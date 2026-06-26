@@ -1,0 +1,7 @@
+node_modules/
+config/extensions/pi-permission-system/logs/
+auth.json
+*.backup.*
+*.bak-*
+sessions/
+backups/

@@ -1,0 +1,25 @@
+{
+  "yoloMode": false,
+  "debugLog": false,
+  "permissionReviewLog": true,
+  "permission": {
+    "*": "allow",
+    "path": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow",
+      "~/.ssh/*": "deny",
+      "~/.gnupg/*": "deny",
+      "~/.aws/*": "deny"
+    },
+    "bash": {
+      "*": "allow",
+      "rm -rf /*": "deny",
+      "sudo rm -rf *": "deny"
+    },
+    "external_directory": {
+      "*": "allow"
+    }
+  }
+}

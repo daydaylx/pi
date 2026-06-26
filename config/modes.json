@@ -1,0 +1,20 @@
+[
+  {
+    "name": "flash",
+    "model": "google/gemini-2.5-flash:free",
+    "thinkingLevel": "high",
+    "color": "#4CAF50"
+  },
+  {
+    "name": "quick",
+    "model": "google/gemini-2.5-flash:free",
+    "thinkingLevel": "minimal",
+    "color": "#2196F3"
+  },
+  {
+    "name": "deep",
+    "model": "deepseek/deepseek-r1-0528:free",
+    "thinkingLevel": "high",
+    "color": "#FF9800"
+  }
+]

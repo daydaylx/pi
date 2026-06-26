@@ -1,0 +1,159 @@
+{
+  "lastChangelogVersion": "0.79.9",
+  "theme": "dark",
+  "defaultProvider": "openrouter",
+  "defaultModel": "qwen/qwen3-coder:free",
+  "hideThinkingBlock": true,
+  "defaultThinkingLevel": "high",
+  "thinkingBudgets": {
+    "minimal": 1024,
+    "low": 4096,
+    "medium": 10240,
+    "high": 32768
+  },
+  "quietStartup": false,
+  "defaultProjectTrust": "ask",
+  "collapseChangelog": true,
+  "enableInstallTelemetry": true,
+  "enabledModels": [
+    "cohere/north-mini-code:free",
+    "deepseek/deepseek-r1-0528:free",
+    "google/gemini-2.5-flash:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
+    "liquid/lfm-2.5-1.2b-thinking:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "nex-agi/nex-n2-pro:free",
+    "nvidia/nemotron-3-nano-30b-a3b:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-nano-12b-v2-vl:free",
+    "nvidia/nemotron-nano-9b-v2:free",
+    "openai/gpt-oss-120b:free",
+    "openai/gpt-oss-20b:free",
+    "poolside/laguna-m.1:free",
+    "poolside/laguna-xs.2:free",
+    "qwen/qwen3-coder:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free"
+  ],
+  "packages": [
+    {
+      "source": "/home/d/pi-packages/david-pi-workflow",
+      "extensions": [
+        "extensions/workflow-dashboard.ts"
+      ],
+      "skills": [],
+      "prompts": [],
+      "themes": []
+    },
+    "npm:@juicesharp/rpiv-todo",
+    "npm:pi-subagents",
+    "npm:pi-lens",
+    "npm:pi-web-access",
+    "npm:@gotgenes/pi-permission-system",
+    "npm:pi-lean-ctx",
+    "npm:pi-roles",
+    "npm:@zgltyq/pi-ask-user",
+    "npm:@smoose/pi-footer",
+    "npm:pi-scroll",
+    "npm:pi-markdown-preview",
+    "npm:pi-show-diffs",
+    "npm:pi-file-watcher",
+    "npm:@zigai/pi-prompt-history",
+    "npm:@zigai/pi-tree",
+    "npm:@zigai/pi-mode",
+    "npm:pi-claude-style-tools"
+  ],
+  "extensions": [
+    "./extensions/bookmark.ts",
+    "./extensions/custom-compaction.ts",
+    "./extensions/custom-footer.ts",
+    "./extensions/notify.ts",
+    "./extensions/session-name.ts",
+    "./extensions/status-line.ts",
+    "./extensions/tools.ts",
+    "./extensions/trigger-compact.ts",
+    "./extensions/plan-mode/index.ts",
+    "./extensions/git-guard.ts",
+    "./extensions/context-bar.ts"
+  ],
+  "doubleEscapeAction": "tree",
+  "treeFilterMode": "all",
+  "editorPaddingX": 1,
+  "autocompleteMaxVisible": 8,
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 32768,
+    "keepRecentTokens": 12000
+  },
+  "branchSummary": {
+    "reserveTokens": 16384,
+    "skipPrompt": true
+  },
+  "retry": {
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 2000,
+    "provider": {
+      "timeoutMs": 3600000,
+      "maxRetries": 0,
+      "maxRetryDelayMs": 60000
+    }
+  },
+  "terminal": {
+    "showImages": false,
+    "showTerminalProgress": true
+  },
+  "images": {
+    "blockImages": true
+  },
+  "shellCommandPrefix": "shopt -s expand_aliases\neval \"$(grep '^alias ' ~/.zshrc 2>/dev/null)\"",
+  "showHardwareCursor": true,
+  "pi-roles": {
+    "roleScope": "both",
+    "defaultRole": "planer",
+    "titleModel": "google/gemini-2.5-flash:free"
+  },
+  "footer": {
+    "preset": "compact",
+    "segments": [
+      "model",
+      "thinking",
+      "git",
+      "context_pct",
+      "cost"
+    ]
+  },
+  "pi-scroll": {
+    "defaultScope": "cwd",
+    "defaultFilterMode": "chat",
+    "preview": true,
+    "previewMinWidth": 100
+  },
+  "pi-show-diffs": {
+    "diffColorMode": "theme",
+    "showDiffRail": true
+  },
+  "pi-claude-style-tools": {
+    "toolBackground": "border",
+    "readOutputMode": "preview",
+    "searchOutputMode": "preview",
+    "mcpOutputMode": "preview",
+    "bashOutputMode": "opencode",
+    "previewLines": 8,
+    "expandedPreviewMaxLines": 4000,
+    "extraExpandedPreviewMaxLines": 12000,
+    "extraToolOutputExpanded": false,
+    "groupToolCalls": true,
+    "bashCollapsedLines": 10,
+    "liveToolPreview": true,
+    "liveToolPreviewLines": 5,
+    "diffCollapsedLines": 24,
+    "themeAdaptive": true,
+    "diffTheme": "github-dark"
+  },
+  "treeTimestampMode": "relative",
+  "treeSelectedPreview": true,
+  "modeShowName": true
+}
