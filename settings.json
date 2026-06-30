@@ -4,7 +4,7 @@
   "defaultProvider": "zai",
   "defaultModel": "glm-5.2",
   "hideThinkingBlock": false,
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "xhigh",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -16,7 +16,10 @@
   "defaultProjectTrust": "ask",
   "collapseChangelog": true,
   "enableInstallTelemetry": false,
-  "enabledModels": ["glm-5.2", "glm-5-turbo"],
+  "enabledModels": [
+    "glm-5.2",
+    "glm-5-turbo"
+  ],
   "packages": [
     "npm:pi-lens",
     "npm:@gotgenes/pi-permission-system",
@@ -83,7 +86,13 @@
   },
   "footer": {
     "preset": "compact",
-    "segments": ["custom:mode", "model", "thinking", "context_pct", "cost"],
+    "segments": [
+      "custom:mode",
+      "model",
+      "thinking",
+      "context_pct",
+      "cost"
+    ],
     "customItems": [
       {
         "id": "mode",
