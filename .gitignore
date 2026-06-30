@@ -1,0 +1,13 @@
+# Sensible Daten
+auth.json
+
+# Session-Daten (groß + sensibel)
+sessions/
+
+# Backups
+backups/
+*.bak-*
+*.backup.*
+
+# Logs
+extensions/pi-permission-system/logs/

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "turbo",
+    "model": "glm-5-turbo",
+    "thinkingLevel": "medium",
+    "color": "#9C27B0"
+  },
+  {
+    "name": "analyse",
+    "model": "glm-5.2",
+    "thinkingLevel": "high",
+    "color": "#4CAF50"
+  },
+  {
+    "name": "plan",
+    "model": "glm-5.2",
+    "thinkingLevel": "xhigh",
+    "color": "#FF9800"
+  },
+  {
+    "name": "work",
+    "model": "glm-5.2",
+    "thinkingLevel": "high",
+    "color": "#2196F3"
+  }
+]

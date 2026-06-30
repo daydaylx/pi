@@ -1,0 +1,77 @@
+{
+  "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+  "name": "david-dark",
+  "vars": {
+    "blue": "#5b8dd9",
+    "amber": "#c8a94e",
+    "purple": "#9b7ec8",
+    "cyan": "#5bccd9",
+    "green": "#6aab6a",
+    "red": "#c85050",
+    "orange": "#c87840"
+  },
+  "colors": {
+    "accent": "blue",
+    "border": 238,
+    "borderAccent": "blue",
+    "borderMuted": 236,
+    "success": "green",
+    "error": "red",
+    "warning": "orange",
+    "muted": 242,
+    "dim": 240,
+    "text": "",
+    "thinkingText": 242,
+
+    "selectedBg": "#252535",
+    "userMessageBg": "#1e1e2e",
+    "userMessageText": "",
+    "customMessageBg": "#252535",
+    "customMessageText": "",
+    "customMessageLabel": "amber",
+    "toolPendingBg": "#1e1e2e",
+    "toolSuccessBg": "#1a2a1a",
+    "toolErrorBg": "#2a1a1a",
+    "toolTitle": "blue",
+    "toolOutput": "",
+
+    "mdHeading": "amber",
+    "mdLink": "blue",
+    "mdLinkUrl": 242,
+    "mdCode": "cyan",
+    "mdCodeBlock": "",
+    "mdCodeBlockBorder": 238,
+    "mdQuote": 242,
+    "mdQuoteBorder": 238,
+    "mdHr": 238,
+    "mdListBullet": "cyan",
+
+    "toolDiffAdded": "#3a6a3a",
+    "toolDiffRemoved": "#6a3a3a",
+    "toolDiffContext": 242,
+
+    "syntaxComment": 238,
+    "syntaxKeyword": "purple",
+    "syntaxFunction": "blue",
+    "syntaxVariable": "amber",
+    "syntaxString": "green",
+    "syntaxNumber": "cyan",
+    "syntaxType": "purple",
+    "syntaxOperator": 242,
+    "syntaxPunctuation": 240,
+
+    "thinkingOff": 236,
+    "thinkingMinimal": 238,
+    "thinkingLow": 240,
+    "thinkingMedium": "blue",
+    "thinkingHigh": "blue",
+    "thinkingXhigh": "purple",
+
+    "bashMode": "amber"
+  },
+  "export": {
+    "pageBg": "#14141e",
+    "cardBg": "#1a1a2a",
+    "infoBg": "#2a281a"
+  }
+}

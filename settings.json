@@ -1,0 +1,127 @@
+{
+  "lastChangelogVersion": "0.80.2",
+  "theme": "david-dark",
+  "defaultProvider": "zai",
+  "defaultModel": "glm-5.2",
+  "hideThinkingBlock": false,
+  "defaultThinkingLevel": "medium",
+  "thinkingBudgets": {
+    "minimal": 1024,
+    "low": 4096,
+    "medium": 10240,
+    "high": 32768,
+    "xhigh": 100000
+  },
+  "quietStartup": true,
+  "defaultProjectTrust": "ask",
+  "collapseChangelog": true,
+  "enableInstallTelemetry": false,
+  "enabledModels": ["glm-5.2", "glm-5-turbo"],
+  "packages": [
+    "npm:pi-lens",
+    "npm:@gotgenes/pi-permission-system",
+    "npm:pi-roles",
+    "npm:@zgltyq/pi-ask-user",
+    "npm:@smoose/pi-footer",
+    "npm:pi-scroll",
+    "npm:pi-markdown-preview",
+    "npm:pi-show-diffs",
+    "npm:@zigai/pi-prompt-history",
+    "npm:@zigai/pi-tree",
+    "npm:@zigai/pi-mode",
+    "npm:pi-claude-style-tools"
+  ],
+  "extensions": [
+    "!extensions/**",
+    "+extensions/custom-compaction.ts",
+    "+extensions/notify.ts",
+    "+extensions/permission-yolo-toggle.ts",
+    "+extensions/tools.ts",
+    "+extensions/trigger-compact.ts",
+    "+extensions/plan-mode/index.ts",
+    "+extensions/git-guard.ts",
+    "+extensions/workflow-dashboard.ts",
+    "+extensions/actions.ts",
+    "+extensions/workflow-autocomplete.ts",
+    "+extensions/auto-router.ts"
+  ],
+  "doubleEscapeAction": "tree",
+  "treeFilterMode": "all",
+  "editorPaddingX": 1,
+  "autocompleteMaxVisible": 8,
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 32768,
+    "keepRecentTokens": 12000
+  },
+  "branchSummary": {
+    "reserveTokens": 16384,
+    "skipPrompt": true
+  },
+  "retry": {
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 2000,
+    "provider": {
+      "timeoutMs": 3600000,
+      "maxRetries": 0,
+      "maxRetryDelayMs": 60000
+    }
+  },
+  "terminal": {
+    "showImages": false,
+    "showTerminalProgress": true
+  },
+  "images": {
+    "blockImages": true
+  },
+  "showHardwareCursor": true,
+  "pi-roles": {
+    "roleScope": "both",
+    "defaultRole": "planer",
+    "titleModel": "glm-5.2"
+  },
+  "footer": {
+    "preset": "compact",
+    "segments": ["custom:mode", "model", "thinking", "context_pct", "cost"],
+    "customItems": [
+      {
+        "id": "mode",
+        "statusKey": "workflow-mode",
+        "prefix": "MODE",
+        "color": "accent"
+      }
+    ]
+  },
+  "pi-scroll": {
+    "defaultScope": "cwd",
+    "defaultFilterMode": "chat",
+    "preview": true,
+    "previewMinWidth": 100
+  },
+  "pi-show-diffs": {
+    "diffColorMode": "theme",
+    "showDiffRail": true
+  },
+  "pi-claude-style-tools": {
+    "toolBackground": "border",
+    "readOutputMode": "preview",
+    "searchOutputMode": "preview",
+    "mcpOutputMode": "preview",
+    "bashOutputMode": "opencode",
+    "previewLines": 5,
+    "expandedPreviewMaxLines": 200,
+    "extraExpandedPreviewMaxLines": 500,
+    "extraToolOutputExpanded": false,
+    "groupToolCalls": true,
+    "bashCollapsedLines": 5,
+    "liveToolPreview": true,
+    "liveToolPreviewLines": 3,
+    "diffCollapsedLines": 18,
+    "themeAdaptive": true,
+    "diffTheme": "github-dark"
+  },
+  "treeTimestampMode": "relative",
+  "treeSelectedPreview": true,
+  "modeShowName": true
+}
