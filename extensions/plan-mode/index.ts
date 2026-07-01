@@ -47,6 +47,13 @@ const PLAN_MODE_TOOLS = [
   "write",
 ];
 
+// Context markers: kept as constants so injection (below) and detection (in
+// the "context" handler) can never drift apart, unlike two separately
+// hand-typed copies of the same bracketed text.
+const PLAN_MODE_MARKER = "[PLAN MODE ACTIVE]";
+const PLAN_REVIEW_MARKER = "[PLAN REVIEW ACTIVE]";
+const EXECUTING_PLAN_MARKER = "[EXECUTING PLAN]";
+
 interface PersistedWorkflowState {
   phase?: WorkflowPhase;
   planningActive?: boolean;
@@ -301,18 +308,18 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         const content = candidate.content;
         if (typeof content === "string") {
           return (
-            !content.includes("[PLAN MODE ACTIVE]") &&
-            !content.includes("[PLAN REVIEW ACTIVE]") &&
-            !content.includes("[EXECUTING PLAN")
+            !content.includes(PLAN_MODE_MARKER) &&
+            !content.includes(PLAN_REVIEW_MARKER) &&
+            !content.includes(EXECUTING_PLAN_MARKER)
           );
         }
         if (Array.isArray(content)) {
           return !content.some(
             (block) =>
               block.type === "text" &&
-              (block.text?.includes("[PLAN MODE ACTIVE]") ||
-                block.text?.includes("[PLAN REVIEW ACTIVE]") ||
-                block.text?.includes("[EXECUTING PLAN")),
+              (block.text?.includes(PLAN_MODE_MARKER) ||
+                block.text?.includes(PLAN_REVIEW_MARKER) ||
+                block.text?.includes(EXECUTING_PLAN_MARKER)),
           );
         }
         return true;
@@ -325,7 +332,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       return {
         message: {
           customType: "plan-review-context",
-          content: `[PLAN REVIEW ACTIVE]
+          content: `${PLAN_REVIEW_MARKER}
 Prüfe den Plan auf Umsetzbarkeit, Vollständigkeit, Risiken, Tests und ungeklärte Entscheidungen.
 
 Du darfst ausschließlich ${PLAN_RELATIVE_PATH} überarbeiten. Andere Schreibzugriffe sind verboten.
@@ -344,7 +351,7 @@ Beende den Review mit genau einem Marker:
       return {
         message: {
           customType: "plan-mode-context",
-          content: `[PLAN MODE ACTIVE]
+          content: `${PLAN_MODE_MARKER}
 Du bist im read-mostly Plan-Modus.
 
 ERLAUBT:
@@ -397,7 +404,7 @@ Verweise anschließend auf /review-plan; /go ist erst nach erfolgreichem Review 
       return {
         message: {
           customType: "plan-execution-context",
-          content: `[EXECUTING PLAN - Full tool access enabled]
+          content: `${EXECUTING_PLAN_MARKER} — Full tool access enabled
 
 Offene Schritte:
 ${todoList || "Keine offenen Todos gefunden."}
@@ -643,7 +650,7 @@ ${content}
     pi.sendMessage(
       {
         customType: "plan-mode-execute",
-        content: `[EXECUTING PLAN]
+        content: `${EXECUTING_PLAN_MARKER}
 
 Plan-Datei: ${PLAN_RELATIVE_PATH}
 

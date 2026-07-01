@@ -1,7 +1,14 @@
 /**
  * Shared Bash command allowlist for plan-mode and other extensions.
- * Single source of truth — do not duplicate in workflow-dashboard.ts.
+ * Single source of truth for destructive/safe command patterns — git-guard.ts
+ * imports GIT_WRITE_PATTERN from here instead of keeping its own copy.
  */
+
+// Git write operations. Exported separately so git-guard.ts (confirmation
+// dialog in normal mode) and DESTRUCTIVE_PATTERNS (hard block in plan-mode)
+// share one definition instead of two regexes that can drift apart.
+export const GIT_WRITE_PATTERN =
+  /\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|switch|clean|branch\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)\b/i;
 
 // Commands that are always blocked regardless of context
 export const DESTRUCTIVE_PATTERNS = [
@@ -27,7 +34,7 @@ export const DESTRUCTIVE_PATTERNS = [
   /\bpip\s+(install|uninstall)/i,
   /\bapt(-get)?\s+(install|remove|purge|update|upgrade)/i,
   /\bbrew\s+(install|uninstall|upgrade)/i,
-  /\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|switch|clean|branch\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)/i,
+  GIT_WRITE_PATTERN,
   /\bsudo\b/i,
   /\bsu\b/i,
   /\bkill\b/i,

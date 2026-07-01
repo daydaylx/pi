@@ -15,13 +15,11 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { GIT_WRITE_PATTERN } from "./shared/bash-allowlist.ts";
 import {
   WORKFLOW_STATUS_EVENT,
   type WorkflowStatusEvent,
 } from "./shared/workflow-status.ts";
-
-const GIT_WRITE_PATTERN =
-  /\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|switch|clean|branch\s+-[dD]|stash\s+(?:pop|drop|clear)|cherry-pick|revert|tag\s+-[dfa]|init|clone)\b/i;
 
 export default function gitGuardExtension(pi: ExtensionAPI): void {
   let enabled = true;

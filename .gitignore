@@ -8,6 +8,3 @@ sessions/
 backups/
 *.bak-*
 *.backup.*
-
-# Logs
-extensions/pi-permission-system/logs/

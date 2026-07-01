@@ -7,7 +7,9 @@
 // than a bare "jiti" specifier, because this file lives in agent/tests/ (not
 // under agent/npm/) and the bare-specifier ancestor walk would not reach the
 // sibling agent/npm/node_modules.
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -165,6 +167,75 @@ assert(
   utils.hashPlanContent("x") !== utils.hashPlanContent("y"),
   "hash differs by input",
 );
+
+// ───────────────────────── plan-mode/utils: extractDoneSteps ─────────────────────────
+eq(
+  utils.extractDoneSteps("[DONE:1] [DONE:1]"),
+  [1],
+  "extractDoneSteps dedups repeated markers",
+);
+eq(
+  utils.extractDoneSteps("[done:2]"),
+  [2],
+  "extractDoneSteps is case-insensitive",
+);
+eq(
+  utils.extractDoneSteps("[DONE:0] [DONE:-1] [DONE:abc]"),
+  [],
+  "extractDoneSteps filters non-positive/non-numeric markers",
+);
+
+// ───────────────────────── plan-mode/utils: applyDoneSteps bounds ─────────────────────────
+const twoTodoPlan = [
+  "## 8. Umsetzungsschritte / Todos",
+  "* [ ] Erster Schritt",
+  "* [ ] Zweiter Schritt",
+].join("\n");
+
+eq(
+  utils.applyDoneSteps(twoTodoPlan, [999]).updated,
+  0,
+  "applyDoneSteps ignores an out-of-range step",
+);
+const oneDone = utils.applyDoneSteps(twoTodoPlan, [1]);
+eq(oneDone.updated, 1, "applyDoneSteps marks an in-range step");
+eq(
+  utils.applyDoneSteps(oneDone.content, [1]).updated,
+  0,
+  "applyDoneSteps ignores an already-completed step",
+);
+
+// ───────────────────────── plan-mode/utils: isPlanFilePath symlink safety ─────────────────────────
+const symlinkTestRoot = mkdtempSync(path.join(tmpdir(), "pi-plan-test-"));
+const symlinkElsewhere = mkdtempSync(path.join(tmpdir(), "pi-plan-elsewhere-"));
+try {
+  eq(
+    utils.isPlanFilePath(".agent/plans/current-plan.md", symlinkTestRoot),
+    true,
+    "isPlanFilePath accepts the canonical plan path (nothing on disk yet)",
+  );
+  eq(
+    utils.isPlanFilePath(
+      "../../etc/passwd",
+      path.join(symlinkTestRoot, "sub", "dir"),
+    ),
+    false,
+    "isPlanFilePath rejects path traversal",
+  );
+
+  // Make the ".agent" path component itself a symlink to an unrelated real
+  // directory — isInside() alone would not catch this (candidate still
+  // resolves textually inside root), only the per-segment lstat walk does.
+  symlinkSync(symlinkElsewhere, path.join(symlinkTestRoot, ".agent"), "dir");
+  eq(
+    utils.isPlanFilePath(".agent/plans/current-plan.md", symlinkTestRoot),
+    false,
+    "isPlanFilePath rejects a symlinked path component",
+  );
+} finally {
+  rmSync(symlinkTestRoot, { recursive: true, force: true });
+  rmSync(symlinkElsewhere, { recursive: true, force: true });
+}
 
 // ───────────────────────── notify: smoke (parses + exports factory) ─────────────────────────
 assert(
