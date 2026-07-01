@@ -73,13 +73,6 @@ export default function bashGuardExtension(pi: ExtensionAPI): void {
     if (GIT_COMMAND.test(command)) return; // handled by git-guard.ts
     if (!DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command))) return;
 
-    // Skip confirmation in YOLO mode
-    try {
-      if (pi.getFlag("yolo") === true) return;
-    } catch {
-      // yolo flag not registered — proceed with guard
-    }
-
     const preview =
       command.length > 120 ? `${command.slice(0, 117)}...` : command;
     const choice = await ctx.ui.select(

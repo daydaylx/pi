@@ -66,13 +66,6 @@ export default function gitGuardExtension(pi: ExtensionAPI): void {
     const command = (event.input.command ?? "") as string;
     if (!GIT_WRITE_PATTERN.test(command)) return;
 
-    // Skip confirmation in YOLO mode
-    try {
-      if (pi.getFlag("yolo") === true) return;
-    } catch {
-      // yolo flag not registered — proceed with guard
-    }
-
     const preview =
       command.length > 120 ? `${command.slice(0, 117)}...` : command;
     const choice = await ctx.ui.select(

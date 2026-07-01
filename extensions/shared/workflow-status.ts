@@ -19,10 +19,6 @@ export type WorkflowStatusEvent =
   | {
       source: "bash-guard";
       enabled: boolean;
-    }
-  | {
-      source: "permission";
-      yolo: boolean;
     };
 
 export const WORKFLOW_MODE_LABEL: Record<WorkflowPhase, string> = {
