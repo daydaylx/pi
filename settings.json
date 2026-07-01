@@ -3,7 +3,7 @@
   "theme": "david-dark",
   "defaultProvider": "zai",
   "defaultModel": "glm-5.2",
-  "hideThinkingBlock": false,
+  "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
     "minimal": 1024,
@@ -16,10 +16,7 @@
   "defaultProjectTrust": "ask",
   "collapseChangelog": true,
   "enableInstallTelemetry": false,
-  "enabledModels": [
-    "glm-5.2",
-    "glm-5-turbo"
-  ],
+  "enabledModels": ["glm-5.2", "glm-5-turbo"],
   "packages": [
     "npm:@zgltyq/pi-ask-user",
     "npm:pi-scroll",
@@ -33,7 +30,8 @@
     "+extensions/plan-mode/index.ts",
     "+extensions/git-guard.ts",
     "+extensions/bash-guard.ts",
-    "+extensions/mode-switcher.ts"
+    "+extensions/mode-switcher.ts",
+    "+extensions/ux-status.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",

@@ -17,6 +17,10 @@ export type WorkflowStatusEvent =
       enabled: boolean;
     }
   | {
+      source: "bash-guard";
+      enabled: boolean;
+    }
+  | {
       source: "permission";
       yolo: boolean;
     };

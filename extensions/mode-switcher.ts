@@ -1,9 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+// Nur Modi, die tatsächlich existieren: Extension-Commands werden dynamisch
+// über pi.getCommands() geprüft (siehe unten). Native Pi-Commands wie /model
+// tauchen dort NICHT auf (getCommands() liefert nur Extension-/Package-
+// Commands, Prompt-Templates und Skills), sind aber fester Bestandteil von
+// Pi — daher `native: true` statt dynamischer Prüfung.
 const MODES = [
-  { name: "auto", label: "Auto       — Router entscheidet", command: "/auto" },
-  { name: "turbo", label: "Turbo      — schnelle Aufgaben", command: "/turbo" },
-  { name: "deep", label: "Deep       — tiefe Analyse", command: "/deep" },
   {
     name: "plan",
     label: "Plan       — Plan erstellen/bearbeiten",
@@ -21,15 +23,25 @@ const MODES = [
   },
   {
     name: "finish",
-    label: "Finish     — Plan archivieren",
+    label: "Finish     — Plan abschließen",
     command: "/finish",
   },
   {
-    name: "actions",
-    label: "Actions    — Aktionsmenü öffnen",
-    command: "/actions",
+    name: "tools",
+    label: "Tools      — Tools konfigurieren",
+    command: "/tools",
   },
-  { name: "home", label: "Home       — Status anzeigen", command: "/home" },
+  {
+    name: "status",
+    label: "Status     — Status/Home anzeigen",
+    command: "/status",
+  },
+  {
+    name: "model",
+    label: "Model      — Modell wechseln",
+    command: "/model",
+    native: true,
+  },
 ] as const;
 
 export default function modeSwitcherExtension(pi: ExtensionAPI): void {
@@ -43,7 +55,9 @@ export default function modeSwitcherExtension(pi: ExtensionAPI): void {
       }
 
       const registered = new Set(pi.getCommands().map((c) => c.name));
-      const available = MODES.filter((m) => registered.has(m.name));
+      const available = MODES.filter(
+        (m) => ("native" in m && m.native) || registered.has(m.name),
+      );
 
       if (available.length === 0) {
         ctx.ui.notify("Keine Modus-Commands registriert.", "info");

@@ -146,7 +146,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       totalTodos: todos.length,
     });
 
-    if ((phase === "executing" || phase === "ready") && todos.length > 0) {
+    const showTodoWidget =
+      (phase === "executing" || phase === "ready") && todos.length > 0;
+
+    if (showTodoWidget) {
       const lines = todos.map((todo) => {
         if (todo.completed) {
           return (
@@ -160,6 +163,16 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     } else {
       ctx.ui.setWidget("plan-todos", undefined);
     }
+
+    // Kompakte Todos-Anzeige im Footer, solange die ausführliche Checkliste
+    // (oben) noch nicht angezeigt wird — vermeidet doppelte Anzeige derselben
+    // Information sobald die Ausführung startet.
+    ctx.ui.setStatus(
+      "plan-todos-count",
+      !showTodoWidget && todos.length > 0
+        ? `Todos ${completedTodos}/${todos.length}`
+        : undefined,
+    );
   }
 
   function invalidateReview(): void {
