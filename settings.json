@@ -18,7 +18,6 @@
   "enableInstallTelemetry": false,
   "enabledModels": ["glm-5.2", "glm-5-turbo"],
   "packages": [
-    "npm:@zgltyq/pi-ask-user",
     "npm:pi-scroll",
     "npm:pi-markdown-preview",
     "npm:@zigai/pi-prompt-history"
@@ -28,6 +27,7 @@
     "+extensions/notify.ts",
     "+extensions/tools.ts",
     "+extensions/plan-mode/index.ts",
+    "+extensions/ask-user.ts",
     "+extensions/git-guard.ts",
     "+extensions/bash-guard.ts",
     "+extensions/mode-switcher.ts",
