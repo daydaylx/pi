@@ -1,43 +1,59 @@
 # Plan workflow extension
 
-The extension implements a guarded workflow:
+The extension implements a lightweight workflow:
 
 ```text
-/plan → /review-plan → /go → /finish
+/plan → /work
 ```
+
+`/review-plan` and `/finish` are optional/automatic complements, not required
+steps.
 
 ## Commands
 
 - `/plan` or `Ctrl+Alt+P`: toggle planning tools.
-- `/review-plan`: run an agent review and approve the resulting plan hash.
-- `/go`: execute the reviewed, unchanged plan.
-- `/work`: alias for `/go`.
+- `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
+  even if no review happened — see "Gating" below.
+- `/review-plan`: optional deep review; worth it for large, risky, or
+  architectural changes. Approves the plan and records a SHA-256 hash.
 - `/plan-todos`: read progress from the current plan file.
-- `/finish`: archive the plan and clear the workflow state.
+- `/finish`: manual archive/early-abort. Runs automatically once all todos
+  are checked off (see "Completion").
 
-## Planning and review
+## Planning
 
 Planning is read-only except for `.agent/plans/current-plan.md`. Paths are
 resolved against Pi's current working directory and must exactly match that
 file. Existing symbolic-link components are rejected.
 
-If a material decision has multiple valid answers, the agent must use
-`ask_user` before finalizing or approving the plan. A review succeeds only when
-the agent emits `[PLAN-REVIEW:APPROVED]` and the plan contains the required
-sections and at least one Todo. `/go` compares the current file with the
-reviewed SHA-256 hash, so any later edit requires another review.
+Only two sections are required: `Auftrag` (the task) and `Todos` (at least
+one checkbox). `Nicht-Ziele`, `Betroffene Bereiche`, and `Risiken /
+Entscheidungen` are recommended in the prompt template but not enforced.
 
-## Todos and completion
+## Gating
 
-The checkboxes in section `## 8. Umsetzungsschritte / Todos` are the sole Todo
-source. During execution, `[DONE:n]` updates checkbox `n` atomically in the plan
-file. Session state stores only the workflow phase and reviewed hash.
+`/work` distinguishes two cases:
 
-`/finish` writes the plan to
-`.agent/plans/archive/YYYY-MM-DD-HHMM-current-plan.md` before removing the
-current file. Name collisions receive a numeric suffix. Incomplete plans
-require explicit confirmation and are archived with status `incomplete`.
-`.agent/plans/` is local workflow state and is ignored by this repository.
+- **Never reviewed**: a plain informational notice is shown; execution
+  proceeds regardless of interactive/non-interactive mode. No block, no
+  dialog required.
+- **Reviewed, then changed**: the SHA-256 hash recorded by `/review-plan` no
+  longer matches the file. This is treated strictly, same as before —
+  interactive sessions get a confirmation dialog, non-interactive sessions
+  block and point back to `/review-plan`. This hash-based protection now
+  only applies to plans that went through a review at some point; plans
+  that skipped review entirely are never gated by it.
+
+## Completion
+
+The checkboxes under `## 5. Todos` are the sole Todo source. During
+execution, `[DONE:n]` updates checkbox `n` atomically in the plan file. As
+soon as every checkbox is checked, the plan is archived automatically under
+`.agent/plans/archive/YYYY-MM-DD-HHMM-current-plan.md` with `Status:
+complete`. If archiving fails, the phase falls back to `ready` and `/finish`
+can be run manually as a retry. `/finish` remains available to archive a
+plan early with open todos (`Status: incomplete`, requires interactive
+confirmation) or as that retry path.
 
 ## Compaction
 

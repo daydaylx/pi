@@ -1,7 +1,7 @@
 /**
  * Plan workflow extension.
  *
- * Workflow: /plan -> /review-plan -> /go -> /finish
+ * Workflow: /plan -> /work (review-plan optional, finish meist automatisch)
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -10,6 +10,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
+  Theme,
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import { relative } from "node:path";
@@ -79,6 +80,37 @@ function getTextContent(message: AssistantMessage): string {
 function getLatestAssistantText(messages: AgentMessage[]): string {
   const latest = [...messages].reverse().find(isAssistantMessage);
   return latest ? getTextContent(latest) : "";
+}
+
+// Begrenzt die kompakte Widget-Darstellung während /work: verhindert, dass
+// die Todo-Liste wie ein zweites Hauptfenster über dem Editor wirkt.
+const MAX_VISIBLE_TODOS = 5;
+const MAX_TODO_LINE_LENGTH = 40;
+
+function truncateTodoText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function buildTodoWidgetLines(todos: TodoItem[], theme: Theme): string[] {
+  const completedTodos = todos.filter((todo) => todo.completed).length;
+  const header = `Todos ${completedTodos}/${todos.length}`;
+
+  if (completedTodos === todos.length) {
+    return [header, "Alle erledigt → /finish"];
+  }
+
+  const openTodos = todos.filter((todo) => !todo.completed);
+  const visibleTodos = openTodos.slice(0, MAX_VISIBLE_TODOS);
+  const lines = visibleTodos.map(
+    (todo) =>
+      `${theme.fg("muted", "☐ ")}${truncateTodoText(todo.text, MAX_TODO_LINE_LENGTH)}`,
+  );
+
+  const hiddenCount = openTodos.length - visibleTodos.length;
+  if (hiddenCount > 0) lines.push(`+ ${hiddenCount} offen`);
+
+  return [header, ...lines];
 }
 
 export default function planModeExtension(pi: ExtensionAPI): void {
@@ -156,20 +188,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     const showTodoWidget =
       (phase === "executing" || phase === "ready") && todos.length > 0;
 
-    if (showTodoWidget) {
-      const lines = todos.map((todo) => {
-        if (todo.completed) {
-          return (
-            ctx.ui.theme.fg("success", "☑ ") +
-            ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(todo.text))
-          );
-        }
-        return `${ctx.ui.theme.fg("muted", "☐ ")}${todo.text}`;
-      });
-      ctx.ui.setWidget("plan-todos", lines);
-    } else {
-      ctx.ui.setWidget("plan-todos", undefined);
-    }
+    ctx.ui.setWidget(
+      "plan-todos",
+      showTodoWidget ? buildTodoWidgetLines(todos, ctx.ui.theme) : undefined,
+    );
 
     // Kompakte Todos-Anzeige im Footer, solange die ausführliche Checkliste
     // (oben) noch nicht angezeigt wird — vermeidet doppelte Anzeige derselben
@@ -370,22 +392,19 @@ Stelle pro Aufruf genau eine fokussierte Frage und biete 2–4 Optionen mit Vor-
 PLANSTRUKTUR:
 # Arbeitsplan: <Aufgabe>
 
-## 1. Arbeitsauftrag
-## 2. Ziel
-## 3. Nicht-Ziele
-## 4. Relevanter Kontext
-## 5. Betroffene Bereiche
-## 6. Risiken und Schwachstellen
-## 7. Offene Fragen
-## 8. Umsetzungsschritte / Todos
-* [ ] Konkreter Schritt
-* [ ] Relevante Tests oder Checks ausführen
-* [ ] Ergebnis prüfen
-## 9. Regeln für die spätere Umsetzung
-## 10. Abschlussregeln / Definition of Done
+## 1. Auftrag
+## 2. Nicht-Ziele
+## 3. Betroffene Bereiche
+## 4. Risiken / Entscheidungen
+## 5. Todos
+- [ ] Konkreter Schritt
+- [ ] Relevante Tests oder Checks ausführen
+- [ ] Ergebnis prüfen
+
+Pflicht sind nur Abschnitt 1 (Auftrag) und Abschnitt 5 (Todos, mindestens eine Checkbox). Abschnitte 2–4 sind empfohlen, aber nicht blockierend.
 
 Schreibe den finalen Plan nach ${PLAN_RELATIVE_PATH} und stoppe danach.
-Verweise anschließend auf /review-plan; /go ist erst nach erfolgreichem Review möglich.`,
+Nächster Schritt: /work. Bei großen, riskanten oder architektonischen Änderungen optional vorher /review-plan.`,
           display: false,
         },
       };
@@ -437,16 +456,27 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
 
       const todos = extractTodoItems(result.content);
       if (todos.length > 0 && todos.every((todo) => todo.completed)) {
-        phase = "ready";
-        pi.sendMessage(
-          {
-            customType: "plan-complete",
-            content:
-              "**Plan vollständig bearbeitet.** Prüfe das Ergebnis und nutze `/finish` zum Archivieren.",
-            display: true,
-          },
-          { triggerTurn: false },
-        );
+        try {
+          const archivePath = archivePlanFile(ctx.cwd, "complete");
+          phase = "idle";
+          reviewedHash = undefined;
+          pi.sendMessage(
+            {
+              customType: "plan-complete",
+              content: `**Plan vollständig bearbeitet und archiviert:** ${relative(ctx.cwd, archivePath)}`,
+              display: true,
+            },
+            { triggerTurn: false },
+          );
+        } catch (error) {
+          phase = "ready";
+          const message =
+            error instanceof Error ? error.message : String(error);
+          ctx.ui.notify(
+            `Alle Todos erledigt, Archivierung fehlgeschlagen: ${message}\nNutze /finish erneut.`,
+            "warning",
+          );
+        }
       }
       updateStatus(ctx);
       persistState();
@@ -481,7 +511,7 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
           planningActive = false;
           restoreNormalTools();
           ctx.ui.notify(
-            "Plan geprüft und freigegeben. `/go` startet den unveränderten Plan.",
+            "Plan geprüft und freigegeben. `/work` startet den unveränderten Plan (auch ohne erneuten Review möglich).",
             "info",
           );
         } else {
@@ -515,7 +545,7 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
       if (readPlanFile(ctx.cwd) !== undefined) {
         updateStatus(ctx);
         ctx.ui.notify(
-          `Plan gespeichert → ${PLAN_RELATIVE_PATH}\nNächster Schritt: /review-plan`,
+          `Plan gespeichert → ${PLAN_RELATIVE_PATH}\nNächster Schritt: /work. Optional: /review-plan für einen Deep-Review.`,
           "info",
         );
       }
@@ -597,25 +627,10 @@ ${content}
       );
       return;
     }
-    if (phase !== "reviewed" || !reviewedHash) {
-      ctx.ui.notify(
-        "Plan ist nicht freigegeben. Führe zuerst /review-plan aus.",
-        "warning",
-      );
+    if (phase === "executing") {
+      ctx.ui.notify("Plan wird bereits ausgeführt.", "warning");
       return;
     }
-    if (hashPlanContent(content) !== reviewedHash) {
-      phase = "draft";
-      reviewedHash = undefined;
-      updateStatus(ctx);
-      persistState();
-      ctx.ui.notify(
-        "Plan wurde nach dem Review verändert. Erneutes /review-plan erforderlich.",
-        "warning",
-      );
-      return;
-    }
-
     const structureErrors = validatePlanStructure(content);
     if (structureErrors.length > 0) {
       phase = "draft";
@@ -627,6 +642,39 @@ ${content}
         "warning",
       );
       return;
+    }
+
+    const currentHash = hashPlanContent(content);
+    const isReviewedAndUnchanged =
+      !!reviewedHash && reviewedHash === currentHash;
+    const isStaleReview = !!reviewedHash && reviewedHash !== currentHash;
+
+    if (isStaleReview) {
+      // Plan wurde reviewed, danach aber verändert — Hash-Schutz bleibt hier strikt.
+      if (!ctx.hasUI) {
+        ctx.ui.notify(
+          "Plan wurde nach dem Review verändert. Führe /review-plan erneut aus (nicht-interaktiver Modus erlaubt keine Rückfrage).",
+          "warning",
+        );
+        return;
+      }
+      const confirmed = await ctx.ui.confirm(
+        "Plan wurde nach dem Review verändert.",
+        "Ohne erneutes /review-plan trotzdem ausführen?",
+      );
+      if (!confirmed) {
+        ctx.ui.notify(
+          "Ausführung abgebrochen. Nutze /review-plan zur erneuten Freigabe.",
+          "info",
+        );
+        return;
+      }
+    } else if (!isReviewedAndUnchanged) {
+      // Nie reviewed — Hinweis, aber kein Block.
+      ctx.ui.notify(
+        "Kein Review durchgeführt. Führe direkt aus (optional: /review-plan für einen Deep-Review).",
+        "info",
+      );
     }
 
     const todos = extractTodoItems(content);
@@ -642,6 +690,7 @@ ${content}
     }
 
     phase = "executing";
+    reviewedHash = undefined;
     planningActive = false;
     restoreNormalTools();
     updateStatus(ctx);
@@ -656,7 +705,7 @@ Plan-Datei: ${PLAN_RELATIVE_PATH}
 
 ${content}
 
-Setze den freigegebenen Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DONE:n].`,
+Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DONE:n].`,
         display: true,
       },
       { triggerTurn: true },
@@ -664,17 +713,17 @@ Setze den freigegebenen Plan Schritt für Schritt um. Markiere abgeschlossene Sc
   }
 
   pi.registerCommand("review-plan", {
-    description: "Aktuelle Plan-Datei prüfen und für /go freigeben",
+    description: "Aktuelle Plan-Datei optional vertieft prüfen",
     handler: async (_args, ctx) => reviewPlan(ctx),
   });
 
-  pi.registerCommand("go", {
-    description: "Geprüften Plan ausführen",
+  pi.registerCommand("work", {
+    description: "Plan ausführen",
     handler: async (_args, ctx) => executePlan(ctx),
   });
 
-  pi.registerCommand("work", {
-    description: "Alias für /go",
+  pi.registerCommand("go", {
+    description: "Alias für /work",
     handler: async (_args, ctx) => executePlan(ctx),
   });
 
@@ -798,8 +847,9 @@ Setze den freigegebenen Plan Schritt für Schritt um. Markiere abgeschlossene Sc
         phase === "reviewed" &&
         (!reviewedHash || hashPlanContent(content) !== reviewedHash)
       ) {
+        // reviewedHash bleibt erhalten: executePlan() erkennt so auch nach
+        // einem Sessionneustart noch "reviewed, aber seither verändert".
         phase = "draft";
-        reviewedHash = undefined;
       }
       if (phase === "executing" || phase === "ready") {
         const todos = extractTodoItems(content);

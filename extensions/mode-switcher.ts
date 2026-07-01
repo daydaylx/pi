@@ -13,13 +13,13 @@ const MODES = [
   },
   {
     name: "review-plan",
-    label: "Review     — Plan prüfen",
+    label: "Review     — Plan optional vertieft prüfen",
     command: "/review-plan",
   },
   {
-    name: "go",
-    label: "Work       — freigegebenen Plan ausführen",
-    command: "/go",
+    name: "work",
+    label: "Work       — Plan ausführen",
+    command: "/work",
   },
   {
     name: "finish",

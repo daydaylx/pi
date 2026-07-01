@@ -80,33 +80,20 @@ for (const [cmd, exp] of safeCases) {
 // ───────────────────────── plan-mode/utils ─────────────────────────
 const validPlan = [
   "# Arbeitsplan: Test",
-  "## 1. Arbeitsauftrag",
+  "## 1. Auftrag",
   "x",
-  "## 2. Ziel",
+  "## 2. Nicht-Ziele",
   "x",
-  "## 3. Nicht-Ziele",
+  "## 3. Betroffene Bereiche",
   "x",
-  "## 4. Relevanter Kontext",
+  "## 4. Risiken / Entscheidungen",
   "x",
-  "## 5. Betroffene Bereiche",
-  "x",
-  "## 6. Risiken und Schwachstellen",
-  "x",
-  "## 7. Offene Fragen",
-  "x",
-  "## 8. Umsetzungsschritte / Todos",
+  "## 5. Todos",
   "* [ ] Erster Schritt",
   "* [ ] Zweiter Schritt",
-  "## 9. Regeln für die spätere Umsetzung",
-  "x",
-  "## 10. Abschlussregeln / Definition of Done",
-  "x",
 ].join("\n");
 
-const brokenPlan = validPlan.replace(
-  "## 6. Risiken und Schwachstellen\nx\n",
-  "",
-);
+const brokenPlan = validPlan.replace("## 1. Auftrag\nx\n", "");
 
 eq(
   utils.validatePlanStructure(validPlan),
@@ -118,9 +105,7 @@ assert(
   "broken plan flagged",
 );
 assert(
-  utils
-    .validatePlanStructure(brokenPlan)
-    .some((e) => e.includes("Risiken und Schwachstellen")),
+  utils.validatePlanStructure(brokenPlan).some((e) => e.includes("Auftrag")),
   "broken plan names the missing heading",
 );
 
@@ -187,7 +172,7 @@ eq(
 
 // ───────────────────────── plan-mode/utils: applyDoneSteps bounds ─────────────────────────
 const twoTodoPlan = [
-  "## 8. Umsetzungsschritte / Todos",
+  "## 5. Todos",
   "* [ ] Erster Schritt",
   "* [ ] Zweiter Schritt",
 ].join("\n");
@@ -258,16 +243,16 @@ assert(
 eq(uxStatus.nextStepFor("idle", false), "/plan", "nextStepFor idle, no plan");
 eq(
   uxStatus.nextStepFor("idle", true),
-  "/review-plan",
+  "/work",
   "nextStepFor idle, plan exists",
 );
-eq(uxStatus.nextStepFor("draft", true), "/review-plan", "nextStepFor draft");
+eq(uxStatus.nextStepFor("draft", true), "/work", "nextStepFor draft");
 eq(
   uxStatus.nextStepFor("reviewing", true),
   "Review läuft — bitte warten",
   "nextStepFor reviewing",
 );
-eq(uxStatus.nextStepFor("reviewed", true), "/go", "nextStepFor reviewed");
+eq(uxStatus.nextStepFor("reviewed", true), "/work", "nextStepFor reviewed");
 eq(
   uxStatus.nextStepFor("executing", true),
   "/plan-todos",

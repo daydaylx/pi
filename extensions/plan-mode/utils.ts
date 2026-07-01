@@ -21,18 +21,7 @@ export { isSafeCommand };
 export const PLAN_RELATIVE_PATH = ".agent/plans/current-plan.md";
 export const PLAN_ARCHIVE_RELATIVE_DIR = ".agent/plans/archive";
 
-const REQUIRED_PLAN_HEADINGS = [
-  "Arbeitsauftrag",
-  "Ziel",
-  "Nicht-Ziele",
-  "Relevanter Kontext",
-  "Betroffene Bereiche",
-  "Risiken und Schwachstellen",
-  "Offene Fragen",
-  "Umsetzungsschritte / Todos",
-  "Regeln für die spätere Umsetzung",
-  "Abschlussregeln / Definition of Done",
-];
+const REQUIRED_PLAN_HEADINGS = ["Auftrag", "Todos"];
 
 export interface TodoItem {
   step: number;
@@ -61,7 +50,9 @@ function assertNoSymlinkComponents(
   for (const segment of rel.split(sep).filter(Boolean)) {
     current = resolve(current, segment);
     if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
-      throw new Error(`Symbolic links are not allowed in plan paths: ${current}`);
+      throw new Error(
+        `Symbolic links are not allowed in plan paths: ${current}`,
+      );
     }
   }
 }
@@ -118,7 +109,11 @@ export function writePlanFileAtomic(cwd: string, content: string): void {
   const mode = existsSync(planPath) ? statSync(planPath).mode & 0o777 : 0o600;
   const temporaryPath = `${planPath}.tmp-${process.pid}-${Date.now()}`;
   try {
-    writeFileSync(temporaryPath, content, { encoding: "utf8", flag: "wx", mode });
+    writeFileSync(temporaryPath, content, {
+      encoding: "utf8",
+      flag: "wx",
+      mode,
+    });
     renameSync(temporaryPath, planPath);
   } finally {
     if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
@@ -132,8 +127,10 @@ function normalizeHeading(value: string): string {
     .toLocaleLowerCase("de-DE");
 }
 
-function findTodoSection(lines: string[]): { start: number; end: number } | undefined {
-  const target = normalizeHeading("Umsetzungsschritte / Todos");
+function findTodoSection(
+  lines: string[],
+): { start: number; end: number } | undefined {
+  const target = normalizeHeading("Todos");
   const start = lines.findIndex((line) => {
     const match = line.match(/^##\s+(.+?)\s*$/);
     return match ? normalizeHeading(match[1]) === target : false;
@@ -143,7 +140,10 @@ function findTodoSection(lines: string[]): { start: number; end: number } | unde
   const nextHeading = lines.findIndex(
     (line, index) => index > start && /^##\s+/.test(line),
   );
-  return { start: start + 1, end: nextHeading < 0 ? lines.length : nextHeading };
+  return {
+    start: start + 1,
+    end: nextHeading < 0 ? lines.length : nextHeading,
+  };
 }
 
 export function cleanStepText(text: string): string {
@@ -267,7 +267,8 @@ export function archivePlanFile(
   const planPath = getPlanPath(root);
   const archiveDir = getPlanArchiveDir(root);
   const content = readPlanFile(root);
-  if (content === undefined) throw new Error(`Plan file not found: ${planPath}`);
+  if (content === undefined)
+    throw new Error(`Plan file not found: ${planPath}`);
 
   assertNoSymlinkComponents(root, archiveDir);
   mkdirSync(archiveDir, { recursive: true });
@@ -278,10 +279,7 @@ export function archivePlanFile(
   let archivePath = resolve(archiveDir, `${timestamp}-current-plan.md`);
   while (existsSync(archivePath)) {
     suffix += 1;
-    archivePath = resolve(
-      archiveDir,
-      `${timestamp}-${suffix}-current-plan.md`,
-    );
+    archivePath = resolve(archiveDir, `${timestamp}-${suffix}-current-plan.md`);
   }
 
   const separator = content.endsWith("\n") ? "\n" : "\n\n";

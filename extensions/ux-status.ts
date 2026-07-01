@@ -32,9 +32,9 @@ import {
 // garantiert existieren.
 const HELP_COMMANDS = [
   { name: "plan", command: "/plan" },
-  { name: "review-plan", command: "/review-plan" },
-  { name: "go", command: "/go" },
   { name: "work", command: "/work" },
+  { name: "go", command: "/go" },
+  { name: "review-plan", command: "/review-plan" },
   { name: "finish", command: "/finish" },
   { name: "plan-todos", command: "/plan-todos" },
   { name: "tools", command: "/tools" },
@@ -81,13 +81,13 @@ function getGitInfo(cwd: string): GitInfo | undefined {
 export function nextStepFor(phase: WorkflowPhase, planExists: boolean): string {
   switch (phase) {
     case "idle":
-      return planExists ? "/review-plan" : "/plan";
+      return planExists ? "/work" : "/plan";
     case "draft":
-      return "/review-plan";
+      return "/work";
     case "reviewing":
       return "Review läuft — bitte warten";
     case "reviewed":
-      return "/go";
+      return "/work";
     case "executing":
       return "/plan-todos";
     case "ready":
@@ -190,7 +190,40 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     },
   });
 
+  const DEFAULT_THINKING_LABEL = "Denkt nach…";
+  const MAX_THINKING_EXCERPT_LENGTH = 80;
+  let lastThinkingLabel = DEFAULT_THINKING_LABEL;
+
+  function buildThinkingLabel(thinking: string): string {
+    const cleaned = thinking.replace(/\s+/g, " ").trim();
+    if (!cleaned) return DEFAULT_THINKING_LABEL;
+    const excerpt =
+      cleaned.length > MAX_THINKING_EXCERPT_LENGTH
+        ? `${cleaned.slice(0, MAX_THINKING_EXCERPT_LENGTH - 1)}…`
+        : cleaned;
+    return `Denknotiz: ${excerpt}`;
+  }
+
   pi.on("session_start", async (_event, ctx) => {
-    ctx.ui.setHiddenThinkingLabel("Denkt nach…");
+    lastThinkingLabel = DEFAULT_THINKING_LABEL;
+    ctx.ui.setHiddenThinkingLabel(lastThinkingLabel);
+  });
+
+  pi.on("message_update", async (event, ctx) => {
+    const ame = event.assistantMessageEvent;
+    if (ame.type === "thinking_start") {
+      lastThinkingLabel = DEFAULT_THINKING_LABEL;
+      ctx.ui.setHiddenThinkingLabel(lastThinkingLabel);
+      return;
+    }
+    if (ame.type !== "thinking_delta") return;
+
+    const block = ame.partial.content[ame.contentIndex];
+    if (!block || block.type !== "thinking") return;
+
+    const label = buildThinkingLabel(block.thinking);
+    if (label === lastThinkingLabel) return;
+    lastThinkingLabel = label;
+    ctx.ui.setHiddenThinkingLabel(label);
   });
 }
