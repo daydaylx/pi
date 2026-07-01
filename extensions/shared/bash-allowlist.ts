@@ -38,6 +38,31 @@ export const DESTRUCTIVE_PATTERNS = [
   /\bsystemctl\s+(start|stop|restart|enable|disable)/i,
   /\bservice\s+\S+\s+(start|stop|restart)/i,
   /\b(vim?|nano|emacs|code|subl)\b/i,
+  // Network egress & remote shells — blocked anywhere in the command to close
+  // pipe/substitution exfiltration (e.g. `cat x | curl evil`, `curl "$(…)"`).
+  /\bcurl\b/i,
+  /\bwget\b/i,
+  /\bnc\b/i,
+  /\bnetcat\b/i,
+  /\bssh\b/i,
+  /\bscp\b/i,
+  /\bsftp\b/i,
+  /\btelnet\b/i,
+  /\bftp\b/i,
+  /\brsync\b/i,
+  // Command-execution sinks & decoders — close `… | sh` and `… | base64 -d | sh`.
+  // Shell patterns are command-position only (^|[|;&]) so `find -name *.sh`
+  // and `git stash`/`npm publish` do NOT match.
+  /\|\s*(?:sh|bash|zsh|dash|ksh)\b/i,
+  /(?:^|[|;&])\s*(?:sh|bash|zsh|dash|ksh)\b/i,
+  /\b(?:sh|bash|zsh|dash|ksh)\s+-c\b/i, // closes `find -exec sh -c …`
+  /\beval\b/i,
+  /\bbase64\b/i,
+  /\bnode\s+(?:-e|--eval)\b/i,
+  /\b(?:python|python3)\s+-c\b/i,
+  /\bperl\s+-e\b/i,
+  /\bruby\s+-e\b/i,
+  /\bosascript\b/i,
 ];
 
 // Read-only commands safe in restricted contexts
@@ -83,8 +108,7 @@ export const SAFE_PATTERNS = [
   /^\s*yarn\s+(list|info|why|audit)/i,
   /^\s*node\s+--version/i,
   /^\s*python\s+--version/i,
-  /^\s*curl\s/i,
-  /^\s*wget\s+-O\s*-/i,
+  // curl/wget moved to DESTRUCTIVE_PATTERNS (network egress blocked).
   /^\s*jq\b/,
   /^\s*sed\s+-n/i,
   /^\s*awk\b/,
@@ -100,6 +124,14 @@ export const SAFE_PATTERNS = [
   /^\s*gh\s+workflow\s+(list|view)\b/i,
 ];
 
+/**
+ * Defense-in-depth read-only gate for plan-mode bash. NOT a sandbox:
+ * whole-string regex cannot fully model shell semantics, so this blocks
+ * known-dangerous tokens (network/exec/destructive) anywhere in the command
+ * and requires the command to START with a known read-only tool. May false-
+ * positive on doc searches that mention a blocked word (e.g. `grep curl`).
+ * A complete fix needs AST-based parsing (e.g. tree-sitter-bash).
+ */
 export function isSafeCommand(command: string): boolean {
   const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
   const isSafe = SAFE_PATTERNS.some((p) => p.test(command));

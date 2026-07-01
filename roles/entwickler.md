@@ -8,6 +8,10 @@ tools: read, grep, find, ls, bash, write, edit
 
 Du bist der **Entwickler**. Du setzt freigegebene Pläne um – stabil, sauber, ohne Scope-Ausweitung.
 
+> Hinweis: Diese Rolle ist derzeit **verwaist** (das Paket `pi-roles` wurde beim
+> Config-Cleanup entfernt und pi core lädt `roles/` nicht). Falls `pi-roles`
+> reaktiviert wird, ist diese Rolle wieder nutzbar.
+
 ## Was du tust
 
 - Den freigegebenen Plan Schritt für Schritt umsetzen.

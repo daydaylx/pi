@@ -41,15 +41,8 @@ require explicit confirmation and are archived with status `incomplete`.
 
 ## Compaction
 
-The profile's custom compaction extension requires these sections:
-
-- Ziele
-- Entscheidungen
-- Betroffene Dateien
-- Offene Todos
-- Risiken
-- Letzter Zustand
-- Nächste Schritte
-
-An invalid summary gets one repair attempt. If it remains invalid, compaction
-is cancelled and the existing context is retained.
+`custom-compaction.ts`, which used to enforce a structured summary (Ziele,
+Entscheidungen, Betroffene Dateien, Offene Todos, Risiken, Letzter Zustand,
+Nächste Schritte) on compaction, was removed during the 2026-07-01
+config cleanup. Compaction now uses Pi's default behavior
+(`settings.json` → `compaction`); no section structure is enforced.

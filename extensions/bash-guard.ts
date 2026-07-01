@@ -1,49 +1,53 @@
 /**
- * Git Guard Extension
+ * Bash Guard Extension
  *
- * Intercepts bash tool calls that contain git write operations and shows a
- * confirmation dialog before executing. Prevents accidental commits, pushes,
- * or destructive git commands during agent turns.
+ * Intercepts potentially destructive or exfiltrating bash tool calls in
+ * normal mode and shows a confirmation dialog before executing. Complements
+ * git-guard.ts (git write operations) and plan-mode's isSafeCommand() gate
+ * (Plan-Mode only, read-only allowlist) — this is the only guard that covers
+ * general bash calls outside Plan Mode.
  *
  * Commands:
- *   /git-guard       - Toggle on/off
- *   /git-guard on    - Enable
- *   /git-guard off   - Disable
+ *   /bash-guard       - Toggle on/off
+ *   /bash-guard on    - Enable
+ *   /bash-guard off   - Disable
  */
 
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { DESTRUCTIVE_PATTERNS } from "./shared/bash-allowlist.ts";
 import {
   WORKFLOW_STATUS_EVENT,
   type WorkflowStatusEvent,
 } from "./shared/workflow-status.ts";
 
-const GIT_WRITE_PATTERN =
-  /\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|switch|clean|branch\s+-[dD]|stash\s+(?:pop|drop|clear)|cherry-pick|revert|tag\s+-[dfa]|init|clone)\b/i;
+// git-guard.ts already prompts for git write operations and silently allows
+// git reads; skip git commands here entirely to avoid double confirmation.
+const GIT_COMMAND = /^\s*git\b/i;
 
-export default function gitGuardExtension(pi: ExtensionAPI): void {
+export default function bashGuardExtension(pi: ExtensionAPI): void {
   let enabled = true;
 
   function updateStatus(ctx: ExtensionContext): void {
     if (enabled) {
-      ctx.ui.setStatus("git-guard", undefined);
+      ctx.ui.setStatus("bash-guard", undefined);
     } else {
       ctx.ui.setStatus(
-        "git-guard",
-        ctx.ui.theme.fg("warning", "GIT GUARD OFF"),
+        "bash-guard",
+        ctx.ui.theme.fg("warning", "BASH GUARD OFF"),
       );
     }
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
-      source: "git-guard",
+      source: "bash-guard",
       enabled,
     } satisfies WorkflowStatusEvent);
   }
 
-  pi.registerCommand("git-guard", {
+  pi.registerCommand("bash-guard", {
     description:
-      "Git-Guard ein-/ausschalten (verhindert unbeabsichtigte git-Aktionen)",
+      "Bash-Guard ein-/ausschalten (Bestätigung vor potenziell destruktiven/exfiltrierenden Bash-Befehlen)",
     handler: async (args, ctx) => {
       const arg = args.trim().toLowerCase();
       if (arg === "on") {
@@ -55,7 +59,7 @@ export default function gitGuardExtension(pi: ExtensionAPI): void {
       }
       updateStatus(ctx);
       ctx.ui.notify(
-        enabled ? "Git-Guard aktiviert" : "Git-Guard deaktiviert",
+        enabled ? "Bash-Guard aktiviert" : "Bash-Guard deaktiviert",
         "info",
       );
     },
@@ -66,7 +70,8 @@ export default function gitGuardExtension(pi: ExtensionAPI): void {
     if (!ctx.hasUI) return;
 
     const command = (event.input.command ?? "") as string;
-    if (!GIT_WRITE_PATTERN.test(command)) return;
+    if (GIT_COMMAND.test(command)) return; // handled by git-guard.ts
+    if (!DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command))) return;
 
     // Skip confirmation in YOLO mode
     try {
@@ -78,14 +83,14 @@ export default function gitGuardExtension(pi: ExtensionAPI): void {
     const preview =
       command.length > 120 ? `${command.slice(0, 117)}...` : command;
     const choice = await ctx.ui.select(
-      `Git-Guard: Diesen Befehl ausführen?\n\n  $ ${preview}`,
+      `Bash-Guard: Diesen Befehl ausführen?\n\n  $ ${preview}`,
       ["Ausführen", "Abbrechen"],
     );
 
     if (choice !== "Ausführen") {
       return {
         block: true,
-        reason: `Git-Guard: Befehl vom User abgebrochen.\nBefehl: ${command}`,
+        reason: `Bash-Guard: Befehl vom User abgebrochen.\nBefehl: ${command}`,
       };
     }
   });

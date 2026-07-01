@@ -6,21 +6,36 @@
  * - OSC 777: Ghostty, iTerm2, WezTerm, rxvt-unicode
  * - OSC 99: Kitty
  * - Windows toast: Windows Terminal (WSL)
+ *
+ * Security: title/body are interpolated into a PowerShell script. To prevent
+ * command injection they are (a) escaped as PowerShell single-quoted string
+ * literals and (b) the whole script is passed via -EncodedCommand (base64 of
+ * UTF-16LE), so no raw script reaches the command line. notify() MUST still
+ * only receive trusted/static strings — do not feed it untrusted input.
  */
 
 import { execFile } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+/** Escape a value as a PowerShell single-quoted string literal. The only
+ *  special character inside such a literal is the single quote, which is
+ *  doubled. This is the safe way to embed content in a PowerShell script. */
+function psSingleQuote(value: string): string {
+	return `'${String(value).replace(/'/g, "''")}'`;
+}
 
 function windowsToastScript(title: string, body: string): string {
 	const type = "Windows.UI.Notifications";
 	const mgr = `[${type}.ToastNotificationManager, ${type}, ContentType = WindowsRuntime]`;
 	const template = `[${type}.ToastTemplateType]::ToastText01`;
 	const toast = `[${type}.ToastNotification]::new($xml)`;
+	const text = psSingleQuote(body);
+	const aumid = psSingleQuote(title);
 	return [
 		`${mgr} > $null`,
 		`$xml = [${type}.ToastNotificationManager]::GetTemplateContent(${template})`,
-		`$xml.GetElementsByTagName('text')[0].AppendChild($xml.CreateTextNode('${body}')) > $null`,
-		`[${type}.ToastNotificationManager]::CreateToastNotifier('${title}').Show(${toast})`,
+		`$xml.GetElementsByTagName('text')[0].AppendChild($xml.CreateTextNode(${text})) > $null`,
+		`[${type}.ToastNotificationManager]::CreateToastNotifier(${aumid}).Show(${toast})`,
 	].join("; ");
 }
 
@@ -35,7 +50,11 @@ function notifyOSC99(title: string, body: string): void {
 }
 
 function notifyWindows(title: string, body: string): void {
-	execFile("powershell.exe", ["-NoProfile", "-Command", windowsToastScript(title, body)]);
+	// -EncodedCommand expects the base64 of the script encoded as UTF-16LE.
+	// Combined with psSingleQuote above this neutralizes PowerShell injection
+	// even if title/body were ever to become dynamic.
+	const encoded = Buffer.from(windowsToastScript(title, body), "utf16le").toString("base64");
+	execFile("powershell.exe", ["-NoProfile", "-EncodedCommand", encoded]);
 }
 
 function notify(title: string, body: string): void {

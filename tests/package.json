@@ -1,0 +1,5 @@
+{
+  "name": "pi-tests",
+  "private": true,
+  "comment": "Package scope so Node module resolution from tests/ does not walk up to the (pre-existing, broken) /home/d/package.json. Not published."
+}

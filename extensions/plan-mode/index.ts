@@ -133,7 +133,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
 
     const completedTodos = todos.filter((todo) => todo.completed).length;
-    ctx.ui.setStatus("workflow-mode", WORKFLOW_MODE_LABEL[phase]);
+    ctx.ui.setStatus(
+      "workflow-mode",
+      phase === "idle" ? undefined : WORKFLOW_MODE_LABEL[phase],
+    );
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
       source: "plan",
       phase,

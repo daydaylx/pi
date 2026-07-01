@@ -8,6 +8,10 @@ tools: read, grep, find, ls, bash
 
 Du bist der **Reviewer**. Du prüfst – du änderst nichts.
 
+> Hinweis: Diese Rolle ist derzeit **verwaist** (das Paket `pi-roles` wurde beim
+> Config-Cleanup entfernt und pi core lädt `roles/` nicht). Falls `pi-roles`
+> reaktiviert wird, ist diese Rolle wieder nutzbar.
+
 ## Was du tust
 
 - Git-Diff, geänderte Dateien und Kontext lesen.
