@@ -1,17 +1,17 @@
 /**
  * UX-Status Extension
  *
- * Bündelt drei kleine, rein informative UX-Features, die keine Plan-/Guard-
+ * Bündelt drei kleine, rein informative UX-Features, die keine Plan-/Policy-
  * Logik verändern:
  *   - /status (+ /home als Alias): kompakter Überblick über Mode, Modell,
- *     Thinking-Level, Plan-/Todo-Stand, Git-Zustand und Guard-Status.
+ *     Thinking-Level, Plan-/Todo-Stand, Git-Zustand und Permission-Status.
  *   - Ctrl+Shift+H: kompakte Shortcut-/Command-Hilfe, die nur tatsächlich
- *     registrierte Commands zeigt (dynamisch geprüft wie in mode-switcher.ts).
+ *     registrierte Commands zeigt (dynamisch geprüft wie im zentralen Menü
+ *     in actions.ts).
  *   - Deutsches Label für eingeklappte Thinking-Blöcke.
  *
- * Plan-Phase und Guard-Status werden nicht neu berechnet, sondern über
- * WORKFLOW_STATUS_EVENT aus git-guard.ts/bash-guard.ts/plan-mode/index.ts
- * mitgelesen (Event existierte bereits, hatte bisher aber keinen Konsumenten).
+ * Plan-Phase und Mode werden nicht neu berechnet, sondern über
+ * WORKFLOW_STATUS_EVENT aus plan-mode und mode-permissions mitgelesen.
  */
 
 import { execSync } from "node:child_process";
@@ -20,8 +20,11 @@ import type {
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import {
+  PERMISSION_LEVEL_LABEL,
   WORKFLOW_MODE_LABEL,
   WORKFLOW_STATUS_EVENT,
+  type PermissionLevel,
+  type RuntimeMode,
   type WorkflowPhase,
   type WorkflowStatusEvent,
 } from "./shared/workflow-status.ts";
@@ -40,8 +43,12 @@ const HELP_COMMANDS = [
   { name: "tools", command: "/tools" },
   { name: "tools-all", command: "/tools-all" },
   { name: "tools-none", command: "/tools-none" },
-  { name: "git-guard", command: "/git-guard" },
-  { name: "bash-guard", command: "/bash-guard" },
+  { name: "actions", command: "/actions" },
+  { name: "permission", command: "/permission <level>" },
+  { name: "write", command: "/write <allow|block|plan-only>" },
+  { name: "full-access", command: "/full-access" },
+  { name: "yolo", command: "/yolo" },
+  { name: "thinking", command: "/thinking <level>" },
   { name: "status", command: "/status" },
   { name: "home", command: "/home" },
   { name: "scroll", command: "/scroll" },
@@ -111,8 +118,8 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     completedTodos: 0,
     totalTodos: 0,
   };
-  let gitGuardEnabled = true;
-  let bashGuardEnabled = true;
+  let runtimeMode: RuntimeMode = "work";
+  let permissionLevel: PermissionLevel = "read-write";
 
   pi.events.on(WORKFLOW_STATUS_EVENT, (event: WorkflowStatusEvent) => {
     if (event.source === "plan") {
@@ -123,18 +130,14 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
         completedTodos: event.completedTodos,
         totalTodos: event.totalTodos,
       };
-    } else if (event.source === "git-guard") {
-      gitGuardEnabled = event.enabled;
-    } else if (event.source === "bash-guard") {
-      bashGuardEnabled = event.enabled;
+    } else if (event.source === "permission") {
+      runtimeMode = event.mode;
+      permissionLevel = event.permissionLevel;
     }
   });
 
   async function showStatus(ctx: ExtensionCommandContext): Promise<void> {
-    const modeLabel =
-      plan.phase === "idle"
-        ? "kein Workflow aktiv"
-        : WORKFLOW_MODE_LABEL[plan.phase];
+    const modeLabel = runtimeMode.toUpperCase();
     const git = getGitInfo(ctx.cwd);
     const gitLine = git
       ? `${git.branch}${git.dirty > 0 ? `, dirty ${git.dirty}` : ""}`
@@ -144,14 +147,23 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
         ? `${plan.completedTodos}/${plan.totalTodos} erledigt`
         : "keine";
 
+    const cost = ctx.model?.cost;
+    const isFreeModel =
+      cost !== undefined ? cost.input === 0 && cost.output === 0 : undefined;
+
     const text = [
       `Mode: ${modeLabel}`,
       `Model: ${ctx.model?.id ?? "kein Modell aktiv"}`,
+      `Provider: ${ctx.model?.provider ?? "-"}`,
+      ...(isFreeModel !== undefined
+        ? [`Kosten: ${isFreeModel ? "kostenlos" : "kostenpflichtig"}`]
+        : []),
       `Thinking: ${pi.getThinkingLevel()}`,
       `Plan: ${plan.planExists ? "vorhanden" : "nicht vorhanden"}`,
       `Todos: ${todosLine}`,
       `Git: ${gitLine}`,
-      `Guards: git ${gitGuardEnabled ? "on" : "off"} | bash ${bashGuardEnabled ? "on" : "off"}`,
+      `Permission: ${PERMISSION_LEVEL_LABEL[permissionLevel]}`,
+      `Workflow: ${WORKFLOW_MODE_LABEL[plan.phase]}`,
       `Next: ${nextStepFor(plan.phase, plan.planExists)}`,
     ].join("\n");
 
@@ -168,6 +180,22 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => showStatus(ctx),
   });
 
+  const THINKING_LEVELS = ["low", "medium", "high", "xhigh"] as const;
+
+  pi.registerCommand("thinking", {
+    description: "Thinking-Level setzen: low | medium | high | xhigh",
+    handler: async (args, ctx) => {
+      const level = args.trim().toLowerCase();
+      const match = THINKING_LEVELS.find((candidate) => candidate === level);
+      if (!match) {
+        ctx.ui.notify("Nutzung: /thinking low|medium|high|xhigh", "info");
+        return;
+      }
+      pi.setThinkingLevel(match);
+      ctx.ui.notify(`Thinking-Level: ${match}.`, "info");
+    },
+  });
+
   pi.registerShortcut("ctrl+shift+h", {
     description: "Shortcut-/Command-Hilfe anzeigen",
     handler: async (ctx) => {
@@ -178,8 +206,9 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
 
       const text = [
         "Shortcuts:",
-        "  Shift+Tab      Mode-Switcher öffnen",
+        "  Shift+Tab      Zentrales Menü öffnen (Modus/Permissions/Thinking/Modell)",
         "  Ctrl+Alt+P     Plan-Modus umschalten",
+        "  Ctrl+Shift+Y   YOLO bestätigt umschalten",
         "  Ctrl+Shift+H   Diese Hilfe anzeigen",
         "",
         "Commands:",

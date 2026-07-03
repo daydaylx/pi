@@ -11,9 +11,10 @@ steps.
 
 ## Commands
 
-- `/plan` or `Ctrl+Alt+P`: toggle planning tools.
+- `/plan` or `Ctrl+Alt+P`: confirmed switch between Plan and Work Mode.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
-  even if no review happened — see "Gating" below.
+  even if no review happened and confirms the switch out of Plan Mode — see
+  "Gating" below.
 - `/review-plan`: optional deep review; worth it for large, risky, or
   architectural changes. Approves the plan and records a SHA-256 hash.
 - `/plan-todos`: read progress from the current plan file.
@@ -22,9 +23,11 @@ steps.
 
 ## Planning
 
-Planning is read-only except for `.agent/plans/current-plan.md`. Paths are
-resolved against Pi's current working directory and must exactly match that
-file. Existing symbolic-link components are rejected.
+Planning is read-only except for `.agent/plans/current-plan.md`. The central
+`mode-permissions.ts` extension enforces file, path, Bash and secret policy;
+this workflow extension no longer maintains a competing permission hook or
+changes Pi's active tool selection. Paths are resolved against Pi's current
+working directory and existing symbolic-link components are rejected.
 
 Only two sections are required: `Auftrag` (the task) and `Todos` (at least
 one checkbox). `Nicht-Ziele`, `Betroffene Bereiche`, and `Risiken /
@@ -54,6 +57,15 @@ complete`. If archiving fails, the phase falls back to `ready` and `/finish`
 can be run manually as a retry. `/finish` remains available to archive a
 plan early with open todos (`Status: incomplete`, requires interactive
 confirmation) or as that retry path.
+
+## Modes and YOLO
+
+Work is the default mode. `/yolo` or `Ctrl+Shift+Y` enables a confirmed,
+session-scoped bypass and visibly marks the footer. A second confirmed toggle
+returns to the previous Plan/Work mode. YOLO is never restored after reload or
+session replacement. On terminals without reliable modified-key reporting,
+use `/yolo`; Pi's preferred shortcut requires Kitty/CSI-u or compatible
+`modifyOtherKeys` support.
 
 ## Compaction
 

@@ -1,0 +1,33 @@
+{
+  "projectRefreshIntervalMs": 30000,
+  "colorSources": {
+    "starship": "terminal",
+    "editor": "theme",
+    "userMessages": "theme"
+  },
+  "features": {
+    "editor": true,
+    "statusLine": true,
+    "copyFriendly": true
+  },
+  "footerSegments": {
+    "cwd": true,
+    "gitBranch": true,
+    "gitStatus": true,
+    "runtime": true,
+    "context": true,
+    "tokens": true,
+    "cost": true
+  },
+  "extensionStatuses": {
+    "defaultPlacement": "right",
+    "placements": {
+      "workflow-mode": "left",
+      "plan-todos-count": "middle"
+    },
+    "colorModes": {
+      "workflow-mode": "original",
+      "plan-todos-count": "original"
+    }
+  }
+}

@@ -20,33 +20,19 @@ import {
   ensurePlanDirectory,
   extractDoneSteps,
   extractTodoItems,
-  getPlanPath,
   getReviewOutcome,
   hashPlanContent,
-  isPlanFilePath,
-  isSafeCommand,
   PLAN_RELATIVE_PATH,
   readPlanFile,
-  redactCommand,
   validatePlanStructure,
   writePlanFileAtomic,
   type TodoItem,
 } from "./utils.ts";
 import {
-  WORKFLOW_MODE_LABEL,
   WORKFLOW_STATUS_EVENT,
   type WorkflowPhase,
+  type WorkflowStatusEvent,
 } from "../shared/workflow-status.ts";
-
-const PLAN_MODE_TOOLS = [
-  "read",
-  "bash",
-  "grep",
-  "find",
-  "ls",
-  "ask_user",
-  "write",
-];
 
 // Context markers: kept as constants so injection (below) and detection (in
 // the "context" handler) can never drift apart, unlike two separately
@@ -117,8 +103,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   let phase: WorkflowPhase = "idle";
   let planningActive = false;
   let reviewedHash: string | undefined;
-  let normalModeTools: string[] | undefined;
   let planModeEverUsed = false;
+  let escalationActive = false;
 
   function readTodos(cwd: string): TodoItem[] {
     const content = readPlanFile(cwd);
@@ -133,12 +119,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     });
   }
 
-  function restoreNormalTools(): void {
-    if (!normalModeTools) return;
-    pi.setActiveTools(normalModeTools);
-    normalModeTools = undefined;
-  }
-
   function enablePlanningTools(ctx: ExtensionContext): boolean {
     try {
       ensurePlanDirectory(ctx.cwd);
@@ -151,10 +131,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       return false;
     }
 
-    if (!planningActive) {
-      normalModeTools = pi.getActiveTools();
-    }
-    pi.setActiveTools(PLAN_MODE_TOOLS);
     planningActive = true;
     planModeEverUsed = true;
     return true;
@@ -172,12 +148,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
 
     const completedTodos = todos.filter((todo) => todo.completed).length;
-    ctx.ui.setStatus(
-      "workflow-mode",
-      phase === "idle" ? undefined : WORKFLOW_MODE_LABEL[phase],
-    );
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
       source: "plan",
+      baseMode: planningActive ? "plan" : "work",
       phase,
       planningActive,
       planExists,
@@ -209,7 +182,18 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     if (phase === "reviewed" || phase === "ready") phase = "draft";
   }
 
-  function togglePlanMode(ctx: ExtensionContext): void {
+  async function togglePlanMode(ctx: ExtensionContext): Promise<void> {
+    if (!ctx.isIdle()) {
+      ctx.ui.notify("Moduswechsel sind nur im Leerlauf möglich.", "info");
+      return;
+    }
+    if (escalationActive) {
+      ctx.ui.notify(
+        "Full Access/YOLO ist aktiv. Zuerst deaktivieren vor einem Moduswechsel.",
+        "warning",
+      );
+      return;
+    }
     if (phase === "executing" || phase === "reviewing") {
       ctx.ui.notify(
         phase === "executing"
@@ -221,10 +205,33 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
 
     if (planningActive) {
+      if (!ctx.hasUI || ctx.mode !== "tui") {
+        ctx.ui.notify(
+          "Der Wechsel in Work Mode erfordert eine interaktive Bestätigung.",
+          "warning",
+        );
+        return;
+      }
+      const confirmed = await ctx.ui.confirm(
+        "Plan Mode verlassen?",
+        "Zu Work Mode wechseln; die Plan-Datei bleibt erhalten.",
+      );
+      if (!confirmed) return;
       planningActive = false;
-      restoreNormalTools();
-      ctx.ui.notify("Plan-Modus pausiert. Plan-Datei bleibt erhalten.", "info");
+      ctx.ui.notify("Work Mode aktiv. Plan-Datei bleibt erhalten.", "info");
     } else {
+      if (!ctx.hasUI || ctx.mode !== "tui") {
+        ctx.ui.notify(
+          "Der Wechsel in Plan Mode erfordert eine interaktive Bestätigung.",
+          "warning",
+        );
+        return;
+      }
+      const confirmed = await ctx.ui.confirm(
+        "Plan Mode aktivieren?",
+        `Read-only-Analyse; Schreibzugriff nur auf ${PLAN_RELATIVE_PATH}.`,
+      );
+      if (!confirmed) return;
       if (!enablePlanningTools(ctx)) return;
       invalidateReview();
       phase = "draft";
@@ -237,6 +244,16 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     persistState();
   }
 
+  pi.events.on(WORKFLOW_STATUS_EVENT, (event: WorkflowStatusEvent) => {
+    if (event.source === "permission") {
+      // Full Access/YOLO wirken nur, solange baseMode "work" ist (siehe
+      // mode-permissions.ts). Eine im Plan Mode nur vorgemerkte Eskalation
+      // soll den Wechsel nach /work nicht blockieren.
+      escalationActive =
+        event.baseMode === "work" && event.escalation !== "none";
+    }
+  });
+
   pi.registerFlag("plan", {
     description: "Start in plan mode (read-only except the plan file)",
     type: "boolean",
@@ -245,7 +262,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("plan", {
     description: "Plan-Modus umschalten",
-    handler: async (_args, ctx) => togglePlanMode(ctx),
+    handler: async (_args, ctx) => {
+      await togglePlanMode(ctx);
+    },
   });
 
   pi.registerCommand("plan-todos", {
@@ -279,41 +298,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
   pi.registerShortcut(Key.ctrlAlt("p"), {
     description: "Plan-Modus umschalten",
-    handler: async (ctx) => togglePlanMode(ctx),
-  });
-
-  pi.on("tool_call", async (event, ctx) => {
-    if (!planningActive) return;
-
-    if (event.toolName === "bash") {
-      const command =
-        typeof event.input.command === "string" ? event.input.command : "";
-      if (!isSafeCommand(command)) {
-        return {
-          block: true,
-          reason:
-            "Plan-Modus: Befehl ist nicht als read-only freigegeben.\n" +
-            `Befehl: ${redactCommand(command)}`,
-        };
-      }
-    }
-
-    if (event.toolName === "write" || event.toolName === "edit") {
-      const input = event.input as Record<string, unknown>;
-      const pathValues = [input.path, input.file_path].filter(
-        (value): value is string => typeof value === "string",
-      );
-      const rawPath = pathValues.length === 1 ? pathValues[0] : undefined;
-      if (!isPlanFilePath(rawPath, ctx.cwd)) {
-        return {
-          block: true,
-          reason:
-            "Plan-Modus: Schreibzugriff blockiert.\n" +
-            `Erlaubt ist ausschließlich: ${PLAN_RELATIVE_PATH}\n` +
-            `Versuchter Pfad: ${rawPath ?? "<fehlend oder mehrdeutig>"}`,
-        };
-      }
-    }
+    handler: async (ctx) => {
+      await togglePlanMode(ctx);
+    },
   });
 
   pi.on("context", async (event) => {
@@ -377,8 +364,8 @@ Beende den Review mit genau einem Marker:
 Du bist im read-mostly Plan-Modus.
 
 ERLAUBT:
-- read, bash (nur allowlisted), grep, find, ls, ask_user
-- write ausschließlich auf ${PLAN_RELATIVE_PATH}
+- read, grep, find, ls und zentral geprüfte read-only Bash-Analyse
+- edit/write ausschließlich auf ${PLAN_RELATIVE_PATH}
 
 VERBOTEN:
 - edit oder write auf andere Dateien
@@ -508,8 +495,7 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
         ) {
           reviewedHash = hashPlanContent(content);
           phase = "reviewed";
-          planningActive = false;
-          restoreNormalTools();
+          planningActive = true;
           ctx.ui.notify(
             "Plan geprüft und freigegeben. `/work` startet den unveränderten Plan (auch ohne erneuten Review möglich).",
             "info",
@@ -550,12 +536,20 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
         );
       }
     } catch {
-      // The write guard already reports unsafe paths.
+      // Die zentrale Permission-Policy meldet unsichere Pfade separat.
     }
   });
 
   async function reviewPlan(ctx: ExtensionCommandContext): Promise<void> {
     await ctx.waitForIdle();
+
+    if (escalationActive) {
+      ctx.ui.notify(
+        "Full Access/YOLO ist aktiv. Zuerst deaktivieren vor dem Plan-Review.",
+        "warning",
+      );
+      return;
+    }
 
     let content: string | undefined;
     try {
@@ -578,6 +572,20 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
         "warning",
       );
       return;
+    }
+    if (!planningActive) {
+      if (!ctx.hasUI || ctx.mode !== "tui") {
+        ctx.ui.notify(
+          "Der Wechsel in Plan Mode erfordert eine interaktive Bestätigung.",
+          "warning",
+        );
+        return;
+      }
+      const confirmed = await ctx.ui.confirm(
+        "Für den Review in Plan Mode wechseln?",
+        "Der Review darf ausschließlich die Plan-Datei ändern.",
+      );
+      if (!confirmed) return;
     }
     if (!enablePlanningTools(ctx)) return;
 
@@ -612,6 +620,14 @@ ${content}
   async function executePlan(ctx: ExtensionCommandContext): Promise<void> {
     await ctx.waitForIdle();
 
+    if (escalationActive) {
+      ctx.ui.notify(
+        "Full Access/YOLO ist aktiv. Zuerst deaktivieren vor einem Wechsel in Work Mode.",
+        "warning",
+      );
+      return;
+    }
+
     let content: string | undefined;
     try {
       content = readPlanFile(ctx.cwd);
@@ -620,10 +636,31 @@ ${content}
       ctx.ui.notify(`Plan-Datei ist nicht sicher lesbar: ${message}`, "error");
       return;
     }
+
+    if (planningActive) {
+      if (!ctx.hasUI || ctx.mode !== "tui") {
+        ctx.ui.notify(
+          "Der Wechsel in Work Mode erfordert eine interaktive Bestätigung.",
+          "warning",
+        );
+        return;
+      }
+      const confirmed = await ctx.ui.confirm(
+        "In Work Mode wechseln?",
+        content === undefined
+          ? "Plan Mode verlassen; es ist kein ausführbarer Plan vorhanden."
+          : "Plan Mode verlassen und den aktuellen Plan ausführen.",
+      );
+      if (!confirmed) return;
+      planningActive = false;
+      updateStatus(ctx);
+      persistState();
+    }
+
     if (content === undefined) {
       ctx.ui.notify(
-        `Keine Plan-Datei gefunden: ${PLAN_RELATIVE_PATH}`,
-        "warning",
+        `Work Mode aktiv. Keine Plan-Datei gefunden: ${PLAN_RELATIVE_PATH}`,
+        "info",
       );
       return;
     }
@@ -692,7 +729,6 @@ ${content}
     phase = "executing";
     reviewedHash = undefined;
     planningActive = false;
-    restoreNormalTools();
     updateStatus(ctx);
     persistState();
 
@@ -745,10 +781,8 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       }
 
       if (content === undefined) {
-        phase = "idle";
-        planningActive = false;
+        phase = planningActive ? "draft" : "idle";
         reviewedHash = undefined;
-        restoreNormalTools();
         updateStatus(ctx);
         persistState();
         ctx.ui.notify("Keine Plan-Datei vorhanden.", "info");
@@ -777,14 +811,14 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       }
 
       try {
+        const keepMode = planningActive;
         const archivePath = archivePlanFile(
           ctx.cwd,
           complete ? "complete" : "incomplete",
         );
-        phase = "idle";
-        planningActive = false;
+        phase = keepMode ? "draft" : "idle";
+        planningActive = keepMode;
         reviewedHash = undefined;
-        restoreNormalTools();
         updateStatus(ctx);
         persistState();
         ctx.ui.notify(
@@ -837,7 +871,6 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
 
     if (content === undefined) {
       phase = "idle";
-      planningActive = false;
       reviewedHash = undefined;
     } else {
       planModeEverUsed = true;
@@ -867,6 +900,7 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       planModeEverUsed = true;
     }
 
+    if (planningActive && phase === "idle") phase = "draft";
     if (planningActive) {
       planningActive = false;
       if (!enablePlanningTools(ctx)) phase = "idle";

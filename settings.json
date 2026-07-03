@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.80.3",
   "theme": "david-dark",
-  "defaultProvider": "zai",
-  "defaultModel": "glm-5.2",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.4-mini",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -20,18 +20,25 @@
   "packages": [
     "npm:pi-scroll",
     "npm:pi-markdown-preview",
-    "npm:@zigai/pi-prompt-history"
+    "npm:@zigai/pi-prompt-history",
+    {
+      "source": "npm:pi-claude-style-tools@1.0.64",
+      "extensions": ["extensions/index.ts"],
+      "themes": []
+    },
+    "npm:pi-zentui@0.3.0"
   ],
   "extensions": [
     "!extensions/**",
     "+extensions/notify.ts",
+    "+extensions/preview-runtime.ts",
     "+extensions/tools.ts",
     "+extensions/plan-mode/index.ts",
+    "+extensions/mode-permissions.ts",
     "+extensions/ask-user.ts",
-    "+extensions/git-guard.ts",
-    "+extensions/bash-guard.ts",
-    "+extensions/mode-switcher.ts",
-    "+extensions/ux-status.ts"
+    "+extensions/ux-status.ts",
+    "+extensions/actions.ts",
+    "+extensions/or-free/index.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",

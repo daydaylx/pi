@@ -14,9 +14,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
-import { isSafeCommand } from "../shared/bash-allowlist.ts";
-
-export { isSafeCommand };
 
 export const PLAN_RELATIVE_PATH = ".agent/plans/current-plan.md";
 export const PLAN_ARCHIVE_RELATIVE_DIR = ".agent/plans/archive";
@@ -301,9 +298,4 @@ export function archivePlanFile(
   }
 
   return archivePath;
-}
-
-// Truncates long commands for display in error/block messages.
-export function redactCommand(command: string): string {
-  return command.length > 120 ? `${command.slice(0, 117)}...` : command;
 }

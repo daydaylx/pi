@@ -8,3 +8,6 @@ sessions/
 backups/
 *.bak-*
 *.backup.*
+
+# OpenRouter free-model cache (regenerated via /or-free-refresh)
+openrouter-free-models.json
