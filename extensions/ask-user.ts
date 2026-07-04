@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
+  digitSelection,
   hasValidQuestionOptionCount,
   MAX_QUESTION_OPTIONS,
   MIN_QUESTION_OPTIONS,
@@ -148,6 +149,19 @@ export default function askUser(pi: ExtensionAPI) {
             }
             editor.handleInput(data);
             refresh();
+            return;
+          }
+
+          // Zahlentasten 1..N wählen eine echte Option direkt. Die
+          // Freitext-Zeile bleibt über Pfeil + Enter erreichbar.
+          const directPick = digitSelection(data, params.options.length);
+          if (directPick !== undefined) {
+            const selected = params.options[directPick - 1];
+            done({
+              answer: selected.label,
+              wasCustom: false,
+              index: directPick,
+            });
             return;
           }
 

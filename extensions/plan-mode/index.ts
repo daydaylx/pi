@@ -35,6 +35,13 @@ import {
   type WorkflowModeRequest,
   type WorkflowPhase,
 } from "../shared/workflow-status.ts";
+import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
+import {
+  buildOverwriteGuardMenu,
+  buildPlanAssistantMenu,
+  type OverwriteDecision,
+  type PlanAssistantAction,
+} from "./plan-menu.ts";
 
 // Context markers: kept as constants so injection (below) and detection (in
 // the "context" handler) can never drift apart, unlike two separately
@@ -211,31 +218,257 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     persistState();
     const label =
       target === "simple_plan"
-        ? "Einfacher Plan"
+        ? "Schnellplan"
         : target === "detailed_plan"
-          ? "Ausführlicher Plan"
+          ? "Architekturplan"
           : "Work-Modus";
     ctx.ui.notify(`${label} aktiv.`, "info");
     return true;
   }
 
-  // Router für /plan: die Auswahl ändert den Modus unmittelbar. Ohne
-  // interaktive TUI wird der ausführliche Planmodus aktiviert.
+  // /plan ist ein zustandsbewusster Plan-Assistent. Er erkennt, ob bereits
+  // eine Plan-Datei existiert und ob alle Todos erledigt sind, und bietet
+  // passend dazu Aktionen über die gemeinsame runMenu-UI an. Ohne TUI wird
+  // konservativ verfahren: ohne Plan -> Architekturplan, mit Plan -> kein
+  // Überschreiben, sondern Hinweis.
   async function routePlan(ctx: ExtensionContext): Promise<void> {
     if (!ctx.hasUI || ctx.mode !== "tui") {
-      setWorkflowMode("detailed_plan", ctx);
+      let planExists = false;
+      try {
+        planExists = readPlanFile(ctx.cwd) !== undefined;
+      } catch {
+        planExists = false;
+      }
+      if (!planExists) {
+        setWorkflowMode("detailed_plan", ctx);
+      } else {
+        ctx.ui.notify(
+          `${PLAN_RELATIVE_PATH} existiert bereits. /plan benötigt den TUI-Modus, um den bestehenden Plan zu schützen.`,
+          "warning",
+        );
+      }
       return;
     }
-    const choice = await ctx.ui.select("Plan-Variante wählen", [
-      "Einfacher Plan",
-      "Ausführlicher Plan",
-    ]);
-    if (!choice) return;
-    if (choice === "Einfacher Plan") {
-      setWorkflowMode("simple_plan", ctx);
-    } else {
-      setWorkflowMode("detailed_plan", ctx);
+
+    let planExists = false;
+    let allTodosComplete = false;
+    try {
+      const content = readPlanFile(ctx.cwd);
+      planExists = content !== undefined;
+      if (planExists) {
+        const todos = extractTodoItems(content);
+        allTodosComplete =
+          todos.length > 0 && todos.every((todo) => todo.completed);
+      }
+    } catch {
+      planExists = false;
     }
+
+    // Aktive Review/Execution sind keine harte Sperre; nur ein Hinweis.
+    // Eingriffe in einen laufenden Turn regeln setWorkflowMode /
+    // normalizeInterruptedPhase bzw. executePlan/reviewPlan selbst.
+    if (phase === "reviewing") {
+      ctx.ui.notify(
+        "Ein Review läuft gerade. Du kannst dennoch eine Aktion wählen.",
+        "info",
+      );
+    } else if (phase === "executing") {
+      ctx.ui.notify(
+        "Ein Plan wird gerade ausgeführt. Du kannst dennoch eine Aktion wählen.",
+        "info",
+      );
+    }
+
+    const title = planExists
+      ? allTodosComplete
+        ? "Plan-Assistent — Plan abgeschlossen"
+        : "Plan-Assistent"
+      : "Plan-Assistent — kein Plan vorhanden";
+
+    const action = await runMenu<PlanAssistantAction>(
+      ctx,
+      title,
+      buildPlanAssistantMenu({ planExists, allTodosComplete }),
+      {
+        fallbackPrompt: "Plan-Aktion wählen",
+        nonInteractiveHint:
+          "Plan-Assistent benötigt den TUI-Modus. Nutze /plan-todos oder /finish direkt.",
+      },
+    );
+    if (!action || action.kind === "cancel") return;
+    await dispatchPlanAssistantAction(action, ctx);
+  }
+
+  function showPlanTodos(ctx: ExtensionContext): void {
+    try {
+      const todos = readTodos(ctx.cwd);
+      if (todos.length === 0) {
+        ctx.ui.notify(`Keine Todos in ${PLAN_RELATIVE_PATH} gefunden.`, "info");
+        return;
+      }
+      const list = todos
+        .map(
+          (todo) => `${todo.step}. ${todo.completed ? "✓" : "○"} ${todo.text}`,
+        )
+        .join("\n");
+      ctx.ui.notify(`Plan-Fortschritt:\n${list}`, "info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Plan-Datei konnte nicht gelesen werden: ${message}`,
+        "error",
+      );
+    }
+  }
+
+  // Schützt eine bestehende Plan-Datei davor, durch einen neuen Plan still
+  // überschrieben zu werden. Gibt true zurück, wenn ein neuer Plan erstellt
+  // werden darf (archiviert oder bewusst überschrieben), sonst false.
+  async function guardNewPlan(ctx: ExtensionContext): Promise<boolean> {
+    let planExists = false;
+    try {
+      planExists = readPlanFile(ctx.cwd) !== undefined;
+    } catch {
+      planExists = false;
+    }
+    if (!planExists) return true;
+
+    const decision = await runMenu<OverwriteDecision>(
+      ctx,
+      "Bestehenden Plan schützen",
+      buildOverwriteGuardMenu(),
+      {
+        fallbackPrompt: "Bestehenden Plan behandeln",
+        nonInteractiveHint:
+          "Bestehender Plan würde überschrieben werden — Abbruch zum Schutz.",
+      },
+    );
+
+    if (!decision || decision === "cancel") {
+      ctx.ui.notify(
+        "Neuer Plan abgebrochen; bestehende Datei bleibt erhalten.",
+        "info",
+      );
+      return false;
+    }
+
+    if (decision === "archive-first") {
+      try {
+        const archivePath = archivePlanFile(ctx.cwd, "incomplete");
+        reviewedHash = undefined;
+        ctx.ui.notify(
+          `Bisheriger Plan archiviert: ${relative(ctx.cwd, archivePath)}`,
+          "info",
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(
+          `Archivierung fehlgeschlagen; neuer Plan abgebrochen: ${message}`,
+          "error",
+        );
+        return false;
+      }
+    }
+    return true;
+  }
+
+  async function dispatchPlanAssistantAction(
+    action: PlanAssistantAction,
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    switch (action.kind) {
+      case "new-plan": {
+        if (!(await guardNewPlan(ctx))) return;
+        setWorkflowMode(action.mode, ctx);
+        return;
+      }
+      case "continue-plan": {
+        const targetMode: WorkflowMode =
+          mode === "simple_plan" || mode === "detailed_plan"
+            ? mode
+            : "detailed_plan";
+        setWorkflowMode(targetMode, ctx);
+        return;
+      }
+      case "review":
+        await reviewPlan(ctx);
+        return;
+      case "execute":
+        await executePlan(ctx);
+        return;
+      case "show-todos":
+        showPlanTodos(ctx);
+        return;
+      case "archive":
+        await runFinish(ctx);
+        return;
+      case "cancel":
+        return;
+    }
+  }
+
+  // /finish benötigt ein ExtensionCommandContext (waitForIdle). Aufrufer ohne
+  // Command-Context (z. B. Shortcuts) erhalten einen Hinweis statt eines
+  // Absturzes. Genau dieses Fallback prüft der plan-action Test.
+  async function runFinish(ctx: ExtensionContext): Promise<void> {
+    const maybeCommandCtx = ctx as Partial<ExtensionCommandContext>;
+    if (typeof maybeCommandCtx.waitForIdle === "function") {
+      await finishPlan(ctx as ExtensionCommandContext);
+    } else {
+      ctx.ui.notify("Nutze /finish, um den Plan abzuschließen.", "info");
+    }
+  }
+
+  // Nach erfolgreicher Plan-Erstellung angeboten: kleines, nicht-blockierendes
+  // Aktionsmenü. Esc / „Im Planmodus bleiben" ändern nichts; es wird niemals
+  // automatisch ausgeführt. Wird nur im TUI und im Idle-Zustand gezeigt.
+  async function offerPostPlanActions(ctx: ExtensionContext): Promise<void> {
+    if (!ctx.hasUI || ctx.mode !== "tui") return;
+    if (typeof ctx.isIdle === "function" && !ctx.isIdle()) return;
+
+    type PostAction = "execute" | "review" | "show-todos" | "stay";
+    const entries: MenuEntry<PostAction>[] = [
+      {
+        id: "post-work",
+        label: "/work starten",
+        description: "Plan-Datei sofort ausführen",
+        value: "execute",
+      },
+      {
+        id: "post-review",
+        label: "/review-plan ausführen",
+        description: "Optionalen Deep-Review des Plans starten",
+        value: "review",
+      },
+      {
+        id: "post-todos",
+        label: "Todos anzeigen",
+        description: "Plan-Fortschritt anzeigen",
+        value: "show-todos",
+      },
+      {
+        id: "post-stay",
+        label: "Im Planmodus bleiben",
+        description: "Keine weitere Aktion; Plan steht zum Verfeinern bereit",
+        value: "stay",
+      },
+    ];
+
+    let selected: PostAction | undefined;
+    try {
+      selected = await runMenu<PostAction>(ctx, "Nächster Schritt", entries, {
+        fallbackPrompt: "Nächsten Schritt wählen",
+        nonInteractiveHint:
+          "Plan gespeichert. Nutze /work zum Ausführen oder /review-plan für einen Deep-Review.",
+      });
+    } catch {
+      return;
+    }
+
+    if (!selected || selected === "stay") return;
+    if (selected === "execute") await executePlan(ctx);
+    else if (selected === "review") await reviewPlan(ctx);
+    else if (selected === "show-todos") showPlanTodos(ctx);
   }
 
   pi.events.on(WORKFLOW_MODE_REQUEST_EVENT, (request: WorkflowModeRequest) => {
@@ -249,7 +482,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("plan", {
-    description: "Plan-Variante wählen: Einfach oder Ausführlich",
+    description: "Plan-Assistent öffnen (zustandsabhängig)",
     handler: async (_args, ctx) => {
       await routePlan(ctx);
     },
@@ -258,34 +491,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   pi.registerCommand("plan-todos", {
     description: "Todos aus der aktuellen Plan-Datei anzeigen",
     handler: async (_args, ctx) => {
-      try {
-        const todos = readTodos(ctx.cwd);
-        if (todos.length === 0) {
-          ctx.ui.notify(
-            `Keine Todos in ${PLAN_RELATIVE_PATH} gefunden.`,
-            "info",
-          );
-          return;
-        }
-        const list = todos
-          .map(
-            (todo) =>
-              `${todo.step}. ${todo.completed ? "✓" : "○"} ${todo.text}`,
-          )
-          .join("\n");
-        ctx.ui.notify(`Plan-Fortschritt:\n${list}`, "info");
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(
-          `Plan-Datei konnte nicht gelesen werden: ${message}`,
-          "error",
-        );
-      }
+      showPlanTodos(ctx);
     },
   });
 
   pi.registerShortcut("ctrl+alt+p", {
-    description: "Plan-Variante wählen",
+    description: "Plan-Assistent öffnen",
     handler: async (ctx) => {
       await routePlan(ctx);
     },
@@ -527,10 +738,10 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
     try {
       if (readPlanFile(ctx.cwd) !== undefined) {
         updateStatus(ctx);
-        ctx.ui.notify(
-          `Plan gespeichert → ${PLAN_RELATIVE_PATH}\nNächster Schritt: /work. Optional: /review-plan für einen Deep-Review.`,
-          "info",
-        );
+        ctx.ui.notify(`Plan gespeichert → ${PLAN_RELATIVE_PATH}`, "info");
+        // Bietet nach dem Schreiben/Verfeinern eines Plans sinnvolle nächste
+        // Aktionen an — nicht-blockierend, keine automatische Ausführung.
+        await offerPostPlanActions(ctx);
       }
     } catch {
       // Die zentrale Permission-Policy meldet unsichere Pfade separat.
@@ -753,15 +964,7 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       void reviewPlan(request.ctx);
       return;
     }
-    const maybeCommandCtx = request.ctx as Partial<ExtensionCommandContext>;
-    if (typeof maybeCommandCtx.waitForIdle === "function") {
-      void finishPlan(request.ctx as ExtensionCommandContext);
-    } else {
-      request.ctx.ui.notify(
-        "Nutze /finish, um den Plan abzuschließen.",
-        "info",
-      );
-    }
+    void runFinish(request.ctx);
   });
 
   pi.registerCommand("finish", {

@@ -238,7 +238,7 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
         "  Ctrl+Shift+T   Thinking wählen",
         "  Ctrl+Shift+X   Befehlsmenü öffnen",
         "  Ctrl+Shift+H   Hilfe anzeigen",
-        "  Ctrl+Alt+P     Plan-Variante wählen (Teilmenge von Shift+Tab)",
+        "  Ctrl+Alt+P     Plan-Assistent öffnen",
         "",
         "Commands:",
         ...commands.map((c) => `  ${c}`),

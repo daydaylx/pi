@@ -56,6 +56,9 @@ const thinkingMenu = await jiti.import(
 const commandMenu = await jiti.import(
   path.resolve(ROOT, "extensions/shared/command-menu.ts"),
 );
+const planMenu = await jiti.import(
+  path.resolve(ROOT, "extensions/plan-mode/plan-menu.ts"),
+);
 const previewRuntime = await jiti.import(
   path.resolve(ROOT, "extensions/preview-runtime.ts"),
 );
@@ -976,6 +979,157 @@ assert(
   }
 }
 
+// ───────────────────────── /plan state-aware assistant ─────────────────────────
+{
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-assistant-"));
+  try {
+    const commands = new Map();
+    const hooks = new Map();
+    const eventHandlers = new Map();
+    const emitted = [];
+    const sent = [];
+    const notifications = [];
+    let idle = true;
+    let lastSelect = { title: null, labels: [] };
+
+    planMode.default({
+      events: {
+        on(name, handler) {
+          eventHandlers.set(name, handler);
+        },
+        emit(name, event) {
+          emitted.push([name, event]);
+        },
+      },
+      on(name, handler) {
+        hooks.set(name, handler);
+      },
+      registerFlag() {},
+      getFlag: () => false,
+      registerCommand(name, options) {
+        commands.set(name, options.handler);
+      },
+      registerShortcut() {},
+      appendEntry() {},
+      sendMessage(message, options) {
+        sent.push({ message, options });
+      },
+    });
+
+    function makePicker(sequence) {
+      let i = 0;
+      return async (_title, labels) => {
+        lastSelect = { title: _title, labels: [...labels] };
+        const want = sequence[i++];
+        if (want === undefined) return undefined;
+        return labels.find((label) => label.includes(want));
+      };
+    }
+
+    const context = {
+      cwd,
+      hasUI: true,
+      mode: "tui",
+      isIdle: () => idle,
+      abort() {},
+      sessionManager: { getEntries: () => [] },
+      ui: {
+        theme: { fg: (_c, t) => t },
+        setStatus() {},
+        setWidget() {},
+        notify: (message) => notifications.push(message),
+        select: async () => undefined,
+        confirm: async () => true,
+      },
+    };
+
+    await hooks.get("session_start")({}, context);
+
+    // 1) No plan: /plan offers new-plan options; picking Schnellplan activates simple_plan.
+    context.ui.select = makePicker(["Neuer Schnellplan"]);
+    await commands.get("plan")("", context);
+    assert(
+      lastSelect.labels.some((label) => label.includes("Neuer Schnellplan")),
+      "/plan offers Neuer Schnellplan when no plan exists",
+    );
+    assert(
+      lastSelect.labels.some((label) => label.includes("Neuer Architekturplan")),
+      "/plan offers Neuer Architekturplan when no plan exists",
+    );
+    eq(
+      emitted.at(-1)[1].mode,
+      "simple_plan",
+      "selecting Schnellplan activates simple_plan",
+    );
+
+    // 2) Existing plan + new-plan request → overwrite guard; cancel keeps the file.
+    utils.writePlanFileAtomic(cwd, validPlan);
+    const before = utils.readPlanFile(cwd);
+    context.ui.select = makePicker(["Neuer Schnellplan", "Abbrechen"]);
+    await commands.get("plan")("", context);
+    eq(
+      utils.readPlanFile(cwd),
+      before,
+      "existing plan is not silently overwritten when the guard is cancelled",
+    );
+    eq(
+      emitted.at(-1)[1].mode,
+      "simple_plan",
+      "mode is unchanged after a cancelled new-plan",
+    );
+
+    // 3) Non-TUI + existing plan: never overwrites, only warns.
+    context.mode = "cli";
+    const notifsBefore = notifications.length;
+    context.ui.select = makePicker(["Neuer Schnellplan"]);
+    await commands.get("plan")("", context);
+    eq(
+      utils.readPlanFile(cwd),
+      before,
+      "non-TUI /plan never overwrites an existing plan",
+    );
+    assert(
+      notifications.length > notifsBefore,
+      "non-TUI /plan emits a warning instead of acting",
+    );
+    context.mode = "tui";
+
+    // 4) Existing plan offers the additional current-plan actions.
+    context.ui.select = makePicker([undefined]); // Esc
+    await commands.get("plan")("", context);
+    for (const label of [
+      "Aktuellen Plan weiterführen",
+      "Aktuellen Plan reviewen",
+      "Aktuellen Plan ausführen",
+      "Plan-Todos anzeigen",
+      "Plan archivieren",
+    ]) {
+      assert(
+        lastSelect.labels.some((entry) => entry.includes(label)),
+        "/plan offers the current-plan action: " + label,
+      );
+    }
+
+    // 5) Post-creation menu: agent_end (draft + plan mode + plan) shows a
+    //    Nächster Schritt menu; Esc does not auto-execute.
+    eventHandlers.get("pi-workflow:set-mode")({
+      mode: "detailed_plan",
+      ctx: context,
+    });
+    const sentBefore = sent.length;
+    context.ui.select = makePicker([undefined]); // Esc on the post menu
+    await hooks.get("agent_end")({ messages: [] }, context);
+    assert(
+      !sent
+        .slice(sentBefore)
+        .some((entry) => entry.message.customType === "plan-mode-execute"),
+      "post-creation menu Esc does not auto-execute the plan",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
 // ───────────────────────── ux-status: smoke + nextStepFor/countDirtyFiles ─────────────────────────
 assert(
   typeof uxStatus.default === "function",
@@ -1127,6 +1281,96 @@ assert(
   "the /yolo entry reflects the current permission level",
 );
 
+// ───────────────────────── plan assistant menu + label rename ─────────────────────────
+const renamedModeEntries = modeMenu.buildModeMenu("simple_plan");
+eq(
+  renamedModeEntries.map((entry) => entry.id),
+  ["mode-simple-plan", "mode-detailed-plan", "mode-work"],
+  "Shift+Tab still contains exactly the three mode variants after the rename",
+);
+assert(
+  renamedModeEntries.find((entry) => entry.id === "mode-simple-plan").label ===
+    "Schnellplan",
+  "simple_plan is now labelled Schnellplan (Shift+Tab)",
+);
+assert(
+  renamedModeEntries.find((entry) => entry.id === "mode-detailed-plan")
+    .label === "Architekturplan",
+  "detailed_plan is now labelled Architekturplan (Shift+Tab)",
+);
+
+const noPlanEntries = planMenu.buildPlanAssistantMenu({
+  planExists: false,
+  allTodosComplete: false,
+});
+eq(
+  noPlanEntries.map((entry) => entry.id),
+  ["plan-new-quick", "plan-new-architecture", "plan-cancel"],
+  "/plan without a plan offers only new-plan variants and cancel",
+);
+assert(
+  noPlanEntries.every(
+    (entry) =>
+      entry.value.kind !== "execute" &&
+      entry.value.kind !== "review" &&
+      entry.value.kind !== "archive" &&
+      entry.value.kind !== "continue-plan",
+  ),
+  "/plan without a plan offers no current-plan actions",
+);
+
+const openPlanEntries = planMenu.buildPlanAssistantMenu({
+  planExists: true,
+  allTodosComplete: false,
+});
+for (const id of [
+  "plan-continue",
+  "plan-review",
+  "plan-execute",
+  "plan-show-todos",
+  "plan-archive",
+  "plan-new-quick",
+  "plan-new-architecture",
+  "plan-cancel",
+]) {
+  assert(openPlanEntries.some((entry) => entry.id === id), "/plan with an open plan offers " + id);
+}
+assert(
+  openPlanEntries.find((entry) => entry.id === "plan-new-quick").value.mode ===
+    "simple_plan",
+  "the quick-plan entry keeps the internal simple_plan value",
+);
+
+const completePlanEntries = planMenu.buildPlanAssistantMenu({
+  planExists: true,
+  allTodosComplete: true,
+});
+for (const forbidden of ["plan-execute", "plan-continue", "plan-review"]) {
+  assert(
+    !completePlanEntries.some((entry) => entry.id === forbidden),
+    "a fully completed plan does not offer " + forbidden,
+  );
+}
+for (const id of [
+  "plan-archive",
+  "plan-show-todos",
+  "plan-new-quick",
+  "plan-new-architecture",
+  "plan-cancel",
+]) {
+  assert(
+    completePlanEntries.some((entry) => entry.id === id),
+    "a fully completed plan still offers " + id,
+  );
+}
+
+const overwriteEntries = planMenu.buildOverwriteGuardMenu();
+eq(
+  overwriteEntries.map((entry) => entry.value),
+  ["archive-first", "overwrite", "cancel"],
+  "the overwrite guard offers archive / overwrite / cancel",
+);
+
 // ───────────────────────── ask_user option-count policy ─────────────────────────
 eq(
   askUserPolicy.hasValidQuestionOptionCount(1),
@@ -1147,6 +1391,33 @@ eq(
   askUserPolicy.hasValidQuestionOptionCount(5),
   false,
   "ask_user rejects more than four options",
+);
+
+// ───────────────────────── ask_user digit-key direct selection ─────────────────────────
+eq(askUserPolicy.digitSelection("1", 2), 1, "digitSelection maps '1' to option 1");
+eq(askUserPolicy.digitSelection("2", 4), 2, "digitSelection maps '2' to option 2");
+eq(askUserPolicy.digitSelection("4", 4), 4, "digitSelection maps '4' to the last option");
+eq(
+  askUserPolicy.digitSelection("3", 2),
+  undefined,
+  "digitSelection ignores digits beyond the real option count (no freetext via digit)",
+);
+eq(askUserPolicy.digitSelection("0", 2), undefined, "digitSelection ignores zero");
+eq(
+  askUserPolicy.digitSelection("\u001b", 2),
+  undefined,
+  "digitSelection ignores a lone Escape byte",
+);
+eq(
+  askUserPolicy.digitSelection("\u001b[A", 2),
+  undefined,
+  "digitSelection ignores multi-byte arrow sequences",
+);
+eq(askUserPolicy.digitSelection("", 2), undefined, "digitSelection ignores empty input");
+eq(
+  askUserPolicy.digitSelection("a", 2),
+  undefined,
+  "digitSelection ignores non-digit characters",
 );
 
 // ───────────────────────── package/UI configuration ─────────────────────────

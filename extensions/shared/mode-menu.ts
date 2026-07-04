@@ -5,17 +5,17 @@ export function buildModeMenu(mode: WorkflowMode): MenuEntry<WorkflowMode>[] {
   return [
     {
       id: "mode-simple-plan",
-      label: "Einfacher Plan",
+      label: "Schnellplan",
       description:
-        "Kompakter Planmodus mit kurzen Rückfragen und klaren nächsten Schritten",
+        "Kompakter Planmodus (simple_plan) mit kurzen Rückfragen und klaren nächsten Schritten",
       value: "simple_plan",
       current: mode === "simple_plan",
     },
     {
       id: "mode-detailed-plan",
-      label: "Ausführlicher Plan",
+      label: "Architekturplan",
       description:
-        "Detaillierte Analyse von Kontext, Risiken, Optionen und Umsetzung",
+        "Detaillierte Analyse (detailed_plan) von Kontext, Risiken, Optionen und Umsetzung",
       value: "detailed_plan",
       current: mode === "detailed_plan",
     },

@@ -11,11 +11,12 @@ steps.
 
 ## Commands
 
-- `/plan` or `Ctrl+Alt+P`: opens a chooser between **Einfacher Plan**
-  (short plan file) and **Ausführlicher Plan** (detailed plan file). Both use
-  `.agent/plans/current-plan.md`. The selected mode remains active until
-  another mode is chosen. Without an interactive TUI it falls back to the
-  detailed plan mode.
+- `/plan` or `Ctrl+Alt+P`: opens a **state-aware plan assistant** (see
+  "`/plan` plan assistant" below). It inspects whether a plan already exists,
+  whether its todos are complete, and whether a review/execution is running,
+  then offers matching actions through the shared overlay menu. Existing plans
+  are never silently overwritten; without an interactive TUI it falls back to
+  starting the detailed plan mode only when no plan exists yet.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
   independently of whether a review happened. If a plan is already executing,
   a duplicate `/work` call is ignored instead of aborting and restarting it.
@@ -28,18 +29,59 @@ steps.
 
 ## Plan variants
 
-`/plan` is a router. Shift+Tab opens the same three persistent modes as a
-pure mode picker (no permissions, no thinking, no tools — see
-`extensions/shared/mode-menu.ts`); permission levels have their own picker on
-`Ctrl+Shift+Y` (below):
+`/plan` is a state-aware assistant (details below). Shift+Tab opens the same
+three persistent modes as a pure mode picker (no permissions, no thinking, no
+tools — see `extensions/shared/mode-menu.ts`); permission levels have their
+own picker on `Ctrl+Shift+Y` (below). Internal values are unchanged; only the
+labels were renamed for clarity:
 
-- **Einfacher Plan** (`simple_plan`) — compact questions and a short plan file
+- **Schnellplan** (`simple_plan`) — compact questions and a short plan file
   for small to medium tasks.
-- **Ausführlicher Plan** (`detailed_plan`) — detailed context, risk,
+- **Architekturplan** (`detailed_plan`) — detailed context, risk,
   architecture and implementation analysis using the same plan file.
 - **Work** (`work`) — normal work. Selecting Work in Shift+Tab does not
   automatically execute a stored plan; `/work` remains the explicit execution
   command.
+
+## `/plan` plan assistant
+
+`/plan`, `Ctrl+Alt+P`, and the `open-plan-picker` entry in the `Ctrl+Shift+X`
+command menu all route through the same assistant. It renders the shared
+`runMenu(...)` overlay (with a plain `ctx.ui.select(...)` fallback) and offers
+different actions depending on the current state:
+
+- **No plan file exists** — *Neuer Schnellplan*, *Neuer Architekturplan*,
+  *Abbrechen*.
+- **Plan exists, todos still open** — *Aktuellen Plan weiterführen*,
+  *Neuer Schnellplan*, *Neuer Architekturplan*, *Aktuellen Plan reviewen*,
+  *Aktuellen Plan ausführen*, *Plan-Todos anzeigen*, *Plan archivieren*,
+  *Abbrechen*.
+- **Plan exists, all todos complete** — *Plan archivieren*,
+  *Neuer Schnellplan*, *Neuer Architekturplan*, *Plan-Todos anzeigen*,
+  *Abbrechen*.
+- **Review or execution running** — the assistant shows a hint notification
+  but does not hard-block; the menu remains available, and any active turn is
+  normalized through the existing `setWorkflowMode` / `executePlan` /
+  `reviewPlan` paths before applying the chosen action.
+
+**Plan protection.** Choosing *Neuer Schnellplan* or *Neuer Architekturplan*
+while `.agent/plans/current-plan.md` already exists opens a three-option guard:
+*Bestehenden Plan archivieren & neu beginnen* (archives the current file as
+`incomplete`, then starts the new plan), *Bestehenden Plan überschreiben*
+(replaces it without archiving), or *Abbrechen* (keeps the existing file). In a
+non-interactive context the guard cannot be shown, so `/plan` conservatively
+refuses to overwrite and only notifies.
+
+**After a plan is created.** Once a plan-mode turn leaves a plan file behind,
+the assistant optionally offers a small, non-blocking *Nächster Schritt* menu:
+*`/work` starten*, *`/review-plan` ausführen*, *Todos anzeigen*, or *Im
+Planmodus bleiben*. Nothing executes automatically — Esc / *Im Planmodus
+bleiben* leave the workflow untouched. The menu only appears in the TUI while
+idle.
+
+Workflow mode, permission level, thinking level, and tool selection remain
+fully independent; `/plan` only changes the workflow mode/phase and never
+touches permissions.
 
 All mode transitions are direct: they have no idle, phase, escalation or
 confirmation guard. If an agent turn is active, mode selection aborts and

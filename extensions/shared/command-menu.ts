@@ -23,7 +23,7 @@ export function buildCommandMenu(
       id: "cmd-plan",
       section: "Plan",
       label: "/plan",
-      description: "Plan-Variante wählen: Einfacher oder ausführlicher Plan",
+      description: "Plan-Assistent öffnen (zustandsabhängige Aktionen)",
       value: { kind: "open-plan-picker" },
     },
     {
