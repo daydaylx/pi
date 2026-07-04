@@ -10,9 +10,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
-  Theme,
 } from "@earendil-works/pi-coding-agent";
-import { Key } from "@earendil-works/pi-tui";
 import { relative } from "node:path";
 import {
   applyDoneSteps,
@@ -29,9 +27,11 @@ import {
   type TodoItem,
 } from "./utils.ts";
 import {
+  WORKFLOW_MODE_REQUEST_EVENT,
   WORKFLOW_STATUS_EVENT,
+  type WorkflowMode,
+  type WorkflowModeRequest,
   type WorkflowPhase,
-  type WorkflowStatusEvent,
 } from "../shared/workflow-status.ts";
 
 // Context markers: kept as constants so injection (below) and detection (in
@@ -41,8 +41,30 @@ const PLAN_MODE_MARKER = "[PLAN MODE ACTIVE]";
 const PLAN_REVIEW_MARKER = "[PLAN REVIEW ACTIVE]";
 const EXECUTING_PLAN_MARKER = "[EXECUTING PLAN]";
 
+// Persistenter Kontext für den „Einfachen Plan": keine Plan-Datei, keine
+// Architektur-/Risiko-Blöcke und keine Änderung der Permission-Stufe.
+const SIMPLE_PLAN_PROMPT = `[EINFACHER PLAN]
+Erstelle einen schlichten, schnell einsetzbaren Plan für die aktuelle Aufgabe — geeignet für kleine bis mittlere Änderungen.
+
+Vorgehen:
+- Stelle maximal 2–5 gezielte Rückfragen, und nur, wenn sie für einen sauberen Plan wirklich nötig sind (nutze dazu ask_user).
+- Verzichte auf ausführliche Architekturprüfung, lange Risiko-/Audit-Blöcke und eine separate Plan-Datei.
+
+Gib danach einen kompakten Plan direkt im Chat aus mit genau diesen Punkten:
+- Ziel
+- Annahmen
+- Betroffene Bereiche
+- Konkrete Schritte
+- Offene Punkte
+- Empfehlung
+
+Führe die Aufgabe nicht aus. Schreibe keine Plan-Datei, lege keine PLAN.md an
+und bleibe knapp.`;
+
 interface PersistedWorkflowState {
+  mode?: WorkflowMode;
   phase?: WorkflowPhase;
+  // Legacy field retained only for state migration.
   planningActive?: boolean;
   reviewedHash?: string;
   // Legacy fields retained only for state migration.
@@ -68,43 +90,11 @@ function getLatestAssistantText(messages: AgentMessage[]): string {
   return latest ? getTextContent(latest) : "";
 }
 
-// Begrenzt die kompakte Widget-Darstellung während /work: verhindert, dass
-// die Todo-Liste wie ein zweites Hauptfenster über dem Editor wirkt.
-const MAX_VISIBLE_TODOS = 5;
-const MAX_TODO_LINE_LENGTH = 40;
-
-function truncateTodoText(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-function buildTodoWidgetLines(todos: TodoItem[], theme: Theme): string[] {
-  const completedTodos = todos.filter((todo) => todo.completed).length;
-  const header = `Todos ${completedTodos}/${todos.length}`;
-
-  if (completedTodos === todos.length) {
-    return [header, "Alle erledigt → /finish"];
-  }
-
-  const openTodos = todos.filter((todo) => !todo.completed);
-  const visibleTodos = openTodos.slice(0, MAX_VISIBLE_TODOS);
-  const lines = visibleTodos.map(
-    (todo) =>
-      `${theme.fg("muted", "☐ ")}${truncateTodoText(todo.text, MAX_TODO_LINE_LENGTH)}`,
-  );
-
-  const hiddenCount = openTodos.length - visibleTodos.length;
-  if (hiddenCount > 0) lines.push(`+ ${hiddenCount} offen`);
-
-  return [header, ...lines];
-}
-
 export default function planModeExtension(pi: ExtensionAPI): void {
+  let mode: WorkflowMode = "work";
   let phase: WorkflowPhase = "idle";
-  let planningActive = false;
   let reviewedHash: string | undefined;
   let planModeEverUsed = false;
-  let escalationActive = false;
 
   function readTodos(cwd: string): TodoItem[] {
     const content = readPlanFile(cwd);
@@ -113,13 +103,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
   function persistState(): void {
     pi.appendEntry<PersistedWorkflowState>("plan-mode", {
+      mode,
       phase,
-      planningActive,
       reviewedHash,
     });
   }
 
-  function enablePlanningTools(ctx: ExtensionContext): boolean {
+  function prepareDetailedPlan(ctx: ExtensionContext): boolean {
     try {
       ensurePlanDirectory(ctx.cwd);
     } catch (error) {
@@ -131,7 +121,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       return false;
     }
 
-    planningActive = true;
     planModeEverUsed = true;
     return true;
   }
@@ -150,31 +139,28 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     const completedTodos = todos.filter((todo) => todo.completed).length;
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
       source: "plan",
-      baseMode: planningActive ? "plan" : "work",
+      mode,
       phase,
-      planningActive,
       planExists,
       completedTodos,
       totalTodos: todos.length,
     });
 
-    const showTodoWidget =
-      (phase === "executing" || phase === "ready") && todos.length > 0;
-
-    ctx.ui.setWidget(
-      "plan-todos",
-      showTodoWidget ? buildTodoWidgetLines(todos, ctx.ui.theme) : undefined,
-    );
-
-    // Kompakte Todos-Anzeige im Footer, solange die ausführliche Checkliste
-    // (oben) noch nicht angezeigt wird — vermeidet doppelte Anzeige derselben
-    // Information sobald die Ausführung startet.
+    const modeLabel =
+      mode === "simple_plan"
+        ? "MODE SIMPLE PLAN"
+        : mode === "detailed_plan"
+          ? "MODE DETAILED PLAN"
+          : "MODE WORK";
     ctx.ui.setStatus(
-      "plan-todos-count",
-      !showTodoWidget && todos.length > 0
-        ? `Todos ${completedTodos}/${todos.length}`
-        : undefined,
+      "workflow-mode",
+      mode === "work" ? modeLabel : ctx.ui.theme.fg("accent", modeLabel),
     );
+
+    // Weder Widget noch Footer zeigen die Todo-Anzahl. Beide Keys werden
+    // explizit gelöscht, damit kein lingernder Wert im Footer stehen bleibt.
+    ctx.ui.setWidget("plan-todos", undefined);
+    ctx.ui.setStatus("plan-todos-count", undefined);
   }
 
   function invalidateReview(): void {
@@ -182,88 +168,83 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     if (phase === "reviewed" || phase === "ready") phase = "draft";
   }
 
-  async function togglePlanMode(ctx: ExtensionContext): Promise<void> {
-    if (!ctx.isIdle()) {
-      ctx.ui.notify("Moduswechsel sind nur im Leerlauf möglich.", "info");
-      return;
-    }
-    if (escalationActive) {
-      ctx.ui.notify(
-        "Full Access/YOLO ist aktiv. Zuerst deaktivieren vor einem Moduswechsel.",
-        "warning",
-      );
-      return;
-    }
-    if (phase === "executing" || phase === "reviewing") {
-      ctx.ui.notify(
-        phase === "executing"
-          ? "Plan wird bereits ausgeführt."
-          : "Plan-Review läuft bereits.",
-        "warning",
-      );
-      return;
-    }
-
-    if (planningActive) {
-      if (!ctx.hasUI || ctx.mode !== "tui") {
-        ctx.ui.notify(
-          "Der Wechsel in Work Mode erfordert eine interaktive Bestätigung.",
-          "warning",
-        );
-        return;
+  function normalizeInterruptedPhase(ctx: ExtensionContext): void {
+    if (phase !== "executing" && phase !== "reviewing") return;
+    try {
+      const content = readPlanFile(ctx.cwd);
+      if (content === undefined) {
+        phase = "idle";
+        reviewedHash = undefined;
+      } else if (reviewedHash && hashPlanContent(content) === reviewedHash) {
+        phase = "reviewed";
+      } else {
+        phase = "draft";
       }
-      const confirmed = await ctx.ui.confirm(
-        "Plan Mode verlassen?",
-        "Zu Work Mode wechseln; die Plan-Datei bleibt erhalten.",
-      );
-      if (!confirmed) return;
-      planningActive = false;
-      ctx.ui.notify("Work Mode aktiv. Plan-Datei bleibt erhalten.", "info");
-    } else {
-      if (!ctx.hasUI || ctx.mode !== "tui") {
-        ctx.ui.notify(
-          "Der Wechsel in Plan Mode erfordert eine interaktive Bestätigung.",
-          "warning",
-        );
-        return;
-      }
-      const confirmed = await ctx.ui.confirm(
-        "Plan Mode aktivieren?",
-        `Read-only-Analyse; Schreibzugriff nur auf ${PLAN_RELATIVE_PATH}.`,
-      );
-      if (!confirmed) return;
-      if (!enablePlanningTools(ctx)) return;
-      invalidateReview();
-      phase = "draft";
-      ctx.ui.notify(
-        `Plan-Modus aktiv. Schreibzugriff nur auf ${PLAN_RELATIVE_PATH}.`,
-        "info",
-      );
+    } catch {
+      phase = "idle";
+      reviewedHash = undefined;
     }
-    updateStatus(ctx);
-    persistState();
   }
 
-  pi.events.on(WORKFLOW_STATUS_EVENT, (event: WorkflowStatusEvent) => {
-    if (event.source === "permission") {
-      // Full Access/YOLO wirken nur, solange baseMode "work" ist (siehe
-      // mode-permissions.ts). Eine im Plan Mode nur vorgemerkte Eskalation
-      // soll den Wechsel nach /work nicht blockieren.
-      escalationActive =
-        event.baseMode === "work" && event.escalation !== "none";
+  function setWorkflowMode(
+    target: WorkflowMode,
+    ctx: ExtensionContext,
+  ): boolean {
+    if (!ctx.isIdle()) ctx.abort();
+    normalizeInterruptedPhase(ctx);
+
+    if (target === "detailed_plan") {
+      if (!prepareDetailedPlan(ctx)) return false;
+      invalidateReview();
+      phase = "draft";
     }
+
+    mode = target;
+    updateStatus(ctx);
+    persistState();
+    const label =
+      target === "simple_plan"
+        ? "Einfacher Plan"
+        : target === "detailed_plan"
+          ? "Ausführlicher Plan"
+          : "Work-Modus";
+    ctx.ui.notify(`${label} aktiv.`, "info");
+    return true;
+  }
+
+  // Router für /plan: die Auswahl ändert den Modus unmittelbar. Ohne
+  // interaktive TUI wird der ausführliche Planmodus aktiviert.
+  async function routePlan(ctx: ExtensionContext): Promise<void> {
+    if (!ctx.hasUI || ctx.mode !== "tui") {
+      setWorkflowMode("detailed_plan", ctx);
+      return;
+    }
+    const choice = await ctx.ui.select("Plan-Variante wählen", [
+      "Einfacher Plan",
+      "Ausführlicher Plan",
+    ]);
+    if (!choice) return;
+    if (choice === "Einfacher Plan") {
+      setWorkflowMode("simple_plan", ctx);
+    } else {
+      setWorkflowMode("detailed_plan", ctx);
+    }
+  }
+
+  pi.events.on(WORKFLOW_MODE_REQUEST_EVENT, (request: WorkflowModeRequest) => {
+    setWorkflowMode(request.mode, request.ctx);
   });
 
   pi.registerFlag("plan", {
-    description: "Start in plan mode (read-only except the plan file)",
+    description: "Start in detailed plan mode (permissions unchanged)",
     type: "boolean",
     default: false,
   });
 
   pi.registerCommand("plan", {
-    description: "Plan-Modus umschalten",
+    description: "Plan-Variante wählen: Einfach oder Ausführlich",
     handler: async (_args, ctx) => {
-      await togglePlanMode(ctx);
+      await routePlan(ctx);
     },
   });
 
@@ -296,15 +277,15 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerShortcut(Key.ctrlAlt("p"), {
-    description: "Plan-Modus umschalten",
+  pi.registerShortcut("ctrl+alt+p", {
+    description: "Plan-Variante wählen",
     handler: async (ctx) => {
-      await togglePlanMode(ctx);
+      await routePlan(ctx);
     },
   });
 
   pi.on("context", async (event) => {
-    if (planningActive || phase === "executing" || phase === "reviewing")
+    if (mode !== "work" || phase === "executing" || phase === "reviewing")
       return;
     if (phase === "idle" && !planModeEverUsed) return;
 
@@ -356,21 +337,27 @@ Beende den Review mit genau einem Marker:
       };
     }
 
-    if (planningActive) {
+    if (mode === "simple_plan") {
+      return {
+        message: {
+          customType: "simple-plan-context",
+          content: SIMPLE_PLAN_PROMPT,
+          display: false,
+        },
+      };
+    }
+
+    if (mode === "detailed_plan") {
       return {
         message: {
           customType: "plan-mode-context",
           content: `${PLAN_MODE_MARKER}
-Du bist im read-mostly Plan-Modus.
+Du bist im ausführlichen Plan-Modus. Analysiere Kontext, Risiken, Optionen,
+Abhängigkeiten und Umsetzungsschritte gründlich. Der Workflow-Modus verändert
+keine Permissions; halte die aktuell gewählte Zugriffsstufe ein.
 
-ERLAUBT:
-- read, grep, find, ls und zentral geprüfte read-only Bash-Analyse
-- edit/write ausschließlich auf ${PLAN_RELATIVE_PATH}
-
-VERBOTEN:
-- edit oder write auf andere Dateien
-- verändernde Bash-Befehle
-- selbstständiger Wechsel in den Arbeitsmodus
+Führe die Aufgabe nicht aus. Schreibe ausschließlich den Plan nach
+${PLAN_RELATIVE_PATH}, sofern die aktuelle Permission-Stufe dies erlaubt.
 
 ENTSCHEIDUNGEN:
 Wenn mehrere relevante Lösungen möglich sind, nutze vor dem finalen Plan ask_user.
@@ -495,7 +482,7 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
         ) {
           reviewedHash = hashPlanContent(content);
           phase = "reviewed";
-          planningActive = true;
+          mode = "detailed_plan";
           ctx.ui.notify(
             "Plan geprüft und freigegeben. `/work` startet den unveränderten Plan (auch ohne erneuten Review möglich).",
             "info",
@@ -526,7 +513,7 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
       return;
     }
 
-    if (phase !== "draft" || !planningActive) return;
+    if (phase !== "draft" || mode !== "detailed_plan") return;
     try {
       if (readPlanFile(ctx.cwd) !== undefined) {
         updateStatus(ctx);
@@ -541,15 +528,7 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
   });
 
   async function reviewPlan(ctx: ExtensionCommandContext): Promise<void> {
-    await ctx.waitForIdle();
-
-    if (escalationActive) {
-      ctx.ui.notify(
-        "Full Access/YOLO ist aktiv. Zuerst deaktivieren vor dem Plan-Review.",
-        "warning",
-      );
-      return;
-    }
+    if (!setWorkflowMode("detailed_plan", ctx)) return;
 
     let content: string | undefined;
     try {
@@ -566,28 +545,6 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
       );
       return;
     }
-    if (phase === "executing") {
-      ctx.ui.notify(
-        "Ein laufender Plan kann nicht parallel geprüft werden.",
-        "warning",
-      );
-      return;
-    }
-    if (!planningActive) {
-      if (!ctx.hasUI || ctx.mode !== "tui") {
-        ctx.ui.notify(
-          "Der Wechsel in Plan Mode erfordert eine interaktive Bestätigung.",
-          "warning",
-        );
-        return;
-      }
-      const confirmed = await ctx.ui.confirm(
-        "Für den Review in Plan Mode wechseln?",
-        "Der Review darf ausschließlich die Plan-Datei ändern.",
-      );
-      if (!confirmed) return;
-    }
-    if (!enablePlanningTools(ctx)) return;
 
     reviewedHash = undefined;
     phase = "reviewing";
@@ -618,15 +575,7 @@ ${content}
   }
 
   async function executePlan(ctx: ExtensionCommandContext): Promise<void> {
-    await ctx.waitForIdle();
-
-    if (escalationActive) {
-      ctx.ui.notify(
-        "Full Access/YOLO ist aktiv. Zuerst deaktivieren vor einem Wechsel in Work Mode.",
-        "warning",
-      );
-      return;
-    }
+    setWorkflowMode("work", ctx);
 
     let content: string | undefined;
     try {
@@ -635,26 +584,6 @@ ${content}
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(`Plan-Datei ist nicht sicher lesbar: ${message}`, "error");
       return;
-    }
-
-    if (planningActive) {
-      if (!ctx.hasUI || ctx.mode !== "tui") {
-        ctx.ui.notify(
-          "Der Wechsel in Work Mode erfordert eine interaktive Bestätigung.",
-          "warning",
-        );
-        return;
-      }
-      const confirmed = await ctx.ui.confirm(
-        "In Work Mode wechseln?",
-        content === undefined
-          ? "Plan Mode verlassen; es ist kein ausführbarer Plan vorhanden."
-          : "Plan Mode verlassen und den aktuellen Plan ausführen.",
-      );
-      if (!confirmed) return;
-      planningActive = false;
-      updateStatus(ctx);
-      persistState();
     }
 
     if (content === undefined) {
@@ -728,7 +657,7 @@ ${content}
 
     phase = "executing";
     reviewedHash = undefined;
-    planningActive = false;
+    mode = "work";
     updateStatus(ctx);
     persistState();
 
@@ -781,7 +710,7 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       }
 
       if (content === undefined) {
-        phase = planningActive ? "draft" : "idle";
+        phase = mode === "detailed_plan" ? "draft" : "idle";
         reviewedHash = undefined;
         updateStatus(ctx);
         persistState();
@@ -811,13 +740,12 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       }
 
       try {
-        const keepMode = planningActive;
+        const keepDetailedMode = mode === "detailed_plan";
         const archivePath = archivePlanFile(
           ctx.cwd,
           complete ? "complete" : "incomplete",
         );
-        phase = keepMode ? "draft" : "idle";
-        planningActive = keepMode;
+        phase = keepDetailedMode ? "draft" : "idle";
         reviewedHash = undefined;
         updateStatus(ctx);
         persistState();
@@ -847,7 +775,9 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
     const persisted = latestState?.data;
     if (persisted?.phase) {
       phase = persisted.phase;
-      planningActive = persisted.planningActive ?? false;
+      mode =
+        persisted.mode ??
+        (persisted.planningActive ? "detailed_plan" : "work");
       reviewedHash = persisted.reviewedHash;
     } else if (persisted) {
       phase = persisted.executing
@@ -855,7 +785,7 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
         : persisted.enabled
           ? "draft"
           : "idle";
-      planningActive = persisted.enabled ?? false;
+      mode = persisted.enabled ? "detailed_plan" : "work";
     }
 
     let content: string | undefined;
@@ -863,7 +793,7 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       content = readPlanFile(ctx.cwd);
     } catch (error) {
       phase = "idle";
-      planningActive = false;
+      mode = "work";
       reviewedHash = undefined;
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(`Unsicherer Planpfad ignoriert: ${message}`, "error");
@@ -896,14 +826,14 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
     if (pi.getFlag("plan") === true) {
       phase = "draft";
       reviewedHash = undefined;
-      planningActive = true;
+      mode = "detailed_plan";
       planModeEverUsed = true;
     }
 
-    if (planningActive && phase === "idle") phase = "draft";
-    if (planningActive) {
-      planningActive = false;
-      if (!enablePlanningTools(ctx)) phase = "idle";
+    if (mode === "detailed_plan" && phase === "idle") phase = "draft";
+    if (mode === "detailed_plan" && !prepareDetailedPlan(ctx)) {
+      mode = "work";
+      phase = "idle";
     }
     updateStatus(ctx);
   });

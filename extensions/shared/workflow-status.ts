@@ -1,15 +1,16 @@
-export const WORKFLOW_STATUS_EVENT = "pi-workflow:status";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export type BaseMode = "plan" | "work";
-export type Escalation = "none" | "full-access" | "yolo";
-export type RuntimeMode = BaseMode | "full-access" | "yolo";
+export const WORKFLOW_STATUS_EVENT = "pi-workflow:status";
+export const WORKFLOW_MODE_REQUEST_EVENT = "pi-workflow:set-mode";
+export const PERMISSION_REQUEST_EVENT = "pi-workflow:set-permission";
+
+export type WorkflowMode = "work" | "simple_plan" | "detailed_plan";
 
 export type WorkflowPhase =
   "idle" | "draft" | "reviewing" | "reviewed" | "executing" | "ready";
 
-// Feingranulare Zugriffsstufe, wie sie im zentralen Menü angezeigt/gewählt
-// wird. Bildet sich aus (baseMode, planStrict) für Plan und aus (baseMode,
-// escalation) für Work ab — siehe mode-permissions.ts.
+// Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
+// Prompting und Workflow; ausschließlich diese Stufe steuert Tool-Zugriffe.
 export type PermissionLevel =
   "read-only" | "read-bash" | "read-write" | "full-access" | "yolo";
 
@@ -22,35 +23,39 @@ export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
 };
 
 export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
-  "read-only": "Nur Lesen, kein Bash — striktester Plan Mode",
-  "read-bash": "Lesen + sichere Inspect-Bash-Befehle (Plan Mode Standard)",
-  "read-write": "Normaler Projektzugriff mit Rückfragen (Work Mode Standard)",
+  "read-only": "Nur Lesen; ausschließlich die Plan-Datei bleibt beschreibbar",
+  "read-bash": "Lesen, sichere Inspect-Bash-Befehle und die Plan-Datei",
+  "read-write": "Normaler Projektzugriff mit Rückfragen bei riskanten Aktionen",
   "full-access":
-    "Work + Git-Housekeeping/Paketmanager ohne Rückfrage; sudo/Löschen bleiben bestätigt",
-  yolo: "Work + sudo/Löschen/externe Schreibzugriffe ohne Rückfrage; kritische Muster bleiben bestätigt",
+    "Git-Housekeeping/Paketmanager ohne Rückfrage; sudo/Löschen bleiben bestätigt",
+  yolo: "sudo/Löschen/externe Schreibzugriffe ohne Rückfrage; kritische Muster bleiben bestätigt",
 };
 
-// Schreibrechte-Override, unabhängig vom Modus zuschaltbar (nur wirksam
-// außerhalb von Plan Mode — Plan Mode erzwingt "nur Plan-Datei" immer selbst).
+// Zusätzlicher Schreibrechte-Override. Die restriktivere Regel aus
+// Permission-Level und Override gewinnt.
 export type WriteOverride = "inherit" | "block" | "plan-file-only";
+
+export interface WorkflowModeRequest {
+  mode: WorkflowMode;
+  ctx: ExtensionContext;
+}
+
+export interface PermissionRequest {
+  level: PermissionLevel;
+  ctx: ExtensionContext;
+}
 
 export type WorkflowStatusEvent =
   | {
       source: "plan";
-      baseMode: BaseMode;
+      mode: WorkflowMode;
       phase: WorkflowPhase;
-      planningActive: boolean;
       planExists: boolean;
       completedTodos: number;
       totalTodos: number;
     }
   | {
       source: "permission";
-      mode: RuntimeMode;
-      baseMode: BaseMode;
-      yolo: boolean;
-      escalation: Escalation;
-      planStrict: boolean;
       writeOverride: WriteOverride;
       permissionLevel: PermissionLevel;
     };

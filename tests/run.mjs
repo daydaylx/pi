@@ -35,6 +35,9 @@ const notify = await jiti.import(path.resolve(ROOT, "extensions/notify.ts"));
 const modePermissions = await jiti.import(
   path.resolve(ROOT, "extensions/mode-permissions.ts"),
 );
+const planMode = await jiti.import(
+  path.resolve(ROOT, "extensions/plan-mode/index.ts"),
+);
 const uxStatus = await jiti.import(
   path.resolve(ROOT, "extensions/ux-status.ts"),
 );
@@ -111,12 +114,12 @@ for (const [cmd, exp] of safeCases) {
 }
 
 eq(
-  policy.decideBash("work", "npm install foo", ROOT).action,
+  policy.decideBash("read-write", "npm install foo", ROOT).action,
   "ask",
   "work asks before package installation",
 );
 eq(
-  policy.decideBash("work", "npx some-tool", ROOT).action,
+  policy.decideBash("read-write", "npx some-tool", ROOT).action,
   "ask",
   "work asks before package runners that may download",
 );
@@ -126,7 +129,7 @@ eq(
   "yolo bypasses package installation prompt",
 );
 eq(
-  policy.decideBash("work", "rm -rf build", ROOT).action,
+  policy.decideBash("read-write", "rm -rf build", ROOT).action,
   "ask",
   "work asks before deletion",
 );
@@ -151,37 +154,37 @@ eq(
   "yolo still hard-prompts before deleting .git",
 );
 eq(
-  policy.decideBash("work", "git reset --hard", ROOT).action,
+  policy.decideBash("read-write", "git reset --hard", ROOT).action,
   "ask",
   "work asks before destructive git",
 );
 eq(
-  policy.decideBash("work", "git commit -m test", ROOT).action,
+  policy.decideBash("read-write", "git commit -m test", ROOT).action,
   "allow",
   "work allows normal commits",
 );
 eq(
-  policy.decideBash("work", "cat .env", ROOT).action,
+  policy.decideBash("read-write", "cat .env", ROOT).action,
   "ask",
   "work asks before secret access",
 );
 eq(
-  policy.decideBash("work", "cat auth.json", ROOT).action,
+  policy.decideBash("read-write", "cat auth.json", ROOT).action,
   "ask",
   "work asks before auth file access",
 );
 eq(
-  policy.decideBash("work", "echo $API_KEY", ROOT).action,
+  policy.decideBash("read-write", "echo $API_KEY", ROOT).action,
   "ask",
   "work asks before exposing secret environment variables",
 );
 eq(
-  policy.decideBash("work", "cat .env.example", ROOT).action,
+  policy.decideBash("read-write", "cat .env.example", ROOT).action,
   "allow",
   "environment example files are not treated as secrets",
 );
 eq(
-  policy.decideBash("work", "cat .env.example .env", ROOT).action,
+  policy.decideBash("read-write", "cat .env.example .env", ROOT).action,
   "ask",
   "a real env file remains sensitive beside an example",
 );
@@ -191,28 +194,28 @@ eq(
   "yolo still hard-prompts before SSH key access",
 );
 eq(
-  policy.decideFileAccess("plan", "write", ".agent/plans/current-plan.md", ROOT)
+  policy.decideFileAccess("read-bash", "write", ".agent/plans/current-plan.md", ROOT)
     .action,
   "allow",
   "plan permits its explicit plan file",
 );
 eq(
-  policy.decideFileAccess("plan", "write", "src/app.ts", ROOT).action,
+  policy.decideFileAccess("read-bash", "write", "src/app.ts", ROOT).action,
   "block",
   "plan blocks ordinary project writes",
 );
 eq(
-  policy.decideFileAccess("work", "write", "src/app.ts", ROOT).action,
+  policy.decideFileAccess("read-write", "write", "src/app.ts", ROOT).action,
   "allow",
   "work permits project writes",
 );
 eq(
-  policy.decideFileAccess("work", "write", "/tmp/outside.txt", ROOT).action,
+  policy.decideFileAccess("read-write", "write", "/tmp/outside.txt", ROOT).action,
   "ask",
   "work asks before external writes",
 );
 eq(
-  policy.decideBash("work", "echo result > /tmp/outside.txt", ROOT).action,
+  policy.decideBash("read-write", "echo result > /tmp/outside.txt", ROOT).action,
   "ask",
   "work asks before shell redirection outside the project",
 );
@@ -264,27 +267,27 @@ eq(
   "full-access still hard-prompts for root deletion",
 );
 
-// ───────────────────────── planStrict: "Read only" disables bash entirely ─────────────────────────
+// ───────────────────────── read-only/read-bash levels ─────────────────────────
 eq(
-  policy.decideBash("plan", "ls -la", ROOT, { planStrict: true }).action,
+  policy.decideBash("read-only", "ls -la", ROOT).action,
   "block",
-  "planStrict blocks even safe read-only bash",
+  "read-only blocks even safe read-only bash",
 );
 eq(
-  policy.decideBash("plan", "ls -la", ROOT).action,
+  policy.decideBash("read-bash", "ls -la", ROOT).action,
   "allow",
-  "plan without planStrict keeps allowing safe bash (default Read+Bash)",
+  "read-bash allows safe inspection commands",
 );
 
 // ───────────────────────── writeOverride: independent of mode ─────────────────────────
 eq(
-  policy.decideFileAccess("work", "write", "src/app.ts", ROOT, "block").action,
+  policy.decideFileAccess("read-write", "write", "src/app.ts", ROOT, "block").action,
   "block",
   "writeOverride block denies ordinary project writes in Work Mode",
 );
 eq(
   policy.decideFileAccess(
-    "work",
+    "read-write",
     "write",
     ".agent/plans/current-plan.md",
     ROOT,
@@ -294,13 +297,13 @@ eq(
   "writeOverride plan-file-only still allows the plan file",
 );
 eq(
-  policy.decideFileAccess("work", "write", "src/app.ts", ROOT, "plan-file-only")
+  policy.decideFileAccess("read-write", "write", "src/app.ts", ROOT, "plan-file-only")
     .action,
   "block",
   "writeOverride plan-file-only blocks ordinary project writes",
 );
 eq(
-  policy.decideBash("work", "touch new.txt", ROOT, { writeOverride: "block" })
+  policy.decideBash("read-write", "touch new.txt", ROOT, { writeOverride: "block" })
     .action,
   "block",
   "writeOverride block denies write-capable bash in Work Mode",
@@ -475,6 +478,7 @@ assert(
   const eventHandlers = new Map();
   const statuses = [];
   const emitted = [];
+  const persisted = [];
   modePermissions.default({
     events: {
       on(name, handler) {
@@ -493,6 +497,9 @@ assert(
     registerShortcut(shortcut) {
       shortcuts.push(shortcut);
     },
+    appendEntry(customType, data) {
+      persisted.push({ type: "custom", customType, data });
+    },
   });
   assert(shortcuts.includes("ctrl+shift+y"), "Ctrl+Shift+Y is registered");
   assert(commands.has("yolo"), "/yolo is registered");
@@ -501,121 +508,82 @@ assert(
   assert(commands.has("write"), "/write is registered");
 
   const confirmations = [];
-  const editorWrites = [];
+  let sessionEntries = [];
   const context = {
     cwd: ROOT,
     hasUI: true,
     mode: "tui",
-    isIdle: () => true,
+    isIdle: () => false,
+    sessionManager: {
+      getEntries: () => sessionEntries,
+    },
     ui: {
       theme: { fg: (_color, text) => text },
       setStatus: (_key, text) => statuses.push(text),
       notify() {},
       confirm: async () => confirmations.shift() ?? false,
-      setEditorText: (text) => editorWrites.push(text),
-      getEditorText: () => "",
     },
   };
-  const setBaseMode = (baseMode) =>
-    eventHandlers.get("pi-workflow:status")({
-      source: "plan",
-      baseMode,
-      phase: baseMode === "plan" ? "draft" : "idle",
-      planningActive: baseMode === "plan",
-      planExists: true,
-      completedTodos: 0,
-      totalTodos: 1,
-    });
 
   await handlers.get("session_start")({}, context);
-  eq(statuses.at(-1), "MODE WORK", "session starts in work mode");
+  eq(statuses.at(-1), "PERM YOLO", "new sessions use configured Auto-YOLO");
 
-  // YOLO in Work Mode takes effect immediately.
-  confirmations.push(true);
+  // De-escalation is immediate and does not depend on idle/mode state.
   await commands.get("yolo")("", context);
   eq(
     statuses.at(-1),
-    "MODE YOLO",
-    "confirmed /yolo is visibly active in Work Mode",
+    "PERM READ + WRITE",
+    "/yolo can be disabled while the agent is busy",
   );
   assert(
-    emitted.some(([, event]) => event.source === "permission" && event.yolo),
-    "yolo publishes central permission state",
+    emitted.some(
+      ([, event]) =>
+        event.source === "permission" &&
+        event.permissionLevel === "read-write" &&
+        !("mode" in event),
+    ),
+    "permission status is published without workflow mode fields",
   );
 
-  confirmations.push(true);
-  await commands.get("yolo")("", context);
-  eq(statuses.at(-1), "MODE WORK", "leaving yolo restores plain Work Mode");
-
-  // Regression test: YOLO must never silently bypass Plan Mode's read-only
-  // guarantee. Arming it while in Plan Mode has to stay dormant until Work
-  // Mode is actually resumed.
-  setBaseMode("plan");
-  eq(statuses.at(-1), "MODE PLAN", "plan event updates visible mode");
-
-  confirmations.push(true);
-  await commands.get("yolo")("", context);
-  eq(
-    statuses.at(-1),
-    "MODE PLAN",
-    "YOLO armed from Plan Mode stays dormant and does not bypass Plan Mode",
-  );
-
-  setBaseMode("work");
-  eq(
-    statuses.at(-1),
-    "MODE YOLO",
-    "pre-armed YOLO activates automatically once Work Mode resumes",
-  );
-
-  confirmations.push(true);
-  await commands.get("yolo")("", context);
-  eq(statuses.at(-1), "MODE WORK", "yolo can be turned off again");
-
-  await handlers.get("session_shutdown")({});
-  await handlers.get("session_start")({}, context);
-  eq(statuses.at(-1), "MODE WORK", "session restart never restores yolo");
-
-  // /permission: Plan sub-levels (read-only/read-bash) toggle planStrict.
-  setBaseMode("plan");
+  // Permission levels apply directly and never stage a mode command.
   await commands.get("permission")("read-only", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "read-only",
-    "/permission read-only sets planStrict while already in Plan Mode",
+    "read-only applies while busy without switching workflow mode",
   );
   await commands.get("permission")("read-bash", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "read-bash",
-    "/permission read-bash relaxes planStrict again",
+    "read-bash applies independently",
   );
 
-  // Selecting a Plan-only level from Work Mode stages /plan for the user
-  // instead of silently switching modes.
-  setBaseMode("work");
-  editorWrites.length = 0;
-  await commands.get("permission")("read-only", context);
+  // The menu request path uses the same setter.
+  eventHandlers.get("pi-workflow:set-permission")({
+    level: "read-write",
+    ctx: context,
+  });
+  await Promise.resolve();
   eq(
-    editorWrites.at(-1),
-    "/plan",
-    "/permission read-only stages /plan when still in Work Mode",
+    emitted.at(-1)[1].permissionLevel,
+    "read-write",
+    "permission request event applies directly",
   );
 
-  // /permission full-access / read-write (escalation ladder from Work Mode).
+  // Elevated levels retain their explicit safety confirmation.
   confirmations.push(true);
   await commands.get("permission")("full-access", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "full-access",
-    "/permission full-access activates the Full Access escalation",
+    "full-access activates after confirmation",
   );
-  confirmations.push(true);
   await commands.get("permission")("read-write", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "read-write",
-    "/permission read-write turns escalation back off",
+    "de-escalation applies without confirmation",
   );
 
   // /write: independent write-rights override.
@@ -631,6 +599,183 @@ assert(
     "inherit",
     "/write allow clears the write override",
   );
+
+  // Session resume restores the last persisted permission and override.
+  sessionEntries = persisted.slice();
+  await handlers.get("session_shutdown")({});
+  await handlers.get("session_start")({}, context);
+  eq(
+    emitted.at(-1)[1].permissionLevel,
+    "read-write",
+    "session resume restores permission level",
+  );
+  eq(
+    emitted.at(-1)[1].writeOverride,
+    "inherit",
+    "session resume restores write override",
+  );
+}
+
+// ───────────────────────── workflow modes: direct, guard-free transitions ─────────────────────────
+assert(
+  typeof planMode.default === "function",
+  "plan-mode/index.ts exports a factory function",
+);
+{
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-workflow-modes-"));
+  try {
+    const commands = new Map();
+    const hooks = new Map();
+    const eventHandlers = new Map();
+    const emitted = [];
+    const persisted = [];
+    const sent = [];
+    let idle = true;
+    let aborts = 0;
+    let confirmations = 0;
+
+    planMode.default({
+      events: {
+        on(name, handler) {
+          eventHandlers.set(name, handler);
+        },
+        emit(name, event) {
+          emitted.push([name, event]);
+        },
+      },
+      on(name, handler) {
+        hooks.set(name, handler);
+      },
+      registerFlag() {},
+      getFlag: () => false,
+      registerCommand(name, options) {
+        commands.set(name, options.handler);
+      },
+      registerShortcut() {},
+      appendEntry(customType, data) {
+        persisted.push({ type: "custom", customType, data });
+      },
+      sendMessage(message, options) {
+        sent.push({ message, options });
+      },
+    });
+
+    let sessionEntries = [];
+    const context = {
+      cwd,
+      hasUI: true,
+      mode: "tui",
+      isIdle: () => idle,
+      abort() {
+        aborts += 1;
+        idle = true;
+      },
+      sessionManager: {
+        getEntries: () => sessionEntries,
+      },
+      ui: {
+        theme: { fg: (_color, text) => text },
+        setStatus() {},
+        setWidget() {},
+        notify() {},
+        select: async () => undefined,
+        confirm: async () => {
+          confirmations += 1;
+          return true;
+        },
+      },
+    };
+
+    await hooks.get("session_start")({}, context);
+    eq(
+      emitted.at(-1)[1].mode,
+      "work",
+      "a new session starts with the single workflow mode set to work",
+    );
+
+    idle = false;
+    eventHandlers.get("pi-workflow:set-mode")({
+      mode: "simple_plan",
+      ctx: context,
+    });
+    eq(aborts, 1, "switching mode aborts an active agent turn");
+    eq(
+      emitted.at(-1)[1].mode,
+      "simple_plan",
+      "simple plan activates directly while busy",
+    );
+    const simpleContext = await hooks.get("before_agent_start")({}, context);
+    eq(
+      simpleContext?.message?.customType,
+      "simple-plan-context",
+      "simple plan is persistent and injects its compact context",
+    );
+
+    idle = false;
+    eventHandlers.get("pi-workflow:set-mode")({
+      mode: "detailed_plan",
+      ctx: context,
+    });
+    eq(aborts, 2, "simple-to-detailed switching is never idle-blocked");
+    eq(
+      emitted.at(-1)[1].mode,
+      "detailed_plan",
+      "detailed plan activates directly",
+    );
+    const detailedContext = await hooks.get("before_agent_start")({}, context);
+    eq(
+      detailedContext?.message?.customType,
+      "plan-mode-context",
+      "detailed plan injects the detailed planning context",
+    );
+
+    utils.writePlanFileAtomic(cwd, validPlan);
+    idle = false;
+    await commands.get("review-plan")("", context);
+    eq(
+      emitted.at(-1)[1].phase,
+      "reviewing",
+      "review starts without permission or mode guards",
+    );
+    idle = false;
+    eventHandlers.get("pi-workflow:set-mode")({
+      mode: "work",
+      ctx: context,
+    });
+    eq(
+      emitted.at(-1)[1].mode,
+      "work",
+      "work overrides an active review immediately",
+    );
+    eq(
+      emitted.at(-1)[1].phase,
+      "draft",
+      "interrupting review leaves a clean non-running phase",
+    );
+    eq(confirmations, 0, "workflow mode transitions never request confirmation");
+    assert(
+      sent.some(({ message }) => message.customType === "plan-review-request"),
+      "review still starts its existing agent workflow",
+    );
+
+    eventHandlers.get("pi-workflow:set-mode")({
+      mode: "simple_plan",
+      ctx: context,
+    });
+    sessionEntries = persisted.slice();
+    await hooks.get("session_start")({}, context);
+    eq(
+      emitted.at(-1)[1].mode,
+      "simple_plan",
+      "the selected workflow mode survives session resume",
+    );
+    assert(
+      emitted.every(([, event]) => event.source === "plan"),
+      "workflow transitions never publish or mutate permission state",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 }
 
 // ───────────────────────── ux-status: smoke + nextStepFor/countDirtyFiles ─────────────────────────
@@ -677,56 +822,28 @@ assert(
   "action-menu.ts exports the pure menu builder",
 );
 
-const availableActionCommands = new Set([
-  "finish",
-  "plan-todos",
-  "preview",
-  "review-plan",
-  "scroll",
-  "status",
-  "thinking",
-  "tools",
-]);
 const planActions = actions.buildActionMenu({
-  mode: "plan",
-  phase: "draft",
-  planExists: true,
-  completedTodos: 1,
-  totalTodos: 3,
-  availableCommands: availableActionCommands,
-  thinkingLevel: "high",
+  mode: "detailed_plan",
   permissionLevel: "read-bash",
-  writeOverride: "inherit",
-  modelLabel: "gpt-5.4-mini (openai-codex)",
 });
-assert(
-  planActions.some(
-    (action) => action.id === "mode-work" && action.command === "/work",
-  ),
-  "actions offers the confirmed Plan-to-Work transition",
+eq(
+  planActions.map((action) => action.id),
+  [
+    "mode-simple-plan",
+    "mode-detailed-plan",
+    "mode-work",
+    "permission-read-only",
+    "permission-read-bash",
+    "permission-read-write",
+    "permission-full-access",
+    "permission-yolo",
+  ],
+  "Shift+Tab contains only plan variants, Work and Permissions",
 );
 assert(
-  planActions.find((action) => action.id === "mode-plan")?.kind === "info",
-  "the currently active mode is a non-selectable status row (no toggle footgun)",
-);
-assert(
-  planActions.some(
-    (action) =>
-      action.id === "preview-plan" &&
-      action.command === "/preview .agent/plans/current-plan.md",
-  ),
-  "actions exposes a read-only plan preview",
-);
-assert(
-  !planActions.some((action) => action.command === "/yolo"),
-  "actions never exposes a raw /yolo shortcut outside the Permissions section",
-);
-assert(
-  planActions.some(
-    (action) =>
-      action.id === "permission-yolo" && action.command === "/permission yolo",
-  ),
-  "YOLO is reachable only through the graduated Permissions section",
+  planActions.find((action) => action.id === "mode-detailed-plan")?.current ===
+    true,
+  "the active detailed plan mode is marked",
 );
 assert(
   planActions.find((action) => action.id === "permission-read-bash")
@@ -734,65 +851,10 @@ assert(
   "the current permission level is marked",
 );
 assert(
-  planActions.find((action) => action.id === "thinking-high")?.current === true,
-  "the current thinking level is marked",
-);
-assert(
-  planActions.find((action) => action.id === "model-current")?.label ===
-    "gpt-5.4-mini (openai-codex)",
-  "the current model is shown as an info row",
-);
-assert(
-  planActions.find((action) => action.id === "write-inherit")?.current === true,
-  "the default write override (inherit) is marked current",
-);
-assert(
-  planActions.some(
-    (action) => action.id === "write-sudo-info" && action.kind === "info",
+  planActions.every((action) =>
+    ["Plan-Modus", "Work-Modus", "Permissions"].includes(action.section),
   ),
-  "Schreibrechte section shows a fixed sudo confirmation status row",
-);
-
-{
-  const editorWrites = [];
-  const notifications = [];
-  const rejected = await actions.putCommandInEditor("/plan", {
-    ui: {
-      getEditorText: () => "unfertiger Entwurf",
-      confirm: async () => false,
-      setEditorText: (text) => editorWrites.push(text),
-      notify: (text) => notifications.push(text),
-    },
-  });
-  eq(
-    rejected,
-    false,
-    "actions preserves editor text when replacement is denied",
-  );
-  eq(
-    editorWrites,
-    [],
-    "actions performs no editor write after denied replacement",
-  );
-
-  const accepted = await actions.putCommandInEditor("/plan", {
-    ui: {
-      getEditorText: () => "",
-      confirm: async () => true,
-      setEditorText: (text) => editorWrites.push(text),
-      notify: (text) => notifications.push(text),
-    },
-  });
-  eq(accepted, true, "actions prepares an accepted command");
-  eq(
-    editorWrites.at(-1),
-    "/plan",
-    "actions only writes the command into the editor",
-  );
-}
-
-const selectablePlanActions = planActions.filter(
-  (action) => action.kind !== "info",
+  "the menu has no model, thinking, write-rights or workflow section",
 );
 const fallbackChoice = await actions.selectActionWithFallback(
   planActions,
@@ -803,8 +865,24 @@ const fallbackChoice = await actions.selectActionWithFallback(
 );
 eq(
   fallbackChoice,
-  selectablePlanActions[1],
-  "/actions falls back to the native selector when custom UI fails, skipping info rows",
+  planActions[1],
+  "/actions fallback preserves the simplified action order",
+);
+
+eq(
+  actions.initialActionIndex(planActions),
+  1,
+  "keyboard focus starts on the active detailed plan mode",
+);
+eq(
+  actions.moveActionIndex(1, 1, planActions.length),
+  2,
+  "down navigation advances to Work mode",
+);
+eq(
+  actions.moveActionIndex(0, -1, planActions.length),
+  planActions.length - 1,
+  "up navigation wraps to the final permission",
 );
 
 // ───────────────────────── or-free: openrouter-api filtering/grouping ─────────────────────────
@@ -1135,8 +1213,16 @@ eq(
     settings.extensions.includes("+extensions/or-free/index.ts"),
     "settings explicitly loads the OpenRouter free-model extension",
   );
-  eq(settings.defaultProvider, "zai", "Z.ai remains the default provider");
-  eq(settings.defaultModel, "glm-5.2", "glm-5.2 remains the default model");
+  eq(
+    settings.defaultProvider,
+    "openai-codex",
+    "configured default provider is covered",
+  );
+  eq(
+    settings.defaultModel,
+    "gpt-5.4-mini",
+    "configured default model is covered",
+  );
 
   const zentui = JSON.parse(
     readFileSync(path.join(ROOT, "zentui.json"), "utf8"),

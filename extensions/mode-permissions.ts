@@ -1,10 +1,8 @@
 /**
- * Central permission decision layer for Plan, Work and session-scoped
- * escalation (Full Access, YOLO).
+ * Central permission decision layer, independent from the workflow mode.
  *
  * This is intentionally the only extension that intercepts tool_call and
- * user_bash. Workflow extensions publish the base mode but do not make access
- * decisions themselves.
+ * user_bash. Workflow extensions do not make access decisions themselves.
  */
 
 import type {
@@ -18,35 +16,29 @@ import {
   type PolicyDecision,
 } from "./shared/permission-policy.ts";
 import {
+  PERMISSION_REQUEST_EVENT,
   PERMISSION_LEVEL_LABEL,
   WORKFLOW_STATUS_EVENT,
-  type BaseMode,
-  type Escalation,
+  type PermissionRequest,
   type PermissionLevel,
-  type RuntimeMode,
-  type WorkflowStatusEvent,
   type WriteOverride,
 } from "./shared/workflow-status.ts";
 
-const STATUS_KEY = "workflow-mode";
+const STATUS_KEY = "workflow-permission";
+const PERSISTED_STATE_KEY = "mode-permissions";
 const MAX_PREVIEW = 140;
 
+// Auto-YOLO: aktiviert YOLO bei jedem Session-Start automatisch. Auf false
+// setzen, um das alte Verhalten (keine automatische Eskalation) wieder-
+// herzustellen. Die Permission-Stufe ist vom Workflow-Modus unabhängig und
+// jederzeit per /yolo oder Strg+Shift+Y änderbar.
+const AUTO_YOLO_ON_START = true;
+
 const WRITE_OVERRIDE_LABEL: Record<WriteOverride, string> = {
-  inherit: "Erlaubt (Standard des Modus)",
+  inherit: "Standard der Permission-Stufe",
   block: "Blockiert",
   "plan-file-only": "Nur Plan-Datei",
 };
-
-const PLAN_PERMISSION_LEVELS = new Set<PermissionLevel>([
-  "read-only",
-  "read-bash",
-]);
-
-function escalationLabel(level: Escalation): string {
-  return level === "none"
-    ? "normaler Work Mode"
-    : PERMISSION_LEVEL_LABEL[level];
-}
 
 function preview(value: string): string {
   const oneLine = value.replace(/\s+/g, " ").trim();
@@ -61,18 +53,17 @@ function toolPath(event: ToolCallEvent): string | undefined {
 }
 
 function decideTool(
-  mode: RuntimeMode,
+  permissionLevel: PermissionLevel,
   event: ToolCallEvent,
   cwd: string,
-  planStrict: boolean,
   writeOverride: WriteOverride,
 ): PolicyDecision {
   if (event.toolName === "bash") {
     return decideBash(
-      mode,
+      permissionLevel,
       String((event.input as Record<string, unknown>).command ?? ""),
       cwd,
-      { planStrict, writeOverride },
+      { writeOverride },
     );
   }
 
@@ -82,12 +73,17 @@ function decideTool(
     event.toolName === "find" ||
     event.toolName === "ls"
   ) {
-    return decideFileAccess(mode, "read", toolPath(event) ?? ".", cwd);
+    return decideFileAccess(
+      permissionLevel,
+      "read",
+      toolPath(event) ?? ".",
+      cwd,
+    );
   }
 
   if (event.toolName === "write" || event.toolName === "edit") {
     return decideFileAccess(
-      mode,
+      permissionLevel,
       "write",
       toolPath(event) ?? "",
       cwd,
@@ -95,10 +91,14 @@ function decideTool(
     );
   }
 
-  if (mode === "plan" && event.toolName !== "ask_user") {
+  if (
+    (permissionLevel === "read-only" ||
+      permissionLevel === "read-bash") &&
+    event.toolName !== "ask_user"
+  ) {
     return {
       action: "block",
-      reason: `Plan Mode: Tool "${event.toolName}" ist nicht freigegeben.`,
+      reason: `${PERMISSION_LEVEL_LABEL[permissionLevel]}: Tool "${event.toolName}" ist nicht freigegeben.`,
     };
   }
   return { action: "allow", reason: "Erlaubt" };
@@ -120,169 +120,83 @@ async function approve(
 }
 
 export default function modePermissionsExtension(pi: ExtensionAPI): void {
-  let baseMode: BaseMode = "work";
-  let escalation: Escalation = "none";
-  let planStrict = false;
+  let permissionLevel: PermissionLevel = AUTO_YOLO_ON_START
+    ? "yolo"
+    : "read-write";
   let writeOverride: WriteOverride = "inherit";
   let activeContext: ExtensionContext | undefined;
 
-  // Full Access/YOLO wirken ausschließlich im Work Mode. Das verhindert, dass
-  // eine im Plan Mode voreingestellte Eskalation dessen Read-only-Garantie
-  // umgeht, sobald baseMode später auf "work" wechselt.
-  function runtimeMode(): RuntimeMode {
-    return baseMode === "work" && escalation !== "none" ? escalation : baseMode;
-  }
-
-  function permissionLevel(): PermissionLevel {
-    if (baseMode === "plan") return planStrict ? "read-only" : "read-bash";
-    if (escalation === "full-access") return "full-access";
-    if (escalation === "yolo") return "yolo";
-    return "read-write";
-  }
-
   function publishStatus(ctx: ExtensionContext): void {
-    const mode = runtimeMode();
     const text =
-      mode === "yolo"
-        ? ctx.ui.theme.fg("warning", "MODE YOLO")
-        : mode === "full-access"
-          ? ctx.ui.theme.fg("warning", "MODE FULL ACCESS")
-          : mode === "plan"
-            ? ctx.ui.theme.fg("accent", "MODE PLAN")
-            : "MODE WORK";
+      permissionLevel === "yolo" || permissionLevel === "full-access"
+        ? ctx.ui.theme.fg(
+            "warning",
+            `PERM ${PERMISSION_LEVEL_LABEL[permissionLevel].toUpperCase()}`,
+          )
+        : `PERM ${PERMISSION_LEVEL_LABEL[permissionLevel].toUpperCase()}`;
     ctx.ui.setStatus(STATUS_KEY, text);
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
       source: "permission",
-      mode,
-      baseMode,
-      yolo: escalation === "yolo",
-      escalation,
-      planStrict,
       writeOverride,
-      permissionLevel: permissionLevel(),
-    } satisfies WorkflowStatusEvent);
+      permissionLevel,
+    });
   }
 
-  pi.events.on(WORKFLOW_STATUS_EVENT, (event: WorkflowStatusEvent) => {
-    if (event.source !== "plan") return;
-    // plan-mode blockiert Moduswechsel selbst, solange eine Eskalation aktiv
-    // in Work Mode wirkt (siehe escalationActive dort) — daher kann baseMode
-    // hier immer übernommen werden, auch um eine vorgemerkte Eskalation beim
-    // Wechsel nach Work scharf zu schalten.
-    baseMode = event.baseMode;
-    if (activeContext) publishStatus(activeContext);
-  });
-
-  async function setEscalation(
-    target: Escalation,
-    ctx: ExtensionContext,
-  ): Promise<void> {
-    if (ctx.mode !== "tui") {
-      ctx.ui.notify(
-        "Eskalationsstufe kann nur interaktiv geändert werden.",
-        "error",
-      );
-      return;
-    }
-    if (!ctx.isIdle()) {
-      ctx.ui.notify(
-        "Eskalationsstufe kann nur im Leerlauf geändert werden.",
-        "info",
-      );
-      return;
-    }
-    if (target === escalation) return;
-
-    if (target === "none") {
-      const confirmed = await ctx.ui.confirm(
-        `${escalationLabel(escalation)} deaktivieren?`,
-        "Zurück zu normalem Work Mode.",
-      );
-      if (!confirmed) return;
-      escalation = "none";
-      publishStatus(ctx);
-      ctx.ui.notify("Eskalation aus. Modus: WORK.", "info");
-      return;
-    }
-
-    const confirmText =
-      target === "yolo"
-        ? "Normale Work-Rückfragen werden umgangen. Systempfade, Secrets, SSH-Keys, sudo, Löschungen und extreme Befehle bleiben hart bestätigt."
-        : "Git-Housekeeping (reset/clean/force-push) und Paketmanager-Installationen werden ohne Rückfrage erlaubt. sudo, Löschungen, externe Schreibzugriffe und kritische Befehle bleiben bestätigt.";
-    const confirmed = await ctx.ui.confirm(
-      `${escalationLabel(target)} für diese Session aktivieren?`,
-      confirmText,
-    );
-    if (!confirmed) return;
-    escalation = target;
-    publishStatus(ctx);
-    ctx.ui.notify(
-      baseMode === "work"
-        ? `${escalationLabel(target)} aktiv.`
-        : `${escalationLabel(target)} vorgemerkt — wird aktiv, sobald Work Mode läuft.`,
-      "warning",
-    );
+  function persistState(): void {
+    pi.appendEntry(PERSISTED_STATE_KEY, { permissionLevel, writeOverride });
   }
 
   async function applyPermissionLevel(
     level: PermissionLevel,
     ctx: ExtensionContext,
   ): Promise<void> {
-    if (ctx.mode !== "tui") {
-      ctx.ui.notify(
-        "Zugriffsstufe kann nur interaktiv geändert werden.",
-        "error",
-      );
-      return;
-    }
-    if (!ctx.isIdle()) {
-      ctx.ui.notify(
-        "Zugriffsstufe kann nur im Leerlauf geändert werden.",
-        "info",
-      );
-      return;
-    }
+    if (level === permissionLevel) return;
 
-    if (PLAN_PERMISSION_LEVELS.has(level)) {
-      planStrict = level === "read-only";
-      if (activeContext) publishStatus(activeContext);
-      if (baseMode === "plan") {
+    if (level === "full-access" || level === "yolo") {
+      if (!ctx.hasUI) {
         ctx.ui.notify(
-          `Zugriffsstufe: ${PERMISSION_LEVEL_LABEL[level]}.`,
-          "info",
+          `${PERMISSION_LEVEL_LABEL[level]} erfordert eine interaktive Bestätigung.`,
+          "error",
         );
         return;
       }
-      ctx.ui.setEditorText("/plan");
-      ctx.ui.notify(
-        `${PERMISSION_LEVEL_LABEL[level]} vorgemerkt — /plan ausführen, um Plan Mode zu aktivieren.`,
-        "info",
+      const confirmText =
+        level === "yolo"
+          ? "Normale Work-Rückfragen werden umgangen. Systempfade, Secrets, SSH-Keys, sudo, Löschungen und extreme Befehle bleiben hart bestätigt."
+          : "Git-Housekeeping (reset/clean/force-push) und Paketmanager-Installationen werden ohne Rückfrage erlaubt. sudo, Löschungen, externe Schreibzugriffe und kritische Befehle bleiben bestätigt.";
+      const confirmed = await ctx.ui.confirm(
+        `${PERMISSION_LEVEL_LABEL[level]} für diese Session aktivieren?`,
+        confirmText,
       );
-      return;
+      if (!confirmed) return;
     }
 
-    const target: Escalation =
-      level === "full-access"
-        ? "full-access"
-        : level === "yolo"
-          ? "yolo"
-          : "none";
-    await setEscalation(target, ctx);
-    if (baseMode !== "work") {
-      ctx.ui.setEditorText("/work");
-    }
+    permissionLevel = level;
+    publishStatus(ctx);
+    persistState();
+    ctx.ui.notify(`Zugriffsstufe: ${PERMISSION_LEVEL_LABEL[level]}.`, "info");
   }
+
+  pi.events.on(PERMISSION_REQUEST_EVENT, (request: PermissionRequest) => {
+    void applyPermissionLevel(request.level, request.ctx);
+  });
 
   pi.registerCommand("yolo", {
     description: "Session-weiten YOLO Mode bestätigt ein-/ausschalten",
     handler: async (_args, ctx) =>
-      setEscalation(escalation === "yolo" ? "none" : "yolo", ctx),
+      applyPermissionLevel(
+        permissionLevel === "yolo" ? "read-write" : "yolo",
+        ctx,
+      ),
   });
 
   pi.registerCommand("full-access", {
     description: "Session-weiten Full Access Mode bestätigt ein-/ausschalten",
     handler: async (_args, ctx) =>
-      setEscalation(escalation === "full-access" ? "none" : "full-access", ctx),
+      applyPermissionLevel(
+        permissionLevel === "full-access" ? "read-write" : "full-access",
+        ctx,
+      ),
   });
 
   pi.registerCommand("permission", {
@@ -316,6 +230,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       }
       writeOverride = next;
       if (activeContext) publishStatus(activeContext);
+      persistState();
       ctx.ui.notify(`Schreibrechte: ${WRITE_OVERRIDE_LABEL[next]}.`, "info");
     },
   });
@@ -323,15 +238,17 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   pi.registerShortcut("ctrl+shift+y", {
     description: "YOLO Mode bestätigt ein-/ausschalten",
     handler: async (ctx) =>
-      setEscalation(escalation === "yolo" ? "none" : "yolo", ctx),
+      applyPermissionLevel(
+        permissionLevel === "yolo" ? "read-write" : "yolo",
+        ctx,
+      ),
   });
 
   pi.on("tool_call", async (event, ctx) => {
     const decision = decideTool(
-      runtimeMode(),
+      permissionLevel,
       event,
       ctx.cwd,
-      planStrict,
       writeOverride,
     );
     const subject =
@@ -350,8 +267,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("user_bash", async (event, ctx) => {
-    const decision = decideBash(runtimeMode(), event.command, event.cwd, {
-      planStrict,
+    const decision = decideBash(permissionLevel, event.command, event.cwd, {
       writeOverride,
     });
     if (await approve(decision, event.command, ctx)) return;
@@ -369,17 +285,37 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    // Eskalation (Full Access/YOLO) wird bewusst nie aus der Session
-    // wiederhergestellt.
     activeContext = ctx;
-    escalation = "none";
-    planStrict = false;
-    writeOverride = "inherit";
+    const latestState = ctx.sessionManager.getEntries()
+      .filter(
+        (entry: { type: string; customType?: string }) =>
+          entry.type === "custom" && entry.customType === PERSISTED_STATE_KEY,
+      )
+      .pop() as {
+      data?: {
+        permissionLevel?: PermissionLevel;
+        writeOverride?: WriteOverride;
+      };
+    } | undefined;
+    permissionLevel =
+      latestState?.data?.permissionLevel ??
+      (AUTO_YOLO_ON_START ? "yolo" : "read-write");
+    writeOverride = latestState?.data?.writeOverride ?? "inherit";
     publishStatus(ctx);
+    if (
+      !latestState &&
+      AUTO_YOLO_ON_START &&
+      permissionLevel === "yolo" &&
+      ctx.mode === "tui"
+    ) {
+      ctx.ui.notify(
+        "YOLO automatisch aktiv. /yolo zum Deaktivieren.",
+        "warning",
+      );
+    }
   });
 
   pi.on("session_shutdown", async () => {
-    escalation = "none";
     activeContext = undefined;
   });
 }

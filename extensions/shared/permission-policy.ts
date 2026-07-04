@@ -1,7 +1,7 @@
 import { existsSync, lstatSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { isPlanFilePath, PLAN_RELATIVE_PATH } from "../plan-mode/utils.ts";
-import type { RuntimeMode, WriteOverride } from "./workflow-status.ts";
+import type { PermissionLevel, WriteOverride } from "./workflow-status.ts";
 
 export type PolicyAction = "allow" | "ask" | "block";
 export type FileOperation = "read" | "write";
@@ -188,36 +188,38 @@ function isSystemPath(path: string): boolean {
 }
 
 export function decideFileAccess(
-  mode: RuntimeMode,
+  permissionLevel: PermissionLevel,
   operation: FileOperation,
   rawPath: string,
   cwd: string,
   writeOverride: WriteOverride = "inherit",
 ): PolicyDecision {
   const scope = resolvePathScope(rawPath, cwd);
+  const isReadRestricted =
+    permissionLevel === "read-only" || permissionLevel === "read-bash";
 
   if (
     isSensitiveReference(rawPath) ||
     isSensitiveReference(scope.absolutePath)
   ) {
-    return mode === "plan"
+    return isReadRestricted
       ? deny(
-          "Plan Mode: Zugriff auf Secrets oder SSH-/Credential-Dateien ist blockiert.",
+          "Diese Zugriffsstufe blockiert Secrets und SSH-/Credential-Dateien.",
         )
       : ask("Zugriff auf Secrets, Tokens, Credentials oder SSH-Keys", true);
   }
 
-  if (mode === "plan") {
+  if (isReadRestricted) {
     if (operation === "write") {
       return isPlanFilePath(rawPath, cwd)
         ? ALLOW
         : deny(
-            `Plan Mode: Schreibzugriff ist ausschließlich auf ${PLAN_RELATIVE_PATH} erlaubt.`,
+            `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${PLAN_RELATIVE_PATH}.`,
           );
     }
     if (!scope.insideProject || scope.symlinkEscape) {
       return deny(
-        "Plan Mode: Lesezugriff außerhalb des Projekts ist blockiert.",
+        "Diese Zugriffsstufe blockiert Lesezugriff außerhalb des Projekts.",
       );
     }
     return ALLOW;
@@ -242,7 +244,7 @@ export function decideFileAccess(
     return ask(`Änderung am Systempfad ${scope.absolutePath}`, true);
   }
   if (operation === "write" && !scope.insideProject) {
-    return mode === "yolo"
+    return permissionLevel === "yolo"
       ? ALLOW
       : ask(`Änderung außerhalb des Projekts: ${scope.absolutePath}`);
   }
@@ -544,28 +546,29 @@ function likelyExternalWrite(command: string, cwd: string): boolean {
 
 export interface DecideBashOptions {
   writeOverride?: WriteOverride;
-  planStrict?: boolean;
 }
 
 export function decideBash(
-  mode: RuntimeMode,
+  permissionLevel: PermissionLevel,
   command: string,
   cwd: string,
   options: DecideBashOptions = {},
 ): PolicyDecision {
-  const { writeOverride = "inherit", planStrict = false } = options;
+  const { writeOverride = "inherit" } = options;
   const trimmed = command.trim();
   if (!trimmed) return deny("Leeres Bash-Kommando.");
 
-  if (mode === "plan") {
-    if (planStrict) {
-      return deny(
-        "Read only: Bash-Kommandos sind in dieser Zugriffsstufe deaktiviert.",
-      );
-    }
+  if (permissionLevel === "read-only") {
+    return deny(
+      "Read only: Bash-Kommandos sind in dieser Zugriffsstufe deaktiviert.",
+    );
+  }
+  if (permissionLevel === "read-bash") {
     return isPlanSafeCommand(trimmed, cwd)
       ? ALLOW
-      : deny("Plan Mode: Das Bash-Kommando ist nicht nachweislich read-only.");
+      : deny(
+          "Read + Bash: Das Kommando ist nicht nachweislich read-only.",
+        );
   }
 
   if (isSensitiveReference(trimmed)) {
@@ -595,15 +598,20 @@ export function decideBash(
   }
 
   for (const [pattern, reason] of SENSITIVE_ASK_PATTERNS) {
-    if (pattern.test(trimmed)) return mode === "yolo" ? ALLOW : ask(reason);
+    if (pattern.test(trimmed)) {
+      return permissionLevel === "yolo" ? ALLOW : ask(reason);
+    }
   }
   for (const [pattern, reason] of ROUTINE_ASK_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return mode === "yolo" || mode === "full-access" ? ALLOW : ask(reason);
+      return permissionLevel === "yolo" ||
+        permissionLevel === "full-access"
+        ? ALLOW
+        : ask(reason);
     }
   }
   if (likelyExternalWrite(trimmed, cwd)) {
-    return mode === "yolo"
+    return permissionLevel === "yolo"
       ? ALLOW
       : ask("Bash-Änderung außerhalb des aktuellen Projekts");
   }

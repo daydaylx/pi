@@ -24,7 +24,7 @@ import {
   WORKFLOW_MODE_LABEL,
   WORKFLOW_STATUS_EVENT,
   type PermissionLevel,
-  type RuntimeMode,
+  type WorkflowMode,
   type WorkflowPhase,
   type WorkflowStatusEvent,
 } from "./shared/workflow-status.ts";
@@ -104,7 +104,6 @@ export function nextStepFor(phase: WorkflowPhase, planExists: boolean): string {
 
 interface CachedPlanState {
   phase: WorkflowPhase;
-  planningActive: boolean;
   planExists: boolean;
   completedTodos: number;
   totalTodos: number;
@@ -113,31 +112,29 @@ interface CachedPlanState {
 export default function uxStatusExtension(pi: ExtensionAPI): void {
   let plan: CachedPlanState = {
     phase: "idle",
-    planningActive: false,
     planExists: false,
     completedTodos: 0,
     totalTodos: 0,
   };
-  let runtimeMode: RuntimeMode = "work";
+  let workflowMode: WorkflowMode = "work";
   let permissionLevel: PermissionLevel = "read-write";
 
   pi.events.on(WORKFLOW_STATUS_EVENT, (event: WorkflowStatusEvent) => {
     if (event.source === "plan") {
+      workflowMode = event.mode;
       plan = {
         phase: event.phase,
-        planningActive: event.planningActive,
         planExists: event.planExists,
         completedTodos: event.completedTodos,
         totalTodos: event.totalTodos,
       };
     } else if (event.source === "permission") {
-      runtimeMode = event.mode;
       permissionLevel = event.permissionLevel;
     }
   });
 
   async function showStatus(ctx: ExtensionCommandContext): Promise<void> {
-    const modeLabel = runtimeMode.toUpperCase();
+    const modeLabel = workflowMode.replaceAll("_", " ").toUpperCase();
     const git = getGitInfo(ctx.cwd);
     const gitLine = git
       ? `${git.branch}${git.dirty > 0 ? `, dirty ${git.dirty}` : ""}`
@@ -206,8 +203,8 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
 
       const text = [
         "Shortcuts:",
-        "  Shift+Tab      Zentrales Menü öffnen (Modus/Permissions/Thinking/Modell)",
-        "  Ctrl+Alt+P     Plan-Modus umschalten",
+        "  Shift+Tab      Modus- und Permission-Menü öffnen",
+        "  Ctrl+Alt+P     Plan-Variante wählen",
         "  Ctrl+Shift+Y   YOLO bestätigt umschalten",
         "  Ctrl+Shift+H   Diese Hilfe anzeigen",
         "",

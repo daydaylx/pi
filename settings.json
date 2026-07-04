@@ -4,7 +4,7 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.4-mini",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "xhigh",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -16,14 +16,19 @@
   "defaultProjectTrust": "ask",
   "collapseChangelog": true,
   "enableInstallTelemetry": false,
-  "enabledModels": ["glm-5.2", "glm-5-turbo"],
+  "enabledModels": [
+    "glm-5.2",
+    "glm-5-turbo"
+  ],
   "packages": [
     "npm:pi-scroll",
     "npm:pi-markdown-preview",
     "npm:@zigai/pi-prompt-history",
     {
       "source": "npm:pi-claude-style-tools@1.0.64",
-      "extensions": ["extensions/index.ts"],
+      "extensions": [
+        "extensions/index.ts"
+      ],
       "themes": []
     },
     "npm:pi-zentui@0.3.0"

@@ -92,17 +92,18 @@ function registerFreeModelsProvider(
 }
 
 export default function orFreeExtension(pi: ExtensionAPI): void {
-  let escalationActive = false;
+  let elevatedPermission = false;
   let planningActive = false;
   let planPhase: string = "idle";
   let lastActiveFreeModelId: string | undefined;
 
   pi.events.on(WORKFLOW_STATUS_EVENT, (event: WorkflowStatusEvent) => {
     if (event.source === "permission") {
-      escalationActive =
-        event.baseMode === "work" && event.escalation !== "none";
+      elevatedPermission =
+        event.permissionLevel === "full-access" ||
+        event.permissionLevel === "yolo";
     } else {
-      planningActive = event.planningActive;
+      planningActive = event.mode !== "work";
       planPhase = event.phase;
     }
   });
@@ -314,7 +315,7 @@ export default function orFreeExtension(pi: ExtensionAPI): void {
         );
         return;
       }
-      if (escalationActive) {
+      if (elevatedPermission) {
         ctx.ui.notify(
           "Full Access/YOLO ist aktiv — /or-free-auto ist für sicherheitskritische Sessions gesperrt. Nutze /or-free für eine bewusste Auswahl.",
           "warning",

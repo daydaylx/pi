@@ -11,23 +11,50 @@ steps.
 
 ## Commands
 
-- `/plan` or `Ctrl+Alt+P`: confirmed switch between Plan and Work Mode.
+- `/plan` or `Ctrl+Alt+P`: opens a chooser between **Einfacher Plan**
+  (light, inline, no plan file) and **Ausführlicher Plan**. The selected mode
+  remains active until another mode is chosen. Without an interactive TUI it
+  falls back to the detailed plan mode.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
-  even if no review happened and confirms the switch out of Plan Mode — see
-  "Gating" below.
+  even if no review happened. The mode transition itself is immediate; see
+  "Gating" below for the separate stale-review check.
 - `/review-plan`: optional deep review; worth it for large, risky, or
   architectural changes. Approves the plan and records a SHA-256 hash.
 - `/plan-todos`: read progress from the current plan file.
 - `/finish`: manual archive/early-abort. Runs automatically once all todos
   are checked off (see "Completion").
 
-## Planning
+## Plan variants
 
-Planning is read-only except for `.agent/plans/current-plan.md`. The central
-`mode-permissions.ts` extension enforces file, path, Bash and secret policy;
-this workflow extension no longer maintains a competing permission hook or
-changes Pi's active tool selection. Paths are resolved against Pi's current
-working directory and existing symbolic-link components are rejected.
+`/plan` is a router. Shift+Tab exposes the same two persistent modes alongside
+Work and the current permission levels:
+
+- **Einfacher Plan** (`simple_plan`) — compact questions and a slim inline
+  plan for small to medium tasks. It does not create a plan file.
+- **Ausführlicher Plan** (`detailed_plan`) — detailed context, risk,
+  architecture and implementation analysis using the existing plan file.
+- **Work** (`work`) — normal work. Selecting Work in Shift+Tab does not
+  automatically execute a stored plan; `/work` remains the explicit execution
+  command.
+
+All mode transitions are direct: they have no idle, phase, escalation or
+confirmation guard. If an agent turn is active it is aborted, running
+review/execution state is normalized, and the requested mode replaces it.
+
+## Permissions
+
+Workflow mode and permission level are independent. Changing
+`read-only`, `read-bash`, `read-write`, `full-access` or `yolo` never changes
+the active workflow mode, and each level applies the same way in all modes.
+`read-only` and `read-bash` retain the explicit
+`.agent/plans/current-plan.md` write exception. Permission selection and the
+existing `/write` override are persisted per session.
+
+The central `mode-permissions.ts` extension enforces file, path, Bash and
+secret policy. Hard warnings for secrets, system paths, destructive root
+operations and similar critical actions remain in place.
+
+## Detailed planning
 
 Only two sections are required: `Auftrag` (the task) and `Todos` (at least
 one checkbox). `Nicht-Ziele`, `Betroffene Bereiche`, and `Risiken /
@@ -58,14 +85,13 @@ can be run manually as a retry. `/finish` remains available to archive a
 plan early with open todos (`Status: incomplete`, requires interactive
 confirmation) or as that retry path.
 
-## Modes and YOLO
+## YOLO
 
-Work is the default mode. `/yolo` or `Ctrl+Shift+Y` enables a confirmed,
-session-scoped bypass and visibly marks the footer. A second confirmed toggle
-returns to the previous Plan/Work mode. YOLO is never restored after reload or
-session replacement. On terminals without reliable modified-key reporting,
-use `/yolo`; Pi's preferred shortcut requires Kitty/CSI-u or compatible
-`modifyOtherKeys` support.
+`/yolo` or `Ctrl+Shift+Y` changes only the permission level and visibly marks
+the footer. The selected level survives resume/reload of the same session.
+On terminals without reliable modified-key reporting, use `/yolo`; Pi's
+preferred shortcut requires Kitty/CSI-u or compatible `modifyOtherKeys`
+support.
 
 ## Compaction
 
