@@ -45,6 +45,52 @@ export interface PermissionRequest {
   ctx: ExtensionContext;
 }
 
+export const WRITE_OVERRIDE_REQUEST_EVENT = "pi-workflow:set-write-override";
+
+export interface WriteOverrideRequest {
+  override: WriteOverride;
+  ctx: ExtensionContext;
+}
+
+export const WRITE_OVERRIDE_LABEL: Record<WriteOverride, string> = {
+  inherit: "Standard der Permission-Stufe",
+  block: "Blockiert",
+  "plan-file-only": "Nur Plan-Datei",
+};
+
+export const WRITE_OVERRIDE_DESCRIPTION: Record<WriteOverride, string> = {
+  inherit:
+    "Schreibrechte folgen der aktuellen Permission-Stufe ohne Zusatzbeschränkung",
+  block:
+    "Jeglicher Schreibzugriff ist blockiert, unabhängig von der Permission-Stufe",
+  "plan-file-only":
+    "Nur die Plan-Datei bleibt beschreibbar, alle anderen Schreibzugriffe sind blockiert",
+};
+
+export const PLAN_ACTION_REQUEST_EVENT = "pi-workflow:plan-action";
+
+export type PlanAction = "choose" | "work" | "review" | "finish";
+
+export interface PlanActionRequest {
+  action: PlanAction;
+  ctx: ExtensionContext;
+}
+
+export const TOOLS_ACTION_REQUEST_EVENT = "pi-workflow:tools-action";
+
+export type ToolsAction = "open" | "enable-all" | "disable-all";
+
+export interface ToolsActionRequest {
+  action: ToolsAction;
+  ctx: ExtensionContext;
+}
+
+export const STATUS_REQUEST_EVENT = "pi-workflow:show-status";
+
+export interface StatusRequest {
+  ctx: ExtensionContext;
+}
+
 export type WorkflowStatusEvent =
   | {
       source: "plan";

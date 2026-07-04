@@ -22,12 +22,10 @@
   "extensionStatuses": {
     "defaultPlacement": "right",
     "placements": {
-      "workflow-mode": "left",
-      "plan-todos-count": "middle"
+      "workflow-mode": "left"
     },
     "colorModes": {
-      "workflow-mode": "original",
-      "plan-todos-count": "original"
+      "workflow-mode": "original"
     }
   }
 }

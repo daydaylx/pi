@@ -1,10 +1,13 @@
 /**
  * UX-Status Extension
  *
- * Bündelt drei kleine, rein informative UX-Features, die keine Plan-/Policy-
+ * Bündelt kleine, rein informative UX-Features, die keine Plan-/Policy-
  * Logik verändern:
- *   - /status (+ /home als Alias): kompakter Überblick über Mode, Modell,
- *     Thinking-Level, Plan-/Todo-Stand, Git-Zustand und Permission-Status.
+ *   - /status (+ /home als Alias, auch über STATUS_REQUEST_EVENT aus dem
+ *     Ctrl+Shift+X-Befehlsmenü erreichbar): kompakter Überblick über Mode,
+ *     Modell, Thinking-Level, Plan-/Todo-Stand, Git-Zustand und
+ *     Permission-Status.
+ *   - /thinking + Ctrl+Shift+T: Thinking-Level setzen (Minimal…XHigh).
  *   - Ctrl+Shift+H: kompakte Shortcut-/Command-Hilfe, die nur tatsächlich
  *     registrierte Commands zeigt (dynamisch geprüft wie im zentralen Menü
  *     in actions.ts).
@@ -17,13 +20,17 @@
 import { execSync } from "node:child_process";
 import type {
   ExtensionAPI,
-  ExtensionCommandContext,
+  ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { runMenu } from "./shared/menu-ui.ts";
+import { buildThinkingMenu, THINKING_LEVELS } from "./shared/thinking-menu.ts";
 import {
   PERMISSION_LEVEL_LABEL,
+  STATUS_REQUEST_EVENT,
   WORKFLOW_MODE_LABEL,
   WORKFLOW_STATUS_EVENT,
   type PermissionLevel,
+  type StatusRequest,
   type WorkflowMode,
   type WorkflowPhase,
   type WorkflowStatusEvent,
@@ -133,7 +140,7 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     }
   });
 
-  async function showStatus(ctx: ExtensionCommandContext): Promise<void> {
+  async function showStatus(ctx: ExtensionContext): Promise<void> {
     const modeLabel = workflowMode.replaceAll("_", " ").toUpperCase();
     const git = getGitInfo(ctx.cwd);
     const gitLine = git
@@ -177,19 +184,42 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => showStatus(ctx),
   });
 
-  const THINKING_LEVELS = ["low", "medium", "high", "xhigh"] as const;
+  pi.events.on(STATUS_REQUEST_EVENT, (request: StatusRequest) => {
+    void showStatus(request.ctx);
+  });
 
   pi.registerCommand("thinking", {
-    description: "Thinking-Level setzen: low | medium | high | xhigh",
+    description: "Thinking-Level setzen: minimal | low | medium | high | xhigh",
     handler: async (args, ctx) => {
       const level = args.trim().toLowerCase();
       const match = THINKING_LEVELS.find((candidate) => candidate === level);
       if (!match) {
-        ctx.ui.notify("Nutzung: /thinking low|medium|high|xhigh", "info");
+        ctx.ui.notify(
+          "Nutzung: /thinking minimal|low|medium|high|xhigh",
+          "info",
+        );
         return;
       }
       pi.setThinkingLevel(match);
       ctx.ui.notify(`Thinking-Level: ${match}.`, "info");
+    },
+  });
+
+  pi.registerShortcut("ctrl+shift+t", {
+    description: "Thinking wählen",
+    handler: async (ctx) => {
+      const selected = await runMenu(
+        ctx,
+        "Thinking",
+        buildThinkingMenu(pi.getThinkingLevel()),
+        {
+          fallbackPrompt: "Thinking-Level wählen",
+          nonInteractiveHint: "Nutze /thinking <level>.",
+        },
+      );
+      if (!selected) return;
+      pi.setThinkingLevel(selected);
+      ctx.ui.notify(`Thinking-Level: ${selected}.`, "info");
     },
   });
 
@@ -203,10 +233,12 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
 
       const text = [
         "Shortcuts:",
-        "  Shift+Tab      Modus- und Permission-Menü öffnen",
-        "  Ctrl+Alt+P     Plan-Variante wählen",
-        "  Ctrl+Shift+Y   YOLO bestätigt umschalten",
-        "  Ctrl+Shift+H   Diese Hilfe anzeigen",
+        "  Shift+Tab      Modus wählen",
+        "  Ctrl+Shift+Y   Permissions wählen",
+        "  Ctrl+Shift+T   Thinking wählen",
+        "  Ctrl+Shift+X   Befehlsmenü öffnen",
+        "  Ctrl+Shift+H   Hilfe anzeigen",
+        "  Ctrl+Alt+P     Plan-Variante wählen (Teilmenge von Shift+Tab)",
         "",
         "Commands:",
         ...commands.map((c) => `  ${c}`),

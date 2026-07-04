@@ -8,11 +8,11 @@
 // under agent/npm/) and the bare-specifier ancestor walk would not reach the
 // sibling agent/npm/node_modules.
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -41,17 +41,26 @@ const planMode = await jiti.import(
 const uxStatus = await jiti.import(
   path.resolve(ROOT, "extensions/ux-status.ts"),
 );
-const actions = await jiti.import(
-  path.resolve(ROOT, "extensions/shared/action-menu.ts"),
+const menuUi = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/menu-ui.ts"),
+);
+const modeMenu = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/mode-menu.ts"),
+);
+const permissionMenu = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/permission-menu.ts"),
+);
+const thinkingMenu = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/thinking-menu.ts"),
+);
+const commandMenu = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/command-menu.ts"),
 );
 const previewRuntime = await jiti.import(
   path.resolve(ROOT, "extensions/preview-runtime.ts"),
 );
-const orFreeApi = await jiti.import(
-  path.resolve(ROOT, "extensions/or-free/openrouter-api.ts"),
-);
-const orFreeStorage = await jiti.import(
-  path.resolve(ROOT, "extensions/or-free/storage.ts"),
+const askUserPolicy = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/ask-user-policy.ts"),
 );
 
 let passed = 0;
@@ -194,8 +203,12 @@ eq(
   "yolo still hard-prompts before SSH key access",
 );
 eq(
-  policy.decideFileAccess("read-bash", "write", ".agent/plans/current-plan.md", ROOT)
-    .action,
+  policy.decideFileAccess(
+    "read-bash",
+    "write",
+    ".agent/plans/current-plan.md",
+    ROOT,
+  ).action,
   "allow",
   "plan permits its explicit plan file",
 );
@@ -210,12 +223,14 @@ eq(
   "work permits project writes",
 );
 eq(
-  policy.decideFileAccess("read-write", "write", "/tmp/outside.txt", ROOT).action,
+  policy.decideFileAccess("read-write", "write", "/tmp/outside.txt", ROOT)
+    .action,
   "ask",
   "work asks before external writes",
 );
 eq(
-  policy.decideBash("read-write", "echo result > /tmp/outside.txt", ROOT).action,
+  policy.decideBash("read-write", "echo result > /tmp/outside.txt", ROOT)
+    .action,
   "ask",
   "work asks before shell redirection outside the project",
 );
@@ -281,7 +296,8 @@ eq(
 
 // ───────────────────────── writeOverride: independent of mode ─────────────────────────
 eq(
-  policy.decideFileAccess("read-write", "write", "src/app.ts", ROOT, "block").action,
+  policy.decideFileAccess("read-write", "write", "src/app.ts", ROOT, "block")
+    .action,
   "block",
   "writeOverride block denies ordinary project writes in Work Mode",
 );
@@ -297,14 +313,20 @@ eq(
   "writeOverride plan-file-only still allows the plan file",
 );
 eq(
-  policy.decideFileAccess("read-write", "write", "src/app.ts", ROOT, "plan-file-only")
-    .action,
+  policy.decideFileAccess(
+    "read-write",
+    "write",
+    "src/app.ts",
+    ROOT,
+    "plan-file-only",
+  ).action,
   "block",
   "writeOverride plan-file-only blocks ordinary project writes",
 );
 eq(
-  policy.decideBash("read-write", "touch new.txt", ROOT, { writeOverride: "block" })
-    .action,
+  policy.decideBash("read-write", "touch new.txt", ROOT, {
+    writeOverride: "block",
+  }).action,
   "block",
   "writeOverride block denies write-capable bash in Work Mode",
 );
@@ -472,7 +494,7 @@ assert(
   "mode-permissions.ts exports a factory function",
 );
 {
-  const shortcuts = [];
+  const shortcuts = new Map();
   const commands = new Map();
   const handlers = new Map();
   const eventHandlers = new Map();
@@ -494,20 +516,21 @@ assert(
     registerCommand(name, options) {
       commands.set(name, options.handler);
     },
-    registerShortcut(shortcut) {
-      shortcuts.push(shortcut);
+    registerShortcut(shortcut, options) {
+      shortcuts.set(shortcut, options.handler);
     },
     appendEntry(customType, data) {
       persisted.push({ type: "custom", customType, data });
     },
   });
-  assert(shortcuts.includes("ctrl+shift+y"), "Ctrl+Shift+Y is registered");
+  assert(shortcuts.has("ctrl+shift+y"), "Ctrl+Shift+Y is registered");
   assert(commands.has("yolo"), "/yolo is registered");
   assert(commands.has("full-access"), "/full-access is registered");
   assert(commands.has("permission"), "/permission is registered");
   assert(commands.has("write"), "/write is registered");
 
-  const confirmations = [];
+  let confirmations = 0;
+  let permissionMenuLabels = [];
   let sessionEntries = [];
   const context = {
     cwd: ROOT,
@@ -521,7 +544,14 @@ assert(
       theme: { fg: (_color, text) => text },
       setStatus: (_key, text) => statuses.push(text),
       notify() {},
-      confirm: async () => confirmations.shift() ?? false,
+      select: async (_title, labels) => {
+        permissionMenuLabels = labels;
+        return "YOLO";
+      },
+      confirm: async () => {
+        confirmations += 1;
+        return false;
+      },
     },
   };
 
@@ -571,19 +601,52 @@ assert(
     "permission request event applies directly",
   );
 
-  // Elevated levels retain their explicit safety confirmation.
-  confirmations.push(true);
+  // The shortcut opens the complete permission menu and applies its selection
+  // through the same setter, even while the agent is busy.
+  await shortcuts.get("ctrl+shift+y")(context);
+  eq(
+    permissionMenuLabels,
+    [
+      "Read only",
+      "Read + Bash Info Commands",
+      "Read + Write",
+      "Full Access",
+      "YOLO",
+    ],
+    "Ctrl+Shift+Y opens the complete permission menu",
+  );
+  eq(
+    emitted.at(-1)[1].permissionLevel,
+    "yolo",
+    "Ctrl+Shift+Y applies the selected permission while busy",
+  );
+  await commands.get("permission")("read-write", context);
+
+  // Elevated levels activate directly when confirmation is disabled.
   await commands.get("permission")("full-access", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "full-access",
-    "full-access activates after confirmation",
+    "full-access activates directly",
   );
+  eq(confirmations, 0, "elevated permission changes require no confirmation");
   await commands.get("permission")("read-write", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "read-write",
     "de-escalation applies without confirmation",
+  );
+  await commands.get("permission")("yolo", context);
+  eq(
+    emitted.at(-1)[1].permissionLevel,
+    "yolo",
+    "/permission yolo activates directly while busy",
+  );
+  eq(confirmations, 0, "direct YOLO activation requires no confirmation");
+  await commands.get("permission")("read-write", context);
+  assert(
+    emitted.every(([, event]) => event.source === "permission"),
+    "permission changes never publish workflow mode events",
   );
 
   // /write: independent write-rights override.
@@ -602,7 +665,6 @@ assert(
 
   // Session resume restores the last persisted permission and override.
   sessionEntries = persisted.slice();
-  await handlers.get("session_shutdown")({});
   await handlers.get("session_start")({}, context);
   eq(
     emitted.at(-1)[1].permissionLevel,
@@ -710,6 +772,40 @@ assert(
       "simple-plan-context",
       "simple plan is persistent and injects its compact context",
     );
+    assert(
+      existsSync(path.join(cwd, ".agent", "plans")),
+      "simple plan prepares the shared plan directory",
+    );
+    assert(
+      simpleContext?.message?.content.includes(utils.PLAN_RELATIVE_PATH),
+      "simple plan requires writing the shared plan file",
+    );
+    assert(
+      simpleContext?.message?.content.includes("## 1. Auftrag") &&
+        simpleContext?.message?.content.includes("## 5. Todos"),
+      "simple plan injects the valid minimal plan structure",
+    );
+
+    utils.writePlanFileAtomic(cwd, validPlan);
+    await commands.get("work")("", context);
+    assert(
+      sent.some(
+        ({ message }) =>
+          message.customType === "plan-mode-execute" &&
+          message.content.includes(utils.PLAN_RELATIVE_PATH),
+      ),
+      "/work executes the plan file created by simple plan",
+    );
+    const executionContext = await hooks.get("before_agent_start")({}, context);
+    assert(
+      executionContext?.message?.content.includes(
+        "aktuelle Permission-Stufe bleibt aktiv",
+      ) &&
+        !executionContext?.message?.content.includes(
+          "Full tool access enabled",
+        ),
+      "plan execution describes permissions without claiming full access",
+    );
 
     idle = false;
     eventHandlers.get("pi-workflow:set-mode")({
@@ -728,16 +824,11 @@ assert(
       "plan-mode-context",
       "detailed plan injects the detailed planning context",
     );
-
-    utils.writePlanFileAtomic(cwd, validPlan);
-    idle = false;
-    await commands.get("review-plan")("", context);
-    eq(
-      emitted.at(-1)[1].phase,
-      "reviewing",
-      "review starts without permission or mode guards",
+    assert(
+      detailedContext?.message?.content.includes(utils.PLAN_RELATIVE_PATH),
+      "detailed plan uses the same plan file as simple plan",
     );
-    idle = false;
+
     eventHandlers.get("pi-workflow:set-mode")({
       mode: "work",
       ctx: context,
@@ -745,17 +836,91 @@ assert(
     eq(
       emitted.at(-1)[1].mode,
       "work",
-      "work overrides an active review immediately",
+      "work mode can be selected before an optional review",
     );
+
+    await commands.get("review-plan")("", context);
     eq(
       emitted.at(-1)[1].phase,
-      "draft",
-      "interrupting review leaves a clean non-running phase",
+      "reviewing",
+      "optional review starts without permission guards",
     );
-    eq(confirmations, 0, "workflow mode transitions never request confirmation");
+    eq(
+      emitted.at(-1)[1].mode,
+      "work",
+      "optional review preserves the active workflow mode",
+    );
+    eq(
+      confirmations,
+      0,
+      "workflow mode transitions never request confirmation",
+    );
     assert(
       sent.some(({ message }) => message.customType === "plan-review-request"),
       "review still starts its existing agent workflow",
+    );
+
+    await hooks.get("agent_end")(
+      {
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "Plan geprüft.\n[PLAN-REVIEW:APPROVED]",
+              },
+            ],
+          },
+        ],
+      },
+      context,
+    );
+    eq(
+      emitted.at(-1)[1].phase,
+      "reviewed",
+      "successful optional review records review status",
+    );
+    eq(
+      emitted.at(-1)[1].mode,
+      "work",
+      "completed review still preserves work mode",
+    );
+
+    utils.writePlanFileAtomic(cwd, `${validPlan}\n`);
+    const executionCount = () =>
+      sent.filter(({ message }) => message.customType === "plan-mode-execute")
+        .length;
+    const executionsBeforeStaleReview = executionCount();
+    await commands.get("work")("", context);
+    eq(
+      executionCount(),
+      executionsBeforeStaleReview + 1,
+      "/work executes a changed plan without stale-review gating",
+    );
+    eq(confirmations, 0, "optional review never adds /work confirmation");
+
+    idle = false;
+    const abortsBeforeDuplicateWork = aborts;
+    const executionsBeforeDuplicateWork = executionCount();
+    await commands.get("work")("", context);
+    eq(
+      aborts,
+      abortsBeforeDuplicateWork,
+      "duplicate /work does not abort an active plan execution",
+    );
+    eq(
+      executionCount(),
+      executionsBeforeDuplicateWork,
+      "duplicate /work does not start another active execution",
+    );
+
+    idle = true;
+    await commands.get("work")("", context);
+    eq(
+      executionCount(),
+      executionsBeforeDuplicateWork + 1,
+      "/work can resume persisted execution state when no turn is active",
     );
 
     eventHandlers.get("pi-workflow:set-mode")({
@@ -772,6 +937,39 @@ assert(
     assert(
       emitted.every(([, event]) => event.source === "plan"),
       "workflow transitions never publish or mutate permission state",
+    );
+
+    // PLAN_ACTION_REQUEST_EVENT: the Ctrl+Shift+X command menu dispatches
+    // through the exact same functions as the /work and /finish commands.
+    idle = true;
+    const executionsBeforePlanAction = executionCount();
+    eventHandlers.get("pi-workflow:plan-action")({
+      action: "work",
+      ctx: context,
+    });
+    await Promise.resolve();
+    eq(
+      executionCount(),
+      executionsBeforePlanAction + 1,
+      "plan-action 'work' reuses the exact /work handler",
+    );
+
+    // Regression test: the mock `context` above deliberately has no
+    // `waitForIdle` (unlike a real ExtensionCommandContext from
+    // registerCommand), mirroring what a shortcut-driven event carries.
+    // finishPlan() requires `waitForIdle`, so the listener must fall back to
+    // a hint instead of crashing with "ctx.waitForIdle is not a function".
+    const notifications = [];
+    context.ui.notify = (message, type) =>
+      notifications.push({ message, type });
+    eventHandlers.get("pi-workflow:plan-action")({
+      action: "finish",
+      ctx: context,
+    });
+    await Promise.resolve();
+    assert(
+      notifications.some((n) => n.message.includes("/finish")),
+      "plan-action 'finish' falls back to a hint instead of crashing without waitForIdle",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -816,48 +1014,30 @@ eq(
   "countDirtyFiles: ignores blank lines",
 );
 
-// ───────────────────────── actions: safe menu + fallback ─────────────────────────
+// ───────────────────────── shared menus: mode/permission/thinking/command ─────────────────────────
 assert(
-  typeof actions.buildActionMenu === "function",
-  "action-menu.ts exports the pure menu builder",
+  typeof modeMenu.buildModeMenu === "function",
+  "mode-menu.ts exports the pure menu builder",
 );
 
-const planActions = actions.buildActionMenu({
-  mode: "detailed_plan",
-  permissionLevel: "read-bash",
-});
+const modeEntries = modeMenu.buildModeMenu("detailed_plan");
 eq(
-  planActions.map((action) => action.id),
-  [
-    "mode-simple-plan",
-    "mode-detailed-plan",
-    "mode-work",
-    "permission-read-only",
-    "permission-read-bash",
-    "permission-read-write",
-    "permission-full-access",
-    "permission-yolo",
-  ],
-  "Shift+Tab contains only plan variants, Work and Permissions",
+  modeEntries.map((entry) => entry.id),
+  ["mode-simple-plan", "mode-detailed-plan", "mode-work"],
+  "Shift+Tab contains only the three mode variants, no permissions",
 );
 assert(
-  planActions.find((action) => action.id === "mode-detailed-plan")?.current ===
+  modeEntries.every((entry) => entry.section === undefined),
+  "the mode menu has no sections",
+);
+assert(
+  modeEntries.find((entry) => entry.id === "mode-detailed-plan")?.current ===
     true,
   "the active detailed plan mode is marked",
 );
-assert(
-  planActions.find((action) => action.id === "permission-read-bash")
-    ?.current === true,
-  "the current permission level is marked",
-);
-assert(
-  planActions.every((action) =>
-    ["Plan-Modus", "Work-Modus", "Permissions"].includes(action.section),
-  ),
-  "the menu has no model, thinking, write-rights or workflow section",
-);
-const fallbackChoice = await actions.selectActionWithFallback(
-  planActions,
+
+const fallbackChoice = await menuUi.selectMenuEntry(
+  modeEntries,
   async () => {
     throw new Error("custom UI unavailable");
   },
@@ -865,325 +1045,109 @@ const fallbackChoice = await actions.selectActionWithFallback(
 );
 eq(
   fallbackChoice,
-  planActions[1],
-  "/actions fallback preserves the simplified action order",
+  modeEntries[1],
+  "menu fallback preserves entry order without a section prefix",
 );
 
 eq(
-  actions.initialActionIndex(planActions),
+  menuUi.initialMenuIndex(modeEntries),
   1,
   "keyboard focus starts on the active detailed plan mode",
 );
 eq(
-  actions.moveActionIndex(1, 1, planActions.length),
+  menuUi.moveMenuIndex(1, 1, modeEntries.length),
   2,
   "down navigation advances to Work mode",
 );
 eq(
-  actions.moveActionIndex(0, -1, planActions.length),
-  planActions.length - 1,
-  "up navigation wraps to the final permission",
+  menuUi.moveMenuIndex(0, -1, modeEntries.length),
+  modeEntries.length - 1,
+  "up navigation wraps to the final entry",
 );
 
-// ───────────────────────── or-free: openrouter-api filtering/grouping ─────────────────────────
-{
-  const base = {
-    architecture: { input_modalities: ["text"], output_modalities: ["text"] },
-    top_provider: { context_length: null, max_completion_tokens: null },
-    expiration_date: null,
-  };
-  const now = new Date("2026-07-02T00:00:00Z");
-  const longAgo = Math.floor(now.getTime() / 1000) - 400 * 24 * 60 * 60;
-  const recent = Math.floor(now.getTime() / 1000) - 1 * 24 * 60 * 60;
+const permissionEntries = permissionMenu.buildPermissionMenu("read-bash");
+eq(
+  permissionEntries.map((entry) => entry.id),
+  [
+    "permission-read-only",
+    "permission-read-bash",
+    "permission-read-write",
+    "permission-full-access",
+    "permission-yolo",
+  ],
+  "Ctrl+Shift+Y contains all five permission levels",
+);
+assert(
+  permissionEntries.find((entry) => entry.id === "permission-read-bash")
+    ?.current === true,
+  "the current permission level is marked",
+);
 
-  const paidModel = {
-    ...base,
-    id: "acme/paid",
-    pricing: { prompt: "0.000002", completion: "0.000006" },
-    context_length: 100000,
-    supported_parameters: ["tools"],
-    created: longAgo,
-  };
-  const hiddenCostModel = {
-    ...base,
-    id: "acme/hidden-cost",
-    pricing: { prompt: "0", completion: "0", web_search: "0.005" },
-    context_length: 100000,
-    supported_parameters: ["tools"],
-    created: longAgo,
-  };
-  const audioOutputModel = {
-    ...base,
-    architecture: {
-      input_modalities: ["text"],
-      output_modalities: ["text", "audio"],
-    },
-    id: "acme/audio",
-    pricing: { prompt: "0", completion: "0" },
-    context_length: 100000,
-    supported_parameters: ["tools"],
-    created: longAgo,
-  };
-  const tinyContextModel = {
-    ...base,
-    id: "acme/tiny",
-    pricing: { prompt: "0", completion: "0" },
-    context_length: 4000,
-    supported_parameters: ["tools"],
-    created: longAgo,
-  };
-  const fastSmallModel = {
-    ...base,
-    id: "acme/fast-small:free",
-    pricing: { prompt: "0", completion: "0" },
-    context_length: 20000,
-    supported_parameters: ["tools"],
-    created: longAgo,
-  };
-  const noToolsModel = {
-    ...base,
-    id: "acme/no-tools:free",
-    pricing: { prompt: "0", completion: "0" },
-    context_length: 60000,
-    supported_parameters: ["reasoning"],
-    created: longAgo,
-  };
-  const recommendedModel = {
-    ...base,
-    id: "acme/recommended:free",
-    pricing: { prompt: "0", completion: "0" },
-    context_length: 60000,
-    supported_parameters: ["tools", "reasoning"],
-    created: longAgo,
-  };
-  const largeContextModel = {
-    ...base,
-    id: "acme/large-context:free",
-    pricing: { prompt: "0", completion: "0" },
-    context_length: 200000,
-    supported_parameters: ["tools"],
-    created: longAgo,
-  };
-  const expiringModel = {
-    ...base,
-    id: "acme/expiring:free",
-    pricing: { prompt: "0", completion: "0" },
-    context_length: 60000,
-    supported_parameters: ["tools"],
-    created: longAgo,
-    expiration_date: "2026-07-09",
-  };
-  const freshModel = {
-    ...base,
-    id: "acme/fresh:free",
-    pricing: { prompt: "0", completion: "0" },
-    context_length: 60000,
-    supported_parameters: ["tools"],
-    created: recent,
-  };
-  const routerFree = {
-    ...base,
-    id: "openrouter/free",
-    pricing: { prompt: "0", completion: "0" },
-    context_length: 200000,
-    supported_parameters: ["tools"],
-    created: longAgo,
-  };
+const writeEntries = permissionMenu.buildWriteOverrideMenu("block");
+eq(
+  writeEntries.map((entry) => entry.id),
+  ["write-inherit", "write-block", "write-plan-file-only"],
+  "/write submenu contains all three write overrides",
+);
+assert(
+  writeEntries.find((entry) => entry.id === "write-block")?.current === true,
+  "the current write override is marked",
+);
 
-  const allModels = [
-    paidModel,
-    hiddenCostModel,
-    audioOutputModel,
-    tinyContextModel,
-    fastSmallModel,
-    noToolsModel,
-    recommendedModel,
-    largeContextModel,
-    expiringModel,
-    freshModel,
-    routerFree,
-  ];
+assert(
+  thinkingMenu.THINKING_LEVELS.includes("minimal"),
+  "thinking levels include minimal (previously missing from /thinking)",
+);
+const thinkingEntries = thinkingMenu.buildThinkingMenu("high");
+eq(
+  thinkingEntries.map((entry) => entry.value),
+  ["minimal", "low", "medium", "high", "xhigh"],
+  "the thinking menu offers all five selectable levels",
+);
+assert(
+  thinkingEntries.find((entry) => entry.value === "high")?.current === true,
+  "the current thinking level is marked",
+);
 
-  const built = orFreeApi.buildFreeModelList(allModels, { now });
-  const byId = Object.fromEntries(built.map((entry) => [entry.id, entry]));
+const commandEntries = commandMenu.buildCommandMenu({
+  permissionLevel: "yolo",
+});
+eq(
+  commandEntries.length,
+  13,
+  "the command menu lists all 13 required commands",
+);
+eq(
+  [...new Set(commandEntries.map((entry) => entry.section))],
+  ["Plan", "Permissions", "Tools", "Status", "Thinking"],
+  "the command menu is grouped into exactly the five required sections",
+);
+assert(
+  commandEntries.find((entry) => entry.id === "cmd-yolo")?.current === true,
+  "the /yolo entry reflects the current permission level",
+);
 
-  assert(!("acme/paid" in byId), "paid model excluded");
-  assert(
-    !("acme/hidden-cost" in byId),
-    "non-zero secondary pricing field excludes a model",
-  );
-  assert(!("acme/audio" in byId), "non-text-only output excludes a model");
-  assert(
-    !("acme/tiny" in byId),
-    "context below minContextLength excludes a model",
-  );
-
-  eq(
-    byId["acme/fast-small:free"]?.group,
-    "fast-small",
-    "small-context+tools model grouped fast-small",
-  );
-  eq(
-    byId["acme/no-tools:free"]?.group,
-    "no-tools",
-    "tool-less model grouped no-tools",
-  );
-  eq(
-    byId["acme/recommended:free"]?.group,
-    "recommended",
-    "mid-context+tools model grouped recommended",
-  );
-  eq(
-    byId["acme/large-context:free"]?.group,
-    "large-context",
-    "huge-context+tools model grouped large-context",
-  );
-  eq(
-    byId["acme/expiring:free"]?.group,
-    "experimental",
-    "expiring model grouped experimental",
-  );
-  assert(
-    byId["acme/expiring:free"]?.warnings.some((w) => w.includes("Läuft ab")),
-    "expiring model carries an expiration warning",
-  );
-  eq(
-    byId["acme/fresh:free"]?.group,
-    "experimental",
-    "freshly created model grouped experimental",
-  );
-  eq(
-    byId["openrouter/free"]?.group,
-    "experimental",
-    "openrouter/free is always experimental regardless of tools/context",
-  );
-  assert(
-    byId["openrouter/free"]?.warnings.some((w) =>
-      w.includes("nicht reproduzierbar"),
-    ),
-    "openrouter/free carries a reproducibility warning",
-  );
-
-  const excluded = orFreeApi.buildFreeModelList(allModels, {
-    now,
-    includeRouterFree: false,
-  });
-  assert(
-    !excluded.some((entry) => entry.id === "openrouter/free"),
-    "includeRouterFree: false drops openrouter/free entirely",
-  );
-
-  const strictContext = orFreeApi.buildFreeModelList(allModels, {
-    now,
-    minContextLength: 50000,
-  });
-  assert(
-    !strictContext.some((entry) => entry.id === "acme/fast-small:free"),
-    "raising minContextLength excludes smaller models",
-  );
-
-  const formatted = orFreeApi.formatFreeModelList(
-    built,
-    "2026-07-02T00:00:00.000Z",
-  );
-  const groupOrderInText = orFreeApi.GROUP_ORDER.filter((g) =>
-    formatted.includes(orFreeApi.GROUP_LABELS[g] + ":"),
-  );
-  eq(
-    groupOrderInText,
-    groupOrderInText
-      .slice()
-      .sort(
-        (a, b) =>
-          orFreeApi.GROUP_ORDER.indexOf(a) - orFreeApi.GROUP_ORDER.indexOf(b),
-      ),
-    "formatFreeModelList prints groups in GROUP_ORDER",
-  );
-  assert(
-    formatted.includes("Rate-Limits"),
-    "formatFreeModelList appends the rate-limit/instability note",
-  );
-
-  assert(
-    orFreeApi
-      .formatSelectLabel(byId["acme/recommended:free"])
-      .includes("acme/recommended:free"),
-    "formatSelectLabel includes the model id",
-  );
-  eq(
-    orFreeApi.formatContextLength(60000),
-    "60K ctx",
-    "formatContextLength formats thousands",
-  );
-  eq(
-    orFreeApi.formatContextLength(1000000),
-    "1M ctx",
-    "formatContextLength formats millions",
-  );
-}
-
-// ───────────────────────── or-free: storage (cache + config) ─────────────────────────
-{
-  const agentDir = mkdtempSync(path.join(tmpdir(), "pi-or-free-test-"));
-  try {
-    eq(orFreeStorage.readCache(agentDir), undefined, "no cache file yet");
-    eq(
-      orFreeStorage.loadConfig(agentDir),
-      orFreeStorage.DEFAULT_CONFIG,
-      "loadConfig falls back to defaults when no config file exists",
-    );
-
-    const cache = {
-      fetchedAt: new Date().toISOString(),
-      filterVersion: orFreeStorage.FILTER_VERSION,
-      count: 1,
-      models: [{ id: "acme/x:free", name: "X", contextLength: 60000 }],
-    };
-    orFreeStorage.writeCacheAtomic(agentDir, cache);
-    const readBack = orFreeStorage.readCache(agentDir);
-    eq(
-      readBack?.count,
-      1,
-      "cache round-trips through writeCacheAtomic/readCache",
-    );
-    eq(
-      readBack?.models?.[0]?.id,
-      "acme/x:free",
-      "cached model survives round-trip",
-    );
-
-    assert(
-      !orFreeStorage.isCacheStale(new Date().toISOString(), 24),
-      "a fresh cache is not stale",
-    );
-    const oldTimestamp = new Date(
-      Date.now() - 25 * 60 * 60 * 1000,
-    ).toISOString();
-    assert(
-      orFreeStorage.isCacheStale(oldTimestamp, 24),
-      "a 25h-old cache exceeds a 24h TTL",
-    );
-
-    writeFileSync(
-      orFreeStorage.getConfigPath(agentDir),
-      JSON.stringify({ minContextLength: 32000 }),
-      "utf8",
-    );
-    const merged = orFreeStorage.loadConfig(agentDir);
-    eq(
-      merged.minContextLength,
-      32000,
-      "loadConfig applies overrides from the config file",
-    );
-    eq(
-      merged.cacheTtlHours,
-      orFreeStorage.DEFAULT_CONFIG.cacheTtlHours,
-      "loadConfig keeps defaults for keys not present in the override file",
-    );
-  } finally {
-    rmSync(agentDir, { recursive: true, force: true });
-  }
-}
+// ───────────────────────── ask_user option-count policy ─────────────────────────
+eq(
+  askUserPolicy.hasValidQuestionOptionCount(1),
+  false,
+  "ask_user rejects fewer than two options",
+);
+eq(
+  askUserPolicy.hasValidQuestionOptionCount(2),
+  true,
+  "ask_user accepts two options",
+);
+eq(
+  askUserPolicy.hasValidQuestionOptionCount(4),
+  true,
+  "ask_user accepts four options",
+);
+eq(
+  askUserPolicy.hasValidQuestionOptionCount(5),
+  false,
+  "ask_user rejects more than four options",
+);
 
 // ───────────────────────── package/UI configuration ─────────────────────────
 {
@@ -1210,18 +1174,14 @@ eq(
     "settings explicitly loads the local /actions extension",
   );
   assert(
-    settings.extensions.includes("+extensions/or-free/index.ts"),
-    "settings explicitly loads the OpenRouter free-model extension",
+    !settings.extensions.includes("+extensions/or-free/index.ts"),
+    "settings does not load the OpenRouter free-model extension",
   );
-  eq(
-    settings.defaultProvider,
-    "openai-codex",
-    "configured default provider is covered",
-  );
+  eq(settings.defaultProvider, "zai", "GLM uses the configured Z.ai provider");
   eq(
     settings.defaultModel,
-    "gpt-5.4-mini",
-    "configured default model is covered",
+    "glm-5.2",
+    "GLM-5.2 is the configured default model",
   );
 
   const zentui = JSON.parse(
@@ -1236,6 +1196,11 @@ eq(
     zentui.extensionStatuses.placements["workflow-mode"],
     "left",
     "Zentui preserves the central workflow mode status",
+  );
+  assert(
+    !("plan-todos-count" in zentui.extensionStatuses.placements) &&
+      !("plan-todos-count" in zentui.extensionStatuses.colorModes),
+    "Zentui contains no stale placement for the hidden plan todo status",
   );
 
   assert(

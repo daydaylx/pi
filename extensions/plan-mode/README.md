@@ -12,34 +12,40 @@ steps.
 ## Commands
 
 - `/plan` or `Ctrl+Alt+P`: opens a chooser between **Einfacher Plan**
-  (light, inline, no plan file) and **Ausführlicher Plan**. The selected mode
-  remains active until another mode is chosen. Without an interactive TUI it
-  falls back to the detailed plan mode.
+  (short plan file) and **Ausführlicher Plan** (detailed plan file). Both use
+  `.agent/plans/current-plan.md`. The selected mode remains active until
+  another mode is chosen. Without an interactive TUI it falls back to the
+  detailed plan mode.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
-  even if no review happened. The mode transition itself is immediate; see
-  "Gating" below for the separate stale-review check.
+  independently of whether a review happened. If a plan is already executing,
+  a duplicate `/work` call is ignored instead of aborting and restarting it.
 - `/review-plan`: optional deep review; worth it for large, risky, or
-  architectural changes. Approves the plan and records a SHA-256 hash.
+  architectural changes. It records review status without changing the active
+  workflow mode or gating `/work`.
 - `/plan-todos`: read progress from the current plan file.
 - `/finish`: manual archive/early-abort. Runs automatically once all todos
   are checked off (see "Completion").
 
 ## Plan variants
 
-`/plan` is a router. Shift+Tab exposes the same two persistent modes alongside
-Work and the current permission levels:
+`/plan` is a router. Shift+Tab opens the same three persistent modes as a
+pure mode picker (no permissions, no thinking, no tools — see
+`extensions/shared/mode-menu.ts`); permission levels have their own picker on
+`Ctrl+Shift+Y` (below):
 
-- **Einfacher Plan** (`simple_plan`) — compact questions and a slim inline
-  plan for small to medium tasks. It does not create a plan file.
+- **Einfacher Plan** (`simple_plan`) — compact questions and a short plan file
+  for small to medium tasks.
 - **Ausführlicher Plan** (`detailed_plan`) — detailed context, risk,
-  architecture and implementation analysis using the existing plan file.
+  architecture and implementation analysis using the same plan file.
 - **Work** (`work`) — normal work. Selecting Work in Shift+Tab does not
   automatically execute a stored plan; `/work` remains the explicit execution
   command.
 
 All mode transitions are direct: they have no idle, phase, escalation or
-confirmation guard. If an agent turn is active it is aborted, running
-review/execution state is normalized, and the requested mode replaces it.
+confirmation guard. If an agent turn is active, mode selection aborts and
+normalizes the current review/execution state before applying the requested
+mode. `/review-plan` is not a mode transition and therefore preserves the
+currently selected mode.
 
 ## Permissions
 
@@ -48,50 +54,80 @@ Workflow mode and permission level are independent. Changing
 the active workflow mode, and each level applies the same way in all modes.
 `read-only` and `read-bash` retain the explicit
 `.agent/plans/current-plan.md` write exception. Permission selection and the
-existing `/write` override are persisted per session.
+existing `/write` override are persisted per session. For the three writable
+levels, a restrictive `/write` override takes precedence; `read-only` and
+`read-bash` always retain their current-plan-file exception.
+
+| Level         | Effective access                                                                                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| `read-only`   | Project reads; only the current plan file remains writable                                                 |
+| `read-bash`   | Project reads, proven read-only Bash commands, and the current plan file                                   |
+| `read-write`  | Normal project writes; prompts for risky operations                                                        |
+| `full-access` | Also allows package installs and Git housekeeping; still prompts for deletion, `sudo`, and external writes |
+| `yolo`        | Allows ordinary deletion, `sudo`, and non-system external writes; hard warnings remain active              |
+
+Use `/permission <level>` to select a level directly. `/full-access` and
+`/yolo` toggle their respective level and return to `read-write` when invoked
+again. `/write allow|block|plan-only` independently restores normal writes,
+blocks writes governed by the override, or restricts them to the current plan
+file. The explicit plan-file exception at the two read-restricted levels is
+unaffected.
+
+`Ctrl+Shift+Y` opens a quick picker containing all five permission levels.
+The picker and all permission commands remain available independently of the
+workflow mode, plan/review phase, or current idle state. They never change the
+workflow mode or abort a running turn.
+
+`CONFIRM_ELEVATED_PERMISSIONS` is currently disabled in
+`mode-permissions.ts`, so `full-access` and `yolo` activate directly. The
+operation-level hard warnings enforced by the central policy remain unchanged.
+
+`AUTO_YOLO_ON_START` is currently enabled in `mode-permissions.ts`. A session
+without persisted permission state therefore starts in `yolo`; a resumed or
+reloaded session restores its latest saved permission level and `/write`
+override. Set that constant to `false` to make new sessions start in
+`read-write`.
 
 The central `mode-permissions.ts` extension enforces file, path, Bash and
 secret policy. Hard warnings for secrets, system paths, destructive root
 operations and similar critical actions remain in place.
 
-## Detailed planning
+## Plan file structure
 
 Only two sections are required: `Auftrag` (the task) and `Todos` (at least
 one checkbox). `Nicht-Ziele`, `Betroffene Bereiche`, and `Risiken /
-Entscheidungen` are recommended in the prompt template but not enforced.
+Entscheidungen` are recommended for detailed plans but not enforced. Simple
+plans intentionally stay short while writing the same valid minimum structure.
 
-## Gating
+## Optional review
 
-`/work` distinguishes two cases:
+`/review-plan` is completely independent from the primary `/plan → /work`
+flow. It can inspect and update the current plan and records a SHA-256 hash
+only for review-status bookkeeping. Missing or stale review status never shows
+a confirmation and never blocks `/work`.
 
-- **Never reviewed**: a plain informational notice is shown; execution
-  proceeds regardless of interactive/non-interactive mode. No block, no
-  dialog required.
-- **Reviewed, then changed**: the SHA-256 hash recorded by `/review-plan` no
-  longer matches the file. This is treated strictly, same as before —
-  interactive sessions get a confirmation dialog, non-interactive sessions
-  block and point back to `/review-plan`. This hash-based protection now
-  only applies to plans that went through a review at some point; plans
-  that skipped review entirely are never gated by it.
+Invoking `/review-plan` preserves `work`, `simple_plan`, or `detailed_plan`.
+The review uses its own temporary phase only while the review turn runs.
 
 ## Completion
 
-The checkboxes under `## 5. Todos` are the sole Todo source. During
-execution, `[DONE:n]` updates checkbox `n` atomically in the plan file. As
-soon as every checkbox is checked, the plan is archived automatically under
+The checkboxes under `## Todos` are the sole Todo source; an optional numeric
+prefix such as `## 5. Todos` is accepted. During execution, `[DONE:n]` updates
+checkbox `n` atomically in the plan file. As soon as every checkbox is
+checked, the plan is archived automatically under
 `.agent/plans/archive/YYYY-MM-DD-HHMM-current-plan.md` with `Status:
 complete`. If archiving fails, the phase falls back to `ready` and `/finish`
-can be run manually as a retry. `/finish` remains available to archive a
-plan early with open todos (`Status: incomplete`, requires interactive
+can be run manually as a retry. `/finish` remains available to archive a plan
+early with open todos (`Status: incomplete`, requires interactive
 confirmation) or as that retry path.
 
-## YOLO
+## Permission shortcut
 
-`/yolo` or `Ctrl+Shift+Y` changes only the permission level and visibly marks
-the footer. The selected level survives resume/reload of the same session.
-On terminals without reliable modified-key reporting, use `/yolo`; Pi's
-preferred shortcut requires Kitty/CSI-u or compatible `modifyOtherKeys`
-support.
+`Ctrl+Shift+Y` opens the permission picker; `/yolo` remains the direct YOLO
+toggle. Both change only the permission level, which is visibly marked in the
+footer. On terminals without reliable modified-key reporting, use
+`/permission` or `/yolo`; Pi's preferred shortcut requires Kitty/CSI-u or
+compatible `modifyOtherKeys` support.
 
 ## Compaction
 

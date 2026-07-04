@@ -20,6 +20,10 @@ import {
   type SettingItem,
   SettingsList,
 } from "@earendil-works/pi-tui";
+import {
+  TOOLS_ACTION_REQUEST_EVENT,
+  type ToolsActionRequest,
+} from "./shared/workflow-status.ts";
 
 // State persisted to session
 interface ToolsState {
@@ -73,96 +77,112 @@ export default function toolsExtension(pi: ExtensionAPI) {
     }
   }
 
+  async function openToolsPicker(ctx: ExtensionContext): Promise<void> {
+    if (ctx.mode !== "tui") {
+      ctx.ui.notify("/tools requires TUI mode", "error");
+      return;
+    }
+
+    // Refresh tool list
+    allTools = pi.getAllTools();
+
+    await ctx.ui.custom((tui, theme, _kb, done) => {
+      // Build settings items for each tool
+      const items: SettingItem[] = allTools.map((tool) => ({
+        id: tool.name,
+        label: tool.name,
+        currentValue: enabledTools.has(tool.name) ? "enabled" : "disabled",
+        values: ["enabled", "disabled"],
+      }));
+
+      const container = new Container();
+      container.addChild(
+        new (class {
+          render(_width: number) {
+            return [theme.fg("accent", theme.bold("Tool Configuration")), ""];
+          }
+          invalidate() {}
+        })(),
+      );
+
+      const settingsList = new SettingsList(
+        items,
+        Math.min(items.length + 2, 15),
+        getSettingsListTheme(),
+        (id, newValue) => {
+          // Update enabled state and apply immediately
+          if (newValue === "enabled") {
+            enabledTools.add(id);
+          } else {
+            enabledTools.delete(id);
+          }
+          applyTools();
+          persistState();
+        },
+        () => {
+          // Close dialog
+          done(undefined);
+        },
+      );
+
+      container.addChild(settingsList);
+
+      const component = {
+        render(width: number) {
+          return container.render(width);
+        },
+        invalidate() {
+          container.invalidate();
+        },
+        handleInput(data: string) {
+          settingsList.handleInput?.(data);
+          tui.requestRender();
+        },
+      };
+
+      return component;
+    });
+  }
+
+  function enableAllTools(ctx: ExtensionContext): void {
+    allTools = pi.getAllTools();
+    enabledTools = new Set(allTools.map((t) => t.name));
+    applyTools();
+    persistState();
+    ctx.ui.notify(`Alle ${enabledTools.size} Tools aktiviert`, "info");
+  }
+
+  function disableAllTools(ctx: ExtensionContext): void {
+    enabledTools = new Set();
+    applyTools();
+    persistState();
+    ctx.ui.notify("Alle Tools deaktiviert", "info");
+  }
+
+  pi.events.on(TOOLS_ACTION_REQUEST_EVENT, (request: ToolsActionRequest) => {
+    if (request.action === "open") {
+      void openToolsPicker(request.ctx);
+    } else if (request.action === "enable-all") {
+      enableAllTools(request.ctx);
+    } else {
+      disableAllTools(request.ctx);
+    }
+  });
+
   // Register /tools command
   pi.registerCommand("tools", {
     description: "Enable/disable tools",
-    handler: async (_args, ctx) => {
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify("/tools requires TUI mode", "error");
-        return;
-      }
-
-      // Refresh tool list
-      allTools = pi.getAllTools();
-
-      await ctx.ui.custom((tui, theme, _kb, done) => {
-        // Build settings items for each tool
-        const items: SettingItem[] = allTools.map((tool) => ({
-          id: tool.name,
-          label: tool.name,
-          currentValue: enabledTools.has(tool.name) ? "enabled" : "disabled",
-          values: ["enabled", "disabled"],
-        }));
-
-        const container = new Container();
-        container.addChild(
-          new (class {
-            render(_width: number) {
-              return [theme.fg("accent", theme.bold("Tool Configuration")), ""];
-            }
-            invalidate() {}
-          })(),
-        );
-
-        const settingsList = new SettingsList(
-          items,
-          Math.min(items.length + 2, 15),
-          getSettingsListTheme(),
-          (id, newValue) => {
-            // Update enabled state and apply immediately
-            if (newValue === "enabled") {
-              enabledTools.add(id);
-            } else {
-              enabledTools.delete(id);
-            }
-            applyTools();
-            persistState();
-          },
-          () => {
-            // Close dialog
-            done(undefined);
-          },
-        );
-
-        container.addChild(settingsList);
-
-        const component = {
-          render(width: number) {
-            return container.render(width);
-          },
-          invalidate() {
-            container.invalidate();
-          },
-          handleInput(data: string) {
-            settingsList.handleInput?.(data);
-            tui.requestRender();
-          },
-        };
-
-        return component;
-      });
-    },
+    handler: async (_args, ctx) => openToolsPicker(ctx),
   });
 
   pi.registerCommand("tools-all", {
     description: "Alle Tools aktivieren",
-    handler: async (_args, ctx) => {
-      allTools = pi.getAllTools();
-      enabledTools = new Set(allTools.map((t) => t.name));
-      applyTools();
-      persistState();
-      ctx.ui.notify(`Alle ${enabledTools.size} Tools aktiviert`, "info");
-    },
+    handler: async (_args, ctx) => enableAllTools(ctx),
   });
 
   pi.registerCommand("tools-none", {
     description: "Alle Tools deaktivieren",
-    handler: async (_args, ctx) => {
-      enabledTools = new Set();
-      applyTools();
-      persistState();
-      ctx.ui.notify("Alle Tools deaktiviert", "info");
-    },
+    handler: async (_args, ctx) => disableAllTools(ctx),
   });
 
   // Restore state on session start

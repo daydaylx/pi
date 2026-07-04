@@ -27,8 +27,10 @@ import {
   type TodoItem,
 } from "./utils.ts";
 import {
+  PLAN_ACTION_REQUEST_EVENT,
   WORKFLOW_MODE_REQUEST_EVENT,
   WORKFLOW_STATUS_EVENT,
+  type PlanActionRequest,
   type WorkflowMode,
   type WorkflowModeRequest,
   type WorkflowPhase,
@@ -41,25 +43,30 @@ const PLAN_MODE_MARKER = "[PLAN MODE ACTIVE]";
 const PLAN_REVIEW_MARKER = "[PLAN REVIEW ACTIVE]";
 const EXECUTING_PLAN_MARKER = "[EXECUTING PLAN]";
 
-// Persistenter Kontext für den „Einfachen Plan": keine Plan-Datei, keine
-// Architektur-/Risiko-Blöcke und keine Änderung der Permission-Stufe.
+// Persistenter Kontext für den „Einfachen Plan": dieselbe Plan-Datei wie im
+// ausführlichen Modus, aber ohne lange Architektur-/Risiko-Blöcke.
 const SIMPLE_PLAN_PROMPT = `[EINFACHER PLAN]
 Erstelle einen schlichten, schnell einsetzbaren Plan für die aktuelle Aufgabe — geeignet für kleine bis mittlere Änderungen.
 
 Vorgehen:
-- Stelle maximal 2–5 gezielte Rückfragen, und nur, wenn sie für einen sauberen Plan wirklich nötig sind (nutze dazu ask_user).
-- Verzichte auf ausführliche Architekturprüfung, lange Risiko-/Audit-Blöcke und eine separate Plan-Datei.
+- Stelle höchstens wenige gezielte Rückfragen, und nur, wenn sie für einen umsetzbaren Plan wirklich nötig sind (nutze dazu ask_user).
+- Verzichte auf ausführliche Architekturprüfung und lange Risiko-/Audit-Blöcke.
+- Führe die Aufgabe nicht aus und ändere keine anderen Dateien.
 
-Gib danach einen kompakten Plan direkt im Chat aus mit genau diesen Punkten:
-- Ziel
-- Annahmen
-- Betroffene Bereiche
-- Konkrete Schritte
-- Offene Punkte
-- Empfehlung
+Schreibe den finalen kurzen Plan nach ${PLAN_RELATIVE_PATH}.
+Verwende mindestens diese gültige Struktur:
 
-Führe die Aufgabe nicht aus. Schreibe keine Plan-Datei, lege keine PLAN.md an
-und bleibe knapp.`;
+# Arbeitsplan: <Aufgabe>
+
+## 1. Auftrag
+<Kurze Zielbeschreibung>
+
+## 5. Todos
+- [ ] Konkreter Umsetzungsschritt
+- [ ] Relevante Tests oder Checks ausführen
+
+Pflicht sind Abschnitt 1 und Abschnitt 5 mit mindestens einer Checkbox.
+Stoppe nach dem Schreiben der Plan-Datei und bleibe knapp.`;
 
 interface PersistedWorkflowState {
   mode?: WorkflowMode;
@@ -109,7 +116,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     });
   }
 
-  function prepareDetailedPlan(ctx: ExtensionContext): boolean {
+  function preparePlan(ctx: ExtensionContext): boolean {
     try {
       ensurePlanDirectory(ctx.cwd);
     } catch (error) {
@@ -193,8 +200,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     if (!ctx.isIdle()) ctx.abort();
     normalizeInterruptedPhase(ctx);
 
-    if (target === "detailed_plan") {
-      if (!prepareDetailedPlan(ctx)) return false;
+    if (target !== "work") {
+      if (!preparePlan(ctx)) return false;
       invalidateReview();
       phase = "draft";
     }
@@ -326,9 +333,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 Prüfe den Plan auf Umsetzbarkeit, Vollständigkeit, Risiken, Tests und ungeklärte Entscheidungen.
 
 Du darfst ausschließlich ${PLAN_RELATIVE_PATH} überarbeiten. Andere Schreibzugriffe sind verboten.
-Wenn mehrere relevante Lösungen möglich sind, stelle vor der Freigabe mit ask_user genau eine fokussierte Frage pro Aufruf. Biete jeweils 2–4 Optionen mit Vor-/Nachteilen und einer Empfehlung an.
+Wenn mehrere relevante Lösungen möglich sind, stelle vor dem Review-Ergebnis mit ask_user genau eine fokussierte Frage pro Aufruf. Biete jeweils 2–4 Optionen mit Vor-/Nachteilen und einer Empfehlung an.
 
-Ein Plan mit offenen entscheidungsrelevanten Fragen darf nicht freigegeben werden.
+Ein Plan mit offenen entscheidungsrelevanten Fragen darf nicht als geprüft markiert werden.
 Beende den Review mit genau einem Marker:
 - [PLAN-REVIEW:APPROVED]
 - [PLAN-REVIEW:CHANGES-REQUIRED]`,
@@ -397,7 +404,7 @@ Nächster Schritt: /work. Bei großen, riskanten oder architektonischen Änderun
       return {
         message: {
           customType: "plan-execution-context",
-          content: `${EXECUTING_PLAN_MARKER} — Full tool access enabled
+          content: `${EXECUTING_PLAN_MARKER} — aktuelle Permission-Stufe bleibt aktiv
 
 Offene Schritte:
 ${todoList || "Keine offenen Todos gefunden."}
@@ -482,9 +489,8 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
         ) {
           reviewedHash = hashPlanContent(content);
           phase = "reviewed";
-          mode = "detailed_plan";
           ctx.ui.notify(
-            "Plan geprüft und freigegeben. `/work` startet den unveränderten Plan (auch ohne erneuten Review möglich).",
+            "Plan geprüft. Der Reviewstatus ist erfasst; `/work` bleibt davon unabhängig verfügbar.",
             "info",
           );
         } else {
@@ -497,7 +503,7 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
                 ? "\nDer Review verlangt Änderungen."
                 : "\nDer verbindliche Review-Marker fehlt.";
           ctx.ui.notify(
-            `Plan nicht freigegeben.${details}\nNach Korrektur erneut /review-plan ausführen.`,
+            `Review nicht abgeschlossen.${details}\nOptional nach Korrektur erneut /review-plan ausführen.`,
             "warning",
           );
         }
@@ -513,7 +519,11 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
       return;
     }
 
-    if (phase !== "draft" || mode !== "detailed_plan") return;
+    if (
+      phase !== "draft" ||
+      (mode !== "simple_plan" && mode !== "detailed_plan")
+    )
+      return;
     try {
       if (readPlanFile(ctx.cwd) !== undefined) {
         updateStatus(ctx);
@@ -527,8 +537,9 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
     }
   });
 
-  async function reviewPlan(ctx: ExtensionCommandContext): Promise<void> {
-    if (!setWorkflowMode("detailed_plan", ctx)) return;
+  async function reviewPlan(ctx: ExtensionContext): Promise<void> {
+    if (!ctx.isIdle()) ctx.abort();
+    normalizeInterruptedPhase(ctx);
 
     let content: string | undefined;
     try {
@@ -574,7 +585,11 @@ ${content}
     );
   }
 
-  async function executePlan(ctx: ExtensionCommandContext): Promise<void> {
+  async function executePlan(ctx: ExtensionContext): Promise<void> {
+    if (phase === "executing" && !ctx.isIdle()) {
+      ctx.ui.notify("Plan wird bereits ausgeführt.", "warning");
+      return;
+    }
     setWorkflowMode("work", ctx);
 
     let content: string | undefined;
@@ -593,10 +608,6 @@ ${content}
       );
       return;
     }
-    if (phase === "executing") {
-      ctx.ui.notify("Plan wird bereits ausgeführt.", "warning");
-      return;
-    }
     const structureErrors = validatePlanStructure(content);
     if (structureErrors.length > 0) {
       phase = "draft";
@@ -610,37 +621,10 @@ ${content}
       return;
     }
 
-    const currentHash = hashPlanContent(content);
-    const isReviewedAndUnchanged =
-      !!reviewedHash && reviewedHash === currentHash;
-    const isStaleReview = !!reviewedHash && reviewedHash !== currentHash;
-
-    if (isStaleReview) {
-      // Plan wurde reviewed, danach aber verändert — Hash-Schutz bleibt hier strikt.
-      if (!ctx.hasUI) {
-        ctx.ui.notify(
-          "Plan wurde nach dem Review verändert. Führe /review-plan erneut aus (nicht-interaktiver Modus erlaubt keine Rückfrage).",
-          "warning",
-        );
-        return;
-      }
-      const confirmed = await ctx.ui.confirm(
-        "Plan wurde nach dem Review verändert.",
-        "Ohne erneutes /review-plan trotzdem ausführen?",
-      );
-      if (!confirmed) {
-        ctx.ui.notify(
-          "Ausführung abgebrochen. Nutze /review-plan zur erneuten Freigabe.",
-          "info",
-        );
-        return;
-      }
-    } else if (!isReviewedAndUnchanged) {
-      // Nie reviewed — Hinweis, aber kein Block.
-      ctx.ui.notify(
-        "Kein Review durchgeführt. Führe direkt aus (optional: /review-plan für einen Deep-Review).",
-        "info",
-      );
+    if (reviewedHash && reviewedHash !== hashPlanContent(content)) {
+      // Review ist reine Statusinformation und darf /work niemals blockieren.
+      reviewedHash = undefined;
+      if (phase === "reviewed") phase = "draft";
     }
 
     const todos = extractTodoItems(content);
@@ -692,75 +676,97 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
     handler: async (_args, ctx) => executePlan(ctx),
   });
 
+  async function finishPlan(ctx: ExtensionCommandContext): Promise<void> {
+    await ctx.waitForIdle();
+
+    let content: string | undefined;
+    try {
+      content = readPlanFile(ctx.cwd);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(`Plan-Datei ist nicht sicher lesbar: ${message}`, "error");
+      return;
+    }
+
+    if (content === undefined) {
+      phase = mode === "work" ? "idle" : "draft";
+      reviewedHash = undefined;
+      updateStatus(ctx);
+      persistState();
+      ctx.ui.notify("Keine Plan-Datei vorhanden.", "info");
+      return;
+    }
+
+    const todos = extractTodoItems(content);
+    const complete = todos.length > 0 && todos.every((todo) => todo.completed);
+    if (!complete) {
+      if (!ctx.hasUI) {
+        ctx.ui.notify(
+          "Offene Todos können ohne interaktive Bestätigung nicht archiviert werden.",
+          "warning",
+        );
+        return;
+      }
+      const confirmed = await ctx.ui.confirm(
+        "Plan mit offenen Todos archivieren?",
+        "Der Plan wird als incomplete archiviert und aus current-plan.md entfernt.",
+      );
+      if (!confirmed) {
+        ctx.ui.notify("Abschluss abgebrochen.", "info");
+        return;
+      }
+    }
+
+    try {
+      const keepPlanMode = mode !== "work";
+      const archivePath = archivePlanFile(
+        ctx.cwd,
+        complete ? "complete" : "incomplete",
+      );
+      phase = keepPlanMode ? "draft" : "idle";
+      reviewedHash = undefined;
+      updateStatus(ctx);
+      persistState();
+      ctx.ui.notify(
+        `Plan archiviert: ${relative(ctx.cwd, archivePath)}`,
+        "info",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Archivierung fehlgeschlagen; aktuelle Plan-Datei bleibt erhalten: ${message}`,
+        "error",
+      );
+    }
+  }
+
+  pi.events.on(PLAN_ACTION_REQUEST_EVENT, (request: PlanActionRequest) => {
+    if (request.action === "choose") {
+      void routePlan(request.ctx);
+      return;
+    }
+    if (request.action === "work") {
+      void executePlan(request.ctx);
+      return;
+    }
+    if (request.action === "review") {
+      void reviewPlan(request.ctx);
+      return;
+    }
+    const maybeCommandCtx = request.ctx as Partial<ExtensionCommandContext>;
+    if (typeof maybeCommandCtx.waitForIdle === "function") {
+      void finishPlan(request.ctx as ExtensionCommandContext);
+    } else {
+      request.ctx.ui.notify(
+        "Nutze /finish, um den Plan abzuschließen.",
+        "info",
+      );
+    }
+  });
+
   pi.registerCommand("finish", {
     description: "Plan abschließen und sicher archivieren",
-    handler: async (_args, ctx) => {
-      await ctx.waitForIdle();
-
-      let content: string | undefined;
-      try {
-        content = readPlanFile(ctx.cwd);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(
-          `Plan-Datei ist nicht sicher lesbar: ${message}`,
-          "error",
-        );
-        return;
-      }
-
-      if (content === undefined) {
-        phase = mode === "detailed_plan" ? "draft" : "idle";
-        reviewedHash = undefined;
-        updateStatus(ctx);
-        persistState();
-        ctx.ui.notify("Keine Plan-Datei vorhanden.", "info");
-        return;
-      }
-
-      const todos = extractTodoItems(content);
-      const complete =
-        todos.length > 0 && todos.every((todo) => todo.completed);
-      if (!complete) {
-        if (!ctx.hasUI) {
-          ctx.ui.notify(
-            "Offene Todos können ohne interaktive Bestätigung nicht archiviert werden.",
-            "warning",
-          );
-          return;
-        }
-        const confirmed = await ctx.ui.confirm(
-          "Plan mit offenen Todos archivieren?",
-          "Der Plan wird als incomplete archiviert und aus current-plan.md entfernt.",
-        );
-        if (!confirmed) {
-          ctx.ui.notify("Abschluss abgebrochen.", "info");
-          return;
-        }
-      }
-
-      try {
-        const keepDetailedMode = mode === "detailed_plan";
-        const archivePath = archivePlanFile(
-          ctx.cwd,
-          complete ? "complete" : "incomplete",
-        );
-        phase = keepDetailedMode ? "draft" : "idle";
-        reviewedHash = undefined;
-        updateStatus(ctx);
-        persistState();
-        ctx.ui.notify(
-          `Plan archiviert: ${relative(ctx.cwd, archivePath)}`,
-          "info",
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(
-          `Archivierung fehlgeschlagen; aktuelle Plan-Datei bleibt erhalten: ${message}`,
-          "error",
-        );
-      }
-    },
+    handler: async (_args, ctx) => finishPlan(ctx),
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -776,8 +782,7 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
     if (persisted?.phase) {
       phase = persisted.phase;
       mode =
-        persisted.mode ??
-        (persisted.planningActive ? "detailed_plan" : "work");
+        persisted.mode ?? (persisted.planningActive ? "detailed_plan" : "work");
       reviewedHash = persisted.reviewedHash;
     } else if (persisted) {
       phase = persisted.executing
@@ -810,8 +815,8 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
         phase === "reviewed" &&
         (!reviewedHash || hashPlanContent(content) !== reviewedHash)
       ) {
-        // reviewedHash bleibt erhalten: executePlan() erkennt so auch nach
-        // einem Sessionneustart noch "reviewed, aber seither verändert".
+        // reviewedHash bleibt bis /work erhalten, damit der veraltete
+        // Reviewstatus auch nach einem Sessionneustart erkannt wird.
         phase = "draft";
       }
       if (phase === "executing" || phase === "ready") {
@@ -830,8 +835,8 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       planModeEverUsed = true;
     }
 
-    if (mode === "detailed_plan" && phase === "idle") phase = "draft";
-    if (mode === "detailed_plan" && !prepareDetailedPlan(ctx)) {
+    if (mode !== "work" && phase === "idle") phase = "draft";
+    if (mode !== "work" && !preparePlan(ctx)) {
       mode = "work";
       phase = "idle";
     }

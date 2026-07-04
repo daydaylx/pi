@@ -4,7 +4,9 @@ description: Änderungen kritisch prüfen – Bugs, Scope-Verstöße, Risiken
 
 Prüfe die letzten Änderungen kritisch:
 
-1. Git-Diff lesen (`git diff HEAD` oder angefügte Dateien).
+1. Änderungsumfang mit `git status --short` erfassen. Danach `git diff HEAD`
+   beziehungsweise angefügte Dateien lesen und relevante unversionierte Dateien
+   ausdrücklich einbeziehen.
 2. Prüfen:
    - **Scope-Verstöße:** Wurden Dateien geändert, die nicht im Plan standen?
    - **Korrektheit:** Macht der Code was er soll? Logikfehler?

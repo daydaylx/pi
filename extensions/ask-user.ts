@@ -1,6 +1,6 @@
 /**
  * Ask-User Tool - Single question with options
- * Full custom UI: options list + inline editor for "Type something..."
+ * Full custom UI: options list + inline editor for "Freitext eingeben..."
  * Escape in editor returns to options, Escape in options cancels
  *
  * Registered as `ask_user` because extensions/plan-mode/index.ts already
@@ -18,6 +18,11 @@ import {
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import {
+  hasValidQuestionOptionCount,
+  MAX_QUESTION_OPTIONS,
+  MIN_QUESTION_OPTIONS,
+} from "./shared/ask-user-policy.ts";
 
 interface OptionWithDesc {
   label: string;
@@ -44,7 +49,9 @@ const OptionSchema = Type.Object({
 const QuestionParams = Type.Object({
   question: Type.String({ description: "The question to ask the user" }),
   options: Type.Array(OptionSchema, {
-    description: "Options for the user to choose from",
+    description: "2–4 options for the user to choose from",
+    minItems: MIN_QUESTION_OPTIONS,
+    maxItems: MAX_QUESTION_OPTIONS,
   }),
 });
 
@@ -73,12 +80,17 @@ export default function askUser(pi: ExtensionAPI) {
         };
       }
 
-      if (params.options.length === 0) {
+      if (!hasValidQuestionOptionCount(params.options.length)) {
         return {
-          content: [{ type: "text", text: "Error: No options provided" }],
+          content: [
+            {
+              type: "text",
+              text: `Error: Expected ${MIN_QUESTION_OPTIONS}–${MAX_QUESTION_OPTIONS} options`,
+            },
+          ],
           details: {
             question: params.question,
-            options: [],
+            options: params.options.map((o) => o.label),
             answer: null,
           } as QuestionDetails,
         };
@@ -86,7 +98,7 @@ export default function askUser(pi: ExtensionAPI) {
 
       const allOptions: DisplayOption[] = [
         ...params.options,
-        { label: "Type something.", isOther: true },
+        { label: "Freitext eingeben.", isOther: true },
       ];
 
       const result = await ctx.ui.custom<{
@@ -298,7 +310,7 @@ export default function askUser(pi: ExtensionAPI) {
       const opts = Array.isArray(args.options) ? args.options : [];
       if (opts.length) {
         const labels = opts.map((o: OptionWithDesc) => o.label);
-        const numbered = [...labels, "Type something."].map(
+        const numbered = [...labels, "Freitext eingeben."].map(
           (o, i) => `${i + 1}. ${o}`,
         );
         text += `\n${theme.fg("dim", `  Options: ${numbered.join(", ")}`)}`;

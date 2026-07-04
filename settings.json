@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.80.3",
   "theme": "david-dark",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.4-mini",
+  "defaultProvider": "zai",
+  "defaultModel": "glm-5.2",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "xhigh",
   "thinkingBudgets": {
@@ -42,8 +42,7 @@
     "+extensions/mode-permissions.ts",
     "+extensions/ask-user.ts",
     "+extensions/ux-status.ts",
-    "+extensions/actions.ts",
-    "+extensions/or-free/index.ts"
+    "+extensions/actions.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",
