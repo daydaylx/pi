@@ -2,9 +2,9 @@
   "lastChangelogVersion": "0.80.3",
   "theme": "david-dark",
   "defaultProvider": "zai",
-  "defaultModel": "glm-5.2",
+  "defaultModel": "glm-5-turbo",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "xhigh",
+  "defaultThinkingLevel": "high",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -36,6 +36,7 @@
   "extensions": [
     "!extensions/**",
     "+extensions/notify.ts",
+    "+extensions/startup-banner.ts",
     "+extensions/preview-runtime.ts",
     "+extensions/tools.ts",
     "+extensions/plan-mode/index.ts",

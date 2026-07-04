@@ -62,6 +62,9 @@ const planMenu = await jiti.import(
 const previewRuntime = await jiti.import(
   path.resolve(ROOT, "extensions/preview-runtime.ts"),
 );
+const startupBanner = await jiti.import(
+  path.resolve(ROOT, "extensions/startup-banner.ts"),
+);
 const askUserPolicy = await jiti.import(
   path.resolve(ROOT, "extensions/shared/ask-user-policy.ts"),
 );
@@ -1419,6 +1422,49 @@ eq(
   undefined,
   "digitSelection ignores non-digit characters",
 );
+
+// ───────────────────────── startup-banner: smoke ─────────────────────────
+assert(
+  typeof startupBanner.default === "function",
+  "startup-banner.ts exports a factory function",
+);
+{
+  let notifyCount = 0;
+  const notifications = [];
+  let sessionStartHandler = null;
+
+  startupBanner.default({
+    on(name, handler) {
+      if (name === "session_start") sessionStartHandler = handler;
+    },
+  });
+
+  assert(
+    sessionStartHandler !== null,
+    "startup-banner registers session_start hook",
+  );
+
+  const ctx = {
+    model: { id: "glm-5-turbo" },
+    ui: {
+      notify(text, type) {
+        notifyCount++;
+        notifications.push({ text, type });
+      },
+    },
+  };
+
+  await sessionStartHandler({}, ctx);
+  eq(notifyCount, 1, "startup-banner sends exactly one notification on session_start");
+  eq(notifications[0].type, "info", "startup-banner notification type is info");
+  assert(
+    notifications[0].text.startsWith("PI AGENT"),
+    "startup-banner notification starts with PI AGENT",
+  );
+
+  await sessionStartHandler({}, ctx);
+  eq(notifyCount, 1, "startup-banner does not send a second notification in the same session");
+}
 
 // ───────────────────────── package/UI configuration ─────────────────────────
 {
