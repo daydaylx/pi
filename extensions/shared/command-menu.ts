@@ -3,6 +3,7 @@ import type { PermissionLevel } from "./workflow-status.ts";
 
 export type CommandMenuTarget =
   | { kind: "open-plan-picker" } // /plan
+  | { kind: "decide" } // /decide
   | { kind: "plan-action"; action: "work" | "review" | "finish" } // /work /review-plan /finish
   | { kind: "open-permission-menu" } // /permission
   | { kind: "open-write-menu" } // /write
@@ -25,6 +26,13 @@ export function buildCommandMenu(
       label: "/plan",
       description: "Plan-Assistent öffnen (zustandsabhängige Aktionen)",
       value: { kind: "open-plan-picker" },
+    },
+    {
+      id: "cmd-decide",
+      section: "Plan",
+      label: "/decide",
+      description: "Decision-Intake starten (Optionen klären → Decision Brief)",
+      value: { kind: "decide" },
     },
     {
       id: "cmd-work",

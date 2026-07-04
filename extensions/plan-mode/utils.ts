@@ -18,7 +18,19 @@ import { dirname, relative, resolve, sep } from "node:path";
 export const PLAN_RELATIVE_PATH = ".agent/plans/current-plan.md";
 export const PLAN_ARCHIVE_RELATIVE_DIR = ".agent/plans/archive";
 
+// Das Decision Brief ist ein eigenständiges Artefakt der vorgeschalteten
+// Klärung. Es liegt im selben .agent/plans-Verzeichnis wie der finale Plan,
+// ersetzt aber current-plan.md nicht und wird von der Permission-Policy nicht
+// gesondert behandelt: die Extension schreibt die Datei selbst (analog
+// writePlanFileAtomic), damit der Klär-Turn auf jeder Zugriffsstufe läuft.
+export const DECISION_BRIEF_RELATIVE_PATH = ".agent/plans/decision-brief.md";
+export const DECISION_BUDGET_DEFAULT = 6;
+export const DECISION_BUDGET_COMPLEX = 8;
+export const DECISION_BRIEF_BLOCK_START = "[DECISION-BRIEF]";
+export const DECISION_BRIEF_BLOCK_END = "[/DECISION-BRIEF]";
+
 const REQUIRED_PLAN_HEADINGS = ["Auftrag", "Todos"];
+const REQUIRED_BRIEF_HEADINGS = ["Ziel", "Entscheidungen", "Abschlusskriterien"];
 
 export interface TodoItem {
   step: number;
@@ -298,4 +310,133 @@ export function archivePlanFile(
   }
 
   return archivePath;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Das Extraktions-Muster wird aus den Block-Marker-Konstanten gebaut, damit
+// Injektion (Prompt) und Erkennung (agent_end) nie auseinanderdriften.
+const DECISION_BRIEF_BLOCK_PATTERN = new RegExp(
+  `${escapeRegExp(DECISION_BRIEF_BLOCK_START)}\\s*([\\s\\S]*?)${escapeRegExp(DECISION_BRIEF_BLOCK_END)}`,
+  "i",
+);
+
+export function getDecisionBriefPath(cwd: string): string {
+  return resolve(cwd, DECISION_BRIEF_RELATIVE_PATH);
+}
+
+export function isDecisionBriefPath(rawPath: unknown, cwd: string): boolean {
+  if (typeof rawPath !== "string" || rawPath.trim() === "") return false;
+
+  const root = resolve(cwd);
+  const candidate = resolve(root, rawPath);
+  const allowed = getDecisionBriefPath(root);
+  if (candidate !== allowed) return false;
+
+  try {
+    assertNoSymlinkComponents(root, candidate);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function readDecisionBrief(cwd: string): string | undefined {
+  const root = resolve(cwd);
+  const briefPath = getDecisionBriefPath(root);
+  assertNoSymlinkComponents(root, briefPath);
+  if (!existsSync(briefPath)) return undefined;
+  return readFileSync(briefPath, "utf8");
+}
+
+export function writeDecisionBriefAtomic(cwd: string, content: string): void {
+  const root = resolve(cwd);
+  const briefPath = getDecisionBriefPath(root);
+  ensurePlanDirectory(root);
+  assertNoSymlinkComponents(root, briefPath);
+
+  const mode = existsSync(briefPath)
+    ? statSync(briefPath).mode & 0o777
+    : 0o600;
+  const temporaryPath = `${briefPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(temporaryPath, content, {
+      encoding: "utf8",
+      flag: "wx",
+      mode,
+    });
+    renameSync(temporaryPath, briefPath);
+  } finally {
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
+}
+
+export function archiveDecisionBrief(
+  cwd: string,
+  now = new Date(),
+): string {
+  const root = resolve(cwd);
+  const briefPath = getDecisionBriefPath(root);
+  const archiveDir = getPlanArchiveDir(root);
+  const content = readDecisionBrief(root);
+  if (content === undefined)
+    throw new Error(`Decision brief not found: ${briefPath}`);
+
+  assertNoSymlinkComponents(root, archiveDir);
+  mkdirSync(archiveDir, { recursive: true });
+  assertNoSymlinkComponents(root, archiveDir);
+
+  const timestamp = formatArchiveTimestamp(now);
+  let suffix = 1;
+  let archivePath = resolve(archiveDir, `${timestamp}-decision-brief.md`);
+  while (existsSync(archivePath)) {
+    suffix += 1;
+    archivePath = resolve(
+      archiveDir,
+      `${timestamp}-${suffix}-decision-brief.md`,
+    );
+  }
+
+  const separator = content.endsWith("\n") ? "\n" : "\n\n";
+  const archivedContent =
+    `${content}${separator}---\n` +
+    `Archived: ${now.toISOString()}\nStatus: superseded\n`;
+  const temporaryPath = `${archivePath}.tmp-${process.pid}-${Date.now()}`;
+
+  try {
+    writeFileSync(temporaryPath, archivedContent, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    renameSync(temporaryPath, archivePath);
+    unlinkSync(briefPath);
+  } finally {
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
+
+  return archivePath;
+}
+
+/**
+ * Extrahiert den Decision-Brief-Inhalt aus dem `[DECISION-BRIEF]…[/DECISION-BRIEF]`
+ * Block der letzten Agent-Antwort. Liefert undefined, wenn kein Block vorhanden
+ * ist — der Aufrufer entscheidet konservativ, dann nichts zu speichern.
+ */
+export function extractDecisionBriefBlock(message: string): string | undefined {
+  const match = message.match(DECISION_BRIEF_BLOCK_PATTERN);
+  return match ? match[1].trim() : undefined;
+}
+
+export function validateDecisionBriefStructure(briefContent: string): string[] {
+  const found = new Set(
+    [...briefContent.matchAll(/^##\s+(.+?)\s*$/gm)].map((match) =>
+      normalizeHeading(match[1]),
+    ),
+  );
+  return REQUIRED_BRIEF_HEADINGS.filter(
+    (heading) => !found.has(normalizeHeading(heading)),
+  ).map((heading) => `Fehlender Abschnitt: ${heading}`);
 }

@@ -68,6 +68,9 @@ const startupBanner = await jiti.import(
 const askUserPolicy = await jiti.import(
   path.resolve(ROOT, "extensions/shared/ask-user-policy.ts"),
 );
+const workflowStatus = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/workflow-status.ts"),
+);
 
 let passed = 0;
 let failed = 0;
@@ -1271,8 +1274,8 @@ const commandEntries = commandMenu.buildCommandMenu({
 });
 eq(
   commandEntries.length,
-  13,
-  "the command menu lists all 13 required commands",
+  14,
+  "the command menu lists all 14 required commands",
 );
 eq(
   [...new Set(commandEntries.map((entry) => entry.section))],
@@ -1308,8 +1311,8 @@ const noPlanEntries = planMenu.buildPlanAssistantMenu({
 });
 eq(
   noPlanEntries.map((entry) => entry.id),
-  ["plan-new-quick", "plan-new-architecture", "plan-cancel"],
-  "/plan without a plan offers only new-plan variants and cancel",
+  ["plan-clarify", "plan-new-quick", "plan-new-architecture", "plan-cancel"],
+  "/plan without a plan offers Optionen klären, new-plan variants and cancel",
 );
 assert(
   noPlanEntries.every(
@@ -1526,6 +1529,353 @@ assert(
       ?.endsWith("/npm/vendor/pandoc-3.9.0.2/bin/pandoc"),
     "Markdown preview resolves the verified config-local Pandoc binary",
   );
+}
+
+// ───────────────────────── Decision-Intake: phase, budgets, path ─────────────────────────
+eq(
+  workflowStatus.WORKFLOW_MODE_LABEL["deciding"],
+  "DECIDE",
+  "the deciding phase has a status label",
+);
+eq(utils.DECISION_BUDGET_DEFAULT, 6, "decision budget default is 6");
+eq(utils.DECISION_BUDGET_COMPLEX, 8, "decision budget complex is 8");
+eq(
+  utils.DECISION_BRIEF_RELATIVE_PATH,
+  ".agent/plans/decision-brief.md",
+  "the decision brief path is separate from current-plan.md",
+);
+assert(
+  workflowStatus.WORKFLOW_MODE_LABEL["deciding"] !== undefined,
+  "deciding is part of the phase label map (no new WorkflowMode)",
+);
+
+// ───────────────────────── Decision-Intake: utils helpers ─────────────────────────
+eq(
+  utils.extractDecisionBriefBlock(
+    "x\n[DECISION-BRIEF]\n# Decision Brief: T\n\n## Ziel\nz\n[/DECISION-BRIEF]\ntail",
+  ),
+  "# Decision Brief: T\n\n## Ziel\nz",
+  "extractDecisionBriefBlock extracts and trims the block",
+);
+eq(
+  utils.extractDecisionBriefBlock("[decision-brief]\nhi\n[/decision-brief]"),
+  "hi",
+  "extractDecisionBriefBlock is case-insensitive",
+);
+eq(
+  utils.extractDecisionBriefBlock("no block here"),
+  undefined,
+  "extractDecisionBriefBlock returns undefined without a block",
+);
+eq(
+  utils
+    .validateDecisionBriefStructure(
+      "# Decision Brief: X\n## Ziel\na\n## Entscheidungen\nb\n## Abschlusskriterien\nc\n",
+    )
+    .some((e) => e.includes("Ziel")),
+  false,
+  "a complete decision brief has no missing-heading errors for Ziel",
+);
+assert(
+  utils
+    .validateDecisionBriefStructure("## Ziel\nx\n")
+    .some((e) => e.includes("Entscheidungen")),
+  "decision brief flags missing Entscheidungen heading",
+);
+
+// ───────────────────────── Decision-Intake: path safety + read/write/archive ─────────────────────────
+const briefRoot = mkdtempSync(path.join(tmpdir(), "pi-decision-brief-"));
+try {
+  eq(
+    utils.isDecisionBriefPath(".agent/plans/decision-brief.md", briefRoot),
+    true,
+    "isDecisionBriefPath accepts the canonical brief path",
+  );
+  eq(
+    utils.isDecisionBriefPath("../../etc/passwd", briefRoot),
+    false,
+    "isDecisionBriefPath rejects path traversal",
+  );
+
+  eq(utils.readDecisionBrief(briefRoot), undefined, "no brief initially");
+  utils.writeDecisionBriefAtomic(
+    briefRoot,
+    "# Decision Brief: T\n\n## Ziel\nz\n",
+  );
+  assert(
+    utils.readDecisionBrief(briefRoot).includes("## Ziel"),
+    "writeDecisionBriefAtomic round-trips via readDecisionBrief",
+  );
+
+  const archived = utils.archiveDecisionBrief(briefRoot);
+  assert(
+    archived.endsWith("-decision-brief.md") && existsSync(archived),
+    "archiveDecisionBrief moves the brief into the archive dir",
+  );
+  eq(
+    utils.readDecisionBrief(briefRoot),
+    undefined,
+    "brief removed after archiving",
+  );
+} finally {
+  rmSync(briefRoot, { recursive: true, force: true });
+}
+
+// ───────────────────────── Decision-Intake: menus ─────────────────────────
+const clarifyNoPlan = planMenu.buildPlanAssistantMenu({
+  planExists: false,
+  allTodosComplete: false,
+});
+assert(
+  clarifyNoPlan.find((entry) => entry.id === "plan-clarify").value.kind ===
+    "clarify",
+  "the clarify entry carries the clarify action (no-plan)",
+);
+const clarifyOpenPlan = planMenu.buildPlanAssistantMenu({
+  planExists: true,
+  allTodosComplete: false,
+});
+assert(
+  clarifyOpenPlan.some((entry) => entry.id === "plan-clarify"),
+  "/plan with an existing plan also offers Optionen klären",
+);
+eq(
+  planMenu.buildDecisionHandoffMenu().map((entry) => entry.value),
+  ["quick", "detailed", "save-only", "cancel"],
+  "the decision handoff offers quick/detailed/save-only/cancel",
+);
+eq(
+  planMenu.buildBriefOverwriteGuardMenu().map((entry) => entry.value),
+  ["archive-first", "overwrite", "cancel"],
+  "the brief overwrite guard offers archive/overwrite/cancel",
+);
+
+// ───────────────────────── Decision-Intake: /decide + deciding turn ─────────────────────────
+{
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-decide-intake-"));
+  try {
+    const commands = new Map();
+    const hooks = new Map();
+    const eventHandlers = new Map();
+    const emitted = [];
+    const sent = [];
+    const notifications = [];
+    let lastSelect = { title: null, labels: [] };
+    let idle = true;
+
+    planMode.default({
+      events: {
+        on(name, handler) {
+          eventHandlers.set(name, handler);
+        },
+        emit(name, event) {
+          emitted.push([name, event]);
+        },
+      },
+      on(name, handler) {
+        hooks.set(name, handler);
+      },
+      registerFlag() {},
+      getFlag: () => false,
+      registerCommand(name, options) {
+        commands.set(name, options.handler);
+      },
+      registerShortcut() {},
+      appendEntry() {},
+      sendMessage(message, options) {
+        sent.push({ message, options });
+      },
+    });
+
+    function makePicker(sequence) {
+      let i = 0;
+      return async (_title, labels) => {
+        lastSelect = { title: _title, labels: [...labels] };
+        const want = sequence[i++];
+        if (want === undefined) return undefined;
+        return labels.find((label) => label.includes(want));
+      };
+    }
+
+    const context = {
+      cwd,
+      hasUI: true,
+      mode: "tui",
+      isIdle: () => idle,
+      abort() {},
+      sessionManager: { getEntries: () => [] },
+      ui: {
+        theme: { fg: (_c, t) => t },
+        setStatus() {},
+        setWidget() {},
+        notify: (message, type) => notifications.push({ message, type }),
+        select: async () => undefined,
+        confirm: async () => true,
+      },
+    };
+
+    await hooks.get("session_start")({}, context);
+    assert(commands.has("decide"), "/decide is registered");
+
+    // /decide with no existing brief enters deciding and triggers a turn.
+    context.ui.select = makePicker([]);
+    await commands.get("decide")("", context);
+    eq(
+      emitted.at(-1)[1].phase,
+      "deciding",
+      "/decide enters the deciding phase",
+    );
+    assert(
+      sent.some(
+        (entry) =>
+          entry.message.customType === "plan-decision-request" &&
+          entry.options?.triggerTurn === true,
+      ),
+      "/decide triggers a decision-intake turn",
+    );
+    assert(
+      sent.some((entry) => entry.message.content.includes("[DECISION-BRIEF]")),
+      "the decision request references the DECISION-BRIEF block",
+    );
+
+    // before_agent_start during deciding injects the hidden context + budget.
+    const decisionContext = await hooks.get("before_agent_start")({}, context);
+    eq(
+      decisionContext?.message?.customType,
+      "plan-decision-context",
+      "deciding injects the decision-intake context",
+    );
+    assert(
+      decisionContext?.message?.display === false,
+      "decision-intake context is hidden",
+    );
+    assert(
+      decisionContext?.message?.content.includes("6") &&
+        decisionContext?.message?.content.includes("8"),
+      "decision-intake context states the budget (6 / 8)",
+    );
+
+    // agent_end with a block writes decision-brief.md, resets phase, handoff.
+    notifications.length = 0;
+    context.ui.select = makePicker(["Nur Decision Brief speichern"]);
+    await hooks.get("agent_end")(
+      {
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "Klärung fertig.\n[DECISION-BRIEF]\n# Decision Brief: T\n\n## Ziel\nZiel\n\n## Entscheidungen\n- E1\n\n## Abschlusskriterien\n- [ ] a\n[/DECISION-BRIEF]",
+              },
+            ],
+          },
+        ],
+      },
+      context,
+    );
+    assert(
+      utils.readDecisionBrief(cwd).includes("# Decision Brief: T"),
+      "agent_end (deciding) writes the decision brief from the block",
+    );
+    assert(
+      notifications.some((n) => n.message.includes("Decision Brief gespeichert")),
+      "a saved-brief notification is emitted",
+    );
+    assert(
+      emitted.at(-1)[1].phase !== "deciding",
+      "phase is reset after the decision turn ends",
+    );
+    assert(
+      emitted
+        .filter(([, e]) => "mode" in e)
+        .every(
+          ([, e]) =>
+            e.mode === "work" ||
+            e.mode === "simple_plan" ||
+            e.mode === "detailed_plan",
+        ),
+      "workflow mode never exceeds the three allowed values",
+    );
+    assert(
+      emitted.every(([, e]) => !("permissionLevel" in e)),
+      "decision intake never publishes permission events",
+    );
+    assert(
+      utils.readPlanFile(cwd) === undefined,
+      "the decision brief is not written to current-plan.md",
+    );
+
+    // No-block agent_end: nothing written, warning only, brief untouched.
+    const beforeNoBlock = utils.readDecisionBrief(cwd);
+    notifications.length = 0;
+    context.ui.select = makePicker(["überschreiben"]); // brief overwrite guard
+    await commands.get("decide")("", context);
+    eq(
+      emitted.at(-1)[1].phase,
+      "deciding",
+      "re-entered deciding after the overwrite guard",
+    );
+    context.ui.select = makePicker([]); // no handoff shown without a block
+    await hooks.get("agent_end")(
+      {
+        messages: [
+          { role: "assistant", content: [{ type: "text", text: "kein Block" }] },
+        ],
+      },
+      context,
+    );
+    eq(
+      utils.readDecisionBrief(cwd),
+      beforeNoBlock,
+      "no-block agent_end leaves the existing brief untouched",
+    );
+    assert(
+      notifications.some((n) => n.type === "warning"),
+      "no-block agent_end emits a warning",
+    );
+
+    // Handoff „Schnellplan" activates simple_plan (no auto turn, brief injected).
+    context.ui.select = makePicker(["überschreiben"]); // brief overwrite guard
+    await commands.get("decide")("", context);
+    const sentBeforeQuick = sent.length;
+    context.ui.select = makePicker(["Schnellplan aus Decision Brief"]);
+    await hooks.get("agent_end")(
+      {
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "[DECISION-BRIEF]\n# Decision Brief: Q\n\n## Ziel\nq\n\n## Entscheidungen\n- e\n\n## Abschlusskriterien\n- [ ] x\n[/DECISION-BRIEF]",
+              },
+            ],
+          },
+        ],
+      },
+      context,
+    );
+    eq(
+      emitted.at(-1)[1].mode,
+      "simple_plan",
+      "handoff Schnellplan activates simple_plan",
+    );
+    assert(
+      !sent
+        .slice(sentBeforeQuick)
+        .some((entry) => entry.options?.triggerTurn),
+      "the handoff does not auto-trigger an agent turn",
+    );
+    const planWithBrief = await hooks.get("before_agent_start")({}, context);
+    assert(
+      planWithBrief?.message?.content.includes("decision-brief") &&
+        planWithBrief?.message?.content.includes("# Decision Brief: Q"),
+      "a plan turn after the handoff receives the decision brief as context",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 }
 
 // ───────────────────────── result ─────────────────────────

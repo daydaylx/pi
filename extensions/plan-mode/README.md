@@ -17,6 +17,10 @@ steps.
   then offers matching actions through the shared overlay menu. Existing plans
   are never silently overwritten; without an interactive TUI it falls back to
   starting the detailed plan mode only when no plan exists yet.
+- `/decide`: starts the optional **Decision-Intake** (see "Decision-Intake
+  (Klärmodus)" below) — an interactive clarification that produces a Decision
+  Brief. It is also reachable as the *Optionen klären* action inside `/plan`
+  and the `/decide` entry in the `Ctrl+Shift+X` command menu.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
   independently of whether a review happened. If a plan is already executing,
   a duplicate `/work` call is ignored instead of aborting and restarting it.
@@ -88,6 +92,62 @@ confirmation guard. If an agent turn is active, mode selection aborts and
 normalizes the current review/execution state before applying the requested
 mode. `/review-plan` is not a mode transition and therefore preserves the
 currently selected mode.
+
+## Decision-Intake (Klärmodus)
+
+The Decision-Intake is an **optional, preparatory** step that runs *before* the
+actual planning. It does **not** replace or extend the workflow modes —
+`work` / `simple_plan` / `detailed_plan` remain the only permanent modes.
+Reaching the intake sets a transient `deciding` phase (analogous to the
+`reviewing` phase), starts **no** implementation, and never switches to
+`/work` automatically.
+
+Start it either via `/decide` or via the *Optionen klären* action inside
+`/plan`. The agent then clarifies the genuinely decision-relevant questions
+using `ask_user` — exactly one focused question per call, 2–4 options each,
+with a short meaning/consequence and an explicit recommendation — and ends the
+turn with a fenced block:
+
+```text
+[DECISION-BRIEF]
+# Decision Brief: <task>
+## Ziel / ## Nicht-Ziele / ## Gewählte Richtung / ## Entscheidungen /
+## Verworfene Optionen / ## Risiken / Constraints / ## Offene Fragen /
+## Abschlusskriterien / ## Empfohlener nächster Schritt
+[/DECISION-BRIEF]
+```
+
+The extension writes that block to `.agent/plans/decision-brief.md` itself
+(the same way it writes `current-plan.md`), so the intake works on **every**
+permission level — including `read-only`/`read-bash` — without changing the
+permission policy. The Decision Brief is a separate artifact; it never
+replaces `current-plan.md`.
+
+**Decision budget.** At most **6** decision questions by default, and at most
+**8** for larger architectural/workflow/permission/UI/security changes. After
+each question the agent checks whether more clarification is truly needed; no
+trivia, taste, or context-derivable questions. Anything still open when the
+budget is reached is recorded under *Offene Fragen* instead of asked forever.
+The user can cancel at any time and have the Decision Brief written from what
+was clarified so far.
+
+**Handoff.** Once a brief is written, a non-blocking menu offers:
+*Schnellplan aus Decision Brief erstellen*, *Architekturplan aus Decision Brief
+erstellen*, *Nur Decision Brief speichern*, or *Abbrechen*. Choosing a plan
+variant only activates `simple_plan`/`detailed_plan` — it starts no turn and
+no `/work`. The next plan turn then receives the Decision Brief as context
+(respecting the chosen direction, not reopening discarded options, surfacing
+open questions, deriving concrete todos) while the final plan is still written
+to `.agent/plans/current-plan.md`.
+
+**Protection.** An existing `current-plan.md` is guarded as usual when a plan
+is created from a brief. An existing Decision Brief is guarded before a new
+intake overwrites it (archive-with-timestamp / overwrite / cancel); there are
+no silent data losses.
+
+Permissions, tools, thinking, and Shift+Tab are fully independent of the
+Decision-Intake: Shift+Tab stays a pure mode picker, `Ctrl+Shift+Y` stays the
+permission picker, and no intake action changes the permission level.
 
 ## Permissions
 

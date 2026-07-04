@@ -13,6 +13,7 @@
 import type { MenuEntry } from "../shared/menu-ui.ts";
 
 export type PlanAssistantAction =
+  | { kind: "clarify" }
   | { kind: "new-plan"; mode: "simple_plan" | "detailed_plan" }
   | { kind: "continue-plan" }
   | { kind: "review" }
@@ -20,6 +21,17 @@ export type PlanAssistantAction =
   | { kind: "show-todos" }
   | { kind: "archive" }
   | { kind: "cancel" };
+
+/**
+ * Vom Handoff-Menü nach einem geschriebenen Decision Brief angebotene Folgen.
+ * Weder „quick" noch „detailed" starten automatisch einen Turn oder /work;
+ * sie aktivieren lediglich den jeweiligen Plan-Modus.
+ */
+export type DecisionHandoffAction =
+  | "quick"
+  | "detailed"
+  | "save-only"
+  | "cancel";
 
 /**
  * Decision returned by the overwrite guard when the user asks for a new plan
@@ -31,6 +43,17 @@ export interface PlanAssistantMenuState {
   planExists: boolean;
   /** True when the plan has at least one todo and all of them are completed. */
   allTodosComplete: boolean;
+}
+
+function clarifyEntry(): MenuEntry<PlanAssistantAction> {
+  return {
+    id: "plan-clarify",
+    label: "Optionen klären",
+    description:
+      "Interaktiver Decision-Intake: Ziel, Optionen, Risiken und Entscheidungen vor der Planung klären → Decision Brief",
+    section: "Klärung",
+    value: { kind: "clarify" },
+  };
 }
 
 function newPlanEntries(): MenuEntry<PlanAssistantAction>[] {
@@ -77,10 +100,10 @@ export function buildPlanAssistantMenu(
   state: PlanAssistantMenuState,
 ): MenuEntry<PlanAssistantAction>[] {
   if (!state.planExists) {
-    return [...newPlanEntries(), cancelEntry()];
+    return [clarifyEntry(), ...newPlanEntries(), cancelEntry()];
   }
 
-  const entries: MenuEntry<PlanAssistantAction>[] = [];
+  const entries: MenuEntry<PlanAssistantAction>[] = [clarifyEntry()];
 
   if (!state.allTodosComplete) {
     entries.push({
@@ -153,6 +176,75 @@ export function buildOverwriteGuardMenu(): MenuEntry<OverwriteDecision>[] {
       label: "Abbrechen",
       description:
         "Keinen neuen Plan erstellen; die bestehende Datei bleibt erhalten",
+      value: "cancel",
+    },
+  ];
+}
+
+/**
+ * Vier-Optionen-Menü nach einem geschriebenen Decision Brief. „quick"/
+ * „detailed" aktivieren den jeweiligen Plan-Modus (der finale Plan bleibt bei
+ * current-plan.md); „save-only" belässt es beim separaten Brief; „cancel"
+ * ändert nichts. Keine der Optionen startet automatisch einen Turn oder /work.
+ */
+export function buildDecisionHandoffMenu(): MenuEntry<DecisionHandoffAction>[] {
+  return [
+    {
+      id: "handoff-quick",
+      label: "Schnellplan aus Decision Brief erstellen",
+      description:
+        "simple_plan aktivieren; das Decision Brief wird als Kontext in den nächsten Plan-Turn übernommen",
+      value: "quick",
+    },
+    {
+      id: "handoff-detailed",
+      label: "Architekturplan aus Decision Brief erstellen",
+      description:
+        "detailed_plan aktivieren; das Decision Brief wird als Kontext in den nächsten Plan-Turn übernommen",
+      value: "detailed",
+    },
+    {
+      id: "handoff-save-only",
+      label: "Nur Decision Brief speichern",
+      description:
+        "Brief bleibt gespeichert; kein Plan-Modus wird aktiviert",
+      value: "save-only",
+    },
+    {
+      id: "handoff-cancel",
+      label: "Abbrechen",
+      description:
+        "Keine weitere Aktion; das Decision Brief bleibt erhalten",
+      value: "cancel",
+    },
+  ];
+}
+
+/**
+ * Drei-Optionen-Guard, bevor ein neues Decision Brief ein bestehendes ersetzt.
+ * `cancel` lässt die bestehende Brief-Datei unangetastet.
+ */
+export function buildBriefOverwriteGuardMenu(): MenuEntry<OverwriteDecision>[] {
+  return [
+    {
+      id: "brief-overwrite-archive-first",
+      label: "Bestehendes Decision Brief archivieren & neu beginnen",
+      description:
+        "Aktuelles Decision Brief mit Zeitstempel ins Archiv sichern, danach den neuen Klär-Turn starten",
+      value: "archive-first",
+    },
+    {
+      id: "brief-overwrite-now",
+      label: "Bestehendes Decision Brief überschreiben",
+      description:
+        "Aktuelles Decision Brief ohne vorherige Sicherung ersetzen",
+      value: "overwrite",
+    },
+    {
+      id: "brief-overwrite-cancel",
+      label: "Abbrechen",
+      description:
+        "Keinen neuen Klär-Turn starten; das bestehende Decision Brief bleibt erhalten",
       value: "cancel",
     },
   ];

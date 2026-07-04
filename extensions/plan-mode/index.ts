@@ -14,15 +14,22 @@ import type {
 import { relative } from "node:path";
 import {
   applyDoneSteps,
+  archiveDecisionBrief,
   archivePlanFile,
+  DECISION_BRIEF_RELATIVE_PATH,
+  DECISION_BUDGET_COMPLEX,
+  DECISION_BUDGET_DEFAULT,
   ensurePlanDirectory,
+  extractDecisionBriefBlock,
   extractDoneSteps,
   extractTodoItems,
   getReviewOutcome,
   hashPlanContent,
   PLAN_RELATIVE_PATH,
+  readDecisionBrief,
   readPlanFile,
   validatePlanStructure,
+  writeDecisionBriefAtomic,
   writePlanFileAtomic,
   type TodoItem,
 } from "./utils.ts";
@@ -37,8 +44,11 @@ import {
 } from "../shared/workflow-status.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import {
+  buildBriefOverwriteGuardMenu,
+  buildDecisionHandoffMenu,
   buildOverwriteGuardMenu,
   buildPlanAssistantMenu,
+  type DecisionHandoffAction,
   type OverwriteDecision,
   type PlanAssistantAction,
 } from "./plan-menu.ts";
@@ -49,6 +59,7 @@ import {
 const PLAN_MODE_MARKER = "[PLAN MODE ACTIVE]";
 const PLAN_REVIEW_MARKER = "[PLAN REVIEW ACTIVE]";
 const EXECUTING_PLAN_MARKER = "[EXECUTING PLAN]";
+const DECISION_INTAKE_MARKER = "[DECISION INTAKE ACTIVE]";
 
 // Persistenter Kontext für den „Einfachen Plan": dieselbe Plan-Datei wie im
 // ausführlichen Modus, aber ohne lange Architektur-/Risiko-Blöcke.
@@ -183,7 +194,25 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   }
 
   function normalizeInterruptedPhase(ctx: ExtensionContext): void {
-    if (phase !== "executing" && phase !== "reviewing") return;
+    if (
+      phase !== "executing" &&
+      phase !== "reviewing" &&
+      phase !== "deciding"
+    )
+      return;
+    if (phase === "deciding") {
+      // Ein unterbrochener Klär-Turn wird nicht als „deciding" fortgesetzt;
+      // /decide kann erneut gestartet werden.
+      let planExists = false;
+      try {
+        planExists = readPlanFile(ctx.cwd) !== undefined;
+      } catch {
+        planExists = false;
+      }
+      phase = planExists ? "draft" : "idle";
+      reviewedHash = undefined;
+      return;
+    }
     try {
       const content = readPlanFile(ctx.cwd);
       if (content === undefined) {
@@ -377,6 +406,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
   ): Promise<void> {
     switch (action.kind) {
+      case "clarify": {
+        await runDecisionIntake(ctx);
+        return;
+      }
       case "new-plan": {
         if (!(await guardNewPlan(ctx))) return;
         setWorkflowMode(action.mode, ctx);
@@ -471,6 +504,183 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     else if (selected === "show-todos") showPlanTodos(ctx);
   }
 
+  // Decision-Intake: vorgeschalteter Klär-Turn. Klärt über ask_user echte
+  // Entscheidungen und endet mit einem [DECISION-BRIEF]-Block. Startet keine
+  // Umsetzung und wechselt nicht nach /work.
+  async function runDecisionIntake(ctx: ExtensionContext): Promise<void> {
+    if (!ctx.hasUI || ctx.mode !== "tui") {
+      ctx.ui.notify(
+        "Decision-Intake benötigt den TUI-Modus (ask_user ist interaktiv nur dort verfügbar).",
+        "warning",
+      );
+      return;
+    }
+    if (!ctx.isIdle()) ctx.abort();
+    normalizeInterruptedPhase(ctx);
+
+    // Bestehendes Decision Brief vor stillem Überschreiben schützen.
+    let briefExists = false;
+    try {
+      briefExists = readDecisionBrief(ctx.cwd) !== undefined;
+    } catch {
+      briefExists = false;
+    }
+    if (briefExists) {
+      const decision = await runMenu<OverwriteDecision>(
+        ctx,
+        "Bestehendes Decision Brief schützen",
+        buildBriefOverwriteGuardMenu(),
+        {
+          fallbackPrompt: "Bestehendes Decision Brief behandeln",
+          nonInteractiveHint:
+            "Bestehendes Decision Brief würde überschrieben werden — Abbruch zum Schutz.",
+        },
+      );
+      if (!decision || decision === "cancel") {
+        ctx.ui.notify(
+          "Decision-Intake abgebrochen; bestehendes Decision Brief bleibt erhalten.",
+          "info",
+        );
+        return;
+      }
+      if (decision === "archive-first") {
+        try {
+          const archivePath = archiveDecisionBrief(ctx.cwd);
+          ctx.ui.notify(
+            `Bisheriges Decision Brief archiviert: ${relative(ctx.cwd, archivePath)}`,
+            "info",
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          ctx.ui.notify(
+            `Archivierung fehlgeschlagen; Intake abgebrochen: ${message}`,
+            "error",
+          );
+          return;
+        }
+      }
+    }
+
+    try {
+      ensurePlanDirectory(ctx.cwd);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Decision-Intake konnte nicht gestartet werden: ${message}`,
+        "error",
+      );
+      return;
+    }
+
+    phase = "deciding";
+    reviewedHash = undefined;
+    updateStatus(ctx);
+    persistState();
+
+    pi.sendMessage(
+      {
+        customType: "plan-decision-request",
+        content: `${DECISION_INTAKE_MARKER}
+Starte den Decision-Intake für die anstehende Aufgabe. Kläre über ask_user die
+wesentlichen Entscheidungen (je 2–4 Optionen mit Bedeutung + Empfehlung), wie im
+Kontext beschrieben, und schließe mit genau einem [DECISION-BRIEF]-Block ab.
+Starte keine Umsetzung und wechsle nicht nach /work.`,
+        display: true,
+      },
+      { triggerTurn: true },
+    );
+  }
+
+  // Wertet das Ende eines Decision-Turn aus: findet die Extension einen
+  // [DECISION-BRIEF]-Block in der Antwort, schreibt sie ihn atomar nach
+  // decision-brief.md (die Extension schreibt selbst, damit der Turn auf jeder
+  // Permission-Stufe läuft). Ohne Block wird konservativ nichts gespeichert.
+  async function handleDecisionTurnEnd(
+    event: { messages: AgentMessage[] },
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    const block = extractDecisionBriefBlock(
+      getLatestAssistantText(event.messages),
+    );
+
+    let planExists = false;
+    try {
+      planExists = readPlanFile(ctx.cwd) !== undefined;
+    } catch {
+      planExists = false;
+    }
+
+    const resetPhase = () => {
+      phase = planExists ? "draft" : "idle";
+      reviewedHash = undefined;
+      updateStatus(ctx);
+      persistState();
+    };
+
+    if (!block) {
+      resetPhase();
+      ctx.ui.notify(
+        "Kein Decision-Brief-Block erkannt; nichts gespeichert. Nutze /decide für einen neuen Versuch.",
+        "warning",
+      );
+      return;
+    }
+
+    try {
+      writeDecisionBriefAtomic(ctx.cwd, block);
+      ctx.ui.notify(
+        `Decision Brief gespeichert → ${DECISION_BRIEF_RELATIVE_PATH}`,
+        "info",
+      );
+      resetPhase();
+      await offerDecisionHandoff(ctx);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Decision Brief konnte nicht gespeichert werden: ${message}`,
+        "error",
+      );
+      resetPhase();
+    }
+  }
+
+  // Nicht-blockierendes Handoff-Menü nach einem geschriebenen Decision Brief.
+  // Schnell-/Architekturplan aktivieren nur den Modus (der finale Plan bleibt
+  // bei current-plan.md); nichts wird automatisch ausgeführt oder nach /work
+  // gewechselt.
+  async function offerDecisionHandoff(ctx: ExtensionContext): Promise<void> {
+    if (!ctx.hasUI || ctx.mode !== "tui") return;
+    if (typeof ctx.isIdle === "function" && !ctx.isIdle()) return;
+
+    const action = await runMenu<DecisionHandoffAction>(
+      ctx,
+      "Decision Brief — nächster Schritt",
+      buildDecisionHandoffMenu(),
+      {
+        fallbackPrompt: "Nächsten Schritt wählen",
+        nonInteractiveHint:
+          "Decision Brief gespeichert. Nutze /plan für Schnell-/Architekturplan.",
+      },
+    );
+    if (!action || action === "cancel") return;
+    if (action === "save-only") {
+      ctx.ui.notify(
+        `Decision Brief gespeichert → ${DECISION_BRIEF_RELATIVE_PATH}`,
+        "info",
+      );
+      return;
+    }
+
+    // quick / detailed → Plan-Modus aktivieren; bestehenden Plan schützen.
+    if (!(await guardNewPlan(ctx))) return;
+    const targetMode = action === "quick" ? "simple_plan" : "detailed_plan";
+    setWorkflowMode(targetMode, ctx);
+    ctx.ui.notify(
+      `${targetMode === "simple_plan" ? "Schnellplan" : "Architekturplan"} aktiv. Das Decision Brief wird als Kontext genutzt — beschreibe jetzt deine Aufgabe.`,
+      "info",
+    );
+  }
+
   pi.events.on(WORKFLOW_MODE_REQUEST_EVENT, (request: WorkflowModeRequest) => {
     setWorkflowMode(request.mode, request.ctx);
   });
@@ -495,6 +705,14 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerCommand("decide", {
+    description:
+      "Decision-Intake starten (Optionen klären → Decision Brief)",
+    handler: async (_args, ctx) => {
+      await runDecisionIntake(ctx);
+    },
+  });
+
   pi.registerShortcut("ctrl+alt+p", {
     description: "Plan-Assistent öffnen",
     handler: async (ctx) => {
@@ -503,7 +721,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("context", async (event) => {
-    if (mode !== "work" || phase === "executing" || phase === "reviewing")
+    if (
+      mode !== "work" ||
+      phase === "executing" ||
+      phase === "reviewing" ||
+      phase === "deciding"
+    )
       return;
     if (phase === "idle" && !planModeEverUsed) return;
 
@@ -518,7 +741,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
           return (
             !content.includes(PLAN_MODE_MARKER) &&
             !content.includes(PLAN_REVIEW_MARKER) &&
-            !content.includes(EXECUTING_PLAN_MARKER)
+            !content.includes(EXECUTING_PLAN_MARKER) &&
+            !content.includes(DECISION_INTAKE_MARKER)
           );
         }
         if (Array.isArray(content)) {
@@ -527,7 +751,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
               block.type === "text" &&
               (block.text?.includes(PLAN_MODE_MARKER) ||
                 block.text?.includes(PLAN_REVIEW_MARKER) ||
-                block.text?.includes(EXECUTING_PLAN_MARKER)),
+                block.text?.includes(EXECUTING_PLAN_MARKER) ||
+                block.text?.includes(DECISION_INTAKE_MARKER)),
           );
         }
         return true;
@@ -535,7 +760,106 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     };
   });
 
+  // Liefert einen Kontext-Zusatz mit dem aktuellen Decision Brief, falls eines
+  // existiert. Wird an die simple_plan-/detailed_plan-Kontexte angehängt, damit
+  // der folgende Plan-Turn die gewählte Richtung respektiert. Bleibt leer,
+  // wenn kein Brief vorhanden ist.
+  function decisionBriefContext(cwd: string): string {
+    let brief: string | undefined;
+    try {
+      brief = readDecisionBrief(cwd);
+    } catch {
+      return "";
+    }
+    if (!brief) return "";
+    return `
+
+ENTSCHEIDUNGS-KONTEXT (Decision Brief):
+Ein Decision Brief liegt vor unter ${DECISION_BRIEF_RELATIVE_PATH}. Respektiere
+die darin gewählte Richtung, öffne verworfene Optionen nicht erneut, übernimm
+die getroffenen Entscheidungen, mache offene Fragen sichtbar und leite konkrete
+Todos daraus ab. Frage nur dann erneut nach, wenn eine offene Frage wirklich
+planungsrelevant ist.
+
+<decision-brief>
+${brief}
+</decision-brief>`;
+  }
+
   pi.on("before_agent_start", async (_event, ctx) => {
+    if (phase === "deciding") {
+      return {
+        message: {
+          customType: "plan-decision-context",
+          content: `${DECISION_INTAKE_MARKER}
+Du bist im Decision-Intake (Klärmodus). Deine Aufgabe ist ausschließlich, die
+für die Umsetzung wesentlichen Entscheidungen zu klären — NICHT die Umsetzung
+selbst und KEINEN finalen Arbeitsplan zu schreiben.
+
+Vorgehen:
+- Kläre Entscheidungen strukturiert über das Tool ask_user.
+- Stelle pro ask_user-Aufruf genau EINE Frage mit 2–4 konkreten Optionen.
+- Jede Option bekommt eine kurze Bedeutung / Konsequenz / Vor- bzw. Nachteil.
+- Nenne zu jeder Frage immer eine Empfehlung.
+- Stelle keine Fragen, deren Antwort aus dem Kontext ableitbar ist, und keine
+  reinen Geschmacksfragen ohne Auswirkung auf Umsetzung, Risiko, UX,
+  Sicherheit oder Architektur.
+- Prüfe nach jeder Frage, ob weitere Klärung wirklich nötig ist.
+- Der Nutzer kann jederzeit abbrechen oder das Decision Brief erstellen lassen.
+
+Budget:
+- Standardmäßig höchstens ${DECISION_BUDGET_DEFAULT} Entscheidungsfragen.
+- Bei größeren Architektur-, Workflow-, Permission-, UI/UX- oder
+  Sicherheitsänderungen höchstens ${DECISION_BUDGET_COMPLEX} Fragen.
+- Wenn nach Erreichen des Budgets noch offene Punkte bestehen, dokumentiere
+  sie im Brief unter „Offene Fragen" statt endlos nachzufragen.
+
+Abschluss:
+- Schreibe KEINE Dateien und starte KEINE Umsetzung (auch nicht /work).
+- Beende den Turn mit genau einem Block in dieser Form:
+
+[DECISION-BRIEF]
+# Decision Brief: <Aufgabe>
+
+## Ziel
+<Klare Beschreibung, was erreicht werden soll>
+
+## Nicht-Ziele
+<Was ausdrücklich nicht gemacht werden soll>
+
+## Gewählte Richtung
+<Kurze Zusammenfassung der empfohlenen Variante>
+
+## Entscheidungen
+- Entscheidung: ...
+  Begründung: ...
+  Status: entschieden
+
+## Verworfene Optionen
+- Option: ...
+  Grund: ...
+
+## Risiken / Constraints
+- ...
+
+## Offene Fragen
+- ...
+
+## Abschlusskriterien
+- [ ] ...
+
+## Empfohlener nächster Schritt
+- Schnellplan oder Architekturplan
+[/DECISION-BRIEF]
+
+Pflicht sind die Abschnitte Ziel, Entscheidungen und Abschlusskriterien.
+Das System speichert den Block als ${DECISION_BRIEF_RELATIVE_PATH} und bietet
+danach den Handoff an. Stoppe nach dem Block.`,
+          display: false,
+        },
+      };
+    }
+
     if (phase === "reviewing") {
       return {
         message: {
@@ -559,7 +883,7 @@ Beende den Review mit genau einem Marker:
       return {
         message: {
           customType: "simple-plan-context",
-          content: SIMPLE_PLAN_PROMPT,
+          content: SIMPLE_PLAN_PROMPT + decisionBriefContext(ctx.cwd),
           display: false,
         },
       };
@@ -596,7 +920,8 @@ PLANSTRUKTUR:
 Pflicht sind nur Abschnitt 1 (Auftrag) und Abschnitt 5 (Todos, mindestens eine Checkbox). Abschnitte 2–4 sind empfohlen, aber nicht blockierend.
 
 Schreibe den finalen Plan nach ${PLAN_RELATIVE_PATH} und stoppe danach.
-Nächster Schritt: /work. Bei großen, riskanten oder architektonischen Änderungen optional vorher /review-plan.`,
+Nächster Schritt: /work. Bei großen, riskanten oder architektonischen Änderungen optional vorher /review-plan.` +
+            decisionBriefContext(ctx.cwd),
           display: false,
         },
       };
@@ -682,6 +1007,11 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
   });
 
   pi.on("agent_end", async (event, ctx) => {
+    if (phase === "deciding") {
+      await handleDecisionTurnEnd(event, ctx);
+      return;
+    }
+
     if (phase === "reviewing") {
       const reviewText = getLatestAssistantText(event.messages);
       const outcome = getReviewOutcome(reviewText);
@@ -956,6 +1286,10 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       void routePlan(request.ctx);
       return;
     }
+    if (request.action === "decide") {
+      void runDecisionIntake(request.ctx);
+      return;
+    }
     if (request.action === "work") {
       void executePlan(request.ctx);
       return;
@@ -1014,6 +1348,7 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       planModeEverUsed = true;
       if (phase === "idle") phase = "draft";
       if (phase === "reviewing") phase = "draft";
+      if (phase === "deciding") phase = "draft";
       if (
         phase === "reviewed" &&
         (!reviewedHash || hashPlanContent(content) !== reviewedHash)

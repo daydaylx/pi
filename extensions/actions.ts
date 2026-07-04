@@ -69,6 +69,12 @@ export default function actionsExtension(pi: ExtensionAPI): void {
           ctx,
         } satisfies PlanActionRequest);
         return;
+      case "decide":
+        pi.events.emit(PLAN_ACTION_REQUEST_EVENT, {
+          action: "decide",
+          ctx,
+        } satisfies PlanActionRequest);
+        return;
       case "plan-action":
         pi.events.emit(PLAN_ACTION_REQUEST_EVENT, {
           action: target.action,

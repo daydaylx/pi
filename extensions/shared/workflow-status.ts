@@ -7,7 +7,13 @@ export const PERMISSION_REQUEST_EVENT = "pi-workflow:set-permission";
 export type WorkflowMode = "work" | "simple_plan" | "detailed_plan";
 
 export type WorkflowPhase =
-  "idle" | "draft" | "reviewing" | "reviewed" | "executing" | "ready";
+  | "idle"
+  | "draft"
+  | "deciding"
+  | "reviewing"
+  | "reviewed"
+  | "executing"
+  | "ready";
 
 // Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
 // Prompting und Workflow; ausschließlich diese Stufe steuert Tool-Zugriffe.
@@ -69,7 +75,7 @@ export const WRITE_OVERRIDE_DESCRIPTION: Record<WriteOverride, string> = {
 
 export const PLAN_ACTION_REQUEST_EVENT = "pi-workflow:plan-action";
 
-export type PlanAction = "choose" | "work" | "review" | "finish";
+export type PlanAction = "choose" | "work" | "review" | "finish" | "decide";
 
 export interface PlanActionRequest {
   action: PlanAction;
@@ -109,6 +115,7 @@ export type WorkflowStatusEvent =
 export const WORKFLOW_MODE_LABEL: Record<WorkflowPhase, string> = {
   idle: "WORK",
   draft: "PLAN",
+  deciding: "DECIDE",
   reviewing: "REVIEW",
   reviewed: "REVIEWED",
   executing: "WORK",

@@ -47,6 +47,7 @@ const HELP_COMMANDS = [
   { name: "review-plan", command: "/review-plan" },
   { name: "finish", command: "/finish" },
   { name: "plan-todos", command: "/plan-todos" },
+  { name: "decide", command: "/decide" },
   { name: "tools", command: "/tools" },
   { name: "tools-all", command: "/tools-all" },
   { name: "tools-none", command: "/tools-none" },
@@ -98,6 +99,8 @@ export function nextStepFor(phase: WorkflowPhase, planExists: boolean): string {
       return planExists ? "/work" : "/plan";
     case "draft":
       return "/work";
+    case "deciding":
+      return "Klärung läuft — Decision Brief";
     case "reviewing":
       return "Review läuft — bitte warten";
     case "reviewed":
