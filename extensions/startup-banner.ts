@@ -4,8 +4,9 @@
  * Zeigt beim Session-Start einen großen, farbigen PI-AGENT-Blockbanner als
  * persistenten Header oberhalb des Chats (ctx.ui.setHeader) — nicht als
  * flüchtige notify()-Statuszeile. Skaliert nach Terminalbreite:
- *   - breit:   "PI AGENT" als Blockglyphen mit Farbverlauf + Kurzhinweise
- *   - schmal:  "PI" als Blockglyphen + kürzerer Hinweis
+ *   - breit:   "PI AGENT" als Blockglyphen mit Farbverlauf + "by Grunert"
+ *              dezent darunter + Kurzhinweise
+ *   - schmal:  "PI" als Blockglyphen + "by Grunert" + kürzerer Hinweis
  *   - winzig:  eine einfache Textzeile
  * Respektiert NO_COLOR und die vom Theme erkannte Terminal-Farbfähigkeit.
  *
@@ -23,6 +24,7 @@ import {
 
 const ENABLE_STARTUP_BANNER = true;
 const PLAIN_TIER_FULL_TEXT_MIN_WIDTH = 10;
+const BYLINE = "by Grunert";
 
 function subtitleLines(
   theme: Theme,
@@ -68,10 +70,13 @@ export default function startupBannerExtension(pi: ExtensionAPI): void {
           tier === "full" ? "PI AGENT" : "PI",
           colorMode,
         );
+        const byline = theme.fg("dim", BYLINE);
         const subtitle = subtitleLines(theme, model, width);
-        return subtitle.length > 0
-          ? [...glyphLines, "", ...subtitle]
-          : glyphLines;
+        return [
+          ...glyphLines,
+          byline,
+          ...(subtitle.length > 0 ? ["", ...subtitle] : []),
+        ];
       },
       invalidate() {},
     }));

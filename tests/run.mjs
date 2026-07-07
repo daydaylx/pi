@@ -1599,11 +1599,19 @@ function stripAnsi(text) {
     wideLines.some((line) => line.includes("██")),
     "wide render draws the big block banner",
   );
+  assert(
+    wideLines.some((line) => stripAnsi(line) === "by Grunert"),
+    "wide render shows the 'by Grunert' byline under the block banner",
+  );
 
   const narrowLines = component.render(40);
   assert(
     narrowLines.some((line) => line.includes("██")),
     "narrow render still draws a block banner (compact PI)",
+  );
+  assert(
+    narrowLines.some((line) => stripAnsi(line) === "by Grunert"),
+    "narrow render also shows the 'by Grunert' byline",
   );
 
   const tinyLines = component.render(6);
