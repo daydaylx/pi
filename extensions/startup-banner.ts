@@ -1,33 +1,79 @@
 /**
  * Startup-Banner Extension
  *
- * Zeigt beim Session-Start ein kompaktes PI AGENT-Banner als notify-Nachricht.
- * Kein Agent-Turn, keine Permissions-Änderung, kein Workflow-Eingriff.
+ * Zeigt beim Session-Start einen großen, farbigen PI-AGENT-Blockbanner als
+ * persistenten Header oberhalb des Chats (ctx.ui.setHeader) — nicht als
+ * flüchtige notify()-Statuszeile. Skaliert nach Terminalbreite:
+ *   - breit:   "PI AGENT" als Blockglyphen mit Farbverlauf + Kurzhinweise
+ *   - schmal:  "PI" als Blockglyphen + kürzerer Hinweis
+ *   - winzig:  eine einfache Textzeile
+ * Respektiert NO_COLOR und die vom Theme erkannte Terminal-Farbfähigkeit.
  *
- * Deaktivieren: aus settings.json entfernen oder ENABLE_STARTUP_BANNER auf false setzen.
+ * Deaktivieren: aus settings.json entfernen oder ENABLE_STARTUP_BANNER auf
+ * false setzen.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import {
+  buildBigBanner,
+  buildPlainBannerLine,
+  resolveBannerColorMode,
+  resolveBannerTier,
+} from "./shared/banner-render.ts";
 
 const ENABLE_STARTUP_BANNER = true;
+const PLAIN_TIER_FULL_TEXT_MIN_WIDTH = 10;
+
+function subtitleLines(
+  theme: Theme,
+  model: string | undefined,
+  width: number,
+): string[] {
+  const lines: string[] = [];
+
+  const status = model
+    ? `Plan • Work • Permissions • ${model}`
+    : "Plan • Work • Permissions";
+  if (status.length <= width) lines.push(theme.fg("muted", status));
+
+  const commands = "/plan  /work  /review-plan  /permission";
+  if (commands.length <= width) lines.push(theme.fg("dim", commands));
+
+  const shortcuts = "Shift+Tab: Mode    Ctrl+Shift+Y: Permissions";
+  if (shortcuts.length <= width) lines.push(theme.fg("dim", shortcuts));
+
+  return lines;
+}
 
 export default function startupBannerExtension(pi: ExtensionAPI): void {
   if (!ENABLE_STARTUP_BANNER) return;
 
-  let shown = false;
-
   pi.on("session_start", async (_event, ctx) => {
-    if (shown) return;
-    shown = true;
+    if (ctx.mode !== "tui") return;
 
-    const model = ctx.model?.id ?? "GLM-5.2";
-    const banner = [
-      "PI AGENT",
-      `Plan • Work • Permissions • ${model}`,
-      "/plan  /work  /review-plan  /permission",
-      "Shift+Tab: Mode    Ctrl+Shift+Y: Permissions",
-    ].join("\n");
+    const model = ctx.model?.id;
 
-    ctx.ui.notify(banner, "info");
+    ctx.ui.setHeader((_tui, theme) => ({
+      render(width: number): string[] {
+        const colorMode = resolveBannerColorMode(theme.getColorMode());
+        const tier = resolveBannerTier(width);
+
+        if (tier === "plain") {
+          const text =
+            width >= PLAIN_TIER_FULL_TEXT_MIN_WIDTH ? "PI AGENT" : "PI";
+          return [buildPlainBannerLine(text, colorMode)];
+        }
+
+        const glyphLines = buildBigBanner(
+          tier === "full" ? "PI AGENT" : "PI",
+          colorMode,
+        );
+        const subtitle = subtitleLines(theme, model, width);
+        return subtitle.length > 0
+          ? [...glyphLines, "", ...subtitle]
+          : glyphLines;
+      },
+      invalidate() {},
+    }));
   });
 }

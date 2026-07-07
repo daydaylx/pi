@@ -65,6 +65,9 @@ const previewRuntime = await jiti.import(
 const startupBanner = await jiti.import(
   path.resolve(ROOT, "extensions/startup-banner.ts"),
 );
+const bannerRender = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/banner-render.ts"),
+);
 const askUserPolicy = await jiti.import(
   path.resolve(ROOT, "extensions/shared/ask-user-policy.ts"),
 );
@@ -1419,54 +1422,196 @@ eq(
   undefined,
   "digitSelection ignores multi-byte arrow sequences",
 );
-eq(askUserPolicy.digitSelection("", 2), undefined, "digitSelection ignores empty input");
+eq(
+  askUserPolicy.digitSelection("", 2),
+  undefined,
+  "digitSelection ignores empty input",
+);
 eq(
   askUserPolicy.digitSelection("a", 2),
   undefined,
   "digitSelection ignores non-digit characters",
 );
 
+// ───────────────────────── banner-render: pure logic ─────────────────────────
+eq(
+  bannerRender.resolveBannerTier(120),
+  "full",
+  "resolveBannerTier: wide terminal is full",
+);
+eq(
+  bannerRender.resolveBannerTier(90),
+  "full",
+  "resolveBannerTier: exact full threshold is full",
+);
+eq(
+  bannerRender.resolveBannerTier(89),
+  "compact",
+  "resolveBannerTier: just below full threshold is compact",
+);
+eq(
+  bannerRender.resolveBannerTier(26),
+  "compact",
+  "resolveBannerTier: exact compact threshold is compact",
+);
+eq(
+  bannerRender.resolveBannerTier(25),
+  "plain",
+  "resolveBannerTier: just below compact threshold is plain",
+);
+eq(bannerRender.resolveBannerTier(0), "plain", "resolveBannerTier: 0 is plain");
+
+eq(
+  bannerRender.resolveBannerColorMode("truecolor", { NO_COLOR: "1" }),
+  "none",
+  "resolveBannerColorMode: NO_COLOR overrides truecolor",
+);
+eq(
+  bannerRender.resolveBannerColorMode("truecolor", { NO_COLOR: "" }),
+  "none",
+  "resolveBannerColorMode: NO_COLOR present but empty still disables color",
+);
+eq(
+  bannerRender.resolveBannerColorMode("truecolor", {}),
+  "truecolor",
+  "resolveBannerColorMode: no NO_COLOR keeps truecolor",
+);
+eq(
+  bannerRender.resolveBannerColorMode("256color", {}),
+  "256color",
+  "resolveBannerColorMode: no NO_COLOR keeps 256color",
+);
+
+{
+  const lines = bannerRender.buildBigBanner("PI", "none");
+  eq(lines.length, 5, "buildBigBanner PI/none returns 5 lines");
+  assert(
+    lines.every((line) => !line.includes("\x1b")),
+    "buildBigBanner colorMode none contains no ANSI escapes",
+  );
+  assert(
+    lines.some((line) => line.includes("██")),
+    "buildBigBanner PI/none draws filled block pixels",
+  );
+  const widths = new Set(lines.map((line) => line.length));
+  eq(widths.size, 1, "buildBigBanner PI lines are all the same width");
+}
+{
+  const lines = bannerRender.buildBigBanner("PI AGENT", "truecolor");
+  eq(lines.length, 5, "buildBigBanner PI AGENT/truecolor returns 5 lines");
+  assert(
+    lines.every((line) => line.includes("\x1b[38;2;")),
+    "buildBigBanner truecolor uses 24-bit ANSI codes",
+  );
+}
+{
+  const lines = bannerRender.buildBigBanner("PI AGENT", "256color");
+  assert(
+    lines.every((line) => line.includes("\x1b[38;5;")),
+    "buildBigBanner 256color uses 256-color ANSI codes",
+  );
+}
+{
+  const plain = bannerRender.buildPlainBannerLine("PI", "none");
+  eq(plain, "PI", "buildPlainBannerLine none returns unstyled text");
+  const colored = bannerRender.buildPlainBannerLine("PI AGENT", "truecolor");
+  assert(
+    colored.includes("\x1b[38;2;") && colored.includes("P"),
+    "buildPlainBannerLine truecolor colors each character",
+  );
+}
+
 // ───────────────────────── startup-banner: smoke ─────────────────────────
 assert(
   typeof startupBanner.default === "function",
   "startup-banner.ts exports a factory function",
 );
-{
-  let notifyCount = 0;
-  const notifications = [];
-  let sessionStartHandler = null;
 
+function stripAnsi(text) {
+  return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+{
+  let sessionStartHandler = null;
   startupBanner.default({
     on(name, handler) {
       if (name === "session_start") sessionStartHandler = handler;
     },
   });
-
   assert(
     sessionStartHandler !== null,
     "startup-banner registers session_start hook",
   );
 
-  const ctx = {
+  const fakeTheme = {
+    fg: (_color, text) => text,
+    getColorMode: () => "truecolor",
+  };
+
+  let headerFactory = "unset";
+  const rpcCtx = {
+    mode: "rpc",
+    model: { id: "glm-5-turbo" },
+    ui: { setHeader: (factory) => (headerFactory = factory) },
+  };
+  await sessionStartHandler({}, rpcCtx);
+  eq(
+    headerFactory,
+    "unset",
+    "startup-banner does not touch the header outside tui mode",
+  );
+
+  let setHeaderCount = 0;
+  const tuiCtx = {
+    mode: "tui",
     model: { id: "glm-5-turbo" },
     ui: {
-      notify(text, type) {
-        notifyCount++;
-        notifications.push({ text, type });
+      setHeader: (factory) => {
+        setHeaderCount++;
+        headerFactory = factory;
       },
     },
   };
-
-  await sessionStartHandler({}, ctx);
-  eq(notifyCount, 1, "startup-banner sends exactly one notification on session_start");
-  eq(notifications[0].type, "info", "startup-banner notification type is info");
+  await sessionStartHandler({}, tuiCtx);
+  eq(setHeaderCount, 1, "startup-banner calls setHeader once in tui mode");
   assert(
-    notifications[0].text.startsWith("PI AGENT"),
-    "startup-banner notification starts with PI AGENT",
+    typeof headerFactory === "function",
+    "startup-banner passes a component factory to setHeader",
   );
 
-  await sessionStartHandler({}, ctx);
-  eq(notifyCount, 1, "startup-banner does not send a second notification in the same session");
+  const component = headerFactory({}, fakeTheme);
+  assert(
+    typeof component.render === "function",
+    "header component exposes render(width)",
+  );
+  assert(
+    typeof component.invalidate === "function",
+    "header component exposes invalidate()",
+  );
+  component.invalidate();
+
+  const wideLines = component.render(120);
+  assert(
+    wideLines.length > 5,
+    "wide render includes glyph lines plus subtitle lines",
+  );
+  assert(
+    wideLines.some((line) => line.includes("██")),
+    "wide render draws the big block banner",
+  );
+
+  const narrowLines = component.render(40);
+  assert(
+    narrowLines.some((line) => line.includes("██")),
+    "narrow render still draws a block banner (compact PI)",
+  );
+
+  const tinyLines = component.render(6);
+  eq(tinyLines.length, 1, "tiny render falls back to a single plain line");
+  assert(
+    stripAnsi(tinyLines[0]).startsWith("PI"),
+    "tiny render plain line starts with PI",
+  );
 }
 
 // ───────────────────────── package/UI configuration ─────────────────────────
