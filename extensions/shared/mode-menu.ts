@@ -1,7 +1,16 @@
 import type { MenuEntry } from "./menu-ui.ts";
 import type { WorkflowMode } from "./workflow-status.ts";
 
-export function buildModeMenu(mode: WorkflowMode): MenuEntry<WorkflowMode>[] {
+/**
+ * `"decide"` startet den Decision-Intake (transiente Phase, siehe
+ * plan-mode/README.md) statt einen persistenten WorkflowMode zu setzen.
+ * `WorkflowMode` selbst bleibt unverändert auf simple_plan/detailed_plan/work
+ * beschränkt — der Aufrufer in actions.ts muss "decide" vor dem Emit von
+ * WORKFLOW_MODE_REQUEST_EVENT herausfiltern.
+ */
+export type ModeMenuAction = WorkflowMode | "decide";
+
+export function buildModeMenu(mode: WorkflowMode): MenuEntry<ModeMenuAction>[] {
   return [
     {
       id: "mode-simple-plan",
@@ -26,6 +35,14 @@ export function buildModeMenu(mode: WorkflowMode): MenuEntry<WorkflowMode>[] {
         "Normaler Arbeitsmodus; eine vorhandene Plan-Datei wird nicht automatisch ausgeführt",
       value: "work",
       current: mode === "work",
+    },
+    {
+      id: "mode-decide",
+      label: "Optionen klären",
+      description:
+        "Interaktiver Decision-Intake (z. B. für UI-Entscheidungen) vor der Planung → Decision Brief",
+      section: "Klärung",
+      value: "decide",
     },
   ];
 }

@@ -52,6 +52,13 @@ export default function actionsExtension(pi: ExtensionAPI): void {
       nonInteractiveHint: "Nutze /plan, um den Modus zu wählen.",
     });
     if (!selected) return;
+    if (selected === "decide") {
+      pi.events.emit(PLAN_ACTION_REQUEST_EVENT, {
+        action: "decide",
+        ctx,
+      } satisfies PlanActionRequest);
+      return;
+    }
     pi.events.emit(WORKFLOW_MODE_REQUEST_EVENT, {
       mode: selected,
       ctx,

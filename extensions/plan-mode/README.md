@@ -19,7 +19,7 @@ steps.
   starting the detailed plan mode only when no plan exists yet.
 - `/decide`: starts the optional **Decision-Intake** (see "Decision-Intake
   (Klärmodus)" below) — an interactive clarification that produces a Decision
-  Brief. It is also reachable as the *Optionen klären* action inside `/plan`
+  Brief. It is also reachable as the _Optionen klären_ action inside `/plan`
   and the `/decide` entry in the `Ctrl+Shift+X` command menu.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
   independently of whether a review happened. If a plan is already executing,
@@ -34,10 +34,12 @@ steps.
 ## Plan variants
 
 `/plan` is a state-aware assistant (details below). Shift+Tab opens the same
-three persistent modes as a pure mode picker (no permissions, no thinking, no
-tools — see `extensions/shared/mode-menu.ts`); permission levels have their
-own picker on `Ctrl+Shift+Y` (below). Internal values are unchanged; only the
-labels were renamed for clarity:
+three persistent modes as a mode picker (no permissions, no thinking, no
+tools — see `extensions/shared/mode-menu.ts`), plus a fourth, non-persistent
+**Optionen klären** entry that starts the Decision-Intake directly from
+Shift+Tab; permission levels have their own picker on `Ctrl+Shift+Y` (below).
+Internal `WorkflowMode` values are unchanged; only the labels were renamed for
+clarity:
 
 - **Schnellplan** (`simple_plan`) — compact questions and a short plan file
   for small to medium tasks.
@@ -46,6 +48,9 @@ labels were renamed for clarity:
 - **Work** (`work`) — normal work. Selecting Work in Shift+Tab does not
   automatically execute a stored plan; `/work` remains the explicit execution
   command.
+- **Optionen klären** (`"decide"`) — not a `WorkflowMode`; selecting it emits
+  the same `PLAN_ACTION_REQUEST_EVENT` (`action: "decide"`) as `/decide` and
+  the `/plan`/`Ctrl+Shift+X` entries, and does not change `mode`.
 
 ## `/plan` plan assistant
 
@@ -54,33 +59,33 @@ command menu all route through the same assistant. It renders the shared
 `runMenu(...)` overlay (with a plain `ctx.ui.select(...)` fallback) and offers
 different actions depending on the current state:
 
-- **No plan file exists** — *Neuer Schnellplan*, *Neuer Architekturplan*,
-  *Abbrechen*.
-- **Plan exists, todos still open** — *Aktuellen Plan weiterführen*,
-  *Neuer Schnellplan*, *Neuer Architekturplan*, *Aktuellen Plan reviewen*,
-  *Aktuellen Plan ausführen*, *Plan-Todos anzeigen*, *Plan archivieren*,
-  *Abbrechen*.
-- **Plan exists, all todos complete** — *Plan archivieren*,
-  *Neuer Schnellplan*, *Neuer Architekturplan*, *Plan-Todos anzeigen*,
-  *Abbrechen*.
+- **No plan file exists** — _Neuer Schnellplan_, _Neuer Architekturplan_,
+  _Abbrechen_.
+- **Plan exists, todos still open** — _Aktuellen Plan weiterführen_,
+  _Neuer Schnellplan_, _Neuer Architekturplan_, _Aktuellen Plan reviewen_,
+  _Aktuellen Plan ausführen_, _Plan-Todos anzeigen_, _Plan archivieren_,
+  _Abbrechen_.
+- **Plan exists, all todos complete** — _Plan archivieren_,
+  _Neuer Schnellplan_, _Neuer Architekturplan_, _Plan-Todos anzeigen_,
+  _Abbrechen_.
 - **Review or execution running** — the assistant shows a hint notification
   but does not hard-block; the menu remains available, and any active turn is
   normalized through the existing `setWorkflowMode` / `executePlan` /
   `reviewPlan` paths before applying the chosen action.
 
-**Plan protection.** Choosing *Neuer Schnellplan* or *Neuer Architekturplan*
+**Plan protection.** Choosing _Neuer Schnellplan_ or _Neuer Architekturplan_
 while `.agent/plans/current-plan.md` already exists opens a three-option guard:
-*Bestehenden Plan archivieren & neu beginnen* (archives the current file as
-`incomplete`, then starts the new plan), *Bestehenden Plan überschreiben*
-(replaces it without archiving), or *Abbrechen* (keeps the existing file). In a
+_Bestehenden Plan archivieren & neu beginnen_ (archives the current file as
+`incomplete`, then starts the new plan), _Bestehenden Plan überschreiben_
+(replaces it without archiving), or _Abbrechen_ (keeps the existing file). In a
 non-interactive context the guard cannot be shown, so `/plan` conservatively
 refuses to overwrite and only notifies.
 
 **After a plan is created.** Once a plan-mode turn leaves a plan file behind,
-the assistant optionally offers a small, non-blocking *Nächster Schritt* menu:
-*`/work` starten*, *`/review-plan` ausführen*, *Todos anzeigen*, or *Im
-Planmodus bleiben*. Nothing executes automatically — Esc / *Im Planmodus
-bleiben* leave the workflow untouched. The menu only appears in the TUI while
+the assistant optionally offers a small, non-blocking _Nächster Schritt_ menu:
+_`/work` starten_, _`/review-plan` ausführen_, _Todos anzeigen_, or _Im
+Planmodus bleiben_. Nothing executes automatically — Esc / _Im Planmodus
+bleiben_ leave the workflow untouched. The menu only appears in the TUI while
 idle.
 
 Workflow mode, permission level, thinking level, and tool selection remain
@@ -95,14 +100,14 @@ currently selected mode.
 
 ## Decision-Intake (Klärmodus)
 
-The Decision-Intake is an **optional, preparatory** step that runs *before* the
+The Decision-Intake is an **optional, preparatory** step that runs _before_ the
 actual planning. It does **not** replace or extend the workflow modes —
 `work` / `simple_plan` / `detailed_plan` remain the only permanent modes.
 Reaching the intake sets a transient `deciding` phase (analogous to the
 `reviewing` phase), starts **no** implementation, and never switches to
 `/work` automatically.
 
-Start it either via `/decide` or via the *Optionen klären* action inside
+Start it either via `/decide` or via the _Optionen klären_ action inside
 `/plan`. The agent then clarifies the genuinely decision-relevant questions
 using `ask_user` — exactly one focused question per call, 2–4 options each,
 with a short meaning/consequence and an explicit recommendation — and ends the
@@ -127,13 +132,13 @@ replaces `current-plan.md`.
 **8** for larger architectural/workflow/permission/UI/security changes. After
 each question the agent checks whether more clarification is truly needed; no
 trivia, taste, or context-derivable questions. Anything still open when the
-budget is reached is recorded under *Offene Fragen* instead of asked forever.
+budget is reached is recorded under _Offene Fragen_ instead of asked forever.
 The user can cancel at any time and have the Decision Brief written from what
 was clarified so far.
 
 **Handoff.** Once a brief is written, a non-blocking menu offers:
-*Schnellplan aus Decision Brief erstellen*, *Architekturplan aus Decision Brief
-erstellen*, *Nur Decision Brief speichern*, or *Abbrechen*. Choosing a plan
+_Schnellplan aus Decision Brief erstellen_, _Architekturplan aus Decision Brief
+erstellen_, _Nur Decision Brief speichern_, or _Abbrechen_. Choosing a plan
 variant only activates `simple_plan`/`detailed_plan` — it starts no turn and
 no `/work`. The next plan turn then receives the Decision Brief as context
 (respecting the chosen direction, not reopening discarded options, surfacing
@@ -145,8 +150,9 @@ is created from a brief. An existing Decision Brief is guarded before a new
 intake overwrites it (archive-with-timestamp / overwrite / cancel); there are
 no silent data losses.
 
-Permissions, tools, thinking, and Shift+Tab are fully independent of the
-Decision-Intake: Shift+Tab stays a pure mode picker, `Ctrl+Shift+Y` stays the
+Permissions, tools, and thinking are fully independent of the Decision-Intake.
+Shift+Tab additionally offers the intake as its "Optionen klären" entry (see
+"Plan variants" above) but this never changes `mode`, `Ctrl+Shift+Y` stays the
 permission picker, and no intake action changes the permission level.
 
 ## Permissions

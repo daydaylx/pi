@@ -1062,7 +1062,9 @@ assert(
       "/plan offers Neuer Schnellplan when no plan exists",
     );
     assert(
-      lastSelect.labels.some((label) => label.includes("Neuer Architekturplan")),
+      lastSelect.labels.some((label) =>
+        label.includes("Neuer Architekturplan"),
+      ),
       "/plan offers Neuer Architekturplan when no plan exists",
     );
     eq(
@@ -1186,12 +1188,23 @@ assert(
 const modeEntries = modeMenu.buildModeMenu("detailed_plan");
 eq(
   modeEntries.map((entry) => entry.id),
-  ["mode-simple-plan", "mode-detailed-plan", "mode-work"],
-  "Shift+Tab contains only the three mode variants, no permissions",
+  ["mode-simple-plan", "mode-detailed-plan", "mode-work", "mode-decide"],
+  "Shift+Tab contains the three mode variants plus Klärung (decide), no permissions",
 );
 assert(
-  modeEntries.every((entry) => entry.section === undefined),
-  "the mode menu has no sections",
+  modeEntries
+    .filter((entry) => entry.id !== "mode-decide")
+    .every((entry) => entry.section === undefined),
+  "the three persistent mode entries have no section",
+);
+assert(
+  modeEntries.find((entry) => entry.id === "mode-decide")?.section ===
+    "Klärung",
+  "the decide entry is grouped under the Klärung section",
+);
+assert(
+  modeEntries.find((entry) => entry.id === "mode-decide")?.value === "decide",
+  "selecting the decide entry yields the decide action, not a WorkflowMode",
 );
 assert(
   modeEntries.find((entry) => entry.id === "mode-detailed-plan")?.current ===
@@ -1294,8 +1307,8 @@ assert(
 const renamedModeEntries = modeMenu.buildModeMenu("simple_plan");
 eq(
   renamedModeEntries.map((entry) => entry.id),
-  ["mode-simple-plan", "mode-detailed-plan", "mode-work"],
-  "Shift+Tab still contains exactly the three mode variants after the rename",
+  ["mode-simple-plan", "mode-detailed-plan", "mode-work", "mode-decide"],
+  "Shift+Tab still contains the three mode variants plus decide after the rename",
 );
 assert(
   renamedModeEntries.find((entry) => entry.id === "mode-simple-plan").label ===
@@ -1342,7 +1355,10 @@ for (const id of [
   "plan-new-architecture",
   "plan-cancel",
 ]) {
-  assert(openPlanEntries.some((entry) => entry.id === id), "/plan with an open plan offers " + id);
+  assert(
+    openPlanEntries.some((entry) => entry.id === id),
+    "/plan with an open plan offers " + id,
+  );
 }
 assert(
   openPlanEntries.find((entry) => entry.id === "plan-new-quick").value.mode ===
@@ -1403,15 +1419,31 @@ eq(
 );
 
 // ───────────────────────── ask_user digit-key direct selection ─────────────────────────
-eq(askUserPolicy.digitSelection("1", 2), 1, "digitSelection maps '1' to option 1");
-eq(askUserPolicy.digitSelection("2", 4), 2, "digitSelection maps '2' to option 2");
-eq(askUserPolicy.digitSelection("4", 4), 4, "digitSelection maps '4' to the last option");
+eq(
+  askUserPolicy.digitSelection("1", 2),
+  1,
+  "digitSelection maps '1' to option 1",
+);
+eq(
+  askUserPolicy.digitSelection("2", 4),
+  2,
+  "digitSelection maps '2' to option 2",
+);
+eq(
+  askUserPolicy.digitSelection("4", 4),
+  4,
+  "digitSelection maps '4' to the last option",
+);
 eq(
   askUserPolicy.digitSelection("3", 2),
   undefined,
   "digitSelection ignores digits beyond the real option count (no freetext via digit)",
 );
-eq(askUserPolicy.digitSelection("0", 2), undefined, "digitSelection ignores zero");
+eq(
+  askUserPolicy.digitSelection("0", 2),
+  undefined,
+  "digitSelection ignores zero",
+);
 eq(
   askUserPolicy.digitSelection("\u001b", 2),
   undefined,
@@ -1932,7 +1964,9 @@ eq(
       "agent_end (deciding) writes the decision brief from the block",
     );
     assert(
-      notifications.some((n) => n.message.includes("Decision Brief gespeichert")),
+      notifications.some((n) =>
+        n.message.includes("Decision Brief gespeichert"),
+      ),
       "a saved-brief notification is emitted",
     );
     assert(
@@ -1973,7 +2007,10 @@ eq(
     await hooks.get("agent_end")(
       {
         messages: [
-          { role: "assistant", content: [{ type: "text", text: "kein Block" }] },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "kein Block" }],
+          },
         ],
       },
       context,
@@ -2015,9 +2052,7 @@ eq(
       "handoff Schnellplan activates simple_plan",
     );
     assert(
-      !sent
-        .slice(sentBeforeQuick)
-        .some((entry) => entry.options?.triggerTurn),
+      !sent.slice(sentBeforeQuick).some((entry) => entry.options?.triggerTurn),
       "the handoff does not auto-trigger an agent turn",
     );
     const planWithBrief = await hooks.get("before_agent_start")({}, context);

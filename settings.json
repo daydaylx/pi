@@ -2,9 +2,9 @@
   "lastChangelogVersion": "0.80.3",
   "theme": "david-dark",
   "defaultProvider": "zai",
-  "defaultModel": "glm-5-turbo",
+  "defaultModel": "glm-5.2",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "xhigh",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
