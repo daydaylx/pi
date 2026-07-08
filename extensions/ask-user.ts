@@ -1,5 +1,5 @@
 /**
- * Ask-User Tool - Single question with options
+ * Ask-User Tool - Decision card with 2–4 options (effort/risk/recommendation)
  * Full custom UI: options list + inline editor for "Freitext eingeben..."
  * Escape in editor returns to options, Escape in options cancels
  *
@@ -8,6 +8,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
 import {
   Editor,
   type EditorTheme,
@@ -19,40 +20,87 @@ import {
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
+  clampRecommendedIndex,
   digitSelection,
   hasValidQuestionOptionCount,
+  isValidRecommendedIndex,
+  LEVELS,
   MAX_QUESTION_OPTIONS,
   MIN_QUESTION_OPTIONS,
+  type Level,
 } from "./shared/ask-user-policy.ts";
 
-interface OptionWithDesc {
+interface QuestionOption {
   label: string;
-  description?: string;
+  description: string;
+  effort: Level;
+  risk: Level;
+  pro?: string;
+  contra?: string;
 }
 
-type DisplayOption = OptionWithDesc & { isOther?: boolean };
+type DisplayOption =
+  | (QuestionOption & { isOther?: false })
+  | { label: string; isOther: true };
 
 interface QuestionDetails {
   question: string;
   options: string[];
   answer: string | null;
   wasCustom?: boolean;
+  /** 1-based index into the original options array; unset for cancelled/custom answers. */
+  selectedIndex?: number;
 }
 
-// Options with labels and optional descriptions
+function levelColor(level: Level): "warning" | "success" | "text" {
+  if (level === "hoch") return "warning";
+  if (level === "niedrig") return "success";
+  return "text";
+}
+
+// Options with label, description, effort/risk, and optional pro/contra
 const OptionSchema = Type.Object({
-  label: Type.String({ description: "Display label for the option" }),
-  description: Type.Optional(
-    Type.String({ description: "Optional description shown below label" }),
+  label: Type.String({ description: "Kurzer Titel der Option" }),
+  description: Type.String({
+    description: "Kurzbeschreibung: was diese Option konkret bedeutet",
+  }),
+  effort: StringEnum(LEVELS, {
+    description: "Geschätzter Umsetzungsaufwand dieser Option",
+  }),
+  risk: StringEnum(LEVELS, {
+    description: "Geschätztes Risiko dieser Option",
+  }),
+  pro: Type.Optional(
+    Type.String({ description: "Wichtigster Vorteil dieser Option" }),
+  ),
+  contra: Type.Optional(
+    Type.String({ description: "Wichtigster Nachteil dieser Option" }),
   ),
 });
 
 const QuestionParams = Type.Object({
-  question: Type.String({ description: "The question to ask the user" }),
+  question: Type.String({ description: "Die konkrete Entscheidungsfrage" }),
+  why: Type.Optional(
+    Type.String({
+      description:
+        "1–2 kurze Sätze: warum diese Entscheidung jetzt wichtig ist",
+    }),
+  ),
   options: Type.Array(OptionSchema, {
-    description: "2–4 options for the user to choose from",
+    description:
+      "2–4 Optionen zur Auswahl. Genau eine davon ist über recommendedIndex als Empfehlung markiert.",
     minItems: MIN_QUESTION_OPTIONS,
     maxItems: MAX_QUESTION_OPTIONS,
+  }),
+  recommendedIndex: Type.Integer({
+    minimum: 1,
+    maximum: MAX_QUESTION_OPTIONS,
+    description:
+      "1-basierter Index (Position in `options`, gezählt ab 1) der empfohlenen Option.",
+  }),
+  recommendationReason: Type.String({
+    description:
+      "Kurze Begründung, warum die durch recommendedIndex markierte Option empfohlen wird",
   }),
 });
 
@@ -61,7 +109,7 @@ export default function askUser(pi: ExtensionAPI) {
     name: "ask_user",
     label: "Ask User",
     description:
-      "Stellt dem Nutzer eine fokussierte Frage mit 2–4 Antwortoptionen und lässt ihn wählen. Nutzen, wenn eine Nutzerentscheidung nötig ist, um fortzufahren.",
+      "Stellt dem Nutzer eine fokussierte Entscheidungsfrage mit 2–4 Optionen. Jede Option braucht Titel, Kurzbeschreibung, Aufwand und Risiko; genau eine Option wird über recommendedIndex als Empfehlung markiert und über recommendationReason begründet. Nutzen, wenn eine echte Nutzerentscheidung nötig ist, um fortzufahren.",
     parameters: QuestionParams,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -70,7 +118,7 @@ export default function askUser(pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: "Error: UI not available (running in non-interactive mode)",
+              text: `Error: ask_user benötigt den interaktiven TUI-Modus (aktueller Modus: "${ctx.mode}"). Diese Entscheidung kann hier nicht eingeholt werden.`,
             },
           ],
           details: {
@@ -97,6 +145,11 @@ export default function askUser(pi: ExtensionAPI) {
         };
       }
 
+      const recommendedIndex = clampRecommendedIndex(
+        params.recommendedIndex,
+        params.options.length,
+      );
+
       const allOptions: DisplayOption[] = [
         ...params.options,
         { label: "Freitext eingeben.", isOther: true },
@@ -107,7 +160,8 @@ export default function askUser(pi: ExtensionAPI) {
         wasCustom: boolean;
         index?: number;
       } | null>((tui, theme, _kb, done) => {
-        let optionIndex = 0;
+        const recommendedDisplayIndex = recommendedIndex - 1;
+        let optionIndex = recommendedDisplayIndex;
         let editMode = false;
         let cachedLines: string[] | undefined;
 
@@ -222,34 +276,84 @@ export default function askUser(pi: ExtensionAPI) {
           }
 
           lines.push(theme.fg("accent", "─".repeat(renderWidth)));
-          addWrappedWithPrefix(" ", theme.fg("text", params.question));
+          addWrappedWithPrefix(
+            " ",
+            theme.fg("text", `ENTSCHEIDUNG: ${params.question}`),
+          );
+          if (params.why) {
+            lines.push("");
+            addWrappedWithPrefix(
+              " ",
+              theme.fg("muted", "Warum das wichtig ist: ") +
+                theme.fg("text", params.why),
+            );
+          }
           lines.push("");
 
           for (let i = 0; i < allOptions.length; i++) {
             const opt = allOptions[i];
             const selected = i === optionIndex;
-            const isOther = opt.isOther === true;
             const prefix = selected ? theme.fg("accent", "> ") : "  ";
-            const label = `${i + 1}. ${opt.label}${isOther && editMode ? " ✎" : ""}`;
-            const color = selected || (isOther && editMode) ? "accent" : "text";
 
-            addWrappedWithPrefix(prefix, theme.fg(color, label));
-
-            // Show description if present
-            if (opt.description) {
-              addWrappedWithPrefix("     ", theme.fg("muted", opt.description));
+            if (opt.isOther) {
+              const label = `${i + 1}. ${opt.label}${editMode ? " ✎" : ""}`;
+              const color = selected || editMode ? "accent" : "text";
+              addWrappedWithPrefix(prefix, theme.fg(color, label));
+              lines.push("");
+              continue;
             }
+
+            const isRecommended = i === recommendedDisplayIndex;
+            const color = selected ? "accent" : "text";
+            const tag = isRecommended
+              ? theme.fg("success", "  EMPFOHLEN")
+              : "";
+            addWrappedWithPrefix(
+              prefix,
+              theme.fg(color, `${i + 1}. ${opt.label}`) + tag,
+            );
+            addWrappedWithPrefix("     ", theme.fg("muted", opt.description));
+            addWrappedWithPrefix(
+              "     ",
+              theme.fg("muted", "Aufwand: ") +
+                theme.fg(levelColor(opt.effort), opt.effort) +
+                theme.fg("muted", " · Risiko: ") +
+                theme.fg(levelColor(opt.risk), opt.risk),
+            );
+            if (opt.pro) {
+              addWrappedWithPrefix(
+                "     ",
+                theme.fg("muted", `Vorteil: ${opt.pro}`),
+              );
+            }
+            if (opt.contra) {
+              addWrappedWithPrefix(
+                "     ",
+                theme.fg("muted", `Nachteil: ${opt.contra}`),
+              );
+            }
+            lines.push("");
           }
 
           if (editMode) {
-            lines.push("");
             addWrappedWithPrefix(" ", theme.fg("muted", "Your answer:"));
             for (const line of editor.render(Math.max(1, renderWidth - 2))) {
               lines.push(` ${line}`);
             }
+            lines.push("");
+          } else {
+            const recommended = params.options[recommendedIndex - 1];
+            addWrappedWithPrefix(
+              " ",
+              theme.fg("success", "Empfehlung: ") +
+                theme.fg(
+                  "text",
+                  `${recommendedIndex}. ${recommended.label} — ${params.recommendationReason}`,
+                ),
+            );
+            lines.push("");
           }
 
-          lines.push("");
           if (editMode) {
             addWrappedWithPrefix(
               " ",
@@ -258,7 +362,10 @@ export default function askUser(pi: ExtensionAPI) {
           } else {
             addWrappedWithPrefix(
               " ",
-              theme.fg("dim", "↑↓ navigate • Enter to select • Esc to cancel"),
+              theme.fg(
+                "dim",
+                `↑↓ navigate • 1–${params.options.length} direct • Enter = Empfehlung (${recommendedIndex}) • Esc cancel`,
+              ),
             );
           }
           lines.push(theme.fg("accent", "─".repeat(renderWidth)));
@@ -313,6 +420,7 @@ export default function askUser(pi: ExtensionAPI) {
           options: simpleOptions,
           answer: result.answer,
           wasCustom: false,
+          selectedIndex: result.index,
         } as QuestionDetails,
       };
     },
@@ -323,16 +431,28 @@ export default function askUser(pi: ExtensionAPI) {
         theme.fg("muted", args.question);
       const opts = Array.isArray(args.options) ? args.options : [];
       if (opts.length) {
-        const labels = opts.map((o: OptionWithDesc) => o.label);
-        const numbered = [...labels, "Freitext eingeben."].map(
-          (o, i) => `${i + 1}. ${o}`,
-        );
-        text += `\n${theme.fg("dim", `  Options: ${numbered.join(", ")}`)}`;
+        const recommendedIndex = isValidRecommendedIndex(
+          args.recommendedIndex,
+          opts.length,
+        )
+          ? args.recommendedIndex
+          : undefined;
+        const labels = [
+          ...opts.map((o: QuestionOption) => o.label),
+          "Freitext eingeben.",
+        ];
+        const parts = labels.map((label, i) => {
+          const numbered = theme.fg("dim", `${i + 1}. ${label}`);
+          return i + 1 === recommendedIndex
+            ? numbered + theme.fg("success", " EMPFOHLEN")
+            : numbered;
+        });
+        text += `\n${theme.fg("dim", "  Options: ")}${parts.join(theme.fg("dim", ", "))}`;
       }
       return new Text(text, 0, 0);
     },
 
-    renderResult(result, _options, theme, _context) {
+    renderResult(result, _options, theme, context) {
       const details = result.details as QuestionDetails | undefined;
       if (!details) {
         const text = result.content[0];
@@ -352,13 +472,19 @@ export default function askUser(pi: ExtensionAPI) {
           0,
         );
       }
-      const idx = details.options.indexOf(details.answer) + 1;
+
+      const idx =
+        details.selectedIndex ?? details.options.indexOf(details.answer) + 1;
       const display = idx > 0 ? `${idx}. ${details.answer}` : details.answer;
-      return new Text(
-        theme.fg("success", "✓ ") + theme.fg("accent", display),
-        0,
-        0,
-      );
+      let text = theme.fg("success", "✓ ") + theme.fg("accent", display);
+
+      const args = context.args as { options?: QuestionOption[] } | undefined;
+      const chosen = idx > 0 ? args?.options?.[idx - 1] : undefined;
+      if (chosen?.description) {
+        text += `\n  ${theme.fg("muted", chosen.description)}`;
+      }
+
+      return new Text(text, 0, 0);
     },
   });
 }

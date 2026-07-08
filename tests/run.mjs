@@ -1700,6 +1700,70 @@ eq(
   "digitSelection ignores non-digit characters",
 );
 
+// ───────────────────────── ask_user recommendedIndex (decision cards) ─────────────────────────
+eq(
+  askUserPolicy.LEVELS,
+  ["niedrig", "mittel", "hoch"],
+  "LEVELS is the exact niedrig/mittel/hoch vocabulary used by schema and rendering",
+);
+
+eq(
+  askUserPolicy.isValidRecommendedIndex(1, 2),
+  true,
+  "isValidRecommendedIndex accepts the first option",
+);
+eq(
+  askUserPolicy.isValidRecommendedIndex(2, 2),
+  true,
+  "isValidRecommendedIndex accepts the last option",
+);
+eq(
+  askUserPolicy.isValidRecommendedIndex(3, 2),
+  false,
+  "isValidRecommendedIndex rejects an index beyond the option count",
+);
+eq(
+  askUserPolicy.isValidRecommendedIndex(0, 2),
+  false,
+  "isValidRecommendedIndex rejects zero (1-based)",
+);
+eq(
+  askUserPolicy.isValidRecommendedIndex(1.5, 4),
+  false,
+  "isValidRecommendedIndex rejects non-integers",
+);
+eq(
+  askUserPolicy.isValidRecommendedIndex(Number.NaN, 4),
+  false,
+  "isValidRecommendedIndex rejects NaN",
+);
+
+eq(
+  askUserPolicy.clampRecommendedIndex(2, 4),
+  2,
+  "clampRecommendedIndex leaves an in-range index unchanged",
+);
+eq(
+  askUserPolicy.clampRecommendedIndex(5, 3),
+  3,
+  "clampRecommendedIndex clamps a too-high index to the last option",
+);
+eq(
+  askUserPolicy.clampRecommendedIndex(0, 3),
+  1,
+  "clampRecommendedIndex clamps a too-low index up to 1",
+);
+eq(
+  askUserPolicy.clampRecommendedIndex(-3, 3),
+  1,
+  "clampRecommendedIndex clamps a negative index up to 1",
+);
+eq(
+  askUserPolicy.clampRecommendedIndex(Number.NaN, 3),
+  1,
+  "clampRecommendedIndex falls back to 1 for a non-integer",
+);
+
 // ───────────────────────── banner-render: pure logic ─────────────────────────
 eq(
   bannerRender.resolveBannerTier(120),

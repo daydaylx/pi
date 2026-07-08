@@ -24,3 +24,40 @@ export function digitSelection(
   if (digit >= 1 && digit <= optionCount) return digit;
   return undefined;
 }
+
+/** Shared niedrig/mittel/hoch vocabulary for effort/risk, so the TypeBox schema (ask-user.ts) and rendering text never drift apart. */
+export const LEVELS = ["niedrig", "mittel", "hoch"] as const;
+export type Level = (typeof LEVELS)[number];
+
+/**
+ * Validity check for historical rendering (renderCall/renderResult on tool
+ * calls recorded before recommendedIndex existed, or from resumed sessions).
+ * Deliberately NOT clamped: clamping here would fabricate a recommendation
+ * on old data that was never actually made.
+ */
+export function isValidRecommendedIndex(
+  recommendedIndex: number,
+  optionCount: number,
+): boolean {
+  return (
+    Number.isInteger(recommendedIndex) &&
+    recommendedIndex >= 1 &&
+    recommendedIndex <= optionCount
+  );
+}
+
+/**
+ * Normalizes recommendedIndex for a fresh execute() call. Unlike
+ * hasValidQuestionOptionCount, an out-of-range index is purely cosmetic (it
+ * only affects the EMPFOHLEN tag and the Enter default), so it is clamped
+ * rather than rejected. Do not use this for historical rendering — see
+ * isValidRecommendedIndex.
+ */
+export function clampRecommendedIndex(
+  recommendedIndex: number,
+  optionCount: number,
+): number {
+  const safeCount = Math.max(1, optionCount);
+  if (!Number.isInteger(recommendedIndex)) return 1;
+  return Math.min(Math.max(recommendedIndex, 1), safeCount);
+}
