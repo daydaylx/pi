@@ -58,7 +58,7 @@ async function selectWithCustomUi<T>(
   if (typeof ctx.ui.custom !== "function") {
     throw new Error("Custom UI overlay not supported in this context.");
   }
-  const { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } =
+  const { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } =
     await import("@earendil-works/pi-tui");
 
   return ctx.ui.custom<MenuEntry<T> | undefined>(
@@ -66,6 +66,10 @@ async function selectWithCustomUi<T>(
       let selectedIndex = initialMenuIndex(entries);
 
       const refresh = () => tui.requestRender();
+      const padAnsi = (value: string, width: number): string => {
+        const missing = Math.max(0, width - visibleWidth(value));
+        return `${value}${" ".repeat(missing)}`;
+      };
       const move = (delta: number) => {
         if (selectedIndex < 0) return;
         selectedIndex = moveMenuIndex(selectedIndex, delta, entries.length);
@@ -74,9 +78,11 @@ async function selectWithCustomUi<T>(
 
       return {
         render(width: number): string[] {
-          const usableWidth = Math.max(20, width);
+          const usableWidth = Math.max(24, width);
           const border = theme.fg("borderMuted", "─".repeat(usableWidth));
           const lines = [border, theme.fg("accent", theme.bold(` ${title}`))];
+          const cardWidth = Math.max(22, usableWidth - 2);
+          const innerWidth = Math.max(10, cardWidth - 4);
 
           let lastSection: string | undefined;
           for (let index = 0; index < entries.length; index += 1) {
@@ -90,31 +96,34 @@ async function selectWithCustomUi<T>(
             }
 
             const selected = index === selectedIndex;
-            const marker =
-              entry.current === true
-                ? "●"
-                : entry.current === false
-                  ? "○"
-                  : " ";
-            const prefix = selected ? theme.fg("accent", " › ") : "   ";
-            const labelText = `${marker} ${entry.label}`;
-            const label = selected
-              ? theme.fg("accent", theme.bold(labelText))
-              : theme.fg("text", labelText);
-            lines.push(truncateToWidth(`${prefix}${label}`, usableWidth));
-          }
+            const marker = entry.current ? "●" : "○";
+            const prefix = selected ? theme.fg("accent", "› ") : "  ";
+            const color = selected ? "accent" : "borderMuted";
+            const textColor = selected ? "accent" : "text";
+            const titleText = `${marker} ${entry.label}`;
+            const top = `┌${"─".repeat(cardWidth - 2)}┐`;
+            const bottom = `└${"─".repeat(cardWidth - 2)}┘`;
+            const cardLine = (content: string): string =>
+              `${prefix}${theme.fg(color, "│")} ${padAnsi(content, innerWidth)} ${theme.fg(color, "│")}`;
 
-          const active =
-            selectedIndex >= 0 ? entries[selectedIndex] : undefined;
-          lines.push("");
-          if (active) {
+            lines.push(`${prefix}${theme.fg(color, top)}`);
             lines.push(
-              ...wrapTextWithAnsi(
-                theme.fg("muted", ` ${active.description}`),
-                usableWidth,
+              cardLine(
+                selected
+                  ? theme.fg(textColor, theme.bold(truncateToWidth(titleText, innerWidth)))
+                  : theme.fg(textColor, truncateToWidth(titleText, innerWidth)),
               ),
             );
+            for (const wrapped of wrapTextWithAnsi(
+              theme.fg("muted", entry.description),
+              innerWidth,
+            ).slice(0, 3)) {
+              lines.push(cardLine(wrapped));
+            }
+            lines.push(`${prefix}${theme.fg(color, bottom)}`);
           }
+
+          lines.push("");
           lines.push(
             theme.fg("dim", " ↑↓ wählen • Enter übernehmen • Esc schließen"),
           );

@@ -49,6 +49,7 @@ import {
   type WorkflowModeRequest,
   type WorkflowPhase,
 } from "../shared/workflow-status.ts";
+import { formatWorkProgressLines } from "../shared/visual-system.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import { SHORTCUTS } from "../shared/shortcuts.ts";
 import {
@@ -202,21 +203,29 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       totalTodos: todos.length,
     });
 
-    const modeLabel =
-      mode === "simple_plan"
-        ? "PLAN SCHNELL"
-        : mode === "detailed_plan"
-          ? "PLAN ARCHITEKTUR"
-          : "WORK";
-    ctx.ui.setStatus(
-      "workflow-mode",
-      mode === "work" ? modeLabel : ctx.ui.theme.fg("accent", modeLabel),
-    );
-
-    // Weder Widget noch Footer zeigen die Todo-Anzahl. Beide Keys werden
-    // explizit gelöscht, damit kein lingernder Wert im Footer stehen bleibt.
-    ctx.ui.setWidget("plan-todos", undefined);
+    // Status/Footer werden zentral in ux-status.ts gerendert. Plan-mode liefert
+    // nur noch strukturierte Status-Events und das Work-Progress-Widget.
+    ctx.ui.setStatus("workflow-mode", undefined);
     ctx.ui.setStatus("plan-todos-count", undefined);
+
+    if (phase === "executing" && todos.length > 0) {
+      ctx.ui.setWidget("work-progress", (_tui, theme) => ({
+        render(): string[] {
+          return formatWorkProgressLines(todos).map((line, index) => {
+            if (index === 0) return theme.fg("accent", theme.bold(line));
+            if (line.includes(" ✓ ")) return theme.fg("success", line);
+            if (line.includes(" ! ") || line.includes(" × ")) {
+              return theme.fg("warning", line);
+            }
+            return theme.fg("muted", line);
+          });
+        },
+        invalidate() {},
+      }));
+    } else {
+      ctx.ui.setWidget("work-progress", undefined);
+      ctx.ui.setWidget("plan-todos", undefined);
+    }
   }
 
   function invalidateReview(): void {
@@ -395,15 +404,20 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     try {
       const todos = readTodos(ctx.cwd);
       if (todos.length === 0) {
-        ctx.ui.notify(`Keine Todos in ${PLAN_RELATIVE_PATH} gefunden.`, "info");
+        ctx.ui.notify(
+          [
+            "KEIN AKTIVER PLAN-FORTSCHRITT",
+            "",
+            `Keine Todos in ${PLAN_RELATIVE_PATH} gefunden.`,
+            "",
+            "Nächster Schritt",
+            "/plan starten oder bestehenden Plan prüfen.",
+          ].join("\n"),
+          "info",
+        );
         return;
       }
-      const list = todos
-        .map(
-          (todo) => `${todo.step}. ${todo.completed ? "✓" : "○"} ${todo.text}`,
-        )
-        .join("\n");
-      ctx.ui.notify(`Plan-Fortschritt:\n${list}`, "info");
+      ctx.ui.notify(formatWorkProgressLines(todos).join("\n"), "info");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(

@@ -28,6 +28,10 @@ steps.
   architectural changes. It records review status without changing the active
   workflow mode or gating `/work`.
 - `/plan-todos`: read progress from the current plan file.
+- `/done <n> [m …]`: manually check off todo numbers (as listed by
+  `/plan-todos`). Fallback for missed `[DONE:n]` markers — without it a plan
+  whose markers the model forgot would stay "executing" forever. Uses the same
+  completion/archive path as the automatic detection.
 - `/finish`: manual archive/early-abort. Runs automatically once all todos
   are checked off (see "Completion").
 
@@ -51,6 +55,13 @@ clarity:
 - **Optionen klären** (`"decide"`) — not a `WorkflowMode`; selecting it emits
   the same `PLAN_ACTION_REQUEST_EVENT` (`action: "decide"`) as `/decide` and
   the `/plan`/`Ctrl+Shift+X` entries, and does not change `mode`.
+
+**Thinking coupling.** A real mode change also sets the thinking level to the
+mode default (`MODE_THINKING` in `index.ts`): Schnellplan → `medium`,
+Architekturplan → `xhigh`, Work → `high`. A manual override via `/thinking` or
+`Ctrl+Shift+T` stays in effect until the next mode change; selecting the
+already-active mode changes nothing. The session start value still comes from
+`settings.json` → `defaultThinkingLevel`.
 
 ## `/plan` plan assistant
 
@@ -81,21 +92,23 @@ _Bestehenden Plan archivieren & neu beginnen_ (archives the current file as
 non-interactive context the guard cannot be shown, so `/plan` conservatively
 refuses to overwrite and only notifies.
 
-**After a plan is created.** Once a plan-mode turn leaves a plan file behind,
-the assistant optionally offers a small, non-blocking _Nächster Schritt_ menu:
-_`/work` starten_, _`/review-plan` ausführen_, _Todos anzeigen_, or _Im
-Planmodus bleiben_. Nothing executes automatically — Esc / _Im Planmodus
-bleiben_ leave the workflow untouched. The menu only appears in the TUI while
-idle.
+**After a plan is created.** Only the turn that newly creates the plan file
+offers a small, non-blocking _Nächster Schritt_ menu: _`/work` starten_,
+_`/review-plan` ausführen_, _Todos anzeigen_, or _Im Planmodus bleiben_.
+Refinement turns on an existing plan stay menu-free (they only notify that the
+plan was saved). Nothing executes automatically — Esc / _Im Planmodus bleiben_
+leave the workflow untouched. The menu only appears in the TUI while idle.
 
 Workflow mode, permission level, thinking level, and tool selection remain
 fully independent; `/plan` only changes the workflow mode/phase and never
 touches permissions.
 
-All mode transitions are direct: they have no idle, phase, escalation or
-confirmation guard. If an agent turn is active, mode selection aborts and
-normalizes the current review/execution state before applying the requested
-mode. `/review-plan` is not a mode transition and therefore preserves the
+Mode transitions have no phase or escalation guard, but they protect running
+work: selecting the already-active mode while idle is a no-op, and if an agent
+turn is active, the switch (as well as `/work`, `/review-plan`, and `/decide`)
+first asks _Laufenden Agent-Turn abbrechen?_ before aborting and normalizing
+the review/execution state. Declining keeps the turn running and changes
+nothing. `/review-plan` is not a mode transition and therefore preserves the
 currently selected mode.
 
 ## Decision-Intake (Klärmodus)
@@ -150,6 +163,11 @@ is created from a brief. An existing Decision Brief is guarded before a new
 intake overwrites it (archive-with-timestamp / overwrite / cancel); there are
 no silent data losses.
 
+**Lifecycle.** When the plan is archived (auto-completion, `/done`, or
+`/finish`), an existing `decision-brief.md` is archived along with it. A brief
+therefore never leaks as stale context into a later, unrelated plan turn;
+archive errors are non-fatal (notification only, the plan archive stands).
+
 Permissions, tools, and thinking are fully independent of the Decision-Intake.
 Shift+Tab additionally offers the intake as its "Optionen klären" entry (see
 "Plan variants" above) but this never changes `mode`, `Ctrl+Shift+Y` stays the
@@ -166,13 +184,22 @@ existing `/write` override are persisted per session. For the three writable
 levels, a restrictive `/write` override takes precedence; `read-only` and
 `read-bash` always retain their current-plan-file exception.
 
-| Level         | Effective access                                                                                           |
-| ------------- | ---------------------------------------------------------------------------------------------------------- |
-| `read-only`   | Project reads; only the current plan file remains writable                                                 |
-| `read-bash`   | Project reads, proven read-only Bash commands, and the current plan file                                   |
-| `read-write`  | Normal project writes; prompts for risky operations                                                        |
-| `full-access` | Also allows package installs and Git housekeeping; still prompts for deletion, `sudo`, and external writes |
-| `yolo`        | Allows ordinary deletion, `sudo`, and non-system external writes; hard warnings remain active              |
+| Level         | Effective access                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `read-only`   | Project reads; only the current plan file remains writable                                                               |
+| `read-bash`   | Project reads, proven read-only Bash commands, and the current plan file                                                 |
+| `read-write`  | Normal project writes; prompts for risky operations                                                                      |
+| `full-access` | Also allows package installs and Git housekeeping; still prompts for deletion, `sudo`, force-push, and external writes   |
+| `yolo`        | Allows ordinary deletion, `sudo`, force-push, and non-system external writes; hard warnings remain active                |
+
+`git push --force` (including `--force-with-lease`/`-f`) is classified as
+sensitive, not as Git housekeeping: it destroys remote history, so
+`full-access` still prompts for it and only `yolo` runs it unprompted. Secret
+detection targets real secret files (dotfiles such as `.env`/`.ssh`, bare
+names such as `credentials`, and data/key extensions such as `auth.json` or
+`secrets.yaml`); source-code modules such as `src/auth.ts` or `tokenizer.ts`
+no longer trigger hard warnings — false alarms would erode the remaining
+warnings' credibility.
 
 Use `/permission <level>` to select a level directly. `/full-access` and
 `/yolo` toggle their respective level and return to `read-write` when invoked
@@ -221,21 +248,41 @@ The review uses its own temporary phase only while the review turn runs.
 
 The checkboxes under `## Todos` are the sole Todo source; an optional numeric
 prefix such as `## 5. Todos` is accepted. During execution, `[DONE:n]` updates
-checkbox `n` atomically in the plan file. As soon as every checkbox is
-checked, the plan is archived automatically under
+checkbox `n` atomically in the plan file; `/done <n> [m …]` is the manual
+fallback for missed markers. As soon as every checkbox is checked, the plan is
+archived automatically under
 `.agent/plans/archive/YYYY-MM-DD-HHMM-current-plan.md` with `Status:
-complete`. If archiving fails, the phase falls back to `ready` and `/finish`
-can be run manually as a retry. `/finish` remains available to archive a plan
-early with open todos (`Status: incomplete`, requires interactive
-confirmation) or as that retry path.
+complete`, and an existing Decision Brief is archived along with it. If
+archiving fails, the phase falls back to `ready` and `/finish` can be run
+manually as a retry. Invoking `/work` on an already fully completed plan
+offers to archive it directly (confirmation) instead of only pointing at
+`/finish`. `/finish` remains available to archive a plan early with open todos
+(`Status: incomplete`, requires interactive confirmation) or as that retry
+path.
 
 ## Permission shortcut
 
 `Ctrl+Shift+Y` opens the permission picker; `/yolo` remains the direct YOLO
-toggle. Both change only the permission level, which is visibly marked in the
-footer. On terminals without reliable modified-key reporting, use
+toggle. Both change only the permission level, which is visibly marked by the
+single central header/footer from `ux-status.ts`. On terminals without reliable modified-key reporting, use
 `/permission` or `/yolo`; Pi's preferred shortcut requires Kitty/CSI-u or
 compatible `modifyOtherKeys` support.
+
+## Restrisiken (bewusste Entscheidungen)
+
+Zwei Punkte sind absichtlich so konfiguriert und bleiben als Restrisiko
+bestehen:
+
+- **YOLO-Autostart.** `AUTO_YOLO_ON_START = true` ist eine bewusste
+  Komfort-Entscheidung. Neue Sessions starten auf der höchsten Stufe; sudo,
+  Löschungen (auch `rm -rf ~`) und externe Schreibzugriffe laufen dort ohne
+  Rückfrage. Nur die harten Warnmuster (Root-Löschung, `.git`-Löschung,
+  `chmod 777`, Download-to-Shell, Systempfade, Secrets) bleiben aktiv.
+- **Planmodi sind Prompt-only.** `simple_plan`/`detailed_plan`/Review/Intake
+  verbieten Umsetzung nur über den injizierten Kontext; technisch erzwungen
+  wird nichts. Wer echten Schutz beim Planen will, wählt `read-only` oder
+  `read-bash` (Plan-Datei bleibt beschreibbar) oder setzt
+  `/write plan-only`.
 
 ## Compaction
 

@@ -16,7 +16,7 @@ export function buildModeMenu(mode: WorkflowMode): MenuEntry<ModeMenuAction>[] {
       id: "mode-simple-plan",
       label: "Schnellplan",
       description:
-        "Kompakter Planmodus (simple_plan) mit kurzen Rückfragen und klaren nächsten Schritten",
+        "Kleine Änderung planen. Schnell · wenig Risiko · keine Umsetzung ohne /work",
       value: "simple_plan",
       current: mode === "simple_plan",
     },
@@ -24,7 +24,7 @@ export function buildModeMenu(mode: WorkflowMode): MenuEntry<ModeMenuAction>[] {
       id: "mode-detailed-plan",
       label: "Architekturplan",
       description:
-        "Detaillierte Analyse (detailed_plan) von Kontext, Risiken, Optionen und Umsetzung",
+        "Größere Änderung sauber planen. Tief · strukturiert · sicher",
       value: "detailed_plan",
       current: mode === "detailed_plan",
     },
@@ -32,7 +32,7 @@ export function buildModeMenu(mode: WorkflowMode): MenuEntry<ModeMenuAction>[] {
       id: "mode-work",
       label: "Work-Modus",
       description:
-        "Normaler Arbeitsmodus; eine vorhandene Plan-Datei wird nicht automatisch ausgeführt",
+        "Bestehenden Plan oder freie Aufgabe bearbeiten. Kontrolliert · explizit · nur mit aktuellen Permissions",
       value: "work",
       current: mode === "work",
     },
@@ -40,7 +40,7 @@ export function buildModeMenu(mode: WorkflowMode): MenuEntry<ModeMenuAction>[] {
       id: "mode-decide",
       label: "Optionen klären",
       description:
-        "Interaktiver Decision-Intake (z. B. für UI-Entscheidungen) vor der Planung → Decision Brief",
+        "Vorentscheidung klären. 2–4 Optionen · Empfehlung · Decision Brief vor dem Plan",
       section: "Klärung",
       value: "decide",
     },

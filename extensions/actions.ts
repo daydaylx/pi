@@ -8,6 +8,7 @@ import {
 } from "./shared/command-menu.ts";
 import { buildModeMenu } from "./shared/mode-menu.ts";
 import { runMenu } from "./shared/menu-ui.ts";
+import { SHORTCUTS } from "./shared/shortcuts.ts";
 import {
   buildPermissionMenu,
   buildWriteOverrideMenu,
@@ -158,17 +159,17 @@ export default function actionsExtension(pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("actions", {
-    description: "Modus-Menü öffnen",
-    handler: async (_args, ctx) => openModeMenu(ctx),
+    description: "Zentrales Aktionsmenü öffnen",
+    handler: async (_args, ctx) => openCommandMenu(ctx),
   });
 
-  pi.registerShortcut("shift+tab", {
-    description: "Modus wählen",
+  pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
+    description: SHORTCUTS.modeMenu.description,
     handler: async (ctx) => openModeMenu(ctx),
   });
 
-  pi.registerShortcut("ctrl+shift+x", {
-    description: "Befehlsmenü öffnen",
+  pi.registerShortcut(SHORTCUTS.commandMenu.keys, {
+    description: SHORTCUTS.commandMenu.description,
     handler: async (ctx) => openCommandMenu(ctx),
   });
 }

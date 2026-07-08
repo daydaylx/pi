@@ -17,6 +17,7 @@ import {
 } from "./shared/permission-policy.ts";
 import { runMenu } from "./shared/menu-ui.ts";
 import { buildPermissionMenu } from "./shared/permission-menu.ts";
+import { SHORTCUTS } from "./shared/shortcuts.ts";
 import {
   PERMISSION_REQUEST_EVENT,
   PERMISSION_LEVEL_LABEL,
@@ -28,6 +29,7 @@ import {
   type WriteOverride,
   type WriteOverrideRequest,
 } from "./shared/workflow-status.ts";
+import { formatPermissionWarning } from "./shared/visual-system.ts";
 
 const STATUS_KEY = "workflow-permission";
 const PERSISTED_STATE_KEY = "mode-permissions";
@@ -125,14 +127,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   let writeOverride: WriteOverride = "inherit";
 
   function publishStatus(ctx: ExtensionContext): void {
-    const text =
-      permissionLevel === "yolo" || permissionLevel === "full-access"
-        ? ctx.ui.theme.fg(
-            "warning",
-            `PERM ${PERMISSION_LEVEL_LABEL[permissionLevel].toUpperCase()}`,
-          )
-        : `PERM ${PERMISSION_LEVEL_LABEL[permissionLevel].toUpperCase()}`;
-    ctx.ui.setStatus(STATUS_KEY, text);
+    // Footer/Header werden zentral in ux-status.ts gerendert. Dieser alte
+    // Status-Key wird nur noch gelöscht, damit keine zweite Statusquelle bleibt.
+    ctx.ui.setStatus(STATUS_KEY, undefined);
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
       source: "permission",
       writeOverride,
@@ -164,7 +161,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       const confirmText =
         level === "yolo"
           ? "Normale Work-Rückfragen werden umgangen. Systempfade, Secrets, SSH-Keys, sudo, Löschungen und extreme Befehle bleiben hart bestätigt."
-          : "Git-Housekeeping (reset/clean/force-push) und Paketmanager-Installationen werden ohne Rückfrage erlaubt. sudo, Löschungen, externe Schreibzugriffe und kritische Befehle bleiben bestätigt.";
+          : "Git-Housekeeping (reset/clean) und Paketmanager-Installationen werden ohne Rückfrage erlaubt. sudo, Löschungen, Force-Push, externe Schreibzugriffe und kritische Befehle bleiben bestätigt.";
       const confirmed = await ctx.ui.confirm(
         `${PERMISSION_LEVEL_LABEL[level]} für diese Session aktivieren?`,
         confirmText,
@@ -175,7 +172,11 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     permissionLevel = level;
     publishStatus(ctx);
     persistState();
-    ctx.ui.notify(`Zugriffsstufe: ${PERMISSION_LEVEL_LABEL[level]}.`, "info");
+    const warning = formatPermissionWarning(level);
+    ctx.ui.notify(
+      warning ?? `Zugriffsstufe: ${PERMISSION_LEVEL_LABEL[level]}.`,
+      warning ? "warning" : "info",
+    );
   }
 
   async function openPermissionMenu(ctx: ExtensionContext): Promise<void> {
@@ -265,8 +266,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerShortcut("ctrl+shift+y", {
-    description: "Permission-Schnellmenü öffnen",
+  pi.registerShortcut(SHORTCUTS.permissionMenu.keys, {
+    description: SHORTCUTS.permissionMenu.description,
     handler: async (ctx) => openPermissionMenu(ctx),
   });
 
@@ -332,7 +333,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       ctx.mode === "tui"
     ) {
       ctx.ui.notify(
-        "YOLO automatisch aktiv. /yolo zum Deaktivieren.",
+        `${formatPermissionWarning("yolo")}\n\nNächster Schritt: /yolo deaktiviert YOLO, /permission öffnet Alternativen.`,
         "warning",
       );
     }

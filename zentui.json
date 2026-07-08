@@ -7,25 +7,25 @@
   },
   "features": {
     "editor": true,
-    "statusLine": true,
+    "statusLine": false,
     "copyFriendly": true
   },
   "footerSegments": {
-    "cwd": true,
-    "gitBranch": true,
-    "gitStatus": true,
-    "runtime": true,
-    "context": true,
-    "tokens": true,
-    "cost": true
+    "cwd": false,
+    "gitBranch": false,
+    "gitStatus": false,
+    "runtime": false,
+    "context": false,
+    "tokens": false,
+    "cost": false
   },
   "extensionStatuses": {
     "defaultPlacement": "right",
     "placements": {
-      "workflow-mode": "left"
+      "workflow-summary": "left"
     },
     "colorModes": {
-      "workflow-mode": "original"
+      "workflow-summary": "original"
     }
   }
 }

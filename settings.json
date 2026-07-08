@@ -1,10 +1,10 @@
 {
   "lastChangelogVersion": "0.80.3",
   "theme": "david-dark",
-  "defaultProvider": "zai",
-  "defaultModel": "glm-5.2",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "xhigh",
+  "defaultThinkingLevel": "high",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -17,8 +17,12 @@
   "collapseChangelog": true,
   "enableInstallTelemetry": false,
   "enabledModels": [
-    "glm-5.2",
-    "glm-5-turbo"
+    "zai/glm-5.2",
+    "zai/glm-5-turbo",
+    "openai-codex/gpt-5.4-mini",
+    "openai-codex/gpt-5.4",
+    "openai-codex/gpt-5.3-codex-spark",
+    "openai-codex/gpt-5.5"
   ],
   "packages": [
     "npm:pi-scroll",
@@ -36,7 +40,6 @@
   "extensions": [
     "!extensions/**",
     "+extensions/notify.ts",
-    "+extensions/startup-banner.ts",
     "+extensions/preview-runtime.ts",
     "+extensions/tools.ts",
     "+extensions/plan-mode/index.ts",

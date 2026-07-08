@@ -85,31 +85,10 @@ export function buildCommandMenu(
       value: { kind: "tools-action", action: "open" },
     },
     {
-      id: "cmd-tools-all",
-      section: "Tools",
-      label: "/tools-all",
-      description: "Alle Tools aktivieren",
-      value: { kind: "tools-action", action: "enable-all" },
-    },
-    {
-      id: "cmd-tools-none",
-      section: "Tools",
-      label: "/tools-none",
-      description: "Alle Tools deaktivieren",
-      value: { kind: "tools-action", action: "disable-all" },
-    },
-    {
       id: "cmd-status",
       section: "Status",
       label: "/status",
       description: "Kompakten Workflow-Status anzeigen",
-      value: { kind: "status" },
-    },
-    {
-      id: "cmd-home",
-      section: "Status",
-      label: "/home",
-      description: "Alias für /status",
       value: { kind: "status" },
     },
     {

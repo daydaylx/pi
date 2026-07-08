@@ -74,6 +74,9 @@ const askUserPolicy = await jiti.import(
 const workflowStatus = await jiti.import(
   path.resolve(ROOT, "extensions/shared/workflow-status.ts"),
 );
+const visualSystem = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/visual-system.ts"),
+);
 
 let passed = 0;
 let failed = 0;
@@ -728,13 +731,22 @@ assert(
   };
 
   await handlers.get("session_start")({}, context);
-  eq(statuses.at(-1), "PERM YOLO", "new sessions use configured Auto-YOLO");
+  eq(
+    emitted.at(-1)[1].permissionLevel,
+    "yolo",
+    "new sessions use configured Auto-YOLO",
+  );
+  eq(
+    statuses.at(-1),
+    undefined,
+    "permission extension clears its legacy footer status key",
+  );
 
   // De-escalation is immediate and does not depend on idle/mode state.
   await commands.get("yolo")("", context);
   eq(
-    statuses.at(-1),
-    "PERM READ + WRITE",
+    emitted.at(-1)[1].permissionLevel,
+    "read-write",
     "/yolo can be disabled while the agent is busy",
   );
   assert(
@@ -1869,87 +1881,45 @@ function stripAnsi(text) {
       if (name === "session_start") sessionStartHandler = handler;
     },
   });
-  assert(
-    sessionStartHandler !== null,
-    "startup-banner registers session_start hook",
-  );
-
-  const fakeTheme = {
-    fg: (_color, text) => text,
-    getColorMode: () => "truecolor",
-  };
-
-  let headerFactory = "unset";
-  const rpcCtx = {
-    mode: "rpc",
-    model: { id: "glm-5-turbo" },
-    ui: { setHeader: (factory) => (headerFactory = factory) },
-  };
-  await sessionStartHandler({}, rpcCtx);
   eq(
-    headerFactory,
-    "unset",
-    "startup-banner does not touch the header outside tui mode",
+    sessionStartHandler,
+    null,
+    "startup-banner is disabled so ux-status remains the single header source",
   );
 
-  let setHeaderCount = 0;
-  const tuiCtx = {
-    mode: "tui",
-    model: { id: "glm-5-turbo" },
-    ui: {
-      setHeader: (factory) => {
-        setHeaderCount++;
-        headerFactory = factory;
-      },
-    },
+  const visualState = {
+    mode: "detailed_plan",
+    phase: "draft",
+    permissionLevel: "read-write",
+    planExists: true,
+    completedTodos: 1,
+    totalTodos: 4,
+    model: "glm-5-turbo",
+    thinking: "high",
+    nextStep: "/work",
   };
-  await sessionStartHandler({}, tuiCtx);
-  eq(setHeaderCount, 1, "startup-banner calls setHeader once in tui mode");
-  assert(
-    typeof headerFactory === "function",
-    "startup-banner passes a component factory to setHeader",
-  );
-
-  const component = headerFactory({}, fakeTheme);
-  assert(
-    typeof component.render === "function",
-    "header component exposes render(width)",
+  eq(
+    visualSystem.formatHeaderLines(ROOT, visualState).length,
+    2,
+    "central visual header is exactly two lines",
   );
   assert(
-    typeof component.invalidate === "function",
-    "header component exposes invalidate()",
-  );
-  component.invalidate();
-
-  const wideLines = component.render(120);
-  assert(
-    wideLines.length > 5,
-    "wide render includes glyph lines plus subtitle lines",
+    visualSystem
+      .formatFooterLine(visualState, "main")
+      .includes("ARCH · DRAFT · READ+WRITE · 3 TODO · NEXT /work"),
+    "central footer combines mode, permission, todos and next step",
   );
   assert(
-    wideLines.some((line) => line.includes("██")),
-    "wide render draws the big block banner",
+    visualSystem.formatPermissionWarning("yolo").includes("YOLO MODE"),
+    "YOLO has an explicit visual warning block",
   );
-  assert(
-    wideLines.some((line) => stripAnsi(line) === "by Grunert"),
-    "wide render shows the 'by Grunert' byline under the block banner",
-  );
-
-  const narrowLines = component.render(40);
-  assert(
-    narrowLines.some((line) => line.includes("██")),
-    "narrow render still draws a block banner (compact PI)",
-  );
-  assert(
-    narrowLines.some((line) => stripAnsi(line) === "by Grunert"),
-    "narrow render also shows the 'by Grunert' byline",
-  );
-
-  const tinyLines = component.render(6);
-  eq(tinyLines.length, 1, "tiny render falls back to a single plain line");
-  assert(
-    stripAnsi(tinyLines[0]).startsWith("PI"),
-    "tiny render plain line starts with PI",
+  eq(
+    visualSystem.formatWorkProgressLines([
+      { step: 1, text: "A", completed: true },
+      { step: 2, text: "B", completed: false },
+    ]),
+    ["WORK PROGRESS", "", "T1 ✓ A", "T2 ○ B"],
+    "work progress uses the shared compact symbols",
   );
 }
 
@@ -1978,14 +1948,26 @@ function stripAnsi(text) {
     "settings explicitly loads the local /actions extension",
   );
   assert(
+    settings.extensions.includes("+extensions/ux-status.ts"),
+    "settings explicitly loads the central chrome/status extension",
+  );
+  assert(
+    !settings.extensions.includes("+extensions/startup-banner.ts"),
+    "settings disables the old competing startup banner",
+  );
+  assert(
     !settings.extensions.includes("+extensions/or-free/index.ts"),
     "settings does not load the OpenRouter free-model extension",
   );
-  eq(settings.defaultProvider, "zai", "GLM uses the configured Z.ai provider");
+  eq(
+    settings.defaultProvider,
+    "openai-codex",
+    "OpenAI Codex uses the configured provider",
+  );
   eq(
     settings.defaultModel,
-    "glm-5.2",
-    "GLM-5.2 is the configured default model",
+    "gpt-5.5",
+    "GPT-5.5 is the configured default model",
   );
 
   const zentui = JSON.parse(
@@ -1993,18 +1975,19 @@ function stripAnsi(text) {
   );
   eq(
     zentui.features.statusLine,
-    true,
-    "Zentui is the single active statusline",
+    false,
+    "Zentui statusline is disabled so Pi has one central footer",
   );
   eq(
-    zentui.extensionStatuses.placements["workflow-mode"],
+    zentui.extensionStatuses.placements["workflow-summary"],
     "left",
-    "Zentui preserves the central workflow mode status",
+    "Zentui preserves only the central workflow summary fallback status",
   );
   assert(
-    !("plan-todos-count" in zentui.extensionStatuses.placements) &&
-      !("plan-todos-count" in zentui.extensionStatuses.colorModes),
-    "Zentui contains no stale placement for the hidden plan todo status",
+    !("workflow-mode" in zentui.extensionStatuses.placements) &&
+      !("workflow-permission" in zentui.extensionStatuses.placements) &&
+      !("plan-todos-count" in zentui.extensionStatuses.placements),
+    "Zentui contains no stale placements for old workflow status keys",
   );
 
   assert(

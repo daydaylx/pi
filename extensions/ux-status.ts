@@ -23,11 +23,13 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { runMenu } from "./shared/menu-ui.ts";
+import { SHORTCUTS } from "./shared/shortcuts.ts";
 import { buildThinkingMenu, THINKING_LEVELS } from "./shared/thinking-menu.ts";
 import {
   PERMISSION_LEVEL_LABEL,
   STATUS_REQUEST_EVENT,
   WORKFLOW_MODE_LABEL,
+  WORKFLOW_PHASE_LABEL,
   WORKFLOW_STATUS_EVENT,
   type PermissionLevel,
   type StatusRequest,
@@ -35,33 +37,29 @@ import {
   type WorkflowPhase,
   type WorkflowStatusEvent,
 } from "./shared/workflow-status.ts";
+import {
+  formatEmptyPlanState,
+  formatFooterLine,
+  formatHeaderLines,
+  formatModePhase,
+  formatPermissionWarning,
+  permissionTone,
+  phaseTone,
+  toneColor,
+  type VisualWorkflowState,
+} from "./shared/visual-system.ts";
 
-// Commands, die in der Ctrl+Shift+H-Hilfe auftauchen dürfen, sofern sie
-// tatsächlich registriert sind. `native: true` markiert feste Pi-Commands,
-// die NICHT über pi.getCommands() auffindbar sind (siehe dort), aber
-// garantiert existieren.
-const HELP_COMMANDS = [
-  { name: "plan", command: "/plan" },
-  { name: "work", command: "/work" },
-  { name: "go", command: "/go" },
-  { name: "review-plan", command: "/review-plan" },
-  { name: "finish", command: "/finish" },
-  { name: "plan-todos", command: "/plan-todos" },
-  { name: "decide", command: "/decide" },
-  { name: "tools", command: "/tools" },
-  { name: "tools-all", command: "/tools-all" },
-  { name: "tools-none", command: "/tools-none" },
-  { name: "actions", command: "/actions" },
-  { name: "permission", command: "/permission <level>" },
-  { name: "write", command: "/write <allow|block|plan-only>" },
-  { name: "full-access", command: "/full-access" },
-  { name: "yolo", command: "/yolo" },
-  { name: "thinking", command: "/thinking <level>" },
-  { name: "status", command: "/status" },
-  { name: "home", command: "/home" },
-  { name: "scroll", command: "/scroll" },
-  { name: "model", command: "/model", native: true },
-] as const;
+// Feste Pi-Commands, die NICHT über pi.getCommands() auffindbar sind, aber
+// garantiert existieren und in der Hilfe auftauchen sollen.
+const NATIVE_HELP_COMMANDS = ["  /model — Modell wählen (nativ)"];
+const CENTRAL_STATUS_KEY = "workflow-summary";
+
+function truncatePlain(value: string, width: number): string {
+  if (width <= 0) return "";
+  if (value.length <= width) return value;
+  if (width === 1) return "…";
+  return `${value.slice(0, width - 1)}…`;
+}
 
 interface GitInfo {
   branch: string;
@@ -128,6 +126,76 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
   };
   let workflowMode: WorkflowMode = "work";
   let permissionLevel: PermissionLevel = "read-write";
+  let activeCtx: ExtensionContext | undefined;
+
+  function buildVisualState(ctx: ExtensionContext): VisualWorkflowState {
+    return {
+      mode: workflowMode,
+      phase: plan.phase,
+      permissionLevel,
+      planExists: plan.planExists,
+      completedTodos: plan.completedTodos,
+      totalTodos: plan.totalTodos,
+      model: ctx.model?.id,
+      thinking: pi.getThinkingLevel(),
+      nextStep: nextStepFor(plan.phase, plan.planExists),
+    };
+  }
+
+  function installCentralChrome(ctx: ExtensionContext): void {
+    const ui = ctx.ui as typeof ctx.ui & {
+      setHeader?: (factory: unknown) => void;
+      setFooter?: (factory: unknown) => void;
+    };
+
+    if (ctx.mode === "tui" && typeof ui.setHeader === "function") {
+      ui.setHeader((_tui: unknown, theme: any) => ({
+        render(width: number): string[] {
+          const state = buildVisualState(ctx);
+          const [title, status] = formatHeaderLines(ctx.cwd, state);
+          const modeColor = toneColor(phaseTone(state.phase, state.mode));
+          const permColor = toneColor(permissionTone(state.permissionLevel));
+          const statusParts = truncatePlain(status, width).split(" | ");
+          const styledStatus = [
+            theme.fg(modeColor, statusParts[0] ?? ""),
+            theme.fg("muted", statusParts[1] ?? ""),
+            theme.fg("muted", statusParts[2] ?? ""),
+            theme.fg(permColor, statusParts[3] ?? ""),
+          ].join(theme.fg("dim", " | "));
+          return [
+            theme.fg("accent", theme.bold(truncatePlain(title, width))),
+            styledStatus,
+          ];
+        },
+        invalidate() {},
+      }));
+    }
+
+    if (ctx.mode === "tui" && typeof ui.setFooter === "function") {
+      ui.setFooter((tui: any, theme: any, footerData: any) => {
+        const dispose = footerData?.onBranchChange?.(() => tui.requestRender());
+        return {
+          render(width: number): string[] {
+            const state = buildVisualState(ctx);
+            const raw = truncatePlain(
+              formatFooterLine(state, footerData?.getGitBranch?.()),
+              width,
+            );
+            const color = toneColor(permissionTone(state.permissionLevel));
+            return [theme.fg(color, raw)];
+          },
+          invalidate() {},
+          dispose,
+        };
+      });
+    }
+  }
+
+  function updateCentralStatus(ctx: ExtensionContext): void {
+    const state = buildVisualState(ctx);
+    const summary = formatFooterLine(state);
+    ctx.ui.setStatus(CENTRAL_STATUS_KEY, summary);
+  }
 
   pi.events.on(WORKFLOW_STATUS_EVENT, (event: WorkflowStatusEvent) => {
     if (event.source === "plan") {
@@ -141,10 +209,11 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     } else if (event.source === "permission") {
       permissionLevel = event.permissionLevel;
     }
+    if (activeCtx) updateCentralStatus(activeCtx);
   });
 
   async function showStatus(ctx: ExtensionContext): Promise<void> {
-    const modeLabel = workflowMode.replaceAll("_", " ").toUpperCase();
+    const modeLabel = WORKFLOW_MODE_LABEL[workflowMode];
     const git = getGitInfo(ctx.cwd);
     const gitLine = git
       ? `${git.branch}${git.dirty > 0 ? `, dirty ${git.dirty}` : ""}`
@@ -158,23 +227,41 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     const isFreeModel =
       cost !== undefined ? cost.input === 0 && cost.output === 0 : undefined;
 
-    const text = [
-      `Mode: ${modeLabel}`,
-      `Model: ${ctx.model?.id ?? "kein Modell aktiv"}`,
-      `Provider: ${ctx.model?.provider ?? "-"}`,
-      ...(isFreeModel !== undefined
-        ? [`Kosten: ${isFreeModel ? "kostenlos" : "kostenpflichtig"}`]
-        : []),
-      `Thinking: ${pi.getThinkingLevel()}`,
-      `Plan: ${plan.planExists ? "vorhanden" : "nicht vorhanden"}`,
-      `Todos: ${todosLine}`,
-      `Git: ${gitLine}`,
-      `Permission: ${PERMISSION_LEVEL_LABEL[permissionLevel]}`,
-      `Workflow: ${WORKFLOW_MODE_LABEL[plan.phase]}`,
-      `Next: ${nextStepFor(plan.phase, plan.planExists)}`,
-    ].join("\n");
+    const warning = formatPermissionWarning(permissionLevel);
+    const text = plan.planExists
+      ? [
+          "STATUS",
+          formatModePhase({ mode: workflowMode, phase: plan.phase }),
+          "",
+          "Details",
+          `- Modus: ${modeLabel}`,
+          `- Model: ${ctx.model?.id ?? "kein Modell aktiv"}`,
+          `- Provider: ${ctx.model?.provider ?? "-"}`,
+          ...(isFreeModel !== undefined
+            ? [`- Kosten: ${isFreeModel ? "kostenlos" : "kostenpflichtig"}`]
+            : []),
+          `- Thinking: ${pi.getThinkingLevel()}`,
+          `- Plan: vorhanden`,
+          `- Todos: ${todosLine}`,
+          `- Git: ${gitLine}`,
+          `- Permission: ${PERMISSION_LEVEL_LABEL[permissionLevel]}`,
+          `- Phase: ${WORKFLOW_PHASE_LABEL[plan.phase]}`,
+          "",
+          "Nächster Schritt",
+          nextStepFor(plan.phase, plan.planExists),
+          ...(warning ? ["", warning] : []),
+        ].join("\n")
+      : [
+          formatEmptyPlanState(),
+          "",
+          "STATUS",
+          `Permission: ${PERMISSION_LEVEL_LABEL[permissionLevel]}`,
+          `Model: ${ctx.model?.id ?? "kein Modell aktiv"}`,
+          `Thinking: ${pi.getThinkingLevel()}`,
+          ...(warning ? ["", warning] : []),
+        ].join("\n");
 
-    ctx.ui.notify(text, "info");
+    ctx.ui.notify(text, warning ? "warning" : "info");
   }
 
   pi.registerCommand("status", {
@@ -190,6 +277,9 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
   pi.events.on(STATUS_REQUEST_EVENT, (request: StatusRequest) => {
     void showStatus(request.ctx);
   });
+
+  pi.on("model_select", async (_event, ctx) => updateCentralStatus(ctx));
+  pi.on("thinking_level_select", async (_event, ctx) => updateCentralStatus(ctx));
 
   pi.registerCommand("thinking", {
     description: "Thinking-Level setzen: minimal | low | medium | high | xhigh",
@@ -208,8 +298,8 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerShortcut("ctrl+shift+t", {
-    description: "Thinking wählen",
+  pi.registerShortcut(SHORTCUTS.thinkingMenu.keys, {
+    description: SHORTCUTS.thinkingMenu.description,
     handler: async (ctx) => {
       const selected = await runMenu(
         ctx,
@@ -226,25 +316,30 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerShortcut("ctrl+shift+h", {
-    description: "Shortcut-/Command-Hilfe anzeigen",
+  pi.registerShortcut(SHORTCUTS.help.keys, {
+    description: SHORTCUTS.help.description,
     handler: async (ctx) => {
-      const registered = new Set(pi.getCommands().map((c) => c.name));
-      const commands = HELP_COMMANDS.filter(
-        (c) => ("native" in c && c.native) || registered.has(c.name),
-      ).map((c) => c.command);
+      // Beide Listen entstehen aus den tatsächlichen Registrierungen: Commands
+      // aus pi.getCommands(), Shortcuts aus der geteilten SHORTCUTS-Konstante.
+      // Eine handgepflegte Liste kann so nicht mehr driften.
+      const commands = pi
+        .getCommands()
+        .map((command) => {
+          const description = (command as { description?: string }).description;
+          return `  /${command.name}${description ? ` — ${description}` : ""}`;
+        })
+        .sort((a, b) => a.localeCompare(b, "de"));
 
       const text = [
         "Shortcuts:",
-        "  Shift+Tab      Modus wählen",
-        "  Ctrl+Shift+Y   Permissions wählen",
-        "  Ctrl+Shift+T   Thinking wählen",
-        "  Ctrl+Shift+X   Befehlsmenü öffnen",
-        "  Ctrl+Shift+H   Hilfe anzeigen",
-        "  Ctrl+Alt+P     Plan-Assistent öffnen",
+        ...Object.values(SHORTCUTS).map(
+          (shortcut) =>
+            `  ${shortcut.label.padEnd(14)} ${shortcut.description}`,
+        ),
         "",
         "Commands:",
-        ...commands.map((c) => `  ${c}`),
+        ...commands,
+        ...NATIVE_HELP_COMMANDS,
       ].join("\n");
 
       ctx.ui.notify(text, "info");
@@ -266,8 +361,15 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    activeCtx = ctx;
+    installCentralChrome(ctx);
+    updateCentralStatus(ctx);
     lastThinkingLabel = DEFAULT_THINKING_LABEL;
     ctx.ui.setHiddenThinkingLabel(lastThinkingLabel);
+  });
+
+  pi.on("session_shutdown", async () => {
+    activeCtx = undefined;
   });
 
   pi.on("message_update", async (event, ctx) => {

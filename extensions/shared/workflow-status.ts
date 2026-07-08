@@ -33,7 +33,7 @@ export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
   "read-bash": "Lesen, sichere Inspect-Bash-Befehle und die Plan-Datei",
   "read-write": "Normaler Projektzugriff mit Rückfragen bei riskanten Aktionen",
   "full-access":
-    "Git-Housekeeping/Paketmanager ohne Rückfrage; sudo/Löschen bleiben bestätigt",
+    "Git-Housekeeping/Paketmanager ohne Rückfrage; sudo/Löschen/Force-Push bleiben bestätigt",
   yolo: "sudo/Löschen/externe Schreibzugriffe ohne Rückfrage; kritische Muster bleiben bestätigt",
 };
 
@@ -112,7 +112,7 @@ export type WorkflowStatusEvent =
       permissionLevel: PermissionLevel;
     };
 
-export const WORKFLOW_MODE_LABEL: Record<WorkflowPhase, string> = {
+export const WORKFLOW_PHASE_LABEL: Record<WorkflowPhase, string> = {
   idle: "WORK",
   draft: "PLAN",
   deciding: "DECIDE",
@@ -120,4 +120,10 @@ export const WORKFLOW_MODE_LABEL: Record<WorkflowPhase, string> = {
   reviewed: "REVIEWED",
   executing: "WORK",
   ready: "READY",
+};
+
+export const WORKFLOW_MODE_LABEL: Record<WorkflowMode, string> = {
+  work: "Work",
+  simple_plan: "Schnellplan",
+  detailed_plan: "Architekturplan",
 };

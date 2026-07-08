@@ -14,8 +14,17 @@ export interface PolicyDecision {
 
 const ALLOW: PolicyDecision = { action: "allow", reason: "Erlaubt" };
 
-const SECRET_PATH_PATTERN =
-  /(^|[\s/\\])(?:\.env(?:\.[^\s/\\]+)?|\.ssh|\.gnupg|\.aws|\.npmrc|\.pypirc|\.netrc|auth(?:\.[^\s/\\]+)?|credentials?(?:\.[^\s/\\]+)?|secrets?(?:\.[^\s/\\]+)?|tokens?(?:\.[^\s/\\]+)?|id_rsa|id_ed25519|[^\s/\\]+\.pem)(?:[\s/\\]|$)/i;
+// Namenssegmente wie auth/credentials/secrets/tokens gelten nur als Secret,
+// wenn sie ohne Endung (auch als Dotfile) oder mit einer Daten-/Key-Endung
+// auftreten. Quellcode-Module wie src/auth.ts oder tokenizer.ts lösen keine
+// harte Warnung mehr aus — Fehlalarme entwerten die verbliebenen Warnungen.
+const SECRET_DATA_EXTENSIONS = "json|ya?ml|toml|ini|env|pem|key|p12|pfx";
+const SECRET_PATH_PATTERN = new RegExp(
+  "(^|[\\s/\\\\])(?:\\.env(?:\\.[^\\s/\\\\]+)?|\\.ssh|\\.gnupg|\\.aws|\\.npmrc|\\.pypirc|\\.netrc|" +
+    `\\.?(?:auth|credentials?|secrets?|tokens?)(?:\\.(?:${SECRET_DATA_EXTENSIONS}))?` +
+    "|id_rsa|id_ed25519|[^\\s/\\\\]+\\.pem)(?:[\\s/\\\\]|$)",
+  "i",
+);
 const ENV_EXAMPLE_PATTERN = /(^|[\s/\\])\.env\.example(?=[\s/\\]|$)/gi;
 const SYSTEM_PATHS = ["/etc", "/usr", "/bin", "/sbin", "/boot", "/var"];
 
@@ -47,13 +56,18 @@ const CRITICAL_BASH_PATTERNS: Array<[RegExp, string]> = [
 ];
 
 // Bleiben ausschließlich in YOLO automatisch erlaubt (nicht in Full Access):
-// sudo/su sowie Datei-/Ordnerlöschung. Sudo/Delete-Fragen werden bewusst nicht
-// zur Full-Access-Stufe freigegeben, damit Full Access spürbar zurückhaltender
-// bleibt als YOLO.
+// sudo/su, Datei-/Ordnerlöschung und erzwungene Git-Pushes. Diese Fragen
+// werden bewusst nicht zur Full-Access-Stufe freigegeben, damit Full Access
+// spürbar zurückhaltender bleibt als YOLO — Force-Push zerstört Remote-
+// History und ist kein Housekeeping.
 const SENSITIVE_ASK_PATTERNS: Array<[RegExp, string]> = [
   [/\b(?:rm|rmdir|unlink|trash)\b/i, "Datei- oder Ordnerlöschung"],
   [/\bgio\s+trash\b/i, "Datei- oder Ordnerlöschung"],
   [/\bsudo\b|\bsu\s+-?(?:\s|$)/i, "Ausführung mit erhöhten Rechten"],
+  [
+    /\bgit\s+push\b[^;&|]*(?:--force(?:-with-lease)?|-f)(?:\s|$)/i,
+    "erzwungener Git-Push",
+  ],
 ];
 
 // Git-Housekeeping und Paketmanager-Rauschen: in Full Access UND YOLO
@@ -68,10 +82,6 @@ const ROUTINE_ASK_PATTERNS: Array<[RegExp, string]> = [
   [
     /\bgit\s+restore\s+(?:--\s+)?\.(?:\s|$)/i,
     "Verwerfen aller Änderungen mit git restore",
-  ],
-  [
-    /\bgit\s+push\b[^;&|]*(?:--force(?:-with-lease)?|-f)(?:\s|$)/i,
-    "erzwungener Git-Push",
   ],
   [
     /\bnpm\s+(?:install|uninstall|update|ci|link|publish)\b/i,
@@ -566,9 +576,7 @@ export function decideBash(
   if (permissionLevel === "read-bash") {
     return isPlanSafeCommand(trimmed, cwd)
       ? ALLOW
-      : deny(
-          "Read + Bash: Das Kommando ist nicht nachweislich read-only.",
-        );
+      : deny("Read + Bash: Das Kommando ist nicht nachweislich read-only.");
   }
 
   if (isSensitiveReference(trimmed)) {
@@ -604,8 +612,7 @@ export function decideBash(
   }
   for (const [pattern, reason] of ROUTINE_ASK_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return permissionLevel === "yolo" ||
-        permissionLevel === "full-access"
+      return permissionLevel === "yolo" || permissionLevel === "full-access"
         ? ALLOW
         : ask(reason);
     }
