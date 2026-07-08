@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.80.3",
   "theme": "david-dark",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5",
+  "defaultProvider": "opencode-go",
+  "defaultModel": "deepseek-v4-pro",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -22,7 +22,18 @@
     "openai-codex/gpt-5.4-mini",
     "openai-codex/gpt-5.4",
     "openai-codex/gpt-5.3-codex-spark",
-    "openai-codex/gpt-5.5"
+    "openai-codex/gpt-5.5",
+    "opencode-go/kimi-k2.6",
+    "opencode-go/minimax-m3",
+    "opencode-go/qwen3.7-max",
+    "opencode-go/minimax-m2.7",
+    "opencode-go/qwen3.6-plus",
+    "opencode-go/deepseek-v4-flash",
+    "opencode-go/qwen3.7-plus",
+    "opencode-go/deepseek-v4-pro",
+    "opencode-go/kimi-k2.7-code",
+    "opencode-go/mimo-v2.5-pro",
+    "opencode-go/mimo-v2.5"
   ],
   "packages": [
     "npm:pi-scroll",
@@ -43,6 +54,7 @@
     "+extensions/preview-runtime.ts",
     "+extensions/tools.ts",
     "+extensions/plan-mode/index.ts",
+    "+extensions/subagents/index.ts",
     "+extensions/mode-permissions.ts",
     "+extensions/ask-user.ts",
     "+extensions/ux-status.ts",

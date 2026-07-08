@@ -9,10 +9,12 @@
 // sibling agent/npm/node_modules.
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -34,6 +36,12 @@ const utils = await jiti.import(
 const notify = await jiti.import(path.resolve(ROOT, "extensions/notify.ts"));
 const modePermissions = await jiti.import(
   path.resolve(ROOT, "extensions/mode-permissions.ts"),
+);
+const subagents = await jiti.import(
+  path.resolve(ROOT, "extensions/subagents/index.ts"),
+);
+const subagentAgents = await jiti.import(
+  path.resolve(ROOT, "extensions/subagents/agents.ts"),
 );
 const planMode = await jiti.import(
   path.resolve(ROOT, "extensions/plan-mode/index.ts"),
@@ -847,6 +855,51 @@ assert(
     "/write allow clears the write override",
   );
 
+  const previousEnvPermission = process.env.PI_SUBAGENT_PERMISSION_LEVEL;
+  const previousEnvWriteOverride = process.env.PI_SUBAGENT_WRITE_OVERRIDE;
+  process.env.PI_SUBAGENT_PERMISSION_LEVEL = "read-bash";
+  process.env.PI_SUBAGENT_WRITE_OVERRIDE = "block";
+  try {
+    const childEmitted = [];
+    const childHandlers = new Map();
+    modePermissions.default({
+      events: {
+        on() {},
+        emit(_name, event) {
+          childEmitted.push(event);
+        },
+      },
+      on(name, handler) {
+        childHandlers.set(name, handler);
+      },
+      registerCommand() {},
+      registerShortcut() {},
+      appendEntry() {},
+    });
+    await childHandlers.get("session_start")({}, context);
+    eq(
+      childEmitted.at(-1).permissionLevel,
+      "read-bash",
+      "subagent child env overrides Auto-YOLO permission",
+    );
+    eq(
+      childEmitted.at(-1).writeOverride,
+      "block",
+      "subagent child env applies write override",
+    );
+  } finally {
+    if (previousEnvPermission === undefined) {
+      delete process.env.PI_SUBAGENT_PERMISSION_LEVEL;
+    } else {
+      process.env.PI_SUBAGENT_PERMISSION_LEVEL = previousEnvPermission;
+    }
+    if (previousEnvWriteOverride === undefined) {
+      delete process.env.PI_SUBAGENT_WRITE_OVERRIDE;
+    } else {
+      process.env.PI_SUBAGENT_WRITE_OVERRIDE = previousEnvWriteOverride;
+    }
+  }
+
   // Session resume restores the last persisted permission and override.
   sessionEntries = persisted.slice();
   await handlers.get("session_start")({}, context);
@@ -859,6 +912,287 @@ assert(
     emitted.at(-1)[1].writeOverride,
     "inherit",
     "session resume restores write override",
+  );
+}
+
+// ───────────────────────── subagents: discovery + safety smoke ─────────────────────────
+assert(
+  typeof subagents.default === "function",
+  "subagents extension exports a factory function",
+);
+{
+  const discovery = subagentAgents.discoverAgents(ROOT, "user");
+  const agentNames = discovery.agents.map((agent) => agent.name);
+  for (const expected of [
+    "scout",
+    "planner",
+    "reviewer",
+    "test-runner",
+    "security-auditor",
+    "docs-auditor",
+    "worker",
+    "oracle",
+  ]) {
+    assert(agentNames.includes(expected), `global subagent exists: ${expected}`);
+  }
+  assert(
+    discovery.agents.find((agent) => agent.name === "worker")?.permission ===
+      "read-write",
+    "worker is the only write-capable default role by policy",
+  );
+  assert(
+    discovery.agents
+      .filter((agent) => agent.name !== "worker")
+      .every((agent) => agent.writeOverride === "block"),
+    "non-worker subagents block write-capable bash by default",
+  );
+
+  const projectRoot = mkdtempSync(path.join(tmpdir(), "pi-subagent-project-"));
+  try {
+    const projectAgentsDir = path.join(projectRoot, ".pi", "agents");
+    mkdirSync(projectAgentsDir, { recursive: true });
+    writeFileSync(
+      path.join(projectAgentsDir, "local-reviewer.md"),
+      [
+        "---",
+        "name: local-reviewer",
+        "description: Project-local test agent",
+        "tools: read, grep, find, ls",
+        "---",
+        "Project-local prompt.",
+        "",
+      ].join("\n"),
+    );
+    const projectOnly = subagentAgents.discoverAgents(projectRoot, "project");
+    eq(
+      projectOnly.agents.map((agent) => agent.name),
+      ["local-reviewer"],
+      "project scope discovers project-local agents without user agents",
+    );
+
+    const registeredTools = new Map();
+    const commands = new Map();
+    subagents.default({
+      registerTool(tool) {
+        registeredTools.set(tool.name, tool);
+      },
+      registerCommand(name, options) {
+        commands.set(name, options);
+      },
+      on(_name, _handler) {
+        // noop in tests – hooks are optional
+      },
+      getThinkingLevel() {
+        return "high";
+      },
+    });
+    assert(registeredTools.has("subagent"), "subagent tool is registered");
+    assert(
+      commands.has("sawidget"),
+      "/sawidget command is registered (#33)",
+    );
+    const tool = registeredTools.get("subagent");
+    const listResult = await tool.execute(
+      "tool-call-1",
+      { list: true, agentScope: "user" },
+      undefined,
+      undefined,
+      {
+        cwd: ROOT,
+        hasUI: false,
+        ui: {
+          confirm: async () => false,
+        },
+      },
+    );
+    assert(
+      listResult.content[0].text.includes("Available agents:"),
+      "subagent list mode returns the available agents",
+    );
+    const deniedProjectRun = await tool.execute(
+      "tool-call-2",
+      {
+        agent: "local-reviewer",
+        task: "Should not run without TUI approval",
+        agentScope: "project",
+      },
+      undefined,
+      undefined,
+      {
+        cwd: projectRoot,
+        hasUI: false,
+        ui: {
+          confirm: async () => false,
+        },
+      },
+    );
+    assert(
+      deniedProjectRun.isError === true &&
+        deniedProjectRun.content[0].text.includes("not approved"),
+      "project-local subagents are denied without interactive approval",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+}
+
+// ───────────────────────── subagent widget: state + rendering (#30–#33) ─────────────────────────
+{
+  const widget = await jiti.import(
+    path.resolve(ROOT, "extensions/subagents/widget.ts"),
+  );
+
+  // ── State-Mutationen (#31) ──
+  widget.resetWidgetState();
+  eq(widget.getWidgetState().visible, true, "widget starts visible by default");
+  eq(widget.getWidgetState().compact, true, "widget starts in compact mode");
+  eq(widget.getWidgetState().debug, false, "widget starts with debug off");
+  eq(
+    widget.getWidgetState().subagents.size,
+    0,
+    "widget starts with no subagents",
+  );
+
+  widget.setWidgetVisible(false);
+  eq(widget.getWidgetState().visible, false, "setWidgetVisible(false) hides widget");
+  widget.setWidgetVisible(true);
+  widget.setWidgetCompact(false);
+  eq(widget.getWidgetState().compact, false, "setWidgetCompact(false) disables compact");
+  widget.setWidgetDebug(true);
+  eq(widget.getWidgetState().debug, true, "setWidgetDebug(true) enables debug");
+
+  widget.setModel("glm-4.6");
+  eq(widget.getWidgetState().model, "glm-4.6", "setModel updates model");
+  widget.setThinking("high");
+  eq(widget.getWidgetState().thinking, "high", "setThinking updates thinking");
+  widget.setNow("prüft API-Hooks");
+  eq(widget.getWidgetState().now, "prüft API-Hooks", "setNow updates current step");
+  widget.setThink("vergleicht Risiken");
+  eq(widget.getWidgetState().think, "vergleicht Risiken", "setThink updates reasoning");
+  widget.setNext("widget bauen");
+  eq(widget.getWidgetState().next, "widget bauen", "setNext updates next step");
+  widget.setRisk("CoT vermeiden");
+  eq(widget.getWidgetState().risk, "CoT vermeiden", "setRisk updates risk");
+
+  // ── Subagent-Status (#31) ──
+  widget.upsertSubagent({
+    id: "planner",
+    label: "planner",
+    status: "running",
+    currentTask: "plan structure",
+    lastUpdate: Date.now(),
+  });
+  widget.upsertSubagent({
+    id: "reviewer",
+    label: "reviewer",
+    status: "done",
+    currentTask: "review plan",
+    lastUpdate: Date.now(),
+  });
+  widget.upsertSubagent({
+    id: "tester",
+    label: "tester",
+    status: "idle",
+    currentTask: "",
+    lastUpdate: Date.now(),
+  });
+  widget.upsertSubagent({
+    id: "blocked-agent",
+    label: "blocked-agent",
+    status: "blocked",
+    currentTask: "failed task",
+    lastUpdate: Date.now(),
+    risk: "timeout",
+  });
+  eq(widget.getWidgetState().subagents.size, 4, "upsertSubagent adds agents");
+
+  widget.upsertSubagent({
+    id: "planner",
+    label: "planner",
+    status: "done",
+    currentTask: "plan structure",
+    lastUpdate: Date.now(),
+  });
+  eq(widget.getWidgetState().subagents.size, 4, "upsertSubagent updates existing agent");
+
+  widget.removeSubagent("tester");
+  eq(
+    widget.getWidgetState().subagents.size,
+    3,
+    "removeSubagent removes by id",
+  );
+
+  widget.clearSubagents();
+  eq(widget.getWidgetState().subagents.size, 0, "clearSubagents empties all");
+
+  // ── Rendering (#30) ──
+  widget.resetWidgetState();
+  widget.upsertSubagent({
+    id: "planner",
+    label: "planner",
+    status: "done",
+    currentTask: "plan",
+    lastUpdate: Date.now(),
+  });
+  widget.upsertSubagent({
+    id: "reviewer",
+    label: "reviewer",
+    status: "running",
+    currentTask: "review",
+    lastUpdate: Date.now(),
+  });
+  widget.setModel("glm-4.6");
+  widget.setThinking("high");
+  widget.setNow("baue Widget");
+  widget.setThink("entscheide Layout");
+  widget.setNext("Commit");
+  widget.setRisk("niedrig");
+
+  const rendered = widget.renderWidget(widget.getWidgetState());
+  assert(rendered.length >= 3, "compact widget renders at least 3 lines");
+  assert(rendered.length <= 4, "compact widget renders at most 4 lines");
+  assert(
+    rendered[0].includes("planner") && rendered[0].includes("reviewer"),
+    "line 1 shows subagent names",
+  );
+  assert(
+    rendered[0].includes("glm-4.6"),
+    "line 1 shows model",
+  );
+  assert(
+    rendered[0].includes("HIGH"),
+    "line 1 shows thinking level",
+  );
+  assert(
+    rendered[1].includes("baue Widget"),
+    "line 2 shows current step",
+  );
+  assert(
+    rendered[2].includes("entscheide Layout"),
+    "line 3 shows reasoning summary",
+  );
+
+  // Hidden widget renders nothing
+  widget.setWidgetVisible(false);
+  eq(
+    widget.renderWidget(widget.getWidgetState()).length,
+    0,
+    "hidden widget renders no lines",
+  );
+
+  // Debug mode shows more
+  widget.setWidgetVisible(true);
+  widget.setWidgetDebug(true);
+  widget.setWidgetCompact(false);
+  const debugRendered = widget.renderWidget(widget.getWidgetState());
+  assert(debugRendered.length > 4, "debug widget renders more than 4 lines");
+
+  // Fallback thinking summary
+  widget.setThink(undefined);
+  const fallbackRendered = widget.renderWidget(widget.getWidgetState());
+  assert(
+    fallbackRendered.some((l) => l.includes("working…")),
+    "missing think falls back to 'working…'",
   );
 }
 
@@ -1213,6 +1547,44 @@ assert(
       emitted.length,
       emittedBeforeDecline,
       "declining the confirmation keeps the workflow mode unchanged",
+    );
+    // ── Work-Prompt-Inhalt (Issue #25): Pflichtregeln im Prompt prüfen ──
+    const workMessages = sent.filter(
+      ({ message }) => message.customType === "plan-mode-execute",
+    );
+    assert(workMessages.length > 0, "at least one work message was sent");
+    const promptText = workMessages.at(-1).message.content;
+    assert(
+      promptText.includes("STOP-REGELN (verbindlich)"),
+      "work prompt includes mandatory STOP-REGELN heading",
+    );
+    assert(
+      promptText.includes("Prüfe zuerst, ob der Plan noch zum aktuellen Repo-Zustand passt"),
+      "work prompt requires repo-state check before execution",
+    );
+    assert(
+      promptText.includes("Keine stillen Scope-Erweiterungen"),
+      "work prompt forbids silent scope creep",
+    );
+    assert(
+      promptText.includes("Keine neuen Dependencies, Commits oder Pushes"),
+      "work prompt forbids unapproved dependency/commit/push changes",
+    );
+    assert(
+      promptText.includes("konkreten Nachweis"),
+      "work prompt requires concrete proof for done steps",
+    );
+    assert(
+      promptText.includes("Stoppe und melde einen Blocker"),
+      "work prompt requires stopping on blockers",
+    );
+    assert(
+      promptText.includes("[WORK-RESULT]"),
+      "work prompt includes WORK-RESULT output format",
+    );
+    assert(
+      promptText.includes("[PLAN-PROGRESS]"),
+      "work prompt includes PLAN-PROGRESS output format",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -1898,17 +2270,95 @@ function stripAnsi(text) {
     thinking: "high",
     nextStep: "/work",
   };
+
+  // ── Header: eine Zeile mit Hauptzustand (#29) ──
   eq(
     visualSystem.formatHeaderLines(ROOT, visualState).length,
-    2,
-    "central visual header is exactly two lines",
+    1,
+    "central visual header is exactly one line",
+  );
+  assert(
+    visualSystem.formatHeaderLines(ROOT, visualState)[0].includes("PI ·"),
+    "header always starts with PI ·",
+  );
+  assert(
+    visualSystem.formatHeaderLines(ROOT, visualState)[0].includes("PLANUNG AKTIV"),
+    "header shows PLANUNG AKTIV for draft phase",
+  );
+  assert(
+    visualSystem.formatHeaderLines(ROOT, { ...visualState, phase: "executing" })[0].includes("WORK AKTIV"),
+    "header shows WORK AKTIV for executing phase",
+  );
+  assert(
+    visualSystem.formatHeaderLines(ROOT, { ...visualState, phase: "idle" })[0].includes("BEREIT"),
+    "header shows BEREIT for idle phase",
+  );
+  assert(
+    visualSystem.formatHeaderLines(ROOT, { ...visualState, permissionLevel: "full-access" })[0].includes("FULL ACCESS"),
+    "header warns about FULL ACCESS",
+  );
+  assert(
+    visualSystem.formatHeaderLines(ROOT, { ...visualState, permissionLevel: "yolo" })[0].includes("YOLO MODE"),
+    "header warns about YOLO MODE",
+  );
+
+  // ── Footer: CWD · Mode · Model · Thinking · Git (#28) ──
+  assert(
+    visualSystem
+      .formatFooterLine(ROOT, visualState, "main")
+      .includes("ARCH:DRAFT"),
+    "footer shows compact mode label",
   );
   assert(
     visualSystem
-      .formatFooterLine(visualState, "main")
-      .includes("ARCH · DRAFT · READ+WRITE · 3 TODO · NEXT /work"),
-    "central footer combines mode, permission, todos and next step",
+      .formatFooterLine(ROOT, visualState, "main")
+      .includes("glm-5-turbo"),
+    "footer shows model",
   );
+  assert(
+    visualSystem
+      .formatFooterLine(ROOT, visualState, "main")
+      .includes("HIGH"),
+    "footer shows thinking level uppercase",
+  );
+  assert(
+    visualSystem
+      .formatFooterLine(ROOT, visualState, "main")
+      .includes("git:main"),
+    "footer shows git branch",
+  );
+  assert(
+    visualSystem.formatFooterLine(ROOT, visualState).startsWith(visualSystem.projectLabel(ROOT)),
+    "footer shows compact cwd as first segment",
+  );
+  eq(
+    visualSystem.formatFooterLine(ROOT, { ...visualState, thinking: undefined }),
+    `${visualSystem.projectLabel(ROOT)} · ARCH:DRAFT · glm-5-turbo · -`,
+    "footer shows dash for missing thinking",
+  );
+
+  // ── formatModeCompact ──
+  eq(
+    visualSystem.formatModeCompact({ mode: "simple_plan", phase: "draft" }),
+    "PLAN:DRAFT",
+    "compact mode for simple_plan draft",
+  );
+  eq(
+    visualSystem.formatModeCompact({ mode: "detailed_plan", phase: "draft" }),
+    "ARCH:DRAFT",
+    "compact mode for detailed_plan draft",
+  );
+  eq(
+    visualSystem.formatModeCompact({ mode: "work", phase: "executing" }),
+    "WORK",
+    "compact mode for work executing",
+  );
+  eq(
+    visualSystem.formatModeCompact({ mode: "work", phase: "reviewing" }),
+    "REVIEW",
+    "compact mode for reviewing",
+  );
+
   assert(
     visualSystem.formatPermissionWarning("yolo").includes("YOLO MODE"),
     "YOLO has an explicit visual warning block",
@@ -1952,6 +2402,10 @@ function stripAnsi(text) {
     "settings explicitly loads the central chrome/status extension",
   );
   assert(
+    settings.extensions.includes("+extensions/subagents/index.ts"),
+    "settings explicitly loads the controlled subagent extension",
+  );
+  assert(
     !settings.extensions.includes("+extensions/startup-banner.ts"),
     "settings disables the old competing startup banner",
   );
@@ -1961,13 +2415,13 @@ function stripAnsi(text) {
   );
   eq(
     settings.defaultProvider,
-    "openai-codex",
-    "OpenAI Codex uses the configured provider",
+    "opencode-go",
+    "OpenCode Go uses the configured provider",
   );
   eq(
     settings.defaultModel,
-    "gpt-5.5",
-    "GPT-5.5 is the configured default model",
+    "kimi-k2.6",
+    "Kimi K2.6 is the configured default model",
   );
 
   const zentui = JSON.parse(

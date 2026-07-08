@@ -73,7 +73,9 @@ export function formatModePhase(state: Pick<VisualWorkflowState, "mode" | "phase
   const phase = WORKFLOW_PHASE_LABEL[state.phase];
   if (state.mode === "simple_plan") return `PLAN · ${phase === "PLAN" ? "DRAFT" : phase}`;
   if (state.mode === "detailed_plan") return `ARCH · ${phase === "PLAN" ? "DRAFT" : phase}`;
-  return phase;
+  // Work mode: show phase only for idle/ready, otherwise just "WORK"
+  if (state.phase === "idle" || state.phase === "ready") return phase;
+  return "WORK";
 }
 
 export function formatTodoSummary(completed: number, total: number): string {
@@ -82,22 +84,41 @@ export function formatTodoSummary(completed: number, total: number): string {
   return open === 0 ? `${total} TODO ✓` : `${open} TODO`;
 }
 
-export function formatHeaderLines(cwd: string, state: VisualWorkflowState): string[] {
-  const model = state.model ?? "no model";
-  const thinking = (state.thinking ?? "-").toUpperCase();
-  const permission = permissionShortLabel(state.permissionLevel);
-  return [
-    `PI · ${projectLabel(cwd)}`,
-    `${formatModePhase(state)} | ${model} | ${thinking} | ${permission}`,
-  ];
+export function formatModeCompact(state: Pick<VisualWorkflowState, "mode" | "phase">): string {
+  const phase = WORKFLOW_PHASE_LABEL[state.phase];
+  if (state.mode === "simple_plan") return `PLAN:${phase === "PLAN" ? "DRAFT" : phase}`;
+  if (state.mode === "detailed_plan") return `ARCH:${phase === "PLAN" ? "DRAFT" : phase}`;
+  if (state.phase === "idle" || state.phase === "ready") return phase;
+  if (state.phase === "reviewing" || state.phase === "reviewed") return "REVIEW";
+  return "WORK";
 }
 
-export function formatFooterLine(state: VisualWorkflowState, gitBranch?: string | null): string {
+export function formatHeaderLines(_cwd: string, state: VisualWorkflowState): string[] {
+  let mainState: string;
+  if (state.permissionLevel === "yolo") {
+    mainState = "!!! YOLO MODE !!!";
+  } else if (state.permissionLevel === "full-access") {
+    mainState = "⚠ FULL ACCESS";
+  } else if (state.phase === "deciding" || state.phase === "draft") {
+    mainState = "PLANUNG AKTIV";
+  } else if (state.phase === "reviewing" || state.phase === "reviewed") {
+    mainState = "REVIEW";
+  } else if (state.phase === "executing") {
+    mainState = "WORK AKTIV";
+  } else if (state.phase === "ready") {
+    mainState = "FERTIG";
+  } else {
+    mainState = "BEREIT";
+  }
+  return [`PI · ${mainState}`];
+}
+
+export function formatFooterLine(cwd: string, state: VisualWorkflowState, gitBranch?: string | null): string {
   const parts = [
-    formatModePhase(state),
-    permissionShortLabel(state.permissionLevel),
-    formatTodoSummary(state.completedTodos, state.totalTodos),
-    `NEXT ${state.nextStep}`,
+    projectLabel(cwd),
+    formatModeCompact(state),
+    state.model ?? "no model",
+    (state.thinking ?? "-").toUpperCase(),
   ];
   if (gitBranch) parts.push(`git:${gitBranch}`);
   return parts.join(" · ");

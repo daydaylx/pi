@@ -35,12 +35,28 @@ const STATUS_KEY = "workflow-permission";
 const PERSISTED_STATE_KEY = "mode-permissions";
 const MAX_PREVIEW = 140;
 const CONFIRM_ELEVATED_PERMISSIONS = false;
+const ENV_PERMISSION_LEVEL = "PI_SUBAGENT_PERMISSION_LEVEL";
+const ENV_WRITE_OVERRIDE = "PI_SUBAGENT_WRITE_OVERRIDE";
 
 // Auto-YOLO: aktiviert YOLO bei jedem Session-Start automatisch. Auf false
 // setzen, um das alte Verhalten (keine automatische Eskalation) wieder-
 // herzustellen. Die Permission-Stufe ist vom Workflow-Modus unabhängig und
 // jederzeit per /yolo oder Strg+Shift+Y änderbar.
 const AUTO_YOLO_ON_START = true;
+
+function permissionFromEnv(): PermissionLevel | undefined {
+  const value = process.env[ENV_PERMISSION_LEVEL] as
+    | PermissionLevel
+    | undefined;
+  return value && value in PERMISSION_LEVEL_LABEL ? value : undefined;
+}
+
+function writeOverrideFromEnv(): WriteOverride | undefined {
+  const value = process.env[ENV_WRITE_OVERRIDE] as WriteOverride | undefined;
+  return value === "inherit" || value === "block" || value === "plan-file-only"
+    ? value
+    : undefined;
+}
 
 function preview(value: string): string {
   const oneLine = value.replace(/\s+/g, " ").trim();
@@ -121,10 +137,9 @@ async function approve(
 }
 
 export default function modePermissionsExtension(pi: ExtensionAPI): void {
-  let permissionLevel: PermissionLevel = AUTO_YOLO_ON_START
-    ? "yolo"
-    : "read-write";
-  let writeOverride: WriteOverride = "inherit";
+  let permissionLevel: PermissionLevel =
+    permissionFromEnv() ?? (AUTO_YOLO_ON_START ? "yolo" : "read-write");
+  let writeOverride: WriteOverride = writeOverrideFromEnv() ?? "inherit";
 
   function publishStatus(ctx: ExtensionContext): void {
     // Footer/Header werden zentral in ux-status.ts gerendert. Dieser alte
@@ -323,8 +338,10 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       | undefined;
     permissionLevel =
       latestState?.data?.permissionLevel ??
+      permissionFromEnv() ??
       (AUTO_YOLO_ON_START ? "yolo" : "read-write");
-    writeOverride = latestState?.data?.writeOverride ?? "inherit";
+    writeOverride =
+      latestState?.data?.writeOverride ?? writeOverrideFromEnv() ?? "inherit";
     publishStatus(ctx);
     if (
       !latestState &&

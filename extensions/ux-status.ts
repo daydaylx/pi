@@ -43,9 +43,6 @@ import {
   formatHeaderLines,
   formatModePhase,
   formatPermissionWarning,
-  permissionTone,
-  phaseTone,
-  toneColor,
   type VisualWorkflowState,
 } from "./shared/visual-system.ts";
 
@@ -152,20 +149,12 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
       ui.setHeader((_tui: unknown, theme: any) => ({
         render(width: number): string[] {
           const state = buildVisualState(ctx);
-          const [title, status] = formatHeaderLines(ctx.cwd, state);
-          const modeColor = toneColor(phaseTone(state.phase, state.mode));
-          const permColor = toneColor(permissionTone(state.permissionLevel));
-          const statusParts = truncatePlain(status, width).split(" | ");
-          const styledStatus = [
-            theme.fg(modeColor, statusParts[0] ?? ""),
-            theme.fg("muted", statusParts[1] ?? ""),
-            theme.fg("muted", statusParts[2] ?? ""),
-            theme.fg(permColor, statusParts[3] ?? ""),
-          ].join(theme.fg("dim", " | "));
-          return [
-            theme.fg("accent", theme.bold(truncatePlain(title, width))),
-            styledStatus,
-          ];
+          const [line] = formatHeaderLines(ctx.cwd, state);
+          const color =
+            state.permissionLevel === "yolo" ? "error" :
+            state.permissionLevel === "full-access" ? "warning" :
+            "accent";
+          return [theme.fg(color, theme.bold(truncatePlain(line, width)))];
         },
         invalidate() {},
       }));
@@ -178,11 +167,10 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
           render(width: number): string[] {
             const state = buildVisualState(ctx);
             const raw = truncatePlain(
-              formatFooterLine(state, footerData?.getGitBranch?.()),
+              formatFooterLine(ctx.cwd, state, footerData?.getGitBranch?.()),
               width,
             );
-            const color = toneColor(permissionTone(state.permissionLevel));
-            return [theme.fg(color, raw)];
+            return [theme.fg("muted", raw)];
           },
           invalidate() {},
           dispose,
@@ -193,7 +181,8 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
 
   function updateCentralStatus(ctx: ExtensionContext): void {
     const state = buildVisualState(ctx);
-    const summary = formatFooterLine(state);
+    const git = getGitInfo(ctx.cwd);
+    const summary = formatFooterLine(ctx.cwd, state, git?.branch);
     ctx.ui.setStatus(CENTRAL_STATUS_KEY, summary);
   }
 
