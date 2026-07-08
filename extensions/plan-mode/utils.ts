@@ -24,13 +24,28 @@ export const PLAN_ARCHIVE_RELATIVE_DIR = ".agent/plans/archive";
 // gesondert behandelt: die Extension schreibt die Datei selbst (analog
 // writePlanFileAtomic), damit der Klär-Turn auf jeder Zugriffsstufe läuft.
 export const DECISION_BRIEF_RELATIVE_PATH = ".agent/plans/decision-brief.md";
+export const INVALID_DECISION_BRIEF_RELATIVE_PATH =
+  ".agent/plans/invalid-decision-brief.md";
 export const DECISION_BUDGET_DEFAULT = 6;
 export const DECISION_BUDGET_COMPLEX = 8;
 export const DECISION_BRIEF_BLOCK_START = "[DECISION-BRIEF]";
 export const DECISION_BRIEF_BLOCK_END = "[/DECISION-BRIEF]";
 
 const REQUIRED_PLAN_HEADINGS = ["Auftrag", "Todos"];
-const REQUIRED_BRIEF_HEADINGS = ["Ziel", "Entscheidungen", "Abschlusskriterien"];
+const REQUIRED_DETAILED_PLAN_HEADINGS = [
+  "Auftrag",
+  "Nicht-Ziele",
+  "Betroffene Bereiche",
+  "Risiken / Entscheidungen",
+  "Todos",
+  "Tests / Checks",
+  "Abschlusskriterien",
+];
+const REQUIRED_BRIEF_HEADINGS = [
+  "Ziel",
+  "Entscheidungen",
+  "Abschlusskriterien",
+];
 
 export interface TodoItem {
   step: number;
@@ -202,6 +217,44 @@ export function extractDoneSteps(message: string): number[] {
   ];
 }
 
+const PLAN_PROGRESS_BLOCK_PATTERN =
+  /\[PLAN-PROGRESS\]([\s\S]*?)\[\/PLAN-PROGRESS\]/i;
+
+/**
+ * Parst einen [PLAN-PROGRESS]...[/PLAN-PROGRESS]-Block und liefert die
+ * Schritt-Nummern aus dem DONE:-Abschnitt. Gibt undefined zurück, wenn kein
+ * Block vorhanden ist (ermöglicht Fallback auf extractDoneSteps). Ein leerer
+ * Block oder DONE-Abschnitt ohne Einträge liefert ein leeres Array.
+ */
+export function extractProgressBlock(message: string): number[] | undefined {
+  const blockMatch = message.match(PLAN_PROGRESS_BLOCK_PATTERN);
+  if (!blockMatch) return undefined;
+
+  const lines = blockMatch[1].split(/\r?\n/);
+  const done: number[] = [];
+  let inDone = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^DONE:\s*$/i.test(trimmed)) {
+      inDone = true;
+      continue;
+    }
+    if (/^[A-Z_]+:\s*$/i.test(trimmed)) {
+      inDone = false;
+      continue;
+    }
+    if (!inDone) continue;
+    const m = trimmed.match(/^[-*•]\s+T?(\d+)/i);
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isSafeInteger(n) && n > 0) done.push(n);
+    }
+  }
+
+  return [...new Set(done)];
+}
+
 export function applyDoneSteps(
   planContent: string,
   completedSteps: readonly number[],
@@ -228,15 +281,22 @@ export function applyDoneSteps(
   };
 }
 
-export function validatePlanStructure(planContent: string): string[] {
+export function validatePlanStructure(
+  planContent: string,
+  planMode?: "simple_plan" | "detailed_plan",
+): string[] {
   const found = new Set(
     [...planContent.matchAll(/^##\s+(.+?)\s*$/gm)].map((match) =>
       normalizeHeading(match[1]),
     ),
   );
-  const errors = REQUIRED_PLAN_HEADINGS.filter(
-    (heading) => !found.has(normalizeHeading(heading)),
-  ).map((heading) => `Fehlender Abschnitt: ${heading}`);
+  const required =
+    planMode === "detailed_plan"
+      ? REQUIRED_DETAILED_PLAN_HEADINGS
+      : REQUIRED_PLAN_HEADINGS;
+  const errors = required
+    .filter((heading) => !found.has(normalizeHeading(heading)))
+    .map((heading) => `Fehlender Abschnitt: ${heading}`);
 
   if (extractTodoItems(planContent).length === 0) {
     errors.push("Der Todo-Abschnitt enthält keine Checkboxen.");
@@ -357,9 +417,7 @@ export function writeDecisionBriefAtomic(cwd: string, content: string): void {
   ensurePlanDirectory(root);
   assertNoSymlinkComponents(root, briefPath);
 
-  const mode = existsSync(briefPath)
-    ? statSync(briefPath).mode & 0o777
-    : 0o600;
+  const mode = existsSync(briefPath) ? statSync(briefPath).mode & 0o777 : 0o600;
   const temporaryPath = `${briefPath}.tmp-${process.pid}-${Date.now()}`;
   try {
     writeFileSync(temporaryPath, content, {
@@ -373,10 +431,34 @@ export function writeDecisionBriefAtomic(cwd: string, content: string): void {
   }
 }
 
-export function archiveDecisionBrief(
+export function getInvalidDecisionBriefPath(cwd: string): string {
+  return resolve(cwd, INVALID_DECISION_BRIEF_RELATIVE_PATH);
+}
+
+export function writeInvalidDecisionBriefAtomic(
   cwd: string,
-  now = new Date(),
-): string {
+  content: string,
+): void {
+  const root = resolve(cwd);
+  const briefPath = getInvalidDecisionBriefPath(root);
+  ensurePlanDirectory(root);
+  assertNoSymlinkComponents(root, briefPath);
+
+  const mode = existsSync(briefPath) ? statSync(briefPath).mode & 0o777 : 0o600;
+  const temporaryPath = `${briefPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(temporaryPath, content, {
+      encoding: "utf8",
+      flag: "wx",
+      mode,
+    });
+    renameSync(temporaryPath, briefPath);
+  } finally {
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
+}
+
+export function archiveDecisionBrief(cwd: string, now = new Date()): string {
   const root = resolve(cwd);
   const briefPath = getDecisionBriefPath(root);
   const archiveDir = getPlanArchiveDir(root);
@@ -431,12 +513,32 @@ export function extractDecisionBriefBlock(message: string): string | undefined {
 }
 
 export function validateDecisionBriefStructure(briefContent: string): string[] {
-  const found = new Set(
-    [...briefContent.matchAll(/^##\s+(.+?)\s*$/gm)].map((match) =>
-      normalizeHeading(match[1]),
-    ),
-  );
-  return REQUIRED_BRIEF_HEADINGS.filter(
-    (heading) => !found.has(normalizeHeading(heading)),
-  ).map((heading) => `Fehlender Abschnitt: ${heading}`);
+  const lines = briefContent.split(/\r?\n/);
+  const errors: string[] = [];
+
+  for (const heading of REQUIRED_BRIEF_HEADINGS) {
+    const headingIndex = lines.findIndex((line) => {
+      const m = line.match(/^##\s+(.+?)\s*$/);
+      return m ? normalizeHeading(m[1]) === normalizeHeading(heading) : false;
+    });
+
+    if (headingIndex < 0) {
+      errors.push(`Fehlender Abschnitt: ${heading}`);
+      continue;
+    }
+
+    const nextH = lines.findIndex(
+      (l, i) => i > headingIndex && /^##\s+/.test(l),
+    );
+    const end = nextH < 0 ? lines.length : nextH;
+    const sectionContent = lines
+      .slice(headingIndex + 1, end)
+      .join("\n")
+      .trim();
+    if (!sectionContent) {
+      errors.push(`Leerer Abschnitt: ${heading}`);
+    }
+  }
+
+  return errors;
 }

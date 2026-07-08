@@ -293,6 +293,74 @@ eq(
   "ask",
   "full-access still hard-prompts for root deletion",
 );
+eq(
+  policy.decideBash("full-access", "git push --force", ROOT).action,
+  "ask",
+  "full-access asks before force-push (destroys remote history)",
+);
+eq(
+  policy.decideBash(
+    "full-access",
+    "git push --force-with-lease origin main",
+    ROOT,
+  ).action,
+  "ask",
+  "full-access asks before force-with-lease push",
+);
+eq(
+  policy.decideBash("read-write", "git push -f origin main", ROOT).action,
+  "ask",
+  "work asks before force-push",
+);
+eq(
+  policy.decideBash("yolo", "git push --force", ROOT).action,
+  "allow",
+  "yolo bypasses the force-push prompt",
+);
+eq(
+  policy.decideBash("full-access", "git push origin main", ROOT).action,
+  "allow",
+  "ordinary pushes stay unprompted in full-access",
+);
+
+// ───────────────────────── secret pattern: data files yes, source code no ─────────────────────────
+eq(
+  policy.decideFileAccess("read-write", "write", "src/auth.ts", ROOT).action,
+  "allow",
+  "auth source modules are not treated as secrets",
+);
+eq(
+  policy.decideFileAccess("read-write", "read", "src/tokenizer.ts", ROOT)
+    .action,
+  "allow",
+  "tokenizer source files are not treated as secrets",
+);
+eq(
+  policy.decideFileAccess("read-write", "read", "config/auth.json", ROOT)
+    .action,
+  "ask",
+  "auth data files remain sensitive",
+);
+eq(
+  policy.decideBash("yolo", "cat src/auth.ts", ROOT).action,
+  "allow",
+  "yolo does not hard-prompt for auth source code",
+);
+eq(
+  policy.decideBash("read-write", "cat secrets.yaml", ROOT).action,
+  "ask",
+  "secrets data files remain sensitive",
+);
+eq(
+  policy.decideBash("read-write", "cat credentials", ROOT).action,
+  "ask",
+  "bare credentials files remain sensitive",
+);
+eq(
+  policy.decideBash("read-bash", "cat src/auth.ts", ROOT).action,
+  "allow",
+  "read-bash can inspect auth source modules",
+);
 
 // ───────────────────────── read-only/read-bash levels ─────────────────────────
 eq(
@@ -381,6 +449,58 @@ assert(
   "broken plan names the missing heading",
 );
 
+// ───────────────────────── validatePlanStructure: detailed_plan mode (#27) ─────────────────────────
+const detailedValidPlan = [
+  "## 1. Auftrag",
+  "x",
+  "## 2. Nicht-Ziele",
+  "y",
+  "## 3. Betroffene Bereiche",
+  "z",
+  "## 4. Risiken / Entscheidungen",
+  "r",
+  "## 5. Todos",
+  "* [ ] Schritt",
+  "## 6. Tests / Checks",
+  "t",
+  "## 7. Abschlusskriterien",
+  "a",
+].join("\n");
+
+eq(
+  utils.validatePlanStructure(detailedValidPlan, "detailed_plan"),
+  [],
+  "detailed plan with all 7 sections has no errors",
+);
+// validPlan has sections 1–5 but lacks Tests/Checks and Abschlusskriterien
+assert(
+  utils
+    .validatePlanStructure(validPlan, "detailed_plan")
+    .some((e) => e.includes("Tests / Checks")),
+  "plan without Tests/Checks section is flagged in detailed mode",
+);
+assert(
+  utils
+    .validatePlanStructure(validPlan, "detailed_plan")
+    .some((e) => e.includes("Abschlusskriterien")),
+  "plan without Abschlusskriterien is flagged in detailed mode",
+);
+// A truly minimal plan is missing more sections in detailed mode
+const minimalPlan = ["## Auftrag", "x", "## Todos", "* [ ] Schritt"].join(
+  "\n",
+);
+assert(
+  utils
+    .validatePlanStructure(minimalPlan, "detailed_plan")
+    .some((e) => e.includes("Nicht-Ziele")),
+  "minimal plan flagged as detailed is missing Nicht-Ziele",
+);
+eq(
+  utils.validatePlanStructure(validPlan, "simple_plan"),
+  [],
+  "plan with sections 1–5 passes simple_plan validation",
+);
+
 const todos = utils.extractTodoItems(validPlan);
 eq(todos.length, 2, "two todos extracted");
 eq(todos[0].step, 1, "first todo step number");
@@ -440,6 +560,46 @@ eq(
   utils.extractDoneSteps("[DONE:0] [DONE:-1] [DONE:abc]"),
   [],
   "extractDoneSteps filters non-positive/non-numeric markers",
+);
+
+// ───────────────────────── plan-mode/utils: extractProgressBlock (#26) ─────────────────────────
+eq(
+  utils.extractProgressBlock("no block here"),
+  undefined,
+  "extractProgressBlock returns undefined without a [PLAN-PROGRESS] block",
+);
+eq(
+  utils.extractProgressBlock("[PLAN-PROGRESS]\nDONE:\n[/PLAN-PROGRESS]"),
+  [],
+  "extractProgressBlock returns empty array for empty DONE section",
+);
+eq(
+  utils.extractProgressBlock(
+    "[PLAN-PROGRESS]\nDONE:\n- T1: erledigt\n- T2: nachweis\n[/PLAN-PROGRESS]",
+  ),
+  [1, 2],
+  "extractProgressBlock parses T-prefixed step IDs from DONE section",
+);
+eq(
+  utils.extractProgressBlock(
+    "[PLAN-PROGRESS]\nDONE:\n- 3: erledigt\n[/PLAN-PROGRESS]",
+  ),
+  [3],
+  "extractProgressBlock parses plain numeric step IDs",
+);
+eq(
+  utils.extractProgressBlock(
+    "[PLAN-PROGRESS]\nBLOCKED:\n- T1: grund\nDONE:\n- T2: ok\n[/PLAN-PROGRESS]",
+  ),
+  [2],
+  "extractProgressBlock only collects steps from DONE section, not BLOCKED",
+);
+eq(
+  utils.extractProgressBlock(
+    "[plan-progress]\nDONE:\n- T1: ok\n[/plan-progress]",
+  ),
+  [1],
+  "extractProgressBlock is case-insensitive",
 );
 
 // ───────────────────────── plan-mode/utils: applyDoneSteps bounds ─────────────────────────
@@ -690,7 +850,7 @@ assert(
   );
 }
 
-// ───────────────────────── workflow modes: direct, guard-free transitions ─────────────────────────
+// ───────────────────────── workflow modes: direct transitions with abort guard ─────────────────────────
 assert(
   typeof planMode.default === "function",
   "plan-mode/index.ts exports a factory function",
@@ -707,6 +867,7 @@ assert(
     let idle = true;
     let aborts = 0;
     let confirmations = 0;
+    const thinkingLevels = [];
 
     planMode.default({
       events: {
@@ -728,6 +889,9 @@ assert(
       registerShortcut() {},
       appendEntry(customType, data) {
         persisted.push({ type: "custom", customType, data });
+      },
+      setThinkingLevel(level) {
+        thinkingLevels.push(level);
       },
       sendMessage(message, options) {
         sent.push({ message, options });
@@ -768,15 +932,20 @@ assert(
     );
 
     idle = false;
-    eventHandlers.get("pi-workflow:set-mode")({
+    await eventHandlers.get("pi-workflow:set-mode")({
       mode: "simple_plan",
       ctx: context,
     });
-    eq(aborts, 1, "switching mode aborts an active agent turn");
+    eq(aborts, 1, "switching mode aborts an active turn after confirmation");
     eq(
       emitted.at(-1)[1].mode,
       "simple_plan",
       "simple plan activates directly while busy",
+    );
+    eq(
+      thinkingLevels.at(-1),
+      "medium",
+      "switching to simple_plan applies the medium thinking default",
     );
     const simpleContext = await hooks.get("before_agent_start")({}, context);
     eq(
@@ -793,8 +962,8 @@ assert(
       "simple plan requires writing the shared plan file",
     );
     assert(
-      simpleContext?.message?.content.includes("## 1. Auftrag") &&
-        simpleContext?.message?.content.includes("## 5. Todos"),
+      simpleContext?.message?.content.includes("## Auftrag") &&
+        simpleContext?.message?.content.includes("## Todos"),
       "simple plan injects the valid minimal plan structure",
     );
 
@@ -820,7 +989,7 @@ assert(
     );
 
     idle = false;
-    eventHandlers.get("pi-workflow:set-mode")({
+    await eventHandlers.get("pi-workflow:set-mode")({
       mode: "detailed_plan",
       ctx: context,
     });
@@ -829,6 +998,11 @@ assert(
       emitted.at(-1)[1].mode,
       "detailed_plan",
       "detailed plan activates directly",
+    );
+    eq(
+      thinkingLevels.at(-1),
+      "xhigh",
+      "switching to detailed_plan applies the xhigh thinking default",
     );
     const detailedContext = await hooks.get("before_agent_start")({}, context);
     eq(
@@ -841,7 +1015,21 @@ assert(
       "detailed plan uses the same plan file as simple plan",
     );
 
-    eventHandlers.get("pi-workflow:set-mode")({
+    // Same-Mode-Auswahl im Idle ist ein No-op: kein Abort, keine Rückfrage.
+    const abortsBeforeSameMode = aborts;
+    const confirmationsBeforeSameMode = confirmations;
+    await eventHandlers.get("pi-workflow:set-mode")({
+      mode: "detailed_plan",
+      ctx: context,
+    });
+    eq(aborts, abortsBeforeSameMode, "same-mode selection does not abort");
+    eq(
+      confirmations,
+      confirmationsBeforeSameMode,
+      "same-mode selection while idle asks no confirmation",
+    );
+
+    await eventHandlers.get("pi-workflow:set-mode")({
       mode: "work",
       ctx: context,
     });
@@ -849,6 +1037,11 @@ assert(
       emitted.at(-1)[1].mode,
       "work",
       "work mode can be selected before an optional review",
+    );
+    eq(
+      thinkingLevels.at(-1),
+      "high",
+      "switching to work applies the high thinking default",
     );
 
     await commands.get("review-plan")("", context);
@@ -864,8 +1057,8 @@ assert(
     );
     eq(
       confirmations,
-      0,
-      "workflow mode transitions never request confirmation",
+      2,
+      "mode switches over an active turn ask exactly one confirmation each",
     );
     assert(
       sent.some(({ message }) => message.customType === "plan-review-request"),
@@ -910,7 +1103,11 @@ assert(
       executionsBeforeStaleReview + 1,
       "/work executes a changed plan without stale-review gating",
     );
-    eq(confirmations, 0, "optional review never adds /work confirmation");
+    eq(
+      confirmations,
+      2,
+      "optional review and /work add no extra confirmations",
+    );
 
     idle = false;
     const abortsBeforeDuplicateWork = aborts;
@@ -935,7 +1132,7 @@ assert(
       "/work can resume persisted execution state when no turn is active",
     );
 
-    eventHandlers.get("pi-workflow:set-mode")({
+    await eventHandlers.get("pi-workflow:set-mode")({
       mode: "simple_plan",
       ctx: context,
     });
@@ -959,7 +1156,9 @@ assert(
       action: "work",
       ctx: context,
     });
-    await Promise.resolve();
+    // executePlan läuft über mehrere awaits (setWorkflowMode → Abort-Guard);
+    // ein einzelner Microtask reicht nicht mehr, daher ein Macrotask.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     eq(
       executionCount(),
       executionsBeforePlanAction + 1,
@@ -982,6 +1181,26 @@ assert(
     assert(
       notifications.some((n) => n.message.includes("/finish")),
       "plan-action 'finish' falls back to a hint instead of crashing without waitForIdle",
+    );
+
+    // Abort-Guard: Ablehnen der Rückfrage bricht weder Turn noch Modus.
+    idle = false;
+    const abortsBeforeDecline = aborts;
+    const emittedBeforeDecline = emitted.length;
+    context.ui.confirm = async () => false;
+    await eventHandlers.get("pi-workflow:set-mode")({
+      mode: "work",
+      ctx: context,
+    });
+    eq(
+      aborts,
+      abortsBeforeDecline,
+      "declining the confirmation aborts nothing",
+    );
+    eq(
+      emitted.length,
+      emittedBeforeDecline,
+      "declining the confirmation keeps the workflow mode unchanged",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -1020,6 +1239,7 @@ assert(
       },
       registerShortcut() {},
       appendEntry() {},
+      setThinkingLevel() {},
       sendMessage(message, options) {
         sent.push({ message, options });
       },
@@ -1123,7 +1343,7 @@ assert(
 
     // 5) Post-creation menu: agent_end (draft + plan mode + plan) shows a
     //    Nächster Schritt menu; Esc does not auto-execute.
-    eventHandlers.get("pi-workflow:set-mode")({
+    await eventHandlers.get("pi-workflow:set-mode")({
       mode: "detailed_plan",
       ctx: context,
     });
@@ -1135,6 +1355,21 @@ assert(
         .slice(sentBefore)
         .some((entry) => entry.message.customType === "plan-mode-execute"),
       "post-creation menu Esc does not auto-execute the plan",
+    );
+
+    // 6) Verfeinerungs-Turn: das Menü erscheint nur nach dem Turn, der die
+    //    Plan-Datei erzeugt hat — danach nicht mehr.
+    let postMenuCalls = 0;
+    context.ui.select = async () => {
+      postMenuCalls += 1;
+      return undefined;
+    };
+    await hooks.get("before_agent_start")({}, context); // Plan existiert bereits
+    await hooks.get("agent_end")({ messages: [] }, context);
+    eq(
+      postMenuCalls,
+      0,
+      "no post-plan menu after a refine turn on an existing plan",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -1290,8 +1525,8 @@ const commandEntries = commandMenu.buildCommandMenu({
 });
 eq(
   commandEntries.length,
-  14,
-  "the command menu lists all 14 required commands",
+  11,
+  "the command menu lists all 11 required commands",
 );
 eq(
   [...new Set(commandEntries.map((entry) => entry.section))],
@@ -1718,9 +1953,14 @@ function stripAnsi(text) {
 
 // ───────────────────────── Decision-Intake: phase, budgets, path ─────────────────────────
 eq(
-  workflowStatus.WORKFLOW_MODE_LABEL["deciding"],
+  workflowStatus.WORKFLOW_PHASE_LABEL["deciding"],
   "DECIDE",
   "the deciding phase has a status label",
+);
+eq(
+  workflowStatus.WORKFLOW_MODE_LABEL["simple_plan"],
+  "Schnellplan",
+  "the mode label map names simple_plan Schnellplan",
 );
 eq(utils.DECISION_BUDGET_DEFAULT, 6, "decision budget default is 6");
 eq(utils.DECISION_BUDGET_COMPLEX, 8, "decision budget complex is 8");
@@ -1730,7 +1970,7 @@ eq(
   "the decision brief path is separate from current-plan.md",
 );
 assert(
-  workflowStatus.WORKFLOW_MODE_LABEL["deciding"] !== undefined,
+  workflowStatus.WORKFLOW_PHASE_LABEL["deciding"] !== undefined,
   "deciding is part of the phase label map (no new WorkflowMode)",
 );
 
@@ -1766,6 +2006,31 @@ assert(
     .validateDecisionBriefStructure("## Ziel\nx\n")
     .some((e) => e.includes("Entscheidungen")),
   "decision brief flags missing Entscheidungen heading",
+);
+assert(
+  utils
+    .validateDecisionBriefStructure(
+      "## Ziel\n\n## Entscheidungen\nb\n## Abschlusskriterien\nc\n",
+    )
+    .some((e) => e.includes("Leerer Abschnitt") && e.includes("Ziel")),
+  "decision brief flags empty Ziel section",
+);
+assert(
+  utils
+    .validateDecisionBriefStructure(
+      "## Ziel\na\n## Entscheidungen\n## Abschlusskriterien\nc\n",
+    )
+    .some(
+      (e) => e.includes("Leerer Abschnitt") && e.includes("Entscheidungen"),
+    ),
+  "decision brief flags empty Entscheidungen section",
+);
+eq(
+  utils.validateDecisionBriefStructure(
+    "## Ziel\na\n## Entscheidungen\nb\n## Abschlusskriterien\nc\n",
+  ),
+  [],
+  "complete brief with content in all sections has no errors",
 );
 
 // ───────────────────────── Decision-Intake: path safety + read/write/archive ─────────────────────────
@@ -1867,6 +2132,7 @@ eq(
       },
       registerShortcut() {},
       appendEntry() {},
+      setThinkingLevel() {},
       sendMessage(message, options) {
         sent.push({ message, options });
       },
@@ -2060,6 +2326,95 @@ eq(
       planWithBrief?.message?.content.includes("decision-brief") &&
         planWithBrief?.message?.content.includes("# Decision Brief: Q"),
       "a plan turn after the handoff receives the decision brief as context",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+// ───────────────────────── /done fallback + brief co-archiving ─────────────────────────
+{
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-done-fallback-"));
+  try {
+    const commands = new Map();
+    const hooks = new Map();
+    const sent = [];
+    const notifications = [];
+
+    planMode.default({
+      events: { on() {}, emit() {} },
+      on(name, handler) {
+        hooks.set(name, handler);
+      },
+      registerFlag() {},
+      getFlag: () => false,
+      registerCommand(name, options) {
+        commands.set(name, options.handler);
+      },
+      registerShortcut() {},
+      appendEntry() {},
+      setThinkingLevel() {},
+      sendMessage(message, options) {
+        sent.push({ message, options });
+      },
+    });
+
+    const context = {
+      cwd,
+      hasUI: true,
+      mode: "tui",
+      isIdle: () => true,
+      abort() {},
+      sessionManager: { getEntries: () => [] },
+      ui: {
+        theme: { fg: (_c, t) => t },
+        setStatus() {},
+        setWidget() {},
+        notify: (message, type) => notifications.push({ message, type }),
+        select: async () => undefined,
+        confirm: async () => true,
+      },
+    };
+
+    await hooks.get("session_start")({}, context);
+    assert(commands.has("done"), "/done is registered");
+
+    utils.writePlanFileAtomic(cwd, validPlan);
+    utils.writeDecisionBriefAtomic(cwd, "# Decision Brief: D\n\n## Ziel\nz\n");
+
+    await commands.get("done")("", context);
+    assert(
+      notifications.some((n) => n.message.includes("Nutzung: /done")),
+      "/done without arguments shows usage",
+    );
+
+    await commands.get("done")("1", context);
+    assert(
+      /\* \[x\] Erster Schritt/.test(utils.readPlanFile(cwd)),
+      "/done 1 checks the first todo in the plan file",
+    );
+
+    notifications.length = 0;
+    await commands.get("done")("1", context);
+    assert(
+      notifications.some((n) => n.type === "warning"),
+      "/done on an already-completed todo warns instead of rewriting",
+    );
+
+    await commands.get("done")("2", context);
+    eq(
+      utils.readPlanFile(cwd),
+      undefined,
+      "completing the last todo via /done archives the plan",
+    );
+    eq(
+      utils.readDecisionBrief(cwd),
+      undefined,
+      "archiving the plan co-archives the decision brief",
+    );
+    assert(
+      sent.some((entry) => entry.message.customType === "plan-complete"),
+      "/done completion announces the archived plan",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

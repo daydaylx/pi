@@ -4,7 +4,10 @@
  * Workflow: /plan -> /work (review-plan optional, finish meist automatisch)
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type {
+  AgentMessage,
+  ThinkingLevel,
+} from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
@@ -22,14 +25,18 @@ import {
   ensurePlanDirectory,
   extractDecisionBriefBlock,
   extractDoneSteps,
+  extractProgressBlock,
   extractTodoItems,
   getReviewOutcome,
   hashPlanContent,
+  INVALID_DECISION_BRIEF_RELATIVE_PATH,
   PLAN_RELATIVE_PATH,
   readDecisionBrief,
   readPlanFile,
+  validateDecisionBriefStructure,
   validatePlanStructure,
   writeDecisionBriefAtomic,
+  writeInvalidDecisionBriefAtomic,
   writePlanFileAtomic,
   type TodoItem,
 } from "./utils.ts";
@@ -43,6 +50,7 @@ import {
   type WorkflowPhase,
 } from "../shared/workflow-status.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
+import { SHORTCUTS } from "../shared/shortcuts.ts";
 import {
   buildBriefOverwriteGuardMenu,
   buildDecisionHandoffMenu,
@@ -76,15 +84,31 @@ Verwende mindestens diese gültige Struktur:
 
 # Arbeitsplan: <Aufgabe>
 
-## 1. Auftrag
+## Auftrag
 <Kurze Zielbeschreibung>
 
-## 5. Todos
+## Todos
 - [ ] Konkreter Umsetzungsschritt
 - [ ] Relevante Tests oder Checks ausführen
 
-Pflicht sind Abschnitt 1 und Abschnitt 5 mit mindestens einer Checkbox.
+Pflicht sind die Abschnitte Auftrag und Todos mit mindestens einer Checkbox.
 Stoppe nach dem Schreiben der Plan-Datei und bleibe knapp.`;
+
+// Thinking-Level folgt dem Workflow-Modus (Nutzerentscheidung): kompaktes
+// Planen braucht kein Maximalbudget, Architekturanalysen schon. Wird nur bei
+// einem echten Moduswechsel gesetzt; ein manueller Override über /thinking
+// oder Ctrl+Shift+T gilt bis zum nächsten Wechsel.
+const MODE_THINKING: Record<WorkflowMode, ThinkingLevel> = {
+  simple_plan: "medium",
+  detailed_plan: "xhigh",
+  work: "high",
+};
+
+const MODE_LABEL: Record<WorkflowMode, string> = {
+  simple_plan: "Schnellplan",
+  detailed_plan: "Architekturplan",
+  work: "Work-Modus",
+};
 
 interface PersistedWorkflowState {
   mode?: WorkflowMode;
@@ -92,6 +116,7 @@ interface PersistedWorkflowState {
   // Legacy field retained only for state migration.
   planningActive?: boolean;
   reviewedHash?: string;
+  planCreationMode?: "simple_plan" | "detailed_plan";
   // Legacy fields retained only for state migration.
   enabled?: boolean;
   executing?: boolean;
@@ -119,7 +144,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   let mode: WorkflowMode = "work";
   let phase: WorkflowPhase = "idle";
   let reviewedHash: string | undefined;
+  let planCreationMode: "simple_plan" | "detailed_plan" | undefined;
   let planModeEverUsed = false;
+  // Ob die Plan-Datei vor dem aktuellen Agent-Turn bereits existierte. Steuert,
+  // dass das "Nächster Schritt"-Menü nur nach dem Turn erscheint, der den Plan
+  // erzeugt hat — nicht nach jedem Verfeinerungs-Turn.
+  let planExistedBeforeTurn = false;
 
   function readTodos(cwd: string): TodoItem[] {
     const content = readPlanFile(cwd);
@@ -131,6 +161,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       mode,
       phase,
       reviewedHash,
+      planCreationMode,
     });
   }
 
@@ -173,10 +204,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
     const modeLabel =
       mode === "simple_plan"
-        ? "MODE SIMPLE PLAN"
+        ? "PLAN SCHNELL"
         : mode === "detailed_plan"
-          ? "MODE DETAILED PLAN"
-          : "MODE WORK";
+          ? "PLAN ARCHITEKTUR"
+          : "WORK";
     ctx.ui.setStatus(
       "workflow-mode",
       mode === "work" ? modeLabel : ctx.ui.theme.fg("accent", modeLabel),
@@ -194,11 +225,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   }
 
   function normalizeInterruptedPhase(ctx: ExtensionContext): void {
-    if (
-      phase !== "executing" &&
-      phase !== "reviewing" &&
-      phase !== "deciding"
-    )
+    if (phase !== "executing" && phase !== "reviewing" && phase !== "deciding")
       return;
     if (phase === "deciding") {
       // Ein unterbrochener Klär-Turn wird nicht als „deciding" fortgesetzt;
@@ -229,11 +256,46 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
   }
 
-  function setWorkflowMode(
+  // Bricht einen laufenden Agent-Turn nur nach expliziter Bestätigung ab.
+  // Idle-Kontexte liefern sofort true; ohne TUI wird die Aktion konservativ
+  // abgelehnt statt still abzubrechen.
+  async function confirmAbortActiveTurn(
+    ctx: ExtensionContext,
+  ): Promise<boolean> {
+    if (ctx.isIdle()) return true;
+    if (!ctx.hasUI || ctx.mode !== "tui") {
+      ctx.ui.notify(
+        "Ein Agent-Turn läuft; die Aktion würde ihn abbrechen und benötigt dafür den TUI-Modus.",
+        "warning",
+      );
+      return false;
+    }
+    const confirmed = await ctx.ui.confirm(
+      "Laufenden Agent-Turn abbrechen?",
+      "Die gewählte Aktion stoppt den aktiven Turn und normalisiert den Workflow-Zustand.",
+    );
+    if (!confirmed) {
+      ctx.ui.notify(
+        "Aktion abgebrochen; der laufende Turn wird fortgesetzt.",
+        "info",
+      );
+      return false;
+    }
+    ctx.abort();
+    return true;
+  }
+
+  async function setWorkflowMode(
     target: WorkflowMode,
     ctx: ExtensionContext,
-  ): boolean {
-    if (!ctx.isIdle()) ctx.abort();
+  ): Promise<boolean> {
+    // Same-Mode-Auswahl im Idle ist ein No-op: ein versehentliches
+    // Shift+Tab+Enter darf weder abbrechen noch neu initialisieren.
+    if (target === mode && ctx.isIdle()) {
+      ctx.ui.notify(`${MODE_LABEL[target]} ist bereits aktiv.`, "info");
+      return true;
+    }
+    if (!(await confirmAbortActiveTurn(ctx))) return false;
     normalizeInterruptedPhase(ctx);
 
     if (target !== "work") {
@@ -242,16 +304,17 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       phase = "draft";
     }
 
+    const modeChanged = target !== mode;
     mode = target;
+    if (modeChanged) pi.setThinkingLevel(MODE_THINKING[target]);
     updateStatus(ctx);
     persistState();
-    const label =
-      target === "simple_plan"
-        ? "Schnellplan"
-        : target === "detailed_plan"
-          ? "Architekturplan"
-          : "Work-Modus";
-    ctx.ui.notify(`${label} aktiv.`, "info");
+    ctx.ui.notify(
+      modeChanged
+        ? `${MODE_LABEL[target]} aktiv. Thinking: ${MODE_THINKING[target]} (Modus-Default, ${SHORTCUTS.thinkingMenu.label} zum Ändern).`
+        : `${MODE_LABEL[target]} aktiv.`,
+      "info",
+    );
     return true;
   }
 
@@ -269,7 +332,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         planExists = false;
       }
       if (!planExists) {
-        setWorkflowMode("detailed_plan", ctx);
+        await setWorkflowMode("detailed_plan", ctx);
       } else {
         ctx.ui.notify(
           `${PLAN_RELATIVE_PATH} existiert bereits. /plan benötigt den TUI-Modus, um den bestehenden Plan zu schützen.`,
@@ -412,7 +475,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       }
       case "new-plan": {
         if (!(await guardNewPlan(ctx))) return;
-        setWorkflowMode(action.mode, ctx);
+        await setWorkflowMode(action.mode, ctx);
         return;
       }
       case "continue-plan": {
@@ -420,7 +483,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
           mode === "simple_plan" || mode === "detailed_plan"
             ? mode
             : "detailed_plan";
-        setWorkflowMode(targetMode, ctx);
+        await setWorkflowMode(targetMode, ctx);
         return;
       }
       case "review":
@@ -515,7 +578,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       );
       return;
     }
-    if (!ctx.isIdle()) ctx.abort();
+    if (!(await confirmAbortActiveTurn(ctx))) return;
     normalizeInterruptedPhase(ctx);
 
     // Bestehendes Decision Brief vor stillem Überschreiben schützen.
@@ -551,7 +614,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
             "info",
           );
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           ctx.ui.notify(
             `Archivierung fehlgeschlagen; Intake abgebrochen: ${message}`,
             "error",
@@ -626,6 +690,21 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
       return;
     }
 
+    const structureErrors = validateDecisionBriefStructure(block);
+    if (structureErrors.length > 0) {
+      try {
+        writeInvalidDecisionBriefAtomic(ctx.cwd, block);
+      } catch {
+        // Debug-Kopie ist optional — Fehler hier nicht nach oben weiterleiten.
+      }
+      resetPhase();
+      ctx.ui.notify(
+        `Decision Brief ungültig – nicht gespeichert:\n${structureErrors.join("\n")}\nKopie abgelegt unter ${INVALID_DECISION_BRIEF_RELATIVE_PATH}. Nutze /decide für einen neuen Versuch.`,
+        "error",
+      );
+      return;
+    }
+
     try {
       writeDecisionBriefAtomic(ctx.cwd, block);
       ctx.ui.notify(
@@ -674,16 +753,16 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     // quick / detailed → Plan-Modus aktivieren; bestehenden Plan schützen.
     if (!(await guardNewPlan(ctx))) return;
     const targetMode = action === "quick" ? "simple_plan" : "detailed_plan";
-    setWorkflowMode(targetMode, ctx);
+    if (!(await setWorkflowMode(targetMode, ctx))) return;
     ctx.ui.notify(
       `${targetMode === "simple_plan" ? "Schnellplan" : "Architekturplan"} aktiv. Das Decision Brief wird als Kontext genutzt — beschreibe jetzt deine Aufgabe.`,
       "info",
     );
   }
 
-  pi.events.on(WORKFLOW_MODE_REQUEST_EVENT, (request: WorkflowModeRequest) => {
-    setWorkflowMode(request.mode, request.ctx);
-  });
+  pi.events.on(WORKFLOW_MODE_REQUEST_EVENT, (request: WorkflowModeRequest) =>
+    setWorkflowMode(request.mode, request.ctx),
+  );
 
   pi.registerFlag("plan", {
     description: "Start in detailed plan mode (permissions unchanged)",
@@ -706,15 +785,14 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
   });
 
   pi.registerCommand("decide", {
-    description:
-      "Decision-Intake starten (Optionen klären → Decision Brief)",
+    description: "Decision-Intake starten (Optionen klären → Decision Brief)",
     handler: async (_args, ctx) => {
       await runDecisionIntake(ctx);
     },
   });
 
-  pi.registerShortcut("ctrl+alt+p", {
-    description: "Plan-Assistent öffnen",
+  pi.registerShortcut(SHORTCUTS.planAssistant.keys, {
+    description: SHORTCUTS.planAssistant.description,
     handler: async (ctx) => {
       await routePlan(ctx);
     },
@@ -787,6 +865,12 @@ ${brief}
   }
 
   pi.on("before_agent_start", async (_event, ctx) => {
+    try {
+      planExistedBeforeTurn = readPlanFile(ctx.cwd) !== undefined;
+    } catch {
+      planExistedBeforeTurn = false;
+    }
+
     if (phase === "deciding") {
       return {
         message: {
@@ -893,7 +977,8 @@ Beende den Review mit genau einem Marker:
       return {
         message: {
           customType: "plan-mode-context",
-          content: `${PLAN_MODE_MARKER}
+          content:
+            `${PLAN_MODE_MARKER}
 Du bist im ausführlichen Plan-Modus. Analysiere Kontext, Risiken, Optionen,
 Abhängigkeiten und Umsetzungsschritte gründlich. Der Workflow-Modus verändert
 keine Permissions; halte die aktuell gewählte Zugriffsstufe ein.
@@ -905,7 +990,7 @@ ENTSCHEIDUNGEN:
 Wenn mehrere relevante Lösungen möglich sind, nutze vor dem finalen Plan ask_user.
 Stelle pro Aufruf genau eine fokussierte Frage und biete 2–4 Optionen mit Vor-/Nachteilen und Empfehlung an.
 
-PLANSTRUKTUR:
+PLANSTRUKTUR (alle Abschnitte sind Pflicht):
 # Arbeitsplan: <Aufgabe>
 
 ## 1. Auftrag
@@ -914,10 +999,13 @@ PLANSTRUKTUR:
 ## 4. Risiken / Entscheidungen
 ## 5. Todos
 - [ ] Konkreter Schritt
-- [ ] Relevante Tests oder Checks ausführen
-- [ ] Ergebnis prüfen
+## 6. Tests / Checks
+- Was nach der Umsetzung geprüft werden muss
+## 7. Abschlusskriterien
+- Woran erkennbar ist, dass die Aufgabe vollständig erledigt ist
 
-Pflicht sind nur Abschnitt 1 (Auftrag) und Abschnitt 5 (Todos, mindestens eine Checkbox). Abschnitte 2–4 sind empfohlen, aber nicht blockierend.
+Alle 7 Abschnitte sind Pflicht. Leere Abschnitte sind nicht erlaubt.
+/work validiert den Plan vor dem Start und stoppt bei fehlenden Abschnitten.
 
 Schreibe den finalen Plan nach ${PLAN_RELATIVE_PATH} und stoppe danach.
 Nächster Schritt: /work. Bei großen, riskanten oder architektonischen Änderungen optional vorher /review-plan.` +
@@ -935,7 +1023,7 @@ Nächster Schritt: /work. Bei großen, riskanten oder architektonischen Änderun
         // The command path performs the user-facing error handling.
       }
       const todoList = todos
-        .map((todo) => `${todo.step}. ${todo.text}`)
+        .map((todo) => `T${todo.step}. ${todo.text}`)
         .join("\n");
       return {
         message: {
@@ -945,8 +1033,21 @@ Nächster Schritt: /work. Bei großen, riskanten oder architektonischen Änderun
 Offene Schritte:
 ${todoList || "Keine offenen Todos gefunden."}
 
-Arbeite die Plan-Datei der Reihe nach ab. Markiere abgeschlossene Schritte mit [DONE:n].
-Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
+STOP-REGELN (verbindlich):
+- Prüfe vor jedem Schritt, ob er noch zum Plan passt. Weiche nicht ab.
+- Keine stillen Scope-Erweiterungen, keine neuen Features außerhalb des Plans.
+- Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.
+- Markiere einen Schritt nur als erledigt, wenn du einen konkreten Nachweis hast.
+- Stoppe und melde einen Blocker, wenn Plan und Realität in Konflikt stehen.
+
+Melde am Ende des Turns Fortschritt als [PLAN-PROGRESS]-Block:
+[PLAN-PROGRESS]
+DONE:
+- T1: erledigt, Nachweis: <kurze Beschreibung>
+
+BLOCKED:
+- T2: Grund: <kurze Beschreibung>
+[/PLAN-PROGRESS]`,
           display: false,
         },
       };
@@ -967,33 +1068,17 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
         return;
       }
 
-      const completedSteps = extractDoneSteps(getTextContent(event.message));
+      const text = getTextContent(event.message);
+      const progressSteps = extractProgressBlock(text);
+      const completedSteps =
+        progressSteps !== undefined ? progressSteps : extractDoneSteps(text);
       const result = applyDoneSteps(current, completedSteps);
       if (result.updated > 0) writePlanFileAtomic(ctx.cwd, result.content);
 
       const todos = extractTodoItems(result.content);
       if (todos.length > 0 && todos.every((todo) => todo.completed)) {
-        try {
-          const archivePath = archivePlanFile(ctx.cwd, "complete");
-          phase = "idle";
-          reviewedHash = undefined;
-          pi.sendMessage(
-            {
-              customType: "plan-complete",
-              content: `**Plan vollständig bearbeitet und archiviert:** ${relative(ctx.cwd, archivePath)}`,
-              display: true,
-            },
-            { triggerTurn: false },
-          );
-        } catch (error) {
-          phase = "ready";
-          const message =
-            error instanceof Error ? error.message : String(error);
-          ctx.ui.notify(
-            `Alle Todos erledigt, Archivierung fehlgeschlagen: ${message}\nNutze /finish erneut.`,
-            "warning",
-          );
-        }
+        archiveCompletedPlan(ctx);
+        return;
       }
       updateStatus(ctx);
       persistState();
@@ -1021,7 +1106,7 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
         const structureErrors =
           content === undefined
             ? [`Plan-Datei fehlt: ${PLAN_RELATIVE_PATH}`]
-            : validatePlanStructure(content);
+            : validatePlanStructure(content, planCreationMode);
 
         if (
           outcome === "approved" &&
@@ -1069,9 +1154,16 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
       if (readPlanFile(ctx.cwd) !== undefined) {
         updateStatus(ctx);
         ctx.ui.notify(`Plan gespeichert → ${PLAN_RELATIVE_PATH}`, "info");
-        // Bietet nach dem Schreiben/Verfeinern eines Plans sinnvolle nächste
-        // Aktionen an — nicht-blockierend, keine automatische Ausführung.
-        await offerPostPlanActions(ctx);
+        // Das "Nächster Schritt"-Menü erscheint nur nach dem Turn, der die
+        // Plan-Datei neu erzeugt hat — Verfeinerungs-Turns bleiben menüfrei.
+        if (!planExistedBeforeTurn) {
+          planExistedBeforeTurn = true;
+          if (mode === "simple_plan" || mode === "detailed_plan") {
+            planCreationMode = mode;
+            persistState();
+          }
+          await offerPostPlanActions(ctx);
+        }
       }
     } catch {
       // Die zentrale Permission-Policy meldet unsichere Pfade separat.
@@ -1079,7 +1171,7 @@ Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.`,
   });
 
   async function reviewPlan(ctx: ExtensionContext): Promise<void> {
-    if (!ctx.isIdle()) ctx.abort();
+    if (!(await confirmAbortActiveTurn(ctx))) return;
     normalizeInterruptedPhase(ctx);
 
     let content: string | undefined;
@@ -1126,12 +1218,58 @@ ${content}
     );
   }
 
+  // Archiviert ein vorhandenes Decision Brief zusammen mit dem Plan, damit es
+  // nicht als veralteter Kontext in spätere, fremde Plan-Turns injiziert wird.
+  // Fehler sind nicht fatal: das Plan-Archiv gilt unabhängig davon.
+  function archiveBriefAlongsidePlan(ctx: ExtensionContext): void {
+    try {
+      if (readDecisionBrief(ctx.cwd) === undefined) return;
+      archiveDecisionBrief(ctx.cwd);
+      ctx.ui.notify("Decision Brief mitarchiviert.", "info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Decision Brief konnte nicht mitarchiviert werden: ${message}`,
+        "warning",
+      );
+    }
+  }
+
+  // Gemeinsamer Abschlusspfad für turn_end-Autoarchiv, /done und den
+  // "alle Todos erledigt"-Fall von /work. Bei Archivfehlern bleibt die Phase
+  // auf "ready", damit /finish als Retry dient.
+  function archiveCompletedPlan(ctx: ExtensionContext): void {
+    try {
+      const archivePath = archivePlanFile(ctx.cwd, "complete");
+      archiveBriefAlongsidePlan(ctx);
+      phase = mode !== "work" ? "draft" : "idle";
+      reviewedHash = undefined;
+      pi.sendMessage(
+        {
+          customType: "plan-complete",
+          content: `**Plan vollständig bearbeitet und archiviert:** ${relative(ctx.cwd, archivePath)}`,
+          display: true,
+        },
+        { triggerTurn: false },
+      );
+    } catch (error) {
+      phase = "ready";
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Alle Todos erledigt, Archivierung fehlgeschlagen: ${message}\nNutze /finish erneut.`,
+        "warning",
+      );
+    }
+    updateStatus(ctx);
+    persistState();
+  }
+
   async function executePlan(ctx: ExtensionContext): Promise<void> {
     if (phase === "executing" && !ctx.isIdle()) {
       ctx.ui.notify("Plan wird bereits ausgeführt.", "warning");
       return;
     }
-    setWorkflowMode("work", ctx);
+    if (!(await setWorkflowMode("work", ctx))) return;
 
     let content: string | undefined;
     try {
@@ -1149,7 +1287,7 @@ ${content}
       );
       return;
     }
-    const structureErrors = validatePlanStructure(content);
+    const structureErrors = validatePlanStructure(content, planCreationMode);
     if (structureErrors.length > 0) {
       phase = "draft";
       reviewedHash = undefined;
@@ -1173,6 +1311,16 @@ ${content}
       phase = "ready";
       updateStatus(ctx);
       persistState();
+      if (ctx.hasUI && ctx.mode === "tui") {
+        const confirmed = await ctx.ui.confirm(
+          "Alle Plan-Todos sind bereits erledigt.",
+          "Plan jetzt archivieren?",
+        );
+        if (confirmed) {
+          archiveCompletedPlan(ctx);
+          return;
+        }
+      }
       ctx.ui.notify(
         "Alle Plan-Todos sind bereits erledigt. Nutze /finish.",
         "info",
@@ -1195,7 +1343,39 @@ Plan-Datei: ${PLAN_RELATIVE_PATH}
 
 ${content}
 
-Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DONE:n].`,
+Setze den Plan Schritt für Schritt um. Die Todos sind als T1, T2, … nummeriert.
+
+STOP-REGELN (verbindlich):
+- Prüfe zuerst, ob der Plan noch zum aktuellen Repo-Zustand passt.
+- Keine stillen Scope-Erweiterungen, keine neuen Features außerhalb des Plans.
+- Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.
+- Markiere einen Schritt nur als erledigt, wenn du einen konkreten Nachweis hast.
+- Stoppe und melde einen Blocker, wenn Plan und Realität in Konflikt stehen.
+
+Schreibe am Ende des Turns einen [PLAN-PROGRESS]-Block zur Fortschrittsverfolgung
+und einen [WORK-RESULT]-Block als lesbaren Ausführungsbericht:
+
+[PLAN-PROGRESS]
+DONE:
+- T1: erledigt, Nachweis: <kurze Beschreibung>
+
+BLOCKED:
+- T2: Grund: <kurze Beschreibung>
+[/PLAN-PROGRESS]
+
+[WORK-RESULT]
+DONE:
+- T1: <was wurde getan>
+
+CHECKS:
+- <was wurde geprüft>
+
+BLOCKED:
+- <was ist blockiert und warum>
+
+CHANGED_FILES:
+- <geänderte Dateien>
+[/WORK-RESULT]`,
         display: true,
       },
       { triggerTurn: true },
@@ -1215,6 +1395,74 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
   pi.registerCommand("go", {
     description: "Alias für /work",
     handler: async (_args, ctx) => executePlan(ctx),
+  });
+
+  // Fallback für vergessene [DONE:n]-Marker: hakt Todos manuell ab und nutzt
+  // denselben Abschluss-/Archivpfad wie die automatische Erkennung. Ohne den
+  // Befehl bliebe ein Plan, dessen Marker das Modell ausgelassen hat, dauerhaft
+  // "executing".
+  pi.registerCommand("done", {
+    description: "Plan-Todos manuell abhaken: /done <n> [m …]",
+    handler: async (args, ctx) => {
+      const steps = args.trim().split(/\s+/).filter(Boolean).map(Number);
+      if (
+        steps.length === 0 ||
+        steps.some((step) => !Number.isSafeInteger(step) || step <= 0)
+      ) {
+        ctx.ui.notify(
+          "Nutzung: /done <n> [m …] — Nummern wie in /plan-todos",
+          "info",
+        );
+        return;
+      }
+
+      let content: string | undefined;
+      try {
+        content = readPlanFile(ctx.cwd);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(
+          `Plan-Datei ist nicht sicher lesbar: ${message}`,
+          "error",
+        );
+        return;
+      }
+      if (content === undefined) {
+        ctx.ui.notify("Keine Plan-Datei vorhanden.", "info");
+        return;
+      }
+
+      const result = applyDoneSteps(content, steps);
+      if (result.updated === 0) {
+        ctx.ui.notify(
+          "Keine passende offene Todo-Nummer gefunden (bereits erledigt oder außerhalb des Bereichs).",
+          "warning",
+        );
+        return;
+      }
+      try {
+        writePlanFileAtomic(ctx.cwd, result.content);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(
+          `Plan-Datei konnte nicht aktualisiert werden: ${message}`,
+          "error",
+        );
+        return;
+      }
+      ctx.ui.notify(
+        `${result.updated} Todo${result.updated === 1 ? "" : "s"} abgehakt.`,
+        "info",
+      );
+
+      const todos = extractTodoItems(result.content);
+      if (todos.length > 0 && todos.every((todo) => todo.completed)) {
+        archiveCompletedPlan(ctx);
+        return;
+      }
+      updateStatus(ctx);
+      persistState();
+    },
   });
 
   async function finishPlan(ctx: ExtensionCommandContext): Promise<void> {
@@ -1264,6 +1512,7 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
         ctx.cwd,
         complete ? "complete" : "incomplete",
       );
+      archiveBriefAlongsidePlan(ctx);
       phase = keepPlanMode ? "draft" : "idle";
       reviewedHash = undefined;
       updateStatus(ctx);
@@ -1321,6 +1570,7 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       mode =
         persisted.mode ?? (persisted.planningActive ? "detailed_plan" : "work");
       reviewedHash = persisted.reviewedHash;
+      planCreationMode = persisted.planCreationMode;
     } else if (persisted) {
       phase = persisted.executing
         ? "executing"
@@ -1340,6 +1590,8 @@ Setze den Plan Schritt für Schritt um. Markiere abgeschlossene Schritte mit [DO
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(`Unsicherer Planpfad ignoriert: ${message}`, "error");
     }
+
+    planExistedBeforeTurn = content !== undefined;
 
     if (content === undefined) {
       phase = "idle";
