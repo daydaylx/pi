@@ -46,8 +46,7 @@ const AUTO_YOLO_ON_START = true;
 
 function permissionFromEnv(): PermissionLevel | undefined {
   const value = process.env[ENV_PERMISSION_LEVEL] as
-    | PermissionLevel
-    | undefined;
+    PermissionLevel | undefined;
   return value && value in PERMISSION_LEVEL_LABEL ? value : undefined;
 }
 
@@ -343,16 +342,5 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     writeOverride =
       latestState?.data?.writeOverride ?? writeOverrideFromEnv() ?? "inherit";
     publishStatus(ctx);
-    if (
-      !latestState &&
-      AUTO_YOLO_ON_START &&
-      permissionLevel === "yolo" &&
-      ctx.mode === "tui"
-    ) {
-      ctx.ui.notify(
-        `${formatPermissionWarning("yolo")}\n\nNächster Schritt: /yolo deaktiviert YOLO, /permission öffnet Alternativen.`,
-        "warning",
-      );
-    }
   });
 }

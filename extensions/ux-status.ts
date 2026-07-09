@@ -40,7 +40,6 @@ import {
 import {
   formatEmptyPlanState,
   formatFooterLine,
-  formatHeaderLines,
   formatModePhase,
   formatPermissionWarning,
   type VisualWorkflowState,
@@ -145,20 +144,9 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
       setFooter?: (factory: unknown) => void;
     };
 
-    if (ctx.mode === "tui" && typeof ui.setHeader === "function") {
-      ui.setHeader((_tui: unknown, theme: any) => ({
-        render(width: number): string[] {
-          const state = buildVisualState(ctx);
-          const [line] = formatHeaderLines(ctx.cwd, state);
-          const color =
-            state.permissionLevel === "yolo" ? "error" :
-            state.permissionLevel === "full-access" ? "warning" :
-            "accent";
-          return [theme.fg(color, theme.bold(truncatePlain(line, width)))];
-        },
-        invalidate() {},
-      }));
-    }
+    // Der Header-Slot gehört startup-banner.ts (großer ASCII-Banner). Diese
+    // Extension setzt hier bewusst keinen eigenen Header, um den Banner nicht
+    // zu überschreiben.
 
     if (ctx.mode === "tui" && typeof ui.setFooter === "function") {
       ui.setFooter((tui: any, theme: any, footerData: any) => {
@@ -268,7 +256,9 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("model_select", async (_event, ctx) => updateCentralStatus(ctx));
-  pi.on("thinking_level_select", async (_event, ctx) => updateCentralStatus(ctx));
+  pi.on("thinking_level_select", async (_event, ctx) =>
+    updateCentralStatus(ctx),
+  );
 
   pi.registerCommand("thinking", {
     description: "Thinking-Level setzen: minimal | low | medium | high | xhigh",

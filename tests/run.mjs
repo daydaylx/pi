@@ -3170,12 +3170,91 @@ function stripAnsi(text) {
       if (name === "session_start") sessionStartHandler = handler;
     },
   });
-  eq(
-    sessionStartHandler,
-    null,
-    "startup-banner is disabled so ux-status remains the single header source",
+  assert(
+    sessionStartHandler !== null,
+    "startup-banner registers session_start hook",
   );
 
+  const fakeTheme = {
+    fg: (_color, text) => text,
+    getColorMode: () => "truecolor",
+  };
+
+  let headerFactory = "unset";
+  const rpcCtx = {
+    mode: "rpc",
+    model: { id: "glm-5-turbo" },
+    ui: { setHeader: (factory) => (headerFactory = factory) },
+  };
+  await sessionStartHandler({}, rpcCtx);
+  eq(
+    headerFactory,
+    "unset",
+    "startup-banner does not touch the header outside tui mode",
+  );
+
+  let setHeaderCount = 0;
+  const tuiCtx = {
+    mode: "tui",
+    model: { id: "glm-5-turbo" },
+    ui: {
+      setHeader: (factory) => {
+        setHeaderCount++;
+        headerFactory = factory;
+      },
+    },
+  };
+  await sessionStartHandler({}, tuiCtx);
+  eq(setHeaderCount, 1, "startup-banner calls setHeader once in tui mode");
+  assert(
+    typeof headerFactory === "function",
+    "startup-banner passes a component factory to setHeader",
+  );
+
+  const component = headerFactory({}, fakeTheme);
+  assert(
+    typeof component.render === "function",
+    "header component exposes render(width)",
+  );
+  assert(
+    typeof component.invalidate === "function",
+    "header component exposes invalidate()",
+  );
+  component.invalidate();
+
+  const wideLines = component.render(120);
+  assert(
+    wideLines.length > 5,
+    "wide render includes glyph lines plus subtitle lines",
+  );
+  assert(
+    wideLines.some((line) => line.includes("██")),
+    "wide render draws the big block banner",
+  );
+  assert(
+    wideLines.some((line) => stripAnsi(line) === "by Grunert"),
+    "wide render shows the 'by Grunert' byline under the block banner",
+  );
+
+  const narrowLines = component.render(40);
+  assert(
+    narrowLines.some((line) => line.includes("██")),
+    "narrow render still draws a block banner (compact PI)",
+  );
+  assert(
+    narrowLines.some((line) => stripAnsi(line) === "by Grunert"),
+    "narrow render also shows the 'by Grunert' byline",
+  );
+
+  const tinyLines = component.render(6);
+  eq(tinyLines.length, 1, "tiny render falls back to a single plain line");
+  assert(
+    stripAnsi(tinyLines[0]).startsWith("PI"),
+    "tiny render plain line starts with PI",
+  );
+}
+
+{
   const visualState = {
     mode: "detailed_plan",
     phase: "draft",
@@ -3188,48 +3267,24 @@ function stripAnsi(text) {
     nextStep: "/work",
   };
 
-  // ── Header: eine Zeile mit Hauptzustand (#29) ──
+  // ── Header: statische Pi-Agent-Zeile, unabhängig vom Workflow-Zustand ──
   eq(
     visualSystem.formatHeaderLines(ROOT, visualState).length,
     1,
     "central visual header is exactly one line",
   );
-  assert(
-    visualSystem.formatHeaderLines(ROOT, visualState)[0].includes("PI ·"),
-    "header always starts with PI ·",
+  eq(
+    visualSystem.formatHeaderLines(ROOT, visualState)[0],
+    "Pi Agent",
+    "header is the static Pi Agent title regardless of workflow state",
   );
-  assert(
-    visualSystem
-      .formatHeaderLines(ROOT, visualState)[0]
-      .includes("PLANUNG AKTIV"),
-    "header shows PLANUNG AKTIV for draft phase",
-  );
-  assert(
-    visualSystem
-      .formatHeaderLines(ROOT, { ...visualState, phase: "executing" })[0]
-      .includes("WORK AKTIV"),
-    "header shows WORK AKTIV for executing phase",
-  );
-  assert(
-    visualSystem
-      .formatHeaderLines(ROOT, { ...visualState, phase: "idle" })[0]
-      .includes("BEREIT"),
-    "header shows BEREIT for idle phase",
-  );
-  assert(
-    visualSystem
-      .formatHeaderLines(ROOT, {
-        ...visualState,
-        permissionLevel: "full-access",
-      })[0]
-      .includes("FULL ACCESS"),
-    "header warns about FULL ACCESS",
-  );
-  assert(
-    visualSystem
-      .formatHeaderLines(ROOT, { ...visualState, permissionLevel: "yolo" })[0]
-      .includes("YOLO MODE"),
-    "header warns about YOLO MODE",
+  eq(
+    visualSystem.formatHeaderLines(ROOT, {
+      ...visualState,
+      permissionLevel: "yolo",
+    })[0],
+    "Pi Agent",
+    "header stays static even during YOLO",
   );
 
   // ── Footer: CWD · Mode · Model · Thinking · Git (#28) ──
@@ -3339,8 +3394,8 @@ function stripAnsi(text) {
     "settings explicitly loads the controlled subagent extension",
   );
   assert(
-    !settings.extensions.includes("+extensions/startup-banner.ts"),
-    "settings disables the old competing startup banner",
+    settings.extensions.includes("+extensions/startup-banner.ts"),
+    "settings loads the big ASCII startup banner as the sole header source",
   );
   assert(
     !settings.extensions.includes("+extensions/or-free/index.ts"),

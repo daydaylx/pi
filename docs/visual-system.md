@@ -4,24 +4,22 @@ Zielbild: ruhig · klar · agentisch · kontrollierbar · professionell.
 
 ## Chrome
 
-- **Header:** genau eine kompakte Quelle (`ux-status.ts`, `ctx.ui.setHeader`) mit maximal zwei Zeilen:
-  - `PI · <Projekt>`
-  - `<MODE · PHASE> | <Model> | <Thinking> | <Permission>`
-- **Footer:** genau eine kompakte Quelle (`ux-status.ts`, `ctx.ui.setFooter`). Der alte große Startup-Banner und Zentui-Statusline sind deaktiviert.
+- **Header:** großer ASCII-Blockbanner (`startup-banner.ts`, `ctx.ui.setHeader`) mit Farbverlauf, Byline "by Grunert" und Kurzhinweisen; skaliert je nach Terminalbreite (voll/kompakt/einzeilig). `ux-status.ts` setzt bewusst keinen eigenen Header mehr, um den Banner nicht zu überschreiben.
+- **Footer:** genau eine kompakte Quelle (`ux-status.ts`, `ctx.ui.setFooter`). Die native Zentui-Statusline bleibt deaktiviert.
 - **Fallback-Status:** nur ein Extension-Status-Key bleibt aktiv: `workflow-summary`. Alte Keys (`workflow-mode`, `workflow-permission`, `plan-todos-count`) werden gelöscht.
 
 ## Farben
 
 Farben tragen Bedeutung, keine Dekoration:
 
-| Zustand | Farbe |
-| --- | --- |
-| Normal | neutral |
+| Zustand            | Farbe        |
+| ------------------ | ------------ |
+| Normal             | neutral      |
 | Plan / Architektur | blau-violett |
-| Review / Warnung | gelb |
-| Work / Erfolg | grün |
-| Full Access | gelb/orange |
-| YOLO / Fehler | rot |
+| Review / Warnung   | gelb         |
+| Work / Erfolg      | grün         |
+| Full Access        | gelb/orange  |
+| YOLO / Fehler      | rot          |
 
 Das Theme `themes/david-dark.json` nutzt gedämpfte Farben, dunkle Borders und gedimmte Tool-Ausgaben.
 
@@ -49,7 +47,7 @@ Das Theme `themes/david-dark.json` nutzt gedämpfte Farben, dunkle Borders und g
 
 ## Warnzustände
 
-`full-access` und `yolo` werden nie wie normale Modi angezeigt. Beim Aktivieren erscheint ein kurzer, eindeutiger Warnblock. Header/Footer färben die Permission-Stufe entsprechend.
+`full-access` und `yolo` werden nie wie normale Modi angezeigt. Beim Aktivieren erscheint ein kurzer, eindeutiger Warnblock. Der Footer färbt die Permission-Stufe entsprechend; der Header (ASCII-Banner) bleibt davon unabhängig.
 
 ## Leere Zustände
 

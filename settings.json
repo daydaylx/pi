@@ -41,9 +41,7 @@
     "npm:@zigai/pi-prompt-history",
     {
       "source": "npm:pi-claude-style-tools@1.0.64",
-      "extensions": [
-        "extensions/index.ts"
-      ],
+      "extensions": ["extensions/index.ts"],
       "themes": []
     },
     "npm:pi-zentui@0.3.0"
@@ -51,6 +49,7 @@
   "extensions": [
     "!extensions/**",
     "+extensions/notify.ts",
+    "+extensions/startup-banner.ts",
     "+extensions/preview-runtime.ts",
     "+extensions/tools.ts",
     "+extensions/plan-mode/index.ts",
