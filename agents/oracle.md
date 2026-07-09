@@ -2,7 +2,7 @@
 name: oracle
 description: Gives a second opinion on plans, risky changes or conflicting reviews using read-only context
 tools: read, grep, find, ls
-model: opencode-go/qwen3.7-plus
+model: opencode-go/qwen3.7-max
 thinking: high
 permission: read-only
 writeOverride: block

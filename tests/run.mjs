@@ -3348,13 +3348,13 @@ function stripAnsi(text) {
   );
   eq(
     settings.defaultProvider,
-    "opencode-go",
-    "OpenCode Go uses the configured provider",
+    "zai",
+    "ZAI is the configured default provider",
   );
   eq(
     settings.defaultModel,
-    "kimi-k2.6",
-    "Kimi K2.6 is the configured default model",
+    "glm-5.2",
+    "GLM-5.2 is the configured default model",
   );
 
   const zentui = JSON.parse(

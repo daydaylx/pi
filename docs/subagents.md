@@ -91,6 +91,15 @@ Limits:
 - No nesting: a subagent child process refuses to spawn further subagents,
   and a `subagent` entry in an agent's `tools` frontmatter is stripped.
 
+### Choosing a mode
+
+- **single** — one bounded task on one agent. Default for most work.
+- **parallel (`tasks[]`)** — same target, multiple independent lenses at once.
+  Use when the angles do not depend on each other, e.g. review one diff with
+  `reviewer` + `security-auditor` + `test-runner` simultaneously.
+- **chain (`chain[]`)** — pipeline where each step's output feeds the next via
+  `{previous}`. Use when step B needs step A's result, e.g. `scout` → `planner`.
+
 ## Agent Profiles
 
 | Agent              | Tools                                   | Permission | Write Override | Model             | Thinking | Use                             |
@@ -104,7 +113,7 @@ Limits:
 | `ui-reviewer`      | read, grep, find, ls                    | read-only  | block          | kimi-k2.6         | high     | Static UI/UX review.            |
 | `docs-auditor`     | read, grep, find, ls                    | read-only  | block          | deepseek-v4-flash | medium   | Docs/code drift.                |
 | `worker`           | read, grep, find, ls, edit, write, bash | read-write | inherit        | deepseek-v4-pro   | high     | Narrow approved implementation. |
-| `oracle`           | read, grep, find, ls                    | read-only  | block          | qwen3.7-plus      | high     | Second opinion.                 |
+| `oracle`           | read, grep, find, ls                    | read-only  | block          | qwen3.7-max       | high     | Second opinion.                 |
 
 All agents are stored in `agents/*.md`. Each file uses frontmatter:
 
