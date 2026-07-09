@@ -962,9 +962,11 @@ assert(
   for (const expected of [
     "scout",
     "planner",
+    "architect",
     "reviewer",
     "test-runner",
     "security-auditor",
+    "ui-reviewer",
     "docs-auditor",
     "worker",
     "oracle",
@@ -1085,6 +1087,86 @@ assert(
       deniedProjectRun.isError === true &&
         deniedProjectRun.content[0].text.includes("not approved"),
       "project-local subagents are denied without interactive approval",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+}
+
+// ───────────────────────── subagents: skipped files, CRLF frontmatter, tool filter ─────────────────────────
+{
+  const projectRoot = mkdtempSync(path.join(tmpdir(), "pi-subagent-skip-"));
+  try {
+    const projectAgentsDir = path.join(projectRoot, ".pi", "agents");
+    mkdirSync(projectAgentsDir, { recursive: true });
+    writeFileSync(
+      path.join(projectAgentsDir, "no-description.md"),
+      ["---", "name: no-description", "tools: read", "---", "Prompt.", ""].join(
+        "\n",
+      ),
+    );
+    writeFileSync(
+      path.join(projectAgentsDir, "crlf-agent.md"),
+      [
+        "---",
+        "name: crlf-agent",
+        "description: Windows line endings test agent",
+        "tools: read, subagent, grep",
+        "---",
+        "CRLF prompt.",
+        "",
+      ].join("\r\n"),
+    );
+    const discovery = subagentAgents.discoverAgents(projectRoot, "project");
+    eq(
+      discovery.agents.map((agent) => agent.name),
+      ["crlf-agent"],
+      "CRLF frontmatter is parsed and the agent is discovered",
+    );
+    eq(
+      discovery.agents[0].tools,
+      ["read", "grep"],
+      "the subagent tool is stripped from tool lists (recursion guard)",
+    );
+    assert(
+      discovery.agents[0].systemPrompt.includes("CRLF prompt."),
+      "CRLF body is preserved as system prompt",
+    );
+    eq(
+      discovery.skipped.length,
+      1,
+      "invalid agent files are reported as skipped",
+    );
+    assert(
+      discovery.skipped[0].filePath.endsWith("no-description.md") &&
+        discovery.skipped[0].reason.includes("description"),
+      "skipped entry names the file and the missing frontmatter key",
+    );
+
+    const commands = new Map();
+    subagents.default({
+      registerTool() {},
+      registerCommand(name, options) {
+        commands.set(name, options);
+      },
+      on() {},
+      getThinkingLevel() {
+        return "high";
+      },
+    });
+    const notified = [];
+    await commands.get("subagent-doctor").handler("", {
+      cwd: projectRoot,
+      ui: { notify: (message, level) => notified.push({ message, level }) },
+    });
+    assert(
+      notified[0].message.includes("no-description.md"),
+      "/subagent-doctor lists skipped agent files",
+    );
+    eq(
+      notified[0].level,
+      "warning",
+      "/subagent-doctor warns when agent files were skipped",
     );
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
@@ -1256,6 +1338,45 @@ assert(
     fallbackRendered.some((l) => l.includes("working…")),
     "missing think falls back to 'working…'",
   );
+
+  // ── TTL cleanup: stale done/blocked entries are evicted on upsert ──
+  widget.resetWidgetState();
+  widget.upsertSubagent({
+    id: "old-done",
+    label: "old-done",
+    status: "done",
+    currentTask: "x",
+    lastUpdate: 0,
+  });
+  widget.upsertSubagent({
+    id: "old-running",
+    label: "old-running",
+    status: "running",
+    currentTask: "x",
+    lastUpdate: 0,
+  });
+  const staleAge = Date.now() - 6 * 60 * 1000;
+  widget.getWidgetState().subagents.get("old-done").lastUpdate = staleAge;
+  widget.getWidgetState().subagents.get("old-running").lastUpdate = staleAge;
+  widget.upsertSubagent({
+    id: "fresh",
+    label: "fresh",
+    status: "running",
+    currentTask: "y",
+    lastUpdate: 0,
+  });
+  assert(
+    !widget.getWidgetState().subagents.has("old-done"),
+    "stale done entries are evicted after the TTL",
+  );
+  assert(
+    widget.getWidgetState().subagents.has("old-running"),
+    "running entries are never evicted by the TTL",
+  );
+  assert(
+    widget.getWidgetState().subagents.has("fresh"),
+    "fresh entries survive the TTL cleanup",
+  );
 }
 
 // ───────────────────────── subagent E2E: fake child process (#40) ─────────────────────────
@@ -1410,6 +1531,61 @@ assert(
       assert(
         result.content[0].text.includes("Unknown agent"),
         "E2E unknown-agent: error message mentions unknown agent",
+      );
+    }
+
+    // ── Mode validation gives a concrete hint ──
+    {
+      const result = await tool.execute(
+        "e2e-mode-hint",
+        { agent: "scout", agentScope: "user" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(
+        result.isError &&
+          result.content[0].text.includes(
+            '"agent" was provided without "task"',
+          ),
+        "E2E mode-hint: agent without task yields a concrete hint",
+      );
+    }
+
+    // ── Nested subagents are refused (recursion guard) ──
+    {
+      process.env.PI_SUBAGENT = "1";
+      try {
+        const result = await tool.execute(
+          "e2e-nested",
+          { list: true, agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(
+          result.isError &&
+            result.content[0].text.includes("Nested subagents are not allowed"),
+          "E2E nested: a subagent child process cannot spawn subagents",
+        );
+      } finally {
+        delete process.env.PI_SUBAGENT;
+      }
+    }
+
+    // ── Signal kill is reported as failure, not success ──
+    process.env.PI_TEST_SCENARIO = "self-kill";
+    {
+      const result = await tool.execute(
+        "e2e-self-kill",
+        { agent: "scout", task: "Die by signal", agentScope: "user" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(
+        result.isError && result.details.results[0].exitCode !== 0,
+        "E2E self-kill: a signal-killed child is reported as failed",
       );
     }
 
@@ -1656,6 +1832,41 @@ assert(
         rmSync(symlinkRoot, { recursive: true, force: true });
         rmSync(symlinkOutside, { recursive: true, force: true });
       }
+
+      // A project root that is itself a symlink must not block its own
+      // subdirectories (both sides are canonicalized).
+      const realRoot = mkdtempSync(
+        path.join(tmpdir(), "pi-subagent-realroot-"),
+      );
+      const linkRoot = path.join(
+        tmpdir(),
+        `pi-subagent-linkroot-${Date.now()}`,
+      );
+      try {
+        mkdirSync(path.join(realRoot, "sub"));
+        symlinkSync(realRoot, linkRoot, "dir");
+        const linkedResult = await tool.execute(
+          "e2e-cwd-6",
+          {
+            agent: "scout",
+            task: "List files",
+            agentScope: "user",
+            cwd: "sub",
+          },
+          undefined,
+          undefined,
+          { ...makeCtx(), cwd: linkRoot },
+        );
+        assert(
+          !linkedResult.details.results[0].stderr.includes(
+            "is outside the project root",
+          ),
+          "E2E cwd: a symlinked project root does not block its own subdirectories",
+        );
+      } finally {
+        rmSync(linkRoot, { recursive: true, force: true });
+        rmSync(realRoot, { recursive: true, force: true });
+      }
     }
 
     // ── Timeout kills a hung child process (#37) ──
@@ -1707,6 +1918,10 @@ assert(
           result.details.results[0].stopReason === "aborted",
           "E2E timeout: stopReason reflects the timeout kill",
         );
+        assert(
+          result.details.results[0].errorMessage.includes("timed out"),
+          "E2E timeout: the error message names the timeout",
+        );
       } finally {
         rmSync(timeoutProjectRoot, { recursive: true, force: true });
       }
@@ -1733,6 +1948,10 @@ assert(
       assert(
         result.details.results[0].stopReason === "aborted",
         "E2E abort: stopReason reflects the abort",
+      );
+      assert(
+        result.details.results[0].errorMessage.includes("aborted"),
+        "E2E abort: the error message names the abort",
       );
     }
 
@@ -1768,6 +1987,29 @@ assert(
       assert(
         Buffer.byteLength(rawPortion, "utf8") <= 32 * 1024,
         "E2E chain-cap: the handoff payload does not exceed CHAIN_HANDOFF_CAP",
+      );
+    }
+
+    // ── Chain handoff keeps $-patterns literal ──
+    process.env.PI_TEST_SCENARIO = "chain-probe";
+    {
+      const result = await tool.execute(
+        "e2e-chain-dollar",
+        {
+          chain: [
+            { agent: "scout", task: "Echo $& and $$ tokens" },
+            { agent: "planner", task: "Next: {previous}" },
+          ],
+          agentScope: "user",
+        },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(
+        !result.isError &&
+          result.content[0].text.includes("Echo $& and $$ tokens"),
+        "E2E chain-dollar: $-patterns in prior output are passed through literally",
       );
     }
 
@@ -1820,6 +2062,42 @@ assert(
       assert(
         scoutEntries.length === 2,
         "E2E widget: two parallel same-name agents get separate widget entries",
+      );
+    }
+
+    // ── Widget: now/risk are reset instead of sticking forever ──
+    {
+      const widgetModule = await jiti.import(
+        path.resolve(ROOT, "extensions/subagents/widget.ts"),
+      );
+      widgetModule.resetWidgetState();
+      process.env.PI_TEST_SCENARIO = "error";
+      await tool.execute(
+        "e2e-widget-risk-1",
+        { agent: "scout", task: "Fail", agentScope: "user" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(
+        widgetModule.getWidgetState().risk != null,
+        "E2E widget: a failed run sets the risk line",
+      );
+      process.env.PI_TEST_SCENARIO = "success";
+      await tool.execute(
+        "e2e-widget-risk-2",
+        { agent: "scout", task: "Succeed", agentScope: "user" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(
+        widgetModule.getWidgetState().risk == null,
+        "E2E widget: the next run clears the stale risk line",
+      );
+      assert(
+        widgetModule.getWidgetState().now === undefined,
+        "E2E widget: the now line resets once all runs are finished",
       );
     }
   } finally {

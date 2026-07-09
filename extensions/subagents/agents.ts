@@ -1,10 +1,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { PermissionLevel, WriteOverride } from "../shared/workflow-status.ts";
+import type {
+  PermissionLevel,
+  WriteOverride,
+} from "../shared/workflow-status.ts";
 
 export type AgentScope = "user" | "project" | "both";
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingLevel =
+  "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface AgentConfig {
   name: string;
@@ -22,8 +26,14 @@ export interface AgentConfig {
   filePath: string;
 }
 
+export interface SkippedAgentFile {
+  filePath: string;
+  reason: string;
+}
+
 export interface AgentDiscoveryResult {
   agents: AgentConfig[];
+  skipped: SkippedAgentFile[];
   userAgentsDir: string;
   projectAgentsDir: string | null;
 }
@@ -60,16 +70,19 @@ function getAgentDir(): string {
     : path.join(os.homedir(), ".pi", "agent");
 }
 
-function parseFrontmatter(
-  content: string,
-): { frontmatter: Record<string, string>; body: string } {
-  if (!content.startsWith("---\n")) {
+function parseFrontmatter(content: string): {
+  frontmatter: Record<string, string>;
+  body: string;
+} {
+  const open = /^---\r?\n/.exec(content);
+  if (!open) {
     return { frontmatter: {}, body: content };
   }
-  const end = content.indexOf("\n---", 4);
-  if (end === -1) return { frontmatter: {}, body: content };
-  const raw = content.slice(4, end).trim();
-  const body = content.slice(end + 4).replace(/^\r?\n/, "");
+  const rest = content.slice(open[0].length);
+  const close = /\r?\n---(?:\r?\n|$)/.exec(rest);
+  if (!close) return { frontmatter: {}, body: content };
+  const raw = rest.slice(0, close.index).trim();
+  const body = rest.slice(close.index + close[0].length);
   const frontmatter: Record<string, string> = {};
   for (const line of raw.split(/\r?\n/)) {
     const match = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
@@ -125,17 +138,21 @@ function normalizeThinking(raw: string | undefined): ThinkingLevel | undefined {
     : undefined;
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
-  if (!fs.existsSync(dir)) return [];
+function loadAgentsFromDir(
+  dir: string,
+  source: "user" | "project",
+): { agents: AgentConfig[]; skipped: SkippedAgentFile[] } {
+  const agents: AgentConfig[] = [];
+  const skipped: SkippedAgentFile[] = [];
+  if (!fs.existsSync(dir)) return { agents, skipped };
 
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return [];
+    return { agents, skipped };
   }
 
-  const agents: AgentConfig[] = [];
   for (const entry of entries) {
     if (!entry.name.endsWith(".md")) continue;
     if (!entry.isFile() && !entry.isSymbolicLink()) continue;
@@ -145,14 +162,31 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
     try {
       content = fs.readFileSync(filePath, "utf8");
     } catch {
+      skipped.push({ filePath, reason: "file is not readable" });
       continue;
     }
 
-    const { frontmatter, body } =
-      parseFrontmatter(content);
-    if (!frontmatter.name || !frontmatter.description) continue;
+    const { frontmatter, body } = parseFrontmatter(content);
+    if (!frontmatter.name || !frontmatter.description) {
+      const missing = [
+        frontmatter.name ? undefined : "name",
+        frontmatter.description ? undefined : "description",
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      skipped.push({
+        filePath,
+        reason: `frontmatter is missing ${missing}`,
+      });
+      continue;
+    }
 
-    const tools = splitCsv(frontmatter.tools) ?? DEFAULT_TOOLS;
+    // Subagenten dürfen keine weiteren Subagenten spawnen (Rekursionsbremse);
+    // ein in der Frontmatter deklariertes "subagent"-Tool wird entfernt.
+    const tools = (splitCsv(frontmatter.tools) ?? DEFAULT_TOOLS).filter(
+      (tool) => tool !== "subagent",
+    );
+    if (tools.length === 0) tools.push(...DEFAULT_TOOLS);
     const timeoutMs = Number.parseInt(frontmatter.timeoutMs ?? "", 10);
     agents.push({
       name: frontmatter.name,
@@ -163,15 +197,16 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
       permission: normalizePermission(frontmatter.permission, tools),
       rawPermission: frontmatter.permission,
       writeOverride: normalizeWriteOverride(frontmatter.writeOverride),
-      timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0
-        ? timeoutMs
-        : DEFAULT_TIMEOUT_MS,
+      timeoutMs:
+        Number.isFinite(timeoutMs) && timeoutMs > 0
+          ? timeoutMs
+          : DEFAULT_TIMEOUT_MS,
       systemPrompt: body.trim(),
       source,
       filePath,
     });
   }
-  return agents;
+  return { agents, skipped };
 }
 
 function isDirectory(candidate: string): boolean {
@@ -200,20 +235,24 @@ export function discoverAgents(
 ): AgentDiscoveryResult {
   const userAgentsDir = path.join(getAgentDir(), "agents");
   const projectAgentsDir = findNearestProjectAgentsDir(cwd);
-  const userAgents = scope === "project"
-    ? []
-    : loadAgentsFromDir(userAgentsDir, "user");
-  const projectAgents = scope === "user" || !projectAgentsDir
-    ? []
-    : loadAgentsFromDir(projectAgentsDir, "project");
+  const empty: { agents: AgentConfig[]; skipped: SkippedAgentFile[] } = {
+    agents: [],
+    skipped: [],
+  };
+  const userLoad =
+    scope === "project" ? empty : loadAgentsFromDir(userAgentsDir, "user");
+  const projectLoad =
+    scope === "user" || !projectAgentsDir
+      ? empty
+      : loadAgentsFromDir(projectAgentsDir, "project");
 
   const byName = new Map<string, AgentConfig>();
   if (scope === "project") {
-    for (const agent of projectAgents) byName.set(agent.name, agent);
+    for (const agent of projectLoad.agents) byName.set(agent.name, agent);
   } else {
-    for (const agent of userAgents) byName.set(agent.name, agent);
+    for (const agent of userLoad.agents) byName.set(agent.name, agent);
     if (scope === "both") {
-      for (const agent of projectAgents) byName.set(agent.name, agent);
+      for (const agent of projectLoad.agents) byName.set(agent.name, agent);
     }
   }
 
@@ -221,6 +260,7 @@ export function discoverAgents(
     agents: Array.from(byName.values()).sort((a, b) =>
       a.name.localeCompare(b.name),
     ),
+    skipped: [...userLoad.skipped, ...projectLoad.skipped],
     userAgentsDir,
     projectAgentsDir,
   };
@@ -230,9 +270,9 @@ export function formatAgentList(agents: AgentConfig[]): string {
   return agents.length === 0
     ? "none"
     : agents
-      .map(
-        (agent) =>
-          `${agent.name} (${agent.source}, ${agent.permission}): ${agent.description}`,
-      )
-      .join("\n");
+        .map(
+          (agent) =>
+            `${agent.name} (${agent.source}, ${agent.permission}): ${agent.description}`,
+        )
+        .join("\n");
 }

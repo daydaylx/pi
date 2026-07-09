@@ -88,6 +88,8 @@ Limits:
 - Maximum concurrent child processes: 3.
 - Model-visible output cap per parallel task: 40 KiB.
 - Default timeout: 10 minutes unless overridden per agent.
+- No nesting: a subagent child process refuses to spawn further subagents,
+  and a `subagent` entry in an agent's `tools` frontmatter is stripped.
 
 ## Agent Profiles
 
@@ -146,6 +148,10 @@ Rules:
 
 - `read-only`: no bash, no writes.
 - `read-bash`: read tools and proven read-only bash only.
+- `full-access`/`yolo` in agent frontmatter are always capped to `read-write`
+  (#36). Running such an agent requires interactive confirmation and is
+  blocked in non-interactive contexts; the declared elevated level is never
+  passed to the child process.
 - `read-write`: write/edit allowed inside project, risky bash still blocks in
   non-interactive child processes.
 - `writeOverride=block`: write-capable bash is denied even if bash exists.
@@ -219,9 +225,11 @@ Reihenfolge prüfen:
    (Eintrag `+extensions/subagents/index.ts` prüfen).
 2. **Werden Agenten gefunden?** `/subagent-doctor` ausführen. Der Command
    zeigt `PI_CODING_AGENT_DIR`, die aufgelösten User-/Projekt-Agentenpfade und
-   die Anzahl gefundener Agenten je Scope. Bei 0 Agenten nennt er konkrete
-   nächste Schritte. Beim Session-Start warnt die Extension zusätzlich
-   automatisch, falls `agentScope: "user"` keine Agenten findet.
+   die Anzahl gefundener Agenten je Scope. Übersprungene Agent-Dateien (z. B.
+   fehlende `name`/`description`-Frontmatter, unlesbare Datei) werden mit
+   Grund gelistet. Bei 0 Agenten nennt er konkrete nächste Schritte. Beim
+   Session-Start warnt die Extension zusätzlich automatisch, falls
+   `agentScope: "user"` keine Agenten findet.
 3. **Minimal-Run erzwingen:** das `subagent`-Tool direkt mit
    `{ "list": true, "agentScope": "user" }` aufrufen lassen, um die reine
    Discovery unabhängig vom automatischen Tool-Auswahlverhalten zu testen.

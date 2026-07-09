@@ -14,6 +14,8 @@
  *   stderr-noise   – emits large stderr, small valid stdout
  *   chain-probe    – emits an oversized reply for a "STEP1" task, otherwise
  *                    echoes back the exact task text it received (#38)
+ *   self-kill      – writes partial output, then dies via SIGKILL so the
+ *                    parent sees a signal exit without an exit code
  */
 
 const scenario = process.env.PI_TEST_SCENARIO || "success";
@@ -130,6 +132,24 @@ function emit(scenarioName) {
         },
       }) + "\n",
     );
+    return;
+  }
+
+  if (scenarioName === "self-kill") {
+    process.stdout.write(
+      JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          model: "fake-model",
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "Partial output before kill" }],
+          usage: { input: 1, output: 1, cost: { total: 0 } },
+        },
+      }) + "\n",
+    );
+    // Give the pipe a moment to flush, then die by signal (no exit code).
+    setTimeout(() => process.kill(process.pid, "SIGKILL"), 50);
     return;
   }
 

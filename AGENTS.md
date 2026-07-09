@@ -17,3 +17,27 @@ sie ergänzen, aber Schutzregeln nicht stillschweigend aufheben.
   Fehler und nicht ausführbare Prüfungen ausdrücklich nennen.
 - Den aktuell gewählten Workflow- und Permission-Modus respektieren. Diese
   Datei erzwingt keinen zusätzlichen Planmodus.
+
+## Subagenten-Delegation
+
+- Die Entscheidung, eine Aufgabe an das `subagent`-Tool zu delegieren, trifft
+  der Haupt-Agent eigenständig; eine ausdrückliche Nutzeranfrage ist nicht
+  erforderlich.
+- Delegieren bei klar abgrenzbaren Aufgaben, die zum Profil eines
+  vorhandenen Agenten passen (`agents/*.md`), z. B.:
+  - breite Codebase-Exploration über mehrere Dateien/Verzeichnisse → `scout`
+  - Architektur-/Alternativenbewertung vor größeren Entscheidungen → `architect`
+  - Umsetzung eines bereits abgenommenen, eng begrenzten Plans → `worker`
+  - Review eines Diffs auf Bugs, Regressionen, Scope-Drift → `reviewer`
+  - Sicherheitsaudit vor Abschluss riskanter Änderungen → `security-auditor`
+  - kontrolliertes Ausführen von Tests/Static-Checks → `test-runner`
+  - Dokumentationsabgleich mit dem aktuellen Code → `docs-auditor`
+  - UI/UX-Review → `ui-reviewer`
+  - Zweitmeinung zu riskanten Plänen oder widersprüchlichen Reviews → `oracle`
+- Nicht delegieren bei trivialen, lokal begrenzten Aufgaben (Ein-Datei-Änderung,
+  kurze Nachfrage, Typo-Fix) — der Prozessstart-Overhead übersteigt dort den
+  Nutzen.
+- Unabhängige Teilaufgaben parallel delegieren (`tasks[]`, max. 6 gleichzeitig),
+  abhängige Arbeitsschritte sequenziell verketten (`chain[]`).
+- Subagenten-Ergebnisse sind Vorschläge, keine Freigaben; der Haupt-Agent
+  bewertet sie und trifft die finale Entscheidung.

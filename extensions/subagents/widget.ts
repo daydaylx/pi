@@ -12,6 +12,9 @@ const MAX_WIDGET_LINES = 4;
 const MAX_SA_LINE_WIDTH = 60;
 const MAX_THINK_LENGTH = 100;
 const MAX_DISPLAYED_AGENTS = 8;
+// Fertige Läufe verfallen nach dieser Zeit, sonst wächst die Map unbegrenzt,
+// weil jede Run-ID eindeutig ist (#42).
+const DONE_ENTRY_TTL_MS = 5 * 60 * 1000;
 
 export type SubagentStatus = "idle" | "queued" | "running" | "done" | "blocked";
 
@@ -102,6 +105,15 @@ export function setRisk(text?: string): void {
 
 export function upsertSubagent(entry: SubagentEntry): void {
   entry.lastUpdate = Date.now();
+  const cutoff = Date.now() - DONE_ENTRY_TTL_MS;
+  for (const [id, existing] of widgetState.subagents) {
+    if (
+      (existing.status === "done" || existing.status === "blocked") &&
+      existing.lastUpdate < cutoff
+    ) {
+      widgetState.subagents.delete(id);
+    }
+  }
   widgetState.subagents.set(entry.id, entry);
 }
 
@@ -126,11 +138,16 @@ function formatSA(status: SubagentStatus, label: string): string {
 }
 
 function renderSALine(state: WidgetState): string {
-  const entries = Array.from(state.subagents.values())
-    .sort((a, b) => {
-      const order: SubagentStatus[] = ["blocked", "running", "queued", "done", "idle"];
-      return order.indexOf(a.status) - order.indexOf(b.status);
-    });
+  const entries = Array.from(state.subagents.values()).sort((a, b) => {
+    const order: SubagentStatus[] = [
+      "blocked",
+      "running",
+      "queued",
+      "done",
+      "idle",
+    ];
+    return order.indexOf(a.status) - order.indexOf(b.status);
+  });
 
   const displayed = entries.slice(0, MAX_DISPLAYED_AGENTS);
   const overflow = entries.length - MAX_DISPLAYED_AGENTS;
@@ -142,7 +159,10 @@ function renderSALine(state: WidgetState): string {
   const model = state.model ?? "?";
   const thinking = (state.thinking ?? "-").toUpperCase();
 
-  return truncate(`SA: ${saLine} | M: ${model} | T: ${thinking}`, MAX_SA_LINE_WIDTH);
+  return truncate(
+    `SA: ${saLine} | M: ${model} | T: ${thinking}`,
+    MAX_SA_LINE_WIDTH,
+  );
 }
 
 function renderNowLine(state: WidgetState): string {
@@ -173,7 +193,9 @@ export function renderWidget(state: WidgetState): string[] {
 
   if (state.debug) {
     const agentDebug = Array.from(state.subagents.values())
-      .map((e) => `  ${e.label}:${e.status} task=${truncate(e.currentTask, 30)}`)
+      .map(
+        (e) => `  ${e.label}:${e.status} task=${truncate(e.currentTask, 30)}`,
+      )
       .join("\n");
     if (agentDebug) lines.push(`---\n${agentDebug}`);
   }
