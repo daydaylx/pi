@@ -206,7 +206,7 @@ export function decideFileAccess(
 ): PolicyDecision {
   const scope = resolvePathScope(rawPath, cwd);
   const isReadRestricted =
-    permissionLevel === "read-only" || permissionLevel === "read-bash";
+    permissionLevel === "read-only" || permissionLevel === "read-bash" || permissionLevel === "test-bash";
 
   if (
     isSensitiveReference(rawPath) ||
@@ -538,6 +538,63 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
   );
 }
 
+// #43: Test-safe commands – extends read-only with controlled test/check runners.
+// Allowed: npm test, npm run test*, tsc --noEmit, npm run lint (without --fix),
+// node <test-file>, npx vitest run, and similar no-write check commands.
+// Blocked: install, update, format, build (with output), delete, sudo.
+const TEST_SAFE_PATTERNS: Array<[RegExp, string]> = [
+  [/^npm\s+test\b/, "npm test"],
+  [/^npm\s+run\s+test(?::\w+)?\b/, "npm run test"],
+  [/^npx\s+vitest\s+run\b/, "npx vitest run"],
+  [/^npx\s+vitest\b(?!.*\b(watch|ui|dev)\b)/, "npx vitest (run mode only)"],
+  [/^npx\s+playwright\s+test\b/, "npx playwright test"],
+  [/^npx\s+cypress\s+run\b/, "npx cypress run"],
+  [/^npx\s+jest\b/, "npx jest"],
+  [/^tsc\s+--noEmit\b/, "tsc --noEmit"],
+  [/^npx\s+tsc\s+--noEmit\b/, "npx tsc --noEmit"],
+  [/^npm\s+run\s+lint\b(?!.*--fix)/, "npm run lint (no --fix)"],
+  [/^npx\s+eslint\b(?!.*--fix)/, "npx eslint (no --fix)"],
+  [/^npx\s+prettier\s+--check\b/, "npx prettier --check"],
+  [/^node\s+\S*tests?[/\\]/, "node test runner"],
+  [/^node\s+\S*test\.m?js\b/, "node test file"],
+  [/^node\s+\S*\.test\.(?:ts|m?js)\b/, "node .test file"],
+  [/^npx\s+mocha\b/, "npx mocha"],
+  [/^npm\s+run-script\s+test\b/, "npm run-script test"],
+];
+
+// Block patterns that are never allowed under test-bash
+const TEST_BLOCK_PATTERNS: Array<[RegExp, string]> = [
+  [/\bnpm\s+(i|install|uninstall|update|upgrade|audit\s+fix|outdated|rebuild|ci|dedupe|prune|shrinkwrap)\b/, "npm package management"],
+  [/\bnpx\s+.{0,20}\b(install|update|uninstall|create|init|add|remove)\b/, "npx package management"],
+  [/\byarn\s+(add|remove|install|upgrade)\b/, "yarn package management"],
+  [/\bpnpm\s+(add|remove|install|update)\b/, "pnpm package management"],
+  [/\bpip\s+install\b/, "pip install"],
+  [/\b(?:npm|npx|yarn)\s+run\s+(?:build|format|fmt|fix|release|deploy|publish|start|dev|serve|watch)\b/, "build/release command"],
+  [/--fix\b/, "--fix flag"],
+  [/--write\b/, "--write flag"],
+  [/\brm\s+(-[rRf]\s+)*[^\s]/, "rm command"],
+  [/\b(?:rmdir|unlink)\b/, "destructive file removal"],
+  [/\bsudo\b/, "sudo"],
+  [/\bchmod\s+[^\s]*[wrx]/, "chmod with permission change"],
+  [/\bchown\b/, "chown"],
+];
+
+export function isTestSafeCommand(command: string, cwd: string): boolean {
+  const trimmed = command.trim();
+
+  // Block destructive patterns first
+  for (const [pattern] of TEST_BLOCK_PATTERNS) {
+    if (pattern.test(trimmed)) return false;
+  }
+
+  // Allow known safe test patterns
+  for (const [pattern] of TEST_SAFE_PATTERNS) {
+    if (pattern.test(trimmed)) return true;
+  }
+
+  return false;
+}
+
 function referencesSystemPath(command: string): boolean {
   return SYSTEM_PATHS.some((path) =>
     new RegExp(
@@ -577,6 +634,16 @@ export function decideBash(
     return isPlanSafeCommand(trimmed, cwd)
       ? ALLOW
       : deny("Read + Bash: Das Kommando ist nicht nachweislich read-only.");
+  }
+
+  // #43: test-bash extends read-bash with controlled test/check commands
+  if (permissionLevel === "test-bash") {
+    if (isPlanSafeCommand(trimmed, cwd)) return ALLOW;
+    if (isTestSafeCommand(trimmed, cwd)) return ALLOW;
+    return deny(
+      "Test Bash: Das Kommando ist kein erlaubter Test/Lint/Check-Befehl. " +
+      "Erlaubt sind npm test, npm run test, tsc --noEmit, npm run lint (ohne --fix) und ähnliche reine Prüfbefehle.",
+    );
   }
 
   if (isSensitiveReference(trimmed)) {

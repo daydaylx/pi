@@ -4,7 +4,7 @@ description: Runs controlled test and static-check commands and summarizes failu
 tools: read, grep, find, ls, bash
 model: opencode-go/deepseek-v4-flash
 thinking: medium
-permission: read-bash
+permission: test-bash
 writeOverride: block
 timeoutMs: 1200000
 ---

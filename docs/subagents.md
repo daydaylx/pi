@@ -28,15 +28,15 @@ The initial rollout is intentionally conservative:
 
 ## Implemented Changes
 
-| Area | Change |
-| --- | --- |
-| Extension | Added `extensions/subagents/index.ts` with list, single, parallel and chain execution modes. |
-| Discovery | Added `extensions/subagents/agents.ts` for user/project agent loading from Markdown frontmatter. |
-| Settings | Added `+extensions/subagents/index.ts` to `settings.json`. |
+| Area        | Change                                                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Extension   | Added `extensions/subagents/index.ts` with list, single, parallel and chain execution modes.                               |
+| Discovery   | Added `extensions/subagents/agents.ts` for user/project agent loading from Markdown frontmatter.                           |
+| Settings    | Added `+extensions/subagents/index.ts` to `settings.json`.                                                                 |
 | Permissions | `mode-permissions.ts` now honors `PI_SUBAGENT_PERMISSION_LEVEL` and `PI_SUBAGENT_WRITE_OVERRIDE` on child process startup. |
-| Agents | Added default global agents under `agents/*.md`. |
-| Prompts | Added `prompts/subagent-*.md` workflow templates. |
-| Tests | Added regression coverage in `tests/run.mjs`. |
+| Agents      | Added default global agents under `agents/*.md`.                                                                           |
+| Prompts     | Added `prompts/subagent-*.md` workflow templates.                                                                          |
+| Tests       | Added regression coverage in `tests/run.mjs`.                                                                              |
 
 ## Local State
 
@@ -75,12 +75,12 @@ Flow:
 
 Supported tool modes:
 
-| Mode | Input | Purpose |
-| --- | --- | --- |
-| list | `{ "list": true }` | Show available agents. |
-| single | `{ "agent": "...", "task": "..." }` | One bounded task. |
-| parallel | `{ "tasks": [...] }` | Independent reviews or scouts. |
-| chain | `{ "chain": [...] }` | Sequential handoff using `{previous}`. |
+| Mode     | Input                               | Purpose                                |
+| -------- | ----------------------------------- | -------------------------------------- |
+| list     | `{ "list": true }`                  | Show available agents.                 |
+| single   | `{ "agent": "...", "task": "..." }` | One bounded task.                      |
+| parallel | `{ "tasks": [...] }`                | Independent reviews or scouts.         |
+| chain    | `{ "chain": [...] }`                | Sequential handoff using `{previous}`. |
 
 Limits:
 
@@ -91,18 +91,18 @@ Limits:
 
 ## Agent Profiles
 
-| Agent | Tools | Permission | Write Override | Model | Thinking | Use |
-| --- | --- | --- | --- | --- | --- | --- |
-| `scout` | read, grep, find, ls | read-only | block | deepseek-v4-flash | medium | Collect codebase context. |
-| `planner` | read, grep, find, ls | read-only | block | deepseek-v4-pro | high | Produce implementation plans. |
-| `architect` | read, grep, find, ls | read-only | block | deepseek-v4-pro | xhigh | Architecture critique. |
-| `reviewer` | read, grep, find, ls, bash | read-bash | block | deepseek-v4-pro | high | Review diffs and scope. |
-| `test-runner` | read, grep, find, ls, bash | read-bash | block | deepseek-v4-flash | medium | Run safe checks. |
-| `security-auditor` | read, grep, find, ls, bash | read-bash | block | deepseek-v4-pro | high | Security and permission audit. |
-| `ui-reviewer` | read, grep, find, ls | read-only | block | kimi-k2.6 | high | Static UI/UX review. |
-| `docs-auditor` | read, grep, find, ls | read-only | block | deepseek-v4-flash | medium | Docs/code drift. |
-| `worker` | read, grep, find, ls, edit, write, bash | read-write | inherit | deepseek-v4-pro | high | Narrow approved implementation. |
-| `oracle` | read, grep, find, ls | read-only | block | qwen3.7-plus | high | Second opinion. |
+| Agent              | Tools                                   | Permission | Write Override | Model             | Thinking | Use                             |
+| ------------------ | --------------------------------------- | ---------- | -------------- | ----------------- | -------- | ------------------------------- |
+| `scout`            | read, grep, find, ls                    | read-only  | block          | deepseek-v4-flash | medium   | Collect codebase context.       |
+| `planner`          | read, grep, find, ls                    | read-only  | block          | deepseek-v4-pro   | high     | Produce implementation plans.   |
+| `architect`        | read, grep, find, ls                    | read-only  | block          | deepseek-v4-pro   | xhigh    | Architecture critique.          |
+| `reviewer`         | read, grep, find, ls, bash              | read-bash  | block          | deepseek-v4-pro   | high     | Review diffs and scope.         |
+| `test-runner`      | read, grep, find, ls, bash              | read-bash  | block          | deepseek-v4-flash | medium   | Run safe checks.                |
+| `security-auditor` | read, grep, find, ls, bash              | read-bash  | block          | deepseek-v4-pro   | high     | Security and permission audit.  |
+| `ui-reviewer`      | read, grep, find, ls                    | read-only  | block          | kimi-k2.6         | high     | Static UI/UX review.            |
+| `docs-auditor`     | read, grep, find, ls                    | read-only  | block          | deepseek-v4-flash | medium   | Docs/code drift.                |
+| `worker`           | read, grep, find, ls, edit, write, bash | read-write | inherit        | deepseek-v4-pro   | high     | Narrow approved implementation. |
+| `oracle`           | read, grep, find, ls                    | read-only  | block          | qwen3.7-plus      | high     | Second opinion.                 |
 
 All agents are stored in `agents/*.md`. Each file uses frontmatter:
 
@@ -119,16 +119,16 @@ timeoutMs: 600000
 
 ## Workflow Templates
 
-| Template | Purpose |
-| --- | --- |
-| `/subagent-list` | List configured user-level agents. |
-| `/subagent-scout-plan <task>` | `scout -> planner`, no implementation. |
-| `/subagent-review [focus]` | Single reviewer pass. |
-| `/subagent-parallel-review [focus]` | Reviewer, security auditor and test runner in parallel. |
-| `/subagent-docs [scope]` | Documentation audit. |
-| `/subagent-security [focus]` | Security audit. |
-| `/subagent-ui-review [scope]` | Static UI/UX review. |
-| `/subagent-implement <approved scope>` | Worker implementation after explicit approval. |
+| Template                               | Purpose                                                 |
+| -------------------------------------- | ------------------------------------------------------- |
+| `/subagent-list`                       | List configured user-level agents.                      |
+| `/subagent-scout-plan <task>`          | `scout -> planner`, no implementation.                  |
+| `/subagent-review [focus]`             | Single reviewer pass.                                   |
+| `/subagent-parallel-review [focus]`    | Reviewer, security auditor and test runner in parallel. |
+| `/subagent-docs [scope]`               | Documentation audit.                                    |
+| `/subagent-security [focus]`           | Security audit.                                         |
+| `/subagent-ui-review [scope]`          | Static UI/UX review.                                    |
+| `/subagent-implement <approved scope>` | Worker implementation after explicit approval.          |
 
 ## Permission Model
 
@@ -200,17 +200,46 @@ Chain shape:
 {
   "chain": [
     { "agent": "scout", "task": "Find code relevant to permissions" },
-    { "agent": "planner", "task": "Create a plan using this context:\n{previous}" }
+    {
+      "agent": "planner",
+      "task": "Create a plan using this context:\n{previous}"
+    }
   ],
   "agentScope": "user"
 }
 ```
+
+## Diagnose (#44)
+
+Wenn Subagenten nicht genutzt werden oder das Tool leer erscheint, in dieser
+Reihenfolge prüfen:
+
+1. **Ist die Extension geladen?** `/tools` ausführen und prüfen, ob `subagent`
+   in der Liste erscheint. Fehlt es, lädt `settings.json` die Extension nicht
+   (Eintrag `+extensions/subagents/index.ts` prüfen).
+2. **Werden Agenten gefunden?** `/subagent-doctor` ausführen. Der Command
+   zeigt `PI_CODING_AGENT_DIR`, die aufgelösten User-/Projekt-Agentenpfade und
+   die Anzahl gefundener Agenten je Scope. Bei 0 Agenten nennt er konkrete
+   nächste Schritte. Beim Session-Start warnt die Extension zusätzlich
+   automatisch, falls `agentScope: "user"` keine Agenten findet.
+3. **Minimal-Run erzwingen:** das `subagent`-Tool direkt mit
+   `{ "list": true, "agentScope": "user" }` aufrufen lassen, um die reine
+   Discovery unabhängig vom automatischen Tool-Auswahlverhalten zu testen.
+4. **Lokale Pfade prüfen:** `pwd`, `echo "$PI_CODING_AGENT_DIR"`,
+   `ls -la ~/.pi/agent/agents`, `ls -la ./agents` — insbesondere ob dieses
+   Repository tatsächlich als Pi-Agent-Konfigurationsordner (`~/.pi/agent`)
+   genutzt wird.
+5. **Child-Prozess prüfen:** bei Fehlern in `result.details.results[].stderr`
+   nachsehen, ob `pi --mode json -p --no-session` lokal überhaupt startet und
+   die Flags `--tools`, `--model`, `--thinking`, `--append-system-prompt`
+   akzeptiert.
 
 ## Verification Plan
 
 Automated:
 
 - `npm --prefix npm test`
+- `npm --prefix npm run typecheck` (real `tsc --noEmit`, see "Typecheck" below; #39)
 - Extension import smoke test.
 - Agent discovery smoke test.
 - Subagent list tool smoke test.
@@ -227,16 +256,36 @@ Manual:
 - Verify project-local agents ask for confirmation in TUI.
 - Verify Ctrl+C aborts an active subagent process.
 
+## Typecheck (#39)
+
+`extensions/**/*.ts` is now covered by a real `tsc --noEmit` run:
+`npm --prefix npm run typecheck` (config: `tsconfig.json` at repo root).
+It is intentionally **not** chained into `npm test`, because two pre-existing,
+subagents-unrelated files currently fail it — chaining it in would make the
+whole suite red for reasons outside this area's control.
+
+`@earendil-works/pi-agent-core` is a transitive dependency declared by
+`pi-coding-agent` but not present under `npm/node_modules` in this dev
+install; `types/shims.d.ts` declares it as an ambient `any`-typed module so
+the real code can still be checked.
+
+Known pre-existing failures (not subagents-related, not fixed here):
+
+| File                                 | Error                                                                                                            |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `extensions/ask-user.ts`             | `DisplayOption` narrowing loses `description`/`effort`/`risk`/`pro`/`contra` on the `isOther` branch (9 errors). |
+| `extensions/shared/banner-render.ts` | `process.env` is not assignable to `Pick<ProcessEnv, "NO_COLOR">`.                                               |
+
 ## Remaining Risks
 
-| Risk | Status | Mitigation |
-| --- | --- | --- |
-| Worker has write tools | Accepted but gated by prompt, permission policy and explicit use. | Use only after approved scope. |
-| Child processes load global settings | Accepted. | Child permission env prevents Auto-YOLO default. |
-| Project-local agents can be malicious | Controlled. | User scope default; confirmation required for project scope. |
-| Model IDs may become unavailable | Possible. | Agent files isolate model choices for easy updates. |
-| Test-runner commands may write caches | Possible. | Prompt forbids source writes; permission blocks write-capable bash. |
-| No true OS sandbox | Known Pi limitation. | Use container/Gondolin for untrusted repos. |
+| Risk                                  | Status                                                            | Mitigation                                                          |
+| ------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Worker has write tools                | Accepted but gated by prompt, permission policy and explicit use. | Use only after approved scope.                                      |
+| Child processes load global settings  | Accepted.                                                         | Child permission env prevents Auto-YOLO default.                    |
+| Project-local agents can be malicious | Controlled.                                                       | User scope default; confirmation required for project scope.        |
+| Model IDs may become unavailable      | Possible.                                                         | Agent files isolate model choices for easy updates.                 |
+| Test-runner commands may write caches | Possible.                                                         | Prompt forbids source writes; permission blocks write-capable bash. |
+| No true OS sandbox                    | Known Pi limitation.                                              | Use container/Gondolin for untrusted repos.                         |
 
 ## Files Changed
 

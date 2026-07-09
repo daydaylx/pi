@@ -18,11 +18,12 @@ export type WorkflowPhase =
 // Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
 // Prompting und Workflow; ausschließlich diese Stufe steuert Tool-Zugriffe.
 export type PermissionLevel =
-  "read-only" | "read-bash" | "read-write" | "full-access" | "yolo";
+  "read-only" | "read-bash" | "test-bash" | "read-write" | "full-access" | "yolo";
 
 export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
   "read-only": "Read only",
   "read-bash": "Read + Bash Info Commands",
+  "test-bash": "Read + Test/Run Commands",
   "read-write": "Read + Write",
   "full-access": "Full Access",
   yolo: "YOLO",
@@ -31,6 +32,7 @@ export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
 export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
   "read-only": "Nur Lesen; ausschließlich die Plan-Datei bleibt beschreibbar",
   "read-bash": "Lesen, sichere Inspect-Bash-Befehle und die Plan-Datei",
+  "test-bash": "Lesen, Inspect- und Test-Befehle (npm test, tsc --noEmit) und die Plan-Datei",
   "read-write": "Normaler Projektzugriff mit Rückfragen bei riskanten Aktionen",
   "full-access":
     "Git-Housekeeping/Paketmanager ohne Rückfrage; sudo/Löschen/Force-Push bleiben bestätigt",

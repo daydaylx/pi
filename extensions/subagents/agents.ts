@@ -13,6 +13,8 @@ export interface AgentConfig {
   model?: string;
   thinking?: ThinkingLevel;
   permission: PermissionLevel;
+  /** Original frontmatter value before normalization – used for elevated-permission detection (#36). */
+  rawPermission: string | undefined;
   writeOverride: WriteOverride;
   timeoutMs: number;
   systemPrompt: string;
@@ -29,13 +31,15 @@ export interface AgentDiscoveryResult {
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls"];
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const CONFIG_DIR_NAME = ".pi";
+// #36: Subagent permissions are limited to safe levels. full-access and yolo
+// require explicit TUI confirmation via confirmElevatedPermission().
 const VALID_PERMISSIONS = new Set<PermissionLevel>([
   "read-only",
   "read-bash",
+  "test-bash",
   "read-write",
-  "full-access",
-  "yolo",
 ]);
+const ELEVATED_PERMISSIONS = new Set<PermissionLevel>(["full-access", "yolo"]);
 const VALID_WRITE_OVERRIDES = new Set<WriteOverride>([
   "inherit",
   "block",
@@ -95,7 +99,17 @@ function normalizePermission(
   if (raw && VALID_PERMISSIONS.has(raw as PermissionLevel)) {
     return raw as PermissionLevel;
   }
+  // #36: Elevated permissions (full-access, yolo) are degraded to read-write.
+  // The caller (index.ts) must obtain explicit TUI confirmation before spawning.
+  if (raw && ELEVATED_PERMISSIONS.has(raw as PermissionLevel)) {
+    return "read-write";
+  }
   return permissionFromTools(tools);
+}
+
+/** Returns true if the raw permission would need elevated confirmation. */
+export function isElevatedPermission(raw: string | undefined): boolean {
+  return raw != null && ELEVATED_PERMISSIONS.has(raw as PermissionLevel);
 }
 
 function normalizeWriteOverride(raw: string | undefined): WriteOverride {
@@ -135,7 +149,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
     }
 
     const { frontmatter, body } =
-      parseFrontmatter<Record<string, string>>(content);
+      parseFrontmatter(content);
     if (!frontmatter.name || !frontmatter.description) continue;
 
     const tools = splitCsv(frontmatter.tools) ?? DEFAULT_TOOLS;
@@ -147,6 +161,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
       model: frontmatter.model,
       thinking: normalizeThinking(frontmatter.thinking),
       permission: normalizePermission(frontmatter.permission, tools),
+      rawPermission: frontmatter.permission,
       writeOverride: normalizeWriteOverride(frontmatter.writeOverride),
       timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0
         ? timeoutMs

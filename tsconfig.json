@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    "paths": {
+      "*": ["./npm/node_modules/*"]
+    },
+    "typeRoots": ["./npm/node_modules/@types"]
+  },
+  "include": ["extensions/**/*.ts", "types/**/*.d.ts"]
+}
