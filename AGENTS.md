@@ -1,7 +1,8 @@
 # Globale Agent-Regeln
 
-Diese Regeln gelten für alle Pi-Sitzungen. Projektbezogene Anweisungen können
-sie ergänzen, aber Schutzregeln nicht stillschweigend aufheben.
+Diese Regeln gelten für alle Pi-Sitzungen.
+
+## Schutzregeln (nicht verhandelbar)
 
 - Commits, Pushes und Branch-Veröffentlichungen nur auf ausdrücklichen Auftrag
   ausführen.
@@ -18,6 +19,11 @@ sie ergänzen, aber Schutzregeln nicht stillschweigend aufheben.
 - Den aktuell gewählten Workflow- und Permission-Modus respektieren. Diese
   Datei erzwingt keinen zusätzlichen Planmodus.
 
+## Verhaltensregeln
+
+- Projektbezogene Anweisungen ergänzen diese Regeln, heben aber Schutzregeln
+  nicht stillschweigend auf.
+
 ## Subagenten-Delegation
 
 - Die Entscheidung, eine Aufgabe an das `subagent`-Tool zu delegieren, trifft
@@ -26,6 +32,7 @@ sie ergänzen, aber Schutzregeln nicht stillschweigend aufheben.
 - Delegieren bei klar abgrenzbaren Aufgaben, die zum Profil eines
   vorhandenen Agenten passen (`agents/*.md`), z. B.:
   - breite Codebase-Exploration über mehrere Dateien/Verzeichnisse → `scout`
+  - Umsetzungsplan für eine komplexe Änderung → `planner`
   - Architektur-/Alternativenbewertung vor größeren Entscheidungen → `architect`
   - Umsetzung eines bereits abgenommenen, eng begrenzten Plans → `worker`
   - Review eines Diffs auf Bugs, Regressionen, Scope-Drift → `reviewer`
@@ -41,3 +48,16 @@ sie ergänzen, aber Schutzregeln nicht stillschweigend aufheben.
   abhängige Arbeitsschritte sequenziell verketten (`chain[]`).
 - Subagenten-Ergebnisse sind Vorschläge, keine Freigaben; der Haupt-Agent
   bewertet sie und trifft die finale Entscheidung.
+
+### Delegations-Selbstcheck
+
+Vor jedem nicht-trivialen Schritt kurz prüfen, damit Delegation nicht
+versehentlich unterbleibt:
+
+1. **Abgrenzbar?** Lässt sich der Schritt als eigenständige, überprüfbare
+   Teilaufgabe abgrenzen?
+2. **Profilpassend?** Passt er zum Profil eines vorhandenen Subagenten
+   (`agents/*.md`)?
+
+Beide ja → delegieren (parallel via `tasks[]`, sequenziell via `chain[]`).
+Sonst selbst ausführen. Ergänzt die Regeln oben und hebt keine Schutzregel auf.

@@ -99,7 +99,7 @@ Limits:
 | `planner`          | read, grep, find, ls                    | read-only  | block          | deepseek-v4-pro   | high     | Produce implementation plans.   |
 | `architect`        | read, grep, find, ls                    | read-only  | block          | deepseek-v4-pro   | xhigh    | Architecture critique.          |
 | `reviewer`         | read, grep, find, ls, bash              | read-bash  | block          | deepseek-v4-pro   | high     | Review diffs and scope.         |
-| `test-runner`      | read, grep, find, ls, bash              | read-bash  | block          | deepseek-v4-flash | medium   | Run safe checks.                |
+| `test-runner`      | read, grep, find, ls, bash              | test-bash  | block          | deepseek-v4-flash | medium   | Run safe tests/checks.          |
 | `security-auditor` | read, grep, find, ls, bash              | read-bash  | block          | deepseek-v4-pro   | high     | Security and permission audit.  |
 | `ui-reviewer`      | read, grep, find, ls                    | read-only  | block          | kimi-k2.6         | high     | Static UI/UX review.            |
 | `docs-auditor`     | read, grep, find, ls                    | read-only  | block          | deepseek-v4-flash | medium   | Docs/code drift.                |
@@ -148,6 +148,7 @@ Rules:
 
 - `read-only`: no bash, no writes.
 - `read-bash`: read tools and proven read-only bash only.
+- `test-bash`: like `read-bash`, plus curated non-destructive test/check commands (e.g. `npm test`, `tsc --noEmit`, `npm run lint` without `--fix`); package management, build/fix and destructive commands stay blocked (#43).
 - `full-access`/`yolo` in agent frontmatter are always capped to `read-write`
   (#36). Running such an agent requires interactive confirmation and is
   blocked in non-interactive contexts; the declared elevated level is never
