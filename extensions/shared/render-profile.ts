@@ -5,6 +5,38 @@ export interface RenderProfile {
   compact: boolean;
 }
 
+// Terminalbreite, ab der activity-panel.ts das rechte Activity Panel zeigt.
+// Darunter fällt tool-visuals.ts auf kompakte Inline-Zeilen im Hauptbereich
+// zurück. Ein einzelner geteilter Wert verhindert ein Auseinanderlaufen der
+// beiden Schwellen.
+export const ACTIVITY_PANEL_MIN_WIDTH = 120;
+
+// Anteil + Mindestbreite + Rand, den activity-panel.ts für das rechte Panel
+// reserviert (muss zu dessen overlayOptions passen). tool-visuals.ts nutzt
+// denselben Wert, um volle Tool-Boxen (Fehler/expandiert) bei sichtbarem
+// Panel schmaler zu rendern — sonst würde die Box unter das Panel-Overlay
+// hineinragen und dessen Rahmen optisch durchschneiden (das Overlay
+// komposittet Spalten in die bereits gerenderten Zeilen hinein, statt den
+// Hauptbereich echt schmaler zu reflowen).
+const ACTIVITY_PANEL_WIDTH_FRACTION = 0.34;
+const ACTIVITY_PANEL_MIN_PANEL_WIDTH = 30;
+const ACTIVITY_PANEL_MARGIN = 1;
+
+/**
+ * Effektive Breite für Hauptbereichs-Komponenten, wenn das Activity Panel
+ * (falls sichtbar) rechts Platz beansprucht. Unterhalb von
+ * ACTIVITY_PANEL_MIN_WIDTH ist das Panel unsichtbar; dort wird die volle
+ * Breite zurückgegeben.
+ */
+export function widthReservedForActivityPanel(termWidth: number): number {
+  if (termWidth < ACTIVITY_PANEL_MIN_WIDTH) return termWidth;
+  const panelWidth = Math.max(
+    ACTIVITY_PANEL_MIN_PANEL_WIDTH,
+    Math.floor(termWidth * ACTIVITY_PANEL_WIDTH_FRACTION),
+  );
+  return Math.max(1, termWidth - panelWidth - ACTIVITY_PANEL_MARGIN * 2);
+}
+
 export type RenderStatus =
   | "idle"
   | "queued"
@@ -123,11 +155,13 @@ export function supportsAnimations(
   return true;
 }
 
-export function resolveRenderProfile(options: {
-  env?: NodeJS.ProcessEnv;
-  width?: number;
-  mode?: string;
-} = {}): RenderProfile {
+export function resolveRenderProfile(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    width?: number;
+    mode?: string;
+  } = {},
+): RenderProfile {
   const env = options.env ?? process.env;
   return {
     unicode: supportsUnicode(env),
@@ -137,7 +171,9 @@ export function resolveRenderProfile(options: {
   };
 }
 
-export function glyphsFor(profile: Pick<RenderProfile, "unicode">): RenderGlyphs {
+export function glyphsFor(
+  profile: Pick<RenderProfile, "unicode">,
+): RenderGlyphs {
   return profile.unicode ? UNICODE_GLYPHS : ASCII_GLYPHS;
 }
 
@@ -164,32 +200,50 @@ export function statusLabel(status: RenderStatus): string {
   }
 }
 
-export function statusMark(status: RenderStatus, profile: Pick<RenderProfile, "unicode">): string {
+export function statusMark(
+  status: RenderStatus,
+  profile: Pick<RenderProfile, "unicode">,
+): string {
   return glyphsFor(profile).status[status];
 }
 
-export function formatStatus(status: RenderStatus, profile: Pick<RenderProfile, "unicode">): string {
+export function formatStatus(
+  status: RenderStatus,
+  profile: Pick<RenderProfile, "unicode">,
+): string {
   return `${statusMark(status, profile)} ${statusLabel(status)}`;
 }
 
-export function truncatePlain(value: string, width: number, ellipsis = "…"): string {
+export function truncatePlain(
+  value: string,
+  width: number,
+  ellipsis = "…",
+): string {
   if (width <= 0) return "";
   if (value.length <= width) return value;
   if (width <= ellipsis.length) return ellipsis.slice(0, width);
   return `${value.slice(0, width - ellipsis.length)}${ellipsis}`;
 }
 
-export function truncateMiddle(value: string, width: number, ellipsis = "…"): string {
+export function truncateMiddle(
+  value: string,
+  width: number,
+  ellipsis = "…",
+): string {
   if (width <= 0) return "";
   if (value.length <= width) return value;
-  if (width <= ellipsis.length + 1) return truncatePlain(value, width, ellipsis);
+  if (width <= ellipsis.length + 1)
+    return truncatePlain(value, width, ellipsis);
   const available = width - ellipsis.length;
   const left = Math.ceil(available / 2);
   const right = Math.floor(available / 2);
   return `${value.slice(0, left)}${ellipsis}${value.slice(value.length - right)}`;
 }
 
-export function truncateModelName(model: string | undefined, width = 26): string {
+export function truncateModelName(
+  model: string | undefined,
+  width = 26,
+): string {
   if (!model) return "no-model";
   const short = model.replace(/^([^/]+\/)/, "");
   return truncateMiddle(short, width);

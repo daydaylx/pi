@@ -22,12 +22,7 @@ import {
 } from "./render-profile.ts";
 
 export type InfoBoxTone =
-  | "neutral"
-  | "accent"
-  | "success"
-  | "warning"
-  | "error"
-  | "muted";
+  "neutral" | "accent" | "success" | "warning" | "error" | "muted";
 
 export type InfoBoxBackground =
   | "customMessageBg"
@@ -158,9 +153,10 @@ function wrapTextFallback(value: string, width: number): string[] {
       continue;
     }
     if (current) lines.push(current);
-    current = visibleWidthFallback(word) > width
-      ? truncateToWidthFallback(word, width, "")
-      : word;
+    current =
+      visibleWidthFallback(word) > width
+        ? truncateToWidthFallback(word, width, "")
+        : word;
   }
   if (current) lines.push(current);
   return lines.length ? lines : [""];
@@ -191,8 +187,7 @@ export class InfoBox {
     this.background = options.background;
     this.collapsible = options.collapsible ?? false;
     this.expanded = options.expanded ?? true;
-    this.maxPreviewLines = options.maxPreviewLines ??
-      DEFAULT_MAX_PREVIEW_LINES;
+    this.maxPreviewLines = options.maxPreviewLines ?? DEFAULT_MAX_PREVIEW_LINES;
     this.profile = options.profile ?? resolveRenderProfile({});
     this.glyphs = glyphsFor(this.profile);
     this.helpers = options.tuiHelpers ?? {
@@ -223,7 +218,8 @@ export class InfoBox {
     if (!this.collapsible) return;
     const { matchesKey, Key } = this.helpers;
     if (
-      data === "e" || data === "E" ||
+      data === "e" ||
+      data === "E" ||
       (Key.enter && matchesKey(data, Key.enter)) ||
       (Key.space && matchesKey(data, Key.space))
     ) {
@@ -244,7 +240,9 @@ export class InfoBox {
     const minWidth = 8;
     if (width < minWidth) {
       this.cachedWidth = width;
-      this.cachedLines = [truncatePlain(this.title, width, this.glyphs.ellipsis)];
+      this.cachedLines = [
+        truncatePlain(this.title, width, this.glyphs.ellipsis),
+      ];
       return this.cachedLines;
     }
 
@@ -264,13 +262,13 @@ export class InfoBox {
 
     // Top border with title
     const titleText = this.formatTitle(innerWidth, theme);
-    lines.push(
-      this.frameTop(titleText, innerWidth + 4, theme, borderColor),
-    );
+    lines.push(this.frameTop(titleText, innerWidth + 4, theme, borderColor));
 
     // Subtitle
     if (this.subtitle) {
-      lines.push(this.contentRow(this.subtitle, innerWidth, theme, "muted", bg));
+      lines.push(
+        this.contentRow(this.subtitle, innerWidth, theme, "muted", bg),
+      );
     }
 
     // Divider after header
@@ -308,7 +306,8 @@ export class InfoBox {
         const wrapped = this.wrapLine(section.lines[j], innerWidth);
         for (let k = 0; k < wrapped.length; k++) {
           if (
-            this.collapsible && lineCount >= this.maxPreviewLines &&
+            this.collapsible &&
+            lineCount >= this.maxPreviewLines &&
             !remainingHintShown
           ) {
             const remaining = this.countRemainingLines(i, j, k, innerWidth);
@@ -337,9 +336,7 @@ export class InfoBox {
 
     // Collapse hint for expanded collapsible boxes
     if (this.collapsible && this.expanded && !remainingHintShown) {
-      lines.push(
-        this.contentRow(COLLAPSE_HINT, innerWidth, theme, "dim", bg),
-      );
+      lines.push(this.contentRow(COLLAPSE_HINT, innerWidth, theme, "dim", bg));
     }
 
     lines.push(this.frameBottom(innerWidth, theme, borderColor));
@@ -366,8 +363,7 @@ export class InfoBox {
     const fillWidth = Math.max(0, totalWidth - 2 - titleWidth);
     const before = Math.min(2, fillWidth);
     const after = fillWidth - before;
-    const border =
-      `${glyphs.box.tl}${glyphs.box.h.repeat(before)}${titlePlain}${glyphs.box.h.repeat(after)}${glyphs.box.tr}`;
+    const border = `${glyphs.box.tl}${glyphs.box.h.repeat(before)}${titlePlain}${glyphs.box.h.repeat(after)}${glyphs.box.tr}`;
     return theme.fg(borderColor, border);
   }
 
@@ -377,8 +373,7 @@ export class InfoBox {
     borderColor: string,
   ): string {
     const { glyphs } = this;
-    const border =
-      `${glyphs.box.bl}${glyphs.box.h.repeat(innerWidth + 2)}${glyphs.box.br}`;
+    const border = `${glyphs.box.bl}${glyphs.box.h.repeat(innerWidth + 2)}${glyphs.box.br}`;
     return theme.fg(borderColor, border);
   }
 
@@ -388,8 +383,7 @@ export class InfoBox {
     borderColor: string,
   ): string {
     const { glyphs } = this;
-    const border =
-      `${glyphs.box.dividerLeft}${glyphs.box.h.repeat(innerWidth + 2)}${glyphs.box.dividerRight}`;
+    const border = `${glyphs.box.dividerLeft}${glyphs.box.h.repeat(innerWidth + 2)}${glyphs.box.dividerRight}`;
     return theme.fg(borderColor, border);
   }
 
@@ -401,7 +395,11 @@ export class InfoBox {
     background?: InfoBoxBackground,
   ): string {
     const { glyphs } = this;
-    const fitted = this.helpers.truncateToWidth(content, innerWidth, this.glyphs.ellipsis);
+    const fitted = this.helpers.truncateToWidth(
+      content,
+      innerWidth,
+      this.glyphs.ellipsis,
+    );
     const padded = this.padContent(fitted, innerWidth);
     const colored = color ? theme.fg(color, padded) : padded;
     const bgColored = background ? theme.bg(background, colored) : colored;
@@ -430,12 +428,12 @@ export class InfoBox {
     for (let i = fromSection; i < this.sections.length; i++) {
       const section = this.sections[i];
       for (
-        let j = (i === fromSection ? fromLine : 0);
+        let j = i === fromSection ? fromLine : 0;
         j < section.lines.length;
         j++
       ) {
         const wrapped = this.wrapLine(section.lines[j], innerWidth);
-        const startK = (i === fromSection && j === fromLine) ? fromWrapped : 0;
+        const startK = i === fromSection && j === fromLine ? fromWrapped : 0;
         count += Math.max(0, wrapped.length - startK);
       }
     }
@@ -473,6 +471,8 @@ export interface InfoBoxComponent {
   invalidate(): void;
   setSections?(sections: InfoBoxSection[]): void;
   handleInput?(data: string): void;
+  /** Current expand/collapse state (only meaningful when `collapsible` was set). */
+  isExpanded?(): boolean;
 }
 
 export function createInfoBoxComponent(
@@ -491,5 +491,8 @@ export function createInfoBoxComponent(
       box.setSections(sections);
     },
     handleInput: box.handleInput.bind(box),
+    isExpanded(): boolean {
+      return box.isExpanded();
+    },
   };
 }

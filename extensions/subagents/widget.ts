@@ -193,9 +193,65 @@ export function clearSubagents(): void {
   widgetState.subagents.clear();
 }
 
+function isWideChar(code: number): boolean {
+  return (
+    (code >= 0x1100 && code <= 0x115f) ||
+    (code >= 0x2329 && code <= 0x232a) ||
+    (code >= 0x2e80 && code <= 0xa4cf) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe10 && code <= 0xfe19) ||
+    (code >= 0xfe30 && code <= 0xfe6f) ||
+    (code >= 0xff00 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6) ||
+    (code >= 0x1f300 && code <= 0x1faff)
+  );
+}
+
+function isCombiningChar(code: number): boolean {
+  return (
+    (code >= 0x0300 && code <= 0x036f) ||
+    (code >= 0x1ab0 && code <= 0x1aff) ||
+    (code >= 0x1dc0 && code <= 0x1dff) ||
+    (code >= 0x20d0 && code <= 0x20ff) ||
+    (code >= 0xfe20 && code <= 0xfe2f)
+  );
+}
+
+function charWidth(char: string): number {
+  const code = char.codePointAt(0) ?? 0;
+  if (isCombiningChar(code)) return 0;
+  return isWideChar(code) ? 2 : 1;
+}
+
+function visibleWidth(value: string): number {
+  let width = 0;
+  for (const char of value) width += charWidth(char);
+  return width;
+}
+
 function truncate(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return `${value.slice(0, max - 1)}…`;
+  if (max <= 0) return "";
+  if (visibleWidth(value) <= max) return value;
+  const ellipsis = "…";
+  const ellipsisWidth = visibleWidth(ellipsis);
+  if (max <= ellipsisWidth) return ellipsis;
+
+  let result = "";
+  let width = 0;
+  const targetWidth = max - ellipsisWidth;
+  for (const char of value) {
+    const nextWidth = width + charWidth(char);
+    if (nextWidth > targetWidth) break;
+    result += char;
+    width = nextWidth;
+  }
+  return `${result}${ellipsis}`;
+}
+
+function normalizeRenderWidth(width?: number): number | undefined {
+  if (typeof width !== "number" || !Number.isFinite(width)) return undefined;
+  return Math.max(1, Math.floor(width));
 }
 
 function formatSA(entry: SubagentEntry): string {
@@ -268,8 +324,9 @@ function renderNextLine(state: WidgetState): string {
   return truncate(parts.join(" | "), MAX_THINK_LENGTH);
 }
 
-export function renderWidget(state: WidgetState): string[] {
+export function renderWidget(state: WidgetState, width?: number): string[] {
   if (!state.visible) return [];
+  const renderWidth = normalizeRenderWidth(width);
   const lines = [
     renderStatusLine(state),
     renderSALine(state),
@@ -290,5 +347,11 @@ export function renderWidget(state: WidgetState): string[] {
     if (agentDebug) lines.push(`---\n${agentDebug}`);
   }
 
-  return lines.slice(0, state.debug ? lines.length : MAX_WIDGET_LINES);
+  const maxLines = state.debug ? Number.POSITIVE_INFINITY : MAX_WIDGET_LINES;
+  const visibleLines = lines
+    .flatMap((line) => line.split("\n"))
+    .slice(0, maxLines);
+  return renderWidth === undefined
+    ? visibleLines
+    : visibleLines.map((line) => truncate(line, renderWidth));
 }

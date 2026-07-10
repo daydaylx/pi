@@ -7,6 +7,18 @@
  * `renderResult` werden überschrieben. So bleiben Prompt-Snippets,
  * Guidelines, Argument-Shims, Execution-Metadaten und die Ausführungslogik der
  * Originaltools erhalten.
+ *
+ * Adaptive Darstellung im Hauptbereich (kein separates Layout-System nötig,
+ * da jede Komponente ihr eigenes render(width) pro Redraw-Zyklus erhält):
+ *   - Fehler und der globale Tool-Output-Expand-Toggle zeigen immer die volle
+ *     Box (unverändert wie zuvor).
+ *   - Normale (erfolgreiche, nicht expandierte) Aufrufe werden bei
+ *     Terminalbreite >= ACTIVITY_PANEL_MIN_WIDTH komplett aus dem
+ *     Hauptbereich entfernt — sie erscheinen stattdessen im rechten Activity
+ *     Panel (siehe activity-panel.ts, das unabhängig über
+ *     tool_execution_start/update/end gespeist wird).
+ *   - Bei schmalerem Terminal fallen sie auf eine kompakte Ein-Zeilen-Anzeige
+ *     zurück statt komplett zu verschwinden.
  */
 
 import type {
@@ -27,19 +39,19 @@ import {
   type InfoBoxTheme,
 } from "./shared/info-box.ts";
 import {
+  ACTIVITY_PANEL_MIN_WIDTH,
   glyphsFor,
   resolveRenderProfile,
+  truncatePlain,
+  widthReservedForActivityPanel,
   type RenderGlyphs,
   type RenderProfile,
 } from "./shared/render-profile.ts";
+import { argNumber, argString, shortPreview } from "./shared/tool-labels.ts";
 
 const MAX_PREVIEW_CHARS = 400;
 const MAX_PREVIEW_LINES = 5;
-
-function shortPreview(value: unknown, max = MAX_PREVIEW_CHARS): string {
-  const oneLine = String(value ?? "").replace(/\s+/g, " ").trim();
-  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
-}
+const MAX_COMPACT_LINE_WIDTH = 200;
 
 type ToolStatus = "pending" | "running" | "completed" | "failed";
 
@@ -78,18 +90,6 @@ function buildPreviewLines(output: string, maxLines: number): string[] {
   return visible;
 }
 
-function argString(args: unknown, key: string, fallback = "-"): string {
-  if (!args || typeof args !== "object") return fallback;
-  const value = (args as Record<string, unknown>)[key];
-  return value === undefined || value === null ? fallback : String(value);
-}
-
-function argNumber(args: unknown, key: string): number | undefined {
-  if (!args || typeof args !== "object") return undefined;
-  const value = (args as Record<string, unknown>)[key];
-  return typeof value === "number" ? value : undefined;
-}
-
 function renderToolBox(options: {
   title: string;
   subtitle?: string;
@@ -108,8 +108,8 @@ function renderToolBox(options: {
   const background = isError
     ? "toolErrorBg"
     : isRunning
-    ? "toolPendingBg"
-    : "toolSuccessBg";
+      ? "toolPendingBg"
+      : "toolSuccessBg";
 
   return createInfoBoxComponent(
     {
@@ -131,6 +131,53 @@ function renderToolBox(options: {
   );
 }
 
+/**
+ * Wählt pro Redraw (render(width) wird bei jedem Zyklus mit der aktuellen
+ * Terminalbreite aufgerufen) zwischen voller Box, kompakter Ein-Zeile oder
+ * komplettem Verstecken. Fehler und globaler Expand-Toggle erzwingen immer
+ * die volle Box, unabhängig von der Breite.
+ */
+function adaptiveToolComponent(options: {
+  title: string;
+  subtitle?: string;
+  status: ToolStatus;
+  sections: InfoBoxSection[];
+  expanded: boolean;
+  theme: InfoBoxTheme;
+  profile: RenderProfile;
+}): InfoBoxComponent {
+  const { title, subtitle, status, expanded, theme, profile } = options;
+  const box = renderToolBox(options);
+  const alwaysFull = status === "failed" || expanded;
+  const glyphs = glyphsFor(profile);
+
+  const compactLabel = subtitle ? `${title} (${subtitle})` : title;
+
+  return {
+    render(width: number): string[] {
+      if (alwaysFull) {
+        return box.render(widthReservedForActivityPanel(width));
+      }
+      if (width >= ACTIVITY_PANEL_MIN_WIDTH) return [];
+      const symbol = toolStatusSymbol(status, glyphs);
+      const color = status === "running" ? "warning" : "muted";
+      const raw = truncatePlain(
+        `${symbol} ${compactLabel}`,
+        Math.min(width, MAX_COMPACT_LINE_WIDTH),
+        glyphs.ellipsis,
+      );
+      return [theme.fg(color, raw)];
+    },
+    invalidate(): void {
+      box.invalidate();
+    },
+  };
+}
+
+function argNumberOrUndefined(args: unknown, key: string): number | undefined {
+  return argNumber(args, key);
+}
+
 export default function toolVisualsExtension(pi: ExtensionAPI): void {
   const cwd = process.cwd();
 
@@ -143,15 +190,15 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
       const profile = resolveRenderProfile({ mode: "tui" });
       const status = inferToolStatus(false, false, context.executionStarted);
       const sections: InfoBoxSection[] = [];
-      const offset = argNumber(args, "offset");
-      const limit = argNumber(args, "limit");
+      const offset = argNumberOrUndefined(args, "offset");
+      const limit = argNumberOrUndefined(args, "limit");
       if (offset || limit) {
         const parts: string[] = [];
         if (offset) parts.push(`offset=${offset}`);
         if (limit) parts.push(`limit=${limit}`);
         sections.push({ title: "Parameter", lines: [parts.join(", ")] });
       }
-      return renderToolBox({
+      return adaptiveToolComponent({
         title: `read ${argString(args, "path")}`,
         status,
         sections,
@@ -164,8 +211,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
       const profile = resolveRenderProfile({ mode: "tui" });
       const content = result.content[0];
       const details = result.details as ReadToolDetails | undefined;
-      const isError = Boolean(result.isError);
-      const status = inferToolStatus(options.isPartial, isError);
+      const status = inferToolStatus(options.isPartial, context.isError);
       const sections: InfoBoxSection[] = [];
 
       if (content?.type === "image") {
@@ -174,9 +220,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
         const lineCount = content.text.split("\n").length;
         const meta = [`${lineCount} Zeilen gelesen`];
         if (details?.truncation?.truncated) {
-          meta.push(
-            `gekürzt von ${details.truncation.totalLines} Zeilen`,
-          );
+          meta.push(`gekürzt von ${details.truncation.totalLines} Zeilen`);
         }
         sections.push({ title: "Metadaten", lines: meta });
         if (status === "completed") {
@@ -187,7 +231,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
         }
       }
 
-      return renderToolBox({
+      return adaptiveToolComponent({
         title: `read ${argString(context.args, "path")}`,
         status,
         sections,
@@ -206,11 +250,11 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
     renderCall(args, theme, context) {
       const profile = resolveRenderProfile({ mode: "tui" });
       const status = inferToolStatus(false, false, context.executionStarted);
-      const timeout = argNumber(args, "timeout");
+      const timeout = argNumberOrUndefined(args, "timeout");
       const sections: InfoBoxSection[] = timeout
         ? [{ title: "Timeout", lines: [`${timeout}s`] }]
         : [];
-      return renderToolBox({
+      return adaptiveToolComponent({
         title: `$ ${shortPreview(argString(args, "command", ""), 120)}`,
         status,
         sections,
@@ -226,8 +270,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
       const output = content?.type === "text" ? content.text : "";
       const exitMatch = output.match(/exit code: (\d+)/);
       const exitCode = exitMatch ? parseInt(exitMatch[1]!, 10) : null;
-      const isError = Boolean(result.isError) ||
-        (exitCode !== null && exitCode !== 0);
+      const isError = context.isError || (exitCode !== null && exitCode !== 0);
       const status = inferToolStatus(options.isPartial, isError);
       const lineCount = output.split("\n").filter((l) => l.trim()).length;
 
@@ -243,7 +286,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
         }
       }
 
-      return renderToolBox({
+      return adaptiveToolComponent({
         title: `$ ${shortPreview(argString(context.args, "command", ""), 120)}`,
         status,
         sections,
@@ -265,7 +308,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
         ? (args as { edits: unknown[] }).edits
         : [];
       const status = inferToolStatus(false, false, context.executionStarted);
-      return renderToolBox({
+      return adaptiveToolComponent({
         title: `edit ${argString(args, "path")}`,
         subtitle: `${edits.length} Block${edits.length === 1 ? "" : "s"}`,
         status,
@@ -278,7 +321,8 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
     renderResult(result, options, theme, context) {
       const profile = resolveRenderProfile({ mode: "tui" });
       const content = result.content[0];
-      const isError = Boolean(result.isError) ||
+      const isError =
+        context.isError ||
         (content?.type === "text" && content.text.startsWith("Error"));
       const status = inferToolStatus(options.isPartial, isError);
       const sections: InfoBoxSection[] = [];
@@ -288,7 +332,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
           lines: buildPreviewLines(content.text, MAX_PREVIEW_LINES),
         });
       }
-      return renderToolBox({
+      return adaptiveToolComponent({
         title: `edit ${argString(context.args, "path")}`,
         status,
         sections,
@@ -309,7 +353,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
       const content = argString(args, "content", "");
       const lineCount = content.split("\n").length;
       const status = inferToolStatus(false, false, context.executionStarted);
-      return renderToolBox({
+      return adaptiveToolComponent({
         title: `write ${argString(args, "path")}`,
         subtitle: `${lineCount} Zeile${lineCount === 1 ? "" : "n"}`,
         status,
@@ -322,7 +366,8 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
     renderResult(result, options, theme, context) {
       const profile = resolveRenderProfile({ mode: "tui" });
       const content = result.content[0];
-      const isError = Boolean(result.isError) ||
+      const isError =
+        context.isError ||
         (content?.type === "text" && content.text.startsWith("Error"));
       const status = inferToolStatus(options.isPartial, isError);
       const sections: InfoBoxSection[] = [];
@@ -332,7 +377,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
           lines: buildPreviewLines(content.text, MAX_PREVIEW_LINES),
         });
       }
-      return renderToolBox({
+      return adaptiveToolComponent({
         title: `write ${argString(context.args, "path")}`,
         status,
         sections,

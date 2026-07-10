@@ -1003,9 +1003,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     if (typeof ui.setWidget !== "function") return;
 
     ui.setWidget("subagent-status", (_tui: unknown, theme: any) => ({
-      render(): string[] {
+      render(width: number): string[] {
         const state = getWidgetState();
-        return colorizeStatusLines(renderWidget(state), theme, (line) =>
+        return colorizeStatusLines(renderWidget(state, width), theme, (line) =>
           line.startsWith("Think:") ? "muted" : undefined,
         );
       },
