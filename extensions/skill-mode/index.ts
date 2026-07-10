@@ -16,7 +16,10 @@
  *   - Diese Datei enthält die Extension-Logik (Menü-Flow, Kontext-Injektion)
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { runMenu } from "../shared/menu-ui.ts";
 import {
   SKILL_CATALOG,
@@ -50,9 +53,12 @@ export default function skillModeExtension(pi: ExtensionAPI): void {
   // Event-Handler: Skill-Launcher aus dem Modusmenü (Shift+Tab → Skill-Modus)
   // ---------------------------------------------------------------------------
 
-  pi.events.on(SKILL_LAUNCHER_REQUEST_EVENT, (request: SkillLauncherRequest) => {
-    void openSkillLauncher(request.ctx);
-  });
+  pi.events.on(
+    SKILL_LAUNCHER_REQUEST_EVENT,
+    (request: SkillLauncherRequest) => {
+      void openSkillLauncher(request.ctx);
+    },
+  );
 
   // ---------------------------------------------------------------------------
   // Menü-Flow: Skill auswählen → Ausführungsmodus wählen → Kontext injizieren
@@ -60,10 +66,7 @@ export default function skillModeExtension(pi: ExtensionAPI): void {
 
   async function openSkillLauncher(ctx: ExtensionContext): Promise<void> {
     if (!ctx.hasUI || ctx.mode !== "tui") {
-      ctx.ui.notify(
-        "Skill-Launcher benötigt den TUI-Modus.",
-        "warning",
-      );
+      ctx.ui.notify("Skill-Launcher benötigt den TUI-Modus.", "warning");
       return;
     }
 
@@ -94,8 +97,7 @@ export default function skillModeExtension(pi: ExtensionAPI): void {
       buildExecutionModeMenu(skill),
       {
         fallbackPrompt: "Ausführungsmodus wählen",
-        nonInteractiveHint:
-          `Nutze /skill ${skill.id} <mode> für direkten Start.`,
+        nonInteractiveHint: `Nutze /skill ${skill.id} <mode> für direkten Start.`,
       },
     );
 
@@ -131,7 +133,10 @@ export default function skillModeExtension(pi: ExtensionAPI): void {
   // Kontext-Injektion
   // ---------------------------------------------------------------------------
 
-  function buildSkillPrompt(skill: SkillDefinition, mode: SkillExecutionMode): string {
+  function buildSkillPrompt(
+    skill: SkillDefinition,
+    mode: SkillExecutionMode,
+  ): string {
     const basePrompt = skill.systemPrompt;
 
     const modeInstructions: Record<SkillExecutionMode, string> = {
@@ -140,12 +145,14 @@ AUSFÜHRUNGSMODUS: Nur Informationen sammeln
 - Du darfst ausschließlich lesen, suchen, vergleichen und analysieren.
 - Keine Änderungen an Dateien, keine Pläne, keine Umsetzung.
 - Keine neuen Dependencies, Commits oder Pushes.
+- Nutze bei breiter Exploration über mehrere Dateien/Verzeichnisse aktiv das \`subagent\`-Tool (\`scout\`, siehe AGENTS.md → Subagenten-Delegation).
 - Halte dich exakt an das Ausgabeformat des Skills.`,
       analysis: `
 AUSFÜHRUNGSMODUS: Analyse mit Risiken
 - Sammle Informationen und bewerte sie.
 - Markiere Risiken, offene Fragen und unsichere Annahmen.
 - Keine Änderungen an Dateien ohne explizite Nutzerfreigabe.
+- Ziehe bei Architektur-/Risikofragen aktiv das \`subagent\`-Tool (\`architect\`) für eine Zweitmeinung hinzu (siehe AGENTS.md → Subagenten-Delegation).
 - Gib konkrete, priorisierte Empfehlungen.
 - Halte dich exakt an das Ausgabeformat des Skills.`,
       plan: `
@@ -153,6 +160,7 @@ AUSFÜHRUNGSMODUS: Plan erstellen
 - Erstelle einen strukturierten Arbeitsplan.
 - Führe die Aufgabe NICHT aus und ändere KEINE Projektdateien (außer der Plan-Datei).
 - Der Plan muss alle im Skill definierten Abschnitte enthalten.
+- Nutze bei Bedarf aktiv das \`subagent\`-Tool (\`scout\` für Kontext, \`planner\` für den Planentwurf, siehe AGENTS.md → Subagenten-Delegation), bevor der finale Plan geschrieben wird.
 - Bei mehrdeutigen Entscheidungen: mit ask_user klären, bevor der Plan finalisiert wird.
 - Schreibe den finalen Plan nach docs/plans/current-plan.md.`,
       work: `
@@ -163,6 +171,7 @@ AUSFÜHRUNGSMODUS: Umsetzung
   - Keine Commits/Pushes ohne ausdrückliche Freigabe.
   - Keine großflächigen Refactorings oder Formatierungen außerhalb des Scopes.
   - Bei Unsicherheit: nachfragen, nicht raten.
+- Nutze nach Änderungen bei Bedarf aktiv das \`subagent\`-Tool (\`reviewer\`/\`security-auditor\`/\`test-runner\`, siehe AGENTS.md → Subagenten-Delegation).
 - Dokumentiere, was geändert wurde und warum.`,
     };
 

@@ -82,6 +82,7 @@ Erstelle einen schlichten, schnell einsetzbaren Plan für die aktuelle Aufgabe �
 Vorgehen:
 - Stelle höchstens wenige gezielte Rückfragen, und nur, wenn sie für einen umsetzbaren Plan wirklich nötig sind (nutze dazu ask_user).
 - Verzichte auf ausführliche Architekturprüfung und lange Risiko-/Audit-Blöcke.
+- Nutze bei Bedarf das \`subagent\`-Tool (z. B. \`scout\` für kurze Kontextfragen), aber nur wenn es den Schnellplan wirklich beschleunigt, nicht routinemäßig.
 - Führe die Aufgabe nicht aus und ändere keine anderen Dateien.
 
 Schreibe den finalen kurzen Plan nach ${PLAN_RELATIVE_PATH}.
@@ -946,6 +947,8 @@ Vorgehen:
 - Stelle keine Fragen, deren Antwort aus dem Kontext ableitbar ist, und keine
   reinen Geschmacksfragen ohne Auswirkung auf Umsetzung, Risiko, UX,
   Sicherheit oder Architektur.
+- Kläre stattdessen recherchierbare Fakten bei Bedarf selbst mit dem
+  \`subagent\`-Tool (z. B. \`scout\`), statt den Nutzer nach Bekanntem zu fragen.
 - Prüfe nach jeder Frage, ob weitere Klärung wirklich nötig ist.
 - Der Nutzer kann jederzeit abbrechen oder das Decision Brief erstellen lassen.
 
@@ -1011,6 +1014,7 @@ Prüfe den Plan auf Umsetzbarkeit, Vollständigkeit, Risiken, Tests und ungeklä
 
 Du darfst ausschließlich ${PLAN_RELATIVE_PATH} überarbeiten. Andere Schreibzugriffe sind verboten.
 Wenn mehrere relevante Lösungen möglich sind, stelle vor dem Review-Ergebnis mit ask_user genau eine fokussierte Frage pro Aufruf. Biete jeweils 2–4 Optionen mit Vor-/Nachteilen und einer Empfehlung an.
+Ziehe bei riskanten oder architektonisch unklaren Plänen das \`subagent\`-Tool (\`architect\`) für eine unabhängige Zweitmeinung hinzu.
 
 Ein Plan mit offenen entscheidungsrelevanten Fragen darf nicht als geprüft markiert werden.
 Beende den Review mit genau einem Marker:
@@ -1047,6 +1051,9 @@ ${PLAN_RELATIVE_PATH}, sofern die aktuelle Permission-Stufe dies erlaubt.
 ENTSCHEIDUNGEN:
 Wenn mehrere relevante Lösungen möglich sind, nutze vor dem finalen Plan ask_user.
 Stelle pro Aufruf genau eine fokussierte Frage und biete 2–4 Optionen mit Vor-/Nachteilen und Empfehlung an.
+
+SUBAGENTEN:
+Nutze das \`subagent\`-Tool aktiv, wenn es passt (siehe AGENTS.md → Subagenten-Delegation), insbesondere \`scout\` für breite Codebase-Exploration vor der Analyse und \`architect\` für eine Architektur-/Risiko-Zweitmeinung vor dem finalen Plan — proaktiv, nicht nur auf Nachfrage.
 
 PLANSTRUKTUR (alle Abschnitte sind Pflicht):
 # Arbeitsplan: <Aufgabe>
@@ -1097,6 +1104,9 @@ STOP-REGELN (verbindlich):
 - Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.
 - Markiere einen Schritt nur als erledigt, wenn du einen konkreten Nachweis hast.
 - Stoppe und melde einen Blocker, wenn Plan und Realität in Konflikt stehen.
+
+SUBAGENTEN:
+Nutze das \`subagent\`-Tool aktiv, wenn es passt (siehe AGENTS.md → Subagenten-Delegation): \`worker\` für klar abgegrenzte Teilscopes statt alles selbst sequenziell abzuarbeiten, sowie \`reviewer\`/\`security-auditor\`/\`test-runner\` nach Änderungen — proaktiv, nicht nur auf Nachfrage.
 
 Melde am Ende des Turns Fortschritt als [PLAN-PROGRESS]-Block:
 [PLAN-PROGRESS]
@@ -1409,6 +1419,9 @@ STOP-REGELN (verbindlich):
 - Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.
 - Markiere einen Schritt nur als erledigt, wenn du einen konkreten Nachweis hast.
 - Stoppe und melde einen Blocker, wenn Plan und Realität in Konflikt stehen.
+
+SUBAGENTEN:
+Nutze das \`subagent\`-Tool aktiv, wenn es passt (siehe AGENTS.md → Subagenten-Delegation): \`worker\` für klar abgegrenzte Teilscopes statt alles selbst sequenziell abzuarbeiten, sowie \`reviewer\`/\`security-auditor\`/\`test-runner\` nach Änderungen — proaktiv, nicht nur auf Nachfrage.
 
 Schreibe am Ende des Turns einen [PLAN-PROGRESS]-Block zur Fortschrittsverfolgung
 und einen [WORK-RESULT]-Block als lesbaren Ausführungsbericht:

@@ -67,6 +67,14 @@ Architekturplan → `xhigh`, Work → `high`. A manual override via `/thinking` 
 already-active mode changes nothing. The session start value still comes from
 `settings.json` → `defaultThinkingLevel`.
 
+**Subagent reminders.** Every injected mode/phase prompt (`SIMPLE_PLAN_PROMPT`,
+`detailed_plan`, `executing`, `reviewing`, `deciding`) now includes a short
+reminder to use the `subagent` tool proactively when it fits, naming the
+agent(s) most relevant to that phase (e.g. `scout`/`architect` while planning,
+`worker`/`reviewer`/`security-auditor`/`test-runner` while executing). This
+does not duplicate the full delegation rule — it points back to `AGENTS.md` →
+"Subagenten-Delegation", which remains the single source of truth.
+
 ## `/plan` plan assistant
 
 `/plan`, `Ctrl+Alt+P`, and the `open-plan-picker` entry in the `Ctrl+Shift+X`
@@ -192,13 +200,13 @@ existing `/write` override are persisted per session. For the three writable
 levels, a restrictive `/write` override takes precedence; `read-only` and
 `read-bash` always retain their current-plan-file exception.
 
-| Level         | Effective access                                                                                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `read-only`   | Project reads; only the current plan file remains writable                                                               |
-| `read-bash`   | Project reads, proven read-only Bash commands, and the current plan file                                                 |
-| `read-write`  | Normal project writes; prompts for risky operations                                                                      |
-| `full-access` | Also allows package installs and Git housekeeping; still prompts for deletion, `sudo`, force-push, and external writes   |
-| `yolo`        | Allows ordinary deletion, `sudo`, force-push, and non-system external writes; hard warnings remain active                |
+| Level         | Effective access                                                                                                       |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `read-only`   | Project reads; only the current plan file remains writable                                                             |
+| `read-bash`   | Project reads, proven read-only Bash commands, and the current plan file                                               |
+| `read-write`  | Normal project writes; prompts for risky operations                                                                    |
+| `full-access` | Also allows package installs and Git housekeeping; still prompts for deletion, `sudo`, force-push, and external writes |
+| `yolo`        | Allows ordinary deletion, `sudo`, force-push, and non-system external writes; hard warnings remain active              |
 
 `git push --force` (including `--force-with-lease`/`-f`) is classified as
 sensitive, not as Git housekeeping: it destroys remote history, so
