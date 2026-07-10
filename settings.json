@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.80.6",
   "theme": "pi-vivid",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5",
+  "defaultProvider": "opencode-go",
+  "defaultModel": "minimax-m3",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -59,7 +59,8 @@
     "+extensions/ux-status.ts",
     "+extensions/actions.ts",
     "+extensions/working-visuals.ts",
-    "+extensions/tool-visuals.ts"
+    "+extensions/tool-visuals.ts",
+    "+extensions/skill-mode/index.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",

@@ -1819,6 +1819,18 @@ assert(
     "line 4 shows reasoning summary",
   );
 
+  widget.setLastRun("scout", "single", "2026-07-10T15:43:06Z");
+  const narrowRendered = widget.renderWidget(widget.getWidgetState(), 69);
+  assert(
+    narrowRendered.every((line) => stripAnsi(line).length <= 69),
+    "subagent widget lines fit the 69-column crash width",
+  );
+  assert(
+    narrowRendered[0].startsWith("Subagents: loaded") &&
+      narrowRendered[0].endsWith("…"),
+    "long subagent status line truncates before TUI validation",
+  );
+
   // Hidden widget renders nothing
   widget.setWidgetVisible(false);
   eq(
@@ -3624,12 +3636,12 @@ assert(
 const modeEntries = modeMenu.buildModeMenu("detailed_plan");
 eq(
   modeEntries.map((entry) => entry.id),
-  ["mode-simple-plan", "mode-detailed-plan", "mode-work", "mode-decide"],
-  "Shift+Tab contains the three mode variants plus Klärung (decide), no permissions",
+  ["mode-simple-plan", "mode-detailed-plan", "mode-work", "mode-decide", "mode-skill"],
+  "Shift+Tab contains the three mode variants plus Klärung (decide) plus Skill-Modus",
 );
 assert(
   modeEntries
-    .filter((entry) => entry.id !== "mode-decide")
+    .filter((entry) => entry.id !== "mode-decide" && entry.id !== "mode-skill")
     .every((entry) => entry.section === undefined),
   "the three persistent mode entries have no section",
 );
@@ -3744,8 +3756,8 @@ assert(
 const renamedModeEntries = modeMenu.buildModeMenu("simple_plan");
 eq(
   renamedModeEntries.map((entry) => entry.id),
-  ["mode-simple-plan", "mode-detailed-plan", "mode-work", "mode-decide"],
-  "Shift+Tab still contains the three mode variants plus decide after the rename",
+  ["mode-simple-plan", "mode-detailed-plan", "mode-work", "mode-decide", "mode-skill"],
+  "Shift+Tab still contains the three mode variants plus decide plus Skill-Modus after the rename",
 );
 assert(
   renamedModeEntries.find((entry) => entry.id === "mode-simple-plan").label ===

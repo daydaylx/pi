@@ -12,7 +12,7 @@ import type { WorkflowMode } from "./workflow-status.ts";
  * `deciding`-Phase läuft (Status DECIDE) — analog zum `current`-Marker der
  * echten Modus-Einträge.
  */
-export type ModeMenuAction = WorkflowMode | "decide";
+export type ModeMenuAction = WorkflowMode | "decide" | "skill";
 
 export function buildModeMenu(
   mode: WorkflowMode,
@@ -51,6 +51,14 @@ export function buildModeMenu(
       section: "Klärung",
       value: "decide",
       current: deciding,
+    },
+    {
+      id: "mode-skill",
+      label: "Skill-Modus",
+      description:
+        "Geführte Skills: Repository analysieren, Git prüfen, Doku-Diff, Bug-Triage, Security-Audit u. a.",
+      section: "Skills",
+      value: "skill",
     },
   ];
 }

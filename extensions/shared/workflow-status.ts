@@ -103,6 +103,12 @@ export interface ToolsActionRequest {
   ctx: ExtensionContext;
 }
 
+export const SKILL_LAUNCHER_REQUEST_EVENT = "pi-workflow:skill-launcher";
+
+export interface SkillLauncherRequest {
+  ctx: ExtensionContext;
+}
+
 export const STATUS_REQUEST_EVENT = "pi-workflow:show-status";
 
 export interface StatusRequest {
