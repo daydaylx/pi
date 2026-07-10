@@ -251,6 +251,37 @@ eq(
   "ask",
   "work asks before external writes",
 );
+// ── #46: isPathWithinAllowed (subagent write scope) ──
+eq(
+  policy.isPathWithinAllowed("src/app.ts", ROOT, ["src"]),
+  true,
+  "#46 write inside an allowed dir is permitted",
+);
+eq(
+  policy.isPathWithinAllowed("src", ROOT, ["src"]),
+  true,
+  "#46 the allowed dir itself is permitted",
+);
+eq(
+  policy.isPathWithinAllowed("../outside.ts", ROOT, ["src"]),
+  false,
+  "#46 write outside the allowed dir is rejected",
+);
+eq(
+  policy.isPathWithinAllowed("tests/run.mjs", ROOT, ["src"]),
+  false,
+  "#46 a sibling dir is rejected",
+);
+eq(
+  policy.isPathWithinAllowed("any/file.ts", ROOT, []),
+  true,
+  "#46 empty allowed list means no restriction",
+);
+eq(
+  policy.isPathWithinAllowed("docs/x.md", ROOT, ["src", "docs"]),
+  true,
+  "#46 multiple allowed dirs: match any",
+);
 eq(
   policy.decideBash("read-write", "echo result > /tmp/outside.txt", ROOT)
     .action,
@@ -419,6 +450,33 @@ for (const cmd of [
     policy.decideBash("test-bash", cmd, ROOT).action,
     "block",
     `test-bash blocks "${cmd}"`,
+  );
+}
+
+// ───────────────── #45: test-bash must reject shell chaining/redirects ─────────────────
+for (const cmd of [
+  "npm test && echo pwned",
+  "tsc --noEmit > log.txt",
+  "tsc --noEmit >> log.txt",
+  "npm test | tee log",
+  "npm test; rm -rf /tmp/x",
+  "tsc --noEmit $(whoami)",
+  "npm test `whoami`",
+  "npm test\nrm -rf /tmp/x",
+  "npm test || tsc --noEmit",
+]) {
+  eq(
+    policy.decideBash("test-bash", cmd, ROOT).action,
+    "block",
+    `#45 test-bash blocks shell metachar in "${cmd.replace(/\n/g, "\\n")}"`,
+  );
+}
+// and the plain allowed commands still pass after the #45 hardening
+for (const cmd of ["npm test", "tsc --noEmit", "npm run test:unit"]) {
+  eq(
+    policy.decideBash("test-bash", cmd, ROOT).action,
+    "allow",
+    `#45 test-bash still allows plain "${cmd}"`,
   );
 }
 
@@ -1173,6 +1231,213 @@ assert(
   }
 }
 
+// ───────────────── #50: unknown tool names are dropped + reported ─────────────────
+{
+  const projectRoot = mkdtempSync(path.join(tmpdir(), "pi-subagent-tools50-"));
+  try {
+    const projectAgentsDir = path.join(projectRoot, ".pi", "agents");
+    mkdirSync(projectAgentsDir, { recursive: true });
+    writeFileSync(
+      path.join(projectAgentsDir, "mixed-tools.md"),
+      [
+        "---",
+        "name: mixed-tools",
+        "description: declares valid + unknown + subagent tools",
+        "tools: read, grep, webfetch, nuke, subagent, bash",
+        "---",
+        "Prompt.",
+        "",
+      ].join("\n"),
+    );
+    const discovery = subagentAgents.discoverAgents(projectRoot, "project");
+    const agent = discovery.agents.find((a) => a.name === "mixed-tools");
+    assert(agent, "mixed-tools agent is discovered");
+    eq(
+      agent.tools,
+      ["read", "grep", "bash"],
+      "#50 only known tools are kept (subagent + unknowns dropped)",
+    );
+    eq(
+      agent.invalidTools,
+      ["webfetch", "nuke"],
+      "#50 unknown tool names recorded in invalidTools",
+    );
+
+    // /subagent-doctor reports the invalid tools
+    const commands = new Map();
+    subagents.default({
+      registerTool() {},
+      registerCommand(name, options) {
+        commands.set(name, options);
+      },
+      on() {},
+      getThinkingLevel() {
+        return "high";
+      },
+    });
+    const notified = [];
+    await commands.get("subagent-doctor").handler("", {
+      cwd: projectRoot,
+      ui: { notify: (message, level) => notified.push({ message, level }) },
+    });
+    assert(
+      notified[0].message.includes("mixed-tools") &&
+        notified[0].message.includes("webfetch") &&
+        notified[0].message.includes("nuke"),
+      "#50 /subagent-doctor lists unknown tool names with the agent",
+    );
+    eq(
+      notified[0].level,
+      "warning",
+      "#50 /subagent-doctor warns when unknown tools were dropped",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+}
+
+// ───────────────── #51: declared timeoutMs is clamped + reported ─────────────────
+{
+  const projectRoot = mkdtempSync(path.join(tmpdir(), "pi-subagent-timeout51-"));
+  try {
+    const projectAgentsDir = path.join(projectRoot, ".pi", "agents");
+    mkdirSync(projectAgentsDir, { recursive: true });
+    writeFileSync(
+      path.join(projectAgentsDir, "huge-timeout.md"),
+      [
+        "---",
+        "name: huge-timeout",
+        "description: declares an oversized timeout",
+        "tools: read",
+        "timeoutMs: 999999999",
+        "---",
+        "Prompt.",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(projectAgentsDir, "bad-timeout.md"),
+      [
+        "---",
+        "name: bad-timeout",
+        "description: declares a non-numeric timeout",
+        "tools: read",
+        "timeoutMs: not-a-number",
+        "---",
+        "Prompt.",
+        "",
+      ].join("\n"),
+    );
+    const discovery = subagentAgents.discoverAgents(projectRoot, "project");
+    const huge = discovery.agents.find((a) => a.name === "huge-timeout");
+    const bad = discovery.agents.find((a) => a.name === "bad-timeout");
+    eq(
+      huge.timeoutMs,
+      30 * 60 * 1000,
+      "#51 oversized timeoutMs is clamped to MAX_TIMEOUT_MS",
+    );
+    assert(
+      huge.timeoutMsWarning.includes("capped"),
+      "#51 clamped agent carries a cap warning",
+    );
+    eq(
+      bad.timeoutMs,
+      10 * 60 * 1000,
+      "#51 invalid timeoutMs falls back to DEFAULT_TIMEOUT_MS",
+    );
+    assert(
+      bad.timeoutMsWarning.includes("invalid"),
+      "#51 invalid timeoutMs carries an invalid warning",
+    );
+
+    // /subagent-doctor surfaces the warnings
+    const commands = new Map();
+    subagents.default({
+      registerTool() {},
+      registerCommand(name, options) {
+        commands.set(name, options);
+      },
+      on() {},
+      getThinkingLevel() {
+        return "high";
+      },
+    });
+    const notified = [];
+    await commands.get("subagent-doctor").handler("", {
+      cwd: projectRoot,
+      ui: { notify: (message, level) => notified.push({ message, level }) },
+    });
+    assert(
+      notified[0].message.includes("huge-timeout") &&
+        notified[0].message.includes("capped"),
+      "#51 /subagent-doctor reports the clamped timeout",
+    );
+    eq(
+      notified[0].level,
+      "warning",
+      "#51 /subagent-doctor warns when a timeout was clamped/invalid",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+}
+
+// ───────────────── #54: fallbackModels parsed + shown by doctor ─────────────────
+{
+  const projectRoot = mkdtempSync(path.join(tmpdir(), "pi-subagent-fallback54-doc-"));
+  try {
+    const projectAgentsDir = path.join(projectRoot, ".pi", "agents");
+    mkdirSync(projectAgentsDir, { recursive: true });
+    writeFileSync(
+      path.join(projectAgentsDir, "fallback-doc.md"),
+      [
+        "---",
+        "name: fallback-doc",
+        "description: documents fallback models",
+        "tools: read",
+        "model: primary-doc-model",
+        "fallbackModels: fallback-a, fallback-b",
+        "---",
+        "Prompt.",
+        "",
+      ].join("\n"),
+    );
+    const discovery = subagentAgents.discoverAgents(projectRoot, "project");
+    const agent = discovery.agents.find((a) => a.name === "fallback-doc");
+    eq(
+      agent.fallbackModels,
+      ["fallback-a", "fallback-b"],
+      "#54 fallbackModels frontmatter is parsed",
+    );
+
+    const commands = new Map();
+    subagents.default({
+      registerTool() {},
+      registerCommand(name, options) {
+        commands.set(name, options);
+      },
+      on() {},
+      getThinkingLevel() {
+        return "high";
+      },
+    });
+    const notified = [];
+    await commands.get("subagent-doctor").handler("", {
+      cwd: projectRoot,
+      ui: { notify: (message, level) => notified.push({ message, level }) },
+    });
+    assert(
+      notified[0].message.includes("fallback-doc") &&
+        notified[0].message.includes("primary-doc-model") &&
+        notified[0].message.includes("fallback-a") &&
+        notified[0].message.includes("fallback-b"),
+      "#54 /subagent-doctor lists fallback model configuration",
+    );
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+}
+
 // ───────────────────────── subagent widget: state + rendering (#30–#33) ─────────────────────────
 {
   const widget = await jiti.import(
@@ -1474,6 +1739,245 @@ assert(
       );
     }
 
+    // ── #49: empty / all-invalid output with exit 0 is a failure ──
+    for (const scenario of ["empty-output", "all-invalid"]) {
+      process.env.PI_TEST_SCENARIO = scenario;
+      const result = await tool.execute(
+        `e2e-${scenario}`,
+        { agent: "scout", task: "produce nothing", agentScope: "user" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(
+        result.isError,
+        `#49 ${scenario}: exit 0 with no assistant output is a failure`,
+      );
+      assert(
+        result.content[0].text.includes("no assistant output"),
+        `#49 ${scenario}: failure message explains the empty output`,
+      );
+    }
+
+    // ── #53: requiredSections validate structured output ──
+    {
+      const tempAgentDir = mkdtempSync(
+        path.join(tmpdir(), "pi-subagent-structured53-"),
+      );
+      const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+      try {
+        const agentsDir = path.join(tempAgentDir, "agents");
+        mkdirSync(agentsDir, { recursive: true });
+        writeFileSync(
+          path.join(agentsDir, "structured-agent.md"),
+          [
+            "---",
+            "name: structured-agent",
+            "description: requires Summary and Risks sections",
+            "tools: read",
+            "requiredSections: Summary, Risks",
+            "---",
+            "Prompt.",
+            "",
+          ].join("\n"),
+        );
+        process.env.PI_CODING_AGENT_DIR = tempAgentDir;
+
+        process.env.PI_TEST_SCENARIO = "structured-valid";
+        const valid = await tool.execute(
+          "e2e-53-valid",
+          { agent: "structured-agent", task: "report", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(!valid.isError, "#53 output with all required sections passes");
+
+        process.env.PI_TEST_SCENARIO = "structured-missing";
+        const missing = await tool.execute(
+          "e2e-53-missing",
+          { agent: "structured-agent", task: "report", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(missing.isError, "#53 missing required section fails");
+        assert(
+          missing.content[0].text.includes("missing required section") &&
+            missing.details.results[0].validationErrors?.[0].includes("Risks"),
+          "#53 validation details identify the missing section",
+        );
+      } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        rmSync(tempAgentDir, { recursive: true, force: true });
+      }
+    }
+
+    // ── #52: git-worktree sandbox mode is prepared but safely blocked ──
+    {
+      const tempAgentDir = mkdtempSync(
+        path.join(tmpdir(), "pi-subagent-sandbox52-"),
+      );
+      const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+      try {
+        const agentsDir = path.join(tempAgentDir, "agents");
+        mkdirSync(agentsDir, { recursive: true });
+        writeFileSync(
+          path.join(agentsDir, "sandbox-agent.md"),
+          [
+            "---",
+            "name: sandbox-agent",
+            "description: requests git worktree sandbox",
+            "tools: read",
+            "sandboxMode: git-worktree",
+            "---",
+            "Prompt.",
+            "",
+          ].join("\n"),
+        );
+        process.env.PI_CODING_AGENT_DIR = tempAgentDir;
+        const result = await tool.execute(
+          "e2e-52-sandbox-block",
+          { agent: "sandbox-agent", task: "run sandboxed", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(result.isError, "#52 git-worktree sandbox mode is blocked");
+        assert(
+          result.content[0].text.includes("git-worktree") &&
+            result.content[0].text.includes("not implemented"),
+          "#52 block message explains sandbox follow-up status",
+        );
+      } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        rmSync(tempAgentDir, { recursive: true, force: true });
+      }
+    }
+
+    // ── #54: fallbackModels retry only provider/model failures ──
+    {
+      const tempAgentDir = mkdtempSync(
+        path.join(tmpdir(), "pi-subagent-fallback54-"),
+      );
+      const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+      try {
+        const agentsDir = path.join(tempAgentDir, "agents");
+        mkdirSync(agentsDir, { recursive: true });
+        writeFileSync(
+          path.join(agentsDir, "fallback-agent.md"),
+          [
+            "---",
+            "name: fallback-agent",
+            "description: has primary + fallback model",
+            "tools: read",
+            "model: primary-model",
+            "fallbackModels: fallback-model",
+            "timeoutMs: 300",
+            "---",
+            "Prompt.",
+            "",
+          ].join("\n"),
+        );
+        process.env.PI_CODING_AGENT_DIR = tempAgentDir;
+
+        process.env.PI_TEST_SCENARIO = "model-primary-ok";
+        const primaryOk = await tool.execute(
+          "e2e-54-primary-ok",
+          { agent: "fallback-agent", task: "run", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(!primaryOk.isError, "#54 primary model success does not error");
+        eq(
+          primaryOk.details.results[0].modelAttempts.length,
+          1,
+          "#54 primary success does not try fallback",
+        );
+
+        process.env.PI_TEST_SCENARIO = "model-fail-then-success";
+        const fallbackOk = await tool.execute(
+          "e2e-54-fallback-ok",
+          { agent: "fallback-agent", task: "run", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(!fallbackOk.isError, "#54 provider failure retries fallback");
+        assert(
+          fallbackOk.content[0].text.includes("Fallback model fallback-model succeeded"),
+          "#54 fallback output is returned after primary provider failure",
+        );
+        eq(
+          fallbackOk.details.results[0].modelAttempts.map((a) => a.model),
+          ["primary-model", "fallback-model"],
+          "#54 attempt details list primary and fallback models",
+        );
+        eq(
+          fallbackOk.details.results[0].modelAttempts[0].retriable,
+          true,
+          "#54 primary provider failure is marked retriable",
+        );
+
+        process.env.PI_TEST_SCENARIO = "model-all-fail";
+        const allFail = await tool.execute(
+          "e2e-54-all-fail",
+          { agent: "fallback-agent", task: "run", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(allFail.isError, "#54 all provider failures remain an error");
+        eq(
+          allFail.details.results[0].modelAttempts.length,
+          2,
+          "#54 all provider failures try every configured model once",
+        );
+
+        process.env.PI_TEST_SCENARIO = "task-error-no-retry";
+        const taskError = await tool.execute(
+          "e2e-54-task-error",
+          { agent: "fallback-agent", task: "run", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(taskError.isError, "#54 normal task error remains an error");
+        eq(
+          taskError.details.results[0].modelAttempts.length,
+          1,
+          "#54 task errors do not retry fallback models",
+        );
+
+        process.env.PI_TEST_SCENARIO = "timeout";
+        const start = Date.now();
+        const timeoutResult = await tool.execute(
+          "e2e-54-timeout-no-retry",
+          { agent: "fallback-agent", task: "run", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(timeoutResult.isError, "#54 timeout remains an error");
+        assert(
+          Date.now() - start < 5000,
+          "#54 timeout does not retry and hang for every fallback",
+        );
+        eq(
+          timeoutResult.details.results[0].modelAttempts.length,
+          1,
+          "#54 timeout does not retry fallback models",
+        );
+      } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        rmSync(tempAgentDir, { recursive: true, force: true });
+      }
+    }
+
     // ── Multi-turn case ──
     process.env.PI_TEST_SCENARIO = "multi-turn";
     {
@@ -1648,13 +2152,105 @@ assert(
         { agent: "worker", task: "Check file", agentScope: "user" },
         undefined,
         undefined,
-        makeCtx(),
+        // #46: worker is write-capable without allowedPaths, so the parent
+        // requires confirmation. Approve it here to keep verifying that a
+        // read-write (non-elevated) agent is allowed to run.
+        makeCtx({
+          hasUI: true,
+          ui: { confirm: async () => true, select: async () => undefined },
+        }),
       );
       // worker has read-write permission, which is allowed → should succeed
       assert(
         result.content[0].text.includes("Fake agent completed"),
         "E2E permission: read-write agent can run",
       );
+    }
+
+    // ── #46: write-capable agents without allowedPaths need confirmation ──
+    process.env.PI_TEST_SCENARIO = "success";
+    {
+      const tempAgentDir = mkdtempSync(
+        path.join(tmpdir(), "pi-subagent-write46-"),
+      );
+      const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+      try {
+        const agentsDir = path.join(tempAgentDir, "agents");
+        mkdirSync(agentsDir, { recursive: true });
+        writeFileSync(
+          path.join(agentsDir, "unscoped-writer.md"),
+          [
+            "---",
+            "name: unscoped-writer",
+            "description: writer without allowedPaths",
+            "tools: write",
+            "---",
+            "Prompt.",
+            "",
+          ].join("\n"),
+        );
+        writeFileSync(
+          path.join(agentsDir, "scoped-writer.md"),
+          [
+            "---",
+            "name: scoped-writer",
+            "description: writer limited to src",
+            "tools: write",
+            "allowedPaths: src",
+            "---",
+            "Prompt.",
+            "",
+          ].join("\n"),
+        );
+        process.env.PI_CODING_AGENT_DIR = tempAgentDir;
+
+        const blocked = await tool.execute(
+          "e2e-46-block",
+          { agent: "unscoped-writer", task: "do", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(
+          blocked.isError,
+          "#46 unscoped write-capable agent is blocked non-interactively",
+        );
+        assert(
+          blocked.content[0].text.includes("allowedPaths"),
+          "#46 block message mentions allowedPaths",
+        );
+
+        const confirmed = await tool.execute(
+          "e2e-46-confirm",
+          { agent: "unscoped-writer", task: "do", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx({
+            hasUI: true,
+            ui: { confirm: async () => true, select: async () => undefined },
+          }),
+        );
+        assert(
+          !confirmed.isError,
+          "#46 unscoped write-capable agent runs after confirmation",
+        );
+
+        const scoped = await tool.execute(
+          "e2e-46-scoped",
+          { agent: "scoped-writer", task: "do", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        assert(
+          !scoped.isError,
+          "#46 scoped write-capable agent runs without confirmation",
+        );
+      } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        rmSync(tempAgentDir, { recursive: true, force: true });
+      }
     }
 
     // ── Elevated permission actually blocks a yolo agent (#36) ──
@@ -2012,6 +2608,67 @@ assert(
         "E2E chain-dollar: $-patterns in prior output are passed through literally",
       );
     }
+
+    // ── #47: task is delivered via @file, not a raw CLI argument ──
+    process.env.PI_TEST_SCENARIO = "argv-probe";
+    {
+      const secretTask =
+        "SECRET-TOKEN-DO-NOT-LEAK-47\nline two with $pecial `backticks` chars";
+      const result = await tool.execute(
+        "e2e-argv-probe",
+        { agent: "scout", task: secretTask, agentScope: "user" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      const echoedArgv = result.content[0].text;
+      assert(!result.isError, "#47 argv-probe runs without error");
+      assert(
+        !echoedArgv.includes("SECRET-TOKEN-DO-NOT-LEAK-47"),
+        "#47 task text is not exposed as a raw CLI argument",
+      );
+      assert(
+        !echoedArgv.includes("$pecial"),
+        "#47 task special characters are not exposed as CLI arguments",
+      );
+      assert(
+        echoedArgv.includes('"@'),
+        "#47 task is passed via an @<file> argument reference",
+      );
+    }
+
+    // ── #48: child environment is whitelisted (no unrelated leak) ──
+    process.env.PI_TEST_SCENARIO = "env-probe";
+    process.env.BOGUS_UNRELATED_VAR_48 = "should-not-leak";
+    {
+      const result = await tool.execute(
+        "e2e-env-probe",
+        { agent: "scout", task: "probe env", agentScope: "user" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(!result.isError, "#48 env-probe runs without error");
+      const probe = JSON.parse(result.content[0].text);
+      eq(
+        probe.bogusPresent,
+        false,
+        "#48 an unrelated parent env var is NOT forwarded to the child",
+      );
+      eq(probe.piSubagentPresent, true, "#48 PI_SUBAGENT marker is forwarded");
+      eq(
+        probe.permPresent,
+        true,
+        "#48 PI_SUBAGENT_PERMISSION_LEVEL is forwarded",
+      );
+      eq(
+        probe.writePresent,
+        true,
+        "#48 PI_SUBAGENT_WRITE_OVERRIDE is forwarded",
+      );
+      eq(probe.pathPresent, true, "#48 PATH is forwarded");
+    }
+    delete process.env.BOGUS_UNRELATED_VAR_48;
 
     // ── Chain stops and does not proceed on step failure (#38) ──
     process.env.PI_TEST_SCENARIO = "error";

@@ -9,18 +9,36 @@ import type {
 export type AgentScope = "user" | "project" | "both";
 export type ThinkingLevel =
   "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type SandboxMode = "none" | "git-worktree";
 
 export interface AgentConfig {
   name: string;
   description: string;
   tools: string[];
+  /** Tool names from frontmatter that are not known pi tools (#50). Kept for
+   * /subagent-doctor reporting; not passed to the child process. */
+  invalidTools: string[];
   model?: string;
+  /** #54: fallback models tried after provider/model failures only. */
+  fallbackModels: string[];
   thinking?: ThinkingLevel;
   permission: PermissionLevel;
   /** Original frontmatter value before normalization – used for elevated-permission detection (#36). */
   rawPermission: string | undefined;
   writeOverride: WriteOverride;
   timeoutMs: number;
+  /** #51: set when the declared timeoutMs was invalid or clamped to
+   * MAX_TIMEOUT_MS; reported by /subagent-doctor. */
+  timeoutMsWarning?: string;
+  /** #46: project-relative or absolute paths the agent may write to. Empty
+   * means unrestricted (subject to parent-side confirmation). */
+  allowedPaths: string[];
+  /** #53: required output sections (Markdown heading or "Section:" label). */
+  requiredSections: string[];
+  /** #52: requested sandbox mode. git-worktree is parsed but blocked until
+   * full worktree isolation is implemented. */
+  sandboxMode: SandboxMode;
+  sandboxModeWarning?: string;
   systemPrompt: string;
   source: "user" | "project";
   filePath: string;
@@ -39,7 +57,24 @@ export interface AgentDiscoveryResult {
 }
 
 const DEFAULT_TOOLS = ["read", "grep", "find", "ls"];
+// #50: Tool names an agent may declare. These are the built-in pi tools a
+// subagent child can be allowed to use via `--tools`. "subagent" is excluded
+// on purpose (recursion guard) and extension-only tools are not accepted in
+// agent frontmatter.
+const ALLOWED_TOOLS = new Set([
+  "read",
+  "write",
+  "edit",
+  "bash",
+  "grep",
+  "find",
+  "ls",
+]);
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+// #51: hard upper bound for an agent's declared timeoutMs. Larger declared
+// values are clamped down (and reported by /subagent-doctor) so a misconfigured
+// agent cannot hold a slot open indefinitely.
+const MAX_TIMEOUT_MS = 30 * 60 * 1000;
 const CONFIG_DIR_NAME = ".pi";
 // #36: Subagent permissions are limited to safe levels. full-access and yolo
 // require explicit TUI confirmation via confirmElevatedPermission().
@@ -63,6 +98,7 @@ const VALID_THINKING = new Set<ThinkingLevel>([
   "high",
   "xhigh",
 ]);
+const VALID_SANDBOX_MODES = new Set<SandboxMode>(["none", "git-worktree"]);
 
 function getAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR
@@ -125,6 +161,11 @@ export function isElevatedPermission(raw: string | undefined): boolean {
   return raw != null && ELEVATED_PERMISSIONS.has(raw as PermissionLevel);
 }
 
+/** #46: an agent that can write files (write/edit tool) needs write-scoping. */
+export function isWriteCapable(agent: AgentConfig): boolean {
+  return agent.tools.some((t) => t === "write" || t === "edit");
+}
+
 function normalizeWriteOverride(raw: string | undefined): WriteOverride {
   if (raw && VALID_WRITE_OVERRIDES.has(raw as WriteOverride)) {
     return raw as WriteOverride;
@@ -136,6 +177,20 @@ function normalizeThinking(raw: string | undefined): ThinkingLevel | undefined {
   return raw && VALID_THINKING.has(raw as ThinkingLevel)
     ? (raw as ThinkingLevel)
     : undefined;
+}
+
+function normalizeSandboxMode(raw: string | undefined): {
+  sandboxMode: SandboxMode;
+  sandboxModeWarning?: string;
+} {
+  if (!raw) return { sandboxMode: "none" };
+  if (VALID_SANDBOX_MODES.has(raw as SandboxMode)) {
+    return { sandboxMode: raw as SandboxMode };
+  }
+  return {
+    sandboxMode: "none",
+    sandboxModeWarning: `invalid sandboxMode "${raw}", using none`,
+  };
 }
 
 function loadAgentsFromDir(
@@ -183,24 +238,57 @@ function loadAgentsFromDir(
 
     // Subagenten dürfen keine weiteren Subagenten spawnen (Rekursionsbremse);
     // ein in der Frontmatter deklariertes "subagent"-Tool wird entfernt.
-    const tools = (splitCsv(frontmatter.tools) ?? DEFAULT_TOOLS).filter(
-      (tool) => tool !== "subagent",
-    );
+    // #50: unbekannte Tool-Namen werden verworfen und für /subagent-doctor
+    // notiert (invalidTools), statt sie ungefiltert an den Child-Prozess
+    // weiterzureichen.
+    const declaredTools = splitCsv(frontmatter.tools) ?? DEFAULT_TOOLS;
+    const tools: string[] = [];
+    const invalidTools: string[] = [];
+    for (const tool of declaredTools) {
+      if (tool === "subagent") continue;
+      if (ALLOWED_TOOLS.has(tool)) {
+        tools.push(tool);
+      } else {
+        invalidTools.push(tool);
+      }
+    }
     if (tools.length === 0) tools.push(...DEFAULT_TOOLS);
-    const timeoutMs = Number.parseInt(frontmatter.timeoutMs ?? "", 10);
+    // #51: clamp the declared timeout and record a warning for invalid/clamped
+    // values so /subagent-doctor can surface them.
+    const declaredTimeoutMs = Number.parseInt(frontmatter.timeoutMs ?? "", 10);
+    let timeoutMs: number;
+    let timeoutMsWarning: string | undefined;
+    if (!Number.isFinite(declaredTimeoutMs) || declaredTimeoutMs <= 0) {
+      timeoutMs = DEFAULT_TIMEOUT_MS;
+      if (frontmatter.timeoutMs) {
+        timeoutMsWarning = `invalid timeoutMs "${frontmatter.timeoutMs}", using default ${DEFAULT_TIMEOUT_MS}ms`;
+      }
+    } else if (declaredTimeoutMs > MAX_TIMEOUT_MS) {
+      timeoutMs = MAX_TIMEOUT_MS;
+      timeoutMsWarning = `timeoutMs ${declaredTimeoutMs}ms capped to ${MAX_TIMEOUT_MS}ms`;
+    } else {
+      timeoutMs = declaredTimeoutMs;
+    }
+    const { sandboxMode, sandboxModeWarning } = normalizeSandboxMode(
+      frontmatter.sandboxMode,
+    );
     agents.push({
       name: frontmatter.name,
       description: frontmatter.description,
       tools,
+      invalidTools,
       model: frontmatter.model,
+      fallbackModels: splitCsv(frontmatter.fallbackModels) ?? [],
       thinking: normalizeThinking(frontmatter.thinking),
       permission: normalizePermission(frontmatter.permission, tools),
       rawPermission: frontmatter.permission,
       writeOverride: normalizeWriteOverride(frontmatter.writeOverride),
-      timeoutMs:
-        Number.isFinite(timeoutMs) && timeoutMs > 0
-          ? timeoutMs
-          : DEFAULT_TIMEOUT_MS,
+      timeoutMs,
+      timeoutMsWarning,
+      allowedPaths: splitCsv(frontmatter.allowedPaths) ?? [],
+      requiredSections: splitCsv(frontmatter.requiredSections) ?? [],
+      sandboxMode,
+      sandboxModeWarning,
       systemPrompt: body.trim(),
       source,
       filePath,

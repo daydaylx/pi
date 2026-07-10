@@ -58,6 +58,7 @@ import {
   discoverAgents,
   formatAgentList,
   isElevatedPermission,
+  isWriteCapable,
 } from "./agents.ts";
 import {
   getWidgetState,
@@ -91,6 +92,15 @@ interface UsageStats {
   turns: number;
 }
 
+interface ModelAttempt {
+  model?: string;
+  exitCode: number;
+  retriable: boolean;
+  stopReason?: string;
+  errorMessage?: string;
+  stderr?: string;
+}
+
 interface SingleResult {
   agent: string;
   agentSource: "user" | "project" | "unknown";
@@ -100,8 +110,10 @@ interface SingleResult {
   stderr: string;
   usage: UsageStats;
   model?: string;
+  modelAttempts?: ModelAttempt[];
   stopReason?: string;
   errorMessage?: string;
+  validationErrors?: string[];
   step?: number;
 }
 
@@ -131,8 +143,43 @@ function isFailed(result: SingleResult): boolean {
   return (
     result.exitCode !== 0 ||
     result.stopReason === "error" ||
-    result.stopReason === "aborted"
+    result.stopReason === "aborted" ||
+    // #49: a clean exit with no assistant output (empty or only-invalid stdout)
+    // is a failure, not a silent success.
+    getFinalOutput(result.messages).trim().length === 0
   );
+}
+
+const MODEL_FAILURE_PATTERNS = [
+  /\bmodel\b/i,
+  /\bprovider\b/i,
+  /api[_ -]?key/i,
+  /auth(?:entication|orization)?/i,
+  /unauthori[sz]ed/i,
+  /rate\s*limit/i,
+  /quota/i,
+  /overloaded/i,
+  /temporarily unavailable/i,
+  /service unavailable/i,
+  /bad gateway/i,
+  /gateway timeout/i,
+  /ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN/i,
+  /\b(?:429|500|502|503|504)\b/,
+];
+
+function isRetriableModelFailure(result: SingleResult): boolean {
+  if (result.stopReason === "aborted") return false;
+  if (result.errorMessage?.toLowerCase().includes("timed out")) return false;
+  if (result.exitCode === 0 && result.stopReason !== "error") return false;
+  const text = [
+    result.stderr,
+    result.errorMessage,
+    getFinalOutput(result.messages),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  if (!text.trim()) return false;
+  return MODEL_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function resultOutput(result: SingleResult): string {
@@ -159,6 +206,27 @@ function truncateToBytes(value: string, cap: number): string {
 function truncateOutput(output: string): string {
   if (Buffer.byteLength(output, "utf8") <= PER_TASK_OUTPUT_CAP) return output;
   return `${truncateToBytes(output, PER_TASK_OUTPUT_CAP)}\n\n[Output truncated for parent context.]`;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function missingRequiredSections(
+  output: string,
+  requiredSections: string[],
+): string[] {
+  return requiredSections.filter((section) => {
+    const label = section.trim();
+    if (!label) return false;
+    const escaped = escapeRegex(label);
+    const markdownHeading = new RegExp(
+      `^\\s{0,3}#{1,6}\\s+${escaped}\\s*$`,
+      "im",
+    );
+    const colonLabel = new RegExp(`^\\s*${escaped}\\s*:`, "im");
+    return !markdownHeading.test(output) && !colonLabel.test(output);
+  });
 }
 
 async function mapWithConcurrencyLimit<TIn, TOut>(
@@ -209,12 +277,81 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 }
 
 function childEnv(agent: AgentConfig): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    PI_SUBAGENT: "1",
-    PI_SUBAGENT_PERMISSION_LEVEL: agent.permission,
-    PI_SUBAGENT_WRITE_OVERRIDE: agent.writeOverride,
-  };
+  // #48: only forward a whitelisted subset of the parent environment to the
+  // subagent child. This keeps unrelated secrets/tokens the parent process
+  // happened to carry (e.g. third-party app credentials) from leaking into
+  // every spawned subagent – including read-only scouts. Essentials needed to
+  // run, pi config, model-provider auth patterns and common dev-tooling/proxy
+  // vars are still passed through.
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of Object.keys(process.env)) {
+    if (isChildEnvVarAllowed(key)) env[key] = process.env[key];
+  }
+  env.PI_SUBAGENT = "1";
+  env.PI_SUBAGENT_PERMISSION_LEVEL = agent.permission;
+  env.PI_SUBAGENT_WRITE_OVERRIDE = agent.writeOverride;
+  // #46: forward the agent's write scope so the child can reject writes
+  // outside the allowed paths.
+  if (agent.allowedPaths.length > 0) {
+    env.PI_SUBAGENT_ALLOWED_PATHS = agent.allowedPaths.join("|");
+  }
+  return env;
+}
+
+const CHILD_ENV_ESSENTIALS = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TMP",
+  "LANG",
+  "LANGUAGE",
+  "TERM",
+  "TERM_PROGRAM",
+  "HOSTNAME",
+  "PWD",
+  "EDITOR",
+  "VISUAL",
+  "NO_COLOR",
+  "FORCE_COLOR",
+  "CLICOLOR",
+  "CLICOLOR_FORCE",
+]);
+const CHILD_ENV_PREFIXES = [
+  "PI_",
+  "GIT_",
+  "NPM_",
+  "NODE_",
+  "XDG_",
+  "LC_",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+];
+// Matched case-insensitively against the uppercased key name.
+const CHILD_ENV_SUFFIXES = [
+  "_API_KEY",
+  "_TOKEN",
+  "_SECRET",
+  "_PASSWORD",
+  "_CREDENTIAL",
+  "_CREDENTIALS",
+  "_BASE_URL",
+  "_ENDPOINT",
+];
+
+function isChildEnvVarAllowed(key: string): boolean {
+  if (CHILD_ENV_ESSENTIALS.has(key)) return true;
+  if (CHILD_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) return true;
+  const upper = key.toUpperCase();
+  return CHILD_ENV_SUFFIXES.some((suffix) => upper.endsWith(suffix));
 }
 
 async function runSingleAgent(
@@ -249,13 +386,17 @@ async function runSingleAgent(
     };
   }
 
-  const args = ["--mode", "json", "-p", "--no-session"];
-  if (agent.model) args.push("--model", agent.model);
-  if (agent.thinking) args.push("--thinking", agent.thinking);
-  args.push("--tools", agent.tools.join(","));
+  const attemptModels: Array<string | undefined> = [];
+  attemptModels.push(agent.model);
+  for (const fallbackModel of agent.fallbackModels) {
+    if (!attemptModels.includes(fallbackModel)) attemptModels.push(fallbackModel);
+  }
+  const modelAttempts: ModelAttempt[] = [];
 
   let tmpPromptDir: string | undefined;
   let tmpPromptPath: string | undefined;
+  let taskTmpDir: string | undefined; // #47: task passed via temp file
+  let taskTmpPath: string | undefined;
   const current: SingleResult = {
     agent: agent.name,
     agentSource: agent.source,
@@ -272,8 +413,20 @@ async function runSingleAgent(
       turns: 0,
     },
     model: agent.model,
+    modelAttempts,
     step,
   };
+
+  // #52: git-worktree sandbox mode is parsed/documented but full isolation is
+  // intentionally not implemented in this pass. Block instead of silently
+  // running unsandboxed.
+  if (agent.sandboxMode === "git-worktree") {
+    current.exitCode = 1;
+    current.stopReason = "error";
+    current.errorMessage =
+      "sandboxMode=git-worktree is configured, but git-worktree sandbox execution is not implemented yet; use sandboxMode=none or move this to the follow-up sandbox plan.";
+    return current;
+  }
 
   // Widget: mark subagent as running (#31, #42: unique run ID)
   const runId = `${agent.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -306,127 +459,202 @@ async function runSingleAgent(
       const tmp = await writePromptToTempFile(agent.name, agent.systemPrompt);
       tmpPromptDir = tmp.dir;
       tmpPromptPath = tmp.filePath;
-      args.push("--append-system-prompt", tmp.filePath);
     }
-    args.push(`Task: ${task}`);
+    // #47: pass the task via a restrictive (0600) temp file – pi includes an
+    // `@file` argument's contents as the initial message – instead of a raw
+    // CLI argument. The task text is then not visible in `ps` and survives
+    // multi-line / special characters. Cleanup happens in finally below.
+    const taskTmp = await writePromptToTempFile(agent.name, `Task: ${task}`);
+    taskTmpDir = taskTmp.dir;
+    taskTmpPath = taskTmp.filePath;
 
-    let wasAborted = false;
-    let wasTimeout = false;
-    let abortHandler: (() => void) | undefined; // #37: for cleanup after exit
-    let timeout: NodeJS.Timeout | undefined;
-    let killEscalation: NodeJS.Timeout | undefined;
-    const exitCode = await new Promise<number>((resolve) => {
-      const invocation = getPiInvocation(args);
-      const cwdCheck = validateCwd(defaultCwd, cwd);
-      if (cwdCheck.error) {
-        current.stderr += `[cwd] ${cwdCheck.error}\n`;
-      }
-      const proc = spawn(invocation.command, invocation.args, {
-        cwd: cwdCheck.cwd,
-        env: childEnv(agent),
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let buffer = "";
-
-      // #37: exited flag for reliable kill logic (proc.killed is set on first signal)
-      let exited = false;
-
-      const finish = (code: number) => {
-        exited = true;
-        if (timeout) clearTimeout(timeout);
-        if (killEscalation) clearTimeout(killEscalation);
-        if (abortHandler && signal) {
-          signal.removeEventListener("abort", abortHandler);
-        }
-        resolve(code);
+    const resetForAttempt = (model: string | undefined) => {
+      current.exitCode = -1;
+      current.messages = [];
+      current.stderr = "";
+      current.usage = {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0,
+        turns: 0,
       };
+      current.model = model;
+      current.stopReason = undefined;
+      current.errorMessage = undefined;
+      current.validationErrors = undefined;
+    };
 
-      const processLine = (line: string) => {
-        if (!line.trim()) return;
-        let event: any;
-        try {
-          event = JSON.parse(line);
-        } catch {
-          return;
+    const runAttempt = async (model: string | undefined) => {
+      resetForAttempt(model);
+      const args = ["--mode", "json", "-p", "--no-session"];
+      if (model) args.push("--model", model);
+      if (agent.thinking) args.push("--thinking", agent.thinking);
+      args.push("--tools", agent.tools.join(","));
+      if (tmpPromptPath) args.push("--append-system-prompt", tmpPromptPath);
+      args.push(`@${taskTmpPath}`);
+
+      let wasAborted = false;
+      let wasTimeout = false;
+      let abortHandler: (() => void) | undefined; // #37: for cleanup after exit
+      let timeout: NodeJS.Timeout | undefined;
+      let killEscalation: NodeJS.Timeout | undefined;
+      const exitCode = await new Promise<number>((resolve) => {
+        const invocation = getPiInvocation(args);
+        const cwdCheck = validateCwd(defaultCwd, cwd);
+        if (cwdCheck.error) {
+          current.stderr += `[cwd] ${cwdCheck.error}\n`;
         }
-        if (event.type === "message_end" && event.message) {
-          const message = event.message as Message;
-          current.messages.push(message);
-          if (message.role === "assistant") {
-            current.usage.turns += 1;
-            if (!current.model && message.model) current.model = message.model;
-            if (message.stopReason) current.stopReason = message.stopReason;
-            if (message.errorMessage)
-              current.errorMessage = message.errorMessage;
-            const usage = message.usage;
-            if (usage) {
-              current.usage.input += usage.input || 0;
-              current.usage.output += usage.output || 0;
-              current.usage.cacheRead += usage.cacheRead || 0;
-              current.usage.cacheWrite += usage.cacheWrite || 0;
-              current.usage.cost += usage.cost?.total || 0;
+        const proc = spawn(invocation.command, invocation.args, {
+          cwd: cwdCheck.cwd,
+          env: childEnv(agent),
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let buffer = "";
+
+        // #37: exited flag for reliable kill logic (proc.killed is set on first signal)
+        let exited = false;
+
+        const finish = (code: number) => {
+          exited = true;
+          if (timeout) clearTimeout(timeout);
+          if (killEscalation) clearTimeout(killEscalation);
+          if (abortHandler && signal) {
+            signal.removeEventListener("abort", abortHandler);
+          }
+          resolve(code);
+        };
+
+        const processLine = (line: string) => {
+          if (!line.trim()) return;
+          let event: any;
+          try {
+            event = JSON.parse(line);
+          } catch {
+            return;
+          }
+          if (event.type === "message_end" && event.message) {
+            const message = event.message as Message;
+            current.messages.push(message);
+            if (message.role === "assistant") {
+              current.usage.turns += 1;
+              if (!current.model && message.model) current.model = message.model;
+              if (message.stopReason) current.stopReason = message.stopReason;
+              if (message.errorMessage)
+                current.errorMessage = message.errorMessage;
+              const usage = message.usage;
+              if (usage) {
+                current.usage.input += usage.input || 0;
+                current.usage.output += usage.output || 0;
+                current.usage.cacheRead += usage.cacheRead || 0;
+                current.usage.cacheWrite += usage.cacheWrite || 0;
+                current.usage.cost += usage.cost?.total || 0;
+              }
+            }
+            emitUpdate();
+          } else if (event.type === "tool_result_end" && event.message) {
+            current.messages.push(event.message as Message);
+            emitUpdate();
+          }
+        };
+
+        proc.stdout.on("data", (data) => {
+          buffer += data.toString();
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) processLine(line);
+        });
+        proc.stderr.on("data", (data) => {
+          // #41: Cap stderr accumulation
+          if (Buffer.byteLength(current.stderr, "utf8") < STDERR_CAP) {
+            current.stderr += data.toString();
+            if (Buffer.byteLength(current.stderr, "utf8") > STDERR_CAP) {
+              current.stderr = `${truncateToBytes(current.stderr, STDERR_CAP)}\n\n[stderr truncated for size.]`;
             }
           }
-          emitUpdate();
-        } else if (event.type === "tool_result_end" && event.message) {
-          current.messages.push(event.message as Message);
-          emitUpdate();
-        }
-      };
+        });
+        proc.on("close", (code, sig) => {
+          exited = true;
+          if (buffer.trim()) processLine(buffer);
+          // Ein Signal-Kill ohne Exit-Code (z. B. OOM-Killer) ist kein Erfolg.
+          finish(code ?? (sig ? 1 : 0));
+        });
+        proc.on("error", (error) => {
+          exited = true;
+          current.stderr += error.message;
+          finish(1);
+        });
 
-      proc.stdout.on("data", (data) => {
-        buffer += data.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) processLine(line);
-      });
-      proc.stderr.on("data", (data) => {
-        // #41: Cap stderr accumulation
-        if (Buffer.byteLength(current.stderr, "utf8") < STDERR_CAP) {
-          current.stderr += data.toString();
-          if (Buffer.byteLength(current.stderr, "utf8") > STDERR_CAP) {
-            current.stderr = `${truncateToBytes(current.stderr, STDERR_CAP)}\n\n[stderr truncated for size.]`;
+        const killProc = (timedOut: boolean) => {
+          wasAborted = true;
+          if (timedOut) wasTimeout = true;
+          proc.kill("SIGTERM");
+          killEscalation = setTimeout(() => {
+            if (!exited) proc.kill("SIGKILL");
+          }, 5000);
+          killEscalation.unref?.();
+        };
+        timeout = setTimeout(() => killProc(true), agent.timeoutMs);
+        if (signal) {
+          if (signal.aborted) killProc(false);
+          else {
+            abortHandler = () => killProc(false);
+            signal.addEventListener("abort", abortHandler, { once: true });
           }
         }
       });
-      proc.on("close", (code, sig) => {
-        exited = true;
-        if (buffer.trim()) processLine(buffer);
-        // Ein Signal-Kill ohne Exit-Code (z. B. OOM-Killer) ist kein Erfolg.
-        finish(code ?? (sig ? 1 : 0));
-      });
-      proc.on("error", (error) => {
-        exited = true;
-        current.stderr += error.message;
-        finish(1);
-      });
 
-      const killProc = (timedOut: boolean) => {
-        wasAborted = true;
-        if (timedOut) wasTimeout = true;
-        proc.kill("SIGTERM");
-        killEscalation = setTimeout(() => {
-          if (!exited) proc.kill("SIGKILL");
-        }, 5000);
-        killEscalation.unref?.();
-      };
-      timeout = setTimeout(() => killProc(true), agent.timeoutMs);
-      if (signal) {
-        if (signal.aborted) killProc(false);
-        else {
-          abortHandler = () => killProc(false);
-          signal.addEventListener("abort", abortHandler, { once: true });
+      current.exitCode = exitCode;
+      if (wasAborted && !current.errorMessage) {
+        current.stopReason = "aborted";
+        current.errorMessage = wasTimeout
+          ? `Subagent timed out after ${agent.timeoutMs} ms.`
+          : "Subagent was aborted by the caller.";
+      }
+      // #49: clean exit but no assistant output (empty or only-invalid stdout) is
+      // an explicit failure with an explainable message, not a silent success.
+      if (
+        current.exitCode === 0 &&
+        !current.errorMessage &&
+        getFinalOutput(current.messages).trim().length === 0
+      ) {
+        current.errorMessage =
+          "Subagent exited successfully but produced no assistant output (empty or only-invalid stdout).";
+      }
+      // #53: validate structured output sections declared in agent frontmatter.
+      if (current.exitCode === 0 && !current.errorMessage) {
+        const missingSections = missingRequiredSections(
+          getFinalOutput(current.messages),
+          agent.requiredSections,
+        );
+        if (missingSections.length > 0) {
+          current.validationErrors = missingSections.map(
+            (section) => `Missing required section: ${section}`,
+          );
+          current.stopReason = "error";
+          current.errorMessage = `Subagent output failed validation: missing required section(s): ${missingSections.join(", ")}.`;
         }
       }
-    });
+    };
 
-    current.exitCode = exitCode;
-    if (wasAborted && !current.errorMessage) {
-      current.stopReason = "aborted";
-      current.errorMessage = wasTimeout
-        ? `Subagent timed out after ${agent.timeoutMs} ms.`
-        : "Subagent was aborted by the caller.";
+    for (let i = 0; i < attemptModels.length; i++) {
+      const model = attemptModels[i];
+      await runAttempt(model);
+      const retriable = isRetriableModelFailure(current);
+      modelAttempts.push({
+        model,
+        exitCode: current.exitCode,
+        retriable,
+        stopReason: current.stopReason,
+        errorMessage: current.errorMessage,
+        stderr: current.stderr.trim()
+          ? truncateToBytes(current.stderr.trim(), 2048)
+          : undefined,
+      });
+      if (retriable && i < attemptModels.length - 1) continue;
+      break;
     }
 
     // Widget: update subagent status on completion (#31, #42)
@@ -456,6 +684,20 @@ async function runSingleAgent(
     if (tmpPromptDir) {
       try {
         fs.rmdirSync(tmpPromptDir);
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+    if (taskTmpPath) {
+      try {
+        fs.unlinkSync(taskTmpPath);
+      } catch {
+        // ignore cleanup errors
+      }
+    }
+    if (taskTmpDir) {
+      try {
+        fs.rmdirSync(taskTmpDir);
       } catch {
         // ignore cleanup errors
       }
@@ -671,6 +913,19 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           `Projekt-Agenten (${projectAgents.length}): ${projectAgents.map((a) => a.name).join(", ") || "(keine)"}`,
         ];
 
+        const agentsWithFallbackModels = discovery.agents.filter(
+          (a) => a.fallbackModels.length > 0,
+        );
+        if (agentsWithFallbackModels.length > 0) {
+          lines.push(
+            "",
+            "Agenten mit Model-Fallbacks:",
+            ...agentsWithFallbackModels.map(
+              (a) => `${a.name}: ${a.model ?? "(default)"} → ${a.fallbackModels.join(" → ")}`,
+            ),
+          );
+        }
+
         if (discovery.skipped.length > 0) {
           lines.push(
             "",
@@ -678,6 +933,57 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
             ...discovery.skipped.map(
               (entry) => `- ${entry.filePath}: ${entry.reason}`,
             ),
+          );
+        }
+
+        // #50: report agents that declared unknown tool names (silently dropped).
+        const agentsWithInvalidTools = discovery.agents.filter(
+          (a) => a.invalidTools.length > 0,
+        );
+        if (agentsWithInvalidTools.length > 0) {
+          lines.push(
+            "",
+            "Agenten mit unbekannten Tool-Namen (werden ignoriert):",
+            ...agentsWithInvalidTools.map(
+              (a) =>
+                `- ${a.name}: ${a.invalidTools.join(", ")}` +
+                " (erlaubt: read, write, edit, bash, grep, find, ls)",
+            ),
+          );
+        }
+
+        // #51: report agents whose declared timeoutMs was invalid or clamped.
+        const agentsWithTimeoutWarning = discovery.agents.filter(
+          (a) => a.timeoutMsWarning,
+        );
+        if (agentsWithTimeoutWarning.length > 0) {
+          lines.push(
+            "",
+            "Agenten mit zeitlimit-Hinweis:",
+            ...agentsWithTimeoutWarning.map(
+              (a) => `- ${a.name}: ${a.timeoutMsWarning}`,
+            ),
+          );
+        }
+
+        // #52: surface sandbox declarations. git-worktree is currently a
+        // prepared/blocking mode, not an implemented isolation feature.
+        const agentsWithSandboxInfo = discovery.agents.filter(
+          (a) => a.sandboxMode !== "none" || a.sandboxModeWarning,
+        );
+        if (agentsWithSandboxInfo.length > 0) {
+          lines.push(
+            "",
+            "Agenten mit Sandbox-Hinweis:",
+            ...agentsWithSandboxInfo.map((a) => {
+              const base = `${a.name}: sandboxMode=${a.sandboxMode}`;
+              const suffix = a.sandboxModeWarning
+                ? ` (${a.sandboxModeWarning})`
+                : a.sandboxMode === "git-worktree"
+                  ? " (vorbereitet, Ausführung blockiert bis Worktree-Isolation implementiert ist)"
+                  : "";
+              return `- ${base}${suffix}`;
+            }),
           );
         }
 
@@ -693,7 +999,11 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 
         ctx.ui.notify(
           lines.join("\n"),
-          discovery.agents.length === 0 || discovery.skipped.length > 0
+          discovery.agents.length === 0 ||
+          discovery.skipped.length > 0 ||
+          agentsWithInvalidTools.length > 0 ||
+          agentsWithTimeoutWarning.length > 0 ||
+          agentsWithSandboxInfo.length > 0
             ? "warning"
             : "info",
         );
@@ -855,6 +1165,51 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
               {
                 type: "text",
                 text: `Canceled: elevated-permission agent(s) ${elevatedNames.join(", ")} were not approved.`,
+              },
+            ],
+            details: makeDetails(
+              hasChain ? "chain" : hasParallel ? "parallel" : "single",
+            )([]),
+            isError: true,
+          };
+        }
+      }
+
+      // #46: write-capable agents without an allowedPaths scope can write
+      // anywhere – require explicit confirmation (block non-interactively).
+      const unrestrictedWriterNames = Array.from(requested)
+        .map((name) => agents.find((a) => a.name === name))
+        .filter((a): a is AgentConfig => a != null)
+        .filter((a) => isWriteCapable(a) && a.allowedPaths.length === 0)
+        .map((a) => a.name);
+      if (unrestrictedWriterNames.length > 0) {
+        if (!ctx.hasUI) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Blocked: write-capable agent(s) ${unrestrictedWriterNames.join(", ")} have no allowedPaths scope and cannot run non-interactively without confirmation. Add an allowedPaths scope to the agent frontmatter or run interactively.`,
+              },
+            ],
+            details: makeDetails(
+              hasChain ? "chain" : hasParallel ? "parallel" : "single",
+            )([]),
+            isError: true,
+          };
+        }
+        const approvedUnrestricted = await ctx.ui.confirm(
+          "Run unrestricted write-capable subagent?",
+          `Agent(s): ${unrestrictedWriterNames.join(", ")}
+No allowedPaths declared – this agent can write anywhere in the project.
+
+To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
+        );
+        if (!approvedUnrestricted) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Canceled: unrestricted write-capable agent(s) ${unrestrictedWriterNames.join(", ")} were not approved.`,
               },
             ],
             details: makeDetails(

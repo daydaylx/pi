@@ -126,7 +126,32 @@ thinking: medium
 permission: read-only
 writeOverride: block
 timeoutMs: 600000
+# optional guardrails:
+allowedPaths: src, tests
+fallbackModels: opencode-go/deepseek-v4-flash, opencode-go/qwen3.7-plus
+requiredSections: Summary, Risks
+sandboxMode: none
 ```
+
+Additional frontmatter guardrails:
+
+- `allowedPaths` (#46): comma-separated project-relative/absolute paths where a
+  write-capable agent may write. Agents with `write`/`edit` but no
+  `allowedPaths` require interactive confirmation and are blocked in
+  non-interactive mode.
+- `fallbackModels` (#54): comma-separated model IDs tried after the primary
+  model fails with a provider/model error (e.g. unavailable provider, auth/rate
+  limit/5xx/network errors). Normal task failures, output validation errors,
+  aborts and timeouts do **not** retry. Attempt details are recorded under
+  `result.details.results[].modelAttempts` and `/subagent-doctor` lists the
+  fallback chain.
+- `requiredSections` (#53): comma-separated output sections that must appear as
+  Markdown headings (`## Summary`) or labels (`Summary:`). Missing sections mark
+  the run as failed with `validationErrors` in details.
+- `sandboxMode` (#52): `none` (default) or `git-worktree`. `git-worktree` is
+  parsed and shown by `/subagent-doctor`, but execution is intentionally
+  blocked until full worktree creation/cleanup isolation is implemented in a
+  follow-up plan.
 
 ## Workflow Templates
 
@@ -165,6 +190,10 @@ Rules:
 - `read-write`: write/edit allowed inside project, risky bash still blocks in
   non-interactive child processes.
 - `writeOverride=block`: write-capable bash is denied even if bash exists.
+- `allowedPaths` limits subagent `write`/`edit` calls in the child process;
+  writes outside the configured paths are blocked (#46).
+- Write-capable agents without `allowedPaths` require interactive parent
+  confirmation and are denied in non-interactive mode (#46).
 - Project-local agents require interactive confirmation unless
   `confirmProjectAgents: false` is explicitly passed.
 - In non-interactive contexts, project-local agents are denied by default when

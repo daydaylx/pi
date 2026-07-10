@@ -13,6 +13,7 @@ import type {
 import {
   decideBash,
   decideFileAccess,
+  isPathWithinAllowed,
   type PolicyDecision,
 } from "./shared/permission-policy.ts";
 import { runMenu } from "./shared/menu-ui.ts";
@@ -37,6 +38,7 @@ const MAX_PREVIEW = 140;
 const CONFIRM_ELEVATED_PERMISSIONS = false;
 const ENV_PERMISSION_LEVEL = "PI_SUBAGENT_PERMISSION_LEVEL";
 const ENV_WRITE_OVERRIDE = "PI_SUBAGENT_WRITE_OVERRIDE";
+const ENV_ALLOWED_PATHS = "PI_SUBAGENT_ALLOWED_PATHS"; // #46
 
 // Auto-YOLO: aktiviert YOLO bei jedem Session-Start automatisch. Auf false
 // setzen, um das alte Verhalten (keine automatische Eskalation) wieder-
@@ -55,6 +57,18 @@ function writeOverrideFromEnv(): WriteOverride | undefined {
   return value === "inherit" || value === "block" || value === "plan-file-only"
     ? value
     : undefined;
+}
+
+// #46: when this process is a subagent child with a declared allowedPaths
+// scope, writes outside those paths are blocked. Undefined = unrestricted.
+function allowedPathsFromEnv(): string[] | undefined {
+  const raw = process.env[ENV_ALLOWED_PATHS];
+  if (!raw) return undefined;
+  const list = raw
+    .split("|")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : undefined;
 }
 
 function preview(value: string): string {
@@ -99,10 +113,19 @@ function decideTool(
   }
 
   if (event.toolName === "write" || event.toolName === "edit") {
+    const filePath = toolPath(event) ?? "";
+    // #46: enforce the subagent's allowedPaths write scope if declared.
+    const allowed = allowedPathsFromEnv();
+    if (allowed && !isPathWithinAllowed(filePath, cwd, allowed)) {
+      return {
+        action: "block",
+        reason: `Subagent write scope: "${filePath}" liegt außerhalb der erlaubten Pfade (${allowed.join(", ")}).`,
+      };
+    }
     return decideFileAccess(
       permissionLevel,
       "write",
-      toolPath(event) ?? "",
+      filePath,
       cwd,
       writeOverride,
     );

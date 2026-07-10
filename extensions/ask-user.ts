@@ -295,7 +295,7 @@ export default function askUser(pi: ExtensionAPI) {
             const selected = i === optionIndex;
             const prefix = selected ? theme.fg("accent", "> ") : "  ";
 
-            if (opt.isOther) {
+            if (opt.isOther === true) {
               const label = `${i + 1}. ${opt.label}${editMode ? " ✎" : ""}`;
               const color = selected || editMode ? "accent" : "text";
               addWrappedWithPrefix(prefix, theme.fg(color, label));

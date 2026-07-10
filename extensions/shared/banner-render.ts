@@ -25,7 +25,9 @@ export function resolveBannerTier(width: number): BannerTier {
 /** NO_COLOR hat Vorrang vor der vom Theme erkannten Terminal-Farbfähigkeit. */
 export function resolveBannerColorMode(
   themeColorMode: "truecolor" | "256color",
-  env: Pick<NodeJS.ProcessEnv, "NO_COLOR"> = process.env,
+  env: Pick<NodeJS.ProcessEnv, "NO_COLOR"> = {
+    NO_COLOR: process.env.NO_COLOR,
+  },
 ): BannerColorMode {
   if (env.NO_COLOR !== undefined) return "none";
   return themeColorMode;
