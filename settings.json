@@ -1,8 +1,8 @@
 {
-  "lastChangelogVersion": "0.80.3",
-  "theme": "david-dark",
-  "defaultProvider": "zai",
-  "defaultModel": "glm-5.2",
+  "lastChangelogVersion": "0.80.6",
+  "theme": "pi-vivid",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -41,7 +41,7 @@
     "npm:@zigai/pi-prompt-history",
     {
       "source": "npm:pi-claude-style-tools@1.0.64",
-      "extensions": ["extensions/index.ts"],
+      "extensions": [],
       "themes": []
     },
     "npm:pi-zentui@0.3.0"
@@ -57,7 +57,9 @@
     "+extensions/mode-permissions.ts",
     "+extensions/ask-user.ts",
     "+extensions/ux-status.ts",
-    "+extensions/actions.ts"
+    "+extensions/actions.ts",
+    "+extensions/working-visuals.ts",
+    "+extensions/tool-visuals.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",

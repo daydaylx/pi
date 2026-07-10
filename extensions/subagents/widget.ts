@@ -9,19 +9,44 @@
  */
 
 const MAX_WIDGET_LINES = 4;
-const MAX_SA_LINE_WIDTH = 60;
+const MAX_SA_LINE_WIDTH = 90;
 const MAX_THINK_LENGTH = 100;
 const MAX_DISPLAYED_AGENTS = 8;
 // Fertige Läufe verfallen nach dieser Zeit, sonst wächst die Map unbegrenzt,
 // weil jede Run-ID eindeutig ist (#42).
 const DONE_ENTRY_TTL_MS = 5 * 60 * 1000;
 
-export type SubagentStatus = "idle" | "queued" | "running" | "done" | "blocked";
+export type SubagentStatus =
+  | "idle"
+  | "queued"
+  | "waiting"
+  | "running"
+  | "done"
+  | "completed"
+  | "warning"
+  | "failed"
+  | "blocked";
 
-const STATUS_SYMBOL: Record<SubagentStatus, string> = {
+export const STATUS_SYMBOL: Record<SubagentStatus, string> = {
   done: "✓",
-  running: "…",
-  blocked: "!",
+  completed: "✓",
+  running: "●",
+  waiting: "○",
+  warning: "!",
+  failed: "✕",
+  blocked: "⏸",
+  idle: "○",
+  queued: "○",
+};
+
+export const STATUS_LABEL: Record<SubagentStatus, string> = {
+  done: "completed",
+  completed: "completed",
+  running: "running",
+  waiting: "waiting",
+  warning: "warning",
+  failed: "failed",
+  blocked: "blocked",
   idle: "idle",
   queued: "queued",
 };
@@ -32,13 +57,30 @@ export interface SubagentEntry {
   status: SubagentStatus;
   currentTask: string;
   lastUpdate: number;
+  role?: string;
+  lastAction?: string;
+  warnings?: number;
+  errors?: number;
+  startedAt?: number;
+  completedAt?: number;
+  parentAgentId?: string;
+  relatedToolCalls?: string[];
   risk?: string;
+}
+
+export interface LastSubagentRun {
+  agent: string;
+  mode: string;
+  time: string;
 }
 
 export interface WidgetState {
   visible: boolean;
   compact: boolean;
   debug: boolean;
+  subagentsLoaded: boolean;
+  agentCount: number;
+  lastRun?: LastSubagentRun;
   subagents: Map<string, SubagentEntry>;
   model?: string;
   thinking?: string;
@@ -53,6 +95,8 @@ function createWidgetState(): WidgetState {
     visible: true,
     compact: true,
     debug: false,
+    subagentsLoaded: false,
+    agentCount: 0,
     subagents: new Map(),
   };
 }
@@ -77,6 +121,26 @@ export function setWidgetCompact(compact: boolean): void {
 
 export function setWidgetDebug(debug: boolean): void {
   widgetState.debug = debug;
+}
+
+export function setSubagentAvailability(
+  loaded: boolean,
+  agentCount: number,
+): void {
+  widgetState.subagentsLoaded = loaded;
+  widgetState.agentCount = Math.max(0, agentCount);
+}
+
+function defaultLastRunTime(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+export function setLastRun(
+  agent: string,
+  mode: string,
+  time = defaultLastRunTime(),
+): void {
+  widgetState.lastRun = { agent, mode, time };
 }
 
 export function setModel(model?: string): void {
@@ -108,7 +172,11 @@ export function upsertSubagent(entry: SubagentEntry): void {
   const cutoff = Date.now() - DONE_ENTRY_TTL_MS;
   for (const [id, existing] of widgetState.subagents) {
     if (
-      (existing.status === "done" || existing.status === "blocked") &&
+      (existing.status === "done" ||
+        existing.status === "completed" ||
+        existing.status === "warning" ||
+        existing.status === "failed" ||
+        existing.status === "blocked") &&
       existing.lastUpdate < cutoff
     ) {
       widgetState.subagents.delete(id);
@@ -130,20 +198,41 @@ function truncate(value: string, max: number): string {
   return `${value.slice(0, max - 1)}…`;
 }
 
-function formatSA(status: SubagentStatus, label: string): string {
-  const symbol = STATUS_SYMBOL[status];
-  if (status === "idle") return `${label} idle`;
-  if (status === "queued") return `${label} queued`;
-  return `${label}${symbol}`;
+function formatSA(entry: SubagentEntry): string {
+  const symbol = STATUS_SYMBOL[entry.status];
+  const label = STATUS_LABEL[entry.status];
+  const counts = [
+    entry.warnings ? `w:${entry.warnings}` : undefined,
+    entry.errors ? `e:${entry.errors}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const suffix = counts ? ` ${counts}` : "";
+  return `${symbol} ${entry.label} ${label}${suffix}`;
+}
+
+function renderStatusLine(state: WidgetState): string {
+  const loaded = state.subagentsLoaded ? "loaded" : "not loaded";
+  const last = state.lastRun
+    ? `${state.lastRun.agent}/${state.lastRun.mode}/${state.lastRun.time}`
+    : "none";
+  return truncate(
+    `Subagents: ${loaded} | Agents: ${state.agentCount} | Last run: ${last}`,
+    MAX_THINK_LENGTH,
+  );
 }
 
 function renderSALine(state: WidgetState): string {
   const entries = Array.from(state.subagents.values()).sort((a, b) => {
     const order: SubagentStatus[] = [
+      "failed",
       "blocked",
+      "warning",
       "running",
+      "waiting",
       "queued",
       "done",
+      "completed",
       "idle",
     ];
     return order.indexOf(a.status) - order.indexOf(b.status);
@@ -152,7 +241,7 @@ function renderSALine(state: WidgetState): string {
   const displayed = entries.slice(0, MAX_DISPLAYED_AGENTS);
   const overflow = entries.length - MAX_DISPLAYED_AGENTS;
 
-  let saLine = displayed.map((e) => formatSA(e.status, e.label)).join(" ");
+  let saLine = displayed.map((e) => formatSA(e)).join(" | ");
   if (overflow > 0) saLine += ` +${overflow}`;
   if (!saLine) saLine = "no agents";
 
@@ -182,6 +271,7 @@ function renderNextLine(state: WidgetState): string {
 export function renderWidget(state: WidgetState): string[] {
   if (!state.visible) return [];
   const lines = [
+    renderStatusLine(state),
     renderSALine(state),
     renderNowLine(state),
     renderThinkLine(state),

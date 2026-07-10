@@ -22,6 +22,12 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+  renderInfoBoxString,
+  type InfoBoxBackground,
+  type InfoBoxTone,
+} from "./shared/info-box.ts";
+import { glyphsFor, resolveRenderProfile } from "./shared/render-profile.ts";
 import { runMenu } from "./shared/menu-ui.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
 import { buildThinkingMenu, THINKING_LEVELS } from "./shared/thinking-menu.ts";
@@ -37,11 +43,15 @@ import {
   type WorkflowPhase,
   type WorkflowStatusEvent,
 } from "./shared/workflow-status.ts";
+import { getWidgetState } from "./subagents/widget.ts";
 import {
   formatEmptyPlanState,
   formatFooterLine,
+  formatFooterLineCompact,
   formatModePhase,
   formatPermissionWarning,
+  permissionTone,
+  toneColor,
   type VisualWorkflowState,
 } from "./shared/visual-system.ts";
 
@@ -55,6 +65,66 @@ function truncatePlain(value: string, width: number): string {
   if (value.length <= width) return value;
   if (width === 1) return "…";
   return `${value.slice(0, width - 1)}…`;
+}
+
+function notifyLevelToInfoBoxTone(
+  level: "info" | "warning" | "error" | string,
+): InfoBoxTone {
+  if (level === "error") return "error";
+  if (level === "warning") return "warning";
+  return "accent";
+}
+
+function notifyLevelToBackground(
+  level: "info" | "warning" | "error" | string,
+): InfoBoxBackground {
+  if (level === "error") return "toolErrorBg";
+  if (level === "warning") return "toolPendingBg";
+  return "customMessageBg";
+}
+
+interface NotifyBoxOptions {
+  title: string;
+  subtitle?: string;
+  status?: { symbol: string; label: string };
+  sections?: { title?: string; lines: string[] }[];
+  plainText: string;
+  level?: "info" | "warning" | "error";
+  width?: number;
+}
+
+function notifyBox(
+  ctx: ExtensionContext,
+  options: NotifyBoxOptions,
+): void {
+  const level = options.level ?? "info";
+  const theme = ctx.ui.theme as any;
+  if (
+    ctx.mode !== "tui" ||
+    typeof theme?.fg !== "function" ||
+    typeof theme?.bg !== "function" ||
+    typeof theme?.bold !== "function"
+  ) {
+    ctx.ui.notify(options.plainText, level);
+    return;
+  }
+  const width = Math.max(
+    40,
+    Math.min(100, options.width ?? process.stdout.columns ?? 80),
+  );
+  const boxText = renderInfoBoxString(
+    {
+      title: options.title,
+      subtitle: options.subtitle,
+      status: options.status,
+      sections: options.sections,
+      tone: notifyLevelToInfoBoxTone(level),
+      background: notifyLevelToBackground(level),
+    },
+    width,
+    theme,
+  );
+  ctx.ui.notify(boxText, level);
 }
 
 interface GitInfo {
@@ -124,7 +194,13 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
   let permissionLevel: PermissionLevel = "read-write";
   let activeCtx: ExtensionContext | undefined;
 
+  function currentThemeName(ctx: ExtensionContext): string {
+    return (ctx.ui.theme as { name?: string } | undefined)?.name ?? "pi-vivid";
+  }
+
   function buildVisualState(ctx: ExtensionContext): VisualWorkflowState {
+    const subagentState = getWidgetState();
+    const subagents = Array.from(subagentState.subagents.values());
     return {
       mode: workflowMode,
       phase: plan.phase,
@@ -134,6 +210,14 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
       totalTodos: plan.totalTodos,
       model: ctx.model?.id,
       thinking: pi.getThinkingLevel(),
+      themeName: currentThemeName(ctx),
+      activeSubagents: subagents.filter((entry) =>
+        entry.status === "running" || entry.status === "queued" || entry.status === "waiting",
+      ).length,
+      subagentWarnings: subagents.reduce((sum, entry) => sum + (entry.warnings ?? 0), 0),
+      subagentErrors: subagents.reduce((sum, entry) =>
+        sum + (entry.errors ?? (entry.status === "failed" || entry.status === "blocked" ? 1 : 0)),
+      0),
       nextStep: nextStepFor(plan.phase, plan.planExists),
     };
   }
@@ -155,10 +239,13 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
           render(width: number): string[] {
             const state = buildVisualState(ctx);
             const raw = truncatePlain(
-              formatFooterLine(ctx.cwd, state, footerData?.getGitBranch?.()),
+              width < 96
+                ? formatFooterLineCompact(ctx.cwd, state, footerData?.getGitBranch?.())
+                : formatFooterLine(ctx.cwd, state, footerData?.getGitBranch?.()),
               width,
             );
-            return [theme.fg("muted", raw)];
+            const modeColor = toneColor(permissionTone(permissionLevel));
+            return [theme.fg(modeColor === "text" ? "muted" : modeColor, raw)];
           },
           invalidate() {},
           dispose,
@@ -205,40 +292,87 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
       cost !== undefined ? cost.input === 0 && cost.output === 0 : undefined;
 
     const warning = formatPermissionWarning(permissionLevel);
-    const text = plan.planExists
-      ? [
-          "STATUS",
-          formatModePhase({ mode: workflowMode, phase: plan.phase }),
-          "",
-          "Details",
-          `- Modus: ${modeLabel}`,
-          `- Model: ${ctx.model?.id ?? "kein Modell aktiv"}`,
-          `- Provider: ${ctx.model?.provider ?? "-"}`,
-          ...(isFreeModel !== undefined
-            ? [`- Kosten: ${isFreeModel ? "kostenlos" : "kostenpflichtig"}`]
-            : []),
-          `- Thinking: ${pi.getThinkingLevel()}`,
-          `- Plan: vorhanden`,
-          `- Todos: ${todosLine}`,
-          `- Git: ${gitLine}`,
-          `- Permission: ${PERMISSION_LEVEL_LABEL[permissionLevel]}`,
-          `- Phase: ${WORKFLOW_PHASE_LABEL[plan.phase]}`,
-          "",
-          "Nächster Schritt",
-          nextStepFor(plan.phase, plan.planExists),
-          ...(warning ? ["", warning] : []),
-        ].join("\n")
-      : [
-          formatEmptyPlanState(),
-          "",
-          "STATUS",
-          `Permission: ${PERMISSION_LEVEL_LABEL[permissionLevel]}`,
-          `Model: ${ctx.model?.id ?? "kein Modell aktiv"}`,
-          `Thinking: ${pi.getThinkingLevel()}`,
-          ...(warning ? ["", warning] : []),
-        ].join("\n");
+    const level = warning ? "warning" : "info";
 
-    ctx.ui.notify(text, warning ? "warning" : "info");
+    const detailLines = [
+      `Modus: ${modeLabel}`,
+      `Model: ${ctx.model?.id ?? "kein Modell aktiv"}`,
+      `Provider: ${ctx.model?.provider ?? "-"}`,
+      ...(isFreeModel !== undefined
+        ? [`Kosten: ${isFreeModel ? "kostenlos" : "kostenpflichtig"}`]
+        : []),
+      `Thinking: ${pi.getThinkingLevel()}`,
+      ...(plan.planExists
+        ? [`Plan: vorhanden`, `Todos: ${todosLine}`]
+        : []),
+      `Git: ${gitLine}`,
+      `Permission: ${PERMISSION_LEVEL_LABEL[permissionLevel]}`,
+      ...(plan.planExists
+        ? [`Phase: ${WORKFLOW_PHASE_LABEL[plan.phase]}`]
+        : []),
+    ];
+
+    const sections: { title?: string; lines: string[] }[] = [
+      { title: "Details", lines: detailLines },
+    ];
+
+    if (plan.planExists) {
+      sections.push({
+        title: "Nächster Schritt",
+        lines: [nextStepFor(plan.phase, true)],
+      });
+    } else {
+      sections.push({
+        title: "Nächste sinnvolle Schritte",
+        lines: [
+          "1. /plan     Schnell- oder Architekturplan erstellen",
+          "2. /decide   Entscheidung klären",
+          "3. /actions  Menü öffnen",
+        ],
+      });
+    }
+
+    if (warning) {
+      sections.push({
+        title: "Warnung",
+        lines: warning.split("\n").filter((line) => line.trim().length > 0),
+      });
+    }
+
+    const plainText = plan.planExists
+      ? [
+        "STATUS",
+        formatModePhase({ mode: workflowMode, phase: plan.phase }),
+        "",
+        ...detailLines,
+        "",
+        "Nächster Schritt",
+        nextStepFor(plan.phase, true),
+        ...(warning ? ["", warning] : []),
+      ].join("\n")
+      : [
+        formatEmptyPlanState(),
+        "",
+        ...detailLines,
+        ...(warning ? ["", warning] : []),
+      ].join("\n");
+
+    notifyBox(ctx, {
+      title: "STATUS",
+      subtitle: plan.planExists
+        ? formatModePhase({ mode: workflowMode, phase: plan.phase })
+        : "KEIN AKTIVER PLAN",
+      status: warning
+        ? {
+          symbol: glyphsFor(resolveRenderProfile({ mode: ctx.mode })).status
+            .warning,
+          label: PERMISSION_LEVEL_LABEL[permissionLevel],
+        }
+        : undefined,
+      sections,
+      plainText,
+      level,
+    });
   }
 
   pi.registerCommand("status", {
@@ -309,19 +443,28 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
         })
         .sort((a, b) => a.localeCompare(b, "de"));
 
+      const shortcutLines = Object.values(SHORTCUTS).map(
+        (shortcut) =>
+          `${shortcut.label.padEnd(14)} ${shortcut.description}`,
+      );
+      const commandLines = [...commands, ...NATIVE_HELP_COMMANDS];
       const text = [
         "Shortcuts:",
-        ...Object.values(SHORTCUTS).map(
-          (shortcut) =>
-            `  ${shortcut.label.padEnd(14)} ${shortcut.description}`,
-        ),
+        ...shortcutLines.map((line) => `  ${line}`),
         "",
         "Commands:",
-        ...commands,
-        ...NATIVE_HELP_COMMANDS,
+        ...commandLines,
       ].join("\n");
 
-      ctx.ui.notify(text, "info");
+      notifyBox(ctx, {
+        title: "Hilfe",
+        sections: [
+          { title: "Shortcuts", lines: shortcutLines },
+          { title: "Commands", lines: commandLines },
+        ],
+        plainText: text,
+        level: "info",
+      });
     },
   });
 

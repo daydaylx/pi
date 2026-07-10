@@ -77,7 +77,17 @@ export const WRITE_OVERRIDE_DESCRIPTION: Record<WriteOverride, string> = {
 
 export const PLAN_ACTION_REQUEST_EVENT = "pi-workflow:plan-action";
 
-export type PlanAction = "choose" | "work" | "review" | "finish" | "decide";
+// "decide" startet den Decision-Intake sofort (triggerTurn, z. B. /decide,
+// /plan-Aktion, Ctrl+Shift+X). "decide-mode" wechselt nur still in den
+// Klär-Modus (phase=deciding) ohne sofortigen Prompt — genutzt vom
+// Shift+Tab-Modusmenü, analog zu den anderen Plan-Modi.
+export type PlanAction =
+  | "choose"
+  | "work"
+  | "review"
+  | "finish"
+  | "decide"
+  | "decide-mode";
 
 export interface PlanActionRequest {
   action: PlanAction;

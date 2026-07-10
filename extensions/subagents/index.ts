@@ -52,6 +52,36 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+
+// `@earendil-works/pi-tui` wird hier bewusst NICHT statisch als Value
+// importiert: tests/run.mjs lädt dieses Modul direkt per jiti, und ein
+// statischer Value-Import lässt den Bare-Specifier bis zur defekten
+// /home/d/package.json auflösen und bricht den gesamten Testlauf (siehe
+// identische Begründung in menu-ui.ts/permission-dialog.ts). Die
+// Tool-Renderer brauchen nur ein sehr einfaches Component-Objekt (render +
+// invalidate), das wir lokal und damit testbar bereitstellen.
+interface SimpleComponent {
+  render(width: number): string[];
+  invalidate(): void;
+  setText?(text: string): void;
+}
+
+class ToolText implements SimpleComponent {
+  private content: string;
+  constructor(content: string, _paddingX = 0, _paddingY = 0) {
+    this.content = content;
+  }
+  setText(text: string): void {
+    this.content = text;
+  }
+  invalidate(): void {}
+  render(width: number): string[] {
+    const max = Math.max(1, width);
+    return this.content.split("\n").map((line) =>
+      line.length <= max ? line : `${line.slice(0, max - 1)}…`,
+    );
+  }
+}
 import {
   type AgentConfig,
   type AgentScope,
@@ -64,15 +94,19 @@ import {
   getWidgetState,
   renderWidget,
   resetWidgetState,
+  setLastRun,
   setModel,
   setNow,
   setRisk,
+  setSubagentAvailability,
   setThinking,
   setWidgetCompact,
   setWidgetDebug,
   setWidgetVisible,
+  STATUS_SYMBOL,
   upsertSubagent,
 } from "./widget.ts";
+import { colorizeStatusLines } from "../shared/visual-system.ts";
 
 const MAX_PARALLEL_TASKS = 6;
 const MAX_CONCURRENCY = 3;
@@ -101,6 +135,19 @@ interface ModelAttempt {
   stderr?: string;
 }
 
+type ChildToolStatus = "running" | "completed" | "warning" | "failed";
+
+interface ChildToolCall {
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  status: ChildToolStatus;
+  summary: string;
+  startedAt: number;
+  completedAt?: number;
+  isError?: boolean;
+}
+
 interface SingleResult {
   agent: string;
   agentSource: "user" | "project" | "unknown";
@@ -109,6 +156,7 @@ interface SingleResult {
   messages: Message[];
   stderr: string;
   usage: UsageStats;
+  toolCalls: ChildToolCall[];
   model?: string;
   modelAttempts?: ModelAttempt[];
   stopReason?: string;
@@ -206,6 +254,43 @@ function truncateToBytes(value: string, cap: number): string {
 function truncateOutput(output: string): string {
   if (Buffer.byteLength(output, "utf8") <= PER_TASK_OUTPUT_CAP) return output;
   return `${truncateToBytes(output, PER_TASK_OUTPUT_CAP)}\n\n[Output truncated for parent context.]`;
+}
+
+function shortArg(value: unknown, max = 48): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value ?? "");
+  const clean = (text ?? "").replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
+}
+
+function summarizeChildTool(toolName: string, args: Record<string, unknown>): string {
+  if (toolName === "bash") return shortArg(args.command, 64);
+  if (typeof args.path === "string") return shortArg(args.path, 64);
+  if (typeof args.pattern === "string") return shortArg(args.pattern, 48);
+  return shortArg(args, 64);
+}
+
+function upsertChildTool(
+  result: SingleResult,
+  update: Omit<ChildToolCall, "startedAt" | "summary"> & {
+    startedAt?: number;
+    summary?: string;
+  },
+): ChildToolCall {
+  const existing = result.toolCalls.find((item) => item.toolCallId === update.toolCallId);
+  if (existing) {
+    Object.assign(existing, update, {
+      summary: update.summary ?? existing.summary,
+      startedAt: update.startedAt ?? existing.startedAt,
+    });
+    return existing;
+  }
+  const created: ChildToolCall = {
+    ...update,
+    startedAt: update.startedAt ?? Date.now(),
+    summary: update.summary ?? summarizeChildTool(update.toolName, update.args),
+  };
+  result.toolCalls.push(created);
+  return created;
 }
 
 function escapeRegex(value: string): string {
@@ -382,6 +467,7 @@ async function runSingleAgent(
         cost: 0,
         turns: 0,
       },
+      toolCalls: [],
       step,
     };
   }
@@ -389,7 +475,8 @@ async function runSingleAgent(
   const attemptModels: Array<string | undefined> = [];
   attemptModels.push(agent.model);
   for (const fallbackModel of agent.fallbackModels) {
-    if (!attemptModels.includes(fallbackModel)) attemptModels.push(fallbackModel);
+    if (!attemptModels.includes(fallbackModel))
+      attemptModels.push(fallbackModel);
   }
   const modelAttempts: ModelAttempt[] = [];
 
@@ -412,6 +499,7 @@ async function runSingleAgent(
       cost: 0,
       turns: 0,
     },
+    toolCalls: [],
     model: agent.model,
     modelAttempts,
     step,
@@ -484,6 +572,7 @@ async function runSingleAgent(
       current.stopReason = undefined;
       current.errorMessage = undefined;
       current.validationErrors = undefined;
+      current.toolCalls = [];
     };
 
     const runAttempt = async (model: string | undefined) => {
@@ -540,7 +629,8 @@ async function runSingleAgent(
             current.messages.push(message);
             if (message.role === "assistant") {
               current.usage.turns += 1;
-              if (!current.model && message.model) current.model = message.model;
+              if (!current.model && message.model)
+                current.model = message.model;
               if (message.stopReason) current.stopReason = message.stopReason;
               if (message.errorMessage)
                 current.errorMessage = message.errorMessage;
@@ -553,6 +643,63 @@ async function runSingleAgent(
                 current.usage.cost += usage.cost?.total || 0;
               }
             }
+            emitUpdate();
+          } else if (event.type === "tool_execution_start") {
+            const tool = upsertChildTool(current, {
+              toolCallId: String(event.toolCallId ?? `${event.toolName}-${Date.now()}`),
+              toolName: String(event.toolName ?? "tool"),
+              args: (event.args ?? {}) as Record<string, unknown>,
+              status: "running",
+              startedAt: Date.now(),
+            });
+            upsertSubagent({
+              id: runId,
+              label: agent.name,
+              status: "running",
+              currentTask: task,
+              lastAction: `${tool.toolName} ${tool.summary}`,
+              relatedToolCalls: current.toolCalls.map((item) => item.toolCallId),
+              lastUpdate: Date.now(),
+            });
+            emitUpdate();
+          } else if (event.type === "tool_execution_update") {
+            const tool = upsertChildTool(current, {
+              toolCallId: String(event.toolCallId ?? `${event.toolName}-${Date.now()}`),
+              toolName: String(event.toolName ?? "tool"),
+              args: (event.args ?? {}) as Record<string, unknown>,
+              status: "running",
+            });
+            upsertSubagent({
+              id: runId,
+              label: agent.name,
+              status: "running",
+              currentTask: task,
+              lastAction: `${tool.toolName} ${tool.summary}`,
+              relatedToolCalls: current.toolCalls.map((item) => item.toolCallId),
+              lastUpdate: Date.now(),
+            });
+            emitUpdate();
+          } else if (event.type === "tool_execution_end") {
+            const isError = Boolean(event.isError);
+            const tool = upsertChildTool(current, {
+              toolCallId: String(event.toolCallId ?? `${event.toolName}-${Date.now()}`),
+              toolName: String(event.toolName ?? "tool"),
+              args: (event.args ?? {}) as Record<string, unknown>,
+              status: isError ? "failed" : "completed",
+              completedAt: Date.now(),
+              isError,
+            });
+            upsertSubagent({
+              id: runId,
+              label: agent.name,
+              status: "running",
+              currentTask: task,
+              lastAction: `${tool.toolName} ${tool.status}`,
+              relatedToolCalls: current.toolCalls.map((item) => item.toolCallId),
+              warnings: current.toolCalls.filter((item) => item.status === "warning").length,
+              errors: current.toolCalls.filter((item) => item.status === "failed").length,
+              lastUpdate: Date.now(),
+            });
             emitUpdate();
           } else if (event.type === "tool_result_end" && event.message) {
             current.messages.push(event.message as Message);
@@ -661,8 +808,13 @@ async function runSingleAgent(
     upsertSubagent({
       id: runId,
       label: agent.name,
-      status: isFailed(current) ? "blocked" : "done",
+      status: isFailed(current) ? "failed" : "completed",
       currentTask: task,
+      lastAction: isFailed(current) ? current.errorMessage ?? "failed" : "completed",
+      warnings: current.validationErrors?.length ?? 0,
+      errors: isFailed(current) ? 1 : current.toolCalls.filter((item) => item.status === "failed").length,
+      completedAt: Date.now(),
+      relatedToolCalls: current.toolCalls.map((item) => item.toolCallId),
       lastUpdate: Date.now(),
       risk: isFailed(current) ? current.errorMessage : undefined,
     });
@@ -735,6 +887,27 @@ const AgentScopeSchema = {
   default: "user",
 } as const;
 
+function childToolStatusSymbol(status: ChildToolStatus): string {
+  if (status === "completed") return "✓ completed";
+  if (status === "failed") return "✕ failed";
+  if (status === "warning") return "! warning";
+  return "● running";
+}
+
+function formatChildToolLine(result: SingleResult, tool: ChildToolCall): string {
+  const agent = `[${result.agent}]`.padEnd(12, " ");
+  const name = tool.toolName.padEnd(10, " ");
+  return `${agent} ${name} ${tool.summary} ${childToolStatusSymbol(tool.status)}`;
+}
+
+function formatSubagentCall(args: any): string {
+  const scope = args.agentScope ?? "user";
+  if (args.list) return `subagent list [${scope}]`;
+  if (args.chain?.length) return `subagent chain (${args.chain.length} steps) [${scope}]`;
+  if (args.tasks?.length) return `subagent parallel (${args.tasks.length} tasks) [${scope}]`;
+  return `subagent ${args.agent ?? "?"} [${scope}]`;
+}
+
 const SubagentParams = {
   type: "object",
   properties: {
@@ -755,6 +928,45 @@ const SubagentParams = {
   },
   additionalProperties: false,
 } as const;
+
+function isDirectoryPath(candidate: string | null): boolean {
+  if (!candidate) return false;
+  try {
+    return fs.statSync(candidate).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function parseAgentScopeArg(args: string): AgentScope | null {
+  const value = args.trim().toLowerCase();
+  if (!value || value === "user") return "user";
+  if (value === "project") return "project";
+  if (value === "both") return "both";
+  return null;
+}
+
+function formatSkipped(
+  skipped: { filePath: string; reason: string }[],
+): string[] {
+  return skipped.map((entry) => `- ${entry.filePath}: ${entry.reason}`);
+}
+
+// #5 (UI-Redesign): kombiniert die konfigurierten Agenten mit ihrem
+// aktuellen Live-Status aus dem Widget-State (Matching über den Agentnamen,
+// da SubagentEntry.id pro Lauf eindeutig/ephemer ist, label aber dem
+// Agentnamen entspricht).
+function formatAgentLiveStatusLines(agents: AgentConfig[]): string[] {
+  const live = getWidgetState().subagents;
+  return agents.map((agent) => {
+    const entry = Array.from(live.values()).find((e) => e.label === agent.name);
+    const status =
+      entry === undefined
+        ? "idle"
+        : `${STATUS_SYMBOL[entry.status]} ${entry.status}${entry.currentTask ? ` — ${entry.currentTask}` : ""}`;
+    return `${agent.name} (${agent.source}, ${agent.permission}): ${agent.description}  [${status}]`;
+  });
+}
 
 async function confirmProjectAgentsIfNeeded(
   ctx: ExtensionContext,
@@ -779,6 +991,9 @@ async function confirmProjectAgentsIfNeeded(
 }
 
 export default function subagentsExtension(pi: ExtensionAPI): void {
+  let subagentToolRegistered = false;
+  setSubagentAvailability(true, 0);
+
   // ─── Widget-Installation (#30) ───
   function installWidget(ctx: ExtensionContext): void {
     if (ctx.mode !== "tui") return;
@@ -790,11 +1005,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     ui.setWidget("subagent-status", (_tui: unknown, theme: any) => ({
       render(): string[] {
         const state = getWidgetState();
-        return renderWidget(state).map((line, index) => {
-          if (index === 0) return theme.fg("accent", theme.bold(line));
-          if (line.startsWith("Think:")) return theme.fg("muted", line);
-          return theme.fg("text", line);
-        });
+        return colorizeStatusLines(renderWidget(state), theme, (line) =>
+          line.startsWith("Think:") ? "muted" : undefined,
+        );
       },
       invalidate() {},
     }));
@@ -804,6 +1017,9 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   if (typeof pi.on === "function") {
     pi.on("session_start", async (_event, ctx) => {
       resetWidgetState();
+      const userDiscovery = discoverAgents(ctx.cwd, "user");
+      const allDiscovery = discoverAgents(ctx.cwd, "both");
+      setSubagentAvailability(true, allDiscovery.agents.length);
       setModel(ctx.model?.id);
       setThinking(
         typeof pi.getThinkingLevel === "function"
@@ -813,18 +1029,16 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       installWidget(ctx);
 
       // #44: warn early instead of silently running without subagents.
-      if (ctx.mode === "tui") {
-        const discovery = discoverAgents(ctx.cwd, "user");
-        if (discovery.agents.length === 0) {
-          ctx.ui.notify(
-            [
-              "Subagent-Extension geladen, aber keine Agenten gefunden.",
-              `Erwarteter Pfad: ${discovery.userAgentsDir}`,
-              "Prüfe /subagent-doctor für Details.",
-            ].join("\n"),
-            "warning",
-          );
-        }
+      if (ctx.mode === "tui" && userDiscovery.agents.length === 0) {
+        ctx.ui.notify(
+          [
+            "Subagent-Extension geladen, aber keine User-Agenten gefunden.",
+            `Erwarteter User-Agentenpfad: ${userDiscovery.userAgentsDir}`,
+            `PI_CODING_AGENT_DIR: ${process.env.PI_CODING_AGENT_DIR ?? "(nicht gesetzt – Fallback ~/.pi/agent)"}`,
+            "Prüfe /subagent-doctor für Details oder /subagent-list für die aktuelle Agentenliste.",
+          ].join("\n"),
+          "warning",
+        );
       }
     });
 
@@ -895,25 +1109,47 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         "Diagnose: Subagent-Extension, Agentenpfade und gefundene Agenten anzeigen",
       handler: async (_args, ctx) => {
         const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
-        const discovery = discoverAgents(ctx.cwd, "both");
-        const userAgents = discovery.agents.filter((a) => a.source === "user");
-        const projectAgents = discovery.agents.filter(
-          (a) => a.source === "project",
+        const userDiscovery = discoverAgents(ctx.cwd, "user");
+        const projectDiscovery = discoverAgents(ctx.cwd, "project");
+        const effectiveDiscovery = discoverAgents(ctx.cwd, "both");
+        const userAgentsDirExists = isDirectoryPath(
+          userDiscovery.userAgentsDir,
         );
+        const projectAgentsDir = effectiveDiscovery.projectAgentsDir;
+        const projectAgentsDirExists = isDirectoryPath(projectAgentsDir);
+        const skippedByPath = new Map<string, string>();
+        for (const entry of [
+          ...userDiscovery.skipped,
+          ...projectDiscovery.skipped,
+          ...effectiveDiscovery.skipped,
+        ]) {
+          skippedByPath.set(entry.filePath, entry.reason);
+        }
+        const skipped = Array.from(skippedByPath, ([filePath, reason]) => ({
+          filePath,
+          reason,
+        }));
 
         const lines = [
           "Subagent-Diagnose",
           "",
-          "Extension: geladen (dieser Command existiert nur, wenn die Extension lief).",
+          "Extension geladen: ja",
+          `subagent-Tool registriert: ${subagentToolRegistered ? "ja" : "nein"}`,
           `PI_CODING_AGENT_DIR: ${agentDirEnv ?? "(nicht gesetzt – Fallback ~/.pi/agent)"}`,
-          `Aufgelöster User-Agentenpfad: ${discovery.userAgentsDir}`,
-          `Aufgelöster Projekt-Agentenpfad: ${discovery.projectAgentsDir ?? "(kein .pi/agents gefunden)"}`,
+          `Erwarteter User-Agentenpfad: ${userDiscovery.userAgentsDir}`,
+          `Existiert User-Agentenpfad: ${userAgentsDirExists ? "ja" : "nein"}`,
+          `Anzahl User-Agenten: ${userDiscovery.agents.length}`,
+          `Projekt-Agentenpfad: ${projectAgentsDir ?? "(kein .pi/agents gefunden)"}`,
+          `Existiert Projekt-Agentenpfad: ${projectAgentsDirExists ? "ja" : projectAgentsDir ? "nein" : "n/a"}`,
+          `Anzahl Projekt-Agenten: ${projectDiscovery.agents.length}`,
+          `Effektive Agenten mit Scope both: ${effectiveDiscovery.agents.length}`,
           "",
-          `User-Agenten (${userAgents.length}): ${userAgents.map((a) => a.name).join(", ") || "(keine)"}`,
-          `Projekt-Agenten (${projectAgents.length}): ${projectAgents.map((a) => a.name).join(", ") || "(keine)"}`,
+          `User-Agenten: ${userDiscovery.agents.map((a) => a.name).join(", ") || "(keine)"}`,
+          `Projekt-Agenten: ${projectDiscovery.agents.map((a) => a.name).join(", ") || "(keine)"}`,
+          `Effektive Liste: ${effectiveDiscovery.agents.map((a) => `${a.name}(${a.source})`).join(", ") || "(keine)"}`,
         ];
 
-        const agentsWithFallbackModels = discovery.agents.filter(
+        const agentsWithFallbackModels = effectiveDiscovery.agents.filter(
           (a) => a.fallbackModels.length > 0,
         );
         if (agentsWithFallbackModels.length > 0) {
@@ -921,23 +1157,22 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
             "",
             "Agenten mit Model-Fallbacks:",
             ...agentsWithFallbackModels.map(
-              (a) => `${a.name}: ${a.model ?? "(default)"} → ${a.fallbackModels.join(" → ")}`,
+              (a) =>
+                `${a.name}: ${a.model ?? "(default)"} → ${a.fallbackModels.join(" → ")}`,
             ),
           );
         }
 
-        if (discovery.skipped.length > 0) {
+        if (skipped.length > 0) {
           lines.push(
             "",
-            `Übersprungene Agent-Dateien (${discovery.skipped.length}):`,
-            ...discovery.skipped.map(
-              (entry) => `- ${entry.filePath}: ${entry.reason}`,
-            ),
+            `Übersprungene Agent-Dateien (${skipped.length}):`,
+            ...formatSkipped(skipped),
           );
         }
 
         // #50: report agents that declared unknown tool names (silently dropped).
-        const agentsWithInvalidTools = discovery.agents.filter(
+        const agentsWithInvalidTools = effectiveDiscovery.agents.filter(
           (a) => a.invalidTools.length > 0,
         );
         if (agentsWithInvalidTools.length > 0) {
@@ -953,13 +1188,13 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         }
 
         // #51: report agents whose declared timeoutMs was invalid or clamped.
-        const agentsWithTimeoutWarning = discovery.agents.filter(
+        const agentsWithTimeoutWarning = effectiveDiscovery.agents.filter(
           (a) => a.timeoutMsWarning,
         );
         if (agentsWithTimeoutWarning.length > 0) {
           lines.push(
             "",
-            "Agenten mit zeitlimit-Hinweis:",
+            "Agenten mit Zeitlimit-Hinweis:",
             ...agentsWithTimeoutWarning.map(
               (a) => `- ${a.name}: ${a.timeoutMsWarning}`,
             ),
@@ -968,7 +1203,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 
         // #52: surface sandbox declarations. git-worktree is currently a
         // prepared/blocking mode, not an implemented isolation feature.
-        const agentsWithSandboxInfo = discovery.agents.filter(
+        const agentsWithSandboxInfo = effectiveDiscovery.agents.filter(
           (a) => a.sandboxMode !== "none" || a.sandboxModeWarning,
         );
         if (agentsWithSandboxInfo.length > 0) {
@@ -987,23 +1222,72 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           );
         }
 
-        if (discovery.agents.length === 0) {
+        if (effectiveDiscovery.agents.length === 0) {
           lines.push(
             "",
             "Keine Agenten gefunden. Nächste Schritte:",
-            `- Prüfen, ob Agent-Dateien unter ${discovery.userAgentsDir} liegen.`,
-            "- PI_CODING_AGENT_DIR setzen, falls dieses Repo nicht ~/.pi/agent ist.",
-            '- Minimal-Run erzwingen: subagent-Tool mit { "list": true } aufrufen.',
+            `- Prüfen, ob Agent-Dateien unter ${userDiscovery.userAgentsDir} liegen und gültige Frontmatter mit name/description haben.`,
+            "- PI_CODING_AGENT_DIR auf das Pi-Agent-Konfigurationsverzeichnis setzen, falls dieses Repo nicht ~/.pi/agent ist.",
+            '- Für projektlokale Agenten `.pi/agents/*.md` im Projekt anlegen und `agentScope: "project"` oder `"both"` verwenden.',
+            "- /subagent-list ausführen; bei leerer Liste /tools prüfen, ob das Tool `subagent` sichtbar ist.",
           );
         }
 
         ctx.ui.notify(
           lines.join("\n"),
-          discovery.agents.length === 0 ||
-          discovery.skipped.length > 0 ||
-          agentsWithInvalidTools.length > 0 ||
-          agentsWithTimeoutWarning.length > 0 ||
-          agentsWithSandboxInfo.length > 0
+          effectiveDiscovery.agents.length === 0 ||
+            skipped.length > 0 ||
+            agentsWithInvalidTools.length > 0 ||
+            agentsWithTimeoutWarning.length > 0 ||
+            agentsWithSandboxInfo.length > 0 ||
+            !subagentToolRegistered
+            ? "warning"
+            : "info",
+        );
+      },
+    });
+
+    // ─── /subagent-list Diagnose-Command ───
+    pi.registerCommand("subagent-list", {
+      description:
+        "Subagenten anzeigen: optional user | project | both (Default: user)",
+      handler: async (args, ctx) => {
+        const scope = parseAgentScopeArg(args);
+        if (!scope) {
+          ctx.ui.notify(
+            "Nutzung: /subagent-list [user|project|both]",
+            "warning",
+          );
+          return;
+        }
+        const discovery = discoverAgents(ctx.cwd, scope);
+        const lines = [
+          "Subagent-Liste",
+          `Scope: ${scope}`,
+          `User-Agentenpfad: ${discovery.userAgentsDir}`,
+          `Projekt-Agentenpfad: ${discovery.projectAgentsDir ?? "(kein .pi/agents gefunden)"}`,
+          `Gefundene Agenten: ${discovery.agents.length}`,
+          "",
+          discovery.agents.length === 0
+            ? formatAgentList(discovery.agents)
+            : formatAgentLiveStatusLines(discovery.agents).join("\n"),
+        ];
+        if (discovery.skipped.length > 0) {
+          lines.push(
+            "",
+            `Übersprungene Agent-Dateien (${discovery.skipped.length}):`,
+            ...formatSkipped(discovery.skipped),
+          );
+        }
+        if (discovery.agents.length === 0) {
+          lines.push(
+            "",
+            "Keine Agenten gefunden. Prüfe /subagent-doctor für Pfade, PI_CODING_AGENT_DIR und Frontmatter-Fehler.",
+          );
+        }
+        ctx.ui.notify(
+          lines.join("\n"),
+          discovery.agents.length === 0 || discovery.skipped.length > 0
             ? "warning"
             : "info",
         );
@@ -1020,6 +1304,55 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       "Default scope is user-level agents from ~/.pi/agent/agents.",
     ].join(" "),
     parameters: SubagentParams,
+
+    renderCall(args, theme, _context) {
+      return new ToolText(
+        theme.fg("toolTitle", theme.bold("subagent ")) +
+          theme.fg("accent", formatSubagentCall(args).replace(/^subagent\s*/, "")),
+        0,
+        0,
+      );
+    },
+
+    renderResult(result, { expanded, isPartial }, theme, _context) {
+      const details = result.details as SubagentDetails | undefined;
+      if (!details || details.results.length === 0) {
+        const text = result.content?.[0];
+        return new ToolText(text?.type === "text" ? text.text : "", 0, 0);
+      }
+      const results = details.results;
+      const done = results.filter((item) => item.exitCode !== -1).length;
+      const failed = results.filter((item) => item.exitCode !== -1 && isFailed(item)).length;
+      const running = results.filter((item) => item.exitCode === -1).length;
+      const headerStatus = isPartial || running > 0
+        ? theme.fg("warning", `● running ${done}/${results.length}`)
+        : failed > 0
+          ? theme.fg("error", `✕ failed ${failed}/${results.length}`)
+          : theme.fg("success", `✓ completed ${done}/${results.length}`);
+      const lines = [
+        `${theme.fg("toolTitle", theme.bold(`subagent ${details.mode}`))} ${headerStatus}`,
+      ];
+      const toolLines = results.flatMap((agentResult) => {
+        const calls = expanded ? agentResult.toolCalls : agentResult.toolCalls.slice(-4);
+        if (calls.length === 0) {
+          const status = agentResult.exitCode === -1
+            ? "● running"
+            : isFailed(agentResult)
+              ? "✕ failed"
+              : "✓ completed";
+          return [`[${agentResult.agent}] ${status}`];
+        }
+        return calls.map((tool) => formatChildToolLine(agentResult, tool));
+      });
+      for (const line of toolLines.slice(0, expanded ? 80 : 12)) {
+        const color = line.includes("✕") ? "error" : line.includes("!") ? "warning" : line.includes("●") ? "warning" : "muted";
+        lines.push(theme.fg(color, line));
+      }
+      if (!expanded && toolLines.length > 12) {
+        lines.push(theme.fg("dim", `… ${toolLines.length - 12} more tool event(s)`));
+      }
+      return new ToolText(lines.join("\n"), 0, 0);
+    },
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const agentScope: AgentScope = params.agentScope ?? "user";
@@ -1044,6 +1377,10 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       }
       const discovery = discoverAgents(ctx.cwd, agentScope);
       const agents = discovery.agents;
+      setSubagentAvailability(
+        true,
+        discoverAgents(ctx.cwd, "both").agents.length,
+      );
       // #35: confirmProjectAgents is always enforced – no tool-parameter override
       const confirmProjectAgents = true;
 
@@ -1094,6 +1431,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       }
 
       if (hasList) {
+        setLastRun("subagent", "list");
         return {
           content: [
             {
@@ -1252,6 +1590,7 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
           );
           results.push(result);
           if (isFailed(result)) {
+            setLastRun(step.agent, "chain");
             return {
               content: [
                 {
@@ -1276,6 +1615,7 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
             .filter(Boolean)
             .join("\n");
         }
+        setLastRun(results.map((result) => result.agent).join("→"), "chain");
         return {
           content: [
             { type: "text", text: resultOutput(results[results.length - 1]) },
@@ -1312,6 +1652,7 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
             cost: 0,
             turns: 0,
           },
+          toolCalls: [],
         }));
         const emitParallelUpdate = () => {
           const done = placeholders.filter(
@@ -1364,6 +1705,7 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
             return `### [${result.agent}] ${status}\n\n${truncateOutput(resultOutput(result))}`;
           })
           .join("\n\n---\n\n");
+        setLastRun(results.map((result) => result.agent).join("+"), "parallel");
         return {
           content: [
             {
@@ -1389,6 +1731,7 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
         onUpdate,
         makeDetails("single"),
       );
+      setLastRun(result.agent, "single");
       return {
         content: [{ type: "text", text: resultOutput(result) }],
         details: makeDetails("single")([result]),
@@ -1396,4 +1739,5 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
       };
     },
   });
+  subagentToolRegistered = true;
 }

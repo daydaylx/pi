@@ -155,6 +155,13 @@ Additional frontmatter guardrails:
 
 ## Workflow Templates
 
+Prompt templates can strongly require a first `subagent` tool call, but they do
+not turn into a hard runtime hook by themselves. If Pi routes a `/subagent-*`
+template to the main model, the model must still select the tool. The templates
+therefore use explicit Tool-first wording and a fallback diagnosis path. The
+real diagnostic commands `/subagent-doctor` and `/subagent-list` do not depend on
+model tool selection.
+
 | Template                               | Purpose                                                 |
 | -------------------------------------- | ------------------------------------------------------- |
 | `/subagent-list`                       | List configured user-level agents.                      |
@@ -262,24 +269,92 @@ Reihenfolge prüfen:
 1. **Ist die Extension geladen?** `/tools` ausführen und prüfen, ob `subagent`
    in der Liste erscheint. Fehlt es, lädt `settings.json` die Extension nicht
    (Eintrag `+extensions/subagents/index.ts` prüfen).
-2. **Werden Agenten gefunden?** `/subagent-doctor` ausführen. Der Command
-   zeigt `PI_CODING_AGENT_DIR`, die aufgelösten User-/Projekt-Agentenpfade und
-   die Anzahl gefundener Agenten je Scope. Übersprungene Agent-Dateien (z. B.
-   fehlende `name`/`description`-Frontmatter, unlesbare Datei) werden mit
-   Grund gelistet. Bei 0 Agenten nennt er konkrete nächste Schritte. Beim
-   Session-Start warnt die Extension zusätzlich automatisch, falls
-   `agentScope: "user"` keine Agenten findet.
-3. **Minimal-Run erzwingen:** das `subagent`-Tool direkt mit
-   `{ "list": true, "agentScope": "user" }` aufrufen lassen, um die reine
-   Discovery unabhängig vom automatischen Tool-Auswahlverhalten zu testen.
-4. **Lokale Pfade prüfen:** `pwd`, `echo "$PI_CODING_AGENT_DIR"`,
+2. **Direkte Diagnose:** `/subagent-doctor` ausführen. Der Command ist nicht
+   vom Modell-Tool-Selection-Verhalten abhängig und zeigt secret-frei:
+   - `Extension geladen: ja`
+   - `subagent-Tool registriert: ja/nein`
+   - `PI_CODING_AGENT_DIR` oder den Fallback `~/.pi/agent`
+   - erwarteter User-Agentenpfad und ob er existiert
+   - Anzahl User-Agenten
+   - Projekt-Agentenpfad (`.pi/agents`) und ob er existiert
+   - Anzahl Projekt-Agenten
+   - effektive Agentenliste mit Scope `both`
+   - übersprungene Agent-Dateien mit Grund
+   - Hinweise zu unbekannten Tools, Timeout-Clamps, Sandbox-Modi und
+     Model-Fallbacks
+   - konkrete nächste Schritte bei 0 gefundenen Agenten
+3. **Direkte Liste:** `/subagent-list` ausführen. Der Command listet standardmäßig
+   `agentScope: "user"`; optional sind `/subagent-list project` und
+   `/subagent-list both`. Bei 0 Agenten verweist er auf `/subagent-doctor`. Jede
+   Agentenzeile zeigt zusätzlich den aktuellen Live-Status aus dem
+   Subagent-Widget (z. B. `[● running — plan structure]` oder `[idle]`), damit
+   sichtbar wird, welcher Agent gerade tatsächlich läuft, ohne eine zweite
+   Statuswelt einzuführen.
+4. **Tool-Minimal-Run:** Wenn `/subagent-list` funktioniert, aber der Hauptagent
+   nicht delegiert, das `subagent`-Tool direkt mit
+   `{ "list": true, "agentScope": "user" }` aufrufen lassen. Das trennt
+   Discovery-Probleme von Modell-Tool-Auswahl.
+5. **Lokale Pfade prüfen:** `pwd`, `echo "$PI_CODING_AGENT_DIR"`,
    `ls -la ~/.pi/agent/agents`, `ls -la ./agents` — insbesondere ob dieses
    Repository tatsächlich als Pi-Agent-Konfigurationsordner (`~/.pi/agent`)
-   genutzt wird.
-5. **Child-Prozess prüfen:** bei Fehlern in `result.details.results[].stderr`
+   genutzt wird. Ist `PI_CODING_AGENT_DIR` falsch gesetzt, sucht Pi unter
+   `<PI_CODING_AGENT_DIR>/agents` und nicht im aktuellen Repo.
+6. **Child-Prozess prüfen:** bei Fehlern in `result.details.results[].stderr`
    nachsehen, ob `pi --mode json -p --no-session` lokal überhaupt startet und
    die Flags `--tools`, `--model`, `--thinking`, `--append-system-prompt`
    akzeptiert.
+
+Beim TUI-Session-Start warnt die Extension sichtbar, falls keine User-Agenten
+gefunden werden. Das ist keine Aussage über Modellqualität oder Billing, sondern
+ein Pfad-/Discovery-Hinweis.
+
+Das Status-Widget zeigt zusätzlich:
+
+```text
+Subagents: loaded | Agents: <count> | Last run: none
+```
+
+Nach einem Tool-Lauf wird `Last run` auf `<agent>/<mode>/<time>` aktualisiert,
+z. B. `reviewer/single/2026-07-10T12:00:00Z`. Lange Nicht-Nutzung ist kein
+Fehler; sie ist über Doctor/List/Widget nur sichtbar diagnostizierbar.
+
+### Statusmodell und Tool-Zuordnung (UI-Redesign)
+
+Das Widget (`extensions/subagents/widget.ts`) nutzt jetzt ein klareres,
+nachvollziehbares Statusmodell. Jeder Subagent zeigt **Symbol + Textlabel**
+(nie nur Farbe):
+
+| Status      | Symbol | Bedeutung                                     |
+| ----------- | ------ | --------------------------------------------- |
+| `running`   | `●`    | Prozess läuft gerade                          |
+| `queued`    | `○`    | Wartet auf Slot (Parallelmodus)               |
+| `waiting`   | `○`    | Wartet auf Parent-Bestätigung (Permissions)   |
+| `completed` | `✓`    | Erfolgreich abgeschlossen                     |
+| `warning`   | `!`    | Warnungen/Validierungsfehler, nicht abgestürzt |
+| `failed`    | `✕`    | Fehler/Abbruch/kein Output                    |
+| `blocked`   | `⏸`    | Blockiert (Permission/Sandbox)                |
+| `idle`      | `○`    | Noch nie gelaufen                             |
+
+Zusätzlich pro Eintrag sichtbar: `role`, `lastAction`, `warnings`/`errors`
+(kompakt als `w:n` / `e:n`), `startedAt`/`completedAt` und `relatedToolCalls`.
+
+**Tool-Zuordnung:** Der Parent-Prozess wertet jetzt zusätzlich die
+Child-JSON-Events `tool_execution_start`, `tool_execution_update` und
+`tool_execution_end` aus und hängt sie als `toolCalls` an `SingleResult` an
+(`toolCallId`, `toolName`, `args`, `status`, `summary`, `startedAt`,
+`completedAt`, `isError`). `renderCall`/`renderResult` des `subagent`-Tools
+zeigen kompakte, eindeutig zugeordnete Zeilen:
+
+```text
+subagent parallel  ● running 1/3
+[planner]   read       src/ui/theme.ts   ✓ completed
+[tester]    bash       npm test          ● running
+[reviewer]  grep       risk              ✕ failed
+```
+
+Grenzen: Chain bleibt sequenziell (nur der aktuelle Schritt ist `running`);
+Parallelität wird nicht vorgetäuscht (nur echtt gestartete Tasks sind
+`running`, Platzhalter vorab sind `queued`).
 
 ## Verification Plan
 
@@ -295,10 +370,49 @@ Automated:
 
 Manual:
 
-- Start Pi and confirm `/tools` includes `subagent`.
-- Run `/subagent-list`.
-- Run `/subagent-scout-plan <small task>` and verify no files change.
-- Run `/subagent-review` after a small diff.
+```text
+/tools
+```
+
+Expected: `subagent` appears as an available tool. If missing, the extension is
+not loaded; check `settings.json` for `+extensions/subagents/index.ts`.
+
+```text
+/subagent-doctor
+```
+
+Expected: shows `Extension geladen: ja`, `subagent-Tool registriert: ja`,
+`PI_CODING_AGENT_DIR`, user/project paths, existence flags, agent counts,
+skipped files (if any) and next steps when count is 0.
+
+```text
+/subagent-list
+```
+
+Expected: lists the user-level agents from `agents/*.md` (or from
+`$PI_CODING_AGENT_DIR/agents`). With `/subagent-list both`, project-local
+`.pi/agents/*.md` are included in the effective list.
+
+```text
+/subagent-scout-plan kleine Testanalyse
+```
+
+Expected: the prompt requires the main model to call `subagent` first with a
+`scout -> planner` chain. It should produce a plan and not modify files. If the
+model refuses or no agents are found, it should report `/tools`,
+`/subagent-doctor`, `/subagent-list` and `PI_CODING_AGENT_DIR`.
+
+```text
+/subagent-parallel-review kleiner Diff
+```
+
+Expected: the prompt requires a parallel `reviewer`, `security-auditor` and
+`test-runner` run. It summarizes findings without editing files.
+
+Additional checks:
+
+- Verify the widget/status line shows `Subagents: loaded`, `Agents: <count>` and
+  `Last run: none` initially, then the last `<agent>/<mode>/<time>` after a run.
 - Verify read-only agents produce no `git diff`.
 - Verify project-local agents ask for confirmation in TUI.
 - Verify Ctrl+C aborts an active subagent process.

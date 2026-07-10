@@ -85,6 +85,15 @@ const workflowStatus = await jiti.import(
 const visualSystem = await jiti.import(
   path.resolve(ROOT, "extensions/shared/visual-system.ts"),
 );
+const permissionDialog = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/permission-dialog.ts"),
+);
+const renderProfile = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/render-profile.ts"),
+);
+const infoBox = await jiti.import(
+  path.resolve(ROOT, "extensions/shared/info-box.ts"),
+);
 
 let passed = 0;
 let failed = 0;
@@ -818,7 +827,7 @@ assert(
     },
     ui: {
       theme: { fg: (_color, text) => text },
-      setStatus: (_key, text) => statuses.push(text),
+      setStatus: (key, text) => statuses.push({ key, text }),
       notify() {},
       select: async (_title, labels) => {
         permissionMenuLabels = labels;
@@ -838,9 +847,14 @@ assert(
     "new sessions use configured Auto-YOLO",
   );
   eq(
-    statuses.at(-1),
+    statuses.find((entry) => entry.key === "workflow-permission")?.text,
     undefined,
     "permission extension clears its legacy footer status key",
+  );
+  eq(
+    statuses.filter((entry) => entry.key === "permission-level").at(-1)?.text,
+    "YOLO",
+    "permission extension publishes the current level on a separate status key",
   );
 
   // De-escalation is immediate and does not depend on idle/mode state.
@@ -1091,6 +1105,10 @@ assert(
       commands.has("subagent-doctor"),
       "/subagent-doctor command is registered (#44)",
     );
+    assert(
+      commands.has("subagent-list"),
+      "/subagent-list command is registered as a real diagnostic command",
+    );
     {
       const notified = [];
       await commands.get("subagent-doctor").handler("", {
@@ -1102,9 +1120,73 @@ assert(
         "/subagent-doctor lists discovered agents",
       );
       assert(
+        notified[0].message.includes("Extension geladen: ja") &&
+          notified[0].message.includes("subagent-Tool registriert: ja") &&
+          notified[0].message.includes("Erwarteter User-Agentenpfad") &&
+          notified[0].message.includes("Anzahl User-Agenten"),
+        "/subagent-doctor reports extension/tool/path/count diagnostics",
+      );
+      assert(
         notified[0].level === "info",
         "/subagent-doctor reports info level when agents are found",
       );
+    }
+    {
+      const notified = [];
+      await commands.get("subagent-list").handler("", {
+        cwd: ROOT,
+        ui: { notify: (message, level) => notified.push({ message, level }) },
+      });
+      assert(
+        notified.length === 1 &&
+          notified[0].message.includes("Subagent-Liste") &&
+          notified[0].message.includes("Scope: user") &&
+          notified[0].message.includes("scout"),
+        "/subagent-list command lists user agents",
+      );
+      eq(
+        notified[0].level,
+        "info",
+        "/subagent-list reports info when agents are found",
+      );
+    }
+    {
+      const notified = [];
+      await commands.get("subagent-list").handler("both", {
+        cwd: projectRoot,
+        ui: { notify: (message, level) => notified.push({ message, level }) },
+      });
+      assert(
+        notified[0].message.includes("local-reviewer") &&
+          notified[0].message.includes("Scope: both"),
+        "/subagent-list supports explicit both scope",
+      );
+    }
+    {
+      // #5 (UI-Redesign): /subagent-list joins configured agents with their
+      // current live status from the widget state.
+      const widgetForListTest = await jiti.import(
+        path.resolve(ROOT, "extensions/subagents/widget.ts"),
+      );
+      widgetForListTest.resetWidgetState();
+      widgetForListTest.upsertSubagent({
+        id: "scout-live-test-1",
+        label: "scout",
+        status: "running",
+        currentTask: "collecting context",
+        lastUpdate: Date.now(),
+      });
+      const notified = [];
+      await commands.get("subagent-list").handler("", {
+        cwd: ROOT,
+        ui: { notify: (message, level) => notified.push({ message, level }) },
+      });
+      assert(
+        notified[0].message.includes("running") &&
+          notified[0].message.includes("collecting context"),
+        "/subagent-list shows the live status of a currently running agent",
+      );
+      widgetForListTest.resetWidgetState();
     }
     const tool = registeredTools.get("subagent");
     const listResult = await tool.execute(
@@ -1148,6 +1230,126 @@ assert(
     );
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });
+  }
+}
+
+// ───────────────────────── subagents: empty discovery + fallback path diagnostics ─────────────────────────
+{
+  const emptyAgentRoot = mkdtempSync(path.join(tmpdir(), "pi-subagent-empty-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  try {
+    process.env.PI_CODING_AGENT_DIR = emptyAgentRoot;
+    const registeredTools = new Map();
+    const commands = new Map();
+    const events = new Map();
+    subagents.default({
+      registerTool(tool) {
+        registeredTools.set(tool.name, tool);
+      },
+      registerCommand(name, options) {
+        commands.set(name, options);
+      },
+      on(name, handler) {
+        events.set(name, handler);
+      },
+      getThinkingLevel() {
+        return "high";
+      },
+    });
+    const notified = [];
+    await commands.get("subagent-doctor").handler("", {
+      cwd: emptyAgentRoot,
+      ui: { notify: (message, level) => notified.push({ message, level }) },
+    });
+    assert(
+      notified[0].message.includes("Keine Agenten gefunden") &&
+        notified[0].message.includes("Existiert User-Agentenpfad: nein") &&
+        notified[0].message.includes("PI_CODING_AGENT_DIR"),
+      "/subagent-doctor reports clear next steps when 0 agents are found",
+    );
+    eq(
+      notified[0].level,
+      "warning",
+      "/subagent-doctor warns when no agents are found",
+    );
+
+    const listNotified = [];
+    await commands.get("subagent-list").handler("", {
+      cwd: emptyAgentRoot,
+      ui: { notify: (message, level) => listNotified.push({ message, level }) },
+    });
+    assert(
+      listNotified[0].message.includes("Keine Agenten gefunden") &&
+        listNotified[0].message.includes("/subagent-doctor"),
+      "/subagent-list points to doctor when no agents are found",
+    );
+
+    const startupWarnings = [];
+    await events.get("session_start")?.(
+      {},
+      {
+        cwd: emptyAgentRoot,
+        mode: "tui",
+        model: { id: "fake-model" },
+        ui: {
+          notify: (message, level) => startupWarnings.push({ message, level }),
+        },
+      },
+    );
+    assert(
+      startupWarnings.some(
+        (entry) =>
+          entry.level === "warning" &&
+          entry.message.includes("keine User-Agenten gefunden") &&
+          entry.message.includes("/subagent-doctor"),
+      ),
+      "session_start warns visibly when no user agents are found",
+    );
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    rmSync(emptyAgentRoot, { recursive: true, force: true });
+  }
+}
+
+{
+  const fallbackHome = mkdtempSync(path.join(tmpdir(), "pi-subagent-home-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const previousHome = process.env.HOME;
+  try {
+    delete process.env.PI_CODING_AGENT_DIR;
+    process.env.HOME = fallbackHome;
+    const agentsDir = path.join(fallbackHome, ".pi", "agent", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      path.join(agentsDir, "fallback-home.md"),
+      [
+        "---",
+        "name: fallback-home",
+        "description: Found through HOME fallback",
+        "tools: read",
+        "---",
+        "Prompt.",
+        "",
+      ].join("\n"),
+    );
+    const discovery = subagentAgents.discoverAgents(fallbackHome, "user");
+    eq(
+      discovery.userAgentsDir,
+      agentsDir,
+      "user agents fall back to ~/.pi/agent/agents when PI_CODING_AGENT_DIR is unset",
+    );
+    eq(
+      discovery.agents.map((agent) => agent.name),
+      ["fallback-home"],
+      "fallback ~/.pi/agent/agents discovery finds agents",
+    );
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    rmSync(fallbackHome, { recursive: true, force: true });
   }
 }
 
@@ -1298,7 +1500,9 @@ assert(
 
 // ───────────────── #51: declared timeoutMs is clamped + reported ─────────────────
 {
-  const projectRoot = mkdtempSync(path.join(tmpdir(), "pi-subagent-timeout51-"));
+  const projectRoot = mkdtempSync(
+    path.join(tmpdir(), "pi-subagent-timeout51-"),
+  );
   try {
     const projectAgentsDir = path.join(projectRoot, ".pi", "agents");
     mkdirSync(projectAgentsDir, { recursive: true });
@@ -1384,7 +1588,9 @@ assert(
 
 // ───────────────── #54: fallbackModels parsed + shown by doctor ─────────────────
 {
-  const projectRoot = mkdtempSync(path.join(tmpdir(), "pi-subagent-fallback54-doc-"));
+  const projectRoot = mkdtempSync(
+    path.join(tmpdir(), "pi-subagent-fallback54-doc-"),
+  );
   try {
     const projectAgentsDir = path.join(projectRoot, ".pi", "agents");
     mkdirSync(projectAgentsDir, { recursive: true });
@@ -1450,6 +1656,12 @@ assert(
   eq(widget.getWidgetState().compact, true, "widget starts in compact mode");
   eq(widget.getWidgetState().debug, false, "widget starts with debug off");
   eq(
+    widget.getWidgetState().subagentsLoaded,
+    false,
+    "widget starts before subagent availability is marked loaded",
+  );
+  eq(widget.getWidgetState().agentCount, 0, "widget starts with 0 agents");
+  eq(
     widget.getWidgetState().subagents.size,
     0,
     "widget starts with no subagents",
@@ -1470,6 +1682,24 @@ assert(
   );
   widget.setWidgetDebug(true);
   eq(widget.getWidgetState().debug, true, "setWidgetDebug(true) enables debug");
+
+  widget.setSubagentAvailability(true, 10);
+  eq(
+    widget.getWidgetState().subagentsLoaded,
+    true,
+    "setSubagentAvailability marks extension as loaded",
+  );
+  eq(
+    widget.getWidgetState().agentCount,
+    10,
+    "setSubagentAvailability updates count",
+  );
+  widget.setLastRun("scout", "single", "2026-07-10T12:00:00Z");
+  eq(
+    widget.getWidgetState().lastRun,
+    { agent: "scout", mode: "single", time: "2026-07-10T12:00:00Z" },
+    "setLastRun records latest subagent usage",
+  );
 
   widget.setModel("glm-4.6");
   eq(widget.getWidgetState().model, "glm-4.6", "setModel updates model");
@@ -1559,6 +1789,8 @@ assert(
     currentTask: "review",
     lastUpdate: Date.now(),
   });
+  widget.setSubagentAvailability(true, 10);
+  widget.setLastRun("reviewer", "parallel", "2026-07-10T12:00:00Z");
   widget.setModel("glm-4.6");
   widget.setThinking("high");
   widget.setNow("baue Widget");
@@ -1570,15 +1802,21 @@ assert(
   assert(rendered.length >= 3, "compact widget renders at least 3 lines");
   assert(rendered.length <= 4, "compact widget renders at most 4 lines");
   assert(
-    rendered[0].includes("planner") && rendered[0].includes("reviewer"),
-    "line 1 shows subagent names",
+    rendered[0].includes("Subagents: loaded") &&
+      rendered[0].includes("Agents: 10") &&
+      rendered[0].includes("Last run: reviewer/parallel"),
+    "line 1 shows loaded state, agent count and last run",
   );
-  assert(rendered[0].includes("glm-4.6"), "line 1 shows model");
-  assert(rendered[0].includes("HIGH"), "line 1 shows thinking level");
-  assert(rendered[1].includes("baue Widget"), "line 2 shows current step");
   assert(
-    rendered[2].includes("entscheide Layout"),
-    "line 3 shows reasoning summary",
+    rendered[1].includes("planner") && rendered[1].includes("reviewer"),
+    "line 2 shows subagent names",
+  );
+  assert(rendered[1].includes("glm-4.6"), "line 2 shows model");
+  assert(rendered[1].includes("HIGH"), "line 2 shows thinking level");
+  assert(rendered[2].includes("baue Widget"), "line 3 shows current step");
+  assert(
+    rendered[3].includes("entscheide Layout"),
+    "line 4 shows reasoning summary",
   );
 
   // Hidden widget renders nothing
@@ -1808,7 +2046,8 @@ assert(
           "#53 validation details identify the missing section",
         );
       } finally {
-        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        if (previousAgentDir === undefined)
+          delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         rmSync(tempAgentDir, { recursive: true, force: true });
       }
@@ -1851,7 +2090,8 @@ assert(
           "#52 block message explains sandbox follow-up status",
         );
       } finally {
-        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        if (previousAgentDir === undefined)
+          delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         rmSync(tempAgentDir, { recursive: true, force: true });
       }
@@ -1908,7 +2148,9 @@ assert(
         );
         assert(!fallbackOk.isError, "#54 provider failure retries fallback");
         assert(
-          fallbackOk.content[0].text.includes("Fallback model fallback-model succeeded"),
+          fallbackOk.content[0].text.includes(
+            "Fallback model fallback-model succeeded",
+          ),
           "#54 fallback output is returned after primary provider failure",
         );
         eq(
@@ -1972,7 +2214,8 @@ assert(
           "#54 timeout does not retry fallback models",
         );
       } finally {
-        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        if (previousAgentDir === undefined)
+          delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         rmSync(tempAgentDir, { recursive: true, force: true });
       }
@@ -2247,7 +2490,8 @@ assert(
           "#46 scoped write-capable agent runs without confirmation",
         );
       } finally {
-        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        if (previousAgentDir === undefined)
+          delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         rmSync(tempAgentDir, { recursive: true, force: true });
       }
@@ -3944,11 +4188,11 @@ function stripAnsi(text) {
     "header stays static even during YOLO",
   );
 
-  // ── Footer: CWD · Mode · Model · Thinking · Git (#28) ──
+  // ── Footer: compact statusbar segments (#28, vivid redesign) ──
   assert(
     visualSystem
       .formatFooterLine(ROOT, visualState, "main")
-      .includes("ARCH:DRAFT"),
+      .includes("MODE:ARCH:DRAFT"),
     "footer shows compact mode label",
   );
   assert(
@@ -3964,8 +4208,20 @@ function stripAnsi(text) {
   assert(
     visualSystem
       .formatFooterLine(ROOT, visualState, "main")
-      .includes("git:main"),
+      .includes("GIT:main"),
     "footer shows git branch",
+  );
+  assert(
+    visualSystem
+      .formatFooterLine(ROOT, visualState, "main")
+      .includes("PERMISSIONS:"),
+    "footer shows permissions segment",
+  );
+  assert(
+    visualSystem
+      .formatFooterLine(ROOT, visualState, "main")
+      .includes("THEME:"),
+    "footer shows theme segment",
   );
   assert(
     visualSystem
@@ -3978,7 +4234,7 @@ function stripAnsi(text) {
       ...visualState,
       thinking: undefined,
     }),
-    `${visualSystem.projectLabel(ROOT)} · ARCH:DRAFT · glm-5-turbo · -`,
+    `${visualSystem.projectLabel(ROOT)} | MODE:ARCH:DRAFT | MODEL:glm-5-turbo | THINKING:- | PERMISSIONS:READ+WRITE | THEME:default`,
     "footer shows dash for missing thinking",
   );
 
@@ -4018,6 +4274,173 @@ function stripAnsi(text) {
   );
 }
 
+// ───────────────────────── visual-system: risk derivation + status colorizing (UI-redesign) ─────────────────────────
+{
+  eq(
+    visualSystem.decisionRisk({ action: "allow" }),
+    "medium",
+    "decisionRisk: non-hard ask/allow-shaped decision defaults to medium",
+  );
+  eq(
+    visualSystem.decisionRisk({ action: "ask" }),
+    "medium",
+    "decisionRisk: plain ask is medium risk",
+  );
+  eq(
+    visualSystem.decisionRisk({ action: "ask", hard: true }),
+    "high",
+    "decisionRisk: hard ask is high risk",
+  );
+  eq(
+    visualSystem.decisionRisk({ action: "block" }),
+    "high",
+    "decisionRisk: block is high risk",
+  );
+
+  eq(visualSystem.riskLabel("low"), "niedrig", "riskLabel: low");
+  eq(visualSystem.riskLabel("medium"), "mittel", "riskLabel: medium");
+  eq(visualSystem.riskLabel("high"), "hoch", "riskLabel: high");
+
+  eq(
+    visualSystem.riskTone("high"),
+    "danger",
+    "riskTone: high risk maps to danger tone",
+  );
+  eq(
+    visualSystem.riskTone("medium"),
+    "warning",
+    "riskTone: medium risk maps to warning tone",
+  );
+  eq(
+    visualSystem.riskTone("low"),
+    "neutral",
+    "riskTone: low risk maps to neutral tone",
+  );
+
+  const fakeTheme = {
+    fg: (color, text) => `[${color}]${text}[/${color}]`,
+    bold: (text) => `**${text}**`,
+  };
+  const colorized = visualSystem.colorizeStatusLines(
+    ["Title", "normal line", "muted line", "warn line"],
+    fakeTheme,
+    (line) => {
+      if (line === "muted line") return "muted";
+      if (line === "warn line") return "warning";
+      return undefined;
+    },
+  );
+  eq(
+    colorized[0],
+    "[accent]**Title**[/accent]",
+    "colorizeStatusLines: first line is bold+accent regardless of callback",
+  );
+  eq(
+    colorized[1],
+    "[text]normal line[/text]",
+    "colorizeStatusLines: default fallback is text tone",
+  );
+  eq(
+    colorized[2],
+    "[muted]muted line[/muted]",
+    "colorizeStatusLines: 'muted' callback result bypasses toneColor",
+  );
+  eq(
+    colorized[3],
+    `[${visualSystem.toneColor("warning")}]warn line[/${visualSystem.toneColor("warning")}]`,
+    "colorizeStatusLines: VisualTone callback result is resolved via toneColor",
+  );
+}
+
+// ───────────────────────── permission-dialog: confirmAction fallback behavior (UI-redesign) ─────────────────────────
+{
+  // (a) No ctx.ui.custom at all -> falls back to ctx.ui.confirm directly.
+  let confirmCalls = 0;
+  const plainCtx = {
+    hasUI: true,
+    mode: "tui",
+    ui: {
+      confirm: async () => {
+        confirmCalls += 1;
+        return true;
+      },
+    },
+  };
+  const allowed = await permissionDialog.confirmAction(
+    plainCtx,
+    { action: "ask", reason: "Testgrund", hard: false },
+    "npm install foo",
+    "bash",
+  );
+  eq(
+    allowed,
+    true,
+    "confirmAction without ctx.ui.custom falls back to ctx.ui.confirm and returns its result",
+  );
+  eq(
+    confirmCalls,
+    1,
+    "confirmAction fallback calls ctx.ui.confirm exactly once",
+  );
+
+  // (b) ctx.ui.custom exists but throws -> falls back to ctx.ui.confirm too.
+  let fallbackConfirmCalls = 0;
+  const throwingCustomCtx = {
+    hasUI: true,
+    mode: "tui",
+    ui: {
+      custom: async () => {
+        throw new Error("no real TUI overlay in this test");
+      },
+      confirm: async () => {
+        fallbackConfirmCalls += 1;
+        return false;
+      },
+    },
+  };
+  const denied = await permissionDialog.confirmAction(
+    throwingCustomCtx,
+    { action: "ask", reason: "Testgrund", hard: true },
+    "rm -rf build/",
+    "bash",
+  );
+  eq(
+    denied,
+    false,
+    "confirmAction falls back to ctx.ui.confirm when ctx.ui.custom throws",
+  );
+  eq(
+    fallbackConfirmCalls,
+    1,
+    "confirmAction fallback path is used exactly once when custom UI fails",
+  );
+}
+
+// ───────────────────────── subagent prompt templates: tool-first guardrails ─────────────────────────
+{
+  const promptFiles = [
+    "subagent-list.md",
+    "subagent-scout-plan.md",
+    "subagent-review.md",
+    "subagent-parallel-review.md",
+    "subagent-docs.md",
+    "subagent-security.md",
+    "subagent-ui-review.md",
+    "subagent-implement.md",
+  ];
+  for (const file of promptFiles) {
+    const content = readFileSync(path.join(ROOT, "prompts", file), "utf8");
+    assert(
+      content.includes("Tool-first Pflicht") &&
+        content.includes("Rufe zuerst das `subagent`-Tool") &&
+        content.includes("bevor der Tool-Aufruf erfolgt") &&
+        content.includes("/subagent-doctor") &&
+        content.includes("PI_CODING_AGENT_DIR"),
+      `${file} requires tool-first subagent usage and fallback diagnosis`,
+    );
+  }
+}
+
 // ───────────────────────── package/UI configuration ─────────────────────────
 {
   const settings = JSON.parse(
@@ -4030,8 +4453,8 @@ function stripAnsi(text) {
   );
   eq(
     claudeTools?.extensions,
-    ["extensions/index.ts"],
-    "Claude tool renderer excludes its separate spinner extension",
+    [],
+    "Claude style tools package is installed but its conflicting tool extension is disabled",
   );
   eq(
     claudeTools?.themes,
@@ -4058,15 +4481,17 @@ function stripAnsi(text) {
     !settings.extensions.includes("+extensions/or-free/index.ts"),
     "settings does not load the OpenRouter free-model extension",
   );
-  eq(
-    settings.defaultProvider,
-    "zai",
-    "ZAI is the configured default provider",
+  assert(
+    settings.enabledModels.includes(`${settings.defaultProvider}/${settings.defaultModel}`),
+    "default provider/model pair is present in enabledModels",
   );
-  eq(
-    settings.defaultModel,
-    "glm-5.2",
-    "GLM-5.2 is the configured default model",
+  assert(
+    settings.extensions.includes("+extensions/tool-visuals.ts"),
+    "local tool-visuals extension is enabled",
+  );
+  assert(
+    Array.isArray(claudeTools?.extensions) && claudeTools.extensions.length === 0,
+    "no package tool renderer is loaded alongside local tool-visuals",
   );
 
   const zentui = JSON.parse(
@@ -4087,6 +4512,16 @@ function stripAnsi(text) {
       !("workflow-permission" in zentui.extensionStatuses.placements) &&
       !("plan-todos-count" in zentui.extensionStatuses.placements),
     "Zentui contains no stale placements for old workflow status keys",
+  );
+  eq(
+    zentui.extensionStatuses.placements["permission-level"],
+    "right",
+    "Zentui places the new separate permission-level status on the right",
+  );
+  eq(
+    zentui.extensionStatuses.colorModes["permission-level"],
+    "original",
+    "Zentui preserves original coloring for the permission-level status",
   );
 
   assert(
@@ -4478,6 +4913,147 @@ eq(
   }
 }
 
+// ───────────────────────── Decision-Intake: silent mode switch (decide-mode) ─────────────────────────
+{
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-decide-mode-"));
+  try {
+    const hooks = new Map();
+    const eventHandlers = new Map();
+    const emitted = [];
+    const sent = [];
+    const notifications = [];
+    let idle = true;
+
+    planMode.default({
+      events: {
+        on(name, handler) {
+          eventHandlers.set(name, handler);
+        },
+        emit(name, event) {
+          emitted.push([name, event]);
+        },
+      },
+      on(name, handler) {
+        hooks.set(name, handler);
+      },
+      registerFlag() {},
+      getFlag: () => false,
+      registerCommand() {},
+      registerShortcut() {},
+      appendEntry() {},
+      setThinkingLevel() {},
+      sendMessage(message, options) {
+        sent.push({ message, options });
+      },
+    });
+
+    const context = {
+      cwd,
+      hasUI: true,
+      mode: "tui",
+      isIdle: () => idle,
+      abort() {},
+      sessionManager: { getEntries: () => [] },
+      ui: {
+        theme: { fg: (_c, t) => t },
+        setStatus() {},
+        setWidget() {},
+        notify: (message, type) => notifications.push({ message, type }),
+        select: async () => undefined,
+        confirm: async () => true,
+      },
+    };
+
+    await hooks.get("session_start")({}, context);
+
+    // Shift+Tab "Optionen klären" (decide-mode) switches into the Klär-Modus
+    // silently: phase becomes "deciding" but NO intake turn is triggered.
+    const sentBefore = sent.length;
+    eventHandlers.get("pi-workflow:plan-action")({
+      action: "decide-mode",
+      ctx: context,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    eq(
+      emitted.at(-1)[1].phase,
+      "deciding",
+      "decide-mode enters the deciding phase",
+    );
+    eq(
+      sent.length,
+      sentBefore,
+      "decide-mode does NOT trigger a decision-intake turn (no message sent)",
+    );
+    assert(
+      !sent.some((entry) => entry.options?.triggerTurn),
+      "decide-mode never sends a triggerTurn message",
+    );
+    assert(
+      notifications.some((n) => n.message.includes("nächste Nachricht")),
+      "decide-mode notifies that the next message starts the intake",
+    );
+
+    // The intake prompt arrives only on the next user turn via before_agent_start.
+    const decisionContext = await hooks.get("before_agent_start")({}, context);
+    eq(
+      decisionContext?.message?.customType,
+      "plan-decision-context",
+      "decide-mode injects the intake context on the next turn",
+    );
+
+    // Contrast: the explicit "decide" action (/decide, /plan-Aktion, Ctrl+Shift+X)
+    // still fires the intake turn immediately.
+    const sentBeforeDecide = sent.length;
+    eventHandlers.get("pi-workflow:plan-action")({
+      action: "decide",
+      ctx: context,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert(
+      sent
+        .slice(sentBeforeDecide)
+        .some(
+          (entry) =>
+            entry.message.customType === "plan-decision-request" &&
+            entry.options?.triggerTurn === true,
+        ),
+      "the decide action still triggers the intake turn immediately",
+    );
+
+    // Re-selecting decide-mode while already deciding + idle is a no-op.
+    notifications.length = 0;
+    const sentBeforeReenter = sent.length;
+    eventHandlers.get("pi-workflow:plan-action")({
+      action: "decide-mode",
+      ctx: context,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    eq(
+      sent.length,
+      sentBeforeReenter,
+      "decide-mode is a no-op when already deciding + idle",
+    );
+    assert(
+      notifications.some((n) => n.message.includes("bereits aktiv")),
+      "re-selecting decide-mode notifies that it is already active",
+    );
+
+    // The mode-menu marks the Klär-Eintrag as current while deciding.
+    assert(
+      modeMenu.buildModeMenu("work", true).find((e) => e.id === "mode-decide")
+        ?.current === true,
+      "buildModeMenu marks the decide entry current while deciding",
+    );
+    assert(
+      modeMenu.buildModeMenu("work").find((e) => e.id === "mode-decide")
+        ?.current === false,
+      "buildModeMenu does not mark decide as current by default",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
 // ───────────────────────── /done fallback + brief co-archiving ─────────────────────────
 {
   const cwd = mkdtempSync(path.join(tmpdir(), "pi-done-fallback-"));
@@ -4565,6 +5141,435 @@ eq(
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+}
+
+// ───────────────────────── render-profile: Unicode/ASCII + capability detection ─────────────────────────
+{
+  eq(
+    renderProfile.supportsUnicode({ LANG: "en_US.UTF-8" }),
+    true,
+    "UTF-8 locale enables unicode glyphs",
+  );
+  eq(
+    renderProfile.supportsUnicode({ LANG: "C" }),
+    false,
+    "non-UTF-8 locale disables unicode glyphs",
+  );
+  eq(
+    renderProfile.supportsUnicode({ LANG: "en_US.UTF-8", PI_ASCII_UI: "1" }),
+    false,
+    "PI_ASCII_UI=1 forces ASCII fallback",
+  );
+  eq(
+    renderProfile.supportsUnicode({ TERM: "dumb" }),
+    false,
+    "TERM=dumb disables unicode",
+  );
+
+  eq(
+    renderProfile.supportsColor({ NO_COLOR: "1" }),
+    false,
+    "NO_COLOR disables color",
+  );
+  eq(
+    renderProfile.supportsColor({ TERM: "dumb" }),
+    false,
+    "TERM=dumb disables color",
+  );
+  eq(
+    renderProfile.supportsColor({ FORCE_COLOR: "1" }),
+    true,
+    "FORCE_COLOR enables color",
+  );
+
+  eq(
+    renderProfile.supportsAnimations({}, "tui"),
+    true,
+    "animations on in TUI by default",
+  );
+  eq(
+    renderProfile.supportsAnimations({ CI: "1" }, "tui"),
+    false,
+    "CI disables animations",
+  );
+  eq(
+    renderProfile.supportsAnimations({ PI_REDUCED_MOTION: "1" }, "tui"),
+    false,
+    "PI_REDUCED_MOTION disables animations",
+  );
+  eq(
+    renderProfile.supportsAnimations({}, "rpc"),
+    false,
+    "animations disabled outside TUI",
+  );
+
+  const vividProfile = renderProfile.resolveRenderProfile({
+    env: { LANG: "en_US.UTF-8" },
+    width: 120,
+    mode: "tui",
+  });
+  eq(vividProfile.unicode, true, "resolved profile keeps unicode in UTF-8 TUI");
+  eq(vividProfile.animations, true, "resolved profile keeps animations in TUI");
+  eq(vividProfile.compact, false, "wide terminal is not compact");
+
+  const tinyProfile = renderProfile.resolveRenderProfile({
+    env: { CI: "1" },
+    width: 70,
+    mode: "tui",
+  });
+  eq(tinyProfile.animations, false, "CI profile disables animations");
+  eq(tinyProfile.compact, true, "narrow terminal is compact");
+
+  // Status symbol + label are never color-only: ASCII fallback keeps text.
+  eq(
+    renderProfile.formatStatus("completed", { unicode: true }),
+    "✓ completed",
+    "unicode completed status is symbol + label",
+  );
+  eq(
+    renderProfile.formatStatus("failed", { unicode: false }).includes("failed"),
+    true,
+    "ASCII failed status still carries the text label",
+  );
+  eq(
+    renderProfile.formatStatus("blocked", { unicode: false }).includes("blocked"),
+    true,
+    "ASCII blocked status still carries the text label",
+  );
+
+  // Model name truncation keeps the meaningful suffix.
+  const longModel = "anthropic/claude-sonnet-4-5-very-long-name-20250514";
+  eq(
+    renderProfile.truncateModelName(longModel, 20).length <= 20,
+    true,
+    "long model name is truncated to fit",
+  );
+  eq(
+    renderProfile.truncateModelName(undefined),
+    "no-model",
+    "missing model falls back to no-model",
+  );
+  eq(
+    renderProfile.truncateModelName("provider/short"),
+    "short",
+    "provider prefix is stripped from short model names",
+  );
+}
+
+// ───────────────────────── visual-system: vivid statusbar segments + compact variant ─────────────────────────
+{
+  const state = {
+    mode: "simple_plan",
+    phase: "draft",
+    permissionLevel: "read-write",
+    planExists: true,
+    completedTodos: 1,
+    totalTodos: 3,
+    model: "glm-5-turbo",
+    thinking: "high",
+    themeName: "pi-vivid",
+    nextStep: "/work",
+  };
+  const full = visualSystem.formatFooterLine(ROOT, state, "main");
+  assert(full.includes("MODE:PLAN:DRAFT"), "full statusbar shows MODE segment");
+  assert(full.includes("PERMISSIONS:READ+WRITE"), "full statusbar shows PERMISSIONS");
+  assert(full.includes("THEME:pi-vivid"), "full statusbar shows active theme");
+
+  const compact = visualSystem.formatFooterLineCompact(ROOT, state, "main");
+  assert(compact.includes("PLAN:DRAFT"), "compact statusbar shows mode");
+  assert(compact.includes("T:high"), "compact statusbar shows lowercase thinking");
+  assert(compact.includes("P:READ+WRITE"), "compact statusbar shows permission tag");
+
+  // Subagent counts surface in both variants when active.
+  const withSubs = { ...state, activeSubagents: 2, subagentErrors: 1 };
+  assert(
+    visualSystem.formatFooterLine(ROOT, withSubs).includes("SA:2"),
+    "full statusbar shows active subagent count",
+  );
+  assert(
+    visualSystem.formatFooterLine(ROOT, withSubs).includes("ERR:1"),
+    "full statusbar surfaces subagent errors",
+  );
+  assert(
+    visualSystem.formatFooterLineCompact(ROOT, withSubs).includes("SA:2"),
+    "compact statusbar shows active subagent count",
+  );
+
+  // test-bash permission tag now has a short label too.
+  eq(
+    visualSystem.permissionShortLabel("test-bash"),
+    "TEST",
+    "test-bash permission has a compact label",
+  );
+}
+
+// ───────────────────────── subagent widget: richer status model ─────────────────────────
+{
+  const widget = await jiti.import(
+    path.resolve(ROOT, "extensions/subagents/widget.ts"),
+  );
+  widget.resetWidgetState();
+  widget.upsertSubagent({
+    id: "planner-1",
+    label: "planner",
+    status: "running",
+    currentTask: "design",
+    lastUpdate: Date.now(),
+    role: "planner",
+    warnings: 0,
+    errors: 0,
+  });
+  widget.upsertSubagent({
+    id: "reviewer-1",
+    label: "reviewer",
+    status: "warning",
+    currentTask: "review",
+    lastUpdate: Date.now(),
+    warnings: 2,
+    errors: 0,
+  });
+  widget.upsertSubagent({
+    id: "tester-1",
+    label: "tester",
+    status: "failed",
+    currentTask: "npm test",
+    lastUpdate: Date.now(),
+    warnings: 0,
+    errors: 1,
+  });
+
+  const rendered = widget.renderWidget(widget.getWidgetState());
+  const saLine = rendered.find((l) => l.startsWith("SA:"));
+  assert(saLine, "widget still renders the SA status line");
+  // Each status carries both a symbol and a text label, never color alone.
+  assert(saLine.includes("planner") && saLine.includes("running"), "running agent shows name + label");
+  assert(saLine.includes("reviewer") && saLine.includes("warning"), "warning agent shows name + label");
+  assert(saLine.includes("tester") && saLine.includes("failed"), "failed agent shows name + label");
+  assert(saLine.includes("w:2"), "warning count surfaces compactly");
+  assert(saLine.includes("e:1"), "error count surfaces compactly");
+
+  // The new status symbols are exported and stable.
+  eq(widget.STATUS_SYMBOL.completed, "✓", "completed symbol exported");
+  eq(widget.STATUS_SYMBOL.failed, "✕", "failed symbol exported");
+  eq(widget.STATUS_SYMBOL.blocked, "⏸", "blocked symbol exported");
+
+  widget.resetWidgetState();
+}
+
+// ───────────────────────── info-box ─────────────────────────
+{
+  const fakeTheme = {
+    fg: (_color, text) => text,
+    bg: (_color, text) => text,
+    bold: (text) => `BOLD:${text}`,
+  };
+
+  const box = new infoBox.InfoBox({
+    title: "Status",
+    subtitle: "Mode: work",
+    status: { symbol: "✓", label: "ready" },
+    sections: [{ title: "Details", lines: ["Line one", "Line two"] }],
+    tone: "success",
+    background: "toolSuccessBg",
+  });
+  const lines = box.render(40, fakeTheme);
+  assert(lines.length >= 7, "info-box renders at least title/subtitle/divider/section/content/footer");
+  assert(lines[0].startsWith("╭"), "info-box top border uses rounded corner");
+  assert(lines[lines.length - 1].startsWith("╰"), "info-box bottom border uses rounded corner");
+  assert(lines.some((l) => l.includes("BOLD:Status")), "info-box title is bold");
+  assert(lines.some((l) => l.includes("✓ ready")), "info-box status shows symbol + label");
+
+  const asciiProfile = renderProfile.resolveRenderProfile({ env: { PI_ASCII_UI: "1" } });
+  const asciiBox = new infoBox.InfoBox({
+    title: "Status with a very long title",
+    sections: [{ lines: ["content with a very very very long tail"] }],
+    profile: asciiProfile,
+  });
+  const asciiLines = asciiBox.render(30, fakeTheme);
+  assert(asciiLines[0].startsWith("+"), "info-box falls back to ASCII corners");
+  assert(
+    asciiLines.some((line) => line.includes("...")),
+    "info-box ASCII fallback uses three-dot ellipsis",
+  );
+  assert(
+    !asciiLines.some((line) => line.includes("…")),
+    "info-box ASCII fallback does not emit unicode ellipsis",
+  );
+
+  const tinyAsciiLines = asciiBox.render(7, fakeTheme);
+  assert(
+    tinyAsciiLines[0].includes("...") && !tinyAsciiLines[0].includes("…"),
+    "info-box tiny-width fallback uses ASCII ellipsis",
+  );
+
+  const collapsed = new infoBox.InfoBox({
+    title: "Collapsed",
+    sections: [{ lines: ["hidden"] }],
+    collapsible: true,
+    expanded: false,
+  });
+  const collapsedLines = collapsed.render(30, fakeTheme);
+  assert(
+    collapsedLines.some((l) => l.includes("expand")),
+    "collapsed info-box shows expand hint",
+  );
+
+  collapsed.handleInput("e");
+  const expandedLines = collapsed.render(30, fakeTheme);
+  assert(
+    expandedLines.some((l) => l.includes("hidden")),
+    "info-box expands after 'e' input",
+  );
+  assert(
+    expandedLines.some((l) => l.includes("collapse")),
+    "expanded info-box shows collapse hint",
+  );
+
+  // Width validation: every visible line must fit within requested width.
+  const wideBox = new infoBox.InfoBox({
+    title: "Wide",
+    sections: [{ title: "Section", lines: ["content"] }],
+  });
+  const wideLines = wideBox.render(50, fakeTheme);
+  for (const line of wideLines) {
+    const stripped = line.replace(/\x1b\[[0-9;]*m/g, "");
+    assert(stripped.length <= 50, `info-box line fits within width: ${stripped.slice(0, 20)}`);
+  }
+
+  // Long titles/subtitles/section text must not exceed requested width.
+  const longBox = new infoBox.InfoBox({
+    title: "Very long title that should be truncated before it can overflow the frame",
+    subtitle: "Very long subtitle that should also be truncated before rendering",
+    sections: [
+      {
+        title: "Very long section title that should be clipped",
+        lines: ["averyveryveryveryverylongunbrokenwordthatmustbetruncated"],
+      },
+    ],
+  });
+  for (const line of longBox.render(32, fakeTheme)) {
+    const stripped = line.replace(/\x1b\[[0-9;]*m/g, "");
+    assert(stripped.length <= 32, "long info-box content stays within width");
+  }
+
+  // Collapse via Enter/Space when TUI helpers are available.
+  const keyBox = new infoBox.InfoBox({
+    title: "Key",
+    sections: [{ lines: ["secret"] }],
+    collapsible: true,
+    expanded: true,
+    tuiHelpers: {
+      visibleWidth: (s) => s.length,
+      truncateToWidth: (s, w) => s.slice(0, w),
+      wrapTextWithAnsi: (s) => [s],
+      matchesKey: (data, key) => data === key,
+      Key: { enter: "enter", space: " " },
+    },
+  });
+  keyBox.handleInput("enter");
+  assert(!keyBox.isExpanded(), "info-box collapses on Enter");
+  keyBox.handleInput(" ");
+  assert(keyBox.isExpanded(), "info-box expands on Space");
+
+  const wrapper = infoBox.createInfoBoxComponent(
+    {
+      title: "Wrapped",
+      sections: [{ lines: ["wrapped secret"] }],
+      collapsible: true,
+      expanded: false,
+      tuiHelpers: {
+        visibleWidth: (s) => s.length,
+        truncateToWidth: (s, w) => s.slice(0, w),
+        wrapTextWithAnsi: (s) => [s],
+        matchesKey: (data, key) => data === key,
+        Key: { enter: "enter", space: " " },
+      },
+    },
+    fakeTheme,
+  );
+  assert(
+    wrapper.render(40).some((line) => line.includes("expand")),
+    "info-box component wrapper starts collapsed",
+  );
+  wrapper.handleInput?.("enter");
+  assert(
+    wrapper.render(40).some((line) => line.includes("wrapped secret")),
+    "info-box component wrapper forwards handleInput to the box",
+  );
+}
+
+// ───────────────────────── ux-status box rendering ─────────────────────────
+{
+  const uxStatus = await jiti.import(
+    path.resolve(ROOT, "extensions/ux-status.ts"),
+  );
+  assert(typeof uxStatus.default === "function", "ux-status.ts exports a factory");
+
+  const commands = new Map();
+  const shortcuts = new Map();
+  const events = new Map();
+  const statuses = [];
+  uxStatus.default({
+    events: {
+      on(name, handler) {
+        events.set(name, handler);
+      },
+      emit() {},
+    },
+    on(name, handler) {
+      events.set(name, handler);
+    },
+    registerCommand(name, options) {
+      commands.set(name, options.handler);
+    },
+    registerShortcut(shortcut, options) {
+      shortcuts.set(shortcut, options.handler);
+    },
+    getThinkingLevel() {
+      return "high";
+    },
+    setThinkingLevel() {},
+    onModelSelect() {},
+    onThinkingLevelSelect() {},
+  });
+
+  assert(commands.has("status"), "/status command is registered");
+  assert(commands.has("home"), "/home alias is registered");
+  assert(shortcuts.has("ctrl+shift+h"), "Ctrl+Shift+H help shortcut is registered");
+
+  const notified = [];
+  const context = {
+    mode: "tui",
+    cwd: ROOT,
+    model: { id: "test-model", provider: "test-provider" },
+    ui: {
+      theme: {
+        fg: (_c, t) => t,
+        bg: (_c, t) => t,
+        bold: (t) => `BOLD:${t}`,
+      },
+      notify: (message, level) => notified.push({ message, level }),
+      setStatus: (key, text) => statuses.push({ key, text }),
+    },
+  };
+
+  // Simulate a workflow status event so the extension has state.
+  events.get("pi-workflow:status")({
+    source: "plan",
+    mode: "work",
+    phase: "idle",
+    planExists: false,
+    completedTodos: 0,
+    totalTodos: 0,
+  });
+
+  await commands.get("status")("", context);
+  assert(notified.length === 1, "/status sends one notification");
+  assert(notified[0].level === "info", "/status uses info level without warning");
+  assert(
+    notified[0].message.includes("STATUS") && notified[0].message.includes("╭"),
+    "/status renders a boxed notification in TUI mode",
+  );
 }
 
 // ───────────────────────── result ─────────────────────────

@@ -59,5 +59,14 @@ versehentlich unterbleibt:
 2. **Profilpassend?** Passt er zum Profil eines vorhandenen Subagenten
    (`agents/*.md`)?
 
-Beide ja → delegieren (parallel via `tasks[]`, sequenziell via `chain[]`).
-Sonst selbst ausführen. Ergänzt die Regeln oben und hebt keine Schutzregel auf.
+Beide ja → das `subagent`-Tool an passender Stelle aufrufen (parallel via
+`tasks[]`, sequenziell via `chain[]`). Wenn das Tool fehlt oder keine passenden
+Agenten gefunden werden, dies sichtbar als Diagnose/Blocker melden und auf
+`/tools`, `/subagent-doctor` und `/subagent-list` verweisen. Nicht stillschweigend
+so tun, als sei delegiert worden.
+
+Bewusst nicht delegieren bei trivialen, lokal begrenzten Aufgaben (z. B.
+Ein-Datei-Typo, kurze Nachfrage, rein mechanischer Kleinstfix) oder wenn der
+Prozessstart-Overhead klar größer als der Nutzen ist. Subagenten-Ergebnisse
+bleiben Vorschläge; der Haupt-Agent prüft und verantwortet die finale Antwort.
+Ergänzt die Regeln oben und hebt keine Schutzregel auf.

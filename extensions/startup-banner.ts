@@ -21,6 +21,7 @@ import {
   resolveBannerColorMode,
   resolveBannerTier,
 } from "./shared/banner-render.ts";
+import { truncateModelName } from "./shared/render-profile.ts";
 
 const ENABLE_STARTUP_BANNER = true;
 const PLAIN_TIER_FULL_TEXT_MIN_WIDTH = 10;
@@ -34,11 +35,11 @@ function subtitleLines(
   const lines: string[] = [];
 
   const status = model
-    ? `Plan • Work • Permissions • ${model}`
-    : "Plan • Work • Permissions";
+    ? `Mode • Model ${truncateModelName(model, 24)} • Thinking • Permissions`
+    : "Mode • Model • Thinking • Permissions";
   if (status.length <= width) lines.push(theme.fg("muted", status));
 
-  const commands = "/plan  /work  /review-plan  /permission";
+  const commands = "/plan  /work  /review-plan  /permission  /subagent-list";
   if (commands.length <= width) lines.push(theme.fg("dim", commands));
 
   const shortcuts = "Shift+Tab: Mode    Ctrl+Shift+Y: Permissions";

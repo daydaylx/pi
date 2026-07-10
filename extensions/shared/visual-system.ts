@@ -9,6 +9,7 @@ import {
   PERMISSION_LEVEL_LABEL,
   WORKFLOW_PHASE_LABEL,
 } from "./workflow-status.ts";
+import { truncateModelName, truncatePlain } from "./render-profile.ts";
 
 export type VisualTone =
   "neutral" | "plan" | "review" | "work" | "warning" | "danger" | "success";
@@ -22,6 +23,10 @@ export interface VisualWorkflowState {
   totalTodos: number;
   model?: string;
   thinking?: string;
+  themeName?: string;
+  activeSubagents?: number;
+  subagentWarnings?: number;
+  subagentErrors?: number;
   nextStep: string;
 }
 
@@ -129,13 +134,41 @@ export function formatFooterLine(
   state: VisualWorkflowState,
   gitBranch?: string | null,
 ): string {
+  const subagents = state.activeSubagents && state.activeSubagents > 0
+    ? `SA:${state.activeSubagents}${state.subagentErrors ? ` ERR:${state.subagentErrors}` : state.subagentWarnings ? ` WARN:${state.subagentWarnings}` : ""}`
+    : undefined;
+  const parts = [
+    projectLabel(cwd),
+    `MODE:${formatModeCompact(state)}`,
+    `MODEL:${truncateModelName(state.model, 32)}`,
+    `THINKING:${(state.thinking ?? "-").toUpperCase()}`,
+    `PERMISSIONS:${permissionShortLabel(state.permissionLevel)}`,
+    `THEME:${state.themeName ?? "default"}`,
+  ];
+  if (gitBranch) parts.push(`GIT:${truncatePlain(gitBranch, 24)}`);
+  if (subagents) parts.push(subagents);
+  return parts.join(" | ");
+}
+
+export function formatFooterLineCompact(
+  cwd: string,
+  state: VisualWorkflowState,
+  gitBranch?: string | null,
+): string {
   const parts = [
     projectLabel(cwd),
     formatModeCompact(state),
-    state.model ?? "no model",
-    (state.thinking ?? "-").toUpperCase(),
+    truncateModelName(state.model, 18),
+    `T:${(state.thinking ?? "-").toLowerCase()}`,
+    `P:${permissionShortLabel(state.permissionLevel)}`,
   ];
-  if (gitBranch) parts.push(`git:${gitBranch}`);
+  if (state.activeSubagents && state.activeSubagents > 0)
+    parts.push(`SA:${state.activeSubagents}`);
+  if (state.subagentErrors && state.subagentErrors > 0)
+    parts.push(`ERR:${state.subagentErrors}`);
+  else if (state.subagentWarnings && state.subagentWarnings > 0)
+    parts.push(`WARN:${state.subagentWarnings}`);
+  if (gitBranch) parts.push(`G:${truncatePlain(gitBranch, 12)}`);
   return parts.join(" · ");
 }
 
@@ -145,6 +178,8 @@ export function permissionShortLabel(level: PermissionLevel): string {
       return "READ";
     case "read-bash":
       return "READ+BASH";
+    case "test-bash":
+      return "TEST";
     case "read-write":
       return "READ+WRITE";
     case "full-access":
@@ -183,6 +218,55 @@ export function formatEmptyPlanState(): string {
     "2. /decide   Entscheidung klären",
     "3. /actions  Menü öffnen",
   ].join("\n");
+}
+
+export type RiskLevel = "low" | "medium" | "high";
+
+export function riskTone(risk: RiskLevel): VisualTone {
+  if (risk === "high") return "danger";
+  if (risk === "medium") return "warning";
+  return "neutral";
+}
+
+export function riskLabel(risk: RiskLevel): string {
+  return { low: "niedrig", medium: "mittel", high: "hoch" }[risk];
+}
+
+/**
+ * Grobe Risikoableitung aus einer PolicyDecision, ohne deren Form anzufassen
+ * (permission-policy.ts bleibt unverändert; die ~40 bestehenden
+ * decideBash/decideFileAccess-Tests prüfen nur `.action`).
+ */
+export function decisionRisk(decision: {
+  action: string;
+  hard?: boolean;
+}): RiskLevel {
+  if (decision.action === "block") return "high";
+  return decision.hard ? "high" : "medium";
+}
+
+/**
+ * Färbt eine Zeilenliste einheitlich ein: erste Zeile fett+accent als Titel,
+ * weitere Zeilen per Callback getönt. Der Aufrufer leitet die Tonalität aus
+ * seinen eigenen strukturierten Daten ab (z. B. Status-Feldern), statt den
+ * bereits gerenderten Text nach Glyphen zu durchsuchen — löst die bisherige
+ * Duplikation zwischen subagents/index.ts und plan-mode/index.ts.
+ */
+export function colorizeStatusLines(
+  lines: string[],
+  theme: {
+    fg(color: string, text: string): string;
+    bold(text: string): string;
+  },
+  lineTone?: (line: string, index: number) => VisualTone | "muted" | undefined,
+): string[] {
+  return lines.map((line, index) => {
+    if (index === 0) return theme.fg("accent", theme.bold(line));
+    const tone = lineTone?.(line, index);
+    if (tone === "muted") return theme.fg("muted", line);
+    if (tone) return theme.fg(toneColor(tone), line);
+    return theme.fg("text", line);
+  });
 }
 
 export function progressSymbol(item: WorkProgressItem): string {

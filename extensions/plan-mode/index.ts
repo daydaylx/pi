@@ -49,7 +49,11 @@ import {
   type WorkflowModeRequest,
   type WorkflowPhase,
 } from "../shared/workflow-status.ts";
-import { formatWorkProgressLines } from "../shared/visual-system.ts";
+import { createInfoBoxComponent } from "../shared/info-box.ts";
+import {
+  colorizeStatusLines,
+  formatWorkProgressLines,
+} from "../shared/visual-system.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import { SHORTCUTS } from "../shared/shortcuts.ts";
 import {
@@ -209,19 +213,24 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     ctx.ui.setStatus("plan-todos-count", undefined);
 
     if (phase === "executing" && todos.length > 0) {
-      ctx.ui.setWidget("work-progress", (_tui, theme) => ({
-        render(): string[] {
-          return formatWorkProgressLines(todos).map((line, index) => {
-            if (index === 0) return theme.fg("accent", theme.bold(line));
-            if (line.includes(" ✓ ")) return theme.fg("success", line);
-            if (line.includes(" ! ") || line.includes(" × ")) {
-              return theme.fg("warning", line);
-            }
-            return theme.fg("muted", line);
-          });
-        },
-        invalidate() {},
-      }));
+      const completed = todos.filter((todo) => todo.completed).length;
+      ctx.ui.setWidget("work-progress", (_tui, theme) => {
+        const todoLines = formatWorkProgressLines(todos).slice(2);
+        const box = createInfoBoxComponent(
+          {
+            title: "Work Progress",
+            subtitle: `${completed}/${todos.length} erledigt`,
+            sections: [{ title: "Todos", lines: todoLines }],
+            tone: "accent",
+            background: "customMessageBg",
+          },
+          theme,
+        );
+        return {
+          render: box.render.bind(box),
+          invalidate: box.invalidate.bind(box),
+        };
+      });
     } else {
       ctx.ui.setWidget("work-progress", undefined);
       ctx.ui.setWidget("plan-todos", undefined);
@@ -581,18 +590,22 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     else if (selected === "show-todos") showPlanTodos(ctx);
   }
 
-  // Decision-Intake: vorgeschalteter Klär-Turn. Klärt über ask_user echte
-  // Entscheidungen und endet mit einem [DECISION-BRIEF]-Block. Startet keine
-  // Umsetzung und wechselt nicht nach /work.
-  async function runDecisionIntake(ctx: ExtensionContext): Promise<void> {
+  // Bereitet den Klär-Modus vor (phase=deciding): TUI-Check, Abbruch-Guard,
+  // Normalisierung, Schutz eines bestehenden Decision Brief und
+  // Verzeichnisanlage. Liefert true, sobald der Klär-Modus aktiv ist — ohne
+  // selbst einen Turn zu triggern. false bei Abbruch/Abwahl/Fehler.
+  // Der eigentliche Intake-Prompt wird bewusst NICHT hier gesendet: Der Aufrufer
+  // entscheidet, ob der Turn sofort (runDecisionIntake) oder erst bei der
+  // nächsten Nutzernachricht (Modusmenü via before_agent_start) startet.
+  async function enterDecisionMode(ctx: ExtensionContext): Promise<boolean> {
     if (!ctx.hasUI || ctx.mode !== "tui") {
       ctx.ui.notify(
         "Decision-Intake benötigt den TUI-Modus (ask_user ist interaktiv nur dort verfügbar).",
         "warning",
       );
-      return;
+      return false;
     }
-    if (!(await confirmAbortActiveTurn(ctx))) return;
+    if (!(await confirmAbortActiveTurn(ctx))) return false;
     normalizeInterruptedPhase(ctx);
 
     // Bestehendes Decision Brief vor stillem Überschreiben schützen.
@@ -618,7 +631,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
           "Decision-Intake abgebrochen; bestehendes Decision Brief bleibt erhalten.",
           "info",
         );
-        return;
+        return false;
       }
       if (decision === "archive-first") {
         try {
@@ -634,7 +647,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
             `Archivierung fehlgeschlagen; Intake abgebrochen: ${message}`,
             "error",
           );
-          return;
+          return false;
         }
       }
     }
@@ -647,13 +660,23 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         `Decision-Intake konnte nicht gestartet werden: ${message}`,
         "error",
       );
-      return;
+      return false;
     }
 
     phase = "deciding";
     reviewedHash = undefined;
     updateStatus(ctx);
     persistState();
+    return true;
+  }
+
+  // Decision-Intake: vorgeschalteter Klär-Turn. Klärt über ask_user echte
+  // Entscheidungen und endet mit einem [DECISION-BRIEF]-Block. Startet keine
+  // Umsetzung und wechselt nicht nach /work. Startet den Intake SOFORT
+  // (triggerTurn) — genutzt von /decide, der /plan-Aktion (clarify) und dem
+  // Ctrl+Shift+X-Eintrag.
+  async function runDecisionIntake(ctx: ExtensionContext): Promise<void> {
+    if (!(await enterDecisionMode(ctx))) return;
 
     pi.sendMessage(
       {
@@ -666,6 +689,27 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
         display: true,
       },
       { triggerTurn: true },
+    );
+  }
+
+  // Shift+Tab-Eintrag „Optionen klären": wechselt nur still in den Klär-Modus,
+  // ohne sofort einen Intake-Turn zu starten — analog zu den anderen Plan-Modi.
+  // Der Intake-Kontext wird bei der nächsten Nutzernachricht über den
+  // before_agent_start-Handler (phase=deciding) injiziert.
+  async function enterDecisionModeFromMenu(
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    if (phase === "deciding" && ctx.isIdle()) {
+      ctx.ui.notify(
+        "Optionen klären ist bereits aktiv – die nächste Nachricht startet den Intake.",
+        "info",
+      );
+      return;
+    }
+    if (!(await enterDecisionMode(ctx))) return;
+    ctx.ui.notify(
+      "Optionen klären aktiv – die nächste Nachricht startet den Intake.",
+      "info",
     );
   }
 
@@ -1551,6 +1595,10 @@ CHANGED_FILES:
     }
     if (request.action === "decide") {
       void runDecisionIntake(request.ctx);
+      return;
+    }
+    if (request.action === "decide-mode") {
+      void enterDecisionModeFromMenu(request.ctx);
       return;
     }
     if (request.action === "work") {

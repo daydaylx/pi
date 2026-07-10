@@ -52,9 +52,13 @@ clarity:
 - **Work** (`work`) — normal work. Selecting Work in Shift+Tab does not
   automatically execute a stored plan; `/work` remains the explicit execution
   command.
-- **Optionen klären** (`"decide"`) — not a `WorkflowMode`; selecting it emits
-  the same `PLAN_ACTION_REQUEST_EVENT` (`action: "decide"`) as `/decide` and
-  the `/plan`/`Ctrl+Shift+X` entries, and does not change `mode`.
+- **Optionen klären** (`"decide"` / `"decide-mode"`) — not a `WorkflowMode`.
+  Selecting it from Shift+Tab switches **silently** into the transient
+  `deciding` phase (`action: "decide-mode"`) without starting a turn, exactly
+  like the other modes — the intake prompt is injected on the next user turn.
+  The explicit entry points `/decide`, the _Optionen klären_ action inside
+  `/plan`, and the `Ctrl+Shift+X` entry keep `action: "decide"` and start the
+  intake immediately. Neither action changes `mode` or the permission level.
 
 **Thinking coupling.** A real mode change also sets the thinking level to the
 mode default (`MODE_THINKING` in `index.ts`): Schnellplan → `medium`,
@@ -120,8 +124,10 @@ Reaching the intake sets a transient `deciding` phase (analogous to the
 `reviewing` phase), starts **no** implementation, and never switches to
 `/work` automatically.
 
-Start it either via `/decide` or via the _Optionen klären_ action inside
-`/plan`. The agent then clarifies the genuinely decision-relevant questions
+Start it via `/decide` or via the _Optionen klären_ action inside `/plan`
+(both start the intake immediately), or switch into the Klär-Modus silently
+from Shift+Tab's _Optionen klären_ entry — the intake then begins on your
+next message. The agent then clarifies the genuinely decision-relevant questions
 using `ask_user` — exactly one focused question per call, 2–4 options each,
 with a short meaning/consequence and an explicit recommendation — and ends the
 turn with a fenced block:
@@ -169,9 +175,11 @@ therefore never leaks as stale context into a later, unrelated plan turn;
 archive errors are non-fatal (notification only, the plan archive stands).
 
 Permissions, tools, and thinking are fully independent of the Decision-Intake.
-Shift+Tab additionally offers the intake as its "Optionen klären" entry (see
-"Plan variants" above) but this never changes `mode`, `Ctrl+Shift+Y` stays the
-permission picker, and no intake action changes the permission level.
+Shift+Tab additionally offers the Klär-Modus as its "Optionen klären" entry
+(see "Plan variants" above): selecting it switches **silently** into
+`deciding` (no immediate turn, no `mode` change), so the intake prompt only
+fires on the next user message. `Ctrl+Shift+Y` stays the permission picker,
+and no intake action changes the permission level.
 
 ## Permissions
 

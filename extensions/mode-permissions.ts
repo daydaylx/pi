@@ -16,6 +16,7 @@ import {
   isPathWithinAllowed,
   type PolicyDecision,
 } from "./shared/permission-policy.ts";
+import { confirmAction } from "./shared/permission-dialog.ts";
 import { runMenu } from "./shared/menu-ui.ts";
 import { buildPermissionMenu } from "./shared/permission-menu.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
@@ -33,8 +34,8 @@ import {
 import { formatPermissionWarning } from "./shared/visual-system.ts";
 
 const STATUS_KEY = "workflow-permission";
+const PERMISSION_STATUS_KEY = "permission-level";
 const PERSISTED_STATE_KEY = "mode-permissions";
-const MAX_PREVIEW = 140;
 const CONFIRM_ELEVATED_PERMISSIONS = false;
 const ENV_PERMISSION_LEVEL = "PI_SUBAGENT_PERMISSION_LEVEL";
 const ENV_WRITE_OVERRIDE = "PI_SUBAGENT_WRITE_OVERRIDE";
@@ -69,13 +70,6 @@ function allowedPathsFromEnv(): string[] | undefined {
     .map((p) => p.trim())
     .filter(Boolean);
   return list.length > 0 ? list : undefined;
-}
-
-function preview(value: string): string {
-  const oneLine = value.replace(/\s+/g, " ").trim();
-  return oneLine.length <= MAX_PREVIEW
-    ? oneLine
-    : `${oneLine.slice(0, MAX_PREVIEW - 1)}…`;
 }
 
 function toolPath(event: ToolCallEvent): string | undefined {
@@ -147,15 +141,12 @@ async function approve(
   decision: PolicyDecision,
   subject: string,
   ctx: ExtensionContext,
+  toolName?: string,
 ): Promise<boolean> {
   if (decision.action === "allow") return true;
   if (decision.action === "block") return false;
   if (!ctx.hasUI || ctx.mode !== "tui") return false;
-
-  const title = decision.hard
-    ? "HARTE WARNUNG — Aktion bestätigen?"
-    : "Riskante Aktion bestätigen?";
-  return ctx.ui.confirm(title, `${decision.reason}\n\n${preview(subject)}`);
+  return confirmAction(ctx, decision, subject, toolName);
 }
 
 export default function modePermissionsExtension(pi: ExtensionAPI): void {
@@ -167,6 +158,12 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     // Footer/Header werden zentral in ux-status.ts gerendert. Dieser alte
     // Status-Key wird nur noch gelöscht, damit keine zweite Statusquelle bleibt.
     ctx.ui.setStatus(STATUS_KEY, undefined);
+    // Separate, kompakte Statusfläche für die aktuelle Permission-Stufe
+    // (unabhängig vom unveränderten formatFooterLine()-Format).
+    ctx.ui.setStatus(
+      PERMISSION_STATUS_KEY,
+      PERMISSION_LEVEL_LABEL[permissionLevel],
+    );
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
       source: "permission",
       writeOverride,
@@ -314,7 +311,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       event.toolName === "bash"
         ? String((event.input as Record<string, unknown>).command ?? "")
         : `${event.toolName}: ${toolPath(event) ?? ""}`;
-    if (await approve(decision, subject, ctx)) return;
+    if (await approve(decision, subject, ctx, event.toolName)) return;
 
     return {
       block: true,
@@ -329,7 +326,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     const decision = decideBash(permissionLevel, event.command, event.cwd, {
       writeOverride,
     });
-    if (await approve(decision, event.command, ctx)) return;
+    if (await approve(decision, event.command, ctx, "bash")) return;
     return {
       result: {
         output:

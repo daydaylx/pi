@@ -1,4 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createInfoBoxComponent } from "./info-box.ts";
+import { glyphsFor, resolveRenderProfile, truncatePlain } from "./render-profile.ts";
 
 // `@earendil-works/pi-tui` is intentionally imported dynamically inside
 // selectWithCustomUi() below, guarded by a `ctx.ui.custom` capability check,
@@ -66,71 +68,97 @@ async function selectWithCustomUi<T>(
       let selectedIndex = initialMenuIndex(entries);
 
       const refresh = () => tui.requestRender();
-      const padAnsi = (value: string, width: number): string => {
-        const missing = Math.max(0, width - visibleWidth(value));
-        return `${value}${" ".repeat(missing)}`;
-      };
+      const profile = resolveRenderProfile({ mode: ctx.mode });
+      const glyphs = glyphsFor(profile);
+      const box = createInfoBoxComponent(
+        {
+          title,
+          sections: [],
+          tone: "accent",
+          background: "customMessageBg",
+          profile,
+          tuiHelpers: { visibleWidth, truncateToWidth, wrapTextWithAnsi, matchesKey, Key },
+        },
+        theme,
+      );
+
       const move = (delta: number) => {
         if (selectedIndex < 0) return;
         selectedIndex = moveMenuIndex(selectedIndex, delta, entries.length);
         refresh();
       };
 
-      return {
-        render(width: number): string[] {
-          const usableWidth = Math.max(24, width);
-          const border = theme.fg("borderMuted", "─".repeat(usableWidth));
-          const lines = [border, theme.fg("accent", theme.bold(` ${title}`))];
-          const cardWidth = Math.max(22, usableWidth - 2);
-          const innerWidth = Math.max(10, cardWidth - 4);
+      const buildMenuLines = (innerWidth: number): string[] => {
+        const lines: string[] = [];
+        let lastSection: string | undefined;
 
-          let lastSection: string | undefined;
-          for (let index = 0; index < entries.length; index += 1) {
-            const entry = entries[index];
-            if (entry.section !== undefined && entry.section !== lastSection) {
-              lines.push("");
-              lines.push(
-                theme.fg("dim", theme.bold(` ${entry.section.toUpperCase()}`)),
-              );
-              lastSection = entry.section;
-            }
-
-            const selected = index === selectedIndex;
-            const marker = entry.current ? "●" : "○";
-            const prefix = selected ? theme.fg("accent", "› ") : "  ";
-            const color = selected ? "accent" : "borderMuted";
-            const textColor = selected ? "accent" : "text";
-            const titleText = `${marker} ${entry.label}`;
-            const top = `┌${"─".repeat(cardWidth - 2)}┐`;
-            const bottom = `└${"─".repeat(cardWidth - 2)}┘`;
-            const cardLine = (content: string): string =>
-              `${prefix}${theme.fg(color, "│")} ${padAnsi(content, innerWidth)} ${theme.fg(color, "│")}`;
-
-            lines.push(`${prefix}${theme.fg(color, top)}`);
-            lines.push(
-              cardLine(
-                selected
-                  ? theme.fg(textColor, theme.bold(truncateToWidth(titleText, innerWidth)))
-                  : theme.fg(textColor, truncateToWidth(titleText, innerWidth)),
-              ),
-            );
-            for (const wrapped of wrapTextWithAnsi(
-              theme.fg("muted", entry.description),
-              innerWidth,
-            ).slice(0, 3)) {
-              lines.push(cardLine(wrapped));
-            }
-            lines.push(`${prefix}${theme.fg(color, bottom)}`);
+        for (let index = 0; index < entries.length; index += 1) {
+          const entry = entries[index];
+          if (entry.section !== undefined && entry.section !== lastSection) {
+            lines.push(theme.fg("dim", theme.bold(entry.section.toUpperCase())));
+            lastSection = entry.section;
           }
 
-          lines.push("");
-          lines.push(
-            theme.fg("dim", " ↑↓ wählen • Enter übernehmen • Esc schließen"),
-          );
-          lines.push(border);
-          return lines;
+          const selected = index === selectedIndex;
+          const marker = entry.current ? glyphs.selected : glyphs.unselected;
+          const cursor = selected ? `${glyphs.cursor} ` : "  ";
+          const statusText = entry.current ? "current" : "option";
+          const textColor = selected ? "accent" : "text";
+          const compact = profile.compact || innerWidth < 60;
+          const titleText = `${cursor}${marker} ${entry.label} [${statusText}]`;
+
+          if (compact) {
+            const descWidth = Math.max(12, innerWidth - visibleWidth(titleText) - 3);
+            const desc = truncateToWidth(entry.description, descWidth, glyphs.ellipsis);
+            const separator = profile.unicode ? "—" : "-";
+            lines.push(
+              `${theme.fg(textColor, selected ? theme.bold(titleText) : titleText)} ${theme.fg("muted", separator)} ${theme.fg("muted", desc)}`,
+            );
+            continue;
+          }
+
+          lines.push(theme.fg(textColor, selected ? theme.bold(titleText) : titleText));
+          const wrapped = wrapTextWithAnsi(theme.fg("muted", entry.description), innerWidth - 2);
+          for (let i = 0; i < wrapped.length && i < 3; i++) {
+            lines.push(`  ${wrapped[i]}`);
+          }
+          if (wrapped.length > 3) {
+            lines.push(
+              theme.fg("dim", `  ${truncatePlain(`${glyphs.ellipsis} ${wrapped.length - 3} weitere Zeile(n)`, innerWidth - 2, glyphs.ellipsis)}`),
+            );
+          }
+        }
+
+        return lines;
+      };
+
+      return {
+        render(width: number): string[] {
+          if (width < 30) {
+            return [theme.fg("warning", "Terminal zu schmal — nutze Fallback-Menü.")];
+          }
+          // InfoBox uses width - 4 for inner content; descriptions are wrapped
+          // to innerWidth - 2 because of the two-space indentation.
+          const innerWidth = Math.max(1, width - 4);
+          const menuLines = buildMenuLines(innerWidth - 2);
+          box.setSections!([
+            { lines: menuLines },
+            {
+              lines: [
+                theme.fg(
+                  "dim",
+                  profile.unicode
+                    ? "↑↓ wählen • Enter übernehmen • Esc schließen"
+                    : "up/down waehlen | Enter uebernehmen | Esc schliessen",
+                ),
+              ],
+            },
+          ]);
+          return box.render(width);
         },
-        invalidate() {},
+        invalidate() {
+          box.invalidate();
+        },
         handleInput(data: string): void {
           if (matchesKey(data, Key.up)) {
             move(-1);
@@ -151,7 +179,7 @@ async function selectWithCustomUi<T>(
       overlay: true,
       overlayOptions: {
         anchor: "center",
-        width: "72%",
+        width: "90%",
         maxHeight: "80%",
         margin: 2,
       },

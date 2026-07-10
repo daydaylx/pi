@@ -29,6 +29,7 @@ import {
   MIN_QUESTION_OPTIONS,
   type Level,
 } from "./shared/ask-user-policy.ts";
+import { glyphsFor, resolveRenderProfile } from "./shared/render-profile.ts";
 
 interface QuestionOption {
   label: string;
@@ -56,6 +57,12 @@ function levelColor(level: Level): "warning" | "success" | "text" {
   if (level === "hoch") return "warning";
   if (level === "niedrig") return "success";
   return "text";
+}
+
+function levelMarker(level: Level): string {
+  if (level === "hoch") return "[HOCH !]";
+  if (level === "mittel") return "[MITTEL ~]";
+  return "[NIEDRIG .]";
 }
 
 // Options with label, description, effort/risk, and optional pro/contra
@@ -255,6 +262,9 @@ export default function askUser(pi: ExtensionAPI) {
 
           const lines: string[] = [];
           const renderWidth = Math.max(1, width);
+          const profile = resolveRenderProfile({ width, mode: ctx.mode });
+          const glyphs = glyphsFor(profile);
+          const optionIndent = renderWidth < 48 ? "  " : "     ";
 
           function addWrapped(text: string) {
             lines.push(...wrapTextWithAnsi(text, renderWidth));
@@ -296,7 +306,7 @@ export default function askUser(pi: ExtensionAPI) {
             const prefix = selected ? theme.fg("accent", "> ") : "  ";
 
             if (opt.isOther === true) {
-              const label = `${i + 1}. ${opt.label}${editMode ? " ✎" : ""}`;
+              const label = `${i + 1}. ${opt.label}${editMode ? ` ${glyphs.edit}` : ""}`;
               const color = selected || editMode ? "accent" : "text";
               addWrappedWithPrefix(prefix, theme.fg(color, label));
               lines.push("");
@@ -312,23 +322,32 @@ export default function askUser(pi: ExtensionAPI) {
               prefix,
               theme.fg(color, `${i + 1}. ${opt.label}`) + tag,
             );
-            addWrappedWithPrefix("     ", theme.fg("muted", opt.description));
             addWrappedWithPrefix(
-              "     ",
+              optionIndent,
+              theme.fg("muted", opt.description),
+            );
+            addWrappedWithPrefix(
+              optionIndent,
               theme.fg("muted", "Aufwand: ") +
-                theme.fg(levelColor(opt.effort), opt.effort) +
+                theme.fg(
+                  levelColor(opt.effort),
+                  `${levelMarker(opt.effort)} ${opt.effort}`,
+                ) +
                 theme.fg("muted", " · Risiko: ") +
-                theme.fg(levelColor(opt.risk), opt.risk),
+                theme.fg(
+                  levelColor(opt.risk),
+                  `${levelMarker(opt.risk)} ${opt.risk}`,
+                ),
             );
             if (opt.pro) {
               addWrappedWithPrefix(
-                "     ",
+                optionIndent,
                 theme.fg("muted", `Vorteil: ${opt.pro}`),
               );
             }
             if (opt.contra) {
               addWrappedWithPrefix(
-                "     ",
+                optionIndent,
                 theme.fg("muted", `Nachteil: ${opt.contra}`),
               );
             }

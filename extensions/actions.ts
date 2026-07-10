@@ -38,6 +38,7 @@ export default function actionsExtension(pi: ExtensionAPI): void {
   let mode: WorkflowMode = "work";
   let permissionLevel: PermissionLevel = "read-write";
   let writeOverride: WriteOverride = "inherit";
+  let deciding = false;
 
   pi.events.on(WORKFLOW_STATUS_EVENT, (event: WorkflowStatusEvent) => {
     if (event.source === "permission") {
@@ -45,17 +46,21 @@ export default function actionsExtension(pi: ExtensionAPI): void {
       writeOverride = event.writeOverride;
     } else {
       mode = event.mode;
+      deciding = event.phase === "deciding";
     }
   });
 
   async function openModeMenu(ctx: ExtensionContext): Promise<void> {
-    const selected = await runMenu(ctx, "Modus", buildModeMenu(mode), {
+    const selected = await runMenu(ctx, "Modus", buildModeMenu(mode, deciding), {
       nonInteractiveHint: "Nutze /plan, um den Modus zu wählen.",
     });
     if (!selected) return;
     if (selected === "decide") {
+      // Shift+Tab verhält sich wie die anderen Plan-Modi: nur in den
+      // Klär-Modus wechseln, ohne sofort den Intake-Prompt zu triggern.
+      // Der Prompt kommt im nächsten Nutzer-Turn (before_agent_start).
       pi.events.emit(PLAN_ACTION_REQUEST_EVENT, {
-        action: "decide",
+        action: "decide-mode",
         ctx,
       } satisfies PlanActionRequest);
       return;

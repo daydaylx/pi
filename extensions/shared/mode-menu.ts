@@ -7,10 +7,17 @@ import type { WorkflowMode } from "./workflow-status.ts";
  * `WorkflowMode` selbst bleibt unverändert auf simple_plan/detailed_plan/work
  * beschränkt — der Aufrufer in actions.ts muss "decide" vor dem Emit von
  * WORKFLOW_MODE_REQUEST_EVENT herausfiltern.
+ *
+ * `deciding` markiert den Klär-Eintrag als aktiv, solange die transiente
+ * `deciding`-Phase läuft (Status DECIDE) — analog zum `current`-Marker der
+ * echten Modus-Einträge.
  */
 export type ModeMenuAction = WorkflowMode | "decide";
 
-export function buildModeMenu(mode: WorkflowMode): MenuEntry<ModeMenuAction>[] {
+export function buildModeMenu(
+  mode: WorkflowMode,
+  deciding = false,
+): MenuEntry<ModeMenuAction>[] {
   return [
     {
       id: "mode-simple-plan",
@@ -43,6 +50,7 @@ export function buildModeMenu(mode: WorkflowMode): MenuEntry<ModeMenuAction>[] {
         "Vorentscheidung klären. 2–4 Optionen · Empfehlung · Decision Brief vor dem Plan",
       section: "Klärung",
       value: "decide",
+      current: deciding,
     },
   ];
 }
