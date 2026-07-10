@@ -5,6 +5,14 @@ Zielsystem: Pi Coding Agent
 Primäre Nutzung: Shift+Tab → Skills → Skill auswählen  
 Wichtig: Der Nutzer soll Skills über ein Menü starten können und nicht über Slash-Commands arbeiten müssen.
 
+Ergänzende Referenz für Agenten-Dokumente-Skills:
+
+```text
+docs/skills/agent-docs-skill-reference.md
+```
+
+---
+
 ## Löschregel
 
 Dieses Dokument ist eine temporäre Spezifikation für den Aufbau aller vorgesehenen Skills.
@@ -62,69 +70,7 @@ Shift+Tab
    - Keine Änderungen vorgenommen, falls read-only/preview-only
    - Zurück zu: vorheriger Modus
 8. Skills dürfen den aktiven Modus nicht dauerhaft ersetzen.
-
----
-
-## Globale Ausgabe für read-only Skills
-
-Read-only Skills sollen ein einheitliches Format nutzen:
-
-```text
-Skill:
-<Name>
-
-Profil:
-read-only
-
-Anfrage:
-<Nutzerauftrag oder Standardprüfung>
-
-Gesammelte Informationen:
-
-1. <Bereich>
-- Gefunden:
-- Nicht gefunden:
-- Nicht prüfbar:
-
-2. <Bereich>
-- Gefunden:
-- Nicht gefunden:
-- Nicht prüfbar:
-
-Quellen:
-- <Datei, Command oder Tool>
-
-Auffälligkeiten als Beobachtung:
-- Nur beschreibende Beobachtungen.
-- Keine To-dos.
-- Kein Plan.
-- Keine Umsetzungsempfehlung.
-
-Status:
-Informationssammlung abgeschlossen.
-Keine Änderungen vorgenommen.
-```
-
-Verbotene Abschnitte in read-only Skills:
-
-- Plan
-- To-dos
-- Roadmap
-- Fix
-- Umsetzung
-- Empfehlung als Hauptausgabe
-- Refactoring-Vorschlag
-
-Erlaubte Formulierungen:
-
-- Gefunden
-- Nicht gefunden
-- Nicht prüfbar
-- Vorhanden
-- Nicht vorhanden
-- Auffällig
-- Quelle
-- Keine Änderungen vorgenommen
+9. Agenten-Dokumente-Skills müssen zusätzlich `docs/skills/agent-docs-skill-reference.md` einhalten.
 
 ---
 
@@ -166,8 +112,8 @@ Nicht erlaubt:
 - PRs erstellen, schließen oder bearbeiten
 - Dependencies installieren
 - Permissions ändern
-- Plan erstellen
-- Umsetzungsempfehlung als Hauptausgabe geben
+- Plan erstellen, außer der jeweilige Skill ist ausdrücklich als Setup-Analyse mit Wartepunkt definiert
+- Umsetzungsempfehlung als Hauptausgabe geben, außer sie ist Teil des definierten Agenten-Setup-Ausgabeformats
 
 ### preview-only
 
@@ -220,6 +166,45 @@ Nicht erlaubt:
 
 ---
 
+## Globale Ausgabe für normale read-only Skills
+
+```text
+Skill:
+<Name>
+
+Profil:
+read-only
+
+Anfrage:
+<Nutzerauftrag oder Standardprüfung>
+
+Gesammelte Informationen:
+
+1. <Bereich>
+- Gefunden:
+- Nicht gefunden:
+- Nicht prüfbar:
+
+Quellen:
+- <Datei, Command oder Tool>
+
+Auffälligkeiten als Beobachtung:
+- Nur beschreibende Beobachtungen.
+- Keine To-dos.
+- Kein Plan.
+- Keine Umsetzungsempfehlung.
+
+Status:
+Informationssammlung abgeschlossen.
+Keine Änderungen vorgenommen.
+```
+
+Ausnahme:
+
+Die Agenten-Dokumente-Skills nutzen die speziellen Ausgabeformate aus `docs/skills/agent-docs-skill-reference.md`, weil diese bewusst Phase-1-Analyse, Phase-2-Setup und Review-Ausgaben definieren.
+
+---
+
 ## Technische Mindeststruktur pro Skill
 
 Jeder Skill soll als registrierbares Objekt oder äquivalente Struktur abbildbar sein:
@@ -239,6 +224,7 @@ allowedCommands
 blockedCommands
 outputSections
 forbiddenSections
+referenceDocs
 finalStatus
 handler oder entrypoint
 ```
@@ -251,202 +237,29 @@ handler oder entrypoint
 
 ## Kategorie: Projekt
 
-### 1. Projektübersicht
+| id | Name | Profil | Input | Zweck |
+|---|---|---|---|---|
+| `project-overview` | Projektübersicht | read-only | optional | Sammelt Projektname, Paketmanager, Framework/Runtime, wichtige Ordner, Scripts, Konfiguration und Doku. |
+| `file-structure-search` | Datei-/Struktur-Suche | read-only | required | Findet relevante Dateien, Ordner, Funktionen, Konfigurationen oder Agenten-Dateien zu einer Nutzeranfrage. |
+| `dependency-config-check` | Dependency-/Config-Check | read-only | optional | Sammelt Paket-, Script-, Dependency- und Konfigurationsinformationen. |
 
-```text
-id: project-overview
-name: Projektübersicht
-category: Projekt
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Sammelt eine neutrale Übersicht über das aktuelle Projekt.
-
-Sammelt:
-
-- Projektname
-- Paketmanager
-- Framework/Runtime, soweit erkennbar
-- wichtige Ordner
-- wichtige Konfigurationsdateien
-- vorhandene Scripts
-- vorhandene Dokumentation
-- vorhandene Agent-/Skill-/Extension-Dateien
-- grobe Projektstruktur
-
-Erlaubte Operationen:
-
-- Datei- und Ordnerstruktur lesen
-- package.json lesen
-- README/Dokumentation lesen
-- Konfigurationsdateien lesen
-
-Blockierte Operationen:
+Blockiert für alle Projekt-Skills:
 
 - Dateiänderungen
-- Installation von Dependencies
-- Formatierung
-- Planerstellung
-
-Ausgabeabschnitte:
-
-- Projekt
-- Struktur
-- Scripts
-- Konfiguration
-- Dokumentation
-- Agent-/Skill-/Extension-Dateien
-- Nicht gefunden
-- Nicht prüfbar
-- Status
-
----
-
-### 2. Datei-/Struktur-Suche
-
-```text
-id: file-structure-search
-name: Datei-/Struktur-Suche
-category: Projekt
-profile: read-only
-inputMode: required
-requiresConfirmation: false
-```
-
-Zweck:
-
-Findet relevante Dateien, Ordner, Funktionen, Konfigurationen oder Agenten-Dateien zu einer Nutzeranfrage.
-
-Beispielanfragen:
-
-- Finde alles zu subagent.
-- Finde alle Dateien zum Shift+Tab-Menü.
-- Finde agent.md, agents/*.md und Extension-Dateien.
-
-Sammelt:
-
-- passende Dateien
-- Trefferstellen
-- Ordnerstruktur
-- Dateitypen
-- Suchbegriffe
-- mögliche Entry-Points
-
-Erlaubte Operationen:
-
-- Dateisuche
-- ripgrep/grep mit lesenden Suchmustern
-- Dateien lesen
-
-Blockierte Operationen:
-
-- Dateiänderungen
-- automatische Umbenennungen
-- automatische Reorganisation
-
-Ausgabeabschnitte:
-
-- Anfrage
-- Treffer
-- Relevante Dateien
-- Relevante Ordner
-- Nicht gefunden
-- Quellen
-- Status
-
----
-
-### 3. Dependency-/Config-Check
-
-```text
-id: dependency-config-check
-name: Dependency-/Config-Check
-category: Projekt
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Sammelt Paket-, Script- und Konfigurationsinformationen.
-
-Sammelt:
-
-- package.json
-- lockfile
-- Scripts
-- Dependencies
-- DevDependencies
-- Node-/Runtime-Versionen, falls definiert
-- TypeScript-Konfiguration
-- Build-Tool-Konfiguration
-- Lint-/Format-Konfiguration
-- Extension-/Agent-Konfigurationen
-
-Erlaubte Operationen:
-
-- package.json lesen
-- Lockfiles lesen
-- Konfigurationsdateien lesen
-
-Blockierte Operationen:
-
 - Dependency-Installation
-- Versionsupdates
-- Paketmanager-Schreibbefehle
-- automatische Config-Änderungen
-
-Ausgabeabschnitte:
-
-- Paketmanager
-- Scripts
-- Dependencies
-- DevDependencies
-- Runtime
-- Konfiguration
-- Nicht gefunden
-- Status
+- automatische Reorganisation
+- Planerstellung als Hauptausgabe
 
 ---
 
 ## Kategorie: Git
 
-### 4. Git-Status
+| id | Name | Profil | Input | Zweck |
+|---|---|---|---|---|
+| `git-status` | Git-Status | read-only | optional | Sammelt aktuellen Branch, Status, lokale Änderungen, Branches, Remote, letzte Commits und Diff-Statistik. |
+| `recent-changes` | Letzte Änderungen | read-only | optional | Macht sichtbar, was zuletzt geändert wurde, welche Dateien betroffen sind und welche Diff-Zusammenfassung existiert. |
 
-```text
-id: git-status
-name: Git-Status
-category: Git
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Sammelt den aktuellen Git-Zustand.
-
-Sammelt:
-
-- aktueller Branch
-- Git-Status
-- staged changes
-- unstaged changes
-- untracked files
-- lokale Branches
-- Remote-Branches
-- Remote-URL
-- Tracking-Branch
-- ahead/behind-Status, falls verfügbar
-- letzte Commits
-- Diff-Statistik
-
-Erlaubte Commands:
+Erlaubte Git-Kommandos für read-only Skills:
 
 ```text
 git status --short --branch
@@ -455,9 +268,12 @@ git branch -a
 git remote -v
 git log --oneline -n 10
 git diff --stat
+git diff
+git show
+git ls-files
 ```
 
-Blockierte Commands:
+Blockierte Git-Kommandos für read-only Skills:
 
 ```text
 git add
@@ -466,180 +282,43 @@ git push
 git pull
 git merge
 git rebase
-git reset
-git clean
 git checkout
 git switch
 git branch -d
 git branch -D
+git reset
+git clean
 git stash
 git tag
 git revert
 git cherry-pick
 ```
 
-Ausgabeabschnitte:
-
-- Branch
-- Status
-- Lokale Änderungen
-- Branches
-- Remote
-- Letzte Commits
-- Diff-Statistik
-- Nicht prüfbar
-- Status
-
----
-
-### 5. Letzte Änderungen
-
-```text
-id: recent-changes
-name: Letzte Änderungen
-category: Git
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Macht sichtbar, was zuletzt geändert wurde.
-
-Sammelt:
-
-- letzte Commits
-- geänderte Dateien
-- Diff-Zusammenfassung
-- aktuelle nicht committed Änderungen
-- betroffene Module/Funktionen, soweit lesbar
-- neue/gelöschte Dateien
-
-Erlaubte Operationen:
-
-- Git-Log lesen
-- Git-Diff lesen
-- betroffene Dateien lesen
-
-Blockierte Operationen:
-
-- Dateien ändern
-- Änderungen rückgängig machen
-- Commit/Pull/Push/Merge/Rebase
-- Plan aus Änderungen erstellen
-
-Ausgabeabschnitte:
-
-- Letzte Commits
-- Aktuelle lokale Änderungen
-- Geänderte Dateien
-- Diff-Statistik
-- Betroffene Bereiche
-- Auffälligkeiten als Beobachtung
-- Status
-
 ---
 
 ## Kategorie: GitHub
 
-### 6. Issues & PRs lesen
+| id | Name | Profil | Input | Zweck |
+|---|---|---|---|---|
+| `github-issues-prs-read` | Issues & PRs lesen | read-only | optional | Sammelt offene Issues, PRs, Labels, letzte Aktualisierung und Branch-Bezug, falls GitHub-Integration verfügbar ist. |
 
-```text
-id: github-issues-prs-read
-name: Issues & PRs lesen
-category: GitHub
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
+Blockiert:
 
-Zweck:
-
-Sammelt GitHub-Informationen zum Repository, falls eine Integration verfügbar ist.
-
-Sammelt:
-
-- offene Issues
-- offene Pull Requests
-- Labels
-- letzte Aktualisierung
-- Branch-Bezug, falls erkennbar
-- verknüpfte Issues/PRs zum aktuellen Branch, falls erkennbar
-
-Erlaubte Operationen:
-
-- Issues lesen
-- PRs lesen
-- Labels lesen
-- Kommentare lesen, falls nötig
-
-Blockierte Operationen:
-
-- Issues erstellen
-- Issues schließen
-- Issues bearbeiten
+- Issues erstellen, schließen oder bearbeiten
 - Kommentare schreiben
 - Labels ändern
-- PRs ändern
-- PRs mergen
-- Reviews abgeben
-
-Ausgabeabschnitte:
-
-- Repository
-- Offene Issues
-- Offene PRs
-- Labels
-- Zuletzt aktualisiert
-- Branch-Bezug
-- Nicht prüfbar
-- Status
+- PRs ändern, mergen oder reviewen
 
 ---
 
 ## Kategorie: Code
 
-### 7. Code-Inspection
+| id | Name | Profil | Input | Zweck |
+|---|---|---|---|---|
+| `code-inspection` | Code-Inspection | read-only | required | Liest und beschreibt eine bestimmte Datei, Funktion, Komponente oder technische Stelle. |
+| `todo-fixme-search` | TODO/FIXME-Suche | read-only | optional | Sammelt TODO-, FIXME-, HACK-, NOTE- oder ähnliche Marker im Projekt. |
 
-```text
-id: code-inspection
-name: Code-Inspection
-category: Code
-profile: read-only
-inputMode: required
-requiresConfirmation: false
-```
-
-Zweck:
-
-Liest und beschreibt eine bestimmte Datei, Funktion, Komponente oder technische Stelle.
-
-Input-Prompt:
-
-```text
-Welche Datei, Funktion oder Komponente soll gelesen werden?
-```
-
-Sammelt:
-
-- relevante Dateien
-- relevante Funktionen
-- Imports/Exports
-- Aufrufstellen
-- grobe Abhängigkeiten
-- vorhandene Kommentare
-- TODO/FIXME
-- sichtbare Konfigurationsverweise
-
-Erlaubte Operationen:
-
-- Dateisuche
-- Dateien lesen
-- Imports/Exports lesen
-- Aufrufstellen suchen
-
-Blockierte Operationen:
+Blockiert:
 
 - Dateiänderungen
 - Refactoring
@@ -649,118 +328,31 @@ Blockierte Operationen:
 - Dependency-Installation
 - Planerstellung
 
-Ausgabeabschnitte:
-
-- Anfrage
-- Relevante Dateien
-- Relevante Funktionen
-- Aufrufstellen
-- Imports/Exports
-- Beobachtungen
-- Nicht gefunden
-- Nicht prüfbar
-- Status
-
----
-
-### 8. TODO/FIXME-Suche
-
-```text
-id: todo-fixme-search
-name: TODO/FIXME-Suche
-category: Code
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Sammelt vorhandene TODO-, FIXME-, HACK-, NOTE- oder ähnliche Marker im Projekt.
-
-Sammelt:
-
-- TODO-Kommentare
-- FIXME-Kommentare
-- HACK-Kommentare
-- NOTE-Kommentare
-- Dateipfade
-- Zeilennummern, falls verfügbar
-- Kontextzeilen, falls sicher lesbar
-
-Erlaubte Operationen:
-
-- Suche in Dateien
-- Lesen von Trefferstellen
-
-Blockierte Operationen:
-
-- Kommentare ändern
-- TODOs entfernen
-- Issues erstellen
-- Plan erstellen
-
-Ausgabeabschnitte:
-
-- Trefferübersicht
-- Treffer nach Datei
-- Marker-Typen
-- Nicht gefunden
-- Status
-
 ---
 
 ## Kategorie: Dokumente
 
-### 9. Dokumenten-Diff
-
-```text
-id: document-diff
-name: Dokumenten-Diff
-category: Dokumente
-profile: read-only
-inputMode: required
-requiresConfirmation: false
-```
-
-Zweck:
-
-Vergleicht Dokumente, Prompt-Dateien, Agent-Dateien, Specs oder alte/neue Versionen miteinander.
+| id | Name | Profil | Input | Zweck |
+|---|---|---|---|---|
+| `document-diff` | Dokumenten-Diff | read-only | required | Vergleicht Dokumente, Prompt-Dateien, Agent-Dateien, Specs oder alte/neue Versionen. |
+| `document-consistency-check` | Dokumenten-Konsistenzcheck | read-only | optional | Sucht in Projektdokumenten nach widersprüchlichen, veralteten oder doppelt gepflegten Regeln. |
 
 Sinnvoll für:
 
-- AGENTS.md
-- CLAUDE.md
-- CODEX.md
-- README.md
-- docs/*.md
-- agents/*.md
-- prompts/*.md
+- `AGENTS.md`
+- `CLAUDE.md`
+- `CODEX.md`
+- `README.md`
+- `docs/*.md`
+- `agents/*.md`
+- `prompts/*.md`
 - Konzept-Dateien
 - Arbeitsaufträge
 - Plan-Dateien
 - Projektregeln
 - Modus-/Skill-Dokumentation
 
-Sammelt:
-
-- welche Dokumente verglichen wurden
-- welche Version neuer/älter ist, falls erkennbar
-- fehlende Abschnitte
-- doppelte Abschnitte
-- widersprüchliche Regeln
-- unterschiedliche Formulierungen gleicher Regeln
-- Inhalte, die in Dokument A stehen, aber in Dokument B fehlen
-
-Erlaubte Operationen:
-
-- Dokumente lesen
-- Überschriften extrahieren
-- Abschnitte vergleichen
-- ähnliche Inhalte finden
-- Widersprüche anzeigen
-
-Blockierte Operationen:
+Blockiert:
 
 - Dokumente ändern
 - Dokumente zusammenführen
@@ -768,304 +360,105 @@ Blockierte Operationen:
 - alte Dokumente löschen
 - automatische Aktualisierung
 
-Ausgabeabschnitte:
-
-- Verglichene Dokumente
-- Gemeinsame Abschnitte
-- Fehlende Abschnitte
-- Unterschiede
-- Widersprüche
-- Doppelte Inhalte
-- Nicht prüfbar
-- Status
-
----
-
-### 10. Dokumenten-Konsistenzcheck
-
-```text
-id: document-consistency-check
-name: Dokumenten-Konsistenzcheck
-category: Dokumente
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Sucht in Projektdokumenten nach widersprüchlichen, veralteten oder doppelt gepflegten Regeln.
-
-Sammelt:
-
-- alle relevanten Markdown-/Text-Dokumente
-- Projektregeln
-- Modusregeln
-- Skill-Regeln
-- Testanweisungen
-- Buildanweisungen
-- Sicherheitsregeln
-- widersprüchliche Aussagen
-- doppelte Abschnitte
-- fehlende Querverweise
-
-Erlaubte Operationen:
-
-- Dokumente suchen
-- Dokumente lesen
-- Abschnitte vergleichen
-
-Blockierte Operationen:
-
-- Dokumente ändern
-- Dokumente löschen
-- Dokumente neu sortieren
-- automatische Vereinheitlichung
-
-Ausgabeabschnitte:
-
-- Geprüfte Dokumente
-- Regeln/Abschnitte
-- Widersprüche
-- Doppelte Inhalte
-- Fehlende Querverweise
-- Nicht prüfbar
-- Status
-
 ---
 
 ## Kategorie: Agenten-Dokumente
 
-### 11. Agent-Dokumente prüfen
+Alle Skills in dieser Kategorie müssen zusätzlich diese Referenz einhalten:
 
 ```text
-id: agent-docs-check
-name: Agent-Dokumente prüfen
-category: Agenten-Dokumente
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
+docs/skills/agent-docs-skill-reference.md
 ```
 
-Zweck:
-
-Prüft, ob ein Projekt sauber für Coding-Agenten vorbereitet ist.
-
-Sucht nach:
-
-- AGENTS.md
-- agent.md
-- CLAUDE.md
-- GEMINI.md
-- CODEX.md
-- README.md
-- CONTRIBUTING.md
-- docs/
-- prompts/
-- agents/
-- .github/copilot-instructions.md
-- Skill-Dateien
-- Projektregeln
-- Modusregeln
-- Testanweisungen
-- Buildanweisungen
-- Sicherheitsregeln
-- Permissions-Regeln
-- Do-not-Regeln
-- Abschlusskriterien
-
-Sammelt:
-
-- vorhandene Agent-Dokumente
-- fehlende Agent-Dokumente
-- vorhandene Regeln
-- fehlende Regeln
-- widersprüchliche Regeln
-- unklare Zuständigkeiten zwischen Dokumenten
-- Hinweise auf veraltete Agenten-Anweisungen
-
-Erlaubte Operationen:
-
-- Dateien suchen
-- Dokumente lesen
-- Regeln extrahieren
-- Lücken beschreiben
-
-Blockierte Operationen:
-
-- Dokumente erstellen
-- Dokumente ändern
-- Regeln ergänzen
-- Dateien löschen
-- automatische Einrichtung
-
-Ausgabeabschnitte:
-
-- Vorhanden
-- Nicht gefunden
-- Unvollständig
-- Widersprüchlich
-- Nicht prüfbar
-- Status
-
----
-
-### 12. Agent-Dokumente vorbereiten
+Diese Kategorie folgt ausdrücklich dem zweistufigen Modell:
 
 ```text
-id: agent-docs-setup-preview
-name: Agent-Dokumente vorbereiten
-category: Agenten-Dokumente
-profile: preview-only
-inputMode: optional
-requiresConfirmation: false
+Phase 1 = read-only Analyse / Review
+Phase 2 = Schreiben nur nach explizitem Go
 ```
 
-Zweck:
+| id | Name | Profil | Input | Zweck |
+|---|---|---|---|---|
+| `agent-docs-check` | Agent-Dokumente prüfen | read-only | optional | Prüft, ob ein Repository sauber für agentische Coding-Workflows vorbereitet ist. |
+| `agent-docs-setup-preview` | Agent-Dokumente vorbereiten | preview-only | optional | Erzeugt nur eine Vorschau sinnvoller Agenten-Dokumente und Inhalte. |
+| `agent-docs-setup` | Agent-Dokumente einrichten | write | required | Legt Agenten-Dokumente nach Analyse, Preview und explizitem Go an oder aktualisiert sie. |
+| `agent-docs-review` | Agent-Dokumente reviewen | read-only | optional | Prüft ein vorhandenes Agenten-Setup streng gegen Code, Scripts, Doku, Claude-Code-Struktur und Overengineering. |
 
-Erzeugt nur eine Vorschau, welche Agent-Dokumente sinnvoll wären und welche Inhalte sie enthalten könnten.
+### `agent-docs-check`
 
-Wichtig:
+Muss prüfen:
 
-Dieser Skill darf nichts schreiben. Er erzeugt nur eine Vorschau.
+- Projektgrundlage
+- bestehende Agenten-Dateien
+- Claude-Code-Struktur
+- Projektdokumentation
+- Automatisierung und Qualität
+- Risiken durch sensible Daten, Secrets, lokale Nutzerdaten, API-Keys, Deployment-Credentials und leicht veränderbare Produktentscheidungen
 
-Sammelt:
+Muss als Ergebnis `# Agenten-Setup-Analyse` liefern und am Ende auf `Warte auf dein Go für Phase 2.` stoppen.
 
-- vorhandene Agent-Dokumente
-- fehlende Agent-Dokumente
-- Projektstruktur
-- Scripts
-- Test-/Build-Kommandos
-- Modus-/Permission-Regeln
-- mögliche Zielstruktur für Agent-Dokumente
+### `agent-docs-setup-preview`
 
-Darf:
+Muss nur Vorschauen erzeugen.
 
-- Dateinamen vorschlagen
-- Dokumentstruktur vorschlagen
-- Inhalte als Vorschau ausgeben
-- Unterschiede zwischen Bestand und Vorschau anzeigen
+Muss anhand des echten Projektkontexts entscheiden, welche Dateien sinnvoll sind. Keine Doku-Deko.
 
-Darf nicht:
+Mögliche Dateien:
 
-- Dateien schreiben
-- Dateien überschreiben
-- Dateien löschen
-- Änderungen anwenden
-- Commits erstellen
-- Push ausführen
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/CODEMAP.md`
+- `docs/AGENT_CONTEXT_PACKS.md`
+- `docs/CURRENT_STATUS.md`
+- `docs/VALIDATION_MATRIX.md`
+- `docs/decisions/*.md`
+- `docs/SECURITY_PRIVACY_CONTEXT.md`
+- `docs/PRIVACY_CONTEXT.md`
+- `docs/MANUAL_TEST_SCENARIOS.md`
+- `docs/UI_CONTEXT.md`, nur bei UI-/App-Projekten
+- `docs/DESIGN_CONTEXT.md`, nur bei UI-/App-Projekten
+- `docs/DATA_MODEL.md`, nur bei Daten/Persistenz
+- `docs/DEPLOYMENT_CONTEXT.md`, nur bei Deployment/Hosting
+- `docs/MODEL_PROVIDER_CONTEXT.md`, nur bei KI-/LLM-/Provider-Projekten
+- `.claude/rules/*.md`, `.claude/agents/*.md`, `.claude/commands/*.md`, nur bei größeren Projekten oder klar wiederkehrenden Spezialaufgaben
 
-Ausgabeabschnitte:
+### `agent-docs-setup`
 
-- Bestehende Dokumente
-- Fehlende Dokumente
-- Vorgeschlagene neue Dokumente
-- Vorgeschlagene Inhalte als Vorschau
-- Keine Änderungen vorgenommen
-- Status
+Darf erst nach:
 
----
+1. read-only Analyse,
+2. Preview,
+3. explizitem `Go`,
+4. Workmodus oder expliziter Schreibfreigabe
 
-### 13. Agent-Dokumente einrichten
+Dateien schreiben.
 
-```text
-id: agent-docs-setup
-name: Agent-Dokumente einrichten
-category: Agenten-Dokumente
-profile: write
-inputMode: required
-requiresConfirmation: true
-```
+Muss echte Pfade und echte Commands nutzen. Darf keine Wunscharchitektur erzeugen.
 
-Zweck:
+### `agent-docs-review`
 
-Legt Agent-Dokumente an oder aktualisiert sie. Dieser Skill ist nicht read-only und darf nur mit expliziter Freigabe laufen.
+Muss strikt read-only arbeiten und das Agenten-Setup gegen folgende Kriterien prüfen:
 
-Sicherer Ablauf:
+- Vollständigkeit
+- Korrektheit
+- Claude-Code-Kompatibilität
+- Agenten-Nutzen
+- Widerspruchsfreiheit
+- Sicherheit/Datenschutz
+- keine Doku-Bürokratie
 
-```text
-Skill starten
-→ bestehende Dokumente prüfen
-→ fehlende Dokumente anzeigen
-→ vorgeschlagene Dateien als Vorschau erzeugen
-→ Nutzer bestätigt mit Go
-→ erst dann Dateien schreiben
-```
-
-Voraussetzungen:
-
-- Workmodus aktiv oder explizite Schreibfreigabe
-- Vorschau wurde angezeigt
-- Nutzer bestätigt mit Go
-
-Darf nach Freigabe:
-
-- AGENTS.md erstellen
-- docs/agent-workflow.md erstellen
-- agents/README.md erstellen
-- vorhandene Agent-Dokumente gezielt aktualisieren
-
-Darf nie ohne Freigabe:
-
-- Dateien schreiben
-- Dateien überschreiben
-- Dateien löschen
-- Commits erstellen
-- Push ausführen
-
-Ausgabeabschnitte:
-
-- Bestehende Dokumente
-- Vorgeschlagene Änderungen
-- Vorschau
-- Freigabe erforderlich
-- Ausgeführte Änderungen, falls Go bestätigt
-- Status
-
-Hinweis:
-
-Dieser Skill sollte erst nach stabiler Umsetzung von `agent-docs-check` und `agent-docs-setup-preview` aktiviert werden.
+Muss `PASS`, `PASS MIT NACHARBEIT` oder `FAIL` ausgeben.
 
 ---
 
 ## Kategorie: Pi-System
 
-### 14. Subagent-Doctor
+| id | Name | Profil | Input | Zweck |
+|---|---|---|---|---|
+| `subagent-doctor` | Subagent-Doctor | read-only | optional | Sammelt Informationen über Subagenten-System, Extension-Dateien und Tool-Registrierung. |
+| `tool-extension-check` | Tool-/Extension-Check | read-only | optional | Sammelt sichtbare Informationen über Tools, Extensions und Registrierungen im Pi-System. |
 
-```text
-id: subagent-doctor
-name: Subagent-Doctor
-category: Pi-System
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Sammelt Informationen über Subagenten-System, Extension-Dateien und Tool-Registrierung.
-
-Sammelt:
-
-- vorhandene Subagent-Dateien
-- agents/*.md
-- Extension-Dateien
-- Subagent-Registry
-- Tool-Registrierung
-- Sichtbarkeit in /tools, falls technisch verfügbar
-- /subagent-list, falls vorhanden
-- /subagent-doctor, falls vorhanden
-- letzte erkennbare Subagent-Nutzung, falls gespeichert
-- Fehler in Pfaden, Namen oder Konfigurationen
-
-Erlaubte Operationen:
-
-- Dateien suchen
-- Dateien lesen
-- Tool-/Extension-Registry lesen
-- vorhandene Diagnosecommands lesen/aufrufen, wenn read-only
-
-Blockierte Operationen:
+Blockiert:
 
 - Subagenten-Dateien ändern
 - Extension neu schreiben
@@ -1073,94 +466,19 @@ Blockierte Operationen:
 - Tools registrieren oder entfernen
 - automatische Reparatur
 
-Ausgabeabschnitte:
-
-- Subagent-Dateien
-- Agent-Definitionen
-- Extension-Dateien
-- Tool-Registrierung
-- Commands
-- Letzte Nutzung
-- Nicht gefunden
-- Nicht prüfbar
-- Status
-
----
-
-### 15. Tool-/Extension-Check
-
-```text
-id: tool-extension-check
-name: Tool-/Extension-Check
-category: Pi-System
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Sammelt sichtbare Informationen über Tools, Extensions und Registrierungen im Pi-System.
-
-Sammelt:
-
-- vorhandene Tool-Dateien
-- Extension-Dateien
-- Registry-Dateien
-- geladene Tools, falls sichtbar
-- Commands/Tool-Namen
-- fehlerhafte oder doppelte Registrierungen, soweit erkennbar
-
-Erlaubte Operationen:
-
-- Dateien suchen
-- Dateien lesen
-- Registry lesen
-- read-only Diagnose ausführen
-
-Blockierte Operationen:
-
-- Tool-Dateien ändern
-- Extension-Dateien ändern
-- Registry ändern
-- Tools aktivieren/deaktivieren
-- automatische Reparatur
-
-Ausgabeabschnitte:
-
-- Tools
-- Extensions
-- Registry
-- Sichtbarkeit
-- Doppelte Einträge
-- Nicht gefunden
-- Nicht prüfbar
-- Status
-
 ---
 
 ## Kategorie: Checks
 
-### 16. Test-/Build-Check
+| id | Name | Profil | Input | Zweck |
+|---|---|---|---|---|
+| `test-build-check` | Test-/Build-Check | command-limited | optional | Führt definierte Test-, Lint- oder Build-Kommandos aus und zeigt Ergebnisse. |
+| `release-deploy-check` | Release-/Deploy-Check | read-only | optional | Sammelt Informationen über Build-, Deploy-, CI/CD- und Release-Strukturen. |
+| `security-surface-check` | Security-Surface-Check | read-only | optional | Sammelt sichtbare Sicherheitsflächen ohne Exploit-Anleitungen oder Änderungen. |
 
-```text
-id: test-build-check
-name: Test-/Build-Check
-category: Checks
-profile: command-limited
-inputMode: optional
-requiresConfirmation: true
-```
+`test-build-check` ist nicht strikt read-only, weil Tests und Builds Cache-, Coverage-, Log- oder Build-Dateien erzeugen können.
 
-Zweck:
-
-Führt definierte Test-, Lint- oder Build-Kommandos aus und zeigt die Ergebnisse.
-
-Wichtig:
-
-Dieser Skill ist nicht strikt read-only, weil Tests und Builds Cache-, Coverage-, Log- oder Build-Dateien erzeugen können.
-
-Erlaubte Commands nur per Allowlist:
+Allowlist für `test-build-check`:
 
 ```text
 npm test
@@ -1175,7 +493,7 @@ yarn build
 yarn lint
 ```
 
-Blockierte Commands:
+Blockiert:
 
 - freie Shell-Kommandos
 - install-Kommandos
@@ -1183,123 +501,6 @@ Blockierte Commands:
 - git write commands
 - deploy commands
 - publish commands
-
-Ausgabeabschnitte:
-
-- Erkannter Paketmanager
-- Gefundene Scripts
-- Ausgeführte Commands
-- Ergebnis
-- Fehlerausgabe
-- Nicht ausgeführt
-- Status
-
----
-
-### 17. Release-/Deploy-Check
-
-```text
-id: release-deploy-check
-name: Release-/Deploy-Check
-category: Checks
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Sammelt Informationen darüber, ob das Projekt Deploy-/Release-Strukturen besitzt.
-
-Sammelt:
-
-- Build-Scripts
-- Deploy-Konfiguration
-- GitHub Actions
-- Cloudflare/Vercel/Netlify-Konfiguration
-- Environment-Beispiele
-- Release-Dokumentation
-- CI-Konfiguration
-
-Erlaubte Operationen:
-
-- Dateien suchen
-- Dateien lesen
-- Workflows lesen
-- Konfigurationsdateien lesen
-
-Blockierte Operationen:
-
-- Build ausführen
-- Deploy ausführen
-- Secrets ändern
-- Workflows ändern
-- Releases erstellen
-
-Ausgabeabschnitte:
-
-- Build
-- Deploy-Konfiguration
-- CI/CD
-- Environment
-- Release-Dokumentation
-- Nicht gefunden
-- Nicht prüfbar
-- Status
-
----
-
-### 18. Security-Surface-Check
-
-```text
-id: security-surface-check
-name: Security-Surface-Check
-category: Checks
-profile: read-only
-inputMode: optional
-requiresConfirmation: false
-```
-
-Zweck:
-
-Sammelt sichtbare Sicherheitsflächen im Projekt, ohne Exploit-Anleitungen oder Änderungen zu erzeugen.
-
-Sammelt:
-
-- .env-Hinweise
-- API-Key-Verwendung
-- unsichere Scripts
-- Child-Process-Nutzung
-- Shell-Ausführung
-- Permissions
-- Netzwerkzugriffe
-- Auth-Konfiguration
-- sensible Dateien
-- öffentlich sichtbare Secrets-Hinweise
-
-Erlaubte Operationen:
-
-- Dateien suchen
-- Dateien lesen
-- statische Treffer anzeigen
-
-Blockierte Operationen:
-
-- Exploit-Erstellung
-- Angriffsschritte
-- Secrets ausgeben, falls gefunden
-- Änderungen an Sicherheitskonfiguration
-- automatische Fixes
-
-Ausgabeabschnitte:
-
-- Sichtbare Sicherheitsflächen
-- Potenziell sensible Dateien
-- Shell/Child-Process
-- Netzwerk/Auth
-- Nicht gefunden
-- Nicht prüfbar
-- Status
 
 ---
 
@@ -1312,8 +513,6 @@ Ausgabeabschnitte:
 - Skill-Metadaten anzeigen
 - Skill auswählen
 - Rückkehr zum vorherigen Modus
-
-Noch keine komplexe Ausführung.
 
 ### Phase 2: Skill-Profile und Guards
 
@@ -1342,18 +541,19 @@ Danach umsetzen:
 8. Dokumenten-Konsistenzcheck
 9. Agent-Dokumente prüfen
 10. Agent-Dokumente vorbereiten
+11. Agent-Dokumente reviewen
 
-### Phase 5: Erweiterte Checks
+### Phase 5: Erweiterte Checks und Write-Skills
 
 Später umsetzen:
 
-11. Dependency-/Config-Check
-12. Issues & PRs lesen
-13. Tool-/Extension-Check
-14. Test-/Build-Check
-15. Release-/Deploy-Check
-16. Security-Surface-Check
-17. Agent-Dokumente einrichten
+12. Dependency-/Config-Check
+13. Issues & PRs lesen
+14. Tool-/Extension-Check
+15. Test-/Build-Check
+16. Release-/Deploy-Check
+17. Security-Surface-Check
+18. Agent-Dokumente einrichten
 
 ---
 
@@ -1369,9 +569,10 @@ Dieses Dokument darf gelöscht werden, wenn alle folgenden Punkte erfüllt sind:
 6. Preview-only Skills schreiben keine Dateien.
 7. Command-limited Skills nutzen eine Allowlist.
 8. Write Skills verlangen explizite Freigabe.
-9. Alle Skills haben ein einheitliches Ausgabeformat.
+9. Alle Skills haben ein einheitliches Ausgabeformat oder ein bewusst definiertes Spezialformat.
 10. Alle MVP-Skills wurden manuell getestet.
 11. Bestehende Plan-/Work-Modi funktionieren weiterhin.
 12. Bestehende Modell-/Thinking-/Permission-Menüs funktionieren weiterhin.
-13. Die dauerhaft relevanten Informationen wurden in finaler Projekt-/Entwicklerdokumentation oder direkt in Skill-Dateien übernommen.
-14. Dieses Dokument wurde nach Abschluss entfernt.
+13. Die Agenten-Dokumente-Skills halten `docs/skills/agent-docs-skill-reference.md` ein.
+14. Die dauerhaft relevanten Informationen wurden in finaler Projekt-/Entwicklerdokumentation oder direkt in Skill-Dateien übernommen.
+15. Dieses Dokument wurde nach Abschluss entfernt.
