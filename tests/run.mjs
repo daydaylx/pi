@@ -1644,6 +1644,351 @@ assert(
   }
 }
 
+// ───────────────────────── #58/#59: model/thinking inheritance ─────────────────────────
+{
+  const projectRoot = mkdtempSync(
+    path.join(tmpdir(), "pi-subagent-inherit58-"),
+  );
+  try {
+    const agentsDir = path.join(projectRoot, ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+
+    writeFileSync(
+      path.join(agentsDir, "inheriting.md"),
+      [
+        "---",
+        "name: inheriting",
+        "description: no model/thinking set",
+        "tools: read",
+        "permission: read-only",
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(agentsDir, "overriding.md"),
+      [
+        "---",
+        "name: overriding",
+        "description: fixed model/thinking",
+        "tools: read",
+        "model: fixed-provider/fixed-model",
+        "thinking: high",
+        "permission: read-only",
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(agentsDir, "explicit-off.md"),
+      [
+        "---",
+        "name: explicit-off",
+        "description: explicit thinking off",
+        "tools: read",
+        "thinking: off",
+        "permission: read-only",
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(agentsDir, "bad-modes.md"),
+      [
+        "---",
+        "name: bad-modes",
+        "description: invalid modelMode/thinkingMode",
+        "tools: read",
+        "modelMode: bogus",
+        "thinkingMode: bogus",
+        "permission: read-only",
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+
+    // ── agents.ts: modelMode/thinkingMode derivation ──
+    const discovery = subagentAgents.discoverAgents(projectRoot, "project");
+    const byName = Object.fromEntries(discovery.agents.map((a) => [a.name, a]));
+
+    eq(
+      byName.inheriting.modelMode,
+      "inherit",
+      "#58 no model field -> modelMode inherit",
+    );
+    eq(
+      byName.inheriting.thinkingMode,
+      "inherit",
+      "#59 no thinking field -> thinkingMode inherit",
+    );
+    assert(
+      byName.inheriting.model === undefined,
+      "#58 inheriting agent has no fixed model",
+    );
+
+    eq(
+      byName.overriding.modelMode,
+      "override",
+      "#58 model field set -> modelMode override",
+    );
+    eq(
+      byName.overriding.thinkingMode,
+      "override",
+      "#59 thinking field set -> thinkingMode override",
+    );
+    eq(
+      byName.overriding.model,
+      "fixed-provider/fixed-model",
+      "#58 override model value preserved",
+    );
+
+    eq(
+      byName["explicit-off"].thinking,
+      "off",
+      "#59 explicit thinking: off is preserved literally",
+    );
+    eq(
+      byName["explicit-off"].thinkingMode,
+      "override",
+      "#59 explicit off -> thinkingMode override",
+    );
+
+    eq(
+      byName["bad-modes"].modelMode,
+      "inherit",
+      "#58 invalid modelMode falls back to derived default",
+    );
+    assert(
+      byName["bad-modes"].modelModeWarning?.includes("bogus"),
+      "#58 invalid modelMode produces a warning",
+    );
+    assert(
+      byName["bad-modes"].thinkingModeWarning?.includes("bogus"),
+      "#59 invalid thinkingMode produces a warning",
+    );
+
+    // ── E2E: model/thinking inheritance and overrides via fake-pi ──
+    const fixturesDir = path.resolve(ROOT, "tests", "fixtures");
+    const fakePi = path.join(fixturesDir, "fake-pi.mjs");
+    process.env.PI_TEST_SUBAGENT_BINARY = fakePi;
+    const registeredTools = new Map();
+    subagents.default({
+      registerTool(tool) {
+        registeredTools.set(tool.name, tool);
+      },
+      registerCommand() {},
+      on() {},
+      getThinkingLevel() {
+        return "xhigh";
+      },
+    });
+    const tool = registeredTools.get("subagent");
+
+    const makeCtx = (overrides = {}) => ({
+      cwd: projectRoot,
+      hasUI: true,
+      model: { id: "main-model-x", provider: "main-provider" },
+      ui: { confirm: async () => true, select: async () => undefined },
+      ...overrides,
+    });
+
+    process.env.PI_TEST_SCENARIO = "model-thinking-inherit-probe";
+    {
+      const result = await tool.execute(
+        "e2e-inherit58-1",
+        { agent: "inheriting", task: "do something", agentScope: "project" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(!result.isError, "#58/#59 inherit E2E: succeeds");
+      const reported = JSON.parse(result.content[0].text);
+      eq(
+        reported.model,
+        "main-model-x",
+        "#58 inherit E2E: child received main model",
+      );
+      eq(
+        reported.thinking,
+        "xhigh",
+        "#59 inherit E2E: child received main thinking level",
+      );
+    }
+    {
+      const result = await tool.execute(
+        "e2e-override58-1",
+        { agent: "overriding", task: "do something", agentScope: "project" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(!result.isError, "#58/#59 override E2E: succeeds");
+      const reported = JSON.parse(result.content[0].text);
+      eq(
+        reported.model,
+        "fixed-provider/fixed-model",
+        "#58 override E2E: child kept its own fixed model, not main model",
+      );
+      eq(
+        reported.thinking,
+        "high",
+        "#59 override E2E: child kept its own fixed thinking, not main thinking",
+      );
+    }
+    {
+      const result = await tool.execute(
+        "e2e-off58-1",
+        { agent: "explicit-off", task: "do something", agentScope: "project" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      assert(!result.isError, "#59 explicit-off E2E: succeeds");
+      const reported = JSON.parse(result.content[0].text);
+      eq(
+        reported.thinking,
+        "off",
+        "#59 explicit-off E2E: 'off' is passed through reliably",
+      );
+    }
+
+    // ── thinking clamping when inheriting a model with a restrictive capability map ──
+    writeFileSync(
+      path.join(agentsDir, "clamp-test.md"),
+      [
+        "---",
+        "name: clamp-test",
+        "description: inherits thinking, main model doesn't support xhigh",
+        "tools: read",
+        "permission: read-only",
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+    {
+      const result = await tool.execute(
+        "e2e-clamp58-1",
+        { agent: "clamp-test", task: "do something", agentScope: "project" },
+        undefined,
+        undefined,
+        makeCtx({
+          model: {
+            id: "main-model-x",
+            provider: "main-provider",
+            thinkingLevelMap: { xhigh: null, high: "high", medium: "medium" },
+          },
+        }),
+      );
+      assert(!result.isError, "#59 clamp E2E: succeeds");
+      const reported = JSON.parse(result.content[0].text);
+      eq(
+        reported.thinking,
+        "high",
+        "#59 clamp E2E: xhigh unsupported by main model -> clamped to high",
+      );
+      const clamp = result.details.results[0].thinkingClamped;
+      assert(
+        clamp && clamp.requested === "xhigh" && clamp.used === "high",
+        "#59 clamp E2E: thinkingClamped is reported in the structured result",
+      );
+    }
+
+    // ── fallback re-validation: primary model fails, fallback model re-resolves thinking ──
+    writeFileSync(
+      path.join(agentsDir, "fallback-test.md"),
+      [
+        "---",
+        "name: fallback-test",
+        "description: inherits thinking, has a fallback model",
+        "tools: read",
+        "fallbackModels: fallback-provider/fallback-model",
+        "permission: read-only",
+        "---",
+        "Body.",
+        "",
+      ].join("\n"),
+    );
+    process.env.PI_TEST_SCENARIO = "model-fail-then-success";
+    {
+      const result = await tool.execute(
+        "e2e-fallback58-1",
+        { agent: "fallback-test", task: "do something", agentScope: "project" },
+        undefined,
+        undefined,
+        makeCtx({
+          model: {
+            id: "primary-model",
+            provider: "main-provider",
+            thinkingLevelMap: { xhigh: null },
+          },
+        }),
+      );
+      assert(
+        !result.isError,
+        "#59 fallback E2E: eventually succeeds via fallback model",
+      );
+      assert(
+        result.content[0].text.includes("fallback-provider/fallback-model"),
+        "#59 fallback E2E: fallback model was actually used",
+      );
+      const modelAttempts = result.details.results[0].modelAttempts;
+      eq(
+        modelAttempts.length,
+        2,
+        "#59 fallback E2E: two attempts recorded (primary failed, fallback succeeded)",
+      );
+    }
+
+    // ── /subagent-doctor and /subagent-list surface inherit vs. override ──
+    const commands = new Map();
+    subagents.default({
+      registerTool() {},
+      registerCommand(name, options) {
+        commands.set(name, options);
+      },
+      on() {},
+      getThinkingLevel() {
+        return "high";
+      },
+    });
+    const doctorNotified = [];
+    await commands.get("subagent-doctor").handler("", {
+      cwd: projectRoot,
+      ui: {
+        notify: (message, level) => doctorNotified.push({ message, level }),
+      },
+    });
+    assert(
+      doctorNotified[0].message.includes("inheriting") &&
+        doctorNotified[0].message.includes("inherit (Hauptmodell)") &&
+        doctorNotified[0].message.includes("overriding") &&
+        doctorNotified[0].message.includes("model=fixed-provider/fixed-model"),
+      "#58/#59 /subagent-doctor lists inherit vs. override per agent",
+    );
+
+    const listNotified = [];
+    await commands.get("subagent-list").handler("project", {
+      cwd: projectRoot,
+      ui: { notify: (message, level) => listNotified.push({ message, level }) },
+    });
+    assert(
+      listNotified[0].message.includes("model: inherit") &&
+        listNotified[0].message.includes("model: fixed-provider/fixed-model"),
+      "#58/#59 /subagent-list shows effective model per agent",
+    );
+
+    delete process.env.PI_TEST_SUBAGENT_BINARY;
+    delete process.env.PI_TEST_SCENARIO;
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+}
+
 // ───────────────────────── subagent widget: state + rendering (#30–#33) ─────────────────────────
 {
   const widget = await jiti.import(
@@ -1807,7 +2152,9 @@ assert(
   assert(rendered.length >= 1, "active widget renders relevant subagent lines");
   assert(rendered.length <= 4, "compact widget renders at most 4 lines");
   assert(
-    rendered.some((line) => line.includes("reviewer") && line.includes("läuft")),
+    rendered.some(
+      (line) => line.includes("reviewer") && line.includes("läuft"),
+    ),
     "active-only widget shows the running subagent",
   );
   assert(
@@ -1831,10 +2178,7 @@ assert(
     narrowRendered.every((line) => stripAnsi(line).length <= 69),
     "subagent widget lines fit the 69-column crash width",
   );
-  assert(
-    narrowRendered.length > 0,
-    "narrow widget retains relevant activity",
-  );
+  assert(narrowRendered.length > 0, "narrow widget retains relevant activity");
 
   // Hidden widget renders nothing
   widget.setWidgetVisible(false);

@@ -2,8 +2,6 @@
 name: test-runner
 description: Runs controlled test and static-check commands and summarizes failures without modifying source
 tools: read, grep, find, ls, bash
-model: opencode-go/deepseek-v4-flash
-thinking: medium
 permission: test-bash
 writeOverride: block
 timeoutMs: 1200000
@@ -16,13 +14,17 @@ Only run commands that are expected to be non-destructive. Do not install depend
 Output exactly:
 
 ## Commands
+
 - command - result
 
 ## Failures
+
 Relevant failing lines only, with file/test names.
 
 ## Interpretation
+
 What the failure means and likely owner.
 
 ## Next Step
+
 Recommended fix or escalation.

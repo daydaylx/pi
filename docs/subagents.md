@@ -102,27 +102,28 @@ Limits:
 
 ## Agent Profiles
 
-| Agent              | Tools                                   | Permission | Write Override | Model             | Thinking | Use                             |
-| ------------------ | --------------------------------------- | ---------- | -------------- | ----------------- | -------- | ------------------------------- |
-| `scout`            | read, grep, find, ls                    | read-only  | block          | deepseek-v4-flash | medium   | Collect codebase context.       |
-| `planner`          | read, grep, find, ls                    | read-only  | block          | deepseek-v4-pro   | high     | Produce implementation plans.   |
-| `architect`        | read, grep, find, ls                    | read-only  | block          | deepseek-v4-pro   | xhigh    | Architecture critique.          |
-| `reviewer`         | read, grep, find, ls, bash              | read-bash  | block          | deepseek-v4-pro   | high     | Review diffs and scope.         |
-| `test-runner`      | read, grep, find, ls, bash              | test-bash  | block          | deepseek-v4-flash | medium   | Run safe tests/checks.          |
-| `security-auditor` | read, grep, find, ls, bash              | read-bash  | block          | deepseek-v4-pro   | high     | Security and permission audit.  |
-| `ui-reviewer`      | read, grep, find, ls                    | read-only  | block          | kimi-k2.6         | high     | Static UI/UX review.            |
-| `docs-auditor`     | read, grep, find, ls                    | read-only  | block          | deepseek-v4-flash | medium   | Docs/code drift.                |
-| `worker`           | read, grep, find, ls, edit, write, bash | read-write | inherit        | deepseek-v4-pro   | high     | Narrow approved implementation. |
-| `oracle`           | read, grep, find, ls                    | read-only  | block          | qwen3.7-max       | high     | Second opinion.                 |
+| Agent              | Tools                                   | Permission | Write Override | Model                  | Thinking                 | Use                             |
+| ------------------ | --------------------------------------- | ---------- | -------------- | ---------------------- | ------------------------ | ------------------------------- |
+| `scout`            | read, grep, find, ls                    | read-only  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Collect codebase context.       |
+| `planner`          | read, grep, find, ls                    | read-only  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Produce implementation plans.   |
+| `architect`        | read, grep, find, ls                    | read-only  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Architecture critique.          |
+| `reviewer`         | read, grep, find, ls, bash              | read-bash  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Review diffs and scope.         |
+| `test-runner`      | read, grep, find, ls, bash              | test-bash  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Run safe tests/checks.          |
+| `security-auditor` | read, grep, find, ls, bash              | read-bash  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Security and permission audit.  |
+| `ui-reviewer`      | read, grep, find, ls                    | read-only  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Static UI/UX review.            |
+| `docs-auditor`     | read, grep, find, ls                    | read-only  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Docs/code drift.                |
+| `worker`           | read, grep, find, ls, edit, write, bash | read-write | inherit        | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Narrow approved implementation. |
+| `oracle`           | read, grep, find, ls                    | read-only  | block          | qwen3.7-max (override) | high (override)          | Second opinion.                 |
 
-All agents are stored in `agents/*.md`. Each file uses frontmatter:
+All agents are stored in `agents/*.md`. Each file uses frontmatter. Since
+#58/#59, `model`/`thinking` are optional: omitting them (the default for
+every profile except `oracle`) means the agent inherits the main agent's
+currently active model/thinking level at spawn time.
 
 ```yaml
 name: scout
 description: Builds compact codebase context
 tools: read, grep, find, ls
-model: opencode-go/deepseek-v4-flash
-thinking: medium
 permission: read-only
 writeOverride: block
 timeoutMs: 600000
@@ -152,6 +153,16 @@ Additional frontmatter guardrails:
   parsed and shown by `/subagent-doctor`, but execution is intentionally
   blocked until full worktree creation/cleanup isolation is implemented in a
   follow-up plan.
+- `modelMode`/`thinkingMode` (#58/#59): `inherit` (default when `model:`/
+  `thinking:` is absent) takes the main agent's currently active model or
+  thinking level for every spawn. `override` (default when `model:`/
+  `thinking:` is set) keeps the profile's fixed value regardless of what the
+  main agent uses — the deliberate exception used by `oracle` for an
+  independent second opinion. On a fallback-model switch, the requested
+  thinking level is re-validated per attempt against the newly targeted
+  model's capabilities; an unsupported level is clamped to the highest
+  supported one and reported (not applied silently) in the tool result and
+  `/subagent-doctor`.
 
 ## Workflow Templates
 
@@ -324,16 +335,16 @@ Das Widget (`extensions/subagents/widget.ts`) nutzt jetzt ein klareres,
 nachvollziehbares Statusmodell. Jeder Subagent zeigt **Symbol + Textlabel**
 (nie nur Farbe):
 
-| Status      | Symbol | Bedeutung                                     |
-| ----------- | ------ | --------------------------------------------- |
-| `running`   | `●`    | Prozess läuft gerade                          |
-| `queued`    | `○`    | Wartet auf Slot (Parallelmodus)               |
-| `waiting`   | `○`    | Wartet auf Parent-Bestätigung (Permissions)   |
-| `completed` | `✓`    | Erfolgreich abgeschlossen                     |
+| Status      | Symbol | Bedeutung                                      |
+| ----------- | ------ | ---------------------------------------------- |
+| `running`   | `●`    | Prozess läuft gerade                           |
+| `queued`    | `○`    | Wartet auf Slot (Parallelmodus)                |
+| `waiting`   | `○`    | Wartet auf Parent-Bestätigung (Permissions)    |
+| `completed` | `✓`    | Erfolgreich abgeschlossen                      |
 | `warning`   | `!`    | Warnungen/Validierungsfehler, nicht abgestürzt |
-| `failed`    | `✕`    | Fehler/Abbruch/kein Output                    |
-| `blocked`   | `⏸`    | Blockiert (Permission/Sandbox)                |
-| `idle`      | `○`    | Noch nie gelaufen                             |
+| `failed`    | `✕`    | Fehler/Abbruch/kein Output                     |
+| `blocked`   | `⏸`    | Blockiert (Permission/Sandbox)                 |
+| `idle`      | `○`    | Noch nie gelaufen                              |
 
 Zusätzlich pro Eintrag sichtbar: `role`, `lastAction`, `warnings`/`errors`
 (kompakt als `w:n` / `e:n`), `startedAt`/`completedAt` und `relatedToolCalls`.

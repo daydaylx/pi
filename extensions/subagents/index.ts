@@ -77,14 +77,17 @@ class ToolText implements SimpleComponent {
   invalidate(): void {}
   render(width: number): string[] {
     const max = Math.max(1, width);
-    return this.content.split("\n").map((line) =>
-      line.length <= max ? line : `${line.slice(0, max - 1)}…`,
-    );
+    return this.content
+      .split("\n")
+      .map((line) =>
+        line.length <= max ? line : `${line.slice(0, max - 1)}…`,
+      );
   }
 }
 import {
   type AgentConfig,
   type AgentScope,
+  type ThinkingLevel,
   discoverAgents,
   formatAgentList,
   isElevatedPermission,
@@ -136,6 +139,57 @@ interface ModelAttempt {
   stderr?: string;
 }
 
+// #58/#59: minimal shape of the main agent's active model, captured at tool
+// call time. Only the fields needed for inheritance/capability clamping –
+// not a full re-export of the pi-ai Model type, to avoid coupling this
+// extension to provider-internal shapes.
+interface MainModelInfo {
+  id: string;
+  thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
+}
+
+// #59: highest-to-lowest so clamping always prefers the strongest supported
+// level.
+const THINKING_LEVEL_ORDER: ThinkingLevel[] = [
+  "xhigh",
+  "high",
+  "medium",
+  "low",
+  "minimal",
+];
+
+/** #59: resolve the thinking level for one spawn attempt. thinkingMode
+ * "override" always keeps the agent's own configured value. "inherit" takes
+ * the main agent's current level and, only when the attempt targets the
+ * inherited main model itself (not an override/fallback model whose
+ * capabilities we don't know), clamps to the highest level that model's
+ * thinkingLevelMap actually supports. */
+function resolveThinkingForAttempt(
+  agent: AgentConfig,
+  mainThinking: ThinkingLevel | undefined,
+  attemptModelId: string | undefined,
+  mainModel: MainModelInfo | undefined,
+): { level: ThinkingLevel | undefined; clampedFrom?: ThinkingLevel } {
+  const requested =
+    agent.thinkingMode === "override"
+      ? agent.thinking
+      : (mainThinking ?? agent.thinking);
+  if (requested === undefined || requested === "off")
+    return { level: requested };
+
+  const capMap =
+    attemptModelId === mainModel?.id ? mainModel?.thinkingLevelMap : undefined;
+  if (!capMap) return { level: requested };
+
+  const requestedCap = capMap[requested];
+  if (requestedCap !== null) return { level: requested };
+
+  const fallbackLevel = THINKING_LEVEL_ORDER.find(
+    (lvl) => capMap[lvl] !== null && capMap[lvl] !== undefined,
+  );
+  return { level: fallbackLevel ?? "off", clampedFrom: requested };
+}
+
 type ChildToolStatus = "running" | "completed" | "warning" | "failed";
 
 interface ChildToolCall {
@@ -160,6 +214,9 @@ interface SingleResult {
   toolCalls: ChildToolCall[];
   model?: string;
   modelAttempts?: ModelAttempt[];
+  /** #59: set when the requested thinking level wasn't supported by the
+   * resolved model and was clamped to the highest supported level. */
+  thinkingClamped?: { requested: ThinkingLevel; used: ThinkingLevel };
   stopReason?: string;
   errorMessage?: string;
   validationErrors?: string[];
@@ -263,7 +320,10 @@ function shortArg(value: unknown, max = 48): string {
   return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
 }
 
-function summarizeChildTool(toolName: string, args: Record<string, unknown>): string {
+function summarizeChildTool(
+  toolName: string,
+  args: Record<string, unknown>,
+): string {
   if (toolName === "bash") return shortArg(args.command, 64);
   if (typeof args.path === "string") return shortArg(args.path, 64);
   if (typeof args.pattern === "string") return shortArg(args.pattern, 48);
@@ -277,7 +337,9 @@ function upsertChildTool(
     summary?: string;
   },
 ): ChildToolCall {
-  const existing = result.toolCalls.find((item) => item.toolCallId === update.toolCallId);
+  const existing = result.toolCalls.find(
+    (item) => item.toolCallId === update.toolCallId,
+  );
   if (existing) {
     Object.assign(existing, update, {
       summary: update.summary ?? existing.summary,
@@ -450,6 +512,11 @@ async function runSingleAgent(
   signal: AbortSignal | undefined,
   onUpdate: OnUpdate | undefined,
   makeDetails: (results: SingleResult[]) => SubagentDetails,
+  // #58/#59: main agent's active model/thinking level, for inherit-mode
+  // agents. undefined when the caller couldn't determine them (e.g. no
+  // model selected yet) – falls back to the agent's own configured value.
+  mainModel: MainModelInfo | undefined,
+  mainThinking: ThinkingLevel | undefined,
 ): Promise<SingleResult> {
   const agent = agents.find((item) => item.name === agentName);
   if (!agent) {
@@ -473,8 +540,15 @@ async function runSingleAgent(
     };
   }
 
+  // #58: inherit-mode agents spawn with the main agent's currently active
+  // model instead of a fixed profile value; override-mode agents (e.g.
+  // oracle) keep their own configured model unchanged.
+  const resolvedPrimaryModel =
+    agent.modelMode === "override"
+      ? agent.model
+      : (mainModel?.id ?? agent.model);
   const attemptModels: Array<string | undefined> = [];
-  attemptModels.push(agent.model);
+  attemptModels.push(resolvedPrimaryModel);
   for (const fallbackModel of agent.fallbackModels) {
     if (!attemptModels.includes(fallbackModel))
       attemptModels.push(fallbackModel);
@@ -572,6 +646,7 @@ async function runSingleAgent(
         turns: 0,
       };
       current.model = model;
+      current.thinkingClamped = undefined;
       current.stopReason = undefined;
       current.errorMessage = undefined;
       current.validationErrors = undefined;
@@ -582,7 +657,25 @@ async function runSingleAgent(
       resetForAttempt(model);
       const args = ["--mode", "json", "-p", "--no-session"];
       if (model) args.push("--model", model);
-      if (agent.thinking) args.push("--thinking", agent.thinking);
+      // #59: resolved per attempt (not once) so a fallback model switch
+      // re-validates the requested thinking level against its own
+      // capabilities instead of reusing a stale clamp decision.
+      const resolvedThinking = resolveThinkingForAttempt(
+        agent,
+        mainThinking,
+        model,
+        mainModel,
+      );
+      if (resolvedThinking.level !== undefined) {
+        args.push("--thinking", resolvedThinking.level);
+      }
+      if (resolvedThinking.clampedFrom) {
+        current.thinkingClamped = {
+          requested: resolvedThinking.clampedFrom,
+          used: resolvedThinking.level ?? "off",
+        };
+        current.stderr += `[thinking] requested "${resolvedThinking.clampedFrom}" not supported by ${model}, using "${resolvedThinking.level}".\n`;
+      }
       args.push("--tools", agent.tools.join(","));
       if (tmpPromptPath) args.push("--append-system-prompt", tmpPromptPath);
       args.push(`@${taskTmpPath}`);
@@ -649,7 +742,9 @@ async function runSingleAgent(
             emitUpdate();
           } else if (event.type === "tool_execution_start") {
             const tool = upsertChildTool(current, {
-              toolCallId: String(event.toolCallId ?? `${event.toolName}-${Date.now()}`),
+              toolCallId: String(
+                event.toolCallId ?? `${event.toolName}-${Date.now()}`,
+              ),
               toolName: String(event.toolName ?? "tool"),
               args: (event.args ?? {}) as Record<string, unknown>,
               status: "running",
@@ -661,13 +756,17 @@ async function runSingleAgent(
               status: "running",
               currentTask: task,
               lastAction: `${tool.toolName} ${tool.summary}`,
-              relatedToolCalls: current.toolCalls.map((item) => item.toolCallId),
+              relatedToolCalls: current.toolCalls.map(
+                (item) => item.toolCallId,
+              ),
               lastUpdate: Date.now(),
             });
             emitUpdate();
           } else if (event.type === "tool_execution_update") {
             const tool = upsertChildTool(current, {
-              toolCallId: String(event.toolCallId ?? `${event.toolName}-${Date.now()}`),
+              toolCallId: String(
+                event.toolCallId ?? `${event.toolName}-${Date.now()}`,
+              ),
               toolName: String(event.toolName ?? "tool"),
               args: (event.args ?? {}) as Record<string, unknown>,
               status: "running",
@@ -678,14 +777,18 @@ async function runSingleAgent(
               status: "running",
               currentTask: task,
               lastAction: `${tool.toolName} ${tool.summary}`,
-              relatedToolCalls: current.toolCalls.map((item) => item.toolCallId),
+              relatedToolCalls: current.toolCalls.map(
+                (item) => item.toolCallId,
+              ),
               lastUpdate: Date.now(),
             });
             emitUpdate();
           } else if (event.type === "tool_execution_end") {
             const isError = Boolean(event.isError);
             const tool = upsertChildTool(current, {
-              toolCallId: String(event.toolCallId ?? `${event.toolName}-${Date.now()}`),
+              toolCallId: String(
+                event.toolCallId ?? `${event.toolName}-${Date.now()}`,
+              ),
               toolName: String(event.toolName ?? "tool"),
               args: (event.args ?? {}) as Record<string, unknown>,
               status: isError ? "failed" : "completed",
@@ -698,9 +801,15 @@ async function runSingleAgent(
               status: "running",
               currentTask: task,
               lastAction: `${tool.toolName} ${isError ? "fehlgeschlagen" : "abgeschlossen"}`,
-              relatedToolCalls: current.toolCalls.map((item) => item.toolCallId),
-              warnings: current.toolCalls.filter((item) => item.status === "warning").length,
-              errors: current.toolCalls.filter((item) => item.status === "failed").length,
+              relatedToolCalls: current.toolCalls.map(
+                (item) => item.toolCallId,
+              ),
+              warnings: current.toolCalls.filter(
+                (item) => item.status === "warning",
+              ).length,
+              errors: current.toolCalls.filter(
+                (item) => item.status === "failed",
+              ).length,
               lastUpdate: Date.now(),
             });
             emitUpdate();
@@ -814,10 +923,12 @@ async function runSingleAgent(
       status: isFailed(current) ? "failed" : "completed",
       currentTask: task,
       lastAction: isFailed(current)
-        ? current.errorMessage ?? "fehlgeschlagen"
+        ? (current.errorMessage ?? "fehlgeschlagen")
         : "abgeschlossen",
       warnings: current.validationErrors?.length ?? 0,
-      errors: isFailed(current) ? 1 : current.toolCalls.filter((item) => item.status === "failed").length,
+      errors: isFailed(current)
+        ? 1
+        : current.toolCalls.filter((item) => item.status === "failed").length,
       completedAt: Date.now(),
       relatedToolCalls: current.toolCalls.map((item) => item.toolCallId),
       lastUpdate: Date.now(),
@@ -899,7 +1010,10 @@ function childToolStatusSymbol(status: ChildToolStatus): string {
   return "● running";
 }
 
-function formatChildToolLine(result: SingleResult, tool: ChildToolCall): string {
+function formatChildToolLine(
+  result: SingleResult,
+  tool: ChildToolCall,
+): string {
   const agent = `[${result.agent}]`.padEnd(12, " ");
   const name = tool.toolName.padEnd(10, " ");
   return `${agent} ${name} ${tool.summary} ${childToolStatusSymbol(tool.status)}`;
@@ -908,8 +1022,10 @@ function formatChildToolLine(result: SingleResult, tool: ChildToolCall): string 
 function formatSubagentCall(args: any): string {
   const scope = args.agentScope ?? "user";
   if (args.list) return `subagent list [${scope}]`;
-  if (args.chain?.length) return `subagent chain (${args.chain.length} steps) [${scope}]`;
-  if (args.tasks?.length) return `subagent parallel (${args.tasks.length} tasks) [${scope}]`;
+  if (args.chain?.length)
+    return `subagent chain (${args.chain.length} steps) [${scope}]`;
+  if (args.tasks?.length)
+    return `subagent parallel (${args.tasks.length} tasks) [${scope}]`;
   return `subagent ${args.agent ?? "?"} [${scope}]`;
 }
 
@@ -961,6 +1077,19 @@ function formatSkipped(
 // aktuellen Live-Status aus dem Widget-State (Matching über den Agentnamen,
 // da SubagentEntry.id pro Lauf eindeutig/ephemer ist, label aber dem
 // Agentnamen entspricht).
+// #58/#59: short "model: inherit|<value>, thinking: inherit|<value>" tag for
+// /subagent-list and /subagent-doctor, so the effective source (main agent
+// vs. profile override) is visible without opening the agent's .md file.
+function formatAgentModelThinkingTag(agent: AgentConfig): string {
+  const modelLabel =
+    agent.modelMode === "inherit" ? "model: inherit" : `model: ${agent.model}`;
+  const thinkingLabel =
+    agent.thinkingMode === "inherit"
+      ? "thinking: inherit"
+      : `thinking: ${agent.thinking ?? "default"}`;
+  return `${modelLabel}, ${thinkingLabel}`;
+}
+
 function formatAgentLiveStatusLines(agents: AgentConfig[]): string[] {
   const live = getWidgetState().subagents;
   return agents.map((agent) => {
@@ -969,7 +1098,7 @@ function formatAgentLiveStatusLines(agents: AgentConfig[]): string[] {
       entry === undefined
         ? "inaktiv"
         : `${STATUS_SYMBOL[entry.status]} ${STATUS_LABEL[entry.status]}${entry.currentTask ? ` — ${entry.currentTask}` : ""}`;
-    return `${agent.name} (${agent.source}, ${agent.permission}): ${agent.description}  [${status}]`;
+    return `${agent.name} (${agent.source}, ${agent.permission}): ${agent.description}  [${formatAgentModelThinkingTag(agent)}] [${status}]`;
   });
 }
 
@@ -1021,8 +1150,10 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       const component: SimpleComponent = {
         render(width: number): string[] {
           const state = getWidgetState();
-          return colorizeStatusLines(renderWidget(state, width), theme, (line) =>
-            line.startsWith("Denknotiz:") ? "muted" : undefined,
+          return colorizeStatusLines(
+            renderWidget(state, width),
+            theme,
+            (line) => (line.startsWith("Denknotiz:") ? "muted" : undefined),
           );
         },
         invalidate() {},
@@ -1198,6 +1329,34 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           );
         }
 
+        // #58/#59: which agents inherit model/thinking from the main agent
+        // vs. keep a profile-configured override (e.g. oracle).
+        if (effectiveDiscovery.agents.length > 0) {
+          lines.push(
+            "",
+            "Agenten mit Modell-/Thinking-Vererbung:",
+            ...effectiveDiscovery.agents.map(
+              (a) =>
+                `- ${a.name}: model=${a.modelMode === "inherit" ? "inherit (Hauptmodell)" : a.model} thinking=${a.thinkingMode === "inherit" ? "inherit (Haupt-Thinking)" : a.thinking}`,
+            ),
+          );
+        }
+
+        const agentsWithModeWarnings = effectiveDiscovery.agents.filter(
+          (a) => a.modelModeWarning || a.thinkingModeWarning,
+        );
+        if (agentsWithModeWarnings.length > 0) {
+          lines.push(
+            "",
+            "Warnungen zu modelMode/thinkingMode:",
+            ...agentsWithModeWarnings.flatMap((a) =>
+              [a.modelModeWarning, a.thinkingModeWarning]
+                .filter((w): w is string => Boolean(w))
+                .map((w) => `${a.name}: ${w}`),
+            ),
+          );
+        }
+
         if (skipped.length > 0) {
           lines.push(
             "",
@@ -1343,7 +1502,10 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     renderCall(args, theme, _context) {
       return new ToolText(
         theme.fg("toolTitle", theme.bold("subagent ")) +
-          theme.fg("accent", formatSubagentCall(args).replace(/^subagent\s*/, "")),
+          theme.fg(
+            "accent",
+            formatSubagentCall(args).replace(/^subagent\s*/, ""),
+          ),
         0,
         0,
       );
@@ -1357,34 +1519,48 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       }
       const results = details.results;
       const done = results.filter((item) => item.exitCode !== -1).length;
-      const failed = results.filter((item) => item.exitCode !== -1 && isFailed(item)).length;
+      const failed = results.filter(
+        (item) => item.exitCode !== -1 && isFailed(item),
+      ).length;
       const running = results.filter((item) => item.exitCode === -1).length;
-      const headerStatus = isPartial || running > 0
-        ? theme.fg("warning", `● running ${done}/${results.length}`)
-        : failed > 0
-          ? theme.fg("error", `✕ failed ${failed}/${results.length}`)
-          : theme.fg("success", `✓ completed ${done}/${results.length}`);
+      const headerStatus =
+        isPartial || running > 0
+          ? theme.fg("warning", `● running ${done}/${results.length}`)
+          : failed > 0
+            ? theme.fg("error", `✕ failed ${failed}/${results.length}`)
+            : theme.fg("success", `✓ completed ${done}/${results.length}`);
       const lines = [
         `${theme.fg("toolTitle", theme.bold(`subagent ${details.mode}`))} ${headerStatus}`,
       ];
       const toolLines = results.flatMap((agentResult) => {
-        const calls = expanded ? agentResult.toolCalls : agentResult.toolCalls.slice(-4);
+        const calls = expanded
+          ? agentResult.toolCalls
+          : agentResult.toolCalls.slice(-4);
         if (calls.length === 0) {
-          const status = agentResult.exitCode === -1
-            ? "● running"
-            : isFailed(agentResult)
-              ? "✕ failed"
-              : "✓ completed";
+          const status =
+            agentResult.exitCode === -1
+              ? "● running"
+              : isFailed(agentResult)
+                ? "✕ failed"
+                : "✓ completed";
           return [`[${agentResult.agent}] ${status}`];
         }
         return calls.map((tool) => formatChildToolLine(agentResult, tool));
       });
       for (const line of toolLines.slice(0, expanded ? 80 : 12)) {
-        const color = line.includes("✕") ? "error" : line.includes("!") ? "warning" : line.includes("●") ? "warning" : "muted";
+        const color = line.includes("✕")
+          ? "error"
+          : line.includes("!")
+            ? "warning"
+            : line.includes("●")
+              ? "warning"
+              : "muted";
         lines.push(theme.fg(color, line));
       }
       if (!expanded && toolLines.length > 12) {
-        lines.push(theme.fg("dim", `… ${toolLines.length - 12} more tool event(s)`));
+        lines.push(
+          theme.fg("dim", `… ${toolLines.length - 12} more tool event(s)`),
+        );
       }
       return new ToolText(lines.join("\n"), 0, 0);
     },
@@ -1418,6 +1594,26 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       );
       // #35: confirmProjectAgents is always enforced – no tool-parameter override
       const confirmProjectAgents = true;
+
+      // #58/#59: main agent's model/thinking, captured once per tool call so
+      // every spawn in this call (single/parallel/chain) sees a consistent
+      // value even if the user changes it mid-flight.
+      const mainModel: MainModelInfo | undefined = ctx.model
+        ? {
+            id: ctx.model.id,
+            thinkingLevelMap: (
+              ctx.model as {
+                thinkingLevelMap?: Partial<
+                  Record<ThinkingLevel, string | null>
+                >;
+              }
+            ).thinkingLevelMap,
+          }
+        : undefined;
+      const mainThinking =
+        typeof pi.getThinkingLevel === "function"
+          ? pi.getThinkingLevel()
+          : undefined;
 
       const hasList = params.list === true;
       const hasSingle = Boolean(params.agent && params.task);
@@ -1622,6 +1818,8 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
               }
             },
             makeDetails("chain"),
+            mainModel,
+            mainThinking,
           );
           results.push(result);
           if (isFailed(result)) {
@@ -1725,6 +1923,8 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
                 }
               },
               makeDetails("parallel"),
+              mainModel,
+              mainThinking,
             );
             placeholders[index] = result;
             emitParallelUpdate();
@@ -1765,6 +1965,8 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
         signal,
         onUpdate,
         makeDetails("single"),
+        mainModel,
+        mainThinking,
       );
       setLastRun(result.agent, "single");
       return {

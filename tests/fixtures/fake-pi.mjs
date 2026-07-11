@@ -29,6 +29,11 @@ function selectedModel() {
   return idx >= 0 ? process.argv[idx + 1] || "" : "";
 }
 
+function selectedThinking() {
+  const idx = process.argv.indexOf("--thinking");
+  return idx >= 0 ? process.argv[idx + 1] || "" : "";
+}
+
 function emitAssistantText(text, model = selectedModel() || "fake-model") {
   process.stdout.write(
     JSON.stringify({
@@ -163,7 +168,10 @@ function emit(scenarioName) {
     return;
   }
 
-  if (scenarioName === "structured-valid" || scenarioName === "structured-missing") {
+  if (
+    scenarioName === "structured-valid" ||
+    scenarioName === "structured-missing"
+  ) {
     // #53: structured output validation scenarios.
     const text =
       scenarioName === "structured-valid"
@@ -232,6 +240,28 @@ function emit(scenarioName) {
         message: {
           role: "assistant",
           model: "fake-model",
+          stopReason: "end_turn",
+          content: [{ type: "text", text }],
+          usage: { input: 1, output: 1, cost: { total: 0 } },
+        },
+      }) + "\n",
+    );
+    return;
+  }
+
+  if (scenarioName === "model-thinking-inherit-probe") {
+    // #58/#59: echo the resolved --model/--thinking flags so tests can
+    // assert inherited vs. overridden values without parsing raw argv.
+    const text = JSON.stringify({
+      model: selectedModel(),
+      thinking: selectedThinking(),
+    });
+    process.stdout.write(
+      JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          model: selectedModel() || "fake-model",
           stopReason: "end_turn",
           content: [{ type: "text", text }],
           usage: { input: 1, output: 1, cost: { total: 0 } },

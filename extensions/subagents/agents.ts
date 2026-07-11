@@ -10,6 +10,11 @@ export type AgentScope = "user" | "project" | "both";
 export type ThinkingLevel =
   "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type SandboxMode = "none" | "git-worktree";
+/** #58/#59: "inherit" (default when model/thinking is absent) takes the
+ * main agent's current model/thinking level at spawn time. "override"
+ * (default when the field is set) keeps the profile's own fixed value. */
+export type ModelMode = "inherit" | "override";
+export type ThinkingMode = "inherit" | "override";
 
 export interface AgentConfig {
   name: string;
@@ -19,9 +24,15 @@ export interface AgentConfig {
    * /subagent-doctor reporting; not passed to the child process. */
   invalidTools: string[];
   model?: string;
+  modelMode: ModelMode;
+  /** Set when a declared modelMode value was invalid; reported by
+   * /subagent-doctor instead of failing silently. */
+  modelModeWarning?: string;
   /** #54: fallback models tried after provider/model failures only. */
   fallbackModels: string[];
   thinking?: ThinkingLevel;
+  thinkingMode: ThinkingMode;
+  thinkingModeWarning?: string;
   permission: PermissionLevel;
   /** Original frontmatter value before normalization – used for elevated-permission detection (#36). */
   rawPermission: string | undefined;
@@ -99,6 +110,8 @@ const VALID_THINKING = new Set<ThinkingLevel>([
   "xhigh",
 ]);
 const VALID_SANDBOX_MODES = new Set<SandboxMode>(["none", "git-worktree"]);
+const VALID_MODEL_MODES = new Set<ModelMode>(["inherit", "override"]);
+const VALID_THINKING_MODES = new Set<ThinkingMode>(["inherit", "override"]);
 
 function getAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR
@@ -193,6 +206,38 @@ function normalizeSandboxMode(raw: string | undefined): {
   };
 }
 
+/** #58/#59: derive modelMode/thinkingMode. An explicit frontmatter value
+ * wins; otherwise the presence of model/thinking decides the default. */
+function normalizeModelMode(
+  raw: string | undefined,
+  hasModel: boolean,
+): { modelMode: ModelMode; modelModeWarning?: string } {
+  if (!raw) return { modelMode: hasModel ? "override" : "inherit" };
+  if (VALID_MODEL_MODES.has(raw as ModelMode)) {
+    return { modelMode: raw as ModelMode };
+  }
+  const fallback: ModelMode = hasModel ? "override" : "inherit";
+  return {
+    modelMode: fallback,
+    modelModeWarning: `invalid modelMode "${raw}", using ${fallback}`,
+  };
+}
+
+function normalizeThinkingMode(
+  raw: string | undefined,
+  hasThinking: boolean,
+): { thinkingMode: ThinkingMode; thinkingModeWarning?: string } {
+  if (!raw) return { thinkingMode: hasThinking ? "override" : "inherit" };
+  if (VALID_THINKING_MODES.has(raw as ThinkingMode)) {
+    return { thinkingMode: raw as ThinkingMode };
+  }
+  const fallback: ThinkingMode = hasThinking ? "override" : "inherit";
+  return {
+    thinkingMode: fallback,
+    thinkingModeWarning: `invalid thinkingMode "${raw}", using ${fallback}`,
+  };
+}
+
 function loadAgentsFromDir(
   dir: string,
   source: "user" | "project",
@@ -272,14 +317,27 @@ function loadAgentsFromDir(
     const { sandboxMode, sandboxModeWarning } = normalizeSandboxMode(
       frontmatter.sandboxMode,
     );
+    const thinking = normalizeThinking(frontmatter.thinking);
+    const { modelMode, modelModeWarning } = normalizeModelMode(
+      frontmatter.modelMode,
+      frontmatter.model !== undefined,
+    );
+    const { thinkingMode, thinkingModeWarning } = normalizeThinkingMode(
+      frontmatter.thinkingMode,
+      thinking !== undefined,
+    );
     agents.push({
       name: frontmatter.name,
       description: frontmatter.description,
       tools,
       invalidTools,
       model: frontmatter.model,
+      modelMode,
+      modelModeWarning,
       fallbackModels: splitCsv(frontmatter.fallbackModels) ?? [],
-      thinking: normalizeThinking(frontmatter.thinking),
+      thinking,
+      thinkingMode,
+      thinkingModeWarning,
       permission: normalizePermission(frontmatter.permission, tools),
       rawPermission: frontmatter.permission,
       writeOverride: normalizeWriteOverride(frontmatter.writeOverride),

@@ -2,8 +2,6 @@
 name: security-auditor
 description: Audits changes for secrets, unsafe shell, injection, permission drift and risky extension behavior
 tools: read, grep, find, ls, bash
-model: opencode-go/deepseek-v4-pro
-thinking: high
 permission: read-bash
 writeOverride: block
 timeoutMs: 900000
@@ -16,16 +14,21 @@ Do not read secret contents. If you find a likely secret file or credential refe
 Output exactly:
 
 ## High Risk
+
 - Evidence, impact, mitigation
 
 ## Medium Risk
+
 - Evidence, impact, mitigation
 
 ## Low Risk
+
 - Evidence, impact, mitigation
 
 ## Permission Notes
+
 Any tool, shell, sandbox or background-run risk.
 
 ## Verdict
+
 Go, Go with fixes, or No-Go.
