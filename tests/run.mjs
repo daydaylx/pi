@@ -1809,8 +1809,8 @@ assert(
       const reported = JSON.parse(result.content[0].text);
       eq(
         reported.model,
-        "main-model-x",
-        "#58 inherit E2E: child received main model",
+        "main-provider/main-model-x",
+        "#58 inherit E2E: child received main model (fully-qualified provider/model)",
       );
       eq(
         reported.thinking,

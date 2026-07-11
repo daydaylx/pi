@@ -147,7 +147,14 @@ function emit(scenarioName) {
   }
 
   if (scenarioName === "model-fail-then-success") {
-    if (selectedModel() === "primary-model") {
+    // #FIX-provider: the inherited primary model arrives fully qualified as
+    // `provider/model` (e.g. "main-provider/primary-model"); an override
+    // frontmatter value may still be bare ("primary-model"). Match both so
+    // the fail-then-fallback path triggers regardless of qualification.
+    if (
+      selectedModel() === "primary-model" ||
+      selectedModel() === "main-provider/primary-model"
+    ) {
       process.stderr.write("Provider unavailable for primary-model (503)\n");
       process.exitCode = 1;
       return;

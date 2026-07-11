@@ -145,7 +145,56 @@ interface ModelAttempt {
 // extension to provider-internal shapes.
 interface MainModelInfo {
   id: string;
+  // #FIX-provider: bare provider name (e.g. "zai"), kept separately so
+  // frontmatter model ids can be qualified with the main agent's provider as
+  // the preferred match when ambiguous.
+  provider?: string;
   thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
+}
+
+/** Minimal structural view of ModelRegistry used to resolve bare model ids to
+ * a concrete provider. Kept structural (not importing ModelRegistry / Model)
+ * so this extension stays decoupled from pi-internal shapes and stays
+ * testable without the full runtime. */
+interface ModelResolver {
+  find(provider: string, modelId: string): unknown;
+  getAll(): Array<{ id: string; provider: string }>;
+}
+
+/** #FIX-provider: resolve a (possibly bare) frontmatter model id to a
+ * fully-qualified `provider/model` string. The child `pi --mode json`
+ * resolves the provider from `--model`: a bare name like `glm-5.2` is
+ * ambiguous and the child picks a wrong/keyless provider (e.g. the built-in
+ * `opencode`), producing "No API key found for opencode". Resolution order:
+ *  1) exact `model.id` match across the registry – covers bare ids AND ids
+ *     that themselves contain a slash (e.g. openrouter `qwen/qwen3-coder:free`);
+ *     when several providers offer the same id, prefer `preferredProvider`.
+ *  2) already-qualified `provider/model` the registry recognises → keep as-is.
+ *  3) unknown id → return unchanged so the child surfaces a clear error
+ *     instead of us silently mangling the value. */
+function qualifyModelId(
+  raw: string | undefined,
+  registry: ModelResolver | undefined,
+  preferredProvider: string | undefined,
+): string | undefined {
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed || !registry) return trimmed;
+  const matches = registry.getAll().filter((m) => m.id === trimmed);
+  if (matches.length > 0) {
+    const chosen =
+      (preferredProvider &&
+        matches.find((m) => m.provider === preferredProvider)) ||
+      matches[0];
+    return `${chosen.provider}/${chosen.id}`;
+  }
+  const slash = trimmed.indexOf("/");
+  if (slash > 0) {
+    const provider = trimmed.slice(0, slash);
+    const modelId = trimmed.slice(slash + 1);
+    if (registry.find(provider, modelId)) return trimmed;
+  }
+  return trimmed;
 }
 
 // #59: highest-to-lowest so clamping always prefers the strongest supported
@@ -517,6 +566,9 @@ async function runSingleAgent(
   // model selected yet) – falls back to the agent's own configured value.
   mainModel: MainModelInfo | undefined,
   mainThinking: ThinkingLevel | undefined,
+  // #FIX-provider: used to qualify bare frontmatter model ids (override /
+  // fallback) to `provider/model` so the child resolves the right provider.
+  modelRegistry: ModelResolver | undefined,
 ): Promise<SingleResult> {
   const agent = agents.find((item) => item.name === agentName);
   if (!agent) {
@@ -543,15 +595,22 @@ async function runSingleAgent(
   // #58: inherit-mode agents spawn with the main agent's currently active
   // model instead of a fixed profile value; override-mode agents (e.g.
   // oracle) keep their own configured model unchanged.
+  // #FIX-provider: frontmatter model ids (`model` / `fallbackModels`) may be
+  // bare; qualify them via the registry so the child resolves the provider the
+  // id actually refers to instead of guessing (→ "No API key found for
+  // opencode"). The inherited main-model id is already fully qualified
+  // (captured at call time), so it passes through unchanged.
+  const qualify = (raw: string | undefined): string | undefined =>
+    qualifyModelId(raw, modelRegistry, mainModel?.provider);
   const resolvedPrimaryModel =
     agent.modelMode === "override"
-      ? agent.model
-      : (mainModel?.id ?? agent.model);
+      ? qualify(agent.model)
+      : (mainModel?.id ?? qualify(agent.model));
   const attemptModels: Array<string | undefined> = [];
   attemptModels.push(resolvedPrimaryModel);
   for (const fallbackModel of agent.fallbackModels) {
-    if (!attemptModels.includes(fallbackModel))
-      attemptModels.push(fallbackModel);
+    const qualified = qualify(fallbackModel);
+    if (!attemptModels.includes(qualified)) attemptModels.push(qualified);
   }
   const modelAttempts: ModelAttempt[] = [];
 
@@ -1598,9 +1657,25 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       // #58/#59: main agent's model/thinking, captured once per tool call so
       // every spawn in this call (single/parallel/chain) sees a consistent
       // value even if the user changes it mid-flight.
+      //
+      // #FIX-provider: capture the FULLY-QUALIFIED id (`provider/model`), not
+      // just `ctx.model.id` (the bare model name). The child `pi --mode json`
+      // resolves the provider from the `--model` argument: a bare name like
+      // `glm-5.2` is ambiguous and the child picks the wrong provider
+      // (e.g. built-in `opencode`, which has no key) → "No API key found for
+      // opencode". Passing `zai/glm-5.2` / `opencode-go/deepseek-v4-pro` makes
+      // the child follow the main agent's provider exactly. The Model object
+      // keeps `provider` and `id` separate, so we recombine them here. This
+      // qualified id also flows into the thinking-level comparison below, so
+      // `attemptModelId === mainModel.id` still matches for the inherited
+      // primary model.
       const mainModel: MainModelInfo | undefined = ctx.model
         ? {
-            id: ctx.model.id,
+            id:
+              (ctx.model as { provider?: string }).provider != null
+                ? `${(ctx.model as { provider?: string }).provider}/${ctx.model.id}`
+                : ctx.model.id,
+            provider: (ctx.model as { provider?: string }).provider,
             thinkingLevelMap: (
               ctx.model as {
                 thinkingLevelMap?: Partial<
@@ -1614,6 +1689,10 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         typeof pi.getThinkingLevel === "function"
           ? pi.getThinkingLevel()
           : undefined;
+      // #FIX-provider: ModelRegistry handle used to qualify frontmatter model
+      // ids (override `model` / `fallbackModels`) to `provider/model`.
+      const modelRegistry: ModelResolver | undefined =
+        (ctx as { modelRegistry?: ModelResolver }).modelRegistry;
 
       const hasList = params.list === true;
       const hasSingle = Boolean(params.agent && params.task);
@@ -1820,6 +1899,7 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
             makeDetails("chain"),
             mainModel,
             mainThinking,
+            modelRegistry,
           );
           results.push(result);
           if (isFailed(result)) {
@@ -1925,6 +2005,7 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
               makeDetails("parallel"),
               mainModel,
               mainThinking,
+              modelRegistry,
             );
             placeholders[index] = result;
             emitParallelUpdate();
@@ -1967,6 +2048,7 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
         makeDetails("single"),
         mainModel,
         mainThinking,
+        modelRegistry,
       );
       setLastRun(result.agent, "single");
       return {
