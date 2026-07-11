@@ -429,11 +429,12 @@ eq(
   "read-bash allows safe inspection commands",
 );
 
-// ───────────────────────── test-bash level (#43) ─────────────────────────
+// ───────────────────────── test-bash level (#43/#63) ─────────────────────────
+// #63: test-bash is a restricted execution mode, not a read-only guarantee.
+// ROOT has no package.json, so "npm test" there is unverifiable by design –
+// these checks use dedicated fixture dirs to isolate the pretest/posttest,
+// npx-local-resolution and write-flag behavior from that.
 for (const cmd of [
-  "npm test",
-  "npm run test",
-  "npm run test:unit",
   "tsc --noEmit",
   "npx tsc --noEmit",
   "npm run lint",
@@ -445,7 +446,7 @@ for (const cmd of [
   eq(
     policy.decideBash("test-bash", cmd, ROOT).action,
     "allow",
-    `test-bash allows "${cmd}"`,
+    `test-bash allows known-safe check "${cmd}"`,
   );
 }
 for (const cmd of [
@@ -463,6 +464,112 @@ for (const cmd of [
     policy.decideBash("test-bash", cmd, ROOT).action,
     "block",
     `test-bash blocks "${cmd}"`,
+  );
+}
+
+// ── #63: "npm test" is only auto-allowed when package.json is readable and
+// has no pretest/posttest hook of unknown content ──
+{
+  const cleanTestDir = mkdtempSync(
+    path.join(tmpdir(), "pi-test-bash-clean-"),
+  );
+  const pretestDir = mkdtempSync(path.join(tmpdir(), "pi-test-bash-pre-"));
+  try {
+    writeFileSync(
+      path.join(cleanTestDir, "package.json"),
+      JSON.stringify({ scripts: { test: "vitest run" } }),
+    );
+    for (const cmd of ["npm test", "npm run test", "npm run test:unit"]) {
+      eq(
+        policy.decideBash("test-bash", cmd, cleanTestDir).action,
+        "allow",
+        `#63 "${cmd}" is allowed when package.json has no pretest/posttest hook`,
+      );
+    }
+
+    writeFileSync(
+      path.join(pretestDir, "package.json"),
+      JSON.stringify({
+        scripts: { pretest: "rm -rf dist", test: "vitest run" },
+      }),
+    );
+    eq(
+      policy.decideBash("test-bash", "npm test", pretestDir).action,
+      "ask",
+      "#63 npm test with an unknown pretest hook requires confirmation, not a silent allow",
+    );
+
+    for (const cmd of ["npm test", "npm run test", "npm run test:unit"]) {
+      eq(
+        policy.decideBash("test-bash", cmd, ROOT).action,
+        "ask",
+        `#63 "${cmd}" requires confirmation when package.json can't be read at all`,
+      );
+    }
+  } finally {
+    rmSync(cleanTestDir, { recursive: true, force: true });
+    rmSync(pretestDir, { recursive: true, force: true });
+  }
+}
+
+// ── #63: npx test runners are only auto-allowed when locally resolvable ──
+{
+  const localVitestDir = mkdtempSync(
+    path.join(tmpdir(), "pi-test-bash-npx-local-"),
+  );
+  try {
+    mkdirSync(path.join(localVitestDir, "node_modules", ".bin"), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(localVitestDir, "node_modules", ".bin", "vitest"),
+      "#!/usr/bin/env node\n",
+    );
+    eq(
+      policy.decideBash("test-bash", "npx vitest run", localVitestDir).action,
+      "allow",
+      "#63 npx vitest is allowed when the binary resolves locally",
+    );
+    eq(
+      policy.decideBash("test-bash", "npx vitest run", ROOT).action,
+      "ask",
+      "#63 npx vitest requires confirmation when not locally installed (would download)",
+    );
+    eq(
+      policy.decideBash(
+        "test-bash",
+        "npx vitest run --no-install",
+        ROOT,
+      ).action,
+      "allow",
+      "#63 npx vitest --no-install is allowed even without a local binary",
+    );
+  } finally {
+    rmSync(localVitestDir, { recursive: true, force: true });
+  }
+}
+
+// ── #63: snapshot/coverage/report-writing flags require confirmation ──
+for (const cmd of [
+  "npx jest -u",
+  "npx jest --updateSnapshot",
+  "npx jest --coverage",
+  "npx vitest run --coverage",
+  "npx playwright test --update-snapshots",
+]) {
+  eq(
+    policy.decideBash("test-bash", cmd, ROOT).action,
+    "ask",
+    `#63 write-flag command requires confirmation: "${cmd}"`,
+  );
+}
+
+// ── #63: Playwright/Cypress write artifacts by default, never a silent allow ──
+for (const cmd of ["npx playwright test", "npx cypress run"]) {
+  eq(
+    policy.decideBash("test-bash", cmd, ROOT).action,
+    "ask",
+    `#63 "${cmd}" requires confirmation (writes artifacts by default)`,
   );
 }
 
@@ -485,13 +592,11 @@ for (const cmd of [
   );
 }
 // and the plain allowed commands still pass after the #45 hardening
-for (const cmd of ["npm test", "tsc --noEmit", "npm run test:unit"]) {
-  eq(
-    policy.decideBash("test-bash", cmd, ROOT).action,
-    "allow",
-    `#45 test-bash still allows plain "${cmd}"`,
-  );
-}
+eq(
+  policy.decideBash("test-bash", "tsc --noEmit", ROOT).action,
+  "allow",
+  "#45 test-bash still allows plain \"tsc --noEmit\"",
+);
 
 // ───────────────────────── writeOverride: independent of mode ─────────────────────────
 eq(

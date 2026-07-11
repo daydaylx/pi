@@ -202,7 +202,7 @@ Rules:
 
 - `read-only`: no bash, no writes.
 - `read-bash`: read tools and proven read-only bash only.
-- `test-bash`: like `read-bash`, plus curated non-destructive test/check commands (e.g. `npm test`, `tsc --noEmit`, `npm run lint` without `--fix`); package management, build/fix and destructive commands stay blocked (#43).
+- `test-bash`: like `read-bash`, plus curated test/check commands (e.g. `npm test`, `tsc --noEmit`, `npm run lint` without `--fix`); package management, build/fix and destructive commands stay blocked (#43). This is a restricted execution mode, not a read-only guarantee (#63): `npm test` is only auto-allowed when `package.json` has no `pretest`/`posttest` hook of unknown content; `npx <runner>` is only auto-allowed when it resolves locally (no implicit download); snapshot-update/coverage/report-writing flags and Playwright/Cypress runs (which write artifacts by default) require confirmation instead of running unattended.
 - `full-access`/`yolo` in agent frontmatter are always capped to `read-write`
   (#36). Running such an agent requires interactive confirmation and is
   blocked in non-interactive contexts; the declared elevated level is never

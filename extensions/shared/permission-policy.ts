@@ -1,4 +1,4 @@
-import { existsSync, lstatSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { isPlanFilePath, PLAN_RELATIVE_PATH } from "../plan-mode/utils.ts";
 import type { PermissionLevel, WriteOverride } from "./workflow-status.ts";
@@ -563,18 +563,13 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
   );
 }
 
-// #43: Test-safe commands – extends read-only with controlled test/check runners.
-// Allowed: npm test, npm run test*, tsc --noEmit, npm run lint (without --fix),
-// node <test-file>, npx vitest run, and similar no-write check commands.
-// Blocked: install, update, format, build (with output), delete, sudo.
+// #43/#63: Test-safe commands – extends read-only with controlled test/check
+// runners whose effect is provably read-only on its own (no package.json
+// lifecycle hooks, no implicit npx download, no snapshot/coverage/report
+// writes). npm test, npx vitest/jest/mocha and Playwright/Cypress are
+// deliberately NOT in this list – they need the extra checks in
+// evaluateTestCommand below and are not safe by pattern match alone.
 const TEST_SAFE_PATTERNS: Array<[RegExp, string]> = [
-  [/^npm\s+test\b/, "npm test"],
-  [/^npm\s+run\s+test(?::\w+)?\b/, "npm run test"],
-  [/^npx\s+vitest\s+run\b/, "npx vitest run"],
-  [/^npx\s+vitest\b(?!.*\b(watch|ui|dev)\b)/, "npx vitest (run mode only)"],
-  [/^npx\s+playwright\s+test\b/, "npx playwright test"],
-  [/^npx\s+cypress\s+run\b/, "npx cypress run"],
-  [/^npx\s+jest\b/, "npx jest"],
   [/^tsc\s+--noEmit\b/, "tsc --noEmit"],
   [/^npx\s+tsc\s+--noEmit\b/, "npx tsc --noEmit"],
   [/^npm\s+run\s+lint\b(?!.*--fix)/, "npm run lint (no --fix)"],
@@ -583,15 +578,16 @@ const TEST_SAFE_PATTERNS: Array<[RegExp, string]> = [
   [/^node\s+\S*tests?[/\\]/, "node test runner"],
   [/^node\s+\S*test\.m?js\b/, "node test file"],
   [/^node\s+\S*\.test\.(?:ts|m?js)\b/, "node .test file"],
-  [/^npx\s+mocha\b/, "npx mocha"],
-  [/^npm\s+run-script\s+test\b/, "npm run-script test"],
 ];
 
 // Block patterns that are never allowed under test-bash
 const TEST_BLOCK_PATTERNS: Array<[RegExp, string]> = [
   [/(?:&&|\|\||[|;&<>`\n\r]|\$\(|\$\{)/, "shell metacharacter (chaining/redirect/substitution)"], // #45
   [/\bnpm\s+(i|install|uninstall|update|upgrade|audit\s+fix|outdated|rebuild|ci|dedupe|prune|shrinkwrap)\b/, "npm package management"],
-  [/\bnpx\s+.{0,20}\b(install|update|uninstall|create|init|add|remove)\b/, "npx package management"],
+  // Negative lookbehind excludes flags like --no-install/--update-snapshots:
+  // a hyphen immediately before the keyword means it's a flag, not a
+  // package-management subcommand/verb.
+  [/\bnpx\s+.{0,20}\b(?<!-)(install|update|uninstall|create|init|add|remove)\b/, "npx package management"],
   [/\byarn\s+(add|remove|install|upgrade)\b/, "yarn package management"],
   [/\bpnpm\s+(add|remove|install|update)\b/, "pnpm package management"],
   [/\bpip\s+install\b/, "pip install"],
@@ -605,20 +601,117 @@ const TEST_BLOCK_PATTERNS: Array<[RegExp, string]> = [
   [/\bchown\b/, "chown"],
 ];
 
-export function isTestSafeCommand(command: string, cwd: string): boolean {
+// #63: flags whose effect cannot be proven read-only – snapshot updates,
+// coverage output and file-writing reporters. Allowed anywhere else under
+// test-bash, but these always require confirmation (or are auto-denied in
+// non-interactive/subagent contexts – see mode-permissions.ts's approve()).
+const TEST_WRITE_FLAG_PATTERNS: Array<[RegExp, string]> = [
+  [/(?:^|\s)-u(?:\s|$)/, "-u (snapshot update)"],
+  [/--update-snapshots?\b/i, "--update-snapshot(s)"],
+  [/--updateSnapshot\b/, "--updateSnapshot"],
+  [/--coverage\b/, "--coverage"],
+  [/--outputFile\b/, "--outputFile"],
+  [/--output-file\b/, "--output-file"],
+  [/--reporter[=\s]\S*(?:html|json|junit)/i, "file-writing --reporter"],
+];
+
+// #63: npm automatically runs pre<script>/post<script> as part of running
+// <script> – their content is unknown to this policy, so "npm test" is only
+// provably read-only when package.json is readable and neither hook exists.
+function hasUnverifiedTestLifecycleHooks(
+  cwd: string,
+  scriptName: string,
+): boolean {
+  let raw: string;
+  try {
+    raw = readFileSync(resolve(cwd, "package.json"), "utf8");
+  } catch {
+    return true;
+  }
+  let scripts: unknown;
+  try {
+    scripts = JSON.parse(raw)?.scripts;
+  } catch {
+    return true;
+  }
+  if (!scripts || typeof scripts !== "object") return true;
+  const record = scripts as Record<string, unknown>;
+  return Boolean(record[`pre${scriptName}`] || record[`post${scriptName}`]);
+}
+
+// #63: npx silently downloads a missing package unless it already resolves
+// locally or --no-install is passed – neither is provably read-only.
+function isLocallyResolvableNpxTool(
+  cwd: string,
+  toolName: string,
+  command: string,
+): boolean {
+  if (/--no-install\b/.test(command)) return true;
+  return existsSync(resolve(cwd, "node_modules", ".bin", toolName));
+}
+
+// #63: test-bash's full decision for a single command. Returns ask() rather
+// than deny() where a human (or, non-interactively, an automatic denial –
+// see mode-permissions.ts's approve()) should decide, instead of silently
+// allowing or silently blocking an unverifiable command.
+function evaluateTestCommand(command: string, cwd: string): PolicyDecision {
   const trimmed = command.trim();
 
-  // Block destructive patterns first
-  for (const [pattern] of TEST_BLOCK_PATTERNS) {
-    if (pattern.test(trimmed)) return false;
+  for (const [pattern, reason] of TEST_BLOCK_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return deny(`Test Bash: ${reason} ist blockiert.`);
+    }
+  }
+  for (const [pattern, reason] of TEST_WRITE_FLAG_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return ask(
+        `Test Bash: "${reason}" kann Dateien schreiben und ist nicht read-only garantiert.`,
+      );
+    }
   }
 
-  // Allow known safe test patterns
+  const npmTestMatch = /^npm\s+(?:run(?:-script)?\s+)?test(?::(\w+))?\b/.exec(
+    trimmed,
+  );
+  if (npmTestMatch) {
+    const scriptName = npmTestMatch[1] ? `test:${npmTestMatch[1]}` : "test";
+    return hasUnverifiedTestLifecycleHooks(cwd, scriptName)
+      ? ask(
+          `Test Bash: pretest/posttest-Skript für "${scriptName}" ist unbekannt oder package.json nicht lesbar.`,
+        )
+      : ALLOW;
+  }
+
+  const npxRunnerMatch = /^npx\s+(vitest|jest|mocha)\b(.*)$/.exec(trimmed);
+  if (npxRunnerMatch) {
+    const [, tool, rest] = npxRunnerMatch;
+    if (tool === "vitest" && /\b(?:watch|ui|dev)\b/.test(rest)) {
+      return deny("Test Bash: vitest im Watch/UI/Dev-Modus ist blockiert.");
+    }
+    return isLocallyResolvableNpxTool(cwd, tool, trimmed)
+      ? ALLOW
+      : ask(
+          `Test Bash: npx könnte "${tool}" nachinstallieren (nicht lokal in node_modules/.bin gefunden, kein --no-install).`,
+        );
+  }
+
+  if (
+    /^npx\s+playwright\s+test\b/.test(trimmed) ||
+    /^npx\s+cypress\s+run\b/.test(trimmed)
+  ) {
+    return ask(
+      "Test Bash: Playwright/Cypress schreiben standardmäßig Artefakte (Screenshots, Videos, Reports) und sind nicht read-only garantiert.",
+    );
+  }
+
   for (const [pattern] of TEST_SAFE_PATTERNS) {
-    if (pattern.test(trimmed)) return true;
+    if (pattern.test(trimmed)) return ALLOW;
   }
 
-  return false;
+  return deny(
+    "Test Bash: Das Kommando ist kein erlaubter Test/Lint/Check-Befehl. " +
+      "Erlaubt sind npm test, tsc --noEmit, npm run lint (ohne --fix) und ähnliche geprüfte Prüfbefehle.",
+  );
 }
 
 function referencesSystemPath(command: string): boolean {
@@ -662,14 +755,14 @@ export function decideBash(
       : deny("Read + Bash: Das Kommando ist nicht nachweislich read-only.");
   }
 
-  // #43: test-bash extends read-bash with controlled test/check commands
+  // #43/#63: test-bash extends read-bash with controlled test/check
+  // commands. This is a restricted execution mode, not a read-only
+  // guarantee – commands whose write behavior can't be verified statically
+  // (unknown pretest/posttest hooks, non-local npx, snapshot/coverage/report
+  // writers) return ask() instead of a silent allow.
   if (permissionLevel === "test-bash") {
     if (isPlanSafeCommand(trimmed, cwd)) return ALLOW;
-    if (isTestSafeCommand(trimmed, cwd)) return ALLOW;
-    return deny(
-      "Test Bash: Das Kommando ist kein erlaubter Test/Lint/Check-Befehl. " +
-      "Erlaubt sind npm test, npm run test, tsc --noEmit, npm run lint (ohne --fix) und ähnliche reine Prüfbefehle.",
-    );
+    return evaluateTestCommand(trimmed, cwd);
   }
 
   if (isSensitiveReference(trimmed)) {

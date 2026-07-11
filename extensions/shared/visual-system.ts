@@ -84,7 +84,14 @@ export function phaseTone(
 export function permissionTone(level: PermissionLevel): VisualTone {
   if (level === "yolo") return "danger";
   if (level === "full-access") return "warning";
-  if (level === "read-only" || level === "read-bash") return "review";
+  // #63: test-bash can write (snapshots, coverage, reports) – not the same
+  // safe tone as the strictly read-only levels.
+  if (
+    level === "read-only" ||
+    level === "read-bash" ||
+    level === "test-bash"
+  )
+    return "review";
   return "neutral";
 }
 

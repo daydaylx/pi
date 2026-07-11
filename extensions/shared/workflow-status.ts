@@ -32,7 +32,7 @@ export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
 export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
   "read-only": "Nur Lesen; ausschließlich die Plan-Datei bleibt beschreibbar",
   "read-bash": "Lesen, sichere Inspect-Bash-Befehle und die Plan-Datei",
-  "test-bash": "Lesen, Inspect- und Test-Befehle (npm test, tsc --noEmit) und die Plan-Datei",
+  "test-bash": "Lesen, eingeschränkte Testausführung (npm test, tsc --noEmit) und die Plan-Datei – kein garantiertes Read-only",
   "read-write": "Normaler Projektzugriff mit Rückfragen bei riskanten Aktionen",
   "full-access":
     "Git-Housekeeping/Paketmanager ohne Rückfrage; sudo/Löschen/Force-Push bleiben bestätigt",
