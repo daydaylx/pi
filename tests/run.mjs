@@ -46,6 +46,9 @@ const subagentAgents = await jiti.import(
 const planMode = await jiti.import(
   path.resolve(ROOT, "extensions/plan-mode/index.ts"),
 );
+const skillMode = await jiti.import(
+  path.resolve(ROOT, "extensions/skill-mode/index.ts"),
+);
 const uxStatus = await jiti.import(
   path.resolve(ROOT, "extensions/ux-status.ts"),
 );
@@ -1097,6 +1100,66 @@ assert(
     emitted.at(-1)[1].writeOverride,
     "inherit",
     "session resume restores write override",
+  );
+}
+
+// ───────────────────────── skill-mode: canonical plan path (#66) ─────────────────────────
+{
+  const sent = [];
+  const commands = new Map();
+  const eventHandlers = new Map();
+  skillMode.default({
+    events: {
+      on(name, handler) {
+        eventHandlers.set(name, handler);
+      },
+      emit() {},
+    },
+    on() {},
+    registerCommand(name, options) {
+      commands.set(name, options.handler);
+    },
+    registerShortcut() {},
+    sendMessage(message, options) {
+      sent.push({ message, options });
+    },
+  });
+
+  const context = {
+    cwd: ROOT,
+    hasUI: true,
+    mode: "tui",
+    ui: {
+      notify() {},
+      confirm: async () => true,
+    },
+  };
+
+  await commands.get("skill")("repo-analyse plan", context);
+  const injected = sent.at(-1)?.message?.content;
+  assert(
+    typeof injected === "string" &&
+      injected.includes(utils.PLAN_RELATIVE_PATH),
+    "skill plan mode instructs writing to the canonical plan path",
+  );
+  assert(
+    !injected.includes("docs/plans"),
+    "skill plan mode no longer references the stale docs/plans path",
+  );
+  assert(
+    utils.isPlanFilePath(utils.PLAN_RELATIVE_PATH, ROOT),
+    "the path the skill instructs writing to is accepted as the plan file",
+  );
+  eq(
+    policy.decideFileAccess(
+      "read-write",
+      "write",
+      utils.PLAN_RELATIVE_PATH,
+      ROOT,
+      "plan-file-only",
+    ).action,
+    "allow",
+    "plan-file-only allows the exact path the skill instructs writing to",
   );
 }
 

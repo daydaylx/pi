@@ -21,6 +21,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { runMenu } from "../shared/menu-ui.ts";
+import { PLAN_RELATIVE_PATH } from "../plan-mode/utils.ts";
 import {
   SKILL_CATALOG,
   findSkill,
@@ -166,7 +167,7 @@ AUSFÜHRUNGSMODUS: Plan erstellen
 - Der Plan muss alle im Skill definierten Abschnitte enthalten.
 - Nutze bei Bedarf das \`subagent\`-Tool (${SUBAGENT_HINT}), bevor der finale Plan geschrieben wird.
 - Bei mehrdeutigen Entscheidungen: mit ask_user klären, bevor der Plan finalisiert wird.
-- Schreibe den finalen Plan nach docs/plans/current-plan.md.`,
+- Schreibe den finalen Plan nach ${PLAN_RELATIVE_PATH}.`,
       work: `
 AUSFÜHRUNGSMODUS: Umsetzung
 - Führe die Aufgabe gemäß dem Skill-Workflow aus.
