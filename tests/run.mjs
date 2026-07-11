@@ -12,6 +12,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -3214,6 +3215,118 @@ assert(
       } finally {
         rmSync(linkRoot, { recursive: true, force: true });
         rmSync(realRoot, { recursive: true, force: true });
+      }
+    }
+
+    // ── #65: child PWD always matches the validated spawn cwd ──
+    process.env.PI_TEST_SCENARIO = "pwd-probe";
+    {
+      // Project root: no cwd override.
+      const rootResult = await tool.execute(
+        "e2e-pwd-root",
+        { agent: "scout", task: "probe pwd", agentScope: "user" },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      const rootProbe = JSON.parse(rootResult.content[0].text);
+      eq(rootProbe.cwd, rootProbe.envPwd, "#65 root: cwd and $PWD agree");
+      eq(
+        rootResult.details.results[0].spawnCwd,
+        rootProbe.cwd,
+        "#65 root: reported spawnCwd matches the child's process.cwd()",
+      );
+
+      // Real subdirectory of the project root.
+      const subdirResult = await tool.execute(
+        "e2e-pwd-subdir",
+        {
+          agent: "scout",
+          task: "probe pwd",
+          agentScope: "user",
+          cwd: "extensions",
+        },
+        undefined,
+        undefined,
+        makeCtx(),
+      );
+      const subdirProbe = JSON.parse(subdirResult.content[0].text);
+      eq(
+        subdirProbe.cwd,
+        subdirProbe.envPwd,
+        "#65 subdirectory: cwd and $PWD agree",
+      );
+      assert(
+        subdirProbe.cwd.endsWith(`${path.sep}extensions`),
+        "#65 subdirectory: both values reflect the requested subdirectory, not the project root",
+      );
+
+      // The parent process's own $PWD must not leak into the child unchanged.
+      const previousParentPwd = process.env.PWD;
+      process.env.PWD = "/definitely/not/the/real/cwd";
+      try {
+        const mismatchResult = await tool.execute(
+          "e2e-pwd-parent-mismatch",
+          { agent: "scout", task: "probe pwd", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        const mismatchProbe = JSON.parse(mismatchResult.content[0].text);
+        assert(
+          mismatchProbe.envPwd !== "/definitely/not/the/real/cwd",
+          "#65 the parent's own $PWD is not copied into the child unchanged",
+        );
+        eq(
+          mismatchProbe.cwd,
+          mismatchProbe.envPwd,
+          "#65 child cwd and $PWD still agree despite a divergent parent $PWD",
+        );
+      } finally {
+        if (previousParentPwd === undefined) delete process.env.PWD;
+        else process.env.PWD = previousParentPwd;
+      }
+
+      // Symlinked project root: both values reflect the resolved real path
+      // of the subdirectory, not the symlink path (mirrors the "cwd
+      // validation (#34)" symlinked-root case above).
+      const pwdRealRoot = mkdtempSync(
+        path.join(tmpdir(), "pi-subagent-pwd-realroot-"),
+      );
+      const pwdLinkRoot = path.join(
+        tmpdir(),
+        `pi-subagent-pwd-linkroot-${Date.now()}`,
+      );
+      try {
+        mkdirSync(path.join(pwdRealRoot, "sub"));
+        symlinkSync(pwdRealRoot, pwdLinkRoot, "dir");
+        const realSub = realpathSync(path.join(pwdRealRoot, "sub"));
+        const symlinkPwdResult = await tool.execute(
+          "e2e-pwd-symlink",
+          {
+            agent: "scout",
+            task: "probe pwd",
+            agentScope: "user",
+            cwd: "sub",
+          },
+          undefined,
+          undefined,
+          { ...makeCtx(), cwd: pwdLinkRoot },
+        );
+        const symlinkPwdProbe = JSON.parse(symlinkPwdResult.content[0].text);
+        eq(
+          symlinkPwdProbe.cwd,
+          symlinkPwdProbe.envPwd,
+          "#65 symlinked project root: cwd and $PWD agree",
+        );
+        eq(
+          symlinkPwdProbe.cwd,
+          realSub,
+          "#65 symlinked project root: both values are the resolved real path, not the symlink path",
+        );
+      } finally {
+        rmSync(pwdLinkRoot, { recursive: true, force: true });
+        rmSync(pwdRealRoot, { recursive: true, force: true });
       }
     }
 

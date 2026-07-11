@@ -19,6 +19,8 @@
  *                    read to recover the task text.
  *   self-kill      – writes partial output, then dies via SIGKILL so the
  *                    parent sees a signal exit without an exit code
+ *   env-probe      – reports which env vars the child actually received (#48/#64)
+ *   pwd-probe      – reports process.cwd() and process.env.PWD (#65)
  */
 import { readFileSync } from "node:fs";
 
@@ -221,6 +223,29 @@ function emit(scenarioName) {
       permPresent: env.PI_SUBAGENT_PERMISSION_LEVEL != null,
       writePresent: env.PI_SUBAGENT_WRITE_OVERRIDE != null,
       pathPresent: "PATH" in env,
+    });
+    process.stdout.write(
+      JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          model: "fake-model",
+          stopReason: "end_turn",
+          content: [{ type: "text", text }],
+          usage: { input: 1, output: 1, cost: { total: 0 } },
+        },
+      }) + "\n",
+    );
+    return;
+  }
+
+  if (scenarioName === "pwd-probe") {
+    // #65: report the child's actual cwd and its $PWD env var, so tests can
+    // assert they always agree and reflect the validated spawn cwd – never
+    // an unrelated value inherited from the parent's own $PWD.
+    const text = JSON.stringify({
+      cwd: process.cwd(),
+      envPwd: process.env.PWD,
     });
     process.stdout.write(
       JSON.stringify({

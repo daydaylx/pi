@@ -270,6 +270,9 @@ interface SingleResult {
   errorMessage?: string;
   validationErrors?: string[];
   step?: number;
+  /** #65: absolute cwd the child was spawned with. process.env.PWD inside
+   * the child is set to this same value – diagnostic only, no secrets. */
+  spawnCwd?: string;
 }
 
 interface SubagentDetails {
@@ -473,7 +476,11 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
   return { command: "pi", args };
 }
 
-function childEnv(agent: AgentConfig): NodeJS.ProcessEnv {
+// #65: the child must see the same effective working directory everywhere –
+// `resolvedCwd` is the already-validated, absolute spawn cwd (validateCwd's
+// result), never the parent's own $PWD. On platforms without meaningful PWD
+// semantics (Windows) the variable is left unset rather than forced.
+function childEnv(agent: AgentConfig, resolvedCwd: string): NodeJS.ProcessEnv {
   // #48: only forward a whitelisted subset of the parent environment to the
   // subagent child. This keeps unrelated secrets/tokens the parent process
   // happened to carry (e.g. third-party app credentials) from leaking into
@@ -483,6 +490,11 @@ function childEnv(agent: AgentConfig): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of Object.keys(process.env)) {
     if (isChildEnvVarAllowed(key)) env[key] = process.env[key];
+  }
+  if (process.platform !== "win32") {
+    env.PWD = resolvedCwd;
+  } else {
+    delete env.PWD;
   }
   env.PI_SUBAGENT = "1";
   env.PI_SUBAGENT_PERMISSION_LEVEL = agent.permission;
@@ -508,7 +520,6 @@ const CHILD_ENV_ESSENTIALS = new Set([
   "TERM",
   "TERM_PROGRAM",
   "HOSTNAME",
-  "PWD",
   "EDITOR",
   "VISUAL",
   "NO_COLOR",
@@ -750,9 +761,12 @@ async function runSingleAgent(
         if (cwdCheck.error) {
           current.stderr += `[cwd] ${cwdCheck.error}\n`;
         }
+        // #65: diagnostic only – no secrets, just the two paths that must
+        // agree inside the child (process.cwd() vs. process.env.PWD).
+        current.spawnCwd = cwdCheck.cwd;
         const proc = spawn(invocation.command, invocation.args, {
           cwd: cwdCheck.cwd,
-          env: childEnv(agent),
+          env: childEnv(agent, cwdCheck.cwd),
           shell: false,
           stdio: ["ignore", "pipe", "pipe"],
         });
