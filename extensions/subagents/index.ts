@@ -788,6 +788,13 @@ async function runSingleAgent(
         };
         current.stderr += `[thinking] requested "${resolvedThinking.clampedFrom}" not supported by ${model}, using "${resolvedThinking.level}".\n`;
       }
+      // #62: warn upfront, not just on the first blocked bash call, so the
+      // model doesn't waste turns retrying bash it can never use in this run.
+      if (agent.tools.includes("bash") && agent.allowedPaths.length > 0) {
+        current.stderr +=
+          `[bash] disabled for this run: allowedPaths (${agent.allowedPaths.join(", ")}) is declared, and bash write access ` +
+          "cannot be confined to that scope, so it is blocked entirely (#62). Use write/edit within the allowed paths instead.\n";
+      }
       args.push("--tools", agent.tools.join(","));
       if (tmpPromptPath) args.push("--append-system-prompt", tmpPromptPath);
       args.push(`@${taskTmpPath}`);
@@ -1205,6 +1212,16 @@ function formatAgentModelThinkingTag(agent: AgentConfig): string {
   return `${modelLabel}, ${thinkingLabel}`;
 }
 
+// #62: makes the scope/bash relationship explicit wherever an agent is
+// listed, instead of implying allowedPaths is a complete boundary for every
+// tool. Only shown for agents that declare bash at all.
+function formatAgentScopeNote(agent: AgentConfig): string | undefined {
+  if (!agent.tools.includes("bash")) return undefined;
+  return agent.allowedPaths.length > 0
+    ? `scope: ${agent.allowedPaths.join(", ")}, bash: gesperrt (write scope aktiv, #62)`
+    : "scope: unrestricted, bash: verfügbar";
+}
+
 function formatAgentLiveStatusLines(agents: AgentConfig[]): string[] {
   const live = getWidgetState().subagents;
   return agents.map((agent) => {
@@ -1213,7 +1230,11 @@ function formatAgentLiveStatusLines(agents: AgentConfig[]): string[] {
       entry === undefined
         ? "inaktiv"
         : `${STATUS_SYMBOL[entry.status]} ${STATUS_LABEL[entry.status]}${entry.currentTask ? ` — ${entry.currentTask}` : ""}`;
-    return `${agent.name} (${agent.source}, ${agent.permission}): ${agent.description}  [${formatAgentModelThinkingTag(agent)}] [${status}]`;
+    const scopeNote = formatAgentScopeNote(agent);
+    return (
+      `${agent.name} (${agent.source}, ${agent.permission}): ${agent.description}  [${formatAgentModelThinkingTag(agent)}] [${status}]` +
+      (scopeNote ? `  [${scopeNote}]` : "")
+    );
   });
 }
 
@@ -1528,6 +1549,21 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
                   : "";
               return `- ${base}${suffix}`;
             }),
+          );
+        }
+
+        // #62: allowedPaths only ever bounded write/edit; bash is disabled
+        // outright for any agent that also declares it, rather than
+        // implying allowedPaths is a complete boundary. Report this per
+        // agent so the gap is never a silent assumption.
+        const agentsWithBash = effectiveDiscovery.agents.filter((a) =>
+          a.tools.includes("bash"),
+        );
+        if (agentsWithBash.length > 0) {
+          lines.push(
+            "",
+            "Scope/Bash je Agent (nur Agenten mit bash-Tool):",
+            ...agentsWithBash.map((a) => `- ${a.name}: ${formatAgentScopeNote(a)}`),
           );
         }
 

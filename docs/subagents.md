@@ -139,7 +139,14 @@ Additional frontmatter guardrails:
 - `allowedPaths` (#46): comma-separated project-relative/absolute paths where a
   write-capable agent may write. Agents with `write`/`edit` but no
   `allowedPaths` require interactive confirmation and are blocked in
-  non-interactive mode.
+  non-interactive mode. `allowedPaths` only ever bounds the `write`/`edit`
+  tools (#62): it is **not** a general filesystem sandbox. An agent that also
+  declares `bash` alongside a non-empty `allowedPaths` has its `bash` tool
+  disabled entirely at runtime — bash could otherwise write anywhere in the
+  project via `cp`/`mv`/`tee`/`sed -i`/redirection/`node`/`python`
+  one-liners/`npm` scripts/`git checkout`/`tar`/`unzip`, none of which
+  `allowedPaths` constrains. `/subagent-doctor` and `/subagent-list` report
+  each bash-capable agent's scope and whether bash is available or blocked.
 - `fallbackModels` (#54): comma-separated model IDs tried after the primary
   model fails with a provider/model error (e.g. unavailable provider, auth/rate
   limit/5xx/network errors). Normal task failures, output validation errors,

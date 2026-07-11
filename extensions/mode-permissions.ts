@@ -70,6 +70,24 @@ function toolPath(event: ToolCallEvent): string | undefined {
   return typeof input.path === "string" ? input.path : undefined;
 }
 
+// #62: allowedPaths is only enforced for write/edit. A scoped subagent's
+// bash tool could otherwise write anywhere in the project via cp/mv/tee/
+// sed -i/redirection/node/python one-liners/npm scripts/git checkout/
+// tar/unzip, etc. – no per-command pattern list can close every one of
+// those paths reliably. Until a real filesystem sandbox scopes bash to
+// allowedPaths, bash is disabled outright for any process that declares a
+// write scope, rather than pretending a regex enforces it. Returns
+// undefined when bash is not scope-restricted (the common case for the
+// main interactive session and unscoped subagents).
+function bashScopeBlock(): PolicyDecision | undefined {
+  const scopedPaths = allowedPathsFromEnv();
+  if (!scopedPaths) return undefined;
+  return {
+    action: "block",
+    reason: `bash blocked because write scope is active (allowedPaths: ${scopedPaths.join(", ")}). Use write/edit within the allowed paths instead.`,
+  };
+}
+
 function decideTool(
   permissionLevel: PermissionLevel,
   event: ToolCallEvent,
@@ -77,11 +95,14 @@ function decideTool(
   writeOverride: WriteOverride,
 ): PolicyDecision {
   if (event.toolName === "bash") {
-    return decideBash(
-      permissionLevel,
-      String((event.input as Record<string, unknown>).command ?? ""),
-      cwd,
-      { writeOverride },
+    return (
+      bashScopeBlock() ??
+      decideBash(
+        permissionLevel,
+        String((event.input as Record<string, unknown>).command ?? ""),
+        cwd,
+        { writeOverride },
+      )
     );
   }
 
@@ -307,9 +328,11 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("user_bash", async (event, ctx) => {
-    const decision = decideBash(permissionLevel, event.command, event.cwd, {
-      writeOverride,
-    });
+    const decision =
+      bashScopeBlock() ??
+      decideBash(permissionLevel, event.command, event.cwd, {
+        writeOverride,
+      });
     if (await approve(decision, event.command, ctx, "bash")) return;
     return {
       result: {

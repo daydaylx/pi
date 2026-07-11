@@ -1194,6 +1194,120 @@ assert(
     }
   }
 
+  // #62: a scoped write boundary (allowedPaths) disables bash entirely,
+  // since allowedPaths only ever bounds write/edit and no per-command
+  // pattern list can reliably close every bash write path.
+  {
+    const previousAllowedPaths = process.env.PI_SUBAGENT_ALLOWED_PATHS;
+    process.env.PI_SUBAGENT_ALLOWED_PATHS = "src";
+    try {
+      const scopedHandlers = new Map();
+      modePermissions.default({
+        events: { on() {}, emit() {} },
+        on(name, handler) {
+          scopedHandlers.set(name, handler);
+        },
+        registerCommand() {},
+        registerShortcut() {},
+        appendEntry() {},
+      });
+      const scopedCtx = { cwd: ROOT, hasUI: false, mode: "json" };
+
+      for (const command of [
+        "cp secret.txt src/ok.txt",
+        "mv a.txt src/b.txt",
+        "tee src/out.txt <<< data",
+        "sed -i s/a/b/ src/file.ts",
+        "perl -i -pe 's/a/b/' src/file.ts",
+        "node -e \"require('fs').writeFileSync('src/x','y')\"",
+        "python3 -c \"open('src/x','w').write('y')\"",
+        "sh -c \"echo hi > src/out.txt\"",
+        "npm run build",
+        "git checkout -- .",
+        "git restore .",
+        "tar -xf a.tar -C src",
+        "unzip a.zip -d src",
+        "ls -la",
+      ]) {
+        const result = await scopedHandlers.get("tool_call")(
+          { toolName: "bash", input: { command } },
+          scopedCtx,
+        );
+        assert(
+          result?.block === true,
+          `#62 bash is blocked under an active write scope: "${command}"`,
+        );
+        assert(
+          /write scope/i.test(result.reason) &&
+            result.reason.includes("allowedPaths"),
+          `#62 block reason names the write scope for: "${command}"`,
+        );
+      }
+
+      const userBashResult = await scopedHandlers.get("user_bash")(
+        { command: "cp a.txt src/b.txt", cwd: ROOT },
+        scopedCtx,
+      );
+      eq(
+        userBashResult.result.exitCode,
+        126,
+        "#62 interactive user_bash is also blocked under an active write scope",
+      );
+      assert(
+        /write scope/i.test(userBashResult.result.output),
+        "#62 user_bash block output names the write scope",
+      );
+    } finally {
+      if (previousAllowedPaths === undefined) {
+        delete process.env.PI_SUBAGENT_ALLOWED_PATHS;
+      } else {
+        process.env.PI_SUBAGENT_ALLOWED_PATHS = previousAllowedPaths;
+      }
+    }
+  }
+
+  // #62: without a declared write scope, bash keeps working normally – no
+  // collateral damage for unscoped bash-capable profiles (reviewer,
+  // test-runner, security-auditor all ship without allowedPaths).
+  {
+    const previousAllowedPaths = process.env.PI_SUBAGENT_ALLOWED_PATHS;
+    const previousEnvPermission = process.env.PI_SUBAGENT_PERMISSION_LEVEL;
+    delete process.env.PI_SUBAGENT_ALLOWED_PATHS;
+    process.env.PI_SUBAGENT_PERMISSION_LEVEL = "read-bash";
+    try {
+      const unscopedHandlers = new Map();
+      modePermissions.default({
+        events: { on() {}, emit() {} },
+        on(name, handler) {
+          unscopedHandlers.set(name, handler);
+        },
+        registerCommand() {},
+        registerShortcut() {},
+        appendEntry() {},
+      });
+      const result = await unscopedHandlers.get("tool_call")(
+        { toolName: "bash", input: { command: "ls -la" } },
+        { cwd: ROOT, hasUI: false, mode: "json" },
+      );
+      eq(
+        result,
+        undefined,
+        "#62 bash runs normally for an unscoped agent (no allowedPaths)",
+      );
+    } finally {
+      if (previousAllowedPaths === undefined) {
+        delete process.env.PI_SUBAGENT_ALLOWED_PATHS;
+      } else {
+        process.env.PI_SUBAGENT_ALLOWED_PATHS = previousAllowedPaths;
+      }
+      if (previousEnvPermission === undefined) {
+        delete process.env.PI_SUBAGENT_PERMISSION_LEVEL;
+      } else {
+        process.env.PI_SUBAGENT_PERMISSION_LEVEL = previousEnvPermission;
+      }
+    }
+  }
+
   // Session resume restores the last persisted permission and override.
   sessionEntries = persisted.slice();
   await handlers.get("session_start")({}, context);
@@ -1382,6 +1496,14 @@ assert(
           notified[0].message.includes("PATH") &&
           notified[0].message.includes("oracle:"),
         "/subagent-doctor reports the base env allowlist and per-agent credential vars",
+      );
+      // #62: doctor reports scope + bash availability per bash-capable agent.
+      assert(
+        notified[0].message.includes("Scope/Bash je Agent") &&
+          notified[0].message.includes(
+            "test-runner: scope: unrestricted, bash: verfügbar",
+          ),
+        "/subagent-doctor reports scope and bash availability for bash-capable agents",
       );
       const secretLookingValues = [
         "test-value-GITHUB_TOKEN",
@@ -3126,6 +3248,76 @@ assert(
           delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
         rmSync(tempAgentDir, { recursive: true, force: true });
+      }
+    }
+
+    // ── #62: bash + allowedPaths – bash is disabled, scope is reported ──
+    process.env.PI_TEST_SCENARIO = "success";
+    {
+      const scopedBashDir = mkdtempSync(
+        path.join(tmpdir(), "pi-subagent-bash62-"),
+      );
+      const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+      try {
+        const agentsDir = path.join(scopedBashDir, "agents");
+        mkdirSync(agentsDir, { recursive: true });
+        writeFileSync(
+          path.join(agentsDir, "scoped-bash.md"),
+          [
+            "---",
+            "name: scoped-bash",
+            "description: bash-capable writer scoped to src",
+            "tools: read, write, bash",
+            "allowedPaths: src",
+            "---",
+            "Prompt.",
+            "",
+          ].join("\n"),
+        );
+        process.env.PI_CODING_AGENT_DIR = scopedBashDir;
+
+        const result = await tool.execute(
+          "e2e-62-scoped-bash",
+          { agent: "scoped-bash", task: "do", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx({
+            hasUI: true,
+            ui: { confirm: async () => true, select: async () => undefined },
+          }),
+        );
+        assert(
+          result.details.results[0].stderr.includes("[bash] disabled"),
+          "#62 the run is warned upfront that bash is disabled for this scoped agent",
+        );
+
+        const notified = [];
+        const doctorHandlers = new Map();
+        subagents.default({
+          registerTool() {},
+          registerCommand(name, options) {
+            doctorHandlers.set(name, options.handler);
+          },
+          on() {},
+          getThinkingLevel() {
+            return "high";
+          },
+        });
+        await doctorHandlers.get("subagent-doctor")("", {
+          cwd: scopedBashDir,
+          ui: { notify: (message) => notified.push(message) },
+        });
+        assert(
+          notified[0].includes(
+            "scoped-bash: scope: src, bash: gesperrt (write scope aktiv, #62)",
+          ),
+          "#62 /subagent-doctor reports the scope and blocked bash for a scoped bash agent",
+        );
+      } finally {
+        if (previousAgentDir === undefined)
+          delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        rmSync(scopedBashDir, { recursive: true, force: true });
       }
     }
 
