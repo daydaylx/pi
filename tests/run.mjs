@@ -835,7 +835,7 @@ assert(
       },
       confirm: async () => {
         confirmations += 1;
-        return false;
+        return true;
       },
     },
   };
@@ -843,8 +843,8 @@ assert(
   await handlers.get("session_start")({}, context);
   eq(
     emitted.at(-1)[1].permissionLevel,
-    "yolo",
-    "new sessions use configured Auto-YOLO",
+    "read-write",
+    "new sessions start in read-write, not YOLO (#61)",
   );
   eq(
     statuses.find((entry) => entry.key === "workflow-permission")?.text,
@@ -857,12 +857,30 @@ assert(
     "permission extension clears the duplicate permission status key",
   );
 
-  // De-escalation is immediate and does not depend on idle/mode state.
+  // #61: /yolo elevates only after confirmation; toggling back out
+  // (de-escalation) is immediate and does not depend on idle/mode state.
+  const confirmationsBeforeToggle = confirmations;
+  await commands.get("yolo")("", context);
+  eq(
+    emitted.at(-1)[1].permissionLevel,
+    "yolo",
+    "/yolo elevates to YOLO after confirmation",
+  );
+  eq(
+    confirmations,
+    confirmationsBeforeToggle + 1,
+    "/yolo elevation requires exactly one confirmation",
+  );
   await commands.get("yolo")("", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "read-write",
     "/yolo can be disabled while the agent is busy",
+  );
+  eq(
+    confirmations,
+    confirmationsBeforeToggle + 1,
+    "/yolo de-escalation does not trigger an additional confirmation",
   );
   assert(
     emitted.some(
@@ -922,32 +940,91 @@ assert(
   );
   await commands.get("permission")("read-write", context);
 
-  // Elevated levels activate directly when confirmation is disabled.
+  // Elevated levels (#61) always require an interactive confirmation.
+  let confirmationsBefore = confirmations;
   await commands.get("permission")("full-access", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "full-access",
-    "full-access activates directly",
+    "full-access activates after confirmation",
   );
-  eq(confirmations, 0, "elevated permission changes require no confirmation");
+  eq(
+    confirmations,
+    confirmationsBefore + 1,
+    "full-access elevation requires exactly one confirmation",
+  );
   await commands.get("permission")("read-write", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "read-write",
     "de-escalation applies without confirmation",
   );
+  eq(
+    confirmations,
+    confirmationsBefore + 1,
+    "de-escalation does not trigger a confirmation",
+  );
+  confirmationsBefore = confirmations;
   await commands.get("permission")("yolo", context);
   eq(
     emitted.at(-1)[1].permissionLevel,
     "yolo",
-    "/permission yolo activates directly while busy",
+    "/permission yolo activates after confirmation while busy",
   );
-  eq(confirmations, 0, "direct YOLO activation requires no confirmation");
+  eq(
+    confirmations,
+    confirmationsBefore + 1,
+    "YOLO activation requires exactly one confirmation",
+  );
   await commands.get("permission")("read-write", context);
   assert(
     emitted.every(([, event]) => event.source === "permission"),
     "permission changes never publish workflow mode events",
   );
+
+  // #61: a declined confirmation must not elevate the session.
+  {
+    const denyContext = {
+      ...context,
+      ui: { ...context.ui, confirm: async () => false },
+    };
+    const beforeElevation = emitted.at(-1)[1].permissionLevel;
+    await commands.get("permission")("yolo", denyContext);
+    eq(
+      emitted.at(-1)[1].permissionLevel,
+      beforeElevation,
+      "declining the confirmation keeps the previous permission level",
+    );
+  }
+
+  // #61: elevation is rejected outright in non-interactive contexts.
+  {
+    let notified;
+    const nonInteractiveContext = {
+      ...context,
+      hasUI: false,
+      ui: {
+        ...context.ui,
+        confirm: async () => {
+          throw new Error("confirm must not be called without UI");
+        },
+        notify: (text, level) => {
+          notified = { text, level };
+        },
+      },
+    };
+    const beforeElevation = emitted.at(-1)[1].permissionLevel;
+    await commands.get("permission")("full-access", nonInteractiveContext);
+    eq(
+      emitted.at(-1)[1].permissionLevel,
+      beforeElevation,
+      "non-interactive elevation attempts do not change the permission level",
+    );
+    assert(
+      notified?.level === "error",
+      "non-interactive elevation attempts notify with an error",
+    );
+  }
 
   // /write: independent write-rights override.
   await commands.get("write")("block", context);
@@ -988,7 +1065,7 @@ assert(
     eq(
       childEmitted.at(-1).permissionLevel,
       "read-bash",
-      "subagent child env overrides Auto-YOLO permission",
+      "subagent child env overrides the default read-write permission",
     );
     eq(
       childEmitted.at(-1).writeOverride,

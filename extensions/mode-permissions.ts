@@ -36,16 +36,9 @@ import { formatPermissionWarning } from "./shared/visual-system.ts";
 const STATUS_KEY = "workflow-permission";
 const PERMISSION_STATUS_KEY = "permission-level";
 const PERSISTED_STATE_KEY = "mode-permissions";
-const CONFIRM_ELEVATED_PERMISSIONS = false;
 const ENV_PERMISSION_LEVEL = "PI_SUBAGENT_PERMISSION_LEVEL";
 const ENV_WRITE_OVERRIDE = "PI_SUBAGENT_WRITE_OVERRIDE";
 const ENV_ALLOWED_PATHS = "PI_SUBAGENT_ALLOWED_PATHS"; // #46
-
-// Auto-YOLO: aktiviert YOLO bei jedem Session-Start automatisch. Auf false
-// setzen, um das alte Verhalten (keine automatische Eskalation) wieder-
-// herzustellen. Die Permission-Stufe ist vom Workflow-Modus unabhängig und
-// jederzeit per /yolo oder Strg+Shift+Y änderbar.
-const AUTO_YOLO_ON_START = true;
 
 function permissionFromEnv(): PermissionLevel | undefined {
   const value = process.env[ENV_PERMISSION_LEVEL] as
@@ -150,8 +143,7 @@ async function approve(
 }
 
 export default function modePermissionsExtension(pi: ExtensionAPI): void {
-  let permissionLevel: PermissionLevel =
-    permissionFromEnv() ?? (AUTO_YOLO_ON_START ? "yolo" : "read-write");
+  let permissionLevel: PermissionLevel = permissionFromEnv() ?? "read-write";
   let writeOverride: WriteOverride = writeOverrideFromEnv() ?? "inherit";
 
   function publishStatus(ctx: ExtensionContext): void {
@@ -176,10 +168,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   ): Promise<void> {
     if (level === permissionLevel) return;
 
-    if (
-      CONFIRM_ELEVATED_PERMISSIONS &&
-      (level === "full-access" || level === "yolo")
-    ) {
+    if (level === "full-access" || level === "yolo") {
       if (!ctx.hasUI) {
         ctx.ui.notify(
           `${PERMISSION_LEVEL_LABEL[level]} erfordert eine interaktive Bestätigung.`,
@@ -353,7 +342,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     permissionLevel =
       latestState?.data?.permissionLevel ??
       permissionFromEnv() ??
-      (AUTO_YOLO_ON_START ? "yolo" : "read-write");
+      "read-write";
     writeOverride =
       latestState?.data?.writeOverride ?? writeOverrideFromEnv() ?? "inherit";
     publishStatus(ctx);

@@ -230,15 +230,13 @@ The picker and all permission commands remain available independently of the
 workflow mode, plan/review phase, or current idle state. They never change the
 workflow mode or abort a running turn.
 
-`CONFIRM_ELEVATED_PERMISSIONS` is currently disabled in
-`mode-permissions.ts`, so `full-access` and `yolo` activate directly. The
-operation-level hard warnings enforced by the central policy remain unchanged.
-
-`AUTO_YOLO_ON_START` is currently enabled in `mode-permissions.ts`. A session
-without persisted permission state therefore starts in `yolo`; a resumed or
-reloaded session restores its latest saved permission level and `/write`
-override. Set that constant to `false` to make new sessions start in
-`read-write`.
+A session without persisted permission state starts in `read-write`; a
+resumed or reloaded session restores its latest saved permission level and
+`/write` override. Activating `full-access` or `yolo` always requires an
+interactive confirmation (`mode-permissions.ts`, `applyPermissionLevel`); in
+non-interactive contexts (no UI) the elevation is rejected outright. The
+operation-level hard warnings enforced by the central policy are unaffected
+by this confirmation and continue to apply regardless of permission level.
 
 The central `mode-permissions.ts` extension enforces file, path, Bash and
 secret policy. Hard warnings for secrets, system paths, destructive root
@@ -287,14 +285,9 @@ compatible `modifyOtherKeys` support.
 
 ## Restrisiken (bewusste Entscheidungen)
 
-Zwei Punkte sind absichtlich so konfiguriert und bleiben als Restrisiko
+Ein Punkt ist absichtlich so konfiguriert und bleibt als Restrisiko
 bestehen:
 
-- **YOLO-Autostart.** `AUTO_YOLO_ON_START = true` ist eine bewusste
-  Komfort-Entscheidung. Neue Sessions starten auf der höchsten Stufe; sudo,
-  Löschungen (auch `rm -rf ~`) und externe Schreibzugriffe laufen dort ohne
-  Rückfrage. Nur die harten Warnmuster (Root-Löschung, `.git`-Löschung,
-  `chmod 777`, Download-to-Shell, Systempfade, Secrets) bleiben aktiv.
 - **Planmodi sind Prompt-only.** `simple_plan`/`detailed_plan`/Review/Intake
   verbieten Umsetzung nur über den injizierten Kontext; technisch erzwungen
   wird nichts. Wer echten Schutz beim Planen will, wählt `read-only` oder

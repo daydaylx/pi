@@ -23,7 +23,7 @@ The initial rollout is intentionally conservative:
 - Only `worker` has `edit` and `write`.
 - Bash-capable agents use `read-bash` and `writeOverride=block`.
 - Child Pi processes receive explicit permission environment variables so they
-  do not inherit the global Auto-YOLO default.
+  do not inherit whatever level the parent session happens to be running at.
 - No persistent background loops or unattended workers are implemented.
 
 ## Implemented Changes
@@ -186,8 +186,10 @@ model tool selection.
 
 ## Permission Model
 
-The local Pi configuration has `AUTO_YOLO_ON_START=true`. That remains unchanged
-for normal sessions, but subagent child processes are pinned by environment:
+Normal sessions start in `read-write` and require an interactive confirmation
+to elevate to `full-access`/`yolo` (#61). Subagent child processes are
+independent of that: they are always pinned by explicit environment
+variables, never by the parent session's currently active level:
 
 - `PI_SUBAGENT_PERMISSION_LEVEL`
 - `PI_SUBAGENT_WRITE_OVERRIDE`
