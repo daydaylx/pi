@@ -70,8 +70,8 @@ export interface InfoBoxOptions {
 }
 
 const DEFAULT_MAX_PREVIEW_LINES = 6;
-const EXPAND_HINT = "Enter/Space/E expand";
-const COLLAPSE_HINT = "Enter/Space/E collapse";
+const EXPAND_HINT = "Enter/Leertaste/E aufklappen";
+const COLLAPSE_HINT = "Enter/Leertaste/E einklappen";
 
 function toneColor(tone: InfoBoxTone): string {
   switch (tone) {
@@ -314,7 +314,7 @@ export class InfoBox {
             if (remaining > 0) {
               lines.push(
                 this.contentRow(
-                  `… ${remaining} more line${remaining === 1 ? "" : "s"} · ${COLLAPSE_HINT}`,
+                  `${this.glyphs.ellipsis} ${remaining} weitere ${remaining === 1 ? "Zeile" : "Zeilen"} · ${COLLAPSE_HINT}`,
                   innerWidth,
                   theme,
                   "dim",

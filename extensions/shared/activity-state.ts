@@ -4,8 +4,8 @@
  * Wird ausschließlich aus den globalen Events tool_execution_start/update/end
  * gespeist (nicht aus renderCall/renderResult — die sind an einzelne
  * ToolExecutionComponents im Hauptbereich gebunden und nicht "umleitbar").
- * activity-panel.ts liest diesen State, um das rechte Activity Panel und den
- * schmalen Inline-Fallback unabhängig vom Haupt-Transkript zu rendern.
+ * activity-panel.ts liest diesen State, um das nicht überlagernde
+ * Aktivitäts-Widget unabhängig vom Haupt-Transkript zu rendern.
  */
 
 import { toolCallLabel } from "./tool-labels.ts";
@@ -38,7 +38,9 @@ function createState(): ActivityState {
 let state: ActivityState = createState();
 
 export function resetActivityState(): void {
-  state = createState();
+  const listeners = state.listeners;
+  state = { ...createState(), listeners };
+  notify();
 }
 
 export function onActivityChange(listener: () => void): () => void {
@@ -121,6 +123,19 @@ export function getRecentActivity(limit: number): ActivityEntry[] {
   return ids
     .map((id) => state.entries.get(id))
     .filter((entry): entry is ActivityEntry => entry !== undefined);
+}
+
+/** Laufende Einträge, neueste zuerst. */
+export function getActiveActivity(limit = MAX_ENTRIES): ActivityEntry[] {
+  return getRecentActivity(MAX_ENTRIES)
+    .filter(
+      (entry) => entry.status === "pending" || entry.status === "running",
+    )
+    .slice(0, Math.max(0, limit));
+}
+
+export function hasActiveActivity(): boolean {
+  return getActiveActivity(1).length > 0;
 }
 
 export function getActivityCount(): number {

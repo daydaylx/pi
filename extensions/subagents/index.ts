@@ -92,6 +92,7 @@ import {
 } from "./agents.ts";
 import {
   getWidgetState,
+  onWidgetChange,
   renderWidget,
   resetWidgetState,
   setLastRun,
@@ -100,13 +101,13 @@ import {
   setRisk,
   setSubagentAvailability,
   setThinking,
-  setWidgetCompact,
-  setWidgetDebug,
-  setWidgetVisible,
+  setWidgetMode,
+  STATUS_LABEL,
   STATUS_SYMBOL,
   upsertSubagent,
 } from "./widget.ts";
 import { colorizeStatusLines } from "../shared/visual-system.ts";
+import { loadUiConfig } from "../shared/ui-config.ts";
 
 const MAX_PARALLEL_TASKS = 6;
 const MAX_CONCURRENCY = 3;
@@ -518,6 +519,7 @@ async function runSingleAgent(
 
   // Widget: mark subagent as running (#31, #42: unique run ID)
   const runId = `${agent.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const startedAt = Date.now();
   activeRuns++;
   // Beim Start eines neuen Batches verfällt die Risk-Anzeige des vorherigen.
   if (activeRuns === 1) setRisk(undefined);
@@ -526,9 +528,10 @@ async function runSingleAgent(
     label: agent.name,
     status: "running",
     currentTask: task,
+    startedAt,
     lastUpdate: Date.now(),
   });
-  setNow(`running ${agent.name}`);
+  setNow(`Subagent ${agent.name} läuft`);
 
   const emitUpdate = () => {
     onUpdate?.({
@@ -694,7 +697,7 @@ async function runSingleAgent(
               label: agent.name,
               status: "running",
               currentTask: task,
-              lastAction: `${tool.toolName} ${tool.status}`,
+              lastAction: `${tool.toolName} ${isError ? "fehlgeschlagen" : "abgeschlossen"}`,
               relatedToolCalls: current.toolCalls.map((item) => item.toolCallId),
               warnings: current.toolCalls.filter((item) => item.status === "warning").length,
               errors: current.toolCalls.filter((item) => item.status === "failed").length,
@@ -810,7 +813,9 @@ async function runSingleAgent(
       label: agent.name,
       status: isFailed(current) ? "failed" : "completed",
       currentTask: task,
-      lastAction: isFailed(current) ? current.errorMessage ?? "failed" : "completed",
+      lastAction: isFailed(current)
+        ? current.errorMessage ?? "fehlgeschlagen"
+        : "abgeschlossen",
       warnings: current.validationErrors?.length ?? 0,
       errors: isFailed(current) ? 1 : current.toolCalls.filter((item) => item.status === "failed").length,
       completedAt: Date.now(),
@@ -819,7 +824,7 @@ async function runSingleAgent(
       risk: isFailed(current) ? current.errorMessage : undefined,
     });
     if (isFailed(current)) {
-      setRisk(current.errorMessage ?? "failed");
+      setRisk(current.errorMessage ?? "fehlgeschlagen");
     }
 
     return current;
@@ -962,8 +967,8 @@ function formatAgentLiveStatusLines(agents: AgentConfig[]): string[] {
     const entry = Array.from(live.values()).find((e) => e.label === agent.name);
     const status =
       entry === undefined
-        ? "idle"
-        : `${STATUS_SYMBOL[entry.status]} ${entry.status}${entry.currentTask ? ` — ${entry.currentTask}` : ""}`;
+        ? "inaktiv"
+        : `${STATUS_SYMBOL[entry.status]} ${STATUS_LABEL[entry.status]}${entry.currentTask ? ` — ${entry.currentTask}` : ""}`;
     return `${agent.name} (${agent.source}, ${agent.permission}): ${agent.description}  [${status}]`;
   });
 }
@@ -992,6 +997,15 @@ async function confirmProjectAgentsIfNeeded(
 
 export default function subagentsExtension(pi: ExtensionAPI): void {
   let subagentToolRegistered = false;
+  let widgetTui: { requestRender?: () => void } | undefined;
+  let widgetComponent: SimpleComponent | undefined;
+
+  function refreshWidget(): void {
+    widgetComponent?.invalidate();
+    widgetTui?.requestRender?.();
+  }
+
+  onWidgetChange(refreshWidget);
   setSubagentAvailability(true, 0);
 
   // ─── Widget-Installation (#30) ───
@@ -1002,21 +1016,28 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     };
     if (typeof ui.setWidget !== "function") return;
 
-    ui.setWidget("subagent-status", (_tui: unknown, theme: any) => ({
-      render(width: number): string[] {
-        const state = getWidgetState();
-        return colorizeStatusLines(renderWidget(state, width), theme, (line) =>
-          line.startsWith("Think:") ? "muted" : undefined,
-        );
-      },
-      invalidate() {},
-    }));
+    ui.setWidget("subagent-status", (tui: unknown, theme: any) => {
+      widgetTui = tui as { requestRender?: () => void };
+      const component: SimpleComponent = {
+        render(width: number): string[] {
+          const state = getWidgetState();
+          return colorizeStatusLines(renderWidget(state, width), theme, (line) =>
+            line.startsWith("Denknotiz:") ? "muted" : undefined,
+          );
+        },
+        invalidate() {},
+      };
+      widgetComponent = component;
+      return component;
+    });
+    refreshWidget();
   }
 
   // Hooks sind optional – das Tool funktioniert auch ohne Widget-Unterstützung.
   if (typeof pi.on === "function") {
     pi.on("session_start", async (_event, ctx) => {
       resetWidgetState();
+      setWidgetMode(loadUiConfig().subagentWidget);
       const userDiscovery = discoverAgents(ctx.cwd, "user");
       const allDiscovery = discoverAgents(ctx.cwd, "both");
       setSubagentAvailability(true, allDiscovery.agents.length);
@@ -1043,6 +1064,8 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
     });
 
     pi.on("session_shutdown", async () => {
+      widgetTui = undefined;
+      widgetComponent = undefined;
       resetWidgetState();
     });
 
@@ -1062,41 +1085,53 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
   // ─── /sawidget Commands (#33) ───
   if (typeof pi.registerCommand === "function") {
     pi.registerCommand("sawidget", {
-      description: "Subagent/Thinking-Widget: on | off | compact | debug",
+      description:
+        "Subagenten-Widget: active-only | on | off | compact | debug",
       handler: async (args, ctx) => {
         const sub = args.trim().toLowerCase();
         switch (sub) {
-          case "on":
-            setWidgetVisible(true);
-            setWidgetCompact(true);
-            setWidgetDebug(false);
-            installWidget(ctx);
-            ctx.ui.notify("Subagent-Widget aktiviert (compact).", "info");
-            break;
-          case "off":
-            setWidgetVisible(false);
-            ctx.ui.notify("Subagent-Widget deaktiviert.", "info");
-            break;
-          case "compact":
-            setWidgetVisible(true);
-            setWidgetCompact(true);
-            setWidgetDebug(false);
-            installWidget(ctx);
-            ctx.ui.notify("Subagent-Widget: compact (max. 4 Zeilen).", "info");
-            break;
-          case "debug":
-            setWidgetVisible(true);
-            setWidgetCompact(false);
-            setWidgetDebug(true);
+          case "active-only":
+            setWidgetMode("active-only");
             installWidget(ctx);
             ctx.ui.notify(
-              "Subagent-Widget: debug (mehr interne Statusdaten).",
+              "Subagenten-Widget nur bei Aktivität (nur diese Sitzung).",
+              "info",
+            );
+            break;
+          case "on":
+            setWidgetMode("on");
+            installWidget(ctx);
+            ctx.ui.notify(
+              "Subagenten-Widget aktiviert (nur diese Sitzung).",
+              "info",
+            );
+            break;
+          case "off":
+            setWidgetMode("off");
+            ctx.ui.notify(
+              "Subagenten-Widget deaktiviert (nur diese Sitzung).",
+              "info",
+            );
+            break;
+          case "compact":
+            setWidgetMode("compact");
+            installWidget(ctx);
+            ctx.ui.notify(
+              "Subagenten-Widget kompakt (maximal 2 Zeilen, nur diese Sitzung).",
+              "info",
+            );
+            break;
+          case "debug":
+            setWidgetMode("debug");
+            installWidget(ctx);
+            ctx.ui.notify(
+              "Subagenten-Widget im Debug-Modus (nur diese Sitzung).",
               "info",
             );
             break;
           default:
             ctx.ui.notify(
-              "Nutzung: /sawidget on | off | compact | debug",
+              "Nutzung: /sawidget active-only | on | off | compact | debug",
               "info",
             );
         }

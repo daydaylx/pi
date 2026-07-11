@@ -41,6 +41,10 @@ import {
 // erkennbar und filterbar bleibt.
 const SKILL_CONTEXT_MARKER = "[SKILL MODE ACTIVE]";
 
+// Gemeinsamer Verweis statt vier separat gepflegter Agentenlisten je Modus
+// (#55): AGENTS.md → Subagenten-Delegation bleibt die einzige Quelle.
+const SUBAGENT_HINT = "siehe AGENTS.md → Subagenten-Delegation";
+
 interface ActiveSkill {
   skill: SkillDefinition;
   mode: SkillExecutionMode;
@@ -145,14 +149,14 @@ AUSFÜHRUNGSMODUS: Nur Informationen sammeln
 - Du darfst ausschließlich lesen, suchen, vergleichen und analysieren.
 - Keine Änderungen an Dateien, keine Pläne, keine Umsetzung.
 - Keine neuen Dependencies, Commits oder Pushes.
-- Nutze bei breiter Exploration über mehrere Dateien/Verzeichnisse aktiv das \`subagent\`-Tool (\`scout\`, siehe AGENTS.md → Subagenten-Delegation).
+- Nutze bei breiter Exploration über mehrere Dateien/Verzeichnisse bei Bedarf das \`subagent\`-Tool (${SUBAGENT_HINT}).
 - Halte dich exakt an das Ausgabeformat des Skills.`,
       analysis: `
 AUSFÜHRUNGSMODUS: Analyse mit Risiken
 - Sammle Informationen und bewerte sie.
 - Markiere Risiken, offene Fragen und unsichere Annahmen.
 - Keine Änderungen an Dateien ohne explizite Nutzerfreigabe.
-- Ziehe bei Architektur-/Risikofragen aktiv das \`subagent\`-Tool (\`architect\`) für eine Zweitmeinung hinzu (siehe AGENTS.md → Subagenten-Delegation).
+- Ziehe bei Architektur-/Risikofragen bei Bedarf das \`subagent\`-Tool hinzu (${SUBAGENT_HINT}).
 - Gib konkrete, priorisierte Empfehlungen.
 - Halte dich exakt an das Ausgabeformat des Skills.`,
       plan: `
@@ -160,7 +164,7 @@ AUSFÜHRUNGSMODUS: Plan erstellen
 - Erstelle einen strukturierten Arbeitsplan.
 - Führe die Aufgabe NICHT aus und ändere KEINE Projektdateien (außer der Plan-Datei).
 - Der Plan muss alle im Skill definierten Abschnitte enthalten.
-- Nutze bei Bedarf aktiv das \`subagent\`-Tool (\`scout\` für Kontext, \`planner\` für den Planentwurf, siehe AGENTS.md → Subagenten-Delegation), bevor der finale Plan geschrieben wird.
+- Nutze bei Bedarf das \`subagent\`-Tool (${SUBAGENT_HINT}), bevor der finale Plan geschrieben wird.
 - Bei mehrdeutigen Entscheidungen: mit ask_user klären, bevor der Plan finalisiert wird.
 - Schreibe den finalen Plan nach docs/plans/current-plan.md.`,
       work: `
@@ -171,7 +175,7 @@ AUSFÜHRUNGSMODUS: Umsetzung
   - Keine Commits/Pushes ohne ausdrückliche Freigabe.
   - Keine großflächigen Refactorings oder Formatierungen außerhalb des Scopes.
   - Bei Unsicherheit: nachfragen, nicht raten.
-- Nutze nach Änderungen bei Bedarf aktiv das \`subagent\`-Tool (\`reviewer\`/\`security-auditor\`/\`test-runner\`, siehe AGENTS.md → Subagenten-Delegation).
+- Nutze nach Änderungen bei Bedarf das \`subagent\`-Tool (${SUBAGENT_HINT}).
 - Dokumentiere, was geändert wurde und warum.`,
     };
 

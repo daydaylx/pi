@@ -8,17 +8,9 @@
  * Guidelines, Argument-Shims, Execution-Metadaten und die Ausführungslogik der
  * Originaltools erhalten.
  *
- * Adaptive Darstellung im Hauptbereich (kein separates Layout-System nötig,
- * da jede Komponente ihr eigenes render(width) pro Redraw-Zyklus erhält):
- *   - Fehler und der globale Tool-Output-Expand-Toggle zeigen immer die volle
- *     Box (unverändert wie zuvor).
- *   - Normale (erfolgreiche, nicht expandierte) Aufrufe werden bei
- *     Terminalbreite >= ACTIVITY_PANEL_MIN_WIDTH komplett aus dem
- *     Hauptbereich entfernt — sie erscheinen stattdessen im rechten Activity
- *     Panel (siehe activity-panel.ts, das unabhängig über
- *     tool_execution_start/update/end gespeist wird).
- *   - Bei schmalerem Terminal fallen sie auf eine kompakte Ein-Zeilen-Anzeige
- *     zurück statt komplett zu verschwinden.
+ * Jeder Aufruf hinterlässt unabhängig von der Terminalbreite mindestens eine
+ * kompakte Verlaufsspur. Aufgeklappte Aufrufe und Fehler zeigen die volle Box;
+ * Fehler werden immer initial geöffnet und beginnen mit der Ursache.
  */
 
 import type {
@@ -39,15 +31,14 @@ import {
   type InfoBoxTheme,
 } from "./shared/info-box.ts";
 import {
-  ACTIVITY_PANEL_MIN_WIDTH,
   glyphsFor,
   resolveRenderProfile,
   truncatePlain,
-  widthReservedForActivityPanel,
   type RenderGlyphs,
   type RenderProfile,
 } from "./shared/render-profile.ts";
 import { argNumber, argString, shortPreview } from "./shared/tool-labels.ts";
+import { loadUiConfig } from "./shared/ui-config.ts";
 
 const MAX_PREVIEW_CHARS = 400;
 const MAX_PREVIEW_LINES = 5;
@@ -66,6 +57,20 @@ function toolStatusSymbol(status: ToolStatus, glyphs: RenderGlyphs): string {
     case "completed":
     default:
       return glyphs.status.completed;
+  }
+}
+
+function toolStatusLabel(status: ToolStatus): string {
+  switch (status) {
+    case "pending":
+      return "wartet";
+    case "running":
+      return "läuft";
+    case "failed":
+      return "fehlgeschlagen";
+    case "completed":
+    default:
+      return "erledigt";
   }
 }
 
@@ -88,6 +93,40 @@ function buildPreviewLines(output: string, maxLines: number): string[] {
     visible.push(`… ${lines.length - maxLines} weitere Zeile(n)`);
   }
   return visible;
+}
+
+function extractExitCode(output: string): number | undefined {
+  const match = output.match(
+    /(?:exit(?:ed)?(?:\s+with)?(?:\s+code)?|exit-code)\s*[:=]?\s*(-?\d+)/i,
+  );
+  return match ? Number.parseInt(match[1]!, 10) : undefined;
+}
+
+function firstErrorCause(output: string): string {
+  const lines = output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return "Keine Fehlerdetails verfügbar";
+  return (
+    lines.find((line) =>
+      /error|failed|failure|denied|not found|no such|invalid|cannot|can't|unable|exception|fatal/i.test(
+        line,
+      ),
+    ) ?? lines[0]!
+  );
+}
+
+function errorSection(
+  output: string,
+  exitCode?: number,
+  showUnknownExitCode = false,
+): InfoBoxSection {
+  const lines = [`Ursache: ${firstErrorCause(output)}`];
+  if (exitCode !== undefined || showUnknownExitCode) {
+    lines.push(`Exit-Code: ${exitCode ?? "unbekannt"}`);
+  }
+  return { title: "Fehler", lines };
 }
 
 function renderToolBox(options: {
@@ -117,7 +156,7 @@ function renderToolBox(options: {
       subtitle,
       status: {
         symbol: toolStatusSymbol(status, glyphs),
-        label: status,
+        label: toolStatusLabel(status),
       },
       sections,
       tone,
@@ -132,10 +171,8 @@ function renderToolBox(options: {
 }
 
 /**
- * Wählt pro Redraw (render(width) wird bei jedem Zyklus mit der aktuellen
- * Terminalbreite aufgerufen) zwischen voller Box, kompakter Ein-Zeile oder
- * komplettem Verstecken. Fehler und globaler Expand-Toggle erzwingen immer
- * die volle Box, unabhängig von der Breite.
+ * Wählt pro Redraw zwischen voller Box und kompakter Verlaufsspur. Es gibt
+ * bewusst keinen unsichtbaren Zustand.
  */
 function adaptiveToolComponent(options: {
   title: string;
@@ -147,8 +184,8 @@ function adaptiveToolComponent(options: {
   profile: RenderProfile;
 }): InfoBoxComponent {
   const { title, subtitle, status, expanded, theme, profile } = options;
-  const box = renderToolBox(options);
   const alwaysFull = status === "failed" || expanded;
+  const box = renderToolBox({ ...options, expanded: alwaysFull });
   const glyphs = glyphsFor(profile);
 
   const compactLabel = subtitle ? `${title} (${subtitle})` : title;
@@ -156,9 +193,8 @@ function adaptiveToolComponent(options: {
   return {
     render(width: number): string[] {
       if (alwaysFull) {
-        return box.render(widthReservedForActivityPanel(width));
+        return box.render(width);
       }
-      if (width >= ACTIVITY_PANEL_MIN_WIDTH) return [];
       const symbol = toolStatusSymbol(status, glyphs);
       const color = status === "running" ? "warning" : "muted";
       const raw = truncatePlain(
@@ -180,6 +216,7 @@ function argNumberOrUndefined(args: unknown, key: string): number | undefined {
 
 export default function toolVisualsExtension(pi: ExtensionAPI): void {
   const cwd = process.cwd();
+  const expandToolHistory = loadUiConfig().toolHistory === "full";
 
   // --- read ---
   const originalRead = createReadTool(cwd);
@@ -202,7 +239,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
         title: `read ${argString(args, "path")}`,
         status,
         sections,
-        expanded: context.expanded,
+        expanded: context.expanded || expandToolHistory,
         theme,
         profile,
       });
@@ -214,8 +251,13 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
       const status = inferToolStatus(options.isPartial, context.isError);
       const sections: InfoBoxSection[] = [];
 
+      if (status === "failed") {
+        const output = content?.type === "text" ? content.text : "";
+        sections.push(errorSection(output));
+      }
+
       if (content?.type === "image") {
-        sections.push({ title: "Ergebnis", lines: ["image"] });
+        sections.push({ title: "Ergebnis", lines: ["Bild"] });
       } else if (content?.type === "text") {
         const lineCount = content.text.split("\n").length;
         const meta = [`${lineCount} Zeilen gelesen`];
@@ -223,7 +265,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
           meta.push(`gekürzt von ${details.truncation.totalLines} Zeilen`);
         }
         sections.push({ title: "Metadaten", lines: meta });
-        if (status === "completed") {
+        if (status === "completed" || status === "failed") {
           const preview = buildPreviewLines(content.text, MAX_PREVIEW_LINES);
           if (preview.length > 0) {
             sections.push({ title: "Vorschau", lines: preview });
@@ -235,7 +277,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
         title: `read ${argString(context.args, "path")}`,
         status,
         sections,
-        expanded: options.expanded,
+        expanded: options.expanded || expandToolHistory,
         theme,
         profile,
       });
@@ -258,7 +300,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
         title: `$ ${shortPreview(argString(args, "command", ""), 120)}`,
         status,
         sections,
-        expanded: context.expanded,
+        expanded: context.expanded || expandToolHistory,
         theme,
         profile,
       });
@@ -268,17 +310,22 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
       const content = result.content[0];
       const details = result.details as BashToolDetails | undefined;
       const output = content?.type === "text" ? content.text : "";
-      const exitMatch = output.match(/exit code: (\d+)/);
-      const exitCode = exitMatch ? parseInt(exitMatch[1]!, 10) : null;
-      const isError = context.isError || (exitCode !== null && exitCode !== 0);
+      const exitCode = extractExitCode(output);
+      const isError = context.isError || (exitCode !== undefined && exitCode !== 0);
       const status = inferToolStatus(options.isPartial, isError);
       const lineCount = output.split("\n").filter((l) => l.trim()).length;
 
-      const meta: string[] = [`${lineCount} Zeilen Output`];
-      if (exitCode !== null) meta.push(`Exit-Code: ${exitCode}`);
-      if (details?.truncation?.truncated) meta.push("Output gekürzt");
+      const meta: string[] = [`${lineCount} Zeilen Ausgabe`];
+      if (status !== "failed" && exitCode !== undefined) {
+        meta.push(`Exit-Code: ${exitCode}`);
+      }
+      if (details?.truncation?.truncated) meta.push("Ausgabe gekürzt");
 
-      const sections: InfoBoxSection[] = [{ title: "Metadaten", lines: meta }];
+      const sections: InfoBoxSection[] = [];
+      if (status === "failed") {
+        sections.push(errorSection(output, exitCode, true));
+      }
+      sections.push({ title: "Metadaten", lines: meta });
       if (status === "completed" || status === "failed") {
         const preview = buildPreviewLines(output, MAX_PREVIEW_LINES);
         if (preview.length > 0) {
@@ -290,7 +337,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
         title: `$ ${shortPreview(argString(context.args, "command", ""), 120)}`,
         status,
         sections,
-        expanded: options.expanded,
+        expanded: options.expanded || expandToolHistory,
         theme,
         profile,
       });
@@ -310,10 +357,10 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
       const status = inferToolStatus(false, false, context.executionStarted);
       return adaptiveToolComponent({
         title: `edit ${argString(args, "path")}`,
-        subtitle: `${edits.length} Block${edits.length === 1 ? "" : "s"}`,
+        subtitle: `${edits.length} ${edits.length === 1 ? "Block" : "Blöcke"}`,
         status,
         sections: [],
-        expanded: context.expanded,
+        expanded: context.expanded || expandToolHistory,
         theme,
         profile,
       });
@@ -327,16 +374,19 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
       const status = inferToolStatus(options.isPartial, isError);
       const sections: InfoBoxSection[] = [];
       if (isError && content?.type === "text") {
-        sections.push({
-          title: "Fehler",
-          lines: buildPreviewLines(content.text, MAX_PREVIEW_LINES),
-        });
+        sections.push(errorSection(content.text));
+        const preview = buildPreviewLines(content.text, MAX_PREVIEW_LINES);
+        if (preview.length > 0) {
+          sections.push({ title: "Vorschau", lines: preview });
+        }
+      } else if (isError) {
+        sections.push(errorSection(""));
       }
       return adaptiveToolComponent({
         title: `edit ${argString(context.args, "path")}`,
         status,
         sections,
-        expanded: options.expanded,
+        expanded: options.expanded || expandToolHistory,
         theme,
         profile,
       });
@@ -358,7 +408,7 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
         subtitle: `${lineCount} Zeile${lineCount === 1 ? "" : "n"}`,
         status,
         sections: [],
-        expanded: context.expanded,
+        expanded: context.expanded || expandToolHistory,
         theme,
         profile,
       });
@@ -372,16 +422,19 @@ export default function toolVisualsExtension(pi: ExtensionAPI): void {
       const status = inferToolStatus(options.isPartial, isError);
       const sections: InfoBoxSection[] = [];
       if (isError && content?.type === "text") {
-        sections.push({
-          title: "Fehler",
-          lines: buildPreviewLines(content.text, MAX_PREVIEW_LINES),
-        });
+        sections.push(errorSection(content.text));
+        const preview = buildPreviewLines(content.text, MAX_PREVIEW_LINES);
+        if (preview.length > 0) {
+          sections.push({ title: "Vorschau", lines: preview });
+        }
+      } else if (isError) {
+        sections.push(errorSection(""));
       }
       return adaptiveToolComponent({
         title: `write ${argString(context.args, "path")}`,
         status,
         sections,
-        expanded: options.expanded,
+        expanded: options.expanded || expandToolHistory,
         theme,
         profile,
       });

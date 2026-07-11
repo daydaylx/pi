@@ -1,10 +1,10 @@
 {
   "lastChangelogVersion": "0.80.6",
   "theme": "pi-vivid",
-  "defaultProvider": "zai",
-  "defaultModel": "glm-5.2",
+  "defaultProvider": "openrouter",
+  "defaultModel": "poolside/laguna-m.1:free",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "medium",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,

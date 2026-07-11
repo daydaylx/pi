@@ -155,15 +155,10 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   let writeOverride: WriteOverride = writeOverrideFromEnv() ?? "inherit";
 
   function publishStatus(ctx: ExtensionContext): void {
-    // Footer/Header werden zentral in ux-status.ts gerendert. Dieser alte
-    // Status-Key wird nur noch gelöscht, damit keine zweite Statusquelle bleibt.
+    // Der Footer in ux-status.ts ist die einzige dauerhafte TUI-Statusquelle.
+    // Beide Alt-Keys werden nur noch bereinigt.
     ctx.ui.setStatus(STATUS_KEY, undefined);
-    // Separate, kompakte Statusfläche für die aktuelle Permission-Stufe
-    // (unabhängig vom unveränderten formatFooterLine()-Format).
-    ctx.ui.setStatus(
-      PERMISSION_STATUS_KEY,
-      PERMISSION_LEVEL_LABEL[permissionLevel],
-    );
+    ctx.ui.setStatus(PERMISSION_STATUS_KEY, undefined);
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
       source: "permission",
       writeOverride,
@@ -216,12 +211,12 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   async function openPermissionMenu(ctx: ExtensionContext): Promise<void> {
     const level = await runMenu(
       ctx,
-      "Permissions",
+      "Berechtigungen",
       buildPermissionMenu(permissionLevel),
       {
-        fallbackPrompt: "Permission wählen",
+        fallbackPrompt: "Berechtigung wählen",
         nonInteractiveHint:
-          "Das Permission-Menü benötigt den TUI-Modus. Nutze /permission <level>.",
+          "Das Berechtigungsmenü benötigt den TUI-Modus. Nutze /permission <level>.",
       },
     );
     if (!level) return;

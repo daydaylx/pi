@@ -53,6 +53,7 @@ import { createInfoBoxComponent } from "../shared/info-box.ts";
 import {
   colorizeStatusLines,
   formatWorkProgressLines,
+  formatWorkProgressWidgetLines,
 } from "../shared/visual-system.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import { SHORTCUTS } from "../shared/shortcuts.ts";
@@ -74,6 +75,12 @@ const PLAN_REVIEW_MARKER = "[PLAN REVIEW ACTIVE]";
 const EXECUTING_PLAN_MARKER = "[EXECUTING PLAN]";
 const DECISION_INTAKE_MARKER = "[DECISION INTAKE ACTIVE]";
 
+// Gemeinsamer Subagenten-Hinweis für die Ausführungsphase: kept as a constant
+// so the two injection sites (before_agent_start during "executing" and
+// executePlan()) can't drift apart into two separately hand-typed copies.
+const SUBAGENT_EXECUTING_REMINDER =
+  "SUBAGENTEN:\nNutze das `subagent`-Tool bei Bedarf (siehe AGENTS.md → Subagenten-Delegation), z. B. für abgegrenzte Teilscopes oder Prüfungen nach Änderungen.";
+
 // Persistenter Kontext für den „Einfachen Plan": dieselbe Plan-Datei wie im
 // ausführlichen Modus, aber ohne lange Architektur-/Risiko-Blöcke.
 const SIMPLE_PLAN_PROMPT = `[EINFACHER PLAN]
@@ -82,7 +89,7 @@ Erstelle einen schlichten, schnell einsetzbaren Plan für die aktuelle Aufgabe �
 Vorgehen:
 - Stelle höchstens wenige gezielte Rückfragen, und nur, wenn sie für einen umsetzbaren Plan wirklich nötig sind (nutze dazu ask_user).
 - Verzichte auf ausführliche Architekturprüfung und lange Risiko-/Audit-Blöcke.
-- Nutze bei Bedarf das \`subagent\`-Tool (z. B. \`scout\` für kurze Kontextfragen), aber nur wenn es den Schnellplan wirklich beschleunigt, nicht routinemäßig.
+- Nutze bei Bedarf das \`subagent\`-Tool (siehe AGENTS.md → Subagenten-Delegation), aber nur wenn es den Schnellplan wirklich beschleunigt, nicht routinemäßig.
 - Führe die Aufgabe nicht aus und ändere keine anderen Dateien.
 
 Schreibe den finalen kurzen Plan nach ${PLAN_RELATIVE_PATH}.
@@ -216,10 +223,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     if (phase === "executing" && todos.length > 0) {
       const completed = todos.filter((todo) => todo.completed).length;
       ctx.ui.setWidget("work-progress", (_tui, theme) => {
-        const todoLines = formatWorkProgressLines(todos).slice(2);
+        const todoLines = formatWorkProgressWidgetLines(todos);
         const box = createInfoBoxComponent(
           {
-            title: "Work Progress",
+            title: "Arbeitsfortschritt",
             subtitle: `${completed}/${todos.length} erledigt`,
             sections: [{ title: "Todos", lines: todoLines }],
             tone: "accent",
@@ -948,7 +955,8 @@ Vorgehen:
   reinen Geschmacksfragen ohne Auswirkung auf Umsetzung, Risiko, UX,
   Sicherheit oder Architektur.
 - Kläre stattdessen recherchierbare Fakten bei Bedarf selbst mit dem
-  \`subagent\`-Tool (z. B. \`scout\`), statt den Nutzer nach Bekanntem zu fragen.
+  \`subagent\`-Tool (siehe AGENTS.md → Subagenten-Delegation), statt den
+  Nutzer nach Bekanntem zu fragen.
 - Prüfe nach jeder Frage, ob weitere Klärung wirklich nötig ist.
 - Der Nutzer kann jederzeit abbrechen oder das Decision Brief erstellen lassen.
 
@@ -1014,7 +1022,7 @@ Prüfe den Plan auf Umsetzbarkeit, Vollständigkeit, Risiken, Tests und ungeklä
 
 Du darfst ausschließlich ${PLAN_RELATIVE_PATH} überarbeiten. Andere Schreibzugriffe sind verboten.
 Wenn mehrere relevante Lösungen möglich sind, stelle vor dem Review-Ergebnis mit ask_user genau eine fokussierte Frage pro Aufruf. Biete jeweils 2–4 Optionen mit Vor-/Nachteilen und einer Empfehlung an.
-Ziehe bei riskanten oder architektonisch unklaren Plänen das \`subagent\`-Tool (\`architect\`) für eine unabhängige Zweitmeinung hinzu.
+Ziehe bei riskanten oder architektonisch unklaren Plänen bei Bedarf das \`subagent\`-Tool hinzu (siehe AGENTS.md → Subagenten-Delegation).
 
 Ein Plan mit offenen entscheidungsrelevanten Fragen darf nicht als geprüft markiert werden.
 Beende den Review mit genau einem Marker:
@@ -1053,7 +1061,7 @@ Wenn mehrere relevante Lösungen möglich sind, nutze vor dem finalen Plan ask_u
 Stelle pro Aufruf genau eine fokussierte Frage und biete 2–4 Optionen mit Vor-/Nachteilen und Empfehlung an.
 
 SUBAGENTEN:
-Nutze das \`subagent\`-Tool aktiv, wenn es passt (siehe AGENTS.md → Subagenten-Delegation), insbesondere \`scout\` für breite Codebase-Exploration vor der Analyse und \`architect\` für eine Architektur-/Risiko-Zweitmeinung vor dem finalen Plan — proaktiv, nicht nur auf Nachfrage.
+Nutze das \`subagent\`-Tool bei Bedarf, wenn eine Teilaufgabe dazu passt (siehe AGENTS.md → Subagenten-Delegation).
 
 PLANSTRUKTUR (alle Abschnitte sind Pflicht):
 # Arbeitsplan: <Aufgabe>
@@ -1105,8 +1113,7 @@ STOP-REGELN (verbindlich):
 - Markiere einen Schritt nur als erledigt, wenn du einen konkreten Nachweis hast.
 - Stoppe und melde einen Blocker, wenn Plan und Realität in Konflikt stehen.
 
-SUBAGENTEN:
-Nutze das \`subagent\`-Tool aktiv, wenn es passt (siehe AGENTS.md → Subagenten-Delegation): \`worker\` für klar abgegrenzte Teilscopes statt alles selbst sequenziell abzuarbeiten, sowie \`reviewer\`/\`security-auditor\`/\`test-runner\` nach Änderungen — proaktiv, nicht nur auf Nachfrage.
+${SUBAGENT_EXECUTING_REMINDER}
 
 Melde am Ende des Turns Fortschritt als [PLAN-PROGRESS]-Block:
 [PLAN-PROGRESS]
@@ -1420,8 +1427,7 @@ STOP-REGELN (verbindlich):
 - Markiere einen Schritt nur als erledigt, wenn du einen konkreten Nachweis hast.
 - Stoppe und melde einen Blocker, wenn Plan und Realität in Konflikt stehen.
 
-SUBAGENTEN:
-Nutze das \`subagent\`-Tool aktiv, wenn es passt (siehe AGENTS.md → Subagenten-Delegation): \`worker\` für klar abgegrenzte Teilscopes statt alles selbst sequenziell abzuarbeiten, sowie \`reviewer\`/\`security-auditor\`/\`test-runner\` nach Änderungen — proaktiv, nicht nur auf Nachfrage.
+${SUBAGENT_EXECUTING_REMINDER}
 
 Schreibe am Ende des Turns einen [PLAN-PROGRESS]-Block zur Fortschrittsverfolgung
 und einen [WORK-RESULT]-Block als lesbaren Ausführungsbericht:

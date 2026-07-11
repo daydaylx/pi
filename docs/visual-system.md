@@ -4,9 +4,21 @@ Zielbild: ruhig · klar · agentisch · kontrollierbar · professionell.
 
 ## Chrome
 
-- **Header:** großer ASCII-Blockbanner (`startup-banner.ts`, `ctx.ui.setHeader`) mit Farbverlauf, Byline "by Grunert" und Kurzhinweisen; skaliert je nach Terminalbreite (voll/kompakt/einzeilig). `ux-status.ts` setzt bewusst keinen eigenen Header mehr, um den Banner nicht zu überschreiben.
-- **Footer:** genau eine kompakte Quelle (`ux-status.ts`, `ctx.ui.setFooter`). Die native Zentui-Statusline bleibt deaktiviert. Das Footer-Format (`formatFooterLine()`) ist eine semantische Segment-Leiste: `MODE | MODEL | THINKING | PERMISSIONS | THEME | GIT | SA`; unter ca. 96 Spalten fällt `formatFooterLineCompact()` auf eine kürzere Variante zurück. Beide liefern stets Symbol/Text und sind auch ohne Farbe verständlich.
-- **Fallback-Status:** zwei Extension-Status-Keys bleiben aktiv: `workflow-summary` (Mode/Model/Thinking/Git, aus `ux-status.ts`) und `permission-level` (aktuelle Zugriffsstufe, aus `mode-permissions.ts`, separat statt im Footer-String, damit `formatFooterLine()` stabil bleibt). Alte Keys (`workflow-mode`, `workflow-permission`, `plan-todos-count`) werden weiterhin gelöscht.
+- **Header:** Der ASCII-Blockbanner erscheint nur beim Start und klappt mit der ersten Eingabe auf `PI AGENT · <Modell>` ein. `/banner on|compact|off` steuert ihn für die aktuelle Sitzung; Modellwechsel aktualisieren die kompakte Zeile.
+- **Footer:** `ux-status.ts` ist die einzige dauerhafte TUI-Statusquelle. Die einzeln gefärbten Segmente stehen in der Reihenfolge `MODUS · MODELL · FEHLER/WARNUNG · SA · RECHTE · GIT · DENKEN`; bei Platzmangel verschwinden optionale Metadaten zuerst. Theme, Anbieter und Projektpfad stehen nur in `/status`.
+- **Fallback-Status:** `workflow-summary` wird nur verwendet, wenn kein TUI-Footer verfügbar ist. Alte Extension-Status-Keys werden gelöscht; Zentui besitzt dafür keine sichtbaren Platzierungen mehr.
+
+## Anzeigeprofile
+
+`settings.json` enthält eine zentrale `ui`-Konfiguration. `balanced` ist der Standard, `minimal` reduziert Banner und Live-Widgets, `debug` zeigt zusätzliche Diagnosefelder. Feldweise Overrides sind möglich; Laufzeitbefehle ändern die Datei nicht.
+
+- `banner`: `on | compact | off`
+- `activity`: `auto | on | compact | off | debug`
+- `subagentWidget`: `active-only | on | off | compact | debug`
+- `toolHistory`: `compact | full`
+- `footer`: `priority | full`
+- `language`: aktuell `de`
+- `reducedMotion`: deaktiviert Animationen unabhängig von Terminalfähigkeiten
 
 ## Farben
 
@@ -52,6 +64,7 @@ Töne und Hintergründe sind semantisch:
 `extensions/shared/render-profile.ts` bündelt zentral, wie Zustände gerendert werden:
 
 - `resolveRenderProfile({ env, width, mode })` entscheidet über `unicode`, `color`, `animations`, `compact`.
+- Die Farbstufe wird konservativ aus TTY, `TERM`, `COLORTERM`, `NO_COLOR`, `CLICOLOR` und Force-Flags ermittelt.
 - Unicode-Glyphen (`● ○ ✓ ✕ ⏸ …`, Box-Drawing `╭╮╰╯│─├┤`) fallen bei `PI_ASCII_UI=1`, `TERM=dumb` oder nicht-UTF-8-Locale auf ASCII/Text zurück (`* o OK X PAUSE ...`, `+|+-+`).
 - Animationen (`working-visuals.ts`) sind nur in TUI aktiv und werden bei `CI=1`, `TERM=dumb`, `PI_REDUCED_MOTION=1` oder `PI_DISABLE_ANIMATIONS=1` deaktiviert.
 - Statussymbole werden **immer** als Symbol + Textlabel ausgegeben (`✓ completed`, `✕ failed`, `⏸ blocked`) — Farbe ist nie die einzige Information.
@@ -59,12 +72,12 @@ Töne und Hintergründe sind semantisch:
 
 ## Tool-Boxen
 
-`extensions/tool-visuals.ts` überschreibt die Renderer für `read`, `bash`, `edit` und `write`. Jede Tool-Ausführung wird als InfoBox dargestellt:
+`extensions/tool-visuals.ts` überschreibt die Renderer für `read`, `bash`, `edit` und `write`. Jede Tool-Ausführung hinterlässt unabhängig von der Terminalbreite mindestens eine kompakte Verlaufsspur:
 
 - Titel enthält Tool-Name und Ziel/Befehl.
 - Status wird als Symbol + Textlabel angezeigt (`pending`, `running`, `completed`, `failed`).
 - Hintergrund und Rahmenfarbe passen sich dem Status an.
-- Im expanded-Zustand zeigt die Box eine begrenzte Vorschau des Outputs (bis zu 5 Zeilen) sowie Metadaten wie Zeilenanzahl, Exit-Code oder Truncation-Hinweise.
+- Fehler öffnen die Box automatisch und zeigen Exit-Code sowie die erste relevante Ursache. Im expanded-Zustand zeigt die Box eine begrenzte Vorschau des Outputs sowie Metadaten.
 - `renderShell: "self"` verhindert, dass Pi einen zusätzlichen Rahmen zeichnet.
 - Die lokale `pi-claude-style-tools`-Package-Extension ist in `settings.json` deaktiviert (`extensions: []`), damit sie nicht dieselben Tool-Namen (`read`, `bash`, `edit`, `write`) registriert und mit `tool-visuals.ts` kollidiert.
 
@@ -88,7 +101,9 @@ Das Theme-Schema erlaubt keine neuen `colors`-Keys (`additionalProperties: false
 - Einträgen mit Cursor (`› `) und Auswahlmarker (`●`/`○`)
 - Section-Headern für Menügruppen
 - einheitlicher Bedienhilfe am unteren Rand
-- kompakter Darstellung bei schmalen Terminals
+- Viewport mit sichtbarer Auswahl, Restindikatoren sowie `PgUp`, `PgDn`, `Home` und `End`
+- kompakter Darstellung unter 60 Spalten, mittlerer Darstellung bis 89 und ausführlicher Darstellung ab 90 Spalten
+- inhaltsabhängiger Breite zwischen 42 Spalten und 75 Prozent des Terminals
 
 `/actions` öffnet das zentrale Aktionsmenü. Slash-Commands bleiben direkt nutzbar.
 
@@ -101,7 +116,14 @@ Das Theme-Schema erlaubt keine neuen `colors`-Keys (`additionalProperties: false
   - `✓` erledigt
   - `!` blockiert
   - `×` fehlgeschlagen
+- Das Widget zeigt höchstens den letzten erledigten, aktuellen und nächsten Schritt sowie `+ N weitere`; `/plan-todos` bleibt vollständig.
 - Die Plan-Datei bleibt ausführlich; UI-Ausgaben sind kompakt und handlungsorientiert.
+
+## Aktivität und Subagenten
+
+`activity-panel.ts` verwendet kein Overlay. `/activity` zeigt ein normales, nicht überlagerndes Widget; im Modus `auto` nur während echter Aktivität. Der Tool-Verlauf bleibt immer im Haupttranskript.
+
+Das Subagenten-Widget läuft standardmäßig als `active-only`: Leerlauf und abgeschlossene Läufe belegen keinen Platz. Warnungen, blockierte und fehlgeschlagene Läufe bleiben sichtbar; Debug zeigt zusätzlich Aufgabe, letzte Aktion, Laufzeit und Zähler.
 
 ## Warnzustände
 

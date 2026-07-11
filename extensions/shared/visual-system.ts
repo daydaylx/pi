@@ -39,6 +39,25 @@ export interface WorkProgressItem {
   running?: boolean;
 }
 
+export type FooterSegmentTone = VisualTone | "muted";
+
+export interface FooterSegment {
+  id:
+    | "mode"
+    | "model"
+    | "error"
+    | "warning"
+    | "subagents"
+    | "permission"
+    | "git"
+    | "thinking";
+  text: string;
+  tone: FooterSegmentTone;
+  /** Höhere Werte werden bei Platzmangel früher entfernt. */
+  dropPriority: number;
+  required?: boolean;
+}
+
 export function projectLabel(cwd: string): string {
   const home = normalize(homedir());
   const normalized = normalize(cwd);
@@ -130,46 +149,138 @@ export function formatHeaderLines(
 }
 
 export function formatFooterLine(
-  cwd: string,
+  _cwd: string,
   state: VisualWorkflowState,
   gitBranch?: string | null,
 ): string {
-  const subagents = state.activeSubagents && state.activeSubagents > 0
-    ? `SA:${state.activeSubagents}${state.subagentErrors ? ` ERR:${state.subagentErrors}` : state.subagentWarnings ? ` WARN:${state.subagentWarnings}` : ""}`
-    : undefined;
-  const parts = [
-    projectLabel(cwd),
-    `MODE:${formatModeCompact(state)}`,
-    `MODEL:${truncateModelName(state.model, 32)}`,
-    `THINKING:${(state.thinking ?? "-").toUpperCase()}`,
-    `PERMISSIONS:${permissionShortLabel(state.permissionLevel)}`,
-    `THEME:${state.themeName ?? "default"}`,
-  ];
-  if (gitBranch) parts.push(`GIT:${truncatePlain(gitBranch, 24)}`);
-  if (subagents) parts.push(subagents);
-  return parts.join(" | ");
+  return buildFooterSegments(state, gitBranch, false)
+    .map((segment) => segment.text)
+    .join(" · ");
 }
 
 export function formatFooterLineCompact(
-  cwd: string,
+  _cwd: string,
   state: VisualWorkflowState,
   gitBranch?: string | null,
 ): string {
-  const parts = [
-    projectLabel(cwd),
-    formatModeCompact(state),
-    truncateModelName(state.model, 18),
-    `T:${(state.thinking ?? "-").toLowerCase()}`,
-    `P:${permissionShortLabel(state.permissionLevel)}`,
+  return buildFooterSegments(state, gitBranch, true)
+    .map((segment) => segment.text)
+    .join(" · ");
+}
+
+/** Priorisierte, semantisch färbbare Footersegmente. */
+export function buildFooterSegments(
+  state: VisualWorkflowState,
+  gitBranch?: string | null,
+  compact = false,
+): FooterSegment[] {
+  const segments: FooterSegment[] = [
+    {
+      id: "mode",
+      text: compact
+        ? formatModeCompact(state)
+        : `MODUS:${formatModeCompact(state)}`,
+      tone: phaseTone(state.phase, state.mode),
+      dropPriority: 0,
+      required: true,
+    },
+    {
+      id: "model",
+      text: compact
+        ? truncateModelName(state.model, 18)
+        : `MODELL:${truncateModelName(state.model, 30)}`,
+      tone: "muted",
+      dropPriority: 10,
+      required: true,
+    },
   ];
-  if (state.activeSubagents && state.activeSubagents > 0)
-    parts.push(`SA:${state.activeSubagents}`);
-  if (state.subagentErrors && state.subagentErrors > 0)
-    parts.push(`ERR:${state.subagentErrors}`);
-  else if (state.subagentWarnings && state.subagentWarnings > 0)
-    parts.push(`WARN:${state.subagentWarnings}`);
-  if (gitBranch) parts.push(`G:${truncatePlain(gitBranch, 12)}`);
-  return parts.join(" · ");
+
+  if ((state.subagentErrors ?? 0) > 0) {
+    segments.push({
+      id: "error",
+      text: `${compact ? "ERR" : "FEHLER"}:${state.subagentErrors}`,
+      tone: "danger",
+      dropPriority: 0,
+      required: true,
+    });
+  }
+  if ((state.subagentWarnings ?? 0) > 0) {
+    segments.push({
+      id: "warning",
+      text: `${compact ? "WARN" : "WARNUNG"}:${state.subagentWarnings}`,
+      tone: "warning",
+      dropPriority: 1,
+      required: true,
+    });
+  }
+  if ((state.activeSubagents ?? 0) > 0) {
+    segments.push({
+      id: "subagents",
+      text: `SA:${state.activeSubagents}`,
+      tone: "work",
+      dropPriority: 5,
+      required: true,
+    });
+  }
+
+  segments.push({
+    id: "permission",
+    text: `${compact ? "R" : "RECHTE"}:${permissionShortLabel(state.permissionLevel)}`,
+    tone: permissionTone(state.permissionLevel),
+    dropPriority: 40,
+  });
+  if (gitBranch) {
+    segments.push({
+      id: "git",
+      text: `${compact ? "G" : "GIT"}:${truncatePlain(gitBranch, compact ? 12 : 24)}`,
+      tone: "muted",
+      dropPriority: 60,
+    });
+  }
+  segments.push({
+    id: "thinking",
+    text: `${compact ? "D" : "DENKEN"}:${(state.thinking ?? "-").toUpperCase()}`,
+    tone: "muted",
+    dropPriority: 70,
+  });
+  return segments;
+}
+
+/** Entfernt nur optionale Segmente, bis die Zeile in die Terminalbreite passt. */
+export function fitFooterSegments(
+  segments: FooterSegment[],
+  width: number,
+): FooterSegment[] {
+  const result = segments.map((segment) => ({ ...segment }));
+  const renderedWidth = () =>
+    result.reduce((sum, segment) => sum + segment.text.length, 0) +
+    Math.max(0, result.length - 1) * 3;
+
+  while (renderedWidth() > width) {
+    let candidate = -1;
+    for (let index = 0; index < result.length; index += 1) {
+      if (result[index]!.required) continue;
+      if (
+        candidate < 0 ||
+        result[index]!.dropPriority > result[candidate]!.dropPriority
+      ) {
+        candidate = index;
+      }
+    }
+    if (candidate < 0) break;
+    result.splice(candidate, 1);
+  }
+
+  if (renderedWidth() > width && result.length > 0) {
+    const overflow = renderedWidth() - width;
+    const model = result.find((segment) => segment.id === "model");
+    const target = model ?? result[result.length - 1]!;
+    target.text = truncatePlain(
+      target.text,
+      Math.max(3, target.text.length - overflow),
+    );
+  }
+  return result;
 }
 
 export function permissionShortLabel(level: PermissionLevel): string {
@@ -287,4 +398,40 @@ export function formatWorkProgressLines(items: WorkProgressItem[]): string[] {
       (item) => `T${item.step} ${progressSymbol(item)} ${item.text}`,
     ),
   ];
+}
+
+/** Kompakte Widgetansicht; /plan-todos behält weiterhin die vollständige Liste. */
+export function formatWorkProgressWidgetLines(
+  items: WorkProgressItem[],
+): string[] {
+  if (items.length === 0) return ["Keine Plan-Todos gefunden."];
+
+  const currentIndex = items.findIndex((item) => item.running);
+  const firstOpenIndex = items.findIndex((item) => !item.completed);
+  const activeIndex = currentIndex >= 0 ? currentIndex : firstOpenIndex;
+  let lastCompletedIndex = -1;
+  for (let index = 0; index < items.length; index += 1) {
+    if (items[index]!.completed) lastCompletedIndex = index;
+  }
+  const nextIndex =
+    activeIndex >= 0
+      ? items.findIndex(
+          (item, index) => index > activeIndex && !item.completed,
+        )
+      : -1;
+
+  const indexes = [lastCompletedIndex, activeIndex, nextIndex]
+    .filter((index, position, values) =>
+      index >= 0 && values.indexOf(index) === position,
+    )
+    .sort((a, b) => a - b);
+  if (indexes.length === 0) indexes.push(Math.max(0, items.length - 1));
+
+  const lines = indexes.map((index) => {
+    const item = items[index]!;
+    return `T${item.step} ${progressSymbol(item)} ${item.text}`;
+  });
+  const omitted = items.length - indexes.length;
+  if (omitted > 0) lines.push(`+ ${omitted} weitere`);
+  return lines;
 }

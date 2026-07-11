@@ -1,20 +1,8 @@
 /**
- * Startup-Banner Extension
- *
- * Zeigt beim Session-Start einen großen, farbigen PI-AGENT-Blockbanner als
- * persistenten Header oberhalb des Chats (ctx.ui.setHeader) — nicht als
- * flüchtige notify()-Statuszeile. Skaliert nach Terminalbreite:
- *   - breit:   "PI AGENT" als Blockglyphen mit Farbverlauf + "by Grunert"
- *              dezent darunter + Kurzhinweise
- *   - schmal:  "PI" als Blockglyphen + "by Grunert" + kürzerer Hinweis
- *   - winzig:  eine einfache Textzeile
- * Respektiert NO_COLOR und die vom Theme erkannte Terminal-Farbfähigkeit.
- *
- * Deaktivieren: aus settings.json entfernen oder ENABLE_STARTUP_BANNER auf
- * false setzen.
+ * Startup-Banner: beim Start groß, danach platzsparend und modellaktuell.
  */
 
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   buildBigBanner,
   buildPlainBannerLine,
@@ -22,64 +10,106 @@ import {
   resolveBannerTier,
 } from "./shared/banner-render.ts";
 import { truncateModelName } from "./shared/render-profile.ts";
+import { loadUiConfig } from "./shared/ui-config.ts";
 
-const ENABLE_STARTUP_BANNER = true;
+type BannerMode = "on" | "compact" | "off";
+
 const PLAIN_TIER_FULL_TEXT_MIN_WIDTH = 10;
 const BYLINE = "by Grunert";
 
-function subtitleLines(
-  theme: Theme,
-  model: string | undefined,
-  width: number,
-): string[] {
-  const lines: string[] = [];
-
-  const status = model
-    ? `Mode • Model ${truncateModelName(model, 24)} • Thinking • Permissions`
-    : "Mode • Model • Thinking • Permissions";
-  if (status.length <= width) lines.push(theme.fg("muted", status));
-
-  const commands = "/plan  /work  /review-plan  /permission  /subagent-list";
-  if (commands.length <= width) lines.push(theme.fg("dim", commands));
-
-  const shortcuts = "Shift+Tab: Mode    Ctrl+Shift+Y: Permissions";
-  if (shortcuts.length <= width) lines.push(theme.fg("dim", shortcuts));
-
-  return lines;
-}
-
 export default function startupBannerExtension(pi: ExtensionAPI): void {
-  if (!ENABLE_STARTUP_BANNER) return;
+  let bannerMode: BannerMode = loadUiConfig().banner;
+  let collapsed = bannerMode !== "on";
+  let modelId: string | undefined;
+  let activeCtx: any;
+  let headerTui: { requestRender(): void } | undefined;
+
+  function refresh(): void {
+    headerTui?.requestRender();
+  }
+
+  function installHeader(ctx: any): void {
+    activeCtx = ctx;
+    ctx.ui.setHeader((tui: any, theme: any) => {
+      headerTui = tui;
+      return {
+        render(width: number): string[] {
+          if (bannerMode === "off") return [];
+
+          const colorMode = resolveBannerColorMode(theme.getColorMode());
+          if (bannerMode === "compact" || collapsed) {
+            const label = modelId
+              ? `PI AGENT · ${truncateModelName(modelId, Math.max(8, width - 13))}`
+              : "PI AGENT";
+            return [theme.fg("muted", label.slice(0, Math.max(1, width)))];
+          }
+
+          const tier = resolveBannerTier(width);
+          if (tier === "plain") {
+            const text =
+              width >= PLAIN_TIER_FULL_TEXT_MIN_WIDTH ? "PI AGENT" : "PI";
+            return [buildPlainBannerLine(text, colorMode)];
+          }
+
+          return [
+            ...buildBigBanner(tier === "full" ? "PI AGENT" : "PI", colorMode),
+            theme.fg("dim", BYLINE),
+          ];
+        },
+        invalidate() {},
+      };
+    });
+  }
 
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
+    bannerMode = loadUiConfig().banner;
+    collapsed = bannerMode !== "on";
+    modelId = ctx.model?.id;
+    installHeader(ctx);
+  });
 
-    const model = ctx.model?.id;
+  pi.on("input", async () => {
+    if (bannerMode === "on" && !collapsed) {
+      collapsed = true;
+      refresh();
+    }
+    return { action: "continue" } as const;
+  });
 
-    ctx.ui.setHeader((_tui, theme) => ({
-      render(width: number): string[] {
-        const colorMode = resolveBannerColorMode(theme.getColorMode());
-        const tier = resolveBannerTier(width);
+  pi.on("model_select", async (_event, ctx) => {
+    modelId = ctx.model?.id;
+    refresh();
+  });
 
-        if (tier === "plain") {
-          const text =
-            width >= PLAIN_TIER_FULL_TEXT_MIN_WIDTH ? "PI AGENT" : "PI";
-          return [buildPlainBannerLine(text, colorMode)];
-        }
+  pi.on("session_shutdown", async () => {
+    activeCtx = undefined;
+    headerTui = undefined;
+  });
 
-        const glyphLines = buildBigBanner(
-          tier === "full" ? "PI AGENT" : "PI",
-          colorMode,
-        );
-        const byline = theme.fg("dim", BYLINE);
-        const subtitle = subtitleLines(theme, model, width);
-        return [
-          ...glyphLines,
-          byline,
-          ...(subtitle.length > 0 ? ["", ...subtitle] : []),
-        ];
-      },
-      invalidate() {},
-    }));
+  pi.registerCommand("banner", {
+    description: "Startbanner steuern: on | compact | off",
+    handler: async (args, ctx) => {
+      const requested = args.trim().toLowerCase();
+      if (
+        requested !== "on" &&
+        requested !== "compact" &&
+        requested !== "off"
+      ) {
+        ctx.ui.notify("Nutzung: /banner on|compact|off", "info");
+        return;
+      }
+      bannerMode = requested;
+      collapsed = requested !== "on";
+      if (ctx.mode === "tui" && activeCtx !== ctx) installHeader(ctx);
+      refresh();
+      const label =
+        requested === "on"
+          ? "groß bis zur nächsten Eingabe"
+          : requested === "compact"
+            ? "kompakt"
+            : "aus";
+      ctx.ui.notify(`Startbanner: ${label}.`, "info");
+    },
   });
 }

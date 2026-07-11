@@ -853,8 +853,8 @@ assert(
   );
   eq(
     statuses.filter((entry) => entry.key === "permission-level").at(-1)?.text,
-    "YOLO",
-    "permission extension publishes the current level on a separate status key",
+    undefined,
+    "permission extension clears the duplicate permission status key",
   );
 
   // De-escalation is immediate and does not depend on idle/mode state.
@@ -1653,6 +1653,11 @@ assert(
   // ── State-Mutationen (#31) ──
   widget.resetWidgetState();
   eq(widget.getWidgetState().visible, true, "widget starts visible by default");
+  eq(
+    widget.getWidgetState().mode,
+    "active-only",
+    "widget starts in active-only mode",
+  );
   eq(widget.getWidgetState().compact, true, "widget starts in compact mode");
   eq(widget.getWidgetState().debug, false, "widget starts with debug off");
   eq(
@@ -1799,24 +1804,25 @@ assert(
   widget.setRisk("niedrig");
 
   const rendered = widget.renderWidget(widget.getWidgetState());
-  assert(rendered.length >= 3, "compact widget renders at least 3 lines");
+  assert(rendered.length >= 1, "active widget renders relevant subagent lines");
   assert(rendered.length <= 4, "compact widget renders at most 4 lines");
   assert(
-    rendered[0].includes("Subagents: loaded") &&
-      rendered[0].includes("Agents: 10") &&
-      rendered[0].includes("Last run: reviewer/parallel"),
-    "line 1 shows loaded state, agent count and last run",
+    rendered.some((line) => line.includes("reviewer") && line.includes("läuft")),
+    "active-only widget shows the running subagent",
   );
   assert(
-    rendered[1].includes("planner") && rendered[1].includes("reviewer"),
-    "line 2 shows subagent names",
+    rendered.every((line) => !line.includes("planner")),
+    "active-only widget hides completed subagents",
   );
-  assert(rendered[1].includes("glm-4.6"), "line 2 shows model");
-  assert(rendered[1].includes("HIGH"), "line 2 shows thinking level");
-  assert(rendered[2].includes("baue Widget"), "line 3 shows current step");
   assert(
-    rendered[3].includes("entscheide Layout"),
-    "line 4 shows reasoning summary",
+    rendered.every(
+      (line) =>
+        !line.includes("glm-4.6") &&
+        !line.includes("HIGH") &&
+        !line.includes("baue Widget") &&
+        !line.includes("entscheide Layout"),
+    ),
+    "normal widget does not duplicate model, thinking or placeholder fields",
   );
 
   widget.setLastRun("scout", "single", "2026-07-10T15:43:06Z");
@@ -1826,9 +1832,8 @@ assert(
     "subagent widget lines fit the 69-column crash width",
   );
   assert(
-    narrowRendered[0].startsWith("Subagents: loaded") &&
-      narrowRendered[0].endsWith("…"),
-    "long subagent status line truncates before TUI validation",
+    narrowRendered.length > 0,
+    "narrow widget retains relevant activity",
   );
 
   // Hidden widget renders nothing
@@ -1846,12 +1851,19 @@ assert(
   const debugRendered = widget.renderWidget(widget.getWidgetState());
   assert(debugRendered.length > 4, "debug widget renders more than 4 lines");
 
-  // Fallback thinking summary
+  // Missing optional fields never create synthetic activity.
   widget.setThink(undefined);
   const fallbackRendered = widget.renderWidget(widget.getWidgetState());
   assert(
-    fallbackRendered.some((l) => l.includes("working…")),
-    "missing think falls back to 'working…'",
+    fallbackRendered.every((line) => !line.includes("working")),
+    "missing think renders no working placeholder",
+  );
+
+  widget.resetWidgetState();
+  eq(
+    widget.renderWidget(widget.getWidgetState()),
+    [],
+    "idle active-only widget renders no lines",
   );
 
   // ── TTL cleanup: stale done/blocked entries are evicted on upsert ──
@@ -3627,6 +3639,65 @@ eq(
   "countDirtyFiles: ignores blank lines",
 );
 
+// ───────────────────────── ux-status: #60 thinking state machine (units) ─────────────────────────
+eq(
+  uxStatus.timeBasedThinkingState(0),
+  "thinking",
+  "timeBasedThinkingState: fresh start is thinking",
+);
+eq(
+  uxStatus.timeBasedThinkingState(4999),
+  "thinking",
+  "timeBasedThinkingState: just under analyzing threshold",
+);
+eq(
+  uxStatus.timeBasedThinkingState(5000),
+  "analyzing",
+  "timeBasedThinkingState: reaches analyzing threshold",
+);
+eq(
+  uxStatus.timeBasedThinkingState(14999),
+  "analyzing",
+  "timeBasedThinkingState: just under planning threshold",
+);
+eq(
+  uxStatus.timeBasedThinkingState(15000),
+  "planning",
+  "timeBasedThinkingState: reaches planning threshold",
+);
+eq(
+  uxStatus.timeBasedThinkingState(60000),
+  "planning",
+  "timeBasedThinkingState: stays planning far beyond threshold",
+);
+
+assert(
+  uxStatus.shouldRenderThinkingUpdate(1000, 0, false) === false,
+  "shouldRenderThinkingUpdate: suppressed inside debounce window",
+);
+assert(
+  uxStatus.shouldRenderThinkingUpdate(1800, 0, false) === true,
+  "shouldRenderThinkingUpdate: allowed right at window edge",
+);
+assert(
+  uxStatus.shouldRenderThinkingUpdate(100, 0, true) === true,
+  "shouldRenderThinkingUpdate: immediate bypasses the window",
+);
+
+eq(
+  uxStatus.THINKING_STATE_LABEL.idle,
+  "",
+  "THINKING_STATE_LABEL: idle has no visible label",
+);
+assert(
+  uxStatus.THINKING_STATE_LABEL.thinking.length > 0 &&
+    uxStatus.THINKING_STATE_LABEL.analyzing.length > 0 &&
+    uxStatus.THINKING_STATE_LABEL.inspecting.length > 0 &&
+    uxStatus.THINKING_STATE_LABEL.planning.length > 0 &&
+    uxStatus.THINKING_STATE_LABEL["preparing-response"].length > 0,
+  "THINKING_STATE_LABEL: every non-idle state has a stable label",
+);
+
 // ───────────────────────── shared menus: mode/permission/thinking/command ─────────────────────────
 assert(
   typeof modeMenu.buildModeMenu === "function",
@@ -3636,7 +3707,13 @@ assert(
 const modeEntries = modeMenu.buildModeMenu("detailed_plan");
 eq(
   modeEntries.map((entry) => entry.id),
-  ["mode-simple-plan", "mode-detailed-plan", "mode-work", "mode-decide", "mode-skill"],
+  [
+    "mode-simple-plan",
+    "mode-detailed-plan",
+    "mode-work",
+    "mode-decide",
+    "mode-skill",
+  ],
   "Shift+Tab contains the three mode variants plus Klärung (decide) plus Skill-Modus",
 );
 assert(
@@ -3756,7 +3833,13 @@ assert(
 const renamedModeEntries = modeMenu.buildModeMenu("simple_plan");
 eq(
   renamedModeEntries.map((entry) => entry.id),
-  ["mode-simple-plan", "mode-detailed-plan", "mode-work", "mode-decide", "mode-skill"],
+  [
+    "mode-simple-plan",
+    "mode-detailed-plan",
+    "mode-work",
+    "mode-decide",
+    "mode-skill",
+  ],
   "Shift+Tab still contains the three mode variants plus decide plus Skill-Modus after the rename",
 );
 assert(
@@ -4230,9 +4313,7 @@ function stripAnsi(text) {
     "footer shows permissions segment",
   );
   assert(
-    visualSystem
-      .formatFooterLine(ROOT, visualState, "main")
-      .includes("THEME:"),
+    visualSystem.formatFooterLine(ROOT, visualState, "main").includes("THEME:"),
     "footer shows theme segment",
   );
   assert(
@@ -4494,7 +4575,9 @@ function stripAnsi(text) {
     "settings does not load the OpenRouter free-model extension",
   );
   assert(
-    settings.enabledModels.includes(`${settings.defaultProvider}/${settings.defaultModel}`),
+    settings.enabledModels.includes(
+      `${settings.defaultProvider}/${settings.defaultModel}`,
+    ),
     "default provider/model pair is present in enabledModels",
   );
   assert(
@@ -4502,7 +4585,8 @@ function stripAnsi(text) {
     "local tool-visuals extension is enabled",
   );
   assert(
-    Array.isArray(claudeTools?.extensions) && claudeTools.extensions.length === 0,
+    Array.isArray(claudeTools?.extensions) &&
+      claudeTools.extensions.length === 0,
     "no package tool renderer is loaded alongside local tool-visuals",
   );
 
@@ -5244,7 +5328,9 @@ eq(
     "ASCII failed status still carries the text label",
   );
   eq(
-    renderProfile.formatStatus("blocked", { unicode: false }).includes("blocked"),
+    renderProfile
+      .formatStatus("blocked", { unicode: false })
+      .includes("blocked"),
     true,
     "ASCII blocked status still carries the text label",
   );
@@ -5284,13 +5370,22 @@ eq(
   };
   const full = visualSystem.formatFooterLine(ROOT, state, "main");
   assert(full.includes("MODE:PLAN:DRAFT"), "full statusbar shows MODE segment");
-  assert(full.includes("PERMISSIONS:READ+WRITE"), "full statusbar shows PERMISSIONS");
+  assert(
+    full.includes("PERMISSIONS:READ+WRITE"),
+    "full statusbar shows PERMISSIONS",
+  );
   assert(full.includes("THEME:pi-vivid"), "full statusbar shows active theme");
 
   const compact = visualSystem.formatFooterLineCompact(ROOT, state, "main");
   assert(compact.includes("PLAN:DRAFT"), "compact statusbar shows mode");
-  assert(compact.includes("T:high"), "compact statusbar shows lowercase thinking");
-  assert(compact.includes("P:READ+WRITE"), "compact statusbar shows permission tag");
+  assert(
+    compact.includes("T:high"),
+    "compact statusbar shows lowercase thinking",
+  );
+  assert(
+    compact.includes("P:READ+WRITE"),
+    "compact statusbar shows permission tag",
+  );
 
   // Subagent counts surface in both variants when active.
   const withSubs = { ...state, activeSubagents: 2, subagentErrors: 1 };
@@ -5354,9 +5449,18 @@ eq(
   const saLine = rendered.find((l) => l.startsWith("SA:"));
   assert(saLine, "widget still renders the SA status line");
   // Each status carries both a symbol and a text label, never color alone.
-  assert(saLine.includes("planner") && saLine.includes("running"), "running agent shows name + label");
-  assert(saLine.includes("reviewer") && saLine.includes("warning"), "warning agent shows name + label");
-  assert(saLine.includes("tester") && saLine.includes("failed"), "failed agent shows name + label");
+  assert(
+    saLine.includes("planner") && saLine.includes("running"),
+    "running agent shows name + label",
+  );
+  assert(
+    saLine.includes("reviewer") && saLine.includes("warning"),
+    "warning agent shows name + label",
+  );
+  assert(
+    saLine.includes("tester") && saLine.includes("failed"),
+    "failed agent shows name + label",
+  );
   assert(saLine.includes("w:2"), "warning count surfaces compactly");
   assert(saLine.includes("e:1"), "error count surfaces compactly");
 
@@ -5385,13 +5489,27 @@ eq(
     background: "toolSuccessBg",
   });
   const lines = box.render(40, fakeTheme);
-  assert(lines.length >= 7, "info-box renders at least title/subtitle/divider/section/content/footer");
+  assert(
+    lines.length >= 7,
+    "info-box renders at least title/subtitle/divider/section/content/footer",
+  );
   assert(lines[0].startsWith("╭"), "info-box top border uses rounded corner");
-  assert(lines[lines.length - 1].startsWith("╰"), "info-box bottom border uses rounded corner");
-  assert(lines.some((l) => l.includes("BOLD:Status")), "info-box title is bold");
-  assert(lines.some((l) => l.includes("✓ ready")), "info-box status shows symbol + label");
+  assert(
+    lines[lines.length - 1].startsWith("╰"),
+    "info-box bottom border uses rounded corner",
+  );
+  assert(
+    lines.some((l) => l.includes("BOLD:Status")),
+    "info-box title is bold",
+  );
+  assert(
+    lines.some((l) => l.includes("✓ ready")),
+    "info-box status shows symbol + label",
+  );
 
-  const asciiProfile = renderProfile.resolveRenderProfile({ env: { PI_ASCII_UI: "1" } });
+  const asciiProfile = renderProfile.resolveRenderProfile({
+    env: { PI_ASCII_UI: "1" },
+  });
   const asciiBox = new infoBox.InfoBox({
     title: "Status with a very long title",
     sections: [{ lines: ["content with a very very very long tail"] }],
@@ -5445,13 +5563,18 @@ eq(
   const wideLines = wideBox.render(50, fakeTheme);
   for (const line of wideLines) {
     const stripped = line.replace(/\x1b\[[0-9;]*m/g, "");
-    assert(stripped.length <= 50, `info-box line fits within width: ${stripped.slice(0, 20)}`);
+    assert(
+      stripped.length <= 50,
+      `info-box line fits within width: ${stripped.slice(0, 20)}`,
+    );
   }
 
   // Long titles/subtitles/section text must not exceed requested width.
   const longBox = new infoBox.InfoBox({
-    title: "Very long title that should be truncated before it can overflow the frame",
-    subtitle: "Very long subtitle that should also be truncated before rendering",
+    title:
+      "Very long title that should be truncated before it can overflow the frame",
+    subtitle:
+      "Very long subtitle that should also be truncated before rendering",
     sections: [
       {
         title: "Very long section title that should be clipped",
@@ -5515,7 +5638,10 @@ eq(
   const uxStatus = await jiti.import(
     path.resolve(ROOT, "extensions/ux-status.ts"),
   );
-  assert(typeof uxStatus.default === "function", "ux-status.ts exports a factory");
+  assert(
+    typeof uxStatus.default === "function",
+    "ux-status.ts exports a factory",
+  );
 
   const commands = new Map();
   const shortcuts = new Map();
@@ -5547,7 +5673,10 @@ eq(
 
   assert(commands.has("status"), "/status command is registered");
   assert(commands.has("home"), "/home alias is registered");
-  assert(shortcuts.has("ctrl+shift+h"), "Ctrl+Shift+H help shortcut is registered");
+  assert(
+    shortcuts.has("ctrl+shift+h"),
+    "Ctrl+Shift+H help shortcut is registered",
+  );
 
   const notified = [];
   const context = {
@@ -5577,10 +5706,171 @@ eq(
 
   await commands.get("status")("", context);
   assert(notified.length === 1, "/status sends one notification");
-  assert(notified[0].level === "info", "/status uses info level without warning");
+  assert(
+    notified[0].level === "info",
+    "/status uses info level without warning",
+  );
   assert(
     notified[0].message.includes("STATUS") && notified[0].message.includes("╭"),
     "/status renders a boxed notification in TUI mode",
+  );
+}
+
+// ───────────────────────── ux-status: #60 thinking state machine (event-driven) ─────────────────────────
+{
+  const uxStatus = await jiti.import(
+    path.resolve(ROOT, "extensions/ux-status.ts"),
+  );
+
+  const commands = new Map();
+  const events = new Map();
+  uxStatus.default({
+    events: {
+      on(name, handler) {
+        events.set(name, handler);
+      },
+      emit() {},
+    },
+    on(name, handler) {
+      events.set(name, handler);
+    },
+    registerCommand(name, options) {
+      commands.set(name, options.handler);
+    },
+    registerShortcut() {},
+    getThinkingLevel() {
+      return "high";
+    },
+    setThinkingLevel() {},
+    onModelSelect() {},
+    onThinkingLevelSelect() {},
+  });
+
+  const labels = [];
+  const notified = [];
+  const context = {
+    mode: "tui",
+    cwd: ROOT,
+    model: { id: "test-model", provider: "test-provider" },
+    ui: {
+      theme: { fg: (_c, t) => t, bg: (_c, t) => t, bold: (t) => t },
+      notify: (message, level) => notified.push({ message, level }),
+      setStatus: () => {},
+      setHiddenThinkingLabel: (label) => labels.push(label),
+    },
+  };
+
+  const messageUpdate = (ame) =>
+    events.get("message_update")({ assistantMessageEvent: ame }, context);
+
+  events.get("session_start")({}, context);
+  assert(
+    labels.at(-1) === undefined,
+    "session_start resets the thinking label to default (undefined)",
+  );
+
+  labels.length = 0;
+  messageUpdate({ type: "thinking_start", contentIndex: 0 });
+  eq(
+    labels.at(-1),
+    uxStatus.THINKING_STATE_LABEL.thinking,
+    "thinking_start renders the 'thinking' label immediately",
+  );
+
+  const rendersBefore = labels.length;
+  messageUpdate({ type: "thinking_delta", contentIndex: 0, delta: "a" });
+  messageUpdate({ type: "thinking_delta", contentIndex: 0, delta: "b" });
+  messageUpdate({ type: "thinking_delta", contentIndex: 0, delta: "c" });
+  assert(
+    labels.length === rendersBefore,
+    "dense thinking_delta bursts inside the debounce window render at most once (here: zero, since state didn't change)",
+  );
+
+  messageUpdate({ type: "toolcall_start", contentIndex: 1 });
+  assert(
+    labels.at(-1) === uxStatus.THINKING_STATE_LABEL.inspecting ||
+      labels.length === rendersBefore,
+    "toolcall_start during thinking moves toward 'inspecting' or is debounced, never a raw text excerpt",
+  );
+  assert(
+    labels.every(
+      (l) =>
+        l === undefined ||
+        Object.values(uxStatus.THINKING_STATE_LABEL).includes(l),
+    ),
+    "every rendered label is one of the fixed state labels, never raw cumulative thinking text",
+  );
+
+  labels.length = 0;
+  messageUpdate({
+    type: "thinking_end",
+    contentIndex: 0,
+    content: "irrelevant raw text",
+  });
+  eq(
+    labels.at(-1),
+    uxStatus.THINKING_STATE_LABEL["preparing-response"],
+    "thinking_end switches immediately to 'preparing-response', not the raw thinking content",
+  );
+
+  labels.length = 0;
+  events.get("message_end")({}, context);
+  assert(
+    labels.at(-1) === undefined,
+    "message_end resets the label (idle) so it doesn't stay stuck after completion",
+  );
+
+  labels.length = 0;
+  messageUpdate({ type: "thinking_start", contentIndex: 0 });
+  labels.length = 0;
+  messageUpdate({ type: "error", reason: "aborted" });
+  assert(
+    labels.at(-1) === undefined,
+    "an aborted/error assistant message event resets the label instead of leaving it stuck",
+  );
+
+  // Debug counters: off by default, no counters exposed until enabled.
+  await commands.get("thinking-debug")("", context);
+  assert(
+    notified.at(-1).level === "warning",
+    "/thinking-debug without 'on' first reports debug is off",
+  );
+
+  await commands.get("thinking-debug")("on", context);
+  messageUpdate({ type: "thinking_start", contentIndex: 0 });
+  messageUpdate({ type: "thinking_delta", contentIndex: 0, delta: "x" });
+  messageUpdate({ type: "thinking_delta", contentIndex: 0, delta: "y" });
+  await commands.get("thinking-debug")("", context);
+  const counterMsg = notified.at(-1).message;
+  assert(
+    counterMsg.includes("received=") &&
+      counterMsg.includes("rendered=") &&
+      counterMsg.includes("suppressed="),
+    "/thinking-debug (enabled) reports received/rendered/suppressed counters",
+  );
+  await commands.get("thinking-debug")("off", context);
+
+  // The counters must never leak into the normal /status output.
+  const statusNotified = [];
+  const statusCtx = {
+    ...context,
+    ui: {
+      ...context.ui,
+      notify: (m, l) => statusNotified.push({ message: m, level: l }),
+    },
+  };
+  events.get("pi-workflow:status")({
+    source: "plan",
+    mode: "work",
+    phase: "idle",
+    planExists: false,
+    completedTodos: 0,
+    totalTodos: 0,
+  });
+  await commands.get("status")("", statusCtx);
+  assert(
+    !statusNotified.some((n) => n.message.includes("received=")),
+    "/status never shows thinking-debug counters",
   );
 }
 

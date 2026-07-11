@@ -21,13 +21,7 @@
   },
   "extensionStatuses": {
     "defaultPlacement": "right",
-    "placements": {
-      "workflow-summary": "left",
-      "permission-level": "right"
-    },
-    "colorModes": {
-      "workflow-summary": "original",
-      "permission-level": "original"
-    }
+    "placements": {},
+    "colorModes": {}
   }
 }

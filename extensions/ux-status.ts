@@ -30,6 +30,7 @@ import {
 import { glyphsFor, resolveRenderProfile } from "./shared/render-profile.ts";
 import { runMenu } from "./shared/menu-ui.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
+import { loadUiConfig } from "./shared/ui-config.ts";
 import { buildThinkingMenu, THINKING_LEVELS } from "./shared/thinking-menu.ts";
 import {
   PERMISSION_LEVEL_LABEL,
@@ -45,13 +46,14 @@ import {
 } from "./shared/workflow-status.ts";
 import { getWidgetState } from "./subagents/widget.ts";
 import {
+  buildFooterSegments,
+  fitFooterSegments,
   formatEmptyPlanState,
   formatFooterLine,
-  formatFooterLineCompact,
   formatModePhase,
   formatPermissionWarning,
-  permissionTone,
   toneColor,
+  type FooterSegmentTone,
   type VisualWorkflowState,
 } from "./shared/visual-system.ts";
 
@@ -59,13 +61,6 @@ import {
 // garantiert existieren und in der Hilfe auftauchen sollen.
 const NATIVE_HELP_COMMANDS = ["  /model — Modell wählen (nativ)"];
 const CENTRAL_STATUS_KEY = "workflow-summary";
-
-function truncatePlain(value: string, width: number): string {
-  if (width <= 0) return "";
-  if (value.length <= width) return value;
-  if (width === 1) return "…";
-  return `${value.slice(0, width - 1)}…`;
-}
 
 function notifyLevelToInfoBoxTone(
   level: "info" | "warning" | "error" | string,
@@ -93,10 +88,7 @@ interface NotifyBoxOptions {
   width?: number;
 }
 
-function notifyBox(
-  ctx: ExtensionContext,
-  options: NotifyBoxOptions,
-): void {
+function notifyBox(ctx: ExtensionContext, options: NotifyBoxOptions): void {
   const level = options.level ?? "info";
   const theme = ctx.ui.theme as any;
   if (
@@ -183,6 +175,54 @@ interface CachedPlanState {
   totalTodos: number;
 }
 
+// #60: grobe Zustände statt Rohtext-Ausschnitten der Denknotiz. Bewusst kein
+// Content-Parsing des Thinking-Texts (modellabhängig/fragil) — die Phasen
+// "analyzing"/"planning" werden rein über die seit thinking_start verstrichene
+// Zeit geschätzt.
+export type ThinkingUiState =
+  | "idle"
+  | "thinking"
+  | "analyzing"
+  | "inspecting"
+  | "planning"
+  | "preparing-response";
+
+export const THINKING_STATE_LABEL: Record<ThinkingUiState, string> = {
+  idle: "",
+  thinking: "Denkt nach…",
+  analyzing: "Analysiert die Aufgabe…",
+  inspecting: "Prüft relevante Dateien…",
+  planning: "Vergleicht mögliche Lösungen…",
+  "preparing-response": "Bereitet die Antwort vor…",
+};
+
+const THINKING_ANALYZING_AFTER_MS = 5_000;
+const THINKING_PLANNING_AFTER_MS = 15_000;
+
+/** Grober Zeitfortschritt innerhalb eines laufenden Thinking-Blocks. */
+export function timeBasedThinkingState(elapsedMs: number): ThinkingUiState {
+  if (elapsedMs >= THINKING_PLANNING_AFTER_MS) return "planning";
+  if (elapsedMs >= THINKING_ANALYZING_AFTER_MS) return "analyzing";
+  return "thinking";
+}
+
+const THINKING_UPDATE_WINDOW_MS = 1_800;
+
+/** Höchstens ein sichtbares Update pro Zeitfenster, außer bei `immediate`. */
+export function shouldRenderThinkingUpdate(
+  now: number,
+  lastRenderedAt: number,
+  immediate: boolean,
+): boolean {
+  return immediate || now - lastRenderedAt >= THINKING_UPDATE_WINDOW_MS;
+}
+
+export interface ThinkingDebugCounters {
+  received: number;
+  rendered: number;
+  suppressed: number;
+}
+
 export default function uxStatusExtension(pi: ExtensionAPI): void {
   let plan: CachedPlanState = {
     phase: "idle",
@@ -193,6 +233,9 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
   let workflowMode: WorkflowMode = "work";
   let permissionLevel: PermissionLevel = "read-write";
   let activeCtx: ExtensionContext | undefined;
+  let footerTui: { requestRender(): void } | undefined;
+  let footerInstalled = false;
+  let footerMode = loadUiConfig().footer;
 
   function currentThemeName(ctx: ExtensionContext): string {
     return (ctx.ui.theme as { name?: string } | undefined)?.name ?? "pi-vivid";
@@ -211,13 +254,23 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
       model: ctx.model?.id,
       thinking: pi.getThinkingLevel(),
       themeName: currentThemeName(ctx),
-      activeSubagents: subagents.filter((entry) =>
-        entry.status === "running" || entry.status === "queued" || entry.status === "waiting",
+      activeSubagents: subagents.filter(
+        (entry) =>
+          entry.status === "running" ||
+          entry.status === "queued" ||
+          entry.status === "waiting",
       ).length,
-      subagentWarnings: subagents.reduce((sum, entry) => sum + (entry.warnings ?? 0), 0),
-      subagentErrors: subagents.reduce((sum, entry) =>
-        sum + (entry.errors ?? (entry.status === "failed" || entry.status === "blocked" ? 1 : 0)),
-      0),
+      subagentWarnings: subagents.reduce(
+        (sum, entry) => sum + (entry.warnings ?? 0),
+        0,
+      ),
+      subagentErrors: subagents.reduce(
+        (sum, entry) =>
+          sum +
+          (entry.errors ??
+            (entry.status === "failed" || entry.status === "blocked" ? 1 : 0)),
+        0,
+      ),
       nextStep: nextStepFor(plan.phase, plan.planExists),
     };
   }
@@ -233,19 +286,30 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     // zu überschreiben.
 
     if (ctx.mode === "tui" && typeof ui.setFooter === "function") {
+      footerInstalled = true;
       ui.setFooter((tui: any, theme: any, footerData: any) => {
+        footerTui = tui;
         const dispose = footerData?.onBranchChange?.(() => tui.requestRender());
         return {
           render(width: number): string[] {
             const state = buildVisualState(ctx);
-            const raw = truncatePlain(
-              width < 96
-                ? formatFooterLineCompact(ctx.cwd, state, footerData?.getGitBranch?.())
-                : formatFooterLine(ctx.cwd, state, footerData?.getGitBranch?.()),
+            const segments = fitFooterSegments(
+              buildFooterSegments(
+                state,
+                footerData?.getGitBranch?.(),
+                footerMode === "priority" && width < 96,
+              ),
               width,
             );
-            const modeColor = toneColor(permissionTone(permissionLevel));
-            return [theme.fg(modeColor === "text" ? "muted" : modeColor, raw)];
+            const separator = theme.fg("dim", " · ");
+            return [
+              segments
+                .map((segment) => {
+                  const color = footerToneColor(segment.tone);
+                  return theme.fg(color, segment.text);
+                })
+                .join(separator),
+            ];
           },
           invalidate() {},
           dispose,
@@ -254,7 +318,20 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     }
   }
 
+  function footerToneColor(
+    tone: FooterSegmentTone,
+  ): "text" | "accent" | "warning" | "error" | "success" | "muted" {
+    if (tone === "muted") return "muted";
+    const color = toneColor(tone);
+    return color === "text" ? "muted" : color;
+  }
+
   function updateCentralStatus(ctx: ExtensionContext): void {
+    if (footerInstalled) {
+      ctx.ui.setStatus(CENTRAL_STATUS_KEY, undefined);
+      footerTui?.requestRender();
+      return;
+    }
     const state = buildVisualState(ctx);
     const git = getGitInfo(ctx.cwd);
     const summary = formatFooterLine(ctx.cwd, state, git?.branch);
@@ -296,17 +373,15 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
 
     const detailLines = [
       `Modus: ${modeLabel}`,
-      `Model: ${ctx.model?.id ?? "kein Modell aktiv"}`,
-      `Provider: ${ctx.model?.provider ?? "-"}`,
+      `Modell: ${ctx.model?.id ?? "kein Modell aktiv"}`,
+      `Anbieter: ${ctx.model?.provider ?? "-"}`,
       ...(isFreeModel !== undefined
         ? [`Kosten: ${isFreeModel ? "kostenlos" : "kostenpflichtig"}`]
         : []),
-      `Thinking: ${pi.getThinkingLevel()}`,
-      ...(plan.planExists
-        ? [`Plan: vorhanden`, `Todos: ${todosLine}`]
-        : []),
+      `Denken: ${pi.getThinkingLevel()}`,
+      ...(plan.planExists ? [`Plan: vorhanden`, `Todos: ${todosLine}`] : []),
       `Git: ${gitLine}`,
-      `Permission: ${PERMISSION_LEVEL_LABEL[permissionLevel]}`,
+      `Berechtigung: ${PERMISSION_LEVEL_LABEL[permissionLevel]}`,
       ...(plan.planExists
         ? [`Phase: ${WORKFLOW_PHASE_LABEL[plan.phase]}`]
         : []),
@@ -341,21 +416,21 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
 
     const plainText = plan.planExists
       ? [
-        "STATUS",
-        formatModePhase({ mode: workflowMode, phase: plan.phase }),
-        "",
-        ...detailLines,
-        "",
-        "Nächster Schritt",
-        nextStepFor(plan.phase, true),
-        ...(warning ? ["", warning] : []),
-      ].join("\n")
+          "STATUS",
+          formatModePhase({ mode: workflowMode, phase: plan.phase }),
+          "",
+          ...detailLines,
+          "",
+          "Nächster Schritt",
+          nextStepFor(plan.phase, true),
+          ...(warning ? ["", warning] : []),
+        ].join("\n")
       : [
-        formatEmptyPlanState(),
-        "",
-        ...detailLines,
-        ...(warning ? ["", warning] : []),
-      ].join("\n");
+          formatEmptyPlanState(),
+          "",
+          ...detailLines,
+          ...(warning ? ["", warning] : []),
+        ].join("\n");
 
     notifyBox(ctx, {
       title: "STATUS",
@@ -364,10 +439,10 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
         : "KEIN AKTIVER PLAN",
       status: warning
         ? {
-          symbol: glyphsFor(resolveRenderProfile({ mode: ctx.mode })).status
-            .warning,
-          label: PERMISSION_LEVEL_LABEL[permissionLevel],
-        }
+            symbol: glyphsFor(resolveRenderProfile({ mode: ctx.mode })).status
+              .warning,
+            label: PERMISSION_LEVEL_LABEL[permissionLevel],
+          }
         : undefined,
       sections,
       plainText,
@@ -416,7 +491,7 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     handler: async (ctx) => {
       const selected = await runMenu(
         ctx,
-        "Thinking",
+        "Denken",
         buildThinkingMenu(pi.getThinkingLevel()),
         {
           fallbackPrompt: "Thinking-Level wählen",
@@ -444,23 +519,22 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
         .sort((a, b) => a.localeCompare(b, "de"));
 
       const shortcutLines = Object.values(SHORTCUTS).map(
-        (shortcut) =>
-          `${shortcut.label.padEnd(14)} ${shortcut.description}`,
+        (shortcut) => `${shortcut.label.padEnd(14)} ${shortcut.description}`,
       );
       const commandLines = [...commands, ...NATIVE_HELP_COMMANDS];
       const text = [
-        "Shortcuts:",
+        "Tastenkürzel:",
         ...shortcutLines.map((line) => `  ${line}`),
         "",
-        "Commands:",
+        "Befehle:",
         ...commandLines,
       ].join("\n");
 
       notifyBox(ctx, {
         title: "Hilfe",
         sections: [
-          { title: "Shortcuts", lines: shortcutLines },
-          { title: "Commands", lines: commandLines },
+          { title: "Tastenkürzel", lines: shortcutLines },
+          { title: "Befehle", lines: commandLines },
         ],
         plainText: text,
         level: "info",
@@ -468,47 +542,121 @@ export default function uxStatusExtension(pi: ExtensionAPI): void {
     },
   });
 
-  const DEFAULT_THINKING_LABEL = "Denkt nach…";
-  const MAX_THINKING_EXCERPT_LENGTH = 80;
-  let lastThinkingLabel = DEFAULT_THINKING_LABEL;
+  // #60: grobe, zeitbasierte Zustände statt Rohtext-Ausschnitten des
+  // kumulativen Thinking-Blocks — vermeidet die vorherige Flut fast
+  // identischer Denknotizen bei dicht aufeinanderfolgenden thinking_delta.
+  let thinkingState: ThinkingUiState = "idle";
+  let thinkingStartedAt = 0;
+  let thinkingLastRenderedAt = 0;
+  let thinkingDebug = false;
+  let thinkingCounters: ThinkingDebugCounters = {
+    received: 0,
+    rendered: 0,
+    suppressed: 0,
+  };
 
-  function buildThinkingLabel(thinking: string): string {
-    const cleaned = thinking.replace(/\s+/g, " ").trim();
-    if (!cleaned) return DEFAULT_THINKING_LABEL;
-    const excerpt =
-      cleaned.length > MAX_THINKING_EXCERPT_LENGTH
-        ? `${cleaned.slice(0, MAX_THINKING_EXCERPT_LENGTH - 1)}…`
-        : cleaned;
-    return `Denknotiz: ${excerpt}`;
+  function renderThinkingState(
+    ctx: ExtensionContext,
+    next: ThinkingUiState,
+    now: number,
+    immediate: boolean,
+  ): void {
+    if (next === thinkingState && !immediate) return;
+    if (!shouldRenderThinkingUpdate(now, thinkingLastRenderedAt, immediate)) {
+      if (thinkingDebug) thinkingCounters.suppressed++;
+      return;
+    }
+    thinkingState = next;
+    thinkingLastRenderedAt = now;
+    if (thinkingDebug) thinkingCounters.rendered++;
+    ctx.ui.setHiddenThinkingLabel(
+      next === "idle" ? undefined : THINKING_STATE_LABEL[next],
+    );
+  }
+
+  function resetThinkingState(ctx: ExtensionContext): void {
+    renderThinkingState(ctx, "idle", Date.now(), true);
   }
 
   pi.on("session_start", async (_event, ctx) => {
     activeCtx = ctx;
+    footerMode = loadUiConfig().footer;
     installCentralChrome(ctx);
     updateCentralStatus(ctx);
-    lastThinkingLabel = DEFAULT_THINKING_LABEL;
-    ctx.ui.setHiddenThinkingLabel(lastThinkingLabel);
+    resetThinkingState(ctx);
   });
 
   pi.on("session_shutdown", async () => {
     activeCtx = undefined;
+    footerTui = undefined;
+    footerInstalled = false;
   });
 
   pi.on("message_update", async (event, ctx) => {
     const ame = event.assistantMessageEvent;
+    const now = Date.now();
     if (ame.type === "thinking_start") {
-      lastThinkingLabel = DEFAULT_THINKING_LABEL;
-      ctx.ui.setHiddenThinkingLabel(lastThinkingLabel);
+      thinkingStartedAt = now;
+      renderThinkingState(ctx, "thinking", now, true);
       return;
     }
-    if (ame.type !== "thinking_delta") return;
+    if (ame.type === "thinking_delta") {
+      if (thinkingDebug) thinkingCounters.received++;
+      if (thinkingState === "idle") return;
+      renderThinkingState(
+        ctx,
+        timeBasedThinkingState(now - thinkingStartedAt),
+        now,
+        false,
+      );
+      return;
+    }
+    if (ame.type === "toolcall_start") {
+      if (thinkingState === "idle") return;
+      renderThinkingState(ctx, "inspecting", now, false);
+      return;
+    }
+    if (ame.type === "thinking_end") {
+      renderThinkingState(ctx, "preparing-response", now, true);
+      return;
+    }
+    if (ame.type === "error") {
+      resetThinkingState(ctx);
+      return;
+    }
+  });
 
-    const block = ame.partial.content[ame.contentIndex];
-    if (!block || block.type !== "thinking") return;
+  pi.on("message_end", async (_event, ctx) => {
+    resetThinkingState(ctx);
+  });
 
-    const label = buildThinkingLabel(block.thinking);
-    if (label === lastThinkingLabel) return;
-    lastThinkingLabel = label;
-    ctx.ui.setHiddenThinkingLabel(label);
+  pi.registerCommand("thinking-debug", {
+    description:
+      "Thinking-Anzeige-Debug: on | off | zeigt Zähler (received/rendered/suppressed)",
+    handler: async (args, ctx) => {
+      const sub = args.trim().toLowerCase();
+      if (sub === "on") {
+        thinkingDebug = true;
+        thinkingCounters = { received: 0, rendered: 0, suppressed: 0 };
+        ctx.ui.notify("Thinking-Debug an.", "info");
+        return;
+      }
+      if (sub === "off") {
+        thinkingDebug = false;
+        ctx.ui.notify("Thinking-Debug aus.", "info");
+        return;
+      }
+      if (!thinkingDebug) {
+        ctx.ui.notify(
+          "Thinking-Debug ist aus. Nutze: /thinking-debug on|off",
+          "warning",
+        );
+        return;
+      }
+      ctx.ui.notify(
+        `Thinking-Debug: received=${thinkingCounters.received} rendered=${thinkingCounters.rendered} suppressed=${thinkingCounters.suppressed}`,
+        "info",
+      );
+    },
   });
 }

@@ -68,12 +68,13 @@ already-active mode changes nothing. The session start value still comes from
 `settings.json` → `defaultThinkingLevel`.
 
 **Subagent reminders.** Every injected mode/phase prompt (`SIMPLE_PLAN_PROMPT`,
-`detailed_plan`, `executing`, `reviewing`, `deciding`) now includes a short
-reminder to use the `subagent` tool proactively when it fits, naming the
-agent(s) most relevant to that phase (e.g. `scout`/`architect` while planning,
-`worker`/`reviewer`/`security-auditor`/`test-runner` while executing). This
-does not duplicate the full delegation rule — it points back to `AGENTS.md` →
-"Subagenten-Delegation", which remains the single source of truth.
+`detailed_plan`, `executing`, `reviewing`, `deciding`) includes a short,
+generic pointer to use the `subagent` tool when it fits the current step,
+without naming individual agents or repeating delegation criteria (#55/#56)
+— it points back to `AGENTS.md` → "Subagenten-Delegation", which remains the
+single source of truth for which agent to use and when. The two "executing"
+phase injections (`before_agent_start` and `executePlan()`) share one string
+constant (`SUBAGENT_EXECUTING_REMINDER`) so they can't drift apart again.
 
 ## `/plan` plan assistant
 

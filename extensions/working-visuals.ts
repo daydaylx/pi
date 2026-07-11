@@ -16,6 +16,7 @@ import {
   resolveRenderProfile,
   type RenderProfile,
 } from "./shared/render-profile.ts";
+import { loadUiConfig } from "./shared/ui-config.ts";
 
 function framesForProfile(profile: RenderProfile, theme: {
   fg(color: string, text: string): string;
@@ -39,6 +40,7 @@ export default function workingVisualsExtension(pi: ExtensionAPI): void {
     if (ctx.mode !== "tui") return;
     const theme = ctx.ui.theme;
     const profile = resolveRenderProfile({ mode: ctx.mode });
+    if (loadUiConfig().reducedMotion) profile.animations = false;
     const frames = framesForProfile(profile, theme);
     if (frames.length === 0) {
       ctx.ui.setWorkingIndicator({ frames: [] });
