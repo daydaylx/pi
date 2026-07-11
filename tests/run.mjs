@@ -1271,6 +1271,24 @@ assert(
         notified[0].level === "info",
         "/subagent-doctor reports info level when agents are found",
       );
+      // #64: doctor reports the env-allowlist as variable names only.
+      assert(
+        notified[0].message.includes("Environment-Allowlist") &&
+          notified[0].message.includes("PATH") &&
+          notified[0].message.includes("oracle:"),
+        "/subagent-doctor reports the base env allowlist and per-agent credential vars",
+      );
+      const secretLookingValues = [
+        "test-value-GITHUB_TOKEN",
+        "sk-ant-",
+        "sk-or-",
+      ];
+      assert(
+        secretLookingValues.every(
+          (needle) => !notified[0].message.includes(needle),
+        ),
+        "/subagent-doctor never includes env var values, only names",
+      );
     }
     {
       const notified = [];
@@ -3534,6 +3552,110 @@ assert(
       eq(probe.pathPresent, true, "#48 PATH is forwarded");
     }
     delete process.env.BOGUS_UNRELATED_VAR_48;
+
+    // ── #64: only the effective provider's credential is forwarded ──
+    process.env.PI_TEST_SCENARIO = "env-probe";
+    {
+      const probedNames = [
+        "GITHUB_TOKEN",
+        "CLOUDFLARE_API_TOKEN",
+        "DATABASE_PASSWORD",
+        "SLACK_TOKEN",
+        "OPENROUTER_API_KEY",
+        "ZAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+      ];
+      const previousValues = Object.fromEntries(
+        probedNames.map((name) => [name, process.env[name]]),
+      );
+      const previousProbeKeys = process.env.PI_TEST_ENV_PROBE_KEYS;
+      process.env.PI_TEST_ENV_PROBE_KEYS = JSON.stringify(probedNames);
+      for (const name of probedNames) {
+        process.env[name] = `test-value-${name}`;
+      }
+      try {
+        // scout is modelMode=inherit, so it takes on the main model passed
+        // via ctx.model – exactly what a real TUI turn would supply.
+        const openrouterResult = await tool.execute(
+          "e2e-env-provider-openrouter",
+          { agent: "scout", task: "probe env", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx({ model: { id: "some-model", provider: "openrouter" } }),
+        );
+        const openrouterProbe = JSON.parse(
+          openrouterResult.content[0].text,
+        ).probedPresence;
+        eq(
+          openrouterProbe.OPENROUTER_API_KEY,
+          true,
+          "#64 the openrouter agent's own credential is forwarded",
+        );
+        for (const foreign of [
+          "GITHUB_TOKEN",
+          "CLOUDFLARE_API_TOKEN",
+          "DATABASE_PASSWORD",
+          "SLACK_TOKEN",
+          "ZAI_API_KEY",
+          "ANTHROPIC_API_KEY",
+          "OPENAI_API_KEY",
+        ]) {
+          eq(
+            openrouterProbe[foreign],
+            false,
+            `#64 ${foreign} is not forwarded to an openrouter agent`,
+          );
+        }
+
+        const anthropicResult = await tool.execute(
+          "e2e-env-provider-anthropic",
+          { agent: "scout", task: "probe env", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx({ model: { id: "some-model", provider: "anthropic" } }),
+        );
+        const anthropicProbe = JSON.parse(
+          anthropicResult.content[0].text,
+        ).probedPresence;
+        eq(
+          anthropicProbe.ANTHROPIC_API_KEY,
+          true,
+          "#64 the anthropic agent's own credential is forwarded",
+        );
+        eq(
+          anthropicProbe.OPENROUTER_API_KEY,
+          false,
+          "#64 a different provider's credential is not forwarded to an anthropic agent",
+        );
+        eq(
+          anthropicProbe.GITHUB_TOKEN,
+          false,
+          "#64 GITHUB_TOKEN is not forwarded regardless of provider",
+        );
+
+        // Normal runtime variables stay unaffected by the tighter allowlist.
+        const runtimeResult = await tool.execute(
+          "e2e-env-provider-runtime",
+          { agent: "scout", task: "probe env", agentScope: "user" },
+          undefined,
+          undefined,
+          makeCtx(),
+        );
+        const runtimeProbe = JSON.parse(runtimeResult.content[0].text);
+        eq(runtimeProbe.pathPresent, true, "#64 PATH still works normally");
+      } finally {
+        if (previousProbeKeys === undefined) {
+          delete process.env.PI_TEST_ENV_PROBE_KEYS;
+        } else {
+          process.env.PI_TEST_ENV_PROBE_KEYS = previousProbeKeys;
+        }
+        for (const name of probedNames) {
+          if (previousValues[name] === undefined) delete process.env[name];
+          else process.env[name] = previousValues[name];
+        }
+      }
+    }
 
     // ── Chain stops and does not proceed on step failure (#38) ──
     process.env.PI_TEST_SCENARIO = "error";

@@ -213,16 +213,27 @@ function emit(scenarioName) {
   }
 
   if (scenarioName === "env-probe") {
-    // #48: report which env vars the child actually received, so tests can
-    // assert the parent env is whitelisted (no unrelated leak) while
-    // essentials + PI_SUBAGENT* are present.
+    // #48/#64: report which env vars the child actually received, so tests
+    // can assert the parent env is whitelisted (no unrelated leak, no
+    // foreign provider credential) while essentials + PI_SUBAGENT* are
+    // present. PI_TEST_ENV_PROBE_KEYS (JSON array of names) lets tests probe
+    // arbitrary variable names (e.g. specific credential env vars) without
+    // hardcoding them here.
     const env = process.env;
+    let probedPresence = {};
+    if (env.PI_TEST_ENV_PROBE_KEYS) {
+      const keys = JSON.parse(env.PI_TEST_ENV_PROBE_KEYS);
+      probedPresence = Object.fromEntries(
+        keys.map((key) => [key, key in env]),
+      );
+    }
     const text = JSON.stringify({
       bogusPresent: "BOGUS_UNRELATED_VAR_48" in env,
       piSubagentPresent: env.PI_SUBAGENT === "1",
       permPresent: env.PI_SUBAGENT_PERMISSION_LEVEL != null,
       writePresent: env.PI_SUBAGENT_WRITE_OVERRIDE != null,
       pathPresent: "PATH" in env,
+      probedPresence,
     });
     process.stdout.write(
       JSON.stringify({

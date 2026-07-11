@@ -480,16 +480,34 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 // `resolvedCwd` is the already-validated, absolute spawn cwd (validateCwd's
 // result), never the parent's own $PWD. On platforms without meaningful PWD
 // semantics (Windows) the variable is left unset rather than forced.
-function childEnv(agent: AgentConfig, resolvedCwd: string): NodeJS.ProcessEnv {
-  // #48: only forward a whitelisted subset of the parent environment to the
-  // subagent child. This keeps unrelated secrets/tokens the parent process
-  // happened to carry (e.g. third-party app credentials) from leaking into
-  // every spawned subagent – including read-only scouts. Essentials needed to
-  // run, pi config, model-provider auth patterns and common dev-tooling/proxy
-  // vars are still passed through.
+//
+// #64: only a fixed base allowlist plus, at most, the single credential
+// variable matching `resolvedModel`'s own provider is forwarded. Unrelated
+// secrets/tokens the parent process happens to carry (e.g. third-party app
+// credentials, other providers' API keys) never reach the child – including
+// read-only scouts.
+function childEnv(
+  agent: AgentConfig,
+  resolvedCwd: string,
+  resolvedModel: string | undefined,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of Object.keys(process.env)) {
     if (isChildEnvVarAllowed(key)) env[key] = process.env[key];
+  }
+  const credentialVar = resolveProviderCredentialEnvVar(resolvedModel);
+  if (credentialVar && process.env[credentialVar] !== undefined) {
+    env[credentialVar] = process.env[credentialVar];
+  }
+  // #40: PI_TEST_SUBAGENT_BINARY redirects the spawned process to the test
+  // fixture binary instead of a real `pi`/provider. Only while that override
+  // is active, also forward PI_TEST_* harness variables (e.g. PI_TEST_SCENARIO)
+  // so the fixture can be steered – these never carry real credentials and
+  // this never activates outside the test suite.
+  if (process.env.PI_TEST_SUBAGENT_BINARY) {
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("PI_TEST_")) env[key] = process.env[key];
+    }
   }
   if (process.platform !== "win32") {
     env.PWD = resolvedCwd;
@@ -507,7 +525,13 @@ function childEnv(agent: AgentConfig, resolvedCwd: string): NodeJS.ProcessEnv {
   return env;
 }
 
+// #64: a fixed, minimal set of exact variable names – no suffix or prefix
+// wildcards. Every name here is a harmless OS/runtime, terminal/locale or
+// proxy setting; none of them can carry a credential. PWD is deliberately
+// excluded – #65 sets it explicitly from the validated spawn cwd, never
+// copied from the parent.
 const CHILD_ENV_ESSENTIALS = new Set([
+  // OS / runtime
   "PATH",
   "HOME",
   "USER",
@@ -515,25 +539,26 @@ const CHILD_ENV_ESSENTIALS = new Set([
   "SHELL",
   "TMPDIR",
   "TMP",
+  "EDITOR",
+  "VISUAL",
+  "HOSTNAME",
+  // Terminal / locale
   "LANG",
   "LANGUAGE",
   "TERM",
   "TERM_PROGRAM",
-  "HOSTNAME",
-  "EDITOR",
-  "VISUAL",
   "NO_COLOR",
   "FORCE_COLOR",
   "CLICOLOR",
   "CLICOLOR_FORCE",
-]);
-const CHILD_ENV_PREFIXES = [
-  "PI_",
-  "GIT_",
-  "NPM_",
-  "NODE_",
-  "XDG_",
-  "LC_",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LC_COLLATE",
+  "LC_MESSAGES",
+  "LC_MONETARY",
+  "LC_NUMERIC",
+  "LC_TIME",
+  // Proxy
   "HTTP_PROXY",
   "HTTPS_PROXY",
   "ALL_PROXY",
@@ -542,24 +567,41 @@ const CHILD_ENV_PREFIXES = [
   "https_proxy",
   "all_proxy",
   "no_proxy",
-];
-// Matched case-insensitively against the uppercased key name.
-const CHILD_ENV_SUFFIXES = [
-  "_API_KEY",
-  "_TOKEN",
-  "_SECRET",
-  "_PASSWORD",
-  "_CREDENTIAL",
-  "_CREDENTIALS",
-  "_BASE_URL",
-  "_ENDPOINT",
-];
+  // Agent discovery (#44) – the only pi-prefixed variable a child needs;
+  // PI_SUBAGENT/PI_SUBAGENT_* are set explicitly below, not inherited.
+  "PI_CODING_AGENT_DIR",
+]);
+
+// #64: known provider id -> credential env var name. Providers not listed
+// here fall back to a deterministic <PROVIDER>_API_KEY derivation (see
+// resolveProviderCredentialEnvVar) instead of matching arbitrary variable
+// suffixes – a subagent only ever receives the single credential matching
+// its own resolved provider, never another provider's.
+const PROVIDER_CREDENTIAL_ENV_VARS: Record<string, string> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  zai: "ZAI_API_KEY",
+};
 
 function isChildEnvVarAllowed(key: string): boolean {
-  if (CHILD_ENV_ESSENTIALS.has(key)) return true;
-  if (CHILD_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) return true;
-  const upper = key.toUpperCase();
-  return CHILD_ENV_SUFFIXES.some((suffix) => upper.endsWith(suffix));
+  return CHILD_ENV_ESSENTIALS.has(key);
+}
+
+// #64: derives the exact credential env var name for the provider a given
+// `provider/model` id resolves to. Returns undefined when no model was
+// resolved for this attempt (no credential is forwarded in that case).
+function resolveProviderCredentialEnvVar(
+  resolvedModel: string | undefined,
+): string | undefined {
+  if (!resolvedModel) return undefined;
+  const provider = resolvedModel.split("/")[0];
+  if (!provider) return undefined;
+  if (provider in PROVIDER_CREDENTIAL_ENV_VARS) {
+    return PROVIDER_CREDENTIAL_ENV_VARS[provider];
+  }
+  const normalized = provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  return normalized ? `${normalized}_API_KEY` : undefined;
 }
 
 async function runSingleAgent(
@@ -766,7 +808,7 @@ async function runSingleAgent(
         current.spawnCwd = cwdCheck.cwd;
         const proc = spawn(invocation.command, invocation.args, {
           cwd: cwdCheck.cwd,
-          env: childEnv(agent, cwdCheck.cwd),
+          env: childEnv(agent, cwdCheck.cwd, model),
           shell: false,
           stdio: ["ignore", "pipe", "pipe"],
         });
@@ -1497,6 +1539,38 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
             "- PI_CODING_AGENT_DIR auf das Pi-Agent-Konfigurationsverzeichnis setzen, falls dieses Repo nicht ~/.pi/agent ist.",
             '- Für projektlokale Agenten `.pi/agents/*.md` im Projekt anlegen und `agentScope: "project"` oder `"both"` verwenden.',
             "- /subagent-list ausführen; bei leerer Liste /tools prüfen, ob das Tool `subagent` sichtbar ist.",
+          );
+        }
+
+        // #64: env-allowlist diagnostics – variable NAMES only, never values.
+        lines.push(
+          "",
+          "Environment-Allowlist (Kind-Prozess):",
+          `Feste Basisliste: ${Array.from(CHILD_ENV_ESSENTIALS).join(", ")}`,
+          "Zusätzlich je Lauf: genau ein Provider-Credential, abgeleitet aus dem effektiv aufgelösten Modell (nie mehrere, nie andere Provider).",
+        );
+        const agentsWithFixedModel = effectiveDiscovery.agents.filter(
+          (a) => a.modelMode === "override" && a.model,
+        );
+        if (agentsWithFixedModel.length > 0) {
+          lines.push(
+            "",
+            "Provider-Credential je Agent (fester Modell-Override):",
+            ...agentsWithFixedModel.map((a) => {
+              const credVar = resolveProviderCredentialEnvVar(a.model);
+              const present =
+                credVar && process.env[credVar] !== undefined ? "ja" : "nein";
+              return `- ${a.name}: ${a.model} → ${credVar ?? "(kein Provider erkannt)"} (im Parent vorhanden: ${present})`;
+            }),
+          );
+        }
+        const agentsWithInheritedModel = effectiveDiscovery.agents.filter(
+          (a) => a.modelMode === "inherit",
+        );
+        if (agentsWithInheritedModel.length > 0) {
+          lines.push(
+            "",
+            `Agenten mit Modell-Vererbung (${agentsWithInheritedModel.map((a) => a.name).join(", ")}): Credential hängt vom beim Start aktiven Hauptmodell ab, hier nicht statisch bestimmbar.`,
           );
         }
 
