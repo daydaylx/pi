@@ -94,32 +94,19 @@ import {
   isWriteCapable,
 } from "./agents.ts";
 import {
-  getWidgetState,
-  onWidgetChange,
-  renderWidget,
-  resetWidgetState,
-  setLastRun,
-  setModel,
-  setNow,
-  setRisk,
-  setSubagentAvailability,
-  setThinking,
-  setWidgetMode,
-  STATUS_LABEL,
-  STATUS_SYMBOL,
-  upsertSubagent,
-} from "./widget.ts";
-import { colorizeStatusLines } from "../shared/visual-system.ts";
-import { loadUiConfig } from "../shared/ui-config.ts";
+  SubagentRunLifecycle,
+  SubagentRuntimeStatus,
+  SUBAGENT_STATUS_LABEL,
+  SUBAGENT_STATUS_SYMBOL,
+  type SubagentRuntimeEntry,
+} from "./runtime-status.ts";
+import { ZENTUI_STATUS_KEYS, setTuiStatus } from "../shared/workflow-status.ts";
 
 const MAX_PARALLEL_TASKS = 6;
 const MAX_CONCURRENCY = 3;
 const PER_TASK_OUTPUT_CAP = 40 * 1024;
 const CHAIN_HANDOFF_CAP = 32 * 1024; // #38: max bytes passed to next agent in chain
 const STDERR_CAP = 128 * 1024; // #41: max stderr bytes before truncation
-
-// Anzahl aktuell laufender Subagenten-Prozesse – steuert nur die Widget-Anzeige.
-let activeRuns = 0;
 
 interface UsageStats {
   input: number;
@@ -280,6 +267,11 @@ interface SubagentDetails {
 }
 
 type OnUpdate = (partial: AgentToolResult<SubagentDetails>) => void;
+
+interface RuntimeStatusSession {
+  isCurrent(): boolean;
+  update(entry: SubagentRuntimeEntry): void;
+}
 
 function getFinalOutput(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -452,10 +444,15 @@ async function writePromptToTempFile(
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
   const safeName = agentName.replace(/[^\w.-]+/g, "_");
   const filePath = path.join(dir, `prompt-${safeName}.md`);
-  await fs.promises.writeFile(filePath, prompt, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+  try {
+    await fs.promises.writeFile(filePath, prompt, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  } catch (error) {
+    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
   return { dir, filePath };
 }
 
@@ -569,9 +566,25 @@ async function runSingleAgent(
   // #FIX-provider: used to qualify bare frontmatter model ids (override /
   // fallback) to `provider/model` so the child resolves the right provider.
   modelRegistry: ModelResolver | undefined,
+  runtimeStatus: RuntimeStatusSession | undefined,
+  lifecycle: SubagentRunLifecycle | undefined,
 ): Promise<SingleResult> {
+  const runId = `${agentName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const updateRuntime = (entry: SubagentRuntimeEntry): void => {
+    if (!runtimeStatus?.isCurrent()) return;
+    runtimeStatus.update(entry);
+  };
   const agent = agents.find((item) => item.name === agentName);
   if (!agent) {
+    updateRuntime({
+      id: runId,
+      label: agentName,
+      status: "failed",
+      currentTask: task,
+      lastAction: "unbekannter Agent",
+      errors: 1,
+      completedAt: Date.now(),
+    });
     return {
       agent: agentName,
       agentSource: "unknown",
@@ -647,24 +660,28 @@ async function runSingleAgent(
     current.stopReason = "error";
     current.errorMessage =
       "sandboxMode=git-worktree is configured, but git-worktree sandbox execution is not implemented yet; use sandboxMode=none or move this to the follow-up sandbox plan.";
+    updateRuntime({
+      id: runId,
+      label: agent.name,
+      status: "blocked",
+      currentTask: task,
+      lastAction: current.errorMessage,
+      errors: 1,
+      completedAt: Date.now(),
+    });
     return current;
   }
 
-  // Widget: mark subagent as running (#31, #42: unique run ID)
-  const runId = `${agent.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  // Runtime state is render-neutral; the caller publishes only its compact
+  // Zentui summary and guards it against session changes.
   const startedAt = Date.now();
-  activeRuns++;
-  // Beim Start eines neuen Batches verfällt die Risk-Anzeige des vorherigen.
-  if (activeRuns === 1) setRisk(undefined);
-  upsertSubagent({
+  updateRuntime({
     id: runId,
     label: agent.name,
     status: "running",
     currentTask: task,
     startedAt,
-    lastUpdate: Date.now(),
   });
-  setNow(`Subagent ${agent.name} läuft`);
 
   const emitUpdate = () => {
     onUpdate?.({
@@ -692,6 +709,13 @@ async function runSingleAgent(
     taskTmpDir = taskTmp.dir;
     taskTmpPath = taskTmp.filePath;
 
+    if (runtimeStatus && !runtimeStatus.isCurrent()) {
+      current.exitCode = 1;
+      current.stopReason = "aborted";
+      current.errorMessage = "Subagent was canceled because its session changed.";
+      return current;
+    }
+
     const resetForAttempt = (model: string | undefined) => {
       current.exitCode = -1;
       current.messages = [];
@@ -714,6 +738,12 @@ async function runSingleAgent(
 
     const runAttempt = async (model: string | undefined) => {
       resetForAttempt(model);
+      if (runtimeStatus && !runtimeStatus.isCurrent()) {
+        current.exitCode = 1;
+        current.stopReason = "aborted";
+        current.errorMessage = "Subagent was canceled because its session changed.";
+        return;
+      }
       const args = ["--mode", "json", "-p", "--no-session"];
       if (model) args.push("--model", model);
       // #59: resolved per attempt (not once) so a fallback model switch
@@ -744,6 +774,7 @@ async function runSingleAgent(
       let abortHandler: (() => void) | undefined; // #37: for cleanup after exit
       let timeout: NodeJS.Timeout | undefined;
       let killEscalation: NodeJS.Timeout | undefined;
+      let unregisterLifecycle: (() => void) | undefined;
       const exitCode = await new Promise<number>((resolve) => {
         const invocation = getPiInvocation(args);
         const cwdCheck = validateCwd(defaultCwd, cwd);
@@ -761,13 +792,17 @@ async function runSingleAgent(
         // #37: exited flag for reliable kill logic (proc.killed is set on first signal)
         let exited = false;
 
+        let settled = false;
         const finish = (code: number) => {
+          if (settled) return;
+          settled = true;
           exited = true;
           if (timeout) clearTimeout(timeout);
           if (killEscalation) clearTimeout(killEscalation);
           if (abortHandler && signal) {
             signal.removeEventListener("abort", abortHandler);
           }
+          unregisterLifecycle?.();
           resolve(code);
         };
 
@@ -809,7 +844,7 @@ async function runSingleAgent(
               status: "running",
               startedAt: Date.now(),
             });
-            upsertSubagent({
+            updateRuntime({
               id: runId,
               label: agent.name,
               status: "running",
@@ -830,7 +865,7 @@ async function runSingleAgent(
               args: (event.args ?? {}) as Record<string, unknown>,
               status: "running",
             });
-            upsertSubagent({
+            updateRuntime({
               id: runId,
               label: agent.name,
               status: "running",
@@ -854,7 +889,7 @@ async function runSingleAgent(
               completedAt: Date.now(),
               isError,
             });
-            upsertSubagent({
+            updateRuntime({
               id: runId,
               label: agent.name,
               status: "running",
@@ -905,15 +940,30 @@ async function runSingleAgent(
           finish(1);
         });
 
+        let terminationRequested = false;
         const killProc = (timedOut: boolean) => {
+          if (exited || terminationRequested) return;
+          terminationRequested = true;
           wasAborted = true;
           if (timedOut) wasTimeout = true;
-          proc.kill("SIGTERM");
+          try {
+            proc.kill("SIGTERM");
+          } catch {
+            finish(1);
+            return;
+          }
           killEscalation = setTimeout(() => {
-            if (!exited) proc.kill("SIGKILL");
+            if (!exited) {
+              try {
+                proc.kill("SIGKILL");
+              } catch {
+                // The close/error handler performs the remaining cleanup.
+              }
+            }
           }, 5000);
           killEscalation.unref?.();
         };
+        unregisterLifecycle = lifecycle?.register(() => killProc(false));
         timeout = setTimeout(() => killProc(true), agent.timeoutMs);
         if (signal) {
           if (signal.aborted) killProc(false);
@@ -975,8 +1025,7 @@ async function runSingleAgent(
       break;
     }
 
-    // Widget: update subagent status on completion (#31, #42)
-    upsertSubagent({
+    updateRuntime({
       id: runId,
       label: agent.name,
       status: isFailed(current) ? "failed" : "completed",
@@ -993,14 +1042,24 @@ async function runSingleAgent(
       lastUpdate: Date.now(),
       risk: isFailed(current) ? current.errorMessage : undefined,
     });
-    if (isFailed(current)) {
-      setRisk(current.errorMessage ?? "fehlgeschlagen");
-    }
-
+    return current;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    current.exitCode = 1;
+    current.stopReason = "error";
+    current.errorMessage = message;
+    updateRuntime({
+      id: runId,
+      label: agent.name,
+      status: "failed",
+      currentTask: task,
+      lastAction: message,
+      errors: 1,
+      completedAt: Date.now(),
+      risk: message,
+    });
     return current;
   } finally {
-    activeRuns--;
-    if (activeRuns <= 0) setNow(undefined);
     if (tmpPromptPath) {
       try {
         fs.unlinkSync(tmpPromptPath);
@@ -1132,10 +1191,6 @@ function formatSkipped(
   return skipped.map((entry) => `- ${entry.filePath}: ${entry.reason}`);
 }
 
-// #5 (UI-Redesign): kombiniert die konfigurierten Agenten mit ihrem
-// aktuellen Live-Status aus dem Widget-State (Matching über den Agentnamen,
-// da SubagentEntry.id pro Lauf eindeutig/ephemer ist, label aber dem
-// Agentnamen entspricht).
 // #58/#59: short "model: inherit|<value>, thinking: inherit|<value>" tag for
 // /subagent-list and /subagent-doctor, so the effective source (main agent
 // vs. profile override) is visible without opening the agent's .md file.
@@ -1149,14 +1204,17 @@ function formatAgentModelThinkingTag(agent: AgentConfig): string {
   return `${modelLabel}, ${thinkingLabel}`;
 }
 
-function formatAgentLiveStatusLines(agents: AgentConfig[]): string[] {
-  const live = getWidgetState().subagents;
+function formatAgentLiveStatusLines(
+  agents: AgentConfig[],
+  runtime: SubagentRuntimeStatus,
+): string[] {
+  const live = runtime.entries();
   return agents.map((agent) => {
-    const entry = Array.from(live.values()).find((e) => e.label === agent.name);
+    const entry = live.find((item) => item.label === agent.name);
     const status =
       entry === undefined
         ? "inaktiv"
-        : `${STATUS_SYMBOL[entry.status]} ${STATUS_LABEL[entry.status]}${entry.currentTask ? ` — ${entry.currentTask}` : ""}`;
+        : `${SUBAGENT_STATUS_SYMBOL[entry.status]} ${SUBAGENT_STATUS_LABEL[entry.status]}${entry.currentTask ? ` — ${entry.currentTask}` : ""}`;
     return `${agent.name} (${agent.source}, ${agent.permission}): ${agent.description}  [${formatAgentModelThinkingTag(agent)}] [${status}]`;
   });
 }
@@ -1185,59 +1243,35 @@ async function confirmProjectAgentsIfNeeded(
 
 export default function subagentsExtension(pi: ExtensionAPI): void {
   let subagentToolRegistered = false;
-  let widgetTui: { requestRender?: () => void } | undefined;
-  let widgetComponent: SimpleComponent | undefined;
+  const runtime = new SubagentRuntimeStatus();
+  const lifecycle = new SubagentRunLifecycle();
+  let sessionEpoch = 0;
 
-  function refreshWidget(): void {
-    widgetComponent?.invalidate();
-    widgetTui?.requestRender?.();
-  }
-
-  onWidgetChange(refreshWidget);
-  setSubagentAvailability(true, 0);
-
-  // ─── Widget-Installation (#30) ───
-  function installWidget(ctx: ExtensionContext): void {
-    if (ctx.mode !== "tui") return;
-    const ui = ctx.ui as typeof ctx.ui & {
-      setWidget?: (key: string, factory: unknown) => void;
+  function createRuntimeStatusSession(
+    ctx: ExtensionContext,
+  ): RuntimeStatusSession {
+    const epoch = sessionEpoch;
+    return {
+      isCurrent: () => epoch === sessionEpoch,
+      update(entry) {
+        if (epoch !== sessionEpoch) return;
+        runtime.upsert(entry);
+        setTuiStatus(
+          ctx,
+          ZENTUI_STATUS_KEYS.subagents,
+          runtime.statusValue(),
+        );
+      },
     };
-    if (typeof ui.setWidget !== "function") return;
-
-    ui.setWidget("subagent-status", (tui: unknown, theme: any) => {
-      widgetTui = tui as { requestRender?: () => void };
-      const component: SimpleComponent = {
-        render(width: number): string[] {
-          const state = getWidgetState();
-          return colorizeStatusLines(
-            renderWidget(state, width),
-            theme,
-            (line) => (line.startsWith("Denknotiz:") ? "muted" : undefined),
-          );
-        },
-        invalidate() {},
-      };
-      widgetComponent = component;
-      return component;
-    });
-    refreshWidget();
   }
 
-  // Hooks sind optional – das Tool funktioniert auch ohne Widget-Unterstützung.
   if (typeof pi.on === "function") {
     pi.on("session_start", async (_event, ctx) => {
-      resetWidgetState();
-      setWidgetMode(loadUiConfig().subagentWidget);
+      sessionEpoch += 1;
+      lifecycle.abortAll();
+      runtime.reset();
+      setTuiStatus(ctx, ZENTUI_STATUS_KEYS.subagents, undefined);
       const userDiscovery = discoverAgents(ctx.cwd, "user");
-      const allDiscovery = discoverAgents(ctx.cwd, "both");
-      setSubagentAvailability(true, allDiscovery.agents.length);
-      setModel(ctx.model?.id);
-      setThinking(
-        typeof pi.getThinkingLevel === "function"
-          ? pi.getThinkingLevel()
-          : undefined,
-      );
-      installWidget(ctx);
 
       // #44: warn early instead of silently running without subagents.
       if (ctx.mode === "tui" && userDiscovery.agents.length === 0) {
@@ -1253,81 +1287,15 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       }
     });
 
-    pi.on("session_shutdown", async () => {
-      widgetTui = undefined;
-      widgetComponent = undefined;
-      resetWidgetState();
-    });
-
-    pi.on("model_select", async (_event, ctx) => {
-      setModel(ctx.model?.id);
-    });
-
-    pi.on("thinking_level_select", async (_event) => {
-      setThinking(
-        typeof pi.getThinkingLevel === "function"
-          ? pi.getThinkingLevel()
-          : undefined,
-      );
+    pi.on("session_shutdown", async (_event, ctx) => {
+      sessionEpoch += 1;
+      lifecycle.abortAll();
+      runtime.reset();
+      setTuiStatus(ctx, ZENTUI_STATUS_KEYS.subagents, undefined);
     });
   }
 
-  // ─── /sawidget Commands (#33) ───
   if (typeof pi.registerCommand === "function") {
-    pi.registerCommand("sawidget", {
-      description:
-        "Subagenten-Widget: active-only | on | off | compact | debug",
-      handler: async (args, ctx) => {
-        const sub = args.trim().toLowerCase();
-        switch (sub) {
-          case "active-only":
-            setWidgetMode("active-only");
-            installWidget(ctx);
-            ctx.ui.notify(
-              "Subagenten-Widget nur bei Aktivität (nur diese Sitzung).",
-              "info",
-            );
-            break;
-          case "on":
-            setWidgetMode("on");
-            installWidget(ctx);
-            ctx.ui.notify(
-              "Subagenten-Widget aktiviert (nur diese Sitzung).",
-              "info",
-            );
-            break;
-          case "off":
-            setWidgetMode("off");
-            ctx.ui.notify(
-              "Subagenten-Widget deaktiviert (nur diese Sitzung).",
-              "info",
-            );
-            break;
-          case "compact":
-            setWidgetMode("compact");
-            installWidget(ctx);
-            ctx.ui.notify(
-              "Subagenten-Widget kompakt (maximal 2 Zeilen, nur diese Sitzung).",
-              "info",
-            );
-            break;
-          case "debug":
-            setWidgetMode("debug");
-            installWidget(ctx);
-            ctx.ui.notify(
-              "Subagenten-Widget im Debug-Modus (nur diese Sitzung).",
-              "info",
-            );
-            break;
-          default:
-            ctx.ui.notify(
-              "Nutzung: /sawidget active-only | on | off | compact | debug",
-              "info",
-            );
-        }
-      },
-    });
-
     // ─── /subagent-doctor Diagnose-Command (#44) ───
     pi.registerCommand("subagent-doctor", {
       description:
@@ -1523,7 +1491,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
           "",
           discovery.agents.length === 0
             ? formatAgentList(discovery.agents)
-            : formatAgentLiveStatusLines(discovery.agents).join("\n"),
+            : formatAgentLiveStatusLines(discovery.agents, runtime).join("\n"),
         ];
         if (discovery.skipped.length > 0) {
           lines.push(
@@ -1647,10 +1615,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       }
       const discovery = discoverAgents(ctx.cwd, agentScope);
       const agents = discovery.agents;
-      setSubagentAvailability(
-        true,
-        discoverAgents(ctx.cwd, "both").agents.length,
-      );
+      const runtimeStatus = createRuntimeStatusSession(ctx);
       // #35: confirmProjectAgents is always enforced – no tool-parameter override
       const confirmProjectAgents = true;
 
@@ -1741,7 +1706,6 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
       }
 
       if (hasList) {
-        setLastRun("subagent", "list");
         return {
           content: [
             {
@@ -1900,10 +1864,11 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
             mainModel,
             mainThinking,
             modelRegistry,
+            runtimeStatus,
+            lifecycle,
           );
           results.push(result);
           if (isFailed(result)) {
-            setLastRun(step.agent, "chain");
             return {
               content: [
                 {
@@ -1928,7 +1893,6 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
             .filter(Boolean)
             .join("\n");
         }
-        setLastRun(results.map((result) => result.agent).join("→"), "chain");
         return {
           content: [
             { type: "text", text: resultOutput(results[results.length - 1]) },
@@ -2006,6 +1970,8 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
               mainModel,
               mainThinking,
               modelRegistry,
+              runtimeStatus,
+              lifecycle,
             );
             placeholders[index] = result;
             emitParallelUpdate();
@@ -2021,7 +1987,6 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
             return `### [${result.agent}] ${status}\n\n${truncateOutput(resultOutput(result))}`;
           })
           .join("\n\n---\n\n");
-        setLastRun(results.map((result) => result.agent).join("+"), "parallel");
         return {
           content: [
             {
@@ -2049,8 +2014,9 @@ To avoid this prompt, add an \`allowedPaths:\` scope to the agent frontmatter.`,
         mainModel,
         mainThinking,
         modelRegistry,
+        runtimeStatus,
+        lifecycle,
       );
-      setLastRun(result.agent, "single");
       return {
         content: [{ type: "text", text: resultOutput(result) }],
         details: makeDetails("single")([result]),

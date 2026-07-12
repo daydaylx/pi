@@ -48,13 +48,10 @@ import {
   type WorkflowMode,
   type WorkflowModeRequest,
   type WorkflowPhase,
+  ZENTUI_STATUS_KEYS,
+  setTuiStatus,
+  workflowStatusValue,
 } from "../shared/workflow-status.ts";
-import { createInfoBoxComponent } from "../shared/info-box.ts";
-import {
-  colorizeStatusLines,
-  formatWorkProgressLines,
-  formatWorkProgressWidgetLines,
-} from "../shared/visual-system.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import { SHORTCUTS } from "../shared/shortcuts.ts";
 import {
@@ -169,6 +166,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     return content === undefined ? [] : extractTodoItems(content);
   }
 
+  function formatPlanTodoLines(todos: TodoItem[]): string[] {
+    return todos.map(
+      (todo) => `${todo.completed ? "[x]" : "[ ]"} T${todo.step}: ${todo.text}`,
+    );
+  }
+
   function persistState(): void {
     pi.appendEntry<PersistedWorkflowState>("plan-mode", {
       mode,
@@ -206,6 +209,16 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
 
     const completedTodos = todos.filter((todo) => todo.completed).length;
+    setTuiStatus(
+      ctx,
+      ZENTUI_STATUS_KEYS.workflow,
+      workflowStatusValue(phase),
+    );
+    setTuiStatus(
+      ctx,
+      ZENTUI_STATUS_KEYS.plan,
+      todos.length > 0 ? `${completedTodos}/${todos.length}` : undefined,
+    );
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
       source: "plan",
       mode,
@@ -215,34 +228,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       totalTodos: todos.length,
     });
 
-    // Status/Footer werden zentral in ux-status.ts gerendert. Plan-mode liefert
-    // nur noch strukturierte Status-Events und das Work-Progress-Widget.
-    ctx.ui.setStatus("workflow-mode", undefined);
-    ctx.ui.setStatus("plan-todos-count", undefined);
-
-    if (phase === "executing" && todos.length > 0) {
-      const completed = todos.filter((todo) => todo.completed).length;
-      ctx.ui.setWidget("work-progress", (_tui, theme) => {
-        const todoLines = formatWorkProgressWidgetLines(todos);
-        const box = createInfoBoxComponent(
-          {
-            title: "Arbeitsfortschritt",
-            subtitle: `${completed}/${todos.length} erledigt`,
-            sections: [{ title: "Todos", lines: todoLines }],
-            tone: "accent",
-            background: "customMessageBg",
-          },
-          theme,
-        );
-        return {
-          render: box.render.bind(box),
-          invalidate: box.invalidate.bind(box),
-        };
-      });
-    } else {
-      ctx.ui.setWidget("work-progress", undefined);
-      ctx.ui.setWidget("plan-todos", undefined);
-    }
   }
 
   function invalidateReview(): void {
@@ -434,7 +419,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         );
         return;
       }
-      ctx.ui.notify(formatWorkProgressLines(todos).join("\n"), "info");
+      ctx.ui.notify(formatPlanTodoLines(todos).join("\n"), "info");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(
@@ -1712,5 +1697,10 @@ CHANGED_FILES:
       phase = "idle";
     }
     updateStatus(ctx);
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, undefined);
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.plan, undefined);
   });
 }

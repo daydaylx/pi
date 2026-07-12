@@ -34,7 +34,12 @@ import {
 } from "./skill-menu.ts";
 import {
   SKILL_LAUNCHER_REQUEST_EVENT,
+  WORKFLOW_STATUS_EVENT,
+  ZENTUI_STATUS_KEYS,
+  setTuiStatus,
   type SkillLauncherRequest,
+  type WorkflowStatusEvent,
+  workflowStatusValue,
 } from "../shared/workflow-status.ts";
 
 // Context-Marker (analog zu plan-mode/index.ts), damit der Skill-Kontext
@@ -48,10 +53,32 @@ const SUBAGENT_HINT = "siehe AGENTS.md → Subagenten-Delegation";
 interface ActiveSkill {
   skill: SkillDefinition;
   mode: SkillExecutionMode;
+  sessionEpoch: number;
 }
 
 export default function skillModeExtension(pi: ExtensionAPI): void {
   let activeSkill: ActiveSkill | null = null;
+  let sessionEpoch = 0;
+  let fallbackWorkflowStatus = "WORK";
+
+  function activateSkill(
+    skill: SkillDefinition,
+    mode: SkillExecutionMode,
+    ctx: ExtensionContext,
+    epoch = sessionEpoch,
+  ): boolean {
+    if (epoch !== sessionEpoch) return false;
+    activeSkill = { skill, mode, sessionEpoch: epoch };
+    injectSkillContext();
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, "SKILL");
+    return true;
+  }
+
+  pi.events.on(WORKFLOW_STATUS_EVENT, (event: WorkflowStatusEvent) => {
+    if (event.source === "plan") {
+      fallbackWorkflowStatus = workflowStatusValue(event.phase);
+    }
+  });
 
   // ---------------------------------------------------------------------------
   // Event-Handler: Skill-Launcher aus dem Modusmenü (Shift+Tab → Skill-Modus)
@@ -69,6 +96,7 @@ export default function skillModeExtension(pi: ExtensionAPI): void {
   // ---------------------------------------------------------------------------
 
   async function openSkillLauncher(ctx: ExtensionContext): Promise<void> {
+    const epoch = sessionEpoch;
     if (!ctx.hasUI || ctx.mode !== "tui") {
       ctx.ui.notify("Skill-Launcher benötigt den TUI-Modus.", "warning");
       return;
@@ -86,7 +114,7 @@ export default function skillModeExtension(pi: ExtensionAPI): void {
       },
     );
 
-    if (!skillId) return;
+    if (!skillId || epoch !== sessionEpoch) return;
 
     const skill = findSkill(skillId);
     if (!skill) {
@@ -105,7 +133,7 @@ export default function skillModeExtension(pi: ExtensionAPI): void {
       },
     );
 
-    if (!mode) return;
+    if (!mode || epoch !== sessionEpoch) return;
 
     // Schritt 3: Bei Work-Modus extra Bestätigung einholen
     if (mode === "work") {
@@ -118,15 +146,14 @@ export default function skillModeExtension(pi: ExtensionAPI): void {
         },
       );
 
-      if (!confirmed || confirmed === "cancel") {
+      if (!confirmed || confirmed === "cancel" || epoch !== sessionEpoch) {
         ctx.ui.notify("Skill-Ausführung abgebrochen.", "info");
         return;
       }
     }
 
     // Schritt 4: Skill aktivieren und Kontext injizieren
-    activeSkill = { skill, mode };
-    injectSkillContext(ctx);
+    if (!activateSkill(skill, mode, ctx, epoch)) return;
     ctx.ui.notify(
       `Skill "${skill.title}" aktiv (${mode}). Die nächste Nachricht startet die Ausführung.`,
       "info",
@@ -187,7 +214,7 @@ ${modeInstructions[mode]}
 Wichtig: Dieser Skill-Kontext gilt nur für diesen Turn. Danach kehrst du in den normalen Modus zurück.`;
   }
 
-  function injectSkillContext(ctx: ExtensionContext): void {
+  function injectSkillContext(): void {
     if (!activeSkill) return;
 
     const prompt = buildSkillPrompt(activeSkill.skill, activeSkill.mode);
@@ -209,6 +236,7 @@ Wichtig: Dieser Skill-Kontext gilt nur für diesen Turn. Danach kehrst du in den
   pi.registerCommand("skill", {
     description: "Skill direkt starten: /skill <id> [info|analysis|plan|work]",
     handler: async (args, ctx) => {
+      const epoch = sessionEpoch;
       const parts = args.trim().split(/\s+/).filter(Boolean);
       if (parts.length === 0) {
         // Kein Argument → Menü öffnen
@@ -251,6 +279,7 @@ Wichtig: Dieser Skill-Kontext gilt nur für diesen Turn. Danach kehrst du in den
             ctx.ui.notify("Skill-Ausführung abgebrochen.", "info");
             return;
           }
+          if (epoch !== sessionEpoch) return;
         } else {
           ctx.ui.notify(
             `Work-Modus benötigt im TUI eine Bestätigung. Nutze /skill ${skill.id} info für Read-only.`,
@@ -260,8 +289,7 @@ Wichtig: Dieser Skill-Kontext gilt nur für diesen Turn. Danach kehrst du in den
         }
       }
 
-      activeSkill = { skill, mode };
-      injectSkillContext(ctx);
+      if (!activateSkill(skill, mode, ctx, epoch)) return;
       ctx.ui.notify(
         `Skill "${skill.title}" aktiv (${mode}). Beschreibe jetzt deine Aufgabe.`,
         "info",
@@ -308,11 +336,28 @@ Wichtig: Dieser Skill-Kontext gilt nur für diesen Turn. Danach kehrst du in den
 
   pi.on("agent_end", async (_event, ctx) => {
     if (!activeSkill) return;
-    const skillTitle = activeSkill.skill.title;
+    const completedSkill = activeSkill;
+    if (completedSkill.sessionEpoch !== sessionEpoch) return;
     activeSkill = null;
+    // Clear the transient skill marker before restoring the latest plan
+    // workflow status. This prevents a stale SKILL value after reloads.
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, undefined);
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, fallbackWorkflowStatus);
     ctx.ui.notify(
-      `Skill "${skillTitle}" abgeschlossen. Normaler Modus wieder aktiv.`,
+      `Skill "${completedSkill.skill.title}" abgeschlossen. Normaler Modus wieder aktiv.`,
       "info",
     );
+  });
+
+  pi.on("session_start", async () => {
+    sessionEpoch += 1;
+    activeSkill = null;
+    fallbackWorkflowStatus = "WORK";
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    sessionEpoch += 1;
+    activeSkill = null;
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, undefined);
   });
 }

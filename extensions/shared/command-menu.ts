@@ -8,8 +8,6 @@ export type CommandMenuTarget =
   | { kind: "open-permission-menu" } // /permission
   | { kind: "open-write-menu" } // /write
   | { kind: "toggle-yolo" } // /yolo
-  | { kind: "tools-action"; action: "open" | "enable-all" | "disable-all" } // /tools /tools-all /tools-none
-  | { kind: "status" } // /status, /home
   | { kind: "open-thinking-menu" }; // /thinking
 
 export interface CommandMenuState {
@@ -76,20 +74,6 @@ export function buildCommandMenu(
       description: "YOLO-Modus für diese Sitzung ein- oder ausschalten",
       value: { kind: "toggle-yolo" },
       current: state.permissionLevel === "yolo",
-    },
-    {
-      id: "cmd-tools",
-      section: "Werkzeuge",
-      label: "/tools",
-      description: "Werkzeuge einzeln aktivieren oder deaktivieren",
-      value: { kind: "tools-action", action: "open" },
-    },
-    {
-      id: "cmd-status",
-      section: "Status",
-      label: "/status",
-      description: "Kompakten Workflow-Status anzeigen",
-      value: { kind: "status" },
     },
     {
       id: "cmd-thinking",

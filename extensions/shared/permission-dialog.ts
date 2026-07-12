@@ -1,14 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createInfoBoxComponent } from "./info-box.ts";
-import { glyphsFor, resolveRenderProfile } from "./render-profile.ts";
-import { projectLabel } from "./visual-system.ts";
+import { basename, dirname, normalize } from "node:path";
+import { homedir } from "node:os";
 import type { PolicyDecision } from "./permission-policy.ts";
-import {
-  decisionRisk,
-  riskLabel,
-  riskTone,
-  type RiskLevel,
-} from "./visual-system.ts";
 
 // `@earendil-works/pi-tui` wird bewusst dynamisch innerhalb von
 // confirmWithCustomUi() importiert, abgesichert durch eine
@@ -20,19 +13,34 @@ import {
 const MAX_PREVIEW = 140;
 const MAX_REASON_LINES = 3;
 
+type RiskLevel = "low" | "medium" | "high";
+
+function decisionRisk(decision: PolicyDecision): RiskLevel {
+  return decision.action === "block" || decision.hard ? "high" : "medium";
+}
+
+function riskLabel(risk: RiskLevel): string {
+  return { low: "niedrig", medium: "mittel", high: "hoch" }[risk];
+}
+
+function projectLabel(cwd: string): string {
+  const home = normalize(homedir());
+  const normalized = normalize(cwd);
+  if (normalized === home) return "~";
+  if (normalized.startsWith(`${home}/`)) {
+    return `~/${normalized.slice(home.length + 1)}`;
+  }
+  const parent = basename(dirname(normalized));
+  const leaf = basename(normalized);
+  return parent && parent !== "." ? `${parent}/${leaf}` : leaf;
+}
+
 /** Ein-Zeilen-Kürzung für die Fallback-Nachricht; exportiert für Wiederverwendung. */
 export function preview(value: string): string {
   const oneLine = value.replace(/\s+/g, " ").trim();
   return oneLine.length <= MAX_PREVIEW
     ? oneLine
     : `${oneLine.slice(0, MAX_PREVIEW - 1)}…`;
-}
-
-function riskToInfoBoxTone(risk: RiskLevel): "error" | "warning" | "neutral" {
-  const tone = riskTone(risk);
-  if (tone === "danger") return "error";
-  if (tone === "warning") return "warning";
-  return "neutral";
 }
 
 async function confirmWithCustomUi(
@@ -44,35 +52,18 @@ async function confirmWithCustomUi(
   if (typeof ctx.ui.custom !== "function") {
     throw new Error("Custom UI overlay not supported in this context.");
   }
-  const { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } =
-    await import("@earendil-works/pi-tui");
+  const { Key, matchesKey, wrapTextWithAnsi } = await import(
+    "@earendil-works/pi-tui"
+  );
 
   const risk = decisionRisk(decision);
-  const boxTone = riskToInfoBoxTone(risk);
-  const background = boxTone === "error" ? "toolErrorBg" : "toolPendingBg";
+  const tone = risk === "high" ? "error" : "warning";
 
   return ctx.ui.custom<boolean>(
     (tui, theme, _keybindings, done) => {
-      const profile = resolveRenderProfile({ mode: ctx.mode });
-      const glyphs = glyphsFor(profile);
-      const box = createInfoBoxComponent(
-        {
-          title: "Permission Request",
-          status: {
-            symbol: glyphs.status.warning,
-            label: `${riskLabel(risk)} (${risk})`,
-          },
-          tone: boxTone,
-          background,
-          profile,
-          tuiHelpers: { visibleWidth, truncateToWidth, wrapTextWithAnsi, matchesKey, Key },
-        },
-        theme,
-      );
-
       return {
         render(width: number): string[] {
-          const innerWidth = Math.max(1, width - 4);
+          const innerWidth = Math.max(1, width - 2);
           const subjectLabel = toolName === "bash" || !toolName
             ? "Command"
             : "Ziel";
@@ -80,40 +71,37 @@ async function confirmWithCustomUi(
             .slice(0, 4);
           const reasonWrapped = wrapTextWithAnsi(decision.reason, innerWidth)
             .slice(0, MAX_REASON_LINES);
+          const detailWrapped = wrapTextWithAnsi(
+            theme.fg(
+              "muted",
+              `Tool: ${toolName ?? "bash"} · Context: ${projectLabel(ctx.cwd)} · Risk: ${riskLabel(risk)} (${risk})`,
+            ),
+            innerWidth,
+          );
+          const actionWrapped = wrapTextWithAnsi(
+            theme.fg("accent", "[a] ALLOW ONCE   [d] DENY"),
+            innerWidth,
+          );
 
-          const sections = [
-            {
-              title: "Details",
-              lines: [
-                `Tool: ${toolName ?? "bash"}`,
-                `Context: ${projectLabel(ctx.cwd)}`,
-                `Risk: ${riskLabel(risk)} (${risk})`,
-              ],
-            },
-            {
-              title: subjectLabel,
-              lines: subjectWrapped.length > 0
-                ? subjectWrapped
-                : ["(leer)"],
-            },
-            {
-              title: "Reason",
-              lines: reasonWrapped.length > 0
-                ? reasonWrapped
-                : ["(keine Begründung)"],
-            },
-            {
-              title: "Aktion",
-              lines: ["[a] ALLOW ONCE   [d] DENY"],
-            },
+          const divider = theme.fg(tone, "─".repeat(Math.max(1, width)));
+          return [
+            divider,
+            theme.fg(tone, theme.bold("Permission Request")),
+            ...detailWrapped,
+            "",
+            theme.fg("muted", `${subjectLabel}:`),
+            ...(subjectWrapped.length > 0 ? subjectWrapped : ["(leer)"]),
+            "",
+            theme.fg("muted", "Reason:"),
+            ...(reasonWrapped.length > 0
+              ? reasonWrapped
+              : ["(keine Begründung)"]),
+            "",
+            ...actionWrapped,
+            divider,
           ];
-
-          box.setSections!(sections);
-          return box.render(width);
         },
-        invalidate() {
-          box.invalidate();
-        },
+        invalidate() {},
         handleInput(data: string): void {
           if (data === "a" || data === "A" || matchesKey(data, Key.enter)) {
             done(true);

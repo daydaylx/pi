@@ -1,12 +1,10 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createInfoBoxComponent } from "./info-box.ts";
-import { glyphsFor, resolveRenderProfile, truncatePlain } from "./render-profile.ts";
 
 // `@earendil-works/pi-tui` is intentionally imported dynamically inside
 // selectWithCustomUi() below, guarded by a `ctx.ui.custom` capability check,
 // rather than as a static top-level import here. A static value-import from
 // an npm package makes this file (and anything importing it, e.g.
-// mode-permissions.ts / ux-status.ts) unloadable by the tests/run.mjs jiti
+// mode-permissions.ts) unloadable by the tests/run.mjs jiti
 // harness in this environment (bare-specifier resolution walks up to a
 // broken /home/d/package.json and crashes). The dynamic import only ever
 // executes when a real ctx.ui.custom is available (real TUI), which the
@@ -38,6 +36,20 @@ export function moveMenuIndex(
 const MENU_MIN_WIDTH = 42;
 const MENU_MAX_WIDTH_FRACTION = 0.75;
 const MENU_MARGIN = 2;
+const MENU_GLYPHS = {
+  selected: "●",
+  unselected: "○",
+  cursor: "›",
+  ellipsis: "…",
+} as const;
+
+type MenuDensity = "compact" | "medium" | "comfortable";
+
+function menuDensity(width: number): MenuDensity {
+  if (width < 56) return "compact";
+  if (width < 88) return "medium";
+  return "comfortable";
+}
 
 function menuMargin(terminalWidth: number, terminalRows: number): number {
   return Math.min(
@@ -191,28 +203,6 @@ async function selectWithCustomUi<T>(
       });
 
       const refresh = () => tui.requestRender();
-      const initialWidth = menuOverlayWidth(
-        tui.terminal.columns,
-        title,
-        entries,
-      );
-      const initialProfile = resolveRenderProfile({
-        width: initialWidth,
-        mode: ctx.mode,
-        isTTY: true,
-      });
-      const box = createInfoBoxComponent(
-        {
-          title,
-          sections: [],
-          tone: "accent",
-          background: "customMessageBg",
-          profile: initialProfile,
-          tuiHelpers: { visibleWidth, truncateToWidth, wrapTextWithAnsi, matchesKey, Key },
-        },
-        theme,
-      );
-
       const move = (delta: number) => {
         if (selectedIndex < 0) return;
         const previous = selectedIndex;
@@ -233,9 +223,8 @@ async function selectWithCustomUi<T>(
 
       const buildMenuBlocks = (
         innerWidth: number,
-        profile: ReturnType<typeof resolveRenderProfile>,
+        density: MenuDensity,
       ): MenuBlock[] => {
-        const glyphs = glyphsFor(profile);
         const blocks: MenuBlock[] = [];
         let lastSection: string | undefined;
 
@@ -248,8 +237,10 @@ async function selectWithCustomUi<T>(
           }
 
           const selected = index === selectedIndex;
-          const marker = entry.current ? glyphs.selected : glyphs.unselected;
-          const cursor = selected ? `${glyphs.cursor} ` : "  ";
+          const marker = entry.current
+            ? MENU_GLYPHS.selected
+            : MENU_GLYPHS.unselected;
+          const cursor = selected ? `${MENU_GLYPHS.cursor} ` : "  ";
           const textColor = selected ? "accent" : "text";
           const activeLabel = entry.current ? " [aktiv]" : "";
           const titleText = `${cursor}${marker} ${entry.label}${activeLabel}`;
@@ -261,10 +252,10 @@ async function selectWithCustomUi<T>(
           const fittedTitle = truncateToWidth(
             styledTitle,
             innerWidth,
-            glyphs.ellipsis,
+            MENU_GLYPHS.ellipsis,
           );
 
-          if (profile.density === "compact") {
+          if (density === "compact") {
             const descWidth = Math.max(
               12,
               innerWidth - visibleWidth(titleText) - 3,
@@ -272,9 +263,9 @@ async function selectWithCustomUi<T>(
             const desc = truncateToWidth(
               entry.description,
               descWidth,
-              glyphs.ellipsis,
+              MENU_GLYPHS.ellipsis,
             );
-            const separator = profile.unicode ? "—" : "-";
+            const separator = "—";
             lines.push(
               descWidth >= 12 && visibleWidth(titleText) + 4 < innerWidth
                 ? `${styledTitle} ${theme.fg("muted", separator)} ${theme.fg("muted", desc)}`
@@ -285,9 +276,9 @@ async function selectWithCustomUi<T>(
           }
 
           lines.push(fittedTitle);
-          if (profile.density === "medium") {
+          if (density === "medium") {
             lines.push(
-              `  ${theme.fg("muted", truncateToWidth(entry.description, Math.max(1, innerWidth - 2), glyphs.ellipsis))}`,
+              `  ${theme.fg("muted", truncateToWidth(entry.description, Math.max(1, innerWidth - 2), MENU_GLYPHS.ellipsis))}`,
             );
             blocks.push({ lines, selectionLine });
             continue;
@@ -302,7 +293,10 @@ async function selectWithCustomUi<T>(
           }
           if (wrapped.length > 3) {
             lines.push(
-              theme.fg("dim", `  ${truncatePlain(`${glyphs.ellipsis} ${wrapped.length - 3} weitere Zeile(n)`, innerWidth - 2, glyphs.ellipsis)}`),
+              theme.fg(
+                "dim",
+                `  ${truncateToWidth(`${MENU_GLYPHS.ellipsis} ${wrapped.length - 3} weitere Zeile(n)`, Math.max(1, innerWidth - 2), MENU_GLYPHS.ellipsis)}`,
+              ),
             );
           }
           blocks.push({ lines, selectionLine });
@@ -331,24 +325,12 @@ async function selectWithCustomUi<T>(
       const restIndicator = (
         direction: "above" | "below",
         count: number,
-        unicode: boolean,
       ): string => {
-        const arrow = unicode
-          ? direction === "above" ? "↑" : "↓"
-          : direction === "above" ? "^" : "v";
-        const noun = unicode ? "Einträge" : "Eintraege";
-        return theme.fg("dim", `${arrow} ${count} weitere ${noun}`);
+        const arrow = direction === "above" ? "↑" : "↓";
+        return theme.fg("dim", `${arrow} ${count} weitere Einträge`);
       };
 
-      const inputHint = (
-        density: ReturnType<typeof resolveRenderProfile>["density"],
-        unicode: boolean,
-      ): string => {
-        if (!unicode) {
-          if (density === "compact") return "Auf/Ab | Enter | Esc";
-          if (density === "medium") return "Auf/Ab | PgUp/PgDn | Enter | Esc";
-          return "Auf/Ab waehlen | PgUp/PgDn | Home/End | Enter uebernehmen | Esc schliessen";
-        }
+      const inputHint = (density: MenuDensity): string => {
         if (density === "compact") return "↑↓ · Enter · Esc";
         if (density === "medium") return "↑↓ wählen · PgUp/PgDn · Enter · Esc";
         return "↑↓ wählen · PgUp/PgDn blättern · Home/End springen · Enter übernehmen · Esc schließen";
@@ -359,14 +341,10 @@ async function selectWithCustomUi<T>(
           if (width < 12) {
             return [theme.fg("warning", "Terminal zu schmal")];
           }
-          const innerWidth = Math.max(1, width - 4);
-          const profile = resolveRenderProfile({
-            width,
-            mode: ctx.mode,
-            isTTY: true,
-          });
-          const blocks = buildMenuBlocks(innerWidth, profile);
-          const hint = inputHint(profile.density, profile.unicode);
+          const innerWidth = Math.max(1, width - 2);
+          const density = menuDensity(width);
+          const blocks = buildMenuBlocks(innerWidth, density);
+          const hint = inputHint(density);
           const hintLines = wrapTextWithAnsi(hint, innerWidth);
           const availableHeight = Math.max(
             1,
@@ -390,7 +368,7 @@ async function selectWithCustomUi<T>(
           const menuLines: string[] = [];
           if (viewport.showAbove) {
             menuLines.push(
-              restIndicator("above", viewport.start, profile.unicode),
+              restIndicator("above", viewport.start),
             );
           }
 
@@ -410,22 +388,20 @@ async function selectWithCustomUi<T>(
               restIndicator(
                 "below",
                 entries.length - viewport.end,
-                profile.unicode,
               ),
             );
           }
 
-          box.setSections!([
-            { lines: menuLines },
-            {
-              lines: hintLines.map((line) => theme.fg("dim", line)),
-            },
-          ]);
-          return box.render(width);
+          return [
+            theme.fg("accent", "─".repeat(Math.max(1, width))),
+            theme.fg("accent", theme.bold(truncateToWidth(title, width, MENU_GLYPHS.ellipsis))),
+            ...menuLines,
+            theme.fg("accent", "─".repeat(Math.max(1, width))),
+            ...hintLines.map((line) => theme.fg("dim", line)),
+            theme.fg("accent", "─".repeat(Math.max(1, width))),
+          ];
         },
-        invalidate() {
-          box.invalidate();
-        },
+        invalidate() {},
         handleInput(data: string): void {
           if (matchesKey(data, Key.up)) {
             move(-1);

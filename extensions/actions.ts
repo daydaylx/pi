@@ -18,8 +18,6 @@ import {
   PERMISSION_REQUEST_EVENT,
   PLAN_ACTION_REQUEST_EVENT,
   SKILL_LAUNCHER_REQUEST_EVENT,
-  STATUS_REQUEST_EVENT,
-  TOOLS_ACTION_REQUEST_EVENT,
   WORKFLOW_MODE_REQUEST_EVENT,
   WORKFLOW_STATUS_EVENT,
   WRITE_OVERRIDE_REQUEST_EVENT,
@@ -27,8 +25,6 @@ import {
   type PermissionRequest,
   type PlanActionRequest,
   type SkillLauncherRequest,
-  type StatusRequest,
-  type ToolsActionRequest,
   type WorkflowMode,
   type WorkflowModeRequest,
   type WorkflowStatusEvent,
@@ -135,15 +131,6 @@ export default function actionsExtension(pi: ExtensionAPI): void {
           level: permissionLevel === "yolo" ? "read-write" : "yolo",
           ctx,
         } satisfies PermissionRequest);
-        return;
-      case "tools-action":
-        pi.events.emit(TOOLS_ACTION_REQUEST_EVENT, {
-          action: target.action,
-          ctx,
-        } satisfies ToolsActionRequest);
-        return;
-      case "status":
-        pi.events.emit(STATUS_REQUEST_EVENT, { ctx } satisfies StatusRequest);
         return;
       case "open-thinking-menu": {
         const level = await runMenu(

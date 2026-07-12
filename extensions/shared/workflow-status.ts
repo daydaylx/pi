@@ -18,12 +18,11 @@ export type WorkflowPhase =
 // Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
 // Prompting und Workflow; ausschließlich diese Stufe steuert Tool-Zugriffe.
 export type PermissionLevel =
-  "read-only" | "read-bash" | "test-bash" | "read-write" | "full-access" | "yolo";
+  "read-only" | "read-bash" | "read-write" | "full-access" | "yolo";
 
 export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
   "read-only": "Read only",
   "read-bash": "Read + Bash Info Commands",
-  "test-bash": "Read + Test/Run Commands",
   "read-write": "Read + Write",
   "full-access": "Full Access",
   yolo: "YOLO",
@@ -32,12 +31,111 @@ export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
 export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
   "read-only": "Nur Lesen; ausschließlich die Plan-Datei bleibt beschreibbar",
   "read-bash": "Lesen, sichere Inspect-Bash-Befehle und die Plan-Datei",
-  "test-bash": "Lesen, Inspect- und Test-Befehle (npm test, tsc --noEmit) und die Plan-Datei",
   "read-write": "Normaler Projektzugriff mit Rückfragen bei riskanten Aktionen",
   "full-access":
     "Git-Housekeeping/Paketmanager ohne Rückfrage; sudo/Löschen/Force-Push bleiben bestätigt",
   yolo: "sudo/Löschen/externe Schreibzugriffe ohne Rückfrage; kritische Muster bleiben bestätigt",
 };
+
+/**
+ * Converts persisted legacy permission values before they reach the policy.
+ * `test-bash` was intentionally removed because its curated command list was
+ * difficult to keep complete and safe; its conservative replacement is the
+ * existing read-only Bash policy.
+ */
+export function normalizePermissionLevel(
+  value: unknown,
+): PermissionLevel | undefined {
+  if (value === "test-bash") return "read-bash";
+  return typeof value === "string" && Object.hasOwn(PERMISSION_LEVEL_LABEL, value)
+    ? (value as PermissionLevel)
+    : undefined;
+}
+
+export const ZENTUI_STATUS_KEYS = {
+  permissions: "permissions",
+  workflow: "workflow",
+  plan: "plan",
+  subagents: "subagents",
+} as const;
+
+export type PermissionStatusBase = "RO" | "RB" | "RW" | "FA" | "YOLO";
+
+export type PermissionStatusValue =
+  | PermissionStatusBase
+  | "RO·LOCK"
+  | "RB·LOCK"
+  | "RW·LOCK"
+  | "FA·LOCK"
+  | "YOLO·LOCK"
+  | "RO·PLAN"
+  | "RB·PLAN"
+  | "RW·PLAN"
+  | "FA·PLAN"
+  | "YOLO·PLAN";
+
+export function permissionStatusValue(
+  level: PermissionLevel,
+  writeOverride: WriteOverride = "inherit",
+): PermissionStatusValue {
+  const base: PermissionStatusBase = (() => {
+    switch (level) {
+    case "read-only":
+      return "RO";
+    case "read-bash":
+      return "RB";
+    case "read-write":
+      return "RW";
+    case "full-access":
+      return "FA";
+    case "yolo":
+      return "YOLO";
+    }
+  })();
+  if (writeOverride === "block") return `${base}·LOCK` as PermissionStatusValue;
+  if (writeOverride === "plan-file-only") {
+    return `${base}·PLAN` as PermissionStatusValue;
+  }
+  return base;
+}
+
+export type WorkflowStatusValue =
+  | "PLAN"
+  | "WORK"
+  | "REVIEW"
+  | "ANALYZE"
+  | "SKILL";
+
+export function workflowStatusValue(
+  phase: WorkflowPhase,
+): Exclude<WorkflowStatusValue, "SKILL"> {
+  switch (phase) {
+    case "draft":
+      return "PLAN";
+    case "deciding":
+      return "ANALYZE";
+    case "reviewing":
+    case "reviewed":
+      return "REVIEW";
+    case "idle":
+    case "executing":
+    case "ready":
+      return "WORK";
+  }
+}
+
+/** Status values are presentation-only and must never leak into non-TUI modes. */
+export function setTuiStatus(
+  ctx: ExtensionContext,
+  key: string,
+  value: string | undefined,
+): void {
+  if (ctx.mode !== "tui" || !ctx.hasUI) return;
+  const ui = ctx.ui as typeof ctx.ui & {
+    setStatus?: (statusKey: string, statusValue: string | undefined) => void;
+  };
+  ui.setStatus?.(key, value);
+}
 
 // Zusätzlicher Schreibrechte-Override. Die restriktivere Regel aus
 // Permission-Level und Override gewinnt.
@@ -94,24 +192,9 @@ export interface PlanActionRequest {
   ctx: ExtensionContext;
 }
 
-export const TOOLS_ACTION_REQUEST_EVENT = "pi-workflow:tools-action";
-
-export type ToolsAction = "open" | "enable-all" | "disable-all";
-
-export interface ToolsActionRequest {
-  action: ToolsAction;
-  ctx: ExtensionContext;
-}
-
 export const SKILL_LAUNCHER_REQUEST_EVENT = "pi-workflow:skill-launcher";
 
 export interface SkillLauncherRequest {
-  ctx: ExtensionContext;
-}
-
-export const STATUS_REQUEST_EVENT = "pi-workflow:show-status";
-
-export interface StatusRequest {
   ctx: ExtensionContext;
 }
 

@@ -24,17 +24,18 @@ import {
   PERMISSION_REQUEST_EVENT,
   PERMISSION_LEVEL_LABEL,
   WORKFLOW_STATUS_EVENT,
+  ZENTUI_STATUS_KEYS,
   WRITE_OVERRIDE_LABEL,
   WRITE_OVERRIDE_REQUEST_EVENT,
+  normalizePermissionLevel,
+  permissionStatusValue,
+  setTuiStatus,
   type PermissionRequest,
   type PermissionLevel,
   type WriteOverride,
   type WriteOverrideRequest,
 } from "./shared/workflow-status.ts";
-import { formatPermissionWarning } from "./shared/visual-system.ts";
 
-const STATUS_KEY = "workflow-permission";
-const PERMISSION_STATUS_KEY = "permission-level";
 const PERSISTED_STATE_KEY = "mode-permissions";
 const CONFIRM_ELEVATED_PERMISSIONS = false;
 const ENV_PERMISSION_LEVEL = "PI_SUBAGENT_PERMISSION_LEVEL";
@@ -48,13 +49,24 @@ const ENV_ALLOWED_PATHS = "PI_SUBAGENT_ALLOWED_PATHS"; // #46
 const AUTO_YOLO_ON_START = true;
 
 function permissionFromEnv(): PermissionLevel | undefined {
-  const value = process.env[ENV_PERMISSION_LEVEL] as
-    PermissionLevel | undefined;
-  return value && value in PERMISSION_LEVEL_LABEL ? value : undefined;
+  return normalizePermissionLevel(process.env[ENV_PERMISSION_LEVEL]);
+}
+
+function permissionWarning(level: PermissionLevel): string | undefined {
+  if (level === "full-access") {
+    return "FULL ACCESS aktiv: Sudo, Löschen, externe Schreibzugriffe und Force-Push bleiben bestätigt.";
+  }
+  if (level === "yolo") {
+    return "YOLO aktiv: harte Warnmuster für Secrets, Systempfade und kritische Aktionen bleiben bestätigt.";
+  }
+  return undefined;
 }
 
 function writeOverrideFromEnv(): WriteOverride | undefined {
-  const value = process.env[ENV_WRITE_OVERRIDE] as WriteOverride | undefined;
+  return normalizeWriteOverride(process.env[ENV_WRITE_OVERRIDE]);
+}
+
+function normalizeWriteOverride(value: unknown): WriteOverride | undefined {
   return value === "inherit" || value === "block" || value === "plan-file-only"
     ? value
     : undefined;
@@ -153,12 +165,14 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   let permissionLevel: PermissionLevel =
     permissionFromEnv() ?? (AUTO_YOLO_ON_START ? "yolo" : "read-write");
   let writeOverride: WriteOverride = writeOverrideFromEnv() ?? "inherit";
+  let sessionEpoch = 0;
 
   function publishStatus(ctx: ExtensionContext): void {
-    // Der Footer in ux-status.ts ist die einzige dauerhafte TUI-Statusquelle.
-    // Beide Alt-Keys werden nur noch bereinigt.
-    ctx.ui.setStatus(STATUS_KEY, undefined);
-    ctx.ui.setStatus(PERMISSION_STATUS_KEY, undefined);
+    setTuiStatus(
+      ctx,
+      ZENTUI_STATUS_KEYS.permissions,
+      permissionStatusValue(permissionLevel, writeOverride),
+    );
     pi.events.emit(WORKFLOW_STATUS_EVENT, {
       source: "permission",
       writeOverride,
@@ -173,7 +187,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   async function applyPermissionLevel(
     level: PermissionLevel,
     ctx: ExtensionContext,
+    epoch = sessionEpoch,
   ): Promise<void> {
+    if (epoch !== sessionEpoch) return;
     if (level === permissionLevel) return;
 
     if (
@@ -195,13 +211,13 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
         `${PERMISSION_LEVEL_LABEL[level]} für diese Session aktivieren?`,
         confirmText,
       );
-      if (!confirmed) return;
+      if (!confirmed || epoch !== sessionEpoch) return;
     }
 
     permissionLevel = level;
     publishStatus(ctx);
     persistState();
-    const warning = formatPermissionWarning(level);
+    const warning = permissionWarning(level);
     ctx.ui.notify(
       warning ?? `Zugriffsstufe: ${PERMISSION_LEVEL_LABEL[level]}.`,
       warning ? "warning" : "info",
@@ -209,6 +225,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   }
 
   async function openPermissionMenu(ctx: ExtensionContext): Promise<void> {
+    const epoch = sessionEpoch;
     const level = await runMenu(
       ctx,
       "Berechtigungen",
@@ -219,8 +236,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
           "Das Berechtigungsmenü benötigt den TUI-Modus. Nutze /permission <level>.",
       },
     );
-    if (!level) return;
-    await applyPermissionLevel(level, ctx);
+    if (!level || epoch !== sessionEpoch) return;
+    await applyPermissionLevel(level, ctx, epoch);
   }
 
   function applyWriteOverride(
@@ -267,7 +284,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       "Zugriffsstufe setzen: read-only | read-bash | read-write | full-access | yolo",
     handler: async (args, ctx) => {
       const level = args.trim() as PermissionLevel;
-      if (!(level in PERMISSION_LEVEL_LABEL)) {
+      if (!Object.hasOwn(PERMISSION_LEVEL_LABEL, level)) {
         ctx.ui.notify(
           "Nutzung: /permission read-only|read-bash|read-write|full-access|yolo",
           "info",
@@ -336,6 +353,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    sessionEpoch += 1;
     const latestState = ctx.sessionManager
       .getEntries()
       .filter(
@@ -351,11 +369,18 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
         }
       | undefined;
     permissionLevel =
-      latestState?.data?.permissionLevel ??
+      normalizePermissionLevel(latestState?.data?.permissionLevel) ??
       permissionFromEnv() ??
       (AUTO_YOLO_ON_START ? "yolo" : "read-write");
     writeOverride =
-      latestState?.data?.writeOverride ?? writeOverrideFromEnv() ?? "inherit";
+      normalizeWriteOverride(latestState?.data?.writeOverride) ??
+      writeOverrideFromEnv() ??
+      "inherit";
     publishStatus(ctx);
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    sessionEpoch += 1;
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.permissions, undefined);
   });
 }
