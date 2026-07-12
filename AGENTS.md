@@ -24,6 +24,18 @@ Diese Regeln gelten für alle Pi-Sitzungen.
 - Projektbezogene Anweisungen ergänzen diese Regeln, heben aber Schutzregeln
   nicht stillschweigend auf.
 
+## Repository-spezifische Architektur
+
+- Zentui besitzt den einzigen globalen Editor, Footer und User-Message-Chrome.
+- `pi-tool-display` besitzt die Built-in-Renderer `read`, `grep`, `find`,
+  `ls`, `bash`, `edit` und `write`.
+- Lokale Extensions dürfen Verhalten, Sicherheitsentscheidungen und temporäre
+  Dialoge bereitstellen, aber keine Header, Footer, Editoren, permanenten
+  Widgets oder Sidebars registrieren.
+- Nach Änderungen ist `npm --prefix npm run verify` auszuführen. Externe
+  Paketversionen bleiben exakt gepinnt und werden nicht als `latest` oder
+  Bereich referenziert.
+
 ## Subagenten-Delegation
 
 - Die Entscheidung, eine Aufgabe an das `subagent`-Tool zu delegieren, trifft
