@@ -92,7 +92,6 @@ const CONFIG_DIR_NAME = ".pi";
 const VALID_PERMISSIONS = new Set<PermissionLevel>([
   "read-only",
   "read-bash",
-  "test-bash",
   "read-write",
 ]);
 const ELEVATED_PERMISSIONS = new Set<PermissionLevel>(["full-access", "yolo"]);
@@ -158,6 +157,9 @@ function normalizePermission(
   raw: string | undefined,
   tools: string[],
 ): PermissionLevel {
+  // Legacy profiles retain their least-privilege behavior after the
+  // test-bash level was removed: read-bash never permits test runners.
+  if (raw === "test-bash") return "read-bash";
   if (raw && VALID_PERMISSIONS.has(raw as PermissionLevel)) {
     return raw as PermissionLevel;
   }

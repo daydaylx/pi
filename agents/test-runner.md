@@ -2,7 +2,7 @@
 name: test-runner
 description: Runs controlled test and static-check commands and summarizes failures without modifying source
 tools: read, grep, find, ls, bash
-permission: test-bash
+permission: read-bash
 writeOverride: block
 timeoutMs: 1200000
 ---
