@@ -281,7 +281,7 @@ path.
 
 `Ctrl+Shift+Y` opens the permission picker; `/yolo` remains the direct YOLO
 toggle. Both change only the permission level, which is visibly marked by the
-single central header/footer from `ux-status.ts`. On terminals without reliable modified-key reporting, use
+Zentui `permissions` status segment. On terminals without reliable modified-key reporting, use
 `/permission` or `/yolo`; Pi's preferred shortcut requires Kitty/CSI-u or
 compatible `modifyOtherKeys` support.
 

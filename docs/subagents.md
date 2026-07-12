@@ -46,10 +46,8 @@ Observed before implementation:
 - No installed `pi-subagents` package.
 - No existing `agents/`, `skills/`, `chains/`, `SYSTEM.md` or `APPEND_SYSTEM.md`.
 - Existing prompt templates: `analyse`, `review`, `ui-review`, `docs-check`.
-- Existing custom extensions: plan mode, permission policy, ask-user, tools,
-  actions, UX status and notification.
-- `settings.json` and `extensions/shared/visual-system.ts` were already dirty
-  before this work and were not reverted.
+- Current local extensions are limited to plan mode, permissions, subagents,
+  skills, ask-user and their temporary menus.
 
 ## Architecture
 
@@ -108,7 +106,7 @@ Limits:
 | `planner`          | read, grep, find, ls                    | read-only  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Produce implementation plans.   |
 | `architect`        | read, grep, find, ls                    | read-only  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Architecture critique.          |
 | `reviewer`         | read, grep, find, ls, bash              | read-bash  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Review diffs and scope.         |
-| `test-runner`      | read, grep, find, ls, bash              | test-bash  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Run safe tests/checks.          |
+| `test-runner`      | read, grep, find, ls, bash              | read-bash  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Inspect checks; request broader permission if execution needs it. |
 | `security-auditor` | read, grep, find, ls, bash              | read-bash  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Security and permission audit.  |
 | `ui-reviewer`      | read, grep, find, ls                    | read-only  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Static UI/UX review.            |
 | `docs-auditor`     | read, grep, find, ls                    | read-only  | block          | inherit (Hauptmodell)  | inherit (Haupt-Thinking) | Docs/code drift.                |
@@ -200,7 +198,9 @@ Rules:
 
 - `read-only`: no bash, no writes.
 - `read-bash`: read tools and proven read-only bash only.
-- `test-bash`: like `read-bash`, plus curated non-destructive test/check commands (e.g. `npm test`, `tsc --noEmit`, `npm run lint` without `--fix`); package management, build/fix and destructive commands stay blocked (#43).
+- `test-bash` was removed. Historical values are conservatively normalized to
+  `read-bash`; test execution requiring broader access must be approved by the
+  parent workflow.
 - `full-access`/`yolo` in agent frontmatter are always capped to `read-write`
   (#36). Running such an agent requires interactive confirmation and is
   blocked in non-interactive contexts; the declared elevated level is never
@@ -297,10 +297,8 @@ Reihenfolge prüfen:
 3. **Direkte Liste:** `/subagent-list` ausführen. Der Command listet standardmäßig
    `agentScope: "user"`; optional sind `/subagent-list project` und
    `/subagent-list both`. Bei 0 Agenten verweist er auf `/subagent-doctor`. Jede
-   Agentenzeile zeigt zusätzlich den aktuellen Live-Status aus dem
-   Subagent-Widget (z. B. `[● running — plan structure]` oder `[idle]`), damit
-   sichtbar wird, welcher Agent gerade tatsächlich läuft, ohne eine zweite
-   Statuswelt einzuführen.
+   Agentenzeilen bleiben diagnostisch; die laufende Gesamtzahl erscheint
+   ausschließlich im kompakten Zentui-Status `subagents`.
 4. **Tool-Minimal-Run:** Wenn `/subagent-list` funktioniert, aber der Hauptagent
    nicht delegiert, das `subagent`-Tool direkt mit
    `{ "list": true, "agentScope": "user" }` aufrufen lassen. Das trennt
@@ -319,35 +317,22 @@ Beim TUI-Session-Start warnt die Extension sichtbar, falls keine User-Agenten
 gefunden werden. Das ist keine Aussage über Modellqualität oder Billing, sondern
 ein Pfad-/Discovery-Hinweis.
 
-Das Status-Widget zeigt zusätzlich:
-
-```text
-Subagents: loaded | Agents: <count> | Last run: none
-```
-
-Nach einem Tool-Lauf wird `Last run` auf `<agent>/<mode>/<time>` aktualisiert,
-z. B. `reviewer/single/2026-07-10T12:00:00Z`. Lange Nicht-Nutzung ist kein
-Fehler; sie ist über Doctor/List/Widget nur sichtbar diagnostizierbar.
+Lange Nicht-Nutzung ist kein Fehler; sie bleibt über Doctor/List und das
+Tool-Ergebnis diagnostizierbar, ohne eine permanente lokale Anzeige.
 
 ### Statusmodell und Tool-Zuordnung (UI-Redesign)
 
-Das Widget (`extensions/subagents/widget.ts`) nutzt jetzt ein klareres,
-nachvollziehbares Statusmodell. Jeder Subagent zeigt **Symbol + Textlabel**
-(nie nur Farbe):
+Subagent runtime state is renderer-neutral. Zentui receives only the compact
+`subagents` status key; no local widget, sidebar, or activity panel is
+registered.
 
-| Status      | Symbol | Bedeutung                                      |
-| ----------- | ------ | ---------------------------------------------- |
-| `running`   | `●`    | Prozess läuft gerade                           |
-| `queued`    | `○`    | Wartet auf Slot (Parallelmodus)                |
-| `waiting`   | `○`    | Wartet auf Parent-Bestätigung (Permissions)    |
-| `completed` | `✓`    | Erfolgreich abgeschlossen                      |
-| `warning`   | `!`    | Warnungen/Validierungsfehler, nicht abgestürzt |
-| `failed`    | `✕`    | Fehler/Abbruch/kein Output                     |
-| `blocked`   | `⏸`    | Blockiert (Permission/Sandbox)                 |
-| `idle`      | `○`    | Noch nie gelaufen                              |
+| Zentui value | Bedeutung |
+| --- | --- |
+| `SUB n` | `n` laufende oder wartende Subagenten |
+| `SUB ERR` | mindestens ein Fehler im aktuellen Lauf |
 
-Zusätzlich pro Eintrag sichtbar: `role`, `lastAction`, `warnings`/`errors`
-(kompakt als `w:n` / `e:n`), `startedAt`/`completedAt` und `relatedToolCalls`.
+Details wie Rollen, Tool-Aufrufe, Warnungen und Ergebniszeiten bleiben im
+`subagent`-Toolresultat und in den Diagnosebefehlen verfügbar.
 
 **Tool-Zuordnung:** Der Parent-Prozess wertet jetzt zusätzlich die
 Child-JSON-Events `tool_execution_start`, `tool_execution_update` und
@@ -422,8 +407,8 @@ Expected: the prompt requires a parallel `reviewer`, `security-auditor` and
 
 Additional checks:
 
-- Verify the widget/status line shows `Subagents: loaded`, `Agents: <count>` and
-  `Last run: none` initially, then the last `<agent>/<mode>/<time>` after a run.
+- Verify Zentui shows `SUB n` only while Subagenten laufen and clears the key
+  after a successful idle session; failures show `SUB ERR`.
 - Verify read-only agents produce no `git diff`.
 - Verify project-local agents ask for confirmation in TUI.
 - Verify Ctrl+C aborts an active subagent process.
@@ -432,21 +417,12 @@ Additional checks:
 
 `extensions/**/*.ts` is now covered by a real `tsc --noEmit` run:
 `npm --prefix npm run typecheck` (config: `tsconfig.json` at repo root).
-It is intentionally **not** chained into `npm test`, because two pre-existing,
-subagents-unrelated files currently fail it — chaining it in would make the
-whole suite red for reasons outside this area's control.
+It is part of the repository-wide verification command:
+`npm --prefix npm run verify`.
 
-`@earendil-works/pi-agent-core` is a transitive dependency declared by
-`pi-coding-agent` but not present under `npm/node_modules` in this dev
-install; `types/shims.d.ts` declares it as an ambient `any`-typed module so
-the real code can still be checked.
-
-Known pre-existing failures (not subagents-related, not fixed here):
-
-| File                                 | Error                                                                                                            |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `extensions/ask-user.ts`             | `DisplayOption` narrowing loses `description`/`effort`/`risk`/`pro`/`contra` on the `isOther` branch (9 errors). |
-| `extensions/shared/banner-render.ts` | `process.env` is not assignable to `Pick<ProcessEnv, "NO_COLOR">`.                                               |
+The portable TypeScript paths resolve Pi runtime packages from the checked-in
+`npm` dependency tree; no globally installed SDK or ambient `any` shim is
+required for the verification command.
 
 ## Remaining Risks
 
