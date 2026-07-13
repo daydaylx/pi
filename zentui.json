@@ -24,13 +24,11 @@
     "placements": {
       "workflow": "right",
       "permissions": "right",
-      "subagents": "right",
       "plan": "right"
     },
     "colorModes": {
       "workflow": "zentui",
       "permissions": "zentui",
-      "subagents": "zentui",
       "plan": "zentui"
     }
   }

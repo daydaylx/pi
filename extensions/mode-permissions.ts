@@ -13,7 +13,6 @@ import type {
 import {
   decideBash,
   decideFileAccess,
-  isPathWithinAllowed,
   type PolicyDecision,
   type ProtectedWritePath,
 } from "./shared/permission-policy.ts";
@@ -40,19 +39,12 @@ import {
 
 const PERSISTED_STATE_KEY = "mode-permissions";
 const CONFIRM_ELEVATED_PERMISSIONS = false;
-const ENV_PERMISSION_LEVEL = "PI_SUBAGENT_PERMISSION_LEVEL";
-const ENV_WRITE_OVERRIDE = "PI_SUBAGENT_WRITE_OVERRIDE";
-const ENV_ALLOWED_PATHS = "PI_SUBAGENT_ALLOWED_PATHS"; // #46
 
 // Auto-YOLO: aktiviert YOLO bei jedem Session-Start automatisch. Auf false
 // setzen, um das alte Verhalten (keine automatische Eskalation) wieder-
 // herzustellen. Die Permission-Stufe ist vom Workflow-Modus unabhängig und
 // jederzeit per /yolo oder Strg+Shift+Y änderbar.
 const AUTO_YOLO_ON_START = true;
-
-function permissionFromEnv(): PermissionLevel | undefined {
-  return normalizePermissionLevel(process.env[ENV_PERMISSION_LEVEL]);
-}
 
 function permissionWarning(level: PermissionLevel): string | undefined {
   if (level === "full-access") {
@@ -64,26 +56,10 @@ function permissionWarning(level: PermissionLevel): string | undefined {
   return undefined;
 }
 
-function writeOverrideFromEnv(): WriteOverride | undefined {
-  return normalizeWriteOverride(process.env[ENV_WRITE_OVERRIDE]);
-}
-
 function normalizeWriteOverride(value: unknown): WriteOverride | undefined {
   return value === "inherit" || value === "block" || value === "plan-file-only"
     ? value
     : undefined;
-}
-
-// #46: when this process is a subagent child with a declared allowedPaths
-// scope, writes outside those paths are blocked. Undefined = unrestricted.
-function allowedPathsFromEnv(): string[] | undefined {
-  const raw = process.env[ENV_ALLOWED_PATHS];
-  if (!raw) return undefined;
-  const list = raw
-    .split("|")
-    .map((p) => p.trim())
-    .filter(Boolean);
-  return list.length > 0 ? list : undefined;
 }
 
 function toolPath(event: ToolCallEvent): string | undefined {
@@ -131,14 +107,6 @@ function decideTool(
 
   if (event.toolName === "write" || event.toolName === "edit") {
     const filePath = toolPath(event) ?? "";
-    // #46: enforce the subagent's allowedPaths write scope if declared.
-    const allowed = allowedPathsFromEnv();
-    if (allowed && !isPathWithinAllowed(filePath, cwd, allowed)) {
-      return {
-        action: "block",
-        reason: `Subagent write scope: "${filePath}" liegt außerhalb der erlaubten Pfade (${allowed.join(", ")}).`,
-      };
-    }
     return decideFileAccess(permissionLevel, "write", filePath, cwd, {
       writeOverride,
       protectedWritePath: PROTECTED_WRITE_PATH,
@@ -170,9 +138,10 @@ async function approve(
 }
 
 export default function modePermissionsExtension(pi: ExtensionAPI): void {
-  let permissionLevel: PermissionLevel =
-    permissionFromEnv() ?? (AUTO_YOLO_ON_START ? "yolo" : "read-write");
-  let writeOverride: WriteOverride = writeOverrideFromEnv() ?? "inherit";
+  let permissionLevel: PermissionLevel = AUTO_YOLO_ON_START
+    ? "yolo"
+    : "read-write";
+  let writeOverride: WriteOverride = "inherit";
   let sessionEpoch = 0;
 
   function publishStatus(ctx: ExtensionContext): void {
@@ -467,12 +436,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       | undefined;
     permissionLevel =
       normalizePermissionLevel(latestState?.data?.permissionLevel) ??
-      permissionFromEnv() ??
       (AUTO_YOLO_ON_START ? "yolo" : "read-write");
     writeOverride =
-      normalizeWriteOverride(latestState?.data?.writeOverride) ??
-      writeOverrideFromEnv() ??
-      "inherit";
+      normalizeWriteOverride(latestState?.data?.writeOverride) ?? "inherit";
     publishStatus(ctx);
   });
 

@@ -2,8 +2,6 @@
 name: docs-auditor
 description: Checks documentation against current code and proposes exact documentation updates
 tools: read, grep, find, ls
-permission: read-only
-writeOverride: block
 timeoutMs: 600000
 ---
 

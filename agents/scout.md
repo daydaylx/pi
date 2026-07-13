@@ -2,8 +2,6 @@
 name: scout
 description: Builds compact codebase context for handoff to planners, reviewers, or the main agent
 tools: read, grep, find, ls
-permission: read-only
-writeOverride: block
 timeoutMs: 600000
 ---
 

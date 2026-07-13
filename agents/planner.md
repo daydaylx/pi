@@ -2,8 +2,6 @@
 name: planner
 description: Converts requirements and discovered context into an implementation-ready plan without making changes
 tools: read, grep, find, ls
-permission: read-only
-writeOverride: block
 timeoutMs: 900000
 ---
 

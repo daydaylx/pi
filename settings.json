@@ -40,12 +40,12 @@
   "packages": [
     "npm:pi-zentui@0.3.0",
     "npm:pi-tool-display@0.5.0",
-    "npm:@ujjwalgrover/pi-catppuccin@1.0.0"
+    "npm:@ujjwalgrover/pi-catppuccin@1.0.0",
+    "npm:pi-subagents@0.34.0"
   ],
   "extensions": [
     "!extensions/**",
     "+extensions/plan-mode/index.ts",
-    "+extensions/subagents/index.ts",
     "+extensions/mode-permissions.ts",
     "+extensions/ask-user.ts",
     "+extensions/skill-mode/index.ts"

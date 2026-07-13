@@ -2,8 +2,6 @@
 name: security-auditor
 description: Audits changes for secrets, unsafe shell, injection, permission drift and risky extension behavior
 tools: read, grep, find, ls, bash
-permission: read-bash
-writeOverride: block
 timeoutMs: 900000
 ---
 

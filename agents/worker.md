@@ -2,8 +2,6 @@
 name: worker
 description: Implements a narrowly scoped approved plan with explicit file ownership
 tools: read, grep, find, ls, edit, write, bash
-permission: read-write
-writeOverride: inherit
 timeoutMs: 1800000
 ---
 
