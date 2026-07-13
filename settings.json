@@ -48,7 +48,6 @@
     "+extensions/subagents/index.ts",
     "+extensions/mode-permissions.ts",
     "+extensions/ask-user.ts",
-    "+extensions/actions.ts",
     "+extensions/skill-mode/index.ts"
   ],
   "doubleEscapeAction": "tree",

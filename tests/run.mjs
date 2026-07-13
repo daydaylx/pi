@@ -591,6 +591,12 @@ await section("permission policy", async () => {
       "write",
       ".agent/plans/current-plan.md",
       ROOT,
+      {
+        protectedWritePath: {
+          matches: planUtils.isPlanFilePath,
+          label: planUtils.PLAN_RELATIVE_PATH,
+        },
+      },
     ).action,
     "allow",
     "read-bash permits the explicit plan file",

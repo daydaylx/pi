@@ -41,12 +41,10 @@ import {
   type TodoItem,
 } from "./utils.ts";
 import {
-  PLAN_ACTION_REQUEST_EVENT,
-  WORKFLOW_MODE_REQUEST_EVENT,
+  SKILL_LAUNCHER_REQUEST_EVENT,
   WORKFLOW_STATUS_EVENT,
-  type PlanActionRequest,
+  type SkillLauncherRequest,
   type WorkflowMode,
-  type WorkflowModeRequest,
   type WorkflowPhase,
   ZENTUI_STATUS_KEYS,
   setTuiStatus,
@@ -119,6 +117,64 @@ const MODE_LABEL: Record<WorkflowMode, string> = {
   detailed_plan: "Architekturplan",
   work: "Work-Modus",
 };
+
+/**
+ * `"decide"` startet den Decision-Intake (transiente Phase) statt einen
+ * persistenten WorkflowMode zu setzen; `openModeMenu()` filtert ihn vor dem
+ * Aufruf von setWorkflowMode() heraus. `"skill"` delegiert an skill-mode über
+ * SKILL_LAUNCHER_REQUEST_EVENT (einziges verbleibendes Cross-Extension-Event,
+ * bis Phase 4 den Skill-Launcher durch den nativen Mechanismus ersetzt).
+ */
+type ModeMenuAction = WorkflowMode | "decide" | "skill";
+
+function buildModeMenu(
+  currentMode: WorkflowMode,
+  deciding: boolean,
+): MenuEntry<ModeMenuAction>[] {
+  return [
+    {
+      id: "mode-simple-plan",
+      label: "Schnellplan",
+      description:
+        "Kleine Änderung planen. Schnell · wenig Risiko · keine Umsetzung ohne /work",
+      value: "simple_plan",
+      current: currentMode === "simple_plan",
+    },
+    {
+      id: "mode-detailed-plan",
+      label: "Architekturplan",
+      description:
+        "Größere Änderung sauber planen. Tief · strukturiert · sicher",
+      value: "detailed_plan",
+      current: currentMode === "detailed_plan",
+    },
+    {
+      id: "mode-work",
+      label: "Work-Modus",
+      description:
+        "Bestehenden Plan oder freie Aufgabe bearbeiten. Kontrolliert · explizit · nur mit aktuellen Permissions",
+      value: "work",
+      current: currentMode === "work",
+    },
+    {
+      id: "mode-decide",
+      label: "Optionen klären",
+      description:
+        "Vorentscheidung klären. 2–4 Optionen · Empfehlung · Decision Brief vor dem Plan",
+      section: "Klärung",
+      value: "decide",
+      current: deciding,
+    },
+    {
+      id: "mode-skill",
+      label: "Skill-Modus",
+      description:
+        "Geführte Skills: Repository analysieren, Git prüfen, Doku-Diff, Bug-Triage, Security-Audit u. a.",
+      section: "Skills",
+      value: "skill",
+    },
+  ];
+}
 
 interface PersistedWorkflowState {
   mode?: WorkflowMode;
@@ -209,11 +265,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
 
     const completedTodos = todos.filter((todo) => todo.completed).length;
-    setTuiStatus(
-      ctx,
-      ZENTUI_STATUS_KEYS.workflow,
-      workflowStatusValue(phase),
-    );
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, workflowStatusValue(phase));
     setTuiStatus(
       ctx,
       ZENTUI_STATUS_KEYS.plan,
@@ -227,7 +279,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       completedTodos,
       totalTodos: todos.length,
     });
-
   }
 
   function invalidateReview(): void {
@@ -811,9 +862,30 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     );
   }
 
-  pi.events.on(WORKFLOW_MODE_REQUEST_EVENT, (request: WorkflowModeRequest) =>
-    setWorkflowMode(request.mode, request.ctx),
-  );
+  // Shift+Tab-Modusmenü: früher ein eigener Event-Rundweg über actions.ts +
+  // shared/mode-menu.ts (WORKFLOW_MODE_REQUEST_EVENT /
+  // PLAN_ACTION_REQUEST_EVENT). Da nur diese Extension Modi setzt, ruft das
+  // Menü setWorkflowMode()/enterDecisionModeFromMenu() jetzt direkt auf.
+  async function openModeMenu(ctx: ExtensionContext): Promise<void> {
+    const selected = await runMenu<ModeMenuAction>(
+      ctx,
+      "Modus",
+      buildModeMenu(mode, phase === "deciding"),
+      { nonInteractiveHint: "Nutze /plan, um den Modus zu wählen." },
+    );
+    if (!selected) return;
+    if (selected === "skill") {
+      pi.events.emit(SKILL_LAUNCHER_REQUEST_EVENT, {
+        ctx,
+      } satisfies SkillLauncherRequest);
+      return;
+    }
+    if (selected === "decide") {
+      await enterDecisionModeFromMenu(ctx);
+      return;
+    }
+    await setWorkflowMode(selected, ctx);
+  }
 
   pi.registerFlag("plan", {
     description: "Start in detailed plan mode (permissions unchanged)",
@@ -847,6 +919,11 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     handler: async (ctx) => {
       await routePlan(ctx);
     },
+  });
+
+  pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
+    description: SHORTCUTS.modeMenu.description,
+    handler: async (ctx) => openModeMenu(ctx),
   });
 
   pi.on("context", async (event) => {
@@ -1591,30 +1668,6 @@ CHANGED_FILES:
       );
     }
   }
-
-  pi.events.on(PLAN_ACTION_REQUEST_EVENT, (request: PlanActionRequest) => {
-    if (request.action === "choose") {
-      void routePlan(request.ctx);
-      return;
-    }
-    if (request.action === "decide") {
-      void runDecisionIntake(request.ctx);
-      return;
-    }
-    if (request.action === "decide-mode") {
-      void enterDecisionModeFromMenu(request.ctx);
-      return;
-    }
-    if (request.action === "work") {
-      void executePlan(request.ctx);
-      return;
-    }
-    if (request.action === "review") {
-      void reviewPlan(request.ctx);
-      return;
-    }
-    void runFinish(request.ctx);
-  });
 
   pi.registerCommand("finish", {
     description: "Plan abschließen und sicher archivieren",

@@ -20,7 +20,7 @@ steps.
 - `/decide`: starts the optional **Decision-Intake** (see "Decision-Intake
   (Klärmodus)" below) — an interactive clarification that produces a Decision
   Brief. It is also reachable as the _Optionen klären_ action inside `/plan`
-  and the `/decide` entry in the `Ctrl+Shift+X` command menu.
+  and as the Shift+Tab mode-menu entry of the same name.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
   independently of whether a review happened. If a plan is already executing,
   a duplicate `/work` call is ignored instead of aborting and restarting it.
@@ -39,9 +39,11 @@ steps.
 
 `/plan` is a state-aware assistant (details below). Shift+Tab opens the same
 three persistent modes as a mode picker (no permissions, no thinking, no
-tools — see `extensions/shared/mode-menu.ts`), plus a fourth, non-persistent
-**Optionen klären** entry that starts the Decision-Intake directly from
-Shift+Tab; permission levels have their own picker on `Ctrl+Shift+Y` (below).
+tools — `buildModeMenu()`/`openModeMenu()` in `index.ts`), plus a fourth,
+non-persistent **Optionen klären** entry that switches into the Klär-Modus
+without starting a turn immediately, and a **Skill-Modus** entry that hands
+off to the skill launcher; permission levels have their own picker on
+`Ctrl+Shift+Y` (below).
 Internal `WorkflowMode` values are unchanged; only the labels were renamed for
 clarity:
 
@@ -78,10 +80,9 @@ constant (`SUBAGENT_EXECUTING_REMINDER`) so they can't drift apart again.
 
 ## `/plan` plan assistant
 
-`/plan`, `Ctrl+Alt+P`, and the `open-plan-picker` entry in the `Ctrl+Shift+X`
-command menu all route through the same assistant. It renders the shared
-`runMenu(...)` overlay (with a plain `ctx.ui.select(...)` fallback) and offers
-different actions depending on the current state:
+`/plan` and `Ctrl+Alt+P` route through the same assistant. It renders the
+shared `runMenu(...)` overlay (with a plain `ctx.ui.select(...)` fallback) and
+offers different actions depending on the current state:
 
 - **No plan file exists** — _Neuer Schnellplan_, _Neuer Architekturplan_,
   _Abbrechen_.

@@ -1,8 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export const WORKFLOW_STATUS_EVENT = "pi-workflow:status";
-export const WORKFLOW_MODE_REQUEST_EVENT = "pi-workflow:set-mode";
-export const PERMISSION_REQUEST_EVENT = "pi-workflow:set-permission";
 
 export type WorkflowMode = "work" | "simple_plan" | "detailed_plan";
 
@@ -47,7 +45,8 @@ export function normalizePermissionLevel(
   value: unknown,
 ): PermissionLevel | undefined {
   if (value === "test-bash") return "read-bash";
-  return typeof value === "string" && Object.hasOwn(PERMISSION_LEVEL_LABEL, value)
+  return typeof value === "string" &&
+    Object.hasOwn(PERMISSION_LEVEL_LABEL, value)
     ? (value as PermissionLevel)
     : undefined;
 }
@@ -80,16 +79,16 @@ export function permissionStatusValue(
 ): PermissionStatusValue {
   const base: PermissionStatusBase = (() => {
     switch (level) {
-    case "read-only":
-      return "RO";
-    case "read-bash":
-      return "RB";
-    case "read-write":
-      return "RW";
-    case "full-access":
-      return "FA";
-    case "yolo":
-      return "YOLO";
+      case "read-only":
+        return "RO";
+      case "read-bash":
+        return "RB";
+      case "read-write":
+        return "RW";
+      case "full-access":
+        return "FA";
+      case "yolo":
+        return "YOLO";
     }
   })();
   if (writeOverride === "block") return `${base}·LOCK` as PermissionStatusValue;
@@ -100,11 +99,7 @@ export function permissionStatusValue(
 }
 
 export type WorkflowStatusValue =
-  | "PLAN"
-  | "WORK"
-  | "REVIEW"
-  | "ANALYZE"
-  | "SKILL";
+  "PLAN" | "WORK" | "REVIEW" | "ANALYZE" | "SKILL";
 
 export function workflowStatusValue(
   phase: WorkflowPhase,
@@ -141,23 +136,6 @@ export function setTuiStatus(
 // Permission-Level und Override gewinnt.
 export type WriteOverride = "inherit" | "block" | "plan-file-only";
 
-export interface WorkflowModeRequest {
-  mode: WorkflowMode;
-  ctx: ExtensionContext;
-}
-
-export interface PermissionRequest {
-  level: PermissionLevel;
-  ctx: ExtensionContext;
-}
-
-export const WRITE_OVERRIDE_REQUEST_EVENT = "pi-workflow:set-write-override";
-
-export interface WriteOverrideRequest {
-  override: WriteOverride;
-  ctx: ExtensionContext;
-}
-
 export const WRITE_OVERRIDE_LABEL: Record<WriteOverride, string> = {
   inherit: "Standard der Permission-Stufe",
   block: "Blockiert",
@@ -172,25 +150,6 @@ export const WRITE_OVERRIDE_DESCRIPTION: Record<WriteOverride, string> = {
   "plan-file-only":
     "Nur die Plan-Datei bleibt beschreibbar, alle anderen Schreibzugriffe sind blockiert",
 };
-
-export const PLAN_ACTION_REQUEST_EVENT = "pi-workflow:plan-action";
-
-// "decide" startet den Decision-Intake sofort (triggerTurn, z. B. /decide,
-// /plan-Aktion, Ctrl+Shift+X). "decide-mode" wechselt nur still in den
-// Klär-Modus (phase=deciding) ohne sofortigen Prompt — genutzt vom
-// Shift+Tab-Modusmenü, analog zu den anderen Plan-Modi.
-export type PlanAction =
-  | "choose"
-  | "work"
-  | "review"
-  | "finish"
-  | "decide"
-  | "decide-mode";
-
-export interface PlanActionRequest {
-  action: PlanAction;
-  ctx: ExtensionContext;
-}
 
 export const SKILL_LAUNCHER_REQUEST_EVENT = "pi-workflow:skill-launcher";
 

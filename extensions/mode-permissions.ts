@@ -15,25 +15,27 @@ import {
   decideFileAccess,
   isPathWithinAllowed,
   type PolicyDecision,
+  type ProtectedWritePath,
 } from "./shared/permission-policy.ts";
+import { isPlanFilePath, PLAN_RELATIVE_PATH } from "./plan-mode/utils.ts";
 import { confirmAction } from "./shared/permission-dialog.ts";
-import { runMenu } from "./shared/menu-ui.ts";
-import { buildPermissionMenu } from "./shared/permission-menu.ts";
+import { runMenu, type MenuEntry } from "./shared/menu-ui.ts";
+import {
+  buildPermissionMenu,
+  buildWriteOverrideMenu,
+} from "./shared/permission-menu.ts";
+import { buildThinkingMenu } from "./shared/thinking-menu.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
 import {
-  PERMISSION_REQUEST_EVENT,
   PERMISSION_LEVEL_LABEL,
   WORKFLOW_STATUS_EVENT,
   ZENTUI_STATUS_KEYS,
   WRITE_OVERRIDE_LABEL,
-  WRITE_OVERRIDE_REQUEST_EVENT,
   normalizePermissionLevel,
   permissionStatusValue,
   setTuiStatus,
-  type PermissionRequest,
   type PermissionLevel,
   type WriteOverride,
-  type WriteOverrideRequest,
 } from "./shared/workflow-status.ts";
 
 const PERSISTED_STATE_KEY = "mode-permissions";
@@ -89,6 +91,15 @@ function toolPath(event: ToolCallEvent): string | undefined {
   return typeof input.path === "string" ? input.path : undefined;
 }
 
+// Restrictive permission levels still allow writes to the workflow
+// extension's plan file. This is the only place mode-permissions.ts knows
+// about plan-mode/utils.ts — shared/permission-policy.ts itself stays
+// workflow-mode-independent and receives this as a plain callback.
+const PROTECTED_WRITE_PATH: ProtectedWritePath = {
+  matches: isPlanFilePath,
+  label: PLAN_RELATIVE_PATH,
+};
+
 function decideTool(
   permissionLevel: PermissionLevel,
   event: ToolCallEvent,
@@ -128,13 +139,10 @@ function decideTool(
         reason: `Subagent write scope: "${filePath}" liegt außerhalb der erlaubten Pfade (${allowed.join(", ")}).`,
       };
     }
-    return decideFileAccess(
-      permissionLevel,
-      "write",
-      filePath,
-      cwd,
+    return decideFileAccess(permissionLevel, "write", filePath, cwd, {
       writeOverride,
-    );
+      protectedWritePath: PROTECTED_WRITE_PATH,
+    });
   }
 
   if (
@@ -250,16 +258,100 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     ctx.ui.notify(`Schreibrechte: ${WRITE_OVERRIDE_LABEL[next]}.`, "info");
   }
 
-  pi.events.on(PERMISSION_REQUEST_EVENT, (request: PermissionRequest) => {
-    void applyPermissionLevel(request.level, request.ctx);
-  });
+  async function openWriteOverrideMenu(ctx: ExtensionContext): Promise<void> {
+    const epoch = sessionEpoch;
+    const override = await runMenu(
+      ctx,
+      "Permissions",
+      buildWriteOverrideMenu(writeOverride),
+      { fallbackPrompt: "Schreibrechte wählen" },
+    );
+    if (!override || epoch !== sessionEpoch) return;
+    applyWriteOverride(override, ctx);
+  }
 
-  pi.events.on(
-    WRITE_OVERRIDE_REQUEST_EVENT,
-    (request: WriteOverrideRequest) => {
-      applyWriteOverride(request.override, request.ctx);
-    },
-  );
+  async function openThinkingMenu(ctx: ExtensionContext): Promise<void> {
+    const level = await runMenu(
+      ctx,
+      "Thinking",
+      buildThinkingMenu(pi.getThinkingLevel()),
+      { fallbackPrompt: "Thinking-Level wählen" },
+    );
+    if (!level) return;
+    pi.setThinkingLevel(level);
+    ctx.ui.notify(`Thinking-Level: ${level}.`, "info");
+  }
+
+  // Zentrales Befehlsmenü (Ctrl+Shift+X): früher in actions.ts als reiner
+  // Event-Router über fünf shared/*-menu.ts-Bausteine. Da diese Extension die
+  // einzige Zuständige für Permission-/Thinking-Aktionen ist, ruft sie die
+  // eigenen Funktionen jetzt direkt auf. Plan-Aktionen (/plan, /decide, /work
+  // …) bleiben ausschließlich über ihre eigenen Slash-Commands und den
+  // Plan-Assistenten (Ctrl+Alt+P) erreichbar.
+  type CommandMenuTarget =
+    | "open-permission-menu"
+    | "open-write-menu"
+    | "toggle-yolo"
+    | "open-thinking-menu";
+
+  function buildCommandMenu(): MenuEntry<CommandMenuTarget>[] {
+    return [
+      {
+        id: "cmd-permission",
+        section: "Berechtigungen",
+        label: "/permission",
+        description: "Zugriffsstufe wählen: nur lesen bis YOLO",
+        value: "open-permission-menu",
+      },
+      {
+        id: "cmd-write",
+        section: "Berechtigungen",
+        label: "/write",
+        description:
+          "Schreibrechte festlegen: erlauben | sperren | nur Plan-Datei",
+        value: "open-write-menu",
+      },
+      {
+        id: "cmd-yolo",
+        section: "Berechtigungen",
+        label: "/yolo",
+        description: "YOLO-Modus für diese Sitzung ein- oder ausschalten",
+        value: "toggle-yolo",
+        current: permissionLevel === "yolo",
+      },
+      {
+        id: "cmd-thinking",
+        section: "Denken",
+        label: "/thinking",
+        description: "Denkstufe wählen: Minimal bis XHigh",
+        value: "open-thinking-menu",
+      },
+    ];
+  }
+
+  async function openCommandMenu(ctx: ExtensionContext): Promise<void> {
+    const selected = await runMenu(ctx, "Befehle", buildCommandMenu(), {
+      fallbackPrompt: "Befehl wählen",
+    });
+    if (!selected) return;
+    switch (selected) {
+      case "open-permission-menu":
+        await openPermissionMenu(ctx);
+        return;
+      case "open-write-menu":
+        await openWriteOverrideMenu(ctx);
+        return;
+      case "toggle-yolo":
+        await applyPermissionLevel(
+          permissionLevel === "yolo" ? "read-write" : "yolo",
+          ctx,
+        );
+        return;
+      case "open-thinking-menu":
+        await openThinkingMenu(ctx);
+        return;
+    }
+  }
 
   pi.registerCommand("yolo", {
     description: "Session-weiten YOLO Mode ein-/ausschalten",
@@ -315,6 +407,11 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   pi.registerShortcut(SHORTCUTS.permissionMenu.keys, {
     description: SHORTCUTS.permissionMenu.description,
     handler: async (ctx) => openPermissionMenu(ctx),
+  });
+
+  pi.registerShortcut(SHORTCUTS.commandMenu.keys, {
+    description: SHORTCUTS.commandMenu.description,
+    handler: async (ctx) => openCommandMenu(ctx),
   });
 
   pi.on("tool_call", async (event, ctx) => {

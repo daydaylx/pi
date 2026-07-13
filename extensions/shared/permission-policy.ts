@@ -1,6 +1,5 @@
 import { existsSync, lstatSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { isPlanFilePath, PLAN_RELATIVE_PATH } from "../plan-mode/utils.ts";
 import type { PermissionLevel, WriteOverride } from "./workflow-status.ts";
 
 export type PolicyAction = "allow" | "ask" | "block";
@@ -199,7 +198,9 @@ export function isPathWithinAllowed(
   for (const raw of allowedPatterns) {
     const pattern = raw.trim();
     if (!pattern) continue;
-    const allowedAbs = isAbsolute(pattern) ? resolve(pattern) : resolve(root, pattern);
+    const allowedAbs = isAbsolute(pattern)
+      ? resolve(pattern)
+      : resolve(root, pattern);
     if (isInside(allowedAbs, targetAbs)) return true;
   }
   return false;
@@ -222,13 +223,29 @@ function isSystemPath(path: string): boolean {
   );
 }
 
+/**
+ * Identifies a caller-defined write exception (e.g. the workflow extension's
+ * plan file) that stays writable even under restrictive permission levels.
+ * Keeps this module independent from any specific workflow mode.
+ */
+export interface ProtectedWritePath {
+  matches: (rawPath: string, cwd: string) => boolean;
+  label: string;
+}
+
+export interface DecideFileAccessOptions {
+  writeOverride?: WriteOverride;
+  protectedWritePath?: ProtectedWritePath;
+}
+
 export function decideFileAccess(
   permissionLevel: PermissionLevel,
   operation: FileOperation,
   rawPath: string,
   cwd: string,
-  writeOverride: WriteOverride = "inherit",
+  options: DecideFileAccessOptions = {},
 ): PolicyDecision {
+  const { writeOverride = "inherit", protectedWritePath } = options;
   // Persisted sessions from before the minimal rebuild can still contain this
   // removed level. Treat it as read-bash rather than allowing its old broader
   // test-command exception path.
@@ -251,10 +268,10 @@ export function decideFileAccess(
 
   if (isReadRestricted) {
     if (operation === "write") {
-      return isPlanFilePath(rawPath, cwd)
+      return protectedWritePath?.matches(rawPath, cwd)
         ? ALLOW
         : deny(
-            `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${PLAN_RELATIVE_PATH}.`,
+            `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${protectedWritePath?.label ?? "keine Datei"}.`,
           );
     }
     if (!scope.insideProject || scope.symlinkEscape) {
@@ -269,7 +286,7 @@ export function decideFileAccess(
     return deny("Schreibrechte-Einstellung: Schreiben ist blockiert.");
   }
   if (operation === "write" && writeOverride === "plan-file-only") {
-    return isPlanFilePath(rawPath, cwd)
+    return protectedWritePath?.matches(rawPath, cwd)
       ? ALLOW
       : deny("Schreibrechte-Einstellung: nur die Plan-Datei ist beschreibbar.");
   }
