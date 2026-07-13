@@ -23,6 +23,15 @@ published to Zentui. The subagent adapter only publishes that key from the
 documented `pi-subagents` lifecycle API; it owns no footer, editor, header,
 widget, or sidebar.
 
+## Theme
+
+`catppuccin-mocha` is the single, exact-pinned visual theme. Zentui and all
+temporary local dialogs use its semantic theme tokens; this repository carries
+no local color palette or icon set. Because every built-in project-data footer
+segment is hidden, Zentui's periodic project refresh is disabled. If a future
+configuration enables CWD, Git, or runtime footer data, it must also choose a
+positive refresh interval deliberately.
+
 ## Native skills
 
 Pi discovers the native skills in this agent directory from

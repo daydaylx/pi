@@ -1,5 +1,5 @@
 {
-  "projectRefreshIntervalMs": 30000,
+  "projectRefreshIntervalMs": 0,
   "colorSources": {
     "starship": "theme",
     "editor": "theme",

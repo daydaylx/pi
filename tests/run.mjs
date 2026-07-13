@@ -394,9 +394,18 @@ await section("target runtime configuration", async () => {
     "runtime packages are exactly the four pinned target packages",
   );
   eq(
-    Object.values(zentui.colorSources),
-    ["theme", "theme", "theme"],
-    "Zentui gets all colors from the active theme",
+    zentui.colorSources,
+    {
+      starship: "theme",
+      editor: "theme",
+      userMessages: "theme",
+    },
+    "Zentui gets every color source from the active theme",
+  );
+  eq(
+    zentui.projectRefreshIntervalMs,
+    0,
+    "hidden project footer data does not retain a periodic refresh timer",
   );
   eq(zentui.features.editor, true, "Zentui editor is enabled");
   eq(zentui.features.statusLine, true, "Zentui footer is enabled");
@@ -405,6 +414,21 @@ await section("target runtime configuration", async () => {
     false,
     "no alternate copy-friendly chrome is enabled",
   );
+  eq(
+    zentui.footerSegments,
+    {
+      cwd: false,
+      gitBranch: false,
+      gitStatus: false,
+      runtime: false,
+      context: false,
+      tokens: false,
+      cost: false,
+    },
+    "Zentui hides every built-in footer segment",
+  );
+  eq(zentui.colors, undefined, "Zentui has no local color overrides");
+  eq(zentui.icons, undefined, "Zentui has no local icon overrides");
   eq(
     zentui.extensionStatuses.defaultPlacement,
     "off",
@@ -436,6 +460,11 @@ await section("target runtime configuration", async () => {
     toolDisplay.enableNativeUserMessageBox,
     false,
     "pi-tool-display leaves user-message chrome to Zentui",
+  );
+  eq(
+    toolDisplay.customToolOverrides,
+    {},
+    "pi-tool-display has no local custom renderer overrides",
   );
   eq(
     {
