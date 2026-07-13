@@ -179,33 +179,6 @@ export function resolvePathScope(
   };
 }
 
-/**
- * #46: subagent write-scope. Returns true if `target` (a raw path as the
- * write/edit tool receives it) resolves to a location equal to or nested
- * inside one of the `allowedPatterns` (project-relative or absolute paths).
- * An empty pattern list means "no restriction" – the caller is responsible
- * for handling the unrestricted case (e.g. requiring confirmation). Patterns
- * are paths/dirs, not globs.
- */
-export function isPathWithinAllowed(
-  target: string,
-  cwd: string,
-  allowedPatterns: string[],
-): boolean {
-  if (allowedPatterns.length === 0) return true;
-  const root = resolve(cwd);
-  const targetAbs = resolve(root, target);
-  for (const raw of allowedPatterns) {
-    const pattern = raw.trim();
-    if (!pattern) continue;
-    const allowedAbs = isAbsolute(pattern)
-      ? resolve(pattern)
-      : resolve(root, pattern);
-    if (isInside(allowedAbs, targetAbs)) return true;
-  }
-  return false;
-}
-
 export function isSensitiveReference(value: string): boolean {
   const withoutEnvExample = value.replace(ENV_EXAMPLE_PATTERN, "$1");
   return (

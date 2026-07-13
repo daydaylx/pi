@@ -4,14 +4,11 @@
 // artifact is needed for the test harness.
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
-  writeFileSync,
 } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -608,17 +605,6 @@ await section("permission policy", async () => {
     "ask",
     "work asks before external writes",
   );
-  eq(
-    policy.isPathWithinAllowed("src/a.ts", ROOT, ["src"]),
-    true,
-    "subagent write scope accepts allowed paths",
-  );
-  eq(
-    policy.isPathWithinAllowed("tests/run.mjs", ROOT, ["src"]),
-    false,
-    "subagent write scope rejects sibling paths",
-  );
-
   const sandbox = mkdtempSync(path.join(tmpdir(), "pi-policy-plan-"));
   const elsewhere = mkdtempSync(path.join(tmpdir(), "pi-policy-elsewhere-"));
   try {
@@ -671,6 +657,313 @@ await section("plan utilities", async () => {
     "approved",
     "review markers are parsed",
   );
+});
+
+// ───────────────── status keys and extension lifecycle ─────────────────
+await section("status mapping helpers", async () => {
+  if (!workflowStatus) return;
+  eq(
+    workflowStatus.normalizePermissionLevel("test-bash"),
+    "read-bash",
+    "legacy test-bash state migrates conservatively",
+  );
+  eq(workflowStatus.permissionStatusValue("read-only"), "RO", "RO is compact");
+  eq(workflowStatus.permissionStatusValue("read-bash"), "RB", "RB is compact");
+  eq(workflowStatus.permissionStatusValue("read-write"), "RW", "RW is compact");
+  eq(
+    workflowStatus.permissionStatusValue("full-access"),
+    "FA",
+    "FA is compact",
+  );
+  eq(workflowStatus.permissionStatusValue("yolo"), "YOLO", "YOLO is compact");
+  eq(
+    workflowStatus.permissionStatusValue("read-write", "block"),
+    "RW·LOCK",
+    "write lock is visible in the compact status",
+  );
+  eq(workflowStatus.workflowStatusValue("draft"), "PLAN", "draft is PLAN");
+  eq(
+    workflowStatus.workflowStatusValue("deciding"),
+    "ANALYZE",
+    "decision intake is ANALYZE",
+  );
+  eq(
+    workflowStatus.workflowStatusValue("reviewed"),
+    "REVIEW",
+    "review is REVIEW",
+  );
+  eq(
+    workflowStatus.workflowStatusValue("executing"),
+    "WORK",
+    "execution is WORK",
+  );
+  const calls = [];
+  workflowStatus.setTuiStatus(
+    {
+      mode: "json",
+      hasUI: false,
+      ui: { setStatus: (...args) => calls.push(args) },
+    },
+    "permissions",
+    "RO",
+  );
+  eq(calls, [], "status helper is silent outside TUI mode");
+});
+
+await section("permission status lifecycle", async () => {
+  if (!modePermissions) return;
+  const harness = createHarness();
+  modePermissions.default(harness.api);
+  const context = harness.makeContext();
+  await harness.runHooks("session_start", {}, context);
+  assert(
+    /^(?:RO|RB|RW|FA|YOLO)(?:\b|\s|·)/.test(
+      String(latestStatus(harness, "permissions")),
+    ),
+    "permission extension publishes a compact Zentui status",
+  );
+  await harness.commands.get("permission")("read-only", context);
+  eq(latestStatus(harness, "permissions"), "RO", "/permission updates status");
+  const toolResults = await harness.runHooks(
+    "tool_call",
+    { toolName: "edit", input: { path: "src/app.ts" } },
+    context,
+  );
+  assert(
+    toolResults.some((result) => result?.block === true),
+    "read-only still blocks write tools",
+  );
+  await harness.commands.get("permission")("read-bash", context);
+  eq(
+    latestStatus(harness, "permissions"),
+    "RB",
+    "/permission read-bash updates status",
+  );
+  await harness.runHooks("session_shutdown", {}, context);
+  eq(
+    latestStatus(harness, "permissions"),
+    undefined,
+    "permission status clears on shutdown",
+  );
+  assertNoGlobalChrome(harness, "permissions install no global chrome");
+});
+
+await section("plan status lifecycle", async () => {
+  if (!planMode || !planUtils) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-status-"));
+  const emptyCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-empty-"));
+  try {
+    planUtils.writePlanFileAtomic(cwd, validPlan);
+    const harness = createHarness({
+      select: (labels) =>
+        labels.includes("Schnellplan") ? "Schnellplan" : undefined,
+    });
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    // The direct Shift+Tab handler owns mode changes since Phase 2. Force the
+    // shared menu's plain-select fallback so this test follows that current
+    // route instead of reviving the removed workflow-event round trip.
+    context.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await harness.runHooks("session_start", {}, context);
+    eq(
+      latestStatus(harness, "workflow"),
+      "PLAN",
+      "an existing plan in its draft phase publishes PLAN",
+    );
+    eq(
+      latestStatus(harness, "plan"),
+      "1/2",
+      "plan progress is compact and accurate",
+    );
+    const openModeMenu = harness.shortcuts.get("shift+tab");
+    assert(Boolean(openModeMenu), "Shift+Tab registers the direct mode menu");
+    if (openModeMenu) await openModeMenu(context);
+    eq(
+      latestStatus(harness, "workflow"),
+      "PLAN",
+      "direct mode menu keeps planning status compact",
+    );
+    eq(
+      harness.api.getThinkingLevel(),
+      "medium",
+      "direct mode menu applies the selected mode defaults",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+    eq(
+      latestStatus(harness, "workflow"),
+      undefined,
+      "workflow clears on shutdown",
+    );
+    eq(
+      latestStatus(harness, "plan"),
+      undefined,
+      "plan progress clears on shutdown",
+    );
+    const nextContext = harness.makeContext({ cwd: emptyCwd });
+    await harness.runHooks("session_start", {}, nextContext);
+    eq(
+      latestStatus(harness, "plan"),
+      undefined,
+      "new sessions do not inherit stale plan status",
+    );
+    assertNoGlobalChrome(
+      harness,
+      "plan mode installs no permanent widget or chrome",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(emptyCwd, { recursive: true, force: true });
+  }
+});
+
+await section("skill status lifecycle", async () => {
+  if (!skillMode) return;
+  const harness = createHarness();
+  skillMode.default(harness.api);
+  const context = harness.makeContext();
+  await harness.runHooks("session_start", {}, context);
+  await harness.commands.get("skill")("repo-analyse info", context);
+  eq(latestStatus(harness, "workflow"), "SKILL", "active skills publish SKILL");
+  assert(
+    harness.sent.some((entry) => entry.message.customType === "skill-context"),
+    "active skills inject their one-turn context",
+  );
+  await harness.runHooks("agent_end", { messages: [] }, context);
+  eq(
+    latestStatus(harness, "workflow"),
+    "WORK",
+    "completed skills restore WORK",
+  );
+  await harness.runHooks("session_shutdown", {}, context);
+  eq(
+    latestStatus(harness, "workflow"),
+    undefined,
+    "skill status clears on shutdown",
+  );
+  assertNoGlobalChrome(harness, "skill mode installs no global chrome");
+});
+
+// ───────────────── temporary dialogs and narrow terminals ─────────────────
+await section("ask-user temporary dialog", async () => {
+  if (!askUser || !askUserPolicy) return;
+  eq(
+    askUserPolicy.hasValidQuestionOptionCount(2),
+    true,
+    "ask_user accepts two options",
+  );
+  eq(
+    askUserPolicy.hasValidQuestionOptionCount(4),
+    true,
+    "ask_user accepts four options",
+  );
+  eq(
+    askUserPolicy.hasValidQuestionOptionCount(5),
+    false,
+    "ask_user rejects five options",
+  );
+  eq(askUserPolicy.digitSelection("2", 2), 2, "direct digit selection works");
+  eq(
+    askUserPolicy.digitSelection("3", 2),
+    undefined,
+    "digits never select the custom-input row",
+  );
+
+  const harness = createHarness({ columns: 24 });
+  askUser.default(harness.api);
+  const tool = harness.tools.get("ask_user");
+  assert(Boolean(tool), "ask_user is registered");
+  if (!tool) return;
+  const context = harness.makeContext();
+  const params = {
+    question:
+      "Welche sichere Option soll bei schmalem Terminal gewählt werden?",
+    why: "Die Auswahl muss ohne globale UI funktionieren.",
+    options: [
+      {
+        label: "Lesen",
+        description: "Nur prüfen.",
+        effort: "niedrig",
+        risk: "niedrig",
+      },
+      {
+        label: "Planen",
+        description: "Einen strukturierten Plan vorbereiten.",
+        effort: "mittel",
+        risk: "niedrig",
+      },
+    ],
+    recommendedIndex: 2,
+    recommendationReason: "Eine klare nächste Entscheidung.",
+  };
+  const pending = tool.execute(
+    "ask-user-test",
+    params,
+    undefined,
+    undefined,
+    context,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const component = harness.customComponents.at(-1);
+  assert(Boolean(component), "ask_user opens a temporary native dialog");
+  if (!component) return;
+  assert(
+    component.render(24).every((line) => stripAnsi(line).length <= 24),
+    "ask_user renders within a narrow 24-column terminal",
+  );
+  component.handleInput("2");
+  const result = await pending;
+  eq(result.details.answer, "Planen", "keyboard selection returns the choice");
+  eq(result.details.selectedIndex, 2, "selected index remains one-based");
+  assertNoGlobalChrome(harness, "ask_user uses no global editor or widget");
+
+  const nonTui = createHarness();
+  askUser.default(nonTui.api);
+  const nonTuiTool = nonTui.tools.get("ask_user");
+  for (const mode of ["json", "print", "rpc"]) {
+    const resultForMode = await nonTuiTool.execute(
+      "ask-user-non-tui",
+      params,
+      undefined,
+      undefined,
+      nonTui.makeContext({ mode, hasUI: false }),
+    );
+    assert(
+      resultForMode.content[0].text.includes(
+        "benötigt den interaktiven TUI-Modus",
+      ),
+      "ask_user returns a structured error in " + mode + " mode",
+    );
+  }
+  eq(nonTui.customComponents.length, 0, "ask_user opens no dialog outside TUI");
+});
+
+await section("permission dialog narrow rendering", async () => {
+  if (!permissionDialog) return;
+  const harness = createHarness({ columns: 24 });
+  const context = harness.makeContext();
+  const pending = permissionDialog.confirmAction(
+    context,
+    {
+      action: "ask",
+      reason: "This is a deliberately long confirmation reason for wrapping.",
+      hard: true,
+    },
+    "rm -rf build-output",
+    "bash",
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const component = harness.customComponents.at(-1);
+  assert(Boolean(component), "permission prompts use a temporary dialog");
+  if (!component) return;
+  assert(
+    component.render(24).every((line) => stripAnsi(line).length <= 24),
+    "permission dialog renders within a narrow 24-column terminal",
+  );
+  component.handleInput("d");
+  eq(await pending, false, "permission dialog denies via keyboard");
+  assertNoGlobalChrome(harness, "permission dialog installs no global chrome");
 });
 
 await section("combined production extension stack", async () => {

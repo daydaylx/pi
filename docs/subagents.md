@@ -25,18 +25,19 @@ completed. Full source review (all ~92 `.ts` files under `src/`) found:
 - No `eval`/dynamic remote code; all `spawn()` calls use array arguments (no
   shell injection); consistent timeout/SIGTERM/SIGKILL escalation.
 
-Verdict: trustworthy. See the migration plan for the full audit writeup.
+Verdict: trustworthy; the audit findings are summarized above.
 
 ## Known behavior change: coarser permission model
 
 `pi-subagents` does not understand the previous `permission`/`writeOverride`/
 `allowedPaths` frontmatter fields, and does not set the
-`PI_SUBAGENT_PERMISSION_LEVEL`/`PI_SUBAGENT_WRITE_OVERRIDE` environment
-variables that `mode-permissions.ts` used to read for spawned children (that
-bridge has been removed as dead code). It restricts child processes only
-through `--tools <list>`, which is a hard registry boundary in Pi core (a
-tool not in the list cannot be invoked, not merely discouraged) — but it is
-coarser than the previous five permission levels.
+`PI_SUBAGENT_PERMISSION_LEVEL`/`PI_SUBAGENT_WRITE_OVERRIDE`/
+`PI_SUBAGENT_ALLOWED_PATHS` environment variables that `mode-permissions.ts`
+used to read for spawned children (that bridge has been removed as dead code).
+It restricts child processes only through `--tools <list>`, which is a hard
+registry boundary in Pi core (a tool not in the list cannot be invoked, not
+merely discouraged) — but it is coarser than the previous five permission
+levels.
 
 **Concretely:** agents whose `tools:` frontmatter includes `bash`
 (`reviewer`, `security-auditor`, `test-runner`) now get full Bash access in

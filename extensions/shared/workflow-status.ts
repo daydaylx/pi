@@ -55,7 +55,6 @@ export const ZENTUI_STATUS_KEYS = {
   permissions: "permissions",
   workflow: "workflow",
   plan: "plan",
-  subagents: "subagents",
 } as const;
 
 export type PermissionStatusBase = "RO" | "RB" | "RW" | "FA" | "YOLO";
