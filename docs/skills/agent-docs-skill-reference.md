@@ -1,6 +1,14 @@
 # Referenz: Agenten-Dokumente-Skills
 
-Status: verbindliche Spezifikation für die Agenten-Dokumente-Skills  
+> **Historische Referenz — durch Phase 4 abgelöst, nicht umsetzen.** Die hier
+> beschriebenen `agent-docs-*`-Skills, ihre Shift+Tab-Integration und ihre
+> eigenen Rechteprofile gehören zum verworfenen Skill-Launcher. Aktive
+> Pi-Skills werden stattdessen nativ aus `skills/<name>/SKILL.md` entdeckt und
+> mit `/skill:<name>` aufgerufen. Diese Profil- und Menüregeln ersetzen oder
+> erweitern die zentrale Permission-Policy nicht und dürfen nicht als
+> Implementierungsvorgabe verwendet werden.
+
+Status: historisch / abgelöst
 Gilt für: `agent-docs-check`, `agent-docs-setup-preview`, `agent-docs-setup`, `agent-docs-review`  
 Ziel: Agenten-Dokumentation nicht generisch, sondern kontrolliert, repo-basiert und praktisch nutzbar erstellen oder prüfen.
 

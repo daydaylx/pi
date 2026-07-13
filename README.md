@@ -11,16 +11,26 @@ Pi Core
 ├── pi-zentui                 # global editor, footer, user-message chrome
 ├── pi-tool-display           # read/grep/find/ls/bash/edit/write renderer
 ├── pi-subagents              # subagent orchestration package
-└── local extensions          # permissions, workflow, skills, ask-user
+└── local extensions          # permissions, workflow, subagent status, ask-user
 ```
 
 Zentui owns the global editor and footer.  
 pi-tool-display owns the configured built-in tool renderers.  
 Local extensions own behavior and security, not global presentation.
 
-`workflow`, `permissions`, and `plan` are the only local status keys published
-to Zentui. No local extension may install a footer, editor, header, permanent
+`workflow`, `permissions`, and `subagents` are the only local status keys
+published to Zentui. The subagent adapter only publishes that key from the
+documented `pi-subagents` lifecycle API; it owns no footer, editor, header,
 widget, or sidebar.
+
+## Native skills
+
+Pi discovers the native skills in this agent directory from
+`skills/<name>/SKILL.md`; in this checkout that is Pi's global
+`~/.pi/agent/skills/` location. Invoke one with `/skill:<name> [arguments]`.
+Skills are not loaded through a local
+extension and are deliberately not a Shift+Tab workflow-menu entry. Their
+instructions remain subject to the active workflow and permission policy.
 
 ## Install and verify
 

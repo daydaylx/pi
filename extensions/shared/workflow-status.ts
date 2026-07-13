@@ -1,7 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export const WORKFLOW_STATUS_EVENT = "pi-workflow:status";
-
 export type WorkflowMode = "work" | "simple_plan" | "detailed_plan";
 
 export type WorkflowPhase =
@@ -53,30 +51,18 @@ export function normalizePermissionLevel(
 
 export const ZENTUI_STATUS_KEYS = {
   permissions: "permissions",
+  subagents: "subagents",
   workflow: "workflow",
-  plan: "plan",
 } as const;
 
 export type PermissionStatusBase = "RO" | "RB" | "RW" | "FA" | "YOLO";
 
-export type PermissionStatusValue =
-  | PermissionStatusBase
-  | "RO·LOCK"
-  | "RB·LOCK"
-  | "RW·LOCK"
-  | "FA·LOCK"
-  | "YOLO·LOCK"
-  | "RO·PLAN"
-  | "RB·PLAN"
-  | "RW·PLAN"
-  | "FA·PLAN"
-  | "YOLO·PLAN";
+export type PermissionStatusValue = PermissionStatusBase;
 
 export function permissionStatusValue(
   level: PermissionLevel,
-  writeOverride: WriteOverride = "inherit",
 ): PermissionStatusValue {
-  const base: PermissionStatusBase = (() => {
+  return (() => {
     switch (level) {
       case "read-only":
         return "RO";
@@ -90,19 +76,13 @@ export function permissionStatusValue(
         return "YOLO";
     }
   })();
-  if (writeOverride === "block") return `${base}·LOCK` as PermissionStatusValue;
-  if (writeOverride === "plan-file-only") {
-    return `${base}·PLAN` as PermissionStatusValue;
-  }
-  return base;
 }
 
-export type WorkflowStatusValue =
-  "PLAN" | "WORK" | "REVIEW" | "ANALYZE" | "SKILL";
+export type WorkflowStatusValue = "PLAN" | "WORK" | "REVIEW" | "ANALYZE";
 
 export function workflowStatusValue(
   phase: WorkflowPhase,
-): Exclude<WorkflowStatusValue, "SKILL"> {
+): WorkflowStatusValue {
   switch (phase) {
     case "draft":
       return "PLAN";
@@ -130,59 +110,3 @@ export function setTuiStatus(
   };
   ui.setStatus?.(key, value);
 }
-
-// Zusätzlicher Schreibrechte-Override. Die restriktivere Regel aus
-// Permission-Level und Override gewinnt.
-export type WriteOverride = "inherit" | "block" | "plan-file-only";
-
-export const WRITE_OVERRIDE_LABEL: Record<WriteOverride, string> = {
-  inherit: "Standard der Permission-Stufe",
-  block: "Blockiert",
-  "plan-file-only": "Nur Plan-Datei",
-};
-
-export const WRITE_OVERRIDE_DESCRIPTION: Record<WriteOverride, string> = {
-  inherit:
-    "Schreibrechte folgen der aktuellen Permission-Stufe ohne Zusatzbeschränkung",
-  block:
-    "Jeglicher Schreibzugriff ist blockiert, unabhängig von der Permission-Stufe",
-  "plan-file-only":
-    "Nur die Plan-Datei bleibt beschreibbar, alle anderen Schreibzugriffe sind blockiert",
-};
-
-export const SKILL_LAUNCHER_REQUEST_EVENT = "pi-workflow:skill-launcher";
-
-export interface SkillLauncherRequest {
-  ctx: ExtensionContext;
-}
-
-export type WorkflowStatusEvent =
-  | {
-      source: "plan";
-      mode: WorkflowMode;
-      phase: WorkflowPhase;
-      planExists: boolean;
-      completedTodos: number;
-      totalTodos: number;
-    }
-  | {
-      source: "permission";
-      writeOverride: WriteOverride;
-      permissionLevel: PermissionLevel;
-    };
-
-export const WORKFLOW_PHASE_LABEL: Record<WorkflowPhase, string> = {
-  idle: "WORK",
-  draft: "PLAN",
-  deciding: "DECIDE",
-  reviewing: "REVIEW",
-  reviewed: "REVIEWED",
-  executing: "WORK",
-  ready: "READY",
-};
-
-export const WORKFLOW_MODE_LABEL: Record<WorkflowMode, string> = {
-  work: "Work",
-  simple_plan: "Schnellplan",
-  detailed_plan: "Architekturplan",
-};

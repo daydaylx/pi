@@ -107,6 +107,27 @@ established prompts and output formats remain in effect without renaming.
 = 8, `parallel.concurrency` = 4, `globalConcurrencyLimit` = 20,
 `maxSubagentSpawnsPerSession` = 40.
 
+## Footer status
+
+Zentui owns the only persistent footer. The small local
+`extensions/subagent-status.ts` adapter merely publishes its `subagents` key:
+`SUB: idle`, `SUB: 1 active`, or `SUB: N active`. It has no widget, footer,
+timer, or polling loop; `pi-subagents` continues to show its own temporary
+activity widget while work is running.
+
+The adapter consumes the package's documented `subagent:async-started` /
+`subagent:async-complete` lifecycle events and Core's tool-execution lifecycle
+for regular `subagent` calls. On session restore it asks the documented v1 RPC
+for `status`. Version `0.34.0` returns that restore information as text rather
+than a structured count, so only its two known public headers are interpreted;
+an unfamiliar, failed, or still-outstanding reply degrades conservatively to
+`SUB: active` rather than claiming the fleet is idle. Because restored runs
+have no stable IDs in that protocol version, an unmatched completion asks for a
+fresh snapshot instead of decrementing a guessed count; a lifecycle change
+while a snapshot is in flight similarly invalidates it first. This bounded
+compatibility assumption is why the package stays exactly pinned in
+`settings.json`.
+
 ## Delegation criteria
 
 `AGENTS.md` → "Subagenten-Delegation" remains the single source of truth for

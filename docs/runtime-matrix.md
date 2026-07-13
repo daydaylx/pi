@@ -7,6 +7,7 @@
 | npm | `10.9.7` | `npm --version` |
 | pi-zentui | `0.3.0` | editor, footer, user chrome |
 | pi-tool-display | `0.5.0` | seven built-in tool owners |
+| pi-subagents | `0.34.0` | orchestration, temporary activity widget, status events |
 | Catppuccin | `@ujjwalgrover/pi-catppuccin@1.0.0` | `catppuccin-mocha` theme |
 | Operating system | Linux | CI and local clean install |
 | Terminals | Kitty narrow split, wide terminal | manual smoke test |

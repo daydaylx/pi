@@ -41,9 +41,6 @@ import {
   type TodoItem,
 } from "./utils.ts";
 import {
-  SKILL_LAUNCHER_REQUEST_EVENT,
-  WORKFLOW_STATUS_EVENT,
-  type SkillLauncherRequest,
   type WorkflowMode,
   type WorkflowPhase,
   ZENTUI_STATUS_KEYS,
@@ -121,11 +118,9 @@ const MODE_LABEL: Record<WorkflowMode, string> = {
 /**
  * `"decide"` startet den Decision-Intake (transiente Phase) statt einen
  * persistenten WorkflowMode zu setzen; `openModeMenu()` filtert ihn vor dem
- * Aufruf von setWorkflowMode() heraus. `"skill"` delegiert an skill-mode über
- * SKILL_LAUNCHER_REQUEST_EVENT (einziges verbleibendes Cross-Extension-Event,
- * bis Phase 4 den Skill-Launcher durch den nativen Mechanismus ersetzt).
+ * Aufruf von setWorkflowMode() heraus.
  */
-type ModeMenuAction = WorkflowMode | "decide" | "skill";
+type ModeMenuAction = WorkflowMode | "decide";
 
 function buildModeMenu(
   currentMode: WorkflowMode,
@@ -164,14 +159,6 @@ function buildModeMenu(
       section: "Klärung",
       value: "decide",
       current: deciding,
-    },
-    {
-      id: "mode-skill",
-      label: "Skill-Modus",
-      description:
-        "Geführte Skills: Repository analysieren, Git prüfen, Doku-Diff, Bug-Triage, Security-Audit u. a.",
-      section: "Skills",
-      value: "skill",
     },
   ];
 }
@@ -254,31 +241,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   }
 
   function updateStatus(ctx: ExtensionContext): void {
-    let todos: TodoItem[] = [];
-    let planExists = false;
-    try {
-      const content = readPlanFile(ctx.cwd);
-      planExists = content !== undefined;
-      todos = content === undefined ? [] : extractTodoItems(content);
-    } catch {
-      // A separate error is shown when a command accesses the unsafe path.
-    }
-
-    const completedTodos = todos.filter((todo) => todo.completed).length;
     setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, workflowStatusValue(phase));
-    setTuiStatus(
-      ctx,
-      ZENTUI_STATUS_KEYS.plan,
-      todos.length > 0 ? `${completedTodos}/${todos.length}` : undefined,
-    );
-    pi.events.emit(WORKFLOW_STATUS_EVENT, {
-      source: "plan",
-      mode,
-      phase,
-      planExists,
-      completedTodos,
-      totalTodos: todos.length,
-    });
   }
 
   function invalidateReview(): void {
@@ -874,12 +837,6 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
       { nonInteractiveHint: "Nutze /plan, um den Modus zu wählen." },
     );
     if (!selected) return;
-    if (selected === "skill") {
-      pi.events.emit(SKILL_LAUNCHER_REQUEST_EVENT, {
-        ctx,
-      } satisfies SkillLauncherRequest);
-      return;
-    }
     if (selected === "decide") {
       await enterDecisionModeFromMenu(ctx);
       return;
@@ -1754,6 +1711,5 @@ CHANGED_FILES:
 
   pi.on("session_shutdown", async (_event, ctx) => {
     setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, undefined);
-    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.plan, undefined);
   });
 }

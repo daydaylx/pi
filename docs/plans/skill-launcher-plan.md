@@ -1,6 +1,14 @@
-# Plan und Arbeitsauftrag: Menügeführter Skill-Launcher für Pi
+# Historischer Plan: menügeführter Skill-Launcher für Pi
 
-Status: Entwurf / Arbeitsauftrag  
+> **Abgelöst durch Phase 4 — nicht umsetzen.** Dieser Entwurf beschreibt den
+> verworfenen Eigenbau `extensions/skill-mode` mit Shift+Tab-Menü,
+> Ausführungsmodi und eigenen Permission-Profilen. Pi nutzt stattdessen native
+> Skills unter `skills/<name>/SKILL.md`, aufrufbar über `/skill:<name>`.
+> Die hier beschriebenen Menü-, Modus- und Profilmechanismen dürfen nicht als
+> aktuelle Implementierungsvorgabe verwendet werden; die Datei bleibt nur als
+> historische Referenz erhalten.
+
+Status: historisch / abgelöst
 Zielsystem: Pi Coding Agent  
 Zieldateien:
 

@@ -1,6 +1,14 @@
-# Pi Skill-Katalog für den menügeführten Skill-Launcher
+# Historischer Skill-Katalog für den menügeführten Skill-Launcher
 
-Status: Entwurf / Arbeitsgrundlage  
+> **Abgelöst durch Phase 4 — nicht umsetzen.** Dieser Katalog beschreibt den
+> verworfenen Eigenbau `extensions/skill-mode` mit Shift+Tab-Menü,
+> Ausführungsmodi und eigenen Permission-Profilen. Aktive Pi-Skills liegen als
+> `skills/<name>/SKILL.md` vor und werden über `/skill:<name>` aufgerufen.
+> Die Menü-, Modus- und Profilvorgaben dieses Dokuments dürfen nicht als
+> aktuelle Spezifikation verwendet werden; der Inhalt bleibt nur als
+> historische Ideensammlung erhalten.
+
+Status: historisch / abgelöst
 Zielsystem: Pi Coding Agent  
 Primäre Nutzung: Shift+Tab → Skills → Skill auswählen  
 Wichtig: Der Nutzer soll Skills über ein Menü starten können und nicht über Slash-Commands arbeiten müssen.

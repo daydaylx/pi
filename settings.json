@@ -47,8 +47,8 @@
     "!extensions/**",
     "+extensions/plan-mode/index.ts",
     "+extensions/mode-permissions.ts",
-    "+extensions/ask-user.ts",
-    "+extensions/skill-mode/index.ts"
+    "+extensions/subagent-status.ts",
+    "+extensions/ask-user.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",

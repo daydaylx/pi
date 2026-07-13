@@ -19,32 +19,23 @@ import {
 import { isPlanFilePath, PLAN_RELATIVE_PATH } from "./plan-mode/utils.ts";
 import { confirmAction } from "./shared/permission-dialog.ts";
 import { runMenu, type MenuEntry } from "./shared/menu-ui.ts";
-import {
-  buildPermissionMenu,
-  buildWriteOverrideMenu,
-} from "./shared/permission-menu.ts";
+import { buildPermissionMenu } from "./shared/permission-menu.ts";
 import { buildThinkingMenu } from "./shared/thinking-menu.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
 import {
   PERMISSION_LEVEL_LABEL,
-  WORKFLOW_STATUS_EVENT,
   ZENTUI_STATUS_KEYS,
-  WRITE_OVERRIDE_LABEL,
   normalizePermissionLevel,
   permissionStatusValue,
   setTuiStatus,
   type PermissionLevel,
-  type WriteOverride,
 } from "./shared/workflow-status.ts";
 
 const PERSISTED_STATE_KEY = "mode-permissions";
-const CONFIRM_ELEVATED_PERMISSIONS = false;
 
-// Auto-YOLO: aktiviert YOLO bei jedem Session-Start automatisch. Auf false
-// setzen, um das alte Verhalten (keine automatische Eskalation) wieder-
-// herzustellen. Die Permission-Stufe ist vom Workflow-Modus unabhängig und
-// jederzeit per /yolo oder Strg+Shift+Y änderbar.
-const AUTO_YOLO_ON_START = true;
+// Permission-Stufen sind vom Workflow-Modus unabhängig. YOLO wird nie beim
+// Session-Start aktiviert, sondern nur durch eine explizite Nutzeraktion.
+const AUTO_YOLO_ON_START = false;
 
 function permissionWarning(level: PermissionLevel): string | undefined {
   if (level === "full-access") {
@@ -54,12 +45,6 @@ function permissionWarning(level: PermissionLevel): string | undefined {
     return "YOLO aktiv: harte Warnmuster für Secrets, Systempfade und kritische Aktionen bleiben bestätigt.";
   }
   return undefined;
-}
-
-function normalizeWriteOverride(value: unknown): WriteOverride | undefined {
-  return value === "inherit" || value === "block" || value === "plan-file-only"
-    ? value
-    : undefined;
 }
 
 function toolPath(event: ToolCallEvent): string | undefined {
@@ -80,14 +65,12 @@ function decideTool(
   permissionLevel: PermissionLevel,
   event: ToolCallEvent,
   cwd: string,
-  writeOverride: WriteOverride,
 ): PolicyDecision {
   if (event.toolName === "bash") {
     return decideBash(
       permissionLevel,
       String((event.input as Record<string, unknown>).command ?? ""),
       cwd,
-      { writeOverride },
     );
   }
 
@@ -108,7 +91,6 @@ function decideTool(
   if (event.toolName === "write" || event.toolName === "edit") {
     const filePath = toolPath(event) ?? "";
     return decideFileAccess(permissionLevel, "write", filePath, cwd, {
-      writeOverride,
       protectedWritePath: PROTECTED_WRITE_PATH,
     });
   }
@@ -141,24 +123,18 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   let permissionLevel: PermissionLevel = AUTO_YOLO_ON_START
     ? "yolo"
     : "read-write";
-  let writeOverride: WriteOverride = "inherit";
   let sessionEpoch = 0;
 
   function publishStatus(ctx: ExtensionContext): void {
     setTuiStatus(
       ctx,
       ZENTUI_STATUS_KEYS.permissions,
-      permissionStatusValue(permissionLevel, writeOverride),
+      permissionStatusValue(permissionLevel),
     );
-    pi.events.emit(WORKFLOW_STATUS_EVENT, {
-      source: "permission",
-      writeOverride,
-      permissionLevel,
-    });
   }
 
   function persistState(): void {
-    pi.appendEntry(PERSISTED_STATE_KEY, { permissionLevel, writeOverride });
+    pi.appendEntry(PERSISTED_STATE_KEY, { permissionLevel });
   }
 
   async function applyPermissionLevel(
@@ -168,28 +144,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   ): Promise<void> {
     if (epoch !== sessionEpoch) return;
     if (level === permissionLevel) return;
-
-    if (
-      CONFIRM_ELEVATED_PERMISSIONS &&
-      (level === "full-access" || level === "yolo")
-    ) {
-      if (!ctx.hasUI) {
-        ctx.ui.notify(
-          `${PERMISSION_LEVEL_LABEL[level]} erfordert eine interaktive Bestätigung.`,
-          "error",
-        );
-        return;
-      }
-      const confirmText =
-        level === "yolo"
-          ? "Normale Work-Rückfragen werden umgangen. Systempfade, Secrets, SSH-Keys, sudo, Löschungen und extreme Befehle bleiben hart bestätigt."
-          : "Git-Housekeeping (reset/clean) und Paketmanager-Installationen werden ohne Rückfrage erlaubt. sudo, Löschungen, Force-Push, externe Schreibzugriffe und kritische Befehle bleiben bestätigt.";
-      const confirmed = await ctx.ui.confirm(
-        `${PERMISSION_LEVEL_LABEL[level]} für diese Session aktivieren?`,
-        confirmText,
-      );
-      if (!confirmed || epoch !== sessionEpoch) return;
-    }
 
     permissionLevel = level;
     publishStatus(ctx);
@@ -217,28 +171,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     await applyPermissionLevel(level, ctx, epoch);
   }
 
-  function applyWriteOverride(
-    next: WriteOverride,
-    ctx: ExtensionContext,
-  ): void {
-    writeOverride = next;
-    publishStatus(ctx);
-    persistState();
-    ctx.ui.notify(`Schreibrechte: ${WRITE_OVERRIDE_LABEL[next]}.`, "info");
-  }
-
-  async function openWriteOverrideMenu(ctx: ExtensionContext): Promise<void> {
-    const epoch = sessionEpoch;
-    const override = await runMenu(
-      ctx,
-      "Permissions",
-      buildWriteOverrideMenu(writeOverride),
-      { fallbackPrompt: "Schreibrechte wählen" },
-    );
-    if (!override || epoch !== sessionEpoch) return;
-    applyWriteOverride(override, ctx);
-  }
-
   async function openThinkingMenu(ctx: ExtensionContext): Promise<void> {
     const level = await runMenu(
       ctx,
@@ -259,7 +191,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   // Plan-Assistenten (Ctrl+Alt+P) erreichbar.
   type CommandMenuTarget =
     | "open-permission-menu"
-    | "open-write-menu"
     | "toggle-yolo"
     | "open-thinking-menu";
 
@@ -271,14 +202,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
         label: "/permission",
         description: "Zugriffsstufe wählen: nur lesen bis YOLO",
         value: "open-permission-menu",
-      },
-      {
-        id: "cmd-write",
-        section: "Berechtigungen",
-        label: "/write",
-        description:
-          "Schreibrechte festlegen: erlauben | sperren | nur Plan-Datei",
-        value: "open-write-menu",
       },
       {
         id: "cmd-yolo",
@@ -306,9 +229,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     switch (selected) {
       case "open-permission-menu":
         await openPermissionMenu(ctx);
-        return;
-      case "open-write-menu":
-        await openWriteOverrideMenu(ctx);
         return;
       case "toggle-yolo":
         await applyPermissionLevel(
@@ -356,23 +276,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("write", {
-    description: "Schreibrechte setzen: allow | block | plan-only",
-    handler: async (args, ctx) => {
-      const map: Record<string, WriteOverride> = {
-        allow: "inherit",
-        block: "block",
-        "plan-only": "plan-file-only",
-      };
-      const next = map[args.trim().toLowerCase()];
-      if (!next) {
-        ctx.ui.notify("Nutzung: /write allow|block|plan-only", "info");
-        return;
-      }
-      applyWriteOverride(next, ctx);
-    },
-  });
-
   pi.registerShortcut(SHORTCUTS.permissionMenu.keys, {
     description: SHORTCUTS.permissionMenu.description,
     handler: async (ctx) => openPermissionMenu(ctx),
@@ -384,7 +287,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    const decision = decideTool(permissionLevel, event, ctx.cwd, writeOverride);
+    const decision = decideTool(permissionLevel, event, ctx.cwd);
     const subject =
       event.toolName === "bash"
         ? String((event.input as Record<string, unknown>).command ?? "")
@@ -401,9 +304,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("user_bash", async (event, ctx) => {
-    const decision = decideBash(permissionLevel, event.command, event.cwd, {
-      writeOverride,
-    });
+    const decision = decideBash(permissionLevel, event.command, event.cwd);
     if (await approve(decision, event.command, ctx, "bash")) return;
     return {
       result: {
@@ -430,15 +331,16 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       | {
           data?: {
             permissionLevel?: PermissionLevel;
-            writeOverride?: WriteOverride;
           };
         }
       | undefined;
+    const restoredLevel = normalizePermissionLevel(
+      latestState?.data?.permissionLevel,
+    );
     permissionLevel =
-      normalizePermissionLevel(latestState?.data?.permissionLevel) ??
-      (AUTO_YOLO_ON_START ? "yolo" : "read-write");
-    writeOverride =
-      normalizeWriteOverride(latestState?.data?.writeOverride) ?? "inherit";
+      restoredLevel === "yolo"
+        ? "read-write"
+        : (restoredLevel ?? (AUTO_YOLO_ON_START ? "yolo" : "read-write"));
     publishStatus(ctx);
   });
 
