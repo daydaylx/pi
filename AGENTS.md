@@ -24,6 +24,18 @@ Diese Regeln gelten für alle Pi-Sitzungen.
 - Projektbezogene Anweisungen ergänzen diese Regeln, heben aber Schutzregeln
   nicht stillschweigend auf.
 
+## Repository-spezifische Architektur
+
+- Zentui besitzt den einzigen globalen Editor, Footer und User-Message-Chrome.
+- `pi-tool-display` besitzt die Built-in-Renderer `read`, `grep`, `find`,
+  `ls`, `bash`, `edit` und `write`.
+- Lokale Extensions dürfen Verhalten, Sicherheitsentscheidungen und temporäre
+  Dialoge bereitstellen, aber keine Header, Footer, Editoren, permanenten
+  Widgets oder Sidebars registrieren.
+- Nach Änderungen ist `npm --prefix npm run verify` auszuführen. Externe
+  Paketversionen bleiben exakt gepinnt und werden nicht als `latest` oder
+  Bereich referenziert.
+
 ## Subagenten-Delegation
 
 - Die Entscheidung, eine Aufgabe an das `subagent`-Tool zu delegieren, trifft
@@ -52,8 +64,8 @@ Diese Regeln gelten für alle Pi-Sitzungen.
   - Dokumentationsabgleich mit dem aktuellen Code → `docs-auditor`
   - UI/UX-Review → `ui-reviewer`
   - Zweitmeinung zu riskanten Plänen oder widersprüchlichen Reviews → `oracle`
-- Unabhängige Teilaufgaben parallel delegieren (`tasks[]`, max. 6 gleichzeitig),
-  abhängige Arbeitsschritte sequenziell verketten (`chain[]`).
+- Unabhängige Teilaufgaben parallel delegieren (`tasks[]`, max. 8 gleichzeitig,
+  Standardkonkurrenz 4), abhängige Arbeitsschritte sequenziell verketten (`chain[]`).
 - Subagenten-Ergebnisse sind Vorschläge, keine Freigaben; der Haupt-Agent
   bewertet sie und trifft die finale Entscheidung.
 
@@ -98,7 +110,7 @@ versehentlich unterbleibt:
 Beide ja → das `subagent`-Tool an passender Stelle aufrufen (parallel via
 `tasks[]`, sequenziell via `chain[]`). Wenn das Tool fehlt oder keine passenden
 Agenten gefunden werden, dies sichtbar als Diagnose/Blocker melden und auf
-`/tools`, `/subagent-doctor` und `/subagent-list` verweisen. Nicht stillschweigend
-so tun, als sei delegiert worden.
+`/tools`, `/subagents-doctor` und die Tool-Action `{action: "list"}` verweisen.
+Nicht stillschweigend so tun, als sei delegiert worden.
 
 Ergänzt die Regeln oben und hebt keine Schutzregel auf.

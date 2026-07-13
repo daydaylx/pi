@@ -11,33 +11,24 @@
     "strict": false,
     "noEmit": true,
     "types": ["node"],
+    "typeRoots": ["./npm/node_modules/@types"],
     "paths": {
-      // The @earendil-works/* packages and `typebox` are not present under
-      // ./npm/node_modules in this dev install, but they ARE installed
-      // globally (the global pi-coding-agent bundles pi-ai/pi-tui/typebox/
-      // pi-agent-core in its own node_modules). Pointing tsconfig at the
-      // global install gives REAL type-checking (#39). This path is
-      // machine-specific by design – the repo travels with the global pi
-      // install. Keep ./npm/node_modules as the generic fallback for jiti's
-      // runtime deps.
       "@earendil-works/pi-coding-agent": [
-        "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent"
+        "./npm/node_modules/@earendil-works/pi-coding-agent"
       ],
       "@earendil-works/pi-agent-core": [
-        "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-agent-core"
+        "./npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-agent-core"
       ],
       "@earendil-works/pi-ai": [
-        "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai"
+        "./npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai"
       ],
       "@earendil-works/pi-tui": [
-        "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui"
+        "./npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui"
       ],
       "typebox": [
-        "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox"
-      ],
-      "*": ["./npm/node_modules/*"]
-    },
-    "typeRoots": ["./npm/node_modules/@types"]
+        "./npm/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox"
+      ]
+    }
   },
   "include": ["extensions/**/*.ts", "types/**/*.d.ts"]
 }

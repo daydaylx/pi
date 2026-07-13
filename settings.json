@@ -1,10 +1,10 @@
 {
   "lastChangelogVersion": "0.80.6",
-  "theme": "pi-vivid",
-  "defaultProvider": "openrouter",
-  "defaultModel": "poolside/laguna-m.1:free",
+  "theme": "catppuccin-mocha",
+  "defaultProvider": "opencode-go",
+  "defaultModel": "kimi-k2.7-code",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "high",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -38,32 +38,17 @@
     "openrouter/poolside/laguna-m.1:free"
   ],
   "packages": [
-    "npm:pi-scroll",
-    "npm:pi-markdown-preview",
-    "npm:@zigai/pi-prompt-history",
-    {
-      "source": "npm:pi-claude-style-tools@1.0.64",
-      "extensions": [],
-      "themes": []
-    },
-    "npm:pi-zentui@0.3.0"
+    "npm:pi-zentui@0.3.0",
+    "npm:pi-tool-display@0.5.0",
+    "npm:@ujjwalgrover/pi-catppuccin@1.0.0",
+    "npm:pi-subagents@0.34.0"
   ],
   "extensions": [
     "!extensions/**",
-    "+extensions/notify.ts",
-    "+extensions/startup-banner.ts",
-    "+extensions/preview-runtime.ts",
-    "+extensions/tools.ts",
     "+extensions/plan-mode/index.ts",
-    "+extensions/subagents/index.ts",
     "+extensions/mode-permissions.ts",
-    "+extensions/ask-user.ts",
-    "+extensions/ux-status.ts",
-    "+extensions/actions.ts",
-    "+extensions/working-visuals.ts",
-    "+extensions/tool-visuals.ts",
-    "+extensions/skill-mode/index.ts",
-    "+extensions/activity-panel.ts"
+    "+extensions/subagent-status.ts",
+    "+extensions/ask-user.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",
@@ -95,11 +80,5 @@
   "images": {
     "blockImages": true
   },
-  "showHardwareCursor": true,
-  "pi-scroll": {
-    "defaultScope": "cwd",
-    "defaultFilterMode": "chat",
-    "preview": true,
-    "previewMinWidth": 100
-  }
+  "showHardwareCursor": true
 }

@@ -2,8 +2,6 @@
 name: architect
 description: Reviews architecture, alternatives, migration risks and long-term maintainability
 tools: read, grep, find, ls
-permission: read-only
-writeOverride: block
 timeoutMs: 900000
 ---
 

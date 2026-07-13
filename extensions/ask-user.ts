@@ -29,7 +29,6 @@ import {
   MIN_QUESTION_OPTIONS,
   type Level,
 } from "./shared/ask-user-policy.ts";
-import { glyphsFor, resolveRenderProfile } from "./shared/render-profile.ts";
 
 interface QuestionOption {
   label: string;
@@ -262,8 +261,6 @@ export default function askUser(pi: ExtensionAPI) {
 
           const lines: string[] = [];
           const renderWidth = Math.max(1, width);
-          const profile = resolveRenderProfile({ width, mode: ctx.mode });
-          const glyphs = glyphsFor(profile);
           const optionIndent = renderWidth < 48 ? "  " : "     ";
 
           function addWrapped(text: string) {
@@ -306,7 +303,7 @@ export default function askUser(pi: ExtensionAPI) {
             const prefix = selected ? theme.fg("accent", "> ") : "  ";
 
             if (opt.isOther === true) {
-              const label = `${i + 1}. ${opt.label}${editMode ? ` ${glyphs.edit}` : ""}`;
+              const label = `${i + 1}. ${opt.label}${editMode ? " ✎" : ""}`;
               const color = selected || editMode ? "accent" : "text";
               addWrappedWithPrefix(prefix, theme.fg(color, label));
               lines.push("");

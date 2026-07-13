@@ -41,20 +41,12 @@ import {
   type TodoItem,
 } from "./utils.ts";
 import {
-  PLAN_ACTION_REQUEST_EVENT,
-  WORKFLOW_MODE_REQUEST_EVENT,
-  WORKFLOW_STATUS_EVENT,
-  type PlanActionRequest,
   type WorkflowMode,
-  type WorkflowModeRequest,
   type WorkflowPhase,
+  ZENTUI_STATUS_KEYS,
+  setTuiStatus,
+  workflowStatusValue,
 } from "../shared/workflow-status.ts";
-import { createInfoBoxComponent } from "../shared/info-box.ts";
-import {
-  colorizeStatusLines,
-  formatWorkProgressLines,
-  formatWorkProgressWidgetLines,
-} from "../shared/visual-system.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import { SHORTCUTS } from "../shared/shortcuts.ts";
 import {
@@ -123,6 +115,54 @@ const MODE_LABEL: Record<WorkflowMode, string> = {
   work: "Work-Modus",
 };
 
+/**
+ * `"decide"` startet den Decision-Intake (transiente Phase) statt einen
+ * persistenten WorkflowMode zu setzen; `openModeMenu()` filtert ihn vor dem
+ * Aufruf von setWorkflowMode() heraus.
+ */
+type ModeMenuAction = WorkflowMode | "decide";
+
+function buildModeMenu(
+  currentMode: WorkflowMode,
+  deciding: boolean,
+): MenuEntry<ModeMenuAction>[] {
+  return [
+    {
+      id: "mode-simple-plan",
+      label: "Schnellplan",
+      description:
+        "Kleine Änderung planen. Schnell · wenig Risiko · keine Umsetzung ohne /work",
+      value: "simple_plan",
+      current: currentMode === "simple_plan",
+    },
+    {
+      id: "mode-detailed-plan",
+      label: "Architekturplan",
+      description:
+        "Größere Änderung sauber planen. Tief · strukturiert · sicher",
+      value: "detailed_plan",
+      current: currentMode === "detailed_plan",
+    },
+    {
+      id: "mode-work",
+      label: "Work-Modus",
+      description:
+        "Bestehenden Plan oder freie Aufgabe bearbeiten. Kontrolliert · explizit · nur mit aktuellen Permissions",
+      value: "work",
+      current: currentMode === "work",
+    },
+    {
+      id: "mode-decide",
+      label: "Optionen klären",
+      description:
+        "Vorentscheidung klären. 2–4 Optionen · Empfehlung · Decision Brief vor dem Plan",
+      section: "Klärung",
+      value: "decide",
+      current: deciding,
+    },
+  ];
+}
+
 interface PersistedWorkflowState {
   mode?: WorkflowMode;
   phase?: WorkflowPhase;
@@ -169,6 +209,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     return content === undefined ? [] : extractTodoItems(content);
   }
 
+  function formatPlanTodoLines(todos: TodoItem[]): string[] {
+    return todos.map(
+      (todo) => `${todo.completed ? "[x]" : "[ ]"} T${todo.step}: ${todo.text}`,
+    );
+  }
+
   function persistState(): void {
     pi.appendEntry<PersistedWorkflowState>("plan-mode", {
       mode,
@@ -195,54 +241,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   }
 
   function updateStatus(ctx: ExtensionContext): void {
-    let todos: TodoItem[] = [];
-    let planExists = false;
-    try {
-      const content = readPlanFile(ctx.cwd);
-      planExists = content !== undefined;
-      todos = content === undefined ? [] : extractTodoItems(content);
-    } catch {
-      // A separate error is shown when a command accesses the unsafe path.
-    }
-
-    const completedTodos = todos.filter((todo) => todo.completed).length;
-    pi.events.emit(WORKFLOW_STATUS_EVENT, {
-      source: "plan",
-      mode,
-      phase,
-      planExists,
-      completedTodos,
-      totalTodos: todos.length,
-    });
-
-    // Status/Footer werden zentral in ux-status.ts gerendert. Plan-mode liefert
-    // nur noch strukturierte Status-Events und das Work-Progress-Widget.
-    ctx.ui.setStatus("workflow-mode", undefined);
-    ctx.ui.setStatus("plan-todos-count", undefined);
-
-    if (phase === "executing" && todos.length > 0) {
-      const completed = todos.filter((todo) => todo.completed).length;
-      ctx.ui.setWidget("work-progress", (_tui, theme) => {
-        const todoLines = formatWorkProgressWidgetLines(todos);
-        const box = createInfoBoxComponent(
-          {
-            title: "Arbeitsfortschritt",
-            subtitle: `${completed}/${todos.length} erledigt`,
-            sections: [{ title: "Todos", lines: todoLines }],
-            tone: "accent",
-            background: "customMessageBg",
-          },
-          theme,
-        );
-        return {
-          render: box.render.bind(box),
-          invalidate: box.invalidate.bind(box),
-        };
-      });
-    } else {
-      ctx.ui.setWidget("work-progress", undefined);
-      ctx.ui.setWidget("plan-todos", undefined);
-    }
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, workflowStatusValue(phase));
   }
 
   function invalidateReview(): void {
@@ -434,7 +433,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         );
         return;
       }
-      ctx.ui.notify(formatWorkProgressLines(todos).join("\n"), "info");
+      ctx.ui.notify(formatPlanTodoLines(todos).join("\n"), "info");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(
@@ -826,9 +825,24 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     );
   }
 
-  pi.events.on(WORKFLOW_MODE_REQUEST_EVENT, (request: WorkflowModeRequest) =>
-    setWorkflowMode(request.mode, request.ctx),
-  );
+  // Shift+Tab-Modusmenü: früher ein eigener Event-Rundweg über actions.ts +
+  // shared/mode-menu.ts (WORKFLOW_MODE_REQUEST_EVENT /
+  // PLAN_ACTION_REQUEST_EVENT). Da nur diese Extension Modi setzt, ruft das
+  // Menü setWorkflowMode()/enterDecisionModeFromMenu() jetzt direkt auf.
+  async function openModeMenu(ctx: ExtensionContext): Promise<void> {
+    const selected = await runMenu<ModeMenuAction>(
+      ctx,
+      "Modus",
+      buildModeMenu(mode, phase === "deciding"),
+      { nonInteractiveHint: "Nutze /plan, um den Modus zu wählen." },
+    );
+    if (!selected) return;
+    if (selected === "decide") {
+      await enterDecisionModeFromMenu(ctx);
+      return;
+    }
+    await setWorkflowMode(selected, ctx);
+  }
 
   pi.registerFlag("plan", {
     description: "Start in detailed plan mode (permissions unchanged)",
@@ -862,6 +876,11 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     handler: async (ctx) => {
       await routePlan(ctx);
     },
+  });
+
+  pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
+    description: SHORTCUTS.modeMenu.description,
+    handler: async (ctx) => openModeMenu(ctx),
   });
 
   pi.on("context", async (event) => {
@@ -1607,30 +1626,6 @@ CHANGED_FILES:
     }
   }
 
-  pi.events.on(PLAN_ACTION_REQUEST_EVENT, (request: PlanActionRequest) => {
-    if (request.action === "choose") {
-      void routePlan(request.ctx);
-      return;
-    }
-    if (request.action === "decide") {
-      void runDecisionIntake(request.ctx);
-      return;
-    }
-    if (request.action === "decide-mode") {
-      void enterDecisionModeFromMenu(request.ctx);
-      return;
-    }
-    if (request.action === "work") {
-      void executePlan(request.ctx);
-      return;
-    }
-    if (request.action === "review") {
-      void reviewPlan(request.ctx);
-      return;
-    }
-    void runFinish(request.ctx);
-  });
-
   pi.registerCommand("finish", {
     description: "Plan abschließen und sicher archivieren",
     handler: async (_args, ctx) => finishPlan(ctx),
@@ -1712,5 +1707,9 @@ CHANGED_FILES:
       phase = "idle";
     }
     updateStatus(ctx);
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, undefined);
   });
 }

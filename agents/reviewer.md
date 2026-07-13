@@ -2,8 +2,6 @@
 name: reviewer
 description: Reviews diffs and code for bugs, regressions, scope drift and missing tests
 tools: read, grep, find, ls, bash
-permission: read-bash
-writeOverride: block
 timeoutMs: 900000
 ---
 

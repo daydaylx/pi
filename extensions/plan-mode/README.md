@@ -20,7 +20,7 @@ steps.
 - `/decide`: starts the optional **Decision-Intake** (see "Decision-Intake
   (Klärmodus)" below) — an interactive clarification that produces a Decision
   Brief. It is also reachable as the _Optionen klären_ action inside `/plan`
-  and the `/decide` entry in the `Ctrl+Shift+X` command menu.
+  and as the Shift+Tab mode-menu entry of the same name.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
   independently of whether a review happened. If a plan is already executing,
   a duplicate `/work` call is ignored instead of aborting and restarting it.
@@ -39,9 +39,11 @@ steps.
 
 `/plan` is a state-aware assistant (details below). Shift+Tab opens the same
 three persistent modes as a mode picker (no permissions, no thinking, no
-tools — see `extensions/shared/mode-menu.ts`), plus a fourth, non-persistent
-**Optionen klären** entry that starts the Decision-Intake directly from
-Shift+Tab; permission levels have their own picker on `Ctrl+Shift+Y` (below).
+tools — `buildModeMenu()`/`openModeMenu()` in `index.ts`), plus a fourth,
+non-persistent **Optionen klären** entry that switches into the Klär-Modus
+without starting a turn immediately; permission levels have their own picker
+on `Ctrl+Shift+Y` (below). Native skills use Pi Core's `/skill:<name>` commands
+and are intentionally not a workflow-menu entry.
 Internal `WorkflowMode` values are unchanged; only the labels were renamed for
 clarity:
 
@@ -78,10 +80,9 @@ constant (`SUBAGENT_EXECUTING_REMINDER`) so they can't drift apart again.
 
 ## `/plan` plan assistant
 
-`/plan`, `Ctrl+Alt+P`, and the `open-plan-picker` entry in the `Ctrl+Shift+X`
-command menu all route through the same assistant. It renders the shared
-`runMenu(...)` overlay (with a plain `ctx.ui.select(...)` fallback) and offers
-different actions depending on the current state:
+`/plan` and `Ctrl+Alt+P` route through the same assistant. It renders the
+shared `runMenu(...)` overlay (with a plain `ctx.ui.select(...)` fallback) and
+offers different actions depending on the current state:
 
 - **No plan file exists** — _Neuer Schnellplan_, _Neuer Architekturplan_,
   _Abbrechen_.
@@ -197,9 +198,9 @@ Workflow mode and permission level are independent. Changing
 the active workflow mode, and each level applies the same way in all modes.
 `read-only` and `read-bash` retain the explicit
 `.agent/plans/current-plan.md` write exception. Permission selection and the
-existing `/write` override are persisted per session. For the three writable
-levels, a restrictive `/write` override takes precedence; `read-only` and
-`read-bash` always retain their current-plan-file exception.
+selected level are persisted per session. New sessions start in `read-write`;
+a persisted `yolo` level is deliberately reset to `read-write` at session
+start, while every other saved level is restored.
 
 | Level         | Effective access                                                                                                       |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -220,9 +221,7 @@ warnings' credibility.
 
 Use `/permission <level>` to select a level directly. `/full-access` and
 `/yolo` toggle their respective level and return to `read-write` when invoked
-again. `/write allow|block|plan-only` independently restores normal writes,
-blocks writes governed by the override, or restricts them to the current plan
-file. The explicit plan-file exception at the two read-restricted levels is
+again. The explicit plan-file exception at the two read-restricted levels is
 unaffected.
 
 `Ctrl+Shift+Y` opens a quick picker containing all five permission levels.
@@ -230,15 +229,13 @@ The picker and all permission commands remain available independently of the
 workflow mode, plan/review phase, or current idle state. They never change the
 workflow mode or abort a running turn.
 
-`CONFIRM_ELEVATED_PERMISSIONS` is currently disabled in
-`mode-permissions.ts`, so `full-access` and `yolo` activate directly. The
-operation-level hard warnings enforced by the central policy remain unchanged.
+`full-access` and `yolo` activate directly when selected. The operation-level
+hard warnings enforced by the central policy remain unchanged.
 
-`AUTO_YOLO_ON_START` is currently enabled in `mode-permissions.ts`. A session
-without persisted permission state therefore starts in `yolo`; a resumed or
-reloaded session restores its latest saved permission level and `/write`
-override. Set that constant to `false` to make new sessions start in
-`read-write`.
+`AUTO_YOLO_ON_START` is `false` in `mode-permissions.ts`. Every new session
+starts at `read-write`; a resumed session also downgrades a previously saved
+`yolo` level to `read-write`. This keeps YOLO exclusively manual via `/yolo`,
+`/permission yolo`, or the permission picker.
 
 The central `mode-permissions.ts` extension enforces file, path, Bash and
 secret policy. Hard warnings for secrets, system paths, destructive root
@@ -281,25 +278,18 @@ path.
 
 `Ctrl+Shift+Y` opens the permission picker; `/yolo` remains the direct YOLO
 toggle. Both change only the permission level, which is visibly marked by the
-single central header/footer from `ux-status.ts`. On terminals without reliable modified-key reporting, use
+Zentui `permissions` status segment. On terminals without reliable modified-key reporting, use
 `/permission` or `/yolo`; Pi's preferred shortcut requires Kitty/CSI-u or
 compatible `modifyOtherKeys` support.
 
 ## Restrisiken (bewusste Entscheidungen)
 
-Zwei Punkte sind absichtlich so konfiguriert und bleiben als Restrisiko
-bestehen:
+Ein Punkt bleibt als bewusstes Restrisiko bestehen:
 
-- **YOLO-Autostart.** `AUTO_YOLO_ON_START = true` ist eine bewusste
-  Komfort-Entscheidung. Neue Sessions starten auf der höchsten Stufe; sudo,
-  Löschungen (auch `rm -rf ~`) und externe Schreibzugriffe laufen dort ohne
-  Rückfrage. Nur die harten Warnmuster (Root-Löschung, `.git`-Löschung,
-  `chmod 777`, Download-to-Shell, Systempfade, Secrets) bleiben aktiv.
 - **Planmodi sind Prompt-only.** `simple_plan`/`detailed_plan`/Review/Intake
   verbieten Umsetzung nur über den injizierten Kontext; technisch erzwungen
   wird nichts. Wer echten Schutz beim Planen will, wählt `read-only` oder
-  `read-bash` (Plan-Datei bleibt beschreibbar) oder setzt
-  `/write plan-only`.
+  `read-bash` (Plan-Datei bleibt beschreibbar).
 
 ## Compaction
 

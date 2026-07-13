@@ -1,7 +1,7 @@
 /**
- * Zentrale Shortcut-Definitionen. Registrierung (actions.ts, ux-status.ts,
- * mode-permissions.ts, plan-mode/index.ts) und die Ctrl+Shift+H-Hilfe lesen
- * dieselben Einträge, damit Tastenkürzel und Hilfetext nie auseinanderdriften.
+ * Zentrale Shortcut-Definitionen. Registrierung (mode-permissions.ts,
+ * plan-mode/index.ts) und die Ctrl+Shift+H-Hilfe lesen dieselben Einträge,
+ * damit Tastenkürzel und Hilfetext nie auseinanderdriften.
  */
 
 export interface ShortcutBinding {

@@ -2,8 +2,6 @@
 name: ui-reviewer
 description: Reviews UI and UX implementation for responsiveness, hierarchy, accessibility and visual consistency
 tools: read, grep, find, ls
-permission: read-only
-writeOverride: block
 timeoutMs: 900000
 ---
 

@@ -1,7 +1,6 @@
 import { existsSync, lstatSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { isPlanFilePath, PLAN_RELATIVE_PATH } from "../plan-mode/utils.ts";
-import type { PermissionLevel, WriteOverride } from "./workflow-status.ts";
+import type { PermissionLevel } from "./workflow-status.ts";
 
 export type PolicyAction = "allow" | "ask" | "block";
 export type FileOperation = "read" | "write";
@@ -30,8 +29,12 @@ const SYSTEM_PATHS = ["/etc", "/usr", "/bin", "/sbin", "/boot", "/var"];
 
 const CRITICAL_BASH_PATTERNS: Array<[RegExp, string]> = [
   [
-    /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\s+\/(?:\s|$)/i,
-    "rekursives Löschen des Root-Dateisystems",
+    /\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i,
+    "Löschen des Root-Dateisystems",
+  ],
+  [
+    /\brm\b[^;&|]*(?:\{[^}]*\}|`|\$(?:\(|\{[^}]*\}|['"]|[A-Za-z_][A-Za-z0-9_]*|[0-9?*#@!_-]))/,
+    "Löschen über eine dynamisch expandierte Pfadangabe",
   ],
   [
     /\bsudo\b[^;&|]*\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r)\b/i,
@@ -180,31 +183,6 @@ export function resolvePathScope(
   };
 }
 
-/**
- * #46: subagent write-scope. Returns true if `target` (a raw path as the
- * write/edit tool receives it) resolves to a location equal to or nested
- * inside one of the `allowedPatterns` (project-relative or absolute paths).
- * An empty pattern list means "no restriction" – the caller is responsible
- * for handling the unrestricted case (e.g. requiring confirmation). Patterns
- * are paths/dirs, not globs.
- */
-export function isPathWithinAllowed(
-  target: string,
-  cwd: string,
-  allowedPatterns: string[],
-): boolean {
-  if (allowedPatterns.length === 0) return true;
-  const root = resolve(cwd);
-  const targetAbs = resolve(root, target);
-  for (const raw of allowedPatterns) {
-    const pattern = raw.trim();
-    if (!pattern) continue;
-    const allowedAbs = isAbsolute(pattern) ? resolve(pattern) : resolve(root, pattern);
-    if (isInside(allowedAbs, targetAbs)) return true;
-  }
-  return false;
-}
-
 export function isSensitiveReference(value: string): boolean {
   const withoutEnvExample = value.replace(ENV_EXAMPLE_PATTERN, "$1");
   return (
@@ -222,16 +200,31 @@ function isSystemPath(path: string): boolean {
   );
 }
 
+/**
+ * Identifies a caller-defined write exception (e.g. the workflow extension's
+ * plan file) that stays writable even under restrictive permission levels.
+ * Keeps this module independent from any specific workflow mode.
+ */
+export interface ProtectedWritePath {
+  matches: (rawPath: string, cwd: string) => boolean;
+  label: string;
+}
+
+export interface DecideFileAccessOptions {
+  protectedWritePath?: ProtectedWritePath;
+}
+
 export function decideFileAccess(
   permissionLevel: PermissionLevel,
   operation: FileOperation,
   rawPath: string,
   cwd: string,
-  writeOverride: WriteOverride = "inherit",
+  options: DecideFileAccessOptions = {},
 ): PolicyDecision {
+  const { protectedWritePath } = options;
   const scope = resolvePathScope(rawPath, cwd);
   const isReadRestricted =
-    permissionLevel === "read-only" || permissionLevel === "read-bash" || permissionLevel === "test-bash";
+    permissionLevel === "read-only" || permissionLevel === "read-bash";
 
   if (
     isSensitiveReference(rawPath) ||
@@ -246,10 +239,10 @@ export function decideFileAccess(
 
   if (isReadRestricted) {
     if (operation === "write") {
-      return isPlanFilePath(rawPath, cwd)
+      return protectedWritePath?.matches(rawPath, cwd)
         ? ALLOW
         : deny(
-            `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${PLAN_RELATIVE_PATH}.`,
+            `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${protectedWritePath?.label ?? "keine Datei"}.`,
           );
     }
     if (!scope.insideProject || scope.symlinkEscape) {
@@ -258,15 +251,6 @@ export function decideFileAccess(
       );
     }
     return ALLOW;
-  }
-
-  if (operation === "write" && writeOverride === "block") {
-    return deny("Schreibrechte-Einstellung: Schreiben ist blockiert.");
-  }
-  if (operation === "write" && writeOverride === "plan-file-only") {
-    return isPlanFilePath(rawPath, cwd)
-      ? ALLOW
-      : deny("Schreibrechte-Einstellung: nur die Plan-Datei ist beschreibbar.");
   }
 
   if (operation === "write" && scope.symlinkEscape) {
@@ -315,6 +299,15 @@ export function parseReadOnlyShell(command: string): ParsedShell {
       escaped = true;
       continue;
     }
+    // Command substitution is active outside quotes and inside double quotes;
+    // it is literal only inside single quotes. Check before quote handling so
+    // `echo "$(touch file)"` cannot pass the harmless `echo` allowlist.
+    if (
+      quote !== "'" &&
+      (char === "`" || (char === "$" && next === "("))
+    ) {
+      return { segments: [], error: "Command-Substitution ist nicht erlaubt." };
+    }
     if (quote) {
       current += char;
       if (char === quote) quote = undefined;
@@ -324,9 +317,6 @@ export function parseReadOnlyShell(command: string): ParsedShell {
       quote = char;
       current += char;
       continue;
-    }
-    if (char === "`" || (char === "$" && next === "(")) {
-      return { segments: [], error: "Command-Substitution ist nicht erlaubt." };
     }
     if (char === "\n" || char === "\r" || char === ";" || char === "&") {
       return { segments: [], error: "Shell-Verkettungen sind nicht erlaubt." };
@@ -435,10 +425,7 @@ function isSafeGit(tokens: string[]): boolean {
     case "show":
       return true;
     case "branch":
-      return !hasAnyOption(tokens, [
-        /^-[dDmMcC]$/,
-        /^--(?:delete|move|copy)$/i,
-      ]);
+      return isSafeGitBranch(tokens);
     case "remote":
       return tokens.length === 2 || (tokens.length === 3 && tokens[2] === "-v");
     case "config":
@@ -446,6 +433,46 @@ function isSafeGit(tokens: string[]): boolean {
     default:
       return subcommand.startsWith("ls-");
   }
+}
+
+function isSafeGitBranch(tokens: string[]): boolean {
+  const args = tokens.slice(2);
+  if (args.length === 0) return true;
+  if (args.length === 1 && args[0] === "--show-current") return true;
+
+  // `git branch <name>` creates a branch. Only a short, explicit list of
+  // read-only listing/filter options is accepted; unknown flags and bare
+  // operands are denied unless `--list`/`-l` makes them patterns.
+  const safeFlags = new Set([
+    "-a",
+    "--all",
+    "-r",
+    "--remotes",
+    "-v",
+    "-vv",
+    "--verbose",
+    "--no-color",
+  ]);
+  const safeValueOptions = [
+    /^--(?:color|column|contains|no-contains|merged|no-merged|points-at|sort|format)=.+$/i,
+  ];
+  let listPatternsAllowed = false;
+
+  for (const arg of args) {
+    if (arg === "-l" || arg === "--list") {
+      listPatternsAllowed = true;
+      continue;
+    }
+    if (
+      safeFlags.has(arg) ||
+      safeValueOptions.some((pattern) => pattern.test(arg))
+    ) {
+      continue;
+    }
+    if (listPatternsAllowed && !arg.startsWith("-")) continue;
+    return false;
+  }
+  return true;
 }
 
 function isSafePlanSegment(tokens: string[], cwd: string): boolean {
@@ -496,6 +523,10 @@ function isSafePlanSegment(tokens: string[], cwd: string): boolean {
     if (tokens.length === 2 && ["-v", "--version"].includes(tokens[1])) {
       return true;
     }
+    const subcommand = tokens[1]?.toLowerCase();
+    if (subcommand === "audit") {
+      return !hasAnyOption(tokens, [/^--fix(?:=|$)/i]);
+    }
     return [
       "list",
       "ls",
@@ -503,8 +534,7 @@ function isSafePlanSegment(tokens: string[], cwd: string): boolean {
       "info",
       "search",
       "outdated",
-      "audit",
-    ].includes(tokens[1]?.toLowerCase());
+    ].includes(subcommand);
   }
   if (["python", "python3"].includes(executable)) {
     return tokens.length === 2 && tokens[1] === "--version";
@@ -563,64 +593,6 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
   );
 }
 
-// #43: Test-safe commands – extends read-only with controlled test/check runners.
-// Allowed: npm test, npm run test*, tsc --noEmit, npm run lint (without --fix),
-// node <test-file>, npx vitest run, and similar no-write check commands.
-// Blocked: install, update, format, build (with output), delete, sudo.
-const TEST_SAFE_PATTERNS: Array<[RegExp, string]> = [
-  [/^npm\s+test\b/, "npm test"],
-  [/^npm\s+run\s+test(?::\w+)?\b/, "npm run test"],
-  [/^npx\s+vitest\s+run\b/, "npx vitest run"],
-  [/^npx\s+vitest\b(?!.*\b(watch|ui|dev)\b)/, "npx vitest (run mode only)"],
-  [/^npx\s+playwright\s+test\b/, "npx playwright test"],
-  [/^npx\s+cypress\s+run\b/, "npx cypress run"],
-  [/^npx\s+jest\b/, "npx jest"],
-  [/^tsc\s+--noEmit\b/, "tsc --noEmit"],
-  [/^npx\s+tsc\s+--noEmit\b/, "npx tsc --noEmit"],
-  [/^npm\s+run\s+lint\b(?!.*--fix)/, "npm run lint (no --fix)"],
-  [/^npx\s+eslint\b(?!.*--fix)/, "npx eslint (no --fix)"],
-  [/^npx\s+prettier\s+--check\b/, "npx prettier --check"],
-  [/^node\s+\S*tests?[/\\]/, "node test runner"],
-  [/^node\s+\S*test\.m?js\b/, "node test file"],
-  [/^node\s+\S*\.test\.(?:ts|m?js)\b/, "node .test file"],
-  [/^npx\s+mocha\b/, "npx mocha"],
-  [/^npm\s+run-script\s+test\b/, "npm run-script test"],
-];
-
-// Block patterns that are never allowed under test-bash
-const TEST_BLOCK_PATTERNS: Array<[RegExp, string]> = [
-  [/(?:&&|\|\||[|;&<>`\n\r]|\$\(|\$\{)/, "shell metacharacter (chaining/redirect/substitution)"], // #45
-  [/\bnpm\s+(i|install|uninstall|update|upgrade|audit\s+fix|outdated|rebuild|ci|dedupe|prune|shrinkwrap)\b/, "npm package management"],
-  [/\bnpx\s+.{0,20}\b(install|update|uninstall|create|init|add|remove)\b/, "npx package management"],
-  [/\byarn\s+(add|remove|install|upgrade)\b/, "yarn package management"],
-  [/\bpnpm\s+(add|remove|install|update)\b/, "pnpm package management"],
-  [/\bpip\s+install\b/, "pip install"],
-  [/\b(?:npm|npx|yarn)\s+run\s+(?:build|format|fmt|fix|release|deploy|publish|start|dev|serve|watch)\b/, "build/release command"],
-  [/--fix\b/, "--fix flag"],
-  [/--write\b/, "--write flag"],
-  [/\brm\s+(-[rRf]\s+)*[^\s]/, "rm command"],
-  [/\b(?:rmdir|unlink)\b/, "destructive file removal"],
-  [/\bsudo\b/, "sudo"],
-  [/\bchmod\s+[^\s]*[wrx]/, "chmod with permission change"],
-  [/\bchown\b/, "chown"],
-];
-
-export function isTestSafeCommand(command: string, cwd: string): boolean {
-  const trimmed = command.trim();
-
-  // Block destructive patterns first
-  for (const [pattern] of TEST_BLOCK_PATTERNS) {
-    if (pattern.test(trimmed)) return false;
-  }
-
-  // Allow known safe test patterns
-  for (const [pattern] of TEST_SAFE_PATTERNS) {
-    if (pattern.test(trimmed)) return true;
-  }
-
-  return false;
-}
-
 function referencesSystemPath(command: string): boolean {
   return SYSTEM_PATHS.some((path) =>
     new RegExp(
@@ -637,17 +609,11 @@ function likelyExternalWrite(command: string, cwd: string): boolean {
   return isWriteCapableCommand(command) && containsExternalPath(tokens, cwd);
 }
 
-export interface DecideBashOptions {
-  writeOverride?: WriteOverride;
-}
-
 export function decideBash(
   permissionLevel: PermissionLevel,
   command: string,
   cwd: string,
-  options: DecideBashOptions = {},
 ): PolicyDecision {
-  const { writeOverride = "inherit" } = options;
   const trimmed = command.trim();
   if (!trimmed) return deny("Leeres Bash-Kommando.");
 
@@ -660,16 +626,6 @@ export function decideBash(
     return isPlanSafeCommand(trimmed, cwd)
       ? ALLOW
       : deny("Read + Bash: Das Kommando ist nicht nachweislich read-only.");
-  }
-
-  // #43: test-bash extends read-bash with controlled test/check commands
-  if (permissionLevel === "test-bash") {
-    if (isPlanSafeCommand(trimmed, cwd)) return ALLOW;
-    if (isTestSafeCommand(trimmed, cwd)) return ALLOW;
-    return deny(
-      "Test Bash: Das Kommando ist kein erlaubter Test/Lint/Check-Befehl. " +
-      "Erlaubt sind npm test, npm run test, tsc --noEmit, npm run lint (ohne --fix) und ähnliche reine Prüfbefehle.",
-    );
   }
 
   if (isSensitiveReference(trimmed)) {
@@ -688,14 +644,6 @@ export function decideBash(
       />>/.test(trimmed))
   ) {
     return ask("Änderung an einem Systempfad", true);
-  }
-
-  if (writeOverride !== "inherit" && isWriteCapableCommand(trimmed)) {
-    return writeOverride === "block"
-      ? deny("Schreibrechte-Einstellung: Schreiben ist blockiert.")
-      : deny(
-          "Schreibrechte-Einstellung: Bash darf nur über das write/edit-Tool die Plan-Datei ändern.",
-        );
   }
 
   for (const [pattern, reason] of SENSITIVE_ASK_PATTERNS) {

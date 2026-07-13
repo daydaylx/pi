@@ -1,14 +1,14 @@
 {
-  "projectRefreshIntervalMs": 30000,
+  "projectRefreshIntervalMs": 0,
   "colorSources": {
-    "starship": "terminal",
+    "starship": "theme",
     "editor": "theme",
     "userMessages": "theme"
   },
   "features": {
     "editor": true,
-    "statusLine": false,
-    "copyFriendly": true
+    "statusLine": true,
+    "copyFriendly": false
   },
   "footerSegments": {
     "cwd": false,
@@ -20,8 +20,16 @@
     "cost": false
   },
   "extensionStatuses": {
-    "defaultPlacement": "right",
-    "placements": {},
-    "colorModes": {}
+    "defaultPlacement": "off",
+    "placements": {
+      "workflow": "right",
+      "permissions": "right",
+      "subagents": "right"
+    },
+    "colorModes": {
+      "workflow": "zentui",
+      "permissions": "zentui",
+      "subagents": "zentui"
+    }
   }
 }
