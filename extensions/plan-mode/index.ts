@@ -241,7 +241,17 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   }
 
   function updateStatus(ctx: ExtensionContext): void {
-    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, workflowStatusValue(phase));
+    let todos: TodoItem[] = [];
+    try {
+      todos = readTodos(ctx.cwd);
+    } catch {
+      // A transient filesystem error must not hide the current workflow mode.
+    }
+    setTuiStatus(
+      ctx,
+      ZENTUI_STATUS_KEYS.workflow,
+      workflowStatusValue(phase, mode, todos),
+    );
   }
 
   function invalidateReview(): void {

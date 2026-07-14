@@ -1,5 +1,7 @@
 {
   "debug": false,
+  "compactTimeline": true,
+  "showThinkingLabels": false,
   "registerToolOverrides": {
     "read": true,
     "grep": true,
@@ -9,15 +11,21 @@
     "edit": true,
     "write": true
   },
-  "customToolOverrides": {},
+  "customToolOverrides": {
+    "subagent": {
+      "enabled": true,
+      "kind": "generic",
+      "outputMode": "preview"
+    }
+  },
   "enableNativeUserMessageBox": false,
-  "readOutputMode": "summary",
-  "searchOutputMode": "count",
-  "mcpOutputMode": "summary",
+  "readOutputMode": "preview",
+  "searchOutputMode": "preview",
+  "mcpOutputMode": "preview",
   "previewLines": 8,
   "expandedPreviewMaxLines": 4000,
-  "bashOutputMode": "summary",
-  "bashCollapsedLines": 10,
+  "bashOutputMode": "preview",
+  "bashCollapsedLines": 0,
   "diffViewMode": "auto",
   "diffIndicatorMode": "bars",
   "diffSplitMinWidth": 120,
