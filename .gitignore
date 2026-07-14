@@ -11,3 +11,6 @@ backups/
 
 # OpenRouter free-model cache (regenerated via /or-free-refresh)
 openrouter-free-models.json
+
+# Local clones of upstream packages (working area, not part of this repo)
+/git/
