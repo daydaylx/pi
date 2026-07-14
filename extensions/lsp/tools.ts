@@ -6,13 +6,24 @@
  * always runs, even on error, so the registry's idle timer stays correct.
  */
 
-import { isAbsolute, relative, resolve as resolvePath } from "node:path";
+import { isAbsolute, join, relative, resolve as resolvePath } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Type } from "typebox";
+import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { LspConfig, LspLogger } from "./types.ts";
+import type { LspConfig, LspLogger, ServerProfile } from "./types.ts";
 import { LspError } from "./types.ts";
 import type { ServerRegistry } from "./registry.ts";
+import type { LspClient } from "./client.ts";
 import { getDocumentSync, resolveTarget } from "./documents.ts";
+import type { ResolvedTarget } from "./documents.ts";
+import { normalizeCapabilities } from "./capabilities.ts";
+import { findWorkspaceRoot } from "./roots.ts";
+
+/** Default cap for lsp_references; not user-configurable to keep scope small. */
+const DEFAULT_REFERENCES_LIMIT = 100;
+/** How long a workspace/symbol result is reused before a fresh request. */
+const WORKSPACE_SYMBOL_CACHE_TTL_MS = 30_000;
 
 /** Wiring supplied by index.ts (#97) so tools stay decoupled from lifecycle. */
 export interface LspToolsDeps {
@@ -161,4 +172,524 @@ export function registerLspDiagnosticsTool(
       }
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// #96: definition, references, hover, workspace symbols
+// ---------------------------------------------------------------------------
+
+const PositionFields = {
+  path: Type.String({
+    description:
+      "Pfad zur Datei, absolut oder relativ zum aktuellen Arbeitsverzeichnis",
+  }),
+  line: Type.Integer({ minimum: 0, description: "0-basierte Zeilennummer" }),
+  character: Type.Integer({
+    minimum: 0,
+    description: "0-basierte Spaltennummer",
+  }),
+};
+
+const DefinitionParams = Type.Object({
+  ...PositionFields,
+  preferLinks: Type.Optional(
+    Type.Boolean({
+      description:
+        "LocationLink-Antworten bevorzugen, falls der Server sie unterstützt",
+      default: false,
+    }),
+  ),
+});
+
+const ReferencesParams = Type.Object({
+  ...PositionFields,
+  includeDeclaration: Type.Optional(
+    Type.Boolean({
+      description: "Die Deklaration selbst mit einschließen",
+      default: false,
+    }),
+  ),
+  limit: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: 500,
+      description: `Maximale Anzahl Ergebnisse (Default ${DEFAULT_REFERENCES_LIMIT})`,
+    }),
+  ),
+});
+
+const HoverParams = Type.Object({
+  ...PositionFields,
+  verbosity: Type.Optional(
+    StringEnum(["brief", "full"], {
+      description: "Kurzform oder vollständiger Hover-Text",
+    }),
+  ),
+});
+
+const WorkspaceSymbolsParams = Type.Object({
+  query: Type.String({
+    minLength: 1,
+    description: "Suchbegriff für Workspace-Symbole",
+  }),
+  limit: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: 200,
+      description: "Maximale Anzahl Ergebnisse",
+    }),
+  ),
+  server: Type.Optional(
+    Type.String({
+      description:
+        "Profil-ID (z. B. 'typescript'), falls nicht aus einer Datei ableitbar",
+    }),
+  ),
+});
+
+interface NormalizedLocation {
+  path: string;
+  line: number;
+  character: number;
+}
+
+interface NormalizedSymbol {
+  name: string;
+  kind: number;
+  path: string;
+  line: number;
+  character: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function uriToPath(uri: unknown): string | undefined {
+  if (typeof uri !== "string") return undefined;
+  try {
+    return fileURLToPath(uri);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Normalises a definition/references result: Location | Location[] | LocationLink[] | null. */
+function toLocationList(
+  result: unknown,
+  workspaceRoot: string,
+): NormalizedLocation[] {
+  const items = Array.isArray(result) ? result : result ? [result] : [];
+  const out: NormalizedLocation[] = [];
+  for (const item of items) {
+    if (!isRecord(item)) continue;
+    // LocationLink has targetUri/targetSelectionRange; Location has uri/range.
+    const uri = item.uri ?? item.targetUri;
+    const range = isRecord(item.range)
+      ? item.range
+      : isRecord(item.targetSelectionRange)
+        ? item.targetSelectionRange
+        : isRecord(item.targetRange)
+          ? item.targetRange
+          : undefined;
+    const start = isRecord(range?.start) ? range.start : undefined;
+    const path = uriToPath(uri);
+    if (!path || !start) continue;
+    out.push({
+      path: relativeToWorkspace(path, workspaceRoot),
+      line: Number(start.line ?? 0),
+      character: Number(start.character ?? 0),
+    });
+  }
+  return out;
+}
+
+/** Normalises a hover result: MarkupContent | MarkedString | MarkedString[] | null. */
+function toHoverText(
+  result: unknown,
+  verbosity: "brief" | "full",
+): string | undefined {
+  if (!isRecord(result)) return undefined;
+  const contents = result.contents;
+  let text: string | undefined;
+  if (isRecord(contents) && typeof contents.value === "string") {
+    text = contents.value; // MarkupContent
+  } else if (typeof contents === "string") {
+    text = contents; // MarkedString (string form)
+  } else if (Array.isArray(contents)) {
+    text = contents
+      .map((c) =>
+        typeof c === "string"
+          ? c
+          : isRecord(c) && typeof c.value === "string"
+            ? c.value
+            : "",
+      )
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  if (!text) return undefined;
+  if (verbosity === "brief") {
+    const firstParagraph = text.split(/\n\s*\n/)[0] ?? text;
+    return firstParagraph.length > 300
+      ? `${firstParagraph.slice(0, 300)}…`
+      : firstParagraph;
+  }
+  return text;
+}
+
+function toWorkspaceSymbols(
+  result: unknown,
+  workspaceRoot: string,
+  limit: number,
+): NormalizedSymbol[] {
+  const items = Array.isArray(result) ? result : [];
+  const out: NormalizedSymbol[] = [];
+  for (const item of items) {
+    if (out.length >= limit) break;
+    if (!isRecord(item)) continue;
+    const location = isRecord(item.location) ? item.location : undefined;
+    const range = isRecord(location?.range) ? location.range : undefined;
+    const start = isRecord(range?.start) ? range.start : undefined;
+    const path = uriToPath(location?.uri);
+    if (!path || !start || typeof item.name !== "string") continue;
+    out.push({
+      name: item.name,
+      kind: Number(item.kind ?? 0),
+      path: relativeToWorkspace(path, workspaceRoot),
+      line: Number(start.line ?? 0),
+      character: Number(start.character ?? 0),
+    });
+  }
+  return out;
+}
+
+/** Acquires a server, syncs the document, and guarantees release() on every path. */
+async function withDocument<T>(
+  deps: LspToolsDeps,
+  target: ResolvedTarget,
+  absPath: string,
+  fn: (client: LspClient, version: number) => Promise<T>,
+): Promise<{ text: string } | { ok: T; version: number }> {
+  const registry = deps.getRegistry();
+  let client: LspClient;
+  try {
+    ({ client } = await registry.acquire(target.workspaceRoot, target.profile));
+  } catch (error) {
+    const text =
+      error instanceof LspError
+        ? formatLspError(error)
+        : `LSP: unerwarteter Fehler beim Start von ${target.profile.label}: ${String(error)}`;
+    return { text };
+  }
+  try {
+    const sync = getDocumentSync(client, target.workspaceRoot, deps.logger);
+    const { version } = sync.openOrSync(absPath, target.languageId);
+    const ok = await fn(client, version);
+    return { ok, version };
+  } catch (error) {
+    const text =
+      error instanceof LspError
+        ? formatLspError(error)
+        : `LSP: unerwarteter Fehler: ${String(error)}`;
+    return { text };
+  } finally {
+    registry.release(target.workspaceRoot, target.profile.id);
+  }
+}
+
+function softFail(
+  feature: string,
+  profile: ServerProfile,
+): { content: [{ type: "text"; text: string }] } {
+  return {
+    content: [
+      {
+        type: "text",
+        text: `LSP: ${profile.label} unterstützt ${feature} nicht (Capability fehlt).`,
+      },
+    ],
+  };
+}
+
+export function registerLspNavigationTools(
+  pi: ExtensionAPI,
+  deps: LspToolsDeps,
+): void {
+  pi.registerTool({
+    name: "lsp_definition",
+    label: "LSP Definition",
+    description:
+      "Findet die Definitionsstelle eines Symbols an einer Position via Language Server Protocol.",
+    parameters: DefinitionParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const absPath = toAbsolute(params.path, ctx.cwd);
+      const config = deps.getConfig();
+      const target = resolveTarget(absPath, config);
+      if (target instanceof LspError) {
+        return { content: [{ type: "text", text: formatLspError(target) }] };
+      }
+
+      const outcome = await withDocument(
+        deps,
+        target,
+        absPath,
+        async (client) => {
+          const caps = normalizeCapabilities(client.serverCapabilities);
+          if (!caps.definition) return undefined;
+          const uri = pathToFileURL(absPath).href;
+          return client.request("textDocument/definition", {
+            textDocument: { uri },
+            position: { line: params.line, character: params.character },
+          });
+        },
+      );
+      if ("text" in outcome)
+        return { content: [{ type: "text", text: outcome.text }] };
+      if (outcome.ok === undefined)
+        return softFail("Definitionssuche", target.profile);
+
+      const locations = toLocationList(outcome.ok, target.workspaceRoot);
+      if (locations.length === 0) {
+        return {
+          content: [{ type: "text", text: "LSP: keine Definition gefunden." }],
+          details: { version: outcome.version },
+        };
+      }
+      const text = locations
+        .map((l) => `${l.path}:${l.line + 1}:${l.character + 1}`)
+        .join("\n");
+      return {
+        content: [{ type: "text", text }],
+        details: { version: outcome.version },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "lsp_references",
+    label: "LSP References",
+    description:
+      "Findet alle Referenzen auf ein Symbol an einer Position via Language Server Protocol.",
+    parameters: ReferencesParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const absPath = toAbsolute(params.path, ctx.cwd);
+      const config = deps.getConfig();
+      const target = resolveTarget(absPath, config);
+      if (target instanceof LspError) {
+        return { content: [{ type: "text", text: formatLspError(target) }] };
+      }
+
+      const outcome = await withDocument(
+        deps,
+        target,
+        absPath,
+        async (client) => {
+          const caps = normalizeCapabilities(client.serverCapabilities);
+          if (!caps.references) return undefined;
+          const uri = pathToFileURL(absPath).href;
+          return client.request("textDocument/references", {
+            textDocument: { uri },
+            position: { line: params.line, character: params.character },
+            context: { includeDeclaration: params.includeDeclaration ?? false },
+          });
+        },
+      );
+      if ("text" in outcome)
+        return { content: [{ type: "text", text: outcome.text }] };
+      if (outcome.ok === undefined)
+        return softFail("Referenzsuche", target.profile);
+
+      const all = toLocationList(outcome.ok, target.workspaceRoot);
+      const limit = params.limit ?? DEFAULT_REFERENCES_LIMIT;
+      const shown = all.slice(0, limit);
+      if (shown.length === 0) {
+        return {
+          content: [{ type: "text", text: "LSP: keine Referenzen gefunden." }],
+          details: { version: outcome.version },
+        };
+      }
+      const lines = shown.map(
+        (l) => `${l.path}:${l.line + 1}:${l.character + 1}`,
+      );
+      const suffix =
+        all.length > shown.length
+          ? `\n(${shown.length} von ${all.length} gezeigt)`
+          : "";
+      return {
+        content: [{ type: "text", text: lines.join("\n") + suffix }],
+        details: {
+          version: outcome.version,
+          total: all.length,
+          shown: shown.length,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "lsp_hover",
+    label: "LSP Hover",
+    description:
+      "Liefert Typ-/Dokumentationsinformationen für ein Symbol an einer Position via Language Server Protocol.",
+    parameters: HoverParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const absPath = toAbsolute(params.path, ctx.cwd);
+      const config = deps.getConfig();
+      const target = resolveTarget(absPath, config);
+      if (target instanceof LspError) {
+        return { content: [{ type: "text", text: formatLspError(target) }] };
+      }
+
+      const outcome = await withDocument(
+        deps,
+        target,
+        absPath,
+        async (client) => {
+          const caps = normalizeCapabilities(client.serverCapabilities);
+          if (!caps.hover) return undefined;
+          const uri = pathToFileURL(absPath).href;
+          return client.request("textDocument/hover", {
+            textDocument: { uri },
+            position: { line: params.line, character: params.character },
+          });
+        },
+      );
+      if ("text" in outcome)
+        return { content: [{ type: "text", text: outcome.text }] };
+      if (outcome.ok === undefined)
+        return softFail("Hover-Informationen", target.profile);
+
+      const verbosity: "brief" | "full" =
+        params.verbosity === "brief" ? "brief" : "full";
+      const text = toHoverText(outcome.ok, verbosity);
+      if (!text) {
+        return {
+          content: [
+            { type: "text", text: "LSP: keine Hover-Informationen verfügbar." },
+          ],
+          details: { version: outcome.version },
+        };
+      }
+      return {
+        content: [{ type: "text", text }],
+        details: { version: outcome.version },
+      };
+    },
+  });
+
+  const workspaceSymbolCache = new Map<
+    string,
+    { result: NormalizedSymbol[]; expiresAt: number }
+  >();
+
+  pi.registerTool({
+    name: "lsp_workspace_symbols",
+    label: "LSP Workspace Symbols",
+    description:
+      "Sucht Symbole (Funktionen, Klassen, …) im gesamten Workspace via Language Server Protocol.",
+    parameters: WorkspaceSymbolsParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const config = deps.getConfig();
+
+      // findWorkspaceRoot() walks up from a *file's* directory (it calls
+      // dirname() internally), so probe with a synthetic path inside cwd
+      // rather than cwd itself — otherwise the search would start one level
+      // too high, in cwd's parent.
+      const probePath = join(ctx.cwd, "__lsp_workspace_symbol_probe__");
+
+      let profile: ServerProfile | undefined;
+      let workspaceRoot: string | undefined;
+      if (params.server) {
+        profile = config.languages[params.server];
+        if (profile?.enabled) {
+          workspaceRoot =
+            findWorkspaceRoot(probePath, profile.rootMarkers) ?? ctx.cwd;
+        }
+      } else {
+        // No explicit server: pick the first enabled profile in configuration
+        // order whose root markers resolve from cwd (keeps this lazy — a
+        // single server start, no parallel fan-out across every profile).
+        for (const candidate of Object.values(config.languages)) {
+          if (!candidate.enabled) continue;
+          const root = findWorkspaceRoot(probePath, candidate.rootMarkers);
+          if (root) {
+            profile = candidate;
+            workspaceRoot = root;
+            break;
+          }
+        }
+      }
+
+      if (!profile || !workspaceRoot) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "LSP: kein aktiviertes Serverprofil für dieses Arbeitsverzeichnis gefunden.",
+            },
+          ],
+        };
+      }
+
+      const limit = params.limit ?? config.workspaceSymbolLimit;
+      const cacheKey = `${workspaceRoot}\0${profile.id}\0${params.query}\0${limit}`;
+      const cached = workspaceSymbolCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return {
+          content: [{ type: "text", text: formatSymbols(cached.result) }],
+          details: { cached: true, count: cached.result.length },
+        };
+      }
+
+      const registry = deps.getRegistry();
+      let client: LspClient;
+      try {
+        ({ client } = await registry.acquire(workspaceRoot, profile));
+      } catch (error) {
+        const text =
+          error instanceof LspError
+            ? formatLspError(error)
+            : `LSP: unerwarteter Fehler beim Start von ${profile.label}: ${String(error)}`;
+        return { content: [{ type: "text", text }] };
+      }
+      try {
+        const caps = normalizeCapabilities(client.serverCapabilities);
+        if (!caps.workspaceSymbols)
+          return softFail("Workspace-Symbolsuche", profile);
+
+        const result = await client.request("workspace/symbol", {
+          query: params.query,
+        });
+        const symbols = toWorkspaceSymbols(result, workspaceRoot, limit);
+        workspaceSymbolCache.set(cacheKey, {
+          result: symbols,
+          expiresAt: Date.now() + WORKSPACE_SYMBOL_CACHE_TTL_MS,
+        });
+        if (symbols.length === 0) {
+          return {
+            content: [{ type: "text", text: "LSP: keine Symbole gefunden." }],
+          };
+        }
+        return {
+          content: [{ type: "text", text: formatSymbols(symbols) }],
+          details: { cached: false, count: symbols.length },
+        };
+      } catch (error) {
+        const text =
+          error instanceof LspError
+            ? formatLspError(error)
+            : `LSP: unerwarteter Fehler: ${String(error)}`;
+        return { content: [{ type: "text", text }] };
+      } finally {
+        registry.release(workspaceRoot, profile.id);
+      }
+    },
+  });
+}
+
+function formatSymbols(symbols: NormalizedSymbol[]): string {
+  return symbols
+    .map((s) => `${s.name} — ${s.path}:${s.line + 1}:${s.character + 1}`)
+    .join("\n");
 }

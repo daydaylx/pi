@@ -1786,13 +1786,18 @@ await section(
       hoverProvider: true,
       definitionProvider: { linkSupport: true },
       referencesProvider: false,
-      workspace: { symbol: true },
+      // Correct LSP 3.17 shape: workspaceSymbolProvider is top-level, like
+      // hoverProvider/definitionProvider (fixed as part of #96 — the
+      // previous `workspace: { symbol: true }` shape never appears in a
+      // real InitializeResult and made normalizeCapabilities() always
+      // report workspaceSymbols as unsupported).
+      workspaceSymbolProvider: true,
       textDocument: { textDocumentSync: 1 },
     });
     assert(full.hover === true, "boolean hoverProvider");
     assert(full.definition === true, "object definitionProvider (truthy)");
     assert(full.references === false, "explicit false referencesProvider");
-    assert(full.workspaceSymbols === true, "workspace.symbol true");
+    assert(full.workspaceSymbols === true, "top-level workspaceSymbolProvider");
     assert(full.textDocumentSync === 1, "textDocumentSync passed through");
 
     const empty = capsMod.normalizeCapabilities({});
@@ -2297,6 +2302,272 @@ await section("LSP documents and diagnostics (#95)", async () => {
     if (client.processRunning) liveCount += 1;
   }
   eq(liveCount, 0, "no LSP client leaves a live process behind");
+
+  try {
+    rmSync(workspace, { recursive: true, force: true });
+  } catch {
+    /* ignore temp cleanup errors */
+  }
+});
+
+// ---------------------------------------------------------------------------
+// LSP navigation and symbol tools (#96). Uses the fake-lsp fixture;
+// deterministic, no real language server or network.
+// ---------------------------------------------------------------------------
+await section("LSP navigation and symbol tools (#96)", async () => {
+  const toolsMod = await load("extensions/lsp/tools.ts");
+  const registryMod = await load("extensions/lsp/registry.ts");
+  const profilesMod = await load("extensions/lsp/server-profiles.ts");
+
+  assert(
+    typeof toolsMod?.registerLspNavigationTools === "function",
+    "lsp tools exports registerLspNavigationTools",
+  );
+
+  const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+  const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp96-test-"));
+  writeFileSync(path.join(workspace, "tsconfig.json"), "{}");
+  const filePath = path.join(workspace, "target.ts");
+  writeFileSync(filePath, "export const target = 1;\n");
+
+  function fakeProfile(extra = {}) {
+    const { args: extraArgs = [], ...rest } = extra;
+    return {
+      id: "typescript",
+      label: "Fake TypeScript",
+      enabled: true,
+      command: process.execPath,
+      args: [fakeServer, ...extraArgs],
+      rootMarkers: ["tsconfig.json"],
+      ...rest,
+    };
+  }
+
+  function makeRegistryDeps(profileExtra = {}, configExtra = {}) {
+    const config = {
+      enabled: true,
+      mode: "auto",
+      requestTimeoutMs: 2000,
+      idleShutdownMs: 100000,
+      workspaceSymbolLimit: 50,
+      languages: {
+        ...profilesMod.PROFILES,
+        typescript: fakeProfile(profileExtra),
+      },
+      ...configExtra,
+    };
+    const registry = new registryMod.ServerRegistry({ config });
+    return {
+      config,
+      registry,
+      deps: { getConfig: () => config, getRegistry: () => registry },
+    };
+  }
+
+  async function check(name, fn) {
+    try {
+      await fn();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      assert(false, name + " threw: " + detail);
+    }
+  }
+
+  await check("lsp_definition: Location result", async () => {
+    const { registry, deps } = makeRegistryDeps();
+    const harness = createHarness();
+    toolsMod.registerLspNavigationTools(harness.api, deps);
+    const tool = harness.tools.get("lsp_definition");
+    assert(Boolean(tool), "lsp_definition tool is registered");
+    const context = harness.makeContext({ cwd: workspace });
+    const result = await tool.execute(
+      "call-1",
+      { path: "target.ts", line: 0, character: 0 },
+      undefined,
+      undefined,
+      context,
+    );
+    assert(
+      result.content[0].text.includes("target.ts:5:3"),
+      "definition points at the fake location",
+    );
+    await registry.shutdownAll();
+  });
+
+  await check("lsp_definition: LocationLink result", async () => {
+    const { registry, deps } = makeRegistryDeps({
+      args: ["--definition-links"],
+    });
+    const harness = createHarness();
+    toolsMod.registerLspNavigationTools(harness.api, deps);
+    const tool = harness.tools.get("lsp_definition");
+    const context = harness.makeContext({ cwd: workspace });
+    const result = await tool.execute(
+      "call-2",
+      { path: "target.ts", line: 0, character: 0, preferLinks: true },
+      undefined,
+      undefined,
+      context,
+    );
+    assert(
+      result.content[0].text.includes("target.ts:5:3"),
+      "LocationLink result is normalised the same way as Location",
+    );
+    await registry.shutdownAll();
+  });
+
+  await check(
+    "lsp_definition: capability gating without a server call",
+    async () => {
+      const { registry, deps } = makeRegistryDeps({
+        args: ["--no-definition-provider"],
+      });
+      const harness = createHarness();
+      toolsMod.registerLspNavigationTools(harness.api, deps);
+      const tool = harness.tools.get("lsp_definition");
+      const context = harness.makeContext({ cwd: workspace });
+      const result = await tool.execute(
+        "call-3",
+        { path: "target.ts", line: 0, character: 0 },
+        undefined,
+        undefined,
+        context,
+      );
+      assert(
+        result.content[0].text.toLowerCase().includes("unterstützt"),
+        "missing definitionProvider yields a soft-fail message instead of a request/crash",
+      );
+      await registry.shutdownAll();
+    },
+  );
+
+  await check("lsp_references: limit truncates with a count hint", async () => {
+    const { registry, deps } = makeRegistryDeps();
+    const harness = createHarness();
+    toolsMod.registerLspNavigationTools(harness.api, deps);
+    const tool = harness.tools.get("lsp_references");
+    const context = harness.makeContext({ cwd: workspace });
+    const result = await tool.execute(
+      "call-4",
+      { path: "target.ts", line: 0, character: 0, limit: 2 },
+      undefined,
+      undefined,
+      context,
+    );
+    assert(
+      result.content[0].text.includes("2 von 3 gezeigt"),
+      "references are truncated to the limit with a hint",
+    );
+    await registry.shutdownAll();
+  });
+
+  await check("lsp_hover: brief is shorter than full", async () => {
+    const { registry, deps } = makeRegistryDeps();
+    const harness = createHarness();
+    toolsMod.registerLspNavigationTools(harness.api, deps);
+    const tool = harness.tools.get("lsp_hover");
+    const context = harness.makeContext({ cwd: workspace });
+    const full = await tool.execute(
+      "call-5",
+      { path: "target.ts", line: 0, character: 0, verbosity: "full" },
+      undefined,
+      undefined,
+      context,
+    );
+    const brief = await tool.execute(
+      "call-6",
+      { path: "target.ts", line: 0, character: 0, verbosity: "brief" },
+      undefined,
+      undefined,
+      context,
+    );
+    assert(
+      full.content[0].text.includes("Detailed hover contents"),
+      "full hover includes the detail paragraph",
+    );
+    assert(
+      brief.content[0].text.length <= full.content[0].text.length,
+      "brief hover is not longer than full hover",
+    );
+    await registry.shutdownAll();
+  });
+
+  await check(
+    "lsp_workspace_symbols: limit and TTL cache avoid a second request",
+    async () => {
+      const { registry, deps } = makeRegistryDeps();
+      const harness = createHarness();
+      toolsMod.registerLspNavigationTools(harness.api, deps);
+      const tool = harness.tools.get("lsp_workspace_symbols");
+      const context = harness.makeContext({ cwd: workspace });
+
+      const first = await tool.execute(
+        "call-7",
+        { query: "target" },
+        undefined,
+        undefined,
+        context,
+      );
+      assert(
+        first.content[0].text.includes("target —"),
+        "workspace symbol search returns the fake symbol",
+      );
+      assert(
+        first.details?.cached === false,
+        "first call is not served from cache",
+      );
+
+      const second = await tool.execute(
+        "call-8",
+        { query: "target" },
+        undefined,
+        undefined,
+        context,
+      );
+      assert(
+        second.details?.cached === true,
+        "second identical call within TTL is served from cache",
+      );
+      await registry.shutdownAll();
+    },
+  );
+
+  await check(
+    "stale document version differs between two calls after a change",
+    async () => {
+      const { registry, deps } = makeRegistryDeps();
+      const harness = createHarness();
+      toolsMod.registerLspNavigationTools(harness.api, deps);
+      const tool = harness.tools.get("lsp_hover");
+      const context = harness.makeContext({ cwd: workspace });
+      const staleFile = path.join(workspace, "stale.ts");
+      writeFileSync(staleFile, "export const stale = 1;\n");
+
+      const before = await tool.execute(
+        "call-9",
+        { path: "stale.ts", line: 0, character: 0 },
+        undefined,
+        undefined,
+        context,
+      );
+      writeFileSync(
+        staleFile,
+        "export const stale = 2;\nexport const extra = 3;\n",
+      );
+      const after = await tool.execute(
+        "call-10",
+        { path: "stale.ts", line: 0, character: 0 },
+        undefined,
+        undefined,
+        context,
+      );
+      assert(
+        before.details?.version !== after.details?.version,
+        "a file change between two calls is reflected in a different version tag",
+      );
+      await registry.shutdownAll();
+    },
+  );
 
   try {
     rmSync(workspace, { recursive: true, force: true });

@@ -2,11 +2,12 @@
  * Optional, read-only LSP integration for Pi (Epic #92).
  *
  * #93 (transport, process, client, types), #94 (config, root detection,
- * server registry, profiles, capabilities) and #95 (document sync,
- * diagnostics) are implemented. This entry point is intentionally NOT
- * registered in `settings.json` yet: nothing activates automatically and no
- * server starts without explicit demand. The remaining tools and /lsp
- * command arrive in #96–#97 and will compose the pieces exported here.
+ * server registry, profiles, capabilities), #95 (document sync,
+ * diagnostics) and #96 (definition, references, hover, workspace symbols)
+ * are implemented. This entry point is intentionally NOT registered in
+ * `settings.json` yet: nothing activates automatically and no server starts
+ * without explicit demand. The /lsp command, status and trust-gated project
+ * config arrive in #97 and will compose the pieces exported here.
  *
  * Rollback: removing the (future) `+extensions/lsp/index.ts` entry from
  * `settings.json` fully disables LSP without touching any other extension.
@@ -69,6 +70,7 @@ export type {
 } from "./documents.ts";
 export {
   registerLspDiagnosticsTool,
+  registerLspNavigationTools,
   formatLspError,
   relativeToWorkspace,
 } from "./tools.ts";

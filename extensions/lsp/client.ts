@@ -45,12 +45,7 @@ export interface LspClientOptions {
 }
 
 export type LspClientState =
-  | "idle"
-  | "starting"
-  | "ready"
-  | "restarting"
-  | "degraded"
-  | "shutdown";
+  "idle" | "starting" | "ready" | "restarting" | "degraded" | "shutdown";
 
 /**
  * Emitted events:
@@ -94,7 +89,10 @@ export class LspClient extends EventEmitter {
 
     this.proc.on("ready", () => this.onProcessReady());
     this.proc.on("exit", (info) =>
-      this.logger("info", `process exit code=${info.code} signal=${info.signal}`),
+      this.logger(
+        "info",
+        `process exit code=${info.code} signal=${info.signal}`,
+      ),
     );
     this.proc.on("stderr", (chunk: Buffer) => {
       const text = chunk.toString("utf8").trimEnd();
@@ -227,7 +225,10 @@ export class LspClient extends EventEmitter {
     const stdin = this.proc.stdin;
     const stdout = this.proc.stdout;
     if (!stdin || !stdout) {
-      this.onDegraded({ cause: "spawn_error", message: "missing stdio streams" });
+      this.onDegraded({
+        cause: "spawn_error",
+        message: "missing stdio streams",
+      });
       return;
     }
     this.transport = new LspTransport(
@@ -254,11 +255,9 @@ export class LspClient extends EventEmitter {
       initializationOptions: this.initOptions,
     };
     try {
-      const result = (await this.transport!.sendRequest(
-        "initialize",
-        params,
-        { timeoutMs: this.requestTimeoutMs },
-      )) as LspInitializeResult;
+      const result = (await this.transport!.sendRequest("initialize", params, {
+        timeoutMs: this.requestTimeoutMs,
+      })) as LspInitializeResult;
       this.transport!.sendNotification("initialized", {});
       this.capabilities = result?.capabilities ?? {};
       this.setState("ready");
@@ -353,6 +352,11 @@ const CLIENT_CAPABILITIES = {
   textDocument: {
     synchronization: { didOpen: true, didChange: true, didClose: true },
     hover: { contentFormat: ["markdown", "plaintext"] },
+    // #96: without declaring linkSupport, servers never return
+    // LocationLink[] for textDocument/definition — only Location/Location[]
+    // — which would make the tool's preferLinks parameter a no-op.
+    definition: { linkSupport: true },
+    references: {},
   },
   workspace: {
     symbol: {},
@@ -362,7 +366,12 @@ const CLIENT_CAPABILITIES = {
 function isRpcError(
   value: unknown,
 ): { code: number; message: string; data?: unknown } | undefined {
-  if (value && typeof value === "object" && "code" in value && "message" in value) {
+  if (
+    value &&
+    typeof value === "object" &&
+    "code" in value &&
+    "message" in value
+  ) {
     return value as { code: number; message: string; data?: unknown };
   }
   return undefined;
