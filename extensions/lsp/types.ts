@@ -133,3 +133,61 @@ export interface LspInitializeResult {
 /** Lightweight logger sink; levels match the planned `--lsp-log` flag (#97). */
 export type LspLogLevel = "error" | "info" | "trace";
 export type LspLogger = (level: LspLogLevel, message: string) => void;
+
+// ---------------------------------------------------------------------------
+// Issue #94: configuration, root detection, registry and server profiles
+// ---------------------------------------------------------------------------
+
+/** Global or per-profile activation mode. */
+export type LspMode = "off" | "auto" | "force";
+
+/** Server-profile descriptor (static, shipped with the extension). */
+export interface ServerProfile {
+  /** Stable id, e.g. "typescript". */
+  id: string;
+  /** Human label. */
+  label: string;
+  /** Whether the profile is active by default. */
+  enabled: boolean;
+  /** Server binary. */
+  command: string;
+  /** Arguments passed to the binary (never a shell string). */
+  args: string[];
+  /** File-system markers that identify a workspace as relevant. */
+  rootMarkers: string[];
+  /** Optional `initializationOptions` sent during `initialize`. */
+  initializationOptions?: Record<string, unknown>;
+  /** Optional per-profile LSP `settings` (server configuration). */
+  settings?: Record<string, unknown>;
+  /** Human-readable note about risk level / prerequisites. */
+  notes?: string;
+}
+
+/** Effective configuration after resolving all layers. */
+export interface LspConfig {
+  enabled: boolean;
+  mode: LspMode;
+  requestTimeoutMs: number;
+  idleShutdownMs: number;
+  workspaceSymbolLimit: number;
+  languages: Record<string, ServerProfile>;
+}
+
+/** Configuration layers merged by `resolveConfig()`. */
+export interface ConfigLayers {
+  defaults: LspConfig;
+  global?: Partial<LspConfig>;
+  projectConfig?: Partial<LspConfig>;
+  sessionFlags?: Partial<LspConfig>;
+  /** If false, `projectConfig` is ignored entirely. */
+  trusted: boolean;
+}
+
+/** Normalised server capabilities used by #95 / #96 tools. */
+export interface LspCapabilities {
+  hover: boolean;
+  definition: boolean;
+  references: boolean;
+  workspaceSymbols: boolean;
+  textDocumentSync: number;
+}
