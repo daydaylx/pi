@@ -1630,6 +1630,252 @@ await section("combined production extension stack", async () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// LSP transport, process and lifecycle (#93). Deterministic: uses the local
+// fake-lsp fixture only, never a real language server or the network.
+// ---------------------------------------------------------------------------
+await section("LSP transport, process and lifecycle (#93)", async () => {
+  const transportMod = await load("extensions/lsp/transport.ts");
+  const clientMod = await load("extensions/lsp/client.ts");
+  const indexMod = await load("extensions/lsp/index.ts");
+  assert(
+    typeof transportMod?.parseStreamChunk === "function",
+    "lsp transport exports parseStreamChunk",
+  );
+  assert(typeof clientMod?.LspClient === "function", "lsp client exports LspClient");
+  assert(
+    typeof indexMod?.createLspClient === "function",
+    "lsp index exports createLspClient",
+  );
+
+  const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+  const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp-test-"));
+  const trackedClients = [];
+
+  function makeClient(extra = {}) {
+    const {
+      args: extraArgs = [],
+      process: extraProcess,
+      command = process.execPath,
+      ...rest
+    } = extra;
+    const client = new clientMod.LspClient({
+      serverId: "fake",
+      workspaceRoot: workspace,
+      command,
+      args:
+        command === process.execPath ? [fakeServer, ...extraArgs] : extraArgs,
+      requestTimeoutMs: 1000,
+      process: {
+        maxRestarts: 1,
+        backoffBaseMs: 40,
+        backoffMaxMs: 80,
+        shutdownGraceMs: 400,
+        ...extraProcess,
+      },
+      ...rest,
+    });
+    trackedClients.push(client);
+    return client;
+  }
+
+  async function check(name, fn) {
+    try {
+      await fn();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      assert(false, name + " threw: " + detail);
+    }
+  }
+
+  async function settle(client) {
+    try {
+      await client.shutdown();
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+
+  function frame(message) {
+    const body = Buffer.from(JSON.stringify(message), "utf8");
+    const header = Buffer.from(
+      `Content-Length: ${body.length}\r\n\r\n`,
+      "utf8",
+    );
+    return Buffer.concat([header, body]);
+  }
+
+  await check("framing parses coalesced and fragmented messages", async () => {
+    const parse = transportMod.parseStreamChunk;
+    const msg1 = { jsonrpc: "2.0", id: 1, method: "a", params: { n: 1 } };
+    const msg2 = { jsonrpc: "2.0", method: "note", params: { x: 2 } };
+    const msg3 = { jsonrpc: "2.0", id: 2, result: { ok: true } };
+    const buf = Buffer.concat([frame(msg1), frame(msg2), frame(msg3)]);
+    // Cut inside the first message body so the head is incomplete.
+    const cut = frame(msg1).length - 3;
+    const head = buf.subarray(0, cut);
+    const tail = buf.subarray(cut);
+    const first = parse(head);
+    eq(first.messages.length, 0, "partial head yields no complete message");
+    const second = parse(Buffer.concat([first.rest, tail]));
+    eq(second.messages.length, 3, "tail completes all three messages");
+    eq(second.rest.length, 0, "no trailing bytes remain");
+    eq(second.messages[0].id, 1, "first message id correlates");
+    eq(second.messages[2].result.ok, true, "third message result parsed");
+  });
+
+  await check("initialize handshake and a sample request", async () => {
+    const client = makeClient();
+    const result = await client.start();
+    assert(
+      result?.capabilities?.hoverProvider === true,
+      "initialize returns server capabilities",
+    );
+    const echo = await client.request("test/echo", { hello: "world" });
+    eq(echo.hello, "world", "test/echo returns the request params");
+    await settle(client);
+    assert(!client.processRunning, "no live process after shutdown");
+  });
+
+  await check("parallel requests correlate by id", async () => {
+    const client = makeClient();
+    await client.start();
+    const replies = await Promise.all([
+      client.request("test/parallel", { i: 1 }),
+      client.request("test/parallel", { i: 2 }),
+      client.request("test/parallel", { i: 3 }),
+    ]);
+    eq(
+      replies.map((r) => r.i),
+      [1, 2, 3],
+      "each parallel request resolves with its own params",
+    );
+    await settle(client);
+  });
+
+  await check("request timeout yields a structured error", async () => {
+    const client = makeClient({ args: ["--hang"] });
+    await client.start();
+    let caught;
+    try {
+      await client.request("test/echo", {}, { timeoutMs: 250 });
+    } catch (error) {
+      caught = error;
+    }
+    assert(Boolean(caught), "a hanging request rejects");
+    eq(caught?.kind, "timeout", "error kind is timeout");
+    eq(caught?.serverId, "fake", "error names the server id");
+    await settle(client);
+  });
+
+  await check("cancellation yields a structured error", async () => {
+    const client = makeClient({ args: ["--hang"] });
+    await client.start();
+    const ac = new AbortController();
+    const promise = client.request("test/echo", {}, {
+      signal: ac.signal,
+      timeoutMs: 5000,
+    });
+    setTimeout(() => ac.abort(), 40);
+    let caught;
+    try {
+      await promise;
+    } catch (error) {
+      caught = error;
+    }
+    eq(caught?.kind, "cancelled", "error kind is cancelled");
+    await settle(client);
+  });
+
+  await check("shutdown rejects in-flight requests promptly", async () => {
+    const client = makeClient({ args: ["--hang"] });
+    await client.start();
+    const started = Date.now();
+    const promise = client.request("test/echo", {}, { timeoutMs: 5000 });
+    // Shut down while the request is still hanging; it must reject now, not
+    // after the full 5s timeout (exercises transport close()/failAll).
+    setTimeout(() => {
+      client.shutdown().catch(() => undefined);
+    }, 60);
+    let caught;
+    try {
+      await promise;
+    } catch (error) {
+      caught = error;
+    }
+    const elapsed = Date.now() - started;
+    assert(Boolean(caught), "in-flight request rejects on shutdown");
+    assert(
+      elapsed < 4000,
+      "in-flight request rejects well before its 5s timeout (got " +
+        elapsed +
+        "ms)",
+    );
+    await settle(client);
+  });
+
+  await check("crash triggers a bounded restart then degrades", async () => {
+    const client = makeClient({
+      args: ["--crash-after-init"],
+      process: { maxRestarts: 1, backoffBaseMs: 30, backoffMaxMs: 60, shutdownGraceMs: 400 },
+    });
+    let restarts = 0;
+    client.on("restart", () => {
+      restarts += 1;
+    });
+    const degraded = new Promise((resolve) =>
+      client.once("degraded", () => resolve(true)),
+    );
+    await client.start(); // first init succeeds, server crashes right after
+    await Promise.race([degraded, new Promise((r) => setTimeout(() => r(false), 2000))]);
+    assert(restarts >= 1, "at least one automatic restart happened");
+    eq(
+      client.currentState,
+      "degraded",
+      "client degrades after bounded restart attempts",
+    );
+    await settle(client);
+    assert(!client.processRunning, "no live process after degraded + shutdown");
+  });
+
+  await check("missing binary yields a structured error without a crash", async () => {
+    const client = makeClient({
+      command: "pi-lsp-definitely-missing-binary-xyzzy",
+      args: [],
+    });
+    let caught;
+    try {
+      await client.start();
+    } catch (error) {
+      caught = error;
+    }
+    assert(Boolean(caught), "a missing binary rejects start");
+    eq(caught?.kind, "missing_binary", "error kind is missing_binary");
+    assert(!client.processRunning, "no live process for a missing binary");
+    await settle(client);
+  });
+
+  // Defensive sweep: every client must be shut down with no process left.
+  for (const client of trackedClients) {
+    try {
+      await client.shutdown();
+    } catch {
+      /* ignore */
+    }
+  }
+  let liveCount = 0;
+  for (const client of trackedClients) {
+    if (client.processRunning) liveCount += 1;
+  }
+  eq(liveCount, 0, "no LSP client leaves a live process behind");
+
+  try {
+    rmSync(workspace, { recursive: true, force: true });
+  } catch {
+    /* ignore temp cleanup errors */
+  }
+});
+
 console.log(
   "\n" +
     (failed === 0 ? "PASS" : "FAIL") +
