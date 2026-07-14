@@ -1,8 +1,8 @@
 {
-  "lastChangelogVersion": "0.80.6",
+  "lastChangelogVersion": "0.80.7",
   "theme": "catppuccin-mocha",
-  "defaultProvider": "zai",
-  "defaultModel": "glm-5.2",
+  "defaultProvider": "openrouter",
+  "defaultModel": "tencent/hy3:free",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -35,7 +35,8 @@
     "opencode-go/mimo-v2.5-pro",
     "opencode-go/mimo-v2.5",
     "openrouter/qwen/qwen3-coder:free",
-    "openrouter/poolside/laguna-m.1:free"
+    "openrouter/poolside/laguna-m.1:free",
+    "openrouter/tencent/hy3:free"
   ],
   "packages": [
     "git:github.com/daydaylx/pi-zentui@06d23d5f2b12f9c49ee26a1c4d8ec776b2ef8adc",
