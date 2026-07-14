@@ -1,6 +1,6 @@
 # LSP-Integration für Pi
 
-> Status: **geplant, noch nicht implementiert**  
+> Status: **v1 implementiert und aktiv (#93–#97 abgeschlossen); #98 (CI-Smoke mit echten Servern, ausführliche Doku/Troubleshooting) offen**  
 > Epic: [#92 – Optionale LSP-Integration für Pi](https://github.com/daydaylx/pi/issues/92)  
 > Zielpfad der Extension: `extensions/lsp/`
 
@@ -22,15 +22,15 @@ Rename, Code Actions, Formatierung, Completion, Signature Help, Inlay Hints und 
 
 ## 2. Verknüpfte Issues
 
-| Reihenfolge | Issue | Inhalt | Abhängigkeit |
-|---:|---|---|---|
-| 0 | [#92](https://github.com/daydaylx/pi/issues/92) | Epic und Gesamtsteuerung | – |
-| 1 | [#93](https://github.com/daydaylx/pi/issues/93) | Transport, Prozessverwaltung und Lifecycle | – |
-| 2 | [#94](https://github.com/daydaylx/pi/issues/94) | Konfiguration, Root-Erkennung und Server-Registry | #93 |
-| 3 | [#95](https://github.com/daydaylx/pi/issues/95) | Dokument-Synchronisation und Diagnosen | #93, #94 |
-| 4 | [#96](https://github.com/daydaylx/pi/issues/96) | Definitionen, Referenzen, Hover und Workspace-Symbole | #95 |
-| 5 | [#97](https://github.com/daydaylx/pi/issues/97) | Steuerung, Status, Trust-Gates und Permissions | #94–#96 |
-| 6 | [#98](https://github.com/daydaylx/pi/issues/98) | Tests, CI-Smokes, Dokumentation und Migration | alle |
+| Reihenfolge | Issue                                           | Inhalt                                                | Abhängigkeit | Status                                |
+| ----------: | ----------------------------------------------- | ----------------------------------------------------- | ------------ | ------------------------------------- |
+|           0 | [#92](https://github.com/daydaylx/pi/issues/92) | Epic und Gesamtsteuerung                              | –            | v1 abgeschlossen (#93–#97), #98 offen |
+|           1 | [#93](https://github.com/daydaylx/pi/issues/93) | Transport, Prozessverwaltung und Lifecycle            | –            | erledigt                              |
+|           2 | [#94](https://github.com/daydaylx/pi/issues/94) | Konfiguration, Root-Erkennung und Server-Registry     | #93          | erledigt                              |
+|           3 | [#95](https://github.com/daydaylx/pi/issues/95) | Dokument-Synchronisation und Diagnosen                | #93, #94     | erledigt                              |
+|           4 | [#96](https://github.com/daydaylx/pi/issues/96) | Definitionen, Referenzen, Hover und Workspace-Symbole | #95          | erledigt                              |
+|           5 | [#97](https://github.com/daydaylx/pi/issues/97) | Steuerung, Status, Trust-Gates und Permissions        | #94–#96      | erledigt                              |
+|           6 | [#98](https://github.com/daydaylx/pi/issues/98) | Tests, CI-Smokes, Dokumentation und Migration         | alle         | offen                                 |
 
 ## 3. Ziel
 
@@ -125,21 +125,21 @@ extensions/lsp/
 
 Verantwortlichkeiten:
 
-| Datei | Verantwortung |
-|---|---|
-| `index.ts` | Extension-Einstieg, Flags, Commands, Lifecycle-Hooks |
-| `types.ts` | interne Typen und normalisierte Ergebnisstrukturen |
-| `config.ts` | Defaults, Projektkonfiguration und Session-Overrides zusammenführen |
-| `roots.ts` | Workspace-Root anhand von Markern bestimmen |
-| `registry.ts` | Serverinstanzen pro Root und Server-ID verwalten |
-| `process.ts` | Spawn, Shutdown, Restart, Backoff und stderr |
-| `transport.ts` | LSP-Framing, JSON-RPC und Request-Korrelation |
-| `client.ts` | Initialize, Requests, Notifications und Capability-State |
-| `documents.ts` | didOpen, didChange, didClose und Dokumentversionen |
-| `capabilities.ts` | serverseitige Feature-Unterstützung normalisieren |
-| `tools.ts` | Pi-Tools registrieren und Ergebnisse aufbereiten |
-| `status.ts` | knappe zentui-/Footer-Zustände |
-| `server-profiles.ts` | sprachspezifische Befehle, Marker und sichere Defaults |
+| Datei                | Verantwortung                                                       |
+| -------------------- | ------------------------------------------------------------------- |
+| `index.ts`           | Extension-Einstieg, Flags, Commands, Lifecycle-Hooks                |
+| `types.ts`           | interne Typen und normalisierte Ergebnisstrukturen                  |
+| `config.ts`          | Defaults, Projektkonfiguration und Session-Overrides zusammenführen |
+| `roots.ts`           | Workspace-Root anhand von Markern bestimmen                         |
+| `registry.ts`        | Serverinstanzen pro Root und Server-ID verwalten                    |
+| `process.ts`         | Spawn, Shutdown, Restart, Backoff und stderr                        |
+| `transport.ts`       | LSP-Framing, JSON-RPC und Request-Korrelation                       |
+| `client.ts`          | Initialize, Requests, Notifications und Capability-State            |
+| `documents.ts`       | didOpen, didChange, didClose und Dokumentversionen                  |
+| `capabilities.ts`    | serverseitige Feature-Unterstützung normalisieren                   |
+| `tools.ts`           | Pi-Tools registrieren und Ergebnisse aufbereiten                    |
+| `status.ts`          | knappe zentui-/Footer-Zustände                                      |
+| `server-profiles.ts` | sprachspezifische Befehle, Marker und sichere Defaults              |
 
 ## 7. Tool-Schnittstellen
 
@@ -224,7 +224,11 @@ Session-Einstellungen haben die höchste Priorität.
       "enabled": true,
       "command": "pyright-langserver",
       "args": ["--stdio"],
-      "rootMarkers": ["pyrightconfig.json", "pyproject.toml", "requirements.txt"]
+      "rootMarkers": [
+        "pyrightconfig.json",
+        "pyproject.toml",
+        "requirements.txt"
+      ]
     },
     "rust": {
       "enabled": false,
@@ -262,14 +266,14 @@ Empfohlene Session-Flags:
 
 ## 9. Serverprofile
 
-| Priorität | Sprache | Server | Standard in v1 | Ressourcen/Risiko |
-|---:|---|---|---|---|
-| 1 | TypeScript/JavaScript | `typescript-language-server` + `typescript` | aktivierbar | mittel |
-| 2 | Python | `pyright-langserver` | aktivierbar | niedrig bis mittel |
-| 3 | Go | `gopls` | zunächst opt-in | mittel, kann Toolchain-Befehle ausführen |
-| 4 | Rust | `rust-analyzer` | deaktiviert | höher, Build-Skripte/Proc-Macros beachten |
-| 5 | C/C++ | `clangd` | deaktiviert | mittel bis hoch, benötigt gutes Compile-Setup |
-| 6 | Java | `eclipse.jdt.ls` | deaktiviert | hoch, zusätzliche Java-Runtime und Workspace-Daten |
+| Priorität | Sprache               | Server                                      | Standard in v1  | Ressourcen/Risiko                                  |
+| --------: | --------------------- | ------------------------------------------- | --------------- | -------------------------------------------------- |
+|         1 | TypeScript/JavaScript | `typescript-language-server` + `typescript` | aktivierbar     | mittel                                             |
+|         2 | Python                | `pyright-langserver`                        | aktivierbar     | niedrig bis mittel                                 |
+|         3 | Go                    | `gopls`                                     | zunächst opt-in | mittel, kann Toolchain-Befehle ausführen           |
+|         4 | Rust                  | `rust-analyzer`                             | deaktiviert     | höher, Build-Skripte/Proc-Macros beachten          |
+|         5 | C/C++                 | `clangd`                                    | deaktiviert     | mittel bis hoch, benötigt gutes Compile-Setup      |
+|         6 | Java                  | `eclipse.jdt.ls`                            | deaktiviert     | hoch, zusätzliche Java-Runtime und Workspace-Daten |
 
 ### 9.1 Sicherheitsdefaults
 
@@ -434,17 +438,17 @@ Issue: [#98](https://github.com/daydaylx/pi/issues/98)
 
 Die Schätzung ist eine Planungsgröße, keine Zusage.
 
-| Bereich | Aufwand |
-|---|---:|
-| Transport und Lifecycle | 3 PT |
-| Registry und Konfiguration | 2 PT |
-| Dokument-Sync und Diagnosen | 2 PT |
-| Navigation und Symbolsuche | 3 PT |
-| UX, Trust und Permissions | 2 PT |
-| Fehlerhärtung | 2 PT |
-| Tests und CI | 2 PT |
-| Dokumentation und Migration | 1 PT |
-| **Gesamt** | **ca. 17 PT** |
+| Bereich                     |       Aufwand |
+| --------------------------- | ------------: |
+| Transport und Lifecycle     |          3 PT |
+| Registry und Konfiguration  |          2 PT |
+| Dokument-Sync und Diagnosen |          2 PT |
+| Navigation und Symbolsuche  |          3 PT |
+| UX, Trust und Permissions   |          2 PT |
+| Fehlerhärtung               |          2 PT |
+| Tests und CI                |          2 PT |
+| Dokumentation und Migration |          1 PT |
+| **Gesamt**                  | **ca. 17 PT** |
 
 Ein schneller Prototyp wäre früher möglich, würde aber gerade bei Prozess-Lifecycle, Dokumentversionierung und Fehlerfällen technische Schulden erzeugen. Diese Abkürzung ist nicht empfohlen.
 
@@ -491,18 +495,18 @@ Der Smoke-Workflow wird manuell und optional zeitgesteuert ausgeführt. Er darf 
 
 ## 16. Risiken
 
-| Risiko | Wirkung | Gegenmaßnahme |
-|---|---|---|
-| fehlende Server-Binaries | Feature nicht nutzbar | präzise Installationsmeldung, Status `degraded` |
-| falscher Workspace-Root | falsche oder fehlende Ergebnisse | Marker konfigurierbar, Root im Status/Log anzeigen |
-| stale Ergebnisse | Agent erhält falsche Semantik | strikte Dokumentversionierung und Invalidation |
-| Server hängt | Pi-Session blockiert | Timeout, Cancellation, Kill und Backoff |
-| hoher RAM-/CPU-Verbrauch | schlechte Nutzererfahrung | Lazy Start, Idle Shutdown, Limits, konservative Defaults |
-| Build-Skripte oder Proc-Macros | Sicherheitsrisiko | Trust-Gate und standardmäßig deaktivieren |
-| CI-Flakiness | langsame Entwicklung | Fake-Server in PR-CI, echte Server separat |
-| Scope wächst zu schnell | instabile Architektur | v1 strikt read-only halten |
-| UI wird überladen | schlechter Workflow | nur Command und knapper Status |
-| Cross-Platform-Fehler | eingeschränkte Nutzbarkeit | Pfadnormalisierung von Beginn an, spätere Smoke-Matrix |
+| Risiko                         | Wirkung                          | Gegenmaßnahme                                            |
+| ------------------------------ | -------------------------------- | -------------------------------------------------------- |
+| fehlende Server-Binaries       | Feature nicht nutzbar            | präzise Installationsmeldung, Status `degraded`          |
+| falscher Workspace-Root        | falsche oder fehlende Ergebnisse | Marker konfigurierbar, Root im Status/Log anzeigen       |
+| stale Ergebnisse               | Agent erhält falsche Semantik    | strikte Dokumentversionierung und Invalidation           |
+| Server hängt                   | Pi-Session blockiert             | Timeout, Cancellation, Kill und Backoff                  |
+| hoher RAM-/CPU-Verbrauch       | schlechte Nutzererfahrung        | Lazy Start, Idle Shutdown, Limits, konservative Defaults |
+| Build-Skripte oder Proc-Macros | Sicherheitsrisiko                | Trust-Gate und standardmäßig deaktivieren                |
+| CI-Flakiness                   | langsame Entwicklung             | Fake-Server in PR-CI, echte Server separat               |
+| Scope wächst zu schnell        | instabile Architektur            | v1 strikt read-only halten                               |
+| UI wird überladen              | schlechter Workflow              | nur Command und knapper Status                           |
+| Cross-Platform-Fehler          | eingeschränkte Nutzbarkeit       | Pfadnormalisierung von Beginn an, spätere Smoke-Matrix   |
 
 ## 17. Migration und Rollback
 
