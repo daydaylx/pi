@@ -1,13 +1,12 @@
 # Pi Subagents
 
-Status: migrated to `pi-subagents` (npm, v0.34.0).
+Status: migrated to the pinned `daydaylx/pi-subagents` fork.
 
 ## Summary
 
 Subagent orchestration is provided by the third-party package
-[`pi-subagents`](https://github.com/nicobailon/pi-subagents), installed via
-`pi install npm:pi-subagents` and pinned exactly in `settings.json` →
-`packages`. The previous local implementation
+[`pi-subagents`](https://github.com/daydaylx/pi-subagents) is pinned as an
+immutable Git commit in `settings.json` → `packages`. The previous local implementation
 (`extensions/subagents/index.ts`, `agents.ts`, `runtime-status.ts`) has been
 removed.
 
@@ -54,11 +53,9 @@ in the child process at all — this remains a hard boundary.
 
 ## Installation
 
-```text
-pi install npm:pi-subagents
-```
-
-Pin the resulting version exactly in `settings.json` (no `latest`/range).
+The runtime source is a reviewed personal fork commit, not an npm range or
+`latest`. Update it by publishing a reviewed fork commit and replacing the
+full SHA in `settings.json`.
 
 ## Tool and commands
 
@@ -107,26 +104,14 @@ established prompts and output formats remain in effect without renaming.
 = 8, `parallel.concurrency` = 4, `globalConcurrencyLimit` = 20,
 `maxSubagentSpawnsPerSession` = 40.
 
-## Footer status
+## UI integration
 
-Zentui owns the only persistent footer. The small local
-`extensions/subagent-status.ts` adapter merely publishes its `subagents` key:
-`SUB: idle`, `SUB: 1 active`, or `SUB: N active`. It has no widget, footer,
-timer, or polling loop; `pi-subagents` continues to show its own temporary
-activity widget while work is running.
-
-The adapter consumes the package's documented `subagent:async-started` /
-`subagent:async-complete` lifecycle events and Core's tool-execution lifecycle
-for regular `subagent` calls. On session restore it asks the documented v1 RPC
-for `status`. Version `0.34.0` returns that restore information as text rather
-than a structured count, so only its two known public headers are interpreted;
-an unfamiliar, failed, or still-outstanding reply degrades conservatively to
-`SUB: active` rather than claiming the fleet is idle. Because restored runs
-have no stable IDs in that protocol version, an unmatched completion asks for a
-fresh snapshot instead of decrementing a guessed count; a lifecycle change
-while a snapshot is in flight similarly invalidates it first. This bounded
-compatibility assumption is why the package stays exactly pinned in
-`settings.json`.
+Zentui owns the only persistent footer and does not show subagent state. The
+local `extensions/subagent/config.json` sets `ui.showAsyncWidget` to `false`,
+so `pi-subagents` retains its lifecycle tracking, status commands, and
+notifications without a permanent activity widget. A `subagent` call appears
+only once: as a compact row in the shared tool timeline. Details remain
+available on manual expansion and are shown immediately on errors.
 
 ## Delegation criteria
 

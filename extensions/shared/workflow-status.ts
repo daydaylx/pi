@@ -51,48 +51,51 @@ export function normalizePermissionLevel(
 
 export const ZENTUI_STATUS_KEYS = {
   permissions: "permissions",
-  subagents: "subagents",
   workflow: "workflow",
 } as const;
 
-export type PermissionStatusBase = "RO" | "RB" | "RW" | "FA" | "YOLO";
+/** Only elevated permission modes belong in the compact footer. */
+export type PermissionRiskStatusValue = "⚠ FULL ACCESS" | "⚠ YOLO";
 
-export type PermissionStatusValue = PermissionStatusBase;
-
-export function permissionStatusValue(
+export function permissionRiskStatusValue(
   level: PermissionLevel,
-): PermissionStatusValue {
-  return (() => {
-    switch (level) {
-      case "read-only":
-        return "RO";
-      case "read-bash":
-        return "RB";
-      case "read-write":
-        return "RW";
-      case "full-access":
-        return "FA";
-      case "yolo":
-        return "YOLO";
-    }
-  })();
+): PermissionRiskStatusValue | undefined {
+  switch (level) {
+    case "full-access":
+      return "⚠ FULL ACCESS";
+    case "yolo":
+      return "⚠ YOLO";
+    default:
+      return undefined;
+  }
 }
 
-export type WorkflowStatusValue = "PLAN" | "WORK" | "REVIEW" | "ANALYZE";
+export type WorkflowProgressItem = {
+  completed: boolean;
+};
+
+export type WorkflowStatusValue = string;
 
 export function workflowStatusValue(
   phase: WorkflowPhase,
+  mode: WorkflowMode = "work",
+  todos: readonly WorkflowProgressItem[] = [],
 ): WorkflowStatusValue {
   switch (phase) {
     case "draft":
-      return "PLAN";
+      return mode === "detailed_plan" ? "ARCH PLAN" : "PLAN";
     case "deciding":
       return "ANALYZE";
     case "reviewing":
     case "reviewed":
       return "REVIEW";
+    case "executing": {
+      const total = todos.length;
+      if (total === 0) return "WORK";
+      const completed = todos.filter((todo) => todo.completed).length;
+      return `WORK ${completed}/${total}`;
+    }
     case "idle":
-    case "executing":
     case "ready":
       return "WORK";
   }

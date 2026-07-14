@@ -128,7 +128,7 @@ const planUtils = await load("extensions/plan-mode/utils.ts");
 const workflowStatus = await load("extensions/shared/workflow-status.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
-const subagentStatus = await load("extensions/subagent-status.ts");
+const activityStatus = await load("extensions/activity-status.ts");
 const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const permissionDialog = await load("extensions/shared/permission-dialog.ts");
@@ -161,6 +161,10 @@ function createHarness(options = {}) {
   const sent = [];
   const customComponents = [];
   const chrome = { footer: 0, editor: 0, widget: 0, header: 0 };
+  const workingMessages = [];
+  const workingVisibility = [];
+  const workingIndicators = [];
+  const hiddenThinkingLabels = [];
   let thinkingLevel = options.thinkingLevel ?? "high";
   let entries = options.entries ?? [];
 
@@ -193,6 +197,18 @@ function createHarness(options = {}) {
     },
     setHeader() {
       chrome.header += 1;
+    },
+    setWorkingMessage(message) {
+      workingMessages.push(message);
+    },
+    setWorkingVisible(visible) {
+      workingVisibility.push(visible);
+    },
+    setWorkingIndicator(indicator) {
+      workingIndicators.push(indicator);
+    },
+    setHiddenThinkingLabel(label) {
+      hiddenThinkingLabels.push(label);
     },
     notify(message, level) {
       notifications.push({ message: String(message), level });
@@ -283,6 +299,10 @@ function createHarness(options = {}) {
     sent,
     customComponents,
     chrome,
+    workingMessages,
+    workingVisibility,
+    workingIndicators,
+    hiddenThinkingLabels,
     makeContext({
       cwd = ROOT,
       mode = "tui",
@@ -368,6 +388,12 @@ await section("target runtime configuration", async () => {
       "utf8",
     ),
   );
+  const subagentConfig = JSON.parse(
+    readFileSync(
+      path.join(ROOT, "extensions", "subagent", "config.json"),
+      "utf8",
+    ),
+  );
   const packageJson = JSON.parse(
     readFileSync(path.join(ROOT, "npm", "package.json"), "utf8"),
   );
@@ -383,16 +409,20 @@ await section("target runtime configuration", async () => {
   const packageSources = settings.packages
     .map((entry) => (typeof entry === "string" ? entry : entry?.source))
     .sort();
-  eq(
-    packageSources,
-    [
-      "npm:@ujjwalgrover/pi-catppuccin@1.0.0",
-      "npm:pi-subagents@0.34.0",
-      "npm:pi-tool-display@0.5.0",
-      "npm:pi-zentui@0.3.0",
-    ],
-    "runtime packages are exactly the four pinned target packages",
+  eq(packageSources.length, 4, "runtime has exactly four package sources");
+  assert(
+    packageSources.includes("npm:@ujjwalgrover/pi-catppuccin@1.0.0"),
+    "Catppuccin keeps its exact npm pin",
   );
+  for (const name of ["pi-zentui", "pi-tool-display", "pi-subagents"]) {
+    const source = packageSources.find((entry) =>
+      entry.startsWith("git:github.com/daydaylx/" + name + "@"),
+    );
+    assert(
+      /^git:github\.com\/daydaylx\/[\w-]+@[0-9a-f]{40}$/.test(source ?? ""),
+      name + " is pinned to an immutable personal-fork commit",
+    );
+  }
   eq(
     zentui.colorSources,
     {
@@ -409,6 +439,7 @@ await section("target runtime configuration", async () => {
   );
   eq(zentui.features.editor, true, "Zentui editor is enabled");
   eq(zentui.features.statusLine, true, "Zentui footer is enabled");
+  eq(zentui.footerLayout, "agent", "Zentui owns the compact agent footer");
   eq(
     zentui.features.copyFriendly,
     false,
@@ -420,10 +451,15 @@ await section("target runtime configuration", async () => {
       cwd: false,
       gitBranch: false,
       gitStatus: false,
+      gitCounts: false,
       runtime: false,
       context: false,
       tokens: false,
       cost: false,
+      sessionDuration: false,
+      username: false,
+      time: false,
+      os: false,
     },
     "Zentui hides every built-in footer segment",
   );
@@ -436,12 +472,13 @@ await section("target runtime configuration", async () => {
   );
   eq(
     zentui.extensionStatuses.placements,
-    {
-      workflow: "right",
-      permissions: "right",
-      subagents: "right",
-    },
-    "Zentui owns precisely the three target status keys",
+    {},
+    "the agent footer does not duplicate status widgets",
+  );
+  eq(
+    zentui.extensionStatuses.colorModes,
+    {},
+    "the agent footer has no separate status color widgets",
   );
   eq(
     toolDisplay.registerToolOverrides,
@@ -463,8 +500,16 @@ await section("target runtime configuration", async () => {
   );
   eq(
     toolDisplay.customToolOverrides,
-    {},
-    "pi-tool-display has no local custom renderer overrides",
+    {
+      subagent: { enabled: true, kind: "generic", outputMode: "preview" },
+    },
+    "pi-tool-display owns the compact subagent timeline row",
+  );
+  eq(toolDisplay.compactTimeline, true, "tool calls use compact timeline rows");
+  eq(
+    toolDisplay.showThinkingLabels,
+    false,
+    "tool display does not render a second thinking label",
   );
   eq(
     {
@@ -476,14 +521,19 @@ await section("target runtime configuration", async () => {
       bashCollapsedLines: toolDisplay.bashCollapsedLines,
     },
     {
-      readOutputMode: "summary",
-      searchOutputMode: "count",
-      mcpOutputMode: "summary",
-      bashOutputMode: "summary",
+      readOutputMode: "preview",
+      searchOutputMode: "preview",
+      mcpOutputMode: "preview",
+      bashOutputMode: "preview",
       previewLines: 8,
-      bashCollapsedLines: 10,
+      bashCollapsedLines: 0,
     },
-    "pi-tool-display uses the balanced preset values",
+    "successful tool calls collapse to one timeline row with manual previews",
+  );
+  eq(
+    subagentConfig.ui?.showAsyncWidget,
+    false,
+    "subagent tracking has no permanent activity widget",
   );
 
   for (const [name, version] of [
@@ -495,7 +545,7 @@ await section("target runtime configuration", async () => {
     eq(
       packageJson.dependencies?.[name],
       version,
-      name + " is exact-pinned in npm/package.json",
+      name + " stays exact-pinned for the local verification harness",
     );
     eq(
       lock.packages?.["node_modules/" + name]?.version,
@@ -522,8 +572,8 @@ await section("target runtime configuration", async () => {
     "the retired skill-mode extension is not active",
   );
   assert(
-    activeExtensions.includes("+extensions/subagent-status.ts"),
-    "the local subagent status publisher is active",
+    activeExtensions.includes("+extensions/activity-status.ts"),
+    "the local one-line activity publisher is active",
   );
   for (const legacy of [
     "+extensions/activity-panel.ts",
@@ -544,6 +594,7 @@ await section("target runtime configuration", async () => {
     "extensions/tool-visuals.ts",
     "extensions/ux-status.ts",
     "extensions/working-visuals.ts",
+    "extensions/subagent-status.ts",
     "extensions/subagents/widget.ts",
     "extensions/skill-mode/index.ts",
     "extensions/shared/activity-state.ts",
@@ -838,26 +889,40 @@ await section("status mapping helpers", async () => {
     workflowStatus.ZENTUI_STATUS_KEYS,
     {
       permissions: "permissions",
-      subagents: "subagents",
       workflow: "workflow",
     },
-    "only workflow, permission, and subagent status keys remain",
+    "only workflow and risk status keys remain",
   );
   eq(
     workflowStatus.normalizePermissionLevel("test-bash"),
     "read-bash",
     "legacy test-bash state migrates conservatively",
   );
-  eq(workflowStatus.permissionStatusValue("read-only"), "RO", "RO is compact");
-  eq(workflowStatus.permissionStatusValue("read-bash"), "RB", "RB is compact");
-  eq(workflowStatus.permissionStatusValue("read-write"), "RW", "RW is compact");
   eq(
-    workflowStatus.permissionStatusValue("full-access"),
-    "FA",
-    "FA is compact",
+    workflowStatus.permissionRiskStatusValue("read-only"),
+    undefined,
+    "ordinary read-only access has no footer segment",
   );
-  eq(workflowStatus.permissionStatusValue("yolo"), "YOLO", "YOLO is compact");
-  eq(workflowStatus.workflowStatusValue("draft"), "PLAN", "draft is PLAN");
+  eq(
+    workflowStatus.permissionRiskStatusValue("full-access"),
+    "⚠ FULL ACCESS",
+    "full access is an explicit footer warning",
+  );
+  eq(
+    workflowStatus.permissionRiskStatusValue("yolo"),
+    "⚠ YOLO",
+    "YOLO is an explicit footer warning",
+  );
+  eq(
+    workflowStatus.workflowStatusValue("draft", "detailed_plan"),
+    "ARCH PLAN",
+    "detailed draft is ARCH PLAN",
+  );
+  eq(
+    workflowStatus.workflowStatusValue("draft", "simple_plan"),
+    "PLAN",
+    "simple draft is PLAN",
+  );
   eq(
     workflowStatus.workflowStatusValue("deciding"),
     "ANALYZE",
@@ -869,9 +934,13 @@ await section("status mapping helpers", async () => {
     "review is REVIEW",
   );
   eq(
-    workflowStatus.workflowStatusValue("executing"),
-    "WORK",
-    "execution is WORK",
+    workflowStatus.workflowStatusValue("executing", "work", [
+      { completed: true },
+      { completed: false },
+      { completed: false },
+    ]),
+    "WORK 1/3",
+    "execution includes compact todo progress",
   );
   const calls = [];
   workflowStatus.setTuiStatus(
@@ -881,7 +950,7 @@ await section("status mapping helpers", async () => {
       ui: { setStatus: (...args) => calls.push(args) },
     },
     "permissions",
-    "RO",
+    "⚠ YOLO",
   );
   eq(calls, [], "status helper is silent outside TUI mode");
 });
@@ -894,12 +963,16 @@ await section("permission status lifecycle", async () => {
   await harness.runHooks("session_start", {}, context);
   eq(
     latestStatus(harness, "permissions"),
-    "RW",
-    "new sessions start at read-write instead of auto-enabling YOLO",
+    undefined,
+    "ordinary read-write access has no footer warning",
   );
   assert(!harness.commands.has("write"), "/write is no longer registered");
   await harness.commands.get("permission")("read-only", context);
-  eq(latestStatus(harness, "permissions"), "RO", "/permission updates status");
+  eq(
+    latestStatus(harness, "permissions"),
+    undefined,
+    "/permission keeps ordinary access out of the footer",
+  );
   eq(
     harness.appended.at(-1)?.data,
     { permissionLevel: "read-only" },
@@ -922,20 +995,20 @@ await section("permission status lifecycle", async () => {
   await harness.commands.get("permission")("read-bash", context);
   eq(
     latestStatus(harness, "permissions"),
-    "RB",
-    "/permission read-bash updates status",
+    undefined,
+    "/permission read-bash has no footer warning",
   );
   await harness.commands.get("yolo")("", context);
   eq(
     latestStatus(harness, "permissions"),
-    "YOLO",
-    "/yolo remains an explicit manual activation",
+    "⚠ YOLO",
+    "/yolo remains an explicit visible warning",
   );
   await harness.commands.get("yolo")("", context);
   eq(
     latestStatus(harness, "permissions"),
-    "RW",
-    "/yolo toggles back to read-write",
+    undefined,
+    "/yolo toggles back to ordinary access without a warning",
   );
   await harness.runHooks("session_shutdown", {}, context);
   eq(
@@ -959,8 +1032,8 @@ await section("permission status lifecycle", async () => {
   await yoloResume.runHooks("session_start", {}, yoloResumeContext);
   eq(
     latestStatus(yoloResume, "permissions"),
-    "RW",
-    "persisted YOLO is downgraded to read-write on session start",
+    undefined,
+    "persisted YOLO is downgraded to ordinary access on session start",
   );
 
   const readBashResume = createHarness({
@@ -977,413 +1050,73 @@ await section("permission status lifecycle", async () => {
   await readBashResume.runHooks("session_start", {}, readBashResumeContext);
   eq(
     latestStatus(readBashResume, "permissions"),
-    "RB",
-    "non-YOLO permission levels still restore on session start",
+    undefined,
+    "restored ordinary permission levels stay outside the footer",
   );
 });
 
-await section("subagent footer status lifecycle", async () => {
-  if (!subagentStatus) return;
-  const harness = createHarness({ sessionId: "current-session" });
-  subagentStatus.default(harness.api);
+await section("activity status lifecycle", async () => {
+  if (!activityStatus) return;
+  const harness = createHarness();
+  activityStatus.default(harness.api);
   const context = harness.makeContext();
   await harness.runHooks("session_start", {}, context);
   eq(
-    latestStatus(harness, "subagents"),
-    "SUB: idle",
-    "subagent footer starts in the idle state",
+    harness.hiddenThinkingLabels.at(-1),
+    "",
+    "the legacy thinking label is blanked",
   );
+  eq(
+    harness.workingIndicators.at(-1)?.frames?.length,
+    1,
+    "activity uses one quiet indicator frame",
+  );
+  eq(
+    harness.workingVisibility.at(-1),
+    false,
+    "activity is hidden until actual agent work begins",
+  );
+
+  await harness.runHooks("agent_start", {}, context);
+  eq(
+    harness.workingMessages.at(-1),
+    "Analysiert die Aufgabe …",
+    "agent start has a concise truthful activity label",
+  );
+  eq(harness.workingVisibility.at(-1), true, "one activity line becomes visible");
 
   await harness.runHooks(
     "tool_execution_start",
-    {
-      toolName: "subagent",
-      toolCallId: "foreground-one",
-      args: { agent: "scout", task: "Inspect the repository" },
-    },
+    { toolCallId: "read-one", toolName: "read" },
     context,
   );
   eq(
-    latestStatus(harness, "subagents"),
-    "SUB: 1 active",
-    "a foreground subagent tool call is visible in the footer",
-  );
-  await harness.runHooks(
-    "tool_execution_start",
-    {
-      toolName: "subagent",
-      toolCallId: "management-call",
-      args: { action: "status" },
-    },
-    context,
-  );
-  eq(
-    latestStatus(harness, "subagents"),
-    "SUB: 1 active",
-    "management actions do not look like active delegated work",
-  );
-  await harness.runHooks(
-    "tool_execution_start",
-    {
-      toolName: "subagent",
-      toolCallId: "foreground-two",
-      args: { tasks: [{ agent: "scout", task: "Inspect another area" }] },
-    },
-    context,
-  );
-  eq(
-    latestStatus(harness, "subagents"),
-    "SUB: 2 active",
-    "multiple foreground subagent calls retain an exact count",
+    harness.workingVisibility.at(-1),
+    false,
+    "the compact tool timeline replaces concurrent activity text",
   );
   await harness.runHooks(
     "tool_execution_end",
-    { toolName: "subagent", toolCallId: "foreground-one" },
+    { toolCallId: "read-one", toolName: "read" },
     context,
   );
   await harness.runHooks(
-    "tool_execution_end",
-    { toolName: "subagent", toolCallId: "foreground-two" },
+    "message_update",
+    { assistantMessageEvent: { type: "text_delta" } },
     context,
   );
   eq(
-    latestStatus(harness, "subagents"),
-    "SUB: idle",
-    "foreground completion returns the footer to idle",
+    harness.workingVisibility.at(-1),
+    false,
+    "activity disappears when visible response text begins",
   );
-
-  harness.api.events.emit("subagent:async-started", {
-    id: "other-session-run",
-    sessionId: "other-session",
-  });
-  eq(
-    latestStatus(harness, "subagents"),
-    "SUB: idle",
-    "async activity from another session is ignored",
-  );
-  harness.api.events.emit("subagent:async-started", {
-    id: "async-one",
-    sessionId: "current-session",
-  });
-  harness.api.events.emit("subagent:async-started", {
-    id: "async-one",
-    sessionId: "current-session",
-  });
-  eq(
-    latestStatus(harness, "subagents"),
-    "SUB: 1 active",
-    "async run identifiers are deduplicated",
-  );
-  harness.api.events.emit("subagent:async-complete", {
-    runId: "async-one",
-    sessionId: "current-session",
-  });
-  eq(
-    latestStatus(harness, "subagents"),
-    "SUB: idle",
-    "async completion accepts the documented runId fallback",
-  );
-
-  const restored = createHarness({ sessionId: "restored-session" });
-  subagentStatus.default(restored.api);
-  const restoredContext = restored.makeContext();
-  await restored.runHooks("session_start", {}, restoredContext);
-  restored.api.events.emit("subagents:rpc:v1:ready", {});
-  const request = [...restored.emitted]
-    .reverse()
-    .find((entry) => entry.name === "subagents:rpc:v1:request");
-  assert(Boolean(request), "status publisher requests restore status after RPC ready");
-  if (request) {
-    eq(
-      latestStatus(restored, "subagents"),
-      "SUB: active",
-      "an outstanding restore request never claims that the fleet is idle",
-    );
-    restored.api.events.emit(
-      `subagents:rpc:v1:reply:${request.event.requestId}`,
-      {
-        version: 1,
-        requestId: request.event.requestId,
-        success: true,
-        data: { text: "Active async runs: 2\n\nrun details" },
-      },
-    );
-    eq(
-      latestStatus(restored, "subagents"),
-      "SUB: 2 active",
-      "the exact pinned RPC status restores a known async count",
-    );
-    restored.api.events.emit("subagent:async-complete", {
-      id: "restored-one",
-      sessionId: "restored-session",
-    });
-    eq(
-      latestStatus(restored, "subagents"),
-      "SUB: active",
-      "an unmapped restored completion triggers a conservative status refresh",
-    );
-    const refreshAfterFirstCompletion = [...restored.emitted]
-      .reverse()
-      .find((entry) => entry.name === "subagents:rpc:v1:request");
-    assert(
-      Boolean(refreshAfterFirstCompletion),
-      "an unmapped restored completion requests a fresh status snapshot",
-    );
-    if (refreshAfterFirstCompletion) {
-      restored.api.events.emit(
-        `subagents:rpc:v1:reply:${refreshAfterFirstCompletion.event.requestId}`,
-        {
-          version: 1,
-          requestId: refreshAfterFirstCompletion.event.requestId,
-          success: true,
-          data: { text: "Active async runs: 1\n\nrun details" },
-        },
-      );
-      eq(
-        latestStatus(restored, "subagents"),
-        "SUB: 1 active",
-        "a refreshed snapshot restores the remaining async count",
-      );
-    }
-    restored.api.events.emit("subagent:async-complete", {
-      id: "restored-two",
-      sessionId: "restored-session",
-    });
-    eq(
-      latestStatus(restored, "subagents"),
-      "SUB: active",
-      "a second unmapped restored completion also avoids a false idle state",
-    );
-    const refreshAfterSecondCompletion = [...restored.emitted]
-      .reverse()
-      .find((entry) => entry.name === "subagents:rpc:v1:request");
-    assert(
-      Boolean(refreshAfterSecondCompletion),
-      "each unmapped restored completion refreshes the status snapshot",
-    );
-    if (refreshAfterSecondCompletion) {
-      restored.api.events.emit(
-        `subagents:rpc:v1:reply:${refreshAfterSecondCompletion.event.requestId}`,
-        {
-          version: 1,
-          requestId: refreshAfterSecondCompletion.event.requestId,
-          success: true,
-          data: { text: "No active async runs." },
-        },
-      );
-      eq(
-        latestStatus(restored, "subagents"),
-        "SUB: idle",
-        "a refreshed empty snapshot returns the footer to idle",
-      );
-    }
-  }
-
-  const readyBeforeSession = createHarness({ sessionId: "ordered-session" });
-  subagentStatus.default(readyBeforeSession.api);
-  readyBeforeSession.api.events.emit("subagents:rpc:v1:ready", {});
-  await readyBeforeSession.runHooks(
-    "session_start",
-    {},
-    readyBeforeSession.makeContext(),
-  );
-  assert(
-    readyBeforeSession.emitted.some(
-      (entry) => entry.name === "subagents:rpc:v1:request",
-    ),
-    "RPC-ready emitted before this extension's session hook still triggers restore status",
-  );
-
-  const unknownRestore = createHarness({ sessionId: "unknown-session" });
-  subagentStatus.default(unknownRestore.api);
-  const unknownContext = unknownRestore.makeContext();
-  await unknownRestore.runHooks("session_start", {}, unknownContext);
-  unknownRestore.api.events.emit("subagents:rpc:v1:ready", {});
-  const unknownRequest = [...unknownRestore.emitted]
-    .reverse()
-    .find((entry) => entry.name === "subagents:rpc:v1:request");
-  assert(
-    Boolean(unknownRequest),
-    "every RPC-ready session requests its restore status",
-  );
-  if (unknownRequest) {
-    unknownRestore.api.events.emit(
-      `subagents:rpc:v1:reply:${unknownRequest.event.requestId}`,
-      {
-        version: 1,
-        requestId: unknownRequest.event.requestId,
-        success: true,
-        data: { text: "A future status format" },
-      },
-    );
-    eq(
-      latestStatus(unknownRestore, "subagents"),
-      "SUB: active",
-      "unknown successful restore status never falsely claims idle",
-    );
-  }
-
-  const liveRunRace = createHarness({ sessionId: "race-session" });
-  subagentStatus.default(liveRunRace.api);
-  const raceContext = liveRunRace.makeContext();
-  await liveRunRace.runHooks("session_start", {}, raceContext);
-  liveRunRace.api.events.emit("subagents:rpc:v1:ready", {});
-  const staleRaceRequest = [...liveRunRace.emitted]
-    .reverse()
-    .find((entry) => entry.name === "subagents:rpc:v1:request");
-  assert(Boolean(staleRaceRequest), "the race case starts with a restore request");
-  if (staleRaceRequest) {
-    liveRunRace.api.events.emit("subagent:async-started", {
-      id: "live-after-snapshot",
-      sessionId: "race-session",
-    });
-    const freshRaceRequest = [...liveRunRace.emitted]
-      .reverse()
-      .find((entry) => entry.name === "subagents:rpc:v1:request");
-    assert(
-      Boolean(freshRaceRequest) &&
-        freshRaceRequest.event.requestId !== staleRaceRequest.event.requestId,
-      "a live run during restore invalidates and refreshes the snapshot",
-    );
-    liveRunRace.api.events.emit(
-      `subagents:rpc:v1:reply:${staleRaceRequest.event.requestId}`,
-      {
-        version: 1,
-        requestId: staleRaceRequest.event.requestId,
-        success: true,
-        data: { text: "Active async runs: 1\n\nrestored only" },
-      },
-    );
-    eq(
-      latestStatus(liveRunRace, "subagents"),
-      "SUB: active",
-      "a stale snapshot cannot hide a live run or claim idle",
-    );
-    if (freshRaceRequest) {
-      liveRunRace.api.events.emit(
-        `subagents:rpc:v1:reply:${freshRaceRequest.event.requestId}`,
-        {
-          version: 1,
-          requestId: freshRaceRequest.event.requestId,
-          success: true,
-          data: { text: "Active async runs: 2\n\nrestored and live" },
-        },
-      );
-      eq(
-        latestStatus(liveRunRace, "subagents"),
-        "SUB: 2 active",
-        "the fresh snapshot includes both the restored and live run",
-      );
-      liveRunRace.api.events.emit("subagent:async-complete", {
-        id: "live-after-snapshot",
-        sessionId: "race-session",
-      });
-      eq(
-        latestStatus(liveRunRace, "subagents"),
-        "SUB: 1 active",
-        "completing the live run cannot hide the restored run",
-      );
-    }
-  }
-
-  const failedRestore = createHarness({ sessionId: "failed-session" });
-  subagentStatus.default(failedRestore.api);
-  const failedContext = failedRestore.makeContext();
-  await failedRestore.runHooks("session_start", {}, failedContext);
-  failedRestore.api.events.emit("subagents:rpc:v1:ready", {});
-  const failedRequest = [...failedRestore.emitted]
-    .reverse()
-    .find((entry) => entry.name === "subagents:rpc:v1:request");
-  assert(Boolean(failedRequest), "a failed restore still has a request to answer");
-  if (failedRequest) {
-    failedRestore.api.events.emit(
-      `subagents:rpc:v1:reply:${failedRequest.event.requestId}`,
-      {
-        version: 1,
-        requestId: failedRequest.event.requestId,
-        success: false,
-        error: "status unavailable",
-      },
-    );
-    eq(
-      latestStatus(failedRestore, "subagents"),
-      "SUB: active",
-      "a failed restore response never incorrectly claims idle",
-    );
-  }
-
-  const sessionRollover = createHarness();
-  subagentStatus.default(sessionRollover.api);
-  const oldSessionContext = sessionRollover.makeContext({
-    sessionId: "old-session",
-  });
-  await sessionRollover.runHooks("session_start", {}, oldSessionContext);
-  sessionRollover.api.events.emit("subagents:rpc:v1:ready", {});
-  const oldSessionRequest = [...sessionRollover.emitted]
-    .reverse()
-    .find((entry) => entry.name === "subagents:rpc:v1:request");
-  assert(Boolean(oldSessionRequest), "the old session has a restore request");
-  const newSessionContext = sessionRollover.makeContext({
-    sessionId: "new-session",
-  });
-  await sessionRollover.runHooks("session_start", {}, newSessionContext);
-  const newSessionRequest = [...sessionRollover.emitted]
-    .reverse()
-    .find((entry) => entry.name === "subagents:rpc:v1:request");
-  assert(
-    Boolean(newSessionRequest) &&
-      newSessionRequest.event.requestId !== oldSessionRequest?.event.requestId,
-    "a new session replaces the old restore request",
-  );
-  if (oldSessionRequest) {
-    sessionRollover.api.events.emit(
-      `subagents:rpc:v1:reply:${oldSessionRequest.event.requestId}`,
-      {
-        version: 1,
-        requestId: oldSessionRequest.event.requestId,
-        success: true,
-        data: { text: "No active async runs." },
-      },
-    );
-    eq(
-      latestStatus(sessionRollover, "subagents"),
-      "SUB: active",
-      "a stale previous-session reply cannot set the new session idle",
-    );
-  }
-  if (newSessionRequest) {
-    sessionRollover.api.events.emit(
-      `subagents:rpc:v1:reply:${newSessionRequest.event.requestId}`,
-      {
-        version: 1,
-        requestId: newSessionRequest.event.requestId,
-        success: true,
-        data: { text: "No active async runs." },
-      },
-    );
-    eq(
-      latestStatus(sessionRollover, "subagents"),
-      "SUB: idle",
-      "the current-session snapshot can still set the footer idle",
-    );
-  }
-
   await harness.runHooks("session_shutdown", {}, context);
   eq(
-    latestStatus(harness, "subagents"),
+    harness.workingMessages.at(-1),
     undefined,
-    "subagent status clears on shutdown",
+    "shutdown restores the default working message",
   );
-  harness.api.events.emit("subagent:async-started", {
-    id: "late-run",
-    sessionId: "current-session",
-  });
-  eq(
-    latestStatus(harness, "subagents"),
-    undefined,
-    "shutdown unsubscribes the package event handlers",
-  );
-  assertNoGlobalChrome(harness, "subagent status installs no global chrome");
+  assertNoGlobalChrome(harness, "activity status installs no global chrome");
 });
 
 await section("plan workflow lifecycle", async () => {
@@ -1570,11 +1303,11 @@ await section("permission dialog narrow rendering", async () => {
 });
 
 await section("combined production extension stack", async () => {
-  if (!modePermissions || !planMode || !subagentStatus || !askUser) return;
+  if (!modePermissions || !planMode || !activityStatus || !askUser) return;
   const factories = [
     modePermissions.default,
     planMode.default,
-    subagentStatus.default,
+    activityStatus.default,
     askUser.default,
   ];
   const harness = createHarness();
@@ -1591,16 +1324,12 @@ await section("combined production extension stack", async () => {
   eq(
     [...harness.tools.keys()].sort(),
     ["ask_user"],
-    // `subagent` is now registered by the externally installed pi-subagents
-    // package, not a local extension file — it is outside the jiti test
-    // harness's reach here, analogous to pi-zentui/pi-tool-display.
     "only local functional tools register locally",
   );
-  assert(
-    /^(?:RO|RB|RW|FA|YOLO)(?:\b|\s|·)/.test(
-      String(latestStatus(harness, "permissions")),
-    ),
-    "combined stack publishes permissions",
+  eq(
+    latestStatus(harness, "permissions"),
+    undefined,
+    "ordinary permissions do not duplicate the footer",
   );
   eq(
     latestStatus(harness, "workflow"),
@@ -1608,9 +1337,9 @@ await section("combined production extension stack", async () => {
     "combined stack publishes workflow",
   );
   eq(
-    latestStatus(harness, "subagents"),
-    "SUB: idle",
-    "combined stack publishes permanent subagent availability",
+    harness.workingVisibility.at(-1),
+    false,
+    "combined stack starts without a permanent activity widget",
   );
 
   for (const mode of ["json", "print", "rpc"]) {

@@ -1,5 +1,6 @@
 {
   "projectRefreshIntervalMs": 0,
+  "footerLayout": "agent",
   "colorSources": {
     "starship": "theme",
     "editor": "theme",
@@ -14,22 +15,19 @@
     "cwd": false,
     "gitBranch": false,
     "gitStatus": false,
+    "gitCounts": false,
     "runtime": false,
     "context": false,
     "tokens": false,
-    "cost": false
+    "cost": false,
+    "sessionDuration": false,
+    "username": false,
+    "time": false,
+    "os": false
   },
   "extensionStatuses": {
     "defaultPlacement": "off",
-    "placements": {
-      "workflow": "right",
-      "permissions": "right",
-      "subagents": "right"
-    },
-    "colorModes": {
-      "workflow": "zentui",
-      "permissions": "zentui",
-      "subagents": "zentui"
-    }
+    "placements": {},
+    "colorModes": {}
   }
 }
