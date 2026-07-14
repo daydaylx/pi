@@ -10,16 +10,9 @@
  */
 
 import { LspError } from "./types.ts";
-import type {
-  LspConfig,
-  LspLogger,
-  ServerProfile,
-} from "./types.ts";
+import type { LspConfig, LspLogger, ServerProfile } from "./types.ts";
 import { LspClient } from "./client.ts";
-import type {
-  LspClientOptions,
-  LspClientState,
-} from "./client.ts";
+import type { LspClientOptions, LspClientState } from "./client.ts";
 
 interface RegistryEntry {
   client: LspClient;
@@ -117,8 +110,7 @@ export class ServerRegistry {
         serverId: profile.id,
         workspaceRoot,
         cause: error instanceof Error ? error.message : String(error),
-        remediation:
-          "Check that the server binary is installed and in PATH.",
+        remediation: "Check that the server binary is installed and in PATH.",
       });
     }
   }
@@ -142,6 +134,22 @@ export class ServerRegistry {
   }
 
   /**
+   * Shut down a single `(workspaceRoot, serverId)` entry, if one is
+   * tracked. Returns `true` when an entry existed and was torn down, `false`
+   * when there was nothing to do. Used by `/lsp restart <id>` (#97) — the
+   * next `acquire()` for the same key lazily spawns a fresh instance.
+   */
+  async shutdownOne(workspaceRoot: string, serverId: string): Promise<boolean> {
+    const key = makeKey(workspaceRoot, serverId);
+    const entry = this.entries.get(key);
+    if (!entry) return false;
+    this.clearIdle(entry);
+    this.entries.delete(key);
+    await entry.client.shutdown().catch(() => undefined);
+    return true;
+  }
+
+  /**
    * Shut down every tracked client and clear the registry.  Leaves no
    * orphan processes; safe to call on session exit.
    */
@@ -161,7 +169,12 @@ export class ServerRegistry {
   }
 
   /** Return subset of entries still alive (for status / debugging). */
-  list(): { workspaceRoot: string; serverId: string; state: LspClientState; pid?: number }[] {
+  list(): {
+    workspaceRoot: string;
+    serverId: string;
+    state: LspClientState;
+    pid?: number;
+  }[] {
     const result: ReturnType<ServerRegistry["list"]> = [];
     for (const [key, entry] of this.entries) {
       const [root, id] = key.split(KEY_SEPARATOR);
@@ -200,11 +213,7 @@ export class ServerRegistry {
     return client;
   }
 
-  private armIdle(
-    entry: RegistryEntry,
-    key: string,
-    idleMs: number,
-  ): void {
+  private armIdle(entry: RegistryEntry, key: string, idleMs: number): void {
     if (entry.activeRequests > 0) return;
     this.clearIdle(entry);
     entry.idleTimer = setTimeout(() => this.onIdle(key, entry), idleMs);

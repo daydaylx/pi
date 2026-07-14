@@ -134,6 +134,7 @@ const activityStatus = await load("extensions/activity-status.ts");
 const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const permissionDialog = await load("extensions/shared/permission-dialog.ts");
+const lspExtensionMod = await load("extensions/lsp/index.ts");
 
 function stripAnsi(value) {
   return String(value).replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
@@ -269,8 +270,8 @@ function createHarness(options = {}) {
       tools.set(tool.name, tool);
     },
     registerFlag() {},
-    getFlag() {
-      return false;
+    getFlag(name) {
+      return options.flags?.[name] ?? false;
     },
     appendEntry(customType, data) {
       appended.push({ type: "custom", customType, data });
@@ -310,6 +311,7 @@ function createHarness(options = {}) {
       mode = "tui",
       hasUI = mode === "tui",
       sessionId = options.sessionId ?? "test-session",
+      trusted = true,
       model = {
         id: "main-model",
         provider: "main-provider",
@@ -331,6 +333,9 @@ function createHarness(options = {}) {
         },
         isIdle() {
           return true;
+        },
+        isProjectTrusted() {
+          return trusted;
         },
         abort() {},
         waitForIdle: async () => {},
@@ -576,6 +581,10 @@ await section("target runtime configuration", async () => {
   assert(
     activeExtensions.includes("+extensions/activity-status.ts"),
     "the local one-line activity publisher is active",
+  );
+  assert(
+    activeExtensions.includes("+extensions/lsp/index.ts"),
+    "the LSP extension is active (#97)",
   );
   for (const legacy of [
     "+extensions/activity-panel.ts",
@@ -1307,12 +1316,20 @@ await section("permission dialog narrow rendering", async () => {
 });
 
 await section("combined production extension stack", async () => {
-  if (!modePermissions || !planMode || !activityStatus || !askUser) return;
+  if (
+    !modePermissions ||
+    !planMode ||
+    !activityStatus ||
+    !askUser ||
+    !lspExtensionMod
+  )
+    return;
   const factories = [
     modePermissions.default,
     planMode.default,
     activityStatus.default,
     askUser.default,
+    lspExtensionMod.default,
   ];
   const harness = createHarness();
   for (const factory of factories) factory(harness.api);
@@ -1327,7 +1344,14 @@ await section("combined production extension stack", async () => {
   eq(harness.duplicateTools, [], "combined stack has no duplicate local tools");
   eq(
     [...harness.tools.keys()].sort(),
-    ["ask_user"],
+    [
+      "ask_user",
+      "lsp_definition",
+      "lsp_diagnostics",
+      "lsp_hover",
+      "lsp_references",
+      "lsp_workspace_symbols",
+    ],
     "only local functional tools register locally",
   );
   eq(
@@ -1344,6 +1368,17 @@ await section("combined production extension stack", async () => {
     harness.workingVisibility.at(-1),
     false,
     "combined stack starts without a permanent activity widget",
+  );
+  eq(
+    latestStatus(harness, "lsp"),
+    "idle",
+    "combined stack publishes an idle lsp status with no active servers",
+  );
+  await harness.runHooks("session_shutdown", {}, context);
+  eq(
+    latestStatus(harness, "lsp"),
+    undefined,
+    "session_shutdown clears the lsp status",
   );
 
   for (const mode of ["json", "print", "rpc"]) {
@@ -2573,6 +2608,312 @@ await section("LSP navigation and symbol tools (#96)", async () => {
     rmSync(workspace, { recursive: true, force: true });
   } catch {
     /* ignore temp cleanup errors */
+  }
+});
+
+// ---------------------------------------------------------------------------
+// LSP command, status and trust (#97). Uses the fake-lsp fixture;
+// deterministic, no real language server or network.
+// ---------------------------------------------------------------------------
+await section("LSP command, status and trust (#97)", async () => {
+  if (!lspExtensionMod) return;
+  const registryMod = await load("extensions/lsp/registry.ts");
+  const statusMod = await load("extensions/lsp/status.ts");
+
+  assert(
+    typeof lspExtensionMod.default === "function",
+    "lsp index exports a default extension factory",
+  );
+  assert(
+    typeof registryMod?.ServerRegistry.prototype.shutdownOne === "function",
+    "registry exports shutdownOne",
+  );
+  assert(
+    typeof statusMod?.computeLspStatus === "function",
+    "lsp status exports computeLspStatus",
+  );
+
+  const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+
+  // --- computeLspStatus: pure function, all four states ---
+  const baseConfig = {
+    enabled: true,
+    mode: "auto",
+    requestTimeoutMs: 2000,
+    idleShutdownMs: 100000,
+    workspaceSymbolLimit: 50,
+    languages: {},
+  };
+  eq(
+    statusMod.computeLspStatus({ ...baseConfig, enabled: false }, []),
+    "off",
+    "disabled config is off",
+  );
+  eq(
+    statusMod.computeLspStatus({ ...baseConfig, mode: "off" }, []),
+    "off",
+    "mode off is off",
+  );
+  eq(statusMod.computeLspStatus(baseConfig, []), "idle", "no entries is idle");
+  eq(
+    statusMod.computeLspStatus(baseConfig, [
+      { state: "ready" },
+      { state: "starting" },
+    ]),
+    "1 active",
+    "counts only ready entries as active",
+  );
+  eq(
+    statusMod.computeLspStatus(baseConfig, [
+      { state: "ready" },
+      { state: "degraded" },
+    ]),
+    "degraded",
+    "any degraded entry reports degraded, even alongside a ready one",
+  );
+
+  // --- Trust gate: untrusted project never reads .pi/lsp.json ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-trust-"));
+    mkdirSync(path.join(cwd, ".pi"), { recursive: true });
+    // Deliberately invalid JSON: if this were ever read and parsed, it would
+    // either throw (caught, logged) or — if the trust gate is broken and it
+    // gets applied — flip `enabled` to false below. Untrusted must ignore it
+    // outright, not merely fail to parse it.
+    writeFileSync(
+      path.join(cwd, ".pi", "lsp.json"),
+      JSON.stringify({ enabled: false }),
+    );
+
+    const harness = createHarness();
+    lspExtensionMod.default(harness.api);
+    const context = harness.makeContext({ cwd, trusted: false });
+    await harness.runHooks("session_start", {}, context);
+    // .pi/lsp.json sets enabled:false; if the trust gate were broken and it
+    // got applied anyway, /lsp status would report "off" instead.
+    await harness.commands.get("lsp")("status", context);
+    const statusText = harness.notifications.at(-1)?.message ?? "";
+    assert(
+      statusText.includes("LSP: idle") || statusText.includes("LSP: 1 active"),
+      "untrusted project ignores .pi/lsp.json and keeps the default enabled config (got: " +
+        statusText +
+        ")",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+    try {
+      rmSync(cwd, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // --- Trust gate: trusted project applies .pi/lsp.json ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-trusted-"));
+    mkdirSync(path.join(cwd, ".pi"), { recursive: true });
+    writeFileSync(
+      path.join(cwd, ".pi", "lsp.json"),
+      JSON.stringify({ enabled: false }),
+    );
+
+    const harness = createHarness();
+    lspExtensionMod.default(harness.api);
+    const context = harness.makeContext({ cwd, trusted: true });
+    await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("lsp")("status", context);
+    const statusText = harness.notifications.at(-1)?.message ?? "";
+    assert(
+      statusText.includes("LSP: off"),
+      "trusted project applies .pi/lsp.json's enabled:false (got: " +
+        statusText +
+        ")",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+    try {
+      rmSync(cwd, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // --- /lsp on|off toggles config.enabled and stops/starts the registry ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-onoff-"));
+    writeFileSync(path.join(cwd, "tsconfig.json"), "{}");
+    writeFileSync(path.join(cwd, "a.ts"), "const a = 1;\n");
+
+    const harness = createHarness();
+    lspExtensionMod.default(harness.api);
+    const context = harness.makeContext({ cwd, trusted: true });
+    await harness.runHooks("session_start", {}, context);
+
+    await harness.commands.get("lsp")("off", context);
+    let statusText = harness.notifications.at(-1)?.message ?? "";
+    assert(
+      statusText.includes("deaktiviert"),
+      "/lsp off confirms deactivation",
+    );
+    await harness.commands.get("lsp")("status", context);
+    statusText = harness.notifications.at(-1)?.message ?? "";
+    assert(statusText.includes("LSP: off"), "/lsp off flips the status to off");
+
+    await harness.commands.get("lsp")("on", context);
+    statusText = harness.notifications.at(-1)?.message ?? "";
+    assert(statusText.includes("aktiviert"), "/lsp on confirms activation");
+    await harness.commands.get("lsp")("status", context);
+    statusText = harness.notifications.at(-1)?.message ?? "";
+    assert(
+      statusText.includes("LSP: idle") || statusText.includes("LSP: 1 active"),
+      "/lsp on flips the status back to idle/active",
+    );
+
+    await harness.runHooks("session_shutdown", {}, context);
+    try {
+      rmSync(cwd, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // --- /lsp restart <id> and /lsp restart (all) ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-restart-"));
+    writeFileSync(path.join(cwd, "tsconfig.json"), "{}");
+    const filePath = path.join(cwd, "a.ts");
+    writeFileSync(filePath, "const a = 1;\n");
+
+    const fakeTsProfile = {
+      id: "typescript",
+      label: "Fake TypeScript",
+      enabled: true,
+      command: process.execPath,
+      args: [fakeServer],
+      rootMarkers: ["tsconfig.json"],
+    };
+    const config = {
+      enabled: true,
+      mode: "auto",
+      requestTimeoutMs: 2000,
+      idleShutdownMs: 100000,
+      workspaceSymbolLimit: 50,
+      languages: { typescript: fakeTsProfile },
+    };
+    const registry = new registryMod.ServerRegistry({ config });
+    await registry.acquire(cwd, fakeTsProfile);
+    registry.release(cwd, fakeTsProfile.id);
+    eq(registry.size, 1, "one server registered before restart");
+
+    const stopped = await registry.shutdownOne(cwd, fakeTsProfile.id);
+    assert(stopped === true, "shutdownOne reports it stopped a tracked entry");
+    eq(registry.size, 0, "shutdownOne removes the entry");
+
+    const missing = await registry.shutdownOne(cwd, "does-not-exist");
+    eq(missing, false, "shutdownOne is a no-op for an untracked key");
+
+    const again = await registry.acquire(cwd, fakeTsProfile);
+    assert(
+      typeof again.client.pid === "number",
+      "the server respawns lazily on next acquire",
+    );
+    await registry.shutdownAll();
+    try {
+      rmSync(cwd, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // --- /lsp servers and /lsp log ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-servers-"));
+    const harness = createHarness();
+    lspExtensionMod.default(harness.api);
+    const context = harness.makeContext({ cwd, trusted: true });
+    await harness.runHooks("session_start", {}, context);
+
+    await harness.commands.get("lsp")("servers", context);
+    let text = harness.notifications.at(-1)?.message ?? "";
+    assert(
+      text.includes("keine aktiven Server"),
+      "/lsp servers reports no active servers initially",
+    );
+
+    await harness.commands.get("lsp")("log", context);
+    text = harness.notifications.at(-1)?.message ?? "";
+    assert(text.includes("kein Log"), "/lsp log reports empty log initially");
+
+    await harness.runHooks("session_shutdown", {}, context);
+    try {
+      rmSync(cwd, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // --- Footer status only appears in TUI mode ---
+  {
+    for (const mode of ["json", "print", "rpc"]) {
+      const nonTui = createHarness();
+      lspExtensionMod.default(nonTui.api);
+      const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-nontui-"));
+      const contextForMode = nonTui.makeContext({
+        cwd,
+        mode,
+        hasUI: false,
+        trusted: true,
+      });
+      await nonTui.runHooks("session_start", {}, contextForMode);
+      eq(
+        nonTui.statusCalls.filter((c) => c.key === "lsp"),
+        [],
+        "lsp status is not published outside TUI mode (" + mode + ")",
+      );
+      await nonTui.runHooks("session_shutdown", {}, contextForMode);
+      try {
+        rmSync(cwd, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  // --- session_shutdown leaves no orphan processes ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-shutdown-"));
+    writeFileSync(path.join(cwd, "tsconfig.json"), "{}");
+    const filePath = path.join(cwd, "a.ts");
+    writeFileSync(filePath, "const a = 1;\n");
+
+    const fakeTsProfile = {
+      id: "typescript",
+      label: "Fake TypeScript",
+      enabled: true,
+      command: process.execPath,
+      args: [fakeServer],
+      rootMarkers: ["tsconfig.json"],
+    };
+    const config = {
+      enabled: true,
+      mode: "auto",
+      requestTimeoutMs: 2000,
+      idleShutdownMs: 100000,
+      workspaceSymbolLimit: 50,
+      languages: { typescript: fakeTsProfile },
+    };
+    const registry = new registryMod.ServerRegistry({ config });
+    const acquired = await registry.acquire(cwd, fakeTsProfile);
+    registry.release(cwd, fakeTsProfile.id);
+    assert(acquired.client.processRunning, "server is running before shutdown");
+    await registry.shutdownAll();
+    assert(
+      !acquired.client.processRunning,
+      "no orphan process remains after shutdownAll",
+    );
+    try {
+      rmSync(cwd, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   }
 });
 
