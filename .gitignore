@@ -14,3 +14,7 @@ openrouter-free-models.json
 
 # Local clones of upstream packages (working area, not part of this repo)
 /git/
+
+# Subagent runtime artifacts
+.pi-subagents/
+run-history.jsonl
