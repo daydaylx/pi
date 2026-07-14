@@ -664,13 +664,14 @@ await section("native project skills", async () => {
     const source = readFileSync(skillPath, "utf8");
     assert(
       new RegExp(
-        "^---\\nname: " + name + "\\ndescription: \\\"[^\\n]+\\\"\\n---\\n",
+        "^---\\nname: " + name + '\\ndescription: \\"[^\\n]+\\"\\n---\\n',
       ).test(source),
       name + " has Pi-compatible name and description frontmatter",
     );
     assert(
       !/^allowed-tools:/m.test(source),
-      name + " does not present experimental allowed-tools as a security boundary",
+      name +
+        " does not present experimental allowed-tools as a security boundary",
     );
   }
 });
@@ -706,11 +707,8 @@ await section("permission policy", async () => {
     "read-bash permits inspection Bash",
   );
   eq(
-    policy.decideBash(
-      "read-bash",
-      'echo "$(touch unexpected-file)"',
-      ROOT,
-    ).action,
+    policy.decideBash("read-bash", 'echo "$(touch unexpected-file)"', ROOT)
+      .action,
     "block",
     "read-bash blocks command substitution inside double quotes",
   );
@@ -1085,7 +1083,11 @@ await section("activity status lifecycle", async () => {
     "Analysiert die Aufgabe …",
     "agent start has a concise truthful activity label",
   );
-  eq(harness.workingVisibility.at(-1), true, "one activity line becomes visible");
+  eq(
+    harness.workingVisibility.at(-1),
+    true,
+    "one activity line becomes visible",
+  );
 
   await harness.runHooks(
     "tool_execution_start",
@@ -1373,7 +1375,10 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
     typeof transportMod?.parseStreamChunk === "function",
     "lsp transport exports parseStreamChunk",
   );
-  assert(typeof clientMod?.LspClient === "function", "lsp client exports LspClient");
+  assert(
+    typeof clientMod?.LspClient === "function",
+    "lsp client exports LspClient",
+  );
   assert(
     typeof indexMod?.createLspClient === "function",
     "lsp index exports createLspClient",
@@ -1503,10 +1508,14 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
     const client = makeClient({ args: ["--hang"] });
     await client.start();
     const ac = new AbortController();
-    const promise = client.request("test/echo", {}, {
-      signal: ac.signal,
-      timeoutMs: 5000,
-    });
+    const promise = client.request(
+      "test/echo",
+      {},
+      {
+        signal: ac.signal,
+        timeoutMs: 5000,
+      },
+    );
     setTimeout(() => ac.abort(), 40);
     let caught;
     try {
@@ -1548,7 +1557,12 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
   await check("crash triggers a bounded restart then degrades", async () => {
     const client = makeClient({
       args: ["--crash-after-init"],
-      process: { maxRestarts: 1, backoffBaseMs: 30, backoffMaxMs: 60, shutdownGraceMs: 400 },
+      process: {
+        maxRestarts: 1,
+        backoffBaseMs: 30,
+        backoffMaxMs: 60,
+        shutdownGraceMs: 400,
+      },
     });
     let restarts = 0;
     client.on("restart", () => {
@@ -1558,7 +1572,10 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
       client.once("degraded", () => resolve(true)),
     );
     await client.start(); // first init succeeds, server crashes right after
-    await Promise.race([degraded, new Promise((r) => setTimeout(() => r(false), 2000))]);
+    await Promise.race([
+      degraded,
+      new Promise((r) => setTimeout(() => r(false), 2000)),
+    ]);
     assert(restarts >= 1, "at least one automatic restart happened");
     eq(
       client.currentState,
@@ -1569,22 +1586,25 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
     assert(!client.processRunning, "no live process after degraded + shutdown");
   });
 
-  await check("missing binary yields a structured error without a crash", async () => {
-    const client = makeClient({
-      command: "pi-lsp-definitely-missing-binary-xyzzy",
-      args: [],
-    });
-    let caught;
-    try {
-      await client.start();
-    } catch (error) {
-      caught = error;
-    }
-    assert(Boolean(caught), "a missing binary rejects start");
-    eq(caught?.kind, "missing_binary", "error kind is missing_binary");
-    assert(!client.processRunning, "no live process for a missing binary");
-    await settle(client);
-  });
+  await check(
+    "missing binary yields a structured error without a crash",
+    async () => {
+      const client = makeClient({
+        command: "pi-lsp-definitely-missing-binary-xyzzy",
+        args: [],
+      });
+      let caught;
+      try {
+        await client.start();
+      } catch (error) {
+        caught = error;
+      }
+      assert(Boolean(caught), "a missing binary rejects start");
+      eq(caught?.kind, "missing_binary", "error kind is missing_binary");
+      assert(!client.processRunning, "no live process for a missing binary");
+      await settle(client);
+    },
+  );
 
   // Defensive sweep: every client must be shut down with no process left.
   for (const client of trackedClients) {
@@ -1611,186 +1631,678 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
 // LSP config, root detection, registry and profiles (#94). Uses the fake-lsp
 // fixture from #93; deterministic, no real language server or network.
 // ---------------------------------------------------------------------------
-await section("LSP config, root detection, registry and profiles (#94)", async () => {
-  const configMod = await load("extensions/lsp/config.ts");
-  const rootsMod = await load("extensions/lsp/roots.ts");
-  const profilesMod = await load("extensions/lsp/server-profiles.ts");
+await section(
+  "LSP config, root detection, registry and profiles (#94)",
+  async () => {
+    const configMod = await load("extensions/lsp/config.ts");
+    const rootsMod = await load("extensions/lsp/roots.ts");
+    const profilesMod = await load("extensions/lsp/server-profiles.ts");
+    const registryMod = await load("extensions/lsp/registry.ts");
+    const capsMod = await load("extensions/lsp/capabilities.ts");
+
+    assert(
+      typeof configMod?.resolveConfig === "function",
+      "lsp config exports resolveConfig",
+    );
+    assert(
+      typeof rootsMod?.findWorkspaceRoot === "function",
+      "lsp roots exports findWorkspaceRoot",
+    );
+    assert(
+      profilesMod?.PROFILES?.typescript?.id === "typescript",
+      "lsp server-profiles exports PROFILES",
+    );
+    assert(
+      typeof registryMod?.ServerRegistry === "function",
+      "lsp registry exports ServerRegistry",
+    );
+    assert(
+      typeof capsMod?.normalizeCapabilities === "function",
+      "lsp capabilities exports normalizeCapabilities",
+    );
+
+    const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+    const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp94-test-"));
+
+    function fakeProfile(extra = {}) {
+      return {
+        id: "fake",
+        label: "Fake LSP",
+        enabled: true,
+        command: process.execPath,
+        args: [fakeServer, ...(extra.args ?? [])],
+        rootMarkers: [],
+        ...extra,
+      };
+    }
+
+    // --- Config priority ---
+
+    const defaults = {
+      enabled: true,
+      mode: "auto",
+      requestTimeoutMs: 10000,
+      idleShutdownMs: 600000,
+      workspaceSymbolLimit: 50,
+      languages: {},
+    };
+    const withTypeScript = { languages: { typescript: { enabled: true } } };
+
+    assert(
+      configMod.resolveConfig({
+        defaults,
+        trusted: true,
+        sessionFlags: { mode: "force" },
+      }).mode === "force",
+      "session flag overrides mode",
+    );
+    assert(
+      configMod.resolveConfig({
+        defaults,
+        trusted: true,
+        sessionFlags: { requestTimeoutMs: 5000 },
+      }).requestTimeoutMs === 5000,
+      "session flag overrides timeout",
+    );
+    assert(
+      configMod.resolveConfig({
+        defaults,
+        trusted: true,
+        projectConfig: { mode: "off" },
+        sessionFlags: { mode: "auto" },
+      }).mode === "auto",
+      "session wins over project",
+    );
+    assert(
+      configMod.resolveConfig({
+        defaults,
+        trusted: true,
+        projectConfig: { enabled: true },
+      }).enabled === true,
+      "project config applied when trusted",
+    );
+    assert(
+      configMod.resolveConfig({
+        defaults,
+        trusted: false,
+        projectConfig: { enabled: false },
+      }).enabled === true,
+      "untrusted ignores projectConfig (keeps defaults)",
+    );
+    assert(
+      configMod.resolveConfig({
+        defaults,
+        trusted: false,
+        projectConfig: { mode: "force" },
+      }).mode === "auto",
+      "untrusted ignores projectConfig mode",
+    );
+
+    // --- Root detection ---
+
+    writeFileSync(path.join(workspace, "tsconfig.json"), "{}");
+    const nested = path.join(workspace, "src", "lib");
+    mkdirSync(nested, { recursive: true });
+    assert(
+      rootsMod.findWorkspaceRoot(path.join(nested, "index.ts"), [
+        "tsconfig.json",
+      ]) === workspace,
+      "finds marker two levels up",
+    );
+    assert(
+      rootsMod.findWorkspaceRoot(workspace, ["pyproject.toml"]) === undefined,
+      "returns undefined when no marker exists",
+    );
+
+    // --- Server profile defaults ---
+
+    const ts = profilesMod.PROFILES.typescript;
+    assert(ts.enabled === true, "typescript profile is enabled by default");
+    assert(
+      ts.initializationOptions?.disableAutomaticTypingAcquisition === true,
+      "typescript disables automatic type acquisition",
+    );
+
+    const rust = profilesMod.PROFILES.rust;
+    assert(rust.enabled === false, "rust profile is disabled by default");
+    assert(
+      rust.settings?.["rust-analyzer"]?.cargo?.buildScripts?.enable === false,
+      "rust disables cargo build scripts",
+    );
+    assert(
+      rust.settings?.["rust-analyzer"]?.procMacro?.enable === false,
+      "rust disables proc macros",
+    );
+    for (const id of ["go", "c", "java"]) {
+      assert(
+        profilesMod.PROFILES[id]?.enabled === false,
+        `${id} profile is disabled by default`,
+      );
+    }
+
+    // --- Capabilities normalisation ---
+
+    const full = capsMod.normalizeCapabilities({
+      hoverProvider: true,
+      definitionProvider: { linkSupport: true },
+      referencesProvider: false,
+      workspace: { symbol: true },
+      textDocument: { textDocumentSync: 1 },
+    });
+    assert(full.hover === true, "boolean hoverProvider");
+    assert(full.definition === true, "object definitionProvider (truthy)");
+    assert(full.references === false, "explicit false referencesProvider");
+    assert(full.workspaceSymbols === true, "workspace.symbol true");
+    assert(full.textDocumentSync === 1, "textDocumentSync passed through");
+
+    const empty = capsMod.normalizeCapabilities({});
+    assert(
+      empty.hover === false &&
+        empty.definition === false &&
+        empty.references === false,
+      "empty object → all false",
+    );
+
+    // --- Registry: reuse the same instance ---
+
+    const idleShort = 80;
+    const reg = new registryMod.ServerRegistry({
+      config: {
+        ...defaults,
+        idleShutdownMs: idleShort,
+        requestTimeoutMs: 2000,
+      },
+    });
+
+    const pf = fakeProfile();
+    const a = await reg.acquire(workspace, pf);
+    const pidA = a.client.pid;
+    assert(typeof pidA === "number", "acquire starts a server");
+
+    reg.release(workspace, pf.id);
+    const b = await reg.acquire(workspace, pf);
+    assert(b.client.pid === pidA, "same (root,serverId) reuses the instance");
+    reg.release(workspace, pf.id);
+
+    // --- Registry: idle shutdown ---
+
+    const c = await reg.acquire(workspace, pf);
+    reg.release(workspace, pf.id);
+    await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
+    assert(reg.size === 0, "entry removed after idle shutdown");
+    assert(
+      !c.client.processRunning,
+      "server process terminated after idle shutdown",
+    );
+
+    // --- Registry: active request prevents idle shutdown ---
+
+    const d = await reg.acquire(workspace, pf);
+    // Do not call release → activeRequests stays 1.
+    await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
+    assert(reg.size === 1, "entry kept while active requests in flight");
+    assert(d.client.processRunning, "server still alive with active requests");
+    reg.release(workspace, pf.id);
+    await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
+    assert(reg.size === 0, "entry removed after release + idle wait");
+
+    // --- Registry: missing binary → structured error, no crash ---
+
+    let missingErr;
+    try {
+      await reg.acquire(workspace, {
+        ...pf,
+        command: "pi-lsp-definitely-missing-binary-xyzzy",
+        id: "missing",
+      });
+    } catch (error) {
+      missingErr = error;
+    }
+    assert(
+      missingErr?.kind === "missing_binary" ||
+        missingErr?.kind === "spawn_error",
+      `missing binary gives structured error (got ${missingErr?.kind})`,
+    );
+    assert(reg.size === 0, "no server registered for missing binary");
+
+    // --- Registry: shutdownAll leaves no orphans ---
+
+    const srv1 = await reg.acquire(workspace, { ...pf, id: "srv1" });
+    const srv2 = await reg.acquire(workspace, { ...pf, id: "srv2" });
+    assert(reg.size === 2, "two servers registered before shutdownAll");
+    await reg.shutdownAll();
+    assert(reg.size === 0, "no entries after shutdownAll");
+    assert(!srv1.client.processRunning, "srv1 process terminated");
+    assert(!srv2.client.processRunning, "srv2 process terminated");
+
+    // Defensive sweep.
+    await reg.shutdownAll();
+    try {
+      rmSync(workspace, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// LSP document synchronisation and diagnostics (#95). Uses the fake-lsp
+// fixture; deterministic, no real language server or network.
+// ---------------------------------------------------------------------------
+await section("LSP documents and diagnostics (#95)", async () => {
+  const documentsMod = await load("extensions/lsp/documents.ts");
+  const toolsMod = await load("extensions/lsp/tools.ts");
+  const clientMod = await load("extensions/lsp/client.ts");
   const registryMod = await load("extensions/lsp/registry.ts");
-  const capsMod = await load("extensions/lsp/capabilities.ts");
+  const profilesMod = await load("extensions/lsp/server-profiles.ts");
+  const typesMod = await load("extensions/lsp/types.ts");
 
   assert(
-    typeof configMod?.resolveConfig === "function",
-    "lsp config exports resolveConfig",
+    typeof documentsMod?.DocumentSync === "function",
+    "lsp documents exports DocumentSync",
   );
-  assert(typeof rootsMod?.findWorkspaceRoot === "function", "lsp roots exports findWorkspaceRoot");
-  assert(profilesMod?.PROFILES?.typescript?.id === "typescript", "lsp server-profiles exports PROFILES");
-  assert(typeof registryMod?.ServerRegistry === "function", "lsp registry exports ServerRegistry");
-  assert(typeof capsMod?.normalizeCapabilities === "function", "lsp capabilities exports normalizeCapabilities");
+  assert(
+    typeof documentsMod?.getDocumentSync === "function",
+    "lsp documents exports getDocumentSync",
+  );
+  assert(
+    typeof documentsMod?.resolveTarget === "function",
+    "lsp documents exports resolveTarget",
+  );
+  assert(
+    typeof toolsMod?.registerLspDiagnosticsTool === "function",
+    "lsp tools exports registerLspDiagnosticsTool",
+  );
 
   const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
-  const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp94-test-"));
-
-  function fakeProfile(extra = {}) {
-    return {
-      id: "fake",
-      label: "Fake LSP",
-      enabled: true,
-      command: process.execPath,
-      args: [fakeServer, ...(extra.args ?? [])],
-      rootMarkers: [],
-      ...extra,
-    };
-  }
-
-  // --- Config priority ---
-
-  const defaults = { enabled: true, mode: "auto", requestTimeoutMs: 10000, idleShutdownMs: 600000, workspaceSymbolLimit: 50, languages: {} };
-  const withTypeScript = { languages: { typescript: { enabled: true } } };
-
-  assert(
-    configMod.resolveConfig({ defaults, trusted: true, sessionFlags: { mode: "force" } }).mode === "force",
-    "session flag overrides mode",
-  );
-  assert(
-    configMod.resolveConfig({ defaults, trusted: true, sessionFlags: { requestTimeoutMs: 5000 } }).requestTimeoutMs === 5000,
-    "session flag overrides timeout",
-  );
-  assert(
-    configMod.resolveConfig({ defaults, trusted: true, projectConfig: { mode: "off" }, sessionFlags: { mode: "auto" } }).mode === "auto",
-    "session wins over project",
-  );
-  assert(
-    configMod.resolveConfig({ defaults, trusted: true, projectConfig: { enabled: true } }).enabled === true,
-    "project config applied when trusted",
-  );
-  assert(
-    configMod.resolveConfig({ defaults, trusted: false, projectConfig: { enabled: false } }).enabled === true,
-    "untrusted ignores projectConfig (keeps defaults)",
-  );
-  assert(
-    configMod.resolveConfig({ defaults, trusted: false, projectConfig: { mode: "force" } }).mode === "auto",
-    "untrusted ignores projectConfig mode",
-  );
-
-  // --- Root detection ---
-
+  const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp95-test-"));
   writeFileSync(path.join(workspace, "tsconfig.json"), "{}");
-  const nested = path.join(workspace, "src", "lib");
-  mkdirSync(nested, { recursive: true });
-  assert(
-    rootsMod.findWorkspaceRoot(path.join(nested, "index.ts"), ["tsconfig.json"]) === workspace,
-    "finds marker two levels up",
-  );
-  assert(
-    rootsMod.findWorkspaceRoot(workspace, ["pyproject.toml"]) === undefined,
-    "returns undefined when no marker exists",
-  );
+  const trackedClients = [];
 
-  // --- Server profile defaults ---
+  function makeClient(extra = {}) {
+    const { args: extraArgs = [], ...rest } = extra;
+    const client = new clientMod.LspClient({
+      serverId: "fake",
+      workspaceRoot: workspace,
+      command: process.execPath,
+      args: [fakeServer, ...extraArgs],
+      requestTimeoutMs: 1000,
+      process: {
+        maxRestarts: 1,
+        backoffBaseMs: 40,
+        backoffMaxMs: 80,
+        shutdownGraceMs: 400,
+      },
+      ...rest,
+    });
+    trackedClients.push(client);
+    return client;
+  }
 
-  const ts = profilesMod.PROFILES.typescript;
-  assert(ts.enabled === true, "typescript profile is enabled by default");
-  assert(
-    ts.initializationOptions?.disableAutomaticTypingAcquisition === true,
-    "typescript disables automatic type acquisition",
-  );
+  async function check(name, fn) {
+    try {
+      await fn();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      assert(false, name + " threw: " + detail);
+    }
+  }
 
-  const rust = profilesMod.PROFILES.rust;
-  assert(rust.enabled === false, "rust profile is disabled by default");
-  assert(
-    rust.settings?.["rust-analyzer"]?.cargo?.buildScripts?.enable === false,
-    "rust disables cargo build scripts",
-  );
-  assert(
-    rust.settings?.["rust-analyzer"]?.procMacro?.enable === false,
-    "rust disables proc macros",
-  );
-  for (const id of ["go", "c", "java"]) {
-    assert(
-      profilesMod.PROFILES[id]?.enabled === false,
-      `${id} profile is disabled by default`,
+  async function settle(client) {
+    try {
+      await client.shutdown();
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+
+  await check("didOpen precedes didChange, versions are monotone", async () => {
+    const client = makeClient();
+    await client.start();
+    const sentNotifications = [];
+    const originalNotify = client.notify.bind(client);
+    client.notify = (method, params) => {
+      sentNotifications.push({ method, params });
+      originalNotify(method, params);
+    };
+
+    const filePath = path.join(workspace, "a.ts");
+    writeFileSync(filePath, "const a = 1;\n");
+    const sync = documentsMod.getDocumentSync(client, workspace);
+
+    const first = sync.openOrSync(filePath, "typescript");
+    eq(first.version, 1, "first sync is version 1");
+    eq(
+      sentNotifications[0]?.method,
+      "textDocument/didOpen",
+      "first sync sends didOpen",
     );
+
+    writeFileSync(filePath, "const a = 2;\n");
+    const second = sync.openOrSync(filePath, "typescript");
+    eq(second.version, 2, "second sync increments version");
+    eq(
+      sentNotifications[1]?.method,
+      "textDocument/didChange",
+      "second sync sends didChange",
+    );
+
+    const third = sync.openOrSync(filePath, "typescript");
+    eq(third.version, 2, "unchanged content keeps the same version");
+    eq(third.changed, false, "unchanged content reports changed: false");
+    eq(
+      sentNotifications.length,
+      2,
+      "unchanged content sends no additional notification",
+    );
+
+    await settle(client);
+  });
+
+  await check(
+    "a new diagnostics version replaces the previous one",
+    async () => {
+      const client = makeClient();
+      await client.start();
+      const filePath = path.join(workspace, "b.ts");
+      writeFileSync(filePath, "const b = 1;\n");
+      const sync = documentsMod.getDocumentSync(client, workspace);
+
+      const v1 = sync.openOrSync(filePath, "typescript");
+      const snap1 = await sync.waitForDiagnostics(filePath, v1.version, 2000);
+      eq(
+        snap1.diagnostics.length,
+        1,
+        "first version has exactly one diagnostic",
+      );
+      eq(
+        snap1.diagnostics[0].message,
+        "fake diagnostic for version 1",
+        "diagnostic mentions its version",
+      );
+
+      writeFileSync(filePath, "const b = 2;\n");
+      const v2 = sync.openOrSync(filePath, "typescript");
+      const snap2 = await sync.waitForDiagnostics(filePath, v2.version, 2000);
+      eq(
+        snap2.diagnostics.length,
+        1,
+        "second version still has exactly one diagnostic (replaced, not appended)",
+      );
+      eq(
+        snap2.diagnostics[0].message,
+        "fake diagnostic for version 2",
+        "diagnostic reflects the new version",
+      );
+      eq(
+        sync.getDiagnostics(filePath).version,
+        2,
+        "cache holds only the latest diagnostics version",
+      );
+
+      await settle(client);
+    },
+  );
+
+  await check(
+    "waitForDiagnostics does not resolve with a stale version",
+    async () => {
+      const client = makeClient();
+      await client.start();
+      const filePath = path.join(workspace, "c.ts");
+      writeFileSync(filePath, "const c = 1;\n");
+      const sync = documentsMod.getDocumentSync(client, workspace);
+      const v1 = sync.openOrSync(filePath, "typescript");
+      await sync.waitForDiagnostics(filePath, v1.version, 2000); // cache now holds version 1
+
+      let outcome;
+      try {
+        await sync.waitForDiagnostics(filePath, v1.version + 1, 300);
+        outcome = "resolved";
+      } catch {
+        outcome = "rejected";
+      }
+      eq(
+        outcome,
+        "rejected",
+        "waiting for a version newer than cached times out instead of resolving with stale data",
+      );
+
+      await settle(client);
+    },
+  );
+
+  await check("close() clears all local document state", async () => {
+    const client = makeClient();
+    await client.start();
+    const filePath = path.join(workspace, "d.ts");
+    writeFileSync(filePath, "const d = 1;\n");
+    const sync = documentsMod.getDocumentSync(client, workspace);
+    sync.openOrSync(filePath, "typescript");
+    await sync.waitForDiagnostics(filePath, 1, 2000);
+    eq(sync.getVersion(filePath), 1, "version tracked before close");
+
+    sync.close(filePath);
+    eq(
+      sync.getVersion(filePath),
+      undefined,
+      "close() clears the tracked version",
+    );
+    eq(
+      sync.getDiagnostics(filePath),
+      undefined,
+      "close() clears cached diagnostics",
+    );
+
+    await settle(client);
+  });
+
+  await check("a restart invalidates tracked document state", async () => {
+    const client = makeClient({
+      args: ["--crash-after-init"],
+      process: {
+        maxRestarts: 1,
+        backoffBaseMs: 30,
+        backoffMaxMs: 60,
+        shutdownGraceMs: 400,
+      },
+    });
+    const restarted = new Promise((resolve) =>
+      client.once("restart", () => resolve(true)),
+    );
+    await client.start();
+    const filePath = path.join(workspace, "e.ts");
+    writeFileSync(filePath, "const e = 1;\n");
+    const sync = documentsMod.getDocumentSync(client, workspace);
+    sync.openOrSync(filePath, "typescript");
+    eq(sync.getVersion(filePath), 1, "version tracked before restart");
+
+    await Promise.race([
+      restarted,
+      new Promise((r) => setTimeout(() => r(false), 2000)),
+    ]);
+    await new Promise((r) => setTimeout(r, 20)); // let the invalidate handler run
+    eq(
+      sync.getVersion(filePath),
+      undefined,
+      "restart invalidates tracked document state",
+    );
+
+    await settle(client);
+  });
+
+  await check("resolveTarget soft-fails on an unmapped extension", async () => {
+    const filePath = path.join(workspace, "notes.xyz");
+    writeFileSync(filePath, "whatever");
+    const config = {
+      enabled: true,
+      mode: "auto",
+      requestTimeoutMs: 2000,
+      idleShutdownMs: 600000,
+      workspaceSymbolLimit: 50,
+      languages: profilesMod.PROFILES,
+    };
+    const result = documentsMod.resolveTarget(filePath, config);
+    assert(
+      result instanceof typesMod.LspError,
+      "an unmapped extension yields a structured LspError, not a crash",
+    );
+  });
+
+  await check(
+    "lsp_diagnostics tool: end-to-end success releases the registry entry",
+    async () => {
+      const fakeTsProfile = {
+        id: "typescript",
+        label: "Fake TypeScript",
+        enabled: true,
+        command: process.execPath,
+        args: [fakeServer],
+        rootMarkers: ["tsconfig.json"],
+      };
+      const config = {
+        enabled: true,
+        mode: "auto",
+        requestTimeoutMs: 2000,
+        idleShutdownMs: 100000,
+        workspaceSymbolLimit: 50,
+        languages: { ...profilesMod.PROFILES, typescript: fakeTsProfile },
+      };
+      const registry = new registryMod.ServerRegistry({ config });
+      let releaseCalls = 0;
+      const originalRelease = registry.release.bind(registry);
+      registry.release = (root, id) => {
+        releaseCalls += 1;
+        originalRelease(root, id);
+      };
+      const deps = { getConfig: () => config, getRegistry: () => registry };
+
+      const harness = createHarness();
+      toolsMod.registerLspDiagnosticsTool(harness.api, deps);
+      const tool = harness.tools.get("lsp_diagnostics");
+      assert(Boolean(tool), "lsp_diagnostics tool is registered");
+
+      const filePath = path.join(workspace, "tool-test.ts");
+      writeFileSync(filePath, "const x = 1;\n");
+      const context = harness.makeContext({ cwd: workspace });
+      const result = await tool.execute(
+        "call-1",
+        { path: "tool-test.ts" },
+        undefined,
+        undefined,
+        context,
+      );
+      assert(
+        result.content[0].text.includes("fake diagnostic"),
+        "lsp_diagnostics tool surfaces the fake server's diagnostic",
+      );
+      eq(
+        releaseCalls,
+        1,
+        "release() runs exactly once after a successful tool call",
+      );
+
+      // An unmapped extension must not touch the registry at all (resolveTarget
+      // fails before acquire() is ever called).
+      const unknownPath = path.join(workspace, "notes2.xyz");
+      writeFileSync(unknownPath, "whatever");
+      const before = registry.size;
+      const unknownResult = await tool.execute(
+        "call-2",
+        { path: "notes2.xyz" },
+        undefined,
+        undefined,
+        context,
+      );
+      assert(
+        unknownResult.content[0].text.toLowerCase().includes("no lsp profile"),
+        "unknown extension yields a soft-fail message",
+      );
+      eq(
+        registry.size,
+        before,
+        "unknown file type creates no new registry entry",
+      );
+
+      await registry.shutdownAll();
+    },
+  );
+
+  await check(
+    "lsp_diagnostics tool: a timeout still releases the registry entry",
+    async () => {
+      const noDiagProfile = {
+        id: "typescript",
+        label: "Fake TypeScript (no diagnostics)",
+        enabled: true,
+        command: process.execPath,
+        args: [fakeServer, "--no-diagnostics"],
+        rootMarkers: ["tsconfig.json"],
+      };
+      const config = {
+        enabled: true,
+        mode: "auto",
+        requestTimeoutMs: 300,
+        idleShutdownMs: 100000,
+        workspaceSymbolLimit: 50,
+        languages: { ...profilesMod.PROFILES, typescript: noDiagProfile },
+      };
+      const registry = new registryMod.ServerRegistry({ config });
+      let releaseCalls = 0;
+      const originalRelease = registry.release.bind(registry);
+      registry.release = (root, id) => {
+        releaseCalls += 1;
+        originalRelease(root, id);
+      };
+      const deps = { getConfig: () => config, getRegistry: () => registry };
+
+      const harness = createHarness();
+      toolsMod.registerLspDiagnosticsTool(harness.api, deps);
+      const tool = harness.tools.get("lsp_diagnostics");
+      const filePath = path.join(workspace, "timeout-test.ts");
+      writeFileSync(filePath, "const y = 1;\n");
+      const context = harness.makeContext({ cwd: workspace });
+
+      const result = await tool.execute(
+        "call-3",
+        { path: "timeout-test.ts" },
+        undefined,
+        undefined,
+        context,
+      );
+      assert(
+        result.content[0].text.toLowerCase().includes("timeout"),
+        "lsp_diagnostics surfaces a verständliche timeout message instead of hanging or crashing",
+      );
+      eq(
+        releaseCalls,
+        1,
+        "release() runs exactly once even when waitForDiagnostics times out",
+      );
+
+      await registry.shutdownAll();
+    },
+  );
+
+  // Defensive sweep: every client must be shut down with no process left.
+  for (const client of trackedClients) {
+    try {
+      await client.shutdown();
+    } catch {
+      /* ignore */
+    }
   }
+  let liveCount = 0;
+  for (const client of trackedClients) {
+    if (client.processRunning) liveCount += 1;
+  }
+  eq(liveCount, 0, "no LSP client leaves a live process behind");
 
-  // --- Capabilities normalisation ---
-
-  const full = capsMod.normalizeCapabilities({
-    hoverProvider: true,
-    definitionProvider: { linkSupport: true },
-    referencesProvider: false,
-    workspace: { symbol: true },
-    textDocument: { textDocumentSync: 1 },
-  });
-  assert(full.hover === true, "boolean hoverProvider");
-  assert(full.definition === true, "object definitionProvider (truthy)");
-  assert(full.references === false, "explicit false referencesProvider");
-  assert(full.workspaceSymbols === true, "workspace.symbol true");
-  assert(full.textDocumentSync === 1, "textDocumentSync passed through");
-
-  const empty = capsMod.normalizeCapabilities({});
-  assert(empty.hover === false && empty.definition === false && empty.references === false, "empty object → all false");
-
-  // --- Registry: reuse the same instance ---
-
-  const idleShort = 80;
-  const reg = new registryMod.ServerRegistry({
-    config: { ...defaults, idleShutdownMs: idleShort, requestTimeoutMs: 2000 },
-  });
-
-  const pf = fakeProfile();
-  const a = await reg.acquire(workspace, pf);
-  const pidA = a.client.pid;
-  assert(typeof pidA === "number", "acquire starts a server");
-
-  reg.release(workspace, pf.id);
-  const b = await reg.acquire(workspace, pf);
-  assert(b.client.pid === pidA, "same (root,serverId) reuses the instance");
-  reg.release(workspace, pf.id);
-
-  // --- Registry: idle shutdown ---
-
-  const c = await reg.acquire(workspace, pf);
-  reg.release(workspace, pf.id);
-  await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
-  assert(reg.size === 0, "entry removed after idle shutdown");
-  assert(!c.client.processRunning, "server process terminated after idle shutdown");
-
-  // --- Registry: active request prevents idle shutdown ---
-
-  const d = await reg.acquire(workspace, pf);
-  // Do not call release → activeRequests stays 1.
-  await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
-  assert(reg.size === 1, "entry kept while active requests in flight");
-  assert(d.client.processRunning, "server still alive with active requests");
-  reg.release(workspace, pf.id);
-  await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
-  assert(reg.size === 0, "entry removed after release + idle wait");
-
-  // --- Registry: missing binary → structured error, no crash ---
-
-  let missingErr;
   try {
-    await reg.acquire(workspace, { ...pf, command: "pi-lsp-definitely-missing-binary-xyzzy", id: "missing" });
-  } catch (error) {
-    missingErr = error;
+    rmSync(workspace, { recursive: true, force: true });
+  } catch {
+    /* ignore temp cleanup errors */
   }
-  assert(missingErr?.kind === "missing_binary" || missingErr?.kind === "spawn_error",
-    `missing binary gives structured error (got ${missingErr?.kind})`);
-  assert(reg.size === 0, "no server registered for missing binary");
-
-  // --- Registry: shutdownAll leaves no orphans ---
-
-  const srv1 = await reg.acquire(workspace, { ...pf, id: "srv1" });
-  const srv2 = await reg.acquire(workspace, { ...pf, id: "srv2" });
-  assert(reg.size === 2, "two servers registered before shutdownAll");
-  await reg.shutdownAll();
-  assert(reg.size === 0, "no entries after shutdownAll");
-  assert(!srv1.client.processRunning, "srv1 process terminated");
-  assert(!srv2.client.processRunning, "srv2 process terminated");
-
-  // Defensive sweep.
-  await reg.shutdownAll();
-  try { rmSync(workspace, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
 console.log(

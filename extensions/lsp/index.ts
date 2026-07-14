@@ -1,12 +1,12 @@
 /**
  * Optional, read-only LSP integration for Pi (Epic #92).
  *
- * #93 (transport, process, client, types) and #94 (config, root detection,
- * server registry, profiles, capabilities) are implemented.  This entry
- * point is intentionally NOT registered in `settings.json` yet: nothing
- * activates automatically and no server starts without explicit demand.
- * Tools and /lsp command arrive in #95–#97 and will compose the pieces
- * exported here.
+ * #93 (transport, process, client, types), #94 (config, root detection,
+ * server registry, profiles, capabilities) and #95 (document sync,
+ * diagnostics) are implemented. This entry point is intentionally NOT
+ * registered in `settings.json` yet: nothing activates automatically and no
+ * server starts without explicit demand. The remaining tools and /lsp
+ * command arrive in #96–#97 and will compose the pieces exported here.
  *
  * Rollback: removing the (future) `+extensions/lsp/index.ts` entry from
  * `settings.json` fully disables LSP without touching any other extension.
@@ -53,11 +53,26 @@ import type { LspClientOptions } from "./client.ts";
 import { ServerRegistry } from "./registry.ts";
 import type { RegistryOptions } from "./registry.ts";
 import { resolveConfig } from "./config.ts";
-export { PROFILES } from "./server-profiles.ts";
+export { PROFILES, EXTENSION_LANGUAGE_MAP } from "./server-profiles.ts";
+export type { LanguageMapping } from "./server-profiles.ts";
 export { resolveConfig, resolveProfileOverrides, parseMode } from "./config.ts";
 export { findWorkspaceRoot } from "./roots.ts";
 export { normalizeCapabilities } from "./capabilities.ts";
 export { ServerRegistry } from "./registry.ts";
+export { DocumentSync, getDocumentSync, resolveTarget } from "./documents.ts";
+export type {
+  DiagnosticsSnapshot,
+  LspDiagnostic,
+  LspDiagnosticRange,
+  OpenResult,
+  ResolvedTarget,
+} from "./documents.ts";
+export {
+  registerLspDiagnosticsTool,
+  formatLspError,
+  relativeToWorkspace,
+} from "./tools.ts";
+export type { LspToolsDeps } from "./tools.ts";
 
 /**
  * Create a ready-to-start client. The server is not spawned until `start()`

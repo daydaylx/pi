@@ -15,6 +15,33 @@
 
 import type { ServerProfile } from "./types.ts";
 
+/**
+ * Maps a file extension to the profile that should handle it and the LSP
+ * `languageId` to announce in `didOpen`. Issue #95 — document synchronisation.
+ */
+export interface LanguageMapping {
+  profileId: string;
+  languageId: string;
+}
+
+export const EXTENSION_LANGUAGE_MAP: Record<string, LanguageMapping> = {
+  ".ts": { profileId: "typescript", languageId: "typescript" },
+  ".tsx": { profileId: "typescript", languageId: "typescriptreact" },
+  ".js": { profileId: "typescript", languageId: "javascript" },
+  ".jsx": { profileId: "typescript", languageId: "javascriptreact" },
+  ".mjs": { profileId: "typescript", languageId: "javascript" },
+  ".cjs": { profileId: "typescript", languageId: "javascript" },
+  ".py": { profileId: "python", languageId: "python" },
+  ".pyi": { profileId: "python", languageId: "python" },
+  ".go": { profileId: "go", languageId: "go" },
+  ".rs": { profileId: "rust", languageId: "rust" },
+  ".c": { profileId: "c", languageId: "c" },
+  ".h": { profileId: "c", languageId: "c" },
+  ".cpp": { profileId: "c", languageId: "cpp" },
+  ".hpp": { profileId: "c", languageId: "cpp" },
+  ".java": { profileId: "java", languageId: "java" },
+};
+
 export const PROFILES: Record<string, ServerProfile> = {
   typescript: {
     id: "typescript",
