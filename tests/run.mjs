@@ -4,11 +4,13 @@
 // artifact is needed for the test harness.
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -1603,6 +1605,192 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
   } catch {
     /* ignore temp cleanup errors */
   }
+});
+
+// ---------------------------------------------------------------------------
+// LSP config, root detection, registry and profiles (#94). Uses the fake-lsp
+// fixture from #93; deterministic, no real language server or network.
+// ---------------------------------------------------------------------------
+await section("LSP config, root detection, registry and profiles (#94)", async () => {
+  const configMod = await load("extensions/lsp/config.ts");
+  const rootsMod = await load("extensions/lsp/roots.ts");
+  const profilesMod = await load("extensions/lsp/server-profiles.ts");
+  const registryMod = await load("extensions/lsp/registry.ts");
+  const capsMod = await load("extensions/lsp/capabilities.ts");
+
+  assert(
+    typeof configMod?.resolveConfig === "function",
+    "lsp config exports resolveConfig",
+  );
+  assert(typeof rootsMod?.findWorkspaceRoot === "function", "lsp roots exports findWorkspaceRoot");
+  assert(profilesMod?.PROFILES?.typescript?.id === "typescript", "lsp server-profiles exports PROFILES");
+  assert(typeof registryMod?.ServerRegistry === "function", "lsp registry exports ServerRegistry");
+  assert(typeof capsMod?.normalizeCapabilities === "function", "lsp capabilities exports normalizeCapabilities");
+
+  const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+  const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp94-test-"));
+
+  function fakeProfile(extra = {}) {
+    return {
+      id: "fake",
+      label: "Fake LSP",
+      enabled: true,
+      command: process.execPath,
+      args: [fakeServer, ...(extra.args ?? [])],
+      rootMarkers: [],
+      ...extra,
+    };
+  }
+
+  // --- Config priority ---
+
+  const defaults = { enabled: true, mode: "auto", requestTimeoutMs: 10000, idleShutdownMs: 600000, workspaceSymbolLimit: 50, languages: {} };
+  const withTypeScript = { languages: { typescript: { enabled: true } } };
+
+  assert(
+    configMod.resolveConfig({ defaults, trusted: true, sessionFlags: { mode: "force" } }).mode === "force",
+    "session flag overrides mode",
+  );
+  assert(
+    configMod.resolveConfig({ defaults, trusted: true, sessionFlags: { requestTimeoutMs: 5000 } }).requestTimeoutMs === 5000,
+    "session flag overrides timeout",
+  );
+  assert(
+    configMod.resolveConfig({ defaults, trusted: true, projectConfig: { mode: "off" }, sessionFlags: { mode: "auto" } }).mode === "auto",
+    "session wins over project",
+  );
+  assert(
+    configMod.resolveConfig({ defaults, trusted: true, projectConfig: { enabled: true } }).enabled === true,
+    "project config applied when trusted",
+  );
+  assert(
+    configMod.resolveConfig({ defaults, trusted: false, projectConfig: { enabled: false } }).enabled === true,
+    "untrusted ignores projectConfig (keeps defaults)",
+  );
+  assert(
+    configMod.resolveConfig({ defaults, trusted: false, projectConfig: { mode: "force" } }).mode === "auto",
+    "untrusted ignores projectConfig mode",
+  );
+
+  // --- Root detection ---
+
+  writeFileSync(path.join(workspace, "tsconfig.json"), "{}");
+  const nested = path.join(workspace, "src", "lib");
+  mkdirSync(nested, { recursive: true });
+  assert(
+    rootsMod.findWorkspaceRoot(path.join(nested, "index.ts"), ["tsconfig.json"]) === workspace,
+    "finds marker two levels up",
+  );
+  assert(
+    rootsMod.findWorkspaceRoot(workspace, ["pyproject.toml"]) === undefined,
+    "returns undefined when no marker exists",
+  );
+
+  // --- Server profile defaults ---
+
+  const ts = profilesMod.PROFILES.typescript;
+  assert(ts.enabled === true, "typescript profile is enabled by default");
+  assert(
+    ts.initializationOptions?.disableAutomaticTypingAcquisition === true,
+    "typescript disables automatic type acquisition",
+  );
+
+  const rust = profilesMod.PROFILES.rust;
+  assert(rust.enabled === false, "rust profile is disabled by default");
+  assert(
+    rust.settings?.["rust-analyzer"]?.cargo?.buildScripts?.enable === false,
+    "rust disables cargo build scripts",
+  );
+  assert(
+    rust.settings?.["rust-analyzer"]?.procMacro?.enable === false,
+    "rust disables proc macros",
+  );
+  for (const id of ["go", "c", "java"]) {
+    assert(
+      profilesMod.PROFILES[id]?.enabled === false,
+      `${id} profile is disabled by default`,
+    );
+  }
+
+  // --- Capabilities normalisation ---
+
+  const full = capsMod.normalizeCapabilities({
+    hoverProvider: true,
+    definitionProvider: { linkSupport: true },
+    referencesProvider: false,
+    workspace: { symbol: true },
+    textDocument: { textDocumentSync: 1 },
+  });
+  assert(full.hover === true, "boolean hoverProvider");
+  assert(full.definition === true, "object definitionProvider (truthy)");
+  assert(full.references === false, "explicit false referencesProvider");
+  assert(full.workspaceSymbols === true, "workspace.symbol true");
+  assert(full.textDocumentSync === 1, "textDocumentSync passed through");
+
+  const empty = capsMod.normalizeCapabilities({});
+  assert(empty.hover === false && empty.definition === false && empty.references === false, "empty object → all false");
+
+  // --- Registry: reuse the same instance ---
+
+  const idleShort = 80;
+  const reg = new registryMod.ServerRegistry({
+    config: { ...defaults, idleShutdownMs: idleShort, requestTimeoutMs: 2000 },
+  });
+
+  const pf = fakeProfile();
+  const a = await reg.acquire(workspace, pf);
+  const pidA = a.client.pid;
+  assert(typeof pidA === "number", "acquire starts a server");
+
+  reg.release(workspace, pf.id);
+  const b = await reg.acquire(workspace, pf);
+  assert(b.client.pid === pidA, "same (root,serverId) reuses the instance");
+  reg.release(workspace, pf.id);
+
+  // --- Registry: idle shutdown ---
+
+  const c = await reg.acquire(workspace, pf);
+  reg.release(workspace, pf.id);
+  await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
+  assert(reg.size === 0, "entry removed after idle shutdown");
+  assert(!c.client.processRunning, "server process terminated after idle shutdown");
+
+  // --- Registry: active request prevents idle shutdown ---
+
+  const d = await reg.acquire(workspace, pf);
+  // Do not call release → activeRequests stays 1.
+  await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
+  assert(reg.size === 1, "entry kept while active requests in flight");
+  assert(d.client.processRunning, "server still alive with active requests");
+  reg.release(workspace, pf.id);
+  await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
+  assert(reg.size === 0, "entry removed after release + idle wait");
+
+  // --- Registry: missing binary → structured error, no crash ---
+
+  let missingErr;
+  try {
+    await reg.acquire(workspace, { ...pf, command: "pi-lsp-definitely-missing-binary-xyzzy", id: "missing" });
+  } catch (error) {
+    missingErr = error;
+  }
+  assert(missingErr?.kind === "missing_binary" || missingErr?.kind === "spawn_error",
+    `missing binary gives structured error (got ${missingErr?.kind})`);
+  assert(reg.size === 0, "no server registered for missing binary");
+
+  // --- Registry: shutdownAll leaves no orphans ---
+
+  const srv1 = await reg.acquire(workspace, { ...pf, id: "srv1" });
+  const srv2 = await reg.acquire(workspace, { ...pf, id: "srv2" });
+  assert(reg.size === 2, "two servers registered before shutdownAll");
+  await reg.shutdownAll();
+  assert(reg.size === 0, "no entries after shutdownAll");
+  assert(!srv1.client.processRunning, "srv1 process terminated");
+  assert(!srv2.client.processRunning, "srv2 process terminated");
+
+  // Defensive sweep.
+  await reg.shutdownAll();
+  try { rmSync(workspace, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
 console.log(
