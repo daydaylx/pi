@@ -11,17 +11,23 @@ Pi Core
 ├── pi-zentui                 # global editor, footer, user-message chrome
 ├── pi-tool-display           # read/grep/find/ls/bash/edit/write renderer
 ├── pi-subagents              # subagent orchestration package
-└── local extensions          # permissions, workflow, subagent status, ask-user
+└── local extensions          # permissions, workflow, activity line, ask-user
 ```
 
 Zentui owns the global editor and footer.  
 pi-tool-display owns the configured built-in tool renderers.  
 Local extensions own behavior and security, not global presentation.
 
-`workflow`, `permissions`, and `subagents` are the only local status keys
-published to Zentui. The subagent adapter only publishes that key from the
-documented `pi-subagents` lifecycle API; it owns no footer, editor, header,
-widget, or sidebar.
+Zentui renders the single footer in this order: current directory, workflow,
+active model, thinking level. Normal permissions stay out of it; only elevated
+`FULL ACCESS` or `YOLO` appear as a trailing warning. Git, token, cost,
+runtime, time, and subagent state have no permanent footer segment.
+
+`activity-status.ts` owns at most one muted activity line above the editor. It
+uses lifecycle state only, never model reasoning text. `pi-tool-display` owns
+the one-line tool timeline; successful calls are compact, while errors and
+manually expanded calls show details. `pi-subagents` keeps lifecycle tracking
+but its persistent async widget is disabled.
 
 ## Theme
 
@@ -56,9 +62,11 @@ Run Pi from this agent directory after the package install. The checked-in
 
 ## Updates and rollback
 
-Update a package only by changing its exact version in both `settings.json`
-and `npm/package.json`, regenerating `npm/package-lock.json`, and running the
-complete verification command. Do not use version ranges or `latest`.
+The three UI runtime packages in `settings.json` are pinned to immutable
+commits in the `daydaylx` forks. Update one only by committing the reviewed
+fork change, replacing its full commit ID in `settings.json`, and running the
+complete verification command. The exact npm pins remain for the local test
+harness. Do not use version ranges or `latest`.
 
 The pre-rebuild state is tagged `backup/pre-minimal-rebuild`. The inherited
 worktree state is also retained in a named local Git stash until this rebuild

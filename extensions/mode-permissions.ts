@@ -26,7 +26,7 @@ import {
   PERMISSION_LEVEL_LABEL,
   ZENTUI_STATUS_KEYS,
   normalizePermissionLevel,
-  permissionStatusValue,
+  permissionRiskStatusValue,
   setTuiStatus,
   type PermissionLevel,
 } from "./shared/workflow-status.ts";
@@ -129,7 +129,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     setTuiStatus(
       ctx,
       ZENTUI_STATUS_KEYS.permissions,
-      permissionStatusValue(permissionLevel),
+      permissionRiskStatusValue(permissionLevel),
     );
   }
 

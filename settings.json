@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.80.6",
   "theme": "catppuccin-mocha",
-  "defaultProvider": "opencode-go",
-  "defaultModel": "kimi-k2.7-code",
+  "defaultProvider": "zai",
+  "defaultModel": "glm-5.2",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -38,16 +38,16 @@
     "openrouter/poolside/laguna-m.1:free"
   ],
   "packages": [
-    "npm:pi-zentui@0.3.0",
-    "npm:pi-tool-display@0.5.0",
+    "git:github.com/daydaylx/pi-zentui@06d23d5f2b12f9c49ee26a1c4d8ec776b2ef8adc",
+    "git:github.com/daydaylx/pi-tool-display@4da62ca9f4fd72c61140e22a182a5069f9819084",
     "npm:@ujjwalgrover/pi-catppuccin@1.0.0",
-    "npm:pi-subagents@0.34.0"
+    "git:github.com/daydaylx/pi-subagents@dd716cfc8c3a9b0ee35632752ac2b1736cd7de61"
   ],
   "extensions": [
     "!extensions/**",
     "+extensions/plan-mode/index.ts",
     "+extensions/mode-permissions.ts",
-    "+extensions/subagent-status.ts",
+    "+extensions/activity-status.ts",
     "+extensions/ask-user.ts"
   ],
   "doubleEscapeAction": "tree",
