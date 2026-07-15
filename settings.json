@@ -49,6 +49,7 @@
     "+extensions/plan-mode/index.ts",
     "+extensions/mode-permissions.ts",
     "+extensions/activity-status.ts",
+    "+extensions/thinking-view.ts",
     "+extensions/ask-user.ts",
     "+extensions/lsp/index.ts",
     "+extensions/git-header.ts"

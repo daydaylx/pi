@@ -131,6 +131,18 @@ const workflowStatus = await load("extensions/shared/workflow-status.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
 const activityStatus = await load("extensions/activity-status.ts");
+// thinking-view-config.ts resolves its default config path once at import
+// time via PI_CODING_AGENT_DIR. This repo itself lives at ~/.pi/agent, so
+// the test suite must redirect that default to an isolated temp directory
+// before the module (or thinking-view.ts, which imports it) ever loads —
+// otherwise tests would read/write the real local config file.
+const thinkingViewConfigDir = mkdtempSync(
+  path.join(tmpdir(), "pi-thinking-view-config-"),
+);
+process.env.PI_CODING_AGENT_DIR = thinkingViewConfigDir;
+const thinkingView = await load("extensions/thinking-view.ts");
+const thinkingViewConfig = await load("extensions/thinking-view-config.ts");
+delete process.env.PI_CODING_AGENT_DIR;
 const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const permissionDialog = await load("extensions/shared/permission-dialog.ts");
@@ -581,6 +593,10 @@ await section("target runtime configuration", async () => {
   assert(
     activeExtensions.includes("+extensions/activity-status.ts"),
     "the local one-line activity publisher is active",
+  );
+  assert(
+    activeExtensions.includes("+extensions/thinking-view.ts"),
+    "the local thinking-state status publisher is active",
   );
   assert(
     activeExtensions.includes("+extensions/lsp/index.ts"),
@@ -1139,6 +1155,151 @@ await section("activity status lifecycle", async () => {
   assertNoGlobalChrome(harness, "activity status installs no global chrome");
 });
 
+await section("thinking view lifecycle", async () => {
+  if (!thinkingView || !thinkingViewConfig) return;
+  eq(
+    thinkingViewConfig
+      .getThinkingViewConfigPath()
+      .startsWith(thinkingViewConfigDir),
+    true,
+    "the config store resolved under the isolated PI_CODING_AGENT_DIR, not the real repo path",
+  );
+  {
+    const harness = createHarness();
+    thinkingView.default(harness.api);
+    const context = harness.makeContext();
+
+    await harness.runHooks("session_start", {}, context);
+    eq(
+      latestStatus(harness, "thinking-view"),
+      undefined,
+      "no status line before any agent activity",
+    );
+
+    await harness.runHooks("agent_start", {}, context);
+    eq(
+      latestStatus(harness, "thinking-view")?.includes("WAITING"),
+      true,
+      "agent start publishes a waiting state",
+    );
+
+    await harness.runHooks(
+      "message_update",
+      { assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
+      context,
+    );
+    eq(
+      latestStatus(harness, "thinking-view")?.includes("THINKING"),
+      true,
+      "a thinking_start delta flips the status to THINKING",
+    );
+    assert(
+      harness.hiddenThinkingLabels.at(-1)?.startsWith("Thinking"),
+      "the hidden-thinking label is kept informative while thinking streams",
+    );
+
+    await harness.runHooks(
+      "message_update",
+      {
+        assistantMessageEvent: {
+          type: "thinking_delta",
+          contentIndex: 0,
+          delta: "reasoning about the fix",
+        },
+      },
+      context,
+    );
+
+    await harness.runHooks(
+      "message_update",
+      {
+        assistantMessageEvent: {
+          type: "text_delta",
+          contentIndex: 1,
+          delta: "Hi",
+        },
+      },
+      context,
+    );
+    eq(
+      latestStatus(harness, "thinking-view")?.includes("ANSWERING"),
+      true,
+      "a text delta after thinking flips the status to ANSWERING, never THINKING again",
+    );
+
+    await harness.runHooks(
+      "message_end",
+      { message: { role: "assistant", content: [] } },
+      context,
+    );
+    await harness.runHooks("agent_settled", {}, context);
+    eq(
+      latestStatus(harness, "thinking-view"),
+      undefined,
+      "the status line clears once the agent settles",
+    );
+
+    await harness.runHooks("session_shutdown", {}, context);
+    eq(
+      harness.hiddenThinkingLabels.at(-1),
+      undefined,
+      "shutdown restores the default hidden-thinking label",
+    );
+    assertNoGlobalChrome(harness, "thinking view installs no global chrome");
+
+    // A turn that never sees thinking_start must never claim THINKING.
+    const honestHarness = createHarness();
+    thinkingView.default(honestHarness.api);
+    const honestContext = honestHarness.makeContext();
+    await honestHarness.runHooks("session_start", {}, honestContext);
+    await honestHarness.runHooks("agent_start", {}, honestContext);
+    await honestHarness.runHooks(
+      "message_update",
+      {
+        assistantMessageEvent: {
+          type: "text_delta",
+          contentIndex: 0,
+          delta: "Hi",
+        },
+      },
+      honestContext,
+    );
+    assert(
+      !(latestStatus(honestHarness, "thinking-view") ?? "").includes(
+        "THINKING",
+      ),
+      "a model that never emits thinking_start is never labeled THINKING",
+    );
+    await honestHarness.runHooks(
+      "message_end",
+      { message: { role: "assistant", content: [] } },
+      honestContext,
+    );
+    eq(
+      latestStatus(honestHarness, "thinking-view")?.includes(
+        "NO VISIBLE THINKING",
+      ),
+      true,
+      "a turn without any thinking delta is honestly labeled NO VISIBLE THINKING",
+    );
+
+    // /thinking-view off must clear the status and the hidden label.
+    const offHarness = createHarness();
+    thinkingView.default(offHarness.api);
+    const offContext = offHarness.makeContext();
+    await offHarness.runHooks("session_start", {}, offContext);
+    await offHarness.runHooks("agent_start", {}, offContext);
+    const command = offHarness.commands.get("thinking-view");
+    assert(Boolean(command), "/thinking-view is registered");
+    if (command) await command("off", offContext);
+    eq(
+      latestStatus(offHarness, "thinking-view"),
+      undefined,
+      "/thinking-view off clears the status line",
+    );
+  }
+});
+
 await section("plan workflow lifecycle", async () => {
   if (!planMode || !planUtils) return;
   const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-status-"));
@@ -1327,6 +1488,7 @@ await section("combined production extension stack", async () => {
     !modePermissions ||
     !planMode ||
     !activityStatus ||
+    !thinkingView ||
     !askUser ||
     !lspExtensionMod
   )
@@ -1335,6 +1497,7 @@ await section("combined production extension stack", async () => {
     modePermissions.default,
     planMode.default,
     activityStatus.default,
+    thinkingView.default,
     askUser.default,
     lspExtensionMod.default,
   ];
