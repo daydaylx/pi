@@ -623,13 +623,20 @@ await section("target runtime configuration", async () => {
 
   const builtInToolName =
     /name\s*:\s*["'](?:read|grep|find|ls|bash|edit|write)["']/;
+  // git-header.ts is the one deliberate exception to the single-owner rule:
+  // it claims only setHeader, and only to show git status at startup, never
+  // setFooter/setEditor/setWidget which stay Zentui's alone.
+  const headerOwnershipExceptions = new Set(["+extensions/git-header.ts"]);
   for (const extension of activeExtensions) {
     const sourcePath = path.join(ROOT, extension.slice(1));
     assert(existsSync(sourcePath), extension + " resolves to a local file");
     if (!existsSync(sourcePath)) continue;
     const source = readFileSync(sourcePath, "utf8");
+    const chromePattern = headerOwnershipExceptions.has(extension)
+      ? /\.(?:setFooter|setEditor|setWidget)\s*\(/
+      : /\.(?:setFooter|setEditor|setWidget|setHeader)\s*\(/;
     assert(
-      !/\.(?:setFooter|setEditor|setWidget|setHeader)\s*\(/.test(source),
+      !chromePattern.test(source),
       extension + " does not claim global TUI chrome",
     );
     assert(
