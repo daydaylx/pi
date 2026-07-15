@@ -40,7 +40,7 @@
   ],
   "packages": [
     "git:github.com/daydaylx/pi-zentui@06d23d5f2b12f9c49ee26a1c4d8ec776b2ef8adc",
-    "git:github.com/daydaylx/pi-tool-display@4da62ca9f4fd72c61140e22a182a5069f9819084",
+    "git:github.com/daydaylx/pi-tool-display@dd33d1340f5ac598b1873034016f1a05eed0619c",
     "npm:@ujjwalgrover/pi-catppuccin@1.0.0",
     "git:github.com/daydaylx/pi-subagents@dd716cfc8c3a9b0ee35632752ac2b1736cd7de61"
   ],
