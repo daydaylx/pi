@@ -19,6 +19,7 @@ import { getDocumentSync, resolveTarget } from "./documents.ts";
 import type { ResolvedTarget } from "./documents.ts";
 import { normalizeCapabilities } from "./capabilities.ts";
 import { findWorkspaceRoot } from "./roots.ts";
+import { limitTextOutput } from "../shared/output-limits.ts";
 
 /** Default cap for lsp_references; not user-configurable to keep scope small. */
 const DEFAULT_REFERENCES_LIMIT = 100;
@@ -73,6 +74,23 @@ export function formatLspError(error: LspError): string {
   return lines.join("\n");
 }
 
+function lspTextResult(
+  text: string,
+  details?: Record<string, unknown>,
+): {
+  content: [{ type: "text"; text: string }];
+  details?: Record<string, unknown>;
+} {
+  const limited = limitTextOutput(text);
+  const nextDetails = limited.truncation
+    ? { ...details, truncation: limited.truncation }
+    : details;
+  return {
+    content: [{ type: "text", text: limited.text }],
+    ...(nextDetails ? { details: nextDetails } : {}),
+  };
+}
+
 function formatDiagnostic(
   diag: {
     severity: number;
@@ -114,7 +132,7 @@ export function registerLspDiagnosticsTool(
       const config = deps.getConfig();
       const target = resolveTarget(absPath, config);
       if (target instanceof LspError) {
-        return { content: [{ type: "text", text: formatLspError(target) }] };
+        return lspTextResult(formatLspError(target));
       }
 
       const registry = deps.getRegistry();
@@ -129,7 +147,7 @@ export function registerLspDiagnosticsTool(
           error instanceof LspError
             ? formatLspError(error)
             : `LSP: unerwarteter Fehler beim Start von ${target.profile.label}: ${String(error)}`;
-        return { content: [{ type: "text", text }] };
+        return lspTextResult(text);
       }
 
       try {
@@ -144,17 +162,15 @@ export function registerLspDiagnosticsTool(
             error instanceof LspError
               ? formatLspError(error)
               : `LSP: Fehler beim Warten auf Diagnosen: ${String(error)}`;
-          return { content: [{ type: "text", text }], details: { version } };
+          return lspTextResult(text, { version });
         }
 
         const relPath = relativeToWorkspace(absPath, target.workspaceRoot);
         if (snapshot.diagnostics.length === 0) {
-          return {
-            content: [
-              { type: "text", text: `LSP: keine Diagnosen für ${relPath}.` },
-            ],
-            details: { version, count: 0 },
-          };
+          return lspTextResult(`LSP: keine Diagnosen für ${relPath}.`, {
+            version,
+            count: 0,
+          });
         }
         const lines = snapshot.diagnostics.map((d) =>
           formatDiagnostic(
@@ -163,10 +179,10 @@ export function registerLspDiagnosticsTool(
             d.relatedInformation,
           ),
         );
-        return {
-          content: [{ type: "text", text: `${relPath}:\n${lines.join("\n")}` }],
-          details: { version, count: snapshot.diagnostics.length },
-        };
+        return lspTextResult(`${relPath}:\n${lines.join("\n")}`, {
+          version,
+          count: snapshot.diagnostics.length,
+        });
       } finally {
         registry.release(target.workspaceRoot, target.profile.id);
       }
@@ -401,15 +417,10 @@ async function withDocument<T>(
 function softFail(
   feature: string,
   profile: ServerProfile,
-): { content: [{ type: "text"; text: string }] } {
-  return {
-    content: [
-      {
-        type: "text",
-        text: `LSP: ${profile.label} unterstützt ${feature} nicht (Capability fehlt).`,
-      },
-    ],
-  };
+) {
+  return lspTextResult(
+    `LSP: ${profile.label} unterstützt ${feature} nicht (Capability fehlt).`,
+  );
 }
 
 export function registerLspNavigationTools(
@@ -427,7 +438,7 @@ export function registerLspNavigationTools(
       const config = deps.getConfig();
       const target = resolveTarget(absPath, config);
       if (target instanceof LspError) {
-        return { content: [{ type: "text", text: formatLspError(target) }] };
+        return lspTextResult(formatLspError(target));
       }
 
       const outcome = await withDocument(
@@ -444,25 +455,20 @@ export function registerLspNavigationTools(
           });
         },
       );
-      if ("text" in outcome)
-        return { content: [{ type: "text", text: outcome.text }] };
+      if ("text" in outcome) return lspTextResult(outcome.text);
       if (outcome.ok === undefined)
         return softFail("Definitionssuche", target.profile);
 
       const locations = toLocationList(outcome.ok, target.workspaceRoot);
       if (locations.length === 0) {
-        return {
-          content: [{ type: "text", text: "LSP: keine Definition gefunden." }],
-          details: { version: outcome.version },
-        };
+        return lspTextResult("LSP: keine Definition gefunden.", {
+          version: outcome.version,
+        });
       }
       const text = locations
         .map((l) => `${l.path}:${l.line + 1}:${l.character + 1}`)
         .join("\n");
-      return {
-        content: [{ type: "text", text }],
-        details: { version: outcome.version },
-      };
+      return lspTextResult(text, { version: outcome.version });
     },
   });
 
@@ -477,7 +483,7 @@ export function registerLspNavigationTools(
       const config = deps.getConfig();
       const target = resolveTarget(absPath, config);
       if (target instanceof LspError) {
-        return { content: [{ type: "text", text: formatLspError(target) }] };
+        return lspTextResult(formatLspError(target));
       }
 
       const outcome = await withDocument(
@@ -495,8 +501,7 @@ export function registerLspNavigationTools(
           });
         },
       );
-      if ("text" in outcome)
-        return { content: [{ type: "text", text: outcome.text }] };
+      if ("text" in outcome) return lspTextResult(outcome.text);
       if (outcome.ok === undefined)
         return softFail("Referenzsuche", target.profile);
 
@@ -504,10 +509,9 @@ export function registerLspNavigationTools(
       const limit = params.limit ?? DEFAULT_REFERENCES_LIMIT;
       const shown = all.slice(0, limit);
       if (shown.length === 0) {
-        return {
-          content: [{ type: "text", text: "LSP: keine Referenzen gefunden." }],
-          details: { version: outcome.version },
-        };
+        return lspTextResult("LSP: keine Referenzen gefunden.", {
+          version: outcome.version,
+        });
       }
       const lines = shown.map(
         (l) => `${l.path}:${l.line + 1}:${l.character + 1}`,
@@ -516,14 +520,11 @@ export function registerLspNavigationTools(
         all.length > shown.length
           ? `\n(${shown.length} von ${all.length} gezeigt)`
           : "";
-      return {
-        content: [{ type: "text", text: lines.join("\n") + suffix }],
-        details: {
-          version: outcome.version,
-          total: all.length,
-          shown: shown.length,
-        },
-      };
+      return lspTextResult(lines.join("\n") + suffix, {
+        version: outcome.version,
+        total: all.length,
+        shown: shown.length,
+      });
     },
   });
 
@@ -538,7 +539,7 @@ export function registerLspNavigationTools(
       const config = deps.getConfig();
       const target = resolveTarget(absPath, config);
       if (target instanceof LspError) {
-        return { content: [{ type: "text", text: formatLspError(target) }] };
+        return lspTextResult(formatLspError(target));
       }
 
       const outcome = await withDocument(
@@ -555,8 +556,7 @@ export function registerLspNavigationTools(
           });
         },
       );
-      if ("text" in outcome)
-        return { content: [{ type: "text", text: outcome.text }] };
+      if ("text" in outcome) return lspTextResult(outcome.text);
       if (outcome.ok === undefined)
         return softFail("Hover-Informationen", target.profile);
 
@@ -564,17 +564,11 @@ export function registerLspNavigationTools(
         params.verbosity === "brief" ? "brief" : "full";
       const text = toHoverText(outcome.ok, verbosity);
       if (!text) {
-        return {
-          content: [
-            { type: "text", text: "LSP: keine Hover-Informationen verfügbar." },
-          ],
-          details: { version: outcome.version },
-        };
+        return lspTextResult("LSP: keine Hover-Informationen verfügbar.", {
+          version: outcome.version,
+        });
       }
-      return {
-        content: [{ type: "text", text }],
-        details: { version: outcome.version },
-      };
+      return lspTextResult(text, { version: outcome.version });
     },
   });
 
@@ -622,24 +616,19 @@ export function registerLspNavigationTools(
       }
 
       if (!profile || !workspaceRoot) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "LSP: kein aktiviertes Serverprofil für dieses Arbeitsverzeichnis gefunden.",
-            },
-          ],
-        };
+        return lspTextResult(
+          "LSP: kein aktiviertes Serverprofil für dieses Arbeitsverzeichnis gefunden.",
+        );
       }
 
       const limit = params.limit ?? config.workspaceSymbolLimit;
       const cacheKey = `${workspaceRoot}\0${profile.id}\0${params.query}\0${limit}`;
       const cached = workspaceSymbolCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
-        return {
-          content: [{ type: "text", text: formatSymbols(cached.result) }],
-          details: { cached: true, count: cached.result.length },
-        };
+        return lspTextResult(formatSymbols(cached.result), {
+          cached: true,
+          count: cached.result.length,
+        });
       }
 
       const registry = deps.getRegistry();
@@ -651,7 +640,7 @@ export function registerLspNavigationTools(
           error instanceof LspError
             ? formatLspError(error)
             : `LSP: unerwarteter Fehler beim Start von ${profile.label}: ${String(error)}`;
-        return { content: [{ type: "text", text }] };
+        return lspTextResult(text);
       }
       try {
         const caps = normalizeCapabilities(client.serverCapabilities);
@@ -667,20 +656,18 @@ export function registerLspNavigationTools(
           expiresAt: Date.now() + WORKSPACE_SYMBOL_CACHE_TTL_MS,
         });
         if (symbols.length === 0) {
-          return {
-            content: [{ type: "text", text: "LSP: keine Symbole gefunden." }],
-          };
+          return lspTextResult("LSP: keine Symbole gefunden.");
         }
-        return {
-          content: [{ type: "text", text: formatSymbols(symbols) }],
-          details: { cached: false, count: symbols.length },
-        };
+        return lspTextResult(formatSymbols(symbols), {
+          cached: false,
+          count: symbols.length,
+        });
       } catch (error) {
         const text =
           error instanceof LspError
             ? formatLspError(error)
             : `LSP: unerwarteter Fehler: ${String(error)}`;
-        return { content: [{ type: "text", text }] };
+        return lspTextResult(text);
       } finally {
         registry.release(workspaceRoot, profile.id);
       }

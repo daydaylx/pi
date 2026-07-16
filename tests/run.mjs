@@ -127,6 +127,7 @@ async function load(relativePath) {
 
 const policy = await load("extensions/shared/permission-policy.ts");
 const planUtils = await load("extensions/plan-mode/utils.ts");
+const planState = await load("extensions/plan-mode/state.ts");
 const workflowStatus = await load("extensions/shared/workflow-status.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
@@ -147,6 +148,12 @@ const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const permissionDialog = await load("extensions/shared/permission-dialog.ts");
 const lspExtensionMod = await load("extensions/lsp/index.ts");
+const outputLimits = await load("extensions/shared/output-limits.ts");
+const toolOutputGuard = await load("extensions/tool-output-guard.ts");
+const setupConfig = await load("extensions/setup-core/config.ts");
+const setupCore = await load("extensions/setup-core/index.ts");
+const auroraState = await load("extensions/aurora-ui/state.ts");
+const auroraUi = await load("extensions/aurora-ui/index.ts");
 
 function stripAnsi(value) {
   return String(value).replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
@@ -180,10 +187,15 @@ function createHarness(options = {}) {
   const workingVisibility = [];
   const workingIndicators = [];
   const hiddenThinkingLabels = [];
+  const execCalls = [];
+  const widgets = new Map();
+  let footerFactory;
+  let editorFactory;
   let thinkingLevel = options.thinkingLevel ?? "high";
   let entries = options.entries ?? [];
 
   const theme = {
+    name: "test-theme",
     fg: (_color, text) => String(text),
     bold: (text) => String(text),
   };
@@ -201,14 +213,27 @@ function createHarness(options = {}) {
       if (value === undefined) statuses.delete(key);
       else statuses.set(key, value);
     },
-    setFooter() {
-      chrome.footer += 1;
+    setFooter(factory) {
+      footerFactory = factory;
+      if (factory) chrome.footer += 1;
     },
     setEditor() {
       chrome.editor += 1;
     },
-    setWidget() {
-      chrome.widget += 1;
+    setEditorComponent(factory) {
+      editorFactory = factory;
+      if (factory) chrome.editor += 1;
+    },
+    getEditorComponent() {
+      return editorFactory;
+    },
+    setWidget(key, content, widgetOptions) {
+      if (content) {
+        widgets.set(key, { content, options: widgetOptions });
+        chrome.widget += 1;
+      } else {
+        widgets.delete(key);
+      }
     },
     setHeader() {
       chrome.header += 1;
@@ -224,6 +249,10 @@ function createHarness(options = {}) {
     },
     setHiddenThinkingLabel(label) {
       hiddenThinkingLabels.push(label);
+    },
+    setTheme(name) {
+      theme.name = name;
+      return { success: true };
     },
     notify(message, level) {
       notifications.push({ message: String(message), level });
@@ -281,6 +310,15 @@ function createHarness(options = {}) {
       if (tools.has(tool.name)) duplicateTools.push(tool.name);
       tools.set(tool.name, tool);
     },
+    async exec(command, args, execOptions) {
+      execCalls.push({ command, args, options: execOptions });
+      return {
+        stdout: `${options.piVersion ?? "0.80.7"}\n`,
+        stderr: "",
+        code: 0,
+        killed: false,
+      };
+    },
     registerFlag() {},
     getFlag(name) {
       return options.flags?.[name] ?? false;
@@ -296,6 +334,9 @@ function createHarness(options = {}) {
     },
     getThinkingLevel() {
       return thinkingLevel;
+    },
+    getSessionName() {
+      return options.sessionName;
     },
   };
 
@@ -318,6 +359,14 @@ function createHarness(options = {}) {
     workingVisibility,
     workingIndicators,
     hiddenThinkingLabels,
+    execCalls,
+    widgets,
+    get footerFactory() {
+      return footerFactory;
+    },
+    get editorFactory() {
+      return editorFactory;
+    },
     makeContext({
       cwd = ROOT,
       mode = "tui",
@@ -351,9 +400,15 @@ function createHarness(options = {}) {
         },
         abort() {},
         waitForIdle: async () => {},
+        getContextUsage() {
+          return { percent: options.contextPercent ?? 42, contextWindow: 100000 };
+        },
         sessionManager: {
           getSessionId() {
             return sessionId;
+          },
+          getLeafId() {
+            return entries.at(-1)?.id ?? null;
           },
           getEntries() {
             return entries;
@@ -420,6 +475,143 @@ await section("target runtime configuration", async () => {
     readFileSync(path.join(ROOT, "npm", "package-lock.json"), "utf8"),
   );
 
+  // Greenfield runtime: the former package-owned cockpit remains below as a
+  // rollback contract, while Aurora is tested through its own ownership path.
+  if (settings.theme === "aurora-night") {
+    const setup = JSON.parse(readFileSync(path.join(ROOT, "setup.json"), "utf8"));
+    const schema = JSON.parse(
+      readFileSync(path.join(ROOT, "schemas", "setup.schema.json"), "utf8"),
+    );
+    const auroraTheme = JSON.parse(
+      readFileSync(path.join(ROOT, "themes", "aurora-night.json"), "utf8"),
+    );
+    const packageSources = settings.packages.map((entry) =>
+      typeof entry === "string" ? entry : entry?.source,
+    );
+    eq(packageSources.length, 1, "only subagent orchestration remains an active package");
+    assert(
+      /^git:github\.com\/daydaylx\/pi-subagents@[0-9a-f]{40}$/.test(
+        packageSources[0] ?? "",
+      ),
+      "subagent runtime remains immutable-pinned",
+    );
+    eq(
+      settings.enabledModels,
+      [
+        "openai-codex/gpt-5.4-mini",
+        "openai-codex/gpt-5.4",
+        "openai-codex/gpt-5.5",
+      ],
+      "model surface is the curated fast/primary/deep set",
+    );
+    eq(
+      [setup.models.fast, setup.models.primary, setup.models.deep],
+      settings.enabledModels,
+      "central model roles match the active model registry surface",
+    );
+    eq(
+      `${settings.defaultProvider}/${settings.defaultModel}`,
+      setup.models.primary,
+      "the active default model matches the central primary role",
+    );
+    assert(
+      readFileSync(path.join(ROOT, "agents", "oracle.md"), "utf8").includes(
+        `model: ${setup.models.deep}`,
+      ),
+      "the oracle profile consumes the central deep-model assignment",
+    );
+    eq(setup.ui, { theme: "aurora-night", motion: "contextual" }, "central UI defaults");
+    eq(setup.permissions, { unknownTools: "ask", bash: "ask" }, "unknown tools and free bash fail to confirmation");
+    eq(schema.additionalProperties, false, "central setup schema rejects unknown root keys");
+    eq(auroraTheme.name, "aurora-night", "Aurora theme has its stable runtime name");
+    for (const color of [
+      "accent",
+      "borderAccent",
+      "success",
+      "warning",
+      "error",
+      "thinkingXhigh",
+    ]) {
+      assert(Boolean(auroraTheme.colors?.[color]), `Aurora declares ${color}`);
+    }
+
+    const activeExtensions = settings.extensions.filter(
+      (entry) => typeof entry === "string" && entry.startsWith("+extensions/"),
+    );
+    for (const extension of [
+      "+extensions/setup-core/index.ts",
+      "+extensions/plan-mode/index.ts",
+      "+extensions/mode-permissions.ts",
+      "+extensions/ask-user.ts",
+      "+extensions/lsp/index.ts",
+      "+extensions/tool-output-guard.ts",
+      "+extensions/aurora-ui/index.ts",
+    ]) {
+      assert(activeExtensions.includes(extension), `${extension} is active`);
+    }
+    for (const legacyOwner of [
+      "+extensions/activity-status.ts",
+      "+extensions/thinking-view.ts",
+      "+extensions/git-header.ts",
+    ]) {
+      assert(!activeExtensions.includes(legacyOwner), `${legacyOwner} is inactive under Aurora`);
+    }
+    for (const extension of activeExtensions) {
+      const sourcePath = path.join(ROOT, extension.slice(1));
+      assert(existsSync(sourcePath), extension + " resolves to a local file");
+      if (!existsSync(sourcePath)) continue;
+      const source = readFileSync(sourcePath, "utf8");
+      const ownsChrome = /\.(?:setFooter|setEditorComponent|setWidget|setHeader)\s*\(/.test(source);
+      if (extension === "+extensions/aurora-ui/index.ts") {
+        assert(ownsChrome, "Aurora owns the custom TUI chrome");
+        eq(
+          (source.match(/\bsetInterval\s*\(/g) ?? []).length,
+          1,
+          "Aurora owns one shared contextual ticker",
+        );
+      } else {
+        assert(!ownsChrome, extension + " does not compete for TUI chrome");
+        assert(!/\bsetInterval\s*\(/.test(source), extension + " has no UI ticker");
+      }
+    }
+    eq(subagentConfig.parallel, { maxTasks: 8, concurrency: 4 }, "subagent parallelism is bounded");
+    eq(subagentConfig.globalConcurrencyLimit, 4, "global subagent concurrency is bounded");
+    eq(
+      subagentConfig.parallel.concurrency,
+      setup.subagents.concurrency,
+      "central subagent concurrency matches the active package configuration",
+    );
+    const installerSource = readFileSync(
+      path.join(ROOT, "scripts", "install-user.mjs"),
+      "utf8",
+    );
+    for (const required of [
+      '"package.json"',
+      '"tsconfig.json"',
+      '"npm/package.json"',
+      '"npm/package-lock.json"',
+      '"tests"',
+    ]) {
+      assert(
+        installerSource.includes(required),
+        `greenfield installer includes verification support ${required}`,
+      );
+    }
+
+    // Exact harness pins remain installed for deterministic typechecking even
+    // though the three former UI packages are not active runtime packages.
+    for (const [name, version] of [
+      ["pi-zentui", "0.3.0"],
+      ["pi-tool-display", "0.5.0"],
+      ["@ujjwalgrover/pi-catppuccin", "1.0.0"],
+      ["pi-subagents", "0.34.0"],
+    ]) {
+      eq(packageJson.dependencies?.[name], version, name + " remains exact in the harness");
+      eq(lock.packages?.["node_modules/" + name]?.version, version, name + " remains locked");
+    }
+    return;
+  }
+
   eq(
     settings.theme,
     "catppuccin-mocha",
@@ -453,12 +645,23 @@ await section("target runtime configuration", async () => {
   );
   eq(
     zentui.projectRefreshIntervalMs,
-    0,
-    "hidden project footer data does not retain a periodic refresh timer",
+    15000,
+    "the visible project footer refreshes without aggressive polling",
   );
   eq(zentui.features.editor, true, "Zentui editor is enabled");
   eq(zentui.features.statusLine, true, "Zentui footer is enabled");
-  eq(zentui.footerLayout, "agent", "Zentui owns the compact agent footer");
+  eq(zentui.footerLayout, "standard", "Zentui owns the information-rich cockpit footer");
+  eq(zentui.contextStyle, "text+gauge", "context usage has text and a visual gauge");
+  eq(
+    zentui.footerFormat,
+    "$cwd( $git_branch)( $git_status)$fill( $context )$fill( $tokens)($sep$cost)",
+    "the cockpit footer has left, centered, and right information zones",
+  );
+  eq(
+    zentui.pathDisplay,
+    { mode: "full", depth: 2 },
+    "project paths retain useful parent context without becoming unbounded",
+  );
   eq(
     zentui.features.copyFriendly,
     false,
@@ -467,32 +670,39 @@ await section("target runtime configuration", async () => {
   eq(
     zentui.footerSegments,
     {
-      cwd: false,
-      gitBranch: false,
-      gitStatus: false,
-      gitCounts: false,
+      cwd: true,
+      gitBranch: true,
+      gitStatus: true,
+      gitCounts: true,
       runtime: false,
-      context: false,
-      tokens: false,
-      cost: false,
+      context: true,
+      tokens: true,
+      cost: true,
       sessionDuration: false,
       username: false,
       time: false,
       os: false,
     },
-    "Zentui hides every built-in footer segment",
+    "Zentui exposes the operational footer segments used by the cockpit",
   );
   eq(zentui.colors, undefined, "Zentui has no local color overrides");
-  eq(zentui.icons, undefined, "Zentui has no local icon overrides");
+  eq(zentui.icons, { mode: "auto" }, "Zentui chooses Nerd or fallback icons automatically");
   eq(
     zentui.extensionStatuses.defaultPlacement,
     "off",
-    "only explicit status keys are shown",
+    "unknown extension statuses cannot grow the footer implicitly",
   );
   eq(
     zentui.extensionStatuses.placements,
-    {},
-    "the agent footer does not duplicate status widgets",
+    {
+      workflow: "left",
+      permissions: "right",
+      "thinking-view": "off",
+      lsp: "right",
+      "subagent-slash": "right",
+      "subagent-slash-text": "right",
+    },
+    "persistent statuses have explicit non-overlapping footer ownership",
   );
   eq(
     zentui.extensionStatuses.colorModes,
@@ -599,6 +809,10 @@ await section("target runtime configuration", async () => {
     "the local thinking-state status publisher is active",
   );
   assert(
+    !activeExtensions.includes("+extensions/git-header.ts"),
+    "the redundant competing git header is inactive",
+  );
+  assert(
     activeExtensions.includes("+extensions/lsp/index.ts"),
     "the LSP extension is active (#97)",
   );
@@ -639,18 +853,12 @@ await section("target runtime configuration", async () => {
 
   const builtInToolName =
     /name\s*:\s*["'](?:read|grep|find|ls|bash|edit|write)["']/;
-  // git-header.ts is the one deliberate exception to the single-owner rule:
-  // it claims only setHeader, and only to show git status at startup, never
-  // setFooter/setEditor/setWidget which stay Zentui's alone.
-  const headerOwnershipExceptions = new Set(["+extensions/git-header.ts"]);
   for (const extension of activeExtensions) {
     const sourcePath = path.join(ROOT, extension.slice(1));
     assert(existsSync(sourcePath), extension + " resolves to a local file");
     if (!existsSync(sourcePath)) continue;
     const source = readFileSync(sourcePath, "utf8");
-    const chromePattern = headerOwnershipExceptions.has(extension)
-      ? /\.(?:setFooter|setEditor|setWidget)\s*\(/
-      : /\.(?:setFooter|setEditor|setWidget|setHeader)\s*\(/;
+    const chromePattern = /\.(?:setFooter|setEditor|setWidget|setHeader)\s*\(/;
     assert(
       !chromePattern.test(source),
       extension + " does not claim global TUI chrome",
@@ -666,10 +874,101 @@ await section("target runtime configuration", async () => {
   }
 });
 
+await section("greenfield setup config and Aurora state contract", async () => {
+  if (!setupConfig || !auroraState) return;
+  const defaults = setupConfig.defaultSetupConfig();
+  eq(defaults.ui, { theme: "aurora-night", motion: "contextual" }, "Aurora is the central UI default");
+  eq(defaults.permissions, { unknownTools: "ask", bash: "ask" }, "capability defaults require confirmation");
+  eq(Object.keys(defaults.models).sort(), ["deep", "fast", "primary"], "three model roles are centralised");
+
+  const project = mkdtempSync(path.join(tmpdir(), "pi-setup-config-"));
+  mkdirSync(path.join(project, ".pi"), { recursive: true });
+  writeFileSync(
+    path.join(project, ".pi", "setup.json"),
+    JSON.stringify({
+      ui: { motion: "reduced" },
+      permissions: { unknownTools: "allow", bash: "allow" },
+      lsp: { requestTimeoutMs: 5000 },
+    }),
+  );
+  const trusted = setupConfig.loadSetupConfig(project, true);
+  eq(trusted.config.ui.motion, "reduced", "trusted project may reduce motion");
+  eq(trusted.config.lsp.requestTimeoutMs, 5000, "trusted project may tune LSP timeout");
+  eq(trusted.config.permissions, defaults.permissions, "project may not relax global permissions");
+  assert(
+    trusted.diagnostics.some((entry) => entry.level === "warning"),
+    "security relaxation produces a visible warning",
+  );
+  rmSync(project, { recursive: true, force: true });
+
+  const state = {
+    sessionEpoch: "epoch-1",
+    workflow: { phase: "idle", label: "WORK" },
+    permissions: {},
+    lsp: {},
+    model: {},
+    activity: { kind: "idle", activeTools: 0 },
+  };
+  auroraState.mergeAuroraUiState(state, {
+    workflow: { phase: "executing", label: "WORK 1/3", completed: 1, total: 3 },
+    lsp: { state: "ready" },
+  });
+  eq(state.workflow.phase, "executing", "Aurora merges typed workflow patches");
+  eq(state.workflow.completed, 1, "Aurora retains progress metadata");
+  eq(state.lsp.state, "ready", "Aurora merges LSP patches");
+  assert(
+    auroraState.isAuroraUiStateRequest({
+      type: "request",
+      requestId: "request-1",
+      sessionEpoch: "epoch-1",
+      requester: "test",
+    }),
+    "Aurora validates state requests",
+  );
+});
+
+await section("setup core lifecycle", async () => {
+  if (!setupCore) return;
+  const harness = createHarness();
+  setupCore.default(harness.api);
+  const context = harness.makeContext();
+  await harness.runHooks("session_start", {}, context);
+  assert(Boolean(harness.tools.get("verify")), "setup core registers the allowlisted verify tool");
+  const doctor = harness.commands.get("setup-doctor");
+  assert(Boolean(doctor), "/setup-doctor is registered");
+  if (doctor) await doctor("", context);
+  assert(
+    harness.notifications.at(-1)?.message?.startsWith("Setup Doctor"),
+    "setup doctor reports effective configuration without mutation",
+  );
+  assert(
+    harness.notifications.at(-1)?.message?.includes("Pi CLI/dev package: 0.80.7/0.80.6") &&
+      harness.notifications.at(-1)?.level === "error",
+    "setup doctor makes CLI/dev version drift visible",
+  );
+  const verify = harness.tools.get("verify");
+  if (verify) {
+    await verify.execute(
+      "verify-safe-cwd",
+      { check: "typecheck" },
+      undefined,
+      undefined,
+      context,
+    );
+    eq(
+      harness.execCalls.at(-1)?.options?.cwd,
+      ROOT,
+      "verify runs the setup's fixed command from the agent directory",
+    );
+  }
+  assertNoGlobalChrome(harness, "setup core owns no TUI chrome");
+});
+
 await section("native project skills", async () => {
   const expectedSkills = [
     "agent-docs",
     "bug-triage",
+    "context-checkpoint",
     "doc-diff",
     "git-check",
     "prompt-compiler",
@@ -686,7 +985,7 @@ await section("native project skills", async () => {
       .map((entry) => entry.name)
       .sort(),
     expectedSkills,
-    "the ten migrated project skills use Pi's standard skill directories",
+    "the eleven project skills use Pi's standard skill directories",
   );
 
   for (const name of expectedSkills) {
@@ -696,7 +995,9 @@ await section("native project skills", async () => {
     const source = readFileSync(skillPath, "utf8");
     assert(
       new RegExp(
-        "^---\\nname: " + name + '\\ndescription: \\"[^\\n]+\\"\\n---\\n',
+        "^---\\nname: " +
+          name +
+          '\\ndescription: (?:\\"[^\\n]+\\"|[^\\n]+)\\n---\\n',
       ).test(source),
       name + " has Pi-compatible name and description frontmatter",
     );
@@ -989,6 +1290,49 @@ await section("status mapping helpers", async () => {
 
 await section("permission status lifecycle", async () => {
   if (!modePermissions) return;
+  const guarded = createHarness({ confirm: false });
+  modePermissions.default(guarded.api);
+  const guardedContext = guarded.makeContext({ mode: "json", hasUI: false });
+  await guarded.runHooks("session_start", {}, guardedContext);
+  const bashDecision = await guarded.runHooks(
+    "tool_call",
+    { toolName: "bash", input: { command: "git status" } },
+    guardedContext,
+  );
+  assert(
+    bashDecision.some((result) => result?.block === true),
+    "free bash requires confirmation in ordinary work mode",
+  );
+  const unknownDecision = await guarded.runHooks(
+    "tool_call",
+    { toolName: "mcp_external_write", input: {} },
+    guardedContext,
+  );
+  assert(
+    unknownDecision.some((result) => result?.block === true),
+    "unknown tools require confirmation by default",
+  );
+  const spoofedLspDecision = await guarded.runHooks(
+    "tool_call",
+    { toolName: "lsp_write", input: {} },
+    guardedContext,
+  );
+  assert(
+    spoofedLspDecision.some((result) => result?.block === true),
+    "an lsp_ prefix cannot spoof a local read-only capability",
+  );
+  for (const toolName of ["lsp_hover", "plan_progress", "ask_user", "verify"]) {
+    const decisions = await guarded.runHooks(
+      "tool_call",
+      { toolName, input: {} },
+      guardedContext,
+    );
+    assert(
+      decisions.every((result) => result === undefined),
+      `${toolName} has an explicit local capability`,
+    );
+  }
+
   const harness = createHarness();
   modePermissions.default(harness.api);
   const context = harness.makeContext();
@@ -1094,9 +1438,9 @@ await section("activity status lifecycle", async () => {
   const context = harness.makeContext();
   await harness.runHooks("session_start", {}, context);
   eq(
-    harness.hiddenThinkingLabels.at(-1),
-    "",
-    "the legacy thinking label is blanked",
+    harness.hiddenThinkingLabels.length,
+    0,
+    "activity leaves the hidden-thinking label to thinking-view",
   );
   eq(
     harness.workingIndicators.at(-1)?.frames?.length,
@@ -1352,6 +1696,11 @@ await section("plan workflow lifecycle", async () => {
     );
     const nextContext = harness.makeContext({ cwd: emptyCwd });
     await harness.runHooks("session_start", {}, nextContext);
+    eq(
+      latestStatus(harness, "workflow"),
+      "WORK",
+      "a new empty session resets inherited in-memory plan state",
+    );
     assertNoGlobalChrome(
       harness,
       "plan mode installs no permanent widget or chrome",
@@ -1359,6 +1708,421 @@ await section("plan workflow lifecycle", async () => {
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(emptyCwd, { recursive: true, force: true });
+  }
+});
+
+await section("plan progress tool and sidecar", async () => {
+  if (!planMode || !planUtils || !planState) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-progress-"));
+  try {
+    planUtils.writePlanFileAtomic(cwd, validPlan);
+    const harness = createHarness();
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+    const work = harness.commands.get("work");
+    const progress = harness.tools.get("plan_progress");
+    assert(Boolean(work), "/work is registered for plan_progress");
+    assert(Boolean(progress), "plan_progress is registered");
+    if (!work || !progress) return;
+    await work("", context);
+
+    const started = await progress.execute(
+      "progress-1",
+      { step: 2, status: "in_progress", evidence: "Implementierung gestartet." },
+      undefined,
+      undefined,
+      context,
+    );
+    eq(started.details?.ok, true, "plan_progress accepts in_progress with evidence");
+    const loaded = planState.loadWorkflowState(cwd);
+    const activeProgress = loaded.state?.progress?.find((record) => record.step === 2);
+    eq(activeProgress?.status, "in_progress", "sidecar persists explicit progress");
+    eq(activeProgress?.step, 2, "sidecar progress references the requested todo");
+
+    const completed = await progress.execute(
+      "progress-2",
+      { step: 2, status: "completed", evidence: "Typecheck und Tests erfolgreich." },
+      undefined,
+      undefined,
+      context,
+    );
+    eq(completed.details?.ok, true, "plan_progress completes a todo with evidence");
+    eq(completed.details?.archived, true, "last completed todo archives the plan");
+    eq(planUtils.readPlanFile(cwd), undefined, "archived plan is removed from the active path");
+    assert(
+      !existsSync(planState.getWorkflowStatePath(cwd)),
+      "archiving removes the active workflow sidecar",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await section("plan workflow context retention", async () => {
+  if (!planMode || !planUtils) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-context-"));
+  try {
+    planUtils.writePlanFileAtomic(cwd, validPlan);
+    const harness = createHarness();
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+
+    const assistant = {
+      role: "assistant",
+      content: [{ type: "text", text: "Plan abgeschlossen." }],
+      stopReason: "stop",
+    };
+    const stalePlan = {
+      role: "custom",
+      customType: "plan-mode-context",
+      content: "[PLAN MODE ACTIVE] alter Plan-Kontext",
+    };
+    const currentPlan = {
+      role: "custom",
+      customType: "plan-review-context",
+      content: "[PLAN REVIEW ACTIVE] aktueller Review-Kontext",
+    };
+    const activePhaseResult = (
+      await harness.runHooks(
+        "context",
+        { messages: [stalePlan, assistant, currentPlan] },
+        context,
+      )
+    )[0];
+    eq(
+      activePhaseResult.messages,
+      [assistant, currentPlan],
+      "active workflow phases remove only stale pre-assistant scaffolding",
+    );
+
+    const toolUseAssistant = {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: "tool-1",
+          name: "read",
+          arguments: { path: "README.md" },
+        },
+      ],
+      stopReason: "toolUse",
+    };
+    const toolResult = {
+      role: "toolResult",
+      toolCallId: "tool-1",
+      toolName: "read",
+      content: [{ type: "text", text: "result" }],
+      isError: false,
+    };
+    const duringToolTurn = await harness.runHooks(
+      "context",
+      { messages: [currentPlan, toolUseAssistant, toolResult] },
+      context,
+    );
+    eq(
+      duringToolTurn[0],
+      undefined,
+      "toolUse plus toolResult is not a completed-turn boundary and retains active plan context",
+    );
+    const afterTerminalAssistant = (
+      await harness.runHooks(
+        "context",
+        {
+          messages: [
+            currentPlan,
+            toolUseAssistant,
+            toolResult,
+            assistant,
+            { role: "user", content: "nächster Turn" },
+          ],
+        },
+        context,
+      )
+    )[0];
+    eq(
+      afterTerminalAssistant.messages,
+      [
+        toolUseAssistant,
+        toolResult,
+        assistant,
+        { role: "user", content: "nächster Turn" },
+      ],
+      "a terminal assistant response makes earlier plan context stale",
+    );
+    const userMarkerDiscussion = {
+      role: "user",
+      content: "Warum enthält die Extension [PLAN MODE ACTIVE]?",
+    };
+    const userMarkerResult = (
+      await harness.runHooks(
+        "context",
+        { messages: [assistant, userMarkerDiscussion] },
+        context,
+      )
+    )[0];
+    eq(
+      userMarkerResult.messages,
+      [assistant, userMarkerDiscussion],
+      "literal marker text in a real user message is never treated as hidden scaffolding",
+    );
+
+    const work = harness.commands.get("work");
+    assert(Boolean(work), "/work is registered for context retention tests");
+    if (!work) return;
+    await work("", context);
+    const executeMessage = harness.sent.at(-1)?.message;
+    assert(
+      executeMessage?.customType === "plan-mode-execute",
+      "the first work turn emits the complete plan-mode-execute message",
+    );
+    const firstWorkResult = (
+      await harness.runHooks(
+        "context",
+        { messages: [stalePlan, assistant, executeMessage] },
+        context,
+      )
+    )[0];
+    eq(
+      firstWorkResult.messages,
+      [assistant, executeMessage],
+      "the first work turn retains the complete current plan after the stale boundary",
+    );
+    assert(
+      firstWorkResult.messages[1].content.includes("Plan-Datei:"),
+      "the retained first-work message still contains the full plan handoff",
+    );
+
+    const currentExecution = {
+      role: "custom",
+      customType: "plan-execution-context",
+      content: "[EXECUTING PLAN] aktueller Folgeturn",
+    };
+    const laterWorkResult = (
+      await harness.runHooks(
+        "context",
+        { messages: [executeMessage, assistant, currentExecution] },
+        context,
+      )
+    )[0];
+    eq(
+      laterWorkResult.messages,
+      [assistant, currentExecution],
+      "later work turns drop the old full plan but retain current execution guidance",
+    );
+
+    const noCompletedTurn = await harness.runHooks(
+      "context",
+      { messages: [executeMessage] },
+      context,
+    );
+    eq(
+      noCompletedTurn[0],
+      undefined,
+      "without an assistant boundary the first execution message is left untouched",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await section("shared output limits and subagent guard", async () => {
+  if (!outputLimits || !toolOutputGuard) return;
+  const largeText = [
+    "HEAD_SENTINEL",
+    ...Array.from(
+      { length: outputLimits.DEFAULT_MAX_LINES + 500 },
+      (_, index) => `line-${index}`,
+    ),
+    "TAIL_SENTINEL",
+  ].join("\n");
+  const limited = outputLimits.limitTextOutput(largeText);
+  assert(Boolean(limited.truncation), "oversized text is visibly truncated");
+  assert(
+    limited.text.startsWith("HEAD_SENTINEL") &&
+      limited.text.endsWith("TAIL_SENTINEL"),
+    "balanced truncation retains both beginning and end",
+  );
+  assert(
+    limited.text.includes("[Ausgabe gekürzt:"),
+    "balanced truncation includes a visible marker",
+  );
+  assert(
+    Buffer.byteLength(limited.text, "utf8") <=
+      outputLimits.DEFAULT_MAX_BYTES,
+    "balanced truncation stays within Pi's byte limit",
+  );
+  assert(
+    limited.truncation.outputLines <= outputLimits.DEFAULT_MAX_LINES,
+    "balanced truncation stays within Pi's line limit",
+  );
+
+  const utf8SingleLine =
+    "HEAD_UTF8_SENTINEL-" +
+    "😀".repeat(40_000) +
+    "-TAIL_UTF8_SENTINEL";
+  const limitedUtf8 = outputLimits.limitTextOutput(utf8SingleLine);
+  const actualUtf8Bytes = Buffer.byteLength(limitedUtf8.text, "utf8");
+  const actualUtf8Lines = limitedUtf8.text.endsWith("\n")
+    ? limitedUtf8.text.split("\n").length - 1
+    : limitedUtf8.text.split("\n").length;
+  assert(
+    limitedUtf8.text.startsWith("HEAD_UTF8_SENTINEL-") &&
+      limitedUtf8.text.endsWith("-TAIL_UTF8_SENTINEL"),
+    "a long single UTF-8 line retains both head and tail sentinels",
+  );
+  assert(
+    !limitedUtf8.text.includes("�"),
+    "partial single-line truncation never splits a UTF-8 code point",
+  );
+  assert(
+    actualUtf8Bytes <= outputLimits.DEFAULT_MAX_BYTES,
+    "single-line UTF-8 truncation stays within Pi's byte limit",
+  );
+  eq(
+    limitedUtf8.truncation.outputBytes,
+    actualUtf8Bytes,
+    "single-line truncation reports its actual byte count",
+  );
+  eq(
+    limitedUtf8.truncation.outputLines,
+    actualUtf8Lines,
+    "single-line truncation reports its actual line count",
+  );
+
+  const harness = createHarness();
+  toolOutputGuard.default(harness.api);
+  const unconstrainedCall = {
+    type: "tool_call",
+    toolCallId: "subagent-unbounded",
+    toolName: "subagent",
+    input: { agent: "scout", task: "inspect" },
+  };
+  await harness.runHooks("tool_call", unconstrainedCall, harness.makeContext());
+  eq(
+    unconstrainedCall.input.maxOutput,
+    undefined,
+    "the guard leaves package-side subagent output settings untouched",
+  );
+
+  const strictCall = {
+    type: "tool_call",
+    toolCallId: "subagent-strict",
+    toolName: "subagent",
+    input: {
+      agent: "scout",
+      task: "inspect",
+      maxOutput: { bytes: 4096, lines: 100 },
+    },
+  };
+  await harness.runHooks("tool_call", strictCall, harness.makeContext());
+  eq(
+    strictCall.input.maxOutput,
+    { bytes: 4096, lines: 100 },
+    "the guard does not mutate caller-provided subagent limits",
+  );
+
+  const details = { runId: "child-1", artifact: "/tmp/result.json" };
+  const guardedResult = (
+    await harness.runHooks(
+      "tool_result",
+      {
+        type: "tool_result",
+        toolCallId: "subagent-result",
+        toolName: "subagent",
+        input: {},
+        content: [{ type: "text", text: largeText }],
+        details,
+        isError: true,
+      },
+      harness.makeContext(),
+    )
+  )[0];
+  assert(
+    guardedResult.content[0].text.includes("[Ausgabe gekürzt:"),
+    "the subagent result backstop visibly truncates oversized text",
+  );
+  assert(
+    guardedResult.content[0].text.startsWith("HEAD_SENTINEL") &&
+      guardedResult.content[0].text.endsWith("TAIL_SENTINEL"),
+    "the subagent result backstop preserves explicit head and tail sentinels",
+  );
+  eq(guardedResult.details, details, "the backstop preserves result details");
+  eq(guardedResult.isError, true, "the backstop preserves isError");
+
+  const unrelated = await harness.runHooks(
+    "tool_result",
+    {
+      type: "tool_result",
+      toolCallId: "other-result",
+      toolName: "other",
+      input: {},
+      content: [{ type: "text", text: largeText }],
+      details: undefined,
+      isError: false,
+    },
+    harness.makeContext(),
+  );
+  eq(
+    unrelated[0],
+    undefined,
+    "the output guard does not alter non-subagent tool results",
+  );
+
+  const lspTools = await load("extensions/lsp/tools.ts");
+  const lspCwd = mkdtempSync(path.join(tmpdir(), "pi-lsp-output-limit-"));
+  try {
+    writeFileSync(path.join(lspCwd, "tsconfig.json"), "{}");
+    writeFileSync(path.join(lspCwd, "large.ts"), "export const value = 1;\n");
+    const profile = {
+      id: "typescript",
+      label: "Bounded TypeScript",
+      enabled: true,
+      command: "unused",
+      args: [],
+      rootMarkers: ["tsconfig.json"],
+    };
+    const config = {
+      enabled: true,
+      mode: "auto",
+      requestTimeoutMs: 1000,
+      idleShutdownMs: 1000,
+      workspaceSymbolLimit: 50,
+      languages: { typescript: profile },
+    };
+    const oversizedError = Array.from(
+      { length: outputLimits.DEFAULT_MAX_LINES + 500 },
+      (_, index) => `server-error-${index}`,
+    ).join("\n");
+    const lspHarness = createHarness();
+    lspTools.registerLspDiagnosticsTool(lspHarness.api, {
+      getConfig: () => config,
+      getRegistry: () => ({
+        async acquire() {
+          throw new Error(oversizedError);
+        },
+        release() {},
+      }),
+    });
+    const lspResult = await lspHarness.tools.get("lsp_diagnostics").execute(
+      "large-lsp-result",
+      { path: "large.ts" },
+      undefined,
+      undefined,
+      lspHarness.makeContext({ cwd: lspCwd }),
+    );
+    assert(
+      lspResult.content[0].text.includes("[Ausgabe gekürzt:"),
+      "LSP text results use the shared visible output boundary",
+    );
+    eq(
+      lspResult.details?.truncation?.strategy,
+      "balanced-head-tail",
+      "LSP details identify output truncation without hiding semantic metadata",
+    );
+  } finally {
+    rmSync(lspCwd, { recursive: true, force: true });
   }
 });
 
@@ -1483,10 +2247,70 @@ await section("permission dialog narrow rendering", async () => {
   assertNoGlobalChrome(harness, "permission dialog installs no global chrome");
 });
 
+await section("Aurora UI lifecycle and responsive surfaces", async () => {
+  if (!auroraUi) return;
+  const harness = createHarness({ sessionName: "aurora-test" });
+  auroraUi.default(harness.api);
+  const context = harness.makeContext();
+  const discovered = await harness.runHooks("resources_discover", {}, context);
+  assert(
+    discovered.some((entry) => entry?.themePaths?.some((value) => value.endsWith("aurora-night.json"))),
+    "Aurora exposes its theme through resource discovery",
+  );
+  await harness.runHooks("session_start", {}, context);
+  eq(context.ui.theme.name, "aurora-night", "Aurora activates its central theme");
+  eq(harness.chrome, { footer: 1, editor: 1, widget: 1, header: 0 }, "Aurora is the single custom chrome owner");
+  assert(Boolean(harness.footerFactory), "Aurora installs a footer factory");
+  assert(Boolean(harness.editorFactory), "Aurora installs an editor factory");
+
+  if (harness.footerFactory) {
+    const footer = harness.footerFactory(
+      { requestRender() {} },
+      context.ui.theme,
+      {
+        getGitBranch: () => "feature/aurora",
+        getExtensionStatuses: () => new Map([
+          ["workflow", "WORK 1/3"],
+          ["permissions", "Read + Write"],
+          ["lsp", "ready"],
+        ]),
+        onBranchChange: () => () => {},
+      },
+    );
+    for (const width of [60, 90, 140]) {
+      assert(
+        footer.render(width).every((line) => stripAnsi(line).length <= width),
+        `Aurora footer fits ${width} columns`,
+      );
+    }
+    footer.dispose?.();
+  }
+
+  await harness.runHooks("agent_start", {}, context);
+  eq(harness.workingVisibility.at(-1), true, "Aurora shows contextual activity while working");
+  await harness.runHooks(
+    "tool_execution_start",
+    { toolCallId: "tool-aurora", toolName: "read", args: { path: "README.md" } },
+    context,
+  );
+  const widget = harness.widgets.get("aurora-ui/activity")?.content;
+  assert(typeof widget === "function", "Aurora activity widget is transient and component-backed");
+  if (typeof widget === "function") {
+    const component = widget({ requestRender() {} }, context.ui.theme);
+    assert(component.render(60).length >= 1, "Aurora activity renders in a narrow terminal");
+    component.dispose?.();
+  }
+  await harness.runHooks("session_shutdown", {}, context);
+  eq(harness.widgets.size, 0, "Aurora removes its widget on shutdown");
+  eq(harness.workingVisibility.at(-1), false, "Aurora hides activity on shutdown");
+  eq(context.ui.theme.name, "test-theme", "Aurora restores the previous theme on shutdown");
+});
+
 await section("combined production extension stack", async () => {
   if (
     !modePermissions ||
     !planMode ||
+    !setupCore ||
     !activityStatus ||
     !thinkingView ||
     !askUser ||
@@ -1494,6 +2318,7 @@ await section("combined production extension stack", async () => {
   )
     return;
   const factories = [
+    setupCore.default,
     modePermissions.default,
     planMode.default,
     activityStatus.default,
@@ -1521,6 +2346,8 @@ await section("combined production extension stack", async () => {
       "lsp_hover",
       "lsp_references",
       "lsp_workspace_symbols",
+      "plan_progress",
+      "verify",
     ],
     "only local functional tools register locally",
   );
@@ -1544,12 +2371,28 @@ await section("combined production extension stack", async () => {
     "idle",
     "combined stack publishes an idle lsp status with no active servers",
   );
+  const lspCommand = harness.commands.get("lsp");
+  assert(Boolean(lspCommand), "/lsp is registered");
+  if (lspCommand) await lspCommand("off", context);
+  eq(
+    latestStatus(harness, "lsp"),
+    "off",
+    "the session-local LSP override can disable LSP",
+  );
   await harness.runHooks("session_shutdown", {}, context);
   eq(
     latestStatus(harness, "lsp"),
     undefined,
     "session_shutdown clears the lsp status",
   );
+  const nextContext = harness.makeContext({ cwd, sessionId: "next-session" });
+  await harness.runHooks("session_start", {}, nextContext);
+  eq(
+    latestStatus(harness, "lsp"),
+    "idle",
+    "a new session does not inherit the previous LSP override",
+  );
+  await harness.runHooks("session_shutdown", {}, nextContext);
 
   for (const mode of ["json", "print", "rpc"]) {
     const nonTui = createHarness();

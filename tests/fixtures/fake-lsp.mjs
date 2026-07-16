@@ -34,6 +34,11 @@ const NO_DIAGNOSTICS = argv.has("--no-diagnostics");
 const DEFINITION_LINKS = argv.has("--definition-links");
 const NO_DEFINITION_PROVIDER = argv.has("--no-definition-provider");
 
+// Some constrained CI/sandbox runtimes do not keep a child alive solely for
+// a piped stdin listener. A referenced, idle timer makes the fixture lifecycle
+// deterministic; it is cleared on every normal termination path.
+const keepAlive = setInterval(() => {}, 60_000);
+
 let buf = Buffer.alloc(0);
 const pending = [];
 const docVersions = new Map(); // uri -> last-seen version
@@ -85,6 +90,10 @@ function handle(message) {
 
 function handleNotification(note) {
   switch (note.method) {
+    case "exit":
+      clearInterval(keepAlive);
+      process.exit(0);
+      return;
     case "textDocument/didOpen": {
       const { uri, version } = note.params?.textDocument ?? {};
       if (uri === undefined) return;
@@ -266,8 +275,18 @@ process.stdin.on("data", (chunk) => {
   while (pending.length) handle(pending.shift());
 });
 
-process.stdin.on("end", () => process.exit(0));
+process.stdin.resume();
+process.stdin.on("end", () => {
+  clearInterval(keepAlive);
+  process.exit(0);
+});
 
 // Keep the event loop alive while the stream is open; exit cleanly on signals.
-process.on("SIGTERM", () => process.exit(0));
-process.on("SIGINT", () => process.exit(0));
+process.on("SIGTERM", () => {
+  clearInterval(keepAlive);
+  process.exit(0);
+});
+process.on("SIGINT", () => {
+  clearInterval(keepAlive);
+  process.exit(0);
+});

@@ -2,6 +2,9 @@
 name: scout
 description: Builds compact codebase context for handoff to planners, reviewers, or the main agent
 tools: read, grep, find, ls
+defaultContext: fresh
+inheritProjectContext: true
+inheritSkills: false
 timeoutMs: 600000
 ---
 
@@ -21,22 +24,28 @@ Do not:
 
 Output exactly:
 
-## Files Retrieved
+## Ergebnis
 
-- `path` lines/section - why it matters
+Compact findings and a short explanation of how the relevant pieces connect.
 
-## Key Findings
+## Belege
 
-- Fact with file reference
+- `path:line` or section - verified fact and why it matters
 
-## Architecture
+## Betroffene Dateien
 
-Short explanation of how the pieces connect.
+- `path` - relevant role in the task; include only files the next agent needs
 
-## Risks / Gaps
+## Fehler oder Risiken
 
-- Missing context, ambiguity or risky assumption
+Missing context, ambiguity, dead ends, and risky assumptions. Do not infer
+product intent when evidence is absent.
 
-## Start Here
+## Offene Fragen
 
-The first file the next agent should inspect and why.
+Questions that repository evidence cannot answer and that materially affect the
+next step.
+
+## Empfehlung
+
+Name the first file or symbol the next agent should inspect and why.

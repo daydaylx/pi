@@ -1,0 +1,43 @@
+{
+  "$schema": "./schemas/setup.schema.json",
+  "ui": {
+    "theme": "aurora-night",
+    "motion": "contextual"
+  },
+  "permissions": {
+    "unknownTools": "ask",
+    "bash": "ask"
+  },
+  "lsp": {
+    "enabled": true,
+    "mode": "auto",
+    "requestTimeoutMs": 10000,
+    "idleShutdownMs": 600000
+  },
+  "subagents": {
+    "concurrency": 4,
+    "freshContext": true
+  },
+  "models": {
+    "primary": "openai-codex/gpt-5.4",
+    "fast": "openai-codex/gpt-5.4-mini",
+    "deep": "openai-codex/gpt-5.5"
+  },
+  "verification": {
+    "typecheck": {
+      "command": "npm",
+      "args": ["--prefix", "npm", "run", "typecheck"],
+      "timeoutMs": 120000
+    },
+    "test": {
+      "command": "npm",
+      "args": ["--prefix", "npm", "run", "test"],
+      "timeoutMs": 300000
+    },
+    "verify": {
+      "command": "npm",
+      "args": ["--prefix", "npm", "run", "verify"],
+      "timeoutMs": 420000
+    }
+  }
+}

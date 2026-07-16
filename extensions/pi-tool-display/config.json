@@ -31,6 +31,6 @@
   "diffSplitMinWidth": 120,
   "diffCollapsedLines": 24,
   "diffWordWrap": true,
-  "showTruncationHints": false,
+  "showTruncationHints": true,
   "showRtkCompactionHints": false
 }

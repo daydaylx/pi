@@ -30,12 +30,30 @@ import {
   setTuiStatus,
   type PermissionLevel,
 } from "./shared/workflow-status.ts";
+import {
+  defaultSetupConfig,
+  loadSetupConfig,
+  type PolicyAction as ConfiguredPolicyAction,
+} from "./setup-core/config.ts";
+import {
+  AURORA_UI_CHANNELS,
+  isAuroraUiStateRequest,
+  publishAuroraUiPatch,
+  publishAuroraUiSnapshot,
+} from "./aurora-ui/state.ts";
 
 const PERSISTED_STATE_KEY = "mode-permissions";
 
 // Permission-Stufen sind vom Workflow-Modus unabhängig. YOLO wird nie beim
 // Session-Start aktiviert, sondern nur durch eine explizite Nutzeraktion.
 const AUTO_YOLO_ON_START = false;
+const LOCAL_LSP_TOOLS = new Set([
+  "lsp_diagnostics",
+  "lsp_definition",
+  "lsp_references",
+  "lsp_hover",
+  "lsp_workspace_symbols",
+]);
 
 function permissionWarning(level: PermissionLevel): string | undefined {
   if (level === "full-access") {
@@ -65,8 +83,24 @@ function decideTool(
   permissionLevel: PermissionLevel,
   event: ToolCallEvent,
   cwd: string,
+  configured: {
+    unknownTools: ConfiguredPolicyAction;
+    bash: ConfiguredPolicyAction;
+  },
 ): PolicyDecision {
   if (event.toolName === "bash") {
+    if (permissionLevel === "read-write") {
+      if (configured.bash === "block") {
+        return { action: "block", reason: "Bash ist in der Setup-Policy gesperrt." };
+      }
+      if (configured.bash === "ask") {
+        return {
+          action: "ask",
+          reason:
+            "Freier Shell-Zugriff benötigt Bestätigung; nutze für Standardprüfungen das verify-Tool.",
+        };
+      }
+    }
     return decideBash(
       permissionLevel,
       String((event.input as Record<string, unknown>).command ?? ""),
@@ -88,6 +122,24 @@ function decideTool(
     );
   }
 
+  // Explicit capability classes for local read-only and workflow tools.
+  // Custom/MCP tools are deliberately not inferred from their names except
+  // for the locally owned, fixed contracts below.
+  if (LOCAL_LSP_TOOLS.has(event.toolName)) {
+    return { action: "allow", reason: "Read-only LSP capability" };
+  }
+  if (event.toolName === "ask_user" || event.toolName === "plan_progress") {
+    return { action: "allow", reason: "Controlled workflow capability" };
+  }
+  if (event.toolName === "verify") {
+    return permissionLevel === "read-only"
+      ? {
+          action: "block",
+          reason: "Read only: Verifikation benötigt mindestens Read + Bash.",
+        }
+      : { action: "allow", reason: "Allowlisted verification capability" };
+  }
+
   if (event.toolName === "write" || event.toolName === "edit") {
     const filePath = toolPath(event) ?? "";
     return decideFileAccess(permissionLevel, "write", filePath, cwd, {
@@ -104,7 +156,23 @@ function decideTool(
       reason: `${PERMISSION_LEVEL_LABEL[permissionLevel]}: Tool "${event.toolName}" ist nicht freigegeben.`,
     };
   }
-  return { action: "allow", reason: "Erlaubt" };
+  if (permissionLevel === "full-access" || permissionLevel === "yolo") {
+    return { action: "allow", reason: "Erweiterte Zugriffsstufe" };
+  }
+  switch (configured.unknownTools) {
+    case "block":
+      return {
+        action: "block",
+        reason: `Unbekanntes Tool "${event.toolName}" ist nicht freigegeben.`,
+      };
+    case "ask":
+      return {
+        action: "ask",
+        reason: `Unbekanntes Tool "${event.toolName}" benötigt Bestätigung.`,
+      };
+    case "allow":
+      return { action: "allow", reason: "Explizit durch Setup-Policy erlaubt" };
+  }
 }
 
 async function approve(
@@ -124,6 +192,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     ? "yolo"
     : "read-write";
   let sessionEpoch = 0;
+  let configuredPolicy = defaultSetupConfig().permissions;
+  let auroraEpoch: string | undefined;
+  let unsubscribeAurora: (() => void) | undefined;
 
   function publishStatus(ctx: ExtensionContext): void {
     setTuiStatus(
@@ -131,6 +202,28 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       ZENTUI_STATUS_KEYS.permissions,
       permissionRiskStatusValue(permissionLevel),
     );
+    if (auroraEpoch) {
+      publishAuroraUiPatch(pi, auroraEpoch, "permissions", {
+        permissions: {
+          level: permissionLevel,
+          label: PERMISSION_LEVEL_LABEL[permissionLevel],
+        },
+      });
+    }
+  }
+
+  function subscribeAuroraProvider(): void {
+    unsubscribeAurora?.();
+    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
+      if (!isAuroraUiStateRequest(value)) return;
+      auroraEpoch = value.sessionEpoch;
+      publishAuroraUiSnapshot(pi, value, "permissions", {
+        permissions: {
+          level: permissionLevel,
+          label: PERMISSION_LEVEL_LABEL[permissionLevel],
+        },
+      });
+    });
   }
 
   function persistState(): void {
@@ -287,7 +380,12 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    const decision = decideTool(permissionLevel, event, ctx.cwd);
+    const decision = decideTool(
+      permissionLevel,
+      event,
+      ctx.cwd,
+      configuredPolicy,
+    );
     const subject =
       event.toolName === "bash"
         ? String((event.input as Record<string, unknown>).command ?? "")
@@ -304,7 +402,18 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("user_bash", async (event, ctx) => {
-    const decision = decideBash(permissionLevel, event.command, event.cwd);
+    const decision =
+      permissionLevel === "read-write" && configuredPolicy.bash !== "allow"
+        ? configuredPolicy.bash === "block"
+          ? {
+              action: "block" as const,
+              reason: "Bash ist in der Setup-Policy gesperrt.",
+            }
+          : {
+              action: "ask" as const,
+              reason: "Freier Shell-Zugriff benötigt Bestätigung.",
+            }
+        : decideBash(permissionLevel, event.command, event.cwd);
     if (await approve(decision, event.command, ctx, "bash")) return;
     return {
       result: {
@@ -321,6 +430,12 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     sessionEpoch += 1;
+    auroraEpoch = undefined;
+    subscribeAuroraProvider();
+    configuredPolicy = loadSetupConfig(
+      ctx.cwd,
+      ctx.isProjectTrusted(),
+    ).config.permissions;
     const latestState = ctx.sessionManager
       .getEntries()
       .filter(
@@ -346,6 +461,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async (_event, ctx) => {
     sessionEpoch += 1;
+    unsubscribeAurora?.();
+    unsubscribeAurora = undefined;
+    auroraEpoch = undefined;
     setTuiStatus(ctx, ZENTUI_STATUS_KEYS.permissions, undefined);
   });
 }

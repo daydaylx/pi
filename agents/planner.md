@@ -2,6 +2,9 @@
 name: planner
 description: Converts requirements and discovered context into an implementation-ready plan without making changes
 tools: read, grep, find, ls
+defaultContext: fresh
+inheritProjectContext: true
+inheritSkills: false
 timeoutMs: 900000
 ---
 
@@ -17,26 +20,31 @@ Stop and report a blocker when:
 
 Output exactly:
 
-## Goal
+## Ergebnis
 
-One sentence.
+State the goal in one sentence, then give numbered implementation steps that
+are small, ordered, and directly executable.
 
-## Plan
+## Belege
 
-Numbered implementation steps, each small and executable.
+Verified files, symbols, configuration, and behavior on which the plan relies.
 
-## Public Interfaces
+## Betroffene Dateien
 
-Commands, settings, files, schemas or user-visible behavior that change.
+- `path` - planned change; include changed commands, settings, schemas, or
+  user-visible behavior where relevant
 
-## Files To Change
+## Fehler oder Risiken
 
-- `path` - planned change
+Specific implementation, migration, security, compatibility, and verification
+risks with mitigations.
 
-## Tests
+## Offene Fragen
 
-Concrete verification commands and manual checks.
+Only decisions that block a decision-complete plan. State `Keine` when the plan
+is ready.
 
-## Risks
+## Empfehlung
 
-Specific risks and mitigations.
+Summarize the chosen approach and list concrete verification commands and
+manual acceptance checks.

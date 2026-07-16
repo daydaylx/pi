@@ -8,13 +8,18 @@ import type {
   AgentMessage,
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
+import {
+  StringEnum,
+  type AssistantMessage,
+  type TextContent,
+} from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { relative } from "node:path";
+import { Type } from "typebox";
 import {
   applyDoneSteps,
   archiveDecisionBrief,
@@ -47,6 +52,14 @@ import {
   setTuiStatus,
   workflowStatusValue,
 } from "../shared/workflow-status.ts";
+import {
+  AURORA_UI_CHANNELS,
+  isAuroraUiStateRequest,
+  publishAuroraUiPatch,
+  publishAuroraUiSnapshot,
+  type AuroraUiStatePatch,
+  type AuroraWorkflowPhase,
+} from "../aurora-ui/state.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import { SHORTCUTS } from "../shared/shortcuts.ts";
 import {
@@ -58,6 +71,14 @@ import {
   type OverwriteDecision,
   type PlanAssistantAction,
 } from "./plan-menu.ts";
+import {
+  createWorkflowStateSnapshot,
+  loadWorkflowState,
+  removeWorkflowState,
+  writeWorkflowStateAtomic,
+  type PlanProgressRecord,
+  type PlanProgressStatus,
+} from "./state.ts";
 
 // Context markers: kept as constants so injection (below) and detection (in
 // the "context" handler) can never drift apart, unlike two separately
@@ -72,6 +93,29 @@ const DECISION_INTAKE_MARKER = "[DECISION INTAKE ACTIVE]";
 // executePlan()) can't drift apart into two separately hand-typed copies.
 const SUBAGENT_EXECUTING_REMINDER =
   "SUBAGENTEN:\nNutze das `subagent`-Tool bei Bedarf (siehe AGENTS.md → Subagenten-Delegation), z. B. für abgegrenzte Teilscopes oder Prüfungen nach Änderungen.";
+
+const PLAN_PROGRESS_STATUSES = [
+  "in_progress",
+  "completed",
+  "blocked",
+] as const;
+
+const PlanProgressParams = Type.Object({
+  step: Type.Integer({
+    minimum: 1,
+    description: "1-basierte Todo-Nummer aus /plan-todos (T1 = 1)",
+  }),
+  status: StringEnum(PLAN_PROGRESS_STATUSES, {
+    description:
+      "in_progress für laufende Arbeit, completed nur nach erfolgreichem Nachweis, blocked für einen konkreten Blocker",
+  }),
+  evidence: Type.String({
+    minLength: 1,
+    maxLength: 1000,
+    description:
+      "Konkreter, kurzer Nachweis für den Status, z. B. Testresultat, betroffene Datei oder Blocker-Ursache",
+  }),
+});
 
 // Persistenter Kontext für den „Einfachen Plan": dieselbe Plan-Datei wie im
 // ausführlichen Modus, aber ohne lange Architektur-/Risiko-Blöcke.
@@ -121,6 +165,23 @@ const MODE_LABEL: Record<WorkflowMode, string> = {
  * Aufruf von setWorkflowMode() heraus.
  */
 type ModeMenuAction = WorkflowMode | "decide";
+
+function auroraWorkflowPhase(phase: WorkflowPhase): AuroraWorkflowPhase {
+  switch (phase) {
+    case "idle":
+      return "idle";
+    case "draft":
+    case "deciding":
+    case "reviewing":
+      return "drafting";
+    case "reviewed":
+      return "reviewed";
+    case "executing":
+      return "executing";
+    case "ready":
+      return "ready";
+  }
+}
 
 function buildModeMenu(
   currentMode: WorkflowMode,
@@ -198,6 +259,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   let phase: WorkflowPhase = "idle";
   let reviewedHash: string | undefined;
   let planCreationMode: "simple_plan" | "detailed_plan" | undefined;
+  let progressRecords: PlanProgressRecord[] = [];
+  let auroraEpoch: string | undefined;
+  let unsubscribeAurora: (() => void) | undefined;
+  let latestCwd: string | undefined;
   let planModeEverUsed = false;
   // Ob die Plan-Datei vor dem aktuellen Agent-Turn bereits existierte. Steuert,
   // dass das "Nächster Schritt"-Menü nur nach dem Turn erscheint, der den Plan
@@ -215,13 +280,60 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     );
   }
 
-  function persistState(): void {
+  function auroraWorkflowState(
+    todos: TodoItem[],
+  ): NonNullable<AuroraUiStatePatch["workflow"]> {
+    const activeStep = progressRecords.find(
+      (record) => record.status === "in_progress",
+    )?.step;
+    const currentTodo =
+      (activeStep
+        ? todos.find(
+            (todo) => todo.step === activeStep && !todo.completed,
+          )
+        : undefined) ?? todos.find((todo) => !todo.completed);
+    return {
+      phase: auroraWorkflowPhase(phase),
+      label: workflowStatusValue(phase, mode, todos),
+      step: currentTodo
+        ? `T${currentTodo.step}: ${currentTodo.text}`
+        : undefined,
+      completed: todos.filter((todo) => todo.completed).length,
+      total: todos.length,
+    };
+  }
+
+  function persistState(ctx: ExtensionContext): void {
     pi.appendEntry<PersistedWorkflowState>("plan-mode", {
       mode,
       phase,
       reviewedHash,
       planCreationMode,
     });
+
+    try {
+      const content = readPlanFile(ctx.cwd);
+      if (content === undefined) {
+        removeWorkflowState(ctx.cwd);
+        progressRecords = [];
+        return;
+      }
+      const snapshot = createWorkflowStateSnapshot(content, {
+        mode,
+        phase,
+        reviewedHash,
+        planCreationMode,
+        progress: progressRecords,
+      });
+      progressRecords = snapshot.progress;
+      writeWorkflowStateAtomic(ctx.cwd, snapshot);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Workflow-Sidecar konnte nicht gespeichert werden: ${message}`,
+        "warning",
+      );
+    }
   }
 
   function preparePlan(ctx: ExtensionContext): boolean {
@@ -241,17 +353,40 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   }
 
   function updateStatus(ctx: ExtensionContext): void {
+    latestCwd = ctx.cwd;
     let todos: TodoItem[] = [];
     try {
       todos = readTodos(ctx.cwd);
     } catch {
       // A transient filesystem error must not hide the current workflow mode.
     }
-    setTuiStatus(
-      ctx,
-      ZENTUI_STATUS_KEYS.workflow,
-      workflowStatusValue(phase, mode, todos),
-    );
+    const workflow = auroraWorkflowState(todos);
+    const label = workflow.label ?? workflowStatusValue(phase, mode, todos);
+    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, label);
+    if (auroraEpoch) {
+      publishAuroraUiPatch(pi, auroraEpoch, "plan-workflow", {
+        workflow,
+      });
+    }
+  }
+
+  function subscribeAuroraProvider(): void {
+    unsubscribeAurora?.();
+    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
+      if (!isAuroraUiStateRequest(value)) return;
+      auroraEpoch = value.sessionEpoch;
+      let todos: TodoItem[] = [];
+      try {
+        // A request can arrive outside a Pi hook, so use the latest cwd captured
+        // by the provider rather than reaching into UI-owned state.
+        todos = latestCwd ? readTodos(latestCwd) : [];
+      } catch {
+        todos = [];
+      }
+      publishAuroraUiSnapshot(pi, value, "plan-workflow", {
+        workflow: auroraWorkflowState(todos),
+      });
+    });
   }
 
   function invalidateReview(): void {
@@ -343,7 +478,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     mode = target;
     if (modeChanged) pi.setThinkingLevel(MODE_THINKING[target]);
     updateStatus(ctx);
-    persistState();
+    persistState(ctx);
     ctx.ui.notify(
       modeChanged
         ? `${MODE_LABEL[target]} aktiv. Thinking: ${MODE_THINKING[target]} (Modus-Default, ${SHORTCUTS.thinkingMenu.label} zum Ändern).`
@@ -382,7 +517,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     try {
       const content = readPlanFile(ctx.cwd);
       planExists = content !== undefined;
-      if (planExists) {
+      if (content !== undefined) {
         const todos = extractTodoItems(content);
         allTodosComplete =
           todos.length > 0 && todos.every((todo) => todo.completed);
@@ -515,6 +650,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       }
       case "new-plan": {
         if (!(await guardNewPlan(ctx))) return;
+        progressRecords = [];
         await setWorkflowMode(action.mode, ctx);
         return;
       }
@@ -683,7 +819,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     phase = "deciding";
     reviewedHash = undefined;
     updateStatus(ctx);
-    persistState();
+    persistState(ctx);
     return true;
   }
 
@@ -753,7 +889,7 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
       phase = planExists ? "draft" : "idle";
       reviewedHash = undefined;
       updateStatus(ctx);
-      persistState();
+      persistState(ctx);
     };
 
     if (!block) {
@@ -894,20 +1030,47 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
   });
 
   pi.on("context", async (event) => {
-    if (
-      mode !== "work" ||
-      phase === "executing" ||
-      phase === "reviewing" ||
-      phase === "deciding"
-    )
-      return;
-    if (phase === "idle" && !planModeEverUsed) return;
+    let lastAssistantIndex = -1;
+    for (let index = event.messages.length - 1; index >= 0; index -= 1) {
+      const message = event.messages[index];
+      if (!message || !isAssistantMessage(message)) continue;
+      const hasToolCall = message.content.some(
+        (block) => block.type === "toolCall",
+      );
+      // toolUse is an intermediate provider response. Other responses that
+      // still carry tool calls also continue the same agent turn (for
+      // example, Pi emits failed tool results after a truncated `length`
+      // response). Error/aborted messages terminate immediately in Pi's
+      // agent loop and therefore are valid stale-context boundaries.
+      if (
+        message.stopReason === "toolUse" ||
+        (hasToolCall &&
+          message.stopReason !== "error" &&
+          message.stopReason !== "aborted")
+      )
+        continue;
+      lastAssistantIndex = index;
+      break;
+    }
+    // With no completed assistant turn there is no stale boundary. In
+    // particular, the complete plan-mode-execute message sent by the first
+    // /work turn must reach the model unchanged.
+    if (lastAssistantIndex < 0) return;
 
     return {
-      messages: event.messages.filter((message) => {
+      messages: event.messages.filter((message, index) => {
+        // Keep the latest assistant response and every message injected for
+        // the current turn. Only older workflow scaffolding is disposable.
+        if (index >= lastAssistantIndex) return true;
         const candidate = message as AgentMessage & { customType?: string };
-        if (candidate.customType?.startsWith("plan-")) return false;
-        if (candidate.role !== "user") return true;
+        if (
+          candidate.customType?.startsWith("plan-") ||
+          candidate.customType === "simple-plan-context"
+        )
+          return false;
+        // Marker fallback is only for legacy hidden custom messages. Never
+        // discard real user text merely because it discusses a marker.
+        if (candidate.role !== "custom") return true;
 
         const content = candidate.content;
         if (typeof content === "string") {
@@ -1144,14 +1307,11 @@ STOP-REGELN (verbindlich):
 
 ${SUBAGENT_EXECUTING_REMINDER}
 
-Melde am Ende des Turns Fortschritt als [PLAN-PROGRESS]-Block:
-[PLAN-PROGRESS]
-DONE:
-- T1: erledigt, Nachweis: <kurze Beschreibung>
-
-BLOCKED:
-- T2: Grund: <kurze Beschreibung>
-[/PLAN-PROGRESS]`,
+FORTSCHRITT:
+- Nutze \`plan_progress\` für jeden Statuswechsel eines Todos.
+- \`completed\` ist nur mit konkretem Nachweis zulässig.
+- \`blocked\` braucht die konkrete Ursache als Nachweis.
+- Textmarker sind nur noch ein Legacy-Fallback; der Toolzustand ist maßgeblich.`,
           display: false,
         },
       };
@@ -1168,7 +1328,7 @@ BLOCKED:
         reviewedHash = undefined;
         ctx.ui.notify("Plan-Datei fehlt. Ausführung wurde gestoppt.", "error");
         updateStatus(ctx);
-        persistState();
+        persistState(ctx);
         return;
       }
 
@@ -1177,7 +1337,22 @@ BLOCKED:
       const completedSteps =
         progressSteps !== undefined ? progressSteps : extractDoneSteps(text);
       const result = applyDoneSteps(current, completedSteps);
-      if (result.updated > 0) writePlanFileAtomic(ctx.cwd, result.content);
+      if (result.updated > 0) {
+        writePlanFileAtomic(ctx.cwd, result.content);
+        const updatedAt = new Date().toISOString();
+        const completed = new Set(completedSteps);
+        progressRecords = [
+          ...progressRecords.filter((record) => !completed.has(record.step)),
+          ...extractTodoItems(result.content)
+            .filter((todo) => completed.has(todo.step) && todo.completed)
+            .map((todo) => ({
+              step: todo.step,
+              status: "completed" as const,
+              evidence: "Über Legacy-Fortschrittsmarker gemeldet.",
+              updatedAt,
+            })),
+        ].sort((a, b) => a.step - b.step);
+      }
 
       const todos = extractTodoItems(result.content);
       if (todos.length > 0 && todos.every((todo) => todo.completed)) {
@@ -1185,7 +1360,7 @@ BLOCKED:
         return;
       }
       updateStatus(ctx);
-      persistState();
+      persistState(ctx);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(
@@ -1245,7 +1420,7 @@ BLOCKED:
       }
 
       updateStatus(ctx);
-      persistState();
+      persistState(ctx);
       return;
     }
 
@@ -1264,9 +1439,13 @@ BLOCKED:
           planExistedBeforeTurn = true;
           if (mode === "simple_plan" || mode === "detailed_plan") {
             planCreationMode = mode;
-            persistState();
           }
+          persistState(ctx);
           await offerPostPlanActions(ctx);
+        } else {
+          // A refinement can change the plan hash even when no workflow phase
+          // changes. Keep the sidecar synchronized with that Markdown edit.
+          persistState(ctx);
         }
       }
     } catch {
@@ -1297,7 +1476,7 @@ BLOCKED:
     reviewedHash = undefined;
     phase = "reviewing";
     updateStatus(ctx);
-    persistState();
+    persistState(ctx);
 
     const structureErrors = validatePlanStructure(content);
     const staticFindings =
@@ -1342,12 +1521,14 @@ ${content}
   // Gemeinsamer Abschlusspfad für turn_end-Autoarchiv, /done und den
   // "alle Todos erledigt"-Fall von /work. Bei Archivfehlern bleibt die Phase
   // auf "ready", damit /finish als Retry dient.
-  function archiveCompletedPlan(ctx: ExtensionContext): void {
+  function archiveCompletedPlan(ctx: ExtensionContext): boolean {
+    let archived = false;
     try {
       const archivePath = archivePlanFile(ctx.cwd, "complete");
       archiveBriefAlongsidePlan(ctx);
       phase = mode !== "work" ? "draft" : "idle";
       reviewedHash = undefined;
+      archived = true;
       pi.sendMessage(
         {
           customType: "plan-complete",
@@ -1365,7 +1546,8 @@ ${content}
       );
     }
     updateStatus(ctx);
-    persistState();
+    persistState(ctx);
+    return archived;
   }
 
   async function executePlan(ctx: ExtensionContext): Promise<void> {
@@ -1396,7 +1578,7 @@ ${content}
       phase = "draft";
       reviewedHash = undefined;
       updateStatus(ctx);
-      persistState();
+      persistState(ctx);
       ctx.ui.notify(
         `Planstruktur ist nicht mehr gültig:\n${structureErrors.join("\n")}`,
         "warning",
@@ -1414,7 +1596,7 @@ ${content}
     if (todos.every((todo) => todo.completed)) {
       phase = "ready";
       updateStatus(ctx);
-      persistState();
+      persistState(ctx);
       if (ctx.hasUI && ctx.mode === "tui") {
         const confirmed = await ctx.ui.confirm(
           "Alle Plan-Todos sind bereits erledigt.",
@@ -1436,7 +1618,7 @@ ${content}
     reviewedHash = undefined;
     mode = "work";
     updateStatus(ctx);
-    persistState();
+    persistState(ctx);
 
     pi.sendMessage(
       {
@@ -1458,16 +1640,9 @@ STOP-REGELN (verbindlich):
 
 ${SUBAGENT_EXECUTING_REMINDER}
 
-Schreibe am Ende des Turns einen [PLAN-PROGRESS]-Block zur Fortschrittsverfolgung
-und einen [WORK-RESULT]-Block als lesbaren Ausführungsbericht:
-
-[PLAN-PROGRESS]
-DONE:
-- T1: erledigt, Nachweis: <kurze Beschreibung>
-
-BLOCKED:
-- T2: Grund: <kurze Beschreibung>
-[/PLAN-PROGRESS]
+Aktualisiere jeden Todo-Status explizit mit \`plan_progress\`. Verwende
+\`completed\` nur mit einem konkreten Nachweis und \`blocked\` nur mit konkreter
+Ursache. Schreibe zusätzlich einen [WORK-RESULT]-Block als lesbaren Bericht:
 
 [WORK-RESULT]
 DONE:
@@ -1487,6 +1662,168 @@ CHANGED_FILES:
       { triggerTurn: true },
     );
   }
+
+  function planProgressResult(
+    text: string,
+    details: Record<string, unknown>,
+  ) {
+    return {
+      content: [{ type: "text" as const, text }],
+      details,
+    };
+  }
+
+  pi.registerTool({
+    name: "plan_progress",
+    label: "Plan Progress",
+    description:
+      "Aktualisiert während /work genau ein Todo des aktiven Plans. Nutze in_progress beim Start, completed ausschließlich mit überprüfbarem Nachweis und blocked mit konkreter Ursache.",
+    parameters: PlanProgressParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const evidence = params.evidence.trim();
+      const status = params.status as PlanProgressStatus;
+      if (evidence.length === 0) {
+        return planProgressResult(
+          "Fehler: evidence darf nicht leer sein.",
+          { ok: false, step: params.step, status },
+        );
+      }
+      if (evidence.length > 1000) {
+        return planProgressResult(
+          "Fehler: evidence darf höchstens 1000 Zeichen enthalten.",
+          { ok: false, step: params.step, status },
+        );
+      }
+      if (phase !== "executing" || mode !== "work") {
+        return planProgressResult(
+          "Fehler: plan_progress ist nur während einer mit /work gestarteten Planausführung verfügbar.",
+          { ok: false, step: params.step, status, phase, mode },
+        );
+      }
+
+      let content: string | undefined;
+      try {
+        content = readPlanFile(ctx.cwd);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return planProgressResult(
+          `Fehler: Plan-Datei ist nicht sicher lesbar: ${message}`,
+          { ok: false, step: params.step, status },
+        );
+      }
+      if (content === undefined) {
+        phase = "draft";
+        reviewedHash = undefined;
+        persistState(ctx);
+        updateStatus(ctx);
+        return planProgressResult("Fehler: Keine aktive Plan-Datei vorhanden.", {
+          ok: false,
+          step: params.step,
+          status,
+        });
+      }
+
+      const todos = extractTodoItems(content);
+      const todo = todos.find((candidate) => candidate.step === params.step);
+      if (!todo) {
+        return planProgressResult(
+          `Fehler: T${params.step} existiert nicht. Gültig sind ${todos.length > 0 ? `T1–T${todos.length}` : "keine Todos"}.`,
+          {
+            ok: false,
+            step: params.step,
+            status,
+            validSteps: todos.map((candidate) => candidate.step),
+          },
+        );
+      }
+      if (todo.completed && status !== "completed") {
+        return planProgressResult(
+          `Fehler: T${params.step} ist im Markdown bereits erledigt und kann nicht auf ${status} zurückgesetzt werden.`,
+          {
+            ok: false,
+            step: params.step,
+            status,
+            currentStatus: "completed",
+          },
+        );
+      }
+
+      const now = new Date().toISOString();
+      const previousProgressRecords = progressRecords;
+      const record: PlanProgressRecord = {
+        step: params.step,
+        status,
+        evidence,
+        updatedAt: now,
+      };
+      progressRecords = [
+        ...progressRecords.filter((candidate) => candidate.step !== params.step),
+        record,
+      ].sort((a, b) => a.step - b.step);
+
+      let updatedContent = content;
+      let checkboxUpdated = false;
+      if (status === "completed") {
+        const result = applyDoneSteps(content, [params.step]);
+        updatedContent = result.content;
+        checkboxUpdated = result.updated === 1;
+        if (checkboxUpdated) {
+          try {
+            writePlanFileAtomic(ctx.cwd, updatedContent);
+          } catch (error) {
+            progressRecords = previousProgressRecords;
+            const message =
+              error instanceof Error ? error.message : String(error);
+            return planProgressResult(
+              `Fehler: Todo konnte nicht atomar aktualisiert werden: ${message}`,
+              { ok: false, step: params.step, status },
+            );
+          }
+        }
+      }
+
+      const nextTodos = extractTodoItems(updatedContent);
+      if (
+        nextTodos.length > 0 &&
+        nextTodos.every((candidate) => candidate.completed)
+      ) {
+        const archived = archiveCompletedPlan(ctx);
+        return planProgressResult(
+          archived
+            ? `T${params.step} als completed erfasst; alle Todos sind erledigt und der Plan wurde archiviert.`
+            : `T${params.step} als completed erfasst; alle Todos sind erledigt, aber die Archivierung ist fehlgeschlagen. Nutze /finish erneut.`,
+          {
+            ok: true,
+            step: params.step,
+            status,
+            evidence,
+            checkboxUpdated,
+            archived,
+          },
+        );
+      }
+
+      persistState(ctx);
+      updateStatus(ctx);
+      const statusLabel =
+        status === "completed"
+          ? "erledigt"
+          : status === "blocked"
+            ? "blockiert"
+            : "in Arbeit";
+      return planProgressResult(
+        `T${params.step} (${todo.text}) ist jetzt ${statusLabel}. Nachweis: ${evidence}`,
+        {
+          ok: true,
+          step: params.step,
+          status,
+          evidence,
+          checkboxUpdated,
+          archived: false,
+        },
+      );
+    },
+  });
 
   pi.registerCommand("review-plan", {
     description: "Aktuelle Plan-Datei optional vertieft prüfen",
@@ -1567,7 +1904,7 @@ CHANGED_FILES:
         return;
       }
       updateStatus(ctx);
-      persistState();
+      persistState(ctx);
     },
   });
 
@@ -1587,7 +1924,7 @@ CHANGED_FILES:
       phase = mode === "work" ? "idle" : "draft";
       reviewedHash = undefined;
       updateStatus(ctx);
-      persistState();
+      persistState(ctx);
       ctx.ui.notify("Keine Plan-Datei vorhanden.", "info");
       return;
     }
@@ -1622,7 +1959,7 @@ CHANGED_FILES:
       phase = keepPlanMode ? "draft" : "idle";
       reviewedHash = undefined;
       updateStatus(ctx);
-      persistState();
+      persistState(ctx);
       ctx.ui.notify(
         `Plan archiviert: ${relative(ctx.cwd, archivePath)}`,
         "info",
@@ -1642,6 +1979,19 @@ CHANGED_FILES:
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    // Extension instances can serve more than one session. Never let an
+    // earlier project's in-memory workflow leak into a new empty session.
+    mode = "work";
+    phase = "idle";
+    reviewedHash = undefined;
+    planCreationMode = undefined;
+    progressRecords = [];
+    planModeEverUsed = false;
+    planExistedBeforeTurn = false;
+    latestCwd = ctx.cwd;
+    auroraEpoch = undefined;
+    subscribeAuroraProvider();
+
     const entries = ctx.sessionManager.getEntries();
     const latestState = entries
       .filter(
@@ -1669,10 +2019,22 @@ CHANGED_FILES:
     let content: string | undefined;
     try {
       content = readPlanFile(ctx.cwd);
+      const loaded = loadWorkflowState(ctx.cwd);
+      if (loaded.state) {
+        mode = loaded.state.mode;
+        phase = loaded.state.phase;
+        reviewedHash = loaded.state.reviewedHash;
+        planCreationMode = loaded.state.planCreationMode;
+        progressRecords = loaded.state.progress;
+      } else {
+        progressRecords = [];
+      }
+      if (loaded.warning) ctx.ui.notify(loaded.warning, "warning");
     } catch (error) {
       phase = "idle";
       mode = "work";
       reviewedHash = undefined;
+      progressRecords = [];
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(`Unsicherer Planpfad ignoriert: ${message}`, "error");
     }
@@ -1717,9 +2079,14 @@ CHANGED_FILES:
       phase = "idle";
     }
     updateStatus(ctx);
+    persistState(ctx);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    unsubscribeAurora?.();
+    unsubscribeAurora = undefined;
+    auroraEpoch = undefined;
+    latestCwd = undefined;
     setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, undefined);
   });
 }

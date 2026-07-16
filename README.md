@@ -1,77 +1,81 @@
-# Minimal Stable Pi Setup
+# Pi Agent — Aurora Setup
 
-This repository contains a reproducible Pi Coding Agent setup with one global
-presentation layer and local extensions limited to behavior and security.
+This repository is the declarative source for a comfort-focused Pi Coding
+Agent setup. Plan workflow, permissions, LSP and presentation are separate
+runtime modules; only Aurora owns custom TUI chrome.
 
-## Architecture
+## Runtime architecture
 
 ```text
 Pi Core
-├── catppuccin-mocha
-├── pi-zentui                 # global editor, footer, user-message chrome
-├── pi-tool-display           # read/grep/find/ls/bash/edit/write renderer
-├── pi-subagents              # subagent orchestration package
-└── local extensions          # permissions, workflow, activity line, ask-user
+├── setup-core        effective config, /setup-doctor, allowlisted verify tool
+├── plan-mode         Shift+Tab workflow, decision/review/work lifecycle
+├── mode-permissions  capability and path policy
+├── lsp               lazy, trust-gated language servers
+├── pi-subagents      exact-pinned orchestration package
+└── aurora-ui         editor, footer, activity surface and motion
 ```
 
-Zentui owns the global editor and footer.  
-pi-tool-display owns the configured built-in tool renderers.  
-Local extensions own behavior and security, not global presentation.
+`themes/aurora-night.json` defines the single color system. Aurora uses one
+100 ms ticker only while contextual motion is active; `reduced` and `off`
+never retain an animation interval. Built-in tools keep Pi's execution and
+rendering contracts.
 
-Zentui renders the single footer in this order: current directory, workflow,
-active model, thinking level. Normal permissions stay out of it; only elevated
-`FULL ACCESS` or `YOLO` appear as a trailing warning. Git, token, cost,
-runtime, time, and subagent state have no permanent footer segment.
+The central `setup.json` is schema-backed. Effective precedence is defaults,
+global setup, then trusted `.pi/setup.json`. Project configuration cannot
+relax global permissions or replace host verification commands.
 
-`activity-status.ts` owns at most one muted activity line above the editor. It
-uses lifecycle state only, never model reasoning text. `pi-tool-display` owns
-the one-line tool timeline; successful calls are compact, while errors and
-manually expanded calls show details. `pi-subagents` keeps lifecycle tracking
-but its persistent async widget is disabled.
+## Plan workflow
 
-## Theme
+The existing public UX remains available: Shift+Tab, `/plan`, `/decide`,
+`/review-plan`, `/work`, `/go`, `/done`, `/finish` and `/plan-todos`.
 
-`catppuccin-mocha` is the single, exact-pinned visual theme. Zentui and all
-temporary local dialogs use its semantic theme tokens; this repository carries
-no local color palette or icon set. Because every built-in project-data footer
-segment is hidden, Zentui's periodic project refresh is disabled. If a future
-configuration enables CWD, Git, or runtime footer data, it must also choose a
-positive refresh interval deliberately.
-
-## Native skills
-
-Pi discovers the native skills in this agent directory from
-`skills/<name>/SKILL.md`; in this checkout that is Pi's global
-`~/.pi/agent/skills/` location. Invoke one with `/skill:<name> [arguments]`.
-Skills are not loaded through a local
-extension and are deliberately not a Shift+Tab workflow-menu entry. Their
-instructions remain subject to the active workflow and permission policy.
+The Markdown plan remains `.agent/plans/current-plan.md`. Runtime metadata is
+stored atomically in `.agent/plans/current-plan.state.json` and is rebuilt
+conservatively when missing or stale. During `/work`, the model records
+progress through `plan_progress(step, status, evidence)`; legacy progress
+markers and `/done` remain compatible fallbacks.
 
 ## Install and verify
 
 Use Node `22.22.2` and npm `10.9.7`.
 
 ```bash
-npm --prefix npm ci
-npm --prefix npm run verify
+npm ci --prefix npm
+npm run verify
+npm run install:user -- --dry-run --target ~/.pi/agent
+npm run install:user -- --apply --target ~/.pi/agent
 ```
 
-Run Pi from this agent directory after the package install. The checked-in
-`settings.json`, `zentui.json`, and
-`extensions/pi-tool-display/config.json` are the runtime configuration.
+The installer copies only an explicit setup allowlist, including the npm
+manifests, TypeScript config and test harness required by `verify`. It never
+copies authentication, sessions, caches, backups, `.git`, symlinks or
+installed dependencies. When this checkout already is `~/.pi/agent`,
+installation is a no-op.
 
-## Updates and rollback
+For an external empty target, run `npm ci --prefix ~/.pi/agent/npm` there
+after installation before using `verify`. Dependency installation is
+deliberately separate and requires the user's approval; the installer never
+downloads packages on its own.
 
-The three UI runtime packages in `settings.json` are pinned to immutable
-commits in the `daydaylx` forks. Update one only by committing the reviewed
-fork change, replacing its full commit ID in `settings.json`, and running the
-complete verification command. The exact npm pins remain for the local test
-harness. Do not use version ranges or `latest`.
+Run `/setup-doctor` after a Pi upgrade or configuration change. It reports
+effective configuration, trust, model roles, LSP mode, active extension count
+and manifest/install version drift without reading credentials.
 
-The pre-rebuild state is tagged `backup/pre-minimal-rebuild`. The inherited
-worktree state is also retained in a named local Git stash until this rebuild
-is accepted. Roll back a milestone by reverting its focused commit; do not
-force-push or reset `main`.
+## Safety and updates
 
-See [the runtime matrix](docs/runtime-matrix.md) for pinned versions and
-manual terminal coverage.
+- Unknown tools and arbitrary Bash require confirmation in normal work mode.
+- `verify` accepts only `typecheck`, `test` or `verify`; it cannot execute free
+  shell input and always runs this setup's fixed checks from the agent
+  directory. Project test scripts still go through the normal Bash policy.
+- LSP servers are never installed automatically and start only on first use.
+- Only the Worker subagent has raw Bash/write tools. Review agents are
+  technically read-only; the Test Runner receives only the allowlisted
+  `verify` tool.
+- Packages remain exact-pinned. Do not update dependencies, commit or publish
+  branches without explicit approval.
+
+The former Zentui/tool-display files remain in the repository for comparison,
+but are not active runtime owners. Rolling back means restoring the previous
+`settings.json` package and extension allowlists; authentication and session
+state are unaffected.

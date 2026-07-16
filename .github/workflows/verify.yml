@@ -11,9 +11,6 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: npm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,5 +18,5 @@ jobs:
           node-version: 22.22.2
           cache: npm
           cache-dependency-path: npm/package-lock.json
-      - run: npm ci
-      - run: npm run verify
+      - run: npm ci --prefix npm
+      - run: npm --prefix npm run verify

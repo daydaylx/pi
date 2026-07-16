@@ -74,6 +74,17 @@ import {
 } from "./tools.ts";
 import type { LspToolsDeps } from "./tools.ts";
 import { computeLspStatus, publishLspStatus } from "./status.ts";
+import {
+  defaultSetupConfig,
+  loadSetupConfig,
+} from "../setup-core/config.ts";
+import {
+  AURORA_UI_CHANNELS,
+  isAuroraUiStateRequest,
+  publishAuroraUiPatch,
+  publishAuroraUiSnapshot,
+  type AuroraUiStatePatch,
+} from "../aurora-ui/state.ts";
 export { PROFILES, EXTENSION_LANGUAGE_MAP } from "./server-profiles.ts";
 export type { LanguageMapping } from "./server-profiles.ts";
 export { resolveConfig, resolveProfileOverrides, parseMode } from "./config.ts";
@@ -122,11 +133,9 @@ const LOG_BUFFER_LIMIT = 200;
 const LSP_TOOL_PREFIX = "lsp_";
 
 function defaultConfig(): LspConfig {
+  const setup = defaultSetupConfig().lsp;
   return {
-    enabled: true,
-    mode: "auto",
-    requestTimeoutMs: 10_000,
-    idleShutdownMs: 600_000,
+    ...setup,
     workspaceSymbolLimit: 50,
     languages: PROFILES,
   };
@@ -157,6 +166,8 @@ export default function lspExtension(pi: ExtensionAPI): void {
   let config: LspConfig = defaultConfig();
   let registry: ServerRegistry | undefined;
   let sessionOverride: Partial<LspConfig> = {};
+  let auroraEpoch: string | undefined;
+  let unsubscribeAurora: (() => void) | undefined;
   const logBuffer: string[] = [];
 
   const logger = (level: LspLogLevel, message: string): void => {
@@ -167,11 +178,19 @@ export default function lspExtension(pi: ExtensionAPI): void {
   function buildConfig(ctx: ExtensionContext): LspConfig {
     const cliMode = parseMode(pi.getFlag("lsp-mode"));
     const trusted = ctx.isProjectTrusted();
+    const loadedSetup = loadSetupConfig(ctx.cwd, trusted);
+    for (const diagnostic of loadedSetup.diagnostics) {
+      logger(
+        diagnostic.level === "error" ? "error" : "info",
+        `${diagnostic.source}: ${diagnostic.message}`,
+      );
+    }
     const projectConfig = trusted
       ? readProjectConfig(ctx.cwd, logger)
       : undefined;
     return resolveConfig({
       defaults: defaultConfig(),
+      global: loadedSetup.config.lsp,
       trusted,
       projectConfig,
       sessionFlags: {
@@ -181,12 +200,39 @@ export default function lspExtension(pi: ExtensionAPI): void {
     });
   }
 
+  function auroraLspState(): NonNullable<AuroraUiStatePatch["lsp"]> {
+    const servers = registry?.list() ?? [];
+    return {
+      state: registry ? computeLspStatus(config, servers) : "off",
+      detail:
+        servers.length > 0
+          ? `${servers.length} Server${servers.length === 1 ? "" : "s"}`
+          : undefined,
+    };
+  }
+
   function refreshStatus(ctx: ExtensionContext): void {
     if (!registry) {
       publishLspStatus(ctx, undefined);
-      return;
+    } else {
+      publishLspStatus(ctx, computeLspStatus(config, registry.list()));
     }
-    publishLspStatus(ctx, computeLspStatus(config, registry.list()));
+    if (auroraEpoch) {
+      publishAuroraUiPatch(pi, auroraEpoch, "lsp", {
+        lsp: auroraLspState(),
+      });
+    }
+  }
+
+  function subscribeAuroraProvider(): void {
+    unsubscribeAurora?.();
+    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
+      if (!isAuroraUiStateRequest(value)) return;
+      auroraEpoch = value.sessionEpoch;
+      publishAuroraUiSnapshot(pi, value, "lsp", {
+        lsp: auroraLspState(),
+      });
+    });
   }
 
   const deps: LspToolsDeps = {
@@ -211,6 +257,11 @@ export default function lspExtension(pi: ExtensionAPI): void {
   registerLspNavigationTools(pi, deps);
 
   pi.on("session_start", async (_event, ctx) => {
+    await registry?.shutdownAll();
+    registry = undefined;
+    sessionOverride = {};
+    auroraEpoch = undefined;
+    subscribeAuroraProvider();
     config = buildConfig(ctx);
     registry = new ServerRegistry({ config, logger });
     refreshStatus(ctx);
@@ -219,7 +270,11 @@ export default function lspExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async (_event, ctx) => {
     await registry?.shutdownAll();
     registry = undefined;
+    sessionOverride = {};
+    unsubscribeAurora?.();
+    unsubscribeAurora = undefined;
     publishLspStatus(ctx, undefined);
+    auroraEpoch = undefined;
   });
 
   pi.on("tool_result", async (event: ToolResultEvent, ctx) => {

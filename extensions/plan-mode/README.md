@@ -29,9 +29,8 @@ steps.
   workflow mode or gating `/work`.
 - `/plan-todos`: read progress from the current plan file.
 - `/done <n> [m …]`: manually check off todo numbers (as listed by
-  `/plan-todos`). Fallback for missed `[DONE:n]` markers — without it a plan
-  whose markers the model forgot would stay "executing" forever. Uses the same
-  completion/archive path as the automatic detection.
+  `/plan-todos`). Manual fallback when an explicit progress update was missed.
+  Uses the same completion/archive path as `plan_progress`.
 - `/finish`: manual archive/early-abort. Runs automatically once all todos
   are checked off (see "Completion").
 
@@ -261,10 +260,14 @@ The review uses its own temporary phase only while the review turn runs.
 ## Completion
 
 The checkboxes under `## Todos` are the sole Todo source; an optional numeric
-prefix such as `## 5. Todos` is accepted. During execution, `[DONE:n]` updates
-checkbox `n` atomically in the plan file; `/done <n> [m …]` is the manual
-fallback for missed markers. As soon as every checkbox is checked, the plan is
-archived automatically under
+prefix such as `## 5. Todos` is accepted. During execution, the
+`plan_progress({ step, status, evidence })` tool records `in_progress`,
+`completed`, or `blocked`; `completed` atomically checks the matching Markdown
+checkbox. Every status requires a concrete evidence string. `/done <n> [m …]`
+remains the manual fallback. Legacy `[PLAN-PROGRESS]` and `[DONE:n]`
+responses are still accepted for existing sessions, but are no longer the
+primary protocol. As soon as every checkbox is checked, the plan is archived
+automatically under
 `.agent/plans/archive/YYYY-MM-DD-HHMM-current-plan.md` with `Status:
 complete`, and an existing Decision Brief is archived along with it. If
 archiving fails, the phase falls back to `ready` and `/finish` can be run
@@ -273,6 +276,13 @@ offers to archive it directly (confirmation) instead of only pointing at
 `/finish`. `/finish` remains available to archive a plan early with open todos
 (`Status: incomplete`, requires interactive confirmation) or as that retry
 path.
+
+Workflow metadata is stored atomically beside the plan in the versioned
+`.agent/plans/current-plan.state.json` sidecar. It includes the plan hash,
+phase, mode, review hash, creation mode, and evidence-backed progress records.
+The Markdown plan remains authoritative: a missing, invalid, or hash-stale
+sidecar is reconstructed conservatively from the plan structure and
+checkboxes on session start.
 
 ## Permission shortcut
 

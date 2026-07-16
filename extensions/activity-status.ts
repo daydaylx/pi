@@ -51,7 +51,6 @@ export default function activityStatusExtension(pi: ExtensionAPI): void {
     lastMessage = undefined;
     lastUpdateAt = 0;
     if (!canRenderActivity(ctx)) return;
-    ctx.ui.setHiddenThinkingLabel("");
     ctx.ui.setWorkingIndicator({ frames: [mutedDot(ctx)] });
     ctx.ui.setWorkingVisible(false);
   });
@@ -87,6 +86,5 @@ export default function activityStatusExtension(pi: ExtensionAPI): void {
     if (!canRenderActivity(ctx)) return;
     ctx.ui.setWorkingMessage();
     ctx.ui.setWorkingIndicator();
-    ctx.ui.setHiddenThinkingLabel();
   });
 }

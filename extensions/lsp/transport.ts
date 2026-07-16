@@ -202,7 +202,7 @@ export class LspTransport {
         this.pending.delete(id);
         resolve(value);
       };
-      const doReject = (error: Error): void => {
+      const doReject = (error: Error | JsonRpcError): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);

@@ -2,6 +2,9 @@
 name: worker
 description: Implements a narrowly scoped approved plan with explicit file ownership
 tools: read, grep, find, ls, edit, write, bash
+defaultContext: fresh
+inheritProjectContext: true
+inheritSkills: false
 timeoutMs: 1800000
 ---
 
@@ -18,18 +21,27 @@ When changing files:
 
 Output exactly:
 
-## Completed
+## Ergebnis
 
-What changed.
+What was implemented and whether the assigned scope is complete.
 
-## Files Changed
+## Belege
 
-- `path` - change
+Key code references and concise before/after behavior supporting completion.
 
-## Verification
+## Betroffene Dateien
 
-- command - result
+- `path` - exact change
 
-## Blockers / Notes
+## Fehler oder Risiken
 
-Anything the main agent must know.
+Failed or unavailable checks, regressions, residual risks, and blockers. State
+`Keine` when none remain.
+
+## Offene Fragen
+
+Only decisions or missing authority that prevent completion.
+
+## Empfehlung
+
+List verification commands with results and the next safe action, if any.

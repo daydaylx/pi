@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.pi/setup.schema.json",
+  "title": "Pi Greenfield Setup",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ui", "permissions", "lsp", "subagents", "models", "verification"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["theme", "motion"],
+      "properties": {
+        "theme": { "const": "aurora-night" },
+        "motion": { "enum": ["contextual", "reduced", "off"] }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unknownTools", "bash"],
+      "properties": {
+        "unknownTools": { "enum": ["block", "ask", "allow"] },
+        "bash": { "enum": ["block", "ask", "allow"] }
+      }
+    },
+    "lsp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "mode", "requestTimeoutMs", "idleShutdownMs"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mode": { "enum": ["off", "auto", "force"] },
+        "requestTimeoutMs": { "type": "integer", "minimum": 1000, "maximum": 120000 },
+        "idleShutdownMs": { "type": "integer", "minimum": 10000, "maximum": 3600000 }
+      }
+    },
+    "subagents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["concurrency", "freshContext"],
+      "properties": {
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "freshContext": { "type": "boolean" }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "fast", "deep"],
+      "properties": {
+        "primary": { "type": "string", "minLength": 1 },
+        "fast": { "type": "string", "minLength": 1 },
+        "deep": { "type": "string", "minLength": 1 }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typecheck", "test", "verify"],
+      "properties": {
+        "typecheck": { "$ref": "#/$defs/check" },
+        "test": { "$ref": "#/$defs/check" },
+        "verify": { "$ref": "#/$defs/check" }
+      }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "args", "timeoutMs"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" }, "maxItems": 12 },
+        "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 900000 }
+      }
+    }
+  }
+}

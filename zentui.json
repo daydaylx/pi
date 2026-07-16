@@ -1,6 +1,19 @@
 {
-  "projectRefreshIntervalMs": 0,
-  "footerLayout": "agent",
+  "projectRefreshIntervalMs": 15000,
+  "footerLayout": "standard",
+  "footerFormat": "$cwd( $git_branch)( $git_status)$fill( $context )$fill( $tokens)($sep$cost)",
+  "contextStyle": "text+gauge",
+  "contextThresholds": {
+    "warning": 70,
+    "error": 90
+  },
+  "pathDisplay": {
+    "mode": "full",
+    "depth": 2
+  },
+  "icons": {
+    "mode": "auto"
+  },
   "colorSources": {
     "starship": "theme",
     "editor": "theme",
@@ -12,14 +25,14 @@
     "copyFriendly": false
   },
   "footerSegments": {
-    "cwd": false,
-    "gitBranch": false,
-    "gitStatus": false,
-    "gitCounts": false,
+    "cwd": true,
+    "gitBranch": true,
+    "gitStatus": true,
+    "gitCounts": true,
     "runtime": false,
-    "context": false,
-    "tokens": false,
-    "cost": false,
+    "context": true,
+    "tokens": true,
+    "cost": true,
     "sessionDuration": false,
     "username": false,
     "time": false,
@@ -27,7 +40,14 @@
   },
   "extensionStatuses": {
     "defaultPlacement": "off",
-    "placements": {},
+    "placements": {
+      "workflow": "left",
+      "permissions": "right",
+      "thinking-view": "off",
+      "lsp": "right",
+      "subagent-slash": "right",
+      "subagent-slash-text": "right"
+    },
     "colorModes": {}
   }
 }
