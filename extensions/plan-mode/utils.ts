@@ -2,8 +2,10 @@
  * Pure and filesystem-safe helpers for the plan workflow.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
+  constants as fsConstants,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -17,6 +19,11 @@ import { dirname, relative, resolve, sep } from "node:path";
 
 export const PLAN_RELATIVE_PATH = ".agent/plans/current-plan.md";
 export const PLAN_ARCHIVE_RELATIVE_DIR = ".agent/plans/archive";
+export const PLAN_MAX_BYTES = 256 * 1024;
+export const DECISION_BRIEF_MAX_BYTES = 128 * 1024;
+export const PLAN_MAX_TODOS = 200;
+export const PLAN_METADATA_VERSION = 2 as const;
+export const PLAN_METADATA_PREFIX = "PI-PLAN-METADATA:";
 
 // Das Decision Brief ist ein eigenständiges Artefakt der vorgeschalteten
 // Klärung. Es liegt im selben .agent/plans-Verzeichnis wie der finale Plan,
@@ -54,7 +61,42 @@ export interface TodoItem {
   lineIndex: number;
 }
 
+export type PlanType = "simple_plan" | "detailed_plan" | "unknown";
+
+export interface PlanMetadata {
+  version: typeof PLAN_METADATA_VERSION;
+  planId: string;
+  planType: Exclude<PlanType, "unknown">;
+}
+
+export type ArtifactReadResult =
+  | { status: "ok"; content: string; bytes: number }
+  | { status: "missing" }
+  | { status: "unreadable"; error: string };
+
 export type ReviewOutcome = "approved" | "changes-required" | "missing";
+
+const PLAN_METADATA_PATTERN =
+  /<!--\s*PI-PLAN-METADATA:\s*(\{[^\r\n]*\})\s*-->/g;
+const ANY_PLAN_METADATA_LINE_PATTERN =
+  /^[ \t]*<!--\s*PI-PLAN-METADATA:[^\r\n]*-->[ \t]*(?:\r?\n)?/gm;
+
+function byteLength(content: string): number {
+  return Buffer.byteLength(content, "utf8");
+}
+
+function assertArtifactSize(
+  name: string,
+  content: string,
+  maximumBytes: number,
+): void {
+  const bytes = byteLength(content);
+  if (bytes > maximumBytes) {
+    throw new Error(
+      `${name} ist zu groß (${bytes} Bytes; maximal ${maximumBytes} Bytes).`,
+    );
+  }
+}
 
 function isInside(basePath: string, candidatePath: string): boolean {
   const rel = relative(basePath, candidatePath);
@@ -116,15 +158,65 @@ export function ensurePlanDirectory(cwd: string): string {
   return planDir;
 }
 
-export function readPlanFile(cwd: string): string | undefined {
+export function readArtifactTriState(
+  cwd: string,
+  relativePath: string,
+  maximumBytes: number,
+): ArtifactReadResult {
   const root = resolve(cwd);
-  const planPath = getPlanPath(root);
-  assertNoSymlinkComponents(root, planPath);
-  if (!existsSync(planPath)) return undefined;
-  return readFileSync(planPath, "utf8");
+  const artifactPath = resolve(root, relativePath);
+  try {
+    assertNoSymlinkComponents(root, artifactPath);
+    if (!existsSync(artifactPath)) return { status: "missing" };
+    const file = statSync(artifactPath);
+    if (!file.isFile()) {
+      return {
+        status: "unreadable",
+        error: `Artefakt ist keine reguläre Datei: ${artifactPath}`,
+      };
+    }
+    if (file.size > maximumBytes) {
+      return {
+        status: "unreadable",
+        error: `Artefakt ist zu groß (${file.size} Bytes; maximal ${maximumBytes} Bytes).`,
+      };
+    }
+    const content = readFileSync(artifactPath, "utf8");
+    const bytes = byteLength(content);
+    if (bytes > maximumBytes) {
+      return {
+        status: "unreadable",
+        error: `Artefakt ist zu groß (${bytes} Bytes; maximal ${maximumBytes} Bytes).`,
+      };
+    }
+    return { status: "ok", content, bytes };
+  } catch (error) {
+    return {
+      status: "unreadable",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export function readPlanFileState(cwd: string): ArtifactReadResult {
+  return readArtifactTriState(cwd, PLAN_RELATIVE_PATH, PLAN_MAX_BYTES);
+}
+
+export function readPlanFile(cwd: string): string | undefined {
+  const result = readPlanFileState(cwd);
+  if (result.status === "missing") return undefined;
+  if (result.status === "unreadable") throw new Error(result.error);
+  return result.content;
 }
 
 export function writePlanFileAtomic(cwd: string, content: string): void {
+  assertArtifactSize("Plan", content, PLAN_MAX_BYTES);
+  const todoCount = extractTodoItems(content).length;
+  if (todoCount > PLAN_MAX_TODOS) {
+    throw new Error(
+      `Plan enthält zu viele Todos (${todoCount}; maximal ${PLAN_MAX_TODOS}).`,
+    );
+  }
   const root = resolve(cwd);
   const planPath = getPlanPath(root);
   ensurePlanDirectory(root);
@@ -142,6 +234,73 @@ export function writePlanFileAtomic(cwd: string, content: string): void {
   } finally {
     if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
   }
+}
+
+function isPlanMetadata(value: unknown): value is PlanMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const metadata = value as Record<string, unknown>;
+  return (
+    metadata.version === PLAN_METADATA_VERSION &&
+    typeof metadata.planId === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      metadata.planId,
+    ) &&
+    (metadata.planType === "simple_plan" ||
+      metadata.planType === "detailed_plan")
+  );
+}
+
+export function parsePlanMetadata(planContent: string): PlanMetadata | undefined {
+  const matches = [...planContent.matchAll(PLAN_METADATA_PATTERN)];
+  if (matches.length !== 1) return undefined;
+  try {
+    const value = JSON.parse(matches[0][1]) as unknown;
+    return isPlanMetadata(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function formatPlanMetadata(metadata: PlanMetadata): string {
+  if (!isPlanMetadata(metadata)) throw new Error("Ungültige Plan-Metadaten.");
+  return `<!-- ${PLAN_METADATA_PREFIX} ${JSON.stringify(metadata)} -->`;
+}
+
+export function ensurePlanMetadataHeader(
+  planContent: string,
+  planType: Exclude<PlanType, "unknown">,
+  planId: string = randomUUID(),
+): { content: string; metadata: PlanMetadata; changed: boolean } {
+  const existing = parsePlanMetadata(planContent);
+  if (existing) {
+    const effectiveType =
+      existing.planType === "detailed_plan" ? "detailed_plan" : planType;
+    const metadata = { ...existing, planType: effectiveType };
+    if (metadata.planType === existing.planType) {
+      return { content: planContent, metadata: existing, changed: false };
+    }
+    return {
+      content: planContent.replace(PLAN_METADATA_PATTERN, formatPlanMetadata(metadata)),
+      metadata,
+      changed: true,
+    };
+  }
+
+  const metadata: PlanMetadata = {
+    version: PLAN_METADATA_VERSION,
+    planId,
+    planType,
+  };
+  const header = formatPlanMetadata(metadata);
+  const sanitized = planContent.replace(ANY_PLAN_METADATA_LINE_PATTERN, "");
+  const firstLineEnd = sanitized.indexOf("\n");
+  const content = firstLineEnd >= 0 && /^#\s+/.test(sanitized.slice(0, firstLineEnd))
+    ? `${sanitized.slice(0, firstLineEnd)}\n${header}${sanitized.slice(firstLineEnd)}`
+    : `${header}\n${sanitized}`;
+  assertArtifactSize("Plan", content, PLAN_MAX_BYTES);
+  return { content, metadata, changed: true };
 }
 
 function normalizeHeading(value: string): string {
@@ -205,6 +364,13 @@ export function extractTodoItems(planContent: string): TodoItem[] {
     });
   }
   return items;
+}
+
+export function computeTodoHash(todo: Pick<TodoItem, "text"> | string): string {
+  const text = typeof todo === "string" ? todo : todo.text;
+  return createHash("sha256")
+    .update(text.trim().replace(/\s+/g, " ").toLocaleLowerCase("de-DE"), "utf8")
+    .digest("hex");
 }
 
 export function extractDoneSteps(message: string): number[] {
@@ -285,23 +451,76 @@ export function validatePlanStructure(
   planContent: string,
   planMode?: "simple_plan" | "detailed_plan",
 ): string[] {
-  const found = new Set(
-    [...planContent.matchAll(/^##\s+(.+?)\s*$/gm)].map((match) =>
-      normalizeHeading(match[1]),
-    ),
-  );
   const required =
     planMode === "detailed_plan"
       ? REQUIRED_DETAILED_PLAN_HEADINGS
       : REQUIRED_PLAN_HEADINGS;
-  const errors = required
-    .filter((heading) => !found.has(normalizeHeading(heading)))
-    .map((heading) => `Fehlender Abschnitt: ${heading}`);
+  const lines = planContent.split(/\r?\n/);
+  const headings = lines.flatMap((line, lineIndex) => {
+    const match = line.match(/^##\s+(.+?)\s*$/);
+    return match
+      ? [{ lineIndex, normalized: normalizeHeading(match[1]) }]
+      : [];
+  });
+  const errors: string[] = [];
+  let previousIndex = -1;
 
-  if (extractTodoItems(planContent).length === 0) {
+  for (const heading of required) {
+    const normalized = normalizeHeading(heading);
+    const occurrences = headings.filter(
+      (candidate) => candidate.normalized === normalized,
+    );
+    if (occurrences.length === 0) {
+      errors.push(`Fehlender Abschnitt: ${heading}`);
+      continue;
+    }
+    if (occurrences.length > 1) {
+      errors.push(`Abschnitt kommt mehrfach vor: ${heading}`);
+    }
+    const headingIndex = headings.findIndex(
+      (candidate) => candidate === occurrences[0],
+    );
+    if (headingIndex < previousIndex) {
+      errors.push(`Abschnitt ist in falscher Reihenfolge: ${heading}`);
+    }
+    previousIndex = Math.max(previousIndex, headingIndex);
+
+    const start = occurrences[0].lineIndex + 1;
+    const nextHeading = lines.findIndex(
+      (line, index) => index >= start && /^##\s+/.test(line),
+    );
+    const end = nextHeading < 0 ? lines.length : nextHeading;
+    if (lines.slice(start, end).join("\n").trim() === "") {
+      errors.push(`Leerer Abschnitt: ${heading}`);
+    }
+  }
+
+  const todos = extractTodoItems(planContent);
+  if (todos.length === 0) {
     errors.push("Der Todo-Abschnitt enthält keine Checkboxen.");
   }
+  if (todos.length > PLAN_MAX_TODOS) {
+    errors.push(
+      `Der Plan enthält zu viele Todos (${todos.length}; maximal ${PLAN_MAX_TODOS}).`,
+    );
+  }
+  const bytes = byteLength(planContent);
+  if (bytes > PLAN_MAX_BYTES) {
+    errors.push(
+      `Der Plan ist zu groß (${bytes} Bytes; maximal ${PLAN_MAX_BYTES} Bytes).`,
+    );
+  }
   return errors;
+}
+
+export function inferPlanType(planContent: string): PlanType {
+  const metadata = parsePlanMetadata(planContent);
+  if (metadata?.planType === "detailed_plan") return "detailed_plan";
+  if (validatePlanStructure(planContent, "detailed_plan").length === 0) {
+    return "detailed_plan";
+  }
+  if (metadata?.planType === "simple_plan") return "simple_plan";
+  return "unknown";
 }
 
 export function hashPlanContent(planContent: string): string {
@@ -331,6 +550,7 @@ export function archivePlanFile(
   cwd: string,
   status: "complete" | "incomplete",
   now = new Date(),
+  expectedPlanHash?: string,
 ): string {
   const root = resolve(cwd);
   const planPath = getPlanPath(root);
@@ -338,6 +558,10 @@ export function archivePlanFile(
   const content = readPlanFile(root);
   if (content === undefined)
     throw new Error(`Plan file not found: ${planPath}`);
+  const initialHash = hashPlanContent(content);
+  if (expectedPlanHash !== undefined && initialHash !== expectedPlanHash) {
+    throw new Error("Plan wurde zwischenzeitlich geändert; Archivierung abgebrochen.");
+  }
 
   assertNoSymlinkComponents(root, archiveDir);
   mkdirSync(archiveDir, { recursive: true });
@@ -363,7 +587,11 @@ export function archivePlanFile(
       flag: "wx",
       mode: 0o600,
     });
-    renameSync(temporaryPath, archivePath);
+    const current = readPlanFile(root);
+    if (current === undefined || hashPlanContent(current) !== initialHash) {
+      throw new Error("Plan wurde zwischenzeitlich geändert; Archivierung abgebrochen.");
+    }
+    copyFileSync(temporaryPath, archivePath, fsConstants.COPYFILE_EXCL);
     unlinkSync(planPath);
   } finally {
     if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
@@ -404,14 +632,22 @@ export function isDecisionBriefPath(rawPath: unknown, cwd: string): boolean {
 }
 
 export function readDecisionBrief(cwd: string): string | undefined {
-  const root = resolve(cwd);
-  const briefPath = getDecisionBriefPath(root);
-  assertNoSymlinkComponents(root, briefPath);
-  if (!existsSync(briefPath)) return undefined;
-  return readFileSync(briefPath, "utf8");
+  const result = readDecisionBriefState(cwd);
+  if (result.status === "missing") return undefined;
+  if (result.status === "unreadable") throw new Error(result.error);
+  return result.content;
+}
+
+export function readDecisionBriefState(cwd: string): ArtifactReadResult {
+  return readArtifactTriState(
+    cwd,
+    DECISION_BRIEF_RELATIVE_PATH,
+    DECISION_BRIEF_MAX_BYTES,
+  );
 }
 
 export function writeDecisionBriefAtomic(cwd: string, content: string): void {
+  assertArtifactSize("Decision Brief", content, DECISION_BRIEF_MAX_BYTES);
   const root = resolve(cwd);
   const briefPath = getDecisionBriefPath(root);
   ensurePlanDirectory(root);
@@ -439,6 +675,7 @@ export function writeInvalidDecisionBriefAtomic(
   cwd: string,
   content: string,
 ): void {
+  assertArtifactSize("Decision Brief", content, DECISION_BRIEF_MAX_BYTES);
   const root = resolve(cwd);
   const briefPath = getInvalidDecisionBriefPath(root);
   ensurePlanDirectory(root);
@@ -515,6 +752,13 @@ export function extractDecisionBriefBlock(message: string): string | undefined {
 export function validateDecisionBriefStructure(briefContent: string): string[] {
   const lines = briefContent.split(/\r?\n/);
   const errors: string[] = [];
+
+  const bytes = byteLength(briefContent);
+  if (bytes > DECISION_BRIEF_MAX_BYTES) {
+    errors.push(
+      `Das Decision Brief ist zu groß (${bytes} Bytes; maximal ${DECISION_BRIEF_MAX_BYTES} Bytes).`,
+    );
+  }
 
   for (const heading of REQUIRED_BRIEF_HEADINGS) {
     const headingIndex = lines.findIndex((line) => {

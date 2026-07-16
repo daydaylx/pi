@@ -18,10 +18,20 @@ Die Übergabe erfolgt ohne Commit, Push oder Paketinstallation.
 - Aurora Night besitzt Editor, Footer, Activity-Widget und Working-Indikator.
   Die Darstellung reagiert auf Terminalbreite und Motion-Modus und räumt alle
   Session-Ressourcen beim Shutdown auf.
-- Der Planworkflow verwendet einen atomaren, versionierten Sidecar und das Tool
-  `plan_progress`; Markdown-Checkboxen bleiben lesbare Source of Truth und alte
+- Der Planworkflow verwendet Sidecar v2 mit stabiler `planId`, Revision,
+  Lifecycle, Todo-Hash und gebundener `executionId`; Lock/CAS-Schreibvorgänge
+  und konservative Migration schützen ältere oder konkurrierende Zustände.
+  Markdown-Checkboxen bleiben lesbare Source of Truth und alte
   Fortschrittsmarker funktionieren weiterhin als Fallback.
-- Freier Bash-Zugriff und unbekannte Tools fragen standardmäßig nach. LSP,
+- Gespeicherte Ausführungen werden ausschließlich als `paused` geladen und
+  brauchen in `/work` eine explizite Resume-Bestätigung. Decision Briefs werden
+  nur bei passender, im Workflow gespeicherter Hash-Verknüpfung übernommen.
+- Planning, Review, Decision, Execution, Paused, Blocked und Ready besitzen
+  technisch erzwungene Workflow-Capabilities; die jeweilige Phase begrenzt
+  Lesen, Rückfragen, Verifikation und Fortschrittsmeldungen unabhängig von der
+  globalen Berechtigungsstufe.
+- Unbekannte Tools fragen in Read+Write, Full und YOLO immer nach und sind in
+  strengeren Stufen blockiert; Setup bleibt absolut gesperrt. LSP,
   `ask_user`, `plan_progress` und `verify` besitzen kleine explizite
   Capability-Grenzen; LSP nutzt eine exakte Tool-Allowlist und `verify` nur
   die festen Setup-Prüfungen aus dem Agent-Verzeichnis.
@@ -42,8 +52,9 @@ Die Übergabe erfolgt ohne Commit, Push oder Paketinstallation.
 
 - Gewählt: Aurora Night mit kontextueller Bewegung. `reduced` und `off` bleiben
   über `setup.json` verfügbar.
-- Gewählt: `read-write` als Startstufe, aber freie Shell und unbekannte Tools
-  standardmäßig nur nach Bestätigung.
+- Gewählt: `read-write` als Startstufe; unbekannte Tools bleiben auch in Full
+  und YOLO bestätigungspflichtig, in strengeren Stufen blockiert und in Setup
+  absolut gesperrt.
 - Gewählt: frischer Subagenten-Kontext und maximale Parallelität vier.
 - Gewählt: drei kuratierte OpenAI-Codex-Modellrollen (`fast`, `primary`, `deep`).
 - Gewählt: alte UI-/Renderer-Dateien bleiben inaktiv erhalten, damit Rückbau

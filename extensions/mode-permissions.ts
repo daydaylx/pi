@@ -52,6 +52,10 @@ import {
   publishAuroraUiPatch,
   publishAuroraUiSnapshot,
 } from "./aurora-ui/state.ts";
+import {
+  requestWorkflowCapabilities,
+  type WorkflowCapabilitySnapshot,
+} from "./shared/workflow-capabilities.ts";
 
 const PERSISTED_STATE_KEY = "mode-permissions";
 
@@ -65,6 +69,126 @@ const LOCAL_LSP_TOOLS = new Set([
   "lsp_hover",
   "lsp_workspace_symbols",
 ]);
+const READ_ONLY_SUBAGENT_PROFILES = new Set([
+  "scout",
+  "planner",
+  "architect",
+  "reviewer",
+  "test-runner",
+  "security-auditor",
+  "ui-reviewer",
+  "docs-auditor",
+  "oracle",
+]);
+
+function isRestrictedWorkflow(snapshot: WorkflowCapabilitySnapshot): boolean {
+  return [
+    "planning",
+    "reviewing",
+    "deciding",
+    "paused",
+    "blocked",
+    "ready",
+  ].includes(snapshot.state);
+}
+
+function workflowAllowsPlanWrite(
+  snapshot: WorkflowCapabilitySnapshot,
+): boolean {
+  return snapshot.state === "planning" || snapshot.state === "reviewing";
+}
+
+function subagentProfiles(input: unknown): string[] | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const value = input as Record<string, unknown>;
+  if (
+    value.action === "list" &&
+    Object.keys(value).every((key) => key === "action")
+  ) {
+    return [];
+  }
+  if (typeof value.agent === "string" && typeof value.task === "string") {
+    return [value.agent];
+  }
+  if (Array.isArray(value.tasks) && value.tasks.length > 0) {
+    const profiles = value.tasks.map((task) =>
+      task && typeof task === "object"
+        ? (task as Record<string, unknown>).agent
+        : undefined,
+    );
+    return profiles.every(
+      (profile): profile is string => typeof profile === "string",
+    )
+      ? profiles
+      : undefined;
+  }
+  if (Array.isArray(value.chain) && value.chain.length > 0) {
+    const profiles = value.chain.map((task) =>
+      task && typeof task === "object"
+        ? (task as Record<string, unknown>).agent
+        : undefined,
+    );
+    return profiles.every(
+      (profile): profile is string => typeof profile === "string",
+    )
+      ? profiles
+      : undefined;
+  }
+  return undefined;
+}
+
+function decideWorkflowTool(
+  workflow: WorkflowCapabilitySnapshot,
+  event: ToolCallEvent,
+  cwd: string,
+): PolicyDecision | undefined {
+  if (
+    workflow.state === "executing" &&
+    (event.toolName === "write" || event.toolName === "edit")
+  ) {
+    const filePath = toolPath(event) ?? "";
+    if (isPlanFilePath(filePath, cwd)) {
+      return {
+        action: "block",
+        reason: "Während der Ausführung darf der Plan nur über plan_progress aktualisiert werden.",
+      };
+    }
+    return undefined;
+  }
+  if (!isRestrictedWorkflow(workflow)) return undefined;
+
+  if (["read", "grep", "find", "ls"].includes(event.toolName)) return undefined;
+  if (LOCAL_LSP_TOOLS.has(event.toolName)) {
+    return { action: "allow", reason: "Workflow: read-only LSP capability" };
+  }
+  if (event.toolName === "ask_user" || event.toolName === "wait") {
+    return { action: "allow", reason: "Workflow: kontrollierte Fähigkeit" };
+  }
+  if (event.toolName === "verify") return undefined;
+  if (event.toolName === "subagent") {
+    const profiles = subagentProfiles(event.input);
+    return profiles &&
+      profiles.every((profile) => READ_ONLY_SUBAGENT_PROFILES.has(profile))
+      ? { action: "allow", reason: "Workflow: read-only Subagenten" }
+      : {
+          action: "block",
+          reason: "Dieser Workflow erlaubt nur bekannte read-only Subagentenprofile.",
+        };
+  }
+  if (event.toolName === "write" || event.toolName === "edit") {
+    const filePath = toolPath(event) ?? "";
+    return workflowAllowsPlanWrite(workflow) && isPlanFilePath(filePath, cwd)
+      ? { action: "allow", reason: "Workflow: kontrollierter Plan-Schreibzugriff" }
+      : {
+          action: "block",
+          reason: "Dieser Workflow blockiert Schreibzugriffe außerhalb des aktuellen Plans.",
+        };
+  }
+  return {
+    action: "block",
+    reason: `Workflow ${workflow.state}: Tool "${event.toolName}" ist nicht freigegeben.`,
+  };
+}
 
 function permissionWarning(level: PermissionLevel): string | undefined {
   if (level === "full-access") {
@@ -94,11 +218,15 @@ function decideTool(
   permissionLevel: PermissionLevel,
   event: ToolCallEvent,
   cwd: string,
+  workflow: WorkflowCapabilitySnapshot,
   configured: {
     unknownTools: ConfiguredPolicyAction;
     bash: ConfiguredPolicyAction;
   },
 ): PolicyDecision {
+  const workflowDecision = decideWorkflowTool(workflow, event, cwd);
+  if (workflowDecision) return workflowDecision;
+
   if (event.toolName === "bash") {
     if (permissionLevel === "read-write") {
       if (configured.bash === "block") {
@@ -167,9 +295,6 @@ function decideTool(
       reason: `${PERMISSION_LEVEL_LABEL[permissionLevel]}: Tool "${event.toolName}" ist nicht freigegeben.`,
     };
   }
-  if (permissionLevel === "full-access" || permissionLevel === "yolo") {
-    return { action: "allow", reason: "Erweiterte Zugriffsstufe" };
-  }
   switch (configured.unknownTools) {
     case "block":
       return {
@@ -182,7 +307,10 @@ function decideTool(
         reason: `Unbekanntes Tool "${event.toolName}" benötigt Bestätigung.`,
       };
     case "allow":
-      return { action: "allow", reason: "Explizit durch Setup-Policy erlaubt" };
+      return {
+        action: "ask",
+        reason: `Unbekanntes Tool "${event.toolName}" wird trotz Setup-Allow einzeln bestätigt.`,
+      };
   }
 }
 
@@ -386,6 +514,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       permissionLevel,
       event,
       ctx.cwd,
+      requestWorkflowCapabilities(pi.events),
       configuredPolicy,
     );
     const subject =
@@ -404,8 +533,13 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("user_bash", async (event, ctx) => {
-    const decision =
-      permissionLevel === "read-write" && configuredPolicy.bash !== "allow"
+    const workflow = requestWorkflowCapabilities(pi.events);
+    const decision = isRestrictedWorkflow(workflow)
+      ? {
+          action: "block" as const,
+          reason: `Workflow ${workflow.state}: direkter Shell-Zugriff ist nicht freigegeben.`,
+        }
+      : permissionLevel === "read-write" && configuredPolicy.bash !== "allow"
         ? configuredPolicy.bash === "block"
           ? {
               action: "block" as const,

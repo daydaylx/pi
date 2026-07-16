@@ -33,11 +33,19 @@ and `/plan-todos` retain their existing semantics. The Control Center starts
 with Schnellplan, Architekturplan, Work-Modus and Optionen klären, then offers
 separate model-role, Thinking, permission and one-file LSP-diagnosis menus.
 
-The Markdown plan remains `.agent/plans/current-plan.md`. Runtime metadata is
-stored atomically in `.agent/plans/current-plan.state.json` and is rebuilt
-conservatively when missing or stale. During `/work`, the model records
-progress through `plan_progress(step, status, evidence)`; legacy progress
-markers and `/done` remain compatible fallbacks.
+The Markdown plan remains `.agent/plans/current-plan.md`. Sidecar v2 stores a
+stable `planId`, revision, lifecycle, per-todo hash and bound `executionId` in
+`.agent/plans/current-plan.state.json`; lock/CAS writes and conservative
+migration protect concurrent or older state. During `/work`, the model records
+progress through `plan_progress(executionId, step, status, evidence)`; legacy progress
+markers and `/done` remain compatible fallbacks. A saved execution is always
+restored as `paused` and `/work` requires an explicit resume. Decision briefs
+are injected only when their stored hash is linked to the current plan.
+
+Planning, review, decision, execution, paused, blocked and ready are enforced
+capability phases, not prompt-only conventions. Each phase exposes only its
+required read, question, verification or progress surface; execution progress
+is additionally bound to the active plan and execution identity.
 
 ## Install and verify
 
@@ -67,7 +75,9 @@ and manifest/install version drift without reading credentials.
 
 ## Safety and updates
 
-- Unknown tools and arbitrary Bash require confirmation in normal work mode.
+- Unknown tools always require confirmation in Read+Write, Full and YOLO, and
+  are blocked in stricter levels; Setup remains an absolute block. Workflow
+  phase limits apply independently and cannot be relaxed by a permission level.
 - `verify` accepts only `typecheck`, `test` or `verify`; it cannot execute free
   shell input and always runs this setup's fixed checks from the agent
   directory. Project test scripts still go through the normal Bash policy.

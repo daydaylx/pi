@@ -609,6 +609,77 @@ function likelyExternalWrite(command: string, cwd: string): boolean {
   return isWriteCapableCommand(command) && containsExternalPath(tokens, cwd);
 }
 
+const OPAQUE_INTERPRETERS = new Set([
+  "bash",
+  "dash",
+  "deno",
+  "ksh",
+  "lua",
+  "node",
+  "perl",
+  "php",
+  "python",
+  "python3",
+  "ruby",
+  "sh",
+  "zsh",
+]);
+
+function executableToken(tokens: string[]): {
+  executable: string;
+  args: string[];
+} {
+  let index = 0;
+  while (
+    index < tokens.length &&
+    /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[index])
+  ) {
+    index += 1;
+  }
+  if (tokens[index] === "sudo") {
+    index += 1;
+    while (index < tokens.length && tokens[index].startsWith("-")) index += 1;
+  }
+  if (tokens[index] === "env") {
+    index += 1;
+    while (
+      index < tokens.length &&
+      (tokens[index].startsWith("-") ||
+        /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[index]))
+    ) {
+      index += 1;
+    }
+  }
+  return {
+    executable: tokens[index]?.split("/").pop()?.toLowerCase() ?? "",
+    args: tokens.slice(index + 1),
+  };
+}
+
+/** Full Access remains permissive, but asks when shell effects are opaque. */
+function fullAccessShellRisk(command: string): string | undefined {
+  const parsed = parseReadOnlyShell(command);
+  if (parsed.error) {
+    return `Nicht sicher klassifizierbare Shell-Konstruktion (${parsed.error})`;
+  }
+  for (const tokens of parsed.segments) {
+    const { executable, args } = executableToken(tokens);
+    if (
+      executable === "find" &&
+      hasAnyOption(tokens, [/^-(?:delete|exec|execdir|ok|okdir)$/i])
+    ) {
+      return "find mit mutierender oder opaker Aktion";
+    }
+    if (
+      OPAQUE_INTERPRETERS.has(executable) &&
+      !(args.length === 1 && ["-v", "-V", "--version"].includes(args[0]))
+    ) {
+      return `Opaker Interpreteraufruf (${executable})`;
+    }
+  }
+  return undefined;
+}
+
 export function decideBash(
   permissionLevel: PermissionLevel,
   command: string,
@@ -634,6 +705,10 @@ export function decideBash(
 
   for (const [pattern, reason] of CRITICAL_BASH_PATTERNS) {
     if (pattern.test(trimmed)) return ask(reason, true);
+  }
+  if (permissionLevel === "full-access") {
+    const shellRisk = fullAccessShellRisk(trimmed);
+    if (shellRisk) return ask(shellRisk);
   }
   if (
     referencesSystemPath(trimmed) &&

@@ -9,6 +9,8 @@ export type WorkflowPhase =
   | "reviewing"
   | "reviewed"
   | "executing"
+  | "paused"
+  | "blocked"
   | "ready";
 
 // Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
@@ -83,7 +85,11 @@ export function workflowStatusValue(
 ): WorkflowStatusValue {
   switch (phase) {
     case "draft":
-      return mode === "detailed_plan" ? "ARCH PLAN" : "PLAN";
+      return mode === "detailed_plan"
+        ? "ARCH PLAN"
+        : mode === "simple_plan"
+          ? "PLAN"
+          : "WORK · PLAN STORED";
     case "deciding":
       return "ANALYZE";
     case "reviewing":
@@ -95,8 +101,19 @@ export function workflowStatusValue(
       const completed = todos.filter((todo) => todo.completed).length;
       return `WORK ${completed}/${total}`;
     }
-    case "idle":
+    case "paused": {
+      const total = todos.length;
+      const completed = todos.filter((todo) => todo.completed).length;
+      return total > 0 ? `PAUSED ${completed}/${total}` : "PAUSED";
+    }
+    case "blocked": {
+      const total = todos.length;
+      const completed = todos.filter((todo) => todo.completed).length;
+      return total > 0 ? `BLOCKED ${completed}/${total}` : "BLOCKED";
+    }
     case "ready":
+      return "READY";
+    case "idle":
       return "WORK";
   }
 }

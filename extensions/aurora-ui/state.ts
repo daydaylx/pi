@@ -14,6 +14,8 @@ export type AuroraWorkflowPhase =
   | "drafting"
   | "reviewed"
   | "executing"
+  | "paused"
+  | "blocked"
   | "ready"
   | "archived";
 
@@ -165,6 +167,8 @@ export function mergeAuroraUiState(
     "drafting",
     "reviewed",
     "executing",
+    "paused",
+    "blocked",
     "ready",
     "archived",
   ];
