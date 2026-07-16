@@ -20,7 +20,7 @@ steps.
 - `/decide`: starts the optional **Decision-Intake** (see "Decision-Intake
   (Klärmodus)" below) — an interactive clarification that produces a Decision
   Brief. It is also reachable as the _Optionen klären_ action inside `/plan`
-  and as the Shift+Tab mode-menu entry of the same name.
+  and as the first-level Shift+Tab Control-Center entry of the same name.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
   independently of whether a review happened. If a plan is already executing,
   a duplicate `/work` call is ignored instead of aborting and restarting it.
@@ -36,13 +36,14 @@ steps.
 
 ## Plan variants
 
-`/plan` is a state-aware assistant (details below). Shift+Tab opens the same
-three persistent modes as a mode picker (no permissions, no thinking, no
-tools — `buildModeMenu()`/`openModeMenu()` in `index.ts`), plus a fourth,
-non-persistent **Optionen klären** entry that switches into the Klär-Modus
-without starting a turn immediately; permission levels have their own picker
-on `Ctrl+Shift+Y` (below). Native skills use Pi Core's `/skill:<name>` commands
-and are intentionally not a workflow-menu entry.
+`/plan` is a state-aware assistant (details below). Shift+Tab opens the
+temporary **Control Center** (`buildControlCenterMenu()`/`openControlCenter()`):
+its first four immediately selectable entries remain **Schnellplan**,
+**Architekturplan**, **Work-Modus** and the non-persistent **Optionen klären**.
+They are followed by separate submenus for the fixed Fast/Primary/Deep model
+roles, Thinking, permissions and one-file LSP diagnostics. Native skills use
+Pi Core's `/skill:<name>` commands and are intentionally not a workflow-menu
+entry.
 Internal `WorkflowMode` values are unchanged; only the labels were renamed for
 clarity:
 
@@ -57,16 +58,16 @@ clarity:
   Selecting it from Shift+Tab switches **silently** into the transient
   `deciding` phase (`action: "decide-mode"`) without starting a turn, exactly
   like the other modes — the intake prompt is injected on the next user turn.
-  The explicit entry points `/decide`, the _Optionen klären_ action inside
-  `/plan`, and the `Ctrl+Shift+X` entry keep `action: "decide"` and start the
-  intake immediately. Neither action changes `mode` or the permission level.
+  The explicit entry points `/decide` and the _Optionen klären_ action inside
+  `/plan` start the intake immediately. Neither action changes `mode` or the
+  permission level. The former `Ctrl+Shift+X` command menu was removed.
 
-**Thinking coupling.** A real mode change also sets the thinking level to the
-mode default (`MODE_THINKING` in `index.ts`): Schnellplan → `medium`,
-Architekturplan → `xhigh`, Work → `high`. A manual override via `/thinking` or
-`Ctrl+Shift+T` stays in effect until the next mode change; selecting the
-already-active mode changes nothing. The session start value still comes from
-`settings.json` → `defaultThinkingLevel`.
+**Thinking coupling.** Thinking has an explicit **Auto**/**Manuell** state.
+Auto follows the workflow default (`MODE_THINKING` in `index.ts`): Schnellplan
+→ `medium`, Architekturplan → `xhigh`, Work → `high`. A manually selected level
+via the Control Center or `Ctrl+Shift+T` persists across workflow changes and
+session restoration until Auto is explicitly selected again. Selecting Auto
+immediately restores the active workflow default.
 
 **Subagent reminders.** Every injected mode/phase prompt (`SIMPLE_PLAN_PROMPT`,
 `detailed_plan`, `executing`, `reviewing`, `deciding`) includes a short,
@@ -135,7 +136,7 @@ Reaching the intake sets a transient `deciding` phase (analogous to the
 
 Start it via `/decide` or via the _Optionen klären_ action inside `/plan`
 (both start the intake immediately), or switch into the Klär-Modus silently
-from Shift+Tab's _Optionen klären_ entry — the intake then begins on your
+from the Control Center's _Optionen klären_ entry — the intake then begins on your
 next message. The agent then clarifies the genuinely decision-relevant questions
 using `ask_user` — exactly one focused question per call, 2–4 options each,
 with a short meaning/consequence and an explicit recommendation — and ends the
@@ -184,8 +185,8 @@ therefore never leaks as stale context into a later, unrelated plan turn;
 archive errors are non-fatal (notification only, the plan archive stands).
 
 Permissions, tools, and thinking are fully independent of the Decision-Intake.
-Shift+Tab additionally offers the Klär-Modus as its "Optionen klären" entry
-(see "Plan variants" above): selecting it switches **silently** into
+The Control Center additionally offers the Klär-Modus as its "Optionen klären"
+entry (see "Plan variants" above): selecting it switches **silently** into
 `deciding` (no immediate turn, no `mode` change), so the intake prompt only
 fires on the next user message. `Ctrl+Shift+Y` stays the permission picker,
 and no intake action changes the permission level.

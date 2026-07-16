@@ -9,7 +9,7 @@ runtime modules; only Aurora owns custom TUI chrome.
 ```text
 Pi Core
 ├── setup-core        effective config, /setup-doctor, allowlisted verify tool
-├── plan-mode         Shift+Tab workflow, decision/review/work lifecycle
+├── plan-mode         Shift+Tab Control Center, workflow, decision/review/work lifecycle
 ├── mode-permissions  capability and path policy
 ├── lsp               lazy, trust-gated language servers
 ├── pi-subagents      exact-pinned orchestration package
@@ -27,8 +27,11 @@ relax global permissions or replace host verification commands.
 
 ## Plan workflow
 
-The existing public UX remains available: Shift+Tab, `/plan`, `/decide`,
-`/review-plan`, `/work`, `/go`, `/done`, `/finish` and `/plan-todos`.
+The existing public UX remains available: Shift+Tab opens the temporary Control
+Center; `/plan`, `/decide`, `/review-plan`, `/work`, `/go`, `/done`, `/finish`
+and `/plan-todos` retain their existing semantics. The Control Center starts
+with Schnellplan, Architekturplan, Work-Modus and Optionen klären, then offers
+separate model-role, Thinking, permission and one-file LSP-diagnosis menus.
 
 The Markdown plan remains `.agent/plans/current-plan.md`. Runtime metadata is
 stored atomically in `.agent/plans/current-plan.state.json` and is rebuilt

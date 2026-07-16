@@ -61,7 +61,19 @@ import {
   type AuroraWorkflowPhase,
 } from "../aurora-ui/state.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
+import {
+  buildControlCenterMenu,
+  buildModelRoleMenu,
+  type ControlCenterAction,
+  type ModelRole,
+} from "../shared/control-center-menu.ts";
+import {
+  CONTROL_CENTER_EVENTS,
+  type ControlCenterSnapshot,
+  type WorkflowThinkingDefaultEvent,
+} from "../shared/control-center-events.ts";
 import { SHORTCUTS } from "../shared/shortcuts.ts";
+import { loadSetupConfig } from "../setup-core/config.ts";
 import {
   buildBriefOverwriteGuardMenu,
   buildDecisionHandoffMenu,
@@ -143,10 +155,9 @@ Verwende mindestens diese gültige Struktur:
 Pflicht sind die Abschnitte Auftrag und Todos mit mindestens einer Checkbox.
 Stoppe nach dem Schreiben der Plan-Datei und bleibe knapp.`;
 
-// Thinking-Level folgt dem Workflow-Modus (Nutzerentscheidung): kompaktes
-// Planen braucht kein Maximalbudget, Architekturanalysen schon. Wird nur bei
-// einem echten Moduswechsel gesetzt; ein manueller Override über /thinking
-// oder Ctrl+Shift+T gilt bis zum nächsten Wechsel.
+// Thinking-Level folgt im Auto-Modus dem Workflow-Modus: kompaktes Planen
+// braucht kein Maximalbudget, Architekturanalysen schon. Manuell ausgewählte
+// Werte bleiben bei echten Moduswechseln erhalten.
 const MODE_THINKING: Record<WorkflowMode, ThinkingLevel> = {
   simple_plan: "medium",
   detailed_plan: "xhigh",
@@ -158,13 +169,6 @@ const MODE_LABEL: Record<WorkflowMode, string> = {
   detailed_plan: "Architekturplan",
   work: "Work-Modus",
 };
-
-/**
- * `"decide"` startet den Decision-Intake (transiente Phase) statt einen
- * persistenten WorkflowMode zu setzen; `openModeMenu()` filtert ihn vor dem
- * Aufruf von setWorkflowMode() heraus.
- */
-type ModeMenuAction = WorkflowMode | "decide";
 
 function auroraWorkflowPhase(phase: WorkflowPhase): AuroraWorkflowPhase {
   switch (phase) {
@@ -181,47 +185,6 @@ function auroraWorkflowPhase(phase: WorkflowPhase): AuroraWorkflowPhase {
     case "ready":
       return "ready";
   }
-}
-
-function buildModeMenu(
-  currentMode: WorkflowMode,
-  deciding: boolean,
-): MenuEntry<ModeMenuAction>[] {
-  return [
-    {
-      id: "mode-simple-plan",
-      label: "Schnellplan",
-      description:
-        "Kleine Änderung planen. Schnell · wenig Risiko · keine Umsetzung ohne /work",
-      value: "simple_plan",
-      current: currentMode === "simple_plan",
-    },
-    {
-      id: "mode-detailed-plan",
-      label: "Architekturplan",
-      description:
-        "Größere Änderung sauber planen. Tief · strukturiert · sicher",
-      value: "detailed_plan",
-      current: currentMode === "detailed_plan",
-    },
-    {
-      id: "mode-work",
-      label: "Work-Modus",
-      description:
-        "Bestehenden Plan oder freie Aufgabe bearbeiten. Kontrolliert · explizit · nur mit aktuellen Permissions",
-      value: "work",
-      current: currentMode === "work",
-    },
-    {
-      id: "mode-decide",
-      label: "Optionen klären",
-      description:
-        "Vorentscheidung klären. 2–4 Optionen · Empfehlung · Decision Brief vor dem Plan",
-      section: "Klärung",
-      value: "decide",
-      current: deciding,
-    },
-  ];
 }
 
 interface PersistedWorkflowState {
@@ -268,6 +231,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   // dass das "Nächster Schritt"-Menü nur nach dem Turn erscheint, der den Plan
   // erzeugt hat — nicht nach jedem Verfeinerungs-Turn.
   let planExistedBeforeTurn = false;
+
+  pi.events.on(CONTROL_CENTER_EVENTS.workflowThinkingDefault, (event) => {
+    (event as WorkflowThinkingDefaultEvent).respond({
+      mode,
+      defaultLevel: MODE_THINKING[mode],
+    });
+  });
 
   function readTodos(cwd: string): TodoItem[] {
     const content = readPlanFile(cwd);
@@ -476,12 +446,20 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
     const modeChanged = target !== mode;
     mode = target;
-    if (modeChanged) pi.setThinkingLevel(MODE_THINKING[target]);
+    let thinkingMode: "auto" | "manual" = "auto";
+    pi.events.emit(CONTROL_CENTER_EVENTS.snapshot, {
+      respond: (snapshot: ControlCenterSnapshot) => {
+        thinkingMode = snapshot.thinkingMode;
+      },
+    });
+    if (modeChanged && thinkingMode === "auto") {
+      pi.setThinkingLevel(MODE_THINKING[target]);
+    }
     updateStatus(ctx);
     persistState(ctx);
     ctx.ui.notify(
       modeChanged
-        ? `${MODE_LABEL[target]} aktiv. Thinking: ${MODE_THINKING[target]} (Modus-Default, ${SHORTCUTS.thinkingMenu.label} zum Ändern).`
+        ? `${MODE_LABEL[target]} aktiv. Thinking: ${thinkingMode === "auto" ? `${MODE_THINKING[target]} (Auto)` : "manueller Wert bleibt erhalten"}.`
         : `${MODE_LABEL[target]} aktiv.`,
       "info",
     );
@@ -826,8 +804,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   // Decision-Intake: vorgeschalteter Klär-Turn. Klärt über ask_user echte
   // Entscheidungen und endet mit einem [DECISION-BRIEF]-Block. Startet keine
   // Umsetzung und wechselt nicht nach /work. Startet den Intake SOFORT
-  // (triggerTurn) — genutzt von /decide, der /plan-Aktion (clarify) und dem
-  // Ctrl+Shift+X-Eintrag.
+  // (triggerTurn) — genutzt von /decide und der /plan-Aktion (clarify).
   async function runDecisionIntake(ctx: ExtensionContext): Promise<void> {
     if (!(await enterDecisionMode(ctx))) return;
 
@@ -971,23 +948,112 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     );
   }
 
-  // Shift+Tab-Modusmenü: früher ein eigener Event-Rundweg über actions.ts +
-  // shared/mode-menu.ts (WORKFLOW_MODE_REQUEST_EVENT /
-  // PLAN_ACTION_REQUEST_EVENT). Da nur diese Extension Modi setzt, ruft das
-  // Menü setWorkflowMode()/enterDecisionModeFromMenu() jetzt direkt auf.
-  async function openModeMenu(ctx: ExtensionContext): Promise<void> {
-    const selected = await runMenu<ModeMenuAction>(
+  function configuredModelRole(
+    current: { provider?: string; id?: string } | undefined,
+    models: Record<ModelRole, string>,
+  ): ModelRole | undefined {
+    if (!current?.provider || !current.id) return undefined;
+    return (["fast", "primary", "deep"] as const).find(
+      (role) => models[role] === `${current.provider}/${current.id}`,
+    );
+  }
+
+  function splitModelReference(value: string): [string, string] | undefined {
+    const separator = value.indexOf("/");
+    if (separator <= 0 || separator === value.length - 1) return undefined;
+    return [value.slice(0, separator), value.slice(separator + 1)];
+  }
+
+  async function openModelRoles(ctx: ExtensionContext): Promise<void> {
+    const models = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config.models;
+    const selected = await runMenu(
       ctx,
-      "Modus",
-      buildModeMenu(mode, phase === "deciding"),
-      { nonInteractiveHint: "Nutze /plan, um den Modus zu wählen." },
+      "Modellrollen",
+      buildModelRoleMenu({
+        models,
+        activeRole: configuredModelRole(ctx.model, models),
+      }),
+      { fallbackPrompt: "Modellrolle wählen" },
+    );
+    if (!selected) return;
+    if (!ctx.isIdle()) {
+      ctx.ui.notify(
+        "Modellwechsel ist nur möglich, wenn kein Agent-Turn läuft.",
+        "warning",
+      );
+      return;
+    }
+    const reference = splitModelReference(models[selected]);
+    if (!reference) {
+      ctx.ui.notify(`Modellrolle ${selected} ist ungültig konfiguriert.`, "error");
+      return;
+    }
+    const [provider, id] = reference;
+    const target = ctx.modelRegistry.find(provider, id);
+    if (!target) {
+      ctx.ui.notify(
+        `Modell für ${selected} ist nicht verfügbar (${models[selected]}). Prüfe Provider und Credentials.`,
+        "error",
+      );
+      return;
+    }
+    try {
+      await pi.setModel(target);
+      ctx.ui.notify(`${selected === "fast" ? "Fast" : selected === "primary" ? "Primary" : "Deep"}: ${models[selected]} aktiv.`, "info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Modell für ${selected} konnte nicht aktiviert werden (${models[selected]}): ${message}`,
+        "error",
+      );
+    }
+  }
+
+  async function openControlCenter(ctx: ExtensionContext): Promise<void> {
+    let snapshot:
+      | { permissionLabel: string; thinkingMode: "auto" | "manual"; thinkingLevel: ThinkingLevel }
+      | undefined;
+    pi.events.emit(CONTROL_CENTER_EVENTS.snapshot, {
+      respond: (value: ControlCenterSnapshot) => {
+        snapshot = value;
+      },
+    });
+    const thinking = snapshot
+      ? `${snapshot.thinkingMode === "auto" ? "Auto" : "Manuell"} (${snapshot.thinkingLevel})`
+      : "Auto";
+    const selected = await runMenu<ControlCenterAction>(
+      ctx,
+      "Control Center",
+      buildControlCenterMenu({
+        mode,
+        deciding: phase === "deciding",
+        permissionLabel: snapshot?.permissionLabel ?? "nicht verfügbar",
+        thinkingLabel: thinking,
+      }),
+      { nonInteractiveHint: "Control Center benötigt den TUI-Modus." },
     );
     if (!selected) return;
     if (selected === "decide") {
       await enterDecisionModeFromMenu(ctx);
       return;
     }
-    await setWorkflowMode(selected, ctx);
+    if (selected === "simple_plan" || selected === "detailed_plan" || selected === "work") {
+      await setWorkflowMode(selected, ctx);
+      return;
+    }
+    if (selected === "model-roles") {
+      await openModelRoles(ctx);
+      return;
+    }
+    if (selected === "thinking") {
+      pi.events.emit(CONTROL_CENTER_EVENTS.openThinking, { ctx });
+      return;
+    }
+    if (selected === "permissions") {
+      pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx });
+      return;
+    }
+    pi.events.emit(CONTROL_CENTER_EVENTS.openDiagnostics, { ctx });
   }
 
   pi.registerFlag("plan", {
@@ -1026,7 +1092,7 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
 
   pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
     description: SHORTCUTS.modeMenu.description,
-    handler: async (ctx) => openModeMenu(ctx),
+    handler: async (ctx) => openControlCenter(ctx),
   });
 
   pi.on("context", async (event) => {

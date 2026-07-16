@@ -74,13 +74,15 @@ export function formatLspError(error: LspError): string {
   return lines.join("\n");
 }
 
+export interface LspToolTextResult {
+  content: [{ type: "text"; text: string }];
+  details?: Record<string, unknown>;
+}
+
 function lspTextResult(
   text: string,
   details?: Record<string, unknown>,
-): {
-  content: [{ type: "text"; text: string }];
-  details?: Record<string, unknown>;
-} {
+): LspToolTextResult {
   const limited = limitTextOutput(text);
   const nextDetails = limited.truncation
     ? { ...details, truncation: limited.truncation }
@@ -117,6 +119,63 @@ function formatDiagnostic(
   return text;
 }
 
+export async function runLspDiagnostics(
+  deps: LspToolsDeps,
+  path: string,
+  cwd: string,
+  includeRelated = false,
+): Promise<LspToolTextResult> {
+  const absPath = toAbsolute(path, cwd);
+  const config = deps.getConfig();
+  const target = resolveTarget(absPath, config);
+  if (target instanceof LspError) return lspTextResult(formatLspError(target));
+
+  const registry = deps.getRegistry();
+  let client;
+  try {
+    ({ client } = await registry.acquire(target.workspaceRoot, target.profile));
+  } catch (error) {
+    const text =
+      error instanceof LspError
+        ? formatLspError(error)
+        : `LSP: unerwarteter Fehler beim Start von ${target.profile.label}: ${String(error)}`;
+    return lspTextResult(text);
+  }
+
+  try {
+    const sync = getDocumentSync(client, target.workspaceRoot, deps.logger);
+    const { version } = sync.openOrSync(absPath, target.languageId);
+    const timeoutMs = Math.min(config.requestTimeoutMs, 5000);
+    let snapshot;
+    try {
+      snapshot = await sync.waitForDiagnostics(absPath, version, timeoutMs);
+    } catch (error) {
+      const text =
+        error instanceof LspError
+          ? formatLspError(error)
+          : `LSP: Fehler beim Warten auf Diagnosen: ${String(error)}`;
+      return lspTextResult(text, { version });
+    }
+
+    const relPath = relativeToWorkspace(absPath, target.workspaceRoot);
+    if (snapshot.diagnostics.length === 0) {
+      return lspTextResult(`LSP: keine Diagnosen für ${relPath}.`, {
+        version,
+        count: 0,
+      });
+    }
+    const lines = snapshot.diagnostics.map((d) =>
+      formatDiagnostic(d, includeRelated, d.relatedInformation),
+    );
+    return lspTextResult(`${relPath}:\n${lines.join("\n")}`, {
+      version,
+      count: snapshot.diagnostics.length,
+    });
+  } finally {
+    registry.release(target.workspaceRoot, target.profile.id);
+  }
+}
+
 export function registerLspDiagnosticsTool(
   pi: ExtensionAPI,
   deps: LspToolsDeps,
@@ -128,64 +187,12 @@ export function registerLspDiagnosticsTool(
       "Liefert aktuelle Compiler-/Linter-Diagnosen (Fehler, Warnungen) für eine Datei via Language Server Protocol. Startet den zuständigen Server bei Bedarf lazy.",
     parameters: DiagnosticsParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const absPath = toAbsolute(params.path, ctx.cwd);
-      const config = deps.getConfig();
-      const target = resolveTarget(absPath, config);
-      if (target instanceof LspError) {
-        return lspTextResult(formatLspError(target));
-      }
-
-      const registry = deps.getRegistry();
-      let client;
-      try {
-        ({ client } = await registry.acquire(
-          target.workspaceRoot,
-          target.profile,
-        ));
-      } catch (error) {
-        const text =
-          error instanceof LspError
-            ? formatLspError(error)
-            : `LSP: unerwarteter Fehler beim Start von ${target.profile.label}: ${String(error)}`;
-        return lspTextResult(text);
-      }
-
-      try {
-        const sync = getDocumentSync(client, target.workspaceRoot, deps.logger);
-        const { version } = sync.openOrSync(absPath, target.languageId);
-        const timeoutMs = Math.min(config.requestTimeoutMs, 5000);
-        let snapshot;
-        try {
-          snapshot = await sync.waitForDiagnostics(absPath, version, timeoutMs);
-        } catch (error) {
-          const text =
-            error instanceof LspError
-              ? formatLspError(error)
-              : `LSP: Fehler beim Warten auf Diagnosen: ${String(error)}`;
-          return lspTextResult(text, { version });
-        }
-
-        const relPath = relativeToWorkspace(absPath, target.workspaceRoot);
-        if (snapshot.diagnostics.length === 0) {
-          return lspTextResult(`LSP: keine Diagnosen für ${relPath}.`, {
-            version,
-            count: 0,
-          });
-        }
-        const lines = snapshot.diagnostics.map((d) =>
-          formatDiagnostic(
-            d,
-            params.includeRelated ?? false,
-            d.relatedInformation,
-          ),
-        );
-        return lspTextResult(`${relPath}:\n${lines.join("\n")}`, {
-          version,
-          count: snapshot.diagnostics.length,
-        });
-      } finally {
-        registry.release(target.workspaceRoot, target.profile.id);
-      }
+      return runLspDiagnostics(
+        deps,
+        params.path,
+        ctx.cwd,
+        params.includeRelated ?? false,
+      );
     },
   });
 }

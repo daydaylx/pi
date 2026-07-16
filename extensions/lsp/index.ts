@@ -72,6 +72,7 @@ import {
   registerLspDiagnosticsTool,
   registerLspNavigationTools,
 } from "./tools.ts";
+import { registerLspControlCenter } from "./control-center.ts";
 import type { LspToolsDeps } from "./tools.ts";
 import { computeLspStatus, publishLspStatus } from "./status.ts";
 import {
@@ -104,8 +105,10 @@ export {
   registerLspNavigationTools,
   formatLspError,
   relativeToWorkspace,
+  runLspDiagnostics,
 } from "./tools.ts";
-export type { LspToolsDeps } from "./tools.ts";
+export type { LspToolsDeps, LspToolTextResult } from "./tools.ts";
+export { findLspDiagnosticCandidates } from "./control-center.ts";
 
 /**
  * Create a ready-to-start client. The server is not spawned until `start()`
@@ -166,6 +169,8 @@ export default function lspExtension(pi: ExtensionAPI): void {
   let config: LspConfig = defaultConfig();
   let registry: ServerRegistry | undefined;
   let sessionOverride: Partial<LspConfig> = {};
+  let sessionEpoch = 0;
+  let activeSessionId: string | undefined;
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
   const logBuffer: string[] = [];
@@ -244,6 +249,36 @@ export default function lspExtension(pi: ExtensionAPI): void {
     logger,
   };
 
+  function captureControlCenterSession(ctx: ExtensionContext): unknown {
+    return { epoch: sessionEpoch, sessionId: ctx.sessionManager.getSessionId() };
+  }
+
+  function isCurrentControlCenterSession(
+    ctx: ExtensionContext,
+    token: unknown,
+  ): boolean {
+    if (!token || typeof token !== "object") return false;
+    const state = token as { epoch?: unknown; sessionId?: unknown };
+    return (
+      state.epoch === sessionEpoch &&
+      state.sessionId === activeSessionId &&
+      ctx.sessionManager.getSessionId() === activeSessionId
+    );
+  }
+
+  function captureControlCenterDeps(): LspToolsDeps {
+    const capturedConfig = config;
+    const capturedRegistry = registry ?? new ServerRegistry({
+      config: capturedConfig,
+      logger,
+    });
+    return {
+      getConfig: () => capturedConfig,
+      getRegistry: () => capturedRegistry,
+      logger,
+    };
+  }
+
   pi.registerFlag("lsp-mode", {
     description: "LSP-Aktivierungsmodus: off | auto | force",
     type: "string",
@@ -255,10 +290,21 @@ export default function lspExtension(pi: ExtensionAPI): void {
 
   registerLspDiagnosticsTool(pi, deps);
   registerLspNavigationTools(pi, deps);
+  registerLspControlCenter(pi, {
+    getStatus: () =>
+      registry ? computeLspStatus(config, registry.list()) : "off",
+    refreshStatus,
+    captureSession: captureControlCenterSession,
+    isSessionCurrent: isCurrentControlCenterSession,
+    captureDeps: captureControlCenterDeps,
+  });
 
   pi.on("session_start", async (_event, ctx) => {
-    await registry?.shutdownAll();
+    const previousRegistry = registry;
+    sessionEpoch += 1;
+    activeSessionId = ctx.sessionManager.getSessionId();
     registry = undefined;
+    await previousRegistry?.shutdownAll();
     sessionOverride = {};
     auroraEpoch = undefined;
     subscribeAuroraProvider();
@@ -268,8 +314,11 @@ export default function lspExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    await registry?.shutdownAll();
+    const previousRegistry = registry;
+    sessionEpoch += 1;
+    activeSessionId = undefined;
     registry = undefined;
+    await previousRegistry?.shutdownAll();
     sessionOverride = {};
     unsubscribeAurora?.();
     unsubscribeAurora = undefined;

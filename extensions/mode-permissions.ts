@@ -5,6 +5,7 @@
  * user_bash. Workflow extensions do not make access decisions themselves.
  */
 
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -18,10 +19,20 @@ import {
 } from "./shared/permission-policy.ts";
 import { isPlanFilePath, PLAN_RELATIVE_PATH } from "./plan-mode/utils.ts";
 import { confirmAction } from "./shared/permission-dialog.ts";
-import { runMenu, type MenuEntry } from "./shared/menu-ui.ts";
+import { runMenu } from "./shared/menu-ui.ts";
 import { buildPermissionMenu } from "./shared/permission-menu.ts";
-import { buildThinkingMenu } from "./shared/thinking-menu.ts";
+import {
+  buildThinkingMenu,
+  thinkingLabel,
+  type SelectableThinkingLevel,
+} from "./shared/thinking-menu.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
+import {
+  CONTROL_CENTER_EVENTS,
+  type ControlCenterSnapshot,
+  type ControlCenterSnapshotEvent,
+  type OpenControlCenterMenuEvent,
+} from "./shared/control-center-events.ts";
 import {
   PERMISSION_LEVEL_LABEL,
   ZENTUI_STATUS_KEYS,
@@ -193,6 +204,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     : "read-write";
   let sessionEpoch = 0;
   let configuredPolicy = defaultSetupConfig().permissions;
+  let thinkingMode: "auto" | "manual" = "auto";
+  let manualThinkingLevel: SelectableThinkingLevel | undefined;
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
 
@@ -227,7 +240,30 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   }
 
   function persistState(): void {
-    pi.appendEntry(PERSISTED_STATE_KEY, { permissionLevel });
+    pi.appendEntry(PERSISTED_STATE_KEY, {
+      permissionLevel,
+      thinkingMode,
+      manualThinkingLevel,
+    });
+  }
+
+  function workflowThinkingDefault(): ThinkingLevel {
+    let level: ThinkingLevel | undefined;
+    pi.events.emit(CONTROL_CENTER_EVENTS.workflowThinkingDefault, {
+      respond: (value: { mode: string; defaultLevel: ThinkingLevel }) => {
+        level = value.defaultLevel;
+      },
+    });
+    return level ?? pi.getThinkingLevel();
+  }
+
+  function snapshot(): ControlCenterSnapshot {
+    return {
+      permissionLevel,
+      permissionLabel: PERMISSION_LEVEL_LABEL[permissionLevel],
+      thinkingMode,
+      thinkingLevel: pi.getThinkingLevel(),
+    };
   }
 
   async function applyPermissionLevel(
@@ -265,74 +301,30 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   }
 
   async function openThinkingMenu(ctx: ExtensionContext): Promise<void> {
-    const level = await runMenu(
+    const selected = await runMenu(
       ctx,
       "Thinking",
-      buildThinkingMenu(pi.getThinkingLevel()),
-      { fallbackPrompt: "Thinking-Level wählen" },
+      buildThinkingMenu(pi.getThinkingLevel(), thinkingMode),
+      { fallbackPrompt: "Thinking-Modus wählen" },
     );
-    if (!level) return;
-    pi.setThinkingLevel(level);
-    ctx.ui.notify(`Thinking-Level: ${level}.`, "info");
-  }
-
-  // Zentrales Befehlsmenü (Ctrl+Shift+X): früher in actions.ts als reiner
-  // Event-Router über fünf shared/*-menu.ts-Bausteine. Da diese Extension die
-  // einzige Zuständige für Permission-/Thinking-Aktionen ist, ruft sie die
-  // eigenen Funktionen jetzt direkt auf. Plan-Aktionen (/plan, /decide, /work
-  // …) bleiben ausschließlich über ihre eigenen Slash-Commands und den
-  // Plan-Assistenten (Ctrl+Alt+P) erreichbar.
-  type CommandMenuTarget =
-    | "open-permission-menu"
-    | "toggle-yolo"
-    | "open-thinking-menu";
-
-  function buildCommandMenu(): MenuEntry<CommandMenuTarget>[] {
-    return [
-      {
-        id: "cmd-permission",
-        section: "Berechtigungen",
-        label: "/permission",
-        description: "Zugriffsstufe wählen: nur lesen bis YOLO",
-        value: "open-permission-menu",
-      },
-      {
-        id: "cmd-yolo",
-        section: "Berechtigungen",
-        label: "/yolo",
-        description: "YOLO-Modus für diese Sitzung ein- oder ausschalten",
-        value: "toggle-yolo",
-        current: permissionLevel === "yolo",
-      },
-      {
-        id: "cmd-thinking",
-        section: "Denken",
-        label: "/thinking",
-        description: "Denkstufe wählen: Minimal bis XHigh",
-        value: "open-thinking-menu",
-      },
-    ];
-  }
-
-  async function openCommandMenu(ctx: ExtensionContext): Promise<void> {
-    const selected = await runMenu(ctx, "Befehle", buildCommandMenu(), {
-      fallbackPrompt: "Befehl wählen",
-    });
     if (!selected) return;
-    switch (selected) {
-      case "open-permission-menu":
-        await openPermissionMenu(ctx);
-        return;
-      case "toggle-yolo":
-        await applyPermissionLevel(
-          permissionLevel === "yolo" ? "read-write" : "yolo",
-          ctx,
-        );
-        return;
-      case "open-thinking-menu":
-        await openThinkingMenu(ctx);
-        return;
+
+    if (selected === "auto") {
+      thinkingMode = "auto";
+      manualThinkingLevel = undefined;
+      const level = workflowThinkingDefault();
+      pi.setThinkingLevel(level);
+      persistState();
+      ctx.ui.notify(`Thinking: ${thinkingLabel(thinkingMode, level)}.`, "info");
+      return;
     }
+
+    const level = selected.slice("manual:".length) as SelectableThinkingLevel;
+    thinkingMode = "manual";
+    manualThinkingLevel = level;
+    pi.setThinkingLevel(level);
+    persistState();
+    ctx.ui.notify(`Thinking: ${thinkingLabel(thinkingMode, level)}.`, "info");
   }
 
   pi.registerCommand("yolo", {
@@ -374,9 +366,19 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     handler: async (ctx) => openPermissionMenu(ctx),
   });
 
-  pi.registerShortcut(SHORTCUTS.commandMenu.keys, {
-    description: SHORTCUTS.commandMenu.description,
-    handler: async (ctx) => openCommandMenu(ctx),
+  pi.registerShortcut(SHORTCUTS.thinkingMenu.keys, {
+    description: SHORTCUTS.thinkingMenu.description,
+    handler: async (ctx) => openThinkingMenu(ctx),
+  });
+
+  pi.events.on(CONTROL_CENTER_EVENTS.openPermissions, async (event) => {
+    await openPermissionMenu((event as OpenControlCenterMenuEvent).ctx);
+  });
+  pi.events.on(CONTROL_CENTER_EVENTS.openThinking, async (event) => {
+    await openThinkingMenu((event as OpenControlCenterMenuEvent).ctx);
+  });
+  pi.events.on(CONTROL_CENTER_EVENTS.snapshot, (event) => {
+    (event as ControlCenterSnapshotEvent).respond(snapshot());
   });
 
   pi.on("tool_call", async (event, ctx) => {
@@ -446,6 +448,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       | {
           data?: {
             permissionLevel?: PermissionLevel;
+            thinkingMode?: "auto" | "manual";
+            manualThinkingLevel?: SelectableThinkingLevel;
           };
         }
       | undefined;
@@ -456,6 +460,15 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       restoredLevel === "yolo"
         ? "read-write"
         : (restoredLevel ?? (AUTO_YOLO_ON_START ? "yolo" : "read-write"));
+    thinkingMode = latestState?.data?.thinkingMode === "manual" ? "manual" : "auto";
+    manualThinkingLevel = latestState?.data?.manualThinkingLevel;
+    if (thinkingMode === "manual" && manualThinkingLevel) {
+      pi.setThinkingLevel(manualThinkingLevel);
+    } else {
+      thinkingMode = "auto";
+      manualThinkingLevel = undefined;
+      pi.setThinkingLevel(workflowThinkingDefault());
+    }
     publishStatus(ctx);
   });
 

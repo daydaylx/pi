@@ -129,6 +129,10 @@ const policy = await load("extensions/shared/permission-policy.ts");
 const planUtils = await load("extensions/plan-mode/utils.ts");
 const planState = await load("extensions/plan-mode/state.ts");
 const workflowStatus = await load("extensions/shared/workflow-status.ts");
+const controlCenterMenu = await load("extensions/shared/control-center-menu.ts");
+const thinkingMenu = await load("extensions/shared/thinking-menu.ts");
+const lspControlCenter = await load("extensions/lsp/control-center.ts");
+const lspTools = await load("extensions/lsp/tools.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
 const activityStatus = await load("extensions/activity-status.ts");
@@ -193,6 +197,7 @@ function createHarness(options = {}) {
   let editorFactory;
   let thinkingLevel = options.thinkingLevel ?? "high";
   let entries = options.entries ?? [];
+  const setModelCalls = [];
 
   const theme = {
     name: "test-theme",
@@ -335,6 +340,10 @@ function createHarness(options = {}) {
     getThinkingLevel() {
       return thinkingLevel;
     },
+    async setModel(model) {
+      setModelCalls.push(model);
+      if (options.setModelError) throw new Error(options.setModelError);
+    },
     getSessionName() {
       return options.sessionName;
     },
@@ -360,6 +369,7 @@ function createHarness(options = {}) {
     workingIndicators,
     hiddenThinkingLabels,
     execCalls,
+    setModelCalls,
     widgets,
     get footerFactory() {
       return footerFactory;
@@ -385,15 +395,17 @@ function createHarness(options = {}) {
         hasUI,
         model,
         modelRegistry: {
-          find() {
-            return true;
+          find(provider, id) {
+            if (typeof options.modelRegistryFind === "function")
+              return options.modelRegistryFind(provider, id);
+            return options.models ? options.models[`${provider}/${id}`] : true;
           },
           getAll() {
             return [];
           },
         },
         isIdle() {
-          return true;
+          return options.idle ?? true;
         },
         isProjectTrusted() {
           return trusted;
@@ -1351,12 +1363,11 @@ await section("permission status lifecycle", async () => {
   );
   eq(
     harness.appended.at(-1)?.data,
-    { permissionLevel: "read-only" },
-    "permission persistence has no independent write-override state",
+    { permissionLevel: "read-only", thinkingMode: "auto" },
+    "permission persistence includes the independent auto-thinking state",
   );
-  eq(
-    harness.emitted,
-    [],
+  assert(
+    harness.emitted.every((event) => event.name !== "workflow-status"),
     "permission changes no longer publish a legacy workflow-status event",
   );
   const toolResults = await harness.runHooks(
@@ -1428,6 +1439,28 @@ await section("permission status lifecycle", async () => {
     latestStatus(readBashResume, "permissions"),
     undefined,
     "restored ordinary permission levels stay outside the footer",
+  );
+
+  const manualThinkingResume = createHarness({
+    thinkingLevel: "low",
+    entries: [
+      {
+        type: "custom",
+        customType: "mode-permissions",
+        data: { permissionLevel: "read-write", thinkingMode: "manual", manualThinkingLevel: "xhigh" },
+      },
+    ],
+  });
+  modePermissions.default(manualThinkingResume.api);
+  await manualThinkingResume.runHooks(
+    "session_start",
+    {},
+    manualThinkingResume.makeContext(),
+  );
+  eq(
+    manualThinkingResume.api.getThinkingLevel(),
+    "xhigh",
+    "manual Thinking is restored from the session state",
   );
 });
 
@@ -1641,6 +1674,202 @@ await section("thinking view lifecycle", async () => {
       undefined,
       "/thinking-view off clears the status line",
     );
+  }
+});
+
+await section("Control Center menus and routing", async () => {
+  if (!controlCenterMenu || !thinkingMenu || !modePermissions || !planMode) return;
+  const entries = controlCenterMenu.buildControlCenterMenu({
+    mode: "work",
+    deciding: false,
+    permissionLabel: "Read + Write",
+    thinkingLabel: "Auto (high)",
+  });
+  eq(
+    entries.slice(0, 4).map((entry) => entry.label),
+    ["Schnellplan", "Architekturplan", "Work-Modus", "Optionen klären"],
+    "Control Center keeps all four workflow actions first",
+  );
+  eq(
+    entries.slice(4).map((entry) => entry.value),
+    ["model-roles", "thinking", "permissions", "diagnostics"],
+    "Control Center exposes the four separated domain menus",
+  );
+  eq(
+    controlCenterMenu.buildModelRoleMenu({
+      models: { fast: "a/fast", primary: "a/primary", deep: "a/deep" },
+      activeRole: "primary",
+    }).map((entry) => [entry.label, entry.current]),
+    [["Fast", false], ["Primary", true], ["Deep", false]],
+    "model role menu is fixed to Fast, Primary and Deep",
+  );
+  const thinkingEntries = thinkingMenu.buildThinkingMenu("high", "auto");
+  eq(thinkingEntries[0].value, "auto", "Thinking menu starts with explicit Auto");
+  assert(
+    thinkingEntries.some((entry) => entry.value === "manual:xhigh"),
+    "Thinking menu exposes manual levels distinctly",
+  );
+
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-control-center-"));
+  try {
+    let choice = "Manuell: XHigh";
+    const harness = createHarness({
+      select: (labels) => {
+        if (choice === "__thinking__")
+          return labels.find((label) => label.endsWith("Thinking: Auto (high)"));
+        if (choice === "__permissions__")
+          return labels.find((label) => label.endsWith("Berechtigungen: Read + Write"));
+        if (choice === "__diagnostics__")
+          return labels.find((label) => label.endsWith("LSP-Diagnose"));
+        if (choice === "__models__") {
+          if (labels.includes("Fast")) return "Fast";
+          return labels.find((label) => label.endsWith("Modellrolle wechseln"));
+        }
+        return labels.find((label) => label === choice);
+      },
+      models: { "openai-codex/gpt-5.4-mini": { provider: "openai-codex", id: "gpt-5.4-mini" } },
+    });
+    planMode.default(harness.api);
+    modePermissions.default(harness.api);
+    const context = harness.makeContext({ cwd, model: { provider: "openai-codex", id: "gpt-5.4", thinkingLevelMap: {} } });
+    context.ui.custom = async () => { throw new Error("use deterministic select fallback"); };
+    await harness.runHooks("session_start", {}, context);
+    assert(!harness.shortcuts.has("ctrl+shift+x"), "Ctrl+Shift+X registers no local shortcut");
+    assert(harness.shortcuts.has("ctrl+shift+y"), "Ctrl+Shift+Y remains registered");
+    assert(harness.shortcuts.has("ctrl+shift+t"), "Ctrl+Shift+T remains registered");
+
+    for (const [selection, eventName] of [
+      ["__thinking__", "control-center:open-thinking"],
+      ["__permissions__", "control-center:open-permissions"],
+      ["__diagnostics__", "control-center:open-diagnostics"],
+    ]) {
+      choice = selection;
+      await harness.shortcuts.get("shift+tab")(context);
+      assert(
+        harness.emitted.some((event) => event.name === eventName),
+        `Control Center routes ${selection} through its shared event`,
+      );
+    }
+
+    choice = "Manuell: XHigh";
+    await harness.shortcuts.get("ctrl+shift+t")(context);
+    eq(harness.api.getThinkingLevel(), "xhigh", "manual Thinking selection applies its level");
+    choice = "Schnellplan";
+    await harness.shortcuts.get("shift+tab")(context);
+    eq(harness.api.getThinkingLevel(), "xhigh", "manual Thinking survives a workflow transition");
+    choice = "Auto";
+    await harness.shortcuts.get("ctrl+shift+t")(context);
+    eq(harness.api.getThinkingLevel(), "medium", "Auto restores the active workflow default");
+    choice = "Architekturplan";
+    await harness.shortcuts.get("shift+tab")(context);
+    eq(harness.api.getThinkingLevel(), "xhigh", "Auto follows later workflow transitions");
+
+    choice = "__models__";
+    await harness.shortcuts.get("shift+tab")(context);
+    eq(
+      harness.setModelCalls.at(-1),
+      { provider: "openai-codex", id: "gpt-5.4-mini" },
+      "Fast resolves through the registry and uses pi.setModel",
+    );
+
+    const unavailable = createHarness({
+      models: {},
+      select: (labels) => labels.includes("Fast")
+        ? "Fast"
+        : labels.find((label) => label.endsWith("Modellrolle wechseln")),
+    });
+    planMode.default(unavailable.api);
+    const unavailableContext = unavailable.makeContext({ cwd });
+    unavailableContext.ui.custom = async () => { throw new Error("use deterministic select fallback"); };
+    await unavailable.shortcuts.get("shift+tab")(unavailableContext);
+    assert(
+      unavailable.notifications.some((entry) => entry.message.includes("nicht verfügbar")),
+      "unavailable configured role fails clearly without a fallback model",
+    );
+
+    const busy = createHarness({
+      idle: false,
+      models: { "openai-codex/gpt-5.4-mini": { provider: "openai-codex", id: "gpt-5.4-mini" } },
+      select: (labels) => labels.includes("Fast")
+        ? "Fast"
+        : labels.find((label) => label.endsWith("Modellrolle wechseln")),
+    });
+    planMode.default(busy.api);
+    const busyContext = busy.makeContext({ cwd });
+    busyContext.ui.custom = async () => { throw new Error("use deterministic select fallback"); };
+    await busy.shortcuts.get("shift+tab")(busyContext);
+    eq(busy.setModelCalls, [], "model role changes are blocked during an active agent turn");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await section("LSP Control Center file picker", async () => {
+  if (!lspControlCenter) return;
+  assert(
+    typeof lspTools?.runLspDiagnostics === "function",
+    "Control Center reuses the exported diagnostics execution path",
+  );
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp-picker-"));
+  try {
+    writeFileSync(path.join(cwd, "ok.ts"), "export {}\n");
+    mkdirSync(path.join(cwd, "node_modules"));
+    writeFileSync(path.join(cwd, "node_modules", "ignored.ts"), "export {}\n");
+    symlinkSync(path.join(cwd, "ok.ts"), path.join(cwd, "linked.ts"));
+    eq(
+      lspControlCenter.findLspDiagnosticCandidates(cwd),
+      ["ok.ts"],
+      "LSP picker accepts regular supported workspace files and skips symlinks/ignored directories",
+    );
+    eq(
+      lspControlCenter.findLspDiagnosticCandidates(path.join(cwd, "missing")),
+      [],
+      "LSP picker has a clear empty candidate result",
+    );
+    eq(
+      lspControlCenter.resolveLspDiagnosticCandidate(cwd, "ok.ts"),
+      path.join(cwd, "ok.ts"),
+      "LSP picker revalidates a regular selected file before diagnosis",
+    );
+    eq(
+      lspControlCenter.resolveLspDiagnosticCandidate(cwd, "linked.ts"),
+      undefined,
+      "LSP picker rejects a selected symlink after enumeration",
+    );
+
+    let sessionCurrent = true;
+    const lifecycleHarness = createHarness({
+      select: (labels) => {
+        if (labels.includes("Datei prüfen")) return "Datei prüfen";
+        sessionCurrent = false;
+        return labels.includes("ok.ts") ? "ok.ts" : undefined;
+      },
+    });
+    lspControlCenter.registerLspControlCenter(lifecycleHarness.api, {
+      getStatus: () => "idle",
+      refreshStatus() {
+        throw new Error("stale picker must not refresh LSP status");
+      },
+      captureSession: () => "session-1",
+      isSessionCurrent: () => sessionCurrent,
+      captureDeps() {
+        throw new Error("stale picker must not start LSP diagnostics");
+      },
+    });
+    const lifecycleContext = lifecycleHarness.makeContext({ cwd });
+    lifecycleContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await lifecycleHarness.dispatchEvent("control-center:open-diagnostics", {
+      ctx: lifecycleContext,
+    });
+    eq(
+      lifecycleHarness.notifications,
+      [],
+      "stale LSP pickers stop before diagnostics or UI updates",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
 

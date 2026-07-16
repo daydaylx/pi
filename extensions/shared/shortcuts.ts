@@ -17,7 +17,7 @@ export const SHORTCUTS = {
   modeMenu: {
     keys: "shift+tab",
     label: "Shift+Tab",
-    description: "Modus wählen",
+    description: "Control Center öffnen",
   },
   permissionMenu: {
     keys: "ctrl+shift+y",
@@ -28,11 +28,6 @@ export const SHORTCUTS = {
     keys: "ctrl+shift+t",
     label: "Ctrl+Shift+T",
     description: "Thinking wählen",
-  },
-  commandMenu: {
-    keys: "ctrl+shift+x",
-    label: "Ctrl+Shift+X",
-    description: "Befehlsmenü öffnen",
   },
   help: {
     keys: "ctrl+shift+h",
