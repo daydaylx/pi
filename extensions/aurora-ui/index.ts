@@ -1,4 +1,5 @@
-import { basename } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, normalize, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -74,6 +75,21 @@ function makeState(
 
 function crop(value: string, width: number): string {
   return truncateToWidth(value, Math.max(1, width), "…");
+}
+
+function compactCwd(cwd: string): string {
+  const normalized = normalize(cwd);
+  const home = normalize(homedir());
+  const fromHome = relative(home, normalized);
+  if (fromHome === "") return "~";
+  if (
+    !isAbsolute(fromHome) &&
+    fromHome !== ".." &&
+    !fromHome.startsWith(`..${sep}`)
+  ) {
+    return `~${sep}${fromHome}`;
+  }
+  return normalized;
 }
 
 function renderBar(
@@ -471,7 +487,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           const layout = layoutFor(width);
           const statuses = footerData.getExtensionStatuses();
           const branch = footerData.getGitBranch();
-          const project = basename(sessionCtx.cwd) || sessionCtx.cwd;
+          const project = compactCwd(sessionCtx.cwd);
           const workflow = statuses.get("workflow") ?? state.workflow.label;
           const permission =
             statuses.get("permissions") ?? state.permissions.label ?? "PERM —";

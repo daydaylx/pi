@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -3057,7 +3057,9 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
   if (!auroraUi) return;
   const harness = createHarness({ sessionName: "aurora-test" });
   auroraUi.default(harness.api);
-  const context = harness.makeContext();
+  const context = harness.makeContext({
+    cwd: path.join(homedir(), "projects", "aurora-test"),
+  });
   const discovered = await harness.runHooks("resources_discover", {}, context);
   assert(
     discovered.some((entry) => entry?.themePaths?.some((value) => value.endsWith("aurora-night.json"))),
@@ -3089,6 +3091,12 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
         `Aurora footer fits ${width} columns`,
       );
     }
+    assert(
+      stripAnsi(footer.render(140)[0]).includes(
+        `~${path.sep}projects${path.sep}aurora-test`,
+      ),
+      "Aurora footer shows the current directory as a compact home-relative path",
+    );
     footer.dispose?.();
   }
 
