@@ -20,6 +20,7 @@ import type { ResolvedTarget } from "./documents.ts";
 import { normalizeCapabilities } from "./capabilities.ts";
 import { findWorkspaceRoot } from "./roots.ts";
 import { limitTextOutput } from "../shared/output-limits.ts";
+import { resolvePathScope } from "../shared/permission-policy.ts";
 
 /** Default cap for lsp_references; not user-configurable to keep scope small. */
 const DEFAULT_REFERENCES_LIMIT = 100;
@@ -47,7 +48,45 @@ const DiagnosticsParams = Type.Object({
 });
 
 function toAbsolute(path: string, cwd: string): string {
-  return isAbsolute(path) ? path : resolvePath(cwd, path);
+  // P0.2: Block absolute paths outside the project (system paths).
+  // Returns the resolved path or throws an LspError; callers use
+  // resolveToolPath() to convert the error into a structured tool result.
+  if (isAbsolute(path)) {
+    const scope = resolvePathScope(path, cwd);
+    if (!scope.insideProject) {
+      throw new LspError({
+        kind: "protocol",
+        serverId: "validation",
+        workspaceRoot: cwd,
+        cause: `path '${path}' is outside the project`,
+        remediation: "Only files within the current project are accessible.",
+      });
+    }
+    return path;
+  }
+  return resolvePath(cwd, path);
+}
+
+/**
+ * Resolves a tool `path` argument safely. On success returns `{ absPath }`;
+ * on failure returns `{ error }` with a pre-formatted message suitable for a
+ * tool result. Centralises the P0.2 outside-project guard so every tool
+ * handles it consistently instead of crashing on an uncaught throw.
+ */
+function resolveToolPath(
+  path: string,
+  cwd: string,
+): { absPath: string } | { error: string } {
+  try {
+    return { absPath: toAbsolute(path, cwd) };
+  } catch (error) {
+    return {
+      error:
+        error instanceof LspError
+          ? formatLspError(error)
+          : `LSP: ungültiger Pfad '${path}': ${String(error)}`,
+    };
+  }
 }
 
 export function relativeToWorkspace(
@@ -125,7 +164,9 @@ export async function runLspDiagnostics(
   cwd: string,
   includeRelated = false,
 ): Promise<LspToolTextResult> {
-  const absPath = toAbsolute(path, cwd);
+  const resolved = resolveToolPath(path, cwd);
+  if ("error" in resolved) return lspTextResult(resolved.error);
+  const absPath = resolved.absPath;
   const config = deps.getConfig();
   const target = resolveTarget(absPath, config);
   if (target instanceof LspError) return lspTextResult(formatLspError(target));
@@ -441,7 +482,9 @@ export function registerLspNavigationTools(
       "Findet die Definitionsstelle eines Symbols an einer Position via Language Server Protocol.",
     parameters: DefinitionParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const absPath = toAbsolute(params.path, ctx.cwd);
+      const resolved = resolveToolPath(params.path, ctx.cwd);
+      if ("error" in resolved) return lspTextResult(resolved.error);
+      const absPath = resolved.absPath;
       const config = deps.getConfig();
       const target = resolveTarget(absPath, config);
       if (target instanceof LspError) {
@@ -486,7 +529,9 @@ export function registerLspNavigationTools(
       "Findet alle Referenzen auf ein Symbol an einer Position via Language Server Protocol.",
     parameters: ReferencesParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const absPath = toAbsolute(params.path, ctx.cwd);
+      const resolved = resolveToolPath(params.path, ctx.cwd);
+      if ("error" in resolved) return lspTextResult(resolved.error);
+      const absPath = resolved.absPath;
       const config = deps.getConfig();
       const target = resolveTarget(absPath, config);
       if (target instanceof LspError) {
@@ -542,7 +587,9 @@ export function registerLspNavigationTools(
       "Liefert Typ-/Dokumentationsinformationen für ein Symbol an einer Position via Language Server Protocol.",
     parameters: HoverParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const absPath = toAbsolute(params.path, ctx.cwd);
+      const resolved = resolveToolPath(params.path, ctx.cwd);
+      if ("error" in resolved) return lspTextResult(resolved.error);
+      const absPath = resolved.absPath;
       const config = deps.getConfig();
       const target = resolveTarget(absPath, config);
       if (target instanceof LspError) {

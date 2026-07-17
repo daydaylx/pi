@@ -66,6 +66,20 @@ export function resolveProfileOverrides(
   overrides?: Partial<ServerProfile>,
 ): ServerProfile {
   if (!overrides) return base;
+
+  // P1.2: Validate args array length (schema maxItems: 12)
+  if (overrides.args !== undefined) {
+    if (!Array.isArray(overrides.args)) {
+      throw new TypeError("args must be an array");
+    }
+    if (overrides.args.length > 12) {
+      throw new TypeError("args exceeds maximum length of 12");
+    }
+    if (!overrides.args.every((arg) => typeof arg === "string")) {
+      throw new TypeError("args must be strings");
+    }
+  }
+
   return {
     id: base.id,
     label: overrides.label ?? base.label,
@@ -90,15 +104,45 @@ export function parseMode(raw: unknown): LspMode | undefined {
 // internal helpers
 // ---------------------------------------------------------------------------
 
+/** Validiert, dass ein Wert eine boolean ist. Andernfalls wirft ein Fehler. */
+function validateBoolean(
+  value: unknown,
+  key: string,
+): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${key} must be a boolean, got ${typeof value}`);
+  }
+  return value;
+}
+
+/** Validiert, dass ein Wert eine positive ganze Zahl ist. Andernfalls wirft ein Fehler. */
+function validatePositiveInt(
+  value: unknown,
+  key: string,
+  min: number,
+  max: number,
+): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+    throw new TypeError(`${key} must be an integer ${min}..${max}`);
+  }
+  return value;
+}
+
 function mergeConfig(target: LspConfig, source: Partial<LspConfig>): void {
-  if (source.enabled !== undefined) target.enabled = Boolean(source.enabled);
-  if (source.mode !== undefined) target.mode = source.mode as LspMode;
+  // P1.2: Fail-closed on invalid types instead of casting
+  if (source.enabled !== undefined) target.enabled = validateBoolean(source.enabled, "enabled");
+  if (source.mode !== undefined) {
+    if (source.mode !== "off" && source.mode !== "auto" && source.mode !== "force") {
+      throw new TypeError(`mode must be "off", "auto", or "force", got ${source.mode}`);
+    }
+    target.mode = source.mode as LspMode;
+  }
   if (source.requestTimeoutMs !== undefined)
-    target.requestTimeoutMs = Number(source.requestTimeoutMs);
+    target.requestTimeoutMs = validatePositiveInt(source.requestTimeoutMs, "requestTimeoutMs", 1_000, 120_000);
   if (source.idleShutdownMs !== undefined)
-    target.idleShutdownMs = Number(source.idleShutdownMs);
+    target.idleShutdownMs = validatePositiveInt(source.idleShutdownMs, "idleShutdownMs", 10_000, 3_600_000);
   if (source.workspaceSymbolLimit !== undefined)
-    target.workspaceSymbolLimit = Number(source.workspaceSymbolLimit);
+    target.workspaceSymbolLimit = validatePositiveInt(source.workspaceSymbolLimit, "workspaceSymbolLimit", 1, 500);
 }
 
 function mergeLanguageProfiles(

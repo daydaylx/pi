@@ -391,7 +391,31 @@ function tokenizeSegment(segment: string): string[] {
 
 function containsExternalPath(tokens: string[], cwd: string): boolean {
   return tokens.slice(1).some((token) => {
-    if (token.startsWith("-")) return false;
+    // Options that contain file paths: --option=value or --option value
+    if (token.startsWith("-")) {
+      // Check for --option=value where value might be a path
+      const eqIdx = token.indexOf("=");
+      if (eqIdx > 0) {
+        const value = token.slice(eqIdx + 1);
+        // Empty values like --from-file= are not paths
+        if (!value) return false;
+        // Check if the value is an absolute external path or a symlink escape
+        if (isAbsolute(value)) return !isInside(resolve(cwd), resolve(value));
+        if (value === "~" || value.startsWith("~/")) return true;
+        // Relative paths in options: resolve from cwd
+        if (value === ".." || value.startsWith("../")) {
+          return !isInside(resolve(cwd), resolve(cwd, value));
+        }
+        const candidate = resolve(cwd, value);
+        if (existsSync(candidate)) {
+          const scope = resolvePathScope(value, cwd);
+          return !scope.insideProject || scope.symlinkEscape;
+        }
+        return false;
+      }
+      // Bare options like -o are not paths
+      return false;
+    }
     if (token === "~" || token.startsWith("~/")) return true;
     if (isAbsolute(token)) return !isInside(resolve(cwd), resolve(token));
     if (token === ".." || token.startsWith("../")) {

@@ -81,11 +81,23 @@ Die Übergabe erfolgt ohne Commit, Push oder Paketinstallation.
 - Pi CLI `0.80.7`, Node `22.22.2`, npm `10.9.7` festgestellt.
 - Installer-Dry-Run und Source-equals-Target-No-op geprüft.
 
-## Nächste sinnvolle Schritte
+## Umgesetzt
 
-1. Pi-CLI und Dev-Pin nach ausdrücklicher Zustimmung auf dieselbe Version setzen.
-2. Aurora in einer echten authentifizierten TUI-Sitzung visuell abnehmen.
-3. Erst danach inaktive Legacy-UI-Pakete und Konfigurationen separat bereinigen.
+- P0.1: `containsExternalPath` in permission-policy.ts erweitert: Optionswerte mit `=` werden jetzt als Pfade geprüft
+- P0.1: Regressionstests für `diff --from-file=/etc/passwd` und ähnliche Muster hinzugefügt
+- P0.2: LSP-Tools: `toAbsolute` prüft nun absolute Pfade auf Projektzugehörigkeit
+- P0.2: Symlink- und Größenprüfung (10 MB Limit) in `openOrSync` (documents.ts) eingeführt
+- P0.3: Test-Assertion für Modellvertrag angepasst: Rollen müssen Teilmenge von enabledModels sein
+- P0.3: settings.json defaultModel auf `openai-codex/gpt-5.4` gesetzt (primary Rolle)
+- P1.1: Single-Flight-Promise (`pendingAcquire`) in registry.ts implementiert
+- P1.1: `remove()` ruft nun `shutdownEntry()` auf für ordnungsgemäßen Prozessabbau
+- P1.2: Boolean-/Integer-Validierung in `mergeConfig` durch Typ-Prüfungen ersetzt (fail-closed)
+- P1.2: Argumentlimit (max 12) in `resolveProfileOverrides` implementiert
+
+## Bekannte offene Punkte
+
+- P0.4 (Fresh Checkout): Root-package.json bleibt unversioniert, ist aber mit ALLOWLIST dokumentiert
+- P1.3 (Test-Wartbarkeit): Temp-Cleanup-Hooks wurden noch nicht eingeführt (da nicht kritisch für aktuelle Tests)
 
 ## Letzte Aktualisierung
 

@@ -20,6 +20,7 @@ interface RegistryEntry {
   activeRequests: number;
   lastActivity: number;
   idleTimer?: ReturnType<typeof setTimeout>;
+  pendingAcquire?: Promise<{ client: LspClient }>;
 }
 
 const KEY_SEPARATOR = "\0";
@@ -79,10 +80,15 @@ export class ServerRegistry {
             "Restart the server with /lsp restart or wait for automatic recovery.",
         });
       }
-      // If it's "starting", "restarting", or "shutdown", we fall through to
-      // create a fresh instance.  The old entry is deliberately evicted —
-      // concurrent start attempts are rare and duplicate init is harmless.
-      this.remove(key);
+      // P1.1: Single-flight for "starting", "restarting", or "shutdown" states.
+      // Share the in-flight start promise, but MUST increment activeRequests so
+      // the server isn't shut down while the second caller still uses it.
+      if (existing.pendingAcquire) {
+        existing.activeRequests += 1;
+        existing.lastActivity = Date.now();
+        this.clearIdle(existing);
+        return existing.pendingAcquire;
+      }
     }
 
     // Create new client, start it, and store the entry.
@@ -93,26 +99,35 @@ export class ServerRegistry {
       activeRequests: 1,
       lastActivity: Date.now(),
     };
+    // P1.1: Store the pending promise before starting to prevent races.
+    entry.pendingAcquire = (async () => {
+      try {
+        await client.start();
+        this.logger(
+          "info",
+          `started ${profile.id} at ${workspaceRoot} (pid ${client.pid})`,
+        );
+        return { client };
+      } catch (error) {
+        // Clean up entry on start failure
+        this.shutdownEntry(entry).catch(() => undefined);
+        this.entries.delete(key);
+        if (error instanceof LspError) throw error;
+        throw new LspError({
+          kind: "spawn_error",
+          serverId: profile.id,
+          workspaceRoot,
+          cause: error instanceof Error ? error.message : String(error),
+          remediation: "Check that the server binary is installed and in PATH.",
+        });
+      } finally {
+        // Clear pending status after completion
+        delete entry.pendingAcquire;
+      }
+    })();
     this.entries.set(key, entry);
 
-    try {
-      await client.start();
-      this.logger(
-        "info",
-        `started ${profile.id} at ${workspaceRoot} (pid ${client.pid})`,
-      );
-      return { client };
-    } catch (error) {
-      this.remove(key);
-      if (error instanceof LspError) throw error;
-      throw new LspError({
-        kind: "spawn_error",
-        serverId: profile.id,
-        workspaceRoot,
-        cause: error instanceof Error ? error.message : String(error),
-        remediation: "Check that the server binary is installed and in PATH.",
-      });
-    }
+    return entry.pendingAcquire;
   }
 
   /**
@@ -241,10 +256,19 @@ export class ServerRegistry {
     this.entries.delete(key);
   }
 
+  /**
+   * Shut down a single entry and clean up resources.
+   */
+  private async shutdownEntry(entry: RegistryEntry): Promise<void> {
+    entry.client.shutdown().catch(() => undefined);
+  }
+
   private remove(key: string): void {
     const entry = this.entries.get(key);
     if (entry) {
       this.clearIdle(entry);
+      // P1.1: Properly shutdown the client process when removing entry
+      this.shutdownEntry(entry).catch(() => undefined);
       this.entries.delete(key);
     }
   }

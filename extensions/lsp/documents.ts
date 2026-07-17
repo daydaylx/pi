@@ -10,7 +10,7 @@
  * This module has no `pi` dependency and is independently testable.
  */
 
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { LspError } from "./types.ts";
@@ -18,6 +18,7 @@ import type { LspConfig, LspLogger, ServerProfile } from "./types.ts";
 import type { LspClient } from "./client.ts";
 import { findWorkspaceRoot } from "./roots.ts";
 import { EXTENSION_LANGUAGE_MAP } from "./server-profiles.ts";
+import { resolvePathScope } from "../shared/permission-policy.ts";
 
 export interface LspDiagnosticRange {
   start: { line: number; character: number };
@@ -136,8 +137,47 @@ export class DocumentSync {
    * are picked up before the next request.
    */
   openOrSync(absPath: string, languageId: string): OpenResult {
+    // P0.2: Check for symlink escape and file size limit
+    const scope = resolvePathScope(absPath, this.workspaceRoot);
+    if (scope.symlinkEscape) {
+      throw new LspError({
+        kind: "protocol",
+        serverId: "validation",
+        workspaceRoot: this.workspaceRoot,
+        cause: `symlink escape detected in path '${absPath}'`,
+        remediation: "Only regular files inside the project are accessible.",
+      });
+    }
+
+    // P0.2: Limit file size to prevent memory exhaustion (10 MB limit)
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    let content: string;
+    try {
+      const stats = lstatSync(absPath);
+      if (stats.size > MAX_FILE_SIZE) {
+        throw new LspError({
+          kind: "protocol",
+          serverId: "validation",
+          workspaceRoot: this.workspaceRoot,
+          cause: `file '${absPath}' exceeds 10 MB limit (${stats.size} bytes)`,
+          remediation: "Open a smaller file or increase the limit in config.",
+        });
+      }
+      content = readFileSync(absPath, "utf8");
+    } catch (error) {
+      const message = error instanceof LspError ? error.message : String(error);
+      throw error instanceof LspError
+        ? error
+        : new LspError({
+            kind: "protocol",
+            serverId: "validation",
+            workspaceRoot: this.workspaceRoot,
+            cause: `cannot read file '${absPath}': ${message}`,
+            remediation: "Check file permissions and that it exists.",
+          });
+    }
+
     const uri = pathToFileURL(absPath).href;
-    const content = readFileSync(absPath, "utf8");
     const existing = this.documents.get(uri);
 
     if (!existing) {
