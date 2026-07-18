@@ -100,13 +100,20 @@ export function buildPlanAssistantMenu(
   state: PlanAssistantMenuState,
 ): MenuEntry<PlanAssistantAction>[] {
   if (!state.planExists) {
-    return [clarifyEntry(), ...newPlanEntries(), cancelEntry()];
+    return [{
+      id: "plan-new",
+      label: "Neuer Plan",
+      description: "Planart oder Klärung auswählen",
+      details: "Beim Öffnen wird keine Aktion ausgeführt; erst eine explizite Auswahl startet den nächsten Schritt.",
+      icon: "✦",
+      children: [...newPlanEntries(), clarifyEntry()],
+    }];
   }
 
-  const entries: MenuEntry<PlanAssistantAction>[] = [clarifyEntry()];
+  const current: MenuEntry<PlanAssistantAction>[] = [];
 
   if (!state.allTodosComplete) {
-    entries.push({
+    current.push({
       id: "plan-continue",
       label: "Aktuellen Plan weiterführen",
       description:
@@ -114,14 +121,14 @@ export function buildPlanAssistantMenu(
       section: "Aktueller Plan",
       value: { kind: "continue-plan" },
     });
-    entries.push({
+    current.push({
       id: "plan-review",
       label: "Aktuellen Plan reviewen",
       description: "Optionalen Deep-Review der Plan-Datei starten",
       section: "Aktueller Plan",
       value: { kind: "review" },
     });
-    entries.push({
+    current.push({
       id: "plan-execute",
       label: "Aktuellen Plan ausführen",
       description: "Plan-Datei über /work Schritt für Schritt umsetzen",
@@ -130,7 +137,7 @@ export function buildPlanAssistantMenu(
     });
   }
 
-  entries.push({
+  current.push({
     id: "plan-show-todos",
     label: "Plan-Todos anzeigen",
     description: "Fortschritt aus der aktuellen Plan-Datei anzeigen",
@@ -138,18 +145,36 @@ export function buildPlanAssistantMenu(
     value: { kind: "show-todos" },
   });
 
-  entries.push({
-    id: "plan-archive",
-    label: "Plan archivieren",
-    description:
-      "Aktuelle Plan-Datei sichern und aus current-plan.md entfernen (/finish)",
-    section: "Aktueller Plan",
-    value: { kind: "archive" },
-  });
-
-  entries.push(...newPlanEntries());
-  entries.push(cancelEntry());
-  return entries;
+  return [
+    {
+      id: "plan-current",
+      label: "Aktueller Plan",
+      description: state.allTodosComplete ? "Todos abgeschlossen" : "Fortsetzen, prüfen, ausführen oder Todos anzeigen",
+      badge: state.allTodosComplete ? "BEREIT" : undefined,
+      children: current,
+    },
+    {
+      id: "plan-management",
+      label: "Verwaltung",
+      description: "Archivieren oder einen neuen Plan beginnen",
+      children: [
+        {
+          id: "plan-archive",
+          label: "Plan archivieren",
+          description: "Aktuelle Plan-Datei sichern und aus current-plan.md entfernen (/finish)",
+          dangerous: true,
+          tone: "danger",
+          value: { kind: "archive" },
+        },
+        {
+          id: "plan-new",
+          label: "Neuer Plan",
+          description: "Bestehenden Plan schützen und eine Planart wählen",
+          children: [...newPlanEntries(), clarifyEntry()],
+        },
+      ],
+    },
+  ];
 }
 
 /**
@@ -169,6 +194,9 @@ export function buildOverwriteGuardMenu(): MenuEntry<OverwriteDecision>[] {
       id: "overwrite-now",
       label: "Bestehenden Plan überschreiben",
       description: "Aktuelle Plan-Datei ohne vorherige Sicherung ersetzen",
+      dangerous: true,
+      tone: "danger",
+      badge: "RISIKO",
       value: "overwrite",
     },
     {
@@ -238,6 +266,9 @@ export function buildBriefOverwriteGuardMenu(): MenuEntry<OverwriteDecision>[] {
       label: "Bestehendes Decision Brief überschreiben",
       description:
         "Aktuelles Decision Brief ohne vorherige Sicherung ersetzen",
+      dangerous: true,
+      tone: "danger",
+      badge: "RISIKO",
       value: "overwrite",
     },
     {

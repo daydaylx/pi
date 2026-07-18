@@ -15,6 +15,7 @@ import {
   Key,
   matchesKey,
   Text,
+  truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
@@ -200,6 +201,10 @@ export default function askUser(pi: ExtensionAPI) {
         }
 
         function handleInput(data: string) {
+          if (matchesKey(data, Key.ctrl("c"))) {
+            done(null);
+            return;
+          }
           if (editMode) {
             if (matchesKey(data, Key.escape)) {
               editMode = false;
@@ -232,6 +237,26 @@ export default function askUser(pi: ExtensionAPI) {
           }
           if (matchesKey(data, Key.down)) {
             optionIndex = Math.min(allOptions.length - 1, optionIndex + 1);
+            refresh();
+            return;
+          }
+          if (matchesKey(data, Key.home)) {
+            optionIndex = 0;
+            refresh();
+            return;
+          }
+          if (matchesKey(data, Key.end)) {
+            optionIndex = allOptions.length - 1;
+            refresh();
+            return;
+          }
+          if (matchesKey(data, Key.pageUp)) {
+            optionIndex = Math.max(0, optionIndex - 3);
+            refresh();
+            return;
+          }
+          if (matchesKey(data, Key.pageDown)) {
+            optionIndex = Math.min(allOptions.length - 1, optionIndex + 3);
             refresh();
             return;
           }
@@ -352,7 +377,7 @@ export default function askUser(pi: ExtensionAPI) {
           }
 
           if (editMode) {
-            addWrappedWithPrefix(" ", theme.fg("muted", "Your answer:"));
+            addWrappedWithPrefix(" ", theme.fg("muted", "Deine Antwort:"));
             for (const line of editor.render(Math.max(1, renderWidth - 2))) {
               lines.push(` ${line}`);
             }
@@ -373,21 +398,34 @@ export default function askUser(pi: ExtensionAPI) {
           if (editMode) {
             addWrappedWithPrefix(
               " ",
-              theme.fg("dim", "Enter to submit • Esc to go back"),
+              theme.fg("dim", "Enter senden · Esc zurück · Ctrl+C abbrechen"),
             );
           } else {
             addWrappedWithPrefix(
               " ",
               theme.fg(
                 "dim",
-                `↑↓ navigate • 1–${params.options.length} direct • Enter = Empfehlung (${recommendedIndex}) • Esc cancel`,
+                `↑↓ Auswahl · Pos1/Ende · 1–${params.options.length} direkt · Enter auswählen · Esc schließen`,
               ),
             );
           }
           lines.push(theme.fg("accent", "─".repeat(renderWidth)));
 
-          cachedLines = lines;
-          return lines;
+          if (renderWidth < 4) {
+            cachedLines = lines;
+            return lines;
+          }
+          const innerWidth = renderWidth - 2;
+          const border = theme.fg("border", "│");
+          const framed = [
+            theme.fg("border", `╭${"─".repeat(innerWidth)}╮`),
+            ...lines.slice(1, -1).map((entry) =>
+              `${border}${truncateToWidth(entry, innerWidth, "…", true)}${border}`,
+            ),
+            theme.fg("border", `╰${"─".repeat(innerWidth)}╯`),
+          ];
+          cachedLines = framed;
+          return framed;
         }
 
         return {

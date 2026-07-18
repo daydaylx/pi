@@ -14,10 +14,10 @@ export type ThinkingMenuSelection = "auto" | `manual:${SelectableThinkingLevel}`
 
 const THINKING_LEVEL_LABEL: Record<SelectableThinkingLevel, string> = {
   minimal: "Minimal",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "XHigh",
+  low: "Niedrig",
+  medium: "Mittel",
+  high: "Hoch",
+  xhigh: "Sehr hoch",
 };
 
 const THINKING_LEVEL_DESCRIPTION: Record<SelectableThinkingLevel, string> = {
@@ -43,7 +43,7 @@ export function buildThinkingMenu(
     {
       id: "thinking-auto",
       label: "Auto",
-      description: "Folgt dem Thinking-Default des aktiven Workflow-Modus",
+      description: "Folgt dem Denkstandard des aktiven Workflow-Modus",
       value: "auto",
       current: mode === "auto",
     },

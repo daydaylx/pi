@@ -129,6 +129,7 @@ const policy = await load("extensions/shared/permission-policy.ts");
 const planUtils = await load("extensions/plan-mode/utils.ts");
 const planState = await load("extensions/plan-mode/state.ts");
 const workflowStatus = await load("extensions/shared/workflow-status.ts");
+const menuUi = await load("extensions/shared/menu-ui.ts");
 const controlCenterMenu = await load("extensions/shared/control-center-menu.ts");
 const thinkingMenu = await load("extensions/shared/thinking-menu.ts");
 const lspControlCenter = await load("extensions/lsp/control-center.ts");
@@ -1847,18 +1848,18 @@ await section("Control Center menus and routing", async () => {
   const entries = controlCenterMenu.buildControlCenterMenu({
     mode: "work",
     deciding: false,
-    permissionLabel: "Read + Write",
+    permissionLabel: "Lesen + Schreiben",
     thinkingLabel: "Auto (high)",
   });
   eq(
-    entries.slice(0, 4).map((entry) => entry.label),
-    ["Schnellplan", "Architekturplan", "Work-Modus", "Optionen klären"],
-    "Control Center keeps all four workflow actions first",
+    entries.map((entry) => entry.label),
+    ["Workflow", "Modell", "Sicherheit", "Werkzeuge", "Darstellung"],
+    "Control Center exposes the five navigable root areas",
   );
   eq(
-    entries.slice(4).map((entry) => entry.value),
-    ["model-roles", "thinking", "permissions", "diagnostics"],
-    "Control Center exposes the four separated domain menus",
+    entries[0].children?.map((entry) => entry.value),
+    ["simple_plan", "detailed_plan", "work", "decide"],
+    "Workflow actions are available below the Workflow area",
   );
   eq(
     controlCenterMenu.buildModelRoleMenu({
@@ -1877,13 +1878,13 @@ await section("Control Center menus and routing", async () => {
 
   const cwd = mkdtempSync(path.join(tmpdir(), "pi-control-center-"));
   try {
-    let choice = "Manuell: XHigh";
+    let choice = "Manuell: Sehr hoch";
     const harness = createHarness({
       select: (labels) => {
         if (choice === "__thinking__")
-          return labels.find((label) => label.endsWith("Thinking: Auto (high)"));
+          return labels.find((label) => label.endsWith("Denken: Auto (high)"));
         if (choice === "__permissions__")
-          return labels.find((label) => label.endsWith("Berechtigungen: Read + Write"));
+          return labels.find((label) => label.endsWith("Berechtigungen: Lesen + Schreiben"));
         if (choice === "__diagnostics__")
           return labels.find((label) => label.endsWith("LSP-Diagnose"));
         if (choice === "__models__") {
@@ -1916,7 +1917,7 @@ await section("Control Center menus and routing", async () => {
       );
     }
 
-    choice = "Manuell: XHigh";
+    choice = "Manuell: Sehr hoch";
     await harness.shortcuts.get("ctrl+shift+t")(context);
     eq(harness.api.getThinkingLevel(), "xhigh", "manual Thinking selection applies its level");
     choice = "Schnellplan";
@@ -1939,7 +1940,7 @@ await section("Control Center menus and routing", async () => {
           {},
           staleThinkingContext,
         );
-        return labels.find((label) => label === "Manuell: XHigh");
+        return labels.find((label) => label === "Manuell: Sehr hoch");
       },
     });
     modePermissions.default(staleThinkingHarness.api);
@@ -3628,6 +3629,65 @@ await section("permission dialog narrow rendering", async () => {
   component.handleInput("d");
   eq(await pending, false, "permission dialog denies via keyboard");
   assertNoGlobalChrome(harness, "permission dialog installs no global chrome");
+});
+
+await section("shared menu shell navigation and rendering", async () => {
+  if (!menuUi) return;
+  eq(
+    menuUi.initialMenuIndex([
+      { id: "disabled", label: "Blockiert", disabled: true },
+      { id: "active", label: "Aktiv", current: true },
+    ]),
+    1,
+    "initial menu selection skips disabled entries",
+  );
+  eq(
+    menuUi.moveMenuIndex(1, 1, [
+      { id: "disabled", label: "Blockiert", disabled: true },
+      { id: "active", label: "Aktiv" },
+      { id: "last", label: "Letzter" },
+    ]),
+    2,
+    "menu movement skips disabled entries",
+  );
+  const viewport = menuUi.calculateMenuViewport([1, 3, 1, 1], 1, 0, 3);
+  eq(viewport.start <= 1 && viewport.end > 1, true, "viewport keeps selected multi-line entry visible");
+  eq(
+    menuUi.menuOverlayWidth(80, "ANSI \u001b[31mTitel\u001b[0m", []),
+    menuUi.menuOverlayWidth(80, "界界界", []),
+    "overlay width does not use raw ANSI or grapheme string length",
+  );
+
+  const harness = createHarness({ columns: 120, rows: 40 });
+  const context = harness.makeContext();
+  const pending = menuUi.runMenu(context, "Hauptmenü", [
+    {
+      id: "area",
+      label: "Bereich",
+      description: "Untermenü mit einer ausführlichen Beschreibung",
+      children: [
+        { id: "go", label: "Ausführen", description: "Sichere explizite Aktion", value: "go" },
+        { id: "disabled", label: "Blockiert", description: "Darf nicht ausgeführt werden", disabled: true, disabledReason: "Nicht verfügbar" },
+      ],
+    },
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const component = harness.customComponents.at(-1);
+  assert(Boolean(component), "shared menu opens a temporary overlay");
+  if (!component) return;
+  for (const width of [30, 50, 80, 120]) {
+    const lines = component.render(width);
+    assert(lines.every((line) => stripAnsi(line).length <= width), `menu frame remains within ${width} columns`);
+    assert(stripAnsi(lines[0]).startsWith("╭"), `menu has a complete top frame at ${width} columns`);
+  }
+  component.handleInput("\r");
+  assert(
+    component.render(80).some((line) => stripAnsi(line).includes("Hauptmenü › Bereich")),
+    "opening a submenu renders a breadcrumb",
+  );
+  component.handleInput("\r");
+  eq(await pending, "go", "Enter selects only the explicit focused leaf action");
+  assertNoGlobalChrome(harness, "menu shell installs no permanent chrome");
 });
 
 await section("Aurora UI lifecycle and responsive surfaces", async () => {

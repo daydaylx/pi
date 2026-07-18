@@ -25,6 +25,8 @@ import {
   type ThinkingViewConfig,
   type ThinkingViewMode,
 } from "./thinking-view-config.ts";
+import { CONTROL_CENTER_EVENTS, type OpenControlCenterMenuEvent } from "./shared/control-center-events.ts";
+import { runMenu, type MenuEntry } from "./shared/menu-ui.ts";
 
 const STATUS_KEY = "thinking-view";
 const RENDER_THROTTLE_FLOOR_MS = 50;
@@ -116,21 +118,21 @@ export default function thinkingViewExtension(pi: ExtensionAPI): void {
   function phaseLabel(phase: Phase): { icon: string; text: string } {
     switch (phase) {
       case "waiting":
-        return { icon: "◌", text: "WAITING" };
+        return { icon: "◌", text: "WARTEN" };
       case "thinking":
-        return { icon: "◉", text: "THINKING" };
+        return { icon: "◉", text: "DENKEN" };
       case "answering":
-        return { icon: "●", text: "ANSWERING" };
+        return { icon: "●", text: "ANTWORTEN" };
       case "preparing_tool":
-        return { icon: "●", text: "PREPARING TOOL" };
+        return { icon: "●", text: "Werkzeug vorbereiten" };
       case "tool_running":
-        return { icon: "●", text: "TOOL RUNNING" };
+        return { icon: "●", text: "Werkzeug läuft" };
       case "finished":
-        return { icon: "✓", text: "FINISHED" };
+        return { icon: "✓", text: "FERTIG" };
       case "no_visible_thinking":
-        return { icon: "○", text: "NO VISIBLE THINKING" };
+        return { icon: "○", text: "Kein sichtbares Denken" };
       case "error":
-        return { icon: "!", text: "ERROR" };
+        return { icon: "!", text: "FEHLER" };
     }
   }
 
@@ -202,7 +204,7 @@ export default function thinkingViewExtension(pi: ExtensionAPI): void {
       return;
     }
     const now = Date.now();
-    const bits: string[] = ["Thinking"];
+    const bits: string[] = ["Denken"];
     if (config.showModel && currentModelName) bits.push(currentModelName);
     if (config.showThinkingLevel && currentThinkingLevel)
       bits.push(currentThinkingLevel);
@@ -388,6 +390,18 @@ export default function thinkingViewExtension(pi: ExtensionAPI): void {
           );
       }
     },
+  });
+
+  pi.events.on(CONTROL_CENTER_EVENTS.openThinkingView, async (event) => {
+    const ctx = (event as OpenControlCenterMenuEvent).ctx;
+    const selected = await runMenu(ctx, "Thinking-Anzeige", [
+      { id: "thinking-view-compact", label: "Kompakt", description: "Kurze Thinking-Statuszeile", value: "compact" as const, current: enabled && mode === "compact" },
+      { id: "thinking-view-focus", label: "Fokus", description: "Statuszeile mit zusätzlichen Details", value: "focus" as const, current: enabled && mode === "focus" },
+      { id: "thinking-view-off", label: "Aus", description: "Thinking-Statuszeile ausblenden", value: "off" as const, current: !enabled },
+    ] satisfies MenuEntry<ThinkingViewMode>[], { fallbackPrompt: "Thinking-Anzeige wählen" });
+    if (!selected) return;
+    applyMode(selected, ctx as ExtensionCommandContext);
+    ctx.ui.notify(`Thinking-Anzeige: ${selected}.`, "info");
   });
 }
 

@@ -19,10 +19,10 @@ export type PermissionLevel =
   "read-only" | "read-bash" | "read-write" | "full-access" | "yolo";
 
 export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
-  "read-only": "Read only",
-  "read-bash": "Read + Bash Info Commands",
-  "read-write": "Read + Write",
-  "full-access": "Full Access",
+  "read-only": "Nur Lesen",
+  "read-bash": "Lesen + Bash-Info",
+  "read-write": "Lesen + Schreiben",
+  "full-access": "Vollzugriff",
   yolo: "YOLO",
 };
 

@@ -1418,6 +1418,10 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
       pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx });
       return;
     }
+    if (selected === "thinking-view") {
+      pi.events.emit(CONTROL_CENTER_EVENTS.openThinkingView, { ctx });
+      return;
+    }
     pi.events.emit(CONTROL_CENTER_EVENTS.openDiagnostics, { ctx });
   }
 
