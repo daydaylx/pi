@@ -445,6 +445,18 @@ export function loadWorkflowState(cwd: string): LoadedWorkflowState {
   }
 }
 
+/** Read the exact persisted revision without applying lifecycle recovery. */
+export function readWorkflowStateRevision(cwd: string): number {
+  const statePath = getWorkflowStatePath(cwd);
+  assertSafeStatePath(cwd, statePath);
+  if (!existsSync(statePath)) return 0;
+  const raw = JSON.parse(readFileSync(statePath, "utf8")) as unknown;
+  const current = parseWorkflowState(raw);
+  if (current) return current.revision;
+  if (parseV1(raw)) return 0;
+  throw new Error("Vorhandener Sidecar ist ungültig; Revision nicht lesbar.");
+}
+
 export function writeWorkflowStateAtomic(cwd: string, state: WorkflowSidecarState): void {
   const root = resolve(cwd);
   const statePath = getWorkflowStatePath(root);

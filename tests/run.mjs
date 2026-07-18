@@ -198,6 +198,7 @@ function createHarness(options = {}) {
   let editorFactory;
   let thinkingLevel = options.thinkingLevel ?? "high";
   let entries = options.entries ?? [];
+  let idle = options.idle ?? true;
   const setModelCalls = [];
 
   const theme = {
@@ -380,6 +381,9 @@ function createHarness(options = {}) {
     setModelCalls,
     widgets,
     lifecycleCalls,
+    setIdle(value) {
+      idle = value;
+    },
     get footerFactory() {
       return footerFactory;
     },
@@ -414,7 +418,7 @@ function createHarness(options = {}) {
           },
         },
         isIdle() {
-          return options.idle ?? true;
+          return idle;
         },
         isProjectTrusted() {
           return trusted;
@@ -1925,6 +1929,43 @@ await section("Control Center menus and routing", async () => {
     await harness.shortcuts.get("shift+tab")(context);
     eq(harness.api.getThinkingLevel(), "xhigh", "Auto follows later workflow transitions");
 
+    let staleThinkingContext;
+    let staleThinkingHarness;
+    staleThinkingHarness = createHarness({
+      thinkingLevel: "low",
+      select: async (labels) => {
+        await staleThinkingHarness.runHooks(
+          "session_start",
+          {},
+          staleThinkingContext,
+        );
+        return labels.find((label) => label === "Manuell: XHigh");
+      },
+    });
+    modePermissions.default(staleThinkingHarness.api);
+    staleThinkingContext = staleThinkingHarness.makeContext({ cwd });
+    staleThinkingContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await staleThinkingHarness.runHooks(
+      "session_start",
+      {},
+      staleThinkingContext,
+    );
+    await staleThinkingHarness.shortcuts.get("ctrl+shift+t")(
+      staleThinkingContext,
+    );
+    eq(
+      staleThinkingHarness.api.getThinkingLevel(),
+      "low",
+      "a Thinking selection from the previous session cannot change the new session",
+    );
+    eq(
+      staleThinkingHarness.appended,
+      [],
+      "a stale Thinking selection is not persisted in the new session",
+    );
+
     choice = "__models__";
     await harness.shortcuts.get("shift+tab")(context);
     eq(
@@ -2113,6 +2154,354 @@ await section("plan workflow lifecycle", async () => {
   }
 });
 
+await section("plan workflow settles before handoff UI", async () => {
+  if (!planMode || !planUtils) return;
+  const planCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-settled-menu-"));
+  const briefCwd = mkdtempSync(path.join(tmpdir(), "pi-brief-settled-menu-"));
+  try {
+    const planMenus = [];
+    const planHarness = createHarness({
+      select: (labels) => {
+        planMenus.push(labels);
+        return labels.includes("Schnellplan")
+          ? "Schnellplan"
+          : labels.includes("Im Planmodus bleiben")
+            ? "Im Planmodus bleiben"
+            : undefined;
+      },
+    });
+    planMode.default(planHarness.api);
+    const planContext = planHarness.makeContext({ cwd: planCwd });
+    planContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await planHarness.runHooks("session_start", {}, planContext);
+    await planHarness.shortcuts.get("shift+tab")(planContext);
+    await planHarness.runHooks("before_agent_start", {}, planContext);
+    planUtils.writePlanFileAtomic(planCwd, progressPlan);
+    planHarness.setIdle(false);
+    await planHarness.runHooks(
+      "agent_end",
+      {
+        messages: [{ role: "assistant", content: [{ type: "text", text: "Plan gespeichert." }], stopReason: "stop" }],
+      },
+      planContext,
+    );
+    assert(
+      planMenus.every((labels) => !labels.includes("Im Planmodus bleiben")),
+      "post-plan actions are not opened from agent_end while Pi is active",
+    );
+    planHarness.setIdle(true);
+    await planHarness.runHooks("agent_settled", {}, planContext);
+    assert(
+      planMenus.some((labels) => labels.includes("Im Planmodus bleiben")),
+      "post-plan actions open exactly after agent_settled",
+    );
+
+    const briefMenus = [];
+    const briefHarness = createHarness({
+      select: (labels) => {
+        briefMenus.push(labels);
+        return labels.includes("Nur Decision Brief speichern")
+          ? "Nur Decision Brief speichern"
+          : undefined;
+      },
+    });
+    planMode.default(briefHarness.api);
+    const briefContext = briefHarness.makeContext({ cwd: briefCwd });
+    briefContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await briefHarness.runHooks("session_start", {}, briefContext);
+    await briefHarness.commands.get("decide")("", briefContext);
+    const briefText = [
+      "[DECISION-BRIEF]",
+      "# Decision Brief: Test",
+      "",
+      "## Ziel",
+      "Ziel",
+      "",
+      "## Entscheidungen",
+      "- Entscheidung: sicher",
+      "",
+      "## Abschlusskriterien",
+      "- [ ] geprüft",
+      "[/DECISION-BRIEF]",
+    ].join("\n");
+    briefHarness.setIdle(false);
+    await briefHarness.runHooks(
+      "agent_end",
+      {
+        messages: [{ role: "assistant", content: [{ type: "text", text: "retryable failure" }], stopReason: "error" }],
+      },
+      briefContext,
+    );
+    await briefHarness.runHooks(
+      "agent_end",
+      {
+        messages: [{ role: "assistant", content: [{ type: "text", text: briefText }], stopReason: "stop" }],
+      },
+      briefContext,
+    );
+    assert(
+      briefMenus.every((labels) => !labels.includes("Nur Decision Brief speichern")),
+      "decision handoff is not opened from agent_end",
+    );
+    briefHarness.setIdle(true);
+    await briefHarness.runHooks("agent_settled", {}, briefContext);
+    assert(Boolean(planUtils.readDecisionBrief(briefCwd)), "settlement stores a valid decision brief");
+    assert(
+      briefMenus.some((labels) => labels.includes("Nur Decision Brief speichern")),
+      "decision handoff opens after agent_settled",
+    );
+  } finally {
+    rmSync(planCwd, { recursive: true, force: true });
+    rmSync(briefCwd, { recursive: true, force: true });
+  }
+});
+
+await section("work fallback progress stays execution-bound", async () => {
+  if (!planMode || !planUtils) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-fallback-progress-"));
+  try {
+    planUtils.writePlanFileAtomic(cwd, progressPlan);
+    const harness = createHarness();
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("work")("", context);
+    const executionId = harness.sent.at(-1)?.message?.content.match(/Execution-ID: ([^\n]+)/)?.[1];
+    assert(Boolean(executionId), "fallback test starts a bound execution");
+    if (!executionId) return;
+
+    await harness.runHooks(
+      "turn_end",
+      {
+        message: { role: "assistant", content: [{ type: "text", text: "[DONE:1]" }], stopReason: "aborted" },
+      },
+      context,
+    );
+    assert(
+      planUtils.extractTodoItems(planUtils.readPlanFile(cwd))[0].completed === false,
+      "aborted legacy markers never complete a todo",
+    );
+    await harness.runHooks(
+      "turn_end",
+      {
+        message: { role: "assistant", content: [{ type: "text", text: "[DONE:1]" }], stopReason: "stop" },
+      },
+      context,
+    );
+    const next = await harness.tools.get("plan_progress").execute(
+      "fallback-next",
+      { executionId, step: 2, status: "in_progress", evidence: "Fallback-Hash blieb synchron." },
+      undefined,
+      undefined,
+      context,
+    );
+    eq(next.details?.ok, true, "partial legacy completion keeps the execution hash current");
+    harness.setIdle(false);
+    await harness.runHooks(
+      "agent_end",
+      {
+        messages: [{ role: "assistant", content: [{ type: "text", text: "API failure" }], stopReason: "error" }],
+      },
+      context,
+    );
+    harness.setIdle(true);
+    await harness.runHooks("agent_settled", {}, context);
+    eq(latestStatus(harness, "workflow"), "PAUSED 1/2", "failed execution settles as paused");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await section("manual done and duplicate work are serialized", async () => {
+  if (!planMode || !planUtils) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-done-serialized-"));
+  const parallelCwd = mkdtempSync(path.join(tmpdir(), "pi-work-parallel-"));
+  try {
+    planUtils.writePlanFileAtomic(cwd, progressPlan);
+    const harness = createHarness();
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("work")("", context);
+    const executionId = harness.sent.at(-1)?.message?.content.match(/Execution-ID: ([^\n]+)/)?.[1];
+    harness.setIdle(false);
+    await harness.commands.get("done")("1", context);
+    assert(
+      planUtils.extractTodoItems(planUtils.readPlanFile(cwd))[0].completed === false,
+      "/done cannot mutate a plan during an active agent turn",
+    );
+    const sentBeforeBusyDuplicate = harness.sent.length;
+    await harness.commands.get("work")("", context);
+    eq(harness.sent.length, sentBeforeBusyDuplicate, "busy duplicate /work is ignored");
+
+    harness.setIdle(true);
+    await harness.commands.get("done")("1", context);
+    const continued = await harness.tools.get("plan_progress").execute(
+      "done-next",
+      { executionId, step: 2, status: "in_progress", evidence: "Manueller Fallback blieb synchron." },
+      undefined,
+      undefined,
+      context,
+    );
+    eq(continued.details?.ok, true, "idle /done updates execution hash and progress records together");
+    const sentBeforeContinue = harness.sent.length;
+    await harness.commands.get("work")("", context);
+    eq(harness.sent.length, sentBeforeContinue + 1, "idle /work continues the existing execution once");
+    assert(
+      harness.sent.at(-1)?.message?.content.includes(`Execution-ID: ${executionId}`),
+      "idle continuation preserves the execution ID",
+    );
+    await harness.commands.get("done")("2", context);
+    eq(planUtils.readPlanFile(cwd), undefined, "idle /done archives after completing the final todo");
+    assert(
+      harness.sent.at(-1)?.message?.customType === "plan-complete" &&
+        harness.sent.at(-1)?.options?.triggerTurn === false,
+      "idle manual completion records a non-triggering completion message",
+    );
+
+    planUtils.writePlanFileAtomic(parallelCwd, progressPlan);
+    const parallel = createHarness();
+    planMode.default(parallel.api);
+    const parallelContext = parallel.makeContext({ cwd: parallelCwd });
+    await parallel.runHooks("session_start", {}, parallelContext);
+    await Promise.all([
+      parallel.commands.get("work")("", parallelContext),
+      parallel.commands.get("go")("", parallelContext),
+    ]);
+    eq(
+      parallel.sent.filter((entry) => entry.message?.customType === "plan-mode-execute").length,
+      1,
+      "parallel /work and /go starts emit one execution handoff",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(parallelCwd, { recursive: true, force: true });
+  }
+});
+
+await section("external plan changes pause explicit progress", async () => {
+  if (!planMode || !planUtils) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-external-progress-"));
+  const continueCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-external-continue-"));
+  try {
+    planUtils.writePlanFileAtomic(cwd, progressPlan);
+    const harness = createHarness();
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("work")("", context);
+    const executionId = harness.sent.at(-1)?.message?.content.match(/Execution-ID: ([^\n]+)/)?.[1];
+    planUtils.writePlanFileAtomic(cwd, `${progressPlan}\n\nExtern geändert.`);
+    const result = await harness.tools.get("plan_progress").execute(
+      "external-progress",
+      { executionId, step: 1, status: "in_progress", evidence: "Darf nicht übernommen werden." },
+      undefined,
+      undefined,
+      context,
+    );
+    eq(result.details?.ok, false, "plan_progress rejects an external plan hash");
+    eq(latestStatus(harness, "workflow"), "PAUSED 0/2", "external plan hash pauses execution");
+
+    planUtils.writePlanFileAtomic(continueCwd, progressPlan);
+    const continuing = createHarness();
+    planMode.default(continuing.api);
+    const continuingContext = continuing.makeContext({ cwd: continueCwd });
+    await continuing.runHooks("session_start", {}, continuingContext);
+    await continuing.commands.get("work")("", continuingContext);
+    planUtils.writePlanFileAtomic(continueCwd, `${progressPlan}\n\nExtern geändert.`);
+    const sentBeforeContinue = continuing.sent.length;
+    await continuing.commands.get("work")("", continuingContext);
+    eq(
+      continuing.sent.length,
+      sentBeforeContinue,
+      "idle /work does not continue an execution after an external plan change",
+    );
+    eq(
+      latestStatus(continuing, "workflow"),
+      "PAUSED 0/2",
+      "changed plan content pauses the old execution before a continuation turn",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(continueCwd, { recursive: true, force: true });
+  }
+});
+
+await section("failed ready settlement keeps the completed plan", async () => {
+  if (!planMode || !planUtils) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-ready-failed-"));
+  const truncatedCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-ready-truncated-"));
+  try {
+    const oneTodoPlan = [
+      "# Plan",
+      "",
+      "## Auftrag",
+      "Ziel",
+      "",
+      "## Todos",
+      "- [ ] Einziger Schritt",
+    ].join("\n");
+    planUtils.writePlanFileAtomic(cwd, oneTodoPlan);
+    const harness = createHarness();
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("work")("", context);
+    const executionId = harness.sent.at(-1)?.message?.content.match(/Execution-ID: ([^\n]+)/)?.[1];
+    await harness.tools.get("plan_progress").execute(
+      "ready-failed",
+      { executionId, step: 1, status: "completed", evidence: "Schritt geprüft." },
+      undefined,
+      undefined,
+      context,
+    );
+    harness.setIdle(false);
+    await harness.runHooks(
+      "agent_end",
+      {
+        messages: [{ role: "assistant", content: [{ type: "text", text: "aborted after progress" }], stopReason: "aborted" }],
+      },
+      context,
+    );
+    harness.setIdle(true);
+    await harness.runHooks("agent_settled", {}, context);
+    assert(Boolean(planUtils.readPlanFile(cwd)), "failed ready settlement does not auto-archive");
+    eq(latestStatus(harness, "workflow"), "READY", "completed plan remains ready for /finish");
+
+    planUtils.writePlanFileAtomic(truncatedCwd, oneTodoPlan);
+    const truncated = createHarness();
+    planMode.default(truncated.api);
+    const truncatedContext = truncated.makeContext({ cwd: truncatedCwd });
+    await truncated.runHooks("session_start", {}, truncatedContext);
+    await truncated.commands.get("work")("", truncatedContext);
+    const truncatedExecutionId = truncated.sent.at(-1)?.message?.content.match(/Execution-ID: ([^\n]+)/)?.[1];
+    await truncated.tools.get("plan_progress").execute(
+      "ready-truncated",
+      { executionId: truncatedExecutionId, step: 1, status: "completed", evidence: "Schritt geprüft." },
+      undefined,
+      undefined,
+      truncatedContext,
+    );
+    await truncated.runHooks(
+      "agent_end",
+      {
+        messages: [{ role: "assistant", content: [{ type: "text", text: "abgeschnitten" }], stopReason: "length" }],
+      },
+      truncatedContext,
+    );
+    await truncated.runHooks("agent_settled", {}, truncatedContext);
+    assert(Boolean(planUtils.readPlanFile(truncatedCwd)), "length-truncated settlement does not auto-archive");
+    eq(latestStatus(truncated, "workflow"), "READY", "truncated completion remains ready for /finish");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(truncatedCwd, { recursive: true, force: true });
+  }
+});
+
 await section("plan progress tool and sidecar", async () => {
   if (!planMode || !planUtils || !planState) return;
   const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-progress-"));
@@ -2265,10 +2654,18 @@ await section("plan progress tool and sidecar", async () => {
     eq(completed.details?.archived, false, "last completion first enters ready");
     eq(completed.details?.ready, true, "last completion reports ready");
     eq(latestStatus(harness, "workflow"), "READY", "ready is visible before archival");
-    assert(Boolean(planUtils.readPlanFile(cwd)), "ready keeps the active plan until agent_end");
+    assert(Boolean(planUtils.readPlanFile(cwd)), "ready keeps the active plan until settlement");
 
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    eq(planUtils.readPlanFile(cwd), undefined, "successful agent_end archives the ready plan");
+    await harness.runHooks(
+      "agent_end",
+      {
+        messages: [{ role: "assistant", content: [{ type: "text", text: "Plan abgeschlossen." }], stopReason: "stop" }],
+      },
+      context,
+    );
+    assert(Boolean(planUtils.readPlanFile(cwd)), "agent_end alone does not archive while Pi is still active");
+    await harness.runHooks("agent_settled", {}, context);
+    eq(planUtils.readPlanFile(cwd), undefined, "successful agent settlement archives the ready plan");
     assert(
       !existsSync(planState.getWorkflowStatePath(cwd)),
       "archiving removes the active workflow sidecar",
@@ -2461,6 +2858,186 @@ await section("workflow sidecar identity, CAS and decision linkage", async () =>
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await section("workflow conflicts fail closed before starting turns", async () => {
+  if (!planMode || !planUtils || !planState) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-cas-transition-"));
+  try {
+    planUtils.writePlanFileAtomic(cwd, progressPlan);
+    const harness = createHarness();
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+    const loaded = planState.loadWorkflowState(cwd).state;
+    assert(Boolean(loaded), "CAS transition test loads a sidecar");
+    if (!loaded) return;
+    planState.writeWorkflowStateAtomic(cwd, {
+      ...loaded,
+      revision: loaded.revision + 1,
+      updatedAt: new Date().toISOString(),
+    });
+    const sentBefore = harness.sent.length;
+    await harness.commands.get("work")("", context);
+    eq(harness.sent.length, sentBefore, "a stale sidecar revision prevents /work handoff");
+    assert(
+      harness.notifications.some((entry) => entry.message.includes("konkurrierenden Zustand")),
+      "CAS conflict is reported as an aborted workflow transition",
+    );
+    await harness.commands.get("work")("", context);
+    assert(
+      harness.sent.some((entry) => entry.message?.customType === "plan-mode-execute"),
+      "the next /work recovers from the winning sidecar revision and can start",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await section("complete archive revalidates hash and todos", async () => {
+  if (!planMode || !planUtils || !planState) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-archive-revalidate-"));
+  const lockedCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-archive-locked-"));
+  try {
+    const completedPlan = validPlan.replace("- [ ] Noch offen", "- [x] Noch offen");
+    planUtils.writePlanFileAtomic(cwd, completedPlan);
+    const harness = createHarness({
+      confirm: () => {
+        planUtils.writePlanFileAtomic(
+          cwd,
+          `${completedPlan}\n- [ ] Nachträglich hinzugefügt`,
+        );
+        return true;
+      },
+    });
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("work")("", context);
+    const remaining = planUtils.readPlanFile(cwd);
+    assert(Boolean(remaining), "a plan changed during archive confirmation remains active");
+    assert(
+      planUtils.extractTodoItems(remaining).some((todo) => !todo.completed),
+      "the newly open todo is preserved instead of archived as complete",
+    );
+    eq(latestStatus(harness, "workflow"), "PAUSED 2/3", "archive race leaves work visibly paused");
+
+    const oneTodoPlan = [
+      "# Plan",
+      "",
+      "## Auftrag",
+      "Ziel",
+      "",
+      "## Todos",
+      "- [ ] Einziger Schritt",
+    ].join("\n");
+    planUtils.writePlanFileAtomic(lockedCwd, oneTodoPlan);
+    const locked = createHarness();
+    planMode.default(locked.api);
+    const lockedContext = locked.makeContext({ cwd: lockedCwd });
+    await locked.runHooks("session_start", {}, lockedContext);
+    await locked.commands.get("work")("", lockedContext);
+    const executionId = locked.sent.at(-1)?.message?.content.match(/Execution-ID: ([^\n]+)/)?.[1];
+    await locked.tools.get("plan_progress").execute(
+      "locked-ready",
+      { executionId, step: 1, status: "completed", evidence: "Schritt geprüft." },
+      undefined,
+      undefined,
+      lockedContext,
+    );
+    const lock = planState.acquireWorkspaceLock(lockedCwd);
+    try {
+      await locked.runHooks(
+        "agent_end",
+        { messages: [{ role: "assistant", content: [{ type: "text", text: "fertig" }], stopReason: "stop" }] },
+        lockedContext,
+      );
+      await locked.runHooks("agent_settled", {}, lockedContext);
+    } finally {
+      lock.release();
+    }
+    assert(Boolean(planUtils.readPlanFile(lockedCwd)), "a competing workspace lock prevents complete archival");
+    eq(latestStatus(locked, "workflow"), "READY", "a lock conflict keeps the completed plan retryable");
+    await locked.commands.get("finish")("", lockedContext);
+    eq(planUtils.readPlanFile(lockedCwd), undefined, "complete archival succeeds after the workspace lock is released");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(lockedCwd, { recursive: true, force: true });
+  }
+});
+
+await section("stale plan actions cannot cross session boundaries", async () => {
+  if (!planMode || !planUtils) return;
+  const firstCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-stale-first-"));
+  const secondCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-stale-second-"));
+  try {
+    planUtils.writePlanFileAtomic(firstCwd, progressPlan);
+    let releaseConfirm;
+    const harness = createHarness({
+      idle: false,
+      confirm: () => new Promise((resolve) => {
+        releaseConfirm = resolve;
+      }),
+    });
+    planMode.default(harness.api);
+    const firstContext = harness.makeContext({ cwd: firstCwd, sessionId: "session-a" });
+    await harness.runHooks("session_start", {}, firstContext);
+    const pendingReview = harness.commands.get("review-plan")("", firstContext);
+    assert(typeof releaseConfirm === "function", "review waits at the active-turn confirmation");
+    await harness.runHooks("session_shutdown", {}, firstContext);
+    harness.setIdle(true);
+    const secondContext = harness.makeContext({ cwd: secondCwd, sessionId: "session-b" });
+    await harness.runHooks("session_start", {}, secondContext);
+    releaseConfirm(true);
+    await pendingReview;
+    assert(
+      harness.sent.every((entry) => entry.message?.customType !== "plan-review-request"),
+      "a confirmation from the old session cannot start review in the replacement session",
+    );
+    eq(
+      harness.lifecycleCalls.filter((entry) => entry.kind === "abort").length,
+      0,
+      "stale confirmation does not abort the replacement session",
+    );
+  } finally {
+    rmSync(firstCwd, { recursive: true, force: true });
+    rmSync(secondCwd, { recursive: true, force: true });
+  }
+});
+
+await section("unreadable plan artifacts fail closed", async () => {
+  if (!planMode || !planUtils) return;
+  const planCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-unreadable-"));
+  const briefCwd = mkdtempSync(path.join(tmpdir(), "pi-brief-unreadable-"));
+  try {
+    mkdirSync(path.join(planCwd, ".agent", "plans"), { recursive: true });
+    writeFileSync(path.join(planCwd, "outside-plan.md"), progressPlan);
+    symlinkSync(
+      path.join(planCwd, "outside-plan.md"),
+      path.join(planCwd, ".agent", "plans", "current-plan.md"),
+    );
+    const planHarness = createHarness();
+    planMode.default(planHarness.api);
+    const planContext = planHarness.makeContext({ cwd: planCwd, mode: "print" });
+    await planHarness.runHooks("session_start", {}, planContext);
+    await planHarness.commands.get("plan")("", planContext);
+    eq(planHarness.sent.length, 0, "an unreadable plan path never starts planning");
+    assert(
+      planHarness.notifications.some((entry) => entry.message.includes("abgebrochen")),
+      "unreadable plan path is reported explicitly",
+    );
+
+    mkdirSync(path.join(briefCwd, ".agent", "plans", "decision-brief.md"), { recursive: true });
+    const briefHarness = createHarness();
+    planMode.default(briefHarness.api);
+    const briefContext = briefHarness.makeContext({ cwd: briefCwd });
+    await briefHarness.runHooks("session_start", {}, briefContext);
+    await briefHarness.commands.get("decide")("", briefContext);
+    eq(briefHarness.sent.length, 0, "an unreadable decision brief is never overwritten by intake");
+  } finally {
+    rmSync(planCwd, { recursive: true, force: true });
+    rmSync(briefCwd, { recursive: true, force: true });
   }
 });
 

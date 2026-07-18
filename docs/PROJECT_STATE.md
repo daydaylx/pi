@@ -21,8 +21,19 @@ Die Übergabe erfolgt ohne Commit, Push oder Paketinstallation.
 - Der Planworkflow verwendet Sidecar v2 mit stabiler `planId`, Revision,
   Lifecycle, Todo-Hash und gebundener `executionId`; Lock/CAS-Schreibvorgänge
   und konservative Migration schützen ältere oder konkurrierende Zustände.
-  Markdown-Checkboxen bleiben lesbare Source of Truth und alte
-  Fortschrittsmarker funktionieren weiterhin als Fallback.
+  CAS-Konflikte stoppen den betreffenden Turn fail-closed und laden die
+  gewinnende Revision für einen späteren Retry neu. Markdown-Checkboxen bleiben
+  lesbare Source of Truth; alte Fortschrittsmarker funktionieren nur aus
+  regulär mit `stopReason: stop` beendeten Antworten und mit passendem
+  Execution-Hash.
+- Plan-, Review-, Decision- und Completion-Ergebnisse werden erst bei
+  `agent_settled` finalisiert. Dadurch laufen Handoff-Menüs erst im Idle-Zustand,
+  Retries zählen nur mit ihrem letzten Ergebnis und Completion-Nachrichten
+  erzeugen keinen unbeabsichtigten Folgeturn.
+- Asynchrone Workflow-Aktionen sind an Session-Epoch und Session-ID gebunden;
+  `/done` ist idle-only, `/work` serialisiert parallele Starts und setzt eine
+  noch aktive Execution nur nach erneuter Hash-Prüfung mit derselben ID fort.
+  Complete-Archive validieren Hash und Todo-Stand unter dem Workspace-Lock.
 - Gespeicherte Ausführungen werden ausschließlich als `paused` geladen und
   brauchen in `/work` eine explizite Resume-Bestätigung. Decision Briefs werden
   nur bei passender, im Workflow gespeicherter Hash-Verknüpfung übernommen.

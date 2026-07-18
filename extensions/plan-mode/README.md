@@ -22,15 +22,17 @@ steps.
   Brief. It is also reachable as the _Optionen klären_ action inside `/plan`
   and as the first-level Shift+Tab Control-Center entry of the same name.
 - `/work` (primary) or `/go` (alias): execute the current plan directly. Runs
-  independently of whether a review happened. If a plan is already executing,
-  a duplicate `/work` call is ignored instead of aborting and restarting it.
+  independently of whether a review happened. A duplicate call during an active
+  turn is ignored; after the turn settled with open todos, `/work` continues the
+  same execution ID instead of aborting and restarting it.
 - `/review-plan`: optional deep review; worth it for large, risky, or
   architectural changes. It records review status without changing the active
   workflow mode or gating `/work`.
 - `/plan-todos`: read progress from the current plan file.
 - `/done <n> [m …]`: manually check off todo numbers (as listed by
   `/plan-todos`). Manual fallback when an explicit progress update was missed.
-  Uses the same completion/archive path as `plan_progress`.
+  It is accepted only while Pi is idle and uses the same hash-bound
+  completion/archive path as `plan_progress`.
 - `/finish`: manual archive/early-abort. Runs automatically once all todos
   are checked off (see "Completion").
 
@@ -112,6 +114,11 @@ _`/review-plan` ausführen_, _Todos anzeigen_, or _Im Planmodus bleiben_.
 Refinement turns on an existing plan stay menu-free (they only notify that the
 plan was saved). Nothing executes automatically — Esc / _Im Planmodus bleiben_
 leave the workflow untouched. The menu only appears in the TUI while idle.
+The result is finalized from `agent_settled`, after retries, compaction and
+queued continuations are finished; `agent_end` never opens UI by itself. Only
+an assistant result with terminal `stopReason: "stop"` can finalize a plan,
+review, decision or completion; errors, aborts and length truncation stay
+retryable and never archive automatically.
 
 Workflow mode, permission level, thinking level, and tool selection remain
 fully independent; `/plan` only changes the workflow mode/phase and never
@@ -265,14 +272,16 @@ prefix such as `## 5. Todos` is accepted. During execution, the
 `plan_progress({ step, status, evidence })` tool records `in_progress`,
 `completed`, or `blocked`; `completed` atomically checks the matching Markdown
 checkbox. Every status requires a concrete evidence string. `/done <n> [m …]`
-remains the manual fallback. Legacy `[PLAN-PROGRESS]` and `[DONE:n]`
-responses are still accepted for existing sessions, but are no longer the
-primary protocol. As soon as every checkbox is checked, the plan is archived
-automatically under
+remains the idle-only manual fallback. Legacy `[PLAN-PROGRESS]` and `[DONE:n]`
+responses are accepted only from successful terminal assistant responses and
+must match the active execution hash. As soon as every checkbox is checked,
+the plan is archived after the complete agent run has settled under
 `.agent/plans/archive/YYYY-MM-DD-HHMM-current-plan.md` with `Status:
 complete`, and an existing Decision Brief is archived along with it. If
-archiving fails, the phase falls back to `ready` and `/finish` can be run
-manually as a retry. Invoking `/work` on an already fully completed plan
+archiving fails while the plan is still complete, the phase falls back to
+`ready`; if the plan changed or contains open todos, execution becomes
+`paused`. In both cases the active plan is retained. Invoking `/work` on an
+already fully completed plan
 offers to archive it directly (confirmation) instead of only pointing at
 `/finish`. `/finish` remains available to archive a plan early with open todos
 (`Status: incomplete`, requires interactive confirmation) or as that retry
@@ -284,6 +293,15 @@ phase, mode, review hash, creation mode, and evidence-backed progress records.
 The Markdown plan remains authoritative: a missing, invalid, or hash-stale
 sidecar is reconstructed conservatively from the plan structure and
 checkboxes on session start.
+
+Sidecar CAS conflicts are fail-closed: the losing session does not start a
+review, decision or execution turn, reloads the winning revision, and can retry
+without restarting the session. An idle `/work` continuation revalidates the
+plan hash before reusing its execution ID. Complete archival revalidates hash
+and todos while holding the workspace lock. Async confirmations and menus are
+bound to the originating session epoch, so results from a replaced session are
+ignored. Unreadable plan or Decision-Brief artifacts are never treated as
+missing and are not overwritten.
 
 ## Permission shortcut
 

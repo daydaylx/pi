@@ -429,13 +429,14 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   }
 
   async function openThinkingMenu(ctx: ExtensionContext): Promise<void> {
+    const epoch = sessionEpoch;
     const selected = await runMenu(
       ctx,
       "Thinking",
       buildThinkingMenu(pi.getThinkingLevel(), thinkingMode),
       { fallbackPrompt: "Thinking-Modus wählen" },
     );
-    if (!selected) return;
+    if (!selected || epoch !== sessionEpoch) return;
 
     if (selected === "auto") {
       thinkingMode = "auto";

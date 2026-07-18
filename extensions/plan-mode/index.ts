@@ -40,7 +40,9 @@ import {
   INVALID_DECISION_BRIEF_RELATIVE_PATH,
   PLAN_RELATIVE_PATH,
   readDecisionBrief,
+  readDecisionBriefState,
   readPlanFile,
+  readPlanFileState,
   validateDecisionBriefStructure,
   validatePlanStructure,
   writeDecisionBriefAtomic,
@@ -94,6 +96,7 @@ import {
 import {
   createWorkflowStateSnapshot,
   loadWorkflowState,
+  readWorkflowStateRevision,
   removeWorkflowState,
   withWorkspaceLock,
   writeWorkflowStateAtomic,
@@ -235,6 +238,11 @@ function getLatestAssistantText(messages: AgentMessage[]): string {
   return latest ? getTextContent(latest) : "";
 }
 
+function latestAssistantSucceeded(messages: AgentMessage[]): boolean {
+  const latest = [...messages].reverse().find(isAssistantMessage);
+  return latest?.stopReason === "stop";
+}
+
 export default function planModeExtension(pi: ExtensionAPI): void {
   let mode: WorkflowMode = "work";
   let phase: WorkflowPhase = "idle";
@@ -252,6 +260,14 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   let currentPlanId: string | undefined;
   let decisionBriefHash: string | undefined;
   let sidecarCasReady = false;
+  let executePlanInFlight = false;
+  let settledRun:
+    | {
+        epoch: number;
+        sessionId: string;
+        messages: AgentMessage[];
+      }
+    | undefined;
   let activeRun:
     | {
         id: string;
@@ -271,6 +287,29 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   // dass das "Nächster Schritt"-Menü nur nach dem Turn erscheint, der den Plan
   // erzeugt hat — nicht nach jedem Verfeinerungs-Turn.
   let planExistedBeforeTurn = false;
+
+  interface SessionToken {
+    epoch: number;
+    sessionId: string;
+  }
+
+  function captureSessionToken(ctx: ExtensionContext): SessionToken {
+    return {
+      epoch: sessionEpoch,
+      sessionId: ctx.sessionManager.getSessionId(),
+    };
+  }
+
+  function isSessionTokenCurrent(
+    token: SessionToken,
+    ctx: ExtensionContext,
+  ): boolean {
+    return (
+      token.epoch === sessionEpoch &&
+      (activeSessionId === undefined || token.sessionId === activeSessionId) &&
+      token.sessionId === ctx.sessionManager.getSessionId()
+    );
+  }
 
   function startRun(
     kind: "deciding" | "reviewing" | "executing",
@@ -390,14 +429,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     };
   }
 
-  function persistState(ctx: ExtensionContext): void {
-    pi.appendEntry<PersistedWorkflowState>("plan-mode", {
-      mode,
-      phase,
-      reviewedHash,
-      planCreationMode,
-    });
-
+  function persistState(
+    ctx: ExtensionContext,
+    expectedPlanHash?: string,
+  ): boolean {
     try {
       const content = readPlanFile(ctx.cwd);
       if (content === undefined) {
@@ -406,7 +441,21 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         workflowRevision = 0;
         currentPlanId = undefined;
         sidecarCasReady = false;
-        return;
+        pi.appendEntry<PersistedWorkflowState>("plan-mode", {
+          mode,
+          phase,
+          reviewedHash,
+          planCreationMode,
+        });
+        return true;
+      }
+      if (
+        expectedPlanHash !== undefined &&
+        hashPlanContent(content) !== expectedPlanHash
+      ) {
+        throw new Error(
+          "Plan-Hash hat sich vor dem Workflow-Commit geändert.",
+        );
       }
       const snapshot = createWorkflowStateSnapshot(content, {
         mode,
@@ -444,12 +493,47 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       currentPlanId = written.planId;
       decisionBriefHash = written.decisionBriefHash;
       sidecarCasReady = true;
+      pi.appendEntry<PersistedWorkflowState>("plan-mode", {
+        mode,
+        phase,
+        reviewedHash,
+        planCreationMode,
+      });
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      try {
+        const persistedRevision = readWorkflowStateRevision(ctx.cwd);
+        const loaded = loadWorkflowState(ctx.cwd);
+        if (loaded.state) {
+          mode = loaded.state.mode;
+          phase = loaded.state.phase;
+          reviewedHash = loaded.state.reviewedHash;
+          planCreationMode = loaded.state.planCreationMode;
+          progressRecords = loaded.state.progress;
+          workflowRevision = persistedRevision;
+          currentPlanId = loaded.state.planId;
+          decisionBriefHash = loaded.state.decisionBriefHash;
+          sidecarCasReady = true;
+          activeRun = undefined;
+        } else {
+          progressRecords = [];
+          workflowRevision = 0;
+          currentPlanId = undefined;
+          decisionBriefHash = undefined;
+          sidecarCasReady = false;
+          activeRun = undefined;
+        }
+        updateStatus(ctx);
+      } catch {
+        // An unreadable or invalid winning state remains fail-closed. A later
+        // session start can perform the normal conservative reconstruction.
+      }
       ctx.ui.notify(
         `Workflow-Sidecar konnte nicht gespeichert werden: ${message}`,
         "warning",
       );
+      return false;
     }
   }
 
@@ -550,6 +634,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
   ): Promise<boolean> {
     if (ctx.isIdle()) return true;
+    const token = captureSessionToken(ctx);
     if (!ctx.hasUI || ctx.mode !== "tui") {
       ctx.ui.notify(
         "Ein Agent-Turn läuft; die Aktion würde ihn abbrechen und benötigt dafür den TUI-Modus.",
@@ -561,6 +646,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       "Laufenden Agent-Turn abbrechen?",
       "Die gewählte Aktion stoppt den aktiven Turn und normalisiert den Workflow-Zustand.",
     );
+    if (!isSessionTokenCurrent(token, ctx)) return false;
     if (!confirmed) {
       ctx.ui.notify(
         "Aktion abgebrochen; der laufende Turn wird fortgesetzt.",
@@ -572,7 +658,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     const maybeCommandCtx = ctx as Partial<ExtensionCommandContext>;
     if (typeof maybeCommandCtx.waitForIdle === "function") {
       await maybeCommandCtx.waitForIdle();
-      return true;
+      return isSessionTokenCurrent(token, ctx);
     }
     ctx.ui.notify(
       "Der laufende Turn wurde abgebrochen. Wiederhole die Aktion, sobald der Agent vollständig beendet ist.",
@@ -586,6 +672,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
     options: { force?: boolean; skipAbort?: boolean } = {},
   ): Promise<boolean> {
+    const previous = {
+      mode,
+      phase,
+      reviewedHash,
+      planCreationMode,
+      thinkingLevel: pi.getThinkingLevel(),
+    };
     // Same-Mode-Auswahl im Idle ist ein No-op: ein versehentliches
     // Shift+Tab+Enter darf weder abbrechen noch neu initialisieren.
     if (!options.force && target === mode && ctx.isIdle()) {
@@ -596,6 +689,14 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     normalizeInterruptedPhase(ctx);
 
     if (target !== "work") {
+      const planState = readPlanFileState(ctx.cwd);
+      if (planState.status === "unreadable") {
+        ctx.ui.notify(
+          `Plan-Modus bleibt inaktiv, weil ${PLAN_RELATIVE_PATH} nicht sicher lesbar ist: ${planState.error}`,
+          "error",
+        );
+        return false;
+      }
       if (!preparePlan(ctx)) return false;
       invalidateReview();
       phase = "draft";
@@ -628,7 +729,19 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       pi.setThinkingLevel(MODE_THINKING[target]);
     }
     updateStatus(ctx);
-    persistState(ctx);
+    if (!persistState(ctx)) {
+      mode = previous.mode;
+      phase = previous.phase;
+      reviewedHash = previous.reviewedHash;
+      planCreationMode = previous.planCreationMode;
+      pi.setThinkingLevel(previous.thinkingLevel);
+      updateStatus(ctx);
+      ctx.ui.notify(
+        "Workflow-Wechsel wegen eines konkurrierenden Zustands abgebrochen.",
+        "warning",
+      );
+      return false;
+    }
     ctx.ui.notify(
       modeChanged
         ? `${MODE_LABEL[target]} aktiv. Thinking: ${thinkingMode === "auto" ? `${MODE_THINKING[target]} (Auto)` : "manueller Wert bleibt erhalten"}.`
@@ -644,13 +757,17 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   // konservativ verfahren: ohne Plan -> Architekturplan, mit Plan -> kein
   // Überschreiben, sondern Hinweis.
   async function routePlan(ctx: ExtensionContext): Promise<void> {
+    const token = captureSessionToken(ctx);
     if (!ctx.hasUI || ctx.mode !== "tui") {
-      let planExists = false;
-      try {
-        planExists = readPlanFile(ctx.cwd) !== undefined;
-      } catch {
-        planExists = false;
+      const planState = readPlanFileState(ctx.cwd);
+      if (planState.status === "unreadable") {
+        ctx.ui.notify(
+          `Plan-Assistent abgebrochen: ${planState.error}`,
+          "error",
+        );
+        return;
       }
+      const planExists = planState.status === "ok";
       if (!planExists) {
         await setWorkflowMode("detailed_plan", ctx);
       } else {
@@ -664,16 +781,18 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
     let planExists = false;
     let allTodosComplete = false;
-    try {
-      const content = readPlanFile(ctx.cwd);
-      planExists = content !== undefined;
-      if (content !== undefined) {
-        const todos = extractTodoItems(content);
+    const planState = readPlanFileState(ctx.cwd);
+    if (planState.status === "unreadable") {
+      ctx.ui.notify(`Plan-Assistent abgebrochen: ${planState.error}`, "error");
+      return;
+    }
+    if (planState.status === "ok") {
+      planExists = true;
+      {
+        const todos = extractTodoItems(planState.content);
         allTodosComplete =
           todos.length > 0 && todos.every((todo) => todo.completed);
       }
-    } catch {
-      planExists = false;
     }
 
     // Aktive Review/Execution sind keine harte Sperre; nur ein Hinweis.
@@ -707,6 +826,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
           "Plan-Assistent benötigt den TUI-Modus. Nutze /plan-todos oder /finish direkt.",
       },
     );
+    if (!isSessionTokenCurrent(token, ctx)) return;
     if (!action || action.kind === "cancel") return;
     await dispatchPlanAssistantAction(action, ctx);
   }
@@ -742,12 +862,16 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   // überschrieben zu werden. Gibt true zurück, wenn ein neuer Plan erstellt
   // werden darf (archiviert oder bewusst überschrieben), sonst false.
   async function guardNewPlan(ctx: ExtensionContext): Promise<boolean> {
-    let planExists = false;
-    try {
-      planExists = readPlanFile(ctx.cwd) !== undefined;
-    } catch {
-      planExists = false;
+    const token = captureSessionToken(ctx);
+    const planState = readPlanFileState(ctx.cwd);
+    if (planState.status === "unreadable") {
+      ctx.ui.notify(
+        `Bestehender Plan ist nicht sicher lesbar; neuer Plan abgebrochen: ${planState.error}`,
+        "error",
+      );
+      return false;
     }
+    const planExists = planState.status === "ok";
     if (!planExists) return true;
 
     const decision = await runMenu<OverwriteDecision>(
@@ -760,6 +884,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
           "Bestehender Plan würde überschrieben werden — Abbruch zum Schutz.",
       },
     );
+    if (!isSessionTokenCurrent(token, ctx)) return false;
 
     if (!decision || decision === "cancel") {
       ctx.ui.notify(
@@ -889,6 +1014,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   async function offerPostPlanActions(ctx: ExtensionContext): Promise<void> {
     if (!ctx.hasUI || ctx.mode !== "tui") return;
     if (typeof ctx.isIdle === "function" && !ctx.isIdle()) return;
+    const token = captureSessionToken(ctx);
 
     type PostAction = "execute" | "review" | "show-todos" | "stay";
     const entries: MenuEntry<PostAction>[] = [
@@ -929,6 +1055,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       return;
     }
 
+    if (!isSessionTokenCurrent(token, ctx)) return;
     if (!selected || selected === "stay") return;
     if (selected === "execute") await executePlan(ctx);
     else if (selected === "review") await reviewPlan(ctx);
@@ -943,6 +1070,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   // entscheidet, ob der Turn sofort (runDecisionIntake) oder erst bei der
   // nächsten Nutzernachricht (Modusmenü via before_agent_start) startet.
   async function enterDecisionMode(ctx: ExtensionContext): Promise<boolean> {
+    const token = captureSessionToken(ctx);
     if (!ctx.hasUI || ctx.mode !== "tui") {
       ctx.ui.notify(
         "Decision-Intake benötigt den TUI-Modus (ask_user ist interaktiv nur dort verfügbar).",
@@ -954,12 +1082,15 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     normalizeInterruptedPhase(ctx);
 
     // Bestehendes Decision Brief vor stillem Überschreiben schützen.
-    let briefExists = false;
-    try {
-      briefExists = readDecisionBrief(ctx.cwd) !== undefined;
-    } catch {
-      briefExists = false;
+    const briefState = readDecisionBriefState(ctx.cwd);
+    if (briefState.status === "unreadable") {
+      ctx.ui.notify(
+        `Decision-Intake abgebrochen: ${briefState.error}`,
+        "error",
+      );
+      return false;
     }
+    const briefExists = briefState.status === "ok";
     if (briefExists) {
       const decision = await runMenu<OverwriteDecision>(
         ctx,
@@ -971,6 +1102,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
             "Bestehendes Decision Brief würde überschrieben werden — Abbruch zum Schutz.",
         },
       );
+      if (!isSessionTokenCurrent(token, ctx)) return false;
       if (!decision || decision === "cancel") {
         ctx.ui.notify(
           "Decision-Intake abgebrochen; bestehendes Decision Brief bleibt erhalten.",
@@ -1012,7 +1144,16 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     reviewedHash = undefined;
     startRun("deciding", ctx);
     updateStatus(ctx);
-    persistState(ctx);
+    if (!persistState(ctx)) {
+      phase = readPlanFileState(ctx.cwd).status === "ok" ? "draft" : "idle";
+      activeRun = undefined;
+      updateStatus(ctx);
+      ctx.ui.notify(
+        "Decision-Intake wegen eines konkurrierenden Workflow-Zustands abgebrochen.",
+        "warning",
+      );
+      return false;
+    }
     return true;
   }
 
@@ -1135,6 +1276,7 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
   async function offerDecisionHandoff(ctx: ExtensionContext): Promise<void> {
     if (!ctx.hasUI || ctx.mode !== "tui") return;
     if (typeof ctx.isIdle === "function" && !ctx.isIdle()) return;
+    const token = captureSessionToken(ctx);
 
     const action = await runMenu<DecisionHandoffAction>(
       ctx,
@@ -1146,6 +1288,7 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
           "Decision Brief gespeichert. Nutze /plan für Schnell-/Architekturplan.",
       },
     );
+    if (!isSessionTokenCurrent(token, ctx)) return;
     if (!action || action === "cancel") return;
     if (action === "save-only") {
       ctx.ui.notify(
@@ -1182,6 +1325,7 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
   }
 
   async function openModelRoles(ctx: ExtensionContext): Promise<void> {
+    const token = captureSessionToken(ctx);
     const models = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config.models;
     const selected = await runMenu(
       ctx,
@@ -1192,6 +1336,7 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
       }),
       { fallbackPrompt: "Modellrolle wählen" },
     );
+    if (!isSessionTokenCurrent(token, ctx)) return;
     if (!selected) return;
     if (!ctx.isIdle()) {
       ctx.ui.notify(
@@ -1216,6 +1361,7 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     }
     try {
       await pi.setModel(target);
+      if (!isSessionTokenCurrent(token, ctx)) return;
       ctx.ui.notify(`${selected === "fast" ? "Fast" : selected === "primary" ? "Primary" : "Deep"}: ${models[selected]} aktiv.`, "info");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1227,6 +1373,7 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
   }
 
   async function openControlCenter(ctx: ExtensionContext): Promise<void> {
+    const token = captureSessionToken(ctx);
     let snapshot:
       | { permissionLabel: string; thinkingMode: "auto" | "manual"; thinkingLevel: ThinkingLevel }
       | undefined;
@@ -1249,6 +1396,7 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
       }),
       { nonInteractiveHint: "Control Center benötigt den TUI-Modus." },
     );
+    if (!isSessionTokenCurrent(token, ctx)) return;
     if (!selected) return;
     if (selected === "decide") {
       await enterDecisionModeFromMenu(ctx);
@@ -1612,11 +1760,92 @@ FORTSCHRITT:
     }
   });
 
+  function completePlanSteps(
+    ctx: ExtensionContext,
+    current: string,
+    completedSteps: readonly number[],
+    evidence: string,
+  ):
+    | { ok: true; content: string; updated: number; todos: TodoItem[]; planHash: string }
+    | { ok: false; reason: string; expectedHash?: string; currentHash: string } {
+    const currentHash = hashPlanContent(current);
+    if (
+      phase === "executing" &&
+      activeRun?.kind === "executing" &&
+      activeRun.planHash &&
+      currentHash !== activeRun.planHash
+    ) {
+      return {
+        ok: false,
+        reason:
+          "Der Plan wurde außerhalb der aktuellen Execution verändert; Fortschritt wurde nicht übernommen.",
+        expectedHash: activeRun.planHash,
+        currentHash,
+      };
+    }
+
+    try {
+      return withWorkspaceLock(ctx.cwd, () => {
+        const lockedContent = readPlanFile(ctx.cwd);
+        if (
+          lockedContent === undefined ||
+          hashPlanContent(lockedContent) !== currentHash
+        ) {
+          return {
+            ok: false as const,
+            reason:
+              "Der Plan wurde vor der Fortschrittsmutation konkurrierend verändert.",
+            currentHash:
+              lockedContent === undefined ? "missing" : hashPlanContent(lockedContent),
+          };
+        }
+
+        const result = applyDoneSteps(lockedContent, completedSteps);
+        if (result.updated > 0) {
+        writePlanFileAtomic(ctx.cwd, result.content);
+        }
+        const planHash = hashPlanContent(result.content);
+        if (activeRun?.kind === "executing") activeRun.planHash = planHash;
+
+        if (result.updated > 0) {
+          const updatedAt = new Date().toISOString();
+          const completed = new Set(completedSteps);
+          progressRecords = [
+            ...progressRecords.filter((record) => !completed.has(record.step)),
+            ...extractTodoItems(result.content)
+              .filter((todo) => completed.has(todo.step) && todo.completed)
+              .map((todo) => ({
+                step: todo.step,
+                status: "completed" as const,
+                evidence,
+                updatedAt,
+              })),
+          ].sort((a, b) => a.step - b.step);
+        }
+
+        return {
+          ok: true as const,
+          content: result.content,
+          updated: result.updated,
+          todos: extractTodoItems(result.content),
+          planHash,
+        };
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `Plan-Datei konnte nicht atomar aktualisiert werden: ${error instanceof Error ? error.message : String(error)}`,
+        currentHash,
+      };
+    }
+  }
+
   pi.on("turn_end", async (event, ctx) => {
     if (
       phase !== "executing" ||
       !isCurrentRun("executing", ctx) ||
-      !isAssistantMessage(event.message)
+      !isAssistantMessage(event.message) ||
+      event.message.stopReason !== "stop"
     )
       return;
 
@@ -1635,33 +1864,38 @@ FORTSCHRITT:
       const progressSteps = extractProgressBlock(text);
       const completedSteps =
         progressSteps !== undefined ? progressSteps : extractDoneSteps(text);
-      const result = applyDoneSteps(current, completedSteps);
-      if (result.updated > 0) {
-        writePlanFileAtomic(ctx.cwd, result.content);
-        const updatedAt = new Date().toISOString();
-        const completed = new Set(completedSteps);
-        progressRecords = [
-          ...progressRecords.filter((record) => !completed.has(record.step)),
-          ...extractTodoItems(result.content)
-            .filter((todo) => completed.has(todo.step) && todo.completed)
-            .map((todo) => ({
-              step: todo.step,
-              status: "completed" as const,
-              evidence: "Über Legacy-Fortschrittsmarker gemeldet.",
-              updatedAt,
-            })),
-        ].sort((a, b) => a.step - b.step);
+      const result = completePlanSteps(
+        ctx,
+        current,
+        completedSteps,
+        "Über Legacy-Fortschrittsmarker gemeldet.",
+      );
+      if (!result.ok) {
+        phase = "paused";
+        activeRun = undefined;
+        updateStatus(ctx);
+        persistState(ctx);
+        ctx.ui.notify(`${result.reason} Ausführung pausiert.`, "warning");
+        return;
       }
 
-      const todos = extractTodoItems(result.content);
+      const todos = result.todos;
       if (todos.length > 0 && todos.every((todo) => todo.completed)) {
         phase = "ready";
         updateStatus(ctx);
-        persistState(ctx);
+        if (!persistState(ctx)) {
+          phase = "paused";
+          activeRun = undefined;
+          updateStatus(ctx);
+        }
         return;
       }
       updateStatus(ctx);
-      persistState(ctx);
+      if (!persistState(ctx)) {
+        phase = "paused";
+        activeRun = undefined;
+        updateStatus(ctx);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(
@@ -1671,10 +1905,39 @@ FORTSCHRITT:
     }
   });
 
-  pi.on("agent_end", async (event, ctx) => {
+  async function handleSettledRun(
+    event: { messages: AgentMessage[] },
+    ctx: ExtensionContext,
+  ): Promise<void> {
     if (phase === "ready" && isCurrentRun("executing", ctx)) {
+      const expectedHash = activeRun?.planHash;
       activeRun = undefined;
-      archiveCompletedPlan(ctx);
+      if (!latestAssistantSucceeded(event.messages)) {
+        updateStatus(ctx);
+        persistState(ctx);
+        ctx.ui.notify(
+          "Alle Todos sind erledigt, aber der Agent-Turn endete fehlerhaft oder wurde abgebrochen. Nutze /finish zum Archivieren.",
+          "warning",
+        );
+        return;
+      }
+      archiveCompletedPlan(ctx, expectedHash);
+      return;
+    }
+
+    if (
+      phase === "executing" &&
+      isCurrentRun("executing", ctx) &&
+      !latestAssistantSucceeded(event.messages)
+    ) {
+      phase = "paused";
+      activeRun = undefined;
+      updateStatus(ctx);
+      persistState(ctx);
+      ctx.ui.notify(
+        "Planausführung endete fehlerhaft oder wurde abgebrochen und wurde pausiert. Nutze /work für einen sicheren Resume.",
+        "warning",
+      );
       return;
     }
 
@@ -1687,13 +1950,26 @@ FORTSCHRITT:
 
     if (phase === "deciding") {
       if (!isCurrentRun("deciding", ctx)) return;
+      if (!latestAssistantSucceeded(event.messages)) {
+        activeRun = undefined;
+        phase = readPlanFileState(ctx.cwd).status === "ok" ? "draft" : "idle";
+        updateStatus(ctx);
+        persistState(ctx);
+        ctx.ui.notify(
+          "Decision-Intake endete fehlerhaft oder wurde abgebrochen; kein Brief wurde übernommen.",
+          "warning",
+        );
+        return;
+      }
       await handleDecisionTurnEnd(event, ctx);
       return;
     }
 
     if (phase === "reviewing") {
       if (!isCurrentRun("reviewing", ctx)) return;
-      const reviewText = getLatestAssistantText(event.messages);
+      const reviewText = latestAssistantSucceeded(event.messages)
+        ? getLatestAssistantText(event.messages)
+        : "";
       const outcome = getReviewOutcome(reviewText);
 
       try {
@@ -1746,6 +2022,14 @@ FORTSCHRITT:
       (mode !== "simple_plan" && mode !== "detailed_plan")
     )
       return;
+    if (!latestAssistantSucceeded(event.messages)) {
+      pendingPlan = undefined;
+      ctx.ui.notify(
+        "Plan-Turn wurde nicht regulär beendet; Plan-Finalisierung und Übergabe wurden übersprungen.",
+        "warning",
+      );
+      return;
+    }
     try {
       let content = readPlanFile(ctx.cwd);
       if (content !== undefined) {
@@ -1801,6 +2085,27 @@ FORTSCHRITT:
     } catch {
       // Die zentrale Permission-Policy meldet unsichere Pfade separat.
     }
+  }
+
+  pi.on("agent_end", async (event, ctx) => {
+    settledRun = {
+      epoch: sessionEpoch,
+      sessionId: ctx.sessionManager.getSessionId(),
+      messages: event.messages,
+    };
+  });
+
+  pi.on("agent_settled", async (_event, ctx) => {
+    const pending = settledRun;
+    settledRun = undefined;
+    if (
+      !pending ||
+      pending.epoch !== sessionEpoch ||
+      pending.sessionId !== activeSessionId ||
+      pending.sessionId !== ctx.sessionManager.getSessionId()
+    )
+      return;
+    await handleSettledRun({ messages: pending.messages }, ctx);
   });
 
   async function reviewPlan(ctx: ExtensionContext): Promise<void> {
@@ -1823,11 +2128,21 @@ FORTSCHRITT:
       return;
     }
 
+    const reviewPlanHash = hashPlanContent(content);
     reviewedHash = undefined;
     phase = "reviewing";
-    startRun("reviewing", ctx, hashPlanContent(content));
+    startRun("reviewing", ctx, reviewPlanHash);
     updateStatus(ctx);
-    persistState(ctx);
+    if (!persistState(ctx, reviewPlanHash)) {
+      phase = "draft";
+      activeRun = undefined;
+      updateStatus(ctx);
+      ctx.ui.notify(
+        "Plan-Review wegen eines konkurrierenden Workflow-Zustands abgebrochen.",
+        "warning",
+      );
+      return;
+    }
 
     const structureErrors = validatePlanStructure(content, effectivePlanType(content));
     const staticFindings =
@@ -1870,16 +2185,41 @@ ${content}
     }
   }
 
-  // Gemeinsamer Abschlusspfad für turn_end-Autoarchiv, /done und den
+  // Gemeinsamer Abschlusspfad für agent_settled-Autoarchiv, /done und den
   // "alle Todos erledigt"-Fall von /work. Bei Archivfehlern bleibt die Phase
   // auf "ready", damit /finish als Retry dient.
-  function archiveCompletedPlan(ctx: ExtensionContext): boolean {
+  function archiveCompletedPlan(
+    ctx: ExtensionContext,
+    expectedPlanHash?: string,
+  ): boolean {
     let archived = false;
     try {
-      const archivePath = archivePlanFile(ctx.cwd, "complete");
+      const archivePath = withWorkspaceLock(ctx.cwd, () => {
+        const content = readPlanFile(ctx.cwd);
+        if (content === undefined) throw new Error("Aktiver Plan fehlt.");
+        const currentHash = hashPlanContent(content);
+        if (expectedPlanHash && currentHash !== expectedPlanHash) {
+          throw new Error(
+            "Plan wurde nach der Abschlussprüfung verändert; Archivierung abgebrochen.",
+          );
+        }
+        const todos = extractTodoItems(content);
+        if (todos.length === 0 || todos.some((todo) => !todo.completed)) {
+          throw new Error(
+            "Plan enthält wieder offene oder keine Todos; er wird nicht als complete archiviert.",
+          );
+        }
+        return archivePlanFile(
+          ctx.cwd,
+          "complete",
+          new Date(),
+          currentHash,
+        );
+      });
       archiveBriefAlongsidePlan(ctx);
       phase = mode !== "work" ? "draft" : "idle";
       reviewedHash = undefined;
+      activeRun = undefined;
       archived = true;
       pi.sendMessage(
         {
@@ -1890,10 +2230,19 @@ ${content}
         { triggerTurn: false },
       );
     } catch (error) {
-      phase = "ready";
+      let stillComplete = false;
+      try {
+        const current = readPlanFile(ctx.cwd);
+        const todos = current ? extractTodoItems(current) : [];
+        stillComplete =
+          todos.length > 0 && todos.every((todo) => todo.completed);
+      } catch {
+        stillComplete = false;
+      }
+      phase = mode === "work" ? (stillComplete ? "ready" : "paused") : "draft";
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(
-        `Alle Todos erledigt, Archivierung fehlgeschlagen: ${message}\nNutze /finish erneut.`,
+        `Archivierung als complete fehlgeschlagen: ${message}\nPlan bleibt aktiv; prüfe ihn und nutze danach /finish erneut.`,
         "warning",
       );
     }
@@ -1903,11 +2252,63 @@ ${content}
   }
 
   async function executePlan(ctx: ExtensionContext): Promise<void> {
-    if (phase === "executing" && !ctx.isIdle()) {
-      ctx.ui.notify("Plan wird bereits ausgeführt.", "warning");
+    if (executePlanInFlight) {
+      ctx.ui.notify("Ein /work-Start wird bereits verarbeitet.", "warning");
       return;
     }
+    executePlanInFlight = true;
+    try {
+      await executePlanInternal(ctx);
+    } finally {
+      executePlanInFlight = false;
+    }
+  }
+
+  async function executePlanInternal(ctx: ExtensionContext): Promise<void> {
+    const token = captureSessionToken(ctx);
+    if (phase === "executing") {
+      if (!isCurrentRun("executing", ctx) || !activeRun?.id) {
+        phase = "paused";
+        activeRun = undefined;
+        updateStatus(ctx);
+        persistState(ctx);
+      } else if (!ctx.isIdle()) {
+        ctx.ui.notify("Plan wird bereits ausgeführt.", "warning");
+        return;
+      } else {
+        const current = readPlanFileState(ctx.cwd);
+        if (
+          current.status !== "ok" ||
+          !activeRun.planHash ||
+          hashPlanContent(current.content) !== activeRun.planHash
+        ) {
+          phase = current.status === "missing" ? "idle" : "paused";
+          activeRun = undefined;
+          updateStatus(ctx);
+          persistState(ctx);
+          ctx.ui.notify(
+            current.status === "unreadable"
+              ? `Plan-Fortsetzung abgebrochen, weil die Plan-Datei nicht sicher lesbar ist: ${current.error}`
+              : current.status === "missing"
+                ? "Plan-Fortsetzung abgebrochen, weil die Plan-Datei fehlt."
+                : "Plan-Fortsetzung abgebrochen, weil der Plan außerhalb der aktuellen Execution verändert wurde.",
+            "warning",
+          );
+          return;
+        }
+        pi.sendMessage(
+          {
+            customType: "plan-mode-continue",
+            content: `${EXECUTING_PLAN_MARKER}\nExecution-ID: ${activeRun.id}\nSetze die noch offenen Plan-Todos mit derselben Execution-ID fort.`,
+            display: true,
+          },
+          { triggerTurn: true },
+        );
+        return;
+      }
+    }
     if (!(await confirmAbortActiveTurn(ctx))) return;
+    if (!isSessionTokenCurrent(token, ctx)) return;
     normalizeInterruptedPhase(ctx);
 
     let content: string | undefined;
@@ -1956,6 +2357,7 @@ ${content}
         "Plan aus nicht vertrauenswürdigem Workspace ausführen?",
         "Der Planinhalt stammt aus dem aktuellen Repository. Nur fortfahren, wenn du ihn geprüft hast.",
       );
+      if (!isSessionTokenCurrent(token, ctx)) return;
       if (!trustedResume) return;
     }
 
@@ -1971,6 +2373,7 @@ ${content}
         phase === "blocked" ? "Blockierten Plan fortsetzen?" : "Pausierten Plan fortsetzen?",
         "Der Planhash wird erneut geprüft und eine neue Execution-ID erzeugt.",
       );
+      if (!isSessionTokenCurrent(token, ctx)) return;
       if (!resume) return;
     }
 
@@ -1982,17 +2385,19 @@ ${content}
 
     const todos = extractTodoItems(content);
     if (todos.every((todo) => todo.completed)) {
+      const completedHash = hashPlanContent(content);
       await setWorkflowMode("work", ctx, { force: true, skipAbort: true });
       phase = "ready";
       updateStatus(ctx);
-      persistState(ctx);
+      if (!persistState(ctx)) return;
       if (ctx.hasUI && ctx.mode === "tui") {
         const confirmed = await ctx.ui.confirm(
           "Alle Plan-Todos sind bereits erledigt.",
           "Plan jetzt archivieren?",
         );
+        if (!isSessionTokenCurrent(token, ctx)) return;
         if (confirmed) {
-          archiveCompletedPlan(ctx);
+          archiveCompletedPlan(ctx, completedHash);
           return;
         }
       }
@@ -2014,7 +2419,16 @@ ${content}
       hashPlanContent(content),
     );
     updateStatus(ctx);
-    persistState(ctx);
+    if (!persistState(ctx)) {
+      phase = "paused";
+      activeRun = undefined;
+      updateStatus(ctx);
+      ctx.ui.notify(
+        "Planausführung wegen eines konkurrierenden Workflow-Zustands nicht gestartet.",
+        "warning",
+      );
+      return;
+    }
 
     try {
       pi.sendMessage(
@@ -2208,28 +2622,34 @@ CHANGED_FILES:
       let updatedContent = content;
       let checkboxUpdated = false;
       if (status === "completed") {
-        const result = applyDoneSteps(content, [params.step]);
-        updatedContent = result.content;
-        checkboxUpdated = result.updated === 1;
-        if (checkboxUpdated) {
-          try {
-            writePlanFileAtomic(ctx.cwd, updatedContent);
-          } catch (error) {
-            progressRecords = previousProgressRecords;
-            const message =
-              error instanceof Error ? error.message : String(error);
-            return planProgressResult(
-              `Fehler: Todo konnte nicht atomar aktualisiert werden: ${message}`,
-              { ok: false, step: params.step, status },
-            );
-          }
-          activeRun.planHash = hashPlanContent(updatedContent);
+        const completion = completePlanSteps(
+          ctx,
+          content,
+          [params.step],
+          evidence,
+        );
+        if (!completion.ok) {
+          progressRecords = previousProgressRecords;
+          return planProgressResult(
+            `Fehler: ${completion.reason}`,
+            { ok: false, step: params.step, status },
+          );
         }
+        updatedContent = completion.content;
+        checkboxUpdated = completion.updated === 1;
       }
 
       if (status === "blocked") {
         phase = "blocked";
-        persistState(ctx);
+        if (!persistState(ctx)) {
+          phase = "paused";
+          activeRun = undefined;
+          updateStatus(ctx);
+          return planProgressResult(
+            "Fehler: Blocker konnte wegen eines konkurrierenden Workflow-Zustands nicht sicher persistiert werden.",
+            { ok: false, step: params.step, status },
+          );
+        }
         updateStatus(ctx);
         return planProgressResult(
           `T${params.step} (${todo.text}) ist blockiert. Die Ausführung bleibt bis zu einem expliziten /work-Resume pausiert. Ursache: ${evidence}`,
@@ -2250,10 +2670,18 @@ CHANGED_FILES:
         nextTodos.every((candidate) => candidate.completed)
       ) {
         phase = "ready";
-        persistState(ctx);
+        if (!persistState(ctx)) {
+          phase = "paused";
+          activeRun = undefined;
+          updateStatus(ctx);
+          return planProgressResult(
+            "Fehler: Abschluss wurde im Plan gespeichert, aber der Workflow-Zustand kollidierte. Ausführung pausiert; nutze /work für einen sicheren Resume.",
+            { ok: false, step: params.step, status, checkboxUpdated },
+          );
+        }
         updateStatus(ctx);
         return planProgressResult(
-          `T${params.step} als completed erfasst; alle Todos sind erledigt. Der Plan wird nach dem erfolgreichen Turn-Ende archiviert.`,
+          `T${params.step} als completed erfasst; alle Todos sind erledigt. Der Plan wird nach dem erfolgreichen Agent-Settlement archiviert.`,
           {
             ok: true,
             step: params.step,
@@ -2266,7 +2694,15 @@ CHANGED_FILES:
         );
       }
 
-      persistState(ctx);
+      if (!persistState(ctx)) {
+        phase = "paused";
+        activeRun = undefined;
+        updateStatus(ctx);
+        return planProgressResult(
+          "Fehler: Fortschritt konnte wegen eines konkurrierenden Workflow-Zustands nicht sicher persistiert werden. Ausführung pausiert.",
+          { ok: false, step: params.step, status, checkboxUpdated },
+        );
+      }
       updateStatus(ctx);
       const statusLabel =
         status === "completed"
@@ -2308,6 +2744,13 @@ CHANGED_FILES:
   pi.registerCommand("done", {
     description: "Plan-Todos manuell abhaken: /done <n> [m …]",
     handler: async (args, ctx) => {
+      if (!ctx.isIdle()) {
+        ctx.ui.notify(
+          "/done ist erst nach Abschluss des laufenden Agent-Turns verfügbar.",
+          "warning",
+        );
+        return;
+      }
       const steps = args.trim().split(/\s+/).filter(Boolean).map(Number);
       if (
         steps.length === 0 ||
@@ -2336,21 +2779,24 @@ CHANGED_FILES:
         return;
       }
 
-      const result = applyDoneSteps(content, steps);
+      const result = completePlanSteps(
+        ctx,
+        content,
+        steps,
+        "Manuell mit /done bestätigt.",
+      );
+      if (!result.ok) {
+        phase = mode === "work" ? "paused" : "draft";
+        activeRun = undefined;
+        updateStatus(ctx);
+        persistState(ctx);
+        ctx.ui.notify(result.reason, "warning");
+        return;
+      }
       if (result.updated === 0) {
         ctx.ui.notify(
           "Keine passende offene Todo-Nummer gefunden (bereits erledigt oder außerhalb des Bereichs).",
           "warning",
-        );
-        return;
-      }
-      try {
-        writePlanFileAtomic(ctx.cwd, result.content);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(
-          `Plan-Datei konnte nicht aktualisiert werden: ${message}`,
-          "error",
         );
         return;
       }
@@ -2359,9 +2805,9 @@ CHANGED_FILES:
         "info",
       );
 
-      const todos = extractTodoItems(result.content);
+      const todos = result.todos;
       if (todos.length > 0 && todos.every((todo) => todo.completed)) {
-        archiveCompletedPlan(ctx);
+        archiveCompletedPlan(ctx, result.planHash);
         return;
       }
       updateStatus(ctx);
@@ -2370,7 +2816,9 @@ CHANGED_FILES:
   });
 
   async function finishPlan(ctx: ExtensionCommandContext): Promise<void> {
+    const token = captureSessionToken(ctx);
     await ctx.waitForIdle();
+    if (!isSessionTokenCurrent(token, ctx)) return;
 
     let content: string | undefined;
     try {
@@ -2404,6 +2852,7 @@ CHANGED_FILES:
         "Plan mit offenen Todos archivieren?",
         "Der Plan wird als incomplete archiviert und aus current-plan.md entfernt.",
       );
+      if (!isSessionTokenCurrent(token, ctx)) return;
       if (!confirmed) {
         ctx.ui.notify("Abschluss abgebrochen.", "info");
         return;
@@ -2452,6 +2901,8 @@ CHANGED_FILES:
     decisionBriefHash = undefined;
     sidecarCasReady = false;
     activeRun = undefined;
+    settledRun = undefined;
+    executePlanInFlight = false;
     pendingPlan = undefined;
     sessionEpoch += 1;
     activeSessionId = ctx.sessionManager.getSessionId();
@@ -2598,6 +3049,8 @@ CHANGED_FILES:
     }
     sessionEpoch += 1;
     activeSessionId = undefined;
+    settledRun = undefined;
+    executePlanInFlight = false;
     unsubscribeAurora?.();
     unsubscribeAurora = undefined;
     auroraEpoch = undefined;
