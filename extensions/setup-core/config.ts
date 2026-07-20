@@ -90,7 +90,7 @@ function reportUnknownKeys(
     diagnostics.push({
       level: "error",
       source,
-      message: `unknown key ${prefix}${key}`,
+      message: `unbekannter Schlüssel ${prefix}${key}`,
     });
   }
 }
@@ -99,7 +99,7 @@ function readObject(path: string, diagnostics: ConfigDiagnostic[]) {
   if (!existsSync(path)) return undefined;
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-    if (!isObject(parsed)) throw new Error("root value must be an object");
+    if (!isObject(parsed)) throw new Error("Root-Wert muss ein Objekt sein");
     return parsed;
   } catch (error) {
     diagnostics.push({
@@ -120,8 +120,13 @@ function enumValue<T extends string>(
   diagnostics: ConfigDiagnostic[],
 ): T {
   if (value === undefined) return fallback;
-  if (typeof value === "string" && allowed.includes(value as T)) return value as T;
-  diagnostics.push({ level: "error", source, message: `${key} has an invalid value` });
+  if (typeof value === "string" && allowed.includes(value as T))
+    return value as T;
+  diagnostics.push({
+    level: "error",
+    source,
+    message: `${key} has an invalid value`,
+  });
   return fallback;
 }
 
@@ -137,7 +142,11 @@ function boundedInt(
   if (value === undefined) return fallback;
   if (Number.isInteger(value) && Number(value) >= min && Number(value) <= max)
     return Number(value);
-  diagnostics.push({ level: "error", source, message: `${key} must be ${min}..${max}` });
+  diagnostics.push({
+    level: "error",
+    source,
+    message: `${key} must be ${min}..${max}`,
+  });
   return fallback;
 }
 
@@ -150,7 +159,15 @@ function applyUserLayer(
   const next = structuredClone(base);
   reportUnknownKeys(
     raw,
-    ["$schema", "ui", "permissions", "lsp", "subagents", "models", "verification"],
+    [
+      "$schema",
+      "ui",
+      "permissions",
+      "lsp",
+      "subagents",
+      "models",
+      "verification",
+    ],
     source,
     "",
     diagnostics,
@@ -160,7 +177,9 @@ function applyUserLayer(
   const lsp = isObject(raw.lsp) ? raw.lsp : undefined;
   const subagents = isObject(raw.subagents) ? raw.subagents : undefined;
   const models = isObject(raw.models) ? raw.models : undefined;
-  const verification = isObject(raw.verification) ? raw.verification : undefined;
+  const verification = isObject(raw.verification)
+    ? raw.verification
+    : undefined;
 
   if (ui)
     reportUnknownKeys(ui, ["theme", "motion"], source, "ui.", diagnostics);
@@ -209,7 +228,7 @@ function applyUserLayer(
     diagnostics.push({
       level: "error",
       source,
-      message: "ui.theme must be aurora-night",
+      message: "ui.theme muss aurora-night sein",
     });
   }
 
@@ -278,7 +297,8 @@ function applyUserLayer(
 
   for (const role of ["primary", "fast", "deep"] as const) {
     const value = models?.[role];
-    if (typeof value === "string" && value.trim()) next.models[role] = value.trim();
+    if (typeof value === "string" && value.trim())
+      next.models[role] = value.trim();
   }
 
   for (const name of ["typecheck", "test", "verify"] as const) {
@@ -324,7 +344,11 @@ function applyUserLayer(
   return next;
 }
 
-const ACTION_RANK: Record<PolicyAction, number> = { block: 0, ask: 1, allow: 2 };
+const ACTION_RANK: Record<PolicyAction, number> = {
+  block: 0,
+  ask: 1,
+  allow: 2,
+};
 
 function applyTrustedProjectLayer(
   base: SetupConfig,
@@ -333,16 +357,19 @@ function applyTrustedProjectLayer(
   diagnostics: ConfigDiagnostic[],
 ): SetupConfig {
   const candidate = applyUserLayer(base, raw, source, diagnostics);
-  const projectPermissions = isObject(raw.permissions) ? raw.permissions : undefined;
+  const projectPermissions = isObject(raw.permissions)
+    ? raw.permissions
+    : undefined;
   for (const key of ["unknownTools", "bash"] as const) {
     if (
       projectPermissions?.[key] !== undefined &&
-      ACTION_RANK[candidate.permissions[key]] > ACTION_RANK[base.permissions[key]]
+      ACTION_RANK[candidate.permissions[key]] >
+        ACTION_RANK[base.permissions[key]]
     ) {
       diagnostics.push({
         level: "warning",
         source,
-        message: `project config may not relax permissions.${key}; global value retained`,
+        message: `Projektkonfiguration darf Berechtigungen.${key} nicht lockern; globaler Wert beibehalten`,
       });
       candidate.permissions[key] = base.permissions[key];
     }
@@ -354,7 +381,10 @@ function applyTrustedProjectLayer(
   return candidate;
 }
 
-export function loadSetupConfig(cwd: string, trusted: boolean): LoadedSetupConfig {
+export function loadSetupConfig(
+  cwd: string,
+  trusted: boolean,
+): LoadedSetupConfig {
   const diagnostics: ConfigDiagnostic[] = [];
   const sources: string[] = [];
   const globalPath = join(getAgentDir(), "setup.json");
@@ -370,7 +400,12 @@ export function loadSetupConfig(cwd: string, trusted: boolean): LoadedSetupConfi
     const project = readObject(projectPath, diagnostics);
     if (project) {
       sources.push(projectPath);
-      config = applyTrustedProjectLayer(config, project, projectPath, diagnostics);
+      config = applyTrustedProjectLayer(
+        config,
+        project,
+        projectPath,
+        diagnostics,
+      );
     }
   } else if (existsSync(projectPath)) {
     diagnostics.push({

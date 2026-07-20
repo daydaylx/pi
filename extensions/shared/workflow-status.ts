@@ -57,14 +57,14 @@ export const ZENTUI_STATUS_KEYS = {
 } as const;
 
 /** Only elevated permission modes belong in the compact footer. */
-export type PermissionRiskStatusValue = "⚠ FULL ACCESS" | "⚠ YOLO";
+export type PermissionRiskStatusValue = "⚠ VOLLZUGRIFF" | "⚠ YOLO";
 
 export function permissionRiskStatusValue(
   level: PermissionLevel,
 ): PermissionRiskStatusValue | undefined {
   switch (level) {
     case "full-access":
-      return "⚠ FULL ACCESS";
+      return "⚠ VOLLZUGRIFF";
     case "yolo":
       return "⚠ YOLO";
     default:
@@ -86,35 +86,35 @@ export function workflowStatusValue(
   switch (phase) {
     case "draft":
       return mode === "detailed_plan"
-        ? "ARCH PLAN"
+        ? "ARCHITEKTURPLAN"
         : mode === "simple_plan"
           ? "PLAN"
-          : "WORK · PLAN STORED";
+          : "ARBEIT · PLAN GESPEICHERT";
     case "deciding":
-      return "ANALYZE";
+      return "ANALYSE";
     case "reviewing":
     case "reviewed":
       return "REVIEW";
     case "executing": {
       const total = todos.length;
-      if (total === 0) return "WORK";
+      if (total === 0) return "ARBEIT";
       const completed = todos.filter((todo) => todo.completed).length;
-      return `WORK ${completed}/${total}`;
+      return `ARBEIT ${completed}/${total}`;
     }
     case "paused": {
       const total = todos.length;
       const completed = todos.filter((todo) => todo.completed).length;
-      return total > 0 ? `PAUSED ${completed}/${total}` : "PAUSED";
+      return total > 0 ? `PAUSIERT ${completed}/${total}` : "PAUSIERT";
     }
     case "blocked": {
       const total = todos.length;
       const completed = todos.filter((todo) => todo.completed).length;
-      return total > 0 ? `BLOCKED ${completed}/${total}` : "BLOCKED";
+      return total > 0 ? `BLOCKIERT ${completed}/${total}` : "BLOCKIERT";
     }
     case "ready":
-      return "READY";
+      return "BEREIT";
     case "idle":
-      return "WORK";
+      return "ARBEIT";
   }
 }
 

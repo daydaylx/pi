@@ -119,11 +119,7 @@ const DECISION_INTAKE_MARKER = "[DECISION INTAKE ACTIVE]";
 const SUBAGENT_EXECUTING_REMINDER =
   "SUBAGENTEN:\nNutze das `subagent`-Tool bei Bedarf (siehe AGENTS.md → Subagenten-Delegation), z. B. für abgegrenzte Teilscopes oder Prüfungen nach Änderungen.";
 
-const PLAN_PROGRESS_STATUSES = [
-  "in_progress",
-  "completed",
-  "blocked",
-] as const;
+const PLAN_PROGRESS_STATUSES = ["in_progress", "completed", "blocked"] as const;
 
 const PlanProgressParams = Type.Object({
   executionId: Type.String({
@@ -393,7 +389,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
   function formatPlanTodoLines(todos: TodoItem[]): string[] {
     return todos.map((todo) => {
-      const progress = progressRecords.find((record) => record.step === todo.step);
+      const progress = progressRecords.find(
+        (record) => record.step === todo.step,
+      );
       const state = todo.completed
         ? "[x]"
         : progress?.status === "blocked"
@@ -414,9 +412,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     )?.step;
     const currentTodo =
       (activeStep
-        ? todos.find(
-            (todo) => todo.step === activeStep && !todo.completed,
-          )
+        ? todos.find((todo) => todo.step === activeStep && !todo.completed)
         : undefined) ?? todos.find((todo) => !todo.completed);
     return {
       phase: auroraWorkflowPhase(phase),
@@ -453,9 +449,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         expectedPlanHash !== undefined &&
         hashPlanContent(content) !== expectedPlanHash
       ) {
-        throw new Error(
-          "Plan-Hash hat sich vor dem Workflow-Commit geändert.",
-        );
+        throw new Error("Plan-Hash hat sich vor dem Workflow-Commit geändert.");
       }
       const snapshot = createWorkflowStateSnapshot(content, {
         mode,
@@ -467,7 +461,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         planCreationMode,
         decisionBriefHash,
         execution:
-          phase === "executing" && activeRun?.kind === "executing" && activeRun.planHash
+          phase === "executing" &&
+          activeRun?.kind === "executing" &&
+          activeRun.planHash
             ? {
                 executionId: activeRun.id,
                 startedAt: activeRun.startedAt,
@@ -685,7 +681,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       ctx.ui.notify(`${MODE_LABEL[target]} ist bereits aktiv.`, "info");
       return true;
     }
-    if (!options.skipAbort && !(await confirmAbortActiveTurn(ctx))) return false;
+    if (!options.skipAbort && !(await confirmAbortActiveTurn(ctx)))
+      return false;
     normalizeInterruptedPhase(ctx);
 
     if (target !== "work") {
@@ -927,10 +924,14 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     let previousHash: string | undefined;
     try {
       const previous = readPlanFile(ctx.cwd);
-      previousHash = previous === undefined ? undefined : hashPlanContent(previous);
+      previousHash =
+        previous === undefined ? undefined : hashPlanContent(previous);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Bestehender Plan ist nicht sicher lesbar: ${message}`, "error");
+      ctx.ui.notify(
+        `Bestehender Plan ist nicht sicher lesbar: ${message}`,
+        "error",
+      );
       return;
     }
 
@@ -941,7 +942,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         decisionBriefHash = brief ? hashPlanContent(brief) : undefined;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Decision Brief ist nicht sicher lesbar: ${message}`, "error");
+        ctx.ui.notify(
+          `Decision Brief ist nicht sicher lesbar: ${message}`,
+          "error",
+        );
         return;
       }
     } else {
@@ -1326,7 +1330,8 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
 
   async function openModelRoles(ctx: ExtensionContext): Promise<void> {
     const token = captureSessionToken(ctx);
-    const models = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config.models;
+    const models = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config
+      .models;
     const selected = await runMenu(
       ctx,
       "Modellrollen",
@@ -1347,7 +1352,10 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     }
     const reference = splitModelReference(models[selected]);
     if (!reference) {
-      ctx.ui.notify(`Modellrolle ${selected} ist ungültig konfiguriert.`, "error");
+      ctx.ui.notify(
+        `Modellrolle ${selected} ist ungültig konfiguriert.`,
+        "error",
+      );
       return;
     }
     const [provider, id] = reference;
@@ -1362,7 +1370,10 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     try {
       await pi.setModel(target);
       if (!isSessionTokenCurrent(token, ctx)) return;
-      ctx.ui.notify(`${selected === "fast" ? "Fast" : selected === "primary" ? "Primary" : "Deep"}: ${models[selected]} aktiv.`, "info");
+      ctx.ui.notify(
+        `${selected === "fast" ? "Fast" : selected === "primary" ? "Primary" : "Deep"}: ${models[selected]} aktiv.`,
+        "info",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(
@@ -1375,7 +1386,11 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
   async function openControlCenter(ctx: ExtensionContext): Promise<void> {
     const token = captureSessionToken(ctx);
     let snapshot:
-      | { permissionLabel: string; thinkingMode: "auto" | "manual"; thinkingLevel: ThinkingLevel }
+      | {
+          permissionLabel: string;
+          thinkingMode: "auto" | "manual";
+          thinkingLevel: ThinkingLevel;
+        }
       | undefined;
     pi.events.emit(CONTROL_CENTER_EVENTS.snapshot, {
       respond: (value: ControlCenterSnapshot) => {
@@ -1402,7 +1417,11 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
       await enterDecisionModeFromMenu(ctx);
       return;
     }
-    if (selected === "simple_plan" || selected === "detailed_plan" || selected === "work") {
+    if (
+      selected === "simple_plan" ||
+      selected === "detailed_plan" ||
+      selected === "work"
+    ) {
       await setWorkflowMode(selected, ctx);
       return;
     }
@@ -1426,7 +1445,8 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
   }
 
   pi.registerFlag("plan", {
-    description: "Start in detailed plan mode (permissions unchanged)",
+    description:
+      "Im detaillierten Planungsmodus starten (Berechtigungen unverändert)",
     type: "boolean",
     default: false,
   });
@@ -1770,8 +1790,19 @@ FORTSCHRITT:
     completedSteps: readonly number[],
     evidence: string,
   ):
-    | { ok: true; content: string; updated: number; todos: TodoItem[]; planHash: string }
-    | { ok: false; reason: string; expectedHash?: string; currentHash: string } {
+    | {
+        ok: true;
+        content: string;
+        updated: number;
+        todos: TodoItem[];
+        planHash: string;
+      }
+    | {
+        ok: false;
+        reason: string;
+        expectedHash?: string;
+        currentHash: string;
+      } {
     const currentHash = hashPlanContent(current);
     if (
       phase === "executing" &&
@@ -1800,13 +1831,15 @@ FORTSCHRITT:
             reason:
               "Der Plan wurde vor der Fortschrittsmutation konkurrierend verändert.",
             currentHash:
-              lockedContent === undefined ? "missing" : hashPlanContent(lockedContent),
+              lockedContent === undefined
+                ? "missing"
+                : hashPlanContent(lockedContent),
           };
         }
 
         const result = applyDoneSteps(lockedContent, completedSteps);
         if (result.updated > 0) {
-        writePlanFileAtomic(ctx.cwd, result.content);
+          writePlanFileAtomic(ctx.cwd, result.content);
         }
         const planHash = hashPlanContent(result.content);
         if (activeRun?.kind === "executing") activeRun.planHash = planHash;
@@ -2148,7 +2181,10 @@ FORTSCHRITT:
       return;
     }
 
-    const structureErrors = validatePlanStructure(content, effectivePlanType(content));
+    const structureErrors = validatePlanStructure(
+      content,
+      effectivePlanType(content),
+    );
     const staticFindings =
       structureErrors.length === 0
         ? "Die formale Planstruktur ist vollständig."
@@ -2213,12 +2249,7 @@ ${content}
             "Plan enthält wieder offene oder keine Todos; er wird nicht als complete archiviert.",
           );
         }
-        return archivePlanFile(
-          ctx.cwd,
-          "complete",
-          new Date(),
-          currentHash,
-        );
+        return archivePlanFile(ctx.cwd, "complete", new Date(), currentHash);
       });
       archiveBriefAlongsidePlan(ctx);
       phase = mode !== "work" ? "draft" : "idle";
@@ -2336,7 +2367,10 @@ ${content}
       );
       return;
     }
-    const structureErrors = validatePlanStructure(content, effectivePlanType(content));
+    const structureErrors = validatePlanStructure(
+      content,
+      effectivePlanType(content),
+    );
     if (structureErrors.length > 0) {
       phase = "draft";
       reviewedHash = undefined;
@@ -2374,7 +2408,9 @@ ${content}
         return;
       }
       const resume = await ctx.ui.confirm(
-        phase === "blocked" ? "Blockierten Plan fortsetzen?" : "Pausierten Plan fortsetzen?",
+        phase === "blocked"
+          ? "Blockierten Plan fortsetzen?"
+          : "Pausierten Plan fortsetzen?",
         "Der Planhash wird erneut geprüft und eine neue Execution-ID erzeugt.",
       );
       if (!isSessionTokenCurrent(token, ctx)) return;
@@ -2417,11 +2453,7 @@ ${content}
     phase = "executing";
     reviewedHash = undefined;
     mode = "work";
-    const executionId = startRun(
-      "executing",
-      ctx,
-      hashPlanContent(content),
-    );
+    const executionId = startRun("executing", ctx, hashPlanContent(content));
     updateStatus(ctx);
     if (!persistState(ctx)) {
       phase = "paused";
@@ -2484,14 +2516,14 @@ CHANGED_FILES:
       const message = error instanceof Error ? error.message : String(error);
       updateStatus(ctx);
       persistState(ctx);
-      ctx.ui.notify(`Planausführung konnte nicht gestartet werden: ${message}`, "error");
+      ctx.ui.notify(
+        `Planausführung konnte nicht gestartet werden: ${message}`,
+        "error",
+      );
     }
   }
 
-  function planProgressResult(
-    text: string,
-    details: Record<string, unknown>,
-  ) {
+  function planProgressResult(text: string, details: Record<string, unknown>) {
     return {
       content: [{ type: "text" as const, text }],
       details,
@@ -2508,10 +2540,11 @@ CHANGED_FILES:
       const evidence = params.evidence.trim();
       const status = params.status as PlanProgressStatus;
       if (evidence.length === 0) {
-        return planProgressResult(
-          "Fehler: evidence darf nicht leer sein.",
-          { ok: false, step: params.step, status },
-        );
+        return planProgressResult("Fehler: evidence darf nicht leer sein.", {
+          ok: false,
+          step: params.step,
+          status,
+        });
       }
       if (evidence.length > 1000) {
         return planProgressResult(
@@ -2550,11 +2583,14 @@ CHANGED_FILES:
         reviewedHash = undefined;
         persistState(ctx);
         updateStatus(ctx);
-        return planProgressResult("Fehler: Keine aktive Plan-Datei vorhanden.", {
-          ok: false,
-          step: params.step,
-          status,
-        });
+        return planProgressResult(
+          "Fehler: Keine aktive Plan-Datei vorhanden.",
+          {
+            ok: false,
+            step: params.step,
+            status,
+          },
+        );
       }
 
       const currentHash = hashPlanContent(content);
@@ -2619,7 +2655,9 @@ CHANGED_FILES:
         updatedAt: now,
       };
       progressRecords = [
-        ...progressRecords.filter((candidate) => candidate.step !== params.step),
+        ...progressRecords.filter(
+          (candidate) => candidate.step !== params.step,
+        ),
         record,
       ].sort((a, b) => a.step - b.step);
 
@@ -2634,10 +2672,11 @@ CHANGED_FILES:
         );
         if (!completion.ok) {
           progressRecords = previousProgressRecords;
-          return planProgressResult(
-            `Fehler: ${completion.reason}`,
-            { ok: false, step: params.step, status },
-          );
+          return planProgressResult(`Fehler: ${completion.reason}`, {
+            ok: false,
+            step: params.step,
+            status,
+          });
         }
         updatedContent = completion.content;
         checkboxUpdated = completion.updated === 1;
@@ -2708,10 +2747,7 @@ CHANGED_FILES:
         );
       }
       updateStatus(ctx);
-      const statusLabel =
-        status === "completed"
-          ? "erledigt"
-          : "in Arbeit";
+      const statusLabel = status === "completed" ? "erledigt" : "in Arbeit";
       return planProgressResult(
         `T${params.step} (${todo.text}) ist jetzt ${statusLabel}. Nachweis: ${evidence}`,
         {

@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.80.7",
+  "lastChangelogVersion": "0.80.10",
   "theme": "aurora-night",
   "defaultProvider": "zai",
   "defaultModel": "glm-5.2",
@@ -50,7 +50,8 @@
     "+extensions/ask-user.ts",
     "+extensions/lsp/index.ts",
     "+extensions/tool-output-guard.ts",
-    "+extensions/aurora-ui/index.ts"
+    "+extensions/aurora-ui/index.ts",
+    "+extensions/diff-viewer/index.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",

@@ -31,7 +31,8 @@ import {
 } from "./utils.ts";
 
 export const WORKFLOW_STATE_VERSION = 2 as const;
-export const WORKFLOW_STATE_RELATIVE_PATH = ".agent/plans/current-plan.state.json";
+export const WORKFLOW_STATE_RELATIVE_PATH =
+  ".agent/plans/current-plan.state.json";
 export const WORKFLOW_LOCK_RELATIVE_PATH = ".agent/plans/.workflow.lock";
 const WORKFLOW_LOCK_STALE_MS = 5 * 60 * 1000;
 
@@ -107,15 +108,37 @@ export interface WorkflowLockHandle {
 
 const MODES = new Set<WorkflowMode>(["work", "simple_plan", "detailed_plan"]);
 const PHASES = new Set<WorkflowPhase>([
-  "idle", "draft", "deciding", "reviewing", "reviewed", "executing", "paused", "blocked", "ready",
+  "idle",
+  "draft",
+  "deciding",
+  "reviewing",
+  "reviewed",
+  "executing",
+  "paused",
+  "blocked",
+  "ready",
 ]);
 const LIFECYCLES = new Set<WorkflowLifecycle>([
-  "work_idle", "planning", "deciding", "reviewing", "reviewed", "executing", "paused", "blocked", "ready",
+  "work_idle",
+  "planning",
+  "deciding",
+  "reviewing",
+  "reviewed",
+  "executing",
+  "paused",
+  "blocked",
+  "ready",
 ]);
 const PROGRESS_STATUSES = new Set<PlanProgressStatus>([
-  "in_progress", "completed", "blocked",
+  "in_progress",
+  "completed",
+  "blocked",
 ]);
-const PLAN_TYPES = new Set<PlanType>(["simple_plan", "detailed_plan", "unknown"]);
+const PLAN_TYPES = new Set<PlanType>([
+  "simple_plan",
+  "detailed_plan",
+  "unknown",
+]);
 const HASH_PATTERN = /^[0-9a-f]{64}$/i;
 
 function isInside(basePath: string, candidatePath: string): boolean {
@@ -126,14 +149,18 @@ function isInside(basePath: string, candidatePath: string): boolean {
 function assertSafeStatePath(cwd: string, statePath: string): void {
   const root = resolve(cwd);
   if (!isInside(root, statePath)) {
-    throw new Error(`Workflow state escapes working directory: ${statePath}`);
+    throw new Error(
+      `Workflow-Zustand verlässt das Arbeitsverzeichnis: ${statePath}`,
+    );
   }
   const rel = relative(root, statePath);
   let current = root;
   for (const segment of rel.split(sep).filter(Boolean)) {
     current = resolve(current, segment);
     if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
-      throw new Error(`Symbolic links are not allowed in workflow state paths: ${current}`);
+      throw new Error(
+        `Symbolische Links sind in Workflow-Zustandspfaden nicht erlaubt: ${current}`,
+      );
     }
   }
 }
@@ -155,12 +182,26 @@ function parseProgressRecord(
   requireTodoHash: boolean,
 ): PlanProgressRecord | undefined {
   if (!isRecord(value)) return undefined;
-  if (!Number.isSafeInteger(value.step) || Number(value.step) <= 0) return undefined;
-  if (typeof value.status !== "string" || !PROGRESS_STATUSES.has(value.status as PlanProgressStatus)) return undefined;
-  if (typeof value.evidence !== "string" || value.evidence.trim() === "") return undefined;
+  if (!Number.isSafeInteger(value.step) || Number(value.step) <= 0)
+    return undefined;
+  if (
+    typeof value.status !== "string" ||
+    !PROGRESS_STATUSES.has(value.status as PlanProgressStatus)
+  )
+    return undefined;
+  if (typeof value.evidence !== "string" || value.evidence.trim() === "")
+    return undefined;
   if (typeof value.updatedAt !== "string") return undefined;
-  if (requireTodoHash && (typeof value.todoHash !== "string" || !HASH_PATTERN.test(value.todoHash))) return undefined;
-  if (value.todoHash !== undefined && (typeof value.todoHash !== "string" || !HASH_PATTERN.test(value.todoHash))) return undefined;
+  if (
+    requireTodoHash &&
+    (typeof value.todoHash !== "string" || !HASH_PATTERN.test(value.todoHash))
+  )
+    return undefined;
+  if (
+    value.todoHash !== undefined &&
+    (typeof value.todoHash !== "string" || !HASH_PATTERN.test(value.todoHash))
+  )
+    return undefined;
   return {
     step: Number(value.step),
     status: value.status as PlanProgressStatus,
@@ -172,72 +213,148 @@ function parseProgressRecord(
 
 function parseExecution(value: unknown): WorkflowExecutionMetadata | undefined {
   if (!isRecord(value)) return undefined;
-  if (typeof value.executionId !== "string" || value.executionId.trim() === "") return undefined;
+  if (typeof value.executionId !== "string" || value.executionId.trim() === "")
+    return undefined;
   if (typeof value.startedAt !== "string") return undefined;
-  if (typeof value.expectedPlanHash !== "string" || !HASH_PATTERN.test(value.expectedPlanHash)) return undefined;
-  if (value.sessionId !== undefined && typeof value.sessionId !== "string") return undefined;
-  if (value.runId !== undefined && typeof value.runId !== "string") return undefined;
+  if (
+    typeof value.expectedPlanHash !== "string" ||
+    !HASH_PATTERN.test(value.expectedPlanHash)
+  )
+    return undefined;
+  if (value.sessionId !== undefined && typeof value.sessionId !== "string")
+    return undefined;
+  if (value.runId !== undefined && typeof value.runId !== "string")
+    return undefined;
   return {
     executionId: value.executionId,
     startedAt: value.startedAt,
     expectedPlanHash: value.expectedPlanHash,
-    ...(typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}),
+    ...(typeof value.sessionId === "string"
+      ? { sessionId: value.sessionId }
+      : {}),
     ...(typeof value.runId === "string" ? { runId: value.runId } : {}),
   };
 }
 
 function parseV1(value: unknown): WorkflowSidecarV1 | undefined {
   if (!isRecord(value) || value.version !== 1) return undefined;
-  if (typeof value.planHash !== "string" || !HASH_PATTERN.test(value.planHash)) return undefined;
-  if (typeof value.mode !== "string" || !MODES.has(value.mode as WorkflowMode)) return undefined;
-  if (typeof value.phase !== "string" || !PHASES.has(value.phase as WorkflowPhase)) return undefined;
-  if (value.reviewedHash !== undefined && typeof value.reviewedHash !== "string") return undefined;
-  if (value.planCreationMode !== undefined && value.planCreationMode !== "simple_plan" && value.planCreationMode !== "detailed_plan") return undefined;
-  if (!Array.isArray(value.progress) || typeof value.updatedAt !== "string") return undefined;
-  const progress = value.progress.map((record) => parseProgressRecord(record, false));
+  if (typeof value.planHash !== "string" || !HASH_PATTERN.test(value.planHash))
+    return undefined;
+  if (typeof value.mode !== "string" || !MODES.has(value.mode as WorkflowMode))
+    return undefined;
+  if (
+    typeof value.phase !== "string" ||
+    !PHASES.has(value.phase as WorkflowPhase)
+  )
+    return undefined;
+  if (
+    value.reviewedHash !== undefined &&
+    typeof value.reviewedHash !== "string"
+  )
+    return undefined;
+  if (
+    value.planCreationMode !== undefined &&
+    value.planCreationMode !== "simple_plan" &&
+    value.planCreationMode !== "detailed_plan"
+  )
+    return undefined;
+  if (!Array.isArray(value.progress) || typeof value.updatedAt !== "string")
+    return undefined;
+  const progress = value.progress.map((record) =>
+    parseProgressRecord(record, false),
+  );
   if (progress.some((record) => record === undefined)) return undefined;
   return {
     version: 1,
     planHash: value.planHash,
     mode: value.mode as WorkflowMode,
     phase: value.phase as WorkflowPhase,
-    ...(typeof value.reviewedHash === "string" ? { reviewedHash: value.reviewedHash } : {}),
-    ...(value.planCreationMode ? { planCreationMode: value.planCreationMode as "simple_plan" | "detailed_plan" } : {}),
+    ...(typeof value.reviewedHash === "string"
+      ? { reviewedHash: value.reviewedHash }
+      : {}),
+    ...(value.planCreationMode
+      ? {
+          planCreationMode: value.planCreationMode as
+            "simple_plan" | "detailed_plan",
+        }
+      : {}),
     progress: progress as PlanProgressRecord[],
     updatedAt: value.updatedAt,
   };
 }
 
 function parseWorkflowState(value: unknown): WorkflowSidecarState | undefined {
-  if (!isRecord(value) || value.version !== WORKFLOW_STATE_VERSION) return undefined;
-  if (!Number.isSafeInteger(value.revision) || Number(value.revision) <= 0) return undefined;
-  if (typeof value.planId !== "string" || value.planId.trim() === "") return undefined;
-  if (typeof value.planHash !== "string" || !HASH_PATTERN.test(value.planHash)) return undefined;
-  if (typeof value.planType !== "string" || !PLAN_TYPES.has(value.planType as PlanType)) return undefined;
-  if (typeof value.lifecycle !== "string" || !LIFECYCLES.has(value.lifecycle as WorkflowLifecycle)) return undefined;
-  if (typeof value.mode !== "string" || !MODES.has(value.mode as WorkflowMode)) return undefined;
-  if (typeof value.phase !== "string" || !PHASES.has(value.phase as WorkflowPhase)) return undefined;
-  if (value.reviewedHash !== undefined && (typeof value.reviewedHash !== "string" || !HASH_PATTERN.test(value.reviewedHash))) return undefined;
-  if (value.decisionBriefHash !== undefined && (typeof value.decisionBriefHash !== "string" || !HASH_PATTERN.test(value.decisionBriefHash))) return undefined;
-  if (value.planCreationMode !== undefined && value.planCreationMode !== "simple_plan" && value.planCreationMode !== "detailed_plan") return undefined;
-  if (!Array.isArray(value.progress) || typeof value.updatedAt !== "string") return undefined;
-  const progress = value.progress.map((record) => parseProgressRecord(record, true));
+  if (!isRecord(value) || value.version !== WORKFLOW_STATE_VERSION)
+    return undefined;
+  if (!Number.isSafeInteger(value.revision) || Number(value.revision) <= 0)
+    return undefined;
+  if (typeof value.planId !== "string" || value.planId.trim() === "")
+    return undefined;
+  if (typeof value.planHash !== "string" || !HASH_PATTERN.test(value.planHash))
+    return undefined;
+  if (
+    typeof value.planType !== "string" ||
+    !PLAN_TYPES.has(value.planType as PlanType)
+  )
+    return undefined;
+  if (
+    typeof value.lifecycle !== "string" ||
+    !LIFECYCLES.has(value.lifecycle as WorkflowLifecycle)
+  )
+    return undefined;
+  if (typeof value.mode !== "string" || !MODES.has(value.mode as WorkflowMode))
+    return undefined;
+  if (
+    typeof value.phase !== "string" ||
+    !PHASES.has(value.phase as WorkflowPhase)
+  )
+    return undefined;
+  if (
+    value.reviewedHash !== undefined &&
+    (typeof value.reviewedHash !== "string" ||
+      !HASH_PATTERN.test(value.reviewedHash))
+  )
+    return undefined;
+  if (
+    value.decisionBriefHash !== undefined &&
+    (typeof value.decisionBriefHash !== "string" ||
+      !HASH_PATTERN.test(value.decisionBriefHash))
+  )
+    return undefined;
+  if (
+    value.planCreationMode !== undefined &&
+    value.planCreationMode !== "simple_plan" &&
+    value.planCreationMode !== "detailed_plan"
+  )
+    return undefined;
+  if (!Array.isArray(value.progress) || typeof value.updatedAt !== "string")
+    return undefined;
+  const progress = value.progress.map((record) =>
+    parseProgressRecord(record, true),
+  );
   if (progress.some((record) => record === undefined)) return undefined;
-  const execution = value.execution === undefined ? undefined : parseExecution(value.execution);
+  const execution =
+    value.execution === undefined ? undefined : parseExecution(value.execution);
   if (value.execution !== undefined && !execution) return undefined;
   const lifecycle = value.lifecycle as WorkflowLifecycle;
   if (value.phase !== compatibilityPhase(lifecycle)) return undefined;
   if ((lifecycle === "executing") !== Boolean(execution)) return undefined;
-  if (execution?.expectedPlanHash !== undefined && execution.expectedPlanHash !== value.planHash) {
+  if (
+    execution?.expectedPlanHash !== undefined &&
+    execution.expectedPlanHash !== value.planHash
+  ) {
     return undefined;
   }
   if (
-    ["work_idle", "executing", "paused", "blocked", "ready"].includes(lifecycle) &&
+    ["work_idle", "executing", "paused", "blocked", "ready"].includes(
+      lifecycle,
+    ) &&
     value.mode !== "work"
   ) {
     return undefined;
   }
-  if (lifecycle === "reviewed" && value.reviewedHash !== value.planHash) return undefined;
+  if (lifecycle === "reviewed" && value.reviewedHash !== value.planHash)
+    return undefined;
   if (
     value.planCreationMode !== undefined &&
     value.planCreationMode !== value.planType
@@ -245,10 +362,15 @@ function parseWorkflowState(value: unknown): WorkflowSidecarState | undefined {
     return undefined;
   }
   const validProgress = progress as PlanProgressRecord[];
-  if (new Set(validProgress.map((record) => record.step)).size !== validProgress.length) {
+  if (
+    new Set(validProgress.map((record) => record.step)).size !==
+    validProgress.length
+  ) {
     return undefined;
   }
-  if (validProgress.filter((record) => record.status === "in_progress").length > 1) {
+  if (
+    validProgress.filter((record) => record.status === "in_progress").length > 1
+  ) {
     return undefined;
   }
   return {
@@ -260,51 +382,88 @@ function parseWorkflowState(value: unknown): WorkflowSidecarState | undefined {
     lifecycle,
     mode: value.mode as WorkflowMode,
     phase: value.phase as WorkflowPhase,
-    ...(typeof value.reviewedHash === "string" ? { reviewedHash: value.reviewedHash } : {}),
-    ...(value.planCreationMode ? { planCreationMode: value.planCreationMode as "simple_plan" | "detailed_plan" } : {}),
-    ...(typeof value.decisionBriefHash === "string" ? { decisionBriefHash: value.decisionBriefHash } : {}),
+    ...(typeof value.reviewedHash === "string"
+      ? { reviewedHash: value.reviewedHash }
+      : {}),
+    ...(value.planCreationMode
+      ? {
+          planCreationMode: value.planCreationMode as
+            "simple_plan" | "detailed_plan",
+        }
+      : {}),
+    ...(typeof value.decisionBriefHash === "string"
+      ? { decisionBriefHash: value.decisionBriefHash }
+      : {}),
     ...(execution ? { execution } : {}),
     progress: validProgress,
     updatedAt: value.updatedAt,
   };
 }
 
-function lifecycleForPhase(mode: WorkflowMode, phase: WorkflowPhase): WorkflowLifecycle {
+function lifecycleForPhase(
+  mode: WorkflowMode,
+  phase: WorkflowPhase,
+): WorkflowLifecycle {
   switch (phase) {
-    case "idle": return mode === "work" ? "work_idle" : "planning";
-    case "draft": return "planning";
-    case "deciding": return "deciding";
-    case "reviewing": return "reviewing";
-    case "reviewed": return "reviewed";
-    case "executing": return "executing";
-    case "paused": return "paused";
-    case "blocked": return "blocked";
-    case "ready": return "ready";
+    case "idle":
+      return mode === "work" ? "work_idle" : "planning";
+    case "draft":
+      return "planning";
+    case "deciding":
+      return "deciding";
+    case "reviewing":
+      return "reviewing";
+    case "reviewed":
+      return "reviewed";
+    case "executing":
+      return "executing";
+    case "paused":
+      return "paused";
+    case "blocked":
+      return "blocked";
+    case "ready":
+      return "ready";
   }
 }
 
 function compatibilityPhase(lifecycle: WorkflowLifecycle): WorkflowPhase {
   switch (lifecycle) {
-    case "work_idle": return "idle";
-    case "planning": return "draft";
-    case "deciding": return "deciding";
-    case "reviewing": return "reviewing";
-    case "reviewed": return "reviewed";
-    case "executing": return "executing";
-    case "ready": return "ready";
-    case "paused": return "paused";
-    case "blocked": return "blocked";
+    case "work_idle":
+      return "idle";
+    case "planning":
+      return "draft";
+    case "deciding":
+      return "deciding";
+    case "reviewing":
+      return "reviewing";
+    case "reviewed":
+      return "reviewed";
+    case "executing":
+      return "executing";
+    case "ready":
+      return "ready";
+    case "paused":
+      return "paused";
+    case "blocked":
+      return "blocked";
   }
 }
 
-function conservativePlanType(planContent: string, previous?: PlanType): PlanType {
+function conservativePlanType(
+  planContent: string,
+  previous?: PlanType,
+): PlanType {
   const inferred = inferPlanType(planContent);
-  if (previous === "detailed_plan" || inferred === "detailed_plan") return "detailed_plan";
-  if (previous === "simple_plan" || inferred === "simple_plan") return "simple_plan";
+  if (previous === "detailed_plan" || inferred === "detailed_plan")
+    return "detailed_plan";
+  if (previous === "simple_plan" || inferred === "simple_plan")
+    return "simple_plan";
   return "unknown";
 }
 
-function creationMode(planType: PlanType): "simple_plan" | "detailed_plan" | undefined {
+function creationMode(
+  planType: PlanType,
+): "simple_plan" | "detailed_plan" | undefined {
   return planType === "unknown" ? undefined : planType;
 }
 
@@ -320,20 +479,27 @@ export function reconstructWorkflowState(
   return {
     version: WORKFLOW_STATE_VERSION,
     revision: Math.max(1, (previous?.revision ?? 0) + 1),
-    planId: previous?.planId ?? parsePlanMetadata(planContent)?.planId ?? randomUUID(),
+    planId:
+      previous?.planId ??
+      parsePlanMetadata(planContent)?.planId ??
+      randomUUID(),
     planHash: hashPlanContent(planContent),
     planType,
     lifecycle: allComplete ? "ready" : "planning",
     mode: "work",
     phase: allComplete ? "ready" : "draft",
-    ...(creationMode(planType) ? { planCreationMode: creationMode(planType) } : {}),
-    progress: todos.filter((todo) => todo.completed).map((todo) => ({
-      step: todo.step,
-      todoHash: computeTodoHash(todo),
-      status: "completed",
-      evidence: "Aus Markdown-Checkbox rekonstruiert.",
-      updatedAt,
-    })),
+    ...(creationMode(planType)
+      ? { planCreationMode: creationMode(planType) }
+      : {}),
+    progress: todos
+      .filter((todo) => todo.completed)
+      .map((todo) => ({
+        step: todo.step,
+        todoHash: computeTodoHash(todo),
+        status: "completed",
+        evidence: "Aus Markdown-Checkbox rekonstruiert.",
+        updatedAt,
+      })),
     updatedAt,
   };
 }
@@ -352,9 +518,10 @@ function migrateV1(
   }
   const todos = extractTodoItems(planContent);
   const planType = conservativePlanType(planContent, legacy.planCreationMode);
-  const lifecycle = legacy.phase === "executing"
-    ? "paused"
-    : lifecycleForPhase(legacy.mode, legacy.phase);
+  const lifecycle =
+    legacy.phase === "executing"
+      ? "paused"
+      : lifecycleForPhase(legacy.mode, legacy.phase);
   const progress = legacy.progress.flatMap((record) => {
     const todo = todos.find((candidate) => candidate.step === record.step);
     return todo ? [{ ...record, todoHash: computeTodoHash(todo) }] : [];
@@ -368,8 +535,12 @@ function migrateV1(
     lifecycle,
     mode: legacy.mode,
     phase: compatibilityPhase(lifecycle),
-    ...(legacy.reviewedHash === hashPlanContent(planContent) ? { reviewedHash: legacy.reviewedHash } : {}),
-    ...(creationMode(planType) ? { planCreationMode: creationMode(planType) } : {}),
+    ...(legacy.reviewedHash === hashPlanContent(planContent)
+      ? { reviewedHash: legacy.reviewedHash }
+      : {}),
+    ...(creationMode(planType)
+      ? { planCreationMode: creationMode(planType) }
+      : {}),
     progress,
     updatedAt: now.toISOString(),
   };
@@ -401,7 +572,8 @@ export function loadWorkflowState(cwd: string): LoadedWorkflowState {
             revision: parsed.revision,
           }),
           recovered: true,
-          warning: "Workflow-Sidecar war veraltet und wurde konservativ rekonstruiert.",
+          warning:
+            "Workflow-Sidecar war veraltet und wurde konservativ rekonstruiert.",
         };
       }
       if (parsed.lifecycle === "executing") {
@@ -415,7 +587,8 @@ export function loadWorkflowState(cwd: string): LoadedWorkflowState {
             updatedAt: new Date().toISOString(),
           },
           recovered: true,
-          warning: "Gespeicherte Planausführung wurde pausiert und muss explizit fortgesetzt werden.",
+          warning:
+            "Gespeicherte Planausführung wurde pausiert und muss explizit fortgesetzt werden.",
         };
       }
       return { state: parsed, recovered: false };
@@ -425,15 +598,17 @@ export function loadWorkflowState(cwd: string): LoadedWorkflowState {
       return {
         state: migrateV1(legacy, plan.content, legacy.planHash === currentHash),
         recovered: true,
-        warning: legacy.planHash === currentHash
-          ? "Workflow-Sidecar wurde von v1 auf v2 migriert."
-          : "Veralteter v1-Sidecar wurde konservativ aus dem aktuellen Plan migriert.",
+        warning:
+          legacy.planHash === currentHash
+            ? "Workflow-Sidecar wurde von v1 auf v2 migriert."
+            : "Veralteter v1-Sidecar wurde konservativ aus dem aktuellen Plan migriert.",
       };
     }
     return {
       state: reconstructWorkflowState(plan.content),
       recovered: true,
-      warning: "Workflow-Sidecar war ungültig und wurde aus Markdown rekonstruiert.",
+      warning:
+        "Workflow-Sidecar war ungültig und wurde aus Markdown rekonstruiert.",
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -457,17 +632,23 @@ export function readWorkflowStateRevision(cwd: string): number {
   throw new Error("Vorhandener Sidecar ist ungültig; Revision nicht lesbar.");
 }
 
-export function writeWorkflowStateAtomic(cwd: string, state: WorkflowSidecarState): void {
+export function writeWorkflowStateAtomic(
+  cwd: string,
+  state: WorkflowSidecarState,
+): void {
   const root = resolve(cwd);
   const statePath = getWorkflowStatePath(root);
   ensurePlanDirectory(root);
   assertSafeStatePath(root, statePath);
-  if (!parseWorkflowState(state)) throw new Error("Workflow-Sidecar v2 ist ungültig.");
+  if (!parseWorkflowState(state))
+    throw new Error("Workflow-Sidecar v2 ist ungültig.");
   const mode = existsSync(statePath) ? statSync(statePath).mode & 0o777 : 0o600;
   const temporaryPath = `${statePath}.tmp-${process.pid}-${Date.now()}`;
   try {
     writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, {
-      encoding: "utf8", flag: "wx", mode,
+      encoding: "utf8",
+      flag: "wx",
+      mode,
     });
     renameSync(temporaryPath, statePath);
   } finally {
@@ -489,11 +670,16 @@ export function acquireWorkspaceLock(cwd: string): WorkflowLockHandle {
   try {
     mkdirSync(lockPath, { mode: 0o700 });
   } catch (error) {
-    const code = isRecord(error) && typeof error.code === "string" ? error.code : undefined;
+    const code =
+      isRecord(error) && typeof error.code === "string"
+        ? error.code
+        : undefined;
     if (code === "EEXIST") {
       const age = Date.now() - statSync(lockPath).mtimeMs;
       if (age <= WORKFLOW_LOCK_STALE_MS) {
-        throw new Error("Workflow wird bereits von einer anderen Session geändert.");
+        throw new Error(
+          "Workflow wird bereits von einer anderen Session geändert.",
+        );
       }
       try {
         rmdirSync(lockPath);
@@ -535,11 +721,17 @@ export function writeWorkflowStateAtomicCAS(
   return withWorkspaceLock(cwd, () => {
     const plan = readPlanFileState(cwd);
     if (plan.status !== "ok") {
-      throw new Error(plan.status === "missing" ? "Plan fehlt; CAS-Schreibvorgang abgebrochen." : plan.error);
+      throw new Error(
+        plan.status === "missing"
+          ? "Plan fehlt; CAS-Schreibvorgang abgebrochen."
+          : plan.error,
+      );
     }
     const planHash = hashPlanContent(plan.content);
     if (expected.planHash !== undefined && expected.planHash !== planHash) {
-      throw new Error("Plan-Hash hat sich geändert; CAS-Schreibvorgang abgebrochen.");
+      throw new Error(
+        "Plan-Hash hat sich geändert; CAS-Schreibvorgang abgebrochen.",
+      );
     }
     if (state.planHash !== planHash) {
       throw new Error("Sidecar referenziert nicht den aktuellen Plan-Hash.");
@@ -550,16 +742,27 @@ export function writeWorkflowStateAtomicCAS(
     if (existsSync(statePath)) {
       try {
         const raw = JSON.parse(readFileSync(statePath, "utf8")) as unknown;
-        currentRevision = parseWorkflowState(raw)?.revision ?? (parseV1(raw) ? 0 : -1);
+        currentRevision =
+          parseWorkflowState(raw)?.revision ?? (parseV1(raw) ? 0 : -1);
       } catch {
         currentRevision = -1;
       }
     }
-    if (currentRevision < 0) throw new Error("Vorhandener Sidecar ist ungültig; CAS abgebrochen.");
-    if (expected.revision !== undefined && currentRevision !== expected.revision) {
-      throw new Error(`Sidecar-Revision hat sich geändert (erwartet ${expected.revision}, aktuell ${currentRevision}).`);
+    if (currentRevision < 0)
+      throw new Error("Vorhandener Sidecar ist ungültig; CAS abgebrochen.");
+    if (
+      expected.revision !== undefined &&
+      currentRevision !== expected.revision
+    ) {
+      throw new Error(
+        `Sidecar-Revision hat sich geändert (erwartet ${expected.revision}, aktuell ${currentRevision}).`,
+      );
     }
-    const next = { ...state, revision: currentRevision + 1, updatedAt: new Date().toISOString() };
+    const next = {
+      ...state,
+      revision: currentRevision + 1,
+      updatedAt: new Date().toISOString(),
+    };
     writeWorkflowStateAtomic(cwd, next);
     return next;
   });
@@ -590,7 +793,8 @@ export function createWorkflowStateSnapshot(
     const todo = byStep.get(record.step);
     if (!todo) return [];
     const todoHash = computeTodoHash(todo);
-    if (record.todoHash !== undefined && record.todoHash !== todoHash) return [];
+    if (record.todoHash !== undefined && record.todoHash !== todoHash)
+      return [];
     if (record.status === "in_progress") {
       if (activeSeen) return [];
       activeSeen = true;
@@ -600,7 +804,8 @@ export function createWorkflowStateSnapshot(
   const inferred = inferPlanType(planContent);
   const requestedType = runtime.planType ?? runtime.planCreationMode;
   const planType = conservativePlanType(planContent, requestedType ?? inferred);
-  const lifecycle = runtime.lifecycle ?? lifecycleForPhase(runtime.mode, runtime.phase);
+  const lifecycle =
+    runtime.lifecycle ?? lifecycleForPhase(runtime.mode, runtime.phase);
   const metadata = parsePlanMetadata(planContent);
   return {
     version: WORKFLOW_STATE_VERSION,
@@ -612,8 +817,12 @@ export function createWorkflowStateSnapshot(
     mode: runtime.mode,
     phase: compatibilityPhase(lifecycle),
     ...(runtime.reviewedHash ? { reviewedHash: runtime.reviewedHash } : {}),
-    ...(creationMode(planType) ? { planCreationMode: creationMode(planType) } : {}),
-    ...(runtime.decisionBriefHash ? { decisionBriefHash: runtime.decisionBriefHash } : {}),
+    ...(creationMode(planType)
+      ? { planCreationMode: creationMode(planType) }
+      : {}),
+    ...(runtime.decisionBriefHash
+      ? { decisionBriefHash: runtime.decisionBriefHash }
+      : {}),
     ...(runtime.execution ? { execution: runtime.execution } : {}),
     progress,
     updatedAt: now.toISOString(),

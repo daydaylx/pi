@@ -390,11 +390,11 @@ function remediationFor(
 ): string | undefined {
   switch (kind) {
     case "missing_binary":
-      return `Install the server binary ('${command}') or disable the profile in .pi/lsp.json.`;
+      return `Server-Binärdatei installieren ('${command}') oder das Profil in .pi/lsp.json deaktivieren.`;
     case "timeout":
-      return "Raise requestTimeoutMs or restart the server with /lsp restart.";
+      return "requestTimeoutMs erhöhen oder Server mit /lsp restart neu starten.";
     case "crashed":
-      return "Check /lsp log for server stderr; the server may be misconfigured.";
+      return "Server-stderr in /lsp log prüfen; der Server ist möglicherweise fehlkonfiguriert.";
     default:
       return undefined;
   }

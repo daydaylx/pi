@@ -14,7 +14,8 @@ import type { LspConfig } from "./types.ts";
 
 export const LSP_STATUS_KEY = "lsp";
 
-export type LspFooterState = "off" | "idle" | "degraded" | `${number} active`;
+export type LspFooterState =
+  "aus" | "leerlauf" | "eingeschränkt" | `${number} aktiv`;
 
 export interface RegistryEntrySnapshot {
   state: LspClientState;
@@ -28,10 +29,10 @@ export function computeLspStatus(
   config: LspConfig,
   entries: RegistryEntrySnapshot[],
 ): LspFooterState {
-  if (!config.enabled || config.mode === "off") return "off";
-  if (entries.some((e) => e.state === "degraded")) return "degraded";
+  if (!config.enabled || config.mode === "off") return "aus";
+  if (entries.some((e) => e.state === "degraded")) return "eingeschränkt";
   const active = entries.filter((e) => e.state === "ready").length;
-  return active > 0 ? (`${active} active` as const) : "idle";
+  return active > 0 ? (`${active} aktiv` as const) : "leerlauf";
 }
 
 /** TUI-only, like every other footer status key in this repo. */

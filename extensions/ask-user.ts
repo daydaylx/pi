@@ -41,8 +41,7 @@ interface QuestionOption {
 }
 
 type DisplayOption =
-  | (QuestionOption & { isOther?: false })
-  | { label: string; isOther: true };
+  (QuestionOption & { isOther?: false }) | { label: string; isOther: true };
 
 interface QuestionDetails {
   question: string;
@@ -114,7 +113,7 @@ const QuestionParams = Type.Object({
 export default function askUser(pi: ExtensionAPI) {
   pi.registerTool({
     name: "ask_user",
-    label: "Ask User",
+    label: "Nutzer fragen",
     description:
       "Stellt dem Nutzer eine fokussierte Entscheidungsfrage mit 2–4 Optionen. Jede Option braucht Titel, Kurzbeschreibung, Aufwand und Risiko; genau eine Option wird über recommendedIndex als Empfehlung markiert und über recommendationReason begründet. Nutzen, wenn eine echte Nutzerentscheidung nötig ist, um fortzufahren.",
     parameters: QuestionParams,
@@ -125,7 +124,7 @@ export default function askUser(pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: `Error: ask_user benötigt den interaktiven TUI-Modus (aktueller Modus: "${ctx.mode}"). Diese Entscheidung kann hier nicht eingeholt werden.`,
+              text: `Fehler: ask_user benötigt den interaktiven TUI-Modus (aktueller Modus: "${ctx.mode}"). Diese Entscheidung kann hier nicht eingeholt werden.`,
             },
           ],
           details: {
@@ -141,7 +140,7 @@ export default function askUser(pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: `Error: Expected ${MIN_QUESTION_OPTIONS}–${MAX_QUESTION_OPTIONS} options`,
+              text: `Fehler: ${MIN_QUESTION_OPTIONS}–${MAX_QUESTION_OPTIONS} Optionen erwartet`,
             },
           ],
           details: {
@@ -337,9 +336,7 @@ export default function askUser(pi: ExtensionAPI) {
 
             const isRecommended = i === recommendedDisplayIndex;
             const color = selected ? "accent" : "text";
-            const tag = isRecommended
-              ? theme.fg("success", "  EMPFOHLEN")
-              : "";
+            const tag = isRecommended ? theme.fg("success", "  EMPFOHLEN") : "";
             addWrappedWithPrefix(
               prefix,
               theme.fg(color, `${i + 1}. ${opt.label}`) + tag,
@@ -419,9 +416,12 @@ export default function askUser(pi: ExtensionAPI) {
           const border = theme.fg("border", "│");
           const framed = [
             theme.fg("border", `╭${"─".repeat(innerWidth)}╮`),
-            ...lines.slice(1, -1).map((entry) =>
-              `${border}${truncateToWidth(entry, innerWidth, "…", true)}${border}`,
-            ),
+            ...lines
+              .slice(1, -1)
+              .map(
+                (entry) =>
+                  `${border}${truncateToWidth(entry, innerWidth, "…", true)}${border}`,
+              ),
             theme.fg("border", `╰${"─".repeat(innerWidth)}╯`),
           ];
           cachedLines = framed;
@@ -442,7 +442,7 @@ export default function askUser(pi: ExtensionAPI) {
 
       if (!result) {
         return {
-          content: [{ type: "text", text: "User cancelled the selection" }],
+          content: [{ type: "text", text: "Auswahl abgebrochen" }],
           details: {
             question: params.question,
             options: simpleOptions,
@@ -453,7 +453,7 @@ export default function askUser(pi: ExtensionAPI) {
 
       if (result.wasCustom) {
         return {
-          content: [{ type: "text", text: `User wrote: ${result.answer}` }],
+          content: [{ type: "text", text: `Eigene Eingabe: ${result.answer}` }],
           details: {
             question: params.question,
             options: simpleOptions,
@@ -466,7 +466,7 @@ export default function askUser(pi: ExtensionAPI) {
         content: [
           {
             type: "text",
-            text: `User selected: ${result.index}. ${result.answer}`,
+            text: `Ausgewählt: ${result.index}. ${result.answer}`,
           },
         ],
         details: {
@@ -501,7 +501,7 @@ export default function askUser(pi: ExtensionAPI) {
             ? numbered + theme.fg("success", " EMPFOHLEN")
             : numbered;
         });
-        text += `\n${theme.fg("dim", "  Options: ")}${parts.join(theme.fg("dim", ", "))}`;
+        text += `\n${theme.fg("dim", "  Optionen: ")}${parts.join(theme.fg("dim", ", "))}`;
       }
       return new Text(text, 0, 0);
     },
@@ -514,13 +514,13 @@ export default function askUser(pi: ExtensionAPI) {
       }
 
       if (details.answer === null) {
-        return new Text(theme.fg("warning", "Cancelled"), 0, 0);
+        return new Text(theme.fg("warning", "Abgebrochen"), 0, 0);
       }
 
       if (details.wasCustom) {
         return new Text(
           theme.fg("success", "✓ ") +
-            theme.fg("muted", "(wrote) ") +
+            theme.fg("muted", "(eigene Eingabe) ") +
             theme.fg("accent", details.answer),
           0,
           0,

@@ -58,8 +58,9 @@ function toAbsolute(path: string, cwd: string): string {
         kind: "protocol",
         serverId: "validation",
         workspaceRoot: cwd,
-        cause: `path '${path}' is outside the project`,
-        remediation: "Only files within the current project are accessible.",
+        cause: `Pfad '${path}' liegt außerhalb des Projekts`,
+        remediation:
+          "Nur Dateien innerhalb des aktuellen Projekts sind zugänglich.",
       });
     }
     return path;
@@ -223,7 +224,7 @@ export function registerLspDiagnosticsTool(
 ): void {
   pi.registerTool({
     name: "lsp_diagnostics",
-    label: "LSP Diagnostics",
+    label: "LSP-Diagnosen",
     description:
       "Liefert aktuelle Compiler-/Linter-Diagnosen (Fehler, Warnungen) für eine Datei via Language Server Protocol. Startet den zuständigen Server bei Bedarf lazy.",
     parameters: DiagnosticsParams,
@@ -462,10 +463,7 @@ async function withDocument<T>(
   }
 }
 
-function softFail(
-  feature: string,
-  profile: ServerProfile,
-) {
+function softFail(feature: string, profile: ServerProfile) {
   return lspTextResult(
     `LSP: ${profile.label} unterstützt ${feature} nicht (Capability fehlt).`,
   );
@@ -477,7 +475,7 @@ export function registerLspNavigationTools(
 ): void {
   pi.registerTool({
     name: "lsp_definition",
-    label: "LSP Definition",
+    label: "LSP-Definition",
     description:
       "Findet die Definitionsstelle eines Symbols an einer Position via Language Server Protocol.",
     parameters: DefinitionParams,
@@ -524,7 +522,7 @@ export function registerLspNavigationTools(
 
   pi.registerTool({
     name: "lsp_references",
-    label: "LSP References",
+    label: "LSP-Referenzen",
     description:
       "Findet alle Referenzen auf ein Symbol an einer Position via Language Server Protocol.",
     parameters: ReferencesParams,
@@ -633,9 +631,9 @@ export function registerLspNavigationTools(
 
   pi.registerTool({
     name: "lsp_workspace_symbols",
-    label: "LSP Workspace Symbols",
+    label: "LSP-Arbeitsbereichs-Symbole",
     description:
-      "Sucht Symbole (Funktionen, Klassen, …) im gesamten Workspace via Language Server Protocol.",
+      "Sucht Symbole (Funktionen, Klassen, …) im gesamten Arbeitsbereich via Language Server Protocol.",
     parameters: WorkspaceSymbolsParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const config = deps.getConfig();

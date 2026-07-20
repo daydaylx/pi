@@ -1,55 +1,55 @@
 # Pi Agent — Aurora Setup
 
-This repository is the declarative source for a comfort-focused Pi Coding
-Agent setup. Plan workflow, permissions, LSP and presentation are separate
-runtime modules; only Aurora owns custom TUI chrome.
+Dieses Repository ist die deklarative Quelle für ein komfortorientiertes Pi
+Coding Agent Setup. Plan-Workflow, Berechtigungen, LSP und Darstellung sind
+separate Laufzeitmodule; nur Aurora besitzt angepasstes TUI-Chrome.
 
-## Runtime architecture
+## Laufzeitarchitektur
 
 ```text
 Pi Core
-├── setup-core        effective config, /setup-doctor, allowlisted verify tool
-├── plan-mode         Shift+Tab Control Center, workflow, decision/review/work lifecycle
-├── mode-permissions  capability and path policy
-├── lsp               lazy, trust-gated language servers
-├── pi-subagents      exact-pinned orchestration package
-└── aurora-ui         editor, footer, activity surface and motion
+├── setup-core        effektive Konfiguration, /setup-doctor, allowlistetes verify-Tool
+├── plan-mode         Shift+Tab Control Center, Workflow, Decision/Review/Work-Lifecycle
+├── mode-permissions  Capability- und Pfad-Policy
+├── lsp               lazy, trust-gesteuerte Language Server
+├── pi-subagents      exakt gepinntes Orchestrierungspaket
+└── aurora-ui         Editor, Footer, Activity-Oberfläche und Motion
 ```
 
-`themes/aurora-night.json` defines the single color system. Aurora uses one
-100 ms ticker only while contextual motion is active; `reduced` and `off`
-never retain an animation interval. Built-in tools keep Pi's execution and
-rendering contracts.
+`themes/aurora-night.json` definiert das einzige Farbsystem. Aurora nutzt einen
+100-ms-Ticker nur, während kontextuelle Bewegung aktiv ist; `reduced` und `off`
+halten niemals ein Animationsintervall vor. Die eingebauten Tools halten Pi's
+Ausführungs- und Rendering-Verträge ein.
 
-The central `setup.json` is schema-backed. Effective precedence is defaults,
-global setup, then trusted `.pi/setup.json`. Project configuration cannot
-relax global permissions or replace host verification commands.
+Der zentrale `setup.json` ist schema-gestützt. Die effektive Reihenfolge ist Defaults,
+globales Setup, dann vertrauenswürdiges `.pi/setup.json`. Projektkonfiguration kann
+globale Berechtigungen nicht lockern oder Host-Verifikationsbefehle ersetzen.
 
-## Plan workflow
+## Plan-Workflow
 
-The existing public UX remains available: Shift+Tab opens the temporary Control
+Die bestehende öffentliche UX bleibt verfügbar: Shift+Tab öffnet das temporäre Control
 Center; `/plan`, `/decide`, `/review-plan`, `/work`, `/go`, `/done`, `/finish`
-and `/plan-todos` retain their existing semantics. The Control Center starts
-with Schnellplan, Architekturplan, Work-Modus and Optionen klären, then offers
-separate model-role, Thinking, permission and one-file LSP-diagnosis menus.
+und `/plan-todos` behalten ihre bestehende Semantik. Das Control Center startet
+mit Schnellplan, Architekturplan, Work-Modus und Optionen klären, und bietet
+danach separate Menüs für Modellrolle, Thinking, Berechtigung und Ein-Datei-LSP-Diagnose.
 
-The Markdown plan remains `.agent/plans/current-plan.md`. Sidecar v2 stores a
-stable `planId`, revision, lifecycle, per-todo hash and bound `executionId` in
-`.agent/plans/current-plan.state.json`; lock/CAS writes and conservative
-migration protect concurrent or older state. During `/work`, the model records
-progress through `plan_progress(executionId, step, status, evidence)`; legacy progress
-markers and `/done` remain compatible fallbacks. A saved execution is always
-restored as `paused` and `/work` requires an explicit resume. Decision briefs
-are injected only when their stored hash is linked to the current plan.
+Der Markdown-Plan bleibt `.agent/plans/current-plan.md`. Sidecar v2 speichert eine
+stabile `planId`, Revision, Lifecycle, Todo-bezogenen Hash und gebundene `executionId` in
+`.agent/plans/current-plan.state.json`; Lock/CAS-Schreibvorgänge und konservative
+Migration schützen konkurrierenden oder älteren Zustand. Während `/work` protokolliert
+das Modell Fortschritt über `plan_progress(executionId, step, status, evidence)`; alte Fortschritts-
+marker und `/done` bleiben kompatible Fallbacks. Eine gespeicherte Ausführung wird immer
+als `paused` wiederhergestellt und `/work` erfordert eine explizite Fortsetzung. Decision Briefs
+werden nur eingespielt, wenn ihr gespeicherter Hash mit dem aktuellen Plan verknüpft ist.
 
-Planning, review, decision, execution, paused, blocked and ready are enforced
-capability phases, not prompt-only conventions. Each phase exposes only its
-required read, question, verification or progress surface; execution progress
-is additionally bound to the active plan and execution identity.
+Planning, Review, Decision, Execution, Paused, Blocked und Ready sind technisch
+erzwungene Capability-Phasen, keine reinen Prompt-Konventionen. Jede Phase legt nur
+ihre nötige Lese-, Rückfrage-, Verifikations- oder Fortschrittsfläche offen; Ausführungs-
+fortschritt ist zusätzlich an den aktiven Plan und die Ausführungsidentität gebunden.
 
-## Install and verify
+## Installieren und verifizieren
 
-Use Node `22.22.2` and npm `10.9.7`.
+Node `22.22.2` und npm `10.9.7` verwenden.
 
 ```bash
 npm ci --prefix npm
@@ -58,37 +58,36 @@ npm run install:user -- --dry-run --target ~/.pi/agent
 npm run install:user -- --apply --target ~/.pi/agent
 ```
 
-The installer copies only an explicit setup allowlist, including the npm
-manifests, TypeScript config and test harness required by `verify`. It never
-copies authentication, sessions, caches, backups, `.git`, symlinks or
-installed dependencies. When this checkout already is `~/.pi/agent`,
-installation is a no-op.
+Der Installer kopiert nur eine explizite Setup-Allowlist, einschließlich der npm-
+Manifeste, TypeScript-Konfiguration und des von `verify` benötigten Test-Harness. Er kopiert
+niemals Authentifizierung, Sitzungen, Caches, Backups, `.git`, Symlinks oder
+installierte Abhängigkeiten. Wenn dieser Checkout bereits `~/.pi/agent` ist,
+ist die Installation ein No-op.
 
-For an external empty target, run `npm ci --prefix ~/.pi/agent/npm` there
-after installation before using `verify`. Dependency installation is
-deliberately separate and requires the user's approval; the installer never
-downloads packages on its own.
+Für ein externes leeres Ziel dort nach der Installation `npm ci --prefix ~/.pi/agent/npm`
+ausführen, bevor `verify` genutzt wird. Die Abhängigkeitsinstallation ist bewusst
+getrennt und erfordert die Zustimmung des Nutzers; der Installer lädt niemals
+eigenständig Pakete herunter.
 
-Run `/setup-doctor` after a Pi upgrade or configuration change. It reports
-effective configuration, trust, model roles, LSP mode, active extension count
-and manifest/install version drift without reading credentials.
+`/setup-doctor` nach einem Pi-Upgrade oder einer Konfigurationsänderung ausführen. Es meldet
+effektive Konfiguration, Vertrauen, Modellrollen, LSP-Modus, aktive Extension-Anzahl
+und Manifest-/Installationsversions-Drift, ohne Zugangsdaten zu lesen.
 
-## Safety and updates
+## Sicherheit und Updates
 
-- Unknown tools always require confirmation in Read+Write, Full and YOLO, and
-  are blocked in stricter levels; Setup remains an absolute block. Workflow
-  phase limits apply independently and cannot be relaxed by a permission level.
-- `verify` accepts only `typecheck`, `test` or `verify`; it cannot execute free
-  shell input and always runs this setup's fixed checks from the agent
-  directory. Project test scripts still go through the normal Bash policy.
-- LSP servers are never installed automatically and start only on first use.
-- Only the Worker subagent has raw Bash/write tools. Review agents are
-  technically read-only; the Test Runner receives only the allowlisted
-  `verify` tool.
-- Packages remain exact-pinned. Do not update dependencies, commit or publish
-  branches without explicit approval.
+- Unbekannte Tools erfordern in Read+Write, Full und YOLO immer eine Bestätigung und
+  sind in strengeren Stufen blockiert; Setup bleibt eine absolute Sperre. Workflow-
+  Phasengrenzen gelten unabhängig und können von einer Berechtigungsstufe nicht gelockert werden.
+- `verify` akzeptiert nur `typecheck`, `test` oder `verify`; es kann keine freie
+  Shell-Eingabe ausführen und führt immer die festen Prüfungen dieses Setups aus dem Agent-
+  Verzeichnis aus. Projekt-Test-Skripte durchlaufen weiterhin die normale Bash-Policy.
+- LSP-Server werden nie automatisch installiert und starten erst bei erster Nutzung.
+- Nur der Worker-Subagent besitzt rohe Bash-/Schreib-Tools. Review-Agenten sind
+  technisch nur lesend; der Test Runner erhält nur das allowlistete `verify`-Tool.
+- Pakete bleiben exakt gepinnt. Abhängigkeiten nicht aktualisieren, committen oder
+  Branches veröffentlichen ohne ausdrückliche Freigabe.
 
-The former Zentui/tool-display files remain in the repository for comparison,
-but are not active runtime owners. Rolling back means restoring the previous
-`settings.json` package and extension allowlists; authentication and session
-state are unaffected.
+Die früheren Zentui-/Tool-Display-Dateien bleiben im Repository zum Vergleich erhalten,
+sind aber keine aktiven Laufzeit-Besitzer. Ein Rollback bedeutet, die vorherigen
+`settings.json`-Paket- und Extension-Allowlists wiederherzustellen; Authentifizierung und
+Sitzungszustand sind davon nicht betroffen.

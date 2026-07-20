@@ -11,6 +11,7 @@ export const CONTROL_CENTER_EVENTS = {
   openThinking: "control-center:open-thinking",
   openThinkingView: "control-center:open-thinking-view",
   openDiagnostics: "control-center:open-diagnostics",
+  openContext: "control-center:open-context",
   snapshot: "control-center:snapshot",
   workflowThinkingDefault: "control-center:workflow-thinking-default",
 } as const;

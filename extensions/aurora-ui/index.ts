@@ -15,10 +15,7 @@ import {
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
-import {
-  loadSetupConfig,
-  type MotionMode,
-} from "../setup-core/config.ts";
+import { loadSetupConfig, type MotionMode } from "../setup-core/config.ts";
 import {
   AURORA_UI_CHANNELS,
   isAuroraUiPatchEvent,
@@ -62,7 +59,7 @@ function makeState(
 ): AuroraUiState {
   return {
     sessionEpoch: epoch,
-    workflow: { phase: "idle", label: "WORK" },
+    workflow: { phase: "idle", label: "ARBEIT" },
     permissions: {},
     lsp: {},
     model: {
@@ -105,7 +102,10 @@ function renderBar(
   const right = edge === "top" ? "╮" : "╯";
   const inner = crop(` ${content} `, Math.max(1, width - 3));
   const fill = "─".repeat(
-    Math.max(0, width - visibleWidth(left) - visibleWidth(inner) - visibleWidth(right)),
+    Math.max(
+      0,
+      width - visibleWidth(left) - visibleWidth(inner) - visibleWidth(right),
+    ),
   );
   return crop(
     theme.fg(color, left) + inner + theme.fg(color, fill + right),
@@ -122,7 +122,10 @@ function joinSides(left: string, right: string, width: number): string {
     return crop(
       clippedLeft +
         " ".repeat(
-          Math.max(1, available - visibleWidth(clippedLeft) - visibleWidth(right)),
+          Math.max(
+            1,
+            available - visibleWidth(clippedLeft) - visibleWidth(right),
+          ),
         ) +
         right,
       available,
@@ -130,7 +133,9 @@ function joinSides(left: string, right: string, width: number): string {
   }
   return (
     left +
-    " ".repeat(Math.max(1, available - visibleWidth(left) - visibleWidth(right))) +
+    " ".repeat(
+      Math.max(1, available - visibleWidth(left) - visibleWidth(right)),
+    ) +
     right
   );
 }
@@ -209,11 +214,16 @@ class AuroraEditor extends CustomEditor {
   render(width: number): string[] {
     const layout = layoutFor(width);
     const workflow = this.auroraState.workflow;
-    const step = workflow.step ? crop(workflow.step, layout === "wide" ? 54 : 28) : "—";
-    const model = this.auroraState.model.id ?? "no model";
-    const thinking = this.auroraState.model.thinking ?? "off";
+    const step = workflow.step
+      ? crop(workflow.step, layout === "wide" ? 54 : 28)
+      : "—";
+    const model = this.auroraState.model.id ?? "kein Modell";
+    const thinking = this.auroraState.model.thinking ?? "aus";
     const contextPercent = this.readContextPercent();
-    const context = contextPercent === null ? "ctx —" : `ctx ${contextPercent.toFixed(0)}%`;
+    const context =
+      contextPercent === null
+        ? "Kontext —"
+        : `Kontext ${contextPercent.toFixed(0)}%`;
     const active = this.auroraState.activity.kind !== "idle";
 
     let top: string;
@@ -223,14 +233,16 @@ class AuroraEditor extends CustomEditor {
       bottom = `${crop(model, 24)} · ${context}`;
     } else if (layout === "normal") {
       top = `AURORA NIGHT · ${workflow.label} · ${step}`;
-      bottom = `${crop(model, 38)} · think ${thinking} · ${context}`;
+      bottom = `${crop(model, 38)} · Denken ${thinking} · ${context}`;
     } else {
-      top = `AURORA NIGHT · WORKFLOW ${workflow.label} · STEP ${step}`;
-      bottom = `MODEL ${crop(model, 48)} · THINK ${thinking} · CONTEXT ${contextPercent === null ? "—" : `${contextPercent.toFixed(1)}%`}`;
+      top = `AURORA NIGHT · ARBEITSABLAUF ${workflow.label} · SCHRITT ${step}`;
+      bottom = `MODELL ${crop(model, 48)} · DENKEN ${thinking} · KONTEXT ${contextPercent === null ? "—" : `${contextPercent.toFixed(1)}%`}`;
     }
 
     const pulse =
-      active && this.ticker.motion === "contextual" && this.ticker.frame % 8 < 4;
+      active &&
+      this.ticker.motion === "contextual" &&
+      this.ticker.frame % 8 < 4;
     return [
       renderBar(this.auroraTheme, top, width, "top", pulse),
       ...super.render(width),
@@ -278,7 +290,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     let input = 0;
     let output = 0;
     for (const entry of branch) {
-      if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+      if (entry.type !== "message" || entry.message.role !== "assistant")
+        continue;
       const message = entry.message as AssistantMessage;
       input += message.usage.input;
       output += message.usage.output;
@@ -290,7 +303,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   function renderActivityWidget(theme: Theme, width: number): string[] {
     if (!state || state.activity.kind === "idle") return [];
-    const icon = workingFrame(theme, ticker?.motion ?? "off", ticker?.frame ?? 0);
+    const icon = workingFrame(
+      theme,
+      ticker?.motion ?? "off",
+      ticker?.frame ?? 0,
+    );
     const label = state.activity.label ?? "Arbeite …";
     const heading = crop(
       `${icon ? `${icon} ` : ""}${theme.fg("muted", label)}`,
@@ -438,8 +455,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
     const epoch = makeEpoch(++epochSequence);
     state = makeState(epoch, ctx, pi);
-    state.permissions.label = `PERM ${loaded.config.permissions.bash.toUpperCase()}`;
-    state.lsp.state = loaded.config.lsp.enabled ? "idle" : "off";
+    state.permissions.label = `BERECHTIGUNG ${loaded.config.permissions.bash.toUpperCase()}`;
+    state.lsp.state = loaded.config.lsp.enabled ? "leerlauf" : "aus";
     activeContext = ctx;
     activeSessionId = ctx.sessionManager.getSessionId();
     disposed = false;
@@ -448,7 +465,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     selectedTheme = loaded.config.ui.theme;
     const themeResult = ctx.ui.setTheme(selectedTheme);
     if (!themeResult.success) {
-      ctx.ui.notify(`Aurora theme: ${themeResult.error ?? "nicht verfügbar"}`, "warning");
+      ctx.ui.notify(
+        `Aurora theme: ${themeResult.error ?? "nicht verfügbar"}`,
+        "warning",
+      );
     }
 
     ticker = new AnimationTicker(loaded.config.ui.motion, (frame) => {
@@ -461,21 +481,24 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     });
 
     const sessionCtx = ctx;
-    ctx.ui.setEditorComponent((tui, editorTheme, keybindings) =>
-      new AuroraEditor(
-        tui,
-        editorTheme,
-        keybindings,
-        sessionCtx.ui.theme,
-        state!,
-        ticker!,
-        () => sessionCtx.getContextUsage()?.percent ?? null,
-      ),
+    ctx.ui.setEditorComponent(
+      (tui, editorTheme, keybindings) =>
+        new AuroraEditor(
+          tui,
+          editorTheme,
+          keybindings,
+          sessionCtx.ui.theme,
+          state!,
+          ticker!,
+          () => sessionCtx.getContextUsage()?.percent ?? null,
+        ),
     );
 
     ctx.ui.setFooter((tui, theme, footerData) => {
       const detachTicker = ticker!.attach(tui);
-      const unsubscribeBranch = footerData.onBranchChange(() => tui.requestRender());
+      const unsubscribeBranch = footerData.onBranchChange(() =>
+        tui.requestRender(),
+      );
       return {
         invalidate() {},
         dispose() {
@@ -490,20 +513,22 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           const project = compactCwd(sessionCtx.cwd);
           const workflow = statuses.get("workflow") ?? state.workflow.label;
           const permission =
-            statuses.get("permissions") ?? state.permissions.label ?? "PERM —";
+            statuses.get("permissions") ??
+            state.permissions.label ??
+            "BERECHTIGUNG —";
           const lsp = statuses.get("lsp") ?? state.lsp.state ?? "—";
           const left =
             layout === "wide"
               ? `${theme.fg("accent", project)}${branch ? theme.fg("muted", ` · git ${branch}`) : ""}`
               : `${theme.fg("accent", crop(project, 28))}${branch ? theme.fg("muted", ` · ${crop(branch, 18)}`) : ""}`;
-          const right = `${theme.fg("muted", workflow)} · ${theme.fg("warning", permission)} · ${theme.fg(lsp === "degraded" ? "error" : "success", `LSP ${lsp}`)}`;
+          const right = `${theme.fg("muted", workflow)} · ${theme.fg("warning", permission)} · ${theme.fg(lsp === "eingeschränkt" ? "error" : "success", `LSP ${lsp}`)}`;
           const lines = [joinSides(left, right, width)];
           if (layout === "wide") {
             const totals = readAssistantTotals(sessionCtx);
             lines.push(
               theme.fg(
                 "dim",
-                `session ${pi.getSessionName() ?? "unnamed"} · ↑${formatTokens(totals.input)} ↓${formatTokens(totals.output)}`,
+                `Sitzung ${pi.getSessionName() ?? "unbenannt"} · ↑${formatTokens(totals.input)} ↓${formatTokens(totals.output)}`,
               ),
             );
           }

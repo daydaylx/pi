@@ -1,125 +1,125 @@
 # Pi Subagents
 
-Status: migrated to the pinned `daydaylx/pi-subagents` fork.
+Status: Migration zum gepinnten `daydaylx/pi-subagents`-Fork abgeschlossen.
 
-## Summary
+## Zusammenfassung
 
-Subagent orchestration is provided by the third-party package
-[`pi-subagents`](https://github.com/daydaylx/pi-subagents), pinned as an
-immutable Git commit in `settings.json` → `packages`. The previous local
-implementation (`extensions/subagents/index.ts`, `agents.ts`,
-`runtime-status.ts`) has been removed.
+Die Subagent-Orchestrierung wird durch das Drittanbieter-Paket
+[`pi-subagents`](https://github.com/daydaylx/pi-subagents) bereitgestellt, als
+unveränderlicher Git-Commit in `settings.json` → `packages` gepinnt. Die vorherige lokale
+Implementierung (`extensions/subagents/index.ts`, `agents.ts`,
+`runtime-status.ts`) wurde entfernt.
 
-## Why the previous No-Go was revised
+## Warum das vorherige No-Go überarbeitet wurde
 
-An earlier session deliberately deferred third-party subagent packages with
-**"No-Go until later: ... without source audit."** That audit has since been
-completed. Full source review (all ~92 `.ts` files under `src/`) found:
+Eine frühere Sitzung verzögerte Drittanbieter-Subagent-Pakete bewusst mit
+**„No-Go until later: ... without source audit.“** Dieses Audit wurde inzwischen
+durchgeführt. Der vollständige Quellcode-Review (alle ~92 `.ts`-Dateien unter `src/`) ergab:
 
-- npm tarball byte-identical to the GitHub tag `v0.34.0`.
-- Single maintainer across 89 published versions, GitHub Actions provenance
-  publishing, no `postinstall` hooks.
-- No network calls, telemetry, or exfiltration; the only external domain is
-  an opt-in, user-initiated Gist share (`share: false` by default).
-- No `eval`/dynamic remote code; all `spawn()` calls use array arguments (no
-  shell injection); consistent timeout/SIGTERM/SIGKILL escalation.
+- npm-Tarball byte-identisch zum GitHub-Tag `v0.34.0`.
+- Einzelner Maintainer über 89 veröffentlichte Versionen, GitHub Actions Provenance
+  Publishing, keine `postinstall`-Hooks.
+- Keine Netzwerkaufrufe, Telemetrie oder Exfiltration; die einzige externe Domain ist ein
+  Opt-in, nutzerinitiierter Gist-Share (`share: false` standardmäßig).
+- Kein `eval`/dynamischer Remote-Code; alle `spawn()`-Aufrufe verwenden Array-Argumente (kein
+  Shell-Injection); konsistente Timeout/SIGTERM/SIGKILL-Eskalation.
 
-Verdict: trustworthy; the audit findings are summarized above.
+Urteil: vertrauenswürdig; die Audit-Ergebnisse sind oben zusammengefasst.
 
-## Capability boundary
+## Capability-Grenze
 
-`pi-subagents` does not understand the previous `permission`/`writeOverride`/
-`allowedPaths` frontmatter fields, and does not set the
-`PI_SUBAGENT_PERMISSION_LEVEL`/`PI_SUBAGENT_WRITE_OVERRIDE`/
-`PI_SUBAGENT_ALLOWED_PATHS` environment variables that `mode-permissions.ts`
-used to read for spawned children (that bridge has been removed as dead code).
-It restricts child processes through `--tools <list>`, which is a hard Pi-core
-registry boundary: an omitted tool cannot be invoked. Reviewer, security and
-exploration profiles therefore omit Bash entirely. The test-runner receives
-the local `verify` tool, which accepts only the configured `typecheck`, `test`
-and `verify` names and runs this setup's fixed checks from the agent directory;
-it cannot pass arbitrary shell input or select repository lifecycle scripts.
-Raw Bash and write tools remain exclusive to `worker`.
+`pi-subagents` versteht die vorherigen `permission`/`writeOverride`/
+`allowedPaths`-Frontmatter-Felder nicht und setzt auch nicht die
+Umgebungsvariablen `PI_SUBAGENT_PERMISSION_LEVEL`/`PI_SUBAGENT_WRITE_OVERRIDE`/
+`PI_SUBAGENT_ALLOWED_PATHS`, die `mode-permissions.ts` früher für gestartete
+Kindprozesse auslas (diese Brücke wurde als Dead Code entfernt). Es beschränkt
+Kindprozesse über `--tools <list>`, was eine harte Pi-Core-Registry-Grenze ist:
+ein weggelassenes Tool kann nicht aufgerufen werden. Reviewer-, Security- und
+Exploration-Profile lassen deshalb Bash komplett weg. Der Test-Runner erhält
+das lokale `verify`-Tool, das nur die konfigurierten Namen `typecheck`, `test`
+und `verify` akzeptiert und die festen Prüfungen dieses Setups aus dem Agent-Verzeichnis
+ausführt; es kann keine beliebige Shell-Eingabe übergeben oder Repository-Lifecycle-Skripte
+auswählen. Rohe Bash- und Write-Tools bleiben `worker` vorbehalten.
 
 ## Installation
 
-The runtime source is a reviewed personal fork commit, not an npm range or
-`latest`. Update it by publishing a reviewed fork commit and replacing the
-full SHA in `settings.json`.
+Die Laufzeitquelle ist ein geprüfter persönlicher Fork-Commit, kein npm-Range oder
+`latest`. Aktualisiere ihn, indem du einen geprüften Fork-Commit veröffentlichst und den
+vollständigen SHA in `settings.json` ersetzt.
 
-## Tool and commands
+## Tools und Befehle
 
-- Tool `subagent` (unchanged name), plus a `wait` tool for async control.
-- Modes: `{agent, task}` (single), `{tasks:[...]}` (parallel),
-  `{chain:[...]}` (chain), `{action: "list"}` (discovery — replaces the
-  previous `/subagent-list` command).
-- Slash commands: `/run`, `/chain`, `/run-chain`, `/parallel`,
-  `/subagent-cost`, `/subagents-doctor` (replaces `/subagent-doctor`),
+- Tool `subagent` (unveränderter Name), plus ein `wait`-Tool für asynchrone Steuerung.
+- Modi: `{agent, task}` (einzeln), `{tasks:[...]}` (parallel),
+  `{chain:[...]}` (Kette), `{action: "list"}` (Discovery – ersetzt den
+  vorherigen `/subagent-list`-Befehl).
+- Slash-Commands: `/run`, `/chain`, `/run-chain`, `/parallel`,
+  `/subagent-cost`, `/subagents-doctor` (ersetzt `/subagent-doctor`),
   `/subagents-fleet`, `/subagents-stop`, `/subagents-models`,
   `/subagents-profiles`, `/subagents-load-profile`,
   `/subagents-refresh-provider-models`, `/subagents-generate-profiles`,
   `/subagents-check-profile`, `/subagents-watchdog`.
 
-## Agent profiles
+## Agent-Profile
 
-Agents live in `agents/*.md` (user scope, since this repository directory
-_is_ `~/.pi/agent`). Frontmatter no longer includes `permission` or
-`writeOverride` — access is controlled entirely through the `tools:` list.
+Agenten leben in `agents/*.md` (Nutzer-Scope, da dieses Repository-Verzeichnis
+_is_ `~/.pi/agent` ist). Das Frontmatter enthält keine `permission` oder
+`writeOverride` mehr — der Zugriff wird vollständig über die `tools:`-Liste gesteuert.
 
-Every local profile declares the context policy explicitly:
+Jedes lokale Profil deklariert die Kontext-Policy explizit:
 
-- `defaultContext: fresh` starts with a new child conversation. The parent
-  transcript is not copied into the child.
-- `inheritProjectContext: true` deliberately loads the compact global and
-  project context files so that safety and architecture rules still apply.
-- `inheritSkills: false` keeps the parent skill catalog out of the child
-  unless the assigned task itself requires a skill.
+- `defaultContext: fresh` startet mit einer neuen Child-Unterhaltung. Das Parent-
+  Transkript wird nicht in das Child kopiert.
+- `inheritProjectContext: true` lädt absichtlich die kompakten globalen und
+  Projekt-Kontextdateien, damit Sicherheits- und Architekturregeln weiterhin gelten.
+- `inheritSkills: false` hält den Parent-Skill-Katalog aus dem Child heraus,
+  es sei denn, die zugewiesene Aufgabe selbst erfordert einen Skill.
 
-Use parent or fork context only when the delegated task materially depends on
-decisions already made in the parent conversation. Reviews, repository
-exploration, tests, security checks and second opinions use fresh context by
-default. Context inheritance and project-context inheritance are separate:
-`fresh` isolates chat history but does not suppress the intentionally enabled
-static project rules.
+Nutze Parent- oder Fork-Kontext nur, wenn die delegierte Aufgabe tatsächlich von
+Entscheidungen abhängt, die bereits im Parent-Chat getroffen wurden. Reviews, Repository-
+Exploration, Tests, Security-Checks und Second Opinions verwenden standardmäßig frischen
+Kontext. Kontext-Vererbung und Projekt-Kontext-Vererbung sind getrennt:
+`fresh` isoliert den Chat-Verlauf, unterdrückt aber nicht die absichtlich aktivierten
+statischen Projektregeln.
 
-`pi-subagents` ships 8 builtin agents (`scout`, `researcher`, `planner`,
-`worker`, `reviewer`, `oracle`, `delegate`, `context-builder`). Five local
-profile names collide with these builtins (`scout`, `oracle`, `planner`,
-`reviewer`, `worker`); user-scope agents automatically shadow builtins with
-the same name (highest discovery priority), so the local, previously
-established prompts and output formats remain in effect without renaming.
+`pi-subagents` liefert 8 eingebaute Agenten (`scout`, `researcher`, `planner`,
+`worker`, `reviewer`, `oracle`, `delegate`, `context-builder`). Fünf lokale
+Profilnamen kollidieren mit diesen Builtins (`scout`, `oracle`, `planner`,
+`reviewer`, `worker`); Agenten im Nutzer-Scope überschatten automatisch Builtins mit
+demselben Namen (höchste Discovery-Priorität), sodass die lokalen, bereits
+etablierten Prompts und Ausgabeformate ohne Umbenennung wirksam bleiben.
 
-| Agent              | Tools                                   | Notes                                               |
-| ------------------ | --------------------------------------- | --------------------------------------------------- |
-| `scout`            | read, grep, find, ls                    | read-only by tool omission                          |
-| `planner`          | read, grep, find, ls                    | read-only by tool omission                          |
-| `architect`        | read, grep, find, ls                    | read-only by tool omission                          |
-| `reviewer`         | read, grep, find, ls                    | technically read-only                               |
-| `test-runner`      | read, grep, find, ls, verify            | only allowlisted verification, no raw Bash          |
-| `security-auditor` | read, grep, find, ls                    | technically read-only                               |
-| `ui-reviewer`      | read, grep, find, ls                    | read-only by tool omission                          |
-| `docs-auditor`     | read, grep, find, ls                    | read-only by tool omission                          |
-| `worker`           | read, grep, find, ls, edit, write, bash | full write scope                                    |
-| `oracle`           | read, grep, find, ls                    | fixed model + thinking; explicit fresh context      |
+| Agent              | Tools                                   | Notizen                                               |
+| ------------------ | --------------------------------------- | ----------------------------------------------------- |
+| `scout`            | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
+| `planner`          | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
+| `architect`        | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
+| `reviewer`         | read, grep, find, ls                    | technisch nur lesend                                  |
+| `test-runner`      | read, grep, find, ls, verify            | nur allowlistete Verifikation, keine rohe Bash        |
+| `security-auditor` | read, grep, find, ls                    | technisch nur lesend                                  |
+| `ui-reviewer`      | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
+| `docs-auditor`     | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
+| `worker`           | read, grep, find, ls, edit, write, bash | voller Schreib-Scope                                  |
+| `oracle`           | read, grep, find, ls                    | festes Modell + Thinking; expliziter frischer Kontext |
 
-## Configuration
+## Konfiguration
 
-`pi-subagents` reads its own config at
-`~/.pi/agent/extensions/subagent/config.json` (optional) plus a
-`settings.json` → `subagents.*` key. The active local values are
+`pi-subagents` liest seine eigene Konfiguration unter
+`~/.pi/agent/extensions/subagent/config.json` (optional) plus einen
+`settings.json` → `subagents.*` Key. Die aktiven lokalen Werte sind
 `parallel.maxTasks` = 8, `parallel.concurrency` = 4,
-`globalConcurrencyLimit` = 4 and `maxSubagentSpawnsPerSession` = 24.
+`globalConcurrencyLimit` = 4 und `maxSubagentSpawnsPerSession` = 24.
 
-The package implementation accepts an internal `maxOutput` value, but the
-public tool schema does not reliably expose that parameter. Callers therefore
-must not depend on setting it directly. The local tool-output guard applies the
-repository limit of approximately 50 KiB or 2,000 lines to returned subagent
-text while preserving a visible truncation notice. A stricter supported limit
-must remain stricter.
+Die Paket-Implementierung akzeptiert einen internen `maxOutput`-Wert, aber das
+öffentliche Tool-Schema stellt diesen Parameter nicht zuverlässig bereit. Aufrufer dürfen
+sich daher nicht darauf verlassen, ihn direkt zu setzen. Die lokale Tool-Output-Absicherung
+wendet das Repository-Limit von etwa 50 KiB oder 2.000 Zeilen auf zurückgegebenen Subagent-
+Text an, während eine sichtbare Kürzungsmeldung erhalten bleibt. Ein strengeres unterstütztes
+Limit muss strenger bleiben.
 
-## Result contract
+## Ergebnisvertrag
 
-Subagents return a compact final report with exactly these top-level sections:
+Subagenten liefern einen kompakten Endbericht mit genau diesen Top-Level-Abschnitten:
 
 ```markdown
 ## Ergebnis
@@ -135,22 +135,22 @@ Subagents return a compact final report with exactly these top-level sections:
 ## Empfehlung
 ```
 
-Role-specific content belongs inside this shared structure. Return only the
-final report to the parent context; never copy a complete child transcript,
-raw tool log or hidden reasoning into it. Session artifacts may remain in the
-configured session storage for diagnostics, but are not injected back into the
-parent conversation.
+Rollenspezifischer Inhalt gehört in diese gemeinsame Struktur. Gib nur den
+Endbericht an den Parent-Kontext zurück; kopiere niemals ein vollständiges Child-Transkript,
+rohes Tool-Log oder versteckte Schlussfolgerungen hinein. Session-Artefakte können zur
+Diagnose im konfigurierten Session-Storage verbleiben, werden aber nicht in die
+Parent-Unterhaltung zurückinjiziert.
 
-## UI integration
+## UI-Integration
 
-Aurora owns the only custom editor, footer and activity widget. The local
-`extensions/subagent/config.json` disables the package's permanent async
-widget and caps both local and global concurrency at four. Subagent lifecycle
-tracking, status commands and completion notifications remain available
-without a second persistent UI owner.
+Aurora besitzt den einzigen angepassten Editor, Footer und Activity-Widget. Die lokale
+`extensions/subagent/config.json` deaktiviert das permanente asynchrone Widget des Pakets und
+begrenzt sowohl lokale als auch globale Parallelität auf vier. Subagent-Lifecycle-Tracking,
+Status-Befehle und Completion-Notifications bleiben verfügbar, ohne einen zweiten persistenten
+UI-Besitzer.
 
-## Delegation criteria
+## Delegationskriterien
 
-The compact rule in `AGENTS.md` decides when delegation is appropriate. This
-document is the detailed reference for profile selection, context isolation,
-result formatting and operational limits.
+Die kompakte Regel in `AGENTS.md` entscheidet, wann Delegation angemessen ist. Dieses
+Dokument ist die detaillierte Referenz für Profilauswahl, Kontext-Isolation,
+Ergebnisformatierung und Betriebsgrenzen.

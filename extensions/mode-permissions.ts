@@ -150,7 +150,8 @@ function decideWorkflowTool(
     if (isPlanFilePath(filePath, cwd)) {
       return {
         action: "block",
-        reason: "Während der Ausführung darf der Plan nur über plan_progress aktualisiert werden.",
+        reason:
+          "Während der Ausführung darf der Plan nur über plan_progress aktualisiert werden.",
       };
     }
     return undefined;
@@ -172,16 +173,21 @@ function decideWorkflowTool(
       ? { action: "allow", reason: "Workflow: read-only Subagenten" }
       : {
           action: "block",
-          reason: "Dieser Workflow erlaubt nur bekannte read-only Subagentenprofile.",
+          reason:
+            "Dieser Workflow erlaubt nur bekannte read-only Subagentenprofile.",
         };
   }
   if (event.toolName === "write" || event.toolName === "edit") {
     const filePath = toolPath(event) ?? "";
     return workflowAllowsPlanWrite(workflow) && isPlanFilePath(filePath, cwd)
-      ? { action: "allow", reason: "Workflow: kontrollierter Plan-Schreibzugriff" }
+      ? {
+          action: "allow",
+          reason: "Workflow: kontrollierter Plan-Schreibzugriff",
+        }
       : {
           action: "block",
-          reason: "Dieser Workflow blockiert Schreibzugriffe außerhalb des aktuellen Plans.",
+          reason:
+            "Dieser Workflow blockiert Schreibzugriffe außerhalb des aktuellen Plans.",
         };
   }
   return {
@@ -192,7 +198,7 @@ function decideWorkflowTool(
 
 function permissionWarning(level: PermissionLevel): string | undefined {
   if (level === "full-access") {
-    return "FULL ACCESS aktiv: Sudo, Löschen, externe Schreibzugriffe und Force-Push bleiben bestätigt.";
+    return "VOLLZUGRIFF aktiv: Sudo, Löschen, externe Schreibzugriffe und Force-Push bleiben bestätigt.";
   }
   if (level === "yolo") {
     return "YOLO aktiv: harte Warnmuster für Secrets, Systempfade und kritische Aktionen bleiben bestätigt.";
@@ -230,7 +236,10 @@ function decideTool(
   if (event.toolName === "bash") {
     if (permissionLevel === "read-write") {
       if (configured.bash === "block") {
-        return { action: "block", reason: "Bash ist in der Setup-Policy gesperrt." };
+        return {
+          action: "block",
+          reason: "Bash ist in der Setup-Policy gesperrt.",
+        };
       }
       if (configured.bash === "ask") {
         return {
@@ -265,7 +274,7 @@ function decideTool(
   // Custom/MCP tools are deliberately not inferred from their names except
   // for the locally owned, fixed contracts below.
   if (LOCAL_LSP_TOOLS.has(event.toolName)) {
-    return { action: "allow", reason: "Read-only LSP capability" };
+    return { action: "allow", reason: "LSP-Fähigkeit (nur lesend)" };
   }
   if (event.toolName === "ask_user" || event.toolName === "plan_progress") {
     return { action: "allow", reason: "Controlled workflow capability" };
@@ -432,9 +441,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     const epoch = sessionEpoch;
     const selected = await runMenu(
       ctx,
-      "Thinking",
+      "Denken",
       buildThinkingMenu(pi.getThinkingLevel(), thinkingMode),
-      { fallbackPrompt: "Thinking-Modus wählen" },
+      { fallbackPrompt: "Denkmodus wählen" },
     );
     if (!selected || epoch !== sessionEpoch) return;
 
@@ -569,10 +578,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     sessionEpoch += 1;
     auroraEpoch = undefined;
     subscribeAuroraProvider();
-    configuredPolicy = loadSetupConfig(
-      ctx.cwd,
-      ctx.isProjectTrusted(),
-    ).config.permissions;
+    configuredPolicy = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config
+      .permissions;
     const latestState = ctx.sessionManager
       .getEntries()
       .filter(
@@ -595,7 +602,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       restoredLevel === "yolo"
         ? "read-write"
         : (restoredLevel ?? (AUTO_YOLO_ON_START ? "yolo" : "read-write"));
-    thinkingMode = latestState?.data?.thinkingMode === "manual" ? "manual" : "auto";
+    thinkingMode =
+      latestState?.data?.thinkingMode === "manual" ? "manual" : "auto";
     manualThinkingLevel = latestState?.data?.manualThinkingLevel;
     if (thinkingMode === "manual" && manualThinkingLevel) {
       pi.setThinkingLevel(manualThinkingLevel);

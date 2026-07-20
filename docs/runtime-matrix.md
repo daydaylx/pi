@@ -1,33 +1,33 @@
-# Runtime Matrix
+# Runtime-Matrix
 
-| Component | Pinned version / value | Verification |
-| --- | --- | --- |
-| Pi runtime | `0.80.7` | installed global package and `pi --version` |
-| Pi dev dependency | `0.80.6` | exact local manifest/lock; `/setup-doctor` reports the drift |
-| Node.js | `22.22.2` | `node --version` |
-| npm | `10.9.7` | `npm --version` |
-| Aurora UI | local TypeScript | typecheck, lifecycle and responsive render tests |
-| Aurora theme | local `aurora-night` | Truecolor and 256-color theme loading |
-| Plan workflow | local TypeScript | lifecycle, sidecar and `plan_progress` tests |
-| LSP | local TypeScript | fake-server transport, document and tool suites |
-| pi-subagents | `daydaylx/pi-subagents@dd716cfc8c3a9b0ee35632752ac2b1736cd7de61` | exact runtime package pin |
-| Operating system | Linux | CI and local verification |
-| Terminals | narrow, normal and wide layouts | responsive UI harness |
+| Komponente          | Gepinnte Version / Wert                                          | Verifikation                                                         |
+| ------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Pi-Runtime          | `0.80.7`                                                         | installiertes globales Paket und `pi --version`                      |
+| Pi-Dev-Abhängigkeit | `0.80.6`                                                         | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
+| Node.js             | `22.22.2`                                                        | `node --version`                                                     |
+| npm                 | `10.9.7`                                                         | `npm --version`                                                      |
+| Aurora UI           | lokales TypeScript                                               | Typecheck, Lifecycle- und responsive Render-Tests                    |
+| Aurora-Theme        | lokales `aurora-night`                                           | Truecolor- und 256-Farb-Theme-Laden                                  |
+| Plan-Workflow       | lokales TypeScript                                               | Lifecycle-, Sidecar- und `plan_progress`-Tests                       |
+| LSP                 | lokales TypeScript                                               | Fake-Server-Transport-, Dokument- und Tool-Suiten                    |
+| pi-subagents        | `daydaylx/pi-subagents@dd716cfc8c3a9b0ee35632752ac2b1736cd7de61` | exakter Laufzeitpaket-Pin                                            |
+| Betriebssystem      | Linux                                                            | CI und lokale Verifikation                                           |
+| Terminals           | schmales, normales und breites Layout                            | responsive UI-Harness                                                |
 
-## Release gate
+## Release-Gate
 
-`npm run verify` must pass with zero known failures. The currently installed Pi
-runtime and the locked development dependency still differ by one patch
-version; aligning them requires an explicitly approved dependency update and
-lockfile refresh. Until then `/setup-doctor` keeps the mismatch visible.
+`npm run verify` muss ohne bekannte Fehlschläge bestehen. Die aktuell installierte Pi-
+Runtime und die gepinnte Entwicklungsabhängigkeit unterscheiden sich noch um eine Patch-
+Version; eine Angleichung erfordert eine ausdrücklich freigegebene Abhängigkeitsaktualisierung
+und Lockfile-Auffrischung. Bis dahin hält `/setup-doctor` die Abweichung sichtbar.
 
-LSP binaries are host prerequisites, not managed dependencies. Missing
-binaries must produce a structured soft failure and must never trigger an
-automatic installation.
+LSP-Binärdateien sind Host-Voraussetzungen, keine verwalteten Abhängigkeiten. Fehlende
+Binärdateien müssen einen strukturierten Soft-Fehler erzeugen und dürfen niemals eine
+automatische Installation auslösen.
 
 ## Rollback
 
-Aurora is activated only through `settings.json`: the local Aurora extension,
-theme and removal of the former UI package sources. Restore the previous
-package/extension allowlists to return to the former cockpit. Plan Markdown,
-sidecars, authentication and sessions are not migrated by the UI switch.
+Aurora wird nur über `settings.json` aktiviert: die lokale Aurora-Extension,
+Theme und Entfernung der früheren UI-Paketquellen. Die vorherigen Paket-/Extension-
+Allowlists wiederherstellen, um zum früheren Cockpit zurückzukehren. Plan-Markdown,
+Sidecars, Authentifizierung und Sitzungen werden vom UI-Wechsel nicht migriert.

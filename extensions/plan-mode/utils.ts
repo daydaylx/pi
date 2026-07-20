@@ -108,7 +108,7 @@ function assertNoSymlinkComponents(
   candidatePath: string,
 ): void {
   if (!isInside(basePath, candidatePath)) {
-    throw new Error(`Path escapes working directory: ${candidatePath}`);
+    throw new Error(`Pfad verlässt das Arbeitsverzeichnis: ${candidatePath}`);
   }
 
   const rel = relative(basePath, candidatePath);
@@ -252,7 +252,9 @@ function isPlanMetadata(value: unknown): value is PlanMetadata {
   );
 }
 
-export function parsePlanMetadata(planContent: string): PlanMetadata | undefined {
+export function parsePlanMetadata(
+  planContent: string,
+): PlanMetadata | undefined {
   const matches = [...planContent.matchAll(PLAN_METADATA_PATTERN)];
   if (matches.length !== 1) return undefined;
   try {
@@ -282,7 +284,10 @@ export function ensurePlanMetadataHeader(
       return { content: planContent, metadata: existing, changed: false };
     }
     return {
-      content: planContent.replace(PLAN_METADATA_PATTERN, formatPlanMetadata(metadata)),
+      content: planContent.replace(
+        PLAN_METADATA_PATTERN,
+        formatPlanMetadata(metadata),
+      ),
       metadata,
       changed: true,
     };
@@ -296,9 +301,10 @@ export function ensurePlanMetadataHeader(
   const header = formatPlanMetadata(metadata);
   const sanitized = planContent.replace(ANY_PLAN_METADATA_LINE_PATTERN, "");
   const firstLineEnd = sanitized.indexOf("\n");
-  const content = firstLineEnd >= 0 && /^#\s+/.test(sanitized.slice(0, firstLineEnd))
-    ? `${sanitized.slice(0, firstLineEnd)}\n${header}${sanitized.slice(firstLineEnd)}`
-    : `${header}\n${sanitized}`;
+  const content =
+    firstLineEnd >= 0 && /^#\s+/.test(sanitized.slice(0, firstLineEnd))
+      ? `${sanitized.slice(0, firstLineEnd)}\n${header}${sanitized.slice(firstLineEnd)}`
+      : `${header}\n${sanitized}`;
   assertArtifactSize("Plan", content, PLAN_MAX_BYTES);
   return { content, metadata, changed: true };
 }
@@ -458,9 +464,7 @@ export function validatePlanStructure(
   const lines = planContent.split(/\r?\n/);
   const headings = lines.flatMap((line, lineIndex) => {
     const match = line.match(/^##\s+(.+?)\s*$/);
-    return match
-      ? [{ lineIndex, normalized: normalizeHeading(match[1]) }]
-      : [];
+    return match ? [{ lineIndex, normalized: normalizeHeading(match[1]) }] : [];
   });
   const errors: string[] = [];
   let previousIndex = -1;
@@ -557,10 +561,12 @@ export function archivePlanFile(
   const archiveDir = getPlanArchiveDir(root);
   const content = readPlanFile(root);
   if (content === undefined)
-    throw new Error(`Plan file not found: ${planPath}`);
+    throw new Error(`Plan-Datei nicht gefunden: ${planPath}`);
   const initialHash = hashPlanContent(content);
   if (expectedPlanHash !== undefined && initialHash !== expectedPlanHash) {
-    throw new Error("Plan wurde zwischenzeitlich geändert; Archivierung abgebrochen.");
+    throw new Error(
+      "Plan wurde zwischenzeitlich geändert; Archivierung abgebrochen.",
+    );
   }
 
   assertNoSymlinkComponents(root, archiveDir);
@@ -589,7 +595,9 @@ export function archivePlanFile(
     });
     const current = readPlanFile(root);
     if (current === undefined || hashPlanContent(current) !== initialHash) {
-      throw new Error("Plan wurde zwischenzeitlich geändert; Archivierung abgebrochen.");
+      throw new Error(
+        "Plan wurde zwischenzeitlich geändert; Archivierung abgebrochen.",
+      );
     }
     copyFileSync(temporaryPath, archivePath, fsConstants.COPYFILE_EXCL);
     unlinkSync(planPath);
@@ -701,7 +709,7 @@ export function archiveDecisionBrief(cwd: string, now = new Date()): string {
   const archiveDir = getPlanArchiveDir(root);
   const content = readDecisionBrief(root);
   if (content === undefined)
-    throw new Error(`Decision brief not found: ${briefPath}`);
+    throw new Error(`Decision Brief nicht gefunden: ${briefPath}`);
 
   assertNoSymlinkComponents(root, archiveDir);
   mkdirSync(archiveDir, { recursive: true });

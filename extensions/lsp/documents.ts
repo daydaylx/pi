@@ -144,8 +144,9 @@ export class DocumentSync {
         kind: "protocol",
         serverId: "validation",
         workspaceRoot: this.workspaceRoot,
-        cause: `symlink escape detected in path '${absPath}'`,
-        remediation: "Only regular files inside the project are accessible.",
+        cause: `Symlink-Escape erkannt in Pfad '${absPath}'`,
+        remediation:
+          "Nur reguläre Dateien innerhalb des Projekts sind zugänglich.",
       });
     }
 
@@ -159,8 +160,9 @@ export class DocumentSync {
           kind: "protocol",
           serverId: "validation",
           workspaceRoot: this.workspaceRoot,
-          cause: `file '${absPath}' exceeds 10 MB limit (${stats.size} bytes)`,
-          remediation: "Open a smaller file or increase the limit in config.",
+          cause: `Datei '${absPath}' überschreitet das 10-MB-Limit (${stats.size} Bytes)`,
+          remediation:
+            "Kleinere Datei öffnen oder das Limit in der Konfiguration erhöhen.",
         });
       }
       content = readFileSync(absPath, "utf8");
@@ -172,8 +174,9 @@ export class DocumentSync {
             kind: "protocol",
             serverId: "validation",
             workspaceRoot: this.workspaceRoot,
-            cause: `cannot read file '${absPath}': ${message}`,
-            remediation: "Check file permissions and that it exists.",
+            cause: `Datei '${absPath}' kann nicht gelesen werden: ${message}`,
+            remediation:
+              "Dateiberechtigungen prüfen und ob die Datei existiert.",
           });
     }
 
@@ -256,8 +259,9 @@ export class DocumentSync {
             serverId: this.client.serverId,
             workspaceRoot: this.workspaceRoot,
             method: "textDocument/publishDiagnostics",
-            cause: `no diagnostics received for version >= ${minVersion} within ${timeoutMs}ms`,
-            remediation: "The server may still be analysing; retry shortly.",
+            cause: `Keine Diagnosen empfangen für Version >= ${minVersion} innerhalb von ${timeoutMs}ms`,
+            remediation:
+              "Der Server analysiert möglicherweise noch; in Kürze erneut versuchen.",
           }),
         );
       }, timeoutMs);
@@ -337,8 +341,8 @@ export function resolveTarget(
       kind: "protocol",
       serverId: "unknown",
       workspaceRoot: absPath,
-      cause: `no LSP profile is mapped for extension '${ext || "(none)"}'`,
-      remediation: "This file type has no configured language server.",
+      cause: `kein LSP-Profil zugeordnet für Erweiterung '${ext || "(none)"}'`,
+      remediation: "Für diesen Dateityp ist kein Language Server konfiguriert.",
     });
   }
 
@@ -348,8 +352,9 @@ export function resolveTarget(
       kind: "protocol",
       serverId: mapping.profileId,
       workspaceRoot: absPath,
-      cause: `profile '${mapping.profileId}' is disabled`,
-      remediation: "Enable it in .pi/lsp.json or with the session mode flag.",
+      cause: `Profil '${mapping.profileId}' ist deaktiviert`,
+      remediation:
+        "In .pi/lsp.json oder mit dem Session-Modus-Flag aktivieren.",
     });
   }
 
@@ -359,8 +364,8 @@ export function resolveTarget(
       kind: "protocol",
       serverId: profile.id,
       workspaceRoot: absPath,
-      cause: `no workspace root found (markers: ${profile.rootMarkers.join(", ")})`,
-      remediation: "Open the file from within its project directory.",
+      cause: `kein Arbeitsbereichs-Root gefunden (Marker: ${profile.rootMarkers.join(", ")})`,
+      remediation: "Datei aus ihrem Projektverzeichnis heraus öffnen.",
     });
   }
 

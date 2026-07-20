@@ -28,12 +28,12 @@ async function readBranch(pi: ExtensionAPI, cwd: string): Promise<string> {
   const name = branch.stdout.trim();
   if (name) return name;
   const head = await pi.exec("git", ["rev-parse", "--short", "HEAD"], { cwd });
-  return head.code === 0 ? `HEAD detached at ${head.stdout.trim()}` : "HEAD";
+  return head.code === 0 ? `HEAD losgelöst bei ${head.stdout.trim()}` : "HEAD";
 }
 
 function summarizeStatus(porcelain: string): string[] {
   const lines = porcelain.split("\n").filter((line) => line.length > 0);
-  if (lines.length === 0) return ["(clean)"];
+  if (lines.length === 0) return ["(sauber)"];
 
   let staged = 0;
   let modified = 0;
@@ -55,11 +55,11 @@ function summarizeStatus(porcelain: string): string[] {
   }
 
   const parts: string[] = [];
-  if (staged > 0) parts.push(`${staged} staged`);
+  if (staged > 0) parts.push(`${staged} vorgemerkt`);
   if (modified > 0) parts.push(`${modified} geändert`);
   if (untracked > 0) parts.push(`${untracked} neu`);
   if (deleted > 0) parts.push(`${deleted} gelöscht`);
-  return [parts.length > 0 ? parts.join(", ") : "(clean)"];
+  return [parts.length > 0 ? parts.join(", ") : "(sauber)"];
 }
 
 async function readCommits(pi: ExtensionAPI, cwd: string): Promise<string[]> {
@@ -85,11 +85,11 @@ async function installGitHeader(
   ctx.ui.setHeader((_tui, theme) => ({
     render(width: number): string[] {
       const lines = [
-        `${theme.bold("Current branch:")} ${branch}`,
+        `${theme.bold("Aktueller Branch:")} ${branch}`,
         theme.bold("Status:"),
         ...status,
         "",
-        theme.bold("Recent commits:"),
+        theme.bold("Letzte Commits:"),
         ...commits.map((line) => theme.fg("muted", line)),
       ];
       return lines.map((line) => truncateToWidth(line, width, ""));

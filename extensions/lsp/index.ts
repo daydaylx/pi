@@ -75,10 +75,7 @@ import {
 import { registerLspControlCenter } from "./control-center.ts";
 import type { LspToolsDeps } from "./tools.ts";
 import { computeLspStatus, publishLspStatus } from "./status.ts";
-import {
-  defaultSetupConfig,
-  loadSetupConfig,
-} from "../setup-core/config.ts";
+import { defaultSetupConfig, loadSetupConfig } from "../setup-core/config.ts";
 import {
   AURORA_UI_CHANNELS,
   isAuroraUiStateRequest,
@@ -208,7 +205,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
   function auroraLspState(): NonNullable<AuroraUiStatePatch["lsp"]> {
     const servers = registry?.list() ?? [];
     return {
-      state: registry ? computeLspStatus(config, servers) : "off",
+      state: registry ? computeLspStatus(config, servers) : "aus",
       detail:
         servers.length > 0
           ? `${servers.length} Server${servers.length === 1 ? "" : "s"}`
@@ -250,7 +247,10 @@ export default function lspExtension(pi: ExtensionAPI): void {
   };
 
   function captureControlCenterSession(ctx: ExtensionContext): unknown {
-    return { epoch: sessionEpoch, sessionId: ctx.sessionManager.getSessionId() };
+    return {
+      epoch: sessionEpoch,
+      sessionId: ctx.sessionManager.getSessionId(),
+    };
   }
 
   function isCurrentControlCenterSession(
@@ -268,10 +268,12 @@ export default function lspExtension(pi: ExtensionAPI): void {
 
   function captureControlCenterDeps(): LspToolsDeps {
     const capturedConfig = config;
-    const capturedRegistry = registry ?? new ServerRegistry({
-      config: capturedConfig,
-      logger,
-    });
+    const capturedRegistry =
+      registry ??
+      new ServerRegistry({
+        config: capturedConfig,
+        logger,
+      });
     return {
       getConfig: () => capturedConfig,
       getRegistry: () => capturedRegistry,
@@ -292,7 +294,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
   registerLspNavigationTools(pi, deps);
   registerLspControlCenter(pi, {
     getStatus: () =>
-      registry ? computeLspStatus(config, registry.list()) : "off",
+      registry ? computeLspStatus(config, registry.list()) : "aus",
     refreshStatus,
     captureSession: captureControlCenterSession,
     isSessionCurrent: isCurrentControlCenterSession,
@@ -341,7 +343,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
         case undefined: {
           const state = registry
             ? computeLspStatus(config, registry.list())
-            : "off";
+            : "aus";
           const servers = registry?.list() ?? [];
           const lines = [`LSP: ${state}`];
           for (const s of servers) {

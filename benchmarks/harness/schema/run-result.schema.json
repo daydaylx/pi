@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pi Benchmark Run Result",
+  "description": "Ausgabeformat von harness/collect-metrics.mjs für einen einzelnen Benchmark-Lauf. Siehe benchmarks/SCORING.md für die Definition jeder Messgröße.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "task",
+    "collectedAt",
+    "automatic",
+    "manualAssessment"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "task": {
+      "type": "string",
+      "description": "Aufgaben-ID, z. B. \"02-local-bug\""
+    },
+    "collectedAt": { "type": "string", "format": "date-time" },
+    "automatic": {
+      "type": "object",
+      "description": "Vollautomatisch aus Session-Logs, run-history.jsonl und git diff erhoben. Nie manuell überschreiben.",
+      "properties": {
+        "modelCalls": { "type": "integer", "minimum": 0 },
+        "tokens": {
+          "type": "object",
+          "properties": {
+            "input": { "type": "integer", "minimum": 0 },
+            "output": { "type": "integer", "minimum": 0 },
+            "reasoning": { "type": "integer", "minimum": 0 },
+            "total": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "failedToolCalls": { "type": "integer", "minimum": 0 },
+        "repeatedIdenticalFailures": { "type": "integer", "minimum": 0 },
+        "userCorrectionTurns": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": ["integer", "null"], "minimum": 0 },
+        "subagentCalls": { "type": "integer", "minimum": 0 },
+        "subagentDurationMsTotal": { "type": "integer", "minimum": 0 },
+        "subagentFailures": { "type": "integer", "minimum": 0 },
+        "diff": {
+          "type": ["object", "null"],
+          "properties": {
+            "changedFiles": { "type": "array", "items": { "type": "string" } },
+            "changedFileCount": { "type": "integer", "minimum": 0 },
+            "linesAdded": { "type": "integer", "minimum": 0 },
+            "linesRemoved": { "type": "integer", "minimum": 0 },
+            "outOfScopeFiles": {
+              "type": ["array", "null"],
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "verify": {
+          "type": ["object", "null"],
+          "properties": {
+            "exitCode": { "type": "integer" },
+            "durationMs": { "type": "integer", "minimum": 0 },
+            "knownBaselineFailuresSeen": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Siehe harness/BASELINE.md — Anzahl der 5 bekannten, referenzcommit-eigenen Testfehlschläge, die im Log gefunden wurden."
+            },
+            "likelyCausedByAgent": {
+              "type": "boolean",
+              "description": "false, wenn exitCode != 0 ausschließlich durch die bekannten Baseline-Fehlschläge erklärt wird."
+            }
+          }
+        }
+      }
+    },
+    "manualAssessment": {
+      "type": "object",
+      "description": "Muss von einem Menschen ausgefüllt werden. Nie automatisch geraten oder mit einem Default befüllt (siehe Änderungsregeln in benchmarks/README.md).",
+      "properties": {
+        "solvedWithoutCorrection": { "type": ["boolean", "null"] },
+        "unnecessaryLineChangesWithinScope": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "lostRequirements": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "repeatedFailuresWithoutContextChange": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "notes": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

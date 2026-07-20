@@ -1,6 +1,9 @@
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { extname, join, relative, resolve, sep } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import {
   CONTROL_CENTER_EVENTS,
   type OpenControlCenterMenuEvent,
@@ -104,7 +107,8 @@ function buildDiagnosticsMenu(status: string): MenuEntry<DiagnosticsAction>[] {
     {
       id: "lsp-pick-file",
       label: "Datei prüfen",
-      description: "Eine unterstützte reguläre Workspace-Datei auswählen und diagnostizieren",
+      description:
+        "Eine unterstützte reguläre Workspace-Datei auswählen und diagnostizieren",
       value: "pick-file",
     },
   ];
@@ -126,9 +130,14 @@ export function registerLspControlCenter(
     if (!options.isSessionCurrent(ctx, session)) return;
 
     const status = options.getStatus();
-    const selected = await runMenu(ctx, "LSP-Diagnose", buildDiagnosticsMenu(status), {
-      fallbackPrompt: "LSP-Diagnose wählen",
-    });
+    const selected = await runMenu(
+      ctx,
+      "LSP-Diagnose",
+      buildDiagnosticsMenu(status),
+      {
+        fallbackPrompt: "LSP-Diagnose wählen",
+      },
+    );
     if (!selected || !options.isSessionCurrent(ctx, session)) return;
     if (selected === "status") {
       ctx.ui.notify(`LSP: ${status}`, "info");
@@ -138,7 +147,7 @@ export function registerLspControlCenter(
     const candidates = findLspDiagnosticCandidates(ctx.cwd);
     if (candidates.length === 0) {
       ctx.ui.notify(
-        "Keine unterstützten regulären Dateien im Workspace gefunden.",
+        "Keine unterstützten regulären Dateien im Arbeitsbereich gefunden.",
         "info",
       );
       return;
@@ -149,7 +158,8 @@ export function registerLspControlCenter(
       candidates.map((candidate) => ({
         id: `lsp-file-${candidate}`,
         label: candidate,
-        description: EXTENSION_LANGUAGE_MAP[extname(candidate)]?.languageId ?? "",
+        description:
+          EXTENSION_LANGUAGE_MAP[extname(candidate)]?.languageId ?? "",
         value: candidate,
       })),
       { fallbackPrompt: "Datei für LSP-Diagnose wählen" },
@@ -165,7 +175,11 @@ export function registerLspControlCenter(
       return;
     }
 
-    const result = await runLspDiagnostics(options.captureDeps(), path, ctx.cwd);
+    const result = await runLspDiagnostics(
+      options.captureDeps(),
+      path,
+      ctx.cwd,
+    );
     if (!options.isSessionCurrent(ctx, session)) return;
     ctx.ui.notify(result.content[0].text, "info");
     options.refreshStatus(ctx);

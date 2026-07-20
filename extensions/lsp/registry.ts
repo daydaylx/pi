@@ -75,9 +75,9 @@ export class ServerRegistry {
           kind: "request_failed",
           serverId: profile.id,
           workspaceRoot,
-          cause: `server is in degraded state`,
+          cause: `Server befindet sich im eingeschränkten Zustand`,
           remediation:
-            "Restart the server with /lsp restart or wait for automatic recovery.",
+            "Server mit /lsp restart neu starten oder auf automatische Wiederherstellung warten.",
         });
       }
       // P1.1: Single-flight for "starting", "restarting", or "shutdown" states.
@@ -118,7 +118,8 @@ export class ServerRegistry {
           serverId: profile.id,
           workspaceRoot,
           cause: error instanceof Error ? error.message : String(error),
-          remediation: "Check that the server binary is installed and in PATH.",
+          remediation:
+            "Prüfen, ob die Server-Binärdatei installiert und in PATH ist.",
         });
       } finally {
         // Clear pending status after completion
