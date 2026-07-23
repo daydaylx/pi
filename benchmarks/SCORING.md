@@ -18,6 +18,9 @@ Anteile und `harness/schema/run-result.schema.json` für das Ausgabeformat.
 | 10  | Subagentenaufrufe                      | Anzahl Einträge in `run-history.jsonl` mit Timestamp innerhalb des Laufzeitfensters der Aufgabe                                                                           | vollautomatisch (Zeitfenster-Filter über `--window-start`/`--window-end`)                                                              | `run-history.jsonl`                                                    |
 | 11  | Verlorene Anforderungen                | Teile des ursprünglichen Auftrags (insbesondere bei Mehrfach-Etappen-Aufgaben wie #08), die im finalen Ergebnis fehlen oder widersprüchlich behandelt wurden              | manuell/subjektiv: Checkliste aus den Teilanforderungen in `TASK.md` gegen finales Diff+Antwort abhaken                                | manuelle Prüfung                                                       |
 | 12  | Wiederholte identische Fehler          | Anzahl Fälle, in denen derselbe `toolName` mit strukturell identischen Argumenten nach einem vorherigen `isError:true`-Ergebnis erneut aufgerufen wird                    | teilautomatisch: exakte Wiederholung (Tool+Argumente identisch) automatisch zählbar; Beurteilung "ohne geänderten Kontext" ist manuell | Session-JSONL `toolResult`/`toolCall`-Paare                            |
+| 13  | Entscheidungs-Persistenz nach Compaction | Sind bestätigte Nutzerentscheidungen, Nicht-Ziele und Architekturentscheidungen nach dem Lauf (potenziell nach einer Compaction) im finalen Turn UND in `docs/CONTEXT_LEDGER.md` unverändert und widerspruchsfrei vorhanden? | teilautomatisch: Datei-Abgleich der erwarteten Fakten gegen den Ledger automatisch (`--ledger-expects`, Feld `automatic.ledgerSurvival`); inhaltliche Widerspruchsfreiheit manuell (`manualAssessment.decisionPersistenceAfterCompaction`) | `docs/CONTEXT_LEDGER.md` im Worktree + finaler Assistant-Turn |
+| 14  | Projektstatus-Korrektheit | Stimmt der berichtete Stand (offene vs. erledigte Todos) im Abschluss-Turn mit Plan/Progress überein? | manuell: Abschluss-Turn gegen `.agent/plans/current-plan.md`/Progress abgleichen (`manualAssessment.projectStatusCorrectness`) | finaler Assistant-Turn + Plan-Datei |
+| 15  | Halluzinationsrate nach langer Sitzung | Anzahl behaupteter Entscheidungen/Fakten im Abschluss-Turn, die weder im Ledger noch im Decision Brief noch im Plan belegt sind | teilautomatisch/manuell: unbelegte Behauptungen markieren und zählen (`manualAssessment.hallucinationCount`) | finaler Assistant-Turn + Ledger/Brief/Plan |
 
 ## Automatisch vs. subjektiv
 
@@ -29,6 +32,13 @@ Anteile und `harness/schema/run-result.schema.json` für das Ausgabeformat.
 Feld `automatic` von `run-result.json`. Das Feld `manualAssessment` enthält
 ausschließlich `null`-Platzhalter, die von einem Menschen ausgefüllt werden
 müssen — nie automatisch geraten oder mit einem Default befüllt.
+
+Für Messgröße 13 erhebt der Harness einen automatischen Teil: mit
+`--ledger-expects "<Fakt A>|<Fakt B>|…"` prüft `collect-metrics.mjs`, ob die als
+dauerhaft erwarteten Fakten nach dem Lauf in `docs/CONTEXT_LEDGER.md` vorhanden
+sind (Feld `automatic.ledgerSurvival` mit `present`/`missing`). Die inhaltliche
+Widerspruchsfreiheit im finalen Turn sowie die Messgrößen 14 und 15 bleiben
+manuell.
 
 ## Bekannte Grenzen der Automatisierung
 

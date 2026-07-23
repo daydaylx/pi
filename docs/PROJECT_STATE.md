@@ -1,10 +1,17 @@
 # Project State
 
+> Flüchtiger Arbeitszustand (aktuelle Phase, letzte Verifikation, nächste
+> Schritte). Dauerhafte Fakten — bestätigte Entscheidungen, Architektur­ent­schei­dungen,
+> Nicht-Ziele, Einschränkungen, offene Risiken, Projektregeln — stehen im
+> Context Ledger: `docs/CONTEXT_LEDGER.md`. Hier nicht duplizieren, sondern
+> referenzieren.
+
 ## Aktuelles Ziel
 
 Ein eigenständiges, komfortables und stabiles Pi-Setup mit Aurora-Night-UI,
 zentraler Konfiguration, expliziten Berechtigungsgrenzen und einem belastbaren
-Plan-/Work-Workflow betreiben.
+Plan-/Work-Workflow betreiben. Nicht-Ziele und aktive Entscheidungen: siehe
+`docs/CONTEXT_LEDGER.md`.
 
 ## Aktuelle Phase
 
@@ -15,104 +22,54 @@ Die Übergabe erfolgt ohne Commit, Push oder Paketinstallation.
 
 - `setup.json` ist die zentrale, validierte Konfiguration für UI, Permissions,
   LSP, Subagenten, Modellrollen und allowlist-basierte Verifikation.
-- Aurora Night besitzt Editor, Footer, Activity-Widget und Working-Indikator.
-  Die Darstellung reagiert auf Terminalbreite und Motion-Modus und räumt alle
+- Aurora Night besitzt Editor, Footer, Activity-Widget und Working-Indikator;
+  die Darstellung reagiert auf Terminalbreite und Motion-Modus und räumt alle
   Session-Ressourcen beim Shutdown auf.
 - Der Planworkflow verwendet Sidecar v2 mit stabiler `planId`, Revision,
   Lifecycle, Todo-Hash und gebundener `executionId`; Lock/CAS-Schreibvorgänge
   und konservative Migration schützen ältere oder konkurrierende Zustände.
-  CAS-Konflikte stoppen den betreffenden Turn fail-closed und laden die
-  gewinnende Revision für einen späteren Retry neu. Markdown-Checkboxen bleiben
-  lesbare Source of Truth; alte Fortschrittsmarker funktionieren nur aus
-  regulär mit `stopReason: stop` beendeten Antworten und mit passendem
-  Execution-Hash.
 - Plan-, Review-, Decision- und Completion-Ergebnisse werden erst bei
-  `agent_settled` finalisiert. Dadurch laufen Handoff-Menüs erst im Idle-Zustand,
-  Retries zählen nur mit ihrem letzten Ergebnis und Completion-Nachrichten
-  erzeugen keinen unbeabsichtigten Folgeturn.
-- Asynchrone Workflow-Aktionen sind an Session-Epoch und Session-ID gebunden;
-  `/done` ist idle-only, `/work` serialisiert parallele Starts und setzt eine
-  noch aktive Execution nur nach erneuter Hash-Prüfung mit derselben ID fort.
-  Complete-Archive validieren Hash und Todo-Stand unter dem Workspace-Lock.
-- Gespeicherte Ausführungen werden ausschließlich als `paused` geladen und
-  brauchen in `/work` eine explizite Resume-Bestätigung. Decision Briefs werden
-  nur bei passender, im Workflow gespeicherter Hash-Verknüpfung übernommen.
+  `agent_settled` finalisiert; Retries zählen nur mit ihrem letzten Ergebnis.
 - Planning, Review, Decision, Execution, Paused, Blocked und Ready besitzen
-  technisch erzwungene Workflow-Capabilities; die jeweilige Phase begrenzt
-  Lesen, Rückfragen, Verifikation und Fortschrittsmeldungen unabhängig von der
-  globalen Berechtigungsstufe.
-- Unbekannte Tools fragen in Read+Write, Full und YOLO immer nach und sind in
-  strengeren Stufen blockiert; Setup bleibt absolut gesperrt. LSP,
-  `ask_user`, `plan_progress` und `verify` besitzen kleine explizite
-  Capability-Grenzen; LSP nutzt eine exakte Tool-Allowlist und `verify` nur
-  die festen Setup-Prüfungen aus dem Agent-Verzeichnis.
-- LSP übernimmt zentrale Defaults, behält vertrauensabhängige Projektkonfiguration
-  bei und meldet seinen Zustand an Aurora.
+  technisch erzwungene Workflow-Capabilities.
+- LSP nutzt eine exakte Tool-Allowlist; `verify` nur die festen Setup-Prüfungen.
 - Subagenten laufen mit maximal vier parallelen Tasks und rollenbezogen
   reduzierten Tool-Sets; Testläufe verwenden `verify` statt freien Bash.
-- Der Installer ist standardmäßig ein Dry-Run, kopiert nur eine Allowlist,
-  schließt Secrets und Laufzeitdaten aus und verweigert Symlinks in Quelle und
-  Zielpfad. npm-Manifeste, TypeScript-Konfiguration und Tests werden für eine
-  funktionsfähige Greenfield-Verifikation mit ausgeliefert.
-- TypeScript läuft strikt; CI und lokale Befehle verwenden dieselbe
-  `typecheck`-/`test`-/`verify`-Fassade.
-- Plan-, LSP- und Aurora-Provider setzen Session-Overrides zurück und entfernen
-  ihre Eventbus-Listener beim Shutdown bzw. Sessionersatz.
-
-## Aktive Entscheidungen
-
-- Gewählt: Aurora Night mit kontextueller Bewegung. `reduced` und `off` bleiben
-  über `setup.json` verfügbar.
-- Gewählt: `read-write` als Startstufe; unbekannte Tools bleiben auch in Full
-  und YOLO bestätigungspflichtig, in strengeren Stufen blockiert und in Setup
-  absolut gesperrt.
-- Gewählt: frischer Subagenten-Kontext und maximale Parallelität vier.
-- Gewählt: drei kuratierte OpenAI-Codex-Modellrollen (`fast`, `primary`, `deep`).
-- Gewählt: alte UI-/Renderer-Dateien bleiben inaktiv erhalten, damit Rückbau
-  und Vergleich ohne Datenverlust möglich sind.
-- Nicht ausgeführt: Commit, Push, Veröffentlichung oder Abhängigkeitsupdate.
-
-## Bekannte offene Punkte
-
-- Die aktive Pi CLI ist inzwischen `0.80.10` (Stand 23.07.2026, zuvor als
-  `0.80.7` dokumentiert), Manifest und lokales Dev-Paket
-  (`npm/package.json`, `npm/package-lock.json`) stehen weiter auf `0.80.6`.
-  Auf npm ist zusätzlich bereits `0.81.1` als `latest` verfügbar.
-  `/setup-doctor` weist die Abweichung als Fehler aus. Entscheidung
-  23.07.2026: Angleichung bleibt zurückgestellt, insbesondere da `0.81.x`
-  ein Minor-Bump ist, dessen Breaking-Changes noch nicht geprüft wurden.
-- Ein echter Provider-/Authentifizierungsdurchlauf wurde bewusst nicht gestartet
-  und `auth.json` nicht gelesen. Theme, Lifecycle, Toolregistrierung und UI-
-  Breakpoints sind im Harness geprüft.
-- In der eingeschränkten Sandbox schließt der verschachtelte Fake-LSP-Prozess
-  sein stdin und erzeugt 26 umgebungsbedingte Fehler. Außerhalb dieser Grenze
-  besteht dieselbe Suite vollständig.
+- Der Installer ist standardmäßig ein Dry-Run mit Allowlist, schließt Secrets
+  und Laufzeitdaten aus und verweigert Symlinks.
+- Context Ledger: getrennte, dauerhafte `docs/CONTEXT_LEDGER.md` plus
+  deterministische Auto-Konsolidierung (ohne Modell-Turn) an den plan-mode-
+  Checkpoints und eine kompakte Recovery-Kopfzeile bei `session_start`.
 
 ## Letzte Verifikation
 
-- `npm run verify`: 599 bestanden, 0 fehlgeschlagen.
-- `npm run typecheck`: erfolgreich mit `strict: true`.
+- `npm run verify` (lokal, `~/.pi/agent`): 599 bestanden, 0 fehlgeschlagen;
+  `npm run typecheck`: erfolgreich mit `strict: true`.
+- In CI/Fremdumgebungen zeigen sich zwei umgebungsbedingte Fehler
+  (CLI-Versionsdrift, abweichender Arbeitsverzeichnis-Pfad) — kein
+  Regressionsindiz, siehe `docs/CONTEXT_LEDGER.md`.
 - `git diff --check`: erfolgreich.
-- Pi CLI `0.80.7`, Node `22.22.2`, npm `10.9.7` festgestellt.
-- Installer-Dry-Run und Source-equals-Target-No-op geprüft.
-
-## Umgesetzt
-
-- P0.1: `containsExternalPath` in permission-policy.ts erweitert: Optionswerte mit `=` werden jetzt als Pfade geprüft
-- P0.1: Regressionstests für `diff --from-file=/etc/passwd` und ähnliche Muster hinzugefügt
-- P0.2: LSP-Tools: `toAbsolute` prüft nun absolute Pfade auf Projektzugehörigkeit
-- P0.2: Symlink- und Größenprüfung (10 MB Limit) in `openOrSync` (documents.ts) eingeführt
-- P0.3: Test-Assertion für Modellvertrag angepasst: Rollen müssen Teilmenge von enabledModels sein
-- P0.3: settings.json defaultModel auf `openai-codex/gpt-5.4` gesetzt (primary Rolle)
-- P1.1: Single-Flight-Promise (`pendingAcquire`) in registry.ts implementiert
-- P1.1: `remove()` ruft nun `shutdownEntry()` auf für ordnungsgemäßen Prozessabbau
-- P1.2: Boolean-/Integer-Validierung in `mergeConfig` durch Typ-Prüfungen ersetzt (fail-closed)
-- P1.2: Argumentlimit (max 12) in `resolveProfileOverrides` implementiert
 
 ## Bekannte offene Punkte
 
-- P0.4 (Fresh Checkout): Root-package.json bleibt unversioniert, ist aber mit ALLOWLIST dokumentiert
-- P1.3 (Test-Wartbarkeit): Temp-Cleanup-Hooks wurden noch nicht eingeführt (da nicht kritisch für aktuelle Tests)
+- P0.4 (Fresh Checkout): Root-`package.json` bleibt unversioniert, ist aber mit
+  ALLOWLIST dokumentiert.
+- P1.3 (Test-Wartbarkeit): Temp-Cleanup-Hooks wurden noch nicht eingeführt.
+- Ein echter Provider-/Authentifizierungsdurchlauf wurde bewusst nicht gestartet
+  und `auth.json` nicht gelesen. Theme, Lifecycle, Toolregistrierung und UI-
+  Breakpoints sind im Harness geprüft.
+- Weitere dauerhafte Einschränkungen/Risiken: siehe `docs/CONTEXT_LEDGER.md`.
+- Ausführliche Plan-Workflow-Mechanik (CAS-Fail-Closed, Session-Epoch-Bindung,
+  Execution-Hash, LSP-Trust-Details): siehe `README.md`.
+
+## Nächste drei Schritte
+
+1. Benchmark-Aufgabe 11 (Context-Ledger-Survival) real gegen die Baseline laufen
+   lassen und Messgrößen 13–15 auswerten.
+2. Token-Schwelle des Compaction-Proxys unter realer Last beobachten und ggf.
+   justieren.
+3. Ledger-Größe bei fortlaufender Nutzung prüfen und veraltete Einträge
+   kuratieren, statt den Ledger wachsen zu lassen.
 
 ## Vorgelegte Planungsgrundlage
 

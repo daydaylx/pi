@@ -36,11 +36,23 @@ danach separate Menüs für Modellrolle, Thinking, Berechtigung und Ein-Datei-LS
 Der Markdown-Plan bleibt `.agent/plans/current-plan.md`. Sidecar v2 speichert eine
 stabile `planId`, Revision, Lifecycle, Todo-bezogenen Hash und gebundene `executionId` in
 `.agent/plans/current-plan.state.json`; Lock/CAS-Schreibvorgänge und konservative
-Migration schützen konkurrierenden oder älteren Zustand. Während `/work` protokolliert
-das Modell Fortschritt über `plan_progress(executionId, step, status, evidence)`; alte Fortschritts-
-marker und `/done` bleiben kompatible Fallbacks. Eine gespeicherte Ausführung wird immer
-als `paused` wiederhergestellt und `/work` erfordert eine explizite Fortsetzung. Decision Briefs
-werden nur eingespielt, wenn ihr gespeicherter Hash mit dem aktuellen Plan verknüpft ist.
+Migration schützen konkurrierenden oder älteren Zustand. CAS-Konflikte stoppen den
+betreffenden Turn fail-closed und laden die gewinnende Revision für einen späteren Retry
+neu. Während `/work` protokolliert das Modell Fortschritt über
+`plan_progress(executionId, step, status, evidence)`; alte Fortschrittsmarker und `/done`
+bleiben kompatible Fallbacks, funktionieren aber nur aus regulär mit `stopReason: stop`
+beendeten Antworten und mit passendem Execution-Hash. Eine gespeicherte Ausführung wird
+immer als `paused` wiederhergestellt und `/work` erfordert eine explizite Fortsetzung.
+Decision Briefs werden nur eingespielt, wenn ihr gespeicherter Hash mit dem aktuellen Plan
+verknüpft ist.
+
+Plan-, Review-, Decision- und Completion-Ergebnisse werden erst bei `agent_settled`
+finalisiert. Dadurch laufen Handoff-Menüs erst im Idle-Zustand, Retries zählen nur mit
+ihrem letzten Ergebnis und Completion-Nachrichten erzeugen keinen unbeabsichtigten
+Folgeturn. Asynchrone Workflow-Aktionen sind zusätzlich an Session-Epoch und Session-ID
+gebunden; `/done` ist idle-only, `/work` serialisiert parallele Starts und setzt eine noch
+aktive Execution nur nach erneuter Hash-Prüfung mit derselben ID fort. Complete-Archive
+validieren Hash und Todo-Stand unter dem Workspace-Lock.
 
 Planning, Review, Decision, Execution, Paused, Blocked und Ready sind technisch
 erzwungene Capability-Phasen, keine reinen Prompt-Konventionen. Jede Phase legt nur
@@ -82,8 +94,12 @@ und Manifest-/Installationsversions-Drift, ohne Zugangsdaten zu lesen.
   Shell-Eingabe ausführen und führt immer die festen Prüfungen dieses Setups aus dem Agent-
   Verzeichnis aus. Projekt-Test-Skripte durchlaufen weiterhin die normale Bash-Policy.
 - LSP-Server werden nie automatisch installiert und starten erst bei erster Nutzung.
+  Projekt-lokale LSP-Konfiguration (`.pi/lsp.json`) wird nur bei vertrautem Projekt
+  berücksichtigt, sonst vollständig verworfen; LSP meldet seinen Zustand an Aurora.
 - Nur der Worker-Subagent besitzt rohe Bash-/Schreib-Tools. Review-Agenten sind
   technisch nur lesend; der Test Runner erhält nur das allowlistete `verify`-Tool.
+- Plan-, LSP- und Aurora-Provider setzen Session-Overrides zurück und entfernen ihre
+  Eventbus-Listener beim Shutdown bzw. Sessionersatz.
 - Pakete bleiben exakt gepinnt. Abhängigkeiten nicht aktualisieren, committen oder
   Branches veröffentlichen ohne ausdrückliche Freigabe.
 

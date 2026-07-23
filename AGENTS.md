@@ -19,12 +19,12 @@ Diese Regeln gelten für alle Pi-Sitzungen.
 - Vor vollständigen Diffs `git diff --stat` verwenden und Diffs anschließend dateibezogen lesen.
 - Testergebnisse auf Zusammenfassung und relevante Fehlerstellen beschränken; keine vollständigen Verzeichnisbäume ohne Grund laden.
 - Gekürzte Ausgaben sichtbar kennzeichnen. `!!command` nur verwenden, wenn der Nutzer die Ausgabe sehen soll, das Modell sie aber nicht weiter benötigt.
-- Dauerregeln in `AGENTS.md`, ausführliche Referenz in `docs/` und aktuellen Arbeitsstand in `docs/PROJECT_STATE.md` trennen.
+- Dauerregeln in `AGENTS.md`, ausführliche Referenz in `docs/`, dauerhaftes Projektgedächtnis (Entscheidungen, Nicht-Ziele, Risiken, Regeln) in `docs/CONTEXT_LEDGER.md` und flüchtigen Arbeitsstand in `docs/PROJECT_STATE.md` trennen; dauerhafte Fakten nicht duplizieren.
 
 ## Sessions und Arbeitsstand
 
 - Bei Wechsel des Hauptziels oder Projekts eine neue Session verwenden.
-- Bei langen zusammenhängenden Aufgaben vor Compaction, Modellwechsel oder Sessionwechsel einen kompakten Context-Checkpoint erstellen.
+- Bei langen zusammenhängenden Aufgaben vor Compaction, Modellwechsel oder Sessionwechsel einen kompakten Context-Checkpoint erstellen. Der dauerhafte Context Ledger wird zusätzlich automatisch und deterministisch (ohne Modell-Turn) von plan-mode konsolidiert.
 - `/fork` für Alternativen, `/clone` für eine separate Zweigkopie, `/tree` für Navigation innerhalb einer Session und `/compact` für lange weiterhin zusammenhängende Aufgaben verwenden.
 
 ## Subagenten

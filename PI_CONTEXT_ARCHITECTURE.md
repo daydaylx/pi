@@ -8,25 +8,72 @@
 | Pi-Projektregeln | `/home/d/.pi/AGENTS.md` | Projektkarte, Architekturgrenzen, Verify und Doku-Routing | nur unter `/home/d/.pi` |
 | Workflow | `skills/*/SKILL.md` | wiederverwendbare Verfahren | Metadaten immer, Body nur bei Aufruf |
 | Referenz | `docs/` und Root-Auditberichte | ausführliche Architektur und Betriebshinweise | gezielt lesen |
-| Arbeitszustand | `docs/PROJECT_STATE.md` | aktuelles Ziel, Entscheidungen, Fehler, nächste Schritte | nur bei Fortsetzung |
+| Dauergedächtnis | `docs/CONTEXT_LEDGER.md` | bestätigte Entscheidungen, Architektur, Nicht-Ziele, Risiken, Regeln, Prioritäten | kompakte Kopfzeile bei Sessionstart, voller Inhalt nur bei Bedarf |
+| Arbeitszustand | `docs/PROJECT_STATE.md` | flüchtige Phase, letzte Verifikation, nächste Schritte | nur bei Fortsetzung |
 | Gespräch | Pi-Session | aktueller Dialog und Toolschritte | nur aktive Session/Branch |
 
 `SYSTEM.md` und `APPEND_SYSTEM.md` werden nicht benötigt. Dynamische
 Projektinformationen werden weder in den Core-Systemprompt noch dauerhaft in
 globale Regeln verschoben.
 
-## Projektstatus und Checkpoints
+## Context Ledger, Projektstatus und Checkpoints
 
-`/skill:context-checkpoint` wird eingesetzt:
+Zwei getrennte Ebenen, keine Doppelrollen:
+
+- **`docs/CONTEXT_LEDGER.md` (dauerhaft):** bestätigte Nutzerentscheidungen,
+  Architekturentscheidungen, Nicht-Ziele, bekannte Einschränkungen, offene
+  Risiken/Fragen, wichtige Projektregeln und aktuelle Prioritäten. Fester
+  Abschnitts-Vertrag (`extensions/shared/context-ledger.ts`), harte Größengrenze
+  (< 200 Zeilen), kein wachsendes Log.
+- **`docs/PROJECT_STATE.md` (flüchtig):** aktuelle Phase, umgesetzte Punkte,
+  letzte Verifikation, nächste drei Schritte. Referenziert den Ledger, dupliziert
+  ihn nicht.
+
+Der Ledger wird **automatisch und deterministisch (ohne Modell-Turn)** von
+`extensions/plan-mode` konsolidiert. Trigger:
+
+- Plan → Work (`executePlan`);
+- Plan-Abschluss (`turn_end`, alle Todos erledigt);
+- nach einem geschriebenen Decision Brief (`handleDecisionTurnEnd`);
+- an der Token-Schwelle (≥ 75 % des Fensters) als Proxy vor Pis Compaction —
+  einmal je Fensterzyklus, da Pi keinen `before_compaction`-Hook bietet;
+- beim Sessionende (`session_shutdown`).
+
+Die Konsolidierung liest nur bereits existierende Artefakte (Decision Brief,
+Plan-Nicht-Ziele/Risiken, offene Todos), merged dedupliziert und filtert
+sensible Zeilen technisch aus (Whitelist der Abschnitte, kein Freitext-
+Passthrough). Bei `session_start` erscheint eine kompakte, tokensparsame
+Kopfzeile statt eines Voll-Injects; veraltete Einträge (abweichender Quell-Hash)
+werden markiert, nicht automatisch übernommen.
+
+`/skill:context-checkpoint` ist die **manuelle, kuratierende** Ebene (LLM-
+gestützt) und wird eingesetzt:
 
 - nach einer abgeschlossenen Analyse;
 - vor einer längeren Implementierung;
 - nach einem abgeschlossenen Teilabschnitt;
 - vor Modellwechsel, manueller Compaction oder neuer Session.
 
-Der Skill aktualisiert ausschließlich `docs/PROJECT_STATE.md`, wenn der aktive
-Permission-Modus Dokumentationsschreiben erlaubt. Er speichert keine Logs,
-Chats, Secrets oder ungeprüften Altentscheidungen und startet keine Compaction.
+Der Skill aktualisiert `docs/PROJECT_STATE.md` und kuratiert
+`docs/CONTEXT_LEDGER.md`, wenn der aktive Permission-Modus Dokumentationsschreiben
+erlaubt. Er speichert keine Logs, Chats, Secrets oder ungeprüften
+Altentscheidungen und startet keine Compaction.
+
+## Prioritätsordnung der Kontextquellen
+
+Verbindliche Reihenfolge (auch die Recovery-Ladepriorität):
+
+1. Sicherheits-/Schutzregeln (globale `AGENTS.md`) — nie entfernbar.
+2. Bestätigte Nutzerentscheidungen + Nicht-Ziele (Ledger) — nie verlieren.
+3. Aktive Aufgabe: Plan-Todos + Execution-Zustand (`plan-mode`).
+4. Aktuelle Prioritäten + offene Risiken (Ledger).
+5. Flüchtiger Arbeitsstand (`PROJECT_STATE.md`).
+6. Gesprächsverlauf (Pi Core, zuerst compaction-fähig).
+7. Rohlogs/Tool-Ausgaben (zuerst entfernbar).
+
+Bei Platzmangel verdichtet Pi Core von unten (7 → 6). Ebenen 1, 2 und 4 liegen
+als Dateien außerhalb des compaction-fähigen Chats und sind dadurch strukturell
+geschützt.
 
 ## Sessionstrategie
 
@@ -139,7 +186,7 @@ Pi-Version geprüft sind, Projekt-Trust respektieren, keine Tool-Semantik
 | manuelle Kontextanalyse | Auditdokumente und Checkpoint-Skill | gering | Core/Skill nutzen |
 | Tool-Kompression | Built-in-Limits plus lokaler Guard | konkrete Lücke geschlossen | keine externe Extension |
 | strukturierte Compaction | Core `/compact [prompt]` | derzeit unbelegt | keine zweite Compaction |
-| persistentes Gedächtnis | `PROJECT_STATE.md` | ausreichend, transparent, Git-fähig | keine Memory-Extension |
+| persistentes Gedächtnis | `PROJECT_STATE.md` (flüchtig) + `CONTEXT_LEDGER.md` (dauerhaft, deterministisch konsolidiert) | transparent, Git-fähig, ohne Modell-Turn; kein wachsendes Log | keine Memory-Extension; Datei plus reine Funktionen in `context-ledger.ts` |
 
 Rückbau erfolgt dateibezogen über die verifizierte Sicherung. Der lokale
 Output-Guard lässt sich unabhängig deaktivieren, ohne Sessions, Providerdaten

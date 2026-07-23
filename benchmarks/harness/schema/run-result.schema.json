@@ -66,6 +66,16 @@
               "description": "false, wenn exitCode != 0 ausschließlich durch die bekannten Baseline-Fehlschläge erklärt wird."
             }
           }
+        },
+        "ledgerSurvival": {
+          "type": ["object", "null"],
+          "description": "Automatischer Anteil von Messgröße 13: Abgleich der als dauerhaft erwarteten Fakten gegen docs/CONTEXT_LEDGER.md nach dem Lauf. Nur gesetzt, wenn --ledger-expects übergeben wurde.",
+          "properties": {
+            "ledgerFound": { "type": "boolean" },
+            "expected": { "type": "integer", "minimum": 0 },
+            "present": { "type": "integer", "minimum": 0 },
+            "missing": { "type": "array", "items": { "type": "string" } }
+          }
         }
       }
     },
@@ -85,6 +95,19 @@
         "repeatedFailuresWithoutContextChange": {
           "type": ["integer", "null"],
           "minimum": 0
+        },
+        "decisionPersistenceAfterCompaction": {
+          "type": ["boolean", "null"],
+          "description": "Messgröße 13 (inhaltlich): sind bestätigte Entscheidungen, Nicht-Ziele und Architekturentscheidungen im finalen Turn unverändert und widerspruchsfrei vorhanden?"
+        },
+        "projectStatusCorrectness": {
+          "type": ["boolean", "null"],
+          "description": "Messgröße 14: stimmt der berichtete Projektstatus (offene vs. erledigte Todos) mit Plan/Progress überein?"
+        },
+        "hallucinationCount": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Messgröße 15: Anzahl behaupteter Fakten im Abschluss-Turn, die nicht im Ledger, Decision Brief oder Plan belegt sind."
         },
         "notes": { "type": ["string", "null"] }
       }
