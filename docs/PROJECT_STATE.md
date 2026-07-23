@@ -140,10 +140,26 @@ Ergebnis des dritten (sauberen) Laufs liegt unter
 Bug korrekt gefunden und minimal behoben (`solvedWithoutCorrection: true`,
 1 Zeile geändert, keine Scope-Abweichung).
 
-**Nächster Schritt:** Auftrag 2 (Baseline messen) — volle Ausführung aller 10
-Aufgaben mit mehreren Wiederholungen, jetzt auf Basis des validierten
-Harness.
+**Auftrag 2 (Baseline messen) ist vorbereitet, aber noch nicht durchgeführt:**
+`benchmarks/harness/run-baseline.sh` verkettet die RUNBOOK.md-Schritte 1
+(Reset), 3 (Verify/Fixture-Test) und 4 (Metriken sammeln) für einen
+einzelnen Lauf (`prepare <task-id>` → Agent arbeiten lassen → `finish
+<task-id>`); erkennt Fixture-Test- (02, 03, 05) und testfreie Aufgaben (06, 09) automatisch und findet die passende Session-Datei über das
+Fensterstart-/Sessionverzeichnis-Muster. Gegen Aufgabe 01 erfolgreich
+end-to-end getestet (Verify- und Collect-Pfad, danach wieder aufgeräumt,
+kein Ergebnis in `results/` committet). Schritt 2 (Agent) und Schritt 5
+(`manualAssessment` ausfüllen) bleiben bewusst manuell.
+
+Entscheidungen für den eigentlichen Messdurchlauf (23.07.2026): aktuelle
+Default-Konfiguration aus `setup.json`/`settings.json` (kein Wechsel), 3
+Wiederholungen pro Aufgabe (30 Läufe gesamt über alle 10 Aufgabentypen).
+
+**Nächster Schritt:** die eigentlichen 30 Baseline-Läufe mit
+`run-baseline.sh` durchführen (empfohlene Reihenfolge laut `README.md`: 02
+und 09 zuerst, da automatisiert prüfbar und ohne Compaction-/
+Multi-Run-Komplexität), Ergebnisse unter `benchmarks/results/` ablegen und
+`manualAssessment` je Lauf von Hand ausfüllen.
 
 ## Letzte Aktualisierung
 
-2026-07-20 CEST
+2026-07-23 CEST

@@ -2,6 +2,37 @@
 
 Alle Befehle relativ zum Repository-Root (`/home/d/.pi/agent`) ausgeführt.
 
+## Kurzform: `harness/run-baseline.sh`
+
+Verkettet Schritt 1 (Reset), 3 (Verify) und 4 (Metriken sammeln) für einen
+einzelnen Lauf. Schritt 2 (Agent arbeiten lassen) und Schritt 5 (manuelle
+Bewertung) bleiben bewusst manuell — siehe `SCORING.md`, "Automatisch vs.
+subjektiv".
+
+```bash
+# 1. Worktree vorbereiten, Fensterstart notieren
+benchmarks/harness/run-baseline.sh prepare <task-id> [worktree-basisverzeichnis]
+
+# 2. Pi im ausgegebenen Worktree-Pfad starten, TASK.md-Auftragstext übergeben
+
+# 3. Verify + Metriken einsammeln (findet die Session-Datei automatisch über
+#    das Fensterstart-/Sessionverzeichnis-Muster; bei mehreren Treffern im
+#    Fenster oder abweichendem Session-Verzeichnis --session <pfad> explizit
+#    angeben)
+benchmarks/harness/run-baseline.sh finish <task-id> [worktree-basisverzeichnis] \
+  [--allowed-files "a,b,c"] [--session <pfad> ...]
+```
+
+Aufgaben mit Fixture-Test (02, 03, 05) und testfreie Aufgaben (06, 09)
+werden vom Skript automatisch erkannt (siehe `FIXTURE_TEST_TASKS`/
+`NO_TEST_TASKS` am Skriptanfang) und entsprechend behandelt, statt immer
+`npm run verify` aufzurufen. Aufräumen (`git worktree remove`) bleibt
+manuell, siehe Schritt 6 unten.
+
+Die folgenden Schritte 1–6 beschreiben denselben Ablauf einzeln, für Fälle,
+in denen die Kurzform nicht passt (z. B. Aufgabe 10 mit mehreren
+Subagent-Sessions).
+
 ## 1. Ausgangszustand herstellen
 
 ```bash
