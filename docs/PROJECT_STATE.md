@@ -86,7 +86,7 @@ Die Übergabe erfolgt ohne Commit, Push oder Paketinstallation.
 
 ## Letzte Verifikation
 
-- `npm run verify`: 439 bestanden, 0 fehlgeschlagen.
+- `npm run verify`: 599 bestanden, 0 fehlgeschlagen.
 - `npm run typecheck`: erfolgreich mit `strict: true`.
 - `git diff --check`: erfolgreich.
 - Pi CLI `0.80.7`, Node `22.22.2`, npm `10.9.7` festgestellt.
@@ -110,6 +110,36 @@ Die Übergabe erfolgt ohne Commit, Push oder Paketinstallation.
 - P0.4 (Fresh Checkout): Root-package.json bleibt unversioniert, ist aber mit ALLOWLIST dokumentiert
 - P1.3 (Test-Wartbarkeit): Temp-Cleanup-Hooks wurden noch nicht eingeführt (da nicht kritisch für aktuelle Tests)
 
+## Vorgelegte Planungsgrundlage
+
+- [`docs/empfehlungsbericht.md`](empfehlungsbericht.md) – strategisches Dach (was übernehmen / vereinfachen / ablehnen), Stand 20.07.2026.
+- [`docs/auftraege/arbeitsauftraege.md`](auftraege/arbeitsauftraege.md) – 17 verbindlich geordnete Aufträge, abgeleitet aus dem Empfehlungsbericht.
+- [`docs/auftraege/auftrag.md`](auftraege/auftrag.md) – **überholt**, siehe Kopfvermerk in der Datei: beschreibt eine kleinere 3-Fall-Pilotphase, die durch die tatsächlich umgesetzte 10-Aufgaben-Vollversion unter `benchmarks/` abgelöst wurde.
+
+**Auftrag 1 (Qualitätsbenchmark definieren) ist abgeschlossen:** Alle 10
+Aufgabentypen sind unter `benchmarks/tasks/` vollständig spezifiziert, samt
+lauffähiger Harness (`reset-task.sh`, `run-verify.sh`, `collect-metrics.mjs`,
+JSON-Schema), committet in `37b5641`. Ein erster End-zu-End-Pilotlauf
+(Aufgabe 02, lokaler Bug) wurde real durchgeführt und hat den Harness
+validiert; dabei zwei Bugs gefunden und behoben:
+
+1. Drei `TASK.md`-Dateien (02, 03, 05) verwiesen im Auftragstext auf
+   `fixture/...`, obwohl `reset-task.sh` das Overlay tatsächlich nach
+   `benchmark-fixture/...` kopiert — korrigiert.
+2. `reset-task.sh` ließ das kopierte Fixture-Verzeichnis komplett untracked;
+   `git diff --numstat` (Basis für die Messgröße "geänderte Dateien/Zeilen" in
+   `collect-metrics.mjs`) erkannte dadurch spätere Agent-Änderungen nicht.
+   Fix: `git add` direkt nach dem Kopieren (kein Commit, nur Staging).
+
+Ergebnis des dritten (sauberen) Laufs liegt unter
+`benchmarks/results/02-local-bug-pilot-20260720-2228.json`: Agent hat den
+Bug korrekt gefunden und minimal behoben (`solvedWithoutCorrection: true`,
+1 Zeile geändert, keine Scope-Abweichung).
+
+**Nächster Schritt:** Auftrag 2 (Baseline messen) — volle Ausführung aller 10
+Aufgaben mit mehreren Wiederholungen, jetzt auf Basis des validierten
+Harness.
+
 ## Letzte Aktualisierung
 
-2026-07-16 06:20 CEST
+2026-07-20 CEST

@@ -18,3 +18,7 @@ openrouter-free-models.json
 # Subagent runtime artifacts
 .pi-subagents/
 run-history.jsonl
+
+# Lokale Modell-/Extension-Laufzeitdaten
+models-store.json
+extensions/thinking-view/config.json

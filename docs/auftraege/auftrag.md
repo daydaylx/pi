@@ -1,5 +1,17 @@
 # Arbeitsauftrag: Qualitätsbenchmark für den Pi Agent – Pilotphase
 
+> **ÜBERHOLT (2026-07-20):** Der zugrundeliegende Widerspruch ist aufgelöst.
+> Auftrag 1 wurde direkt mit der vollen 10-Aufgaben-Version umgesetzt
+> (`benchmarks/tasks/01-single-file-change/` … `10-with-without-subagent/`,
+> committet in `37b5641`), nicht mit dieser kleineren 3-Fall-Pilotvariante.
+> Ein realer Harness-Validierungslauf hat inzwischen stattgefunden (siehe
+> `docs/PROJECT_STATE.md`, `benchmarks/results/02-local-bug-pilot-20260720-2228.json`).
+> Diese Datei bleibt nur aus Audit-Gründen erhalten und ist kein aktiver
+> Auftrag mehr.
+
+> **Übergeordnet:** [Arbeitsaufträge](arbeitsauftraege.md) – dieser Auftrag entspricht Auftrag 1. · [Empfehlungsbericht](../empfehlungsbericht.md) – Strategie-Dach.
+> **Beziehung zum Umfang:** Diese Pilotvariante umfasst **3 Testfälle**. Die [Arbeitsaufträge](arbeitsauftraege.md) (Auftrag 1) fordern „mindestens zehn" Aufgabentypen – dieser Auftrag ist die kleinere Pilotvorstufe; die ausbaufähige Vollversion ist dort definiert. _(Aufgelöst, siehe Vermerk oben.)_
+
 ## Rolle
 
 Du bist Testarchitekt für KI-Coding-Agenten und entwickelst einen kleinen, reproduzierbaren Qualitätsbenchmark für dieses Repository.

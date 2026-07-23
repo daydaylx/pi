@@ -1,5 +1,8 @@
 # Arbeitsaufträge für die Weiterentwicklung von `daydaylx/pi`
 
+> **Übergeordnet:** [Empfehlungsbericht](../empfehlungsbericht.md) – Strategie-Dach, begründet die Aufträge.
+> **Detail zu Auftrag 1:** [Benchmark-Auftrag](auftrag.md) – Pilotphase des Qualitätsbenchmarks.
+
 ## Verbindliche Reihenfolge
 
 Die Aufträge nicht parallel und nicht in beliebiger Reihenfolge umsetzen.

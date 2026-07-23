@@ -3,6 +3,10 @@
 **Stand:** 20. Juli 2026  
 **Gegenstand:** Welche Konzepte das bestehende Pi-Setup wirklich übernehmen, vereinfachen oder bewusst ablehnen sollte.
 
+**Zugehörige Dokumente:**
+- [Arbeitsaufträge](auftraege/arbeitsauftraege.md) – abgeleitetes Umsetzungsprogramm (17 operative Aufträge)
+- [Benchmark-Auftrag](auftraege/auftrag.md) – Detailausarbeitung von Auftrag 1 (Pilotphase)
+
 ## 1. Gesamturteil
 
 Das Repository ist nicht mehr nur eine Sammlung kleiner Pi-Anpassungen. Es ist bereits ein umfangreiches, eigenständiges Agenten-Setup mit:
