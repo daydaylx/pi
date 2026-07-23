@@ -46,6 +46,8 @@ function parseArgs(argv) {
     else if (arg === "--window-start") args.windowStart = argv[++i];
     else if (arg === "--window-end") args.windowEnd = argv[++i];
     else if (arg === "--allowed-files") args.allowedFiles = argv[++i];
+    else if (arg === "--ledger") args.ledger = argv[++i];
+    else if (arg === "--ledger-expects") args.ledgerExpects = argv[++i];
   }
   return args;
 }
@@ -237,6 +239,40 @@ function collectVerifyResult(verifyResultPath) {
   };
 }
 
+// --- Messgröße 13 (automatischer Anteil): Entscheidungs-Persistenz ---
+// Prüft, ob die als dauerhaft erwarteten Fakten nach dem Lauf (also potenziell
+// nach einer Compaction) im Context Ledger vorhanden sind. Nur der Datei-
+// Abgleich ist automatisch; die inhaltliche Korrektheit im finalen Turn bleibt
+// manuell (siehe SCORING.md, Messgröße 13).
+function collectLedgerSurvival(worktreePath, ledgerPathArg, expectsArg) {
+  const expects = expectsArg
+    ? expectsArg
+        .split("|")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+    : [];
+  if (expects.length === 0) return null;
+  const ledgerPath =
+    ledgerPathArg ??
+    (worktreePath ? `${worktreePath}/docs/CONTEXT_LEDGER.md` : undefined);
+  if (!ledgerPath || !existsSync(ledgerPath)) {
+    return {
+      ledgerFound: false,
+      expected: expects.length,
+      present: 0,
+      missing: expects,
+    };
+  }
+  const content = readFileSync(ledgerPath, "utf-8");
+  const missing = expects.filter((needle) => !content.includes(needle));
+  return {
+    ledgerFound: true,
+    expected: expects.length,
+    present: expects.length - missing.length,
+    missing,
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.task) {
@@ -261,6 +297,12 @@ async function main() {
 
   const verifyResult = collectVerifyResult(args.verifyResult);
 
+  const ledgerSurvival = collectLedgerSurvival(
+    args.worktree,
+    args.ledger,
+    args.ledgerExpects,
+  );
+
   const result = {
     schemaVersion: "1.0.0",
     task: args.task,
@@ -277,12 +319,16 @@ async function main() {
       subagentFailures: runHistoryMetrics.subagentFailures,
       diff: diffStat,
       verify: verifyResult,
+      ledgerSurvival,
     },
     manualAssessment: {
       solvedWithoutCorrection: null,
       unnecessaryLineChangesWithinScope: null,
       lostRequirements: null,
       repeatedFailuresWithoutContextChange: null,
+      decisionPersistenceAfterCompaction: null,
+      projectStatusCorrectness: null,
+      hallucinationCount: null,
       notes: null,
     },
   };

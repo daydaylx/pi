@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.pi/context-ledger.schema.json",
+  "title": "Pi Context Ledger Metadata",
+  "description": "Vertrag für den JSON-Metadaten-Kommentar am Ende von docs/CONTEXT_LEDGER.md (Marker CONTEXT-LEDGER-META). Der Abschnitts-Vertrag der Markdown-Datei ist in extensions/shared/context-ledger.ts (LEDGER_SECTIONS) festgelegt und wird beim Schreiben als Whitelist erzwungen.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "lastCheckpoint", "lastTrigger"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "Version des Ledger-Metadatenformats."
+    },
+    "lastCheckpoint": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-Zeitstempel der letzten Konsolidierung."
+    },
+    "lastTrigger": {
+      "enum": [
+        "plan-to-work",
+        "plan-complete",
+        "decision-brief",
+        "token-threshold",
+        "session-shutdown",
+        "manual"
+      ],
+      "description": "Auslöser, der die letzte Konsolidierung erzeugt hat."
+    },
+    "briefHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 des zuletzt konsolidierten Decision Brief. Weicht der aktuelle Wert ab, gelten übernommene Entscheidungen bei der Recovery als potenziell veraltet."
+    },
+    "planHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 des zuletzt konsolidierten Plans. Weicht der aktuelle Wert ab, gelten übernommene Nicht-Ziele/Risiken bei der Recovery als potenziell veraltet."
+    }
+  }
+}

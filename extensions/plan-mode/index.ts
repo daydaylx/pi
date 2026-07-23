@@ -19,8 +19,17 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { relative } from "node:path";
+import { relative, sep } from "node:path";
 import { Type } from "typebox";
+import {
+  consolidateLedger,
+  classifyLedger,
+  ledgerSummaryLine,
+  readLedger,
+  shouldCheckpointForTokens,
+  CONTEXT_LEDGER_RELATIVE_PATH,
+  type LedgerTrigger,
+} from "../shared/context-ledger.ts";
 import {
   applyDoneSteps,
   archiveDecisionBrief,
@@ -283,6 +292,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   // dass das "Nächster Schritt"-Menü nur nach dem Turn erscheint, der den Plan
   // erzeugt hat — nicht nach jedem Verfeinerungs-Turn.
   let planExistedBeforeTurn = false;
+  // Token-Proxy für den „vor Compaction"-Checkpoint: einmal je Fensterzyklus.
+  // Wird scharf gestellt, sobald die Kontextauslastung wieder unter die
+  // Schwelle fällt (typisch nach einer Compaction, wenn `tokens` neu klein
+  // oder null gemeldet wird).
+  let ledgerTokenCheckpointArmed = true;
 
   interface SessionToken {
     epoch: number;
@@ -372,6 +386,74 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   function readTodos(cwd: string): TodoItem[] {
     const content = readPlanFile(cwd);
     return content === undefined ? [] : extractTodoItems(content);
+  }
+
+  function getProjectName(cwd: string): string {
+    const base = cwd.split(sep).filter(Boolean).pop();
+    return base && base.length > 0 ? base : "Projekt";
+  }
+
+  // Deterministischer, modell-freier Context-Ledger-Checkpoint. Konsolidiert die
+  // bereits existierenden strukturierten Artefakte (Decision Brief, Plan,
+  // offene Todos) in docs/CONTEXT_LEDGER.md. Fail-open: ein Ledger-Fehler darf
+  // den Workflow niemals stoppen. Erzeugt keinen zusätzlichen Modell-Turn.
+  function runLedgerCheckpoint(
+    ctx: ExtensionContext,
+    trigger: LedgerTrigger,
+  ): void {
+    try {
+      // Artefakte aus nicht vertrauenswürdigen Workspaces werden nicht
+      // dauerhaft übernommen (analog zur Plan-Behandlung).
+      if (!ctx.isProjectTrusted()) return;
+
+      let briefContent: string | undefined;
+      let planContent: string | undefined;
+      let openPriorities: string[] = [];
+      try {
+        briefContent = readDecisionBrief(ctx.cwd);
+      } catch {
+        // Ein unlesbares Brief blockiert die restliche Konsolidierung nicht.
+      }
+      try {
+        planContent = readPlanFile(ctx.cwd);
+      } catch {
+        // Ein unlesbarer Plan blockiert die restliche Konsolidierung nicht.
+      }
+      try {
+        openPriorities = readTodos(ctx.cwd)
+          .filter((todo) => !todo.completed)
+          .map((todo) => todo.text);
+      } catch {
+        openPriorities = [];
+      }
+
+      if (
+        briefContent === undefined &&
+        planContent === undefined &&
+        openPriorities.length === 0
+      ) {
+        return;
+      }
+
+      const wrote = consolidateLedger(
+        ctx.cwd,
+        getProjectName(ctx.cwd),
+        { briefContent, planContent, openPriorities },
+        trigger,
+      );
+      if (wrote) {
+        ctx.ui.notify(
+          `Context Ledger aktualisiert (${trigger}) → ${CONTEXT_LEDGER_RELATIVE_PATH}`,
+          "info",
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Context Ledger konnte nicht aktualisiert werden: ${message}`,
+        "warning",
+      );
+    }
   }
 
   function effectivePlanType(
@@ -1261,6 +1343,8 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
         `Decision Brief gespeichert → ${DECISION_BRIEF_RELATIVE_PATH}`,
         "info",
       );
+      // Bestätigte Entscheidungen dauerhaft ins Ledger übernehmen.
+      runLedgerCheckpoint(ctx, "decision-brief");
       resetPhase();
       await offerDecisionHandoff(ctx);
     } catch (error) {
@@ -1925,6 +2009,9 @@ FORTSCHRITT:
           activeRun = undefined;
           updateStatus(ctx);
         }
+        // Plan abgeschlossen: erledigte Prioritäten aktualisieren, dauerhafte
+        // Fakten festschreiben.
+        runLedgerCheckpoint(ctx, "plan-complete");
         return;
       }
       updateStatus(ctx);
@@ -1940,6 +2027,36 @@ FORTSCHRITT:
         "error",
       );
     }
+  });
+
+  // Token-Proxy für den „vor Compaction"-Checkpoint. Pi Core besitzt keinen
+  // before_compaction-Hook; deshalb konsolidieren wir konservativ, sobald die
+  // Kontextauslastung Pis Compaction-Schwelle nähert — einmal je Fensterzyklus.
+  // Fällt die Auslastung wieder unter die Schwelle (typisch nach einer
+  // Compaction), wird der Checkpoint erneut scharf gestellt.
+  pi.on("turn_end", (_event, ctx) => {
+    let usage:
+      | { tokens: number | null; contextWindow: number; percent: number | null }
+      | undefined;
+    try {
+      usage = ctx.getContextUsage?.();
+    } catch {
+      return;
+    }
+    if (!usage || usage.tokens === null) {
+      // Unbekannte Auslastung (u. a. direkt nach einer Compaction) stellt den
+      // Checkpoint für den nächsten Zyklus wieder scharf.
+      ledgerTokenCheckpointArmed = true;
+      return;
+    }
+    const crossed = shouldCheckpointForTokens(usage.tokens, usage.contextWindow);
+    if (!crossed) {
+      ledgerTokenCheckpointArmed = true;
+      return;
+    }
+    if (!ledgerTokenCheckpointArmed) return;
+    ledgerTokenCheckpointArmed = false;
+    runLedgerCheckpoint(ctx, "token-threshold");
   });
 
   async function handleSettledRun(
@@ -2465,6 +2582,10 @@ ${content}
       );
       return;
     }
+
+    // Plan → Work: dauerhafte Fakten (Nicht-Ziele, Risiken, Entscheidungen)
+    // aus Plan und Brief ins Ledger sichern, bevor die Umsetzung beginnt.
+    runLedgerCheckpoint(ctx, "plan-to-work");
 
     try {
       pi.sendMessage(
@@ -3079,9 +3200,38 @@ CHANGED_FILES:
     }
     updateStatus(ctx);
     persistState(ctx);
+
+    // Intelligente Wiederherstellung: kein Voll-Inject. Der dauerhafte Ledger
+    // bleibt eine Datei; nur eine kompakte, tokensparsame Kopfzeile weist auf
+    // Entscheidungen, Nicht-Ziele, Risiken und die aktuelle Priorität hin.
+    // Veraltete Einträge (abweichender Quell-Hash) werden markiert, nicht
+    // automatisch übernommen. Voller Inhalt nur bei Bedarf über die Datei.
+    ledgerTokenCheckpointArmed = true;
+    try {
+      const ledger = readLedger(ctx.cwd);
+      if (ledger !== undefined) {
+        let currentBriefHash: string | undefined;
+        let currentPlanHash: string | undefined;
+        try {
+          const brief = readDecisionBrief(ctx.cwd);
+          if (brief !== undefined) currentBriefHash = hashPlanContent(brief);
+        } catch {
+          // Ein unlesbares Brief darf die Recovery-Kopfzeile nicht verhindern.
+        }
+        if (content !== undefined) currentPlanHash = hashPlanContent(content);
+        const summary = ledgerSummaryLine(
+          classifyLedger(ledger, currentBriefHash, currentPlanHash),
+        );
+        if (summary) ctx.ui.notify(summary, "info");
+      }
+    } catch {
+      // Recovery ist rein additiv; ein Ledger-Lesefehler bleibt folgenlos.
+    }
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    // Finaler deterministischer Konsolidierungslauf, bevor die Session endet.
+    runLedgerCheckpoint(ctx, "session-shutdown");
     if (phase === "executing") {
       phase = "paused";
       activeRun = undefined;

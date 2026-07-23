@@ -164,6 +164,7 @@ const setupConfig = await load("extensions/setup-core/config.ts");
 const setupCore = await load("extensions/setup-core/index.ts");
 const auroraState = await load("extensions/aurora-ui/state.ts");
 const auroraUi = await load("extensions/aurora-ui/index.ts");
+const contextLedger = await load("extensions/shared/context-ledger.ts");
 
 function stripAnsi(value) {
   return String(value).replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
@@ -6244,6 +6245,268 @@ await section("diff viewer regressions", async () => {
     ["a.txt", "b.txt"],
     "tracker sorts by persisted timestamp",
   );
+});
+
+await section("context ledger consolidation and recovery", async () => {
+  const {
+    computeLedgerContent,
+    parseLedgerSections,
+    parseLedgerMeta,
+    classifyLedger,
+    ledgerSummaryLine,
+    sanitizeBullet,
+    isSensitiveLine,
+    shouldCheckpointForTokens,
+    consolidateLedger,
+    readLedger,
+    hashContent,
+    CONTEXT_LEDGER_RELATIVE_PATH,
+    CONTEXT_LEDGER_MAX_LINES,
+  } = contextLedger;
+
+  const now = new Date("2026-07-23T10:00:00.000Z");
+  const brief = [
+    "# Decision Brief: Beispiel",
+    "## Ziel",
+    "Etwas erreichen.",
+    "## Nicht-Ziele",
+    "- Keine neue Memory-Extension",
+    "## Entscheidungen",
+    "- Entscheidung: Aurora Night als Standard-UI",
+    "## Risiken / Constraints",
+    "- xhigh übersteigt den 64K-Ausgaberahmen",
+    "## Offene Fragen",
+    "- Version 0.80.6 vs 0.80.7 angleichen?",
+    "## Verworfene Optionen",
+    "- Option: Externe Memory-Extension — zu komplex",
+    "## Abschlusskriterien",
+    "- [ ] Fertig",
+  ].join("\n");
+
+  // Erst-Konsolidierung aus einem Decision Brief.
+  const first = computeLedgerContent(
+    "pi",
+    undefined,
+    { briefContent: brief },
+    "decision-brief",
+    now,
+  );
+  assert(first.changed, "erste Konsolidierung schreibt");
+  eq(
+    first.sections["Bestätigte Nutzerentscheidungen"],
+    ["Entscheidung: Aurora Night als Standard-UI"],
+    "Entscheidung landet im richtigen Abschnitt",
+  );
+  eq(
+    first.sections["Nicht-Ziele"],
+    ["Keine neue Memory-Extension"],
+    "Nicht-Ziel übernommen",
+  );
+  eq(
+    first.sections["Offene Risiken"],
+    ["xhigh übersteigt den 64K-Ausgaberahmen"],
+    "Risiko übernommen",
+  );
+
+  // Idempotenz: derselbe Brief nochmal → keine Änderung.
+  const second = computeLedgerContent(
+    "pi",
+    first.content,
+    { briefContent: brief },
+    "decision-brief",
+    now,
+  );
+  assert(!second.changed, "erneute Konsolidierung derselben Quelle ist ein No-op");
+  eq(
+    second.sections["Bestätigte Nutzerentscheidungen"].length,
+    1,
+    "keine Duplikate bei Wiederholung",
+  );
+
+  // Neuer Plan fügt weitere Nicht-Ziele hinzu, dedupliziert Bekanntes.
+  const plan = [
+    "# Arbeitsplan: Beispiel",
+    "## 2. Nicht-Ziele",
+    "- Keine neue Memory-Extension",
+    "- Keine Vergrößerung des Kontextfensters",
+    "## 4. Risiken / Entscheidungen",
+    "- Token-Proxy statt echtem Hook",
+    "## 5. Todos",
+    "- [ ] Modul schreiben",
+  ].join("\n");
+  const third = computeLedgerContent(
+    "pi",
+    first.content,
+    { planContent: plan, openPriorities: ["Modul schreiben", "Modul schreiben"] },
+    "plan-to-work",
+    now,
+  );
+  assert(third.changed, "neuer Plan ändert den Ledger");
+  eq(
+    third.sections["Nicht-Ziele"],
+    ["Keine neue Memory-Extension", "Keine Vergrößerung des Kontextfensters"],
+    "Plan-Nicht-Ziele dedupliziert angehängt",
+  );
+  eq(
+    third.sections["Aktuelle Prioritäten"],
+    ["Modul schreiben"],
+    "Prioritäten werden ersetzt und dedupliziert",
+  );
+
+  // Secret-Filter: sensible Zeilen werden nie übernommen.
+  assert(isSensitiveLine("password=hunter2"), "erkennt password");
+  assert(isSensitiveLine("Bearer abcdef123456"), "erkennt Bearer-Token");
+  assert(isSensitiveLine("API_KEY=sk-abcdefghij"), "erkennt ENV-Zuweisung");
+  eq(sanitizeBullet("- secret token: xoxb-1234567890"), undefined, "sanitize verwirft Secret");
+  eq(sanitizeBullet("-   Normaler   Eintrag "), "Normaler Eintrag", "sanitize normalisiert Freitext");
+  const secretBrief = [
+    "## Entscheidungen",
+    "- Entscheidung: normale Entscheidung",
+    "- AWS_SECRET_ACCESS_KEY=abcd1234efgh",
+  ].join("\n");
+  const filtered = computeLedgerContent("pi", undefined, { briefContent: secretBrief }, "manual", now);
+  eq(
+    filtered.sections["Bestätigte Nutzerentscheidungen"],
+    ["Entscheidung: normale Entscheidung"],
+    "Secret-Zeile wird aus dem Merge gefiltert",
+  );
+
+  // Meta und Klassifikation.
+  const meta = parseLedgerMeta(third.content);
+  assert(meta && meta.lastTrigger === "plan-to-work", "Meta enthält Trigger");
+  assert(meta && meta.planHash === hashContent(plan), "Meta enthält Plan-Hash");
+  const classSame = classifyLedger(third.content, undefined, hashContent(plan));
+  assert(!classSame.possiblyStale, "gleicher Plan-Hash → nicht veraltet");
+  const classStale = classifyLedger(third.content, undefined, "deadbeef");
+  assert(classStale.possiblyStale, "abweichender Plan-Hash → veraltet-Flag");
+  assert(!classStale.isEmpty, "gefüllter Ledger ist nicht leer");
+
+  // Recovery-Kopfzeile ist kompakt und nennt den Dateipfad.
+  const summary = ledgerSummaryLine(classSame);
+  assert(
+    typeof summary === "string" && summary.includes(CONTEXT_LEDGER_RELATIVE_PATH),
+    "Kopfzeile verweist auf die Ledger-Datei",
+  );
+  eq(ledgerSummaryLine(classifyLedger(undefined)), undefined, "leerer Ledger → keine Kopfzeile");
+
+  // Token-Proxy.
+  assert(shouldCheckpointForTokens(80000, 100000), "80% ≥ 75% Schwelle löst aus");
+  assert(!shouldCheckpointForTokens(50000, 100000), "50% löst nicht aus");
+  assert(!shouldCheckpointForTokens(0, 100000), "0 Tokens löst nicht aus");
+  assert(!shouldCheckpointForTokens(80000, 0), "ungültiges Fenster löst nicht aus");
+
+  // Zeilengrenze wird erzwungen.
+  let overflowThrew = false;
+  try {
+    const huge = ["## Nicht-Ziele"];
+    for (let i = 0; i < CONTEXT_LEDGER_MAX_LINES + 50; i += 1) huge.push(`- Eintrag ${i}`);
+    computeLedgerContent("pi", huge.join("\n"), {}, "manual", now);
+  } catch {
+    overflowThrew = true;
+  }
+  assert(overflowThrew, "Überschreiten der Zeilengrenze wirft");
+
+  // Dateisystem-Roundtrip (atomar, symlink-sicher).
+  const dir = mkdtempSync(path.join(tmpdir(), "pi-ledger-"));
+  try {
+    const wrote = consolidateLedger(dir, "pi", { briefContent: brief }, "manual", now);
+    assert(wrote, "consolidateLedger schreibt beim ersten Mal");
+    const onDisk = readLedger(dir);
+    assert(
+      typeof onDisk === "string" && onDisk.includes("Aurora Night"),
+      "geschriebener Ledger enthält die Entscheidung",
+    );
+    const again = consolidateLedger(dir, "pi", { briefContent: brief }, "manual", now);
+    assert(!again, "unveränderte Quelle schreibt nicht erneut");
+    const parsed = parseLedgerSections(onDisk);
+    eq(parsed["Nicht-Ziele"], ["Keine neue Memory-Extension"], "Roundtrip erhält Abschnitte");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+await section("context ledger plan-mode integration", async () => {
+  if (!planMode) return;
+  const { readLedger } = contextLedger;
+  const dir = mkdtempSync(path.join(tmpdir(), "pi-ledger-integration-"));
+  try {
+    mkdirSync(path.join(dir, ".agent", "plans"), { recursive: true });
+    writeFileSync(
+      path.join(dir, ".agent", "plans", "current-plan.md"),
+      [
+        "# Arbeitsplan: Ledger-Integration",
+        "## 1. Auftrag",
+        "Etwas umsetzen.",
+        "## 2. Nicht-Ziele",
+        "- Keine neue Memory-Extension",
+        "## 5. Todos",
+        "- [ ] Erster Schritt",
+        "- [x] Erledigter Schritt",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(dir, ".agent", "plans", "decision-brief.md"),
+      [
+        "# Decision Brief: Ledger-Integration",
+        "## Ziel",
+        "Ziel.",
+        "## Entscheidungen",
+        "- Entscheidung: Deterministischer Ledger ohne Modell-Turn",
+        "## Abschlusskriterien",
+        "- [ ] Fertig",
+        "",
+      ].join("\n"),
+    );
+
+    const harness = createHarness();
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd: dir, trusted: true });
+
+    // session_shutdown triggert einen deterministischen Konsolidierungslauf.
+    await harness.runHooks("session_shutdown", {}, context);
+    const ledger = readLedger(dir);
+    assert(typeof ledger === "string", "session_shutdown schreibt den Ledger");
+    assert(
+      ledger.includes("Deterministischer Ledger ohne Modell-Turn"),
+      "Entscheidung aus dem Brief steht im Ledger",
+    );
+    assert(
+      ledger.includes("Keine neue Memory-Extension"),
+      "Nicht-Ziel aus dem Plan steht im Ledger",
+    );
+    assert(
+      ledger.includes("Erster Schritt") && !ledger.includes("Erledigter Schritt"),
+      "nur offene Todos werden als aktuelle Priorität geführt",
+    );
+
+    // Es wurde kein zusätzlicher Modell-Turn ausgelöst.
+    eq(harness.sent.length, 0, "Ledger-Checkpoint erzeugt keinen Modell-Turn");
+
+    // Recovery: session_start zeigt eine kompakte Kopfzeile, kein Voll-Inject.
+    const startHarness = createHarness();
+    planMode.default(startHarness.api);
+    const startContext = startHarness.makeContext({ cwd: dir, trusted: true });
+    await startHarness.runHooks("session_start", {}, startContext);
+    assert(
+      startHarness.notifications.some(
+        (entry) =>
+          typeof entry.message === "string" &&
+          entry.message.startsWith("Context Ledger:"),
+      ),
+      "session_start meldet eine kompakte Ledger-Kopfzeile",
+    );
+    assert(
+      !startHarness.notifications.some(
+        (entry) =>
+          typeof entry.message === "string" &&
+          entry.message.includes("Deterministischer Ledger ohne Modell-Turn"),
+      ),
+      "die Kopfzeile injiziert nicht den vollen Ledger-Inhalt",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 console.log(
