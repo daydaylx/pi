@@ -74,9 +74,13 @@ Die Übergabe erfolgt ohne Commit, Push oder Paketinstallation.
 
 ## Bekannte offene Punkte
 
-- Die aktive Pi CLI ist `0.80.7`, Manifest und lokales Dev-Paket sind `0.80.6`.
-  `/setup-doctor` weist diese Abweichung als Fehler aus. Eine Angleichung wartet
-  auf ausdrückliche Freigabe für die Abhängigkeitsänderung.
+- Die aktive Pi CLI ist inzwischen `0.80.10` (Stand 23.07.2026, zuvor als
+  `0.80.7` dokumentiert), Manifest und lokales Dev-Paket
+  (`npm/package.json`, `npm/package-lock.json`) stehen weiter auf `0.80.6`.
+  Auf npm ist zusätzlich bereits `0.81.1` als `latest` verfügbar.
+  `/setup-doctor` weist die Abweichung als Fehler aus. Entscheidung
+  23.07.2026: Angleichung bleibt zurückgestellt, insbesondere da `0.81.x`
+  ein Minor-Bump ist, dessen Breaking-Changes noch nicht geprüft wurden.
 - Ein echter Provider-/Authentifizierungsdurchlauf wurde bewusst nicht gestartet
   und `auth.json` nicht gelesen. Theme, Lifecycle, Toolregistrierung und UI-
   Breakpoints sind im Harness geprüft.
