@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0.0",
+  "task": "02-local-bug",
+  "collectedAt": "2026-07-20T20:28:26.478Z",
+  "automatic": {
+    "modelCalls": 8,
+    "tokens": {
+      "input": 9054,
+      "output": 4696,
+      "reasoning": 3712,
+      "total": 124022
+    },
+    "failedToolCalls": 2,
+    "repeatedIdenticalFailures": 0,
+    "userCorrectionTurns": 0,
+    "durationMs": 98869,
+    "subagentCalls": 0,
+    "subagentDurationMsTotal": 0,
+    "subagentFailures": 0,
+    "diff": {
+      "changedFiles": ["benchmark-fixture/diff-viewer/diff-algorithm.ts"],
+      "changedFileCount": 1,
+      "linesAdded": 1,
+      "linesRemoved": 1,
+      "outOfScopeFiles": []
+    },
+    "verify": null
+  },
+  "manualAssessment": {
+    "solvedWithoutCorrection": true,
+    "unnecessaryLineChangesWithinScope": 0,
+    "lostRequirements": [],
+    "repeatedFailuresWithoutContextChange": 0,
+    "notes": "Dritter Anlauf dieses Pilotlaufs (erste zwei Versuche deckten Harness-Bugs auf, siehe unten). Fix trifft exakt die injizierte Zeile (< zu <=) ohne Nebenänderungen, unabhängig per diff und run-fixture-test.mjs verifiziert (PASS 2/2). Kein Regressionstest für den Grenzfall ergänzt (nicht verlangt, siehe Bewertungskriterien (c) in TASK.md). Die 2 failedToolCalls sind unbedenklich: 1x Schreibversuch außerhalb des Projektpfads (Pfadschutz griff korrekt trotz gelockertem bash:allow), 1x der erwartete rote Testlauf vor dem Fix."
+  }
+}

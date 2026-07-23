@@ -11,47 +11,54 @@ fixture/diff-viewer/change-tracker.ts   unveränderte Kopie des Originals
 fixture/run-fixture-test.mjs            Verhaltens-Schutzwall (11 Assertions)
 ```
 
-Verifiziert: `node fixture/run-fixture-test.mjs` läuft im Ausgangszustand mit
-11/11 bestandenen Assertions.
+Verifiziert: `node benchmark-fixture/run-fixture-test.mjs` läuft im
+Ausgangszustand mit 11/11 bestandenen Assertions.
+
+`harness/reset-task.sh` kopiert das oben gezeigte `fixture/`-Verzeichnis zur
+Laufzeit nach `<worktree>/benchmark-fixture/` — alle Pfadangaben unterhalb
+dieses Punkts (Auftragstext, Testkommando, Änderungsumfang) beziehen sich auf
+diesen Laufzeitpfad, nicht auf den Repo-Pfad `benchmarks/tasks/05-refactor-no-behavior-change/fixture/`.
 
 ## Auftrag (wörtlich an den Agenten)
 
-> `changedFiles` und `totalChanges` in `fixture/diff-viewer/change-tracker.ts`
-> iterieren beide manuell über `this.changes.values()`/`.entries()`.
-> Vereinheitliche das, ohne das öffentliche Verhalten (Rückgabewerte,
-> Sortierung, Typen) zu verändern. Test: `node fixture/run-fixture-test.mjs`.
+> `changedFiles` und `totalChanges` in
+> `benchmark-fixture/diff-viewer/change-tracker.ts` iterieren beide manuell
+> über `this.changes.values()`/`.entries()`. Vereinheitliche das, ohne das
+> öffentliche Verhalten (Rückgabewerte, Sortierung, Typen) zu verändern.
+> Test: `node benchmark-fixture/run-fixture-test.mjs`.
 
 ## Erlaubter Änderungsumfang
 
-Ausschließlich `fixture/diff-viewer/change-tracker.ts`, keine Änderung der
-exportierten Klassenschnittstelle (`ChangeTracker` behält identische
-öffentliche Getter/Methoden: `changedFiles`, `totalChanges`, `recordChange`,
-`getChangesForFile`, `reset`, `reconstructFromSession`, `initialized`).
+Ausschließlich `benchmark-fixture/diff-viewer/change-tracker.ts`, keine
+Änderung der exportierten Klassenschnittstelle (`ChangeTracker` behält
+identische öffentliche Getter/Methoden: `changedFiles`, `totalChanges`,
+`recordChange`, `getChangesForFile`, `reset`, `reconstructFromSession`,
+`initialized`).
 
 ## Erwartetes Ergebnis
 
 Interner Umbau (z. B. eine gemeinsame private Hilfsfunktion für die
 Iteration), identisches Verhalten für alle 11 Assertions in
-`fixture/run-fixture-test.mjs`. Keine Änderung der Rückgabereihenfolge oder
--werte.
+`benchmark-fixture/run-fixture-test.mjs`. Keine Änderung der
+Rückgabereihenfolge oder -werte.
 
 ## Relevante Tests
 
-`fixture/run-fixture-test.mjs` — bewusst breiter als die eine bestehende
-Assertion im echten Repo (deckt leere Tracker, mehrfache Änderungen an
-derselben Datei, `reset()`-Verhalten zusätzlich ab), damit ein Refactoring
-hier tatsächlich geprüft werden kann.
+`benchmark-fixture/run-fixture-test.mjs` — bewusst breiter als die eine
+bestehende Assertion im echten Repo (deckt leere Tracker, mehrfache
+Änderungen an derselben Datei, `reset()`-Verhalten zusätzlich ab), damit ein
+Refactoring hier tatsächlich geprüft werden kann.
 
 ## Verbotene Änderungen
 
-- `fixture/diff-viewer/types.ts`.
+- `benchmark-fixture/diff-viewer/types.ts`.
 - Jede Änderung am Verhalten von `reconstructFromSession` bei fehlerhaften
   Session-Entries.
 - Änderung der öffentlichen Signatur von `recordChange`/`getChangesForFile`.
 
 ## Abbruchbedingungen
 
-- `node fixture/run-fixture-test.mjs` schlägt nach der Änderung fehl.
+- `node benchmark-fixture/run-fixture-test.mjs` schlägt nach der Änderung fehl.
 - Diff enthält Verhaltensänderungen, die kein Assert in
   `run-fixture-test.mjs` auffängt, aber aus dem Code ersichtlich sind
   (manuelle Prüfung erforderlich, siehe Bewertungskriterien).

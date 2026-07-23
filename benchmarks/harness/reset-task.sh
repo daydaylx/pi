@@ -53,7 +53,15 @@ fi
 # selbst stammt.
 if [ -d "$TASK_DIR/fixture" ]; then
   cp -r "$TASK_DIR/fixture/." "$WORKTREE_PATH/benchmark-fixture/"
-  echo "Fixture-Overlay kopiert nach $WORKTREE_PATH/benchmark-fixture/" >&2
+  # Ohne diesen Stage-Schritt bleibt benchmark-fixture/ für Git komplett
+  # untracked ("??"). `git diff --numstat` (genutzt von collect-metrics.mjs
+  # zur Erfassung der Messgröße "geänderte Dateien/Zeilen") vergleicht nur
+  # gegen den Index und zeigt für untrackte Verzeichnisse nichts an, selbst
+  # wenn der Agent Dateien darin tatsächlich ändert. `git add` ohne Commit
+  # gibt Git eine Baseline, gegen die spätere Agent-Änderungen als normaler
+  # Diff sichtbar werden.
+  git -C "$WORKTREE_PATH" add benchmark-fixture/
+  echo "Fixture-Overlay kopiert nach $WORKTREE_PATH/benchmark-fixture/ und für Diff-Erkennung gestaged" >&2
 fi
 
 echo "$WORKTREE_PATH"
