@@ -145,6 +145,14 @@ fehlender Code. Sie können nach Eigentümerbestätigung geschlossen werden
    `/setup-doctor` zeigt Recovery-Status. 20 neue Tests. `verify`: 798→818,
    0 Fehler. **Offen:** Recovery-Dialog (User-Gate vor Fortsetzung), Stale-
    State-Rejection, Direct-Task-Recovery; Schließen des Issues.
+9. ~~**#108**~~ — **umgesetzt (Methodik-Doku):** Baseline-Methodik dokumentiert
+   (`docs/benchmark-baseline.md`, README-Querverweis). Fasst die bestehende
+   Benchmark-Infrastruktur (11 Aufgabentypen, `reset-task.sh`,
+   `collect-metrics.mjs`, `run-baseline.sh`, RUNBOOK, SCORING) zusammen und
+   definiert den Vergleichsrahmen (Pi-Versionen, Codex CLI, Claude Code,
+   Gemini CLI), Messgrößen (automatisch + manuell), Stichproben-Design und
+   Ablauf. **Offen:** die eigentlichen 30 Baseline-Läufe (brauchen reale
+   Agent-Interaktion) und externe Agent-Vergleiche; Schließen des Issues.
 
 ### Verworfene direkte Sprünge
 

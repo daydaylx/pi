@@ -96,6 +96,7 @@ und Manifest-/Installationsversions-Drift, ohne Zugangsdaten zu lesen.
   Zusätzlich: advisory `/verify-gate` ([`docs/verification-gate.md`](docs/verification-gate.md)),
   vertrauensgebundene Projekt-Profile ([`docs/verify-profiles.md`](docs/verify-profiles.md))
   und Task-Contract/Scope-Kontrolle ([`docs/task-contract.md`](docs/task-contract.md)).
+- Benchmark-Infrastruktur und Baseline-Methodik: [`docs/benchmark-baseline.md`](docs/benchmark-baseline.md).
 - LSP-Server werden nie automatisch installiert und starten erst bei erster Nutzung.
   Projekt-lokale LSP-Konfiguration (`.pi/lsp.json`) wird nur bei vertrautem Projekt
   berücksichtigt, sonst vollständig verworfen; LSP meldet seinen Zustand an Aurora.
