@@ -1139,7 +1139,9 @@ await section("setup core lifecycle", async () => {
   assert(
     harness.notifications
       .at(-1)
-      ?.message?.includes("project verification profiles: keine .pi/verify.json"),
+      ?.message?.includes(
+        "project verification profiles: keine .pi/verify.json",
+      ),
     "setup doctor reports the project verification profile status (#105)",
   );
   assert(
@@ -1149,15 +1151,11 @@ await section("setup core lifecycle", async () => {
     "setup doctor reports the doom-loop status (#103)",
   );
   assert(
-    harness.notifications
-      .at(-1)
-      ?.message?.includes("edit metrics: edits 0/0"),
+    harness.notifications.at(-1)?.message?.includes("edit metrics: edits 0/0"),
     "setup doctor reports the edit metrics (#104)",
   );
   assert(
-    harness.notifications
-      .at(-1)
-      ?.message?.includes("recovery status:"),
+    harness.notifications.at(-1)?.message?.includes("recovery status:"),
     "setup doctor reports the recovery status (#107)",
   );
   const verify = harness.tools.get("verify");
@@ -1248,7 +1246,11 @@ await section("project verification profiles (#105)", async () => {
   eq(trusted.profiles.tests.program, "pytest", "program preserved");
   eq(trusted.profiles.tests.args, ["-q"], "args preserved as array");
   eq(trusted.profiles.tests.required, true, "required defaults to true");
-  eq(trusted.profiles.tests.trustRequired, true, "trustRequired defaults to true");
+  eq(
+    trusted.profiles.tests.trustRequired,
+    true,
+    "trustRequired defaults to true",
+  );
   eq(trusted.profiles.tests.cwd, ".", "cwd defaults to '.'");
 
   // --- Missing file yields no profiles and no diagnostics ---
@@ -1264,7 +1266,9 @@ await section("project verification profiles (#105)", async () => {
   });
   let res = profilesMod.loadVerifyProfiles(workspace, true);
   eq(
-    res.diagnostics.some((d) => d.message.includes("unbekannter Schlüssel 'unexpected'")),
+    res.diagnostics.some((d) =>
+      d.message.includes("unbekannter Schlüssel 'unexpected'"),
+    ),
     true,
     "unknown top-level key is reported",
   );
@@ -1278,9 +1282,15 @@ await section("project verification profiles (#105)", async () => {
     },
   });
   res = profilesMod.loadVerifyProfiles(workspace, true);
-  eq(Object.keys(res.profiles), ["good"], "profile with unknown key is dropped");
   eq(
-    res.diagnostics.some((d) => d.message.includes("profiles.bad") && d.message.includes("oops")),
+    Object.keys(res.profiles),
+    ["good"],
+    "profile with unknown key is dropped",
+  );
+  eq(
+    res.diagnostics.some(
+      (d) => d.message.includes("profiles.bad") && d.message.includes("oops"),
+    ),
     true,
     "unknown profile key is reported with path",
   );
@@ -1303,7 +1313,13 @@ await section("project verification profiles (#105)", async () => {
     "every schema violation drops its profile (fail-closed)",
   );
   const msgs = res.diagnostics.map((d) => d.message).join("\n");
-  for (const needle of ["noProgram.program", "badArgs.args", "nonStringArg.args", "hugeTimeout.timeoutMs", "badEnv.env"]) {
+  for (const needle of [
+    "noProgram.program",
+    "badArgs.args",
+    "nonStringArg.args",
+    "hugeTimeout.timeoutMs",
+    "badEnv.env",
+  ]) {
     assert(msgs.includes(needle), "diagnostic names " + needle);
   }
 
@@ -1356,16 +1372,8 @@ await section("project verification profiles (#105)", async () => {
     ["-q", "--maxfail=1"],
     "exec receives args as a separate array (no shell string)",
   );
-  eq(
-    seen[0].options.cwd,
-    root,
-    "exec runs in the bounded project root",
-  );
-  eq(
-    typeof seen[0].options.env,
-    "object",
-    "exec receives an env object",
-  );
+  eq(seen[0].options.cwd, root, "exec runs in the bounded project root");
+  eq(typeof seen[0].options.env, "object", "exec receives an env object");
   eq(
     seen[0].options.env.PATH !== undefined,
     true,
@@ -1379,7 +1387,11 @@ await section("project verification profiles (#105)", async () => {
   });
   eq(failRun.ok, false, "non-zero exit -> not ok");
   eq(failRun.exitCode, 2, "exit code captured");
-  eq(failRun.error.kind, "spawn_failed", "non-zero exit reported as spawn_failed");
+  eq(
+    failRun.error.kind,
+    "spawn_failed",
+    "non-zero exit reported as spawn_failed",
+  );
 
   // --- runProfile: timeout -> killed, structured timeout error ---
   const timeoutRun = await profilesMod.runProfile(profile, {
@@ -1398,7 +1410,11 @@ await section("project verification profiles (#105)", async () => {
     },
   });
   eq(missingRun.ok, false, "missing binary -> not ok");
-  eq(missingRun.error.kind, "missing_binary", "ENOENT classified as missing_binary");
+  eq(
+    missingRun.error.kind,
+    "missing_binary",
+    "ENOENT classified as missing_binary",
+  );
 
   // --- runProfile: cwd bounding honored at run time ---
   const escapeRun = await profilesMod.runProfile(
@@ -1445,7 +1461,9 @@ await section("universal verification gate (#102)", async () => {
 
   // --- parseGitStatus ---
   const parsed = gateMod.parseGitStatus(
-    [" M src/a.ts", "A  docs/b.md", "?? c.txt", 'R  old.ts -> new.ts'].join("\n"),
+    [" M src/a.ts", "A  docs/b.md", "?? c.txt", "R  old.ts -> new.ts"].join(
+      "\n",
+    ),
   );
   eq(parsed.length, 4, "porcelain lines parsed");
   eq(parsed[0].path, "src/a.ts", "modified path parsed");
@@ -1495,12 +1513,24 @@ await section("universal verification gate (#102)", async () => {
     };
     return async (program, args) => {
       const joined = `${program} ${args.join(" ")}`;
-      if (args[0] === "status") return { code: 0, stdout: byKey.status, stderr: "", killed: false };
-      if (args[0] === "diff") return { code: 0, stdout: byKey.diff, stderr: "", killed: false };
+      if (args[0] === "status")
+        return { code: 0, stdout: byKey.status, stderr: "", killed: false };
+      if (args[0] === "diff")
+        return { code: 0, stdout: byKey.diff, stderr: "", killed: false };
       if (joined.includes("run typecheck"))
-        return { code: byKey.typecheck.code, stdout: byKey.typecheck.stdout, stderr: byKey.typecheck.stderr, killed: false };
+        return {
+          code: byKey.typecheck.code,
+          stdout: byKey.typecheck.stdout,
+          stderr: byKey.typecheck.stderr,
+          killed: false,
+        };
       if (joined.includes("run test"))
-        return { code: byKey.test.code, stdout: byKey.test.stdout, stderr: byKey.test.stderr, killed: false };
+        return {
+          code: byKey.test.code,
+          stdout: byKey.test.stdout,
+          stderr: byKey.test.stderr,
+          killed: false,
+        };
       // any project profile program -> pass by default
       return { code: 0, stdout: "", stderr: "", killed: false };
     };
@@ -1526,13 +1556,19 @@ await section("universal verification gate (#102)", async () => {
   });
   eq(failing.status, "fail", "test failure -> gate fail");
   eq(failing.checks[1].status, "fail", "test check marked fail");
-  eq(failing.recommendation.includes("nicht empfohlen"), true, "fail recommendation given");
+  eq(
+    failing.recommendation.includes("nicht empfohlen"),
+    true,
+    "fail recommendation given",
+  );
 
   // --- runVerificationGate: required check not_run -> blocked ---
   const blockedExec = async (program, args) => {
     const joined = `${program} ${args.join(" ")}`;
-    if (args[0] === "status") return { code: 0, stdout: "", stderr: "", killed: false };
-    if (args[0] === "diff") return { code: 0, stdout: "", stderr: "", killed: false };
+    if (args[0] === "status")
+      return { code: 0, stdout: "", stderr: "", killed: false };
+    if (args[0] === "diff")
+      return { code: 0, stdout: "", stderr: "", killed: false };
     if (joined.includes("run typecheck"))
       throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
     return { code: 0, stdout: "", stderr: "", killed: false };
@@ -1545,7 +1581,9 @@ await section("universal verification gate (#102)", async () => {
   eq(blocked.status, "blocked", "missing typecheck binary -> blocked");
   eq(blocked.checks[0].status, "not_run", "typecheck not_run");
   eq(
-    blocked.residualRisks.some((r) => r.includes("typecheck") && r.includes("missing_binary")),
+    blocked.residualRisks.some(
+      (r) => r.includes("typecheck") && r.includes("missing_binary"),
+    ),
     true,
     "missing-binary check surfaced as residual risk",
   );
@@ -1558,7 +1596,9 @@ await section("universal verification gate (#102)", async () => {
   });
   eq(emptyDiff.status, "pass", "empty diff still passes when checks pass");
   eq(
-    emptyDiff.scopeHints.some((h) => h.includes("keine Working-Tree-Änderungen")),
+    emptyDiff.scopeHints.some((h) =>
+      h.includes("keine Working-Tree-Änderungen"),
+    ),
     true,
     "empty diff produces a scope hint",
   );
@@ -1571,7 +1611,12 @@ await section("universal verification gate (#102)", async () => {
     JSON.stringify({
       profiles: {
         pytest: { program: "pytest", args: ["-q"], timeoutMs: 60000 },
-        lint: { program: "flake8", args: ["."], required: false, timeoutMs: 30000 },
+        lint: {
+          program: "flake8",
+          args: ["."],
+          required: false,
+          timeoutMs: 30000,
+        },
       },
     }),
   );
@@ -1580,7 +1625,9 @@ await section("universal verification gate (#102)", async () => {
     trusted: true,
     exec: makeExec({ test: { code: 0, stdout: "", stderr: "" } }),
   });
-  const profileChecks = withProfiles.checks.filter((c) => c.source === "project");
+  const profileChecks = withProfiles.checks.filter(
+    (c) => c.source === "project",
+  );
   eq(profileChecks.length, 2, "both project profiles ran as checks");
   eq(
     profileChecks.some((c) => c.name === "pytest" && c.required),
@@ -1603,7 +1650,13 @@ await section("universal verification gate (#102)", async () => {
 
   // --- formatGateReport ---
   const report = gateMod.formatGateReport(passing, "Beispielauftrag");
-  for (const needle of ["Verifikations-Gate", "Auftrag: Beispielauftrag", "PASS", "src/a.ts", "setup/typecheck"])
+  for (const needle of [
+    "Verifikations-Gate",
+    "Auftrag: Beispielauftrag",
+    "PASS",
+    "src/a.ts",
+    "setup/typecheck",
+  ])
     assert(report.includes(needle), "report contains " + needle);
 
   try {
@@ -1641,10 +1694,22 @@ await section("task contract and scope control (#106)", async () => {
   const re = (p) => contractMod.globToRegExp(p);
   assert(re("src/a.ts").test("src/a.ts"), "exact path matches");
   assert(!re("src/a.ts").test("src/b.ts"), "exact path rejects others");
-  assert(re("src/*.ts").test("src/a.ts"), "single-star matches within a segment");
-  assert(!re("src/*.ts").test("src/sub/a.ts"), "single-star does not cross segments");
-  assert(re("src/**/*.ts").test("src/sub/deep/a.ts"), "double-star crosses segments");
-  assert(re("src/**/*.ts").test("src/a.ts"), "double-star also matches shallow");
+  assert(
+    re("src/*.ts").test("src/a.ts"),
+    "single-star matches within a segment",
+  );
+  assert(
+    !re("src/*.ts").test("src/sub/a.ts"),
+    "single-star does not cross segments",
+  );
+  assert(
+    re("src/**/*.ts").test("src/sub/deep/a.ts"),
+    "double-star crosses segments",
+  );
+  assert(
+    re("src/**/*.ts").test("src/a.ts"),
+    "double-star also matches shallow",
+  );
   assert(re("src/?").test("src/a"), "question mark matches one char");
   assert(re("docs/").test("docs/a.md"), "directory prefix matches beneath");
   assert(!re("docs/").test("src/a.ts"), "directory prefix rejects others");
@@ -1656,7 +1721,11 @@ await section("task contract and scope control (#106)", async () => {
   );
   eq(scope.inScope.length, 2, "two changed files are in scope");
   eq(scope.outOfScope.length, 2, "two changed files are out of scope");
-  eq(scope.undeclared, ["docs/lsp.md"], "declared-but-unchanged pattern reported");
+  eq(
+    scope.undeclared,
+    ["docs/lsp.md"],
+    "declared-but-unchanged pattern reported",
+  );
 
   // --- analyzeScopeDrift: noise + open criteria ---
   const drift = contractMod.analyzeScopeDrift(
@@ -1695,7 +1764,11 @@ await section("task contract and scope control (#106)", async () => {
   eq(loaded.contract.goal, "Fix login bug", "goal roundtrips");
   eq(loaded.contract.source, "plan", "source roundtrips");
   eq(loaded.contract.planId, "abc-123", "planId reference roundtrips");
-  eq(loaded.contract.acceptanceCriteria[0].status, "pending", "criterion status roundtrips");
+  eq(
+    loaded.contract.acceptanceCriteria[0].status,
+    "pending",
+    "criterion status roundtrips",
+  );
   contractMod.clearTaskContract(ws);
   const after = contractMod.loadTaskContract(ws);
   eq(after.contract, undefined, "clear removes the contract");
@@ -1704,20 +1777,31 @@ await section("task contract and scope control (#106)", async () => {
   // --- schema validation fail-closed ---
   function writeContract(obj) {
     mkdirSync(path.join(ws, ".agent"), { recursive: true });
-    writeFileSync(path.join(ws, ".agent", "task-contract.json"), JSON.stringify(obj));
+    writeFileSync(
+      path.join(ws, ".agent", "task-contract.json"),
+      JSON.stringify(obj),
+    );
   }
   writeContract({ goal: "ok", oops: 1 });
   let r = contractMod.loadTaskContract(ws);
   eq(
-    r.diagnostics.some((d) => d.message.includes("unbekannter Schlüssel 'oops'")),
+    r.diagnostics.some((d) =>
+      d.message.includes("unbekannter Schlüssel 'oops'"),
+    ),
     true,
     "unknown key reported",
   );
   writeContract({ goal: "ok", expectedScope: "not-array" });
   r = contractMod.loadTaskContract(ws);
-  eq(r.contract.expectedScope, [], "bad expectedScope type falls back to empty (kept, not dropped)");
   eq(
-    r.diagnostics.some((d) => d.message.includes("expectedScope muss ein String-Array sein")),
+    r.contract.expectedScope,
+    [],
+    "bad expectedScope type falls back to empty (kept, not dropped)",
+  );
+  eq(
+    r.diagnostics.some((d) =>
+      d.message.includes("expectedScope muss ein String-Array sein"),
+    ),
     true,
     "bad expectedScope type is reported as a diagnostic",
   );
@@ -1741,9 +1825,7 @@ await section("task contract and scope control (#106)", async () => {
   const gateWs = mkdtempSync(path.join(tmpdir(), "pi-gate-contract-"));
   contractMod.saveTaskContract(gateWs, {
     goal: "Add LSP smoke harness",
-    acceptanceCriteria: [
-      { criterion: "smoke runs", status: "pending" },
-    ],
+    acceptanceCriteria: [{ criterion: "smoke runs", status: "pending" }],
     expectedScope: ["tests/lsp-smoke.mjs", "tests/fixtures/lsp-smoke/**"],
     nonGoals: [],
     verification: ["typecheck", "test"],
@@ -1758,7 +1840,8 @@ await section("task contract and scope control (#106)", async () => {
         stderr: "",
         killed: false,
       };
-    if (args[0] === "diff") return { code: 0, stdout: "", stderr: "", killed: false };
+    if (args[0] === "diff")
+      return { code: 0, stdout: "", stderr: "", killed: false };
     return { code: 0, stdout: "", stderr: "", killed: false };
   };
   const gated = await gateMod.runVerificationGate({
@@ -1766,16 +1849,116 @@ await section("task contract and scope control (#106)", async () => {
     trusted: true,
     exec: gateExec,
   });
-  eq(gated.taskDescription, "Add LSP smoke harness", "gate pulls the goal from the contract");
   eq(
-    gated.scopeHints.some((h) => h.includes("Scope-Drift") && h.includes("README.md")),
+    gated.taskDescription,
+    "Add LSP smoke harness",
+    "gate pulls the goal from the contract",
+  );
+  eq(
+    gated.scopeHints.some(
+      (h) => h.includes("Scope-Drift") && h.includes("README.md"),
+    ),
     true,
     "out-of-scope file (README.md) reported as real drift",
   );
   eq(
-    gated.residualRisks.some((r) => r.includes("offene Anforderung") && r.includes("smoke runs")),
+    gated.residualRisks.some(
+      (r) => r.includes("offene Anforderung") && r.includes("smoke runs"),
+    ),
     true,
     "pending acceptance criterion surfaced as a residual risk",
+  );
+
+  // --- deriveContractFromPlan: goal + acceptance criteria from a reviewed plan ---
+  assert(
+    typeof contractMod.deriveContractFromPlan === "function",
+    "task-contract exports deriveContractFromPlan",
+  );
+  const detailedPlanForContract = [
+    "# Arbeitsplan: Login-Bug beheben",
+    "",
+    "## 1. Auftrag",
+    "Behebe den Login-Bug in der Auth-Middleware.",
+    "",
+    "## 2. Nicht-Ziele",
+    "- Keine Erweiterung des OAuth-Flows",
+    "",
+    "## 3. Betroffene Bereiche",
+    "src/auth/**",
+    "",
+    "## 4. Risiken / Entscheidungen",
+    "Keine besonderen Risiken.",
+    "",
+    "## 5. Todos",
+    "- [ ] Bug reproduzieren",
+    "- [ ] Fix implementieren",
+    "",
+    "## 6. Tests / Checks",
+    "- typecheck",
+    "- test",
+    "",
+    "## 7. Abschlusskriterien",
+    "- Login funktioniert wieder",
+    "- Bestehende Tests bleiben grün",
+  ].join("\n");
+  const derived = contractMod.deriveContractFromPlan(detailedPlanForContract, {
+    planId: "plan-xyz",
+  });
+  eq(
+    derived.goal,
+    "Behebe den Login-Bug in der Auth-Middleware.",
+    "goal derived from Auftrag section",
+  );
+  eq(derived.source, "plan", "derived contract is marked source: plan");
+  eq(
+    derived.planId,
+    "plan-xyz",
+    "derived contract references the plan's planId",
+  );
+  eq(
+    derived.expectedScope,
+    [],
+    "derived contract has no glob scope (prose section, not globs)",
+  );
+  eq(
+    derived.acceptanceCriteria.map((c) => c.criterion),
+    ["Login funktioniert wieder", "Bestehende Tests bleiben grün"],
+    "acceptance criteria derived from Abschlusskriterien section",
+  );
+  assert(
+    derived.acceptanceCriteria.every((c) => c.status === "pending"),
+    "derived acceptance criteria start pending",
+  );
+  eq(
+    derived.nonGoals,
+    ["Keine Erweiterung des OAuth-Flows"],
+    "non-goals derived from Nicht-Ziele section",
+  );
+  eq(
+    derived.verification,
+    ["typecheck", "test"],
+    "verification derived from Tests / Checks section",
+  );
+
+  const planWithoutAuftrag = ["# Plan", "", "## Todos", "- [ ] x"].join("\n");
+  eq(
+    contractMod.deriveContractFromPlan(planWithoutAuftrag, { planId: "p" }),
+    undefined,
+    "plan without an Auftrag section yields no contract",
+  );
+
+  // An empty declared scope must not manufacture false scope-drift: matchScope
+  // treats "no scope declared" as "nothing to check", not "everything drifted".
+  const emptyScope = contractMod.matchScope([], ["src/a.ts", "README.md"]);
+  eq(
+    emptyScope.outOfScope,
+    [],
+    "empty expectedScope reports no out-of-scope files",
+  );
+  eq(
+    emptyScope.inScope,
+    [],
+    "empty expectedScope reports no in-scope files either",
   );
 
   try {
@@ -1785,6 +1968,73 @@ await section("task contract and scope control (#106)", async () => {
     /* ignore temp cleanup */
   }
 });
+
+await section(
+  "plan-mode wires task-contract derivation and archival (#106)",
+  async () => {
+    if (!planMode || !planUtils) return;
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-contract-"));
+    try {
+      const metadata = planUtils.ensurePlanMetadataHeader(
+        detailedPlan,
+        "detailed_plan",
+      );
+      planUtils.writePlanFileAtomic(cwd, metadata.content);
+      const harness = createHarness();
+      planMode.default(harness.api);
+      const context = harness.makeContext({ cwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("review-plan")("", context);
+      await harness.runHooks(
+        "agent_end",
+        {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "[PLAN-REVIEW:APPROVED]" }],
+              stopReason: "stop",
+            },
+          ],
+        },
+        context,
+      );
+      await harness.runHooks("agent_settled", {}, context);
+
+      const contractPath = path.join(cwd, ".agent", "task-contract.json");
+      assert(
+        existsSync(contractPath),
+        "a task contract is derived and saved once the plan is reviewed",
+      );
+      const saved = JSON.parse(readFileSync(contractPath, "utf8"));
+      eq(
+        saved.goal,
+        "Das Ziel.",
+        "derived contract's goal matches the Auftrag section",
+      );
+      eq(saved.source, "plan", "derived contract is marked source: plan");
+      eq(
+        saved.planId,
+        metadata.metadata.planId,
+        "derived contract references the reviewed plan's planId",
+      );
+
+      // Complete every todo and archive: the contract must be cleared
+      // alongside the plan, not left behind as stale state.
+      const completedContent = readFileSync(
+        path.join(cwd, ".agent", "plans", "current-plan.md"),
+        "utf8",
+      ).replace("- [ ] Umsetzung", "- [x] Umsetzung");
+      planUtils.writePlanFileAtomic(cwd, completedContent);
+      await harness.commands.get("finish")("", context);
+      assert(
+        !existsSync(contractPath),
+        "the task contract is cleared once the plan is archived as complete",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Doom-loop detection (#103). Pure detection logic (normalise, detectLoop)
@@ -1820,7 +2070,9 @@ await section("doom-loop detection (#103)", async () => {
     "read signature includes path",
   );
   assert(
-    sig({ toolName: "bash", input: { command: "npm test" } }).includes("npm test"),
+    sig({ toolName: "bash", input: { command: "npm test" } }).includes(
+      "npm test",
+    ),
     "bash signature includes the command",
   );
 
@@ -1846,38 +2098,61 @@ await section("doom-loop detection (#103)", async () => {
     timestamp: 0,
   });
   // Not enough identical errors
-  const one = dlMod.detectLoop(entry("edit", "oldText-X", true), [
+  const one = dlMod.detectLoop(
     entry("edit", "oldText-X", true),
-  ], cfg);
+    [entry("edit", "oldText-X", true)],
+    cfg,
+  );
   eq(one, undefined, "only one prior identical error -> no detection");
   // Two prior identical errors + new = 3 total
-  const twoPrior = dlMod.detectLoop(entry("edit", "oldText-X", true), [
+  const twoPrior = dlMod.detectLoop(
     entry("edit", "oldText-X", true),
-    entry("read", "src/a.ts", false),
-    entry("edit", "oldText-X", true),
-  ], cfg);
-  eq(twoPrior?.kind, "identical-failure", "≥2 prior identical failures -> identical-failure detection");
+    [
+      entry("edit", "oldText-X", true),
+      entry("read", "src/a.ts", false),
+      entry("edit", "oldText-X", true),
+    ],
+    cfg,
+  );
+  eq(
+    twoPrior?.kind,
+    "identical-failure",
+    "≥2 prior identical failures -> identical-failure detection",
+  );
   eq(twoPrior?.toolName, "edit", "detection names the tool");
   eq(twoPrior?.occurrences, 3, "occurrences count includes the current call");
 
   // --- detectLoop: stuck-tool (same toolName failing ≥3x in window) ---
-  const stuck = dlMod.detectLoop(entry("bash", "cmdZ", true), [
-    entry("bash", "cmdA", true),
-    entry("bash", "cmdB", true),
-    entry("bash", "cmdC", true),
-  ], cfg);
-  eq(stuck?.kind, "stuck-tool", "3 prior bash failures in window -> stuck-tool");
+  const stuck = dlMod.detectLoop(
+    entry("bash", "cmdZ", true),
+    [
+      entry("bash", "cmdA", true),
+      entry("bash", "cmdB", true),
+      entry("bash", "cmdC", true),
+    ],
+    cfg,
+  );
+  eq(
+    stuck?.kind,
+    "stuck-tool",
+    "3 prior bash failures in window -> stuck-tool",
+  );
 
   // --- detectLoop: no detection when entry is not an error ---
-  const ok = dlMod.detectLoop(entry("edit", "oldText-X", false), [
-    entry("edit", "oldText-X", true),
-    entry("edit", "oldText-X", true),
-  ], cfg);
+  const ok = dlMod.detectLoop(
+    entry("edit", "oldText-X", false),
+    [entry("edit", "oldText-X", true), entry("edit", "oldText-X", true)],
+    cfg,
+  );
   eq(ok, undefined, "non-error entry does not trigger detection");
 
   // --- createDoomLoopState ---
   const ds = dlMod.createDoomLoopState();
-  eq(ds.history instanceof dlMod.HistoryBuffer, true, "state owns a HistoryBuffer");
+  eq(
+    ds.history instanceof dlMod.HistoryBuffer,
+    true,
+    "state owns a HistoryBuffer",
+  );
   eq(ds.config, dlMod.DEFAULT_CONFIG, "state uses default config");
 });
 
@@ -1917,10 +2192,18 @@ await section("edit and write metrics (#104)", async () => {
   const ctx = harness.makeContext();
 
   // Simulate an edit call that succeeds.
-  await harness.runHooks("tool_call", { toolName: "edit", input: { oldText: "a", path: "src/a.ts" } }, ctx);
+  await harness.runHooks(
+    "tool_call",
+    { toolName: "edit", input: { oldText: "a", path: "src/a.ts" } },
+    ctx,
+  );
   await harness.runHooks(
     "tool_result",
-    { toolName: "edit", input: { oldText: "a", path: "src/a.ts" }, isError: false },
+    {
+      toolName: "edit",
+      input: { oldText: "a", path: "src/a.ts" },
+      isError: false,
+    },
     ctx,
   );
   eq(metrics.editAttempts, 1, "edit call counted");
@@ -1935,7 +2218,11 @@ await section("edit and write metrics (#104)", async () => {
   );
   await harness.runHooks(
     "tool_result",
-    { toolName: "edit", input: { oldText: "b", path: "src/a.ts" }, isError: true },
+    {
+      toolName: "edit",
+      input: { oldText: "b", path: "src/a.ts" },
+      isError: true,
+    },
     ctx,
   );
   eq(metrics.editAttempts, 2);
@@ -1958,7 +2245,11 @@ await section("edit and write metrics (#104)", async () => {
     ctx,
   );
   eq(metrics.writeCalls, 2);
-  eq(metrics.writeToExisting, 1, "write to new file does not count as existing");
+  eq(
+    metrics.writeToExisting,
+    1,
+    "write to new file does not count as existing",
+  );
 
   // --- metricsSummary ---
   const summary = emMod.metricsSummary(metrics);
@@ -1971,7 +2262,11 @@ await section("edit and write metrics (#104)", async () => {
   await harness.runHooks("session_shutdown", {}, ctx);
   eq(metrics.editAttempts, 0, "metrics reset on shutdown");
   eq(metrics.editFailures, 0);
-  eq(metrics.perFile["src/a.ts"], undefined, "per-file stats cleared on shutdown");
+  eq(
+    metrics.perFile["src/a.ts"],
+    undefined,
+    "per-file stats cleared on shutdown",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1992,7 +2287,10 @@ await section("recovery status check (#107)", async () => {
     writeFileSync(path.join(ws, ".agent", "plans", "current-plan.md"), text);
   }
   function writeState(obj) {
-    writeFileSync(path.join(ws, ".agent", "plans", "current-plan.state.json"), JSON.stringify(obj));
+    writeFileSync(
+      path.join(ws, ".agent", "plans", "current-plan.state.json"),
+      JSON.stringify(obj),
+    );
   }
   function ctx() {
     return { cwd: ws };
@@ -2009,7 +2307,10 @@ await section("recovery status check (#107)", async () => {
   const idle = rcMod.checkRecoveryStatus(ctx());
   eq(idle.interrupted, false);
   eq(idle.phase, "idle");
-  assert(idle.summary.includes("keine unterbrochene Aufgabe"), "idle phase not interrupted");
+  assert(
+    idle.summary.includes("keine unterbrochene Aufgabe"),
+    "idle phase not interrupted",
+  );
 
   // --- Paused phase with pending todos -> interrupted ---
   writeState({ phase: "paused", revision: 3 });
@@ -2040,7 +2341,10 @@ await section("recovery status check (#107)", async () => {
   writeState({ phase: "paused", revision: 1, reviewedHash: "different-hash" });
   const stale = rcMod.checkRecoveryStatus(ctx());
   eq(stale.planStale, true, "stale plan detected");
-  assert(stale.summary.includes("Plan seit Review geändert"), "stale flag in summary");
+  assert(
+    stale.summary.includes("Plan seit Review geändert"),
+    "stale flag in summary",
+  );
 
   try {
     rmSync(ws, { recursive: true, force: true });
@@ -7215,7 +7519,10 @@ await section("context ledger consolidation and recovery", async () => {
     "decision-brief",
     now,
   );
-  assert(!second.changed, "erneute Konsolidierung derselben Quelle ist ein No-op");
+  assert(
+    !second.changed,
+    "erneute Konsolidierung derselben Quelle ist ein No-op",
+  );
   eq(
     second.sections["Bestätigte Nutzerentscheidungen"].length,
     1,
@@ -7236,7 +7543,10 @@ await section("context ledger consolidation and recovery", async () => {
   const third = computeLedgerContent(
     "pi",
     first.content,
-    { planContent: plan, openPriorities: ["Modul schreiben", "Modul schreiben"] },
+    {
+      planContent: plan,
+      openPriorities: ["Modul schreiben", "Modul schreiben"],
+    },
     "plan-to-work",
     now,
   );
@@ -7256,14 +7566,28 @@ await section("context ledger consolidation and recovery", async () => {
   assert(isSensitiveLine("password=hunter2"), "erkennt password");
   assert(isSensitiveLine("Bearer abcdef123456"), "erkennt Bearer-Token");
   assert(isSensitiveLine("API_KEY=sk-abcdefghij"), "erkennt ENV-Zuweisung");
-  eq(sanitizeBullet("- secret token: xoxb-1234567890"), undefined, "sanitize verwirft Secret");
-  eq(sanitizeBullet("-   Normaler   Eintrag "), "Normaler Eintrag", "sanitize normalisiert Freitext");
+  eq(
+    sanitizeBullet("- secret token: xoxb-1234567890"),
+    undefined,
+    "sanitize verwirft Secret",
+  );
+  eq(
+    sanitizeBullet("-   Normaler   Eintrag "),
+    "Normaler Eintrag",
+    "sanitize normalisiert Freitext",
+  );
   const secretBrief = [
     "## Entscheidungen",
     "- Entscheidung: normale Entscheidung",
     "- AWS_SECRET_ACCESS_KEY=abcd1234efgh",
   ].join("\n");
-  const filtered = computeLedgerContent("pi", undefined, { briefContent: secretBrief }, "manual", now);
+  const filtered = computeLedgerContent(
+    "pi",
+    undefined,
+    { briefContent: secretBrief },
+    "manual",
+    now,
+  );
   eq(
     filtered.sections["Bestätigte Nutzerentscheidungen"],
     ["Entscheidung: normale Entscheidung"],
@@ -7283,22 +7607,34 @@ await section("context ledger consolidation and recovery", async () => {
   // Recovery-Kopfzeile ist kompakt und nennt den Dateipfad.
   const summary = ledgerSummaryLine(classSame);
   assert(
-    typeof summary === "string" && summary.includes(CONTEXT_LEDGER_RELATIVE_PATH),
+    typeof summary === "string" &&
+      summary.includes(CONTEXT_LEDGER_RELATIVE_PATH),
     "Kopfzeile verweist auf die Ledger-Datei",
   );
-  eq(ledgerSummaryLine(classifyLedger(undefined)), undefined, "leerer Ledger → keine Kopfzeile");
+  eq(
+    ledgerSummaryLine(classifyLedger(undefined)),
+    undefined,
+    "leerer Ledger → keine Kopfzeile",
+  );
 
   // Token-Proxy.
-  assert(shouldCheckpointForTokens(80000, 100000), "80% ≥ 75% Schwelle löst aus");
+  assert(
+    shouldCheckpointForTokens(80000, 100000),
+    "80% ≥ 75% Schwelle löst aus",
+  );
   assert(!shouldCheckpointForTokens(50000, 100000), "50% löst nicht aus");
   assert(!shouldCheckpointForTokens(0, 100000), "0 Tokens löst nicht aus");
-  assert(!shouldCheckpointForTokens(80000, 0), "ungültiges Fenster löst nicht aus");
+  assert(
+    !shouldCheckpointForTokens(80000, 0),
+    "ungültiges Fenster löst nicht aus",
+  );
 
   // Zeilengrenze wird erzwungen.
   let overflowThrew = false;
   try {
     const huge = ["## Nicht-Ziele"];
-    for (let i = 0; i < CONTEXT_LEDGER_MAX_LINES + 50; i += 1) huge.push(`- Eintrag ${i}`);
+    for (let i = 0; i < CONTEXT_LEDGER_MAX_LINES + 50; i += 1)
+      huge.push(`- Eintrag ${i}`);
     computeLedgerContent("pi", huge.join("\n"), {}, "manual", now);
   } catch {
     overflowThrew = true;
@@ -7308,17 +7644,33 @@ await section("context ledger consolidation and recovery", async () => {
   // Dateisystem-Roundtrip (atomar, symlink-sicher).
   const dir = mkdtempSync(path.join(tmpdir(), "pi-ledger-"));
   try {
-    const wrote = consolidateLedger(dir, "pi", { briefContent: brief }, "manual", now);
+    const wrote = consolidateLedger(
+      dir,
+      "pi",
+      { briefContent: brief },
+      "manual",
+      now,
+    );
     assert(wrote, "consolidateLedger schreibt beim ersten Mal");
     const onDisk = readLedger(dir);
     assert(
       typeof onDisk === "string" && onDisk.includes("Aurora Night"),
       "geschriebener Ledger enthält die Entscheidung",
     );
-    const again = consolidateLedger(dir, "pi", { briefContent: brief }, "manual", now);
+    const again = consolidateLedger(
+      dir,
+      "pi",
+      { briefContent: brief },
+      "manual",
+      now,
+    );
     assert(!again, "unveränderte Quelle schreibt nicht erneut");
     const parsed = parseLedgerSections(onDisk);
-    eq(parsed["Nicht-Ziele"], ["Keine neue Memory-Extension"], "Roundtrip erhält Abschnitte");
+    eq(
+      parsed["Nicht-Ziele"],
+      ["Keine neue Memory-Extension"],
+      "Roundtrip erhält Abschnitte",
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -7375,7 +7727,8 @@ await section("context ledger plan-mode integration", async () => {
       "Nicht-Ziel aus dem Plan steht im Ledger",
     );
     assert(
-      ledger.includes("Erster Schritt") && !ledger.includes("Erledigter Schritt"),
+      ledger.includes("Erster Schritt") &&
+        !ledger.includes("Erledigter Schritt"),
       "nur offene Todos werden als aktuelle Priorität geführt",
     );
 

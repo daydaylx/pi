@@ -94,6 +94,11 @@ import {
 } from "../shared/workflow-capabilities.ts";
 import { loadSetupConfig } from "../setup-core/config.ts";
 import {
+  clearTaskContract,
+  deriveContractFromPlan,
+  saveTaskContract,
+} from "../setup-core/task-contract.ts";
+import {
   buildBriefOverwriteGuardMenu,
   buildDecisionHandoffMenu,
   buildOverwriteGuardMenu,
@@ -2049,7 +2054,10 @@ FORTSCHRITT:
       ledgerTokenCheckpointArmed = true;
       return;
     }
-    const crossed = shouldCheckpointForTokens(usage.tokens, usage.contextWindow);
+    const crossed = shouldCheckpointForTokens(
+      usage.tokens,
+      usage.contextWindow,
+    );
     if (!crossed) {
       ledgerTokenCheckpointArmed = true;
       return;
@@ -2140,6 +2148,16 @@ FORTSCHRITT:
         ) {
           reviewedHash = hashPlanContent(content);
           phase = "reviewed";
+          if (currentPlanId) {
+            try {
+              const derived = deriveContractFromPlan(content, {
+                planId: currentPlanId,
+              });
+              if (derived) saveTaskContract(ctx.cwd, derived);
+            } catch {
+              // Best-effort: a missing/unwritable task contract never blocks review.
+            }
+          }
           ctx.ui.notify(
             "Plan geprüft. Der Reviewstatus ist erfasst; `/work` bleibt davon unabhängig verfügbar.",
             "info",
@@ -2369,6 +2387,7 @@ ${content}
         return archivePlanFile(ctx.cwd, "complete", new Date(), currentHash);
       });
       archiveBriefAlongsidePlan(ctx);
+      clearTaskContract(ctx.cwd);
       phase = mode !== "work" ? "draft" : "idle";
       reviewedHash = undefined;
       activeRun = undefined;
@@ -3027,6 +3046,7 @@ CHANGED_FILES:
         complete ? "complete" : "incomplete",
       );
       archiveBriefAlongsidePlan(ctx);
+      clearTaskContract(ctx.cwd);
       phase = keepPlanMode ? "draft" : "idle";
       reviewedHash = undefined;
       updateStatus(ctx);

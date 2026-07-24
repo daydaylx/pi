@@ -319,7 +319,20 @@ function normalizeHeading(value: string): string {
 function findTodoSection(
   lines: string[],
 ): { start: number; end: number } | undefined {
-  const target = normalizeHeading("Todos");
+  return findHeadingSection(lines, "Todos");
+}
+
+/**
+ * Locate a `## <heading>` section's body range (numbered prefixes like
+ * "## 1. Auftrag" are tolerated via normalizeHeading). Shared by
+ * findTodoSection and extractSectionText so both plan formats (simple:
+ * "## Auftrag"; detailed: "## 1. Auftrag") resolve the same way.
+ */
+function findHeadingSection(
+  lines: string[],
+  heading: string,
+): { start: number; end: number } | undefined {
+  const target = normalizeHeading(heading);
   const start = lines.findIndex((line) => {
     const match = line.match(/^##\s+(.+?)\s*$/);
     return match ? normalizeHeading(match[1]) === target : false;
@@ -333,6 +346,48 @@ function findTodoSection(
     start: start + 1,
     end: nextHeading < 0 ? lines.length : nextHeading,
   };
+}
+
+/**
+ * Extract the raw trimmed body text of a `## <heading>` section, or
+ * undefined if the heading is absent. Used to derive a task contract's goal
+ * ("Auftrag") and acceptance criteria ("Abschlusskriterien") from a reviewed
+ * plan without re-parsing the whole structure validator.
+ */
+export function extractSectionText(
+  planContent: string,
+  heading: string,
+): string | undefined {
+  const lines = planContent.split(/\r?\n/);
+  const section = findHeadingSection(lines, heading);
+  if (!section) return undefined;
+  const text = lines.slice(section.start, section.end).join("\n").trim();
+  return text === "" ? undefined : text;
+}
+
+/**
+ * Split a section body into non-empty item lines: markdown list markers
+ * ("- ", "* ", "1. ") are stripped, checkbox syntax ("[ ]"/"[x]") is
+ * ignored, plain prose paragraphs become a single item per line. Unlike
+ * cleanStepText (used for todo display), this does not reshape casing or
+ * truncate — verification/tool names like "typecheck" must round-trip
+ * unchanged.
+ */
+export function extractSectionItems(
+  planContent: string,
+  heading: string,
+): string[] {
+  const text = extractSectionText(planContent, heading);
+  if (!text) return [];
+  return text
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/^\s*[-*]\s+(\[[ xX]\]\s+)?/, "")
+        .replace(/^\s*\d+\.\s+/, "")
+        .trim(),
+    )
+    .filter((line) => line.length > 0);
 }
 
 export function cleanStepText(text: string): string {

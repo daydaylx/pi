@@ -15,8 +15,15 @@
  * Storage: `.agent/task-contract.json` (volatile; archive/discard after
  * completion; not committed) — consistent with `.agent/plans/`.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
+import { extractSectionItems, extractSectionText } from "../plan-mode/utils.ts";
 
 const CONTRACT_RELATIVE_PATH = join(".agent", "task-contract.json");
 
@@ -70,6 +77,11 @@ export interface LoadedContract {
   contract?: TaskContract;
   diagnostics: ContractDiagnostic[];
   source?: string;
+}
+
+/** Minimal plan facts needed to derive a contract; avoids importing plan-mode types. */
+export interface PlanContractSource {
+  planId: string;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -128,6 +140,11 @@ export function globToRegExp(pattern: string): RegExp {
  * matches any pattern; a pattern is "undeclared" if no changed file matched it.
  * Exact paths and directory prefixes ("src/") are handled by the matcher too
  * (a prefix like "src/" matches via the trailing-slash literal).
+ *
+ * An empty `expectedScope` means "no scope was declared" (e.g. a plan-derived
+ * contract, whose prose "Betroffene Bereiche" section can't be turned into
+ * globs) — it is NOT the same as "everything is out of scope". Callers that
+ * want to surface this should check `expectedScope.length === 0` themselves.
  */
 export function matchScope(
   expectedScope: string[],
@@ -135,6 +152,8 @@ export function matchScope(
 ): ScopeMatchResult {
   const patterns = expectedScope.map(normalizePath).filter(Boolean);
   const files = changedFiles.map(normalizePath).filter(Boolean);
+  if (patterns.length === 0)
+    return { inScope: [], outOfScope: [], undeclared: [] };
   const regexes = patterns.map((p) => globToRegExp(p));
   const matched = new Set<string>();
   const usedPatterns = new Set<number>();
@@ -160,7 +179,9 @@ export function analyzeScopeDrift(
   changedFiles: string[],
 ): ScopeDriftAnalysis {
   const match = matchScope(contract.expectedScope, changedFiles);
-  const noise = changedFiles.filter((f) => NOISE_PATTERN.test(normalizePath(f)));
+  const noise = changedFiles.filter((f) =>
+    NOISE_PATTERN.test(normalizePath(f)),
+  );
   const openCriteria = contract.acceptanceCriteria.filter(
     (c) => c.status !== "met",
   );
@@ -248,7 +269,9 @@ function validateContract(
     }
   }
 
-  const expectedScope = isStringArray(raw.expectedScope) ? [...raw.expectedScope] : [];
+  const expectedScope = isStringArray(raw.expectedScope)
+    ? [...raw.expectedScope]
+    : [];
   if (raw.expectedScope !== undefined && !isStringArray(raw.expectedScope)) {
     diagnostics.push({
       level: "error",
@@ -264,7 +287,9 @@ function validateContract(
       message: "nonGoals muss ein String-Array sein",
     });
   }
-  const verification = isStringArray(raw.verification) ? [...raw.verification] : [];
+  const verification = isStringArray(raw.verification)
+    ? [...raw.verification]
+    : [];
   if (raw.verification !== undefined && !isStringArray(raw.verification)) {
     diagnostics.push({
       level: "error",
@@ -272,7 +297,9 @@ function validateContract(
       message: "verification muss ein String-Array sein",
     });
   }
-  const assumptions = isStringArray(raw.assumptions) ? [...raw.assumptions] : [];
+  const assumptions = isStringArray(raw.assumptions)
+    ? [...raw.assumptions]
+    : [];
   if (raw.assumptions !== undefined && !isStringArray(raw.assumptions)) {
     diagnostics.push({
       level: "error",
@@ -308,6 +335,41 @@ function validateContract(
     assumptions,
     ...(planId ? { planId } : {}),
     source: sourceKind,
+  };
+}
+
+/**
+ * Derive a task contract from a reviewed plan's "Auftrag" and
+ * "Abschlusskriterien" sections (present in both the simple and detailed
+ * plan formats — see plan-mode/utils.ts REQUIRED_*_PLAN_HEADINGS). Returns
+ * undefined if the plan has no usable goal, so callers can skip saving
+ * rather than persist an empty contract.
+ *
+ * References the plan's existing planId (source.planId) instead of minting
+ * a new identity — keeps this a data-only derivation, not a second workflow
+ * state machine.
+ */
+export function deriveContractFromPlan(
+  planContent: string,
+  source: PlanContractSource,
+): TaskContract | undefined {
+  const goal = extractSectionText(planContent, "Auftrag");
+  if (!goal) return undefined;
+  const acceptanceCriteria: AcceptanceCriterion[] = extractSectionItems(
+    planContent,
+    "Abschlusskriterien",
+  ).map((criterion) => ({ criterion, status: "pending" as const }));
+  const nonGoals = extractSectionItems(planContent, "Nicht-Ziele");
+  const verification = extractSectionItems(planContent, "Tests / Checks");
+  return {
+    goal,
+    acceptanceCriteria,
+    expectedScope: [],
+    nonGoals,
+    verification,
+    assumptions: [],
+    planId: source.planId,
+    source: "plan",
   };
 }
 

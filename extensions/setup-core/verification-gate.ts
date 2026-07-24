@@ -128,14 +128,21 @@ async function runSetupCheck(
       durationMs: elapsed(start),
       output: limited.text,
       ...(result.killed
-        ? { error: { kind: "timeout", message: `Zeitlimit ${spec.timeoutMs}ms` } }
+        ? {
+            error: {
+              kind: "timeout",
+              message: `Zeitlimit ${spec.timeoutMs}ms`,
+            },
+          }
         : !ok
           ? { error: { kind: "exit", message: `Exit-Code ${result.code}` } }
           : {}),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const kind = /enoent|spawn/i.test(message) ? "missing_binary" : "spawn_failed";
+    const kind = /enoent|spawn/i.test(message)
+      ? "missing_binary"
+      : "spawn_failed";
     return {
       name,
       source: "setup",
@@ -149,9 +156,7 @@ async function runSetupCheck(
 
 /** Aggregate check results into an overall gate status. */
 export function aggregateStatus(checks: GateCheck[]): GateStatus {
-  const requiredFails = checks.filter(
-    (c) => c.required && c.status === "fail",
-  );
+  const requiredFails = checks.filter((c) => c.required && c.status === "fail");
   const requiredNotRun = checks.filter(
     (c) => c.required && c.status === "not_run",
   );
@@ -179,11 +184,11 @@ export async function runVerificationGate(
     if (statusResult.code === 0) {
       changedFiles.push(...parseGitStatus(statusResult.stdout));
     }
-    const diffResult = (await ctx.exec(
-      "git",
-      ["diff", "--stat"],
-      { cwd: ctx.projectRoot, timeout: 10_000, env: {} },
-    )) as RawExecResult;
+    const diffResult = (await ctx.exec("git", ["diff", "--stat"], {
+      cwd: ctx.projectRoot,
+      timeout: 10_000,
+      env: {},
+    })) as RawExecResult;
     if (diffResult.code === 0 && diffResult.stdout.trim()) {
       diffStat = diffResult.stdout.trim();
     }
@@ -241,6 +246,11 @@ export async function runVerificationGate(
       contract,
       changedFiles.map((f) => f.path),
     );
+    if (contract.expectedScope.length === 0) {
+      residualRisks.push(
+        "Task-Contract ohne deklarierten Scope (z. B. plan-abgeleitet) — Scope-Drift kann nicht geprüft werden.",
+      );
+    }
     if (drift.match.outOfScope.length > 0) {
       scopeHints.push(
         `Scope-Drift — außerhalb des deklarierten Scopes: ${drift.match.outOfScope.join(", ")}`,
@@ -257,9 +267,7 @@ export async function runVerificationGate(
       );
     }
     for (const c of drift.openCriteria) {
-      residualRisks.push(
-        `offene Anforderung [${c.status}]: ${c.criterion}`,
-      );
+      residualRisks.push(`offene Anforderung [${c.status}]: ${c.criterion}`);
     }
   } else {
     const noise = changedFiles.filter((f) =>
@@ -272,7 +280,9 @@ export async function runVerificationGate(
     }
   }
   if (changedFiles.length === 0) {
-    scopeHints.push("keine Working-Tree-Änderungen erkannt (ggf. bereits committet).");
+    scopeHints.push(
+      "keine Working-Tree-Änderungen erkannt (ggf. bereits committet).",
+    );
   }
 
   for (const d of loadedProfiles.diagnostics) {
@@ -315,7 +325,10 @@ export async function runVerificationGate(
 }
 
 /** Render a GateResult as a human-readable report (for /verify-gate output). */
-export function formatGateReport(result: GateResult, taskDescription?: string): string {
+export function formatGateReport(
+  result: GateResult,
+  taskDescription?: string,
+): string {
   const lines: string[] = ["Verifikations-Gate", "=================="];
   const goal = taskDescription ?? result.taskDescription;
   if (goal) lines.push(`Auftrag: ${goal}`);
