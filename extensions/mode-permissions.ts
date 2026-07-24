@@ -56,6 +56,11 @@ import {
   requestWorkflowCapabilities,
   type WorkflowCapabilitySnapshot,
 } from "./shared/workflow-capabilities.ts";
+import {
+  requestDoomLoopSnapshot,
+  type DoomLoopSnapshot,
+} from "./shared/doom-loop-capabilities.ts";
+import { normaliseSignature as normaliseDoomLoopSignature } from "./setup-core/doom-loop.ts";
 
 const PERSISTED_STATE_KEY = "mode-permissions";
 
@@ -229,7 +234,24 @@ function decideTool(
     unknownTools: ConfiguredPolicyAction;
     bash: ConfiguredPolicyAction;
   },
+  doomLoop?: DoomLoopSnapshot,
 ): PolicyDecision {
+  // Doom-loop (#103) and edit-fallback (#104) are advisory detectors that
+  // publish their state via a capability bus rather than intercepting
+  // tool_call themselves — this is intentionally the only place that turns
+  // a detection into an actual decision. "ask" (not "block") so the user can
+  // always override; there is no automatic hard stop.
+  if (
+    doomLoop?.active &&
+    doomLoop.signature !== undefined &&
+    normaliseDoomLoopSignature(event) === doomLoop.signature
+  ) {
+    return {
+      action: "ask",
+      reason: `Doom-Loop erkannt: ${doomLoop.reason ?? "wiederholtes Muster"}`,
+    };
+  }
+
   const workflowDecision = decideWorkflowTool(workflow, event, cwd);
   if (workflowDecision) return workflowDecision;
 
@@ -526,6 +548,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       ctx.cwd,
       requestWorkflowCapabilities(pi.events),
       configuredPolicy,
+      requestDoomLoopSnapshot(pi.events),
     );
     const subject =
       event.toolName === "bash"

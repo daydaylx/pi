@@ -2146,6 +2146,84 @@ await section("doom-loop detection (#103)", async () => {
   );
   eq(ok, undefined, "non-error entry does not trigger detection");
 
+  // --- detectLoop: timeout (no repetition threshold needed) ---
+  const timedOut = dlMod.detectLoop(
+    {
+      toolName: "bash",
+      signature: "bash|c:npm test",
+      isError: true,
+      timestamp: 0,
+      errorTextPrefix: "Command timed out after 30 seconds",
+    },
+    [],
+    cfg,
+  );
+  eq(
+    timedOut?.kind,
+    "timeout",
+    "a timed-out error text triggers a timeout detection",
+  );
+  eq(timedOut?.occurrences, 1, "timeout needs no prior occurrences");
+  eq(
+    timedOut?.signature,
+    "bash|c:npm test",
+    "timeout detection carries the signature",
+  );
+
+  // --- detectLoop: read-loop (same path read repeatedly, no isError needed) ---
+  const readEntry = (path, isError = false) => ({
+    toolName: "read",
+    signature: `read|p:${path}`,
+    isError,
+    timestamp: 0,
+  });
+  const readLoop = dlMod.detectLoop(
+    readEntry("src/a.ts"),
+    [readEntry("src/a.ts"), readEntry("src/a.ts")],
+    cfg,
+  );
+  eq(
+    readLoop?.kind,
+    "read-loop",
+    "3rd read of the same path with no edit/write triggers read-loop",
+  );
+  eq(
+    readLoop?.occurrences,
+    3,
+    "read-loop occurrence count includes the current call",
+  );
+
+  const readLoopBroken = dlMod.detectLoop(
+    readEntry("src/a.ts"),
+    [
+      readEntry("src/a.ts"),
+      {
+        toolName: "edit",
+        signature: "edit|e:x|p:src/a.ts",
+        isError: false,
+        timestamp: 0,
+      },
+      readEntry("src/a.ts"),
+    ],
+    cfg,
+  );
+  eq(
+    readLoopBroken,
+    undefined,
+    "an intervening edit on the same path resets the read-loop count",
+  );
+
+  const twoReadsOnly = dlMod.detectLoop(
+    readEntry("src/a.ts"),
+    [readEntry("src/a.ts")],
+    cfg,
+  );
+  eq(
+    twoReadsOnly,
+    undefined,
+    "only 2 total reads does not yet trigger read-loop",
+  );
+
   // --- createDoomLoopState ---
   const ds = dlMod.createDoomLoopState();
   eq(
@@ -2154,6 +2232,71 @@ await section("doom-loop detection (#103)", async () => {
     "state owns a HistoryBuffer",
   );
   eq(ds.config, dlMod.DEFAULT_CONFIG, "state uses default config");
+});
+
+await section("doom-loop capability bus (#103)", async () => {
+  const dlCapMod = await load("extensions/shared/doom-loop-capabilities.ts");
+  const dlMod = await load("extensions/setup-core/doom-loop.ts");
+
+  // --- no provider registered -> default snapshot ---
+  const noProviderEvents = { emit() {} };
+  eq(
+    dlCapMod.requestDoomLoopSnapshot(noProviderEvents),
+    { active: false },
+    "no doom-loop provider yields the inactive default snapshot",
+  );
+
+  // --- registerDoomLoopDetector wires session_start/tool_result/bus request ---
+  const harness = createHarness();
+  const state = dlMod.registerDoomLoopDetector(harness.api);
+  const context = harness.makeContext();
+
+  eq(
+    harness.api.events.emit(dlCapMod.DOOM_LOOP_CAPABILITY_EVENTS.request, {
+      respond() {},
+    }) ?? true,
+    true,
+    "capability-bus request handler is registered without throwing",
+  );
+
+  // Drive two identical failing edits through the real tool_result hook so
+  // the bus reflects an actual detection, not a hand-built one.
+  const failingEdit = {
+    toolName: "edit",
+    input: { oldText: "foo", path: "src/a.ts" },
+    content: [{ type: "text", text: "no match" }],
+    isError: true,
+  };
+  await harness.runHooks("tool_result", failingEdit, context);
+  await harness.runHooks("tool_result", failingEdit, context);
+
+  const afterDetection = dlCapMod.requestDoomLoopSnapshot(harness.api.events);
+  eq(
+    afterDetection.active,
+    true,
+    "a real detection is reflected on the capability bus",
+  );
+  assert(
+    afterDetection.signature === state.lastDetection?.signature,
+    "bus snapshot signature matches the detector's last detection",
+  );
+
+  // A successful, non-looping result clears the bus snapshot again.
+  await harness.runHooks(
+    "tool_result",
+    {
+      toolName: "read",
+      input: { path: "other.ts" },
+      content: [],
+      isError: false,
+    },
+    context,
+  );
+  eq(
+    dlCapMod.requestDoomLoopSnapshot(harness.api.events).active,
+    false,
+    "a clean result clears the doom-loop bus snapshot",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -2875,6 +3018,62 @@ await section("permission status lifecycle", async () => {
     "manual Thinking is restored from the session state",
   );
 });
+
+await section(
+  "mode-permissions consults the doom-loop capability bus (#103)",
+  async () => {
+    if (!modePermissions) return;
+    const harness = createHarness({ confirm: false });
+    modePermissions.default(harness.api);
+    const context = harness.makeContext({ mode: "json", hasUI: false });
+    await harness.runHooks("session_start", {}, context);
+
+    // No doom-loop provider registered: an ordinary edit is allowed.
+    const clean = await harness.runHooks(
+      "tool_call",
+      { toolName: "edit", input: { oldText: "x", path: "src/a.ts" } },
+      context,
+    );
+    assert(
+      clean.every((result) => result === undefined),
+      "an edit is allowed when no doom-loop provider is registered",
+    );
+
+    // Register a fake doom-loop provider reporting an active loop for the
+    // exact signature of the edit we're about to retry.
+    harness.api.events.on("doom-loop-capabilities:request", (event) => {
+      event.respond({
+        active: true,
+        reason: "edit: Suchmuster wiederholt fehlgeschlagen (2x)",
+        signature: "edit|e:x|p:src/a.ts",
+      });
+    });
+
+    const looping = await harness.runHooks(
+      "tool_call",
+      { toolName: "edit", input: { oldText: "x", path: "src/a.ts" } },
+      context,
+    );
+    assert(
+      looping.some(
+        (result) =>
+          result?.block === true && result.reason.includes("Doom-Loop erkannt"),
+      ),
+      "a matching doom-loop signature is surfaced as a confirmation (ask), not a silent block, in a non-interactive context",
+    );
+
+    // A different edit (different signature) is unaffected by the active loop.
+    const different = await harness.runHooks(
+      "tool_call",
+      { toolName: "edit", input: { oldText: "y", path: "src/b.ts" } },
+      context,
+    );
+    assert(
+      different.every((result) => result === undefined),
+      "a different edit signature is not blocked by an unrelated active doom-loop",
+    );
+  },
+);
 
 await section("unknown tools remain confirmed in elevated modes", async () => {
   if (!modePermissions) return;

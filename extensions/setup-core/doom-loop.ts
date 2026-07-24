@@ -17,7 +17,14 @@
  *   - History is session-scoped; cleaned up at `session_shutdown`.
  */
 import { createHash } from "node:crypto";
-import type { ExtensionAPI, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ToolCallEvent,
+} from "@earendil-works/pi-coding-agent";
+import {
+  DOOM_LOOP_CAPABILITY_EVENTS,
+  type DoomLoopCapabilityRequest,
+} from "../shared/doom-loop-capabilities.ts";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -40,6 +47,14 @@ export interface DoomLoopConfig {
   stuckToolThreshold: number;
   /** How many recent entries to examine for stuck-tool patterns. */
   stuckToolWindow: number;
+  /**
+   * Same `read` path this many times in the examined window (without an
+   * intervening edit/write to that path) triggers a "read-loop" detection.
+   * Reads rarely fail, so this pattern does not require `isError`.
+   */
+  readLoopThreshold: number;
+  /** How many recent entries to examine for read-loop patterns. */
+  readLoopWindow: number;
 }
 
 export const DEFAULT_CONFIG: DoomLoopConfig = {
@@ -48,6 +63,8 @@ export const DEFAULT_CONFIG: DoomLoopConfig = {
   identicalFailureWindow: 10,
   stuckToolThreshold: 3,
   stuckToolWindow: 8,
+  readLoopThreshold: 3,
+  readLoopWindow: 8,
 };
 
 // ---------------------------------------------------------------------------
@@ -61,6 +78,13 @@ export interface NormalisedEntry {
   isError: boolean;
   /** Timestamp in ms (Date.now) — used only for ordering, never for timeouts. */
   timestamp: number;
+  /**
+   * First text block of the tool result, truncated. Only used to match the
+   * timeout pattern; never stored beyond a short prefix and never surfaced
+   * verbatim in a detection message (keeps output limited per the issue's
+   * "no full tool output" constraint).
+   */
+  errorTextPrefix?: string;
 }
 
 /**
@@ -76,7 +100,10 @@ export function normaliseSignature(event: {
   const parts: string[] = [toolName];
   // Normalise each field that we extract: cast to string, trim, lowercase
   // (makes oldText matches slightly more tolerant of whitespace drift).
-  const norm = (value: unknown): string => String(value ?? "").trim().toLowerCase();
+  const norm = (value: unknown): string =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase();
 
   switch (toolName) {
     case "edit":
@@ -84,7 +111,12 @@ export function normaliseSignature(event: {
       parts.push("p:" + norm(input.path ?? input.filePath ?? ""));
       break;
     case "write":
-      parts.push("p:" + norm(input.path ?? input.filePath ?? contentHash(norm(input.content))));
+      parts.push(
+        "p:" +
+          norm(
+            input.path ?? input.filePath ?? contentHash(norm(input.content)),
+          ),
+      );
       break;
     case "read":
       parts.push("p:" + norm(input.path));
@@ -153,24 +185,59 @@ export class HistoryBuffer {
 // ---------------------------------------------------------------------------
 
 export interface LoopDetection {
-  kind: "identical-failure" | "stuck-tool";
+  kind: "identical-failure" | "stuck-tool" | "timeout" | "read-loop";
   toolName: string;
   /** Human-readable explanation (for a status label or notification). */
   message: string;
   /** How many times the pattern was observed in the examined window. */
   occurrences: number;
+  /** The normalised signature of the offending call, for capability-bus lookups. */
+  signature: string;
+}
+
+const TIMEOUT_PATTERN = /timed out|timeout/i;
+
+/** Extract the first text block from a tool_result's content, if any. */
+function firstText(content: Array<{ type: string; text?: string }>): string {
+  return content.find((c) => c.type === "text")?.text ?? "";
+}
+
+/**
+ * All of edit/write/read signatures end in a `p:<path>` segment (see
+ * normaliseSignature) — used by the read-loop check to tell whether a write
+ * touched the same file a read keeps re-reading.
+ */
+function signaturePath(signature: string): string | undefined {
+  const match = signature.match(/p:([^|]*)$/);
+  return match ? match[1] : undefined;
 }
 
 /**
  * Match the current entry against recent history and return up to one
- * detection (the first match wins in the order: identical-failure, stuck-tool).
- * Returns `undefined` when no threshold is met.
+ * detection (first match wins, in order: timeout, identical-failure,
+ * stuck-tool, read-loop). Returns `undefined` when no threshold is met.
  */
 export function detectLoop(
   entry: NormalisedEntry,
   history: NormalisedEntry[],
   config: DoomLoopConfig = DEFAULT_CONFIG,
 ): LoopDetection | undefined {
+  // Timeout: a hung/timed-out tool call is always worth surfacing, no
+  // repetition threshold needed.
+  if (
+    entry.isError &&
+    entry.errorTextPrefix &&
+    TIMEOUT_PATTERN.test(entry.errorTextPrefix)
+  ) {
+    return {
+      kind: "timeout",
+      toolName: entry.toolName,
+      message: `${entry.toolName}: Tool-Aufruf hat einen Timeout ausgelöst — möglicherweise hängender Prozess.`,
+      occurrences: 1,
+      signature: entry.signature,
+    };
+  }
+
   // Identical-failure: same toolName + same signature + both errors.
   if (entry.isError) {
     const window = history.slice(-config.identicalFailureWindow);
@@ -181,11 +248,16 @@ export function detectLoop(
         e.signature === entry.signature,
     );
     if (identicalErrors.length >= config.identicalFailureThreshold) {
+      const message =
+        entry.toolName === "edit"
+          ? `edit: Suchmuster wiederholt fehlgeschlagen (${identicalErrors.length + 1}x) — Datei erneut lesen statt zu raten.`
+          : `${entry.toolName}: identischer fehlgeschlagener Aufruf (${identicalErrors.length + 1}x) — mögliche Doom-Loop.`;
       return {
         kind: "identical-failure",
         toolName: entry.toolName,
-        message: `${entry.toolName}: identischer fehlgeschlagener Aufruf (${identicalErrors.length + 1}x) — mögliche Doom-Loop.`,
+        message,
         occurrences: identicalErrors.length + 1,
+        signature: entry.signature,
       };
     }
   }
@@ -202,6 +274,32 @@ export function detectLoop(
         toolName: entry.toolName,
         message: `${entry.toolName}: ${toolErrors.length + 1}x fehlgeschlagen im letzten Fenster — Agent scheint festzuhängen.`,
         occurrences: toolErrors.length + 1,
+        signature: entry.signature,
+      };
+    }
+  }
+
+  // Read-loop: same path read repeatedly without an intervening edit/write
+  // to that path. Reads rarely fail, so this does not require isError.
+  if (entry.toolName === "read") {
+    const window = history.slice(-config.readLoopWindow);
+    const path = signaturePath(entry.signature);
+    const sameReads = window.filter(
+      (e) => e.toolName === "read" && e.signature === entry.signature,
+    );
+    const wasModified = window.some(
+      (e) =>
+        (e.toolName === "edit" || e.toolName === "write") &&
+        path !== undefined &&
+        signaturePath(e.signature) === path,
+    );
+    if (!wasModified && sameReads.length >= config.readLoopThreshold - 1) {
+      return {
+        kind: "read-loop",
+        toolName: entry.toolName,
+        message: `read: derselbe Pfad wiederholt gelesen (${sameReads.length + 1}x) ohne zwischenzeitliche Änderung — neue Begründung nötig.`,
+        occurrences: sameReads.length + 1,
+        signature: entry.signature,
       };
     }
   }
@@ -220,7 +318,9 @@ export interface DoomLoopState {
   lastDetection?: LoopDetection;
 }
 
-export function createDoomLoopState(config?: Partial<DoomLoopConfig>): DoomLoopState {
+export function createDoomLoopState(
+  config?: Partial<DoomLoopConfig>,
+): DoomLoopState {
   const resolved = { ...DEFAULT_CONFIG, ...config };
   return { history: new HistoryBuffer(resolved.historySize), config: resolved };
 }
@@ -240,16 +340,25 @@ export function registerDoomLoopDetector(
       signature: normaliseSignature(event),
       isError: event.isError,
       timestamp: Date.now(),
+      // Only a short prefix, only to match the timeout pattern — never
+      // stored or surfaced in full (per the issue's output constraint).
+      ...(event.isError
+        ? { errorTextPrefix: firstText(event.content).slice(0, 200) }
+        : {}),
     };
     state.history.push(entry);
-    if (!entry.isError) {
-      // A successful result breaks the loop perception.
-      state.lastDetection = undefined;
-      return;
-    }
+    // Read-loop is the only pattern that can trigger on a successful call
+    // (reads rarely fail), so detectLoop always runs; error-only patterns
+    // (timeout/identical-failure/stuck-tool) return undefined by construction
+    // when entry.isError is false.
     const detection = detectLoop(
       entry,
-      state.history.tail(state.config.identicalFailureWindow * 2),
+      state.history.tail(
+        Math.max(
+          state.config.identicalFailureWindow,
+          state.config.readLoopWindow,
+        ) * 2,
+      ),
       state.config,
     );
     if (detection) {
@@ -257,7 +366,25 @@ export function registerDoomLoopDetector(
       // Advisory: publish a label visible in the Aurora footer so both
       // the agent and the user can see the warning.
       pi.appendEntry("doom-loop", detection);
+    } else if (entry.isError === false) {
+      // A successful, non-looping result breaks the loop perception.
+      state.lastDetection = undefined;
     }
+  });
+
+  pi.events.on(DOOM_LOOP_CAPABILITY_EVENTS.request, (busEvent) => {
+    const request = busEvent as DoomLoopCapabilityRequest;
+    const detection = state.lastDetection;
+    request.respond(
+      detection
+        ? {
+            active: true,
+            reason: detection.message,
+            signature: detection.signature,
+            toolName: detection.toolName,
+          }
+        : { active: false },
+    );
   });
 
   pi.on("session_shutdown", () => {
