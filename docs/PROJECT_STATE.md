@@ -98,8 +98,18 @@ fehlender Code. Sie können nach Eigentümerbestätigung geschlossen werden
    DI, kein Shell, cwd-Traversal-Schutz, Additiv-env, fail-closed),
    `/setup-doctor`-Diagnosezeile, 45 neue Tests (Trust-Gate, Schema, cwd,
    no-shell, timeout, missing_binary), Doku `docs/verify-profiles.md` +
-   Beispiel. `verify`: 637→682, 0 Fehler. **Offen:** Verifikations-Gate #102
-   (konsumiert die Profile) und Schließen des GitHub-Issues durch Eigentümer.
+   Beispiel. `verify`: 637→682, 0 Fehler. **Offen:** Schließen des GitHub-Issues
+   durch Eigentümer.
+3. ~~**#102**~~ — **umgesetzt (2026-07-24, Advisory-MVP):** universelles
+   Verifikations-Gate als neues Modul `extensions/setup-core/verification-gate.ts`
+   + `/verify-gate`-Kommando. Bewertet Arbeitsauftrag + Working-Tree-Diff +
+   Scope-Hinweise + Setup-Verify (typecheck/test) + #105-Projekt-Profile
+   gemeinsam, liefert strukturierten Bericht + Status (pass/fail/blocked).
+   Advisory (blockiert `/done`/`/finish` nicht). 35 neue Tests (parseGitStatus,
+   aggregateStatus, runVerificationGate mit DI: pass/fail/blocked, leerer Diff,
+   Profile trusted/untrusted, formatGateReport), Doku `docs/verification-gate.md`.
+   `verify`: 682→717, 0 Fehler. **Offen:** Hard-Enforcement in `/finish` +
+   echtes Scope-Drift via #106 (Folge-Schritte), Schließen des Issues.
 
 ### Verworfene direkte Sprünge
 

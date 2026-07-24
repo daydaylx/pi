@@ -93,6 +93,8 @@ und Manifest-/Installationsversions-Drift, ohne Zugangsdaten zu lesen.
 - `verify` akzeptiert nur `typecheck`, `test` oder `verify`; es kann keine freie
   Shell-Eingabe ausführen und führt immer die festen Prüfungen dieses Setups aus dem Agent-
   Verzeichnis aus. Projekt-Test-Skripte durchlaufen weiterhin die normale Bash-Policy.
+  Zusätzlich: advisory `/verify-gate` ([`docs/verification-gate.md`](docs/verification-gate.md))
+  und vertrauensgebundene Projekt-Profile ([`docs/verify-profiles.md`](docs/verify-profiles.md)).
 - LSP-Server werden nie automatisch installiert und starten erst bei erster Nutzung.
   Projekt-lokale LSP-Konfiguration (`.pi/lsp.json`) wird nur bei vertrautem Projekt
   berücksichtigt, sonst vollständig verworfen; LSP meldet seinen Zustand an Aurora.

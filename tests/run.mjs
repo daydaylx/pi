@@ -1118,6 +1118,10 @@ await section("setup core lifecycle", async () => {
     Boolean(harness.tools.get("verify")),
     "setup core registers the allowlisted verify tool",
   );
+  assert(
+    Boolean(harness.commands.get("verify-gate")),
+    "setup core registers the advisory verification gate (#102)",
+  );
   const doctor = harness.commands.get("setup-doctor");
   assert(Boolean(doctor), "/setup-doctor is registered");
   if (doctor) await doctor("", context);
@@ -1396,6 +1400,196 @@ await section("project verification profiles (#105)", async () => {
 
   try {
     rmSync(workspace, { recursive: true, force: true });
+  } catch {
+    /* ignore temp cleanup */
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Universal verification gate (#102), advisory MVP. Consumes the setup
+// verification + #105 project profiles + git diff. No real process is spawned
+// (exec is injected).
+// ---------------------------------------------------------------------------
+await section("universal verification gate (#102)", async () => {
+  const gateMod = await load("extensions/setup-core/verification-gate.ts");
+  assert(
+    typeof gateMod?.runVerificationGate === "function",
+    "verification-gate exports runVerificationGate",
+  );
+  assert(
+    typeof gateMod?.aggregateStatus === "function",
+    "verification-gate exports aggregateStatus",
+  );
+  assert(
+    typeof gateMod?.parseGitStatus === "function",
+    "verification-gate exports parseGitStatus",
+  );
+
+  // --- parseGitStatus ---
+  const parsed = gateMod.parseGitStatus(
+    [" M src/a.ts", "A  docs/b.md", "?? c.txt", 'R  old.ts -> new.ts'].join("\n"),
+  );
+  eq(parsed.length, 4, "porcelain lines parsed");
+  eq(parsed[0].path, "src/a.ts", "modified path parsed");
+  eq(parsed[1].status, "A ", "added status captured");
+  eq(parsed[3].path, "new.ts", "rename resolves to the new path");
+
+  // --- aggregateStatus ---
+  eq(
+    gateMod.aggregateStatus([
+      { name: "a", source: "setup", status: "pass", required: true },
+      { name: "b", source: "project", status: "pass", required: false },
+    ]),
+    "pass",
+    "all required pass -> pass",
+  );
+  eq(
+    gateMod.aggregateStatus([
+      { name: "a", source: "setup", status: "fail", required: true },
+    ]),
+    "fail",
+    "required fail -> fail",
+  );
+  eq(
+    gateMod.aggregateStatus([
+      { name: "a", source: "setup", status: "not_run", required: true },
+    ]),
+    "blocked",
+    "required not_run -> blocked",
+  );
+  eq(
+    gateMod.aggregateStatus([
+      { name: "a", source: "setup", status: "fail", required: false },
+    ]),
+    "pass",
+    "optional fail does not block",
+  );
+
+  // --- runVerificationGate: all pass ---
+  const ws = mkdtempSync(path.join(tmpdir(), "pi-gate-"));
+  function makeExec(overrides = {}) {
+    const byKey = {
+      status: " M src/a.ts\nA  docs/b.md\n",
+      diff: " src/a.ts | 2 +-\n 1 file changed\n",
+      typecheck: { code: 0, stdout: "", stderr: "" },
+      test: { code: 0, stdout: "pass", stderr: "" },
+      ...overrides,
+    };
+    return async (program, args) => {
+      const joined = `${program} ${args.join(" ")}`;
+      if (args[0] === "status") return { code: 0, stdout: byKey.status, stderr: "", killed: false };
+      if (args[0] === "diff") return { code: 0, stdout: byKey.diff, stderr: "", killed: false };
+      if (joined.includes("run typecheck"))
+        return { code: byKey.typecheck.code, stdout: byKey.typecheck.stdout, stderr: byKey.typecheck.stderr, killed: false };
+      if (joined.includes("run test"))
+        return { code: byKey.test.code, stdout: byKey.test.stdout, stderr: byKey.test.stderr, killed: false };
+      // any project profile program -> pass by default
+      return { code: 0, stdout: "", stderr: "", killed: false };
+    };
+  }
+
+  const passing = await gateMod.runVerificationGate({
+    projectRoot: ws,
+    trusted: true,
+    exec: makeExec(),
+  });
+  eq(passing.status, "pass", "typecheck+test pass, no profiles -> pass");
+  eq(passing.changedFiles.length, 2, "changed files gathered from git status");
+  eq(Boolean(passing.diffStat), true, "diff stat captured");
+  eq(passing.checks.length, 2, "setup typecheck + test ran as checks");
+  eq(passing.checks[0].name, "typecheck", "first setup check is typecheck");
+  eq(passing.checks[0].source, "setup", "check source is setup");
+
+  // --- runVerificationGate: required setup check fails -> fail ---
+  const failing = await gateMod.runVerificationGate({
+    projectRoot: ws,
+    trusted: true,
+    exec: makeExec({ test: { code: 1, stdout: "", stderr: "1 test failed" } }),
+  });
+  eq(failing.status, "fail", "test failure -> gate fail");
+  eq(failing.checks[1].status, "fail", "test check marked fail");
+  eq(failing.recommendation.includes("nicht empfohlen"), true, "fail recommendation given");
+
+  // --- runVerificationGate: required check not_run -> blocked ---
+  const blockedExec = async (program, args) => {
+    const joined = `${program} ${args.join(" ")}`;
+    if (args[0] === "status") return { code: 0, stdout: "", stderr: "", killed: false };
+    if (args[0] === "diff") return { code: 0, stdout: "", stderr: "", killed: false };
+    if (joined.includes("run typecheck"))
+      throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
+    return { code: 0, stdout: "", stderr: "", killed: false };
+  };
+  const blocked = await gateMod.runVerificationGate({
+    projectRoot: ws,
+    trusted: true,
+    exec: blockedExec,
+  });
+  eq(blocked.status, "blocked", "missing typecheck binary -> blocked");
+  eq(blocked.checks[0].status, "not_run", "typecheck not_run");
+  eq(
+    blocked.residualRisks.some((r) => r.includes("typecheck") && r.includes("missing_binary")),
+    true,
+    "missing-binary check surfaced as residual risk",
+  );
+
+  // --- runVerificationGate: empty diff -> scope hint ---
+  const emptyDiff = await gateMod.runVerificationGate({
+    projectRoot: ws,
+    trusted: true,
+    exec: makeExec({ status: "", diff: "" }),
+  });
+  eq(emptyDiff.status, "pass", "empty diff still passes when checks pass");
+  eq(
+    emptyDiff.scopeHints.some((h) => h.includes("keine Working-Tree-Änderungen")),
+    true,
+    "empty diff produces a scope hint",
+  );
+
+  // --- runVerificationGate: project profiles consumed when trusted ---
+  const profileDir = path.join(ws, ".pi");
+  mkdirSync(profileDir, { recursive: true });
+  writeFileSync(
+    path.join(profileDir, "verify.json"),
+    JSON.stringify({
+      profiles: {
+        pytest: { program: "pytest", args: ["-q"], timeoutMs: 60000 },
+        lint: { program: "flake8", args: ["."], required: false, timeoutMs: 30000 },
+      },
+    }),
+  );
+  const withProfiles = await gateMod.runVerificationGate({
+    projectRoot: ws,
+    trusted: true,
+    exec: makeExec({ test: { code: 0, stdout: "", stderr: "" } }),
+  });
+  const profileChecks = withProfiles.checks.filter((c) => c.source === "project");
+  eq(profileChecks.length, 2, "both project profiles ran as checks");
+  eq(
+    profileChecks.some((c) => c.name === "pytest" && c.required),
+    true,
+    "required project profile marked required",
+  );
+  eq(withProfiles.status, "pass", "passing profiles + setup checks -> pass");
+
+  // --- runVerificationGate: profiles ignored when untrusted ---
+  const untrustedProfiles = await gateMod.runVerificationGate({
+    projectRoot: ws,
+    trusted: false,
+    exec: makeExec({ status: "", diff: "" }),
+  });
+  eq(
+    untrustedProfiles.checks.filter((c) => c.source === "project").length,
+    0,
+    "untrusted project runs no project profiles",
+  );
+
+  // --- formatGateReport ---
+  const report = gateMod.formatGateReport(passing, "Beispielauftrag");
+  for (const needle of ["Verifikations-Gate", "Auftrag: Beispielauftrag", "PASS", "src/a.ts", "setup/typecheck"])
+    assert(report.includes(needle), "report contains " + needle);
+
+  try {
+    rmSync(ws, { recursive: true, force: true });
   } catch {
     /* ignore temp cleanup */
   }
