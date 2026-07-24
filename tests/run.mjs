@@ -2087,6 +2087,11 @@ await section("task contract and scope control (#106)", async () => {
     true,
     "pending acceptance criterion surfaced as a residual risk",
   );
+  eq(
+    gated.status,
+    "fail",
+    "real scope-drift escalates an otherwise-passing status to fail (hard-enforcement fix)",
+  );
 
   // --- deriveContractFromPlan: goal + acceptance criteria from a reviewed plan ---
   assert(
@@ -2187,6 +2192,156 @@ await section("task contract and scope control (#106)", async () => {
     /* ignore temp cleanup */
   }
 });
+
+await section(
+  "gate status reflects real scope-drift, not just checks (#102/#106 hard-enforcement fix)",
+  async () => {
+    const contractMod = await load("extensions/setup-core/task-contract.ts");
+    const gateMod = await load("extensions/setup-core/verification-gate.ts");
+    const passingExec = async (_program, args) => {
+      if (args[0] === "status")
+        return {
+          code: 0,
+          stdout: " M src/a.ts\n M README.md\n",
+          stderr: "",
+          killed: false,
+        };
+      if (args[0] === "diff")
+        return { code: 0, stdout: "", stderr: "", killed: false };
+      return { code: 0, stdout: "", stderr: "", killed: false };
+    };
+    const failingExec = async (_program, args) => {
+      if (args[0] === "status")
+        return {
+          code: 0,
+          stdout: " M src/a.ts\n M README.md\n",
+          stderr: "",
+          killed: false,
+        };
+      if (args[0] === "diff")
+        return { code: 0, stdout: "", stderr: "", killed: false };
+      const joined = `${_program} ${args.join(" ")}`;
+      if (joined.includes("run typecheck"))
+        return { code: 1, stdout: "", stderr: "type error", killed: false };
+      return { code: 0, stdout: "", stderr: "", killed: false };
+    };
+
+    // --- out-of-scope drift escalates an otherwise-passing status to fail ---
+    {
+      const ws = mkdtempSync(path.join(tmpdir(), "pi-gate-drift-fail-"));
+      try {
+        contractMod.saveTaskContract(ws, {
+          goal: "Fix auth bug",
+          acceptanceCriteria: [],
+          expectedScope: ["src/**/*.ts"],
+          nonGoals: [],
+          verification: [],
+          assumptions: [],
+          source: "direct",
+        });
+        const gated = await gateMod.runVerificationGate({
+          projectRoot: ws,
+          trusted: true,
+          exec: passingExec,
+        });
+        eq(
+          gated.status,
+          "fail",
+          "an out-of-scope README.md change fails an otherwise-passing gate",
+        );
+      } finally {
+        rmSync(ws, { recursive: true, force: true });
+      }
+    }
+
+    // --- a required check failure (blocked) is never downgraded to fail by drift ---
+    {
+      const ws = mkdtempSync(path.join(tmpdir(), "pi-gate-drift-blocked-"));
+      try {
+        contractMod.saveTaskContract(ws, {
+          goal: "Fix auth bug",
+          acceptanceCriteria: [],
+          expectedScope: ["src/**/*.ts"],
+          nonGoals: [],
+          verification: [],
+          assumptions: [],
+          source: "direct",
+        });
+        const gated = await gateMod.runVerificationGate({
+          projectRoot: ws,
+          trusted: true,
+          exec: failingExec,
+        });
+        eq(
+          gated.status,
+          "fail",
+          "a genuine typecheck failure still reports fail regardless of drift",
+        );
+      } finally {
+        rmSync(ws, { recursive: true, force: true });
+      }
+    }
+
+    // --- no contract -> drift heuristic is noise-only, never affects status ---
+    {
+      const ws = mkdtempSync(path.join(tmpdir(), "pi-gate-no-contract-"));
+      try {
+        const gated = await gateMod.runVerificationGate({
+          projectRoot: ws,
+          trusted: true,
+          exec: passingExec,
+        });
+        eq(
+          gated.status,
+          "pass",
+          "without a task contract, changed files never affect the gate status",
+        );
+      } finally {
+        rmSync(ws, { recursive: true, force: true });
+      }
+    }
+
+    // --- in-scope changes only -> no drift, status unaffected ---
+    {
+      const ws = mkdtempSync(path.join(tmpdir(), "pi-gate-in-scope-"));
+      try {
+        contractMod.saveTaskContract(ws, {
+          goal: "Fix auth bug",
+          acceptanceCriteria: [],
+          expectedScope: ["src/**/*.ts"],
+          nonGoals: [],
+          verification: [],
+          assumptions: [],
+          source: "direct",
+        });
+        const inScopeExec = async (_program, args) => {
+          if (args[0] === "status")
+            return {
+              code: 0,
+              stdout: " M src/a.ts\n",
+              stderr: "",
+              killed: false,
+            };
+          if (args[0] === "diff")
+            return { code: 0, stdout: "", stderr: "", killed: false };
+          return { code: 0, stdout: "", stderr: "", killed: false };
+        };
+        const gated = await gateMod.runVerificationGate({
+          projectRoot: ws,
+          trusted: true,
+          exec: inScopeExec,
+        });
+        eq(
+          gated.status,
+          "pass",
+          "changes fully within the declared scope do not trigger drift",
+        );
+      } finally {
+        rmSync(ws, { recursive: true, force: true });
+      }
+    }
+  },
+);
 
 await section(
   "plan-mode wires task-contract derivation and archival (#106)",

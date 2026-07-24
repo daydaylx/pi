@@ -1,12 +1,22 @@
 /**
- * Universal verification gate (#102) — advisory MVP.
+ * Universal verification gate (#102).
  *
- * A central, on-demand completion check that, before a task is declared done,
- * jointly evaluates the task, the working-tree diff, the changed files and the
- * relevant verification results. It is ADVISORY: invoked via `/verify-gate`,
- * it produces a structured report and a gate status. It does NOT modify the
- * existing completion path (`/done`, `/finish`) — hard enforcement and true
- * scope-drift detection (which needs the task contract #106) are follow-ups.
+ * A central completion check that, before a task is declared done, jointly
+ * evaluates the task, the working-tree diff, the changed files and the
+ * relevant verification results. `runVerificationGate` itself stays pure/
+ * side-effect-free (besides the injected `exec`); hard enforcement lives in
+ * its callers (`/verify-gate`, `/finish`, `/task-done`), which block
+ * completion on anything other than `status === "pass"` unless the user
+ * explicitly overrides in a TUI session.
+ *
+ * `status` reflects both required setup/project checks (typecheck, test,
+ * #105 profiles) AND real scope-drift (#106 task-contract: file changes
+ * outside the declared scope) — an out-of-scope change escalates an
+ * otherwise-passing status to "fail", since it is itself an "unexpected
+ * file change". Open acceptance criteria stay a residual risk only, not a
+ * blocker: nothing in this codebase ever flips a criterion to "met", so
+ * treating "pending" as a blocker would make every contract-bearing task
+ * permanently unfinishable.
  *
  * Reuses instead of rebuilding:
  *   - setup verification (loadSetupConfig) runs at the agent dir, untouchable;
@@ -235,6 +245,12 @@ export async function runVerificationGate(
   const scopeHints: string[] = [];
   const residualRisks: string[] = [];
   let taskDescription: string | undefined = ctx.taskDescription;
+  // Real, out-of-scope file changes are a hard-enforcement blocker — an
+  // "unexpected file" per #102's own completion criteria, not just advisory
+  // noise. Open acceptance criteria stay a residual risk only: nothing in
+  // this codebase ever flips a criterion to "met", so treating "pending" as
+  // a blocker would make every contract-bearing task permanently unfinishable.
+  let scopeDrifted = false;
   const loadedContract = loadTaskContract(ctx.projectRoot);
   for (const d of loadedContract.diagnostics) {
     residualRisks.push(`Task-Contract (${d.source}): ${d.message}`);
@@ -252,6 +268,7 @@ export async function runVerificationGate(
       );
     }
     if (drift.match.outOfScope.length > 0) {
+      scopeDrifted = true;
       scopeHints.push(
         `Scope-Drift — außerhalb des deklarierten Scopes: ${drift.match.outOfScope.join(", ")}`,
       );
@@ -298,8 +315,13 @@ export async function runVerificationGate(
     );
   }
 
-  // 5. Aggregate + recommendation.
-  const status = aggregateStatus(checks);
+  // 5. Aggregate + recommendation. Real scope-drift (out-of-scope files) is
+  // itself an "unexpected file change" per #102's completion criteria —
+  // it escalates a passing check status to "fail", never downgrades a
+  // "blocked" (missing/unrunnable required check) which is already worse.
+  const checksStatus = aggregateStatus(checks);
+  const status: GateStatus =
+    scopeDrifted && checksStatus === "pass" ? "fail" : checksStatus;
   const required = checks.filter((c) => c.required);
   const passed = required.filter((c) => c.status === "pass").length;
   const summary = `${status.toUpperCase()} — ${passed}/${required.length} Pflichtprüfungen bestanden; ${changedFiles.length} Working-Tree-Datei(en) geändert.`;
@@ -309,7 +331,9 @@ export async function runVerificationGate(
       ? "Abschluss möglich: alle Pflichtprüfungen bestanden. Restrisiken beachten."
       : status === "blocked"
         ? "Abschluss blockiert: mindestens eine Pflichtprüfung ist nicht ausführbar. Binary/Konfiguration prüfen."
-        : "Abschluss nicht empfohlen: mindestens eine Pflichtprüfung fehlgeschlagen. Fehler beheben und erneut prüfen.";
+        : scopeDrifted && checksStatus === "pass"
+          ? "Abschluss nicht empfohlen: Scope-Drift erkannt (Änderungen außerhalb des deklarierten Scopes). Diff prüfen oder Scope korrigieren."
+          : "Abschluss nicht empfohlen: mindestens eine Pflichtprüfung fehlgeschlagen. Fehler beheben und erneut prüfen.";
 
   return {
     status,
