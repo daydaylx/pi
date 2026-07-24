@@ -22,6 +22,12 @@ import {
 } from "./edit-fallback.ts";
 import { checkRecoveryStatus, offerRecoveryDialog } from "./recovery-check.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
+import {
+  clearTaskContract,
+  createDirectContract,
+  loadTaskContract,
+  saveTaskContract,
+} from "./task-contract.ts";
 
 const CheckParams = Type.Object({
   check: Type.Union([
@@ -260,6 +266,83 @@ export default function setupCore(pi: ExtensionAPI): void {
         formatGateReport(result),
         result.status === "pass" ? "info" : "warning",
       );
+    },
+  });
+
+  pi.registerCommand("task", {
+    description:
+      "Direkte Aufgabe (ohne /plan) beginnen: /task <Ziel> — legt einen Task-Contract an, den /task-done gegen das Gate prüft.",
+    handler: async (args, ctx) => {
+      const goal = args.trim();
+      if (!goal) {
+        ctx.ui.notify("Nutzung: /task <Ziel>", "info");
+        return;
+      }
+      const existing = loadTaskContract(ctx.cwd);
+      if (existing.contract) {
+        if (!ctx.hasUI || ctx.mode !== "tui") {
+          ctx.ui.notify(
+            `Es existiert bereits ein Task-Contract ("${existing.contract.goal}"). Überschreiben ist ohne interaktive Bestätigung nicht möglich.`,
+            "warning",
+          );
+          return;
+        }
+        const overwrite = await ctx.ui.confirm(
+          "Bestehenden Task-Contract überschreiben?",
+          `Aktuell: "${existing.contract.goal}" (${existing.contract.source === "plan" ? "aus Plan abgeleitet" : "direkte Aufgabe"}). Neu: "${goal}".`,
+        );
+        if (!overwrite) {
+          ctx.ui.notify(
+            "Abgebrochen; bestehender Task-Contract bleibt aktiv.",
+            "info",
+          );
+          return;
+        }
+      }
+      saveTaskContract(ctx.cwd, createDirectContract(goal));
+      ctx.ui.notify(
+        `Direkte Aufgabe gestartet: "${goal}". Nutze /task-done zum Abschluss.`,
+        "info",
+      );
+    },
+  });
+
+  pi.registerCommand("task-done", {
+    description:
+      "Direkte Aufgabe (ohne /plan) abschließen: prüft das Verifikations-Gate und löscht danach den Task-Contract.",
+    handler: async (_args, ctx) => {
+      const loaded = loadTaskContract(ctx.cwd);
+      if (!loaded.contract || loaded.contract.source !== "direct") {
+        ctx.ui.notify("Keine aktive direkte Aufgabe.", "info");
+        return;
+      }
+      const result = await runVerificationGate({
+        projectRoot: ctx.cwd,
+        trusted: ctx.isProjectTrusted(),
+        exec: execAdapter,
+      });
+      if (result.status !== "pass") {
+        if (!ctx.hasUI || ctx.mode !== "tui") {
+          ctx.ui.notify(
+            `Verifikations-Gate ${result.status.toUpperCase()}: Abschluss ohne interaktive Bestätigung nicht möglich.\n${formatGateReport(result)}`,
+            "warning",
+          );
+          return;
+        }
+        const override = await ctx.ui.confirm(
+          `Verifikations-Gate ${result.status.toUpperCase()} — trotzdem abschließen?`,
+          formatGateReport(result),
+        );
+        if (!override) {
+          ctx.ui.notify(
+            "Abschluss abgebrochen; Gate-Ergebnis siehe oben.",
+            "info",
+          );
+          return;
+        }
+      }
+      clearTaskContract(ctx.cwd);
+      ctx.ui.notify("Direkte Aufgabe abgeschlossen.", "info");
     },
   });
 }

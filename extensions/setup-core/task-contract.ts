@@ -373,6 +373,25 @@ export function deriveContractFromPlan(
   };
 }
 
+/**
+ * Build a task contract for a direct task (no `/plan`), from the goal text a
+ * user supplies to `/task`. Unlike `deriveContractFromPlan`, there is no
+ * markdown to parse — acceptanceCriteria/expectedScope/etc. start empty. An
+ * empty `expectedScope` is not treated as "everything drifted" (see
+ * `matchScope`), so this is safe to save as-is.
+ */
+export function createDirectContract(goal: string): TaskContract {
+  return {
+    goal,
+    acceptanceCriteria: [],
+    expectedScope: [],
+    nonGoals: [],
+    verification: [],
+    assumptions: [],
+    source: "direct",
+  };
+}
+
 /** Load the active task contract, if any. Schema-validated, fail-closed. */
 export function loadTaskContract(cwd: string): LoadedContract {
   const diagnostics: ContractDiagnostic[] = [];

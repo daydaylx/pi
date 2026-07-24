@@ -1177,6 +1177,225 @@ await section("setup core lifecycle", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Direct-task lifecycle (/task, /task-done). Closes the "direct tasks are
+// nowhere covered" gap for #102/#106/#107: task-contract.ts had a "direct"
+// source in its schema but nothing in production code ever created one.
+// ---------------------------------------------------------------------------
+await section("direct task lifecycle: /task and /task-done", async () => {
+  if (!setupCore) return;
+  const contractMod = await load("extensions/setup-core/task-contract.ts");
+
+  // --- /task with no argument: no contract created ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-empty-"));
+    try {
+      const harness = createHarness();
+      setupCore.default(harness.api);
+      const context = harness.makeContext({ cwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("task")("", context);
+      eq(
+        contractMod.loadTaskContract(cwd).contract,
+        undefined,
+        "an empty /task argument never creates a contract",
+      );
+      assert(
+        harness.notifications.some((n) => n.message.includes("Nutzung: /task")),
+        "empty /task argument shows usage",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  // --- /task with a goal: creates a direct contract ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-create-"));
+    try {
+      const harness = createHarness();
+      setupCore.default(harness.api);
+      const context = harness.makeContext({ cwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("task")("Fix the login redirect", context);
+      const loaded = contractMod.loadTaskContract(cwd);
+      eq(loaded.contract?.goal, "Fix the login redirect", "goal is stored");
+      eq(
+        loaded.contract?.source,
+        "direct",
+        "contract is marked source: direct",
+      );
+      eq(
+        loaded.contract?.expectedScope,
+        [],
+        "no scope is declared for a direct task",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  // --- /task with an existing contract: non-TUI refuses, TUI asks ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-collision-"));
+    try {
+      contractMod.saveTaskContract(
+        cwd,
+        contractMod.createDirectContract("Original goal"),
+      );
+
+      const nonTuiHarness = createHarness();
+      setupCore.default(nonTuiHarness.api);
+      const nonTuiContext = nonTuiHarness.makeContext({
+        cwd,
+        mode: "json",
+        hasUI: false,
+      });
+      await nonTuiHarness.runHooks("session_start", {}, nonTuiContext);
+      await nonTuiHarness.commands.get("task")("New goal", nonTuiContext);
+      eq(
+        contractMod.loadTaskContract(cwd).contract?.goal,
+        "Original goal",
+        "a non-interactive session cannot overwrite an existing contract",
+      );
+
+      const declinedHarness = createHarness({ confirm: false });
+      setupCore.default(declinedHarness.api);
+      const declinedContext = declinedHarness.makeContext({ cwd });
+      await declinedHarness.runHooks("session_start", {}, declinedContext);
+      await declinedHarness.commands.get("task")("New goal", declinedContext);
+      eq(
+        contractMod.loadTaskContract(cwd).contract?.goal,
+        "Original goal",
+        "declining the overwrite confirmation keeps the original contract",
+      );
+
+      const acceptedHarness = createHarness({ confirm: true });
+      setupCore.default(acceptedHarness.api);
+      const acceptedContext = acceptedHarness.makeContext({ cwd });
+      await acceptedHarness.runHooks("session_start", {}, acceptedContext);
+      await acceptedHarness.commands.get("task")("New goal", acceptedContext);
+      eq(
+        contractMod.loadTaskContract(cwd).contract?.goal,
+        "New goal",
+        "confirming the overwrite replaces the contract",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  // --- /task-done: no contract -> notice, no gate call ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-done-none-"));
+    try {
+      const harness = createHarness();
+      setupCore.default(harness.api);
+      const context = harness.makeContext({ cwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("task-done")("", context);
+      assert(
+        harness.notifications.some((n) =>
+          n.message.includes("Keine aktive direkte Aufgabe"),
+        ),
+        "/task-done with no contract reports there is nothing to finish",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  const makeFailingExec = () => async (_program, args) => {
+    if (args[0] === "status")
+      return { code: 0, stdout: " M src/a.ts\n", stderr: "", killed: false };
+    if (args[0] === "diff")
+      return { code: 0, stdout: "1 file changed", stderr: "", killed: false };
+    if (`${_program} ${args.join(" ")}`.includes("run typecheck"))
+      return { code: 1, stdout: "", stderr: "type error", killed: false };
+    return { code: 0, stdout: "", stderr: "", killed: false };
+  };
+  const makePassingExec = () => async (_program, args) => {
+    if (args[0] === "status" || args[0] === "diff")
+      return { code: 0, stdout: "", stderr: "", killed: false };
+    return { code: 0, stdout: "", stderr: "", killed: false };
+  };
+
+  // --- /task-done: passing gate clears the contract without asking ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-done-pass-"));
+    try {
+      contractMod.saveTaskContract(
+        cwd,
+        contractMod.createDirectContract("Ship it"),
+      );
+      const harness = createHarness({
+        confirm: () => {
+          throw new Error("must not be asked when the gate passes");
+        },
+      });
+      setupCore.default(harness.api);
+      harness.api.exec = makePassingExec();
+      const context = harness.makeContext({ cwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("task-done")("", context);
+      eq(
+        contractMod.loadTaskContract(cwd).contract,
+        undefined,
+        "a passing gate clears the direct task contract",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  // --- /task-done: failing gate + non-TUI blocks completion entirely ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-done-fail-nontui-"));
+    try {
+      contractMod.saveTaskContract(
+        cwd,
+        contractMod.createDirectContract("Risky change"),
+      );
+      const harness = createHarness();
+      setupCore.default(harness.api);
+      harness.api.exec = makeFailingExec();
+      const context = harness.makeContext({ cwd, mode: "json", hasUI: false });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("task-done")("", context);
+      assert(
+        Boolean(contractMod.loadTaskContract(cwd).contract),
+        "a failing gate in a non-interactive context keeps the contract intact",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  // --- /task-done: failing gate + TUI override still completes ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-done-fail-override-"));
+    try {
+      contractMod.saveTaskContract(
+        cwd,
+        contractMod.createDirectContract("Risky change"),
+      );
+      const harness = createHarness({ confirm: true });
+      setupCore.default(harness.api);
+      harness.api.exec = makeFailingExec();
+      const context = harness.makeContext({ cwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("task-done")("", context);
+      eq(
+        contractMod.loadTaskContract(cwd).contract,
+        undefined,
+        "an explicit override of a failing gate still completes the direct task",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Trust-gated project verification profiles (#105). Foundation for the
 // universal verification gate (#102); separate from the inviolable setup
 // `verify` tool. No real process is spawned (exec is injected).
