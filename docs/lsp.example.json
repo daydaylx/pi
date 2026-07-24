@@ -1,0 +1,13 @@
+{
+  "_comment": "Example project-local LSP config. Copy to .pi/lsp.json in a TRUSTED project. Only read when the project is trusted; otherwise discarded entirely. See docs/lsp.md.",
+  "enabled": true,
+  "mode": "auto",
+  "requestTimeoutMs": 10000,
+  "idleShutdownMs": 600000,
+  "workspaceSymbolLimit": 50,
+  "languages": {
+    "typescript": { "enabled": true },
+    "python": { "enabled": true },
+    "rust": { "enabled": false }
+  }
+}

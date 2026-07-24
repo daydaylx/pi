@@ -1,0 +1,54 @@
+name: LSP Smoke
+
+# Optional, SEPARATE smoke workflow for issue #98.
+#
+# Unlike `verify.yml` (which stays deterministic and fast using only the local
+# fake-LSP fixture), this workflow boots the REAL Pi LSP extension against real
+# language servers installed on the runner. It is intentionally NOT triggered on
+# pull_request / push so the regular PR gate never depends on installing or
+# reaching external language servers from the network.
+#
+# Run it manually (Actions tab -> "Run workflow") or on the weekly schedule
+# below. A failure here does not block merging.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, low-traffic; pinned servers keep it stable.
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  lsp-smoke:
+    name: Real language servers (TS + Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.2
+          cache: npm
+          cache-dependency-path: npm/package-lock.json
+
+      - name: Install Pi dev dependencies
+        run: npm ci --prefix npm
+
+      # Pinned versions for reproducibility. These are installed on the runner
+      # only; they are never added to the repo manifests.
+      - name: Install real language servers
+        run: |
+          npm install -g typescript-language-server@4.4.1 typescript@5.9.3
+          npm install -g pyright@1.1.403
+
+      - name: Verify servers are on PATH
+        run: |
+          command -v typescript-language-server
+          command -v pyright-langserver
+
+      - name: Run LSP smoke harness
+        run: node tests/lsp-smoke.mjs

@@ -96,6 +96,7 @@ und Manifest-/Installationsversions-Drift, ohne Zugangsdaten zu lesen.
 - LSP-Server werden nie automatisch installiert und starten erst bei erster Nutzung.
   Projekt-lokale LSP-Konfiguration (`.pi/lsp.json`) wird nur bei vertrautem Projekt
   berücksichtigt, sonst vollständig verworfen; LSP meldet seinen Zustand an Aurora.
+  Nutzer-Doku, Server-Matrix und Beispielkonfiguration: [`docs/lsp.md`](docs/lsp.md).
 - Nur der Worker-Subagent besitzt rohe Bash-/Schreib-Tools. Review-Agenten sind
   technisch nur lesend; der Test Runner erhält nur das allowlistete `verify`-Tool.
 - Plan-, LSP- und Aurora-Provider setzen Session-Overrides zurück und entfernen ihre

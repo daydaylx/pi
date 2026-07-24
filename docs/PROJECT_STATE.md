@@ -50,6 +50,67 @@ Die Übergabe erfolgt ohne Commit, Push oder Paketinstallation.
   Regressionsindiz, siehe `docs/CONTEXT_LEDGER.md`.
 - `git diff --check`: erfolgreich.
 
+## GitHub-Issue-Triage (daydaylx/pi, Stand 2026-07-23)
+
+12 offene Issues gesichtet (`gh issue list --state open`). Working Tree dabei
+fast sauber (nur `docs/CONTEXT_LEDGER.md` + `settings.json` modifiziert) — die
+Ledger-Notiz zu „24 uncommittierten Änderungen" ist veraltet.
+
+### Status-Überraschung: LSP v1 ist im Code bereits fertig
+
+`docs/LSP_INTEGRATION_PLAN.md` markiert **#93–#97 als „erledigt"**, und
+`extensions/lsp/tools.ts` registriert alle fünf Tools (`lsp_diagnostics`,
+`lsp_definition`, `lsp_references`, `lsp_hover`, `lsp_workspace_symbols`).
+Die GitHub-Issues #95/#96/#97 sind dennoch offen → **Tracking-Lag**, kein
+fehlender Code. Sie können nach Eigentümerbestätigung geschlossen werden
+(housekeeping, kein Phase-2-Fix).
+
+### Priorisierte Tabelle
+
+| Tier | # | Titel | Typ | Scope | Risiko | Aufwand | Abhängigkeit |
+|------|----|-------|-----|-------|--------|---------|--------------|
+| 0 | #95/#96/#97 | LSP-Sync/Diagnosen, Tools, Steuerung | erledigt | close only | niedrig | trivial | Eigentümer schließt |
+| **1** | **#98** | LSP: Tests, CI-Smokes, Doku, Migration | feature | `extensions/lsp`, `.github/workflows/lsp-smoke.yml`, `docs/` | niedrig–mittel | M | #93–#97 (fertig) |
+| **1** | **#105** | Vertrauensgebundene Projekt-Verifikationsprofile | feature | neue Extension/Konfig, `setup.json` | mittel | M | — (Basis für #102) |
+| 2 | #102 | Universelles Verifikations-Gate | feature | Core-Abschlussprozess | hoch | L | **#105** |
+| 2 | #104 | Sichere Edit-Fallbacks + Edit-Metriken | feature | Edit-Tool + Metriken | mittel | M | optional #103 |
+| 3 | #103 | Doom-Loop-/Festfahr-Erkennung | feature | Tool-Historie, querschneidend | mittel | M | — |
+| 3 | #106 | Task-Contract + Scope-Kontrolle (ohne Planmodus) | feature | nutzt bestehende plan/execution-Logik | mittel | M | #102 |
+| 3 | #107 | Sichere Wiederaufnahme nach Abbruch/Timeout/Provider | feature | Recovery-Statemachine | hoch | L | — |
+| 4 | #108 | Reale Benchmark-Baseline | auswertung | 30 reale Läufe + externer Agent | mittel | XL (Messung) | benchmarks/ existiert |
+
+### Empfehlung für die nächsten Phase-2-Zyklen
+
+1. ~~**#98**~~ — **umgesetzt (2026-07-24):** Fake-LSP-Protokolltests waren bereits
+   vollständig; ergänzt wurden separater Smoke-Workflow `.github/workflows/
+   lsp-smoke.yml`, Standalone-Smoke-Harness `tests/lsp-smoke.mjs` (gegen
+   `extensions/lsp` via jiti, SKIP bei fehlendem Binary, FAIL nur bei
+   Crash/Orphan), Nutzer-Doku `docs/lsp.md` (Steuerung, Trust, Server-Matrix,
+   Troubleshooting, Migration/Rollback), Beispiel `docs/lsp.example.json` und
+   README-Querverweis. `verify` bleibt 637/0. **Offen:** erster echter CI-Smoke-
+   Lauf (braucht Push + `workflow_dispatch` = Nutzerauftrag) und Schließen des
+   GitHub-Issues durch Eigentümer. Tracking-Lag #95–#97 (Code fertig) ebenfalls
+   schließbar.
+2. **#105** — wohlspezifizierte Datenmodell-Foundation ohne freie Shell;
+   entblockt die gesamte Verifikations-Gate-Schiene (#102 → #106).
+
+### Verworfene direkte Sprünge
+
+- #102 vor #105: Gate braucht die Profile zuerst.
+- #108 jetzt: Messaufgabe eigener Art, braucht reale 30 Agent-Läufe + externen
+  Agent — nicht im kleinen Fix-Fluss lösbar, eigener Track.
+- #95–#97 neu implementieren: Code ist vorhanden, keine Arbeit.
+
+### Abhängigkeitsgraph
+
+```
+#105 ──▶ #102 ──▶ #106
+#103 ──▶ #104 (optional)
+#98  (schließt LSP-Epic #92 ab, sobald #95–97 closed)
+#107 (eigenständig, aber größere Recovery-Logik)
+#108 (Messung, parallel/letzter Track)
+```
+
 ## Bekannte offene Punkte
 
 - P0.4 (Fresh Checkout): Root-`package.json` bleibt unversioniert, ist aber mit
