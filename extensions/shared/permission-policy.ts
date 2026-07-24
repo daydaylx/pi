@@ -1,5 +1,12 @@
-import { existsSync, lstatSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  lstatSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
+import { delimiter, isAbsolute, relative, resolve, sep } from "node:path";
 import type { PermissionLevel } from "./workflow-status.ts";
 
 export type PolicyAction = "allow" | "ask" | "block";
@@ -120,8 +127,6 @@ const PLAN_SIMPLE_COMMANDS = new Set([
   "cat",
   "head",
   "tail",
-  "less",
-  "more",
   "wc",
   "sort",
   "uniq",
@@ -144,6 +149,20 @@ const PLAN_SIMPLE_COMMANDS = new Set([
   "date",
   "uptime",
 ]);
+
+const SAFE_SHELL_BUILTINS = new Set(["echo", "printf", "pwd", "type"]);
+const TRUSTED_EXECUTABLE_ROOTS = [
+  "/usr/bin",
+  "/bin",
+  "/usr/sbin",
+  "/sbin",
+].flatMap((path) => {
+  try {
+    return [realpathSync(path)];
+  } catch {
+    return [];
+  }
+});
 
 function deny(reason: string): PolicyDecision {
   return { action: "block", reason };
@@ -436,26 +455,109 @@ function hasAnyOption(tokens: string[], patterns: RegExp[]): boolean {
     .some((token) => patterns.some((pattern) => pattern.test(token)));
 }
 
-function isSafeGit(tokens: string[]): boolean {
-  const subcommand = tokens[1]?.toLowerCase();
+/**
+ * Resolves the executable exactly as a shell PATH lookup would encounter it.
+ * A first hit outside a root-owned system bin directory is rejected instead
+ * of falling through to a later, trusted executable with the same basename.
+ */
+function trustedExecutableName(rawExecutable: string, cwd: string):
+  | string
+  | undefined {
+  if (
+    SAFE_SHELL_BUILTINS.has(rawExecutable) &&
+    !rawExecutable.includes("/") &&
+    !rawExecutable.includes("\\")
+  ) {
+    return rawExecutable;
+  }
+
+  let candidate: string | undefined;
+  if (rawExecutable.includes("/") || rawExecutable.includes("\\")) {
+    // Relative executables remain attacker-controlled even when they happen
+    // to resolve through `..` to a system directory.
+    if (!isAbsolute(rawExecutable)) return undefined;
+    candidate = resolve(rawExecutable);
+  } else {
+    for (const rawEntry of (process.env.PATH ?? "").split(delimiter)) {
+      const entry = rawEntry ? resolve(rawEntry) : resolve(cwd);
+      const pathCandidate = resolve(entry, rawExecutable);
+      if (existsSync(pathCandidate)) {
+        candidate = pathCandidate;
+        break;
+      }
+    }
+  }
+  if (!candidate) return undefined;
+
+  try {
+    const canonical = realpathSync(candidate);
+    if (!statSync(canonical).isFile()) return undefined;
+    accessSync(canonical, constants.X_OK);
+    if (
+      !TRUSTED_EXECUTABLE_ROOTS.some((root) => isInside(root, canonical))
+    ) {
+      return undefined;
+    }
+    return canonical.split(sep).pop()?.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function isSafeGit(tokens: string[], stdoutIsPiped: boolean): boolean {
+  let subcommandIndex = 1;
+  let pagerDisabled = stdoutIsPiped;
+  if (tokens[subcommandIndex] === "--no-pager") {
+    pagerDisabled = true;
+    subcommandIndex += 1;
+  }
+
+  const subcommand = tokens[subcommandIndex]?.toLowerCase();
   if (!subcommand) return false;
-  if (hasAnyOption(tokens, [/^--output(?:=|$)/i, /^--ext-diff$/i]))
+  const args = tokens.slice(subcommandIndex + 1);
+  if (
+    hasAnyOption(tokens, [
+      /^--out/i,
+      /^--ext-d/i,
+      /^--textc/i,
+      /^--pagin/i,
+      /^--config(?:-env)?(?:=|$)/i,
+      /^-c$/i,
+      /^--show-sign/i,
+    ])
+  ) {
     return false;
+  }
 
   switch (subcommand) {
     case "status":
+      return true;
     case "log":
+      return (
+        pagerDisabled &&
+        !args.some((arg) =>
+          /^(?:-p|--patch|--stat|--numstat|--shortstat|--dirstat(?:=|$)|--summary)$/i.test(
+            arg,
+          ),
+        )
+      );
     case "diff":
     case "show":
-      return true;
+      return pagerDisabled && args.includes("--no-textconv");
     case "branch":
-      return isSafeGitBranch(tokens);
+      if (
+        !pagerDisabled &&
+        !(args.length === 1 && args[0] === "--show-current")
+      ) {
+        return false;
+      }
+      return isSafeGitBranch([tokens[0], "branch", ...args]);
     case "remote":
-      return tokens.length === 2 || (tokens.length === 3 && tokens[2] === "-v");
+      return args.length === 0 || (args.length === 1 && args[0] === "-v");
     case "config":
-      return tokens[2] === "--get" || tokens[2] === "--get-all";
+      return args[0] === "--get" || args[0] === "--get-all";
     default:
-      return subcommand.startsWith("ls-");
+      return subcommand === "ls-files" || subcommand === "ls-tree";
   }
 }
 
@@ -499,47 +601,161 @@ function isSafeGitBranch(tokens: string[]): boolean {
   return true;
 }
 
-function isSafePlanSegment(tokens: string[], cwd: string): boolean {
-  const executable = tokens[0].split("/").pop()?.toLowerCase() ?? "";
+function hasAtMostOneUniqInput(tokens: string[]): boolean {
+  const optionsWithSeparateValues = new Set([
+    "-f",
+    "--skip-fields",
+    "-s",
+    "--skip-chars",
+    "-w",
+    "--check-chars",
+  ]);
+  let positional = 0;
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "--") {
+      positional += tokens.length - index - 1;
+      break;
+    }
+    if (optionsWithSeparateValues.has(token)) {
+      index += 1;
+      if (index >= tokens.length) return false;
+      continue;
+    }
+    if (token.startsWith("-")) continue;
+    positional += 1;
+  }
+  // GNU uniq's second positional operand is an output file.
+  return positional <= 1;
+}
+
+function isSafeSed(tokens: string[]): boolean {
+  let quiet = false;
+  const expressions: string[] = [];
+  const operands: string[] = [];
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "-n" || token === "--quiet" || token === "--silent") {
+      quiet = true;
+      continue;
+    }
+    if (token === "-e" || token === "--expression") {
+      index += 1;
+      if (index >= tokens.length) return false;
+      expressions.push(tokens[index]);
+      continue;
+    }
+    if (token.startsWith("--expression=")) {
+      expressions.push(token.slice("--expression=".length));
+      continue;
+    }
+    if (token.startsWith("-")) return false;
+    operands.push(token);
+  }
+  if (!quiet) return false;
+  if (expressions.length === 0) {
+    const expression = operands.shift();
+    if (!expression) return false;
+    expressions.push(expression);
+  }
+  if (operands.length === 0) return false;
+
+  // The common inspection form `sed -n 'START,ENDp' file` is sufficient for
+  // plan exploration and cannot contain GNU sed's `e` or `w` side effects.
+  return expressions.every((expression) =>
+    /^(?:\d+|\$)(?:,(?:\d+|\$))?p$/.test(expression),
+  );
+}
+
+function isSafePlanSegment(
+  tokens: string[],
+  cwd: string,
+  stdoutIsPiped: boolean,
+): boolean {
+  const executable = trustedExecutableName(tokens[0], cwd);
+  if (!executable) return false;
   if (tokens.some((token) => isSensitiveReference(token))) return false;
   if (containsExternalPath(tokens, cwd)) return false;
 
   if (PLAN_SIMPLE_COMMANDS.has(executable)) {
     if (
       executable === "tree" &&
-      hasAnyOption(tokens, [/^-o$/, /^--output(?:=|$)/i])
+      hasAnyOption(tokens, [/^-o(?:.+)?$/, /^--output(?:=|$)/i])
     ) {
       return false;
     }
     if (
-      ["sort", "uniq", "diff"].includes(executable) &&
+      executable === "sort" &&
+      hasAnyOption(tokens, [
+        /^-o(?:.+)?$/i,
+        /^-T(?:.+)?$/i,
+        /^--out/i,
+        /^--temp/i,
+        /^--compress/i,
+      ])
+    ) {
+      return false;
+    }
+    if (
+      ["uniq", "diff"].includes(executable) &&
       hasAnyOption(tokens, [/^-o$/, /^--output(?:=|$)/i])
     ) {
       return false;
     }
+    if (executable === "uniq" && !hasAtMostOneUniqInput(tokens)) return false;
     if (
       executable === "fd" &&
-      hasAnyOption(tokens, [/^-x$/, /^-X$/, /^--exec(?:-batch)?$/i])
+      hasAnyOption(tokens, [
+        /^-x/,
+        /^-X/,
+        /^--exec(?:-batch)?(?:=|$)/i,
+      ])
     ) {
       return false;
     }
-    if (executable === "rg" && hasAnyOption(tokens, [/^--pre(?:=|$)/i])) {
+    if (
+      executable === "rg" &&
+      hasAnyOption(tokens, [
+        /^--pre(?:=|$)/i,
+        /^--hostname-bin(?:=|$)/i,
+      ])
+    ) {
+      return false;
+    }
+    if (
+      executable === "file" &&
+      hasAnyOption(tokens, [
+        /^-C$/,
+        /^-z$/,
+        /^-Z$/,
+        /^--compile$/i,
+        /^--uncompress/i,
+      ])
+    ) {
+      return false;
+    }
+    if (executable === "bat") {
+      return (
+        hasAnyOption(tokens, [/^--paging=never$/i]) &&
+        !hasAnyOption(tokens, [/^--pager(?:=|$)/i])
+      );
+    }
+    if (
+      executable === "date" &&
+      hasAnyOption(tokens, [/^-s(?:.+)?$/i, /^--set(?:=|$)/i])
+    ) {
       return false;
     }
     return true;
   }
   if (executable === "find") {
     return !hasAnyOption(tokens, [
-      /^-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)$/i,
+      /^-(?:delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/i,
     ]);
   }
-  if (executable === "sed") {
-    return (
-      hasAnyOption(tokens, [/^-n$/, /^--quiet$/, /^--silent$/]) &&
-      !hasAnyOption(tokens, [/^-i/, /^--in-place/])
-    );
-  }
-  if (executable === "git") return isSafeGit(tokens);
+  if (executable === "sed") return isSafeSed(tokens);
+  if (executable === "git") return isSafeGit(tokens, stdoutIsPiped);
   if (executable === "node") {
     return tokens.length === 2 && ["-v", "--version"].includes(tokens[1]);
   }
@@ -613,7 +829,9 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
   const parsed = parseReadOnlyShell(command);
   return (
     !parsed.error &&
-    parsed.segments.every((tokens) => isSafePlanSegment(tokens, cwd))
+    parsed.segments.every((tokens, index) =>
+      isSafePlanSegment(tokens, cwd, index < parsed.segments.length - 1),
+    )
   );
 }
 
