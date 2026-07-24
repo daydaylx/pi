@@ -109,7 +109,19 @@ fehlender Code. Sie können nach Eigentümerbestätigung geschlossen werden
    aggregateStatus, runVerificationGate mit DI: pass/fail/blocked, leerer Diff,
    Profile trusted/untrusted, formatGateReport), Doku `docs/verification-gate.md`.
    `verify`: 682→717, 0 Fehler. **Offen:** Hard-Enforcement in `/finish` +
-   echtes Scope-Drift via #106 (Folge-Schritte), Schließen des Issues.
+   Schließen des Issues (echtes Scope-Drift jetzt via #106 verfügbar).
+4. ~~**#106**~~ — **umgesetzt (2026-07-24):** Task-Contract + Scope-Kontrolle
+   als leichtgewichtiges, eigenständiges Modul
+   `extensions/setup-core/task-contract.ts`. Kompakter Contract (Ziel,
+   Acceptance-Kriterien mit Status, expectedScope als Globs, nonGoals,
+   verification, assumptions getrennt von Vorgaben, optionale planId-Referenz)
+   in flüchtigem `.agent/task-contract.json`. Eigener Glob-Matcher (keine neue
+   Dep), `matchScope`/`analyzeScopeDrift`. **Ins Gate integriert:** echtes
+   Scope-Drift (out-of-Scope-Dateien) + offene/broken Kriterien als Restrisiken.
+   Referenziert planId ohne zweite Zustandsmaschine (plan-mode/state.ts
+   unberührt). 32 neue Tests, Doku `docs/task-contract.md`. `verify`: 717→749,
+   0 Fehler. **Offen:** Contract-Anlegung ist Skill-/Prompt-Aufgabe (nicht
+   Code); Schließen des Issues.
 
 ### Verworfene direkte Sprünge
 

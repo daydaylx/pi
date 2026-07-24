@@ -24,6 +24,7 @@ import {
   runProfile,
   type ExecFn,
 } from "./verify-profiles.ts";
+import { analyzeScopeDrift, loadTaskContract } from "./task-contract.ts";
 
 export type GateStatus = "pass" | "fail" | "blocked";
 
@@ -46,6 +47,8 @@ export interface GateCheck {
 export interface GateResult {
   status: GateStatus;
   summary: string;
+  /** Task/contract goal, if a task contract was present. */
+  taskDescription?: string;
   changedFiles: ChangedFile[];
   diffStat?: string;
   checks: GateCheck[];
@@ -221,22 +224,57 @@ export async function runVerificationGate(
     });
   }
 
-  // 4. Scope hints + residual risks (without #106 we cannot judge true drift,
-  //    only surface obvious noise for human review).
+  // 4. Scope hints + residual risks. With a task contract (#106) we can detect
+  //    REAL drift (out-of-scope files, undeclared scope, open criteria);
+  //    without one we fall back to obvious-noise heuristics.
   const scopeHints: string[] = [];
-  const noise = changedFiles.filter((f) =>
-    /(node_modules|\.lock$|^package-lock\.json$|\/\.git\/)/.test(f.path),
-  );
-  if (noise.length > 0) {
-    scopeHints.push(
-      `potenzielles Rauschen im Diff: ${noise.map((f) => f.path).join(", ")}`,
+  const residualRisks: string[] = [];
+  let taskDescription: string | undefined = ctx.taskDescription;
+  const loadedContract = loadTaskContract(ctx.projectRoot);
+  for (const d of loadedContract.diagnostics) {
+    residualRisks.push(`Task-Contract (${d.source}): ${d.message}`);
+  }
+  const contract = loadedContract.contract;
+  if (contract) {
+    if (!taskDescription) taskDescription = contract.goal;
+    const drift = analyzeScopeDrift(
+      contract,
+      changedFiles.map((f) => f.path),
     );
+    if (drift.match.outOfScope.length > 0) {
+      scopeHints.push(
+        `Scope-Drift — außerhalb des deklarierten Scopes: ${drift.match.outOfScope.join(", ")}`,
+      );
+    }
+    if (drift.match.undeclared.length > 0) {
+      scopeHints.push(
+        `deklarierter Scope ohne Änderung (möglicherweise unvollständig): ${drift.match.undeclared.join(", ")}`,
+      );
+    }
+    if (drift.noise.length > 0) {
+      scopeHints.push(
+        `potenzielles Rauschen im Diff: ${drift.noise.join(", ")}`,
+      );
+    }
+    for (const c of drift.openCriteria) {
+      residualRisks.push(
+        `offene Anforderung [${c.status}]: ${c.criterion}`,
+      );
+    }
+  } else {
+    const noise = changedFiles.filter((f) =>
+      /(node_modules|\.lock$|^package-lock\.json$|\/\.git\/)/.test(f.path),
+    );
+    if (noise.length > 0) {
+      scopeHints.push(
+        `potenzielles Rauschen im Diff: ${noise.map((f) => f.path).join(", ")}`,
+      );
+    }
   }
   if (changedFiles.length === 0) {
     scopeHints.push("keine Working-Tree-Änderungen erkannt (ggf. bereits committet).");
   }
 
-  const residualRisks: string[] = [];
   for (const d of loadedProfiles.diagnostics) {
     residualRisks.push(`Profil-Konfiguration (${d.source}): ${d.message}`);
   }
@@ -266,6 +304,7 @@ export async function runVerificationGate(
   return {
     status,
     summary,
+    ...(taskDescription ? { taskDescription } : {}),
     changedFiles,
     ...(diffStat ? { diffStat } : {}),
     checks,
@@ -278,7 +317,8 @@ export async function runVerificationGate(
 /** Render a GateResult as a human-readable report (for /verify-gate output). */
 export function formatGateReport(result: GateResult, taskDescription?: string): string {
   const lines: string[] = ["Verifikations-Gate", "=================="];
-  if (taskDescription) lines.push(`Auftrag: ${taskDescription}`);
+  const goal = taskDescription ?? result.taskDescription;
+  if (goal) lines.push(`Auftrag: ${goal}`);
   lines.push(`Status: ${result.summary}`);
   lines.push("", "Geänderte Dateien (Working Tree):");
   if (result.changedFiles.length === 0) {

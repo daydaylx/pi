@@ -1595,6 +1595,179 @@ await section("universal verification gate (#102)", async () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Task contract + scope control (#106). Lightweight, standalone; references
+// planId without a second workflow state machine. Enables real scope-drift
+// for the advisory gate (#102).
+// ---------------------------------------------------------------------------
+await section("task contract and scope control (#106)", async () => {
+  const contractMod = await load("extensions/setup-core/task-contract.ts");
+  assert(
+    typeof contractMod?.globToRegExp === "function",
+    "task-contract exports globToRegExp",
+  );
+  assert(
+    typeof contractMod?.matchScope === "function",
+    "task-contract exports matchScope",
+  );
+  assert(
+    typeof contractMod?.analyzeScopeDrift === "function",
+    "task-contract exports analyzeScopeDrift",
+  );
+  assert(
+    typeof contractMod?.loadTaskContract === "function",
+    "task-contract exports loadTaskContract",
+  );
+
+  // --- globToRegExp ---
+  const re = (p) => contractMod.globToRegExp(p);
+  assert(re("src/a.ts").test("src/a.ts"), "exact path matches");
+  assert(!re("src/a.ts").test("src/b.ts"), "exact path rejects others");
+  assert(re("src/*.ts").test("src/a.ts"), "single-star matches within a segment");
+  assert(!re("src/*.ts").test("src/sub/a.ts"), "single-star does not cross segments");
+  assert(re("src/**/*.ts").test("src/sub/deep/a.ts"), "double-star crosses segments");
+  assert(re("src/**/*.ts").test("src/a.ts"), "double-star also matches shallow");
+  assert(re("src/?").test("src/a"), "question mark matches one char");
+  assert(re("docs/").test("docs/a.md"), "directory prefix matches beneath");
+  assert(!re("docs/").test("src/a.ts"), "directory prefix rejects others");
+
+  // --- matchScope: in/out/undeclared ---
+  const scope = contractMod.matchScope(
+    ["src/**/*.ts", "docs/lsp.md"],
+    ["src/a.ts", "src/sub/b.ts", "README.md", "package-lock.json"],
+  );
+  eq(scope.inScope.length, 2, "two changed files are in scope");
+  eq(scope.outOfScope.length, 2, "two changed files are out of scope");
+  eq(scope.undeclared, ["docs/lsp.md"], "declared-but-unchanged pattern reported");
+
+  // --- analyzeScopeDrift: noise + open criteria ---
+  const drift = contractMod.analyzeScopeDrift(
+    {
+      goal: "g",
+      acceptanceCriteria: [
+        { criterion: "done", status: "met" },
+        { criterion: "open", status: "pending" },
+        { criterion: "broken-one", status: "broken" },
+      ],
+      expectedScope: ["src/**/*.ts"],
+      nonGoals: [],
+      verification: ["typecheck"],
+      assumptions: ["maybe"],
+      source: "direct",
+    },
+    ["src/a.ts", "package-lock.json"],
+  );
+  eq(drift.noise, ["package-lock.json"], "lockfile flagged as noise");
+  eq(drift.openCriteria.length, 2, "pending + broken criteria are open");
+
+  // --- save/load roundtrip + clear ---
+  const ws = mkdtempSync(path.join(tmpdir(), "pi-contract-"));
+  const sample = {
+    goal: "Fix login bug",
+    acceptanceCriteria: [{ criterion: "login works", status: "pending" }],
+    expectedScope: ["src/auth/**/*.ts"],
+    nonGoals: ["no UI changes"],
+    verification: ["typecheck", "test"],
+    assumptions: ["root cause is in auth"],
+    planId: "abc-123",
+    source: "plan",
+  };
+  contractMod.saveTaskContract(ws, sample);
+  const loaded = contractMod.loadTaskContract(ws);
+  eq(loaded.contract.goal, "Fix login bug", "goal roundtrips");
+  eq(loaded.contract.source, "plan", "source roundtrips");
+  eq(loaded.contract.planId, "abc-123", "planId reference roundtrips");
+  eq(loaded.contract.acceptanceCriteria[0].status, "pending", "criterion status roundtrips");
+  contractMod.clearTaskContract(ws);
+  const after = contractMod.loadTaskContract(ws);
+  eq(after.contract, undefined, "clear removes the contract");
+  eq(after.diagnostics.length, 0, "cleared contract yields no diagnostics");
+
+  // --- schema validation fail-closed ---
+  function writeContract(obj) {
+    mkdirSync(path.join(ws, ".agent"), { recursive: true });
+    writeFileSync(path.join(ws, ".agent", "task-contract.json"), JSON.stringify(obj));
+  }
+  writeContract({ goal: "ok", oops: 1 });
+  let r = contractMod.loadTaskContract(ws);
+  eq(
+    r.diagnostics.some((d) => d.message.includes("unbekannter Schlüssel 'oops'")),
+    true,
+    "unknown key reported",
+  );
+  writeContract({ goal: "ok", expectedScope: "not-array" });
+  r = contractMod.loadTaskContract(ws);
+  eq(r.contract.expectedScope, [], "bad expectedScope type falls back to empty (kept, not dropped)");
+  eq(
+    r.diagnostics.some((d) => d.message.includes("expectedScope muss ein String-Array sein")),
+    true,
+    "bad expectedScope type is reported as a diagnostic",
+  );
+  writeContract({ goal: "   " });
+  r = contractMod.loadTaskContract(ws);
+  eq(r.contract, undefined, "empty goal -> contract dropped");
+  writeContract({
+    goal: "ok",
+    acceptanceCriteria: [{ criterion: "x", status: "invalid" }],
+  });
+  r = contractMod.loadTaskContract(ws);
+  eq(
+    r.contract.acceptanceCriteria.length,
+    0,
+    "criterion with bad status is dropped, contract kept",
+  );
+  contractMod.clearTaskContract(ws);
+
+  // --- gate integration: real scope-drift surfaces when a contract exists ---
+  const gateMod = await load("extensions/setup-core/verification-gate.ts");
+  const gateWs = mkdtempSync(path.join(tmpdir(), "pi-gate-contract-"));
+  contractMod.saveTaskContract(gateWs, {
+    goal: "Add LSP smoke harness",
+    acceptanceCriteria: [
+      { criterion: "smoke runs", status: "pending" },
+    ],
+    expectedScope: ["tests/lsp-smoke.mjs", "tests/fixtures/lsp-smoke/**"],
+    nonGoals: [],
+    verification: ["typecheck", "test"],
+    assumptions: [],
+    source: "direct",
+  });
+  const gateExec = async (program, args) => {
+    if (args[0] === "status")
+      return {
+        code: 0,
+        stdout: " M tests/lsp-smoke.mjs\n M README.md\n",
+        stderr: "",
+        killed: false,
+      };
+    if (args[0] === "diff") return { code: 0, stdout: "", stderr: "", killed: false };
+    return { code: 0, stdout: "", stderr: "", killed: false };
+  };
+  const gated = await gateMod.runVerificationGate({
+    projectRoot: gateWs,
+    trusted: true,
+    exec: gateExec,
+  });
+  eq(gated.taskDescription, "Add LSP smoke harness", "gate pulls the goal from the contract");
+  eq(
+    gated.scopeHints.some((h) => h.includes("Scope-Drift") && h.includes("README.md")),
+    true,
+    "out-of-scope file (README.md) reported as real drift",
+  );
+  eq(
+    gated.residualRisks.some((r) => r.includes("offene Anforderung") && r.includes("smoke runs")),
+    true,
+    "pending acceptance criterion surfaced as a residual risk",
+  );
+
+  try {
+    rmSync(ws, { recursive: true, force: true });
+    rmSync(gateWs, { recursive: true, force: true });
+  } catch {
+    /* ignore temp cleanup */
+  }
+});
+
 await section("native project skills", async () => {
   const expectedSkills = [
     "agent-docs",
