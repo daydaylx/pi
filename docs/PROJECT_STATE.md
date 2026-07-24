@@ -122,6 +122,15 @@ fehlender Code. Sie können nach Eigentümerbestätigung geschlossen werden
    unberührt). 32 neue Tests, Doku `docs/task-contract.md`. `verify`: 717→749,
    0 Fehler. **Offen:** Contract-Anlegung ist Skill-/Prompt-Aufgabe (nicht
    Code); Schließen des Issues.
+5. ~~**#103**~~ — **umgesetzt (Advisory-MVP):** Doom-Loop- und Festfahr-
+   Erkennung als reine Detektionslogik (`extensions/setup-core/doom-loop.ts`)
+   + dünnes Event-Wiring in setup-core. `normaliseSignature` (edit/oldText,
+   bash/command, read/path, …), `HistoryBuffer` (Ringpuffer), `detectLoop`
+   (identical-failure ≥2x gleiche Sig-Fehler; stuck-tool ≥3x gleicher
+   ToolName-Fehler). Advisory: publiziert via `appendEntry("doom-loop", …)`;
+   `/setup-doctor` zeigt letzten Loop-Status. 23 neue Tests. `verify`:
+   749→772, 0 Fehler. **Offen:** Reaktionen (Strategie-Stop, Oracle-Vorschlag,
+   blocked) als Folge; Schließen des Issues.
 
 ### Verworfene direkte Sprünge
 

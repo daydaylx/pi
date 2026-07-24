@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles } from "./verify-profiles.ts";
 import { formatGateReport, runVerificationGate } from "./verification-gate.ts";
+import { createDoomLoopState, registerDoomLoopDetector } from "./doom-loop.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 
 const CheckParams = Type.Object({
@@ -33,6 +34,8 @@ function packageVersion(path: string): string | undefined {
 export default function setupCore(pi: ExtensionAPI): void {
   let activeCwd = process.cwd();
   let trusted = false;
+  const doomLoop = createDoomLoopState();
+  registerDoomLoopDetector(pi, doomLoop);
 
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
@@ -116,6 +119,9 @@ export default function setupCore(pi: ExtensionAPI): void {
           ? `${profileCount} Profil(e) geladen`
           : ".pi/verify.json ignoriert (untrusted)"
         : "keine .pi/verify.json";
+      const loopHint = doomLoop.lastDetection
+        ? `${doomLoop.lastDetection.kind}: ${doomLoop.lastDetection.message}`
+        : "keine Doom-Loop erkannt";
       const hasVersionDrift =
         String(declaredVersion ?? "") !== String(devVersion ?? "") ||
         (runtimeVersion !== undefined &&
@@ -163,6 +169,7 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  installed dev package: ${devVersion ?? "missing"}`,
         `  configured extensions: ${Array.isArray(settings?.extensions) ? settings.extensions.length : "?"}`,
         `  project verification profiles: ${profileHint}`,
+        `  doom-loop status: ${loopHint}`,
       ];
       for (const diagnostic of loaded.diagnostics) {
         lines.push(

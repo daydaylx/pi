@@ -1142,6 +1142,12 @@ await section("setup core lifecycle", async () => {
       ?.message?.includes("project verification profiles: keine .pi/verify.json"),
     "setup doctor reports the project verification profile status (#105)",
   );
+  assert(
+    harness.notifications
+      .at(-1)
+      ?.message?.includes("doom-loop status: keine Doom-Loop erkannt"),
+    "setup doctor reports the doom-loop status (#103)",
+  );
   const verify = harness.tools.get("verify");
   if (verify) {
     await verify.execute(
@@ -1766,6 +1772,101 @@ await section("task contract and scope control (#106)", async () => {
   } catch {
     /* ignore temp cleanup */
   }
+});
+
+// ---------------------------------------------------------------------------
+// Doom-loop detection (#103). Pure detection logic (normalise, detectLoop)
+// and history buffer are tested; the event wiring is thin and covered by the
+// existing setup-core registration assertion.
+// ---------------------------------------------------------------------------
+await section("doom-loop detection (#103)", async () => {
+  const dlMod = await load("extensions/setup-core/doom-loop.ts");
+  const keys = [
+    "normaliseSignature",
+    "detectLoop",
+    "HistoryBuffer",
+    "createDoomLoopState",
+    "registerDoomLoopDetector",
+  ];
+  for (const k of keys)
+    assert(typeof dlMod[k] === "function", `doom-loop exports ${k}`);
+
+  // --- normaliseSignature ---
+  const sig = dlMod.normaliseSignature;
+  eq(
+    sig({ toolName: "edit", input: { oldText: "foo", path: "src/a.ts" } }),
+    sig({ toolName: "edit", input: { oldText: "foo", path: "src/a.ts" } }),
+    "identical edit args produce identical signature",
+  );
+  assert(
+    sig({ toolName: "edit", input: { oldText: "foo", path: "src/a.ts" } }) !==
+      sig({ toolName: "edit", input: { oldText: "bar", path: "src/a.ts" } }),
+    "different oldText produces different signature",
+  );
+  assert(
+    sig({ toolName: "read", input: { path: "src/a.ts" } }).includes("src/a.ts"),
+    "read signature includes path",
+  );
+  assert(
+    sig({ toolName: "bash", input: { command: "npm test" } }).includes("npm test"),
+    "bash signature includes the command",
+  );
+
+  // --- HistoryBuffer ---
+  const buf = new dlMod.HistoryBuffer(3);
+  eq(buf.length, 0, "new buffer is empty");
+  buf.push({ toolName: "a", signature: "s", isError: false, timestamp: 1 });
+  eq(buf.length, 1);
+  buf.push({ toolName: "b", signature: "s", isError: true, timestamp: 2 });
+  buf.push({ toolName: "c", signature: "s", isError: true, timestamp: 3 });
+  buf.push({ toolName: "d", signature: "s", isError: true, timestamp: 4 });
+  eq(buf.length, 3, "buffer overflows at maxSize 3");
+  eq(buf.tail(1)[0].toolName, "d", "tail returns most recent");
+  buf.clear();
+  eq(buf.length, 0, "clear empties the buffer");
+
+  // --- detectLoop: identical-failure (same toolName+sig, both errors, ≥2x) ---
+  const cfg = dlMod.DEFAULT_CONFIG;
+  const entry = (toolName, signature, isError) => ({
+    toolName,
+    signature,
+    isError,
+    timestamp: 0,
+  });
+  // Not enough identical errors
+  const one = dlMod.detectLoop(entry("edit", "oldText-X", true), [
+    entry("edit", "oldText-X", true),
+  ], cfg);
+  eq(one, undefined, "only one prior identical error -> no detection");
+  // Two prior identical errors + new = 3 total
+  const twoPrior = dlMod.detectLoop(entry("edit", "oldText-X", true), [
+    entry("edit", "oldText-X", true),
+    entry("read", "src/a.ts", false),
+    entry("edit", "oldText-X", true),
+  ], cfg);
+  eq(twoPrior?.kind, "identical-failure", "≥2 prior identical failures -> identical-failure detection");
+  eq(twoPrior?.toolName, "edit", "detection names the tool");
+  eq(twoPrior?.occurrences, 3, "occurrences count includes the current call");
+
+  // --- detectLoop: stuck-tool (same toolName failing ≥3x in window) ---
+  const stuck = dlMod.detectLoop(entry("bash", "cmdZ", true), [
+    entry("bash", "cmdA", true),
+    entry("bash", "cmdB", true),
+    entry("bash", "cmdC", true),
+  ], cfg);
+  eq(stuck?.kind, "stuck-tool", "3 prior bash failures in window -> stuck-tool");
+
+  // --- detectLoop: no detection when entry is not an error ---
+  const ok = dlMod.detectLoop(entry("edit", "oldText-X", false), [
+    entry("edit", "oldText-X", true),
+    entry("edit", "oldText-X", true),
+  ], cfg);
+  eq(ok, undefined, "non-error entry does not trigger detection");
+
+  // --- createDoomLoopState ---
+  const ds = dlMod.createDoomLoopState();
+  eq(ds.history instanceof dlMod.HistoryBuffer, true, "state owns a HistoryBuffer");
+  eq(ds.config, dlMod.DEFAULT_CONFIG, "state uses default config");
 });
 
 await section("native project skills", async () => {
