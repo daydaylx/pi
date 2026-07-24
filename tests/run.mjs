@@ -2412,6 +2412,169 @@ await section("edit and write metrics (#104)", async () => {
   );
 });
 
+await section("edit fallback detection (#104)", async () => {
+  const efMod = await load("extensions/setup-core/edit-fallback.ts");
+  const efCapMod = await load(
+    "extensions/shared/edit-fallback-capabilities.ts",
+  );
+  assert(
+    typeof efMod?.createEditFallbackState === "function",
+    "edit-fallback exports createEditFallbackState",
+  );
+  assert(
+    typeof efMod?.registerEditFallbackDetector === "function",
+    "edit-fallback exports registerEditFallbackDetector",
+  );
+
+  // --- no provider registered -> empty default snapshot ---
+  eq(
+    efCapMod.requestEditFallbackSnapshot({ emit() {} }),
+    {},
+    "no edit-fallback provider yields an empty snapshot",
+  );
+
+  // --- edit-retry: identical failed edit signature is flagged on the next attempt ---
+  const harness = createHarness();
+  const state = efMod.createEditFallbackState();
+  efMod.registerEditFallbackDetector(harness.api, state, {
+    existCheck: (p) => p.includes("existing.ts"),
+  });
+  const ctx = harness.makeContext();
+
+  await harness.runHooks(
+    "tool_call",
+    { toolName: "edit", input: { oldText: "needle", path: "src/a.ts" } },
+    ctx,
+  );
+  let snapshot = efCapMod.requestEditFallbackSnapshot(harness.api.events);
+  eq(snapshot, {}, "first attempt of a signature is not flagged");
+  await harness.runHooks(
+    "tool_result",
+    {
+      toolName: "edit",
+      input: { oldText: "needle", path: "src/a.ts" },
+      isError: true,
+    },
+    ctx,
+  );
+
+  await harness.runHooks(
+    "tool_call",
+    { toolName: "edit", input: { oldText: "needle", path: "src/a.ts" } },
+    ctx,
+  );
+  snapshot = efCapMod.requestEditFallbackSnapshot(harness.api.events);
+  eq(
+    snapshot.kind,
+    "edit-retry",
+    "a repeated identical failed edit is flagged",
+  );
+  eq(snapshot.blockedPath, "src/a.ts");
+  eq(snapshot.blockedSignature, "src/a.ts|needle");
+
+  // A successful edit on the same path clears the candidate.
+  await harness.runHooks(
+    "tool_result",
+    {
+      toolName: "edit",
+      input: { oldText: "needle", path: "src/a.ts" },
+      isError: false,
+    },
+    ctx,
+  );
+  eq(
+    efCapMod.requestEditFallbackSnapshot(harness.api.events),
+    {},
+    "a successful edit clears the pending candidate for that path",
+  );
+
+  // A different signature on the same path is unaffected.
+  await harness.runHooks(
+    "tool_call",
+    { toolName: "edit", input: { oldText: "other-needle", path: "src/a.ts" } },
+    ctx,
+  );
+  eq(
+    efCapMod.requestEditFallbackSnapshot(harness.api.events),
+    {},
+    "a different oldText is not treated as a repeated failure",
+  );
+
+  // --- full-rewrite: write to an existing, never-seen path is flagged ---
+  const rewriteHarness = createHarness();
+  const rewriteState = efMod.createEditFallbackState();
+  efMod.registerEditFallbackDetector(rewriteHarness.api, rewriteState, {
+    existCheck: (p) => p.includes("existing.ts"),
+  });
+  const rewriteCtx = rewriteHarness.makeContext();
+
+  await rewriteHarness.runHooks(
+    "tool_call",
+    { toolName: "write", input: { path: "src/existing.ts", content: "x" } },
+    rewriteCtx,
+  );
+  const rewriteSnapshot = efCapMod.requestEditFallbackSnapshot(
+    rewriteHarness.api.events,
+  );
+  eq(
+    rewriteSnapshot.kind,
+    "full-rewrite",
+    "a write to an unseen existing file is flagged",
+  );
+  eq(rewriteSnapshot.blockedPath, "src/existing.ts");
+
+  // A write to a NEW file (existCheck false) is never flagged.
+  const freshHarness = createHarness();
+  const freshState = efMod.createEditFallbackState();
+  efMod.registerEditFallbackDetector(freshHarness.api, freshState, {
+    existCheck: () => false,
+  });
+  const freshCtx = freshHarness.makeContext();
+  await freshHarness.runHooks(
+    "tool_call",
+    { toolName: "write", input: { path: "src/new.ts", content: "y" } },
+    freshCtx,
+  );
+  eq(
+    efCapMod.requestEditFallbackSnapshot(freshHarness.api.events),
+    {},
+    "a write to a brand-new file is never flagged as a full rewrite",
+  );
+
+  // A write to an existing file that was READ first is not flagged.
+  const readFirstHarness = createHarness();
+  const readFirstState = efMod.createEditFallbackState();
+  efMod.registerEditFallbackDetector(readFirstHarness.api, readFirstState, {
+    existCheck: (p) => p.includes("existing.ts"),
+  });
+  const readFirstCtx = readFirstHarness.makeContext();
+  await readFirstHarness.runHooks(
+    "tool_call",
+    { toolName: "read", input: { path: "src/existing.ts" } },
+    readFirstCtx,
+  );
+  await readFirstHarness.runHooks(
+    "tool_call",
+    { toolName: "write", input: { path: "src/existing.ts", content: "z" } },
+    readFirstCtx,
+  );
+  eq(
+    efCapMod.requestEditFallbackSnapshot(readFirstHarness.api.events),
+    {},
+    "a write preceded by a read on the same path is not flagged",
+  );
+
+  // --- session_shutdown clears state ---
+  await harness.runHooks("session_shutdown", {}, ctx);
+  eq(
+    state.failedEditSignatures.size,
+    0,
+    "failed signatures cleared on shutdown",
+  );
+  eq(state.seenPaths.size, 0, "seen paths cleared on shutdown");
+  eq(state.candidate, undefined, "candidate cleared on shutdown");
+});
+
 // ---------------------------------------------------------------------------
 // Recovery status check (#107). Reads plan + sidecar state, reports
 // interrupted task presence without touching the plan-mode state machine.
@@ -3071,6 +3234,99 @@ await section(
     assert(
       different.every((result) => result === undefined),
       "a different edit signature is not blocked by an unrelated active doom-loop",
+    );
+  },
+);
+
+await section(
+  "mode-permissions consults the edit-fallback capability bus (#104)",
+  async () => {
+    if (!modePermissions) return;
+    const harness = createHarness({ confirm: false });
+    modePermissions.default(harness.api);
+    const context = harness.makeContext({ mode: "json", hasUI: false });
+    await harness.runHooks("session_start", {}, context);
+
+    // No provider registered: an ordinary edit and write are both allowed.
+    const cleanEdit = await harness.runHooks(
+      "tool_call",
+      { toolName: "edit", input: { oldText: "x", path: "src/a.ts" } },
+      context,
+    );
+    assert(
+      cleanEdit.every((result) => result === undefined),
+      "an edit is allowed when no edit-fallback provider is registered",
+    );
+
+    // --- edit-retry candidate ---
+    harness.api.events.on("edit-fallback-capabilities:request", (event) => {
+      event.respond({
+        kind: "edit-retry",
+        blockedPath: "src/a.ts",
+        blockedSignature: "src/a.ts|x",
+        reason: "Suchmuster bereits fehlgeschlagen",
+      });
+    });
+    const retried = await harness.runHooks(
+      "tool_call",
+      { toolName: "edit", input: { oldText: "x", path: "src/a.ts" } },
+      context,
+    );
+    assert(
+      retried.some(
+        (result) =>
+          result?.block === true && result.reason.includes("Edit-Fallback"),
+      ),
+      "a matching edit-retry signature is surfaced as a confirmation, not a silent block",
+    );
+    const differentEdit = await harness.runHooks(
+      "tool_call",
+      { toolName: "edit", input: { oldText: "y", path: "src/a.ts" } },
+      context,
+    );
+    assert(
+      differentEdit.every((result) => result === undefined),
+      "a different oldText on the same path is unaffected by the edit-retry candidate",
+    );
+
+    // --- full-rewrite candidate ---
+    const rewriteHarness = createHarness({ confirm: false });
+    modePermissions.default(rewriteHarness.api);
+    const rewriteContext = rewriteHarness.makeContext({
+      mode: "json",
+      hasUI: false,
+    });
+    await rewriteHarness.runHooks("session_start", {}, rewriteContext);
+    rewriteHarness.api.events.on(
+      "edit-fallback-capabilities:request",
+      (event) => {
+        event.respond({
+          kind: "full-rewrite",
+          blockedPath: "src/existing.ts",
+          reason: "Vollständiges Rewrite ohne vorherigen Read/Edit",
+        });
+      },
+    );
+    const rewrite = await rewriteHarness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: "src/existing.ts", content: "x" } },
+      rewriteContext,
+    );
+    assert(
+      rewrite.some(
+        (result) =>
+          result?.block === true && result.reason.includes("Edit-Fallback"),
+      ),
+      "a full-rewrite candidate is surfaced as a confirmation for the matching write",
+    );
+    const otherWrite = await rewriteHarness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: "src/other.ts", content: "x" } },
+      rewriteContext,
+    );
+    assert(
+      otherWrite.every((result) => result === undefined),
+      "a write to a different path is unaffected by the full-rewrite candidate",
     );
   },
 );

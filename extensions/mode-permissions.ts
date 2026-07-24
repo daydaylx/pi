@@ -61,6 +61,10 @@ import {
   type DoomLoopSnapshot,
 } from "./shared/doom-loop-capabilities.ts";
 import { normaliseSignature as normaliseDoomLoopSignature } from "./setup-core/doom-loop.ts";
+import {
+  requestEditFallbackSnapshot,
+  type EditFallbackSnapshot,
+} from "./shared/edit-fallback-capabilities.ts";
 
 const PERSISTED_STATE_KEY = "mode-permissions";
 
@@ -216,6 +220,14 @@ function toolPath(event: ToolCallEvent): string | undefined {
   return typeof input.path === "string" ? input.path : undefined;
 }
 
+/** Mirrors edit-fallback.ts's normalisePathKey so signatures compare equal. */
+function normalisePathForFallback(value: unknown): string {
+  const s = String(value ?? "")
+    .trim()
+    .replace(/\\/g, "/");
+  return s.replace(/^\.\//, "") || "(unknown)";
+}
+
 // Restrictive permission levels still allow writes to the workflow
 // extension's plan file. This is the only place mode-permissions.ts knows
 // about plan-mode/utils.ts — shared/permission-policy.ts itself stays
@@ -235,6 +247,7 @@ function decideTool(
     bash: ConfiguredPolicyAction;
   },
   doomLoop?: DoomLoopSnapshot,
+  editFallback?: EditFallbackSnapshot,
 ): PolicyDecision {
   // Doom-loop (#103) and edit-fallback (#104) are advisory detectors that
   // publish their state via a capability bus rather than intercepting
@@ -249,6 +262,30 @@ function decideTool(
     return {
       action: "ask",
       reason: `Doom-Loop erkannt: ${doomLoop.reason ?? "wiederholtes Muster"}`,
+    };
+  }
+
+  if (editFallback?.kind === "edit-retry" && event.toolName === "edit") {
+    const input = event.input as Record<string, unknown>;
+    const oldText = Array.isArray(input.edits)
+      ? (input.edits as Array<{ oldText?: unknown }>)[0]?.oldText
+      : input.oldText;
+    const signature = `${normalisePathForFallback(input.path ?? input.filePath)}|${String(oldText ?? "").trim()}`;
+    if (signature === editFallback.blockedSignature) {
+      return {
+        action: "ask",
+        reason: `Edit-Fallback: ${editFallback.reason ?? "wiederholter Fehlversuch"}`,
+      };
+    }
+  }
+  if (
+    editFallback?.kind === "full-rewrite" &&
+    event.toolName === "write" &&
+    normalisePathForFallback(toolPath(event)) === editFallback.blockedPath
+  ) {
+    return {
+      action: "ask",
+      reason: `Edit-Fallback: ${editFallback.reason ?? "vollständiges Rewrite ohne vorherigen Read/Edit"}`,
     };
   }
 
@@ -549,6 +586,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       requestWorkflowCapabilities(pi.events),
       configuredPolicy,
       requestDoomLoopSnapshot(pi.events),
+      requestEditFallbackSnapshot(pi.events),
     );
     const subject =
       event.toolName === "bash"

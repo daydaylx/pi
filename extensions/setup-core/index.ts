@@ -7,7 +7,15 @@ import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles } from "./verify-profiles.ts";
 import { formatGateReport, runVerificationGate } from "./verification-gate.ts";
 import { createDoomLoopState, registerDoomLoopDetector } from "./doom-loop.ts";
-import { createEditMetrics, metricsSummary, registerEditMetrics } from "./edit-metrics.ts";
+import {
+  createEditMetrics,
+  metricsSummary,
+  registerEditMetrics,
+} from "./edit-metrics.ts";
+import {
+  createEditFallbackState,
+  registerEditFallbackDetector,
+} from "./edit-fallback.ts";
 import { checkRecoveryStatus } from "./recovery-check.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 
@@ -39,16 +47,17 @@ export default function setupCore(pi: ExtensionAPI): void {
   let recoveryStatus = { interrupted: false, summary: "unbekannt" };
   const doomLoop = createDoomLoopState();
   const editMetrics = createEditMetrics();
+  const editFallback = createEditFallbackState();
   registerDoomLoopDetector(pi, doomLoop);
-  registerEditMetrics(pi, editMetrics, {
-    existCheck: (p) => {
-      try {
-        return existsSync(p);
-      } catch {
-        return false;
-      }
-    },
-  });
+  const existCheck = (p: string) => {
+    try {
+      return existsSync(p);
+    } catch {
+      return false;
+    }
+  };
+  registerEditMetrics(pi, editMetrics, { existCheck });
+  registerEditFallbackDetector(pi, editFallback, { existCheck });
 
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
@@ -238,7 +247,10 @@ export default function setupCore(pi: ExtensionAPI): void {
             signal: options.signal as AbortSignal | undefined,
           }),
       });
-      ctx.ui.notify(formatGateReport(result), result.status === "pass" ? "info" : "warning");
+      ctx.ui.notify(
+        formatGateReport(result),
+        result.status === "pass" ? "info" : "warning",
+      );
     },
   });
 }
