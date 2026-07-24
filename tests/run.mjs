@@ -1148,6 +1148,12 @@ await section("setup core lifecycle", async () => {
       ?.message?.includes("doom-loop status: keine Doom-Loop erkannt"),
     "setup doctor reports the doom-loop status (#103)",
   );
+  assert(
+    harness.notifications
+      .at(-1)
+      ?.message?.includes("edit metrics: edits 0/0"),
+    "setup doctor reports the edit metrics (#104)",
+  );
   const verify = harness.tools.get("verify");
   if (verify) {
     await verify.execute(
@@ -1867,6 +1873,99 @@ await section("doom-loop detection (#103)", async () => {
   const ds = dlMod.createDoomLoopState();
   eq(ds.history instanceof dlMod.HistoryBuffer, true, "state owns a HistoryBuffer");
   eq(ds.config, dlMod.DEFAULT_CONFIG, "state uses default config");
+});
+
+// ---------------------------------------------------------------------------
+// Edit and write metrics (#104). Tracks per-session edit attempts, failures,
+// write calls, and per-file stats. Hooks tool_call/tool_result.
+// ---------------------------------------------------------------------------
+await section("edit and write metrics (#104)", async () => {
+  const emMod = await load("extensions/setup-core/edit-metrics.ts");
+  assert(
+    typeof emMod?.createEditMetrics === "function",
+    "edit-metrics exports createEditMetrics",
+  );
+  assert(
+    typeof emMod?.registerEditMetrics === "function",
+    "edit-metrics exports registerEditMetrics",
+  );
+  assert(
+    typeof emMod?.metricsSummary === "function",
+    "edit-metrics exports metricsSummary",
+  );
+
+  // --- createEditMetrics starts at zero ---
+  const m = emMod.createEditMetrics();
+  eq(m.editAttempts, 0);
+  eq(m.editFailures, 0);
+  eq(m.writeCalls, 0);
+  eq(m.writeToExisting, 0);
+  eq(Object.keys(m.perFile).length, 0, "per-file stats start empty");
+
+  // --- event wiring via harness ---
+  const harness = createHarness();
+  const metrics = emMod.createEditMetrics();
+  emMod.registerEditMetrics(harness.api, metrics, {
+    existCheck: (p) => p.includes("existing.ts"),
+  });
+  const ctx = harness.makeContext();
+
+  // Simulate an edit call that succeeds.
+  await harness.runHooks("tool_call", { toolName: "edit", input: { oldText: "a", path: "src/a.ts" } }, ctx);
+  await harness.runHooks(
+    "tool_result",
+    { toolName: "edit", input: { oldText: "a", path: "src/a.ts" }, isError: false },
+    ctx,
+  );
+  eq(metrics.editAttempts, 1, "edit call counted");
+  eq(metrics.editFailures, 0, "successful edit -> no failure count");
+  eq(metrics.perFile["src/a.ts"].editAttempts, 1);
+
+  // Simulate a failing edit.
+  await harness.runHooks(
+    "tool_call",
+    { toolName: "edit", input: { oldText: "b", path: "src/a.ts" } },
+    ctx,
+  );
+  await harness.runHooks(
+    "tool_result",
+    { toolName: "edit", input: { oldText: "b", path: "src/a.ts" }, isError: true },
+    ctx,
+  );
+  eq(metrics.editAttempts, 2);
+  eq(metrics.editFailures, 1, "failing edit counted as failure");
+  eq(metrics.perFile["src/a.ts"].editFailures, 1);
+
+  // Simulate a write to an existing file.
+  await harness.runHooks(
+    "tool_call",
+    { toolName: "write", input: { path: "src/existing.ts", content: "x" } },
+    ctx,
+  );
+  eq(metrics.writeCalls, 1);
+  eq(metrics.writeToExisting, 1, "write to existing file counted");
+
+  // Simulate a write to a new file.
+  await harness.runHooks(
+    "tool_call",
+    { toolName: "write", input: { path: "src/new.ts", content: "y" } },
+    ctx,
+  );
+  eq(metrics.writeCalls, 2);
+  eq(metrics.writeToExisting, 1, "write to new file does not count as existing");
+
+  // --- metricsSummary ---
+  const summary = emMod.metricsSummary(metrics);
+  assert(summary.includes("edits 2/1"), "summary shows edit attempts/failures");
+  assert(summary.includes("50%"), "summary shows failure ratio");
+  assert(summary.includes("writes 2"), "summary shows write count");
+  assert(summary.includes("src/a.ts(1)"), "summary shows top failing file");
+
+  // --- session_shutdown clears metrics ---
+  await harness.runHooks("session_shutdown", {}, ctx);
+  eq(metrics.editAttempts, 0, "metrics reset on shutdown");
+  eq(metrics.editFailures, 0);
+  eq(metrics.perFile["src/a.ts"], undefined, "per-file stats cleared on shutdown");
 });
 
 await section("native project skills", async () => {

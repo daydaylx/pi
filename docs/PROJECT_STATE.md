@@ -131,6 +131,13 @@ fehlender Code. Sie können nach Eigentümerbestätigung geschlossen werden
    `/setup-doctor` zeigt letzten Loop-Status. 23 neue Tests. `verify`:
    749→772, 0 Fehler. **Offen:** Reaktionen (Strategie-Stop, Oracle-Vorschlag,
    blocked) als Folge; Schließen des Issues.
+7. ~~**#104**~~ — **umgesetzt (Metriken-MVP):** Edit-/Write-Metriken-Tracker
+   (`extensions/setup-core/edit-metrics.ts`): zählt pro Session edit/write-
+   Calls über `tool_call`/`tool_result`-Hooks, Failures, write-to-existing,
+   per-File-Stats, liefert kompakte Summary für `/setup-doctor`. Integriert
+   mit dem Doom-Loop-Detector (#103) via gemeinsamer setup-core-Registrierung.
+   26 neue Tests. `verify`: 772→798, 0 Fehler. **Offen:** Fallback-Hierarchie
+   (ist Agent-Verhalten, nicht Code); Schließen des Issues.
 
 ### Verworfene direkte Sprünge
 

@@ -7,6 +7,7 @@ import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles } from "./verify-profiles.ts";
 import { formatGateReport, runVerificationGate } from "./verification-gate.ts";
 import { createDoomLoopState, registerDoomLoopDetector } from "./doom-loop.ts";
+import { createEditMetrics, metricsSummary, registerEditMetrics } from "./edit-metrics.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 
 const CheckParams = Type.Object({
@@ -35,7 +36,17 @@ export default function setupCore(pi: ExtensionAPI): void {
   let activeCwd = process.cwd();
   let trusted = false;
   const doomLoop = createDoomLoopState();
+  const editMetrics = createEditMetrics();
   registerDoomLoopDetector(pi, doomLoop);
+  registerEditMetrics(pi, editMetrics, {
+    existCheck: (p) => {
+      try {
+        return existsSync(p);
+      } catch {
+        return false;
+      }
+    },
+  });
 
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
@@ -122,6 +133,7 @@ export default function setupCore(pi: ExtensionAPI): void {
       const loopHint = doomLoop.lastDetection
         ? `${doomLoop.lastDetection.kind}: ${doomLoop.lastDetection.message}`
         : "keine Doom-Loop erkannt";
+      const editHint = metricsSummary(editMetrics);
       const hasVersionDrift =
         String(declaredVersion ?? "") !== String(devVersion ?? "") ||
         (runtimeVersion !== undefined &&
@@ -170,6 +182,7 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  configured extensions: ${Array.isArray(settings?.extensions) ? settings.extensions.length : "?"}`,
         `  project verification profiles: ${profileHint}`,
         `  doom-loop status: ${loopHint}`,
+        `  edit metrics: ${editHint}`,
       ];
       for (const diagnostic of loaded.diagnostics) {
         lines.push(
