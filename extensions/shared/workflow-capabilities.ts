@@ -9,7 +9,13 @@
 
 export const WORKFLOW_CAPABILITY_EVENTS = {
   request: "workflow-capabilities:request",
+  stateDiscarded: "workflow-capabilities:state-discarded",
 } as const;
+
+export interface WorkflowStateDiscardedEvent {
+  cwd: string;
+  sessionId: string;
+}
 
 export type WorkflowCapabilityState =
   | "work"

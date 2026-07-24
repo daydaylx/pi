@@ -17,7 +17,10 @@
  * contract itself).
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadWorkflowState, removeWorkflowState } from "../plan-mode/state.ts";
+import {
+  loadWorkflowState,
+  removeWorkflowStateAtomicCAS,
+} from "../plan-mode/state.ts";
 import {
   extractTodoItems,
   hashPlanContent,
@@ -152,7 +155,7 @@ const NOTHING_OPTION = "Nichts tun";
  * instead. Never resumes or discards without an explicit selection.
  *
  * Branches on `status.directTaskGoal`: a plan candidate offers `/work` as the
- * resume path and discards via `removeWorkflowState` (sidecar only, plan
+ * resume path and discards the sidecar with a plan/hash/token-bound CAS (plan
  * content untouched); a direct-task candidate offers `/task-done` as the
  * resume path and discards via `clearTaskContract`.
  */
@@ -160,10 +163,26 @@ export async function offerRecoveryDialog(
   ctx: ExtensionContext,
   status: RecoveryStatus,
   exec: GateContext["exec"],
-): Promise<void> {
+): Promise<"plan-state-discarded" | undefined> {
   if (!status.interrupted) return;
+  const sessionId = ctx.sessionManager.getSessionId();
+  const sessionIsCurrent = (): boolean =>
+    ctx.sessionManager.getSessionId() === sessionId;
 
   const isDirectTask = status.directTaskGoal !== undefined;
+  const initialPlanState = isDirectTask
+    ? undefined
+    : loadWorkflowState(ctx.cwd);
+  const initialPlanHash =
+    initialPlanState?.state?.planHash ??
+    (() => {
+      try {
+        const plan = readPlanFile(ctx.cwd);
+        return plan === undefined ? undefined : hashPlanContent(plan);
+      } catch {
+        return undefined;
+      }
+    })();
   const staleNote = isDirectTask
     ? status.directTaskLikelyStale
       ? " ⚠ Ein Plan-Workflow ist inzwischen aktiv; dieser Contract ist vermutlich veraltet."
@@ -182,6 +201,7 @@ export async function offerRecoveryDialog(
     `Unterbrochene Aufgabe gefunden: ${status.summary}${staleNote}`,
     options,
   );
+  if (!sessionIsCurrent()) return;
 
   switch (choice) {
     case RESUME_OPTION:
@@ -198,6 +218,7 @@ export async function offerRecoveryDialog(
         trusted: ctx.isProjectTrusted(),
         exec,
       });
+      if (!sessionIsCurrent()) return;
       const lines = [
         `Working-Tree-Diff (${result.changedFiles.length} Datei(en)):`,
         ...result.changedFiles.map((f) => `  ${f.status} ${f.path}`),
@@ -212,6 +233,7 @@ export async function offerRecoveryDialog(
         trusted: ctx.isProjectTrusted(),
         exec,
       });
+      if (!sessionIsCurrent()) return;
       ctx.ui.notify(
         formatGateReport(result),
         result.status === "pass" ? "info" : "warning",
@@ -227,6 +249,7 @@ export async function offerRecoveryDialog(
           ? "Der Task-Contract wird entfernt. Diese Aktion ist nicht rückgängig zu machen."
           : "Der Sidecar-Zustand wird entfernt; der Plan-Inhalt selbst bleibt erhalten. Diese Aktion ist nicht rückgängig zu machen.",
       );
+      if (!sessionIsCurrent()) return;
       if (!confirmed) {
         ctx.ui.notify("Verwerfen abgebrochen.", "info");
         return;
@@ -235,11 +258,33 @@ export async function offerRecoveryDialog(
         clearTaskContract(ctx.cwd);
         ctx.ui.notify("Task-Contract der direkten Aufgabe verworfen.", "info");
       } else {
-        removeWorkflowState(ctx.cwd);
+        if (!initialPlanState || !initialPlanHash) {
+          ctx.ui.notify(
+            "Workflow-Zustand konnte nicht eindeutig gebunden werden; Verwerfen wurde abgebrochen.",
+            "warning",
+          );
+          return;
+        }
+        try {
+          removeWorkflowStateAtomicCAS(ctx.cwd, {
+            stateToken: initialPlanState.stateToken,
+            planHash: initialPlanHash,
+            ...(initialPlanState.state?.planId
+              ? { planId: initialPlanState.state.planId }
+              : {}),
+          });
+        } catch (error) {
+          ctx.ui.notify(
+            `Workflow-Zustand hat sich während der Bestätigung geändert; Verwerfen wurde abgebrochen: ${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
+          return;
+        }
         ctx.ui.notify(
           "Workflow-Zustand verworfen. Der Plan-Inhalt ist unverändert.",
           "info",
         );
+        return "plan-state-discarded";
       }
       return;
     }

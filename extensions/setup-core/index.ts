@@ -28,6 +28,10 @@ import {
   loadTaskContract,
   saveTaskContract,
 } from "./task-contract.ts";
+import {
+  WORKFLOW_CAPABILITY_EVENTS,
+  type WorkflowStateDiscardedEvent,
+} from "../shared/workflow-capabilities.ts";
 
 const CheckParams = Type.Object({
   check: Type.Union([
@@ -81,7 +85,26 @@ export default function setupCore(pi: ExtensionAPI): void {
     trusted = ctx.isProjectTrusted();
     recoveryStatus = checkRecoveryStatus(ctx);
     if (recoveryStatus.interrupted && ctx.hasUI && ctx.mode === "tui") {
-      void offerRecoveryDialog(ctx, recoveryStatus, execAdapter);
+      const sessionId = ctx.sessionManager.getSessionId();
+      void offerRecoveryDialog(ctx, recoveryStatus, execAdapter).then(
+        (result) => {
+          if (
+            result === "plan-state-discarded" &&
+            ctx.sessionManager.getSessionId() === sessionId
+          ) {
+            pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.stateDiscarded, {
+              cwd: ctx.cwd,
+              sessionId,
+            } satisfies WorkflowStateDiscardedEvent);
+          }
+        },
+      ).catch((error) => {
+        if (ctx.sessionManager.getSessionId() !== sessionId) return;
+        ctx.ui.notify(
+          `Recovery-Dialog wurde sicher abgebrochen: ${error instanceof Error ? error.message : String(error)}`,
+          "warning",
+        );
+      });
     }
   });
 
