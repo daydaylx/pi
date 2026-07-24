@@ -2141,8 +2141,8 @@ await section("task contract and scope control (#106)", async () => {
   );
   eq(
     derived.expectedScope,
-    [],
-    "derived contract has no glob scope (prose section, not globs)",
+    ["src/auth/**"],
+    "derived contract preserves a safe path glob from Betroffene Bereiche",
   );
   eq(
     derived.acceptanceCriteria.map((c) => c.criterion),
@@ -2169,6 +2169,22 @@ await section("task contract and scope control (#106)", async () => {
     contractMod.deriveContractFromPlan(planWithoutAuftrag, { planId: "p" }),
     undefined,
     "plan without an Auftrag section yields no contract",
+  );
+
+  const unsafeScopePlan = detailedPlanForContract.replace(
+    "src/auth/**",
+    [
+      "- `src/auth/**`",
+      "- ../outside/**",
+      "- /etc/**",
+      "- !src/generated/**",
+      "- Diese Zeile ist nur Prosa",
+    ].join("\n"),
+  );
+  eq(
+    contractMod.extractExpectedScopeFromPlan(unsafeScopePlan),
+    ["src/auth/**"],
+    "scope derivation rejects traversal, absolute, negated, and prose entries",
   );
 
   // An empty declared scope must not manufacture false scope-drift: matchScope
@@ -2318,7 +2334,8 @@ await section(
           if (args[0] === "status")
             return {
               code: 0,
-              stdout: " M src/a.ts\n",
+              stdout:
+                " M src/a.ts\n?? .agent/task-contract.json\n?? .agent/plans/current-plan.state.json\n",
               stderr: "",
               killed: false,
             };
@@ -2334,7 +2351,7 @@ await section(
         eq(
           gated.status,
           "pass",
-          "changes fully within the declared scope do not trigger drift",
+          "in-scope changes and internal workflow artifacts do not trigger drift",
         );
       } finally {
         rmSync(ws, { recursive: true, force: true });
@@ -3653,6 +3670,40 @@ await section("interactive recovery dialog (#107)", async () => {
         Boolean(planUtils.readPlanFile(cwd)),
         "discarding the workflow state never touches the plan content itself",
       );
+
+      const currentPlan = planUtils.readPlanFile(cwd);
+      const replacement = planState.createWorkflowStateSnapshot(currentPlan, {
+        mode: "work",
+        phase: "paused",
+        revision: 1,
+      });
+      planState.writeWorkflowStateAtomic(cwd, replacement);
+      const raced = createHarness({
+        select: () => "Verwerfen (Workflow-Zustand zurücksetzen)",
+        confirm: () => {
+          planState.writeWorkflowStateAtomic(cwd, {
+            ...replacement,
+            revision: replacement.revision + 1,
+            updatedAt: new Date().toISOString(),
+          });
+          return true;
+        },
+      });
+      await rcMod.offerRecoveryDialog(
+        raced.makeContext({ cwd }),
+        status,
+        passingExec,
+      );
+      assert(
+        existsSync(planState.getWorkflowStatePath(cwd)),
+        "recovery discard CAS preserves a sidecar changed during confirmation",
+      );
+      assert(
+        raced.notifications.some((entry) =>
+          entry.message.includes("während der Bestätigung geändert"),
+        ),
+        "a recovery discard race is reported instead of deleting the winner",
+      );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -3866,7 +3917,6 @@ await section("permission policy", async () => {
     ["cat readme.md", true],
     ["git status", true],
     ["git log | head -20", true],
-    ["rg needle src/", true],
   ]) {
     eq(
       policy.isPlanSafeCommand(command, ROOT),
@@ -3906,11 +3956,6 @@ await section("permission policy", async () => {
     "read-bash blocks forced git branch creation",
   );
   eq(
-    policy.decideBash("read-bash", "npm audit", ROOT).action,
-    "allow",
-    "read-bash permits a plain npm audit",
-  );
-  eq(
     policy.decideBash("read-bash", "npm audit --fix", ROOT).action,
     "block",
     "read-bash blocks npm audit --fix",
@@ -3920,6 +3965,42 @@ await section("permission policy", async () => {
     "block",
     "read-bash blocks npm audit --fix option variants",
   );
+  eq(
+    policy.decideBash("read-bash", "less README.md", ROOT).action,
+    "block",
+    "read-bash blocks interactive pagers",
+  );
+  eq(
+    policy.decideBash(
+      "read-bash",
+      "sort --output=sorted.txt README.md",
+      ROOT,
+    ).action,
+    "block",
+    "read-bash blocks write-capable helper options",
+  );
+  const shadowBin = mkdtempSync(path.join(tmpdir(), "pi-path-shadow-"));
+  const previousPath = process.env.PATH;
+  try {
+    writeFileSync(path.join(shadowBin, "ls"), "#!/bin/sh\nexit 0\n", {
+      mode: 0o755,
+    });
+    process.env.PATH = `${shadowBin}${path.delimiter}${previousPath ?? ""}`;
+    eq(
+      policy.decideBash("read-bash", "ls -la", ROOT).action,
+      "block",
+      "read-bash rejects a PATH-shadowed executable",
+    );
+    eq(
+      policy.decideBash("read-bash", "/usr/bin/ls -la", ROOT).action,
+      "allow",
+      "read-bash accepts the canonical system executable explicitly",
+    );
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    rmSync(shadowBin, { recursive: true, force: true });
+  }
   eq(
     policy.decideBash("read-write", "npm install x", ROOT).action,
     "ask",
@@ -5981,6 +6062,291 @@ await section("workflow sidecar v2 recovery is conservative", async () => {
 });
 
 await section(
+  "workflow identity, lease, migration and archive races are fail-closed",
+  async () => {
+    if (!planMode || !planUtils || !planState) return;
+    const leaseCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-lease-"));
+    const expiredCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-expired-"));
+    const legacyCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-v1-"));
+    const archiveCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-archive-hash-"));
+    const takeoverCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-takeover-"));
+    const orphanCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-orphan-state-"));
+    try {
+      const longPrefix = "A".repeat(100);
+      const identityPlan = [
+        "# Plan",
+        "",
+        "## Todos",
+        `- [ ] ${longPrefix} alpha`,
+        `- [ ] ${longPrefix} beta`,
+      ].join("\n");
+      const identityTodos = planUtils.extractTodoItems(identityPlan);
+      eq(
+        identityTodos[0].text,
+        identityTodos[1].text,
+        "long todo labels may share the same truncated display text",
+      );
+      assert(
+        identityTodos[0].identityText !== identityTodos[1].identityText,
+        "todo identity retains the complete normalized text",
+      );
+      assert(
+        planUtils.computeTodoHash(identityTodos[0]) !==
+          planUtils.computeTodoHash(identityTodos[1]),
+        "todo fingerprints use full identity rather than truncated display text",
+      );
+
+      const now = new Date("2026-07-24T12:00:00.000Z");
+      planUtils.writePlanFileAtomic(leaseCwd, progressPlan);
+      const live = planState.createWorkflowStateSnapshot(progressPlan, {
+        mode: "work",
+        phase: "executing",
+        planCreationMode: "simple_plan",
+        execution: {
+          executionId: "live-execution",
+          startedAt: now.toISOString(),
+          expectedPlanHash: planUtils.hashPlanContent(progressPlan),
+          ownerId: "owner-a",
+          leaseExpiresAt: new Date(now.getTime() + 90_000).toISOString(),
+        },
+      });
+      planState.writeWorkflowStateAtomic(leaseCwd, live);
+      const loadedLive = planState.loadWorkflowState(leaseCwd, now);
+      eq(
+        loadedLive.state?.lifecycle,
+        "executing",
+        "a live bounded lease remains owned by the current executor",
+      );
+      eq(
+        loadedLive.recovered,
+        false,
+        "loading a live lease does not manufacture a recovery transition",
+      );
+
+      planUtils.writePlanFileAtomic(expiredCwd, progressPlan);
+      const expired = planState.createWorkflowStateSnapshot(progressPlan, {
+        mode: "work",
+        phase: "executing",
+        planCreationMode: "simple_plan",
+        execution: {
+          executionId: "expired-execution",
+          startedAt: new Date(now.getTime() - 120_000).toISOString(),
+          expectedPlanHash: planUtils.hashPlanContent(progressPlan),
+          ownerId: "owner-old",
+          leaseExpiresAt: new Date(now.getTime() - 1).toISOString(),
+        },
+      });
+      planState.writeWorkflowStateAtomic(expiredCwd, expired);
+      const loadedExpired = planState.loadWorkflowState(expiredCwd, now);
+      eq(
+        loadedExpired.state?.lifecycle,
+        "paused",
+        "an expired lease is recovered as paused",
+      );
+      eq(
+        loadedExpired.state?.execution,
+        undefined,
+        "expired execution ownership is discarded during recovery",
+      );
+
+      planUtils.writePlanFileAtomic(legacyCwd, validPlan);
+      writeFileSync(
+        planState.getWorkflowStatePath(legacyCwd),
+        `${JSON.stringify(
+          {
+            version: 1,
+            planHash: planUtils.hashPlanContent(validPlan),
+            mode: "detailed_plan",
+            phase: "executing",
+            planCreationMode: "detailed_plan",
+            progress: [
+              {
+                step: 1,
+                status: "in_progress",
+                evidence: "legacy active",
+                updatedAt: now.toISOString(),
+              },
+              {
+                step: 2,
+                status: "completed",
+                evidence: "legacy mismatch",
+                updatedAt: now.toISOString(),
+              },
+            ],
+            updatedAt: now.toISOString(),
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      const migrated = planState.loadWorkflowState(legacyCwd, now);
+      eq(migrated.state?.version, 2, "v1 is migrated to sidecar v2");
+      eq(
+        migrated.state?.lifecycle,
+        "paused",
+        "legacy executing state never resumes automatically",
+      );
+      eq(
+        migrated.state?.mode,
+        "work",
+        "a migrated work lifecycle uses work mode consistently",
+      );
+      eq(
+        migrated.state?.progress.map((record) => [
+          record.step,
+          record.status,
+        ]),
+        [[1, "completed"]],
+        "v1 progress is reconciled against current Markdown checkboxes",
+      );
+      assert(
+        /^[0-9a-f]{64}$/i.test(migrated.state?.progress[0]?.todoHash ?? ""),
+        "migrated progress receives a full todo fingerprint",
+      );
+
+      const metadataPlan = planUtils.ensurePlanMetadataHeader(
+        progressPlan,
+        "simple_plan",
+        "11111111-1111-4111-8111-111111111111",
+      ).content;
+      const reconstructed = planState.reconstructWorkflowState(
+        metadataPlan,
+        now,
+        {
+          planId: "stale-sidecar-plan-id",
+          planType: "simple_plan",
+          revision: 9,
+        },
+      );
+      eq(
+        reconstructed.planId,
+        "11111111-1111-4111-8111-111111111111",
+        "embedded plan metadata wins over stale sidecar identity",
+      );
+
+      const completePlan = validPlan.replace(
+        "- [ ] Noch offen",
+        "- [x] Noch offen",
+      );
+      planUtils.writePlanFileAtomic(archiveCwd, completePlan);
+      let stalePlanArchiveRejected = false;
+      try {
+        planUtils.archivePlanFile(
+          archiveCwd,
+          "complete",
+          planUtils.hashPlanContent(`${completePlan}\nchanged`),
+          now,
+        );
+      } catch {
+        stalePlanArchiveRejected = true;
+      }
+      assert(
+        stalePlanArchiveRejected,
+        "archive rejects a stale expected plan hash",
+      );
+      eq(
+        planUtils.readPlanFile(archiveCwd),
+        completePlan,
+        "a failed archive claim restores the exact active plan",
+      );
+
+      const brief = "# Decision Brief\n\n## Ziel\nSicher entscheiden.\n";
+      planUtils.writeDecisionBriefAtomic(archiveCwd, brief);
+      let staleBriefArchiveRejected = false;
+      try {
+        planUtils.archiveDecisionBrief(
+          archiveCwd,
+          planUtils.hashPlanContent(`${brief}\nchanged`),
+          now,
+        );
+      } catch {
+        staleBriefArchiveRejected = true;
+      }
+      assert(
+        staleBriefArchiveRejected,
+        "decision-brief archive rejects a stale expected hash",
+      );
+      eq(
+        planUtils.readDecisionBrief(archiveCwd),
+        brief,
+        "a failed brief archive claim restores the exact linked artifact",
+      );
+
+      const liveNow = new Date();
+      planUtils.writePlanFileAtomic(takeoverCwd, progressPlan);
+      planState.writeWorkflowStateAtomic(
+        takeoverCwd,
+        planState.createWorkflowStateSnapshot(progressPlan, {
+          mode: "work",
+          phase: "executing",
+          planCreationMode: "simple_plan",
+          execution: {
+            executionId: "foreign-live-execution",
+            startedAt: liveNow.toISOString(),
+            expectedPlanHash: planUtils.hashPlanContent(progressPlan),
+            ownerId: "foreign-owner",
+            leaseExpiresAt: new Date(
+              liveNow.getTime() + 90_000,
+            ).toISOString(),
+          },
+        }),
+      );
+      const takeover = createHarness({ confirm: true });
+      planMode.default(takeover.api);
+      const takeoverContext = takeover.makeContext({ cwd: takeoverCwd });
+      await takeover.runHooks("session_start", {}, takeoverContext);
+      await takeover.commands.get("finish")("", takeoverContext);
+      assert(
+        Boolean(planUtils.readPlanFile(takeoverCwd)),
+        "/finish cannot archive through another session's live lease",
+      );
+      await takeover.commands.get("work")("", takeoverContext);
+      assert(
+        takeover.sent.some(
+          (entry) => entry.message?.customType === "plan-mode-execute",
+        ),
+        "an explicitly confirmed /work takeover claims and starts the plan",
+      );
+      const claimed = planState.loadWorkflowState(takeoverCwd);
+      assert(
+        claimed.state?.lifecycle === "executing" &&
+          claimed.state.execution?.ownerId !== "foreign-owner",
+        "takeover replaces the foreign execution owner with a fresh live lease",
+      );
+      await takeover.runHooks("session_shutdown", {}, takeoverContext);
+
+      planUtils.writePlanFileAtomic(orphanCwd, progressPlan);
+      planState.writeWorkflowStateAtomic(
+        orphanCwd,
+        planState.createWorkflowStateSnapshot(progressPlan, {
+          mode: "work",
+          phase: "paused",
+        }),
+      );
+      rmSync(planUtils.getPlanPath(orphanCwd));
+      const orphan = createHarness();
+      planMode.default(orphan.api);
+      await orphan.runHooks(
+        "session_start",
+        {},
+        orphan.makeContext({ cwd: orphanCwd }),
+      );
+      assert(
+        existsSync(planState.getWorkflowStatePath(orphanCwd)),
+        "session recovery preserves an orphan sidecar when the plan vanished unexpectedly",
+      );
+    } finally {
+      rmSync(leaseCwd, { recursive: true, force: true });
+      rmSync(expiredCwd, { recursive: true, force: true });
+      rmSync(legacyCwd, { recursive: true, force: true });
+      rmSync(archiveCwd, { recursive: true, force: true });
+      rmSync(takeoverCwd, { recursive: true, force: true });
+      rmSync(orphanCwd, { recursive: true, force: true });
+    }
+  },
+);
+
+await section(
   "workflow sidecar identity, CAS and decision linkage",
   async () => {
     if (!planMode || !planUtils || !planState) return;
@@ -6019,6 +6385,38 @@ await section(
         "CAS increments the sidecar revision",
       );
       eq(written.planId, initial.planId, "CAS preserves stable plan identity");
+
+      const tokenBeforeRawRewrite =
+        planState.loadWorkflowState(cwd).stateToken;
+      writeFileSync(
+        planState.getWorkflowStatePath(cwd),
+        JSON.stringify(written),
+      );
+      let rawTokenRejected = false;
+      try {
+        planState.writeWorkflowStateAtomicCAS(cwd, next, {
+          revision: written.revision,
+          planHash: written.planHash,
+          stateToken: tokenBeforeRawRewrite,
+        });
+      } catch {
+        rawTokenRejected = true;
+      }
+      assert(
+        rawTokenRejected,
+        "raw-token CAS rejects byte changes even when revision and values match",
+      );
+      const rewritten = planState.loadWorkflowState(cwd);
+      const afterRawRewrite = planState.writeWorkflowStateAtomicCAS(cwd, next, {
+        revision: written.revision,
+        planHash: written.planHash,
+        stateToken: rewritten.stateToken,
+      });
+      eq(
+        afterRawRewrite.revision,
+        written.revision + 1,
+        "raw-token CAS accepts the exact newly observed sidecar bytes",
+      );
 
       let staleRejected = false;
       try {
@@ -6072,6 +6470,61 @@ await section(
           (result) => !result?.message?.content?.includes("<decision-brief>"),
         ),
         "a changed decision brief is no longer injected",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
+await section(
+  "continuing a reviewed plan preserves provenance and invalidates review",
+  async () => {
+    if (!planMode || !planUtils || !planState) return;
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-continue-review-"));
+    try {
+      const metadata = planUtils.ensurePlanMetadataHeader(
+        progressPlan,
+        "simple_plan",
+      );
+      planUtils.writePlanFileAtomic(cwd, metadata.content);
+      const planHash = planUtils.hashPlanContent(metadata.content);
+      planState.writeWorkflowStateAtomic(
+        cwd,
+        planState.createWorkflowStateSnapshot(metadata.content, {
+          mode: "work",
+          phase: "reviewed",
+          reviewedHash: planHash,
+          planId: metadata.metadata.planId,
+          planCreationMode: "simple_plan",
+        }),
+      );
+      const harness = createHarness({
+        customResult: {
+          id: "plan-continue",
+          label: "Aktuellen Plan weiterführen",
+          value: { kind: "continue-plan" },
+        },
+      });
+      planMode.default(harness.api);
+      const context = harness.makeContext({ cwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("plan")("", context);
+      const continued = planState.loadWorkflowState(cwd).state;
+      eq(
+        continued?.mode,
+        "simple_plan",
+        "continue-plan restores the original simple-plan provenance",
+      );
+      eq(
+        continued?.phase,
+        "draft",
+        "continue-plan returns a reviewed plan to draft",
+      );
+      eq(
+        continued?.reviewedHash,
+        undefined,
+        "continue-plan invalidates the prior review hash",
       );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -7242,6 +7695,14 @@ await section("combined production extension stack", async () => {
 // LSP transport, process and lifecycle (#93). Deterministic: uses the local
 // fake-lsp fixture only, never a real language server or the network.
 // ---------------------------------------------------------------------------
+const FAKE_LSP_COMMAND = "python3";
+const FAKE_LSP_FIXTURE = path.join(
+  ROOT,
+  "tests",
+  "fixtures",
+  "fake-lsp.py",
+);
+
 await section("LSP transport, process and lifecycle (#93)", async () => {
   const transportMod = await load("extensions/lsp/transport.ts");
   const clientMod = await load("extensions/lsp/client.ts");
@@ -7259,7 +7720,7 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
     "lsp index exports createLspClient",
   );
 
-  const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+  const fakeServer = FAKE_LSP_FIXTURE;
   const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp-test-"));
   const trackedClients = [];
 
@@ -7267,7 +7728,7 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
     const {
       args: extraArgs = [],
       process: extraProcess,
-      command = process.execPath,
+      command = FAKE_LSP_COMMAND,
       ...rest
     } = extra;
     const client = new clientMod.LspClient({
@@ -7275,7 +7736,7 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
       workspaceRoot: workspace,
       command,
       args:
-        command === process.execPath ? [fakeServer, ...extraArgs] : extraArgs,
+        command === FAKE_LSP_COMMAND ? [fakeServer, ...extraArgs] : extraArgs,
       requestTimeoutMs: 1000,
       process: {
         maxRestarts: 1,
@@ -7536,7 +7997,7 @@ await section(
       "lsp capabilities exports normalizeCapabilities",
     );
 
-    const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+    const fakeServer = FAKE_LSP_FIXTURE;
     const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp94-test-"));
 
     function fakeProfile(extra = {}) {
@@ -7544,7 +8005,7 @@ await section(
         id: "fake",
         label: "Fake LSP",
         enabled: true,
-        command: process.execPath,
+        command: FAKE_LSP_COMMAND,
         args: [fakeServer, ...(extra.args ?? [])],
         rootMarkers: [],
         ...extra,
@@ -7794,7 +8255,7 @@ await section("LSP documents and diagnostics (#95)", async () => {
     "lsp tools exports registerLspDiagnosticsTool",
   );
 
-  const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+  const fakeServer = FAKE_LSP_FIXTURE;
   const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp95-test-"));
   writeFileSync(path.join(workspace, "tsconfig.json"), "{}");
   const trackedClients = [];
@@ -7804,7 +8265,7 @@ await section("LSP documents and diagnostics (#95)", async () => {
     const client = new clientMod.LspClient({
       serverId: "fake",
       workspaceRoot: workspace,
-      command: process.execPath,
+      command: FAKE_LSP_COMMAND,
       args: [fakeServer, ...extraArgs],
       requestTimeoutMs: 1000,
       process: {
@@ -8036,7 +8497,7 @@ await section("LSP documents and diagnostics (#95)", async () => {
         id: "typescript",
         label: "Fake TypeScript",
         enabled: true,
-        command: process.execPath,
+        command: FAKE_LSP_COMMAND,
         args: [fakeServer],
         rootMarkers: ["tsconfig.json"],
       };
@@ -8115,7 +8576,7 @@ await section("LSP documents and diagnostics (#95)", async () => {
         id: "typescript",
         label: "Fake TypeScript (no diagnostics)",
         enabled: true,
-        command: process.execPath,
+        command: FAKE_LSP_COMMAND,
         args: [fakeServer, "--no-diagnostics"],
         rootMarkers: ["tsconfig.json"],
       };
@@ -8412,7 +8873,7 @@ await section("LSP navigation and symbol tools (#96)", async () => {
     "lsp tools exports registerLspNavigationTools",
   );
 
-  const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+  const fakeServer = FAKE_LSP_FIXTURE;
   const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp96-test-"));
   writeFileSync(path.join(workspace, "tsconfig.json"), "{}");
   const filePath = path.join(workspace, "target.ts");
@@ -8424,7 +8885,7 @@ await section("LSP navigation and symbol tools (#96)", async () => {
       id: "typescript",
       label: "Fake TypeScript",
       enabled: true,
-      command: process.execPath,
+      command: FAKE_LSP_COMMAND,
       args: [fakeServer, ...extraArgs],
       rootMarkers: ["tsconfig.json"],
       ...rest,
@@ -8686,7 +9147,7 @@ await section("LSP command, status and trust (#97)", async () => {
     "lsp status exports computeLspStatus",
   );
 
-  const fakeServer = path.join(ROOT, "tests", "fixtures", "fake-lsp.mjs");
+  const fakeServer = FAKE_LSP_FIXTURE;
 
   // --- computeLspStatus: pure function, all four states ---
   const baseConfig = {
@@ -8845,7 +9306,7 @@ await section("LSP command, status and trust (#97)", async () => {
       id: "typescript",
       label: "Fake TypeScript",
       enabled: true,
-      command: process.execPath,
+      command: FAKE_LSP_COMMAND,
       args: [fakeServer],
       rootMarkers: ["tsconfig.json"],
     };
@@ -8947,7 +9408,7 @@ await section("LSP command, status and trust (#97)", async () => {
       id: "typescript",
       label: "Fake TypeScript",
       enabled: true,
-      command: process.execPath,
+      command: FAKE_LSP_COMMAND,
       args: [fakeServer],
       rootMarkers: ["tsconfig.json"],
     };
