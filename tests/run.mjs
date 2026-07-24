@@ -3107,6 +3107,106 @@ await section("recovery status check (#107)", async () => {
   }
 });
 
+await section(
+  "recovery status check: direct-task branch (#102/#106 follow-up)",
+  async () => {
+    const rcMod = await load("extensions/setup-core/recovery-check.ts");
+    const contractMod = await load("extensions/setup-core/task-contract.ts");
+    const ws = mkdtempSync(path.join(tmpdir(), "pi-recovery-direct-"));
+    function ctx() {
+      return { cwd: ws };
+    }
+
+    // --- No plan, no contract -> not interrupted ---
+    eq(
+      rcMod.checkRecoveryStatus(ctx()).interrupted,
+      false,
+      "no plan and no contract -> not interrupted",
+    );
+
+    // --- No plan, but a leftover direct contract -> interrupted direct task ---
+    contractMod.saveTaskContract(
+      ws,
+      contractMod.createDirectContract("Fix the login bug"),
+    );
+    const direct = rcMod.checkRecoveryStatus(ctx());
+    eq(direct.interrupted, true, "a leftover direct contract is interrupted");
+    eq(direct.directTaskGoal, "Fix the login bug");
+    eq(
+      direct.directTaskLikelyStale,
+      false,
+      "no concurrent plan -> not flagged as stale",
+    );
+    assert(
+      direct.summary.includes("Fix the login bug"),
+      "summary names the direct task goal",
+    );
+
+    // --- A plan-derived contract is NOT treated as a direct-task candidate ---
+    contractMod.saveTaskContract(
+      ws,
+      contractMod.deriveContractFromPlan(
+        "# Plan\n## Auftrag\nZiel\n## Abschlusskriterien\n- x",
+        { planId: "plan-1" },
+      ),
+    );
+    eq(
+      rcMod.checkRecoveryStatus(ctx()).directTaskGoal,
+      undefined,
+      "a source:plan contract is not surfaced as a direct-task candidate",
+    );
+    contractMod.clearTaskContract(ws);
+
+    // --- Concurrent active plan workflow -> direct contract flagged as likely stale ---
+    contractMod.saveTaskContract(
+      ws,
+      contractMod.createDirectContract("Old direct task"),
+    );
+    const planContent = "# Plan\n## Auftrag\nZiel\n## Todos\n- [ ] a";
+    planUtils.writePlanFileAtomic(ws, planContent);
+    // mode:"simple_plan" with phase:"draft" is not itself interrupted, but
+    // signals "a plan workflow is concurrently active" for the staleness check.
+    planState.writeWorkflowStateAtomic(
+      ws,
+      planState.createWorkflowStateSnapshot(planContent, {
+        mode: "simple_plan",
+        phase: "draft",
+        revision: 1,
+      }),
+    );
+    const concurrent = rcMod.checkRecoveryStatus(ctx());
+    eq(concurrent.directTaskGoal, "Old direct task");
+    eq(
+      concurrent.directTaskLikelyStale,
+      true,
+      "an active plan workflow flags the direct contract as likely stale",
+    );
+
+    // --- A plan interruption always takes precedence over a direct contract ---
+    planState.writeWorkflowStateAtomic(
+      ws,
+      planState.createWorkflowStateSnapshot(planContent, {
+        mode: "work",
+        phase: "paused",
+        revision: 3,
+      }),
+    );
+    const precedence = rcMod.checkRecoveryStatus(ctx());
+    eq(
+      precedence.directTaskGoal,
+      undefined,
+      "an interrupted plan takes precedence over an existing direct contract",
+    );
+    eq(precedence.phase, "paused");
+
+    try {
+      rmSync(ws, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  },
+);
+
 await section("interactive recovery dialog (#107)", async () => {
   const rcMod = await load("extensions/setup-core/recovery-check.ts");
   assert(
@@ -3259,6 +3359,81 @@ await section("interactive recovery dialog (#107)", async () => {
     );
   }
 });
+
+await section(
+  "interactive recovery dialog: direct-task branch (#102/#106 follow-up)",
+  async () => {
+    const rcMod = await load("extensions/setup-core/recovery-check.ts");
+    const contractMod = await load("extensions/setup-core/task-contract.ts");
+    const passingExec = async (_program, args) => {
+      if (args[0] === "status" || args[0] === "diff")
+        return { code: 0, stdout: "", stderr: "", killed: false };
+      return { code: 0, stdout: "", stderr: "", killed: false };
+    };
+    const directStatus = {
+      interrupted: true,
+      directTaskGoal: "Fix the login bug",
+      summary: 'Direkte Aufgabe unterbrochen: "Fix the login bug"',
+    };
+
+    // --- "Fortsetzen" points to /task-done, not /work ---
+    {
+      const harness = createHarness({
+        select: () => "Fortsetzen (Hinweis auf /work)",
+      });
+      const context = harness.makeContext();
+      await rcMod.offerRecoveryDialog(context, directStatus, passingExec);
+      assert(
+        harness.notifications.some((n) => n.message.includes("/task-done")),
+        "resuming a direct task points to /task-done, not /work",
+      );
+    }
+
+    // --- "Verwerfen" removes the task-contract, not the plan sidecar ---
+    {
+      const cwd = mkdtempSync(
+        path.join(tmpdir(), "pi-recovery-discard-direct-"),
+      );
+      try {
+        contractMod.saveTaskContract(
+          cwd,
+          contractMod.createDirectContract("Fix the login bug"),
+        );
+
+        const declined = createHarness({
+          select: () => "Verwerfen (Workflow-Zustand zurücksetzen)",
+          confirm: false,
+        });
+        await rcMod.offerRecoveryDialog(
+          declined.makeContext({ cwd }),
+          directStatus,
+          passingExec,
+        );
+        assert(
+          Boolean(contractMod.loadTaskContract(cwd).contract),
+          "declining the discard confirmation keeps the direct task contract",
+        );
+
+        const accepted = createHarness({
+          select: () => "Verwerfen (Workflow-Zustand zurücksetzen)",
+          confirm: true,
+        });
+        await rcMod.offerRecoveryDialog(
+          accepted.makeContext({ cwd }),
+          directStatus,
+          passingExec,
+        );
+        eq(
+          contractMod.loadTaskContract(cwd).contract,
+          undefined,
+          "confirming the discard removes the direct task contract",
+        );
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    }
+  },
+);
 
 await section(
   "setup-core opens the recovery dialog only in an interactive TUI session (#107)",

@@ -7,6 +7,14 @@
  * user actions the issue calls for: resume, inspect the diff, re-run
  * verification, discard, or do nothing. It never resumes automatically —
  * every action requires an explicit choice.
+ *
+ * Also covers recovery for direct tasks (#102/#106 follow-up): a
+ * `source:"direct"` task-contract left over from an interrupted `/task`
+ * session is a separate, unrelated candidate to an interrupted plan. A plan
+ * interruption always takes precedence when both exist; a direct contract
+ * found while a plan workflow is concurrently active is flagged as likely
+ * stale (see the coexistence rule — `/plan` never touches an existing direct
+ * contract itself).
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadWorkflowState, removeWorkflowState } from "../plan-mode/state.ts";
@@ -16,6 +24,7 @@ import {
   readPlanFile,
 } from "../plan-mode/utils.ts";
 import type { WorkflowPhase } from "../shared/workflow-status.ts";
+import { clearTaskContract, loadTaskContract } from "./task-contract.ts";
 import {
   formatGateReport,
   runVerificationGate,
@@ -25,16 +34,20 @@ import {
 export interface RecoveryStatus {
   /** Whether an interrupted task candidate was found. */
   interrupted: boolean;
-  /** The detected workflow phase. */
+  /** The detected workflow phase (plan candidate only). */
   phase?: WorkflowPhase;
-  /** Number of incomplete plan todos. */
+  /** Number of incomplete plan todos (plan candidate only). */
   pendingTodos?: number;
-  /** Total number of todos. */
+  /** Total number of todos (plan candidate only). */
   totalTodos?: number;
-  /** Plan revision from the sidecar. */
+  /** Plan revision from the sidecar (plan candidate only). */
   planRevision?: number;
-  /** Whether the plan content matches the reviewed hash (stale check). */
+  /** Whether the plan content matches the reviewed hash (plan candidate only). */
   planStale?: boolean;
+  /** Goal of an interrupted direct task, if that's what was found instead of a plan. */
+  directTaskGoal?: string;
+  /** A plan workflow is concurrently active while this direct contract exists — likely stale. */
+  directTaskLikelyStale?: boolean;
   /** Human-readable one-liner for a status label. */
   summary: string;
 }
@@ -44,6 +57,7 @@ const INTERRUPTED_PHASES = new Set<WorkflowPhase>([
   "paused",
   "blocked",
 ]);
+const IDLE_PLAN_PHASES = new Set<WorkflowPhase>(["idle", "draft"]);
 
 export function checkRecoveryStatus(ctx: ExtensionContext): RecoveryStatus {
   let content: string | undefined;
@@ -53,56 +67,75 @@ export function checkRecoveryStatus(ctx: ExtensionContext): RecoveryStatus {
     /* plan unreadable — nothing to recover */
   }
 
-  if (!content) {
-    return { interrupted: false, summary: "kein Plan — keine Recovery nötig" };
-  }
-
   let phase: WorkflowPhase = "idle";
   let revision: number | undefined;
   let reviewedHash: string | undefined;
-  try {
-    // Reuses the same recovery guarantees plan-mode itself relies on at
-    // session_start (e.g. a persisted "executing" lifecycle is downgraded to
-    // "paused" on load) instead of re-parsing the sidecar JSON directly.
-    const loaded = loadWorkflowState(ctx.cwd);
-    if (loaded.state) {
-      phase = loaded.state.phase;
-      revision = loaded.state.revision;
-      reviewedHash = loaded.state.reviewedHash;
+  let mode: "work" | "simple_plan" | "detailed_plan" = "work";
+  if (content !== undefined) {
+    try {
+      // Reuses the same recovery guarantees plan-mode itself relies on at
+      // session_start (e.g. a persisted "executing" lifecycle is downgraded
+      // to "paused" on load) instead of re-parsing the sidecar JSON directly.
+      const loaded = loadWorkflowState(ctx.cwd);
+      if (loaded.state) {
+        phase = loaded.state.phase;
+        revision = loaded.state.revision;
+        reviewedHash = loaded.state.reviewedHash;
+        mode = loaded.state.mode;
+      }
+    } catch {
+      /* state unreadable */
     }
-  } catch {
-    /* state unreadable */
   }
 
-  if (!INTERRUPTED_PHASES.has(phase)) {
+  // A plan interruption always takes precedence over a direct-task candidate.
+  if (content !== undefined && INTERRUPTED_PHASES.has(phase)) {
+    const todos = extractTodoItems(content);
+    const pendingTodos = todos.filter((t) => !t.completed);
+    const planStale =
+      reviewedHash !== undefined
+        ? hashPlanContent(content) !== reviewedHash
+        : undefined;
+
+    const flags: string[] = [];
+    if (planStale) flags.push("Plan seit Review geändert");
+    const flagText = flags.length > 0 ? ` — ⚠ ${flags.join(", ")}` : "";
+
     return {
-      interrupted: false,
+      interrupted: true,
       phase,
-      summary: `Plan-Phase '${phase}' — keine unterbrochene Aufgabe`,
+      pendingTodos: pendingTodos.length,
+      totalTodos: todos.length,
+      planRevision: revision,
+      planStale,
+      summary: `Phase '${phase}' (Rev ${revision ?? "?"}), ${pendingTodos.length}/${todos.length} offene Todos${flagText}`,
     };
   }
 
-  const todos = extractTodoItems(content);
-  const pendingTodos = todos.filter((t) => !t.completed);
-  const planStale =
-    reviewedHash !== undefined
-      ? hashPlanContent(content) !== reviewedHash
-      : undefined;
+  // No interrupted plan — check for an interrupted direct task instead.
+  const loadedContract = loadTaskContract(ctx.cwd);
+  if (loadedContract.contract?.source === "direct") {
+    const planWorkflowActive =
+      content !== undefined &&
+      (mode !== "work" || !IDLE_PLAN_PHASES.has(phase));
+    const goal = loadedContract.contract.goal;
+    return {
+      interrupted: true,
+      directTaskGoal: goal,
+      directTaskLikelyStale: planWorkflowActive,
+      summary: planWorkflowActive
+        ? `Direkte Aufgabe "${goal}" — ⚠ Plan-Workflow ist inzwischen aktiv, Contract vermutlich veraltet`
+        : `Direkte Aufgabe unterbrochen: "${goal}"`,
+    };
+  }
 
-  const flags: string[] = [];
-  if (planStale) flags.push("Plan seit Review geändert");
-  const flagText = flags.length > 0 ? ` — ⚠ ${flags.join(", ")}` : "";
-
-  const summary = `Phase '${phase}' (Rev ${revision ?? "?"}), ${pendingTodos.length}/${todos.length} offene Todos${flagText}`;
-
+  if (content === undefined) {
+    return { interrupted: false, summary: "kein Plan — keine Recovery nötig" };
+  }
   return {
-    interrupted: true,
+    interrupted: false,
     phase,
-    pendingTodos: pendingTodos.length,
-    totalTodos: todos.length,
-    planRevision: revision,
-    planStale,
-    summary,
+    summary: `Plan-Phase '${phase}' — keine unterbrochene Aufgabe`,
   };
 }
 
@@ -117,6 +150,11 @@ const NOTHING_OPTION = "Nichts tun";
  * the user's choice. Only called when `ctx.hasUI && ctx.mode === "tui"` —
  * non-interactive sessions keep the existing read-only `/setup-doctor` line
  * instead. Never resumes or discards without an explicit selection.
+ *
+ * Branches on `status.directTaskGoal`: a plan candidate offers `/work` as the
+ * resume path and discards via `removeWorkflowState` (sidecar only, plan
+ * content untouched); a direct-task candidate offers `/task-done` as the
+ * resume path and discards via `clearTaskContract`.
  */
 export async function offerRecoveryDialog(
   ctx: ExtensionContext,
@@ -125,9 +163,14 @@ export async function offerRecoveryDialog(
 ): Promise<void> {
   if (!status.interrupted) return;
 
-  const staleNote = status.planStale
-    ? " ⚠ Der Plan wurde seit dem letzten Review geändert."
-    : "";
+  const isDirectTask = status.directTaskGoal !== undefined;
+  const staleNote = isDirectTask
+    ? status.directTaskLikelyStale
+      ? " ⚠ Ein Plan-Workflow ist inzwischen aktiv; dieser Contract ist vermutlich veraltet."
+      : ""
+    : status.planStale
+      ? " ⚠ Der Plan wurde seit dem letzten Review geändert."
+      : "";
   const options = [
     RESUME_OPTION,
     DIFF_OPTION,
@@ -143,7 +186,9 @@ export async function offerRecoveryDialog(
   switch (choice) {
     case RESUME_OPTION:
       ctx.ui.notify(
-        "Nutze /work, um die pausierte oder blockierte Ausführung sicher fortzusetzen (verlangt dort eine eigene Bestätigung).",
+        isDirectTask
+          ? "Arbeite normal weiter und nutze /task-done zum Abschließen der direkten Aufgabe."
+          : "Nutze /work, um die pausierte oder blockierte Ausführung sicher fortzusetzen (verlangt dort eine eigene Bestätigung).",
         "info",
       );
       return;
@@ -175,18 +220,27 @@ export async function offerRecoveryDialog(
     }
     case DISCARD_OPTION: {
       const confirmed = await ctx.ui.confirm(
-        "Workflow-Zustand wirklich verwerfen?",
-        "Der Sidecar-Zustand wird entfernt; der Plan-Inhalt selbst bleibt erhalten. Diese Aktion ist nicht rückgängig zu machen.",
+        isDirectTask
+          ? "Task-Contract der direkten Aufgabe wirklich verwerfen?"
+          : "Workflow-Zustand wirklich verwerfen?",
+        isDirectTask
+          ? "Der Task-Contract wird entfernt. Diese Aktion ist nicht rückgängig zu machen."
+          : "Der Sidecar-Zustand wird entfernt; der Plan-Inhalt selbst bleibt erhalten. Diese Aktion ist nicht rückgängig zu machen.",
       );
       if (!confirmed) {
         ctx.ui.notify("Verwerfen abgebrochen.", "info");
         return;
       }
-      removeWorkflowState(ctx.cwd);
-      ctx.ui.notify(
-        "Workflow-Zustand verworfen. Der Plan-Inhalt ist unverändert.",
-        "info",
-      );
+      if (isDirectTask) {
+        clearTaskContract(ctx.cwd);
+        ctx.ui.notify("Task-Contract der direkten Aufgabe verworfen.", "info");
+      } else {
+        removeWorkflowState(ctx.cwd);
+        ctx.ui.notify(
+          "Workflow-Zustand verworfen. Der Plan-Inhalt ist unverändert.",
+          "info",
+        );
+      }
       return;
     }
     case NOTHING_OPTION:
