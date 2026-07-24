@@ -2036,6 +2036,205 @@ await section(
   },
 );
 
+// Fails only git-diff-derived setup checks (typecheck/test), never git
+// status/diff themselves, so runVerificationGate can still gather the
+// changed-file list while producing a `fail` status.
+function makeFailingGateExec() {
+  return async (program, args) => {
+    const joined = `${program} ${args.join(" ")}`;
+    if (args[0] === "status")
+      return { code: 0, stdout: " M src/a.ts\n", stderr: "", killed: false };
+    if (args[0] === "diff")
+      return { code: 0, stdout: "1 file changed", stderr: "", killed: false };
+    if (joined.includes("run typecheck"))
+      return { code: 1, stdout: "", stderr: "type error", killed: false };
+    return { code: 0, stdout: "", stderr: "", killed: false };
+  };
+}
+
+await section(
+  "plan-mode /finish enforces the verification gate (#102)",
+  async () => {
+    if (!planMode || !planUtils) return;
+
+    // --- non-TUI: a failing gate blocks completion, no archival happens ---
+    const nonTuiCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-gate-nontui-"));
+    try {
+      planUtils.writePlanFileAtomic(
+        nonTuiCwd,
+        validPlan.replace("- [ ] Noch offen", "- [x] Noch offen"),
+      );
+      const harness = createHarness();
+      planMode.default(harness.api);
+      harness.api.exec = makeFailingGateExec();
+      const context = harness.makeContext({
+        cwd: nonTuiCwd,
+        mode: "json",
+        hasUI: false,
+      });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("finish")("", context);
+      assert(
+        Boolean(planUtils.readPlanFile(nonTuiCwd)),
+        "a failing gate in a non-interactive context prevents archival",
+      );
+      assert(
+        harness.notifications.some(
+          (n) =>
+            n.message.includes("Verifikations-Gate") &&
+            n.message.includes("FAIL"),
+        ),
+        "the gate failure is reported to the user",
+      );
+    } finally {
+      rmSync(nonTuiCwd, { recursive: true, force: true });
+    }
+
+    // --- TUI, override declined: gate blocks completion ---
+    const declinedCwd = mkdtempSync(
+      path.join(tmpdir(), "pi-plan-gate-declined-"),
+    );
+    try {
+      planUtils.writePlanFileAtomic(
+        declinedCwd,
+        validPlan.replace("- [ ] Noch offen", "- [x] Noch offen"),
+      );
+      const harness = createHarness({ confirm: false });
+      planMode.default(harness.api);
+      harness.api.exec = makeFailingGateExec();
+      const context = harness.makeContext({ cwd: declinedCwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("finish")("", context);
+      assert(
+        Boolean(planUtils.readPlanFile(declinedCwd)),
+        "declining the gate override in TUI mode prevents archival",
+      );
+    } finally {
+      rmSync(declinedCwd, { recursive: true, force: true });
+    }
+
+    // --- TUI, override accepted: gate does not prevent an explicit finish ---
+    const acceptedCwd = mkdtempSync(
+      path.join(tmpdir(), "pi-plan-gate-accepted-"),
+    );
+    try {
+      planUtils.writePlanFileAtomic(
+        acceptedCwd,
+        validPlan.replace("- [ ] Noch offen", "- [x] Noch offen"),
+      );
+      const harness = createHarness({ confirm: true });
+      planMode.default(harness.api);
+      harness.api.exec = makeFailingGateExec();
+      const context = harness.makeContext({ cwd: acceptedCwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("finish")("", context);
+      eq(
+        planUtils.readPlanFile(acceptedCwd),
+        undefined,
+        "an explicit override of a failing gate still completes the archival",
+      );
+    } finally {
+      rmSync(acceptedCwd, { recursive: true, force: true });
+    }
+
+    // --- a passing gate never asks for confirmation ---
+    const passingCwd = mkdtempSync(
+      path.join(tmpdir(), "pi-plan-gate-passing-"),
+    );
+    try {
+      planUtils.writePlanFileAtomic(
+        passingCwd,
+        validPlan.replace("- [ ] Noch offen", "- [x] Noch offen"),
+      );
+      const harness = createHarness({
+        confirm: () => {
+          throw new Error("must not be asked when the gate passes");
+        },
+      });
+      planMode.default(harness.api);
+      harness.api.exec = async (_program, args) => {
+        if (args[0] === "status")
+          return { code: 0, stdout: "", stderr: "", killed: false };
+        if (args[0] === "diff")
+          return { code: 0, stdout: "", stderr: "", killed: false };
+        return { code: 0, stdout: "", stderr: "", killed: false };
+      };
+      const context = harness.makeContext({ cwd: passingCwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("finish")("", context);
+      eq(
+        planUtils.readPlanFile(passingCwd),
+        undefined,
+        "a passing gate completes the archival without any confirmation",
+      );
+    } finally {
+      rmSync(passingCwd, { recursive: true, force: true });
+    }
+  },
+);
+
+await section(
+  "plan-mode autoarchive defers to /finish on a failing gate (#102)",
+  async () => {
+    if (!planMode || !planUtils) return;
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-gate-autoarchive-"));
+    try {
+      planUtils.writePlanFileAtomic(cwd, progressPlan);
+      const harness = createHarness();
+      planMode.default(harness.api);
+      harness.api.exec = makeFailingGateExec();
+      const context = harness.makeContext({ cwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("work")("", context);
+      const executionId = harness.sent
+        .at(-1)
+        ?.message?.content.match(/Execution-ID: ([^\n]+)/)?.[1];
+      await harness.tools
+        .get("plan_progress")
+        .execute(
+          "p1",
+          { executionId, step: 1, status: "completed", evidence: "erledigt" },
+          undefined,
+          undefined,
+          context,
+        );
+      await harness.tools
+        .get("plan_progress")
+        .execute(
+          "p2",
+          { executionId, step: 2, status: "completed", evidence: "erledigt" },
+          undefined,
+          undefined,
+          context,
+        );
+      await harness.runHooks(
+        "agent_end",
+        {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "fertig" }],
+              stopReason: "stop",
+            },
+          ],
+        },
+        context,
+      );
+      await harness.runHooks("agent_settled", {}, context);
+      assert(
+        Boolean(planUtils.readPlanFile(cwd)),
+        "a failing gate skips the autoarchive path instead of discarding the plan",
+      );
+      assert(
+        harness.notifications.some((n) => n.message.includes("/finish")),
+        "the user is pointed to /finish for a gated archival",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
 // ---------------------------------------------------------------------------
 // Doom-loop detection (#103). Pure detection logic (normalise, detectLoop)
 // and history buffer are tested; the event wiring is thin and covered by the

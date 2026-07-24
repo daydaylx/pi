@@ -99,6 +99,11 @@ import {
   saveTaskContract,
 } from "../setup-core/task-contract.ts";
 import {
+  formatGateReport,
+  runVerificationGate,
+  type GateResult,
+} from "../setup-core/verification-gate.ts";
+import {
   buildBriefOverwriteGuardMenu,
   buildDecisionHandoffMenu,
   buildOverwriteGuardMenu,
@@ -2083,6 +2088,26 @@ FORTSCHRITT:
         );
         return;
       }
+      // #102: the autoarchive path never blocks itself — a broken gate must
+      // never silently discard a completed plan's working tree. On fail it
+      // just skips the autoarchive and points to /finish, which does gate
+      // with an explicit override.
+      let gateBlocksAutoarchive = false;
+      try {
+        const gate = await runGateBeforeFinish(ctx);
+        gateBlocksAutoarchive = gate.status !== "pass";
+      } catch {
+        // Gate itself failing to run is not a reason to block autoarchive.
+      }
+      if (gateBlocksAutoarchive) {
+        updateStatus(ctx);
+        persistState(ctx);
+        ctx.ui.notify(
+          "Alle Todos sind erledigt, aber das Verifikations-Gate meldet Befunde. Nutze /finish für eine geprüfte Archivierung mit Bestätigung.",
+          "warning",
+        );
+        return;
+      }
       archiveCompletedPlan(ctx, expectedHash);
       return;
     }
@@ -2358,6 +2383,26 @@ ${content}
         "warning",
       );
     }
+  }
+
+  // #102 hard enforcement: runs the advisory verification gate before an
+  // explicit completion (/finish). Only /finish blocks on fail/blocked, with
+  // an explicit TUI override — the agent_settled autoarchive path (below)
+  // deliberately never blocks itself to avoid silently discarding a
+  // completed, working-tree-only plan; it just points to /finish instead.
+  async function runGateBeforeFinish(
+    ctx: ExtensionContext,
+  ): Promise<GateResult> {
+    return runVerificationGate({
+      projectRoot: ctx.cwd,
+      trusted: ctx.isProjectTrusted(),
+      exec: (program, args, options) =>
+        pi.exec(program, args, {
+          cwd: options.cwd,
+          timeout: options.timeout,
+          signal: options.signal as AbortSignal | undefined,
+        }),
+    });
   }
 
   // Gemeinsamer Abschlusspfad für agent_settled-Autoarchiv, /done und den
@@ -3035,6 +3080,41 @@ CHANGED_FILES:
       if (!isSessionTokenCurrent(token, ctx)) return;
       if (!confirmed) {
         ctx.ui.notify("Abschluss abgebrochen.", "info");
+        return;
+      }
+    }
+
+    let gate: GateResult | undefined;
+    try {
+      gate = await runGateBeforeFinish(ctx);
+    } catch (error) {
+      // The gate itself is best-effort: a broken exec/config must not
+      // prevent archiving a plan the user has explicitly asked to finish.
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui.notify(
+        `Verifikations-Gate konnte nicht ausgeführt werden: ${message}`,
+        "warning",
+      );
+    }
+    if (!isSessionTokenCurrent(token, ctx)) return;
+    if (gate && gate.status !== "pass") {
+      if (!ctx.hasUI || ctx.mode !== "tui") {
+        ctx.ui.notify(
+          `Verifikations-Gate ${gate.status.toUpperCase()}: Abschluss ohne interaktive Bestätigung nicht möglich.\n${formatGateReport(gate)}`,
+          "warning",
+        );
+        return;
+      }
+      const override = await ctx.ui.confirm(
+        `Verifikations-Gate ${gate.status.toUpperCase()} — trotzdem abschließen?`,
+        formatGateReport(gate),
+      );
+      if (!isSessionTokenCurrent(token, ctx)) return;
+      if (!override) {
+        ctx.ui.notify(
+          "Abschluss abgebrochen; Gate-Ergebnis siehe oben.",
+          "info",
+        );
         return;
       }
     }
