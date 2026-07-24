@@ -2642,6 +2642,88 @@ await section("doom-loop detection (#103)", async () => {
     "only 2 total reads does not yet trigger read-loop",
   );
 
+  // --- detectLoop: oscillation (A→B→A→B, same toolName, alternates) ---
+  const bashEntry = (command, isError = false) => ({
+    toolName: "bash",
+    signature: `bash|c:${command}`,
+    isError,
+    timestamp: 0,
+  });
+  const oscillating = dlMod.detectLoop(
+    bashEntry("git checkout feature-x"),
+    [
+      bashEntry("git checkout main"),
+      bashEntry("git checkout feature-x"),
+      bashEntry("git checkout main"),
+    ],
+    cfg,
+  );
+  eq(
+    oscillating?.kind,
+    "oscillation",
+    "A→B→A→B alternation triggers oscillation",
+  );
+  eq(
+    oscillating?.occurrences,
+    4,
+    "oscillation occurrence count includes the current call",
+  );
+
+  const threeStateSwing = dlMod.detectLoop(
+    bashEntry("git checkout C"),
+    [
+      bashEntry("git checkout A"),
+      bashEntry("git checkout B"),
+      bashEntry("git checkout A"),
+    ],
+    cfg,
+  );
+  eq(
+    threeStateSwing,
+    undefined,
+    "three distinct states in sequence does not trigger oscillation (needs exactly two)",
+  );
+
+  const differentTools = dlMod.detectLoop(
+    entry("read", "src/a.ts", false),
+    [
+      bashEntry("git checkout main"),
+      entry("read", "src/b.ts", false),
+      bashEntry("git checkout main"),
+    ],
+    cfg,
+  );
+  eq(
+    differentTools,
+    undefined,
+    "oscillation only compares entries of the same toolName",
+  );
+
+  // --- detectLoop: stale-test-failure (same bash failure, 0 edits since) ---
+  const staleFailure = dlMod.detectLoop(
+    bashEntry("npm test", true),
+    [bashEntry("npm test", true), bashEntry("npm test", true)],
+    cfg,
+    0, // editsSinceLastBashRun
+  );
+  eq(
+    staleFailure?.kind,
+    "stale-test-failure",
+    "repeated identical bash failure with zero edits in between is stale",
+  );
+
+  const freshAttempt = dlMod.detectLoop(
+    bashEntry("npm test", true),
+    [bashEntry("npm test", true), bashEntry("npm test", true)],
+    cfg,
+    1, // editsSinceLastBashRun — code changed since the last run
+  );
+  eq(
+    freshAttempt?.kind,
+    "identical-failure",
+    "the same repeated bash failure falls back to identical-failure once code changed in between",
+  );
+
   // --- createDoomLoopState ---
   const ds = dlMod.createDoomLoopState();
   eq(
@@ -2650,7 +2732,81 @@ await section("doom-loop detection (#103)", async () => {
     "state owns a HistoryBuffer",
   );
   eq(ds.config, dlMod.DEFAULT_CONFIG, "state uses default config");
+  eq(ds.editsSinceLastBashRun, 0, "edits-since-bash counter starts at zero");
 });
+
+await section(
+  "doom-loop wiring: editsSinceLastBashRun counter (#103)",
+  async () => {
+    const dlMod = await load("extensions/setup-core/doom-loop.ts");
+    const harness = createHarness();
+    const state = dlMod.registerDoomLoopDetector(harness.api);
+    const context = harness.makeContext();
+
+    await harness.runHooks(
+      "tool_result",
+      {
+        toolName: "edit",
+        input: { oldText: "a", path: "src/a.ts" },
+        content: [],
+        isError: false,
+      },
+      context,
+    );
+    eq(
+      state.editsSinceLastBashRun,
+      1,
+      "a successful edit increments the counter",
+    );
+
+    await harness.runHooks(
+      "tool_result",
+      {
+        toolName: "write",
+        input: { path: "src/b.ts", content: "x" },
+        content: [],
+        isError: false,
+      },
+      context,
+    );
+    eq(
+      state.editsSinceLastBashRun,
+      2,
+      "a successful write also increments the counter",
+    );
+
+    await harness.runHooks(
+      "tool_result",
+      {
+        toolName: "edit",
+        input: { oldText: "b", path: "src/a.ts" },
+        content: [{ type: "text", text: "no match" }],
+        isError: true,
+      },
+      context,
+    );
+    eq(
+      state.editsSinceLastBashRun,
+      2,
+      "a failed edit does not increment the counter",
+    );
+
+    await harness.runHooks(
+      "tool_result",
+      {
+        toolName: "bash",
+        input: { command: "npm test" },
+        content: [],
+        isError: false,
+      },
+      context,
+    );
+    eq(state.editsSinceLastBashRun, 0, "any bash call resets the counter");
+
+    await harness.runHooks("session_shutdown", {}, context);
+    eq(state.editsSinceLastBashRun, 0, "session_shutdown resets the counter");
+  },
+);
 
 await section("doom-loop capability bus (#103)", async () => {
   const dlCapMod = await load("extensions/shared/doom-loop-capabilities.ts");

@@ -55,6 +55,15 @@ export interface DoomLoopConfig {
   readLoopThreshold: number;
   /** How many recent entries to examine for read-loop patterns. */
   readLoopWindow: number;
+  /**
+   * Same toolName strictly alternating between exactly two signatures this
+   * many times (e.g. A→B→A→B) in the examined window triggers an
+   * "oscillation" detection — state-pendulum swings that succeed individually
+   * but never converge.
+   */
+  oscillationThreshold: number;
+  /** How many recent entries to examine for oscillation patterns. */
+  oscillationWindow: number;
 }
 
 export const DEFAULT_CONFIG: DoomLoopConfig = {
@@ -65,6 +74,8 @@ export const DEFAULT_CONFIG: DoomLoopConfig = {
   stuckToolWindow: 8,
   readLoopThreshold: 3,
   readLoopWindow: 8,
+  oscillationThreshold: 4,
+  oscillationWindow: 8,
 };
 
 // ---------------------------------------------------------------------------
@@ -185,7 +196,13 @@ export class HistoryBuffer {
 // ---------------------------------------------------------------------------
 
 export interface LoopDetection {
-  kind: "identical-failure" | "stuck-tool" | "timeout" | "read-loop";
+  kind:
+    | "identical-failure"
+    | "stuck-tool"
+    | "timeout"
+    | "read-loop"
+    | "oscillation"
+    | "stale-test-failure";
   toolName: string;
   /** Human-readable explanation (for a status label or notification). */
   message: string;
@@ -214,13 +231,20 @@ function signaturePath(signature: string): string | undefined {
 
 /**
  * Match the current entry against recent history and return up to one
- * detection (first match wins, in order: timeout, identical-failure,
- * stuck-tool, read-loop). Returns `undefined` when no threshold is met.
+ * detection (first match wins, in order: timeout, stale-test-failure,
+ * identical-failure, stuck-tool, read-loop, oscillation). Returns
+ * `undefined` when no threshold is met.
+ *
+ * `editsSinceLastBashRun` is maintained by the caller (session-scoped state,
+ * not derivable from a bounded history window alone) — see
+ * `registerDoomLoopDetector`. It counts successful edit/write calls since
+ * the previous `bash` call and resets to 0 on every `bash` call.
  */
 export function detectLoop(
   entry: NormalisedEntry,
   history: NormalisedEntry[],
   config: DoomLoopConfig = DEFAULT_CONFIG,
+  editsSinceLastBashRun = 0,
 ): LoopDetection | undefined {
   // Timeout: a hung/timed-out tool call is always worth surfacing, no
   // repetition threshold needed.
@@ -236,6 +260,32 @@ export function detectLoop(
       occurrences: 1,
       signature: entry.signature,
     };
+  }
+
+  // Stale-test-failure: same bash command failed before, with zero
+  // successful edit/write calls in between — re-running the same test
+  // without having changed anything. More specific than identical-failure
+  // (which doesn't check for an intervening code change), so it is checked
+  // first for bash entries.
+  if (
+    entry.isError &&
+    entry.toolName === "bash" &&
+    editsSinceLastBashRun === 0
+  ) {
+    const window = history.slice(-config.identicalFailureWindow);
+    const identicalBashFailures = window.filter(
+      (e) =>
+        e.isError && e.toolName === "bash" && e.signature === entry.signature,
+    );
+    if (identicalBashFailures.length >= config.identicalFailureThreshold) {
+      return {
+        kind: "stale-test-failure",
+        toolName: "bash",
+        message: `bash: derselbe Testfehler (${identicalBashFailures.length + 1}x) ohne Codeänderung dazwischen — Ursache analysieren statt erneut auszuführen.`,
+        occurrences: identicalBashFailures.length + 1,
+        signature: entry.signature,
+      };
+    }
   }
 
   // Identical-failure: same toolName + same signature + both errors.
@@ -304,6 +354,35 @@ export function detectLoop(
     }
   }
 
+  // Oscillation: same toolName strictly alternating between exactly two
+  // signatures (A→B→A→B→…) — a state pendulum where each individual call
+  // may succeed, so this does not require isError. Not a special case of
+  // identical-failure/stuck-tool (those require the SAME signature failing
+  // repeatedly); this requires two DIFFERENT signatures never converging.
+  {
+    const window = history
+      .filter((e) => e.toolName === entry.toolName)
+      .slice(-(config.oscillationThreshold - 1));
+    const sequence = [...window, entry];
+    if (sequence.length >= config.oscillationThreshold) {
+      const signatures = new Set(sequence.map((e) => e.signature));
+      const alternates =
+        signatures.size === 2 &&
+        sequence.every(
+          (e, i) => i < 2 || e.signature === sequence[i - 2].signature,
+        );
+      if (alternates) {
+        return {
+          kind: "oscillation",
+          toolName: entry.toolName,
+          message: `${entry.toolName}: pendelt zwischen zwei Zuständen (${sequence.length}x) ohne Konvergenz — neue Strategie nötig.`,
+          occurrences: sequence.length,
+          signature: entry.signature,
+        };
+      }
+    }
+  }
+
   return undefined;
 }
 
@@ -316,13 +395,23 @@ export interface DoomLoopState {
   config: DoomLoopConfig;
   /** The most recent detection, if any. Cleared on new non-error results. */
   lastDetection?: LoopDetection;
+  /**
+   * Successful edit/write calls since the last `bash` call; reset to 0 on
+   * every `bash` call. Feeds the `stale-test-failure` pattern (a repeated
+   * bash failure with zero code changes in between).
+   */
+  editsSinceLastBashRun: number;
 }
 
 export function createDoomLoopState(
   config?: Partial<DoomLoopConfig>,
 ): DoomLoopState {
   const resolved = { ...DEFAULT_CONFIG, ...config };
-  return { history: new HistoryBuffer(resolved.historySize), config: resolved };
+  return {
+    history: new HistoryBuffer(resolved.historySize),
+    config: resolved,
+    editsSinceLastBashRun: 0,
+  };
 }
 
 /**
@@ -347,20 +436,33 @@ export function registerDoomLoopDetector(
         : {}),
     };
     state.history.push(entry);
-    // Read-loop is the only pattern that can trigger on a successful call
-    // (reads rarely fail), so detectLoop always runs; error-only patterns
-    // (timeout/identical-failure/stuck-tool) return undefined by construction
-    // when entry.isError is false.
+    // Read-loop and oscillation are the only patterns that can trigger on a
+    // successful call, so detectLoop always runs; error-only patterns
+    // (timeout/stale-test-failure/identical-failure/stuck-tool) return
+    // undefined by construction when entry.isError is false.
     const detection = detectLoop(
       entry,
       state.history.tail(
         Math.max(
           state.config.identicalFailureWindow,
           state.config.readLoopWindow,
+          state.config.oscillationWindow,
         ) * 2,
       ),
       state.config,
+      state.editsSinceLastBashRun,
     );
+    // Update the edits-since-bash counter AFTER detection (which needs the
+    // value as of the previous bash run), so this call itself is reflected
+    // starting with the next entry.
+    if (entry.toolName === "bash") {
+      state.editsSinceLastBashRun = 0;
+    } else if (
+      !entry.isError &&
+      (entry.toolName === "edit" || entry.toolName === "write")
+    ) {
+      state.editsSinceLastBashRun += 1;
+    }
     if (detection) {
       state.lastDetection = detection;
       // Advisory: publish a label visible in the Aurora footer so both
@@ -390,6 +492,7 @@ export function registerDoomLoopDetector(
   pi.on("session_shutdown", () => {
     state.history.clear();
     state.lastDetection = undefined;
+    state.editsSinceLastBashRun = 0;
   });
 
   return state;
