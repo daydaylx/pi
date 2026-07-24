@@ -5,7 +5,11 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles } from "./verify-profiles.ts";
-import { formatGateReport, runVerificationGate } from "./verification-gate.ts";
+import {
+  formatGateReport,
+  runVerificationGate,
+  type GateContext,
+} from "./verification-gate.ts";
 import { createDoomLoopState, registerDoomLoopDetector } from "./doom-loop.ts";
 import {
   createEditMetrics,
@@ -16,7 +20,7 @@ import {
   createEditFallbackState,
   registerEditFallbackDetector,
 } from "./edit-fallback.ts";
-import { checkRecoveryStatus } from "./recovery-check.ts";
+import { checkRecoveryStatus, offerRecoveryDialog } from "./recovery-check.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 
 const CheckParams = Type.Object({
@@ -59,10 +63,20 @@ export default function setupCore(pi: ExtensionAPI): void {
   registerEditMetrics(pi, editMetrics, { existCheck });
   registerEditFallbackDetector(pi, editFallback, { existCheck });
 
+  const execAdapter: GateContext["exec"] = (program, args, options) =>
+    pi.exec(program, args, {
+      cwd: options.cwd,
+      timeout: options.timeout,
+      signal: options.signal as AbortSignal | undefined,
+    });
+
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
     trusted = ctx.isProjectTrusted();
     recoveryStatus = checkRecoveryStatus(ctx);
+    if (recoveryStatus.interrupted && ctx.hasUI && ctx.mode === "tui") {
+      void offerRecoveryDialog(ctx, recoveryStatus, execAdapter);
+    }
   });
 
   pi.registerTool({
@@ -240,12 +254,7 @@ export default function setupCore(pi: ExtensionAPI): void {
       const result = await runVerificationGate({
         projectRoot: ctx.cwd,
         trusted: ctx.isProjectTrusted(),
-        exec: (program, args, options) =>
-          pi.exec(program, args, {
-            cwd: options.cwd,
-            timeout: options.timeout,
-            signal: options.signal as AbortSignal | undefined,
-          }),
+        exec: execAdapter,
       });
       ctx.ui.notify(
         formatGateReport(result),

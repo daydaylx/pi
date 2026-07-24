@@ -2786,16 +2786,19 @@ await section("recovery status check (#107)", async () => {
   );
 
   const ws = mkdtempSync(path.join(tmpdir(), "pi-recovery-"));
-  mkdirSync(path.join(ws, ".agent", "plans"), { recursive: true });
 
   function writePlan(text) {
-    writeFileSync(path.join(ws, ".agent", "plans", "current-plan.md"), text);
+    planUtils.writePlanFileAtomic(ws, text);
   }
-  function writeState(obj) {
-    writeFileSync(
-      path.join(ws, ".agent", "plans", "current-plan.state.json"),
-      JSON.stringify(obj),
+  // Writes a schema-valid v2 sidecar via the same constructor plan-mode
+  // itself uses (loadWorkflowState now backs checkRecoveryStatus, and it
+  // rejects/reconstructs anything that doesn't validate as v2).
+  function writeState(planContent, runtime) {
+    const snapshot = planState.createWorkflowStateSnapshot(
+      planContent,
+      runtime,
     );
+    planState.writeWorkflowStateAtomic(ws, snapshot);
   }
   function ctx() {
     return { cwd: ws };
@@ -2807,8 +2810,9 @@ await section("recovery status check (#107)", async () => {
   assert(noPlan.summary.includes("kein Plan"), "summary says no plan");
 
   // --- Idle phase -> no interrupted task ---
-  writePlan("# Plan\n## Todos\n- [ ] todo 1");
-  writeState({ phase: "idle", revision: 1 });
+  const idlePlan = "# Plan\n## Auftrag\nZiel\n## Todos\n- [ ] todo 1";
+  writePlan(idlePlan);
+  writeState(idlePlan, { mode: "work", phase: "idle", revision: 1 });
   const idle = rcMod.checkRecoveryStatus(ctx());
   eq(idle.interrupted, false);
   eq(idle.phase, "idle");
@@ -2818,7 +2822,7 @@ await section("recovery status check (#107)", async () => {
   );
 
   // --- Paused phase with pending todos -> interrupted ---
-  writeState({ phase: "paused", revision: 3 });
+  writeState(idlePlan, { mode: "work", phase: "paused", revision: 3 });
   const paused = rcMod.checkRecoveryStatus(ctx());
   eq(paused.interrupted, true, "paused -> interrupted");
   eq(paused.phase, "paused");
@@ -2827,23 +2831,49 @@ await section("recovery status check (#107)", async () => {
   eq(paused.planRevision, 3);
   assert(paused.summary.includes("Phase 'paused'"), "summary includes phase");
 
-  // --- Executing phase with multiple todos ---
-  writePlan("# Plan\n## Todos\n- [ ] a\n- [x] b\n- [ ] c");
-  writeState({ phase: "executing", revision: 5 });
+  // --- Executing phase with multiple todos: loadWorkflowState's own
+  // recovery guarantee (never silently resume "executing") now applies —
+  // it is downgraded to "paused" on load, which still counts as interrupted.
+  const multiPlan =
+    "# Plan\n## Auftrag\nZiel\n## Todos\n- [ ] a\n- [x] b\n- [ ] c";
+  writePlan(multiPlan);
+  const multiPlanHash = planUtils.hashPlanContent(multiPlan);
+  writeState(multiPlan, {
+    mode: "work",
+    phase: "executing",
+    revision: 5,
+    execution: {
+      executionId: "exec-1",
+      startedAt: new Date().toISOString(),
+      expectedPlanHash: multiPlanHash,
+    },
+  });
   const exec = rcMod.checkRecoveryStatus(ctx());
   eq(exec.interrupted, true);
+  eq(
+    exec.phase,
+    "paused",
+    "a persisted 'executing' phase is never resumed as-is",
+  );
   eq(exec.pendingTodos, 2);
   eq(exec.totalTodos, 3);
-  eq(exec.planRevision, 5);
 
   // --- Blocked phase ---
-  writeState({ phase: "blocked", revision: 2 });
+  writeState(multiPlan, { mode: "work", phase: "blocked", revision: 2 });
   const blocked = rcMod.checkRecoveryStatus(ctx());
   eq(blocked.interrupted, true);
 
-  // --- Stale plan (content hash != reviewedHash) ---
-  writePlan("# Stale content");
-  writeState({ phase: "paused", revision: 1, reviewedHash: "different-hash" });
+  // --- Stale plan (reviewedHash refers to different content than the
+  // current plan, but planHash itself still matches so loadWorkflowState
+  // does not reconstruct the sidecar out from under the reviewedHash check) ---
+  const stalePlan = "# Stale\n## Auftrag\nAlt\n## Todos\n- [ ] x";
+  writePlan(stalePlan);
+  writeState(stalePlan, {
+    mode: "work",
+    phase: "paused",
+    revision: 1,
+    reviewedHash: "0".repeat(64),
+  });
   const stale = rcMod.checkRecoveryStatus(ctx());
   eq(stale.planStale, true, "stale plan detected");
   assert(
@@ -2857,6 +2887,217 @@ await section("recovery status check (#107)", async () => {
     /* ignore */
   }
 });
+
+await section("interactive recovery dialog (#107)", async () => {
+  const rcMod = await load("extensions/setup-core/recovery-check.ts");
+  assert(
+    typeof rcMod?.offerRecoveryDialog === "function",
+    "recovery-check exports offerRecoveryDialog",
+  );
+
+  const passingExec = async (_program, args) => {
+    if (args[0] === "status")
+      return { code: 0, stdout: " M src/a.ts\n", stderr: "", killed: false };
+    if (args[0] === "diff")
+      return { code: 0, stdout: "1 file changed", stderr: "", killed: false };
+    return { code: 0, stdout: "", stderr: "", killed: false };
+  };
+
+  const status = {
+    interrupted: true,
+    phase: "paused",
+    pendingTodos: 1,
+    totalTodos: 2,
+    planRevision: 3,
+    summary: "Phase 'paused' (Rev 3), 1/2 offene Todos",
+  };
+
+  // --- non-interrupted status: dialog never opens ---
+  {
+    let opened = false;
+    const harness = createHarness({
+      select: () => {
+        opened = true;
+        return undefined;
+      },
+    });
+    const context = harness.makeContext();
+    await rcMod.offerRecoveryDialog(
+      context,
+      { interrupted: false, summary: "kein Plan" },
+      passingExec,
+    );
+    eq(opened, false, "the dialog never opens when nothing is interrupted");
+  }
+
+  // --- "Fortsetzen" points to /work, makes no other change ---
+  {
+    const harness = createHarness({
+      select: () => "Fortsetzen (Hinweis auf /work)",
+    });
+    const context = harness.makeContext();
+    await rcMod.offerRecoveryDialog(context, status, passingExec);
+    assert(
+      harness.notifications.some((n) => n.message.includes("/work")),
+      "resuming points the user to /work instead of resuming automatically",
+    );
+  }
+
+  // --- "Diff prüfen" shows changed files without altering workflow state ---
+  {
+    const harness = createHarness({ select: () => "Diff prüfen" });
+    const context = harness.makeContext();
+    await rcMod.offerRecoveryDialog(context, status, passingExec);
+    assert(
+      harness.notifications.some(
+        (n) =>
+          n.message.includes("Working-Tree-Diff") &&
+          n.message.includes("src/a.ts"),
+      ),
+      "the diff option surfaces the changed-file list",
+    );
+  }
+
+  // --- "Verifikation erneut ausführen" runs the gate and shows its report ---
+  {
+    const harness = createHarness({
+      select: () => "Verifikation erneut ausführen",
+    });
+    const context = harness.makeContext();
+    await rcMod.offerRecoveryDialog(context, status, passingExec);
+    assert(
+      harness.notifications.some((n) => n.message.includes("PASS")),
+      "re-verification shows the gate report",
+    );
+  }
+
+  // --- "Verwerfen" requires a second confirmation and then removes the sidecar ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-recovery-discard-"));
+    try {
+      planUtils.writePlanFileAtomic(
+        cwd,
+        "# Plan\n## Auftrag\nZiel\n## Todos\n- [ ] x",
+      );
+      planState.writeWorkflowStateAtomic(
+        cwd,
+        planState.createWorkflowStateSnapshot(
+          "# Plan\n## Auftrag\nZiel\n## Todos\n- [ ] x",
+          { mode: "work", phase: "paused", revision: 1 },
+        ),
+      );
+      assert(
+        existsSync(planState.getWorkflowStatePath(cwd)),
+        "sidecar exists before discard",
+      );
+
+      // Declining the safety confirmation must NOT remove anything.
+      const declined = createHarness({
+        select: () => "Verwerfen (Workflow-Zustand zurücksetzen)",
+        confirm: false,
+      });
+      await rcMod.offerRecoveryDialog(
+        declined.makeContext({ cwd }),
+        status,
+        passingExec,
+      );
+      assert(
+        existsSync(planState.getWorkflowStatePath(cwd)),
+        "declining the discard confirmation keeps the workflow sidecar",
+      );
+
+      const accepted = createHarness({
+        select: () => "Verwerfen (Workflow-Zustand zurücksetzen)",
+        confirm: true,
+      });
+      await rcMod.offerRecoveryDialog(
+        accepted.makeContext({ cwd }),
+        status,
+        passingExec,
+      );
+      assert(
+        !existsSync(planState.getWorkflowStatePath(cwd)),
+        "confirming the discard removes the workflow sidecar",
+      );
+      assert(
+        Boolean(planUtils.readPlanFile(cwd)),
+        "discarding the workflow state never touches the plan content itself",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  // --- "Nichts tun" (or dismissing the dialog) changes nothing ---
+  {
+    const harness = createHarness({ select: () => undefined });
+    const context = harness.makeContext();
+    await rcMod.offerRecoveryDialog(context, status, passingExec);
+    eq(
+      harness.notifications.length,
+      0,
+      "doing nothing produces no notification",
+    );
+  }
+});
+
+await section(
+  "setup-core opens the recovery dialog only in an interactive TUI session (#107)",
+  async () => {
+    if (!setupCore) return;
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-recovery-wiring-"));
+    try {
+      const planContent = "# Plan\n## Auftrag\nZiel\n## Todos\n- [ ] x";
+      planUtils.writePlanFileAtomic(cwd, planContent);
+      planState.writeWorkflowStateAtomic(
+        cwd,
+        planState.createWorkflowStateSnapshot(planContent, {
+          mode: "work",
+          phase: "paused",
+          revision: 1,
+        }),
+      );
+
+      // TUI + hasUI: the dialog opens.
+      let tuiOpened = false;
+      const tuiHarness = createHarness({
+        select: () => {
+          tuiOpened = true;
+          return undefined;
+        },
+      });
+      setupCore.default(tuiHarness.api);
+      await tuiHarness.runHooks(
+        "session_start",
+        {},
+        tuiHarness.makeContext({ cwd, mode: "tui", hasUI: true }),
+      );
+      eq(
+        tuiOpened,
+        true,
+        "an interrupted task opens the dialog in a TUI session",
+      );
+
+      // Non-TUI: the dialog must not open.
+      let jsonOpened = false;
+      const jsonHarness = createHarness({
+        select: () => {
+          jsonOpened = true;
+          return undefined;
+        },
+      });
+      setupCore.default(jsonHarness.api);
+      await jsonHarness.runHooks(
+        "session_start",
+        {},
+        jsonHarness.makeContext({ cwd, mode: "json", hasUI: false }),
+      );
+      eq(jsonOpened, false, "a non-interactive session never opens the dialog");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
 
 await section("native project skills", async () => {
   const expectedSkills = [
