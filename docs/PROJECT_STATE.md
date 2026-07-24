@@ -138,6 +138,13 @@ fehlender Code. Sie können nach Eigentümerbestätigung geschlossen werden
    mit dem Doom-Loop-Detector (#103) via gemeinsamer setup-core-Registrierung.
    26 neue Tests. `verify`: 772→798, 0 Fehler. **Offen:** Fallback-Hierarchie
    (ist Agent-Verhalten, nicht Code); Schließen des Issues.
+8. ~~**#107**~~ — **umgesetzt (Advisory-MVP):** Recovery-Status-Checker
+   (`extensions/setup-core/recovery-check.ts`): liest Plan + Sidecar-State
+   (read-only, plan-mode/state.ts unberührt), erkennt unterbrochene Tasks
+   (Phase paused/executing/blocked), zählt offene Todos, prüft Plan-Staleness.
+   `/setup-doctor` zeigt Recovery-Status. 20 neue Tests. `verify`: 798→818,
+   0 Fehler. **Offen:** Recovery-Dialog (User-Gate vor Fortsetzung), Stale-
+   State-Rejection, Direct-Task-Recovery; Schließen des Issues.
 
 ### Verworfene direkte Sprünge
 

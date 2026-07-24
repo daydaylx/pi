@@ -1154,6 +1154,12 @@ await section("setup core lifecycle", async () => {
       ?.message?.includes("edit metrics: edits 0/0"),
     "setup doctor reports the edit metrics (#104)",
   );
+  assert(
+    harness.notifications
+      .at(-1)
+      ?.message?.includes("recovery status:"),
+    "setup doctor reports the recovery status (#107)",
+  );
   const verify = harness.tools.get("verify");
   if (verify) {
     await verify.execute(
@@ -1966,6 +1972,81 @@ await section("edit and write metrics (#104)", async () => {
   eq(metrics.editAttempts, 0, "metrics reset on shutdown");
   eq(metrics.editFailures, 0);
   eq(metrics.perFile["src/a.ts"], undefined, "per-file stats cleared on shutdown");
+});
+
+// ---------------------------------------------------------------------------
+// Recovery status check (#107). Reads plan + sidecar state, reports
+// interrupted task presence without touching the plan-mode state machine.
+// ---------------------------------------------------------------------------
+await section("recovery status check (#107)", async () => {
+  const rcMod = await load("extensions/setup-core/recovery-check.ts");
+  assert(
+    typeof rcMod?.checkRecoveryStatus === "function",
+    "recovery-check exports checkRecoveryStatus",
+  );
+
+  const ws = mkdtempSync(path.join(tmpdir(), "pi-recovery-"));
+  mkdirSync(path.join(ws, ".agent", "plans"), { recursive: true });
+
+  function writePlan(text) {
+    writeFileSync(path.join(ws, ".agent", "plans", "current-plan.md"), text);
+  }
+  function writeState(obj) {
+    writeFileSync(path.join(ws, ".agent", "plans", "current-plan.state.json"), JSON.stringify(obj));
+  }
+  function ctx() {
+    return { cwd: ws };
+  }
+
+  // --- No plan file -> no recovery candidate ---
+  const noPlan = rcMod.checkRecoveryStatus(ctx());
+  eq(noPlan.interrupted, false, "no plan -> not interrupted");
+  assert(noPlan.summary.includes("kein Plan"), "summary says no plan");
+
+  // --- Idle phase -> no interrupted task ---
+  writePlan("# Plan\n## Todos\n- [ ] todo 1");
+  writeState({ phase: "idle", revision: 1 });
+  const idle = rcMod.checkRecoveryStatus(ctx());
+  eq(idle.interrupted, false);
+  eq(idle.phase, "idle");
+  assert(idle.summary.includes("keine unterbrochene Aufgabe"), "idle phase not interrupted");
+
+  // --- Paused phase with pending todos -> interrupted ---
+  writeState({ phase: "paused", revision: 3 });
+  const paused = rcMod.checkRecoveryStatus(ctx());
+  eq(paused.interrupted, true, "paused -> interrupted");
+  eq(paused.phase, "paused");
+  eq(paused.pendingTodos, 1);
+  eq(paused.totalTodos, 1);
+  eq(paused.planRevision, 3);
+  assert(paused.summary.includes("Phase 'paused'"), "summary includes phase");
+
+  // --- Executing phase with multiple todos ---
+  writePlan("# Plan\n## Todos\n- [ ] a\n- [x] b\n- [ ] c");
+  writeState({ phase: "executing", revision: 5 });
+  const exec = rcMod.checkRecoveryStatus(ctx());
+  eq(exec.interrupted, true);
+  eq(exec.pendingTodos, 2);
+  eq(exec.totalTodos, 3);
+  eq(exec.planRevision, 5);
+
+  // --- Blocked phase ---
+  writeState({ phase: "blocked", revision: 2 });
+  const blocked = rcMod.checkRecoveryStatus(ctx());
+  eq(blocked.interrupted, true);
+
+  // --- Stale plan (content hash != reviewedHash) ---
+  writePlan("# Stale content");
+  writeState({ phase: "paused", revision: 1, reviewedHash: "different-hash" });
+  const stale = rcMod.checkRecoveryStatus(ctx());
+  eq(stale.planStale, true, "stale plan detected");
+  assert(stale.summary.includes("Plan seit Review geändert"), "stale flag in summary");
+
+  try {
+    rmSync(ws, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 await section("native project skills", async () => {

@@ -8,6 +8,7 @@ import { loadVerifyProfiles } from "./verify-profiles.ts";
 import { formatGateReport, runVerificationGate } from "./verification-gate.ts";
 import { createDoomLoopState, registerDoomLoopDetector } from "./doom-loop.ts";
 import { createEditMetrics, metricsSummary, registerEditMetrics } from "./edit-metrics.ts";
+import { checkRecoveryStatus } from "./recovery-check.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 
 const CheckParams = Type.Object({
@@ -35,6 +36,7 @@ function packageVersion(path: string): string | undefined {
 export default function setupCore(pi: ExtensionAPI): void {
   let activeCwd = process.cwd();
   let trusted = false;
+  let recoveryStatus = { interrupted: false, summary: "unbekannt" };
   const doomLoop = createDoomLoopState();
   const editMetrics = createEditMetrics();
   registerDoomLoopDetector(pi, doomLoop);
@@ -51,6 +53,7 @@ export default function setupCore(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
     trusted = ctx.isProjectTrusted();
+    recoveryStatus = checkRecoveryStatus(ctx);
   });
 
   pi.registerTool({
@@ -134,6 +137,7 @@ export default function setupCore(pi: ExtensionAPI): void {
         ? `${doomLoop.lastDetection.kind}: ${doomLoop.lastDetection.message}`
         : "keine Doom-Loop erkannt";
       const editHint = metricsSummary(editMetrics);
+      const recoveryHint = recoveryStatus.summary;
       const hasVersionDrift =
         String(declaredVersion ?? "") !== String(devVersion ?? "") ||
         (runtimeVersion !== undefined &&
@@ -183,6 +187,7 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  project verification profiles: ${profileHint}`,
         `  doom-loop status: ${loopHint}`,
         `  edit metrics: ${editHint}`,
+        `  recovery status: ${recoveryHint}`,
       ];
       for (const diagnostic of loaded.diagnostics) {
         lines.push(
