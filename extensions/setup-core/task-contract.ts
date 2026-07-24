@@ -99,6 +99,107 @@ function normalizePath(p: string): string {
   return n;
 }
 
+type ScopeCandidateKind = "code" | "list" | "plain";
+
+/**
+ * Normalize a plan-authored scope path/glob conservatively.
+ *
+ * Scope entries become inputs to drift enforcement, so ambiguous prose and
+ * path forms that can escape the repository are ignored rather than guessed.
+ * The matcher only implements `*`, `**`, and `?`; unsupported glob syntax is
+ * rejected here instead of being persisted as a misleading literal pattern.
+ */
+function normalizePlanScopeCandidate(
+  raw: string,
+  kind: ScopeCandidateKind,
+): string | undefined {
+  let candidate = raw.trim();
+  if (!candidate || candidate.startsWith("!")) return undefined;
+  if (/^[A-Za-z]:/.test(candidate)) return undefined;
+  if (/^(?:[/\\]|~)/.test(candidate)) return undefined;
+  if (/[\u0000-\u001f\u007f]/.test(candidate)) return undefined;
+
+  candidate = candidate.replace(/\\/g, "/");
+  while (candidate.startsWith("./")) candidate = candidate.slice(2);
+  candidate = candidate.replace(/\/{2,}/g, "/");
+
+  if (candidate.startsWith("!")) return undefined;
+  const trailingSlash = candidate.endsWith("/");
+  const segments = candidate.split("/");
+  if (
+    candidate === "" ||
+    segments.some((segment) => segment === "..") ||
+    /[`"'<>|:;,$&#[\]{}]/.test(candidate)
+  ) {
+    return undefined;
+  }
+  candidate = segments
+    .filter((segment) => segment !== "" && segment !== ".")
+    .join("/");
+  if (trailingSlash && candidate) candidate += "/";
+
+  // A code span is explicit enough to support a real filename containing
+  // spaces. Unquoted list/plain lines with whitespace are treated as prose.
+  if (kind !== "code" && /\s/.test(candidate)) return undefined;
+  if (!/^[A-Za-z0-9._@+*?()/ -]+$/.test(candidate)) return undefined;
+
+  // A free-standing word is more likely prose than a repository path. Lists
+  // and code spans are explicit declarations and may name extensionless files.
+  if (
+    kind === "plain" &&
+    !candidate.includes("/") &&
+    !candidate.includes(".") &&
+    !/[?*]/.test(candidate)
+  ) {
+    return undefined;
+  }
+
+  return candidate;
+}
+
+/**
+ * Extract safe, repository-relative paths/globs from a plan's
+ * "Betroffene Bereiche" section.
+ *
+ * Accepted authoring forms are inline-code paths, markdown list entries, and
+ * unambiguous plain path lines. Invalid entries are intentionally omitted so
+ * prose, absolute paths, parent traversal, drive paths, and negated globs
+ * cannot weaken scope enforcement.
+ */
+export function extractExpectedScopeFromPlan(planContent: string): string[] {
+  const section = extractSectionText(planContent, "Betroffene Bereiche");
+  if (!section) return [];
+
+  const scope: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string, kind: ScopeCandidateKind): void => {
+    const normalized = normalizePlanScopeCandidate(raw, kind);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    scope.push(normalized);
+  };
+
+  for (const rawLine of section.split(/\r?\n/)) {
+    const codeSpans = [...rawLine.matchAll(/`([^`\r\n]+)`/g)];
+    if (codeSpans.length > 0) {
+      for (const match of codeSpans) add(match[1], "code");
+      continue;
+    }
+
+    const list = rawLine.match(
+      /^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)(.+?)\s*$/,
+    );
+    if (list) {
+      add(list[1], "list");
+      continue;
+    }
+
+    add(rawLine, "plain");
+  }
+
+  return scope;
+}
+
 /**
  * Convert a minimal glob into a RegExp. Supports:
  *   **  -> any characters including '/'  (across segments)
@@ -141,10 +242,10 @@ export function globToRegExp(pattern: string): RegExp {
  * Exact paths and directory prefixes ("src/") are handled by the matcher too
  * (a prefix like "src/" matches via the trailing-slash literal).
  *
- * An empty `expectedScope` means "no scope was declared" (e.g. a plan-derived
- * contract, whose prose "Betroffene Bereiche" section can't be turned into
- * globs) — it is NOT the same as "everything is out of scope". Callers that
- * want to surface this should check `expectedScope.length === 0` themselves.
+ * An empty `expectedScope` means "no usable scope was declared" (e.g. a direct
+ * task or a legacy plan without safe path entries) — it is NOT the same as
+ * "everything is out of scope". Callers that want to surface this should
+ * check `expectedScope.length === 0` themselves.
  */
 export function matchScope(
   expectedScope: string[],
@@ -339,11 +440,10 @@ function validateContract(
 }
 
 /**
- * Derive a task contract from a reviewed plan's "Auftrag" and
- * "Abschlusskriterien" sections (present in both the simple and detailed
- * plan formats — see plan-mode/utils.ts REQUIRED_*_PLAN_HEADINGS). Returns
- * undefined if the plan has no usable goal, so callers can skip saving
- * rather than persist an empty contract.
+ * Derive a task contract from a reviewed plan's "Auftrag",
+ * "Abschlusskriterien", and safe "Betroffene Bereiche" entries. Returns
+ * undefined if the plan has no usable goal, so callers can skip saving rather
+ * than persist an empty contract.
  *
  * References the plan's existing planId (source.planId) instead of minting
  * a new identity — keeps this a data-only derivation, not a second workflow
@@ -364,7 +464,7 @@ export function deriveContractFromPlan(
   return {
     goal,
     acceptanceCriteria,
-    expectedScope: [],
+    expectedScope: extractExpectedScopeFromPlan(planContent),
     nonGoals,
     verification,
     assumptions: [],

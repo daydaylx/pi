@@ -11,12 +11,11 @@
  *
  * `status` reflects both required setup/project checks (typecheck, test,
  * #105 profiles) AND real scope-drift (#106 task-contract: file changes
- * outside the declared scope) — an out-of-scope change escalates an
- * otherwise-passing status to "fail", since it is itself an "unexpected
- * file change". Open acceptance criteria stay a residual risk only, not a
- * blocker: nothing in this codebase ever flips a criterion to "met", so
- * treating "pending" as a blocker would make every contract-bearing task
- * permanently unfinishable.
+ * outside the declared scope) — an out-of-scope change always makes the
+ * overall status "fail", since it is itself an "unexpected file change".
+ * Open acceptance criteria stay a residual risk only, not a blocker: nothing
+ * in this codebase ever flips a criterion to "met", so treating "pending" as
+ * a blocker would make every contract-bearing task permanently unfinishable.
  *
  * Reuses instead of rebuilding:
  *   - setup verification (loadSetupConfig) runs at the agent dir, untouchable;
@@ -76,6 +75,10 @@ export interface GateContext {
   exec: ExecFn;
   /** Optional task description for the report header (from a plan or direct). */
   taskDescription?: string;
+}
+
+function isInternalWorkflowArtifact(path: string): boolean {
+  return path === ".agent/task-contract.json" || path.startsWith(".agent/plans/");
 }
 
 interface RawExecResult {
@@ -258,13 +261,16 @@ export async function runVerificationGate(
   const contract = loadedContract.contract;
   if (contract) {
     if (!taskDescription) taskDescription = contract.goal;
+    const scopeRelevantFiles = changedFiles
+      .map((file) => file.path)
+      .filter((path) => !isInternalWorkflowArtifact(path));
     const drift = analyzeScopeDrift(
       contract,
-      changedFiles.map((f) => f.path),
+      scopeRelevantFiles,
     );
     if (contract.expectedScope.length === 0) {
       residualRisks.push(
-        "Task-Contract ohne deklarierten Scope (z. B. plan-abgeleitet) — Scope-Drift kann nicht geprüft werden.",
+        "Task-Contract ohne deklarierten Scope — Scope-Drift kann nicht geprüft werden.",
       );
     }
     if (drift.match.outOfScope.length > 0) {
@@ -317,11 +323,12 @@ export async function runVerificationGate(
 
   // 5. Aggregate + recommendation. Real scope-drift (out-of-scope files) is
   // itself an "unexpected file change" per #102's completion criteria —
-  // it escalates a passing check status to "fail", never downgrades a
-  // "blocked" (missing/unrunnable required check) which is already worse.
+  // it always makes the overall status "fail". Check failures already take
+  // precedence over not-run checks in aggregateStatus; scope drift likewise
+  // takes precedence over "blocked" because it is a confirmed failure rather
+  // than an inability to verify.
   const checksStatus = aggregateStatus(checks);
-  const status: GateStatus =
-    scopeDrifted && checksStatus === "pass" ? "fail" : checksStatus;
+  const status: GateStatus = scopeDrifted ? "fail" : checksStatus;
   const required = checks.filter((c) => c.required);
   const passed = required.filter((c) => c.status === "pass").length;
   const summary = `${status.toUpperCase()} — ${passed}/${required.length} Pflichtprüfungen bestanden; ${changedFiles.length} Working-Tree-Datei(en) geändert.`;
@@ -331,8 +338,12 @@ export async function runVerificationGate(
       ? "Abschluss möglich: alle Pflichtprüfungen bestanden. Restrisiken beachten."
       : status === "blocked"
         ? "Abschluss blockiert: mindestens eine Pflichtprüfung ist nicht ausführbar. Binary/Konfiguration prüfen."
-        : scopeDrifted && checksStatus === "pass"
-          ? "Abschluss nicht empfohlen: Scope-Drift erkannt (Änderungen außerhalb des deklarierten Scopes). Diff prüfen oder Scope korrigieren."
+        : scopeDrifted
+          ? checksStatus === "blocked"
+            ? "Abschluss nicht empfohlen: Scope-Drift erkannt und mindestens eine Pflichtprüfung ist nicht ausführbar. Diff sowie Binary/Konfiguration prüfen."
+            : checksStatus === "fail"
+              ? "Abschluss nicht empfohlen: Scope-Drift erkannt und mindestens eine Pflichtprüfung fehlgeschlagen. Diff und Fehler prüfen."
+              : "Abschluss nicht empfohlen: Scope-Drift erkannt (Änderungen außerhalb des deklarierten Scopes). Diff prüfen oder Scope korrigieren."
           : "Abschluss nicht empfohlen: mindestens eine Pflichtprüfung fehlgeschlagen. Fehler beheben und erneut prüfen.";
 
   return {

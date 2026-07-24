@@ -1,6 +1,6 @@
 # Verifikations-Gate (`.pi/verify.json` → `/verify-gate`)
 
-> Universelles, advisory Abschluss-Gate.
+> Universelles Abschluss-Gate mit explizitem Diagnose-Aufruf.
 > Issue: [#102](https://github.com/daydaylx/pi/issues/102) — konsumiert die
 > Projekt-Verifikationsprofile aus [#105](verify-profiles.md) und die
 > Setup-Verifikation.
@@ -12,13 +12,14 @@ durchlaufen werden – unabhängig davon, ob direkt, über den Planmodus oder du
 einen Worker gearbeitet wurde. Das Gate bewertet **Auftrag + Diff + Scope +
 Prüfergebnisse gemeinsam** und liefert einen strukturierten Abschlussbericht.
 
-## Status: Advisory (MVP)
+## Status: verbindlich im Completion-Pfad
 
-Dieses Gate ist **advisory**: es wird über `/verify-gate` aufgerufen und
-**blockiert nicht** automatisch den bestehenden Abschluss (`/done`, `/finish`).
-Hard-Enforcement im Completion-Pfad und echtes Scope-Drift (das den
-Task-Contract [#106](https://github.com/daydaylx/pi/issues/106) voraussetzt)
-sind bewusst als Folgeschritte vorgesehen, sobald das Engine bewährt ist.
+`/verify-gate` bleibt der explizite Diagnose-Aufruf. Im Planworkflow verwenden
+`/done`, der automatische Abschluss, der „bereits vollständig"-Pfad von
+`/work` und `/finish` dieselbe Prüfung: Nur `pass` darf archivieren.
+`fail` und `blocked` lassen Plan, Sidecar und Task-Contract aktiv. Ausschließlich
+`/finish` bietet in einer interaktiven TUI eine ausdrückliche Übersteuerung an;
+Hintergrund- und Agent-Pfade können das Gate nicht umgehen.
 
 ## Aufruf
 
@@ -37,9 +38,9 @@ entspricht der Prüfsumme.
    (unverletzlich, laufen immer im Agent-Verzeichnis).
 3. **Projekt-Profile (#105)** – `.pi/verify.json`, **nur bei vertrautem Projekt**;
    siehe [`verify-profiles.md`](verify-profiles.md).
-4. **Scope-Hinweise** – offensichtliches Rauschen (`node_modules`, Lockfiles,
-   `.git/`) und „keine Änderungen" werden markiert (kein echtes Drift-Urteil
-   ohne #106).
+4. **Scope-Kontrolle** – mit Task-Contract werden geänderte Dateien gegen den
+   aus `Betroffene Bereiche` abgeleiteten Scope geprüft. Out-of-Scope-Dateien
+   setzen den Status auf `fail`; ohne Contract bleiben nur Rauschhinweise.
 5. **Restrisiken** – nicht ausführbare Prüfungen (`missing_binary`), ungültige
    Profilkonfiguration.
 
@@ -52,7 +53,8 @@ entspricht der Prüfsumme.
 | `fail` | mind. eine Pflichtprüfung fehlgeschlagen | Fehler beheben, erneut prüfen |
 
 Optionale Prüfungen (`required: false`) erscheinen im Bericht, führen aber nicht
-zu `fail`/`blocked`.
+zu `fail`/`blocked`. Bestätigte Scope-Drift führt unabhängig von erfolgreichen
+Prüfkommandos zu `fail`.
 
 ## Berichtsaufbau
 
@@ -87,7 +89,8 @@ Empfehlung: Abschluss möglich …
 
 ## Abgrenzung / Folge-Schritte
 
-- **Hard-Enforcement** in `/finish`: Status `fail`/`blocked` verweigert den
-  Abschluss (Folge-Schritt).
-- **Echtes Scope-Drift**: Vergleich geänderter Dateien gegen den deklarierten
-  Datei-Scope aus dem Task-Contract (#106).
+- Offene oder gebrochene Acceptance-Kriterien werden als Restrisiken
+  ausgewiesen; ihr Status wird nicht automatisch aus Testergebnissen geändert.
+- Ohne Task-Contract kann kein fachliches Scope-Urteil gefällt werden. Das Gate
+  meldet diesen Fall, behandelt beliebige Änderungen aber nicht pauschal als
+  Drift.
