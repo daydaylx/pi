@@ -7,6 +7,7 @@ import {
   constants as fsConstants,
   copyFileSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -57,6 +58,7 @@ const REQUIRED_BRIEF_HEADINGS = [
 export interface TodoItem {
   step: number;
   text: string;
+  identityText: string;
   completed: boolean;
   lineIndex: number;
 }
@@ -390,20 +392,24 @@ export function extractSectionItems(
     .filter((line) => line.length > 0);
 }
 
-export function cleanStepText(text: string): string {
-  let cleaned = text
+function cleanStepIdentityText(text: string): string {
+  const cleaned = text
     .replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
 
-  if (cleaned.length > 0) {
-    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  }
-  if (cleaned.length > 80) {
-    cleaned = `${cleaned.slice(0, 77)}...`;
-  }
-  return cleaned;
+  return cleaned.length > 0
+    ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
+    : cleaned;
+}
+
+function truncateStepText(text: string): string {
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+export function cleanStepText(text: string): string {
+  return truncateStepText(cleanStepIdentityText(text));
 }
 
 export function extractTodoItems(planContent: string): TodoItem[] {
@@ -415,11 +421,12 @@ export function extractTodoItems(planContent: string): TodoItem[] {
   for (let index = section.start; index < section.end; index += 1) {
     const match = lines[index].match(/^\s*[-*]\s+\[([ xX])\]\s+(.+?)\s*$/);
     if (!match) continue;
-    const text = cleanStepText(match[2]);
-    if (!text) continue;
+    const identityText = cleanStepIdentityText(match[2]);
+    if (!identityText) continue;
     items.push({
       step: items.length + 1,
-      text,
+      text: truncateStepText(identityText),
+      identityText,
       completed: match[1].trim() !== "",
       lineIndex: index,
     });
@@ -427,8 +434,10 @@ export function extractTodoItems(planContent: string): TodoItem[] {
   return items;
 }
 
-export function computeTodoHash(todo: Pick<TodoItem, "text"> | string): string {
-  const text = typeof todo === "string" ? todo : todo.text;
+export function computeTodoHash(
+  todo: Pick<TodoItem, "identityText"> | string,
+): string {
+  const text = typeof todo === "string" ? todo : todo.identityText;
   return createHash("sha256")
     .update(text.trim().replace(/\s+/g, " ").toLocaleLowerCase("de-DE"), "utf8")
     .digest("hex");
@@ -605,62 +614,220 @@ export function formatArchiveTimestamp(date: Date): string {
   );
 }
 
-export function archivePlanFile(
-  cwd: string,
-  status: "complete" | "incomplete",
-  now = new Date(),
-  expectedPlanHash?: string,
+interface ArchiveClaimOptions {
+  root: string;
+  artifactPath: string;
+  archiveDir: string;
+  archiveName: string;
+  archiveDate: Date;
+  maximumBytes: number;
+  expectedHash: string;
+  missingMessage: string;
+  changedMessage: string;
+  createArchivedContent: (content: string) => string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isErrnoCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === code
+  );
+}
+
+function readClaimedArtifact(
+  root: string,
+  claimPath: string,
+  maximumBytes: number,
 ): string {
-  const root = resolve(cwd);
-  const planPath = getPlanPath(root);
-  const archiveDir = getPlanArchiveDir(root);
-  const content = readPlanFile(root);
-  if (content === undefined)
-    throw new Error(`Plan-Datei nicht gefunden: ${planPath}`);
-  const initialHash = hashPlanContent(content);
-  if (expectedPlanHash !== undefined && initialHash !== expectedPlanHash) {
+  assertNoSymlinkComponents(root, claimPath);
+  const file = lstatSync(claimPath);
+  if (!file.isFile()) {
+    throw new Error(`Artefakt-Claim ist keine reguläre Datei: ${claimPath}`);
+  }
+  if (file.size > maximumBytes) {
     throw new Error(
-      "Plan wurde zwischenzeitlich geändert; Archivierung abgebrochen.",
+      `Artefakt ist zu groß (${file.size} Bytes; maximal ${maximumBytes} Bytes).`,
     );
   }
+  const content = readFileSync(claimPath, "utf8");
+  assertArtifactSize("Artefakt", content, maximumBytes);
+  return content;
+}
 
+function restoreArchiveClaim(
+  claimPath: string,
+  artifactPath: string,
+): string | undefined {
+  if (!existsSync(claimPath)) return undefined;
+  try {
+    if (!lstatSync(claimPath).isFile()) return claimPath;
+  } catch {
+    return existsSync(claimPath) ? claimPath : undefined;
+  }
+
+  try {
+    // A hard link restores the exact claimed inode and fails atomically if a
+    // newer artifact already occupies the original path.
+    linkSync(claimPath, artifactPath);
+    unlinkSync(claimPath);
+    return artifactPath;
+  } catch {
+    // Never overwrite a concurrently recreated artifact. The uniquely named
+    // claim remains as an explicit recovery copy instead.
+    return claimPath;
+  }
+}
+
+function archiveClaimedArtifact(options: ArchiveClaimOptions): string {
+  const {
+    root,
+    artifactPath,
+    archiveDir,
+    archiveName,
+    archiveDate,
+    maximumBytes,
+    expectedHash,
+    missingMessage,
+    changedMessage,
+    createArchivedContent,
+  } = options;
+
+  assertNoSymlinkComponents(root, artifactPath);
+  if (!existsSync(artifactPath)) throw new Error(missingMessage);
   assertNoSymlinkComponents(root, archiveDir);
   mkdirSync(archiveDir, { recursive: true });
   assertNoSymlinkComponents(root, archiveDir);
 
-  const timestamp = formatArchiveTimestamp(now);
-  let suffix = 1;
-  let archivePath = resolve(archiveDir, `${timestamp}-current-plan.md`);
-  while (existsSync(archivePath)) {
-    suffix += 1;
-    archivePath = resolve(archiveDir, `${timestamp}-${suffix}-current-plan.md`);
-  }
+  const claimPath =
+    `${artifactPath}.archive-claim-${process.pid}-${Date.now()}-` +
+    randomUUID();
+  assertNoSymlinkComponents(root, claimPath);
 
-  const separator = content.endsWith("\n") ? "\n" : "\n\n";
-  const archivedContent =
-    `${content}${separator}---\n` +
-    `Archived: ${now.toISOString()}\nStatus: ${status}\n`;
-  const temporaryPath = `${archivePath}.tmp-${process.pid}-${Date.now()}`;
+  let claimed = false;
+  let archivePath: string | undefined;
+  let archiveCreated = false;
+  let temporaryPath: string | undefined;
 
   try {
+    // From this point on, any newly created artifactPath belongs to a newer
+    // writer and must never be removed by this archive operation.
+    renameSync(artifactPath, claimPath);
+    claimed = true;
+
+    const content = readClaimedArtifact(root, claimPath, maximumBytes);
+    if (hashPlanContent(content) !== expectedHash) {
+      throw new Error(changedMessage);
+    }
+    const archivedContent = createArchivedContent(content);
+
+    temporaryPath = resolve(
+      archiveDir,
+      `.${archiveName}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`,
+    );
     writeFileSync(temporaryPath, archivedContent, {
       encoding: "utf8",
       flag: "wx",
       mode: 0o600,
     });
-    const current = readPlanFile(root);
-    if (current === undefined || hashPlanContent(current) !== initialHash) {
-      throw new Error(
-        "Plan wurde zwischenzeitlich geändert; Archivierung abgebrochen.",
-      );
-    }
-    copyFileSync(temporaryPath, archivePath, fsConstants.COPYFILE_EXCL);
-    unlinkSync(planPath);
-  } finally {
-    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
-  }
 
-  return archivePath;
+    const timestampedName = `${formatArchiveTimestamp(archiveDate)}-${archiveName}`;
+    let suffix = 1;
+    while (true) {
+      archivePath = resolve(
+        archiveDir,
+        suffix === 1
+          ? timestampedName
+          : `${timestampedName.slice(0, -archiveName.length)}${suffix}-${archiveName}`,
+      );
+      try {
+        copyFileSync(temporaryPath, archivePath, fsConstants.COPYFILE_EXCL);
+        archiveCreated = true;
+        break;
+      } catch (error) {
+        if (!isErrnoCode(error, "EEXIST")) throw error;
+        suffix += 1;
+      }
+    }
+
+    unlinkSync(claimPath);
+    claimed = false;
+    return archivePath;
+  } catch (error) {
+    const cleanupErrors: string[] = [];
+    if (archiveCreated && archivePath !== undefined) {
+      try {
+        unlinkSync(archivePath);
+      } catch (cleanupError) {
+        cleanupErrors.push(
+          `Archivkopie konnte nicht entfernt werden: ${errorMessage(cleanupError)}`,
+        );
+      }
+    }
+
+    const recoveryPath = claimed
+      ? restoreArchiveClaim(claimPath, artifactPath)
+      : undefined;
+    const recoveryNote =
+      recoveryPath === claimPath
+        ? ` Der beanspruchte Inhalt blieb zur Wiederherstellung unter ${claimPath} erhalten.`
+        : "";
+    const cleanupNote =
+      cleanupErrors.length > 0 ? ` ${cleanupErrors.join(" ")}` : "";
+    throw new Error(`${errorMessage(error)}${recoveryNote}${cleanupNote}`);
+  } finally {
+    if (temporaryPath !== undefined && existsSync(temporaryPath)) {
+      try {
+        unlinkSync(temporaryPath);
+      } catch {
+        // The original or its recovery claim remains intact on failures; a
+        // stale archive temp file must not mask the primary result.
+      }
+    }
+  }
+}
+
+export function archivePlanFile(
+  cwd: string,
+  status: "complete" | "incomplete",
+  expectedPlanHash: string,
+  now = new Date(),
+): string {
+  const root = resolve(cwd);
+  const planPath = getPlanPath(root);
+  const archiveDir = getPlanArchiveDir(root);
+  return archiveClaimedArtifact({
+    root,
+    artifactPath: planPath,
+    archiveDir,
+    archiveName: "current-plan.md",
+    archiveDate: now,
+    maximumBytes: PLAN_MAX_BYTES,
+    expectedHash: expectedPlanHash,
+    missingMessage: `Plan-Datei nicht gefunden: ${planPath}`,
+    changedMessage:
+      "Plan wurde zwischenzeitlich geändert; Archivierung abgebrochen.",
+    createArchivedContent: (content) => {
+      if (status === "complete") {
+        const todos = extractTodoItems(content);
+        if (todos.length === 0 || todos.some((todo) => !todo.completed)) {
+          throw new Error(
+            "Plan ist nicht vollständig; Archivierung als complete abgebrochen.",
+          );
+        }
+      }
+      const separator = content.endsWith("\n") ? "\n" : "\n\n";
+      return (
+        `${content}${separator}---\n` +
+        `Archived: ${now.toISOString()}\nStatus: ${status}\n`
+      );
+    },
+  });
 }
 
 function escapeRegExp(value: string): string {
@@ -758,48 +925,33 @@ export function writeInvalidDecisionBriefAtomic(
   }
 }
 
-export function archiveDecisionBrief(cwd: string, now = new Date()): string {
+export function archiveDecisionBrief(
+  cwd: string,
+  expectedHash: string,
+  now = new Date(),
+): string {
   const root = resolve(cwd);
   const briefPath = getDecisionBriefPath(root);
   const archiveDir = getPlanArchiveDir(root);
-  const content = readDecisionBrief(root);
-  if (content === undefined)
-    throw new Error(`Decision Brief nicht gefunden: ${briefPath}`);
-
-  assertNoSymlinkComponents(root, archiveDir);
-  mkdirSync(archiveDir, { recursive: true });
-  assertNoSymlinkComponents(root, archiveDir);
-
-  const timestamp = formatArchiveTimestamp(now);
-  let suffix = 1;
-  let archivePath = resolve(archiveDir, `${timestamp}-decision-brief.md`);
-  while (existsSync(archivePath)) {
-    suffix += 1;
-    archivePath = resolve(
-      archiveDir,
-      `${timestamp}-${suffix}-decision-brief.md`,
-    );
-  }
-
-  const separator = content.endsWith("\n") ? "\n" : "\n\n";
-  const archivedContent =
-    `${content}${separator}---\n` +
-    `Archived: ${now.toISOString()}\nStatus: superseded\n`;
-  const temporaryPath = `${archivePath}.tmp-${process.pid}-${Date.now()}`;
-
-  try {
-    writeFileSync(temporaryPath, archivedContent, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    renameSync(temporaryPath, archivePath);
-    unlinkSync(briefPath);
-  } finally {
-    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
-  }
-
-  return archivePath;
+  return archiveClaimedArtifact({
+    root,
+    artifactPath: briefPath,
+    archiveDir,
+    archiveName: "decision-brief.md",
+    archiveDate: now,
+    maximumBytes: DECISION_BRIEF_MAX_BYTES,
+    expectedHash,
+    missingMessage: `Decision Brief nicht gefunden: ${briefPath}`,
+    changedMessage:
+      "Decision Brief wurde zwischenzeitlich geändert; Archivierung abgebrochen.",
+    createArchivedContent: (content) => {
+      const separator = content.endsWith("\n") ? "\n" : "\n\n";
+      return (
+        `${content}${separator}---\n` +
+        `Archived: ${now.toISOString()}\nStatus: superseded\n`
+      );
+    },
+  });
 }
 
 /**

@@ -248,6 +248,12 @@ The central `mode-permissions.ts` extension enforces file, path, Bash and
 secret policy. Hard warnings for secrets, system paths, destructive root
 operations and similar critical actions remain in place.
 
+At `read-bash`, an allowlisted command is trusted only when its first `PATH`
+resolution (or explicit absolute path) canonically points into a system binary
+root. Workspace, temporary, relative, user-bin, pager, helper-execution and
+write-capable option variants remain blocked even when the executable name
+itself is allowlisted.
+
 ## Plan file structure
 
 Only two sections are required: `Auftrag` (the task) and `Todos` (at least
@@ -272,12 +278,16 @@ prefix such as `## 5. Todos` is accepted. During execution, the
 `plan_progress({ step, status, evidence })` tool records `in_progress`,
 `completed`, or `blocked`; `completed` atomically checks the matching Markdown
 checkbox. Every status requires a concrete evidence string. `/done <n> [m …]`
-remains the idle-only manual fallback. Legacy `[PLAN-PROGRESS]` and `[DONE:n]`
+remains the idle-only manual fallback for the currently leased `/work`
+execution; it cannot complete an unrelated or stale plan. Legacy
+`[PLAN-PROGRESS]` and `[DONE:n]`
 responses are accepted only from successful terminal assistant responses and
 must match the active execution hash. As soon as every checkbox is checked,
-the plan is archived after the complete agent run has settled under
+the plan is archived only after the complete agent run has settled and the
+verification gate returned `pass`, under
 `.agent/plans/archive/YYYY-MM-DD-HHMM-current-plan.md` with `Status:
-complete`, and an existing Decision Brief is archived along with it. If
+complete`. A Decision Brief is archived along with it only when its current
+hash is linked to that plan. If
 archiving fails while the plan is still complete, the phase falls back to
 `ready`; if the plan changed or contains open todos, execution becomes
 `paused`. In both cases the active plan is retained. Invoking `/work` on an
@@ -287,6 +297,12 @@ offers to archive it directly (confirmation) instead of only pointing at
 (`Status: incomplete`, requires interactive confirmation) or as that retry
 path.
 
+All completion paths (`/done`, settled autoarchive, the already-complete
+`/work` path, and `/finish`) use the same hard verification gate. A `fail`,
+`blocked`, or gate execution error keeps the active artifacts in place. Only
+`/finish` may override that result, and only after an explicit TUI
+confirmation.
+
 Workflow metadata is stored atomically beside the plan in the versioned
 `.agent/plans/current-plan.state.json` sidecar. It includes the plan hash,
 phase, mode, review hash, creation mode, and evidence-backed progress records.
@@ -294,14 +310,20 @@ The Markdown plan remains authoritative: a missing, invalid, or hash-stale
 sidecar is reconstructed conservatively from the plan structure and
 checkboxes on session start.
 
-Sidecar CAS conflicts are fail-closed: the losing session does not start a
-review, decision or execution turn, reloads the winning revision, and can retry
-without restarting the session. An idle `/work` continuation revalidates the
-plan hash before reusing its execution ID. Complete archival revalidates hash
-and todos while holding the workspace lock. Async confirmations and menus are
-bound to the originating session epoch, so results from a replaced session are
-ignored. Unreadable plan or Decision-Brief artifacts are never treated as
-missing and are not overwritten.
+Every sidecar write uses a CAS token over the exact persisted bytes plus the
+current plan hash; discards additionally bind the available plan identity or
+hash. Conflicts are fail-closed: the losing session does not start a review,
+decision or execution turn, reloads the winning state, and can retry without
+restarting the session. A live `/work`
+execution additionally owns a 90-second lease renewed every 30 seconds.
+Another session leaves that execution untouched unless the user explicitly
+confirms takeover; expired leases recover as `paused`. `/work` re-reads and
+revalidates the exact plan after all trust/resume/takeover confirmations before
+claiming and sending it. Complete archival revalidates hash and todos while
+holding the workspace lock. Async confirmations and menus are bound to the
+originating session epoch, so results from a replaced session are ignored.
+Unreadable plan or Decision-Brief artifacts are never treated as missing and
+are not overwritten.
 
 ## Permission shortcut
 

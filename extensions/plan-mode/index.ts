@@ -91,6 +91,7 @@ import {
   WORKFLOW_CAPABILITY_EVENTS,
   type WorkflowCapabilityRequest,
   type WorkflowCapabilityState,
+  type WorkflowStateDiscardedEvent,
 } from "../shared/workflow-capabilities.ts";
 import { loadSetupConfig } from "../setup-core/config.ts";
 import {
@@ -113,13 +114,15 @@ import {
   type PlanAssistantAction,
 } from "./plan-menu.ts";
 import {
+  assertWorkflowStateToken,
+  computeWorkflowStateToken,
   createWorkflowStateSnapshot,
+  isExecutionLeaseLive,
   loadWorkflowState,
-  readWorkflowStateRevision,
-  removeWorkflowState,
+  removeWorkflowStateAtomicCAS,
   withWorkspaceLock,
-  writeWorkflowStateAtomic,
   writeWorkflowStateAtomicCAS,
+  type WorkflowExecutionMetadata,
   type PlanProgressRecord,
   type PlanProgressStatus,
 } from "./state.ts";
@@ -139,6 +142,8 @@ const SUBAGENT_EXECUTING_REMINDER =
   "SUBAGENTEN:\nNutze das `subagent`-Tool bei Bedarf (siehe AGENTS.md → Subagenten-Delegation), z. B. für abgegrenzte Teilscopes oder Prüfungen nach Änderungen.";
 
 const PLAN_PROGRESS_STATUSES = ["in_progress", "completed", "blocked"] as const;
+const EXECUTION_LEASE_MS = 90_000;
+const EXECUTION_HEARTBEAT_MS = 30_000;
 
 const PlanProgressParams = Type.Object({
   executionId: Type.String({
@@ -267,6 +272,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
   let latestCwd: string | undefined;
+  let latestContext: ExtensionContext | undefined;
   let planModeEverUsed = false;
   let sessionEpoch = 0;
   let activeSessionId: string | undefined;
@@ -274,7 +280,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   let workflowRevision = 0;
   let currentPlanId: string | undefined;
   let decisionBriefHash: string | undefined;
-  let sidecarCasReady = false;
+  let workflowStateToken = "missing";
+  let executionOwnerId = randomUUID();
+  let foreignExecution: WorkflowExecutionMetadata | undefined;
+  let leaseHeartbeat: ReturnType<typeof setTimeout> | undefined;
   let executePlanInFlight = false;
   let settledRun:
     | {
@@ -290,6 +299,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         sessionId: string;
         startedAt: string;
         planHash?: string;
+        ownerId?: string;
+        leaseExpiresAt?: string;
       }
     | undefined;
   let pendingPlan:
@@ -343,8 +354,58 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       sessionId: ctx.sessionManager.getSessionId(),
       startedAt: new Date().toISOString(),
       ...(planHash ? { planHash } : {}),
+      ...(kind === "executing"
+        ? {
+            ownerId: executionOwnerId,
+            leaseExpiresAt: new Date(
+              Date.now() + EXECUTION_LEASE_MS,
+            ).toISOString(),
+          }
+        : {}),
     };
     return id;
+  }
+
+  function stopExecutionHeartbeat(): void {
+    if (leaseHeartbeat !== undefined) clearTimeout(leaseHeartbeat);
+    leaseHeartbeat = undefined;
+  }
+
+  function scheduleExecutionHeartbeat(ctx: ExtensionContext): void {
+    stopExecutionHeartbeat();
+    if (
+      phase !== "executing" ||
+      activeRun?.kind !== "executing" ||
+      activeRun.ownerId !== executionOwnerId
+    ) {
+      return;
+    }
+    const token = captureSessionToken(ctx);
+    const executionId = activeRun.id;
+    leaseHeartbeat = setTimeout(() => {
+      leaseHeartbeat = undefined;
+      if (
+        !isSessionTokenCurrent(token, ctx) ||
+        phase !== "executing" ||
+        activeRun?.id !== executionId ||
+        activeRun.ownerId !== executionOwnerId
+      ) {
+        return;
+      }
+      activeRun.leaseExpiresAt = new Date(
+        Date.now() + EXECUTION_LEASE_MS,
+      ).toISOString();
+      if (!persistState(ctx, activeRun.planHash)) {
+        phase = "paused";
+        activeRun = undefined;
+        updateStatus(ctx);
+        ctx.ui.notify(
+          "Execution-Lease konnte nicht erneuert werden; Ausführung wurde sicher pausiert.",
+          "warning",
+        );
+      }
+    }, EXECUTION_HEARTBEAT_MS);
+    leaseHeartbeat.unref?.();
   }
 
   function isCurrentRun(
@@ -356,6 +417,61 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       activeRun.sessionId === ctx.sessionManager.getSessionId() &&
       activeSessionId === ctx.sessionManager.getSessionId()
     );
+  }
+
+  function hasCurrentExecutionLease(ctx: ExtensionContext): boolean {
+    if (
+      !isCurrentRun("executing", ctx) ||
+      !activeRun?.planHash ||
+      activeRun.ownerId !== executionOwnerId
+    ) {
+      return false;
+    }
+    return isExecutionLeaseLive({
+      executionId: activeRun.id,
+      startedAt: activeRun.startedAt,
+      expectedPlanHash: activeRun.planHash,
+      sessionId: activeRun.sessionId,
+      ownerId: activeRun.ownerId,
+      leaseExpiresAt: activeRun.leaseExpiresAt,
+    });
+  }
+
+  function hasBlockingForeignExecution(
+    ctx: ExtensionContext,
+    action: string,
+  ): boolean {
+    if (!foreignExecution) return false;
+    if (isExecutionLeaseLive(foreignExecution)) {
+      ctx.ui.notify(
+        `${action} ist blockiert, solange Execution ${foreignExecution.executionId} in einer anderen Session geleast ist. Nutze /work für eine explizite Übernahme.`,
+        "warning",
+      );
+      return true;
+    }
+    try {
+      const loaded = loadWorkflowState(ctx.cwd);
+      workflowStateToken = loaded.stateToken;
+      if (loaded.state) {
+        mode = loaded.state.mode;
+        phase = loaded.state.phase;
+        reviewedHash = loaded.state.reviewedHash;
+        planCreationMode = loaded.state.planCreationMode;
+        progressRecords = loaded.state.progress;
+        workflowRevision = loaded.state.revision;
+        currentPlanId = loaded.state.planId;
+        decisionBriefHash = loaded.state.decisionBriefHash;
+      }
+      foreignExecution = undefined;
+      updateStatus(ctx);
+      return false;
+    } catch (error) {
+      ctx.ui.notify(
+        `${action} ist blockiert, weil der abgelaufene Fremdzustand nicht sicher geladen werden konnte: ${error instanceof Error ? error.message : String(error)}`,
+        "warning",
+      );
+      return true;
+    }
   }
 
   function workflowCapabilityState(): WorkflowCapabilityState {
@@ -384,6 +500,51 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     (event as WorkflowCapabilityRequest).respond({
       state: workflowCapabilityState(),
     });
+  });
+
+  pi.events.on(WORKFLOW_CAPABILITY_EVENTS.stateDiscarded, (event) => {
+    const discarded = event as WorkflowStateDiscardedEvent;
+    const ctx = latestContext;
+    if (
+      !ctx ||
+      discarded.cwd !== latestCwd ||
+      discarded.sessionId !== activeSessionId ||
+      discarded.sessionId !== ctx.sessionManager.getSessionId()
+    ) {
+      return;
+    }
+    try {
+      const loaded = loadWorkflowState(ctx.cwd);
+      workflowStateToken = loaded.stateToken;
+      if (loaded.state) {
+        mode = loaded.state.mode;
+        phase = loaded.state.phase;
+        reviewedHash = loaded.state.reviewedHash;
+        planCreationMode = loaded.state.planCreationMode;
+        progressRecords = loaded.state.progress;
+        workflowRevision = loaded.state.revision;
+        currentPlanId = loaded.state.planId;
+        decisionBriefHash = loaded.state.decisionBriefHash;
+      } else {
+        mode = "work";
+        phase = "idle";
+        reviewedHash = undefined;
+        planCreationMode = undefined;
+        progressRecords = [];
+        workflowRevision = 0;
+        currentPlanId = undefined;
+        decisionBriefHash = undefined;
+      }
+      activeRun = undefined;
+      foreignExecution = undefined;
+      stopExecutionHeartbeat();
+      updateStatus(ctx);
+    } catch (error) {
+      ctx.ui.notify(
+        `Verworfener Workflow-Zustand konnte nicht in-memory synchronisiert werden: ${error instanceof Error ? error.message : String(error)}`,
+        "warning",
+      );
+    }
   });
 
   pi.events.on(CONTROL_CENTER_EVENTS.workflowThinkingDefault, (event) => {
@@ -520,15 +681,34 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   function persistState(
     ctx: ExtensionContext,
     expectedPlanHash?: string,
+    options: { allowMissingPlanCleanup?: boolean } = {},
   ): boolean {
     try {
       const content = readPlanFile(ctx.cwd);
       if (content === undefined) {
-        withWorkspaceLock(ctx.cwd, () => removeWorkflowState(ctx.cwd));
+        if (phase === "executing" || activeRun?.kind === "executing") {
+          throw new Error(
+            "Aktiver Plan fehlt während einer Execution; Sidecar bleibt zur Recovery erhalten.",
+          );
+        }
+        if (workflowStateToken !== "missing") {
+          if (!options.allowMissingPlanCleanup) {
+            throw new Error(
+              "Plan fehlt ohne bestätigte Archivierung; vorhandener Sidecar bleibt zur Recovery erhalten.",
+            );
+          }
+          removeWorkflowStateAtomicCAS(ctx.cwd, {
+            stateToken: workflowStateToken,
+            ...(currentPlanId ? { planId: currentPlanId } : {}),
+          });
+        }
         progressRecords = [];
         workflowRevision = 0;
         currentPlanId = undefined;
-        sidecarCasReady = false;
+        decisionBriefHash = undefined;
+        workflowStateToken = "missing";
+        foreignExecution = undefined;
+        stopExecutionHeartbeat();
         pi.appendEntry<PersistedWorkflowState>("plan-mode", {
           mode,
           phase,
@@ -561,26 +741,24 @@ export default function planModeExtension(pi: ExtensionAPI): void {
                 startedAt: activeRun.startedAt,
                 expectedPlanHash: activeRun.planHash,
                 sessionId: activeRun.sessionId,
+                ownerId: activeRun.ownerId,
+                leaseExpiresAt: activeRun.leaseExpiresAt,
               }
             : undefined,
         progress: progressRecords,
       });
-      let written = snapshot;
-      if (sidecarCasReady) {
-        written = writeWorkflowStateAtomicCAS(ctx.cwd, snapshot, {
-          revision: workflowRevision,
-          planHash: snapshot.planHash,
-        });
-      } else {
-        withWorkspaceLock(ctx.cwd, () =>
-          writeWorkflowStateAtomic(ctx.cwd, snapshot),
-        );
-      }
+      const written = writeWorkflowStateAtomicCAS(ctx.cwd, snapshot, {
+        planHash: snapshot.planHash,
+        stateToken: workflowStateToken,
+      });
       progressRecords = written.progress;
       workflowRevision = written.revision;
       currentPlanId = written.planId;
       decisionBriefHash = written.decisionBriefHash;
-      sidecarCasReady = true;
+      workflowStateToken = computeWorkflowStateToken(written);
+      foreignExecution = undefined;
+      if (phase === "executing") scheduleExecutionHeartbeat(ctx);
+      else stopExecutionHeartbeat();
       pi.appendEntry<PersistedWorkflowState>("plan-mode", {
         mode,
         phase,
@@ -591,27 +769,33 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       try {
-        const persistedRevision = readWorkflowStateRevision(ctx.cwd);
         const loaded = loadWorkflowState(ctx.cwd);
+        workflowStateToken = loaded.stateToken;
         if (loaded.state) {
           mode = loaded.state.mode;
           phase = loaded.state.phase;
           reviewedHash = loaded.state.reviewedHash;
           planCreationMode = loaded.state.planCreationMode;
           progressRecords = loaded.state.progress;
-          workflowRevision = persistedRevision;
+          workflowRevision = loaded.state.revision;
           currentPlanId = loaded.state.planId;
           decisionBriefHash = loaded.state.decisionBriefHash;
-          sidecarCasReady = true;
+          foreignExecution =
+            loaded.state.lifecycle === "executing" &&
+            loaded.state.execution?.ownerId !== executionOwnerId
+              ? loaded.state.execution
+              : undefined;
           activeRun = undefined;
         } else {
           progressRecords = [];
           workflowRevision = 0;
           currentPlanId = undefined;
           decisionBriefHash = undefined;
-          sidecarCasReady = false;
+          workflowStateToken = loaded.stateToken;
+          foreignExecution = undefined;
           activeRun = undefined;
         }
+        stopExecutionHeartbeat();
         updateStatus(ctx);
       } catch {
         // An unreadable or invalid winning state remains fail-closed. A later
@@ -643,6 +827,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
   function updateStatus(ctx: ExtensionContext): void {
     latestCwd = ctx.cwd;
+    latestContext = ctx;
     let todos: TodoItem[] = [];
     try {
       todos = readTodos(ctx.cwd);
@@ -686,7 +871,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   function normalizeInterruptedPhase(ctx: ExtensionContext): void {
     if (phase !== "executing" && phase !== "reviewing" && phase !== "deciding")
       return;
-    if (phase === "deciding") {
+    const interruptedPhase = phase;
+    activeRun = undefined;
+    if (interruptedPhase === "executing") stopExecutionHeartbeat();
+    if (interruptedPhase === "deciding") {
       // Ein unterbrochener Klär-Turn wird nicht als „deciding" fortgesetzt;
       // /decide kann erneut gestartet werden.
       let planExists = false;
@@ -760,6 +948,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
     options: { force?: boolean; skipAbort?: boolean } = {},
   ): Promise<boolean> {
+    if (hasBlockingForeignExecution(ctx, "Workflow-Wechsel")) return false;
     const previous = {
       mode,
       phase,
@@ -767,9 +956,18 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       planCreationMode,
       thinkingLevel: pi.getThinkingLevel(),
     };
-    // Same-Mode-Auswahl im Idle ist ein No-op: ein versehentliches
-    // Shift+Tab+Enter darf weder abbrechen noch neu initialisieren.
+    // Work bleibt im Idle ein No-op. Eine erneute Auswahl desselben Planmodus
+    // bedeutet dagegen ausdrücklich "weiter planen" und invalidiert daher
+    // einen alten Reviewstatus, ohne die ursprüngliche Planart zu verlieren.
     if (!options.force && target === mode && ctx.isIdle()) {
+      if (target !== "work") {
+        invalidateReview();
+        phase = "draft";
+        updateStatus(ctx);
+        if (!persistState(ctx)) return false;
+        ctx.ui.notify(`${MODE_LABEL[target]} wird fortgesetzt.`, "info");
+        return true;
+      }
       ctx.ui.notify(`${MODE_LABEL[target]} ist bereits aktiv.`, "info");
       return true;
     }
@@ -985,8 +1183,33 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
     if (decision === "archive-first") {
       try {
-        const archivePath = archivePlanFile(ctx.cwd, "incomplete");
+        const gate = await runGateBeforeFinish(ctx);
+        if (!isSessionTokenCurrent(token, ctx)) return false;
+        if (gate.status !== "pass") {
+          ctx.ui.notify(
+            `Verifikations-Gate ${gate.status.toUpperCase()}: bestehender Plan bleibt aktiv.\n${formatGateReport(gate)}`,
+            "warning",
+          );
+          return false;
+        }
+        const archivePath = withWorkspaceLock(ctx.cwd, () => {
+          assertWorkflowStateToken(ctx.cwd, workflowStateToken);
+          return archivePlanFile(
+            ctx.cwd,
+            "incomplete",
+            hashPlanContent(planState.content),
+          );
+        });
         reviewedHash = undefined;
+        if (
+          !persistState(ctx, undefined, { allowMissingPlanCleanup: true })
+        ) {
+          ctx.ui.notify(
+            "Plan wurde archiviert, aber der konkurrierend geänderte Sidecar blieb zur Recovery erhalten.",
+            "warning",
+          );
+          return false;
+        }
         ctx.ui.notify(
           `Bisheriger Plan archiviert: ${relative(ctx.cwd, archivePath)}`,
           "info",
@@ -1008,6 +1231,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
     options: { attachDecisionBrief?: boolean } = {},
   ): Promise<void> {
+    if (hasBlockingForeignExecution(ctx, "Neuer Plan")) return;
     // Never archive, overwrite or clear progress while an old turn can still
     // write to the active plan. This ordering is the data-loss boundary.
     if (!(await confirmAbortActiveTurn(ctx))) return;
@@ -1071,7 +1295,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         const targetMode: WorkflowMode =
           mode === "simple_plan" || mode === "detailed_plan"
             ? mode
-            : "detailed_plan";
+            : (planCreationMode ?? "detailed_plan");
         await setWorkflowMode(targetMode, ctx);
         return;
       }
@@ -1174,6 +1398,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       );
       return false;
     }
+    if (hasBlockingForeignExecution(ctx, "Decision-Intake")) return false;
     if (!(await confirmAbortActiveTurn(ctx))) return false;
     normalizeInterruptedPhase(ctx);
 
@@ -1208,7 +1433,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       }
       if (decision === "archive-first") {
         try {
-          const archivePath = archiveDecisionBrief(ctx.cwd);
+          const archivePath = withWorkspaceLock(ctx.cwd, () =>
+            archiveDecisionBrief(
+              ctx.cwd,
+              hashPlanContent(briefState.content),
+            ),
+          );
           ctx.ui.notify(
             `Bisheriges Decision Brief archiviert: ${relative(ctx.cwd, archivePath)}`,
             "info",
@@ -2078,8 +2308,9 @@ FORTSCHRITT:
   ): Promise<void> {
     if (phase === "ready" && isCurrentRun("executing", ctx)) {
       const expectedHash = activeRun?.planHash;
-      activeRun = undefined;
       if (!latestAssistantSucceeded(event.messages)) {
+        activeRun = undefined;
+        stopExecutionHeartbeat();
         updateStatus(ctx);
         persistState(ctx);
         ctx.ui.notify(
@@ -2088,27 +2319,18 @@ FORTSCHRITT:
         );
         return;
       }
-      // #102: the autoarchive path never blocks itself — a broken gate must
-      // never silently discard a completed plan's working tree. On fail it
-      // just skips the autoarchive and points to /finish, which does gate
-      // with an explicit override.
-      let gateBlocksAutoarchive = false;
-      try {
-        const gate = await runGateBeforeFinish(ctx);
-        gateBlocksAutoarchive = gate.status !== "pass";
-      } catch {
-        // Gate itself failing to run is not a reason to block autoarchive.
-      }
-      if (gateBlocksAutoarchive) {
+      if (!expectedHash) {
+        activeRun = undefined;
+        stopExecutionHeartbeat();
         updateStatus(ctx);
         persistState(ctx);
         ctx.ui.notify(
-          "Alle Todos sind erledigt, aber das Verifikations-Gate meldet Befunde. Nutze /finish für eine geprüfte Archivierung mit Bestätigung.",
+          "Alle Todos sind erledigt, aber der erwartete Plan-Hash fehlt. Automatische Archivierung wurde sicher blockiert.",
           "warning",
         );
         return;
       }
-      archiveCompletedPlan(ctx, expectedHash);
+      await archiveCompletedPlan(ctx, expectedHash);
       return;
     }
 
@@ -2306,6 +2528,7 @@ FORTSCHRITT:
   });
 
   async function reviewPlan(ctx: ExtensionContext): Promise<void> {
+    if (hasBlockingForeignExecution(ctx, "Plan-Review")) return;
     if (!(await confirmAbortActiveTurn(ctx))) return;
     normalizeInterruptedPhase(ctx);
 
@@ -2371,10 +2594,20 @@ ${content}
   // nicht als veralteter Kontext in spätere, fremde Plan-Turns injiziert wird.
   // Fehler sind nicht fatal: das Plan-Archiv gilt unabhängig davon.
   function archiveBriefAlongsidePlan(ctx: ExtensionContext): void {
-    decisionBriefHash = undefined;
+    const expectedHash = decisionBriefHash;
+    if (!expectedHash) return;
     try {
-      if (readDecisionBrief(ctx.cwd) === undefined) return;
-      archiveDecisionBrief(ctx.cwd);
+      const brief = readDecisionBrief(ctx.cwd);
+      if (!brief || hashPlanContent(brief) !== expectedHash) {
+        ctx.ui.notify(
+          "Vorhandenes Decision Brief gehört nicht zum abgeschlossenen Plan und bleibt aktiv.",
+          "warning",
+        );
+        decisionBriefHash = undefined;
+        return;
+      }
+      archiveDecisionBrief(ctx.cwd, expectedHash);
+      decisionBriefHash = undefined;
       ctx.ui.notify("Decision Brief mitarchiviert.", "info");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2385,11 +2618,8 @@ ${content}
     }
   }
 
-  // #102 hard enforcement: runs the advisory verification gate before an
-  // explicit completion (/finish). Only /finish blocks on fail/blocked, with
-  // an explicit TUI override — the agent_settled autoarchive path (below)
-  // deliberately never blocks itself to avoid silently discarding a
-  // completed, working-tree-only plan; it just points to /finish instead.
+  // Einheitliches hartes Abschluss-Gate. Nur /finish darf einen Befund nach
+  // expliziter TUI-Bestätigung übersteuern.
   async function runGateBeforeFinish(
     ctx: ExtensionContext,
   ): Promise<GateResult> {
@@ -2408,34 +2638,62 @@ ${content}
   // Gemeinsamer Abschlusspfad für agent_settled-Autoarchiv, /done und den
   // "alle Todos erledigt"-Fall von /work. Bei Archivfehlern bleibt die Phase
   // auf "ready", damit /finish als Retry dient.
-  function archiveCompletedPlan(
+  async function archiveCompletedPlan(
     ctx: ExtensionContext,
-    expectedPlanHash?: string,
-  ): boolean {
+    expectedPlanHash: string,
+  ): Promise<boolean> {
+    const token = captureSessionToken(ctx);
     let archived = false;
     try {
-      const archivePath = withWorkspaceLock(ctx.cwd, () => {
-        const content = readPlanFile(ctx.cwd);
-        if (content === undefined) throw new Error("Aktiver Plan fehlt.");
-        const currentHash = hashPlanContent(content);
-        if (expectedPlanHash && currentHash !== expectedPlanHash) {
-          throw new Error(
-            "Plan wurde nach der Abschlussprüfung verändert; Archivierung abgebrochen.",
-          );
-        }
-        const todos = extractTodoItems(content);
-        if (todos.length === 0 || todos.some((todo) => !todo.completed)) {
-          throw new Error(
-            "Plan enthält wieder offene oder keine Todos; er wird nicht als complete archiviert.",
-          );
-        }
-        return archivePlanFile(ctx.cwd, "complete", new Date(), currentHash);
-      });
+      const beforeGate = readPlanFile(ctx.cwd);
+      if (
+        beforeGate === undefined ||
+        hashPlanContent(beforeGate) !== expectedPlanHash
+      ) {
+        throw new Error(
+          "Plan wurde vor der Abschlussprüfung verändert oder entfernt.",
+        );
+      }
+      const todos = extractTodoItems(beforeGate);
+      if (todos.length === 0 || todos.some((todo) => !todo.completed)) {
+        throw new Error(
+          "Plan enthält wieder offene oder keine Todos; er wird nicht als complete archiviert.",
+        );
+      }
+      let gate: GateResult;
+      try {
+        gate = await runGateBeforeFinish(ctx);
+      } catch (error) {
+        throw new Error(
+          `Verifikations-Gate konnte nicht ausgeführt werden: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (!isSessionTokenCurrent(token, ctx)) return false;
+      if (gate.status !== "pass") {
+        phase = "ready";
+        activeRun = undefined;
+        stopExecutionHeartbeat();
+        updateStatus(ctx);
+        persistState(ctx, expectedPlanHash);
+        ctx.ui.notify(
+          `Verifikations-Gate ${gate.status.toUpperCase()}: automatische Archivierung blockiert.\n${formatGateReport(gate)}\nBehebe die Befunde oder nutze /finish für eine explizite TUI-Übersteuerung.`,
+          "warning",
+        );
+        return false;
+      }
+      const archivePath = withWorkspaceLock(ctx.cwd, () =>
+        {
+          assertWorkflowStateToken(ctx.cwd, workflowStateToken);
+          return archivePlanFile(ctx.cwd, "complete", expectedPlanHash);
+        },
+      );
       archiveBriefAlongsidePlan(ctx);
       clearTaskContract(ctx.cwd);
       phase = mode !== "work" ? "draft" : "idle";
       reviewedHash = undefined;
       activeRun = undefined;
+      foreignExecution = undefined;
+      stopExecutionHeartbeat();
       archived = true;
       pi.sendMessage(
         {
@@ -2456,6 +2714,8 @@ ${content}
         stillComplete = false;
       }
       phase = mode === "work" ? (stillComplete ? "ready" : "paused") : "draft";
+      activeRun = undefined;
+      stopExecutionHeartbeat();
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(
         `Archivierung als complete fehlgeschlagen: ${message}\nPlan bleibt aktiv; prüfe ihn und nutze danach /finish erneut.`,
@@ -2463,7 +2723,7 @@ ${content}
       );
     }
     updateStatus(ctx);
-    persistState(ctx);
+    persistState(ctx, undefined, { allowMissingPlanCleanup: archived });
     return archived;
   }
 
@@ -2482,10 +2742,110 @@ ${content}
 
   async function executePlanInternal(ctx: ExtensionContext): Promise<void> {
     const token = captureSessionToken(ctx);
+    let takeoverConfirmed = false;
+    if (!ctx.isProjectTrusted()) {
+      if (!ctx.hasUI || ctx.mode !== "tui") {
+        ctx.ui.notify(
+          "Ein Plan aus einem nicht vertrauenswürdigen Workspace kann non-interaktiv nicht ausgeführt werden.",
+          "warning",
+        );
+        return;
+      }
+      const trustedResume = await ctx.ui.confirm(
+        "Plan aus nicht vertrauenswürdigem Workspace ausführen?",
+        "Der Planinhalt stammt aus dem aktuellen Repository. Nur fortfahren, wenn du ihn geprüft hast.",
+      );
+      if (!isSessionTokenCurrent(token, ctx) || !trustedResume) return;
+
+      // Untrusted artifacts stay inactive at session_start. After the explicit
+      // trust confirmation, hydrate their exact token/lease so the first
+      // /work attempt can claim safely without an avoidable CAS retry.
+      try {
+        const loaded = loadWorkflowState(ctx.cwd);
+        workflowStateToken = loaded.stateToken;
+        if (loaded.state) {
+          mode = loaded.state.mode;
+          phase = loaded.state.phase;
+          reviewedHash = loaded.state.reviewedHash;
+          planCreationMode = loaded.state.planCreationMode;
+          progressRecords = loaded.state.progress;
+          workflowRevision = loaded.state.revision;
+          currentPlanId = loaded.state.planId;
+          decisionBriefHash = loaded.state.decisionBriefHash;
+          foreignExecution =
+            loaded.state.lifecycle === "executing" &&
+            isExecutionLeaseLive(loaded.state.execution) &&
+            loaded.state.execution?.ownerId !== executionOwnerId
+              ? loaded.state.execution
+              : undefined;
+        }
+      } catch (error) {
+        ctx.ui.notify(
+          `Plan-Artefakte konnten nach der Vertrauensbestätigung nicht sicher geladen werden: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        );
+        return;
+      }
+    }
+    if (phase === "executing" && foreignExecution) {
+      if (!ctx.hasUI || ctx.mode !== "tui") {
+        ctx.ui.notify(
+          "Dieser Plan besitzt eine aktive Execution-Lease in einer anderen Session. Eine Übernahme muss interaktiv mit /work bestätigt werden.",
+          "warning",
+        );
+        return;
+      }
+      const expectedForeign = foreignExecution;
+      const takeover = await ctx.ui.confirm(
+        "Aktive Planausführung übernehmen?",
+        `Execution ${expectedForeign.executionId} läuft in einer anderen Session. Die alte Session verliert beim nächsten CAS/Heartbeat ihre Schreibberechtigung.`,
+      );
+      if (!isSessionTokenCurrent(token, ctx) || !takeover) return;
+      const loaded = loadWorkflowState(ctx.cwd);
+      if (
+        loaded.state?.lifecycle === "executing" &&
+        loaded.state.execution &&
+        (loaded.state.execution.executionId !== expectedForeign.executionId ||
+          loaded.state.execution.ownerId !== expectedForeign.ownerId)
+      ) {
+        ctx.ui.notify(
+          "Die aktive Execution hat sich während der Bestätigung geändert. Übernahme abgebrochen; starte /work erneut.",
+          "warning",
+        );
+        return;
+      }
+      workflowStateToken = loaded.stateToken;
+      if (loaded.state) {
+        mode = loaded.state.mode;
+        phase = "paused";
+        reviewedHash = loaded.state.reviewedHash;
+        planCreationMode = loaded.state.planCreationMode;
+        progressRecords = loaded.state.progress;
+        workflowRevision = loaded.state.revision;
+        currentPlanId = loaded.state.planId;
+        decisionBriefHash = loaded.state.decisionBriefHash;
+      }
+      foreignExecution = undefined;
+      activeRun = undefined;
+      takeoverConfirmed = true;
+      updateStatus(ctx);
+      if (!persistState(ctx, expectedForeign.expectedPlanHash)) {
+        ctx.ui.notify(
+          "Execution konnte wegen eines konkurrierenden Zustands nicht übernommen werden.",
+          "warning",
+        );
+        return;
+      }
+    }
     if (phase === "executing") {
-      if (!isCurrentRun("executing", ctx) || !activeRun?.id) {
+      if (
+        !isCurrentRun("executing", ctx) ||
+        !activeRun?.id ||
+        !hasCurrentExecutionLease(ctx)
+      ) {
         phase = "paused";
         activeRun = undefined;
+        stopExecutionHeartbeat();
         updateStatus(ctx);
         persistState(ctx);
       } else if (!ctx.isIdle()) {
@@ -2537,7 +2897,14 @@ ${content}
     }
 
     if (content === undefined) {
-      await setWorkflowMode("work", ctx, { force: true, skipAbort: true });
+      if (
+        !(await setWorkflowMode("work", ctx, {
+          force: true,
+          skipAbort: true,
+        }))
+      ) {
+        return;
+      }
       phase = "idle";
       activeRun = undefined;
       updateStatus(ctx);
@@ -2564,23 +2931,7 @@ ${content}
       return;
     }
 
-    if (!ctx.isProjectTrusted()) {
-      if (!ctx.hasUI || ctx.mode !== "tui") {
-        ctx.ui.notify(
-          "Ein Plan aus einem nicht vertrauenswürdigen Workspace kann non-interaktiv nicht ausgeführt werden.",
-          "warning",
-        );
-        return;
-      }
-      const trustedResume = await ctx.ui.confirm(
-        "Plan aus nicht vertrauenswürdigem Workspace ausführen?",
-        "Der Planinhalt stammt aus dem aktuellen Repository. Nur fortfahren, wenn du ihn geprüft hast.",
-      );
-      if (!isSessionTokenCurrent(token, ctx)) return;
-      if (!trustedResume) return;
-    }
-
-    if (phase === "paused" || phase === "blocked") {
+    if ((phase === "paused" || phase === "blocked") && !takeoverConfirmed) {
       if (!ctx.hasUI || ctx.mode !== "tui") {
         ctx.ui.notify(
           "Eine pausierte oder blockierte Ausführung benötigt eine interaktive Resume-Bestätigung.",
@@ -2598,10 +2949,60 @@ ${content}
       if (!resume) return;
     }
 
+    // Sämtliche potenziell wartenden Bestätigungen liegen hinter uns. Von hier
+    // an darf ausschließlich exakt der erneut gelesene und validierte Plan
+    // geclaimt und an den Agenten übergeben werden.
+    const approvedHash = hashPlanContent(content);
+    const approvedState = readPlanFileState(ctx.cwd);
+    if (
+      approvedState.status !== "ok" ||
+      hashPlanContent(approvedState.content) !== approvedHash
+    ) {
+      ctx.ui.notify(
+        approvedState.status === "unreadable"
+          ? `Plan wurde während der Bestätigung unlesbar: ${approvedState.error}`
+          : "Plan wurde während der Bestätigung verändert oder entfernt. /work wurde ohne Ausführung abgebrochen.",
+        "warning",
+      );
+      return;
+    }
+    content = approvedState.content;
+    const approvedStructureErrors = validatePlanStructure(
+      content,
+      effectivePlanType(content),
+    );
+    if (approvedStructureErrors.length > 0) {
+      phase = "draft";
+      reviewedHash = undefined;
+      updateStatus(ctx);
+      persistState(ctx);
+      ctx.ui.notify(
+        `Planstruktur ist vor dem Execution-Claim nicht mehr gültig:\n${approvedStructureErrors.join("\n")}`,
+        "warning",
+      );
+      return;
+    }
+
     if (reviewedHash && reviewedHash !== hashPlanContent(content)) {
       // Review ist reine Statusinformation und darf /work niemals blockieren.
       reviewedHash = undefined;
       if (phase === "reviewed") phase = "draft";
+    }
+
+    if (currentPlanId) {
+      try {
+        const contract = deriveContractFromPlan(content, {
+          planId: currentPlanId,
+        });
+        if (contract) saveTaskContract(ctx.cwd, contract);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(
+          `Task Contract konnte vor /work nicht sicher gespeichert werden: ${message}`,
+          "error",
+        );
+        return;
+      }
     }
 
     const todos = extractTodoItems(content);
@@ -2618,7 +3019,7 @@ ${content}
         );
         if (!isSessionTokenCurrent(token, ctx)) return;
         if (confirmed) {
-          archiveCompletedPlan(ctx, completedHash);
+          await archiveCompletedPlan(ctx, completedHash);
           return;
         }
       }
@@ -2749,6 +3150,17 @@ CHANGED_FILES:
       ) {
         return planProgressResult(
           "Fehler: Die Execution-ID gehört nicht zur aktuell aktiven Planausführung. Nutze /work für einen sicheren Resume.",
+          { ok: false, step: params.step, status },
+        );
+      }
+      if (!hasCurrentExecutionLease(ctx)) {
+        phase = "paused";
+        activeRun = undefined;
+        stopExecutionHeartbeat();
+        updateStatus(ctx);
+        persistState(ctx);
+        return planProgressResult(
+          "Fehler: Die Execution-Lease ist abgelaufen. Ausführung wurde pausiert; nutze /work für einen sicheren Resume.",
           { ok: false, step: params.step, status },
         );
       }
@@ -2976,6 +3388,28 @@ CHANGED_FILES:
         );
         return;
       }
+      if (
+        phase !== "executing" ||
+        !isCurrentRun("executing", ctx)
+      ) {
+        ctx.ui.notify(
+          "/done ist nur für die aktuell geleaste, mit /work gestartete Execution verfügbar.",
+          "warning",
+        );
+        return;
+      }
+      if (!hasCurrentExecutionLease(ctx)) {
+        phase = "paused";
+        activeRun = undefined;
+        stopExecutionHeartbeat();
+        updateStatus(ctx);
+        persistState(ctx);
+        ctx.ui.notify(
+          "/done wurde blockiert, weil die Execution-Lease abgelaufen ist. Nutze /work für einen sicheren Resume.",
+          "warning",
+        );
+        return;
+      }
       const steps = args.trim().split(/\s+/).filter(Boolean).map(Number);
       if (
         steps.length === 0 ||
@@ -3032,7 +3466,7 @@ CHANGED_FILES:
 
       const todos = result.todos;
       if (todos.length > 0 && todos.every((todo) => todo.completed)) {
-        archiveCompletedPlan(ctx, result.planHash);
+        await archiveCompletedPlan(ctx, result.planHash);
         return;
       }
       updateStatus(ctx);
@@ -3044,6 +3478,7 @@ CHANGED_FILES:
     const token = captureSessionToken(ctx);
     await ctx.waitForIdle();
     if (!isSessionTokenCurrent(token, ctx)) return;
+    if (hasBlockingForeignExecution(ctx, "Plan-Abschluss")) return;
 
     let content: string | undefined;
     try {
@@ -3065,6 +3500,7 @@ CHANGED_FILES:
 
     const todos = extractTodoItems(content);
     const complete = todos.length > 0 && todos.every((todo) => todo.completed);
+    const expectedPlanHash = hashPlanContent(content);
     if (!complete) {
       if (!ctx.hasUI) {
         ctx.ui.notify(
@@ -3085,29 +3521,30 @@ CHANGED_FILES:
     }
 
     let gate: GateResult | undefined;
+    let gateError: string | undefined;
     try {
       gate = await runGateBeforeFinish(ctx);
     } catch (error) {
-      // The gate itself is best-effort: a broken exec/config must not
-      // prevent archiving a plan the user has explicitly asked to finish.
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Verifikations-Gate konnte nicht ausgeführt werden: ${message}`,
-        "warning",
-      );
+      gateError = error instanceof Error ? error.message : String(error);
     }
     if (!isSessionTokenCurrent(token, ctx)) return;
-    if (gate && gate.status !== "pass") {
+    if (gateError || (gate && gate.status !== "pass")) {
+      const gateLabel = gateError
+        ? "BLOCKED"
+        : (gate?.status.toUpperCase() ?? "BLOCKED");
+      const gateDetails = gateError
+        ? `Verifikations-Gate konnte nicht ausgeführt werden: ${gateError}`
+        : formatGateReport(gate as GateResult);
       if (!ctx.hasUI || ctx.mode !== "tui") {
         ctx.ui.notify(
-          `Verifikations-Gate ${gate.status.toUpperCase()}: Abschluss ohne interaktive Bestätigung nicht möglich.\n${formatGateReport(gate)}`,
+          `Verifikations-Gate ${gateLabel}: Abschluss ohne interaktive Bestätigung nicht möglich.\n${gateDetails}`,
           "warning",
         );
         return;
       }
       const override = await ctx.ui.confirm(
-        `Verifikations-Gate ${gate.status.toUpperCase()} — trotzdem abschließen?`,
-        formatGateReport(gate),
+        `Verifikations-Gate ${gateLabel} — trotzdem abschließen?`,
+        gateDetails,
       );
       if (!isSessionTokenCurrent(token, ctx)) return;
       if (!override) {
@@ -3120,17 +3557,42 @@ CHANGED_FILES:
     }
 
     try {
+      const current = readPlanFile(ctx.cwd);
+      if (
+        current === undefined ||
+        hashPlanContent(current) !== expectedPlanHash
+      ) {
+        throw new Error(
+          "Plan wurde während Bestätigung oder Verifikations-Gate verändert; Abschluss abgebrochen.",
+        );
+      }
+      const currentTodos = extractTodoItems(current);
+      const stillComplete =
+        currentTodos.length > 0 &&
+        currentTodos.every((todo) => todo.completed);
+      if (stillComplete !== complete) {
+        throw new Error(
+          "Todo-Abschlussstatus hat sich während des Gates verändert; Abschluss abgebrochen.",
+        );
+      }
       const keepPlanMode = mode !== "work";
-      const archivePath = archivePlanFile(
-        ctx.cwd,
-        complete ? "complete" : "incomplete",
-      );
+      const archivePath = withWorkspaceLock(ctx.cwd, () => {
+        assertWorkflowStateToken(ctx.cwd, workflowStateToken);
+        return archivePlanFile(
+          ctx.cwd,
+          complete ? "complete" : "incomplete",
+          expectedPlanHash,
+        );
+      });
       archiveBriefAlongsidePlan(ctx);
       clearTaskContract(ctx.cwd);
       phase = keepPlanMode ? "draft" : "idle";
       reviewedHash = undefined;
+      activeRun = undefined;
+      foreignExecution = undefined;
+      stopExecutionHeartbeat();
       updateStatus(ctx);
-      persistState(ctx);
+      persistState(ctx, undefined, { allowMissingPlanCleanup: true });
       ctx.ui.notify(
         `Plan archiviert: ${relative(ctx.cwd, archivePath)}`,
         "info",
@@ -3160,7 +3622,10 @@ CHANGED_FILES:
     workflowRevision = 0;
     currentPlanId = undefined;
     decisionBriefHash = undefined;
-    sidecarCasReady = false;
+    workflowStateToken = "missing";
+    executionOwnerId = randomUUID();
+    foreignExecution = undefined;
+    stopExecutionHeartbeat();
     activeRun = undefined;
     settledRun = undefined;
     executePlanInFlight = false;
@@ -3221,6 +3686,7 @@ CHANGED_FILES:
     try {
       content = readPlanFile(ctx.cwd);
       const loaded = loadWorkflowState(ctx.cwd);
+      workflowStateToken = loaded.stateToken;
       if (loaded.state) {
         mode = loaded.state.mode;
         phase = loaded.state.phase;
@@ -3230,13 +3696,18 @@ CHANGED_FILES:
         workflowRevision = loaded.state.revision;
         currentPlanId = loaded.state.planId;
         decisionBriefHash = loaded.state.decisionBriefHash;
-        sidecarCasReady = !loaded.recovered;
+        foreignExecution =
+          loaded.state.lifecycle === "executing" &&
+          isExecutionLeaseLive(loaded.state.execution) &&
+          loaded.state.execution?.ownerId !== executionOwnerId
+            ? loaded.state.execution
+            : undefined;
       } else {
         progressRecords = [];
         workflowRevision = 0;
         currentPlanId = undefined;
         decisionBriefHash = undefined;
-        sidecarCasReady = false;
+        foreignExecution = undefined;
       }
       if (loaded.warning) ctx.ui.notify(loaded.warning, "warning");
     } catch (error) {
@@ -3247,7 +3718,8 @@ CHANGED_FILES:
       workflowRevision = 0;
       currentPlanId = undefined;
       decisionBriefHash = undefined;
-      sidecarCasReady = false;
+      workflowStateToken = "missing";
+      foreignExecution = undefined;
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(`Unsicherer Planpfad ignoriert: ${message}`, "error");
     }
@@ -3270,7 +3742,12 @@ CHANGED_FILES:
         // Reviewstatus auch nach einem Sessionneustart erkannt wird.
         phase = "draft";
       }
-      if (
+      if (phase === "executing" && foreignExecution) {
+        ctx.ui.notify(
+          `Plan wird durch eine aktive Execution-Lease (${foreignExecution.executionId}) in einer anderen Session bearbeitet. /work kann eine explizite Übernahme anbieten.`,
+          "warning",
+        );
+      } else if (
         phase === "executing" ||
         phase === "paused" ||
         phase === "blocked" ||
@@ -3286,7 +3763,7 @@ CHANGED_FILES:
       }
     }
 
-    if (pi.getFlag("plan") === true) {
+    if (pi.getFlag("plan") === true && !foreignExecution) {
       phase = "draft";
       reviewedHash = undefined;
       mode = "detailed_plan";
@@ -3299,7 +3776,7 @@ CHANGED_FILES:
       phase = "idle";
     }
     updateStatus(ctx);
-    persistState(ctx);
+    if (!foreignExecution) persistState(ctx);
 
     // Intelligente Wiederherstellung: kein Voll-Inject. Der dauerhafte Ledger
     // bleibt eine Datei; nur eine kompakte, tokensparsame Kopfzeile weist auf
@@ -3332,11 +3809,12 @@ CHANGED_FILES:
   pi.on("session_shutdown", async (_event, ctx) => {
     // Finaler deterministischer Konsolidierungslauf, bevor die Session endet.
     runLedgerCheckpoint(ctx, "session-shutdown");
-    if (phase === "executing") {
+    if (phase === "executing" && isCurrentRun("executing", ctx)) {
       phase = "paused";
       activeRun = undefined;
       persistState(ctx);
     }
+    stopExecutionHeartbeat();
     sessionEpoch += 1;
     activeSessionId = undefined;
     settledRun = undefined;
@@ -3345,6 +3823,7 @@ CHANGED_FILES:
     unsubscribeAurora = undefined;
     auroraEpoch = undefined;
     latestCwd = undefined;
+    latestContext = undefined;
     setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, undefined);
   });
 }

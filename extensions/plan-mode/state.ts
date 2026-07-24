@@ -5,7 +5,7 @@
  * identity, lifecycle and todo fingerprints; v1 is migrated conservatively.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -63,6 +63,10 @@ export interface WorkflowExecutionMetadata {
   expectedPlanHash: string;
   sessionId?: string;
   runId?: string;
+  /** Random owner token for the live execution lease. */
+  ownerId?: string;
+  /** ISO timestamp after which another session may explicitly take over. */
+  leaseExpiresAt?: string;
 }
 
 export interface WorkflowSidecarState {
@@ -88,6 +92,8 @@ export interface LoadedWorkflowState {
   state?: WorkflowSidecarState;
   recovered: boolean;
   warning?: string;
+  /** Token over the exact on-disk sidecar bytes (or the missing sentinel). */
+  stateToken: string;
 }
 
 interface WorkflowSidecarV1 {
@@ -140,6 +146,59 @@ const PLAN_TYPES = new Set<PlanType>([
   "unknown",
 ]);
 const HASH_PATTERN = /^[0-9a-f]{64}$/i;
+const MISSING_STATE_TOKEN = "missing";
+const MAX_LEASE_FUTURE_MS = 180_000;
+
+function stateTokenForRaw(raw: string | undefined): string {
+  return raw === undefined
+    ? MISSING_STATE_TOKEN
+    : `sha256:${createHash("sha256").update(raw, "utf8").digest("hex")}`;
+}
+
+function serializeWorkflowState(state: WorkflowSidecarState): string {
+  return `${JSON.stringify(state, null, 2)}\n`;
+}
+
+export function computeWorkflowStateToken(
+  state: WorkflowSidecarState,
+): string {
+  return stateTokenForRaw(serializeWorkflowState(state));
+}
+
+/**
+ * Assert the exact sidecar bytes observed by a caller. Mutating callers must
+ * hold the workspace lock across this assertion and their artifact mutation.
+ */
+export function assertWorkflowStateToken(
+  cwd: string,
+  expectedToken: string,
+): void {
+  const statePath = getWorkflowStatePath(cwd);
+  assertSafeStatePath(cwd, statePath);
+  if (stateTokenForRaw(readStateRaw(statePath)) !== expectedToken) {
+    throw new Error(
+      "Workflow-Sidecar hat sich geändert; Artefaktmutation abgebrochen.",
+    );
+  }
+}
+
+function readStateRaw(statePath: string): string | undefined {
+  return existsSync(statePath) ? readFileSync(statePath, "utf8") : undefined;
+}
+
+export function isExecutionLeaseLive(
+  execution: WorkflowExecutionMetadata | undefined,
+  now = new Date(),
+): boolean {
+  if (!execution?.ownerId || !execution.leaseExpiresAt) return false;
+  const expiry = Date.parse(execution.leaseExpiresAt);
+  const nowMs = now.getTime();
+  return (
+    Number.isFinite(expiry) &&
+    expiry > nowMs &&
+    expiry <= nowMs + MAX_LEASE_FUTURE_MS
+  );
+}
 
 function isInside(basePath: string, candidatePath: string): boolean {
   const rel = relative(basePath, candidatePath);
@@ -225,6 +284,18 @@ function parseExecution(value: unknown): WorkflowExecutionMetadata | undefined {
     return undefined;
   if (value.runId !== undefined && typeof value.runId !== "string")
     return undefined;
+  if (value.ownerId !== undefined && typeof value.ownerId !== "string")
+    return undefined;
+  if (
+    value.leaseExpiresAt !== undefined &&
+    (typeof value.leaseExpiresAt !== "string" ||
+      !Number.isFinite(Date.parse(value.leaseExpiresAt)))
+  )
+    return undefined;
+  if (
+    (value.ownerId === undefined) !== (value.leaseExpiresAt === undefined)
+  )
+    return undefined;
   return {
     executionId: value.executionId,
     startedAt: value.startedAt,
@@ -233,6 +304,10 @@ function parseExecution(value: unknown): WorkflowExecutionMetadata | undefined {
       ? { sessionId: value.sessionId }
       : {}),
     ...(typeof value.runId === "string" ? { runId: value.runId } : {}),
+    ...(typeof value.ownerId === "string" ? { ownerId: value.ownerId } : {}),
+    ...(typeof value.leaseExpiresAt === "string"
+      ? { leaseExpiresAt: value.leaseExpiresAt }
+      : {}),
   };
 }
 
@@ -480,8 +555,8 @@ export function reconstructWorkflowState(
     version: WORKFLOW_STATE_VERSION,
     revision: Math.max(1, (previous?.revision ?? 0) + 1),
     planId:
-      previous?.planId ??
       parsePlanMetadata(planContent)?.planId ??
+      previous?.planId ??
       randomUUID(),
     planHash: hashPlanContent(planContent),
     planType,
@@ -504,6 +579,73 @@ export function reconstructWorkflowState(
   };
 }
 
+function normalizeProgress(
+  progress: readonly PlanProgressRecord[],
+  planContent: string,
+  now = new Date(),
+): { progress: PlanProgressRecord[]; changed: boolean } {
+  const todos = extractTodoItems(planContent);
+  const duplicateSteps = new Set<number>();
+  const seen = new Set<number>();
+  for (const record of progress) {
+    if (seen.has(record.step)) duplicateSteps.add(record.step);
+    seen.add(record.step);
+  }
+  let changed = duplicateSteps.size > 0;
+  const byStep = new Map(todos.map((todo) => [todo.step, todo]));
+  const normalized: PlanProgressRecord[] = [];
+  for (const record of progress) {
+    const todo = byStep.get(record.step);
+    if (!todo || duplicateSteps.has(record.step)) {
+      changed = true;
+      continue;
+    }
+    const todoHash = computeTodoHash(todo);
+    if (record.todoHash !== undefined && record.todoHash !== todoHash) {
+      changed = true;
+      continue;
+    }
+    if (todo.completed && record.status !== "completed") {
+      changed = true;
+      continue;
+    }
+    if (!todo.completed && record.status === "completed") {
+      changed = true;
+      continue;
+    }
+    if (record.todoHash !== todoHash) changed = true;
+    normalized.push({ ...record, todoHash });
+  }
+  if (
+    normalized.filter((record) => record.status === "in_progress").length > 1
+  ) {
+    changed = true;
+    for (let index = normalized.length - 1; index >= 0; index -= 1) {
+      if (normalized[index]?.status === "in_progress")
+        normalized.splice(index, 1);
+    }
+  }
+  for (const todo of todos) {
+    if (
+      todo.completed &&
+      !normalized.some((record) => record.step === todo.step)
+    ) {
+      changed = true;
+      normalized.push({
+        step: todo.step,
+        todoHash: computeTodoHash(todo),
+        status: "completed",
+        evidence: "Aus Markdown-Checkbox rekonstruiert.",
+        updatedAt: now.toISOString(),
+      });
+    }
+  }
+  return {
+    progress: normalized.sort((left, right) => left.step - right.step),
+    changed,
+  };
+}
+
 function migrateV1(
   legacy: WorkflowSidecarV1,
   planContent: string,
@@ -518,65 +660,89 @@ function migrateV1(
   }
   const todos = extractTodoItems(planContent);
   const planType = conservativePlanType(planContent, legacy.planCreationMode);
-  const lifecycle =
-    legacy.phase === "executing"
-      ? "paused"
-      : lifecycleForPhase(legacy.mode, legacy.phase);
-  const progress = legacy.progress.flatMap((record) => {
-    const todo = todos.find((candidate) => candidate.step === record.step);
-    return todo ? [{ ...record, todoHash: computeTodoHash(todo) }] : [];
-  });
+  const currentHash = hashPlanContent(planContent);
+  const allComplete = todos.length > 0 && todos.every((todo) => todo.completed);
+  const reviewed = legacy.reviewedHash === currentHash;
+  let lifecycle: WorkflowLifecycle;
+  if (legacy.phase === "executing") lifecycle = "paused";
+  else if (legacy.phase === "deciding" || legacy.phase === "reviewing")
+    lifecycle = "planning";
+  else if (legacy.phase === "reviewed")
+    lifecycle = reviewed ? "reviewed" : "planning";
+  else if (legacy.phase === "ready")
+    lifecycle = allComplete ? "ready" : "paused";
+  else lifecycle = lifecycleForPhase(legacy.mode, legacy.phase);
+  const workLifecycle = [
+    "work_idle",
+    "executing",
+    "paused",
+    "blocked",
+    "ready",
+  ].includes(lifecycle);
+  const normalized = normalizeProgress(legacy.progress, planContent, now);
   return {
     version: WORKFLOW_STATE_VERSION,
     revision: 1,
     planId: parsePlanMetadata(planContent)?.planId ?? randomUUID(),
-    planHash: hashPlanContent(planContent),
+    planHash: currentHash,
     planType,
     lifecycle,
-    mode: legacy.mode,
+    mode: workLifecycle ? "work" : legacy.mode,
     phase: compatibilityPhase(lifecycle),
-    ...(legacy.reviewedHash === hashPlanContent(planContent)
+    ...(reviewed
       ? { reviewedHash: legacy.reviewedHash }
       : {}),
     ...(creationMode(planType)
       ? { planCreationMode: creationMode(planType) }
       : {}),
-    progress,
+    progress: normalized.progress,
     updatedAt: now.toISOString(),
   };
 }
 
 /** Load and conservatively normalize sidecar state. Persisting is left to the caller. */
-export function loadWorkflowState(cwd: string): LoadedWorkflowState {
+export function loadWorkflowState(
+  cwd: string,
+  now = new Date(),
+): LoadedWorkflowState {
   const plan = readPlanFileState(cwd);
   const statePath = getWorkflowStatePath(cwd);
   assertSafeStatePath(cwd, statePath);
+  const rawText = readStateRaw(statePath);
+  const stateToken = stateTokenForRaw(rawText);
   if (plan.status === "unreadable") throw new Error(plan.error);
   if (plan.status === "missing") {
-    if (existsSync(statePath)) unlinkSync(statePath);
-    return { state: undefined, recovered: false };
+    return { state: undefined, recovered: false, stateToken };
   }
-  if (!existsSync(statePath)) {
-    return { state: reconstructWorkflowState(plan.content), recovered: true };
+  if (rawText === undefined) {
+    return {
+      state: reconstructWorkflowState(plan.content, now),
+      recovered: true,
+      stateToken,
+    };
   }
   try {
-    const raw = JSON.parse(readFileSync(statePath, "utf8")) as unknown;
+    const raw = JSON.parse(rawText) as unknown;
     const currentHash = hashPlanContent(plan.content);
     const parsed = parseWorkflowState(raw);
     if (parsed) {
       if (parsed.planHash !== currentHash) {
         return {
-          state: reconstructWorkflowState(plan.content, new Date(), {
+          state: reconstructWorkflowState(plan.content, now, {
             planType: parsed.planType,
             planId: parsed.planId,
             revision: parsed.revision,
           }),
           recovered: true,
+          stateToken,
           warning:
             "Workflow-Sidecar war veraltet und wurde konservativ rekonstruiert.",
         };
       }
       if (parsed.lifecycle === "executing") {
+        if (isExecutionLeaseLive(parsed.execution, now)) {
+          return { state: parsed, recovered: false, stateToken };
+        }
         return {
           state: {
             ...parsed,
@@ -584,20 +750,42 @@ export function loadWorkflowState(cwd: string): LoadedWorkflowState {
             lifecycle: "paused",
             phase: "paused",
             execution: undefined,
-            updatedAt: new Date().toISOString(),
+            updatedAt: now.toISOString(),
           },
           recovered: true,
+          stateToken,
           warning:
-            "Gespeicherte Planausführung wurde pausiert und muss explizit fortgesetzt werden.",
+            "Abgelaufene oder alte Planausführung wurde pausiert und muss explizit fortgesetzt werden.",
         };
       }
-      return { state: parsed, recovered: false };
+      const normalized = normalizeProgress(parsed.progress, plan.content, now);
+      if (normalized.changed) {
+        return {
+          state: {
+            ...parsed,
+            revision: parsed.revision + 1,
+            progress: normalized.progress,
+            updatedAt: now.toISOString(),
+          },
+          recovered: true,
+          stateToken,
+          warning:
+            "Veraltete Todo-Fingerprints wurden konservativ mit dem aktuellen Plan abgeglichen.",
+        };
+      }
+      return { state: parsed, recovered: false, stateToken };
     }
     const legacy = parseV1(raw);
     if (legacy) {
       return {
-        state: migrateV1(legacy, plan.content, legacy.planHash === currentHash),
+        state: migrateV1(
+          legacy,
+          plan.content,
+          legacy.planHash === currentHash,
+          now,
+        ),
         recovered: true,
+        stateToken,
         warning:
           legacy.planHash === currentHash
             ? "Workflow-Sidecar wurde von v1 auf v2 migriert."
@@ -605,16 +793,18 @@ export function loadWorkflowState(cwd: string): LoadedWorkflowState {
       };
     }
     return {
-      state: reconstructWorkflowState(plan.content),
+      state: reconstructWorkflowState(plan.content, now),
       recovered: true,
+      stateToken,
       warning:
         "Workflow-Sidecar war ungültig und wurde aus Markdown rekonstruiert.",
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
-      state: reconstructWorkflowState(plan.content),
+      state: reconstructWorkflowState(plan.content, now),
       recovered: true,
+      stateToken,
       warning: `Workflow-Sidecar konnte nicht gelesen werden und wurde rekonstruiert: ${message}`,
     };
   }
@@ -645,7 +835,7 @@ export function writeWorkflowStateAtomic(
   const mode = existsSync(statePath) ? statSync(statePath).mode & 0o777 : 0o600;
   const temporaryPath = `${statePath}.tmp-${process.pid}-${Date.now()}`;
   try {
-    writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, {
+    writeFileSync(temporaryPath, serializeWorkflowState(state), {
       encoding: "utf8",
       flag: "wx",
       mode,
@@ -654,12 +844,6 @@ export function writeWorkflowStateAtomic(
   } finally {
     if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
   }
-}
-
-export function removeWorkflowState(cwd: string): void {
-  const statePath = getWorkflowStatePath(cwd);
-  assertSafeStatePath(cwd, statePath);
-  if (existsSync(statePath)) unlinkSync(statePath);
 }
 
 export function acquireWorkspaceLock(cwd: string): WorkflowLockHandle {
@@ -716,7 +900,11 @@ export function withWorkspaceLock<T>(cwd: string, action: () => T): T {
 export function writeWorkflowStateAtomicCAS(
   cwd: string,
   state: WorkflowSidecarState,
-  expected: { revision?: number; planHash?: string } = {},
+  expected: {
+    revision?: number;
+    planHash?: string;
+    stateToken?: string;
+  } = {},
 ): WorkflowSidecarState {
   return withWorkspaceLock(cwd, () => {
     const plan = readPlanFileState(cwd);
@@ -738,18 +926,29 @@ export function writeWorkflowStateAtomicCAS(
     }
     const statePath = getWorkflowStatePath(cwd);
     assertSafeStatePath(cwd, statePath);
+    const currentRaw = readStateRaw(statePath);
+    const currentToken = stateTokenForRaw(currentRaw);
+    if (
+      expected.stateToken !== undefined &&
+      expected.stateToken !== currentToken
+    ) {
+      throw new Error(
+        "Workflow-Sidecar hat sich geändert; CAS-Schreibvorgang abgebrochen.",
+      );
+    }
     let currentRevision = 0;
-    if (existsSync(statePath)) {
+    if (currentRaw !== undefined) {
       try {
-        const raw = JSON.parse(readFileSync(statePath, "utf8")) as unknown;
+        const raw = JSON.parse(currentRaw) as unknown;
         currentRevision =
           parseWorkflowState(raw)?.revision ?? (parseV1(raw) ? 0 : -1);
       } catch {
         currentRevision = -1;
       }
     }
-    if (currentRevision < 0)
+    if (currentRevision < 0 && expected.stateToken === undefined)
       throw new Error("Vorhandener Sidecar ist ungültig; CAS abgebrochen.");
+    if (currentRevision < 0) currentRevision = 0;
     if (
       expected.revision !== undefined &&
       currentRevision !== expected.revision
@@ -765,6 +964,55 @@ export function writeWorkflowStateAtomicCAS(
     };
     writeWorkflowStateAtomic(cwd, next);
     return next;
+  });
+}
+
+export function removeWorkflowStateAtomicCAS(
+  cwd: string,
+  expected: {
+    stateToken: string;
+    planHash?: string;
+    planId?: string;
+  },
+): void {
+  withWorkspaceLock(cwd, () => {
+    const statePath = getWorkflowStatePath(cwd);
+    assertSafeStatePath(cwd, statePath);
+    const rawText = readStateRaw(statePath);
+    if (stateTokenForRaw(rawText) !== expected.stateToken) {
+      throw new Error(
+        "Workflow-Sidecar hat sich geändert; Löschen wurde abgebrochen.",
+      );
+    }
+    if (expected.planHash !== undefined) {
+      const plan = readPlanFileState(cwd);
+      if (
+        plan.status !== "ok" ||
+        hashPlanContent(plan.content) !== expected.planHash
+      ) {
+        throw new Error(
+          "Plan hat sich geändert; Workflow-Zustand wurde nicht gelöscht.",
+        );
+      }
+    }
+    if (expected.planId !== undefined && rawText !== undefined) {
+      try {
+        const parsed = parseWorkflowState(JSON.parse(rawText) as unknown);
+        if (parsed?.planId !== expected.planId) {
+          throw new Error(
+            "Plan-Identität hat sich geändert; Workflow-Zustand wurde nicht gelöscht.",
+          );
+        }
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          throw new Error(
+            "Workflow-Sidecar ist nicht mehr lesbar; Löschen wurde abgebrochen.",
+          );
+        }
+        throw error;
+      }
+    }
+    if (rawText !== undefined) unlinkSync(statePath);
   });
 }
 
@@ -810,7 +1058,7 @@ export function createWorkflowStateSnapshot(
   return {
     version: WORKFLOW_STATE_VERSION,
     revision: Math.max(1, runtime.revision ?? 1),
-    planId: runtime.planId ?? metadata?.planId ?? randomUUID(),
+    planId: metadata?.planId ?? runtime.planId ?? randomUUID(),
     planHash: hashPlanContent(planContent),
     planType,
     lifecycle,
