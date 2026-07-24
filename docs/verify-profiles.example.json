@@ -1,0 +1,32 @@
+{
+  "_comment": "Example project-local verification profiles. Copy to .pi/verify.json in a TRUSTED project. Only read when the project is trusted; otherwise ignored entirely. Separate from the inviolable setup verification. See docs/verify-profiles.md.",
+  "profiles": {
+    "typecheck": {
+      "program": "npm",
+      "args": ["run", "typecheck"],
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "required": true,
+      "env": {},
+      "trustRequired": true
+    },
+    "tests": {
+      "program": "npm",
+      "args": ["test"],
+      "cwd": ".",
+      "timeoutMs": 300000,
+      "required": true,
+      "env": {},
+      "trustRequired": true
+    },
+    "lint": {
+      "program": "npm",
+      "args": ["run", "lint"],
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "required": false,
+      "env": {},
+      "trustRequired": true
+    }
+  }
+}

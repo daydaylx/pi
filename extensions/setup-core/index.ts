@@ -4,6 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
+import { loadVerifyProfiles } from "./verify-profiles.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 
 const CheckParams = Type.Object({
@@ -107,6 +108,13 @@ export default function setupCore(pi: ExtensionAPI): void {
         runtimeResult.code === 0
           ? runtimeResult.stdout.trim().replace(/^v/, "")
           : undefined;
+      const projectProfiles = loadVerifyProfiles(activeCwd, trusted);
+      const profileCount = Object.keys(projectProfiles.profiles).length;
+      const profileHint = projectProfiles.source
+        ? trusted
+          ? `${profileCount} Profil(e) geladen`
+          : ".pi/verify.json ignoriert (untrusted)"
+        : "keine .pi/verify.json";
       const hasVersionDrift =
         String(declaredVersion ?? "") !== String(devVersion ?? "") ||
         (runtimeVersion !== undefined &&
@@ -153,8 +161,14 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  Pi CLI/dev package: ${runtimeVersion ?? "unknown"}/${String(declaredVersion ?? "?")}`,
         `  installed dev package: ${devVersion ?? "missing"}`,
         `  configured extensions: ${Array.isArray(settings?.extensions) ? settings.extensions.length : "?"}`,
+        `  project verification profiles: ${profileHint}`,
       ];
       for (const diagnostic of loaded.diagnostics) {
+        lines.push(
+          `  ${diagnostic.level.toUpperCase()}: ${diagnostic.message} (${diagnostic.source})`,
+        );
+      }
+      for (const diagnostic of projectProfiles.diagnostics) {
         lines.push(
           `  ${diagnostic.level.toUpperCase()}: ${diagnostic.message} (${diagnostic.source})`,
         );

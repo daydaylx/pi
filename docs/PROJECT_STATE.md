@@ -91,8 +91,15 @@ fehlender Code. Sie können nach Eigentümerbestätigung geschlossen werden
    Lauf (braucht Push + `workflow_dispatch` = Nutzerauftrag) und Schließen des
    GitHub-Issues durch Eigentümer. Tracking-Lag #95–#97 (Code fertig) ebenfalls
    schließbar.
-2. **#105** — wohlspezifizierte Datenmodell-Foundation ohne freie Shell;
-   entblockt die gesamte Verifikations-Gate-Schiene (#102 → #106).
+2. ~~**#105**~~ — **umgesetzt (2026-07-24):** vertrauensgebundene projektlokale
+   Verifikationsprofile als separate Schicht (`.pi/verify.json`), die die
+   unverletzliche Setup-Verifikation nicht berührt. Neues Modul
+   `extensions/setup-core/verify-profiles.ts` (Schema + Loader + Runner mit
+   DI, kein Shell, cwd-Traversal-Schutz, Additiv-env, fail-closed),
+   `/setup-doctor`-Diagnosezeile, 45 neue Tests (Trust-Gate, Schema, cwd,
+   no-shell, timeout, missing_binary), Doku `docs/verify-profiles.md` +
+   Beispiel. `verify`: 637→682, 0 Fehler. **Offen:** Verifikations-Gate #102
+   (konsumiert die Profile) und Schließen des GitHub-Issues durch Eigentümer.
 
 ### Verworfene direkte Sprünge
 

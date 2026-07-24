@@ -1132,6 +1132,12 @@ await section("setup core lifecycle", async () => {
       harness.notifications.at(-1)?.level === "error",
     "setup doctor makes CLI/dev version drift visible",
   );
+  assert(
+    harness.notifications
+      .at(-1)
+      ?.message?.includes("project verification profiles: keine .pi/verify.json"),
+    "setup doctor reports the project verification profile status (#105)",
+  );
   const verify = harness.tools.get("verify");
   if (verify) {
     await verify.execute(
@@ -1148,6 +1154,251 @@ await section("setup core lifecycle", async () => {
     );
   }
   assertNoGlobalChrome(harness, "setup core owns no TUI chrome");
+});
+
+// ---------------------------------------------------------------------------
+// Trust-gated project verification profiles (#105). Foundation for the
+// universal verification gate (#102); separate from the inviolable setup
+// `verify` tool. No real process is spawned (exec is injected).
+// ---------------------------------------------------------------------------
+await section("project verification profiles (#105)", async () => {
+  const profilesMod = await load("extensions/setup-core/verify-profiles.ts");
+  assert(
+    typeof profilesMod?.loadVerifyProfiles === "function",
+    "verify-profiles exports loadVerifyProfiles",
+  );
+  assert(
+    typeof profilesMod?.runProfile === "function",
+    "verify-profiles exports runProfile",
+  );
+  assert(
+    typeof profilesMod?.resolveProfileCwd === "function",
+    "verify-profiles exports resolveProfileCwd",
+  );
+
+  const workspace = mkdtempSync(path.join(tmpdir(), "pi-verify-profiles-"));
+  const cfgDir = path.join(workspace, ".pi");
+  mkdirSync(cfgDir, { recursive: true });
+  const cfgPath = path.join(cfgDir, "verify.json");
+
+  function writeConfig(obj) {
+    writeFileSync(cfgPath, JSON.stringify(obj));
+  }
+  function clearConfig() {
+    try {
+      rmSync(cfgPath, { force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // --- Trust gate: untrusted ignores .pi/verify.json ---
+  writeConfig({
+    profiles: {
+      tests: {
+        program: "pytest",
+        args: ["-q"],
+        timeoutMs: 30000,
+      },
+    },
+  });
+  const untrusted = profilesMod.loadVerifyProfiles(workspace, false);
+  eq(
+    Object.keys(untrusted.profiles).length,
+    0,
+    "untrusted project loads no verification profiles",
+  );
+  eq(
+    untrusted.diagnostics.some(
+      (d) => d.level === "warning" && d.message.includes("trusted"),
+    ),
+    true,
+    "untrusted project gets a clear 'ignored until trusted' diagnostic",
+  );
+
+  // --- Trust gate: trusted loads valid profiles ---
+  const trusted = profilesMod.loadVerifyProfiles(workspace, true);
+  eq(
+    Object.keys(trusted.profiles),
+    ["tests"],
+    "trusted project loads the declared profile",
+  );
+  eq(trusted.profiles.tests.program, "pytest", "program preserved");
+  eq(trusted.profiles.tests.args, ["-q"], "args preserved as array");
+  eq(trusted.profiles.tests.required, true, "required defaults to true");
+  eq(trusted.profiles.tests.trustRequired, true, "trustRequired defaults to true");
+  eq(trusted.profiles.tests.cwd, ".", "cwd defaults to '.'");
+
+  // --- Missing file yields no profiles and no diagnostics ---
+  clearConfig();
+  const missing = profilesMod.loadVerifyProfiles(workspace, true);
+  eq(Object.keys(missing.profiles).length, 0, "missing file -> no profiles");
+  eq(missing.diagnostics.length, 0, "missing file -> no diagnostics");
+
+  // --- Schema: unknown top-level key is rejected ---
+  writeConfig({
+    unexpected: 1,
+    profiles: { tests: { program: "pytest", args: [] } },
+  });
+  let res = profilesMod.loadVerifyProfiles(workspace, true);
+  eq(
+    res.diagnostics.some((d) => d.message.includes("unbekannter Schlüssel 'unexpected'")),
+    true,
+    "unknown top-level key is reported",
+  );
+  eq(Object.keys(res.profiles), ["tests"], "valid profile still loads");
+
+  // --- Schema: unknown profile key drops the profile (fail-closed) ---
+  writeConfig({
+    profiles: {
+      bad: { program: "x", args: [], oops: true },
+      good: { program: "y", args: ["--fast"] },
+    },
+  });
+  res = profilesMod.loadVerifyProfiles(workspace, true);
+  eq(Object.keys(res.profiles), ["good"], "profile with unknown key is dropped");
+  eq(
+    res.diagnostics.some((d) => d.message.includes("profiles.bad") && d.message.includes("oops")),
+    true,
+    "unknown profile key is reported with path",
+  );
+
+  // --- Schema: invalid program / args / timeoutMs / env ---
+  writeConfig({
+    profiles: {
+      noProgram: { args: [] },
+      emptyProgram: { program: "   ", args: [] },
+      badArgs: { program: "x", args: "not-array" },
+      nonStringArg: { program: "x", args: [1] },
+      hugeTimeout: { program: "x", args: [], timeoutMs: 9_000_000 },
+      badEnv: { program: "x", args: [], env: { K: 1 } },
+    },
+  });
+  res = profilesMod.loadVerifyProfiles(workspace, true);
+  eq(
+    Object.keys(res.profiles),
+    [],
+    "every schema violation drops its profile (fail-closed)",
+  );
+  const msgs = res.diagnostics.map((d) => d.message).join("\n");
+  for (const needle of ["noProgram.program", "badArgs.args", "nonStringArg.args", "hugeTimeout.timeoutMs", "badEnv.env"]) {
+    assert(msgs.includes(needle), "diagnostic names " + needle);
+  }
+
+  // --- resolveProfileCwd: relative ok, absolute/escape rejected ---
+  const root = workspace;
+  eq(
+    profilesMod.resolveProfileCwd(root, "."),
+    root,
+    "'.' resolves to the project root",
+  );
+  eq(
+    profilesMod.resolveProfileCwd(root, "sub/dir"),
+    path.join(root, "sub", "dir"),
+    "relative subdir resolves under the project root",
+  );
+  eq(
+    profilesMod.resolveProfileCwd(root, "/etc"),
+    null,
+    "absolute cwd is rejected",
+  );
+  eq(
+    profilesMod.resolveProfileCwd(root, "../escape"),
+    null,
+    "parent traversal is rejected",
+  );
+
+  // --- runProfile: program + args passed separately (no shell string) ---
+  const seen = [];
+  const recordingExec = async (program, args, options) => {
+    seen.push({ program, args, options });
+    return { code: 0, stdout: "ok", stderr: "", killed: false };
+  };
+  const profile = {
+    program: "pytest",
+    args: ["-q", "--maxfail=1"],
+    cwd: ".",
+    timeoutMs: 30_000,
+    required: true,
+    env: {},
+    trustRequired: true,
+  };
+  const okRun = await profilesMod.runProfile(profile, {
+    projectRoot: root,
+    exec: recordingExec,
+  });
+  eq(okRun.ok, true, "exit 0 -> ok");
+  eq(seen[0].program, "pytest", "exec receives the program name");
+  eq(
+    seen[0].args,
+    ["-q", "--maxfail=1"],
+    "exec receives args as a separate array (no shell string)",
+  );
+  eq(
+    seen[0].options.cwd,
+    root,
+    "exec runs in the bounded project root",
+  );
+  eq(
+    typeof seen[0].options.env,
+    "object",
+    "exec receives an env object",
+  );
+  eq(
+    seen[0].options.env.PATH !== undefined,
+    true,
+    "profile env is additive on top of process.env (PATH inherited)",
+  );
+
+  // --- runProfile: non-zero exit -> not ok, structured error ---
+  const failRun = await profilesMod.runProfile(profile, {
+    projectRoot: root,
+    exec: async () => ({ code: 2, stdout: "", stderr: "boom", killed: false }),
+  });
+  eq(failRun.ok, false, "non-zero exit -> not ok");
+  eq(failRun.exitCode, 2, "exit code captured");
+  eq(failRun.error.kind, "spawn_failed", "non-zero exit reported as spawn_failed");
+
+  // --- runProfile: timeout -> killed, structured timeout error ---
+  const timeoutRun = await profilesMod.runProfile(profile, {
+    projectRoot: root,
+    exec: async () => ({ code: null, stdout: "", stderr: "", killed: true }),
+  });
+  eq(timeoutRun.ok, false, "killed -> not ok");
+  eq(timeoutRun.killed, true, "killed flag surfaced");
+  eq(timeoutRun.error.kind, "timeout", "timeout reported as timeout");
+
+  // --- runProfile: missing binary (ENOENT) -> missing_binary, no crash ---
+  const missingRun = await profilesMod.runProfile(profile, {
+    projectRoot: root,
+    exec: async () => {
+      throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
+    },
+  });
+  eq(missingRun.ok, false, "missing binary -> not ok");
+  eq(missingRun.error.kind, "missing_binary", "ENOENT classified as missing_binary");
+
+  // --- runProfile: cwd bounding honored at run time ---
+  const escapeRun = await profilesMod.runProfile(
+    { ...profile, cwd: "../escape" },
+    {
+      projectRoot: root,
+      exec: async () => ({ code: 0, stdout: "", stderr: "", killed: false }),
+    },
+  );
+  eq(escapeRun.ok, false, "escaping cwd is not executed");
+  eq(
+    escapeRun.error.kind,
+    "spawn_failed",
+    "escaping cwd reported as spawn_failed with a clear message",
+  );
+  eq(seen.length, 1, "escaping cwd prevented the exec call entirely");
+
+  try {
+    rmSync(workspace, { recursive: true, force: true });
+  } catch {
+    /* ignore temp cleanup */
+  }
 });
 
 await section("native project skills", async () => {
