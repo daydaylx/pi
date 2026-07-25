@@ -4938,11 +4938,11 @@ await section("Control Center menus and routing", async () => {
       "Ctrl+Shift+X registers no local shortcut",
     );
     assert(!harness.shortcuts.has("ctrl+shift+y"), "legacy permission shortcut is retired");
-    assert(harness.shortcuts.has("ctrl+shift+d"), "Ctrl+Shift+D opens Thinking");
-    assert(harness.shortcuts.has("ctrl+shift+m"), "Ctrl+Shift+M opens models");
+    assert(harness.shortcuts.has("super+d"), "Super+D opens Thinking");
+    assert(harness.shortcuts.has("super+m"), "Super+M opens models");
 
     choice = "Manuell: Sehr hoch";
-    await harness.shortcuts.get("ctrl+shift+d")(context);
+    await harness.shortcuts.get("super+d")(context);
     eq(
       harness.api.getThinkingLevel(),
       "xhigh",
@@ -4956,7 +4956,7 @@ await section("Control Center menus and routing", async () => {
       "manual Thinking survives a workflow transition",
     );
     choice = "Auto";
-    await harness.shortcuts.get("ctrl+shift+d")(context);
+    await harness.shortcuts.get("super+d")(context);
     eq(
       harness.api.getThinkingLevel(),
       "medium",
@@ -4993,7 +4993,7 @@ await section("Control Center menus and routing", async () => {
       {},
       staleThinkingContext,
     );
-    await staleThinkingHarness.shortcuts.get("ctrl+shift+d")(
+    await staleThinkingHarness.shortcuts.get("super+d")(
       staleThinkingContext,
     );
     eq(
@@ -5008,7 +5008,7 @@ await section("Control Center menus and routing", async () => {
     );
 
     choice = "__models__";
-    await harness.shortcuts.get("ctrl+shift+m")(context);
+    await harness.shortcuts.get("super+m")(context);
     eq(
       harness.setModelCalls.at(-1),
       { provider: "openai-codex", id: "gpt-5.4-mini" },
@@ -5027,7 +5027,7 @@ await section("Control Center menus and routing", async () => {
     unavailableContext.ui.custom = async () => {
       throw new Error("use deterministic select fallback");
     };
-    await unavailable.shortcuts.get("ctrl+shift+m")(unavailableContext);
+    await unavailable.shortcuts.get("super+m")(unavailableContext);
     assert(
       unavailable.notifications.some((entry) =>
         entry.message.includes("nicht verfügbar"),
@@ -5053,7 +5053,7 @@ await section("Control Center menus and routing", async () => {
     busyContext.ui.custom = async () => {
       throw new Error("use deterministic select fallback");
     };
-    await busy.shortcuts.get("ctrl+shift+m")(busyContext);
+    await busy.shortcuts.get("super+m")(busyContext);
     eq(
       busy.setModelCalls,
       [],
@@ -5074,8 +5074,8 @@ await section("global control plane shortcuts", async () => {
   context.ui.custom = async () => {
     throw new Error("use deterministic select fallback");
   };
-  const openMainMenu = harness.shortcuts.get("ctrl+shift+q");
-  assert(Boolean(openMainMenu), "Ctrl+Shift+Q registers the global main menu");
+  const openMainMenu = harness.shortcuts.get("super+q");
+  assert(Boolean(openMainMenu), "Super+Q registers the global main menu");
   if (openMainMenu) await openMainMenu(context);
   assert(
     harness.emitted.some((event) => event.name === "control-center:open-diagnostics"),

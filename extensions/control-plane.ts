@@ -4,19 +4,14 @@ import { runTabbedOverlay } from "./shared/tabbed-overlay.ts";
 import { CONTROL_CENTER_EVENTS } from "./shared/control-center-events.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
 
-type MainAction = "models" | "permissions" | "diagnostics" | "thinking" | "thinking-view";
+type MainAction = "permissions" | "diagnostics" | "thinking" | "thinking-view";
 
 export default function controlPlaneExtension(pi: ExtensionAPI): void {
   async function openMainMenu(ctx: ExtensionContext): Promise<void> {
+    // Die Modellauswahl wird absichtlich nicht über das Hauptmenü angeboten:
+    // Sie ist bereits direkt über Super+M (SHORTCUTS.modelMenu) und im
+    // Control Center (Shift+Tab → Modell → Modellrolle wechseln) erreichbar.
     const selected = await runTabbedOverlay<MainAction>(ctx, "Hauptmenü", [
-      {
-        id: "models",
-        label: "Modelle",
-        entries: [
-          { id: "models-global", label: "Globale Modelle", description: "Aktives Modell aus den freigegebenen Rollen wählen", value: "models" },
-          { id: "models-scoped", label: "Scoped Models", description: "Coding/Dokumentation: Primary · Plan/Summary: Fast · Architektur/Review: Deep", disabled: true, disabledReason: "Scope-Routing ist mit der aktuellen Pi-Runtime schreibgeschützt." },
-        ],
-      },
       {
         id: "permissions",
         label: "Permissions",
@@ -53,7 +48,6 @@ export default function controlPlaneExtension(pi: ExtensionAPI): void {
     const action = selected?.entry.value;
     if (!action) return;
     switch (action) {
-      case "models": pi.events.emit(CONTROL_CENTER_EVENTS.openModels, { ctx }); break;
       case "permissions": pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx }); break;
       case "diagnostics": pi.events.emit(CONTROL_CENTER_EVENTS.openDiagnostics, { ctx }); break;
       case "thinking": pi.events.emit(CONTROL_CENTER_EVENTS.openThinking, { ctx }); break;

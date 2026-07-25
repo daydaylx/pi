@@ -20,28 +20,28 @@ export const SHORTCUTS = {
     description: "Control Center öffnen",
   },
   modelMenu: {
-    keys: "ctrl+shift+m",
-    label: "Ctrl+Shift+M",
+    keys: "super+m",
+    label: "Super+M",
     description: "Modellsteuerung öffnen",
   },
   thinkingMenu: {
-    keys: "ctrl+shift+d",
-    label: "Ctrl+Shift+D",
+    keys: "super+d",
+    label: "Super+D",
     description: "Thinking wählen",
   },
   mainMenu: {
-    keys: "ctrl+shift+q",
-    label: "Ctrl+Shift+Q",
+    keys: "super+q",
+    label: "Super+Q",
     description: "Hauptmenü öffnen",
   },
   help: {
-    keys: "ctrl+shift+h",
-    label: "Ctrl+Shift+H",
+    keys: "super+h",
+    label: "Super+H",
     description: "Shortcut-/Command-Hilfe anzeigen",
   },
   planAssistant: {
-    keys: "ctrl+alt+p",
-    label: "Ctrl+Alt+P",
+    keys: "super+p",
+    label: "Super+P",
     description: "Plan-Assistent öffnen",
   },
 } as const satisfies Record<string, ShortcutBinding>;

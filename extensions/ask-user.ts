@@ -402,7 +402,7 @@ export default function askUser(pi: ExtensionAPI) {
               " ",
               theme.fg(
                 "dim",
-                `↑↓ Auswahl · Pos1/Ende · 1–${params.options.length} direkt · Enter auswählen · Esc schließen`,
+                `[1–${params.options.length}] Ziffer · [↑/↓] Auswahl · [Enter] Auswählen · [Esc] Abbrechen`,
               ),
             );
           }

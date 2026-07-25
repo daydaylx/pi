@@ -171,12 +171,14 @@ async function selectWithCustomUi<T>(
         if (layout !== "compact" && entry.section && (index === 0 || entry.section !== level().entries[index - 1]?.section)) lines.push(fg("muted", theme.bold(pad(` ${entry.section.toLocaleUpperCase("de-DE")}`, inner))));
         const selectionLine = lines.length;
         const suffix = `${tag(entry) ? ` [${tag(entry)}]` : ""}${entry.children ? " ›" : ""}`;
-        const main = `${index === level().selected ? "▌" : " "} ${entry.icon ? `${entry.icon} ` : ""}${entry.label}${suffix}`;
-        const rendered = fg(tone(entry), pad(main, inner));
-        lines.push(index === level().selected ? selectedRow(rendered, inner) : rendered);
+        const isSelected = index === level().selected;
+        const indicator = isSelected ? fg("accent", "▌") : " ";
+        const main = `${indicator} ${entry.icon ? `${entry.icon} ` : ""}${entry.label}${suffix}`;
+        const rendered = isSelected ? selectedRow(main, inner) : fg(tone(entry), pad(` ${main}`, inner));
+        lines.push(rendered);
         const description = entry.disabled ? entry.disabledReason ?? entry.description : entry.description;
         if (description && layout !== "compact") {
-          for (const part of wrapTextWithAnsi(fg(entry.disabled ? "dim" : "muted", description), Math.max(1, inner - 3)).slice(0, layout === "comfortable" ? 2 : 1)) lines.push(pad(`   ${part}`, inner));
+          for (const part of wrapTextWithAnsi(fg(entry.disabled ? "dim" : "muted", description), Math.max(1, inner - 4)).slice(0, layout === "comfortable" ? 2 : 1)) lines.push(pad(`    ${part}`, inner));
         }
         return { lines, selectionLine };
       });
@@ -199,8 +201,9 @@ async function selectWithCustomUi<T>(
             stack.length > 1 ? "←/Rücktaste zurück" : "",
             "Esc schließen",
           ].filter(Boolean).join(layout === "compact" ? " · " : "  ·  ");
-          const footer = wrapTextWithAnsi(fg("dim", footerText), Math.max(1, inner)).slice(0, layout === "compact" ? 1 : 2).map((item) => pad(item, inner));
-          const fixed = 2 + 1 + (layout === "compact" ? 0 : 1) + 2 + footer.length + (detail.length ? detail.length + 1 : 0);
+          const footer = wrapTextWithAnsi(fg("dim", footerText), Math.max(1, inner)).slice(0, layout === "compact" ? 1 : 2).map((item) => pad(` ${item}`, inner));
+          const paddingLines = layout === "compact" ? 0 : 2;
+          const fixed = 2 + 1 + (layout === "compact" ? 0 : 1) + 2 + paddingLines + footer.length + (detail.length ? detail.length + 1 : 0);
           const budget = Math.max(1, size.rows - marginFor(size.columns, size.rows) * 2 - fixed);
           const renderedBlocks = blocks(inner, layout);
           const view = calculateMenuViewport(renderedBlocks.map((block) => block.lines.length), current.selected, current.viewportStart, budget);
@@ -218,12 +221,15 @@ async function selectWithCustomUi<T>(
           if (view.showBelow) content.push(fg("dim", ` ↓ ${current.entries.length - view.end} weitere Einträge`));
           if (content.length === 0) content.push(fg("muted", " Keine Einträge verfügbar."));
           if (width < 4) return [truncateToWidth("Menü", width, ELLIPSIS)];
+          const emptyLine = frame("", inner);
           return [
             `${border("╭")}${border("─".repeat(inner))}${border("╮")}`,
             frame(fg("accent", theme.bold(pad(` ${title}`, inner))), inner),
             ...(layout === "compact" ? [] : [frame(fg("muted", pad(` ${crumbs}`, inner)), inner)]),
             divider(inner),
+            ...(layout === "compact" ? [] : [emptyLine]),
             ...content.map((item) => frame(item, inner)),
+            ...(layout === "compact" ? [] : [emptyLine]),
             ...(detail.length ? [divider(inner), frame(fg("muted", theme.bold(pad(" DETAILS", inner))), inner), ...detail.map((item) => frame(item, inner))] : []),
             divider(inner),
             ...footer.map((item) => frame(item, inner)),

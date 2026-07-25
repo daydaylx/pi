@@ -75,11 +75,7 @@
 - Änderungen mit Tests und statischen Prüfungen verifizieren; Fehler ausdrücklich nennen
 
 ## Aktuelle Prioritäten
-- Task-contract.ts: Typen, loadTaskContract/saveTaskContract,
-- Gate-Integration: Contract vorhanden → scopeHints zeigen echte
-- Tests: Schema/Fail-closed, matchScope (exact/prefix/glob/** ),
-- Docs/task-contract.md + Querverweis.
-- Vorher/Nachher verify; git diff --stat/--check; PROJECT_STATE.
+- (keine Einträge)
 
 ## Verworfene Optionen
 - Externe Memory-/Smart-Compaction-/Context-Extension — kein verbleibender Nutzen, der Komplexität und Überschneidung rechtfertigt
@@ -91,4 +87,4 @@
 - Option: Dynamisches Thinking pro Anfrage.
 - Option: Vollständiger Diagnose-Browser.
 
-<!-- CONTEXT-LEDGER-META: {"schemaVersion":1,"lastCheckpoint":"2026-07-24T01:28:04.872Z","lastTrigger":"session-shutdown","briefHash":"5d5f5bce0d3bceb08e04da73ba0fad2ebfb1a9049354f8c7a8b2ed3097cfc74f","planHash":"dab9f24e8639c729047494d6a4ddc9653b49f5c09ed9ddcfe08091afd3e77204"} -->
+<!-- CONTEXT-LEDGER-META: {"schemaVersion":1,"lastCheckpoint":"2026-07-25T09:58:30.547Z","lastTrigger":"session-shutdown","briefHash":"5d5f5bce0d3bceb08e04da73ba0fad2ebfb1a9049354f8c7a8b2ed3097cfc74f","planHash":"57b9a3949d7aa90c84ebb5f0767b1db57d04a7aa5a662f6a6381fb5f62888ffe"} -->

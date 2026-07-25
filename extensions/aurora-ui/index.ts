@@ -32,6 +32,7 @@ import {
   renderActiveTools,
   type ActiveToolView,
 } from "./tool-renderers.ts";
+import { renderPill } from "../shared/ui-theme.ts";
 
 const OWNER = "aurora-ui";
 const ACTIVITY_WIDGET = "aurora-ui/activity";
@@ -43,9 +44,16 @@ const THEME_PATH = fileURLToPath(
 type Layout = "narrow" | "normal" | "wide";
 
 function layoutFor(width: number): Layout {
-  if (width < 72) return "narrow";
-  if (width < 120) return "normal";
+  if (width < 76) return "narrow";
+  if (width < 124) return "normal";
   return "wide";
+}
+
+function renderContextGauge(percent: number, theme: Theme): string {
+  const filled = Math.min(10, Math.max(0, Math.floor(percent / 10)));
+  const bar = "▓".repeat(filled) + "░".repeat(10 - filled);
+  const color = percent >= 90 ? "error" : percent >= 70 ? "warning" : "success";
+  return theme.fg(color, `[${bar}] ${percent}%`);
 }
 
 function makeEpoch(sequence: number): string {
@@ -517,22 +525,60 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             state.permissions.label ??
             "BERECHTIGUNG —";
           const lsp = statuses.get("lsp") ?? state.lsp.state ?? "—";
-          const left =
-            layout === "wide"
-              ? `${theme.fg("accent", project)}${branch ? theme.fg("muted", ` · git ${branch}`) : ""}`
-              : `${theme.fg("accent", crop(project, 28))}${branch ? theme.fg("muted", ` · ${crop(branch, 18)}`) : ""}`;
-          const right = `${theme.fg("muted", workflow)} · ${theme.fg("warning", permission)} · ${theme.fg(lsp === "eingeschränkt" ? "error" : "success", `LSP ${lsp}`)}`;
-          const lines = [joinSides(left, right, width)];
+          const model = state.model.id ?? "kein Modell";
+          const thinking = state.model.thinking ?? "aus";
+
+          // Block 1 (Links): Modell-Info
+          const modelPill = renderPill(theme, crop(model, layout === "wide" ? 32 : 18), { tone: "accent", bg: "pillBg" });
+          const thinkingPill = renderPill(theme, `Denken ${thinking}`, { tone: "muted", bg: "pillBg" });
+          const leftBlock = layout === "wide" ? `${modelPill} ${thinkingPill}` : modelPill;
+
+          // Block 2 (Mitte): Arbeitskontext / Pfad
+          const branchText = branch ? ` git:${crop(branch, 16)}` : "";
+          const centerBlock = renderPill(theme, `${crop(project, layout === "wide" ? 36 : 24)}${branchText}`, { tone: "text", bold: true, bg: "pillBg" });
+
+          // Block 3 (Rechts): Systemstatus / Berechtigungen
+          const permPill = renderPill(theme, permission, { tone: "warning", bold: true, bg: "pillBg" });
+          const lspPill = renderPill(theme, `LSP ${lsp}`, { tone: lsp === "eingeschränkt" ? "error" : "success", bg: "pillBg" });
+          const workflowPill = renderPill(theme, workflow, { tone: "muted", bg: "pillBg" });
+
+          const rightBlock = layout === "wide"
+            ? `${workflowPill} ${permPill} ${lspPill}`
+            : layout === "normal"
+            ? `${permPill} ${lspPill}`
+            : permPill;
+
+          let line: string;
+          if (layout === "wide") {
+            const available = Math.max(1, width);
+            const leftW = visibleWidth(leftBlock);
+            const centerW = visibleWidth(centerBlock);
+            const rightW = visibleWidth(rightBlock);
+            const totalW = leftW + centerW + rightW;
+            if (totalW + 4 <= available) {
+              const spaceLeft = Math.max(1, Math.floor((available - totalW) / 2));
+              const spaceRight = Math.max(1, available - leftW - spaceLeft - centerW - rightW);
+              line = leftBlock + " ".repeat(spaceLeft) + centerBlock + " ".repeat(spaceRight) + rightBlock;
+            } else {
+              line = joinSides(`${leftBlock}  ${centerBlock}`, rightBlock, width);
+            }
+          } else {
+            line = joinSides(`${leftBlock}  ${centerBlock}`, rightBlock, width);
+          }
+
+          const lines = [crop(line, width)];
           if (layout === "wide") {
             const totals = readAssistantTotals(sessionCtx);
+            const usage = sessionCtx.getContextUsage();
+            const gauge = usage?.percent != null ? ` · Konf ${renderContextGauge(usage.percent, theme)}` : "";
             lines.push(
               theme.fg(
                 "dim",
-                `Sitzung ${pi.getSessionName() ?? "unbenannt"} · ↑${formatTokens(totals.input)} ↓${formatTokens(totals.output)}`,
+                `Sitzung ${pi.getSessionName() ?? "unbenannt"} · ↑${formatTokens(totals.input)} ↓${formatTokens(totals.output)}${gauge}`,
               ),
             );
           }
-          return lines.map((line) => crop(line, width));
+          return lines.map((l) => crop(l, width));
         },
       };
     });

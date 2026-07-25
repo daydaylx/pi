@@ -83,20 +83,24 @@ export async function runTabbedOverlay<T>(
         const state = current();
         state.selected = state.selected >= 0 && !state.tab.entries[state.selected]?.disabled ? state.selected : initialMenuIndex(state.tab.entries);
         const tabLine = states.map((item, index) => {
-          const marker = index === active ? "●" : "○";
+          const isActive = index === active;
+          const marker = isActive ? "●" : "○";
           const badge = item.tab.badge ? ` [${item.tab.badge}]` : "";
-          return `${marker} ${item.tab.label}${badge}`;
-        }).join("  ");
+          const text = `${marker} ${item.tab.label}${badge}`;
+          return isActive ? fg("accent", theme.bold(text)) : fg("muted", text);
+        }).join("   ");
         const entryLines = state.tab.entries.map((entry, index) => {
-          const label = `${index === state.selected ? "▌" : " "} ${entry.icon ? `${entry.icon} ` : ""}${entry.label}${tag(entry) ? ` [${tag(entry)}]` : ""}`;
-          const lines = [fg(tone(entry), pad(label, inner))];
+          const isSelected = index === state.selected;
+          const indicator = isSelected ? fg("accent", "▌") : " ";
+          const label = `${indicator} ${entry.icon ? `${entry.icon} ` : ""}${entry.label}${tag(entry) ? ` [${tag(entry)}]` : ""}`;
+          const lines = [isSelected ? fg("accent", theme.bold(pad(` ${label}`, inner))) : fg(tone(entry), pad(` ${label}`, inner))];
           if ((entry.disabled ? entry.disabledReason ?? entry.description : entry.description) && size.rows >= 18) {
             const description = entry.disabled ? entry.disabledReason ?? entry.description! : entry.description!;
-            lines.push(...wrapTextWithAnsi(fg(entry.disabled ? "dim" : "muted", `   ${description}`), Math.max(1, inner)).slice(0, 1).map((line: string) => pad(line, inner)));
+            lines.push(...wrapTextWithAnsi(fg(entry.disabled ? "dim" : "muted", description), Math.max(1, inner - 4)).slice(0, 1).map((line: string) => pad(`    ${line}`, inner)));
           }
           return lines;
         });
-        const fixed = 7;
+        const fixed = 9;
         const view = calculateMenuViewport(entryLines.map((lines) => lines.length), state.selected, state.viewportStart, Math.max(1, size.rows - fixed - 4));
         state.viewportStart = view.start;
         visibleEntries = Math.max(1, view.end - view.start);
@@ -108,15 +112,18 @@ export async function runTabbedOverlay<T>(
         const selected = state.selected >= 0 ? state.tab.entries[state.selected] : undefined;
         const footer = `Tab Tabs · ↑↓ Auswahl · Enter ${selected?.disabled ? "nicht verfügbar" : "übernehmen"} · Esc schließen`;
         const frame = (value: string) => `${border("│")}${pad(value, inner)}${border("│")}`;
+        const emptyLine = frame("");
         if (width < 4) return [truncateToWidth(title, width, ELLIPSIS)];
         return [
           `${border("╭")}${border("─".repeat(inner))}${border("╮")}`,
           frame(fg("accent", theme.bold(` ${title}`))),
-          frame(fg("muted", tabLine)),
+          frame(` ${tabLine}`),
           `${border("├")}${border("─".repeat(inner))}${border("┤")}`,
+          emptyLine,
           ...content.map(frame),
+          emptyLine,
           `${border("├")}${border("─".repeat(inner))}${border("┤")}`,
-          frame(fg("dim", footer)),
+          frame(fg("dim", ` ${footer}`)),
           `${border("╰")}${border("─".repeat(inner))}${border("╯")}`,
         ];
       },

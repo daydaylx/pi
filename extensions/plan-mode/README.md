@@ -11,7 +11,7 @@ steps.
 
 ## Commands
 
-- `/plan` or `Ctrl+Alt+P`: opens a **state-aware plan assistant** (see
+- `/plan` or `Super+P`: opens a **state-aware plan assistant** (see
   "`/plan` plan assistant" below). It inspects whether a plan already exists,
   whether its todos are complete, and whether a review/execution is running,
   then offers matching actions through the shared overlay menu. Existing plans
@@ -67,7 +67,7 @@ clarity:
 **Thinking coupling.** Thinking has an explicit **Auto**/**Manuell** state.
 Auto follows the workflow default (`MODE_THINKING` in `index.ts`): Schnellplan
 → `medium`, Architekturplan → `xhigh`, Work → `high`. A manually selected level
-via the Control Center or `Ctrl+Shift+T` persists across workflow changes and
+via the Control Center or `Super+D` persists across workflow changes and
 session restoration until Auto is explicitly selected again. Selecting Auto
 immediately restores the active workflow default.
 
@@ -82,7 +82,7 @@ constant (`SUBAGENT_EXECUTING_REMINDER`) so they can't drift apart again.
 
 ## `/plan` plan assistant
 
-`/plan` and `Ctrl+Alt+P` route through the same assistant. It renders the
+`/plan` and `Super+P` route through the same assistant. It renders the
 shared `runMenu(...)` overlay (with a plain `ctx.ui.select(...)` fallback) and
 offers different actions depending on the current state:
 

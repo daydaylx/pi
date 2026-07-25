@@ -25,12 +25,16 @@ export function compactToolTarget(toolName: string, args: unknown): string | und
   const target = firstString(args, [
     "path",
     "file_path",
+    "file",
     "query",
     "pattern",
     "command",
     "url",
     "symbol",
     "name",
+    "role",
+    "task",
+    "target",
   ]);
   if (!target) return undefined;
   if (toolName === "bash") return target.replace(/\s+/g, " ");
@@ -49,10 +53,11 @@ export function renderActiveTools(
   now: number,
 ): string[] {
   const available = Math.max(1, width);
-  return tools.slice(0, width < 74 ? 1 : 3).map((tool) => {
+  return tools.slice(0, width < 76 ? 1 : 3).map((tool) => {
     const elapsed = Math.max(0, Math.floor((now - tool.startedAt) / 1000));
     const target = tool.target ? `  ${theme.fg("muted", tool.target)}` : "";
-    const line = `${theme.fg("accent", "◆")} ${theme.bold(tool.name)}${target} ${theme.fg("dim", `${elapsed}s`)}`;
+    const badge = theme.fg("accent", "◆");
+    const line = `${badge} ${theme.bold(tool.name)}${target} ${theme.fg("dim", `${elapsed}s`)}`;
     return truncateToWidth(line, available, "…");
   });
 }

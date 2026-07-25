@@ -50,32 +50,38 @@ async function confirmWithCustomUi(
     (_tui, theme, _keybindings, done) => ({
       render(width: number): string[] {
         const innerWidth = Math.max(1, width - 2);
+        const contentWidth = Math.max(1, innerWidth - 2);
         const subjectLabel = toolName === "bash" || !toolName ? "Befehl" : "Ziel";
-        const subjectWrapped = wrapTextWithAnsi(subject, innerWidth).slice(0, 4);
-        const reasonWrapped = wrapTextWithAnsi(decision.reason, innerWidth).slice(0, MAX_REASON_LINES);
+        const subjectWrapped = wrapTextWithAnsi(subject, contentWidth).slice(0, 4);
+        const reasonWrapped = wrapTextWithAnsi(decision.reason, contentWidth).slice(0, MAX_REASON_LINES);
         const details = wrapTextWithAnsi(
           theme.fg("muted", `Werkzeug: ${toolName ?? "bash"} · Kontext: ${projectLabel(ctx.cwd)} · Risiko: ${riskLabel(risk)} (${risk})`),
-          innerWidth,
+          contentWidth,
         );
         if (width < 4) return [truncateToWidth("Warnung", width, "…")];
-        const pad = (line: string) => truncateToWidth(line, innerWidth, "…", true);
-        const border = (line: string) => `${theme.fg("border", "│")}${pad(line)}${theme.fg("border", "│")}`;
+        const pad = (line: string) => truncateToWidth(` ${line} `, innerWidth, "…", true);
+        const border = (line: string) => `${theme.fg(tone, "│")}${pad(line)}${theme.fg(tone, "│")}`;
+        const emptyLine = `${theme.fg(tone, "│")}${" ".repeat(innerWidth)}${theme.fg(tone, "│")}`;
         const divider = `${theme.fg(tone, "├")}${theme.fg(tone, "─".repeat(innerWidth))}${theme.fg(tone, "┤")}`;
         const body = [
-          theme.fg(tone, theme.bold(" Berechtigungsanfrage")),
+          theme.fg(tone, theme.bold("⚠️  BERECHTIGUNGSANFRAGE")),
           ...details,
           "",
-          theme.fg("muted", `${subjectLabel}:`),
+          theme.fg("warning", theme.bold(`${subjectLabel}:`)),
           ...(subjectWrapped.length ? subjectWrapped : ["(leer)"]),
           "",
-          theme.fg("muted", "Begründung:"),
-          ...(reasonWrapped.length ? reasonWrapped : ["(keine Begründung)"]),
+          theme.fg("muted", theme.bold("Begründung:")),
+          ...(reasonWrapped.length ? reasonWrapped.map((r) => theme.fg("muted", r)) : [theme.fg("muted", "(keine Begründung)")]),
         ];
         return [
           `${theme.fg(tone, "╭")}${theme.fg(tone, "─".repeat(innerWidth))}${theme.fg(tone, "╮")}`,
+          emptyLine,
           ...body.map(border),
+          emptyLine,
           divider,
-          border(theme.fg("accent", " [a] Einmal erlauben   [d] Ablehnen")),
+          emptyLine,
+          border(`${theme.fg("accent", theme.bold("[a] Einmal erlauben"))}   ${theme.fg("muted", "[d] Ablehnen")}`),
+          emptyLine,
           `${theme.fg(tone, "╰")}${theme.fg(tone, "─".repeat(innerWidth))}${theme.fg(tone, "╯")}`,
         ];
       },
