@@ -21,9 +21,11 @@ export interface TabbedOverlaySelection<T> {
   entry: MenuEntry<T>;
 }
 
-export interface RunTabbedOverlayOptions {
+export interface RunTabbedOverlayOptions<T> {
   initialTabId?: string;
   nonInteractiveHint?: string;
+  /** Optional in-place action for the selected entry. The overlay stays open. */
+  onSpace?: (selection: TabbedOverlaySelection<T>) => void;
 }
 
 interface TabState<T> {
@@ -43,7 +45,7 @@ export async function runTabbedOverlay<T>(
   ctx: ExtensionContext,
   title: string,
   tabs: readonly TabbedOverlayTab<T>[],
-  options: RunTabbedOverlayOptions = {},
+  options: RunTabbedOverlayOptions<T> = {},
 ): Promise<TabbedOverlaySelection<T> | undefined> {
   if (ctx.mode !== "tui" || !ctx.hasUI) {
     ctx.ui.notify(options.nonInteractiveHint ?? `${title} benötigt den TUI-Modus.`, "error");
@@ -110,7 +112,7 @@ export async function runTabbedOverlay<T>(
         if (view.showBelow) content.push(fg("dim", ` ↓ ${state.tab.entries.length - view.end} weitere Einträge`));
         if (content.length === 0) content.push(fg("muted", " Keine Einträge verfügbar."));
         const selected = state.selected >= 0 ? state.tab.entries[state.selected] : undefined;
-        const footer = `Tab Tabs · ↑↓ Auswahl · Enter ${selected?.disabled ? "nicht verfügbar" : "übernehmen"} · Esc schließen`;
+        const footer = `Tab Tabs · ↑↓ Auswahl · Space umschalten · Enter ${selected?.disabled ? "nicht verfügbar" : "übernehmen"} · Esc schließen`;
         const frame = (value: string) => `${border("│")}${pad(value, inner)}${border("│")}`;
         const emptyLine = frame("");
         if (width < 4) return [truncateToWidth(title, width, ELLIPSIS)];
@@ -140,6 +142,10 @@ export async function runTabbedOverlay<T>(
         else if (matchesKey(data, Key.pageDown)) state.selected = Math.min(state.tab.entries.length - 1, state.selected + visibleEntries);
         else if (matchesKey(data, Key.home)) { state.selected = initialMenuIndex(state.tab.entries); state.viewportStart = 0; }
         else if (matchesKey(data, Key.end)) { state.selected = [...state.tab.entries].map((entry, index) => ({ entry, index })).reverse().find((item) => !item.entry.disabled)?.index ?? -1; state.viewportStart = Math.max(0, state.selected); }
+        else if (data === " ") {
+          const entry = state.selected >= 0 ? state.tab.entries[state.selected] : undefined;
+          if (entry && !entry.disabled) options.onSpace?.({ tabId: state.tab.id, entry });
+        }
         else if (matchesKey(data, Key.enter)) {
           const entry = state.selected >= 0 ? state.tab.entries[state.selected] : undefined;
           if (entry && !entry.disabled) done({ tabId: state.tab.id, entry });

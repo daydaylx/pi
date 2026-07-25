@@ -428,6 +428,9 @@ function createHarness(options = {}) {
           getAll() {
             return [];
           },
+          getAvailable() {
+            return options.models ? Object.values(options.models) : [];
+          },
         },
         isIdle() {
           return idle;
@@ -587,29 +590,14 @@ await section("target runtime configuration", async () => {
       ),
       "subagent runtime remains immutable-pinned",
     );
-    const roleModels = [
-      setup.models.fast,
-      setup.models.primary,
-      setup.models.deep,
-    ];
-    // P0.3: enabledModels must contain the three central roles (subset check)
     assert(
-      roleModels.every((m) => settings.enabledModels.includes(m)),
-      "central model roles are contained in enabledModels",
+      !Object.hasOwn(setup, "models"),
+      "setup.json contains no duplicate model-role configuration",
     );
-    // The session's effective default model (provider/model) must be available
-    // in enabledModels. It does not have to equal the primary role — users may
-    // pick a different startup model while roles stay bound to agent profiles.
     const defaultModelId = `${settings.defaultProvider}/${settings.defaultModel}`;
     assert(
       settings.enabledModels.includes(defaultModelId),
-      `the active default model (${defaultModelId}) is contained in enabledModels`,
-    );
-    assert(
-      readFileSync(path.join(ROOT, "agents", "oracle.md"), "utf8").includes(
-        `model: ${setup.models.deep}`,
-      ),
-      "the oracle profile consumes the central deep-model assignment",
+      `the active default model (${defaultModelId}) is contained in Pi's scoped models`,
     );
     eq(
       setup.ui,
@@ -1044,11 +1032,7 @@ await section("greenfield setup config and Aurora state contract", async () => {
     { unknownTools: "ask", bash: "ask" },
     "capability defaults require confirmation",
   );
-  eq(
-    Object.keys(defaults.models).sort(),
-    ["deep", "fast", "primary"],
-    "three model roles are centralised",
-  );
+  assert(!Object.hasOwn(defaults, "models"), "native Pi scoped models replace setup roles");
 
   const project = mkdtempSync(path.join(tmpdir(), "pi-setup-config-"));
   mkdirSync(path.join(project, ".pi"), { recursive: true });
@@ -4893,20 +4877,6 @@ await section("Control Center menus and routing", async () => {
     ["simple_plan", "detailed_plan", "work", "decide"],
     "Workflow actions are available below the Workflow area",
   );
-  eq(
-    controlCenterMenu
-      .buildModelRoleMenu({
-        models: { fast: "a/fast", primary: "a/primary", deep: "a/deep" },
-        activeRole: "primary",
-      })
-      .map((entry) => [entry.label, entry.current]),
-    [
-      ["Fast", false],
-      ["Primary", true],
-      ["Deep", false],
-    ],
-    "model role menu is fixed to Fast, Primary and Deep",
-  );
   const thinkingEntries = thinkingMenu.buildThinkingMenu("high", "auto");
   eq(
     thinkingEntries[0].value,
@@ -4932,8 +4902,7 @@ await section("Control Center menus and routing", async () => {
         if (choice === "__diagnostics__")
           return labels.find((label) => label.endsWith("LSP-Diagnose"));
         if (choice === "__models__") {
-          if (labels.includes("Fast")) return "Fast";
-          return labels.find((label) => label.endsWith("Modellrolle wechseln"));
+          return labels.find((label) => label.endsWith("openai-codex/gpt-5.4-mini"));
         }
         return labels.find((label) => label === choice);
       },
@@ -5033,27 +5002,7 @@ await section("Control Center menus and routing", async () => {
     eq(
       harness.setModelCalls.at(-1),
       { provider: "openai-codex", id: "gpt-5.4-mini" },
-      "Fast resolves through the registry and uses pi.setModel",
-    );
-
-    const unavailable = createHarness({
-      models: {},
-      select: (labels) =>
-        labels.includes("Fast")
-          ? "Fast"
-          : labels.find((label) => label.endsWith("Modellrolle wechseln")),
-    });
-    planMode.default(unavailable.api);
-    const unavailableContext = unavailable.makeContext({ cwd });
-    unavailableContext.ui.custom = async () => {
-      throw new Error("use deterministic select fallback");
-    };
-    await unavailable.shortcuts.get("super+m")(unavailableContext);
-    assert(
-      unavailable.notifications.some((entry) =>
-        entry.message.includes("nicht verfügbar"),
-      ),
-      "unavailable configured role fails clearly without a fallback model",
+      "a native scoped/global model resolves through the registry and uses pi.setModel",
     );
 
     const busy = createHarness({
@@ -5064,10 +5013,7 @@ await section("Control Center menus and routing", async () => {
           id: "gpt-5.4-mini",
         },
       },
-      select: (labels) =>
-        labels.includes("Fast")
-          ? "Fast"
-          : labels.find((label) => label.endsWith("Modellrolle wechseln")),
+      select: (labels) => labels.find((label) => label.endsWith("openai-codex/gpt-5.4-mini")),
     });
     planMode.default(busy.api);
     const busyContext = busy.makeContext({ cwd });
@@ -5078,7 +5024,7 @@ await section("Control Center menus and routing", async () => {
     eq(
       busy.setModelCalls,
       [],
-      "model role changes are blocked during an active agent turn",
+      "native scoped/global model changes are blocked during an active agent turn",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

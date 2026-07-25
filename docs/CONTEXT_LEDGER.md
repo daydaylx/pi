@@ -8,18 +8,18 @@
 - Aurora Night mit kontextueller Bewegung; reduced und off bleiben über setup.json verfügbar
 - read-write als Startstufe; unbekannte Tools bleiben in Full und YOLO bestätigungspflichtig, in strengeren Stufen blockiert, in Setup gesperrt
 - Frischer Subagenten-Kontext, maximale Parallelität drei
-- Drei kuratierte OpenAI-Codex-Modellrollen: fast, primary, deep
+- Modellwahl und Cycling folgen Pi-native `/scoped-models` und `settings.enabledModels`
 - Alte UI-/Renderer-Dateien bleiben inaktiv erhalten (Rückbau ohne Datenverlust)
 - Entscheidung: Shift+Tab öffnet das zentrale Control Center mit hierarchischen Bereichen.
 - Entscheidung: Die vier vorhandenen Workflow-Modi stehen im Control Center an erster Stelle und bleiben direkt erreichbar.
 - Entscheidung: Ctrl+Shift+X wird entfernt.
-- Entscheidung: Das Modell-Untermenü bietet nur Fast, Primary und Deep; die Rollen wechseln sofort zum konfigurierten Modell.
+- Entscheidung: Das Modell-Untermenü zeigt Registry-Modelle und Pi-native Scoped Models; die Auswahl wechselt sofort zum gewählten Modell.
 - Entscheidung: Thinking zeigt sichtbar „Auto“ oder „Manuell“.
 - Entscheidung: Diagnose zeigt Status und erlaubt eine Datei-Prüfung über eine kurze Dateiauswahl.
 - Entscheidung: Plan & Workflow umfasst Moduswahl sowie den Einstieg in Decision Intake.
 
 ## Architekturentscheidungen
-- setup.json ist die zentrale, validierte Konfiguration für UI, Permissions, LSP, Subagenten, Modellrollen und Verifikation
+- setup.json ist die zentrale, validierte Konfiguration für UI, Permissions, LSP, Subagenten und Verifikation
 - Plan-Workflow nutzt Sidecar v2 mit stabiler planId, Revision, Lifecycle, Todo-Hash und gebundener executionId (Lock/CAS)
 - Pi Core bleibt alleiniger Compaction-Eigentümer; keine zweite Compaction
 - Context Ledger (docs/CONTEXT_LEDGER.md) ist das dauerhafte Projektgedächtnis, getrennt vom flüchtigen docs/PROJECT_STATE.md

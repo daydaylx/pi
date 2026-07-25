@@ -2,6 +2,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { MenuEntry } from "./menu-ui.ts";
 
 export const THINKING_LEVELS = [
+  "off",
   "minimal",
   "low",
   "medium",
@@ -13,6 +14,7 @@ export type SelectableThinkingLevel = (typeof THINKING_LEVELS)[number];
 export type ThinkingMenuSelection = "auto" | `manual:${SelectableThinkingLevel}`;
 
 const THINKING_LEVEL_LABEL: Record<SelectableThinkingLevel, string> = {
+  off: "Aus",
   minimal: "Minimal",
   low: "Niedrig",
   medium: "Mittel",
@@ -21,6 +23,7 @@ const THINKING_LEVEL_LABEL: Record<SelectableThinkingLevel, string> = {
 };
 
 const THINKING_LEVEL_DESCRIPTION: Record<SelectableThinkingLevel, string> = {
+  off: "Kein erweitertes Denken für diese Antwort",
   minimal: "Kaum sichtbares Nachdenken, schnellste Antworten",
   low: "Kurzes Nachdenken für einfache Aufgaben",
   medium: "Ausgewogenes Nachdenken für normale Aufgaben",

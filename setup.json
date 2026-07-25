@@ -18,11 +18,6 @@
     "concurrency": 3,
     "freshContext": true
   },
-  "models": {
-    "primary": "openai-codex/gpt-5.4",
-    "fast": "openai-codex/gpt-5.4-mini",
-    "deep": "openai-codex/gpt-5.5"
-  },
   "verification": {
     "typecheck": {
       "command": "npm",

@@ -4,14 +4,18 @@ import { runTabbedOverlay } from "./shared/tabbed-overlay.ts";
 import { CONTROL_CENTER_EVENTS } from "./shared/control-center-events.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
 
-type MainAction = "permissions" | "diagnostics" | "thinking" | "thinking-view";
+type MainAction = "models" | "permissions" | "diagnostics" | "thinking" | "thinking-view";
 
 export default function controlPlaneExtension(pi: ExtensionAPI): void {
   async function openMainMenu(ctx: ExtensionContext): Promise<void> {
-    // Die Modellauswahl wird absichtlich nicht über das Hauptmenü angeboten:
-    // Sie ist bereits direkt über Super+M (SHORTCUTS.modelMenu) und im
-    // Control Center (Shift+Tab → Modell → Modellrolle wechseln) erreichbar.
     const selected = await runTabbedOverlay<MainAction>(ctx, "Hauptmenü", [
+      {
+        id: "models",
+        label: "Modell",
+        entries: [
+          { id: "model-scopes", label: "Modelle & Scopes", description: "Coding, Quick, Architect und Review für diese Sitzung wählen", value: "models" },
+        ],
+      },
       {
         id: "permissions",
         label: "Permissions",
@@ -40,14 +44,15 @@ export default function controlPlaneExtension(pi: ExtensionAPI): void {
         id: "system",
         label: "System",
         entries: [
-          { id: "system-theme", label: "Theme & Motion", description: "Aurora Night und Bewegungsmodus", disabled: true, disabledReason: "Persistente UI-Konfiguration wird noch nicht von der Pi-Runtime geschrieben." },
-          { id: "system-hotkeys", label: "Hotkeys", description: "CSI-u/Kitty Keyboard Protocol erforderlich", disabled: true, disabledReason: "Die Belegung wird zentral aus der Agent-Konfiguration geladen." },
+          { id: "system-theme", label: "Theme & Motion", description: "Aurora Night und Bewegungsmodus", disabled: true, disabledReason: "Die globale UI-Konfiguration bleibt außerhalb der Laufzeit-TUI." },
+          { id: "system-hotkeys", label: "Hotkeys", description: "CSI-u/Kitty Keyboard Protocol erforderlich", disabled: true, disabledReason: "Die Super-Shortcuts gelten im fokussierten Pi-Terminal." },
         ],
       },
     ], { nonInteractiveHint: "Hauptmenü benötigt den TUI-Modus." });
     const action = selected?.entry.value;
     if (!action) return;
     switch (action) {
+      case "models": pi.events.emit(CONTROL_CENTER_EVENTS.openModels, { ctx }); break;
       case "permissions": pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx }); break;
       case "diagnostics": pi.events.emit(CONTROL_CENTER_EVENTS.openDiagnostics, { ctx }); break;
       case "thinking": pi.events.emit(CONTROL_CENTER_EVENTS.openThinking, { ctx }); break;

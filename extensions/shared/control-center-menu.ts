@@ -43,7 +43,7 @@ export function buildControlCenterMenu(
       description: "Modellrolle und Denkmodus",
       icon: "◈",
       children: [
-        { id: "control-model-roles", label: "Modellrolle wechseln", description: "Fast, Primary oder Deep für diese Sitzung wählen", value: "model-roles" },
+        { id: "control-model-roles", label: "Modelle & Scopes", description: "Globale Modelle oder native Scoped Models für diese Sitzung wählen", value: "model-roles" },
         { id: "control-thinking", label: `Denken: ${state.thinkingLabel}`, description: "Denkmodus für diese Sitzung", badge: state.thinkingLabel, value: "thinking" },
       ],
     },
@@ -69,29 +69,4 @@ export function buildControlCenterMenu(
       children: [{ id: "control-thinking-view", label: "Thinking-Anzeige", description: "Kompakt, Fokus oder aus", value: "thinking-view" }],
     },
   ];
-}
-
-export type ModelRole = "fast" | "primary" | "deep";
-
-export interface ModelRoleMenuState {
-  models: Record<ModelRole, string>;
-  activeRole?: ModelRole;
-}
-
-const ROLE_LABEL: Record<ModelRole, string> = {
-  fast: "Fast",
-  primary: "Primary",
-  deep: "Deep",
-};
-
-export function buildModelRoleMenu(
-  state: ModelRoleMenuState,
-): MenuEntry<ModelRole>[] {
-  return (["fast", "primary", "deep"] as const).map((role) => ({
-    id: `model-role-${role}`,
-    label: ROLE_LABEL[role],
-    description: state.models[role],
-    value: role,
-    current: state.activeRole === role,
-  }));
 }

@@ -31,7 +31,12 @@ Die bestehende öffentliche UX bleibt verfügbar: Shift+Tab öffnet das temporä
 Center; `/plan`, `/decide`, `/review-plan`, `/work`, `/go`, `/done`, `/finish`
 und `/plan-todos` behalten ihre bestehende Semantik. Das Control Center startet
 mit Schnellplan, Architekturplan, Work-Modus und Optionen klären, und bietet
-danach separate Menüs für Modellrolle, Thinking, Berechtigung und Ein-Datei-LSP-Diagnose.
+danach separate Menüs für Modell-Scopes, Thinking, Berechtigung und Ein-Datei-LSP-Diagnose.
+
+Die TUI-Shortcuts bleiben auf das fokussierte Terminal begrenzt: `Shift+Tab`
+öffnet Workflows, Review/To-dos und Skills; `Super+M` die Modell-Scopes;
+`Super+D` Thinking und Status-Telemetrie; `Super+Q` das Hauptmenü. Für die
+Super-Kombinationen muss das Terminal das Kitty-/CSI-u-Protokoll unterstützen.
 
 Der Markdown-Plan bleibt `.agent/plans/current-plan.md`. Sidecar v2 speichert eine
 stabile `planId`, Revision, Lifecycle, Todo-bezogenen Hash und gebundene `executionId` in
@@ -82,7 +87,7 @@ getrennt und erfordert die Zustimmung des Nutzers; der Installer lädt niemals
 eigenständig Pakete herunter.
 
 `/setup-doctor` nach einem Pi-Upgrade oder einer Konfigurationsänderung ausführen. Es meldet
-effektive Konfiguration, Vertrauen, Modellrollen, LSP-Modus, aktive Extension-Anzahl
+effektive Konfiguration, Vertrauen, Modell-Scopes, LSP-Modus, aktive Extension-Anzahl
 und Manifest-/Installationsversions-Drift, ohne Zugangsdaten zu lesen.
 
 ## Sicherheit und Updates

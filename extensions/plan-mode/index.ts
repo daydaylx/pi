@@ -13,13 +13,18 @@ import {
   type AssistantMessage,
   type TextContent,
 } from "@earendil-works/pi-ai";
+import {
+  getAgentDir,
+  resolveModelScopeWithDiagnostics,
+} from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { relative, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import { Type } from "typebox";
 import {
   consolidateLedger,
@@ -76,11 +81,7 @@ import {
 } from "../aurora-ui/state.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
-import {
-  buildModelRoleMenu,
-  type ControlCenterAction,
-  type ModelRole,
-} from "../shared/control-center-menu.ts";
+import { type ControlCenterAction } from "../shared/control-center-menu.ts";
 import {
   CONTROL_CENTER_EVENTS,
   type ControlCenterSnapshot,
@@ -93,7 +94,6 @@ import {
   type WorkflowCapabilityState,
   type WorkflowStateDiscardedEvent,
 } from "../shared/workflow-capabilities.ts";
-import { loadSetupConfig } from "../setup-core/config.ts";
 import {
   clearTaskContract,
   deriveContractFromPlan,
@@ -282,6 +282,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   let decisionBriefHash: string | undefined;
   let workflowStateToken = "missing";
   let executionOwnerId = randomUUID();
+  const selectedSkillCommands = new Set<string>();
   let foreignExecution: WorkflowExecutionMetadata | undefined;
   let leaseHeartbeat: ReturnType<typeof setTimeout> | undefined;
   let executePlanInFlight = false;
@@ -1636,37 +1637,107 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     );
   }
 
-  function configuredModelRole(
-    current: { provider?: string; id?: string } | undefined,
-    models: Record<ModelRole, string>,
-  ): ModelRole | undefined {
-    if (!current?.provider || !current.id) return undefined;
-    return (["fast", "primary", "deep"] as const).find(
-      (role) => models[role] === `${current.provider}/${current.id}`,
-    );
-  }
-
   function splitModelReference(value: string): [string, string] | undefined {
     const separator = value.indexOf("/");
     if (separator <= 0 || separator === value.length - 1) return undefined;
     return [value.slice(0, separator), value.slice(separator + 1)];
   }
 
-  async function openModelRoles(ctx: ExtensionContext): Promise<void> {
-    const token = captureSessionToken(ctx);
-    const models = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config
-      .models;
-    const selected = await runMenu(
-      ctx,
-      "Modellrollen",
-      buildModelRoleMenu({
-        models,
-        activeRole: configuredModelRole(ctx.model, models),
-      }),
-      { fallbackPrompt: "Modellrolle wählen" },
+  function modelDescription(
+    reference: string,
+    ctx: ExtensionContext,
+  ): { description: string; unavailable: boolean } {
+    const parsed = splitModelReference(reference);
+    if (!parsed) return { description: "Ungültige Modellreferenz", unavailable: true };
+    const [provider, id] = parsed;
+    const model = ctx.modelRegistry.find(provider, id);
+    if (!model) return { description: `${reference} · nicht in der Modell-Registry`, unavailable: true };
+    const available = ctx.modelRegistry.getAvailable().some(
+      (candidate) => candidate.provider === provider && candidate.id === id,
     );
+    const context = ctx.model?.provider === provider && ctx.model.id === id
+      ? ctx.getContextUsage()?.tokens
+      : undefined;
+    const contextUsage = context === null || context === undefined ? "Kontext: —" : `Kontext: ${context}`;
+    const rates = model.cost?.input || model.cost?.output
+      ? `Input/Output: ${model.cost.input}/${model.cost.output}`
+      : "Input/Output: —";
+    return {
+      description: `${reference} · ${available ? "verfügbar" : "keine Auth"} · ${model.contextWindow ?? "—"} Kontext · ${model.maxTokens ?? "—"} Output · ${rates} · ${contextUsage}`,
+      unavailable: !available,
+    };
+  }
+
+  function nativeScopedModelPatterns(): string[] {
+    const path = join(getAgentDir(), "settings.json");
+    if (!existsSync(path)) return [];
+    try {
+      const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+      if (!raw || typeof raw !== "object") return [];
+      const patterns = (raw as { enabledModels?: unknown }).enabledModels;
+      return Array.isArray(patterns)
+        ? patterns.filter((pattern): pattern is string => typeof pattern === "string" && pattern.trim().length > 0)
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  interface ModelOverlayAction {
+    reference: string;
+    thinkingLevel?: ThinkingLevel;
+    source: "global" | "scoped";
+  }
+
+  async function openModelScopes(ctx: ExtensionContext): Promise<void> {
+    const token = captureSessionToken(ctx);
+    const globalModels = ctx.modelRegistry.getAvailable()
+      .sort((left, right) => `${left.provider}/${left.id}`.localeCompare(`${right.provider}/${right.id}`));
+    const patterns = nativeScopedModelPatterns();
+    const scoped = patterns.length > 0
+      ? await resolveModelScopeWithDiagnostics(patterns, ctx.modelRegistry)
+      : { scopedModels: [], diagnostics: [] };
+    const selected = await runTabbedOverlay<ModelOverlayAction>(ctx, "Modelle & Scopes", [
+      {
+        id: "global",
+        label: "Globale Modelle",
+        entries: globalModels.map((model) => {
+          const reference = `${model.provider}/${model.id}`;
+          const details = modelDescription(reference, ctx);
+          return {
+            id: `model-${reference}`,
+            label: reference,
+            description: details.description,
+            value: { reference, source: "global" as const },
+            current: Boolean(ctx.model && `${ctx.model.provider}/${ctx.model.id}` === reference),
+          };
+        }),
+      },
+      {
+        id: "scopes",
+        label: "Scoped Models",
+        entries: scoped.scopedModels.length > 0 ? scoped.scopedModels.map(({ model, thinkingLevel }) => {
+          const reference = `${model.provider}/${model.id}`;
+          const details = modelDescription(reference, ctx);
+          return {
+            id: `scoped-model-${reference}`,
+            label: reference,
+            description: `${details.description}${thinkingLevel ? ` · Thinking: ${thinkingLevel}` : ""}`,
+            value: { reference, thinkingLevel, source: "scoped" as const },
+            current: Boolean(ctx.model && `${ctx.model.provider}/${ctx.model.id}` === reference),
+          };
+        }) : [{
+          id: "scoped-models-empty",
+          label: "Keine Scoped Models konfiguriert",
+          description: "Verwalte die native Auswahl über /scoped-models oder settings.enabledModels.",
+          disabled: true,
+          disabledReason: "Keine native Scope-Auswahl vorhanden.",
+        }],
+      },
+    ], { nonInteractiveHint: "Modellsteuerung benötigt den TUI-Modus." });
     if (!isSessionTokenCurrent(token, ctx)) return;
-    if (!selected) return;
+    const action = selected?.entry.value;
+    if (!action) return;
     if (!ctx.isIdle()) {
       ctx.ui.notify(
         "Modellwechsel ist nur möglich, wenn kein Agent-Turn läuft.",
@@ -1674,40 +1745,100 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
       );
       return;
     }
-    const reference = splitModelReference(models[selected]);
-    if (!reference) {
-      ctx.ui.notify(
-        `Modellrolle ${selected} ist ungültig konfiguriert.`,
-        "error",
-      );
+    const parsed = splitModelReference(action.reference);
+    if (!parsed) {
+      ctx.ui.notify("Modellreferenz ist ungültig.", "error");
       return;
     }
-    const [provider, id] = reference;
+    const [provider, id] = parsed;
     const target = ctx.modelRegistry.find(provider, id);
     if (!target) {
       ctx.ui.notify(
-        `Modell für ${selected} ist nicht verfügbar (${models[selected]}). Prüfe Provider und Credentials.`,
+        `Modell ist nicht verfügbar (${action.reference}). Prüfe Provider und Credentials.`,
         "error",
       );
       return;
     }
     try {
       await pi.setModel(target);
+      if (action.thinkingLevel) pi.setThinkingLevel(action.thinkingLevel);
       if (!isSessionTokenCurrent(token, ctx)) return;
       ctx.ui.notify(
-        `${selected === "fast" ? "Fast" : selected === "primary" ? "Primary" : "Deep"}: ${models[selected]} aktiv.`,
+        `${action.source === "scoped" ? "Scoped Model" : "Globales Modell"}: ${action.reference} aktiv.`,
         "info",
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(
-        `Modell für ${selected} konnte nicht aktiviert werden (${models[selected]}): ${message}`,
+        `Modell konnte nicht aktiviert werden (${action.reference}): ${message}`,
         "error",
       );
     }
   }
 
-  type WorkOverlayAction = ControlCenterAction | "review-plan" | "plan-todos" | "changes" | "history" | "skills";
+  type SkillCommand = { name: string; description?: string; sourceInfo?: { path?: string } };
+  type WorkOverlayAction = ControlCenterAction | "review-plan" | "plan-todos" | "changes" | "history" | "skills-library" | "skills-toggles" | "skills-status";
+
+  function nativeSkillCommands(): SkillCommand[] {
+    return (pi.getCommands() as unknown as SkillCommand[])
+      .filter((command) => command.name.startsWith("skill:"))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  function persistSelectedSkills(): void {
+    pi.appendEntry("skill-selection", { commands: [...selectedSkillCommands] });
+  }
+
+  async function openSkillLibrary(ctx: ExtensionContext, togglesOnly = false): Promise<void> {
+    const commands = nativeSkillCommands();
+    if (commands.length === 0) {
+      ctx.ui.notify("Keine nativen Pi-Skills sind in dieser Sitzung verfügbar.", "warning");
+      return;
+    }
+    const entries = commands
+      .filter((command) => !togglesOnly || selectedSkillCommands.has(command.name))
+      .map((command) => ({
+        id: `skill-${command.name}`,
+        label: `/${command.name}`,
+        description: command.description ?? command.sourceInfo?.path ?? "Native Pi-Skill-Anweisung",
+        value: command.name,
+        current: selectedSkillCommands.has(command.name),
+      }));
+    if (entries.length === 0) {
+      ctx.ui.notify("Noch keine Quick-Skills ausgewählt. Öffne zuerst die Skill-Bibliothek.", "info");
+      return;
+    }
+    const selected = await runTabbedOverlay<string>(ctx, togglesOnly ? "Quick-Skill Toggles" : "Skill-Bibliothek", [
+      { id: "skills", label: togglesOnly ? "Ausgewählt" : "Native Skills", entries },
+    ], {
+      nonInteractiveHint: "Die Skill-Bibliothek benötigt den TUI-Modus.",
+      onSpace: ({ entry }) => {
+        const command = entry.value;
+        if (!command) return;
+        if (selectedSkillCommands.has(command)) selectedSkillCommands.delete(command);
+        else selectedSkillCommands.add(command);
+        entry.current = selectedSkillCommands.has(command);
+        persistSelectedSkills();
+      },
+    });
+    const command = selected?.entry.value;
+    if (!command) return;
+    const args = await ctx.ui.input(`/${command} starten`, "Optionale Aufgabe oder Argumente");
+    if (args === undefined) return;
+    pi.sendMessage({
+      customType: "skill-launch",
+      content: `[SKILL-LAUNCH]\nLade und befolge jetzt den nativen Pi-Skill /${command}.\nNutzerauftrag: ${args.trim() || "Führe den Skill für die aktuelle Aufgabe aus."}`,
+      display: true,
+    }, { triggerTurn: true });
+  }
+
+  function showSkillManagementStatus(ctx: ExtensionContext): void {
+    const count = nativeSkillCommands().length;
+    ctx.ui.notify(
+      `${count} native Skill(s) verfügbar. Skills und Extensions werden hier nur angezeigt; verwalte sie über skills/ bzw. die Pi-Konfiguration und starte Pi danach neu.`,
+      "info",
+    );
+  }
 
   async function openControlCenter(ctx: ExtensionContext): Promise<void> {
     const token = captureSessionToken(ctx);
@@ -1737,7 +1868,9 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
         id: "skills",
         label: "Skills",
         entries: [
-          { id: "skills", label: "Skill-Bibliothek", description: "Lokale Skills anzeigen und für diese Sitzung markieren", value: "skills" },
+          { id: "skills-library", label: "Skill-Bibliothek", description: "Native Pi-Skills anzeigen; Space für die nächste Aufgabe vormerken", value: "skills-library" },
+          { id: "skills-toggles", label: "Quick-Skill Toggles", description: "Nur für die nächste Aufgabe vorgemerkte Skills anzeigen", value: "skills-toggles" },
+          { id: "skills-status", label: "Custom Skills & Extensions", description: "Verfügbare Skills und sichere Verwaltungshinweise", value: "skills-status" },
         ],
       },
     ], { nonInteractiveHint: "Arbeits-Overlay benötigt den TUI-Modus." });
@@ -1772,7 +1905,15 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
       ctx.ui.notify("Task-Historie folgt den archivierten Plänen unter .agent/plans/archive.", "info");
       return;
     }
-    ctx.ui.notify("Skills bleiben explizite Pi-/skill:-Befehle; ein Sitzungsprofil wird separat ergänzt.", "info");
+    if (action === "skills-library") {
+      await openSkillLibrary(ctx);
+      return;
+    }
+    if (action === "skills-toggles") {
+      await openSkillLibrary(ctx, true);
+      return;
+    }
+    showSkillManagementStatus(ctx);
   }
 
   pi.registerFlag("plan", {
@@ -1817,11 +1958,11 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
 
   pi.registerShortcut(SHORTCUTS.modelMenu.keys, {
     description: SHORTCUTS.modelMenu.description,
-    handler: async (ctx) => openModelRoles(ctx),
+    handler: async (ctx) => openModelScopes(ctx),
   });
 
   pi.events.on(CONTROL_CENTER_EVENTS.openModels, async (event) => {
-    await openModelRoles((event as { ctx: ExtensionContext }).ctx);
+    await openModelScopes((event as { ctx: ExtensionContext }).ctx);
   });
 
   pi.on("context", async (event) => {
@@ -2122,6 +2263,20 @@ FORTSCHRITT:
         },
       };
     }
+  });
+
+  pi.on("before_agent_start", (_event, _ctx) => {
+    if (selectedSkillCommands.size === 0) return;
+    const commands = [...selectedSkillCommands];
+    selectedSkillCommands.clear();
+    persistSelectedSkills();
+    return {
+      message: {
+        customType: "skill-selection",
+        content: `[SKILL-SELECTION]\nFür diese Aufgabe wurden folgende native Pi-Skills ausgewählt: ${commands.map((name) => `/${name}`).join(", ")}.\nLade vor der Bearbeitung die vollständigen SKILL.md-Anweisungen dieser Skills und befolge sie. Die bestehende Permission- und Workflow-Policy bleibt unverändert.`,
+        display: false,
+      },
+    };
   });
 
   function completePlanSteps(
@@ -3652,6 +3807,7 @@ CHANGED_FILES:
     planModeEverUsed = false;
     planExistedBeforeTurn = false;
     latestCwd = ctx.cwd;
+    selectedSkillCommands.clear();
     auroraEpoch = undefined;
     subscribeAuroraProvider();
 
@@ -3675,6 +3831,18 @@ CHANGED_FILES:
     }
 
     const entries = ctx.sessionManager.getEntries();
+    const latestSkillSelection = entries
+      .filter(
+        (entry: { type: string; customType?: string }) =>
+          entry.type === "custom" && entry.customType === "skill-selection",
+      )
+      .pop() as { data?: { commands?: unknown } } | undefined;
+    if (Array.isArray(latestSkillSelection?.data?.commands)) {
+      for (const command of latestSkillSelection.data.commands) {
+        if (typeof command === "string" && command.startsWith("skill:"))
+          selectedSkillCommands.add(command);
+      }
+    }
     const latestState = entries
       .filter(
         (entry: { type: string; customType?: string }) =>

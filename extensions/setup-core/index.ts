@@ -200,20 +200,6 @@ export default function setupCore(pi: ExtensionAPI): void {
             (value): value is string => typeof value === "string",
           )
         : [];
-      const modelRoles = Object.values(loaded.config.models);
-      if (modelRoles.some((model) => !enabledModels.includes(model))) {
-        consistencyErrors.push(
-          "Zentrale Modellrollen fehlen in settings.enabledModels.",
-        );
-      }
-      if (
-        `${String(settings?.defaultProvider ?? "")}/${String(settings?.defaultModel ?? "")}` !==
-        loaded.config.models.primary
-      ) {
-        consistencyErrors.push(
-          "Das aktive Default-Modell entspricht nicht models.primary.",
-        );
-      }
       const subagentParallel = subagentSettings?.parallel as
         Record<string, unknown> | undefined;
       if (
@@ -232,7 +218,7 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  theme/motion: ${loaded.config.ui.theme}/${loaded.config.ui.motion}`,
         `  permissions: unknown=${loaded.config.permissions.unknownTools}, bash=${loaded.config.permissions.bash}`,
         `  LSP: ${loaded.config.lsp.enabled ? loaded.config.lsp.mode : "off"}`,
-        `  model roles: ${Object.values(loaded.config.models).join(" | ")}`,
+        `  scoped models: ${enabledModels.length || 0} Pattern(s) in settings.enabledModels`,
         `  Pi CLI/dev package: ${runtimeVersion ?? "unknown"}/${String(declaredVersion ?? "?")}`,
         `  installed dev package: ${devVersion ?? "missing"}`,
         `  configured extensions: ${Array.isArray(settings?.extensions) ? settings.extensions.length : "?"}`,

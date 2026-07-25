@@ -23,7 +23,6 @@ export interface SetupConfig {
     idleShutdownMs: number;
   };
   subagents: { concurrency: number; freshContext: boolean };
-  models: { primary: string; fast: string; deep: string };
   verification: Record<VerificationName, VerificationCommand>;
 }
 
@@ -49,11 +48,6 @@ const DEFAULT_CONFIG: SetupConfig = {
     idleShutdownMs: 600_000,
   },
   subagents: { concurrency: 3, freshContext: true },
-  models: {
-    primary: "openai-codex/gpt-5.4",
-    fast: "openai-codex/gpt-5.4-mini",
-    deep: "openai-codex/gpt-5.5",
-  },
   verification: {
     typecheck: {
       command: "npm",
@@ -165,7 +159,6 @@ function applyUserLayer(
       "permissions",
       "lsp",
       "subagents",
-      "models",
       "verification",
     ],
     source,
@@ -176,7 +169,6 @@ function applyUserLayer(
   const permissions = isObject(raw.permissions) ? raw.permissions : undefined;
   const lsp = isObject(raw.lsp) ? raw.lsp : undefined;
   const subagents = isObject(raw.subagents) ? raw.subagents : undefined;
-  const models = isObject(raw.models) ? raw.models : undefined;
   const verification = isObject(raw.verification)
     ? raw.verification
     : undefined;
@@ -205,14 +197,6 @@ function applyUserLayer(
       ["concurrency", "freshContext"],
       source,
       "subagents.",
-      diagnostics,
-    );
-  if (models)
-    reportUnknownKeys(
-      models,
-      ["primary", "fast", "deep"],
-      source,
-      "models.",
       diagnostics,
     );
   if (verification)
@@ -295,12 +279,6 @@ function applyUserLayer(
   if (typeof subagents?.freshContext === "boolean")
     next.subagents.freshContext = subagents.freshContext;
 
-  for (const role of ["primary", "fast", "deep"] as const) {
-    const value = models?.[role];
-    if (typeof value === "string" && value.trim())
-      next.models[role] = value.trim();
-  }
-
   for (const name of ["typecheck", "test", "verify"] as const) {
     const rawCheck = verification?.[name];
     if (!isObject(rawCheck)) continue;
@@ -376,7 +354,6 @@ function applyTrustedProjectLayer(
   }
   // A repository must never choose commands that execute on the host.
   candidate.verification = structuredClone(base.verification);
-  candidate.models = structuredClone(base.models);
   candidate.subagents = structuredClone(base.subagents);
   return candidate;
 }

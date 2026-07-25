@@ -20,6 +20,7 @@ import {
 import { isPlanFilePath, PLAN_RELATIVE_PATH } from "./plan-mode/utils.ts";
 import { confirmAction } from "./shared/permission-dialog.ts";
 import { runMenu } from "./shared/menu-ui.ts";
+import { runTabbedOverlay } from "./shared/tabbed-overlay.ts";
 import { buildPermissionMenu } from "./shared/permission-menu.ts";
 import {
   buildThinkingMenu,
@@ -494,15 +495,44 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
 
   async function openThinkingMenu(ctx: ExtensionContext): Promise<void> {
     const epoch = sessionEpoch;
-    const selected = await runMenu(
-      ctx,
-      "Denken",
-      buildThinkingMenu(pi.getThinkingLevel(), thinkingMode),
-      { fallbackPrompt: "Denkmodus wählen" },
-    );
-    if (!selected || epoch !== sessionEpoch) return;
+    const entries = buildThinkingMenu(pi.getThinkingLevel(), thinkingMode)
+      .filter((entry) => {
+        if (entry.value === "auto") return true;
+        const value = entry.value;
+        if (!value) return false;
+        const level = value.slice("manual:".length) as SelectableThinkingLevel;
+        return ctx.model?.thinkingLevelMap?.[level] !== null;
+      });
+    const selected = await runTabbedOverlay<
+      "auto" | `manual:${SelectableThinkingLevel}` | "thinking-view"
+    >(ctx, "Thinking & Reasoning", [
+      {
+        id: "depth",
+        label: "Denktiefe",
+        entries,
+      },
+      {
+        id: "telemetry",
+        label: "Anzeige & Telemetrie",
+        entries: [
+          {
+            id: "thinking-view",
+            label: "Status-Telemetrie",
+            description: "Ausgeblendet, kompakt oder mit Fokus; zeigt nie interne Modellgedanken",
+            value: "thinking-view",
+          },
+        ],
+      },
+    ], { nonInteractiveHint: "Thinking & Reasoning benötigt den TUI-Modus." });
+    const value = selected?.entry.value;
+    if (value === "thinking-view") {
+      pi.events.emit(CONTROL_CENTER_EVENTS.openThinkingView, { ctx });
+      return;
+    }
+    const selectedLevel = value;
+    if (!selectedLevel || epoch !== sessionEpoch) return;
 
-    if (selected === "auto") {
+    if (selectedLevel === "auto") {
       thinkingMode = "auto";
       manualThinkingLevel = undefined;
       const level = workflowThinkingDefault();
@@ -512,7 +542,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    const level = selected.slice("manual:".length) as SelectableThinkingLevel;
+    const level = selectedLevel.slice("manual:".length) as SelectableThinkingLevel;
     thinkingMode = "manual";
     manualThinkingLevel = level;
     pi.setThinkingLevel(level);
