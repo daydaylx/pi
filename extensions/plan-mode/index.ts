@@ -75,8 +75,8 @@ import {
   type AuroraWorkflowPhase,
 } from "../aurora-ui/state.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
+import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
 import {
-  buildControlCenterMenu,
   buildModelRoleMenu,
   type ControlCenterAction,
   type ModelRole,
@@ -1707,65 +1707,72 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     }
   }
 
+  type WorkOverlayAction = ControlCenterAction | "review-plan" | "plan-todos" | "changes" | "history" | "skills";
+
   async function openControlCenter(ctx: ExtensionContext): Promise<void> {
     const token = captureSessionToken(ctx);
-    let snapshot:
-      | {
-          permissionLabel: string;
-          thinkingMode: "auto" | "manual";
-          thinkingLevel: ThinkingLevel;
-        }
-      | undefined;
-    pi.events.emit(CONTROL_CENTER_EVENTS.snapshot, {
-      respond: (value: ControlCenterSnapshot) => {
-        snapshot = value;
+    const selected = await runTabbedOverlay<WorkOverlayAction>(ctx, "Arbeits-Overlay", [
+      {
+        id: "workflows",
+        label: "Workflows",
+        badge: MODE_LABEL[mode],
+        entries: [
+          { id: "mode-simple-plan", label: "Schnellplan", description: "Kleine Änderung atomar planen", value: "simple_plan", current: mode === "simple_plan" },
+          { id: "mode-detailed-plan", label: "Architekturplan", description: "Struktur, Abhängigkeiten und Risiken prüfen", value: "detailed_plan", current: mode === "detailed_plan" },
+          { id: "mode-work", label: "Arbeitsmodus", description: "Freie Aufgabe oder bestehenden Plan bearbeiten", value: "work", current: mode === "work" },
+          { id: "mode-decide", label: "Optionen klären", description: "Entscheidungsbrief vor der Planung erstellen", value: "decide", current: phase === "deciding" },
+        ],
       },
-    });
-    const thinking = snapshot
-      ? `${snapshot.thinkingMode === "auto" ? "Auto" : "Manuell"} (${snapshot.thinkingLevel})`
-      : "Auto";
-    const selected = await runMenu<ControlCenterAction>(
-      ctx,
-      "Control Center",
-      buildControlCenterMenu({
-        mode,
-        deciding: phase === "deciding",
-        permissionLabel: snapshot?.permissionLabel ?? "nicht verfügbar",
-        thinkingLabel: thinking,
-      }),
-      { nonInteractiveHint: "Control Center benötigt den TUI-Modus." },
-    );
+      {
+        id: "review",
+        label: "Review & To-dos",
+        entries: [
+          { id: "review-plan", label: "Review-Plan", description: "Aktuellen Plan auf Risiken, Tests und offene Entscheidungen prüfen", value: "review-plan" },
+          { id: "plan-todos", label: "Plan-To-dos", description: "Live-Status der Schritte des aktuellen Plans", value: "plan-todos" },
+          { id: "changes", label: "Diff-Check", description: "Änderungen der aktuellen Sitzung im Diff-Browser prüfen", value: "changes" },
+          { id: "history", label: "Task-Historie", description: "Archivierte Pläne zusammenfassen", value: "history" },
+        ],
+      },
+      {
+        id: "skills",
+        label: "Skills",
+        entries: [
+          { id: "skills", label: "Skill-Bibliothek", description: "Lokale Skills anzeigen und für diese Sitzung markieren", value: "skills" },
+        ],
+      },
+    ], { nonInteractiveHint: "Arbeits-Overlay benötigt den TUI-Modus." });
     if (!isSessionTokenCurrent(token, ctx)) return;
-    if (!selected) return;
-    if (selected === "decide") {
+    const action = selected?.entry.value;
+    if (!action) return;
+    if (action === "decide") {
       await enterDecisionModeFromMenu(ctx);
       return;
     }
     if (
-      selected === "simple_plan" ||
-      selected === "detailed_plan" ||
-      selected === "work"
+      action === "simple_plan" ||
+      action === "detailed_plan" ||
+      action === "work"
     ) {
-      await setWorkflowMode(selected, ctx);
+      await setWorkflowMode(action, ctx);
       return;
     }
-    if (selected === "model-roles") {
-      await openModelRoles(ctx);
+    if (action === "review-plan") {
+      await reviewPlan(ctx);
       return;
     }
-    if (selected === "thinking") {
-      pi.events.emit(CONTROL_CENTER_EVENTS.openThinking, { ctx });
+    if (action === "plan-todos") {
+      showPlanTodos(ctx);
       return;
     }
-    if (selected === "permissions") {
-      pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx });
+    if (action === "changes") {
+      pi.events.emit(CONTROL_CENTER_EVENTS.openChanges, { ctx });
       return;
     }
-    if (selected === "thinking-view") {
-      pi.events.emit(CONTROL_CENTER_EVENTS.openThinkingView, { ctx });
+    if (action === "history") {
+      ctx.ui.notify("Task-Historie folgt den archivierten Plänen unter .agent/plans/archive.", "info");
       return;
     }
-    pi.events.emit(CONTROL_CENTER_EVENTS.openDiagnostics, { ctx });
+    ctx.ui.notify("Skills bleiben explizite Pi-/skill:-Befehle; ein Sitzungsprofil wird separat ergänzt.", "info");
   }
 
   pi.registerFlag("plan", {
@@ -1806,6 +1813,15 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
   pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
     description: SHORTCUTS.modeMenu.description,
     handler: async (ctx) => openControlCenter(ctx),
+  });
+
+  pi.registerShortcut(SHORTCUTS.modelMenu.keys, {
+    description: SHORTCUTS.modelMenu.description,
+    handler: async (ctx) => openModelRoles(ctx),
+  });
+
+  pi.events.on(CONTROL_CENTER_EVENTS.openModels, async (event) => {
+    await openModelRoles((event as { ctx: ExtensionContext }).ctx);
   });
 
   pi.on("context", async (event) => {

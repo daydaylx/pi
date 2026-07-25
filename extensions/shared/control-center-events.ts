@@ -8,10 +8,12 @@ import type { PermissionLevel } from "./workflow-status.ts";
  */
 export const CONTROL_CENTER_EVENTS = {
   openPermissions: "control-center:open-permissions",
+  openModels: "control-center:open-models",
   openThinking: "control-center:open-thinking",
   openThinkingView: "control-center:open-thinking-view",
   openDiagnostics: "control-center:open-diagnostics",
   openContext: "control-center:open-context",
+  openChanges: "control-center:open-changes",
   snapshot: "control-center:snapshot",
   workflowThinkingDefault: "control-center:workflow-thinking-default",
 } as const;

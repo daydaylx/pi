@@ -1,11 +1,11 @@
 {
   "toolDescriptionMode": "compact",
   "parallel": {
-    "maxTasks": 8,
-    "concurrency": 4
+    "maxTasks": 4,
+    "concurrency": 3
   },
-  "globalConcurrencyLimit": 4,
-  "maxSubagentSpawnsPerSession": 24,
+  "globalConcurrencyLimit": 3,
+  "maxSubagentSpawnsPerSession": 12,
   "ui": {
     "showAsyncWidget": false
   }

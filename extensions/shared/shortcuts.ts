@@ -1,7 +1,7 @@
 /**
- * Zentrale Shortcut-Definitionen. Registrierung (mode-permissions.ts,
- * plan-mode/index.ts) und die Ctrl+Shift+H-Hilfe lesen dieselben Einträge,
- * damit Tastenkürzel und Hilfetext nie auseinanderdriften.
+ * Zentrale Shortcut-Definitionen. Die vier globalen Bereiche nutzen bewusst
+ * modifier-eindeutige CSI-u/Kitty-Sequenzen. Terminale müssen das erweiterte
+ * Tastaturprotokoll aktivieren, damit die Kombinationen unterscheidbar sind.
  */
 
 export interface ShortcutBinding {
@@ -19,15 +19,20 @@ export const SHORTCUTS = {
     label: "Shift+Tab",
     description: "Control Center öffnen",
   },
-  permissionMenu: {
-    keys: "ctrl+shift+y",
-    label: "Ctrl+Shift+Y",
-    description: "Permission-Schnellmenü öffnen",
+  modelMenu: {
+    keys: "ctrl+shift+m",
+    label: "Ctrl+Shift+M",
+    description: "Modellsteuerung öffnen",
   },
   thinkingMenu: {
-    keys: "ctrl+shift+t",
-    label: "Ctrl+Shift+T",
+    keys: "ctrl+shift+d",
+    label: "Ctrl+Shift+D",
     description: "Thinking wählen",
+  },
+  mainMenu: {
+    keys: "ctrl+shift+q",
+    label: "Ctrl+Shift+Q",
+    description: "Hauptmenü öffnen",
   },
   help: {
     keys: "ctrl+shift+h",

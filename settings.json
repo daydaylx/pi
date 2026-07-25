@@ -1,8 +1,8 @@
 {
-  "lastChangelogVersion": "0.80.10",
+  "lastChangelogVersion": "0.81.1",
   "theme": "aurora-night",
-  "defaultProvider": "zai",
-  "defaultModel": "glm-5.2",
+  "defaultProvider": "opencode-go",
+  "defaultModel": "minimax-m3",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -22,7 +22,7 @@
     "openai-codex/gpt-5.5",
     "zai/glm-5.2",
     "zai/glm-4.7",
-    "openrouter/tencent/hy3:free",
+    "openrouter/tencent/hy3",
     "openrouter/poolside/laguna-m.1:free",
     "openrouter/openai/gpt-oss-20b:free",
     "opencode-go/qwen3.7-plus",
@@ -37,7 +37,8 @@
     "openai-codex/gpt-5.6-terra",
     "openai-codex/gpt-5.6-luna",
     "openai-codex/gpt-5.6-sol",
-    "anthropic/claude-sonnet-5"
+    "anthropic/claude-sonnet-5",
+    "opencode-go/deepseek-v4-pro"
   ],
   "packages": [
     "git:github.com/daydaylx/pi-subagents@dd716cfc8c3a9b0ee35632752ac2b1736cd7de61"
@@ -46,6 +47,7 @@
     "!extensions/**",
     "+extensions/setup-core/index.ts",
     "+extensions/plan-mode/index.ts",
+    "+extensions/control-plane.ts",
     "+extensions/mode-permissions.ts",
     "+extensions/ask-user.ts",
     "+extensions/lsp/index.ts",

@@ -22,3 +22,4 @@ run-history.jsonl
 # Lokale Modell-/Extension-Laufzeitdaten
 models-store.json
 extensions/thinking-view/config.json
+pi-crash.log

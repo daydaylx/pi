@@ -8,6 +8,6 @@
   "languages": {
     "typescript": { "enabled": true },
     "python": { "enabled": true },
-    "rust": { "enabled": false }
+    "rust": { "enabled": true }
   }
 }

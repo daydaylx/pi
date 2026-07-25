@@ -15,7 +15,7 @@
     "idleShutdownMs": 600000
   },
   "subagents": {
-    "concurrency": 4,
+    "concurrency": 3,
     "freshContext": true
   },
   "models": {

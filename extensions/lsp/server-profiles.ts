@@ -4,8 +4,8 @@
  * Each profile ships with the security-defaults required by the plan §9:
  * - TypeScript: automatic type acquisition disabled.
  * - Python: no unsafe execution.
- * - Go, Rust, C/C++, Java: default `enabled: false` / opt-in only.
- * - Rust: cargo build scripts and proc macros disabled.
+ * - Rust: default `enabled: true`, with cargo build scripts and proc macros disabled.
+ * - Go, C/C++, Java: default `enabled: false` / opt-in only.
  *
  * Profiles are static data — command strings are never constructed from
  * untrusted project values (see `process.ts` for separated command/args).
@@ -79,7 +79,7 @@ export const PROFILES: Record<string, ServerProfile> = {
   rust: {
     id: "rust",
     label: "Rust",
-    enabled: false,
+    enabled: true,
     command: "rust-analyzer",
     args: [],
     rootMarkers: ["Cargo.toml", "rust-project.json"],

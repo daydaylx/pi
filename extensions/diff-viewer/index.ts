@@ -9,6 +9,7 @@ import { computeFallbackDiff } from "./git-diff.ts";
 import { renderCompact } from "./diff-renderer.ts";
 import { DiffBrowserComponent } from "./diff-browser.ts";
 import { DiffEntryComponent } from "./diff-entry.ts";
+import { CONTROL_CENTER_EVENTS, type OpenControlCenterMenuEvent } from "../shared/control-center-events.ts";
 
 const LIVE_PREVIEW_WIDGET = "diff-viewer/live-preview";
 
@@ -40,6 +41,38 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
   const pendingDiffs = new Map<string, PendingDiff>();
   const livePreviews = new Map<string, DiffViewEntryData>();
   let activeCtx: ExtensionContext | null = null;
+
+  async function openChanges(ctx: ExtensionContext): Promise<void> {
+    if (ctx.mode !== "tui") {
+      ctx.ui.notify("Diff-Check benötigt den interaktiven Modus", "warning");
+      return;
+    }
+    const changes = tracker.changedFiles;
+    if (changes.length === 0) {
+      ctx.ui.notify("Keine Änderungen in dieser Session", "info");
+      return;
+    }
+    await ctx.ui.custom<void>((tui: TUI, theme: Theme, keybindings, done) => {
+      const browser = new DiffBrowserComponent(
+        changes,
+        theme,
+        keybindings,
+        (path) => {
+          const change = changes.find((candidate) => candidate.path === path);
+          return change
+            ? { stats: change.stats, hunks: change.hunks, timestamp: change.timestamp }
+            : null;
+        },
+        Math.max(12, Math.floor((process.stdout.rows ?? 40) * 0.8) - 2),
+        () => tui.requestRender(),
+      );
+      browser.onClose = () => done();
+      return browser;
+    }, {
+      overlay: true,
+      overlayOptions: { anchor: "center", width: "90%", maxHeight: "80%", margin: 1 },
+    });
+  }
 
   function updateLivePreview(ctx: ExtensionContext): void {
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
@@ -167,36 +200,10 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("changes", {
     description: "Zeigt alle Dateiänderungen der aktuellen Session als Diff-Browser",
-    handler: async (_args, ctx) => {
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify("/changes benötigt den interaktiven Modus", "warning");
-        return;
-      }
-      const changes = tracker.changedFiles;
-      if (changes.length === 0) {
-        ctx.ui.notify("Keine Änderungen in dieser Session", "info");
-        return;
-      }
-      await ctx.ui.custom<void>((tui: TUI, theme: Theme, keybindings, done) => {
-        const browser = new DiffBrowserComponent(
-          changes,
-          theme,
-          keybindings,
-          (path) => {
-            const change = changes.find((candidate) => candidate.path === path);
-            return change
-              ? { stats: change.stats, hunks: change.hunks, timestamp: change.timestamp }
-              : null;
-          },
-          Math.max(12, Math.floor((process.stdout.rows ?? 40) * 0.8) - 2),
-          () => tui.requestRender(),
-        );
-        browser.onClose = () => done();
-        return browser;
-      }, {
-        overlay: true,
-        overlayOptions: { anchor: "center", width: "90%", maxHeight: "80%", margin: 1 },
-      });
-    },
+    handler: async (_args, ctx) => openChanges(ctx),
+  });
+
+  pi.events.on(CONTROL_CENTER_EVENTS.openChanges, async (event) => {
+    await openChanges((event as OpenControlCenterMenuEvent).ctx);
   });
 }

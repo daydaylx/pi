@@ -52,10 +52,10 @@ in dieser Version bewusst **nicht** enthalten.
 - **TypeScript/JavaScript**: automatisch aktiv, aber *Automatic Type
   Acquisition* deaktiviert und `maxTsServerMemory` begrenzt.
 - **Python**: automatisch aktiv, keine unsichere Ausführung.
-- **Go, Rust, C/C++, Java**: standardmäßig **`enabled: false`** (opt-in),
-  weil diese Server Toolchain-Kommandos ausführen oder ressourcenintensiv sind.
-- **Rust** (falls aktiviert): Cargo-Build-Skripte und Proc-Macros bleiben
+- **Rust**: automatisch aktiv; Cargo-Build-Skripte und Proc-Macros bleiben
   aus Sicherheitsgründen deaktiviert.
+- **Go, C/C++, Java**: standardmäßig **`enabled: false`** (opt-in),
+  weil diese Server Toolchain-Kommandos ausführen oder ressourcenintensiv sind.
 
 ## Server-Matrix
 
@@ -64,7 +64,7 @@ in dieser Version bewusst **nicht** enthalten.
 | TypeScript / JavaScript | `typescript` | `typescript-language-server --stdio` | aktiv | Benötigt `typescript-language-server` + `typescript` (global). |
 | Python | `python` | `pyright-langserver --stdio` | aktiv | Benötigt `pyright` (z. B. `npm i -g pyright`). |
 | Go | `go` | `gopls` | **opt-in** | Kann Toolchain-Kommandos ausführen; nicht in nicht vertrauten Projekten aktivieren. |
-| Rust | `rust` | `rust-analyzer` | **opt-in** | Build-Skripte/Proc-Macros standardmäßig deaktiviert. |
+| Rust | `rust` | `rust-analyzer` | aktiv | Build-Skripte/Proc-Macros standardmäßig deaktiviert. |
 | C / C++ | `c` | `clangd` | **opt-in** | Benötigt eine `compile_commands.json`; ohne diese sind die Ergebnisse schwach. |
 | Java | `java` | `eclipse.jdt.ls` | **opt-in** | Benötigt Java-Runtime + JDT-LS; ressourcenintensiv. |
 
@@ -87,7 +87,7 @@ Nur in vertrauenswürdigen Projekten gelesen. Siehe kommentiertes Beispiel unter
   "languages": {
     "typescript": { "enabled": true },
     "python":     { "enabled": true },
-    "rust":       { "enabled": false }
+    "rust":       { "enabled": true }
   }
 }
 ```

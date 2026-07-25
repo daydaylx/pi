@@ -81,12 +81,8 @@ const LOCAL_LSP_TOOLS = new Set([
 const READ_ONLY_SUBAGENT_PROFILES = new Set([
   "scout",
   "planner",
-  "architect",
   "reviewer",
   "test-runner",
-  "security-auditor",
-  "ui-reviewer",
-  "docs-auditor",
   "oracle",
 ]);
 
@@ -556,11 +552,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       }
       await applyPermissionLevel(level, ctx);
     },
-  });
-
-  pi.registerShortcut(SHORTCUTS.permissionMenu.keys, {
-    description: SHORTCUTS.permissionMenu.description,
-    handler: async (ctx) => openPermissionMenu(ctx),
   });
 
   pi.registerShortcut(SHORTCUTS.thinkingMenu.keys, {

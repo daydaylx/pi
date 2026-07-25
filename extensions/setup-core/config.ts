@@ -48,7 +48,7 @@ const DEFAULT_CONFIG: SetupConfig = {
     requestTimeoutMs: 10_000,
     idleShutdownMs: 600_000,
   },
-  subagents: { concurrency: 4, freshContext: true },
+  subagents: { concurrency: 3, freshContext: true },
   models: {
     primary: "openai-codex/gpt-5.4",
     fast: "openai-codex/gpt-5.4-mini",

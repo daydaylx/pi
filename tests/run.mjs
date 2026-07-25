@@ -138,6 +138,7 @@ const lspControlCenter = await load("extensions/lsp/control-center.ts");
 const lspTools = await load("extensions/lsp/tools.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
+const controlPlane = await load("extensions/control-plane.ts");
 const activityStatus = await load("extensions/activity-status.ts");
 const diffAlgorithm = await load("extensions/diff-viewer/diff-algorithm.ts");
 const diffFallback = await load("extensions/diff-viewer/git-diff.ts");
@@ -704,12 +705,12 @@ await section("target runtime configuration", async () => {
     }
     eq(
       subagentConfig.parallel,
-      { maxTasks: 8, concurrency: 4 },
+      { maxTasks: 4, concurrency: 3 },
       "subagent parallelism is bounded",
     );
     eq(
       subagentConfig.globalConcurrencyLimit,
-      4,
+      3,
       "global subagent concurrency is bounded",
     );
     eq(
@@ -4936,30 +4937,12 @@ await section("Control Center menus and routing", async () => {
       !harness.shortcuts.has("ctrl+shift+x"),
       "Ctrl+Shift+X registers no local shortcut",
     );
-    assert(
-      harness.shortcuts.has("ctrl+shift+y"),
-      "Ctrl+Shift+Y remains registered",
-    );
-    assert(
-      harness.shortcuts.has("ctrl+shift+t"),
-      "Ctrl+Shift+T remains registered",
-    );
-
-    for (const [selection, eventName] of [
-      ["__thinking__", "control-center:open-thinking"],
-      ["__permissions__", "control-center:open-permissions"],
-      ["__diagnostics__", "control-center:open-diagnostics"],
-    ]) {
-      choice = selection;
-      await harness.shortcuts.get("shift+tab")(context);
-      assert(
-        harness.emitted.some((event) => event.name === eventName),
-        `Control Center routes ${selection} through its shared event`,
-      );
-    }
+    assert(!harness.shortcuts.has("ctrl+shift+y"), "legacy permission shortcut is retired");
+    assert(harness.shortcuts.has("ctrl+shift+d"), "Ctrl+Shift+D opens Thinking");
+    assert(harness.shortcuts.has("ctrl+shift+m"), "Ctrl+Shift+M opens models");
 
     choice = "Manuell: Sehr hoch";
-    await harness.shortcuts.get("ctrl+shift+t")(context);
+    await harness.shortcuts.get("ctrl+shift+d")(context);
     eq(
       harness.api.getThinkingLevel(),
       "xhigh",
@@ -4973,7 +4956,7 @@ await section("Control Center menus and routing", async () => {
       "manual Thinking survives a workflow transition",
     );
     choice = "Auto";
-    await harness.shortcuts.get("ctrl+shift+t")(context);
+    await harness.shortcuts.get("ctrl+shift+d")(context);
     eq(
       harness.api.getThinkingLevel(),
       "medium",
@@ -5010,7 +4993,7 @@ await section("Control Center menus and routing", async () => {
       {},
       staleThinkingContext,
     );
-    await staleThinkingHarness.shortcuts.get("ctrl+shift+t")(
+    await staleThinkingHarness.shortcuts.get("ctrl+shift+d")(
       staleThinkingContext,
     );
     eq(
@@ -5025,7 +5008,7 @@ await section("Control Center menus and routing", async () => {
     );
 
     choice = "__models__";
-    await harness.shortcuts.get("shift+tab")(context);
+    await harness.shortcuts.get("ctrl+shift+m")(context);
     eq(
       harness.setModelCalls.at(-1),
       { provider: "openai-codex", id: "gpt-5.4-mini" },
@@ -5044,7 +5027,7 @@ await section("Control Center menus and routing", async () => {
     unavailableContext.ui.custom = async () => {
       throw new Error("use deterministic select fallback");
     };
-    await unavailable.shortcuts.get("shift+tab")(unavailableContext);
+    await unavailable.shortcuts.get("ctrl+shift+m")(unavailableContext);
     assert(
       unavailable.notifications.some((entry) =>
         entry.message.includes("nicht verfügbar"),
@@ -5070,7 +5053,7 @@ await section("Control Center menus and routing", async () => {
     busyContext.ui.custom = async () => {
       throw new Error("use deterministic select fallback");
     };
-    await busy.shortcuts.get("shift+tab")(busyContext);
+    await busy.shortcuts.get("ctrl+shift+m")(busyContext);
     eq(
       busy.setModelCalls,
       [],
@@ -5079,6 +5062,25 @@ await section("Control Center menus and routing", async () => {
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+await section("global control plane shortcuts", async () => {
+  if (!controlPlane) return;
+  const harness = createHarness({
+    select: (labels) => labels.includes("LSP-Diagnose") ? "LSP-Diagnose" : undefined,
+  });
+  controlPlane.default(harness.api);
+  const context = harness.makeContext();
+  context.ui.custom = async () => {
+    throw new Error("use deterministic select fallback");
+  };
+  const openMainMenu = harness.shortcuts.get("ctrl+shift+q");
+  assert(Boolean(openMainMenu), "Ctrl+Shift+Q registers the global main menu");
+  if (openMainMenu) await openMainMenu(context);
+  assert(
+    harness.emitted.some((event) => event.name === "control-center:open-diagnostics"),
+    "global main menu routes tool actions through domain events",
+  );
 });
 
 await section("LSP Control Center file picker", async () => {
@@ -8100,7 +8102,7 @@ await section(
     );
 
     const rust = profilesMod.PROFILES.rust;
-    assert(rust.enabled === false, "rust profile is disabled by default");
+    assert(rust.enabled === true, "rust profile is enabled by default");
     assert(
       rust.settings?.["rust-analyzer"]?.cargo?.buildScripts?.enable === false,
       "rust disables cargo build scripts",
