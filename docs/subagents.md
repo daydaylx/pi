@@ -34,8 +34,7 @@ Umgebungsvariablen `PI_SUBAGENT_PERMISSION_LEVEL`/`PI_SUBAGENT_WRITE_OVERRIDE`/
 `PI_SUBAGENT_ALLOWED_PATHS`, die `mode-permissions.ts` früher für gestartete
 Kindprozesse auslas (diese Brücke wurde als Dead Code entfernt). Es beschränkt
 Kindprozesse über `--tools <list>`, was eine harte Pi-Core-Registry-Grenze ist:
-ein weggelassenes Tool kann nicht aufgerufen werden. Reviewer-, Security- und
-Exploration-Profile lassen deshalb Bash komplett weg. Der Test-Runner erhält
+ein weggelassenes Tool kann nicht aufgerufen werden. Review- und Exploration-Profile lassen deshalb Bash komplett weg. Der Test-Runner erhält
 das lokale `verify`-Tool, das nur die konfigurierten Namen `typecheck`, `test`
 und `verify` akzeptiert und die festen Prüfungen dieses Setups aus dem Agent-Verzeichnis
 ausführt; es kann keine beliebige Shell-Eingabe übergeben oder Repository-Lifecycle-Skripte
@@ -83,32 +82,35 @@ Kontext. Kontext-Vererbung und Projekt-Kontext-Vererbung sind getrennt:
 statischen Projektregeln.
 
 `pi-subagents` liefert 8 eingebaute Agenten (`scout`, `researcher`, `planner`,
-`worker`, `reviewer`, `oracle`, `delegate`, `context-builder`). Fünf lokale
-Profilnamen kollidieren mit diesen Builtins (`scout`, `oracle`, `planner`,
-`reviewer`, `worker`); Agenten im Nutzer-Scope überschatten automatisch Builtins mit
-demselben Namen (höchste Discovery-Priorität), sodass die lokalen, bereits
+`worker`, `reviewer`, `oracle`, `delegate`, `context-builder`). Fünf der sechs
+lokalen Profilnamen kollidieren mit Builtins (`scout`, `oracle`, `planner`,
+`reviewer`, `worker`); `test-runner` ist ausschließlich lokal definiert. Agenten
+im Nutzer-Scope überschatten automatisch Builtins mit demselben Namen (höchste
+Discovery-Priorität), sodass die lokalen, bereits
 etablierten Prompts und Ausgabeformate ohne Umbenennung wirksam bleiben.
+
+Die früheren Spezialprofile `architect`, `security-auditor`, `ui-reviewer` und
+`docs-auditor` wurden konsolidiert: Architekturverantwortung liegt jetzt vollständig
+beim `planner`; Security-, UI-, Docs- und Architektur-Reviews erfolgen über den
+`reviewer` mit seinem Fokus-System (`general`, `security`, `ui`, `docs`,
+`architecture`).
 
 | Agent              | Tools                                   | Notizen                                               |
 | ------------------ | --------------------------------------- | ----------------------------------------------------- |
-| `scout`            | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
-| `planner`          | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
-| `architect`        | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
-| `reviewer`         | read, grep, find, ls                    | technisch nur lesend                                  |
-| `test-runner`      | read, grep, find, ls, verify            | nur allowlistete Verifikation, keine rohe Bash        |
-| `security-auditor` | read, grep, find, ls                    | technisch nur lesend                                  |
-| `ui-reviewer`      | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
-| `docs-auditor`     | read, grep, find, ls                    | nur lesend durch Tool-Auslassung                      |
-| `worker`           | read, grep, find, ls, edit, write, bash | voller Schreib-Scope                                  |
-| `oracle`           | read, grep, find, ls                    | festes Modell + Thinking; expliziter frischer Kontext |
+| `scout`            | read, grep, find, ls                    | nur lesend; liefert kompakten Explorationskontext      |
+| `planner`          | read, grep, find, ls                    | Planung + volle Architekturverantwortung, nur lesend   |
+| `worker`           | read, grep, find, ls, edit, write, bash | voller Schreib-Scope, nur zugewiesene Dateien          |
+| `reviewer`         | read, grep, find, ls                    | 5 Fokusse: general, security, ui, docs, architecture   |
+| `test-runner`      | read, grep, find, ls, verify            | nur allowlistete Verifikation, keine rohe Bash         |
+| `oracle`           | read, grep, find, ls                    | festes Deep-Modell + Thinking; zweite Meinung          |
 
 ## Konfiguration
 
 `pi-subagents` liest seine eigene Konfiguration unter
 `~/.pi/agent/extensions/subagent/config.json` (optional) plus einen
 `settings.json` → `subagents.*` Key. Die aktiven lokalen Werte sind
-`parallel.maxTasks` = 8, `parallel.concurrency` = 4,
-`globalConcurrencyLimit` = 4 und `maxSubagentSpawnsPerSession` = 24.
+`parallel.maxTasks` = 4, `parallel.concurrency` = 3,
+`globalConcurrencyLimit` = 3 und `maxSubagentSpawnsPerSession` = 12.
 
 Die Paket-Implementierung akzeptiert einen internen `maxOutput`-Wert, aber das
 öffentliche Tool-Schema stellt diesen Parameter nicht zuverlässig bereit. Aufrufer dürfen
@@ -151,6 +153,7 @@ UI-Besitzer.
 
 ## Delegationskriterien
 
-Die kompakte Regel in `AGENTS.md` entscheidet, wann Delegation angemessen ist. Dieses
+Die kompakten Regeln in `AGENTS.md` (sechs harte Kriterien plus
+Delegationsmuster) entscheiden, wann Delegation angemessen ist. Dieses
 Dokument ist die detaillierte Referenz für Profilauswahl, Kontext-Isolation,
 Ergebnisformatierung und Betriebsgrenzen.

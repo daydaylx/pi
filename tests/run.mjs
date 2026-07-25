@@ -3856,6 +3856,26 @@ await section(
   },
 );
 
+await section("native subagent profiles", async () => {
+  const expectedProfiles = [
+    "oracle.md",
+    "planner.md",
+    "reviewer.md",
+    "scout.md",
+    "test-runner.md",
+    "worker.md",
+  ];
+  const agentsRoot = path.join(ROOT, "agents");
+  eq(
+    readdirSync(agentsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+      .map((entry) => entry.name)
+      .sort(),
+    expectedProfiles,
+    "the six consolidated local subagent profiles remain the complete set",
+  );
+});
+
 await section("native project skills", async () => {
   const expectedSkills = [
     "agent-docs",
@@ -3863,6 +3883,7 @@ await section("native project skills", async () => {
     "context-checkpoint",
     "doc-diff",
     "git-check",
+    "lsp-navigation",
     "prompt-compiler",
     "release-changelog",
     "repo-analyse",
@@ -3877,7 +3898,7 @@ await section("native project skills", async () => {
       .map((entry) => entry.name)
       .sort(),
     expectedSkills,
-    "the eleven project skills use Pi's standard skill directories",
+    "the twelve project skills use Pi's standard skill directories",
   );
 
   for (const name of expectedSkills) {

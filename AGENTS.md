@@ -29,7 +29,35 @@ Diese Regeln gelten für alle Pi-Sitzungen.
 
 ## Subagenten
 
-- Der Haupt-Agent delegiert klar abgrenzbare, unabhängige oder spezialisierte Teilaufgaben eigenständig; triviale Kleinstaufgaben bleiben lokal.
+### Harte Kriterien
+
+Ein Subagent wird nur verwendet, wenn mindestens eine Bedingung erfüllt ist:
+
+1. Die Teilaufgabe ist klar unabhängig.
+2. Ein anderes Toolset oder Berechtigungsprofil wird benötigt.
+3. Eine unabhängige Prüfung erzeugt echten Mehrwert.
+4. Der relevante Repository-Bereich ist noch unbekannt.
+5. Die Entscheidung besitzt hohe Folgekosten.
+6. Die Aufgabe kann sinnvoll parallel ausgeführt werden.
+
+Triviale Teilaufgaben bleiben beim Hauptagenten.
+
+### Delegationsmuster
+
+- **Kleine Änderung:** Main-Agent → direkt, oder Main-Agent → worker
+- **Normale Implementierung:** planner (oder Main-Agent) → worker → reviewer
+- **Unbekannter Bereich:** scout → planner → worker → reviewer
+- **Riskante Architektur:** scout → planner → oracle → worker → reviewer → test-runner
+- **Reine Prüfung:** reviewer mit klar angegebenem Fokus
+- **Reine Tests:** test-runner
+
+Der scout ist nur nötig, wenn relevante Dateien oder Systemgrenzen noch unbekannt
+sind. Der oracle nur bei sicherheitskritischen Änderungen, hohem
+Datenverlustrisiko, Architekturentscheidungen mit hohen Wechselkosten, größeren
+Migrationen, widersprüchlichen Reviews oder ausdrücklichem Wunsch.
+
+### Kontext und Ergebnis
+
 - Unabhängige Aufgaben starten standardmäßig mit frischer Unterhaltung. Fork-Kontext nur nutzen, wenn frühere Nutzerentscheidungen tatsächlich benötigt werden.
 - Ergebnisse kompakt synthetisieren und Belege, betroffene Dateien, Risiken, offene Fragen und Empfehlung nennen; keine vollständigen Unterhaltungen zurückkopieren.
 - Profilauswahl und Detailregeln nur bei Bedarf aus `/home/d/.pi/agent/docs/subagents.md` lesen.

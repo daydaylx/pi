@@ -23,3 +23,4 @@ run-history.jsonl
 models-store.json
 extensions/thinking-view/config.json
 pi-crash.log
+pi-debug.log

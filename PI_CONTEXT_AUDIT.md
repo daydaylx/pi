@@ -1,6 +1,7 @@
 # Pi Context Audit
 
 Datum: 2026-07-15  
+Status: historischer Audit-Snapshot; Inventar und Aktivitätsangaben beziehen sich auf dieses Datum. Den aktuellen Stand dokumentieren `docs/CONTEXT_LEDGER.md` und die jeweilige Fachdokumentation.
 Arbeitsverzeichnis: `/home/d/.pi/agent`  
 Sicherung: `/home/d/.pi/agent/backups/pi-context-audit/20260715-232411`
 UI-Folgesicherung: `/home/d/.pi/agent/backups/20260716-002807-ui-redesign`

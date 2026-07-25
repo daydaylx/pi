@@ -7,7 +7,7 @@
 ## Bestätigte Nutzerentscheidungen
 - Aurora Night mit kontextueller Bewegung; reduced und off bleiben über setup.json verfügbar
 - read-write als Startstufe; unbekannte Tools bleiben in Full und YOLO bestätigungspflichtig, in strengeren Stufen blockiert, in Setup gesperrt
-- Frischer Subagenten-Kontext, maximale Parallelität vier
+- Frischer Subagenten-Kontext, maximale Parallelität drei
 - Drei kuratierte OpenAI-Codex-Modellrollen: fast, primary, deep
 - Alte UI-/Renderer-Dateien bleiben inaktiv erhalten (Rückbau ohne Datenverlust)
 - Entscheidung: Shift+Tab öffnet das zentrale Control Center mit hierarchischen Bereichen.
@@ -24,6 +24,7 @@
 - Pi Core bleibt alleiniger Compaction-Eigentümer; keine zweite Compaction
 - Context Ledger (docs/CONTEXT_LEDGER.md) ist das dauerhafte Projektgedächtnis, getrennt vom flüchtigen docs/PROJECT_STATE.md
 - Automatische Ledger-Checkpoints laufen deterministisch ohne Modell-Turn in plan-mode
+- Subagenten von 10 auf 6 konsolidiert: architect → planner; security-auditor, ui-reviewer, docs-auditor → reviewer (Fokus-System). Weniger Rollenüberschneidungen, klarere Delegationskriterien.
 
 ## Nicht-Ziele
 - Keine externe Memory-Extension nur zum Speichern von mehr Daten
@@ -41,6 +42,16 @@
 - Keine Berührung der 24 anderen uncommittierten Änderungen auf `main`.
 - Keine Commits/Pushes (nur auf ausdrücklichen Auftrag).
 - Kein Eintrag in `PI_CONTEXT_CHANGELOG.md` (audit-spezifisches Änderungsprotokoll, thematisch falsch).
+- Keine vollständige Neuentwicklung der Subagent-Extension.
+- Kein Austausch von `pi-subagents`.
+- Keine Änderungen am gepinnten Drittanbieter-Fork.
+- Keine neuen Abhängigkeiten.
+- Keine Änderung der grundlegenden Permission-Architektur.
+- Keine Erweiterung der Agentenanzahl.
+- Keine allgemeinen Refactorings außerhalb der Subagenten-, Dokumentations- und Konfigurationsbereiche.
+- Keine automatische Veröffentlichung, kein Commit und kein Push.
+- Keine Änderungen an der `verify`-Konfiguration in `setup.json`.
+- Keine Änderung des Ergebnisvertrag-Schemas (Abschnittsüberschriften bleiben stabil).
 
 ## Bekannte Einschränkungen
 - Aktive Pi CLI ist 0.80.7, Manifest und lokales Dev-Paket sind 0.80.6 (dokumentierte Drift)
@@ -87,4 +98,4 @@
 - Option: Dynamisches Thinking pro Anfrage.
 - Option: Vollständiger Diagnose-Browser.
 
-<!-- CONTEXT-LEDGER-META: {"schemaVersion":1,"lastCheckpoint":"2026-07-25T09:58:30.547Z","lastTrigger":"session-shutdown","briefHash":"5d5f5bce0d3bceb08e04da73ba0fad2ebfb1a9049354f8c7a8b2ed3097cfc74f","planHash":"57b9a3949d7aa90c84ebb5f0767b1db57d04a7aa5a662f6a6381fb5f62888ffe"} -->
+<!-- CONTEXT-LEDGER-META: {"schemaVersion":1,"lastCheckpoint":"2026-07-25T10:42:15.941Z","lastTrigger":"session-shutdown","briefHash":"5d5f5bce0d3bceb08e04da73ba0fad2ebfb1a9049354f8c7a8b2ed3097cfc74f","planHash":"3188be1f0327d64821243ea7a0ac15517cd624f764171911d7b229fcd1a8645a"} -->
