@@ -115,7 +115,7 @@ export function scriptToHunks(
       }
       return { kind: "added", newLine: step.newLine, text: step.text };
     });
-    addInlineHighlights(lines);
+    applyInlineHighlights(lines);
     return {
       oldStart: selected.find((step) => step.oldLine !== undefined)?.oldLine ?? 0,
       oldCount: lines.filter((line) => line.kind !== "added").length,
@@ -178,7 +178,8 @@ export function computeWordDiff(oldText: string, newText: string): InlineSegment
   return mergeSegments(segments);
 }
 
-function addInlineHighlights(lines: DiffLine[]): void {
+/** Adds shared word-level highlights to adjacent removed/added lines. */
+export function applyInlineHighlights(lines: DiffLine[]): void {
   for (let index = 0; index < lines.length - 1; index++) {
     const removed = lines[index]!;
     const added = lines[index + 1]!;

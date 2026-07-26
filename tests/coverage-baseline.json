@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "metric": "v8-function",
+  "activeExtensions": [
+    "extensions/setup-core/index.ts",
+    "extensions/plan-mode/index.ts",
+    "extensions/mode-permissions.ts",
+    "extensions/lsp/index.ts",
+    "extensions/ask-user.ts",
+    "extensions/tool-output-guard.ts",
+    "extensions/diff-viewer/index.ts",
+    "extensions/control-plane.ts",
+    "extensions/aurora-ui/index.ts"
+  ],
+  "minimumFunctionCoverage": {
+    "extensions/setup-core/index.ts": 80,
+    "extensions/plan-mode/index.ts": 87,
+    "extensions/mode-permissions.ts": 92,
+    "extensions/lsp/index.ts": 20,
+    "extensions/ask-user.ts": 36,
+    "extensions/tool-output-guard.ts": 100,
+    "extensions/diff-viewer/index.ts": 50,
+    "extensions/control-plane.ts": 100,
+    "extensions/aurora-ui/index.ts": 81
+  }
+}

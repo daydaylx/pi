@@ -1,4 +1,5 @@
 /** Verbesserte, session-basierte Diff-Darstellung für edit/write-Operationen. */
+import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
@@ -14,14 +15,16 @@ import { CONTROL_CENTER_EVENTS, type OpenControlCenterMenuEvent } from "../share
 const LIVE_PREVIEW_WIDGET = "diff-viewer/live-preview";
 
 interface PendingDiff {
-  data: DiffViewEntryData;
+  path: string;
   oldContent: string;
+  expectedContent: string;
+  timestamp: number;
+  preview?: DiffViewEntryData;
 }
 
-async function readCurrentFile(pi: ExtensionAPI, cwd: string, filePath: string): Promise<string | null> {
+async function readCurrentFile(cwd: string, filePath: string): Promise<string | null> {
   try {
-    const result = await pi.exec("cat", [filePath], { cwd, timeout: 5000 });
-    return result.code === 0 ? result.stdout : null;
+    return await readFile(resolve(cwd, filePath), "utf8");
   } catch {
     return null;
   }
@@ -129,7 +132,7 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
     if (!args.path) return;
 
     const cwd = activeCtx?.cwd ?? ctx.cwd;
-    const oldContent = (await readCurrentFile(pi, cwd, args.path)) ?? "";
+    const oldContent = (await readCurrentFile(cwd, args.path)) ?? "";
     let expectedContent: string | undefined;
     if (event.toolName === "edit" && args.edits) {
       expectedContent = oldContent;
@@ -140,17 +143,27 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
     if (expectedContent === undefined) return;
 
     const path = displayPath(cwd, args.path);
-    const diff = computeFallbackDiff(path, oldContent, expectedContent);
-    const data: DiffViewEntryData = {
+    const timestamp = Date.now();
+    let preview: DiffViewEntryData | undefined;
+    if (ctx.mode === "tui" && ctx.hasUI) {
+      const diff = computeFallbackDiff(path, oldContent, expectedContent);
+      preview = {
+        path,
+        stats: diff.stats,
+        hunks: diff.hunks,
+        toolName: event.toolName,
+        timestamp,
+      };
+      livePreviews.set(event.toolCallId, preview);
+      updateLivePreview(ctx);
+    }
+    pendingDiffs.set(event.toolCallId, {
       path,
-      stats: diff.stats,
-      hunks: diff.hunks,
-      toolName: event.toolName,
-      timestamp: Date.now(),
-    };
-    pendingDiffs.set(event.toolCallId, { data, oldContent });
-    livePreviews.set(event.toolCallId, data);
-    updateLivePreview(ctx);
+      oldContent,
+      expectedContent,
+      timestamp,
+      preview,
+    });
   });
 
   pi.on("tool_result", async (event, ctx) => {
@@ -172,19 +185,33 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
     try {
       // Vorher-/Nachher-Snapshots isolieren exakt diese Tool-Operation und
       // vermeiden, dass bereits vorhandene Working-Tree-Änderungen erscheinen.
-      const newContent = (await readCurrentFile(pi, ctx.cwd, args.path)) ?? "";
-      const path = displayPath(ctx.cwd, args.path);
-      const actual = computeFallbackDiff(path, pending.oldContent, newContent);
+      const newContent = (await readCurrentFile(ctx.cwd, args.path)) ?? "";
+      const actual = newContent === pending.expectedContent && pending.preview
+        ? pending.preview
+        : (() => {
+            const diff = computeFallbackDiff(
+              pending.path,
+              pending.oldContent,
+              newContent,
+            );
+            return {
+              path: pending.path,
+              stats: diff.stats,
+              hunks: diff.hunks,
+              toolName: event.toolName,
+              timestamp: pending.timestamp,
+            } satisfies DiffViewEntryData;
+          })();
       const data: DiffViewEntryData = {
-        path,
+        path: actual.path,
         stats: actual.stats,
         hunks: actual.hunks,
         toolName: event.toolName,
-        timestamp: Date.now(),
+        timestamp: pending.timestamp,
       };
       if (data.stats.linesAdded > 0 || data.stats.linesRemoved > 0) {
         pi.appendEntry("diff-view", data);
-        tracker.recordChange(path, event.toolName, data.stats, data.hunks, data.timestamp);
+        tracker.recordChange(data.path, event.toolName, data.stats, data.hunks, data.timestamp);
       }
     } finally {
       pendingDiffs.delete(event.toolCallId);

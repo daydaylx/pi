@@ -35,8 +35,10 @@ danach separate Menüs für Modell-Scopes, Thinking, Berechtigung und Ein-Datei-
 
 Die TUI-Shortcuts bleiben auf das fokussierte Terminal begrenzt: `Shift+Tab`
 öffnet Workflows, Review/To-dos und Skills; `Super+M` die Modell-Scopes;
-`Super+D` Thinking und Status-Telemetrie; `Super+Q` das Hauptmenü. Für die
-Super-Kombinationen muss das Terminal das Kitty-/CSI-u-Protokoll unterstützen.
+`Super+D` Thinking und Status-Telemetrie; `Super+Q` das Hauptmenü. `Super+Y`
+schaltet den sichtbaren YOLO-Voll-Bypass um; der Editor-Yank liegt deshalb auf
+`Super+Shift+Y`. Für die Super-Kombinationen muss das Terminal das
+Kitty-/CSI-u-Protokoll unterstützen.
 
 Der Markdown-Plan bleibt `.agent/plans/current-plan.md`. Sidecar v2 speichert eine
 stabile `planId`, Revision, Lifecycle, Todo-bezogenen Hash und gebundene `executionId` in
@@ -63,6 +65,12 @@ Planning, Review, Decision, Execution, Paused, Blocked und Ready sind technisch
 erzwungene Capability-Phasen, keine reinen Prompt-Konventionen. Jede Phase legt nur
 ihre nötige Lese-, Rückfrage-, Verifikations- oder Fortschrittsfläche offen; Ausführungs-
 fortschritt ist zusätzlich an den aktiven Plan und die Ausführungsidentität gebunden.
+
+Jede erfolgreiche Workflow-Aktivierung sowie jeder Session-Start setzt die
+Permission-Stufe auf den zugehörigen Wert aus
+`permissions.workflowDefaults` zurück. Die Standardkonfiguration startet alle
+drei Workflow-Modi mit `read-bash`; manuelle Stufenwechsel gelten nur bis zum
+nächsten Workflow-Reset.
 
 ## Installieren und verifizieren
 
@@ -92,9 +100,14 @@ und Manifest-/Installationsversions-Drift, ohne Zugangsdaten zu lesen.
 
 ## Sicherheit und Updates
 
-- Unbekannte Tools erfordern in Read+Write, Full und YOLO immer eine Bestätigung und
-  sind in strengeren Stufen blockiert; Setup bleibt eine absolute Sperre. Workflow-
-  Phasengrenzen gelten unabhängig und können von einer Berechtigungsstufe nicht gelockert werden.
+- Unbekannte Tools erfordern in Read+Write und Full eine Bestätigung und sind in
+  strengeren Stufen blockiert. `Super+Y` beziehungsweise `/yolo` aktiviert dagegen
+  bewusst einen vollständigen, im Footer klar markierten Anwendung-Bypass: Policy,
+  Workflow-Grenzen, Secret-/Systempfadprüfungen und Bestätigungen greifen dann nicht.
+  Extern erzwungene OS- oder Containergrenzen bleiben davon unberührt.
+- Jeder Permission-Reset und YOLO-Wechsel wird als redigierter Session-Audit-Eintrag
+  gespeichert; er enthält nur Zeit, Quelle, Workflow und Zugriffszustand, niemals
+  Befehle, Pfade oder Tool-Inhalte.
 - `verify` akzeptiert nur `typecheck`, `test` oder `verify`; es kann keine freie
   Shell-Eingabe ausführen und führt immer die festen Prüfungen dieses Setups aus dem Agent-
   Verzeichnis aus. Projekt-Test-Skripte durchlaufen weiterhin die normale Bash-Policy.

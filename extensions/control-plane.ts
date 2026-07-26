@@ -20,7 +20,7 @@ export default function controlPlaneExtension(pi: ExtensionAPI): void {
         id: "permissions",
         label: "Permissions",
         entries: [
-          { id: "permission-level", label: "Zugriffsstufe", description: "Nur Lesen bis YOLO; Workflow-Grenzen bleiben unverändert", value: "permissions" },
+          { id: "permission-level", label: "Zugriffsstufe", description: "Nur Lesen bis YOLO; YOLO ist ein vollständiger, sichtbarer Bypass", value: "permissions" },
           { id: "permission-rules", label: "Whitelist / Blacklist / Dateisystem", description: "Globale Policy-Datei", disabled: true, disabledReason: "Policy-Regeln bleiben bewusst außerhalb der Laufzeit-TUI." },
         ],
       },

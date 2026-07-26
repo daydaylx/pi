@@ -84,6 +84,27 @@ const jiti = createJiti(path.join(ROOT, "npm", "package.json"), {
 let passed = 0;
 let failed = 0;
 
+const TEST_SUITES = new Set(["runtime", "workflow", "lsp", "diff-ledger"]);
+const requestedSuite = process.env.PI_TEST_SUITE;
+if (requestedSuite && !TEST_SUITES.has(requestedSuite)) {
+  throw new Error(
+    `Unknown PI_TEST_SUITE ${requestedSuite}; expected one of ${[...TEST_SUITES].join(", ")}.`,
+  );
+}
+
+function suiteForSection(name) {
+  if (/^LSP |^LSP$|LSP-|LSP\b/.test(name)) return "lsp";
+  if (/diff viewer|context ledger/i.test(name)) return "diff-ledger";
+  if (
+    /^(target runtime|greenfield setup|setup core|direct task|project verification|universal verification|task contract|native subagent|native project skills)/i.test(
+      name,
+    )
+  ) {
+    return "runtime";
+  }
+  return "workflow";
+}
+
 function assert(condition, message) {
   if (condition) {
     passed += 1;
@@ -105,6 +126,7 @@ function eq(actual, expected, message) {
 }
 
 async function section(name, run) {
+  if (requestedSuite && suiteForSection(name) !== requestedSuite) return;
   try {
     await run();
   } catch (error) {
@@ -143,6 +165,7 @@ const activityStatus = await load("extensions/activity-status.ts");
 const diffAlgorithm = await load("extensions/diff-viewer/diff-algorithm.ts");
 const diffFallback = await load("extensions/diff-viewer/git-diff.ts");
 const diffTracker = await load("extensions/diff-viewer/change-tracker.ts");
+const diffViewer = await load("extensions/diff-viewer/index.ts");
 // thinking-view-config.ts resolves its default config path once at import
 // time via PI_CODING_AGENT_DIR. This repo itself lives at ~/.pi/agent, so
 // the test suite must redirect that default to an isolated temp directory
@@ -169,6 +192,27 @@ const contextLedger = await load("extensions/shared/context-ledger.ts");
 
 function stripAnsi(value) {
   return String(value).replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function contrastRatio(foreground, background) {
+  const luminance = (hex) => {
+    const channels = hex
+      .replace("#", "")
+      .match(/.{2}/g)
+      .map((channel) => parseInt(channel, 16) / 255)
+      .map((channel) =>
+        channel <= 0.04045
+          ? channel / 12.92
+          : ((channel + 0.055) / 1.055) ** 2.4,
+      );
+    return (
+      0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+    );
+  };
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort(
+    (a, b) => b - a,
+  );
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
 function latestStatus(harness, key) {
@@ -209,6 +253,8 @@ function createHarness(options = {}) {
   let thinkingLevel = options.thinkingLevel ?? "high";
   let entries = options.entries ?? [];
   let idle = options.idle ?? true;
+  let branchReads = 0;
+  const branchListeners = new Set();
   const setModelCalls = [];
 
   const theme = {
@@ -422,6 +468,12 @@ function createHarness(options = {}) {
     get footerFactory() {
       return footerFactory;
     },
+    get branchReads() {
+      return branchReads;
+    },
+    emitBranchChange() {
+      for (const listener of branchListeners) listener();
+    },
     get editorFactory() {
       return editorFactory;
     },
@@ -490,6 +542,7 @@ function createHarness(options = {}) {
             return entries;
           },
           getBranch() {
+            branchReads += 1;
             return entries;
           },
         },
@@ -565,14 +618,8 @@ await section("target runtime configuration", async () => {
   const settings = JSON.parse(
     readFileSync(path.join(ROOT, "settings.json"), "utf8"),
   );
-  const zentui = JSON.parse(
-    readFileSync(path.join(ROOT, "zentui.json"), "utf8"),
-  );
-  const toolDisplay = JSON.parse(
-    readFileSync(
-      path.join(ROOT, "extensions", "pi-tool-display", "config.json"),
-      "utf8",
-    ),
+  const keybindings = JSON.parse(
+    readFileSync(path.join(ROOT, "keybindings.json"), "utf8"),
   );
   const subagentConfig = JSON.parse(
     readFileSync(
@@ -587,8 +634,7 @@ await section("target runtime configuration", async () => {
     readFileSync(path.join(ROOT, "npm", "package-lock.json"), "utf8"),
   );
 
-  // Greenfield runtime: the former package-owned cockpit remains below as a
-  // rollback contract, while Aurora is tested through its own ownership path.
+  // Aurora is the only supported runtime chrome in this test suite.
   if (settings.theme === "aurora-night") {
     const setup = JSON.parse(
       readFileSync(path.join(ROOT, "setup.json"), "utf8"),
@@ -629,8 +675,21 @@ await section("target runtime configuration", async () => {
     );
     eq(
       setup.permissions,
-      { unknownTools: "ask", bash: "ask" },
+      {
+        unknownTools: "ask",
+        bash: "ask",
+        workflowDefaults: {
+          work: "read-bash",
+          simple_plan: "read-bash",
+          detailed_plan: "read-bash",
+        },
+      },
       "unknown tools and free bash fail to confirmation",
+    );
+    eq(
+      keybindings["tui.editor.yank"],
+      "super+shift+y",
+      "editor yank leaves Super+Y available for the YOLO toggle",
     );
     eq(
       schema.additionalProperties,
@@ -641,6 +700,16 @@ await section("target runtime configuration", async () => {
       auroraTheme.name,
       "aurora-night",
       "Aurora theme has its stable runtime name",
+    );
+    eq(
+      auroraTheme.vars.dim,
+      "#7384AA",
+      "Aurora dim uses the accessible P2 contrast color",
+    );
+    assert(
+      contrastRatio(auroraTheme.vars.dim, auroraTheme.vars.navy) >= 4.5 &&
+        contrastRatio(auroraTheme.vars.dim, auroraTheme.vars.surface) >= 4.5,
+      "Aurora dim meets AA contrast on both default backgrounds",
     );
     for (const color of [
       "accent",
@@ -655,6 +724,21 @@ await section("target runtime configuration", async () => {
 
     const activeExtensions = settings.extensions.filter(
       (entry) => typeof entry === "string" && entry.startsWith("+extensions/"),
+    );
+    eq(
+      activeExtensions,
+      [
+        "+extensions/setup-core/index.ts",
+        "+extensions/plan-mode/index.ts",
+        "+extensions/mode-permissions.ts",
+        "+extensions/lsp/index.ts",
+        "+extensions/ask-user.ts",
+        "+extensions/tool-output-guard.ts",
+        "+extensions/diff-viewer/index.ts",
+        "+extensions/control-plane.ts",
+        "+extensions/aurora-ui/index.ts",
+      ],
+      "settings declare the dependency-safe local extension order",
     );
     for (const extension of [
       "+extensions/setup-core/index.ts",
@@ -745,6 +829,28 @@ await section("target runtime configuration", async () => {
         `greenfield installer includes verification support ${required}`,
       );
     }
+    for (const workflow of ["verify.yml", "lsp-smoke.yml"]) {
+      const source = readFileSync(
+        path.join(ROOT, ".github", "workflows", workflow),
+        "utf8",
+      );
+      assert(
+        /actions\/checkout@11bd71901bbe5b1630ceea73d27597364c9af683/.test(
+          source,
+        ),
+        `${workflow} pins actions/checkout to its v4.2.2 commit`,
+      );
+      assert(
+        /actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020/.test(
+          source,
+        ),
+        `${workflow} pins actions/setup-node to its v4.4.0 commit`,
+      );
+      assert(
+        !/uses:\s*actions\/(?:checkout|setup-node)@v\d/.test(source),
+        `${workflow} has no mutable checkout/setup-node tag`,
+      );
+    }
 
     // Exact harness pins remain installed for deterministic typechecking even
     // though the three former UI packages are not active runtime packages.
@@ -768,278 +874,6 @@ await section("target runtime configuration", async () => {
     return;
   }
 
-  eq(
-    settings.theme,
-    "catppuccin-mocha",
-    "Catppuccin Mocha is the configured theme",
-  );
-  const packageSources = settings.packages
-    .map((entry) => (typeof entry === "string" ? entry : entry?.source))
-    .sort();
-  eq(packageSources.length, 4, "runtime has exactly four package sources");
-  assert(
-    packageSources.includes("npm:@ujjwalgrover/pi-catppuccin@1.0.0"),
-    "Catppuccin keeps its exact npm pin",
-  );
-  for (const name of ["pi-zentui", "pi-tool-display", "pi-subagents"]) {
-    const source = packageSources.find((entry) =>
-      entry.startsWith("git:github.com/daydaylx/" + name + "@"),
-    );
-    assert(
-      /^git:github\.com\/daydaylx\/[\w-]+@[0-9a-f]{40}$/.test(source ?? ""),
-      name + " is pinned to an immutable personal-fork commit",
-    );
-  }
-  eq(
-    zentui.colorSources,
-    {
-      starship: "theme",
-      editor: "theme",
-      userMessages: "theme",
-    },
-    "Zentui gets every color source from the active theme",
-  );
-  eq(
-    zentui.projectRefreshIntervalMs,
-    15000,
-    "the visible project footer refreshes without aggressive polling",
-  );
-  eq(zentui.features.editor, true, "Zentui editor is enabled");
-  eq(zentui.features.statusLine, true, "Zentui footer is enabled");
-  eq(
-    zentui.footerLayout,
-    "standard",
-    "Zentui owns the information-rich cockpit footer",
-  );
-  eq(
-    zentui.contextStyle,
-    "text+gauge",
-    "context usage has text and a visual gauge",
-  );
-  eq(
-    zentui.footerFormat,
-    "$cwd( $git_branch)( $git_status)$fill( $context )$fill( $tokens)($sep$cost)",
-    "the cockpit footer has left, centered, and right information zones",
-  );
-  eq(
-    zentui.pathDisplay,
-    { mode: "full", depth: 2 },
-    "project paths retain useful parent context without becoming unbounded",
-  );
-  eq(
-    zentui.features.copyFriendly,
-    false,
-    "no alternate copy-friendly chrome is enabled",
-  );
-  eq(
-    zentui.footerSegments,
-    {
-      cwd: true,
-      gitBranch: true,
-      gitStatus: true,
-      gitCounts: true,
-      runtime: false,
-      context: true,
-      tokens: true,
-      cost: true,
-      sessionDuration: false,
-      username: false,
-      time: false,
-      os: false,
-    },
-    "Zentui exposes the operational footer segments used by the cockpit",
-  );
-  eq(zentui.colors, undefined, "Zentui has no local color overrides");
-  eq(
-    zentui.icons,
-    { mode: "auto" },
-    "Zentui chooses Nerd or fallback icons automatically",
-  );
-  eq(
-    zentui.extensionStatuses.defaultPlacement,
-    "off",
-    "unknown extension statuses cannot grow the footer implicitly",
-  );
-  eq(
-    zentui.extensionStatuses.placements,
-    {
-      workflow: "left",
-      permissions: "right",
-      "thinking-view": "off",
-      lsp: "right",
-      "subagent-slash": "right",
-      "subagent-slash-text": "right",
-    },
-    "persistent statuses have explicit non-overlapping footer ownership",
-  );
-  eq(
-    zentui.extensionStatuses.colorModes,
-    {},
-    "the agent footer has no separate status color widgets",
-  );
-  eq(
-    toolDisplay.registerToolOverrides,
-    {
-      read: true,
-      grep: true,
-      find: true,
-      ls: true,
-      bash: true,
-      edit: true,
-      write: true,
-    },
-    "pi-tool-display owns every configured built-in renderer",
-  );
-  eq(
-    toolDisplay.enableNativeUserMessageBox,
-    false,
-    "pi-tool-display leaves user-message chrome to Zentui",
-  );
-  eq(
-    toolDisplay.customToolOverrides,
-    {
-      subagent: { enabled: true, kind: "generic", outputMode: "preview" },
-    },
-    "pi-tool-display owns the compact subagent timeline row",
-  );
-  eq(toolDisplay.compactTimeline, true, "tool calls use compact timeline rows");
-  eq(
-    toolDisplay.showThinkingLabels,
-    false,
-    "tool display does not render a second thinking label",
-  );
-  eq(
-    {
-      readOutputMode: toolDisplay.readOutputMode,
-      searchOutputMode: toolDisplay.searchOutputMode,
-      mcpOutputMode: toolDisplay.mcpOutputMode,
-      bashOutputMode: toolDisplay.bashOutputMode,
-      previewLines: toolDisplay.previewLines,
-      bashCollapsedLines: toolDisplay.bashCollapsedLines,
-    },
-    {
-      readOutputMode: "preview",
-      searchOutputMode: "preview",
-      mcpOutputMode: "preview",
-      bashOutputMode: "preview",
-      previewLines: 8,
-      bashCollapsedLines: 0,
-    },
-    "successful tool calls collapse to one timeline row with manual previews",
-  );
-  eq(
-    subagentConfig.ui?.showAsyncWidget,
-    false,
-    "subagent tracking has no permanent activity widget",
-  );
-
-  for (const [name, version] of [
-    ["pi-zentui", "0.3.0"],
-    ["pi-tool-display", "0.5.0"],
-    ["@ujjwalgrover/pi-catppuccin", "1.0.0"],
-    ["pi-subagents", "0.34.0"],
-  ]) {
-    eq(
-      packageJson.dependencies?.[name],
-      version,
-      name + " stays exact-pinned for the local verification harness",
-    );
-    eq(
-      lock.packages?.["node_modules/" + name]?.version,
-      version,
-      name + " is locked at its declared version",
-    );
-  }
-  for (const [name, version] of Object.entries({
-    ...(packageJson.dependencies ?? {}),
-    ...(packageJson.devDependencies ?? {}),
-  })) {
-    assert(
-      typeof version === "string" &&
-        !/^(?:\^|~)|(?:latest|github:|git\+)/.test(version),
-      name + " has a reproducible package version",
-    );
-  }
-
-  const activeExtensions = settings.extensions.filter(
-    (entry) => typeof entry === "string" && entry.startsWith("+extensions/"),
-  );
-  assert(
-    !activeExtensions.includes("+extensions/skill-mode/index.ts"),
-    "the retired skill-mode extension is not active",
-  );
-  assert(
-    activeExtensions.includes("+extensions/activity-status.ts"),
-    "the local one-line activity publisher is active",
-  );
-  assert(
-    activeExtensions.includes("+extensions/thinking-view.ts"),
-    "the local thinking-state status publisher is active",
-  );
-  assert(
-    !activeExtensions.includes("+extensions/git-header.ts"),
-    "the redundant competing git header is inactive",
-  );
-  assert(
-    activeExtensions.includes("+extensions/lsp/index.ts"),
-    "the LSP extension is active (#97)",
-  );
-  for (const legacy of [
-    "+extensions/activity-panel.ts",
-    "+extensions/preview-runtime.ts",
-    "+extensions/sidebar.ts",
-    "+extensions/startup-banner.ts",
-    "+extensions/tool-visuals.ts",
-    "+extensions/ux-status.ts",
-    "+extensions/working-visuals.ts",
-  ]) {
-    assert(!activeExtensions.includes(legacy), legacy + " is not active");
-  }
-  for (const legacy of [
-    "extensions/activity-panel.ts",
-    "extensions/preview-runtime.ts",
-    "extensions/sidebar.ts",
-    "extensions/startup-banner.ts",
-    "extensions/tool-visuals.ts",
-    "extensions/ux-status.ts",
-    "extensions/working-visuals.ts",
-    "extensions/subagent-status.ts",
-    "extensions/subagents/widget.ts",
-    "extensions/skill-mode/index.ts",
-    "extensions/shared/activity-state.ts",
-    "extensions/shared/info-box.ts",
-    "extensions/shared/render-profile.ts",
-    "extensions/shared/tool-labels.ts",
-    "extensions/shared/ui-config.ts",
-    "extensions/shared/visual-system.ts",
-  ]) {
-    assert(
-      !existsSync(path.join(ROOT, legacy)),
-      legacy + " was removed with the legacy UI platform",
-    );
-  }
-
-  const builtInToolName =
-    /name\s*:\s*["'](?:read|grep|find|ls|bash|edit|write)["']/;
-  for (const extension of activeExtensions) {
-    const sourcePath = path.join(ROOT, extension.slice(1));
-    assert(existsSync(sourcePath), extension + " resolves to a local file");
-    if (!existsSync(sourcePath)) continue;
-    const source = readFileSync(sourcePath, "utf8");
-    const chromePattern = /\.(?:setFooter|setEditor|setWidget|setHeader)\s*\(/;
-    assert(
-      !chromePattern.test(source),
-      extension + " does not claim global TUI chrome",
-    );
-    assert(
-      !builtInToolName.test(source),
-      extension + " does not register a competing built-in renderer",
-    );
-    assert(
-      !/\bsetInterval\s*\(/.test(source),
-      extension + " does not retain a repeating UI timer",
-    );
-  }
 });
 
 await section("greenfield setup config and Aurora state contract", async () => {
@@ -1052,7 +886,15 @@ await section("greenfield setup config and Aurora state contract", async () => {
   );
   eq(
     defaults.permissions,
-    { unknownTools: "ask", bash: "ask" },
+    {
+      unknownTools: "ask",
+      bash: "ask",
+      workflowDefaults: {
+        work: "read-bash",
+        simple_plan: "read-bash",
+        detailed_plan: "read-bash",
+      },
+    },
     "capability defaults require confirmation",
   );
   assert(!Object.hasOwn(defaults, "models"), "native Pi scoped models replace setup roles");
@@ -1063,7 +905,11 @@ await section("greenfield setup config and Aurora state contract", async () => {
     path.join(project, ".pi", "setup.json"),
     JSON.stringify({
       ui: { motion: "reduced" },
-      permissions: { unknownTools: "allow", bash: "allow" },
+      permissions: {
+        unknownTools: "allow",
+        bash: "allow",
+        workflowDefaults: { work: "full-access" },
+      },
       lsp: { requestTimeoutMs: 5000 },
     }),
   );
@@ -4037,43 +3883,43 @@ await section("permission policy", async () => {
   );
   eq(
     policy.decideBash("yolo", "rm -rf /", ROOT).action,
-    "ask",
-    "YOLO still protects root deletion",
+    "allow",
+    "YOLO bypasses root-deletion policy",
   );
   eq(
     policy.decideBash("yolo", "rm -rf -- /", ROOT).action,
-    "ask",
-    "YOLO protects root deletion after the rm option terminator",
+    "allow",
+    "YOLO bypasses root deletion after the rm option terminator",
   );
   eq(
     policy.decideBash("yolo", "rm -rf /{,}", ROOT).action,
-    "ask",
-    "YOLO protects root deletion through brace expansion",
+    "allow",
+    "YOLO bypasses root deletion through brace expansion",
   );
   eq(
     policy.decideBash("yolo", "rm -rf {/,tmp}", ROOT).action,
-    "ask",
-    "YOLO protects root deletion through a leading brace alternative",
+    "allow",
+    "YOLO bypasses root deletion through a leading brace alternative",
   );
   eq(
     policy.decideBash("yolo", "rm -rf /{,{tmp}}", ROOT).action,
-    "ask",
-    "YOLO protects root deletion through nested brace expansion",
+    "allow",
+    "YOLO bypasses root deletion through nested brace expansion",
   );
   eq(
     policy.decideBash("yolo", 'ROOT=/; rm -rf "$ROOT"', ROOT).action,
-    "ask",
-    "YOLO protects dynamically resolved rm targets",
+    "allow",
+    "YOLO bypasses dynamically resolved rm targets",
   );
   eq(
     policy.decideBash("yolo", "rm -rf $'/'", ROOT).action,
-    "ask",
-    "YOLO protects ANSI-quoted dynamic rm targets",
+    "allow",
+    "YOLO bypasses ANSI-quoted dynamic rm targets",
   );
   eq(
     policy.decideBash("yolo", "rm -rf `printf /`", ROOT).action,
-    "ask",
-    "YOLO protects backtick-expanded rm targets",
+    "allow",
+    "YOLO bypasses backtick-expanded rm targets",
   );
   eq(
     policy.decideBash("yolo", "rm -rf temporary-output", ROOT).action,
@@ -4188,8 +4034,8 @@ await section("status mapping helpers", async () => {
   );
   eq(
     workflowStatus.permissionRiskStatusValue("read-only"),
-    undefined,
-    "ordinary read-only access has no footer segment",
+    "🛡 DEFAULT · READ ONLY",
+    "ordinary read-only access remains visible in the footer",
   );
   eq(
     workflowStatus.permissionRiskStatusValue("full-access"),
@@ -4198,8 +4044,8 @@ await section("status mapping helpers", async () => {
   );
   eq(
     workflowStatus.permissionRiskStatusValue("yolo"),
-    "⚠ YOLO",
-    "YOLO is an explicit footer warning",
+    "⚠ YOLO · VOLL-BYPASS",
+    "YOLO exposes its complete bypass in the footer",
   );
   eq(
     workflowStatus.workflowStatusValue("draft", "detailed_plan"),
@@ -4277,12 +4123,12 @@ await section("permission status lifecycle", async () => {
   await guarded.runHooks("session_start", {}, guardedContext);
   const bashDecision = await guarded.runHooks(
     "tool_call",
-    { toolName: "bash", input: { command: "git status" } },
+    { toolName: "bash", input: { command: "npm install example-package" } },
     guardedContext,
   );
   assert(
     bashDecision.some((result) => result?.block === true),
-    "free bash requires confirmation in ordinary work mode",
+    "the read-bash workflow default blocks mutating shell commands",
   );
   const unknownDecision = await guarded.runHooks(
     "tool_call",
@@ -4320,20 +4166,29 @@ await section("permission status lifecycle", async () => {
   await harness.runHooks("session_start", {}, context);
   eq(
     latestStatus(harness, "permissions"),
-    undefined,
-    "ordinary read-write access has no footer warning",
+    "🛡 DEFAULT · READ + BASH",
+    "session start exposes the workflow default in the footer",
   );
   assert(!harness.commands.has("write"), "/write is no longer registered");
   await harness.commands.get("permission")("read-only", context);
   eq(
     latestStatus(harness, "permissions"),
-    undefined,
-    "/permission keeps ordinary access out of the footer",
+    "🛡 MANUELL · READ ONLY",
+    "/permission marks a manual ordinary access level in the footer",
   );
   eq(
     harness.appended.at(-1)?.data,
-    { permissionLevel: "read-only", thinkingMode: "auto" },
-    "permission persistence includes the independent auto-thinking state",
+    {
+      timestamp: harness.appended.at(-1)?.data?.timestamp,
+      source: "command",
+      state: "MANUAL",
+      selectedState: "MANUAL",
+      effectiveLevel: "read-only",
+      selectedLevel: "read-only",
+      workflowDefaultLevel: "read-bash",
+      workflowMode: "work",
+    },
+    "permission changes append a redacted transition audit record",
   );
   assert(
     harness.emitted.every((event) => event.name !== "workflow-status"),
@@ -4351,20 +4206,49 @@ await section("permission status lifecycle", async () => {
   await harness.commands.get("permission")("read-bash", context);
   eq(
     latestStatus(harness, "permissions"),
-    undefined,
-    "/permission read-bash has no footer warning",
+    "🛡 DEFAULT · READ + BASH",
+    "/permission read-bash remains visible in the footer",
   );
   await harness.commands.get("yolo")("", context);
   eq(
     latestStatus(harness, "permissions"),
-    "⚠ YOLO",
+    "⚠ YOLO · VOLL-BYPASS",
     "/yolo remains an explicit visible warning",
   );
-  await harness.commands.get("yolo")("", context);
+  const yoloUnknown = await harness.runHooks(
+    "tool_call",
+    { toolName: "mcp_unclassified_mutation", input: {} },
+    context,
+  );
+  assert(
+    yoloUnknown.every((result) => result === undefined),
+    "YOLO bypasses confirmation for unknown tools",
+  );
+  const yoloExternalWrite = await harness.runHooks(
+    "tool_call",
+    { toolName: "write", input: { path: "/etc/pi-agent-test", content: "x" } },
+    context,
+  );
+  assert(
+    yoloExternalWrite.every((result) => result === undefined),
+    "YOLO bypasses system-path file policy",
+  );
+  const yoloShell = await harness.runHooks(
+    "user_bash",
+    { command: "sudo rm -rf /" },
+    context,
+  );
+  assert(
+    yoloShell.every((result) => result === undefined),
+    "YOLO bypasses direct-shell policy",
+  );
+  const yoloShortcut = harness.shortcuts.get("super+y");
+  assert(Boolean(yoloShortcut), "Super+Y is registered as the YOLO toggle");
+  if (yoloShortcut) await yoloShortcut(context);
   eq(
     latestStatus(harness, "permissions"),
-    undefined,
-    "/yolo toggles back to ordinary access without a warning",
+    "🛡 DEFAULT · READ + BASH",
+    "Super+Y returns to the previous normal access level",
   );
   await harness.runHooks("session_shutdown", {}, context);
   eq(
@@ -4388,8 +4272,8 @@ await section("permission status lifecycle", async () => {
   await yoloResume.runHooks("session_start", {}, yoloResumeContext);
   eq(
     latestStatus(yoloResume, "permissions"),
-    undefined,
-    "persisted YOLO is downgraded to ordinary access on session start",
+    "🛡 DEFAULT · READ + BASH",
+    "persisted YOLO is reset to the workflow default on session start",
   );
 
   const readBashResume = createHarness({
@@ -4406,8 +4290,8 @@ await section("permission status lifecycle", async () => {
   await readBashResume.runHooks("session_start", {}, readBashResumeContext);
   eq(
     latestStatus(readBashResume, "permissions"),
-    undefined,
-    "restored ordinary permission levels stay outside the footer",
+    "🛡 DEFAULT · READ + BASH",
+    "persisted ordinary permission levels are reset to the workflow default",
   );
 
   const manualThinkingResume = createHarness({
@@ -4437,6 +4321,49 @@ await section("permission status lifecycle", async () => {
   );
 });
 
+await section("workflow defaults and manual permissions stay separate", async () => {
+  if (!modePermissions || !planMode) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-workflow-permission-p1-"));
+  try {
+    const restored = createHarness({ flags: { plan: true }, thinkingLevel: "low" });
+    planMode.default(restored.api);
+    modePermissions.default(restored.api);
+    const restoredContext = restored.makeContext({ cwd });
+    await restored.runHooks("session_start", {}, restoredContext);
+    eq(
+      restored.api.getThinkingLevel(),
+      "xhigh",
+      "plan recovery completes before permissions resolve the auto Thinking default",
+    );
+
+    const harness = createHarness();
+    planMode.default(harness.api);
+    modePermissions.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("permission")("full-access", context);
+    harness.api.events.emit("workflow-capabilities:activated", {
+      cwd,
+      sessionId: context.sessionManager.getSessionId(),
+      mode: "detailed_plan",
+    });
+    eq(
+      latestStatus(harness, "permissions"),
+      "⚠ VOLLZUGRIFF",
+      "a manual full-access selection survives a workflow activation",
+    );
+    await harness.commands.get("yolo")("", context);
+    await harness.commands.get("yolo")("", context);
+    eq(
+      latestStatus(harness, "permissions"),
+      "⚠ VOLLZUGRIFF",
+      "leaving YOLO restores the prior manual permission selection",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 await section(
   "mode-permissions consults the doom-loop capability bus (#103)",
   async () => {
@@ -4445,6 +4372,7 @@ await section(
     modePermissions.default(harness.api);
     const context = harness.makeContext({ mode: "json", hasUI: false });
     await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("permission")("read-write", context);
 
     // No doom-loop provider registered: an ordinary edit is allowed.
     const clean = await harness.runHooks(
@@ -4501,6 +4429,7 @@ await section(
     modePermissions.default(harness.api);
     const context = harness.makeContext({ mode: "json", hasUI: false });
     await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("permission")("read-write", context);
 
     // No provider registered: an ordinary edit and write are both allowed.
     const cleanEdit = await harness.runHooks(
@@ -4552,6 +4481,10 @@ await section(
       hasUI: false,
     });
     await rewriteHarness.runHooks("session_start", {}, rewriteContext);
+    await rewriteHarness.commands.get("permission")(
+      "read-write",
+      rewriteContext,
+    );
     rewriteHarness.api.events.on(
       "edit-fallback-capabilities:request",
       (event) => {
@@ -4586,9 +4519,9 @@ await section(
   },
 );
 
-await section("unknown tools remain confirmed in elevated modes", async () => {
+await section("unknown-tool handling distinguishes full access from YOLO", async () => {
   if (!modePermissions) return;
-  for (const level of ["full-access", "yolo"]) {
+  for (const level of ["full-access"]) {
     const harness = createHarness({ confirm: false });
     modePermissions.default(harness.api);
     const context = harness.makeContext({ mode: "json", hasUI: false });
@@ -4607,6 +4540,20 @@ await section("unknown tools remain confirmed in elevated modes", async () => {
       `${level} still asks before an unclassified tool`,
     );
   }
+  const yoloHarness = createHarness({ confirm: false });
+  modePermissions.default(yoloHarness.api);
+  const yoloContext = yoloHarness.makeContext({ mode: "json", hasUI: false });
+  await yoloHarness.runHooks("session_start", {}, yoloContext);
+  await yoloHarness.commands.get("permission")("yolo", yoloContext);
+  const yoloDecisions = await yoloHarness.runHooks(
+    "tool_call",
+    { toolName: "mcp_unclassified_mutation", input: {} },
+    yoloContext,
+  );
+  assert(
+    yoloDecisions.every((result) => result === undefined),
+    "YOLO bypasses unclassified-tool confirmation",
+  );
 });
 
 await section(
@@ -4663,6 +4610,31 @@ await section(
       assert(
         scout.every((result) => result === undefined),
         "planning allows a known read-only subagent profile",
+      );
+
+      await harness.commands.get("yolo")("", context);
+      const yoloSourceWrite = await harness.runHooks(
+        "tool_call",
+        { toolName: "edit", input: { path: "src/app.ts" } },
+        context,
+      );
+      assert(
+        yoloSourceWrite.every((result) => result === undefined),
+        "YOLO bypasses workflow write restrictions",
+      );
+      harness.api.events.emit("workflow-capabilities:activated", {
+        cwd,
+        sessionId: context.sessionManager.getSessionId(),
+        mode: "detailed_plan",
+      });
+      const resetSourceWrite = await harness.runHooks(
+        "tool_call",
+        { toolName: "edit", input: { path: "src/app.ts" } },
+        context,
+      );
+      assert(
+        resetSourceWrite.some((result) => result?.block === true),
+        "workflow activation resets YOLO to its declared default",
       );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -5014,9 +4986,10 @@ await section("Control Center menus and routing", async () => {
       "low",
       "a Thinking selection from the previous session cannot change the new session",
     );
-    eq(
-      staleThinkingHarness.appended,
-      [],
+    assert(
+      staleThinkingHarness.appended.every(
+        (entry) => entry.data?.thinkingMode !== "manual",
+      ),
       "a stale Thinking selection is not persisted in the new session",
     );
 
@@ -7713,6 +7686,7 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
   assert(Boolean(harness.editorFactory), "Aurora installs an editor factory");
 
   if (harness.footerFactory) {
+    let onBranchChange;
     const footer = harness.footerFactory(
       { requestRender() {} },
       context.ui.theme,
@@ -7724,7 +7698,12 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
             ["permissions", "Read + Write"],
             ["lsp", "ready"],
           ]),
-        onBranchChange: () => () => {},
+        onBranchChange: (listener) => {
+          onBranchChange = listener;
+          return () => {
+            onBranchChange = undefined;
+          };
+        },
       },
     );
     for (const width of [60, 90, 140]) {
@@ -7738,6 +7717,20 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
         `~${path.sep}projects${path.sep}aurora-test`,
       ),
       "Aurora footer shows the current directory as a compact home-relative path",
+    );
+    const readsAfterFirstWideRender = harness.branchReads;
+    footer.render(140);
+    eq(
+      harness.branchReads,
+      readsAfterFirstWideRender,
+      "Aurora reuses token totals across unchanged footer renders",
+    );
+    onBranchChange?.();
+    footer.render(140);
+    eq(
+      harness.branchReads,
+      readsAfterFirstWideRender + 1,
+      "Aurora recomputes token totals exactly once after a branch change",
     );
     footer.dispose?.();
   }
@@ -7792,18 +7785,36 @@ await section("combined production extension stack", async () => {
     !askUser ||
     !lspExtensionMod ||
     !toolOutputGuard ||
+    !diffViewer ||
+    !controlPlane ||
     !auroraUi
   )
     return;
-  const factories = [
-    setupCore.default,
-    planMode.default,
-    modePermissions.default,
-    askUser.default,
-    lspExtensionMod.default,
-    toolOutputGuard.default,
-    auroraUi.default,
-  ];
+  const factoryByExtension = {
+    "+extensions/setup-core/index.ts": setupCore.default,
+    "+extensions/plan-mode/index.ts": planMode.default,
+    "+extensions/mode-permissions.ts": modePermissions.default,
+    "+extensions/lsp/index.ts": lspExtensionMod.default,
+    "+extensions/ask-user.ts": askUser.default,
+    "+extensions/tool-output-guard.ts": toolOutputGuard.default,
+    "+extensions/diff-viewer/index.ts": diffViewer.default,
+    "+extensions/control-plane.ts": controlPlane.default,
+    "+extensions/aurora-ui/index.ts": auroraUi.default,
+  };
+  const settings = JSON.parse(
+    readFileSync(path.join(ROOT, "settings.json"), "utf8"),
+  );
+  const activeExtensions = settings.extensions.filter(
+    (entry) => typeof entry === "string" && entry.startsWith("+extensions/"),
+  );
+  eq(
+    activeExtensions,
+    Object.keys(factoryByExtension),
+    "combined stack activates exactly the configured local entry points",
+  );
+  const factories = activeExtensions.map((extension) =>
+    factoryByExtension[extension],
+  );
   const harness = createHarness();
   for (const factory of factories) factory(harness.api);
   // A dedicated cwd keeps this test isolated from any real .agent/plans/
@@ -7835,8 +7846,8 @@ await section("combined production extension stack", async () => {
   );
   eq(
     latestStatus(harness, "permissions"),
-    undefined,
-    "ordinary permissions do not duplicate the footer",
+    "🛡 DEFAULT · READ + BASH",
+    "the workflow default is visible in the shared footer",
   );
   eq(
     latestStatus(harness, "workflow"),
@@ -9284,6 +9295,68 @@ await section("LSP navigation and symbol tools (#96)", async () => {
   );
 
   await check(
+    "lsp_workspace_symbols: LRU cache stays bounded and clears expired entries",
+    async () => {
+      const { registry, deps } = makeRegistryDeps();
+      const harness = createHarness();
+      toolsMod.registerLspNavigationTools(harness.api, deps);
+      const tool = harness.tools.get("lsp_workspace_symbols");
+      const context = harness.makeContext({ cwd: workspace });
+      const realNow = Date.now;
+      let now = realNow();
+      Date.now = () => now;
+      try {
+        for (let index = 0; index <= 100; index++) {
+          await tool.execute(
+            `lru-${index}`,
+            { query: `symbol-${index}` },
+            undefined,
+            undefined,
+            context,
+          );
+        }
+        const newest = await tool.execute(
+          "lru-newest",
+          { query: "symbol-100" },
+          undefined,
+          undefined,
+          context,
+        );
+        assert(
+          newest.details?.cached === true,
+          "the most recently inserted workspace-symbol query stays cached",
+        );
+        const oldest = await tool.execute(
+          "lru-oldest",
+          { query: "symbol-0" },
+          undefined,
+          undefined,
+          context,
+        );
+        assert(
+          oldest.details?.cached === false,
+          "the 101st unique query evicts the oldest LRU entry",
+        );
+        now += 30_001;
+        const expired = await tool.execute(
+          "lru-expired",
+          { query: "symbol-100" },
+          undefined,
+          undefined,
+          context,
+        );
+        assert(
+          expired.details?.cached === false,
+          "expired workspace-symbol entries are purged before reuse",
+        );
+      } finally {
+        Date.now = realNow;
+        await registry.shutdownAll();
+      }
+    },
+  );
+
+  await check(
     "stale document version differs between two calls after a change",
     async () => {
       const { registry, deps } = makeRegistryDeps();
@@ -9648,6 +9721,20 @@ await section("diff viewer regressions", async () => {
     typeof diffFallback?.computeFallbackDiff === "function",
     "diff fallback loads",
   );
+  assert(
+    typeof diffAlgorithm?.applyInlineHighlights === "function",
+    "diff algorithm owns the shared inline-highlighting helper",
+  );
+  const diffFallbackSource = readFileSync(
+    path.join(ROOT, "extensions", "diff-viewer", "git-diff.ts"),
+    "utf8",
+  );
+  assert(
+    !/pi\.exec|gitDiffForFile|gitDiffAll|isGitAvailable/.test(
+      diffFallbackSource,
+    ),
+    "active fallback diff has no dormant Git subprocess path",
+  );
 
   const long = "token ".repeat(600);
   eq(
@@ -9690,6 +9777,75 @@ await section("diff viewer regressions", async () => {
     1,
     "final newline does not add a phantom diff line",
   );
+
+  if (diffViewer?.default) {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-diff-viewer-p1-"));
+    try {
+      const file = path.join(cwd, "sample.txt");
+      writeFileSync(file, "before\n", "utf8");
+      const harness = createHarness();
+      diffViewer.default(harness.api);
+      const context = harness.makeContext({ cwd });
+      await harness.runHooks("session_start", {}, context);
+      await harness.runHooks(
+        "tool_call",
+        {
+          toolCallId: "same-content",
+          toolName: "write",
+          input: { path: "sample.txt", content: "after\n" },
+        },
+        context,
+      );
+      writeFileSync(file, "after\n", "utf8");
+      await harness.runHooks(
+        "tool_result",
+        {
+          toolCallId: "same-content",
+          toolName: "write",
+          input: { path: "sample.txt" },
+          isError: false,
+        },
+        context,
+      );
+      assert(
+        harness.execCalls.every((call) => call.command !== "cat"),
+        "diff viewer reads snapshots through Node FS instead of spawning cat",
+      );
+      eq(
+        harness.appended.at(-1)?.data?.stats,
+        { path: "sample.txt", linesAdded: 1, linesRemoved: 1, hunks: 1 },
+        "diff viewer persists the expected successful write diff",
+      );
+
+      await harness.runHooks(
+        "tool_call",
+        {
+          toolCallId: "changed-content",
+          toolName: "write",
+          input: { path: "sample.txt", content: "predicted\n" },
+        },
+        context,
+      );
+      writeFileSync(file, "actual\nextra\n", "utf8");
+      await harness.runHooks(
+        "tool_result",
+        {
+          toolCallId: "changed-content",
+          toolName: "write",
+          input: { path: "sample.txt" },
+          isError: false,
+        },
+        context,
+      );
+      eq(
+        harness.appended.at(-1)?.data?.stats,
+        { path: "sample.txt", linesAdded: 2, linesRemoved: 1, hunks: 1 },
+        "diff viewer records the actual content when it differs from the preview",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
 
   const tracker = new diffTracker.ChangeTracker();
   tracker.recordChange(

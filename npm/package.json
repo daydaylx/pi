@@ -7,9 +7,12 @@
     "npm": "10.9.7"
   },
   "scripts": {
-    "test": "node ../tests/run.mjs",
+    "test": "node ../tests/run-all.mjs",
+    "test:coverage": "node ../tests/coverage.mjs",
+    "test:coverage:baseline": "node ../tests/coverage.mjs --write-baseline",
+    "test:runtime": "node ../tests/p1-runtime.mjs",
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
-    "verify": "npm run typecheck && npm test"
+    "verify": "npm run typecheck && npm run test:coverage && npm run test:runtime"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",

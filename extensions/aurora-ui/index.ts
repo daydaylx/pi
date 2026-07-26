@@ -284,7 +284,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let disposed = true;
   let pendingRequestId: string | undefined;
   let busUnsubscribers: Array<() => void> = [];
-  let tokenTotalsCacheKey: string | undefined;
+  let tokenTotalsDirty = true;
   let tokenTotalsCache = { input: 0, output: 0 };
   const activeTools = new Map<string, ActiveToolView>();
 
@@ -292,9 +292,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     input: number;
     output: number;
   } {
+    if (!tokenTotalsDirty) return tokenTotalsCache;
     const branch = ctx.sessionManager.getBranch();
-    const cacheKey = `${ctx.sessionManager.getLeafId() ?? "root"}:${branch.length}`;
-    if (cacheKey === tokenTotalsCacheKey) return tokenTotalsCache;
     let input = 0;
     let output = 0;
     for (const entry of branch) {
@@ -304,8 +303,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       input += message.usage.input;
       output += message.usage.output;
     }
-    tokenTotalsCacheKey = cacheKey;
     tokenTotalsCache = { input, output };
+    tokenTotalsDirty = false;
     return tokenTotalsCache;
   }
 
@@ -425,7 +424,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     for (const unsubscribe of busUnsubscribers.splice(0)) unsubscribe();
     pendingRequestId = undefined;
     activeTools.clear();
-    tokenTotalsCacheKey = undefined;
+    tokenTotalsDirty = true;
     tokenTotalsCache = { input: 0, output: 0 };
     ticker?.dispose();
     ticker = undefined;
@@ -504,9 +503,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
     ctx.ui.setFooter((tui, theme, footerData) => {
       const detachTicker = ticker!.attach(tui);
-      const unsubscribeBranch = footerData.onBranchChange(() =>
-        tui.requestRender(),
-      );
+      const unsubscribeBranch = footerData.onBranchChange(() => {
+        tokenTotalsDirty = true;
+        tui.requestRender();
+      });
       return {
         invalidate() {},
         dispose() {

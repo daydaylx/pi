@@ -44,4 +44,9 @@ export const SHORTCUTS = {
     label: "Super+P",
     description: "Plan-Assistent öffnen",
   },
+  yoloToggle: {
+    keys: "super+y",
+    label: "Super+Y",
+    description: "YOLO-Voll-Bypass ein-/ausschalten",
+  },
 } as const satisfies Record<string, ShortcutBinding>;

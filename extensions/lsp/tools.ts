@@ -26,6 +26,8 @@ import { resolvePathScope } from "../shared/permission-policy.ts";
 const DEFAULT_REFERENCES_LIMIT = 100;
 /** How long a workspace/symbol result is reused before a fresh request. */
 const WORKSPACE_SYMBOL_CACHE_TTL_MS = 30_000;
+/** Bound session-long query diversity; Map iteration order implements LRU. */
+const MAX_WORKSPACE_SYMBOL_CACHE_ENTRIES = 100;
 
 /** Wiring supplied by index.ts (#97) so tools stay decoupled from lifecycle. */
 export interface LspToolsDeps {
@@ -629,6 +631,43 @@ export function registerLspNavigationTools(
     { result: NormalizedSymbol[]; expiresAt: number }
   >();
 
+  function clearExpiredWorkspaceSymbols(now: number): void {
+    for (const [key, value] of workspaceSymbolCache) {
+      if (value.expiresAt <= now) workspaceSymbolCache.delete(key);
+    }
+  }
+
+  function getCachedWorkspaceSymbols(
+    key: string,
+    now: number,
+  ): NormalizedSymbol[] | undefined {
+    clearExpiredWorkspaceSymbols(now);
+    const cached = workspaceSymbolCache.get(key);
+    if (!cached) return undefined;
+    // Refresh insertion order so the Map retains the most recently used keys.
+    workspaceSymbolCache.delete(key);
+    workspaceSymbolCache.set(key, cached);
+    return cached.result;
+  }
+
+  function cacheWorkspaceSymbols(
+    key: string,
+    result: NormalizedSymbol[],
+    now: number,
+  ): void {
+    clearExpiredWorkspaceSymbols(now);
+    workspaceSymbolCache.delete(key);
+    workspaceSymbolCache.set(key, {
+      result,
+      expiresAt: now + WORKSPACE_SYMBOL_CACHE_TTL_MS,
+    });
+    while (workspaceSymbolCache.size > MAX_WORKSPACE_SYMBOL_CACHE_ENTRIES) {
+      const oldestKey = workspaceSymbolCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      workspaceSymbolCache.delete(oldestKey);
+    }
+  }
+
   pi.registerTool({
     name: "lsp_workspace_symbols",
     label: "LSP-Arbeitsbereichs-Symbole",
@@ -675,11 +714,12 @@ export function registerLspNavigationTools(
 
       const limit = params.limit ?? config.workspaceSymbolLimit;
       const cacheKey = `${workspaceRoot}\0${profile.id}\0${params.query}\0${limit}`;
-      const cached = workspaceSymbolCache.get(cacheKey);
-      if (cached && cached.expiresAt > Date.now()) {
-        return lspTextResult(formatSymbols(cached.result), {
+      const now = Date.now();
+      const cached = getCachedWorkspaceSymbols(cacheKey, now);
+      if (cached) {
+        return lspTextResult(formatSymbols(cached), {
           cached: true,
-          count: cached.result.length,
+          count: cached.length,
         });
       }
 
@@ -703,10 +743,7 @@ export function registerLspNavigationTools(
           query: params.query,
         });
         const symbols = toWorkspaceSymbols(result, workspaceRoot, limit);
-        workspaceSymbolCache.set(cacheKey, {
-          result: symbols,
-          expiresAt: Date.now() + WORKSPACE_SYMBOL_CACHE_TTL_MS,
-        });
+        cacheWorkspaceSymbols(cacheKey, symbols, Date.now());
         if (symbols.length === 0) {
           return lspTextResult("LSP: keine Symbole gefunden.");
         }

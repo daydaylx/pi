@@ -217,6 +217,7 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  project trust: ${trusted ? "trusted" : "untrusted"}`,
         `  theme/motion: ${loaded.config.ui.theme}/${loaded.config.ui.motion}`,
         `  permissions: unknown=${loaded.config.permissions.unknownTools}, bash=${loaded.config.permissions.bash}`,
+        `  workflow defaults: work=${loaded.config.permissions.workflowDefaults.work}, simple_plan=${loaded.config.permissions.workflowDefaults.simple_plan}, detailed_plan=${loaded.config.permissions.workflowDefaults.detailed_plan}`,
         `  LSP: ${loaded.config.lsp.enabled ? loaded.config.lsp.mode : "off"}`,
         `  scoped models: ${enabledModels.length || 0} Pattern(s) in settings.enabledModels`,
         `  Pi CLI/dev package: ${runtimeVersion ?? "unknown"}/${String(declaredVersion ?? "?")}`,

@@ -18,6 +18,8 @@ export type WorkflowPhase =
 export type PermissionLevel =
   "read-only" | "read-bash" | "read-write" | "full-access" | "yolo";
 
+export type PermissionState = "DEFAULT" | "MANUAL" | "YOLO_OVERRIDE";
+
 export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
   "read-only": "Nur Lesen",
   "read-bash": "Lesen + Bash-Info",
@@ -32,7 +34,7 @@ export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
   "read-write": "Normaler Projektzugriff mit Rückfragen bei riskanten Aktionen",
   "full-access":
     "Git-Housekeeping/Paketmanager ohne Rückfrage; sudo/Löschen/Force-Push bleiben bestätigt",
-  yolo: "sudo/Löschen/externe Schreibzugriffe ohne Rückfrage; kritische Muster bleiben bestätigt",
+  yolo: "Vollständiger Policy- und Workflow-Bypass ohne Rückfragen",
 };
 
 /**
@@ -56,19 +58,32 @@ export const ZENTUI_STATUS_KEYS = {
   workflow: "workflow",
 } as const;
 
-/** Only elevated permission modes belong in the compact footer. */
-export type PermissionRiskStatusValue = "⚠ VOLLZUGRIFF" | "⚠ YOLO";
+export type PermissionRiskStatusValue =
+  | "🛡 DEFAULT · READ ONLY"
+  | "🛡 DEFAULT · READ + BASH"
+  | "🛡 DEFAULT · READ + WRITE"
+  | "🛡 MANUELL · READ ONLY"
+  | "🛡 MANUELL · READ + BASH"
+  | "🛡 MANUELL · READ + WRITE"
+  | "⚠ VOLLZUGRIFF"
+  | "⚠ YOLO · VOLL-BYPASS";
 
 export function permissionRiskStatusValue(
   level: PermissionLevel,
-): PermissionRiskStatusValue | undefined {
+  state: PermissionState = "DEFAULT",
+): PermissionRiskStatusValue {
+  const prefix = state === "MANUAL" ? "🛡 MANUELL" : "🛡 DEFAULT";
   switch (level) {
+    case "read-only":
+      return `${prefix} · READ ONLY` as PermissionRiskStatusValue;
+    case "read-bash":
+      return `${prefix} · READ + BASH` as PermissionRiskStatusValue;
+    case "read-write":
+      return `${prefix} · READ + WRITE` as PermissionRiskStatusValue;
     case "full-access":
       return "⚠ VOLLZUGRIFF";
     case "yolo":
-      return "⚠ YOLO";
-    default:
-      return undefined;
+      return "⚠ YOLO · VOLL-BYPASS";
   }
 }
 

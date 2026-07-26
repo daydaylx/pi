@@ -1,11 +1,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { PermissionLevel, WorkflowMode } from "../shared/workflow-status.ts";
 
 export type MotionMode = "contextual" | "reduced" | "off";
 export type PolicyAction = "block" | "ask" | "allow";
 export type LspMode = "off" | "auto" | "force";
 export type VerificationName = "typecheck" | "test" | "verify";
+export type WorkflowDefaultPermissionLevel = Exclude<
+  PermissionLevel,
+  "yolo"
+>;
 
 export interface VerificationCommand {
   command: string;
@@ -15,7 +20,11 @@ export interface VerificationCommand {
 
 export interface SetupConfig {
   ui: { theme: "aurora-night"; motion: MotionMode };
-  permissions: { unknownTools: PolicyAction; bash: PolicyAction };
+  permissions: {
+    unknownTools: PolicyAction;
+    bash: PolicyAction;
+    workflowDefaults: Record<WorkflowMode, WorkflowDefaultPermissionLevel>;
+  };
   lsp: {
     enabled: boolean;
     mode: LspMode;
@@ -40,7 +49,15 @@ export interface LoadedSetupConfig {
 
 const DEFAULT_CONFIG: SetupConfig = {
   ui: { theme: "aurora-night", motion: "contextual" },
-  permissions: { unknownTools: "ask", bash: "ask" },
+  permissions: {
+    unknownTools: "ask",
+    bash: "ask",
+    workflowDefaults: {
+      work: "read-bash",
+      simple_plan: "read-bash",
+      detailed_plan: "read-bash",
+    },
+  },
   lsp: {
     enabled: true,
     mode: "auto",
@@ -178,9 +195,20 @@ function applyUserLayer(
   if (permissions)
     reportUnknownKeys(
       permissions,
-      ["unknownTools", "bash"],
+      ["unknownTools", "bash", "workflowDefaults"],
       source,
       "permissions.",
+      diagnostics,
+    );
+  const workflowDefaults = isObject(permissions?.workflowDefaults)
+    ? permissions.workflowDefaults
+    : undefined;
+  if (workflowDefaults)
+    reportUnknownKeys(
+      workflowDefaults,
+      ["work", "simple_plan", "detailed_plan"],
+      source,
+      "permissions.workflowDefaults.",
       diagnostics,
     );
   if (lsp)
@@ -240,6 +268,16 @@ function applyUserLayer(
     "permissions.bash",
     diagnostics,
   );
+  for (const mode of ["work", "simple_plan", "detailed_plan"] as const) {
+    next.permissions.workflowDefaults[mode] = enumValue(
+      workflowDefaults?.[mode],
+      ["read-only", "read-bash", "read-write", "full-access"],
+      next.permissions.workflowDefaults[mode],
+      source,
+      `permissions.workflowDefaults.${mode}`,
+      diagnostics,
+    );
+  }
   if (typeof lsp?.enabled === "boolean") next.lsp.enabled = lsp.enabled;
   next.lsp.mode = enumValue(
     lsp?.mode,
@@ -328,6 +366,13 @@ const ACTION_RANK: Record<PolicyAction, number> = {
   allow: 2,
 };
 
+const PERMISSION_RANK: Record<WorkflowDefaultPermissionLevel, number> = {
+  "read-only": 0,
+  "read-bash": 1,
+  "read-write": 2,
+  "full-access": 3,
+};
+
 function applyTrustedProjectLayer(
   base: SetupConfig,
   raw: Record<string, unknown>,
@@ -350,6 +395,24 @@ function applyTrustedProjectLayer(
         message: `Projektkonfiguration darf Berechtigungen.${key} nicht lockern; globaler Wert beibehalten`,
       });
       candidate.permissions[key] = base.permissions[key];
+    }
+  }
+  const projectWorkflowDefaults = isObject(projectPermissions?.workflowDefaults)
+    ? projectPermissions.workflowDefaults
+    : undefined;
+  for (const mode of ["work", "simple_plan", "detailed_plan"] as const) {
+    if (
+      projectWorkflowDefaults?.[mode] !== undefined &&
+      PERMISSION_RANK[candidate.permissions.workflowDefaults[mode]] >
+        PERMISSION_RANK[base.permissions.workflowDefaults[mode]]
+    ) {
+      diagnostics.push({
+        level: "warning",
+        source,
+        message: `Projektkonfiguration darf Berechtigungen.workflowDefaults.${mode} nicht lockern; globaler Wert beibehalten`,
+      });
+      candidate.permissions.workflowDefaults[mode] =
+        base.permissions.workflowDefaults[mode];
     }
   }
   // A repository must never choose commands that execute on the host.

@@ -1,5 +1,5 @@
 {
-  "tui.editor.yank": "super+y",
+  "tui.editor.yank": "super+shift+y",
   "app.thinking.cycle": "super+t",
   "app.model.cycleForward": "super+,",
   "app.session.resume": "super+r"

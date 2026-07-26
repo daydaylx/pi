@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.82.0",
   "theme": "aurora-night",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-sol",
+  "defaultProvider": "openrouter",
+  "defaultModel": "poolside/laguna-m.1:free",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -48,13 +48,13 @@
     "!extensions/**",
     "+extensions/setup-core/index.ts",
     "+extensions/plan-mode/index.ts",
-    "+extensions/control-plane.ts",
     "+extensions/mode-permissions.ts",
-    "+extensions/ask-user.ts",
     "+extensions/lsp/index.ts",
+    "+extensions/ask-user.ts",
     "+extensions/tool-output-guard.ts",
-    "+extensions/aurora-ui/index.ts",
-    "+extensions/diff-viewer/index.ts"
+    "+extensions/diff-viewer/index.ts",
+    "+extensions/control-plane.ts",
+    "+extensions/aurora-ui/index.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",

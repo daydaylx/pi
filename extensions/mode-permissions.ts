@@ -37,10 +37,11 @@ import {
 import {
   PERMISSION_LEVEL_LABEL,
   ZENTUI_STATUS_KEYS,
-  normalizePermissionLevel,
   permissionRiskStatusValue,
   setTuiStatus,
   type PermissionLevel,
+  type PermissionState,
+  type WorkflowMode,
 } from "./shared/workflow-status.ts";
 import {
   defaultSetupConfig,
@@ -54,7 +55,9 @@ import {
   publishAuroraUiSnapshot,
 } from "./aurora-ui/state.ts";
 import {
+  WORKFLOW_CAPABILITY_EVENTS,
   requestWorkflowCapabilities,
+  type WorkflowActivatedEvent,
   type WorkflowCapabilitySnapshot,
 } from "./shared/workflow-capabilities.ts";
 import {
@@ -69,9 +72,6 @@ import {
 
 const PERSISTED_STATE_KEY = "mode-permissions";
 
-// Permission-Stufen sind vom Workflow-Modus unabhängig. YOLO wird nie beim
-// Session-Start aktiviert, sondern nur durch eine explizite Nutzeraktion.
-const AUTO_YOLO_ON_START = false;
 const LOCAL_LSP_TOOLS = new Set([
   "lsp_diagnostics",
   "lsp_definition",
@@ -207,7 +207,7 @@ function permissionWarning(level: PermissionLevel): string | undefined {
     return "VOLLZUGRIFF aktiv: Sudo, Löschen, externe Schreibzugriffe und Force-Push bleiben bestätigt.";
   }
   if (level === "yolo") {
-    return "YOLO aktiv: harte Warnmuster für Secrets, Systempfade und kritische Aktionen bleiben bestätigt.";
+    return "YOLO aktiv: VOLL-BYPASS. Alle Policy-, Workflow- und Sicherheitsabfragen sind deaktiviert.";
   }
   return undefined;
 }
@@ -246,6 +246,9 @@ function decideTool(
   doomLoop?: DoomLoopSnapshot,
   editFallback?: EditFallbackSnapshot,
 ): PolicyDecision {
+  if (permissionLevel === "yolo") {
+    return { action: "allow", reason: "YOLO-Voll-Bypass" };
+  }
   // Doom-loop (#103) and edit-fallback (#104) are advisory detectors that
   // publish their state via a capability bus rather than intercepting
   // tool_call themselves — this is intentionally the only place that turns
@@ -392,11 +395,19 @@ async function approve(
 }
 
 export default function modePermissionsExtension(pi: ExtensionAPI): void {
-  let permissionLevel: PermissionLevel = AUTO_YOLO_ON_START
-    ? "yolo"
-    : "read-write";
-  let sessionEpoch = 0;
   let configuredPolicy = defaultSetupConfig().permissions;
+  let activeWorkflowMode: WorkflowMode = "work";
+  let workflowDefaultPermission: Exclude<PermissionLevel, "yolo"> =
+    configuredPolicy.workflowDefaults.work;
+  let selectedPermissionLevel: Exclude<PermissionLevel, "yolo"> =
+    workflowDefaultPermission;
+  let selectedPermissionState: Exclude<PermissionState, "YOLO_OVERRIDE"> =
+    "DEFAULT";
+  let permissionState: PermissionState = "DEFAULT";
+  let permissionLevel: PermissionLevel = selectedPermissionLevel;
+  let sessionEpoch = 0;
+  let activeSessionId: string | undefined;
+  let activeContext: ExtensionContext | undefined;
   let thinkingMode: "auto" | "manual" = "auto";
   let manualThinkingLevel: SelectableThinkingLevel | undefined;
   let auroraEpoch: string | undefined;
@@ -406,7 +417,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     setTuiStatus(
       ctx,
       ZENTUI_STATUS_KEYS.permissions,
-      permissionRiskStatusValue(permissionLevel),
+      permissionRiskStatusValue(permissionLevel, permissionState),
     );
     if (auroraEpoch) {
       publishAuroraUiPatch(pi, auroraEpoch, "permissions", {
@@ -435,8 +446,30 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   function persistState(): void {
     pi.appendEntry(PERSISTED_STATE_KEY, {
       permissionLevel,
+      workflowDefaultPermission,
+      selectedPermissionLevel,
+      selectedPermissionState,
+      permissionState,
+      workflowMode: activeWorkflowMode,
       thinkingMode,
       manualThinkingLevel,
+    });
+  }
+
+  function auditTransition(
+    source: "command" | "shortcut" | "workflow" | "session",
+  ): void {
+    // This is a persistent session audit entry. It intentionally records no
+    // command text, paths, tool input, or other potentially sensitive data.
+    pi.appendEntry("permission-transition", {
+      timestamp: new Date().toISOString(),
+      source,
+      state: permissionState,
+      selectedState: selectedPermissionState,
+      effectiveLevel: permissionLevel,
+      selectedLevel: selectedPermissionLevel,
+      workflowDefaultLevel: workflowDefaultPermission,
+      workflowMode: activeWorkflowMode,
     });
   }
 
@@ -459,17 +492,81 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     };
   }
 
+  function applyWorkflowDefaults(
+    workflowMode: WorkflowMode,
+    ctx: ExtensionContext,
+    source: "workflow" | "session",
+  ): void {
+    activeWorkflowMode = workflowMode;
+    workflowDefaultPermission = configuredPolicy.workflowDefaults[workflowMode];
+    if (selectedPermissionState === "DEFAULT") {
+      selectedPermissionLevel = workflowDefaultPermission;
+    }
+    // YOLO is a temporary bypass, never a workflow preference.  A workflow
+    // transition therefore exits it, while an explicitly selected normal
+    // level remains intact.
+    permissionState = selectedPermissionState;
+    permissionLevel = selectedPermissionLevel;
+    publishStatus(ctx);
+    persistState();
+    auditTransition(source);
+    if (source === "workflow") {
+      const detail = selectedPermissionState === "MANUAL"
+        ? `manuelle Stufe ${PERMISSION_LEVEL_LABEL[selectedPermissionLevel]} bleibt aktiv`
+        : `Default ${PERMISSION_LEVEL_LABEL[workflowDefaultPermission]} aktiv`;
+      ctx.ui.notify(`🔄 Workflow ${workflowMode}: ${detail}.`, "info");
+    }
+  }
+
+  async function toggleYolo(
+    ctx: ExtensionContext,
+    source: "command" | "shortcut",
+    epoch = sessionEpoch,
+  ): Promise<void> {
+    if (epoch !== sessionEpoch) return;
+    if (permissionState === "YOLO_OVERRIDE") {
+      permissionState = selectedPermissionState;
+      permissionLevel = selectedPermissionLevel;
+    } else {
+      permissionState = "YOLO_OVERRIDE";
+      permissionLevel = "yolo";
+    }
+    publishStatus(ctx);
+    persistState();
+    auditTransition(source);
+    const warning = permissionWarning(permissionLevel);
+    ctx.ui.notify(
+      warning ?? `Zugriffsstufe: ${PERMISSION_LEVEL_LABEL[permissionLevel]}.`,
+      warning ? "warning" : "info",
+    );
+  }
+
   async function applyPermissionLevel(
     level: PermissionLevel,
     ctx: ExtensionContext,
     epoch = sessionEpoch,
   ): Promise<void> {
     if (epoch !== sessionEpoch) return;
-    if (level === permissionLevel) return;
+    if (level === "yolo") {
+      await toggleYolo(ctx, "command", epoch);
+      return;
+    }
+    const nextState: Exclude<PermissionState, "YOLO_OVERRIDE"> =
+      level === workflowDefaultPermission ? "DEFAULT" : "MANUAL";
+    if (
+      permissionState !== "YOLO_OVERRIDE" &&
+      selectedPermissionState === nextState &&
+      selectedPermissionLevel === level
+    )
+      return;
 
+    selectedPermissionState = nextState;
+    selectedPermissionLevel = level;
+    permissionState = nextState;
     permissionLevel = level;
     publishStatus(ctx);
     persistState();
+    auditTransition("command");
     const warning = permissionWarning(level);
     ctx.ui.notify(
       warning ?? `Zugriffsstufe: ${PERMISSION_LEVEL_LABEL[level]}.`,
@@ -552,18 +649,18 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("yolo", {
     description: "Session-weiten YOLO Mode ein-/ausschalten",
-    handler: async (_args, ctx) =>
-      applyPermissionLevel(
-        permissionLevel === "yolo" ? "read-write" : "yolo",
-        ctx,
-      ),
+    handler: async (_args, ctx) => toggleYolo(ctx, "command"),
   });
 
   pi.registerCommand("full-access", {
     description: "Session-weiten Full Access Mode ein-/ausschalten",
     handler: async (_args, ctx) =>
       applyPermissionLevel(
-        permissionLevel === "full-access" ? "read-write" : "full-access",
+        permissionState !== "YOLO_OVERRIDE" &&
+          selectedPermissionState === "MANUAL" &&
+          selectedPermissionLevel === "full-access"
+          ? workflowDefaultPermission
+          : "full-access",
         ctx,
       ),
   });
@@ -588,6 +685,10 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     description: SHORTCUTS.thinkingMenu.description,
     handler: async (ctx) => openThinkingMenu(ctx),
   });
+  pi.registerShortcut(SHORTCUTS.yoloToggle.keys, {
+    description: SHORTCUTS.yoloToggle.description,
+    handler: async (ctx) => toggleYolo(ctx, "shortcut"),
+  });
 
   pi.events.on(CONTROL_CENTER_EVENTS.openPermissions, async (event) => {
     await openPermissionMenu((event as OpenControlCenterMenuEvent).ctx);
@@ -597,6 +698,17 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
   pi.events.on(CONTROL_CENTER_EVENTS.snapshot, (event) => {
     (event as ControlCenterSnapshotEvent).respond(snapshot());
+  });
+  pi.events.on(WORKFLOW_CAPABILITY_EVENTS.activated, (event) => {
+    const activated = event as WorkflowActivatedEvent;
+    if (
+      !activeContext ||
+      activated.sessionId !== activeSessionId ||
+      activated.cwd !== activeContext.cwd
+    ) {
+      return;
+    }
+    applyWorkflowDefaults(activated.mode, activeContext, "workflow");
   });
 
   pi.on("tool_call", async (event, ctx) => {
@@ -626,7 +738,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
 
   pi.on("user_bash", async (event, ctx) => {
     const workflow = requestWorkflowCapabilities(pi.events);
-    const decision = isRestrictedWorkflow(workflow)
+    const decision = permissionLevel === "yolo"
+      ? { action: "allow" as const, reason: "YOLO-Voll-Bypass" }
+      : isRestrictedWorkflow(workflow)
       ? {
           action: "block" as const,
           reason: `Workflow ${workflow.state}: direkter Shell-Zugriff ist nicht freigegeben.`,
@@ -658,6 +772,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     sessionEpoch += 1;
+    activeSessionId = ctx.sessionManager.getSessionId();
+    activeContext = ctx;
     auroraEpoch = undefined;
     subscribeAuroraProvider();
     configuredPolicy = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config
@@ -677,13 +793,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
           };
         }
       | undefined;
-    const restoredLevel = normalizePermissionLevel(
-      latestState?.data?.permissionLevel,
-    );
-    permissionLevel =
-      restoredLevel === "yolo"
-        ? "read-write"
-        : (restoredLevel ?? (AUTO_YOLO_ON_START ? "yolo" : "read-write"));
+    // Permission state is intentionally never restored. Every new session
+    // begins with the declared workflow default, regardless of old entries.
     thinkingMode =
       latestState?.data?.thinkingMode === "manual" ? "manual" : "auto";
     manualThinkingLevel = latestState?.data?.manualThinkingLevel;
@@ -694,7 +805,13 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       manualThinkingLevel = undefined;
       pi.setThinkingLevel(workflowThinkingDefault());
     }
-    publishStatus(ctx);
+    selectedPermissionState = "DEFAULT";
+    permissionState = "DEFAULT";
+    applyWorkflowDefaults(
+      requestWorkflowCapabilities(pi.events).mode ?? "work",
+      ctx,
+      "session",
+    );
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
@@ -702,6 +819,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     unsubscribeAurora?.();
     unsubscribeAurora = undefined;
     auroraEpoch = undefined;
+    activeSessionId = undefined;
+    activeContext = undefined;
     setTuiStatus(ctx, ZENTUI_STATUS_KEYS.permissions, undefined);
   });
 }

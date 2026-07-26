@@ -66,10 +66,9 @@ const CRITICAL_BASH_PATTERNS: Array<[RegExp, string]> = [
 ];
 
 // Bleiben ausschließlich in YOLO automatisch erlaubt (nicht in Full Access):
-// sudo/su, Datei-/Ordnerlöschung und erzwungene Git-Pushes. Diese Fragen
-// werden bewusst nicht zur Full-Access-Stufe freigegeben, damit Full Access
-// spürbar zurückhaltender bleibt als YOLO — Force-Push zerstört Remote-
-// History und ist kein Housekeeping.
+// sudo/su, Datei-/Ordnerlöschung und erzwungene Git-Pushes. Der vollständige
+// YOLO-Bypass wird am Beginn der öffentlichen Entscheidungsmethoden behandelt;
+// diese Muster beschreiben deshalb ausschließlich die verbleibenden Stufen.
 const SENSITIVE_ASK_PATTERNS: Array<[RegExp, string]> = [
   [/\b(?:rm|rmdir|unlink|trash)\b/i, "Datei- oder Ordnerlöschung"],
   [/\bgio\s+trash\b/i, "Datei- oder Ordnerlöschung"],
@@ -80,8 +79,8 @@ const SENSITIVE_ASK_PATTERNS: Array<[RegExp, string]> = [
   ],
 ];
 
-// Git-Housekeeping und Paketmanager-Rauschen: in Full Access UND YOLO
-// automatisch erlaubt.
+// Git-Housekeeping und Paketmanager-Rauschen sind in Full Access automatisch
+// erlaubt. YOLO wird bereits vor dieser Auswertung vollständig freigegeben.
 const ROUTINE_ASK_PATTERNS: Array<[RegExp, string]> = [
   [/\bgit\s+reset\b/i, "git reset"],
   [/\bgit\s+clean\b/i, "git clean"],
@@ -240,6 +239,9 @@ export function decideFileAccess(
   cwd: string,
   options: DecideFileAccessOptions = {},
 ): PolicyDecision {
+  if (permissionLevel === "yolo") {
+    return { action: "allow", reason: "YOLO-Voll-Bypass" };
+  }
   const { protectedWritePath } = options;
   const scope = resolvePathScope(rawPath, cwd);
   const isReadRestricted =
@@ -282,9 +284,7 @@ export function decideFileAccess(
     return ask(`Änderung am Systempfad ${scope.absolutePath}`, true);
   }
   if (operation === "write" && !scope.insideProject) {
-    return permissionLevel === "yolo"
-      ? ALLOW
-      : ask(`Änderung außerhalb des Projekts: ${scope.absolutePath}`);
+    return ask(`Änderung außerhalb des Projekts: ${scope.absolutePath}`);
   }
   return ALLOW;
 }
@@ -927,6 +927,9 @@ export function decideBash(
   command: string,
   cwd: string,
 ): PolicyDecision {
+  if (permissionLevel === "yolo") {
+    return { action: "allow", reason: "YOLO-Voll-Bypass" };
+  }
   const trimmed = command.trim();
   if (!trimmed) return deny("Leeres Bash-Kommando.");
 
@@ -965,20 +968,16 @@ export function decideBash(
 
   for (const [pattern, reason] of SENSITIVE_ASK_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return permissionLevel === "yolo" ? ALLOW : ask(reason);
+      return ask(reason);
     }
   }
   for (const [pattern, reason] of ROUTINE_ASK_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return permissionLevel === "yolo" || permissionLevel === "full-access"
-        ? ALLOW
-        : ask(reason);
+      return permissionLevel === "full-access" ? ALLOW : ask(reason);
     }
   }
   if (likelyExternalWrite(trimmed, cwd)) {
-    return permissionLevel === "yolo"
-      ? ALLOW
-      : ask("Bash-Änderung außerhalb des aktuellen Projekts");
+    return ask("Bash-Änderung außerhalb des aktuellen Projekts");
   }
   return ALLOW;
 }

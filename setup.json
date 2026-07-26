@@ -6,7 +6,12 @@
   },
   "permissions": {
     "unknownTools": "ask",
-    "bash": "ask"
+    "bash": "ask",
+    "workflowDefaults": {
+      "work": "read-bash",
+      "simple_plan": "read-bash",
+      "detailed_plan": "read-bash"
+    }
   },
   "lsp": {
     "enabled": true,

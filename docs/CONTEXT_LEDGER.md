@@ -6,7 +6,8 @@
 
 ## Bestätigte Nutzerentscheidungen
 - Aurora Night mit kontextueller Bewegung; reduced und off bleiben über setup.json verfügbar
-- read-write als Startstufe; unbekannte Tools bleiben in Full und YOLO bestätigungspflichtig, in strengeren Stufen blockiert, in Setup gesperrt
+- Workflow-Startstufe `read-bash` für Work, Schnellplan und Architekturplan; jeder Workflow-Aufruf und Session-Start setzt den Permission-Zustand darauf zurück
+- `Super+Y`/`/yolo` aktivieren einen sichtbaren vollständigen Anwendungs-Bypass; Policy-, Workflow-, Secret-/Systempfad- und Bestätigungsprüfungen greifen dann nicht
 - Frischer Subagenten-Kontext, maximale Parallelität drei
 - Modellwahl und Cycling folgen Pi-native `/scoped-models` und `settings.enabledModels`
 - Alte UI-/Renderer-Dateien bleiben inaktiv erhalten (Rückbau ohne Datenverlust)
@@ -20,6 +21,7 @@
 
 ## Architekturentscheidungen
 - setup.json ist die zentrale, validierte Konfiguration für UI, Permissions, LSP, Subagenten und Verifikation
+- `permissions.workflowDefaults` ist die deklarative Zuordnung von Workflow zu Normalstufe; vertrauenswürdige Projekte dürfen sie nur weiter einschränken
 - Plan-Workflow nutzt Sidecar v2 mit stabiler planId, Revision, Lifecycle, Todo-Hash und gebundener executionId (Lock/CAS)
 - Pi Core bleibt alleiniger Compaction-Eigentümer; keine zweite Compaction
 - Context Ledger (docs/CONTEXT_LEDGER.md) ist das dauerhafte Projektgedächtnis, getrennt vom flüchtigen docs/PROJECT_STATE.md
@@ -46,7 +48,6 @@
 - Kein Austausch von `pi-subagents`.
 - Keine Änderungen am gepinnten Drittanbieter-Fork.
 - Keine neuen Abhängigkeiten.
-- Keine Änderung der grundlegenden Permission-Architektur.
 - Keine Erweiterung der Agentenanzahl.
 - Keine allgemeinen Refactorings außerhalb der Subagenten-, Dokumentations- und Konfigurationsbereiche.
 - Keine automatische Veröffentlichung, kein Commit und kein Push.

@@ -4,15 +4,8 @@
  * Workflow: /plan -> /work (review-plan optional, finish meist automatisch)
  */
 
-import type {
-  AgentMessage,
-  ThinkingLevel,
-} from "@earendil-works/pi-agent-core";
-import {
-  StringEnum,
-  type AssistantMessage,
-  type TextContent,
-} from "@earendil-works/pi-ai";
+import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { StringEnum } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
   resolveModelScopeWithDiagnostics,
@@ -25,16 +18,13 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative } from "node:path";
 import { Type } from "typebox";
 import {
-  consolidateLedger,
   classifyLedger,
   ledgerSummaryLine,
   readLedger,
   shouldCheckpointForTokens,
-  CONTEXT_LEDGER_RELATIVE_PATH,
-  type LedgerTrigger,
 } from "../shared/context-ledger.ts";
 import {
   applyDoneSteps,
@@ -79,7 +69,6 @@ import {
   publishAuroraUiPatch,
   publishAuroraUiSnapshot,
   type AuroraUiStatePatch,
-  type AuroraWorkflowPhase,
 } from "../aurora-ui/state.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
@@ -89,11 +78,11 @@ import {
   type ControlCenterSnapshot,
   type WorkflowThinkingDefaultEvent,
 } from "../shared/control-center-events.ts";
-import { SHORTCUTS } from "../shared/shortcuts.ts";
 import {
   WORKFLOW_CAPABILITY_EVENTS,
   type WorkflowCapabilityRequest,
   type WorkflowCapabilityState,
+  type WorkflowActivatedEvent,
   type WorkflowStateDiscardedEvent,
 } from "../shared/workflow-capabilities.ts";
 import {
@@ -136,24 +125,30 @@ import {
   removeWorkflowStateAtomicCAS,
   withWorkspaceLock,
   writeWorkflowStateAtomicCAS,
+  type LoadedWorkflowState,
   type WorkflowExecutionMetadata,
   type PlanProgressRecord,
   type PlanProgressStatus,
 } from "./state.ts";
-
-// Context markers: kept as constants so injection (below) and detection (in
-// the "context" handler) can never drift apart, unlike two separately
-// hand-typed copies of the same bracketed text.
-const PLAN_MODE_MARKER = "[PLAN MODE ACTIVE]";
-const PLAN_REVIEW_MARKER = "[PLAN REVIEW ACTIVE]";
-const EXECUTING_PLAN_MARKER = "[EXECUTING PLAN]";
-const DECISION_INTAKE_MARKER = "[DECISION INTAKE ACTIVE]";
-
-// Gemeinsamer Subagenten-Hinweis für die Ausführungsphase: kept as a constant
-// so the two injection sites (before_agent_start during "executing" and
-// executePlan()) can't drift apart into two separately hand-typed copies.
-const SUBAGENT_EXECUTING_REMINDER =
-  "SUBAGENTEN:\nNutze das `subagent`-Tool bei Bedarf (siehe AGENTS.md → Subagenten-Delegation), z. B. für abgegrenzte Teilscopes oder Prüfungen nach Änderungen.";
+import {
+  DECISION_INTAKE_MARKER,
+  EXECUTING_PLAN_MARKER,
+  getLatestAssistantText,
+  getTextContent,
+  isAssistantMessage,
+  latestAssistantSucceeded,
+  MODE_LABEL,
+  MODE_THINKING,
+  PLAN_MODE_MARKER,
+  PLAN_REVIEW_MARKER,
+  SIMPLE_PLAN_PROMPT,
+  SUBAGENT_EXECUTING_REMINDER,
+  auroraWorkflowPhase,
+} from "./workflow-presentation.ts";
+import { registerPlanEntryCommands } from "./workflow-commands.ts";
+import { runLedgerCheckpoint } from "./ledger-checkpoint.ts";
+import { registerWorkflowContextCleanup } from "./workflow-hooks.ts";
+import { WorkflowSettlementCoordinator } from "./workflow-settlement.ts";
 
 const PLAN_PROGRESS_STATUSES = ["in_progress", "completed", "blocked"] as const;
 const EXECUTION_LEASE_MS = 90_000;
@@ -180,67 +175,6 @@ const PlanProgressParams = Type.Object({
   }),
 });
 
-// Persistenter Kontext für den „Einfachen Plan": dieselbe Plan-Datei wie im
-// ausführlichen Modus, aber ohne lange Architektur-/Risiko-Blöcke.
-const SIMPLE_PLAN_PROMPT = `[EINFACHER PLAN]
-Erstelle einen schlichten, schnell einsetzbaren Plan für die aktuelle Aufgabe — geeignet für kleine bis mittlere Änderungen.
-
-Vorgehen:
-- Stelle höchstens wenige gezielte Rückfragen, und nur, wenn sie für einen umsetzbaren Plan wirklich nötig sind (nutze dazu ask_user).
-- Verzichte auf ausführliche Architekturprüfung und lange Risiko-/Audit-Blöcke.
-- Nutze bei Bedarf das \`subagent\`-Tool (siehe AGENTS.md → Subagenten-Delegation), aber nur wenn es den Schnellplan wirklich beschleunigt, nicht routinemäßig.
-- Führe die Aufgabe nicht aus und ändere keine anderen Dateien.
-
-Schreibe den finalen kurzen Plan nach ${PLAN_RELATIVE_PATH}.
-Verwende mindestens diese gültige Struktur:
-
-# Arbeitsplan: <Aufgabe>
-
-## Auftrag
-<Kurze Zielbeschreibung>
-
-## Todos
-- [ ] Konkreter Umsetzungsschritt
-- [ ] Relevante Tests oder Checks ausführen
-
-Pflicht sind die Abschnitte Auftrag und Todos mit mindestens einer Checkbox.
-Stoppe nach dem Schreiben der Plan-Datei und bleibe knapp.`;
-
-// Thinking-Level folgt im Auto-Modus dem Workflow-Modus: kompaktes Planen
-// braucht kein Maximalbudget, Architekturanalysen schon. Manuell ausgewählte
-// Werte bleiben bei echten Moduswechseln erhalten.
-const MODE_THINKING: Record<WorkflowMode, ThinkingLevel> = {
-  simple_plan: "medium",
-  detailed_plan: "xhigh",
-  work: "high",
-};
-
-const MODE_LABEL: Record<WorkflowMode, string> = {
-  simple_plan: "Schnellplan",
-  detailed_plan: "Architekturplan",
-  work: "Work-Modus",
-};
-
-function auroraWorkflowPhase(phase: WorkflowPhase): AuroraWorkflowPhase {
-  switch (phase) {
-    case "idle":
-      return "idle";
-    case "draft":
-    case "deciding":
-    case "reviewing":
-      return "drafting";
-    case "reviewed":
-      return "reviewed";
-    case "executing":
-      return "executing";
-    case "paused":
-      return "paused";
-    case "blocked":
-      return "blocked";
-    case "ready":
-      return "ready";
-  }
-}
 
 interface PersistedWorkflowState {
   mode?: WorkflowMode;
@@ -252,29 +186,6 @@ interface PersistedWorkflowState {
   // Legacy fields retained only for state migration.
   enabled?: boolean;
   executing?: boolean;
-}
-
-function isAssistantMessage(
-  message: AgentMessage,
-): message is AssistantMessage {
-  return message.role === "assistant" && Array.isArray(message.content);
-}
-
-function getTextContent(message: AssistantMessage): string {
-  return message.content
-    .filter((block): block is TextContent => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
-}
-
-function getLatestAssistantText(messages: AgentMessage[]): string {
-  const latest = [...messages].reverse().find(isAssistantMessage);
-  return latest ? getTextContent(latest) : "";
-}
-
-function latestAssistantSucceeded(messages: AgentMessage[]): boolean {
-  const latest = [...messages].reverse().find(isAssistantMessage);
-  return latest?.stopReason === "stop";
 }
 
 export default function planModeExtension(pi: ExtensionAPI): void {
@@ -300,13 +211,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   let foreignExecution: WorkflowExecutionMetadata | undefined;
   let leaseHeartbeat: ReturnType<typeof setTimeout> | undefined;
   let executePlanInFlight = false;
-  let settledRun:
-    | {
-        epoch: number;
-        sessionId: string;
-        messages: AgentMessage[];
-      }
-    | undefined;
+  const settlement = new WorkflowSettlementCoordinator();
   let activeRun:
     | {
         id: string;
@@ -349,6 +254,57 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   interface SessionToken {
     epoch: number;
     sessionId: string;
+  }
+
+  /**
+   * The persisted workflow fields have one reset and one hydration path.
+   * Volatile run/lease handles stay local to the current session and are never
+   * reconstructed from an untrusted or stale sidecar implicitly.
+   */
+  function resetPersistedWorkflowMemory(
+    stateToken = "missing",
+  ): void {
+    mode = "work";
+    phase = "idle";
+    reviewedHash = undefined;
+    planCreationMode = undefined;
+    progressRecords = [];
+    workflowRevision = 0;
+    currentPlanId = undefined;
+    decisionBriefHash = undefined;
+    workflowStateToken = stateToken;
+    foreignExecution = undefined;
+  }
+
+  function hydratePersistedWorkflowMemory(
+    loaded: LoadedWorkflowState,
+    options: { resetWhenMissing?: boolean; trackForeignExecution?: boolean } = {},
+  ): boolean {
+    workflowStateToken = loaded.stateToken;
+    if (!loaded.state) {
+      if (options.resetWhenMissing) {
+        resetPersistedWorkflowMemory(loaded.stateToken);
+      } else {
+        foreignExecution = undefined;
+      }
+      return false;
+    }
+    mode = loaded.state.mode;
+    phase = loaded.state.phase;
+    reviewedHash = loaded.state.reviewedHash;
+    planCreationMode = loaded.state.planCreationMode;
+    progressRecords = loaded.state.progress;
+    workflowRevision = loaded.state.revision;
+    currentPlanId = loaded.state.planId;
+    decisionBriefHash = loaded.state.decisionBriefHash;
+    foreignExecution =
+      options.trackForeignExecution &&
+      loaded.state.lifecycle === "executing" &&
+      isExecutionLeaseLive(loaded.state.execution) &&
+      loaded.state.execution?.ownerId !== executionOwnerId
+        ? loaded.state.execution
+        : undefined;
+    return true;
   }
 
   function captureSessionToken(ctx: ExtensionContext): SessionToken {
@@ -478,18 +434,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
     try {
       const loaded = loadWorkflowState(ctx.cwd);
-      workflowStateToken = loaded.stateToken;
-      if (loaded.state) {
-        mode = loaded.state.mode;
-        phase = loaded.state.phase;
-        reviewedHash = loaded.state.reviewedHash;
-        planCreationMode = loaded.state.planCreationMode;
-        progressRecords = loaded.state.progress;
-        workflowRevision = loaded.state.revision;
-        currentPlanId = loaded.state.planId;
-        decisionBriefHash = loaded.state.decisionBriefHash;
-      }
-      foreignExecution = undefined;
+      hydratePersistedWorkflowMemory(loaded);
       updateStatus(ctx);
       return false;
     } catch (error) {
@@ -526,6 +471,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   pi.events.on(WORKFLOW_CAPABILITY_EVENTS.request, (event) => {
     (event as WorkflowCapabilityRequest).respond({
       state: workflowCapabilityState(),
+      mode,
     });
   });
 
@@ -542,28 +488,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
     try {
       const loaded = loadWorkflowState(ctx.cwd);
-      workflowStateToken = loaded.stateToken;
-      if (loaded.state) {
-        mode = loaded.state.mode;
-        phase = loaded.state.phase;
-        reviewedHash = loaded.state.reviewedHash;
-        planCreationMode = loaded.state.planCreationMode;
-        progressRecords = loaded.state.progress;
-        workflowRevision = loaded.state.revision;
-        currentPlanId = loaded.state.planId;
-        decisionBriefHash = loaded.state.decisionBriefHash;
-      } else {
-        mode = "work";
-        phase = "idle";
-        reviewedHash = undefined;
-        planCreationMode = undefined;
-        progressRecords = [];
-        workflowRevision = 0;
-        currentPlanId = undefined;
-        decisionBriefHash = undefined;
-      }
+      hydratePersistedWorkflowMemory(loaded, { resetWhenMissing: true });
       activeRun = undefined;
-      foreignExecution = undefined;
       stopExecutionHeartbeat();
       updateStatus(ctx);
     } catch (error) {
@@ -584,74 +510,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   function readTodos(cwd: string): TodoItem[] {
     const content = readPlanFile(cwd);
     return content === undefined ? [] : extractTodoItems(content);
-  }
-
-  function getProjectName(cwd: string): string {
-    const base = cwd.split(sep).filter(Boolean).pop();
-    return base && base.length > 0 ? base : "Projekt";
-  }
-
-  // Deterministischer, modell-freier Context-Ledger-Checkpoint. Konsolidiert die
-  // bereits existierenden strukturierten Artefakte (Decision Brief, Plan,
-  // offene Todos) in docs/CONTEXT_LEDGER.md. Fail-open: ein Ledger-Fehler darf
-  // den Workflow niemals stoppen. Erzeugt keinen zusätzlichen Modell-Turn.
-  function runLedgerCheckpoint(
-    ctx: ExtensionContext,
-    trigger: LedgerTrigger,
-  ): void {
-    try {
-      // Artefakte aus nicht vertrauenswürdigen Workspaces werden nicht
-      // dauerhaft übernommen (analog zur Plan-Behandlung).
-      if (!ctx.isProjectTrusted()) return;
-
-      let briefContent: string | undefined;
-      let planContent: string | undefined;
-      let openPriorities: string[] = [];
-      try {
-        briefContent = readDecisionBrief(ctx.cwd);
-      } catch {
-        // Ein unlesbares Brief blockiert die restliche Konsolidierung nicht.
-      }
-      try {
-        planContent = readPlanFile(ctx.cwd);
-      } catch {
-        // Ein unlesbarer Plan blockiert die restliche Konsolidierung nicht.
-      }
-      try {
-        openPriorities = readTodos(ctx.cwd)
-          .filter((todo) => !todo.completed)
-          .map((todo) => todo.text);
-      } catch {
-        openPriorities = [];
-      }
-
-      if (
-        briefContent === undefined &&
-        planContent === undefined &&
-        openPriorities.length === 0
-      ) {
-        return;
-      }
-
-      const wrote = consolidateLedger(
-        ctx.cwd,
-        getProjectName(ctx.cwd),
-        { briefContent, planContent, openPriorities },
-        trigger,
-      );
-      if (wrote) {
-        ctx.ui.notify(
-          `Context Ledger aktualisiert (${trigger}) → ${CONTEXT_LEDGER_RELATIVE_PATH}`,
-          "info",
-        );
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Context Ledger konnte nicht aktualisiert werden: ${message}`,
-        "warning",
-      );
-    }
   }
 
   function effectivePlanType(
@@ -797,31 +655,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       const message = error instanceof Error ? error.message : String(error);
       try {
         const loaded = loadWorkflowState(ctx.cwd);
-        workflowStateToken = loaded.stateToken;
-        if (loaded.state) {
-          mode = loaded.state.mode;
-          phase = loaded.state.phase;
-          reviewedHash = loaded.state.reviewedHash;
-          planCreationMode = loaded.state.planCreationMode;
-          progressRecords = loaded.state.progress;
-          workflowRevision = loaded.state.revision;
-          currentPlanId = loaded.state.planId;
-          decisionBriefHash = loaded.state.decisionBriefHash;
-          foreignExecution =
-            loaded.state.lifecycle === "executing" &&
-            loaded.state.execution?.ownerId !== executionOwnerId
-              ? loaded.state.execution
-              : undefined;
-          activeRun = undefined;
-        } else {
-          progressRecords = [];
-          workflowRevision = 0;
-          currentPlanId = undefined;
-          decisionBriefHash = undefined;
-          workflowStateToken = loaded.stateToken;
-          foreignExecution = undefined;
-          activeRun = undefined;
-        }
+        hydratePersistedWorkflowMemory(loaded, {
+          resetWhenMissing: true,
+          trackForeignExecution: true,
+        });
+        activeRun = undefined;
         stopExecutionHeartbeat();
         updateStatus(ctx);
       } catch {
@@ -992,9 +830,19 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         phase = "draft";
         updateStatus(ctx);
         if (!persistState(ctx)) return false;
+        pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.activated, {
+          cwd: ctx.cwd,
+          sessionId: ctx.sessionManager.getSessionId(),
+          mode: target,
+        } satisfies WorkflowActivatedEvent);
         ctx.ui.notify(`${MODE_LABEL[target]} wird fortgesetzt.`, "info");
         return true;
       }
+      pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.activated, {
+        cwd: ctx.cwd,
+        sessionId: ctx.sessionManager.getSessionId(),
+        mode: target,
+      } satisfies WorkflowActivatedEvent);
       ctx.ui.notify(`${MODE_LABEL[target]} ist bereits aktiv.`, "info");
       return true;
     }
@@ -1056,6 +904,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       );
       return false;
     }
+    pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.activated, {
+      cwd: ctx.cwd,
+      sessionId: ctx.sessionManager.getSessionId(),
+      mode: target,
+    } satisfies WorkflowActivatedEvent);
     ctx.ui.notify(
       modeChanged
         ? `${MODE_LABEL[target]} aktiv. Thinking: ${thinkingMode === "auto" ? `${MODE_THINKING[target]} (Auto)` : "manueller Wert bleibt erhalten"}.`
@@ -2161,121 +2014,14 @@ Starte keine Umsetzung und wechsle nicht nach /work.`,
     showSkillManagementStatus(ctx);
   }
 
-  pi.registerFlag("plan", {
-    description:
-      "Im detaillierten Planungsmodus starten (Berechtigungen unverändert)",
-    type: "boolean",
-    default: false,
+  registerPlanEntryCommands(pi, {
+    routePlan,
+    showPlanTodos,
+    runDecisionIntake,
+    openControlCenter,
+    openModelScopes,
   });
-
-  pi.registerCommand("plan", {
-    description: "Plan-Assistent öffnen (zustandsabhängig)",
-    handler: async (_args, ctx) => {
-      await routePlan(ctx);
-    },
-  });
-
-  pi.registerCommand("plan-todos", {
-    description: "Todos aus der aktuellen Plan-Datei anzeigen",
-    handler: async (_args, ctx) => {
-      showPlanTodos(ctx);
-    },
-  });
-
-  pi.registerCommand("decide", {
-    description: "Decision-Intake starten (Optionen klären → Decision Brief)",
-    handler: async (_args, ctx) => {
-      await runDecisionIntake(ctx);
-    },
-  });
-
-  pi.registerShortcut(SHORTCUTS.planAssistant.keys, {
-    description: SHORTCUTS.planAssistant.description,
-    handler: async (ctx) => {
-      await routePlan(ctx);
-    },
-  });
-
-  pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
-    description: SHORTCUTS.modeMenu.description,
-    handler: async (ctx) => openControlCenter(ctx),
-  });
-
-  pi.registerShortcut(SHORTCUTS.modelMenu.keys, {
-    description: SHORTCUTS.modelMenu.description,
-    handler: async (ctx) => openModelScopes(ctx),
-  });
-
-  pi.events.on(CONTROL_CENTER_EVENTS.openModels, async (event) => {
-    await openModelScopes((event as { ctx: ExtensionContext }).ctx);
-  });
-
-  pi.on("context", async (event) => {
-    let lastAssistantIndex = -1;
-    for (let index = event.messages.length - 1; index >= 0; index -= 1) {
-      const message = event.messages[index];
-      if (!message || !isAssistantMessage(message)) continue;
-      const hasToolCall = message.content.some(
-        (block) => block.type === "toolCall",
-      );
-      // toolUse is an intermediate provider response. Other responses that
-      // still carry tool calls also continue the same agent turn (for
-      // example, Pi emits failed tool results after a truncated `length`
-      // response). Error/aborted messages terminate immediately in Pi's
-      // agent loop and therefore are valid stale-context boundaries.
-      if (
-        message.stopReason === "toolUse" ||
-        (hasToolCall &&
-          message.stopReason !== "error" &&
-          message.stopReason !== "aborted")
-      )
-        continue;
-      lastAssistantIndex = index;
-      break;
-    }
-    // With no completed assistant turn there is no stale boundary. In
-    // particular, the complete plan-mode-execute message sent by the first
-    // /work turn must reach the model unchanged.
-    if (lastAssistantIndex < 0) return;
-
-    return {
-      messages: event.messages.filter((message, index) => {
-        // Keep the latest assistant response and every message injected for
-        // the current turn. Only older workflow scaffolding is disposable.
-        if (index >= lastAssistantIndex) return true;
-        const candidate = message as AgentMessage & { customType?: string };
-        if (
-          candidate.customType?.startsWith("plan-") ||
-          candidate.customType === "simple-plan-context"
-        )
-          return false;
-        // Marker fallback is only for legacy hidden custom messages. Never
-        // discard real user text merely because it discusses a marker.
-        if (candidate.role !== "custom") return true;
-
-        const content = candidate.content;
-        if (typeof content === "string") {
-          return (
-            !content.includes(PLAN_MODE_MARKER) &&
-            !content.includes(PLAN_REVIEW_MARKER) &&
-            !content.includes(EXECUTING_PLAN_MARKER) &&
-            !content.includes(DECISION_INTAKE_MARKER)
-          );
-        }
-        if (Array.isArray(content)) {
-          return !content.some(
-            (block) =>
-              block.type === "text" &&
-              (block.text?.includes(PLAN_MODE_MARKER) ||
-                block.text?.includes(PLAN_REVIEW_MARKER) ||
-                block.text?.includes(EXECUTING_PLAN_MARKER) ||
-                block.text?.includes(DECISION_INTAKE_MARKER)),
-          );
-        }
-        return true;
-      }),
-    };
-  });
+  registerWorkflowContextCleanup(pi);
 
   // Liefert einen Kontext-Zusatz mit dem aktuellen Decision Brief, falls eines
   // existiert. Wird an die simple_plan-/detailed_plan-Kontexte angehängt, damit
@@ -2425,7 +2171,8 @@ Beende den Review mit genau einem Marker:
             `${PLAN_MODE_MARKER}
 Du bist im ausführlichen Plan-Modus. Analysiere Kontext, Risiken, Optionen,
 Abhängigkeiten und Umsetzungsschritte gründlich. Der Workflow-Modus verändert
-keine Permissions; halte die aktuell gewählte Zugriffsstufe ein.
+keine manuell gewählte Permission-Stufe; halte die aktuell aktive Zugriffsstufe
+ein.
 
 Führe die Aufgabe nicht aus. Schreibe ausschließlich den Plan nach
 ${PLAN_RELATIVE_PATH}, sofern die aktuelle Permission-Stufe dies erlaubt.
@@ -2923,23 +2670,20 @@ FORTSCHRITT:
   }
 
   pi.on("agent_end", async (event, ctx) => {
-    settledRun = {
+    settlement.capture({
       epoch: sessionEpoch,
       sessionId: ctx.sessionManager.getSessionId(),
       messages: event.messages,
-    };
+    });
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    const pending = settledRun;
-    settledRun = undefined;
-    if (
-      !pending ||
-      pending.epoch !== sessionEpoch ||
-      pending.sessionId !== activeSessionId ||
-      pending.sessionId !== ctx.sessionManager.getSessionId()
-    )
-      return;
+    const pending = settlement.takeCurrent(
+      sessionEpoch,
+      activeSessionId,
+      ctx.sessionManager.getSessionId(),
+    );
+    if (!pending) return;
     await handleSettledRun({ messages: pending.messages }, ctx);
   });
 
@@ -4032,20 +3776,12 @@ CHANGED_FILES:
     // earlier project's in-memory workflow leak into a new empty session.
     clearPostPlanInput(ctx);
     postPlanCardViewStates.clear();
-    mode = "work";
-    phase = "idle";
-    reviewedHash = undefined;
-    planCreationMode = undefined;
-    progressRecords = [];
-    workflowRevision = 0;
-    currentPlanId = undefined;
-    decisionBriefHash = undefined;
-    workflowStateToken = "missing";
+    resetPersistedWorkflowMemory();
     executionOwnerId = randomUUID();
     foreignExecution = undefined;
     stopExecutionHeartbeat();
     activeRun = undefined;
-    settledRun = undefined;
+    settlement.clear();
     executePlanInFlight = false;
     pendingPlan = undefined;
     sessionEpoch += 1;
@@ -4117,40 +3853,12 @@ CHANGED_FILES:
     try {
       content = readPlanFile(ctx.cwd);
       const loaded = loadWorkflowState(ctx.cwd);
-      workflowStateToken = loaded.stateToken;
-      if (loaded.state) {
-        mode = loaded.state.mode;
-        phase = loaded.state.phase;
-        reviewedHash = loaded.state.reviewedHash;
-        planCreationMode = loaded.state.planCreationMode;
-        progressRecords = loaded.state.progress;
-        workflowRevision = loaded.state.revision;
-        currentPlanId = loaded.state.planId;
-        decisionBriefHash = loaded.state.decisionBriefHash;
-        foreignExecution =
-          loaded.state.lifecycle === "executing" &&
-          isExecutionLeaseLive(loaded.state.execution) &&
-          loaded.state.execution?.ownerId !== executionOwnerId
-            ? loaded.state.execution
-            : undefined;
-      } else {
-        progressRecords = [];
-        workflowRevision = 0;
-        currentPlanId = undefined;
-        decisionBriefHash = undefined;
-        foreignExecution = undefined;
-      }
+      hydratePersistedWorkflowMemory(loaded, {
+        trackForeignExecution: true,
+      });
       if (loaded.warning) ctx.ui.notify(loaded.warning, "warning");
     } catch (error) {
-      phase = "idle";
-      mode = "work";
-      reviewedHash = undefined;
-      progressRecords = [];
-      workflowRevision = 0;
-      currentPlanId = undefined;
-      decisionBriefHash = undefined;
-      workflowStateToken = "missing";
-      foreignExecution = undefined;
+      resetPersistedWorkflowMemory();
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(`Unsicherer Planpfad ignoriert: ${message}`, "error");
     }
@@ -4173,9 +3881,11 @@ CHANGED_FILES:
         // Reviewstatus auch nach einem Sessionneustart erkannt wird.
         phase = "draft";
       }
-      if (phase === "executing" && foreignExecution) {
+      const restoredForeignExecution =
+        foreignExecution as WorkflowExecutionMetadata | undefined;
+      if (phase === "executing" && restoredForeignExecution) {
         ctx.ui.notify(
-          `Plan wird durch eine aktive Execution-Lease (${foreignExecution.executionId}) in einer anderen Session bearbeitet. /work kann eine explizite Übernahme anbieten.`,
+          `Plan wird durch eine aktive Execution-Lease (${restoredForeignExecution.executionId}) in einer anderen Session bearbeitet. /work kann eine explizite Übernahme anbieten.`,
           "warning",
         );
       } else if (
@@ -4250,7 +3960,7 @@ CHANGED_FILES:
     stopExecutionHeartbeat();
     sessionEpoch += 1;
     activeSessionId = undefined;
-    settledRun = undefined;
+    settlement.clear();
     executePlanInFlight = false;
     unsubscribeAurora?.();
     unsubscribeAurora = undefined;
