@@ -194,6 +194,8 @@ function createHarness(options = {}) {
   const appended = [];
   const sent = [];
   const customComponents = [];
+  const entryRenderers = new Map();
+  const terminalInputListeners = new Set();
   const chrome = { footer: 0, editor: 0, widget: 0, header: 0 };
   const workingMessages = [];
   const workingVisibility = [];
@@ -272,6 +274,10 @@ function createHarness(options = {}) {
     notify(message, level) {
       notifications.push({ message: String(message), level });
     },
+    onTerminalInput(handler) {
+      terminalInputListeners.add(handler);
+      return () => terminalInputListeners.delete(handler);
+    },
     select: async (_title, labels) =>
       typeof options.select === "function" ? options.select(labels) : undefined,
     confirm: async (title, message) => {
@@ -330,6 +336,9 @@ function createHarness(options = {}) {
       if (tools.has(tool.name)) duplicateTools.push(tool.name);
       tools.set(tool.name, tool);
     },
+    registerEntryRenderer(customType, renderer) {
+      entryRenderers.set(customType, renderer);
+    },
     async exec(command, args, execOptions) {
       execCalls.push({ command, args, options: execOptions });
       return {
@@ -384,6 +393,8 @@ function createHarness(options = {}) {
     appended,
     sent,
     customComponents,
+    entryRenderers,
+    theme,
     chrome,
     workingMessages,
     workingVisibility,
@@ -395,6 +406,18 @@ function createHarness(options = {}) {
     lifecycleCalls,
     setIdle(value) {
       idle = value;
+    },
+    sendTerminalInput(data) {
+      let current = data;
+      for (const listener of [...terminalInputListeners]) {
+        const result = listener(current);
+        if (result?.consume) return { consumed: true, data: current };
+        if (result?.data !== undefined) current = result.data;
+      }
+      return { consumed: current.length === 0, data: current };
+    },
+    get terminalInputListenerCount() {
+      return terminalInputListeners.size;
     },
     get footerFactory() {
       return footerFactory;
@@ -5238,14 +5261,60 @@ await section("plan workflow settles before handoff UI", async () => {
       planContext,
     );
     assert(
-      planMenus.every((labels) => !labels.includes("Im Planmodus bleiben")),
-      "post-plan actions are not opened from agent_end while Pi is active",
+      !planHarness.appended.some(
+        (entry) => entry.customType === "plan-next-actions",
+      ),
+      "post-plan card is not appended from agent_end while Pi is active",
     );
     planHarness.setIdle(true);
     await planHarness.runHooks("agent_settled", {}, planContext);
+    const postPlanCard = planHarness.appended.find(
+      (entry) => entry.customType === "plan-next-actions",
+    );
     assert(
-      planMenus.some((labels) => labels.includes("Im Planmodus bleiben")),
-      "post-plan actions open exactly after agent_settled",
+      Boolean(postPlanCard),
+      "post-plan card is appended exactly after agent_settled",
+    );
+    assert(
+      planHarness.customComponents.length === 0,
+      "post-plan card never opens a modal component",
+    );
+    const cardRenderer = planHarness.entryRenderers.get("plan-next-actions");
+    assert(Boolean(cardRenderer), "post-plan card has a transcript renderer");
+    if (cardRenderer && postPlanCard) {
+      const component = cardRenderer(
+        { data: postPlanCard.data },
+        { expanded: false },
+        planHarness.theme,
+      );
+      for (const width of [24, 48, 80]) {
+        const lines = component.render(width);
+        assert(
+          lines.every((line) => stripAnsi(line).length <= width),
+          `post-plan card fits ${width} columns`,
+        );
+      }
+      const cardText = component.render(80).map(stripAnsi).join("\n");
+      for (const label of [
+        "Arbeitsmodus starten",
+        "Plan bearbeiten",
+        "Später fortsetzen",
+        "Plan verwerfen",
+        "Plan erneut anzeigen",
+      ]) {
+        assert(cardText.includes(label), `post-plan card includes ${label}`);
+      }
+    }
+    const sentBeforeEscape = planHarness.sent.length;
+    eq(
+      planHarness.sendTerminalInput("\x1b").consumed,
+      true,
+      "Esc closes the focused post-plan card",
+    );
+    eq(
+      planHarness.sent.length,
+      sentBeforeEscape,
+      "Esc performs no post-plan action",
     );
 
     const briefMenus = [];
@@ -5326,6 +5395,170 @@ await section("plan workflow settles before handoff UI", async () => {
   } finally {
     rmSync(planCwd, { recursive: true, force: true });
     rmSync(briefCwd, { recursive: true, force: true });
+  }
+});
+
+await section("post-plan transcript card keyboard actions", async () => {
+  if (!planMode || !planUtils || !planState) return;
+  const workCwd = mkdtempSync(path.join(tmpdir(), "pi-post-plan-work-"));
+  const editCwd = mkdtempSync(path.join(tmpdir(), "pi-post-plan-edit-"));
+  const replayCwd = mkdtempSync(path.join(tmpdir(), "pi-post-plan-replay-"));
+  const discardEscCwd = mkdtempSync(
+    path.join(tmpdir(), "pi-post-plan-discard-esc-"),
+  );
+  const discardCwd = mkdtempSync(path.join(tmpdir(), "pi-post-plan-discard-"));
+
+  async function createFocusedPostPlanCard(cwd) {
+    const harness = createHarness({
+      select: (labels) =>
+        labels.includes("Schnellplan") ? "Schnellplan" : undefined,
+    });
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    context.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await harness.runHooks("session_start", {}, context);
+    await harness.shortcuts.get("shift+tab")(context);
+    await harness.runHooks("before_agent_start", {}, context);
+    const longPlan = `${progressPlan}\n${"Ausführlicher Planinhalt für den Scrollback.\n".repeat(80)}`;
+    planUtils.writePlanFileAtomic(cwd, longPlan);
+    await harness.runHooks(
+      "agent_end",
+      {
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: longPlan }],
+            stopReason: "stop",
+          },
+        ],
+      },
+      context,
+    );
+    await harness.runHooks("agent_settled", {}, context);
+    assert(
+      harness.appended.some((entry) => entry.customType === "plan-next-actions"),
+      "long plan is followed by a post-plan transcript card",
+    );
+    const savedPlan = planUtils.readPlanFile(cwd);
+    assert(
+      savedPlan.includes(longPlan.slice(-60)),
+      "post-plan card does not replace the persisted long plan",
+    );
+    return { harness, context, longPlan, savedPlan };
+  }
+
+  try {
+    {
+      const { harness } = await createFocusedPostPlanCard(workCwd);
+      eq(
+        harness.sendTerminalInput("1").consumed,
+        true,
+        "digit 1 is consumed by the focused card",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert(
+        harness.sent.some(
+          (entry) => entry.message?.customType === "plan-mode-execute",
+        ),
+        "work starts only after explicit digit 1 selection",
+      );
+    }
+
+    {
+      const { harness } = await createFocusedPostPlanCard(editCwd);
+      harness.sendTerminalInput("\x1b[B");
+      eq(
+        harness.sendTerminalInput("\r").consumed,
+        true,
+        "arrow navigation plus Enter selects the focused post-plan action",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert(
+        harness.sent.some(
+          (entry) =>
+            entry.message?.customType === "plan-refinement-request" &&
+            entry.options?.triggerTurn === true,
+        ),
+        "Plan bearbeiten starts an explicit refinement turn",
+      );
+    }
+
+    {
+      const { harness, longPlan } = await createFocusedPostPlanCard(replayCwd);
+      eq(
+        harness.sendTerminalInput("R").consumed,
+        true,
+        "R is consumed by the focused card",
+      );
+      const cardIndex = harness.appended.findIndex(
+        (entry) => entry.customType === "plan-next-actions",
+      );
+      const replayIndex = harness.appended.findIndex(
+        (entry) => entry.customType === "plan-replay",
+      );
+      assert(
+        replayIndex > cardIndex,
+        "replayed plan is appended after the original completion card",
+      );
+      eq(
+        harness.appended[replayIndex]?.data?.content,
+        planUtils.readPlanFile(replayCwd),
+        "R replays the current complete plan without changing it",
+      );
+      assert(
+        planUtils.readPlanFile(replayCwd).includes(longPlan.slice(-60)),
+        "long plan remains intact after replay",
+      );
+      harness.sendTerminalInput("\x1b");
+    }
+
+    {
+      const { harness } = await createFocusedPostPlanCard(discardEscCwd);
+      harness.sendTerminalInput("4");
+      assert(
+        harness.appended.some(
+          (entry) => entry.customType === "plan-discard-confirm",
+        ),
+        "discard asks for an inline transcript confirmation",
+      );
+      harness.sendTerminalInput("\x1b");
+      assert(
+        Boolean(planUtils.readPlanFile(discardEscCwd)),
+        "Esc cancels final discard without deleting the plan",
+      );
+    }
+
+    {
+      const { harness } = await createFocusedPostPlanCard(discardCwd);
+      harness.sendTerminalInput("4");
+      harness.sendTerminalInput("Y");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      eq(
+        planUtils.readPlanFile(discardCwd),
+        undefined,
+        "Y permanently deletes the active plan after inline confirmation",
+      );
+      assert(
+        !existsSync(planState.getWorkflowStatePath(discardCwd)),
+        "final discard removes the workflow sidecar",
+      );
+      assert(
+        !existsSync(path.join(discardCwd, ".agent", "plans", "archive")),
+        "final discard creates no archive copy",
+      );
+    }
+  } finally {
+    for (const cwd of [
+      workCwd,
+      editCwd,
+      replayCwd,
+      discardEscCwd,
+      discardCwd,
+    ]) {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   }
 });
 

@@ -17,6 +17,7 @@ import {
   getAgentDir,
   resolveModelScopeWithDiagnostics,
 } from "@earendil-works/pi-coding-agent";
+import { Key, matchesKey } from "@earendil-works/pi-tui";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -39,6 +40,7 @@ import {
   applyDoneSteps,
   archiveDecisionBrief,
   archivePlanFile,
+  discardPlanFile,
   DECISION_BRIEF_RELATIVE_PATH,
   DECISION_BUDGET_COMPLEX,
   DECISION_BUDGET_DEFAULT,
@@ -113,6 +115,18 @@ import {
   type OverwriteDecision,
   type PlanAssistantAction,
 } from "./plan-menu.ts";
+import {
+  createPlanReplayRenderer,
+  createPostPlanCardRenderer,
+  createPostPlanDiscardConfirmRenderer,
+  PLAN_REPLAY_ENTRY,
+  POST_PLAN_ACTIONS,
+  POST_PLAN_CARD_ENTRY,
+  POST_PLAN_DISCARD_CONFIRM_ENTRY,
+  type PostPlanAction,
+  type PostPlanCardData,
+  type PostPlanCardViewState,
+} from "./post-plan-card.ts";
 import {
   assertWorkflowStateToken,
   computeWorkflowStateToken,
@@ -314,11 +328,23 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   // dass das "Nächster Schritt"-Menü nur nach dem Turn erscheint, der den Plan
   // erzeugt hat — nicht nach jedem Verfeinerungs-Turn.
   let planExistedBeforeTurn = false;
+  let postPlanInputUnsubscribe: (() => void) | undefined;
+  const postPlanCardViewStates = new Map<string, PostPlanCardViewState>();
   // Token-Proxy für den „vor Compaction"-Checkpoint: einmal je Fensterzyklus.
   // Wird scharf gestellt, sobald die Kontextauslastung wieder unter die
   // Schwelle fällt (typisch nach einer Compaction, wenn `tokens` neu klein
   // oder null gemeldet wird).
   let ledgerTokenCheckpointArmed = true;
+
+  pi.registerEntryRenderer(
+    POST_PLAN_CARD_ENTRY,
+    createPostPlanCardRenderer((cardId) => postPlanCardViewStates.get(cardId)),
+  );
+  pi.registerEntryRenderer(PLAN_REPLAY_ENTRY, createPlanReplayRenderer());
+  pi.registerEntryRenderer(
+    POST_PLAN_DISCARD_CONFIRM_ENTRY,
+    createPostPlanDiscardConfirmRenderer(),
+  );
 
   interface SessionToken {
     epoch: number;
@@ -1329,58 +1355,277 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     }
   }
 
-  // Nach erfolgreicher Plan-Erstellung angeboten: kleines, nicht-blockierendes
-  // Aktionsmenü. Esc / „Im Planmodus bleiben" ändern nichts; es wird niemals
-  // automatisch ausgeführt. Wird nur im TUI und im Idle-Zustand gezeigt.
-  async function offerPostPlanActions(ctx: ExtensionContext): Promise<void> {
-    if (!ctx.hasUI || ctx.mode !== "tui") return;
-    if (typeof ctx.isIdle === "function" && !ctx.isIdle()) return;
-    const token = captureSessionToken(ctx);
+  const POST_PLAN_STATUS_KEY = "plan-next-step";
 
-    type PostAction = "execute" | "review" | "show-todos" | "stay";
-    const entries: MenuEntry<PostAction>[] = [
-      {
-        id: "post-work",
-        label: "/work starten",
-        description: "Plan-Datei sofort ausführen",
-        value: "execute",
-      },
-      {
-        id: "post-review",
-        label: "/review-plan ausführen",
-        description: "Optionalen Deep-Review des Plans starten",
-        value: "review",
-      },
-      {
-        id: "post-todos",
-        label: "Todos anzeigen",
-        description: "Plan-Fortschritt anzeigen",
-        value: "show-todos",
-      },
-      {
-        id: "post-stay",
-        label: "Im Planmodus bleiben",
-        description: "Keine weitere Aktion; Plan steht zum Verfeinern bereit",
-        value: "stay",
-      },
-    ];
+  function clearPostPlanInput(
+    ctx: ExtensionContext,
+    cardId?: string,
+  ): void {
+    postPlanInputUnsubscribe?.();
+    postPlanInputUnsubscribe = undefined;
+    if (cardId) {
+      const state = postPlanCardViewStates.get(cardId);
+      if (state) state.focused = false;
+    }
+    if (ctx.mode === "tui" && ctx.hasUI) {
+      ctx.ui.setStatus(POST_PLAN_STATUS_KEY, undefined);
+    }
+  }
 
-    let selected: PostAction | undefined;
+  function refreshPostPlanCard(ctx: ExtensionContext, label: string): void {
+    // setStatus requests a normal TUI redraw. The card itself remains a chat
+    // entry; this temporary footer text is only the keyboard-focus indicator.
+    if (ctx.mode === "tui" && ctx.hasUI) {
+      ctx.ui.setStatus(POST_PLAN_STATUS_KEY, label);
+    }
+  }
+
+  function replayPlan(ctx: ExtensionContext): void {
     try {
-      selected = await runMenu<PostAction>(ctx, "Nächster Schritt", entries, {
-        fallbackPrompt: "Nächsten Schritt wählen",
-        nonInteractiveHint:
-          "Plan gespeichert. Nutze /work zum Ausführen oder /review-plan für einen Deep-Review.",
-      });
-    } catch {
+      const content = readPlanFile(ctx.cwd);
+      if (content === undefined) {
+        ctx.ui.notify("Plan-Datei ist nicht mehr vorhanden.", "warning");
+        return;
+      }
+      pi.appendEntry(PLAN_REPLAY_ENTRY, { content });
+    } catch (error) {
+      ctx.ui.notify(
+        `Plan-Datei konnte nicht erneut angezeigt werden: ${error instanceof Error ? error.message : String(error)}`,
+        "error",
+      );
+    }
+  }
+
+  async function startPlanRefinement(
+    ctx: ExtensionContext,
+    card: PostPlanCardData,
+    token: SessionToken,
+  ): Promise<void> {
+    if (!isSessionTokenCurrent(token, ctx)) return;
+    let content: string | undefined;
+    try {
+      content = readPlanFile(ctx.cwd);
+    } catch (error) {
+      ctx.ui.notify(
+        `Plan-Datei ist nicht sicher lesbar: ${error instanceof Error ? error.message : String(error)}`,
+        "error",
+      );
+      return;
+    }
+    if (!content || hashPlanContent(content) !== card.planHash) {
+      ctx.ui.notify(
+        "Plan wurde seit der Abschlusskarte geändert oder entfernt; Bearbeitung wurde nicht gestartet.",
+        "warning",
+      );
       return;
     }
 
+    mode =
+      planCreationMode ??
+      (inferPlanType(content) === "simple_plan"
+        ? "simple_plan"
+        : "detailed_plan");
+    phase = "draft";
+    reviewedHash = undefined;
+    activeRun = undefined;
+    updateStatus(ctx);
+    if (!persistState(ctx, card.planHash)) {
+      ctx.ui.notify(
+        "Plan-Bearbeitung wurde wegen eines konkurrierenden Workflow-Zustands nicht gestartet.",
+        "warning",
+      );
+      return;
+    }
+
+    pi.sendMessage(
+      {
+        customType: "plan-refinement-request",
+        content: `Überarbeite den bestehenden Plan in ${PLAN_RELATIVE_PATH}. Prüfe ihn auf Präzision, Vollständigkeit und umsetzbare Todos; frage nur bei einer wirklich entscheidungsrelevanten Lücke nach. Starte keine Umsetzung.`,
+        display: true,
+      },
+      { triggerTurn: true },
+    );
+  }
+
+  function offerPostPlanDiscardConfirmation(
+    ctx: ExtensionContext,
+    card: PostPlanCardData,
+    token: SessionToken,
+  ): void {
+    pi.appendEntry(POST_PLAN_DISCARD_CONFIRM_ENTRY, {
+      planHash: card.planHash,
+      ...(card.planId ? { planId: card.planId } : {}),
+    });
+    refreshPostPlanCard(ctx, "PLAN LÖSCHEN · Y bestätigen · Esc abbrechen");
+    postPlanInputUnsubscribe = ctx.ui.onTerminalInput((data) => {
+      if (!isSessionTokenCurrent(token, ctx)) {
+        clearPostPlanInput(ctx);
+        return { data };
+      }
+      if (data === "y" || data === "Y") {
+        clearPostPlanInput(ctx);
+        void discardPostPlan(ctx, card, token);
+        return { consume: true };
+      }
+      if (matchesKey(data, Key.escape)) {
+        clearPostPlanInput(ctx);
+        return { consume: true };
+      }
+      clearPostPlanInput(ctx);
+      return { data };
+    });
+  }
+
+  async function discardPostPlan(
+    ctx: ExtensionContext,
+    card: PostPlanCardData,
+    token: SessionToken,
+  ): Promise<void> {
     if (!isSessionTokenCurrent(token, ctx)) return;
-    if (!selected || selected === "stay") return;
-    if (selected === "execute") await executePlan(ctx);
-    else if (selected === "review") await reviewPlan(ctx);
-    else if (selected === "show-todos") showPlanTodos(ctx);
+    let discarded = false;
+    try {
+      withWorkspaceLock(ctx.cwd, () => {
+        assertWorkflowStateToken(ctx.cwd, workflowStateToken);
+        discardPlanFile(ctx.cwd, card.planHash);
+        discarded = true;
+      });
+      removeWorkflowStateAtomicCAS(ctx.cwd, {
+        stateToken: workflowStateToken,
+        ...(card.planId ? { planId: card.planId } : {}),
+      });
+      clearTaskContract(ctx.cwd);
+      mode = "work";
+      phase = "idle";
+      reviewedHash = undefined;
+      planCreationMode = undefined;
+      progressRecords = [];
+      workflowRevision = 0;
+      currentPlanId = undefined;
+      decisionBriefHash = undefined;
+      workflowStateToken = "missing";
+      activeRun = undefined;
+      foreignExecution = undefined;
+      stopExecutionHeartbeat();
+      updateStatus(ctx);
+      ctx.ui.notify("Plan endgültig verworfen.", "info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (discarded) {
+        clearTaskContract(ctx.cwd);
+        mode = "work";
+        phase = "idle";
+        reviewedHash = undefined;
+        planCreationMode = undefined;
+        progressRecords = [];
+        workflowRevision = 0;
+        currentPlanId = undefined;
+        decisionBriefHash = undefined;
+        workflowStateToken = "missing";
+        activeRun = undefined;
+        foreignExecution = undefined;
+        stopExecutionHeartbeat();
+        updateStatus(ctx);
+        ctx.ui.notify(
+          `Plan wurde gelöscht, aber der Workflow-Sidecar konnte nicht vollständig bereinigt werden: ${message}`,
+          "warning",
+        );
+        return;
+      }
+      ctx.ui.notify(`Plan wurde nicht verworfen: ${message}`, "warning");
+    }
+  }
+
+  async function dispatchPostPlanAction(
+    action: PostPlanAction,
+    ctx: ExtensionContext,
+    card: PostPlanCardData,
+    token: SessionToken,
+  ): Promise<void> {
+    if (!isSessionTokenCurrent(token, ctx)) return;
+    switch (action) {
+      case "work":
+        await executePlan(ctx);
+        return;
+      case "edit":
+        await startPlanRefinement(ctx, card, token);
+        return;
+      case "defer":
+        return;
+      case "discard":
+        offerPostPlanDiscardConfirmation(ctx, card, token);
+        return;
+    }
+  }
+
+  // The completion card is a durable transcript entry, not a modal component.
+  // Its temporary input listener provides keyboard focus without covering the
+  // plan above it in the terminal scrollback.
+  function offerPostPlanActions(ctx: ExtensionContext): void {
+    if (!ctx.hasUI || ctx.mode !== "tui") return;
+    if (typeof ctx.isIdle === "function" && !ctx.isIdle()) return;
+    clearPostPlanInput(ctx);
+    let content: string | undefined;
+    try {
+      content = readPlanFile(ctx.cwd);
+    } catch {
+      return;
+    }
+    if (content === undefined) return;
+
+    const token = captureSessionToken(ctx);
+    const card: PostPlanCardData = {
+      cardId: randomUUID(),
+      planHash: hashPlanContent(content),
+      ...(currentPlanId ? { planId: currentPlanId } : {}),
+    };
+    postPlanCardViewStates.set(card.cardId, { focused: true, selected: 0 });
+    pi.appendEntry(POST_PLAN_CARD_ENTRY, card);
+    refreshPostPlanCard(ctx, "NÄCHSTER SCHRITT · ↑↓ wählen · Enter bestätigen");
+
+    postPlanInputUnsubscribe = ctx.ui.onTerminalInput((data) => {
+      if (!isSessionTokenCurrent(token, ctx)) {
+        clearPostPlanInput(ctx, card.cardId);
+        return { data };
+      }
+      const state = postPlanCardViewStates.get(card.cardId);
+      if (!state) return { data };
+      const direct = POST_PLAN_ACTIONS.find((action) => action.key === data);
+      if (direct) {
+        clearPostPlanInput(ctx, card.cardId);
+        void dispatchPostPlanAction(direct.value, ctx, card, token);
+        return { consume: true };
+      }
+      if (data === "r" || data === "R") {
+        replayPlan(ctx);
+        refreshPostPlanCard(ctx, "NÄCHSTER SCHRITT · ↑↓ wählen · Enter bestätigen");
+        return { consume: true };
+      }
+      if (matchesKey(data, Key.up)) {
+        state.selected =
+          (state.selected - 1 + POST_PLAN_ACTIONS.length) %
+          POST_PLAN_ACTIONS.length;
+        refreshPostPlanCard(ctx, "NÄCHSTER SCHRITT · ↑↓ wählen · Enter bestätigen");
+        return { consume: true };
+      }
+      if (matchesKey(data, Key.down)) {
+        state.selected = (state.selected + 1) % POST_PLAN_ACTIONS.length;
+        refreshPostPlanCard(ctx, "NÄCHSTER SCHRITT · ↑↓ wählen · Enter bestätigen");
+        return { consume: true };
+      }
+      if (matchesKey(data, Key.enter)) {
+        const action = POST_PLAN_ACTIONS[state.selected];
+        if (!action) return { consume: true };
+        clearPostPlanInput(ctx, card.cardId);
+        void dispatchPostPlanAction(action.value, ctx, card, token);
+        return { consume: true };
+      }
+      if (matchesKey(data, Key.escape)) {
+        clearPostPlanInput(ctx, card.cardId);
+        return { consume: true };
+      }
+      clearPostPlanInput(ctx, card.cardId);
+      return { data };
+    });
   }
 
   // Bereitet den Klär-Modus vor (phase=deciding): TUI-Check, Abbruch-Guard,
@@ -3785,6 +4030,8 @@ CHANGED_FILES:
   pi.on("session_start", async (_event, ctx) => {
     // Extension instances can serve more than one session. Never let an
     // earlier project's in-memory workflow leak into a new empty session.
+    clearPostPlanInput(ctx);
+    postPlanCardViewStates.clear();
     mode = "work";
     phase = "idle";
     reviewedHash = undefined;
@@ -3992,6 +4239,8 @@ CHANGED_FILES:
 
   pi.on("session_shutdown", async (_event, ctx) => {
     // Finaler deterministischer Konsolidierungslauf, bevor die Session endet.
+    clearPostPlanInput(ctx);
+    postPlanCardViewStates.clear();
     runLedgerCheckpoint(ctx, "session-shutdown");
     if (phase === "executing" && isCurrentRun("executing", ctx)) {
       phase = "paused";

@@ -830,6 +830,46 @@ export function archivePlanFile(
   });
 }
 
+/**
+ * Removes the active plan without creating an archive copy.
+ *
+ * The plan is first renamed to a private claim and hash-checked there, so a
+ * concurrently recreated current-plan.md is never removed by this operation.
+ */
+export function discardPlanFile(cwd: string, expectedPlanHash: string): void {
+  const root = resolve(cwd);
+  const planPath = getPlanPath(root);
+  assertNoSymlinkComponents(root, planPath);
+  if (!existsSync(planPath)) {
+    throw new Error(`Plan-Datei nicht gefunden: ${planPath}`);
+  }
+
+  const claimPath =
+    `${planPath}.discard-claim-${process.pid}-${Date.now()}-` + randomUUID();
+  assertNoSymlinkComponents(root, claimPath);
+  let claimed = false;
+
+  try {
+    renameSync(planPath, claimPath);
+    claimed = true;
+    const content = readClaimedArtifact(root, claimPath, PLAN_MAX_BYTES);
+    if (hashPlanContent(content) !== expectedPlanHash) {
+      throw new Error("Plan wurde zwischenzeitlich geändert; Verwerfen abgebrochen.");
+    }
+    unlinkSync(claimPath);
+    claimed = false;
+  } catch (error) {
+    const recoveryPath = claimed
+      ? restoreArchiveClaim(claimPath, planPath)
+      : undefined;
+    const recoveryNote =
+      recoveryPath === claimPath
+        ? ` Der beanspruchte Inhalt blieb zur Wiederherstellung unter ${claimPath} erhalten.`
+        : "";
+    throw new Error(`${errorMessage(error)}${recoveryNote}`);
+  }
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

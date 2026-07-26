@@ -108,17 +108,23 @@ _Bestehenden Plan archivieren & neu beginnen_ (archives the current file as
 non-interactive context the guard cannot be shown, so `/plan` conservatively
 refuses to overwrite and only notifies.
 
-**After a plan is created.** Only the turn that newly creates the plan file
-offers a small, non-blocking _Nächster Schritt_ menu: _`/work` starten_,
-_`/review-plan` ausführen_, _Todos anzeigen_, or _Im Planmodus bleiben_.
-Refinement turns on an existing plan stay menu-free (they only notify that the
-plan was saved). Nothing executes automatically — Esc / _Im Planmodus bleiben_
-leave the workflow untouched. The menu only appears in the TUI while idle.
-The result is finalized from `agent_settled`, after retries, compaction and
-queued continuations are finished; `agent_end` never opens UI by itself. Only
-an assistant result with terminal `stopReason: "stop"` can finalize a plan,
-review, decision or completion; errors, aborts and length truncation stay
-retryable and never archive automatically.
+**After a plan is created.** Only the turn that newly creates or replaces the
+plan file appends a non-modal _Nächster Schritt_ card to the normal terminal
+transcript. It is rendered directly below the fully emitted plan, so the plan
+always remains visible in scrollback and is never replaced or covered. The
+focused card supports _1 Arbeitsmodus starten_, _2 Plan bearbeiten_, _3 Später
+fortsetzen_, _4 Plan verwerfen_, plus _R Plan erneut anzeigen_; arrow keys and
+Enter work as alternatives to the numbered choices. Esc closes the card without
+an action. Work starts only after its explicit choice; editing starts an
+explicit plan-refinement turn. Re-showing appends the current persisted plan to
+the transcript. Final discard uses a second inline `Y`/Esc confirmation and
+deletes the active plan without an archive copy. Refinement turns remain
+card-free (they only notify that the plan was saved). The card only appears in
+the idle TUI. The result is finalized from `agent_settled`, after retries,
+compaction and queued continuations are finished; `agent_end` never opens UI by
+itself. Only an assistant result with terminal `stopReason: "stop"` can
+finalize a plan, review, decision or completion; errors, aborts and length
+truncation stay retryable and never archive automatically.
 
 Workflow mode, permission level, thinking level, and tool selection remain
 fully independent; `/plan` only changes the workflow mode/phase and never
