@@ -51,11 +51,11 @@ const DEFAULT_CONFIG: SetupConfig = {
   ui: { theme: "aurora-night", motion: "contextual" },
   permissions: {
     unknownTools: "ask",
-    bash: "ask",
+    bash: "allow",
     workflowDefaults: {
-      work: "read-bash",
-      simple_plan: "read-bash",
-      detailed_plan: "read-bash",
+      work: "project-write",
+      simple_plan: "readonly",
+      detailed_plan: "readonly",
     },
   },
   lsp: {
@@ -269,9 +269,22 @@ function applyUserLayer(
     diagnostics,
   );
   for (const mode of ["work", "simple_plan", "detailed_plan"] as const) {
+    const rawDefault = workflowDefaults?.[mode];
+    const migratedDefault =
+      rawDefault === "read-only" ||
+      rawDefault === "read-bash" ||
+      rawDefault === "test-bash"
+        ? "readonly"
+        : rawDefault === "read-write"
+          ? "project-write"
+          : rawDefault === "full-access"
+            ? "confirm-all"
+            : rawDefault === "yolo"
+              ? "project-write"
+              : rawDefault;
     next.permissions.workflowDefaults[mode] = enumValue(
-      workflowDefaults?.[mode],
-      ["read-only", "read-bash", "read-write", "full-access"],
+      migratedDefault,
+      ["readonly", "project-write", "confirm-all"],
       next.permissions.workflowDefaults[mode],
       source,
       `permissions.workflowDefaults.${mode}`,
@@ -367,10 +380,9 @@ const ACTION_RANK: Record<PolicyAction, number> = {
 };
 
 const PERMISSION_RANK: Record<WorkflowDefaultPermissionLevel, number> = {
-  "read-only": 0,
-  "read-bash": 1,
-  "read-write": 2,
-  "full-access": 3,
+  readonly: 0,
+  "confirm-all": 1,
+  "project-write": 2,
 };
 
 function applyTrustedProjectLayer(

@@ -35,12 +35,13 @@ const BASELINE_FAILURE_NAMES = [
 ];
 
 function parseArgs(argv) {
-  const args = { sessions: [] };
+  const args = { sessions: [], subagentSessions: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--task") args.task = argv[++i];
     else if (arg === "--worktree") args.worktree = argv[++i];
     else if (arg === "--session") args.sessions.push(argv[++i]);
+    else if (arg === "--subagent-session") args.subagentSessions.push(argv[++i]);
     else if (arg === "--run-history") args.runHistory = argv[++i];
     else if (arg === "--verify-result") args.verifyResult = argv[++i];
     else if (arg === "--window-start") args.windowStart = argv[++i];
@@ -48,6 +49,9 @@ function parseArgs(argv) {
     else if (arg === "--allowed-files") args.allowedFiles = argv[++i];
     else if (arg === "--ledger") args.ledger = argv[++i];
     else if (arg === "--ledger-expects") args.ledgerExpects = argv[++i];
+    else if (arg === "--environment-file") args.environmentFile = argv[++i];
+    else if (arg === "--resources-file") args.resourcesFile = argv[++i];
+    else if (arg === "--subagent-calls") args.subagentCalls = argv[++i];
   }
   return args;
 }
@@ -65,6 +69,22 @@ function readJsonl(filePath) {
       }
     })
     .filter((entry) => entry !== null);
+}
+
+// P3 records reproducibility metadata and GNU-time measurements in private
+// state files, then supplies them here. These files contain only the explicit,
+// non-sensitive fields chosen by the controller; metric collection never reads
+// credentials or environment variables directly.
+function readOptionalJsonObject(filePath, label) {
+  if (!filePath) return undefined;
+  if (!existsSync(filePath)) {
+    throw new Error(`${label} file not found: ${filePath}`);
+  }
+  const value = JSON.parse(readFileSync(filePath, "utf-8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} file must contain a JSON object.`);
+  }
+  return value;
 }
 
 // --- Session-Metriken (Tokenverbrauch, Modellaufrufe, Tool-Fehlschläge,
@@ -280,8 +300,15 @@ async function main() {
     process.exit(1);
   }
 
-  const sessionEntries = args.sessions.flatMap((p) => readJsonl(p));
-  const sessionMetrics = collectSessionMetrics(sessionEntries);
+  const mainSessionEntries = args.sessions.flatMap((p) => readJsonl(p));
+  const subagentSessionEntrySets = args.subagentSessions.map((p) => readJsonl(p));
+  const subagentSessionEntries = subagentSessionEntrySets.flat();
+  const sessionMetrics = collectSessionMetrics(mainSessionEntries);
+  const subagentSessionMetrics = collectSessionMetrics(subagentSessionEntries);
+  const subagentDurationMsTotal = subagentSessionEntrySets.reduce(
+    (total, entries) => total + (collectSessionMetrics(entries).durationMs ?? 0),
+    0,
+  );
 
   const runHistoryEntries = readJsonl(args.runHistory);
   const runHistoryMetrics = collectRunHistoryMetrics(
@@ -289,6 +316,12 @@ async function main() {
     args.windowStart,
     args.windowEnd,
   );
+  const suppliedSubagentCalls = args.subagentCalls === undefined
+    ? undefined
+    : Number(args.subagentCalls);
+  if (suppliedSubagentCalls !== undefined && (!Number.isInteger(suppliedSubagentCalls) || suppliedSubagentCalls < 0)) {
+    throw new Error("--subagent-calls must be a non-negative integer.");
+  }
 
   const allowedFiles = args.allowedFiles
     ? args.allowedFiles.split(",").map((f) => f.trim())
@@ -303,23 +336,42 @@ async function main() {
     args.ledgerExpects,
   );
 
+  const environment = readOptionalJsonObject(
+    args.environmentFile,
+    "environment",
+  );
+  const resources = readOptionalJsonObject(args.resourcesFile, "resources");
+
   const result = {
     schemaVersion: "1.0.0",
     task: args.task,
     collectedAt: new Date().toISOString(),
     automatic: {
       modelCalls: sessionMetrics.modelCalls,
-      tokens: sessionMetrics.tokens,
+      tokens: {
+        input: sessionMetrics.tokens.input + subagentSessionMetrics.tokens.input,
+        output: sessionMetrics.tokens.output + subagentSessionMetrics.tokens.output,
+        reasoning: sessionMetrics.tokens.reasoning + subagentSessionMetrics.tokens.reasoning,
+        total: sessionMetrics.tokens.total + subagentSessionMetrics.tokens.total,
+      },
       failedToolCalls: sessionMetrics.failedToolCalls,
       repeatedIdenticalFailures: sessionMetrics.repeatedIdenticalFailures,
       userCorrectionTurns: sessionMetrics.userCorrectionTurns,
       durationMs: sessionMetrics.durationMs,
-      subagentCalls: runHistoryMetrics.subagentCalls,
-      subagentDurationMsTotal: runHistoryMetrics.subagentDurationMsTotal,
-      subagentFailures: runHistoryMetrics.subagentFailures,
+      subagentCalls: suppliedSubagentCalls ?? runHistoryMetrics.subagentCalls,
+      subagentModelCalls: subagentSessionMetrics.modelCalls,
+      subagentTokens: subagentSessionMetrics.tokens,
+      subagentDurationMsTotal: args.subagentSessions.length > 0
+        ? subagentDurationMsTotal
+        : runHistoryMetrics.subagentDurationMsTotal,
+      subagentFailures: args.subagentSessions.length > 0
+        ? subagentSessionMetrics.failedToolCalls
+        : runHistoryMetrics.subagentFailures,
       diff: diffStat,
       verify: verifyResult,
       ledgerSurvival,
+      ...(environment === undefined ? {} : { environment }),
+      ...(resources === undefined ? {} : { resources }),
     },
     manualAssessment: {
       solvedWithoutCorrection: null,

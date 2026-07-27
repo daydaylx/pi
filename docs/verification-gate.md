@@ -1,96 +1,46 @@
-# Verifikations-Gate (`.pi/verify.json` → `/verify-gate`)
+# Verifikation und Completion
 
-> Universelles Abschluss-Gate mit explizitem Diagnose-Aufruf.
-> Issue: [#102](https://github.com/daydaylx/pi/issues/102) — konsumiert die
-> Projekt-Verifikationsprofile aus [#105](verify-profiles.md) und die
-> Setup-Verifikation.
+`/verify-gate` bleibt eine manuelle Diagnose. Der verbindliche Abschluss für
+Plan- und Direct-Task-Arbeit liegt in `extensions/plan-mode/completion.ts`.
 
-## Zweck
+## Verbindlicher Ablauf
 
-Bevor eine Aufgabe als erledigt gilt, soll derselbe verbindliche Prüfprozess
-durchlaufen werden – unabhängig davon, ob direkt, über den Planmodus oder durch
-einen Worker gearbeitet wurde. Das Gate bewertet **Auftrag + Diff + Scope +
-Prüfergebnisse gemeinsam** und liefert einen strukturierten Abschlussbericht.
+1. PlanSnapshot/Sidecar beziehungsweise Direct Task validieren.
+2. `git status`, `git diff --check`, Diff-Stat und Diff-Fingerprint erfassen.
+3. Geänderte Dateien gegen den technischen Scope prüfen.
+4. Secret-/Auth-Pfade als harte Grenze behandeln.
+5. Projektprofile nach `required`, `recommended` oder `advisory` ausführen.
+6. LSP-Diagnosen für unterstützte geänderte Dateien ausführen.
+7. Einen unabhängigen lokalen Reviewer über Subagent-RPC starten.
+8. Diff, Plan und State nach dem Reviewer erneut prüfen.
+9. Erst danach `done` committen und deterministisch archivieren.
 
-## Status: verbindlich im Completion-Pfad
+Jeder Eintrag aus dem Planabschnitt „Verifikation“ beziehungsweise aus dem
+Direct Task muss durch einen erfolgreichen ausführbaren Profil-Check belegt
+sein. Eine nicht zuordenbare Deklaration blockiert den Abschluss.
 
-`/verify-gate` bleibt der explizite Diagnose-Aufruf. Im Planworkflow verwenden
-`/done`, der automatische Abschluss, der „bereits vollständig"-Pfad von
-`/work` und `/finish` dieselbe Prüfung: Nur `pass` darf archivieren.
-`fail` und `blocked` lassen Plan, Sidecar und Task-Contract aktiv. Ausschließlich
-`/finish` bietet in einer interaktiven TUI eine ausdrückliche Übersteuerung an;
-Hintergrund- und Agent-Pfade können das Gate nicht umgehen.
+Erforderliche Checks müssen erfolgreich laufen. Ein fehlender erforderlicher
+Check ergibt `blocked`, ein fehlgeschlagener `fail`. Empfohlene Checks schlagen
+bei echten Fehlern fehl, bleiben bei Nichtverfügbarkeit als Restrisiko sichtbar.
+Advisory Checks blockieren nie.
 
-## Aufruf
+Der Reviewer muss genau einen Marker als letzte nichtleere Zeile liefern:
 
-```
-/verify-gate
-```
-
-Läuft nur im Idle-Zustand (nach Abschluss des laufenden Agent-Turns). Führt
-real Prüfungen aus (Typecheck, Tests, ggf. Projekt-Profile) – die Laufzeit
-entspricht der Prüfsumme.
-
-## Was das Gate prüft
-
-1. **Working-Tree-Diff** – `git status --porcelain` + `git diff --stat`.
-2. **Setup-Verifikation** – `typecheck` und `test` aus `setup.json.verification`
-   (unverletzlich, laufen immer im Agent-Verzeichnis).
-3. **Projekt-Profile (#105)** – `.pi/verify.json`, **nur bei vertrautem Projekt**;
-   siehe [`verify-profiles.md`](verify-profiles.md).
-4. **Scope-Kontrolle** – mit Task-Contract werden geänderte Dateien gegen den
-   aus `Betroffene Bereiche` abgeleiteten Scope geprüft. Out-of-Scope-Dateien
-   setzen den Status auf `fail`; ohne Contract bleiben nur Rauschhinweise.
-5. **Restrisiken** – nicht ausführbare Prüfungen (`missing_binary`), ungültige
-   Profilkonfiguration.
-
-## Gate-Status
-
-| Status | Bedeutung | Empfehlung |
-|---|---|---|
-| `pass` | alle Pflichtprüfungen bestanden | Abschluss möglich; Restrisiken beachten |
-| `blocked` | mind. eine Pflichtprüfung nicht ausführbar | Binary/Konfiguration prüfen |
-| `fail` | mind. eine Pflichtprüfung fehlgeschlagen | Fehler beheben, erneut prüfen |
-
-Optionale Prüfungen (`required: false`) erscheinen im Bericht, führen aber nicht
-zu `fail`/`blocked`. Bestätigte Scope-Drift führt unabhängig von erfolgreichen
-Prüfkommandos zu `fail`.
-
-## Berichtsaufbau
-
-```
-Verifikations-Gate
-Auftrag: <Task/Plan>
-Status: PASS — 2/2 Pflichtprüfungen bestanden; 3 Working-Tree-Datei(en) geändert.
-
-Geänderte Dateien (Working Tree):
-   M src/a.ts
-  A  docs/b.md
-
-Prüfungen:
-  [PASS] setup/typecheck [Pflicht] (4200ms)
-  [PASS] setup/test [Pflicht] (18900ms)
-  [PASS] project/pytest [Pflicht] (3100ms)
-
-Scope-Hinweise:
-  - potenzielles Rauschen im Diff: package-lock.json
-
-Empfehlung: Abschluss möglich …
+```text
+[COMPLETION-REVIEW:PASS]
+[COMPLETION-REVIEW:REWORK]
+[COMPLETION-REVIEW:UNVERIFIABLE]
 ```
 
-## Sicherheitsgarantien
+Nur `PASS` plus erfolgreiche Pflichtprüfungen ergibt einen normalen
+Abschlussbericht. `/finish` darf in einer interaktiven TUI einen Befund mit
+nichtleerer Begründung übersteuern; Hintergrundpfade besitzen keinen Override.
+Ein Secret-/Auth-Befund ist eine harte Grenze und nie übersteuerbar.
 
-- Keine freie Shell: alle Prüfungen laufen als `program + args[]` (Setup via
-  `verify`-Tool-Pfad, Projekt via #105-Runner).
-- Setup-Verifikation bleibt unverletzlich (Agent-Verzeichnis, von Projekten
-  unbeeinflussbar).
-- Projekt-Profile nur bei Vertrauen; unbekannte Schlüssel fail-closed.
-- Diff wird nur gelesen (`git status`/`git diff`), nie mutiert.
+## Sicherheitsgrenzen
 
-## Abgrenzung / Folge-Schritte
-
-- Offene oder gebrochene Acceptance-Kriterien werden als Restrisiken
-  ausgewiesen; ihr Status wird nicht automatisch aus Testergebnissen geändert.
-- Ohne Task-Contract kann kein fachliches Scope-Urteil gefällt werden. Das Gate
-  meldet diesen Fall, behandelt beliebige Änderungen aber nicht pauschal als
-  Drift.
+- Kein Shell-String für Projektprofile: Programm und Argumente bleiben getrennt.
+- Projektprofile werden nur in vertrauten Projekten geladen.
+- Secret-/Auth-Diffs werden nicht an den Reviewer übermittelt.
+- Untracked Inhalte werden gehasht, nicht in den Reviewer-Diff eingebettet.
+- Verändert sich der Diff während der Prüfung, schlägt Completion fehl.

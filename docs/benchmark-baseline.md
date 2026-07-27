@@ -42,8 +42,8 @@ reproduzierbaren Bedingungen.
 
 | Agent | Konfiguration | Thinking | Permission |
 |---|---|---|---|
-| **Pi (aktuell)** | `setup.json` default, Aurora Night, `read-write` | auto | `read-write` |
-| **Pi (vorherige Version)** | Letzter stabiler Tag vor aktuellen Änderungen | auto | `read-write` |
+| **Pi (aktuell)** | `setup.json` default, Aurora Night, `project-write` | auto | `project-write` |
+| **Pi (vorherige Version)** | Letzter stabiler Tag vor aktuellen Änderungen | auto | `read-write` (Legacy) |
 | **Codex CLI** | Default | medium-equivalent | Standard |
 | **Claude Code** | Default | medium-equivalent | Standard |
 | **Gemini CLI** (optional) | Default | medium-equivalent | Standard |

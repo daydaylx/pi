@@ -38,7 +38,8 @@ lockern keine globalen Grenzen.
       "args": ["-q"],               // Argumente, getrennt als Array
       "cwd": ".",                   // relativ zum Projekt-Root, kein Escape
       "timeoutMs": 300000,          // 1000..900000
-      "required": true,             // Pflichtprüfung (Gate blockiert sonst)
+      "classification": "required", // required | recommended | advisory
+      "required": true,             // Legacy-Projektion
       "env": { "KEY": "value" },    // additiv auf process.env
       "trustRequired": true         // nur in vertrauten Projekten ausführen
     }
@@ -51,10 +52,11 @@ lockern keine globalen Grenzen.
 | Feld | Typ | Default | Hinweis |
 |---|---|---|---|
 | `program` | string | – (Pflicht) | Programmname, via PATH aufgelöst. Kein Shell-String, keine Pipes. |
-| `args` | string[] | `[]` | Argumente, verbatim und getrennt. Max. 64 Einträge. |
+| `args` | string[] | – (Pflicht) | Argumente, verbatim und getrennt. Leeres Array erlaubt, max. 64 Einträge. |
 | `cwd` | string | `"."` | Muss relativ sein und unter dem Projekt-Root bleiben. Absolut/`..` → Profil ungültig. |
 | `timeoutMs` | int | `120000` | Bereich 1000..900000. |
-| `required` | bool | `true` | `false` = optionale Prüfung (Gate warnt nur). |
+| `classification` | string | `required` | `required`, `recommended` oder `advisory`. |
+| `required` | bool | `true` | Legacy-Projektion; darf einer expliziten Klassifikation nicht widersprechen. |
 | `env` | {string:string} | `{}` | Zusätzliche/übersteuernde Env-Variablen. |
 | `trustRequired` | bool | `true` | Explizite Vertrauensanforderung (Redundanz zum Trust-Gate, aber auditierbar). |
 

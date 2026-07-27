@@ -6,8 +6,7 @@
 
 ## Bestätigte Nutzerentscheidungen
 - Aurora Night mit kontextueller Bewegung; reduced und off bleiben über setup.json verfügbar
-- Workflow-Startstufe `read-bash` für Work, Schnellplan und Architekturplan; jeder Workflow-Aufruf und Session-Start setzt den Permission-Zustand darauf zurück
-- `Super+Y`/`/yolo` aktivieren einen sichtbaren vollständigen Anwendungs-Bypass; Policy-, Workflow-, Secret-/Systempfad- und Bestätigungsprüfungen greifen dann nicht
+- Berechtigungsmodell: `readonly`, `project-write`, `confirm-all`, temporäres `yolo`; Work startet mit `project-write`, beide Planvarianten mit `readonly`
 - Frischer Subagenten-Kontext, maximale Parallelität drei
 - Modellwahl und Cycling folgen Pi-native `/scoped-models` und `settings.enabledModels`
 - Alte UI-/Renderer-Dateien bleiben inaktiv erhalten (Rückbau ohne Datenverlust)
@@ -18,15 +17,16 @@
 - Entscheidung: Thinking zeigt sichtbar „Auto“ oder „Manuell“.
 - Entscheidung: Diagnose zeigt Status und erlaubt eine Datei-Prüfung über eine kurze Dateiauswahl.
 - Entscheidung: Plan & Workflow umfasst Moduswahl sowie den Einstieg in Decision Intake.
+- Entscheidung: Das Modell-Untermenü bietet nur Fast, Primary und Deep; die Rollen wechseln sofort zum konfigurierten Modell.
 
 ## Architekturentscheidungen
 - setup.json ist die zentrale, validierte Konfiguration für UI, Permissions, LSP, Subagenten und Verifikation
 - `permissions.workflowDefaults` ist die deklarative Zuordnung von Workflow zu Normalstufe; vertrauenswürdige Projekte dürfen sie nur weiter einschränken
-- Plan-Workflow nutzt Sidecar v2 mit stabiler planId, Revision, Lifecycle, Todo-Hash und gebundener executionId (Lock/CAS)
+- Plan-Workflow nutzt PlanSnapshot und Sidecar v3 mit stabiler planId, Planrevision, Plan-Hash, stabilen Step-IDs und CAS; keine Lease und kein Heartbeat
 - Pi Core bleibt alleiniger Compaction-Eigentümer; keine zweite Compaction
 - Context Ledger (docs/CONTEXT_LEDGER.md) ist das dauerhafte Projektgedächtnis, getrennt vom flüchtigen docs/PROJECT_STATE.md
-- Automatische Ledger-Checkpoints laufen deterministisch ohne Modell-Turn in plan-mode
-- Subagenten von 10 auf 6 konsolidiert: architect → planner; security-auditor, ui-reviewer, docs-auditor → reviewer (Fokus-System). Weniger Rollenüberschneidungen, klarere Delegationskriterien.
+- Ledger bleibt manuell nutzbar; plan-mode löst keine automatischen Checkpoints mehr aus
+- Lokale Kernrollen sind Planner, Worker und Reviewer; Paket-Builtins sind deaktiviert, ein Researcher ist ohne Web-Toolchain nicht installiert
 
 ## Nicht-Ziele
 - Keine externe Memory-Extension nur zum Speichern von mehr Daten
@@ -53,6 +53,7 @@
 - Keine automatische Veröffentlichung, kein Commit und kein Push.
 - Keine Änderungen an der `verify`-Konfiguration in `setup.json`.
 - Keine Änderung des Ergebnisvertrag-Schemas (Abschnittsüberschriften bleiben stabil).
+- Keine Änderung der grundlegenden Permission-Architektur.
 
 ## Bekannte Einschränkungen
 - Aktive Pi CLI ist 0.80.7, Manifest und lokales Dev-Paket sind 0.80.6 (dokumentierte Drift)
@@ -87,7 +88,11 @@
 - Änderungen mit Tests und statischen Prüfungen verifizieren; Fehler ausdrücklich nennen
 
 ## Aktuelle Prioritäten
-- (keine Einträge)
+- T1: agents/architect.md löschen
+- T2: agents/security-auditor.md löschen
+- T3: agents/ui-reviewer.md löschen
+- T4: agents/docs-auditor.md löschen
+- T5: agents/planner.md — Frontmatter-Description und Prompt um vollständige Ar...
 
 ## Verworfene Optionen
 - Externe Memory-/Smart-Compaction-/Context-Extension — kein verbleibender Nutzen, der Komplexität und Überschneidung rechtfertigt
@@ -99,4 +104,4 @@
 - Option: Dynamisches Thinking pro Anfrage.
 - Option: Vollständiger Diagnose-Browser.
 
-<!-- CONTEXT-LEDGER-META: {"schemaVersion":1,"lastCheckpoint":"2026-07-25T10:42:15.941Z","lastTrigger":"session-shutdown","briefHash":"5d5f5bce0d3bceb08e04da73ba0fad2ebfb1a9049354f8c7a8b2ed3097cfc74f","planHash":"3188be1f0327d64821243ea7a0ac15517cd624f764171911d7b229fcd1a8645a"} -->
+<!-- CONTEXT-LEDGER-META: {"schemaVersion":1,"lastCheckpoint":"2026-07-26T07:52:26.834Z","lastTrigger":"session-shutdown","briefHash":"5d5f5bce0d3bceb08e04da73ba0fad2ebfb1a9049354f8c7a8b2ed3097cfc74f","planHash":"3188be1f0327d64821243ea7a0ac15517cd624f764171911d7b229fcd1a8645a"} -->

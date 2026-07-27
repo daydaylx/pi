@@ -16,37 +16,41 @@ export type WorkflowPhase =
 // Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
 // Prompting und Workflow; ausschließlich diese Stufe steuert Tool-Zugriffe.
 export type PermissionLevel =
-  "read-only" | "read-bash" | "read-write" | "full-access" | "yolo";
+  "readonly" | "project-write" | "confirm-all" | "yolo";
 
 export type PermissionState = "DEFAULT" | "MANUAL" | "YOLO_OVERRIDE";
 
 export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
-  "read-only": "Nur Lesen",
-  "read-bash": "Lesen + Bash-Info",
-  "read-write": "Lesen + Schreiben",
-  "full-access": "Vollzugriff",
+  readonly: "Nur Lesen",
+  "project-write": "Projekt schreiben",
+  "confirm-all": "Alles bestätigen",
   yolo: "YOLO",
 };
 
 export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
-  "read-only": "Nur Lesen; ausschließlich die Plan-Datei bleibt beschreibbar",
-  "read-bash": "Lesen, sichere Inspect-Bash-Befehle und die Plan-Datei",
-  "read-write": "Normaler Projektzugriff mit Rückfragen bei riskanten Aktionen",
-  "full-access":
-    "Git-Housekeeping/Paketmanager ohne Rückfrage; sudo/Löschen/Force-Push bleiben bestätigt",
-  yolo: "Vollständiger Policy- und Workflow-Bypass ohne Rückfragen",
+  readonly:
+    "Projekt lesen und sichere Inspect-Shell nutzen; nur der Plan ist in der Planung beschreibbar",
+  "project-write":
+    "Gewöhnliche Projektänderungen; riskante, destruktive und externe Aktionen bestätigen",
+  "confirm-all":
+    "Jede Mutation und jede externe Aktion einzeln bestätigen",
+  yolo:
+    "Temporärer sichtbarer Bypass; harte Secret-, System-, Symlink- und Trust-Grenzen bleiben aktiv",
 };
 
 /**
  * Converts persisted legacy permission values before they reach the policy.
- * `test-bash` was intentionally removed because its curated command list was
- * difficult to keep complete and safe; its conservative replacement is the
- * existing read-only Bash policy.
+ * Legacy values are accepted only at input boundaries and mapped to the
+ * nearest conservative v3 mode.
  */
 export function normalizePermissionLevel(
   value: unknown,
 ): PermissionLevel | undefined {
-  if (value === "test-bash") return "read-bash";
+  if (value === "read-only" || value === "read-bash" || value === "test-bash")
+    return "readonly";
+  if (value === "read-write") return "project-write";
+  if (value === "full-access") return "confirm-all";
+  if (value === "yolo") return "project-write";
   return typeof value === "string" &&
     Object.hasOwn(PERMISSION_LEVEL_LABEL, value)
     ? (value as PermissionLevel)
@@ -59,14 +63,13 @@ export const ZENTUI_STATUS_KEYS = {
 } as const;
 
 export type PermissionRiskStatusValue =
-  | "🛡 DEFAULT · READ ONLY"
-  | "🛡 DEFAULT · READ + BASH"
-  | "🛡 DEFAULT · READ + WRITE"
-  | "🛡 MANUELL · READ ONLY"
-  | "🛡 MANUELL · READ + BASH"
-  | "🛡 MANUELL · READ + WRITE"
-  | "⚠ VOLLZUGRIFF"
-  | "⚠ YOLO · VOLL-BYPASS";
+  | "🛡 DEFAULT · READONLY"
+  | "🛡 DEFAULT · PROJECT WRITE"
+  | "🛡 DEFAULT · CONFIRM ALL"
+  | "🛡 MANUELL · READONLY"
+  | "🛡 MANUELL · PROJECT WRITE"
+  | "🛡 MANUELL · CONFIRM ALL"
+  | "⚠ YOLO · TEMPORÄR";
 
 export function permissionRiskStatusValue(
   level: PermissionLevel,
@@ -74,16 +77,14 @@ export function permissionRiskStatusValue(
 ): PermissionRiskStatusValue {
   const prefix = state === "MANUAL" ? "🛡 MANUELL" : "🛡 DEFAULT";
   switch (level) {
-    case "read-only":
-      return `${prefix} · READ ONLY` as PermissionRiskStatusValue;
-    case "read-bash":
-      return `${prefix} · READ + BASH` as PermissionRiskStatusValue;
-    case "read-write":
-      return `${prefix} · READ + WRITE` as PermissionRiskStatusValue;
-    case "full-access":
-      return "⚠ VOLLZUGRIFF";
+    case "readonly":
+      return `${prefix} · READONLY` as PermissionRiskStatusValue;
+    case "project-write":
+      return `${prefix} · PROJECT WRITE` as PermissionRiskStatusValue;
+    case "confirm-all":
+      return `${prefix} · CONFIRM ALL` as PermissionRiskStatusValue;
     case "yolo":
-      return "⚠ YOLO · VOLL-BYPASS";
+      return "⚠ YOLO · TEMPORÄR";
   }
 }
 

@@ -37,8 +37,14 @@ export interface VerificationProfile {
   cwd: string;
   /** Hard timeout in milliseconds. Bounded to [1000, 900000]. */
   timeoutMs: number;
-  /** If true, the future gate treats a failure as blocking. Default true. */
+  /** Legacy compatibility projection. Prefer `classification`. */
   required: boolean;
+  /**
+   * required: failure or non-execution blocks.
+   * recommended: confirmed failure blocks; a missing tool is a residual risk.
+   * advisory: findings never block completion.
+   */
+  classification: "required" | "recommended" | "advisory";
   /** Additive environment overrides on top of `process.env`. */
   env: Record<string, string>;
   /**
@@ -150,6 +156,7 @@ function validateProfile(
     "cwd",
     "timeoutMs",
     "required",
+    "classification",
     "env",
     "trustRequired",
   ];
@@ -225,7 +232,45 @@ function validateProfile(
     timeoutMs = raw.timeoutMs;
   }
 
-  const required = raw.required === undefined ? true : Boolean(raw.required);
+  if (raw.required !== undefined && typeof raw.required !== "boolean") {
+    diagnostics.push({
+      level: "error",
+      source,
+      message: `profiles.${id}.required muss boolean sein`,
+    });
+    return null;
+  }
+  if (
+    raw.classification !== undefined &&
+    raw.classification !== "required" &&
+    raw.classification !== "recommended" &&
+    raw.classification !== "advisory"
+  ) {
+    diagnostics.push({
+      level: "error",
+      source,
+      message:
+        `profiles.${id}.classification muss required, recommended oder advisory sein`,
+    });
+    return null;
+  }
+  const classification =
+    (raw.classification as VerificationProfile["classification"] | undefined) ??
+    (raw.required === false ? "advisory" : "required");
+  if (
+    raw.required !== undefined &&
+    raw.classification !== undefined &&
+    raw.required !== (classification === "required")
+  ) {
+    diagnostics.push({
+      level: "error",
+      source,
+      message:
+        `profiles.${id}: required und classification widersprechen sich`,
+    });
+    return null;
+  }
+  const required = classification === "required";
 
   let env: Record<string, string> = {};
   if (raw.env !== undefined) {
@@ -240,7 +285,19 @@ function validateProfile(
     env = { ...raw.env };
   }
 
-  const trustRequired = raw.trustRequired === undefined ? true : Boolean(raw.trustRequired);
+  if (
+    raw.trustRequired !== undefined &&
+    typeof raw.trustRequired !== "boolean"
+  ) {
+    diagnostics.push({
+      level: "error",
+      source,
+      message: `profiles.${id}.trustRequired muss boolean sein`,
+    });
+    return null;
+  }
+  const trustRequired =
+    raw.trustRequired === undefined ? true : raw.trustRequired;
 
   return {
     program,
@@ -248,6 +305,7 @@ function validateProfile(
     cwd,
     timeoutMs,
     required,
+    classification,
     env,
     trustRequired,
   };

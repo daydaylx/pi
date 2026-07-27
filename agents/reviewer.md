@@ -87,3 +87,8 @@ Only questions needed to determine whether a finding is actionable.
 
 For each finding, give the smallest fix; finish with a short readiness
 assessment.
+
+When the task is a workflow completion review, obey the completion request's
+marker contract and make the final nonempty line exactly one of
+`[COMPLETION-REVIEW:PASS]`, `[COMPLETION-REVIEW:REWORK]`, or
+`[COMPLETION-REVIEW:UNVERIFIABLE]`.

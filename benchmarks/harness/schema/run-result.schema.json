@@ -36,6 +36,16 @@
         "userCorrectionTurns": { "type": "integer", "minimum": 0 },
         "durationMs": { "type": ["integer", "null"], "minimum": 0 },
         "subagentCalls": { "type": "integer", "minimum": 0 },
+        "subagentModelCalls": { "type": "integer", "minimum": 0 },
+        "subagentTokens": {
+          "type": "object",
+          "properties": {
+            "input": { "type": "integer", "minimum": 0 },
+            "output": { "type": "integer", "minimum": 0 },
+            "reasoning": { "type": "integer", "minimum": 0 },
+            "total": { "type": "integer", "minimum": 0 }
+          }
+        },
         "subagentDurationMsTotal": { "type": "integer", "minimum": 0 },
         "subagentFailures": { "type": "integer", "minimum": 0 },
         "diff": {
@@ -75,6 +85,94 @@
             "expected": { "type": "integer", "minimum": 0 },
             "present": { "type": "integer", "minimum": 0 },
             "missing": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "environment": {
+          "type": "object",
+          "description": "Optional reproducibility metadata supplied by a controller. It may contain only non-sensitive configuration fingerprints and explicit runtime facts; it must never contain credentials or a raw environment dump.",
+          "properties": {
+            "reference": { "type": "string" },
+            "configHash": { "type": "string" },
+            "configFiles": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": { "type": "string" },
+                  "sha256": { "type": "string" }
+                }
+              }
+            },
+            "benchmarkOverlays": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": { "type": "string" },
+                  "sha256": { "type": "string" }
+                }
+              }
+            },
+            "benchmarkEnvironmentOverrides": {
+              "type": "object",
+              "description": "Explizite, nicht-sensitive Benchmark-Umgebungswerte. Der Controller erlaubt nur den dokumentierten Ledger-Testschalter.",
+              "additionalProperties": { "type": "string" }
+            },
+            "harnessScaffolding": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": { "type": "string" },
+                  "sha256": { "type": "string" }
+                }
+              }
+            },
+            "model": { "type": "string" },
+            "thinking": { "type": "string" },
+            "taskPromptFingerprint": { "type": "string" },
+            "testOnly": { "type": "boolean" },
+            "runtime": {
+              "type": "object",
+              "properties": {
+                "nodeVersion": { "type": "string" },
+                "platform": { "type": "string" },
+                "arch": { "type": "string" },
+                "piPackageVersion": { "type": "string" },
+                "piPackageFingerprint": { "type": "string" },
+                "piEntrypointFingerprint": { "type": "string" }
+              }
+            },
+            "runId": { "type": "string" },
+            "task": { "type": "string" },
+            "scored": { "type": "boolean" },
+            "variant": { "type": ["string", "null"] },
+            "pair": { "type": ["string", "null"] }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "description": "Optional GNU time -v measurements captured by a benchmark controller. Values are per launch plus non-sensitive aggregates.",
+          "properties": {
+            "launches": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": { "type": "string" },
+                  "exitCode": { "type": "integer" },
+                  "signal": { "type": ["string", "null"] },
+                  "cpuUserSeconds": { "type": ["number", "null"], "minimum": 0 },
+                  "cpuSystemSeconds": { "type": ["number", "null"], "minimum": 0 },
+                  "wallSeconds": { "type": ["number", "null"], "minimum": 0 },
+                  "peakRssKiB": { "type": ["number", "null"], "minimum": 0 }
+                }
+              }
+            },
+            "totalCpuUserSeconds": { "type": "number", "minimum": 0 },
+            "totalCpuSystemSeconds": { "type": "number", "minimum": 0 },
+            "totalWallSeconds": { "type": "number", "minimum": 0 },
+            "peakRssKiB": { "type": ["number", "null"], "minimum": 0 }
           }
         }
       }

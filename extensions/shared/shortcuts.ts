@@ -47,6 +47,6 @@ export const SHORTCUTS = {
   yoloToggle: {
     keys: "super+y",
     label: "Super+Y",
-    description: "YOLO-Voll-Bypass ein-/ausschalten",
+    description: "Temporären YOLO-Modus ein-/ausschalten",
   },
 } as const satisfies Record<string, ShortcutBinding>;

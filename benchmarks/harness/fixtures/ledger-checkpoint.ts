@@ -1,16 +1,16 @@
-/** Fail-open, model-free checkpoint of plan artifacts into the context ledger. */
+/** Benchmark-only fail-open checkpoint of plan artifacts into the context ledger. */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   consolidateLedger,
   CONTEXT_LEDGER_RELATIVE_PATH,
   type LedgerTrigger,
 } from "../shared/context-ledger.ts";
-import { extractTodoItems, readDecisionBrief, readPlanFile } from "./utils.ts";
+import {
+  extractTodoItems,
+  readDecisionBrief,
+  readPlanFile,
+} from "./utils.ts";
 
-/**
- * Reserved for the isolated P3 A/B benchmark. It suppresses only automatic
- * ledger consolidation; the plan-mode state machine remains active.
- */
 export const BENCHMARK_DISABLE_LEDGER_CHECKPOINTS_ENV =
   "PI_BENCHMARK_DISABLE_LEDGER_CHECKPOINTS";
 
@@ -30,30 +30,23 @@ export function runLedgerCheckpoint(
   trigger: LedgerTrigger,
 ): void {
   try {
-    if (!ledgerCheckpointsEnabled()) return;
-    if (!ctx.isProjectTrusted()) return;
+    if (!ledgerCheckpointsEnabled() || !ctx.isProjectTrusted()) return;
     let briefContent: string | undefined;
     let planContent: string | undefined;
     let openPriorities: string[] = [];
     try {
       briefContent = readDecisionBrief(ctx.cwd);
-    } catch {
-      // A corrupt brief must not prevent the remaining checkpoint.
-    }
+    } catch {}
     try {
       planContent = readPlanFile(ctx.cwd);
-    } catch {
-      // A corrupt plan must not prevent the remaining checkpoint.
-    }
+    } catch {}
     try {
       openPriorities = planContent
         ? extractTodoItems(planContent)
             .filter((todo) => !todo.completed)
             .map((todo) => todo.text)
         : [];
-    } catch {
-      openPriorities = [];
-    }
+    } catch {}
     if (
       briefContent === undefined &&
       planContent === undefined &&
@@ -75,7 +68,9 @@ export function runLedgerCheckpoint(
       );
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    ctx.ui.notify(`Context Ledger konnte nicht aktualisiert werden: ${message}`, "warning");
+    ctx.ui.notify(
+      `Context Ledger konnte nicht aktualisiert werden: ${error instanceof Error ? error.message : String(error)}`,
+      "warning",
+    );
   }
 }

@@ -28,14 +28,13 @@ export interface WorkflowActivatedEvent {
 }
 
 export type WorkflowCapabilityState =
-  | "work"
+  | "idle"
   | "planning"
+  | "working"
   | "reviewing"
-  | "deciding"
-  | "executing"
   | "paused"
   | "blocked"
-  | "ready";
+  | "done";
 
 export interface WorkflowCapabilitySnapshot {
   state: WorkflowCapabilityState;
@@ -50,7 +49,7 @@ export interface WorkflowEventBus {
   emit(channel: string, value: unknown): void;
 }
 
-const DEFAULT_SNAPSHOT: WorkflowCapabilitySnapshot = { state: "work", mode: "work" };
+const DEFAULT_SNAPSHOT: WorkflowCapabilitySnapshot = { state: "idle", mode: "work" };
 
 export function requestWorkflowCapabilities(
   events: WorkflowEventBus,
@@ -78,14 +77,13 @@ export function isWorkflowCapabilitySnapshot(
     return false;
   }
   switch ((value as { state?: unknown }).state) {
-    case "work":
+    case "idle":
     case "planning":
+    case "working":
     case "reviewing":
-    case "deciding":
-    case "executing":
     case "paused":
     case "blocked":
-    case "ready":
+    case "done":
       return true;
     default:
       return false;

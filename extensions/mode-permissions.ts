@@ -6,6 +6,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { relative, resolve, sep } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -39,6 +40,7 @@ import {
   ZENTUI_STATUS_KEYS,
   permissionRiskStatusValue,
   setTuiStatus,
+  normalizePermissionLevel,
   type PermissionLevel,
   type PermissionState,
   type WorkflowMode,
@@ -60,15 +62,6 @@ import {
   type WorkflowActivatedEvent,
   type WorkflowCapabilitySnapshot,
 } from "./shared/workflow-capabilities.ts";
-import {
-  requestDoomLoopSnapshot,
-  type DoomLoopSnapshot,
-} from "./shared/doom-loop-capabilities.ts";
-import { normaliseSignature as normaliseDoomLoopSignature } from "./setup-core/doom-loop.ts";
-import {
-  requestEditFallbackSnapshot,
-  type EditFallbackSnapshot,
-} from "./shared/edit-fallback-capabilities.ts";
 
 const PERSISTED_STATE_KEY = "mode-permissions";
 
@@ -80,21 +73,16 @@ const LOCAL_LSP_TOOLS = new Set([
   "lsp_workspace_symbols",
 ]);
 const READ_ONLY_SUBAGENT_PROFILES = new Set([
-  "scout",
   "planner",
   "reviewer",
-  "test-runner",
-  "oracle",
 ]);
 
 function isRestrictedWorkflow(snapshot: WorkflowCapabilitySnapshot): boolean {
   return [
     "planning",
     "reviewing",
-    "deciding",
     "paused",
     "blocked",
-    "ready",
   ].includes(snapshot.state);
 }
 
@@ -143,24 +131,71 @@ function subagentProfiles(input: unknown): string[] | undefined {
   return undefined;
 }
 
+function isManagedWorkflowArtifactPath(rawPath: string, cwd: string): boolean {
+  const target = resolve(cwd, rawPath);
+  const plansRoot = resolve(cwd, ".agent/plans");
+  const plansRelative = relative(plansRoot, target);
+  return (
+    plansRelative === "" ||
+    (plansRelative !== ".." &&
+      !plansRelative.startsWith(`..${sep}`)) ||
+    target === resolve(cwd, ".agent/direct-task.json")
+  );
+}
+
+function referencesWorkflowArtifact(command: string): boolean {
+  const normalized = command.replace(/\\/g, "/");
+  return (
+    normalized.includes(".agent/plans/") ||
+    normalized.includes(".agent/direct-task.json")
+  );
+}
+
 function decideWorkflowTool(
   workflow: WorkflowCapabilitySnapshot,
   event: ToolCallEvent,
   cwd: string,
 ): PolicyDecision | undefined {
+  const managedPath = toolPath(event);
   if (
-    workflow.state === "executing" &&
+    managedPath &&
+    isManagedWorkflowArtifactPath(managedPath, cwd) &&
+    !["read", "grep", "find", "ls"].includes(event.toolName)
+  ) {
+    if (event.toolName === "write" || event.toolName === "edit") {
+      if (
+        workflowAllowsPlanWrite(workflow) &&
+        isPlanFilePath(managedPath, cwd)
+      ) {
+        return {
+          action: "allow",
+          reason: "Workflow: kontrollierter Plan-Schreibzugriff",
+        };
+      }
+    }
+    return {
+      action: "block",
+      reason:
+        "Workflow-Artefakte dürfen nur über Plan-Mode und plan_progress aktualisiert werden.",
+    };
+  }
+  if (
+    workflow.state === "working" &&
     (event.toolName === "write" || event.toolName === "edit")
   ) {
-    const filePath = toolPath(event) ?? "";
-    if (isPlanFilePath(filePath, cwd)) {
-      return {
-        action: "block",
-        reason:
-          "Während der Ausführung darf der Plan nur über plan_progress aktualisiert werden.",
-      };
-    }
     return undefined;
+  }
+  if (
+    event.toolName === "bash" &&
+    referencesWorkflowArtifact(
+      String((event.input as Record<string, unknown>).command ?? ""),
+    )
+  ) {
+    return {
+      action: "block",
+      reason:
+        "Workflow-Artefakte sind über Shell gesperrt; nutze Plan-Mode, Direct-Task-Kommandos oder plan_progress.",
+    };
   }
   if (!isRestrictedWorkflow(workflow)) return undefined;
 
@@ -203,32 +238,26 @@ function decideWorkflowTool(
 }
 
 function permissionWarning(level: PermissionLevel): string | undefined {
-  if (level === "full-access") {
-    return "VOLLZUGRIFF aktiv: Sudo, Löschen, externe Schreibzugriffe und Force-Push bleiben bestätigt.";
+  if (level === "confirm-all") {
+    return "CONFIRM ALL aktiv: Jede Mutation und externe Aktion benötigt eine Bestätigung.";
   }
   if (level === "yolo") {
-    return "YOLO aktiv: VOLL-BYPASS. Alle Policy-, Workflow- und Sicherheitsabfragen sind deaktiviert.";
+    return "YOLO temporär aktiv: Rückfragen entfallen; harte Secret-, System-, Symlink- und Trust-Grenzen bleiben aktiv.";
   }
   return undefined;
 }
 
 function toolPath(event: ToolCallEvent): string | undefined {
   const input = event.input as Record<string, unknown>;
-  return typeof input.path === "string" ? input.path : undefined;
+  return typeof input.path === "string"
+    ? input.path
+    : typeof input.filePath === "string"
+      ? input.filePath
+      : undefined;
 }
 
-/** Mirrors edit-fallback.ts's normalisePathKey so signatures compare equal. */
-function normalisePathForFallback(value: unknown): string {
-  const s = String(value ?? "")
-    .trim()
-    .replace(/\\/g, "/");
-  return s.replace(/^\.\//, "") || "(unknown)";
-}
-
-// Restrictive permission levels still allow writes to the workflow
-// extension's plan file. This is the only place mode-permissions.ts knows
-// about plan-mode/utils.ts — shared/permission-policy.ts itself stays
-// workflow-mode-independent and receives this as a plain callback.
+// Planning/reviewing alone may grant a write exception for the current plan.
+// Outside those workflow capabilities, readonly blocks the same path.
 const PROTECTED_WRITE_PATH: ProtectedWritePath = {
   matches: isPlanFilePath,
   label: PLAN_RELATIVE_PATH,
@@ -243,57 +272,25 @@ function decideTool(
     unknownTools: ConfiguredPolicyAction;
     bash: ConfiguredPolicyAction;
   },
-  doomLoop?: DoomLoopSnapshot,
-  editFallback?: EditFallbackSnapshot,
 ): PolicyDecision {
-  if (permissionLevel === "yolo") {
-    return { action: "allow", reason: "YOLO-Voll-Bypass" };
-  }
-  // Doom-loop (#103) and edit-fallback (#104) are advisory detectors that
-  // publish their state via a capability bus rather than intercepting
-  // tool_call themselves — this is intentionally the only place that turns
-  // a detection into an actual decision. "ask" (not "block") so the user can
-  // always override; there is no automatic hard stop.
-  if (
-    doomLoop?.active &&
-    doomLoop.signature !== undefined &&
-    normaliseDoomLoopSignature(event) === doomLoop.signature
-  ) {
-    return {
-      action: "ask",
-      reason: `Doom-Loop erkannt: ${doomLoop.reason ?? "wiederholtes Muster"}`,
-    };
-  }
-
-  if (editFallback?.kind === "edit-retry" && event.toolName === "edit") {
-    const input = event.input as Record<string, unknown>;
-    const oldText = Array.isArray(input.edits)
-      ? (input.edits as Array<{ oldText?: unknown }>)[0]?.oldText
-      : input.oldText;
-    const signature = `${normalisePathForFallback(input.path ?? input.filePath)}|${String(oldText ?? "").trim()}`;
-    if (signature === editFallback.blockedSignature) {
-      return {
-        action: "ask",
-        reason: `Edit-Fallback: ${editFallback.reason ?? "wiederholter Fehlversuch"}`,
-      };
-    }
-  }
-  if (
-    editFallback?.kind === "full-rewrite" &&
-    event.toolName === "write" &&
-    normalisePathForFallback(toolPath(event)) === editFallback.blockedPath
-  ) {
-    return {
-      action: "ask",
-      reason: `Edit-Fallback: ${editFallback.reason ?? "vollständiges Rewrite ohne vorherigen Read/Edit"}`,
-    };
-  }
 
   const workflowDecision = decideWorkflowTool(workflow, event, cwd);
-  if (workflowDecision) return workflowDecision;
+  if (workflowDecision) {
+    if (
+      permissionLevel === "confirm-all" &&
+      workflowDecision.action === "allow" &&
+      ["write", "edit", "subagent"].includes(event.toolName)
+    ) {
+      return {
+        action: "ask",
+        reason: `Confirm All: kontrollierte Aktion "${event.toolName}" bestätigen`,
+      };
+    }
+    return workflowDecision;
+  }
 
   if (event.toolName === "bash") {
-    if (permissionLevel === "read-write") {
+    if (permissionLevel === "project-write") {
       if (configured.bash === "block") {
         return {
           action: "block",
@@ -335,27 +332,46 @@ function decideTool(
   if (LOCAL_LSP_TOOLS.has(event.toolName)) {
     return { action: "allow", reason: "LSP-Fähigkeit (nur lesend)" };
   }
-  if (event.toolName === "ask_user" || event.toolName === "plan_progress") {
+  if (event.toolName === "ask_user") {
     return { action: "allow", reason: "Controlled workflow capability" };
   }
+  if (event.toolName === "plan_progress") {
+    return permissionLevel === "confirm-all"
+      ? {
+          action: "ask",
+          reason: "Confirm All: Sidecar-Fortschritt bestätigen",
+        }
+      : { action: "allow", reason: "Controlled workflow capability" };
+  }
   if (event.toolName === "verify") {
-    return permissionLevel === "read-only"
+    return permissionLevel === "readonly"
       ? {
           action: "block",
-          reason: "Read only: Verifikation benötigt mindestens Read + Bash.",
+          reason: "Readonly: Verifikation kann Projektartefakte erzeugen.",
         }
-      : { action: "allow", reason: "Allowlisted verification capability" };
+      : permissionLevel === "confirm-all"
+        ? { action: "ask", reason: "Verifikation kann Projektartefakte erzeugen." }
+        : { action: "allow", reason: "Allowlisted verification capability" };
   }
 
   if (event.toolName === "write" || event.toolName === "edit") {
     const filePath = toolPath(event) ?? "";
     return decideFileAccess(permissionLevel, "write", filePath, cwd, {
-      protectedWritePath: PROTECTED_WRITE_PATH,
+      ...(workflowAllowsPlanWrite(workflow)
+        ? { protectedWritePath: PROTECTED_WRITE_PATH }
+        : {}),
     });
   }
 
+  if (permissionLevel === "yolo") {
+    return {
+      action: "allow",
+      reason: "Temporärer YOLO-Bypass innerhalb harter Grenzen",
+    };
+  }
+
   if (
-    (permissionLevel === "read-only" || permissionLevel === "read-bash") &&
+    permissionLevel === "readonly" &&
     event.toolName !== "ask_user"
   ) {
     return {
@@ -445,11 +461,11 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
 
   function persistState(): void {
     pi.appendEntry(PERSISTED_STATE_KEY, {
-      permissionLevel,
+      permissionLevel: selectedPermissionLevel,
       workflowDefaultPermission,
       selectedPermissionLevel,
       selectedPermissionState,
-      permissionState,
+      permissionState: selectedPermissionState,
       workflowMode: activeWorkflowMode,
       thinkingMode,
       manualThinkingLevel,
@@ -532,7 +548,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       permissionLevel = "yolo";
     }
     publishStatus(ctx);
-    persistState();
+    if (permissionState !== "YOLO_OVERRIDE") persistState();
     auditTransition(source);
     const warning = permissionWarning(permissionLevel);
     ctx.ui.notify(
@@ -653,26 +669,30 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("full-access", {
-    description: "Session-weiten Full Access Mode ein-/ausschalten",
+    description: "Legacy-Alias für Confirm All",
     handler: async (_args, ctx) =>
       applyPermissionLevel(
         permissionState !== "YOLO_OVERRIDE" &&
           selectedPermissionState === "MANUAL" &&
-          selectedPermissionLevel === "full-access"
+          selectedPermissionLevel === "confirm-all"
           ? workflowDefaultPermission
-          : "full-access",
+          : "confirm-all",
         ctx,
       ),
   });
 
   pi.registerCommand("permission", {
     description:
-      "Zugriffsstufe setzen: read-only | read-bash | read-write | full-access | yolo",
+      "Zugriffsstufe setzen: readonly | project-write | confirm-all | yolo",
     handler: async (args, ctx) => {
-      const level = args.trim() as PermissionLevel;
-      if (!Object.hasOwn(PERMISSION_LEVEL_LABEL, level)) {
+      const raw = args.trim();
+      const level =
+        Object.hasOwn(PERMISSION_LEVEL_LABEL, raw)
+          ? (raw as PermissionLevel)
+          : normalizePermissionLevel(raw);
+      if (!level) {
         ctx.ui.notify(
-          "Nutzung: /permission read-only|read-bash|read-write|full-access|yolo",
+          "Nutzung: /permission readonly|project-write|confirm-all|yolo",
           "info",
         );
         return;
@@ -712,14 +732,22 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", async (event, ctx) => {
+    if (
+      !ctx.isProjectTrusted() &&
+      !["read", "grep", "find", "ls", "ask_user"].includes(event.toolName)
+    ) {
+      return {
+        block: true,
+        reason:
+          "Harte Trust-Grenze: mutierende oder externe Tools sind im nicht vertrauenswürdigen Projekt blockiert.",
+      };
+    }
     const decision = decideTool(
       permissionLevel,
       event,
       ctx.cwd,
       requestWorkflowCapabilities(pi.events),
       configuredPolicy,
-      requestDoomLoopSnapshot(pi.events),
-      requestEditFallbackSnapshot(pi.events),
     );
     const subject =
       event.toolName === "bash"
@@ -737,15 +765,30 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("user_bash", async (event, ctx) => {
+    if (!ctx.isProjectTrusted()) {
+      return {
+        result: {
+          output:
+            "Harte Trust-Grenze: Shell-Zugriff ist im nicht vertrauenswürdigen Projekt blockiert.",
+          exitCode: 126,
+          cancelled: true,
+          truncated: false,
+        },
+      };
+    }
     const workflow = requestWorkflowCapabilities(pi.events);
-    const decision = permissionLevel === "yolo"
-      ? { action: "allow" as const, reason: "YOLO-Voll-Bypass" }
+    const decision = referencesWorkflowArtifact(event.command)
+      ? {
+          action: "block" as const,
+          reason:
+            "Workflow-Artefakte sind über Shell gesperrt; nutze Plan-Mode, Direct-Task-Kommandos oder plan_progress.",
+        }
       : isRestrictedWorkflow(workflow)
       ? {
           action: "block" as const,
           reason: `Workflow ${workflow.state}: direkter Shell-Zugriff ist nicht freigegeben.`,
         }
-      : permissionLevel === "read-write" && configuredPolicy.bash !== "allow"
+      : permissionLevel === "project-write" && configuredPolicy.bash !== "allow"
         ? configuredPolicy.bash === "block"
           ? {
               action: "block" as const,
@@ -787,14 +830,14 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       .pop() as
       | {
           data?: {
-            permissionLevel?: PermissionLevel;
+            permissionLevel?: unknown;
+            selectedPermissionLevel?: unknown;
+            selectedPermissionState?: unknown;
             thinkingMode?: "auto" | "manual";
             manualThinkingLevel?: SelectableThinkingLevel;
           };
         }
       | undefined;
-    // Permission state is intentionally never restored. Every new session
-    // begins with the declared workflow default, regardless of old entries.
     thinkingMode =
       latestState?.data?.thinkingMode === "manual" ? "manual" : "auto";
     manualThinkingLevel = latestState?.data?.manualThinkingLevel;
@@ -805,7 +848,21 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       manualThinkingLevel = undefined;
       pi.setThinkingLevel(workflowThinkingDefault());
     }
-    selectedPermissionState = "DEFAULT";
+    const persistedRaw =
+      latestState?.data?.selectedPermissionLevel ??
+      latestState?.data?.permissionLevel;
+    const normalizedPersistedLevel = normalizePermissionLevel(persistedRaw);
+    const restoredLevel =
+      normalizedPersistedLevel === "yolo"
+        ? "project-write"
+        : normalizedPersistedLevel;
+    const persistedManual =
+      latestState?.data?.selectedPermissionState === "MANUAL" ||
+      persistedRaw === "yolo" ||
+      (latestState?.data?.selectedPermissionState === undefined &&
+        restoredLevel !== undefined);
+    selectedPermissionLevel = restoredLevel ?? configuredPolicy.workflowDefaults.work;
+    selectedPermissionState = persistedManual ? "MANUAL" : "DEFAULT";
     permissionState = "DEFAULT";
     applyWorkflowDefaults(
       requestWorkflowCapabilities(pi.events).mode ?? "work",

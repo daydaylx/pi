@@ -28,9 +28,9 @@
           "additionalProperties": false,
           "required": ["work", "simple_plan", "detailed_plan"],
           "properties": {
-            "work": { "enum": ["read-only", "read-bash", "read-write", "full-access"] },
-            "simple_plan": { "enum": ["read-only", "read-bash", "read-write", "full-access"] },
-            "detailed_plan": { "enum": ["read-only", "read-bash", "read-write", "full-access"] }
+            "work": { "enum": ["readonly", "project-write", "confirm-all"] },
+            "simple_plan": { "enum": ["readonly", "project-write", "confirm-all"] },
+            "detailed_plan": { "enum": ["readonly", "project-write", "confirm-all"] }
           }
         }
       }

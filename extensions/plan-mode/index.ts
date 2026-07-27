@@ -1,3972 +1,1013 @@
 /**
- * Plan workflow extension.
+ * Pi workflow controller v3.
  *
- * Workflow: /plan -> /work (review-plan optional, finish meist automatisch)
+ * The business contract lives in current-plan.md. Runtime progress lives only
+ * in current-plan.state.json. This file wires the focused planning, execution,
+ * completion, presentation and persistence modules together.
  */
-
-import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { StringEnum } from "@earendil-works/pi-ai";
-import {
-  getAgentDir,
-  resolveModelScopeWithDiagnostics,
-} from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey } from "@earendil-works/pi-tui";
-import type {
-  ExtensionAPI,
-  ExtensionCommandContext,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import {
-  classifyLedger,
-  ledgerSummaryLine,
-  readLedger,
-  shouldCheckpointForTokens,
-} from "../shared/context-ledger.ts";
-import {
-  applyDoneSteps,
-  archiveDecisionBrief,
-  archivePlanFile,
-  discardPlanFile,
-  DECISION_BRIEF_RELATIVE_PATH,
-  DECISION_BUDGET_COMPLEX,
-  DECISION_BUDGET_DEFAULT,
-  ensurePlanMetadataHeader,
-  ensurePlanDirectory,
-  extractDecisionBriefBlock,
-  extractDoneSteps,
-  extractProgressBlock,
-  extractTodoItems,
-  getReviewOutcome,
-  hashPlanContent,
-  inferPlanType,
-  INVALID_DECISION_BRIEF_RELATIVE_PATH,
-  PLAN_RELATIVE_PATH,
-  readDecisionBrief,
-  readDecisionBriefState,
-  readPlanFile,
-  readPlanFileState,
-  validateDecisionBriefStructure,
-  validatePlanStructure,
-  writeDecisionBriefAtomic,
-  writeInvalidDecisionBriefAtomic,
-  writePlanFileAtomic,
-  type TodoItem,
-} from "./utils.ts";
-import {
-  type WorkflowMode,
-  type WorkflowPhase,
-  ZENTUI_STATUS_KEYS,
-  setTuiStatus,
-  workflowStatusValue,
-} from "../shared/workflow-status.ts";
-import {
-  AURORA_UI_CHANNELS,
-  isAuroraUiStateRequest,
-  publishAuroraUiPatch,
-  publishAuroraUiSnapshot,
-  type AuroraUiStatePatch,
-} from "../aurora-ui/state.ts";
-import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
-import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
-import { type ControlCenterAction } from "../shared/control-center-menu.ts";
-import {
-  CONTROL_CENTER_EVENTS,
-  type ControlCenterSnapshot,
-  type WorkflowThinkingDefaultEvent,
-} from "../shared/control-center-events.ts";
+import { CONTROL_CENTER_EVENTS } from "../shared/control-center-events.ts";
+import { SHORTCUTS } from "../shared/shortcuts.ts";
 import {
   WORKFLOW_CAPABILITY_EVENTS,
   type WorkflowCapabilityRequest,
-  type WorkflowCapabilityState,
-  type WorkflowActivatedEvent,
-  type WorkflowStateDiscardedEvent,
 } from "../shared/workflow-capabilities.ts";
+import { LSP_COMPLETION_RPC } from "../lsp/completion-rpc.ts";
 import {
-  clearTaskContract,
-  deriveContractFromPlan,
-  saveTaskContract,
-} from "../setup-core/task-contract.ts";
+  formatCompletionResult,
+  runCompletionPipeline,
+  type CompletionLspResult,
+  type CompletionPipelineResult,
+} from "./completion.ts";
 import {
-  formatGateReport,
-  runVerificationGate,
-  type GateResult,
-} from "../setup-core/verification-gate.ts";
+  executionPrompt,
+  pauseExecution,
+  startOrResumeExecution,
+  updateExecutionStep,
+} from "./execution.ts";
 import {
-  buildBriefOverwriteGuardMenu,
-  buildDecisionHandoffMenu,
-  buildOverwriteGuardMenu,
-  buildPlanAssistantMenu,
-  type DecisionHandoffAction,
-  type OverwriteDecision,
-  type PlanAssistantAction,
-} from "./plan-menu.ts";
+  finalizePlanningTurn,
+  planningPrompt,
+  reviewPrompt,
+} from "./planning.ts";
+import type { PlanKind } from "./plan-snapshot.ts";
 import {
-  createPlanReplayRenderer,
-  createPostPlanCardRenderer,
-  createPostPlanDiscardConfirmRenderer,
-  PLAN_REPLAY_ENTRY,
-  POST_PLAN_ACTIONS,
-  POST_PLAN_CARD_ENTRY,
-  POST_PLAN_DISCARD_CONFIRM_ENTRY,
-  type PostPlanAction,
-  type PostPlanCardData,
-  type PostPlanCardViewState,
-} from "./post-plan-card.ts";
+  formatPlanSteps,
+  updateWorkflowPresentation,
+  workflowWarning,
+} from "./presentation.ts";
+import { runCompletionReviewerViaRpc } from "./reviewer-rpc.ts";
 import {
-  assertWorkflowStateToken,
-  computeWorkflowStateToken,
-  createWorkflowStateSnapshot,
-  isExecutionLeaseLive,
-  loadWorkflowState,
-  removeWorkflowStateAtomicCAS,
-  withWorkspaceLock,
-  writeWorkflowStateAtomicCAS,
-  type LoadedWorkflowState,
-  type WorkflowExecutionMetadata,
-  type PlanProgressRecord,
-  type PlanProgressStatus,
-} from "./state.ts";
-import {
-  DECISION_INTAKE_MARKER,
-  EXECUTING_PLAN_MARKER,
-  getLatestAssistantText,
-  getTextContent,
-  isAssistantMessage,
-  latestAssistantSucceeded,
-  MODE_LABEL,
-  MODE_THINKING,
-  PLAN_MODE_MARKER,
-  PLAN_REVIEW_MARKER,
-  SIMPLE_PLAN_PROMPT,
-  SUBAGENT_EXECUTING_REMINDER,
-  auroraWorkflowPhase,
-} from "./workflow-presentation.ts";
-import { registerPlanEntryCommands } from "./workflow-commands.ts";
-import { runLedgerCheckpoint } from "./ledger-checkpoint.ts";
-import { registerWorkflowContextCleanup } from "./workflow-hooks.ts";
-import { WorkflowSettlementCoordinator } from "./workflow-settlement.ts";
+  PLAN_RELATIVE_PATH,
+  archiveCompletedWorkflow,
+  clearDirectTask,
+  clearWorkflowLockAfterConfirmation,
+  commitWorkflowDone,
+  discardActiveWorkflow,
+  finalizeObservedPlanCAS,
+  loadDirectTask,
+  loadWorkflowStateV3,
+  migrateLegacyWorkflowToV3,
+  saveDirectTask,
+  workflowPath,
+  writeWorkflowStateCAS,
+  type WorkflowStateLoadResult,
+  type WorkflowStateV3,
+} from "./store.ts";
 
-const PLAN_PROGRESS_STATUSES = ["in_progress", "completed", "blocked"] as const;
-const EXECUTION_LEASE_MS = 90_000;
-const EXECUTION_HEARTBEAT_MS = 30_000;
-
+const STEP_STATUSES = ["in_progress", "completed", "blocked"] as const;
 const PlanProgressParams = Type.Object({
-  executionId: Type.String({
-    minLength: 1,
-    description: "Execution-ID aus dem aktuellen /work-Handoff",
+  stepId: Type.String({
+    minLength: 36,
+    maxLength: 36,
+    description: "Stabile PI-STEP-ID aus dem aktuellen Ausführungskontext",
   }),
-  step: Type.Integer({
-    minimum: 1,
-    description: "1-basierte Todo-Nummer aus /plan-todos (T1 = 1)",
-  }),
-  status: StringEnum(PLAN_PROGRESS_STATUSES, {
-    description:
-      "in_progress für laufende Arbeit, completed nur nach erfolgreichem Nachweis, blocked für einen konkreten Blocker",
-  }),
-  evidence: Type.String({
-    minLength: 1,
-    maxLength: 1000,
-    description:
-      "Konkreter, kurzer Nachweis für den Status, z. B. Testresultat, betroffene Datei oder Blocker-Ursache",
-  }),
+  status: StringEnum(STEP_STATUSES),
+  evidence: Type.String({ minLength: 1, maxLength: 1000 }),
 });
 
+type MutableUi = ExtensionContext["ui"] & {
+  input?: (title: string, placeholder?: string) => Promise<string | undefined>;
+};
 
-interface PersistedWorkflowState {
-  mode?: WorkflowMode;
-  phase?: WorkflowPhase;
-  // Legacy field retained only for state migration.
-  planningActive?: boolean;
-  reviewedHash?: string;
-  planCreationMode?: "simple_plan" | "detailed_plan";
-  // Legacy fields retained only for state migration.
-  enabled?: boolean;
-  executing?: boolean;
+function textResult(text: string, details: Record<string, unknown> = {}) {
+  return {
+    content: [{ type: "text" as const, text }],
+    details,
+  };
+}
+
+function planContent(cwd: string): string | undefined {
+  const path = workflowPath(cwd, PLAN_RELATIVE_PATH);
+  return existsSync(path) ? readFileSync(path, "utf8") : undefined;
+}
+
+async function requestLsp(
+  pi: ExtensionAPI,
+  projectRoot: string,
+  files: string[],
+): Promise<CompletionLspResult[]> {
+  if (files.length === 0) return [];
+  const requestId = randomUUID();
+  return await new Promise<CompletionLspResult[]>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(
+        files.map((path) => ({
+          path,
+          status: "unavailable",
+          summary: "LSP-Completion-RPC antwortete nicht rechtzeitig.",
+        })),
+      );
+    }, 20_000);
+    pi.events.emit(LSP_COMPLETION_RPC.request, {
+      version: 1,
+      requestId,
+      projectRoot,
+      files,
+      respond(value: {
+        version: 1;
+        requestId: string;
+        results: CompletionLspResult[];
+      }): void {
+        if (settled || value.requestId !== requestId) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value.results);
+      },
+    });
+  });
+}
+
+function completionOverrideReport(
+  result: CompletionPipelineResult,
+  loaded: WorkflowStateLoadResult,
+  reason: string,
+) {
+  if (!loaded.snapshot) throw new Error("PlanSnapshot fehlt.");
+  if (
+    result.checks.find((check) => check.name === "hard-boundaries")?.status !==
+      "pass"
+  ) {
+    throw new Error("Harte Secret-/Auth-Grenzen können nicht übersteuert werden.");
+  }
+  return {
+    version: 1 as const,
+    completionId: randomUUID(),
+    planId: loaded.snapshot.planId,
+    planRevision: loaded.snapshot.planRevision,
+    planHash: loaded.snapshot.planHash,
+    diffHash: result.diffHash,
+    outcome: "override" as const,
+    reviewerVerdict: result.reviewer.verdict,
+    checks: result.checks.map((check) => ({
+      name: check.name,
+      classification: check.classification,
+      status: check.status,
+      summary: check.summary,
+    })),
+    scopeFindings: result.scopeFindings,
+    residualRisks: result.residualRisks,
+    reviewerSummary: result.reviewer.summary,
+    overrideReason: reason.trim(),
+    completedAt: new Date().toISOString(),
+  };
 }
 
 export default function planModeExtension(pi: ExtensionAPI): void {
-  let mode: WorkflowMode = "work";
-  let phase: WorkflowPhase = "idle";
-  let reviewedHash: string | undefined;
-  let planCreationMode: "simple_plan" | "detailed_plan" | undefined;
-  let progressRecords: PlanProgressRecord[] = [];
-  let auroraEpoch: string | undefined;
-  let unsubscribeAurora: (() => void) | undefined;
-  let latestCwd: string | undefined;
-  let latestContext: ExtensionContext | undefined;
-  let planModeEverUsed = false;
-  let sessionEpoch = 0;
-  let activeSessionId: string | undefined;
-  let projectTrusted = false;
-  let workflowRevision = 0;
-  let currentPlanId: string | undefined;
-  let decisionBriefHash: string | undefined;
-  let workflowStateToken = "missing";
-  let executionOwnerId = randomUUID();
-  const selectedSkillCommands = new Set<string>();
-  let foreignExecution: WorkflowExecutionMetadata | undefined;
-  let leaseHeartbeat: ReturnType<typeof setTimeout> | undefined;
-  let executePlanInFlight = false;
-  const settlement = new WorkflowSettlementCoordinator();
-  let activeRun:
-    | {
-        id: string;
-        kind: "deciding" | "reviewing" | "executing";
-        sessionId: string;
-        startedAt: string;
-        planHash?: string;
-        ownerId?: string;
-        leaseExpiresAt?: string;
-      }
-    | undefined;
-  let pendingPlan:
-    | {
-        mode: "simple_plan" | "detailed_plan";
-        previousHash?: string;
-      }
-    | undefined;
-  // Ob die Plan-Datei vor dem aktuellen Agent-Turn bereits existierte. Steuert,
-  // dass das "Nächster Schritt"-Menü nur nach dem Turn erscheint, der den Plan
-  // erzeugt hat — nicht nach jedem Verfeinerungs-Turn.
-  let planExistedBeforeTurn = false;
-  let postPlanInputUnsubscribe: (() => void) | undefined;
-  const postPlanCardViewStates = new Map<string, PostPlanCardViewState>();
-  // Token-Proxy für den „vor Compaction"-Checkpoint: einmal je Fensterzyklus.
-  // Wird scharf gestellt, sobald die Kontextauslastung wieder unter die
-  // Schwelle fällt (typisch nach einer Compaction, wenn `tokens` neu klein
-  // oder null gemeldet wird).
-  let ledgerTokenCheckpointArmed = true;
+  let current: WorkflowStateLoadResult = {
+    stateToken: "missing",
+    recovered: false,
+    migrationRequired: false,
+    warnings: [],
+  };
+  let activeCwd: string | undefined;
+  let activeContext: ExtensionContext | undefined;
+  let planningKind: PlanKind | undefined;
+  let planningBaseContent: string | undefined;
+  let planningIsReview = false;
+  let completionRunning = false;
 
-  pi.registerEntryRenderer(
-    POST_PLAN_CARD_ENTRY,
-    createPostPlanCardRenderer((cardId) => postPlanCardViewStates.get(cardId)),
-  );
-  pi.registerEntryRenderer(PLAN_REPLAY_ENTRY, createPlanReplayRenderer());
-  pi.registerEntryRenderer(
-    POST_PLAN_DISCARD_CONFIRM_ENTRY,
-    createPostPlanDiscardConfirmRenderer(),
-  );
-
-  interface SessionToken {
-    epoch: number;
-    sessionId: string;
-  }
-
-  /**
-   * The persisted workflow fields have one reset and one hydration path.
-   * Volatile run/lease handles stay local to the current session and are never
-   * reconstructed from an untrusted or stale sidecar implicitly.
-   */
-  function resetPersistedWorkflowMemory(
-    stateToken = "missing",
-  ): void {
-    mode = "work";
-    phase = "idle";
-    reviewedHash = undefined;
-    planCreationMode = undefined;
-    progressRecords = [];
-    workflowRevision = 0;
-    currentPlanId = undefined;
-    decisionBriefHash = undefined;
-    workflowStateToken = stateToken;
-    foreignExecution = undefined;
-  }
-
-  function hydratePersistedWorkflowMemory(
-    loaded: LoadedWorkflowState,
-    options: { resetWhenMissing?: boolean; trackForeignExecution?: boolean } = {},
-  ): boolean {
-    workflowStateToken = loaded.stateToken;
-    if (!loaded.state) {
-      if (options.resetWhenMissing) {
-        resetPersistedWorkflowMemory(loaded.stateToken);
-      } else {
-        foreignExecution = undefined;
-      }
-      return false;
-    }
-    mode = loaded.state.mode;
-    phase = loaded.state.phase;
-    reviewedHash = loaded.state.reviewedHash;
-    planCreationMode = loaded.state.planCreationMode;
-    progressRecords = loaded.state.progress;
-    workflowRevision = loaded.state.revision;
-    currentPlanId = loaded.state.planId;
-    decisionBriefHash = loaded.state.decisionBriefHash;
-    foreignExecution =
-      options.trackForeignExecution &&
-      loaded.state.lifecycle === "executing" &&
-      isExecutionLeaseLive(loaded.state.execution) &&
-      loaded.state.execution?.ownerId !== executionOwnerId
-        ? loaded.state.execution
-        : undefined;
-    return true;
-  }
-
-  function captureSessionToken(ctx: ExtensionContext): SessionToken {
-    return {
-      epoch: sessionEpoch,
-      sessionId: ctx.sessionManager.getSessionId(),
-    };
-  }
-
-  function isSessionTokenCurrent(
-    token: SessionToken,
+  const notify = (
     ctx: ExtensionContext,
-  ): boolean {
-    return (
-      token.epoch === sessionEpoch &&
-      (activeSessionId === undefined || token.sessionId === activeSessionId) &&
-      token.sessionId === ctx.sessionManager.getSessionId()
-    );
+    message: string,
+    level: "info" | "warning" | "error" = "info",
+  ): void => ctx.ui.notify(message, level);
+
+  function workflowMode(): "work" | PlanKind {
+    return planningKind ?? "work";
   }
 
-  function startRun(
-    kind: "deciding" | "reviewing" | "executing",
-    ctx: ExtensionContext,
-    planHash?: string,
-  ): string {
-    const id = randomUUID();
-    activeRun = {
-      id,
-      kind,
-      sessionId: ctx.sessionManager.getSessionId(),
-      startedAt: new Date().toISOString(),
-      ...(planHash ? { planHash } : {}),
-      ...(kind === "executing"
-        ? {
-            ownerId: executionOwnerId,
-            leaseExpiresAt: new Date(
-              Date.now() + EXECUTION_LEASE_MS,
-            ).toISOString(),
-          }
-        : {}),
-    };
-    return id;
-  }
-
-  function stopExecutionHeartbeat(): void {
-    if (leaseHeartbeat !== undefined) clearTimeout(leaseHeartbeat);
-    leaseHeartbeat = undefined;
-  }
-
-  function scheduleExecutionHeartbeat(ctx: ExtensionContext): void {
-    stopExecutionHeartbeat();
-    if (
-      phase !== "executing" ||
-      activeRun?.kind !== "executing" ||
-      activeRun.ownerId !== executionOwnerId
-    ) {
-      return;
-    }
-    const token = captureSessionToken(ctx);
-    const executionId = activeRun.id;
-    leaseHeartbeat = setTimeout(() => {
-      leaseHeartbeat = undefined;
-      if (
-        !isSessionTokenCurrent(token, ctx) ||
-        phase !== "executing" ||
-        activeRun?.id !== executionId ||
-        activeRun.ownerId !== executionOwnerId
-      ) {
-        return;
-      }
-      activeRun.leaseExpiresAt = new Date(
-        Date.now() + EXECUTION_LEASE_MS,
-      ).toISOString();
-      if (!persistState(ctx, activeRun.planHash)) {
-        phase = "paused";
-        activeRun = undefined;
-        updateStatus(ctx);
-        ctx.ui.notify(
-          "Execution-Lease konnte nicht erneuert werden; Ausführung wurde sicher pausiert.",
-          "warning",
-        );
-      }
-    }, EXECUTION_HEARTBEAT_MS);
-    leaseHeartbeat.unref?.();
-  }
-
-  function isCurrentRun(
-    kind: "deciding" | "reviewing" | "executing",
-    ctx: ExtensionContext,
-  ): boolean {
-    return (
-      activeRun?.kind === kind &&
-      activeRun.sessionId === ctx.sessionManager.getSessionId() &&
-      activeSessionId === ctx.sessionManager.getSessionId()
-    );
-  }
-
-  function hasCurrentExecutionLease(ctx: ExtensionContext): boolean {
-    if (
-      !isCurrentRun("executing", ctx) ||
-      !activeRun?.planHash ||
-      activeRun.ownerId !== executionOwnerId
-    ) {
-      return false;
-    }
-    return isExecutionLeaseLive({
-      executionId: activeRun.id,
-      startedAt: activeRun.startedAt,
-      expectedPlanHash: activeRun.planHash,
-      sessionId: activeRun.sessionId,
-      ownerId: activeRun.ownerId,
-      leaseExpiresAt: activeRun.leaseExpiresAt,
-    });
-  }
-
-  function hasBlockingForeignExecution(
-    ctx: ExtensionContext,
-    action: string,
-  ): boolean {
-    if (!foreignExecution) return false;
-    if (isExecutionLeaseLive(foreignExecution)) {
-      ctx.ui.notify(
-        `${action} ist blockiert, solange Execution ${foreignExecution.executionId} in einer anderen Session geleast ist. Nutze /work für eine explizite Übernahme.`,
-        "warning",
-      );
-      return true;
-    }
-    try {
-      const loaded = loadWorkflowState(ctx.cwd);
-      hydratePersistedWorkflowMemory(loaded);
-      updateStatus(ctx);
-      return false;
-    } catch (error) {
-      ctx.ui.notify(
-        `${action} ist blockiert, weil der abgelaufene Fremdzustand nicht sicher geladen werden konnte: ${error instanceof Error ? error.message : String(error)}`,
-        "warning",
-      );
-      return true;
-    }
-  }
-
-  function workflowCapabilityState(): WorkflowCapabilityState {
-    switch (phase) {
-      case "deciding":
-        return "deciding";
-      case "reviewing":
-        return "reviewing";
-      case "executing":
-        return "executing";
-      case "paused":
-        return "paused";
-      case "blocked":
-        return "blocked";
-      case "ready":
-        return "ready";
-      case "draft":
-      case "reviewed":
-        return mode === "work" ? "work" : "planning";
-      case "idle":
-        return mode === "work" ? "work" : "planning";
-    }
-  }
-
-  pi.events.on(WORKFLOW_CAPABILITY_EVENTS.request, (event) => {
-    (event as WorkflowCapabilityRequest).respond({
-      state: workflowCapabilityState(),
-      mode,
-    });
-  });
-
-  pi.events.on(WORKFLOW_CAPABILITY_EVENTS.stateDiscarded, (event) => {
-    const discarded = event as WorkflowStateDiscardedEvent;
-    const ctx = latestContext;
-    if (
-      !ctx ||
-      discarded.cwd !== latestCwd ||
-      discarded.sessionId !== activeSessionId ||
-      discarded.sessionId !== ctx.sessionManager.getSessionId()
-    ) {
-      return;
-    }
-    try {
-      const loaded = loadWorkflowState(ctx.cwd);
-      hydratePersistedWorkflowMemory(loaded, { resetWhenMissing: true });
-      activeRun = undefined;
-      stopExecutionHeartbeat();
-      updateStatus(ctx);
-    } catch (error) {
-      ctx.ui.notify(
-        `Verworfener Workflow-Zustand konnte nicht in-memory synchronisiert werden: ${error instanceof Error ? error.message : String(error)}`,
-        "warning",
-      );
-    }
-  });
-
-  pi.events.on(CONTROL_CENTER_EVENTS.workflowThinkingDefault, (event) => {
-    (event as WorkflowThinkingDefaultEvent).respond({
-      mode,
-      defaultLevel: MODE_THINKING[mode],
-    });
-  });
-
-  function readTodos(cwd: string): TodoItem[] {
-    const content = readPlanFile(cwd);
-    return content === undefined ? [] : extractTodoItems(content);
-  }
-
-  function effectivePlanType(
-    content: string,
-  ): "simple_plan" | "detailed_plan" | undefined {
-    const inferred = inferPlanType(content);
-    if (planCreationMode === "detailed_plan" || inferred === "detailed_plan") {
-      return "detailed_plan";
-    }
-    if (planCreationMode === "simple_plan" || inferred === "simple_plan") {
-      return "simple_plan";
-    }
-    return undefined;
-  }
-
-  function formatPlanTodoLines(todos: TodoItem[]): string[] {
-    return todos.map((todo) => {
-      const progress = progressRecords.find(
-        (record) => record.step === todo.step,
-      );
-      const state = todo.completed
-        ? "[x]"
-        : progress?.status === "blocked"
-          ? "[!]"
-          : progress?.status === "in_progress"
-            ? "[~]"
-            : "[ ]";
-      const evidence = progress?.evidence ? ` — ${progress.evidence}` : "";
-      return `${state} T${todo.step}: ${todo.text}${evidence}`;
-    });
-  }
-
-  function auroraWorkflowState(
-    todos: TodoItem[],
-  ): NonNullable<AuroraUiStatePatch["workflow"]> {
-    const activeStep = progressRecords.find(
-      (record) => record.status === "in_progress",
-    )?.step;
-    const currentTodo =
-      (activeStep
-        ? todos.find((todo) => todo.step === activeStep && !todo.completed)
-        : undefined) ?? todos.find((todo) => !todo.completed);
-    return {
-      phase: auroraWorkflowPhase(phase),
-      label: workflowStatusValue(phase, mode, todos),
-      step: currentTodo
-        ? `T${currentTodo.step}: ${currentTodo.text}`
-        : undefined,
-      completed: todos.filter((todo) => todo.completed).length,
-      total: todos.length,
-    };
-  }
-
-  function persistState(
-    ctx: ExtensionContext,
-    expectedPlanHash?: string,
-    options: { allowMissingPlanCleanup?: boolean } = {},
-  ): boolean {
-    try {
-      const content = readPlanFile(ctx.cwd);
-      if (content === undefined) {
-        if (phase === "executing" || activeRun?.kind === "executing") {
-          throw new Error(
-            "Aktiver Plan fehlt während einer Execution; Sidecar bleibt zur Recovery erhalten.",
-          );
-        }
-        if (workflowStateToken !== "missing") {
-          if (!options.allowMissingPlanCleanup) {
-            throw new Error(
-              "Plan fehlt ohne bestätigte Archivierung; vorhandener Sidecar bleibt zur Recovery erhalten.",
-            );
-          }
-          removeWorkflowStateAtomicCAS(ctx.cwd, {
-            stateToken: workflowStateToken,
-            ...(currentPlanId ? { planId: currentPlanId } : {}),
-          });
-        }
-        progressRecords = [];
-        workflowRevision = 0;
-        currentPlanId = undefined;
-        decisionBriefHash = undefined;
-        workflowStateToken = "missing";
-        foreignExecution = undefined;
-        stopExecutionHeartbeat();
-        pi.appendEntry<PersistedWorkflowState>("plan-mode", {
-          mode,
-          phase,
-          reviewedHash,
-          planCreationMode,
-        });
-        return true;
-      }
-      if (
-        expectedPlanHash !== undefined &&
-        hashPlanContent(content) !== expectedPlanHash
-      ) {
-        throw new Error("Plan-Hash hat sich vor dem Workflow-Commit geändert.");
-      }
-      const snapshot = createWorkflowStateSnapshot(content, {
-        mode,
-        phase,
-        revision: Math.max(1, workflowRevision + 1),
-        planId: currentPlanId,
-        planType: planCreationMode,
-        reviewedHash,
-        planCreationMode,
-        decisionBriefHash,
-        execution:
-          phase === "executing" &&
-          activeRun?.kind === "executing" &&
-          activeRun.planHash
-            ? {
-                executionId: activeRun.id,
-                startedAt: activeRun.startedAt,
-                expectedPlanHash: activeRun.planHash,
-                sessionId: activeRun.sessionId,
-                ownerId: activeRun.ownerId,
-                leaseExpiresAt: activeRun.leaseExpiresAt,
-              }
-            : undefined,
-        progress: progressRecords,
-      });
-      const written = writeWorkflowStateAtomicCAS(ctx.cwd, snapshot, {
-        planHash: snapshot.planHash,
-        stateToken: workflowStateToken,
-      });
-      progressRecords = written.progress;
-      workflowRevision = written.revision;
-      currentPlanId = written.planId;
-      decisionBriefHash = written.decisionBriefHash;
-      workflowStateToken = computeWorkflowStateToken(written);
-      foreignExecution = undefined;
-      if (phase === "executing") scheduleExecutionHeartbeat(ctx);
-      else stopExecutionHeartbeat();
-      pi.appendEntry<PersistedWorkflowState>("plan-mode", {
-        mode,
-        phase,
-        reviewedHash,
-        planCreationMode,
-      });
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      try {
-        const loaded = loadWorkflowState(ctx.cwd);
-        hydratePersistedWorkflowMemory(loaded, {
-          resetWhenMissing: true,
-          trackForeignExecution: true,
-        });
-        activeRun = undefined;
-        stopExecutionHeartbeat();
-        updateStatus(ctx);
-      } catch {
-        // An unreadable or invalid winning state remains fail-closed. A later
-        // session start can perform the normal conservative reconstruction.
-      }
-      ctx.ui.notify(
-        `Workflow-Sidecar konnte nicht gespeichert werden: ${message}`,
-        "warning",
-      );
-      return false;
-    }
-  }
-
-  function preparePlan(ctx: ExtensionContext): boolean {
-    try {
-      ensurePlanDirectory(ctx.cwd);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Plan-Modus konnte nicht aktiviert werden: ${message}`,
-        "error",
-      );
-      return false;
-    }
-
-    planModeEverUsed = true;
-    return true;
-  }
-
-  function updateStatus(ctx: ExtensionContext): void {
-    latestCwd = ctx.cwd;
-    latestContext = ctx;
-    let todos: TodoItem[] = [];
-    try {
-      todos = readTodos(ctx.cwd);
-    } catch {
-      // A transient filesystem error must not hide the current workflow mode.
-    }
-    const workflow = auroraWorkflowState(todos);
-    const label = workflow.label ?? workflowStatusValue(phase, mode, todos);
-    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, label);
-    if (auroraEpoch) {
-      publishAuroraUiPatch(pi, auroraEpoch, "plan-workflow", {
-        workflow,
-      });
-    }
-  }
-
-  function subscribeAuroraProvider(): void {
-    unsubscribeAurora?.();
-    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
-      if (!isAuroraUiStateRequest(value)) return;
-      auroraEpoch = value.sessionEpoch;
-      let todos: TodoItem[] = [];
-      try {
-        // A request can arrive outside a Pi hook, so use the latest cwd captured
-        // by the provider rather than reaching into UI-owned state.
-        todos = latestCwd ? readTodos(latestCwd) : [];
-      } catch {
-        todos = [];
-      }
-      publishAuroraUiSnapshot(pi, value, "plan-workflow", {
-        workflow: auroraWorkflowState(todos),
-      });
-    });
-  }
-
-  function invalidateReview(): void {
-    reviewedHash = undefined;
-    if (phase === "reviewed" || phase === "ready") phase = "draft";
-  }
-
-  function normalizeInterruptedPhase(ctx: ExtensionContext): void {
-    if (phase !== "executing" && phase !== "reviewing" && phase !== "deciding")
-      return;
-    const interruptedPhase = phase;
-    activeRun = undefined;
-    if (interruptedPhase === "executing") stopExecutionHeartbeat();
-    if (interruptedPhase === "deciding") {
-      // Ein unterbrochener Klär-Turn wird nicht als „deciding" fortgesetzt;
-      // /decide kann erneut gestartet werden.
-      let planExists = false;
-      try {
-        planExists = readPlanFile(ctx.cwd) !== undefined;
-      } catch {
-        planExists = false;
-      }
-      phase = planExists ? "draft" : "idle";
-      reviewedHash = undefined;
-      return;
-    }
-    try {
-      const content = readPlanFile(ctx.cwd);
-      if (content === undefined) {
-        phase = "idle";
-        reviewedHash = undefined;
-      } else if (reviewedHash && hashPlanContent(content) === reviewedHash) {
-        phase = "reviewed";
-      } else {
-        phase = "draft";
-      }
-    } catch {
-      phase = "idle";
-      reviewedHash = undefined;
-    }
-  }
-
-  // Bricht einen laufenden Agent-Turn nur nach expliziter Bestätigung ab.
-  // Idle-Kontexte liefern sofort true; ohne TUI wird die Aktion konservativ
-  // abgelehnt statt still abzubrechen.
-  async function confirmAbortActiveTurn(
-    ctx: ExtensionContext,
-  ): Promise<boolean> {
-    if (ctx.isIdle()) return true;
-    const token = captureSessionToken(ctx);
-    if (!ctx.hasUI || ctx.mode !== "tui") {
-      ctx.ui.notify(
-        "Ein Agent-Turn läuft; die Aktion würde ihn abbrechen und benötigt dafür den TUI-Modus.",
-        "warning",
-      );
-      return false;
-    }
-    const confirmed = await ctx.ui.confirm(
-      "Laufenden Agent-Turn abbrechen?",
-      "Die gewählte Aktion stoppt den aktiven Turn und normalisiert den Workflow-Zustand.",
-    );
-    if (!isSessionTokenCurrent(token, ctx)) return false;
-    if (!confirmed) {
-      ctx.ui.notify(
-        "Aktion abgebrochen; der laufende Turn wird fortgesetzt.",
-        "info",
-      );
-      return false;
-    }
-    ctx.abort();
-    const maybeCommandCtx = ctx as Partial<ExtensionCommandContext>;
-    if (typeof maybeCommandCtx.waitForIdle === "function") {
-      await maybeCommandCtx.waitForIdle();
-      return isSessionTokenCurrent(token, ctx);
-    }
-    ctx.ui.notify(
-      "Der laufende Turn wurde abgebrochen. Wiederhole die Aktion, sobald der Agent vollständig beendet ist.",
-      "info",
-    );
-    return false;
-  }
-
-  async function setWorkflowMode(
-    target: WorkflowMode,
-    ctx: ExtensionContext,
-    options: { force?: boolean; skipAbort?: boolean } = {},
-  ): Promise<boolean> {
-    if (hasBlockingForeignExecution(ctx, "Workflow-Wechsel")) return false;
-    const previous = {
-      mode,
-      phase,
-      reviewedHash,
-      planCreationMode,
-      thinkingLevel: pi.getThinkingLevel(),
-    };
-    // Work bleibt im Idle ein No-op. Eine erneute Auswahl desselben Planmodus
-    // bedeutet dagegen ausdrücklich "weiter planen" und invalidiert daher
-    // einen alten Reviewstatus, ohne die ursprüngliche Planart zu verlieren.
-    if (!options.force && target === mode && ctx.isIdle()) {
-      if (target !== "work") {
-        invalidateReview();
-        phase = "draft";
-        updateStatus(ctx);
-        if (!persistState(ctx)) return false;
-        pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.activated, {
-          cwd: ctx.cwd,
-          sessionId: ctx.sessionManager.getSessionId(),
-          mode: target,
-        } satisfies WorkflowActivatedEvent);
-        ctx.ui.notify(`${MODE_LABEL[target]} wird fortgesetzt.`, "info");
-        return true;
-      }
-      pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.activated, {
-        cwd: ctx.cwd,
-        sessionId: ctx.sessionManager.getSessionId(),
-        mode: target,
-      } satisfies WorkflowActivatedEvent);
-      ctx.ui.notify(`${MODE_LABEL[target]} ist bereits aktiv.`, "info");
-      return true;
-    }
-    if (!options.skipAbort && !(await confirmAbortActiveTurn(ctx)))
-      return false;
-    normalizeInterruptedPhase(ctx);
-
-    if (target !== "work") {
-      const planState = readPlanFileState(ctx.cwd);
-      if (planState.status === "unreadable") {
-        ctx.ui.notify(
-          `Plan-Modus bleibt inaktiv, weil ${PLAN_RELATIVE_PATH} nicht sicher lesbar ist: ${planState.error}`,
-          "error",
-        );
-        return false;
-      }
-      if (!preparePlan(ctx)) return false;
-      invalidateReview();
-      phase = "draft";
-    } else if (
-      phase !== "executing" &&
-      phase !== "paused" &&
-      phase !== "blocked" &&
-      phase !== "ready"
-    ) {
-      let planExists = false;
-      try {
-        planExists = readPlanFile(ctx.cwd) !== undefined;
-      } catch {
-        // Preserve fail-closed error handling in the command that requested
-        // the transition. A plain Work selection may still expose a stored
-        // plan, but never claims that it is executing.
-      }
-      phase = planExists ? "draft" : "idle";
-    }
-
-    const modeChanged = target !== mode;
-    mode = target;
-    let thinkingMode: "auto" | "manual" = "auto";
-    pi.events.emit(CONTROL_CENTER_EVENTS.snapshot, {
-      respond: (snapshot: ControlCenterSnapshot) => {
-        thinkingMode = snapshot.thinkingMode;
-      },
-    });
-    if (modeChanged && thinkingMode === "auto") {
-      pi.setThinkingLevel(MODE_THINKING[target]);
-    }
-    updateStatus(ctx);
-    if (!persistState(ctx)) {
-      mode = previous.mode;
-      phase = previous.phase;
-      reviewedHash = previous.reviewedHash;
-      planCreationMode = previous.planCreationMode;
-      pi.setThinkingLevel(previous.thinkingLevel);
-      updateStatus(ctx);
-      ctx.ui.notify(
-        "Workflow-Wechsel wegen eines konkurrierenden Zustands abgebrochen.",
-        "warning",
-      );
-      return false;
-    }
+  function publishWorkflowActivation(ctx: ExtensionContext): void {
     pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.activated, {
       cwd: ctx.cwd,
       sessionId: ctx.sessionManager.getSessionId(),
-      mode: target,
-    } satisfies WorkflowActivatedEvent);
-    ctx.ui.notify(
-      modeChanged
-        ? `${MODE_LABEL[target]} aktiv. Thinking: ${thinkingMode === "auto" ? `${MODE_THINKING[target]} (Auto)` : "manueller Wert bleibt erhalten"}.`
-        : `${MODE_LABEL[target]} aktiv.`,
-      "info",
-    );
-    return true;
-  }
-
-  // /plan ist ein zustandsbewusster Plan-Assistent. Er erkennt, ob bereits
-  // eine Plan-Datei existiert und ob alle Todos erledigt sind, und bietet
-  // passend dazu Aktionen über die gemeinsame runMenu-UI an. Ohne TUI wird
-  // konservativ verfahren: ohne Plan -> Architekturplan, mit Plan -> kein
-  // Überschreiben, sondern Hinweis.
-  async function routePlan(ctx: ExtensionContext): Promise<void> {
-    const token = captureSessionToken(ctx);
-    if (!ctx.hasUI || ctx.mode !== "tui") {
-      const planState = readPlanFileState(ctx.cwd);
-      if (planState.status === "unreadable") {
-        ctx.ui.notify(
-          `Plan-Assistent abgebrochen: ${planState.error}`,
-          "error",
-        );
-        return;
-      }
-      const planExists = planState.status === "ok";
-      if (!planExists) {
-        await setWorkflowMode("detailed_plan", ctx);
-      } else {
-        ctx.ui.notify(
-          `${PLAN_RELATIVE_PATH} existiert bereits. /plan benötigt den TUI-Modus, um den bestehenden Plan zu schützen.`,
-          "warning",
-        );
-      }
-      return;
-    }
-
-    let planExists = false;
-    let allTodosComplete = false;
-    const planState = readPlanFileState(ctx.cwd);
-    if (planState.status === "unreadable") {
-      ctx.ui.notify(`Plan-Assistent abgebrochen: ${planState.error}`, "error");
-      return;
-    }
-    if (planState.status === "ok") {
-      planExists = true;
-      {
-        const todos = extractTodoItems(planState.content);
-        allTodosComplete =
-          todos.length > 0 && todos.every((todo) => todo.completed);
-      }
-    }
-
-    // Aktive Review/Execution sind keine harte Sperre; nur ein Hinweis.
-    // Eingriffe in einen laufenden Turn regeln setWorkflowMode /
-    // normalizeInterruptedPhase bzw. executePlan/reviewPlan selbst.
-    if (phase === "reviewing") {
-      ctx.ui.notify(
-        "Ein Review läuft gerade. Du kannst dennoch eine Aktion wählen.",
-        "info",
-      );
-    } else if (phase === "executing") {
-      ctx.ui.notify(
-        "Ein Plan wird gerade ausgeführt. Du kannst dennoch eine Aktion wählen.",
-        "info",
-      );
-    }
-
-    const title = planExists
-      ? allTodosComplete
-        ? "Plan-Assistent — Plan abgeschlossen"
-        : "Plan-Assistent"
-      : "Plan-Assistent — kein Plan vorhanden";
-
-    const action = await runMenu<PlanAssistantAction>(
-      ctx,
-      title,
-      buildPlanAssistantMenu({ planExists, allTodosComplete }),
-      {
-        fallbackPrompt: "Plan-Aktion wählen",
-        nonInteractiveHint:
-          "Plan-Assistent benötigt den TUI-Modus. Nutze /plan-todos oder /finish direkt.",
-      },
-    );
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    if (!action || action.kind === "cancel") return;
-    await dispatchPlanAssistantAction(action, ctx);
-  }
-
-  function showPlanTodos(ctx: ExtensionContext): void {
-    try {
-      const todos = readTodos(ctx.cwd);
-      if (todos.length === 0) {
-        ctx.ui.notify(
-          [
-            "KEIN AKTIVER PLAN-FORTSCHRITT",
-            "",
-            `Keine Todos in ${PLAN_RELATIVE_PATH} gefunden.`,
-            "",
-            "Nächster Schritt",
-            "/plan starten oder bestehenden Plan prüfen.",
-          ].join("\n"),
-          "info",
-        );
-        return;
-      }
-      ctx.ui.notify(formatPlanTodoLines(todos).join("\n"), "info");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Plan-Datei konnte nicht gelesen werden: ${message}`,
-        "error",
-      );
-    }
-  }
-
-  // Schützt eine bestehende Plan-Datei davor, durch einen neuen Plan still
-  // überschrieben zu werden. Gibt true zurück, wenn ein neuer Plan erstellt
-  // werden darf (archiviert oder bewusst überschrieben), sonst false.
-  async function guardNewPlan(ctx: ExtensionContext): Promise<boolean> {
-    const token = captureSessionToken(ctx);
-    const planState = readPlanFileState(ctx.cwd);
-    if (planState.status === "unreadable") {
-      ctx.ui.notify(
-        `Bestehender Plan ist nicht sicher lesbar; neuer Plan abgebrochen: ${planState.error}`,
-        "error",
-      );
-      return false;
-    }
-    const planExists = planState.status === "ok";
-    if (!planExists) return true;
-
-    const decision = await runMenu<OverwriteDecision>(
-      ctx,
-      "Bestehenden Plan schützen",
-      buildOverwriteGuardMenu(),
-      {
-        fallbackPrompt: "Bestehenden Plan behandeln",
-        nonInteractiveHint:
-          "Bestehender Plan würde überschrieben werden — Abbruch zum Schutz.",
-      },
-    );
-    if (!isSessionTokenCurrent(token, ctx)) return false;
-
-    if (!decision || decision === "cancel") {
-      ctx.ui.notify(
-        "Neuer Plan abgebrochen; bestehende Datei bleibt erhalten.",
-        "info",
-      );
-      return false;
-    }
-
-    if (decision === "archive-first") {
-      try {
-        const gate = await runGateBeforeFinish(ctx);
-        if (!isSessionTokenCurrent(token, ctx)) return false;
-        if (gate.status !== "pass") {
-          ctx.ui.notify(
-            `Verifikations-Gate ${gate.status.toUpperCase()}: bestehender Plan bleibt aktiv.\n${formatGateReport(gate)}`,
-            "warning",
-          );
-          return false;
-        }
-        const archivePath = withWorkspaceLock(ctx.cwd, () => {
-          assertWorkflowStateToken(ctx.cwd, workflowStateToken);
-          return archivePlanFile(
-            ctx.cwd,
-            "incomplete",
-            hashPlanContent(planState.content),
-          );
-        });
-        reviewedHash = undefined;
-        if (
-          !persistState(ctx, undefined, { allowMissingPlanCleanup: true })
-        ) {
-          ctx.ui.notify(
-            "Plan wurde archiviert, aber der konkurrierend geänderte Sidecar blieb zur Recovery erhalten.",
-            "warning",
-          );
-          return false;
-        }
-        ctx.ui.notify(
-          `Bisheriger Plan archiviert: ${relative(ctx.cwd, archivePath)}`,
-          "info",
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(
-          `Archivierung fehlgeschlagen; neuer Plan abgebrochen: ${message}`,
-          "error",
-        );
-        return false;
-      }
-    }
-    return true;
-  }
-
-  async function beginNewPlan(
-    targetMode: "simple_plan" | "detailed_plan",
-    ctx: ExtensionContext,
-    options: { attachDecisionBrief?: boolean } = {},
-  ): Promise<void> {
-    if (hasBlockingForeignExecution(ctx, "Neuer Plan")) return;
-    // Never archive, overwrite or clear progress while an old turn can still
-    // write to the active plan. This ordering is the data-loss boundary.
-    if (!(await confirmAbortActiveTurn(ctx))) return;
-    normalizeInterruptedPhase(ctx);
-
-    let previousHash: string | undefined;
-    try {
-      const previous = readPlanFile(ctx.cwd);
-      previousHash =
-        previous === undefined ? undefined : hashPlanContent(previous);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Bestehender Plan ist nicht sicher lesbar: ${message}`,
-        "error",
-      );
-      return;
-    }
-
-    if (!(await guardNewPlan(ctx))) return;
-    if (options.attachDecisionBrief) {
-      try {
-        const brief = readDecisionBrief(ctx.cwd);
-        decisionBriefHash = brief ? hashPlanContent(brief) : undefined;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(
-          `Decision Brief ist nicht sicher lesbar: ${message}`,
-          "error",
-        );
-        return;
-      }
-    } else {
-      decisionBriefHash = undefined;
-    }
-    pendingPlan = { mode: targetMode, previousHash };
-    if (
-      !(await setWorkflowMode(targetMode, ctx, {
-        force: true,
-        skipAbort: true,
-      }))
-    ) {
-      pendingPlan = undefined;
-    }
-  }
-
-  async function dispatchPlanAssistantAction(
-    action: PlanAssistantAction,
-    ctx: ExtensionContext,
-  ): Promise<void> {
-    switch (action.kind) {
-      case "clarify": {
-        await runDecisionIntake(ctx);
-        return;
-      }
-      case "new-plan": {
-        await beginNewPlan(action.mode, ctx);
-        return;
-      }
-      case "continue-plan": {
-        const targetMode: WorkflowMode =
-          mode === "simple_plan" || mode === "detailed_plan"
-            ? mode
-            : (planCreationMode ?? "detailed_plan");
-        await setWorkflowMode(targetMode, ctx);
-        return;
-      }
-      case "review":
-        await reviewPlan(ctx);
-        return;
-      case "execute":
-        await executePlan(ctx);
-        return;
-      case "show-todos":
-        showPlanTodos(ctx);
-        return;
-      case "archive":
-        await runFinish(ctx);
-        return;
-      case "cancel":
-        return;
-    }
-  }
-
-  // /finish benötigt ein ExtensionCommandContext (waitForIdle). Aufrufer ohne
-  // Command-Context (z. B. Shortcuts) erhalten einen Hinweis statt eines
-  // Absturzes. Genau dieses Fallback prüft der plan-action Test.
-  async function runFinish(ctx: ExtensionContext): Promise<void> {
-    const maybeCommandCtx = ctx as Partial<ExtensionCommandContext>;
-    if (typeof maybeCommandCtx.waitForIdle === "function") {
-      await finishPlan(ctx as ExtensionCommandContext);
-    } else {
-      ctx.ui.notify("Nutze /finish, um den Plan abzuschließen.", "info");
-    }
-  }
-
-  const POST_PLAN_STATUS_KEY = "plan-next-step";
-
-  function clearPostPlanInput(
-    ctx: ExtensionContext,
-    cardId?: string,
-  ): void {
-    postPlanInputUnsubscribe?.();
-    postPlanInputUnsubscribe = undefined;
-    if (cardId) {
-      const state = postPlanCardViewStates.get(cardId);
-      if (state) state.focused = false;
-    }
-    if (ctx.mode === "tui" && ctx.hasUI) {
-      ctx.ui.setStatus(POST_PLAN_STATUS_KEY, undefined);
-    }
-  }
-
-  function refreshPostPlanCard(ctx: ExtensionContext, label: string): void {
-    // setStatus requests a normal TUI redraw. The card itself remains a chat
-    // entry; this temporary footer text is only the keyboard-focus indicator.
-    if (ctx.mode === "tui" && ctx.hasUI) {
-      ctx.ui.setStatus(POST_PLAN_STATUS_KEY, label);
-    }
-  }
-
-  function replayPlan(ctx: ExtensionContext): void {
-    try {
-      const content = readPlanFile(ctx.cwd);
-      if (content === undefined) {
-        ctx.ui.notify("Plan-Datei ist nicht mehr vorhanden.", "warning");
-        return;
-      }
-      pi.appendEntry(PLAN_REPLAY_ENTRY, { content });
-    } catch (error) {
-      ctx.ui.notify(
-        `Plan-Datei konnte nicht erneut angezeigt werden: ${error instanceof Error ? error.message : String(error)}`,
-        "error",
-      );
-    }
-  }
-
-  async function startPlanRefinement(
-    ctx: ExtensionContext,
-    card: PostPlanCardData,
-    token: SessionToken,
-  ): Promise<void> {
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    let content: string | undefined;
-    try {
-      content = readPlanFile(ctx.cwd);
-    } catch (error) {
-      ctx.ui.notify(
-        `Plan-Datei ist nicht sicher lesbar: ${error instanceof Error ? error.message : String(error)}`,
-        "error",
-      );
-      return;
-    }
-    if (!content || hashPlanContent(content) !== card.planHash) {
-      ctx.ui.notify(
-        "Plan wurde seit der Abschlusskarte geändert oder entfernt; Bearbeitung wurde nicht gestartet.",
-        "warning",
-      );
-      return;
-    }
-
-    mode =
-      planCreationMode ??
-      (inferPlanType(content) === "simple_plan"
-        ? "simple_plan"
-        : "detailed_plan");
-    phase = "draft";
-    reviewedHash = undefined;
-    activeRun = undefined;
-    updateStatus(ctx);
-    if (!persistState(ctx, card.planHash)) {
-      ctx.ui.notify(
-        "Plan-Bearbeitung wurde wegen eines konkurrierenden Workflow-Zustands nicht gestartet.",
-        "warning",
-      );
-      return;
-    }
-
-    pi.sendMessage(
-      {
-        customType: "plan-refinement-request",
-        content: `Überarbeite den bestehenden Plan in ${PLAN_RELATIVE_PATH}. Prüfe ihn auf Präzision, Vollständigkeit und umsetzbare Todos; frage nur bei einer wirklich entscheidungsrelevanten Lücke nach. Starte keine Umsetzung.`,
-        display: true,
-      },
-      { triggerTurn: true },
-    );
-  }
-
-  function offerPostPlanDiscardConfirmation(
-    ctx: ExtensionContext,
-    card: PostPlanCardData,
-    token: SessionToken,
-  ): void {
-    pi.appendEntry(POST_PLAN_DISCARD_CONFIRM_ENTRY, {
-      planHash: card.planHash,
-      ...(card.planId ? { planId: card.planId } : {}),
-    });
-    refreshPostPlanCard(ctx, "PLAN LÖSCHEN · Y bestätigen · Esc abbrechen");
-    postPlanInputUnsubscribe = ctx.ui.onTerminalInput((data) => {
-      if (!isSessionTokenCurrent(token, ctx)) {
-        clearPostPlanInput(ctx);
-        return { data };
-      }
-      if (data === "y" || data === "Y") {
-        clearPostPlanInput(ctx);
-        void discardPostPlan(ctx, card, token);
-        return { consume: true };
-      }
-      if (matchesKey(data, Key.escape)) {
-        clearPostPlanInput(ctx);
-        return { consume: true };
-      }
-      clearPostPlanInput(ctx);
-      return { data };
+      mode: workflowMode(),
     });
   }
 
-  async function discardPostPlan(
-    ctx: ExtensionContext,
-    card: PostPlanCardData,
-    token: SessionToken,
-  ): Promise<void> {
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    let discarded = false;
-    try {
-      withWorkspaceLock(ctx.cwd, () => {
-        assertWorkflowStateToken(ctx.cwd, workflowStateToken);
-        discardPlanFile(ctx.cwd, card.planHash);
-        discarded = true;
-      });
-      removeWorkflowStateAtomicCAS(ctx.cwd, {
-        stateToken: workflowStateToken,
-        ...(card.planId ? { planId: card.planId } : {}),
-      });
-      clearTaskContract(ctx.cwd);
-      mode = "work";
-      phase = "idle";
-      reviewedHash = undefined;
-      planCreationMode = undefined;
-      progressRecords = [];
-      workflowRevision = 0;
-      currentPlanId = undefined;
-      decisionBriefHash = undefined;
-      workflowStateToken = "missing";
-      activeRun = undefined;
-      foreignExecution = undefined;
-      stopExecutionHeartbeat();
-      updateStatus(ctx);
-      ctx.ui.notify("Plan endgültig verworfen.", "info");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (discarded) {
-        clearTaskContract(ctx.cwd);
-        mode = "work";
-        phase = "idle";
-        reviewedHash = undefined;
-        planCreationMode = undefined;
-        progressRecords = [];
-        workflowRevision = 0;
-        currentPlanId = undefined;
-        decisionBriefHash = undefined;
-        workflowStateToken = "missing";
-        activeRun = undefined;
-        foreignExecution = undefined;
-        stopExecutionHeartbeat();
-        updateStatus(ctx);
-        ctx.ui.notify(
-          `Plan wurde gelöscht, aber der Workflow-Sidecar konnte nicht vollständig bereinigt werden: ${message}`,
-          "warning",
-        );
-        return;
-      }
-      ctx.ui.notify(`Plan wurde nicht verworfen: ${message}`, "warning");
-    }
+  function reload(ctx: ExtensionContext): WorkflowStateLoadResult {
+    current = loadWorkflowStateV3(ctx.cwd);
+    updateWorkflowPresentation(ctx, current.state);
+    return current;
   }
 
-  async function dispatchPostPlanAction(
-    action: PostPlanAction,
+  function replaceState(
     ctx: ExtensionContext,
-    card: PostPlanCardData,
-    token: SessionToken,
-  ): Promise<void> {
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    switch (action) {
-      case "work":
-        await executePlan(ctx);
-        return;
-      case "edit":
-        await startPlanRefinement(ctx, card, token);
-        return;
-      case "defer":
-        return;
-      case "discard":
-        offerPostPlanDiscardConfirmation(ctx, card, token);
-        return;
-    }
-  }
-
-  // The completion card is a durable transcript entry, not a modal component.
-  // Its temporary input listener provides keyboard focus without covering the
-  // plan above it in the terminal scrollback.
-  function offerPostPlanActions(ctx: ExtensionContext): void {
-    if (!ctx.hasUI || ctx.mode !== "tui") return;
-    if (typeof ctx.isIdle === "function" && !ctx.isIdle()) return;
-    clearPostPlanInput(ctx);
-    let content: string | undefined;
-    try {
-      content = readPlanFile(ctx.cwd);
-    } catch {
-      return;
-    }
-    if (content === undefined) return;
-
-    const token = captureSessionToken(ctx);
-    const card: PostPlanCardData = {
-      cardId: randomUUID(),
-      planHash: hashPlanContent(content),
-      ...(currentPlanId ? { planId: currentPlanId } : {}),
+    candidate: WorkflowStateV3,
+  ): WorkflowStateV3 {
+    const saved = writeWorkflowStateCAS(
+      ctx.cwd,
+      candidate,
+      current.stateToken,
+    );
+    current = {
+      ...current,
+      state: saved.state,
+      stateToken: saved.stateToken,
+      recovered: false,
     };
-    postPlanCardViewStates.set(card.cardId, { focused: true, selected: 0 });
-    pi.appendEntry(POST_PLAN_CARD_ENTRY, card);
-    refreshPostPlanCard(ctx, "NÄCHSTER SCHRITT · ↑↓ wählen · Enter bestätigen");
-
-    postPlanInputUnsubscribe = ctx.ui.onTerminalInput((data) => {
-      if (!isSessionTokenCurrent(token, ctx)) {
-        clearPostPlanInput(ctx, card.cardId);
-        return { data };
-      }
-      const state = postPlanCardViewStates.get(card.cardId);
-      if (!state) return { data };
-      const direct = POST_PLAN_ACTIONS.find((action) => action.key === data);
-      if (direct) {
-        clearPostPlanInput(ctx, card.cardId);
-        void dispatchPostPlanAction(direct.value, ctx, card, token);
-        return { consume: true };
-      }
-      if (data === "r" || data === "R") {
-        replayPlan(ctx);
-        refreshPostPlanCard(ctx, "NÄCHSTER SCHRITT · ↑↓ wählen · Enter bestätigen");
-        return { consume: true };
-      }
-      if (matchesKey(data, Key.up)) {
-        state.selected =
-          (state.selected - 1 + POST_PLAN_ACTIONS.length) %
-          POST_PLAN_ACTIONS.length;
-        refreshPostPlanCard(ctx, "NÄCHSTER SCHRITT · ↑↓ wählen · Enter bestätigen");
-        return { consume: true };
-      }
-      if (matchesKey(data, Key.down)) {
-        state.selected = (state.selected + 1) % POST_PLAN_ACTIONS.length;
-        refreshPostPlanCard(ctx, "NÄCHSTER SCHRITT · ↑↓ wählen · Enter bestätigen");
-        return { consume: true };
-      }
-      if (matchesKey(data, Key.enter)) {
-        const action = POST_PLAN_ACTIONS[state.selected];
-        if (!action) return { consume: true };
-        clearPostPlanInput(ctx, card.cardId);
-        void dispatchPostPlanAction(action.value, ctx, card, token);
-        return { consume: true };
-      }
-      if (matchesKey(data, Key.escape)) {
-        clearPostPlanInput(ctx, card.cardId);
-        return { consume: true };
-      }
-      clearPostPlanInput(ctx, card.cardId);
-      return { data };
-    });
+    updateWorkflowPresentation(ctx, saved.state);
+    return saved.state;
   }
 
-  // Bereitet den Klär-Modus vor (phase=deciding): TUI-Check, Abbruch-Guard,
-  // Normalisierung, Schutz eines bestehenden Decision Brief und
-  // Verzeichnisanlage. Liefert true, sobald der Klär-Modus aktiv ist — ohne
-  // selbst einen Turn zu triggern. false bei Abbruch/Abwahl/Fehler.
-  // Der eigentliche Intake-Prompt wird bewusst NICHT hier gesendet: Der Aufrufer
-  // entscheidet, ob der Turn sofort (runDecisionIntake) oder erst bei der
-  // nächsten Nutzernachricht (Modusmenü via before_agent_start) startet.
-  async function enterDecisionMode(ctx: ExtensionContext): Promise<boolean> {
-    const token = captureSessionToken(ctx);
-    if (!ctx.hasUI || ctx.mode !== "tui") {
-      ctx.ui.notify(
-        "Decision-Intake benötigt den TUI-Modus (ask_user ist interaktiv nur dort verfügbar).",
-        "warning",
-      );
-      return false;
-    }
-    if (hasBlockingForeignExecution(ctx, "Decision-Intake")) return false;
-    if (!(await confirmAbortActiveTurn(ctx))) return false;
-    normalizeInterruptedPhase(ctx);
-
-    // Bestehendes Decision Brief vor stillem Überschreiben schützen.
-    const briefState = readDecisionBriefState(ctx.cwd);
-    if (briefState.status === "unreadable") {
-      ctx.ui.notify(
-        `Decision-Intake abgebrochen: ${briefState.error}`,
-        "error",
-      );
-      return false;
-    }
-    const briefExists = briefState.status === "ok";
-    if (briefExists) {
-      const decision = await runMenu<OverwriteDecision>(
-        ctx,
-        "Bestehendes Decision Brief schützen",
-        buildBriefOverwriteGuardMenu(),
-        {
-          fallbackPrompt: "Bestehendes Decision Brief behandeln",
-          nonInteractiveHint:
-            "Bestehendes Decision Brief würde überschrieben werden — Abbruch zum Schutz.",
-        },
-      );
-      if (!isSessionTokenCurrent(token, ctx)) return false;
-      if (!decision || decision === "cancel") {
-        ctx.ui.notify(
-          "Decision-Intake abgebrochen; bestehendes Decision Brief bleibt erhalten.",
-          "info",
-        );
-        return false;
-      }
-      if (decision === "archive-first") {
-        try {
-          const archivePath = withWorkspaceLock(ctx.cwd, () =>
-            archiveDecisionBrief(
-              ctx.cwd,
-              hashPlanContent(briefState.content),
-            ),
-          );
-          ctx.ui.notify(
-            `Bisheriges Decision Brief archiviert: ${relative(ctx.cwd, archivePath)}`,
-            "info",
-          );
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          ctx.ui.notify(
-            `Archivierung fehlgeschlagen; Intake abgebrochen: ${message}`,
-            "error",
-          );
-          return false;
-        }
-      }
-    }
-
-    try {
-      ensurePlanDirectory(ctx.cwd);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Decision-Intake konnte nicht gestartet werden: ${message}`,
-        "error",
-      );
-      return false;
-    }
-
-    phase = "deciding";
-    reviewedHash = undefined;
-    startRun("deciding", ctx);
-    updateStatus(ctx);
-    if (!persistState(ctx)) {
-      phase = readPlanFileState(ctx.cwd).status === "ok" ? "draft" : "idle";
-      activeRun = undefined;
-      updateStatus(ctx);
-      ctx.ui.notify(
-        "Decision-Intake wegen eines konkurrierenden Workflow-Zustands abgebrochen.",
-        "warning",
-      );
-      return false;
-    }
-    return true;
+  async function choosePlanKind(
+    args: string,
+    ctx: ExtensionContext,
+  ): Promise<PlanKind | undefined> {
+    const normalized = args.trim().toLowerCase();
+    if (["quick", "schnell", "simple"].includes(normalized))
+      return "simple_plan";
+    if (["architecture", "architektur", "detailed"].includes(normalized))
+      return "detailed_plan";
+    const choice = await ctx.ui.select("Planart", [
+      "Schnellplan",
+      "Architekturplan",
+    ]);
+    return choice === "Schnellplan"
+      ? "simple_plan"
+      : choice === "Architekturplan"
+        ? "detailed_plan"
+        : undefined;
   }
 
-  // Decision-Intake: vorgeschalteter Klär-Turn. Klärt über ask_user echte
-  // Entscheidungen und endet mit einem [DECISION-BRIEF]-Block. Startet keine
-  // Umsetzung und wechselt nicht nach /work. Startet den Intake SOFORT
-  // (triggerTurn) — genutzt von /decide und der /plan-Aktion (clarify).
-  async function runDecisionIntake(ctx: ExtensionContext): Promise<void> {
-    if (!(await enterDecisionMode(ctx))) return;
-
-    pi.sendMessage(
-      {
-        customType: "plan-decision-request",
-        content: `${DECISION_INTAKE_MARKER}
-Starte den Decision-Intake für die anstehende Aufgabe. Kläre über ask_user die
-wesentlichen Entscheidungen (je 2–4 Optionen mit Bedeutung + Empfehlung), wie im
-Kontext beschrieben, und schließe mit genau einem [DECISION-BRIEF]-Block ab.
-Starte keine Umsetzung und wechsle nicht nach /work.`,
-        display: true,
-      },
-      { triggerTurn: true },
-    );
-  }
-
-  // Shift+Tab-Eintrag „Optionen klären": wechselt nur still in den Klär-Modus,
-  // ohne sofort einen Intake-Turn zu starten — analog zu den anderen Plan-Modi.
-  // Der Intake-Kontext wird bei der nächsten Nutzernachricht über den
-  // before_agent_start-Handler (phase=deciding) injiziert.
-  async function enterDecisionModeFromMenu(
+  async function beginPlanning(
+    kind: PlanKind,
     ctx: ExtensionContext,
   ): Promise<void> {
-    if (phase === "deciding" && ctx.isIdle()) {
-      ctx.ui.notify(
-        "Optionen klären ist bereits aktiv – die nächste Nachricht startet den Intake.",
-        "info",
-      );
-      return;
-    }
-    if (!(await enterDecisionMode(ctx))) return;
-    ctx.ui.notify(
-      "Optionen klären aktiv – die nächste Nachricht startet den Intake.",
-      "info",
-    );
-  }
-
-  // Wertet das Ende eines Decision-Turn aus: findet die Extension einen
-  // [DECISION-BRIEF]-Block in der Antwort, schreibt sie ihn atomar nach
-  // decision-brief.md (die Extension schreibt selbst, damit der Turn auf jeder
-  // Permission-Stufe läuft). Ohne Block wird konservativ nichts gespeichert.
-  async function handleDecisionTurnEnd(
-    event: { messages: AgentMessage[] },
-    ctx: ExtensionContext,
-  ): Promise<void> {
-    if (!isCurrentRun("deciding", ctx)) return;
-    const block = extractDecisionBriefBlock(
-      getLatestAssistantText(event.messages),
-    );
-
-    let planExists = false;
-    try {
-      planExists = readPlanFile(ctx.cwd) !== undefined;
-    } catch {
-      planExists = false;
-    }
-
-    const resetPhase = () => {
-      phase = planExists ? "draft" : "idle";
-      reviewedHash = undefined;
-      activeRun = undefined;
-      updateStatus(ctx);
-      persistState(ctx);
-    };
-
-    if (!block) {
-      resetPhase();
-      ctx.ui.notify(
-        "Kein Decision-Brief-Block erkannt; nichts gespeichert. Nutze /decide für einen neuen Versuch.",
-        "warning",
-      );
-      return;
-    }
-
-    const structureErrors = validateDecisionBriefStructure(block);
-    if (structureErrors.length > 0) {
-      try {
-        writeInvalidDecisionBriefAtomic(ctx.cwd, block);
-      } catch {
-        // Debug-Kopie ist optional — Fehler hier nicht nach oben weiterleiten.
-      }
-      resetPhase();
-      ctx.ui.notify(
-        `Decision Brief ungültig – nicht gespeichert:\n${structureErrors.join("\n")}\nKopie abgelegt unter ${INVALID_DECISION_BRIEF_RELATIVE_PATH}. Nutze /decide für einen neuen Versuch.`,
-        "error",
-      );
-      return;
-    }
-
-    try {
-      writeDecisionBriefAtomic(ctx.cwd, block);
-      ctx.ui.notify(
-        `Decision Brief gespeichert → ${DECISION_BRIEF_RELATIVE_PATH}`,
-        "info",
-      );
-      // Bestätigte Entscheidungen dauerhaft ins Ledger übernehmen.
-      runLedgerCheckpoint(ctx, "decision-brief");
-      resetPhase();
-      await offerDecisionHandoff(ctx);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Decision Brief konnte nicht gespeichert werden: ${message}`,
-        "error",
-      );
-      resetPhase();
-    }
-  }
-
-  // Nicht-blockierendes Handoff-Menü nach einem geschriebenen Decision Brief.
-  // Schnell-/Architekturplan aktivieren nur den Modus (der finale Plan bleibt
-  // bei current-plan.md); nichts wird automatisch ausgeführt oder nach /work
-  // gewechselt.
-  async function offerDecisionHandoff(ctx: ExtensionContext): Promise<void> {
-    if (!ctx.hasUI || ctx.mode !== "tui") return;
-    if (typeof ctx.isIdle === "function" && !ctx.isIdle()) return;
-    const token = captureSessionToken(ctx);
-
-    const action = await runMenu<DecisionHandoffAction>(
-      ctx,
-      "Decision Brief — nächster Schritt",
-      buildDecisionHandoffMenu(),
-      {
-        fallbackPrompt: "Nächsten Schritt wählen",
-        nonInteractiveHint:
-          "Decision Brief gespeichert. Nutze /plan für Schnell-/Architekturplan.",
-      },
-    );
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    if (!action || action === "cancel") return;
-    if (action === "save-only") {
-      ctx.ui.notify(
-        `Decision Brief gespeichert → ${DECISION_BRIEF_RELATIVE_PATH}`,
-        "info",
-      );
-      return;
-    }
-
-    // quick / detailed → Plan-Modus aktivieren; bestehenden Plan schützen.
-    const targetMode = action === "quick" ? "simple_plan" : "detailed_plan";
-    await beginNewPlan(targetMode, ctx, { attachDecisionBrief: true });
-    if (mode !== targetMode) return;
-    ctx.ui.notify(
-      `${targetMode === "simple_plan" ? "Schnellplan" : "Architekturplan"} aktiv. Das Decision Brief wird als Kontext genutzt — beschreibe jetzt deine Aufgabe.`,
-      "info",
-    );
-  }
-
-  function splitModelReference(value: string): [string, string] | undefined {
-    const separator = value.indexOf("/");
-    if (separator <= 0 || separator === value.length - 1) return undefined;
-    return [value.slice(0, separator), value.slice(separator + 1)];
-  }
-
-  function modelDescription(
-    reference: string,
-    ctx: ExtensionContext,
-  ): { description: string; unavailable: boolean } {
-    const parsed = splitModelReference(reference);
-    if (!parsed) return { description: "Ungültige Modellreferenz", unavailable: true };
-    const [provider, id] = parsed;
-    const model = ctx.modelRegistry.find(provider, id);
-    if (!model) return { description: `${reference} · nicht in der Modell-Registry`, unavailable: true };
-    const available = ctx.modelRegistry.getAvailable().some(
-      (candidate) => candidate.provider === provider && candidate.id === id,
-    );
-    const context = ctx.model?.provider === provider && ctx.model.id === id
-      ? ctx.getContextUsage()?.tokens
-      : undefined;
-    const contextUsage = context === null || context === undefined ? "Kontext: —" : `Kontext: ${context}`;
-    const rates = model.cost?.input || model.cost?.output
-      ? `Input/Output: ${model.cost.input}/${model.cost.output}`
-      : "Input/Output: —";
-    return {
-      description: `${reference} · ${available ? "verfügbar" : "keine Auth"} · ${model.contextWindow ?? "—"} Kontext · ${model.maxTokens ?? "—"} Output · ${rates} · ${contextUsage}`,
-      unavailable: !available,
-    };
-  }
-
-  function nativeScopedModelPatterns(): string[] {
-    const path = join(getAgentDir(), "settings.json");
-    if (!existsSync(path)) return [];
-    try {
-      const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-      if (!raw || typeof raw !== "object") return [];
-      const patterns = (raw as { enabledModels?: unknown }).enabledModels;
-      return Array.isArray(patterns)
-        ? patterns.filter((pattern): pattern is string => typeof pattern === "string" && pattern.trim().length > 0)
-        : [];
-    } catch {
-      return [];
-    }
-  }
-
-  interface ModelOverlayAction {
-    reference: string;
-    thinkingLevel?: ThinkingLevel;
-    source: "global" | "scoped";
-  }
-
-  async function openModelScopes(ctx: ExtensionContext): Promise<void> {
-    const token = captureSessionToken(ctx);
-    const globalModels = ctx.modelRegistry.getAvailable()
-      .sort((left, right) => `${left.provider}/${left.id}`.localeCompare(`${right.provider}/${right.id}`));
-    const patterns = nativeScopedModelPatterns();
-    const scoped = patterns.length > 0
-      ? await resolveModelScopeWithDiagnostics(patterns, ctx.modelRegistry)
-      : { scopedModels: [], diagnostics: [] };
-    const selected = await runTabbedOverlay<ModelOverlayAction>(ctx, "Modelle & Scopes", [
-      {
-        id: "global",
-        label: "Globale Modelle",
-        entries: globalModels.map((model) => {
-          const reference = `${model.provider}/${model.id}`;
-          const details = modelDescription(reference, ctx);
-          return {
-            id: `model-${reference}`,
-            label: reference,
-            description: details.description,
-            value: { reference, source: "global" as const },
-            current: Boolean(ctx.model && `${ctx.model.provider}/${ctx.model.id}` === reference),
-          };
-        }),
-      },
-      {
-        id: "scopes",
-        label: "Scoped Models",
-        entries: scoped.scopedModels.length > 0 ? scoped.scopedModels.map(({ model, thinkingLevel }) => {
-          const reference = `${model.provider}/${model.id}`;
-          const details = modelDescription(reference, ctx);
-          return {
-            id: `scoped-model-${reference}`,
-            label: reference,
-            description: `${details.description}${thinkingLevel ? ` · Thinking: ${thinkingLevel}` : ""}`,
-            value: { reference, thinkingLevel, source: "scoped" as const },
-            current: Boolean(ctx.model && `${ctx.model.provider}/${ctx.model.id}` === reference),
-          };
-        }) : [{
-          id: "scoped-models-empty",
-          label: "Keine Scoped Models konfiguriert",
-          description: "Verwalte die native Auswahl über /scoped-models oder settings.enabledModels.",
-          disabled: true,
-          disabledReason: "Keine native Scope-Auswahl vorhanden.",
-        }],
-      },
-    ], { nonInteractiveHint: "Modellsteuerung benötigt den TUI-Modus." });
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    const action = selected?.entry.value;
-    if (!action) return;
-    if (!ctx.isIdle()) {
-      ctx.ui.notify(
-        "Modellwechsel ist nur möglich, wenn kein Agent-Turn läuft.",
-        "warning",
-      );
-      return;
-    }
-    const parsed = splitModelReference(action.reference);
-    if (!parsed) {
-      ctx.ui.notify("Modellreferenz ist ungültig.", "error");
-      return;
-    }
-    const [provider, id] = parsed;
-    const target = ctx.modelRegistry.find(provider, id);
-    if (!target) {
-      ctx.ui.notify(
-        `Modell ist nicht verfügbar (${action.reference}). Prüfe Provider und Credentials.`,
-        "error",
-      );
-      return;
-    }
-    try {
-      await pi.setModel(target);
-      if (action.thinkingLevel) pi.setThinkingLevel(action.thinkingLevel);
-      if (!isSessionTokenCurrent(token, ctx)) return;
-      ctx.ui.notify(
-        `${action.source === "scoped" ? "Scoped Model" : "Globales Modell"}: ${action.reference} aktiv.`,
-        "info",
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Modell konnte nicht aktiviert werden (${action.reference}): ${message}`,
-        "error",
-      );
-    }
-  }
-
-  type SkillCommand = { name: string; description?: string; sourceInfo?: { path?: string } };
-  type WorkOverlayAction = ControlCenterAction | "review-plan" | "plan-todos" | "changes" | "history" | "skills-library" | "skills-toggles" | "skills-status";
-
-  function nativeSkillCommands(): SkillCommand[] {
-    return (pi.getCommands() as unknown as SkillCommand[])
-      .filter((command) => command.name.startsWith("skill:"))
-      .sort((left, right) => left.name.localeCompare(right.name));
-  }
-
-  function persistSelectedSkills(): void {
-    pi.appendEntry("skill-selection", { commands: [...selectedSkillCommands] });
-  }
-
-  async function openSkillLibrary(ctx: ExtensionContext, togglesOnly = false): Promise<void> {
-    const commands = nativeSkillCommands();
-    if (commands.length === 0) {
-      ctx.ui.notify("Keine nativen Pi-Skills sind in dieser Sitzung verfügbar.", "warning");
-      return;
-    }
-    const entries = commands
-      .filter((command) => !togglesOnly || selectedSkillCommands.has(command.name))
-      .map((command) => ({
-        id: `skill-${command.name}`,
-        label: `/${command.name}`,
-        description: command.description ?? command.sourceInfo?.path ?? "Native Pi-Skill-Anweisung",
-        value: command.name,
-        current: selectedSkillCommands.has(command.name),
-      }));
-    if (entries.length === 0) {
-      ctx.ui.notify("Noch keine Quick-Skills ausgewählt. Öffne zuerst die Skill-Bibliothek.", "info");
-      return;
-    }
-    const selected = await runTabbedOverlay<string>(ctx, togglesOnly ? "Quick-Skill Toggles" : "Skill-Bibliothek", [
-      { id: "skills", label: togglesOnly ? "Ausgewählt" : "Native Skills", entries },
-    ], {
-      nonInteractiveHint: "Die Skill-Bibliothek benötigt den TUI-Modus.",
-      onSpace: ({ entry }) => {
-        const command = entry.value;
-        if (!command) return;
-        if (selectedSkillCommands.has(command)) selectedSkillCommands.delete(command);
-        else selectedSkillCommands.add(command);
-        entry.current = selectedSkillCommands.has(command);
-        persistSelectedSkills();
-      },
-    });
-    const command = selected?.entry.value;
-    if (!command) return;
-    const args = await ctx.ui.input(`/${command} starten`, "Optionale Aufgabe oder Argumente");
-    if (args === undefined) return;
-    pi.sendMessage({
-      customType: "skill-launch",
-      content: `[SKILL-LAUNCH]\nLade und befolge jetzt den nativen Pi-Skill /${command}.\nNutzerauftrag: ${args.trim() || "Führe den Skill für die aktuelle Aufgabe aus."}`,
-      display: true,
-    }, { triggerTurn: true });
-  }
-
-  function showSkillManagementStatus(ctx: ExtensionContext): void {
-    const count = nativeSkillCommands().length;
-    ctx.ui.notify(
-      `${count} native Skill(s) verfügbar. Skills und Extensions werden hier nur angezeigt; verwalte sie über skills/ bzw. die Pi-Konfiguration und starte Pi danach neu.`,
-      "info",
-    );
-  }
-
-  async function openControlCenter(ctx: ExtensionContext): Promise<void> {
-    const token = captureSessionToken(ctx);
-    const selected = await runTabbedOverlay<WorkOverlayAction>(ctx, "Arbeits-Overlay", [
-      {
-        id: "workflows",
-        label: "Workflows",
-        badge: MODE_LABEL[mode],
-        entries: [
-          { id: "mode-simple-plan", label: "Schnellplan", description: "Kleine Änderung atomar planen", value: "simple_plan", current: mode === "simple_plan" },
-          { id: "mode-detailed-plan", label: "Architekturplan", description: "Struktur, Abhängigkeiten und Risiken prüfen", value: "detailed_plan", current: mode === "detailed_plan" },
-          { id: "mode-work", label: "Arbeitsmodus", description: "Freie Aufgabe oder bestehenden Plan bearbeiten", value: "work", current: mode === "work" },
-          { id: "mode-decide", label: "Optionen klären", description: "Entscheidungsbrief vor der Planung erstellen", value: "decide", current: phase === "deciding" },
-        ],
-      },
-      {
-        id: "review",
-        label: "Review & To-dos",
-        entries: [
-          { id: "review-plan", label: "Review-Plan", description: "Aktuellen Plan auf Risiken, Tests und offene Entscheidungen prüfen", value: "review-plan" },
-          { id: "plan-todos", label: "Plan-To-dos", description: "Live-Status der Schritte des aktuellen Plans", value: "plan-todos" },
-          { id: "changes", label: "Diff-Check", description: "Änderungen der aktuellen Sitzung im Diff-Browser prüfen", value: "changes" },
-          { id: "history", label: "Task-Historie", description: "Archivierte Pläne zusammenfassen", value: "history" },
-        ],
-      },
-      {
-        id: "skills",
-        label: "Skills",
-        entries: [
-          { id: "skills-library", label: "Skill-Bibliothek", description: "Native Pi-Skills anzeigen; Space für die nächste Aufgabe vormerken", value: "skills-library" },
-          { id: "skills-toggles", label: "Quick-Skill Toggles", description: "Nur für die nächste Aufgabe vorgemerkte Skills anzeigen", value: "skills-toggles" },
-          { id: "skills-status", label: "Custom Skills & Extensions", description: "Verfügbare Skills und sichere Verwaltungshinweise", value: "skills-status" },
-        ],
-      },
-    ], { nonInteractiveHint: "Arbeits-Overlay benötigt den TUI-Modus." });
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    const action = selected?.entry.value;
-    if (!action) return;
-    if (action === "decide") {
-      await enterDecisionModeFromMenu(ctx);
-      return;
-    }
-    if (
-      action === "simple_plan" ||
-      action === "detailed_plan" ||
-      action === "work"
-    ) {
-      await setWorkflowMode(action, ctx);
-      return;
-    }
-    if (action === "review-plan") {
-      await reviewPlan(ctx);
-      return;
-    }
-    if (action === "plan-todos") {
-      showPlanTodos(ctx);
-      return;
-    }
-    if (action === "changes") {
-      pi.events.emit(CONTROL_CENTER_EVENTS.openChanges, { ctx });
-      return;
-    }
-    if (action === "history") {
-      ctx.ui.notify("Task-Historie folgt den archivierten Plänen unter .agent/plans/archive.", "info");
-      return;
-    }
-    if (action === "skills-library") {
-      await openSkillLibrary(ctx);
-      return;
-    }
-    if (action === "skills-toggles") {
-      await openSkillLibrary(ctx, true);
-      return;
-    }
-    showSkillManagementStatus(ctx);
-  }
-
-  registerPlanEntryCommands(pi, {
-    routePlan,
-    showPlanTodos,
-    runDecisionIntake,
-    openControlCenter,
-    openModelScopes,
-  });
-  registerWorkflowContextCleanup(pi);
-
-  // Liefert einen Kontext-Zusatz mit dem aktuellen Decision Brief, falls eines
-  // existiert. Wird an die simple_plan-/detailed_plan-Kontexte angehängt, damit
-  // der folgende Plan-Turn die gewählte Richtung respektiert. Bleibt leer,
-  // wenn kein Brief vorhanden ist.
-  function decisionBriefContext(cwd: string): string {
-    if (!decisionBriefHash) return "";
-    let brief: string | undefined;
-    try {
-      brief = readDecisionBrief(cwd);
-    } catch {
-      return "";
-    }
-    if (!brief || hashPlanContent(brief) !== decisionBriefHash) return "";
-    return `
-
-ENTSCHEIDUNGS-KONTEXT (Decision Brief):
-Ein Decision Brief liegt vor unter ${DECISION_BRIEF_RELATIVE_PATH}. Respektiere
-die darin gewählte Richtung, öffne verworfene Optionen nicht erneut, übernimm
-die getroffenen Entscheidungen, mache offene Fragen sichtbar und leite konkrete
-Todos daraus ab. Frage nur dann erneut nach, wenn eine offene Frage wirklich
-planungsrelevant ist.
-
-<decision-brief>
-${brief}
-</decision-brief>`;
-  }
-
-  pi.on("before_agent_start", async (_event, ctx) => {
-    try {
-      planExistedBeforeTurn = readPlanFile(ctx.cwd) !== undefined;
-    } catch {
-      planExistedBeforeTurn = false;
-    }
-
-    if (phase === "deciding") {
-      return {
-        message: {
-          customType: "plan-decision-context",
-          content: `${DECISION_INTAKE_MARKER}
-Du bist im Decision-Intake (Klärmodus). Deine Aufgabe ist ausschließlich, die
-für die Umsetzung wesentlichen Entscheidungen zu klären — NICHT die Umsetzung
-selbst und KEINEN finalen Arbeitsplan zu schreiben.
-
-Vorgehen:
-- Kläre Entscheidungen strukturiert über das Tool ask_user.
-- Stelle pro ask_user-Aufruf genau EINE Frage mit 2–4 konkreten Optionen.
-- Jede Option bekommt eine kurze Bedeutung / Konsequenz / Vor- bzw. Nachteil.
-- Nenne zu jeder Frage immer eine Empfehlung.
-- Stelle keine Fragen, deren Antwort aus dem Kontext ableitbar ist, und keine
-  reinen Geschmacksfragen ohne Auswirkung auf Umsetzung, Risiko, UX,
-  Sicherheit oder Architektur.
-- Kläre stattdessen recherchierbare Fakten bei Bedarf selbst mit dem
-  \`subagent\`-Tool (siehe AGENTS.md → Subagenten-Delegation), statt den
-  Nutzer nach Bekanntem zu fragen.
-- Prüfe nach jeder Frage, ob weitere Klärung wirklich nötig ist.
-- Der Nutzer kann jederzeit abbrechen oder das Decision Brief erstellen lassen.
-
-Budget:
-- Standardmäßig höchstens ${DECISION_BUDGET_DEFAULT} Entscheidungsfragen.
-- Bei größeren Architektur-, Workflow-, Permission-, UI/UX- oder
-  Sicherheitsänderungen höchstens ${DECISION_BUDGET_COMPLEX} Fragen.
-- Wenn nach Erreichen des Budgets noch offene Punkte bestehen, dokumentiere
-  sie im Brief unter „Offene Fragen" statt endlos nachzufragen.
-
-Abschluss:
-- Schreibe KEINE Dateien und starte KEINE Umsetzung (auch nicht /work).
-- Beende den Turn mit genau einem Block in dieser Form:
-
-[DECISION-BRIEF]
-# Decision Brief: <Aufgabe>
-
-## Ziel
-<Klare Beschreibung, was erreicht werden soll>
-
-## Nicht-Ziele
-<Was ausdrücklich nicht gemacht werden soll>
-
-## Gewählte Richtung
-<Kurze Zusammenfassung der empfohlenen Variante>
-
-## Entscheidungen
-- Entscheidung: ...
-  Begründung: ...
-  Status: entschieden
-
-## Verworfene Optionen
-- Option: ...
-  Grund: ...
-
-## Risiken / Constraints
-- ...
-
-## Offene Fragen
-- ...
-
-## Abschlusskriterien
-- [ ] ...
-
-## Empfohlener nächster Schritt
-- Schnellplan oder Architekturplan
-[/DECISION-BRIEF]
-
-Pflicht sind die Abschnitte Ziel, Entscheidungen und Abschlusskriterien.
-Das System speichert den Block als ${DECISION_BRIEF_RELATIVE_PATH} und bietet
-danach den Handoff an. Stoppe nach dem Block.`,
-          display: false,
-        },
-      };
-    }
-
-    if (phase === "reviewing") {
-      return {
-        message: {
-          customType: "plan-review-context",
-          content: `${PLAN_REVIEW_MARKER}
-Prüfe den Plan auf Umsetzbarkeit, Vollständigkeit, Risiken, Tests und ungeklärte Entscheidungen.
-
-Du darfst ausschließlich ${PLAN_RELATIVE_PATH} überarbeiten. Andere Schreibzugriffe sind verboten.
-Wenn mehrere relevante Lösungen möglich sind, stelle vor dem Review-Ergebnis mit ask_user genau eine fokussierte Frage pro Aufruf. Biete jeweils 2–4 Optionen mit Vor-/Nachteilen und einer Empfehlung an.
-Ziehe bei riskanten oder architektonisch unklaren Plänen bei Bedarf das \`subagent\`-Tool hinzu (siehe AGENTS.md → Subagenten-Delegation).
-
-Ein Plan mit offenen entscheidungsrelevanten Fragen darf nicht als geprüft markiert werden.
-Beende den Review mit genau einem Marker:
-- [PLAN-REVIEW:APPROVED]
-- [PLAN-REVIEW:CHANGES-REQUIRED]`,
-          display: false,
-        },
-      };
-    }
-
-    if (mode === "simple_plan") {
-      return {
-        message: {
-          customType: "simple-plan-context",
-          content: SIMPLE_PLAN_PROMPT + decisionBriefContext(ctx.cwd),
-          display: false,
-        },
-      };
-    }
-
-    if (mode === "detailed_plan") {
-      return {
-        message: {
-          customType: "plan-mode-context",
-          content:
-            `${PLAN_MODE_MARKER}
-Du bist im ausführlichen Plan-Modus. Analysiere Kontext, Risiken, Optionen,
-Abhängigkeiten und Umsetzungsschritte gründlich. Der Workflow-Modus verändert
-keine manuell gewählte Permission-Stufe; halte die aktuell aktive Zugriffsstufe
-ein.
-
-Führe die Aufgabe nicht aus. Schreibe ausschließlich den Plan nach
-${PLAN_RELATIVE_PATH}, sofern die aktuelle Permission-Stufe dies erlaubt.
-
-ENTSCHEIDUNGEN:
-Wenn mehrere relevante Lösungen möglich sind, nutze vor dem finalen Plan ask_user.
-Stelle pro Aufruf genau eine fokussierte Frage und biete 2–4 Optionen mit Vor-/Nachteilen und Empfehlung an.
-
-SUBAGENTEN:
-Nutze das \`subagent\`-Tool bei Bedarf, wenn eine Teilaufgabe dazu passt (siehe AGENTS.md → Subagenten-Delegation).
-
-PLANSTRUKTUR (alle Abschnitte sind Pflicht):
-# Arbeitsplan: <Aufgabe>
-
-## 1. Auftrag
-## 2. Nicht-Ziele
-## 3. Betroffene Bereiche
-## 4. Risiken / Entscheidungen
-## 5. Todos
-- [ ] Konkreter Schritt
-## 6. Tests / Checks
-- Was nach der Umsetzung geprüft werden muss
-## 7. Abschlusskriterien
-- Woran erkennbar ist, dass die Aufgabe vollständig erledigt ist
-
-Alle 7 Abschnitte sind Pflicht. Leere Abschnitte sind nicht erlaubt.
-/work validiert den Plan vor dem Start und stoppt bei fehlenden Abschnitten.
-
-Schreibe den finalen Plan nach ${PLAN_RELATIVE_PATH} und stoppe danach.
-Nächster Schritt: /work. Bei großen, riskanten oder architektonischen Änderungen optional vorher /review-plan.` +
-            decisionBriefContext(ctx.cwd),
-          display: false,
-        },
-      };
-    }
-
-    if (phase === "executing") {
-      if (!isCurrentRun("executing", ctx)) {
-        phase = "paused";
-        updateStatus(ctx);
-        persistState(ctx);
-        return;
-      }
-      const executionId = activeRun?.id;
-      if (!executionId) return;
-      let todos: TodoItem[] = [];
-      try {
-        todos = readTodos(ctx.cwd).filter((todo) => !todo.completed);
-      } catch {
-        // The command path performs the user-facing error handling.
-      }
-      const todoList = todos
-        .map((todo) => `T${todo.step}. ${todo.text}`)
-        .join("\n");
-      return {
-        message: {
-          customType: "plan-execution-context",
-          content: `${EXECUTING_PLAN_MARKER} — aktuelle Permission-Stufe bleibt aktiv
-
-Execution-ID: ${executionId}
-
-Offene Schritte:
-${todoList || "Keine offenen Todos gefunden."}
-
-STOP-REGELN (verbindlich):
-- Prüfe vor jedem Schritt, ob er noch zum Plan passt. Weiche nicht ab.
-- Keine stillen Scope-Erweiterungen, keine neuen Features außerhalb des Plans.
-- Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.
-- Markiere einen Schritt nur als erledigt, wenn du einen konkreten Nachweis hast.
-- Stoppe und melde einen Blocker, wenn Plan und Realität in Konflikt stehen.
-
-${SUBAGENT_EXECUTING_REMINDER}
-
-FORTSCHRITT:
-- Nutze \`plan_progress\` mit \`executionId: "${executionId}"\` für jeden Statuswechsel eines Todos.
-- \`completed\` ist nur mit konkretem Nachweis zulässig.
-- \`blocked\` braucht die konkrete Ursache als Nachweis.
-- Textmarker sind nur noch ein Legacy-Fallback; der Toolzustand ist maßgeblich.`,
-          display: false,
-        },
-      };
-    }
-  });
-
-  pi.on("before_agent_start", (_event, _ctx) => {
-    if (selectedSkillCommands.size === 0) return;
-    const commands = [...selectedSkillCommands];
-    selectedSkillCommands.clear();
-    persistSelectedSkills();
-    return {
-      message: {
-        customType: "skill-selection",
-        content: `[SKILL-SELECTION]\nFür diese Aufgabe wurden folgende native Pi-Skills ausgewählt: ${commands.map((name) => `/${name}`).join(", ")}.\nLade vor der Bearbeitung die vollständigen SKILL.md-Anweisungen dieser Skills und befolge sie. Die bestehende Permission- und Workflow-Policy bleibt unverändert.`,
-        display: false,
-      },
-    };
-  });
-
-  function completePlanSteps(
-    ctx: ExtensionContext,
-    current: string,
-    completedSteps: readonly number[],
-    evidence: string,
-  ):
-    | {
-        ok: true;
-        content: string;
-        updated: number;
-        todos: TodoItem[];
-        planHash: string;
-      }
-    | {
-        ok: false;
-        reason: string;
-        expectedHash?: string;
-        currentHash: string;
-      } {
-    const currentHash = hashPlanContent(current);
-    if (
-      phase === "executing" &&
-      activeRun?.kind === "executing" &&
-      activeRun.planHash &&
-      currentHash !== activeRun.planHash
-    ) {
-      return {
-        ok: false,
-        reason:
-          "Der Plan wurde außerhalb der aktuellen Execution verändert; Fortschritt wurde nicht übernommen.",
-        expectedHash: activeRun.planHash,
-        currentHash,
-      };
-    }
-
-    try {
-      return withWorkspaceLock(ctx.cwd, () => {
-        const lockedContent = readPlanFile(ctx.cwd);
-        if (
-          lockedContent === undefined ||
-          hashPlanContent(lockedContent) !== currentHash
-        ) {
-          return {
-            ok: false as const,
-            reason:
-              "Der Plan wurde vor der Fortschrittsmutation konkurrierend verändert.",
-            currentHash:
-              lockedContent === undefined
-                ? "missing"
-                : hashPlanContent(lockedContent),
-          };
-        }
-
-        const result = applyDoneSteps(lockedContent, completedSteps);
-        if (result.updated > 0) {
-          writePlanFileAtomic(ctx.cwd, result.content);
-        }
-        const planHash = hashPlanContent(result.content);
-        if (activeRun?.kind === "executing") activeRun.planHash = planHash;
-
-        if (result.updated > 0) {
-          const updatedAt = new Date().toISOString();
-          const completed = new Set(completedSteps);
-          progressRecords = [
-            ...progressRecords.filter((record) => !completed.has(record.step)),
-            ...extractTodoItems(result.content)
-              .filter((todo) => completed.has(todo.step) && todo.completed)
-              .map((todo) => ({
-                step: todo.step,
-                status: "completed" as const,
-                evidence,
-                updatedAt,
-              })),
-          ].sort((a, b) => a.step - b.step);
-        }
-
-        return {
-          ok: true as const,
-          content: result.content,
-          updated: result.updated,
-          todos: extractTodoItems(result.content),
-          planHash,
-        };
-      });
-    } catch (error) {
-      return {
-        ok: false,
-        reason: `Plan-Datei konnte nicht atomar aktualisiert werden: ${error instanceof Error ? error.message : String(error)}`,
-        currentHash,
-      };
-    }
-  }
-
-  pi.on("turn_end", async (event, ctx) => {
-    if (
-      phase !== "executing" ||
-      !isCurrentRun("executing", ctx) ||
-      !isAssistantMessage(event.message) ||
-      event.message.stopReason !== "stop"
-    )
-      return;
-
-    try {
-      const current = readPlanFile(ctx.cwd);
-      if (current === undefined) {
-        phase = "draft";
-        reviewedHash = undefined;
-        ctx.ui.notify("Plan-Datei fehlt. Ausführung wurde gestoppt.", "error");
-        updateStatus(ctx);
-        persistState(ctx);
-        return;
-      }
-
-      const text = getTextContent(event.message);
-      const progressSteps = extractProgressBlock(text);
-      const completedSteps =
-        progressSteps !== undefined ? progressSteps : extractDoneSteps(text);
-      const result = completePlanSteps(
-        ctx,
-        current,
-        completedSteps,
-        "Über Legacy-Fortschrittsmarker gemeldet.",
-      );
-      if (!result.ok) {
-        phase = "paused";
-        activeRun = undefined;
-        updateStatus(ctx);
-        persistState(ctx);
-        ctx.ui.notify(`${result.reason} Ausführung pausiert.`, "warning");
-        return;
-      }
-
-      const todos = result.todos;
-      if (todos.length > 0 && todos.every((todo) => todo.completed)) {
-        phase = "ready";
-        updateStatus(ctx);
-        if (!persistState(ctx)) {
-          phase = "paused";
-          activeRun = undefined;
-          updateStatus(ctx);
-        }
-        // Plan abgeschlossen: erledigte Prioritäten aktualisieren, dauerhafte
-        // Fakten festschreiben.
-        runLedgerCheckpoint(ctx, "plan-complete");
-        return;
-      }
-      updateStatus(ctx);
-      if (!persistState(ctx)) {
-        phase = "paused";
-        activeRun = undefined;
-        updateStatus(ctx);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Todo-Status konnte nicht aktualisiert werden: ${message}`,
-        "error",
-      );
-    }
-  });
-
-  // Token-Proxy für den „vor Compaction"-Checkpoint. Pi Core besitzt keinen
-  // before_compaction-Hook; deshalb konsolidieren wir konservativ, sobald die
-  // Kontextauslastung Pis Compaction-Schwelle nähert — einmal je Fensterzyklus.
-  // Fällt die Auslastung wieder unter die Schwelle (typisch nach einer
-  // Compaction), wird der Checkpoint erneut scharf gestellt.
-  pi.on("turn_end", (_event, ctx) => {
-    let usage:
-      | { tokens: number | null; contextWindow: number; percent: number | null }
-      | undefined;
-    try {
-      usage = ctx.getContextUsage?.();
-    } catch {
-      return;
-    }
-    if (!usage || usage.tokens === null) {
-      // Unbekannte Auslastung (u. a. direkt nach einer Compaction) stellt den
-      // Checkpoint für den nächsten Zyklus wieder scharf.
-      ledgerTokenCheckpointArmed = true;
-      return;
-    }
-    const crossed = shouldCheckpointForTokens(
-      usage.tokens,
-      usage.contextWindow,
-    );
-    if (!crossed) {
-      ledgerTokenCheckpointArmed = true;
-      return;
-    }
-    if (!ledgerTokenCheckpointArmed) return;
-    ledgerTokenCheckpointArmed = false;
-    runLedgerCheckpoint(ctx, "token-threshold");
-  });
-
-  async function handleSettledRun(
-    event: { messages: AgentMessage[] },
-    ctx: ExtensionContext,
-  ): Promise<void> {
-    if (phase === "ready" && isCurrentRun("executing", ctx)) {
-      const expectedHash = activeRun?.planHash;
-      if (!latestAssistantSucceeded(event.messages)) {
-        activeRun = undefined;
-        stopExecutionHeartbeat();
-        updateStatus(ctx);
-        persistState(ctx);
-        ctx.ui.notify(
-          "Alle Todos sind erledigt, aber der Agent-Turn endete fehlerhaft oder wurde abgebrochen. Nutze /finish zum Archivieren.",
-          "warning",
-        );
-        return;
-      }
-      if (!expectedHash) {
-        activeRun = undefined;
-        stopExecutionHeartbeat();
-        updateStatus(ctx);
-        persistState(ctx);
-        ctx.ui.notify(
-          "Alle Todos sind erledigt, aber der erwartete Plan-Hash fehlt. Automatische Archivierung wurde sicher blockiert.",
-          "warning",
-        );
-        return;
-      }
-      await archiveCompletedPlan(ctx, expectedHash);
-      return;
-    }
-
-    if (
-      phase === "executing" &&
-      isCurrentRun("executing", ctx) &&
-      !latestAssistantSucceeded(event.messages)
-    ) {
-      phase = "paused";
-      activeRun = undefined;
-      updateStatus(ctx);
-      persistState(ctx);
-      ctx.ui.notify(
-        "Planausführung endete fehlerhaft oder wurde abgebrochen und wurde pausiert. Nutze /work für einen sicheren Resume.",
-        "warning",
-      );
-      return;
-    }
-
-    if (phase === "blocked" && isCurrentRun("executing", ctx)) {
-      activeRun = undefined;
-      updateStatus(ctx);
-      persistState(ctx);
-      return;
-    }
-
-    if (phase === "deciding") {
-      if (!isCurrentRun("deciding", ctx)) return;
-      if (!latestAssistantSucceeded(event.messages)) {
-        activeRun = undefined;
-        phase = readPlanFileState(ctx.cwd).status === "ok" ? "draft" : "idle";
-        updateStatus(ctx);
-        persistState(ctx);
-        ctx.ui.notify(
-          "Decision-Intake endete fehlerhaft oder wurde abgebrochen; kein Brief wurde übernommen.",
-          "warning",
-        );
-        return;
-      }
-      await handleDecisionTurnEnd(event, ctx);
-      return;
-    }
-
-    if (phase === "reviewing") {
-      if (!isCurrentRun("reviewing", ctx)) return;
-      const reviewText = latestAssistantSucceeded(event.messages)
-        ? getLatestAssistantText(event.messages)
-        : "";
-      const outcome = getReviewOutcome(reviewText);
-
-      try {
-        const content = readPlanFile(ctx.cwd);
-        const structureErrors =
-          content === undefined
-            ? [`Plan-Datei fehlt: ${PLAN_RELATIVE_PATH}`]
-            : validatePlanStructure(content, effectivePlanType(content));
-
-        if (
-          outcome === "approved" &&
-          content !== undefined &&
-          structureErrors.length === 0
-        ) {
-          reviewedHash = hashPlanContent(content);
-          phase = "reviewed";
-          if (currentPlanId) {
-            try {
-              const derived = deriveContractFromPlan(content, {
-                planId: currentPlanId,
-              });
-              if (derived) saveTaskContract(ctx.cwd, derived);
-            } catch {
-              // Best-effort: a missing/unwritable task contract never blocks review.
-            }
-          }
-          ctx.ui.notify(
-            "Plan geprüft. Der Reviewstatus ist erfasst; `/work` bleibt davon unabhängig verfügbar.",
-            "info",
-          );
-        } else {
-          reviewedHash = undefined;
-          phase = "draft";
-          const details =
-            structureErrors.length > 0
-              ? `\n${structureErrors.join("\n")}`
-              : outcome === "changes-required"
-                ? "\nDer Review verlangt Änderungen."
-                : "\nDer verbindliche Review-Marker fehlt.";
-          ctx.ui.notify(
-            `Review nicht abgeschlossen.${details}\nOptional nach Korrektur erneut /review-plan ausführen.`,
-            "warning",
-          );
-        }
-      } catch (error) {
-        reviewedHash = undefined;
-        phase = "draft";
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Plan-Review fehlgeschlagen: ${message}`, "error");
-      }
-
-      updateStatus(ctx);
-      persistState(ctx);
-      activeRun = undefined;
-      return;
-    }
-
-    if (
-      phase !== "draft" ||
-      (mode !== "simple_plan" && mode !== "detailed_plan")
-    )
-      return;
-    if (!latestAssistantSucceeded(event.messages)) {
-      pendingPlan = undefined;
-      ctx.ui.notify(
-        "Plan-Turn wurde nicht regulär beendet; Plan-Finalisierung und Übergabe wurden übersprungen.",
-        "warning",
-      );
-      return;
-    }
-    try {
-      let content = readPlanFile(ctx.cwd);
-      if (content !== undefined) {
-        const preMetadataHash = hashPlanContent(content);
-        const replacedPlan =
-          pendingPlan !== undefined &&
-          (pendingPlan.previousHash === undefined ||
-            preMetadataHash !== pendingPlan.previousHash);
-        if (replacedPlan && pendingPlan) {
-          planCreationMode = pendingPlan.mode;
-          progressRecords = [];
-          reviewedHash = undefined;
-          currentPlanId = undefined;
-          pendingPlan = undefined;
-        }
-        if (
-          !planExistedBeforeTurn &&
-          !replacedPlan &&
-          (mode === "simple_plan" || mode === "detailed_plan")
-        ) {
-          planCreationMode = mode;
-        }
-        if (planCreationMode) {
-          const metadata = ensurePlanMetadataHeader(
-            content,
-            planCreationMode,
-            currentPlanId,
-          );
-          if (metadata.changed) writePlanFileAtomic(ctx.cwd, metadata.content);
-          content = metadata.content;
-          currentPlanId = metadata.metadata.planId;
-        }
-        updateStatus(ctx);
-        ctx.ui.notify(`Plan gespeichert → ${PLAN_RELATIVE_PATH}`, "info");
-        // Das "Nächster Schritt"-Menü erscheint nur nach dem Turn, der die
-        // Plan-Datei neu erzeugt hat — Verfeinerungs-Turns bleiben menüfrei.
-        if (!planExistedBeforeTurn || replacedPlan) {
-          planExistedBeforeTurn = true;
-          persistState(ctx);
-          await offerPostPlanActions(ctx);
-        } else {
-          // A refinement can change the plan hash even when no workflow phase
-          // changes. Keep the sidecar synchronized with that Markdown edit.
-          persistState(ctx);
-        }
-      } else if (pendingPlan) {
-        pendingPlan = undefined;
-        ctx.ui.notify(
-          "Der neue Plan wurde nicht erstellt; der Pending-Zustand wurde zurückgesetzt.",
-          "warning",
-        );
-      }
-    } catch {
-      // Die zentrale Permission-Policy meldet unsichere Pfade separat.
-    }
-  }
-
-  pi.on("agent_end", async (event, ctx) => {
-    settlement.capture({
-      epoch: sessionEpoch,
-      sessionId: ctx.sessionManager.getSessionId(),
-      messages: event.messages,
-    });
-  });
-
-  pi.on("agent_settled", async (_event, ctx) => {
-    const pending = settlement.takeCurrent(
-      sessionEpoch,
-      activeSessionId,
-      ctx.sessionManager.getSessionId(),
-    );
-    if (!pending) return;
-    await handleSettledRun({ messages: pending.messages }, ctx);
-  });
-
-  async function reviewPlan(ctx: ExtensionContext): Promise<void> {
-    if (hasBlockingForeignExecution(ctx, "Plan-Review")) return;
-    if (!(await confirmAbortActiveTurn(ctx))) return;
-    normalizeInterruptedPhase(ctx);
-
-    let content: string | undefined;
-    try {
-      content = readPlanFile(ctx.cwd);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Plan-Datei ist nicht sicher lesbar: ${message}`, "error");
-      return;
-    }
-    if (content === undefined) {
-      ctx.ui.notify(
-        `Keine Plan-Datei gefunden: ${PLAN_RELATIVE_PATH}\nErstelle zuerst einen Plan mit /plan.`,
-        "warning",
-      );
-      return;
-    }
-
-    const reviewPlanHash = hashPlanContent(content);
-    reviewedHash = undefined;
-    phase = "reviewing";
-    startRun("reviewing", ctx, reviewPlanHash);
-    updateStatus(ctx);
-    if (!persistState(ctx, reviewPlanHash)) {
-      phase = "draft";
-      activeRun = undefined;
-      updateStatus(ctx);
-      ctx.ui.notify(
-        "Plan-Review wegen eines konkurrierenden Workflow-Zustands abgebrochen.",
-        "warning",
-      );
-      return;
-    }
-
-    const structureErrors = validatePlanStructure(
-      content,
-      effectivePlanType(content),
-    );
-    const staticFindings =
-      structureErrors.length === 0
-        ? "Die formale Planstruktur ist vollständig."
-        : `Formale Befunde:\n- ${structureErrors.join("\n- ")}`;
-
-    pi.sendMessage(
-      {
-        customType: "plan-review-request",
-        content: `[PLAN REVIEW REQUEST]
-${staticFindings}
-
-Prüfe jetzt den folgenden Plan inhaltlich. Überarbeite bei Bedarf ausschließlich ${PLAN_RELATIVE_PATH}. Kläre entscheidungsrelevante Alternativen strukturiert mit ask_user.
-
-<plan>
-${content}
-</plan>`,
-        display: true,
-      },
-      { triggerTurn: true },
-    );
-  }
-
-  // Archiviert ein vorhandenes Decision Brief zusammen mit dem Plan, damit es
-  // nicht als veralteter Kontext in spätere, fremde Plan-Turns injiziert wird.
-  // Fehler sind nicht fatal: das Plan-Archiv gilt unabhängig davon.
-  function archiveBriefAlongsidePlan(ctx: ExtensionContext): void {
-    const expectedHash = decisionBriefHash;
-    if (!expectedHash) return;
-    try {
-      const brief = readDecisionBrief(ctx.cwd);
-      if (!brief || hashPlanContent(brief) !== expectedHash) {
-        ctx.ui.notify(
-          "Vorhandenes Decision Brief gehört nicht zum abgeschlossenen Plan und bleibt aktiv.",
-          "warning",
-        );
-        decisionBriefHash = undefined;
-        return;
-      }
-      archiveDecisionBrief(ctx.cwd, expectedHash);
-      decisionBriefHash = undefined;
-      ctx.ui.notify("Decision Brief mitarchiviert.", "info");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Decision Brief konnte nicht mitarchiviert werden: ${message}`,
-        "warning",
-      );
-    }
-  }
-
-  // Einheitliches hartes Abschluss-Gate. Nur /finish darf einen Befund nach
-  // expliziter TUI-Bestätigung übersteuern.
-  async function runGateBeforeFinish(
-    ctx: ExtensionContext,
-  ): Promise<GateResult> {
-    return runVerificationGate({
-      projectRoot: ctx.cwd,
-      trusted: ctx.isProjectTrusted(),
-      exec: (program, args, options) =>
-        pi.exec(program, args, {
-          cwd: options.cwd,
-          timeout: options.timeout,
-          signal: options.signal as AbortSignal | undefined,
-        }),
-    });
-  }
-
-  // Gemeinsamer Abschlusspfad für agent_settled-Autoarchiv, /done und den
-  // "alle Todos erledigt"-Fall von /work. Bei Archivfehlern bleibt die Phase
-  // auf "ready", damit /finish als Retry dient.
-  async function archiveCompletedPlan(
-    ctx: ExtensionContext,
-    expectedPlanHash: string,
-  ): Promise<boolean> {
-    const token = captureSessionToken(ctx);
-    let archived = false;
-    try {
-      const beforeGate = readPlanFile(ctx.cwd);
-      if (
-        beforeGate === undefined ||
-        hashPlanContent(beforeGate) !== expectedPlanHash
-      ) {
-        throw new Error(
-          "Plan wurde vor der Abschlussprüfung verändert oder entfernt.",
-        );
-      }
-      const todos = extractTodoItems(beforeGate);
-      if (todos.length === 0 || todos.some((todo) => !todo.completed)) {
-        throw new Error(
-          "Plan enthält wieder offene oder keine Todos; er wird nicht als complete archiviert.",
-        );
-      }
-      let gate: GateResult;
-      try {
-        gate = await runGateBeforeFinish(ctx);
-      } catch (error) {
-        throw new Error(
-          `Verifikations-Gate konnte nicht ausgeführt werden: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      if (!isSessionTokenCurrent(token, ctx)) return false;
-      if (gate.status !== "pass") {
-        phase = "ready";
-        activeRun = undefined;
-        stopExecutionHeartbeat();
-        updateStatus(ctx);
-        persistState(ctx, expectedPlanHash);
-        ctx.ui.notify(
-          `Verifikations-Gate ${gate.status.toUpperCase()}: automatische Archivierung blockiert.\n${formatGateReport(gate)}\nBehebe die Befunde oder nutze /finish für eine explizite TUI-Übersteuerung.`,
-          "warning",
-        );
-        return false;
-      }
-      const archivePath = withWorkspaceLock(ctx.cwd, () =>
-        {
-          assertWorkflowStateToken(ctx.cwd, workflowStateToken);
-          return archivePlanFile(ctx.cwd, "complete", expectedPlanHash);
-        },
-      );
-      archiveBriefAlongsidePlan(ctx);
-      clearTaskContract(ctx.cwd);
-      phase = mode !== "work" ? "draft" : "idle";
-      reviewedHash = undefined;
-      activeRun = undefined;
-      foreignExecution = undefined;
-      stopExecutionHeartbeat();
-      archived = true;
-      pi.sendMessage(
-        {
-          customType: "plan-complete",
-          content: `**Plan vollständig bearbeitet und archiviert:** ${relative(ctx.cwd, archivePath)}`,
-          display: true,
-        },
-        { triggerTurn: false },
-      );
-    } catch (error) {
-      let stillComplete = false;
-      try {
-        const current = readPlanFile(ctx.cwd);
-        const todos = current ? extractTodoItems(current) : [];
-        stillComplete =
-          todos.length > 0 && todos.every((todo) => todo.completed);
-      } catch {
-        stillComplete = false;
-      }
-      phase = mode === "work" ? (stillComplete ? "ready" : "paused") : "draft";
-      activeRun = undefined;
-      stopExecutionHeartbeat();
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Archivierung als complete fehlgeschlagen: ${message}\nPlan bleibt aktiv; prüfe ihn und nutze danach /finish erneut.`,
-        "warning",
-      );
-    }
-    updateStatus(ctx);
-    persistState(ctx, undefined, { allowMissingPlanCleanup: archived });
-    return archived;
-  }
-
-  async function executePlan(ctx: ExtensionContext): Promise<void> {
-    if (executePlanInFlight) {
-      ctx.ui.notify("Ein /work-Start wird bereits verarbeitet.", "warning");
-      return;
-    }
-    executePlanInFlight = true;
-    try {
-      await executePlanInternal(ctx);
-    } finally {
-      executePlanInFlight = false;
-    }
-  }
-
-  async function executePlanInternal(ctx: ExtensionContext): Promise<void> {
-    const token = captureSessionToken(ctx);
-    let takeoverConfirmed = false;
     if (!ctx.isProjectTrusted()) {
-      if (!ctx.hasUI || ctx.mode !== "tui") {
-        ctx.ui.notify(
-          "Ein Plan aus einem nicht vertrauenswürdigen Workspace kann non-interaktiv nicht ausgeführt werden.",
-          "warning",
-        );
-        return;
-      }
-      const trustedResume = await ctx.ui.confirm(
-        "Plan aus nicht vertrauenswürdigem Workspace ausführen?",
-        "Der Planinhalt stammt aus dem aktuellen Repository. Nur fortfahren, wenn du ihn geprüft hast.",
+      notify(ctx, "Harte Trust-Grenze: Planung schreibt keine Artefakte in einem untrusted Projekt.", "error");
+      return;
+    }
+    reload(ctx);
+    if (loadDirectTask(ctx.cwd)) {
+      notify(ctx, "Eine direkte Aufgabe ist aktiv; schließe sie zuerst mit /task-done ab.", "warning");
+      return;
+    }
+    if (current.migrationRequired) {
+      notify(ctx, "Vor einer neuen Planung ist /migrate-plan erforderlich.", "warning");
+      return;
+    }
+    if (current.planContent) {
+      const confirmed = await ctx.ui.confirm(
+        "Aktiven Plan überarbeiten?",
+        "Die nächste Planrevision invalidiert bisherigen Fortschritt und Review.",
       );
-      if (!isSessionTokenCurrent(token, ctx) || !trustedResume) return;
+      if (!confirmed) return;
+    }
+    planningKind = kind;
+    planningBaseContent = current.planContent;
+    planningIsReview = false;
+    publishWorkflowActivation(ctx);
+    pi.sendMessage(
+      {
+        customType: "pi-plan-request",
+        content:
+          kind === "detailed_plan"
+            ? "Erstelle jetzt den Architekturplan."
+            : "Erstelle jetzt den Schnellplan.",
+        display: true,
+      },
+      { triggerTurn: true },
+    );
+    notify(ctx, "Planung gestartet; es wird noch nichts implementiert.");
+  }
 
-      // Untrusted artifacts stay inactive at session_start. After the explicit
-      // trust confirmation, hydrate their exact token/lease so the first
-      // /work attempt can claim safely without an avoidable CAS retry.
-      try {
-        const loaded = loadWorkflowState(ctx.cwd);
-        workflowStateToken = loaded.stateToken;
-        if (loaded.state) {
-          mode = loaded.state.mode;
-          phase = loaded.state.phase;
-          reviewedHash = loaded.state.reviewedHash;
-          planCreationMode = loaded.state.planCreationMode;
-          progressRecords = loaded.state.progress;
-          workflowRevision = loaded.state.revision;
-          currentPlanId = loaded.state.planId;
-          decisionBriefHash = loaded.state.decisionBriefHash;
-          foreignExecution =
-            loaded.state.lifecycle === "executing" &&
-            isExecutionLeaseLive(loaded.state.execution) &&
-            loaded.state.execution?.ownerId !== executionOwnerId
-              ? loaded.state.execution
-              : undefined;
-        }
-      } catch (error) {
-        ctx.ui.notify(
-          `Plan-Artefakte konnten nach der Vertrauensbestätigung nicht sicher geladen werden: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        );
-        return;
-      }
+  async function beginReview(ctx: ExtensionContext): Promise<void> {
+    if (!ctx.isProjectTrusted()) {
+      notify(ctx, "Harte Trust-Grenze: Plan-Review ist im untrusted Projekt blockiert.", "error");
+      return;
     }
-    if (phase === "executing" && foreignExecution) {
-      if (!ctx.hasUI || ctx.mode !== "tui") {
-        ctx.ui.notify(
-          "Dieser Plan besitzt eine aktive Execution-Lease in einer anderen Session. Eine Übernahme muss interaktiv mit /work bestätigt werden.",
-          "warning",
-        );
-        return;
-      }
-      const expectedForeign = foreignExecution;
-      const takeover = await ctx.ui.confirm(
-        "Aktive Planausführung übernehmen?",
-        `Execution ${expectedForeign.executionId} läuft in einer anderen Session. Die alte Session verliert beim nächsten CAS/Heartbeat ihre Schreibberechtigung.`,
+    const loaded = reload(ctx);
+    if (!loaded.snapshot || !loaded.planContent) {
+      notify(ctx, "Kein gültiger PlanSnapshot v3 vorhanden.", "warning");
+      return;
+    }
+    planningKind = loaded.snapshot.planType;
+    planningBaseContent = loaded.planContent;
+    planningIsReview = true;
+    publishWorkflowActivation(ctx);
+    pi.sendMessage(
+      {
+        customType: "pi-plan-review",
+        content: "Prüfe jetzt den aktuellen PlanSnapshot.",
+        display: true,
+      },
+      { triggerTurn: true },
+    );
+  }
+
+  async function startWork(ctx: ExtensionContext): Promise<void> {
+    if (!ctx.isProjectTrusted()) {
+      notify(ctx, "Harte Trust-Grenze: /work ist im untrusted Projekt blockiert.", "error");
+      return;
+    }
+    const loaded = reload(ctx);
+    if (loaded.migrationRequired) {
+      notify(ctx, "Legacy-State zuerst ausdrücklich mit /migrate-plan migrieren.", "warning");
+      return;
+    }
+    if (!loaded.snapshot || !loaded.state) {
+      notify(
+        ctx,
+        loaded.warnings.join("\n") || "Kein gültiger PlanSnapshot vorhanden.",
+        "warning",
       );
-      if (!isSessionTokenCurrent(token, ctx) || !takeover) return;
-      const loaded = loadWorkflowState(ctx.cwd);
-      if (
-        loaded.state?.lifecycle === "executing" &&
-        loaded.state.execution &&
-        (loaded.state.execution.executionId !== expectedForeign.executionId ||
-          loaded.state.execution.ownerId !== expectedForeign.ownerId)
-      ) {
-        ctx.ui.notify(
-          "Die aktive Execution hat sich während der Bestätigung geändert. Übernahme abgebrochen; starte /work erneut.",
-          "warning",
-        );
-        return;
-      }
-      workflowStateToken = loaded.stateToken;
-      if (loaded.state) {
-        mode = loaded.state.mode;
-        phase = "paused";
-        reviewedHash = loaded.state.reviewedHash;
-        planCreationMode = loaded.state.planCreationMode;
-        progressRecords = loaded.state.progress;
-        workflowRevision = loaded.state.revision;
-        currentPlanId = loaded.state.planId;
-        decisionBriefHash = loaded.state.decisionBriefHash;
-      }
-      foreignExecution = undefined;
-      activeRun = undefined;
-      takeoverConfirmed = true;
-      updateStatus(ctx);
-      if (!persistState(ctx, expectedForeign.expectedPlanHash)) {
-        ctx.ui.notify(
-          "Execution konnte wegen eines konkurrierenden Zustands nicht übernommen werden.",
-          "warning",
-        );
-        return;
-      }
+      return;
     }
-    if (phase === "executing") {
+    if (
+      loaded.state.status === "working" ||
+      loaded.state.status === "paused" ||
+      loaded.state.status === "blocked"
+    ) {
+      const confirmed = await ctx.ui.confirm(
+        "Planausführung fortsetzen?",
+        "Der gespeicherte Fortschritt wird konservativ fortgesetzt; eine Übernahme erfolgt nie zeitgesteuert.",
+      );
+      if (!confirmed) return;
+    }
+    const saved = replaceState(ctx, startOrResumeExecution(loaded.state));
+    publishWorkflowActivation(ctx);
+    pi.sendMessage(
+      {
+        customType: "pi-work-request",
+        content: executionPrompt(loaded.snapshot, saved),
+        display: true,
+      },
+      { triggerTurn: true },
+    );
+  }
+
+  async function finishWorkflow(
+    ctx: ExtensionContext,
+    allowOverride: boolean,
+  ): Promise<void> {
+    if (!ctx.isProjectTrusted()) {
+      notify(ctx, "Harte Trust-Grenze: Completion ist im untrusted Projekt blockiert.", "error");
+      return;
+    }
+    if (completionRunning) return;
+    let loaded = reload(ctx);
+    if (!loaded.snapshot || !loaded.state) {
+      notify(ctx, "Kein abschließbarer PlanSnapshot vorhanden.", "warning");
+      return;
+    }
+    const reviewedPlanHash = loaded.snapshot.planHash;
+    completionRunning = true;
+    try {
+      if (loaded.state.status !== "reviewing") {
+        loaded.state = replaceState(ctx, {
+          ...loaded.state,
+          status: "reviewing",
+          activeStepId: undefined,
+        });
+        loaded = current;
+      }
+      const result = await runCompletionPipeline({
+        projectRoot: ctx.cwd,
+        trusted: ctx.isProjectTrusted(),
+        exec: (program, args, options) =>
+          pi.exec(program, args, {
+            cwd: options.cwd,
+            timeout: options.timeout,
+            signal: options.signal as AbortSignal | undefined,
+          }),
+        plan: loaded.snapshot,
+        state: loaded.state,
+        runReviewer: (input) => runCompletionReviewerViaRpc(pi, input),
+        runLsp: (files) => requestLsp(pi, ctx.cwd, files),
+      });
+      notify(
+        ctx,
+        formatCompletionResult(result),
+        result.status === "pass" ? "info" : "warning",
+      );
+
+      let report = result.report;
+      const overrideAllowed =
+        result.checks.find((check) => check.name === "hard-boundaries")
+          ?.status === "pass";
       if (
-        !isCurrentRun("executing", ctx) ||
-        !activeRun?.id ||
-        !hasCurrentExecutionLease(ctx)
+        !report &&
+        overrideAllowed &&
+        allowOverride &&
+        ctx.mode === "tui" &&
+        ctx.hasUI
       ) {
-        phase = "paused";
-        activeRun = undefined;
-        stopExecutionHeartbeat();
-        updateStatus(ctx);
-        persistState(ctx);
-      } else if (!ctx.isIdle()) {
-        ctx.ui.notify("Plan wird bereits ausgeführt.", "warning");
+        const ui = ctx.ui as MutableUi;
+        const reason = (await ui.input?.(
+          "Completion-Override",
+          "Nichtleere Begründung für das bewusste Restrisiko",
+        ))?.trim();
+        if (reason) report = completionOverrideReport(result, loaded, reason);
+      }
+      if (!report) {
+        replaceState(ctx, {
+          ...(reload(ctx).state as WorkflowStateV3),
+          status: "blocked",
+          activeStepId: undefined,
+        });
         return;
-      } else {
-        const current = readPlanFileState(ctx.cwd);
-        if (
-          current.status !== "ok" ||
-          !activeRun.planHash ||
-          hashPlanContent(current.content) !== activeRun.planHash
-        ) {
-          phase = current.status === "missing" ? "idle" : "paused";
-          activeRun = undefined;
-          updateStatus(ctx);
-          persistState(ctx);
-          ctx.ui.notify(
-            current.status === "unreadable"
-              ? `Plan-Fortsetzung abgebrochen, weil die Plan-Datei nicht sicher lesbar ist: ${current.error}`
-              : current.status === "missing"
-                ? "Plan-Fortsetzung abgebrochen, weil die Plan-Datei fehlt."
-                : "Plan-Fortsetzung abgebrochen, weil der Plan außerhalb der aktuellen Execution verändert wurde.",
+      }
+
+      const verified = reload(ctx);
+      if (
+        !verified.snapshot ||
+        !verified.state ||
+        verified.snapshot.planHash !== reviewedPlanHash ||
+        verified.state.status !== "reviewing"
+      ) {
+        throw new Error(
+          "Plan oder State änderte sich nach Review; Abschluss wurde abgebrochen.",
+        );
+      }
+      const done = commitWorkflowDone(
+        ctx.cwd,
+        verified.state,
+        verified.stateToken,
+        report,
+      );
+      const archivePath = archiveCompletedWorkflow(
+        ctx.cwd,
+        done.state,
+        done.stateToken,
+        report,
+      );
+      current = {
+        stateToken: "missing",
+        recovered: false,
+        migrationRequired: false,
+        warnings: [],
+      };
+      updateWorkflowPresentation(ctx);
+      notify(ctx, `Plan erfolgreich archiviert: ${archivePath}`);
+    } catch (error) {
+      notify(ctx, `Completion abgebrochen: ${workflowWarning(error)}`, "error");
+      reload(ctx);
+    } finally {
+      completionRunning = false;
+    }
+  }
+
+  async function finishDirectTask(ctx: ExtensionContext): Promise<void> {
+    if (!ctx.isProjectTrusted()) {
+      notify(ctx, "Harte Trust-Grenze: Completion ist im untrusted Projekt blockiert.", "error");
+      return;
+    }
+    const task = loadDirectTask(ctx.cwd);
+    if (!task) {
+      notify(ctx, "Keine aktive direkte Aufgabe.", "warning");
+      return;
+    }
+    if (completionRunning) return;
+    completionRunning = true;
+    try {
+      const pipelineContext = {
+        projectRoot: ctx.cwd,
+        trusted: ctx.isProjectTrusted(),
+        exec: (program, args, options) =>
+          pi.exec(program, args, {
+            cwd: options.cwd,
+            timeout: options.timeout,
+            signal: options.signal as AbortSignal | undefined,
+          }),
+        directTask: task,
+        runReviewer: (input) => runCompletionReviewerViaRpc(pi, input),
+        runLsp: (files) => requestLsp(pi, ctx.cwd, files),
+      } satisfies Parameters<typeof runCompletionPipeline>[0];
+      let result = await runCompletionPipeline(pipelineContext);
+      notify(
+        ctx,
+        formatCompletionResult(result),
+        result.status === "pass" ? "info" : "warning",
+      );
+      const overrideAllowed =
+        result.checks.find((check) => check.name === "hard-boundaries")
+          ?.status === "pass";
+      if (
+        !result.report &&
+        overrideAllowed &&
+        ctx.mode === "tui" &&
+        ctx.hasUI
+      ) {
+        const reason = (await (ctx.ui as MutableUi).input?.(
+          "Direct-Task-Override",
+          "Nichtleere Begründung für den Abschluss trotz Befund",
+        ))?.trim();
+        if (reason) {
+          result = await runCompletionPipeline(pipelineContext, {
+            overrideReason: reason,
+          });
+          notify(
+            ctx,
+            `${formatCompletionResult(result)}\n\nOverride protokolliert: ${reason}`,
             "warning",
           );
+        }
+      }
+      if (!result.report) return;
+      pi.appendEntry("workflow-completion", result.report);
+      clearDirectTask(ctx.cwd);
+      notify(
+        ctx,
+        result.report.outcome === "override"
+          ? "Direkte Aufgabe mit begründetem Override abgeschlossen; Bericht wurde in der Sitzung protokolliert."
+          : "Direkte Aufgabe abgeschlossen; Bericht wurde in der Sitzung protokolliert.",
+      );
+    } catch (error) {
+      notify(ctx, `Direct Task nicht abgeschlossen: ${workflowWarning(error)}`, "error");
+    } finally {
+      completionRunning = false;
+    }
+  }
+
+  async function finalizePlanning(ctx: ExtensionContext): Promise<void> {
+    const kind = planningKind;
+    if (!kind) return;
+    planningKind = undefined;
+    const observed = planContent(ctx.cwd);
+    if (!observed) {
+      notify(ctx, `${PLAN_RELATIVE_PATH} wurde nicht erstellt.`, "warning");
+      return;
+    }
+    try {
+      const finalized = finalizePlanningTurn(
+        observed,
+        kind,
+        planningBaseContent,
+      );
+      const saved = finalizeObservedPlanCAS(
+        ctx.cwd,
+        observed,
+        finalized.snapshot,
+        current.stateToken,
+        current.state,
+      );
+      current = {
+        planContent: finalized.content,
+        snapshot: finalized.snapshot,
+        state: saved.state,
+        stateToken: saved.stateToken,
+        recovered: false,
+        migrationRequired: false,
+        warnings: [],
+      };
+      updateWorkflowPresentation(ctx, saved.state);
+      notify(
+        ctx,
+        planningIsReview
+          ? "Plan-Review abgeschlossen; die aktuelle Revision benötigt vor Arbeit erneut /work."
+          : `PlanSnapshot v3 gespeichert. Starte die Umsetzung ausdrücklich mit /work.`,
+      );
+    } catch (error) {
+      notify(
+        ctx,
+        `Plan ist noch nicht vertragskonform:\n${workflowWarning(error)}`,
+        "error",
+      );
+    } finally {
+      planningBaseContent = undefined;
+      planningIsReview = false;
+    }
+  }
+
+  pi.registerFlag("plan", {
+    description: "Im Architekturplan-Modus starten",
+    type: "boolean",
+    default: false,
+  });
+  pi.registerCommand("plan", {
+    description: "Schnell- oder Architekturplan erstellen",
+    handler: async (args, ctx) => {
+      const kind = await choosePlanKind(args, ctx);
+      if (kind) await beginPlanning(kind, ctx);
+    },
+  });
+  pi.registerCommand("review-plan", {
+    description: "Aktuellen Plan optional vertieft prüfen",
+    handler: async (_args, ctx) => beginReview(ctx),
+  });
+  pi.registerCommand("work", {
+    description: "Bestätigten Plan ausführen oder explizit fortsetzen",
+    handler: async (_args, ctx) => startWork(ctx),
+  });
+  pi.registerCommand("go", {
+    description: "Alias für /work",
+    handler: async (_args, ctx) => startWork(ctx),
+  });
+  pi.registerCommand("plan-todos", {
+    description: "Stabile Planschritte und Sidecar-Status anzeigen",
+    handler: async (_args, ctx) => {
+      const loaded = reload(ctx);
+      notify(
+        ctx,
+        loaded.snapshot && loaded.state
+          ? formatPlanSteps(loaded.snapshot, loaded.state)
+          : "Keine gültigen Planschritte vorhanden.",
+        loaded.snapshot && loaded.state ? "info" : "warning",
+      );
+    },
+  });
+  pi.registerCommand("done", {
+    description: "Planschritte manuell abschließen: /done <n> [m …]",
+    handler: async (args, ctx) => {
+      if (!ctx.isProjectTrusted()) {
+        notify(ctx, "Harte Trust-Grenze: Fortschritt ist im untrusted Projekt blockiert.", "error");
+        return;
+      }
+      const loaded = reload(ctx);
+      if (!loaded.snapshot || !loaded.state) {
+        notify(ctx, "Kein aktiver Plan.", "warning");
+        return;
+      }
+      const numbers = [
+        ...new Set(
+          args
+            .split(/[\s,]+/)
+            .filter(Boolean)
+            .map(Number)
+            .filter(Number.isSafeInteger),
+        ),
+      ];
+      if (numbers.length === 0) {
+        notify(ctx, "Verwendung: /done <n> [m …]", "warning");
+        return;
+      }
+      let state = loaded.state;
+      for (const number of numbers) {
+        const step = loaded.snapshot.steps[number - 1];
+        if (!step) {
+          notify(ctx, `Unbekannter Planschritt: ${number}`, "warning");
           return;
         }
-        pi.sendMessage(
-          {
-            customType: "plan-mode-continue",
-            content: `${EXECUTING_PLAN_MARKER}\nExecution-ID: ${activeRun.id}\nSetze die noch offenen Plan-Todos mit derselben Execution-ID fort.`,
-            display: true,
-          },
-          { triggerTurn: true },
-        );
+        state = updateExecutionStep(state, {
+          stepId: step.id,
+          status: "completed",
+          evidence: "Manuell über /done bestätigt.",
+        }).state;
+      }
+      replaceState(ctx, state);
+      if (state.status === "reviewing") await finishWorkflow(ctx, false);
+    },
+  });
+  pi.registerCommand("finish", {
+    description: "Completion-Pipeline ausführen; TUI-Override nur mit Begründung",
+    handler: async (_args, ctx) => finishWorkflow(ctx, true),
+  });
+  pi.registerCommand("discard-plan", {
+    description: "Aktiven Plan und Sidecar ausdrücklich verwerfen",
+    handler: async (_args, ctx) => {
+      if (!ctx.isProjectTrusted()) {
+        notify(ctx, "Harte Trust-Grenze: Verwerfen ist im untrusted Projekt blockiert.", "error");
         return;
       }
-    }
-    if (!(await confirmAbortActiveTurn(ctx))) return;
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    normalizeInterruptedPhase(ctx);
-
-    let content: string | undefined;
-    try {
-      content = readPlanFile(ctx.cwd);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Plan-Datei ist nicht sicher lesbar: ${message}`, "error");
-      return;
-    }
-
-    if (content === undefined) {
-      if (
-        !(await setWorkflowMode("work", ctx, {
-          force: true,
-          skipAbort: true,
-        }))
-      ) {
+      const loaded = reload(ctx);
+      if (!loaded.planContent && !loaded.state) {
+        notify(ctx, "Kein aktiver Workflow vorhanden.");
         return;
       }
-      phase = "idle";
-      activeRun = undefined;
-      updateStatus(ctx);
-      persistState(ctx);
-      ctx.ui.notify(
-        `Work Mode aktiv. Keine Plan-Datei gefunden: ${PLAN_RELATIVE_PATH}`,
-        "info",
+      const confirmed = await ctx.ui.confirm(
+        "Aktiven Plan verwerfen?",
+        "Plan, Sidecar und unarchivierter Completion-Report werden entfernt. Diese Aktion ist nicht automatisch rückgängig.",
       );
-      return;
-    }
-    const structureErrors = validatePlanStructure(
-      content,
-      effectivePlanType(content),
-    );
-    if (structureErrors.length > 0) {
-      phase = "draft";
-      reviewedHash = undefined;
-      updateStatus(ctx);
-      persistState(ctx);
-      ctx.ui.notify(
-        `Planstruktur ist nicht mehr gültig:\n${structureErrors.join("\n")}`,
-        "warning",
-      );
-      return;
-    }
-
-    if ((phase === "paused" || phase === "blocked") && !takeoverConfirmed) {
-      if (!ctx.hasUI || ctx.mode !== "tui") {
-        ctx.ui.notify(
-          "Eine pausierte oder blockierte Ausführung benötigt eine interaktive Resume-Bestätigung.",
+      if (!confirmed) return;
+      try {
+        discardActiveWorkflow(ctx.cwd, loaded.stateToken, true);
+        current = {
+          stateToken: "missing",
+          recovered: false,
+          migrationRequired: false,
+          warnings: [],
+        };
+        updateWorkflowPresentation(ctx);
+        notify(ctx, "Aktiver Plan und Sidecar wurden entfernt.", "warning");
+      } catch (error) {
+        notify(ctx, workflowWarning(error), "error");
+      }
+    },
+  });
+  pi.registerCommand("task", {
+    description: "Direkte Aufgabe mit Scope und Abschlusskriterien starten",
+    handler: async (args, ctx) => {
+      const goal = args.trim();
+      if (!goal) {
+        notify(ctx, "Nutzung: /task <Ziel>", "warning");
+        return;
+      }
+      if (!ctx.isProjectTrusted()) {
+        notify(ctx, "Harte Trust-Grenze: Direct Tasks sind im untrusted Projekt blockiert.", "error");
+        return;
+      }
+      if (reload(ctx).planContent) {
+        notify(
+          ctx,
+          "Ein Plan ist aktiv. Schließe ihn ab oder verwirf ihn ausdrücklich mit /discard-plan.",
           "warning",
         );
         return;
       }
-      const resume = await ctx.ui.confirm(
-        phase === "blocked"
-          ? "Blockierten Plan fortsetzen?"
-          : "Pausierten Plan fortsetzen?",
-        "Der Planhash wird erneut geprüft und eine neue Execution-ID erzeugt.",
-      );
-      if (!isSessionTokenCurrent(token, ctx)) return;
-      if (!resume) return;
-    }
-
-    // Sämtliche potenziell wartenden Bestätigungen liegen hinter uns. Von hier
-    // an darf ausschließlich exakt der erneut gelesene und validierte Plan
-    // geclaimt und an den Agenten übergeben werden.
-    const approvedHash = hashPlanContent(content);
-    const approvedState = readPlanFileState(ctx.cwd);
-    if (
-      approvedState.status !== "ok" ||
-      hashPlanContent(approvedState.content) !== approvedHash
-    ) {
-      ctx.ui.notify(
-        approvedState.status === "unreadable"
-          ? `Plan wurde während der Bestätigung unlesbar: ${approvedState.error}`
-          : "Plan wurde während der Bestätigung verändert oder entfernt. /work wurde ohne Ausführung abgebrochen.",
-        "warning",
-      );
-      return;
-    }
-    content = approvedState.content;
-    const approvedStructureErrors = validatePlanStructure(
-      content,
-      effectivePlanType(content),
-    );
-    if (approvedStructureErrors.length > 0) {
-      phase = "draft";
-      reviewedHash = undefined;
-      updateStatus(ctx);
-      persistState(ctx);
-      ctx.ui.notify(
-        `Planstruktur ist vor dem Execution-Claim nicht mehr gültig:\n${approvedStructureErrors.join("\n")}`,
-        "warning",
-      );
-      return;
-    }
-
-    if (reviewedHash && reviewedHash !== hashPlanContent(content)) {
-      // Review ist reine Statusinformation und darf /work niemals blockieren.
-      reviewedHash = undefined;
-      if (phase === "reviewed") phase = "draft";
-    }
-
-    if (currentPlanId) {
-      try {
-        const contract = deriveContractFromPlan(content, {
-          planId: currentPlanId,
-        });
-        if (contract) saveTaskContract(ctx.cwd, contract);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(
-          `Task Contract konnte vor /work nicht sicher gespeichert werden: ${message}`,
-          "error",
+      if (ctx.mode !== "tui" || !ctx.hasUI) {
+        notify(
+          ctx,
+          "Direct Tasks benötigen TUI-Eingaben für Scope, Verifikation und Abschlusskriterien.",
+          "warning",
         );
         return;
       }
-    }
-
-    const todos = extractTodoItems(content);
-    if (todos.every((todo) => todo.completed)) {
-      const completedHash = hashPlanContent(content);
-      await setWorkflowMode("work", ctx, { force: true, skipAbort: true });
-      phase = "ready";
-      updateStatus(ctx);
-      if (!persistState(ctx)) return;
-      if (ctx.hasUI && ctx.mode === "tui") {
-        const confirmed = await ctx.ui.confirm(
-          "Alle Plan-Todos sind bereits erledigt.",
-          "Plan jetzt archivieren?",
-        );
-        if (!isSessionTokenCurrent(token, ctx)) return;
-        if (confirmed) {
-          await archiveCompletedPlan(ctx, completedHash);
-          return;
-        }
+      const ui = ctx.ui as MutableUi;
+      const scope = (await ui.input?.(
+        "Technischer Scope",
+        "Projekt-relative Pfade/Globs, durch Komma getrennt",
+      ))?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
+      const verification = (await ui.input?.(
+        "Verifikation",
+        ".pi/verify.json-Profil-IDs, durch Komma getrennt",
+      ))?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
+      const acceptanceCriteria = (await ui.input?.(
+        "Abschlusskriterien",
+        "Beobachtbare Kriterien, durch Komma getrennt",
+      ))?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
+      if (
+        scope.length === 0 ||
+        verification.length === 0 ||
+        acceptanceCriteria.length === 0
+      ) {
+        notify(ctx, "Direct Task nicht erstellt: alle drei Felder sind erforderlich.", "warning");
+        return;
       }
-      ctx.ui.notify(
-        "Alle Plan-Todos sind bereits erledigt. Nutze /finish.",
-        "info",
-      );
-      return;
-    }
-
-    if (!(await setWorkflowMode("work", ctx, { force: true, skipAbort: true })))
-      return;
-    phase = "executing";
-    reviewedHash = undefined;
-    mode = "work";
-    const executionId = startRun("executing", ctx, hashPlanContent(content));
-    updateStatus(ctx);
-    if (!persistState(ctx)) {
-      phase = "paused";
-      activeRun = undefined;
-      updateStatus(ctx);
-      ctx.ui.notify(
-        "Planausführung wegen eines konkurrierenden Workflow-Zustands nicht gestartet.",
-        "warning",
-      );
-      return;
-    }
-
-    // Plan → Work: dauerhafte Fakten (Nicht-Ziele, Risiken, Entscheidungen)
-    // aus Plan und Brief ins Ledger sichern, bevor die Umsetzung beginnt.
-    runLedgerCheckpoint(ctx, "plan-to-work");
-
-    try {
+      const existing = loadDirectTask(ctx.cwd);
+      if (
+        existing &&
+        !(await ctx.ui.confirm(
+          "Direct Task überschreiben?",
+          `Aktiv: ${existing.goal}`,
+        ))
+      ) {
+        return;
+      }
+      const task = saveDirectTask(ctx.cwd, {
+        goal,
+        technicalScope: scope,
+        verification,
+        acceptanceCriteria,
+      });
       pi.sendMessage(
         {
-          customType: "plan-mode-execute",
-          content: `${EXECUTING_PLAN_MARKER}
-
-Plan-Datei: ${PLAN_RELATIVE_PATH}
-Execution-ID: ${executionId}
-
-${content}
-
-Setze den Plan Schritt für Schritt um. Die Todos sind als T1, T2, … nummeriert.
-
-STOP-REGELN (verbindlich):
-- Prüfe zuerst, ob der Plan noch zum aktuellen Repo-Zustand passt.
-- Keine stillen Scope-Erweiterungen, keine neuen Features außerhalb des Plans.
-- Keine neuen Dependencies, Commits oder Pushes ohne ausdrückliche Freigabe.
-- Markiere einen Schritt nur als erledigt, wenn du einen konkreten Nachweis hast.
-- Stoppe und melde einen Blocker, wenn Plan und Realität in Konflikt stehen.
-
-${SUBAGENT_EXECUTING_REMINDER}
-
-Aktualisiere jeden Todo-Status explizit mit \`plan_progress\` und übergib dabei
-\`executionId: "${executionId}"\`. Verwende
-\`completed\` nur mit einem konkreten Nachweis und \`blocked\` nur mit konkreter
-Ursache. Schreibe zusätzlich einen [WORK-RESULT]-Block als lesbaren Bericht:
-
-[WORK-RESULT]
-DONE:
-- T1: <was wurde getan>
-
-CHECKS:
-- <was wurde geprüft>
-
-BLOCKED:
-- <was ist blockiert und warum>
-
-CHANGED_FILES:
-- <geänderte Dateien>
-[/WORK-RESULT]`,
+          customType: "pi-direct-task",
+          content: `Führe die direkte Aufgabe aus. Bleibe im technischen Scope und prüfe die Abschlusskriterien. Nutze /task-done zum Abschluss.\n\n${JSON.stringify(task, null, 2)}`,
           display: true,
         },
         { triggerTurn: true },
       );
-    } catch (error) {
-      phase = "paused";
-      activeRun = undefined;
-      const message = error instanceof Error ? error.message : String(error);
-      updateStatus(ctx);
-      persistState(ctx);
-      ctx.ui.notify(
-        `Planausführung konnte nicht gestartet werden: ${message}`,
-        "error",
+    },
+  });
+  pi.registerCommand("task-done", {
+    description: "Direct Task über dieselbe Completion-Pipeline abschließen",
+    handler: async (_args, ctx) => finishDirectTask(ctx),
+  });
+  pi.registerCommand("migrate-plan", {
+    description: "Legacy-Workflow v1/v2 ausdrücklich nach v3 migrieren",
+    handler: async (_args, ctx) => {
+      if (!ctx.isProjectTrusted()) {
+        notify(ctx, "Harte Trust-Grenze: Migration ist im untrusted Projekt blockiert.", "error");
+        return;
+      }
+      const confirmed = await ctx.ui.confirm(
+        "Legacy-Workflow migrieren?",
+        "Bestätige nur, wenn alle älteren Pi-Sessions für dieses Projekt geschlossen sind. Vorher wird ein Backup angelegt.",
       );
-    }
-  }
-
-  function planProgressResult(text: string, details: Record<string, unknown>) {
-    return {
-      content: [{ type: "text" as const, text }],
-      details,
-    };
-  }
+      if (!confirmed) return;
+      try {
+        current = migrateLegacyWorkflowToV3(ctx.cwd, {
+          confirmedLegacySessionsClosed: true,
+        });
+        updateWorkflowPresentation(ctx, current.state);
+        notify(ctx, current.warnings.join("\n"));
+      } catch (error) {
+        notify(ctx, workflowWarning(error), "error");
+      }
+    },
+  });
+  pi.registerCommand("recover-workflow-lock", {
+    description: "Verwaisten Workflow-Lock nach Bestätigung entfernen",
+    handler: async (_args, ctx) => {
+      if (!ctx.isProjectTrusted()) {
+        notify(ctx, "Harte Trust-Grenze: Lock-Recovery ist im untrusted Projekt blockiert.", "error");
+        return;
+      }
+      const confirmed = await ctx.ui.confirm(
+        "Workflow-Lock entfernen?",
+        "Nur bestätigen, wenn kein anderer Pi-Prozess diesen Workflow bearbeitet.",
+      );
+      if (!confirmed) return;
+      try {
+        clearWorkflowLockAfterConfirmation(ctx.cwd, true);
+        notify(ctx, "Workflow-Lock entfernt.");
+      } catch (error) {
+        notify(ctx, workflowWarning(error), "error");
+      }
+    },
+  });
 
   pi.registerTool({
     name: "plan_progress",
     label: "Plan Progress",
     description:
-      "Aktualisiert während /work genau ein Todo des aktiven Plans. Nutze in_progress beim Start, completed ausschließlich mit überprüfbarem Nachweis und blocked mit konkreter Ursache.",
+      "Schreibt ausschließlich Fortschritt zu einer stabilen Step-ID in den v3-Sidecar.",
     parameters: PlanProgressParams,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const evidence = params.evidence.trim();
-      const status = params.status as PlanProgressStatus;
-      if (evidence.length === 0) {
-        return planProgressResult("Fehler: evidence darf nicht leer sein.", {
-          ok: false,
-          step: params.step,
-          status,
+    executionMode: "sequential",
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      try {
+        if (!ctx.isProjectTrusted()) {
+          return textResult(
+            "Fehler: Harte Trust-Grenze blockiert Fortschritt im untrusted Projekt.",
+            { ok: false },
+          );
+        }
+        const loaded = reload(ctx);
+        if (!loaded.state || !loaded.snapshot) {
+          return textResult("Fehler: Kein aktiver PlanSnapshot.", { ok: false });
+        }
+        const updated = updateExecutionStep(loaded.state, {
+          stepId: params.stepId,
+          status: params.status,
+          evidence: params.evidence,
         });
-      }
-      if (evidence.length > 1000) {
-        return planProgressResult(
-          "Fehler: evidence darf höchstens 1000 Zeichen enthalten.",
-          { ok: false, step: params.step, status },
+        replaceState(ctx, updated.state);
+        return textResult(
+          updated.allCompleted
+            ? `T${updated.stepNumber} abgeschlossen; alle Schritte sind bereit für Completion.`
+            : `T${updated.stepNumber} ist jetzt ${params.status}.`,
+          {
+            ok: true,
+            stepId: params.stepId,
+            status: params.status,
+            allCompleted: updated.allCompleted,
+          },
         );
-      }
-      if (phase !== "executing" || mode !== "work") {
-        return planProgressResult(
-          "Fehler: plan_progress ist nur während einer mit /work gestarteten Planausführung verfügbar.",
-          { ok: false, step: params.step, status, phase, mode },
-        );
-      }
-      if (
-        !isCurrentRun("executing", ctx) ||
-        params.executionId !== activeRun?.id
-      ) {
-        return planProgressResult(
-          "Fehler: Die Execution-ID gehört nicht zur aktuell aktiven Planausführung. Nutze /work für einen sicheren Resume.",
-          { ok: false, step: params.step, status },
-        );
-      }
-      if (!hasCurrentExecutionLease(ctx)) {
-        phase = "paused";
-        activeRun = undefined;
-        stopExecutionHeartbeat();
-        updateStatus(ctx);
-        persistState(ctx);
-        return planProgressResult(
-          "Fehler: Die Execution-Lease ist abgelaufen. Ausführung wurde pausiert; nutze /work für einen sicheren Resume.",
-          { ok: false, step: params.step, status },
-        );
-      }
-
-      let content: string | undefined;
-      try {
-        content = readPlanFile(ctx.cwd);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return planProgressResult(
-          `Fehler: Plan-Datei ist nicht sicher lesbar: ${message}`,
-          { ok: false, step: params.step, status },
-        );
+        return textResult(`Fehler: ${workflowWarning(error)}`, { ok: false });
       }
-      if (content === undefined) {
-        phase = "paused";
-        reviewedHash = undefined;
-        persistState(ctx);
-        updateStatus(ctx);
-        return planProgressResult(
-          "Fehler: Keine aktive Plan-Datei vorhanden.",
-          {
-            ok: false,
-            step: params.step,
-            status,
-          },
-        );
-      }
+    },
+  });
 
-      const currentHash = hashPlanContent(content);
-      if (activeRun.planHash && currentHash !== activeRun.planHash) {
-        phase = "paused";
-        const expectedHash = activeRun.planHash;
-        activeRun = undefined;
-        persistState(ctx);
-        updateStatus(ctx);
-        return planProgressResult(
-          "Fehler: Der Plan wurde außerhalb dieser Execution verändert. Die Ausführung wurde pausiert; prüfe den Plan und starte /work erneut.",
-          { ok: false, step: params.step, status, expectedHash, currentHash },
-        );
-      }
+  pi.registerShortcut(SHORTCUTS.planAssistant.keys, {
+    description: SHORTCUTS.planAssistant.description,
+    handler: async (ctx) => {
+      const kind = await choosePlanKind("", ctx);
+      if (kind) await beginPlanning(kind, ctx);
+    },
+  });
+  pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
+    description: SHORTCUTS.modeMenu.description,
+    handler: async (ctx) => {
+      const choice = await ctx.ui.select("Control Center", [
+        "Schnellplan",
+        "Architekturplan",
+        "Arbeiten / fortsetzen",
+        "Berechtigungen",
+        "Modelle",
+        "Thinking",
+        "LSP-Diagnose",
+      ]);
+      if (choice === "Schnellplan") await beginPlanning("simple_plan", ctx);
+      else if (choice === "Architekturplan")
+        await beginPlanning("detailed_plan", ctx);
+      else if (choice === "Arbeiten / fortsetzen") await startWork(ctx);
+      else if (choice === "Berechtigungen")
+        pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx });
+      else if (choice === "Modelle")
+        pi.events.emit(CONTROL_CENTER_EVENTS.openModels, { ctx });
+      else if (choice === "Thinking")
+        pi.events.emit(CONTROL_CENTER_EVENTS.openThinking, { ctx });
+      else if (choice === "LSP-Diagnose")
+        pi.events.emit(CONTROL_CENTER_EVENTS.openDiagnostics, { ctx });
+    },
+  });
 
-      const todos = extractTodoItems(content);
-      const todo = todos.find((candidate) => candidate.step === params.step);
-      if (!todo) {
-        return planProgressResult(
-          `Fehler: T${params.step} existiert nicht. Gültig sind ${todos.length > 0 ? `T1–T${todos.length}` : "keine Todos"}.`,
-          {
-            ok: false,
-            step: params.step,
-            status,
-            validSteps: todos.map((candidate) => candidate.step),
-          },
-        );
-      }
-      if (todo.completed && status !== "completed") {
-        return planProgressResult(
-          `Fehler: T${params.step} ist im Markdown bereits erledigt und kann nicht auf ${status} zurückgesetzt werden.`,
-          {
-            ok: false,
-            step: params.step,
-            status,
-            currentStatus: "completed",
-          },
-        );
-      }
-      const otherActive = progressRecords.find(
-        (record) =>
-          record.status === "in_progress" && record.step !== params.step,
-      );
-      if (status === "in_progress" && otherActive) {
-        return planProgressResult(
-          `Fehler: T${otherActive.step} ist bereits in Arbeit. Schließe oder blockiere diesen Schritt zuerst.`,
-          {
-            ok: false,
-            step: params.step,
-            status,
-            activeStep: otherActive.step,
-          },
-        );
-      }
+  pi.events.on(WORKFLOW_CAPABILITY_EVENTS.request, (value) => {
+    const request = value as Partial<WorkflowCapabilityRequest>;
+    if (typeof request.respond !== "function") return;
+    request.respond({
+      state: planningKind
+        ? planningIsReview
+          ? "reviewing"
+          : "planning"
+        : current.state?.status ?? "idle",
+      mode: workflowMode(),
+    });
+  });
+  pi.events.on(CONTROL_CENTER_EVENTS.workflowThinkingDefault, (value) => {
+    const event = value as {
+      respond?: (result: { mode: string; defaultLevel: string }) => void;
+    };
+    event.respond?.({
+      mode: planningKind ?? (current.state?.status === "working" ? "work" : "idle"),
+      defaultLevel: planningKind === "detailed_plan" ? "high" : "medium",
+    });
+  });
 
-      const now = new Date().toISOString();
-      const previousProgressRecords = progressRecords;
-      const record: PlanProgressRecord = {
-        step: params.step,
-        status,
-        evidence,
-        updatedAt: now,
+  pi.on("before_agent_start", async (_event, ctx) => {
+    if (planningKind)
+      return {
+        message: {
+          customType: "pi-plan-context",
+          content:
+            planningIsReview && current.planContent
+              ? reviewPrompt(current.planContent)
+              : planningPrompt(planningKind),
+        } as AgentMessage,
       };
-      progressRecords = [
-        ...progressRecords.filter(
-          (candidate) => candidate.step !== params.step,
-        ),
-        record,
-      ].sort((a, b) => a.step - b.step);
-
-      let updatedContent = content;
-      let checkboxUpdated = false;
-      if (status === "completed") {
-        const completion = completePlanSteps(
-          ctx,
-          content,
-          [params.step],
-          evidence,
-        );
-        if (!completion.ok) {
-          progressRecords = previousProgressRecords;
-          return planProgressResult(`Fehler: ${completion.reason}`, {
-            ok: false,
-            step: params.step,
-            status,
-          });
-        }
-        updatedContent = completion.content;
-        checkboxUpdated = completion.updated === 1;
-      }
-
-      if (status === "blocked") {
-        phase = "blocked";
-        if (!persistState(ctx)) {
-          phase = "paused";
-          activeRun = undefined;
-          updateStatus(ctx);
-          return planProgressResult(
-            "Fehler: Blocker konnte wegen eines konkurrierenden Workflow-Zustands nicht sicher persistiert werden.",
-            { ok: false, step: params.step, status },
-          );
-        }
-        updateStatus(ctx);
-        return planProgressResult(
-          `T${params.step} (${todo.text}) ist blockiert. Die Ausführung bleibt bis zu einem expliziten /work-Resume pausiert. Ursache: ${evidence}`,
-          {
-            ok: true,
-            step: params.step,
-            status,
-            evidence,
-            checkboxUpdated: false,
-            archived: false,
-          },
-        );
-      }
-
-      const nextTodos = extractTodoItems(updatedContent);
-      if (
-        nextTodos.length > 0 &&
-        nextTodos.every((candidate) => candidate.completed)
-      ) {
-        phase = "ready";
-        if (!persistState(ctx)) {
-          phase = "paused";
-          activeRun = undefined;
-          updateStatus(ctx);
-          return planProgressResult(
-            "Fehler: Abschluss wurde im Plan gespeichert, aber der Workflow-Zustand kollidierte. Ausführung pausiert; nutze /work für einen sicheren Resume.",
-            { ok: false, step: params.step, status, checkboxUpdated },
-          );
-        }
-        updateStatus(ctx);
-        return planProgressResult(
-          `T${params.step} als completed erfasst; alle Todos sind erledigt. Der Plan wird nach dem erfolgreichen Agent-Settlement archiviert.`,
-          {
-            ok: true,
-            step: params.step,
-            status,
-            evidence,
-            checkboxUpdated,
-            archived: false,
-            ready: true,
-          },
-        );
-      }
-
-      if (!persistState(ctx)) {
-        phase = "paused";
-        activeRun = undefined;
-        updateStatus(ctx);
-        return planProgressResult(
-          "Fehler: Fortschritt konnte wegen eines konkurrierenden Workflow-Zustands nicht sicher persistiert werden. Ausführung pausiert.",
-          { ok: false, step: params.step, status, checkboxUpdated },
-        );
-      }
-      updateStatus(ctx);
-      const statusLabel = status === "completed" ? "erledigt" : "in Arbeit";
-      return planProgressResult(
-        `T${params.step} (${todo.text}) ist jetzt ${statusLabel}. Nachweis: ${evidence}`,
-        {
-          ok: true,
-          step: params.step,
-          status,
-          evidence,
-          checkboxUpdated,
-          archived: false,
-        },
-      );
-    },
+    const loaded = reload(ctx);
+    if (loaded.snapshot && loaded.state?.status === "working") {
+      return {
+        message: {
+          customType: "pi-work-context",
+          content: executionPrompt(loaded.snapshot, loaded.state),
+        } as AgentMessage,
+      };
+    }
+    const directTask = loadDirectTask(ctx.cwd);
+    if (directTask) {
+      return {
+        message: {
+          customType: "pi-direct-task-context",
+          content: `Aktive direkte Aufgabe:\n${JSON.stringify(directTask, null, 2)}`,
+        } as AgentMessage,
+      };
+    }
+    return undefined;
   });
 
-  pi.registerCommand("review-plan", {
-    description: "Aktuelle Plan-Datei optional vertieft prüfen",
-    handler: async (_args, ctx) => reviewPlan(ctx),
-  });
-
-  pi.registerCommand("work", {
-    description: "Plan ausführen",
-    handler: async (_args, ctx) => executePlan(ctx),
-  });
-
-  pi.registerCommand("go", {
-    description: "Alias für /work",
-    handler: async (_args, ctx) => executePlan(ctx),
-  });
-
-  // Fallback für vergessene [DONE:n]-Marker: hakt Todos manuell ab und nutzt
-  // denselben Abschluss-/Archivpfad wie die automatische Erkennung. Ohne den
-  // Befehl bliebe ein Plan, dessen Marker das Modell ausgelassen hat, dauerhaft
-  // "executing".
-  pi.registerCommand("done", {
-    description: "Plan-Todos manuell abhaken: /done <n> [m …]",
-    handler: async (args, ctx) => {
-      if (!ctx.isIdle()) {
-        ctx.ui.notify(
-          "/done ist erst nach Abschluss des laufenden Agent-Turns verfügbar.",
-          "warning",
-        );
-        return;
-      }
-      if (
-        phase !== "executing" ||
-        !isCurrentRun("executing", ctx)
-      ) {
-        ctx.ui.notify(
-          "/done ist nur für die aktuell geleaste, mit /work gestartete Execution verfügbar.",
-          "warning",
-        );
-        return;
-      }
-      if (!hasCurrentExecutionLease(ctx)) {
-        phase = "paused";
-        activeRun = undefined;
-        stopExecutionHeartbeat();
-        updateStatus(ctx);
-        persistState(ctx);
-        ctx.ui.notify(
-          "/done wurde blockiert, weil die Execution-Lease abgelaufen ist. Nutze /work für einen sicheren Resume.",
-          "warning",
-        );
-        return;
-      }
-      const steps = args.trim().split(/\s+/).filter(Boolean).map(Number);
-      if (
-        steps.length === 0 ||
-        steps.some((step) => !Number.isSafeInteger(step) || step <= 0)
-      ) {
-        ctx.ui.notify(
-          "Nutzung: /done <n> [m …] — Nummern wie in /plan-todos",
-          "info",
-        );
-        return;
-      }
-
-      let content: string | undefined;
-      try {
-        content = readPlanFile(ctx.cwd);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(
-          `Plan-Datei ist nicht sicher lesbar: ${message}`,
-          "error",
-        );
-        return;
-      }
-      if (content === undefined) {
-        ctx.ui.notify("Keine Plan-Datei vorhanden.", "info");
-        return;
-      }
-
-      const result = completePlanSteps(
-        ctx,
-        content,
-        steps,
-        "Manuell mit /done bestätigt.",
-      );
-      if (!result.ok) {
-        phase = mode === "work" ? "paused" : "draft";
-        activeRun = undefined;
-        updateStatus(ctx);
-        persistState(ctx);
-        ctx.ui.notify(result.reason, "warning");
-        return;
-      }
-      if (result.updated === 0) {
-        ctx.ui.notify(
-          "Keine passende offene Todo-Nummer gefunden (bereits erledigt oder außerhalb des Bereichs).",
-          "warning",
-        );
-        return;
-      }
-      ctx.ui.notify(
-        `${result.updated} Todo${result.updated === 1 ? "" : "s"} abgehakt.`,
-        "info",
-      );
-
-      const todos = result.todos;
-      if (todos.length > 0 && todos.every((todo) => todo.completed)) {
-        await archiveCompletedPlan(ctx, result.planHash);
-        return;
-      }
-      updateStatus(ctx);
-      persistState(ctx);
-    },
-  });
-
-  async function finishPlan(ctx: ExtensionCommandContext): Promise<void> {
-    const token = captureSessionToken(ctx);
-    await ctx.waitForIdle();
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    if (hasBlockingForeignExecution(ctx, "Plan-Abschluss")) return;
-
-    let content: string | undefined;
-    try {
-      content = readPlanFile(ctx.cwd);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Plan-Datei ist nicht sicher lesbar: ${message}`, "error");
+  pi.on("agent_settled", async (_event, ctx) => {
+    if (planningKind) {
+      await finalizePlanning(ctx);
       return;
     }
-
-    if (content === undefined) {
-      phase = mode === "work" ? "idle" : "draft";
-      reviewedHash = undefined;
-      updateStatus(ctx);
-      persistState(ctx);
-      ctx.ui.notify("Keine Plan-Datei vorhanden.", "info");
-      return;
+    const loaded = reload(ctx);
+    if (
+      loaded.state?.status === "reviewing" &&
+      loaded.state.steps.length > 0 &&
+      loaded.state.steps.every((step) => step.status === "completed")
+    ) {
+      await finishWorkflow(ctx, false);
     }
-
-    const todos = extractTodoItems(content);
-    const complete = todos.length > 0 && todos.every((todo) => todo.completed);
-    const expectedPlanHash = hashPlanContent(content);
-    if (!complete) {
-      if (!ctx.hasUI) {
-        ctx.ui.notify(
-          "Offene Todos können ohne interaktive Bestätigung nicht archiviert werden.",
-          "warning",
-        );
-        return;
-      }
-      const confirmed = await ctx.ui.confirm(
-        "Plan mit offenen Todos archivieren?",
-        "Der Plan wird als incomplete archiviert und aus current-plan.md entfernt.",
-      );
-      if (!isSessionTokenCurrent(token, ctx)) return;
-      if (!confirmed) {
-        ctx.ui.notify("Abschluss abgebrochen.", "info");
-        return;
-      }
-    }
-
-    let gate: GateResult | undefined;
-    let gateError: string | undefined;
-    try {
-      gate = await runGateBeforeFinish(ctx);
-    } catch (error) {
-      gateError = error instanceof Error ? error.message : String(error);
-    }
-    if (!isSessionTokenCurrent(token, ctx)) return;
-    if (gateError || (gate && gate.status !== "pass")) {
-      const gateLabel = gateError
-        ? "BLOCKED"
-        : (gate?.status.toUpperCase() ?? "BLOCKED");
-      const gateDetails = gateError
-        ? `Verifikations-Gate konnte nicht ausgeführt werden: ${gateError}`
-        : formatGateReport(gate as GateResult);
-      if (!ctx.hasUI || ctx.mode !== "tui") {
-        ctx.ui.notify(
-          `Verifikations-Gate ${gateLabel}: Abschluss ohne interaktive Bestätigung nicht möglich.\n${gateDetails}`,
-          "warning",
-        );
-        return;
-      }
-      const override = await ctx.ui.confirm(
-        `Verifikations-Gate ${gateLabel} — trotzdem abschließen?`,
-        gateDetails,
-      );
-      if (!isSessionTokenCurrent(token, ctx)) return;
-      if (!override) {
-        ctx.ui.notify(
-          "Abschluss abgebrochen; Gate-Ergebnis siehe oben.",
-          "info",
-        );
-        return;
-      }
-    }
-
-    try {
-      const current = readPlanFile(ctx.cwd);
-      if (
-        current === undefined ||
-        hashPlanContent(current) !== expectedPlanHash
-      ) {
-        throw new Error(
-          "Plan wurde während Bestätigung oder Verifikations-Gate verändert; Abschluss abgebrochen.",
-        );
-      }
-      const currentTodos = extractTodoItems(current);
-      const stillComplete =
-        currentTodos.length > 0 &&
-        currentTodos.every((todo) => todo.completed);
-      if (stillComplete !== complete) {
-        throw new Error(
-          "Todo-Abschlussstatus hat sich während des Gates verändert; Abschluss abgebrochen.",
-        );
-      }
-      const keepPlanMode = mode !== "work";
-      const archivePath = withWorkspaceLock(ctx.cwd, () => {
-        assertWorkflowStateToken(ctx.cwd, workflowStateToken);
-        return archivePlanFile(
-          ctx.cwd,
-          complete ? "complete" : "incomplete",
-          expectedPlanHash,
-        );
-      });
-      archiveBriefAlongsidePlan(ctx);
-      clearTaskContract(ctx.cwd);
-      phase = keepPlanMode ? "draft" : "idle";
-      reviewedHash = undefined;
-      activeRun = undefined;
-      foreignExecution = undefined;
-      stopExecutionHeartbeat();
-      updateStatus(ctx);
-      persistState(ctx, undefined, { allowMissingPlanCleanup: true });
-      ctx.ui.notify(
-        `Plan archiviert: ${relative(ctx.cwd, archivePath)}`,
-        "info",
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(
-        `Archivierung fehlgeschlagen; aktuelle Plan-Datei bleibt erhalten: ${message}`,
-        "error",
-      );
-    }
-  }
-
-  pi.registerCommand("finish", {
-    description: "Plan abschließen und sicher archivieren",
-    handler: async (_args, ctx) => finishPlan(ctx),
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    // Extension instances can serve more than one session. Never let an
-    // earlier project's in-memory workflow leak into a new empty session.
-    clearPostPlanInput(ctx);
-    postPlanCardViewStates.clear();
-    resetPersistedWorkflowMemory();
-    executionOwnerId = randomUUID();
-    foreignExecution = undefined;
-    stopExecutionHeartbeat();
-    activeRun = undefined;
-    settlement.clear();
-    executePlanInFlight = false;
-    pendingPlan = undefined;
-    sessionEpoch += 1;
-    activeSessionId = ctx.sessionManager.getSessionId();
-    projectTrusted = ctx.isProjectTrusted();
-    planModeEverUsed = false;
-    planExistedBeforeTurn = false;
-    latestCwd = ctx.cwd;
-    selectedSkillCommands.clear();
-    auroraEpoch = undefined;
-    subscribeAuroraProvider();
-
-    if (!projectTrusted) {
-      let untrustedPlanExists = false;
-      try {
-        untrustedPlanExists = readPlanFile(ctx.cwd) !== undefined;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Unsicherer Planpfad ignoriert: ${message}`, "error");
-      }
-      planExistedBeforeTurn = untrustedPlanExists;
-      updateStatus(ctx);
-      if (untrustedPlanExists) {
-        ctx.ui.notify(
-          "Plan-Artefakte aus dem nicht vertrauenswürdigen Workspace bleiben inaktiv. /work verlangt eine explizite Bestätigung.",
+    activeCwd = ctx.cwd;
+    activeContext = ctx;
+    planningKind =
+      pi.getFlag("plan") === true ? "detailed_plan" : undefined;
+    planningBaseContent = undefined;
+    planningIsReview = false;
+    try {
+      const loaded = reload(ctx);
+      for (const warning of loaded.warnings) notify(ctx, warning, "warning");
+      if (loaded.migrationRequired) {
+        notify(
+          ctx,
+          "Legacy-Workflow erkannt. Schließe alte Sessions und nutze /migrate-plan.",
+          "warning",
+        );
+      } else if (loaded.state?.status === "working") {
+        notify(
+          ctx,
+          "Unterbrochene Ausführung erkannt. Es gibt keine zeitgesteuerte Übernahme; nutze /work für explizite Recovery.",
           "warning",
         );
       }
-      return;
-    }
-
-    const entries = ctx.sessionManager.getEntries();
-    const latestSkillSelection = entries
-      .filter(
-        (entry: { type: string; customType?: string }) =>
-          entry.type === "custom" && entry.customType === "skill-selection",
-      )
-      .pop() as { data?: { commands?: unknown } } | undefined;
-    if (Array.isArray(latestSkillSelection?.data?.commands)) {
-      for (const command of latestSkillSelection.data.commands) {
-        if (typeof command === "string" && command.startsWith("skill:"))
-          selectedSkillCommands.add(command);
-      }
-    }
-    const latestState = entries
-      .filter(
-        (entry: { type: string; customType?: string }) =>
-          entry.type === "custom" && entry.customType === "plan-mode",
-      )
-      .pop() as { data?: PersistedWorkflowState } | undefined;
-
-    const persisted = latestState?.data;
-    if (persisted?.phase) {
-      phase = persisted.phase;
-      mode =
-        persisted.mode ?? (persisted.planningActive ? "detailed_plan" : "work");
-      reviewedHash = persisted.reviewedHash;
-      planCreationMode = persisted.planCreationMode;
-    } else if (persisted) {
-      phase = persisted.executing
-        ? "executing"
-        : persisted.enabled
-          ? "draft"
-          : "idle";
-      mode = persisted.enabled ? "detailed_plan" : "work";
-    }
-
-    let content: string | undefined;
-    try {
-      content = readPlanFile(ctx.cwd);
-      const loaded = loadWorkflowState(ctx.cwd);
-      hydratePersistedWorkflowMemory(loaded, {
-        trackForeignExecution: true,
-      });
-      if (loaded.warning) ctx.ui.notify(loaded.warning, "warning");
     } catch (error) {
-      resetPersistedWorkflowMemory();
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`Unsicherer Planpfad ignoriert: ${message}`, "error");
-    }
-
-    planExistedBeforeTurn = content !== undefined;
-
-    if (content === undefined) {
-      phase = "idle";
-      reviewedHash = undefined;
-    } else {
-      planModeEverUsed = true;
-      if (phase === "idle") phase = "draft";
-      if (phase === "reviewing") phase = "draft";
-      if (phase === "deciding") phase = "draft";
-      if (
-        phase === "reviewed" &&
-        (!reviewedHash || hashPlanContent(content) !== reviewedHash)
-      ) {
-        // reviewedHash bleibt bis /work erhalten, damit der veraltete
-        // Reviewstatus auch nach einem Sessionneustart erkannt wird.
-        phase = "draft";
-      }
-      const restoredForeignExecution =
-        foreignExecution as WorkflowExecutionMetadata | undefined;
-      if (phase === "executing" && restoredForeignExecution) {
-        ctx.ui.notify(
-          `Plan wird durch eine aktive Execution-Lease (${restoredForeignExecution.executionId}) in einer anderen Session bearbeitet. /work kann eine explizite Übernahme anbieten.`,
-          "warning",
-        );
-      } else if (
-        phase === "executing" ||
-        phase === "paused" ||
-        phase === "blocked" ||
-        phase === "ready"
-      ) {
-        const todos = extractTodoItems(content);
-        phase =
-          todos.length > 0 && todos.every((todo) => todo.completed)
-            ? "ready"
-            : phase === "blocked"
-              ? "blocked"
-              : "paused";
-      }
-    }
-
-    if (pi.getFlag("plan") === true && !foreignExecution) {
-      phase = "draft";
-      reviewedHash = undefined;
-      mode = "detailed_plan";
-      planModeEverUsed = true;
-    }
-
-    if (mode !== "work" && phase === "idle") phase = "draft";
-    if (mode !== "work" && !preparePlan(ctx)) {
-      mode = "work";
-      phase = "idle";
-    }
-    updateStatus(ctx);
-    if (!foreignExecution) persistState(ctx);
-
-    // Intelligente Wiederherstellung: kein Voll-Inject. Der dauerhafte Ledger
-    // bleibt eine Datei; nur eine kompakte, tokensparsame Kopfzeile weist auf
-    // Entscheidungen, Nicht-Ziele, Risiken und die aktuelle Priorität hin.
-    // Veraltete Einträge (abweichender Quell-Hash) werden markiert, nicht
-    // automatisch übernommen. Voller Inhalt nur bei Bedarf über die Datei.
-    ledgerTokenCheckpointArmed = true;
-    try {
-      const ledger = readLedger(ctx.cwd);
-      if (ledger !== undefined) {
-        let currentBriefHash: string | undefined;
-        let currentPlanHash: string | undefined;
-        try {
-          const brief = readDecisionBrief(ctx.cwd);
-          if (brief !== undefined) currentBriefHash = hashPlanContent(brief);
-        } catch {
-          // Ein unlesbares Brief darf die Recovery-Kopfzeile nicht verhindern.
-        }
-        if (content !== undefined) currentPlanHash = hashPlanContent(content);
-        const summary = ledgerSummaryLine(
-          classifyLedger(ledger, currentBriefHash, currentPlanHash),
-        );
-        if (summary) ctx.ui.notify(summary, "info");
-      }
-    } catch {
-      // Recovery ist rein additiv; ein Ledger-Lesefehler bleibt folgenlos.
+      notify(ctx, `Workflow-State nicht sicher geladen: ${workflowWarning(error)}`, "error");
     }
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
-    // Finaler deterministischer Konsolidierungslauf, bevor die Session endet.
-    clearPostPlanInput(ctx);
-    postPlanCardViewStates.clear();
-    runLedgerCheckpoint(ctx, "session-shutdown");
-    if (phase === "executing" && isCurrentRun("executing", ctx)) {
-      phase = "paused";
-      activeRun = undefined;
-      persistState(ctx);
+    if (
+      activeCwd === ctx.cwd &&
+      ctx.isProjectTrusted() &&
+      current.state?.status === "working"
+    ) {
+      try {
+        replaceState(ctx, pauseExecution(current.state));
+      } catch (error) {
+        notify(ctx, `Pause-State nicht gespeichert: ${workflowWarning(error)}`, "warning");
+      }
     }
-    stopExecutionHeartbeat();
-    sessionEpoch += 1;
-    activeSessionId = undefined;
-    settlement.clear();
-    executePlanInFlight = false;
-    unsubscribeAurora?.();
-    unsubscribeAurora = undefined;
-    auroraEpoch = undefined;
-    latestCwd = undefined;
-    latestContext = undefined;
-    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, undefined);
+    activeCwd = undefined;
+    activeContext = undefined;
+    planningKind = undefined;
   });
+
+  void activeContext;
 }

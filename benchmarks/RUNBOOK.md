@@ -2,6 +2,69 @@
 
 Alle Befehle relativ zum Repository-Root (`/home/d/.pi/agent`) ausgeführt.
 
+## P3-Controller (35 Scored-Runs)
+
+P3 ist von der älteren Einzelrun-Kurzform unten getrennt. Es nutzt immer
+Commit `e46915680d859ac9d6cac615cc197d5a31d46461`, die feste Manifest-ID und
+einen privaten State-Ordner unter
+`${XDG_STATE_HOME:-~/.local/state}/pi-p3` (0700). Ergebnisse gehören **nie**
+nach `benchmarks/results/`.
+
+Alle P3-Scored-Runs pinnen `opencode-go/kimi-k2.7-code` mit Thinking-Stufe
+`high`; eine Änderung dieser Modellkonfiguration erfordert eine neue
+Manifest- und Baseline-Serie.
+
+```bash
+# Einmal vor dem Start: Manifest, Referenzcommit und GNU time prüfen
+node benchmarks/harness/p3.mjs validate
+
+# Je Scored-Run: Worktree + expliziten Session-Pfad anlegen, starten,
+# Metriken abschließen und die Symlinks/den Worktree entfernen
+node benchmarks/harness/p3.mjs prepare p3-01-1
+node benchmarks/harness/p3.mjs launch p3-01-1
+node benchmarks/harness/p3.mjs finish p3-01-1
+node benchmarks/harness/p3.mjs cleanup p3-01-1
+
+# Fortschritt aller 35 Scored-Runs
+node benchmarks/harness/p3.mjs summarize
+```
+
+`launch` nutzt stets den in den lokalen Metadaten gespeicherten, expliziten
+`--session`-Pfad; es sucht nie globale Sessions. Jeder Scored-Start läuft
+unter GNU `time -v`; CPU-Zeit, Wall-Clock-Zeit und Peak RSS landen in
+`automatic.resources`. `automatic.environment` enthält nur Referenz,
+Hash der fest allowlisteten nicht-sensitiven Konfigurationsdateien und
+Laufzeit-Fingerprints. Es protokolliert außerdem die effektiven,
+nicht-sensitiven Benchmark-Overlays und Umgebungswerte.
+
+`prepare` setzt ausschließlich im isolierten Worktree die drei
+`permissions.workflowDefaults` auf `full-access`; dadurch kann der Agent die
+ausdrücklich gestellte Benchmark-Aufgabe bearbeiten, ohne die Konfiguration
+des Haupt-Checkouts zu verändern. Für alle Aufgaben außer 11 setzt der
+Controller den Ledger-Gate-Schalter auf `1`, damit der Session-Shutdown keine
+aufgabenfremde Änderung an `docs/CONTEXT_LEDGER.md` erzeugt.
+
+Während `prepare` läuft, ist `PI_CODING_AGENT_DIR` der Worktree. Der
+nicht-sensitive Abhängigkeitsbaum `npm/node_modules` wird für die
+Modulauflösung verlinkt; `auth.json` und `models-store.json` sind die einzigen
+Credential-Symlinks. Ihr Inhalt wird vom Controller weder gelesen, kopiert
+noch ausgegeben. `cleanup` entfernt zuerst genau diese Credential-Symlinks
+und dann den Worktree. Mit `cleanup <id> --purge` lässt sich auch der lokale
+Zustand für eine Wiederholung entfernen.
+
+Die V8-Profile sind bewusst unbewertet und separat: `p3-diag-02-v8-cpu`,
+`p3-diag-02-v8-heap`, `p3-diag-09-v8-cpu`, `p3-diag-09-v8-heap`. Für Aufgabe
+11 setzt ausschließlich die Variante `p3-11-disabled` exakt
+`PI_BENCHMARK_DISABLE_LEDGER_CHECKPOINTS=1`; die aktive Variante lässt die
+Variable weg. Damit bleibt dieser Schalter innerhalb des Paars die einzige
+Verhaltensdifferenz.
+
+Der Offline-Test verwendet einen lokalen Pi-Stummel und ruft kein Modell auf:
+
+```bash
+node benchmarks/harness/test/p3.test.mjs
+```
+
 ## Kurzform: `harness/run-baseline.sh`
 
 Verkettet Schritt 1 (Reset), 3 (Verify) und 4 (Metriken sammeln) für einen

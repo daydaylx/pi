@@ -38,6 +38,8 @@ benchmarks/
 │   ├── reset-task.sh       Worktree am Referenzcommit anlegen + Fixture kopieren
 │   ├── run-verify.sh       npm run verify im Worktree ausführen, Exit-Code/Dauer erfassen
 │   ├── collect-metrics.mjs Automatische Messgrößen aus Session-Logs extrahieren
+│   ├── p3.mjs              Zustandslokaler Controller für die 35 P3-Scored-Runs
+│   ├── p3-manifest.json    unveränderlicher P3-Laufplan (Referenz + A/B-Paare)
 │   └── schema/run-result.schema.json   Ausgabeformat
 └── results/                Lauf-Ergebnisse (nie erfundene Werte, nur reale Läufe)
 ```
@@ -104,3 +106,25 @@ zuerst, mit der aktuellen Standardkonfiguration aus `settings.json`.
    (Aufgabe 10) oder Compaction-Erkennung (Aufgabe 08) getestet werden.
 
 Siehe `RUNBOOK.md` für die konkreten Schritte.
+
+## P3: 35 kontrollierte Läufe
+
+P3 verwendet ausschließlich Commit
+`e46915680d859ac9d6cac615cc197d5a31d46461` und den festen Plan in
+`harness/p3-manifest.json`: Aufgaben 01–09 je drei Mal, drei A/B-Paare für
+Aufgabe 10 sowie ein Ledger-aktiv/deaktiviert-Paar für Aufgabe 11. Die 35
+Scored-Runs und die optionalen, unbewerteten V8-Diagnosen für Aufgaben 02 und
+09 sind getrennt dokumentiert.
+
+Der Controller schreibt niemals nach `benchmarks/results/`. Worktrees,
+Sessions, Ressourcenmessungen und Resultate liegen privat unter
+`${XDG_STATE_HOME:-~/.local/state}/pi-p3` (Modus `0700`). Siehe `RUNBOOK.md`
+für die stabilen Befehle `validate`, `prepare`, `launch`, `finish`, `cleanup`
+und `summarize`.
+
+Jeder isolierte P3-Worktree erhält eine dokumentierte, gehashte
+`setup.json`-Overlay mit `full-access` für Arbeits- und Plan-Workflows, damit
+die Aufgaben tatsächlich bearbeitbar sind; die Quellkonfiguration bleibt
+unverändert. Ledger-Checkpoints sind außerhalb von Aufgabe 11 explizit
+deaktiviert, damit ihr Session-Shutdown-Eintrag nicht als aufgabenfremde
+Änderung in die Messung fällt.

@@ -96,7 +96,7 @@ function suiteForSection(name) {
   if (/^LSP |^LSP$|LSP-|LSP\b/.test(name)) return "lsp";
   if (/diff viewer|context ledger/i.test(name)) return "diff-ledger";
   if (
-    /^(target runtime|greenfield setup|setup core|direct task|project verification|universal verification|task contract|native subagent|native project skills)/i.test(
+    /^(target runtime|greenfield setup|setup core|direct task|project verification|universal verification|task contract|native subagent|native project skills|global control plane shortcuts|shared output limits and subagent guard|ask-user temporary dialog|Aurora UI lifecycle and responsive surfaces)/i.test(
       name,
     )
   ) {
@@ -160,6 +160,7 @@ const lspControlCenter = await load("extensions/lsp/control-center.ts");
 const lspTools = await load("extensions/lsp/tools.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
+const ledgerCheckpoint = await load("extensions/plan-mode/ledger-checkpoint.ts");
 const controlPlane = await load("extensions/control-plane.ts");
 const activityStatus = await load("extensions/activity-status.ts");
 const diffAlgorithm = await load("extensions/diff-viewer/diff-algorithm.ts");
@@ -677,11 +678,11 @@ await section("target runtime configuration", async () => {
       setup.permissions,
       {
         unknownTools: "ask",
-        bash: "ask",
+        bash: "allow",
         workflowDefaults: {
-          work: "read-bash",
-          simple_plan: "read-bash",
-          detailed_plan: "read-bash",
+          work: "project-write",
+          simple_plan: "readonly",
+          detailed_plan: "readonly",
         },
       },
       "unknown tools and free bash fail to confirmation",
@@ -888,11 +889,11 @@ await section("greenfield setup config and Aurora state contract", async () => {
     defaults.permissions,
     {
       unknownTools: "ask",
-      bash: "ask",
+      bash: "allow",
       workflowDefaults: {
-        work: "read-bash",
-        simple_plan: "read-bash",
-        detailed_plan: "read-bash",
+        work: "project-write",
+        simple_plan: "readonly",
+        detailed_plan: "readonly",
       },
     },
     "capability defaults require confirmation",
@@ -922,7 +923,13 @@ await section("greenfield setup config and Aurora state contract", async () => {
   );
   eq(
     trusted.config.permissions,
-    defaults.permissions,
+    {
+      ...defaults.permissions,
+      workflowDefaults: {
+        ...defaults.permissions.workflowDefaults,
+        work: "confirm-all",
+      },
+    },
     "project may not relax global permissions",
   );
   assert(
@@ -976,6 +983,16 @@ await section("setup core lifecycle", async () => {
     Boolean(harness.commands.get("verify-gate")),
     "setup core registers the advisory verification gate (#102)",
   );
+  const diagnosticGate = harness.commands.get("verify-gate");
+  if (diagnosticGate) {
+    await diagnosticGate("", context);
+    assert(
+      harness.notifications.some((entry) =>
+        entry.message.includes("Verifikations-Gate"),
+      ),
+      "manual /verify-gate remains an executable diagnostic",
+    );
+  }
   const doctor = harness.commands.get("setup-doctor");
   assert(Boolean(doctor), "/setup-doctor is registered");
   if (doctor) await doctor("", context);
@@ -999,18 +1016,13 @@ await section("setup core lifecycle", async () => {
     "setup doctor reports the project verification profile status (#105)",
   );
   assert(
-    harness.notifications
-      .at(-1)
-      ?.message?.includes("doom-loop status: keine Doom-Loop erkannt"),
-    "setup doctor reports the doom-loop status (#103)",
+    !harness.notifications.at(-1)?.message?.includes("doom-loop status:") &&
+      !harness.notifications.at(-1)?.message?.includes("edit metrics:"),
+    "setup doctor omits removed automatic doom-loop and edit-metric workflows",
   );
   assert(
-    harness.notifications.at(-1)?.message?.includes("edit metrics: edits 0/0"),
-    "setup doctor reports the edit metrics (#104)",
-  );
-  assert(
-    harness.notifications.at(-1)?.message?.includes("recovery status:"),
-    "setup doctor reports the recovery status (#107)",
+    !harness.notifications.at(-1)?.message?.includes("recovery status:"),
+    "setup doctor leaves workflow recovery to the explicit v3 controller",
   );
   const verify = harness.tools.get("verify");
   if (verify) {
@@ -1036,7 +1048,7 @@ await section("setup core lifecycle", async () => {
 // source in its schema but nothing in production code ever created one.
 // ---------------------------------------------------------------------------
 await section("direct task lifecycle: /task and /task-done", async () => {
-  if (!setupCore) return;
+  return; // Replaced by the v3 module suite for .agent/direct-task.json.
   const contractMod = await load("extensions/setup-core/task-contract.ts");
 
   // --- /task with no argument: no contract created ---
@@ -3711,11 +3723,8 @@ await section(
 
 await section("native subagent profiles", async () => {
   const expectedProfiles = [
-    "oracle.md",
     "planner.md",
     "reviewer.md",
-    "scout.md",
-    "test-runner.md",
     "worker.md",
   ];
   const agentsRoot = path.join(ROOT, "agents");
@@ -3725,7 +3734,7 @@ await section("native subagent profiles", async () => {
       .map((entry) => entry.name)
       .sort(),
     expectedProfiles,
-    "the six consolidated local subagent profiles remain the complete set",
+    "planner, worker and reviewer are the complete local core role set",
   );
 });
 
@@ -9482,6 +9491,26 @@ await section("LSP command, status and trust (#97)", async () => {
     lspExtensionMod.default(harness.api);
     const context = harness.makeContext({ cwd, trusted: false });
     await harness.runHooks("session_start", {}, context);
+    harness.api.events.emit("aurora-ui/state/request", {
+      type: "request",
+      requestId: "lsp-state",
+      sessionEpoch: "lsp-epoch",
+      requester: "test",
+    });
+    let completionRpcResult;
+    harness.api.events.emit("lsp:diagnostics:v1:request", {
+      version: 1,
+      requestId: "lsp-completion-mismatch",
+      projectRoot: `${cwd}-other`,
+      files: ["a.ts"],
+      respond(value) {
+        completionRpcResult = value;
+      },
+    });
+    assert(
+      completionRpcResult?.results?.[0]?.status === "unavailable",
+      "completion RPC rejects a request for another active project",
+    );
     // .pi/lsp.json sets enabled:false; if the trust gate were broken and it
     // got applied anyway, /lsp status would report "off" instead.
     await harness.commands.get("lsp")("status", context);
@@ -10133,51 +10162,58 @@ await section("context ledger plan-mode integration", async () => {
     planMode.default(harness.api);
     const context = harness.makeContext({ cwd: dir, trusted: true });
 
-    // session_shutdown triggert einen deterministischen Konsolidierungslauf.
+    // v3 entfernt automatische Ledger-Trigger; manuelle Ledger-Funktionen
+    // bleiben im vorigen Modultest abgedeckt.
     await harness.runHooks("session_shutdown", {}, context);
     const ledger = readLedger(dir);
-    assert(typeof ledger === "string", "session_shutdown schreibt den Ledger");
     assert(
-      ledger.includes("Deterministischer Ledger ohne Modell-Turn"),
-      "Entscheidung aus dem Brief steht im Ledger",
-    );
-    assert(
-      ledger.includes("Keine neue Memory-Extension"),
-      "Nicht-Ziel aus dem Plan steht im Ledger",
-    );
-    assert(
-      ledger.includes("Erster Schritt") &&
-        !ledger.includes("Erledigter Schritt"),
-      "nur offene Todos werden als aktuelle Priorität geführt",
+      ledger === undefined,
+      "session_shutdown schreibt keinen automatischen Ledger mehr",
     );
 
     // Es wurde kein zusätzlicher Modell-Turn ausgelöst.
     eq(harness.sent.length, 0, "Ledger-Checkpoint erzeugt keinen Modell-Turn");
 
-    // Recovery: session_start zeigt eine kompakte Kopfzeile, kein Voll-Inject.
+    // Recovery injiziert auch keine automatische Ledger-Kopfzeile mehr.
     const startHarness = createHarness();
     planMode.default(startHarness.api);
     const startContext = startHarness.makeContext({ cwd: dir, trusted: true });
     await startHarness.runHooks("session_start", {}, startContext);
     assert(
-      startHarness.notifications.some(
+      !startHarness.notifications.some(
         (entry) =>
           typeof entry.message === "string" &&
           entry.message.startsWith("Context Ledger:"),
       ),
-      "session_start meldet eine kompakte Ledger-Kopfzeile",
-    );
-    assert(
-      !startHarness.notifications.some(
-        (entry) =>
-          typeof entry.message === "string" &&
-          entry.message.includes("Deterministischer Ledger ohne Modell-Turn"),
-      ),
-      "die Kopfzeile injiziert nicht den vollen Ledger-Inhalt",
+      "session_start meldet keine automatische Ledger-Kopfzeile",
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+await section("context ledger benchmark checkpoint switch", async () => {
+  if (!ledgerCheckpoint) return;
+  const {
+    BENCHMARK_DISABLE_LEDGER_CHECKPOINTS_ENV,
+    ledgerCheckpointsEnabled,
+  } = ledgerCheckpoint;
+  assert(
+    ledgerCheckpointsEnabled({}),
+    "Ledger-Checkpoints sind ohne Benchmark-Override aktiv",
+  );
+  assert(
+    !ledgerCheckpointsEnabled({
+      [BENCHMARK_DISABLE_LEDGER_CHECKPOINTS_ENV]: "1",
+    }),
+    "der exakte Benchmark-Override deaktiviert nur die Checkpoints",
+  );
+  assert(
+    ledgerCheckpointsEnabled({
+      [BENCHMARK_DISABLE_LEDGER_CHECKPOINTS_ENV]: "true",
+    }),
+    "nur der explizite Wert 1 deaktiviert Checkpoints",
+  );
 });
 
 console.log(

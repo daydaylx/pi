@@ -6,11 +6,11 @@
   },
   "permissions": {
     "unknownTools": "ask",
-    "bash": "ask",
+    "bash": "allow",
     "workflowDefaults": {
-      "work": "read-bash",
-      "simple_plan": "read-bash",
-      "detailed_plan": "read-bash"
+      "work": "project-write",
+      "simple_plan": "readonly",
+      "detailed_plan": "readonly"
     }
   },
   "lsp": {

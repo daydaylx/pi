@@ -10,28 +10,7 @@ import {
   runVerificationGate,
   type GateContext,
 } from "./verification-gate.ts";
-import { createDoomLoopState, registerDoomLoopDetector } from "./doom-loop.ts";
-import {
-  createEditMetrics,
-  metricsSummary,
-  registerEditMetrics,
-} from "./edit-metrics.ts";
-import {
-  createEditFallbackState,
-  registerEditFallbackDetector,
-} from "./edit-fallback.ts";
-import { checkRecoveryStatus, offerRecoveryDialog } from "./recovery-check.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
-import {
-  clearTaskContract,
-  createDirectContract,
-  loadTaskContract,
-  saveTaskContract,
-} from "./task-contract.ts";
-import {
-  WORKFLOW_CAPABILITY_EVENTS,
-  type WorkflowStateDiscardedEvent,
-} from "../shared/workflow-capabilities.ts";
 
 const CheckParams = Type.Object({
   check: Type.Union([
@@ -58,20 +37,6 @@ function packageVersion(path: string): string | undefined {
 export default function setupCore(pi: ExtensionAPI): void {
   let activeCwd = process.cwd();
   let trusted = false;
-  let recoveryStatus = { interrupted: false, summary: "unbekannt" };
-  const doomLoop = createDoomLoopState();
-  const editMetrics = createEditMetrics();
-  const editFallback = createEditFallbackState();
-  registerDoomLoopDetector(pi, doomLoop);
-  const existCheck = (p: string) => {
-    try {
-      return existsSync(p);
-    } catch {
-      return false;
-    }
-  };
-  registerEditMetrics(pi, editMetrics, { existCheck });
-  registerEditFallbackDetector(pi, editFallback, { existCheck });
 
   const execAdapter: GateContext["exec"] = (program, args, options) =>
     pi.exec(program, args, {
@@ -83,29 +48,6 @@ export default function setupCore(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
     trusted = ctx.isProjectTrusted();
-    recoveryStatus = checkRecoveryStatus(ctx);
-    if (recoveryStatus.interrupted && ctx.hasUI && ctx.mode === "tui") {
-      const sessionId = ctx.sessionManager.getSessionId();
-      void offerRecoveryDialog(ctx, recoveryStatus, execAdapter).then(
-        (result) => {
-          if (
-            result === "plan-state-discarded" &&
-            ctx.sessionManager.getSessionId() === sessionId
-          ) {
-            pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.stateDiscarded, {
-              cwd: ctx.cwd,
-              sessionId,
-            } satisfies WorkflowStateDiscardedEvent);
-          }
-        },
-      ).catch((error) => {
-        if (ctx.sessionManager.getSessionId() !== sessionId) return;
-        ctx.ui.notify(
-          `Recovery-Dialog wurde sicher abgebrochen: ${error instanceof Error ? error.message : String(error)}`,
-          "warning",
-        );
-      });
-    }
   });
 
   pi.registerTool({
@@ -185,11 +127,6 @@ export default function setupCore(pi: ExtensionAPI): void {
           ? `${profileCount} Profil(e) geladen`
           : ".pi/verify.json ignoriert (untrusted)"
         : "keine .pi/verify.json";
-      const loopHint = doomLoop.lastDetection
-        ? `${doomLoop.lastDetection.kind}: ${doomLoop.lastDetection.message}`
-        : "keine Doom-Loop erkannt";
-      const editHint = metricsSummary(editMetrics);
-      const recoveryHint = recoveryStatus.summary;
       const hasVersionDrift =
         String(declaredVersion ?? "") !== String(devVersion ?? "") ||
         (runtimeVersion !== undefined &&
@@ -224,9 +161,6 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  installed dev package: ${devVersion ?? "missing"}`,
         `  configured extensions: ${Array.isArray(settings?.extensions) ? settings.extensions.length : "?"}`,
         `  project verification profiles: ${profileHint}`,
-        `  doom-loop status: ${loopHint}`,
-        `  edit metrics: ${editHint}`,
-        `  recovery status: ${recoveryHint}`,
       ];
       for (const diagnostic of loaded.diagnostics) {
         lines.push(
@@ -279,80 +213,4 @@ export default function setupCore(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("task", {
-    description:
-      "Direkte Aufgabe (ohne /plan) beginnen: /task <Ziel> — legt einen Task-Contract an, den /task-done gegen das Gate prüft.",
-    handler: async (args, ctx) => {
-      const goal = args.trim();
-      if (!goal) {
-        ctx.ui.notify("Nutzung: /task <Ziel>", "info");
-        return;
-      }
-      const existing = loadTaskContract(ctx.cwd);
-      if (existing.contract) {
-        if (!ctx.hasUI || ctx.mode !== "tui") {
-          ctx.ui.notify(
-            `Es existiert bereits ein Task-Contract ("${existing.contract.goal}"). Überschreiben ist ohne interaktive Bestätigung nicht möglich.`,
-            "warning",
-          );
-          return;
-        }
-        const overwrite = await ctx.ui.confirm(
-          "Bestehenden Task-Contract überschreiben?",
-          `Aktuell: "${existing.contract.goal}" (${existing.contract.source === "plan" ? "aus Plan abgeleitet" : "direkte Aufgabe"}). Neu: "${goal}".`,
-        );
-        if (!overwrite) {
-          ctx.ui.notify(
-            "Abgebrochen; bestehender Task-Contract bleibt aktiv.",
-            "info",
-          );
-          return;
-        }
-      }
-      saveTaskContract(ctx.cwd, createDirectContract(goal));
-      ctx.ui.notify(
-        `Direkte Aufgabe gestartet: "${goal}". Nutze /task-done zum Abschluss.`,
-        "info",
-      );
-    },
-  });
-
-  pi.registerCommand("task-done", {
-    description:
-      "Direkte Aufgabe (ohne /plan) abschließen: prüft das Verifikations-Gate und löscht danach den Task-Contract.",
-    handler: async (_args, ctx) => {
-      const loaded = loadTaskContract(ctx.cwd);
-      if (!loaded.contract || loaded.contract.source !== "direct") {
-        ctx.ui.notify("Keine aktive direkte Aufgabe.", "info");
-        return;
-      }
-      const result = await runVerificationGate({
-        projectRoot: ctx.cwd,
-        trusted: ctx.isProjectTrusted(),
-        exec: execAdapter,
-      });
-      if (result.status !== "pass") {
-        if (!ctx.hasUI || ctx.mode !== "tui") {
-          ctx.ui.notify(
-            `Verifikations-Gate ${result.status.toUpperCase()}: Abschluss ohne interaktive Bestätigung nicht möglich.\n${formatGateReport(result)}`,
-            "warning",
-          );
-          return;
-        }
-        const override = await ctx.ui.confirm(
-          `Verifikations-Gate ${result.status.toUpperCase()} — trotzdem abschließen?`,
-          formatGateReport(result),
-        );
-        if (!override) {
-          ctx.ui.notify(
-            "Abschluss abgebrochen; Gate-Ergebnis siehe oben.",
-            "info",
-          );
-          return;
-        }
-      }
-      clearTaskContract(ctx.cwd);
-      ctx.ui.notify("Direkte Aufgabe abgeschlossen.", "info");
-    },
-  });
 }

@@ -1,10 +1,10 @@
 {
   "lastChangelogVersion": "0.82.0",
   "theme": "aurora-night",
-  "defaultProvider": "openrouter",
-  "defaultModel": "poolside/laguna-m.1:free",
+  "defaultProvider": "opencode-go",
+  "defaultModel": "kimi-k2.7-code",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "medium",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -44,6 +44,9 @@
   "packages": [
     "git:github.com/daydaylx/pi-subagents@dd716cfc8c3a9b0ee35632752ac2b1736cd7de61"
   ],
+  "subagents": {
+    "disableBuiltins": true
+  },
   "extensions": [
     "!extensions/**",
     "+extensions/setup-core/index.ts",

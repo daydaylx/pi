@@ -1,159 +1,55 @@
 # Pi Subagents
 
-Status: Migration zum gepinnten `daydaylx/pi-subagents`-Fork abgeschlossen.
+Die Orchestrierung stammt aus dem exakt gepinnten
+`daydaylx/pi-subagents`-Fork. Paket-Builtins sind in `settings.json` mit
+`subagents.disableBuiltins: true` vollständig deaktiviert, damit keine
+überlappenden Rollen im Agent-Katalog erscheinen.
 
-## Zusammenfassung
+## Kernrollen
 
-Die Subagent-Orchestrierung wird durch das Drittanbieter-Paket
-[`pi-subagents`](https://github.com/daydaylx/pi-subagents) bereitgestellt, als
-unveränderlicher Git-Commit in `settings.json` → `packages` gepinnt. Die vorherige lokale
-Implementierung (`extensions/subagents/index.ts`, `agents.ts`,
-`runtime-status.ts`) wurde entfernt.
+| Rolle | Tools | Verantwortung |
+| --- | --- | --- |
+| `planner` | read, grep, find, ls | Quick-/Architekturplanung und Systemgrenzen, nur lesend |
+| `worker` | read, grep, find, ls, edit, write, bash | eng abgegrenzte Umsetzung und relevante Checks |
+| `reviewer` | read, grep, find, ls | unabhängiger Diff-, Scope- und Abschlussreview |
 
-## Warum das vorherige No-Go überarbeitet wurde
+Ein `researcher` ist optional vorgesehen, aber ohne Web-Toolchain nicht
+installiert. Die früheren lokalen Rollen `scout`, `oracle` und `test-runner`
+sowie überlappende Paket-Builtins sind nicht aktiv.
 
-Eine frühere Sitzung verzögerte Drittanbieter-Subagent-Pakete bewusst mit
-**„No-Go until later: ... without source audit.“** Dieses Audit wurde inzwischen
-durchgeführt. Der vollständige Quellcode-Review (alle ~92 `.ts`-Dateien unter `src/`) ergab:
+Alle lokalen Profile starten standardmäßig mit frischem Child-Kontext,
+übernehmen die statischen Projektregeln und nicht automatisch den
+Parent-Skill-Katalog. Die Toolliste ist die technische Capability-Grenze:
+nur der Worker besitzt Schreib- und Shell-Tools.
 
-- npm-Tarball byte-identisch zum GitHub-Tag `v0.34.0`.
-- Einzelner Maintainer über 89 veröffentlichte Versionen, GitHub Actions Provenance
-  Publishing, keine `postinstall`-Hooks.
-- Keine Netzwerkaufrufe, Telemetrie oder Exfiltration; die einzige externe Domain ist ein
-  Opt-in, nutzerinitiierter Gist-Share (`share: false` standardmäßig).
-- Kein `eval`/dynamischer Remote-Code; alle `spawn()`-Aufrufe verwenden Array-Argumente (kein
-  Shell-Injection); konsistente Timeout/SIGTERM/SIGKILL-Eskalation.
+## Completion-RPC
 
-Urteil: vertrauenswürdig; die Audit-Ergebnisse sind oben zusammengefasst.
+Plan-mode nutzt ausschließlich den versionierten In-Process-Vertrag:
 
-## Capability-Grenze
+- Request: `subagents:rpc:v1:request`
+- Reply: `subagents:rpc:v1:reply:<requestId>`
+- Methoden: asynchrones `spawn` des lokalen `reviewer`, anschließend `status`
 
-`pi-subagents` versteht die vorherigen `permission`/`writeOverride`/
-`allowedPaths`-Frontmatter-Felder nicht und setzt auch nicht die
-Umgebungsvariablen `PI_SUBAGENT_PERMISSION_LEVEL`/`PI_SUBAGENT_WRITE_OVERRIDE`/
-`PI_SUBAGENT_ALLOWED_PATHS`, die `mode-permissions.ts` früher für gestartete
-Kindprozesse auslas (diese Brücke wurde als Dead Code entfernt). Es beschränkt
-Kindprozesse über `--tools <list>`, was eine harte Pi-Core-Registry-Grenze ist:
-ein weggelassenes Tool kann nicht aufgerufen werden. Review- und Exploration-Profile lassen deshalb Bash komplett weg. Der Test-Runner erhält
-das lokale `verify`-Tool, das nur die konfigurierten Namen `typecheck`, `test`
-und `verify` akzeptiert und die festen Prüfungen dieses Setups aus dem Agent-Verzeichnis
-ausführt; es kann keine beliebige Shell-Eingabe übergeben oder Repository-Lifecycle-Skripte
-auswählen. Rohe Bash- und Write-Tools bleiben `worker` vorbehalten.
+Der Reviewer arbeitet lesend mit PlanSnapshot, Diff-Fingerprint,
+Dateiliste, Scope-Befunden und Check-Ergebnissen. Sein letzter nichtleerer
+Output muss exakt einer dieser Marker sein:
 
-## Installation
-
-Die Laufzeitquelle ist ein geprüfter persönlicher Fork-Commit, kein npm-Range oder
-`latest`. Aktualisiere ihn, indem du einen geprüften Fork-Commit veröffentlichst und den
-vollständigen SHA in `settings.json` ersetzt.
-
-## Tools und Befehle
-
-- Tool `subagent` (unveränderter Name), plus ein `wait`-Tool für asynchrone Steuerung.
-- Modi: `{agent, task}` (einzeln), `{tasks:[...]}` (parallel),
-  `{chain:[...]}` (Kette), `{action: "list"}` (Discovery – ersetzt den
-  vorherigen `/subagent-list`-Befehl).
-- Slash-Commands: `/run`, `/chain`, `/run-chain`, `/parallel`,
-  `/subagent-cost`, `/subagents-doctor` (ersetzt `/subagent-doctor`),
-  `/subagents-fleet`, `/subagents-stop`, `/subagents-models`,
-  `/subagents-profiles`, `/subagents-load-profile`,
-  `/subagents-refresh-provider-models`, `/subagents-generate-profiles`,
-  `/subagents-check-profile`, `/subagents-watchdog`.
-
-## Agent-Profile
-
-Agenten leben in `agents/*.md` (Nutzer-Scope, da dieses Repository-Verzeichnis
-_is_ `~/.pi/agent` ist). Das Frontmatter enthält keine `permission` oder
-`writeOverride` mehr — der Zugriff wird vollständig über die `tools:`-Liste gesteuert.
-
-Jedes lokale Profil deklariert die Kontext-Policy explizit:
-
-- `defaultContext: fresh` startet mit einer neuen Child-Unterhaltung. Das Parent-
-  Transkript wird nicht in das Child kopiert.
-- `inheritProjectContext: true` lädt absichtlich die kompakten globalen und
-  Projekt-Kontextdateien, damit Sicherheits- und Architekturregeln weiterhin gelten.
-- `inheritSkills: false` hält den Parent-Skill-Katalog aus dem Child heraus,
-  es sei denn, die zugewiesene Aufgabe selbst erfordert einen Skill.
-
-Nutze Parent- oder Fork-Kontext nur, wenn die delegierte Aufgabe tatsächlich von
-Entscheidungen abhängt, die bereits im Parent-Chat getroffen wurden. Reviews, Repository-
-Exploration, Tests, Security-Checks und Second Opinions verwenden standardmäßig frischen
-Kontext. Kontext-Vererbung und Projekt-Kontext-Vererbung sind getrennt:
-`fresh` isoliert den Chat-Verlauf, unterdrückt aber nicht die absichtlich aktivierten
-statischen Projektregeln.
-
-`pi-subagents` liefert 8 eingebaute Agenten (`scout`, `researcher`, `planner`,
-`worker`, `reviewer`, `oracle`, `delegate`, `context-builder`). Fünf der sechs
-lokalen Profilnamen kollidieren mit Builtins (`scout`, `oracle`, `planner`,
-`reviewer`, `worker`); `test-runner` ist ausschließlich lokal definiert. Agenten
-im Nutzer-Scope überschatten automatisch Builtins mit demselben Namen (höchste
-Discovery-Priorität), sodass die lokalen, bereits
-etablierten Prompts und Ausgabeformate ohne Umbenennung wirksam bleiben.
-
-Die früheren Spezialprofile `architect`, `security-auditor`, `ui-reviewer` und
-`docs-auditor` wurden konsolidiert: Architekturverantwortung liegt jetzt vollständig
-beim `planner`; Security-, UI-, Docs- und Architektur-Reviews erfolgen über den
-`reviewer` mit seinem Fokus-System (`general`, `security`, `ui`, `docs`,
-`architecture`).
-
-| Agent              | Tools                                   | Notizen                                               |
-| ------------------ | --------------------------------------- | ----------------------------------------------------- |
-| `scout`            | read, grep, find, ls                    | nur lesend; liefert kompakten Explorationskontext      |
-| `planner`          | read, grep, find, ls                    | Planung + volle Architekturverantwortung, nur lesend   |
-| `worker`           | read, grep, find, ls, edit, write, bash | voller Schreib-Scope, nur zugewiesene Dateien          |
-| `reviewer`         | read, grep, find, ls                    | 5 Fokusse: general, security, ui, docs, architecture   |
-| `test-runner`      | read, grep, find, ls, verify            | nur allowlistete Verifikation, keine rohe Bash         |
-| `oracle`           | read, grep, find, ls                    | festes Deep-Modell + Thinking; zweite Meinung          |
-
-## Konfiguration
-
-`pi-subagents` liest seine eigene Konfiguration unter
-`~/.pi/agent/extensions/subagent/config.json` (optional) plus einen
-`settings.json` → `subagents.*` Key. Die aktiven lokalen Werte sind
-`parallel.maxTasks` = 4, `parallel.concurrency` = 3,
-`globalConcurrencyLimit` = 3 und `maxSubagentSpawnsPerSession` = 12.
-
-Die Paket-Implementierung akzeptiert einen internen `maxOutput`-Wert, aber das
-öffentliche Tool-Schema stellt diesen Parameter nicht zuverlässig bereit. Aufrufer dürfen
-sich daher nicht darauf verlassen, ihn direkt zu setzen. Die lokale Tool-Output-Absicherung
-wendet das Repository-Limit von etwa 50 KiB oder 2.000 Zeilen auf zurückgegebenen Subagent-
-Text an, während eine sichtbare Kürzungsmeldung erhalten bleibt. Ein strengeres unterstütztes
-Limit muss strenger bleiben.
-
-## Ergebnisvertrag
-
-Subagenten liefern einen kompakten Endbericht mit genau diesen Top-Level-Abschnitten:
-
-```markdown
-## Ergebnis
-
-## Belege
-
-## Betroffene Dateien
-
-## Fehler oder Risiken
-
-## Offene Fragen
-
-## Empfehlung
+```text
+[COMPLETION-REVIEW:PASS]
+[COMPLETION-REVIEW:REWORK]
+[COMPLETION-REVIEW:UNVERIFIABLE]
 ```
 
-Rollenspezifischer Inhalt gehört in diese gemeinsame Struktur. Gib nur den
-Endbericht an den Parent-Kontext zurück; kopiere niemals ein vollständiges Child-Transkript,
-rohes Tool-Log oder versteckte Schlussfolgerungen hinein. Session-Artefakte können zur
-Diagnose im konfigurierten Session-Storage verbleiben, werden aber nicht in die
-Parent-Unterhaltung zurückinjiziert.
+Fehlender, mehrfacher oder nicht abschließender Marker wird als
+`UNVERIFIABLE` behandelt. Der Parent übernimmt niemals ein Child-Transkript
+als fachliche Quelle.
 
-## UI-Integration
+## Betriebsgrenzen
 
-Aurora besitzt den einzigen angepassten Editor, Footer und Activity-Widget. Die lokale
-`extensions/subagent/config.json` deaktiviert das permanente asynchrone Widget des Pakets und
-begrenzt sowohl lokale als auch globale Parallelität auf vier. Subagent-Lifecycle-Tracking,
-Status-Befehle und Completion-Notifications bleiben verfügbar, ohne einen zweiten persistenten
-UI-Besitzer.
-
-## Delegationskriterien
-
-Die kompakten Regeln in `AGENTS.md` (sechs harte Kriterien plus
-Delegationsmuster) entscheiden, wann Delegation angemessen ist. Dieses
-Dokument ist die detaillierte Referenz für Profilauswahl, Kontext-Isolation,
-Ergebnisformatierung und Betriebsgrenzen.
+- Keine automatische Installation oder Aktualisierung des Pakets.
+- Keine Secrets, Auth-Dateien oder Umgebungsdumps in Tasks oder Reports.
+- Asynchrone Runs werden über die Paket-Artefakte bzw. `status` beobachtet,
+  nicht über Terminal-Scraping.
+- Delegation folgt den harten Kriterien in `AGENTS.md`.
+- Completion startet immer genau einen unabhängigen Reviewer; allgemeine
+  Aufgaben delegieren nur, wenn die Projektregeln es rechtfertigen.

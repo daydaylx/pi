@@ -76,6 +76,7 @@ import { registerLspControlCenter } from "./control-center.ts";
 import type { LspToolsDeps } from "./tools.ts";
 import { computeLspStatus, publishLspStatus } from "./status.ts";
 import { defaultSetupConfig, loadSetupConfig } from "../setup-core/config.ts";
+import { registerLspCompletionRpc } from "./completion-rpc.ts";
 import {
   AURORA_UI_CHANNELS,
   isAuroraUiStateRequest,
@@ -168,6 +169,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
   let sessionOverride: Partial<LspConfig> = {};
   let sessionEpoch = 0;
   let activeSessionId: string | undefined;
+  let activeProjectRoot: string | undefined;
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
   const logBuffer: string[] = [];
@@ -292,6 +294,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
 
   registerLspDiagnosticsTool(pi, deps);
   registerLspNavigationTools(pi, deps);
+  registerLspCompletionRpc(pi, deps, () => activeProjectRoot);
   registerLspControlCenter(pi, {
     getStatus: () =>
       registry ? computeLspStatus(config, registry.list()) : "aus",
@@ -305,6 +308,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
     const previousRegistry = registry;
     sessionEpoch += 1;
     activeSessionId = ctx.sessionManager.getSessionId();
+    activeProjectRoot = ctx.cwd;
     registry = undefined;
     await previousRegistry?.shutdownAll();
     sessionOverride = {};
@@ -319,6 +323,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
     const previousRegistry = registry;
     sessionEpoch += 1;
     activeSessionId = undefined;
+    activeProjectRoot = undefined;
     registry = undefined;
     await previousRegistry?.shutdownAll();
     sessionOverride = {};

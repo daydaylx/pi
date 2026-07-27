@@ -65,10 +65,9 @@ const CRITICAL_BASH_PATTERNS: Array<[RegExp, string]> = [
   ],
 ];
 
-// Bleiben ausschließlich in YOLO automatisch erlaubt (nicht in Full Access):
-// sudo/su, Datei-/Ordnerlöschung und erzwungene Git-Pushes. Der vollständige
-// YOLO-Bypass wird am Beginn der öffentlichen Entscheidungsmethoden behandelt;
-// diese Muster beschreiben deshalb ausschließlich die verbleibenden Stufen.
+// In project-write lösen diese Muster eine Rückfrage aus. confirm-all fragt
+// ohnehin bei jeder Mutation; YOLO überspringt Rückfragen nur innerhalb seiner
+// harten Secret-, System-, Symlink- und Projektgrenzen.
 const SENSITIVE_ASK_PATTERNS: Array<[RegExp, string]> = [
   [/\b(?:rm|rmdir|unlink|trash)\b/i, "Datei- oder Ordnerlöschung"],
   [/\bgio\s+trash\b/i, "Datei- oder Ordnerlöschung"],
@@ -79,8 +78,8 @@ const SENSITIVE_ASK_PATTERNS: Array<[RegExp, string]> = [
   ],
 ];
 
-// Git-Housekeeping und Paketmanager-Rauschen sind in Full Access automatisch
-// erlaubt. YOLO wird bereits vor dieser Auswertung vollständig freigegeben.
+// Routinemutationen fragen in project-write nach. confirm-all fragt bereits
+// allgemein; YOLO wird vor dieser Auswertung innerhalb harter Grenzen erlaubt.
 const ROUTINE_ASK_PATTERNS: Array<[RegExp, string]> = [
   [/\bgit\s+reset\b/i, "git reset"],
   [/\bgit\s+clean\b/i, "git clean"],
@@ -239,21 +238,17 @@ export function decideFileAccess(
   cwd: string,
   options: DecideFileAccessOptions = {},
 ): PolicyDecision {
-  if (permissionLevel === "yolo") {
-    return { action: "allow", reason: "YOLO-Voll-Bypass" };
-  }
   const { protectedWritePath } = options;
   const scope = resolvePathScope(rawPath, cwd);
-  const isReadRestricted =
-    permissionLevel === "read-only" || permissionLevel === "read-bash";
+  const isReadRestricted = permissionLevel === "readonly";
 
   if (
     isSensitiveReference(rawPath) ||
     isSensitiveReference(scope.absolutePath)
   ) {
-    return isReadRestricted
+    return isReadRestricted || permissionLevel === "yolo"
       ? deny(
-          "Diese Zugriffsstufe blockiert Secrets und SSH-/Credential-Dateien.",
+          "Harte Grenze: Secrets und SSH-/Credential-Dateien sind blockiert.",
         )
       : ask("Zugriff auf Secrets, Tokens, Credentials oder SSH-Keys", true);
   }
@@ -274,17 +269,31 @@ export function decideFileAccess(
     return ALLOW;
   }
 
+  if (!scope.insideProject && operation === "read") {
+    return permissionLevel === "yolo"
+      ? deny("Harte Projektgrenze: externer Lesezugriff ist in YOLO blockiert.")
+      : ask(`Lesezugriff außerhalb des Projekts: ${scope.absolutePath}`);
+  }
   if (operation === "write" && scope.symlinkEscape) {
-    return ask(
-      "Schreibzugriff über einen Symlink außerhalb der Projektgrenze",
-      true,
-    );
+    return permissionLevel === "yolo"
+      ? deny("Harte Symlink-Grenze: Schreibzugriff wurde blockiert.")
+      : ask(
+          "Schreibzugriff über einen Symlink außerhalb der Projektgrenze",
+          true,
+        );
   }
   if (operation === "write" && isSystemPath(scope.absolutePath)) {
-    return ask(`Änderung am Systempfad ${scope.absolutePath}`, true);
+    return permissionLevel === "yolo"
+      ? deny("Harte Systemgrenze: Änderung am Systempfad wurde blockiert.")
+      : ask(`Änderung am Systempfad ${scope.absolutePath}`, true);
   }
   if (operation === "write" && !scope.insideProject) {
-    return ask(`Änderung außerhalb des Projekts: ${scope.absolutePath}`);
+    return permissionLevel === "yolo"
+      ? deny("Harte Projektgrenze: externe Änderung wurde blockiert.")
+      : ask(`Änderung außerhalb des Projekts: ${scope.absolutePath}`);
+  }
+  if (operation === "write" && permissionLevel === "confirm-all") {
+    return ask(`Mutation im Projekt: ${scope.absolutePath}`);
   }
   return ALLOW;
 }
@@ -425,12 +434,8 @@ function containsExternalPath(tokens: string[], cwd: string): boolean {
         if (value === ".." || value.startsWith("../")) {
           return !isInside(resolve(cwd), resolve(cwd, value));
         }
-        const candidate = resolve(cwd, value);
-        if (existsSync(candidate)) {
-          const scope = resolvePathScope(value, cwd);
-          return !scope.insideProject || scope.symlinkEscape;
-        }
-        return false;
+        const scope = resolvePathScope(value, cwd);
+        return !scope.insideProject || scope.symlinkEscape;
       }
       // Bare options like -o are not paths
       return false;
@@ -440,12 +445,8 @@ function containsExternalPath(tokens: string[], cwd: string): boolean {
     if (token === ".." || token.startsWith("../")) {
       return !isInside(resolve(cwd), resolve(cwd, token));
     }
-    const candidate = resolve(cwd, token);
-    if (existsSync(candidate)) {
-      const scope = resolvePathScope(token, cwd);
-      return !scope.insideProject || scope.symlinkEscape;
-    }
-    return false;
+    const scope = resolvePathScope(token, cwd);
+    return !scope.insideProject || scope.symlinkEscape;
   });
 }
 
@@ -878,10 +879,6 @@ function executableToken(tokens: string[]): {
   ) {
     index += 1;
   }
-  if (tokens[index] === "sudo") {
-    index += 1;
-    while (index < tokens.length && tokens[index].startsWith("-")) index += 1;
-  }
   if (tokens[index] === "env") {
     index += 1;
     while (
@@ -898,25 +895,16 @@ function executableToken(tokens: string[]): {
   };
 }
 
-/** Full Access remains permissive, but asks when shell effects are opaque. */
-function fullAccessShellRisk(command: string): string | undefined {
+function opaqueInterpreter(command: string): string | undefined {
   const parsed = parseReadOnlyShell(command);
-  if (parsed.error) {
-    return `Nicht sicher klassifizierbare Shell-Konstruktion (${parsed.error})`;
-  }
+  if (parsed.error) return undefined;
   for (const tokens of parsed.segments) {
     const { executable, args } = executableToken(tokens);
-    if (
-      executable === "find" &&
-      hasAnyOption(tokens, [/^-(?:delete|exec|execdir|ok|okdir)$/i])
-    ) {
-      return "find mit mutierender oder opaker Aktion";
-    }
     if (
       OPAQUE_INTERPRETERS.has(executable) &&
       !(args.length === 1 && ["-v", "-V", "--version"].includes(args[0]))
     ) {
-      return `Opaker Interpreteraufruf (${executable})`;
+      return executable;
     }
   }
   return undefined;
@@ -927,33 +915,27 @@ export function decideBash(
   command: string,
   cwd: string,
 ): PolicyDecision {
-  if (permissionLevel === "yolo") {
-    return { action: "allow", reason: "YOLO-Voll-Bypass" };
-  }
   const trimmed = command.trim();
   if (!trimmed) return deny("Leeres Bash-Kommando.");
 
-  if (permissionLevel === "read-only") {
-    return deny(
-      "Read only: Bash-Kommandos sind in dieser Zugriffsstufe deaktiviert.",
-    );
-  }
-  if (permissionLevel === "read-bash") {
+  if (permissionLevel === "readonly") {
     return isPlanSafeCommand(trimmed, cwd)
       ? ALLOW
-      : deny("Read + Bash: Das Kommando ist nicht nachweislich read-only.");
+      : deny("Readonly: Das Kommando ist nicht nachweislich rein inspizierend.");
   }
 
   if (isSensitiveReference(trimmed)) {
-    return ask("Zugriff auf Secrets, Tokens, Credentials oder SSH-Keys", true);
+    return permissionLevel === "yolo"
+      ? deny("Harte Secret-Grenze: Shell-Zugriff wurde blockiert.")
+      : ask("Zugriff auf Secrets, Tokens, Credentials oder SSH-Keys", true);
   }
 
   for (const [pattern, reason] of CRITICAL_BASH_PATTERNS) {
-    if (pattern.test(trimmed)) return ask(reason, true);
-  }
-  if (permissionLevel === "full-access") {
-    const shellRisk = fullAccessShellRisk(trimmed);
-    if (shellRisk) return ask(shellRisk);
+    if (pattern.test(trimmed)) {
+      return permissionLevel === "yolo"
+        ? deny(`Harte Systemgrenze: ${reason}`)
+        : ask(reason, true);
+    }
   }
   if (
     referencesSystemPath(trimmed) &&
@@ -963,7 +945,40 @@ export function decideBash(
       /(?:^|[^<])>(?!>)/.test(trimmed) ||
       />>/.test(trimmed))
   ) {
-    return ask("Änderung an einem Systempfad", true);
+    return permissionLevel === "yolo"
+      ? deny("Harte Systemgrenze: Änderung am Systempfad wurde blockiert.")
+      : ask("Änderung an einem Systempfad", true);
+  }
+
+  if (permissionLevel === "confirm-all") {
+    if (isPlanSafeCommand(trimmed, cwd)) return ALLOW;
+    return ask(
+      isWriteCapableCommand(trimmed)
+        ? "Shell-Mutation benötigt Bestätigung"
+        : "Nicht rein inspizierender oder externer Shell-Aufruf benötigt Bestätigung",
+    );
+  }
+  if (permissionLevel === "yolo") {
+    if (/\b(?:sudo|su)\b/i.test(trimmed)) {
+      return deny("Harte Systemgrenze: erhöhte Rechte sind auch in YOLO blockiert.");
+    }
+    if (
+      /\b(?:apt|apt-get|dnf|yum|pacman|zypper|brew)\s+(?:install|remove|purge|update|upgrade)\b/i.test(
+        trimmed,
+      )
+    ) {
+      return deny("Harte Systemgrenze: System-Paketoperation wurde blockiert.");
+    }
+    const interpreter = opaqueInterpreter(trimmed);
+    if (interpreter) {
+      return deny(
+        `Harte System-/Secret-Grenze: opaker Interpreteraufruf (${interpreter}) wurde blockiert.`,
+      );
+    }
+    if (likelyExternalWrite(trimmed, cwd)) {
+      return deny("Harte Projektgrenze: externe Shell-Änderung wurde blockiert.");
+    }
+    return { action: "allow", reason: "Temporärer YOLO-Bypass innerhalb harter Grenzen" };
   }
 
   for (const [pattern, reason] of SENSITIVE_ASK_PATTERNS) {
@@ -973,7 +988,7 @@ export function decideBash(
   }
   for (const [pattern, reason] of ROUTINE_ASK_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return permissionLevel === "full-access" ? ALLOW : ask(reason);
+      return ask(reason);
     }
   }
   if (likelyExternalWrite(trimmed, cwd)) {
