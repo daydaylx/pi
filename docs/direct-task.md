@@ -29,6 +29,8 @@ möglich. Normaler Abschluss und Override werden vor dem Aufräumen als
 `workflow-completion`-Bericht in der Sitzung protokolliert. Nach akzeptiertem
 Abschluss wird `direct-task.json` entfernt.
 
-Das ältere `.agent/task-contract.json` und seine planabgeleitete
-Zwischenschicht sind kein aktiver Workflow-Vertrag mehr. Der reine
-`matchScope`-Matcher bleibt als gemeinsame Utility für die Completion erhalten.
+Das ältere `.agent/task-contract.json` und `setup-core/task-contract.ts` wurden
+entfernt: die Datei wurde von keinem Codepfad je geschrieben, der darauf
+aufbauende Scope-Drift-Zweig des Verifikations-Gates war unerreichbar. Der reine
+`matchScope`-Matcher lebt weiter in `extensions/plan-mode/scope.ts` und ist die
+Grundlage der erzwingbaren Scope-Prüfung in `plan-mode/completion.ts`.

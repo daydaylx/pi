@@ -110,10 +110,14 @@ Workflow und Berechtigungsstufe bleiben orthogonal:
 - `yolo` – sichtbarer temporärer Bypass; harte Secret-, System-, Symlink- und
   Trust-Grenzen bleiben aktiv und der Zustand wird nie persistiert.
 
+Die Workflow-Entscheidung fällt vor der Berechtigungsstufe. `yolo` hebt daher
+die Planungszusage nicht auf: während `planning` bleibt jeder Schreibzugriff
+außerhalb des aktuellen Plans blockiert.
+
 Legacy-Werte werden konservativ abgebildet:
 `read-only`/`read-bash` → `readonly`, `read-write` → `project-write`,
 `full-access` → `confirm-all`, persistiertes `yolo` → `project-write`.
 
 Automatische Ledger-Checkpoints, Doom-Loop-Entscheidungen und Edit-Metrik-Gates
-sind kein Bestandteil des aktiven Workflows. Die manuellen Diagnose- und
-Ledger-Module bleiben verfügbar.
+sind kein Bestandteil des aktiven Workflows; ihre Module wurden entfernt. Die
+manuellen Diagnose- und Ledger-Funktionen bleiben verfügbar.

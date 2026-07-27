@@ -69,13 +69,20 @@ Details: [`docs/subagents.md`](docs/subagents.md).
 ## UI und Shortcuts
 
 Shift+Tab öffnet das temporäre Control Center. `Super+P` öffnet die Planwahl,
-`Super+M` Modell-Scopes, `Super+D` Thinking, `Super+Q` das Hauptmenü und
+`Super+M` die Modellwahl, `Super+D` Thinking, `Super+Q` das Hauptmenü und
 `Super+Y` den temporären YOLO-Modus. Die Super-Kombinationen benötigen
 Kitty-/CSI-u-Unterstützung.
 
+`Super+M` listet die verfügbaren Modelle der Registry; während eines laufenden
+Turns ist der Wechsel gesperrt. Die frühere Scoped-Model-Übersicht entfällt.
+Im Auto-Modus folgt die Denktiefe dem Workflow: ein Wechsel der Planart passt
+sie sofort an, eine manuell gewählte Stufe bleibt unangetastet.
+
 Automatische Ledger-Checkpoints, Doom-Loop-Entscheidungen und Edit-Metrik-Gates
-wurden aus dem aktiven Workflow entfernt. Manuelle Ledger-, Diagnose- und
-Verifikationsfunktionen bleiben bestehen.
+wurden aus dem aktiven Workflow entfernt; ihre Module sind inzwischen ebenfalls
+gelöscht. Eine unterbrochene Ausführung meldet `plan-mode` beim Sitzungsstart
+und verweist auf `/work` — einen separaten Recovery-Dialog gibt es nicht mehr.
+Manuelle Ledger-, Diagnose- und Verifikationsfunktionen bleiben bestehen.
 
 ## Installieren und verifizieren
 

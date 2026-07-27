@@ -18,7 +18,7 @@ import {
   type PolicyDecision,
   type ProtectedWritePath,
 } from "./shared/permission-policy.ts";
-import { isPlanFilePath, PLAN_RELATIVE_PATH } from "./plan-mode/utils.ts";
+import { isPlanFilePath, PLAN_RELATIVE_PATH } from "./plan-mode/store/index.ts";
 import { confirmAction } from "./shared/permission-dialog.ts";
 import { runMenu } from "./shared/menu-ui.ts";
 import { runTabbedOverlay } from "./shared/tabbed-overlay.ts";
@@ -72,18 +72,12 @@ const LOCAL_LSP_TOOLS = new Set([
   "lsp_hover",
   "lsp_workspace_symbols",
 ]);
-const READ_ONLY_SUBAGENT_PROFILES = new Set([
-  "planner",
-  "reviewer",
-]);
+const READ_ONLY_SUBAGENT_PROFILES = new Set(["planner", "reviewer"]);
 
 function isRestrictedWorkflow(snapshot: WorkflowCapabilitySnapshot): boolean {
-  return [
-    "planning",
-    "reviewing",
-    "paused",
-    "blocked",
-  ].includes(snapshot.state);
+  return ["planning", "reviewing", "paused", "blocked"].includes(
+    snapshot.state,
+  );
 }
 
 function workflowAllowsPlanWrite(
@@ -137,8 +131,7 @@ function isManagedWorkflowArtifactPath(rawPath: string, cwd: string): boolean {
   const plansRelative = relative(plansRoot, target);
   return (
     plansRelative === "" ||
-    (plansRelative !== ".." &&
-      !plansRelative.startsWith(`..${sep}`)) ||
+    (plansRelative !== ".." && !plansRelative.startsWith(`..${sep}`)) ||
     target === resolve(cwd, ".agent/direct-task.json")
   );
 }
@@ -273,7 +266,6 @@ function decideTool(
     bash: ConfiguredPolicyAction;
   },
 ): PolicyDecision {
-
   const workflowDecision = decideWorkflowTool(workflow, event, cwd);
   if (workflowDecision) {
     if (
@@ -350,7 +342,10 @@ function decideTool(
           reason: "Readonly: Verifikation kann Projektartefakte erzeugen.",
         }
       : permissionLevel === "confirm-all"
-        ? { action: "ask", reason: "Verifikation kann Projektartefakte erzeugen." }
+        ? {
+            action: "ask",
+            reason: "Verifikation kann Projektartefakte erzeugen.",
+          }
         : { action: "allow", reason: "Allowlisted verification capability" };
   }
 
@@ -370,10 +365,7 @@ function decideTool(
     };
   }
 
-  if (
-    permissionLevel === "readonly" &&
-    event.toolName !== "ask_user"
-  ) {
+  if (permissionLevel === "readonly" && event.toolName !== "ask_user") {
     return {
       action: "block",
       reason: `${PERMISSION_LEVEL_LABEL[permissionLevel]}: Tool "${event.toolName}" ist nicht freigegeben.`,
@@ -523,13 +515,20 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     // level remains intact.
     permissionState = selectedPermissionState;
     permissionLevel = selectedPermissionLevel;
+    // Auto thinking has to follow the workflow, not just the session start:
+    // switching to an architecture plan must raise the depth immediately. A
+    // manually chosen level is a user decision and stays untouched.
+    if (thinkingMode === "auto") {
+      pi.setThinkingLevel(workflowThinkingDefault());
+    }
     publishStatus(ctx);
     persistState();
     auditTransition(source);
     if (source === "workflow") {
-      const detail = selectedPermissionState === "MANUAL"
-        ? `manuelle Stufe ${PERMISSION_LEVEL_LABEL[selectedPermissionLevel]} bleibt aktiv`
-        : `Default ${PERMISSION_LEVEL_LABEL[workflowDefaultPermission]} aktiv`;
+      const detail =
+        selectedPermissionState === "MANUAL"
+          ? `manuelle Stufe ${PERMISSION_LEVEL_LABEL[selectedPermissionLevel]} bleibt aktiv`
+          : `Default ${PERMISSION_LEVEL_LABEL[workflowDefaultPermission]} aktiv`;
       ctx.ui.notify(`🔄 Workflow ${workflowMode}: ${detail}.`, "info");
     }
   }
@@ -608,35 +607,43 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
 
   async function openThinkingMenu(ctx: ExtensionContext): Promise<void> {
     const epoch = sessionEpoch;
-    const entries = buildThinkingMenu(pi.getThinkingLevel(), thinkingMode)
-      .filter((entry) => {
-        if (entry.value === "auto") return true;
-        const value = entry.value;
-        if (!value) return false;
-        const level = value.slice("manual:".length) as SelectableThinkingLevel;
-        return ctx.model?.thinkingLevelMap?.[level] !== null;
-      });
+    const entries = buildThinkingMenu(
+      pi.getThinkingLevel(),
+      thinkingMode,
+    ).filter((entry) => {
+      if (entry.value === "auto") return true;
+      const value = entry.value;
+      if (!value) return false;
+      const level = value.slice("manual:".length) as SelectableThinkingLevel;
+      return ctx.model?.thinkingLevelMap?.[level] !== null;
+    });
     const selected = await runTabbedOverlay<
       "auto" | `manual:${SelectableThinkingLevel}` | "thinking-view"
-    >(ctx, "Thinking & Reasoning", [
-      {
-        id: "depth",
-        label: "Denktiefe",
-        entries,
-      },
-      {
-        id: "telemetry",
-        label: "Anzeige & Telemetrie",
-        entries: [
-          {
-            id: "thinking-view",
-            label: "Status-Telemetrie",
-            description: "Ausgeblendet, kompakt oder mit Fokus; zeigt nie interne Modellgedanken",
-            value: "thinking-view",
-          },
-        ],
-      },
-    ], { nonInteractiveHint: "Thinking & Reasoning benötigt den TUI-Modus." });
+    >(
+      ctx,
+      "Thinking & Reasoning",
+      [
+        {
+          id: "depth",
+          label: "Denktiefe",
+          entries,
+        },
+        {
+          id: "telemetry",
+          label: "Anzeige & Telemetrie",
+          entries: [
+            {
+              id: "thinking-view",
+              label: "Status-Telemetrie",
+              description:
+                "Ausgeblendet, kompakt oder mit Fokus; zeigt nie interne Modellgedanken",
+              value: "thinking-view",
+            },
+          ],
+        },
+      ],
+      { nonInteractiveHint: "Thinking & Reasoning benötigt den TUI-Modus." },
+    );
     const value = selected?.entry.value;
     if (value === "thinking-view") {
       pi.events.emit(CONTROL_CENTER_EVENTS.openThinkingView, { ctx });
@@ -655,7 +662,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    const level = selectedLevel.slice("manual:".length) as SelectableThinkingLevel;
+    const level = selectedLevel.slice(
+      "manual:".length,
+    ) as SelectableThinkingLevel;
     thinkingMode = "manual";
     manualThinkingLevel = level;
     pi.setThinkingLevel(level);
@@ -686,10 +695,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       "Zugriffsstufe setzen: readonly | project-write | confirm-all | yolo",
     handler: async (args, ctx) => {
       const raw = args.trim();
-      const level =
-        Object.hasOwn(PERMISSION_LEVEL_LABEL, raw)
-          ? (raw as PermissionLevel)
-          : normalizePermissionLevel(raw);
+      const level = Object.hasOwn(PERMISSION_LEVEL_LABEL, raw)
+        ? (raw as PermissionLevel)
+        : normalizePermissionLevel(raw);
       if (!level) {
         ctx.ui.notify(
           "Nutzung: /permission readonly|project-write|confirm-all|yolo",
@@ -784,21 +792,22 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
             "Workflow-Artefakte sind über Shell gesperrt; nutze Plan-Mode, Direct-Task-Kommandos oder plan_progress.",
         }
       : isRestrictedWorkflow(workflow)
-      ? {
-          action: "block" as const,
-          reason: `Workflow ${workflow.state}: direkter Shell-Zugriff ist nicht freigegeben.`,
-        }
-      : permissionLevel === "project-write" && configuredPolicy.bash !== "allow"
-        ? configuredPolicy.bash === "block"
-          ? {
-              action: "block" as const,
-              reason: "Bash ist in der Setup-Policy gesperrt.",
-            }
-          : {
-              action: "ask" as const,
-              reason: "Freier Shell-Zugriff benötigt Bestätigung.",
-            }
-        : decideBash(permissionLevel, event.command, event.cwd);
+        ? {
+            action: "block" as const,
+            reason: `Workflow ${workflow.state}: direkter Shell-Zugriff ist nicht freigegeben.`,
+          }
+        : permissionLevel === "project-write" &&
+            configuredPolicy.bash !== "allow"
+          ? configuredPolicy.bash === "block"
+            ? {
+                action: "block" as const,
+                reason: "Bash ist in der Setup-Policy gesperrt.",
+              }
+            : {
+                action: "ask" as const,
+                reason: "Freier Shell-Zugriff benötigt Bestätigung.",
+              }
+          : decideBash(permissionLevel, event.command, event.cwd);
     if (await approve(decision, event.command, ctx, "bash")) return;
     return {
       result: {
@@ -861,7 +870,8 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       persistedRaw === "yolo" ||
       (latestState?.data?.selectedPermissionState === undefined &&
         restoredLevel !== undefined);
-    selectedPermissionLevel = restoredLevel ?? configuredPolicy.workflowDefaults.work;
+    selectedPermissionLevel =
+      restoredLevel ?? configuredPolicy.workflowDefaults.work;
     selectedPermissionState = persistedManual ? "MANUAL" : "DEFAULT";
     permissionState = "DEFAULT";
     applyWorkflowDefaults(

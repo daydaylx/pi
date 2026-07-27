@@ -23,13 +23,13 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readFileSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
-import { readArtifactTriState } from "../plan-mode/utils.ts";
 
 export const CONTEXT_LEDGER_RELATIVE_PATH = "docs/CONTEXT_LEDGER.md";
 export const CONTEXT_LEDGER_MAX_BYTES = 32 * 1024;
@@ -486,6 +486,57 @@ function assertNoSymlinkComponents(basePath: string, candidatePath: string): voi
     if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
       throw new Error(`Symbolische Links sind im Ledger-Pfad nicht erlaubt: ${current}`);
     }
+  }
+}
+
+type ArtifactReadResult =
+  | { status: "ok"; content: string; bytes: number }
+  | { status: "missing" }
+  | { status: "unreadable"; error: string };
+
+/**
+ * Bounded, symlink-safe tri-state read. Distinguishes "missing" from
+ * "unreadable" so callers never mistake an absent artifact for a broken one.
+ * Moved here from plan-mode/utils.ts, whose remaining exports were retired
+ * with the workflow-v3 consolidation.
+ */
+function readArtifactTriState(
+  cwd: string,
+  relativePath: string,
+  maximumBytes: number,
+): ArtifactReadResult {
+  const root = resolve(cwd);
+  const artifactPath = resolve(root, relativePath);
+  try {
+    assertNoSymlinkComponents(root, artifactPath);
+    if (!existsSync(artifactPath)) return { status: "missing" };
+    const file = statSync(artifactPath);
+    if (!file.isFile()) {
+      return {
+        status: "unreadable",
+        error: `Artefakt ist keine reguläre Datei: ${artifactPath}`,
+      };
+    }
+    if (file.size > maximumBytes) {
+      return {
+        status: "unreadable",
+        error: `Artefakt ist zu groß (${file.size} Bytes; maximal ${maximumBytes} Bytes).`,
+      };
+    }
+    const content = readFileSync(artifactPath, "utf8");
+    const bytes = Buffer.byteLength(content, "utf8");
+    if (bytes > maximumBytes) {
+      return {
+        status: "unreadable",
+        error: `Artefakt ist zu groß (${bytes} Bytes; maximal ${maximumBytes} Bytes).`,
+      };
+    }
+    return { status: "ok", content, bytes };
+  } catch (error) {
+    return {
+      status: "unreadable",
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 

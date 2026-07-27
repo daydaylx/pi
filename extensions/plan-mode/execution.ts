@@ -3,7 +3,7 @@ import type {
   WorkflowStateV3,
   WorkflowStepState,
   WorkflowStepStatus,
-} from "./store.ts";
+} from "./store/index.ts";
 
 export interface StepUpdate {
   stepId: string;

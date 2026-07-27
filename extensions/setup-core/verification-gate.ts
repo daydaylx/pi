@@ -9,13 +9,11 @@
  * completion on anything other than `status === "pass"` unless the user
  * explicitly overrides in a TUI session.
  *
- * `status` reflects both required setup/project checks (typecheck, test,
- * #105 profiles) AND real scope-drift (#106 task-contract: file changes
- * outside the declared scope) — an out-of-scope change always makes the
- * overall status "fail", since it is itself an "unexpected file change".
- * Open acceptance criteria stay a residual risk only, not a blocker: nothing
- * in this codebase ever flips a criterion to "met", so treating "pending" as
- * a blocker would make every contract-bearing task permanently unfinishable.
+ * `status` reflects the required setup/project checks (typecheck, test,
+ * #105 profiles). Scope is NOT decided here: the enforceable scope check
+ * lives in plan-mode/completion.ts, which matches the changed files against
+ * the PlanSnapshot's "Technischer Scope" as a required check. This gate only
+ * reports obvious diff noise and stays advisory.
  *
  * Reuses instead of rebuilding:
  *   - setup verification (loadSetupConfig) runs at the agent dir, untouchable;
@@ -33,7 +31,6 @@ import {
   runProfile,
   type ExecFn,
 } from "./verify-profiles.ts";
-import { analyzeScopeDrift, loadTaskContract } from "./task-contract.ts";
 
 export type GateStatus = "pass" | "fail" | "blocked";
 
@@ -75,10 +72,6 @@ export interface GateContext {
   exec: ExecFn;
   /** Optional task description for the report header (from a plan or direct). */
   taskDescription?: string;
-}
-
-function isInternalWorkflowArtifact(path: string): boolean {
-  return path === ".agent/task-contract.json" || path.startsWith(".agent/plans/");
 }
 
 interface RawExecResult {
@@ -242,65 +235,24 @@ export async function runVerificationGate(
     });
   }
 
-  // 4. Scope hints + residual risks. With a task contract (#106) we can detect
-  //    REAL drift (out-of-scope files, undeclared scope, open criteria);
-  //    without one we fall back to obvious-noise heuristics.
+  // 4. Scope hints + residual risks.
+  //
+  // The task-contract path was removed with the workflow-v3 consolidation:
+  // .agent/task-contract.json was never written by any code path, so the
+  // drift branch was unreachable. The enforceable scope check lives in
+  // plan-mode/completion.ts, which matches the changed files against the
+  // PlanSnapshot's "Technischer Scope" as a REQUIRED check. This gate stays
+  // advisory and only reports obvious diff noise.
   const scopeHints: string[] = [];
   const residualRisks: string[] = [];
-  let taskDescription: string | undefined = ctx.taskDescription;
-  // Real, out-of-scope file changes are a hard-enforcement blocker — an
-  // "unexpected file" per #102's own completion criteria, not just advisory
-  // noise. Open acceptance criteria stay a residual risk only: nothing in
-  // this codebase ever flips a criterion to "met", so treating "pending" as
-  // a blocker would make every contract-bearing task permanently unfinishable.
-  let scopeDrifted = false;
-  const loadedContract = loadTaskContract(ctx.projectRoot);
-  for (const d of loadedContract.diagnostics) {
-    residualRisks.push(`Task-Contract (${d.source}): ${d.message}`);
-  }
-  const contract = loadedContract.contract;
-  if (contract) {
-    if (!taskDescription) taskDescription = contract.goal;
-    const scopeRelevantFiles = changedFiles
-      .map((file) => file.path)
-      .filter((path) => !isInternalWorkflowArtifact(path));
-    const drift = analyzeScopeDrift(
-      contract,
-      scopeRelevantFiles,
+  const taskDescription: string | undefined = ctx.taskDescription;
+  const noise = changedFiles.filter((file) =>
+    /(node_modules|\.lock$|^package-lock\.json$|\/\.git\/)/.test(file.path),
+  );
+  if (noise.length > 0) {
+    scopeHints.push(
+      `potenzielles Rauschen im Diff: ${noise.map((file) => file.path).join(", ")}`,
     );
-    if (contract.expectedScope.length === 0) {
-      residualRisks.push(
-        "Task-Contract ohne deklarierten Scope — Scope-Drift kann nicht geprüft werden.",
-      );
-    }
-    if (drift.match.outOfScope.length > 0) {
-      scopeDrifted = true;
-      scopeHints.push(
-        `Scope-Drift — außerhalb des deklarierten Scopes: ${drift.match.outOfScope.join(", ")}`,
-      );
-    }
-    if (drift.match.undeclared.length > 0) {
-      scopeHints.push(
-        `deklarierter Scope ohne Änderung (möglicherweise unvollständig): ${drift.match.undeclared.join(", ")}`,
-      );
-    }
-    if (drift.noise.length > 0) {
-      scopeHints.push(
-        `potenzielles Rauschen im Diff: ${drift.noise.join(", ")}`,
-      );
-    }
-    for (const c of drift.openCriteria) {
-      residualRisks.push(`offene Anforderung [${c.status}]: ${c.criterion}`);
-    }
-  } else {
-    const noise = changedFiles.filter((f) =>
-      /(node_modules|\.lock$|^package-lock\.json$|\/\.git\/)/.test(f.path),
-    );
-    if (noise.length > 0) {
-      scopeHints.push(
-        `potenzielles Rauschen im Diff: ${noise.map((f) => f.path).join(", ")}`,
-      );
-    }
   }
   if (changedFiles.length === 0) {
     scopeHints.push(
@@ -328,7 +280,7 @@ export async function runVerificationGate(
   // takes precedence over "blocked" because it is a confirmed failure rather
   // than an inability to verify.
   const checksStatus = aggregateStatus(checks);
-  const status: GateStatus = scopeDrifted ? "fail" : checksStatus;
+  const status: GateStatus = checksStatus;
   const required = checks.filter((c) => c.required);
   const passed = required.filter((c) => c.status === "pass").length;
   const summary = `${status.toUpperCase()} — ${passed}/${required.length} Pflichtprüfungen bestanden; ${changedFiles.length} Working-Tree-Datei(en) geändert.`;
@@ -338,13 +290,7 @@ export async function runVerificationGate(
       ? "Abschluss möglich: alle Pflichtprüfungen bestanden. Restrisiken beachten."
       : status === "blocked"
         ? "Abschluss blockiert: mindestens eine Pflichtprüfung ist nicht ausführbar. Binary/Konfiguration prüfen."
-        : scopeDrifted
-          ? checksStatus === "blocked"
-            ? "Abschluss nicht empfohlen: Scope-Drift erkannt und mindestens eine Pflichtprüfung ist nicht ausführbar. Diff sowie Binary/Konfiguration prüfen."
-            : checksStatus === "fail"
-              ? "Abschluss nicht empfohlen: Scope-Drift erkannt und mindestens eine Pflichtprüfung fehlgeschlagen. Diff und Fehler prüfen."
-              : "Abschluss nicht empfohlen: Scope-Drift erkannt (Änderungen außerhalb des deklarierten Scopes). Diff prüfen oder Scope korrigieren."
-          : "Abschluss nicht empfohlen: mindestens eine Pflichtprüfung fehlgeschlagen. Fehler beheben und erneut prüfen.";
+        : "Abschluss nicht empfohlen: mindestens eine Pflichtprüfung fehlgeschlagen. Fehler beheben und erneut prüfen.";
 
   return {
     status,

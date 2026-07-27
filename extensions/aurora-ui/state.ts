@@ -1,7 +1,4 @@
-import type {
-  EventBus,
-  ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+import type { EventBus, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export const AURORA_UI_CHANNELS = {
   request: "aurora-ui/state/request",
@@ -9,21 +6,22 @@ export const AURORA_UI_CHANNELS = {
   snapshot: "aurora-ui/state/snapshot",
 } as const;
 
+/**
+ * Presentation mirror of the canonical WorkflowStatus (plan-mode/store.ts),
+ * plus "archived" for a completed and filed workflow, which has no runtime
+ * state left to report.
+ */
 export type AuroraWorkflowPhase =
   | "idle"
-  | "drafting"
-  | "reviewed"
-  | "executing"
+  | "planning"
+  | "working"
+  | "reviewing"
   | "paused"
   | "blocked"
-  | "ready"
+  | "done"
   | "archived";
 
-export type AuroraActivityKind =
-  | "idle"
-  | "thinking"
-  | "tool"
-  | "responding";
+export type AuroraActivityKind = "idle" | "thinking" | "tool" | "responding";
 
 export interface AuroraUiState {
   sessionEpoch: string;
@@ -131,7 +129,9 @@ export function isAuroraUiStateRequest(
   );
 }
 
-export function isAuroraUiPatchEvent(value: unknown): value is AuroraUiPatchEvent {
+export function isAuroraUiPatchEvent(
+  value: unknown,
+): value is AuroraUiPatchEvent {
   if (!value || typeof value !== "object") return false;
   const event = value as Partial<AuroraUiPatchEvent>;
   return (
@@ -164,12 +164,12 @@ export function mergeAuroraUiState(
 ): void {
   const workflowPhases: readonly AuroraWorkflowPhase[] = [
     "idle",
-    "drafting",
-    "reviewed",
-    "executing",
+    "planning",
+    "working",
+    "reviewing",
     "paused",
     "blocked",
-    "ready",
+    "done",
     "archived",
   ];
   const activityKinds: readonly AuroraActivityKind[] = [
@@ -180,19 +180,21 @@ export function mergeAuroraUiState(
   ];
 
   if (patch.workflow) {
-    if (
-      patch.workflow.phase &&
-      workflowPhases.includes(patch.workflow.phase)
-    )
+    if (patch.workflow.phase && workflowPhases.includes(patch.workflow.phase))
       state.workflow.phase = patch.workflow.phase;
     if (typeof patch.workflow.label === "string")
       state.workflow.label = patch.workflow.label;
     if ("step" in patch.workflow) {
       state.workflow.step =
-        typeof patch.workflow.step === "string" ? patch.workflow.step : undefined;
+        typeof patch.workflow.step === "string"
+          ? patch.workflow.step
+          : undefined;
     }
     if (typeof patch.workflow.completed === "number")
-      state.workflow.completed = Math.max(0, Math.floor(patch.workflow.completed));
+      state.workflow.completed = Math.max(
+        0,
+        Math.floor(patch.workflow.completed),
+      );
     if (typeof patch.workflow.total === "number")
       state.workflow.total = Math.max(0, Math.floor(patch.workflow.total));
   }
@@ -218,20 +220,22 @@ export function mergeAuroraUiState(
   }
   if (patch.model) {
     if ("id" in patch.model)
-      state.model.id = typeof patch.model.id === "string" ? patch.model.id : undefined;
+      state.model.id =
+        typeof patch.model.id === "string" ? patch.model.id : undefined;
     if ("thinking" in patch.model)
       state.model.thinking =
-        typeof patch.model.thinking === "string" ? patch.model.thinking : undefined;
+        typeof patch.model.thinking === "string"
+          ? patch.model.thinking
+          : undefined;
   }
   if (patch.activity) {
-    if (
-      patch.activity.kind &&
-      activityKinds.includes(patch.activity.kind)
-    )
+    if (patch.activity.kind && activityKinds.includes(patch.activity.kind))
       state.activity.kind = patch.activity.kind;
     if ("label" in patch.activity)
       state.activity.label =
-        typeof patch.activity.label === "string" ? patch.activity.label : undefined;
+        typeof patch.activity.label === "string"
+          ? patch.activity.label
+          : undefined;
     if (typeof patch.activity.activeTools === "number")
       state.activity.activeTools = Math.max(
         0,

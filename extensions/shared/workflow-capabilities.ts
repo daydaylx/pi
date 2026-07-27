@@ -11,14 +11,8 @@ import type { WorkflowMode } from "./workflow-status.ts";
 
 export const WORKFLOW_CAPABILITY_EVENTS = {
   request: "workflow-capabilities:request",
-  stateDiscarded: "workflow-capabilities:state-discarded",
   activated: "workflow-capabilities:activated",
 } as const;
-
-export interface WorkflowStateDiscardedEvent {
-  cwd: string;
-  sessionId: string;
-}
 
 /** Emitted only after a workflow activation was persisted successfully. */
 export interface WorkflowActivatedEvent {
@@ -28,13 +22,7 @@ export interface WorkflowActivatedEvent {
 }
 
 export type WorkflowCapabilityState =
-  | "idle"
-  | "planning"
-  | "working"
-  | "reviewing"
-  | "paused"
-  | "blocked"
-  | "done";
+  "idle" | "planning" | "working" | "reviewing" | "paused" | "blocked" | "done";
 
 export interface WorkflowCapabilitySnapshot {
   state: WorkflowCapabilityState;
@@ -49,7 +37,10 @@ export interface WorkflowEventBus {
   emit(channel: string, value: unknown): void;
 }
 
-const DEFAULT_SNAPSHOT: WorkflowCapabilitySnapshot = { state: "idle", mode: "work" };
+const DEFAULT_SNAPSHOT: WorkflowCapabilitySnapshot = {
+  state: "idle",
+  mode: "work",
+};
 
 export function requestWorkflowCapabilities(
   events: WorkflowEventBus,

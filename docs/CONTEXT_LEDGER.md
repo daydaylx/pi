@@ -5,6 +5,7 @@
      Arbeitszustand gehört in docs/PROJECT_STATE.md. -->
 
 ## Bestätigte Nutzerentscheidungen
+
 - Aurora Night mit kontextueller Bewegung; reduced und off bleiben über setup.json verfügbar
 - Berechtigungsmodell: `readonly`, `project-write`, `confirm-all`, temporäres `yolo`; Work startet mit `project-write`, beide Planvarianten mit `readonly`
 - Frischer Subagenten-Kontext, maximale Parallelität drei
@@ -20,6 +21,7 @@
 - Entscheidung: Das Modell-Untermenü bietet nur Fast, Primary und Deep; die Rollen wechseln sofort zum konfigurierten Modell.
 
 ## Architekturentscheidungen
+
 - setup.json ist die zentrale, validierte Konfiguration für UI, Permissions, LSP, Subagenten und Verifikation
 - `permissions.workflowDefaults` ist die deklarative Zuordnung von Workflow zu Normalstufe; vertrauenswürdige Projekte dürfen sie nur weiter einschränken
 - Plan-Workflow nutzt PlanSnapshot und Sidecar v3 mit stabiler planId, Planrevision, Plan-Hash, stabilen Step-IDs und CAS; keine Lease und kein Heartbeat
@@ -27,8 +29,14 @@
 - Context Ledger (docs/CONTEXT_LEDGER.md) ist das dauerhafte Projektgedächtnis, getrennt vom flüchtigen docs/PROJECT_STATE.md
 - Ledger bleibt manuell nutzbar; plan-mode löst keine automatischen Checkpoints mehr aus
 - Lokale Kernrollen sind Planner, Worker und Reviewer; Paket-Builtins sind deaktiviert, ein Researcher ist ohne Web-Toolchain nicht installiert
+- Workflow-Persistenz liegt in `plan-mode/store/` mit getrennten Modulen (paths, atomic-files, types, locks, workflow-state, archive, migration, direct-task) und `store/index.ts` als Barrel; `assertSafePath` bleibt die einzige Quelle für Pfad- und Symlink-Regeln
+- Es gibt genau einen kanonischen Workflow-Status: `WorkflowStatus` in `plan-mode/store.ts` (`idle`, `planning`, `working`, `reviewing`, `paused`, `blocked`, `done`). `WorkflowPhase` und `WorkflowLifecycle` sind entfernt; Legacy-Werte erscheinen nur noch in `legacyStatus()` der v1/v2-Migration. `WorkflowMode` beschreibt ausschließlich die Planart, keinen zweiten Lebenszyklus
+- Eine unterbrochene Ausführung meldet plan-mode beim Sitzungsstart und verweist auf `/work`; ein separates Recovery-Modul mit eigenem Dialog wird bewusst nicht geführt (Auftrag: keine zusätzliche komplexe Recovery-Logik)
+- Doom-Loop- und Edit-Fallback-Erkennung sind ersatzlos entfernt: ihre Module waren von keiner Extension mehr geladen. Die Schutzwirkung entfällt bewusst zugunsten geringerer Komplexität
+- Die früheren `PI_CONTEXT_*.md` im Wurzelverzeichnis sind entfernt; `docs/CONTEXT_LEDGER.md` und `docs/PROJECT_STATE.md` sind die einzigen laufend gepflegten Kontextdokumente. Ältere Einträge unten verweisen noch auf die entfernten Dateien und sind rein historisch zu lesen
 
 ## Nicht-Ziele
+
 - Keine externe Memory-Extension nur zum Speichern von mehr Daten
 - Keine Vergrößerung des Kontextfensters als Lösung
 - Kein Eingriff in Pi-Core-Compaction oder deren Werte ohne Verlustbeleg
@@ -56,11 +64,13 @@
 - Keine Änderung der grundlegenden Permission-Architektur.
 
 ## Bekannte Einschränkungen
+
 - Aktive Pi CLI ist 0.80.7, Manifest und lokales Dev-Paket sind 0.80.6 (dokumentierte Drift)
 - Die verschachtelte Fake-LSP-Umgebung erzeugt in der Sandbox umgebungsbedingte Testfehler
 - xhigh 100000 liegt über dem registrierten 64K-Ausgaberahmen des Standardmodells
 
 ## Offene Risiken
+
 - Runtime-/Dev-Versionsabweichung kann interne API-Tests vom produktiven Verhalten abweichen lassen
 - Session- und Subagenten-Artefakte wachsen weiter; Aufbewahrung periodisch prüfen (kein Modellmemory)
 - Modellrollen sind konfiguriert, benötigen aber eine zuverlässige Anbindung an Pis Modellwechsel.
@@ -78,16 +88,83 @@
 - **Querverweis-Format:** als Verweiszeile direkt unter der Titel-Überschrift, konsistent mit dem Format des jeweiligen Quelldokuments (Rollenprompt-Struktur von `Auftrag.md` beachten).
 
 ## Offene Fragen
+
 - Angleichung von Runtime 0.80.7 und Dev-Pin 0.80.6 wartet auf ausdrückliche Freigabe für die Abhängigkeitsänderung
 - Keine umsetzungsblockierenden Fragen.
 
+## Vertragsabweichungen (Umbauvertrag §13.14)
+
+> Der Umbauvertrag verlangt, jede Abweichung **vor** der Umsetzung zu
+> dokumentieren. Die folgenden Einträge wurden **nachgezogen**: die Änderungen
+> waren zum Zeitpunkt der Protokollierung bereits umgesetzt. Das ist selbst
+> eine Abweichung von §13.14 und hier ausdrücklich als solche vermerkt.
+
+### V-1 — Doom-Loop- und Edit-Fallback-Erkennung ersatzlos entfernt
+
+- **Vertragsregel:** §13.14 („Entfernung eines Schutzmechanismus ohne benannten
+  Ersatz" ist unzulässig). §8 führt beide unter „Entfernen oder nur im
+  Debug-Modus behalten", was die Entfernung deckt, den Ersatzanspruch aus
+  §13.14 aber nicht aufhebt.
+- **Grund:** Ausdrückliche Nutzerentscheidung. Beide Module waren seit `4c7a201`
+  von keiner Extension mehr geladen (`setup-core/index.ts` importierte sie
+  nicht); `mode-permissions.ts` fragte die zugehörigen Capability-Busse nicht
+  mehr ab. Die Schutzwirkung war damit bereits vor der Entfernung wirkungslos.
+- **Betroffene Module:** `setup-core/doom-loop.ts`, `setup-core/edit-fallback.ts`,
+  `setup-core/edit-metrics.ts`, `shared/doom-loop-capabilities.ts`,
+  `shared/edit-fallback-capabilities.ts` (~700 Zeilen) und ihre Testsektionen.
+- **Risiko:** Wiederholt scheiternde Edits und Endlosschleifen werden nicht mehr
+  erkannt. **Kein Ersatz vorhanden** — bewusst in Kauf genommen.
+- **Schutzmaßnahme:** Keine. Die verbleibenden Qualitätsprüfungen (Diff, Scope,
+  Typecheck, Tests, LSP, unabhängiger Reviewer) aus §13.2 sind unberührt.
+- **Zusätzliche Verifikation:** Volle Suite, Typecheck, Coverage-Gate, Runtime-
+  Reload und Installer-Dry-Run nach der Entfernung grün.
+- **Entscheidung:** dauerhaft.
+
+### V-2 — `recovery-check.ts` entfernt
+
+- **Vertragsregel:** §13.1 Rang 4 („Einfache Wiederaufnahme nach Pause, Absturz
+  oder Neustart"), §11 Abschlusskriterium „Abgebrochene Aufgaben lassen sich
+  einfach wieder aufnehmen".
+- **Grund:** Das Modul war von keiner Extension importiert und damit wirkungslos.
+  Es las zudem den v2-Sidecar, während v3 in dieselbe Datei schreibt, sodass es
+  auch bei Anbindung nie eine unterbrochene Arbeit erkannt hätte. §8 verlangt für
+  Recovery ausdrücklich „keine zusätzliche komplexe Recovery-Logik".
+- **Betroffene Module:** `setup-core/recovery-check.ts` (290 Zeilen), die
+  zugehörigen Testsektionen und `store.discardWorkflowStateOnly()`.
+- **Risiko:** Der interaktive Dialog mit Diff-Ansicht und Re-Verifikation entfällt.
+- **Benannter Ersatz:** `plan-mode/index.ts` meldet beim `session_start` eine
+  unterbrochene Ausführung (`status === "working"`) und verweist auf `/work`;
+  `/work` verlangt eine ausdrückliche Bestätigung. Die Invariante aus §13.6
+  („Recovery darf keine nicht bestätigte oder fremde Ausführung automatisch
+  fortsetzen") bleibt damit erfüllt.
+- **Entscheidung:** dauerhaft.
+
+### V-3 — Abgehängte UI-Module entfernt
+
+- **Vertragsregel:** §13.2 („Aurora UI und die festgelegten Shortcuts behalten
+  ihre Grundfunktion").
+- **Grund:** `plan-menu.ts`, `post-plan-card.ts`, `workflow-presentation.ts`,
+  `workflow-hooks.ts`, `workflow-commands.ts`, `workflow-settlement.ts`,
+  `ledger-checkpoint.ts` und `plan-mode/state.ts` hatten null Importe. Der
+  UX-Verlust war bereits mit `4c7a201` eingetreten, nicht durch die Entfernung.
+- **Risiko:** Die Post-Plan-Karte und das zustandsabhängige Plan-Menü sind
+  endgültig weg.
+- **Benannter Ersatz:** Das Shift+Tab-Control-Center in `plan-mode/index.ts`
+  deckt Schnellplan, Architekturplan, Arbeit, Berechtigungen, Modelle, Thinking
+  und LSP ab. Bei der Gelegenheit wurde die verletzte Garantie repariert:
+  `Super+M` war von keiner Extension registriert und `openModels` hatte keinen
+  Listener — beides wiederhergestellt.
+- **Entscheidung:** dauerhaft.
+
 ## Wichtige Projektregeln
+
 - Commits, Pushes und Branch-Veröffentlichungen nur auf ausdrücklichen Auftrag
 - Änderungen auf den konkreten Auftrag begrenzen; nicht zum Auftrag gehörende Nutzeränderungen erhalten
 - Secrets, Zugangsdaten, Auth-Dateien und Umgebungsvariablen weder offenlegen noch committen
 - Änderungen mit Tests und statischen Prüfungen verifizieren; Fehler ausdrücklich nennen
 
 ## Aktuelle Prioritäten
+
 - T1: agents/architect.md löschen
 - T2: agents/security-auditor.md löschen
 - T3: agents/ui-reviewer.md löschen
@@ -95,6 +172,7 @@
 - T5: agents/planner.md — Frontmatter-Description und Prompt um vollständige Ar...
 
 ## Verworfene Optionen
+
 - Externe Memory-/Smart-Compaction-/Context-Extension — kein verbleibender Nutzen, der Komplexität und Überschneidung rechtfertigt
 - Externe Full-UI-Pakete (Pi Droid, Vera) — verletzen die Presentation-only-/Trust-Grenze
 - Option: Kompakte Gesamtliste ohne Untermenüs.

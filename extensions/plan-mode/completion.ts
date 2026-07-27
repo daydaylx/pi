@@ -8,7 +8,6 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import { isSensitiveReference } from "../shared/permission-policy.ts";
-import { matchScope } from "../setup-core/task-contract.ts";
 import {
   loadSetupConfig,
   type VerificationName,
@@ -19,11 +18,12 @@ import {
   type ExecFn,
 } from "../setup-core/verify-profiles.ts";
 import type { PlanSnapshot } from "./plan-snapshot.ts";
+import { matchScope } from "./scope.ts";
 import type {
   CompletionReport,
   DirectTask,
   WorkflowStateV3,
-} from "./store.ts";
+} from "./store/index.ts";
 
 export type CompletionClassification =
   | "required"
@@ -863,4 +863,46 @@ export function formatCompletionResult(
     for (const risk of result.residualRisks) lines.push(`- ${risk}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * Build the completion report for an explicit, user-justified override.
+ *
+ * Hard secret/auth boundaries are never overridable (§13.2): the check must
+ * have passed, otherwise this throws instead of producing a report.
+ */
+export function completionOverrideReport(
+  result: CompletionPipelineResult,
+  snapshot: PlanSnapshot,
+  reason: string,
+): CompletionReport {
+  if (
+    result.checks.find((check) => check.name === "hard-boundaries")?.status !==
+    "pass"
+  ) {
+    throw new Error(
+      "Harte Secret-/Auth-Grenzen können nicht übersteuert werden.",
+    );
+  }
+  return {
+    version: 1 as const,
+    completionId: randomUUID(),
+    planId: snapshot.planId,
+    planRevision: snapshot.planRevision,
+    planHash: snapshot.planHash,
+    diffHash: result.diffHash,
+    outcome: "override" as const,
+    reviewerVerdict: result.reviewer.verdict,
+    checks: result.checks.map((check) => ({
+      name: check.name,
+      classification: check.classification,
+      status: check.status,
+      summary: check.summary,
+    })),
+    scopeFindings: result.scopeFindings,
+    residualRisks: result.residualRisks,
+    reviewerSummary: result.reviewer.summary,
+    overrideReason: reason.trim(),
+    completedAt: new Date().toISOString(),
+  };
 }

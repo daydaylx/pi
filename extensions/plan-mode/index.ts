@@ -5,7 +5,6 @@
  * in current-plan.state.json. This file wires the focused planning, execution,
  * completion, presentation and persistence modules together.
  */
-import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
@@ -20,13 +19,12 @@ import {
   WORKFLOW_CAPABILITY_EVENTS,
   type WorkflowCapabilityRequest,
 } from "../shared/workflow-capabilities.ts";
-import { LSP_COMPLETION_RPC } from "../lsp/completion-rpc.ts";
 import {
+  completionOverrideReport,
   formatCompletionResult,
   runCompletionPipeline,
-  type CompletionLspResult,
-  type CompletionPipelineResult,
 } from "./completion.ts";
+import { requestLsp } from "./lsp-bridge.ts";
 import {
   executionPrompt,
   pauseExecution,
@@ -40,6 +38,7 @@ import {
 } from "./planning.ts";
 import type { PlanKind } from "./plan-snapshot.ts";
 import {
+  clearWorkflowPresentation,
   formatPlanSteps,
   updateWorkflowPresentation,
   workflowWarning,
@@ -61,7 +60,7 @@ import {
   writeWorkflowStateCAS,
   type WorkflowStateLoadResult,
   type WorkflowStateV3,
-} from "./store.ts";
+} from "./store/index.ts";
 
 const STEP_STATUSES = ["in_progress", "completed", "blocked"] as const;
 const PlanProgressParams = Type.Object({
@@ -88,80 +87,6 @@ function textResult(text: string, details: Record<string, unknown> = {}) {
 function planContent(cwd: string): string | undefined {
   const path = workflowPath(cwd, PLAN_RELATIVE_PATH);
   return existsSync(path) ? readFileSync(path, "utf8") : undefined;
-}
-
-async function requestLsp(
-  pi: ExtensionAPI,
-  projectRoot: string,
-  files: string[],
-): Promise<CompletionLspResult[]> {
-  if (files.length === 0) return [];
-  const requestId = randomUUID();
-  return await new Promise<CompletionLspResult[]>((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      resolve(
-        files.map((path) => ({
-          path,
-          status: "unavailable",
-          summary: "LSP-Completion-RPC antwortete nicht rechtzeitig.",
-        })),
-      );
-    }, 20_000);
-    pi.events.emit(LSP_COMPLETION_RPC.request, {
-      version: 1,
-      requestId,
-      projectRoot,
-      files,
-      respond(value: {
-        version: 1;
-        requestId: string;
-        results: CompletionLspResult[];
-      }): void {
-        if (settled || value.requestId !== requestId) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(value.results);
-      },
-    });
-  });
-}
-
-function completionOverrideReport(
-  result: CompletionPipelineResult,
-  loaded: WorkflowStateLoadResult,
-  reason: string,
-) {
-  if (!loaded.snapshot) throw new Error("PlanSnapshot fehlt.");
-  if (
-    result.checks.find((check) => check.name === "hard-boundaries")?.status !==
-      "pass"
-  ) {
-    throw new Error("Harte Secret-/Auth-Grenzen können nicht übersteuert werden.");
-  }
-  return {
-    version: 1 as const,
-    completionId: randomUUID(),
-    planId: loaded.snapshot.planId,
-    planRevision: loaded.snapshot.planRevision,
-    planHash: loaded.snapshot.planHash,
-    diffHash: result.diffHash,
-    outcome: "override" as const,
-    reviewerVerdict: result.reviewer.verdict,
-    checks: result.checks.map((check) => ({
-      name: check.name,
-      classification: check.classification,
-      status: check.status,
-      summary: check.summary,
-    })),
-    scopeFindings: result.scopeFindings,
-    residualRisks: result.residualRisks,
-    reviewerSummary: result.reviewer.summary,
-    overrideReason: reason.trim(),
-    completedAt: new Date().toISOString(),
-  };
 }
 
 export default function planModeExtension(pi: ExtensionAPI): void {
@@ -206,11 +131,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
     candidate: WorkflowStateV3,
   ): WorkflowStateV3 {
-    const saved = writeWorkflowStateCAS(
-      ctx.cwd,
-      candidate,
-      current.stateToken,
-    );
+    const saved = writeWorkflowStateCAS(ctx.cwd, candidate, current.stateToken);
     current = {
       ...current,
       state: saved.state,
@@ -246,16 +167,28 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
   ): Promise<void> {
     if (!ctx.isProjectTrusted()) {
-      notify(ctx, "Harte Trust-Grenze: Planung schreibt keine Artefakte in einem untrusted Projekt.", "error");
+      notify(
+        ctx,
+        "Harte Trust-Grenze: Planung schreibt keine Artefakte in einem untrusted Projekt.",
+        "error",
+      );
       return;
     }
     reload(ctx);
     if (loadDirectTask(ctx.cwd)) {
-      notify(ctx, "Eine direkte Aufgabe ist aktiv; schließe sie zuerst mit /task-done ab.", "warning");
+      notify(
+        ctx,
+        "Eine direkte Aufgabe ist aktiv; schließe sie zuerst mit /task-done ab.",
+        "warning",
+      );
       return;
     }
     if (current.migrationRequired) {
-      notify(ctx, "Vor einer neuen Planung ist /migrate-plan erforderlich.", "warning");
+      notify(
+        ctx,
+        "Vor einer neuen Planung ist /migrate-plan erforderlich.",
+        "warning",
+      );
       return;
     }
     if (current.planContent) {
@@ -268,6 +201,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     planningKind = kind;
     planningBaseContent = current.planContent;
     planningIsReview = false;
+    updateWorkflowPresentation(ctx, current.state, "planning");
     publishWorkflowActivation(ctx);
     pi.sendMessage(
       {
@@ -285,7 +219,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
   async function beginReview(ctx: ExtensionContext): Promise<void> {
     if (!ctx.isProjectTrusted()) {
-      notify(ctx, "Harte Trust-Grenze: Plan-Review ist im untrusted Projekt blockiert.", "error");
+      notify(
+        ctx,
+        "Harte Trust-Grenze: Plan-Review ist im untrusted Projekt blockiert.",
+        "error",
+      );
       return;
     }
     const loaded = reload(ctx);
@@ -296,6 +234,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     planningKind = loaded.snapshot.planType;
     planningBaseContent = loaded.planContent;
     planningIsReview = true;
+    updateWorkflowPresentation(ctx, loaded.state, "reviewing");
     publishWorkflowActivation(ctx);
     pi.sendMessage(
       {
@@ -309,12 +248,20 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
   async function startWork(ctx: ExtensionContext): Promise<void> {
     if (!ctx.isProjectTrusted()) {
-      notify(ctx, "Harte Trust-Grenze: /work ist im untrusted Projekt blockiert.", "error");
+      notify(
+        ctx,
+        "Harte Trust-Grenze: /work ist im untrusted Projekt blockiert.",
+        "error",
+      );
       return;
     }
     const loaded = reload(ctx);
     if (loaded.migrationRequired) {
-      notify(ctx, "Legacy-State zuerst ausdrücklich mit /migrate-plan migrieren.", "warning");
+      notify(
+        ctx,
+        "Legacy-State zuerst ausdrücklich mit /migrate-plan migrieren.",
+        "warning",
+      );
       return;
     }
     if (!loaded.snapshot || !loaded.state) {
@@ -353,7 +300,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     allowOverride: boolean,
   ): Promise<void> {
     if (!ctx.isProjectTrusted()) {
-      notify(ctx, "Harte Trust-Grenze: Completion ist im untrusted Projekt blockiert.", "error");
+      notify(
+        ctx,
+        "Harte Trust-Grenze: Completion ist im untrusted Projekt blockiert.",
+        "error",
+      );
       return;
     }
     if (completionRunning) return;
@@ -405,11 +356,14 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         ctx.hasUI
       ) {
         const ui = ctx.ui as MutableUi;
-        const reason = (await ui.input?.(
-          "Completion-Override",
-          "Nichtleere Begründung für das bewusste Restrisiko",
-        ))?.trim();
-        if (reason) report = completionOverrideReport(result, loaded, reason);
+        const reason = (
+          await ui.input?.(
+            "Completion-Override",
+            "Nichtleere Begründung für das bewusste Restrisiko",
+          )
+        )?.trim();
+        if (reason && loaded.snapshot)
+          report = completionOverrideReport(result, loaded.snapshot, reason);
       }
       if (!report) {
         replaceState(ctx, {
@@ -461,7 +415,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
   async function finishDirectTask(ctx: ExtensionContext): Promise<void> {
     if (!ctx.isProjectTrusted()) {
-      notify(ctx, "Harte Trust-Grenze: Completion ist im untrusted Projekt blockiert.", "error");
+      notify(
+        ctx,
+        "Harte Trust-Grenze: Completion ist im untrusted Projekt blockiert.",
+        "error",
+      );
       return;
     }
     const task = loadDirectTask(ctx.cwd);
@@ -500,10 +458,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         ctx.mode === "tui" &&
         ctx.hasUI
       ) {
-        const reason = (await (ctx.ui as MutableUi).input?.(
-          "Direct-Task-Override",
-          "Nichtleere Begründung für den Abschluss trotz Befund",
-        ))?.trim();
+        const reason = (
+          await (ctx.ui as MutableUi).input?.(
+            "Direct-Task-Override",
+            "Nichtleere Begründung für den Abschluss trotz Befund",
+          )
+        )?.trim();
         if (reason) {
           result = await runCompletionPipeline(pipelineContext, {
             overrideReason: reason,
@@ -525,7 +485,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
           : "Direkte Aufgabe abgeschlossen; Bericht wurde in der Sitzung protokolliert.",
       );
     } catch (error) {
-      notify(ctx, `Direct Task nicht abgeschlossen: ${workflowWarning(error)}`, "error");
+      notify(
+        ctx,
+        `Direct Task nicht abgeschlossen: ${workflowWarning(error)}`,
+        "error",
+      );
     } finally {
       completionRunning = false;
     }
@@ -622,7 +586,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     description: "Planschritte manuell abschließen: /done <n> [m …]",
     handler: async (args, ctx) => {
       if (!ctx.isProjectTrusted()) {
-        notify(ctx, "Harte Trust-Grenze: Fortschritt ist im untrusted Projekt blockiert.", "error");
+        notify(
+          ctx,
+          "Harte Trust-Grenze: Fortschritt ist im untrusted Projekt blockiert.",
+          "error",
+        );
         return;
       }
       const loaded = reload(ctx);
@@ -661,14 +629,19 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     },
   });
   pi.registerCommand("finish", {
-    description: "Completion-Pipeline ausführen; TUI-Override nur mit Begründung",
+    description:
+      "Completion-Pipeline ausführen; TUI-Override nur mit Begründung",
     handler: async (_args, ctx) => finishWorkflow(ctx, true),
   });
   pi.registerCommand("discard-plan", {
     description: "Aktiven Plan und Sidecar ausdrücklich verwerfen",
     handler: async (_args, ctx) => {
       if (!ctx.isProjectTrusted()) {
-        notify(ctx, "Harte Trust-Grenze: Verwerfen ist im untrusted Projekt blockiert.", "error");
+        notify(
+          ctx,
+          "Harte Trust-Grenze: Verwerfen ist im untrusted Projekt blockiert.",
+          "error",
+        );
         return;
       }
       const loaded = reload(ctx);
@@ -705,7 +678,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         return;
       }
       if (!ctx.isProjectTrusted()) {
-        notify(ctx, "Harte Trust-Grenze: Direct Tasks sind im untrusted Projekt blockiert.", "error");
+        notify(
+          ctx,
+          "Harte Trust-Grenze: Direct Tasks sind im untrusted Projekt blockiert.",
+          "error",
+        );
         return;
       }
       if (reload(ctx).planContent) {
@@ -725,24 +702,46 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         return;
       }
       const ui = ctx.ui as MutableUi;
-      const scope = (await ui.input?.(
-        "Technischer Scope",
-        "Projekt-relative Pfade/Globs, durch Komma getrennt",
-      ))?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
-      const verification = (await ui.input?.(
-        "Verifikation",
-        ".pi/verify.json-Profil-IDs, durch Komma getrennt",
-      ))?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
-      const acceptanceCriteria = (await ui.input?.(
-        "Abschlusskriterien",
-        "Beobachtbare Kriterien, durch Komma getrennt",
-      ))?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
+      const scope =
+        (
+          await ui.input?.(
+            "Technischer Scope",
+            "Projekt-relative Pfade/Globs, durch Komma getrennt",
+          )
+        )
+          ?.split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean) ?? [];
+      const verification =
+        (
+          await ui.input?.(
+            "Verifikation",
+            ".pi/verify.json-Profil-IDs, durch Komma getrennt",
+          )
+        )
+          ?.split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean) ?? [];
+      const acceptanceCriteria =
+        (
+          await ui.input?.(
+            "Abschlusskriterien",
+            "Beobachtbare Kriterien, durch Komma getrennt",
+          )
+        )
+          ?.split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean) ?? [];
       if (
         scope.length === 0 ||
         verification.length === 0 ||
         acceptanceCriteria.length === 0
       ) {
-        notify(ctx, "Direct Task nicht erstellt: alle drei Felder sind erforderlich.", "warning");
+        notify(
+          ctx,
+          "Direct Task nicht erstellt: alle drei Felder sind erforderlich.",
+          "warning",
+        );
         return;
       }
       const existing = loadDirectTask(ctx.cwd);
@@ -779,7 +778,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     description: "Legacy-Workflow v1/v2 ausdrücklich nach v3 migrieren",
     handler: async (_args, ctx) => {
       if (!ctx.isProjectTrusted()) {
-        notify(ctx, "Harte Trust-Grenze: Migration ist im untrusted Projekt blockiert.", "error");
+        notify(
+          ctx,
+          "Harte Trust-Grenze: Migration ist im untrusted Projekt blockiert.",
+          "error",
+        );
         return;
       }
       const confirmed = await ctx.ui.confirm(
@@ -802,7 +805,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
     description: "Verwaisten Workflow-Lock nach Bestätigung entfernen",
     handler: async (_args, ctx) => {
       if (!ctx.isProjectTrusted()) {
-        notify(ctx, "Harte Trust-Grenze: Lock-Recovery ist im untrusted Projekt blockiert.", "error");
+        notify(
+          ctx,
+          "Harte Trust-Grenze: Lock-Recovery ist im untrusted Projekt blockiert.",
+          "error",
+        );
         return;
       }
       const confirmed = await ctx.ui.confirm(
@@ -836,7 +843,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         }
         const loaded = reload(ctx);
         if (!loaded.state || !loaded.snapshot) {
-          return textResult("Fehler: Kein aktiver PlanSnapshot.", { ok: false });
+          return textResult("Fehler: Kein aktiver PlanSnapshot.", {
+            ok: false,
+          });
         }
         const updated = updateExecutionStep(loaded.state, {
           stepId: params.stepId,
@@ -859,6 +868,56 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         return textResult(`Fehler: ${workflowWarning(error)}`, { ok: false });
       }
     },
+  });
+
+  /**
+   * Model control (Super+M and the Hauptmenü "Modelle" entry).
+   *
+   * Lists what the registry actually offers and applies the choice through
+   * pi.setModel. The retired scoped-model overlay is NOT restored here.
+   */
+  async function openModelMenu(ctx: ExtensionContext): Promise<void> {
+    // Never swap the model out from under a running turn.
+    if (typeof ctx.isIdle === "function" && !ctx.isIdle()) {
+      ctx.ui.notify(
+        "Der Agent arbeitet gerade. Ein Modellwechsel ist erst danach möglich.",
+        "warning",
+      );
+      return;
+    }
+    const available = [...ctx.modelRegistry.getAvailable()].sort(
+      (left, right) =>
+        `${left.provider}/${left.id}`.localeCompare(
+          `${right.provider}/${right.id}`,
+        ),
+    );
+    if (available.length === 0) {
+      ctx.ui.notify("Keine Modelle verfügbar.", "warning");
+      return;
+    }
+    const current = ctx.model
+      ? `${ctx.model.provider}/${ctx.model.id}`
+      : undefined;
+    const labels = available.map((model) => {
+      const reference = `${model.provider}/${model.id}`;
+      return reference === current ? `● ${reference}` : `  ${reference}`;
+    });
+    const choice = await ctx.ui.select("Modell wählen", labels);
+    if (!choice) return;
+    const picked = available.find((model) =>
+      choice.endsWith(`${model.provider}/${model.id}`),
+    );
+    if (picked) pi.setModel(picked);
+  }
+
+  pi.registerShortcut(SHORTCUTS.modelMenu.keys, {
+    description: SHORTCUTS.modelMenu.description,
+    handler: async (ctx) => await openModelMenu(ctx),
+  });
+  // Without this listener the Hauptmenü "Modelle" entry emitted into the void.
+  pi.events.on(CONTROL_CENTER_EVENTS.openModels, async (event) => {
+    const ctx = (event as { ctx?: ExtensionContext }).ctx;
+    if (ctx) await openModelMenu(ctx);
   });
 
   pi.registerShortcut(SHORTCUTS.planAssistant.keys, {
@@ -903,7 +962,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         ? planningIsReview
           ? "reviewing"
           : "planning"
-        : current.state?.status ?? "idle",
+        : (current.state?.status ?? "idle"),
       mode: workflowMode(),
     });
   });
@@ -912,7 +971,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       respond?: (result: { mode: string; defaultLevel: string }) => void;
     };
     event.respond?.({
-      mode: planningKind ?? (current.state?.status === "working" ? "work" : "idle"),
+      mode:
+        planningKind ?? (current.state?.status === "working" ? "work" : "idle"),
       defaultLevel: planningKind === "detailed_plan" ? "high" : "medium",
     });
   });
@@ -967,8 +1027,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     activeCwd = ctx.cwd;
     activeContext = ctx;
-    planningKind =
-      pi.getFlag("plan") === true ? "detailed_plan" : undefined;
+    planningKind = pi.getFlag("plan") === true ? "detailed_plan" : undefined;
     planningBaseContent = undefined;
     planningIsReview = false;
     try {
@@ -988,7 +1047,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
         );
       }
     } catch (error) {
-      notify(ctx, `Workflow-State nicht sicher geladen: ${workflowWarning(error)}`, "error");
+      notify(
+        ctx,
+        `Workflow-State nicht sicher geladen: ${workflowWarning(error)}`,
+        "error",
+      );
     }
   });
 
@@ -1001,12 +1064,17 @@ export default function planModeExtension(pi: ExtensionAPI): void {
       try {
         replaceState(ctx, pauseExecution(current.state));
       } catch (error) {
-        notify(ctx, `Pause-State nicht gespeichert: ${workflowWarning(error)}`, "warning");
+        notify(
+          ctx,
+          `Pause-State nicht gespeichert: ${workflowWarning(error)}`,
+          "warning",
+        );
       }
     }
     activeCwd = undefined;
     activeContext = undefined;
     planningKind = undefined;
+    clearWorkflowPresentation(ctx);
   });
 
   void activeContext;

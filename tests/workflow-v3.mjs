@@ -66,7 +66,7 @@ const jiti = createJiti(path.join(ROOT, "npm", "package.json"), {
 
 const load = (relative) => jiti.import(path.join(ROOT, relative));
 const snapshotMod = await load("extensions/plan-mode/plan-snapshot.ts");
-const store = await load("extensions/plan-mode/store.ts");
+const store = await load("extensions/plan-mode/store/index.ts");
 const execution = await load("extensions/plan-mode/execution.ts");
 const planning = await load("extensions/plan-mode/planning.ts");
 const completion = await load("extensions/plan-mode/completion.ts");

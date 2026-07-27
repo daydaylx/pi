@@ -1,17 +1,10 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+/**
+ * Planart und UX-Einstieg. Bewusst KEIN zweiter Lebenszyklus: der einzige
+ * kanonische Workflow-Status ist `WorkflowStatus` in plan-mode/store.ts.
+ */
 export type WorkflowMode = "work" | "simple_plan" | "detailed_plan";
-
-export type WorkflowPhase =
-  | "idle"
-  | "draft"
-  | "deciding"
-  | "reviewing"
-  | "reviewed"
-  | "executing"
-  | "paused"
-  | "blocked"
-  | "ready";
 
 // Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
 // Prompting und Workflow; ausschließlich diese Stufe steuert Tool-Zugriffe.
@@ -32,10 +25,8 @@ export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
     "Projekt lesen und sichere Inspect-Shell nutzen; nur der Plan ist in der Planung beschreibbar",
   "project-write":
     "Gewöhnliche Projektänderungen; riskante, destruktive und externe Aktionen bestätigen",
-  "confirm-all":
-    "Jede Mutation und jede externe Aktion einzeln bestätigen",
-  yolo:
-    "Temporärer sichtbarer Bypass; harte Secret-, System-, Symlink- und Trust-Grenzen bleiben aktiv",
+  "confirm-all": "Jede Mutation und jede externe Aktion einzeln bestätigen",
+  yolo: "Temporärer sichtbarer Bypass; harte Secret-, System-, Symlink- und Trust-Grenzen bleiben aktiv",
 };
 
 /**
@@ -88,53 +79,11 @@ export function permissionRiskStatusValue(
   }
 }
 
-export type WorkflowProgressItem = {
-  completed: boolean;
-};
-
-export type WorkflowStatusValue = string;
-
-export function workflowStatusValue(
-  phase: WorkflowPhase,
-  mode: WorkflowMode = "work",
-  todos: readonly WorkflowProgressItem[] = [],
-): WorkflowStatusValue {
-  switch (phase) {
-    case "draft":
-      return mode === "detailed_plan"
-        ? "ARCHITEKTURPLAN"
-        : mode === "simple_plan"
-          ? "PLAN"
-          : "ARBEIT · PLAN GESPEICHERT";
-    case "deciding":
-      return "ANALYSE";
-    case "reviewing":
-    case "reviewed":
-      return "REVIEW";
-    case "executing": {
-      const total = todos.length;
-      if (total === 0) return "ARBEIT";
-      const completed = todos.filter((todo) => todo.completed).length;
-      return `ARBEIT ${completed}/${total}`;
-    }
-    case "paused": {
-      const total = todos.length;
-      const completed = todos.filter((todo) => todo.completed).length;
-      return total > 0 ? `PAUSIERT ${completed}/${total}` : "PAUSIERT";
-    }
-    case "blocked": {
-      const total = todos.length;
-      const completed = todos.filter((todo) => todo.completed).length;
-      return total > 0 ? `BLOCKIERT ${completed}/${total}` : "BLOCKIERT";
-    }
-    case "ready":
-      return "BEREIT";
-    case "idle":
-      return "ARBEIT";
-  }
-}
-
-/** Status values are presentation-only and must never leak into non-TUI modes. */
+/**
+ * Status values are presentation-only and must never leak into non-TUI modes.
+ * The workflow label itself is built in plan-mode/presentation.ts, the single
+ * place that maps WorkflowStatus to a German label.
+ */
 export function setTuiStatus(
   ctx: ExtensionContext,
   key: string,
