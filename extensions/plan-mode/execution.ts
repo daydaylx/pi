@@ -212,7 +212,7 @@ export async function startWork(
   session.pi.sendMessage(
     {
       customType: "pi-work-request",
-      content: executionPrompt(loaded.snapshot, saved),
+      content: "Führe jetzt den verbindlichen PlanSnapshot aus.",
       display: true,
     },
     { triggerTurn: true },
