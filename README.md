@@ -77,8 +77,11 @@ laufen durch denselben Handler. `Super+P` öffnet die Planwahl, `Super+M` die
 Modellwahl, `Super+D` Thinking und `Super+Y` den temporären YOLO-Modus. Die
 Super-Kombinationen benötigen Kitty-/CSI-u-Unterstützung.
 
-Aurora besitzt Editor, Widget, Aktivität und Motion; die Fußzeile gehört
-`pi-zentui` und liest die Statuswerte `workflow`, `permissions` und `lsp`.
+Aurora besitzt Editor, Fußzeile, Widget, Aktivität und Motion. Die Fußzeile ist
+die einzige Statusfläche: Modell, Denktiefe, Projekt, Berechtigung, LSP und
+Kontext stehen dort und nirgends sonst; der Editorrahmen trägt nur Arbeitsablauf
+und Schritt. Die Statuswerte `workflow`, `permissions` und `lsp` liefern
+`plan-mode`, `mode-permissions` und `lsp`.
 
 `Super+M` listet die verfügbaren Modelle der Registry; während eines laufenden
 Turns ist der Wechsel gesperrt. Die frühere Scoped-Model-Übersicht entfällt.

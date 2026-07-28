@@ -1,5 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
+import { layoutFor } from "./layout.ts";
 
 export interface ActiveToolView {
   id: string;
@@ -21,7 +22,10 @@ function firstString(
   return undefined;
 }
 
-export function compactToolTarget(toolName: string, args: unknown): string | undefined {
+export function compactToolTarget(
+  toolName: string,
+  args: unknown,
+): string | undefined {
   const target = firstString(args, [
     "path",
     "file_path",
@@ -53,7 +57,7 @@ export function renderActiveTools(
   now: number,
 ): string[] {
   const available = Math.max(1, width);
-  return tools.slice(0, width < 76 ? 1 : 3).map((tool) => {
+  return tools.slice(0, layoutFor(width) === "narrow" ? 1 : 3).map((tool) => {
     const elapsed = Math.max(0, Math.floor((now - tool.startedAt) / 1000));
     const target = tool.target ? `  ${theme.fg("muted", tool.target)}` : "";
     const badge = theme.fg("accent", "◆");

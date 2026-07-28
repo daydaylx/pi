@@ -37,7 +37,33 @@ Konsolidierung korrigiert wurde.
 `thinking-view-config.ts`, `context-menu.ts`, `git-header.ts`,
 `activity-status.ts`). Tote Eventkanäle entfernt (`openContext`, `openChanges`,
 `snapshot`, `openThinkingView`). `ZENTUI_STATUS_KEYS` heißt `UI_STATUS_KEYS`;
-die Stringwerte blieben unverändert, weil `zentui.json` sie referenziert.
+die Stringwerte blieben unverändert, jetzt weil `aurora-ui/footer.ts` sie liest.
+
+**UI-Chrome repariert und entschlackt.** `themes/aurora-night.json` deklarierte
+mit `pillBg` und `overlayBg` zwei Schlüssel, die das Pi-Theme-Schema nicht kennt
+(`additionalProperties: false`). `Theme.bg()` wirft bei unbekannten Schlüsseln;
+ein `try/catch` in `renderPill` verschluckte das, sodass jedes Fußzeilensegment
+als `[Klammertext]` rendete statt als Fläche — bei laufendem Ticker rund 60
+gefangene Ausnahmen je Sekunde. `shared/ui-theme.ts` ist auf `renderSegment`
+reduziert; `renderPill`, `emptyBorderLine`, `renderFrameBorder` und
+`formatSelectionRow` sind entfallen, die drei letzten hatten keinen Aufrufer.
+
+Die Fußzeile ist die einzige Statusfläche (ADR 009). Modell, Denktiefe, Kontext
+und Arbeitsablauf standen zuvor doppelt — im Editorrahmen und in der Fußzeile.
+Der Rahmen ist auf eine Zeile mit Arbeitsablauf und Schritt reduziert, die
+untere Rahmenzeile und das 2,5-Hz-Blinken sind entfallen. Neu sind
+`aurora-ui/footer.ts` (Renderlogik, priorisiertes Weglassen von Segmenten statt
+hartem Abschneiden) und `aurora-ui/layout.ts` (die Breitenschwellen, zuvor in
+`tool-renderers.ts` als `76` dupliziert). `index.ts` schrumpft von 679 auf 539
+Zeilen; die Registrierung von Editor, Fußzeile und Widget bleibt dort.
+
+Die Berechtigung erscheint jetzt als kurzer Modus-Label aus
+`PERMISSION_LEVEL_LABEL`. Der frühere Startwert setzte `permissions.bash` unter
+ein Modus-Label — zwei verschiedene Einstellungen unter einem Namen.
+
+`zentui.json` und `extensions/pi-tool-display/config.json` sind gelöscht: beide
+Pakete sind seit der Paketbereinigung keine aktiven Laufzeitpakete, ihre
+Konfiguration steuerte nichts. Die npm-Pins bleiben als Typecheck-Anker.
 
 **Shortcuts.** `Shift+Tab` ist der Workflow-Wechsel, `Super+Q` das vollständige
 Control Center — eine gemeinsame Definition (`shared/control-center-menu.ts`),
@@ -72,17 +98,17 @@ Dev-Pin `0.80.6` — eine Minor-, keine Patch-Abweichung.
 
 Stand 2026-07-28, alle Läufe tatsächlich ausgeführt.
 
-| Prüfung | Ergebnis |
-| --- | --- |
-| `npm --prefix npm run verify` | **grün (Exit 0)** |
-| `npm --prefix npm run typecheck` | grün |
-| `npm --prefix npm run test` | **711 bestanden, 0 fehlgeschlagen** (runtime 271, ui 35, workflow-v3 237, lsp 155, diff 13) |
-| `npm --prefix npm run test:coverage` | grün, alle Werte über Baseline |
-| `node tests/p1-runtime.mjs` | grün |
-| `node benchmarks/harness/test/p3.test.mjs` | grün |
-| `npm run install:user -- --dry-run` | grün, 187 Dateien |
-| `git diff --check` | sauber |
-| Erreichbarkeitsanalyse | 94/94 Dateien ab `settings.json` erreichbar |
+| Prüfung                                    | Ergebnis                                                                                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `npm --prefix npm run verify`              | **grün (Exit 0)**                                                                           |
+| `npm --prefix npm run typecheck`           | grün                                                                                        |
+| `npm --prefix npm run test`                | **711 bestanden, 0 fehlgeschlagen** (runtime 271, ui 35, workflow-v3 237, lsp 155, diff 13) |
+| `npm --prefix npm run test:coverage`       | grün, alle Werte über Baseline                                                              |
+| `node tests/p1-runtime.mjs`                | grün                                                                                        |
+| `node benchmarks/harness/test/p3.test.mjs` | grün                                                                                        |
+| `npm run install:user -- --dry-run`        | grün, 187 Dateien                                                                           |
+| `git diff --check`                         | sauber                                                                                      |
+| Erreichbarkeitsanalyse                     | 94/94 Dateien ab `settings.json` erreichbar                                                 |
 
 Ausgangsbaseline auf Commit `a7e4ad7`: 787 bestanden. Die Differenz von 76
 Assertions entfällt vollständig auf Tests entfernter Runtime-Funktionen

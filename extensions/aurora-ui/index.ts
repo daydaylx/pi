@@ -1,5 +1,3 @@
-import { homedir } from "node:os";
-import { isAbsolute, normalize, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -12,7 +10,6 @@ import {
 import {
   type EditorTheme,
   type TUI,
-  truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import { loadSetupConfig, type MotionMode } from "../setup-core/config.ts";
@@ -32,7 +29,8 @@ import {
   renderActiveTools,
   type ActiveToolView,
 } from "./tool-renderers.ts";
-import { renderPill } from "../shared/ui-theme.ts";
+import { crop, layoutFor } from "./layout.ts";
+import { renderFooterLines } from "./footer.ts";
 
 const OWNER = "aurora-ui";
 const ACTIVITY_WIDGET = "aurora-ui/activity";
@@ -40,21 +38,6 @@ const TICK_INTERVAL_MS = 100;
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
 );
-
-type Layout = "narrow" | "normal" | "wide";
-
-function layoutFor(width: number): Layout {
-  if (width < 76) return "narrow";
-  if (width < 124) return "normal";
-  return "wide";
-}
-
-function renderContextGauge(percent: number, theme: Theme): string {
-  const filled = Math.min(10, Math.max(0, Math.floor(percent / 10)));
-  const bar = "▓".repeat(filled) + "░".repeat(10 - filled);
-  const color = percent >= 90 ? "error" : percent >= 70 ? "warning" : "success";
-  return theme.fg(color, `[${bar}] ${percent}%`);
-}
 
 function makeEpoch(sequence: number): string {
   return `${Date.now().toString(36)}-${sequence.toString(36)}`;
@@ -78,36 +61,21 @@ function makeState(
   };
 }
 
-function crop(value: string, width: number): string {
-  return truncateToWidth(value, Math.max(1, width), "…");
-}
-
-function compactCwd(cwd: string): string {
-  const normalized = normalize(cwd);
-  const home = normalize(homedir());
-  const fromHome = relative(home, normalized);
-  if (fromHome === "") return "~";
-  if (
-    !isAbsolute(fromHome) &&
-    fromHome !== ".." &&
-    !fromHome.startsWith(`..${sep}`)
-  ) {
-    return `~${sep}${fromHome}`;
-  }
-  return normalized;
-}
-
+/**
+ * The single frame line above the editor. It carries the workflow and the
+ * current step only — everything durable (model, thinking, project, context)
+ * lives in the footer, so no value is shown on two surfaces at once.
+ */
 function renderBar(
   theme: Theme,
   content: string,
   width: number,
-  edge: "top" | "bottom",
   active: boolean,
 ): string {
   if (width <= 2) return crop(content, width);
   const color = active ? "borderAccent" : "borderMuted";
-  const left = edge === "top" ? "╭─" : "╰─";
-  const right = edge === "top" ? "╮" : "╯";
+  const left = "╭─";
+  const right = "╮";
   const inner = crop(` ${content} `, Math.max(1, width - 3));
   const fill = "─".repeat(
     Math.max(
@@ -118,33 +86,6 @@ function renderBar(
   return crop(
     theme.fg(color, left) + inner + theme.fg(color, fill + right),
     width,
-  );
-}
-
-function joinSides(left: string, right: string, width: number): string {
-  const available = Math.max(1, width);
-  if (visibleWidth(left) + visibleWidth(right) + 1 > available) {
-    if (available < 52) return crop(`${left} · ${right}`, available);
-    const leftWidth = Math.max(1, Math.floor(available * 0.55));
-    const clippedLeft = crop(left, leftWidth);
-    return crop(
-      clippedLeft +
-        " ".repeat(
-          Math.max(
-            1,
-            available - visibleWidth(clippedLeft) - visibleWidth(right),
-          ),
-        ) +
-        right,
-      available,
-    );
-  }
-  return (
-    left +
-    " ".repeat(
-      Math.max(1, available - visibleWidth(left) - visibleWidth(right)),
-    ) +
-    right
   );
 }
 
@@ -208,8 +149,7 @@ class AuroraEditor extends CustomEditor {
     keybindings: KeybindingsManager,
     private readonly auroraTheme: Theme,
     private readonly auroraState: AuroraUiState,
-    private readonly ticker: AnimationTicker,
-    private readonly readContextPercent: () => number | null,
+    ticker: AnimationTicker,
   ) {
     super(tui, editorTheme, keybindings);
     this.detachTicker = ticker.attach(tui);
@@ -220,49 +160,21 @@ class AuroraEditor extends CustomEditor {
   }
 
   render(width: number): string[] {
-    const layout = layoutFor(width);
     const workflow = this.auroraState.workflow;
     const step = workflow.step
-      ? crop(workflow.step, layout === "wide" ? 54 : 28)
+      ? crop(workflow.step, layoutFor(width) === "wide" ? 54 : 28)
       : "—";
-    const model = this.auroraState.model.id ?? "kein Modell";
-    const thinking = this.auroraState.model.thinking ?? "aus";
-    const contextPercent = this.readContextPercent();
-    const context =
-      contextPercent === null
-        ? "Kontext —"
-        : `Kontext ${contextPercent.toFixed(0)}%`;
     const active = this.auroraState.activity.kind !== "idle";
-
-    let top: string;
-    let bottom: string;
-    if (layout === "narrow") {
-      top = `AURORA · ${workflow.label}`;
-      bottom = `${crop(model, 24)} · ${context}`;
-    } else if (layout === "normal") {
-      top = `AURORA NIGHT · ${workflow.label} · ${step}`;
-      bottom = `${crop(model, 38)} · Denken ${thinking} · ${context}`;
-    } else {
-      top = `AURORA NIGHT · ARBEITSABLAUF ${workflow.label} · SCHRITT ${step}`;
-      bottom = `MODELL ${crop(model, 48)} · DENKEN ${thinking} · KONTEXT ${contextPercent === null ? "—" : `${contextPercent.toFixed(1)}%`}`;
-    }
-
-    const pulse =
-      active &&
-      this.ticker.motion === "contextual" &&
-      this.ticker.frame % 8 < 4;
     return [
-      renderBar(this.auroraTheme, top, width, "top", pulse),
+      renderBar(
+        this.auroraTheme,
+        `${workflow.label} · Schritt ${step}`,
+        width,
+        active,
+      ),
       ...super.render(width),
-      renderBar(this.auroraTheme, bottom, width, "bottom", active),
     ];
   }
-}
-
-function formatTokens(value: number): string {
-  if (value < 1_000) return String(value);
-  if (value < 1_000_000) return `${(value / 1_000).toFixed(1)}k`;
-  return `${(value / 1_000_000).toFixed(1)}m`;
 }
 
 function workingFrame(theme: Theme, motion: MotionMode, frame: number): string {
@@ -462,7 +374,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
     const epoch = makeEpoch(++epochSequence);
     state = makeState(epoch, ctx, pi);
-    state.permissions.label = `BERECHTIGUNG ${loaded.config.permissions.bash.toUpperCase()}`;
+    // The permission label is deliberately left empty: it means the permission
+    // mode, and only `permissions/session-state.ts` knows it. That extension
+    // answers the state request emitted by `installBus` below, still inside
+    // this handler. Seeding it from `permissions.bash` — a different setting
+    // entirely — is what used to put the bash policy under a mode label.
     state.lsp.state = loaded.config.lsp.enabled ? "leerlauf" : "aus";
     activeContext = ctx;
     activeSessionId = ctx.sessionManager.getSessionId();
@@ -497,7 +413,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           sessionCtx.ui.theme,
           state!,
           ticker!,
-          () => sessionCtx.getContextUsage()?.percent ?? null,
         ),
     );
 
@@ -515,70 +430,15 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         },
         render(width: number): string[] {
           if (!state) return [];
-          const layout = layoutFor(width);
-          const statuses = footerData.getExtensionStatuses();
-          const branch = footerData.getGitBranch();
-          const project = compactCwd(sessionCtx.cwd);
-          const workflow = statuses.get("workflow") ?? state.workflow.label;
-          const permission =
-            statuses.get("permissions") ??
-            state.permissions.label ??
-            "BERECHTIGUNG —";
-          const lsp = statuses.get("lsp") ?? state.lsp.state ?? "—";
-          const model = state.model.id ?? "kein Modell";
-          const thinking = state.model.thinking ?? "aus";
-
-          // Block 1 (Links): Modell-Info
-          const modelPill = renderPill(theme, crop(model, layout === "wide" ? 32 : 18), { tone: "accent", bg: "pillBg" });
-          const thinkingPill = renderPill(theme, `Denken ${thinking}`, { tone: "muted", bg: "pillBg" });
-          const leftBlock = layout === "wide" ? `${modelPill} ${thinkingPill}` : modelPill;
-
-          // Block 2 (Mitte): Arbeitskontext / Pfad
-          const branchText = branch ? ` git:${crop(branch, 16)}` : "";
-          const centerBlock = renderPill(theme, `${crop(project, layout === "wide" ? 36 : 24)}${branchText}`, { tone: "text", bold: true, bg: "pillBg" });
-
-          // Block 3 (Rechts): Systemstatus / Berechtigungen
-          const permPill = renderPill(theme, permission, { tone: "warning", bold: true, bg: "pillBg" });
-          const lspPill = renderPill(theme, `LSP ${lsp}`, { tone: lsp === "eingeschränkt" ? "error" : "success", bg: "pillBg" });
-          const workflowPill = renderPill(theme, workflow, { tone: "muted", bg: "pillBg" });
-
-          const rightBlock = layout === "wide"
-            ? `${workflowPill} ${permPill} ${lspPill}`
-            : layout === "normal"
-            ? `${permPill} ${lspPill}`
-            : permPill;
-
-          let line: string;
-          if (layout === "wide") {
-            const available = Math.max(1, width);
-            const leftW = visibleWidth(leftBlock);
-            const centerW = visibleWidth(centerBlock);
-            const rightW = visibleWidth(rightBlock);
-            const totalW = leftW + centerW + rightW;
-            if (totalW + 4 <= available) {
-              const spaceLeft = Math.max(1, Math.floor((available - totalW) / 2));
-              const spaceRight = Math.max(1, available - leftW - spaceLeft - centerW - rightW);
-              line = leftBlock + " ".repeat(spaceLeft) + centerBlock + " ".repeat(spaceRight) + rightBlock;
-            } else {
-              line = joinSides(`${leftBlock}  ${centerBlock}`, rightBlock, width);
-            }
-          } else {
-            line = joinSides(`${leftBlock}  ${centerBlock}`, rightBlock, width);
-          }
-
-          const lines = [crop(line, width)];
-          if (layout === "wide") {
-            const totals = readAssistantTotals(sessionCtx);
-            const usage = sessionCtx.getContextUsage();
-            const gauge = usage?.percent != null ? ` · Konf ${renderContextGauge(usage.percent, theme)}` : "";
-            lines.push(
-              theme.fg(
-                "dim",
-                `Sitzung ${pi.getSessionName() ?? "unbenannt"} · ↑${formatTokens(totals.input)} ↓${formatTokens(totals.output)}${gauge}`,
-              ),
-            );
-          }
-          return lines.map((l) => crop(l, width));
+          return renderFooterLines(theme, width, {
+            state,
+            statuses: footerData.getExtensionStatuses(),
+            branch: footerData.getGitBranch(),
+            cwd: sessionCtx.cwd,
+            sessionName: pi.getSessionName(),
+            tokens: readAssistantTotals(sessionCtx),
+            contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
+          });
         },
       };
     });

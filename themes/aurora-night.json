@@ -28,8 +28,6 @@
     "text": "text",
     "thinkingText": "muted",
     "selectedBg": "surfaceRaised",
-    "overlayBg": "surface",
-    "pillBg": "surfaceRaised",
     "userMessageBg": "surface",
     "userMessageText": "text",
     "customMessageBg": "surfaceRaised",

@@ -240,6 +240,68 @@ await section("target runtime configuration", async () => {
       assert(Boolean(auroraTheme.colors?.[color]), `Aurora declares ${color}`);
     }
 
+    // Pi's theme schema sets additionalProperties:false and Theme.fg/bg throw on
+    // unknown keys. A key the schema does not know therefore does not fail
+    // loudly — it fails inside whatever try/catch happens to wrap the call. This
+    // is the check that would have caught the invented "pillBg".
+    const themeSchema = JSON.parse(
+      readFileSync(
+        path.join(
+          ROOT,
+          "npm/node_modules/@earendil-works/pi-coding-agent/dist",
+          "modes/interactive/theme/theme-schema.json",
+        ),
+        "utf8",
+      ),
+    );
+    const schemaColors = themeSchema.properties?.colors ?? {};
+    const declaredColors = Object.keys(schemaColors.properties ?? {});
+    assert(
+      declaredColors.length > 0,
+      "the Pi theme schema exposes its color properties",
+    );
+    eq(
+      schemaColors.additionalProperties,
+      false,
+      "the Pi theme schema rejects unknown color keys",
+    );
+    for (const color of Object.keys(auroraTheme.colors ?? {})) {
+      assert(
+        declaredColors.includes(color),
+        `Aurora color ${color} exists in the Pi theme schema`,
+      );
+    }
+    for (const required of schemaColors.required ?? []) {
+      assert(
+        Object.hasOwn(auroraTheme.colors ?? {}, required),
+        `Aurora declares the required color ${required}`,
+      );
+    }
+
+    // The three former UI packages are inactive (see the pin assertions below),
+    // so their configuration steered nothing. ADR 009 deleted it; these two
+    // assertions are the stronger statement over "is unused".
+    for (const deadConfig of [
+      "zentui.json",
+      "extensions/pi-tool-display/config.json",
+    ]) {
+      assert(
+        !existsSync(path.join(ROOT, deadConfig)),
+        `${deadConfig} does not return as dead configuration`,
+      );
+    }
+
+    // renderPill reached for a background through an `as never` cast, which is
+    // exactly how the invalid key survived the typechecker.
+    const uiTheme = readFileSync(
+      path.join(ROOT, "extensions/shared/ui-theme.ts"),
+      "utf8",
+    );
+    assert(
+      !/as never/.test(uiTheme) && !/\.bg\(/.test(uiTheme),
+      "shared chrome helpers type their theme colors instead of casting them away",
+    );
+
     const activeExtensions = settings.extensions.filter(
       (entry) => typeof entry === "string" && entry.startsWith("+extensions/"),
     );
@@ -1635,6 +1697,23 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
   if (!auroraUi) return;
   const harness = createHarness({ sessionName: "aurora-test" });
   auroraUi.default(harness.api);
+
+  // Stands in for permissions/session-state.ts, the only extension that knows
+  // the permission mode. Aurora seeds no label of its own any more, so without
+  // a provider the footer must say so rather than invent one.
+  harness.api.events.on("aurora-ui/state/request", (value) => {
+    if (value?.requester !== "aurora-ui") return;
+    harness.api.events.emit("aurora-ui/state/snapshot", {
+      type: "snapshot",
+      requestId: value.requestId,
+      sessionEpoch: value.sessionEpoch,
+      source: "permissions-test-provider",
+      state: {
+        permissions: { level: "project-write", label: "Projekt schreiben" },
+      },
+    });
+  });
+
   const context = harness.makeContext({
     cwd: path.join(homedir(), "projects", "aurora-test"),
   });
@@ -1691,6 +1770,45 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
         `~${path.sep}projects${path.sep}aurora-test`,
       ),
       "Aurora footer shows the current directory as a compact home-relative path",
+    );
+
+    const wide = stripAnsi(footer.render(140)[0]);
+    const narrow = stripAnsi(footer.render(60)[0]);
+
+    // The permission mode comes from the Aurora bus. The "permissions" status
+    // key carries a risk banner sized for dialogs, not for a footer segment.
+    assert(
+      wide.includes("Projekt schreiben") && !wide.includes("Read + Write"),
+      "Aurora footer shows the permission mode from the bus, not the status banner",
+    );
+    assert(
+      narrow.includes("Projekt schreiben"),
+      "the permission mode survives the narrowest layout",
+    );
+
+    // Segments give up their place whole rather than being shaved off at the
+    // edge, so what remains stays readable.
+    assert(
+      wide.includes("Denken") && !narrow.includes("Denken"),
+      "Aurora footer drops the thinking segment before it crowds a narrow line",
+    );
+
+    // renderPill's bracket fallback fired on every render because "pillBg" is
+    // not a key the Pi theme schema knows.
+    assert(
+      !/[[\]]/.test(wide) && !/[[\]]/.test(narrow),
+      "Aurora footer segments are colored, not bracketed",
+    );
+
+    const wideLines = footer.render(140).map(stripAnsi);
+    eq(
+      wideLines.filter((line) => line.includes("Kontext")).length,
+      1,
+      "context is reported exactly once, on the second wide line",
+    );
+    assert(
+      !wideLines.some((line) => line.includes("Konf ")),
+      "the second footer line spells out Kontext",
     );
     const readsAfterFirstWideRender = harness.branchReads;
     footer.render(140);
