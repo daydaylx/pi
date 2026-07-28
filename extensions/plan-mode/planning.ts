@@ -187,7 +187,7 @@ export async function activatePlanningMode(
   session.planningKind = kind;
   session.planningBaseContent = session.current.planContent;
   session.planningIsReview = false;
-  updateWorkflowPresentation(ctx, session.current.state, "planning");
+  updateWorkflowPresentation(ctx, session.current.state, "planning", session.pi);
   session.publishWorkflowActivation(ctx);
   return true;
 }
@@ -209,11 +209,19 @@ export async function beginReview(
     session.notify(ctx, "Kein gültiger PlanSnapshot v3 vorhanden.", "warning");
     return;
   }
+  if (loaded.state?.status !== "planning") {
+    session.notify(
+      ctx,
+      "/review-plan ist nur vor dem ersten /work verfügbar. Änderungen nach Ausführungsbeginn benötigen eine bestätigte Planrevision über /plan.",
+      "warning",
+    );
+    return;
+  }
   session.selectedMode = loaded.snapshot.planType;
   session.planningKind = loaded.snapshot.planType;
   session.planningBaseContent = loaded.planContent;
   session.planningIsReview = true;
-  updateWorkflowPresentation(ctx, loaded.state, "reviewing");
+  updateWorkflowPresentation(ctx, loaded.state, "reviewing", session.pi);
   session.publishWorkflowActivation(ctx);
   session.pi.sendMessage(
     {
@@ -259,7 +267,7 @@ export async function finalizePlanning(
       migrationRequired: false,
       warnings: [],
     };
-    updateWorkflowPresentation(ctx, saved.state);
+    updateWorkflowPresentation(ctx, saved.state, undefined, session.pi);
     session.publishWorkflowActivation(ctx);
     session.notify(
       ctx,

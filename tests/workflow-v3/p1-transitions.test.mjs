@@ -17,6 +17,7 @@ const planMode = await load("extensions/plan-mode/index.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const store = await load("extensions/plan-mode/store/index.ts");
 const capsMod = await load("extensions/shared/workflow-capabilities.ts");
+const snapshotMod = await load("extensions/plan-mode/plan-snapshot.ts");
 
 function queryCapabilities(api) {
   return capsMod.requestWorkflowCapabilities(api.events);
@@ -65,6 +66,125 @@ async function writeQuickPlan(cwd) {
   writeFileSync(path.join(cwd, store.PLAN_RELATIVE_PATH), content);
   return content;
 }
+
+function seedWorkingPlan(cwd) {
+  const finalized = snapshotMod.finalizePlanDocument(
+    quickPlan(),
+    "simple_plan",
+  );
+  const initial = store.writePlanAndStateCAS(
+    cwd,
+    finalized.snapshot,
+    "missing",
+  );
+  return store.writeWorkflowStateCAS(
+    cwd,
+    {
+      ...initial.state,
+      status: "working",
+    },
+    initial.stateToken,
+  );
+}
+
+await test(
+  "--plan uses the same confirmation guard as /plan architecture",
+  async () => {
+    if (!planMode) return;
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-v3-plan-flag-"));
+    try {
+      const saved = seedWorkingPlan(cwd);
+      const harness = createHarness({
+        confirm: false,
+        flags: { plan: true },
+      });
+      planMode.default(harness.api);
+      const context = harness.makeContext({ cwd, trusted: true, mode: "tui" });
+
+      await harness.runHooks("session_start", {}, context);
+
+      assert(
+        harness.lifecycleCalls.some(
+          (entry) =>
+            entry.kind === "confirm" &&
+            entry.title === "Aktiven Plan überarbeiten?",
+        ),
+        "--plan asks before revising an active plan",
+      );
+      const loaded = store.loadWorkflowStateV3(cwd);
+      equal(loaded.snapshot?.planId, saved.state.planId, "declining preserves plan identity");
+      equal(loaded.state?.status, "working", "declining preserves execution state");
+      const contexts = await harness.runHooks("before_agent_start", {}, context);
+      assert(
+        contexts.some((entry) =>
+          entry?.message?.content?.includes("PI WORKFLOW: AUSFÜHRUNG"),
+        ),
+        "declining --plan keeps the active work context instead of injecting planning",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
+
+await test("review-plan rejects a plan whose execution has started", async () => {
+  if (!planMode) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-v3-review-state-"));
+  try {
+    seedWorkingPlan(cwd);
+    const harness = createHarness({ confirm: true });
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd, trusted: true, mode: "tui" });
+    await harness.runHooks("session_start", {}, context);
+    const sentBeforeReview = harness.sent.length;
+
+    await harness.commands.get("review-plan")("", context);
+
+    equal(
+      harness.sent.length,
+      sentBeforeReview,
+      "review-plan does not start a review turn after work began",
+    );
+    const caps = queryCapabilities(harness.api);
+    equal(caps.state, "working", "working sidecar state remains authoritative");
+    equal(caps.mode, "work", "working plans retain the work capability mode");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("planning changes publish an Aurora workflow patch", async () => {
+  if (!planMode) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-v3-aurora-plan-"));
+  try {
+    const harness = createHarness({ confirm: true });
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd, trusted: true, mode: "tui" });
+    await harness.runHooks("session_start", {}, context);
+    harness.api.events.emit("aurora-ui/state/request", {
+      type: "request",
+      requestId: "workflow-test",
+      sessionEpoch: "workflow-epoch",
+      requester: "test",
+    });
+    const emittedBeforePlanning = harness.emitted.length;
+
+    await harness.commands.get("plan")("quick", context);
+
+    assert(
+      harness.emitted
+        .slice(emittedBeforePlanning)
+        .some(
+          (entry) =>
+            entry.name === "aurora-ui/state/patch" &&
+            entry.event?.patch?.workflow?.phase === "planning",
+        ),
+      "the plan activation publishes the planning phase to Aurora",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
 
 await test(
   "finalizePlanning keeps capabilities consistent before /work",

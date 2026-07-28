@@ -64,7 +64,7 @@ export async function discardPlan(
       migrationRequired: false,
       warnings: [],
     };
-    updateWorkflowPresentation(ctx);
+    updateWorkflowPresentation(ctx, undefined, undefined, session.pi);
     session.publishWorkflowActivation(ctx);
     session.notify(ctx, "Aktiver Plan und Sidecar wurden entfernt.", "warning");
   } catch (error) {
@@ -86,7 +86,7 @@ export async function migrateLegacyPlan(
     session.current = migrateLegacyWorkflowToV3(ctx.cwd, {
       confirmedLegacySessionsClosed: true,
     });
-    updateWorkflowPresentation(ctx, session.current.state);
+    updateWorkflowPresentation(ctx, session.current.state, undefined, session.pi);
     session.notify(ctx, session.current.warnings.join("\n"));
   } catch (error) {
     session.notify(ctx, workflowWarning(error), "error");

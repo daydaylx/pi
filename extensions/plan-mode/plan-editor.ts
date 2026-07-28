@@ -48,6 +48,14 @@ export async function editPlanMarkdown(
   session: WorkflowSession,
   ctx: ExtensionContext,
 ): Promise<void> {
+  if (!ctx.isProjectTrusted()) {
+    session.notify(
+      ctx,
+      "Harte Trust-Grenze: Planbearbeitung ist im untrusted Projekt blockiert.",
+      "error",
+    );
+    return;
+  }
   const loaded = session.reload(ctx);
   const path = workflowPath(ctx.cwd, PLAN_RELATIVE_PATH);
 
@@ -115,17 +123,31 @@ export async function editPlanMarkdown(
       "info",
     );
   } catch (error) {
-    // Revert edits on disk to prevent corrupted state
+    // Restore only if both the plan bytes and the sidecar still belong to this
+    // editor attempt. A raw write here would overwrite a newer revision from
+    // another process and break the plan/state binding that CAS protects.
+    let restored = false;
     try {
-      const { writeFileSync } = await import("node:fs");
-      writeFileSync(path, initialContent, "utf8");
+      finalizeObservedPlanCAS(
+        ctx.cwd,
+        editedContent,
+        loaded.snapshot,
+        loaded.stateToken,
+        loaded.state,
+      );
+      session.reload(ctx);
+      restored = true;
     } catch {
-      // Ignore fallback write errors
+      // A concurrent update wins. Leave its plan and sidecar untouched.
     }
 
     session.notify(
       ctx,
-      `Plan-Validierung fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}. Änderungen wurden zurückgesetzt.`,
+      `Plan-Validierung fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}. ${
+        restored
+          ? "Der Editorstand wurde sicher zurückgesetzt."
+          : "Der Workflow wurde nicht überschrieben; lade den aktuellen Stand erneut."
+      }`,
       "error",
     );
   }

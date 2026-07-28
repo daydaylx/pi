@@ -177,7 +177,7 @@ export async function finishWorkflow(
       migrationRequired: false,
       warnings: [],
     };
-    updateWorkflowPresentation(ctx);
+    updateWorkflowPresentation(ctx, undefined, undefined, session.pi);
     session.notify(ctx, `Plan erfolgreich archiviert: ${archivePath}`);
   } catch (error) {
     session.notify(

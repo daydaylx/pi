@@ -23,7 +23,12 @@ import {
 import { finishWorkflow } from "./completion-commands.ts";
 import { executionPrompt, pauseExecution } from "./execution.ts";
 import { offerWorkflowRecovery } from "./maintenance-commands.ts";
-import { finalizePlanning, planningPrompt, reviewPrompt } from "./planning.ts";
+import {
+  activatePlanningMode,
+  finalizePlanning,
+  planningPrompt,
+  reviewPrompt,
+} from "./planning.ts";
 import {
   clearWorkflowPresentation,
   computeAuroraWorkflowState,
@@ -121,15 +126,22 @@ export function registerPlanEvents(
   pi.on("session_start", async (_event, ctx) => {
     session.activeCwd = ctx.cwd;
     session.activeContext = ctx;
-    session.planningKind =
-      pi.getFlag("plan") === true ? "detailed_plan" : undefined;
-    session.selectedMode = session.planningKind;
+    const startWithDetailedPlan = pi.getFlag("plan") === true;
+    session.planningKind = undefined;
+    session.selectedMode = undefined;
     session.planningBaseContent = undefined;
     session.planningIsReview = false;
     try {
       const loaded = session.reload(ctx);
       for (const warning of loaded.warnings)
         session.notify(ctx, warning, "warning");
+      // `--plan` is a mode request, not a bypass for the normal planning
+      // guards. In particular, it must not overwrite a live plan or coexist
+      // with a direct task without the same confirmation as `/plan`.
+      if (startWithDetailedPlan) {
+        await activatePlanningMode(session, "detailed_plan", ctx);
+        return;
+      }
       if (loaded.migrationRequired) {
         session.notify(
           ctx,
@@ -168,6 +180,6 @@ export function registerPlanEvents(
     session.activeContext = undefined;
     session.planningKind = undefined;
     session.selectedMode = undefined;
-    clearWorkflowPresentation(ctx);
+    clearWorkflowPresentation(ctx, session.pi);
   });
 }

@@ -93,6 +93,7 @@ await test("editPlanMarkdown processes manual plan updates via CAS", async () =>
 
     const mockCtx = {
       cwd: tmpDir,
+      isProjectTrusted: () => true,
       ui: {
         openExternalEditor: async (path) => {
           writeFileSync(path, updatedPlanText, "utf8");
@@ -112,6 +113,83 @@ await test("editPlanMarkdown processes manual plan updates via CAS", async () =>
     assert(
       diskContent.includes("Manuell hinzugefügter Schritt"),
       "disk plan includes edited text",
+    );
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+await test("editPlanMarkdown is blocked in untrusted projects", async () => {
+  let opened = false;
+  let notifiedMessage = "";
+  const session = {
+    reload() {
+      throw new Error("untrusted edit must not load workflow files");
+    },
+    notify(_ctx, message) {
+      notifiedMessage = message;
+    },
+  };
+  await planEditor.editPlanMarkdown(session, {
+    cwd: "/unused",
+    isProjectTrusted: () => false,
+    ui: {
+      async openExternalEditor() {
+        opened = true;
+      },
+    },
+  });
+  assert(!opened, "untrusted projects never open an editor");
+  assert(
+    notifiedMessage.includes("Trust-Grenze"),
+    "untrusted edit reports the hard trust boundary",
+  );
+});
+
+await test("editPlanMarkdown preserves a concurrent plan revision", async () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "pi-test-editor-conflict-"));
+  try {
+    const first = snapshotMod.finalizePlanDocument(quickPlan(), "simple_plan");
+    const initial = storeMod.writePlanAndStateCAS(
+      tmpDir,
+      first.snapshot,
+      "missing",
+    );
+    const concurrent = snapshotMod.finalizePlanDocument(
+      quickPlan("Konkurrierende Änderung"),
+      "simple_plan",
+    );
+    const session = sessionMod.createWorkflowSession({ events: { emit() {} } });
+    session.current = {
+      state: initial.state,
+      snapshot: first.snapshot,
+      stateToken: initial.stateToken,
+      recovered: false,
+      migrationRequired: false,
+      warnings: [],
+    };
+    session.notify = () => {};
+    const context = {
+      cwd: tmpDir,
+      isProjectTrusted: () => true,
+      ui: {
+        async openExternalEditor() {
+          storeMod.writePlanAndStateCAS(
+            tmpDir,
+            concurrent.snapshot,
+            initial.stateToken,
+            initial.state,
+          );
+        },
+      },
+    };
+
+    await planEditor.editPlanMarkdown(session, context);
+
+    equal(
+      readFileSync(join(tmpDir, storeMod.PLAN_RELATIVE_PATH), "utf8"),
+      concurrent.content,
+      "the failed editor synchronization never overwrites a concurrent revision",
     );
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
