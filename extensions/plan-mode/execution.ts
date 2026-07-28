@@ -1,4 +1,6 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlanSnapshot } from "./plan-snapshot.ts";
+import type { WorkflowSession } from "./session.ts";
 import type {
   WorkflowStateV3,
   WorkflowStepState,
@@ -21,7 +23,9 @@ export function startOrResumeExecution(
   state: WorkflowStateV3,
 ): WorkflowStateV3 {
   if (state.status === "done") {
-    throw new Error("Ein abgeschlossener Workflow kann nicht fortgesetzt werden.");
+    throw new Error(
+      "Ein abgeschlossener Workflow kann nicht fortgesetzt werden.",
+    );
   }
   return {
     ...state,
@@ -63,8 +67,7 @@ export function updateExecutionStep(
     throw new Error("Ein abgeschlossener Schritt wird nicht zurückgesetzt.");
   }
   const active = state.steps.find(
-    (step) =>
-      step.status === "in_progress" && step.id !== update.stepId,
+    (step) => step.status === "in_progress" && step.id !== update.stepId,
   );
   if (update.status === "in_progress" && active) {
     throw new Error(`Ein anderer Schritt ist bereits in Arbeit: ${active.id}`);
@@ -85,13 +88,51 @@ export function updateExecutionStep(
           : allCompleted
             ? "reviewing"
             : "working",
-      activeStepId:
-        update.status === "in_progress" ? update.stepId : undefined,
+      activeStepId: update.status === "in_progress" ? update.stepId : undefined,
       steps,
     },
     allCompleted,
     stepNumber: index + 1,
   };
+}
+
+/**
+ * Resolve 1-based plan step numbers against the snapshot and complete them.
+ *
+ * Pure: the caller persists the result. An unknown number aborts the whole
+ * batch rather than completing a prefix of it, so a typo cannot silently mark
+ * the wrong steps as done.
+ */
+export function completeStepsByNumber(
+  snapshot: PlanSnapshot,
+  state: WorkflowStateV3,
+  numbers: readonly number[],
+  evidence = "Manuell über /done bestätigt.",
+): { state: WorkflowStateV3 } | { unknownStep: number } {
+  let next = state;
+  for (const number of numbers) {
+    const step = snapshot.steps[number - 1];
+    if (!step) return { unknownStep: number };
+    next = updateExecutionStep(next, {
+      stepId: step.id,
+      status: "completed",
+      evidence,
+    }).state;
+  }
+  return { state: next };
+}
+
+/** Parse "/done 1, 2 3" into unique, safe step numbers. */
+export function parseStepNumbers(args: string): number[] {
+  return [
+    ...new Set(
+      args
+        .split(/[\s,]+/)
+        .filter(Boolean)
+        .map(Number)
+        .filter(Number.isSafeInteger),
+    ),
+  ];
 }
 
 export function executionPrompt(
@@ -122,4 +163,56 @@ ${snapshot.content}
 
 Aktueller Schrittstatus:
 ${steps}`;
+}
+
+export async function startWork(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): Promise<void> {
+  if (!ctx.isProjectTrusted()) {
+    session.notify(
+      ctx,
+      "Harte Trust-Grenze: /work ist im untrusted Projekt blockiert.",
+      "error",
+    );
+    return;
+  }
+  const loaded = session.reload(ctx);
+  if (loaded.migrationRequired) {
+    session.notify(
+      ctx,
+      "Legacy-State zuerst ausdrücklich mit /migrate-plan migrieren.",
+      "warning",
+    );
+    return;
+  }
+  if (!loaded.snapshot || !loaded.state) {
+    session.notify(
+      ctx,
+      loaded.warnings.join("\n") || "Kein gültiger PlanSnapshot vorhanden.",
+      "warning",
+    );
+    return;
+  }
+  if (
+    loaded.state.status === "working" ||
+    loaded.state.status === "paused" ||
+    loaded.state.status === "blocked"
+  ) {
+    const confirmed = await ctx.ui.confirm(
+      "Planausführung fortsetzen?",
+      "Der gespeicherte Fortschritt wird konservativ fortgesetzt; eine Übernahme erfolgt nie zeitgesteuert.",
+    );
+    if (!confirmed) return;
+  }
+  const saved = session.replaceState(ctx, startOrResumeExecution(loaded.state));
+  session.publishWorkflowActivation(ctx);
+  session.pi.sendMessage(
+    {
+      customType: "pi-work-request",
+      content: executionPrompt(loaded.snapshot, saved),
+      display: true,
+    },
+    { triggerTurn: true },
+  );
 }

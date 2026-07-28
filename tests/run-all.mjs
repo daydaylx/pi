@@ -4,11 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Every domain in run.mjs's SECTION_SUITES needs an entry here, otherwise its
+// sections never run in `npm test`. run.mjs itself fails when a section has no
+// declared domain, which keeps the two lists honest in both directions.
 const suites = [
   { name: "runtime", file: "run.mjs", env: { PI_TEST_SUITE: "runtime" } },
-  // "workflow" is the fourth domain filter in run.mjs. It was missing here,
-  // so those sections never ran in `npm test`.
-  { name: "workflow", file: "run.mjs", env: { PI_TEST_SUITE: "workflow" } },
+  { name: "ui", file: "run.mjs", env: { PI_TEST_SUITE: "ui" } },
   { name: "workflow-v3", file: "workflow-v3.mjs", env: {} },
   { name: "lsp", file: "run.mjs", env: { PI_TEST_SUITE: "lsp" } },
   {

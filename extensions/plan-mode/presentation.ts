@@ -71,3 +71,22 @@ export function formatPlanSteps(
 export function workflowWarning(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+type MutableUi = ExtensionContext["ui"] & {
+  input?: (title: string, placeholder?: string) => Promise<string | undefined>;
+};
+
+/**
+ * Ask for a single line of text in the TUI.
+ *
+ * Hosts without a text input simply have no `input` method, and every caller
+ * has to treat "no answer" and "empty answer" the same way — so this resolves
+ * to undefined instead of throwing or inventing a fallback prompt.
+ */
+export async function promptInput(
+  ctx: ExtensionContext,
+  title: string,
+  placeholder?: string,
+): Promise<string | undefined> {
+  return await (ctx.ui as MutableUi).input?.(title, placeholder);
+}

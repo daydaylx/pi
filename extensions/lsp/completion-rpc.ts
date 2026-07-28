@@ -1,9 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { CompletionLspResult } from "../plan-mode/completion.ts";
-import {
-  runLspDiagnostics,
-  type LspToolsDeps,
-} from "./tools.ts";
+import type { CompletionLspResult } from "../plan-mode/completion/types.ts";
+import { runLspDiagnostics, type LspToolsDeps } from "./tools.ts";
 
 export const LSP_COMPLETION_RPC = {
   request: "lsp:diagnostics:v1:request",

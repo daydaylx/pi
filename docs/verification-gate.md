@@ -1,7 +1,7 @@
 # Verifikation und Completion
 
 `/verify-gate` bleibt eine manuelle Diagnose. Der verbindliche Abschluss für
-Plan- und Direct-Task-Arbeit liegt in `extensions/plan-mode/completion.ts`.
+Plan- und Direct-Task-Arbeit liegt in `extensions/plan-mode/completion/`.
 
 ## Verbindlicher Ablauf
 

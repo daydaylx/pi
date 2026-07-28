@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { LSP_COMPLETION_RPC } from "../lsp/completion-rpc.ts";
-import type { CompletionLspResult } from "./completion.ts";
+import type { CompletionLspResult } from "./completion/types.ts";
 
 const LSP_RESPONSE_TIMEOUT_MS = 20_000;
 

@@ -32,7 +32,7 @@ abgeschlossen.
 - Automatische Ledger-, Doom-Loop- und Edit-Metrik-Workflowtrigger entfernt;
   P3-Ledger-Gate in eine Benchmark-Fixture ausgelagert.
 - Genau ein kanonischer Workflow-Status (`WorkflowStatus` in
-  `plan-mode/store.ts`). `WorkflowPhase` und `WorkflowLifecycle` sind entfernt;
+  `plan-mode/store/types.ts`). `WorkflowPhase` und `WorkflowLifecycle` sind entfernt;
   Legacy-Werte kommen nur noch in `legacyStatus()` der Migration vor.
 - Abgehängte Module entfernt: plan-menu, post-plan-card, workflow-presentation,
   workflow-hooks, workflow-commands, workflow-settlement, ledger-checkpoint,
@@ -48,29 +48,53 @@ abgeschlossen.
 - `setup-core/task-contract.ts` entfernt: `.agent/task-contract.json` wurde nie
   geschrieben, der Scope-Drift-Zweig des Gates war unerreichbar. Der wirksame
   Matcher liegt jetzt in `plan-mode/scope.ts`; die erzwingbare Scope-Prüfung
-  bleibt der required-Check in `plan-mode/completion.ts`.
+  bleibt der required-Check in `plan-mode/completion/scope-check.ts`.
 - `plan-mode/utils.ts` aufgelöst (1043 Z., 43 von 46 Exporten ungenutzt):
   `isPlanFilePath` nach `store.ts` (nutzt dort das vorhandene `assertSafePath`),
   `readArtifactTriState` nach `shared/context-ledger.ts`. Die doppelten
   Pfadkonstanten entfallen damit.
 - `requestLsp` nach `plan-mode/lsp-bridge.ts`, `completionOverrideReport` nach
-  `completion.ts` verschoben.
+  `completion/report.ts` verschoben.
+- `index.ts` (1158 → 628 Z.) auf Registrierung und Verdrahtung reduziert: der
+  Closure-State liegt jetzt in `session.ts` (`WorkflowSession`), die Handler
+  bei ihrer Fachlichkeit (`planning.ts`, `execution.ts`,
+  `completion-commands.ts`). Pipeline (`completion/`) und Orchestrierung
+  (`completion-commands.ts`) sind getrennt, damit kein Zyklus zur LSP-Bridge
+  entsteht. Keine zyklischen Importe.
 - `store.ts` (1212 Z.) nach Verantwortlichkeiten aufgeteilt:
   `store/{paths,atomic-files,types,locks,workflow-state,archive,migration,
-  direct-task}.ts` mit `store/index.ts` als Barrel. Keine funktionale Änderung,
+direct-task}.ts` mit `store/index.ts` als Barrel. Keine funktionale Änderung,
   keine zyklischen Importe, `assertSafePath` bleibt einzige Quelle der
   Pfadsicherheit.
+- Verbliebene Großdateien fachlich zerlegt, ohne Verhaltensänderung:
+  `completion.ts` (908 Z.) → `completion/` (11 Module, Fassade entfernt);
+  `plan-mode/index.ts` (628 → 18 Z.) mit `commands.ts`, `events.ts`,
+  `direct-task-commands.ts`, `maintenance-commands.ts`, `model-menu.ts`;
+  `mode-permissions.ts` (893 → 127 Z.) mit `extensions/permissions/` (Policy
+  byte-identisch verschoben, Entry-Pfad unverändert);
+  `store/workflow-state.ts` (597 Z.) → Schema, Factory, Load, CAS-Fassade und
+  `workflow-done.ts`; `benchmarks/harness/p3.mjs` (943 → 33 Z.) → `p3/`.
+  `plan-snapshot.ts` bewusst ungeteilt (ein Änderungsgrund, keine
+  Infrastruktur-Vermischung).
+- Testsuite fachlich getrennt: `tests/workflow-v3.mjs` (1527 → 27 Z.) → 13
+  Fachsuites unter `tests/workflow-v3/`; gemeinsame Helfer in `tests/shared/`
+  (jiti-Loader, Assertions, Harness, Plan-Fixtures). Die Auffang-Domäne
+  `workflow` in `run.mjs` (6451 → 4832 Z.) ist einem expliziten
+  `SECTION_SUITES`-Lookup gewichen; eine Sektion ohne Domäne lässt die Suite
+  jetzt fehlschlagen, statt still aus jedem gefilterten Lauf zu verschwinden.
 
 ## Letzte Verifikation
 
 - Typprüfung: erfolgreich.
-- Laufzeitsuite: 284 Assertions bestanden, 0 fehlgeschlagen.
-- Workflow-Suite: 188 Assertions bestanden, 0 fehlgeschlagen.
-- Workflow-v3-Suite: 111 Assertions bestanden, 0 fehlgeschlagen.
-- LSP-Suite: 154 Assertions bestanden, 0 fehlgeschlagen.
-- Diff-/Ledger-Suite: 46 Assertions bestanden, 0 fehlgeschlagen.
+- Laufzeitsuite: 303 Assertions bestanden, 0 fehlgeschlagen.
+- UI-Suite: 55 Assertions bestanden, 0 fehlgeschlagen.
+- Workflow-v3-Suite: 227 Assertions bestanden, 0 fehlgeschlagen.
+- LSP-Suite: 155 Assertions bestanden, 0 fehlgeschlagen.
+- Diff-/Ledger-Suite: 47 Assertions bestanden, 0 fehlgeschlagen.
 - Coverage-Gates: erfolgreich.
 - Runtime-Reload-Test: erfolgreich.
+- P3-Harness-Offline-Test: erfolgreich.
+- Keine zyklischen Importe über `extensions/`, `tests/` und `benchmarks/`.
 - `git diff --check`: erfolgreich.
 - Installer-Dry-Run: erfolgreich (132 Dateien).
 - Nicht ausgeführt: Fresh-Checkout-Reproduktion,

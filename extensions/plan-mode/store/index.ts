@@ -6,7 +6,11 @@
  *   atomic-files.ts   bounded reads, atomic writes, serialization, tokens
  *   types.ts          state/report types, size limits, validation patterns
  *   locks.ts          the directory lock (no lease, no heartbeat)
- *   workflow-state.ts parsing, loading and CAS-guarded writes
+ *   workflow-state.ts the CAS-guarded write paths and the state facade
+ *   workflow-state-schema.ts   parsing and validation
+ *   workflow-state-factory.ts  building a state from a PlanSnapshot
+ *   workflow-state-load.ts     loading plan + sidecar, conservative recovery
+ *   workflow-done.ts  the only path that may set status `done`
  *   archive.ts        archiving a completed workflow, discarding an active one
  *   migration.ts      v1/v2 → v3, legacy support only
  *   direct-task.ts    plan-less direct tasks
@@ -47,7 +51,6 @@ export {
 } from "./locks.ts";
 
 export {
-  commitWorkflowDone,
   createWorkflowState,
   finalizeObservedPlanCAS,
   loadWorkflowStateV3,
@@ -55,6 +58,8 @@ export {
   writePlanAndStateCAS,
   writeWorkflowStateCAS,
 } from "./workflow-state.ts";
+
+export { commitWorkflowDone } from "./workflow-done.ts";
 
 export { archiveCompletedWorkflow, discardActiveWorkflow } from "./archive.ts";
 

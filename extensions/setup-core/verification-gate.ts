@@ -11,7 +11,7 @@
  *
  * `status` reflects the required setup/project checks (typecheck, test,
  * #105 profiles). Scope is NOT decided here: the enforceable scope check
- * lives in plan-mode/completion.ts, which matches the changed files against
+ * lives in plan-mode/completion/scope-check.ts, which matches the changed files against
  * the PlanSnapshot's "Technischer Scope" as a required check. This gate only
  * reports obvious diff noise and stays advisory.
  *
@@ -240,7 +240,7 @@ export async function runVerificationGate(
   // The task-contract path was removed with the workflow-v3 consolidation:
   // .agent/task-contract.json was never written by any code path, so the
   // drift branch was unreachable. The enforceable scope check lives in
-  // plan-mode/completion.ts, which matches the changed files against the
+  // plan-mode/completion/scope-check.ts, which matches the changed files against the
   // PlanSnapshot's "Technischer Scope" as a REQUIRED check. This gate stays
   // advisory and only reports obvious diff noise.
   const scopeHints: string[] = [];

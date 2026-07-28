@@ -80,6 +80,52 @@ Architekturplan, Arbeit, Berechtigungen, Modelle, Thinking und LSP.
 `Super+M`, `Super+D`, `Super+Q` und `Super+Y` behalten ihre Modell-, Thinking-,
 Hauptmenü- und temporäre YOLO-Grundfunktion.
 
+## Module
+
+```text
+index.ts                  erzeugt die Session, registriert Commands und Events
+commands.ts               Command-, Tool- und Shortcut-Registrierung
+events.ts                 Lifecycle-Hooks und Capability-Responder
+session.ts                Sitzungszustand (WorkflowSession) und Persistenz-Adapter
+planning.ts               Prompts sowie /plan und /review-plan
+execution.ts              /work, /go und Schrittfortschritt
+completion-commands.ts    /finish und /task-done als Orchestrierung
+direct-task-commands.ts   /task: Eligibility und Erstellung
+maintenance-commands.ts   /discard-plan, /migrate-plan, /recover-workflow-lock
+model-menu.ts             Modellauswahl (Super+M und Hauptmenü)
+plan-snapshot.ts          Planvertrag, Metadaten und stabile Step-IDs
+scope.ts                  Glob-Matcher für den technischen Scope
+presentation.ts           Statuszeile, Fehlermeldungen und TUI-Eingabe
+reviewer-rpc.ts           unabhängiger Reviewer über die Subagent-RPC
+lsp-bridge.ts             LSP-Diagnosen für die Completion
+
+completion/               Completion-Pipeline (rein, ohne Sitzung und UI)
+  index.ts                Orchestrierung und öffentliche API
+  types.ts                gemeinsame Completion-Typen
+  secret-boundary.ts      harte Secret-/Auth-Grenze
+  diff-evidence.ts        Diff-Erfassung, Hashing und Diff-Stabilität
+  verification.ts         Setup-Checks, Projektprofile, Verifikationsabdeckung
+  scope-check.ts          technischer Scope (rein)
+  lsp-check.ts            LSP-Diagnosen als Completion-Checks
+  reviewer-check.ts       Reviewer-Input, -Aufruf und Marker-Validierung
+  result-policy.ts        pass/fail/blocked und Override-Zulässigkeit (rein)
+  report.ts               persistierter Completion-Bericht
+  formatter.ts            Nutzerausgabe
+
+store/                    Persistenz: paths, atomic-files, types, locks,
+                          workflow-state (+ -schema, -factory, -load),
+                          workflow-done, archive, migration, direct-task
+```
+
+Die Controller importieren einander nicht zyklisch; jeder persistente
+Schreibvorgang läuft über `store/`.
+
+`plan-snapshot.ts` bleibt bewusst ungeteilt: die Datei hat keinen
+Dateisystemzugriff, keine UI-Formatierung, keine State-Mutation und keine
+Command-Logik — sie beschreibt ausschließlich den Planvertrag und ändert sich
+deshalb immer als Ganzes. `parsePlanSnapshot` verschränkt Parsing und
+Validierung bewusst in einem Durchlauf über die Abschnitte.
+
 ## Completion
 
 Die Pipeline prüft in dieser Reihenfolge:
@@ -99,6 +145,19 @@ Secret-/Auth-Befunde sind harte Grenzen und auch interaktiv nicht
 übersteuerbar.
 
 ## Berechtigungen
+
+Entry-Point bleibt `extensions/mode-permissions.ts` (Registrierung und
+Verdrahtung); die Logik liegt in `extensions/permissions/`:
+
+```text
+tool-event.ts       Pfad aus einem Tool-Call lesen
+workflow-policy.ts  workflow-bezogene Entscheidungen   (rein)
+tool-policy.ts      Entscheidungen nach Berechtigungsstufe (rein)
+session-state.ts    Modus, Workflow-Defaults, YOLO, Persistenz, Audit
+thinking-control.ts Denktiefe und ihr Menü
+menus.ts            Berechtigungsmenü
+guards.ts           die tool_call-/user_bash-Interceptoren
+```
 
 Workflow und Berechtigungsstufe bleiben orthogonal:
 

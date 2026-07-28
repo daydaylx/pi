@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  parseCompletionReviewerResult,
-  type CompletionReviewerInput,
-  type CompletionReviewerResult,
-} from "./completion.ts";
+import { parseCompletionReviewerResult } from "./completion/reviewer-check.ts";
+import type {
+  CompletionReviewerInput,
+  CompletionReviewerResult,
+} from "./completion/types.ts";
 
 interface RpcReply {
   ok?: boolean;
@@ -23,7 +23,10 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function firstString(value: unknown, keys: readonly string[]): string | undefined {
+function firstString(
+  value: unknown,
+  keys: readonly string[],
+): string | undefined {
   return findString(value, new Set(keys), new Set(), 0);
 }
 
@@ -59,7 +62,8 @@ function findString(
 }
 
 function reviewerTask(input: CompletionReviewerInput): string {
-  const plan = input.plan?.content ??
+  const plan =
+    input.plan?.content ??
     (input.directTask
       ? [
           "# Direct Task",
@@ -156,13 +160,10 @@ function terminalState(value: unknown): string | undefined {
 }
 
 function reviewerOutput(value: unknown): string | undefined {
-  return firstString(value, [
-    "output",
-    "text",
-    "transcript",
-    "final",
-    "message",
-  ]) ?? firstString(value, ["summary"]);
+  return (
+    firstString(value, ["output", "text", "transcript", "final", "message"]) ??
+    firstString(value, ["summary"])
+  );
 }
 
 export async function runCompletionReviewerViaRpc(
@@ -213,9 +214,7 @@ export async function runCompletionReviewerViaRpc(
           "stopped",
           "cancelled",
           "paused",
-        ].includes(
-          state,
-        )
+        ].includes(state)
       ) {
         return {
           verdict: "UNVERIFIABLE",

@@ -1,3 +1,29 @@
+/**
+ * Planning and review turns.
+ *
+ * Owns the prompts AND the handlers that start, finish and review a plan.
+ * Never writes project files: planning may only touch the plan itself
+ * (Umbauvertrag §13.3).
+ */
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { WorkflowSession } from "./session.ts";
+import { existsSync, readFileSync } from "node:fs";
+import {
+  PLAN_RELATIVE_PATH,
+  finalizeObservedPlanCAS,
+  loadDirectTask,
+  workflowPath,
+} from "./store/index.ts";
+import {
+  updateWorkflowPresentation,
+  workflowWarning,
+} from "./presentation.ts";
+
+/** Read the plan file as written by the planning turn, if it exists. */
+function planContent(cwd: string): string | undefined {
+  const path = workflowPath(cwd, PLAN_RELATIVE_PATH);
+  return existsSync(path) ? readFileSync(path, "utf8") : undefined;
+}
 import {
   finalizePlanDocument,
   type FinalizedPlanDocument,
@@ -72,4 +98,165 @@ Abschlusskriterien.
 <plan>
 ${content}
 </plan>`;
+}
+
+export async function choosePlanKind(
+  args: string,
+  ctx: ExtensionContext,
+): Promise<PlanKind | undefined> {
+  const normalized = args.trim().toLowerCase();
+  if (["quick", "schnell", "simple"].includes(normalized))
+    return "simple_plan";
+  if (["architecture", "architektur", "detailed"].includes(normalized))
+    return "detailed_plan";
+  const choice = await ctx.ui.select("Planart", [
+    "Schnellplan",
+    "Architekturplan",
+  ]);
+  return choice === "Schnellplan"
+    ? "simple_plan"
+    : choice === "Architekturplan"
+      ? "detailed_plan"
+      : undefined;
+}
+
+export async function beginPlanning(
+  session: WorkflowSession,
+  kind: PlanKind,
+  ctx: ExtensionContext,
+): Promise<void> {
+  if (!ctx.isProjectTrusted()) {
+    session.notify(
+      ctx,
+      "Harte Trust-Grenze: Planung schreibt keine Artefakte in einem untrusted Projekt.",
+      "error",
+    );
+    return;
+  }
+  session.reload(ctx);
+  if (loadDirectTask(ctx.cwd)) {
+    session.notify(
+      ctx,
+      "Eine direkte Aufgabe ist aktiv; schließe sie zuerst mit /task-done ab.",
+      "warning",
+    );
+    return;
+  }
+  if (session.current.migrationRequired) {
+    session.notify(
+      ctx,
+      "Vor einer neuen Planung ist /migrate-plan erforderlich.",
+      "warning",
+    );
+    return;
+  }
+  if (session.current.planContent) {
+    const confirmed = await ctx.ui.confirm(
+      "Aktiven Plan überarbeiten?",
+      "Die nächste Planrevision invalidiert bisherigen Fortschritt und Review.",
+    );
+    if (!confirmed) return;
+  }
+  session.planningKind = kind;
+  session.planningBaseContent = session.current.planContent;
+  session.planningIsReview = false;
+  updateWorkflowPresentation(ctx, session.current.state, "planning");
+  session.publishWorkflowActivation(ctx);
+  session.pi.sendMessage(
+    {
+      customType: "pi-plan-request",
+      content:
+        kind === "detailed_plan"
+          ? "Erstelle jetzt den Architekturplan."
+          : "Erstelle jetzt den Schnellplan.",
+      display: true,
+    },
+    { triggerTurn: true },
+  );
+  session.notify(ctx, "Planung gestartet; es wird noch nichts implementiert.");
+}
+
+export async function beginReview(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): Promise<void> {
+  if (!ctx.isProjectTrusted()) {
+    session.notify(
+      ctx,
+      "Harte Trust-Grenze: Plan-Review ist im untrusted Projekt blockiert.",
+      "error",
+    );
+    return;
+  }
+  const loaded = session.reload(ctx);
+  if (!loaded.snapshot || !loaded.planContent) {
+    session.notify(ctx, "Kein gültiger PlanSnapshot v3 vorhanden.", "warning");
+    return;
+  }
+  session.planningKind = loaded.snapshot.planType;
+  session.planningBaseContent = loaded.planContent;
+  session.planningIsReview = true;
+  updateWorkflowPresentation(ctx, loaded.state, "reviewing");
+  session.publishWorkflowActivation(ctx);
+  session.pi.sendMessage(
+    {
+      customType: "pi-plan-review",
+      content: "Prüfe jetzt den aktuellen PlanSnapshot.",
+      display: true,
+    },
+    { triggerTurn: true },
+  );
+}
+
+export async function finalizePlanning(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): Promise<void> {
+  const kind = session.planningKind;
+  if (!kind) return;
+  session.planningKind = undefined;
+  const observed = planContent(ctx.cwd);
+  if (!observed) {
+    session.notify(ctx, `${PLAN_RELATIVE_PATH} wurde nicht erstellt.`, "warning");
+    return;
+  }
+  try {
+    const finalized = finalizePlanningTurn(
+      observed,
+      kind,
+      session.planningBaseContent,
+    );
+    const saved = finalizeObservedPlanCAS(
+      ctx.cwd,
+      observed,
+      finalized.snapshot,
+      session.current.stateToken,
+      session.current.state,
+    );
+    session.current = {
+      planContent: finalized.content,
+      snapshot: finalized.snapshot,
+      state: saved.state,
+      stateToken: saved.stateToken,
+      recovered: false,
+      migrationRequired: false,
+      warnings: [],
+    };
+    updateWorkflowPresentation(ctx, saved.state);
+    session.notify(
+      ctx,
+      session.planningIsReview
+        ? "Plan-Review abgeschlossen; die aktuelle Revision benötigt vor Arbeit erneut /work."
+        : `PlanSnapshot v3 gespeichert. Starte die Umsetzung ausdrücklich mit /work.`,
+    );
+  } catch (error) {
+    session.notify(
+      ctx,
+      `Plan ist noch nicht vertragskonform:\n${workflowWarning(error)}`,
+      "error",
+    );
+  } finally {
+    session.planningBaseContent = undefined;
+    session.planningIsReview = false;
+  }
 }

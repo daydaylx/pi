@@ -33,4 +33,4 @@ Das ältere `.agent/task-contract.json` und `setup-core/task-contract.ts` wurden
 entfernt: die Datei wurde von keinem Codepfad je geschrieben, der darauf
 aufbauende Scope-Drift-Zweig des Verifikations-Gates war unerreichbar. Der reine
 `matchScope`-Matcher lebt weiter in `extensions/plan-mode/scope.ts` und ist die
-Grundlage der erzwingbaren Scope-Prüfung in `plan-mode/completion.ts`.
+Grundlage der erzwingbaren Scope-Prüfung in `plan-mode/completion/scope-check.ts`.
