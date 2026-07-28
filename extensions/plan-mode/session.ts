@@ -17,6 +17,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { PlanKind } from "./plan-snapshot.ts";
 import { updateWorkflowPresentation } from "./presentation.ts";
+import type { WorkflowMode, WorkflowStatus } from "../shared/workflow-status.ts";
 import {
   loadWorkflowStateV3,
   writeWorkflowStateCAS,
@@ -40,6 +41,8 @@ export interface WorkflowSession {
   current: WorkflowStateLoadResult;
   /** Set while a planning or review turn is active. */
   planningKind?: PlanKind;
+  /** The workflow selected for this session, including passive menu changes. */
+  selectedMode?: WorkflowMode;
   /** Plan content the running planning turn started from. */
   planningBaseContent?: string;
   /** Whether the active planning turn is a review rather than a new plan. */
@@ -54,6 +57,8 @@ export interface WorkflowSession {
   notify(ctx: ExtensionContext, message: string, level?: NotifyLevel): void;
   /** Current workflow mode for permission defaults — planning kind or work. */
   workflowMode(): "work" | PlanKind;
+  /** UI override for a selected mode that has not changed persisted state. */
+  workflowPresentationOverride(): WorkflowStatus | undefined;
   /** Announce the active mode so permissions can apply their defaults. */
   publishWorkflowActivation(ctx: ExtensionContext): void;
   /** Re-read plan and sidecar from disk and refresh the status bar. */
@@ -88,6 +93,7 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
     },
 
     workflowMode() {
+      if (session.selectedMode) return session.selectedMode;
       if (session.planningKind) return session.planningKind;
       const status = session.current.state?.status;
       if (status === "planning" || status === "reviewing") {
@@ -100,6 +106,21 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
       return "work";
     },
 
+    workflowPresentationOverride() {
+      if (session.planningKind)
+        return session.planningIsReview ? "reviewing" : "planning";
+      if (session.selectedMode === "simple_plan" || session.selectedMode === "detailed_plan")
+        return "planning";
+      if (
+        session.selectedMode === "work" &&
+        (session.current.state?.status === "planning" ||
+          session.current.state?.status === "reviewing")
+      ) {
+        return "idle";
+      }
+      return undefined;
+    },
+
     publishWorkflowActivation(ctx) {
       pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.activated, {
         cwd: ctx.cwd,
@@ -110,7 +131,12 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
 
     reload(ctx) {
       session.current = loadWorkflowStateV3(ctx.cwd);
-      updateWorkflowPresentation(ctx, session.current.state, undefined, session.pi);
+      updateWorkflowPresentation(
+        ctx,
+        session.current.state,
+        session.workflowPresentationOverride(),
+        session.pi,
+      );
       return session.current;
     },
 
@@ -126,7 +152,12 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
         stateToken: saved.stateToken,
         recovered: false,
       };
-      updateWorkflowPresentation(ctx, saved.state, undefined, session.pi);
+      updateWorkflowPresentation(
+        ctx,
+        saved.state,
+        session.workflowPresentationOverride(),
+        session.pi,
+      );
       return saved.state;
     },
 

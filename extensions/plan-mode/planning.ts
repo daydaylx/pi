@@ -125,43 +125,7 @@ export async function beginPlanning(
   kind: PlanKind,
   ctx: ExtensionContext,
 ): Promise<void> {
-  if (!ctx.isProjectTrusted()) {
-    session.notify(
-      ctx,
-      "Harte Trust-Grenze: Planung schreibt keine Artefakte in einem untrusted Projekt.",
-      "error",
-    );
-    return;
-  }
-  session.reload(ctx);
-  if (loadDirectTask(ctx.cwd)) {
-    session.notify(
-      ctx,
-      "Eine direkte Aufgabe ist aktiv; schließe sie zuerst mit /task-done ab.",
-      "warning",
-    );
-    return;
-  }
-  if (session.current.migrationRequired) {
-    session.notify(
-      ctx,
-      "Vor einer neuen Planung ist /migrate-plan erforderlich.",
-      "warning",
-    );
-    return;
-  }
-  if (session.current.planContent) {
-    const confirmed = await ctx.ui.confirm(
-      "Aktiven Plan überarbeiten?",
-      "Die nächste Planrevision invalidiert bisherigen Fortschritt und Review.",
-    );
-    if (!confirmed) return;
-  }
-  session.planningKind = kind;
-  session.planningBaseContent = session.current.planContent;
-  session.planningIsReview = false;
-  updateWorkflowPresentation(ctx, session.current.state, "planning");
-  session.publishWorkflowActivation(ctx);
+  if (!(await activatePlanningMode(session, kind, ctx))) return;
   session.pi.sendMessage(
     {
       customType: "pi-plan-request",
@@ -174,6 +138,58 @@ export async function beginPlanning(
     { triggerTurn: true },
   );
   session.notify(ctx, "Planung gestartet; es wird noch nichts implementiert.");
+}
+
+/**
+ * Select a planning mode without creating an agent turn.
+ *
+ * The next user prompt receives the planning context through before_agent_start.
+ * Explicit launchers such as /plan call this first and then trigger their turn.
+ */
+export async function activatePlanningMode(
+  session: WorkflowSession,
+  kind: PlanKind,
+  ctx: ExtensionContext,
+): Promise<boolean> {
+  if (!ctx.isProjectTrusted()) {
+    session.notify(
+      ctx,
+      "Harte Trust-Grenze: Planung schreibt keine Artefakte in einem untrusted Projekt.",
+      "error",
+    );
+    return false;
+  }
+  session.reload(ctx);
+  if (loadDirectTask(ctx.cwd)) {
+    session.notify(
+      ctx,
+      "Eine direkte Aufgabe ist aktiv; schließe sie zuerst mit /task-done ab.",
+      "warning",
+    );
+    return false;
+  }
+  if (session.current.migrationRequired) {
+    session.notify(
+      ctx,
+      "Vor einer neuen Planung ist /migrate-plan erforderlich.",
+      "warning",
+    );
+    return false;
+  }
+  if (session.current.planContent) {
+    const confirmed = await ctx.ui.confirm(
+      "Aktiven Plan überarbeiten?",
+      "Die nächste Planrevision invalidiert bisherigen Fortschritt und Review.",
+    );
+    if (!confirmed) return false;
+  }
+  session.selectedMode = kind;
+  session.planningKind = kind;
+  session.planningBaseContent = session.current.planContent;
+  session.planningIsReview = false;
+  updateWorkflowPresentation(ctx, session.current.state, "planning");
+  session.publishWorkflowActivation(ctx);
+  return true;
 }
 
 export async function beginReview(
@@ -193,6 +209,7 @@ export async function beginReview(
     session.notify(ctx, "Kein gültiger PlanSnapshot v3 vorhanden.", "warning");
     return;
   }
+  session.selectedMode = loaded.snapshot.planType;
   session.planningKind = loaded.snapshot.planType;
   session.planningBaseContent = loaded.planContent;
   session.planningIsReview = true;

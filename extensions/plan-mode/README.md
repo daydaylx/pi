@@ -67,7 +67,8 @@ v2-Lease und legt vorher ein Backup unter
 
 ## Commands
 
-- `/plan [quick|architecture]` oder `Super+P` – Plan erstellen/überarbeiten.
+- `/plan` – zustandsabhängigen Plan-Assistenten öffnen; `/plan [quick|architecture]`
+  oder `Super+P` starten eine Planung sofort.
 - `/review-plan` – stateless Plan-Review; Änderungen erzeugen eine neue Revision.
 - `/work`, `/go` – Ausführung ausdrücklich starten oder fortsetzen.
 - `/plan-todos` – Schritte mit Sidecar-Status anzeigen.
@@ -78,10 +79,19 @@ v2-Lease und legt vorher ein Backup unter
 - `/recover-workflow-lock` – verwaisten Lock bestätigt entfernen.
 - `/task <Ziel>`, `/task-done` – direkte Aufgabe mit eigenem Scope-Vertrag.
 
-Shift+Tab öffnet das kompakte Control Center für Schnellplan,
-Architekturplan, Arbeit, Berechtigungen, Modelle, Thinking und LSP.
+Shift+Tab öffnet den kompakten Workflow-Wechsel für Schnellplan,
+Architekturplan und Arbeit. Die Auswahl wechselt nur den Modus; erst der
+nächste Nutzerprompt startet die Planung. Der Workflow-Tab des vollständigen
+Control Centers (`Super+Q`) verhält sich gleich. `/plan`, `/work` und
+`Super+P` bleiben explizite Sofortstarts.
 `Super+M`, `Super+D`, `Super+Q` und `Super+Y` behalten ihre Modell-, Thinking-,
 Hauptmenü- und temporäre YOLO-Grundfunktion.
+
+Unterbrochene Ausführungen (`working`, `paused`, `blocked`) bieten beim
+Sitzungsstart in der TUI ausdrücklich Fortsetzen, Read-only-Diagnose oder
+„Fortschritt zurücksetzen, Plan behalten“ an. Keine Auswahl führt automatisch
+zu Arbeit; das Zurücksetzen benötigt zusätzlich eine Bestätigung und bleibt
+CAS-gebunden.
 
 ## Module
 

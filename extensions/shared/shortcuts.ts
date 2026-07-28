@@ -44,4 +44,9 @@ export const SHORTCUTS = {
     label: "Super+Y",
     description: "Temporären YOLO-Modus ein-/ausschalten",
   },
+  routingModelMenu: {
+    keys: "super+s",
+    label: "Super+S",
+    description: "Agenten-Modelle für Routingstufen anpassen",
+  },
 } as const satisfies Record<string, ShortcutBinding>;

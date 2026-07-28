@@ -22,6 +22,7 @@ import {
 } from "../shared/workflow-capabilities.ts";
 import { finishWorkflow } from "./completion-commands.ts";
 import { executionPrompt, pauseExecution } from "./execution.ts";
+import { offerWorkflowRecovery } from "./maintenance-commands.ts";
 import { finalizePlanning, planningPrompt, reviewPrompt } from "./planning.ts";
 import {
   clearWorkflowPresentation,
@@ -39,13 +40,11 @@ export function registerPlanEvents(
   pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
     if (!isAuroraUiStateRequest(value)) return;
     setAuroraEpoch(value.sessionEpoch);
-    const override = session.planningKind
-      ? session.planningIsReview
-        ? "reviewing"
-        : "planning"
-      : undefined;
     publishAuroraUiSnapshot(pi, value, "plan-mode", {
-      workflow: computeAuroraWorkflowState(session.current.state, override),
+      workflow: computeAuroraWorkflowState(
+        session.current.state,
+        session.workflowPresentationOverride(),
+      ),
     });
   });
 
@@ -53,11 +52,10 @@ export function registerPlanEvents(
     const request = value as Partial<WorkflowCapabilityRequest>;
     if (typeof request.respond !== "function") return;
     request.respond({
-      state: session.planningKind
-        ? session.planningIsReview
-          ? "reviewing"
-          : "planning"
-        : (session.current.state?.status ?? "idle"),
+      state:
+        session.workflowPresentationOverride() ??
+        session.current.state?.status ??
+        "idle",
       mode: session.workflowMode(),
     });
   });
@@ -67,11 +65,9 @@ export function registerPlanEvents(
       respond?: (result: { mode: string; defaultLevel: string }) => void;
     };
     event.respond?.({
-      mode:
-        session.planningKind ??
-        (session.current.state?.status === "working" ? "work" : "idle"),
+      mode: session.workflowMode(),
       defaultLevel:
-        session.planningKind === "detailed_plan" ? "high" : "medium",
+        session.workflowMode() === "detailed_plan" ? "high" : "medium",
     });
   });
 
@@ -127,6 +123,7 @@ export function registerPlanEvents(
     session.activeContext = ctx;
     session.planningKind =
       pi.getFlag("plan") === true ? "detailed_plan" : undefined;
+    session.selectedMode = session.planningKind;
     session.planningBaseContent = undefined;
     session.planningIsReview = false;
     try {
@@ -139,12 +136,8 @@ export function registerPlanEvents(
           "Legacy-Workflow erkannt. Schließe alte Sessions und nutze /migrate-plan.",
           "warning",
         );
-      } else if (loaded.state?.status === "working") {
-        session.notify(
-          ctx,
-          "Unterbrochene Ausführung erkannt. Es gibt keine zeitgesteuerte Übernahme; nutze /work für explizite Recovery.",
-          "warning",
-        );
+      } else {
+        await offerWorkflowRecovery(session, ctx);
       }
     } catch (error) {
       session.notify(
@@ -174,6 +167,7 @@ export function registerPlanEvents(
     session.activeCwd = undefined;
     session.activeContext = undefined;
     session.planningKind = undefined;
+    session.selectedMode = undefined;
     clearWorkflowPresentation(ctx);
   });
 }

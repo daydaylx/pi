@@ -4,7 +4,7 @@
   "defaultProvider": "opencode-go",
   "defaultModel": "qwen3.7-max",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "high",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,

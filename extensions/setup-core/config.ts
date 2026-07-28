@@ -551,9 +551,14 @@ function applyTrustedProjectLayer(
   // A repository must never choose commands that execute on the host.
   candidate.verification = structuredClone(base.verification);
   candidate.subagents = structuredClone(base.subagents);
-  // Profile sind nur Bezeichner, aber sie dürfen nicht vom Repo vorgegeben
-  // werden — die Zuordnung zu Modellen bleibt eine globale Nutzerentscheidung.
-  candidate.routingProfiles = structuredClone(base.routingProfiles);
+  if (isObject(raw.routingProfiles)) {
+    candidate.routingProfiles = applyRoutingProfiles(
+      raw.routingProfiles,
+      candidate.routingProfiles,
+      source,
+      diagnostics,
+    );
+  }
   return candidate;
 }
 
@@ -571,7 +576,9 @@ export function loadSetupConfig(
     config = applyUserLayer(config, global, globalPath, diagnostics);
   }
 
-  const projectPath = join(cwd, ".pi", "setup.json");
+  const projectPath = existsSync(join(cwd, ".pi", "setup.json"))
+    ? join(cwd, ".pi", "setup.json")
+    : join(cwd, "setup.json");
   if (trusted) {
     const project = readObject(projectPath, diagnostics);
     if (project) {

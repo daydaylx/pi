@@ -166,6 +166,19 @@ Aktueller Schrittstatus:
 ${steps}`;
 }
 
+/** Select ordinary work without starting or resuming a plan execution. */
+export function activateWorkMode(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): void {
+  session.selectedMode = "work";
+  session.planningKind = undefined;
+  session.planningBaseContent = undefined;
+  session.planningIsReview = false;
+  session.reload(ctx);
+  session.publishWorkflowActivation(ctx);
+}
+
 export async function startWork(
   session: WorkflowSession,
   ctx: ExtensionContext,
@@ -178,7 +191,8 @@ export async function startWork(
     );
     return;
   }
-  const loaded = session.reload(ctx);
+  activateWorkMode(session, ctx);
+  const loaded = session.current;
   if (loaded.migrationRequired) {
     session.notify(
       ctx,

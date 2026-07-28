@@ -6,11 +6,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { assert, eq, test } from "./assertions.mjs";
 import { createHarness, latestStatus, assertNoGlobalChrome } from "../shared/harness.mjs";
-import { validPlan, planUtils } from "../shared/plan-fixtures.mjs";
+import { validPlan, planUtils, v3Plan } from "../shared/plan-fixtures.mjs";
 import { load } from "./harness.mjs";
 
 const planMode = await load("extensions/plan-mode/index.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
+const controlPlane = await load("extensions/control-plane.ts");
+const planSnapshot = await load("extensions/plan-mode/plan-snapshot.ts");
+const planStore = await load("extensions/plan-mode/store/index.ts");
 
 await test("plan workflow lifecycle", async () => {
   if (!planMode || !planUtils) return;
@@ -44,6 +47,7 @@ await test("plan workflow lifecycle", async () => {
     );
     const openModeMenu = harness.shortcuts.get("shift+tab");
     assert(Boolean(openModeMenu), "Shift+Tab registers the direct mode menu");
+    const sentBeforeModeSelection = harness.sent.length;
     if (openModeMenu) await openModeMenu(context);
     assert(
       !modeLabels.includes("Skill-Modus"),
@@ -58,6 +62,22 @@ await test("plan workflow lifecycle", async () => {
       harness.api.getThinkingLevel(),
       "medium",
       "direct mode menu applies the selected mode defaults",
+    );
+    eq(
+      harness.sent.length,
+      sentBeforeModeSelection,
+      "Shift+Tab selects a plan mode without starting an agent turn",
+    );
+    const selectedPlanContext = await harness.runHooks(
+      "before_agent_start",
+      {},
+      context,
+    );
+    assert(
+      selectedPlanContext.some((entry) =>
+        entry?.message?.content?.includes("PI WORKFLOW: PLANUNG"),
+      ),
+      "the next user turn receives the selected planning context",
     );
     await harness.runHooks("session_shutdown", {}, context);
     eq(
@@ -91,6 +111,166 @@ await test("plan workflow lifecycle", async () => {
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(emptyCwd, { recursive: true, force: true });
+  }
+});
+
+await test("workflow menus select modes without auto-starting work", async () => {
+  if (!planMode || !controlPlane) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-passive-mode-menu-"));
+  try {
+    let choice = "Schnellplan";
+    const harness = createHarness({
+      select: (labels) => labels.find((label) => label === choice),
+    });
+    planMode.default(harness.api);
+    controlPlane.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    context.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await harness.runHooks("session_start", {}, context);
+
+    const sentBeforePlanMode = harness.sent.length;
+    await harness.shortcuts.get("shift+tab")(context);
+    eq(
+      harness.sent.length,
+      sentBeforePlanMode,
+      "Shift+Tab mode selection never sends a triggerTurn request",
+    );
+
+    choice = "Arbeiten";
+    await harness.shortcuts.get("shift+tab")(context);
+    eq(
+      harness.sent.length,
+      sentBeforePlanMode,
+      "selecting work only changes the mode and does not start execution",
+    );
+    const workContext = await harness.runHooks("before_agent_start", {}, context);
+    assert(
+      workContext.every((entry) => entry === undefined),
+      "work mode after a passive plan selection injects no planning or execution prompt",
+    );
+
+    choice = "Architekturplan";
+    await harness.shortcuts.get("super+q")(context);
+    await new Promise((resolve) => setImmediate(resolve));
+    eq(
+      harness.sent.length,
+      sentBeforePlanMode,
+      "the Control Center workflow tab uses the same passive mode switch",
+    );
+    const controlCenterPlanContext = await harness.runHooks(
+      "before_agent_start",
+      {},
+      context,
+    );
+    assert(
+      controlCenterPlanContext.some((entry) =>
+        entry?.message?.content?.includes("PI WORKFLOW: PLANUNG"),
+      ),
+      "the Control Center waits for the next user turn before planning",
+    );
+
+    const sentBeforeExplicitPlan = harness.sent.length;
+    await harness.commands.get("plan")("quick", context);
+    assert(
+      harness.sent.length === sentBeforeExplicitPlan + 1 &&
+        harness.sent.at(-1)?.options?.triggerTurn === true,
+      "/plan remains an explicit planning start",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("passive plan selection protects an existing plan", async () => {
+  if (!planMode || !planUtils) return;
+  const cwd = mkdtempSync(path.join(tmpdir(), "pi-passive-existing-plan-"));
+  try {
+    planUtils.writePlanFileAtomic(cwd, validPlan);
+    const harness = createHarness({
+      confirm: false,
+      select: (labels) => labels.find((label) => label === "Schnellplan"),
+    });
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    context.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await harness.runHooks("session_start", {}, context);
+
+    await harness.shortcuts.get("shift+tab")(context);
+    assert(
+      harness.lifecycleCalls.some(
+        (entry) =>
+          entry.kind === "confirm" && entry.title === "Aktiven Plan überarbeiten?",
+      ),
+      "a passive plan-mode selection confirms a revision before the next prompt can change it",
+    );
+    eq(harness.sent.length, 0, "declining the revision never starts a turn");
+    const contextAfterDecline = await harness.runHooks(
+      "before_agent_start",
+      {},
+      context,
+    );
+    assert(
+      contextAfterDecline.every((entry) => entry === undefined),
+      "declining leaves the next user prompt outside planning mode",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("/plan opens a v3 state-aware assistant", async () => {
+  if (!planMode || !planUtils) return;
+  const emptyCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-assistant-empty-"));
+  const activeCwd = mkdtempSync(path.join(tmpdir(), "pi-plan-assistant-active-"));
+  try {
+    const fresh = createHarness({
+      select: (labels) =>
+        labels.find((label) => label === "Neuen Schnellplan starten"),
+    });
+    planMode.default(fresh.api);
+    const freshContext = fresh.makeContext({ cwd: emptyCwd });
+    freshContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await fresh.runHooks("session_start", {}, freshContext);
+    await fresh.commands.get("plan")("", freshContext);
+    assert(
+      fresh.sent.length === 1 && fresh.sent[0]?.options?.triggerTurn === true,
+      "a new-plan assistant action retains /plan's explicit planning start",
+    );
+
+    const finalized = planSnapshot.finalizePlanDocument(
+      v3Plan(),
+      "simple_plan",
+    );
+    planStore.writePlanAndStateCAS(activeCwd, finalized.snapshot, "missing");
+    const active = createHarness({
+      confirm: false,
+      select: (labels) =>
+        labels.find((label) => label === "Plan überarbeiten"),
+    });
+    planMode.default(active.api);
+    const activeContext = active.makeContext({ cwd: activeCwd });
+    activeContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await active.runHooks("session_start", {}, activeContext);
+    await active.commands.get("plan")("", activeContext);
+    assert(
+      active.lifecycleCalls.some(
+        (entry) =>
+          entry.kind === "confirm" && entry.title === "Aktiven Plan überarbeiten?",
+      ),
+      "the active-plan assistant routes revisions through the existing confirmation",
+    );
+    eq(active.sent.length, 0, "declining a revision leaves the plan untouched");
+  } finally {
+    rmSync(emptyCwd, { recursive: true, force: true });
+    rmSync(activeCwd, { recursive: true, force: true });
   }
 });
 

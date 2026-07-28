@@ -20,6 +20,7 @@ export type ControlCenterAction =
   | "detailed_plan"
   | "work"
   | "models"
+  | "routing_models"
   | "permissions"
   | "thinking"
   | "diagnostics";
@@ -81,6 +82,13 @@ export function buildControlCenterTabs(
           label: "Modelle",
           description: "Modell für diese Sitzung wählen",
           value: "models",
+        },
+        {
+          id: "routing-model-selection",
+          label: "Agenten-Modelle (Super+S)",
+          description:
+            "Modelle für Planner, Worker und Reviewer je Routingstufe anpassen",
+          value: "routing_models",
         },
       ],
     },

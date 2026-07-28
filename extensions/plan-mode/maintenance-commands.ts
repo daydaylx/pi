@@ -16,10 +16,12 @@ import { updateWorkflowPresentation, workflowWarning } from "./presentation.ts";
 import type { WorkflowSession } from "./session.ts";
 import {
   clearWorkflowLockAfterConfirmation,
+  createWorkflowState,
   discardActiveWorkflow,
   loadDirectTask,
   migrateLegacyWorkflowToV3,
 } from "./store/index.ts";
+import { startWork } from "./execution.ts";
 
 function denyUntrusted(
   session: WorkflowSession,
@@ -53,6 +55,7 @@ export async function discardPlan(
   try {
     discardActiveWorkflow(ctx.cwd, loaded.stateToken, true);
     session.planningKind = undefined;
+    session.selectedMode = undefined;
     session.planningBaseContent = undefined;
     session.planningIsReview = false;
     session.current = {
@@ -135,6 +138,110 @@ export async function runVerifyGate(
       `Verifikations-Diagnose fehlgeschlagen: ${workflowWarning(error)}`,
       "error",
     );
+  }
+}
+
+/**
+ * Reset only execution progress while retaining the immutable plan snapshot.
+ *
+ * This is intentionally separate from /discard-plan: recovery must offer a
+ * way out of a stale or blocked sidecar without throwing away the user's
+ * approved scope.  replaceState keeps the write CAS-bound to the current
+ * sidecar and validates that the snapshot still matches the plan on disk.
+ */
+export async function resetWorkflowProgress(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): Promise<void> {
+  if (denyUntrusted(session, ctx, "Fortschritt zurücksetzen")) return;
+  const loaded = session.reload(ctx);
+  if (!loaded.snapshot || !loaded.state) {
+    session.notify(ctx, "Kein gültiger PlanSnapshot zum Zurücksetzen vorhanden.", "warning");
+    return;
+  }
+  const confirmed = await ctx.ui.confirm(
+    "Fortschritt zurücksetzen?",
+    "Der Plan bleibt erhalten; Schritte, Evidence, Review und Completion-Status werden auf Planung zurückgesetzt.",
+  );
+  if (!confirmed) return;
+  try {
+    session.selectedMode = undefined;
+    session.replaceState(ctx, createWorkflowState(loaded.snapshot));
+    session.publishWorkflowActivation(ctx);
+    session.notify(
+      ctx,
+      "Fortschritt wurde zurückgesetzt. Der Plan bleibt erhalten und kann über /plan überarbeitet oder mit /work neu gestartet werden.",
+      "info",
+    );
+  } catch (error) {
+    session.notify(
+      ctx,
+      `Fortschritt wurde nicht zurückgesetzt: ${workflowWarning(error)}`,
+      "error",
+    );
+  }
+}
+
+type RecoveryAction = "resume" | "verify" | "reset" | "later";
+
+/**
+ * Offer a recovery choice for an interrupted v3 execution.
+ *
+ * No branch resumes, verifies or mutates state before a deliberate TUI choice;
+ * startWork and resetWorkflowProgress each retain their own confirmation.
+ */
+export async function offerWorkflowRecovery(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): Promise<void> {
+  const loaded = session.current;
+  const status = loaded.state?.status;
+  if (
+    !ctx.isProjectTrusted() ||
+    !loaded.snapshot ||
+    !loaded.state ||
+    (status !== "working" && status !== "paused" && status !== "blocked")
+  ) {
+    return;
+  }
+  if (ctx.mode !== "tui" || !ctx.hasUI) {
+    session.notify(
+      ctx,
+      "Unterbrochene Ausführung erkannt. Nutze /work zum Fortsetzen oder /verify-gate für eine Diagnose.",
+      "warning",
+    );
+    return;
+  }
+  const selected = await ctx.ui.select("Unterbrochene Ausführung", [
+    "Ausführung fortsetzen",
+    "Prüfungen vorab anzeigen",
+    "Fortschritt zurücksetzen, Plan behalten",
+    "Später fortsetzen",
+  ]);
+  const action: RecoveryAction =
+    selected === "Ausführung fortsetzen"
+      ? "resume"
+      : selected === "Prüfungen vorab anzeigen"
+        ? "verify"
+        : selected === "Fortschritt zurücksetzen, Plan behalten"
+          ? "reset"
+          : "later";
+  switch (action) {
+    case "resume":
+      await startWork(session, ctx);
+      return;
+    case "verify":
+      await runVerifyGate(session, ctx);
+      return;
+    case "reset":
+      await resetWorkflowProgress(session, ctx);
+      return;
+    case "later":
+      session.notify(
+        ctx,
+        "Unterbrochene Ausführung bleibt unverändert. Nutze /work zum Fortsetzen.",
+        "info",
+      );
   }
 }
 

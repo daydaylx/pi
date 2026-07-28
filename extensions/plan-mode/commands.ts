@@ -19,12 +19,14 @@ import {
 } from "../shared/control-center-menu.ts";
 import { SHORTCUTS } from "../shared/shortcuts.ts";
 import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
+import { openAgentModelMenu } from "./agent-model-menu.ts";
 import { finishDirectTask, finishWorkflow } from "./completion-commands.ts";
 import { startDirectTask } from "./direct-task-commands.ts";
 import { runRoute } from "./route-commands.ts";
 import {
   completeStepsByNumber,
   parseStepNumbers,
+  activateWorkMode,
   startWork,
   updateExecutionStep,
 } from "./execution.ts";
@@ -35,7 +37,16 @@ import {
   runVerifyGate,
 } from "./maintenance-commands.ts";
 import { openModelMenu } from "./model-menu.ts";
-import { beginPlanning, beginReview, choosePlanKind } from "./planning.ts";
+import {
+  buildPlanAssistantTab,
+  type PlanAssistantAction,
+} from "./plan-assistant.ts";
+import {
+  activatePlanningMode,
+  beginPlanning,
+  beginReview,
+  choosePlanKind,
+} from "./planning.ts";
 import { formatPlanSteps, workflowWarning } from "./presentation.ts";
 import type { WorkflowSession } from "./session.ts";
 
@@ -98,6 +109,62 @@ async function completeStepsCommand(
   if (state.status === "reviewing") await finishWorkflow(session, ctx, false);
 }
 
+async function openPlanAssistant(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): Promise<void> {
+  const loaded = session.reload(ctx);
+  const selected = await runTabbedOverlay<PlanAssistantAction>(
+    ctx,
+    "Plan-Assistent",
+    [buildPlanAssistantTab(loaded)],
+    { nonInteractiveHint: "Der Plan-Assistent benötigt den TUI-Modus." },
+  );
+  const action = selected?.entry.value;
+  if (!action) return;
+
+  switch (action) {
+    case "new-simple":
+      await beginPlanning(session, "simple_plan", ctx);
+      return;
+    case "new-detailed":
+      await beginPlanning(session, "detailed_plan", ctx);
+      return;
+    case "revise":
+      await beginPlanning(session, loaded.snapshot?.planType ?? "simple_plan", ctx);
+      return;
+    case "review":
+      await beginReview(session, ctx);
+      return;
+    case "resume":
+      await startWork(session, ctx);
+      return;
+    case "show-steps": {
+      const current = session.reload(ctx);
+      session.notify(
+        ctx,
+        current.snapshot && current.state
+          ? formatPlanSteps(current.snapshot, current.state)
+          : "Keine gültigen Planschritte vorhanden.",
+        current.snapshot && current.state ? "info" : "warning",
+      );
+      return;
+    }
+    case "verify":
+      await runVerifyGate(session, ctx);
+      return;
+    case "finish":
+      await finishWorkflow(session, ctx, true);
+      return;
+    case "discard":
+      await discardPlan(session, ctx);
+      return;
+    case "migrate":
+      await migrateLegacyPlan(session, ctx);
+      return;
+  }
+}
+
 export function registerPlanCommands(
   pi: ExtensionAPI,
   session: WorkflowSession,
@@ -109,8 +176,12 @@ export function registerPlanCommands(
   });
 
   pi.registerCommand("plan", {
-    description: "Schnell- oder Architekturplan erstellen",
+    description: "Zustandsabhängigen Plan-Assistenten öffnen oder Planart starten",
     handler: async (args, ctx) => {
+      if (!args.trim()) {
+        await openPlanAssistant(session, ctx);
+        return;
+      }
       const kind = await choosePlanKind(args, ctx);
       if (kind) await beginPlanning(session, kind, ctx);
     },
@@ -250,16 +321,28 @@ export function registerPlanCommands(
     switch (action) {
       case "simple_plan":
       case "detailed_plan":
-        await beginPlanning(session, action, ctx);
+        if (await activatePlanningMode(session, action, ctx)) {
+          session.notify(
+            ctx,
+            `${action === "detailed_plan" ? "Architekturplan" : "Schnellplan"} aktiv. Beschreibe jetzt die Aufgabe.`,
+          );
+        }
         return;
       case "work":
-        await startWork(session, ctx);
+        activateWorkMode(session, ctx);
+        session.notify(
+          ctx,
+          "Arbeitsmodus aktiv. Starte einen gespeicherten Plan weiterhin ausdrücklich mit /work.",
+        );
         return;
       case "permissions":
         pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx });
         return;
       case "models":
         pi.events.emit(CONTROL_CENTER_EVENTS.openModels, { ctx });
+        return;
+      case "routing_models":
+        await openAgentModelMenu(pi, session, ctx);
         return;
       case "thinking":
         pi.events.emit(CONTROL_CENTER_EVENTS.openThinking, { ctx });
@@ -305,6 +388,10 @@ export function registerPlanCommands(
   pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
     description: SHORTCUTS.modeMenu.description,
     handler: openWorkflowSwitch,
+  });
+  pi.registerShortcut(SHORTCUTS.routingModelMenu.keys, {
+    description: SHORTCUTS.routingModelMenu.description,
+    handler: (ctx) => openAgentModelMenu(pi, session, ctx),
   });
   pi.events.on(CONTROL_CENTER_EVENTS.open, async (event) => {
     const ctx = (event as { ctx?: ExtensionContext }).ctx;

@@ -70,10 +70,14 @@ Details: [`docs/subagents.md`](docs/subagents.md).
 
 ## UI und Shortcuts
 
+`/plan` öffnet einen zustandsabhängigen Assistenten; `/plan quick`,
+`/plan architecture` und `Super+P` starten die Planung bewusst sofort.
 `Shift+Tab` ist der Workflow-Wechsel: Schnellplan, Architekturplan, Arbeiten.
-`Super+Q` öffnet das vollständige Control Center, dessen erster Reiter genau
-dieser Workflow-Wechsel ist — beide bauen auf derselben Definition auf und
-laufen durch denselben Handler. `Super+P` öffnet die Planwahl, `Super+M` die
+Die Auswahl wechselt nur Modus, Berechtigungen und Auto-Thinking; der nächste
+eigene Prompt startet die Planung. `Super+Q` öffnet das vollständige Control
+Center, dessen erster Reiter genau dieser Workflow-Wechsel ist — beide bauen
+auf derselben Definition auf und laufen durch denselben Handler. `/plan`,
+`/work` und `Super+P` bleiben bewusste Sofortstarts. `Super+M` öffnet die
 Modellwahl, `Super+D` Thinking und `Super+Y` den temporären YOLO-Modus. Die
 Super-Kombinationen benötigen Kitty-/CSI-u-Unterstützung.
 
