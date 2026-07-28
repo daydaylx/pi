@@ -20,7 +20,10 @@ import {
   CONTROL_CENTER_EVENTS,
   type OpenControlCenterMenuEvent,
 } from "./shared/control-center-events.ts";
-import { SHORTCUTS } from "./shared/shortcuts.ts";
+import {
+  THINKING_LEVELS,
+  type SelectableThinkingLevel,
+} from "./shared/thinking-menu.ts";
 import {
   PERMISSION_LEVEL_LABEL,
   normalizePermissionLevel,
@@ -53,6 +56,10 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
       "Zugriffsstufe setzen: readonly | project-write | confirm-all | yolo",
     handler: async (args, ctx) => {
       const raw = args.trim();
+      if (!raw) {
+        await openPermissionMenu(session, ctx);
+        return;
+      }
       const level = Object.hasOwn(PERMISSION_LEVEL_LABEL, raw)
         ? (raw as PermissionLevel)
         : normalizePermissionLevel(raw);
@@ -67,16 +74,37 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerShortcut(SHORTCUTS.thinkingMenu.keys, {
-    description: SHORTCUTS.thinkingMenu.description,
-    handler: async (ctx) => {
+  pi.registerCommand("thinking", {
+    description:
+      "Denktiefe wählen: auto | off | minimal | low | medium | high | xhigh",
+    handler: async (args, ctx) => {
       const epoch = session.epoch();
-      await thinking.openMenu(ctx, () => session.isCurrentEpoch(epoch));
+      const value = args.trim().toLowerCase();
+      if (!value) {
+        await thinking.openMenu(ctx, () => session.isCurrentEpoch(epoch));
+        return;
+      }
+      if (value === "auto") {
+        thinking.applySelection(
+          "auto",
+          ctx,
+          () => session.isCurrentEpoch(epoch),
+        );
+        return;
+      }
+      if (THINKING_LEVELS.includes(value as SelectableThinkingLevel)) {
+        thinking.applySelection(
+          `manual:${value as SelectableThinkingLevel}`,
+          ctx,
+          () => session.isCurrentEpoch(epoch),
+        );
+        return;
+      }
+      ctx.ui.notify(
+        "Nutzung: /thinking auto|off|minimal|low|medium|high|xhigh",
+        "info",
+      );
     },
-  });
-  pi.registerShortcut(SHORTCUTS.yoloToggle.keys, {
-    description: SHORTCUTS.yoloToggle.description,
-    handler: async (ctx) => session.toggleYolo(ctx, "shortcut"),
   });
 
   pi.events.on(CONTROL_CENTER_EVENTS.openPermissions, async (event) => {

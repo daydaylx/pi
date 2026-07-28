@@ -11,12 +11,14 @@ import { createHarness } from "../shared/harness.mjs";
 import { load } from "./harness.mjs";
 
 const planMode = await load("extensions/plan-mode/index.ts");
+const controlPlane = await load("extensions/control-plane.ts");
 const agentModelMenu = await load("extensions/plan-mode/agent-model-menu.ts");
 
-await test("Super+S shortcut is registered by plan-mode", async () => {
-  if (!planMode) return;
+await test("Super+S shortcut is registered by the control plane", async () => {
+  if (!planMode || !controlPlane) return;
   const harness = createHarness();
   planMode.default(harness.api);
+  controlPlane.default(harness.api);
   const handler = harness.shortcuts.get("super+s");
   assert(typeof handler === "function", "super+s shortcut handler is registered");
 });

@@ -120,6 +120,17 @@ export default function setupCore(pi: ExtensionAPI): void {
         (runtimeVersion !== undefined &&
           runtimeVersion !== String(declaredVersion ?? ""));
       const consistencyErrors: string[] = [];
+      const hasCommandRuntime =
+        typeof (
+          ctx.ui as typeof ctx.ui & {
+            submitSlashCommand?: unknown;
+          }
+        ).submitSlashCommand === "function";
+      if (!hasCommandRuntime) {
+        consistencyErrors.push(
+          "Der Runtime-Einstieg submitSlashCommand für Command Center und Shortcuts fehlt.",
+        );
+      }
       const enabledModels = Array.isArray(settings?.enabledModels)
         ? settings.enabledModels.filter(
             (value): value is string => typeof value === "string",
@@ -148,6 +159,7 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  Pi CLI/dev package: ${runtimeVersion ?? "unknown"}/${String(declaredVersion ?? "?")}`,
         `  installed dev package: ${devVersion ?? "missing"}`,
         `  configured extensions: ${Array.isArray(settings?.extensions) ? settings.extensions.length : "?"}`,
+        `  command runtime: ${hasCommandRuntime ? "available" : "missing"}`,
         `  project verification profiles: ${profileHint}`,
       ];
       for (const diagnostic of loaded.diagnostics) {

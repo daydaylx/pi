@@ -130,15 +130,19 @@ await test("recovery progress reset rejects a stale sidecar token", async () => 
   try {
     const plan = snapshotMod.finalizePlanDocument(quickPlan(), "simple_plan");
     const initial = store.writePlanAndStateCAS(cwd, plan.snapshot, "missing");
-    const harness = createHarness({ confirm: true });
+    const harness = createHarness({
+      confirm: () => {
+        store.writeWorkflowStateCAS(
+          cwd,
+          { ...initial.state, status: "paused" },
+          initial.stateToken,
+        );
+        return true;
+      },
+    });
     const context = harness.makeContext({ cwd });
     const session = sessionMod.createWorkflowSession(harness.api);
     session.reload(context);
-    store.writeWorkflowStateCAS(
-      cwd,
-      { ...initial.state, status: "paused" },
-      initial.stateToken,
-    );
 
     await maintenance.resetWorkflowProgress(session, context);
     const current = store.loadWorkflowStateV3(cwd);

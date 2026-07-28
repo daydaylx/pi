@@ -11,42 +11,54 @@ export interface ShortcutBinding {
   label: string;
   /** Beschreibung für Registrierung und Hilfe. */
   description: string;
+  /** Kanonischer Slash-Aufruf; Shortcut und Command teilen exakt diesen Weg. */
+  command: `/${string}`;
+  /** Ob ein vorhandener Editorentwurf vor dem Aufruf bestätigt werden muss. */
+  effect?: "preserve-draft" | "starts-turn" | "replaces-session";
 }
 
 export const SHORTCUTS = {
   modeMenu: {
     keys: "shift+tab",
     label: "Shift+Tab",
-    description: "Workflow wechseln",
+    description: "Workflow wechseln · /workflow",
+    command: "/workflow",
   },
   modelMenu: {
     keys: "super+m",
     label: "Super+M",
-    description: "Modellsteuerung öffnen",
+    description: "Modell wählen · /model",
+    command: "/model",
   },
   thinkingMenu: {
     keys: "super+d",
     label: "Super+D",
-    description: "Thinking wählen",
+    description: "Denktiefe wählen · /thinking",
+    command: "/thinking",
   },
   mainMenu: {
     keys: "super+q",
     label: "Super+Q",
-    description: "Hauptmenü öffnen",
+    description: "Command Center öffnen · /commands",
+    command: "/commands",
   },
   planAssistant: {
     keys: "super+p",
     label: "Super+P",
-    description: "Plan-Assistent öffnen",
+    description: "Plan-Assistent öffnen · /plan",
+    command: "/plan",
+    effect: "starts-turn",
   },
   yoloToggle: {
     keys: "super+y",
     label: "Super+Y",
-    description: "Temporären YOLO-Modus ein-/ausschalten",
+    description: "Temporären YOLO-Modus umschalten · /yolo",
+    command: "/yolo",
   },
   routingModelMenu: {
     keys: "super+s",
     label: "Super+S",
-    description: "Agenten-Modelle für Routingstufen anpassen",
+    description: "Agentenmodelle anpassen · /agent-models",
+    command: "/agent-models",
   },
 } as const satisfies Record<string, ShortcutBinding>;

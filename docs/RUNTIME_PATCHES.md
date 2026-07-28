@@ -54,7 +54,11 @@ Mit `--runtime <pfad>` lässt sich eine andere Installation ansprechen.
   Extension auf. Ein scheiternder Unsubscriber blockiert die übrigen nicht.
 - `dist/core/agent-session.js`: `reload()` ruft `dispose()` direkt nach
   `emitSessionShutdownEvent` — bevor die neue Generation ihre Listener
-  registriert.
+  registriert. `pi.getCommands()` liefert zusätzlich die 22 Built-ins und nur
+  dann Skill-Commands, wenn Skill-Commands in den Settings aktiviert sind.
+- `dist/modes/interactive/interactive-mode.js`: Die Extension-UI erhält
+  `submitSlashCommand()`. Es akzeptiert genau eine Slash-Zeile und reicht sie
+  an denselben Dispatcher wie eine manuelle Eingabe weiter.
 - `dist/core/package-manager.js`: neue Funktion
   `applyConfiguredExtensionOrder()`. `toResolvedPaths()` sortiert Extensions
   innerhalb derselben Präzedenz nach der Position ihres `+path`-Eintrags in
@@ -70,6 +74,11 @@ Thinking, die über `respond()`-Callbacks arbeiten.
 
 Ohne den Reihenfolge-Patch ist die Sortierung innerhalb einer Präzedenzstufe die
 Verzeichnis-Scan-Reihenfolge, nicht die in `settings.json` deklarierte.
+
+Ohne Inventar- und Dispatcher-Patch könnte `/commands` weder Pi-Built-ins
+vollständig anzeigen noch einen gewählten Eintrag direkt ausführen. Shortcuts,
+Menü und manuelle Slash-Eingabe würden dann unterschiedliche Ausführungswege
+verwenden.
 
 ## Upgrade-Gate
 

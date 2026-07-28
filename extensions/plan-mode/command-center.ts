@@ -1,0 +1,327 @@
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import {
+  COMMAND_CATEGORIES,
+  COMMAND_DEFINITIONS,
+  normalizeAvailableCommands,
+  type AvailableCommand,
+  type CommandCategoryId,
+  type CommandDefinition,
+  type CommandEffect,
+} from "../shared/command-catalog.ts";
+import { submitCanonicalCommand } from "../shared/command-runtime.ts";
+import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
+
+export interface CommandCenterState {
+  hasActivePlan: boolean;
+  hasActiveDirectTask: boolean;
+  migrationRequired: boolean;
+}
+
+export interface CommandMenuAction {
+  name: string;
+  commandLine: string;
+  effect: CommandEffect;
+  guide?: CommandDefinition["guide"];
+}
+
+const NEEDS_PLAN = new Set([
+  "review-plan",
+  "plan-todos",
+  "view-plan",
+  "edit-plan",
+  "done",
+  "verify-gate",
+  "finish",
+  "discard-plan",
+]);
+
+function disabledReason(
+  name: string,
+  state: CommandCenterState,
+): string | undefined {
+  if (NEEDS_PLAN.has(name) && !state.hasActivePlan)
+    return "Kein aktiver Plan.";
+  if (name === "work" && !state.hasActivePlan)
+    return "Erstelle und bestätige zuerst einen Plan.";
+  if ((name === "plan" || name === "workflow") && state.hasActiveDirectTask)
+    return "Schließe den aktiven Direktauftrag zuerst mit /task-done ab.";
+  if (name === "task" && state.hasActivePlan)
+    return "Schließe oder verwirf den aktiven Plan zuerst.";
+  if (name === "task-done" && !state.hasActiveDirectTask)
+    return "Kein aktiver Direktauftrag.";
+  if (name === "migrate-plan" && !state.migrationRequired)
+    return "Keine Legacy-Migration erforderlich.";
+  return undefined;
+}
+
+function commandEntry(
+  definition: CommandDefinition,
+  state: CommandCenterState,
+): MenuEntry<CommandMenuAction> {
+  const reason = disabledReason(definition.name, state);
+  const aliases = definition.aliases?.length
+    ? `Aliase: ${definition.aliases.map((alias) => `/${alias}`).join(", ")}.`
+    : undefined;
+  const shortcut = definition.shortcut
+    ? `Shortcut: ${definition.shortcut}.`
+    : undefined;
+  return {
+    id: `command-${definition.name}`,
+    label: `${definition.label} · /${definition.name}`,
+    description: [definition.description, shortcut].filter(Boolean).join(" "),
+    details: aliases,
+    disabled: Boolean(reason),
+    disabledReason: reason,
+    dangerous: definition.dangerous,
+    tone: definition.dangerous ? "danger" : undefined,
+    value: {
+      name: definition.name,
+      commandLine: `/${definition.name}`,
+      effect: definition.effect ?? "preserve-draft",
+      guide: definition.guide,
+    },
+  };
+}
+
+function dynamicEntry(command: AvailableCommand): MenuEntry<CommandMenuAction> {
+  const startsTurn = command.source === "prompt" || command.source === "skill";
+  return {
+    id: `dynamic-command-${command.source}-${command.name}`,
+    label: `${command.name} · /${command.name}`,
+    description:
+      command.description ??
+      "Dynamisch registrierter Command ohne zusätzliche Beschreibung.",
+    badge: command.source === "prompt"
+      ? "PROMPT"
+      : command.source === "skill"
+        ? "SKILL"
+        : "ERWEITERUNG",
+    value: {
+      name: command.name,
+      commandLine: `/${command.name}`,
+      effect: startsTurn ? "starts-turn" : "preserve-draft",
+    },
+  };
+}
+
+export function buildCommandCenterEntries(
+  available: readonly AvailableCommand[],
+  state: CommandCenterState,
+): MenuEntry<CommandMenuAction>[] {
+  const knownNames = new Set(
+    COMMAND_DEFINITIONS.flatMap((definition) => [
+      definition.name,
+      ...(definition.aliases ?? []),
+    ]),
+  );
+  const knownByCategory = new Map<CommandCategoryId, MenuEntry<CommandMenuAction>[]>();
+  for (const category of COMMAND_CATEGORIES)
+    knownByCategory.set(category.id, []);
+
+  for (const definition of COMMAND_DEFINITIONS) {
+    if (definition.name === "commands") continue;
+    knownByCategory.get(definition.category)?.push(commandEntry(definition, state));
+  }
+
+  const prompts = available
+    .filter((command) => command.source === "prompt")
+    .map(dynamicEntry);
+  const skills = available
+    .filter((command) => command.source === "skill")
+    .map(dynamicEntry);
+  const unknown = available
+    .filter(
+      (command) =>
+        command.source !== "prompt" &&
+        command.source !== "skill" &&
+        !knownNames.has(command.name),
+    )
+    .map(dynamicEntry);
+
+  const resources = knownByCategory.get("resources") ?? [];
+  if (prompts.length > 0) {
+    resources.push({
+      id: "resource-prompts",
+      label: "Prompt-Vorlagen",
+      description: "Geladene Prompt-Commands",
+      children: prompts,
+    });
+  }
+  if (skills.length > 0) {
+    resources.push({
+      id: "resource-skills",
+      label: "Skills",
+      description: "Aktivierte native Skill-Commands",
+      children: skills,
+    });
+  }
+  if (resources.length === 0) {
+    resources.push({
+      id: "resource-empty",
+      label: "Keine Vorlagen oder Skills geladen",
+      disabled: true,
+      disabledReason: "Die aktuelle Runtime meldet keine aktiven Ressourcen.",
+    });
+  }
+  if (unknown.length > 0) {
+    knownByCategory.get("system")?.push({
+      id: "system-other-commands",
+      label: "Weitere Commands",
+      description: "Dynamisch registrierte, noch nicht katalogisierte Commands",
+      children: unknown,
+    });
+  }
+
+  return COMMAND_CATEGORIES.map((category) => ({
+    id: `command-category-${category.id}`,
+    label: category.label,
+    shortcut: category.shortcut,
+    description: `Mit ${category.shortcut} direkt öffnen`,
+    children: knownByCategory.get(category.id) ?? [],
+  }));
+}
+
+function cleanInput(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized && !/[\r\n]/.test(normalized) ? normalized : undefined;
+}
+
+function quotePathArgument(value: string): string | undefined {
+  if (!/\s/.test(value)) return value;
+  if (!value.includes("'")) return `'${value}'`;
+  if (!value.includes('"')) return `"${value}"`;
+  return undefined;
+}
+
+async function choose(
+  ctx: ExtensionContext,
+  title: string,
+  entries: ReadonlyArray<{ label: string; value: string }>,
+): Promise<string | undefined> {
+  return runMenu(
+    ctx,
+    title,
+    entries.map((entry) => ({
+      id: `${title}-${entry.value || "default"}`,
+      label: entry.label,
+      value: entry.value,
+    })),
+  );
+}
+
+async function guideCommand(
+  ctx: ExtensionContext,
+  action: CommandMenuAction,
+): Promise<string | undefined> {
+  switch (action.guide) {
+    case undefined:
+      return action.commandLine;
+    case "route": {
+      const level = await choose(ctx, "Aufgaben-Routing · /route", [
+        { label: "Aktuelle Entscheidung anzeigen · /route", value: "" },
+        { label: "LOW erzwingen · /route low", value: "low" },
+        { label: "STANDARD erzwingen · /route standard", value: "standard" },
+        { label: "HIGH erzwingen · /route high", value: "high" },
+      ]);
+      return level === undefined ? undefined : `/route${level ? ` ${level}` : ""}`;
+    }
+    case "lsp": {
+      const subcommand = await choose(ctx, "LSP-Steuerung · /lsp", [
+        { label: "Status · /lsp status", value: "status" },
+        { label: "Aktivieren · /lsp on", value: "on" },
+        { label: "Deaktivieren · /lsp off", value: "off" },
+        { label: "Server neu starten · /lsp restart", value: "restart" },
+        { label: "Server auflisten · /lsp servers", value: "servers" },
+        { label: "Log anzeigen · /lsp log", value: "log" },
+        { label: "Datei diagnostizieren · /lsp diagnostics", value: "diagnostics" },
+      ]);
+      if (!subcommand) return undefined;
+      if (subcommand !== "restart") return `/lsp ${subcommand}`;
+      const server = cleanInput(
+        await ctx.ui.input(
+          "LSP-Server neu starten",
+          "Server-ID leer lassen, um alle Server neu zu starten",
+        ),
+      );
+      return `/lsp restart${server ? ` ${server}` : ""}`;
+    }
+    case "name": {
+      const name = cleanInput(
+        await ctx.ui.input("Sitzung benennen · /name", "Neuer Sitzungsname"),
+      );
+      return name ? `/name ${name}` : undefined;
+    }
+    case "import": {
+      const path = cleanInput(
+        await ctx.ui.input("Sitzung importieren · /import", "Pfad zur JSONL-Datei"),
+      );
+      if (!path) return undefined;
+      const quoted = quotePathArgument(path);
+      if (!quoted) {
+        ctx.ui.notify("Der Pfad enthält nicht sicher darstellbare Anführungszeichen.", "error");
+        return undefined;
+      }
+      return `/import ${quoted}`;
+    }
+    case "export": {
+      const mode = await choose(ctx, "Sitzung exportieren · /export", [
+        { label: "HTML mit Standardpfad · /export", value: "default" },
+        { label: "Zielpfad angeben", value: "path" },
+      ]);
+      if (!mode) return undefined;
+      if (mode === "default") return "/export";
+      const path = cleanInput(
+        await ctx.ui.input(
+          "Export-Ziel",
+          "Pfad mit .html oder .jsonl",
+        ),
+      );
+      if (!path) return undefined;
+      const quoted = quotePathArgument(path);
+      if (!quoted) {
+        ctx.ui.notify("Der Pfad enthält nicht sicher darstellbare Anführungszeichen.", "error");
+        return undefined;
+      }
+      return `/export ${quoted}`;
+    }
+    case "compact": {
+      const mode = await choose(ctx, "Kontext kompaktieren · /compact", [
+        { label: "Standard-Kompaktierung · /compact", value: "default" },
+        { label: "Eigene Anweisung ergänzen", value: "custom" },
+      ]);
+      if (!mode) return undefined;
+      if (mode === "default") return "/compact";
+      const instructions = cleanInput(
+        await ctx.ui.input(
+          "Kompaktierungsanweisung",
+          "Was muss im Kontext erhalten bleiben?",
+        ),
+      );
+      return instructions ? `/compact ${instructions}` : undefined;
+    }
+  }
+}
+
+export async function openCommandCenter(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  state: CommandCenterState,
+): Promise<void> {
+  const available =
+    typeof pi.getCommands === "function"
+      ? normalizeAvailableCommands(pi.getCommands())
+      : [];
+  const selected = await runMenu(
+    ctx,
+    "Command Center · /commands",
+    buildCommandCenterEntries(available, state),
+    { nonInteractiveHint: "Das Command Center benötigt den TUI-Modus." },
+  );
+  if (!selected) return;
+  const commandLine = await guideCommand(ctx, selected);
+  if (!commandLine) return;
+  await submitCanonicalCommand(ctx, commandLine, selected.effect);
+}

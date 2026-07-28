@@ -1048,14 +1048,11 @@ await section("Control Center menus and routing", async () => {
       "Shift+Tab separates planning from the available plan-less direct task",
     );
     assert(
-      workflowSwitch.every((entry) => controlCenter.includes(entry)),
-      "the Control Center reuses the very same workflow entries",
-    );
-    assert(
       controlCenter.length > workflowSwitch.length &&
-        controlCenter.includes("Zugriffsstufe") &&
-        controlCenter.includes("LSP-Diagnose"),
-      "Super+Q additionally exposes the non-workflow areas",
+        controlCenter.includes("Workflow wechseln · /workflow") &&
+        controlCenter.includes("Berechtigungsmodus · /permission") &&
+        controlCenter.includes("LSP-Steuerung · /lsp"),
+      "Super+Q exposes the canonical workflow, permission and LSP commands",
     );
   }
 
@@ -1099,6 +1096,7 @@ await section("Control Center menus and routing", async () => {
     });
     planMode.default(harness.api);
     modePermissions.default(harness.api);
+    controlPlane.default(harness.api);
     const context = harness.makeContext({
       cwd,
       model: { provider: "openai-codex", id: "gpt-5.4", thinkingLevelMap: {} },
@@ -1163,6 +1161,7 @@ await section("Control Center menus and routing", async () => {
       },
     });
     modePermissions.default(staleThinkingHarness.api);
+    controlPlane.default(staleThinkingHarness.api);
     staleThinkingContext = staleThinkingHarness.makeContext({ cwd });
     staleThinkingContext.ui.custom = async () => {
       throw new Error("use deterministic select fallback");
@@ -1188,9 +1187,9 @@ await section("Control Center menus and routing", async () => {
     choice = "__models__";
     await harness.shortcuts.get("super+m")(context);
     eq(
-      harness.setModelCalls.at(-1),
-      { provider: "openai-codex", id: "gpt-5.4-mini" },
-      "a native scoped/global model resolves through the registry and uses pi.setModel",
+      harness.submittedCommands.at(-1),
+      "/model",
+      "Super+M delegates model selection to Pi's canonical /model command",
     );
 
     const busy = createHarness({
@@ -1205,15 +1204,16 @@ await section("Control Center menus and routing", async () => {
         labels.find((label) => label.endsWith("openai-codex/gpt-5.4-mini")),
     });
     planMode.default(busy.api);
+    controlPlane.default(busy.api);
     const busyContext = busy.makeContext({ cwd });
     busyContext.ui.custom = async () => {
       throw new Error("use deterministic select fallback");
     };
     await busy.shortcuts.get("super+m")(busyContext);
     eq(
-      busy.setModelCalls,
-      [],
-      "native scoped/global model changes are blocked during an active agent turn",
+      busy.submittedCommands,
+      ["/model"],
+      "the shortcut keeps using Pi's canonical model command while busy",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -1234,15 +1234,15 @@ await section("global control plane shortcuts", async () => {
   const openMainMenu = harness.shortcuts.get("super+q");
   assert(Boolean(openMainMenu), "Super+Q registers the global main menu");
   if (openMainMenu) await openMainMenu(context);
-  // Super+Q is an optional door to the ONE Control Center, not a second menu:
-  // it opens nothing itself, it emits the shared open event.
-  assert(
-    harness.emitted.some((event) => event.name === "control-center:open"),
-    "Super+Q opens the single shared Control Center",
+  eq(
+    harness.submittedCommands,
+    ["/commands"],
+    "Super+Q submits the canonical /commands entry point",
   );
-  assert(
-    harness.emitted.every((event) => event.name === "control-center:open"),
-    "the control plane owns shortcuts only, never its own menu entries",
+  eq(
+    harness.emitted,
+    [],
+    "the control plane owns shortcuts only and needs no parallel menu event",
   );
 });
 

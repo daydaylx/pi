@@ -76,6 +76,8 @@ check("the patch set covers what p1-runtime.mjs verifies", () => {
     "dispose(message = ",
     "this._extensionRunner.dispose()",
     "applyConfiguredExtensionOrder",
+    "const builtinCommands = BUILTIN_SLASH_COMMANDS.map",
+    "submitSlashCommand: async (commandLine)",
   ];
   const applied = PATCHES.map((patch) => patch.replacement).join("\n");
   for (const marker of runtimeMarkers) {
@@ -86,10 +88,17 @@ check("the patch set covers what p1-runtime.mjs verifies", () => {
   }
 });
 
-check("patches stay within the runtime's dist tree", () => {
+check("patches stay within the allowlisted runtime files", () => {
+  const allowed = new Set([
+    "dist/core/agent-session.js",
+    "dist/core/extensions/loader.js",
+    "dist/core/extensions/runner.js",
+    "dist/core/package-manager.js",
+    "dist/modes/interactive/interactive-mode.js",
+  ]);
   for (const patch of PATCHES) {
     assert.ok(
-      patch.file.startsWith("dist/core/") && !patch.file.includes(".."),
+      allowed.has(patch.file) && !patch.file.includes(".."),
       `patch '${patch.id}' targets an unexpected path: ${patch.file}`,
     );
   }

@@ -4,18 +4,24 @@
 
 | Shortcut | Funktion |
 | --- | --- |
-| `Shift+Tab` | Workflow wechseln: Schnellplan, Architekturplan, Planarbeit oder Direktauftrag |
-| `Super+P` | Planwahl (identisch mit `/plan`) |
-| `Super+M` | Modellwahl |
-| `Super+D` | Denktiefe |
-| `Super+Y` | Temporärer YOLO-Modus |
-| `Super+Q` | Vollständiges Control Center; erster Reiter ist der Workflow-Wechsel |
+| `Shift+Tab` | `/workflow` |
+| `Super+P` | `/plan` |
+| `Super+M` | `/model` |
+| `Super+D` | `/thinking` |
+| `Super+Y` | `/yolo` |
+| `Super+S` | `/agent-models` |
+| `Super+Q` | `/commands` |
 
-`Shift+Tab` und `Super+Q` bauen auf derselben Menü-Definition auf und laufen
-durch denselben Handler. Sie unterscheiden sich nur im Umfang, nie im Inhalt
-eines Eintrags. Planarbeit startet oder setzt ausschließlich einen vorhandenen
-Plan fort; ein Direktauftrag ist die kompakte, planlose Alternative mit Scope,
-Verifikation und Abschlusskriterien.
+`/commands` ist die gemeinsame Sprache von Menü, Autocomplete und Shortcuts.
+Das Hauptmenü besteht aus Arbeit (`A`), Plan (`P`), Modelle & Denken (`M`),
+Rechte & Vertrauen (`R`), Code & Diagnose (`C`), Sitzungen & Kontext (`S`),
+Vorlagen & Skills (`V`) sowie System & Transfer (`T`). Ein Buchstabe öffnet
+den Bereich direkt. Einträge zeigen den kanonischen `/command`; Aliase werden
+nur am Original erklärt.
+
+`/workflow` trennt Planarbeit und Direktauftrag. Planarbeit startet oder setzt
+ausschließlich einen vorhandenen Plan fort; ein Direktauftrag ist die kompakte,
+planlose Alternative mit Scope, Verifikation und Abschlusskriterien.
 
 Die Shortcuts gelten im fokussierten Pi-Terminal und benötigen für `Super`
 das Kitty-/CSI-u-Protokoll. Sie werden nicht als systemweite Linux-Mint-Hotkeys
@@ -34,9 +40,7 @@ Ansicht gibt es nicht mehr — der Status steht in der Fußzeile.
 
 ## Skills und Konfiguration
 
-Die Skill-Bibliothek verwendet nur die von Pi bereits registrierten nativen
-`/skill:<name>`-Kommandos. `Space` merkt Skills für die nächste Aufgabe vor;
-bei deren Start wird der Agent angewiesen, die zugehörigen `SKILL.md`-Dateien
-zu laden. Eigene Skills und Extensions werden im Overlay nur mit Status und
-Verwaltungshinweisen dargestellt; die Laufzeit-TUI verändert keine Dateien und
-lädt Extensions nicht dynamisch nach.
+Das Command Center verwendet nur die von Pi registrierten nativen
+`/skill:<name>`-Kommandos. Es zeigt ausschließlich aktive Skill-Commands und
+die aktuell geladenen Prompt-Vorlagen; die Laufzeit-TUI verändert keine Dateien
+und lädt Extensions nicht dynamisch nach.

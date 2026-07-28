@@ -74,6 +74,9 @@ export function createHarness(options = {}) {
   let branchReads = 0;
   const branchListeners = new Set();
   const setModelCalls = [];
+  const submittedCommands = [];
+  let editorText = options.editorText ?? "";
+  let activeContext;
 
   const theme = {
     name: "test-theme",
@@ -144,6 +147,10 @@ export function createHarness(options = {}) {
     },
     select: async (_title, labels) =>
       typeof options.select === "function" ? options.select(labels) : undefined,
+    input: async (title, placeholder) =>
+      typeof options.input === "function"
+        ? options.input(title, placeholder)
+        : undefined,
     confirm: async (title, message) => {
       lifecycleCalls.push({ kind: "confirm", title, message });
       return typeof options.confirm === "function"
@@ -157,6 +164,21 @@ export function createHarness(options = {}) {
         if ("customResult" in options)
           queueMicrotask(() => resolve(options.customResult));
       });
+    },
+    getEditorText() {
+      return editorText;
+    },
+    setEditorText(text) {
+      editorText = String(text);
+    },
+    async submitSlashCommand(commandLine) {
+      submittedCommands.push(commandLine);
+      editorText = "";
+      if (typeof options.onSubmitSlashCommand === "function")
+        await options.onSubmitSlashCommand(commandLine);
+      const match = commandLine.match(/^\/([^\s]+)(?:\s+(.*))?$/);
+      const handler = match ? commands.get(match[1]) : undefined;
+      if (handler && activeContext) await handler(match[2] ?? "", activeContext);
     },
   };
 
@@ -241,6 +263,19 @@ export function createHarness(options = {}) {
     getSessionName() {
       return options.sessionName;
     },
+    getCommands() {
+      if (Array.isArray(options.commands)) return options.commands;
+      return [...commands.keys()].map((name) => ({
+        name,
+        source: "extension",
+        sourceInfo: {
+          path: "<test>",
+          source: "test",
+          scope: "temporary",
+          origin: "top-level",
+        },
+      }));
+    },
   };
 
   return {
@@ -266,6 +301,7 @@ export function createHarness(options = {}) {
     hiddenThinkingLabels,
     execCalls,
     setModelCalls,
+    submittedCommands,
     widgets,
     lifecycleCalls,
     setIdle(value) {
@@ -295,6 +331,9 @@ export function createHarness(options = {}) {
     get editorFactory() {
       return editorFactory;
     },
+    get editorText() {
+      return editorText;
+    },
     makeContext({
       cwd = ROOT,
       mode = "tui",
@@ -307,7 +346,7 @@ export function createHarness(options = {}) {
         thinkingLevelMap: { high: "high", medium: "medium" },
       },
     } = {}) {
-      return {
+      activeContext = {
         cwd,
         mode,
         hasUI,
@@ -366,6 +405,7 @@ export function createHarness(options = {}) {
         },
         ui,
       };
+      return activeContext;
     },
     async runHooks(name, event, context) {
       const results = [];

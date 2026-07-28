@@ -11,6 +11,7 @@ import { load } from "./harness.mjs";
 
 const planMode = await load("extensions/plan-mode/index.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
+const controlPlane = await load("extensions/control-plane.ts");
 
 await test("permission status lifecycle", async () => {
   if (!modePermissions) return;
@@ -59,6 +60,7 @@ await test("permission status lifecycle", async () => {
 
   const harness = createHarness();
   modePermissions.default(harness.api);
+  if (controlPlane) controlPlane.default(harness.api);
   const context = harness.makeContext();
   await harness.runHooks("session_start", {}, context);
   eq(

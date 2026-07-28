@@ -13,6 +13,7 @@ import {
 import { load } from "./harness.mjs";
 
 const permissionsExtension = await load("extensions/mode-permissions.ts");
+const controlPlane = await load("extensions/control-plane.ts");
 const permissionDialog = await load("extensions/shared/permission-dialog.ts");
 
 await test("permission extension exposes transitions, menus and hard guards", async () => {
@@ -91,6 +92,17 @@ await test("permission extension exposes transitions, menus and hard guards", as
       getEntries: () => sessionEntries,
     },
     ui: {
+      getEditorText() {
+        return "";
+      },
+      setEditorText() {},
+      async submitSlashCommand(commandLine) {
+        const match = /^\/([^\s]+)(?:\s+(.*))?$/.exec(commandLine);
+        if (!match) throw new Error(`invalid slash command: ${commandLine}`);
+        const handler = commands.get(match[1]);
+        if (!handler) throw new Error(`unknown slash command: /${match[1]}`);
+        await handler(match[2] ?? "", context);
+      },
       setStatus(key, value) {
         statuses.push({ key, value });
       },
@@ -114,6 +126,7 @@ await test("permission extension exposes transitions, menus and hard guards", as
   };
   try {
     permissionsExtension.default(api);
+    if (controlPlane) controlPlane.default(api);
     api.events.on("workflow-capabilities:request", (request) => {
       request.respond({ state: workflowState, mode: workflowMode });
     });

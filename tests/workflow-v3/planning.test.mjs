@@ -29,6 +29,7 @@ await test("plan workflow lifecycle", async () => {
       },
     });
     planMode.default(harness.api);
+    if (controlPlane) controlPlane.default(harness.api);
     // mode-permissions owns the thinking level (it also holds the manual
     // override), so the pair has to be loaded like the real runtime does.
     if (modePermissions) modePermissions.default(harness.api);
@@ -120,7 +121,15 @@ await test("workflow menus keep planning passive and block plan work without a p
   try {
     let choice = "Schnellplan";
     const harness = createHarness({
-      select: (labels) => labels.find((label) => label === choice),
+      select: (labels) => {
+        if (
+          choice === "Architekturplan" &&
+          labels.includes("Workflow wechseln · /workflow")
+        ) {
+          return "Workflow wechseln · /workflow";
+        }
+        return labels.find((label) => label === choice);
+      },
     });
     planMode.default(harness.api);
     controlPlane.default(harness.api);
@@ -195,6 +204,7 @@ await test("passive plan selection protects an existing plan", async () => {
       select: (labels) => labels.find((label) => label === "Schnellplan"),
     });
     planMode.default(harness.api);
+    if (controlPlane) controlPlane.default(harness.api);
     const context = harness.makeContext({ cwd });
     context.ui.custom = async () => {
       throw new Error("use deterministic select fallback");

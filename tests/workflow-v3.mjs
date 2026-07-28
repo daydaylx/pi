@@ -22,6 +22,7 @@ await import("./workflow-v3/permissions.test.mjs");
 await import("./workflow-v3/presentation.test.mjs");
 await import("./workflow-v3/p1-transitions.test.mjs");
 await import("./workflow-v3/control-center-menu.test.mjs");
+await import("./workflow-v3/command-center.test.mjs");
 await import("./workflow-v3/integration.test.mjs");
 await import("./workflow-v3/routing.test.mjs");
 await import("./workflow-v3/agent-model-menu.test.mjs");

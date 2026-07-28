@@ -170,7 +170,7 @@ async function selectWithCustomUi<T>(
         const lines: string[] = [];
         if (layout !== "compact" && entry.section && (index === 0 || entry.section !== level().entries[index - 1]?.section)) lines.push(fg("muted", theme.bold(pad(` ${entry.section.toLocaleUpperCase("de-DE")}`, inner))));
         const selectionLine = lines.length;
-        const suffix = `${tag(entry) ? ` [${tag(entry)}]` : ""}${entry.children ? " ›" : ""}`;
+        const suffix = `${entry.shortcut ? `  [${entry.shortcut}]` : ""}${tag(entry) ? ` [${tag(entry)}]` : ""}${entry.children ? " ›" : ""}`;
         const isSelected = index === level().selected;
         const indicator = isSelected ? fg("accent", "▌") : " ";
         const main = `${indicator} ${entry.icon ? `${entry.icon} ` : ""}${entry.label}${suffix}`;
@@ -251,6 +251,25 @@ async function selectWithCustomUi<T>(
             if (!entry || entry.disabled) return;
             if (entry.children) stack.push({ entries: entry.children, selected: initialMenuIndex(entry.children), viewportStart: 0, label: entry.label });
             else done(entry);
+          } else if (data.length === 1) {
+            const matched = current.entries.find(
+              (entry) =>
+                !entry.disabled &&
+                entry.shortcut?.toLocaleLowerCase("de-DE") ===
+                  data.toLocaleLowerCase("de-DE"),
+            );
+            if (!matched) return;
+            if (matched.children) {
+              stack.push({
+                entries: matched.children,
+                selected: initialMenuIndex(matched.children),
+                viewportStart: 0,
+                label: matched.label,
+              });
+            } else {
+              done(matched);
+              return;
+            }
           } else if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) { done(undefined); return; }
           else return;
           refresh();

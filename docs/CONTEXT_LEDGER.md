@@ -13,7 +13,7 @@
 - Berechtigungsmodell: `readonly`, `project-write`, `confirm-all`, temporäres `yolo`. Work startet mit `project-write`, beide Planvarianten mit `readonly`. YOLO wird nie persistiert
 - Frischer Subagenten-Kontext, maximale Parallelität drei
 - Modellwahl folgt Pi-nativ `settings.enabledModels`; die Auswahl wechselt sofort zum gewählten Modell und ist während eines laufenden Turns gesperrt
-- **Shift+Tab ist der Workflow-Wechsel** (Schnellplan, Architekturplan, Plan ausführen/fortsetzen, Direktauftrag starten/fortsetzen). Super+Q öffnet das vollständige Control Center, dessen erster Reiter genau dieser Workflow-Wechsel ist
+- **Alle Menü- und Shortcut-Aktionen sprechen kanonische Slash-Commands.** `/commands` beziehungsweise Super+Q öffnet acht Bereiche mit lokalen `A/P/M/R/C/S/V/T`-Tasten; Shift+Tab sendet `/workflow`. Built-ins, Projekt-Commands, geladene Prompts und aktive Skills bleiben darüber erreichbar
 - Thinking zeigt sichtbar „Auto" oder „Manuell"; im Auto-Modus folgt die Denktiefe dem Workflow, eine manuell gewählte Stufe bleibt unangetastet
 - Diagnose zeigt Status und erlaubt eine Dateiprüfung über eine kurze Dateiauswahl
 - Ctrl+Shift+X ist entfernt
@@ -106,8 +106,9 @@ ausdrücklich ohne.
   `activity-status.ts`, `thinking-view.ts`, `thinking-view-config.ts` und
   `context-menu.ts` hatten null Importe.
 - **Risiko:** Post-Plan-Karte und zustandsabhängiges Plan-Menü sind endgültig weg.
-- **Ersatz:** Shift+Tab (Workflow-Wechsel) und Super+Q (vollständiges Control
-  Center) aus einer gemeinsamen Definition, siehe [007](decisions/007-aurora-single-ui-owner.md).
+- **Ersatz:** `/commands` als vollständiges Command Center und `/workflow` als
+  kompakter Workflow-Wechsel; globale Shortcuts senden ausschließlich diese
+  kanonischen Slash-Commands, siehe [007](decisions/007-aurora-single-ui-owner.md).
 
 ### V-4 — Zweites Verifikations-Gate entfernt
 

@@ -47,6 +47,89 @@ const STALE_CTX_MESSAGE =
  */
 export const PATCHES = [
   {
+    id: "agent-session-builtin-command-import",
+    file: "dist/core/agent-session.js",
+    summary: "Built-in Slash-Commands für das Extension-Inventar importieren",
+    detect: 'import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.js";',
+    anchor: `import { createSyntheticSourceInfo } from "./source-info.js";`,
+    replacement: `import { createSyntheticSourceInfo } from "./source-info.js";
+import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.js";`,
+  },
+  {
+    id: "agent-session-complete-command-inventory",
+    file: "dist/core/agent-session.js",
+    summary: "pi.getCommands() um Built-ins und aktive Skills ergänzen",
+    detect: "const builtinCommands = BUILTIN_SLASH_COMMANDS.map",
+    anchor: `        const getCommands = () => {
+            const extensionCommands = runner.getRegisteredCommands().map((command) => ({
+                name: command.invocationName,
+                description: command.description,
+                source: "extension",
+                sourceInfo: command.sourceInfo,
+            }));
+            const templates = this.promptTemplates.map((template) => ({
+                name: template.name,
+                description: template.description,
+                source: "prompt",
+                sourceInfo: template.sourceInfo,
+            }));
+            const skills = this._resourceLoader.getSkills().skills.map((skill) => ({
+                name: \`skill:\${skill.name}\`,
+                description: skill.description,
+                source: "skill",
+                sourceInfo: skill.sourceInfo,
+            }));
+            return [...extensionCommands, ...templates, ...skills];
+        };`,
+    replacement: `        const getCommands = () => {
+            const builtinCommands = BUILTIN_SLASH_COMMANDS.map((command) => ({
+                name: command.name,
+                description: command.description,
+                source: "builtin",
+                sourceInfo: createSyntheticSourceInfo(\`<builtin-command:\${command.name}>\`, { source: "builtin" }),
+            }));
+            const extensionCommands = runner.getRegisteredCommands().map((command) => ({
+                name: command.invocationName,
+                description: command.description,
+                source: "extension",
+                sourceInfo: command.sourceInfo,
+            }));
+            const templates = this.promptTemplates.map((template) => ({
+                name: template.name,
+                description: template.description,
+                source: "prompt",
+                sourceInfo: template.sourceInfo,
+            }));
+            const skills = this.settingsManager.getEnableSkillCommands()
+                ? this._resourceLoader.getSkills().skills.map((skill) => ({
+                    name: \`skill:\${skill.name}\`,
+                    description: skill.description,
+                    source: "skill",
+                    sourceInfo: skill.sourceInfo,
+                }))
+                : [];
+            return [...builtinCommands, ...extensionCommands, ...templates, ...skills];
+        };`,
+  },
+  {
+    id: "interactive-submit-slash-command",
+    file: "dist/modes/interactive/interactive-mode.js",
+    summary: "Slash-Commands aus Extension-Menüs direkt absenden",
+    detect: "submitSlashCommand: async (commandLine)",
+    anchor: `            setEditorText: (text) => this.editor.setText(text),
+            getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),`,
+    replacement: `            setEditorText: (text) => this.editor.setText(text),
+            getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),
+            // P1: menu and shortcut actions use the same dispatcher as a
+            // manually submitted slash command. Arbitrary prompts are rejected.
+            submitSlashCommand: async (commandLine) => {
+                const normalized = commandLine.trim();
+                if (!/^\\/[^\\s/]+(?:\\s[^\\r\\n]*)?$/.test(normalized))
+                    throw new Error("submitSlashCommand accepts one slash command only");
+                await this.defaultEditor.onSubmit?.(normalized);
+            },`,
+  },
+  {
     id: "loader-scoped-events",
     file: "dist/core/extensions/loader.js",
     summary: "Extension-Listener an den Extension-Lebenszyklus binden",

@@ -33,11 +33,17 @@ const packageManagerSource = readFileSync(
   `${RUNTIME_ROOT}/dist/core/package-manager.js`,
   "utf8",
 );
+const interactiveSource = readFileSync(
+  `${RUNTIME_ROOT}/dist/modes/interactive/interactive-mode.js`,
+  "utf8",
+);
 
 assert.match(loaderSource, /eventUnsubscribers/, "loader scopes event-bus listeners");
 assert.match(runnerSource, /dispose\(message = /, "runner disposes scoped listeners");
 assert.match(sessionSource, /await emitSessionShutdownEvent[\s\S]{0,240}this\._extensionRunner\.dispose\(\)/, "reload disposes the replaced runner");
 assert.match(packageManagerSource, /applyConfiguredExtensionOrder/, "package manager honors explicit extension order");
+assert.match(sessionSource, /const builtinCommands = BUILTIN_SLASH_COMMANDS\.map/, "command inventory includes Pi built-ins");
+assert.match(interactiveSource, /submitSlashCommand: async \(commandLine\)/, "interactive UI exposes canonical slash submission");
 
 const { createEventBus } = await import(`${RUNTIME_ROOT}/dist/core/event-bus.js`);
 const { createExtensionRuntime, loadExtensionFromFactory } = await import(

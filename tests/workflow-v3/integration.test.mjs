@@ -12,6 +12,7 @@ const snapshotMod = await load("extensions/plan-mode/plan-snapshot.ts");
 const store = await load("extensions/plan-mode/store/index.ts");
 const execution = await load("extensions/plan-mode/execution.ts");
 const planExtension = await load("extensions/plan-mode/index.ts");
+const controlPlane = await load("extensions/control-plane.ts");
 
 await test("extension entry drives plan, work, completion, direct task and recovery", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "pi-v3-integration-"));
@@ -126,6 +127,15 @@ await test("extension entry drives plan, work, completion, direct task and recov
       getEntries: () => [],
     },
     ui: {
+      getEditorText() { return ""; },
+      setEditorText() {},
+      async submitSlashCommand(commandLine) {
+        const match = /^\/([^\s]+)(?:\s+(.*))?$/.exec(commandLine);
+        if (!match) throw new Error(`invalid slash command: ${commandLine}`);
+        const handler = commands.get(match[1]);
+        if (!handler) throw new Error(`unknown slash command: /${match[1]}`);
+        await handler(match[2] ?? "", context);
+      },
       notify(message, level) { notifications.push({ message, level }); },
       setStatus() {},
       async select() { return selectQueue.shift(); },
@@ -145,6 +155,7 @@ await test("extension entry drives plan, work, completion, direct task and recov
   };
   try {
     planExtension.default(api);
+    if (controlPlane) controlPlane.default(api);
     await runHook("session_start");
     mkdirSync(path.join(cwd, ".pi"), { recursive: true });
     writeFileSync(

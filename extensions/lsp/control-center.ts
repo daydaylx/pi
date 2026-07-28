@@ -123,9 +123,8 @@ export function registerLspControlCenter(
     isSessionCurrent: (ctx: ExtensionContext, token: unknown) => boolean;
     captureDeps: () => LspToolsDeps;
   },
-): void {
-  pi.events.on(CONTROL_CENTER_EVENTS.openDiagnostics, async (event) => {
-    const ctx = (event as OpenControlCenterMenuEvent).ctx;
+): (ctx: ExtensionContext) => Promise<void> {
+  const open = async (ctx: ExtensionContext): Promise<void> => {
     const session = options.captureSession(ctx);
     if (!options.isSessionCurrent(ctx, session)) return;
 
@@ -183,5 +182,9 @@ export function registerLspControlCenter(
     if (!options.isSessionCurrent(ctx, session)) return;
     ctx.ui.notify(result.content[0].text, "info");
     options.refreshStatus(ctx);
+  };
+  pi.events.on(CONTROL_CENTER_EVENTS.openDiagnostics, async (event) => {
+    await open((event as OpenControlCenterMenuEvent).ctx);
   });
+  return open;
 }

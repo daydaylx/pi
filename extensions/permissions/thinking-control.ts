@@ -39,6 +39,11 @@ export interface ThinkingControl {
     thinkingMode?: "auto" | "manual";
     manualThinkingLevel?: SelectableThinkingLevel;
   }): void;
+  applySelection(
+    selection: "auto" | `manual:${SelectableThinkingLevel}`,
+    ctx: ExtensionContext,
+    isCurrentEpoch: () => boolean,
+  ): void;
   openMenu(ctx: ExtensionContext, isCurrentEpoch: () => boolean): Promise<void>;
   /** Wired by the extension entry so a change persists with the rest. */
   onPersist: () => void;
@@ -82,6 +87,31 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
       }
     },
 
+    applySelection(selectedLevel, ctx, isCurrentEpoch) {
+      if (!isCurrentEpoch()) return;
+      if (selectedLevel === "auto") {
+        thinkingMode = "auto";
+        manualThinkingLevel = undefined;
+        const level = control.workflowDefault();
+        pi.setThinkingLevel(level);
+        control.onPersist();
+        ctx.ui.notify(
+          `Thinking: ${thinkingLabel(thinkingMode, level)}.`,
+          "info",
+        );
+        return;
+      }
+
+      const level = selectedLevel.slice(
+        "manual:".length,
+      ) as SelectableThinkingLevel;
+      thinkingMode = "manual";
+      manualThinkingLevel = level;
+      pi.setThinkingLevel(level);
+      control.onPersist();
+      ctx.ui.notify(`Thinking: ${thinkingLabel(thinkingMode, level)}.`, "info");
+    },
+
     async openMenu(ctx, isCurrentEpoch) {
       const entries = buildThinkingMenu(
         pi.getThinkingLevel(),
@@ -108,29 +138,7 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
         { nonInteractiveHint: "Thinking & Reasoning benötigt den TUI-Modus." },
       );
       const selectedLevel = selected?.entry.value;
-      if (!selectedLevel || !isCurrentEpoch()) return;
-
-      if (selectedLevel === "auto") {
-        thinkingMode = "auto";
-        manualThinkingLevel = undefined;
-        const level = control.workflowDefault();
-        pi.setThinkingLevel(level);
-        control.onPersist();
-        ctx.ui.notify(
-          `Thinking: ${thinkingLabel(thinkingMode, level)}.`,
-          "info",
-        );
-        return;
-      }
-
-      const level = selectedLevel.slice(
-        "manual:".length,
-      ) as SelectableThinkingLevel;
-      thinkingMode = "manual";
-      manualThinkingLevel = level;
-      pi.setThinkingLevel(level);
-      control.onPersist();
-      ctx.ui.notify(`Thinking: ${thinkingLabel(thinkingMode, level)}.`, "info");
+      if (selectedLevel) control.applySelection(selectedLevel, ctx, isCurrentEpoch);
     },
   };
   return control;

@@ -295,7 +295,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
   registerLspDiagnosticsTool(pi, deps);
   registerLspNavigationTools(pi, deps);
   registerLspCompletionRpc(pi, deps, () => activeProjectRoot);
-  registerLspControlCenter(pi, {
+  const openLspDiagnostics = registerLspControlCenter(pi, {
     getStatus: () =>
       registry ? computeLspStatus(config, registry.list()) : "aus",
     refreshStatus,
@@ -340,12 +340,27 @@ export default function lspExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("lsp", {
     description:
-      "LSP steuern: status | on | off | restart [id] | servers | log",
+      "LSP steuern: status | on | off | restart [id] | servers | log | diagnostics",
     handler: async (args, ctx) => {
       const [sub, ...rest] = args.trim().split(/\s+/).filter(Boolean);
-      switch (sub) {
+      if (sub === undefined) {
+        const choice = await ctx.ui.select("LSP-Steuerung · /lsp", [
+          "Status · /lsp status",
+          "Aktivieren · /lsp on",
+          "Deaktivieren · /lsp off",
+          "Server neu starten · /lsp restart",
+          "Server auflisten · /lsp servers",
+          "Log anzeigen · /lsp log",
+          "Datei diagnostizieren · /lsp diagnostics",
+        ]);
+        const selected = choice?.match(/\/lsp(?:\s+([a-z]+))?$/)?.[1];
+        if (!selected) return;
+        args = selected;
+      }
+      const [resolvedSub, ...resolvedRest] = args.trim().split(/\s+/).filter(Boolean);
+      switch (resolvedSub) {
         case "status":
-        case undefined: {
+        {
           const state = registry
             ? computeLspStatus(config, registry.list())
             : "aus";
@@ -375,7 +390,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
           return;
         }
         case "restart": {
-          const id = rest[0];
+          const id = resolvedRest[0];
           if (!registry) {
             ctx.ui.notify("LSP: kein aktiver Server.", "info");
             return;
@@ -431,9 +446,13 @@ export default function lspExtension(pi: ExtensionAPI): void {
           );
           return;
         }
+        case "diagnostics": {
+          await openLspDiagnostics(ctx);
+          return;
+        }
         default:
           ctx.ui.notify(
-            "Nutzung: /lsp status|on|off|restart [id]|servers|log",
+            "Nutzung: /lsp status|on|off|restart [id]|servers|log|diagnostics",
             "info",
           );
       }

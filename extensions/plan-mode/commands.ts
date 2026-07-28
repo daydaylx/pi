@@ -11,15 +11,13 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { CONTROL_CENTER_EVENTS } from "../shared/control-center-events.ts";
 import {
-  buildControlCenterTabs,
   buildWorkflowTab,
-  type ControlCenterAction,
+  type WorkflowAction,
 } from "../shared/control-center-menu.ts";
-import { SHORTCUTS } from "../shared/shortcuts.ts";
 import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
 import { openAgentModelMenu } from "./agent-model-menu.ts";
+import { openCommandCenter } from "./command-center.ts";
 import { finishDirectTask, finishWorkflow } from "./completion-commands.ts";
 import {
   beginDirectTask,
@@ -39,7 +37,6 @@ import {
   recoverWorkflowLock,
   runVerifyGate,
 } from "./maintenance-commands.ts";
-import { openModelMenu } from "./model-menu.ts";
 import { editPlanMarkdown, viewPlanMarkdown } from "./plan-editor.ts";
 import {
   buildPlanAssistantTab,
@@ -94,8 +91,13 @@ async function completeStepsCommand(
   }
   const numbers = parseStepNumbers(args);
   if (numbers.length === 0) {
-    session.notify(ctx, "Verwendung: /done <n> [m …]", "warning");
-    return;
+    const input = await ctx.ui.input(
+      "Planschritte abschließen · /done",
+      "Schrittnummern, z. B. 1 3 4",
+    );
+    const selected = parseStepNumbers(input ?? "");
+    if (selected.length === 0) return;
+    numbers.push(...selected);
   }
   const completed = completeStepsByNumber(
     loaded.snapshot,
@@ -254,7 +256,17 @@ export function registerPlanCommands(
   });
   pi.registerCommand("task", {
     description: "Direktauftrag mit Scope und Abschlusskriterien starten",
-    handler: async (args, ctx) => startDirectTask(session, ctx, args),
+    handler: async (args, ctx) => {
+      if (args.trim()) {
+        await startDirectTask(session, ctx, args);
+        return;
+      }
+      if (loadDirectTask(ctx.cwd)) {
+        await resumeDirectTask(session, ctx);
+        return;
+      }
+      await beginDirectTask(session, ctx);
+    },
   });
   pi.registerCommand("task-done", {
     description: "Direktauftrag über dieselbe Completion-Pipeline abschließen",
@@ -323,27 +335,8 @@ export function registerPlanCommands(
     },
   });
 
-  pi.registerShortcut(SHORTCUTS.modelMenu.keys, {
-    description: SHORTCUTS.modelMenu.description,
-    handler: async (ctx) => await openModelMenu(pi, ctx),
-  });
-  // Without this listener the Hauptmenü "Modelle" entry emitted into the void.
-  pi.events.on(CONTROL_CENTER_EVENTS.openModels, async (event) => {
-    const ctx = (event as { ctx?: ExtensionContext }).ctx;
-    if (ctx) await openModelMenu(pi, ctx);
-  });
-
-  pi.registerShortcut(SHORTCUTS.planAssistant.keys, {
-    description: SHORTCUTS.planAssistant.description,
-    handler: async (ctx) => {
-      const kind = await choosePlanKind("", ctx);
-      if (kind) await beginPlanning(session, kind, ctx);
-    },
-  });
-  // The one action router. Both entry points end here, so an entry can never
-  // mean something different depending on which key opened it.
-  const runControlCenterAction = async (
-    action: ControlCenterAction,
+  const runWorkflowAction = async (
+    action: WorkflowAction,
     ctx: ExtensionContext,
   ): Promise<void> => {
     switch (action) {
@@ -365,21 +358,6 @@ export function registerPlanCommands(
       case "direct_task_continue":
         await resumeDirectTask(session, ctx);
         return;
-      case "permissions":
-        pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx });
-        return;
-      case "models":
-        pi.events.emit(CONTROL_CENTER_EVENTS.openModels, { ctx });
-        return;
-      case "routing_models":
-        await openAgentModelMenu(pi, session, ctx);
-        return;
-      case "thinking":
-        pi.events.emit(CONTROL_CENTER_EVENTS.openThinking, { ctx });
-        return;
-      case "diagnostics":
-        pi.events.emit(CONTROL_CENTER_EVENTS.openDiagnostics, { ctx });
-        return;
     }
   };
 
@@ -389,43 +367,33 @@ export function registerPlanCommands(
       hasActivePlan: Boolean(loaded.snapshot && loaded.state),
       hasActiveDirectTask: Boolean(loadDirectTask(ctx.cwd)),
       activeMode: session.workflowMode(),
+      migrationRequired: loaded.migrationRequired,
     };
   };
 
-  /** Shift+Tab: the workflow switch. */
   const openWorkflowSwitch = async (ctx: ExtensionContext): Promise<void> => {
-    const selected = await runTabbedOverlay<ControlCenterAction>(
+    const selected = await runTabbedOverlay<WorkflowAction>(
       ctx,
-      "Workflow wechseln",
+      "Workflow wechseln · /workflow",
       [buildWorkflowTab(menuState(ctx))],
       { nonInteractiveHint: "Der Workflow-Wechsel benötigt den TUI-Modus." },
     );
     const action = selected?.entry.value;
-    if (action) await runControlCenterAction(action, ctx);
+    if (action) await runWorkflowAction(action, ctx);
   };
 
-  /** Super+Q: the full Control Center, starting with that same workflow tab. */
-  const openControlCenter = async (ctx: ExtensionContext): Promise<void> => {
-    const selected = await runTabbedOverlay<ControlCenterAction>(
-      ctx,
-      "Control Center",
-      buildControlCenterTabs(menuState(ctx)),
-      { nonInteractiveHint: "Das Control Center benötigt den TUI-Modus." },
-    );
-    const action = selected?.entry.value;
-    if (action) await runControlCenterAction(action, ctx);
-  };
-
-  pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
-    description: SHORTCUTS.modeMenu.description,
-    handler: openWorkflowSwitch,
+  pi.registerCommand("workflow", {
+    description: "Zustandsabhängigen Workflow-Wechsel öffnen",
+    handler: async (_args, ctx) => openWorkflowSwitch(ctx),
   });
-  pi.registerShortcut(SHORTCUTS.routingModelMenu.keys, {
-    description: SHORTCUTS.routingModelMenu.description,
-    handler: (ctx) => openAgentModelMenu(pi, session, ctx),
+  pi.registerCommand("agent-models", {
+    description: "Agentenmodelle für Planner, Worker und Reviewer anpassen",
+    handler: async (_args, ctx) => openAgentModelMenu(pi, session, ctx),
   });
-  pi.events.on(CONTROL_CENTER_EVENTS.open, async (event) => {
-    const ctx = (event as { ctx?: ExtensionContext }).ctx;
-    if (ctx) await openControlCenter(ctx);
+  pi.registerCommand("commands", {
+    description: "Alle Slash-Commands nach Aufgabenbereich öffnen",
+    handler: async (_args, ctx) => {
+      await openCommandCenter(pi, ctx, menuState(ctx));
+    },
   });
 }

@@ -65,11 +65,14 @@ ein Modus-Label — zwei verschiedene Einstellungen unter einem Namen.
 Pakete sind seit der Paketbereinigung keine aktiven Laufzeitpakete, ihre
 Konfiguration steuerte nichts. Die npm-Pins bleiben als Typecheck-Anker.
 
-**Shortcuts.** `Shift+Tab` ist der Workflow-Wechsel, `Super+Q` das vollständige
-Control Center — eine gemeinsame Definition (`shared/control-center-menu.ts`),
-ein gemeinsamer Action-Router. Die frühere Inline-Menüliste in `commands.ts`
-und das separate Overlay in `control-plane.ts` sind entfallen. Der nie
-registrierte `SHORTCUTS.help` ist entfernt.
+**Commands und Shortcuts.** `/commands` ist das vollständige Command Center mit
+acht Aufgabenbereichen und lokalen `A/P/M/R/C/S/V/T`-Tasten. Es kombiniert
+22 Pi-Built-ins, 27 registrierte Projekt-Commands (24 kanonische Namen plus
+drei Aliase) sowie die aktuell geladenen Prompt- und Skill-Commands. Alle
+globalen Shortcuts
+reichen kanonische Slash-Zeilen an denselben Runtime-Dispatcher weiter;
+Shift+Tab entspricht `/workflow`, Super+Q `/commands`. Zustandsabhängige
+Sperren, Argument-Assistenten und Entwurfsschutz sitzen damit an einer Stelle.
 
 **Permissions.** `/full-access` mit eigener Toggle-Logik entfernt; die Legacy-
 Werte werden weiterhin an der Eingangsgrenze `/permission <wert>` akzeptiert.
@@ -118,9 +121,11 @@ Assertions entfällt vollständig auf Tests entfernter Runtime-Funktionen
 
 Das Upgrade der installierten Pi-Runtime von `0.82.0` auf `0.82.1` hatte die
 lokalen Patches überschrieben; `tests/p1-runtime.mjs` und damit `npm run verify`
-waren rot. Alle vier Eingriffspunkte wurden gegen `0.82.1` neu geschrieben
-(gescopte Event-Listener im Loader, `ExtensionRunner.dispose()`, Aufruf im
-Reload-Pfad, `applyConfiguredExtensionOrder`) und der Versions-Pin nachgezogen.
+waren rot. Die ursprünglichen vier Eingriffspunkte und drei
+Command-Center-Erweiterungen wurden gegen `0.82.1` geschrieben (gescopte
+Event-Listener im Loader, `ExtensionRunner.dispose()`, Aufruf im Reload-Pfad,
+`applyConfiguredExtensionOrder`, vollständiges Command-Inventar und direkter
+Slash-Dispatcher) und der Versions-Pin nachgezogen.
 Der Reload-Test über zehn Generationen ist grün.
 
 Damit sich das Nachschreiben von Hand nicht wiederholt, stehen die Eingriffe

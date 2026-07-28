@@ -79,16 +79,19 @@ v2-Lease und legt vorher ein Backup unter
 - `/recover-workflow-lock` – verwaisten Lock bestätigt entfernen.
 - `/task <Ziel>`, `/task-done` – Direktauftrag mit eigenem Scope-Vertrag.
 
-Shift+Tab öffnet den kompakten Workflow-Wechsel für Schnellplan,
+`/commands` beziehungsweise `Super+Q` öffnet alle Built-ins, Projekt-Commands,
+Prompt-Vorlagen und aktiven Skills in acht Aufgabenbereichen. `A/P/M/R/C/S/V/T`
+öffnet den passenden Bereich ohne Pfeilnavigation; die Einträge zeigen stets
+den kanonischen Slash-Namen und vorhandene globale Shortcuts.
+
+Shift+Tab sendet `/workflow` und öffnet den kompakten Workflow-Wechsel für Schnellplan,
 Architekturplan, **Plan ausführen / fortsetzen** und **Direktauftrag starten /
 fortsetzen**. Planarbeit ist nur mit einem aktiven Plan verfügbar und startet
 sofort; ein Direktauftrag ist planlos, erfasst aber weiterhin Scope,
 Verifikation und Abschlusskriterien. Plan und Direktauftrag schließen sich
-gegenseitig aus. Der Workflow-Tab des vollständigen Control Centers (`Super+Q`)
-verhält sich gleich. `/plan`, `/work`, `/task <Ziel>` und `Super+P` bleiben
-explizite Einstiege.
-`Super+M`, `Super+D`, `Super+Q` und `Super+Y` behalten ihre Modell-, Thinking-,
-Hauptmenü- und temporäre YOLO-Grundfunktion.
+gegenseitig aus. `/plan`, `/work` und `/task` bleiben explizite Einstiege.
+Auch `Super+P/M/D/Y/S` senden ausschließlich `/plan`, `/model`, `/thinking`,
+`/yolo` beziehungsweise `/agent-models`.
 
 Unterbrochene Ausführungen (`working`, `paused`, `blocked`) bieten beim
 Sitzungsstart in der TUI ausdrücklich Fortsetzen, Read-only-Diagnose oder
@@ -100,7 +103,8 @@ CAS-gebunden.
 
 ```text
 index.ts                  erzeugt die Session, registriert Commands und Events
-commands.ts               Command-, Tool- und Shortcut-Registrierung
+commands.ts               Workflow-Commands und Command-Center-Einstieg
+command-center.ts         hierarchisches /commands-Menü und Argument-Assistenten
 events.ts                 Lifecycle-Hooks und Capability-Responder
 session.ts                Sitzungszustand (WorkflowSession) und Persistenz-Adapter
 planning.ts               Prompts sowie /plan und /review-plan
@@ -108,7 +112,7 @@ execution.ts              /work, /go und Schrittfortschritt
 completion-commands.ts    /finish und /task-done als Orchestrierung
 direct-task-commands.ts   /task: Eligibility und Erstellung
 maintenance-commands.ts   /discard-plan, /migrate-plan, /recover-workflow-lock
-model-menu.ts             Modellauswahl (Super+M und Hauptmenü)
+agent-model-menu.ts       Agentenmodelle für Planner, Worker und Reviewer
 plan-snapshot.ts          Planvertrag, Metadaten und stabile Step-IDs
 scope.ts                  Glob-Matcher für den technischen Scope
 presentation.ts           Statuszeile, Fehlermeldungen und TUI-Eingabe

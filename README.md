@@ -72,16 +72,24 @@ Details: [`docs/subagents.md`](docs/subagents.md).
 
 `/plan` öffnet einen zustandsabhängigen Assistenten; `/plan quick`,
 `/plan architecture` und `Super+P` starten die Planung bewusst sofort.
-`Shift+Tab` trennt die Arbeitswege klar: Schnellplan, Architekturplan,
+`Super+Q` oder `/commands` öffnet das vollständige, deutsch beschriftete
+Command Center. Seine acht Bereiche lassen sich im Menü direkt mit
+`A/P/M/R/C/S/V/T` öffnen: Arbeit, Plan, Modelle, Rechte, Code, Sitzungen,
+Vorlagen und System. Jeder Eintrag zeigt seinen kanonischen Slash-Command;
+Aliase stehen nur als Hinweis am Original. Geladene Prompt- und Skill-Commands
+werden aus der Runtime ergänzt.
+
+Alle globalen Shortcuts sprechen dieselbe Slash-Sprache: `Shift+Tab` sendet
+`/workflow`, `Super+P` `/plan`, `Super+M` `/model`, `Super+D` `/thinking`,
+`Super+Y` `/yolo`, `Super+S` `/agent-models` und `Super+Q` `/commands`.
+Der Workflow-Wechsel trennt Schnellplan, Architekturplan,
 **Plan ausführen / fortsetzen** und **Direktauftrag starten / fortsetzen**.
 Planarbeit startet nur mit einem vorhandenen Plan; ein Direktauftrag erfasst
-Ziel, Scope, Verifikation und Abschlusskriterien ohne PlanSnapshot. `Super+Q`
-öffnet das vollständige Control Center, dessen erster Reiter genau dieser
-Workflow-Wechsel ist — beide bauen auf derselben Definition auf und laufen durch
-denselben Handler. `/work` und `/task <Ziel>` bleiben die expliziten
-Kommando-Einstiege. `Super+M` öffnet die Modellwahl, `Super+D` Thinking und
-`Super+Y` den temporären YOLO-Modus. Die Super-Kombinationen benötigen
-Kitty-/CSI-u-Unterstützung.
+Ziel, Scope, Verifikation und Abschlusskriterien ohne PlanSnapshot. `/work` und
+`/task` bleiben die expliziten Kommando-Einstiege. Menü- und Shortcut-Aktionen
+laufen durch denselben Slash-Dispatcher wie manuelle Eingaben; vorhandener
+Editor-Text bleibt erhalten oder wird vor Turn-/Sitzungswechseln bestätigt.
+Die Super-Kombinationen benötigen Kitty-/CSI-u-Unterstützung.
 
 Aurora besitzt Editor, Fußzeile, Widget, Aktivität und Motion. Die Fußzeile ist
 die einzige Statusfläche: Modell, Denktiefe, Projekt, Berechtigung, LSP und
