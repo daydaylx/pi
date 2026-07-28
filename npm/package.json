@@ -11,8 +11,10 @@
     "test:coverage": "node ../tests/coverage.mjs",
     "test:coverage:baseline": "node ../tests/coverage.mjs --write-baseline",
     "test:runtime": "node ../tests/p1-runtime.mjs",
+    "test:patches": "node ../tests/runtime-patches.mjs",
+    "patch:runtime": "node ../scripts/apply-runtime-patches.mjs",
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
-    "verify": "npm run typecheck && npm run test:coverage && npm run test:runtime"
+    "verify": "npm run typecheck && npm run test:coverage && npm run test:patches && npm run test:runtime"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",

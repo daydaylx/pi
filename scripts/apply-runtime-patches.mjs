@@ -1,0 +1,406 @@
+/**
+ * Re-applies the local P1 patches to the installed Pi runtime.
+ *
+ * The patches live in `node_modules` and every `npm update` of the runtime
+ * removes them — that already happened once, silently, between 0.82.0 and
+ * 0.82.1. `tests/p1-runtime.mjs` notices the loss; this script repairs it
+ * without anyone having to rewrite the edits by hand.
+ *
+ * Three rules it will not bend:
+ *   - idempotent: an already patched file is reported and left alone;
+ *   - loud: an anchor that no longer matches aborts the whole run, because a
+ *     changed runtime means the patch has to be reviewed, not force-fitted;
+ *   - reversible: originals are copied to backups/ before the first write.
+ *
+ * Usage:
+ *   node scripts/apply-runtime-patches.mjs              # dry run
+ *   node scripts/apply-runtime-patches.mjs --apply
+ *   node scripts/apply-runtime-patches.mjs --apply --runtime <path>
+ *   node scripts/apply-runtime-patches.mjs --apply --allow-version-drift
+ */
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/** The runtime version these patches were written and verified against. */
+export const EXPECTED_RUNTIME_VERSION = "0.82.1";
+
+export const DEFAULT_RUNTIME_ROOT =
+  process.env.PI_RUNTIME_ROOT ??
+  "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent";
+
+const STALE_CTX_MESSAGE =
+  '"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload()."';
+
+/**
+ * One edit. `detect` proves the patch is already in place, `anchor` is the
+ * exact untouched text it replaces. Both must be unambiguous.
+ */
+export const PATCHES = [
+  {
+    id: "loader-scoped-events",
+    file: "dist/core/extensions/loader.js",
+    summary: "Extension-Listener an den Extension-Lebenszyklus binden",
+    detect: "extension.eventUnsubscribers.push(unsubscribe)",
+    anchor: `        events: eventBus,
+    };
+    return api;
+}`,
+    replacement: `        // P1: scope every extension listener to the extension lifecycle. The raw
+        // bus keeps listeners forever, so a reload left the previous generation
+        // answering alongside the new one.
+        events: {
+            emit: (channel, data) => eventBus.emit(channel, data),
+            on: (channel, handler) => {
+                const unsubscribe = eventBus.on(channel, handler);
+                extension.eventUnsubscribers.push(unsubscribe);
+                return () => {
+                    const index = extension.eventUnsubscribers.indexOf(unsubscribe);
+                    if (index >= 0)
+                        extension.eventUnsubscribers.splice(index, 1);
+                    unsubscribe();
+                };
+            },
+            clear: () => eventBus.clear(),
+        },
+    };
+    return api;
+}`,
+  },
+  {
+    id: "loader-unsubscriber-list",
+    file: "dist/core/extensions/loader.js",
+    summary: "Unsubscriber-Liste am Extension-Objekt anlegen",
+    detect: "eventUnsubscribers: [],",
+    anchor: `        commands: new Map(),
+        flags: new Map(),
+        shortcuts: new Map(),
+    };
+}`,
+    replacement: `        commands: new Map(),
+        flags: new Map(),
+        shortcuts: new Map(),
+        // P1: unsubscribers for this extension's event-bus listeners.
+        eventUnsubscribers: [],
+    };
+}`,
+  },
+  {
+    id: "runner-dispose",
+    file: "dist/core/extensions/runner.js",
+    summary: "ExtensionRunner.dispose() meldet die Listener ab",
+    detect: "dispose(message = ",
+    anchor: `    assertActive() {
+        if (this.staleMessage) {
+            throw new Error(this.staleMessage);
+        }
+    }`,
+    replacement: `    assertActive() {
+        if (this.staleMessage) {
+            throw new Error(this.staleMessage);
+        }
+    }
+    /**
+     * P1: invalidate this generation AND remove its event-bus listeners.
+     *
+     * invalidate() alone only marks contexts stale; the listeners registered
+     * through pi.events stayed on the shared bus, so after a reload both the
+     * old and the new generation answered the same channel.
+     */
+    dispose(message = ${STALE_CTX_MESSAGE}) {
+        this.invalidate(message);
+        for (const extension of this.extensions) {
+            const unsubscribers = extension.eventUnsubscribers;
+            if (!unsubscribers)
+                continue;
+            for (const unsubscribe of unsubscribers.splice(0)) {
+                try {
+                    unsubscribe();
+                }
+                catch {
+                    // A failing unsubscriber must not block the remaining ones.
+                }
+            }
+        }
+    }`,
+  },
+  {
+    id: "session-reload-dispose",
+    file: "dist/core/agent-session.js",
+    summary: "Reload verwirft die Listener der abgelösten Generation",
+    detect: "this._extensionRunner.dispose();",
+    anchor: `        await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
+        await this.settingsManager.reload();`,
+    replacement: `        await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
+        // P1: drop the replaced generation's event-bus listeners before the new
+        // one registers its own, otherwise both answer.
+        this._extensionRunner.dispose();
+        await this.settingsManager.reload();`,
+  },
+  {
+    id: "package-manager-order-helper",
+    file: "dist/core/package-manager.js",
+    summary: "Sortierfunktion für die deklarierte Extension-Reihenfolge",
+    detect: "function applyConfiguredExtensionOrder(",
+    anchor: `/**
+ * Apply patterns to paths and return a Set of enabled paths.
+ * Pattern types:`,
+    replacement: `/**
+ * P1: order extensions by their explicit \`+path\` entries from settings.json.
+ *
+ * The precedence sort is stable, so within one rank the order came from the
+ * directory scan — alphabetical, not the order the user declared. Extensions
+ * that load each other's exports need the declared order to hold.
+ */
+function applyConfiguredExtensionOrder(resolved, overrides, fallbackBaseDir) {
+    const forceIncludes = getOverridePatterns(overrides)
+        .filter((pattern) => pattern.startsWith("+"))
+        .map((pattern) => pattern.slice(1));
+    if (forceIncludes.length === 0)
+        return resolved;
+    const declaredIndex = (entry) => {
+        const baseDir = entry.metadata?.baseDir ?? fallbackBaseDir;
+        if (!baseDir)
+            return forceIncludes.length;
+        for (let index = 0; index < forceIncludes.length; index += 1) {
+            if (matchesAnyExactPattern(entry.path, [forceIncludes[index]], baseDir))
+                return index;
+        }
+        return forceIncludes.length;
+    };
+    return resolved
+        .map((entry, index) => ({ entry, index, declared: declaredIndex(entry) }))
+        .sort((a, b) => resourcePrecedenceRank(a.entry.metadata) -
+        resourcePrecedenceRank(b.entry.metadata) ||
+        a.declared - b.declared ||
+        a.index - b.index)
+        .map((item) => item.entry);
+}
+/**
+ * Apply patterns to paths and return a Set of enabled paths.
+ * Pattern types:`,
+  },
+  {
+    id: "package-manager-order-use",
+    file: "dist/core/package-manager.js",
+    summary: "toResolvedPaths() wendet die deklarierte Reihenfolge an",
+    detect: "mapToResolved(accumulator.extensions, extensionOverrides)",
+    anchor: `    toResolvedPaths(accumulator) {
+        const mapToResolved = (entries) => {
+            const resolved = Array.from(entries.entries()).map(([path, { metadata, enabled }]) => ({
+                path,
+                enabled,
+                metadata,
+            }));
+            resolved.sort((a, b) => resourcePrecedenceRank(a.metadata) - resourcePrecedenceRank(b.metadata));
+            const seen = new Set();
+            return resolved.filter((entry) => {
+                const canonicalPath = canonicalizePath(entry.path);
+                if (seen.has(canonicalPath))
+                    return false;
+                seen.add(canonicalPath);
+                return true;
+            });
+        };
+        return {
+            extensions: mapToResolved(accumulator.extensions),`,
+    replacement: `    toResolvedPaths(accumulator) {
+        const mapToResolved = (entries, extensionOverrides) => {
+            let resolved = Array.from(entries.entries()).map(([path, { metadata, enabled }]) => ({
+                path,
+                enabled,
+                metadata,
+            }));
+            if (extensionOverrides) {
+                resolved = applyConfiguredExtensionOrder(resolved, extensionOverrides, this.agentDir);
+            }
+            else {
+                resolved.sort((a, b) => resourcePrecedenceRank(a.metadata) - resourcePrecedenceRank(b.metadata));
+            }
+            const seen = new Set();
+            return resolved.filter((entry) => {
+                const canonicalPath = canonicalizePath(entry.path);
+                if (seen.has(canonicalPath))
+                    return false;
+                seen.add(canonicalPath);
+                return true;
+            });
+        };
+        const settings = this.settingsManager.getSettings();
+        const extensionOverrides = [
+            ...(settings?.extensions ?? []),
+        ];
+        return {
+            extensions: mapToResolved(accumulator.extensions, extensionOverrides),`,
+  },
+];
+
+/**
+ * Decide what a single patch would do to `content`, without writing.
+ * Throws when the anchor is gone — a changed runtime needs a human, not a
+ * best-effort guess.
+ */
+export function planPatch(patch, content) {
+  if (content.includes(patch.detect)) return { state: "already", content };
+  const occurrences = content.split(patch.anchor).length - 1;
+  if (occurrences === 0) {
+    throw new Error(
+      `Patch '${patch.id}': Ankertext nicht gefunden in ${patch.file}. Die Runtime hat sich geändert — Patch prüfen und portieren, nicht erzwingen.`,
+    );
+  }
+  if (occurrences > 1) {
+    throw new Error(
+      `Patch '${patch.id}': Ankertext kommt ${occurrences}× in ${patch.file} vor und ist damit nicht eindeutig.`,
+    );
+  }
+  return {
+    state: "pending",
+    content: content.replace(patch.anchor, patch.replacement),
+  };
+}
+
+function parseArgs(argv) {
+  let apply = false;
+  let runtime = DEFAULT_RUNTIME_ROOT;
+  let allowVersionDrift = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--apply") apply = true;
+    else if (arg === "--dry-run") apply = false;
+    else if (arg === "--allow-version-drift") allowVersionDrift = true;
+    else if (arg === "--runtime") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--runtime benötigt einen Pfad");
+      runtime = value;
+      index += 1;
+    } else {
+      throw new Error(`Unbekanntes Argument: ${arg}`);
+    }
+  }
+  return { apply, runtime: path.resolve(runtime), allowVersionDrift };
+}
+
+function assertNoSymlinkComponents(candidate) {
+  const absolute = path.resolve(candidate);
+  const parsed = path.parse(absolute);
+  let current = parsed.root;
+  for (const segment of absolute
+    .slice(parsed.root.length)
+    .split(path.sep)
+    .filter(Boolean)) {
+    current = path.join(current, segment);
+    if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
+      throw new Error(`Symlink im Runtime-Pfad nicht erlaubt: ${current}`);
+    }
+  }
+}
+
+function readRuntimeVersion(runtime) {
+  const manifest = path.join(runtime, "package.json");
+  if (!existsSync(manifest)) {
+    throw new Error(`Keine Pi-Runtime unter ${runtime} (package.json fehlt).`);
+  }
+  const version = JSON.parse(readFileSync(manifest, "utf8")).version;
+  if (typeof version !== "string") {
+    throw new Error(`Runtime-Manifest ohne Version: ${manifest}`);
+  }
+  return version;
+}
+
+function main(argv) {
+  const { apply, runtime, allowVersionDrift } = parseArgs(argv);
+  assertNoSymlinkComponents(runtime);
+
+  const version = readRuntimeVersion(runtime);
+  if (version !== EXPECTED_RUNTIME_VERSION) {
+    const message = `Runtime ist ${version}, die Patches sind gegen ${EXPECTED_RUNTIME_VERSION} geschrieben.`;
+    if (!allowVersionDrift) {
+      throw new Error(
+        `${message} Patches gegen die neue Version prüfen und EXPECTED_RUNTIME_VERSION nachziehen, oder bewusst mit --allow-version-drift fortfahren.`,
+      );
+    }
+    console.warn(`WARNUNG: ${message} Fortsetzung wurde ausdrücklich erlaubt.`);
+  }
+
+  // Plan every patch before touching anything: a single bad anchor must not
+  // leave the runtime half patched.
+  const byFile = new Map();
+  const results = [];
+  for (const patch of PATCHES) {
+    const absolute = path.join(runtime, patch.file);
+    if (!existsSync(absolute)) {
+      throw new Error(`Runtime-Datei fehlt: ${absolute}`);
+    }
+    if (!byFile.has(patch.file)) {
+      byFile.set(patch.file, {
+        original: readFileSync(absolute, "utf8"),
+        content: readFileSync(absolute, "utf8"),
+      });
+    }
+    const entry = byFile.get(patch.file);
+    const planned = planPatch(patch, entry.content);
+    entry.content = planned.content;
+    results.push({ patch, state: planned.state });
+  }
+
+  const pending = results.filter((result) => result.state === "pending");
+  for (const { patch, state } of results) {
+    const tag = state === "already" ? "OK  " : apply ? "PATCH" : "DRY ";
+    console.log(`${tag} ${patch.id} — ${patch.summary}`);
+  }
+
+  if (pending.length === 0) {
+    console.log(
+      `\nAlle ${PATCHES.length} Patches sind bereits angewendet (Runtime ${version}).`,
+    );
+    return;
+  }
+  if (!apply) {
+    console.log(
+      `\n${pending.length} von ${PATCHES.length} Patches fehlen; --apply schreibt sie.`,
+    );
+    return;
+  }
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupDir = path.join(SOURCE, "backups", "runtime-patches", stamp);
+  const changedFiles = [...byFile.entries()].filter(
+    ([, entry]) => entry.content !== entry.original,
+  );
+  mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  for (const [file, entry] of changedFiles) {
+    const backupPath = path.join(backupDir, file);
+    mkdirSync(path.dirname(backupPath), { recursive: true, mode: 0o700 });
+    copyFileSync(path.join(runtime, file), backupPath);
+    writeFileSync(path.join(runtime, file), entry.content, "utf8");
+  }
+  console.log(
+    `\n${pending.length} Patch(es) auf ${changedFiles.length} Datei(en) angewendet.`,
+  );
+  console.log(`Originale gesichert unter ${backupDir}`);
+  console.log("Verifikation: node tests/p1-runtime.mjs");
+}
+
+// Only run as a CLI, so the tests can import PATCHES and planPatch.
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  try {
+    main(process.argv.slice(2));
+  } catch (error) {
+    console.error(
+      `Runtime-Patch: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  }
+}

@@ -104,6 +104,12 @@ npm --prefix npm run verify
 npm run install:user -- --dry-run --target ~/.pi/agent
 ```
 
+Die lokal gepatchte Pi-Runtime liegt außerhalb dieses Arbeitsbaums und verliert
+ihre Patches bei jedem Runtime-Update.
+`node scripts/apply-runtime-patches.mjs --apply` stellt sie idempotent wieder
+her, `node tests/p1-runtime.mjs` verifiziert sie;
+Einzelheiten in [`docs/RUNTIME_PATCHES.md`](docs/RUNTIME_PATCHES.md).
+
 `/setup-doctor` meldet effektive Konfiguration, Vertrauen, Modell-Scopes,
 LSP-Modus, Extension-Anzahl und Runtime-/Manifest-Drift, ohne Zugangsdaten zu
 lesen. LSP-Server werden nicht automatisch installiert. Pakete bleiben exakt

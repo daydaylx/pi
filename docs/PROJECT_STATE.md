@@ -95,20 +95,25 @@ lokalen Patches überschrieben; `tests/p1-runtime.mjs` und damit `npm run verify
 waren rot. Alle vier Eingriffspunkte wurden gegen `0.82.1` neu geschrieben
 (gescopte Event-Listener im Loader, `ExtensionRunner.dispose()`, Aufruf im
 Reload-Pfad, `applyConfiguredExtensionOrder`) und der Versions-Pin nachgezogen.
-Der Reload-Test über zehn Generationen ist grün. Einzelheiten in
+Der Reload-Test über zehn Generationen ist grün.
+
+Damit sich das Nachschreiben von Hand nicht wiederholt, stehen die Eingriffe
+jetzt versioniert in `scripts/apply-runtime-patches.mjs`
+(`node scripts/apply-runtime-patches.mjs`): idempotent, alles-oder-nichts, mit Sicherung nach
+`backups/runtime-patches/` und hartem Abbruch bei geändertem Runtime-Code.
+`tests/runtime-patches.mjs` sichert das Skript ab und läuft in
+`npm run verify` mit. Verifiziert wurde es end-to-end gegen eine unpatched
+Kopie der Runtime: das Ergebnis ist byte-identisch mit der von Hand gepatchten
+Live-Installation und besteht `tests/p1-runtime.mjs`. Einzelheiten in
 [`RUNTIME_PATCHES.md`](RUNTIME_PATCHES.md).
 
 ## Nächste Repository-Prioritäten
 
-1. Die P1-Patches liegen außerhalb von Git und gehen bei jedem npm-Update der
-   Runtime verloren. Ein wiederanwendbares Patch-Skript im Repository würde das
-   Neuschreiben von Hand ersparen; bisher schützt nur `tests/p1-runtime.mjs`
-   davor, den Verlust zu übersehen.
-2. Angleichung von Pi-Runtime `0.82.1` und Dev-Pin `0.80.6` — braucht eine
+1. Angleichung von Pi-Runtime `0.82.1` und Dev-Pin `0.80.6` — braucht eine
    ausdrückliche Freigabe für die Abhängigkeitsänderung.
-3. Entfernung von `store/migration.ts` und `/migrate-plan`, sobald keine
+2. Entfernung von `store/migration.ts` und `/migrate-plan`, sobald keine
    Ausrollziele mehr v1/v2-Artefakte tragen (letzte unterstützte Version: v2).
    Dieses Repository selbst ist seit dem Verwerfen der lokalen Altartefakte
    v3-rein.
-4. Coverage von `lsp/index.ts` (20,5 %) und `ask-user.ts` (36,8 %) anheben oder
+3. Coverage von `lsp/index.ts` (20,5 %) und `ask-user.ts` (36,8 %) anheben oder
    die niedrigen Schwellen ausdrücklich als gewollt festhalten.

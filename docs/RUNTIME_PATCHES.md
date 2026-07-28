@@ -6,10 +6,42 @@ Version `0.82.1`. Sie enthält bewusst lokale P1-Patches, die nicht Teil dieses
 Git-Arbeitsbaums sind.
 
 > **Historie:** Das Upgrade von `0.82.0` auf `0.82.1` hat die gepatchten Dateien
-> überschrieben; die Patches waren zwischenzeitlich verloren. Am 2026-07-28
-> wurden sie gegen `0.82.1` neu portiert und über `tests/p1-runtime.mjs`
-> verifiziert. Ein npm-Update der Runtime entfernt sie erneut — der Test ist die
-> einzige Absicherung dagegen.
+> überschrieben; die Patches waren zwischenzeitlich unbemerkt verloren. Am
+> 2026-07-28 wurden sie gegen `0.82.1` neu portiert und in
+> `scripts/apply-runtime-patches.mjs` versioniert, damit sich das Nachschreiben
+> von Hand nicht wiederholt.
+
+## Wiederherstellen
+
+Die Patches liegen in `node_modules` und überleben kein `npm update` der
+Runtime. Der Quelltext der Eingriffe steht deshalb versioniert im Repository:
+
+```sh
+node scripts/apply-runtime-patches.mjs            # Vorschau, schreibt nichts
+node scripts/apply-runtime-patches.mjs --apply    # anwenden
+node tests/p1-runtime.mjs                         # verifizieren
+```
+
+Gleichwertig über npm: `npm --prefix npm run patch:runtime -- --apply`.
+
+Eigenschaften des Skripts:
+
+- **Idempotent.** Ein bereits gepatchter Eingriffspunkt wird als `OK` gemeldet
+  und nicht angefasst; wiederholte Läufe ändern nichts.
+- **Laut statt findig.** Findet es einen Ankertext nicht mehr oder mehrfach,
+  bricht der gesamte Lauf ab, bevor irgendetwas geschrieben wurde. Eine
+  geänderte Runtime verlangt eine Prüfung, keine Näherung.
+- **Alles-oder-nichts.** Alle Eingriffe werden erst geplant, dann geschrieben —
+  eine halb gepatchte Runtime kann nicht entstehen.
+- **Reversibel.** Vor dem ersten Schreibvorgang landen die Originale unter
+  `backups/runtime-patches/<Zeitstempel>/`.
+- **Versionsgebunden.** Weicht die installierte Version von
+  `EXPECTED_RUNTIME_VERSION` ab, bricht das Skript ab. `--allow-version-drift`
+  erzwingt den Lauf ausdrücklich und sichtbar.
+
+Mit `--runtime <pfad>` lässt sich eine andere Installation ansprechen.
+`tests/runtime-patches.mjs` prüft das Skript selbst und läuft in
+`npm run verify` mit.
 
 ## Umfang
 

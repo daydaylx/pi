@@ -24,6 +24,10 @@ const ALLOWLIST = [
   "npm/package.json",
   "npm/package-lock.json",
   "schemas",
+  // The runtime-patch script has to travel with the setup: the patches live in
+  // node_modules and every runtime update removes them, so an installed agent
+  // dir needs to be able to restore them on its own.
+  "scripts",
   "skills",
   "tests",
   "themes",
@@ -38,7 +42,8 @@ const NEVER_COPY = new Set([
 
 function parseArgs(argv) {
   let apply = false;
-  let target = process.env.PI_CODING_AGENT_DIR || path.join(homedir(), ".pi", "agent");
+  let target =
+    process.env.PI_CODING_AGENT_DIR || path.join(homedir(), ".pi", "agent");
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--apply") apply = true;
@@ -59,7 +64,9 @@ function collect(source, relative = "") {
   const current = path.join(source, relative);
   const stat = lstatSync(current);
   if (stat.isSymbolicLink()) {
-    throw new Error(`Symlink im Deployment-Manifest nicht erlaubt: ${relative}`);
+    throw new Error(
+      `Symlink im Deployment-Manifest nicht erlaubt: ${relative}`,
+    );
   }
   if (stat.isFile()) return [relative];
   if (!stat.isDirectory()) return [];
@@ -75,7 +82,10 @@ function assertNoSymlinkComponents(candidate) {
   const absolute = path.resolve(candidate);
   const parsed = path.parse(absolute);
   let current = parsed.root;
-  for (const segment of absolute.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
+  for (const segment of absolute
+    .slice(parsed.root.length)
+    .split(path.sep)
+    .filter(Boolean)) {
     current = path.join(current, segment);
     if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
       throw new Error(`Symlink im Zielpfad nicht erlaubt: ${current}`);
@@ -85,7 +95,9 @@ function assertNoSymlinkComponents(candidate) {
 
 const { apply, target } = parseArgs(process.argv.slice(2));
 if (target === SOURCE) {
-  console.log("Quelle und Ziel sind identisch; keine Dateien zu synchronisieren.");
+  console.log(
+    "Quelle und Ziel sind identisch; keine Dateien zu synchronisieren.",
+  );
   process.exit(0);
 }
 
