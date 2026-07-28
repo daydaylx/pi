@@ -11,8 +11,14 @@ import {
   type CommandDefinition,
   type CommandEffect,
 } from "../shared/command-catalog.ts";
+import { resolveLspInteractiveCommand } from "../lsp/control-center.ts";
 import { submitCanonicalCommand } from "../shared/command-runtime.ts";
-import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
+import {
+  choose,
+  cleanInput,
+  runMenu,
+  type MenuEntry,
+} from "../shared/menu-ui.ts";
 
 export interface CommandCenterState {
   hasActivePlan: boolean;
@@ -42,8 +48,7 @@ function disabledReason(
   name: string,
   state: CommandCenterState,
 ): string | undefined {
-  if (NEEDS_PLAN.has(name) && !state.hasActivePlan)
-    return "Kein aktiver Plan.";
+  if (NEEDS_PLAN.has(name) && !state.hasActivePlan) return "Kein aktiver Plan.";
   if (name === "work" && !state.hasActivePlan)
     return "Erstelle und bestätige zuerst einen Plan.";
   if ((name === "plan" || name === "workflow") && state.hasActiveDirectTask)
@@ -94,11 +99,12 @@ function dynamicEntry(command: AvailableCommand): MenuEntry<CommandMenuAction> {
     description:
       command.description ??
       "Dynamisch registrierter Command ohne zusätzliche Beschreibung.",
-    badge: command.source === "prompt"
-      ? "PROMPT"
-      : command.source === "skill"
-        ? "SKILL"
-        : "ERWEITERUNG",
+    badge:
+      command.source === "prompt"
+        ? "PROMPT"
+        : command.source === "skill"
+          ? "SKILL"
+          : "ERWEITERUNG",
     value: {
       name: command.name,
       commandLine: `/${command.name}`,
@@ -117,13 +123,18 @@ export function buildCommandCenterEntries(
       ...(definition.aliases ?? []),
     ]),
   );
-  const knownByCategory = new Map<CommandCategoryId, MenuEntry<CommandMenuAction>[]>();
+  const knownByCategory = new Map<
+    CommandCategoryId,
+    MenuEntry<CommandMenuAction>[]
+  >();
   for (const category of COMMAND_CATEGORIES)
     knownByCategory.set(category.id, []);
 
   for (const definition of COMMAND_DEFINITIONS) {
     if (definition.name === "commands") continue;
-    knownByCategory.get(definition.category)?.push(commandEntry(definition, state));
+    knownByCategory
+      .get(definition.category)
+      ?.push(commandEntry(definition, state));
   }
 
   const prompts = available
@@ -184,32 +195,11 @@ export function buildCommandCenterEntries(
   }));
 }
 
-function cleanInput(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  return normalized && !/[\r\n]/.test(normalized) ? normalized : undefined;
-}
-
 function quotePathArgument(value: string): string | undefined {
   if (!/\s/.test(value)) return value;
   if (!value.includes("'")) return `'${value}'`;
   if (!value.includes('"')) return `"${value}"`;
   return undefined;
-}
-
-async function choose(
-  ctx: ExtensionContext,
-  title: string,
-  entries: ReadonlyArray<{ label: string; value: string }>,
-): Promise<string | undefined> {
-  return runMenu(
-    ctx,
-    title,
-    entries.map((entry) => ({
-      id: `${title}-${entry.value || "default"}`,
-      label: entry.label,
-      value: entry.value,
-    })),
-  );
 }
 
 async function guideCommand(
@@ -226,27 +216,13 @@ async function guideCommand(
         { label: "STANDARD erzwingen · /route standard", value: "standard" },
         { label: "HIGH erzwingen · /route high", value: "high" },
       ]);
-      return level === undefined ? undefined : `/route${level ? ` ${level}` : ""}`;
+      return level === undefined
+        ? undefined
+        : `/route${level ? ` ${level}` : ""}`;
     }
     case "lsp": {
-      const subcommand = await choose(ctx, "LSP-Steuerung · /lsp", [
-        { label: "Status · /lsp status", value: "status" },
-        { label: "Aktivieren · /lsp on", value: "on" },
-        { label: "Deaktivieren · /lsp off", value: "off" },
-        { label: "Server neu starten · /lsp restart", value: "restart" },
-        { label: "Server auflisten · /lsp servers", value: "servers" },
-        { label: "Log anzeigen · /lsp log", value: "log" },
-        { label: "Datei diagnostizieren · /lsp diagnostics", value: "diagnostics" },
-      ]);
-      if (!subcommand) return undefined;
-      if (subcommand !== "restart") return `/lsp ${subcommand}`;
-      const server = cleanInput(
-        await ctx.ui.input(
-          "LSP-Server neu starten",
-          "Server-ID leer lassen, um alle Server neu zu starten",
-        ),
-      );
-      return `/lsp restart${server ? ` ${server}` : ""}`;
+      const resolved = await resolveLspInteractiveCommand(ctx);
+      return resolved ? `/lsp ${resolved}` : undefined;
     }
     case "name": {
       const name = cleanInput(
@@ -256,12 +232,18 @@ async function guideCommand(
     }
     case "import": {
       const path = cleanInput(
-        await ctx.ui.input("Sitzung importieren · /import", "Pfad zur JSONL-Datei"),
+        await ctx.ui.input(
+          "Sitzung importieren · /import",
+          "Pfad zur JSONL-Datei",
+        ),
       );
       if (!path) return undefined;
       const quoted = quotePathArgument(path);
       if (!quoted) {
-        ctx.ui.notify("Der Pfad enthält nicht sicher darstellbare Anführungszeichen.", "error");
+        ctx.ui.notify(
+          "Der Pfad enthält nicht sicher darstellbare Anführungszeichen.",
+          "error",
+        );
         return undefined;
       }
       return `/import ${quoted}`;
@@ -274,15 +256,15 @@ async function guideCommand(
       if (!mode) return undefined;
       if (mode === "default") return "/export";
       const path = cleanInput(
-        await ctx.ui.input(
-          "Export-Ziel",
-          "Pfad mit .html oder .jsonl",
-        ),
+        await ctx.ui.input("Export-Ziel", "Pfad mit .html oder .jsonl"),
       );
       if (!path) return undefined;
       const quoted = quotePathArgument(path);
       if (!quoted) {
-        ctx.ui.notify("Der Pfad enthält nicht sicher darstellbare Anführungszeichen.", "error");
+        ctx.ui.notify(
+          "Der Pfad enthält nicht sicher darstellbare Anführungszeichen.",
+          "error",
+        );
         return undefined;
       }
       return `/export ${quoted}`;

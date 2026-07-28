@@ -8,7 +8,12 @@ import {
   CONTROL_CENTER_EVENTS,
   type OpenControlCenterMenuEvent,
 } from "../shared/control-center-events.ts";
-import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
+import {
+  choose,
+  cleanInput,
+  runMenu,
+  type MenuEntry,
+} from "../shared/menu-ui.ts";
 import { EXTENSION_LANGUAGE_MAP } from "./server-profiles.ts";
 import { runLspDiagnostics, type LspToolsDeps } from "./tools.ts";
 
@@ -187,4 +192,32 @@ export function registerLspControlCenter(
     await open((event as OpenControlCenterMenuEvent).ctx);
   });
   return open;
+}
+
+/**
+ * The one interactive resolver for a bare `/lsp`. Both the direct command
+ * handler and the Command Center guide call this, so a chosen action can
+ * never differ depending on which entry point picked it.
+ */
+export async function resolveLspInteractiveCommand(
+  ctx: ExtensionContext,
+): Promise<string | undefined> {
+  const subcommand = await choose(ctx, "LSP-Steuerung · /lsp", [
+    { label: "Status · /lsp status", value: "status" },
+    { label: "Aktivieren · /lsp on", value: "on" },
+    { label: "Deaktivieren · /lsp off", value: "off" },
+    { label: "Server neu starten · /lsp restart", value: "restart" },
+    { label: "Server auflisten · /lsp servers", value: "servers" },
+    { label: "Log anzeigen · /lsp log", value: "log" },
+    { label: "Datei diagnostizieren · /lsp diagnostics", value: "diagnostics" },
+  ]);
+  if (!subcommand) return undefined;
+  if (subcommand !== "restart") return subcommand;
+  const server = cleanInput(
+    await ctx.ui.input(
+      "LSP-Server neu starten",
+      "Server-ID leer lassen, um alle Server neu zu starten",
+    ),
+  );
+  return server ? `restart ${server}` : "restart";
 }

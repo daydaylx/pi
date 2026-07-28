@@ -3852,6 +3852,93 @@ await section("LSP command, status and trust (#97)", async () => {
     }
   }
 
+  // --- resolveLspInteractiveCommand is the one resolver behind bare /lsp
+  // and the Command Center guide, so a chosen action can no longer differ
+  // depending on which entry point picked it ---
+  {
+    const restartHarness = createHarness({
+      select: (labels) =>
+        labels.find((label) => label.includes("Server neu starten")),
+      input: () => "primary",
+    });
+    const restartContext = restartHarness.makeContext();
+    restartContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    eq(
+      await lspControlCenter.resolveLspInteractiveCommand(restartContext),
+      "restart primary",
+      "restart threads the typed server id through the shared resolver",
+    );
+
+    const restartAllHarness = createHarness({
+      select: (labels) =>
+        labels.find((label) => label.includes("Server neu starten")),
+      input: () => "  ",
+    });
+    const restartAllContext = restartAllHarness.makeContext();
+    restartAllContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    eq(
+      await lspControlCenter.resolveLspInteractiveCommand(restartAllContext),
+      "restart",
+      "leaving the server id blank still restarts every server",
+    );
+
+    let statusInputCalls = 0;
+    const statusHarness = createHarness({
+      select: (labels) => labels.find((label) => label.includes("Status")),
+      input: () => {
+        statusInputCalls += 1;
+        return undefined;
+      },
+    });
+    const statusContext = statusHarness.makeContext();
+    statusContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    eq(
+      await lspControlCenter.resolveLspInteractiveCommand(statusContext),
+      "status",
+      "non-restart choices resolve directly",
+    );
+    eq(statusInputCalls, 0, "non-restart choices never prompt for a server id");
+  }
+
+  // --- bare /lsp now reuses that resolver, so restart honors a typed id
+  // instead of silently restarting every server (the pre-fix behavior) ---
+  {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-bare-menu-"));
+    const harness = createHarness({
+      select: (labels) =>
+        labels.find((label) => label.includes("Server neu starten")),
+      input: () => "ghost-server",
+    });
+    lspExtensionMod.default(harness.api);
+    const context = harness.makeContext({ cwd, trusted: true });
+    context.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await harness.runHooks("session_start", {}, context);
+
+    await harness.commands.get("lsp")("", context);
+    const text = harness.notifications.at(-1)?.message ?? "";
+    assert(
+      text.includes("kein laufender Server 'ghost-server'"),
+      "bare /lsp restart targets exactly the typed server id (got: " +
+        text +
+        ")",
+    );
+
+    await harness.runHooks("session_shutdown", {}, context);
+    try {
+      rmSync(cwd, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
   // --- Footer status only appears in TUI mode ---
   {
     for (const mode of ["json", "print", "rpc"]) {

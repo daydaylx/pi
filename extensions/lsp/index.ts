@@ -72,7 +72,10 @@ import {
   registerLspDiagnosticsTool,
   registerLspNavigationTools,
 } from "./tools.ts";
-import { registerLspControlCenter } from "./control-center.ts";
+import {
+  registerLspControlCenter,
+  resolveLspInteractiveCommand,
+} from "./control-center.ts";
 import type { LspToolsDeps } from "./tools.ts";
 import { computeLspStatus, publishLspStatus } from "./status.ts";
 import { defaultSetupConfig, loadSetupConfig } from "../setup-core/config.ts";
@@ -342,25 +345,18 @@ export default function lspExtension(pi: ExtensionAPI): void {
     description:
       "LSP steuern: status | on | off | restart [id] | servers | log | diagnostics",
     handler: async (args, ctx) => {
-      const [sub, ...rest] = args.trim().split(/\s+/).filter(Boolean);
+      const [sub] = args.trim().split(/\s+/).filter(Boolean);
       if (sub === undefined) {
-        const choice = await ctx.ui.select("LSP-Steuerung · /lsp", [
-          "Status · /lsp status",
-          "Aktivieren · /lsp on",
-          "Deaktivieren · /lsp off",
-          "Server neu starten · /lsp restart",
-          "Server auflisten · /lsp servers",
-          "Log anzeigen · /lsp log",
-          "Datei diagnostizieren · /lsp diagnostics",
-        ]);
-        const selected = choice?.match(/\/lsp(?:\s+([a-z]+))?$/)?.[1];
-        if (!selected) return;
-        args = selected;
+        const resolved = await resolveLspInteractiveCommand(ctx);
+        if (!resolved) return;
+        args = resolved;
       }
-      const [resolvedSub, ...resolvedRest] = args.trim().split(/\s+/).filter(Boolean);
+      const [resolvedSub, ...resolvedRest] = args
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
       switch (resolvedSub) {
-        case "status":
-        {
+        case "status": {
           const state = registry
             ? computeLspStatus(config, registry.list())
             : "aus";
