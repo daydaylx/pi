@@ -21,6 +21,6 @@
     "extensions/tool-output-guard.ts": 100,
     "extensions/diff-viewer/index.ts": 50,
     "extensions/control-plane.ts": 100,
-    "extensions/aurora-ui/index.ts": 81
+    "extensions/aurora-ui/index.ts": 93
   }
 }

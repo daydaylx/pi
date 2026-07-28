@@ -1738,6 +1738,46 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
   assert(Boolean(harness.footerFactory), "Aurora installs a footer factory");
   assert(Boolean(harness.editorFactory), "Aurora installs an editor factory");
 
+  // A second consumer asks for the current state. Aurora answers on the
+  // snapshot channel — the contract aurora-ui/README.md documents.
+  {
+    const answers = [];
+    const stopListening = harness.api.events.on(
+      "aurora-ui/state/snapshot",
+      (value) => {
+        if (value?.source === "aurora-ui") answers.push(value);
+      },
+    );
+    const request = harness.emitted.find(
+      (entry) => entry.name === "aurora-ui/state/request",
+    )?.event;
+    assert(Boolean(request), "Aurora announces a session epoch on start");
+    harness.api.events.emit("aurora-ui/state/request", {
+      type: "request",
+      requestId: "control-center:1",
+      sessionEpoch: request?.sessionEpoch,
+      requester: "control-center",
+    });
+    eq(
+      answers.length,
+      1,
+      "Aurora answers a foreign state request exactly once",
+    );
+    eq(
+      answers[0]?.requestId,
+      "control-center:1",
+      "the snapshot carries the requester's id",
+    );
+    harness.api.events.emit("aurora-ui/state/request", {
+      type: "request",
+      requestId: "stale:1",
+      sessionEpoch: "epoch-from-a-previous-session",
+      requester: "control-center",
+    });
+    eq(answers.length, 1, "Aurora ignores a request from a stale epoch");
+    stopListening?.();
+  }
+
   if (harness.footerFactory) {
     let onBranchChange;
     const footer = harness.footerFactory(
@@ -1827,6 +1867,47 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
     footer.dispose?.();
   }
 
+  // The editor frame carries workflow and step only. Everything durable moved
+  // to the footer, so a status value must never appear on both surfaces.
+  if (harness.editorFactory) {
+    const identity = (value) => value;
+    const editor = harness.editorFactory(
+      {
+        requestRender() {},
+        write() {},
+        terminal: { rows: 40, columns: 140 },
+      },
+      {
+        borderColor: identity,
+        selectList: {
+          text: identity,
+          selectedText: identity,
+          description: identity,
+          scrollIndicator: identity,
+        },
+      },
+      { onAction() {}, get: () => undefined },
+    );
+    const framed = editor.render(140).map(stripAnsi);
+    const frame = framed.find((line) => line.startsWith("╭"));
+    assert(Boolean(frame), "the editor keeps exactly one frame line on top");
+    assert(
+      !framed.some((line) => line.startsWith("╰")),
+      "the lower frame line is gone with the values it used to carry",
+    );
+    assert(
+      frame?.includes("Schritt"),
+      "the editor frame names the current step",
+    );
+    for (const duplicated of ["Denken", "Kontext", "aurora-test-model"]) {
+      assert(
+        !frame?.includes(duplicated),
+        `the editor frame leaves ${duplicated} to the footer`,
+      );
+    }
+    editor.dispose?.();
+  }
+
   await harness.runHooks("agent_start", {}, context);
   eq(
     harness.workingVisibility.at(-1),
@@ -1855,6 +1936,24 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
     );
     component.dispose?.();
   }
+
+  // A turn that ends while a tool is still registered must not leave the
+  // activity surface claiming work. agent_end and agent_settled share one
+  // handler, so both have to clear it.
+  await harness.runHooks("agent_end", {}, context);
+  eq(
+    harness.workingVisibility.at(-1),
+    false,
+    "Aurora settles the activity surface when the turn ends",
+  );
+  eq(
+    harness.widgets
+      .get("aurora-ui/activity")
+      ?.content({ requestRender() {} }, context.ui.theme)
+      .render(140).length,
+    0,
+    "the activity widget renders nothing once the turn has settled",
+  );
   await harness.runHooks("session_shutdown", {}, context);
   eq(harness.widgets.size, 0, "Aurora removes its widget on shutdown");
   eq(
