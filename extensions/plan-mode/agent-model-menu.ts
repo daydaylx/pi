@@ -174,9 +174,7 @@ function saveRoutingProfilesToSetup(
 ): void {
   const setupPath = existsSync(join(cwd, ".pi", "setup.json"))
     ? join(cwd, ".pi", "setup.json")
-    : existsSync(join(cwd, "setup.json"))
-      ? join(cwd, "setup.json")
-      : join(getAgentDir(), "setup.json");
+    : join(cwd, "setup.json");
 
   let existing: Record<string, unknown> = {};
   if (existsSync(setupPath)) {
