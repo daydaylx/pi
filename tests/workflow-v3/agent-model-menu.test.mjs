@@ -55,9 +55,23 @@ await test("openAgentModelMenu updates setup.json and session routing", async ()
       select: async (_title, labels) => {
         selectCallCount++;
         if (selectCallCount === 1) {
-          return labels.find((opt) => opt.includes("HIGH › Reviewer")) ?? labels[0];
+          const matched = labels.find(
+            (opt) => opt.includes("HIGH") && opt.includes("Reviewer"),
+          );
+          if (!matched) {
+            throw new Error(
+              `Expected slot label with HIGH and Reviewer, got: ${JSON.stringify(labels)}`,
+            );
+          }
+          return matched;
         }
-        return labels.find((opt) => opt.includes("claude-3-opus")) ?? labels[0];
+        const matchedModel = labels.find((opt) => opt.includes("claude-3-opus"));
+        if (!matchedModel) {
+          throw new Error(
+            `Expected model option with claude-3-opus, got: ${JSON.stringify(labels)}`,
+          );
+        }
+        return matchedModel;
       },
       models: {
         "anthropic/claude-3-opus": { provider: "anthropic", id: "claude-3-opus" },
