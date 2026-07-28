@@ -52,6 +52,9 @@ export async function discardPlan(
   if (!confirmed) return;
   try {
     discardActiveWorkflow(ctx.cwd, loaded.stateToken, true);
+    session.planningKind = undefined;
+    session.planningBaseContent = undefined;
+    session.planningIsReview = false;
     session.current = {
       stateToken: "missing",
       recovered: false,
@@ -59,6 +62,7 @@ export async function discardPlan(
       warnings: [],
     };
     updateWorkflowPresentation(ctx);
+    session.publishWorkflowActivation(ctx);
     session.notify(ctx, "Aktiver Plan und Sidecar wurden entfernt.", "warning");
   } catch (error) {
     session.notify(ctx, workflowWarning(error), "error");

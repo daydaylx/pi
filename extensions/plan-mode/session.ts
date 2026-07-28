@@ -88,7 +88,16 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
     },
 
     workflowMode() {
-      return session.planningKind ?? "work";
+      if (session.planningKind) return session.planningKind;
+      const status = session.current.state?.status;
+      if (status === "planning" || status === "reviewing") {
+        const planType = session.current.snapshot?.planType;
+        if (planType === "simple_plan" || planType === "detailed_plan") {
+          return planType;
+        }
+        return "simple_plan";
+      }
+      return "work";
     },
 
     publishWorkflowActivation(ctx) {
