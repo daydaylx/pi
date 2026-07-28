@@ -3,7 +3,6 @@
  * Rendert Diff-Einträge inline in der Konversation.
  */
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import type { DiffViewEntryData } from "./types.ts";

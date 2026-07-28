@@ -8,7 +8,6 @@
  */
 import { assessRouting } from "./assess.ts";
 import { decideRouting } from "./decide.ts";
-import { formatRoutingSummary } from "./format.ts";
 import { resolveProfiles } from "./profiles.ts";
 import type {
   RoutingDecision,

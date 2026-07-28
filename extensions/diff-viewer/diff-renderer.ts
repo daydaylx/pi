@@ -3,7 +3,7 @@
  * Unterstützt Compact- und Full-Modi.
  */
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { DiffHunk, DiffStats, FileDiff } from "./types.ts";
 
 /** Maximale Anzahl Hunk-Zeilen im Compact-Modus. */

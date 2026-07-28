@@ -10,6 +10,11 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+  AURORA_UI_CHANNELS,
+  isAuroraUiStateRequest,
+  publishAuroraUiSnapshot,
+} from "../aurora-ui/state.ts";
 import { CONTROL_CENTER_EVENTS } from "../shared/control-center-events.ts";
 import {
   WORKFLOW_CAPABILITY_EVENTS,
@@ -18,7 +23,12 @@ import {
 import { finishWorkflow } from "./completion-commands.ts";
 import { executionPrompt, pauseExecution } from "./execution.ts";
 import { finalizePlanning, planningPrompt, reviewPrompt } from "./planning.ts";
-import { clearWorkflowPresentation, workflowWarning } from "./presentation.ts";
+import {
+  clearWorkflowPresentation,
+  computeAuroraWorkflowState,
+  setAuroraEpoch,
+  workflowWarning,
+} from "./presentation.ts";
 import type { WorkflowSession } from "./session.ts";
 import { loadDirectTask } from "./store/index.ts";
 
@@ -26,6 +36,19 @@ export function registerPlanEvents(
   pi: ExtensionAPI,
   session: WorkflowSession,
 ): void {
+  pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
+    if (!isAuroraUiStateRequest(value)) return;
+    setAuroraEpoch(value.sessionEpoch);
+    const override = session.planningKind
+      ? session.planningIsReview
+        ? "reviewing"
+        : "planning"
+      : undefined;
+    publishAuroraUiSnapshot(pi, value, "plan-mode", {
+      workflow: computeAuroraWorkflowState(session.current.state, override),
+    });
+  });
+
   pi.events.on(WORKFLOW_CAPABILITY_EVENTS.request, (value) => {
     const request = value as Partial<WorkflowCapabilityRequest>;
     if (typeof request.respond !== "function") return;

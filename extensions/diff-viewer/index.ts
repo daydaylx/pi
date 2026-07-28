@@ -66,11 +66,10 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
       return;
     }
     await ctx.ui.custom<void>(
-      (tui: TUI, theme: Theme, keybindings, done) => {
+      (tui: TUI, theme: Theme, _keybindings, done) => {
         const browser = new DiffBrowserComponent(
           changes,
           theme,
-          keybindings,
           (path) => {
             const change = changes.find((candidate) => candidate.path === path);
             return change

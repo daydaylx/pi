@@ -58,7 +58,7 @@ export async function runTabbedOverlay<T>(
   }
 
   // Keep this dynamic: static pi-tui imports break the jiti test loader.
-  const { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } = await import("@earendil-works/pi-tui");
+  const { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } = await import("@earendil-works/pi-tui");
   let terminal = () => ({ columns: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 24 });
   const start = Math.max(0, tabs.findIndex((tab) => tab.id === options.initialTabId));
 

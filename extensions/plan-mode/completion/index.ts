@@ -7,7 +7,6 @@
  * neither the checks nor the review changed the working tree.
  */
 import { captureDiffEvidence, verifyDiffStability } from "./diff-evidence.ts";
-import { formatCompletionResult } from "./formatter.ts";
 import { runLspChecks, selectLspFiles } from "./lsp-check.ts";
 import { buildReport } from "./report.ts";
 import {
@@ -16,7 +15,6 @@ import {
   runReviewerCheck,
 } from "./reviewer-check.ts";
 import {
-  canOverrideCompletion,
   classifyCompletionResult,
 } from "./result-policy.ts";
 import { evaluateScope } from "./scope-check.ts";

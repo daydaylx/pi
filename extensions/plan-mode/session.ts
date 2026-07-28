@@ -110,7 +110,7 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
 
     reload(ctx) {
       session.current = loadWorkflowStateV3(ctx.cwd);
-      updateWorkflowPresentation(ctx, session.current.state);
+      updateWorkflowPresentation(ctx, session.current.state, undefined, session.pi);
       return session.current;
     },
 
@@ -126,7 +126,7 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
         stateToken: saved.stateToken,
         recovered: false,
       };
-      updateWorkflowPresentation(ctx, saved.state);
+      updateWorkflowPresentation(ctx, saved.state, undefined, session.pi);
       return saved.state;
     },
 

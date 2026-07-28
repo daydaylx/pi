@@ -1,4 +1,9 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  publishAuroraUiPatch,
+  type AuroraUiState,
+  type AuroraWorkflowPhase,
+} from "../aurora-ui/state.ts";
 import { setTuiStatus, UI_STATUS_KEYS } from "../shared/workflow-status.ts";
 import type { PlanSnapshot } from "./plan-snapshot.ts";
 import type { WorkflowStateV3, WorkflowStatus } from "./store/index.ts";
@@ -13,6 +18,33 @@ const LABELS: Record<WorkflowStatus, string> = {
   done: "FERTIG",
 };
 
+let currentAuroraEpoch: string | undefined;
+
+export function setAuroraEpoch(epoch: string | undefined): void {
+  currentAuroraEpoch = epoch;
+}
+
+export function computeAuroraWorkflowState(
+  state?: WorkflowStateV3,
+  override?: WorkflowStatus,
+): AuroraUiState["workflow"] {
+  const phase: AuroraWorkflowPhase = override ?? state?.status ?? "idle";
+  const completed = state?.steps.filter(
+    (step) => step.status === "completed",
+  ).length;
+  const total = state?.steps.length;
+  const suffix =
+    state &&
+    state.steps.length > 0 &&
+    (state.status === "working" ||
+      state.status === "paused" ||
+      state.status === "blocked")
+      ? ` ${completed}/${state.steps.length}`
+      : "";
+  const label = `${LABELS[phase]}${suffix}`;
+  return { phase, label, completed, total };
+}
+
 /**
  * Publish the workflow label.
  *
@@ -24,35 +56,32 @@ export function updateWorkflowPresentation(
   ctx: ExtensionContext,
   state?: WorkflowStateV3,
   override?: WorkflowStatus,
+  pi?: ExtensionAPI,
 ): void {
-  if (override) {
-    setTuiStatus(ctx, UI_STATUS_KEYS.workflow, LABELS[override]);
-    return;
-  }
-  if (!state) {
-    setTuiStatus(ctx, UI_STATUS_KEYS.workflow, LABELS.idle);
-    return;
-  }
-  const completed = state.steps.filter(
-    (step) => step.status === "completed",
-  ).length;
-  const suffix =
-    state.steps.length > 0 &&
-    (state.status === "working" ||
-      state.status === "paused" ||
-      state.status === "blocked")
-      ? ` ${completed}/${state.steps.length}`
-      : "";
+  const info = computeAuroraWorkflowState(state, override);
   setTuiStatus(
     ctx,
     UI_STATUS_KEYS.workflow,
-    `${LABELS[state.status]}${suffix}`,
+    override ? LABELS[override] : (!state ? LABELS.idle : info.label),
   );
+  if (currentAuroraEpoch && pi) {
+    publishAuroraUiPatch(pi, currentAuroraEpoch, "plan-mode", {
+      workflow: info,
+    });
+  }
 }
 
 /** Remove the workflow label; the session no longer owns a workflow. */
-export function clearWorkflowPresentation(ctx: ExtensionContext): void {
+export function clearWorkflowPresentation(
+  ctx: ExtensionContext,
+  pi?: ExtensionAPI,
+): void {
   setTuiStatus(ctx, UI_STATUS_KEYS.workflow, undefined);
+  if (currentAuroraEpoch && pi) {
+    publishAuroraUiPatch(pi, currentAuroraEpoch, "plan-mode", {
+      workflow: { phase: "idle", label: "ARBEIT" },
+    });
+  }
 }
 
 export function formatPlanSteps(

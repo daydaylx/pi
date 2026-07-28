@@ -10,7 +10,7 @@ import {
   assertSafePath,
   workflowPath,
 } from "./paths.ts";
-import { readBounded, serialize, writeAtomic } from "./atomic-files.ts";
+import { readBounded, writeAtomic } from "./atomic-files.ts";
 import { withWorkflowLock } from "./locks.ts";
 import { currentStateToken } from "./workflow-state.ts";
 import {

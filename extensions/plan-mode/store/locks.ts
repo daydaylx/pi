@@ -4,7 +4,7 @@
  * Deliberately without lease or heartbeat (Umbauvertrag §13.5): a stale lock is
  * only ever removed through an explicit, confirmed user action.
  */
-import { existsSync, mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmdirSync, unlinkSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { WORKFLOW_LOCK_RELATIVE_PATH, ensureParent, workflowPath } from "./paths.ts";

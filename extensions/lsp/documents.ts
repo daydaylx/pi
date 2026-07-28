@@ -66,7 +66,6 @@ interface DocumentEntry {
 export class DocumentSync {
   private readonly client: LspClient;
   private readonly workspaceRoot: string;
-  private readonly logger: LspLogger;
   private readonly documents = new Map<string, DocumentEntry>();
   private readonly diagnostics = new Map<string, DiagnosticsSnapshot>();
   private readonly waiters = new Map<
@@ -82,7 +81,6 @@ export class DocumentSync {
   }) {
     this.client = options.client;
     this.workspaceRoot = options.workspaceRoot;
-    this.logger = options.logger ?? (() => undefined);
     this.client.onNotification(this.onNotification);
     this.client.on("restart", this.onInvalidate);
     this.client.on("degraded", this.onInvalidate);

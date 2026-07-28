@@ -243,6 +243,7 @@ export async function finalizePlanning(
       warnings: [],
     };
     updateWorkflowPresentation(ctx, saved.state);
+    session.publishWorkflowActivation(ctx);
     session.notify(
       ctx,
       session.planningIsReview

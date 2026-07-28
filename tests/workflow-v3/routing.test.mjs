@@ -149,7 +149,7 @@ await test("profiles are swappable and fall back safely", () => {
   // An empty/invalid levels map falls back to the documented built-ins.
   const fallback = routing.resolveProfiles("high", { levels: {} });
   eq(
-    fallback.workerProfile,
+    fallback.worker,
     routing.DEFAULT_ROUTING_PROFILES.levels.high.worker,
     "invalid config uses the documented fallback",
   );

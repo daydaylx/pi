@@ -145,7 +145,7 @@ async function selectWithCustomUi<T>(
 ): Promise<MenuEntry<T> | undefined> {
   if (typeof ctx.ui.custom !== "function") throw new Error("Benutzerdefiniertes TUI-Overlay wird nicht unterstützt.");
   // This must stay dynamic: static pi-tui imports break the jiti test loader.
-  const { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } = await import("@earendil-works/pi-tui");
+  const { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } = await import("@earendil-works/pi-tui");
   let terminal = () => ({ columns: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 24 });
   return ctx.ui.custom<MenuEntry<T> | undefined>(
     (tui, theme, _keybindings, done) => {

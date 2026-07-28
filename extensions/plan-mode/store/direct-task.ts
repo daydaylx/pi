@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { isSafeTechnicalScopeEntry } from "../plan-snapshot.ts";
 import { DIRECT_TASK_RELATIVE_PATH, isRecord, workflowPath } from "./paths.ts";
 import { readBounded, serialize, writeAtomic } from "./atomic-files.ts";
-import { MAX_DIRECT_TASK_BYTES, UUID_PATTERN, type DirectTask } from "./types.ts";
+import { MAX_DIRECT_TASK_BYTES, type DirectTask } from "./types.ts";
 
 function parseStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) &&

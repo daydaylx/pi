@@ -29,7 +29,7 @@ import {
   renderActiveTools,
   type ActiveToolView,
 } from "./tool-renderers.ts";
-import { crop, layoutFor } from "./layout.ts";
+import { crop } from "./layout.ts";
 import { renderFooterLines, type SubagentInfo } from "./footer.ts";
 
 const OWNER = "aurora-ui";

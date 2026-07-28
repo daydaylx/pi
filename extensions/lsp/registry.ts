@@ -264,13 +264,5 @@ export class ServerRegistry {
     entry.client.shutdown().catch(() => undefined);
   }
 
-  private remove(key: string): void {
-    const entry = this.entries.get(key);
-    if (entry) {
-      this.clearIdle(entry);
-      // P1.1: Properly shutdown the client process when removing entry
-      this.shutdownEntry(entry).catch(() => undefined);
-      this.entries.delete(key);
-    }
-  }
+
 }

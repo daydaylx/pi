@@ -2,7 +2,7 @@
  * Diff-Browser-Overlay: Vollbild-Ansicht aller Session-Änderungen.
  * Registriert als `/changes`-Command.
  */
-import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   truncateToWidth,
@@ -32,8 +32,6 @@ export class DiffBrowserComponent implements Component {
   private selectedFile = 0;
   private listScrollOffset = 0;
   private scrollOffset = 0;
-  private cachedWidth?: number;
-  private cachedLines?: string[];
 
   // Callbacks
   public onClose?: () => void;
@@ -41,7 +39,6 @@ export class DiffBrowserComponent implements Component {
   constructor(
     private readonly files: SessionChange[],
     private readonly theme: Theme,
-    private readonly keybindings: KeybindingsManager,
     private readonly getDiffForFile: (path: string) => FileDiff | null,
     private readonly maxHeight = 40,
     private readonly requestRender: () => void = () => {},
@@ -236,10 +233,7 @@ export class DiffBrowserComponent implements Component {
     return lines;
   }
 
-  invalidate(): void {
-    this.cachedWidth = undefined;
-    this.cachedLines = undefined;
-  }
+  invalidate(): void {}
 }
 
 function renderBorder(
@@ -248,7 +242,6 @@ function renderBorder(
   width: number,
   edge: "top" | "bottom",
 ): string {
-  const color = theme.fg("borderAccent", "");
   if (width <= 2) return truncateToWidth(label, width);
   const left = edge === "top" ? "╭─" : "╰─";
   const right = edge === "top" ? "╮" : "╯";

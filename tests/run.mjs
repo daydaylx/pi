@@ -1709,6 +1709,7 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
       sessionEpoch: value.sessionEpoch,
       source: "permissions-test-provider",
       state: {
+        workflow: { phase: "working", label: "Schritt 1/3" },
         permissions: { level: "project-write", label: "Projekt schreiben" },
       },
     });

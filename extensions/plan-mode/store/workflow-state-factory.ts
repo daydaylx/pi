@@ -16,11 +16,12 @@ import {
 export function reconcileSteps(
   state: WorkflowStateV3 | undefined,
   snapshotSteps: readonly { id: string }[],
+  samePlan = true,
 ): WorkflowStepState[] {
   const previous = new Map((state?.steps ?? []).map((step) => [step.id, step]));
   const next = snapshotSteps.map((step) => {
     const existing = previous.get(step.id);
-    return existing
+    return existing && samePlan
       ? { ...existing }
       : { id: step.id, status: "pending" as const };
   });
@@ -49,7 +50,7 @@ export function createWorkflowState(
     previous?.planId === snapshot.planId &&
     previous.planRevision === snapshot.planRevision &&
     previous.planHash === snapshot.planHash;
-  const steps = reconcileSteps(previous, snapshot.steps);
+  const steps = reconcileSteps(previous, snapshot.steps, samePlan);
   return {
     version: WORKFLOW_STATE_VERSION,
     revision: Math.max(1, (previous?.revision ?? 0) + 1),
