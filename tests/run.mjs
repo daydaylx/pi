@@ -1044,8 +1044,8 @@ await section("Control Center menus and routing", async () => {
     const [workflowSwitch, controlCenter] = seen;
     eq(
       workflowSwitch,
-      ["Schnellplan", "Architekturplan", "Arbeiten"],
-      "Shift+Tab is the workflow switch and offers only the workflow modes",
+      ["Schnellplan", "Architekturplan", "Direktauftrag starten"],
+      "Shift+Tab separates planning from the available plan-less direct task",
     );
     assert(
       workflowSwitch.every((entry) => controlCenter.includes(entry)),

@@ -114,7 +114,7 @@ await test("plan workflow lifecycle", async () => {
   }
 });
 
-await test("workflow menus select modes without auto-starting work", async () => {
+await test("workflow menus keep planning passive and block plan work without a plan", async () => {
   if (!planMode || !controlPlane) return;
   const cwd = mkdtempSync(path.join(tmpdir(), "pi-passive-mode-menu-"));
   try {
@@ -138,17 +138,19 @@ await test("workflow menus select modes without auto-starting work", async () =>
       "Shift+Tab mode selection never sends a triggerTurn request",
     );
 
-    choice = "Arbeiten";
+    choice = "Plan ausführen / fortsetzen";
     await harness.shortcuts.get("shift+tab")(context);
     eq(
       harness.sent.length,
       sentBeforePlanMode,
-      "selecting work only changes the mode and does not start execution",
+      "the unavailable plan-work entry cannot start execution",
     );
     const workContext = await harness.runHooks("before_agent_start", {}, context);
     assert(
-      workContext.every((entry) => entry === undefined),
-      "work mode after a passive plan selection injects no planning or execution prompt",
+      workContext.some((entry) =>
+        entry?.message?.content?.includes("PI WORKFLOW: PLANUNG"),
+      ),
+      "the disabled plan-work entry leaves the selected planning mode intact",
     );
 
     choice = "Architekturplan";

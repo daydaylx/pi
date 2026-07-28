@@ -13,7 +13,7 @@
 - Berechtigungsmodell: `readonly`, `project-write`, `confirm-all`, temporäres `yolo`. Work startet mit `project-write`, beide Planvarianten mit `readonly`. YOLO wird nie persistiert
 - Frischer Subagenten-Kontext, maximale Parallelität drei
 - Modellwahl folgt Pi-nativ `settings.enabledModels`; die Auswahl wechselt sofort zum gewählten Modell und ist während eines laufenden Turns gesperrt
-- **Shift+Tab ist der Workflow-Wechsel** (Schnellplan, Architekturplan, Arbeiten). Super+Q öffnet das vollständige Control Center, dessen erster Reiter genau dieser Workflow-Wechsel ist
+- **Shift+Tab ist der Workflow-Wechsel** (Schnellplan, Architekturplan, Plan ausführen/fortsetzen, Direktauftrag starten/fortsetzen). Super+Q öffnet das vollständige Control Center, dessen erster Reiter genau dieser Workflow-Wechsel ist
 - Thinking zeigt sichtbar „Auto" oder „Manuell"; im Auto-Modus folgt die Denktiefe dem Workflow, eine manuell gewählte Stufe bleibt unangetastet
 - Diagnose zeigt Status und erlaubt eine Dateiprüfung über eine kurze Dateiauswahl
 - Ctrl+Shift+X ist entfernt

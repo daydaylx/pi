@@ -131,6 +131,9 @@ await test("extension entry drives plan, work, completion, direct task and recov
       async select() { return selectQueue.shift(); },
       async confirm() { return true; },
       async input() { return inputQueue.shift(); },
+      async custom() {
+        throw new Error("use deterministic select fallback");
+      },
     },
   };
   const runHook = async (name) => {
@@ -189,7 +192,8 @@ await test("extension entry drives plan, work, completion, direct task and recov
     await commands.get("review-plan")("", context);
     await runHook("before_agent_start");
     await runHook("agent_settled");
-    await commands.get("work")("", context);
+    selectQueue.push("Plan ausführen / fortsetzen");
+    await shortcuts.get("shift+tab")(context);
     const workContext = await runHook("before_agent_start");
     assert(
       workContext.some((entry) =>
@@ -228,6 +232,38 @@ await test("extension entry drives plan, work, completion, direct task and recov
     assert(
       !existsSync(path.join(cwd, store.PLAN_RELATIVE_PATH)),
       "successful automatic completion archives the active plan",
+    );
+
+    inputQueue.push(
+      "Direktauftrag aus dem Workflow-Menü",
+      "extensions/**",
+      "typecheck",
+      "requested behavior works",
+    );
+    selectQueue.push("Direktauftrag starten");
+    await shortcuts.get("shift+tab")(context);
+    assert(
+      Boolean(store.loadDirectTask(cwd)),
+      "workflow menu creates the explicit plan-less direct task",
+    );
+    assert(
+      sent.some((entry) => entry.customType === "pi-direct-task"),
+      "workflow menu starts direct-task execution immediately",
+    );
+    const directTurnsBeforeResume = sent.filter(
+      (entry) => entry.customType === "pi-direct-task",
+    ).length;
+    selectQueue.push("Direktauftrag fortsetzen");
+    await shortcuts.get("shift+tab")(context);
+    equal(
+      sent.filter((entry) => entry.customType === "pi-direct-task").length,
+      directTurnsBeforeResume + 1,
+      "workflow menu resumes the active direct task without creating another one",
+    );
+    await commands.get("task-done")("", context);
+    assert(
+      !store.loadDirectTask(cwd),
+      "/task-done completes a direct task created from the workflow menu",
     );
 
     inputQueue.push(

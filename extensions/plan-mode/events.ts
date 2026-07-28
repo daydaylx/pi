@@ -96,7 +96,7 @@ export function registerPlanEvents(
       return {
         message: {
           customType: "pi-direct-task-context",
-          content: `Aktive direkte Aufgabe:\n${JSON.stringify(directTask, null, 2)}`,
+          content: `Aktiver Direktauftrag:\n${JSON.stringify(directTask, null, 2)}`,
         } as AgentMessage,
       };
     }

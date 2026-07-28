@@ -15,6 +15,8 @@ export type PlanAssistantAction =
   | "review"
   | "resume"
   | "show-steps"
+  | "view"
+  | "edit"
   | "verify"
   | "finish"
   | "discard"
@@ -71,6 +73,18 @@ export function buildPlanAssistantTab(
   }
 
   const common = [
+    action(
+      "plan-view",
+      "Plan anzeigen",
+      "Vollständigen Markdown-Plan im Terminal ausgeben",
+      "view",
+    ),
+    action(
+      "plan-edit",
+      "Plan manuell bearbeiten",
+      "current-plan.md im Editor öffnen und Sidecar synchronisieren",
+      "edit",
+    ),
     action(
       "plan-show-steps",
       "Schritte anzeigen",

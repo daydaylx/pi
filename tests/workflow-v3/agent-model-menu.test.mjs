@@ -44,15 +44,10 @@ await test("openAgentModelMenu updates setup.json and session routing", async ()
       "utf-8",
     );
 
-    const harness = createHarness();
-    planMode.default(harness.api);
-
     // Mock select choices: first slot "HIGH › Reviewer", second model "claude-3-opus"
     let selectCallCount = 0;
-    const context = harness.makeContext({
-      cwd,
-      mode: "tui",
-      select: async (_title, labels) => {
+    const harness = createHarness({
+      select: async (labels) => {
         selectCallCount++;
         if (selectCallCount === 1) {
           const matched = labels.find(
@@ -78,6 +73,8 @@ await test("openAgentModelMenu updates setup.json and session routing", async ()
         "anthropic/claude-3-5-haiku": { provider: "anthropic", id: "claude-3-5-haiku" },
       },
     });
+    planMode.default(harness.api);
+    const context = harness.makeContext({ cwd, mode: "tui" });
 
     await harness.runHooks("session_start", {}, context);
 

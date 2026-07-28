@@ -74,7 +74,7 @@ function stepsCheck(ctx: CompletionPipelineContext): CompletionCheck {
       classification: ctx.directTask ? "advisory" : "required",
       status: ctx.directTask ? "pass" : "not_run",
       summary: ctx.directTask
-        ? "Direct Task besitzt keinen Workflow-Step-State."
+        ? "Direktauftrag besitzt keinen Workflow-Step-State."
         : "Workflow-State fehlt.",
     };
   }
@@ -101,7 +101,7 @@ export async function runCompletionPipeline(
   ctx: CompletionPipelineContext,
 ): Promise<CompletionPipelineResult> {
   if (!ctx.plan && !ctx.directTask) {
-    throw new Error("Completion benötigt PlanSnapshot oder Direct Task.");
+    throw new Error("Completion benötigt PlanSnapshot oder Direktauftrag.");
   }
   if (ctx.plan && ctx.state) {
     if (

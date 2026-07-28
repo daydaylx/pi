@@ -7,9 +7,14 @@
  * contract fields must be stated by the user, never inferred.
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { activateWorkMode } from "./execution.ts";
 import { promptInput } from "./presentation.ts";
 import type { WorkflowSession } from "./session.ts";
-import { loadDirectTask, saveDirectTask } from "./store/index.ts";
+import {
+  loadDirectTask,
+  saveDirectTask,
+  type DirectTask,
+} from "./store/index.ts";
 import { routingInputFromDirectTask } from "./routing/index.ts";
 
 function commaList(value: string | undefined): string[] {
@@ -36,7 +41,7 @@ export function checkDirectTaskEligibility(
       ok: false,
       level: "error",
       message:
-        "Harte Trust-Grenze: Direct Tasks sind im untrusted Projekt blockiert.",
+        "Harte Trust-Grenze: Direktaufträge sind im untrusted Projekt blockiert.",
     };
   }
   if (session.reload(ctx).planContent) {
@@ -52,10 +57,79 @@ export function checkDirectTaskEligibility(
       ok: false,
       level: "warning",
       message:
-        "Direct Tasks benötigen TUI-Eingaben für Scope, Verifikation und Abschlusskriterien.",
+        "Direktaufträge benötigen TUI-Eingaben für Scope, Verifikation und Abschlusskriterien.",
     };
   }
   return { ok: true };
+}
+
+/** Start a direct task from the workflow menu, including its goal prompt. */
+export async function beginDirectTask(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): Promise<void> {
+  const eligibility = checkDirectTaskEligibility(session, ctx);
+  if (!eligibility.ok) {
+    session.notify(ctx, eligibility.message, eligibility.level);
+    return;
+  }
+  const goal = (
+    await promptInput(
+      ctx,
+      "Direktauftrag starten",
+      "Ziel der überschaubaren Änderung",
+    )
+  )?.trim();
+  if (!goal) return;
+  await startDirectTask(session, ctx, goal);
+}
+
+function startDirectTaskExecution(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+  task: DirectTask,
+): void {
+  activateWorkMode(session, ctx);
+  session.assessRouting(ctx, routingInputFromDirectTask(task));
+  session.publishWorkflowActivation(ctx);
+  session.pi.sendMessage(
+    {
+      customType: "pi-direct-task",
+      content: `Führe den Direktauftrag aus. Bleibe im technischen Scope und prüfe die Abschlusskriterien. Nutze /task-done zum Abschluss.\n\n${JSON.stringify(task, null, 2)}`,
+      display: true,
+    },
+    { triggerTurn: true },
+  );
+}
+
+/** Resume a stored direct task through the same explicit handoff as a new one. */
+export async function resumeDirectTask(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): Promise<void> {
+  if (!ctx.isProjectTrusted()) {
+    session.notify(
+      ctx,
+      "Harte Trust-Grenze: Direktaufträge sind im untrusted Projekt blockiert.",
+      "error",
+    );
+    return;
+  }
+  const loaded = session.reload(ctx);
+  if (loaded.planContent) {
+    session.notify(
+      ctx,
+      "Ein Plan ist aktiv. Schließe ihn ab oder verwirf ihn ausdrücklich mit /discard-plan.",
+      "warning",
+    );
+    return;
+  }
+  const task = loadDirectTask(ctx.cwd);
+  if (!task) {
+    session.notify(ctx, "Kein aktiver Direktauftrag.", "warning");
+    return;
+  }
+  startDirectTaskExecution(session, ctx, task);
 }
 
 export async function startDirectTask(
@@ -102,7 +176,7 @@ export async function startDirectTask(
   ) {
     session.notify(
       ctx,
-      "Direct Task nicht erstellt: alle drei Felder sind erforderlich.",
+      "Direktauftrag nicht erstellt: alle drei Felder sind erforderlich.",
       "warning",
     );
     return;
@@ -112,7 +186,7 @@ export async function startDirectTask(
   if (
     existing &&
     !(await ctx.ui.confirm(
-      "Direct Task überschreiben?",
+      "Direktauftrag überschreiben?",
       `Aktiv: ${existing.goal}`,
     ))
   ) {
@@ -124,13 +198,5 @@ export async function startDirectTask(
     verification,
     acceptanceCriteria,
   });
-  session.assessRouting(ctx, routingInputFromDirectTask(task));
-  session.pi.sendMessage(
-    {
-      customType: "pi-direct-task",
-      content: `Führe die direkte Aufgabe aus. Bleibe im technischen Scope und prüfe die Abschlusskriterien. Nutze /task-done zum Abschluss.\n\n${JSON.stringify(task, null, 2)}`,
-      display: true,
-    },
-    { triggerTurn: true },
-  );
+  startDirectTaskExecution(session, ctx, task);
 }

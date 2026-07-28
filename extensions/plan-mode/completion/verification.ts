@@ -207,6 +207,6 @@ export function verificationCoverageCheck(
     summary:
       declarations.length > 0
         ? `${declarations.length} deklarierte Verifikation(en) sind durch erfolgreiche Checks belegt.`
-        : "Plan oder Direct Task deklariert keine Verifikation.",
+        : "Plan oder Direktauftrag deklariert keine Verifikation.",
   };
 }

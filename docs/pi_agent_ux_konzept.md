@@ -4,7 +4,7 @@
 
 | Shortcut | Funktion |
 | --- | --- |
-| `Shift+Tab` | Workflow wechseln: Schnellplan, Architekturplan, Arbeiten |
+| `Shift+Tab` | Workflow wechseln: Schnellplan, Architekturplan, Planarbeit oder Direktauftrag |
 | `Super+P` | Planwahl (identisch mit `/plan`) |
 | `Super+M` | Modellwahl |
 | `Super+D` | Denktiefe |
@@ -13,7 +13,9 @@
 
 `Shift+Tab` und `Super+Q` bauen auf derselben Menü-Definition auf und laufen
 durch denselben Handler. Sie unterscheiden sich nur im Umfang, nie im Inhalt
-eines Eintrags.
+eines Eintrags. Planarbeit startet oder setzt ausschließlich einen vorhandenen
+Plan fort; ein Direktauftrag ist die kompakte, planlose Alternative mit Scope,
+Verifikation und Abschlusskriterien.
 
 Die Shortcuts gelten im fokussierten Pi-Terminal und benötigen für `Super`
 das Kitty-/CSI-u-Protokoll. Sie werden nicht als systemweite Linux-Mint-Hotkeys

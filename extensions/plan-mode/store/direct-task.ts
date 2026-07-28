@@ -50,11 +50,11 @@ export function loadDirectTask(cwd: string): DirectTask | undefined {
   if (raw === undefined) return undefined;
   try {
     const parsed = parseDirectTask(JSON.parse(raw) as unknown);
-    if (!parsed) throw new Error("Direct Task ist ungültig.");
+    if (!parsed) throw new Error("Direktauftrag ist ungültig.");
     return parsed;
   } catch (error) {
     throw new Error(
-      `Direct Task kann nicht gelesen werden: ${error instanceof Error ? error.message : String(error)}`,
+      `Direktauftrag kann nicht gelesen werden: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -73,7 +73,7 @@ export function saveDirectTask(
     acceptanceCriteria: [...task.acceptanceCriteria],
     updatedAt: new Date().toISOString(),
   };
-  if (!parseDirectTask(value)) throw new Error("Direct Task ist ungültig.");
+  if (!parseDirectTask(value)) throw new Error("Direktauftrag ist ungültig.");
   writeAtomic(
     cwd,
     workflowPath(cwd, DIRECT_TASK_RELATIVE_PATH),

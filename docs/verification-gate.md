@@ -12,7 +12,7 @@ werden, eine Aufgabe abzuschließen.
 
 ## Verbindlicher Ablauf
 
-1. PlanSnapshot/Sidecar beziehungsweise Direct Task validieren.
+1. PlanSnapshot/Sidecar beziehungsweise Direktauftrag validieren.
 2. `git status`, `git diff --check`, Diff-Stat und Diff-Fingerprint erfassen.
 3. Geänderte Dateien gegen den technischen Scope prüfen.
 4. Secret-/Auth-Pfade als harte Grenze behandeln.
@@ -23,7 +23,7 @@ werden, eine Aufgabe abzuschließen.
 9. Erst danach `done` committen und deterministisch archivieren.
 
 Jeder Eintrag aus dem Planabschnitt „Verifikation“ beziehungsweise aus dem
-Direct Task muss durch einen erfolgreichen ausführbaren Profil-Check belegt
+Ein Direktauftrag muss durch einen erfolgreichen ausführbaren Profil-Check belegt
 sein. Eine nicht zuordenbare Deklaration blockiert den Abschluss.
 
 Erforderliche Checks müssen erfolgreich laufen. Ein fehlender erforderlicher

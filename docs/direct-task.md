@@ -1,7 +1,8 @@
-# Direct Task und Scope-Kontrolle (`.agent/direct-task.json`)
+# Direktauftrag und Scope-Kontrolle (`.agent/direct-task.json`)
 
-Direkte Aufgaben verwenden keinen Plan und keine zweite Workflow-State-
-Machine. `/task <Ziel>` erfragt im TUI:
+Direktaufträge verwenden keinen Plan und keine zweite Workflow-State-Machine.
+Sie lassen sich über **Direktauftrag starten** im Workflow-Wechsel oder über
+`/task <Ziel>` anlegen. Beide Einstiege erfragen im TUI:
 
 - sicheren projekt-relativen technischen Scope,
 - erwartete `.pi/verify.json`-Profil-IDs,

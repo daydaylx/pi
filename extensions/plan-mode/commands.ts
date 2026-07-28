@@ -21,12 +21,15 @@ import { SHORTCUTS } from "../shared/shortcuts.ts";
 import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
 import { openAgentModelMenu } from "./agent-model-menu.ts";
 import { finishDirectTask, finishWorkflow } from "./completion-commands.ts";
-import { startDirectTask } from "./direct-task-commands.ts";
+import {
+  beginDirectTask,
+  resumeDirectTask,
+  startDirectTask,
+} from "./direct-task-commands.ts";
 import { runRoute } from "./route-commands.ts";
 import {
   completeStepsByNumber,
   parseStepNumbers,
-  activateWorkMode,
   startWork,
   updateExecutionStep,
 } from "./execution.ts";
@@ -37,6 +40,7 @@ import {
   runVerifyGate,
 } from "./maintenance-commands.ts";
 import { openModelMenu } from "./model-menu.ts";
+import { editPlanMarkdown, viewPlanMarkdown } from "./plan-editor.ts";
 import {
   buildPlanAssistantTab,
   type PlanAssistantAction,
@@ -49,6 +53,7 @@ import {
 } from "./planning.ts";
 import { formatPlanSteps, workflowWarning } from "./presentation.ts";
 import type { WorkflowSession } from "./session.ts";
+import { loadDirectTask } from "./store/index.ts";
 
 const STEP_STATUSES = ["in_progress", "completed", "blocked"] as const;
 const PlanProgressParams = Type.Object({
@@ -139,6 +144,12 @@ async function openPlanAssistant(
     case "resume":
       await startWork(session, ctx);
       return;
+    case "view":
+      await viewPlanMarkdown(session, ctx);
+      return;
+    case "edit":
+      await editPlanMarkdown(session, ctx);
+      return;
     case "show-steps": {
       const current = session.reload(ctx);
       session.notify(
@@ -211,6 +222,23 @@ export function registerPlanCommands(
       );
     },
   });
+  pi.registerCommand("view-plan", {
+    description: "Vollständigen Markdown-Plan im Terminal anzeigen",
+    handler: async (_args, ctx) => viewPlanMarkdown(session, ctx),
+  });
+  pi.registerCommand("show-plan", {
+    description: "Alias für /view-plan",
+    handler: async (_args, ctx) => viewPlanMarkdown(session, ctx),
+  });
+  pi.registerCommand("edit-plan", {
+    description:
+      "Markdown-Plan direkt im Editor bearbeiten und Sidecar synchronisieren",
+    handler: async (_args, ctx) => editPlanMarkdown(session, ctx),
+  });
+  pi.registerCommand("plan-edit", {
+    description: "Alias für /edit-plan",
+    handler: async (_args, ctx) => editPlanMarkdown(session, ctx),
+  });
   pi.registerCommand("done", {
     description: "Planschritte manuell abschließen: /done <n> [m …]",
     handler: async (args, ctx) => completeStepsCommand(session, ctx, args),
@@ -225,11 +253,11 @@ export function registerPlanCommands(
     handler: async (_args, ctx) => discardPlan(session, ctx),
   });
   pi.registerCommand("task", {
-    description: "Direkte Aufgabe mit Scope und Abschlusskriterien starten",
+    description: "Direktauftrag mit Scope und Abschlusskriterien starten",
     handler: async (args, ctx) => startDirectTask(session, ctx, args),
   });
   pi.registerCommand("task-done", {
-    description: "Direct Task über dieselbe Completion-Pipeline abschließen",
+    description: "Direktauftrag über dieselbe Completion-Pipeline abschließen",
     handler: async (_args, ctx) => finishDirectTask(session, ctx),
   });
   pi.registerCommand("migrate-plan", {
@@ -328,12 +356,14 @@ export function registerPlanCommands(
           );
         }
         return;
-      case "work":
-        activateWorkMode(session, ctx);
-        session.notify(
-          ctx,
-          "Arbeitsmodus aktiv. Starte einen gespeicherten Plan weiterhin ausdrücklich mit /work.",
-        );
+      case "plan_work":
+        await startWork(session, ctx);
+        return;
+      case "direct_task_start":
+        await beginDirectTask(session, ctx);
+        return;
+      case "direct_task_continue":
+        await resumeDirectTask(session, ctx);
         return;
       case "permissions":
         pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx });
@@ -356,7 +386,8 @@ export function registerPlanCommands(
   const menuState = (ctx: ExtensionContext) => {
     const loaded = session.reload(ctx);
     return {
-      hasActiveWorkflow: Boolean(loaded.snapshot && loaded.state),
+      hasActivePlan: Boolean(loaded.snapshot && loaded.state),
+      hasActiveDirectTask: Boolean(loadDirectTask(ctx.cwd)),
       activeMode: session.workflowMode(),
     };
   };

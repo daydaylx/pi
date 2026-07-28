@@ -18,7 +18,7 @@ Prüfungen vorab, entscheidet aber nichts.
 - `.agent/plans/current-plan.state.json` ist die einzige Laufzeitquelle.
 - `.agent/plans/current-plan.completion.json` existiert nur zwischen
   erfolgreichem Completion-Commit und Archivierung.
-- `.agent/direct-task.json` beschreibt direkte Aufgaben ohne Plan.
+- `.agent/direct-task.json` beschreibt Direktaufträge ohne Plan.
 - `.agent/plans/archive/` enthält abgeschlossene Plansnapshots samt Bericht.
 
 Der Plan trägt Metadaten v3 (`planId`, `planRevision`, `planType`) und
@@ -77,13 +77,16 @@ v2-Lease und legt vorher ein Backup unter
 - `/discard-plan` – aktiven Plan nach Bestätigung verwerfen.
 - `/migrate-plan` – v1/v2 nach v3 migrieren.
 - `/recover-workflow-lock` – verwaisten Lock bestätigt entfernen.
-- `/task <Ziel>`, `/task-done` – direkte Aufgabe mit eigenem Scope-Vertrag.
+- `/task <Ziel>`, `/task-done` – Direktauftrag mit eigenem Scope-Vertrag.
 
 Shift+Tab öffnet den kompakten Workflow-Wechsel für Schnellplan,
-Architekturplan und Arbeit. Die Auswahl wechselt nur den Modus; erst der
-nächste Nutzerprompt startet die Planung. Der Workflow-Tab des vollständigen
-Control Centers (`Super+Q`) verhält sich gleich. `/plan`, `/work` und
-`Super+P` bleiben explizite Sofortstarts.
+Architekturplan, **Plan ausführen / fortsetzen** und **Direktauftrag starten /
+fortsetzen**. Planarbeit ist nur mit einem aktiven Plan verfügbar und startet
+sofort; ein Direktauftrag ist planlos, erfasst aber weiterhin Scope,
+Verifikation und Abschlusskriterien. Plan und Direktauftrag schließen sich
+gegenseitig aus. Der Workflow-Tab des vollständigen Control Centers (`Super+Q`)
+verhält sich gleich. `/plan`, `/work`, `/task <Ziel>` und `Super+P` bleiben
+explizite Einstiege.
 `Super+M`, `Super+D`, `Super+Q` und `Super+Y` behalten ihre Modell-, Thinking-,
 Hauptmenü- und temporäre YOLO-Grundfunktion.
 

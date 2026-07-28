@@ -205,7 +205,7 @@ export async function finishDirectTask(
   }
   const task = loadDirectTask(ctx.cwd);
   if (!task) {
-    session.notify(ctx, "Keine aktive direkte Aufgabe.", "warning");
+    session.notify(ctx, "Kein aktiver Direktauftrag.", "warning");
     return;
   }
   if (session.completionRunning) return;
@@ -223,13 +223,13 @@ export async function finishDirectTask(
     session.notify(
       ctx,
       report.outcome === "override"
-        ? "Direkte Aufgabe mit begründetem Override abgeschlossen; Bericht wurde in der Sitzung protokolliert."
-        : "Direkte Aufgabe abgeschlossen; Bericht wurde in der Sitzung protokolliert.",
+        ? "Direktauftrag mit begründetem Override abgeschlossen; Bericht wurde in der Sitzung protokolliert."
+        : "Direktauftrag abgeschlossen; Bericht wurde in der Sitzung protokolliert.",
     );
   } catch (error) {
     session.notify(
       ctx,
-      `Direct Task nicht abgeschlossen: ${workflowWarning(error)}`,
+      `Direktauftrag nicht abgeschlossen: ${workflowWarning(error)}`,
       "error",
     );
   } finally {

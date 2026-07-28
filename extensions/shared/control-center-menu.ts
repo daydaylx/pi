@@ -18,7 +18,9 @@ import type { WorkflowMode } from "./workflow-status.ts";
 export type ControlCenterAction =
   | "simple_plan"
   | "detailed_plan"
-  | "work"
+  | "plan_work"
+  | "direct_task_start"
+  | "direct_task_continue"
   | "models"
   | "routing_models"
   | "permissions"
@@ -26,8 +28,10 @@ export type ControlCenterAction =
   | "diagnostics";
 
 export interface ControlCenterState {
-  /** Whether a resumable workflow exists; drives the "Arbeiten" wording. */
-  hasActiveWorkflow: boolean;
+  /** Whether a plan exists that can be executed or resumed. */
+  hasActivePlan: boolean;
+  /** Whether a plan-less direct task is currently active. */
+  hasActiveDirectTask: boolean;
   /** The mode currently in force, marked as the active entry. */
   activeMode?: WorkflowMode;
 }
@@ -44,6 +48,10 @@ export function buildWorkflowTab(
         id: "workflow-simple-plan",
         label: "Schnellplan",
         description: "Kurzer Plan für eine überschaubare Änderung",
+        disabled: state.hasActiveDirectTask,
+        disabledReason: state.hasActiveDirectTask
+          ? "Ein Direktauftrag ist aktiv. Schließe ihn zuerst mit /task-done ab."
+          : undefined,
         current: state.activeMode === "simple_plan",
         value: "simple_plan",
       },
@@ -52,17 +60,41 @@ export function buildWorkflowTab(
         label: "Architekturplan",
         description:
           "Bewertete Optionen, begründete Empfehlung und Nutzerentscheidung",
+        disabled: state.hasActiveDirectTask,
+        disabledReason: state.hasActiveDirectTask
+          ? "Ein Direktauftrag ist aktiv. Schließe ihn zuerst mit /task-done ab."
+          : undefined,
         current: state.activeMode === "detailed_plan",
         value: "detailed_plan",
       },
       {
-        id: "workflow-work",
-        label: state.hasActiveWorkflow ? "Arbeiten / fortsetzen" : "Arbeiten",
-        description: state.hasActiveWorkflow
-          ? "Unterbrochene Ausführung ausdrücklich fortsetzen"
-          : "Bestätigten Plan ausführen",
-        current: state.activeMode === "work",
-        value: "work",
+        id: "workflow-plan-work",
+        label: "Plan ausführen / fortsetzen",
+        description:
+          "Bestätigten Plan sofort ausführen oder unterbrochene Ausführung fortsetzen",
+        disabled: !state.hasActivePlan,
+        disabledReason: !state.hasActivePlan
+          ? "Erstelle und bestätige zuerst einen Plan."
+          : undefined,
+        current: state.activeMode === "work" && state.hasActivePlan,
+        value: "plan_work",
+      },
+      {
+        id: "workflow-direct-task",
+        label: state.hasActiveDirectTask
+          ? "Direktauftrag fortsetzen"
+          : "Direktauftrag starten",
+        description: state.hasActiveDirectTask
+          ? "Aktiven Direktauftrag weiterbearbeiten; Abschluss über /task-done"
+          : "Kompakte Aufgabe ohne Plan mit Scope, Verifikation und Abschlusskriterien",
+        disabled: state.hasActivePlan,
+        disabledReason: state.hasActivePlan
+          ? "Schließe den aktiven Plan ab oder verwirf ihn, bevor du einen Direktauftrag startest."
+          : undefined,
+        current: state.activeMode === "work" && state.hasActiveDirectTask,
+        value: state.hasActiveDirectTask
+          ? "direct_task_continue"
+          : "direct_task_start",
       },
     ],
   };

@@ -163,7 +163,7 @@ export async function activatePlanningMode(
   if (loadDirectTask(ctx.cwd)) {
     session.notify(
       ctx,
-      "Eine direkte Aufgabe ist aktiv; schließe sie zuerst mit /task-done ab.",
+      "Ein Direktauftrag ist aktiv; schließe ihn zuerst mit /task-done ab.",
       "warning",
     );
     return false;

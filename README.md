@@ -36,7 +36,7 @@ Bestätigung geschlossener Alt-Sessions und ein vorheriges Backup.
 Completion prüft Diff, Scope, klassifizierte Verifikationsprofile, LSP und
 einen unabhängigen Reviewer. Erst ein exakter
 `[COMPLETION-REVIEW:PASS]`-Marker plus erfolgreiche erforderliche Checks
-erlaubt den normalen Abschluss. `/finish` (Plan) und `/task-done` (Direct Task)
+erlaubt den normalen Abschluss. `/finish` (Plan) und `/task-done` (Direktauftrag)
 rufen denselben internen Handler; Befunde lassen sich nur interaktiv und mit
 Begründung übersteuern. `/verify-gate` zeigt dieselben Prüfungen vorab an,
 entscheidet aber nichts und schließt nichts ab.
@@ -72,14 +72,16 @@ Details: [`docs/subagents.md`](docs/subagents.md).
 
 `/plan` öffnet einen zustandsabhängigen Assistenten; `/plan quick`,
 `/plan architecture` und `Super+P` starten die Planung bewusst sofort.
-`Shift+Tab` ist der Workflow-Wechsel: Schnellplan, Architekturplan, Arbeiten.
-Die Auswahl wechselt nur Modus, Berechtigungen und Auto-Thinking; der nächste
-eigene Prompt startet die Planung. `Super+Q` öffnet das vollständige Control
-Center, dessen erster Reiter genau dieser Workflow-Wechsel ist — beide bauen
-auf derselben Definition auf und laufen durch denselben Handler. `/plan`,
-`/work` und `Super+P` bleiben bewusste Sofortstarts. `Super+M` öffnet die
-Modellwahl, `Super+D` Thinking und `Super+Y` den temporären YOLO-Modus. Die
-Super-Kombinationen benötigen Kitty-/CSI-u-Unterstützung.
+`Shift+Tab` trennt die Arbeitswege klar: Schnellplan, Architekturplan,
+**Plan ausführen / fortsetzen** und **Direktauftrag starten / fortsetzen**.
+Planarbeit startet nur mit einem vorhandenen Plan; ein Direktauftrag erfasst
+Ziel, Scope, Verifikation und Abschlusskriterien ohne PlanSnapshot. `Super+Q`
+öffnet das vollständige Control Center, dessen erster Reiter genau dieser
+Workflow-Wechsel ist — beide bauen auf derselben Definition auf und laufen durch
+denselben Handler. `/work` und `/task <Ziel>` bleiben die expliziten
+Kommando-Einstiege. `Super+M` öffnet die Modellwahl, `Super+D` Thinking und
+`Super+Y` den temporären YOLO-Modus. Die Super-Kombinationen benötigen
+Kitty-/CSI-u-Unterstützung.
 
 Aurora besitzt Editor, Fußzeile, Widget, Aktivität und Motion. Die Fußzeile ist
 die einzige Statusfläche: Modell, Denktiefe, Projekt, Berechtigung, LSP und
