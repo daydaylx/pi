@@ -30,7 +30,7 @@ import {
   type ActiveToolView,
 } from "./tool-renderers.ts";
 import { crop, layoutFor } from "./layout.ts";
-import { renderFooterLines } from "./footer.ts";
+import { renderFooterLines, type SubagentInfo } from "./footer.ts";
 
 const OWNER = "aurora-ui";
 const ACTIVITY_WIDGET = "aurora-ui/activity";
@@ -62,9 +62,9 @@ function makeState(
 }
 
 /**
- * The single frame line above the editor. It carries the workflow and the
- * current step only — everything durable (model, thinking, project, context)
- * lives in the footer, so no value is shown on two surfaces at once.
+ * The single frame line above the editor. It carries the workflow label
+ * only — everything durable (model, thinking, project, context) lives in
+ * the footer, so no value is shown on two surfaces at once.
  */
 function renderBar(
   theme: Theme,
@@ -161,17 +161,9 @@ class AuroraEditor extends CustomEditor {
 
   render(width: number): string[] {
     const workflow = this.auroraState.workflow;
-    const step = workflow.step
-      ? crop(workflow.step, layoutFor(width) === "wide" ? 54 : 28)
-      : "—";
     const active = this.auroraState.activity.kind !== "idle";
     return [
-      renderBar(
-        this.auroraTheme,
-        `${workflow.label} · Schritt ${step}`,
-        width,
-        active,
-      ),
+      renderBar(this.auroraTheme, workflow.label, width, active),
       ...super.render(width),
     ];
   }
@@ -198,6 +190,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let busUnsubscribers: Array<() => void> = [];
   let tokenTotalsDirty = true;
   let tokenTotalsCache = { input: 0, output: 0 };
+  let subagentsCache: SubagentInfo[] = [];
+  let subagentsCacheDirty = true;
   const activeTools = new Map<string, ActiveToolView>();
 
   function readAssistantTotals(ctx: ExtensionContext): {
@@ -422,14 +416,85 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         tokenTotalsDirty = true;
         tui.requestRender();
       });
+
+      const unsubscribeSubagentEvent = pi.events.on(
+        "subagent:control-event",
+        () => {
+          subagentsCacheDirty = true;
+          tui.requestRender();
+        },
+      );
+
+      async function fetchSubagentStatus(): Promise<SubagentInfo[]> {
+        if (!subagentsCacheDirty) return subagentsCache;
+        try {
+          const requestId = crypto.randomUUID();
+          const replyPromise = new Promise<unknown>((resolve) => {
+            const unsubscribe = pi.events.on(
+              `subagents:rpc:v1:reply:${requestId}`,
+              (reply: unknown) => {
+                unsubscribe();
+                resolve(reply);
+              },
+            );
+            setTimeout(() => {
+              unsubscribe();
+              resolve(null);
+            }, 1000);
+          });
+
+          pi.events.emit("subagents:rpc:v1:request", {
+            version: 1,
+            requestId,
+            method: "status",
+            params: {},
+          });
+
+          const reply = await replyPromise;
+          if (
+            reply &&
+            typeof reply === "object" &&
+            "success" in reply &&
+            reply.success &&
+            "data" in reply
+          ) {
+            const data = reply.data as { runs?: unknown[] };
+            if (data.runs && Array.isArray(data.runs)) {
+              subagentsCache = data.runs
+                .filter(
+                  (run): run is { status: string; config?: { agent?: string; phase?: string; label?: string } } =>
+                    typeof run === "object" &&
+                    run !== null &&
+                    "status" in run &&
+                    typeof run.status === "string",
+                )
+                .map((run) => ({
+                  agent: run.config?.agent ?? "unknown",
+                  phase: run.config?.phase,
+                  label: run.config?.label,
+                  status: run.status as SubagentInfo["status"],
+                }));
+            }
+          }
+          subagentsCacheDirty = false;
+          return subagentsCache;
+        } catch {
+          return [];
+        }
+      }
+
       return {
-        invalidate() {},
+        invalidate() {
+          subagentsCacheDirty = true;
+        },
         dispose() {
           unsubscribeBranch();
+          unsubscribeSubagentEvent();
           detachTicker();
         },
         render(width: number): string[] {
           if (!state) return [];
+          fetchSubagentStatus();
           return renderFooterLines(theme, width, {
             state,
             statuses: footerData.getExtensionStatuses(),
@@ -438,6 +503,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             sessionName: pi.getSessionName(),
             tokens: readAssistantTotals(sessionCtx),
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
+            subagents: subagentsCache,
           });
         },
       };

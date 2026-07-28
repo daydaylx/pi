@@ -24,6 +24,13 @@ import {
   type WorkflowStateV3,
 } from "./store/index.ts";
 import { WORKFLOW_CAPABILITY_EVENTS } from "../shared/workflow-capabilities.ts";
+import { loadSetupConfig } from "../setup-core/config.ts";
+import {
+  computeRouting,
+  formatRoutingSummary,
+  type RoutingDecision,
+  type RoutingInput,
+} from "./routing/index.ts";
 
 export type NotifyLevel = "info" | "warning" | "error";
 
@@ -41,6 +48,8 @@ export interface WorkflowSession {
   completionRunning: boolean;
   activeCwd?: string;
   activeContext?: ExtensionContext;
+  /** In-memory routing decision; not persisted and not a WorkflowStatus. */
+  routing?: RoutingDecision;
 
   notify(ctx: ExtensionContext, message: string, level?: NotifyLevel): void;
   /** Current workflow mode for permission defaults — planning kind or work. */
@@ -54,6 +63,12 @@ export interface WorkflowSession {
     ctx: ExtensionContext,
     candidate: WorkflowStateV3,
   ): WorkflowStateV3;
+  /**
+   * Assess the task before execution: load routing config, compute the frozen
+   * RoutingDecision, store it in memory and surface it. The only enforced
+   * effect is phase steering; it never changes WorkflowStatus.
+   */
+  assessRouting(ctx: ExtensionContext, input: RoutingInput): RoutingDecision;
 }
 
 export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
@@ -104,6 +119,17 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
       };
       updateWorkflowPresentation(ctx, saved.state);
       return saved.state;
+    },
+
+    assessRouting(ctx, input) {
+      const setup = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
+      const decision = computeRouting(input, setup.config.routingProfiles);
+      session.routing = decision;
+      if (decision.downgradeBlocked) {
+        ctx.ui.notify(decision.downgradeBlocked, "warning");
+      }
+      ctx.ui.notify(formatRoutingSummary(decision), "info");
+      return decision;
     },
   };
   return session;

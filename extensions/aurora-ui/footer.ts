@@ -11,6 +11,13 @@ import type { AuroraUiState } from "./state.ts";
  * only place that reports model, thinking level, project, permissions, LSP and
  * context. Nothing here may be duplicated by another surface.
  */
+export interface SubagentInfo {
+  agent: string;
+  phase?: string;
+  label?: string;
+  status: "running" | "paused" | "needs_attention" | "queued";
+}
+
 export interface FooterInput {
   state: AuroraUiState;
   statuses: ReadonlyMap<string, string>;
@@ -19,6 +26,7 @@ export interface FooterInput {
   sessionName: string | undefined;
   tokens: { input: number; output: number };
   contextPercent: number | null;
+  subagents?: SubagentInfo[];
 }
 
 /**
@@ -225,6 +233,39 @@ export function renderFooterLines(
         width,
       ),
     );
+
+    // Subagenten-Zeilen (nur wenn aktiv)
+    if (input.subagents && input.subagents.length > 0) {
+      const count = input.subagents.length;
+      const summary = crop(
+        `${theme.fg("accent", "⚡")} ${theme.fg("text", `${count} Subagent${count === 1 ? "" : "en"} aktiv`)}`,
+        width,
+      );
+      lines.push(summary);
+
+      const details = input.subagents
+        .slice(0, 3)
+        .map((sa) => {
+          const parts = [sa.agent];
+          if (sa.phase) parts.push(sa.phase);
+          const statusColor =
+            sa.status === "running"
+              ? "success"
+              : sa.status === "paused"
+                ? "warning"
+                : sa.status === "needs_attention"
+                  ? "error"
+                  : "muted";
+          parts.push(theme.fg(statusColor, sa.status));
+          return parts.join(" · ");
+        })
+        .join("    ");
+      const truncated =
+        input.subagents.length > 3 ? `  ${theme.fg("muted", "...")}` : "";
+      lines.push(
+        crop(`  ${theme.fg("muted", details)}${truncated}`, width),
+      );
+    }
   }
   return lines;
 }

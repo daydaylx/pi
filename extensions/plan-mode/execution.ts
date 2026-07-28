@@ -6,6 +6,7 @@ import type {
   WorkflowStepState,
   WorkflowStepStatus,
 } from "./store/index.ts";
+import { routingInputFromPlan } from "./routing/index.ts";
 
 export interface StepUpdate {
   stepId: string;
@@ -206,6 +207,7 @@ export async function startWork(
     if (!confirmed) return;
   }
   const saved = session.replaceState(ctx, startOrResumeExecution(loaded.state));
+  session.assessRouting(ctx, routingInputFromPlan(loaded.snapshot));
   session.publishWorkflowActivation(ctx);
   session.pi.sendMessage(
     {

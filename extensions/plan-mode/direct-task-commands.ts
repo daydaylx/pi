@@ -10,6 +10,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { promptInput } from "./presentation.ts";
 import type { WorkflowSession } from "./session.ts";
 import { loadDirectTask, saveDirectTask } from "./store/index.ts";
+import { routingInputFromDirectTask } from "./routing/index.ts";
 
 function commaList(value: string | undefined): string[] {
   return (
@@ -123,6 +124,7 @@ export async function startDirectTask(
     verification,
     acceptanceCriteria,
   });
+  session.assessRouting(ctx, routingInputFromDirectTask(task));
   session.pi.sendMessage(
     {
       customType: "pi-direct-task",

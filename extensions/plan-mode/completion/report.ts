@@ -56,6 +56,7 @@ export function buildReport(
     residualRisks,
     reviewerSummary: reviewer.summary,
     ...(overrideReason ? { overrideReason: overrideReason.trim() } : {}),
+    ...(ctx.routing ? { routing: ctx.routing } : {}),
     completedAt: now,
   };
 }
@@ -104,6 +105,7 @@ export function completionOverrideReport(
     residualRisks: result.residualRisks,
     reviewerSummary: result.reviewer.summary,
     overrideReason: trimmed,
+    ...(result.report?.routing ? { routing: result.report.routing } : {}),
     completedAt: new Date().toISOString(),
   };
 }

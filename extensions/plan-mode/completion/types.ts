@@ -12,6 +12,7 @@ import type {
   DirectTask,
   WorkflowStateV3,
 } from "../store/index.ts";
+import type { RoutingReportMetrics } from "../routing/types.ts";
 
 export type CompletionClassification = "required" | "recommended" | "advisory";
 export type CompletionCheckStatus = "pass" | "fail" | "not_run";
@@ -78,6 +79,7 @@ export interface CompletionVerificationContext {
 
 export interface CompletionPipelineContext extends CompletionVerificationContext {
   state?: WorkflowStateV3;
+  routing?: RoutingReportMetrics;
   runReviewer(
     input: CompletionReviewerInput,
   ): Promise<CompletionReviewerResult>;

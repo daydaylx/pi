@@ -24,7 +24,6 @@ export interface AuroraUiState {
   workflow: {
     phase: AuroraWorkflowPhase;
     label: string;
-    step?: string;
     completed?: number;
     total?: number;
   };
@@ -174,12 +173,6 @@ export function mergeAuroraUiState(
       state.workflow.phase = patch.workflow.phase;
     if (typeof patch.workflow.label === "string")
       state.workflow.label = patch.workflow.label;
-    if ("step" in patch.workflow) {
-      state.workflow.step =
-        typeof patch.workflow.step === "string"
-          ? patch.workflow.step
-          : undefined;
-    }
     if (typeof patch.workflow.completed === "number")
       state.workflow.completed = Math.max(
         0,

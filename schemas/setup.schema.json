@@ -29,8 +29,12 @@
           "required": ["work", "simple_plan", "detailed_plan"],
           "properties": {
             "work": { "enum": ["readonly", "project-write", "confirm-all"] },
-            "simple_plan": { "enum": ["readonly", "project-write", "confirm-all"] },
-            "detailed_plan": { "enum": ["readonly", "project-write", "confirm-all"] }
+            "simple_plan": {
+              "enum": ["readonly", "project-write", "confirm-all"]
+            },
+            "detailed_plan": {
+              "enum": ["readonly", "project-write", "confirm-all"]
+            }
           }
         }
       }
@@ -42,8 +46,16 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "mode": { "enum": ["off", "auto", "force"] },
-        "requestTimeoutMs": { "type": "integer", "minimum": 1000, "maximum": 120000 },
-        "idleShutdownMs": { "type": "integer", "minimum": 10000, "maximum": 3600000 }
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000
+        },
+        "idleShutdownMs": {
+          "type": "integer",
+          "minimum": 10000,
+          "maximum": 3600000
+        }
       }
     },
     "subagents": {
@@ -64,6 +76,23 @@
         "test": { "$ref": "#/$defs/check" },
         "verify": { "$ref": "#/$defs/check" }
       }
+    },
+    "routingProfiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["levels"],
+      "properties": {
+        "levels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["low", "standard", "high"],
+          "properties": {
+            "low": { "$ref": "#/$defs/routingProfile" },
+            "standard": { "$ref": "#/$defs/routingProfile" },
+            "high": { "$ref": "#/$defs/routingProfile" }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -73,8 +102,22 @@
       "required": ["command", "args", "timeoutMs"],
       "properties": {
         "command": { "type": "string", "minLength": 1 },
-        "args": { "type": "array", "items": { "type": "string" }, "maxItems": 12 },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 12
+        },
         "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 900000 }
+      }
+    },
+    "routingProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worker"],
+      "properties": {
+        "planner": { "type": "string", "minLength": 1 },
+        "worker": { "type": "string", "minLength": 1 },
+        "reviewer": { "type": "string", "minLength": 1 }
       }
     }
   }

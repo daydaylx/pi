@@ -2,7 +2,7 @@
   "lastChangelogVersion": "0.82.1",
   "theme": "aurora-night",
   "defaultProvider": "opencode-go",
-  "defaultModel": "kimi-k2.7-code",
+  "defaultModel": "qwen3.7-max",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "medium",
   "thinkingBudgets": {

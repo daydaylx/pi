@@ -21,6 +21,7 @@ await import("./workflow-v3/permission-state.test.mjs");
 await import("./workflow-v3/permissions.test.mjs");
 await import("./workflow-v3/presentation.test.mjs");
 await import("./workflow-v3/integration.test.mjs");
+await import("./workflow-v3/routing.test.mjs");
 
 const { passed, failed } = summary();
 if (failed > 0) {

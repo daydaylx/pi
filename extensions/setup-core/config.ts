@@ -6,6 +6,11 @@ import {
   type PermissionLevel,
   type WorkflowMode,
 } from "../shared/workflow-status.ts";
+import type {
+  RoutingLevel,
+  RoutingProfileConfig,
+  RoutingProfilesConfig,
+} from "../plan-mode/routing/types.ts";
 
 export type MotionMode = "contextual" | "reduced" | "off";
 export type PolicyAction = "block" | "ask" | "allow";
@@ -34,6 +39,7 @@ export interface SetupConfig {
   };
   subagents: { concurrency: number; freshContext: boolean };
   verification: Record<VerificationName, VerificationCommand>;
+  routingProfiles: RoutingProfilesConfig;
 }
 
 export interface ConfigDiagnostic {
@@ -81,6 +87,23 @@ const DEFAULT_CONFIG: SetupConfig = {
       command: "npm",
       args: ["--prefix", "npm", "run", "verify"],
       timeoutMs: 420_000,
+    },
+  },
+  // Keep in sync with DEFAULT_ROUTING_PROFILES in plan-mode/routing/profiles.ts:
+  // setup-core owns the config default; profiles.ts owns the runtime fallback.
+  routingProfiles: {
+    levels: {
+      low: { worker: "coding-schnell" },
+      standard: {
+        planner: "planung",
+        worker: "coding",
+        reviewer: "review",
+      },
+      high: {
+        planner: "planung-premium",
+        worker: "coding",
+        reviewer: "review-premium",
+      },
     },
   },
 };
@@ -162,6 +185,99 @@ function boundedInt(
   return fallback;
 }
 
+const ROUTING_LEVEL_KEYS: readonly RoutingLevel[] = ["low", "standard", "high"];
+
+function normalizeProfileEntry(
+  raw: Record<string, unknown>,
+  level: RoutingLevel,
+  source: string,
+  diagnostics: ConfigDiagnostic[],
+): RoutingProfileConfig | undefined {
+  const { planner, worker, reviewer } = raw as {
+    planner?: unknown;
+    worker?: unknown;
+    reviewer?: unknown;
+  };
+  const result: RoutingProfileConfig = { worker: "" };
+  let ok = true;
+  if (typeof worker === "string" && worker.trim()) {
+    result.worker = worker.trim();
+  } else {
+    diagnostics.push({
+      level: "error",
+      source,
+      message: `routingProfiles.levels.${level}.worker muss ein nichtleerer String sein`,
+    });
+    ok = false;
+  }
+  for (const [key, value] of [
+    ["planner", planner],
+    ["reviewer", reviewer],
+  ] as const) {
+    if (value === undefined) continue;
+    if (typeof value === "string" && value.trim()) {
+      if (key === "planner") result.planner = value.trim();
+      else result.reviewer = value.trim();
+    } else {
+      diagnostics.push({
+        level: "error",
+        source,
+        message: `routingProfiles.levels.${level}.${key} muss ein nichtleerer String sein`,
+      });
+      ok = false;
+    }
+  }
+  return ok ? result : undefined;
+}
+
+function applyRoutingProfiles(
+  raw: Record<string, unknown> | undefined,
+  base: RoutingProfilesConfig,
+  source: string,
+  diagnostics: ConfigDiagnostic[],
+): RoutingProfilesConfig {
+  if (!raw) return structuredClone(base);
+  reportUnknownKeys(raw, ["levels"], source, "routingProfiles.", diagnostics);
+  const rawLevels = isObject(raw.levels) ? raw.levels : undefined;
+  if (rawLevels) {
+    reportUnknownKeys(
+      rawLevels,
+      ROUTING_LEVEL_KEYS,
+      source,
+      "routingProfiles.levels.",
+      diagnostics,
+    );
+  }
+  const next: RoutingProfilesConfig = structuredClone(base);
+  for (const level of ROUTING_LEVEL_KEYS) {
+    const rawProfile = rawLevels?.[level];
+    if (rawProfile === undefined) continue;
+    if (!isObject(rawProfile)) {
+      diagnostics.push({
+        level: "error",
+        source,
+        message: `routingProfiles.levels.${level} muss ein Objekt sein`,
+      });
+      continue;
+    }
+    reportUnknownKeys(
+      rawProfile,
+      ["planner", "worker", "reviewer"],
+      source,
+      `routingProfiles.levels.${level}.`,
+      diagnostics,
+    );
+    const normalized = normalizeProfileEntry(
+      rawProfile,
+      level,
+      source,
+      diagnostics,
+    );
+    if (normalized) next.levels[level] = normalized;
+  }
+  return next;
+}
+
 function applyUserLayer(
   base: SetupConfig,
   raw: Record<string, unknown>,
@@ -171,7 +287,15 @@ function applyUserLayer(
   const next = structuredClone(base);
   reportUnknownKeys(
     raw,
-    ["$schema", "ui", "permissions", "lsp", "subagents", "verification"],
+    [
+      "$schema",
+      "ui",
+      "permissions",
+      "lsp",
+      "subagents",
+      "verification",
+      "routingProfiles",
+    ],
     source,
     "",
     diagnostics,
@@ -360,6 +484,13 @@ function applyUserLayer(
       });
     }
   }
+
+  next.routingProfiles = applyRoutingProfiles(
+    isObject(raw.routingProfiles) ? raw.routingProfiles : undefined,
+    next.routingProfiles,
+    source,
+    diagnostics,
+  );
   return next;
 }
 
@@ -420,6 +551,9 @@ function applyTrustedProjectLayer(
   // A repository must never choose commands that execute on the host.
   candidate.verification = structuredClone(base.verification);
   candidate.subagents = structuredClone(base.subagents);
+  // Profile sind nur Bezeichner, aber sie dürfen nicht vom Repo vorgegeben
+  // werden — die Zuordnung zu Modellen bleibt eine globale Nutzerentscheidung.
+  candidate.routingProfiles = structuredClone(base.routingProfiles);
   return candidate;
 }
 

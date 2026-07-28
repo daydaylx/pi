@@ -1,5 +1,6 @@
 /** Shared workflow types, size limits and validation patterns. */
 import type { PlanSnapshot } from "../plan-snapshot.ts";
+import type { RoutingReportMetrics } from "../routing/types.ts";
 // Re-export only: the canonical declaration lives in shared/workflow-status.ts
 // so permissions and the UI can read it without importing plan-mode.
 export type { WorkflowStatus } from "../../shared/workflow-status.ts";
@@ -84,6 +85,8 @@ export interface CompletionReport {
   residualRisks: string[];
   reviewerSummary: string;
   overrideReason?: string;
+  /** Neutral routing metrics captured for the run, if routing ran. */
+  routing?: RoutingReportMetrics;
   completedAt: string;
 }
 

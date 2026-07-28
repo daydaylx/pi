@@ -27,6 +27,7 @@ import {
   workflowWarning,
 } from "./presentation.ts";
 import { runCompletionReviewerViaRpc } from "./reviewer-rpc.ts";
+import { routingMetrics } from "./routing/index.ts";
 import type { WorkflowSession } from "./session.ts";
 import {
   archiveCompletedWorkflow,
@@ -67,6 +68,7 @@ async function runCompletion(
     ...(subject.plan ? { plan: subject.plan } : {}),
     ...(subject.state ? { state: subject.state } : {}),
     ...(subject.directTask ? { directTask: subject.directTask } : {}),
+    ...(session.routing ? { routing: routingMetrics(session.routing) } : {}),
     runReviewer: (input) => runCompletionReviewerViaRpc(session.pi, input),
     runLsp: (files) => requestLsp(session.pi, ctx.cwd, files),
   });

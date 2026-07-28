@@ -21,6 +21,7 @@ import { SHORTCUTS } from "../shared/shortcuts.ts";
 import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
 import { finishDirectTask, finishWorkflow } from "./completion-commands.ts";
 import { startDirectTask } from "./direct-task-commands.ts";
+import { runRoute } from "./route-commands.ts";
 import {
   completeStepsByNumber,
   parseStepNumbers,
@@ -172,6 +173,11 @@ export function registerPlanCommands(
     description:
       "Completion-Prüfungen vorab ansehen; entscheidet nichts und schließt nichts ab",
     handler: async (_args, ctx) => runVerifyGate(session, ctx),
+  });
+  pi.registerCommand("route", {
+    description:
+      "Aufgaben-Routing anzeigen oder manuell stufen: /route [low|standard|high]",
+    handler: async (args, ctx) => runRoute(session, ctx, args),
   });
 
   pi.registerTool({
