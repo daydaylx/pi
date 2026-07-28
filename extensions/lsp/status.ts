@@ -2,7 +2,7 @@
  * Compact footer status for the LSP extension (issue #97).
  *
  * The status key is defined locally, not added to the shared
- * `ZENTUI_STATUS_KEYS` in `shared/workflow-status.ts` — an existing test
+ * `UI_STATUS_KEYS` in `shared/workflow-status.ts` — an existing test
  * there pins that object to exactly `{permissions, workflow}`, and LSP has
  * no reason to share that registry.
  */

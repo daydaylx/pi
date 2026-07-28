@@ -1,16 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { PermissionLevel, WorkflowMode } from "../shared/workflow-status.ts";
+import {
+  normalizePermissionLevel,
+  type PermissionLevel,
+  type WorkflowMode,
+} from "../shared/workflow-status.ts";
 
 export type MotionMode = "contextual" | "reduced" | "off";
 export type PolicyAction = "block" | "ask" | "allow";
 export type LspMode = "off" | "auto" | "force";
 export type VerificationName = "typecheck" | "test" | "verify";
-export type WorkflowDefaultPermissionLevel = Exclude<
-  PermissionLevel,
-  "yolo"
->;
+export type WorkflowDefaultPermissionLevel = Exclude<PermissionLevel, "yolo">;
 
 export interface VerificationCommand {
   command: string;
@@ -170,14 +171,7 @@ function applyUserLayer(
   const next = structuredClone(base);
   reportUnknownKeys(
     raw,
-    [
-      "$schema",
-      "ui",
-      "permissions",
-      "lsp",
-      "subagents",
-      "verification",
-    ],
+    ["$schema", "ui", "permissions", "lsp", "subagents", "verification"],
     source,
     "",
     diagnostics,
@@ -270,18 +264,14 @@ function applyUserLayer(
   );
   for (const mode of ["work", "simple_plan", "detailed_plan"] as const) {
     const rawDefault = workflowDefaults?.[mode];
+    // Single legacy boundary: normalizePermissionLevel owns the v1/v2 mapping,
+    // including "yolo" -> "project-write". That has to happen BEFORE the enum
+    // filter below, otherwise a persisted "yolo" would silently fall back to
+    // the built-in default instead of the conservative downgrade.
     const migratedDefault =
-      rawDefault === "read-only" ||
-      rawDefault === "read-bash" ||
-      rawDefault === "test-bash"
-        ? "readonly"
-        : rawDefault === "read-write"
-          ? "project-write"
-          : rawDefault === "full-access"
-            ? "confirm-all"
-            : rawDefault === "yolo"
-              ? "project-write"
-              : rawDefault;
+      rawDefault === undefined
+        ? undefined
+        : (normalizePermissionLevel(rawDefault) ?? rawDefault);
     next.permissions.workflowDefaults[mode] = enumValue(
       migratedDefault,
       ["readonly", "project-write", "confirm-all"],

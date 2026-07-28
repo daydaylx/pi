@@ -47,7 +47,6 @@ import {
 import { prepareTaskInput, promptFingerprint, taskPrompt } from "./prompts.mjs";
 import { runVerification } from "./verification.mjs";
 import {
-  applyBenchmarkOverlay,
   configFingerprint,
   createCredentialLinks,
   linkRuntimeDependencies,
@@ -91,10 +90,7 @@ export async function commandPrepare(id) {
     const packageManifest = stageWorktreePackageManifest(paths.worktree);
     const permissionOverlay = stageWorktreePermissionOverlay(paths.worktree);
     prepareTaskInput(paths.worktree, run);
-    const benchmarkOverlays = [
-      permissionOverlay,
-      ...applyBenchmarkOverlay(paths.worktree, run),
-    ];
+    const benchmarkOverlays = [permissionOverlay];
     createCredentialLinks(paths.worktree);
     const environmentOverrides = benchmarkEnvironmentOverrides(run);
     const environment = {
@@ -217,12 +213,6 @@ export async function commandFinish(id) {
     args.push("--subagent-session", sessionPath);
   }
   if (verifyResult) args.push("--verify-result", verifyResult);
-  if (run.task === "11-context-ledger-survival") {
-    args.push(
-      "--ledger-expects",
-      "enabled: false|bestehende Profile|zls|build.zig",
-    );
-  }
   writeFileSync(paths.result, "", { mode: 0o600 });
   const { openSync } = await import("node:fs");
   const fd = openSync(paths.result, "a", 0o600);
@@ -304,6 +294,6 @@ export async function commandSummarize() {
     return { id: run.id, task: run.task, status };
   });
   process.stdout.write(
-    `${JSON.stringify({ reference: REFERENCE, scoredRunCount: 35, counts, runs }, null, 2)}\n`,
+    `${JSON.stringify({ reference: REFERENCE, scoredRunCount: manifest.scoredRunCount, counts, runs }, null, 2)}\n`,
   );
 }

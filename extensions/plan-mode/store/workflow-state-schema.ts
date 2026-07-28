@@ -7,6 +7,7 @@
  * requires a completion record whose reviewer verdict and reviewed plan hash
  * actually line up.
  */
+import { isWorkflowStatus } from "../../shared/workflow-status.ts";
 import { isRecord } from "./paths.ts";
 import {
   HASH_PATTERN,
@@ -96,17 +97,7 @@ export function parseWorkflowStateV3(
   }
   if (typeof value.planHash !== "string" || !HASH_PATTERN.test(value.planHash))
     return undefined;
-  if (
-    value.status !== "idle" &&
-    value.status !== "planning" &&
-    value.status !== "working" &&
-    value.status !== "reviewing" &&
-    value.status !== "paused" &&
-    value.status !== "blocked" &&
-    value.status !== "done"
-  ) {
-    return undefined;
-  }
+  if (!isWorkflowStatus(value.status)) return undefined;
   if (!Array.isArray(value.steps) || typeof value.updatedAt !== "string")
     return undefined;
   const steps = value.steps.map(parseStepState);

@@ -41,9 +41,7 @@ export const TASK_IDS = new Set([
   "08-long-session-compaction",
   "09-hanging-tool-call",
   "10-with-without-subagent",
-  "11-context-ledger-survival",
 ]);
-export const LEDGER_GATE_ENV = "PI_BENCHMARK_DISABLE_LEDGER_CHECKPOINTS";
 export const CONFIG_FILES = [
   "settings.json",
   "setup.json",
@@ -54,11 +52,5 @@ export const CONFIG_FILES = [
 ];
 
 export function benchmarkEnvironmentOverrides(run) {
-  // Ledger checkpoints are intentionally benchmarked only by task 11. They
-  // would otherwise add an unrelated docs/CONTEXT_LEDGER.md mutation when a
-  // task session shuts down, so all other tasks use the explicit gate.
-  if (run.task !== "11-context-ledger-survival") {
-    return { [LEDGER_GATE_ENV]: "1" };
-  }
   return run.environment ?? {};
 }

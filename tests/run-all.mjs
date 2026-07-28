@@ -13,9 +13,9 @@ const suites = [
   { name: "workflow-v3", file: "workflow-v3.mjs", env: {} },
   { name: "lsp", file: "run.mjs", env: { PI_TEST_SUITE: "lsp" } },
   {
-    name: "diff-ledger",
+    name: "diff",
     file: "run.mjs",
-    env: { PI_TEST_SUITE: "diff-ledger" },
+    env: { PI_TEST_SUITE: "diff" },
   },
 ];
 

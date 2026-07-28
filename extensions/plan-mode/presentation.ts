@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { setTuiStatus, ZENTUI_STATUS_KEYS } from "../shared/workflow-status.ts";
+import { setTuiStatus, UI_STATUS_KEYS } from "../shared/workflow-status.ts";
 import type { PlanSnapshot } from "./plan-snapshot.ts";
 import type { WorkflowStateV3, WorkflowStatus } from "./store/index.ts";
 
@@ -26,11 +26,11 @@ export function updateWorkflowPresentation(
   override?: WorkflowStatus,
 ): void {
   if (override) {
-    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, LABELS[override]);
+    setTuiStatus(ctx, UI_STATUS_KEYS.workflow, LABELS[override]);
     return;
   }
   if (!state) {
-    setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, LABELS.idle);
+    setTuiStatus(ctx, UI_STATUS_KEYS.workflow, LABELS.idle);
     return;
   }
   const completed = state.steps.filter(
@@ -45,14 +45,14 @@ export function updateWorkflowPresentation(
       : "";
   setTuiStatus(
     ctx,
-    ZENTUI_STATUS_KEYS.workflow,
+    UI_STATUS_KEYS.workflow,
     `${LABELS[state.status]}${suffix}`,
   );
 }
 
 /** Remove the workflow label; the session no longer owns a workflow. */
 export function clearWorkflowPresentation(ctx: ExtensionContext): void {
-  setTuiStatus(ctx, ZENTUI_STATUS_KEYS.workflow, undefined);
+  setTuiStatus(ctx, UI_STATUS_KEYS.workflow, undefined);
 }
 
 export function formatPlanSteps(

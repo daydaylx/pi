@@ -2,7 +2,7 @@
 
 > Optional, read-only, projektbezogene Language-Server-Integration.
 > Epic: [#92](https://github.com/daydaylx/pi/issues/92).
-> Architektur- und Implementierungshintergrund: [`LSP_INTEGRATION_PLAN.md`](LSP_INTEGRATION_PLAN.md).
+> Architektur- und Implementierungshintergrund: [`archive/LSP_INTEGRATION_PLAN.md`](archive/LSP_INTEGRATION_PLAN.md) (historisch, umgesetzt).
 
 Pi kann über das Language Server Protocol semantische Codeinformationen
 einholen: Diagnosen, Definitionen, Referenzen, Hover-Informationen und

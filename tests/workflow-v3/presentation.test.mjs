@@ -10,7 +10,7 @@ const planPresentation = await load("extensions/plan-mode/presentation.ts");
 await test("status mapping helpers", async () => {
   if (!workflowStatus) return;
   eq(
-    workflowStatus.ZENTUI_STATUS_KEYS,
+    workflowStatus.UI_STATUS_KEYS,
     {
       permissions: "permissions",
       workflow: "workflow",

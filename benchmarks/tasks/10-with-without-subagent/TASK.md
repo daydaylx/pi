@@ -11,7 +11,7 @@ einen.
 > Prüfe alle Dateien unter `extensions/shared/` auf verbliebene englische
 > Code-Kommentare (Fließtext, nicht Bezeichner/Schlüsselwörter/technische
 > Begriffe) und übersetze sie ins Deutsche. Behalte technische Begriffe wie
-> in `docs/uebersetzungsbericht.md` beschrieben bei (API, CLI, Git, LSP,
+> in `docs/archive/uebersetzungsbericht.md` beschrieben bei (API, CLI, Git, LSP,
 > Modellrollen-IDs etc. bleiben unübersetzt).
 
 Lauf A — Anweisung im System-/Auftragstext ergänzt um: "Bearbeite dies
@@ -36,7 +36,7 @@ finden):
 Ausschließlich Dateien unter `extensions/shared/`, nur Kommentartext
 (Docstrings, Inline-Kommentare), keine Logikänderung, keine Änderung an
 String-Literalen, die zur Laufzeit sichtbar sind (die sind bereits Teil der
-abgeschlossenen UI-Übersetzung, siehe `docs/uebersetzungsbericht.md` — diese
+abgeschlossenen UI-Übersetzung, siehe `docs/archive/uebersetzungsbericht.md` — diese
 Aufgabe betrifft nur Entwickler-Kommentare).
 
 ## Erwartetes Ergebnis

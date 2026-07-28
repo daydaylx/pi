@@ -17,7 +17,7 @@ export const SHORTCUTS = {
   modeMenu: {
     keys: "shift+tab",
     label: "Shift+Tab",
-    description: "Control Center öffnen",
+    description: "Workflow wechseln",
   },
   modelMenu: {
     keys: "super+m",
@@ -33,11 +33,6 @@ export const SHORTCUTS = {
     keys: "super+q",
     label: "Super+Q",
     description: "Hauptmenü öffnen",
-  },
-  help: {
-    keys: "super+h",
-    label: "Super+H",
-    description: "Shortcut-/Command-Hilfe anzeigen",
   },
   planAssistant: {
     keys: "super+p",

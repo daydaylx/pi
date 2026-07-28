@@ -47,8 +47,6 @@ function parseArgs(argv) {
     else if (arg === "--window-start") args.windowStart = argv[++i];
     else if (arg === "--window-end") args.windowEnd = argv[++i];
     else if (arg === "--allowed-files") args.allowedFiles = argv[++i];
-    else if (arg === "--ledger") args.ledger = argv[++i];
-    else if (arg === "--ledger-expects") args.ledgerExpects = argv[++i];
     else if (arg === "--environment-file") args.environmentFile = argv[++i];
     else if (arg === "--resources-file") args.resourcesFile = argv[++i];
     else if (arg === "--subagent-calls") args.subagentCalls = argv[++i];
@@ -259,40 +257,6 @@ function collectVerifyResult(verifyResultPath) {
   };
 }
 
-// --- Messgröße 13 (automatischer Anteil): Entscheidungs-Persistenz ---
-// Prüft, ob die als dauerhaft erwarteten Fakten nach dem Lauf (also potenziell
-// nach einer Compaction) im Context Ledger vorhanden sind. Nur der Datei-
-// Abgleich ist automatisch; die inhaltliche Korrektheit im finalen Turn bleibt
-// manuell (siehe SCORING.md, Messgröße 13).
-function collectLedgerSurvival(worktreePath, ledgerPathArg, expectsArg) {
-  const expects = expectsArg
-    ? expectsArg
-        .split("|")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0)
-    : [];
-  if (expects.length === 0) return null;
-  const ledgerPath =
-    ledgerPathArg ??
-    (worktreePath ? `${worktreePath}/docs/CONTEXT_LEDGER.md` : undefined);
-  if (!ledgerPath || !existsSync(ledgerPath)) {
-    return {
-      ledgerFound: false,
-      expected: expects.length,
-      present: 0,
-      missing: expects,
-    };
-  }
-  const content = readFileSync(ledgerPath, "utf-8");
-  const missing = expects.filter((needle) => !content.includes(needle));
-  return {
-    ledgerFound: true,
-    expected: expects.length,
-    present: expects.length - missing.length,
-    missing,
-  };
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.task) {
@@ -330,12 +294,6 @@ async function main() {
 
   const verifyResult = collectVerifyResult(args.verifyResult);
 
-  const ledgerSurvival = collectLedgerSurvival(
-    args.worktree,
-    args.ledger,
-    args.ledgerExpects,
-  );
-
   const environment = readOptionalJsonObject(
     args.environmentFile,
     "environment",
@@ -369,7 +327,6 @@ async function main() {
         : runHistoryMetrics.subagentFailures,
       diff: diffStat,
       verify: verifyResult,
-      ledgerSurvival,
       ...(environment === undefined ? {} : { environment }),
       ...(resources === undefined ? {} : { resources }),
     },

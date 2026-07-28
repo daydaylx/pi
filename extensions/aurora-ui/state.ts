@@ -1,4 +1,8 @@
 import type { EventBus, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  WORKFLOW_STATUSES,
+  type WorkflowStatus,
+} from "../shared/workflow-status.ts";
 
 export const AURORA_UI_CHANNELS = {
   request: "aurora-ui/state/request",
@@ -7,19 +11,11 @@ export const AURORA_UI_CHANNELS = {
 } as const;
 
 /**
- * Presentation mirror of the canonical WorkflowStatus (plan-mode/store.ts),
- * plus "archived" for a completed and filed workflow, which has no runtime
- * state left to report.
+ * Presentation mirror of the canonical WorkflowStatus, plus "archived" for a
+ * completed and filed workflow, which has no runtime state left to report.
+ * The status values themselves are never re-declared here.
  */
-export type AuroraWorkflowPhase =
-  | "idle"
-  | "planning"
-  | "working"
-  | "reviewing"
-  | "paused"
-  | "blocked"
-  | "done"
-  | "archived";
+export type AuroraWorkflowPhase = WorkflowStatus | "archived";
 
 export type AuroraActivityKind = "idle" | "thinking" | "tool" | "responding";
 
@@ -163,13 +159,7 @@ export function mergeAuroraUiState(
   patch: AuroraUiStatePatch,
 ): void {
   const workflowPhases: readonly AuroraWorkflowPhase[] = [
-    "idle",
-    "planning",
-    "working",
-    "reviewing",
-    "paused",
-    "blocked",
-    "done",
+    ...WORKFLOW_STATUSES,
     "archived",
   ];
   const activityKinds: readonly AuroraActivityKind[] = [

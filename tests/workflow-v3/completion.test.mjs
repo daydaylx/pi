@@ -190,23 +190,22 @@ await test("completion marker is exact and pipeline rechecks stable diff", async
         secretReviewerInput.diff.includes("nicht an den Reviewer"),
       "secret paths block completion without reading or forwarding their diff",
     );
-    const secretOverride = await completion.runCompletionPipeline(
-      {
-        projectRoot,
-        trusted: true,
-        exec: secretExec,
-        plan: finalized.snapshot,
-        state,
-        runLsp: async () => [],
-        runReviewer: async () => ({
-          verdict: "PASS",
-          summary: "Keine Befunde.",
-        }),
-      },
-      { overrideReason: "must not bypass secrets" },
-    );
+    // Der Override ist kein Pipeline-Modus mehr, sondern eine eigene
+    // begründete Entscheidung auf genau diesem Ergebnis. Die harte Grenze
+    // muss dort genauso greifen: completionOverrideReport wirft.
+    let secretOverrideError;
+    try {
+      completion.completionOverrideReport(
+        secretBoundary,
+        { plan: finalized.snapshot },
+        "must not bypass secrets",
+      );
+    } catch (error) {
+      secretOverrideError = error;
+    }
     assert(
-      secretOverride.report === undefined,
+      secretOverrideError instanceof Error &&
+        secretOverrideError.message.includes("Secret"),
       "hard secret findings cannot produce an override report",
     );
     const reviewFailure = await completion.runCompletionPipeline({

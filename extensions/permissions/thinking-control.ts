@@ -94,7 +94,7 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
         return ctx.model?.thinkingLevelMap?.[level] !== null;
       });
       const selected = await runTabbedOverlay<
-        "auto" | `manual:${SelectableThinkingLevel}` | "thinking-view"
+        "auto" | `manual:${SelectableThinkingLevel}`
       >(
         ctx,
         "Thinking & Reasoning",
@@ -104,28 +104,10 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
             label: "Denktiefe",
             entries,
           },
-          {
-            id: "telemetry",
-            label: "Anzeige & Telemetrie",
-            entries: [
-              {
-                id: "thinking-view",
-                label: "Status-Telemetrie",
-                description:
-                  "Ausgeblendet, kompakt oder mit Fokus; zeigt nie interne Modellgedanken",
-                value: "thinking-view",
-              },
-            ],
-          },
         ],
         { nonInteractiveHint: "Thinking & Reasoning benötigt den TUI-Modus." },
       );
-      const value = selected?.entry.value;
-      if (value === "thinking-view") {
-        pi.events.emit(CONTROL_CENTER_EVENTS.openThinkingView, { ctx });
-        return;
-      }
-      const selectedLevel = value;
+      const selectedLevel = selected?.entry.value;
       if (!selectedLevel || !isCurrentEpoch()) return;
 
       if (selectedLevel === "auto") {

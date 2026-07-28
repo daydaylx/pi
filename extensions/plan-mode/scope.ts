@@ -4,9 +4,6 @@
  * The scope lives in the PlanSnapshot ("Technischer Scope") and is the only
  * machine-enforceable part of the plan. This module answers one question:
  * which changed files fall outside it. It reads no files and holds no state.
- *
- * Moved here from setup-core/task-contract.ts, whose contract file was never
- * written and whose remaining scope-drift path was therefore unreachable.
  */
 
 function normalizePath(value: string): string {

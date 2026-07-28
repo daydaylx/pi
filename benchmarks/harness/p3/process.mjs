@@ -10,7 +10,6 @@ import { spawn } from "node:child_process";
 import { agentInvocation } from "./agent.mjs";
 import {
   GNU_TIME,
-  LEDGER_GATE_ENV,
   PI_MODEL,
   PI_THINKING,
   benchmarkEnvironmentOverrides,
@@ -70,7 +69,6 @@ function launchEnvironment(run, paths) {
     PI_CODING_AGENT_DIR: paths.worktree,
     PI_CODING_AGENT_SESSION_DIR: paths.runDir,
   };
-  delete environment[LEDGER_GATE_ENV];
   return { ...environment, ...benchmarkEnvironmentOverrides(run) };
 }
 
@@ -95,7 +93,6 @@ export async function runAgentSession(run, paths, prompts) {
     "--thinking",
     PI_THINKING,
   ];
-  if (run.task === "11-context-ledger-survival") args.push("--plan");
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
   args.push("--print", ...prompts);
   // Do not retain Pi stdout/stderr: an agent may handle credentials through

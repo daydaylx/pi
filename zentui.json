@@ -43,10 +43,7 @@
     "placements": {
       "workflow": "left",
       "permissions": "right",
-      "thinking-view": "off",
-      "lsp": "right",
-      "subagent-slash": "right",
-      "subagent-slash-text": "right"
+      "lsp": "right"
     },
     "colorModes": {}
   }

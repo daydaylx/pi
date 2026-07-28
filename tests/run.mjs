@@ -42,9 +42,7 @@ const SECTION_SUITES = {
   "target runtime configuration": "runtime",
   "greenfield setup config and Aurora state contract": "runtime",
   "setup core lifecycle": "runtime",
-  "direct task lifecycle: /task and /task-done": "runtime",
   "project verification profiles (#105)": "runtime",
-  "universal verification gate (#102)": "runtime",
   "technical scope matching": "runtime",
   "native subagent profiles": "runtime",
   "native project skills": "runtime",
@@ -53,8 +51,6 @@ const SECTION_SUITES = {
   "ask-user temporary dialog": "runtime",
   "Aurora UI lifecycle and responsive surfaces": "runtime",
   "combined production extension stack": "runtime",
-  "activity status lifecycle": "ui",
-  "thinking view lifecycle": "ui",
   "Control Center menus and routing": "ui",
   "shared menu shell navigation and rendering": "ui",
   "LSP Control Center file picker": "lsp",
@@ -64,9 +60,7 @@ const SECTION_SUITES = {
   "LSP security and registry single-flight (P0.2, P1.1)": "lsp",
   "LSP navigation and symbol tools (#96)": "lsp",
   "LSP command, status and trust (#97)": "lsp",
-  "diff viewer regressions": "diff-ledger",
-  "context ledger consolidation and recovery": "diff-ledger",
-  "context ledger plan-mode integration": "diff-ledger",
+  "diff viewer regressions": "diff",
 };
 
 const TEST_SUITES = new Set(Object.values(SECTION_SUITES));
@@ -117,32 +111,16 @@ async function load(relativePath) {
 
 const policy = await load("extensions/shared/permission-policy.ts");
 const menuUi = await load("extensions/shared/menu-ui.ts");
-const controlCenterMenu = await load(
-  "extensions/shared/control-center-menu.ts",
-);
 const thinkingMenu = await load("extensions/shared/thinking-menu.ts");
 const lspControlCenter = await load("extensions/lsp/control-center.ts");
 const lspTools = await load("extensions/lsp/tools.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
 const controlPlane = await load("extensions/control-plane.ts");
-const activityStatus = await load("extensions/activity-status.ts");
 const diffAlgorithm = await load("extensions/diff-viewer/diff-algorithm.ts");
 const diffFallback = await load("extensions/diff-viewer/git-diff.ts");
 const diffTracker = await load("extensions/diff-viewer/change-tracker.ts");
 const diffViewer = await load("extensions/diff-viewer/index.ts");
-// thinking-view-config.ts resolves its default config path once at import
-// time via PI_CODING_AGENT_DIR. This repo itself lives at ~/.pi/agent, so
-// the test suite must redirect that default to an isolated temp directory
-// before the module (or thinking-view.ts, which imports it) ever loads —
-// otherwise tests would read/write the real local config file.
-const thinkingViewConfigDir = mkdtempSync(
-  path.join(tmpdir(), "pi-thinking-view-config-"),
-);
-process.env.PI_CODING_AGENT_DIR = thinkingViewConfigDir;
-const thinkingView = await load("extensions/thinking-view.ts");
-const thinkingViewConfig = await load("extensions/thinking-view-config.ts");
-delete process.env.PI_CODING_AGENT_DIR;
 const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const lspExtensionMod = await load("extensions/lsp/index.ts");
@@ -152,7 +130,6 @@ const setupConfig = await load("extensions/setup-core/config.ts");
 const setupCore = await load("extensions/setup-core/index.ts");
 const auroraState = await load("extensions/aurora-ui/state.ts");
 const auroraUi = await load("extensions/aurora-ui/index.ts");
-const contextLedger = await load("extensions/shared/context-ledger.ts");
 
 // ─────────────────── target runtime and exclusive ownership ───────────────────
 await section("target runtime configuration", async () => {
@@ -292,14 +269,18 @@ await section("target runtime configuration", async () => {
     ]) {
       assert(activeExtensions.includes(extension), `${extension} is active`);
     }
+    // Aurora is the only UI owner: the pre-Aurora chrome files are gone from
+    // the tree, not merely deactivated. Git history is their fallback.
     for (const legacyOwner of [
-      "+extensions/activity-status.ts",
-      "+extensions/thinking-view.ts",
-      "+extensions/git-header.ts",
+      "extensions/activity-status.ts",
+      "extensions/thinking-view.ts",
+      "extensions/thinking-view-config.ts",
+      "extensions/git-header.ts",
+      "extensions/context-menu.ts",
     ]) {
       assert(
-        !activeExtensions.includes(legacyOwner),
-        `${legacyOwner} is inactive under Aurora`,
+        !existsSync(path.join(ROOT, legacyOwner)),
+        `${legacyOwner} no longer exists under Aurora`,
       );
     }
     for (const extension of activeExtensions) {
@@ -529,19 +510,9 @@ await section("setup core lifecycle", async () => {
     "setup core registers the allowlisted verify tool",
   );
   assert(
-    Boolean(harness.commands.get("verify-gate")),
-    "setup core registers the advisory verification gate (#102)",
+    !harness.commands.get("verify-gate"),
+    "setup core no longer owns /verify-gate; it belongs to the completion domain",
   );
-  const diagnosticGate = harness.commands.get("verify-gate");
-  if (diagnosticGate) {
-    await diagnosticGate("", context);
-    assert(
-      harness.notifications.some((entry) =>
-        entry.message.includes("Verifikations-Gate"),
-      ),
-      "manual /verify-gate remains an executable diagnostic",
-    );
-  }
   const doctor = harness.commands.get("setup-doctor");
   assert(Boolean(doctor), "/setup-doctor is registered");
   if (doctor) await doctor("", context);
@@ -589,225 +560,6 @@ await section("setup core lifecycle", async () => {
     );
   }
   assertNoGlobalChrome(harness, "setup core owns no TUI chrome");
-});
-
-// ---------------------------------------------------------------------------
-// Direct-task lifecycle (/task, /task-done). Closes the "direct tasks are
-// nowhere covered" gap for #102/#106/#107: task-contract.ts had a "direct"
-// source in its schema but nothing in production code ever created one.
-// ---------------------------------------------------------------------------
-await section("direct task lifecycle: /task and /task-done", async () => {
-  return; // Replaced by the v3 module suite for .agent/direct-task.json.
-  const contractMod = await load("extensions/setup-core/task-contract.ts");
-
-  // --- /task with no argument: no contract created ---
-  {
-    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-empty-"));
-    try {
-      const harness = createHarness();
-      setupCore.default(harness.api);
-      const context = harness.makeContext({ cwd });
-      await harness.runHooks("session_start", {}, context);
-      await harness.commands.get("task")("", context);
-      eq(
-        contractMod.loadTaskContract(cwd).contract,
-        undefined,
-        "an empty /task argument never creates a contract",
-      );
-      assert(
-        harness.notifications.some((n) => n.message.includes("Nutzung: /task")),
-        "empty /task argument shows usage",
-      );
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-
-  // --- /task with a goal: creates a direct contract ---
-  {
-    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-create-"));
-    try {
-      const harness = createHarness();
-      setupCore.default(harness.api);
-      const context = harness.makeContext({ cwd });
-      await harness.runHooks("session_start", {}, context);
-      await harness.commands.get("task")("Fix the login redirect", context);
-      const loaded = contractMod.loadTaskContract(cwd);
-      eq(loaded.contract?.goal, "Fix the login redirect", "goal is stored");
-      eq(
-        loaded.contract?.source,
-        "direct",
-        "contract is marked source: direct",
-      );
-      eq(
-        loaded.contract?.expectedScope,
-        [],
-        "no scope is declared for a direct task",
-      );
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-
-  // --- /task with an existing contract: non-TUI refuses, TUI asks ---
-  {
-    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-collision-"));
-    try {
-      contractMod.saveTaskContract(
-        cwd,
-        contractMod.createDirectContract("Original goal"),
-      );
-
-      const nonTuiHarness = createHarness();
-      setupCore.default(nonTuiHarness.api);
-      const nonTuiContext = nonTuiHarness.makeContext({
-        cwd,
-        mode: "json",
-        hasUI: false,
-      });
-      await nonTuiHarness.runHooks("session_start", {}, nonTuiContext);
-      await nonTuiHarness.commands.get("task")("New goal", nonTuiContext);
-      eq(
-        contractMod.loadTaskContract(cwd).contract?.goal,
-        "Original goal",
-        "a non-interactive session cannot overwrite an existing contract",
-      );
-
-      const declinedHarness = createHarness({ confirm: false });
-      setupCore.default(declinedHarness.api);
-      const declinedContext = declinedHarness.makeContext({ cwd });
-      await declinedHarness.runHooks("session_start", {}, declinedContext);
-      await declinedHarness.commands.get("task")("New goal", declinedContext);
-      eq(
-        contractMod.loadTaskContract(cwd).contract?.goal,
-        "Original goal",
-        "declining the overwrite confirmation keeps the original contract",
-      );
-
-      const acceptedHarness = createHarness({ confirm: true });
-      setupCore.default(acceptedHarness.api);
-      const acceptedContext = acceptedHarness.makeContext({ cwd });
-      await acceptedHarness.runHooks("session_start", {}, acceptedContext);
-      await acceptedHarness.commands.get("task")("New goal", acceptedContext);
-      eq(
-        contractMod.loadTaskContract(cwd).contract?.goal,
-        "New goal",
-        "confirming the overwrite replaces the contract",
-      );
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-
-  // --- /task-done: no contract -> notice, no gate call ---
-  {
-    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-done-none-"));
-    try {
-      const harness = createHarness();
-      setupCore.default(harness.api);
-      const context = harness.makeContext({ cwd });
-      await harness.runHooks("session_start", {}, context);
-      await harness.commands.get("task-done")("", context);
-      assert(
-        harness.notifications.some((n) =>
-          n.message.includes("Keine aktive direkte Aufgabe"),
-        ),
-        "/task-done with no contract reports there is nothing to finish",
-      );
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-
-  const makeFailingExec = () => async (_program, args) => {
-    if (args[0] === "status")
-      return { code: 0, stdout: " M src/a.ts\n", stderr: "", killed: false };
-    if (args[0] === "diff")
-      return { code: 0, stdout: "1 file changed", stderr: "", killed: false };
-    if (`${_program} ${args.join(" ")}`.includes("run typecheck"))
-      return { code: 1, stdout: "", stderr: "type error", killed: false };
-    return { code: 0, stdout: "", stderr: "", killed: false };
-  };
-  const makePassingExec = () => async (_program, args) => {
-    if (args[0] === "status" || args[0] === "diff")
-      return { code: 0, stdout: "", stderr: "", killed: false };
-    return { code: 0, stdout: "", stderr: "", killed: false };
-  };
-
-  // --- /task-done: passing gate clears the contract without asking ---
-  {
-    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-done-pass-"));
-    try {
-      contractMod.saveTaskContract(
-        cwd,
-        contractMod.createDirectContract("Ship it"),
-      );
-      const harness = createHarness({
-        confirm: () => {
-          throw new Error("must not be asked when the gate passes");
-        },
-      });
-      setupCore.default(harness.api);
-      harness.api.exec = makePassingExec();
-      const context = harness.makeContext({ cwd });
-      await harness.runHooks("session_start", {}, context);
-      await harness.commands.get("task-done")("", context);
-      eq(
-        contractMod.loadTaskContract(cwd).contract,
-        undefined,
-        "a passing gate clears the direct task contract",
-      );
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-
-  // --- /task-done: failing gate + non-TUI blocks completion entirely ---
-  {
-    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-done-fail-nontui-"));
-    try {
-      contractMod.saveTaskContract(
-        cwd,
-        contractMod.createDirectContract("Risky change"),
-      );
-      const harness = createHarness();
-      setupCore.default(harness.api);
-      harness.api.exec = makeFailingExec();
-      const context = harness.makeContext({ cwd, mode: "json", hasUI: false });
-      await harness.runHooks("session_start", {}, context);
-      await harness.commands.get("task-done")("", context);
-      assert(
-        Boolean(contractMod.loadTaskContract(cwd).contract),
-        "a failing gate in a non-interactive context keeps the contract intact",
-      );
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-
-  // --- /task-done: failing gate + TUI override still completes ---
-  {
-    const cwd = mkdtempSync(path.join(tmpdir(), "pi-task-done-fail-override-"));
-    try {
-      contractMod.saveTaskContract(
-        cwd,
-        contractMod.createDirectContract("Risky change"),
-      );
-      const harness = createHarness({ confirm: true });
-      setupCore.default(harness.api);
-      harness.api.exec = makeFailingExec();
-      const context = harness.makeContext({ cwd });
-      await harness.runHooks("session_start", {}, context);
-      await harness.commands.get("task-done")("", context);
-      eq(
-        contractMod.loadTaskContract(cwd).contract,
-        undefined,
-        "an explicit override of a failing gate still completes the direct task",
-      );
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1074,233 +826,6 @@ await section("project verification profiles (#105)", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Universal verification gate (#102), advisory MVP. Consumes the setup
-// verification + #105 project profiles + git diff. No real process is spawned
-// (exec is injected).
-// ---------------------------------------------------------------------------
-await section("universal verification gate (#102)", async () => {
-  const gateMod = await load("extensions/setup-core/verification-gate.ts");
-  assert(
-    typeof gateMod?.runVerificationGate === "function",
-    "verification-gate exports runVerificationGate",
-  );
-  assert(
-    typeof gateMod?.aggregateStatus === "function",
-    "verification-gate exports aggregateStatus",
-  );
-  assert(
-    typeof gateMod?.parseGitStatus === "function",
-    "verification-gate exports parseGitStatus",
-  );
-
-  // --- parseGitStatus ---
-  const parsed = gateMod.parseGitStatus(
-    [" M src/a.ts", "A  docs/b.md", "?? c.txt", "R  old.ts -> new.ts"].join(
-      "\n",
-    ),
-  );
-  eq(parsed.length, 4, "porcelain lines parsed");
-  eq(parsed[0].path, "src/a.ts", "modified path parsed");
-  eq(parsed[1].status, "A ", "added status captured");
-  eq(parsed[3].path, "new.ts", "rename resolves to the new path");
-
-  // --- aggregateStatus ---
-  eq(
-    gateMod.aggregateStatus([
-      { name: "a", source: "setup", status: "pass", required: true },
-      { name: "b", source: "project", status: "pass", required: false },
-    ]),
-    "pass",
-    "all required pass -> pass",
-  );
-  eq(
-    gateMod.aggregateStatus([
-      { name: "a", source: "setup", status: "fail", required: true },
-    ]),
-    "fail",
-    "required fail -> fail",
-  );
-  eq(
-    gateMod.aggregateStatus([
-      { name: "a", source: "setup", status: "not_run", required: true },
-    ]),
-    "blocked",
-    "required not_run -> blocked",
-  );
-  eq(
-    gateMod.aggregateStatus([
-      { name: "a", source: "setup", status: "fail", required: false },
-    ]),
-    "pass",
-    "optional fail does not block",
-  );
-
-  // --- runVerificationGate: all pass ---
-  const ws = mkdtempSync(path.join(tmpdir(), "pi-gate-"));
-  function makeExec(overrides = {}) {
-    const byKey = {
-      status: " M src/a.ts\nA  docs/b.md\n",
-      diff: " src/a.ts | 2 +-\n 1 file changed\n",
-      typecheck: { code: 0, stdout: "", stderr: "" },
-      test: { code: 0, stdout: "pass", stderr: "" },
-      ...overrides,
-    };
-    return async (program, args) => {
-      const joined = `${program} ${args.join(" ")}`;
-      if (args[0] === "status")
-        return { code: 0, stdout: byKey.status, stderr: "", killed: false };
-      if (args[0] === "diff")
-        return { code: 0, stdout: byKey.diff, stderr: "", killed: false };
-      if (joined.includes("run typecheck"))
-        return {
-          code: byKey.typecheck.code,
-          stdout: byKey.typecheck.stdout,
-          stderr: byKey.typecheck.stderr,
-          killed: false,
-        };
-      if (joined.includes("run test"))
-        return {
-          code: byKey.test.code,
-          stdout: byKey.test.stdout,
-          stderr: byKey.test.stderr,
-          killed: false,
-        };
-      // any project profile program -> pass by default
-      return { code: 0, stdout: "", stderr: "", killed: false };
-    };
-  }
-
-  const passing = await gateMod.runVerificationGate({
-    projectRoot: ws,
-    trusted: true,
-    exec: makeExec(),
-  });
-  eq(passing.status, "pass", "typecheck+test pass, no profiles -> pass");
-  eq(passing.changedFiles.length, 2, "changed files gathered from git status");
-  eq(Boolean(passing.diffStat), true, "diff stat captured");
-  eq(passing.checks.length, 2, "setup typecheck + test ran as checks");
-  eq(passing.checks[0].name, "typecheck", "first setup check is typecheck");
-  eq(passing.checks[0].source, "setup", "check source is setup");
-
-  // --- runVerificationGate: required setup check fails -> fail ---
-  const failing = await gateMod.runVerificationGate({
-    projectRoot: ws,
-    trusted: true,
-    exec: makeExec({ test: { code: 1, stdout: "", stderr: "1 test failed" } }),
-  });
-  eq(failing.status, "fail", "test failure -> gate fail");
-  eq(failing.checks[1].status, "fail", "test check marked fail");
-  eq(
-    failing.recommendation.includes("nicht empfohlen"),
-    true,
-    "fail recommendation given",
-  );
-
-  // --- runVerificationGate: required check not_run -> blocked ---
-  const blockedExec = async (program, args) => {
-    const joined = `${program} ${args.join(" ")}`;
-    if (args[0] === "status")
-      return { code: 0, stdout: "", stderr: "", killed: false };
-    if (args[0] === "diff")
-      return { code: 0, stdout: "", stderr: "", killed: false };
-    if (joined.includes("run typecheck"))
-      throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
-    return { code: 0, stdout: "", stderr: "", killed: false };
-  };
-  const blocked = await gateMod.runVerificationGate({
-    projectRoot: ws,
-    trusted: true,
-    exec: blockedExec,
-  });
-  eq(blocked.status, "blocked", "missing typecheck binary -> blocked");
-  eq(blocked.checks[0].status, "not_run", "typecheck not_run");
-  eq(
-    blocked.residualRisks.some(
-      (r) => r.includes("typecheck") && r.includes("missing_binary"),
-    ),
-    true,
-    "missing-binary check surfaced as residual risk",
-  );
-
-  // --- runVerificationGate: empty diff -> scope hint ---
-  const emptyDiff = await gateMod.runVerificationGate({
-    projectRoot: ws,
-    trusted: true,
-    exec: makeExec({ status: "", diff: "" }),
-  });
-  eq(emptyDiff.status, "pass", "empty diff still passes when checks pass");
-  eq(
-    emptyDiff.scopeHints.some((h) =>
-      h.includes("keine Working-Tree-Änderungen"),
-    ),
-    true,
-    "empty diff produces a scope hint",
-  );
-
-  // --- runVerificationGate: project profiles consumed when trusted ---
-  const profileDir = path.join(ws, ".pi");
-  mkdirSync(profileDir, { recursive: true });
-  writeFileSync(
-    path.join(profileDir, "verify.json"),
-    JSON.stringify({
-      profiles: {
-        pytest: { program: "pytest", args: ["-q"], timeoutMs: 60000 },
-        lint: {
-          program: "flake8",
-          args: ["."],
-          required: false,
-          timeoutMs: 30000,
-        },
-      },
-    }),
-  );
-  const withProfiles = await gateMod.runVerificationGate({
-    projectRoot: ws,
-    trusted: true,
-    exec: makeExec({ test: { code: 0, stdout: "", stderr: "" } }),
-  });
-  const profileChecks = withProfiles.checks.filter(
-    (c) => c.source === "project",
-  );
-  eq(profileChecks.length, 2, "both project profiles ran as checks");
-  eq(
-    profileChecks.some((c) => c.name === "pytest" && c.required),
-    true,
-    "required project profile marked required",
-  );
-  eq(withProfiles.status, "pass", "passing profiles + setup checks -> pass");
-
-  // --- runVerificationGate: profiles ignored when untrusted ---
-  const untrustedProfiles = await gateMod.runVerificationGate({
-    projectRoot: ws,
-    trusted: false,
-    exec: makeExec({ status: "", diff: "" }),
-  });
-  eq(
-    untrustedProfiles.checks.filter((c) => c.source === "project").length,
-    0,
-    "untrusted project runs no project profiles",
-  );
-
-  // --- formatGateReport ---
-  const report = gateMod.formatGateReport(passing, "Beispielauftrag");
-  for (const needle of [
-    "Verifikations-Gate",
-    "Auftrag: Beispielauftrag",
-    "PASS",
-    "src/a.ts",
-    "setup/typecheck",
-  ])
-    assert(report.includes(needle), "report contains " + needle);
-
-  try {
-    rmSync(ws, { recursive: true, force: true });
-  } catch {
-    /* ignore temp cleanup */
-  }
-});
-
-// ---------------------------------------------------------------------------
 // Task contract + scope control (#106). Lightweight, standalone; references
 // planId without a second workflow state machine. Enables real scope-drift
 // for the advisory gate (#102).
@@ -1353,17 +878,10 @@ await section("technical scope matching", async () => {
     "declared-but-unchanged pattern reported",
   );
 
-  // Contract-Persistenz (saveTaskContract/loadTaskContract/analyzeScopeDrift)
-  // entfiel mit setup-core/task-contract.ts: .agent/task-contract.json wurde
-  // von keinem Codepfad je geschrieben. Die erzwingbare Scope-Prüfung läuft
-  // über plan-mode/completion/scope-check.ts gegen den PlanSnapshot-Scope.
+  // Die erzwingbare Scope-Prüfung läuft über
+  // plan-mode/completion/scope-check.ts gegen den PlanSnapshot-Scope
+  // (docs/decisions/004-remove-task-contract.md).
 });
-
-// Entfernt mit der Task-Contract-Bereinigung: prüfte den Scope-Drift-Zweig des
-// Verifikations-Gates, der über .agent/task-contract.json lief. Diese Datei
-// wurde von keinem Codepfad je geschrieben, der Zweig war unerreichbar.
-// Ersatz: die erzwingbare Scope-Prüfung in plan-mode/completion/scope-check.ts
-// (required-Check "technical-scope" gegen den PlanSnapshot-Scope).
 
 /** Gate exec stub whose typecheck step fails; used by the sections below. */
 
@@ -1431,236 +949,54 @@ await section("native project skills", async () => {
 // von keiner Extension mehr geladen (setup-core/index.ts importierte sie nicht)
 // und damit wirkungslos. Ihre Tests entfallen mit ihnen.
 
-await section("activity status lifecycle", async () => {
-  if (!activityStatus) return;
-  const harness = createHarness();
-  activityStatus.default(harness.api);
-  const context = harness.makeContext();
-  await harness.runHooks("session_start", {}, context);
-  eq(
-    harness.hiddenThinkingLabels.length,
-    0,
-    "activity leaves the hidden-thinking label to thinking-view",
-  );
-  eq(
-    harness.workingIndicators.at(-1)?.frames?.length,
-    1,
-    "activity uses one quiet indicator frame",
-  );
-  eq(
-    harness.workingVisibility.at(-1),
-    false,
-    "activity is hidden until actual agent work begins",
-  );
+await section("Control Center menus and routing", async () => {
+  if (!thinkingMenu || !modePermissions || !planMode || !controlPlane) return;
 
-  await harness.runHooks("agent_start", {}, context);
-  eq(
-    harness.workingMessages.at(-1),
-    "Analysiert die Aufgabe …",
-    "agent start has a concise truthful activity label",
-  );
-  eq(
-    harness.workingVisibility.at(-1),
-    true,
-    "one activity line becomes visible",
-  );
-
-  await harness.runHooks(
-    "tool_execution_start",
-    { toolCallId: "read-one", toolName: "read" },
-    context,
-  );
-  eq(
-    harness.workingVisibility.at(-1),
-    false,
-    "the compact tool timeline replaces concurrent activity text",
-  );
-  await harness.runHooks(
-    "tool_execution_end",
-    { toolCallId: "read-one", toolName: "read" },
-    context,
-  );
-  await harness.runHooks(
-    "message_update",
-    { assistantMessageEvent: { type: "text_delta" } },
-    context,
-  );
-  eq(
-    harness.workingVisibility.at(-1),
-    false,
-    "activity disappears when visible response text begins",
-  );
-  await harness.runHooks("session_shutdown", {}, context);
-  eq(
-    harness.workingMessages.at(-1),
-    undefined,
-    "shutdown restores the default working message",
-  );
-  assertNoGlobalChrome(harness, "activity status installs no global chrome");
-});
-
-await section("thinking view lifecycle", async () => {
-  if (!thinkingView || !thinkingViewConfig) return;
-  eq(
-    thinkingViewConfig
-      .getThinkingViewConfigPath()
-      .startsWith(thinkingViewConfigDir),
-    true,
-    "the config store resolved under the isolated PI_CODING_AGENT_DIR, not the real repo path",
-  );
+  // Two entry points, different scope, one definition: Shift+Tab is the
+  // workflow switch, Super+Q the full Control Center whose first tab IS that
+  // workflow switch. Both route through plan-mode's single action router, so
+  // a workflow entry can never differ between them.
   {
-    const harness = createHarness();
-    thinkingView.default(harness.api);
-    const context = harness.makeContext();
-
-    await harness.runHooks("session_start", {}, context);
+    const seen = [];
+    const shared = createHarness({
+      select: (labels) => {
+        seen.push([...labels]);
+        return undefined;
+      },
+    });
+    planMode.default(shared.api);
+    controlPlane.default(shared.api);
+    const sharedContext = shared.makeContext({
+      cwd: mkdtempSync(path.join(tmpdir(), "pi-cc-entries-")),
+    });
+    sharedContext.ui.custom = async () => {
+      throw new Error("use deterministic select fallback");
+    };
+    await shared.runHooks("session_start", {}, sharedContext);
+    await shared.shortcuts.get("shift+tab")(sharedContext);
+    await shared.shortcuts.get("super+q")(sharedContext);
+    // Super+Q routes through an event; the bus dispatches without awaiting the
+    // async listener, so let the microtask queue drain before asserting.
+    await new Promise((resolve) => setImmediate(resolve));
+    eq(seen.length, 2, "both entry points opened their menu");
+    const [workflowSwitch, controlCenter] = seen;
     eq(
-      latestStatus(harness, "thinking-view"),
-      undefined,
-      "no status line before any agent activity",
-    );
-
-    await harness.runHooks("agent_start", {}, context);
-    eq(
-      latestStatus(harness, "thinking-view")?.includes("WARTEN"),
-      true,
-      "agent start publishes a waiting state",
-    );
-
-    await harness.runHooks(
-      "message_update",
-      { assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
-      context,
-    );
-    eq(
-      latestStatus(harness, "thinking-view")?.includes("DENKEN"),
-      true,
-      "a thinking_start delta flips the status to THINKING",
+      workflowSwitch,
+      ["Schnellplan", "Architekturplan", "Arbeiten"],
+      "Shift+Tab is the workflow switch and offers only the workflow modes",
     );
     assert(
-      harness.hiddenThinkingLabels.at(-1)?.startsWith("Denken"),
-      "the hidden-thinking label is kept informative while thinking streams",
-    );
-
-    await harness.runHooks(
-      "message_update",
-      {
-        assistantMessageEvent: {
-          type: "thinking_delta",
-          contentIndex: 0,
-          delta: "reasoning about the fix",
-        },
-      },
-      context,
-    );
-
-    await harness.runHooks(
-      "message_update",
-      {
-        assistantMessageEvent: {
-          type: "text_delta",
-          contentIndex: 1,
-          delta: "Hi",
-        },
-      },
-      context,
-    );
-    eq(
-      latestStatus(harness, "thinking-view")?.includes("ANTWORTEN"),
-      true,
-      "a text delta after thinking flips the status to ANSWERING, never THINKING again",
-    );
-
-    await harness.runHooks(
-      "message_end",
-      { message: { role: "assistant", content: [] } },
-      context,
-    );
-    await harness.runHooks("agent_settled", {}, context);
-    eq(
-      latestStatus(harness, "thinking-view"),
-      undefined,
-      "the status line clears once the agent settles",
-    );
-
-    await harness.runHooks("session_shutdown", {}, context);
-    eq(
-      harness.hiddenThinkingLabels.at(-1),
-      undefined,
-      "shutdown restores the default hidden-thinking label",
-    );
-    assertNoGlobalChrome(harness, "thinking view installs no global chrome");
-
-    // A turn that never sees thinking_start must never claim THINKING.
-    const honestHarness = createHarness();
-    thinkingView.default(honestHarness.api);
-    const honestContext = honestHarness.makeContext();
-    await honestHarness.runHooks("session_start", {}, honestContext);
-    await honestHarness.runHooks("agent_start", {}, honestContext);
-    await honestHarness.runHooks(
-      "message_update",
-      {
-        assistantMessageEvent: {
-          type: "text_delta",
-          contentIndex: 0,
-          delta: "Hi",
-        },
-      },
-      honestContext,
+      workflowSwitch.every((entry) => controlCenter.includes(entry)),
+      "the Control Center reuses the very same workflow entries",
     );
     assert(
-      !(latestStatus(honestHarness, "thinking-view") ?? "").includes("DENKEN"),
-      "a model that never emits thinking_start is never labeled THINKING",
-    );
-    await honestHarness.runHooks(
-      "message_end",
-      { message: { role: "assistant", content: [] } },
-      honestContext,
-    );
-    eq(
-      latestStatus(honestHarness, "thinking-view")?.includes(
-        "Kein sichtbares Denken",
-      ),
-      true,
-      "a turn without any thinking delta is honestly labeled NO VISIBLE THINKING",
-    );
-
-    // /thinking-view off must clear the status and the hidden label.
-    const offHarness = createHarness();
-    thinkingView.default(offHarness.api);
-    const offContext = offHarness.makeContext();
-    await offHarness.runHooks("session_start", {}, offContext);
-    await offHarness.runHooks("agent_start", {}, offContext);
-    const command = offHarness.commands.get("thinking-view");
-    assert(Boolean(command), "/thinking-view is registered");
-    if (command) await command("off", offContext);
-    eq(
-      latestStatus(offHarness, "thinking-view"),
-      undefined,
-      "/thinking-view off clears the status line",
+      controlCenter.length > workflowSwitch.length &&
+        controlCenter.includes("Zugriffsstufe") &&
+        controlCenter.includes("LSP-Diagnose"),
+      "Super+Q additionally exposes the non-workflow areas",
     );
   }
-});
 
-await section("Control Center menus and routing", async () => {
-  if (!controlCenterMenu || !thinkingMenu || !modePermissions || !planMode)
-    return;
-  const entries = controlCenterMenu.buildControlCenterMenu({
-    mode: "work",
-    deciding: false,
-    permissionLabel: "Lesen + Schreiben",
-    thinkingLabel: "Auto (high)",
-  });
-  eq(
-    entries.map((entry) => entry.label),
-    ["Workflow", "Modell", "Sicherheit", "Werkzeuge", "Darstellung"],
-    "Control Center exposes the five navigable root areas",
-  );
-  eq(
-    entries[0].children?.map((entry) => entry.value),
-    ["simple_plan", "detailed_plan", "work", "decide"],
-    "Workflow actions are available below the Workflow area",
-  );
   const thinkingEntries = thinkingMenu.buildThinkingMenu("high", "auto");
   eq(
     thinkingEntries[0].value,
@@ -1836,11 +1172,15 @@ await section("global control plane shortcuts", async () => {
   const openMainMenu = harness.shortcuts.get("super+q");
   assert(Boolean(openMainMenu), "Super+Q registers the global main menu");
   if (openMainMenu) await openMainMenu(context);
+  // Super+Q is an optional door to the ONE Control Center, not a second menu:
+  // it opens nothing itself, it emits the shared open event.
   assert(
-    harness.emitted.some(
-      (event) => event.name === "control-center:open-diagnostics",
-    ),
-    "global main menu routes tool actions through domain events",
+    harness.emitted.some((event) => event.name === "control-center:open"),
+    "Super+Q opens the single shared Control Center",
+  );
+  assert(
+    harness.emitted.every((event) => event.name === "control-center:open"),
+    "the control plane owns shortcuts only, never its own menu entries",
   );
 });
 
@@ -4516,300 +3856,6 @@ await section("diff viewer regressions", async () => {
     ["a.txt", "b.txt"],
     "tracker sorts by persisted timestamp",
   );
-});
-
-await section("context ledger consolidation and recovery", async () => {
-  const {
-    computeLedgerContent,
-    parseLedgerSections,
-    parseLedgerMeta,
-    classifyLedger,
-    ledgerSummaryLine,
-    sanitizeBullet,
-    isSensitiveLine,
-    shouldCheckpointForTokens,
-    consolidateLedger,
-    readLedger,
-    hashContent,
-    CONTEXT_LEDGER_RELATIVE_PATH,
-    CONTEXT_LEDGER_MAX_LINES,
-  } = contextLedger;
-
-  const now = new Date("2026-07-23T10:00:00.000Z");
-  const brief = [
-    "# Decision Brief: Beispiel",
-    "## Ziel",
-    "Etwas erreichen.",
-    "## Nicht-Ziele",
-    "- Keine neue Memory-Extension",
-    "## Entscheidungen",
-    "- Entscheidung: Aurora Night als Standard-UI",
-    "## Risiken / Constraints",
-    "- xhigh übersteigt den 64K-Ausgaberahmen",
-    "## Offene Fragen",
-    "- Version 0.80.6 vs 0.80.7 angleichen?",
-    "## Verworfene Optionen",
-    "- Option: Externe Memory-Extension — zu komplex",
-    "## Abschlusskriterien",
-    "- [ ] Fertig",
-  ].join("\n");
-
-  // Erst-Konsolidierung aus einem Decision Brief.
-  const first = computeLedgerContent(
-    "pi",
-    undefined,
-    { briefContent: brief },
-    "decision-brief",
-    now,
-  );
-  assert(first.changed, "erste Konsolidierung schreibt");
-  eq(
-    first.sections["Bestätigte Nutzerentscheidungen"],
-    ["Entscheidung: Aurora Night als Standard-UI"],
-    "Entscheidung landet im richtigen Abschnitt",
-  );
-  eq(
-    first.sections["Nicht-Ziele"],
-    ["Keine neue Memory-Extension"],
-    "Nicht-Ziel übernommen",
-  );
-  eq(
-    first.sections["Offene Risiken"],
-    ["xhigh übersteigt den 64K-Ausgaberahmen"],
-    "Risiko übernommen",
-  );
-
-  // Idempotenz: derselbe Brief nochmal → keine Änderung.
-  const second = computeLedgerContent(
-    "pi",
-    first.content,
-    { briefContent: brief },
-    "decision-brief",
-    now,
-  );
-  assert(
-    !second.changed,
-    "erneute Konsolidierung derselben Quelle ist ein No-op",
-  );
-  eq(
-    second.sections["Bestätigte Nutzerentscheidungen"].length,
-    1,
-    "keine Duplikate bei Wiederholung",
-  );
-
-  // Neuer Plan fügt weitere Nicht-Ziele hinzu, dedupliziert Bekanntes.
-  const plan = [
-    "# Arbeitsplan: Beispiel",
-    "## 2. Nicht-Ziele",
-    "- Keine neue Memory-Extension",
-    "- Keine Vergrößerung des Kontextfensters",
-    "## 4. Risiken / Entscheidungen",
-    "- Token-Proxy statt echtem Hook",
-    "## 5. Todos",
-    "- [ ] Modul schreiben",
-  ].join("\n");
-  const third = computeLedgerContent(
-    "pi",
-    first.content,
-    {
-      planContent: plan,
-      openPriorities: ["Modul schreiben", "Modul schreiben"],
-    },
-    "plan-to-work",
-    now,
-  );
-  assert(third.changed, "neuer Plan ändert den Ledger");
-  eq(
-    third.sections["Nicht-Ziele"],
-    ["Keine neue Memory-Extension", "Keine Vergrößerung des Kontextfensters"],
-    "Plan-Nicht-Ziele dedupliziert angehängt",
-  );
-  eq(
-    third.sections["Aktuelle Prioritäten"],
-    ["Modul schreiben"],
-    "Prioritäten werden ersetzt und dedupliziert",
-  );
-
-  // Secret-Filter: sensible Zeilen werden nie übernommen.
-  assert(isSensitiveLine("password=hunter2"), "erkennt password");
-  assert(isSensitiveLine("Bearer abcdef123456"), "erkennt Bearer-Token");
-  assert(isSensitiveLine("API_KEY=sk-abcdefghij"), "erkennt ENV-Zuweisung");
-  eq(
-    sanitizeBullet("- secret token: xoxb-1234567890"),
-    undefined,
-    "sanitize verwirft Secret",
-  );
-  eq(
-    sanitizeBullet("-   Normaler   Eintrag "),
-    "Normaler Eintrag",
-    "sanitize normalisiert Freitext",
-  );
-  const secretBrief = [
-    "## Entscheidungen",
-    "- Entscheidung: normale Entscheidung",
-    "- AWS_SECRET_ACCESS_KEY=abcd1234efgh",
-  ].join("\n");
-  const filtered = computeLedgerContent(
-    "pi",
-    undefined,
-    { briefContent: secretBrief },
-    "manual",
-    now,
-  );
-  eq(
-    filtered.sections["Bestätigte Nutzerentscheidungen"],
-    ["Entscheidung: normale Entscheidung"],
-    "Secret-Zeile wird aus dem Merge gefiltert",
-  );
-
-  // Meta und Klassifikation.
-  const meta = parseLedgerMeta(third.content);
-  assert(meta && meta.lastTrigger === "plan-to-work", "Meta enthält Trigger");
-  assert(meta && meta.planHash === hashContent(plan), "Meta enthält Plan-Hash");
-  const classSame = classifyLedger(third.content, undefined, hashContent(plan));
-  assert(!classSame.possiblyStale, "gleicher Plan-Hash → nicht veraltet");
-  const classStale = classifyLedger(third.content, undefined, "deadbeef");
-  assert(classStale.possiblyStale, "abweichender Plan-Hash → veraltet-Flag");
-  assert(!classStale.isEmpty, "gefüllter Ledger ist nicht leer");
-
-  // Recovery-Kopfzeile ist kompakt und nennt den Dateipfad.
-  const summary = ledgerSummaryLine(classSame);
-  assert(
-    typeof summary === "string" &&
-      summary.includes(CONTEXT_LEDGER_RELATIVE_PATH),
-    "Kopfzeile verweist auf die Ledger-Datei",
-  );
-  eq(
-    ledgerSummaryLine(classifyLedger(undefined)),
-    undefined,
-    "leerer Ledger → keine Kopfzeile",
-  );
-
-  // Token-Proxy.
-  assert(
-    shouldCheckpointForTokens(80000, 100000),
-    "80% ≥ 75% Schwelle löst aus",
-  );
-  assert(!shouldCheckpointForTokens(50000, 100000), "50% löst nicht aus");
-  assert(!shouldCheckpointForTokens(0, 100000), "0 Tokens löst nicht aus");
-  assert(
-    !shouldCheckpointForTokens(80000, 0),
-    "ungültiges Fenster löst nicht aus",
-  );
-
-  // Zeilengrenze wird erzwungen.
-  let overflowThrew = false;
-  try {
-    const huge = ["## Nicht-Ziele"];
-    for (let i = 0; i < CONTEXT_LEDGER_MAX_LINES + 50; i += 1)
-      huge.push(`- Eintrag ${i}`);
-    computeLedgerContent("pi", huge.join("\n"), {}, "manual", now);
-  } catch {
-    overflowThrew = true;
-  }
-  assert(overflowThrew, "Überschreiten der Zeilengrenze wirft");
-
-  // Dateisystem-Roundtrip (atomar, symlink-sicher).
-  const dir = mkdtempSync(path.join(tmpdir(), "pi-ledger-"));
-  try {
-    const wrote = consolidateLedger(
-      dir,
-      "pi",
-      { briefContent: brief },
-      "manual",
-      now,
-    );
-    assert(wrote, "consolidateLedger schreibt beim ersten Mal");
-    const onDisk = readLedger(dir);
-    assert(
-      typeof onDisk === "string" && onDisk.includes("Aurora Night"),
-      "geschriebener Ledger enthält die Entscheidung",
-    );
-    const again = consolidateLedger(
-      dir,
-      "pi",
-      { briefContent: brief },
-      "manual",
-      now,
-    );
-    assert(!again, "unveränderte Quelle schreibt nicht erneut");
-    const parsed = parseLedgerSections(onDisk);
-    eq(
-      parsed["Nicht-Ziele"],
-      ["Keine neue Memory-Extension"],
-      "Roundtrip erhält Abschnitte",
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-await section("context ledger plan-mode integration", async () => {
-  if (!planMode) return;
-  const { readLedger } = contextLedger;
-  const dir = mkdtempSync(path.join(tmpdir(), "pi-ledger-integration-"));
-  try {
-    mkdirSync(path.join(dir, ".agent", "plans"), { recursive: true });
-    writeFileSync(
-      path.join(dir, ".agent", "plans", "current-plan.md"),
-      [
-        "# Arbeitsplan: Ledger-Integration",
-        "## 1. Auftrag",
-        "Etwas umsetzen.",
-        "## 2. Nicht-Ziele",
-        "- Keine neue Memory-Extension",
-        "## 5. Todos",
-        "- [ ] Erster Schritt",
-        "- [x] Erledigter Schritt",
-        "",
-      ].join("\n"),
-    );
-    writeFileSync(
-      path.join(dir, ".agent", "plans", "decision-brief.md"),
-      [
-        "# Decision Brief: Ledger-Integration",
-        "## Ziel",
-        "Ziel.",
-        "## Entscheidungen",
-        "- Entscheidung: Deterministischer Ledger ohne Modell-Turn",
-        "## Abschlusskriterien",
-        "- [ ] Fertig",
-        "",
-      ].join("\n"),
-    );
-
-    const harness = createHarness();
-    planMode.default(harness.api);
-    const context = harness.makeContext({ cwd: dir, trusted: true });
-
-    // v3 entfernt automatische Ledger-Trigger; manuelle Ledger-Funktionen
-    // bleiben im vorigen Modultest abgedeckt.
-    await harness.runHooks("session_shutdown", {}, context);
-    const ledger = readLedger(dir);
-    assert(
-      ledger === undefined,
-      "session_shutdown schreibt keinen automatischen Ledger mehr",
-    );
-
-    // Es wurde kein zusätzlicher Modell-Turn ausgelöst.
-    eq(harness.sent.length, 0, "Ledger-Checkpoint erzeugt keinen Modell-Turn");
-
-    // Recovery injiziert auch keine automatische Ledger-Kopfzeile mehr.
-    const startHarness = createHarness();
-    planMode.default(startHarness.api);
-    const startContext = startHarness.makeContext({ cwd: dir, trusted: true });
-    await startHarness.runHooks("session_start", {}, startContext);
-    assert(
-      !startHarness.notifications.some(
-        (entry) =>
-          typeof entry.message === "string" &&
-          entry.message.startsWith("Context Ledger:"),
-      ),
-      "session_start meldet keine automatische Ledger-Kopfzeile",
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 // A section missing from SECTION_SUITES would run unfiltered but vanish from

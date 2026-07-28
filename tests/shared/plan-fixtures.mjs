@@ -9,7 +9,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { importModule } from "./jiti-loader.mjs";
 
-const planSnapshot = await importModule("extensions/plan-mode/plan-snapshot.ts");
+const planSnapshot = await importModule(
+  "extensions/plan-mode/plan-snapshot.ts",
+);
 const planStore = await importModule("extensions/plan-mode/store/index.ts");
 
 export const validPlan = [
@@ -152,6 +154,11 @@ export const planUtils = {
     const dir = path.join(cwd, ".agent", "plans");
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "current-plan.md"), content, "utf8");
+  },
+  /** Raw sidecar bytes; used to prove a read-only path wrote nothing. */
+  readWorkflowStateRaw(cwd) {
+    const file = path.join(cwd, ".agent", "plans", "current-plan.state.json");
+    return existsSync(file) ? readFileSync(file, "utf8") : undefined;
   },
 };
 

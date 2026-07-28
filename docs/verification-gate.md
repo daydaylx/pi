@@ -1,7 +1,14 @@
 # Verifikation und Completion
 
-`/verify-gate` bleibt eine manuelle Diagnose. Der verbindliche Abschluss für
-Plan- und Direct-Task-Arbeit liegt in `extensions/plan-mode/completion/`.
+Der verbindliche Abschluss für Plan- und Direct-Task-Arbeit liegt in
+`extensions/plan-mode/completion/`. Es gibt keine zweite Abschlusskette:
+`/finish` und `/task-done` rufen denselben internen Handler, siehe
+[`decisions/006-single-completion-pipeline.md`](decisions/006-single-completion-pipeline.md).
+
+`/verify-gate` ist eine reine Vorschau. Es benutzt dieselben Prüffunktionen und
+dieselbe Klassifikation, lässt aber Reviewer, Diff-Stabilitätsprüfung,
+Statusschreibung und Bericht aus — es kann deshalb nie zu einem zweiten Weg
+werden, eine Aufgabe abzuschließen.
 
 ## Verbindlicher Ablauf
 
@@ -33,9 +40,12 @@ Der Reviewer muss genau einen Marker als letzte nichtleere Zeile liefern:
 ```
 
 Nur `PASS` plus erfolgreiche Pflichtprüfungen ergibt einen normalen
-Abschlussbericht. `/finish` darf in einer interaktiven TUI einen Befund mit
-nichtleerer Begründung übersteuern; Hintergrundpfade besitzen keinen Override.
-Ein Secret-/Auth-Befund ist eine harte Grenze und nie übersteuerbar.
+Abschlussbericht. In einer interaktiven TUI darf ein Befund mit nichtleerer
+Begründung übersteuert werden; Hintergrundpfade besitzen keinen Override. Der
+Override baut den Bericht aus dem bereits gelaufenen Ergebnis — die Pipeline
+läuft nie ein zweites Mal, weil die Diff-Stabilität sonst gegen einen später
+erfassten Diff geprüft würde. Ein Secret-/Auth-Befund ist eine harte Grenze und
+nie übersteuerbar.
 
 ## Sicherheitsgrenzen
 

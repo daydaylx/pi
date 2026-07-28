@@ -1,8 +1,33 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 /**
- * Planart und UX-Einstieg. Bewusst KEIN zweiter Lebenszyklus: der einzige
- * kanonische Workflow-Status ist `WorkflowStatus` in plan-mode/store.ts.
+ * Der einzige kanonische Workflow-Status. Er steht hier statt in
+ * plan-mode/store/, weil auch Permissions und die UI ihn lesen müssen und
+ * `shared/` nicht auf eine Fach-Extension zeigen darf. `plan-mode/store/types.ts`
+ * re-exportiert ihn; eine zweite Deklaration darf es nirgends geben.
+ */
+export type WorkflowStatus =
+  "idle" | "planning" | "working" | "reviewing" | "paused" | "blocked" | "done";
+
+export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
+  "idle",
+  "planning",
+  "working",
+  "reviewing",
+  "paused",
+  "blocked",
+  "done",
+];
+
+export function isWorkflowStatus(value: unknown): value is WorkflowStatus {
+  return (
+    typeof value === "string" &&
+    (WORKFLOW_STATUSES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Planart und UX-Einstieg. Bewusst KEIN zweiter Lebenszyklus.
  */
 export type WorkflowMode = "work" | "simple_plan" | "detailed_plan";
 
@@ -48,7 +73,7 @@ export function normalizePermissionLevel(
     : undefined;
 }
 
-export const ZENTUI_STATUS_KEYS = {
+export const UI_STATUS_KEYS = {
   permissions: "permissions",
   workflow: "workflow",
 } as const;

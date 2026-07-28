@@ -44,14 +44,6 @@ export function taskPrompt(run, worktree) {
       "Fasse am Ende zusammen, was in dieser Sitzung geändert wurde und ob noch etwas fehlt.",
     ];
   }
-  if (run.task === "11-context-ledger-survival") {
-    return [
-      "Wir legen fest: neue LSP-Server-Profile sind standardmäßig deaktiviert (enabled: false). Bestätige diese Entscheidung und halte als Nicht-Ziel fest, dass bestehende Profile (typescript, python, go, rust, c, java) in dieser Aufgabe nicht verändert werden.",
-      'Architektur-Detail: Das neue Profil zig verwendet den Server zls mit rootMarkers: ["build.zig"]. Halte das als Architekturentscheidung fest.',
-      'Setze das um: füge in extensions/lsp/server-profiles.ts das Profil zig hinzu (enabled: false, Server zls, rootMarkers: ["build.zig"], Sprachzuordnung .zig → { profileId: "zig", languageId: "zig" }) und ergänze einen Regressionstest in tests/run.mjs analog zu den bestehenden Server-Profil-Tests.',
-      "Fasse am Ende zusammen: (a) welche Entscheidung wir getroffen haben, (b) welches Nicht-Ziel gilt, (c) welche Architekturentscheidung für zig gilt und (d) welche Todos noch offen sind.",
-    ];
-  }
   const spec = readFileSync(join(worktree, "benchmarks", "tasks", run.task, "TASK.md"), "utf8");
   const quoted = spec
     .split("\n")

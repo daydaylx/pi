@@ -32,6 +32,11 @@ import type {
 } from "./types.ts";
 
 export * from "./types.ts";
+export {
+  diagnoseCompletion,
+  formatCompletionDiagnosis,
+  type CompletionDiagnosis,
+} from "./diagnosis.ts";
 export { captureDiffEvidence, verifyDiffStability } from "./diff-evidence.ts";
 export { formatCompletionResult } from "./formatter.ts";
 export { selectLspFiles, runLspChecks } from "./lsp-check.ts";
@@ -89,9 +94,13 @@ function stepsCheck(ctx: CompletionPipelineContext): CompletionCheck {
   };
 }
 
+/**
+ * Run the pipeline. It reports a passed completion and nothing else — an
+ * override is not a pipeline mode but a separate, justified decision made by
+ * the caller via completionOverrideReport() on exactly this result.
+ */
 export async function runCompletionPipeline(
   ctx: CompletionPipelineContext,
-  options: { overrideReason?: string } = {},
 ): Promise<CompletionPipelineResult> {
   if (!ctx.plan && !ctx.directTask) {
     throw new Error("Completion benötigt PlanSnapshot oder Direct Task.");
@@ -148,12 +157,6 @@ export async function runCompletionPipeline(
     ...verification.risks,
     ...aggregate.residualRisks,
   ];
-  const overrideReason = options.overrideReason?.trim();
-  const mayReport =
-    aggregate.status === "pass" ||
-    (canOverrideCompletion(checks) &&
-      Boolean(overrideReason) &&
-      overrideReason !== "");
   return {
     status: aggregate.status,
     checks,
@@ -162,7 +165,7 @@ export async function runCompletionPipeline(
     scopeFindings: scope.findings,
     residualRisks,
     reviewer,
-    ...(mayReport
+    ...(aggregate.status === "pass"
       ? {
           report: buildReport(
             ctx,
@@ -171,7 +174,6 @@ export async function runCompletionPipeline(
             scope.findings,
             residualRisks,
             reviewer,
-            aggregate.status === "pass" ? undefined : overrideReason,
           ),
         }
       : {}),

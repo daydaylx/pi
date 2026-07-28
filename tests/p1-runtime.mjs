@@ -1,4 +1,4 @@
-// P1 regression test for the locally patched Pi 0.82.0 runtime.
+// P1 regression test for the locally patched Pi 0.82.1 runtime.
 // It intentionally targets the executable runtime, not npm/node_modules,
 // because that is the Pi instance users actually start.
 import assert from "node:assert/strict";
@@ -13,8 +13,8 @@ const packageJson = JSON.parse(
 );
 assert.equal(
   packageJson.version,
-  "0.82.0",
-  "P1 runtime patch is pinned to Pi 0.82.0",
+  "0.82.1",
+  "P1 runtime patch is pinned to Pi 0.82.1",
 );
 
 const loaderSource = readFileSync(

@@ -1,72 +1,163 @@
-import type { MenuEntry } from "./menu-ui.ts";
+/**
+ * The single Control Center definition.
+ *
+ * Pure data: this module decides what is offered, never how it is rendered or
+ * what an action does. The two entry points differ in SCOPE, never in content:
+ *
+ *   Shift+Tab  the workflow switch — buildWorkflowTab() alone
+ *   Super+Q    the full Control Center — buildControlCenterTabs(), which
+ *              starts with that very same workflow tab
+ *
+ * Because both read from the same builders and both route through the same
+ * action union, a workflow entry can never say one thing in one place and
+ * something else in the other.
+ */
+import type { TabbedOverlayTab } from "./tabbed-overlay.ts";
+import type { WorkflowMode } from "./workflow-status.ts";
 
-export type WorkflowControlCenterAction =
+export type ControlCenterAction =
   | "simple_plan"
   | "detailed_plan"
   | "work"
-  | "decide";
-
-export type ControlCenterAction =
-  | WorkflowControlCenterAction
-  | "model-roles"
-  | "thinking"
+  | "models"
   | "permissions"
-  | "diagnostics"
-  | "thinking-view";
+  | "thinking"
+  | "diagnostics";
 
-export interface ControlCenterMenuState {
-  mode: string;
-  deciding: boolean;
-  permissionLabel: string;
-  thinkingLabel: string;
+export interface ControlCenterState {
+  /** Whether a resumable workflow exists; drives the "Arbeiten" wording. */
+  hasActiveWorkflow: boolean;
+  /** The mode currently in force, marked as the active entry. */
+  activeMode?: WorkflowMode;
 }
 
-export function buildControlCenterMenu(
-  state: ControlCenterMenuState,
-): MenuEntry<ControlCenterAction>[] {
+/** The workflow switch: what Shift+Tab offers, and the first Control Center tab. */
+export function buildWorkflowTab(
+  state: ControlCenterState,
+): TabbedOverlayTab<ControlCenterAction> {
+  return {
+    id: "workflow",
+    label: "Workflow",
+    entries: [
+      {
+        id: "workflow-simple-plan",
+        label: "Schnellplan",
+        description: "Kurzer Plan für eine überschaubare Änderung",
+        current: state.activeMode === "simple_plan",
+        value: "simple_plan",
+      },
+      {
+        id: "workflow-detailed-plan",
+        label: "Architekturplan",
+        description:
+          "Bewertete Optionen, begründete Empfehlung und Nutzerentscheidung",
+        current: state.activeMode === "detailed_plan",
+        value: "detailed_plan",
+      },
+      {
+        id: "workflow-work",
+        label: state.hasActiveWorkflow ? "Arbeiten / fortsetzen" : "Arbeiten",
+        description: state.hasActiveWorkflow
+          ? "Unterbrochene Ausführung ausdrücklich fortsetzen"
+          : "Bestätigten Plan ausführen",
+        current: state.activeMode === "work",
+        value: "work",
+      },
+    ],
+  };
+}
+
+export function buildControlCenterTabs(
+  state: ControlCenterState,
+): TabbedOverlayTab<ControlCenterAction>[] {
   return [
+    buildWorkflowTab(state),
     {
-      id: "workflow",
-      label: "Workflow",
-      description: "Planungs- und Arbeitsmodus auswählen",
-      icon: "◆",
-      children: [
-        { id: "mode-simple-plan", label: "Schnellplan", description: "Kleine Änderung planen; keine Umsetzung ohne /work", details: "Kompakter Plan für überschaubare Änderungen.", value: "simple_plan", current: state.mode === "simple_plan" },
-        { id: "mode-detailed-plan", label: "Architekturplan", description: "Größere Änderung strukturiert vorbereiten", details: "Analysiert Kontext, Optionen und Risiken vor der Umsetzung.", value: "detailed_plan", current: state.mode === "detailed_plan" },
-        { id: "mode-work", label: "Arbeitsmodus", description: "Bestehenden Plan oder freie Aufgabe bearbeiten", value: "work", current: state.mode === "work" },
-        { id: "mode-decide", label: "Optionen klären", description: "Vor der Planung eine Entscheidung vorbereiten", value: "decide", current: state.deciding },
-      ],
-    },
-    {
-      id: "model",
+      id: "models",
       label: "Modell",
-      description: "Modellrolle und Denkmodus",
-      icon: "◈",
-      children: [
-        { id: "control-model-roles", label: "Modelle & Scopes", description: "Globale Modelle oder native Scoped Models für diese Sitzung wählen", value: "model-roles" },
-        { id: "control-thinking", label: `Denken: ${state.thinkingLabel}`, description: "Denkmodus für diese Sitzung", badge: state.thinkingLabel, value: "thinking" },
+      entries: [
+        {
+          id: "model-selection",
+          label: "Modelle",
+          description: "Modell für diese Sitzung wählen",
+          value: "models",
+        },
       ],
     },
     {
-      id: "security",
-      label: "Sicherheit",
-      description: "Berechtigungen und Risiko",
-      icon: "◉",
-      children: [{ id: "control-permissions", label: `Berechtigungen: ${state.permissionLabel}`, description: "Zugriffsstufe wählen", badge: state.permissionLabel, value: "permissions" }],
+      id: "permissions",
+      label: "Permissions",
+      entries: [
+        {
+          id: "permission-level",
+          label: "Zugriffsstufe",
+          description:
+            "Nur Lesen bis YOLO; YOLO umgeht Rückfragen, harte Grenzen bleiben aktiv",
+          value: "permissions",
+        },
+        {
+          id: "permission-rules",
+          label: "Whitelist / Blacklist / Dateisystem",
+          description: "Globale Policy-Datei",
+          disabled: true,
+          disabledReason:
+            "Policy-Regeln bleiben bewusst außerhalb der Laufzeit-TUI.",
+        },
+      ],
+    },
+    {
+      id: "thinking",
+      label: "Thinking",
+      entries: [
+        {
+          id: "thinking-depth",
+          label: "Denktiefe",
+          description: "Auto oder manuelle Denktiefe für diese Sitzung",
+          value: "thinking",
+        },
+      ],
     },
     {
       id: "tools",
-      label: "Werkzeuge",
-      description: "Lokale Diagnosewerkzeuge",
-      icon: "◇",
-      children: [{ id: "control-diagnostics", label: "LSP-Diagnose", description: "LSP-Status anzeigen oder eine Datei prüfen", value: "diagnostics" }],
+      label: "Tools",
+      entries: [
+        {
+          id: "tool-diagnostics",
+          label: "LSP-Diagnose",
+          description: "Status und Diagnose einer Datei",
+          value: "diagnostics",
+        },
+        {
+          id: "tool-plugins",
+          label: "Plugins & Erweiterungen",
+          description: "Aktive Extensions werden beim Start geladen",
+          disabled: true,
+          disabledReason:
+            "Dynamisches Laden/Entladen wird von Pi nicht unterstützt.",
+        },
+      ],
     },
     {
-      id: "display",
-      label: "Darstellung",
-      description: "Thinking-Anzeige im Terminal",
-      icon: "◌",
-      children: [{ id: "control-thinking-view", label: "Thinking-Anzeige", description: "Kompakt, Fokus oder aus", value: "thinking-view" }],
+      id: "system",
+      label: "System",
+      entries: [
+        {
+          id: "system-theme",
+          label: "Theme & Motion",
+          description: "Aurora Night und Bewegungsmodus",
+          disabled: true,
+          disabledReason:
+            "Die globale UI-Konfiguration bleibt außerhalb der Laufzeit-TUI.",
+        },
+        {
+          id: "system-hotkeys",
+          label: "Hotkeys",
+          description: "CSI-u/Kitty Keyboard Protocol erforderlich",
+          disabled: true,
+          disabledReason:
+            "Die Super-Shortcuts gelten im fokussierten Pi-Terminal.",
+        },
+      ],
     },
   ];
 }

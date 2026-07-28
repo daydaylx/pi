@@ -20,7 +20,7 @@ import {
 } from "../../setup-core/verify-profiles.ts";
 import type {
   CompletionCheck,
-  CompletionPipelineContext,
+  CompletionVerificationContext,
   RawExecResult,
 } from "./types.ts";
 
@@ -77,7 +77,7 @@ export async function runSetupCheck(
  * invalid profile config is a required check that cannot be run.
  */
 export async function runVerificationChecks(
-  ctx: CompletionPipelineContext,
+  ctx: CompletionVerificationContext,
 ): Promise<{ checks: CompletionCheck[]; risks: string[] }> {
   const checks: CompletionCheck[] = [];
   const risks: string[] = [];
@@ -125,7 +125,7 @@ export async function runVerificationChecks(
 }
 
 function declaredVerification(
-  ctx: CompletionPipelineContext,
+  ctx: CompletionVerificationContext,
 ): readonly string[] {
   return ctx.plan?.verification ?? ctx.directTask?.verification ?? [];
 }
@@ -144,7 +144,7 @@ function checkAliases(name: string): string[] {
  * `not_run`, never a silent pass.
  */
 export function verificationCoverageCheck(
-  ctx: CompletionPipelineContext,
+  ctx: CompletionVerificationContext,
   checks: readonly CompletionCheck[],
 ): CompletionCheck {
   const declarations = declaredVerification(ctx);

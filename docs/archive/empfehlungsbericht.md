@@ -4,8 +4,7 @@
 **Gegenstand:** Welche Konzepte das bestehende Pi-Setup wirklich übernehmen, vereinfachen oder bewusst ablehnen sollte.
 
 **Zugehörige Dokumente:**
-- [Arbeitsaufträge](auftraege/arbeitsauftraege.md) – abgeleitetes Umsetzungsprogramm (17 operative Aufträge)
-- [Benchmark-Auftrag](auftraege/auftrag.md) – Detailausarbeitung von Auftrag 1 (Pilotphase)
+- [Arbeitsaufträge](arbeitsauftraege.md) – abgeleitetes Umsetzungsprogramm (17 operative Aufträge)
 
 ## 1. Gesamturteil
 

@@ -14,12 +14,11 @@ Unterhaltung zu kopieren. Trennt bewusst zwei Ebenen:
   Entscheidungen, Architekturentscheidungen, Nicht-Ziele, Einschränkungen,
   offene Risiken/Fragen, Projektregeln, aktuelle Prioritäten).
 
-Der Ledger wird zusätzlich **automatisch** und deterministisch (ohne Modell-Turn)
-von `extensions/plan-mode` konsolidiert: bei Plan→Work, Plan-Abschluss, nach
-einem Decision Brief, an der Token-Schwelle vor Compaction und beim Sessionende.
-Dieser Skill ist die **manuelle, kuratierende** Ebene: er formuliert um,
-verdichtet, entfernt Veraltetes und ergänzt Fakten, die die Automatik nicht aus
-den strukturierten Artefakten ableiten kann.
+Der Ledger wird **ausschließlich hier** gepflegt. Es gibt keine automatische
+Konsolidierung: die Laufzeit besitzt keinen Ledger-Code und löst weder bei
+Plan→Work noch bei Completion, Token-Schwelle oder Sessionende einen Checkpoint
+aus. Beide Dateien sind gewöhnliche Markdown-Dokumente, die dieser Skill liest,
+umformuliert, verdichtet und schreibt.
 
 ## Ablauf
 

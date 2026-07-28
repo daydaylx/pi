@@ -12,7 +12,13 @@ import type {
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { CONTROL_CENTER_EVENTS } from "../shared/control-center-events.ts";
+import {
+  buildControlCenterTabs,
+  buildWorkflowTab,
+  type ControlCenterAction,
+} from "../shared/control-center-menu.ts";
 import { SHORTCUTS } from "../shared/shortcuts.ts";
+import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
 import { finishDirectTask, finishWorkflow } from "./completion-commands.ts";
 import { startDirectTask } from "./direct-task-commands.ts";
 import {
@@ -25,6 +31,7 @@ import {
   discardPlan,
   migrateLegacyPlan,
   recoverWorkflowLock,
+  runVerifyGate,
 } from "./maintenance-commands.ts";
 import { openModelMenu } from "./model-menu.ts";
 import { beginPlanning, beginReview, choosePlanKind } from "./planning.ts";
@@ -161,6 +168,11 @@ export function registerPlanCommands(
     description: "Verwaisten Workflow-Lock nach Bestätigung entfernen",
     handler: async (_args, ctx) => recoverWorkflowLock(session, ctx),
   });
+  pi.registerCommand("verify-gate", {
+    description:
+      "Completion-Prüfungen vorab ansehen; entscheidet nichts und schließt nichts ab",
+    handler: async (_args, ctx) => runVerifyGate(session, ctx),
+  });
 
   pi.registerTool({
     name: "plan_progress",
@@ -223,32 +235,73 @@ export function registerPlanCommands(
       if (kind) await beginPlanning(session, kind, ctx);
     },
   });
+  // The one action router. Both entry points end here, so an entry can never
+  // mean something different depending on which key opened it.
+  const runControlCenterAction = async (
+    action: ControlCenterAction,
+    ctx: ExtensionContext,
+  ): Promise<void> => {
+    switch (action) {
+      case "simple_plan":
+      case "detailed_plan":
+        await beginPlanning(session, action, ctx);
+        return;
+      case "work":
+        await startWork(session, ctx);
+        return;
+      case "permissions":
+        pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx });
+        return;
+      case "models":
+        pi.events.emit(CONTROL_CENTER_EVENTS.openModels, { ctx });
+        return;
+      case "thinking":
+        pi.events.emit(CONTROL_CENTER_EVENTS.openThinking, { ctx });
+        return;
+      case "diagnostics":
+        pi.events.emit(CONTROL_CENTER_EVENTS.openDiagnostics, { ctx });
+        return;
+    }
+  };
+
+  const menuState = (ctx: ExtensionContext) => {
+    const loaded = session.reload(ctx);
+    return {
+      hasActiveWorkflow: Boolean(loaded.snapshot && loaded.state),
+      activeMode: session.workflowMode(),
+    };
+  };
+
+  /** Shift+Tab: the workflow switch. */
+  const openWorkflowSwitch = async (ctx: ExtensionContext): Promise<void> => {
+    const selected = await runTabbedOverlay<ControlCenterAction>(
+      ctx,
+      "Workflow wechseln",
+      [buildWorkflowTab(menuState(ctx))],
+      { nonInteractiveHint: "Der Workflow-Wechsel benötigt den TUI-Modus." },
+    );
+    const action = selected?.entry.value;
+    if (action) await runControlCenterAction(action, ctx);
+  };
+
+  /** Super+Q: the full Control Center, starting with that same workflow tab. */
+  const openControlCenter = async (ctx: ExtensionContext): Promise<void> => {
+    const selected = await runTabbedOverlay<ControlCenterAction>(
+      ctx,
+      "Control Center",
+      buildControlCenterTabs(menuState(ctx)),
+      { nonInteractiveHint: "Das Control Center benötigt den TUI-Modus." },
+    );
+    const action = selected?.entry.value;
+    if (action) await runControlCenterAction(action, ctx);
+  };
+
   pi.registerShortcut(SHORTCUTS.modeMenu.keys, {
     description: SHORTCUTS.modeMenu.description,
-    handler: async (ctx) => {
-      const choice = await ctx.ui.select("Control Center", [
-        "Schnellplan",
-        "Architekturplan",
-        "Arbeiten / fortsetzen",
-        "Berechtigungen",
-        "Modelle",
-        "Thinking",
-        "LSP-Diagnose",
-      ]);
-      if (choice === "Schnellplan")
-        await beginPlanning(session, "simple_plan", ctx);
-      else if (choice === "Architekturplan")
-        await beginPlanning(session, "detailed_plan", ctx);
-      else if (choice === "Arbeiten / fortsetzen")
-        await startWork(session, ctx);
-      else if (choice === "Berechtigungen")
-        pi.events.emit(CONTROL_CENTER_EVENTS.openPermissions, { ctx });
-      else if (choice === "Modelle")
-        pi.events.emit(CONTROL_CENTER_EVENTS.openModels, { ctx });
-      else if (choice === "Thinking")
-        pi.events.emit(CONTROL_CENTER_EVENTS.openThinking, { ctx });
-      else if (choice === "LSP-Diagnose")
-        pi.events.emit(CONTROL_CENTER_EVENTS.openDiagnostics, { ctx });
-    },
+    handler: openWorkflowSwitch,
+  });
+  pi.events.on(CONTROL_CENTER_EVENTS.open, async (event) => {
+    const ctx = (event as { ctx?: ExtensionContext }).ctx;
+    if (ctx) await openControlCenter(ctx);
   });
 }

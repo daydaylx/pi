@@ -70,26 +70,6 @@ export function linkRuntimeDependencies(worktree) {
   symlinkSync(sourceModules, destination);
 }
 
-export function applyBenchmarkOverlay(worktree, run) {
-  // Both sides of the task-11 A/B pair receive the identical, benchmark-only
-  // gate-capable module. The environment flag is the sole behavioral delta.
-  if (run.task !== "11-context-ledger-survival") {
-    return [];
-  }
-  const relativePath = "extensions/plan-mode/ledger-checkpoint.ts";
-  const source = join(
-    SOURCE_ROOT,
-    "benchmarks",
-    "harness",
-    "fixtures",
-    "ledger-checkpoint.ts",
-  );
-  const destination = join(worktree, relativePath);
-  cpSync(source, destination);
-  stageHarnessInput(worktree, relativePath);
-  return [{ path: relativePath, sha256: sha256File(source) }];
-}
-
 export function stageHarnessInput(worktree, path) {
   runGit(["add", "--force", "--", path], { cwd: worktree });
 }

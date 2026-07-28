@@ -4,10 +4,16 @@
 
 | Shortcut | Funktion |
 | --- | --- |
-| `Shift+Tab` | Arbeits-Overlay: Workflows, Review & To-dos, Skills |
-| `Super+M` | Globale Modelle und feste Scopes |
-| `Super+D` | Denktiefe und Status-Telemetrie |
-| `Super+Q` | Modell, Berechtigungen, Werkzeuge, Thinking und System |
+| `Shift+Tab` | Workflow wechseln: Schnellplan, Architekturplan, Arbeiten |
+| `Super+P` | Planwahl (identisch mit `/plan`) |
+| `Super+M` | Modellwahl |
+| `Super+D` | Denktiefe |
+| `Super+Y` | Temporärer YOLO-Modus |
+| `Super+Q` | Vollständiges Control Center; erster Reiter ist der Workflow-Wechsel |
+
+`Shift+Tab` und `Super+Q` bauen auf derselben Menü-Definition auf und laufen
+durch denselben Handler. Sie unterscheiden sich nur im Umfang, nie im Inhalt
+eines Eintrags.
 
 Die Shortcuts gelten im fokussierten Pi-Terminal und benötigen für `Super`
 das Kitty-/CSI-u-Protokoll. Sie werden nicht als systemweite Linux-Mint-Hotkeys
@@ -15,15 +21,14 @@ registriert.
 
 ## Modelle und Thinking
 
-`Super+M` zeigt alle verfügbaren Registry-Modelle sowie die von Pi über
-`/scoped-models` beziehungsweise `settings.enabledModels` ausgewählten Modelle.
+`Super+M` zeigt die über `settings.enabledModels` freigegebenen Modelle.
 Die Anzeige enthält Registry-Status, Kontextfenster, Output-Limit, Preisraten
 und vorhandenen Kontextverbrauch.
 
 `Super+D` bietet Auto sowie die vom aktiven Modell unterstützten Thinking-Stufen
-einschließlich `Off`. Die Telemetrie zeigt nur Status, Dauer und Tool-Aktivität;
-sie zeigt keine internen Modellgedanken und bietet kein frei wählbares
-Reasoning-Token-Budget.
+einschließlich `Off`. Im Auto-Modus folgt die Denktiefe dem Workflow; eine
+manuell gewählte Stufe bleibt unangetastet. Eine separate Status-Telemetrie-
+Ansicht gibt es nicht mehr — der Status steht in der Fußzeile.
 
 ## Skills und Konfiguration
 

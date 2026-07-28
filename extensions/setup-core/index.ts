@@ -5,11 +5,6 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles } from "./verify-profiles.ts";
-import {
-  formatGateReport,
-  runVerificationGate,
-  type GateContext,
-} from "./verification-gate.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 
 const CheckParams = Type.Object({
@@ -37,13 +32,6 @@ function packageVersion(path: string): string | undefined {
 export default function setupCore(pi: ExtensionAPI): void {
   let activeCwd = process.cwd();
   let trusted = false;
-
-  const execAdapter: GateContext["exec"] = (program, args, options) =>
-    pi.exec(program, args, {
-      cwd: options.cwd,
-      timeout: options.timeout,
-      signal: options.signal as AbortSignal | undefined,
-    });
 
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
@@ -189,28 +177,4 @@ export default function setupCore(pi: ExtensionAPI): void {
       );
     },
   });
-
-  pi.registerCommand("verify-gate", {
-    description:
-      "Universelles Verifikations-Gate (#102): Diff + Scope + Prüfungen vor dem Abschluss bewerten (advisory).",
-    handler: async (_args, ctx) => {
-      if (typeof ctx.isIdle === "function" && !ctx.isIdle()) {
-        ctx.ui.notify(
-          "/verify-gate ist erst nach Abschluss des laufenden Agent-Turns verfügbar.",
-          "warning",
-        );
-        return;
-      }
-      const result = await runVerificationGate({
-        projectRoot: ctx.cwd,
-        trusted: ctx.isProjectTrusted(),
-        exec: execAdapter,
-      });
-      ctx.ui.notify(
-        formatGateReport(result),
-        result.status === "pass" ? "info" : "warning",
-      );
-    },
-  });
-
 }

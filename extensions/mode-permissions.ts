@@ -18,7 +18,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   CONTROL_CENTER_EVENTS,
-  type ControlCenterSnapshotEvent,
   type OpenControlCenterMenuEvent,
 } from "./shared/control-center-events.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
@@ -47,17 +46,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   pi.registerCommand("yolo", {
     description: "Session-weiten YOLO Mode ein-/ausschalten",
     handler: async (_args, ctx) => session.toggleYolo(ctx, "command"),
-  });
-
-  pi.registerCommand("full-access", {
-    description: "Legacy-Alias für Confirm All",
-    handler: async (_args, ctx) =>
-      session.applyPermissionLevel(
-        session.isManuallySelected("confirm-all")
-          ? session.workflowDefaultLevel()
-          : "confirm-all",
-        ctx,
-      ),
   });
 
   pi.registerCommand("permission", {
@@ -101,9 +89,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     const ctx = (event as OpenControlCenterMenuEvent).ctx;
     const epoch = session.epoch();
     await thinking.openMenu(ctx, () => session.isCurrentEpoch(epoch));
-  });
-  pi.events.on(CONTROL_CENTER_EVENTS.snapshot, (event) => {
-    (event as ControlCenterSnapshotEvent).respond(session.snapshot());
   });
   pi.events.on(WORKFLOW_CAPABILITY_EVENTS.activated, (event) => {
     const activated = event as WorkflowActivatedEvent;

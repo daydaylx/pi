@@ -9,7 +9,7 @@ getrennte Laufzeitmodule.
 ```text
 Pi Core
 ├── setup-core        Konfiguration, /setup-doctor, allowlistetes verify
-├── plan-mode         PlanSnapshot v3, Sidecar, Completion und Control Center
+├── plan-mode         PlanSnapshot v3, Sidecar, Completion, Control Center
 ├── mode-permissions  vier Berechtigungsmodi und harte Projektgrenzen
 ├── lsp               lazy, trust-gesteuerte Language Server
 ├── pi-subagents      gepinnte Orchestrierung; lokale Kernrollen
@@ -36,8 +36,10 @@ Bestätigung geschlossener Alt-Sessions und ein vorheriges Backup.
 Completion prüft Diff, Scope, klassifizierte Verifikationsprofile, LSP und
 einen unabhängigen Reviewer. Erst ein exakter
 `[COMPLETION-REVIEW:PASS]`-Marker plus erfolgreiche erforderliche Checks
-erlaubt den normalen Abschluss. `/finish` kann Befunde nur interaktiv und mit
-Begründung übersteuern.
+erlaubt den normalen Abschluss. `/finish` (Plan) und `/task-done` (Direct Task)
+rufen denselben internen Handler; Befunde lassen sich nur interaktiv und mit
+Begründung übersteuern. `/verify-gate` zeigt dieselben Prüfungen vorab an,
+entscheidet aber nichts und schließt nichts ab.
 
 Details: [`extensions/plan-mode/README.md`](extensions/plan-mode/README.md).
 
@@ -68,21 +70,28 @@ Details: [`docs/subagents.md`](docs/subagents.md).
 
 ## UI und Shortcuts
 
-Shift+Tab öffnet das temporäre Control Center. `Super+P` öffnet die Planwahl,
-`Super+M` die Modellwahl, `Super+D` Thinking, `Super+Q` das Hauptmenü und
-`Super+Y` den temporären YOLO-Modus. Die Super-Kombinationen benötigen
-Kitty-/CSI-u-Unterstützung.
+`Shift+Tab` ist der Workflow-Wechsel: Schnellplan, Architekturplan, Arbeiten.
+`Super+Q` öffnet das vollständige Control Center, dessen erster Reiter genau
+dieser Workflow-Wechsel ist — beide bauen auf derselben Definition auf und
+laufen durch denselben Handler. `Super+P` öffnet die Planwahl, `Super+M` die
+Modellwahl, `Super+D` Thinking und `Super+Y` den temporären YOLO-Modus. Die
+Super-Kombinationen benötigen Kitty-/CSI-u-Unterstützung.
+
+Aurora besitzt Editor, Widget, Aktivität und Motion; die Fußzeile gehört
+`pi-zentui` und liest die Statuswerte `workflow`, `permissions` und `lsp`.
 
 `Super+M` listet die verfügbaren Modelle der Registry; während eines laufenden
 Turns ist der Wechsel gesperrt. Die frühere Scoped-Model-Übersicht entfällt.
 Im Auto-Modus folgt die Denktiefe dem Workflow: ein Wechsel der Planart passt
 sie sofort an, eine manuell gewählte Stufe bleibt unangetastet.
 
-Automatische Ledger-Checkpoints, Doom-Loop-Entscheidungen und Edit-Metrik-Gates
-wurden aus dem aktiven Workflow entfernt; ihre Module sind inzwischen ebenfalls
-gelöscht. Eine unterbrochene Ausführung meldet `plan-mode` beim Sitzungsstart
-und verweist auf `/work` — einen separaten Recovery-Dialog gibt es nicht mehr.
-Manuelle Ledger-, Diagnose- und Verifikationsfunktionen bleiben bestehen.
+Ledger-Checkpoints, Doom-Loop-Entscheidungen und Edit-Metrik-Gates sind samt
+Modulen entfernt. `docs/CONTEXT_LEDGER.md` bleibt als handgepflegte
+Dokumentation und wird von keinem Laufzeitcode geschrieben. Eine unterbrochene
+Ausführung meldet `plan-mode` beim Sitzungsstart und verweist auf `/work` —
+einen separaten Recovery-Dialog gibt es nicht mehr.
+
+Begründete Architekturentscheidungen: [`docs/decisions/`](docs/decisions/).
 
 ## Installieren und verifizieren
 

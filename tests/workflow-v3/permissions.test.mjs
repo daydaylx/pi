@@ -5,7 +5,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { assert, eq, test } from "./assertions.mjs";
-import { createHarness, assertNoGlobalChrome, stripAnsi } from "../shared/harness.mjs";
+import {
+  createHarness,
+  assertNoGlobalChrome,
+  stripAnsi,
+} from "../shared/harness.mjs";
 import { load } from "./harness.mjs";
 
 const permissionsExtension = await load("extensions/mode-permissions.ts");
@@ -42,17 +46,31 @@ await test("permission extension exposes transitions, menus and hard guards", as
   };
   const api = {
     events: {
-      on(name, handler) { return add(events, name, handler); },
+      on(name, handler) {
+        return add(events, name, handler);
+      },
       emit(name, value) {
         for (const handler of events.get(name) ?? []) handler(value);
       },
     },
-    on(name, handler) { add(hooks, name, handler); },
-    registerCommand(name, options) { commands.set(name, options.handler); },
-    registerShortcut(name, options) { shortcuts.set(name, options.handler); },
-    appendEntry(type, data) { appended.push({ type, data }); },
-    getThinkingLevel() { return thinking; },
-    setThinkingLevel(value) { thinking = value; },
+    on(name, handler) {
+      add(hooks, name, handler);
+    },
+    registerCommand(name, options) {
+      commands.set(name, options.handler);
+    },
+    registerShortcut(name, options) {
+      shortcuts.set(name, options.handler);
+    },
+    appendEntry(type, data) {
+      appended.push({ type, data });
+    },
+    getThinkingLevel() {
+      return thinking;
+    },
+    setThinkingLevel(value) {
+      thinking = value;
+    },
   };
   const context = {
     cwd,
@@ -73,10 +91,18 @@ await test("permission extension exposes transitions, menus and hard guards", as
       getEntries: () => sessionEntries,
     },
     ui: {
-      setStatus(key, value) { statuses.push({ key, value }); },
-      notify(message, level) { notifications.push({ message, level }); },
-      async confirm() { return true; },
-      async select() { return selections.shift(); },
+      setStatus(key, value) {
+        statuses.push({ key, value });
+      },
+      notify(message, level) {
+        notifications.push({ message, level });
+      },
+      async confirm() {
+        return true;
+      },
+      async select() {
+        return selections.shift();
+      },
     },
   };
   const runHook = async (name, event = {}) => {
@@ -181,8 +207,7 @@ await test("permission extension exposes transitions, menus and hard guards", as
     const protectedPlanBash = await runHook("tool_call", {
       toolName: "bash",
       input: {
-        command:
-          "printf changed > .agent/plans/current-plan.md",
+        command: "printf changed > .agent/plans/current-plan.md",
       },
     });
     assert(
@@ -214,11 +239,19 @@ await test("permission extension exposes transitions, menus and hard guards", as
       "yolo is never persisted as effective permission",
     );
     await shortcuts.get("super+y")(context);
-    await commands.get("full-access")("", context);
-    await commands.get("full-access")("", context);
+    assert(
+      !commands.get("full-access"),
+      "the legacy /full-access alias with its own toggle logic is retired",
+    );
+    await commands.get("permission")("confirm-all", context);
     assert(
       statuses.at(-1).value.includes("CONFIRM ALL"),
-      "legacy full-access command selects confirm-all",
+      "/permission confirm-all selects confirm-all",
+    );
+    await commands.get("permission")("full-access", context);
+    assert(
+      statuses.at(-1).value.includes("CONFIRM ALL"),
+      "the legacy value is still accepted at the /permission input boundary",
     );
     selections.push("Nur Lesen");
     for (const handler of events.get("control-center:open-permissions") ?? []) {
@@ -226,11 +259,6 @@ await test("permission extension exposes transitions, menus and hard guards", as
     }
     selections.push(undefined);
     await shortcuts.get("super+d")(context);
-    let snapshot;
-    api.events.emit("control-center:snapshot", {
-      respond(value) { snapshot = value; },
-    });
-    assert(Boolean(snapshot?.permissionLevel), "control center receives permission snapshot");
     api.events.emit("workflow-capabilities:activated", {
       cwd,
       sessionId: "permission-session",
@@ -251,7 +279,8 @@ await test("permission extension exposes transitions, menus and hard guards", as
     );
     await runHook("session_shutdown");
     assert(
-      notifications.length > 0 && appended.some((entry) => entry.type === "permission-transition"),
+      notifications.length > 0 &&
+        appended.some((entry) => entry.type === "permission-transition"),
       "permission transitions stay visible and redacted in audit entries",
     );
   } finally {

@@ -48,7 +48,6 @@ try {
   assert.equal(result.automatic.environment.testOnly, true);
   assert.match(result.automatic.environment.configHash, /^[a-f0-9]{64}$/);
   assert.deepEqual(result.automatic.environment.benchmarkEnvironmentOverrides, {
-    PI_BENCHMARK_DISABLE_LEDGER_CHECKPOINTS: "1",
   });
   const effectiveSetup = JSON.parse(
     await import("node:fs").then(({ readFileSync }) => readFileSync(join(worktree, "setup.json"), "utf8")),
@@ -81,9 +80,9 @@ try {
   assert.match(p3("cleanup", "p3-diag-02-v8-cpu", "--purge"), /purged/);
 
   const summary = JSON.parse(p3("summarize"));
-  assert.equal(summary.scoredRunCount, 35);
+  assert.equal(summary.scoredRunCount, 33);
   assert.equal(summary.counts.invalid, 1, "an ungelöster Stub-Lauf bleibt ungültig");
-  assert.equal(summary.counts.missing, 34);
+  assert.equal(summary.counts.missing, 32);
   console.log("P3 harness offline test passed.");
 } finally {
   for (const id of ["p3-01-1", "p3-diag-02-v8-cpu"]) {

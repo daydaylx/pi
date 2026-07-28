@@ -23,10 +23,9 @@ import {
   publishAuroraUiPatch,
   publishAuroraUiSnapshot,
 } from "../aurora-ui/state.ts";
-import type { ControlCenterSnapshot } from "../shared/control-center-events.ts";
 import {
   PERMISSION_LEVEL_LABEL,
-  ZENTUI_STATUS_KEYS,
+  UI_STATUS_KEYS,
   normalizePermissionLevel,
   permissionRiskStatusValue,
   setTuiStatus,
@@ -65,7 +64,6 @@ export interface PermissionSession {
   context(): ExtensionContext | undefined;
   isCurrentEpoch(epoch: number): boolean;
   epoch(): number;
-  snapshot(): ControlCenterSnapshot;
   persist(): void;
   applyWorkflowDefaults(
     workflowMode: WorkflowMode,
@@ -85,7 +83,6 @@ export interface PermissionSession {
   /** True when the event belongs to the session that is currently active. */
   ownsSession(sessionId: string, cwd: string): boolean;
   workflowDefaultLevel(): Exclude<PermissionLevel, "yolo">;
-  isManuallySelected(level: PermissionLevel): boolean;
   beginSession(ctx: ExtensionContext, workflowMode: WorkflowMode): void;
   endSession(ctx: ExtensionContext): void;
 }
@@ -113,7 +110,7 @@ export function createPermissionSession(
   function publishStatus(ctx: ExtensionContext): void {
     setTuiStatus(
       ctx,
-      ZENTUI_STATUS_KEYS.permissions,
+      UI_STATUS_KEYS.permissions,
       permissionRiskStatusValue(permissionLevel, permissionState),
     );
     if (auroraEpoch) {
@@ -165,14 +162,6 @@ export function createPermissionSession(
     isCurrentEpoch: (epoch) => epoch === sessionEpoch,
     workflowDefaultLevel: () => workflowDefaultPermission,
 
-    isManuallySelected(level) {
-      return (
-        permissionState !== "YOLO_OVERRIDE" &&
-        selectedPermissionState === "MANUAL" &&
-        selectedPermissionLevel === level
-      );
-    },
-
     ownsSession(sessionId, cwd) {
       return Boolean(
         activeContext &&
@@ -180,13 +169,6 @@ export function createPermissionSession(
         cwd === activeContext.cwd,
       );
     },
-
-    snapshot: () => ({
-      permissionLevel,
-      permissionLabel: PERMISSION_LEVEL_LABEL[permissionLevel],
-      thinkingMode: thinking.mode(),
-      thinkingLevel: pi.getThinkingLevel(),
-    }),
 
     persist() {
       pi.appendEntry(PERSISTED_STATE_KEY, {
@@ -321,7 +303,7 @@ export function createPermissionSession(
       auroraEpoch = undefined;
       activeSessionId = undefined;
       activeContext = undefined;
-      setTuiStatus(ctx, ZENTUI_STATUS_KEYS.permissions, undefined);
+      setTuiStatus(ctx, UI_STATUS_KEYS.permissions, undefined);
     },
   };
   return session;

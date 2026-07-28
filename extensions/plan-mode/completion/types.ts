@@ -63,13 +63,21 @@ export interface CompletionLspResult {
   summary: string;
 }
 
-export interface CompletionPipelineContext {
+/**
+ * What the verification checks actually need. Kept separate from the full
+ * pipeline context so the read-only diagnosis (`/verify-gate`) can call the
+ * very same functions without inventing a reviewer or an LSP bridge.
+ */
+export interface CompletionVerificationContext {
   projectRoot: string;
   trusted: boolean;
   exec: ExecFn;
   plan?: PlanSnapshot;
-  state?: WorkflowStateV3;
   directTask?: DirectTask;
+}
+
+export interface CompletionPipelineContext extends CompletionVerificationContext {
+  state?: WorkflowStateV3;
   runReviewer(
     input: CompletionReviewerInput,
   ): Promise<CompletionReviewerResult>;

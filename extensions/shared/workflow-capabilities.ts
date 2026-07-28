@@ -1,4 +1,8 @@
-import type { WorkflowMode } from "./workflow-status.ts";
+import {
+  isWorkflowStatus,
+  type WorkflowMode,
+  type WorkflowStatus,
+} from "./workflow-status.ts";
 
 /**
  * Synchronous capability bridge between workflow and permission extensions.
@@ -21,11 +25,8 @@ export interface WorkflowActivatedEvent {
   mode: WorkflowMode;
 }
 
-export type WorkflowCapabilityState =
-  "idle" | "planning" | "working" | "reviewing" | "paused" | "blocked" | "done";
-
 export interface WorkflowCapabilitySnapshot {
-  state: WorkflowCapabilityState;
+  state: WorkflowStatus;
   /** Current mode is provided for workflow-specific permission defaults. */
   mode?: WorkflowMode;
 }
@@ -67,16 +68,5 @@ export function isWorkflowCapabilitySnapshot(
   ) {
     return false;
   }
-  switch ((value as { state?: unknown }).state) {
-    case "idle":
-    case "planning":
-    case "working":
-    case "reviewing":
-    case "paused":
-    case "blocked":
-    case "done":
-      return true;
-    default:
-      return false;
-  }
+  return isWorkflowStatus((value as { state?: unknown }).state);
 }

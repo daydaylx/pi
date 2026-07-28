@@ -8,7 +8,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { agentModule, runtimePackagePath } from "./agent.mjs";
-import { CONFIG_FILES, GNU_TIME, LEDGER_GATE_ENV, MANIFEST_PATH, PI_MODEL, PI_THINKING, REFERENCE, SECRET_LINK_NAMES, SOURCE_ROOT, TASK_IDS } from "./config.mjs";
+import { CONFIG_FILES, GNU_TIME, MANIFEST_PATH, PI_MODEL, PI_THINKING, REFERENCE, SECRET_LINK_NAMES, SOURCE_ROOT, TASK_IDS } from "./config.mjs";
 import { fail, readJson, runGit } from "./io.mjs";
 
 export function loadManifest() {
@@ -29,12 +29,12 @@ export function findRun(manifest, id) {
 export function validateManifest(manifest) {
   if (manifest.schemaVersion !== "1.0.0") fail("P3 manifest schemaVersion must be 1.0.0.");
   if (manifest.reference !== REFERENCE) fail(`P3 manifest reference must be ${REFERENCE}.`);
-  if (manifest.scoredRunCount !== 35) fail("P3 manifest scoredRunCount must be 35.");
+  if (manifest.scoredRunCount !== 33) fail("P3 manifest scoredRunCount must be 33.");
   if (manifest.model !== PI_MODEL || manifest.thinking !== PI_THINKING) {
     fail(`P3 manifest must pin ${PI_MODEL} with ${PI_THINKING} thinking.`);
   }
-  if (!Array.isArray(manifest.runs) || manifest.runs.length !== 35) {
-    fail("P3 manifest must contain exactly 35 scored runs.");
+  if (!Array.isArray(manifest.runs) || manifest.runs.length !== 33) {
+    fail("P3 manifest must contain exactly 33 scored runs.");
   }
   if (!manifest.runs.every((run) => run.scored === true)) fail("All P3 manifest runs must be scored.");
   const ids = allRuns(manifest).map((run) => run.id);
@@ -44,13 +44,7 @@ export function validateManifest(manifest) {
       fail("P3 manifest run ids must be path-safe p3 identifiers.");
     }
     if (!TASK_IDS.has(run.task)) fail(`P3 manifest contains an unknown task '${run.task}'.`);
-    const environmentKeys = Object.keys(run.environment ?? {});
-    const allowsOnlyLedgerGate =
-      run.task === "11-context-ledger-survival" &&
-      run.variant === "ledger-disabled" &&
-      environmentKeys.length === 1 &&
-      run.environment?.[LEDGER_GATE_ENV] === "1";
-    if (environmentKeys.length > 0 && !allowsOnlyLedgerGate) {
+    if (Object.keys(run.environment ?? {}).length > 0) {
       fail(`P3 run '${run.id}' has an unsupported environment override.`);
     }
   }
@@ -66,14 +60,6 @@ export function validateManifest(manifest) {
     if (JSON.stringify(variants) !== JSON.stringify(["with-subagent", "without-subagent"])) {
       fail(`P3 ${pair} must contain one with-subagent and one without-subagent run.`);
     }
-  }
-  const task11 = manifest.runs.filter((run) => run.task.startsWith("11-"));
-  if (task11.length !== 2) fail("P3 task 11 must have one active/disabled A/B pair.");
-  const active = task11.find((run) => run.variant === "ledger-active");
-  const disabled = task11.find((run) => run.variant === "ledger-disabled");
-  if (!active || !disabled || active.environment !== undefined ||
-      disabled.environment?.[LEDGER_GATE_ENV] !== "1") {
-    fail("P3 task 11 must omit the ledger gate for active and set it to '1' only for disabled.");
   }
   const expectedDiagnostics = new Set([
     "p3-diag-02-v8-cpu",

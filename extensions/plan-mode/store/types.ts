@@ -1,5 +1,9 @@
 /** Shared workflow types, size limits and validation patterns. */
 import type { PlanSnapshot } from "../plan-snapshot.ts";
+// Re-export only: the canonical declaration lives in shared/workflow-status.ts
+// so permissions and the UI can read it without importing plan-mode.
+export type { WorkflowStatus } from "../../shared/workflow-status.ts";
+import type { WorkflowStatus } from "../../shared/workflow-status.ts";
 
 export const WORKFLOW_STATE_VERSION = 3 as const;
 export const MAX_PLAN_BYTES = 256 * 1024;
@@ -8,9 +12,6 @@ export const MAX_DIRECT_TASK_BYTES = 128 * 1024;
 export const HASH_PATTERN = /^[0-9a-f]{64}$/i;
 export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export type WorkflowStatus =
-  "idle" | "planning" | "working" | "reviewing" | "paused" | "blocked" | "done";
 
 export type WorkflowStepStatus =
   "pending" | "in_progress" | "completed" | "blocked";

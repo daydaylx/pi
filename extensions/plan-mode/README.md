@@ -6,9 +6,11 @@ Der Workflow ist bewusst klein:
 /plan → /work → Completion → Archiv
 ```
 
-`/review-plan` ist optional. `/finish` startet dieselbe Completion-Pipeline
-manuell; ein fehlgeschlagener Abschluss kann ausschließlich im TUI und nur mit
-einer nichtleeren Begründung übersteuert werden.
+`/review-plan` ist optional. `/finish` startet die Completion-Pipeline manuell;
+ein fehlgeschlagener Abschluss kann ausschließlich im TUI und nur mit einer
+nichtleeren Begründung übersteuert werden. `/task-done` schließt einen Direct
+Task über denselben internen Handler ab. `/verify-gate` zeigt dieselben
+Prüfungen vorab, entscheidet aber nichts.
 
 ## Artefakte
 
@@ -41,7 +43,8 @@ Quick Plan und Architekturplan verwenden diese Abschnitte:
 11. Abschlusskriterien
 
 Ein Architekturplan ergänzt zwei bis vier tatsächlich bewertete Optionen. Ein
-Quick Plan erfindet keine Alternativen und erzeugt keinen Decision Brief.
+Quick Plan erfindet keine Alternativen. Ein separates Decision-Brief-Artefakt
+gibt es nicht — die Nutzerentscheidung steht verbindlich im Plan selbst.
 Technischer Scope besteht ausschließlich aus sicheren projekt-relativen Pfaden
 oder Globs.
 
