@@ -9,7 +9,6 @@
 import { ROOT } from "./jiti-loader.mjs";
 import { eq } from "./assertions.mjs";
 
-
 export function stripAnsi(value) {
   return String(value).replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
 }
@@ -67,6 +66,7 @@ export function createHarness(options = {}) {
   const execCalls = [];
   const widgets = new Map();
   const lifecycleCalls = [];
+  let customCallIndex = 0;
   let footerFactory;
   let editorFactory;
   let thinkingLevel = options.thinkingLevel ?? "high";
@@ -162,8 +162,16 @@ export function createHarness(options = {}) {
       return new Promise((resolve) => {
         const component = factory(tui, theme, {}, resolve);
         customComponents.push(component);
-        if ("customResult" in options)
+        const index = customCallIndex++;
+        if (Array.isArray(options.customResults)) {
+          const value =
+            index < options.customResults.length
+              ? options.customResults[index]
+              : undefined;
+          queueMicrotask(() => resolve(value));
+        } else if ("customResult" in options) {
           queueMicrotask(() => resolve(options.customResult));
+        }
       });
     },
     getEditorText() {
@@ -179,7 +187,8 @@ export function createHarness(options = {}) {
         await options.onSubmitSlashCommand(commandLine);
       const match = commandLine.match(/^\/([^\s]+)(?:\s+(.*))?$/);
       const handler = match ? commands.get(match[1]) : undefined;
-      if (handler && activeContext) await handler(match[2] ?? "", activeContext);
+      if (handler && activeContext)
+        await handler(match[2] ?? "", activeContext);
     },
   };
 

@@ -16,11 +16,19 @@ import {
 import { loadSetupConfig } from "../setup-core/config.ts";
 import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
 import {
+  runTabbedOverlay,
+  type TabbedOverlayTab,
+} from "../shared/tabbed-overlay.ts";
+import {
   computeRouting,
   routingInputFromDirectTask,
   routingInputFromPlan,
 } from "./routing/index.ts";
-import type { RoutingLevel, RoutingProfilesConfig } from "./routing/types.ts";
+import {
+  ROUTING_LEVELS,
+  type RoutingLevel,
+  type RoutingProfilesConfig,
+} from "./routing/types.ts";
 import type { WorkflowSession } from "./session.ts";
 import { loadDirectTask } from "./store/index.ts";
 
@@ -139,6 +147,21 @@ const AGENT_ROLE_SLOTS: readonly AgentRoleSlot[] = [
   },
 ];
 
+function roleLabel(role: AgentRoleSlot["role"]): string {
+  switch (role) {
+    case "planner":
+      return "Planner";
+    case "worker":
+      return "Worker";
+    case "reviewer":
+      return "Reviewer";
+  }
+}
+
+function slotsForLevel(level: RoutingLevel): readonly AgentRoleSlot[] {
+  return AGENT_ROLE_SLOTS.filter((slot) => slot.level === level);
+}
+
 export async function openAgentModelMenu(
   _pi: ExtensionAPI,
   session: WorkflowSession,
@@ -153,59 +176,141 @@ export async function openAgentModelMenu(
   }
 
   const loadedSetup = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
-  const currentProfiles = JSON.parse(
+  let currentProfiles: RoutingProfilesConfig = JSON.parse(
     JSON.stringify(loadedSetup.config.routingProfiles),
   );
+  let activeTabId: string = session.routing?.level ?? "standard";
 
-  const entries = buildAgentModelMenuEntries(
-    ctx.modelRegistry.getAvailable(),
-    currentProfiles,
-  );
+  for (;;) {
+    const picked = await runTabbedOverlay<AgentRoleSlot>(
+      ctx,
+      "Agenten-Modelle anpassen (Super+S)",
+      buildLevelTabs(currentProfiles),
+      {
+        initialTabId: activeTabId,
+        nonInteractiveHint:
+          "Die Agenten-Modell-Auswahl benötigt den TUI-Modus.",
+      },
+    );
+    if (!picked?.entry.value) return;
+    activeTabId = picked.tabId;
+    const slot = picked.entry.value;
 
-  const choice = await runMenu(
-    ctx,
-    "Agenten-Modelle anpassen (Super+S)",
-    entries,
-    {
-      nonInteractiveHint: "Die Agenten-Modell-Auswahl benötigt den TUI-Modus.",
-    },
-  );
-  if (!choice) return;
+    const choice = await runMenu(
+      ctx,
+      `${slot.label} · Modell wählen`,
+      buildModelPickerEntries(
+        slot,
+        ctx.modelRegistry.getAvailable(),
+        currentProfiles,
+      ),
+      {
+        nonInteractiveHint:
+          "Die Agenten-Modell-Auswahl benötigt den TUI-Modus.",
+      },
+    );
+    if (!choice) continue;
 
-  const { slot: chosenSlot } = choice;
-  const activeAssigned =
-    currentProfiles.levels?.[chosenSlot.level]?.[chosenSlot.role];
+    const updated = await applyModelChoice(
+      choice,
+      currentProfiles,
+      session,
+      ctx,
+    );
+    if (updated) currentProfiles = updated;
+  }
+}
 
+/** Stufe 1: ein Tab je Routing-Stufe, Zeilen = deren Rollen-Slots (LOW nur "Worker"). */
+export function buildLevelTabs(
+  currentProfiles: RoutingProfilesConfig,
+): TabbedOverlayTab<AgentRoleSlot>[] {
+  return ROUTING_LEVELS.map((level) => ({
+    id: level,
+    label: level.toLocaleUpperCase("de-DE"),
+    entries: slotsForLevel(level).map((slot) => ({
+      id: slot.id,
+      label: roleLabel(slot.role),
+      description: `aktuell: ${assignedProfile(currentProfiles, slot)}`,
+      value: slot,
+    })),
+  }));
+}
+
+/**
+ * Stufe 2: flache, nach Access-Provider gruppierte Modell-Liste für einen
+ * Slot. Sortiert primär nach Access-Provider (sonst reißen die `section`-
+ * Blöcke im Renderer auseinander), sekundär nach Modellname.
+ */
+export function buildModelPickerEntries(
+  slot: AgentRoleSlot,
+  availableModels: readonly AvailableModel[],
+  currentProfiles: RoutingProfilesConfig,
+): MenuEntry<AgentModelChoice>[] {
+  const assigned = assignedProfile(currentProfiles, slot);
+  const entries: MenuEntry<AgentModelChoice>[] = [...availableModels]
+    .sort(
+      (left, right) =>
+        accessProviderDisplayName(left.provider).localeCompare(
+          accessProviderDisplayName(right.provider),
+          "de-DE",
+        ) || left.name.localeCompare(right.name, "de-DE"),
+    )
+    .map((model) => {
+      const ref = `${model.provider}/${model.id}`;
+      return {
+        id: `${slot.id}-${ref}`,
+        label: model.name,
+        compactLabel: model.name,
+        description: `${modelVendorDisplayName(model)} · ${model.id}`,
+        section: accessProviderDisplayName(model.provider),
+        current: ref === assigned,
+        value: { slot, kind: "model", ref },
+      };
+    });
+
+  entries.push({
+    id: `${slot.id}-manual`,
+    label: "✏ Manuellen Profilnamen eingeben",
+    description: "Profilnamen ohne Auswahl eines Registry-Modells festlegen",
+    section: "Manuell",
+    value: { slot, kind: "freitext" },
+  });
+
+  return entries;
+}
+
+async function applyModelChoice(
+  choice: AgentModelChoice,
+  currentProfiles: RoutingProfilesConfig,
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+): Promise<RoutingProfilesConfig | undefined> {
+  const { slot } = choice;
   let selectedModel: string | undefined;
 
   if (choice.kind === "freitext") {
-    const inputFn = (
-      ctx.ui as unknown as {
-        input?: (
-          title: string,
-          placeholder?: string,
-        ) => Promise<string | undefined>;
-      }
-    ).input;
-    if (typeof inputFn === "function") {
-      selectedModel = await inputFn(
-        `Profilname für ${chosenSlot.label}`,
-        activeAssigned ?? "z. B. gpt-4o",
-      );
-    }
+    const activeAssigned = assignedProfile(currentProfiles, slot);
+    selectedModel = await ctx.ui.input(
+      `Profilname für ${slot.label}`,
+      activeAssigned !== "—" ? activeAssigned : "z. B. gpt-4o",
+    );
   } else {
     selectedModel = choice.ref;
   }
 
-  if (!selectedModel || !selectedModel.trim()) return;
+  if (!selectedModel || !selectedModel.trim()) return undefined;
   selectedModel = selectedModel.trim();
 
-  if (!currentProfiles.levels[chosenSlot.level]) {
-    currentProfiles.levels[chosenSlot.level] = { worker: "default" };
+  const next: RoutingProfilesConfig = JSON.parse(
+    JSON.stringify(currentProfiles),
+  );
+  if (!next.levels[slot.level]) {
+    next.levels[slot.level] = { worker: "default" };
   }
-  currentProfiles.levels[chosenSlot.level][chosenSlot.role] = selectedModel;
+  next.levels[slot.level][slot.role] = selectedModel;
 
-  saveRoutingProfilesToSetup(ctx.cwd, currentProfiles);
+  saveRoutingProfilesToSetup(ctx.cwd, next);
 
   if (session.routing) {
     const task = loadDirectTask(ctx.cwd);
@@ -215,83 +320,12 @@ export async function openAgentModelMenu(
         ? routingInputFromPlan(session.current.snapshot)
         : undefined;
     if (baseInput) {
-      session.routing = computeRouting(baseInput, currentProfiles);
+      session.routing = computeRouting(baseInput, next);
     }
   }
 
-  ctx.ui.notify(`${chosenSlot.label} auf '${selectedModel}' gesetzt.`, "info");
-}
-
-export function buildAgentModelMenuEntries(
-  availableModels: readonly AvailableModel[],
-  currentProfiles: RoutingProfilesConfig,
-): MenuEntry<AgentModelChoice>[] {
-  const accessGroups = new Map<string, Map<string, AvailableModel[]>>();
-  for (const model of availableModels) {
-    const vendors = accessGroups.get(model.provider) ?? new Map();
-    const vendor = modelVendorDisplayName(model);
-    const models = vendors.get(vendor) ?? [];
-    models.push(model);
-    vendors.set(vendor, models);
-    accessGroups.set(model.provider, vendors);
-  }
-
-  const entries: MenuEntry<AgentModelChoice>[] = [...accessGroups.entries()]
-    .sort(([left], [right]) =>
-      accessProviderDisplayName(left).localeCompare(
-        accessProviderDisplayName(right),
-        "de-DE",
-      ),
-    )
-    .map(([accessProvider, vendors]) => ({
-      id: `access-${accessProvider}`,
-      label: accessProviderDisplayName(accessProvider),
-      description: `${[...vendors.values()].flat().length} verfügbare Modelle`,
-      children: [...vendors.entries()]
-        .sort(([left], [right]) => left.localeCompare(right, "de-DE"))
-        .map(([vendor, models]) => ({
-          id: `vendor-${accessProvider}-${vendor}`,
-          label: vendor,
-          children: [...models]
-            .sort((left, right) =>
-              left.name.localeCompare(right.name, "de-DE"),
-            )
-            .map((model) => modelEntry(model, currentProfiles)),
-        })),
-    }));
-
-  entries.push({
-    id: "manual-profile",
-    label: "✏ Manuelles Profil / Freitext eingeben",
-    description: "Profilnamen ohne Auswahl eines Registry-Modells festlegen",
-    children: AGENT_ROLE_SLOTS.map((slot) => ({
-      id: `manual-${slot.id}`,
-      label: slot.label,
-      description: `aktuell: ${assignedProfile(currentProfiles, slot)}`,
-      value: { slot, kind: "freitext" },
-    })),
-  });
-  return entries;
-}
-
-function modelEntry(
-  model: AvailableModel,
-  currentProfiles: RoutingProfilesConfig,
-): MenuEntry<AgentModelChoice> {
-  const ref = `${model.provider}/${model.id}`;
-  return {
-    id: `model-${ref}`,
-    label: model.name,
-    compactLabel: model.name,
-    description: `${accessProviderDisplayName(model.provider)} · ${model.id}`,
-    children: AGENT_ROLE_SLOTS.map((slot) => ({
-      id: `${ref}-${slot.id}`,
-      label: slot.label,
-      description: `aktuell: ${assignedProfile(currentProfiles, slot)}`,
-      current: ref === assignedProfile(currentProfiles, slot),
-      value: { slot, kind: "model", ref },
-    })),
-  };
+  ctx.ui.notify(`${slot.label} auf '${selectedModel}' gesetzt.`, "info");
+  return next;
 }
 
 function assignedProfile(
