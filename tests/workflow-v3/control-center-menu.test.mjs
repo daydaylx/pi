@@ -15,7 +15,10 @@ await test("workflow menu separates plan execution from direct tasks", () => {
   });
   const planWork = entry(empty, "plan_work");
   const directStart = entry(empty, "direct_task_start");
-  assert(planWork?.disabled, "plan execution is unavailable without a plan");
+  assert(
+    !planWork?.disabled,
+    "plan execution remains selectable without a plan to explain the prerequisite",
+  );
   eq(
     directStart?.label,
     "Direktauftrag starten",

@@ -20,7 +20,7 @@ import {
   routingInputFromDirectTask,
   routingInputFromPlan,
 } from "./routing/index.ts";
-import type { RoutingLevel } from "./routing/types.ts";
+import type { RoutingLevel, RoutingProfilesConfig } from "./routing/types.ts";
 import type { WorkflowSession } from "./session.ts";
 import { loadDirectTask } from "./store/index.ts";
 
@@ -34,6 +34,75 @@ interface AgentRoleSlot {
 type AgentModelChoice =
   | { slot: AgentRoleSlot; kind: "model"; ref: string }
   | { slot: AgentRoleSlot; kind: "freitext" };
+
+interface AvailableModel {
+  provider: string;
+  id: string;
+  name: string;
+}
+
+const ACCESS_PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  "openai-codex": "OpenAI Codex Abo",
+  "opencode-go": "OpenCode Go Abo",
+  openrouter: "OpenRouter API",
+  zai: "Z.AI Coding Plan",
+  anthropic: "Anthropic API",
+};
+
+const MODEL_VENDOR_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  anthropic: "Anthropic",
+  deepseek: "DeepSeek",
+  glm: "Z.AI (GLM)",
+  kimi: "Moonshot AI (Kimi)",
+  minimax: "MiniMax",
+  mimo: "Xiaomi (MiMo)",
+  openai: "OpenAI",
+  qwen: "Alibaba (Qwen)",
+  tencent: "Tencent",
+  zai: "Z.AI",
+};
+
+const DIRECT_MODEL_VENDORS: Readonly<Record<string, string>> = {
+  "openai-codex": "OpenAI",
+  zai: "Z.AI",
+  anthropic: "Anthropic",
+};
+
+function accessProviderDisplayName(provider: string): string {
+  return ACCESS_PROVIDER_DISPLAY_NAMES[provider] ?? provider;
+}
+
+function modelVendorDisplayName(model: AvailableModel): string {
+  const directVendor = DIRECT_MODEL_VENDORS[model.provider];
+  if (directVendor) return directVendor;
+
+  const normalizedId = model.id.toLocaleLowerCase("en-US");
+  const family = Object.keys(MODEL_VENDOR_DISPLAY_NAMES).find((candidate) =>
+    normalizedId.startsWith(candidate),
+  );
+  if (family) return MODEL_VENDOR_DISPLAY_NAMES[family];
+
+  const routedVendor = model.id.split("/", 1)[0]?.trim();
+  if (routedVendor && model.id.includes("/"))
+    return readableVendorName(routedVendor);
+
+  return accessProviderDisplayName(model.provider);
+}
+
+function readableVendorName(vendor: string): string {
+  const normalized = vendor.toLocaleLowerCase("en-US");
+  if (MODEL_VENDOR_DISPLAY_NAMES[normalized])
+    return MODEL_VENDOR_DISPLAY_NAMES[normalized];
+  return vendor
+    .split(/[-_.]/)
+    .filter(Boolean)
+    .map((part) =>
+      part.length <= 4
+        ? part.toLocaleUpperCase("en-US")
+        : `${part[0]?.toLocaleUpperCase("en-US")}${part.slice(1)}`,
+    )
+    .join(" ");
+}
 
 const AGENT_ROLE_SLOTS: readonly AgentRoleSlot[] = [
   { id: "low-worker", level: "low", role: "worker", label: "LOW › Worker" },
@@ -88,41 +157,9 @@ export async function openAgentModelMenu(
     JSON.stringify(loadedSetup.config.routingProfiles),
   );
 
-  const availableModels = [...ctx.modelRegistry.getAvailable()].sort(
-    (left, right) =>
-      `${left.provider}/${left.id}`.localeCompare(
-        `${right.provider}/${right.id}`,
-      ),
-  );
-
-  const entries: MenuEntry<AgentModelChoice>[] = AGENT_ROLE_SLOTS.map(
-    (slot) => {
-      const assigned = currentProfiles.levels?.[slot.level]?.[slot.role] ?? "—";
-      const children: MenuEntry<AgentModelChoice>[] = availableModels.map(
-        (model) => {
-          const ref = `${model.provider}/${model.id}`;
-          return {
-            id: `${slot.id}-${ref}`,
-            label: model.name,
-            description: model.id,
-            section: model.provider,
-            current: ref === assigned,
-            value: { slot, kind: "model", ref },
-          };
-        },
-      );
-      children.push({
-        id: `${slot.id}-freitext`,
-        label: "✏ Manuelles Profil / Freitext eingeben",
-        value: { slot, kind: "freitext" },
-      });
-      return {
-        id: `slot-${slot.id}`,
-        label: slot.label,
-        description: `aktuell: ${assigned}`,
-        children,
-      };
-    },
+  const entries = buildAgentModelMenuEntries(
+    ctx.modelRegistry.getAvailable(),
+    currentProfiles,
   );
 
   const choice = await runMenu(
@@ -183,6 +220,85 @@ export async function openAgentModelMenu(
   }
 
   ctx.ui.notify(`${chosenSlot.label} auf '${selectedModel}' gesetzt.`, "info");
+}
+
+export function buildAgentModelMenuEntries(
+  availableModels: readonly AvailableModel[],
+  currentProfiles: RoutingProfilesConfig,
+): MenuEntry<AgentModelChoice>[] {
+  const accessGroups = new Map<string, Map<string, AvailableModel[]>>();
+  for (const model of availableModels) {
+    const vendors = accessGroups.get(model.provider) ?? new Map();
+    const vendor = modelVendorDisplayName(model);
+    const models = vendors.get(vendor) ?? [];
+    models.push(model);
+    vendors.set(vendor, models);
+    accessGroups.set(model.provider, vendors);
+  }
+
+  const entries: MenuEntry<AgentModelChoice>[] = [...accessGroups.entries()]
+    .sort(([left], [right]) =>
+      accessProviderDisplayName(left).localeCompare(
+        accessProviderDisplayName(right),
+        "de-DE",
+      ),
+    )
+    .map(([accessProvider, vendors]) => ({
+      id: `access-${accessProvider}`,
+      label: accessProviderDisplayName(accessProvider),
+      description: `${[...vendors.values()].flat().length} verfügbare Modelle`,
+      children: [...vendors.entries()]
+        .sort(([left], [right]) => left.localeCompare(right, "de-DE"))
+        .map(([vendor, models]) => ({
+          id: `vendor-${accessProvider}-${vendor}`,
+          label: vendor,
+          children: [...models]
+            .sort((left, right) =>
+              left.name.localeCompare(right.name, "de-DE"),
+            )
+            .map((model) => modelEntry(model, currentProfiles)),
+        })),
+    }));
+
+  entries.push({
+    id: "manual-profile",
+    label: "✏ Manuelles Profil / Freitext eingeben",
+    description: "Profilnamen ohne Auswahl eines Registry-Modells festlegen",
+    children: AGENT_ROLE_SLOTS.map((slot) => ({
+      id: `manual-${slot.id}`,
+      label: slot.label,
+      description: `aktuell: ${assignedProfile(currentProfiles, slot)}`,
+      value: { slot, kind: "freitext" },
+    })),
+  });
+  return entries;
+}
+
+function modelEntry(
+  model: AvailableModel,
+  currentProfiles: RoutingProfilesConfig,
+): MenuEntry<AgentModelChoice> {
+  const ref = `${model.provider}/${model.id}`;
+  return {
+    id: `model-${ref}`,
+    label: model.name,
+    compactLabel: model.name,
+    description: `${accessProviderDisplayName(model.provider)} · ${model.id}`,
+    children: AGENT_ROLE_SLOTS.map((slot) => ({
+      id: `${ref}-${slot.id}`,
+      label: slot.label,
+      description: `aktuell: ${assignedProfile(currentProfiles, slot)}`,
+      current: ref === assignedProfile(currentProfiles, slot),
+      value: { slot, kind: "model", ref },
+    })),
+  };
+}
+
+function assignedProfile(
+  profiles: RoutingProfilesConfig,
+  slot: AgentRoleSlot,
+): string {
+  return profiles.levels?.[slot.level]?.[slot.role] ?? "—";
 }
 
 function saveRoutingProfilesToSetup(

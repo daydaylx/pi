@@ -191,7 +191,7 @@ export async function startWork(
     );
     return;
   }
-  activateWorkMode(session, ctx);
+  session.reload(ctx);
   const loaded = session.current;
   if (loaded.migrationRequired) {
     session.notify(
@@ -204,11 +204,13 @@ export async function startWork(
   if (!loaded.snapshot || !loaded.state) {
     session.notify(
       ctx,
-      loaded.warnings.join("\n") || "Kein gültiger PlanSnapshot vorhanden.",
+      loaded.warnings.join("\n") ||
+        "Kein aktiver Plan. Erstelle zuerst einen Schnellplan oder Architekturplan.",
       "warning",
     );
     return;
   }
+  activateWorkMode(session, ctx);
   if (
     loaded.state.status === "working" ||
     loaded.state.status === "paused" ||

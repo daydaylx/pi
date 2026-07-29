@@ -1044,8 +1044,13 @@ await section("Control Center menus and routing", async () => {
     const [workflowSwitch, controlCenter] = seen;
     eq(
       workflowSwitch,
-      ["Schnellplan", "Architekturplan", "Direktauftrag starten"],
-      "Shift+Tab separates planning from the available plan-less direct task",
+      [
+        "Schnellplan",
+        "Architekturplan",
+        "Plan ausführen / fortsetzen",
+        "Direktauftrag starten",
+      ],
+      "Shift+Tab keeps plan execution selectable to explain a missing plan",
     );
     assert(
       controlCenter.length > workflowSwitch.length &&

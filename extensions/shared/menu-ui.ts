@@ -5,6 +5,8 @@ import { statusSeparator } from "./ui-theme.ts";
 export interface MenuEntry<T> {
   id: string;
   label: string;
+  /** Shorter label for narrow terminal layouts. */
+  compactLabel?: string;
   description?: string;
   details?: string;
   section?: string;
@@ -291,7 +293,9 @@ async function selectWithCustomUi<T>(
           const suffix = `${entry.shortcut ? `  [${entry.shortcut}]` : ""}${tag(entry) ? ` [${tag(entry)}]` : ""}${entry.children ? " ›" : ""}`;
           const isSelected = index === level().selected;
           const indicator = isSelected ? fg("accent", "▌") : " ";
-          const main = `${indicator} ${entry.icon ? `${entry.icon} ` : ""}${entry.label}${suffix}`;
+          const label =
+            layout === "compact" ? (entry.compactLabel ?? entry.label) : entry.label;
+          const main = `${indicator} ${entry.icon ? `${entry.icon} ` : ""}${label}${suffix}`;
           const rendered = isSelected
             ? selectedRow(main, inner)
             : fg(tone(entry), pad(` ${main}`, inner));

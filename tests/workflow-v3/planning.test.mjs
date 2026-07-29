@@ -115,7 +115,7 @@ await test("plan workflow lifecycle", async () => {
   }
 });
 
-await test("workflow menus keep planning passive and block plan work without a plan", async () => {
+await test("workflow menus keep planning passive and explain missing plans", async () => {
   if (!planMode || !controlPlane) return;
   const cwd = mkdtempSync(path.join(tmpdir(), "pi-passive-mode-menu-"));
   try {
@@ -152,7 +152,15 @@ await test("workflow menus keep planning passive and block plan work without a p
     eq(
       harness.sent.length,
       sentBeforePlanMode,
-      "the unavailable plan-work entry cannot start execution",
+      "plan work without a plan cannot start execution",
+    );
+    assert(
+      harness.notifications.some((notification) =>
+        notification.message.includes(
+          "Kein aktiver Plan. Erstelle zuerst einen Schnellplan oder Architekturplan.",
+        ),
+      ),
+      "plan work without a plan explains how to continue",
     );
     const workContext = await harness.runHooks("before_agent_start", {}, context);
     assert(

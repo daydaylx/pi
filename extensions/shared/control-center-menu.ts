@@ -54,10 +54,6 @@ export function buildWorkflowTab(
         label: "Plan ausführen / fortsetzen",
         description:
           "Bestätigten Plan sofort ausführen oder unterbrochene Ausführung fortsetzen",
-        disabled: !state.hasActivePlan,
-        disabledReason: !state.hasActivePlan
-          ? "Erstelle und bestätige zuerst einen Plan."
-          : undefined,
         current: state.activeMode === "work" && state.hasActivePlan,
         value: "plan_work",
       },
