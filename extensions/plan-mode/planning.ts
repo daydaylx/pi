@@ -177,6 +177,14 @@ export async function activatePlanningMode(
     return false;
   }
   if (session.current.planContent) {
+    if (ctx.mode !== "tui" || !ctx.hasUI) {
+      session.notify(
+        ctx,
+        "Ein Plan ist bereits aktiv; die Überschreibung erfordert eine Bestätigung im TUI-Modus. Nutze /discard-plan, um ihn zuerst zu verwerfen, oder starte /plan interaktiv.",
+        "warning",
+      );
+      return false;
+    }
     const confirmed = await ctx.ui.confirm(
       "Aktiven Plan überarbeiten?",
       "Die nächste Planrevision invalidiert bisherigen Fortschritt und Review.",

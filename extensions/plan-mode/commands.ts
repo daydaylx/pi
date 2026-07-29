@@ -11,6 +11,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import { catalogDescription } from "../shared/command-catalog.ts";
 import {
   buildWorkflowTab,
   type WorkflowAction,
@@ -189,7 +190,7 @@ export function registerPlanCommands(
   });
 
   pi.registerCommand("plan", {
-    description: "Zustandsabhängigen Plan-Assistenten öffnen oder Planart starten",
+    description: catalogDescription("plan"),
     handler: async (args, ctx) => {
       if (!args.trim()) {
         await openPlanAssistant(session, ctx);
@@ -200,11 +201,11 @@ export function registerPlanCommands(
     },
   });
   pi.registerCommand("review-plan", {
-    description: "Aktuellen Plan optional vertieft prüfen",
+    description: catalogDescription("review-plan"),
     handler: async (_args, ctx) => beginReview(session, ctx),
   });
   pi.registerCommand("work", {
-    description: "Bestätigten Plan ausführen oder explizit fortsetzen",
+    description: catalogDescription("work"),
     handler: async (_args, ctx) => startWork(session, ctx),
   });
   pi.registerCommand("go", {
@@ -212,7 +213,7 @@ export function registerPlanCommands(
     handler: async (_args, ctx) => startWork(session, ctx),
   });
   pi.registerCommand("plan-todos", {
-    description: "Stabile Planschritte und Sidecar-Status anzeigen",
+    description: catalogDescription("plan-todos"),
     handler: async (_args, ctx) => {
       const loaded = session.reload(ctx);
       session.notify(
@@ -225,7 +226,7 @@ export function registerPlanCommands(
     },
   });
   pi.registerCommand("view-plan", {
-    description: "Vollständigen Markdown-Plan im Terminal anzeigen",
+    description: catalogDescription("view-plan"),
     handler: async (_args, ctx) => viewPlanMarkdown(session, ctx),
   });
   pi.registerCommand("show-plan", {
@@ -233,8 +234,7 @@ export function registerPlanCommands(
     handler: async (_args, ctx) => viewPlanMarkdown(session, ctx),
   });
   pi.registerCommand("edit-plan", {
-    description:
-      "Markdown-Plan direkt im Editor bearbeiten und Sidecar synchronisieren",
+    description: catalogDescription("edit-plan"),
     handler: async (_args, ctx) => editPlanMarkdown(session, ctx),
   });
   pi.registerCommand("plan-edit", {
@@ -242,20 +242,19 @@ export function registerPlanCommands(
     handler: async (_args, ctx) => editPlanMarkdown(session, ctx),
   });
   pi.registerCommand("done", {
-    description: "Planschritte manuell abschließen: /done <n> [m …]",
+    description: `${catalogDescription("done")}: /done <n> [m …]`,
     handler: async (args, ctx) => completeStepsCommand(session, ctx, args),
   });
   pi.registerCommand("finish", {
-    description:
-      "Completion-Pipeline ausführen; TUI-Override nur mit Begründung",
+    description: `${catalogDescription("finish")}; TUI-Override nur mit Begründung`,
     handler: async (_args, ctx) => finishWorkflow(session, ctx, true),
   });
   pi.registerCommand("discard-plan", {
-    description: "Aktiven Plan und Sidecar ausdrücklich verwerfen",
+    description: catalogDescription("discard-plan"),
     handler: async (_args, ctx) => discardPlan(session, ctx),
   });
   pi.registerCommand("task", {
-    description: "Direktauftrag mit Scope und Abschlusskriterien starten",
+    description: `${catalogDescription("task")}: Scope und Abschlusskriterien angeben`,
     handler: async (args, ctx) => {
       if (args.trim()) {
         await startDirectTask(session, ctx, args);
@@ -269,25 +268,23 @@ export function registerPlanCommands(
     },
   });
   pi.registerCommand("task-done", {
-    description: "Direktauftrag über dieselbe Completion-Pipeline abschließen",
+    description: catalogDescription("task-done"),
     handler: async (_args, ctx) => finishDirectTask(session, ctx),
   });
   pi.registerCommand("migrate-plan", {
-    description: "Legacy-Workflow v1/v2 ausdrücklich nach v3 migrieren",
+    description: catalogDescription("migrate-plan"),
     handler: async (_args, ctx) => migrateLegacyPlan(session, ctx),
   });
   pi.registerCommand("recover-workflow-lock", {
-    description: "Verwaisten Workflow-Lock nach Bestätigung entfernen",
+    description: catalogDescription("recover-workflow-lock"),
     handler: async (_args, ctx) => recoverWorkflowLock(session, ctx),
   });
   pi.registerCommand("verify-gate", {
-    description:
-      "Completion-Prüfungen vorab ansehen; entscheidet nichts und schließt nichts ab",
+    description: `${catalogDescription("verify-gate")}; entscheidet nichts und schließt nichts ab`,
     handler: async (_args, ctx) => runVerifyGate(session, ctx),
   });
   pi.registerCommand("route", {
-    description:
-      "Aufgaben-Routing anzeigen oder manuell stufen: /route [low|standard|high]",
+    description: `${catalogDescription("route")}: /route [low|standard|high]`,
     handler: async (args, ctx) => runRoute(session, ctx, args),
   });
 
@@ -383,15 +380,15 @@ export function registerPlanCommands(
   };
 
   pi.registerCommand("workflow", {
-    description: "Zustandsabhängigen Workflow-Wechsel öffnen",
+    description: catalogDescription("workflow"),
     handler: async (_args, ctx) => openWorkflowSwitch(ctx),
   });
   pi.registerCommand("agent-models", {
-    description: "Agentenmodelle für Planner, Worker und Reviewer anpassen",
+    description: catalogDescription("agent-models"),
     handler: async (_args, ctx) => openAgentModelMenu(pi, session, ctx),
   });
   pi.registerCommand("commands", {
-    description: "Alle Slash-Commands nach Aufgabenbereich öffnen",
+    description: catalogDescription("commands"),
     handler: async (_args, ctx) => {
       await openCommandCenter(pi, ctx, menuState(ctx));
     },

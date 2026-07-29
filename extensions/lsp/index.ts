@@ -19,6 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { catalogDescription } from "../shared/command-catalog.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -342,8 +343,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("lsp", {
-    description:
-      "LSP steuern: status | on | off | restart [id] | servers | log | diagnostics",
+    description: `${catalogDescription("lsp")}: status | on | off | restart [id] | servers | log | diagnostics`,
     handler: async (args, ctx) => {
       const [sub] = args.trim().split(/\s+/).filter(Boolean);
       if (sub === undefined) {

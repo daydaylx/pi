@@ -3,6 +3,7 @@
  * modifier-eindeutige CSI-u/Kitty-Sequenzen. Terminale müssen das erweiterte
  * Tastaturprotokoll aktivieren, damit die Kombinationen unterscheidbar sind.
  */
+import { catalogLabel } from "./command-catalog.ts";
 
 export interface ShortcutBinding {
   /** Key-Spezifikation für pi.registerShortcut(). */
@@ -21,44 +22,44 @@ export const SHORTCUTS = {
   modeMenu: {
     keys: "shift+tab",
     label: "Shift+Tab",
-    description: "Workflow wechseln · /workflow",
+    description: `${catalogLabel("workflow")} · /workflow`,
     command: "/workflow",
   },
   modelMenu: {
     keys: "super+m",
     label: "Super+M",
-    description: "Modell wählen · /model",
+    description: `${catalogLabel("model")} · /model`,
     command: "/model",
   },
   thinkingMenu: {
     keys: "super+d",
     label: "Super+D",
-    description: "Denktiefe wählen · /thinking",
+    description: `${catalogLabel("thinking")} · /thinking`,
     command: "/thinking",
   },
   mainMenu: {
     keys: "super+q",
     label: "Super+Q",
-    description: "Command Center öffnen · /commands",
+    description: `${catalogLabel("commands")} · /commands`,
     command: "/commands",
   },
   planAssistant: {
     keys: "super+p",
     label: "Super+P",
-    description: "Plan-Assistent öffnen · /plan",
+    description: `${catalogLabel("plan")} · /plan`,
     command: "/plan",
     effect: "starts-turn",
   },
   yoloToggle: {
     keys: "super+y",
     label: "Super+Y",
-    description: "Temporären YOLO-Modus umschalten · /yolo",
+    description: `${catalogLabel("yolo")} · /yolo`,
     command: "/yolo",
   },
   routingModelMenu: {
     keys: "super+s",
     label: "Super+S",
-    description: "Agentenmodelle anpassen · /agent-models",
+    description: `${catalogLabel("agent-models")} · /agent-models`,
     command: "/agent-models",
   },
 } as const satisfies Record<string, ShortcutBinding>;

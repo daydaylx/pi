@@ -31,3 +31,14 @@ export function renderSegment(
   const content = icon ? `${icon} ${text}` : text;
   return theme.fg(tone, bold ? theme.bold(content) : content);
 }
+
+/**
+ * The one separator glyph every status bar (footer, menu hint lines) joins
+ * its segments with. A raw, unstyled `" · "`/`" │ "` next to this themed one
+ * reads as a third, unintended color — every caller must go through here.
+ */
+export const STATUS_SEPARATOR = " │ ";
+
+export function statusSeparator(theme: Theme): string {
+  return theme.fg("borderMuted", STATUS_SEPARATOR);
+}

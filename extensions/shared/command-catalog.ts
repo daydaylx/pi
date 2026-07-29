@@ -50,21 +50,21 @@ export const COMMAND_CATEGORIES: readonly CommandCategory[] = [
 const definitions = [
   ["workflow", "Workflow wechseln", "Arbeitsweg auswählen oder fortsetzen", "work"],
   ["plan", "Plan-Assistent", "Plan erstellen, prüfen oder verwalten", "work", undefined, "Super+P", "starts-turn"],
-  ["work", "Plan ausführen", "Bestätigten Plan ausführen oder fortsetzen", "work", ["go"], undefined, "starts-turn"],
-  ["task", "Direktauftrag", "Kompakte Aufgabe ohne Plan starten oder fortsetzen", "work", undefined, undefined, "starts-turn"],
-  ["task-done", "Direktauftrag abschließen", "Direktauftrag durch die Completion-Pipeline führen", "work"],
+  ["work", "Plan ausführen", "Bestätigten Plan ausführen oder explizit fortsetzen", "work", ["go"], undefined, "starts-turn"],
+  ["task", "Direktauftrag", "Direktauftrag ohne Plan starten oder fortsetzen", "work", undefined, undefined, "starts-turn"],
+  ["task-done", "Direktauftrag abschließen", "Direktauftrag über dieselbe Completion-Pipeline abschließen", "work"],
   ["route", "Aufgaben-Routing", "Routing anzeigen oder manuell stufen", "work", undefined, undefined, undefined, undefined, "route"],
 
-  ["review-plan", "Plan prüfen", "Aktuellen Plan vertieft prüfen", "plan", undefined, undefined, "starts-turn"],
-  ["plan-todos", "Planschritte anzeigen", "Planschritte und Sidecar-Status anzeigen", "plan"],
-  ["view-plan", "Plan anzeigen", "Vollständigen Markdown-Plan anzeigen", "plan", ["show-plan"]],
-  ["edit-plan", "Plan bearbeiten", "Markdown-Plan bearbeiten und Sidecar synchronisieren", "plan", ["plan-edit"]],
+  ["review-plan", "Plan prüfen", "Aktuellen Plan optional vertieft prüfen", "plan", undefined, undefined, "starts-turn"],
+  ["plan-todos", "Planschritte anzeigen", "Stabile Planschritte und Sidecar-Status anzeigen", "plan"],
+  ["view-plan", "Plan anzeigen", "Vollständigen Markdown-Plan im Terminal anzeigen", "plan", ["show-plan"]],
+  ["edit-plan", "Plan bearbeiten", "Markdown-Plan direkt im Editor bearbeiten und Sidecar synchronisieren", "plan", ["plan-edit"]],
   ["done", "Planschritte abschließen", "Einen oder mehrere Planschritte manuell abschließen", "plan"],
   ["verify-gate", "Prüfungen vorab", "Completion-Prüfungen read-only ansehen", "plan"],
   ["finish", "Plan abschließen", "Verbindliche Completion-Pipeline ausführen", "plan"],
   ["discard-plan", "Plan verwerfen", "Aktiven Plan und Sidecar nach Bestätigung entfernen", "plan", undefined, undefined, undefined, true],
-  ["migrate-plan", "Legacy-Plan migrieren", "Legacy-Workflow ausdrücklich nach v3 migrieren", "plan", undefined, undefined, undefined, true],
-  ["recover-workflow-lock", "Workflow-Sperre reparieren", "Verwaiste Sperre nach Bestätigung entfernen", "plan", undefined, undefined, undefined, true],
+  ["migrate-plan", "Legacy-Plan migrieren", "Legacy-Workflow v1/v2 ausdrücklich nach v3 migrieren", "plan", undefined, undefined, undefined, true],
+  ["recover-workflow-lock", "Workflow-Sperre reparieren", "Verwaisten Workflow-Lock nach Bestätigung entfernen", "plan", undefined, undefined, undefined, true],
 
   ["model", "Modell wählen", "Modell für diese Sitzung auswählen", "models", undefined, "Super+M"],
   ["scoped-models", "Modellumfang", "Modelle für die native Modellrotation auswählen", "models"],
@@ -128,6 +128,28 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = definitions.map
     ...(guide ? { guide } : {}),
   }),
 );
+
+const definitionByName = new Map(
+  COMMAND_DEFINITIONS.map((definition) => [definition.name, definition]),
+);
+
+/**
+ * The one canonical description per command. Autocomplete, the shortcut
+ * overlay and the Command Center menu all read from here instead of keeping
+ * their own copy, so the three surfaces cannot drift back into three
+ * different explanations of the same command.
+ */
+export function catalogDescription(name: string): string {
+  const definition = definitionByName.get(name);
+  if (!definition) throw new Error(`Kein Katalogeintrag für /${name}`);
+  return definition.description;
+}
+
+export function catalogLabel(name: string): string {
+  const definition = definitionByName.get(name);
+  if (!definition) throw new Error(`Kein Katalogeintrag für /${name}`);
+  return definition.label;
+}
 
 export function normalizeAvailableCommands(
   commands: readonly SlashCommandInfo[],

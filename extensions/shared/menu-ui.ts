@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { statusSeparator } from "./ui-theme.ts";
 
 /** Pure menu data; menu builders never need to know about TUI rendering. */
 export interface MenuEntry<T> {
@@ -352,11 +353,9 @@ async function selectWithCustomUi<T>(
             "Esc schließen",
           ]
             .filter(Boolean)
-            .join(layout === "compact" ? " · " : "  ·  ");
-          const footer = wrapTextWithAnsi(
-            fg("dim", footerText),
-            Math.max(1, inner),
-          )
+            .map((part) => fg("dim", part))
+            .join(statusSeparator(theme));
+          const footer = wrapTextWithAnsi(footerText, Math.max(1, inner))
             .slice(0, layout === "compact" ? 1 : 2)
             .map((item) => pad(` ${item}`, inner));
           const paddingLines = layout === "compact" ? 0 : 2;

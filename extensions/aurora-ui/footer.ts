@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { isAbsolute, normalize, relative, sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderSegment } from "../shared/ui-theme.ts";
+import { renderSegment, statusSeparator } from "../shared/ui-theme.ts";
 import { crop, layoutFor, type Layout } from "./layout.ts";
 import type { AuroraUiState } from "./state.ts";
 
@@ -36,10 +36,9 @@ export interface FooterInput {
  * the edge. Permissions, project and model never drop — they are the reason
  * the footer exists.
  */
-const DROP_ORDER = ["thinking", "workflow", "lsp", "branch"] as const;
+const DROP_ORDER = ["thinking", "lsp", "branch"] as const;
 type Droppable = (typeof DROP_ORDER)[number];
 
-const SEPARATOR = " │ ";
 const GROUP_GAP = "   ";
 
 export function compactCwd(cwd: string): string {
@@ -70,11 +69,17 @@ export function renderContextGauge(percent: number, theme: Theme): string {
   return `${theme.fg(color, bar)} ${theme.fg(color, `${Math.round(percent)}%`)}`;
 }
 
-function joinSides(left: string, right: string, width: number): string {
+function joinSides(
+  theme: Theme,
+  left: string,
+  right: string,
+  width: number,
+): string {
   const available = Math.max(1, width);
   const gap = available - visibleWidth(left) - visibleWidth(right);
   if (gap >= 1) return left + " ".repeat(gap) + right;
-  if (available < 52) return crop(`${left}${SEPARATOR}${right}`, available);
+  if (available < 52)
+    return crop(`${left}${statusSeparator(theme)}${right}`, available);
   const clippedLeft = crop(left, Math.max(1, Math.floor(available * 0.55)));
   return crop(
     clippedLeft +
@@ -139,15 +144,6 @@ function buildBlocks(
   );
 
   const right: string[] = [];
-  if (!dropped.has("workflow") && layout === "wide") {
-    right.push(
-      renderSegment(
-        theme,
-        input.statuses.get("workflow") ?? state.workflow.label,
-        { tone: "muted" },
-      ),
-    );
-  }
   right.push(
     renderSegment(theme, permissionLabel(input), {
       tone: "warning",
@@ -163,7 +159,7 @@ function buildBlocks(
     );
   }
 
-  const sep = theme.fg("borderMuted", SEPARATOR);
+  const sep = statusSeparator(theme);
   return {
     left: left.join(sep),
     center,
@@ -180,7 +176,12 @@ function blocksWidth(blocks: Blocks): number {
   );
 }
 
-function layoutLine(blocks: Blocks, layout: Layout, width: number): string {
+function layoutLine(
+  theme: Theme,
+  blocks: Blocks,
+  layout: Layout,
+  width: number,
+): string {
   if (layout === "wide" && blocksWidth(blocks) + 2 <= width) {
     // Three balanced columns: the project sits centred between model and status.
     const leftW = visibleWidth(blocks.left);
@@ -199,6 +200,7 @@ function layoutLine(blocks: Blocks, layout: Layout, width: number): string {
     );
   }
   return joinSides(
+    theme,
     `${blocks.left}${GROUP_GAP}${blocks.center}`,
     blocks.right,
     width,
@@ -219,18 +221,22 @@ export function renderFooterLines(
     blocks = buildBlocks(theme, input, layout, dropped);
   }
 
-  const lines = [layoutLine(blocks, layout, width)];
+  const lines = [layoutLine(theme, blocks, layout, width)];
   if (layout === "wide") {
+    const sep = statusSeparator(theme);
     const gauge =
       input.contextPercent === null
         ? ""
-        : `${SEPARATOR}Kontext ${renderContextGauge(input.contextPercent, theme)}`;
+        : `${sep}Kontext ${renderContextGauge(input.contextPercent, theme)}`;
     lines.push(
       crop(
-        theme.fg(
-          "dim",
-          `Sitzung ${input.sessionName ?? "unbenannt"}${SEPARATOR}↑${formatTokens(input.tokens.input)} ↓${formatTokens(input.tokens.output)}`,
-        ) + gauge,
+        theme.fg("dim", `Sitzung ${input.sessionName ?? "unbenannt"}`) +
+          sep +
+          theme.fg(
+            "dim",
+            `↑${formatTokens(input.tokens.input)} ↓${formatTokens(input.tokens.output)}`,
+          ) +
+          gauge,
         width,
       ),
     );
@@ -258,7 +264,7 @@ export function renderFooterLines(
                   ? "error"
                   : "muted";
           parts.push(theme.fg(statusColor, sa.status));
-          return parts.join(" · ");
+          return parts.join(statusSeparator(theme));
         })
         .join("    ");
       const truncated =

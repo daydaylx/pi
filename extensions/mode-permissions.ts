@@ -16,6 +16,7 @@
  *   guards.ts           the tool_call / user_bash interceptors
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { catalogDescription } from "./shared/command-catalog.ts";
 import {
   CONTROL_CENTER_EVENTS,
   type OpenControlCenterMenuEvent,
@@ -47,13 +48,12 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   thinking.onPersist = () => session.persist();
 
   pi.registerCommand("yolo", {
-    description: "Session-weiten YOLO Mode ein-/ausschalten",
+    description: catalogDescription("yolo"),
     handler: async (_args, ctx) => session.toggleYolo(ctx, "command"),
   });
 
   pi.registerCommand("permission", {
-    description:
-      "Zugriffsstufe setzen: readonly | project-write | confirm-all | yolo",
+    description: `${catalogDescription("permission")}: readonly | project-write | confirm-all | yolo`,
     handler: async (args, ctx) => {
       const raw = args.trim();
       if (!raw) {
@@ -75,8 +75,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("thinking", {
-    description:
-      "Denktiefe wählen: auto | off | minimal | low | medium | high | xhigh",
+    description: `${catalogDescription("thinking")}: auto | off | minimal | low | medium | high | xhigh`,
     handler: async (args, ctx) => {
       const epoch = session.epoch();
       const value = args.trim().toLowerCase();

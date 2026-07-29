@@ -41,6 +41,22 @@ export { loadWorkflowStateV3 } from "./workflow-state-load.ts";
 // primitives from this module, so re-exporting it would close an import cycle.
 // store/index.ts publishes it directly from ./workflow-done.ts.
 
+/**
+ * Thrown by every CAS write when the on-disk state or plan no longer matches
+ * what the caller observed. `reason` tells the two checks apart so callers can
+ * word a user-facing message precisely, but neither reason implies it is safe
+ * to bypass CAS and write anyway — the on-disk side always won the race.
+ */
+export class WorkflowConcurrencyError extends Error {
+  constructor(
+    message: string,
+    readonly reason: "state-changed" | "plan-changed",
+  ) {
+    super(message);
+    this.name = "WorkflowConcurrencyError";
+  }
+}
+
 export function currentStateToken(cwd: string): string {
   const path = workflowPath(cwd, WORKFLOW_STATE_RELATIVE_PATH);
   return tokenFor(readBounded(cwd, path, MAX_STATE_BYTES));
@@ -70,7 +86,10 @@ export function writeWorkflowStateCAS(
   }
   return withWorkflowLock(cwd, () => {
     if (currentStateToken(cwd) !== expectedToken) {
-      throw new Error("Workflow-State hat sich konkurrierend geändert.");
+      throw new WorkflowConcurrencyError(
+        "Workflow-State hat sich konkurrierend geändert.",
+        "state-changed",
+      );
     }
     const plan = readBounded(
       cwd,
@@ -101,8 +120,9 @@ export function writePlanAndStateCAS(
 ): { state: WorkflowStateV3; stateToken: string } {
   return withWorkflowLock(cwd, () => {
     if (currentStateToken(cwd) !== previousStateToken) {
-      throw new Error(
+      throw new WorkflowConcurrencyError(
         "Workflow-State hat sich vor der Planaktualisierung geändert.",
+        "state-changed",
       );
     }
     const planPath = workflowPath(cwd, PLAN_RELATIVE_PATH);
@@ -113,7 +133,10 @@ export function writePlanAndStateCAS(
       previous?.planHash &&
       hashPlanSnapshotContent(currentPlan) !== previous.planHash
     ) {
-      throw new Error("Plan wurde konkurrierend geändert.");
+      throw new WorkflowConcurrencyError(
+        "Plan wurde konkurrierend geändert.",
+        "plan-changed",
+      );
     }
     writeAtomic(cwd, planPath, snapshot.content, MAX_PLAN_BYTES);
     const state = createWorkflowState(snapshot, previous);
@@ -135,13 +158,17 @@ export function finalizeObservedPlanCAS(
 ): { state: WorkflowStateV3; stateToken: string } {
   return withWorkflowLock(cwd, () => {
     if (currentStateToken(cwd) !== previousStateToken) {
-      throw new Error("Workflow-State hat sich während der Planung geändert.");
+      throw new WorkflowConcurrencyError(
+        "Workflow-State hat sich während der Planung geändert.",
+        "state-changed",
+      );
     }
     const planPath = workflowPath(cwd, PLAN_RELATIVE_PATH);
     const currentPlan = readBounded(cwd, planPath, MAX_PLAN_BYTES);
     if (currentPlan !== observedPlanContent) {
-      throw new Error(
+      throw new WorkflowConcurrencyError(
         "Plan hat sich nach dem beobachteten Agent-Turn geändert.",
+        "plan-changed",
       );
     }
     writeAtomic(cwd, planPath, snapshot.content, MAX_PLAN_BYTES);

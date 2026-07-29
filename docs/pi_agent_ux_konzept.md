@@ -12,12 +12,16 @@
 | `Super+S` | `/agent-models` |
 | `Super+Q` | `/commands` |
 
-`/commands` ist die gemeinsame Sprache von Menü, Autocomplete und Shortcuts.
-Das Hauptmenü besteht aus Arbeit (`A`), Plan (`P`), Modelle & Denken (`M`),
-Rechte & Vertrauen (`R`), Code & Diagnose (`C`), Sitzungen & Kontext (`S`),
-Vorlagen & Skills (`V`) sowie System & Transfer (`T`). Ein Buchstabe öffnet
-den Bereich direkt. Einträge zeigen den kanonischen `/command`; Aliase werden
-nur am Original erklärt.
+`/commands` teilt die kanonischen Namen, Kategorien und Beschreibungen
+zwischen Menü, Autocomplete und Shortcuts (`extensions/shared/command-catalog.ts`
+ist dafür die einzige Quelle). Freitextsuche über alle Commands gibt es aber
+nur im nativen Autocomplete; das Command-Center-Menü selbst bietet keine
+Texteingabe, sondern ausschließlich Pfeiltasten-Navigation und den
+Kategorie-Buchstaben als Einzeltasten-Sprung. Das Hauptmenü besteht aus Arbeit
+(`A`), Plan (`P`), Modelle & Denken (`M`), Rechte & Vertrauen (`R`), Code &
+Diagnose (`C`), Sitzungen & Kontext (`S`), Vorlagen & Skills (`V`) sowie
+System & Transfer (`T`). Ein Buchstabe öffnet den Bereich direkt. Einträge
+zeigen den kanonischen `/command`; Aliase werden nur am Original erklärt.
 
 `/workflow` trennt Planarbeit und Direktauftrag. Planarbeit startet oder setzt
 ausschließlich einen vorhandenen Plan fort; ein Direktauftrag ist die kompakte,

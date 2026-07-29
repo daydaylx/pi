@@ -46,6 +46,7 @@ export function createHarness(options = {}) {
   const hooks = new Map();
   const eventHandlers = new Map();
   const commands = new Map();
+  const commandDescriptions = new Map();
   const shortcuts = new Map();
   const tools = new Map();
   const duplicateTools = [];
@@ -214,6 +215,7 @@ export function createHarness(options = {}) {
     },
     registerCommand(name, options) {
       commands.set(name, options.handler);
+      commandDescriptions.set(name, options.description);
     },
     registerShortcut(shortcut, options) {
       shortcuts.set(shortcut, options.handler);
@@ -282,6 +284,7 @@ export function createHarness(options = {}) {
     api,
     hooks,
     commands,
+    commandDescriptions,
     shortcuts,
     tools,
     duplicateTools,

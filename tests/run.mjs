@@ -1676,6 +1676,10 @@ await section("shared menu shell navigation and rendering", async () => {
       stripAnsi(lines[0]).startsWith("╭"),
       `menu has a complete top frame at ${width} columns`,
     );
+    assert(
+      lines.every((line) => !stripAnsi(line).includes(" · ")),
+      `menu footer hint at ${width} columns uses the themed separator, not a raw dot`,
+    );
   }
   component.handleInput("\r");
   assert(
@@ -1834,11 +1838,23 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
       "Aurora footer drops the thinking segment before it crowds a narrow line",
     );
 
+    // The editor frame is the only surface allowed to show workflow status
+    // (decision 009). The footer must never echo the "workflow" status key,
+    // even in the wide layout that has room for it.
+    assert(
+      !wide.includes("ARBEIT 1/3"),
+      "Aurora footer no longer duplicates the workflow status from the editor frame",
+    );
+
     // renderPill's bracket fallback fired on every render because "pillBg" is
     // not a key the Pi theme schema knows.
     assert(
       !/[[\]]/.test(wide) && !/[[\]]/.test(narrow),
       "Aurora footer segments are colored, not bracketed",
+    );
+    assert(
+      !wide.includes(" · ") && !narrow.includes(" · "),
+      "Aurora footer never falls back to an unstyled separator",
     );
 
     const wideLines = footer.render(140).map(stripAnsi);
@@ -1934,6 +1950,18 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
     assert(
       component.render(60).length >= 1,
       "Aurora activity renders in a narrow terminal",
+    );
+    // The specific activity text ("1 Tool aktiv") must live on exactly one
+    // surface. The native working indicator stays generic; the widget above
+    // the editor carries the specific text.
+    eq(
+      harness.workingMessages.at(-1),
+      "Arbeite …",
+      "the native working indicator stays generic while a tool runs",
+    );
+    assert(
+      stripAnsi(component.render(60)[0]).includes("Tool"),
+      "the specific activity text lives only in the activity widget",
     );
     component.dispose?.();
   }

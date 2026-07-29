@@ -252,7 +252,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     ctx.ui.setWorkingIndicator({
       frames: [workingFrame(ctx.ui.theme, ticker.motion, ticker.frame)],
     });
-    ctx.ui.setWorkingMessage(state.activity.label ?? "Arbeite …");
+    // The specific activity text (e.g. "N Tools aktiv") lives exclusively in
+    // the activity widget's heading (renderActivityWidget below). Passing it
+    // here too would show the same text on both surfaces at once.
+    ctx.ui.setWorkingMessage("Arbeite …");
     ctx.ui.setWorkingVisible(true);
   }
 

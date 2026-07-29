@@ -64,7 +64,11 @@ await test("editPlanMarkdown processes manual plan updates via CAS", async () =>
 
     // Initialize plan & state
     const first = snapshotMod.finalizePlanDocument(quickPlan(), "simple_plan");
-    const writeResult = storeMod.writePlanAndStateCAS(tmpDir, first.snapshot, "missing");
+    const writeResult = storeMod.writePlanAndStateCAS(
+      tmpDir,
+      first.snapshot,
+      "missing",
+    );
 
     let notifiedMessage = "";
     let notifiedLevel = "";
@@ -190,6 +194,123 @@ await test("editPlanMarkdown preserves a concurrent plan revision", async () => 
       readFileSync(join(tmpDir, storeMod.PLAN_RELATIVE_PATH), "utf8"),
       concurrent.content,
       "the failed editor synchronization never overwrites a concurrent revision",
+    );
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+await test("editPlanMarkdown labels a markdown validation failure distinctly and resets the file", async () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "pi-test-editor-invalid-"));
+  try {
+    const first = snapshotMod.finalizePlanDocument(quickPlan(), "simple_plan");
+    const initial = storeMod.writePlanAndStateCAS(
+      tmpDir,
+      first.snapshot,
+      "missing",
+    );
+
+    const session = sessionMod.createWorkflowSession({ events: { emit() {} } });
+    session.current = {
+      state: initial.state,
+      snapshot: first.snapshot,
+      stateToken: initial.stateToken,
+      recovered: false,
+      migrationRequired: false,
+      warnings: [],
+    };
+    let notifiedMessage = "";
+    session.notify = (_ctx, msg) => {
+      notifiedMessage = msg;
+    };
+
+    // Drop the required steps section entirely: finalizePlanDocument must
+    // reject this, with no concurrent writer involved.
+    const invalidPlanText = first.content.replace(
+      /## Umsetzungsschritte\n1\. .*\n2\. .*\n/,
+      "## Umsetzungsschritte\n",
+    );
+
+    const context = {
+      cwd: tmpDir,
+      isProjectTrusted: () => true,
+      ui: {
+        async openExternalEditor(path) {
+          writeFileSync(path, invalidPlanText, "utf8");
+        },
+      },
+    };
+
+    await planEditor.editPlanMarkdown(session, context);
+
+    assert(
+      notifiedMessage.startsWith("Markdown ungültig:"),
+      "a validation error is labelled distinctly from a concurrency conflict",
+    );
+    assert(
+      notifiedMessage.includes("sicher zurückgesetzt"),
+      "without a concurrent writer, the CAS restore succeeds",
+    );
+    equal(
+      readFileSync(join(tmpDir, storeMod.PLAN_RELATIVE_PATH), "utf8"),
+      first.content,
+      "the plan file is reverted to the pre-edit revision",
+    );
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+await test("editPlanMarkdown labels a concurrent conflict distinctly from a validation error", async () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "pi-test-editor-conflict-msg-"));
+  try {
+    const first = snapshotMod.finalizePlanDocument(quickPlan(), "simple_plan");
+    const initial = storeMod.writePlanAndStateCAS(
+      tmpDir,
+      first.snapshot,
+      "missing",
+    );
+    const concurrent = snapshotMod.finalizePlanDocument(
+      quickPlan("Konkurrierende Änderung"),
+      "simple_plan",
+    );
+    const session = sessionMod.createWorkflowSession({ events: { emit() {} } });
+    session.current = {
+      state: initial.state,
+      snapshot: first.snapshot,
+      stateToken: initial.stateToken,
+      recovered: false,
+      migrationRequired: false,
+      warnings: [],
+    };
+    let notifiedMessage = "";
+    session.notify = (_ctx, msg) => {
+      notifiedMessage = msg;
+    };
+    const context = {
+      cwd: tmpDir,
+      isProjectTrusted: () => true,
+      ui: {
+        async openExternalEditor() {
+          storeMod.writePlanAndStateCAS(
+            tmpDir,
+            concurrent.snapshot,
+            initial.stateToken,
+            initial.state,
+          );
+        },
+      },
+    };
+
+    await planEditor.editPlanMarkdown(session, context);
+
+    assert(
+      notifiedMessage.startsWith("Nebenläufige Änderung erkannt:"),
+      "a concurrency conflict is labelled distinctly from a validation error",
+    );
+    assert(
+      !notifiedMessage.includes("Markdown ungültig"),
+      "a valid-but-outdated edit is never described as an invalid markdown edit",
     );
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });

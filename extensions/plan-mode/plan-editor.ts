@@ -13,8 +13,11 @@ import {
   PLAN_RELATIVE_PATH,
   finalizeObservedPlanCAS,
   workflowPath,
+  type WorkflowStateV3,
 } from "./store/index.ts";
+import type { PlanSnapshot } from "./plan-snapshot.ts";
 import { finalizePlanDocument } from "./plan-snapshot.ts";
+import { workflowWarning } from "./presentation.ts";
 
 /**
  * Renders the active plan's Markdown content cleanly in the TUI / terminal.
@@ -101,13 +104,35 @@ export async function editPlanMarkdown(
     return;
   }
 
+  let finalized: ReturnType<typeof finalizePlanDocument>;
   try {
-    const finalized = finalizePlanDocument(
+    finalized = finalizePlanDocument(
       editedContent,
       loaded.snapshot.planType,
       initialContent,
     );
+  } catch (error) {
+    const restored = restoreAfterFailedEdit(
+      session,
+      ctx,
+      editedContent,
+      loaded.snapshot,
+      loaded.stateToken,
+      loaded.state,
+    );
+    session.notify(
+      ctx,
+      `Markdown ungültig: ${workflowWarning(error)}. ${
+        restored
+          ? "Der Editorstand wurde sicher zurückgesetzt."
+          : "Deine Bearbeitung ist unverändert in der Datei erhalten geblieben, wurde aber nicht als Planrevision übernommen. Prüfe den Inhalt mit /view-plan und starte bei Bedarf /edit-plan erneut."
+      }`,
+      "error",
+    );
+    return;
+  }
 
+  try {
     finalizeObservedPlanCAS(
       ctx.cwd,
       editedContent,
@@ -123,32 +148,57 @@ export async function editPlanMarkdown(
       "info",
     );
   } catch (error) {
-    // Restore only if both the plan bytes and the sidecar still belong to this
-    // editor attempt. A raw write here would overwrite a newer revision from
-    // another process and break the plan/state binding that CAS protects.
-    let restored = false;
-    try {
-      finalizeObservedPlanCAS(
-        ctx.cwd,
-        editedContent,
-        loaded.snapshot,
-        loaded.stateToken,
-        loaded.state,
-      );
-      session.reload(ctx);
-      restored = true;
-    } catch {
-      // A concurrent update wins. Leave its plan and sidecar untouched.
-    }
-
+    const restored = restoreAfterFailedEdit(
+      session,
+      ctx,
+      editedContent,
+      loaded.snapshot,
+      loaded.stateToken,
+      loaded.state,
+    );
     session.notify(
       ctx,
-      `Plan-Validierung fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}. ${
+      `Nebenläufige Änderung erkannt: ${workflowWarning(error)}. ${
         restored
           ? "Der Editorstand wurde sicher zurückgesetzt."
-          : "Der Workflow wurde nicht überschrieben; lade den aktuellen Stand erneut."
+          : "Deine Bearbeitung wurde nicht übernommen; lade den aktuellen Stand mit /view-plan, bevor du erneut bearbeitest."
       }`,
       "error",
     );
+  }
+}
+
+/**
+ * Reverts the plan file to `previousSnapshot` when a failed edit needs to be
+ * undone. This always goes through the same CAS check as an intentional
+ * write: if the plan or sidecar moved on since `stateToken`/`state` were
+ * observed, a concurrent writer already won and nothing is overwritten. There
+ * is no bypass — writing `previousSnapshot` unconditionally would overwrite
+ * that concurrent revision and break the plan/state hash binding CAS exists
+ * to protect (see `finalizeObservedPlanCAS`). The user's own edit is never
+ * lost either way, since $EDITOR already saved it to disk before this runs.
+ */
+function restoreAfterFailedEdit(
+  session: WorkflowSession,
+  ctx: ExtensionContext,
+  editedContent: string,
+  previousSnapshot: PlanSnapshot,
+  stateToken: string,
+  state: WorkflowStateV3 | undefined,
+): boolean {
+  try {
+    finalizeObservedPlanCAS(
+      ctx.cwd,
+      editedContent,
+      previousSnapshot,
+      stateToken,
+      state,
+    );
+    session.reload(ctx);
+    return true;
+  } catch {
+    // A concurrent writer won, or the lock/write itself failed. Either way,
+    // the canonical file is left exactly as $EDITOR saved it.
+    return false;
   }
 }

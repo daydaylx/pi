@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { catalogDescription } from "../shared/command-catalog.ts";
 import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles } from "./verify-profiles.ts";
@@ -76,7 +77,7 @@ export default function setupCore(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("setup-doctor", {
-    description: "Effektive Setup-Konfiguration und Runtime-Konsistenz prüfen",
+    description: catalogDescription("setup-doctor"),
     handler: async (_args, ctx) => {
       activeCwd = ctx.cwd;
       trusted = ctx.isProjectTrusted();

@@ -8,6 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { Text } from "@earendil-works/pi-tui";
+import { catalogDescription } from "../shared/command-catalog.ts";
 import type { DiffViewEntryData } from "./types.ts";
 import { ChangeTracker } from "./change-tracker.ts";
 import { computeFallbackDiff } from "./git-diff.ts";
@@ -264,8 +265,7 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("changes", {
-    description:
-      "Zeigt alle Dateiänderungen der aktuellen Session als Diff-Browser",
+    description: catalogDescription("changes"),
     handler: async (_args, ctx) => openChanges(ctx),
   });
 }

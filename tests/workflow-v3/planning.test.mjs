@@ -364,3 +364,38 @@ await test("new-plan abort guard runs before archival", async () => {
 // Entfernt mit Workflow-v3-Vereinheitlichung: prüfte v2-Mechanik
 // (Execution-IDs, Leases, abgelöste Statuslabels).
 // Ersatz: workflow-v3.mjs → "extension entry drives plan, work, completion, direct task and recovery"
+
+await test(
+  "--plan never confirms outside the TUI when a plan is already active",
+  async () => {
+    if (!planMode || !planStore || !planSnapshot) return;
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-plan-headless-"));
+    try {
+      const finalized = planSnapshot.finalizePlanDocument(
+        v3Plan(),
+        "simple_plan",
+      );
+      planStore.writePlanAndStateCAS(cwd, finalized.snapshot, "missing");
+
+      const harness = createHarness({ flags: { plan: true } });
+      planMode.default(harness.api);
+      const context = harness.makeContext({ cwd, mode: "json", hasUI: false });
+
+      await harness.runHooks("session_start", {}, context);
+
+      assert(
+        !harness.lifecycleCalls.some((entry) => entry.kind === "confirm"),
+        "activatePlanningMode never calls confirm outside the TUI",
+      );
+      assert(
+        harness.notifications.some(
+          (entry) =>
+            entry.level === "warning" && entry.message.includes("TUI-Modus"),
+        ),
+        "the refusal to overwrite the active plan headlessly is reported",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);

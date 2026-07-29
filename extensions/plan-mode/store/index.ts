@@ -51,6 +51,7 @@ export {
 } from "./locks.ts";
 
 export {
+  WorkflowConcurrencyError,
   createWorkflowState,
   finalizeObservedPlanCAS,
   loadWorkflowStateV3,
