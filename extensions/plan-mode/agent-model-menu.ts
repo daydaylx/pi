@@ -14,7 +14,12 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { loadSetupConfig } from "../setup-core/config.ts";
-import { computeRouting, routingInputFromDirectTask, routingInputFromPlan } from "./routing/index.ts";
+import { runMenu, type MenuEntry } from "../shared/menu-ui.ts";
+import {
+  computeRouting,
+  routingInputFromDirectTask,
+  routingInputFromPlan,
+} from "./routing/index.ts";
 import type { RoutingLevel } from "./routing/types.ts";
 import type { WorkflowSession } from "./session.ts";
 import { loadDirectTask } from "./store/index.ts";
@@ -25,6 +30,10 @@ interface AgentRoleSlot {
   role: "planner" | "worker" | "reviewer";
   label: string;
 }
+
+type AgentModelChoice =
+  | { slot: AgentRoleSlot; kind: "model"; ref: string }
+  | { slot: AgentRoleSlot; kind: "freitext" };
 
 const AGENT_ROLE_SLOTS: readonly AgentRoleSlot[] = [
   { id: "low-worker", level: "low", role: "worker", label: "LOW › Worker" },
@@ -79,50 +88,66 @@ export async function openAgentModelMenu(
     JSON.stringify(loadedSetup.config.routingProfiles),
   );
 
-  const slotLabels = AGENT_ROLE_SLOTS.map((slot) => {
-    const assigned = currentProfiles.levels?.[slot.level]?.[slot.role] ?? "—";
-    return `${slot.label.padEnd(24)} (aktuell: ${assigned})`;
-  });
+  const availableModels = [...ctx.modelRegistry.getAvailable()].sort(
+    (left, right) =>
+      `${left.provider}/${left.id}`.localeCompare(
+        `${right.provider}/${right.id}`,
+      ),
+  );
 
-  const slotChoice = await ctx.ui.select(
+  const entries: MenuEntry<AgentModelChoice>[] = AGENT_ROLE_SLOTS.map(
+    (slot) => {
+      const assigned = currentProfiles.levels?.[slot.level]?.[slot.role] ?? "—";
+      const children: MenuEntry<AgentModelChoice>[] = availableModels.map(
+        (model) => {
+          const ref = `${model.provider}/${model.id}`;
+          return {
+            id: `${slot.id}-${ref}`,
+            label: model.name,
+            description: model.id,
+            section: model.provider,
+            current: ref === assigned,
+            value: { slot, kind: "model", ref },
+          };
+        },
+      );
+      children.push({
+        id: `${slot.id}-freitext`,
+        label: "✏ Manuelles Profil / Freitext eingeben",
+        value: { slot, kind: "freitext" },
+      });
+      return {
+        id: `slot-${slot.id}`,
+        label: slot.label,
+        description: `aktuell: ${assigned}`,
+        children,
+      };
+    },
+  );
+
+  const choice = await runMenu(
+    ctx,
     "Agenten-Modelle anpassen (Super+S)",
-    slotLabels,
+    entries,
+    {
+      nonInteractiveHint: "Die Agenten-Modell-Auswahl benötigt den TUI-Modus.",
+    },
   );
-  if (!slotChoice) return;
+  if (!choice) return;
 
-  const chosenSlot = AGENT_ROLE_SLOTS.find((slot) =>
-    slotChoice.includes(slot.label),
-  );
-  if (!chosenSlot) return;
-
-  const availableModels = [
-    ...ctx.modelRegistry.getAvailable(),
-  ].sort((left, right) =>
-    `${left.provider}/${left.id}`.localeCompare(`${right.provider}/${right.id}`),
-  );
-
+  const { slot: chosenSlot } = choice;
   const activeAssigned =
     currentProfiles.levels?.[chosenSlot.level]?.[chosenSlot.role];
 
-  const modelOptions: string[] = availableModels.map((model) => {
-    const ref = `${model.provider}/${model.id}`;
-    return ref === activeAssigned ? `● ${ref}` : `  ${ref}`;
-  });
-
-  modelOptions.push("✏  Manuelles Profil / Freitext eingeben");
-
-  const modelChoice = await ctx.ui.select(
-    `Modell für ${chosenSlot.label} wählen`,
-    modelOptions,
-  );
-  if (!modelChoice) return;
-
   let selectedModel: string | undefined;
 
-  if (modelChoice.includes("Freitext eingeben")) {
+  if (choice.kind === "freitext") {
     const inputFn = (
       ctx.ui as unknown as {
-        input?: (title: string, placeholder?: string) => Promise<string | undefined>;
+        input?: (
+          title: string,
+          placeholder?: string,
+        ) => Promise<string | undefined>;
       }
     ).input;
     if (typeof inputFn === "function") {
@@ -132,12 +157,7 @@ export async function openAgentModelMenu(
       );
     }
   } else {
-    const matched = availableModels.find((model) =>
-      modelChoice.endsWith(`${model.provider}/${model.id}`),
-    );
-    if (matched) {
-      selectedModel = `${matched.provider}/${matched.id}`;
-    }
+    selectedModel = choice.ref;
   }
 
   if (!selectedModel || !selectedModel.trim()) return;
@@ -162,10 +182,7 @@ export async function openAgentModelMenu(
     }
   }
 
-  ctx.ui.notify(
-    `${chosenSlot.label} auf '${selectedModel}' gesetzt.`,
-    "info",
-  );
+  ctx.ui.notify(`${chosenSlot.label} auf '${selectedModel}' gesetzt.`, "info");
 }
 
 function saveRoutingProfilesToSetup(

@@ -3,7 +3,13 @@
  * Verifiziert Shortcut-Registrierung, Modellauswahl, Speicherung in setup.json
  * und Live-Aktualisierung von session.routing.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { assert, equal, test } from "./assertions.mjs";
@@ -20,7 +26,10 @@ await test("Super+S shortcut is registered by the control plane", async () => {
   planMode.default(harness.api);
   controlPlane.default(harness.api);
   const handler = harness.shortcuts.get("super+s");
-  assert(typeof handler === "function", "super+s shortcut handler is registered");
+  assert(
+    typeof handler === "function",
+    "super+s shortcut handler is registered",
+  );
 });
 
 await test("openAgentModelMenu updates setup.json and session routing", async () => {
@@ -46,33 +55,37 @@ await test("openAgentModelMenu updates setup.json and session routing", async ()
       "utf-8",
     );
 
-    // Mock select choices: first slot "HIGH › Reviewer", second model "claude-3-opus"
-    let selectCallCount = 0;
+    // openAgentModelMenu now drives a single nested runMenu() overlay
+    // (slot -> model, with back-navigation between levels) instead of two
+    // chained ctx.ui.select() dialogs. The harness resolves ctx.ui.custom()
+    // straight to customResult, which stands in for the MenuEntry the user
+    // would have picked (runMenu unwraps its .value after selection).
     const harness = createHarness({
-      select: async (labels) => {
-        selectCallCount++;
-        if (selectCallCount === 1) {
-          const matched = labels.find(
-            (opt) => opt.includes("HIGH") && opt.includes("Reviewer"),
-          );
-          if (!matched) {
-            throw new Error(
-              `Expected slot label with HIGH and Reviewer, got: ${JSON.stringify(labels)}`,
-            );
-          }
-          return matched;
-        }
-        const matchedModel = labels.find((opt) => opt.includes("claude-3-opus"));
-        if (!matchedModel) {
-          throw new Error(
-            `Expected model option with claude-3-opus, got: ${JSON.stringify(labels)}`,
-          );
-        }
-        return matchedModel;
+      customResult: {
+        id: "high-reviewer-anthropic/claude-3-opus",
+        label: "anthropic/claude-3-opus",
+        value: {
+          slot: {
+            id: "high-reviewer",
+            level: "high",
+            role: "reviewer",
+            label: "HIGH › Reviewer",
+          },
+          kind: "model",
+          ref: "anthropic/claude-3-opus",
+        },
       },
       models: {
-        "anthropic/claude-3-opus": { provider: "anthropic", id: "claude-3-opus" },
-        "anthropic/claude-3-5-haiku": { provider: "anthropic", id: "claude-3-5-haiku" },
+        "anthropic/claude-3-opus": {
+          provider: "anthropic",
+          id: "claude-3-opus",
+          name: "Claude 3 Opus",
+        },
+        "anthropic/claude-3-5-haiku": {
+          provider: "anthropic",
+          id: "claude-3-5-haiku",
+          name: "Claude 3.5 Haiku",
+        },
       },
     });
     planMode.default(harness.api);

@@ -571,7 +571,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             }
           : {
               kind: "responding",
-              label: "Bereitet die Antwort vor …",
+              label: undefined,
               activeTools: 0,
             },
     });

@@ -39,7 +39,7 @@ export interface FooterInput {
 const DROP_ORDER = ["thinking", "workflow", "lsp", "branch"] as const;
 type Droppable = (typeof DROP_ORDER)[number];
 
-const SEPARATOR = " · ";
+const SEPARATOR = " │ ";
 const GROUP_GAP = "   ";
 
 export function compactCwd(cwd: string): string {
@@ -163,10 +163,11 @@ function buildBlocks(
     );
   }
 
+  const sep = theme.fg("borderMuted", SEPARATOR);
   return {
-    left: left.join(SEPARATOR),
+    left: left.join(sep),
     center,
-    right: right.join(SEPARATOR),
+    right: right.join(sep),
   };
 }
 
