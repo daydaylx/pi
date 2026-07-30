@@ -28,6 +28,7 @@ await import("./workflow-v3/routing.test.mjs");
 await import("./workflow-v3/agent-model-menu.test.mjs");
 await import("./workflow-v3/plan-editor.test.mjs");
 await import("./workflow-v3/command-descriptions.test.mjs");
+await import("./workflow-v3/fleet-dock-api-probe.test.mjs");
 
 const { passed, failed } = summary();
 if (failed > 0) {
