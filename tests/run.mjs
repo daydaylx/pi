@@ -585,7 +585,7 @@ await section("setup core lifecycle", async () => {
   assert(
     harness.notifications
       .at(-1)
-      ?.message?.includes("Pi CLI/dev package: 0.80.7/0.80.6") &&
+      ?.message?.includes("Pi CLI/dev package: 0.80.7/0.82.1") &&
       harness.notifications.at(-1)?.level === "error",
     "setup doctor makes CLI/dev version drift visible",
   );

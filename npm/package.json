@@ -24,7 +24,7 @@
     "pi-zentui": "0.3.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.82.1",
     "@types/node": "24.12.4",
     "typescript": "7.0.2"
   }
