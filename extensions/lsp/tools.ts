@@ -15,6 +15,7 @@ import type { LspConfig, LspLogger, ServerProfile } from "./types.ts";
 import { LspError } from "./types.ts";
 import type { ServerRegistry } from "./registry.ts";
 import type { LspClient } from "./client.ts";
+import { formatErrorMessage } from "./client.ts";
 import { getDocumentSync, resolveTarget } from "./documents.ts";
 import type { ResolvedTarget } from "./documents.ts";
 import { normalizeCapabilities } from "./capabilities.ts";
@@ -87,7 +88,7 @@ function resolveToolPath(
       error:
         error instanceof LspError
           ? formatLspError(error)
-          : `LSP: ungültiger Pfad '${path}': ${String(error)}`,
+          : `LSP: ungültiger Pfad '${path}': ${formatErrorMessage(error)}`,
     };
   }
 }
@@ -182,7 +183,7 @@ export async function runLspDiagnostics(
     const text =
       error instanceof LspError
         ? formatLspError(error)
-        : `LSP: unerwarteter Fehler beim Start von ${target.profile.label}: ${String(error)}`;
+        : `LSP: unerwarteter Fehler beim Start von ${target.profile.label}: ${formatErrorMessage(error)}`;
     return lspTextResult(text);
   }
 
@@ -197,7 +198,7 @@ export async function runLspDiagnostics(
       const text =
         error instanceof LspError
           ? formatLspError(error)
-          : `LSP: Fehler beim Warten auf Diagnosen: ${String(error)}`;
+          : `LSP: Fehler beim Warten auf Diagnosen: ${formatErrorMessage(error)}`;
       return lspTextResult(text, { version });
     }
 
@@ -446,7 +447,7 @@ async function withDocument<T>(
     const text =
       error instanceof LspError
         ? formatLspError(error)
-        : `LSP: unerwarteter Fehler beim Start von ${target.profile.label}: ${String(error)}`;
+        : `LSP: unerwarteter Fehler beim Start von ${target.profile.label}: ${formatErrorMessage(error)}`;
     return { text };
   }
   try {
@@ -458,7 +459,7 @@ async function withDocument<T>(
     const text =
       error instanceof LspError
         ? formatLspError(error)
-        : `LSP: unerwarteter Fehler: ${String(error)}`;
+        : `LSP: unerwarteter Fehler: ${formatErrorMessage(error)}`;
     return { text };
   } finally {
     registry.release(target.workspaceRoot, target.profile.id);
@@ -731,7 +732,7 @@ export function registerLspNavigationTools(
         const text =
           error instanceof LspError
             ? formatLspError(error)
-            : `LSP: unerwarteter Fehler beim Start von ${profile.label}: ${String(error)}`;
+            : `LSP: unerwarteter Fehler beim Start von ${profile.label}: ${formatErrorMessage(error)}`;
         return lspTextResult(text);
       }
       try {
@@ -755,7 +756,7 @@ export function registerLspNavigationTools(
         const text =
           error instanceof LspError
             ? formatLspError(error)
-            : `LSP: unerwarteter Fehler: ${String(error)}`;
+            : `LSP: unerwarteter Fehler: ${formatErrorMessage(error)}`;
         return lspTextResult(text);
       } finally {
         registry.release(workspaceRoot, profile.id);

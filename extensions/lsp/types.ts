@@ -83,6 +83,7 @@ export class LspError extends Error {
   readonly serverId: string;
   readonly workspaceRoot: string;
   readonly method?: string;
+  readonly cause: string;
   readonly remediation?: string;
   readonly data?: unknown;
 
@@ -96,6 +97,7 @@ export class LspError extends Error {
     this.serverId = details.serverId;
     this.workspaceRoot = details.workspaceRoot;
     this.method = details.method;
+    this.cause = details.cause;
     this.remediation = details.remediation;
     this.data = details.data;
   }
@@ -106,7 +108,7 @@ export class LspError extends Error {
       serverId: this.serverId,
       workspaceRoot: this.workspaceRoot,
       method: this.method,
-      cause: this.message,
+      cause: this.cause,
       remediation: this.remediation,
       data: this.data,
     };

@@ -2140,6 +2140,8 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
   const transportMod = await load("extensions/lsp/transport.ts");
   const clientMod = await load("extensions/lsp/client.ts");
   const indexMod = await load("extensions/lsp/index.ts");
+  const typesMod = await load("extensions/lsp/types.ts");
+  const toolsMod = await load("extensions/lsp/tools.ts");
   assert(
     typeof transportMod?.parseStreamChunk === "function",
     "lsp transport exports parseStreamChunk",
@@ -2152,6 +2154,49 @@ await section("LSP transport, process and lifecycle (#93)", async () => {
     typeof indexMod?.createLspClient === "function",
     "lsp index exports createLspClient",
   );
+
+  await check("formatErrorMessage and LspError formatting handles RPC errors cleanly", async () => {
+    const { formatErrorMessage } = clientMod;
+    const { LspError } = typesMod;
+    const { formatLspError } = toolsMod;
+
+    eq(
+      formatErrorMessage(new Error("std error")),
+      "std error",
+      "formatErrorMessage unpacks Error instance",
+    );
+    eq(
+      formatErrorMessage({ code: -32601, message: "Method not found" }),
+      "Method not found",
+      "formatErrorMessage unpacks JSON-RPC error object",
+    );
+    eq(
+      formatErrorMessage({ message: "custom obj message" }),
+      "custom obj message",
+      "formatErrorMessage unpacks object with message property",
+    );
+
+    const lspErr = new LspError({
+      kind: "request_failed",
+      serverId: "typescript",
+      workspaceRoot: "/home/d/.pi/agent",
+      method: "workspace/symbol",
+      cause: "Method workspace/symbol not supported",
+    });
+
+    eq(lspErr.cause, "Method workspace/symbol not supported", "LspError stores cause property");
+    eq(lspErr.toStructured().cause, "Method workspace/symbol not supported", "toStructured returns cause without header prefix");
+
+    const formatted = formatLspError(lspErr);
+    assert(
+      !formatted.includes("[object Object]"),
+      "formatted error does not contain [object Object]",
+    );
+    assert(
+      formatted.includes("Ursache: Method workspace/symbol not supported"),
+      "formatted error shows concise cause without duplicate header",
+    );
+  });
 
   const fakeServer = FAKE_LSP_FIXTURE;
   const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp-test-"));

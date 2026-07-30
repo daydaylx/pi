@@ -310,7 +310,7 @@ export class LspClient extends EventEmitter {
     const data = isRpcError(error) ? error : undefined;
     return this.toError(
       kind,
-      error instanceof Error ? error.message : String(error),
+      formatErrorMessage(error),
       method,
       data,
     );
@@ -375,6 +375,26 @@ function isRpcError(
     return value as { code: number; message: string; data?: unknown };
   }
   return undefined;
+}
+
+export function formatErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  const rpc = isRpcError(error);
+  if (rpc) return rpc.message;
+  if (error && typeof error === "object") {
+    if (
+      "message" in error &&
+      typeof (error as { message: unknown }).message === "string"
+    ) {
+      return (error as { message: string }).message;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error);
 }
 
 function readCode(error: unknown): string | undefined {

@@ -11,7 +11,7 @@
 
 import { LspError } from "./types.ts";
 import type { LspConfig, LspLogger, ServerProfile } from "./types.ts";
-import { LspClient } from "./client.ts";
+import { LspClient, formatErrorMessage } from "./client.ts";
 import type { LspClientOptions, LspClientState } from "./client.ts";
 
 interface RegistryEntry {
@@ -117,7 +117,7 @@ export class ServerRegistry {
           kind: "spawn_error",
           serverId: profile.id,
           workspaceRoot,
-          cause: error instanceof Error ? error.message : String(error),
+          cause: formatErrorMessage(error),
           remediation:
             "Prüfen, ob die Server-Binärdatei installiert und in PATH ist.",
         });
