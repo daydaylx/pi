@@ -2,21 +2,23 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { RUN_MJS_SUITES } from "./shared/run-suite-registry.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Every domain in run.mjs's SECTION_SUITES needs an entry here, otherwise its
-// sections never run in `npm test`. run.mjs itself fails when a section has no
-// declared domain, which keeps the two lists honest in both directions.
+// The run.mjs domains come from the same registry as the bootstrap, so a new
+// section domain cannot be filtered correctly while being omitted from npm test.
 const suites = [
-  { name: "runtime", file: "run.mjs", env: { PI_TEST_SUITE: "runtime" } },
-  { name: "ui", file: "run.mjs", env: { PI_TEST_SUITE: "ui" } },
-  { name: "workflow-mode", file: "workflow-mode.mjs", env: {} },
-  { name: "lsp", file: "run.mjs", env: { PI_TEST_SUITE: "lsp" } },
-  {
-    name: "diff",
+  ...RUN_MJS_SUITES.slice(0, 2).map((name) => ({
+    name,
     file: "run.mjs",
-    env: { PI_TEST_SUITE: "diff" },
-  },
+    env: { PI_TEST_SUITE: name },
+  })),
+  { name: "workflow-mode", file: "workflow-mode.mjs", env: {} },
+  ...RUN_MJS_SUITES.slice(2).map((name) => ({
+    name,
+    file: "run.mjs",
+    env: { PI_TEST_SUITE: name },
+  })),
   { name: "performance-tools", file: "performance-tools.mjs", env: {} },
   { name: "p4-manifest", file: "../benchmarks/harness/test/p4-manifest.test.mjs", env: {} },
   { name: "p4-performance-manifest", file: "../benchmarks/harness/test/p4-performance-manifest.test.mjs", env: {} },

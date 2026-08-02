@@ -19,6 +19,10 @@ CRASH_AFTER_INIT = "--crash-after-init" in ARGS
 NO_DIAGNOSTICS = "--no-diagnostics" in ARGS
 DEFINITION_LINKS = "--definition-links" in ARGS
 NO_DEFINITION_PROVIDER = "--no-definition-provider" in ARGS
+# Exercises client capability negotiation: no diagnostic push is sent unless
+# initialize advertised textDocument.publishDiagnostics.
+REQUIRE_DIAGNOSTICS_CAPABILITY = "--require-diagnostics-capability" in ARGS
+CLIENT_SUPPORTS_DIAGNOSTICS = False
 
 WRITE_LOCK = threading.Lock()
 
@@ -45,7 +49,9 @@ def later(delay, callback):
 
 
 def publish_diagnostics(uri, version):
-    if NO_DIAGNOSTICS:
+    if NO_DIAGNOSTICS or (
+        REQUIRE_DIAGNOSTICS_CAPABILITY and not CLIENT_SUPPORTS_DIAGNOSTICS
+    ):
         return
 
     def send():
@@ -83,11 +89,17 @@ def handle_notification(note):
 
 
 def handle_request(request):
+    global CLIENT_SUPPORTS_DIAGNOSTICS
     method = request.get("method")
     request_id = request.get("id")
     params = request.get("params") or {}
 
     if method == "initialize":
+        CLIENT_SUPPORTS_DIAGNOSTICS = bool(
+            params.get("capabilities", {})
+            .get("textDocument", {})
+            .get("publishDiagnostics")
+        )
         capabilities = {
             "textDocumentSync": 1,
             "hoverProvider": True,

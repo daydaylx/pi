@@ -1,0 +1,29 @@
+/** Ordered ownership map for sections executed by tests/run.mjs. */
+export const SECTION_SUITES = {
+  "target runtime configuration": "runtime",
+  "greenfield setup config and Aurora state contract": "runtime",
+  "setup core lifecycle": "runtime",
+  "project verification profiles (#105)": "runtime",
+  "project_check tool (#123)": "runtime",
+  "project check freshness warning (#129)": "runtime",
+  "performance tool registrations": "runtime",
+  "native subagent profiles": "runtime",
+  "native project skills": "runtime",
+  "Control Center menus and routing": "ui",
+  "global control plane shortcuts": "runtime",
+  "LSP Control Center file picker": "lsp",
+  "shared output limits and subagent guard": "runtime",
+  "ask-user temporary dialog": "runtime",
+  "shared menu shell navigation and rendering": "ui",
+  "Aurora UI lifecycle and responsive surfaces": "runtime",
+  "combined production extension stack": "runtime",
+  "LSP transport, process and lifecycle (#93)": "lsp",
+  "LSP config, root detection, registry and profiles (#94)": "lsp",
+  "LSP documents and diagnostics (#95)": "lsp",
+  "LSP security and registry single-flight (P0.2, P1.1)": "lsp",
+  "LSP navigation and symbol tools (#96)": "lsp",
+  "LSP command, status and trust (#97)": "lsp",
+  "diff viewer regressions": "diff",
+};
+
+export const RUN_MJS_SUITES = [...new Set(Object.values(SECTION_SUITES))];

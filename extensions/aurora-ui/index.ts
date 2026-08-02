@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -39,32 +38,94 @@ const TICK_INTERVAL_MS = 100;
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
 );
-const SUBAGENT_CONFIG_PATH = fileURLToPath(
-  new URL("../subagent/config.json", import.meta.url),
-);
+const SUBAGENT_STATUS_REFRESH_MS = 750;
 
-/**
- * The footer is the only place that reports a given value — nothing here may be
- * duplicated by another surface (see the header comment in footer.ts). Once
- * pi-subagents runs its Fleet
- * Status Dock, that dock is the richer surface for the same information: one
- * line per agent with its concrete activity, runtime and tokens, right below
- * the editor. The footer therefore hands the subagent segment over instead of
- * printing a second, poorer copy two lines further down.
- *
- * Read from the subagent extension's own config rather than from a shared
- * setting: the dock is opt-in there, and only that file knows whether it is on.
- * Any read or parse problem means "no dock", i.e. the footer keeps reporting.
- */
-function fleetDockOwnsSubagentDisplay(): boolean {
-  try {
-    const raw = JSON.parse(readFileSync(SUBAGENT_CONFIG_PATH, "utf8")) as {
-      ui?: { fleetView?: unknown };
-    };
-    return raw.ui?.fleetView === true;
-  } catch {
-    return false;
+type SubagentToolArgs = {
+  action?: unknown;
+  async?: unknown;
+  agent?: unknown;
+  tasks?: unknown;
+  chain?: unknown;
+};
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function agentNamesFromTaskList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const task = record(item);
+    if (!task) return [];
+    const agent = typeof task.agent === "string" ? task.agent : undefined;
+    const parallel = agentNamesFromTaskList(task.parallel);
+    return [...(agent ? [agent] : []), ...parallel];
+  });
+}
+
+function foregroundSubagentsFromArgs(args: unknown): SubagentInfo[] {
+  const input = args as SubagentToolArgs | undefined;
+  if (!input || input.action !== undefined || input.async === true) return [];
+  const agents = [
+    ...(typeof input.agent === "string" ? [input.agent] : []),
+    ...agentNamesFromTaskList(input.tasks),
+    ...agentNamesFromTaskList(input.chain),
+  ];
+  return [...new Set(agents.length > 0 ? agents : ["subagent"])].map((agent) => ({
+    agent,
+    status: "running",
+  }));
+}
+
+function textFromRpcReply(reply: unknown): string {
+  const envelope = record(reply);
+  const data = record(envelope?.data);
+  // The RPC bridge serializes AgentToolResult text as data.text. Keep the
+  // content-array fallback for the older bridge envelope.
+  if (typeof data?.text === "string") return data.text;
+  const content = data?.content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((item) => {
+      const part = record(item);
+      return typeof part?.text === "string" ? [part.text] : [];
+    })
+    .join("\n");
+}
+
+function asyncSubagentsFromRpcReply(reply: unknown): SubagentInfo[] {
+  const envelope = record(reply);
+  if (!envelope || envelope.success !== true) return [];
+
+  // This accepts the early structured bridge format too. The pinned bridge
+  // serializes its AgentToolResult text through data.text.
+  const data = record(envelope.data);
+  if (Array.isArray(data?.runs)) {
+    return data.runs.flatMap((item) => {
+      const run = record(item);
+      if (!run || typeof run.status !== "string") return [];
+      const config = record(run.config);
+      return [{
+        agent: typeof config?.agent === "string" ? config.agent : "async",
+        phase: typeof config?.phase === "string" ? config.phase : undefined,
+        label: typeof config?.label === "string" ? config.label : undefined,
+        status: run.status as SubagentInfo["status"],
+      }];
+    });
   }
+
+  const runs: SubagentInfo[] = [];
+  const linePattern = /^-\s+([^|\s]+)\s+\|\s+(queued|running)\b[^|]*\|\s+(single|parallel|chain)\b/gm;
+  for (const match of textFromRpcReply(reply).matchAll(linePattern)) {
+    runs.push({
+      agent: match[3] === "single" ? "async" : match[3]!,
+      phase: match[1],
+      status: match[2] as SubagentInfo["status"],
+    });
+  }
+  return runs;
 }
 
 function makeEpoch(sequence: number): string {
@@ -219,8 +280,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let tokenTotalsDirty = true;
   let tokenTotalsCache = { input: 0, output: 0 };
   let subagentsCache: SubagentInfo[] = [];
+  let asyncSubagentsCache: SubagentInfo[] = [];
+  const foregroundSubagents = new Map<string, SubagentInfo[]>();
   let subagentsCacheDirty = true;
-  let fleetDockOwnsSubagents = false;
+  let subagentsLastFetchedAt = Number.NEGATIVE_INFINITY;
+  let subagentsFetchInFlight: Promise<void> | undefined;
   const activeTools = new Map<string, ActiveToolView>();
 
   function readAssistantTotals(ctx: ExtensionContext): {
@@ -398,7 +462,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
 
     const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
-    fleetDockOwnsSubagents = fleetDockOwnsSubagentDisplay();
     const epoch = makeEpoch(++epochSequence);
     state = makeState(epoch, ctx, pi);
     // The permission label is deliberately left empty: it means the permission
@@ -458,9 +521,24 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         },
       );
 
-      async function fetchSubagentStatus(): Promise<SubagentInfo[]> {
-        if (!subagentsCacheDirty) return subagentsCache;
-        try {
+      function mergeSubagents(): void {
+        const currentForeground = [...foregroundSubagents.values()].flat();
+        const byKey = new Map<string, SubagentInfo>();
+        for (const entry of [...currentForeground, ...asyncSubagentsCache]) {
+          byKey.set(`${entry.agent}\u0000${entry.phase ?? ""}\u0000${entry.label ?? ""}`, entry);
+        }
+        subagentsCache = [...byKey.values()];
+      }
+
+      function fetchSubagentStatus(): void {
+        const now = Date.now();
+        if (
+          subagentsFetchInFlight ||
+          (!subagentsCacheDirty && now - subagentsLastFetchedAt < SUBAGENT_STATUS_REFRESH_MS)
+        ) {
+          return;
+        }
+        subagentsFetchInFlight = (async () => {
           const requestId = crypto.randomUUID();
           const replyPromise = new Promise<unknown>((resolve) => {
             const unsubscribe = pi.events.on(
@@ -484,36 +562,22 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           });
 
           const reply = await replyPromise;
-          if (
-            reply &&
-            typeof reply === "object" &&
-            "success" in reply &&
-            reply.success &&
-            "data" in reply
-          ) {
-            const data = reply.data as { runs?: unknown[] };
-            if (data.runs && Array.isArray(data.runs)) {
-              subagentsCache = data.runs
-                .filter(
-                  (run): run is { status: string; config?: { agent?: string; phase?: string; label?: string } } =>
-                    typeof run === "object" &&
-                    run !== null &&
-                    "status" in run &&
-                    typeof run.status === "string",
-                )
-                .map((run) => ({
-                  agent: run.config?.agent ?? "unknown",
-                  phase: run.config?.phase,
-                  label: run.config?.label,
-                  status: run.status as SubagentInfo["status"],
-                }));
-            }
-          }
+          asyncSubagentsCache = asyncSubagentsFromRpcReply(reply);
           subagentsCacheDirty = false;
-          return subagentsCache;
-        } catch {
-          return [];
-        }
+          subagentsLastFetchedAt = Date.now();
+          mergeSubagents();
+          tui.requestRender();
+        })()
+          .catch(() => {
+            asyncSubagentsCache = [];
+            subagentsCacheDirty = false;
+            subagentsLastFetchedAt = Date.now();
+            mergeSubagents();
+          })
+          .finally(() => {
+            subagentsFetchInFlight = undefined;
+            tui.requestRender();
+          });
       }
 
       return {
@@ -527,7 +591,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         },
         render(width: number): string[] {
           if (!state) return [];
-          if (!fleetDockOwnsSubagents) fetchSubagentStatus();
+          mergeSubagents();
+          fetchSubagentStatus();
           return renderFooterLines(theme, width, {
             state,
             statuses: footerData.getExtensionStatuses(),
@@ -536,7 +601,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             sessionName: pi.getSessionName(),
             tokens: readAssistantTotals(sessionCtx),
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
-            subagents: fleetDockOwnsSubagents ? undefined : subagentsCache,
+            subagents: subagentsCache,
           });
         },
       };
@@ -567,6 +632,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_start", (_event, ctx) => {
     activeTools.clear();
+    foregroundSubagents.clear();
+    subagentsCacheDirty = true;
     updateState(ctx, {
       activity: {
         kind: "thinking",
@@ -583,6 +650,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       target: compactToolTarget(event.toolName, event.args),
       startedAt: Date.now(),
     });
+    if (event.toolName === "subagent") {
+      const subagents = foregroundSubagentsFromArgs(event.args);
+      if (subagents.length > 0) foregroundSubagents.set(event.toolCallId, subagents);
+      subagentsCacheDirty = true;
+    }
     updateState(ctx, {
       activity: {
         kind: "tool",
@@ -594,6 +666,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   pi.on("tool_execution_end", (event, ctx) => {
     activeTools.delete(event.toolCallId);
+    if (event.toolName === "subagent") {
+      foregroundSubagents.delete(event.toolCallId);
+      subagentsCacheDirty = true;
+    }
     updateState(ctx, {
       activity:
         activeTools.size > 0
@@ -613,6 +689,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   pi.on("message_update", (event, ctx) => {
     if (!event.assistantMessageEvent.type.startsWith("text_")) return;
     activeTools.clear();
+    foregroundSubagents.clear();
+    subagentsCacheDirty = true;
     updateState(ctx, {
       activity: { kind: "idle", label: undefined, activeTools: 0 },
     });
@@ -628,6 +706,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   const settle = (_event: unknown, ctx: ExtensionContext) => {
     activeTools.clear();
+    foregroundSubagents.clear();
+    subagentsCacheDirty = true;
     updateState(ctx, {
       activity: { kind: "idle", label: undefined, activeTools: 0 },
     });

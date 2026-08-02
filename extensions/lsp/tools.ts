@@ -190,7 +190,10 @@ export async function runLspDiagnostics(
   try {
     const sync = getDocumentSync(client, target.workspaceRoot, deps.logger);
     const { version } = sync.openOrSync(absPath, target.languageId);
-    const timeoutMs = Math.min(config.requestTimeoutMs, 5000);
+    // Diagnostics are asynchronous and a cold workspace can take longer than
+    // five seconds. Honour the configured request timeout like every other
+    // LSP operation instead of applying a hidden, shorter cap.
+    const timeoutMs = config.requestTimeoutMs;
     let snapshot;
     try {
       snapshot = await sync.waitForDiagnostics(absPath, version, timeoutMs);

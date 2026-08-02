@@ -139,14 +139,20 @@ async function probeServer({ profile, fixture, targetFile, languageId, rootMarke
     const sync = getDocumentSync(client, workspace);
     sync.openOrSync(filePath, languageId);
 
-    // Give the real server time to publish diagnostics (async, like the fake).
-    // Soft check: we report whether diagnostics arrived, but do not fail on
-    // zero — server versions and indexing latency vary.
-    let diagnostics = [];
+    // A clean fixture may legitimately have no diagnostic entries, but every
+    // compatible server must still publish a diagnostics snapshot after open.
+    // Treat a missing publication as a smoke failure; otherwise regressions in
+    // client capability negotiation stay invisible.
+    let diagnostics;
     for (let i = 0; i < 40; i++) {
-      diagnostics = diagnosticsByUri.get(uri) ?? [];
-      if (diagnostics.length > 0) break;
+      if (diagnosticsByUri.has(uri)) {
+        diagnostics = diagnosticsByUri.get(uri) ?? [];
+        break;
+      }
       await wait(250);
+    }
+    if (diagnostics === undefined) {
+      throw new Error("server did not publish diagnostics within 10 seconds");
     }
 
     // Definition probe: a well-formed request must get a well-formed response

@@ -351,6 +351,15 @@ export class LspClient extends EventEmitter {
 const CLIENT_CAPABILITIES = {
   textDocument: {
     synchronization: { didOpen: true, didChange: true, didClose: true },
+    // Some current servers only publish push diagnostics when the client
+    // explicitly advertises it. Version support lets DocumentSync reject a
+    // stale publication after a full-text didChange.
+    publishDiagnostics: {
+      relatedInformation: true,
+      versionSupport: true,
+      codeDescriptionSupport: true,
+      dataSupport: true,
+    },
     hover: { contentFormat: ["markdown", "plaintext"] },
     // #96: without declaring linkSupport, servers never return
     // LocationLink[] for textDocument/definition — only Location/Location[]
