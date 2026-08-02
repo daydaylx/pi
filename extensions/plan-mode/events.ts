@@ -1,15 +1,5 @@
-/**
- * Lifecycle and capability event wiring.
- *
- * Callbacks stay thin on purpose: they resolve what happened and delegate to a
- * controller. The two capability responders exist so permissions and thinking
- * can read the workflow state without importing plan-mode.
- */
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   AURORA_UI_CHANNELS,
   isAuroraUiStateRequest,
@@ -20,166 +10,43 @@ import {
   WORKFLOW_CAPABILITY_EVENTS,
   type WorkflowCapabilityRequest,
 } from "../shared/workflow-capabilities.ts";
-import { finishWorkflow } from "./completion-commands.ts";
-import { executionPrompt, pauseExecution } from "./execution.ts";
-import { offerWorkflowRecovery } from "./maintenance-commands.ts";
-import {
-  activatePlanningMode,
-  finalizePlanning,
-  planningPrompt,
-  reviewPrompt,
-} from "./planning.ts";
-import {
-  clearWorkflowPresentation,
-  computeAuroraWorkflowState,
-  setAuroraEpoch,
-  workflowWarning,
-} from "./presentation.ts";
+import { isPlanningMode } from "../shared/workflow-mode.ts";
+import { readPlan } from "./plan-file.ts";
+import { planningPrompt, workPrompt } from "./prompts.ts";
+import { clearWorkflowPresentation, setAuroraEpoch, workflowUiState } from "./presentation.ts";
 import type { WorkflowSession } from "./session.ts";
-import { loadDirectTask } from "./store/index.ts";
 
-export function registerPlanEvents(
-  pi: ExtensionAPI,
-  session: WorkflowSession,
-): void {
+export function registerPlanEvents(pi: ExtensionAPI, session: WorkflowSession): void {
   pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
     if (!isAuroraUiStateRequest(value)) return;
     setAuroraEpoch(value.sessionEpoch);
     publishAuroraUiSnapshot(pi, value, "plan-mode", {
-      workflow: computeAuroraWorkflowState(
-        session.current.state,
-        session.workflowPresentationOverride(),
-      ),
+      workflow: workflowUiState(session.selectedMode),
     });
   });
-
   pi.events.on(WORKFLOW_CAPABILITY_EVENTS.request, (value) => {
     const request = value as Partial<WorkflowCapabilityRequest>;
-    if (typeof request.respond !== "function") return;
-    request.respond({
-      state:
-        session.workflowPresentationOverride() ??
-        session.current.state?.status ??
-        "idle",
-      mode: session.workflowMode(),
-    });
+    request.respond?.({ mode: session.selectedMode });
   });
-
   pi.events.on(CONTROL_CENTER_EVENTS.workflowThinkingDefault, (value) => {
-    const event = value as {
-      respond?: (result: { mode: string; defaultLevel: string }) => void;
-    };
-    event.respond?.({
-      mode: session.workflowMode(),
-      defaultLevel:
-        session.workflowMode() === "detailed_plan" ? "high" : "medium",
-    });
+    (value as { respond?: (result: { mode: string; defaultLevel: string }) => void })
+      .respond?.({
+        mode: session.selectedMode,
+        defaultLevel: session.selectedMode === "detailed_plan" ? "high" : "medium",
+      });
   });
-
   pi.on("before_agent_start", async (_event, ctx) => {
-    if (session.planningKind)
-      return {
-        message: {
-          customType: "pi-plan-context",
-          content:
-            session.planningIsReview && session.current.planContent
-              ? reviewPrompt(session.current.planContent)
-              : planningPrompt(session.planningKind),
-        } as AgentMessage,
-      };
-    const loaded = session.reload(ctx);
-    if (loaded.snapshot && loaded.state?.status === "working") {
-      return {
-        message: {
-          customType: "pi-work-context",
-          content: executionPrompt(loaded.snapshot, loaded.state),
-        } as AgentMessage,
-      };
-    }
-    const directTask = loadDirectTask(ctx.cwd);
-    if (directTask) {
-      return {
-        message: {
-          customType: "pi-direct-task-context",
-          content: `Aktiver Direktauftrag:\n${JSON.stringify(directTask, null, 2)}`,
-        } as AgentMessage,
-      };
-    }
-    return undefined;
+    const content = isPlanningMode(session.selectedMode)
+      ? planningPrompt(session.selectedMode)
+      : workPrompt(readPlan(ctx.cwd));
+    return {
+      message: { customType: "pi-workflow-mode", content } as AgentMessage,
+    };
   });
-
-  pi.on("agent_settled", async (_event, ctx) => {
-    if (session.planningKind) {
-      await finalizePlanning(session, ctx);
-      return;
-    }
-    const loaded = session.reload(ctx);
-    if (
-      loaded.state?.status === "reviewing" &&
-      loaded.state.steps.length > 0 &&
-      loaded.state.steps.every((step) => step.status === "completed")
-    ) {
-      await finishWorkflow(session, ctx, false);
-    }
-  });
-
   pi.on("session_start", async (_event, ctx) => {
-    session.activeCwd = ctx.cwd;
-    session.activeContext = ctx;
-    const startWithDetailedPlan = pi.getFlag("plan") === true;
-    session.planningKind = undefined;
-    session.selectedMode = undefined;
-    session.planningBaseContent = undefined;
-    session.planningIsReview = false;
-    try {
-      const loaded = session.reload(ctx);
-      for (const warning of loaded.warnings)
-        session.notify(ctx, warning, "warning");
-      // `--plan` is a mode request, not a bypass for the normal planning
-      // guards. In particular, it must not overwrite a live plan or coexist
-      // with a direct task without the same confirmation as `/plan`.
-      if (startWithDetailedPlan) {
-        await activatePlanningMode(session, "detailed_plan", ctx);
-        return;
-      }
-      if (loaded.migrationRequired) {
-        session.notify(
-          ctx,
-          "Legacy-Workflow erkannt. Schließe alte Sessions und nutze /migrate-plan.",
-          "warning",
-        );
-      } else {
-        await offerWorkflowRecovery(session, ctx);
-      }
-    } catch (error) {
-      session.notify(
-        ctx,
-        `Workflow-State nicht sicher geladen: ${workflowWarning(error)}`,
-        "error",
-      );
-    }
+    session.setMode(ctx, "work");
   });
-
-  pi.on("session_shutdown", async (_event, ctx: ExtensionContext) => {
-    if (
-      session.activeCwd === ctx.cwd &&
-      ctx.isProjectTrusted() &&
-      session.current.state?.status === "working"
-    ) {
-      try {
-        session.replaceState(ctx, pauseExecution(session.current.state));
-      } catch (error) {
-        session.notify(
-          ctx,
-          `Pause-State nicht gespeichert: ${workflowWarning(error)}`,
-          "warning",
-        );
-      }
-    }
-    session.activeCwd = undefined;
-    session.activeContext = undefined;
-    session.planningKind = undefined;
-    session.selectedMode = undefined;
-    clearWorkflowPresentation(ctx, session.pi);
+  pi.on("session_shutdown", async (_event, ctx) => {
+    clearWorkflowPresentation(ctx);
   });
 }

@@ -1,35 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-
-/**
- * Der einzige kanonische Workflow-Status. Er steht hier statt in
- * plan-mode/store/, weil auch Permissions und die UI ihn lesen müssen und
- * `shared/` nicht auf eine Fach-Extension zeigen darf. `plan-mode/store/types.ts`
- * re-exportiert ihn; eine zweite Deklaration darf es nirgends geben.
- */
-export type WorkflowStatus =
-  "idle" | "planning" | "working" | "reviewing" | "paused" | "blocked" | "done";
-
-export const WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
-  "idle",
-  "planning",
-  "working",
-  "reviewing",
-  "paused",
-  "blocked",
-  "done",
-];
-
-export function isWorkflowStatus(value: unknown): value is WorkflowStatus {
-  return (
-    typeof value === "string" &&
-    (WORKFLOW_STATUSES as readonly string[]).includes(value)
-  );
-}
-
-/**
- * Planart und UX-Einstieg. Bewusst KEIN zweiter Lebenszyklus.
- */
-export type WorkflowMode = "work" | "simple_plan" | "detailed_plan";
+export type { WorkflowMode } from "./workflow-mode.ts";
 
 // Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
 // Prompting und Workflow; ausschließlich diese Stufe steuert Tool-Zugriffe.
@@ -105,9 +75,8 @@ export function permissionRiskStatusValue(
 }
 
 /**
- * Status values are presentation-only and must never leak into non-TUI modes.
- * The workflow label itself is built in plan-mode/presentation.ts, the single
- * place that maps WorkflowStatus to a German label.
+ * TUI status values are presentation-only and must never leak into non-TUI
+ * modes.
  */
 export function setTuiStatus(
   ctx: ExtensionContext,

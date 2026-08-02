@@ -17,7 +17,7 @@ ausschließlich über den Skill `context-checkpoint`.
 ## Begründung
 
 Ein Ledger, das der Workflow automatisch schreibt, ist eine zweite
-Aufgabenquelle neben dem PlanSnapshot. Ein Ledger, das niemand schreibt, ist
+Aufgabenquelle neben der eigentlichen Nutzeraufgabe. Ein Ledger, das niemand schreibt, ist
 toter Code. Als bewusst gepflegte Langzeitdokumentation ist es nützlich — dafür
 braucht es keinen Laufzeitcode.
 

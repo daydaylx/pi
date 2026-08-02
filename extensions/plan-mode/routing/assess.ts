@@ -81,7 +81,6 @@ const HARD_HIGH_CATEGORIES: readonly HardHighCategory[] = [
       "persistente",
       "json-schema",
       "versioniert",
-      "sidecar",
       "manifest",
     ],
   },

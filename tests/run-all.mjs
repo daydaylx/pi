@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const suites = [
   { name: "runtime", file: "run.mjs", env: { PI_TEST_SUITE: "runtime" } },
   { name: "ui", file: "run.mjs", env: { PI_TEST_SUITE: "ui" } },
-  { name: "workflow-v3", file: "workflow-v3.mjs", env: {} },
+  { name: "workflow-mode", file: "workflow-mode.mjs", env: {} },
   { name: "lsp", file: "run.mjs", env: { PI_TEST_SUITE: "lsp" } },
   {
     name: "diff",

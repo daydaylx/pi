@@ -40,7 +40,7 @@ export function eq(actual, expected, message) {
   );
 }
 
-/** Alias kept for the workflow-v3 suites, which call it `equal`. */
+/** Compatibility alias for tests that use the older assertion spelling. */
 export const equal = eq;
 
 export function counters() {

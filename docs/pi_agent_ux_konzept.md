@@ -23,9 +23,8 @@ Diagnose (`C`), Sitzungen & Kontext (`S`), Vorlagen & Skills (`V`) sowie
 System & Transfer (`T`). Ein Buchstabe öffnet den Bereich direkt. Einträge
 zeigen den kanonischen `/command`; Aliase werden nur am Original erklärt.
 
-`/workflow` trennt Planarbeit und Direktauftrag. Planarbeit startet oder setzt
-ausschließlich einen vorhandenen Plan fort; ein Direktauftrag ist die kompakte,
-planlose Alternative mit Scope, Verifikation und Abschlusskriterien.
+`/workflow` bietet nur Work, Schnellplan und Architekturplan. Ein vorhandener
+Plan ist im Work-Modus Kontext und in Planmodi frei formatierbares Markdown.
 
 Die Shortcuts gelten im fokussierten Pi-Terminal und benötigen für `Super`
 das Kitty-/CSI-u-Protokoll. Sie werden nicht als systemweite Linux-Mint-Hotkeys

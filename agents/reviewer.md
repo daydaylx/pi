@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Reviews diffs and code for bugs, regressions and scope drift across five focus areas (general, security, ui, docs, architecture). Absorbs former security-auditor, ui-reviewer, docs-auditor and architect review roles.
+description: Reviews diffs and code for bugs, regressions and scope drift across five focus areas (general, security, ui, docs, architecture).
 tools: read, grep, find, ls
 defaultContext: fresh
 inheritProjectContext: true
@@ -87,8 +87,3 @@ Only questions needed to determine whether a finding is actionable.
 
 For each finding, give the smallest fix; finish with a short readiness
 assessment.
-
-When the task is a workflow completion review, obey the completion request's
-marker contract and make the final nonempty line exactly one of
-`[COMPLETION-REVIEW:PASS]`, `[COMPLETION-REVIEW:REWORK]`, or
-`[COMPLETION-REVIEW:UNVERIFIABLE]`.

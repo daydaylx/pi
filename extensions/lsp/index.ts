@@ -80,7 +80,6 @@ import {
 import type { LspToolsDeps } from "./tools.ts";
 import { computeLspStatus, publishLspStatus } from "./status.ts";
 import { defaultSetupConfig, loadSetupConfig } from "../setup-core/config.ts";
-import { registerLspCompletionRpc } from "./completion-rpc.ts";
 import {
   AURORA_UI_CHANNELS,
   isAuroraUiStateRequest,
@@ -298,7 +297,6 @@ export default function lspExtension(pi: ExtensionAPI): void {
 
   registerLspDiagnosticsTool(pi, deps);
   registerLspNavigationTools(pi, deps);
-  registerLspCompletionRpc(pi, deps, () => activeProjectRoot);
   const openLspDiagnostics = registerLspControlCenter(pi, {
     getStatus: () =>
       registry ? computeLspStatus(config, registry.list()) : "aus",

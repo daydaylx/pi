@@ -35,15 +35,13 @@ import { ROOT, importModule } from "./shared/jiti-loader.mjs";
 // would have let a renamed or newly added section drop out of every filtered
 // run unnoticed — unknownSections below now makes that a hard failure.
 //
-// The plan-workflow, permission and presentation sections moved to
-// tests/workflow-v3/; what remained of the old "workflow" domain is UI, which
-// is now its own domain.
+// Workflow-specific behavior is covered by tests/workflow-mode.mjs; this
+// runner owns only the remaining runtime, UI, LSP and diff sections.
 const SECTION_SUITES = {
   "target runtime configuration": "runtime",
   "greenfield setup config and Aurora state contract": "runtime",
   "setup core lifecycle": "runtime",
   "project verification profiles (#105)": "runtime",
-  "technical scope matching": "runtime",
   "native subagent profiles": "runtime",
   "native project skills": "runtime",
   "global control plane shortcuts": "runtime",
@@ -176,6 +174,11 @@ await section("target runtime configuration", async () => {
         packageSources[0] ?? "",
       ),
       "subagent runtime remains immutable-pinned",
+    );
+    eq(
+      settings.subagents,
+      { disableBuiltins: true },
+      "settings directly disable package-built-in agent profiles",
     );
     assert(
       !Object.hasOwn(setup, "models"),
@@ -385,17 +388,37 @@ await section("target runtime configuration", async () => {
     eq(
       subagentConfig.parallel,
       { maxTasks: 4, concurrency: 3 },
-      "subagent parallelism is bounded",
+      "active package config directly bounds subagent tasks and concurrency",
     );
     eq(
       subagentConfig.globalConcurrencyLimit,
       3,
-      "global subagent concurrency is bounded",
+      "active package config directly bounds global concurrency",
+    );
+    eq(
+      subagentConfig.maxSubagentSpawnsPerSession,
+      12,
+      "active package config directly bounds spawns per session",
+    );
+    eq(
+      setup.subagents,
+      { concurrency: 3 },
+      "setup.json supplies only the concurrency baseline",
+    );
+    eq(
+      schema.properties.subagents.required,
+      ["concurrency"],
+      "setup schema requires only the concurrency baseline",
+    );
+    eq(
+      schema.properties.subagents.properties,
+      { concurrency: { type: "integer", minimum: 1, maximum: 8 } },
+      "setup schema exposes no runtime package limits",
     );
     eq(
       subagentConfig.parallel.concurrency,
       setup.subagents.concurrency,
-      "central subagent concurrency matches the active package configuration",
+      "active package concurrency matches the setup baseline",
     );
     const installerSource = readFileSync(
       path.join(ROOT, "scripts", "install-user.mjs"),
@@ -525,7 +548,7 @@ await section("greenfield setup config and Aurora state contract", async () => {
 
   const state = {
     sessionEpoch: "epoch-1",
-    workflow: { phase: "idle", label: "ARBEIT" },
+    workflow: { phase: "work", label: "Work" },
     permissions: {},
     lsp: {},
     model: {},
@@ -533,22 +556,20 @@ await section("greenfield setup config and Aurora state contract", async () => {
   };
   auroraState.mergeAuroraUiState(state, {
     workflow: {
-      phase: "working",
-      label: "ARBEIT 1/3",
-      completed: 1,
-      total: 3,
+      phase: "simple_plan",
+      label: "Schnellplan",
     },
     lsp: { state: "ready" },
   });
-  eq(state.workflow.phase, "working", "Aurora merges typed workflow patches");
-  // The canonical status set is the only accepted vocabulary now.
+  eq(state.workflow.phase, "simple_plan", "Aurora merges workflow modes");
+  // Unknown legacy phases are ignored.
   auroraState.mergeAuroraUiState(state, { workflow: { phase: "executing" } });
   eq(
     state.workflow.phase,
-    "working",
+    "simple_plan",
     "Aurora rejects the retired legacy phase name",
   );
-  eq(state.workflow.completed, 1, "Aurora retains progress metadata");
+  eq(state.workflow.completed, undefined, "Aurora has no workflow progress metadata");
   eq(state.lsp.state, "ready", "Aurora merges LSP patches");
   assert(
     auroraState.isAuroraUiStateRequest({
@@ -596,6 +617,17 @@ await section("setup core lifecycle", async () => {
         "project verification profiles: keine .pi/verify.json",
       ),
     "setup doctor reports the project verification profile status (#105)",
+  );
+  assert(
+    harness.notifications
+      .at(-1)
+      ?.message?.includes("subagent baseline (setup.json): concurrency=3") &&
+      harness.notifications
+        .at(-1)
+        ?.message?.includes(
+          "active subagent package config: concurrency=3, globalConcurrencyLimit=3",
+        ),
+    "setup doctor distinguishes the setup baseline from active package config",
   );
   assert(
     !harness.notifications.at(-1)?.message?.includes("doom-loop status:") &&
@@ -887,64 +919,6 @@ await section("project verification profiles (#105)", async () => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Task contract + scope control (#106). Lightweight, standalone; references
-// planId without a second workflow state machine. Enables real scope-drift
-// for the advisory gate (#102).
-// ---------------------------------------------------------------------------
-await section("technical scope matching", async () => {
-  const scopeMod = await load("extensions/plan-mode/scope.ts");
-  assert(
-    typeof scopeMod?.globToRegExp === "function",
-    "scope module exports globToRegExp",
-  );
-  assert(
-    typeof scopeMod?.matchScope === "function",
-    "scope module exports matchScope",
-  );
-
-  // --- globToRegExp ---
-  const re = (p) => scopeMod.globToRegExp(p);
-  assert(re("src/a.ts").test("src/a.ts"), "exact path matches");
-  assert(!re("src/a.ts").test("src/b.ts"), "exact path rejects others");
-  assert(
-    re("src/*.ts").test("src/a.ts"),
-    "single-star matches within a segment",
-  );
-  assert(
-    !re("src/*.ts").test("src/sub/a.ts"),
-    "single-star does not cross segments",
-  );
-  assert(
-    re("src/**/*.ts").test("src/sub/deep/a.ts"),
-    "double-star crosses segments",
-  );
-  assert(
-    re("src/**/*.ts").test("src/a.ts"),
-    "double-star also matches shallow",
-  );
-  assert(re("src/?").test("src/a"), "question mark matches one char");
-  assert(re("docs/").test("docs/a.md"), "directory prefix matches beneath");
-  assert(!re("docs/").test("src/a.ts"), "directory prefix rejects others");
-
-  // --- matchScope: in/out/undeclared ---
-  const scope = scopeMod.matchScope(
-    ["src/**/*.ts", "docs/lsp.md"],
-    ["src/a.ts", "src/sub/b.ts", "README.md", "package-lock.json"],
-  );
-  eq(scope.inScope.length, 2, "two changed files are in scope");
-  eq(scope.outOfScope.length, 2, "two changed files are out of scope");
-  eq(
-    scope.undeclared,
-    ["docs/lsp.md"],
-    "declared-but-unchanged pattern reported",
-  );
-
-  // Die erzwingbare Scope-Prüfung läuft über
-  // plan-mode/completion/scope-check.ts gegen den PlanSnapshot-Scope
-  // (docs/decisions/004-remove-task-contract.md).
-});
-
 /** Gate exec stub whose typecheck step fails; used by the sections below. */
 
 await section("native subagent profiles", async () => {
@@ -957,6 +931,82 @@ await section("native subagent profiles", async () => {
       .sort(),
     expectedProfiles,
     "planner, worker and reviewer are the complete local core role set",
+  );
+  const profileSources = Object.fromEntries(
+    expectedProfiles.map((name) => [
+      name,
+      readFileSync(path.join(agentsRoot, name), "utf8"),
+    ]),
+  );
+  const expectedTools = {
+    "planner.md": "read, grep, find, ls",
+    "reviewer.md": "read, grep, find, ls",
+    "worker.md": "read, grep, find, ls, edit, write, bash",
+  };
+  for (const [name, source] of Object.entries(profileSources)) {
+    assert(
+      source.includes(`tools: ${expectedTools[name]}`),
+      `${name} declares its exact runtime tool boundary`,
+    );
+    assert(
+      source.includes("defaultContext: fresh") &&
+        source.includes("inheritProjectContext: true") &&
+        source.includes("inheritSkills: false"),
+      `${name} starts with fresh context without inherited skills`,
+    );
+    assert(
+      !/^tools:.*\b(?:task|delegate|spawn)\b/m.test(source),
+      `${name} cannot perform nested delegation`,
+    );
+  }
+  for (const name of ["planner.md", "reviewer.md"]) {
+    assert(
+      !/^tools:.*\b(?:edit|write|bash)\b/m.test(profileSources[name]),
+      `${name} remains read-only`,
+    );
+  }
+  assert(
+    /^tools:.*\bedit\b.*\bwrite\b.*\bbash\b/m.test(
+      profileSources["worker.md"],
+    ),
+    "worker exclusively owns write and shell tools",
+  );
+  for (const activeDoc of [
+    "AGENTS.md",
+    "README.md",
+    "docs/subagents.md",
+  ]) {
+    const source = readFileSync(path.join(ROOT, activeDoc), "utf8");
+    const retiredRole = "(?:scout|oracle|test-runner)";
+    const optionalCodeTick = "[`]?";
+    const historicalMarker =
+      /\b(?:frühere?[nr]?|historisch(?:e[nsr]?|en)?|retired|inaktiv|nicht\s+(?:aktiv|ausführbar|installiert)|entfernt)\b/i;
+    const executableRecommendation = new RegExp(
+      [
+        `\\|\\s*${optionalCodeTick}${retiredRole}${optionalCodeTick}\\s*\\|`,
+        `\\b(?:verwende|nutze|delegiere|starte|wähle|übergebe)\\s+(?:an\\s+)?${optionalCodeTick}${retiredRole}${optionalCodeTick}\\b`,
+        `\\b${retiredRole}\\b\\s*(?:→|ist\\s+(?:nötig|zuständig)|führt|prüft|implementiert)`,
+      ].join("|"),
+      "i",
+    );
+    for (const paragraph of source.split(/\n\s*\n/)) {
+      if (!new RegExp(`\\b${retiredRole}\\b`, "i").test(paragraph))
+        continue;
+      assert(
+        historicalMarker.test(paragraph),
+        `${activeDoc} marks a historical retired-role mention as inactive`,
+      );
+      assert(
+        !executableRecommendation.test(paragraph),
+        `${activeDoc} does not recommend a retired role for execution`,
+      );
+    }
+  }
+  assert(
+    !/COMPLETION-REVIEW|completion request's marker contract/i.test(
+      profileSources["reviewer.md"],
+    ),
+    "reviewer has no automatic completion-marker contract",
   );
 });
 
@@ -1045,12 +1095,11 @@ await section("Control Center menus and routing", async () => {
     eq(
       workflowSwitch,
       [
+        "Work",
         "Schnellplan",
         "Architekturplan",
-        "Plan ausführen / fortsetzen",
-        "Direktauftrag starten",
       ],
-      "Shift+Tab keeps plan execution selectable to explain a missing plan",
+      "Shift+Tab exposes only the three workflow modes",
     );
     assert(
       controlCenter.length > workflowSwitch.length &&
@@ -2064,7 +2113,6 @@ await section("combined production extension stack", async () => {
       "lsp_hover",
       "lsp_references",
       "lsp_workspace_symbols",
-      "plan_progress",
       "verify",
     ],
     "only local functional tools register locally",
@@ -2076,7 +2124,7 @@ await section("combined production extension stack", async () => {
   );
   eq(
     latestStatus(harness, "workflow"),
-    "ARBEIT",
+    "Work",
     "combined stack publishes workflow",
   );
   eq(
@@ -3753,20 +3801,6 @@ await section("LSP command, status and trust (#97)", async () => {
       sessionEpoch: "lsp-epoch",
       requester: "test",
     });
-    let completionRpcResult;
-    harness.api.events.emit("lsp:diagnostics:v1:request", {
-      version: 1,
-      requestId: "lsp-completion-mismatch",
-      projectRoot: `${cwd}-other`,
-      files: ["a.ts"],
-      respond(value) {
-        completionRpcResult = value;
-      },
-    });
-    assert(
-      completionRpcResult?.results?.[0]?.status === "unavailable",
-      "completion RPC rejects a request for another active project",
-    );
     // .pi/lsp.json sets enabled:false; if the trust gate were broken and it
     // got applied anyway, /lsp status would report "off" instead.
     await harness.commands.get("lsp")("status", context);

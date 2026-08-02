@@ -61,10 +61,9 @@
     "subagents": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["concurrency", "freshContext"],
+      "required": ["concurrency"],
       "properties": {
-        "concurrency": { "type": "integer", "minimum": 1, "maximum": 8 },
-        "freshContext": { "type": "boolean" }
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 8 }
       }
     },
     "verification": {

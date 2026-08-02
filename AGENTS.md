@@ -44,20 +44,24 @@ Triviale Teilaufgaben bleiben beim Hauptagenten.
 
 ### Delegationsmuster
 
-- **Kleine Änderung:** Main-Agent → direkt, oder Main-Agent → worker
-- **Normale Implementierung:** planner (oder Main-Agent) → worker → reviewer
-- **Unbekannter Bereich:** scout → planner → worker → reviewer
-- **Riskante Architektur:** scout → planner → oracle → worker → reviewer → test-runner
-- **Reine Prüfung:** reviewer mit klar angegebenem Fokus
-- **Reine Tests:** test-runner
+- **Kleine Aufgabe:** Hauptagent direkt, oder `worker`.
+- **Analyse und Planung:** Hauptagent, oder `planner` bei einer unabhängigen
+  Planungsaufgabe.
+- **Umsetzung und relevante Tests:** `worker`.
+- **Gezielte manuelle Prüfung:** `reviewer` mit klar benanntem Fokus und nur
+  auf ausdrücklichen Auftrag.
 
-Der scout ist nur nötig, wenn relevante Dateien oder Systemgrenzen noch unbekannt
-sind. Der oracle nur bei sicherheitskritischen Änderungen, hohem
-Datenverlustrisiko, Architekturentscheidungen mit hohen Wechselkosten, größeren
-Migrationen, widersprüchlichen Reviews oder ausdrücklichem Wunsch.
+Ein Review ist keine automatische Abschlussstufe. Es gibt keine weiteren
+ausführbaren lokalen Rollen.
 
 ### Kontext und Ergebnis
 
-- Unabhängige Aufgaben starten standardmäßig mit frischer Unterhaltung. Fork-Kontext nur nutzen, wenn frühere Nutzerentscheidungen tatsächlich benötigt werden.
+- Lokale Profile starten mit frischem Kontext und ohne verschachtelte
+  Delegation; beides ist in ihren Profil-Tools festgelegt. Fork-Kontext nur
+  nutzen, wenn frühere Nutzerentscheidungen tatsächlich benötigt werden.
+- Die Laufzeitquellen sind direkt: `settings.json` deaktiviert Paket-Builtins
+  mit `subagents.disableBuiltins`; `extensions/subagent/config.json` setzt
+  `maxTasks: 4`, `concurrency: 3`, `globalConcurrencyLimit: 3` und
+  `maxSubagentSpawnsPerSession: 12`.
 - Ergebnisse kompakt synthetisieren und Belege, betroffene Dateien, Risiken, offene Fragen und Empfehlung nennen; keine vollständigen Unterhaltungen zurückkopieren.
 - Profilauswahl und Detailregeln nur bei Bedarf aus `/home/d/.pi/agent/docs/subagents.md` lesen.

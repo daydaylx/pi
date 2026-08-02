@@ -1,11 +1,4 @@
-/**
- * Pi workflow controller v3.
- *
- * The business contract lives in current-plan.md. Runtime progress lives only
- * in current-plan.state.json. This file wires the focused planning, execution,
- * completion, presentation and persistence modules together and does nothing
- * else: dependencies, command registration, event registration.
- */
+/** Three-mode plan controller: mode, prompts, commands and nothing else. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanCommands } from "./commands.ts";
 import { registerPlanEvents } from "./events.ts";

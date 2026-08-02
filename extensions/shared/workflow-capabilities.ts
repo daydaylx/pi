@@ -1,8 +1,4 @@
-import {
-  isWorkflowStatus,
-  type WorkflowMode,
-  type WorkflowStatus,
-} from "./workflow-status.ts";
+import { WORKFLOW_MODES, type WorkflowMode } from "./workflow-mode.ts";
 
 /**
  * Synchronous capability bridge between workflow and permission extensions.
@@ -26,9 +22,8 @@ export interface WorkflowActivatedEvent {
 }
 
 export interface WorkflowCapabilitySnapshot {
-  state: WorkflowStatus;
-  /** Current mode is provided for workflow-specific permission defaults. */
-  mode?: WorkflowMode;
+  /** The selected mode is the only workflow truth. */
+  mode: WorkflowMode;
 }
 export interface WorkflowCapabilityRequest {
   respond(snapshot: WorkflowCapabilitySnapshot): void;
@@ -39,7 +34,6 @@ export interface WorkflowEventBus {
 }
 
 const DEFAULT_SNAPSHOT: WorkflowCapabilitySnapshot = {
-  state: "idle",
   mode: "work",
 };
 
@@ -60,13 +54,5 @@ export function isWorkflowCapabilitySnapshot(
 ): value is WorkflowCapabilitySnapshot {
   if (!value || typeof value !== "object") return false;
   const mode = (value as { mode?: unknown }).mode;
-  if (
-    mode !== undefined &&
-    mode !== "work" &&
-    mode !== "simple_plan" &&
-    mode !== "detailed_plan"
-  ) {
-    return false;
-  }
-  return isWorkflowStatus((value as { state?: unknown }).state);
+  return typeof mode === "string" && WORKFLOW_MODES.includes(mode as WorkflowMode);
 }

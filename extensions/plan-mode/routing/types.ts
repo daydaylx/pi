@@ -13,8 +13,6 @@
  * from a profile, so a missing or invalid profile can never silently drop a
  * required review.
  */
-import type { PlanKind } from "../plan-snapshot.ts";
-
 export type RoutingLevel = "low" | "standard" | "high";
 
 export const ROUTING_LEVELS: readonly RoutingLevel[] = [
@@ -85,8 +83,8 @@ export interface RoutingInput {
   scopePaths: string[];
   /** Affected areas / module hints from the plan or task. */
   affectedAreas: string[];
-  /** Plan type, when a plan snapshot exists. */
-  planType?: PlanKind;
+  /** Selected planning mode, when a plan is used as input. */
+  planType?: "simple_plan" | "detailed_plan";
   /** Declared verification profile ids / commands available. */
   verification: string[];
   /** Optional manual override level requested by the user. */

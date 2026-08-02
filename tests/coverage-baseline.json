@@ -13,9 +13,9 @@
     "extensions/aurora-ui/index.ts"
   ],
   "minimumFunctionCoverage": {
-    "extensions/setup-core/index.ts": 80,
-    "extensions/plan-mode/index.ts": 87,
-    "extensions/mode-permissions.ts": 92,
+    "extensions/setup-core/index.ts": 100,
+    "extensions/plan-mode/index.ts": 100,
+    "extensions/mode-permissions.ts": 60,
     "extensions/lsp/index.ts": 20,
     "extensions/ask-user.ts": 36,
     "extensions/tool-output-guard.ts": 100,

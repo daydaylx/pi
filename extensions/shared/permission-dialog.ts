@@ -2,6 +2,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { basename, dirname, normalize } from "node:path";
 import { homedir } from "node:os";
 import type { PolicyDecision } from "./permission-policy.ts";
+import type { GrantChoice } from "../permissions/grants.ts";
 
 // pi-tui remains dynamically imported below so this shared module remains
 // loadable through the tests/run.mjs jiti harness.
@@ -110,4 +111,52 @@ export async function confirmAction(
   }
   const title = decision.hard ? "HARTE WARNUNG — Aktion bestätigen?" : "Riskante Aktion bestätigen?";
   return ctx.ui.confirm(title, `${decision.reason}\n\n${preview(subject)}`);
+}
+
+/**
+ * Ask for one narrow permission decision. The selected rule is rendered from
+ * concrete tool input; callers never pass free-form patterns to persistence.
+ */
+export async function requestGrant(
+  ctx: ExtensionContext,
+  input: {
+    subject: string;
+    toolName: string;
+    reason: string;
+    impacts: readonly string[];
+    persistable: boolean;
+  },
+): Promise<GrantChoice> {
+  if (!ctx.hasUI || ctx.mode !== "tui") return "deny";
+  const details = [
+    input.reason,
+    `Ziel: ${projectLabel(ctx.cwd)}`,
+    ...input.impacts.map((impact) => `- ${impact}`),
+    preview(input.subject),
+  ].join("\n");
+  const choices = ["Einmal zulassen"];
+  if (input.persistable) {
+    choices.push(
+      "Für diese Sitzung zulassen",
+      "Immer für dieses Projekt zulassen",
+      "Global immer zulassen",
+    );
+  }
+  choices.push("Blockieren");
+  const selected = await ctx.ui.select(`Freigabe erforderlich\n${details}`, choices);
+  switch (selected) {
+    case "Einmal zulassen":
+      return "once";
+    case "Für diese Sitzung zulassen":
+      return "session";
+    case "Immer für dieses Projekt zulassen":
+      return "project";
+    case "Global immer zulassen":
+      return (await ctx.ui.confirm(
+        "Globale Freigabe wirklich speichern?",
+        "Diese Freigabe gilt künftig in allen Projekten.",
+      )) ? "global" : "deny";
+    default:
+      return "deny";
+  }
 }

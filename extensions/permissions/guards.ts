@@ -1,128 +1,80 @@
-/**
- * The tool_call and user_bash interceptors.
- *
- * This is the only place in the extension stack that blocks a tool or a shell
- * command. The order is fixed: the hard trust boundary first (an untrusted
- * project allows nothing mutating or external, whatever the level says), then
- * the workflow decision, then the permission level.
- *
- * A decision that needs confirmation but cannot ask — no UI, not a TUI, or the
- * user declined — always resolves to blocked, never to allowed.
- */
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  ToolCallEvent,
-} from "@earendil-works/pi-coding-agent";
-import { confirmAction } from "../shared/permission-dialog.ts";
-import {
-  decideBash,
-  type PolicyDecision,
-} from "../shared/permission-policy.ts";
+import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { requestGrant } from "../shared/permission-dialog.ts";
+import { decideBash } from "../shared/permission-policy.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
+import { isPlanningMode } from "../shared/workflow-mode.ts";
 import type { PermissionSession } from "./session-state.ts";
-import { toolPath } from "./tool-event.ts";
 import { decideTool } from "./tool-policy.ts";
 import {
-  isRestrictedWorkflow,
-  referencesWorkflowArtifact,
+  assessBash,
+  assessWorkflowTool,
+  automaticallyAllowedInPlanMode,
 } from "./workflow-policy.ts";
+import { toolPath } from "./tool-event.ts";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "ask_user"];
 
-async function approve(
-  decision: PolicyDecision,
+async function approveWorkflowAction(
+  session: PermissionSession,
+  assessment: ReturnType<typeof assessWorkflowTool> | ReturnType<typeof assessBash>,
   subject: string,
   ctx: ExtensionContext,
-  toolName?: string,
 ): Promise<boolean> {
-  if (decision.action === "allow") return true;
-  if (decision.action === "block") return false;
-  if (!ctx.hasUI || ctx.mode !== "tui") return false;
-  return confirmAction(ctx, decision, subject, toolName);
+  if (assessment.classification === "hard-block") return false;
+  if (session.hasGrant(assessment.descriptor, ctx.cwd)) return true;
+  if (assessment.classification === "safe-read") return true;
+  const choice = await requestGrant(ctx, {
+    subject,
+    toolName: assessment.descriptor.tool,
+    reason: assessment.reason,
+    impacts: assessment.impacts,
+    persistable: assessment.descriptor.persistable,
+  });
+  if (choice === "deny") return false;
+  if (choice !== "once") session.saveGrant(choice, assessment.descriptor, ctx.cwd);
+  return true;
 }
 
-export function registerPermissionGuards(
-  pi: ExtensionAPI,
-  session: PermissionSession,
-): void {
+export function registerPermissionGuards(pi: ExtensionAPI, session: PermissionSession): void {
   pi.on("tool_call", async (event: ToolCallEvent, ctx) => {
     if (!ctx.isProjectTrusted() && !READ_ONLY_TOOLS.includes(event.toolName)) {
-      return {
-        block: true,
-        reason:
-          "Harte Trust-Grenze: mutierende oder externe Tools sind im nicht vertrauenswürdigen Projekt blockiert.",
-      };
-    }
-    const decision = decideTool(
-      session.level(),
-      event,
-      ctx.cwd,
-      requestWorkflowCapabilities(pi.events),
-      session.configured(),
-    );
-    const subject =
-      event.toolName === "bash"
-        ? String((event.input as Record<string, unknown>).command ?? "")
-        : `${event.toolName}: ${toolPath(event) ?? ""}`;
-    if (await approve(decision, subject, ctx, event.toolName)) return;
-
-    return {
-      block: true,
-      reason:
-        decision.action === "ask"
-          ? `${decision.reason}: Bestätigung fehlt oder wurde abgelehnt.`
-          : decision.reason,
-    };
-  });
-
-  pi.on("user_bash", async (event, ctx) => {
-    if (!ctx.isProjectTrusted()) {
-      return {
-        result: {
-          output:
-            "Harte Trust-Grenze: Shell-Zugriff ist im nicht vertrauenswürdigen Projekt blockiert.",
-          exitCode: 126,
-          cancelled: true,
-          truncated: false,
-        },
-      };
+      return { block: true, reason: "Harte Trust-Grenze: mutierende oder externe Tools sind im nicht vertrauenswürdigen Projekt blockiert." };
     }
     const workflow = requestWorkflowCapabilities(pi.events);
-    const configured = session.configured();
-    const decision = referencesWorkflowArtifact(event.command)
-      ? {
-          action: "block" as const,
-          reason:
-            "Workflow-Artefakte sind über Shell gesperrt; nutze Plan-Mode, Direct-Task-Kommandos oder plan_progress.",
-        }
-      : isRestrictedWorkflow(workflow)
-        ? {
-            action: "block" as const,
-            reason: `Workflow ${workflow.state}: direkter Shell-Zugriff ist nicht freigegeben.`,
-          }
-        : session.level() === "project-write" && configured.bash !== "allow"
-          ? configured.bash === "block"
-            ? {
-                action: "block" as const,
-                reason: "Bash ist in der Setup-Policy gesperrt.",
-              }
-            : {
-                action: "ask" as const,
-                reason: "Freier Shell-Zugriff benötigt Bestätigung.",
-              }
-          : decideBash(session.level(), event.command, event.cwd);
-    if (await approve(decision, event.command, ctx, "bash")) return;
-    return {
-      result: {
-        output:
-          decision.action === "ask"
-            ? `${decision.reason}: Bestätigung fehlt oder wurde abgelehnt.`
-            : decision.reason,
-        exitCode: 126,
-        cancelled: true,
-        truncated: false,
-      },
-    };
+    const assessment = assessWorkflowTool(event, ctx.cwd);
+    const subject = event.toolName === "bash"
+      ? String((event.input as Record<string, unknown>).command ?? "")
+      : `${event.toolName}: ${toolPath(event) ?? ""}`;
+    if (assessment.classification === "hard-block") {
+      return { block: true, reason: assessment.reason };
+    }
+    if (session.hasGrant(assessment.descriptor, ctx.cwd) || automaticallyAllowedInPlanMode(workflow, event, ctx.cwd)) return;
+    if (isPlanningMode(workflow.mode)) {
+      if (await approveWorkflowAction(session, assessment, subject, ctx)) return;
+      return { block: true, reason: "Freigabe fehlt oder wurde abgelehnt." };
+    }
+    const decision = decideTool(session.level(), event, ctx.cwd, session.configured());
+    if (decision.action === "allow") return;
+    if (await approveWorkflowAction(session, assessment, subject, ctx)) return;
+    return { block: true, reason: decision.action === "block" ? decision.reason : "Freigabe fehlt oder wurde abgelehnt." };
+  });
+
+  pi.on("user_bash", async (event, ctx: ExtensionContext) => {
+    if (!ctx.isProjectTrusted()) {
+      return { result: { output: "Harte Trust-Grenze: Shell-Zugriff ist im nicht vertrauenswürdigen Projekt blockiert.", exitCode: 126, cancelled: true, truncated: false } };
+    }
+    const workflow = requestWorkflowCapabilities(pi.events);
+    const assessment = assessBash(event.command, event.cwd);
+    let allowed = false;
+    if (assessment.classification !== "hard-block" && session.hasGrant(assessment.descriptor, event.cwd)) {
+      allowed = true;
+    } else if (assessment.classification !== "hard-block" && isPlanningMode(workflow.mode)) {
+      allowed = await approveWorkflowAction(session, assessment, event.command, ctx);
+    } else if (assessment.classification !== "hard-block") {
+      const generic = decideBash(session.level(), event.command, event.cwd);
+      allowed = generic.action === "allow" || await approveWorkflowAction(session, assessment, event.command, ctx);
+    }
+    if (allowed) return;
+    return { result: { output: assessment.classification === "hard-block" ? assessment.reason : "Freigabe fehlt oder wurde abgelehnt.", exitCode: 126, cancelled: true, truncated: false } };
   });
 }

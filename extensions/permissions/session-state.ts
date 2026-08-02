@@ -41,6 +41,14 @@ import {
 import { permissionWarning } from "./tool-policy.ts";
 import type { SelectableThinkingLevel } from "../shared/thinking-menu.ts";
 import type { ThinkingControl } from "./thinking-control.ts";
+import {
+  PermissionGrantStore,
+  type GrantChoice,
+  type GrantDescriptor,
+  type PermissionGrant,
+} from "./grants.ts";
+
+export type { PermissionGrant } from "./grants.ts";
 
 export const PERSISTED_STATE_KEY = "mode-permissions";
 
@@ -85,6 +93,15 @@ export interface PermissionSession {
   workflowDefaultLevel(): Exclude<PermissionLevel, "yolo">;
   beginSession(ctx: ExtensionContext, workflowMode: WorkflowMode): void;
   endSession(ctx: ExtensionContext): void;
+  hasGrant(descriptor: GrantDescriptor, cwd: string): boolean;
+  saveGrant(
+    choice: Exclude<GrantChoice, "once" | "deny">,
+    descriptor: GrantDescriptor,
+    cwd: string,
+  ): boolean;
+  listGrants(scope: "project" | "global", cwd: string): PermissionGrant[];
+  removeGrant(id: string): boolean;
+  clearProjectGrants(cwd: string): void;
 }
 
 export function createPermissionSession(
@@ -106,6 +123,7 @@ export function createPermissionSession(
   let activeContext: ExtensionContext | undefined;
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
+  const grants = new PermissionGrantStore();
 
   function publishStatus(ctx: ExtensionContext): void {
     setTuiStatus(
@@ -161,6 +179,11 @@ export function createPermissionSession(
     epoch: () => sessionEpoch,
     isCurrentEpoch: (epoch) => epoch === sessionEpoch,
     workflowDefaultLevel: () => workflowDefaultPermission,
+    hasGrant: (descriptor, cwd) => grants.matches(descriptor, cwd),
+    saveGrant: (choice, descriptor, cwd) => grants.add(choice, descriptor, cwd),
+    listGrants: (scope, cwd) => grants.list(scope, cwd),
+    removeGrant: (id) => grants.remove(id),
+    clearProjectGrants: (cwd) => grants.clearProject(cwd),
 
     ownsSession(sessionId, cwd) {
       return Boolean(

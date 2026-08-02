@@ -145,7 +145,7 @@ export default function setupCore(pi: ExtensionAPI): void {
           loaded.config.subagents.concurrency
       ) {
         consistencyErrors.push(
-          "Die aktive Subagenten-Parallelität weicht von setup.json ab.",
+          "Die aktive Paket-Parallelität weicht von der Setup-Basis ab.",
         );
       }
       const lines = [
@@ -156,6 +156,8 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  permissions: unknown=${loaded.config.permissions.unknownTools}, bash=${loaded.config.permissions.bash}`,
         `  workflow defaults: work=${loaded.config.permissions.workflowDefaults.work}, simple_plan=${loaded.config.permissions.workflowDefaults.simple_plan}, detailed_plan=${loaded.config.permissions.workflowDefaults.detailed_plan}`,
         `  LSP: ${loaded.config.lsp.enabled ? loaded.config.lsp.mode : "off"}`,
+        `  subagent baseline (setup.json): concurrency=${loaded.config.subagents.concurrency}`,
+        `  active subagent package config: concurrency=${String(subagentParallel?.concurrency ?? "missing")}, globalConcurrencyLimit=${String(subagentSettings?.globalConcurrencyLimit ?? "missing")}`,
         `  scoped models: ${enabledModels.length || 0} Pattern(s) in settings.enabledModels`,
         `  Pi CLI/dev package: ${runtimeVersion ?? "unknown"}/${String(declaredVersion ?? "?")}`,
         `  installed dev package: ${devVersion ?? "missing"}`,

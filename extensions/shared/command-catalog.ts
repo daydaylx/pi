@@ -48,23 +48,12 @@ export const COMMAND_CATEGORIES: readonly CommandCategory[] = [
 ] as const;
 
 const definitions = [
-  ["workflow", "Workflow wechseln", "Arbeitsweg auswählen oder fortsetzen", "work"],
-  ["plan", "Plan-Assistent", "Plan erstellen, prüfen oder verwalten", "work", undefined, "Super+P", "starts-turn"],
-  ["work", "Plan ausführen", "Bestätigten Plan ausführen oder explizit fortsetzen", "work", ["go"], undefined, "starts-turn"],
-  ["task", "Direktauftrag", "Direktauftrag ohne Plan starten oder fortsetzen", "work", undefined, undefined, "starts-turn"],
-  ["task-done", "Direktauftrag abschließen", "Direktauftrag über dieselbe Completion-Pipeline abschließen", "work"],
-  ["route", "Aufgaben-Routing", "Routing anzeigen oder manuell stufen", "work", undefined, undefined, undefined, undefined, "route"],
+  ["workflow", "Workflow wechseln", "Work, Schnellplan oder Architekturplan auswählen", "work"],
+  ["plan", "Planmodus", "Schnellplan oder Architekturplan auswählen", "work", undefined, "Super+P"],
+  ["work", "Work-Modus", "Normale Projektarbeit ohne Planpflicht aktivieren", "work", ["go"]],
 
-  ["review-plan", "Plan prüfen", "Aktuellen Plan optional vertieft prüfen", "plan", undefined, undefined, "starts-turn"],
-  ["plan-todos", "Planschritte anzeigen", "Stabile Planschritte und Sidecar-Status anzeigen", "plan"],
   ["view-plan", "Plan anzeigen", "Vollständigen Markdown-Plan im Terminal anzeigen", "plan", ["show-plan"]],
-  ["edit-plan", "Plan bearbeiten", "Markdown-Plan direkt im Editor bearbeiten und Sidecar synchronisieren", "plan", ["plan-edit"]],
-  ["done", "Planschritte abschließen", "Einen oder mehrere Planschritte manuell abschließen", "plan"],
-  ["verify-gate", "Prüfungen vorab", "Completion-Prüfungen read-only ansehen", "plan"],
-  ["finish", "Plan abschließen", "Verbindliche Completion-Pipeline ausführen", "plan"],
-  ["discard-plan", "Plan verwerfen", "Aktiven Plan und Sidecar nach Bestätigung entfernen", "plan", undefined, undefined, undefined, true],
-  ["migrate-plan", "Legacy-Plan migrieren", "Legacy-Workflow v1/v2 ausdrücklich nach v3 migrieren", "plan", undefined, undefined, undefined, true],
-  ["recover-workflow-lock", "Workflow-Sperre reparieren", "Verwaisten Workflow-Lock nach Bestätigung entfernen", "plan", undefined, undefined, undefined, true],
+  ["edit-plan", "Plan bearbeiten", "current-plan.md im aktiven Planmodus bearbeiten", "plan", ["plan-edit"]],
 
   ["model", "Modell wählen", "Modell für diese Sitzung auswählen", "models", undefined, "Super+M"],
   ["scoped-models", "Modellumfang", "Modelle für die native Modellrotation auswählen", "models"],

@@ -8,7 +8,7 @@
 | npm                 | `10.9.7`                                                         | `npm --version`                                                      |
 | Aurora UI           | lokales TypeScript                                               | Typecheck, Lifecycle- und responsive Render-Tests                    |
 | Aurora-Theme        | lokales `aurora-night`                                           | Truecolor- und 256-Farb-Theme-Laden                                  |
-| Plan-Workflow       | lokales TypeScript                                               | Lifecycle-, Sidecar- und `plan_progress`-Tests                       |
+| Planmodus           | lokales TypeScript                                               | Modus-, Prompt- und Permission-Grant-Tests                           |
 | LSP                 | lokales TypeScript                                               | Fake-Server-Transport-, Dokument- und Tool-Suiten                    |
 | pi-subagents        | `daydaylx/pi-subagents@dd716cfc8c3a9b0ee35632752ac2b1736cd7de61` | exakter Laufzeitpaket-Pin                                            |
 | Betriebssystem      | Linux                                                            | CI und lokale Verifikation                                           |
@@ -32,4 +32,4 @@ automatische Installation auslösen.
 Aurora wird nur über `settings.json` aktiviert: die lokale Aurora-Extension,
 Theme und Entfernung der früheren UI-Paketquellen. Die vorherigen Paket-/Extension-
 Allowlists wiederherstellen, um zum früheren Cockpit zurückzukehren. Plan-Markdown,
-Sidecars, Authentifizierung und Sitzungen werden vom UI-Wechsel nicht migriert.
+Plan-Markdown, Authentifizierung und Sitzungen werden vom UI-Wechsel nicht migriert.

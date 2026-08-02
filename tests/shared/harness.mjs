@@ -3,8 +3,7 @@
  *
  * createHarness is deliberately self-contained: it records what an extension
  * registered and emitted so a suite can drive hooks, commands, shortcuts and
- * tools without a running agent. Extracted from run.mjs so the workflow-v3
- * suites use the same harness instead of a drifting second copy.
+ * tools without a running agent.
  */
 import { ROOT } from "./jiti-loader.mjs";
 import { eq } from "./assertions.mjs";

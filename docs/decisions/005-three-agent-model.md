@@ -20,7 +20,7 @@ sie statt der Grundrolle zu wählen ist — Aufwand ohne Ergebnisunterschied.
 
 ## Konsequenzen
 
-- Der Completion-Reviewer läuft über die versionierte In-Process-RPC von
-  `pi-subagents` und bleibt vom Worker unabhängig.
+- Reviews laufen nur als manuell und ausdrücklich angeforderte Prüfung; sie
+  sind keine automatische Completion- oder Abschlussstufe.
 - Ein Web-Researcher ist mangels Web-Toolchain nicht installiert.
 - Spezialprüfungen (Sicherheit, UI, Doku) sind Skills, keine eigenen Agenten.

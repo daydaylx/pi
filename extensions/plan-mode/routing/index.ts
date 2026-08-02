@@ -13,10 +13,7 @@ import type {
   RoutingDecision,
   RoutingInput,
   RoutingProfilesConfig,
-  RoutingReportMetrics,
 } from "./types.ts";
-import type { PlanSnapshot } from "../plan-snapshot.ts";
-import type { DirectTask } from "../store/index.ts";
 
 export type {
   RoutingAssessment,
@@ -57,38 +54,4 @@ export function computeRouting(
     workerProfile: profiles.worker,
     reviewerProfile: profiles.reviewer,
   });
-}
-
-/** Build routing input from a finalized plan snapshot (used at /work). */
-export function routingInputFromPlan(snapshot: PlanSnapshot): RoutingInput {
-  return {
-    taskText: snapshot.goal,
-    scopePaths: snapshot.technicalScope,
-    affectedAreas: snapshot.affectedAreas,
-    planType: snapshot.planType,
-    verification: snapshot.verification,
-  };
-}
-
-/** Build routing input from a direct task (used at /task). */
-export function routingInputFromDirectTask(task: DirectTask): RoutingInput {
-  return {
-    taskText: task.goal,
-    scopePaths: task.technicalScope,
-    affectedAreas: [],
-    verification: task.verification,
-  };
-}
-
-/** Project a decision to the neutral metrics attached to a completion report. */
-export function routingMetrics(
-  decision: RoutingDecision,
-): RoutingReportMetrics {
-  return {
-    level: decision.level,
-    workerProfile: decision.workerProfile,
-    plannerProfile: decision.plannerProfile,
-    reviewerProfile: decision.reviewerProfile,
-    manuallyEscalated: decision.manuallyEscalated,
-  };
 }

@@ -1,175 +1,43 @@
-/**
- * Session state shared by the workflow controllers.
- *
- * Replaces the closure variables that used to live inside the extension entry.
- * The point is not indirection but reach: planning, execution and completion
- * each own their handlers now, and they all need the same three things —
- * the loaded workflow state, the planning flags, and a way to persist.
- *
- * Deliberately a plain mutable record with three methods, not a framework:
- * every persistent write still goes through the store (Umbauvertrag §13.3),
- * and the presentation is refreshed wherever the state changes so the status
- * bar can never drift from the sidecar.
- */
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { PlanKind } from "./plan-snapshot.ts";
-import { updateWorkflowPresentation } from "./presentation.ts";
-import type { WorkflowMode, WorkflowStatus } from "../shared/workflow-status.ts";
 import {
-  loadWorkflowStateV3,
-  writeWorkflowStateCAS,
-  type WorkflowStateLoadResult,
-  type WorkflowStateV3,
-} from "./store/index.ts";
+  type WorkflowMode,
+  workflowModeLabel,
+} from "../shared/workflow-mode.ts";
 import { WORKFLOW_CAPABILITY_EVENTS } from "../shared/workflow-capabilities.ts";
-import { loadSetupConfig } from "../setup-core/config.ts";
-import {
-  computeRouting,
-  formatRoutingSummary,
-  type RoutingDecision,
-  type RoutingInput,
-} from "./routing/index.ts";
+import { updateWorkflowPresentation } from "./presentation.ts";
 
 export type NotifyLevel = "info" | "warning" | "error";
 
 export interface WorkflowSession {
   readonly pi: ExtensionAPI;
-  /** Last loaded plan + sidecar view. */
-  current: WorkflowStateLoadResult;
-  /** Set while a planning or review turn is active. */
-  planningKind?: PlanKind;
-  /** The workflow selected for this session, including passive menu changes. */
-  selectedMode?: WorkflowMode;
-  /** Plan content the running planning turn started from. */
-  planningBaseContent?: string;
-  /** Whether the active planning turn is a review rather than a new plan. */
-  planningIsReview: boolean;
-  /** Guards against a second completion pipeline running concurrently. */
-  completionRunning: boolean;
-  activeCwd?: string;
-  activeContext?: ExtensionContext;
-  /** In-memory routing decision; not persisted and not a WorkflowStatus. */
-  routing?: RoutingDecision;
-
+  selectedMode: WorkflowMode;
   notify(ctx: ExtensionContext, message: string, level?: NotifyLevel): void;
-  /** Current workflow mode for permission defaults — planning kind or work. */
-  workflowMode(): "work" | PlanKind;
-  /** UI override for a selected mode that has not changed persisted state. */
-  workflowPresentationOverride(): WorkflowStatus | undefined;
-  /** Announce the active mode so permissions can apply their defaults. */
-  publishWorkflowActivation(ctx: ExtensionContext): void;
-  /** Re-read plan and sidecar from disk and refresh the status bar. */
-  reload(ctx: ExtensionContext): WorkflowStateLoadResult;
-  /** CAS-write a new state, then refresh the status bar. */
-  replaceState(
-    ctx: ExtensionContext,
-    candidate: WorkflowStateV3,
-  ): WorkflowStateV3;
-  /**
-   * Assess the task before execution: load routing config, compute the frozen
-   * RoutingDecision, store it in memory and surface it. The only enforced
-   * effect is phase steering; it never changes WorkflowStatus.
-   */
-  assessRouting(ctx: ExtensionContext, input: RoutingInput): RoutingDecision;
+  setMode(ctx: ExtensionContext, mode: WorkflowMode): void;
+  publishMode(ctx: ExtensionContext): void;
 }
 
 export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
   const session: WorkflowSession = {
     pi,
-    current: {
-      stateToken: "missing",
-      recovered: false,
-      migrationRequired: false,
-      warnings: [],
-    },
-    planningIsReview: false,
-    completionRunning: false,
-
+    selectedMode: "work",
     notify(ctx, message, level = "info") {
       ctx.ui.notify(message, level);
     },
-
-    workflowMode() {
-      if (session.selectedMode) return session.selectedMode;
-      if (session.planningKind) return session.planningKind;
-      const status = session.current.state?.status;
-      if (status === "planning" || status === "reviewing") {
-        const planType = session.current.snapshot?.planType;
-        if (planType === "simple_plan" || planType === "detailed_plan") {
-          return planType;
-        }
-        return "simple_plan";
-      }
-      return "work";
+    setMode(ctx, mode) {
+      session.selectedMode = mode;
+      updateWorkflowPresentation(ctx, mode, pi);
+      session.publishMode(ctx);
+      session.notify(ctx, `${workflowModeLabel(mode)} aktiv.`);
     },
-
-    workflowPresentationOverride() {
-      if (session.planningKind)
-        return session.planningIsReview ? "reviewing" : "planning";
-      if (session.selectedMode === "simple_plan" || session.selectedMode === "detailed_plan")
-        return "planning";
-      if (
-        session.selectedMode === "work" &&
-        (session.current.state?.status === "planning" ||
-          session.current.state?.status === "reviewing")
-      ) {
-        return "idle";
-      }
-      return undefined;
-    },
-
-    publishWorkflowActivation(ctx) {
+    publishMode(ctx) {
       pi.events.emit(WORKFLOW_CAPABILITY_EVENTS.activated, {
         cwd: ctx.cwd,
         sessionId: ctx.sessionManager.getSessionId(),
-        mode: session.workflowMode(),
+        mode: session.selectedMode,
       });
-    },
-
-    reload(ctx) {
-      session.current = loadWorkflowStateV3(ctx.cwd);
-      updateWorkflowPresentation(
-        ctx,
-        session.current.state,
-        session.workflowPresentationOverride(),
-        session.pi,
-      );
-      return session.current;
-    },
-
-    replaceState(ctx, candidate) {
-      const saved = writeWorkflowStateCAS(
-        ctx.cwd,
-        candidate,
-        session.current.stateToken,
-      );
-      session.current = {
-        ...session.current,
-        state: saved.state,
-        stateToken: saved.stateToken,
-        recovered: false,
-      };
-      updateWorkflowPresentation(
-        ctx,
-        saved.state,
-        session.workflowPresentationOverride(),
-        session.pi,
-      );
-      return saved.state;
-    },
-
-    assessRouting(ctx, input) {
-      const setup = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
-      const decision = computeRouting(input, setup.config.routingProfiles);
-      session.routing = decision;
-      if (decision.downgradeBlocked) {
-        ctx.ui.notify(decision.downgradeBlocked, "warning");
-      }
-      ctx.ui.notify(formatRoutingSummary(decision), "info");
-      return decision;
     },
   };
   return session;

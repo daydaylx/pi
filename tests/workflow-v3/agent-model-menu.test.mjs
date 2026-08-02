@@ -1,8 +1,8 @@
 /**
  * Agent-Modellmenü (Super+S) Tests:
  * Verifiziert Shortcut-Registrierung, die Tab-Übersicht je Routing-Stufe, die
- * nach Anbieter kategorisierte Modell-Liste, Speicherung in setup.json und
- * Live-Aktualisierung von session.routing.
+ * wie `/model` sortierte und dargestellte Modell-Liste, Speicherung in setup.json und
+ * Speicherung der unabhängigen Routing-Profilkonfiguration.
  */
 import {
   existsSync,
@@ -13,9 +13,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { assert, eq, equal, test } from "./assertions.mjs";
+import { assert, eq, equal, test } from "../shared/assertions.mjs";
 import { createHarness } from "../shared/harness.mjs";
-import { load } from "./harness.mjs";
+import { importModule as load } from "../shared/jiti-loader.mjs";
 
 const planMode = await load("extensions/plan-mode/index.ts");
 const controlPlane = await load("extensions/control-plane.ts");
@@ -87,7 +87,7 @@ await test("buildLevelTabs exposes LOW/STANDARD/HIGH, LOW limited to Worker", as
   );
 });
 
-await test("buildModelPickerEntries groups by access provider and flags the active model", async () => {
+await test("buildModelPickerEntries follows /model ordering and row data", async () => {
   if (!agentModelMenu) return;
   const slot = {
     id: "high-worker",
@@ -120,20 +120,21 @@ await test("buildModelPickerEntries groups by access provider and flags the acti
     availableModels,
     profiles,
   );
-  assert(
-    entries.some((entry) => entry.section === "OpenCode Go Abo"),
-    "groups OpenCode Go models under their access-provider section",
+  const modelEntries = entries.filter((entry) => entry.value?.kind === "model");
+  eq(
+    modelEntries.map((entry) => entry.value.ref),
+    [
+      "opencode-go/deepseek-v4-pro",
+      "openai-codex/gpt-5.6-terra",
+      "opencode-go/kimi-k2.7-code",
+    ],
+    "places the active model first, then follows /model provider ordering",
   );
-  assert(
-    entries.some((entry) => entry.section === "OpenAI Codex Abo"),
-    "groups OpenAI Codex models under their access-provider section",
-  );
-  const active = entries.find(
-    (entry) =>
-      entry.value?.kind === "model" &&
-      entry.value.ref === "opencode-go/deepseek-v4-pro",
-  );
-  assert(active?.current, "marks the currently assigned model as active");
+  const active = modelEntries[0];
+  eq(active.label, "deepseek-v4-pro", "shows the technical model ID");
+  eq(active.badge, "opencode-go ✓", "shows provider and active marker");
+  eq(active.description, "Model Name: DeepSeek V4 Pro", "shows the model name as detail");
+  assert(active.current, "marks the currently assigned model as active");
   assert(
     entries.some((entry) => entry.value?.kind === "freitext"),
     "offers a manual/freitext entry",
@@ -191,8 +192,8 @@ await test("selecting a model returns to the tab overview instead of closing", a
       "opens a second overlay for the model list",
     );
     component = harness.customComponents.at(-1);
-    // Sorted by access provider first: "OpenAI Codex Abo" precedes
-    // "OpenCode Go Abo", so GPT-5.6 Terra is the first selectable model.
+    // The profile is initially unassigned, so /model ordering starts with the
+    // alphabetically first provider: GPT-5.6 Terra is selected first.
     component.handleInput("\r");
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -402,7 +403,7 @@ await test("menu remains fully usable without a custom TUI overlay (select fallb
           roleListPicks += 1;
           return roleListPicks === 1 ? "LOW › Worker" : undefined;
         }
-        return labels.find((label) => label === "Claude 3 Opus");
+        return labels.find((label) => label === "claude-3-opus");
       },
     });
     planMode.default(harness.api);

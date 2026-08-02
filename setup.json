@@ -20,24 +20,55 @@
     "idleShutdownMs": 600000
   },
   "subagents": {
-    "concurrency": 3,
-    "freshContext": true
+    "concurrency": 3
   },
   "verification": {
     "typecheck": {
       "command": "npm",
-      "args": ["--prefix", "npm", "run", "typecheck"],
+      "args": [
+        "--prefix",
+        "npm",
+        "run",
+        "typecheck"
+      ],
       "timeoutMs": 120000
     },
     "test": {
       "command": "npm",
-      "args": ["--prefix", "npm", "run", "test"],
+      "args": [
+        "--prefix",
+        "npm",
+        "run",
+        "test"
+      ],
       "timeoutMs": 300000
     },
     "verify": {
       "command": "npm",
-      "args": ["--prefix", "npm", "run", "verify"],
+      "args": [
+        "--prefix",
+        "npm",
+        "run",
+        "verify"
+      ],
       "timeoutMs": 420000
+    }
+  },
+  "routingProfiles": {
+    "levels": {
+      "low": {
+        "worker": "openai-codex/gpt-5.6-terra"
+      },
+      "standard": {
+        "worker": "openai-codex/gpt-5.6-terra",
+        "planner": "openai-codex/gpt-5.6-sol",
+        "reviewer": "zai/glm-5.2"
+      },
+      "high": {
+        "worker": "openai-codex/gpt-5.6-terra",
+        "planner": "openai-codex/gpt-5.6-sol",
+        "reviewer": "anthropic/claude-sonnet-5"
+      }
     }
   }
 }

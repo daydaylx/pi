@@ -50,7 +50,7 @@ function makeState(
 ): AuroraUiState {
   return {
     sessionEpoch: epoch,
-    workflow: { phase: "idle", label: "ARBEIT" },
+    workflow: { phase: "work", label: "Work" },
     permissions: {},
     lsp: {},
     model: {

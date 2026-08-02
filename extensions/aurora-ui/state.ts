@@ -1,8 +1,5 @@
 import type { EventBus, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  WORKFLOW_STATUSES,
-  type WorkflowStatus,
-} from "../shared/workflow-status.ts";
+import { WORKFLOW_MODES, type WorkflowMode } from "../shared/workflow-mode.ts";
 
 export const AURORA_UI_CHANNELS = {
   request: "aurora-ui/state/request",
@@ -10,12 +7,8 @@ export const AURORA_UI_CHANNELS = {
   snapshot: "aurora-ui/state/snapshot",
 } as const;
 
-/**
- * Presentation mirror of the canonical WorkflowStatus, plus "archived" for a
- * completed and filed workflow, which has no runtime state left to report.
- * The status values themselves are never re-declared here.
- */
-export type AuroraWorkflowPhase = WorkflowStatus | "archived";
+/** Presentation mirror of the selected workflow mode. */
+export type AuroraWorkflowPhase = WorkflowMode;
 
 export type AuroraActivityKind = "idle" | "thinking" | "tool" | "responding";
 
@@ -157,10 +150,7 @@ export function mergeAuroraUiState(
   state: AuroraUiState,
   patch: AuroraUiStatePatch,
 ): void {
-  const workflowPhases: readonly AuroraWorkflowPhase[] = [
-    ...WORKFLOW_STATUSES,
-    "archived",
-  ];
+  const workflowPhases: readonly AuroraWorkflowPhase[] = WORKFLOW_MODES;
   const activityKinds: readonly AuroraActivityKind[] = [
     "idle",
     "thinking",
@@ -173,13 +163,8 @@ export function mergeAuroraUiState(
       state.workflow.phase = patch.workflow.phase;
     if (typeof patch.workflow.label === "string")
       state.workflow.label = patch.workflow.label;
-    if (typeof patch.workflow.completed === "number")
-      state.workflow.completed = Math.max(
-        0,
-        Math.floor(patch.workflow.completed),
-      );
-    if (typeof patch.workflow.total === "number")
-      state.workflow.total = Math.max(0, Math.floor(patch.workflow.total));
+    if ("completed" in patch.workflow) state.workflow.completed = undefined;
+    if ("total" in patch.workflow) state.workflow.total = undefined;
   }
   if (patch.permissions) {
     if ("level" in patch.permissions)

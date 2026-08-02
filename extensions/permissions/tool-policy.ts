@@ -10,20 +10,13 @@ import {
   decideBash,
   decideFileAccess,
   type PolicyDecision,
-  type ProtectedWritePath,
 } from "../shared/permission-policy.ts";
-import { isPlanFilePath, PLAN_RELATIVE_PATH } from "../plan-mode/store/index.ts";
 import {
   PERMISSION_LEVEL_LABEL,
   type PermissionLevel,
 } from "../shared/workflow-status.ts";
 import type { PolicyAction as ConfiguredPolicyAction } from "../setup-core/config.ts";
-import type { WorkflowCapabilitySnapshot } from "../shared/workflow-capabilities.ts";
-import {
-  LOCAL_LSP_TOOLS,
-  decideWorkflowTool,
-  workflowAllowsPlanWrite,
-} from "./workflow-policy.ts";
+import { LOCAL_LSP_TOOLS } from "./workflow-policy.ts";
 import { toolPath } from "./tool-event.ts";
 
 export function permissionWarning(level: PermissionLevel): string | undefined {
@@ -36,38 +29,15 @@ export function permissionWarning(level: PermissionLevel): string | undefined {
   return undefined;
 }
 
-// Planning/reviewing alone may grant a write exception for the current plan.
-// Outside those workflow capabilities, readonly blocks the same path.
-const PROTECTED_WRITE_PATH: ProtectedWritePath = {
-  matches: isPlanFilePath,
-  label: PLAN_RELATIVE_PATH,
-};
-
 export function decideTool(
   permissionLevel: PermissionLevel,
   event: ToolCallEvent,
   cwd: string,
-  workflow: WorkflowCapabilitySnapshot,
   configured: {
     unknownTools: ConfiguredPolicyAction;
     bash: ConfiguredPolicyAction;
   },
 ): PolicyDecision {
-  const workflowDecision = decideWorkflowTool(workflow, event, cwd);
-  if (workflowDecision) {
-    if (
-      permissionLevel === "confirm-all" &&
-      workflowDecision.action === "allow" &&
-      ["write", "edit", "subagent"].includes(event.toolName)
-    ) {
-      return {
-        action: "ask",
-        reason: `Confirm All: kontrollierte Aktion "${event.toolName}" bestätigen`,
-      };
-    }
-    return workflowDecision;
-  }
-
   if (event.toolName === "bash") {
     if (permissionLevel === "project-write") {
       if (configured.bash === "block") {
@@ -114,14 +84,6 @@ export function decideTool(
   if (event.toolName === "ask_user") {
     return { action: "allow", reason: "Controlled workflow capability" };
   }
-  if (event.toolName === "plan_progress") {
-    return permissionLevel === "confirm-all"
-      ? {
-          action: "ask",
-          reason: "Confirm All: Sidecar-Fortschritt bestätigen",
-        }
-      : { action: "allow", reason: "Controlled workflow capability" };
-  }
   if (event.toolName === "verify") {
     return permissionLevel === "readonly"
       ? {
@@ -138,11 +100,7 @@ export function decideTool(
 
   if (event.toolName === "write" || event.toolName === "edit") {
     const filePath = toolPath(event) ?? "";
-    return decideFileAccess(permissionLevel, "write", filePath, cwd, {
-      ...(workflowAllowsPlanWrite(workflow)
-        ? { protectedWritePath: PROTECTED_WRITE_PATH }
-        : {}),
-    });
+    return decideFileAccess(permissionLevel, "write", filePath, cwd);
   }
 
   if (permissionLevel === "yolo") {

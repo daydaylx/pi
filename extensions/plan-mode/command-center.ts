@@ -21,9 +21,7 @@ import {
 } from "../shared/menu-ui.ts";
 
 export interface CommandCenterState {
-  hasActivePlan: boolean;
-  hasActiveDirectTask: boolean;
-  migrationRequired: boolean;
+  activeMode: "work" | "simple_plan" | "detailed_plan";
 }
 
 export interface CommandMenuAction {
@@ -33,32 +31,12 @@ export interface CommandMenuAction {
   guide?: CommandDefinition["guide"];
 }
 
-const NEEDS_PLAN = new Set([
-  "review-plan",
-  "plan-todos",
-  "view-plan",
-  "edit-plan",
-  "done",
-  "verify-gate",
-  "finish",
-  "discard-plan",
-]);
-
 function disabledReason(
   name: string,
   state: CommandCenterState,
 ): string | undefined {
-  if (NEEDS_PLAN.has(name) && !state.hasActivePlan) return "Kein aktiver Plan.";
-  if (name === "work" && !state.hasActivePlan)
-    return "Erstelle und bestätige zuerst einen Plan.";
-  if ((name === "plan" || name === "workflow") && state.hasActiveDirectTask)
-    return "Schließe den aktiven Direktauftrag zuerst mit /task-done ab.";
-  if (name === "task" && state.hasActivePlan)
-    return "Schließe oder verwirf den aktiven Plan zuerst.";
-  if (name === "task-done" && !state.hasActiveDirectTask)
-    return "Kein aktiver Direktauftrag.";
-  if (name === "migrate-plan" && !state.migrationRequired)
-    return "Keine Legacy-Migration erforderlich.";
+  if (name === "edit-plan" && state.activeMode === "work")
+    return "Wechsle zuerst in einen Planmodus.";
   return undefined;
 }
 

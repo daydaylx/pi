@@ -37,7 +37,7 @@ export interface SetupConfig {
     requestTimeoutMs: number;
     idleShutdownMs: number;
   };
-  subagents: { concurrency: number; freshContext: boolean };
+  subagents: { concurrency: number };
   verification: Record<VerificationName, VerificationCommand>;
   routingProfiles: RoutingProfilesConfig;
 }
@@ -71,7 +71,7 @@ const DEFAULT_CONFIG: SetupConfig = {
     requestTimeoutMs: 10_000,
     idleShutdownMs: 600_000,
   },
-  subagents: { concurrency: 3, freshContext: true },
+  subagents: { concurrency: 3 },
   verification: {
     typecheck: {
       command: "npm",
@@ -340,7 +340,7 @@ function applyUserLayer(
   if (subagents)
     reportUnknownKeys(
       subagents,
-      ["concurrency", "freshContext"],
+      ["concurrency"],
       source,
       "subagents.",
       diagnostics,
@@ -441,9 +441,6 @@ function applyUserLayer(
     "subagents.concurrency",
     diagnostics,
   );
-  if (typeof subagents?.freshContext === "boolean")
-    next.subagents.freshContext = subagents.freshContext;
-
   for (const name of ["typecheck", "test", "verify"] as const) {
     const rawCheck = verification?.[name];
     if (!isObject(rawCheck)) continue;
