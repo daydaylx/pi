@@ -42,6 +42,7 @@ const SECTION_SUITES = {
   "greenfield setup config and Aurora state contract": "runtime",
   "setup core lifecycle": "runtime",
   "project verification profiles (#105)": "runtime",
+  "project_check tool (#123)": "runtime",
   "native subagent profiles": "runtime",
   "native project skills": "runtime",
   "global control plane shortcuts": "runtime",
@@ -462,10 +463,9 @@ await section("target runtime configuration", async () => {
     }
 
     // Exact harness pins remain installed for deterministic typechecking even
-    // though the three former UI packages are not active runtime packages.
+    // though the remaining former UI packages are not active at runtime.
     for (const [name, version] of [
       ["pi-zentui", "0.3.0"],
-      ["pi-tool-display", "0.5.0"],
       ["@ujjwalgrover/pi-catppuccin", "1.0.0"],
       ["pi-subagents", "0.34.0"],
     ]) {
@@ -593,6 +593,10 @@ await section("setup core lifecycle", async () => {
   assert(
     Boolean(harness.tools.get("verify")),
     "setup core registers the allowlisted verify tool",
+  );
+  assert(
+    Boolean(harness.tools.get("project_check")),
+    "setup core registers the trust-bound project_check tool (#123)",
   );
   assert(
     !harness.commands.get("verify-gate"),
@@ -723,6 +727,21 @@ await section("setup core lifecycle", async () => {
       harness.execCalls.at(-1)?.options?.cwd,
       ROOT,
       "verify runs the setup's fixed command from the agent directory",
+    );
+  }
+  const projectCheck = harness.tools.get("project_check");
+  if (projectCheck) {
+    const missing = await projectCheck.execute(
+      "project-check-missing-config",
+      { profile: "tests" },
+      undefined,
+      undefined,
+      context,
+    );
+    eq(
+      missing.isError,
+      true,
+      "project_check reports a missing .pi/verify.json without guessing commands",
     );
   }
   assertNoGlobalChrome(harness, "setup core owns no TUI chrome");
@@ -897,6 +916,13 @@ await section("project verification profiles (#105)", async () => {
     null,
     "parent traversal is rejected",
   );
+  const outsideWorkspace = mkdtempSync(path.join(tmpdir(), "pi-verify-outside-"));
+  symlinkSync(outsideWorkspace, path.join(workspace, "outside-link"));
+  eq(
+    profilesMod.resolveProfileCwd(root, "outside-link"),
+    null,
+    "existing cwd symlinks escaping the project are rejected",
+  );
 
   // --- runProfile: program + args passed separately (no shell string) ---
   const seen = [];
@@ -986,9 +1012,106 @@ await section("project verification profiles (#105)", async () => {
 
   try {
     rmSync(workspace, { recursive: true, force: true });
+    rmSync(outsideWorkspace, { recursive: true, force: true });
   } catch {
     /* ignore temp cleanup */
   }
+});
+
+await section("project_check tool (#123)", async () => {
+  if (!setupCore) return;
+  const workspace = mkdtempSync(path.join(tmpdir(), "pi-project-check-"));
+  mkdirSync(path.join(workspace, ".pi"), { recursive: true });
+  writeFileSync(
+    path.join(workspace, ".pi", "verify.json"),
+    JSON.stringify({
+      profiles: {
+        typecheck: {
+          program: "npm",
+          args: ["run", "typecheck", "--token=do-not-leak"],
+          classification: "required",
+        },
+        lint: {
+          program: "npm",
+          args: ["run", "lint"],
+          classification: "advisory",
+        },
+      },
+    }),
+  );
+  const harness = createHarness();
+  setupCore.default(harness.api);
+  const trusted = harness.makeContext({ cwd: workspace, trusted: true });
+  await harness.runHooks("session_start", {}, trusted);
+  const tool = harness.tools.get("project_check");
+  assert(Boolean(tool), "project_check is available in a trusted project");
+  if (tool) {
+    const result = await tool.execute(
+      "project-check-ordered",
+      { profiles: ["typecheck", "lint"] },
+      undefined,
+      undefined,
+      trusted,
+    );
+    eq(
+      harness.execCalls.slice(-2).map((call) => call.command),
+      ["npm", "npm"],
+      "project_check executes requested profiles in deterministic order",
+    );
+    eq(
+      harness.execCalls.at(-2)?.options?.cwd,
+      workspace,
+      "project_check executes only at the bounded project cwd",
+    );
+    eq(result.isError, false, "successful required and advisory profiles pass");
+    eq(
+      result.details.profiles.map((profile) => profile.classification),
+      ["required", "advisory"],
+      "project_check returns each profile classification structurally",
+    );
+    assert(
+      result.content[0].text.includes("--token=[redacted]") &&
+        !result.content[0].text.includes("do-not-leak"),
+      "project_check redacts credential-like command arguments",
+    );
+    const unknown = await tool.execute(
+      "project-check-unknown",
+      { profile: "does-not-exist" },
+      undefined,
+      undefined,
+      trusted,
+    );
+    eq(unknown.isError, true, "project_check rejects unknown profile IDs");
+    assert(
+      unknown.content[0].text.includes("Verfügbar: lint, typecheck"),
+      "unknown profile errors list available profile IDs",
+    );
+    const invalid = await tool.execute(
+      "project-check-ambiguous",
+      { profile: "lint", profiles: ["typecheck"] },
+      undefined,
+      undefined,
+      trusted,
+    );
+    eq(invalid.isError, true, "project_check rejects ambiguous single-plus-list calls");
+  }
+  const untrusted = harness.makeContext({ cwd: workspace, trusted: false });
+  await harness.runHooks("session_start", {}, untrusted);
+  if (tool) {
+    const result = await tool.execute(
+      "project-check-untrusted",
+      { profile: "typecheck" },
+      undefined,
+      undefined,
+      untrusted,
+    );
+    eq(result.isError, true, "project_check refuses untrusted project profiles");
+    assert(
+      result.content[0].text.includes("vertrauten Projekten"),
+      "project_check explains the trust requirement",
+    );
+  }
+  rmSync(workspace, { recursive: true, force: true });
 });
 
 /** Gate exec stub whose typecheck step fails; used by the sections below. */
@@ -2355,6 +2478,7 @@ await section("combined production extension stack", async () => {
       "lsp_hover",
       "lsp_references",
       "lsp_workspace_symbols",
+      "project_check",
       "verify",
     ],
     "only local functional tools register locally",

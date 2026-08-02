@@ -6,9 +6,8 @@
 und lese die Statuswerte über `zentui.json`. Das traf zum Zeitpunkt der
 Entscheidung womöglich zu, aber nicht mehr: `extensions/aurora-ui/index.ts` ruft
 `ctx.ui.setFooter(…)` selbst auf, und `tests/run.mjs` hält seit der
-Paketbereinigung ausdrücklich fest, dass die drei früheren UI-Pakete keine
-aktiven Laufzeitpakete mehr sind — sie bleiben nur als exakte Pins für einen
-deterministischen Typecheck installiert.
+Paketbereinigung ausdrücklich fest, dass die früheren UI-Pakete keine aktiven
+Laufzeitpakete mehr sind. Die für den Typecheck nötigen Pins bleiben installiert.
 
 `zentui.json` steuerte damit nichts. Wer die Fußzeile ändern wollte, editierte
 `footerFormat`, `footerSegments` oder `contextThresholds` und sah keine Wirkung.
@@ -18,8 +17,10 @@ Dasselbe galt für `extensions/pi-tool-display/config.json`.
 
 Aurora ist der einzige Besitzer der gesamten TUI-Chrome, Fußzeile eingeschlossen.
 `zentui.json` und `extensions/pi-tool-display/config.json` sind gelöscht. Die
-npm-Pins in `npm/package.json` bleiben unverändert — sie tragen den Typecheck,
-nicht die Laufzeit.
+npm-Pins für die noch benötigten Typen in `npm/package.json` bleiben unverändert
+— sie tragen den Typecheck, nicht die Laufzeit. Der ungenutzte
+`pi-tool-display`-Pin wurde entfernt, weil sein Peer-Bereich Pi 0.83 nicht
+unterstützt.
 
 Die Fußzeile ist zugleich die einzige Statusfläche. Modell, Denktiefe, Projekt,
 Berechtigung, LSP und Kontext stehen dort und auf keiner zweiten Fläche; der

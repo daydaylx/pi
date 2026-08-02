@@ -44,6 +44,30 @@ benchmarks/
 └── results/                Lauf-Ergebnisse (nie erfundene Werte, nur reale Läufe)
 ```
 
+## V2: private Evaluator-Umgebung
+
+Die P3-Dateien bleiben als historische Serie unverändert. Die nächste Serie
+nutzt einen **externen**, nicht im Agenten-Worktree liegenden Bereich, der vor
+jedem Lauf ausdrücklich gesetzt werden muss:
+
+```text
+PI_BENCHMARK_PRIVATE_ROOT=/absoluter/private/pfad
+```
+
+Er enthält je Aufgabe `tasks/<id>/metadata.json` und `evaluator.mjs`, inklusive
+versteckter Eingaben und Referenzwissen. Der Agentenprozess erhält diesen Pfad
+nicht als Umgebungsvariable. Das Modul `harness/v2-private.mjs` führt den
+Evaluator erst nach dem Agentenlauf aus, akzeptiert nur eine kleine öffentliche
+Ergebnisprojektion und redigiert private Pfade und Lösungsdetails. Private
+Artefakte oder Tests gehören niemals in `benchmarks/tasks/` oder einen
+Agenten-Worktree.
+
+`harness/p4-manifest.json` ist die getrennte P4-Serie für den vereinfachten
+Workflow. Sie pinnt Referenzcommit, Serien-ID, Rollen, Modelle und Thinking
+vollständig. P3-Ergebnisse werden nicht mit P4 zusammengefasst. Der erste
+Pilot deckt eine kurze prüfbare Aufgabe, eine Multi-Datei-Aufgabe, eine lange
+Sitzung und das Same-Model-Subagent-A/B-Paar ab.
+
 ## Trennung von Produktivcode
 
 `benchmarks/` ist nicht in `settings.json` → `extensions` referenziert,

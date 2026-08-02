@@ -50,6 +50,14 @@ for (const patch of PATCHES) {
     assert.equal(twice.content, once, "a second run changes nothing");
   });
 
+  if (patch.legacyDetect) {
+    check(`${patch.id}: upgrades its known legacy form`, () => {
+      const planned = planPatch(patch, patch.legacyDetect);
+      assert.equal(planned.state, "pending");
+      assert.ok(planned.content.includes(patch.detect));
+    });
+  }
+
   check(`${patch.id}: refuses a runtime it does not recognise`, () => {
     assert.throws(
       () => planPatch(patch, "// eine Runtime, die diesen Anker nicht kennt\n"),

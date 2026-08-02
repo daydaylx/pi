@@ -3,7 +3,7 @@
  *
  * The patches live in `node_modules` and every `npm update` of the runtime
  * removes them — that already happened once, silently, between 0.82.0 and
- * 0.82.1. `tests/p1-runtime.mjs` notices the loss; this script repairs it
+ * 0.83.0. `tests/p1-runtime.mjs` notices the loss; this script repairs it
  * without anyone having to rewrite the edits by hand.
  *
  * Three rules it will not bend:
@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The runtime version these patches were written and verified against. */
-export const EXPECTED_RUNTIME_VERSION = "0.82.1";
+export const EXPECTED_RUNTIME_VERSION = "0.83.0";
 
 export const DEFAULT_RUNTIME_ROOT =
   process.env.PI_RUNTIME_ROOT ??
@@ -276,7 +276,20 @@ function applyConfiguredExtensionOrder(resolved, overrides, fallbackBaseDir) {
     id: "package-manager-order-use",
     file: "dist/core/package-manager.js",
     summary: "toResolvedPaths() wendet die deklarierte Reihenfolge an",
-    detect: "mapToResolved(accumulator.extensions, extensionOverrides)",
+    detect: `        const globalSettings = this.settingsManager.getGlobalSettings();
+        const extensionOverrides = [
+            ...(globalSettings.extensions ?? []),
+        ];`,
+    // The first 0.83.0 port used the removed getSettings() API. Recognize that
+    // exact short-lived form and upgrade it atomically with the other patches.
+    legacyDetect: `        const settings = this.settingsManager.getSettings();
+        const extensionOverrides = [
+            ...(settings?.extensions ?? []),
+        ];`,
+    legacyReplacement: `        const globalSettings = this.settingsManager.getGlobalSettings();
+        const extensionOverrides = [
+            ...(globalSettings.extensions ?? []),
+        ];`,
     anchor: `    toResolvedPaths(accumulator) {
         const mapToResolved = (entries) => {
             const resolved = Array.from(entries.entries()).map(([path, { metadata, enabled }]) => ({
@@ -318,9 +331,9 @@ function applyConfiguredExtensionOrder(resolved, overrides, fallbackBaseDir) {
                 return true;
             });
         };
-        const settings = this.settingsManager.getSettings();
+        const globalSettings = this.settingsManager.getGlobalSettings();
         const extensionOverrides = [
-            ...(settings?.extensions ?? []),
+            ...(globalSettings.extensions ?? []),
         ];
         return {
             extensions: mapToResolved(accumulator.extensions, extensionOverrides),`,
@@ -334,6 +347,18 @@ function applyConfiguredExtensionOrder(resolved, overrides, fallbackBaseDir) {
  */
 export function planPatch(patch, content) {
   if (content.includes(patch.detect)) return { state: "already", content };
+  if (patch.legacyDetect && content.includes(patch.legacyDetect)) {
+    const occurrences = content.split(patch.legacyDetect).length - 1;
+    if (occurrences > 1) {
+      throw new Error(
+        `Patch '${patch.id}': veralteter Anker kommt ${occurrences}× in ${patch.file} vor und ist damit nicht eindeutig.`,
+      );
+    }
+    return {
+      state: "pending",
+      content: content.replace(patch.legacyDetect, patch.legacyReplacement),
+    };
+  }
   const occurrences = content.split(patch.anchor).length - 1;
   if (occurrences === 0) {
     throw new Error(

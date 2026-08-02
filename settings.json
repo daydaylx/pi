@@ -1,10 +1,10 @@
 {
-  "lastChangelogVersion": "0.82.1",
+  "lastChangelogVersion": "0.83.0",
   "theme": "aurora-night",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.6-terra",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "xhigh",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -42,7 +42,7 @@
     "openrouter/openai/gpt-oss-120b"
   ],
   "packages": [
-    "git:github.com/daydaylx/pi-subagents@dd716cfc8c3a9b0ee35632752ac2b1736cd7de61"
+    "git:github.com/daydaylx/pi-subagents@7be2c87cdf8548fbaca25f6e6d0f90ee13efddb6"
   ],
   "subagents": {
     "disableBuiltins": true

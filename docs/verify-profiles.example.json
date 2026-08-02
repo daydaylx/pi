@@ -1,5 +1,4 @@
 {
-  "_comment": "Example project-local verification profiles. Copy to .pi/verify.json in a TRUSTED project. Only read when the project is trusted; otherwise ignored entirely. Separate from the inviolable setup verification. See docs/verify-profiles.md.",
   "profiles": {
     "typecheck": {
       "program": "npm",

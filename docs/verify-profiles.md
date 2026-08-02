@@ -1,16 +1,17 @@
 # Projekt-Verifikationsprofile (`.pi/verify.json`)
 
 > Vertrauensgebundene, schema-gestützte projektlokale Prüfprofile.
-> Issue: [#105](https://github.com/daydaylx/pi/issues/105) – Foundation für das
-> universelle Verifikations-Gate [#102](https://github.com/daydaylx/pi/issues/102).
+> Issues: [#105](https://github.com/daydaylx/pi/issues/105) und
+> [#123](https://github.com/daydaylx/pi/issues/123).
 
 ## Zweck
 
 Ein **vertrautes** Projekt kann seine eigenen Prüfungen (Typecheck, Lint, Tests,
 Build, projektspezifische Checks) deklarieren – z. B. eine JS-Profil `npm test`,
-eine Python-Profil `pytest`, eine Rust-Profil `cargo test`. Das künftige
-Verifikations-Gate (#102) führt diese Profile deterministisch aus, bevor eine
-Aufgabe als abgeschlossen gilt.
+eine Python-Profil `pytest`, eine Rust-Profil `cargo test`. Das Tool
+`project_check` führt ausdrücklich angeforderte Profile in ihrer angegebenen
+Reihenfolge aus. Es gibt kein automatisches Abschluss-Gate und keine
+Pflichtprüfung nach Änderungen.
 
 ## Abgrenzung zur Setup-Verifikation (wichtig)
 
@@ -27,6 +28,23 @@ lockern keine globalen Grenzen.
   „ignored until the project is trusted“).
 - `/setup-doctor` zeigt den Status: Anzahl geladener Profile bzw. „ignoriert
   (untrusted)“.
+
+## Ausführen mit `project_check`
+
+Das Tool akzeptiert entweder ein einzelnes Profil oder eine kleine geordnete
+Liste (maximal acht), aber niemals ein freies Shell-Kommando:
+
+```text
+project_check({ "profile": "typecheck" })
+project_check({ "profiles": ["typecheck", "tests"] })
+```
+
+Pro Profil enthält das Ergebnis Profil-ID, redigiertes Programm und Argumente,
+relatives Arbeitsverzeichnis, Klassifikation, Start- und Endzeit, Exit-Code,
+Dauer, Status und begrenzte relevante Ausgabe. `advisory`-Befunde machen den
+Tool-Aufruf nicht fehlerhaft; bei `recommended` bleibt ein fehlendes Binary als
+sichtbares Restrisiko erhalten. Ungültige, fehlende oder in nicht vertrauten
+Projekten liegende Profile werden nicht ausgeführt.
 
 ## Schema
 
@@ -106,8 +124,8 @@ Siehe [`verify-profiles.example.json`](verify-profiles.example.json).
 - **Begrenztes `cwd`:** Pfad-Traversal (`..`/absolut) wird beim Laden und vor
   der Ausführung abgelehnt.
 - **Begrenztes Timeout:** harte Obergrenze, kein endloses Hängen.
-- **Additiv-Env:** nur deklarierte Keys werden gesetzt/überschrieben;
-  `process.env` wird nicht als ganzes durchgereicht.
+- **Additiv-Env:** nur deklarierte Keys werden gesetzt/überschrieben; sie
+  erscheinen nicht im Tool-Ergebnis.
 - **Trust-Pflicht:** ohne Vertrauen keine Auswertung, keine Ausführung.
 
 ## Troubleshooting

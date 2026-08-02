@@ -17,7 +17,7 @@
  *   - Schema validation is fail-closed: unknown keys or bad types drop the
  *     offending profile and produce a diagnostic.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { limitTextOutput } from "../shared/output-limits.ts";
 
@@ -70,7 +70,7 @@ export interface ExecOptions {
   cwd: string;
   timeout: number;
   env: Record<string, string>;
-  signal?: unknown;
+  signal?: AbortSignal;
 }
 
 export interface ExecResult {
@@ -92,7 +92,7 @@ export type ExecFn = (
 
 export interface RunProfileOptions {
   projectRoot: string;
-  signal?: unknown;
+  signal?: AbortSignal;
   exec: ExecFn;
 }
 
@@ -121,12 +121,32 @@ export function resolveProfileCwd(
   cwd: string,
 ): string | null {
   if (isAbsolute(cwd)) return null;
-  const resolved = resolve(projectRoot, cwd);
-  const rel = relative(projectRoot, resolved);
+  const resolvedRoot = resolve(projectRoot);
+  const resolved = resolve(resolvedRoot, cwd);
+  const rel = relative(resolvedRoot, resolved);
   // rel === "" means the project root itself (allowed). ".." means escape.
   if (rel !== "" && rel.startsWith("..")) return null;
-  // Also reject path segments that resolve outside via symlink-ish ".." parts.
+  // Also reject path segments that resolve outside via ".." parts.
   if (rel.split(/[\\/]/).some((segment) => segment === "..")) return null;
+  // A lexical check alone permits an existing directory symlink that points
+  // outside the project. Resolve both sides physically when possible. A
+  // missing directory remains a normal process error rather than an escape.
+  if (existsSync(resolved)) {
+    try {
+      const physicalRoot = realpathSync(resolvedRoot);
+      const physicalCwd = realpathSync(resolved);
+      const physicalRel = relative(physicalRoot, physicalCwd);
+      if (
+        physicalRel !== "" &&
+        (physicalRel.startsWith("..") ||
+          physicalRel.split(/[\\/]/).some((segment) => segment === ".."))
+      ) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+  }
   return resolved;
 }
 

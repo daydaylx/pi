@@ -2,8 +2,8 @@
 
 | Komponente          | Gepinnte Version / Wert                                          | Verifikation                                                         |
 | ------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Pi-Runtime          | `0.82.1`                                                         | installiertes globales Paket und `pi --version`                      |
-| Pi-Dev-Abhängigkeit | `0.80.6`                                                         | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
+| Pi-Runtime          | `0.83.0`                                                         | installiertes globales Paket und `pi --version`                      |
+| Pi-Dev-Abhängigkeit | `0.83.0`                                                         | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
 | Node.js             | `22.22.2`                                                        | `node --version`                                                     |
 | npm                 | `10.9.7`                                                         | `npm --version`                                                      |
 | Aurora UI           | lokales TypeScript                                               | Typecheck, Lifecycle- und responsive Render-Tests                    |

@@ -20,12 +20,14 @@
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
     "jiti": "2.7.0",
     "pi-subagents": "0.34.0",
-    "pi-tool-display": "0.5.0",
     "pi-zentui": "0.3.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@earendil-works/pi-coding-agent": "0.83.0",
     "@types/node": "24.12.4",
     "typescript": "7.0.2"
+  },
+  "overrides": {
+    "brace-expansion": "5.0.8"
   }
 }

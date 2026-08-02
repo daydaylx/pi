@@ -2,7 +2,7 @@
 
 Die tatsächlich gestartete Pi-Runtime liegt unter
 `/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent` und hat
-Version `0.82.1`. Sie enthält bewusst lokale P1-Patches, die nicht Teil dieses
+Version `0.83.0`. Sie enthält bewusst lokale P1-Patches, die nicht Teil dieses
 Git-Arbeitsbaums sind.
 
 > **Historie:** Das Upgrade von `0.82.0` auf `0.82.1` hat die gepatchten Dateien
@@ -10,6 +10,9 @@ Git-Arbeitsbaums sind.
 > 2026-07-28 wurden sie gegen `0.82.1` neu portiert und in
 > `scripts/apply-runtime-patches.mjs` versioniert, damit sich das Nachschreiben
 > von Hand nicht wiederholt.
+
+Am 2026-08-02 wurde der Patch gegen Pi `0.83.0` geprüft und neu gebunden. Alle
+neun Anker waren unverändert; der Patch-Umfang selbst blieb gleich.
 
 ## Wiederherstellen
 
