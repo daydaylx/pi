@@ -43,7 +43,7 @@ export function validateP4Manifest(manifest, { root = ROOT } = {}) {
       throw new Error("P4 runs require path-safe ids and an explicit same-model stack mode.");
     }
   }
-  for (const taskId of ["01-single-file-change", "02-local-bug", "03-failing-unit-test", "04-multi-file-change", "10-with-without-subagent"]) {
+  for (const taskId of ["01-single-file-change", "02-local-bug", "03-failing-unit-test", "04-multi-file-change", "05-refactor-no-behavior-change", "06-unfamiliar-code-navigation", "07-underspecified-request", "08-long-session-compaction", "09-hanging-tool-call", "10-with-without-subagent"]) {
     if (!existsSync(join(root, "benchmarks", "v2", "tasks", taskId, "PROMPT.md"))) {
       throw new Error(`P4 public prompt missing for migrated task '${taskId}'.`);
     }
