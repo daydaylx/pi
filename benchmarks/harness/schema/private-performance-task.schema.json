@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "External P4 private performance task metadata",
+  "type": "object",
+  "required": ["taskId", "seriesId", "sourceCommit", "visibleInputFingerprint", "privateInputFingerprint", "evaluatorFingerprint", "bottleneckClass", "expectedScope", "hiddenCorrectnessInputs", "hiddenPerformanceInputs", "baseline", "measurement", "antiGaming"],
+  "properties": {
+    "taskId": { "type": "string", "pattern": "^(11-cpu-hotspot|12-allocation-layout|13-build-dispatch)$" },
+    "seriesId": { "const": "P4" },
+    "bottleneckClass": { "enum": ["cpu_algorithm", "allocation_layout", "build_dispatch"] },
+    "hiddenCorrectnessInputs": { "type": "array", "minItems": 2 },
+    "hiddenPerformanceInputs": { "type": "array", "minItems": 2 },
+    "measurement": { "type": "object", "required": ["warmups", "runs", "primaryStatistic"] },
+    "antiGaming": { "type": "object", "required": ["testMutation", "hardcodedInput", "cleanBuild"] }
+  }
+}

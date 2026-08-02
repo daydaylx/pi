@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
-import { loadPrivateTask } from "./v2-private.mjs";
+import { agentEnvironment, loadPrivateTask, runPrivateEvaluator } from "./v2-private.mjs";
 
 function hash(value) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 
@@ -70,6 +70,36 @@ export function pinRuntimeRoles(manifestRoles, resolvedRoles) {
   return result;
 }
 
+/** Fail before a run if Pi cannot resolve every explicitly pinned model. */
+export function assertPinnedModelsAvailable(manifestRoles, availableModels) {
+  if (!Array.isArray(availableModels)) throw new Error("P4 requires the runtime's resolved available-model list.");
+  for (const [role, pin] of Object.entries(manifestRoles)) {
+    if (pin.enabled === false) continue;
+    if (!availableModels.includes(pin.model)) throw new Error(`P4 pinned model for '${role}' is unavailable.`);
+  }
+  return true;
+}
+
+/** A subagent record must preserve its role, pin and main-run relationship. */
+export function validateRoleHistory(history, manifestRoles, parentRunId) {
+  if (!Array.isArray(history)) throw new Error("P4 runtime did not return role history.");
+  return history.map((entry) => {
+    const pin = manifestRoles[entry?.role];
+    if (!pin || pin.enabled === false || entry.parentRunId !== parentRunId || entry.model !== pin.model || entry.thinking !== pin.thinking) {
+      throw new Error("P4 subagent history differs from the pinned role configuration.");
+    }
+    return { role: entry.role, model: entry.model, thinking: entry.thinking, parentRunId: entry.parentRunId, ...(entry.durationMs === undefined ? {} : { durationMs: entry.durationMs }), ...(entry.tokens === undefined ? {} : { tokens: entry.tokens }) };
+  });
+}
+
+export function inspectAgentChanges(worktree) {
+  const diff = git(worktree, ["diff", "--no-ext-diff", "--binary"]);
+  const changedFiles = git(worktree, ["diff", "--no-ext-diff", "--name-only"]).split("\n").filter(Boolean);
+  const visibleTestChanges = changedFiles.filter((path) => /(^|\/)(?:test|tests|__tests__|spec)(?:\/|\.|$)/i.test(path));
+  const benchmarkChanges = changedFiles.filter((path) => /(^|\/)(?:bench|benchmark)(?:\/|\.|$)/i.test(path));
+  return { diffFingerprint: createHash("sha256").update(diff).digest("hex"), changedFiles, visibleTestChanges, benchmarkChanges };
+}
+
 export function createP4Result({ manifest, run, promptFingerprint, resolvedRoles, evaluator, inputFingerprint, sessionMetrics, diff }) {
   const roles = pinRuntimeRoles(manifest.roles, resolvedRoles);
   const configFingerprint = hash({ manifest: { seriesId: manifest.seriesId, reference: manifest.reference, roles: manifest.roles, run }, promptFingerprint });
@@ -86,4 +116,30 @@ export function validatePrivateP4Task(privateRoot, taskId) {
   const task = loadPrivateTask(privateRoot, taskId);
   if (task.metadata.seriesId !== "P4") throw new Error("Private task does not belong to P4.");
   return { taskId, evaluatorFingerprint: hash(task.metadata), inputFingerprint: task.metadata.inputFingerprint };
+}
+
+/**
+ * Execute one P4 run. `launchAgent` belongs to the runtime integration; it is
+ * handed only the public prompt, isolated worktree and scrubbed environment.
+ */
+export async function runP4Task({ root, manifest, run, privateRoot, availableModels, launchAgent }) {
+  if (typeof launchAgent !== "function") throw new Error("P4 requires a controlled agent launcher.");
+  assertPinnedModelsAvailable(manifest.roles, availableModels);
+  const privateTask = validatePrivateP4Task(privateRoot, run.task);
+  const prepared = prepareP4Worktree({ root, reference: manifest.reference, taskId: run.task });
+  try {
+    const launch = await launchAgent({
+      worktree: prepared.worktree,
+      prompt: readFileSync(prepared.promptPath, "utf8"),
+      env: agentEnvironment(process.env),
+      run: { id: run.id, stackMode: run.stackMode },
+    });
+    const resolvedRoles = pinRuntimeRoles(manifest.roles, launch?.resolvedRoles);
+    const roleHistory = validateRoleHistory(launch?.roleHistory ?? [], manifest.roles, run.id);
+    const evaluator = runPrivateEvaluator({ root: privateRoot, taskId: run.task, worktree: prepared.worktree });
+    const diff = inspectAgentChanges(prepared.worktree);
+    return createP4Result({ manifest, run, promptFingerprint: prepared.promptFingerprint, resolvedRoles,
+      evaluator: { ...evaluator, visibleTestChanges: diff.visibleTestChanges, benchmarkChanges: diff.benchmarkChanges },
+      inputFingerprint: privateTask.inputFingerprint ?? "unknown", sessionMetrics: { ...(launch?.sessionMetrics ?? {}), roleHistory }, diff });
+  } finally { disposeP4Worktree({ root, ...prepared }); }
 }

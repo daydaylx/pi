@@ -1,0 +1,18 @@
+{
+  "$schema": "./schema/p4-production-stack-manifest.schema.json",
+  "schemaVersion": "2.0.0",
+  "name": "pi-benchmark-v2-production-stack",
+  "reference": "b85cb72247a7097f6a938c35d145d195d85942a4",
+  "seriesId": "P4-production",
+  "privateEvaluator": "PI_BENCHMARK_PRIVATE_ROOT",
+  "roles": {
+    "main": { "model": "opencode-go/kimi-k2.7-code", "thinking": "high" },
+    "planner": { "model": "openai-codex/gpt-5.6-sol", "thinking": "high" },
+    "worker": { "model": "openai-codex/gpt-5.6-terra", "thinking": "high" },
+    "reviewer": { "model": "zai/glm-5.2", "thinking": "high" }
+  },
+  "runs": [
+    { "id": "p4-production-10-a", "task": "10-with-without-subagent", "stackMode": "production-stack", "variant": "without-subagent" },
+    { "id": "p4-production-10-b", "task": "10-with-without-subagent", "stackMode": "production-stack", "variant": "with-subagent" }
+  ]
+}

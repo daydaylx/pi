@@ -17,6 +17,12 @@ const suites = [
     file: "run.mjs",
     env: { PI_TEST_SUITE: "diff" },
   },
+  { name: "performance-tools", file: "performance-tools.mjs", env: {} },
+  { name: "p4-manifest", file: "../benchmarks/harness/test/p4-manifest.test.mjs", env: {} },
+  { name: "p4-performance-manifest", file: "../benchmarks/harness/test/p4-performance-manifest.test.mjs", env: {} },
+  { name: "p4-production-stack", file: "../benchmarks/harness/test/stack-manifest.test.mjs", env: {} },
+  { name: "p4-private-boundary", file: "../benchmarks/harness/test/v2-private.test.mjs", env: {} },
+  { name: "p4-controller", file: "../benchmarks/harness/test/p4-controller.test.mjs", env: {} },
 ];
 
 for (const suite of suites) {

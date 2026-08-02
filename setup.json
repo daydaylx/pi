@@ -67,7 +67,7 @@
       "high": {
         "worker": "openai-codex/gpt-5.6-terra",
         "planner": "openai-codex/gpt-5.6-sol",
-        "reviewer": "anthropic/claude-sonnet-5"
+        "reviewer": "zai/glm-5.2"
       }
     }
   }

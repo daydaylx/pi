@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pi Benchmark P4 Production Stack Manifest",
+  "type": "object",
+  "required": ["schemaVersion", "name", "reference", "seriesId", "privateEvaluator", "roles", "runs"],
+  "properties": {
+    "schemaVersion": { "const": "2.0.0" },
+    "name": { "const": "pi-benchmark-v2-production-stack" },
+    "seriesId": { "const": "P4-production" },
+    "privateEvaluator": { "const": "PI_BENCHMARK_PRIVATE_ROOT" }
+  }
+}

@@ -43,6 +43,8 @@ const SECTION_SUITES = {
   "setup core lifecycle": "runtime",
   "project verification profiles (#105)": "runtime",
   "project_check tool (#123)": "runtime",
+  "project check freshness warning (#129)": "runtime",
+  "performance tool registrations": "runtime",
   "native subagent profiles": "runtime",
   "native project skills": "runtime",
   "global control plane shortcuts": "runtime",
@@ -1054,12 +1056,12 @@ await section("project_check tool (#123)", async () => {
       trusted,
     );
     eq(
-      harness.execCalls.slice(-2).map((call) => call.command),
-      ["npm", "npm"],
+      harness.execCalls.slice(-3).map((call) => call.command),
+      ["npm", "npm", "git"],
       "project_check executes requested profiles in deterministic order",
     );
     eq(
-      harness.execCalls.at(-2)?.options?.cwd,
+      harness.execCalls.at(-3)?.options?.cwd,
       workspace,
       "project_check executes only at the bounded project cwd",
     );
@@ -1110,6 +1112,88 @@ await section("project_check tool (#123)", async () => {
       result.content[0].text.includes("vertrauten Projekten"),
       "project_check explains the trust requirement",
     );
+  }
+  rmSync(workspace, { recursive: true, force: true });
+});
+
+await section("project check freshness warning (#129)", async () => {
+  if (!setupCore) return;
+  const workspace = mkdtempSync(path.join(tmpdir(), "pi-project-check-freshness-"));
+  mkdirSync(path.join(workspace, ".pi"), { recursive: true });
+  writeFileSync(path.join(workspace, ".pi", "verify.json"), JSON.stringify({
+    profiles: { test: { program: "node", args: ["--version"], classification: "required" } },
+  }));
+  const harness = createHarness({
+    exec(command) {
+      return { code: 0, stdout: command === "git" ? "diff --git a/a b/a\n" : "ok", stderr: "", killed: false };
+    },
+  });
+  setupCore.default(harness.api);
+  const context = harness.makeContext({ cwd: workspace, trusted: true });
+  await harness.runHooks("session_start", {}, context);
+  await harness.runHooks("agent_end", {}, context);
+  assert(harness.notifications.at(-1)?.message?.includes("kein erfolgreicher Projekt-Check"), "agent end warns non-blockingly for a changed unchecked project");
+  const checks = harness.tools.get("project_check");
+  if (checks) await checks.execute("fresh-check", { profile: "test" }, undefined, undefined, context);
+  const warnings = harness.notifications.length;
+  await harness.runHooks("agent_end", {}, context);
+  eq(harness.notifications.length, warnings, "a successful required check for the current diff suppresses the warning");
+  rmSync(workspace, { recursive: true, force: true });
+});
+
+await section("performance tool registrations", async () => {
+  if (!setupCore) return;
+  const workspace = mkdtempSync(path.join(tmpdir(), "pi-performance-registration-"));
+  mkdirSync(path.join(workspace, ".pi"), { recursive: true });
+  writeFileSync(path.join(workspace, ".pi", "performance.json"), JSON.stringify({
+    profiles: {
+      quick: {
+        program: "bench",
+        args: [],
+        warmups: 0,
+        runs: 2,
+        metricSource: "json",
+        metric: "duration_ms",
+        direction: "lower_is_better",
+      },
+    },
+  }));
+  writeFileSync(path.join(workspace, ".pi", "profiling.json"), JSON.stringify({
+    profiles: {
+      compiler: { adapter: "compiler-diagnostics", program: "cc", args: ["-c", "source.c"] },
+    },
+  }));
+  const harness = createHarness({
+    exec(command) {
+      if (command === "git") return { code: 0, stdout: "diff --git a/a b/a\n", stderr: "", killed: false };
+      if (command === "bench") return { code: 0, stdout: '{"duration_ms":10}', stderr: "", killed: false };
+      if (command === "cc") return { code: 0, stdout: "source.c:1:1: remark: loop vectorized", stderr: "", killed: false };
+      return { code: 1, stdout: "", stderr: "unexpected command", killed: false };
+    },
+  });
+  setupCore.default(harness.api);
+  const context = harness.makeContext({ cwd: workspace, trusted: true });
+  await harness.runHooks("session_start", {}, context);
+  const profile = harness.tools.get("performance_profile");
+  const measure = harness.tools.get("performance_measure");
+  const compare = harness.tools.get("performance_compare");
+  const state = harness.tools.get("performance_state");
+  if (profile) {
+    const result = await profile.execute("profile-compiler", { profile: "compiler" }, undefined, undefined, context);
+    eq(result.isError, false, "profiling executes a configured trusted profile");
+  }
+  if (measure) {
+    const result = await measure.execute("measure-quick", { profile: "quick" }, undefined, undefined, context);
+    eq(result.isError, false, "performance measurement accepts a complete profile");
+    assert(result.content[0].text.includes("median=10.000"), "measurement reports its compact median summary");
+  }
+  if (compare) {
+    const result = await compare.execute("compare-missing", { baseline: "none", candidate: "none" }, undefined, undefined, context);
+    eq(result.isError, true, "comparison rejects measurements not held in the session");
+  }
+  if (state) {
+    const result = await state.execute("state-show", { action: "show" }, undefined, undefined, context);
+    eq(result.isError, false, "performance state can be inspected without mutating the project");
   }
   rmSync(workspace, { recursive: true, force: true });
 });
@@ -2382,6 +2466,7 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
       stripAnsi(component.render(60)[0]).includes("Tool"),
       "the specific activity text lives only in the activity widget",
     );
+    component.invalidate?.();
     component.dispose?.();
   }
 
@@ -2402,6 +2487,47 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
     0,
     "the activity widget renders nothing once the turn has settled",
   );
+  {
+    const subagentConfigPath = path.join(ROOT, "extensions", "subagent", "config.json");
+    const originalSubagentConfig = readFileSync(subagentConfigPath, "utf8");
+    const footerHarness = createHarness();
+    try {
+      writeFileSync(
+        subagentConfigPath,
+        originalSubagentConfig.replace('"fleetView": true', '"fleetView": false'),
+      );
+      auroraUi.default(footerHarness.api);
+      footerHarness.api.events.on("subagents:rpc:v1:request", (request) => {
+        footerHarness.api.events.emit(`subagents:rpc:v1:reply:${request.requestId}`, {
+          success: true,
+          data: { runs: [{ status: "running", config: { agent: "worker" } }] },
+        });
+      });
+      const footerContext = footerHarness.makeContext();
+      await footerHarness.runHooks("session_start", {}, footerContext);
+      const footer = footerHarness.footerFactory?.(
+        { requestRender() {} },
+        footerContext.ui.theme,
+        {
+          getGitBranch: () => null,
+          getExtensionStatuses: () => new Map(),
+          onBranchChange: () => () => {},
+        },
+      );
+      footer?.render(140);
+      await Promise.resolve();
+      await Promise.resolve();
+      footer?.invalidate?.();
+      assert(
+        footer?.render(140).some((line) => stripAnsi(line).includes("worker")),
+        "Aurora fetches and renders subagents only while the Fleet Dock is disabled",
+      );
+      await footerHarness.runHooks("session_shutdown", {}, footerContext);
+    } finally {
+      writeFileSync(subagentConfigPath, originalSubagentConfig);
+    }
+  }
+
   await harness.runHooks("session_shutdown", {}, context);
   eq(harness.widgets.size, 0, "Aurora removes its widget on shutdown");
   eq(
@@ -2478,6 +2604,10 @@ await section("combined production extension stack", async () => {
       "lsp_hover",
       "lsp_references",
       "lsp_workspace_symbols",
+      "performance_compare",
+      "performance_measure",
+      "performance_profile",
+      "performance_state",
       "project_check",
       "verify",
     ],

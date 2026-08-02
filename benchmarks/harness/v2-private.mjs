@@ -110,5 +110,13 @@ export function runPrivateEvaluator({ root, taskId, worktree, timeoutMs = 300_00
   if (result.error || result.status !== 0) {
     throw new Error(`Private evaluator failed: ${redactedText(result.stderr || result.error?.message || "unknown error", root)}`);
   }
-  return publicEvaluatorResult(JSON.parse(result.stdout), root);
+  let decoded;
+  try {
+    decoded = JSON.parse(result.stdout);
+  } catch {
+    // Never include evaluator stdout in an error: it can contain a failed
+    // hidden-test diagnostic or reference-specific detail.
+    throw new Error("Private evaluator returned invalid result JSON.");
+  }
+  return publicEvaluatorResult(decoded, root);
 }

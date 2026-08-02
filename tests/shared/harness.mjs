@@ -237,6 +237,8 @@ export function createHarness(options = {}) {
     },
     async exec(command, args, execOptions) {
       execCalls.push({ command, args, options: execOptions });
+      if (typeof options.exec === "function")
+        return options.exec(command, args, execOptions);
       return {
         stdout: `${options.piVersion ?? "0.80.7"}\n`,
         stderr: "",

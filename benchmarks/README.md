@@ -167,6 +167,15 @@ keine Rangliste.
 
 `p4-manifest.json` pinnt Main, Planner und Worker auf dasselbe Modell und
 dieselbe Thinking-Stufe. Für einen Produktions-Stack ist ein separates
-Manifest mit `stackMode: "production-stack"` erforderlich; Ergebnisse beider
-Arten werden nicht zusammengefasst. Ein Lauf wird bei einer abweichenden
+Manifest `p4-production-stack-manifest.json` mit
+`stackMode: "production-stack"` vorhanden; Ergebnisse beider Arten werden
+nicht zusammengefasst. Ein Lauf wird bei einer abweichenden
 Runtime-Rollenauflösung ungültig.
+
+Die drei Performanceaufgaben `11`–`13` decken CPU/Algorithmik,
+Allokation/Datenlayout und Build/Dispatch ab. Ihr öffentlicher Auftrag bleibt
+kurz; das externe Metadatenformat verlangt mindestens zwei versteckte
+Korrektheits- und zwei Performanceeingaben, Test- und Hardcoding-Schutz,
+Clean-Build sowie zwei Warmups und sieben Messläufe. Die erste Matrix ist als
+`3 Aufgaben × 2 Stacks × 3 Wiederholungen = 18 Läufe` versioniert. Ohne einen
+konfigurierten externen Evaluator werden keine Performanceergebnisse erzeugt.

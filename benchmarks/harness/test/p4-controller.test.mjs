@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadP4Manifest } from "../p4-manifest.mjs";
-import { createP4Result, disposeP4Worktree, pinRuntimeRoles, prepareP4Worktree, validatePrivateP4Task } from "../p4-controller.mjs";
+import { assertPinnedModelsAvailable, createP4Result, disposeP4Worktree, pinRuntimeRoles, prepareP4Worktree, runP4Task, validatePrivateP4Task } from "../p4-controller.mjs";
 
 const root = new URL("../../..", import.meta.url).pathname;
 const manifest = loadP4Manifest();
@@ -22,13 +22,34 @@ const pinned = pinRuntimeRoles(manifest.roles, {
 });
 assert.equal(pinned.reviewer.enabled, false);
 assert.throws(() => pinRuntimeRoles(manifest.roles, { main: { model: "fallback", thinking: "high" } }));
+assert.equal(assertPinnedModelsAvailable(manifest.roles, [manifest.roles.main.model]), true);
+assert.throws(() => assertPinnedModelsAvailable(manifest.roles, []), /unavailable/);
 
 const privateRoot = mkdtempSync(join(tmpdir(), "pi-p4-private-"));
 try {
   const task = join(privateRoot, "tasks", "01-single-file-change"); mkdirSync(task, { recursive: true });
   writeFileSync(join(task, "metadata.json"), JSON.stringify({ taskId: "01-single-file-change", seriesId: "P4", inputFingerprint: "inputs-v1" }));
-  writeFileSync(join(task, "evaluator.mjs"), "process.stdout.write(JSON.stringify({status: 'valid'}))");
+  writeFileSync(join(task, "evaluator.mjs"), "process.stdout.write(JSON.stringify({status: 'valid', evaluatorFingerprint: 'private-v1'}))");
   assert.equal(validatePrivateP4Task(privateRoot, "01-single-file-change").inputFingerprint, "inputs-v1");
+  const originalPrivateRoot = process.env.PI_BENCHMARK_PRIVATE_ROOT;
+  process.env.PI_BENCHMARK_PRIVATE_ROOT = privateRoot;
+  try {
+    const executed = await runP4Task({ root, manifest, run: manifest.runs[0], privateRoot,
+      availableModels: [manifest.roles.main.model],
+      launchAgent: async ({ env, prompt }) => {
+        assert.equal(env.PI_BENCHMARK_PRIVATE_ROOT, undefined);
+        assert(prompt.length > 40, "agent receives the public prompt text");
+        return { resolvedRoles: {
+          main: { model: manifest.roles.main.model, thinking: "high" }, planner: { model: manifest.roles.planner.model, thinking: "high" }, worker: { model: manifest.roles.worker.model, thinking: "high" },
+        }, roleHistory: [], sessionMetrics: { durationMs: 1 } };
+      },
+    });
+    assert.equal(executed.evaluator.status, "valid");
+    assert.equal(executed.diff.visibleTestChanges.length, 0);
+  } finally {
+    if (originalPrivateRoot === undefined) delete process.env.PI_BENCHMARK_PRIVATE_ROOT;
+    else process.env.PI_BENCHMARK_PRIVATE_ROOT = originalPrivateRoot;
+  }
 } finally { rmSync(privateRoot, { recursive: true, force: true }); }
 
 const result = createP4Result({ manifest, run: manifest.runs[0], promptFingerprint: "a".repeat(64), resolvedRoles: {

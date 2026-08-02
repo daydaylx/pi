@@ -39,6 +39,12 @@ project_check({ "profile": "typecheck" })
 project_check({ "profiles": ["typecheck", "tests"] })
 ```
 
+Bei einem `agent_end` mit Projektänderungen erscheint eine kurze, nicht
+blockierende Warnung, falls seit dem aktuellen Diff kein erfolgreicher
+`required`-Check lief. Ein Check vor einer weiteren Änderung gilt dabei nicht
+als aktuell. Ohne Pflichtprofil erscheint höchstens ein Hinweis; es gibt weder
+einen automatischen Testlauf noch eine Completion- oder Planphase.
+
 Pro Profil enthält das Ergebnis Profil-ID, redigiertes Programm und Argumente,
 relatives Arbeitsverzeichnis, Klassifikation, Start- und Endzeit, Exit-Code,
 Dauer, Status und begrenzte relevante Ausgabe. `advisory`-Befunde machen den
