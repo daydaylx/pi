@@ -20,7 +20,7 @@ Commands:
   launch <run-id>          run the benchmark task (or an unscored diagnostic)
   finish <run-id>          collect metrics and write the result to local state
   cleanup <run-id> [--purge] remove credential links and the isolated worktree
-  summarize                print completion status for the 35 scored runs
+  summarize                print completion status for the 33 scored runs
 `;
 }
 
@@ -45,4 +45,3 @@ export async function main(argv) {
   }
   fail(usage());
 }
-

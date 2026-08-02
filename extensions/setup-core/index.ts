@@ -7,6 +7,10 @@ import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles } from "./verify-profiles.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
+import {
+  collectContextDiagnostics,
+  formatContextDiagnostics,
+} from "./context-diagnostics.ts";
 
 const CheckParams = Type.Object({
   check: Type.Union([
@@ -78,7 +82,22 @@ export default function setupCore(pi: ExtensionAPI): void {
 
   pi.registerCommand("setup-doctor", {
     description: catalogDescription("setup-doctor"),
-    handler: async (_args, ctx) => {
+    handler: async (args, ctx) => {
+      const subcommand = args.trim();
+      if (subcommand === "context") {
+        const diagnostics = collectContextDiagnostics({
+          registeredTools: pi.getAllTools(),
+          activeToolNames: pi.getActiveTools(),
+          systemPrompt: ctx.getSystemPrompt(),
+          sessionEntries: ctx.sessionManager.getEntries(),
+        });
+        ctx.ui.notify(formatContextDiagnostics(diagnostics), "info");
+        return;
+      }
+      if (subcommand) {
+        ctx.ui.notify("Usage: /setup-doctor [context]", "error");
+        return;
+      }
       activeCwd = ctx.cwd;
       trusted = ctx.isProjectTrusted();
       const loaded = loadSetupConfig(activeCwd, trusted);

@@ -286,6 +286,21 @@ export function createHarness(options = {}) {
         },
       }));
     },
+    getActiveTools() {
+      return Array.isArray(options.activeTools)
+        ? options.activeTools
+        : [...tools.keys()];
+    },
+    getAllTools() {
+      if (Array.isArray(options.registeredTools)) return options.registeredTools;
+      return [...tools.values()].map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+        promptGuidelines: tool.promptGuidelines,
+        sourceInfo: { path: "<test>", source: "test", scope: "temporary", origin: "top-level" },
+      }));
+    },
   };
 
   return {
@@ -398,6 +413,9 @@ export function createHarness(options = {}) {
             percent: options.contextPercent ?? 42,
             contextWindow: 100000,
           };
+        },
+        getSystemPrompt() {
+          return options.systemPrompt ?? "";
         },
         sessionManager: {
           getSessionId() {

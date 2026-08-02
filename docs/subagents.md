@@ -36,6 +36,19 @@ Schreib- und Shell-Tools.
   `inheritProjectContext: true`, `inheritSkills: false` und ihre jeweilige
   Toolliste. Keines der Profile hat ein Delegations-Tool.
 
+## Ergebnisbudget und Artefakte
+
+Die generische Tool-Ausgabegrenze bleibt unverändert. Für Ergebnisse des
+`subagent`-Tools gilt zusätzlich ein eigener Backstop von 12 KiB oder 240
+Zeilen. Bei einer Kürzung bleiben Anfang und Ende des zusammengeführten
+Textes sichtbar; strukturierte Nicht-Text-Blöcke bleiben erhalten.
+
+Die Antwortdetails bleiben ebenfalls erhalten und erhalten ergänzend die
+Kürzungsmetadaten (`details.truncation`). Das ist eine strukturierte
+Laufzeitangabe für spätere Diagnose und keine Persistenz von Prompt- oder
+Tool-Inhalten. Die Paket-Artefakte und `status` bleiben die Quelle für
+asynchrone Run-Informationen.
+
 ## Betriebsgrenzen
 
 - Keine automatische Installation oder Aktualisierung des Pakets.

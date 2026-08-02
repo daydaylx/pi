@@ -7,6 +7,10 @@ import {
 
 export { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES };
 
+/** Tighter backstop for child-agent reports injected into the parent context. */
+export const SUBAGENT_MAX_BYTES = 12 * 1024;
+export const SUBAGENT_MAX_LINES = 240;
+
 export interface OutputTruncationDetails {
   truncated: true;
   strategy: "balanced-head-tail";
@@ -98,4 +102,15 @@ export function limitTextOutput(
       maxBytes,
     },
   };
+}
+
+/**
+ * Applies the dedicated child-agent report budget without changing the generic
+ * tool and verification output boundary used elsewhere.
+ */
+export function limitSubagentOutput(text: string): LimitedTextOutput {
+  return limitTextOutput(text, {
+    maxBytes: SUBAGENT_MAX_BYTES,
+    maxLines: SUBAGENT_MAX_LINES,
+  });
 }

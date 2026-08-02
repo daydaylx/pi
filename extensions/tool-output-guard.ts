@@ -1,5 +1,27 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { limitTextOutput } from "./shared/output-limits.ts";
+import {
+  limitSubagentOutput,
+  type OutputTruncationDetails,
+} from "./shared/output-limits.ts";
+
+function withTruncationDetails(
+  details: unknown,
+  truncation: OutputTruncationDetails,
+): Record<string, unknown> {
+  if (details && typeof details === "object" && !Array.isArray(details)) {
+    const existing = details as Record<string, unknown>;
+    return {
+      ...existing,
+      ...(existing.truncation === undefined
+        ? {}
+        : { upstreamTruncation: existing.truncation }),
+      truncation,
+    };
+  }
+  return details === undefined
+    ? { truncation }
+    : { originalDetails: details, truncation };
+}
 
 export default function toolOutputGuard(pi: ExtensionAPI): void {
   pi.on("tool_result", async (event) => {
@@ -10,7 +32,7 @@ export default function toolOutputGuard(pi: ExtensionAPI): void {
     if (textBlocks.length === 0) return;
 
     const combined = textBlocks.map((block) => block.text).join("\n\n");
-    const limited = limitTextOutput(combined);
+    const limited = limitSubagentOutput(combined);
     if (!limited.truncation) return;
 
     const content: typeof event.content = [];
@@ -25,7 +47,7 @@ export default function toolOutputGuard(pi: ExtensionAPI): void {
     }
     return {
       content,
-      details: event.details,
+      details: withTruncationDetails(event.details, limited.truncation),
       isError: event.isError,
     };
   });

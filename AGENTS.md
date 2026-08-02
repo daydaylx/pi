@@ -24,7 +24,7 @@ Diese Regeln gelten für alle Pi-Sitzungen.
 ## Sessions und Arbeitsstand
 
 - Bei Wechsel des Hauptziels oder Projekts eine neue Session verwenden.
-- Bei langen zusammenhängenden Aufgaben vor Compaction, Modellwechsel oder Sessionwechsel einen kompakten Context-Checkpoint erstellen. Der dauerhafte Context Ledger wird zusätzlich automatisch und deterministisch (ohne Modell-Turn) von plan-mode konsolidiert.
+- Bei langen zusammenhängenden Aufgaben vor Compaction, Modellwechsel oder Sessionwechsel über den Skill `context-checkpoint` einen kompakten Checkpoint erstellen. Er pflegt bei Bedarf `docs/PROJECT_STATE.md` und `docs/CONTEXT_LEDGER.md`; die Laufzeit konsolidiert diese Dateien nicht automatisch.
 - `/fork` für Alternativen, `/clone` für eine separate Zweigkopie, `/tree` für Navigation innerhalb einer Session und `/compact` für lange weiterhin zusammenhängende Aufgaben verwenden.
 
 ## Subagenten

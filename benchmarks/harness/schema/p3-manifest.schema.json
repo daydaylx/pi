@@ -9,11 +9,11 @@
     "reference": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "model": { "const": "opencode-go/kimi-k2.7-code" },
     "thinking": { "const": "high" },
-    "scoredRunCount": { "const": 35 },
+    "scoredRunCount": { "const": 33 },
     "runs": {
       "type": "array",
-      "minItems": 35,
-      "maxItems": 35,
+      "minItems": 33,
+      "maxItems": 33,
       "items": { "$ref": "#/$defs/run" }
     },
     "diagnostics": {
@@ -32,7 +32,7 @@
       "required": ["id", "task", "scored"],
       "properties": {
         "id": { "type": "string", "pattern": "^p3-[a-z0-9-]+$" },
-        "task": { "type": "string", "pattern": "^(0[1-9]|10|11)-[a-z0-9-]+$" },
+        "task": { "type": "string", "pattern": "^(0[1-9]|10)-[a-z0-9-]+$" },
         "scored": { "type": "boolean" },
         "pair": { "type": "string" },
         "variant": { "type": "string" },

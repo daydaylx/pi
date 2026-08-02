@@ -2,7 +2,7 @@
 
 Alle Befehle relativ zum Repository-Root (`/home/d/.pi/agent`) ausgeführt.
 
-## P3-Controller (35 Scored-Runs)
+## P3-Controller (33 Scored-Runs)
 
 P3 ist von der älteren Einzelrun-Kurzform unten getrennt. Es nutzt immer
 Commit `e46915680d859ac9d6cac615cc197d5a31d46461`, die feste Manifest-ID und
@@ -25,7 +25,7 @@ node benchmarks/harness/p3.mjs launch p3-01-1
 node benchmarks/harness/p3.mjs finish p3-01-1
 node benchmarks/harness/p3.mjs cleanup p3-01-1
 
-# Fortschritt aller 35 Scored-Runs
+# Fortschritt aller 33 Scored-Runs
 node benchmarks/harness/p3.mjs summarize
 ```
 
@@ -40,9 +40,8 @@ nicht-sensitiven Benchmark-Overlays und Umgebungswerte.
 `prepare` setzt ausschließlich im isolierten Worktree die drei
 `permissions.workflowDefaults` auf `full-access`; dadurch kann der Agent die
 ausdrücklich gestellte Benchmark-Aufgabe bearbeiten, ohne die Konfiguration
-des Haupt-Checkouts zu verändern. Für alle Aufgaben außer 11 setzt der
-Controller den Ledger-Gate-Schalter auf `1`, damit der Session-Shutdown keine
-aufgabenfremde Änderung an `docs/CONTEXT_LEDGER.md` erzeugt.
+des Haupt-Checkouts zu verändern. Der Controller setzt keine Ledger- oder
+Checkpoint-Gates.
 
 Während `prepare` läuft, ist `PI_CODING_AGENT_DIR` der Worktree. Der
 nicht-sensitive Abhängigkeitsbaum `npm/node_modules` wird für die
@@ -53,11 +52,7 @@ und dann den Worktree. Mit `cleanup <id> --purge` lässt sich auch der lokale
 Zustand für eine Wiederholung entfernen.
 
 Die V8-Profile sind bewusst unbewertet und separat: `p3-diag-02-v8-cpu`,
-`p3-diag-02-v8-heap`, `p3-diag-09-v8-cpu`, `p3-diag-09-v8-heap`. Für Aufgabe
-11 setzt ausschließlich die Variante `p3-11-disabled` exakt
-`PI_BENCHMARK_DISABLE_LEDGER_CHECKPOINTS=1`; die aktive Variante lässt die
-Variable weg. Damit bleibt dieser Schalter innerhalb des Paars die einzige
-Verhaltensdifferenz.
+`p3-diag-02-v8-heap`, `p3-diag-09-v8-cpu`, `p3-diag-09-v8-heap`.
 
 Der Offline-Test verwendet einen lokalen Pi-Stummel und ruft kein Modell auf:
 

@@ -13,7 +13,7 @@ reproduzierbaren Bedingungen.
 
 | Komponente | Pfad | Zweck |
 |---|---|---|
-| 11 Aufgabentypen | `benchmarks/tasks/01-–11-*/` | Ausgangszustand, Auftrag, erwartetes Ergebnis, verbotene Änderungen |
+| 10 Aufgabentypen | `benchmarks/tasks/01-–10-*/` | Ausgangszustand, Auftrag, erwartetes Ergebnis, verbotene Änderungen |
 | `reset-task.sh` | `benchmarks/harness/` | Setzt jede Aufgabe auf ihren definierten Ausgangszustand zurück |
 | `run-verify.sh` | `benchmarks/harness/` | Führt Task-spezifische Verifikation aus |
 | `collect-metrics.mjs` | `benchmarks/harness/` | Sammelt automatische Metriken (geänderte Dateien/Zeilen, Testresultate, Token/Laufzeit) |
@@ -36,7 +36,6 @@ reproduzierbaren Bedingungen.
 | 08 | Lange Sitzung mit Compaction | Kontext-Erhalt prüfen |
 | 09 | Hängender Tool-Aufruf | Kein Fixture-Test (manuelle Bewertung) |
 | 10 | Mit/ohne Subagent | Subagenten-Nutzen messen |
-| 11 | Context-Ledger-Survival | Context-Ledger nach Compaction/Session-Wechsel |
 
 ## Vergleichskandidaten
 
@@ -63,17 +62,17 @@ reproduzierbaren Bedingungen.
 | Modellaufrufe | Session-Metadaten |
 | Subagentenaufrufe | Session-Metadaten |
 | Verlorene Anforderungen | `manualAssessment` |
-| Wiederholte identische Fehler | Doom-Loop-Detektor-Status |
-| Verifikations-Gate-Ergebnis | `/verify-gate` Output |
-| Edit-Wiederholungen | Edit-Metriken |
+| Wiederholte identische Fehler | Session-JSONL (`toolCall`/`toolResult`) |
+| Verifikations-Ergebnis | `run-verify.sh` Exit-Code |
+| Unnötige Edit-Wiederholungen | `git diff --numstat` + manuelle Scope-Prüfung |
 
 ## Stichproben-Design
 
 - **3 Wiederholungen** pro Aufgabe × Agent (mindestens)
 - Bei stark schwankenden Ergebnissen: **5 Wiederholungen**
 - **10 Aufgaben × 3 Läufe × 5 Agenten = 150 Läufe** (Gesamtumfang)
-- Reduzierter Umfang für erste Baseline: nur Pi (aktuell) × 10 Aufgaben × 3
-  Läufe = **30 Läufe**, externe Agenten später
+- P3: Aufgaben 01–09 je drei Läufe plus drei A/B-Paare für Aufgabe 10 =
+  **33 Scored-Runs**, externe Agenten später
 
 ## Ablauf pro Lauf
 

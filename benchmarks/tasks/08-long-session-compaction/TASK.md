@@ -24,7 +24,8 @@ false` in der Section 'LSP transport, process and lifecycle', Zeile
 Diese vier Etappen sind bewusst in einer einzigen, langen Sitzung zu
 bearbeiten (kein Neustart zwischen den Etappen), um die
 `compaction`-Konfiguration aus `settings.json` (`reserveTokens: 32768`,
-`keepRecentTokens: 12000`) realistisch auszulösen.
+`keepRecentTokens: 12000`) realistisch auszulösen. Die begründete aktuelle
+Budgetentscheidung steht in `docs/decisions/010-compaction-recent-context-budget.md`.
 
 ## Erlaubter Änderungsumfang
 

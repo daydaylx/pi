@@ -124,6 +124,7 @@ const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const lspExtensionMod = await load("extensions/lsp/index.ts");
 const outputLimits = await load("extensions/shared/output-limits.ts");
 const toolOutputGuard = await load("extensions/tool-output-guard.ts");
+const contextDiagnostics = await load("extensions/setup-core/context-diagnostics.ts");
 const setupConfig = await load("extensions/setup-core/config.ts");
 const setupCore = await load("extensions/setup-core/index.ts");
 const auroraState = await load("extensions/aurora-ui/state.ts");
@@ -638,6 +639,76 @@ await section("setup core lifecycle", async () => {
     !harness.notifications.at(-1)?.message?.includes("recovery status:"),
     "setup doctor leaves workflow recovery to the explicit v3 controller",
   );
+  const contextHarness = createHarness({
+    systemPrompt: "System 🙂",
+    registeredTools: [
+      { name: "zeta", parameters: { type: "object", properties: { b: { type: "number" }, a: { type: "string" } } } },
+      { name: "alpha", parameters: { type: "object", required: ["value"] } },
+    ],
+    activeTools: ["zeta", "dynamic-tool"],
+    entries: [
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          usage: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40 },
+        },
+      },
+      {
+        type: "compaction",
+        timestamp: "2026-08-02T10:00:00.000Z",
+        usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
+      },
+      {
+        type: "message",
+        message: {
+          role: "toolResult",
+          details: {
+            truncation: {
+              truncated: true,
+              totalBytes: 200,
+              outputBytes: 80,
+            },
+          },
+        },
+      },
+    ],
+  });
+  setupCore.default(contextHarness.api);
+  const contextCommand = contextHarness.commands.get("setup-doctor");
+  const diagnosticContext = contextHarness.makeContext();
+  if (contextCommand) await contextCommand("context", diagnosticContext);
+  const contextReport = contextHarness.notifications.at(-1)?.message ?? "";
+  assert(
+    contextReport.includes("registered tools: 2 (alpha, zeta)") &&
+      contextReport.includes("active tools: 2 (dynamic-tool, zeta)"),
+    "context doctor reports sorted registered and dynamically active tools",
+  );
+  assert(
+    contextReport.includes("effective system prompt: 11 bytes") &&
+      contextReport.includes("real usage: input=11, output=22, cacheRead=33, cacheWrite=44") &&
+      contextReport.includes("persisted compactions: 1 (2026-08-02T10:00:00.000Z)") &&
+      contextReport.includes("persisted tool truncations: count=1, totalBytes=200, outputBytes=80"),
+    "context doctor reports only aggregate prompt, usage, compaction and truncation diagnostics",
+  );
+  if (contextCommand) await contextCommand("unexpected", diagnosticContext);
+  eq(
+    contextHarness.notifications.at(-1),
+    { message: "Usage: /setup-doctor [context]", level: "error" },
+    "context doctor rejects unknown arguments without running the default doctor",
+  );
+  eq(contextHarness.execCalls.length, 0, "context doctor does not invoke runtime or model commands");
+  if (contextDiagnostics) {
+    const empty = contextDiagnostics.collectContextDiagnostics({
+      registeredTools: [],
+      activeToolNames: [],
+      sessionEntries: [],
+    });
+    eq(empty.schemaBytes, 2, "empty context diagnostics have a deterministic empty schema size");
+    eq(empty.systemPromptBytes, null, "missing system prompt is reported as n/a");
+    eq(empty.usage, null, "missing persisted usage is reported as n/a");
+    eq(empty.toolTruncation, { count: 0, totalBytes: 0, outputBytes: 0 }, "empty sessions have no persisted truncations");
+  }
   const verify = harness.tools.get("verify");
   if (verify) {
     await verify.execute(
@@ -1054,6 +1125,48 @@ await section("native project skills", async () => {
         " does not present experimental allowed-tools as a security boundary",
     );
   }
+
+  const checkpointSkill = readFileSync(
+    path.join(skillsRoot, "context-checkpoint", "SKILL.md"),
+    "utf8",
+  );
+  const agentRules = readFileSync(path.join(ROOT, "AGENTS.md"), "utf8");
+  const ledger = readFileSync(
+    path.join(ROOT, "docs", "CONTEXT_LEDGER.md"),
+    "utf8",
+  );
+  const projectState = readFileSync(
+    path.join(ROOT, "docs", "PROJECT_STATE.md"),
+    "utf8",
+  );
+  const ledgerDecision = readFileSync(
+    path.join(
+      ROOT,
+      "docs",
+      "decisions",
+      "008-context-ledger-is-documentation.md",
+    ),
+    "utf8",
+  );
+  assert(
+    /\bcontext-checkpoint\b/.test(agentRules) &&
+      !/Ledger\s+wird\s+zusätzlich\s+automatisch[\s\S]{0,120}plan-mode\s+konsolidiert/i.test(
+        agentRules,
+      ),
+    "AGENTS routes checkpoints through the manual skill without a runtime ledger claim",
+  );
+  assert(
+    /keine\s+automatische\s+Konsolidierung/i.test(checkpointSkill) &&
+      checkpointSkill.includes("docs/PROJECT_STATE.md") &&
+      checkpointSkill.includes("docs/CONTEXT_LEDGER.md"),
+    "context-checkpoint is the sole ledger maintenance path",
+  );
+  assert(
+    ledger.includes("# Context Ledger") &&
+      projectState.includes("# Project State") &&
+      ledgerDecision.includes("keine Laufzeitkomponente"),
+    "ledger, project state and ADR retain their separate non-runtime roles",
+  );
 });
 
 // ─────────────────────── security and plan helpers ───────────────────────
@@ -1429,6 +1542,20 @@ await section("shared output limits and subagent guard", async () => {
     actualUtf8Lines,
     "single-line truncation reports its actual line count",
   );
+  eq(outputLimits.SUBAGENT_MAX_BYTES, 12 * 1024, "subagent output has its dedicated byte limit");
+  eq(outputLimits.SUBAGENT_MAX_LINES, 240, "subagent output has its dedicated line limit");
+  const compactSubagent = outputLimits.limitSubagentOutput("kurzer Bericht");
+  eq(compactSubagent, { text: "kurzer Bericht" }, "compact subagent output remains unchanged");
+  const subagentUtf8 = outputLimits.limitSubagentOutput(
+    "HEAD_SUBAGENT_UTF8-" + "😀".repeat(10_000) + "-TAIL_SUBAGENT_UTF8",
+  );
+  assert(
+    subagentUtf8.text.startsWith("HEAD_SUBAGENT_UTF8-") &&
+      subagentUtf8.text.endsWith("-TAIL_SUBAGENT_UTF8") &&
+      !subagentUtf8.text.includes("�") &&
+      Buffer.byteLength(subagentUtf8.text, "utf8") <= outputLimits.SUBAGENT_MAX_BYTES,
+    "subagent UTF-8 truncation is byte-safe and retains head and tail",
+  );
 
   const harness = createHarness();
   toolOutputGuard.default(harness.api);
@@ -1487,8 +1614,72 @@ await section("shared output limits and subagent guard", async () => {
       guardedResult.content[0].text.endsWith("TAIL_SENTINEL"),
     "the subagent result backstop preserves explicit head and tail sentinels",
   );
-  eq(guardedResult.details, details, "the backstop preserves result details");
+  eq(
+    guardedResult.details,
+    { ...details, truncation: guardedResult.details.truncation },
+    "the backstop preserves result details and adds truncation metadata",
+  );
+  assert(
+    guardedResult.details.truncation.totalBytes > guardedResult.details.truncation.outputBytes,
+    "subagent truncation metadata records original and retained bytes",
+  );
   eq(guardedResult.isError, true, "the backstop preserves isError");
+
+  const upstreamTruncation = { truncated: true, source: "package" };
+  const guardedExistingTruncation = (
+    await harness.runHooks(
+      "tool_result",
+      {
+        type: "tool_result",
+        toolCallId: "subagent-existing-truncation",
+        toolName: "subagent",
+        input: {},
+        content: [{ type: "text", text: largeText }],
+        details: { artifact: "/tmp/upstream.json", truncation: upstreamTruncation },
+        isError: false,
+      },
+      harness.makeContext(),
+    )
+  )[0];
+  eq(
+    guardedExistingTruncation.details.upstreamTruncation,
+    upstreamTruncation,
+    "the backstop preserves an upstream truncation detail separately",
+  );
+  assert(
+    guardedExistingTruncation.details.truncation.totalBytes >
+      guardedExistingTruncation.details.truncation.outputBytes,
+    "the backstop still records its own delivered-output metadata",
+  );
+
+  const multiBlock = (
+    await harness.runHooks(
+      "tool_result",
+      {
+        type: "tool_result",
+        toolCallId: "subagent-multi-block",
+        toolName: "subagent",
+        input: {},
+        content: [
+          { type: "text", text: "FIRST_BLOCK\n" + largeText },
+          { type: "image", data: "image-data", mimeType: "image/png" },
+          { type: "text", text: largeText + "\nLAST_BLOCK" },
+        ],
+        details: { artifact: "/tmp/child-result.json" },
+        isError: false,
+      },
+      harness.makeContext(),
+    )
+  )[0];
+  eq(multiBlock.content.length, 2, "subagent guard combines text blocks without dropping non-text blocks");
+  eq(multiBlock.content[1], { type: "image", data: "image-data", mimeType: "image/png" }, "subagent guard preserves structured artifact blocks");
+  assert(
+    multiBlock.content[0].text.startsWith("FIRST_BLOCK") &&
+      multiBlock.content[0].text.endsWith("LAST_BLOCK") &&
+      multiBlock.details.artifact === "/tmp/child-result.json" &&
+      multiBlock.details.truncation,
+    "multi-block subagent output keeps head/tail and structured detail metadata",
+  );
 
   const unrelated = await harness.runHooks(
     "tool_result",
