@@ -7,6 +7,9 @@
   "globalConcurrencyLimit": 3,
   "maxSubagentSpawnsPerSession": 12,
   "ui": {
-    "showAsyncWidget": false
+    "showAsyncWidget": false,
+    "fleetView": true,
+    "fleetViewPlacement": "belowEditor",
+    "asyncWidget": false
   }
 }

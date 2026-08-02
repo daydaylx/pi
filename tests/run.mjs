@@ -129,6 +129,7 @@ const setupConfig = await load("extensions/setup-core/config.ts");
 const setupCore = await load("extensions/setup-core/index.ts");
 const auroraState = await load("extensions/aurora-ui/state.ts");
 const auroraUi = await load("extensions/aurora-ui/index.ts");
+const auroraFooter = await load("extensions/aurora-ui/footer.ts");
 
 // ─────────────────── target runtime and exclusive ownership ───────────────────
 await section("target runtime configuration", async () => {
@@ -607,7 +608,7 @@ await section("setup core lifecycle", async () => {
   assert(
     harness.notifications
       .at(-1)
-      ?.message?.includes("Pi CLI/dev package: 0.80.7/0.82.1") &&
+      ?.message?.includes("Pi CLI/dev package: 0.80.7/0.83.0") &&
       harness.notifications.at(-1)?.level === "error",
     "setup doctor makes CLI/dev version drift visible",
   );
@@ -2127,6 +2128,56 @@ await section("Aurora UI lifecycle and responsive surfaces", async () => {
       "Aurora recomputes token totals exactly once after a branch change",
     );
     footer.dispose?.();
+  }
+
+  // The footer is the only surface that reports a given value. Once
+  // pi-subagents runs its Fleet Status Dock, the dock owns the subagent
+  // display and Aurora hands the segment over by passing no subagents at all
+  // (see fleetDockOwnsSubagentDisplay in index.ts). This pins the contract the
+  // handover relies on: subagent lines exist if and only if they are passed in.
+  {
+    const footerState = {
+      sessionEpoch: "test-epoch",
+      workflow: { phase: "arbeit", label: "ARBEIT" },
+      permissions: { label: "Read + Write" },
+      lsp: { state: "ready" },
+      model: { id: "claude-opus-5", thinking: "aus" },
+      activity: { kind: "idle", activeTools: 0 },
+    };
+    const footerInput = (subagents) => ({
+      state: footerState,
+      statuses: new Map(),
+      branch: null,
+      cwd: process.cwd(),
+      sessionName: undefined,
+      tokens: { input: 0, output: 0 },
+      contextPercent: null,
+      subagents,
+    });
+    const withSubagents = auroraFooter
+      .renderFooterLines(context.ui.theme, 140, footerInput([
+        { agent: "reviewer", status: "needs_attention" },
+        { agent: "worker", status: "running" },
+      ]))
+      .map(stripAnsi)
+      .join("\n");
+    const handedOver = auroraFooter
+      .renderFooterLines(context.ui.theme, 140, footerInput(undefined))
+      .map(stripAnsi)
+      .join("\n");
+    assert(
+      withSubagents.includes("2 Subagenten aktiv") &&
+        withSubagents.includes("reviewer"),
+      "Aurora footer reports subagents while it owns the display",
+    );
+    assert(
+      !handedOver.includes("Subagent") && !handedOver.includes("reviewer"),
+      "Aurora footer prints no subagent line once the Fleet Dock owns the display",
+    );
+    assert(
+      handedOver.length > 0 && handedOver.includes("Read + Write"),
+      "handing the subagent segment over leaves the rest of the footer intact",
+    );
   }
 
   // The editor frame carries workflow and step only. Everything durable moved

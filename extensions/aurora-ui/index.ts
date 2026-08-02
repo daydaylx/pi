@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -38,6 +39,33 @@ const TICK_INTERVAL_MS = 100;
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
 );
+const SUBAGENT_CONFIG_PATH = fileURLToPath(
+  new URL("../subagent/config.json", import.meta.url),
+);
+
+/**
+ * The footer is the only place that reports a given value — nothing here may be
+ * duplicated by another surface (see the header comment in footer.ts). Once
+ * pi-subagents runs its Fleet
+ * Status Dock, that dock is the richer surface for the same information: one
+ * line per agent with its concrete activity, runtime and tokens, right below
+ * the editor. The footer therefore hands the subagent segment over instead of
+ * printing a second, poorer copy two lines further down.
+ *
+ * Read from the subagent extension's own config rather than from a shared
+ * setting: the dock is opt-in there, and only that file knows whether it is on.
+ * Any read or parse problem means "no dock", i.e. the footer keeps reporting.
+ */
+function fleetDockOwnsSubagentDisplay(): boolean {
+  try {
+    const raw = JSON.parse(readFileSync(SUBAGENT_CONFIG_PATH, "utf8")) as {
+      ui?: { fleetView?: unknown };
+    };
+    return raw.ui?.fleetView === true;
+  } catch {
+    return false;
+  }
+}
 
 function makeEpoch(sequence: number): string {
   return `${Date.now().toString(36)}-${sequence.toString(36)}`;
@@ -192,6 +220,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let tokenTotalsCache = { input: 0, output: 0 };
   let subagentsCache: SubagentInfo[] = [];
   let subagentsCacheDirty = true;
+  let fleetDockOwnsSubagents = false;
   const activeTools = new Map<string, ActiveToolView>();
 
   function readAssistantTotals(ctx: ExtensionContext): {
@@ -369,6 +398,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
 
     const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
+    fleetDockOwnsSubagents = fleetDockOwnsSubagentDisplay();
     const epoch = makeEpoch(++epochSequence);
     state = makeState(epoch, ctx, pi);
     // The permission label is deliberately left empty: it means the permission
@@ -497,7 +527,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         },
         render(width: number): string[] {
           if (!state) return [];
-          fetchSubagentStatus();
+          if (!fleetDockOwnsSubagents) fetchSubagentStatus();
           return renderFooterLines(theme, width, {
             state,
             statuses: footerData.getExtensionStatuses(),
@@ -506,7 +536,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             sessionName: pi.getSessionName(),
             tokens: readAssistantTotals(sessionCtx),
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
-            subagents: subagentsCache,
+            subagents: fleetDockOwnsSubagents ? undefined : subagentsCache,
           });
         },
       };
