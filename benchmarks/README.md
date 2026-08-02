@@ -149,3 +149,24 @@ Jeder isolierte P3-Worktree erhält eine dokumentierte, gehashte
 `setup.json`-Overlay mit `full-access` für Arbeits- und Plan-Workflows, damit
 die Aufgaben tatsächlich bearbeitbar sind; die Quellkonfiguration bleibt
 unverändert. Der Controller setzt keine Ledger- oder Checkpoint-Gates.
+## P4 / Benchmark V2
+
+P4 misst den vereinfachten aktuellen Pi-Workflow ab Commit
+`b85cb72247a7097f6a938c35d145d195d85942a4`. P3 bleibt eine historische Serie
+und ist nicht direkt vergleichbar. P4-Ergebnisse tragen zwingend `seriesId:
+"P4"`, ein Prompt- und Konfigurationsfingerprint sowie die tatsächlich
+aufgelösten Rollenmodelle.
+
+Der öffentliche Auftrag liegt unter `v2/tasks/*/PROMPT.md`. Vollständige
+Aufgabenmetadaten, Referenzwissen und versteckte Tests liegen ausschließlich
+unter dem externen Root aus `PI_BENCHMARK_PRIVATE_ROOT`; der P4-Controller
+entfernt historische `TASK.md`-Dateien aus jedem Agenten-Worktree. Die
+Pilotmatrix enthält eine kurze, eine Multi-Datei- und eine Langsitzungsaufgabe
+sowie das Same-Model-Subagenten-A/B-Paar. Sie ist eine technische Pilotmatrix,
+keine Rangliste.
+
+`p4-manifest.json` pinnt Main, Planner und Worker auf dasselbe Modell und
+dieselbe Thinking-Stufe. Für einen Produktions-Stack ist ein separates
+Manifest mit `stackMode: "production-stack"` erforderlich; Ergebnisse beider
+Arten werden nicht zusammengefasst. Ein Lauf wird bei einer abweichenden
+Runtime-Rollenauflösung ungültig.
