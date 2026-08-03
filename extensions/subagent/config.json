@@ -8,7 +8,7 @@
   "maxSubagentSpawnsPerSession": 12,
   "ui": {
     "showAsyncWidget": false,
-    "fleetView": false,
+    "fleetView": true,
     "fleetViewPlacement": "belowEditor",
     "asyncWidget": false
   }
