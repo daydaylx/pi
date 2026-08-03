@@ -151,20 +151,45 @@ function packageVersion(path: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * Fingerprints the project's uncommitted state: unstaged changes, staged
+ * changes, and the existence of untracked files. Only `git diff` (unstaged,
+ * tracked) used to be captured, so an agent that staged a change or created
+ * a new untracked file without committing could make a required check look
+ * fresh against a diff state it never actually ran against. Untracked files
+ * are covered by existence via `git status`, not a content hash: an edit to
+ * an already-existing untracked file's contents does not change its
+ * porcelain status line and so does not change this fingerprint. Extending
+ * that further would mean hashing arbitrary untracked file contents on every
+ * check, which is outside what the freshness check needs today.
+ */
 async function projectDiffFingerprint(
   pi: ExtensionAPI,
   cwd: string,
 ): Promise<{ fingerprint: string; changed: boolean }> {
-  const result = await pi.exec("git", ["diff", "--no-ext-diff", "--binary"], {
-    cwd,
-    timeout: 10_000,
-  });
+  const options = { cwd, timeout: 10_000 };
+  const [unstaged, staged, status] = await Promise.all([
+    pi.exec("git", ["diff", "--no-ext-diff", "--binary"], options),
+    pi.exec("git", ["diff", "--cached", "--no-ext-diff", "--binary"], options),
+    pi.exec(
+      "git",
+      ["status", "--porcelain=v1", "--untracked-files=all"],
+      options,
+    ),
+  ]);
   // Git may be unavailable or the directory may not be a repository. This is
   // intentionally conservative: no alleged check freshness in that case.
-  if (result.code !== 0) return { fingerprint: "unavailable", changed: false };
+  if (unstaged.code !== 0 || staged.code !== 0 || status.code !== 0) {
+    return { fingerprint: "unavailable", changed: false };
+  }
   return {
-    fingerprint: fingerprint(result.stdout),
-    changed: result.stdout.length > 0,
+    fingerprint: fingerprint(
+      `${unstaged.stdout}\0${staged.stdout}\0${status.stdout}`,
+    ),
+    changed:
+      unstaged.stdout.length > 0 ||
+      staged.stdout.length > 0 ||
+      status.stdout.length > 0,
   };
 }
 

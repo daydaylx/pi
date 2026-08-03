@@ -98,9 +98,7 @@ export function prepareP4Worktree({ root, reference, taskId }) {
     // Some migrated tasks reference files that did not exist yet at
     // `reference` (see benchmarks/tasks/<id>/fixture/, the pre-P4 overlay
     // reset-task.sh applied). Restore that overlay so the prompt's file
-    // references resolve, and stage it so a later `git diff` sees the
-    // agent's real edits to it rather than nothing (untracked directories
-    // are invisible to `git diff` without an index baseline) (P0-06).
+    // references resolve (P0-06).
     const fixtureSource = resolve(
       root,
       "benchmarks",
@@ -109,9 +107,30 @@ export function prepareP4Worktree({ root, reference, taskId }) {
       "fixture",
     );
     if (existsSync(fixtureSource)) {
-      const fixtureTarget = join(worktree, "benchmark-fixture");
-      cpSync(fixtureSource, fixtureTarget, { recursive: true });
-      git(worktree, ["add", "benchmark-fixture"]);
+      cpSync(fixtureSource, join(worktree, "benchmark-fixture"), {
+        recursive: true,
+      });
+    }
+    // Both changes above (the historic-tasks removal and the fixture
+    // restore) are P4 setup, not agent work, so they are folded into one
+    // commit here rather than left staged or unstaged. inspectAgentChanges
+    // below now inspects staged changes and untracked files too (P0-07);
+    // without this commit, both of the above would permanently show up as
+    // an "agent change" on every single run regardless of what the agent
+    // actually did.
+    git(worktree, ["add", "-A"]);
+    const setupDiff = git(worktree, ["diff", "--cached", "--name-only"]);
+    if (setupDiff.trim().length > 0) {
+      git(worktree, [
+        "-c",
+        "user.email=p4-benchmark@localhost",
+        "-c",
+        "user.name=P4 Benchmark Setup",
+        "commit",
+        "--quiet",
+        "-m",
+        "P4 setup: remove historic task hints and restore fixture overlay",
+      ]);
     }
     return {
       base,
@@ -223,11 +242,45 @@ export function validateRoleHistory(history, manifestRoles, parentRunId) {
   });
 }
 
+// P0-07: staged changes and new untracked files used to be entirely
+// invisible here (only unstaged diff against tracked files was inspected),
+// so an agent's staged-but-not-committed edit, or a new file it never
+// staged, would not show up in the result's diff/changedFiles at all.
 export function inspectAgentChanges(worktree) {
-  const diff = git(worktree, ["diff", "--no-ext-diff", "--binary"]);
-  const changedFiles = git(worktree, ["diff", "--no-ext-diff", "--name-only"])
+  const unstagedDiff = git(worktree, ["diff", "--no-ext-diff", "--binary"]);
+  const stagedDiff = git(worktree, [
+    "diff",
+    "--cached",
+    "--no-ext-diff",
+    "--binary",
+  ]);
+  const status = git(worktree, [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+  ]);
+  const unstagedFiles = git(worktree, [
+    "diff",
+    "--no-ext-diff",
+    "--name-only",
+  ])
     .split("\n")
     .filter(Boolean);
+  const stagedFiles = git(worktree, [
+    "diff",
+    "--cached",
+    "--no-ext-diff",
+    "--name-only",
+  ])
+    .split("\n")
+    .filter(Boolean);
+  const untrackedFiles = status
+    .split("\n")
+    .filter((line) => line.startsWith("?? "))
+    .map((line) => line.slice(3));
+  const changedFiles = [
+    ...new Set([...unstagedFiles, ...stagedFiles, ...untrackedFiles]),
+  ].sort();
   const visibleTestChanges = changedFiles.filter((path) =>
     /(^|\/)(?:test|tests|__tests__|spec)(?:\/|\.|$)/i.test(path),
   );
@@ -235,7 +288,9 @@ export function inspectAgentChanges(worktree) {
     /(^|\/)(?:bench|benchmark)(?:\/|\.|$)/i.test(path),
   );
   return {
-    diffFingerprint: createHash("sha256").update(diff).digest("hex"),
+    diffFingerprint: createHash("sha256")
+      .update(`${unstagedDiff}\0${stagedDiff}\0${status}`)
+      .digest("hex"),
     changedFiles,
     visibleTestChanges,
     benchmarkChanges,

@@ -15,6 +15,7 @@ import {
   assertPinnedModelsAvailable,
   createP4Result,
   disposeP4Worktree,
+  inspectAgentChanges,
   pinRuntimeRoles,
   prepareP4Worktree,
   runP4Task,
@@ -38,7 +39,10 @@ try {
     ),
   );
   // P0-05: the worktree's own object database must not reach commits before
-  // the reference, not merely hide them from a default `git log`.
+  // the reference, not merely hide them from a default `git log`. There are
+  // two commits, not one: the fetched reference plus P4's own local setup
+  // commit for the historic-tasks removal (P0-07) — both descend from and
+  // are only reachable through the reference itself.
   assert.equal(
     execFileSync("git", ["log", "--oneline"], {
       cwd: prepared.worktree,
@@ -46,8 +50,8 @@ try {
     })
       .trim()
       .split("\n").length,
-    1,
-    "the worktree's history contains exactly the reference commit",
+    2,
+    "the worktree's history is the reference commit plus P4's own local setup commit",
   );
   const parentReference = execFileSync(
     "git",
@@ -94,13 +98,63 @@ try {
       encoding: "utf8",
     },
   );
-  assert.match(
+  assert.equal(
     status,
-    /^A /m,
-    "the fixture overlay is staged, not merely present as untracked files",
+    "",
+    "the fixture overlay is committed as part of the worktree's own baseline, not left staged (P0-07: a merely staged, uncommitted fixture would show up as an agent change in every run)",
+  );
+  const committedFiles = execFileSync(
+    "git",
+    ["show", "--name-only", "--format=", "HEAD"],
+    { cwd: fixtureTaskPrepared.worktree, encoding: "utf8" },
+  );
+  assert.match(
+    committedFiles,
+    /^benchmark-fixture\/run-fixture-test\.mjs$/m,
+    "the fixture overlay is part of the HEAD commit",
   );
 } finally {
   disposeP4Worktree(fixtureTaskPrepared);
+}
+
+// P0-07: inspectAgentChanges must see staged and untracked changes, not
+// only unstaged edits to already-tracked files.
+const diffPrepared = prepareP4Worktree({
+  root,
+  reference: manifest.reference,
+  taskId: "01-single-file-change",
+});
+try {
+  const clean = inspectAgentChanges(diffPrepared.worktree);
+  assert.deepEqual(clean.changedFiles, [], "a freshly prepared worktree has no changes yet");
+
+  writeFileSync(join(diffPrepared.worktree, "untracked-agent-file.txt"), "new file\n");
+  const withUntracked = inspectAgentChanges(diffPrepared.worktree);
+  assert(
+    withUntracked.changedFiles.includes("untracked-agent-file.txt"),
+    "an untracked new file is reported",
+  );
+  assert.notEqual(
+    withUntracked.diffFingerprint,
+    clean.diffFingerprint,
+    "an untracked new file changes the fingerprint",
+  );
+
+  execFileSync("git", ["add", "untracked-agent-file.txt"], {
+    cwd: diffPrepared.worktree,
+  });
+  const withStaged = inspectAgentChanges(diffPrepared.worktree);
+  assert(
+    withStaged.changedFiles.includes("untracked-agent-file.txt"),
+    "a staged new file is still reported once it is no longer untracked",
+  );
+  assert.notEqual(
+    withStaged.diffFingerprint,
+    withUntracked.diffFingerprint,
+    "moving a change from untracked to staged changes the fingerprint",
+  );
+} finally {
+  disposeP4Worktree(diffPrepared);
 }
 
 const pinned = pinRuntimeRoles(manifest.roles, {

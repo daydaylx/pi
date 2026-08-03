@@ -1185,12 +1185,14 @@ export const runtimeSections = {
           trusted,
         );
         eq(
-          harness.execCalls.slice(-3).map((call) => call.command),
-          ["npm", "npm", "git"],
+          harness.execCalls.slice(-5).map((call) => call.command),
+          ["npm", "npm", "git", "git", "git"],
+          // The trailing three git calls are projectDiffFingerprint's
+          // unstaged diff, staged diff, and status calls (P0-07).
           "project_check executes requested profiles in deterministic order",
         );
         eq(
-          harness.execCalls.at(-3)?.options?.cwd,
+          harness.execCalls.at(-5)?.options?.cwd,
           workspace,
           "project_check executes only at the bounded project cwd",
         );
@@ -1344,6 +1346,107 @@ export const runtimeSections = {
       rmSync(workspace, { recursive: true, force: true });
     });
   },
+
+  "project check freshness detects staged and untracked changes (P0-07)":
+    async (context) => {
+      const {
+        section,
+        load,
+        policy,
+        menuUi,
+        thinkingMenu,
+        lspControlCenter,
+        lspTools,
+        modePermissions,
+        planMode,
+        controlPlane,
+        diffAlgorithm,
+        diffFallback,
+        diffTracker,
+        diffViewer,
+        askUser,
+        askUserPolicy,
+        lspExtensionMod,
+        outputLimits,
+        toolOutputGuard,
+        contextDiagnostics,
+        setupConfig,
+        setupCore,
+        auroraState,
+        auroraUi,
+        auroraFooter,
+      } = context;
+
+      await section(
+        "project check freshness detects staged and untracked changes (P0-07)",
+        async () => {
+          if (!setupCore) return;
+          // Only unstaged `git diff` used to be inspected, so a staged-only
+          // or untracked-only change looked identical to no change at all —
+          // an agent could stage an edit or add a new file and a required
+          // check would still look fresh against it.
+          async function assertDetected(exec, label) {
+            const workspace = mkdtempSync(
+              path.join(tmpdir(), "pi-project-check-freshness-diff-"),
+            );
+            mkdirSync(path.join(workspace, ".pi"), { recursive: true });
+            writeFileSync(
+              path.join(workspace, ".pi", "verify.json"),
+              JSON.stringify({
+                profiles: {
+                  test: {
+                    program: "node",
+                    args: ["--version"],
+                    classification: "required",
+                  },
+                },
+              }),
+            );
+            const harness = createHarness({ exec });
+            setupCore.default(harness.api);
+            const context = harness.makeContext({
+              cwd: workspace,
+              trusted: true,
+            });
+            await harness.runHooks("session_start", {}, context);
+            await harness.runHooks("agent_end", {}, context);
+            assert(
+              harness.notifications
+                .at(-1)
+                ?.message?.includes("kein erfolgreicher Projekt-Check"),
+              `${label} is detected as a project change`,
+            );
+            rmSync(workspace, { recursive: true, force: true });
+          }
+
+          await assertDetected((command, args) => {
+            if (command !== "git")
+              return { code: 0, stdout: "ok", stderr: "", killed: false };
+            if (args.includes("--cached"))
+              return {
+                code: 0,
+                stdout: "diff --git a/staged b/staged\n",
+                stderr: "",
+                killed: false,
+              };
+            return { code: 0, stdout: "", stderr: "", killed: false };
+          }, "a staged-only change");
+
+          await assertDetected((command, args) => {
+            if (command !== "git")
+              return { code: 0, stdout: "ok", stderr: "", killed: false };
+            if (args[0] === "status")
+              return {
+                code: 0,
+                stdout: "?? new-file.txt\n",
+                stderr: "",
+                killed: false,
+              };
+            return { code: 0, stdout: "", stderr: "", killed: false };
+          }, "a new untracked file");
+        },
+      );
+    },
 
   "performance tool registrations": async (context) => {
     const {
@@ -1700,8 +1803,7 @@ export const runtimeSections = {
             "the very first attempt always establishes the baseline",
           );
 
-          gitDiffOutput =
-            "diff --git a/src/hot.js b/src/hot.js\n+faster\n";
+          gitDiffOutput = "diff --git a/src/hot.js b/src/hot.js\n+faster\n";
           const candidateMeasurement = await measure.execute(
             "m-candidate",
             { profile: "quick" },
@@ -2861,12 +2963,16 @@ export const runtimeSections = {
           "the normal footer adds model and routine diagnostics",
         );
 
-        const auroraTools = await load("extensions/aurora-ui/tool-renderers.ts");
-        const activeTools = ["read", "grep", "bash", "edit"].map((name, index) => ({
-          id: `${name}-${index}`,
-          name,
-          startedAt: 0,
-        }));
+        const auroraTools = await load(
+          "extensions/aurora-ui/tool-renderers.ts",
+        );
+        const activeTools = ["read", "grep", "bash", "edit"].map(
+          (name, index) => ({
+            id: `${name}-${index}`,
+            name,
+            startedAt: 0,
+          }),
+        );
         const narrowTools = auroraTools
           .renderActiveTools(activeTools, context.ui.theme, 60, 5_000)
           .map(stripAnsi);
@@ -2874,11 +2980,13 @@ export const runtimeSections = {
           .renderActiveTools(activeTools, context.ui.theme, 90, 5_000)
           .map(stripAnsi);
         assert(
-          narrowTools.length === 2 && narrowTools.at(-1)?.includes("+3 weitere Tools"),
+          narrowTools.length === 2 &&
+            narrowTools.at(-1)?.includes("+3 weitere Tools"),
           "the narrow activity surface discloses hidden parallel tools",
         );
         assert(
-          normalTools.length === 4 && normalTools.at(-1)?.includes("+1 weitere Tools"),
+          normalTools.length === 4 &&
+            normalTools.at(-1)?.includes("+1 weitere Tools"),
           "the normal activity surface discloses its remaining parallel tool",
         );
       }
@@ -2937,10 +3045,26 @@ export const runtimeSections = {
             context.ui.theme,
             124,
             footerInput([
-              { agent: "very-long-investigator-name", phase: "very-long-analysis-phase", status: "running" },
-              { agent: "very-long-debugger-name", phase: "very-long-analysis-phase", status: "running" },
-              { agent: "very-long-verifier-name", phase: "very-long-analysis-phase", status: "running" },
-              { agent: "very-long-review-name", phase: "very-long-analysis-phase", status: "running" },
+              {
+                agent: "very-long-investigator-name",
+                phase: "very-long-analysis-phase",
+                status: "running",
+              },
+              {
+                agent: "very-long-debugger-name",
+                phase: "very-long-analysis-phase",
+                status: "running",
+              },
+              {
+                agent: "very-long-verifier-name",
+                phase: "very-long-analysis-phase",
+                status: "running",
+              },
+              {
+                agent: "very-long-review-name",
+                phase: "very-long-analysis-phase",
+                status: "running",
+              },
             ]),
           )
           .map(stripAnsi)
@@ -3105,21 +3229,29 @@ export const runtimeSections = {
           });
           await motionHarness.runHooks("session_start", {}, motionContext);
           await motionHarness.runHooks("agent_start", {}, motionContext);
-          const motionWidget = motionHarness.widgets.get("aurora-ui/activity")?.content;
-          const rendered = typeof motionWidget === "function"
-            ? motionWidget({ requestRender() {} }, motionContext.ui.theme)
-                .render(60)
-                .map(stripAnsi)
-                .join("\n")
-            : "";
+          const motionWidget =
+            motionHarness.widgets.get("aurora-ui/activity")?.content;
+          const rendered =
+            typeof motionWidget === "function"
+              ? motionWidget({ requestRender() {} }, motionContext.ui.theme)
+                  .render(60)
+                  .map(stripAnsi)
+                  .join("\n")
+              : "";
           assert(
             rendered.includes("Analysiert die Aufgabe"),
             `Aurora keeps its activity label visible with ${motion} motion`,
           );
           if (motion === "reduced")
-            assert(rendered.includes("●"), "reduced motion uses a static activity marker");
+            assert(
+              rendered.includes("●"),
+              "reduced motion uses a static activity marker",
+            );
           else
-            assert(!rendered.includes("●"), "off motion keeps activity text without a marker");
+            assert(
+              !rendered.includes("●"),
+              "off motion keeps activity text without a marker",
+            );
           eq(
             motionHarness.workingVisibility.at(-1),
             false,
