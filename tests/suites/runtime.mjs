@@ -800,6 +800,114 @@ export const runtimeSections = {
     // ---------------------------------------------------------------------------
   },
 
+  "setup doctor required profile completeness (P1-08)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
+
+    await section(
+      "setup doctor required profile completeness (P1-08)",
+      async () => {
+        if (!setupCore) return;
+        // Before this, the only signal that a project had no required check
+        // was a passive agent_end notification, gated on the project having
+        // *changed* since the session started — invisible on a fresh
+        // /setup-doctor run, and silent entirely when .pi/verify.json was
+        // missing outright.
+        async function doctorReport(workspace) {
+          const harness = createHarness();
+          setupCore.default(harness.api);
+          const context = harness.makeContext({
+            cwd: workspace,
+            trusted: true,
+          });
+          const doctor = harness.commands.get("setup-doctor");
+          await doctor("", context);
+          return harness.notifications.at(-1)?.message ?? "";
+        }
+
+        const noConfigWorkspace = mkdtempSync(
+          path.join(tmpdir(), "pi-setup-doctor-no-verify-json-"),
+        );
+        assert(
+          (await doctorReport(noConfigWorkspace)).includes(
+            "WARNING: Kein Projekt-Prüfprofil definiert",
+          ),
+          "a trusted project without .pi/verify.json is flagged",
+        );
+        rmSync(noConfigWorkspace, { recursive: true, force: true });
+
+        const noRequiredWorkspace = mkdtempSync(
+          path.join(tmpdir(), "pi-setup-doctor-no-required-"),
+        );
+        mkdirSync(path.join(noRequiredWorkspace, ".pi"), { recursive: true });
+        writeFileSync(
+          path.join(noRequiredWorkspace, ".pi", "verify.json"),
+          JSON.stringify({
+            profiles: {
+              lint: { program: "eslint", args: [], classification: "advisory" },
+            },
+          }),
+        );
+        assert(
+          (await doctorReport(noRequiredWorkspace)).includes(
+            "WARNING: Projekt-Prüfprofile enthalten keine Pflichtprüfung",
+          ),
+          "a project whose profiles are all non-required is flagged",
+        );
+        rmSync(noRequiredWorkspace, { recursive: true, force: true });
+
+        const healthyWorkspace = mkdtempSync(
+          path.join(tmpdir(), "pi-setup-doctor-healthy-"),
+        );
+        mkdirSync(path.join(healthyWorkspace, ".pi"), { recursive: true });
+        writeFileSync(
+          path.join(healthyWorkspace, ".pi", "verify.json"),
+          JSON.stringify({
+            profiles: {
+              typecheck: {
+                program: "tsc",
+                args: ["--noEmit"],
+                classification: "required",
+              },
+            },
+          }),
+        );
+        const healthyReport = await doctorReport(healthyWorkspace);
+        assert(
+          !healthyReport.includes("Kein Projekt-Prüfprofil definiert") &&
+            !healthyReport.includes("keine Pflichtprüfung"),
+          "a project with at least one required profile is not flagged",
+        );
+        rmSync(healthyWorkspace, { recursive: true, force: true });
+      },
+    );
+  },
+
   "project verification profiles (#105)": async (context) => {
     const {
       section,

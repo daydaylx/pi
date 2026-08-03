@@ -808,6 +808,26 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  command runtime: ${hasCommandRuntime ? "available" : "missing"}`,
         `  project verification profiles: ${profileHint}`,
       ];
+      // P1-08: completeness of required profiles used to be visible only as
+      // a passive agent_end notification (line ~231), gated on the project
+      // having *changed*, and silent entirely when .pi/verify.json was
+      // missing outright. /setup-doctor now surfaces both cases explicitly,
+      // any time it is run.
+      if (trusted && !projectProfiles.source) {
+        lines.push(
+          "  WARNING: Kein Projekt-Prüfprofil definiert (.pi/verify.json fehlt) — project_check kann nichts gegenprüfen.",
+        );
+      } else if (
+        trusted &&
+        projectProfiles.source &&
+        !Object.values(projectProfiles.profiles).some(
+          (profile) => profile.classification === "required",
+        )
+      ) {
+        lines.push(
+          "  WARNING: Projekt-Prüfprofile enthalten keine Pflichtprüfung (classification: required) — kein Lauf kann als verifiziert gelten.",
+        );
+      }
       for (const diagnostic of loaded.diagnostics) {
         lines.push(
           `  ${diagnostic.level.toUpperCase()}: ${diagnostic.message} (${diagnostic.source})`,
