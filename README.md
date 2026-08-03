@@ -20,11 +20,11 @@ Completion, Recovery, Migration oder Planpflicht.
 
 ## Subagenten
 
-Es gibt ausschließlich drei lokale Rollen: `planner` für unabhängige Analyse
-und Planung, `worker` für Umsetzung und relevante Tests sowie `reviewer` für
-eine gezielt und manuell angeforderte Prüfung. Kleine Aufgaben bearbeitet der
-Hauptagent direkt oder delegiert sie an den Worker. Ein Review und Completion
-werden nie automatisch ausgelöst.
+Es gibt ausschließlich drei lokale Rollen: `investigator` für die belegte
+Analyse unbekannter Bereiche, `debugger` für Reproduktion und Diagnose
+unbekannter Bugs sowie `verifier` für die unabhängige Prüfung nichttrivialer
+Umsetzungen. Planung, Implementierung und finale Kommunikation bleiben beim
+Hauptagenten; Delegation und Verifikation sind nie automatische Pflichtketten.
 
 Die Paket-Builtins sind in `settings.json` mit
 `subagents.disableBuiltins: true` deaktiviert. Die aktive Paketkonfiguration

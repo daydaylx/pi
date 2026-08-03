@@ -5,25 +5,31 @@ Die Orchestrierung stammt aus dem exakt gepinnten
 `subagents.disableBuiltins: true` vollständig deaktiviert, damit keine
 überlappenden Rollen im Agent-Katalog erscheinen.
 
-## Kernrollen
+## Aktive Rollen
 
 | Rolle | Tools | Verantwortung |
 | --- | --- | --- |
-| `planner` | read, grep, find, ls | Quick-/Architekturplanung und Systemgrenzen, nur lesend |
-| `worker` | read, grep, find, ls, edit, write, bash | eng abgegrenzte Umsetzung und relevante Checks |
-| `reviewer` | read, grep, find, ls | unabhängige, auf Nutzerauftrag gestartete Prüfung |
+| `investigator` | read, grep, find, ls | unbekannte Änderungssurface oder Kontrollfluss belegt eingrenzen |
+| `debugger` | read, grep, find, ls, bash | unbekannte, intermittierende oder gescheiterte Bugs reproduzieren und eingrenzen |
+| `verifier` | read, grep, find, ls, bash | nichttriviale Umsetzung unabhängig gegen Auftrag, Diff und Checks prüfen |
 
-Kleine Aufgaben bleiben beim Hauptagenten oder gehen an den Worker. Der
-Hauptagent oder Planner analysiert und plant; der Worker setzt um und führt
-relevante Tests aus. Der Reviewer prüft nur gezielt und manuell auf
-ausdrücklichen Auftrag. Es gibt keine automatische Completion und keine
-weiteren ausführbaren lokalen Rollen.
+Der Hauptagent plant, implementiert, triagiert und kommuniziert das finale
+Ergebnis. Kleine, klar lokalisierte Änderungen bleiben beim Hauptagenten.
+Normale Änderungen mit bekannter Änderungssurface plant und implementiert der
+Hauptagent ebenfalls selbst.
+`investigator` wird nur bei unbekanntem Bereich oder relevanter
+Änderungssurface gestartet; `debugger` nur bei unbekannten, intermittierenden
+oder gescheiterten Bugs; `verifier` nur für eine unabhängige Prüfung nach einer
+nichttrivialen Umsetzung. Es gibt keine automatische Pflichtdelegation und
+keine verschachtelte Delegation.
 
 Alle lokalen Profile starten laut Profil-Tools mit frischem Child-Kontext,
 übernehmen die statischen Projektregeln und nicht automatisch den
 Parent-Skill-Katalog. Ihre Toolliste erlaubt keine verschachtelte Delegation.
-Sie ist zugleich die technische Capability-Grenze: Nur der Worker besitzt
-Schreib- und Shell-Tools.
+Sie ist zugleich die technische Capability-Grenze: Keines der drei Profile
+besitzt `edit` oder `write`. `debugger` und `verifier` dürfen technisch Shell
+ausführen, ihre Profile verbieten aber ausdrücklich Projektänderungen; der
+Hauptagent bleibt alleiniger regulärer Patch-Eigentümer.
 
 ## Direkte Laufzeitquellen
 

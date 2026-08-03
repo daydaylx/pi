@@ -44,24 +44,27 @@ Triviale Teilaufgaben bleiben beim Hauptagenten.
 
 ### Delegationsmuster
 
-- **Kleine Aufgabe:** Hauptagent direkt, oder `worker`.
-- **Analyse und Planung:** Hauptagent, oder `planner` bei einer unabhängigen
-  Planungsaufgabe.
-- **Umsetzung und relevante Tests:** `worker`.
-- **Gezielte manuelle Prüfung:** `reviewer` mit klar benanntem Fokus und nur
-  auf ausdrücklichen Auftrag.
+- **Triviale, klar lokalisierte Aufgabe:** Hauptagent direkt.
+- **Unbekannter Repository-Bereich oder relevante Änderungssurface:**
+  `investigator` für eine belegte, reine Analyse.
+- **Unbekannter, intermittierender oder gescheiterter Bug:** `debugger` für
+  Reproduktion und Hypothesentests.
+- **Unabhängige Prüfung nach nichttrivialer Implementierung:** `verifier`.
 
-Ein Review ist keine automatische Abschlussstufe. Es gibt keine weiteren
-ausführbaren lokalen Rollen.
+Planung, Umsetzung, Triage und finale Nutzerkommunikation bleiben beim
+Hauptagenten. Es gibt keine automatische Pflichtdelegation und keine
+verschachtelte Delegation.
 
 ### Kontext und Ergebnis
 
-- Lokale Profile starten mit frischem Kontext und ohne verschachtelte
-  Delegation; beides ist in ihren Profil-Tools festgelegt. Fork-Kontext nur
-  nutzen, wenn frühere Nutzerentscheidungen tatsächlich benötigt werden.
+- Lokale Profile starten mit frischem Kontext, übernehmen die statischen
+  Projektregeln und erben keine Skills. Sie besitzen kein Delegationswerkzeug.
+  Fork-Kontext nur nutzen, wenn frühere Nutzerentscheidungen tatsächlich
+  benötigt werden.
 - Die Laufzeitquellen sind direkt: `settings.json` deaktiviert Paket-Builtins
   mit `subagents.disableBuiltins`; `extensions/subagent/config.json` setzt
   `maxTasks: 4`, `concurrency: 3`, `globalConcurrencyLimit: 3` und
   `maxSubagentSpawnsPerSession: 12`.
 - Ergebnisse kompakt synthetisieren und Belege, betroffene Dateien, Risiken, offene Fragen und Empfehlung nennen; keine vollständigen Unterhaltungen zurückkopieren.
-- Profilauswahl und Detailregeln nur bei Bedarf aus `/home/d/.pi/agent/docs/subagents.md` lesen.
+- Profilauswahl und Detailregeln nur bei Bedarf aus
+  `/home/d/.pi/agent/docs/subagents.md` lesen.
