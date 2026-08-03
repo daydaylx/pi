@@ -79,6 +79,7 @@ export function createLaunchAgent({ manifest, state }) {
       },
       roleHistory,
       sessionMetrics: { durationMs, exitCode: result.code },
+      sessionPath: paths.session,
     };
   };
 }

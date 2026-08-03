@@ -4,9 +4,17 @@
  * Collection only — the scoring itself is manual (see SCORING.md) and is
  * deliberately not computed here.
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fail, readJson } from "./io.mjs";
+
+// Extracted to ../subagent-variant.mjs so P3 and P4 share one implementation
+// of subagent-call counting and cap reading; re-exported here so existing P3
+// imports keep working unchanged.
+export {
+  countSubagentToolCalls,
+  subagentSpawnCap,
+} from "../subagent-variant.mjs";
 
 function listJsonlFiles(directory) {
   if (!existsSync(directory)) return [];
@@ -14,44 +22,16 @@ function listJsonlFiles(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const candidate = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...listJsonlFiles(candidate));
-    else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(candidate);
+    else if (entry.isFile() && entry.name.endsWith(".jsonl"))
+      files.push(candidate);
   }
   return files.sort();
 }
 
 export function subagentSessionPaths(paths) {
-  return listJsonlFiles(paths.runDir).filter((candidate) => candidate !== paths.session);
-}
-
-export function countSubagentToolCalls(sessionPath) {
-  if (!existsSync(sessionPath)) return 0;
-  let calls = 0;
-  for (const line of readFileSync(sessionPath, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line);
-      if (entry?.type !== "message" || entry.message?.role !== "assistant") continue;
-      for (const block of entry.message.content ?? []) {
-        if (block?.type === "toolCall" && block.name === "subagent") calls += 1;
-      }
-    } catch {
-      // The collector will treat malformed session data as unavailable rather
-      // than allowing P3 to infer a subagent call from it.
-    }
-  }
-  return calls;
-}
-
-export function subagentSpawnCap(worktree) {
-  const config = readJson(
-    join(worktree, "extensions", "subagent", "config.json"),
-    "P3 subagent configuration",
+  return listJsonlFiles(paths.runDir).filter(
+    (candidate) => candidate !== paths.session,
   );
-  const cap = config.maxSubagentSpawnsPerSession;
-  if (!Number.isInteger(cap) || cap < 1) {
-    fail("P3 subagent configuration has no valid maxSubagentSpawnsPerSession.");
-  }
-  return cap;
 }
 
 export function readMeta(paths) {
