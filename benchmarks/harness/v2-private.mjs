@@ -24,7 +24,9 @@ const SAFE_RESULT_KEYS = new Set([
 export function privateRoot(env = process.env) {
   const configured = env[ROOT_VARIABLE];
   if (typeof configured !== "string" || configured.length === 0) {
-    throw new Error(`${ROOT_VARIABLE} must name the external private evaluator root.`);
+    throw new Error(
+      `${ROOT_VARIABLE} must name the external private evaluator root.`,
+    );
   }
   if (!isAbsolute(configured)) {
     throw new Error(`${ROOT_VARIABLE} must be an absolute path.`);
@@ -53,7 +55,9 @@ export function loadPrivateTask(root, taskId) {
   const metadataPath = join(task, "metadata.json");
   const evaluatorPath = join(task, "evaluator.mjs");
   if (!existsSync(metadataPath) || !existsSync(evaluatorPath)) {
-    throw new Error("Private benchmark task is incomplete (metadata.json and evaluator.mjs are required).");
+    throw new Error(
+      "Private benchmark task is incomplete (metadata.json and evaluator.mjs are required).",
+    );
   }
   let metadata;
   try {
@@ -62,7 +66,9 @@ export function loadPrivateTask(root, taskId) {
     throw new Error("Private benchmark task metadata is not valid JSON.");
   }
   if (!metadata || typeof metadata !== "object" || metadata.taskId !== taskId) {
-    throw new Error("Private benchmark task metadata does not match the requested task.");
+    throw new Error(
+      "Private benchmark task metadata does not match the requested task.",
+    );
   }
   return { task, metadataPath, evaluatorPath, metadata };
 }
@@ -72,7 +78,13 @@ export function agentEnvironment(env = process.env) {
   const result = {};
   for (const [key, value] of Object.entries(env)) {
     if (typeof value !== "string") continue;
-    if (key === ROOT_VARIABLE || key.startsWith("P3_") || key.startsWith("PI_BENCHMARK_")) continue;
+    if (
+      key === ROOT_VARIABLE ||
+      key.startsWith("P3_") ||
+      key.startsWith("P4_") ||
+      key.startsWith("PI_BENCHMARK_")
+    )
+      continue;
     result[key] = value;
   }
   return result;
@@ -81,7 +93,10 @@ export function agentEnvironment(env = process.env) {
 function redactedText(value, root) {
   return String(value)
     .replaceAll(root, "[private evaluator]")
-    .replace(/(?:reference|solution|hidden[ -]?test)[^\n]{0,180}/gi, "[redacted evaluator detail]");
+    .replace(
+      /(?:reference|solution|hidden[ -]?test)[^\n]{0,180}/gi,
+      "[redacted evaluator detail]",
+    );
 }
 
 export function publicEvaluatorResult(value, root) {
@@ -91,7 +106,8 @@ export function publicEvaluatorResult(value, root) {
   const result = {};
   for (const [key, candidate] of Object.entries(value)) {
     if (!SAFE_RESULT_KEYS.has(key)) continue;
-    result[key] = typeof candidate === "string" ? redactedText(candidate, root) : candidate;
+    result[key] =
+      typeof candidate === "string" ? redactedText(candidate, root) : candidate;
   }
   if (typeof result.status !== "string") {
     throw new Error("Private evaluator result has no status.");
@@ -99,16 +115,31 @@ export function publicEvaluatorResult(value, root) {
   return result;
 }
 
-export function runPrivateEvaluator({ root, taskId, worktree, timeoutMs = 300_000 }) {
+export function runPrivateEvaluator({
+  root,
+  taskId,
+  worktree,
+  timeoutMs = 300_000,
+}) {
   const task = loadPrivateTask(root, taskId);
-  const result = spawnSync(process.execPath, [task.evaluatorPath, "--worktree", resolve(worktree)], {
-    cwd: task.task,
-    encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", TMPDIR: process.env.TMPDIR ?? "" },
-    timeout: timeoutMs,
-  });
+  const result = spawnSync(
+    process.execPath,
+    [task.evaluatorPath, "--worktree", resolve(worktree)],
+    {
+      cwd: task.task,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        TMPDIR: process.env.TMPDIR ?? "",
+      },
+      timeout: timeoutMs,
+    },
+  );
   if (result.error || result.status !== 0) {
-    throw new Error(`Private evaluator failed: ${redactedText(result.stderr || result.error?.message || "unknown error", root)}`);
+    throw new Error(
+      `Private evaluator failed: ${redactedText(result.stderr || result.error?.message || "unknown error", root)}`,
+    );
   }
   let decoded;
   try {
