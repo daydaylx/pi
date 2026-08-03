@@ -7,6 +7,7 @@ export const SECTION_SUITES = {
   "project_check tool (#123)": "runtime",
   "project check freshness warning (#129)": "runtime",
   "performance tool registrations": "runtime",
+  "performance_state correctness verification (P0-02)": "runtime",
   "native subagent profiles": "runtime",
   "native project skills": "runtime",
   "Control Center menus and routing": "ui",

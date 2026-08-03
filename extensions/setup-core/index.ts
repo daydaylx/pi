@@ -638,17 +638,35 @@ export default function setupCore(pi: ExtensionAPI): void {
           details: {},
           isError: true,
         };
+      // "passed" is a claim about the measured code state, not just a free
+      // parameter: it is only trusted when a required project_check already
+      // succeeded against that exact diff fingerprint (lastSuccessfulRequiredCheck).
+      // "failed" needs no such proof — a false failure claim only makes this
+      // tool overly conservative, never wrongly permissive.
+      let correctness = params.correctness;
+      let downgradeNotice = "";
+      if (correctness === "passed") {
+        const verified =
+          lastSuccessfulRequiredCheck !== undefined &&
+          lastSuccessfulRequiredCheck.diffFingerprint ===
+            measurement.sourceFingerprint;
+        if (!verified) {
+          correctness = "unknown";
+          downgradeNotice =
+            " (correctness von 'passed' auf 'unknown' herabgestuft: kein erfolgreicher project_check-Lauf für genau diesen Codezustand gefunden — project_check ausführen, bevor der Versuch erneut aufgezeichnet wird)";
+        }
+      }
       const attempt = recordExperiment(experiment, {
         hypothesis: params.hypothesis,
         measurement,
-        correctness: params.correctness,
+        correctness,
         diffFingerprint: measurement.sourceFingerprint,
       });
       return {
         content: [
           {
             type: "text" as const,
-            text: `${attempt.id}: ${attempt.decision} – ${attempt.reason}`,
+            text: `${attempt.id}: ${attempt.decision} – ${attempt.reason}${downgradeNotice}`,
           },
         ],
         details: {

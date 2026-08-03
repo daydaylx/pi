@@ -63,6 +63,16 @@ belastbarer Gewinn dargestellt.
 Kandidaten nur für die aktuelle Sitzung. Es speichert weder Logs noch Prompts,
 ändert keine Dateien und führt niemals einen Git-Rollback aus.
 
+Ein `record_attempt` mit `correctness: "passed"` wird nur akzeptiert, wenn seit
+genau dem gemessenen Codezustand (`sourceFingerprint` der Messung) bereits ein
+erfolgreicher `project_check`-Lauf eines Pflichtprofils vorliegt. Fehlt dieser
+Nachweis, stuft `performance_state` die Behauptung selbständig auf `"unknown"`
+herab und meldet das im Tool-Ergebnis — eine freie Korrektheitsbehauptung ohne
+echten Check kann eine Performanceverbesserung also nicht mehr als `"kept"`
+absichern. `correctness: "failed"` braucht dagegen keinen `project_check`-Beleg,
+da eine falsche Fehlschlag-Behauptung das Ergebnis nur unnötig konservativ
+macht, nie fälschlich zulässig.
+
 ## Profiling
 
 `.pi/profiling.json` hat eine getrennte, kleine Adapterliste:

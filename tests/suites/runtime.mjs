@@ -529,6 +529,8 @@ export const runtimeSections = {
           workflow: {
             phase: "simple_plan",
             label: "Schnellplan",
+            completed: 1,
+            total: 3,
           },
           lsp: { state: "ready" },
         });
@@ -542,10 +544,15 @@ export const runtimeSections = {
           "simple_plan",
           "Aurora rejects the retired legacy phase name",
         );
+        eq(state.workflow.completed, 1, "Aurora keeps workflow progress");
+        eq(state.workflow.total, 3, "Aurora keeps the workflow total");
+        auroraState.mergeAuroraUiState(state, {
+          workflow: { completed: 4, total: 3 },
+        });
         eq(
           state.workflow.completed,
           undefined,
-          "Aurora has no workflow progress metadata",
+          "Aurora rejects progress beyond the declared total",
         );
         eq(state.lsp.state, "ready", "Aurora merges LSP patches");
         assert(
@@ -1568,6 +1575,225 @@ export const runtimeSections = {
     /** Gate exec stub whose typecheck step fails; used by the sections below. */
   },
 
+  "performance_state correctness verification (P0-02)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
+
+    await section(
+      "performance_state correctness verification (P0-02)",
+      async () => {
+        if (!setupCore) return;
+        const workspace = mkdtempSync(
+          path.join(tmpdir(), "pi-performance-state-correctness-"),
+        );
+        mkdirSync(path.join(workspace, ".pi"), { recursive: true });
+        writeFileSync(
+          path.join(workspace, ".pi", "verify.json"),
+          JSON.stringify({
+            profiles: {
+              typecheck: {
+                program: "node",
+                args: ["--version"],
+                classification: "required",
+              },
+            },
+          }),
+        );
+        writeFileSync(
+          path.join(workspace, ".pi", "performance.json"),
+          JSON.stringify({
+            profiles: {
+              quick: {
+                program: "bench",
+                args: [],
+                warmups: 0,
+                runs: 2,
+                metricSource: "json",
+                metric: "duration_ms",
+                direction: "lower_is_better",
+              },
+            },
+          }),
+        );
+        let gitDiffOutput = "";
+        const harness = createHarness({
+          exec(command) {
+            if (command === "git")
+              return {
+                code: 0,
+                stdout: gitDiffOutput,
+                stderr: "",
+                killed: false,
+              };
+            if (command === "bench")
+              return {
+                code: 0,
+                stdout: '{"duration_ms":10}',
+                stderr: "",
+                killed: false,
+              };
+            if (command === "node")
+              return { code: 0, stdout: "v22.0.0", stderr: "", killed: false };
+            return {
+              code: 1,
+              stdout: "",
+              stderr: "unexpected command",
+              killed: false,
+            };
+          },
+        });
+        setupCore.default(harness.api);
+        const trusted = harness.makeContext({ cwd: workspace, trusted: true });
+        await harness.runHooks("session_start", {}, trusted);
+        const measure = harness.tools.get("performance_measure");
+        const state = harness.tools.get("performance_state");
+        const check = harness.tools.get("project_check");
+        if (measure && state && check) {
+          gitDiffOutput = "";
+          const baselineMeasurement = await measure.execute(
+            "m-baseline",
+            { profile: "quick" },
+            undefined,
+            undefined,
+            trusted,
+          );
+          const baselineAttempt = await state.execute(
+            "a-baseline",
+            {
+              action: "record_attempt",
+              measurementId: baselineMeasurement.details.id,
+              hypothesis: "baseline",
+              correctness: "unknown",
+            },
+            undefined,
+            undefined,
+            trusted,
+          );
+          eq(
+            baselineAttempt.details.attempt.decision,
+            "kept",
+            "the very first attempt always establishes the baseline",
+          );
+
+          gitDiffOutput =
+            "diff --git a/src/hot.js b/src/hot.js\n+faster\n";
+          const candidateMeasurement = await measure.execute(
+            "m-candidate",
+            { profile: "quick" },
+            undefined,
+            undefined,
+            trusted,
+          );
+          const unverifiedAttempt = await state.execute(
+            "a-candidate-unverified",
+            {
+              action: "record_attempt",
+              measurementId: candidateMeasurement.details.id,
+              hypothesis: "candidate, no project_check yet",
+              correctness: "passed",
+            },
+            undefined,
+            undefined,
+            trusted,
+          );
+          eq(
+            unverifiedAttempt.details.attempt.correctness,
+            "unknown",
+            "a 'passed' claim with no matching project_check run is downgraded to 'unknown' (P0-02)",
+          );
+          assert(
+            unverifiedAttempt.content[0].text.includes("herabgestuft"),
+            "the tool response explains why the claim was downgraded",
+          );
+
+          const checkResult = await check.execute(
+            "check-candidate",
+            { profile: "typecheck" },
+            undefined,
+            undefined,
+            trusted,
+          );
+          eq(
+            checkResult.isError,
+            false,
+            "the required profile succeeds for the candidate's exact code state",
+          );
+
+          const verifiedAttempt = await state.execute(
+            "a-candidate-verified",
+            {
+              action: "record_attempt",
+              measurementId: candidateMeasurement.details.id,
+              hypothesis: "candidate, verified by project_check",
+              correctness: "passed",
+            },
+            undefined,
+            undefined,
+            trusted,
+          );
+          eq(
+            verifiedAttempt.details.attempt.correctness,
+            "passed",
+            "a 'passed' claim backed by a matching project_check run is trusted (P0-02)",
+          );
+          assert(
+            !verifiedAttempt.content[0].text.includes("herabgestuft"),
+            "no downgrade notice once project_check verified this exact code state",
+          );
+
+          const failedAttempt = await state.execute(
+            "a-candidate-failed",
+            {
+              action: "record_attempt",
+              measurementId: candidateMeasurement.details.id,
+              hypothesis: "candidate, claimed failed",
+              correctness: "failed",
+            },
+            undefined,
+            undefined,
+            trusted,
+          );
+          eq(
+            failedAttempt.details.attempt.correctness,
+            "failed",
+            "a 'failed' claim needs no project_check and is trusted directly",
+          );
+          eq(
+            failedAttempt.details.attempt.decision,
+            "rejected",
+            "a candidate claimed failed is always rejected",
+          );
+        }
+        rmSync(workspace, { recursive: true, force: true });
+      },
+    );
+  },
+
   "native subagent profiles": async (context) => {
     const {
       section,
@@ -1649,6 +1875,15 @@ export const runtimeSections = {
           `${name} has no project write tool`,
         );
       }
+      for (const name of ["investigator.md", "verifier.md"]) {
+        const source = profileSources[name];
+        assert(
+          source.includes("## Acceptance Contract") &&
+            source.includes("`acceptance-report`") &&
+            source.includes("Teil des Ausgabeformats"),
+          `${name} treats a required acceptance report as part of its fixed output format`,
+        );
+      }
       assert(
         !/^tools:.*\bbash\b/m.test(profileSources["investigator.md"]),
         "investigator has no shell access",
@@ -1679,6 +1914,12 @@ export const runtimeSections = {
           readFileSync(path.join(ROOT, "docs/subagents.md"), "utf8"),
         ),
         "documentation keeps regular patch ownership with the main agent",
+      );
+      assert(
+        readFileSync(path.join(ROOT, "docs/subagents.md"), "utf8").includes(
+          "Aufrufer geben ihnen keinen\n`output`-Pfad vor",
+        ),
+        "documentation keeps read-only subagent findings inline instead of requiring a child-written output path",
       );
     });
   },
@@ -2387,7 +2628,12 @@ export const runtimeSections = {
           sessionEpoch: value.sessionEpoch,
           source: "permissions-test-provider",
           state: {
-            workflow: { phase: "working", label: "Schritt 1/3" },
+            workflow: {
+              phase: "detailed_plan",
+              label: "Architekturplan",
+              completed: 1,
+              total: 3,
+            },
             permissions: { level: "project-write", label: "Projekt schreiben" },
           },
         });
@@ -2572,6 +2818,71 @@ export const runtimeSections = {
         footer.dispose?.();
       }
 
+      {
+        const responsiveInput = {
+          state: {
+            sessionEpoch: "responsive-test",
+            workflow: { phase: "work", label: "Work" },
+            permissions: { level: "confirm-all", label: "Alles bestätigen" },
+            lsp: { state: "eingeschränkt" },
+            model: { id: "aurora-test-model", thinking: "hoch" },
+            activity: { kind: "idle", activeTools: 0 },
+          },
+          statuses: new Map(),
+          branch: "feature/aurora",
+          cwd: path.join(homedir(), "projects", "aurora-test"),
+          sessionName: "aurora-test",
+          tokens: { input: 1_000, output: 500 },
+          contextPercent: 92,
+        };
+        const narrow = auroraFooter
+          .renderFooterLines(context.ui.theme, 60, responsiveInput)
+          .map(stripAnsi)
+          .join("\n");
+        const normal = auroraFooter
+          .renderFooterLines(context.ui.theme, 90, {
+            ...responsiveInput,
+            state: { ...responsiveInput.state, lsp: { state: "ready" } },
+            contextPercent: 40,
+          })
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          narrow.includes("Alles bestätigen") &&
+            narrow.includes("LSP eingeschränkt") &&
+            narrow.includes("Kontext 92%") &&
+            !narrow.includes("aurora-test-model"),
+          "the narrow footer protects permissions and warnings before model metadata",
+        );
+        assert(
+          normal.includes("aurora-test-model") &&
+            normal.includes("LSP ready") &&
+            normal.includes("Kontext 40%"),
+          "the normal footer adds model and routine diagnostics",
+        );
+
+        const auroraTools = await load("extensions/aurora-ui/tool-renderers.ts");
+        const activeTools = ["read", "grep", "bash", "edit"].map((name, index) => ({
+          id: `${name}-${index}`,
+          name,
+          startedAt: 0,
+        }));
+        const narrowTools = auroraTools
+          .renderActiveTools(activeTools, context.ui.theme, 60, 5_000)
+          .map(stripAnsi);
+        const normalTools = auroraTools
+          .renderActiveTools(activeTools, context.ui.theme, 90, 5_000)
+          .map(stripAnsi);
+        assert(
+          narrowTools.length === 2 && narrowTools.at(-1)?.includes("+3 weitere Tools"),
+          "the narrow activity surface discloses hidden parallel tools",
+        );
+        assert(
+          normalTools.length === 4 && normalTools.at(-1)?.includes("+1 weitere Tools"),
+          "the normal activity surface discloses its remaining parallel tool",
+        );
+      }
+
       // Aurora owns the compact, live subagent summary in the footer. Rendering no
       // subagents must leave the rest of the footer intact.
       {
@@ -2620,6 +2931,23 @@ export const runtimeSections = {
         assert(
           handedOver.length > 0 && handedOver.includes("Read + Write"),
           "handing the subagent segment over leaves the rest of the footer intact",
+        );
+        const overflow = auroraFooter
+          .renderFooterLines(
+            context.ui.theme,
+            124,
+            footerInput([
+              { agent: "very-long-investigator-name", phase: "very-long-analysis-phase", status: "running" },
+              { agent: "very-long-debugger-name", phase: "very-long-analysis-phase", status: "running" },
+              { agent: "very-long-verifier-name", phase: "very-long-analysis-phase", status: "running" },
+              { agent: "very-long-review-name", phase: "very-long-analysis-phase", status: "running" },
+            ]),
+          )
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          overflow.includes("+1 weitere"),
+          "the subagent overflow count survives long names in the compact wide footer",
         );
       }
 
@@ -2708,8 +3036,8 @@ export const runtimeSections = {
           "the lower frame line is gone with the values it used to carry",
         );
         assert(
-          frame?.includes("Schritt"),
-          "the editor frame names the current step",
+          frame?.includes("Architekturplan · 1/3"),
+          "the editor frame names the workflow and its structured progress",
         );
         for (const duplicated of ["Denken", "Kontext", "aurora-test-model"]) {
           assert(
@@ -2723,8 +3051,8 @@ export const runtimeSections = {
       await harness.runHooks("agent_start", {}, context);
       eq(
         harness.workingVisibility.at(-1),
-        true,
-        "Aurora shows contextual activity while working",
+        false,
+        "Aurora keeps the native working indicator hidden while its activity widget owns live status",
       );
       await harness.runHooks(
         "tool_execution_start",
@@ -2746,13 +3074,12 @@ export const runtimeSections = {
           component.render(60).length >= 1,
           "Aurora activity renders in a narrow terminal",
         );
-        // The specific activity text ("1 Tool aktiv") must live on exactly one
-        // surface. The native working indicator stays generic; the widget above
-        // the editor carries the specific text.
+        // The widget is Aurora's only live-work surface; the native indicator
+        // remains hidden so the editor does not show two competing signals.
         eq(
-          harness.workingMessages.at(-1),
-          "Arbeite …",
-          "the native working indicator stays generic while a tool runs",
+          harness.workingVisibility.at(-1),
+          false,
+          "the native working indicator remains hidden while a tool runs",
         );
         assert(
           stripAnsi(component.render(60)[0]).includes("Tool"),
@@ -2760,6 +3087,48 @@ export const runtimeSections = {
         );
         component.invalidate?.();
         component.dispose?.();
+      }
+
+      for (const motion of ["reduced", "off"]) {
+        const workspace = mkdtempSync(path.join(tmpdir(), "aurora-motion-"));
+        try {
+          mkdirSync(path.join(workspace, ".pi"));
+          writeFileSync(
+            path.join(workspace, ".pi", "setup.json"),
+            JSON.stringify({ ui: { motion } }),
+          );
+          const motionHarness = createHarness();
+          auroraUi.default(motionHarness.api);
+          const motionContext = motionHarness.makeContext({
+            cwd: workspace,
+            trusted: true,
+          });
+          await motionHarness.runHooks("session_start", {}, motionContext);
+          await motionHarness.runHooks("agent_start", {}, motionContext);
+          const motionWidget = motionHarness.widgets.get("aurora-ui/activity")?.content;
+          const rendered = typeof motionWidget === "function"
+            ? motionWidget({ requestRender() {} }, motionContext.ui.theme)
+                .render(60)
+                .map(stripAnsi)
+                .join("\n")
+            : "";
+          assert(
+            rendered.includes("Analysiert die Aufgabe"),
+            `Aurora keeps its activity label visible with ${motion} motion`,
+          );
+          if (motion === "reduced")
+            assert(rendered.includes("●"), "reduced motion uses a static activity marker");
+          else
+            assert(!rendered.includes("●"), "off motion keeps activity text without a marker");
+          eq(
+            motionHarness.workingVisibility.at(-1),
+            false,
+            `${motion} motion leaves the native working indicator hidden`,
+          );
+          await motionHarness.runHooks("session_shutdown", {}, motionContext);
+        } finally {
+          rmSync(workspace, { recursive: true, force: true });
+        }
       }
 
       // A turn that ends while a tool is still registered must not leave the
