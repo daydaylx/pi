@@ -7,12 +7,22 @@
   "privateEvaluator": "PI_BENCHMARK_PRIVATE_ROOT",
   "roles": {
     "main": { "model": "opencode-go/kimi-k2.7-code", "thinking": "high" },
-    "planner": { "model": "openai-codex/gpt-5.6-sol", "thinking": "high" },
-    "worker": { "model": "openai-codex/gpt-5.6-terra", "thinking": "high" },
-    "reviewer": { "model": "zai/glm-5.2", "thinking": "high" }
+    "investigator": { "model": "openai-codex/gpt-5.6-sol", "thinking": "high" },
+    "debugger": { "model": "openai-codex/gpt-5.6-terra", "thinking": "high" },
+    "verifier": { "model": "zai/glm-5.2", "thinking": "high" }
   },
   "runs": [
-    { "id": "p4-production-10-a", "task": "10-with-without-subagent", "stackMode": "production-stack", "variant": "without-subagent" },
-    { "id": "p4-production-10-b", "task": "10-with-without-subagent", "stackMode": "production-stack", "variant": "with-subagent" }
+    {
+      "id": "p4-production-10-a",
+      "task": "10-with-without-subagent",
+      "stackMode": "production-stack",
+      "variant": "without-subagent"
+    },
+    {
+      "id": "p4-production-10-b",
+      "task": "10-with-without-subagent",
+      "stackMode": "production-stack",
+      "variant": "with-subagent"
+    }
   ]
 }

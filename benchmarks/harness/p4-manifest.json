@@ -7,15 +7,40 @@
   "privateEvaluator": "PI_BENCHMARK_PRIVATE_ROOT",
   "roles": {
     "main": { "model": "opencode-go/kimi-k2.7-code", "thinking": "high" },
-    "planner": { "model": "opencode-go/kimi-k2.7-code", "thinking": "high" },
-    "worker": { "model": "opencode-go/kimi-k2.7-code", "thinking": "high" },
-    "reviewer": { "enabled": false }
+    "investigator": {
+      "model": "opencode-go/kimi-k2.7-code",
+      "thinking": "high"
+    },
+    "debugger": { "model": "opencode-go/kimi-k2.7-code", "thinking": "high" },
+    "verifier": { "enabled": false }
   },
   "runs": [
-    { "id": "p4-pilot-01", "task": "01-single-file-change", "stackMode": "same-model" },
-    { "id": "p4-pilot-04", "task": "04-multi-file-change", "stackMode": "same-model" },
-    { "id": "p4-pilot-08", "task": "08-long-session-compaction", "stackMode": "same-model" },
-    { "id": "p4-pilot-10-a", "task": "10-with-without-subagent", "stackMode": "same-model", "variant": "without-subagent" },
-    { "id": "p4-pilot-10-b", "task": "10-with-without-subagent", "stackMode": "same-model", "variant": "with-subagent" }
+    {
+      "id": "p4-pilot-01",
+      "task": "01-single-file-change",
+      "stackMode": "same-model"
+    },
+    {
+      "id": "p4-pilot-04",
+      "task": "04-multi-file-change",
+      "stackMode": "same-model"
+    },
+    {
+      "id": "p4-pilot-08",
+      "task": "08-long-session-compaction",
+      "stackMode": "same-model"
+    },
+    {
+      "id": "p4-pilot-10-a",
+      "task": "10-with-without-subagent",
+      "stackMode": "same-model",
+      "variant": "without-subagent"
+    },
+    {
+      "id": "p4-pilot-10-b",
+      "task": "10-with-without-subagent",
+      "stackMode": "same-model",
+      "variant": "with-subagent"
+    }
   ]
 }
