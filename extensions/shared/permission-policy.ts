@@ -211,6 +211,48 @@ export function isSensitiveReference(value: string): boolean {
   );
 }
 
+/**
+ * True if `$NAME` or `${NAME}` appears outside single quotes. A real shell
+ * expands these before this policy ever sees the resolved path, so a token
+ * that looks like a safe relative path (e.g. `$HOME/x`) can resolve anywhere
+ * on disk at runtime. Path checks elsewhere in this module (containsExternalPath,
+ * resolvePathScope) only see the literal token text and cannot detect this on
+ * their own. Mirrors the quote/escape handling used for shell parsing below so
+ * a literal `'$HOME/x'` (single-quoted, never expanded by a shell) is not
+ * flagged.
+ */
+export function containsUnquotedVariableExpansion(command: string): boolean {
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (
+      quote !== "'" &&
+      char === "$" &&
+      /[A-Za-z_{]/.test(command[index + 1] ?? "")
+    ) {
+      return true;
+    }
+    if (quote) {
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+    }
+  }
+  return false;
+}
+
 function isSystemPath(path: string): boolean {
   return SYSTEM_PATHS.some(
     (root) => path === root || path.startsWith(`${root}/`),
@@ -827,6 +869,7 @@ function isSafePlanSegment(
 }
 
 export function isPlanSafeCommand(command: string, cwd: string): boolean {
+  if (containsUnquotedVariableExpansion(command)) return false;
   const parsed = parseReadOnlyShell(command);
   return (
     !parsed.error &&
@@ -959,6 +1002,11 @@ export function decideBash(
     );
   }
   if (permissionLevel === "yolo") {
+    if (containsUnquotedVariableExpansion(trimmed)) {
+      return deny(
+        "Harte Projektgrenze: eine unquotierte Shell-Variable kann außerhalb des Projekts auflösen.",
+      );
+    }
     if (/\b(?:sudo|su)\b/i.test(trimmed)) {
       return deny("Harte Systemgrenze: erhöhte Rechte sind auch in YOLO blockiert.");
     }
@@ -990,6 +1038,9 @@ export function decideBash(
     if (pattern.test(trimmed)) {
       return ask(reason);
     }
+  }
+  if (containsUnquotedVariableExpansion(trimmed)) {
+    return ask("Eine unquotierte Shell-Variable kann außerhalb des Projekts auflösen");
   }
   if (likelyExternalWrite(trimmed, cwd)) {
     return ask("Bash-Änderung außerhalb des aktuellen Projekts");
