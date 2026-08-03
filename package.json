@@ -1,0 +1,16 @@
+{
+  "name": "pi-agent",
+  "private": true,
+  "packageManager": "npm@10.9.7",
+  "engines": {
+    "node": "22.22.2",
+    "npm": "10.9.7"
+  },
+  "scripts": {
+    "typecheck": "npm --prefix npm run typecheck",
+    "test": "npm --prefix npm run test",
+    "verify": "npm --prefix npm run verify",
+    "install:user": "node scripts/install-user.mjs",
+    "patch:runtime": "node scripts/apply-runtime-patches.mjs"
+  }
+}
