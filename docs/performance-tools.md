@@ -38,10 +38,26 @@ Lege `.pi/performance.json` an:
 ```
 
 Danach `performance_measure` mit der Profil-ID aufrufen. Das Ergebnis enthält
-Rohwerte, Median, Mittelwert, Min/Max, Streuung, Profil- und Diff-Fingerprint.
+Rohwerte, Median, Mittelwert, Min/Max, Streuung sowie drei getrennte
+Fingerprints:
+
+- `profileFingerprint` — die exakte Profilkonfiguration.
+- `benchmarkInputFingerprint` — was gemessen wird (Kommando, Argumente,
+  Metrikkonfiguration, optional deklarierte `inputId`). Bleibt über eine
+  Codeänderung hinweg stabil, solange Kommando und Eingabeidentität gleich
+  bleiben.
+- `sourceFingerprint` — der Quell-/Workspace-Zustand (Commit/Diff) zum
+  Messzeitpunkt. Ändert sich absichtlich bei jeder Codeänderung.
+
 `performance_compare` akzeptiert nur zwei in derselben Sitzung aufgezeichnete
-Messungen mit identischen Fingerprints. Hohe Streuung oder unvollständige
-Serien bleiben sichtbar und werden nicht als belastbarer Gewinn dargestellt.
+Messungen mit identischem `profileFingerprint`, `benchmarkInputFingerprint`
+und identischer Richtung. Ein unterschiedlicher `sourceFingerprint` ist bei
+einem normalen Vorher-/Nachher-Vergleich erwartet, sichtbar im Ergebnis
+(`sourceChanged`) und **kein** Ablehnungsgrund. Setze `inputId` in einem
+Profil, wenn zwei Profile technisch dasselbe Benchmark-Kommando teilen, aber
+absichtlich unterschiedliche Eingabedatensätze adressieren sollen. Hohe
+Streuung oder unvollständige Serien bleiben sichtbar und werden nicht als
+belastbarer Gewinn dargestellt.
 
 `performance_state` hält Baseline, Versuche und den besten technisch gültigen
 Kandidaten nur für die aktuelle Sitzung. Es speichert weder Logs noch Prompts,

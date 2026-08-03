@@ -50,7 +50,10 @@ const ProjectCheckParams = Type.Object({
 });
 
 const PerformanceMeasureParams = Type.Object({
-  profile: Type.String({ minLength: 1, description: "ID eines Performanceprofils aus .pi/performance.json." }),
+  profile: Type.String({
+    minLength: 1,
+    description: "ID eines Performanceprofils aus .pi/performance.json.",
+  }),
 });
 
 const PerformanceCompareParams = Type.Object({
@@ -59,14 +62,27 @@ const PerformanceCompareParams = Type.Object({
 });
 
 const PerformanceStateParams = Type.Object({
-  action: Type.Union([Type.Literal("show"), Type.Literal("record_attempt"), Type.Literal("reset")]),
+  action: Type.Union([
+    Type.Literal("show"),
+    Type.Literal("record_attempt"),
+    Type.Literal("reset"),
+  ]),
   measurementId: Type.Optional(Type.String({ minLength: 1 })),
-  correctness: Type.Optional(Type.Union([Type.Literal("passed"), Type.Literal("failed"), Type.Literal("unknown")])),
+  correctness: Type.Optional(
+    Type.Union([
+      Type.Literal("passed"),
+      Type.Literal("failed"),
+      Type.Literal("unknown"),
+    ]),
+  ),
   hypothesis: Type.Optional(Type.String({ maxLength: 240 })),
 });
 
 const PerformanceProfileParams = Type.Object({
-  profile: Type.String({ minLength: 1, description: "ID eines Profiling-Adapters aus .pi/profiling.json." }),
+  profile: Type.String({
+    minLength: 1,
+    description: "ID eines Profiling-Adapters aus .pi/profiling.json.",
+  }),
 });
 
 interface ProjectCheckParamsValue {
@@ -77,9 +93,15 @@ interface ProjectCheckParamsValue {
 function redactArgument(args: string[], index: number): string {
   const value = args[index] ?? "";
   const previous = args[index - 1] ?? "";
-  const sensitiveName = /(?:token|secret|password|passwd|api[-_]?key|authorization)/i;
-  if (sensitiveName.test(previous) || sensitiveName.test(value.split("=", 1)[0])) {
-    return value.includes("=") ? `${value.split("=", 1)[0]}=[redacted]` : "[redacted]";
+  const sensitiveName =
+    /(?:token|secret|password|passwd|api[-_]?key|authorization)/i;
+  if (
+    sensitiveName.test(previous) ||
+    sensitiveName.test(value.split("=", 1)[0])
+  ) {
+    return value.includes("=")
+      ? `${value.split("=", 1)[0]}=[redacted]`
+      : "[redacted]";
   }
   return value;
 }
@@ -94,7 +116,9 @@ function requestedProfileIds(
   params: ProjectCheckParamsValue,
 ): { ids: string[] } | { error: string } {
   if (params.profile !== undefined && params.profiles !== undefined) {
-    return { error: "Bitte entweder 'profile' oder 'profiles' angeben, nicht beides." };
+    return {
+      error: "Bitte entweder 'profile' oder 'profiles' angeben, nicht beides.",
+    };
   }
   const ids = params.profile !== undefined ? [params.profile] : params.profiles;
   if (!ids || ids.length === 0) {
@@ -106,7 +130,9 @@ function requestedProfileIds(
     };
   }
   if (new Set(ids).size !== ids.length) {
-    return { error: "Ein Projekt-Prüfprofil darf pro Aufruf nur einmal vorkommen." };
+    return {
+      error: "Ein Projekt-Prüfprofil darf pro Aufruf nur einmal vorkommen.",
+    };
   }
   return { ids };
 }
@@ -136,11 +162,15 @@ async function projectDiffFingerprint(
   // Git may be unavailable or the directory may not be a repository. This is
   // intentionally conservative: no alleged check freshness in that case.
   if (result.code !== 0) return { fingerprint: "unavailable", changed: false };
-  return { fingerprint: fingerprint(result.stdout), changed: result.stdout.length > 0 };
+  return {
+    fingerprint: fingerprint(result.stdout),
+    changed: result.stdout.length > 0,
+  };
 }
 
 function compactMeasurement(result: MeasurementResult): string {
-  const median = result.median === undefined ? "unavailable" : result.median.toFixed(3);
+  const median =
+    result.median === undefined ? "unavailable" : result.median.toFixed(3);
   return `${result.profileId}: median=${median} ${result.metric}, ${result.successfulRuns}/${result.plannedRuns} gültig${result.warnings.length ? `; ${result.warnings.join(" ")}` : ""}`;
 }
 
@@ -149,7 +179,8 @@ export default function setupCore(pi: ExtensionAPI): void {
   let trusted = false;
   const measurements = new Map<string, MeasurementResult>();
   let experiment: ExperimentState = { attempts: [] };
-  let lastSuccessfulRequiredCheck: { diffFingerprint: string; profileIds: string[] } | undefined;
+  let lastSuccessfulRequiredCheck:
+    { diffFingerprint: string; profileIds: string[] } | undefined;
 
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
@@ -163,15 +194,27 @@ export default function setupCore(pi: ExtensionAPI): void {
       .filter(([, profile]) => profile.classification === "required")
       .map(([id]) => id);
     if (required.length === 0) {
-      if (profiles.source) ctx.ui.notify("ℹ Projektprüfprofile enthalten keine Pflichtprüfung.", "info");
+      if (profiles.source)
+        ctx.ui.notify(
+          "ℹ Projektprüfprofile enthalten keine Pflichtprüfung.",
+          "info",
+        );
       return;
     }
     const current = await projectDiffFingerprint(pi, ctx.cwd);
     if (!current.changed) return;
     if (!lastSuccessfulRequiredCheck) {
-      ctx.ui.notify("⚠ Projektänderungen vorhanden; seit der letzten Änderung wurde kein erfolgreicher Projekt-Check ausgeführt.", "warning");
-    } else if (lastSuccessfulRequiredCheck.diffFingerprint !== current.fingerprint) {
-      ctx.ui.notify("⚠ Letzter Projekt-Check ist älter als der aktuelle Diff.", "warning");
+      ctx.ui.notify(
+        "⚠ Projektänderungen vorhanden; seit der letzten Änderung wurde kein erfolgreicher Projekt-Check ausgeführt.",
+        "warning",
+      );
+    } else if (
+      lastSuccessfulRequiredCheck.diffFingerprint !== current.fingerprint
+    ) {
+      ctx.ui.notify(
+        "⚠ Letzter Projekt-Check ist älter als der aktuelle Diff.",
+        "warning",
+      );
     }
   });
 
@@ -215,25 +258,67 @@ export default function setupCore(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "performance_profile",
     label: "Performance profilieren",
-    description: "Führt einen konfigurierten CPU- oder Compiler-Adapter aus und gibt nur verdichtete Befunde zurück.",
-    promptSnippet: "Run a configured profiling adapter and return concise structured findings.",
+    description:
+      "Führt einen konfigurierten CPU- oder Compiler-Adapter aus und gibt nur verdichtete Befunde zurück.",
+    promptSnippet:
+      "Run a configured profiling adapter and return concise structured findings.",
     parameters: PerformanceProfileParams,
     executionMode: "sequential",
     async execute(_id, params, signal, _onUpdate, ctx) {
       const loaded = loadProfilingProfiles(ctx.cwd, ctx.isProjectTrusted());
-      if (!ctx.isProjectTrusted() || !loaded.source) return {
-        content: [{ type: "text" as const, text: ctx.isProjectTrusted() ? "Kein Profilingprofil definiert: .pi/profiling.json fehlt." : ".pi/profiling.json wird nur in vertrauten Projekten ausgeführt." }],
-        details: { diagnostics: loaded.diagnostics }, isError: true,
-      };
+      if (!ctx.isProjectTrusted() || !loaded.source)
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: ctx.isProjectTrusted()
+                ? "Kein Profilingprofil definiert: .pi/profiling.json fehlt."
+                : ".pi/profiling.json wird nur in vertrauten Projekten ausgeführt.",
+            },
+          ],
+          details: { diagnostics: loaded.diagnostics },
+          isError: true,
+        };
       const profile = loaded.profiles[params.profile];
-      if (!profile) return { content: [{ type: "text" as const, text: `Unbekanntes Profilingprofil: ${params.profile}` }], details: { availableProfileIds: Object.keys(loaded.profiles).sort(), diagnostics: loaded.diagnostics }, isError: true };
+      if (!profile)
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Unbekanntes Profilingprofil: ${params.profile}`,
+            },
+          ],
+          details: {
+            availableProfileIds: Object.keys(loaded.profiles).sort(),
+            diagnostics: loaded.diagnostics,
+          },
+          isError: true,
+        };
       const diff = await projectDiffFingerprint(pi, ctx.cwd);
       const result = await runProfilingProfile(params.profile, profile, {
-        projectRoot: ctx.cwd, inputFingerprint: fingerprint({ diff: diff.fingerprint, cwd: ctx.cwd }), signal,
+        projectRoot: ctx.cwd,
+        inputFingerprint: fingerprint({ diff: diff.fingerprint, cwd: ctx.cwd }),
+        signal,
         exec: (program, args, options) => pi.exec(program, args, options),
       });
-      const headline = result.findings.length ? result.findings.map((finding, index) => `${index + 1}. ${finding.symbol} — ${finding.value} ${finding.unit}`).join("\n") : result.warnings.join(" ");
-      return { content: [{ type: "text" as const, text: `${result.adapter}: ${result.status}\n${headline}` }], details: result, isError: result.status !== "success" };
+      const headline = result.findings.length
+        ? result.findings
+            .map(
+              (finding, index) =>
+                `${index + 1}. ${finding.symbol} — ${finding.value} ${finding.unit}`,
+            )
+            .join("\n")
+        : result.warnings.join(" ");
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `${result.adapter}: ${result.status}\n${headline}`,
+          },
+        ],
+        details: result,
+        isError: result.status !== "success",
+      };
     },
   });
 
@@ -282,7 +367,11 @@ export default function setupCore(pi: ExtensionAPI): void {
               text: "Kein Projekt-Prüfprofil definiert: .pi/verify.json fehlt. Dokumentation: docs/verify-profiles.md",
             },
           ],
-          details: { profiles: [], availableProfileIds, diagnostics: loaded.diagnostics },
+          details: {
+            profiles: [],
+            availableProfileIds,
+            diagnostics: loaded.diagnostics,
+          },
           isError: true,
         };
       }
@@ -319,15 +408,15 @@ export default function setupCore(pi: ExtensionAPI): void {
           profileId,
           command: {
             program: profile.program,
-            args: profile.args.map((_, index) => redactArgument(profile.args, index)),
+            args: profile.args.map((_, index) =>
+              redactArgument(profile.args, index),
+            ),
           },
           cwd: profile.cwd,
           classification: profile.classification,
           startedAt,
           finishedAt,
-          status: result.ok
-            ? "success"
-            : result.error?.kind ?? "failed",
+          status: result.ok ? "success" : (result.error?.kind ?? "failed"),
           exitCode: result.exitCode,
           durationMs: result.durationMs,
           killed: result.killed,
@@ -339,7 +428,10 @@ export default function setupCore(pi: ExtensionAPI): void {
 
       const text = reports
         .map((report) => {
-          const exit = report.exitCode === null ? "kein Exit-Code" : `Exit-Code ${report.exitCode}`;
+          const exit =
+            report.exitCode === null
+              ? "kein Exit-Code"
+              : `Exit-Code ${report.exitCode}`;
           return [
             `${report.profileId} [${report.classification}]: ${report.status} (${exit}, ${report.durationMs} ms)`,
             `  Kommando: ${profileCommandSummary(report.command.program, report.command.args)}`,
@@ -353,13 +445,21 @@ export default function setupCore(pi: ExtensionAPI): void {
         (report) =>
           report.status !== "success" &&
           report.classification !== "advisory" &&
-          !(report.classification === "recommended" && report.status === "missing_binary"),
+          !(
+            report.classification === "recommended" &&
+            report.status === "missing_binary"
+          ),
       );
       const currentDiff = await projectDiffFingerprint(pi, ctx.cwd);
       const successfulRequired = reports.filter(
-        (report) => report.classification === "required" && report.status === "success",
+        (report) =>
+          report.classification === "required" && report.status === "success",
       );
-      if (!blockingFailure && successfulRequired.length > 0 && currentDiff.changed) {
+      if (
+        !blockingFailure &&
+        successfulRequired.length > 0 &&
+        currentDiff.changed
+      ) {
         lastSuccessfulRequiredCheck = {
           diffFingerprint: currentDiff.fingerprint,
           profileIds: successfulRequired.map((report) => report.profileId),
@@ -382,45 +482,110 @@ export default function setupCore(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "performance_measure",
     label: "Performance messen",
-    description: "Führt ein vertrauensgebundenes Performanceprofil mit Warmups und einer Messserie shellfrei aus.",
-    promptSnippet: "Measure a configured performance profile and return robust statistics.",
+    description:
+      "Führt ein vertrauensgebundenes Performanceprofil mit Warmups und einer Messserie shellfrei aus.",
+    promptSnippet:
+      "Measure a configured performance profile and return robust statistics.",
     parameters: PerformanceMeasureParams,
     executionMode: "sequential",
     async execute(_id, params, signal, _onUpdate, ctx) {
       const loaded = loadPerformanceProfiles(ctx.cwd, ctx.isProjectTrusted());
-      if (!ctx.isProjectTrusted() || !loaded.source) return {
-        content: [{ type: "text" as const, text: ctx.isProjectTrusted() ? "Kein Performanceprofil definiert: .pi/performance.json fehlt." : ".pi/performance.json wird nur in vertrauten Projekten ausgeführt." }],
-        details: { diagnostics: loaded.diagnostics }, isError: true,
-      };
+      if (!ctx.isProjectTrusted() || !loaded.source)
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: ctx.isProjectTrusted()
+                ? "Kein Performanceprofil definiert: .pi/performance.json fehlt."
+                : ".pi/performance.json wird nur in vertrauten Projekten ausgeführt.",
+            },
+          ],
+          details: { diagnostics: loaded.diagnostics },
+          isError: true,
+        };
       const profile = loaded.profiles[params.profile];
-      if (!profile) return { content: [{ type: "text" as const, text: `Unbekanntes Performanceprofil: ${params.profile}` }], details: { availableProfileIds: Object.keys(loaded.profiles).sort(), diagnostics: loaded.diagnostics }, isError: true };
+      if (!profile)
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Unbekanntes Performanceprofil: ${params.profile}`,
+            },
+          ],
+          details: {
+            availableProfileIds: Object.keys(loaded.profiles).sort(),
+            diagnostics: loaded.diagnostics,
+          },
+          isError: true,
+        };
       const diff = await projectDiffFingerprint(pi, ctx.cwd);
       const result = await measureProfile(params.profile, profile, {
-        projectRoot: ctx.cwd, inputFingerprint: fingerprint({ diff: diff.fingerprint, cwd: ctx.cwd }), signal,
+        projectRoot: ctx.cwd,
+        sourceFingerprint: diff.fingerprint,
+        signal,
         exec: (program, args, options) => pi.exec(program, args, options),
       });
       measurements.set(result.id, result);
-      return { content: [{ type: "text" as const, text: compactMeasurement(result) }], details: result, isError: result.successfulRuns < 2 };
+      return {
+        content: [{ type: "text" as const, text: compactMeasurement(result) }],
+        details: result,
+        isError: result.successfulRuns < 2,
+      };
     },
   });
 
   pi.registerTool({
     name: "performance_compare",
     label: "Performance vergleichen",
-    description: "Vergleicht zwei vorhandene, kompatible Messserien ohne freie Eingaben oder Shell-Aufrufe.",
+    description:
+      "Vergleicht zwei vorhandene, kompatible Messserien ohne freie Eingaben oder Shell-Aufrufe.",
     promptSnippet: "Compare two recorded performance measurements.",
     parameters: PerformanceCompareParams,
     executionMode: "sequential",
     async execute(_id, params) {
       const baseline = measurements.get(params.baseline);
       const candidate = measurements.get(params.candidate);
-      if (!baseline || !candidate) return { content: [{ type: "text" as const, text: "Baseline oder Kandidat ist in dieser Sitzung nicht vorhanden." }], details: {}, isError: true };
+      if (!baseline || !candidate)
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Baseline oder Kandidat ist in dieser Sitzung nicht vorhanden.",
+            },
+          ],
+          details: {},
+          isError: true,
+        };
       try {
         const comparison = compareMeasurements(baseline, candidate);
-        const change = comparison.percentChange === undefined ? "unavailable" : `${(comparison.percentChange * 100).toFixed(2)} %`;
-        return { content: [{ type: "text" as const, text: `Median: ${comparison.baselineMedian.toFixed(3)} → ${comparison.candidateMedian.toFixed(3)} (${change}); ${comparison.inconclusive ? "innerhalb der Messunsicherheit" : comparison.improved ? "Verbesserung" : "keine Verbesserung"}.` }], details: comparison, isError: false };
+        const change =
+          comparison.percentChange === undefined
+            ? "unavailable"
+            : `${(comparison.percentChange * 100).toFixed(2)} %`;
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Median: ${comparison.baselineMedian.toFixed(3)} → ${comparison.candidateMedian.toFixed(3)} (${change}); ${comparison.inconclusive ? "innerhalb der Messunsicherheit" : comparison.improved ? "Verbesserung" : "keine Verbesserung"}.${comparison.sourceChanged ? " Quelle unterschiedlich (bei Vorher/Nachher-Vergleich erwartet)." : ""}`,
+            },
+          ],
+          details: comparison,
+          isError: false,
+        };
       } catch (error) {
-        return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Messungen sind nicht vergleichbar." }], details: {}, isError: true };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                error instanceof Error
+                  ? error.message
+                  : "Messungen sind nicht vergleichbar.",
+            },
+          ],
+          details: {},
+          isError: true,
+        };
       }
     },
   });
@@ -428,17 +593,71 @@ export default function setupCore(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "performance_state",
     label: "Performance-Experiment",
-    description: "Verwaltet ausschließlich einen kleinen, sitzungslokalen Mess- und Entscheidungsstand.",
-    promptSnippet: "Record or inspect the session-local performance experiment state.",
+    description:
+      "Verwaltet ausschließlich einen kleinen, sitzungslokalen Mess- und Entscheidungsstand.",
+    promptSnippet:
+      "Record or inspect the session-local performance experiment state.",
     parameters: PerformanceStateParams,
     executionMode: "sequential",
     async execute(_id, params) {
-      if (params.action === "reset") { experiment = { attempts: [] }; return { content: [{ type: "text" as const, text: "Sitzungslokaler Experimentstand zurückgesetzt; Projektdateien bleiben unverändert." }], details: experiment, isError: false }; }
-      if (params.action === "show") return { content: [{ type: "text" as const, text: `Baseline: ${experiment.baseline?.id ?? "keine"}; best valid: ${experiment.best?.id ?? "keine"}; Versuche: ${experiment.attempts.length}.` }], details: experiment, isError: false };
-      const measurement = params.measurementId ? measurements.get(params.measurementId) : undefined;
-      if (!measurement || !params.hypothesis || !params.correctness) return { content: [{ type: "text" as const, text: "Für einen Versuch sind measurementId, hypothesis und correctness erforderlich." }], details: {}, isError: true };
-      const attempt = recordExperiment(experiment, { hypothesis: params.hypothesis, measurement, correctness: params.correctness, diffFingerprint: measurement.inputFingerprint });
-      return { content: [{ type: "text" as const, text: `${attempt.id}: ${attempt.decision} – ${attempt.reason}` }], details: { attempt, baseline: experiment.baseline?.id, best: experiment.best?.id }, isError: false };
+      if (params.action === "reset") {
+        experiment = { attempts: [] };
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Sitzungslokaler Experimentstand zurückgesetzt; Projektdateien bleiben unverändert.",
+            },
+          ],
+          details: experiment,
+          isError: false,
+        };
+      }
+      if (params.action === "show")
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Baseline: ${experiment.baseline?.id ?? "keine"}; best valid: ${experiment.best?.id ?? "keine"}; Versuche: ${experiment.attempts.length}.`,
+            },
+          ],
+          details: experiment,
+          isError: false,
+        };
+      const measurement = params.measurementId
+        ? measurements.get(params.measurementId)
+        : undefined;
+      if (!measurement || !params.hypothesis || !params.correctness)
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Für einen Versuch sind measurementId, hypothesis und correctness erforderlich.",
+            },
+          ],
+          details: {},
+          isError: true,
+        };
+      const attempt = recordExperiment(experiment, {
+        hypothesis: params.hypothesis,
+        measurement,
+        correctness: params.correctness,
+        diffFingerprint: measurement.sourceFingerprint,
+      });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `${attempt.id}: ${attempt.decision} – ${attempt.reason}`,
+          },
+        ],
+        details: {
+          attempt,
+          baseline: experiment.baseline?.id,
+          best: experiment.best?.id,
+        },
+        isError: false,
+      };
     },
   });
 

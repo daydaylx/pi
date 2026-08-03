@@ -21,34 +21,34 @@ import {
 import { ROOT } from "../shared/jiti-loader.mjs";
 
 export const runtimeSections = {
-  'target runtime configuration': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "target runtime configuration": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("target runtime configuration", async () => {
       const settings = JSON.parse(
@@ -149,7 +149,8 @@ export const runtimeSections = {
         );
         assert(
           contrastRatio(auroraTheme.vars.dim, auroraTheme.vars.navy) >= 4.5 &&
-            contrastRatio(auroraTheme.vars.dim, auroraTheme.vars.surface) >= 4.5,
+            contrastRatio(auroraTheme.vars.dim, auroraTheme.vars.surface) >=
+              4.5,
           "Aurora dim meets AA contrast on both default backgrounds",
         );
         for (const color of [
@@ -160,7 +161,10 @@ export const runtimeSections = {
           "error",
           "thinkingXhigh",
         ]) {
-          assert(Boolean(auroraTheme.colors?.[color]), `Aurora declares ${color}`);
+          assert(
+            Boolean(auroraTheme.colors?.[color]),
+            `Aurora declares ${color}`,
+          );
         }
 
         // Pi's theme schema sets additionalProperties:false and Theme.fg/bg throw on
@@ -226,7 +230,8 @@ export const runtimeSections = {
         );
 
         const activeExtensions = settings.extensions.filter(
-          (entry) => typeof entry === "string" && entry.startsWith("+extensions/"),
+          (entry) =>
+            typeof entry === "string" && entry.startsWith("+extensions/"),
         );
         eq(
           activeExtensions,
@@ -252,7 +257,10 @@ export const runtimeSections = {
           "+extensions/tool-output-guard.ts",
           "+extensions/aurora-ui/index.ts",
         ]) {
-          assert(activeExtensions.includes(extension), `${extension} is active`);
+          assert(
+            activeExtensions.includes(extension),
+            `${extension} is active`,
+          );
         }
         // Aurora is the only UI owner: the pre-Aurora chrome files are gone from
         // the tree, not merely deactivated. Git history is their fallback.
@@ -270,7 +278,10 @@ export const runtimeSections = {
         }
         for (const extension of activeExtensions) {
           const sourcePath = path.join(ROOT, extension.slice(1));
-          assert(existsSync(sourcePath), extension + " resolves to a local file");
+          assert(
+            existsSync(sourcePath),
+            extension + " resolves to a local file",
+          );
           if (!existsSync(sourcePath)) continue;
           const source = readFileSync(sourcePath, "utf8");
           const ownsChrome =
@@ -289,7 +300,9 @@ export const runtimeSections = {
               extension === "+extensions/diff-viewer/index.ts";
             if (isTemporaryDiffPreview) {
               assert(
-                !/\.(?:setFooter|setEditorComponent|setHeader)\s*\(/.test(source),
+                !/\.(?:setFooter|setEditorComponent|setHeader)\s*\(/.test(
+                  source,
+                ),
                 extension + " owns no permanent TUI chrome",
               );
               assert(
@@ -297,7 +310,10 @@ export const runtimeSections = {
                 extension + " clears its temporary live-preview widget",
               );
             } else {
-              assert(!ownsChrome, extension + " does not compete for TUI chrome");
+              assert(
+                !ownsChrome,
+                extension + " does not compete for TUI chrome",
+              );
             }
             assert(
               !/\bsetInterval\s*\(/.test(source),
@@ -400,168 +416,179 @@ export const runtimeSections = {
         return;
       }
     });
-
   },
 
-  'greenfield setup config and Aurora state contract': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "greenfield setup config and Aurora state contract": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
-    await section("greenfield setup config and Aurora state contract", async () => {
-      if (!setupConfig || !auroraState) return;
-      const defaults = setupConfig.defaultSetupConfig();
-      eq(
-        defaults.ui,
-        { theme: "aurora-night", motion: "contextual" },
-        "Aurora is the central UI default",
-      );
-      eq(
-        defaults.permissions,
-        {
-          unknownTools: "ask",
-          bash: "allow",
-          workflowDefaults: {
-            work: "project-write",
-            simple_plan: "readonly",
-            detailed_plan: "readonly",
-          },
-        },
-        "capability defaults require confirmation",
-      );
-      assert(
-        !Object.hasOwn(defaults, "models"),
-        "native Pi scoped models replace setup roles",
-      );
-
-      const project = mkdtempSync(path.join(tmpdir(), "pi-setup-config-"));
-      mkdirSync(path.join(project, ".pi"), { recursive: true });
-      writeFileSync(
-        path.join(project, ".pi", "setup.json"),
-        JSON.stringify({
-          ui: { motion: "reduced" },
-          permissions: {
-            unknownTools: "allow",
+    await section(
+      "greenfield setup config and Aurora state contract",
+      async () => {
+        if (!setupConfig || !auroraState) return;
+        const defaults = setupConfig.defaultSetupConfig();
+        eq(
+          defaults.ui,
+          { theme: "aurora-night", motion: "contextual" },
+          "Aurora is the central UI default",
+        );
+        eq(
+          defaults.permissions,
+          {
+            unknownTools: "ask",
             bash: "allow",
-            workflowDefaults: { work: "full-access" },
+            workflowDefaults: {
+              work: "project-write",
+              simple_plan: "readonly",
+              detailed_plan: "readonly",
+            },
           },
-          lsp: { requestTimeoutMs: 5000 },
-        }),
-      );
-      const trusted = setupConfig.loadSetupConfig(project, true);
-      eq(trusted.config.ui.motion, "reduced", "trusted project may reduce motion");
-      eq(
-        trusted.config.lsp.requestTimeoutMs,
-        5000,
-        "trusted project may tune LSP timeout",
-      );
-      eq(
-        trusted.config.permissions,
-        {
-          ...defaults.permissions,
-          workflowDefaults: {
-            ...defaults.permissions.workflowDefaults,
-            work: "confirm-all",
-          },
-        },
-        "project may not relax global permissions",
-      );
-      assert(
-        trusted.diagnostics.some((entry) => entry.level === "warning"),
-        "security relaxation produces a visible warning",
-      );
-      rmSync(project, { recursive: true, force: true });
+          "capability defaults require confirmation",
+        );
+        assert(
+          !Object.hasOwn(defaults, "models"),
+          "native Pi scoped models replace setup roles",
+        );
 
-      const state = {
-        sessionEpoch: "epoch-1",
-        workflow: { phase: "work", label: "Work" },
-        permissions: {},
-        lsp: {},
-        model: {},
-        activity: { kind: "idle", activeTools: 0 },
-      };
-      auroraState.mergeAuroraUiState(state, {
-        workflow: {
-          phase: "simple_plan",
-          label: "Schnellplan",
-        },
-        lsp: { state: "ready" },
-      });
-      eq(state.workflow.phase, "simple_plan", "Aurora merges workflow modes");
-      // Unknown legacy phases are ignored.
-      auroraState.mergeAuroraUiState(state, { workflow: { phase: "executing" } });
-      eq(
-        state.workflow.phase,
-        "simple_plan",
-        "Aurora rejects the retired legacy phase name",
-      );
-      eq(state.workflow.completed, undefined, "Aurora has no workflow progress metadata");
-      eq(state.lsp.state, "ready", "Aurora merges LSP patches");
-      assert(
-        auroraState.isAuroraUiStateRequest({
-          type: "request",
-          requestId: "request-1",
+        const project = mkdtempSync(path.join(tmpdir(), "pi-setup-config-"));
+        mkdirSync(path.join(project, ".pi"), { recursive: true });
+        writeFileSync(
+          path.join(project, ".pi", "setup.json"),
+          JSON.stringify({
+            ui: { motion: "reduced" },
+            permissions: {
+              unknownTools: "allow",
+              bash: "allow",
+              workflowDefaults: { work: "full-access" },
+            },
+            lsp: { requestTimeoutMs: 5000 },
+          }),
+        );
+        const trusted = setupConfig.loadSetupConfig(project, true);
+        eq(
+          trusted.config.ui.motion,
+          "reduced",
+          "trusted project may reduce motion",
+        );
+        eq(
+          trusted.config.lsp.requestTimeoutMs,
+          5000,
+          "trusted project may tune LSP timeout",
+        );
+        eq(
+          trusted.config.permissions,
+          {
+            ...defaults.permissions,
+            workflowDefaults: {
+              ...defaults.permissions.workflowDefaults,
+              work: "confirm-all",
+            },
+          },
+          "project may not relax global permissions",
+        );
+        assert(
+          trusted.diagnostics.some((entry) => entry.level === "warning"),
+          "security relaxation produces a visible warning",
+        );
+        rmSync(project, { recursive: true, force: true });
+
+        const state = {
           sessionEpoch: "epoch-1",
-          requester: "test",
-        }),
-        "Aurora validates state requests",
-      );
-    });
-
+          workflow: { phase: "work", label: "Work" },
+          permissions: {},
+          lsp: {},
+          model: {},
+          activity: { kind: "idle", activeTools: 0 },
+        };
+        auroraState.mergeAuroraUiState(state, {
+          workflow: {
+            phase: "simple_plan",
+            label: "Schnellplan",
+          },
+          lsp: { state: "ready" },
+        });
+        eq(state.workflow.phase, "simple_plan", "Aurora merges workflow modes");
+        // Unknown legacy phases are ignored.
+        auroraState.mergeAuroraUiState(state, {
+          workflow: { phase: "executing" },
+        });
+        eq(
+          state.workflow.phase,
+          "simple_plan",
+          "Aurora rejects the retired legacy phase name",
+        );
+        eq(
+          state.workflow.completed,
+          undefined,
+          "Aurora has no workflow progress metadata",
+        );
+        eq(state.lsp.state, "ready", "Aurora merges LSP patches");
+        assert(
+          auroraState.isAuroraUiStateRequest({
+            type: "request",
+            requestId: "request-1",
+            sessionEpoch: "epoch-1",
+            requester: "test",
+          }),
+          "Aurora validates state requests",
+        );
+      },
+    );
   },
 
-  'setup core lifecycle': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "setup core lifecycle": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("setup core lifecycle", async () => {
       if (!setupCore) return;
@@ -606,7 +633,9 @@ export const runtimeSections = {
       assert(
         harness.notifications
           .at(-1)
-          ?.message?.includes("subagent baseline (setup.json): concurrency=3") &&
+          ?.message?.includes(
+            "subagent baseline (setup.json): concurrency=3",
+          ) &&
           harness.notifications
             .at(-1)
             ?.message?.includes(
@@ -626,8 +655,17 @@ export const runtimeSections = {
       const contextHarness = createHarness({
         systemPrompt: "System 🙂",
         registeredTools: [
-          { name: "zeta", parameters: { type: "object", properties: { b: { type: "number" }, a: { type: "string" } } } },
-          { name: "alpha", parameters: { type: "object", required: ["value"] } },
+          {
+            name: "zeta",
+            parameters: {
+              type: "object",
+              properties: { b: { type: "number" }, a: { type: "string" } },
+            },
+          },
+          {
+            name: "alpha",
+            parameters: { type: "object", required: ["value"] },
+          },
         ],
         activeTools: ["zeta", "dynamic-tool"],
         entries: [
@@ -670,9 +708,15 @@ export const runtimeSections = {
       );
       assert(
         contextReport.includes("effective system prompt: 11 bytes") &&
-          contextReport.includes("real usage: input=11, output=22, cacheRead=33, cacheWrite=44") &&
-          contextReport.includes("persisted compactions: 1 (2026-08-02T10:00:00.000Z)") &&
-          contextReport.includes("persisted tool truncations: count=1, totalBytes=200, outputBytes=80"),
+          contextReport.includes(
+            "real usage: input=11, output=22, cacheRead=33, cacheWrite=44",
+          ) &&
+          contextReport.includes(
+            "persisted compactions: 1 (2026-08-02T10:00:00.000Z)",
+          ) &&
+          contextReport.includes(
+            "persisted tool truncations: count=1, totalBytes=200, outputBytes=80",
+          ),
         "context doctor reports only aggregate prompt, usage, compaction and truncation diagnostics",
       );
       if (contextCommand) await contextCommand("unexpected", diagnosticContext);
@@ -681,17 +725,33 @@ export const runtimeSections = {
         { message: "Usage: /setup-doctor [context]", level: "error" },
         "context doctor rejects unknown arguments without running the default doctor",
       );
-      eq(contextHarness.execCalls.length, 0, "context doctor does not invoke runtime or model commands");
+      eq(
+        contextHarness.execCalls.length,
+        0,
+        "context doctor does not invoke runtime or model commands",
+      );
       if (contextDiagnostics) {
         const empty = contextDiagnostics.collectContextDiagnostics({
           registeredTools: [],
           activeToolNames: [],
           sessionEntries: [],
         });
-        eq(empty.schemaBytes, 2, "empty context diagnostics have a deterministic empty schema size");
-        eq(empty.systemPromptBytes, null, "missing system prompt is reported as n/a");
+        eq(
+          empty.schemaBytes,
+          2,
+          "empty context diagnostics have a deterministic empty schema size",
+        );
+        eq(
+          empty.systemPromptBytes,
+          null,
+          "missing system prompt is reported as n/a",
+        );
         eq(empty.usage, null, "missing persisted usage is reported as n/a");
-        eq(empty.toolTruncation, { count: 0, totalBytes: 0, outputBytes: 0 }, "empty sessions have no persisted truncations");
+        eq(
+          empty.toolTruncation,
+          { count: 0, totalBytes: 0, outputBytes: 0 },
+          "empty sessions have no persisted truncations",
+        );
       }
       const verify = harness.tools.get("verify");
       if (verify) {
@@ -733,37 +793,39 @@ export const runtimeSections = {
     // ---------------------------------------------------------------------------
   },
 
-  'project verification profiles (#105)': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "project verification profiles (#105)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("project verification profiles (#105)", async () => {
-      const profilesMod = await load("extensions/setup-core/verify-profiles.ts");
+      const profilesMod = await load(
+        "extensions/setup-core/verify-profiles.ts",
+      );
       assert(
         typeof profilesMod?.loadVerifyProfiles === "function",
         "verify-profiles exports loadVerifyProfiles",
@@ -837,7 +899,11 @@ export const runtimeSections = {
       // --- Missing file yields no profiles and no diagnostics ---
       clearConfig();
       const missing = profilesMod.loadVerifyProfiles(workspace, true);
-      eq(Object.keys(missing.profiles).length, 0, "missing file -> no profiles");
+      eq(
+        Object.keys(missing.profiles).length,
+        0,
+        "missing file -> no profiles",
+      );
       eq(missing.diagnostics.length, 0, "missing file -> no diagnostics");
 
       // --- Schema: unknown top-level key is rejected ---
@@ -870,7 +936,8 @@ export const runtimeSections = {
       );
       eq(
         res.diagnostics.some(
-          (d) => d.message.includes("profiles.bad") && d.message.includes("oops"),
+          (d) =>
+            d.message.includes("profiles.bad") && d.message.includes("oops"),
         ),
         true,
         "unknown profile key is reported with path",
@@ -926,7 +993,9 @@ export const runtimeSections = {
         null,
         "parent traversal is rejected",
       );
-      const outsideWorkspace = mkdtempSync(path.join(tmpdir(), "pi-verify-outside-"));
+      const outsideWorkspace = mkdtempSync(
+        path.join(tmpdir(), "pi-verify-outside-"),
+      );
       symlinkSync(outsideWorkspace, path.join(workspace, "outside-link"));
       eq(
         profilesMod.resolveProfileCwd(root, "outside-link"),
@@ -971,7 +1040,12 @@ export const runtimeSections = {
       // --- runProfile: non-zero exit -> not ok, structured error ---
       const failRun = await profilesMod.runProfile(profile, {
         projectRoot: root,
-        exec: async () => ({ code: 2, stdout: "", stderr: "boom", killed: false }),
+        exec: async () => ({
+          code: 2,
+          stdout: "",
+          stderr: "boom",
+          killed: false,
+        }),
       });
       eq(failRun.ok, false, "non-zero exit -> not ok");
       eq(failRun.exitCode, 2, "exit code captured");
@@ -984,7 +1058,12 @@ export const runtimeSections = {
       // --- runProfile: timeout -> killed, structured timeout error ---
       const timeoutRun = await profilesMod.runProfile(profile, {
         projectRoot: root,
-        exec: async () => ({ code: null, stdout: "", stderr: "", killed: true }),
+        exec: async () => ({
+          code: null,
+          stdout: "",
+          stderr: "",
+          killed: true,
+        }),
       });
       eq(timeoutRun.ok, false, "killed -> not ok");
       eq(timeoutRun.killed, true, "killed flag surfaced");
@@ -1009,7 +1088,12 @@ export const runtimeSections = {
         { ...profile, cwd: "../escape" },
         {
           projectRoot: root,
-          exec: async () => ({ code: 0, stdout: "", stderr: "", killed: false }),
+          exec: async () => ({
+            code: 0,
+            stdout: "",
+            stderr: "",
+            killed: false,
+          }),
         },
       );
       eq(escapeRun.ok, false, "escaping cwd is not executed");
@@ -1027,37 +1111,36 @@ export const runtimeSections = {
         /* ignore temp cleanup */
       }
     });
-
   },
 
-  'project_check tool (#123)': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "project_check tool (#123)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("project_check tool (#123)", async () => {
       if (!setupCore) return;
@@ -1104,7 +1187,11 @@ export const runtimeSections = {
           workspace,
           "project_check executes only at the bounded project cwd",
         );
-        eq(result.isError, false, "successful required and advisory profiles pass");
+        eq(
+          result.isError,
+          false,
+          "successful required and advisory profiles pass",
+        );
         eq(
           result.details.profiles.map((profile) => profile.classification),
           ["required", "advisory"],
@@ -1134,7 +1221,11 @@ export const runtimeSections = {
           undefined,
           trusted,
         );
-        eq(invalid.isError, true, "project_check rejects ambiguous single-plus-list calls");
+        eq(
+          invalid.isError,
+          true,
+          "project_check rejects ambiguous single-plus-list calls",
+        );
       }
       const untrusted = harness.makeContext({ cwd: workspace, trusted: false });
       await harness.runHooks("session_start", {}, untrusted);
@@ -1146,7 +1237,11 @@ export const runtimeSections = {
           undefined,
           untrusted,
         );
-        eq(result.isError, true, "project_check refuses untrusted project profiles");
+        eq(
+          result.isError,
+          true,
+          "project_check refuses untrusted project profiles",
+        );
         assert(
           result.content[0].text.includes("vertrauten Projekten"),
           "project_check explains the trust requirement",
@@ -1154,122 +1249,188 @@ export const runtimeSections = {
       }
       rmSync(workspace, { recursive: true, force: true });
     });
-
   },
 
-  'project check freshness warning (#129)': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "project check freshness warning (#129)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("project check freshness warning (#129)", async () => {
       if (!setupCore) return;
-      const workspace = mkdtempSync(path.join(tmpdir(), "pi-project-check-freshness-"));
+      const workspace = mkdtempSync(
+        path.join(tmpdir(), "pi-project-check-freshness-"),
+      );
       mkdirSync(path.join(workspace, ".pi"), { recursive: true });
-      writeFileSync(path.join(workspace, ".pi", "verify.json"), JSON.stringify({
-        profiles: { test: { program: "node", args: ["--version"], classification: "required" } },
-      }));
+      writeFileSync(
+        path.join(workspace, ".pi", "verify.json"),
+        JSON.stringify({
+          profiles: {
+            test: {
+              program: "node",
+              args: ["--version"],
+              classification: "required",
+            },
+          },
+        }),
+      );
       const harness = createHarness({
         exec(command) {
-          return { code: 0, stdout: command === "git" ? "diff --git a/a b/a\n" : "ok", stderr: "", killed: false };
+          return {
+            code: 0,
+            stdout: command === "git" ? "diff --git a/a b/a\n" : "ok",
+            stderr: "",
+            killed: false,
+          };
         },
       });
       setupCore.default(harness.api);
       const context = harness.makeContext({ cwd: workspace, trusted: true });
       await harness.runHooks("session_start", {}, context);
       await harness.runHooks("agent_end", {}, context);
-      assert(harness.notifications.at(-1)?.message?.includes("kein erfolgreicher Projekt-Check"), "agent end warns non-blockingly for a changed unchecked project");
+      assert(
+        harness.notifications
+          .at(-1)
+          ?.message?.includes("kein erfolgreicher Projekt-Check"),
+        "agent end warns non-blockingly for a changed unchecked project",
+      );
       const checks = harness.tools.get("project_check");
-      if (checks) await checks.execute("fresh-check", { profile: "test" }, undefined, undefined, context);
+      if (checks)
+        await checks.execute(
+          "fresh-check",
+          { profile: "test" },
+          undefined,
+          undefined,
+          context,
+        );
       const warnings = harness.notifications.length;
       await harness.runHooks("agent_end", {}, context);
-      eq(harness.notifications.length, warnings, "a successful required check for the current diff suppresses the warning");
+      eq(
+        harness.notifications.length,
+        warnings,
+        "a successful required check for the current diff suppresses the warning",
+      );
       rmSync(workspace, { recursive: true, force: true });
     });
-
   },
 
-  'performance tool registrations': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "performance tool registrations": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("performance tool registrations", async () => {
       if (!setupCore) return;
-      const workspace = mkdtempSync(path.join(tmpdir(), "pi-performance-registration-"));
+      const workspace = mkdtempSync(
+        path.join(tmpdir(), "pi-performance-registration-"),
+      );
       mkdirSync(path.join(workspace, ".pi"), { recursive: true });
-      writeFileSync(path.join(workspace, ".pi", "performance.json"), JSON.stringify({
-        profiles: {
-          quick: {
-            program: "bench",
-            args: [],
-            warmups: 0,
-            runs: 2,
-            metricSource: "json",
-            metric: "duration_ms",
-            direction: "lower_is_better",
+      writeFileSync(
+        path.join(workspace, ".pi", "performance.json"),
+        JSON.stringify({
+          profiles: {
+            quick: {
+              program: "bench",
+              args: [],
+              warmups: 0,
+              runs: 2,
+              metricSource: "json",
+              metric: "duration_ms",
+              direction: "lower_is_better",
+            },
           },
-        },
-      }));
-      writeFileSync(path.join(workspace, ".pi", "profiling.json"), JSON.stringify({
-        profiles: {
-          compiler: { adapter: "compiler-diagnostics", program: "cc", args: ["-c", "source.c"] },
-        },
-      }));
+        }),
+      );
+      writeFileSync(
+        path.join(workspace, ".pi", "profiling.json"),
+        JSON.stringify({
+          profiles: {
+            compiler: {
+              adapter: "compiler-diagnostics",
+              program: "cc",
+              args: ["-c", "source.c"],
+            },
+          },
+        }),
+      );
+      let gitDiffOutput = "";
       const harness = createHarness({
         exec(command) {
-          if (command === "git") return { code: 0, stdout: "diff --git a/a b/a\n", stderr: "", killed: false };
-          if (command === "bench") return { code: 0, stdout: '{"duration_ms":10}', stderr: "", killed: false };
-          if (command === "cc") return { code: 0, stdout: "source.c:1:1: remark: loop vectorized", stderr: "", killed: false };
-          return { code: 1, stdout: "", stderr: "unexpected command", killed: false };
+          if (command === "git")
+            return {
+              code: 0,
+              stdout: gitDiffOutput,
+              stderr: "",
+              killed: false,
+            };
+          if (command === "bench")
+            return {
+              code: 0,
+              stdout: '{"duration_ms":10}',
+              stderr: "",
+              killed: false,
+            };
+          if (command === "cc")
+            return {
+              code: 0,
+              stdout: "source.c:1:1: remark: loop vectorized",
+              stderr: "",
+              killed: false,
+            };
+          return {
+            code: 1,
+            stdout: "",
+            stderr: "unexpected command",
+            killed: false,
+          };
         },
       });
       setupCore.default(harness.api);
@@ -1280,60 +1441,168 @@ export const runtimeSections = {
       const compare = harness.tools.get("performance_compare");
       const state = harness.tools.get("performance_state");
       if (profile) {
-        const result = await profile.execute("profile-compiler", { profile: "compiler" }, undefined, undefined, context);
-        eq(result.isError, false, "profiling executes a configured trusted profile");
+        const result = await profile.execute(
+          "profile-compiler",
+          { profile: "compiler" },
+          undefined,
+          undefined,
+          context,
+        );
+        eq(
+          result.isError,
+          false,
+          "profiling executes a configured trusted profile",
+        );
       }
       if (measure) {
-        const result = await measure.execute("measure-quick", { profile: "quick" }, undefined, undefined, context);
-        eq(result.isError, false, "performance measurement accepts a complete profile");
-        assert(result.content[0].text.includes("median=10.000"), "measurement reports its compact median summary");
+        const result = await measure.execute(
+          "measure-quick",
+          { profile: "quick" },
+          undefined,
+          undefined,
+          context,
+        );
+        eq(
+          result.isError,
+          false,
+          "performance measurement accepts a complete profile",
+        );
+        assert(
+          result.content[0].text.includes("median=10.000"),
+          "measurement reports its compact median summary",
+        );
       }
       if (compare) {
-        const result = await compare.execute("compare-missing", { baseline: "none", candidate: "none" }, undefined, undefined, context);
-        eq(result.isError, true, "comparison rejects measurements not held in the session");
+        const result = await compare.execute(
+          "compare-missing",
+          { baseline: "none", candidate: "none" },
+          undefined,
+          undefined,
+          context,
+        );
+        eq(
+          result.isError,
+          true,
+          "comparison rejects measurements not held in the session",
+        );
+      }
+      if (measure && compare) {
+        // P0-01 regression: baseline measured on a clean workspace, candidate
+        // measured after a real code change (the git diff stub now reports a
+        // non-empty diff). The two measurements share the same benchmark
+        // command, so the real before/after comparison must succeed even
+        // though the source state genuinely differs.
+        gitDiffOutput = "";
+        const baseline = await measure.execute(
+          "measure-baseline",
+          { profile: "quick" },
+          undefined,
+          undefined,
+          context,
+        );
+        eq(
+          baseline.isError,
+          false,
+          "baseline measurement on a clean workspace succeeds",
+        );
+        gitDiffOutput =
+          "diff --git a/src/hot.js b/src/hot.js\n+faster implementation\n";
+        const afterChange = await measure.execute(
+          "measure-after-change",
+          { profile: "quick" },
+          undefined,
+          undefined,
+          context,
+        );
+        eq(
+          afterChange.isError,
+          false,
+          "candidate measurement after a real code change succeeds",
+        );
+        assert(
+          baseline.details.sourceFingerprint !==
+            afterChange.details.sourceFingerprint,
+          "baseline and candidate carry different source fingerprints",
+        );
+        eq(
+          baseline.details.benchmarkInputFingerprint,
+          afterChange.details.benchmarkInputFingerprint,
+          "same profile keeps the same benchmark input fingerprint across a code change",
+        );
+        const comparison = await compare.execute(
+          "compare-before-after",
+          { baseline: baseline.details.id, candidate: afterChange.details.id },
+          undefined,
+          undefined,
+          context,
+        );
+        eq(
+          comparison.isError,
+          false,
+          "a normal before/after benchmark comparison is not rejected as an incompatible input (P0-01)",
+        );
+        eq(
+          comparison.details.sourceChanged,
+          true,
+          "the differing source state is surfaced in the comparison, not treated as an error",
+        );
+        gitDiffOutput = "";
       }
       if (state) {
-        const result = await state.execute("state-show", { action: "show" }, undefined, undefined, context);
-        eq(result.isError, false, "performance state can be inspected without mutating the project");
+        const result = await state.execute(
+          "state-show",
+          { action: "show" },
+          undefined,
+          undefined,
+          context,
+        );
+        eq(
+          result.isError,
+          false,
+          "performance state can be inspected without mutating the project",
+        );
       }
       rmSync(workspace, { recursive: true, force: true });
     });
 
     /** Gate exec stub whose typecheck step fails; used by the sections below. */
-
   },
 
-  'native subagent profiles': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "native subagent profiles": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("native subagent profiles", async () => {
-      const expectedProfiles = ["planner.md", "reviewer.md", "worker.md"];
+      const expectedProfiles = [
+        "debugger.md",
+        "investigator.md",
+        "verifier.md",
+      ];
       const agentsRoot = path.join(ROOT, "agents");
       eq(
         readdirSync(agentsRoot, { withFileTypes: true })
@@ -1341,7 +1610,7 @@ export const runtimeSections = {
           .map((entry) => entry.name)
           .sort(),
         expectedProfiles,
-        "planner, worker and reviewer are the complete local core role set",
+        "investigator, debugger and verifier are the complete local role set",
       );
       const profileSources = Object.fromEntries(
         expectedProfiles.map((name) => [
@@ -1350,11 +1619,15 @@ export const runtimeSections = {
         ]),
       );
       const expectedTools = {
-        "planner.md": "read, grep, find, ls",
-        "reviewer.md": "read, grep, find, ls",
-        "worker.md": "read, grep, find, ls, edit, write, bash",
+        "investigator.md": "read, grep, find, ls",
+        "debugger.md": "read, grep, find, ls, bash",
+        "verifier.md": "read, grep, find, ls, bash",
       };
       for (const [name, source] of Object.entries(profileSources)) {
+        assert(
+          source.includes(`name: ${name.slice(0, -3)}`),
+          `${name} declares the exact active role name`,
+        );
         assert(
           source.includes(`tools: ${expectedTools[name]}`),
           `${name} declares its exact runtime tool boundary`,
@@ -1370,87 +1643,74 @@ export const runtimeSections = {
           `${name} cannot perform nested delegation`,
         );
       }
-      for (const name of ["planner.md", "reviewer.md"]) {
+      for (const name of expectedProfiles) {
         assert(
-          !/^tools:.*\b(?:edit|write|bash)\b/m.test(profileSources[name]),
-          `${name} remains read-only`,
+          !/^tools:.*\b(?:edit|write)\b/m.test(profileSources[name]),
+          `${name} has no project write tool`,
         );
       }
       assert(
-        /^tools:.*\bedit\b.*\bwrite\b.*\bbash\b/m.test(
-          profileSources["worker.md"],
-        ),
-        "worker exclusively owns write and shell tools",
+        !/^tools:.*\bbash\b/m.test(profileSources["investigator.md"]),
+        "investigator has no shell access",
       );
-      for (const activeDoc of [
-        "AGENTS.md",
-        "README.md",
-        "docs/subagents.md",
-      ]) {
-        const source = readFileSync(path.join(ROOT, activeDoc), "utf8");
-        const retiredRole = "(?:scout|oracle|test-runner)";
-        const optionalCodeTick = "[`]?";
-        const historicalMarker =
-          /\b(?:frühere?[nr]?|historisch(?:e[nsr]?|en)?|retired|inaktiv|nicht\s+(?:aktiv|ausführbar|installiert)|entfernt)\b/i;
-        const executableRecommendation = new RegExp(
-          [
-            `\\|\\s*${optionalCodeTick}${retiredRole}${optionalCodeTick}\\s*\\|`,
-            `\\b(?:verwende|nutze|delegiere|starte|wähle|übergebe)\\s+(?:an\\s+)?${optionalCodeTick}${retiredRole}${optionalCodeTick}\\b`,
-            `\\b${retiredRole}\\b\\s*(?:→|ist\\s+(?:nötig|zuständig)|führt|prüft|implementiert)`,
-          ].join("|"),
-          "i",
+      for (const name of ["debugger.md", "verifier.md"]) {
+        assert(
+          /^tools:.*\bbash\b/m.test(profileSources[name]),
+          `${name} may run diagnostic shell commands`,
         );
-        for (const paragraph of source.split(/\n\s*\n/)) {
-          if (!new RegExp(`\\b${retiredRole}\\b`, "i").test(paragraph))
-            continue;
-          assert(
-            historicalMarker.test(paragraph),
-            `${activeDoc} marks a historical retired-role mention as inactive`,
-          );
-          assert(
-            !executableRecommendation.test(paragraph),
-            `${activeDoc} does not recommend a retired role for execution`,
-          );
-        }
+      }
+      const archivedRoot = path.join(ROOT, "docs", "archive", "subagents-v1");
+      eq(
+        readdirSync(archivedRoot)
+          .filter((name) => name.endsWith(".md"))
+          .sort(),
+        ["planner.md", "reviewer.md", "worker.md"],
+        "retired profiles are preserved outside the active agent directory",
+      );
+      for (const activeDoc of ["AGENTS.md", "README.md", "docs/subagents.md"]) {
+        const source = readFileSync(path.join(ROOT, activeDoc), "utf8");
+        assert(
+          !/\b(?:planner|worker|reviewer)\b/i.test(source),
+          `${activeDoc} does not present retired roles as active`,
+        );
       }
       assert(
-        !/COMPLETION-REVIEW|completion request's marker contract/i.test(
-          profileSources["reviewer.md"],
+        /Hauptagent.*(?:Patch-Eigentümer|implementiert)/is.test(
+          readFileSync(path.join(ROOT, "docs/subagents.md"), "utf8"),
         ),
-        "reviewer has no automatic completion-marker contract",
+        "documentation keeps regular patch ownership with the main agent",
       );
     });
-
   },
 
-  'native project skills': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "native project skills": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("native project skills", async () => {
       const expectedSkills = [
@@ -1544,37 +1804,36 @@ export const runtimeSections = {
     // Doom-Loop- und Edit-Fallback-Module wurden entfernt: sie waren seit 4c7a201
     // von keiner Extension mehr geladen (setup-core/index.ts importierte sie nicht)
     // und damit wirkungslos. Ihre Tests entfallen mit ihnen.
-
   },
 
-  'global control plane shortcuts': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "global control plane shortcuts": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("global control plane shortcuts", async () => {
       if (!controlPlane) return;
@@ -1601,37 +1860,36 @@ export const runtimeSections = {
         "the control plane owns shortcuts only and needs no parallel menu event",
       );
     });
-
   },
 
-  'shared output limits and subagent guard': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "shared output limits and subagent guard": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("shared output limits and subagent guard", async () => {
       if (!outputLimits || !toolOutputGuard) return;
@@ -1644,7 +1902,10 @@ export const runtimeSections = {
         "TAIL_SENTINEL",
       ].join("\n");
       const limited = outputLimits.limitTextOutput(largeText);
-      assert(Boolean(limited.truncation), "oversized text is visibly truncated");
+      assert(
+        Boolean(limited.truncation),
+        "oversized text is visibly truncated",
+      );
       assert(
         limited.text.startsWith("HEAD_SENTINEL") &&
           limited.text.endsWith("TAIL_SENTINEL"),
@@ -1655,7 +1916,8 @@ export const runtimeSections = {
         "balanced truncation includes a visible marker",
       );
       assert(
-        Buffer.byteLength(limited.text, "utf8") <= outputLimits.DEFAULT_MAX_BYTES,
+        Buffer.byteLength(limited.text, "utf8") <=
+          outputLimits.DEFAULT_MAX_BYTES,
         "balanced truncation stays within Pi's byte limit",
       );
       assert(
@@ -1693,10 +1955,23 @@ export const runtimeSections = {
         actualUtf8Lines,
         "single-line truncation reports its actual line count",
       );
-      eq(outputLimits.SUBAGENT_MAX_BYTES, 12 * 1024, "subagent output has its dedicated byte limit");
-      eq(outputLimits.SUBAGENT_MAX_LINES, 240, "subagent output has its dedicated line limit");
-      const compactSubagent = outputLimits.limitSubagentOutput("kurzer Bericht");
-      eq(compactSubagent, { text: "kurzer Bericht" }, "compact subagent output remains unchanged");
+      eq(
+        outputLimits.SUBAGENT_MAX_BYTES,
+        12 * 1024,
+        "subagent output has its dedicated byte limit",
+      );
+      eq(
+        outputLimits.SUBAGENT_MAX_LINES,
+        240,
+        "subagent output has its dedicated line limit",
+      );
+      const compactSubagent =
+        outputLimits.limitSubagentOutput("kurzer Bericht");
+      eq(
+        compactSubagent,
+        { text: "kurzer Bericht" },
+        "compact subagent output remains unchanged",
+      );
       const subagentUtf8 = outputLimits.limitSubagentOutput(
         "HEAD_SUBAGENT_UTF8-" + "😀".repeat(10_000) + "-TAIL_SUBAGENT_UTF8",
       );
@@ -1704,7 +1979,8 @@ export const runtimeSections = {
         subagentUtf8.text.startsWith("HEAD_SUBAGENT_UTF8-") &&
           subagentUtf8.text.endsWith("-TAIL_SUBAGENT_UTF8") &&
           !subagentUtf8.text.includes("�") &&
-          Buffer.byteLength(subagentUtf8.text, "utf8") <= outputLimits.SUBAGENT_MAX_BYTES,
+          Buffer.byteLength(subagentUtf8.text, "utf8") <=
+            outputLimits.SUBAGENT_MAX_BYTES,
         "subagent UTF-8 truncation is byte-safe and retains head and tail",
       );
 
@@ -1716,7 +1992,11 @@ export const runtimeSections = {
         toolName: "subagent",
         input: { agent: "scout", task: "inspect" },
       };
-      await harness.runHooks("tool_call", unconstrainedCall, harness.makeContext());
+      await harness.runHooks(
+        "tool_call",
+        unconstrainedCall,
+        harness.makeContext(),
+      );
       eq(
         unconstrainedCall.input.maxOutput,
         undefined,
@@ -1771,7 +2051,8 @@ export const runtimeSections = {
         "the backstop preserves result details and adds truncation metadata",
       );
       assert(
-        guardedResult.details.truncation.totalBytes > guardedResult.details.truncation.outputBytes,
+        guardedResult.details.truncation.totalBytes >
+          guardedResult.details.truncation.outputBytes,
         "subagent truncation metadata records original and retained bytes",
       );
       eq(guardedResult.isError, true, "the backstop preserves isError");
@@ -1786,7 +2067,10 @@ export const runtimeSections = {
             toolName: "subagent",
             input: {},
             content: [{ type: "text", text: largeText }],
-            details: { artifact: "/tmp/upstream.json", truncation: upstreamTruncation },
+            details: {
+              artifact: "/tmp/upstream.json",
+              truncation: upstreamTruncation,
+            },
             isError: false,
           },
           harness.makeContext(),
@@ -1822,8 +2106,16 @@ export const runtimeSections = {
           harness.makeContext(),
         )
       )[0];
-      eq(multiBlock.content.length, 2, "subagent guard combines text blocks without dropping non-text blocks");
-      eq(multiBlock.content[1], { type: "image", data: "image-data", mimeType: "image/png" }, "subagent guard preserves structured artifact blocks");
+      eq(
+        multiBlock.content.length,
+        2,
+        "subagent guard combines text blocks without dropping non-text blocks",
+      );
+      eq(
+        multiBlock.content[1],
+        { type: "image", data: "image-data", mimeType: "image/png" },
+        "subagent guard preserves structured artifact blocks",
+      );
       assert(
         multiBlock.content[0].text.startsWith("FIRST_BLOCK") &&
           multiBlock.content[0].text.endsWith("LAST_BLOCK") &&
@@ -1855,7 +2147,10 @@ export const runtimeSections = {
       const lspCwd = mkdtempSync(path.join(tmpdir(), "pi-lsp-output-limit-"));
       try {
         writeFileSync(path.join(lspCwd, "tsconfig.json"), "{}");
-        writeFileSync(path.join(lspCwd, "large.ts"), "export const value = 1;\n");
+        writeFileSync(
+          path.join(lspCwd, "large.ts"),
+          "export const value = 1;\n",
+        );
         const profile = {
           id: "typescript",
           label: "Bounded TypeScript",
@@ -1912,34 +2207,34 @@ export const runtimeSections = {
     // ───────────────── temporary dialogs and narrow terminals ─────────────────
   },
 
-  'ask-user temporary dialog': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "ask-user temporary dialog": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("ask-user temporary dialog", async () => {
       if (!askUser || !askUserPolicy) return;
@@ -1958,7 +2253,11 @@ export const runtimeSections = {
         false,
         "ask_user rejects five options",
       );
-      eq(askUserPolicy.digitSelection("2", 2), 2, "direct digit selection works");
+      eq(
+        askUserPolicy.digitSelection("2", 2),
+        2,
+        "direct digit selection works",
+      );
       eq(
         askUserPolicy.digitSelection("3", 2),
         undefined,
@@ -2009,7 +2308,11 @@ export const runtimeSections = {
       );
       component.handleInput("2");
       const result = await pending;
-      eq(result.details.answer, "Planen", "keyboard selection returns the choice");
+      eq(
+        result.details.answer,
+        "Planen",
+        "keyboard selection returns the choice",
+      );
       eq(result.details.selectedIndex, 2, "selected index remains one-based");
       assertNoGlobalChrome(harness, "ask_user uses no global editor or widget");
 
@@ -2031,39 +2334,42 @@ export const runtimeSections = {
           "ask_user returns a structured error in " + mode + " mode",
         );
       }
-      eq(nonTui.customComponents.length, 0, "ask_user opens no dialog outside TUI");
+      eq(
+        nonTui.customComponents.length,
+        0,
+        "ask_user opens no dialog outside TUI",
+      );
     });
-
   },
 
-  'Aurora UI lifecycle and responsive surfaces': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "Aurora UI lifecycle and responsive surfaces": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("Aurora UI lifecycle and responsive surfaces", async () => {
       if (!auroraUi) return;
@@ -2090,10 +2396,16 @@ export const runtimeSections = {
       const context = harness.makeContext({
         cwd: path.join(homedir(), "projects", "aurora-test"),
       });
-      const discovered = await harness.runHooks("resources_discover", {}, context);
+      const discovered = await harness.runHooks(
+        "resources_discover",
+        {},
+        context,
+      );
       assert(
         discovered.some((entry) =>
-          entry?.themePaths?.some((value) => value.endsWith("aurora-night.json")),
+          entry?.themePaths?.some((value) =>
+            value.endsWith("aurora-night.json"),
+          ),
         ),
         "Aurora exposes its theme through resource discovery",
       );
@@ -2108,8 +2420,14 @@ export const runtimeSections = {
         { footer: 1, editor: 1, widget: 1, header: 0 },
         "Aurora is the single custom chrome owner",
       );
-      assert(Boolean(harness.footerFactory), "Aurora installs a footer factory");
-      assert(Boolean(harness.editorFactory), "Aurora installs an editor factory");
+      assert(
+        Boolean(harness.footerFactory),
+        "Aurora installs a footer factory",
+      );
+      assert(
+        Boolean(harness.editorFactory),
+        "Aurora installs an editor factory",
+      );
 
       // A second consumer asks for the current state. Aurora answers on the
       // snapshot channel — the contract aurora-ui/README.md documents.
@@ -2174,7 +2492,9 @@ export const runtimeSections = {
         );
         for (const width of [60, 90, 140]) {
           assert(
-            footer.render(width).every((line) => stripAnsi(line).length <= width),
+            footer
+              .render(width)
+              .every((line) => stripAnsi(line).length <= width),
             `Aurora footer fits ${width} columns`,
           );
         }
@@ -2274,10 +2594,14 @@ export const runtimeSections = {
           subagents,
         });
         const withSubagents = auroraFooter
-          .renderFooterLines(context.ui.theme, 140, footerInput([
-            { agent: "reviewer", status: "needs_attention" },
-            { agent: "worker", status: "running" },
-          ]))
+          .renderFooterLines(
+            context.ui.theme,
+            140,
+            footerInput([
+              { agent: "reviewer", status: "needs_attention" },
+              { agent: "worker", status: "running" },
+            ]),
+          )
           .map(stripAnsi)
           .join("\n");
         const handedOver = auroraFooter
@@ -2297,6 +2621,59 @@ export const runtimeSections = {
           handedOver.length > 0 && handedOver.includes("Read + Write"),
           "handing the subagent segment over leaves the rest of the footer intact",
         );
+      }
+
+      // The pure function contract above only proves renderFooterLines() itself
+      // behaves correctly. This proves the actual wiring: with the real, pinned
+      // `extensions/subagent/config.json` (`ui.fleetView: true`), the running
+      // extension must read that file at session_start and hand the segment
+      // over end-to-end — not just when a test constructs the input by hand.
+      {
+        const dockHarness = createHarness();
+        auroraUi.default(dockHarness.api);
+        dockHarness.api.events.on("subagents:rpc:v1:request", (request) => {
+          dockHarness.api.events.emit(
+            `subagents:rpc:v1:reply:${request.requestId}`,
+            {
+              success: true,
+              data: {
+                text: "Active async runs: 1\n\n- async-test | running | single | steps 1 | /tmp",
+              },
+            },
+          );
+        });
+        const dockContext = dockHarness.makeContext();
+        await dockHarness.runHooks("session_start", {}, dockContext);
+        const dockFooter = dockHarness.footerFactory?.(
+          { requestRender() {} },
+          dockContext.ui.theme,
+          {
+            getGitBranch: () => null,
+            getExtensionStatuses: () => new Map(),
+            onBranchChange: () => () => {},
+          },
+        );
+        await dockHarness.runHooks(
+          "tool_execution_start",
+          {
+            toolCallId: "foreground-subagent",
+            toolName: "subagent",
+            args: { agent: "worker" },
+          },
+          dockContext,
+        );
+        dockFooter?.render(140);
+        await Promise.resolve();
+        await Promise.resolve();
+        const dockRendered =
+          dockFooter?.render(140).map(stripAnsi).join("\n") ?? "";
+        assert(
+          !dockRendered.includes("worker") &&
+            !dockRendered.includes("async-test") &&
+            !dockRendered.includes("Subagent"),
+          "with the real pinned config, the Fleet Status Dock owns the subagent segment end-to-end and the footer shows none of it",
+        );
+        await dockHarness.runHooks("session_shutdown", {}, dockContext);
       }
 
       // The editor frame carries workflow and step only. Everything durable moved
@@ -2322,7 +2699,10 @@ export const runtimeSections = {
         );
         const framed = editor.render(140).map(stripAnsi);
         const frame = framed.find((line) => line.startsWith("╭"));
-        assert(Boolean(frame), "the editor keeps exactly one frame line on top");
+        assert(
+          Boolean(frame),
+          "the editor keeps exactly one frame line on top",
+        );
         assert(
           !framed.some((line) => line.startsWith("╰")),
           "the lower frame line is gone with the values it used to carry",
@@ -2400,54 +2780,99 @@ export const runtimeSections = {
         "the activity widget renders nothing once the turn has settled",
       );
       {
-        const footerHarness = createHarness();
-        auroraUi.default(footerHarness.api);
-        footerHarness.api.events.on("subagents:rpc:v1:request", (request) => {
-          footerHarness.api.events.emit(`subagents:rpc:v1:reply:${request.requestId}`, {
-            success: true,
-            data: {
-              text: "Active async runs: 1\n\n- async-test | running | single | steps 1 | /tmp",
-            },
+        // This footer-level tracking (foreground subagents from tool-call args,
+        // async runs from the RPC reply) is what the footer falls back to when
+        // the Fleet Status Dock does not own the subagent display. With the
+        // pinned config's `ui.fleetView: true`, the dock owns it and the footer
+        // must show nothing here (see the handover test above) — so this block
+        // pins the real repo config to `fleetView: false` for its duration to
+        // exercise the tracking mechanism itself, then restores the real file.
+        const subagentConfigPath = path.join(
+          ROOT,
+          "extensions",
+          "subagent",
+          "config.json",
+        );
+        const originalSubagentConfig = readFileSync(subagentConfigPath, "utf8");
+        try {
+          writeFileSync(
+            subagentConfigPath,
+            JSON.stringify(
+              {
+                ...JSON.parse(originalSubagentConfig),
+                ui: {
+                  ...JSON.parse(originalSubagentConfig).ui,
+                  fleetView: false,
+                },
+              },
+              null,
+              2,
+            ),
+          );
+          const footerHarness = createHarness();
+          auroraUi.default(footerHarness.api);
+          footerHarness.api.events.on("subagents:rpc:v1:request", (request) => {
+            footerHarness.api.events.emit(
+              `subagents:rpc:v1:reply:${request.requestId}`,
+              {
+                success: true,
+                data: {
+                  text: "Active async runs: 1\n\n- async-test | running | single | steps 1 | /tmp",
+                },
+              },
+            );
           });
-        });
-        const footerContext = footerHarness.makeContext();
-        await footerHarness.runHooks("session_start", {}, footerContext);
-        const footer = footerHarness.footerFactory?.(
-          { requestRender() {} },
-          footerContext.ui.theme,
-          {
-            getGitBranch: () => null,
-            getExtensionStatuses: () => new Map(),
-            onBranchChange: () => () => {},
-          },
-        );
-        footer?.render(140);
-        await Promise.resolve();
-        await Promise.resolve();
-        footer?.invalidate?.();
-        assert(
-          footer?.render(140).some((line) => stripAnsi(line).includes("async-test")),
-          "Aurora renders active async runs from the pinned RPC response shape",
-        );
-        await footerHarness.runHooks(
-          "tool_execution_start",
-          { toolCallId: "foreground-subagent", toolName: "subagent", args: { agent: "worker" } },
-          footerContext,
-        );
-        assert(
-          footer?.render(140).some((line) => stripAnsi(line).includes("worker")),
-          "Aurora renders a running foreground subagent immediately",
-        );
-        await footerHarness.runHooks(
-          "tool_execution_end",
-          { toolCallId: "foreground-subagent", toolName: "subagent" },
-          footerContext,
-        );
-        assert(
-          !footer?.render(140).some((line) => stripAnsi(line).includes("worker")),
-          "Aurora removes a foreground subagent when its tool call ends",
-        );
-        await footerHarness.runHooks("session_shutdown", {}, footerContext);
+          const footerContext = footerHarness.makeContext();
+          await footerHarness.runHooks("session_start", {}, footerContext);
+          const footer = footerHarness.footerFactory?.(
+            { requestRender() {} },
+            footerContext.ui.theme,
+            {
+              getGitBranch: () => null,
+              getExtensionStatuses: () => new Map(),
+              onBranchChange: () => () => {},
+            },
+          );
+          footer?.render(140);
+          await Promise.resolve();
+          await Promise.resolve();
+          footer?.invalidate?.();
+          assert(
+            footer
+              ?.render(140)
+              .some((line) => stripAnsi(line).includes("async-test")),
+            "Aurora renders active async runs from the pinned RPC response shape",
+          );
+          await footerHarness.runHooks(
+            "tool_execution_start",
+            {
+              toolCallId: "foreground-subagent",
+              toolName: "subagent",
+              args: { agent: "worker" },
+            },
+            footerContext,
+          );
+          assert(
+            footer
+              ?.render(140)
+              .some((line) => stripAnsi(line).includes("worker")),
+            "Aurora renders a running foreground subagent immediately",
+          );
+          await footerHarness.runHooks(
+            "tool_execution_end",
+            { toolCallId: "foreground-subagent", toolName: "subagent" },
+            footerContext,
+          );
+          assert(
+            !footer
+              ?.render(140)
+              .some((line) => stripAnsi(line).includes("worker")),
+            "Aurora removes a foreground subagent when its tool call ends",
+          );
+          await footerHarness.runHooks("session_shutdown", {}, footerContext);
+        } finally {
+          writeFileSync(subagentConfigPath, originalSubagentConfig);
+        }
       }
 
       await harness.runHooks("session_shutdown", {}, context);
@@ -2463,37 +2888,36 @@ export const runtimeSections = {
         "Aurora restores the previous theme on shutdown",
       );
     });
-
   },
 
-  'combined production extension stack': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "combined production extension stack": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("combined production extension stack", async () => {
       if (
@@ -2523,7 +2947,8 @@ export const runtimeSections = {
         readFileSync(path.join(ROOT, "settings.json"), "utf8"),
       );
       const activeExtensions = settings.extensions.filter(
-        (entry) => typeof entry === "string" && entry.startsWith("+extensions/"),
+        (entry) =>
+          typeof entry === "string" && entry.startsWith("+extensions/"),
       );
       eq(
         activeExtensions,
@@ -2547,7 +2972,11 @@ export const runtimeSections = {
         { footer: 1, editor: 1, widget: 1, header: 0 },
         "combined stack gives Aurora exclusive ownership of custom chrome",
       );
-      eq(harness.duplicateTools, [], "combined stack has no duplicate local tools");
+      eq(
+        harness.duplicateTools,
+        [],
+        "combined stack has no duplicate local tools",
+      );
       eq(
         [...harness.tools.keys()].sort(),
         [
@@ -2600,7 +3029,10 @@ export const runtimeSections = {
         undefined,
         "session_shutdown clears the lsp status",
       );
-      const nextContext = harness.makeContext({ cwd, sessionId: "next-session" });
+      const nextContext = harness.makeContext({
+        cwd,
+        sessionId: "next-session",
+      });
       await harness.runHooks("session_start", {}, nextContext);
       eq(
         latestStatus(harness, "lsp"),
@@ -2625,7 +3057,5 @@ export const runtimeSections = {
         );
       }
     });
-
   },
-
 };
