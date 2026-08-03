@@ -46,6 +46,11 @@ const suites = [
     env: {},
   },
   { name: "p4-cli", file: "../benchmarks/harness/test/p4.test.mjs", env: {} },
+  {
+    name: "p4-run-result-schema",
+    file: "../benchmarks/harness/test/p4-run-result-schema.test.mjs",
+    env: {},
+  },
   { name: "check-npm-audit", file: "check-npm-audit.test.mjs", env: {} },
 ];
 
