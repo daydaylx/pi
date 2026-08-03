@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -35,8 +37,70 @@ try {
       `${prepared.worktree}/benchmarks/tasks/01-single-file-change/TASK.md`,
     ),
   );
+  // P0-05: the worktree's own object database must not reach commits before
+  // the reference, not merely hide them from a default `git log`.
+  assert.equal(
+    execFileSync("git", ["log", "--oneline"], {
+      cwd: prepared.worktree,
+      encoding: "utf8",
+    })
+      .trim()
+      .split("\n").length,
+    1,
+    "the worktree's history contains exactly the reference commit",
+  );
+  const parentReference = execFileSync(
+    "git",
+    ["rev-parse", `${manifest.reference}~1`],
+    { cwd: root, encoding: "utf8" },
+  ).trim();
+  const parentLookup = spawnSync(
+    "git",
+    ["cat-file", "-e", `${parentReference}^{commit}`],
+    { cwd: prepared.worktree },
+  );
+  assert.notEqual(
+    parentLookup.status,
+    0,
+    "the reference commit's own parent is not a reachable object in the worktree",
+  );
 } finally {
-  disposeP4Worktree({ root, ...prepared });
+  disposeP4Worktree(prepared);
+}
+
+// P0-06: a task with a fixture overlay (files that did not exist yet at the
+// reference commit) gets it restored and staged in the worktree.
+const fixtureTaskPrepared = prepareP4Worktree({
+  root,
+  reference: manifest.reference,
+  taskId: "02-local-bug",
+});
+try {
+  const fixturePath = join(
+    fixtureTaskPrepared.worktree,
+    "benchmark-fixture",
+    "run-fixture-test.mjs",
+  );
+  assert.equal(
+    existsSync(fixturePath),
+    true,
+    "the fixture overlay is copied into the worktree",
+  );
+  const status = execFileSync(
+    "git",
+    ["status", "--porcelain", "benchmark-fixture"],
+    {
+      cwd: fixtureTaskPrepared.worktree,
+      encoding: "utf8",
+    },
+  );
+  assert.match(
+    status,
+    /^A /m,
+    "the fixture overlay is staged, not merely present as untracked files",
+  );
+} finally {
+  disposeP4Worktree(fixtureTaskPrepared);
 }
 
 const pinned = pinRuntimeRoles(manifest.roles, {

@@ -5,7 +5,9 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -28,9 +30,9 @@ function hash(value) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function git(root, args) {
+function git(cwd, args) {
   return execFileSync("git", args, {
-    cwd: root,
+    cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -50,13 +52,42 @@ export function promptPath(root, taskId) {
   return candidate;
 }
 
-/** Create an agent worktree from the fixed commit and remove historic hints. */
+/**
+ * Create an agent worktree from the fixed commit and remove historic hints.
+ *
+ * Uses an independent shallow fetch (git init + fetch --depth 1 + checkout)
+ * rather than `git worktree add`. A worktree shares the parent repository's
+ * .git object database, so `git log`/`git show` inside it could still reach
+ * every commit ever made, including ones after `reference` and historic
+ * TASK.md solution hints outside benchmarks/tasks/ (P0-05). A depth-1 fetch
+ * from a local `file://` URL gives a repository whose object database
+ * genuinely contains only the one requested commit (verified: `git log`
+ * shows exactly one entry, and `git cat-file -e` on an unrelated commit
+ * fails with "not a valid object name" rather than merely being hidden by
+ * ref visibility).
+ */
 export function prepareP4Worktree({ root, reference, taskId }) {
   const publicPrompt = promptPath(root, taskId); // validate before mutation
   const base = mkdtempSync(join(tmpdir(), "pi-p4-worktree-"));
   const worktree = join(base, "source");
   try {
-    git(root, ["worktree", "add", "--detach", worktree, reference]);
+    mkdirSync(worktree, { recursive: true });
+    git(worktree, ["init", "--quiet"]);
+    git(worktree, [
+      "fetch",
+      "--quiet",
+      "--depth",
+      "1",
+      `file://${root}`,
+      reference,
+    ]);
+    git(worktree, ["checkout", "--quiet", "FETCH_HEAD"]);
+    const actualReference = git(worktree, ["rev-parse", "HEAD"]).trim();
+    if (actualReference !== reference) {
+      throw new Error(
+        "P4 worktree did not resolve to the required reference commit.",
+      );
+    }
     // P3 task descriptions include solution hints. They are historical data,
     // not an input to any P4 agent. The P4 prompt is passed in-memory only.
     const historicTasks = join(worktree, "benchmarks", "tasks");
@@ -64,6 +95,24 @@ export function prepareP4Worktree({ root, reference, taskId }) {
       rmSync(historicTasks, { recursive: true, force: true });
     if (findTaskDescriptions(worktree).length)
       throw new Error("P4 worktree still contains a task description.");
+    // Some migrated tasks reference files that did not exist yet at
+    // `reference` (see benchmarks/tasks/<id>/fixture/, the pre-P4 overlay
+    // reset-task.sh applied). Restore that overlay so the prompt's file
+    // references resolve, and stage it so a later `git diff` sees the
+    // agent's real edits to it rather than nothing (untracked directories
+    // are invisible to `git diff` without an index baseline) (P0-06).
+    const fixtureSource = resolve(
+      root,
+      "benchmarks",
+      "tasks",
+      taskId,
+      "fixture",
+    );
+    if (existsSync(fixtureSource)) {
+      const fixtureTarget = join(worktree, "benchmark-fixture");
+      cpSync(fixtureSource, fixtureTarget, { recursive: true });
+      git(worktree, ["add", "benchmark-fixture"]);
+    }
     return {
       base,
       worktree,
@@ -73,11 +122,6 @@ export function prepareP4Worktree({ root, reference, taskId }) {
         .digest("hex"),
     };
   } catch (error) {
-    try {
-      git(root, ["worktree", "remove", "--force", worktree]);
-    } catch {
-      /* not added */
-    }
     rmSync(base, { recursive: true, force: true });
     throw error;
   }
@@ -95,17 +139,16 @@ function findTaskDescriptions(directory) {
   return found;
 }
 
-export function disposeP4Worktree({ root, base, worktree }) {
+// No `git worktree remove` step: prepareP4Worktree no longer registers a
+// worktree against the parent repository, so plain removal is sufficient
+// and there is nothing left to unregister there.
+export function disposeP4Worktree({ base, worktree }) {
   if (
     !base.startsWith(`${tmpdir()}${"/"}`) ||
     relative(base, worktree).startsWith("..")
   )
     throw new Error("Refusing to dispose an unrecognised P4 worktree.");
-  try {
-    git(root, ["worktree", "remove", "--force", worktree]);
-  } finally {
-    rmSync(base, { recursive: true, force: true });
-  }
+  rmSync(base, { recursive: true, force: true });
 }
 
 export function pinRuntimeRoles(manifestRoles, resolvedRoles) {
@@ -327,6 +370,6 @@ export async function runP4Task({
       variantViolation,
     });
   } finally {
-    disposeP4Worktree({ root, ...prepared });
+    disposeP4Worktree(prepared);
   }
 }
