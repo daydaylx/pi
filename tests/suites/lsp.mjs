@@ -28,34 +28,34 @@ const FAKE_LSP_COMMAND = "python3";
 const FAKE_LSP_FIXTURE = path.join(ROOT, "tests", "fixtures", "fake-lsp.py");
 
 export const lspSections = {
-  'LSP Control Center file picker': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "LSP Control Center file picker": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("LSP Control Center file picker", async () => {
       if (!lspControlCenter) return;
@@ -67,7 +67,10 @@ export const lspSections = {
       try {
         writeFileSync(path.join(cwd, "ok.ts"), "export {}\n");
         mkdirSync(path.join(cwd, "node_modules"));
-        writeFileSync(path.join(cwd, "node_modules", "ignored.ts"), "export {}\n");
+        writeFileSync(
+          path.join(cwd, "node_modules", "ignored.ts"),
+          "export {}\n",
+        );
         symlinkSync(path.join(cwd, "ok.ts"), path.join(cwd, "linked.ts"));
         eq(
           lspControlCenter.findLspDiagnosticCandidates(cwd),
@@ -75,7 +78,9 @@ export const lspSections = {
           "LSP picker accepts regular supported workspace files and skips symlinks/ignored directories",
         );
         eq(
-          lspControlCenter.findLspDiagnosticCandidates(path.join(cwd, "missing")),
+          lspControlCenter.findLspDiagnosticCandidates(
+            path.join(cwd, "missing"),
+          ),
           [],
           "LSP picker has a clear empty candidate result",
         );
@@ -113,9 +118,12 @@ export const lspSections = {
         lifecycleContext.ui.custom = async () => {
           throw new Error("use deterministic select fallback");
         };
-        await lifecycleHarness.dispatchEvent("control-center:open-diagnostics", {
-          ctx: lifecycleContext,
-        });
+        await lifecycleHarness.dispatchEvent(
+          "control-center:open-diagnostics",
+          {
+            ctx: lifecycleContext,
+          },
+        );
         eq(
           lifecycleHarness.notifications,
           [],
@@ -125,37 +133,36 @@ export const lspSections = {
         rmSync(cwd, { recursive: true, force: true });
       }
     });
-
   },
 
-  'LSP transport, process and lifecycle (#93)': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "LSP transport, process and lifecycle (#93)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("LSP transport, process and lifecycle (#93)", async () => {
       const transportMod = await load("extensions/lsp/transport.ts");
@@ -176,48 +183,61 @@ export const lspSections = {
         "lsp index exports createLspClient",
       );
 
-      await check("formatErrorMessage and LspError formatting handles RPC errors cleanly", async () => {
-        const { formatErrorMessage } = clientMod;
-        const { LspError } = typesMod;
-        const { formatLspError } = toolsMod;
+      await check(
+        "formatErrorMessage and LspError formatting handles RPC errors cleanly",
+        async () => {
+          const { formatErrorMessage } = clientMod;
+          const { LspError } = typesMod;
+          const { formatLspError } = toolsMod;
 
-        eq(
-          formatErrorMessage(new Error("std error")),
-          "std error",
-          "formatErrorMessage unpacks Error instance",
-        );
-        eq(
-          formatErrorMessage({ code: -32601, message: "Method not found" }),
-          "Method not found",
-          "formatErrorMessage unpacks JSON-RPC error object",
-        );
-        eq(
-          formatErrorMessage({ message: "custom obj message" }),
-          "custom obj message",
-          "formatErrorMessage unpacks object with message property",
-        );
+          eq(
+            formatErrorMessage(new Error("std error")),
+            "std error",
+            "formatErrorMessage unpacks Error instance",
+          );
+          eq(
+            formatErrorMessage({ code: -32601, message: "Method not found" }),
+            "Method not found",
+            "formatErrorMessage unpacks JSON-RPC error object",
+          );
+          eq(
+            formatErrorMessage({ message: "custom obj message" }),
+            "custom obj message",
+            "formatErrorMessage unpacks object with message property",
+          );
 
-        const lspErr = new LspError({
-          kind: "request_failed",
-          serverId: "typescript",
-          workspaceRoot: "/home/d/.pi/agent",
-          method: "workspace/symbol",
-          cause: "Method workspace/symbol not supported",
-        });
+          const lspErr = new LspError({
+            kind: "request_failed",
+            serverId: "typescript",
+            workspaceRoot: "/home/d/.pi/agent",
+            method: "workspace/symbol",
+            cause: "Method workspace/symbol not supported",
+          });
 
-        eq(lspErr.cause, "Method workspace/symbol not supported", "LspError stores cause property");
-        eq(lspErr.toStructured().cause, "Method workspace/symbol not supported", "toStructured returns cause without header prefix");
+          eq(
+            lspErr.cause,
+            "Method workspace/symbol not supported",
+            "LspError stores cause property",
+          );
+          eq(
+            lspErr.toStructured().cause,
+            "Method workspace/symbol not supported",
+            "toStructured returns cause without header prefix",
+          );
 
-        const formatted = formatLspError(lspErr);
-        assert(
-          !formatted.includes("[object Object]"),
-          "formatted error does not contain [object Object]",
-        );
-        assert(
-          formatted.includes("Ursache: Method workspace/symbol not supported"),
-          "formatted error shows concise cause without duplicate header",
-        );
-      });
+          const formatted = formatLspError(lspErr);
+          assert(
+            !formatted.includes("[object Object]"),
+            "formatted error does not contain [object Object]",
+          );
+          assert(
+            formatted.includes(
+              "Ursache: Method workspace/symbol not supported",
+            ),
+            "formatted error shows concise cause without duplicate header",
+          );
+        },
+      );
 
       const fakeServer = FAKE_LSP_FIXTURE;
       const workspace = mkdtempSync(path.join(tmpdir(), "pi-lsp-test-"));
@@ -235,7 +255,9 @@ export const lspSections = {
           workspaceRoot: workspace,
           command,
           args:
-            command === FAKE_LSP_COMMAND ? [fakeServer, ...extraArgs] : extraArgs,
+            command === FAKE_LSP_COMMAND
+              ? [fakeServer, ...extraArgs]
+              : extraArgs,
           requestTimeoutMs: 1000,
           process: {
             maxRestarts: 1,
@@ -276,24 +298,31 @@ export const lspSections = {
         return Buffer.concat([header, body]);
       }
 
-      await check("framing parses coalesced and fragmented messages", async () => {
-        const parse = transportMod.parseStreamChunk;
-        const msg1 = { jsonrpc: "2.0", id: 1, method: "a", params: { n: 1 } };
-        const msg2 = { jsonrpc: "2.0", method: "note", params: { x: 2 } };
-        const msg3 = { jsonrpc: "2.0", id: 2, result: { ok: true } };
-        const buf = Buffer.concat([frame(msg1), frame(msg2), frame(msg3)]);
-        // Cut inside the first message body so the head is incomplete.
-        const cut = frame(msg1).length - 3;
-        const head = buf.subarray(0, cut);
-        const tail = buf.subarray(cut);
-        const first = parse(head);
-        eq(first.messages.length, 0, "partial head yields no complete message");
-        const second = parse(Buffer.concat([first.rest, tail]));
-        eq(second.messages.length, 3, "tail completes all three messages");
-        eq(second.rest.length, 0, "no trailing bytes remain");
-        eq(second.messages[0].id, 1, "first message id correlates");
-        eq(second.messages[2].result.ok, true, "third message result parsed");
-      });
+      await check(
+        "framing parses coalesced and fragmented messages",
+        async () => {
+          const parse = transportMod.parseStreamChunk;
+          const msg1 = { jsonrpc: "2.0", id: 1, method: "a", params: { n: 1 } };
+          const msg2 = { jsonrpc: "2.0", method: "note", params: { x: 2 } };
+          const msg3 = { jsonrpc: "2.0", id: 2, result: { ok: true } };
+          const buf = Buffer.concat([frame(msg1), frame(msg2), frame(msg3)]);
+          // Cut inside the first message body so the head is incomplete.
+          const cut = frame(msg1).length - 3;
+          const head = buf.subarray(0, cut);
+          const tail = buf.subarray(cut);
+          const first = parse(head);
+          eq(
+            first.messages.length,
+            0,
+            "partial head yields no complete message",
+          );
+          const second = parse(Buffer.concat([first.rest, tail]));
+          eq(second.messages.length, 3, "tail completes all three messages");
+          eq(second.rest.length, 0, "no trailing bytes remain");
+          eq(second.messages[0].id, 1, "first message id correlates");
+          eq(second.messages[2].result.ok, true, "third message result parsed");
+        },
+      );
 
       await check("initialize handshake and a sample request", async () => {
         const client = makeClient();
@@ -389,37 +418,43 @@ export const lspSections = {
         await settle(client);
       });
 
-      await check("crash triggers a bounded restart then degrades", async () => {
-        const client = makeClient({
-          args: ["--crash-after-init"],
-          process: {
-            maxRestarts: 1,
-            backoffBaseMs: 30,
-            backoffMaxMs: 60,
-            shutdownGraceMs: 400,
-          },
-        });
-        let restarts = 0;
-        client.on("restart", () => {
-          restarts += 1;
-        });
-        const degraded = new Promise((resolve) =>
-          client.once("degraded", () => resolve(true)),
-        );
-        await client.start(); // first init succeeds, server crashes right after
-        await Promise.race([
-          degraded,
-          new Promise((r) => setTimeout(() => r(false), 2000)),
-        ]);
-        assert(restarts >= 1, "at least one automatic restart happened");
-        eq(
-          client.currentState,
-          "degraded",
-          "client degrades after bounded restart attempts",
-        );
-        await settle(client);
-        assert(!client.processRunning, "no live process after degraded + shutdown");
-      });
+      await check(
+        "crash triggers a bounded restart then degrades",
+        async () => {
+          const client = makeClient({
+            args: ["--crash-after-init"],
+            process: {
+              maxRestarts: 1,
+              backoffBaseMs: 30,
+              backoffMaxMs: 60,
+              shutdownGraceMs: 400,
+            },
+          });
+          let restarts = 0;
+          client.on("restart", () => {
+            restarts += 1;
+          });
+          const degraded = new Promise((resolve) =>
+            client.once("degraded", () => resolve(true)),
+          );
+          await client.start(); // first init succeeds, server crashes right after
+          await Promise.race([
+            degraded,
+            new Promise((r) => setTimeout(() => r(false), 2000)),
+          ]);
+          assert(restarts >= 1, "at least one automatic restart happened");
+          eq(
+            client.currentState,
+            "degraded",
+            "client degrades after bounded restart attempts",
+          );
+          await settle(client);
+          assert(
+            !client.processRunning,
+            "no live process after degraded + shutdown",
+          );
+        },
+      );
 
       await check(
         "missing binary yields a structured error without a crash",
@@ -436,7 +471,10 @@ export const lspSections = {
           }
           assert(Boolean(caught), "a missing binary rejects start");
           eq(caught?.kind, "missing_binary", "error kind is missing_binary");
-          assert(!client.processRunning, "no live process for a missing binary");
+          assert(
+            !client.processRunning,
+            "no live process for a missing binary",
+          );
           await settle(client);
         },
       );
@@ -468,34 +506,36 @@ export const lspSections = {
     // ---------------------------------------------------------------------------
   },
 
-  'LSP config, root detection, registry and profiles (#94)': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "LSP config, root detection, registry and profiles (#94)": async (
+    context,
+  ) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section(
       "LSP config, root detection, registry and profiles (#94)",
@@ -604,6 +644,114 @@ export const lspSections = {
           "untrusted ignores projectConfig mode",
         );
 
+        // --- Profile override validation (C2) ---
+        // Previously only `args` was type-checked; command/enabled/
+        // rootMarkers fell through the `??` fallback unvalidated, so a
+        // malformed .pi/lsp.json (e.g. command: 123) would reach the server
+        // registry as-is.
+        const baseProfile = {
+          id: "custom",
+          label: "custom",
+          enabled: true,
+          command: "custom-lsp",
+          args: [],
+          rootMarkers: [],
+        };
+        assert(
+          (() => {
+            try {
+              configMod.resolveProfileOverrides(baseProfile, { command: 123 });
+              return false;
+            } catch (error) {
+              return (
+                error instanceof TypeError && /command/.test(error.message)
+              );
+            }
+          })(),
+          "resolveProfileOverrides rejects a non-string command",
+        );
+        assert(
+          (() => {
+            try {
+              configMod.resolveProfileOverrides(baseProfile, {
+                enabled: "yes",
+              });
+              return false;
+            } catch (error) {
+              return (
+                error instanceof TypeError && /enabled/.test(error.message)
+              );
+            }
+          })(),
+          "resolveProfileOverrides rejects a non-boolean enabled",
+        );
+        assert(
+          (() => {
+            try {
+              configMod.resolveProfileOverrides(baseProfile, {
+                rootMarkers: "package.json",
+              });
+              return false;
+            } catch (error) {
+              return (
+                error instanceof TypeError && /rootMarkers/.test(error.message)
+              );
+            }
+          })(),
+          "resolveProfileOverrides rejects a non-array rootMarkers",
+        );
+        assert(
+          (() => {
+            try {
+              configMod.resolveProfileOverrides(baseProfile, {
+                rootMarkers: [1, 2],
+              });
+              return false;
+            } catch (error) {
+              return (
+                error instanceof TypeError && /rootMarkers/.test(error.message)
+              );
+            }
+          })(),
+          "resolveProfileOverrides rejects a rootMarkers array with non-string entries",
+        );
+        eq(
+          configMod.resolveProfileOverrides(baseProfile, {
+            command: "other-lsp",
+            enabled: false,
+            rootMarkers: ["go.mod"],
+          }),
+          {
+            ...baseProfile,
+            command: "other-lsp",
+            enabled: false,
+            rootMarkers: ["go.mod"],
+          },
+          "resolveProfileOverrides still applies valid command/enabled/rootMarkers overrides",
+        );
+        // End-to-end: the same malformed value reaching resolveConfig
+        // through a (trusted) project config must fail closed too, not only
+        // when resolveProfileOverrides is called directly.
+        assert(
+          (() => {
+            try {
+              configMod.resolveConfig({
+                defaults,
+                trusted: true,
+                projectConfig: {
+                  languages: { custom: { command: 123 } },
+                },
+              });
+              return false;
+            } catch (error) {
+              return (
+                error instanceof TypeError && /command/.test(error.message)
+              );
+            }
+          })(),
+          "resolveConfig fails closed on a malformed project language override, not just resolveProfileOverrides in isolation",
+        );
+
         // --- Root detection ---
 
         writeFileSync(path.join(workspace, "tsconfig.json"), "{}");
@@ -616,7 +764,8 @@ export const lspSections = {
           "finds marker two levels up",
         );
         assert(
-          rootsMod.findWorkspaceRoot(workspace, ["pyproject.toml"]) === undefined,
+          rootsMod.findWorkspaceRoot(workspace, ["pyproject.toml"]) ===
+            undefined,
           "returns undefined when no marker exists",
         );
 
@@ -632,7 +781,8 @@ export const lspSections = {
         const rust = profilesMod.PROFILES.rust;
         assert(rust.enabled === true, "rust profile is enabled by default");
         assert(
-          rust.settings?.["rust-analyzer"]?.cargo?.buildScripts?.enable === false,
+          rust.settings?.["rust-analyzer"]?.cargo?.buildScripts?.enable ===
+            false,
           "rust disables cargo build scripts",
         );
         assert(
@@ -663,7 +813,10 @@ export const lspSections = {
         assert(full.hover === true, "boolean hoverProvider");
         assert(full.definition === true, "object definitionProvider (truthy)");
         assert(full.references === false, "explicit false referencesProvider");
-        assert(full.workspaceSymbols === true, "top-level workspaceSymbolProvider");
+        assert(
+          full.workspaceSymbols === true,
+          "top-level workspaceSymbolProvider",
+        );
         assert(full.textDocumentSync === 1, "textDocumentSync passed through");
 
         const empty = capsMod.normalizeCapabilities({});
@@ -692,7 +845,10 @@ export const lspSections = {
 
         reg.release(workspace, pf.id);
         const b = await reg.acquire(workspace, pf);
-        assert(b.client.pid === pidA, "same (root,serverId) reuses the instance");
+        assert(
+          b.client.pid === pidA,
+          "same (root,serverId) reuses the instance",
+        );
         reg.release(workspace, pf.id);
 
         // --- Registry: idle shutdown ---
@@ -712,7 +868,10 @@ export const lspSections = {
         // Do not call release → activeRequests stays 1.
         await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
         assert(reg.size === 1, "entry kept while active requests in flight");
-        assert(d.client.processRunning, "server still alive with active requests");
+        assert(
+          d.client.processRunning,
+          "server still alive with active requests",
+        );
         reg.release(workspace, pf.id);
         await new Promise((r) => setTimeout(r, idleShort * 2 + 30));
         assert(reg.size === 0, "entry removed after release + idle wait");
@@ -762,34 +921,34 @@ export const lspSections = {
     // ---------------------------------------------------------------------------
   },
 
-  'LSP documents and diagnostics (#95)': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "LSP documents and diagnostics (#95)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("LSP documents and diagnostics (#95)", async () => {
       const documentsMod = await load("extensions/lsp/documents.ts");
@@ -858,48 +1017,51 @@ export const lspSections = {
         }
       }
 
-      await check("didOpen precedes didChange, versions are monotone", async () => {
-        const client = makeClient();
-        await client.start();
-        const sentNotifications = [];
-        const originalNotify = client.notify.bind(client);
-        client.notify = (method, params) => {
-          sentNotifications.push({ method, params });
-          originalNotify(method, params);
-        };
+      await check(
+        "didOpen precedes didChange, versions are monotone",
+        async () => {
+          const client = makeClient();
+          await client.start();
+          const sentNotifications = [];
+          const originalNotify = client.notify.bind(client);
+          client.notify = (method, params) => {
+            sentNotifications.push({ method, params });
+            originalNotify(method, params);
+          };
 
-        const filePath = path.join(workspace, "a.ts");
-        writeFileSync(filePath, "const a = 1;\n");
-        const sync = documentsMod.getDocumentSync(client, workspace);
+          const filePath = path.join(workspace, "a.ts");
+          writeFileSync(filePath, "const a = 1;\n");
+          const sync = documentsMod.getDocumentSync(client, workspace);
 
-        const first = sync.openOrSync(filePath, "typescript");
-        eq(first.version, 1, "first sync is version 1");
-        eq(
-          sentNotifications[0]?.method,
-          "textDocument/didOpen",
-          "first sync sends didOpen",
-        );
+          const first = sync.openOrSync(filePath, "typescript");
+          eq(first.version, 1, "first sync is version 1");
+          eq(
+            sentNotifications[0]?.method,
+            "textDocument/didOpen",
+            "first sync sends didOpen",
+          );
 
-        writeFileSync(filePath, "const a = 2;\n");
-        const second = sync.openOrSync(filePath, "typescript");
-        eq(second.version, 2, "second sync increments version");
-        eq(
-          sentNotifications[1]?.method,
-          "textDocument/didChange",
-          "second sync sends didChange",
-        );
+          writeFileSync(filePath, "const a = 2;\n");
+          const second = sync.openOrSync(filePath, "typescript");
+          eq(second.version, 2, "second sync increments version");
+          eq(
+            sentNotifications[1]?.method,
+            "textDocument/didChange",
+            "second sync sends didChange",
+          );
 
-        const third = sync.openOrSync(filePath, "typescript");
-        eq(third.version, 2, "unchanged content keeps the same version");
-        eq(third.changed, false, "unchanged content reports changed: false");
-        eq(
-          sentNotifications.length,
-          2,
-          "unchanged content sends no additional notification",
-        );
+          const third = sync.openOrSync(filePath, "typescript");
+          eq(third.version, 2, "unchanged content keeps the same version");
+          eq(third.changed, false, "unchanged content reports changed: false");
+          eq(
+            sentNotifications.length,
+            2,
+            "unchanged content sends no additional notification",
+          );
 
-        await settle(client);
-      });
+          await settle(client);
+        },
+      );
 
       await check(
         "a new diagnostics version replaces the previous one",
@@ -911,7 +1073,11 @@ export const lspSections = {
           const sync = documentsMod.getDocumentSync(client, workspace);
 
           const v1 = sync.openOrSync(filePath, "typescript");
-          const snap1 = await sync.waitForDiagnostics(filePath, v1.version, 2000);
+          const snap1 = await sync.waitForDiagnostics(
+            filePath,
+            v1.version,
+            2000,
+          );
           eq(
             snap1.diagnostics.length,
             1,
@@ -925,7 +1091,11 @@ export const lspSections = {
 
           writeFileSync(filePath, "const b = 2;\n");
           const v2 = sync.openOrSync(filePath, "typescript");
-          const snap2 = await sync.waitForDiagnostics(filePath, v2.version, 2000);
+          const snap2 = await sync.waitForDiagnostics(
+            filePath,
+            v2.version,
+            2000,
+          );
           eq(
             snap2.diagnostics.length,
             1,
@@ -1033,23 +1203,26 @@ export const lspSections = {
         await settle(client);
       });
 
-      await check("resolveTarget soft-fails on an unmapped extension", async () => {
-        const filePath = path.join(workspace, "notes.xyz");
-        writeFileSync(filePath, "whatever");
-        const config = {
-          enabled: true,
-          mode: "auto",
-          requestTimeoutMs: 2000,
-          idleShutdownMs: 600000,
-          workspaceSymbolLimit: 50,
-          languages: profilesMod.PROFILES,
-        };
-        const result = documentsMod.resolveTarget(filePath, config);
-        assert(
-          result instanceof typesMod.LspError,
-          "an unmapped extension yields a structured LspError, not a crash",
-        );
-      });
+      await check(
+        "resolveTarget soft-fails on an unmapped extension",
+        async () => {
+          const filePath = path.join(workspace, "notes.xyz");
+          writeFileSync(filePath, "whatever");
+          const config = {
+            enabled: true,
+            mode: "auto",
+            requestTimeoutMs: 2000,
+            idleShutdownMs: 600000,
+            workspaceSymbolLimit: 50,
+            languages: profilesMod.PROFILES,
+          };
+          const result = documentsMod.resolveTarget(filePath, config);
+          assert(
+            result instanceof typesMod.LspError,
+            "an unmapped extension yields a structured LspError, not a crash",
+          );
+        },
+      );
 
       await check(
         "lsp_diagnostics tool: end-to-end success releases the registry entry",
@@ -1117,7 +1290,9 @@ export const lspSections = {
             context,
           );
           assert(
-            unknownResult.content[0].text.toLowerCase().includes("kein lsp-profil"),
+            unknownResult.content[0].text
+              .toLowerCase()
+              .includes("kein lsp-profil"),
             "unknown extension yields a soft-fail message",
           );
           eq(
@@ -1206,37 +1381,36 @@ export const lspSections = {
         /* ignore temp cleanup errors */
       }
     });
-
   },
 
-  'LSP security and registry single-flight (P0.2, P1.1)': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "LSP security and registry single-flight (P0.2, P1.1)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section(
       "LSP security and registry single-flight (P0.2, P1.1)",
@@ -1298,7 +1472,8 @@ export const lspSections = {
               onNotification: () => {},
               on: () => {},
               off: () => {},
-              notify: (method, params) => notifications.push({ method, params }),
+              notify: (method, params) =>
+                notifications.push({ method, params }),
             };
             const sync = new documentsMod.DocumentSync({
               client: fakeClient,
@@ -1319,7 +1494,11 @@ export const lspSections = {
               );
             }
             assert(threw, "symlink escape is rejected with an error");
-            eq(notifications.length, 0, "no didOpen is sent for a symlink escape");
+            eq(
+              notifications.length,
+              0,
+              "no didOpen is sent for a symlink escape",
+            );
             rmSync(elsewhere, { recursive: true, force: true });
           })();
 
@@ -1457,34 +1636,34 @@ export const lspSections = {
     // ---------------------------------------------------------------------------
   },
 
-  'LSP navigation and symbol tools (#96)': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "LSP navigation and symbol tools (#96)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("LSP navigation and symbol tools (#96)", async () => {
       const toolsMod = await load("extensions/lsp/tools.ts");
@@ -1613,25 +1792,28 @@ export const lspSections = {
         },
       );
 
-      await check("lsp_references: limit truncates with a count hint", async () => {
-        const { registry, deps } = makeRegistryDeps();
-        const harness = createHarness();
-        toolsMod.registerLspNavigationTools(harness.api, deps);
-        const tool = harness.tools.get("lsp_references");
-        const context = harness.makeContext({ cwd: workspace });
-        const result = await tool.execute(
-          "call-4",
-          { path: "target.ts", line: 0, character: 0, limit: 2 },
-          undefined,
-          undefined,
-          context,
-        );
-        assert(
-          result.content[0].text.includes("2 von 3 gezeigt"),
-          "references are truncated to the limit with a hint",
-        );
-        await registry.shutdownAll();
-      });
+      await check(
+        "lsp_references: limit truncates with a count hint",
+        async () => {
+          const { registry, deps } = makeRegistryDeps();
+          const harness = createHarness();
+          toolsMod.registerLspNavigationTools(harness.api, deps);
+          const tool = harness.tools.get("lsp_references");
+          const context = harness.makeContext({ cwd: workspace });
+          const result = await tool.execute(
+            "call-4",
+            { path: "target.ts", line: 0, character: 0, limit: 2 },
+            undefined,
+            undefined,
+            context,
+          );
+          assert(
+            result.content[0].text.includes("2 von 3 gezeigt"),
+            "references are truncated to the limit with a hint",
+          );
+          await registry.shutdownAll();
+        },
+      );
 
       await check("lsp_hover: brief is shorter than full", async () => {
         const { registry, deps } = makeRegistryDeps();
@@ -1816,34 +1998,34 @@ export const lspSections = {
     // ---------------------------------------------------------------------------
   },
 
-  'LSP command, status and trust (#97)': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "LSP command, status and trust (#97)": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      toolOutputGuard,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("LSP command, status and trust (#97)", async () => {
       if (!lspExtensionMod) return;
@@ -1996,7 +2178,10 @@ export const lspSections = {
         );
         await harness.commands.get("lsp")("status", context);
         statusText = harness.notifications.at(-1)?.message ?? "";
-        assert(statusText.includes("LSP: aus"), "/lsp off flips the status to off");
+        assert(
+          statusText.includes("LSP: aus"),
+          "/lsp off flips the status to off",
+        );
 
         await harness.commands.get("lsp")("on", context);
         statusText = harness.notifications.at(-1)?.message ?? "";
@@ -2046,7 +2231,10 @@ export const lspSections = {
         eq(registry.size, 1, "one server registered before restart");
 
         const stopped = await registry.shutdownOne(cwd, fakeTsProfile.id);
-        assert(stopped === true, "shutdownOne reports it stopped a tracked entry");
+        assert(
+          stopped === true,
+          "shutdownOne reports it stopped a tracked entry",
+        );
         eq(registry.size, 0, "shutdownOne removes the entry");
 
         const missing = await registry.shutdownOne(cwd, "does-not-exist");
@@ -2082,7 +2270,10 @@ export const lspSections = {
 
         await harness.commands.get("lsp")("log", context);
         text = harness.notifications.at(-1)?.message ?? "";
-        assert(text.includes("kein Log"), "/lsp log reports empty log initially");
+        assert(
+          text.includes("kein Log"),
+          "/lsp log reports empty log initially",
+        );
 
         await harness.runHooks("session_shutdown", {}, context);
         try {
@@ -2121,7 +2312,9 @@ export const lspSections = {
           throw new Error("use deterministic select fallback");
         };
         eq(
-          await lspControlCenter.resolveLspInteractiveCommand(restartAllContext),
+          await lspControlCenter.resolveLspInteractiveCommand(
+            restartAllContext,
+          ),
           "restart",
           "leaving the server id blank still restarts every server",
         );
@@ -2143,7 +2336,11 @@ export const lspSections = {
           "status",
           "non-restart choices resolve directly",
         );
-        eq(statusInputCalls, 0, "non-restart choices never prompt for a server id");
+        eq(
+          statusInputCalls,
+          0,
+          "non-restart choices never prompt for a server id",
+        );
       }
 
       // --- bare /lsp now reuses that resolver, so restart honors a typed id
@@ -2232,7 +2429,10 @@ export const lspSections = {
         const registry = new registryMod.ServerRegistry({ config });
         const acquired = await registry.acquire(cwd, fakeTsProfile);
         registry.release(cwd, fakeTsProfile.id);
-        assert(acquired.client.processRunning, "server is running before shutdown");
+        assert(
+          acquired.client.processRunning,
+          "server is running before shutdown",
+        );
         await registry.shutdownAll();
         assert(
           !acquired.client.processRunning,
@@ -2245,7 +2445,5 @@ export const lspSections = {
         }
       }
     });
-
   },
-
 };

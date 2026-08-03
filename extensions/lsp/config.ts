@@ -80,6 +80,31 @@ export function resolveProfileOverrides(
     }
   }
 
+  // C2: command/enabled/rootMarkers used to fall through the `??` below
+  // unvalidated — a malformed .pi/lsp.json (e.g. command: 123) would reach
+  // the server registry as-is instead of failing closed here, the same way
+  // args already does.
+  if (
+    overrides.command !== undefined &&
+    typeof overrides.command !== "string"
+  ) {
+    throw new TypeError("command must be a string");
+  }
+  if (
+    overrides.enabled !== undefined &&
+    typeof overrides.enabled !== "boolean"
+  ) {
+    throw new TypeError("enabled must be a boolean");
+  }
+  if (overrides.rootMarkers !== undefined) {
+    if (
+      !Array.isArray(overrides.rootMarkers) ||
+      !overrides.rootMarkers.every((marker) => typeof marker === "string")
+    ) {
+      throw new TypeError("rootMarkers must be an array of strings");
+    }
+  }
+
   return {
     id: base.id,
     label: overrides.label ?? base.label,
@@ -105,10 +130,7 @@ export function parseMode(raw: unknown): LspMode | undefined {
 // ---------------------------------------------------------------------------
 
 /** Validiert, dass ein Wert eine boolean ist. Andernfalls wirft ein Fehler. */
-function validateBoolean(
-  value: unknown,
-  key: string,
-): boolean {
+function validateBoolean(value: unknown, key: string): boolean {
   if (typeof value !== "boolean") {
     throw new TypeError(`${key} must be a boolean, got ${typeof value}`);
   }
@@ -122,7 +144,12 @@ function validatePositiveInt(
   min: number,
   max: number,
 ): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < min ||
+    value > max
+  ) {
     throw new TypeError(`${key} must be an integer ${min}..${max}`);
   }
   return value;
@@ -130,19 +157,41 @@ function validatePositiveInt(
 
 function mergeConfig(target: LspConfig, source: Partial<LspConfig>): void {
   // P1.2: Fail-closed on invalid types instead of casting
-  if (source.enabled !== undefined) target.enabled = validateBoolean(source.enabled, "enabled");
+  if (source.enabled !== undefined)
+    target.enabled = validateBoolean(source.enabled, "enabled");
   if (source.mode !== undefined) {
-    if (source.mode !== "off" && source.mode !== "auto" && source.mode !== "force") {
-      throw new TypeError(`mode must be "off", "auto", or "force", got ${source.mode}`);
+    if (
+      source.mode !== "off" &&
+      source.mode !== "auto" &&
+      source.mode !== "force"
+    ) {
+      throw new TypeError(
+        `mode must be "off", "auto", or "force", got ${source.mode}`,
+      );
     }
     target.mode = source.mode as LspMode;
   }
   if (source.requestTimeoutMs !== undefined)
-    target.requestTimeoutMs = validatePositiveInt(source.requestTimeoutMs, "requestTimeoutMs", 1_000, 120_000);
+    target.requestTimeoutMs = validatePositiveInt(
+      source.requestTimeoutMs,
+      "requestTimeoutMs",
+      1_000,
+      120_000,
+    );
   if (source.idleShutdownMs !== undefined)
-    target.idleShutdownMs = validatePositiveInt(source.idleShutdownMs, "idleShutdownMs", 10_000, 3_600_000);
+    target.idleShutdownMs = validatePositiveInt(
+      source.idleShutdownMs,
+      "idleShutdownMs",
+      10_000,
+      3_600_000,
+    );
   if (source.workspaceSymbolLimit !== undefined)
-    target.workspaceSymbolLimit = validatePositiveInt(source.workspaceSymbolLimit, "workspaceSymbolLimit", 1, 500);
+    target.workspaceSymbolLimit = validatePositiveInt(
+      source.workspaceSymbolLimit,
+      "workspaceSymbolLimit",
+      1,
+      500,
+    );
 }
 
 function mergeLanguageProfiles(
