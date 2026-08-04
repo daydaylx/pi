@@ -102,7 +102,10 @@ export interface RunProfileResult {
   killed: boolean;
   durationMs: number;
   output: string;
-  error?: { kind: "missing_binary" | "timeout" | "spawn_failed"; message: string };
+  error?: {
+    kind: "missing_binary" | "timeout" | "spawn_failed";
+    message: string;
+  };
   truncation?: ReturnType<typeof limitTextOutput>["truncation"];
 }
 
@@ -269,8 +272,7 @@ function validateProfile(
     diagnostics.push({
       level: "error",
       source,
-      message:
-        `profiles.${id}.classification muss required, recommended oder advisory sein`,
+      message: `profiles.${id}.classification muss required, recommended oder advisory sein`,
     });
     return null;
   }
@@ -285,8 +287,7 @@ function validateProfile(
     diagnostics.push({
       level: "error",
       source,
-      message:
-        `profiles.${id}: required und classification widersprechen sich`,
+      message: `profiles.${id}: required und classification widersprechen sich`,
     });
     return null;
   }
@@ -462,7 +463,10 @@ export async function runProfile(
   const killed = Boolean(result.killed);
   const ok = result.code === 0 && !killed;
   const error: RunProfileResult["error"] = killed
-    ? { kind: "timeout", message: `Zeitlimit ${profile.timeoutMs}ms überschritten` }
+    ? {
+        kind: "timeout",
+        message: `Zeitlimit ${profile.timeoutMs}ms überschritten`,
+      }
     : result.code !== 0
       ? { kind: "spawn_failed", message: `Exit-Code ${result.code}` }
       : undefined;

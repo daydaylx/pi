@@ -38,14 +38,40 @@ const interactiveSource = readFileSync(
   "utf8",
 );
 
-assert.match(loaderSource, /eventUnsubscribers/, "loader scopes event-bus listeners");
-assert.match(runnerSource, /dispose\(message = /, "runner disposes scoped listeners");
-assert.match(sessionSource, /await emitSessionShutdownEvent[\s\S]{0,240}this\._extensionRunner\.dispose\(\)/, "reload disposes the replaced runner");
-assert.match(packageManagerSource, /applyConfiguredExtensionOrder/, "package manager honors explicit extension order");
-assert.match(sessionSource, /const builtinCommands = BUILTIN_SLASH_COMMANDS\.map/, "command inventory includes Pi built-ins");
-assert.match(interactiveSource, /submitSlashCommand: async \(commandLine\)/, "interactive UI exposes canonical slash submission");
+assert.match(
+  loaderSource,
+  /eventUnsubscribers/,
+  "loader scopes event-bus listeners",
+);
+assert.match(
+  runnerSource,
+  /dispose\(message = /,
+  "runner disposes scoped listeners",
+);
+assert.match(
+  sessionSource,
+  /await emitSessionShutdownEvent[\s\S]{0,240}this\._extensionRunner\.dispose\(\)/,
+  "reload disposes the replaced runner",
+);
+assert.match(
+  packageManagerSource,
+  /applyConfiguredExtensionOrder/,
+  "package manager honors explicit extension order",
+);
+assert.match(
+  sessionSource,
+  /const builtinCommands = BUILTIN_SLASH_COMMANDS\.map/,
+  "command inventory includes Pi built-ins",
+);
+assert.match(
+  interactiveSource,
+  /submitSlashCommand: async \(commandLine\)/,
+  "interactive UI exposes canonical slash submission",
+);
 
-const { createEventBus } = await import(`${RUNTIME_ROOT}/dist/core/event-bus.js`);
+const { createEventBus } = await import(
+  `${RUNTIME_ROOT}/dist/core/event-bus.js`
+);
 const { createExtensionRuntime, loadExtensionFromFactory } = await import(
   `${RUNTIME_ROOT}/dist/core/extensions/loader.js`
 );
@@ -72,7 +98,13 @@ for (let reload = 1; reload <= 10; reload += 1) {
     runtime,
     `<p1-reload-${reload}>`,
   );
-  activeRunner = new ExtensionRunner([extension], runtime, process.cwd(), {}, {});
+  activeRunner = new ExtensionRunner(
+    [extension],
+    runtime,
+    process.cwd(),
+    {},
+    {},
+  );
 
   const responses = [];
   eventBus.emit("p1:reload-provider", {
@@ -96,6 +128,10 @@ eventBus.emit("p1:reload-provider", {
   },
 });
 await new Promise((resolve) => setImmediate(resolve));
-assert.deepEqual(postDisposeResponses, [], "disposing the last runner removes its listener");
+assert.deepEqual(
+  postDisposeResponses,
+  [],
+  "disposing the last runner removes its listener",
+);
 
 console.log("P1 runtime reload regression passed.");

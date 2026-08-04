@@ -22,7 +22,13 @@
  * as `tests/run.mjs`); it does NOT reimplement any client logic.
  */
 import { createRequire } from "node:module";
-import { mkdtempSync, rmSync, writeFileSync, copyFileSync, mkdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  copyFileSync,
+  mkdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -75,9 +81,7 @@ function summarize(results) {
   const failed = results.filter((r) => r.status === "fail");
   const ok = results.filter((r) => r.status === "ok");
   const skipped = results.filter((r) => r.status === "skip");
-  lines.push(
-    `ok=${ok.length} skip=${skipped.length} fail=${failed.length}`,
-  );
+  lines.push(`ok=${ok.length} skip=${skipped.length} fail=${failed.length}`);
   console.log(lines.join("\n"));
   return failed.length === 0;
 }
@@ -86,11 +90,21 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function probeServer({ profile, fixture, targetFile, languageId, rootMarker, probeLine, probeCharacter }) {
+async function probeServer({
+  profile,
+  fixture,
+  targetFile,
+  languageId,
+  rootMarker,
+  probeLine,
+  probeCharacter,
+}) {
   const { LspClient } = await load("extensions/lsp/client.ts");
   const { getDocumentSync } = await load("extensions/lsp/documents.ts");
 
-  const workspace = mkdtempSync(path.join(tmpdir(), `pi-lsp-smoke-${profile.id}-`));
+  const workspace = mkdtempSync(
+    path.join(tmpdir(), `pi-lsp-smoke-${profile.id}-`),
+  );
   // A root marker helps the server resolve the workspace root.
   writeFileSync(path.join(workspace, rootMarker), "{}\n");
   copyFileSync(fixture, path.join(workspace, targetFile));
@@ -125,7 +139,10 @@ async function probeServer({ profile, fixture, targetFile, languageId, rootMarke
       init = await client.start();
     } catch (error) {
       if (error?.kind === "missing_binary") {
-        return { status: "skip", detail: `binary not installed (${profile.command})` };
+        return {
+          status: "skip",
+          detail: `binary not installed (${profile.command})`,
+        };
       }
       throw error;
     }
@@ -179,9 +196,15 @@ async function probeServer({ profile, fixture, targetFile, languageId, rootMarke
         textDocument: { uri },
         position: { line: probeLine, character: probeCharacter },
       });
-      hoverShape = hover?.contents ? "contents" : hover == null ? "null" : "other";
+      hoverShape = hover?.contents
+        ? "contents"
+        : hover == null
+          ? "null"
+          : "other";
     } catch (error) {
-      throw new Error(`hover request failed: ${error?.message ?? String(error)}`);
+      throw new Error(
+        `hover request failed: ${error?.message ?? String(error)}`,
+      );
     }
 
     const diagCount = diagnostics.length;

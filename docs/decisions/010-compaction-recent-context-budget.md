@@ -13,10 +13,10 @@ Der Vergleich verwendet die vier aufeinanderfolgenden Anweisungen aus
 Benchmark-Aufgabe 08 in jeweils getrennten temporären Arbeitskopien und
 Session-Dateien. Vorgesehen waren dieselben vier Varianten mit hohem Denken:
 
-| Modell | 12.000 | 20.000 |
-| --- | --- | --- |
-| `openai-codex/gpt-5.4-mini` | ausgeführt | nicht ausgeführt |
-| `openai-codex/gpt-5.6-sol` | nicht ausgeführt | nicht ausgeführt |
+| Modell                      | 12.000           | 20.000           |
+| --------------------------- | ---------------- | ---------------- |
+| `openai-codex/gpt-5.4-mini` | ausgeführt       | nicht ausgeführt |
+| `openai-codex/gpt-5.6-sol`  | nicht ausgeführt | nicht ausgeführt |
 
 Ein Kandidat darf nur übernommen werden, wenn alle vier Etappen samt
 Regressionstest abgeschlossen sind, die Verifikation grün ist, keine

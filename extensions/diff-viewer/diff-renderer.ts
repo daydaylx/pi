@@ -53,7 +53,10 @@ export function renderCompact(
     }
   }
 
-  if (rendered >= COMPACT_MAX_LINES && totalDiffLines(diff) > COMPACT_MAX_LINES) {
+  if (
+    rendered >= COMPACT_MAX_LINES &&
+    totalDiffLines(diff) > COMPACT_MAX_LINES
+  ) {
     const remaining = totalDiffLines(diff) - COMPACT_MAX_LINES;
     lines.push(theme.fg("dim", `  … ${remaining} weitere Zeilen`));
   }
@@ -162,15 +165,23 @@ function renderDiffLine(
   // Zeilennummern
   let numPart = "";
   if (showLineNums) {
-    const oldNum = dl.oldLine !== undefined ? padNum(dl.oldLine) : " ".repeat(LINE_NUM_WIDTH);
-    const newNum = dl.newLine !== undefined ? padNum(dl.newLine) : " ".repeat(LINE_NUM_WIDTH);
+    const oldNum =
+      dl.oldLine !== undefined
+        ? padNum(dl.oldLine)
+        : " ".repeat(LINE_NUM_WIDTH);
+    const newNum =
+      dl.newLine !== undefined
+        ? padNum(dl.newLine)
+        : " ".repeat(LINE_NUM_WIDTH);
     numPart = theme.fg("dim", `${oldNum} ${newNum} `);
   }
 
   const prefixColor =
-    dl.kind === "added" ? theme.fg("toolDiffAdded", prefix) :
-    dl.kind === "removed" ? theme.fg("toolDiffRemoved", prefix) :
-    theme.fg("dim", prefix);
+    dl.kind === "added"
+      ? theme.fg("toolDiffAdded", prefix)
+      : dl.kind === "removed"
+        ? theme.fg("toolDiffRemoved", prefix)
+        : theme.fg("dim", prefix);
 
   return `  ${prefixColor} ${numPart}${inlineStyled ? content : fg(content)}`;
 }
@@ -191,9 +202,10 @@ function renderInlineLine(
   let result = "";
   for (const segment of highlights) {
     if (segment.type === "equal") {
-      result += lineKind === "added"
-        ? theme.fg("toolDiffAdded", segment.text)
-        : theme.fg("toolDiffRemoved", segment.text);
+      result +=
+        lineKind === "added"
+          ? theme.fg("toolDiffAdded", segment.text)
+          : theme.fg("toolDiffRemoved", segment.text);
     } else if (segment.type === lineKind) {
       result += theme.fg("warning", theme.bold(segment.text));
     }
@@ -216,7 +228,9 @@ function totalDiffLines(diff: FileDiff): number {
 
 function padNum(n: number): string {
   const s = String(n);
-  return s.length >= LINE_NUM_WIDTH ? s : " ".repeat(LINE_NUM_WIDTH - s.length) + s;
+  return s.length >= LINE_NUM_WIDTH
+    ? s
+    : " ".repeat(LINE_NUM_WIDTH - s.length) + s;
 }
 
 function truncate(s: string, width: number): string {

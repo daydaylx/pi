@@ -15,9 +15,15 @@ Untersuche das angefragte Repository zunächst ohne Änderungen. Respektiere `AG
 Strukturiere das Ergebnis mit:
 
 ## Repository-Überblick
+
 ## Haupttechnologien
+
 ## Einstiegspunkte
+
 ## Wichtige Dateien
+
 ## Risiken
+
 ## Offene Fragen
+
 ## Nächste sinnvolle Prüfungen

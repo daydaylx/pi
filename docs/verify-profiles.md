@@ -58,31 +58,31 @@ Projekten liegende Profile werden nicht ausgeführt.
 {
   "profiles": {
     "<id>": {
-      "program": "pytest",          // Programmname (PATH), kein Shell-String
-      "args": ["-q"],               // Argumente, getrennt als Array
-      "cwd": ".",                   // relativ zum Projekt-Root, kein Escape
-      "timeoutMs": 300000,          // 1000..900000
+      "program": "pytest", // Programmname (PATH), kein Shell-String
+      "args": ["-q"], // Argumente, getrennt als Array
+      "cwd": ".", // relativ zum Projekt-Root, kein Escape
+      "timeoutMs": 300000, // 1000..900000
       "classification": "required", // required | recommended | advisory
-      "required": true,             // Legacy-Projektion
-      "env": { "KEY": "value" },    // additiv auf process.env
-      "trustRequired": true         // nur in vertrauten Projekten ausführen
-    }
-  }
+      "required": true, // Legacy-Projektion
+      "env": { "KEY": "value" }, // additiv auf process.env
+      "trustRequired": true, // nur in vertrauten Projekten ausführen
+    },
+  },
 }
 ```
 
 ### Felder
 
-| Feld | Typ | Default | Hinweis |
-|---|---|---|---|
-| `program` | string | – (Pflicht) | Programmname, via PATH aufgelöst. Kein Shell-String, keine Pipes. |
-| `args` | string[] | – (Pflicht) | Argumente, verbatim und getrennt. Leeres Array erlaubt, max. 64 Einträge. |
-| `cwd` | string | `"."` | Muss relativ sein und unter dem Projekt-Root bleiben. Absolut/`..` → Profil ungültig. |
-| `timeoutMs` | int | `120000` | Bereich 1000..900000. |
-| `classification` | string | `required` | `required`, `recommended` oder `advisory`. |
-| `required` | bool | `true` | Legacy-Projektion; darf einer expliziten Klassifikation nicht widersprechen. |
-| `env` | {string:string} | `{}` | Zusätzliche/übersteuernde Env-Variablen. |
-| `trustRequired` | bool | `true` | Explizite Vertrauensanforderung (Redundanz zum Trust-Gate, aber auditierbar). |
+| Feld             | Typ             | Default     | Hinweis                                                                               |
+| ---------------- | --------------- | ----------- | ------------------------------------------------------------------------------------- |
+| `program`        | string          | – (Pflicht) | Programmname, via PATH aufgelöst. Kein Shell-String, keine Pipes.                     |
+| `args`           | string[]        | – (Pflicht) | Argumente, verbatim und getrennt. Leeres Array erlaubt, max. 64 Einträge.             |
+| `cwd`            | string          | `"."`       | Muss relativ sein und unter dem Projekt-Root bleiben. Absolut/`..` → Profil ungültig. |
+| `timeoutMs`      | int             | `120000`    | Bereich 1000..900000.                                                                 |
+| `classification` | string          | `required`  | `required`, `recommended` oder `advisory`.                                            |
+| `required`       | bool            | `true`      | Legacy-Projektion; darf einer expliziten Klassifikation nicht widersprechen.          |
+| `env`            | {string:string} | `{}`        | Zusätzliche/übersteuernde Env-Variablen.                                              |
+| `trustRequired`  | bool            | `true`      | Explizite Vertrauensanforderung (Redundanz zum Trust-Gate, aber auditierbar).         |
 
 ### Fail-closed-Validierung
 
@@ -100,9 +100,13 @@ Siehe [`verify-profiles.example.json`](verify-profiles.example.json).
 ```json
 {
   "profiles": {
-    "typecheck": { "program": "npm", "args": ["run", "typecheck"], "timeoutMs": 120000 },
-    "tests":     { "program": "npm", "args": ["test"],            "timeoutMs": 300000 },
-    "lint":      { "program": "npm", "args": ["run", "lint"],     "required": false }
+    "typecheck": {
+      "program": "npm",
+      "args": ["run", "typecheck"],
+      "timeoutMs": 120000
+    },
+    "tests": { "program": "npm", "args": ["test"], "timeoutMs": 300000 },
+    "lint": { "program": "npm", "args": ["run", "lint"], "required": false }
   }
 }
 ```
@@ -136,10 +140,10 @@ Siehe [`verify-profiles.example.json`](verify-profiles.example.json).
 
 ## Troubleshooting
 
-| Symptom | Ursache | Behebung |
-|---|---|---|
-| `/setup-doctor`: „ignoriert (untrusted)“ | Projekt nicht vertraut | Projekt vertrauen. |
-| Profil fehlt, Diagnose „unbekannter Schlüssel“ | Tippfehler im Schema | Schlüssel korrigieren; fail-closed hat das Profil entfallen lassen. |
-| Diagnose „cwd … verlässt den Projekt-Root“ | absoluter oder `..`-Pfad | relatives `cwd` unterhalb des Projekts verwenden. |
-| Lauf-Ergebnis `missing_binary` | Programm nicht installiert | Binary installieren oder Profil entfernen. |
-| Lauf-Ergebnis `timeout` | `timeoutMs` zu klein | realistischeres Timeout setzen. |
+| Symptom                                        | Ursache                    | Behebung                                                            |
+| ---------------------------------------------- | -------------------------- | ------------------------------------------------------------------- |
+| `/setup-doctor`: „ignoriert (untrusted)“       | Projekt nicht vertraut     | Projekt vertrauen.                                                  |
+| Profil fehlt, Diagnose „unbekannter Schlüssel“ | Tippfehler im Schema       | Schlüssel korrigieren; fail-closed hat das Profil entfallen lassen. |
+| Diagnose „cwd … verlässt den Projekt-Root“     | absoluter oder `..`-Pfad   | relatives `cwd` unterhalb des Projekts verwenden.                   |
+| Lauf-Ergebnis `missing_binary`                 | Programm nicht installiert | Binary installieren oder Profil entfernen.                          |
+| Lauf-Ergebnis `timeout`                        | `timeoutMs` zu klein       | realistischeres Timeout setzen.                                     |

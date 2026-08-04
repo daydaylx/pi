@@ -15,11 +15,19 @@ Beginne mit einer Read-only-Prüfung der vorhandenen Agent-Dokumentation. Respek
 Strukturiere das Ergebnis mit:
 
 # Agent-Dokumente Prüfung
+
 ## Gefundene Dokumente
+
 ## Wichtige Inhalte
+
 ## Widersprüche
+
 ## Veraltete oder doppelte Dokumente
+
 ## Fehlende Dokumente
+
 ## Empfohlene Zielstruktur
+
 ## Konkrete nächste Schritte
+
 ## Änderungen mit Freigabepflicht

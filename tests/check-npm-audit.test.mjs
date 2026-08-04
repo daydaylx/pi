@@ -14,7 +14,12 @@ await test("findUnexpectedAdvisories ignores documented advisories and flags new
       },
       "some-new-package": {
         name: "some-new-package",
-        via: [{ url: "https://github.com/advisories/GHSA-new-new-new", title: "brand new issue" }],
+        via: [
+          {
+            url: "https://github.com/advisories/GHSA-new-new-new",
+            title: "brand new issue",
+          },
+        ],
       },
       "transitive-only": {
         // `via` entries can be plain package-name strings for indirect
@@ -25,8 +30,14 @@ await test("findUnexpectedAdvisories ignores documented advisories and flags new
     },
   };
   const unexpected = findUnexpectedAdvisories(report, ACCEPTED_ADVISORIES);
-  assert(unexpected.length === 1, "exactly one unexpected advisory is reported");
-  assert(unexpected[0].includes("GHSA-new-new-new"), "the unexpected advisory names the new GHSA id");
+  assert(
+    unexpected.length === 1,
+    "exactly one unexpected advisory is reported",
+  );
+  assert(
+    unexpected[0].includes("GHSA-new-new-new"),
+    "the unexpected advisory names the new GHSA id",
+  );
 });
 
 await test("findUnexpectedAdvisories reports nothing when every advisory is accepted", () => {
@@ -34,7 +45,9 @@ await test("findUnexpectedAdvisories reports nothing when every advisory is acce
     vulnerabilities: {
       "brace-expansion": {
         name: "brace-expansion",
-        via: [...ACCEPTED_ADVISORIES].slice(0, 2).map((url) => ({ url, title: "known" })),
+        via: [...ACCEPTED_ADVISORIES]
+          .slice(0, 2)
+          .map((url) => ({ url, title: "known" })),
       },
     },
   };

@@ -22,13 +22,8 @@ import { ROOT } from "../shared/jiti-loader.mjs";
 
 export const uiSections = {
   "Control Center menus": async (context) => {
-    const {
-      section,
-      thinkingMenu,
-      modePermissions,
-      planMode,
-      controlPlane,
-    } = context;
+    const { section, thinkingMenu, modePermissions, planMode, controlPlane } =
+      context;
 
     await section("Control Center menus", async () => {
       if (!thinkingMenu || !modePermissions || !planMode || !controlPlane)
@@ -232,10 +227,7 @@ export const uiSections = {
   },
 
   "shared menu shell navigation and rendering": async (context) => {
-    const {
-      section,
-      menuUi,
-    } = context;
+    const { section, menuUi } = context;
 
     await section("shared menu shell navigation and rendering", async () => {
       if (!menuUi) return;

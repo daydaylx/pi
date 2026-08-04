@@ -32,7 +32,9 @@ export function agentModule() {
   const candidate = resolve(override);
   const sourcePrefix = `${SOURCE_ROOT}/`;
   if (!candidate.startsWith(sourcePrefix) || !existsSync(candidate)) {
-    fail("P3_AGENT_MODULE must name an existing module inside the source checkout.");
+    fail(
+      "P3_AGENT_MODULE must name an existing module inside the source checkout.",
+    );
   }
   return candidate;
 }
@@ -59,7 +61,13 @@ export function agentInvocation(run, paths) {
 export function diagnosticV8Args(run, paths) {
   if (run.scored) return [];
   privateDir(join(paths.runDir, "diagnostics"));
-  if (run.mode === "v8-cpu-prof") return ["--cpu-prof", "--cpu-prof-dir", join(paths.runDir, "diagnostics")];
-  if (run.mode === "v8-heap-prof") return ["--heap-prof", "--heap-prof-dir", join(paths.runDir, "diagnostics")];
+  if (run.mode === "v8-cpu-prof")
+    return ["--cpu-prof", "--cpu-prof-dir", join(paths.runDir, "diagnostics")];
+  if (run.mode === "v8-heap-prof")
+    return [
+      "--heap-prof",
+      "--heap-prof-dir",
+      join(paths.runDir, "diagnostics"),
+    ];
   fail(`Unknown diagnostic V8 mode '${run.mode}'.`);
 }

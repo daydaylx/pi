@@ -15,8 +15,13 @@ Sammle Änderungen seit dem vom Nutzer benannten oder sinnvoll ermittelbaren Ver
 Strukturiere das Ergebnis mit:
 
 ## Änderungen
+
 ## Fixes
+
 ## Risiken
+
 ## Breaking Changes
+
 ## Migration
+
 ## Release-Checkliste

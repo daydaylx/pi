@@ -21,14 +21,9 @@ import {
 import { ROOT } from "../shared/jiti-loader.mjs";
 
 export const diffSections = {
-  'diff viewer regressions': async (context) => {
-  const {
-    section,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-  } = context;
+  "diff viewer regressions": async (context) => {
+    const { section, diffAlgorithm, diffFallback, diffTracker, diffViewer } =
+      context;
 
     await section("diff viewer regressions", async () => {
       assert(
@@ -61,9 +56,10 @@ export const diffSections = {
         "large inline diffs skip quadratic word highlighting",
       );
 
-      const before = Array.from({ length: 20 }, (_, index) => `line ${index}`).join(
-        "\n",
-      );
+      const before = Array.from(
+        { length: 20 },
+        (_, index) => `line ${index}`,
+      ).join("\n");
       const after = before
         .replace("line 2", "line two")
         .replace("line 17", "line seventeen");
@@ -186,7 +182,5 @@ export const diffSections = {
         "tracker sorts by persisted timestamp",
       );
     });
-
   },
-
 };

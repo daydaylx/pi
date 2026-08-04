@@ -11,60 +11,60 @@ reproduzierbaren Bedingungen.
 
 ## Infrastruktur (bereits vorhanden)
 
-| Komponente | Pfad | Zweck |
-|---|---|---|
-| 10 Aufgabentypen | `benchmarks/tasks/01-–10-*/` | Ausgangszustand, Auftrag, erwartetes Ergebnis, verbotene Änderungen |
-| `reset-task.sh` | `benchmarks/harness/` | Setzt jede Aufgabe auf ihren definierten Ausgangszustand zurück |
-| `run-verify.sh` | `benchmarks/harness/` | Führt Task-spezifische Verifikation aus |
-| `collect-metrics.mjs` | `benchmarks/harness/` | Sammelt automatische Metriken (geänderte Dateien/Zeilen, Testresultate, Token/Laufzeit) |
-| `run-baseline.sh` | `benchmarks/harness/` | Verkettet Reset → Verify → Collect für einen Lauf |
-| `RUNBOOK.md` | `benchmarks/` | Schritt-für-Schritt-Anleitung für einen manuellen Lauf |
-| `SCORING.md` | `benchmarks/` | Bewertungskriterien: automatisch vs. subjektiv |
-| Pilot-Result | `benchmarks/results/02-local-bug-pilot-*.json` | Validiert den Harness (Aufgabe 02, 1 Lauf) |
+| Komponente            | Pfad                                           | Zweck                                                                                   |
+| --------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 10 Aufgabentypen      | `benchmarks/tasks/01-–10-*/`                   | Ausgangszustand, Auftrag, erwartetes Ergebnis, verbotene Änderungen                     |
+| `reset-task.sh`       | `benchmarks/harness/`                          | Setzt jede Aufgabe auf ihren definierten Ausgangszustand zurück                         |
+| `run-verify.sh`       | `benchmarks/harness/`                          | Führt Task-spezifische Verifikation aus                                                 |
+| `collect-metrics.mjs` | `benchmarks/harness/`                          | Sammelt automatische Metriken (geänderte Dateien/Zeilen, Testresultate, Token/Laufzeit) |
+| `run-baseline.sh`     | `benchmarks/harness/`                          | Verkettet Reset → Verify → Collect für einen Lauf                                       |
+| `RUNBOOK.md`          | `benchmarks/`                                  | Schritt-für-Schritt-Anleitung für einen manuellen Lauf                                  |
+| `SCORING.md`          | `benchmarks/`                                  | Bewertungskriterien: automatisch vs. subjektiv                                          |
+| Pilot-Result          | `benchmarks/results/02-local-bug-pilot-*.json` | Validiert den Harness (Aufgabe 02, 1 Lauf)                                              |
 
 ## Aufgabentypen
 
-| ID | Typ | Besonderheit |
-|---|---|---|
-| 01 | Ein-Datei-Änderung | Präzise, kleine Änderung |
-| 02 | Lokaler Bug | Fixture-Test (verify-prüfbar) |
-| 03 | Fehlgeschlagener Unit-Test | Fixture-Test (verify-prüfbar) |
-| 04 | Multi-Datei-Änderung | Änderung über mehrere Dateien |
-| 05 | Refactoring ohne Verhaltensänderung | Fixture-Test (verify-prüfbar) |
-| 06 | Navigation in unbekanntem Code | Testfrei (manuelle Bewertung) |
-| 07 | Unterbestimmter Auftrag | Bewertung der Rückfrage-Qualität |
-| 08 | Lange Sitzung mit Compaction | Kontext-Erhalt prüfen |
-| 09 | Hängender Tool-Aufruf | Kein Fixture-Test (manuelle Bewertung) |
-| 10 | Mit/ohne Subagent | Subagenten-Nutzen messen |
+| ID  | Typ                                 | Besonderheit                           |
+| --- | ----------------------------------- | -------------------------------------- |
+| 01  | Ein-Datei-Änderung                  | Präzise, kleine Änderung               |
+| 02  | Lokaler Bug                         | Fixture-Test (verify-prüfbar)          |
+| 03  | Fehlgeschlagener Unit-Test          | Fixture-Test (verify-prüfbar)          |
+| 04  | Multi-Datei-Änderung                | Änderung über mehrere Dateien          |
+| 05  | Refactoring ohne Verhaltensänderung | Fixture-Test (verify-prüfbar)          |
+| 06  | Navigation in unbekanntem Code      | Testfrei (manuelle Bewertung)          |
+| 07  | Unterbestimmter Auftrag             | Bewertung der Rückfrage-Qualität       |
+| 08  | Lange Sitzung mit Compaction        | Kontext-Erhalt prüfen                  |
+| 09  | Hängender Tool-Aufruf               | Kein Fixture-Test (manuelle Bewertung) |
+| 10  | Mit/ohne Subagent                   | Subagenten-Nutzen messen               |
 
 ## Vergleichskandidaten
 
-| Agent | Konfiguration | Thinking | Permission |
-|---|---|---|---|
-| **Pi (aktuell)** | `setup.json` default, Aurora Night, `project-write` | auto | `project-write` |
-| **Pi (vorherige Version)** | Letzter stabiler Tag vor aktuellen Änderungen | auto | `read-write` (Legacy) |
-| **Codex CLI** | Default | medium-equivalent | Standard |
-| **Claude Code** | Default | medium-equivalent | Standard |
-| **Gemini CLI** (optional) | Default | medium-equivalent | Standard |
+| Agent                      | Konfiguration                                       | Thinking          | Permission            |
+| -------------------------- | --------------------------------------------------- | ----------------- | --------------------- |
+| **Pi (aktuell)**           | `setup.json` default, Aurora Night, `project-write` | auto              | `project-write`       |
+| **Pi (vorherige Version)** | Letzter stabiler Tag vor aktuellen Änderungen       | auto              | `read-write` (Legacy) |
+| **Codex CLI**              | Default                                             | medium-equivalent | Standard              |
+| **Claude Code**            | Default                                             | medium-equivalent | Standard              |
+| **Gemini CLI** (optional)  | Default                                             | medium-equivalent | Standard              |
 
 ## Messgrößen (automatisch)
 
-| Metrik | Quelle |
-|---|---|
-| Erfolg ohne Nachkorrektur | `collect-metrics.mjs` + `manualAssessment` |
-| Benötigte Nutzerkorrekturen | `manualAssessment` |
-| Unnötig geänderte Dateien | `git diff --stat` vs. erwarteten Scope |
-| Unnötig geänderte Zeilen | `git diff --numstat` |
-| Fehlgeschlagene Tool-Aufrufe | `isError: true` im Session-Verlauf |
-| Test-/Typecheck-/Build-Ergebnis | `run-verify.sh` Exit-Code |
-| Tokenverbrauch | Session-Metadaten |
-| Laufzeit | Session-Metadaten |
-| Modellaufrufe | Session-Metadaten |
-| Subagentenaufrufe | Session-Metadaten |
-| Verlorene Anforderungen | `manualAssessment` |
-| Wiederholte identische Fehler | Session-JSONL (`toolCall`/`toolResult`) |
-| Verifikations-Ergebnis | `run-verify.sh` Exit-Code |
-| Unnötige Edit-Wiederholungen | `git diff --numstat` + manuelle Scope-Prüfung |
+| Metrik                          | Quelle                                        |
+| ------------------------------- | --------------------------------------------- |
+| Erfolg ohne Nachkorrektur       | `collect-metrics.mjs` + `manualAssessment`    |
+| Benötigte Nutzerkorrekturen     | `manualAssessment`                            |
+| Unnötig geänderte Dateien       | `git diff --stat` vs. erwarteten Scope        |
+| Unnötig geänderte Zeilen        | `git diff --numstat`                          |
+| Fehlgeschlagene Tool-Aufrufe    | `isError: true` im Session-Verlauf            |
+| Test-/Typecheck-/Build-Ergebnis | `run-verify.sh` Exit-Code                     |
+| Tokenverbrauch                  | Session-Metadaten                             |
+| Laufzeit                        | Session-Metadaten                             |
+| Modellaufrufe                   | Session-Metadaten                             |
+| Subagentenaufrufe               | Session-Metadaten                             |
+| Verlorene Anforderungen         | `manualAssessment`                            |
+| Wiederholte identische Fehler   | Session-JSONL (`toolCall`/`toolResult`)       |
+| Verifikations-Ergebnis          | `run-verify.sh` Exit-Code                     |
+| Unnötige Edit-Wiederholungen    | `git diff --numstat` + manuelle Scope-Prüfung |
 
 ## Stichproben-Design
 
@@ -86,6 +86,7 @@ reproduzierbaren Bedingungen.
 ## Auswertung
 
 Pro Agent-Konfiguration:
+
 - Erfolgsquote gesamt und pro Aufgabentyp
 - Häufigste Fehlerklassen
 - Durchschnittliche Laufzeit und Tokenverbrauch

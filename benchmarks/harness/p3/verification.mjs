@@ -3,7 +3,12 @@
  */
 import { chmodSync, closeSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { FIXTURE_TEST_TASKS, HERE, NO_VERIFY_TASKS, SOURCE_ROOT } from "./config.mjs";
+import {
+  FIXTURE_TEST_TASKS,
+  HERE,
+  NO_VERIFY_TASKS,
+  SOURCE_ROOT,
+} from "./config.mjs";
 import { fail, readJson, writePrivateJson } from "./io.mjs";
 import { spawnToFiles } from "./process.mjs";
 
@@ -23,7 +28,10 @@ export async function runVerification(run, paths) {
       closeSync(fd);
     }
     const verify = readJson(output, "P3 verification result");
-    if (!Number.isInteger(verify.exitCode) || !Number.isInteger(verify.durationMs)) {
+    if (
+      !Number.isInteger(verify.exitCode) ||
+      !Number.isInteger(verify.durationMs)
+    ) {
       fail("P3 verification result has an invalid contract.");
     }
     chmodSync(output, 0o600);
@@ -37,15 +45,23 @@ export async function runVerification(run, paths) {
   const started = Date.now();
   let result;
   try {
-    result = await spawnToFiles(process.execPath, [join(paths.worktree, "benchmark-fixture", "run-fixture-test.mjs")], {
-      cwd: paths.worktree,
-      env: { ...process.env, PI_CODING_AGENT_DIR: paths.worktree },
-      stdio: ["ignore", fd, fd],
-    });
+    result = await spawnToFiles(
+      process.execPath,
+      [join(paths.worktree, "benchmark-fixture", "run-fixture-test.mjs")],
+      {
+        cwd: paths.worktree,
+        env: { ...process.env, PI_CODING_AGENT_DIR: paths.worktree },
+        stdio: ["ignore", fd, fd],
+      },
+    );
   } finally {
     closeSync(fd);
   }
-  const verify = { exitCode: result.code, durationMs: Date.now() - started, logFile };
+  const verify = {
+    exitCode: result.code,
+    durationMs: Date.now() - started,
+    logFile,
+  };
   writePrivateJson(output, verify);
   return output;
 }

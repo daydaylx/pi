@@ -126,9 +126,16 @@ const diffPrepared = prepareP4Worktree({
 });
 try {
   const clean = inspectAgentChanges(diffPrepared.worktree);
-  assert.deepEqual(clean.changedFiles, [], "a freshly prepared worktree has no changes yet");
+  assert.deepEqual(
+    clean.changedFiles,
+    [],
+    "a freshly prepared worktree has no changes yet",
+  );
 
-  writeFileSync(join(diffPrepared.worktree, "untracked-agent-file.txt"), "new file\n");
+  writeFileSync(
+    join(diffPrepared.worktree, "untracked-agent-file.txt"),
+    "new file\n",
+  );
   const withUntracked = inspectAgentChanges(diffPrepared.worktree);
   assert(
     withUntracked.changedFiles.includes("untracked-agent-file.txt"),

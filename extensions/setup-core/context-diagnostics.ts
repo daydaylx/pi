@@ -38,15 +38,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function names(values: readonly unknown[]): string[] {
-  return [...new Set(values.filter((value): value is string => typeof value === "string"))]
-    .sort((left, right) => left.localeCompare(right));
+  return [
+    ...new Set(
+      values.filter((value): value is string => typeof value === "string"),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
 }
 
 function stableJson(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "boolean")
     return JSON.stringify(value);
-  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null";
+  if (typeof value === "number")
+    return Number.isFinite(value) ? String(value) : "null";
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (!isRecord(value)) return "null";
   return `{${Object.keys(value)
@@ -58,7 +62,12 @@ function stableJson(value: unknown): string {
 function readUsage(value: unknown): UsageTotals | undefined {
   if (!isRecord(value)) return undefined;
   const fields = ["input", "output", "cacheRead", "cacheWrite"] as const;
-  if (!fields.every((field) => typeof value[field] === "number" && Number.isFinite(value[field])))
+  if (
+    !fields.every(
+      (field) =>
+        typeof value[field] === "number" && Number.isFinite(value[field]),
+    )
+  )
     return undefined;
   return {
     input: value.input as number,
@@ -75,15 +84,26 @@ function usageFromEntry(entry: unknown): UsageTotals | undefined {
   return isRecord(entry.message) ? readUsage(entry.message.usage) : undefined;
 }
 
-function truncationFromEntry(entry: unknown): { totalBytes: number; outputBytes: number } | undefined {
-  if (!isRecord(entry) || !isRecord(entry.message) || entry.message.role !== "toolResult")
+function truncationFromEntry(
+  entry: unknown,
+): { totalBytes: number; outputBytes: number } | undefined {
+  if (
+    !isRecord(entry) ||
+    !isRecord(entry.message) ||
+    entry.message.role !== "toolResult"
+  )
     return undefined;
   const details = entry.message.details;
-  if (!isRecord(details) || !isRecord(details.truncation) || details.truncation.truncated !== true)
+  if (
+    !isRecord(details) ||
+    !isRecord(details.truncation) ||
+    details.truncation.truncated !== true
+  )
     return undefined;
   const totalBytes = details.truncation.totalBytes;
   const outputBytes = details.truncation.outputBytes;
-  if (typeof totalBytes !== "number" || !Number.isFinite(totalBytes)) return undefined;
+  if (typeof totalBytes !== "number" || !Number.isFinite(totalBytes))
+    return undefined;
   return {
     totalBytes,
     outputBytes:
@@ -101,12 +121,20 @@ export function collectContextDiagnostics(
   input: ContextDiagnosticInput,
 ): ContextDiagnostics {
   const registered = input.registeredTools
-    .filter((tool): tool is { name: string; parameters?: unknown } => typeof tool.name === "string")
+    .filter(
+      (tool): tool is { name: string; parameters?: unknown } =>
+        typeof tool.name === "string",
+    )
     .sort((left, right) => left.name.localeCompare(right.name));
   const registeredToolNames = names(registered.map((tool) => tool.name));
   const activeToolNames = names(input.activeToolNames);
   const schemaBytes = Buffer.byteLength(
-    stableJson(registered.map((tool) => ({ name: tool.name, parameters: tool.parameters ?? null }))),
+    stableJson(
+      registered.map((tool) => ({
+        name: tool.name,
+        parameters: tool.parameters ?? null,
+      })),
+    ),
     "utf8",
   );
 
@@ -126,7 +154,11 @@ export function collectContextDiagnostics(
       usage.cacheRead += entryUsage.cacheRead;
       usage.cacheWrite += entryUsage.cacheWrite;
     }
-    if (isRecord(entry) && entry.type === "compaction" && typeof entry.timestamp === "string")
+    if (
+      isRecord(entry) &&
+      entry.type === "compaction" &&
+      typeof entry.timestamp === "string"
+    )
       compactionTimestamps.push(entry.timestamp);
     const truncation = truncationFromEntry(entry);
     if (truncation) {
@@ -150,7 +182,9 @@ export function collectContextDiagnostics(
   };
 }
 
-export function formatContextDiagnostics(diagnostics: ContextDiagnostics): string {
+export function formatContextDiagnostics(
+  diagnostics: ContextDiagnostics,
+): string {
   const namesOrNone = (names: readonly string[]) => names.join(", ") || "keine";
   const usage = diagnostics.usage
     ? `input=${diagnostics.usage.input}, output=${diagnostics.usage.output}, cacheRead=${diagnostics.usage.cacheRead}, cacheWrite=${diagnostics.usage.cacheWrite}`

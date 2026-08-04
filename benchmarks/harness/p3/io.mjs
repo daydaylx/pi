@@ -6,7 +6,13 @@
  * it is written to.
  */
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -81,7 +87,11 @@ export function runPaths(state, run) {
 
 export function assertSafeStatePath(state, candidate) {
   const relativePath = relative(state, candidate);
-  if (relativePath === "" || relativePath.startsWith("..") || isAbsolute(relativePath)) {
+  if (
+    relativePath === "" ||
+    relativePath.startsWith("..") ||
+    isAbsolute(relativePath)
+  ) {
     fail("Refusing to operate outside the P3 state directory.");
   }
 }

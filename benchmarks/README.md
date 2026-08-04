@@ -149,6 +149,7 @@ Jeder isolierte P3-Worktree erhält eine dokumentierte, gehashte
 `setup.json`-Overlay mit `full-access` für Arbeits- und Plan-Workflows, damit
 die Aufgaben tatsächlich bearbeitbar sind; die Quellkonfiguration bleibt
 unverändert. Der Controller setzt keine Ledger- oder Checkpoint-Gates.
+
 ## P4 / Benchmark V2
 
 P4 misst den vereinfachten aktuellen Pi-Workflow ab Commit

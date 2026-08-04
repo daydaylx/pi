@@ -31,15 +31,25 @@ export class DiffEntryComponent implements Component {
     const th = this.theme;
 
     if (this.expanded) {
-      lines.push(...renderFull(
-        { stats: this.data.stats, hunks: this.data.hunks, timestamp: this.data.timestamp },
-        th,
-        width,
-      ));
+      lines.push(
+        ...renderFull(
+          {
+            stats: this.data.stats,
+            hunks: this.data.hunks,
+            timestamp: this.data.timestamp,
+          },
+          th,
+          width,
+        ),
+      );
     } else {
       lines.push(
         ...renderCompact(
-          { stats: this.data.stats, hunks: this.data.hunks, timestamp: this.data.timestamp },
+          {
+            stats: this.data.stats,
+            hunks: this.data.hunks,
+            timestamp: this.data.timestamp,
+          },
           th,
           width,
         ),
@@ -49,7 +59,10 @@ export class DiffEntryComponent implements Component {
       const totalLines = this.countTotalLines();
       if (totalLines > 6) {
         lines.push(
-          th.fg("dim", `  ${keyHint("app.tools.expand", "zum Erweitern")} – ${totalLines} Zeilen gesamt`),
+          th.fg(
+            "dim",
+            `  ${keyHint("app.tools.expand", "zum Erweitern")} – ${totalLines} Zeilen gesamt`,
+          ),
         );
       }
     }

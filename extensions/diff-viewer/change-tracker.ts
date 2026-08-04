@@ -71,13 +71,15 @@ export class ChangeTracker {
       if (entry.type !== "custom") continue;
       if (entry.customType !== "diff-view") continue;
 
-      const data = entry.data as {
-        path: string;
-        toolName?: string;
-        stats?: DiffStats;
-        hunks?: DiffHunk[];
-        timestamp?: number;
-      } | undefined;
+      const data = entry.data as
+        | {
+            path: string;
+            toolName?: string;
+            stats?: DiffStats;
+            hunks?: DiffHunk[];
+            timestamp?: number;
+          }
+        | undefined;
 
       if (data?.path && data.stats && data.hunks) {
         this.recordChange(

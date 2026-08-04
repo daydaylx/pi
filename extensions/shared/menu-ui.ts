@@ -294,7 +294,9 @@ async function selectWithCustomUi<T>(
           const isSelected = index === level().selected;
           const indicator = isSelected ? fg("accent", "▌") : " ";
           const label =
-            layout === "compact" ? (entry.compactLabel ?? entry.label) : entry.label;
+            layout === "compact"
+              ? (entry.compactLabel ?? entry.label)
+              : entry.label;
           const main = `${indicator} ${entry.icon ? `${entry.icon} ` : ""}${label}${suffix}`;
           const rendered = isSelected
             ? selectedRow(main, inner)

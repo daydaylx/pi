@@ -54,5 +54,7 @@ export function isWorkflowCapabilitySnapshot(
 ): value is WorkflowCapabilitySnapshot {
   if (!value || typeof value !== "object") return false;
   const mode = (value as { mode?: unknown }).mode;
-  return typeof mode === "string" && WORKFLOW_MODES.includes(mode as WorkflowMode);
+  return (
+    typeof mode === "string" && WORKFLOW_MODES.includes(mode as WorkflowMode)
+  );
 }

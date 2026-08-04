@@ -41,7 +41,8 @@ function parseArgs(argv) {
     if (arg === "--task") args.task = argv[++i];
     else if (arg === "--worktree") args.worktree = argv[++i];
     else if (arg === "--session") args.sessions.push(argv[++i]);
-    else if (arg === "--subagent-session") args.subagentSessions.push(argv[++i]);
+    else if (arg === "--subagent-session")
+      args.subagentSessions.push(argv[++i]);
     else if (arg === "--run-history") args.runHistory = argv[++i];
     else if (arg === "--verify-result") args.verifyResult = argv[++i];
     else if (arg === "--window-start") args.windowStart = argv[++i];
@@ -265,12 +266,15 @@ async function main() {
   }
 
   const mainSessionEntries = args.sessions.flatMap((p) => readJsonl(p));
-  const subagentSessionEntrySets = args.subagentSessions.map((p) => readJsonl(p));
+  const subagentSessionEntrySets = args.subagentSessions.map((p) =>
+    readJsonl(p),
+  );
   const subagentSessionEntries = subagentSessionEntrySets.flat();
   const sessionMetrics = collectSessionMetrics(mainSessionEntries);
   const subagentSessionMetrics = collectSessionMetrics(subagentSessionEntries);
   const subagentDurationMsTotal = subagentSessionEntrySets.reduce(
-    (total, entries) => total + (collectSessionMetrics(entries).durationMs ?? 0),
+    (total, entries) =>
+      total + (collectSessionMetrics(entries).durationMs ?? 0),
     0,
   );
 
@@ -280,10 +284,12 @@ async function main() {
     args.windowStart,
     args.windowEnd,
   );
-  const suppliedSubagentCalls = args.subagentCalls === undefined
-    ? undefined
-    : Number(args.subagentCalls);
-  if (suppliedSubagentCalls !== undefined && (!Number.isInteger(suppliedSubagentCalls) || suppliedSubagentCalls < 0)) {
+  const suppliedSubagentCalls =
+    args.subagentCalls === undefined ? undefined : Number(args.subagentCalls);
+  if (
+    suppliedSubagentCalls !== undefined &&
+    (!Number.isInteger(suppliedSubagentCalls) || suppliedSubagentCalls < 0)
+  ) {
     throw new Error("--subagent-calls must be a non-negative integer.");
   }
 
@@ -307,10 +313,15 @@ async function main() {
     automatic: {
       modelCalls: sessionMetrics.modelCalls,
       tokens: {
-        input: sessionMetrics.tokens.input + subagentSessionMetrics.tokens.input,
-        output: sessionMetrics.tokens.output + subagentSessionMetrics.tokens.output,
-        reasoning: sessionMetrics.tokens.reasoning + subagentSessionMetrics.tokens.reasoning,
-        total: sessionMetrics.tokens.total + subagentSessionMetrics.tokens.total,
+        input:
+          sessionMetrics.tokens.input + subagentSessionMetrics.tokens.input,
+        output:
+          sessionMetrics.tokens.output + subagentSessionMetrics.tokens.output,
+        reasoning:
+          sessionMetrics.tokens.reasoning +
+          subagentSessionMetrics.tokens.reasoning,
+        total:
+          sessionMetrics.tokens.total + subagentSessionMetrics.tokens.total,
       },
       failedToolCalls: sessionMetrics.failedToolCalls,
       repeatedIdenticalFailures: sessionMetrics.repeatedIdenticalFailures,
@@ -319,12 +330,14 @@ async function main() {
       subagentCalls: suppliedSubagentCalls ?? runHistoryMetrics.subagentCalls,
       subagentModelCalls: subagentSessionMetrics.modelCalls,
       subagentTokens: subagentSessionMetrics.tokens,
-      subagentDurationMsTotal: args.subagentSessions.length > 0
-        ? subagentDurationMsTotal
-        : runHistoryMetrics.subagentDurationMsTotal,
-      subagentFailures: args.subagentSessions.length > 0
-        ? subagentSessionMetrics.failedToolCalls
-        : runHistoryMetrics.subagentFailures,
+      subagentDurationMsTotal:
+        args.subagentSessions.length > 0
+          ? subagentDurationMsTotal
+          : runHistoryMetrics.subagentDurationMsTotal,
+      subagentFailures:
+        args.subagentSessions.length > 0
+          ? subagentSessionMetrics.failedToolCalls
+          : runHistoryMetrics.subagentFailures,
       diff: diffStat,
       verify: verifyResult,
       ...(environment === undefined ? {} : { environment }),

@@ -7,11 +7,11 @@ Die Orchestrierung stammt aus dem exakt gepinnten
 
 ## Aktive Rollen
 
-| Rolle | Tools | Verantwortung |
-| --- | --- | --- |
-| `investigator` | read, grep, find, ls | unbekannte Änderungssurface oder Kontrollfluss belegt eingrenzen |
-| `debugger` | read, grep, find, ls, bash | unbekannte, intermittierende oder gescheiterte Bugs reproduzieren und eingrenzen |
-| `verifier` | read, grep, find, ls, bash | nichttriviale Umsetzung unabhängig gegen Auftrag, Diff und Checks prüfen |
+| Rolle          | Tools                      | Verantwortung                                                                    |
+| -------------- | -------------------------- | -------------------------------------------------------------------------------- |
+| `investigator` | read, grep, find, ls       | unbekannte Änderungssurface oder Kontrollfluss belegt eingrenzen                 |
+| `debugger`     | read, grep, find, ls, bash | unbekannte, intermittierende oder gescheiterte Bugs reproduzieren und eingrenzen |
+| `verifier`     | read, grep, find, ls, bash | nichttriviale Umsetzung unabhängig gegen Auftrag, Diff und Checks prüfen         |
 
 Der Hauptagent plant, implementiert, triagiert und kommuniziert das finale
 Ergebnis. Kleine, klar lokalisierte Änderungen bleiben beim Hauptagenten.

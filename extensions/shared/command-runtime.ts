@@ -7,7 +7,9 @@ interface SlashCommandUI {
 
 function slashCommandUi(ctx: ExtensionContext): SlashCommandUI | undefined {
   const candidate = ctx.ui as typeof ctx.ui & Partial<SlashCommandUI>;
-  return typeof candidate.submitSlashCommand === "function" ? candidate as SlashCommandUI : undefined;
+  return typeof candidate.submitSlashCommand === "function"
+    ? (candidate as SlashCommandUI)
+    : undefined;
 }
 
 export async function submitCanonicalCommand(

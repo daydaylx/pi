@@ -15,8 +15,13 @@ Bewerte die vorhandene Oberfläche anhand der verfügbaren Artefakte, etwa Code,
 Strukturiere das Ergebnis mit:
 
 ## Größte Schwächen
+
 ## Bedienprobleme
+
 ## Visuelle Dominanz
+
 ## Inkonsistenzen
+
 ## Konkrete Verbesserungen
+
 ## Priorität

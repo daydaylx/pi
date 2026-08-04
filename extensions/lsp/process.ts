@@ -103,7 +103,10 @@ export class LspProcess extends EventEmitter {
 
   private spawnOnce(): void {
     const { command, args, cwd, env } = this.options;
-    this.logger("info", `spawning language server: ${command} ${args.join(" ")}`);
+    this.logger(
+      "info",
+      `spawning language server: ${command} ${args.join(" ")}`,
+    );
 
     let child: ChildProcess;
     try {

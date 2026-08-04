@@ -23,7 +23,8 @@ function projectLabel(cwd: string): string {
   const home = normalize(homedir());
   const normalized = normalize(cwd);
   if (normalized === home) return "~";
-  if (normalized.startsWith(`${home}/`)) return `~/${normalized.slice(home.length + 1)}`;
+  if (normalized.startsWith(`${home}/`))
+    return `~/${normalized.slice(home.length + 1)}`;
   const parent = basename(dirname(normalized));
   const leaf = basename(normalized);
   return parent && parent !== "." ? `${parent}/${leaf}` : leaf;
@@ -31,7 +32,9 @@ function projectLabel(cwd: string): string {
 
 export function preview(value: string): string {
   const oneLine = value.replace(/\s+/g, " ").trim();
-  return oneLine.length <= MAX_PREVIEW ? oneLine : `${oneLine.slice(0, MAX_PREVIEW - 1)}…`;
+  return oneLine.length <= MAX_PREVIEW
+    ? oneLine
+    : `${oneLine.slice(0, MAX_PREVIEW - 1)}…`;
 }
 
 async function confirmWithCustomUi(
@@ -41,9 +44,12 @@ async function confirmWithCustomUi(
   toolName: string | undefined,
 ): Promise<boolean> {
   if (typeof ctx.ui.custom !== "function") {
-    throw new Error("Benutzerdefiniertes UI-Overlay wird in diesem Kontext nicht unterstützt.");
+    throw new Error(
+      "Benutzerdefiniertes UI-Overlay wird in diesem Kontext nicht unterstützt.",
+    );
   }
-  const { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } = await import("@earendil-works/pi-tui");
+  const { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } =
+    await import("@earendil-works/pi-tui");
   const risk = decisionRisk(decision);
   const tone = risk === "high" ? "error" : "warning";
   return ctx.ui.custom<boolean>(
@@ -51,16 +57,28 @@ async function confirmWithCustomUi(
       render(width: number): string[] {
         const innerWidth = Math.max(1, width - 2);
         const contentWidth = Math.max(1, innerWidth - 2);
-        const subjectLabel = toolName === "bash" || !toolName ? "Befehl" : "Ziel";
-        const subjectWrapped = wrapTextWithAnsi(subject, contentWidth).slice(0, 4);
-        const reasonWrapped = wrapTextWithAnsi(decision.reason, contentWidth).slice(0, MAX_REASON_LINES);
+        const subjectLabel =
+          toolName === "bash" || !toolName ? "Befehl" : "Ziel";
+        const subjectWrapped = wrapTextWithAnsi(subject, contentWidth).slice(
+          0,
+          4,
+        );
+        const reasonWrapped = wrapTextWithAnsi(
+          decision.reason,
+          contentWidth,
+        ).slice(0, MAX_REASON_LINES);
         const details = wrapTextWithAnsi(
-          theme.fg("muted", `Werkzeug: ${toolName ?? "bash"} · Kontext: ${projectLabel(ctx.cwd)} · Risiko: ${riskLabel(risk)} (${risk})`),
+          theme.fg(
+            "muted",
+            `Werkzeug: ${toolName ?? "bash"} · Kontext: ${projectLabel(ctx.cwd)} · Risiko: ${riskLabel(risk)} (${risk})`,
+          ),
           contentWidth,
         );
         if (width < 4) return [truncateToWidth("Warnung", width, "…")];
-        const pad = (line: string) => truncateToWidth(` ${line} `, innerWidth, "…", true);
-        const border = (line: string) => `${theme.fg(tone, "│")}${pad(line)}${theme.fg(tone, "│")}`;
+        const pad = (line: string) =>
+          truncateToWidth(` ${line} `, innerWidth, "…", true);
+        const border = (line: string) =>
+          `${theme.fg(tone, "│")}${pad(line)}${theme.fg(tone, "│")}`;
         const emptyLine = `${theme.fg(tone, "│")}${" ".repeat(innerWidth)}${theme.fg(tone, "│")}`;
         const divider = `${theme.fg(tone, "├")}${theme.fg(tone, "─".repeat(innerWidth))}${theme.fg(tone, "┤")}`;
         const body = [
@@ -71,7 +89,9 @@ async function confirmWithCustomUi(
           ...(subjectWrapped.length ? subjectWrapped : ["(leer)"]),
           "",
           theme.fg("muted", theme.bold("Begründung:")),
-          ...(reasonWrapped.length ? reasonWrapped.map((r) => theme.fg("muted", r)) : [theme.fg("muted", "(keine Begründung)")]),
+          ...(reasonWrapped.length
+            ? reasonWrapped.map((r) => theme.fg("muted", r))
+            : [theme.fg("muted", "(keine Begründung)")]),
         ];
         return [
           `${theme.fg(tone, "╭")}${theme.fg(tone, "─".repeat(innerWidth))}${theme.fg(tone, "╮")}`,
@@ -80,18 +100,35 @@ async function confirmWithCustomUi(
           emptyLine,
           divider,
           emptyLine,
-          border(`${theme.fg("accent", theme.bold("[a] Einmal erlauben"))}   ${theme.fg("muted", "[d] Ablehnen")}`),
+          border(
+            `${theme.fg("accent", theme.bold("[a] Einmal erlauben"))}   ${theme.fg("muted", "[d] Ablehnen")}`,
+          ),
           emptyLine,
           `${theme.fg(tone, "╰")}${theme.fg(tone, "─".repeat(innerWidth))}${theme.fg(tone, "╯")}`,
         ];
       },
       invalidate() {},
       handleInput(data: string): void {
-        if (data === "a" || data === "A" || matchesKey(data, Key.enter)) done(true);
-        else if (data === "d" || data === "D" || matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) done(false);
+        if (data === "a" || data === "A" || matchesKey(data, Key.enter))
+          done(true);
+        else if (
+          data === "d" ||
+          data === "D" ||
+          matchesKey(data, Key.escape) ||
+          matchesKey(data, Key.ctrl("c"))
+        )
+          done(false);
       },
     }),
-    { overlay: true, overlayOptions: { anchor: "center", width: "90%", maxHeight: "70%", margin: 2 } },
+    {
+      overlay: true,
+      overlayOptions: {
+        anchor: "center",
+        width: "90%",
+        maxHeight: "70%",
+        margin: 2,
+      },
+    },
   );
 }
 
@@ -108,6 +145,8 @@ export async function confirmAction(
       // Fall through to the established confirm fallback.
     }
   }
-  const title = decision.hard ? "HARTE WARNUNG — Aktion bestätigen?" : "Riskante Aktion bestätigen?";
+  const title = decision.hard
+    ? "HARTE WARNUNG — Aktion bestätigen?"
+    : "Riskante Aktion bestätigen?";
   return ctx.ui.confirm(title, `${decision.reason}\n\n${preview(subject)}`);
 }

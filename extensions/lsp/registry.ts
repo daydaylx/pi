@@ -263,6 +263,4 @@ export class ServerRegistry {
   private async shutdownEntry(entry: RegistryEntry): Promise<void> {
     entry.client.shutdown().catch(() => undefined);
   }
-
-
 }

@@ -64,10 +64,7 @@
           "minimum": 0
         },
         "durationMs": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 0
         },
         "subagentCalls": {
@@ -108,10 +105,7 @@
           "minimum": 0
         },
         "diff": {
-          "type": [
-            "object",
-            "null"
-          ],
+          "type": ["object", "null"],
           "properties": {
             "changedFiles": {
               "type": "array",
@@ -132,10 +126,7 @@
               "minimum": 0
             },
             "outOfScopeFiles": {
-              "type": [
-                "array",
-                "null"
-              ],
+              "type": ["array", "null"],
               "items": {
                 "type": "string"
               }
@@ -143,10 +134,7 @@
           }
         },
         "verify": {
-          "type": [
-            "object",
-            "null"
-          ],
+          "type": ["object", "null"],
           "properties": {
             "exitCode": {
               "type": "integer"
@@ -270,16 +258,10 @@
               "type": "boolean"
             },
             "variant": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "pair": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             }
           }
         },
@@ -299,37 +281,22 @@
                     "type": "integer"
                   },
                   "signal": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": ["string", "null"]
                   },
                   "cpuUserSeconds": {
-                    "type": [
-                      "number",
-                      "null"
-                    ],
+                    "type": ["number", "null"],
                     "minimum": 0
                   },
                   "cpuSystemSeconds": {
-                    "type": [
-                      "number",
-                      "null"
-                    ],
+                    "type": ["number", "null"],
                     "minimum": 0
                   },
                   "wallSeconds": {
-                    "type": [
-                      "number",
-                      "null"
-                    ],
+                    "type": ["number", "null"],
                     "minimum": 0
                   },
                   "peakRssKiB": {
-                    "type": [
-                      "number",
-                      "null"
-                    ],
+                    "type": ["number", "null"],
                     "minimum": 0
                   }
                 }
@@ -348,10 +315,7 @@
               "minimum": 0
             },
             "peakRssKiB": {
-              "type": [
-                "number",
-                "null"
-              ],
+              "type": ["number", "null"],
               "minimum": 0
             }
           }
@@ -363,61 +327,37 @@
       "description": "Muss von einem Menschen ausgefüllt werden. Nie automatisch geraten oder mit einem Default befüllt (siehe Änderungsregeln in benchmarks/README.md).",
       "properties": {
         "solvedWithoutCorrection": {
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": ["boolean", "null"]
         },
         "unnecessaryLineChangesWithinScope": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 0
         },
         "lostRequirements": {
-          "type": [
-            "array",
-            "null"
-          ],
+          "type": ["array", "null"],
           "items": {
             "type": "string"
           }
         },
         "repeatedFailuresWithoutContextChange": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 0
         },
         "decisionPersistenceAfterCompaction": {
-          "type": [
-            "boolean",
-            "null"
-          ],
+          "type": ["boolean", "null"],
           "description": "Messgröße 13 (inhaltlich): sind bestätigte Entscheidungen, Nicht-Ziele und Architekturentscheidungen im finalen Turn unverändert und widerspruchsfrei vorhanden?"
         },
         "projectStatusCorrectness": {
-          "type": [
-            "boolean",
-            "null"
-          ],
+          "type": ["boolean", "null"],
           "description": "Messgröße 14: stimmt der berichtete Projektstatus (offene vs. erledigte Todos) mit Plan/Progress überein?"
         },
         "hallucinationCount": {
-          "type": [
-            "integer",
-            "null"
-          ],
+          "type": ["integer", "null"],
           "minimum": 0,
           "description": "Messgröße 15: Anzahl behaupteter Fakten im Abschluss-Turn, die nicht im PlanSnapshot belegt sind."
         },
         "notes": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       }
     }

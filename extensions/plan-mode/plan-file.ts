@@ -12,7 +12,8 @@ function isInside(base: string, target: string): boolean {
 export function planPath(cwd: string): string {
   const root = resolve(cwd);
   const target = resolve(root, PLAN_RELATIVE_PATH);
-  if (!isInside(root, target)) throw new Error("Planpfad verlässt das Projekt.");
+  if (!isInside(root, target))
+    throw new Error("Planpfad verlässt das Projekt.");
   return target;
 }
 

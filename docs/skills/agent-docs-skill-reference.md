@@ -139,16 +139,16 @@ Prüfen, ob ein Repository sauber für agentische Coding-Workflows vorbereitet i
 
 Der Skill muss exakt diese Struktur liefern:
 
-```markdown
+````markdown
 # Agenten-Setup-Analyse
 
 ## Gesamturteil
 
 Kurze Einschätzung:
 
-* gut vorbereitet
-* teilweise vorbereitet
-* kaum vorbereitet
+- gut vorbereitet
+- teilweise vorbereitet
+- kaum vorbereitet
 
 ## Gefundene vorhandene Dateien
 
@@ -175,6 +175,7 @@ docs/
   rules/
   agents/
 ```
+````
 
 ## Konkreter Umsetzungsplan
 
@@ -191,7 +192,8 @@ Liste nur echte Entscheidungen, die nicht aus dem Repo ableitbar sind.
 ## Wartepunkt
 
 Warte auf dein Go für Phase 2.
-```
+
+````
 
 ---
 
@@ -200,7 +202,7 @@ Warte auf dein Go für Phase 2.
 ```text
 id: agent-docs-setup-preview
 profile: preview-only
-```
+````
 
 ### Aufgabe
 
@@ -326,10 +328,10 @@ Er muss stoppen, wenn kein bestätigter Plan oder keine ausdrückliche Freigabe 
 
 Kurz erklären:
 
-* welche Datei Agenten zuerst lesen sollen
-* wann Context Packs genutzt werden
-* welche Checks bei Änderungen gelten
-* wie Claude Code eingebunden ist
+- welche Datei Agenten zuerst lesen sollen
+- wann Context Packs genutzt werden
+- welche Checks bei Änderungen gelten
+- wie Claude Code eingebunden ist
 
 ## Verifikation
 
@@ -436,20 +438,20 @@ sauber / uncommitted Änderungen vorhanden / unklar
 
 ## Ergebnis nach Bereich
 
-| Bereich | Urteil | Begründung |
-| ------- | ------ | ---------- |
-| AGENTS.md / CLAUDE.md | | |
-| CODEMAP | | |
-| Context Packs | | |
-| Validation Matrix | | |
-| Current Status | | |
-| ADRs / Decisions | | |
-| UI / Design Context | | |
-| Data Model | | |
-| Security / Privacy | | |
-| Manual Tests | | |
-| Claude-Code Settings | | |
-| Rules / Subagents | | |
+| Bereich               | Urteil | Begründung |
+| --------------------- | ------ | ---------- |
+| AGENTS.md / CLAUDE.md |        |            |
+| CODEMAP               |        |            |
+| Context Packs         |        |            |
+| Validation Matrix     |        |            |
+| Current Status        |        |            |
+| ADRs / Decisions      |        |            |
+| UI / Design Context   |        |            |
+| Data Model            |        |            |
+| Security / Privacy    |        |            |
+| Manual Tests          |        |            |
+| Claude-Code Settings  |        |            |
+| Rules / Subagents     |        |            |
 
 ## Gefundene Probleme
 

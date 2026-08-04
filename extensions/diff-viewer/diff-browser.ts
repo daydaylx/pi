@@ -123,8 +123,18 @@ export class DiffBrowserComponent implements Component {
     const th = this.theme;
     lines.push(renderBorder(th, " DIFF BROWSER ", width, "top"));
     lines.push("");
-    lines.push(truncate(th.fg("muted", "  Keine Änderungen in dieser Session."), width));
-    lines.push(truncate(th.fg("dim", "  Führe eine edit- oder write-Operation aus, um Diffs zu sehen."), width));
+    lines.push(
+      truncate(th.fg("muted", "  Keine Änderungen in dieser Session."), width),
+    );
+    lines.push(
+      truncate(
+        th.fg(
+          "dim",
+          "  Führe eine edit- oder write-Operation aus, um Diffs zu sehen.",
+        ),
+        width,
+      ),
+    );
     lines.push("");
     lines.push(renderBorder(th, "", width, "bottom"));
     lines.push(truncate(th.fg("dim", "  Escape · Schließen"), width));
@@ -136,13 +146,31 @@ export class DiffBrowserComponent implements Component {
     const th = this.theme;
 
     // Header
-    lines.push(renderBorder(th, ` DIFF BROWSER · ${this.files.length} Dateien `, width, "top"));
-    lines.push(truncate(th.fg("dim", `  Datei                                  +/−  Hunks`), width));
-    lines.push(truncate(th.fg("borderMuted", "  " + "─".repeat(Math.max(0, width - 4))), width));
+    lines.push(
+      renderBorder(
+        th,
+        ` DIFF BROWSER · ${this.files.length} Dateien `,
+        width,
+        "top",
+      ),
+    );
+    lines.push(
+      truncate(
+        th.fg("dim", `  Datei                                  +/−  Hunks`),
+        width,
+      ),
+    );
+    lines.push(
+      truncate(
+        th.fg("borderMuted", "  " + "─".repeat(Math.max(0, width - 4))),
+        width,
+      ),
+    );
 
     // Dateiliste mit Scroll-Offset, damit die Auswahl stets sichtbar bleibt.
     const listHeight = Math.max(1, availableHeight - 5);
-    if (this.selectedFile < this.listScrollOffset) this.listScrollOffset = this.selectedFile;
+    if (this.selectedFile < this.listScrollOffset)
+      this.listScrollOffset = this.selectedFile;
     if (this.selectedFile >= this.listScrollOffset + listHeight) {
       this.listScrollOffset = this.selectedFile - listHeight + 1;
     }
@@ -165,22 +193,47 @@ export class DiffBrowserComponent implements Component {
       const hunks = th.fg("dim", `${change.stats.hunks}h`);
       const right = `${added} ${removed}  ${hunks}`;
 
-      const padding = Math.max(1, width - visibleWidth(prefix) - visibleWidth(pathDisplay) - visibleWidth(right) - 2);
+      const padding = Math.max(
+        1,
+        width -
+          visibleWidth(prefix) -
+          visibleWidth(pathDisplay) -
+          visibleWidth(right) -
+          2,
+      );
       statsLine += " ".repeat(padding) + right;
       lines.push(truncate(statsLine, width));
     }
 
     if (this.files.length > listHeight) {
-      lines.push(truncate(th.fg("dim", `  ${this.listScrollOffset + 1}-${end} von ${this.files.length}`), width));
+      lines.push(
+        truncate(
+          th.fg(
+            "dim",
+            `  ${this.listScrollOffset + 1}-${end} von ${this.files.length}`,
+          ),
+          width,
+        ),
+      );
     }
 
     // Footer
-    lines.push(truncate(th.fg("borderMuted", "  " + "─".repeat(Math.max(0, width - 4))), width));
+    lines.push(
+      truncate(
+        th.fg("borderMuted", "  " + "─".repeat(Math.max(0, width - 4))),
+        width,
+      ),
+    );
     lines.push(renderBorder(th, "", width, "bottom"));
-    lines.push(truncate(
-      th.fg("dim", "  ↑↓ Navigieren  ·  Enter / → Diff anzeigen  ·  Escape Schließen"),
-      width,
-    ));
+    lines.push(
+      truncate(
+        th.fg(
+          "dim",
+          "  ↑↓ Navigieren  ·  Enter / → Diff anzeigen  ·  Escape Schließen",
+        ),
+        width,
+      ),
+    );
 
     return lines;
   }
@@ -196,7 +249,15 @@ export class DiffBrowserComponent implements Component {
 
     if (!fileDiff) {
       lines.push(renderBorder(th, ` ${selected.path} `, width, "top"));
-      lines.push(truncate(th.fg("warning", "  Diff nicht verfügbar – Datei konnte nicht gelesen werden."), width));
+      lines.push(
+        truncate(
+          th.fg(
+            "warning",
+            "  Diff nicht verfügbar – Datei konnte nicht gelesen werden.",
+          ),
+          width,
+        ),
+      );
       lines.push(renderBorder(th, "", width, "bottom"));
       return lines;
     }
@@ -212,7 +273,10 @@ export class DiffBrowserComponent implements Component {
     const clampedOffset = Math.min(this.scrollOffset, maxOffset);
     this.scrollOffset = clampedOffset;
 
-    const visibleLines = fullLines.slice(clampedOffset, clampedOffset + maxVisible);
+    const visibleLines = fullLines.slice(
+      clampedOffset,
+      clampedOffset + maxVisible,
+    );
 
     for (const line of visibleLines) {
       lines.push(truncate(`  ${line}`, width));
@@ -225,10 +289,15 @@ export class DiffBrowserComponent implements Component {
     }
 
     lines.push(renderBorder(th, "", width, "bottom"));
-    lines.push(truncate(
-      th.fg("dim", "  ← / Escape Zurück  ·  ↑↓ / j/k Scrollen  ·  q Schließen"),
-      width,
-    ));
+    lines.push(
+      truncate(
+        th.fg(
+          "dim",
+          "  ← / Escape Zurück  ·  ↑↓ / j/k Scrollen  ·  q Schließen",
+        ),
+        width,
+      ),
+    );
 
     return lines;
   }
@@ -246,9 +315,16 @@ function renderBorder(
   const left = edge === "top" ? "╭─" : "╰─";
   const right = edge === "top" ? "╮" : "╯";
   const inner = label ? ` ${label} ` : "";
-  const fill = "─".repeat(Math.max(0, width - visibleWidth(left) - visibleWidth(inner) - visibleWidth(right)));
+  const fill = "─".repeat(
+    Math.max(
+      0,
+      width - visibleWidth(left) - visibleWidth(inner) - visibleWidth(right),
+    ),
+  );
   return truncateToWidth(
-    theme.fg("borderAccent", left) + theme.fg("accent", inner) + theme.fg("borderAccent", fill + right),
+    theme.fg("borderAccent", left) +
+      theme.fg("accent", inner) +
+      theme.fg("borderAccent", fill + right),
     width,
   );
 }

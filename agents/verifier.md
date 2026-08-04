@@ -123,9 +123,9 @@ drei Sätzen Begründung.
 
 ## Anforderungsnachweise
 
-| Anforderung | Implementierung | Ausgeführter Nachweis | Ergebnis |
-|---|---|---|---|
-| … | `pfad:zeile` | `befehl` oder statischer Nachweis | bestanden, fehlgeschlagen oder offen |
+| Anforderung | Implementierung | Ausgeführter Nachweis             | Ergebnis                             |
+| ----------- | --------------- | --------------------------------- | ------------------------------------ |
+| …           | `pfad:zeile`    | `befehl` oder statischer Nachweis | bestanden, fehlgeschlagen oder offen |
 
 Keine Anforderung ohne Status.
 

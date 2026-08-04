@@ -294,13 +294,19 @@ export function createHarness(options = {}) {
         : [...tools.keys()];
     },
     getAllTools() {
-      if (Array.isArray(options.registeredTools)) return options.registeredTools;
+      if (Array.isArray(options.registeredTools))
+        return options.registeredTools;
       return [...tools.values()].map((tool) => ({
         name: tool.name,
         description: tool.description,
         parameters: tool.parameters,
         promptGuidelines: tool.promptGuidelines,
-        sourceInfo: { path: "<test>", source: "test", scope: "temporary", origin: "top-level" },
+        sourceInfo: {
+          path: "<test>",
+          source: "test",
+          scope: "temporary",
+          origin: "top-level",
+        },
       }));
     },
   };

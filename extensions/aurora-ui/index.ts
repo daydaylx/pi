@@ -100,10 +100,12 @@ function foregroundSubagentsFromArgs(args: unknown): SubagentInfo[] {
     ...agentNamesFromTaskList(input.tasks),
     ...agentNamesFromTaskList(input.chain),
   ];
-  return [...new Set(agents.length > 0 ? agents : ["subagent"])].map((agent) => ({
-    agent,
-    status: "running",
-  }));
+  return [...new Set(agents.length > 0 ? agents : ["subagent"])].map(
+    (agent) => ({
+      agent,
+      status: "running",
+    }),
+  );
 }
 
 function textFromRpcReply(reply: unknown): string {
@@ -134,17 +136,20 @@ function asyncSubagentsFromRpcReply(reply: unknown): SubagentInfo[] {
       const run = record(item);
       if (!run || typeof run.status !== "string") return [];
       const config = record(run.config);
-      return [{
-        agent: typeof config?.agent === "string" ? config.agent : "async",
-        phase: typeof config?.phase === "string" ? config.phase : undefined,
-        label: typeof config?.label === "string" ? config.label : undefined,
-        status: run.status as SubagentInfo["status"],
-      }];
+      return [
+        {
+          agent: typeof config?.agent === "string" ? config.agent : "async",
+          phase: typeof config?.phase === "string" ? config.phase : undefined,
+          label: typeof config?.label === "string" ? config.label : undefined,
+          status: run.status as SubagentInfo["status"],
+        },
+      ];
     });
   }
 
   const runs: SubagentInfo[] = [];
-  const linePattern = /^-\s+([^|\s]+)\s+\|\s+(queued|running)\b[^|]*\|\s+(single|parallel|chain)\b/gm;
+  const linePattern =
+    /^-\s+([^|\s]+)\s+\|\s+(queued|running)\b[^|]*\|\s+(single|parallel|chain)\b/gm;
   for (const match of textFromRpcReply(reply).matchAll(linePattern)) {
     runs.push({
       agent: match[3] === "single" ? "async" : match[3]!,
@@ -283,7 +288,12 @@ class AuroraEditor extends CustomEditor {
         : "";
     const active = this.auroraState.activity.kind !== "idle";
     return [
-      renderBar(this.auroraTheme, `${workflow.label}${progress}`, width, active),
+      renderBar(
+        this.auroraTheme,
+        `${workflow.label}${progress}`,
+        width,
+        active,
+      ),
       ...super.render(width),
     ];
   }
@@ -538,7 +548,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         const currentForeground = [...foregroundSubagents.values()].flat();
         const byKey = new Map<string, SubagentInfo>();
         for (const entry of [...currentForeground, ...asyncSubagentsCache]) {
-          byKey.set(`${entry.agent}\u0000${entry.phase ?? ""}\u0000${entry.label ?? ""}`, entry);
+          byKey.set(
+            `${entry.agent}\u0000${entry.phase ?? ""}\u0000${entry.label ?? ""}`,
+            entry,
+          );
         }
         subagentsCache = [...byKey.values()];
       }
@@ -547,7 +560,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         const now = Date.now();
         if (
           subagentsFetchInFlight ||
-          (!subagentsCacheDirty && now - subagentsLastFetchedAt < SUBAGENT_STATUS_REFRESH_MS)
+          (!subagentsCacheDirty &&
+            now - subagentsLastFetchedAt < SUBAGENT_STATUS_REFRESH_MS)
         ) {
           return;
         }
@@ -667,7 +681,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     });
     if (event.toolName === "subagent") {
       const subagents = foregroundSubagentsFromArgs(event.args);
-      if (subagents.length > 0) foregroundSubagents.set(event.toolCallId, subagents);
+      if (subagents.length > 0)
+        foregroundSubagents.set(event.toolCallId, subagents);
       subagentsCacheDirty = true;
     }
     updateState(ctx, {

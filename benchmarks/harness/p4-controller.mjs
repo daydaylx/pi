@@ -259,11 +259,7 @@ export function inspectAgentChanges(worktree) {
     "--porcelain=v1",
     "--untracked-files=all",
   ]);
-  const unstagedFiles = git(worktree, [
-    "diff",
-    "--no-ext-diff",
-    "--name-only",
-  ])
+  const unstagedFiles = git(worktree, ["diff", "--no-ext-diff", "--name-only"])
     .split("\n")
     .filter(Boolean);
   const stagedFiles = git(worktree, [

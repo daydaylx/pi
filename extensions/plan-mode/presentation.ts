@@ -1,10 +1,16 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import {
   publishAuroraUiPatch,
   type AuroraUiState,
 } from "../aurora-ui/state.ts";
 import { setTuiStatus, UI_STATUS_KEYS } from "../shared/workflow-status.ts";
-import { type WorkflowMode, workflowModeLabel } from "../shared/workflow-mode.ts";
+import {
+  type WorkflowMode,
+  workflowModeLabel,
+} from "../shared/workflow-mode.ts";
 
 let auroraEpoch: string | undefined;
 

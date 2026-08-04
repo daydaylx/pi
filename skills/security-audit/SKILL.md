@@ -15,8 +15,13 @@ Führe eine defensive Prüfung nur innerhalb des vom Nutzer bereitgestellten Pro
 Strukturiere das Ergebnis mit:
 
 ## Dependency-Risiken
+
 ## Secrets / Tokens
+
 ## Berechtigungen
+
 ## Netzwerk / API
+
 ## Kritische Findings
+
 ## Empfohlene Maßnahmen

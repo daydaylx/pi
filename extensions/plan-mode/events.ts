@@ -13,10 +13,17 @@ import {
 import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { readPlan } from "./plan-file.ts";
 import { planningPrompt, workPrompt } from "./prompts.ts";
-import { clearWorkflowPresentation, setAuroraEpoch, workflowUiState } from "./presentation.ts";
+import {
+  clearWorkflowPresentation,
+  setAuroraEpoch,
+  workflowUiState,
+} from "./presentation.ts";
 import type { WorkflowSession } from "./session.ts";
 
-export function registerPlanEvents(pi: ExtensionAPI, session: WorkflowSession): void {
+export function registerPlanEvents(
+  pi: ExtensionAPI,
+  session: WorkflowSession,
+): void {
   pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
     if (!isAuroraUiStateRequest(value)) return;
     setAuroraEpoch(value.sessionEpoch);
@@ -29,11 +36,15 @@ export function registerPlanEvents(pi: ExtensionAPI, session: WorkflowSession): 
     request.respond?.({ mode: session.selectedMode });
   });
   pi.events.on(CONTROL_CENTER_EVENTS.workflowThinkingDefault, (value) => {
-    (value as { respond?: (result: { mode: string; defaultLevel: string }) => void })
-      .respond?.({
-        mode: session.selectedMode,
-        defaultLevel: session.selectedMode === "detailed_plan" ? "high" : "medium",
-      });
+    (
+      value as {
+        respond?: (result: { mode: string; defaultLevel: string }) => void;
+      }
+    ).respond?.({
+      mode: session.selectedMode,
+      defaultLevel:
+        session.selectedMode === "detailed_plan" ? "high" : "medium",
+    });
   });
   pi.on("before_agent_start", async (_event, ctx) => {
     const content = isPlanningMode(session.selectedMode)

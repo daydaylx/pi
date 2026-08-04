@@ -245,11 +245,11 @@ handler oder entrypoint
 
 ## Kategorie: Projekt
 
-| id | Name | Profil | Input | Zweck |
-|---|---|---|---|---|
-| `project-overview` | Projektübersicht | read-only | optional | Sammelt Projektname, Paketmanager, Framework/Runtime, wichtige Ordner, Scripts, Konfiguration und Doku. |
-| `file-structure-search` | Datei-/Struktur-Suche | read-only | required | Findet relevante Dateien, Ordner, Funktionen, Konfigurationen oder Agenten-Dateien zu einer Nutzeranfrage. |
-| `dependency-config-check` | Dependency-/Config-Check | read-only | optional | Sammelt Paket-, Script-, Dependency- und Konfigurationsinformationen. |
+| id                        | Name                     | Profil    | Input    | Zweck                                                                                                      |
+| ------------------------- | ------------------------ | --------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `project-overview`        | Projektübersicht         | read-only | optional | Sammelt Projektname, Paketmanager, Framework/Runtime, wichtige Ordner, Scripts, Konfiguration und Doku.    |
+| `file-structure-search`   | Datei-/Struktur-Suche    | read-only | required | Findet relevante Dateien, Ordner, Funktionen, Konfigurationen oder Agenten-Dateien zu einer Nutzeranfrage. |
+| `dependency-config-check` | Dependency-/Config-Check | read-only | optional | Sammelt Paket-, Script-, Dependency- und Konfigurationsinformationen.                                      |
 
 Blockiert für alle Projekt-Skills:
 
@@ -262,9 +262,9 @@ Blockiert für alle Projekt-Skills:
 
 ## Kategorie: Git
 
-| id | Name | Profil | Input | Zweck |
-|---|---|---|---|---|
-| `git-status` | Git-Status | read-only | optional | Sammelt aktuellen Branch, Status, lokale Änderungen, Branches, Remote, letzte Commits und Diff-Statistik. |
+| id               | Name              | Profil    | Input    | Zweck                                                                                                                |
+| ---------------- | ----------------- | --------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `git-status`     | Git-Status        | read-only | optional | Sammelt aktuellen Branch, Status, lokale Änderungen, Branches, Remote, letzte Commits und Diff-Statistik.            |
 | `recent-changes` | Letzte Änderungen | read-only | optional | Macht sichtbar, was zuletzt geändert wurde, welche Dateien betroffen sind und welche Diff-Zusammenfassung existiert. |
 
 Erlaubte Git-Kommandos für read-only Skills:
@@ -306,8 +306,8 @@ git cherry-pick
 
 ## Kategorie: GitHub
 
-| id | Name | Profil | Input | Zweck |
-|---|---|---|---|---|
+| id                       | Name               | Profil    | Input    | Zweck                                                                                                               |
+| ------------------------ | ------------------ | --------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
 | `github-issues-prs-read` | Issues & PRs lesen | read-only | optional | Sammelt offene Issues, PRs, Labels, letzte Aktualisierung und Branch-Bezug, falls GitHub-Integration verfügbar ist. |
 
 Blockiert:
@@ -321,10 +321,10 @@ Blockiert:
 
 ## Kategorie: Code
 
-| id | Name | Profil | Input | Zweck |
-|---|---|---|---|---|
-| `code-inspection` | Code-Inspection | read-only | required | Liest und beschreibt eine bestimmte Datei, Funktion, Komponente oder technische Stelle. |
-| `todo-fixme-search` | TODO/FIXME-Suche | read-only | optional | Sammelt TODO-, FIXME-, HACK-, NOTE- oder ähnliche Marker im Projekt. |
+| id                  | Name             | Profil    | Input    | Zweck                                                                                   |
+| ------------------- | ---------------- | --------- | -------- | --------------------------------------------------------------------------------------- |
+| `code-inspection`   | Code-Inspection  | read-only | required | Liest und beschreibt eine bestimmte Datei, Funktion, Komponente oder technische Stelle. |
+| `todo-fixme-search` | TODO/FIXME-Suche | read-only | optional | Sammelt TODO-, FIXME-, HACK-, NOTE- oder ähnliche Marker im Projekt.                    |
 
 Blockiert:
 
@@ -340,9 +340,9 @@ Blockiert:
 
 ## Kategorie: Dokumente
 
-| id | Name | Profil | Input | Zweck |
-|---|---|---|---|---|
-| `document-diff` | Dokumenten-Diff | read-only | required | Vergleicht Dokumente, Prompt-Dateien, Agent-Dateien, Specs oder alte/neue Versionen. |
+| id                           | Name                       | Profil    | Input    | Zweck                                                                                         |
+| ---------------------------- | -------------------------- | --------- | -------- | --------------------------------------------------------------------------------------------- |
+| `document-diff`              | Dokumenten-Diff            | read-only | required | Vergleicht Dokumente, Prompt-Dateien, Agent-Dateien, Specs oder alte/neue Versionen.          |
 | `document-consistency-check` | Dokumenten-Konsistenzcheck | read-only | optional | Sucht in Projektdokumenten nach widersprüchlichen, veralteten oder doppelt gepflegten Regeln. |
 
 Sinnvoll für:
@@ -385,12 +385,12 @@ Phase 1 = read-only Analyse / Review
 Phase 2 = Schreiben nur nach explizitem Go
 ```
 
-| id | Name | Profil | Input | Zweck |
-|---|---|---|---|---|
-| `agent-docs-check` | Agent-Dokumente prüfen | read-only | optional | Prüft, ob ein Repository sauber für agentische Coding-Workflows vorbereitet ist. |
-| `agent-docs-setup-preview` | Agent-Dokumente vorbereiten | preview-only | optional | Erzeugt nur eine Vorschau sinnvoller Agenten-Dokumente und Inhalte. |
-| `agent-docs-setup` | Agent-Dokumente einrichten | write | required | Legt Agenten-Dokumente nach Analyse, Preview und explizitem Go an oder aktualisiert sie. |
-| `agent-docs-review` | Agent-Dokumente reviewen | read-only | optional | Prüft ein vorhandenes Agenten-Setup streng gegen Code, Scripts, Doku, Claude-Code-Struktur und Overengineering. |
+| id                         | Name                        | Profil       | Input    | Zweck                                                                                                           |
+| -------------------------- | --------------------------- | ------------ | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `agent-docs-check`         | Agent-Dokumente prüfen      | read-only    | optional | Prüft, ob ein Repository sauber für agentische Coding-Workflows vorbereitet ist.                                |
+| `agent-docs-setup-preview` | Agent-Dokumente vorbereiten | preview-only | optional | Erzeugt nur eine Vorschau sinnvoller Agenten-Dokumente und Inhalte.                                             |
+| `agent-docs-setup`         | Agent-Dokumente einrichten  | write        | required | Legt Agenten-Dokumente nach Analyse, Preview und explizitem Go an oder aktualisiert sie.                        |
+| `agent-docs-review`        | Agent-Dokumente reviewen    | read-only    | optional | Prüft ein vorhandenes Agenten-Setup streng gegen Code, Scripts, Doku, Claude-Code-Struktur und Overengineering. |
 
 ### `agent-docs-check`
 
@@ -461,9 +461,9 @@ Muss `PASS`, `PASS MIT NACHARBEIT` oder `FAIL` ausgeben.
 
 ## Kategorie: Pi-System
 
-| id | Name | Profil | Input | Zweck |
-|---|---|---|---|---|
-| `subagent-doctor` | Subagent-Doctor | read-only | optional | Sammelt Informationen über Subagenten-System, Extension-Dateien und Tool-Registrierung. |
+| id                     | Name                  | Profil    | Input    | Zweck                                                                                    |
+| ---------------------- | --------------------- | --------- | -------- | ---------------------------------------------------------------------------------------- |
+| `subagent-doctor`      | Subagent-Doctor       | read-only | optional | Sammelt Informationen über Subagenten-System, Extension-Dateien und Tool-Registrierung.  |
 | `tool-extension-check` | Tool-/Extension-Check | read-only | optional | Sammelt sichtbare Informationen über Tools, Extensions und Registrierungen im Pi-System. |
 
 Blockiert:
@@ -478,11 +478,11 @@ Blockiert:
 
 ## Kategorie: Checks
 
-| id | Name | Profil | Input | Zweck |
-|---|---|---|---|---|
-| `test-build-check` | Test-/Build-Check | command-limited | optional | Führt definierte Test-, Lint- oder Build-Kommandos aus und zeigt Ergebnisse. |
-| `release-deploy-check` | Release-/Deploy-Check | read-only | optional | Sammelt Informationen über Build-, Deploy-, CI/CD- und Release-Strukturen. |
-| `security-surface-check` | Security-Surface-Check | read-only | optional | Sammelt sichtbare Sicherheitsflächen ohne Exploit-Anleitungen oder Änderungen. |
+| id                       | Name                   | Profil          | Input    | Zweck                                                                          |
+| ------------------------ | ---------------------- | --------------- | -------- | ------------------------------------------------------------------------------ |
+| `test-build-check`       | Test-/Build-Check      | command-limited | optional | Führt definierte Test-, Lint- oder Build-Kommandos aus und zeigt Ergebnisse.   |
+| `release-deploy-check`   | Release-/Deploy-Check  | read-only       | optional | Sammelt Informationen über Build-, Deploy-, CI/CD- und Release-Strukturen.     |
+| `security-surface-check` | Security-Surface-Check | read-only       | optional | Sammelt sichtbare Sicherheitsflächen ohne Exploit-Anleitungen oder Änderungen. |
 
 `test-build-check` ist nicht strikt read-only, weil Tests und Builds Cache-, Coverage-, Log- oder Build-Dateien erzeugen können.
 

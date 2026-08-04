@@ -89,7 +89,6 @@ function isResponse(value: JsonRpcMessage): value is JsonRpcResponse {
   );
 }
 
-
 export interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (error: JsonRpcError | Error) => void;
@@ -132,9 +131,7 @@ export class LspTransport {
     stdout.on("data", this.onData);
     stdout.on("error", this.onStreamError);
     stdout.on("end", () => this.failAll("server stream ended"));
-    stdout.on("close", () =>
-      this.failAll("server stream closed"),
-    );
+    stdout.on("close", () => this.failAll("server stream closed"));
     // A missing-binary or a crashed/exited server makes stdin writes fail with
     // EPIPE. Without a listener Node would crash the host on that 'error'
     // event; we swallow it once the transport is closing.

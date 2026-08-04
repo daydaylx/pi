@@ -68,7 +68,11 @@ export function renderActiveTools(
   const hidden = tools.length - visible.length;
   if (hidden > 0)
     visible.push(
-      truncateToWidth(theme.fg("muted", `↳ +${hidden} weitere Tools`), available, "…"),
+      truncateToWidth(
+        theme.fg("muted", `↳ +${hidden} weitere Tools`),
+        available,
+        "…",
+      ),
     );
   return visible;
 }

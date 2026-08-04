@@ -6,14 +6,37 @@
  * can be traced back to an exact configuration.
  */
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, lstatSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { agentModule, runtimePackagePath } from "./agent.mjs";
-import { CONFIG_FILES, PI_MODEL, PI_THINKING, REFERENCE, SECRET_LINK_NAMES, SOURCE_ROOT, benchmarkEnvironmentOverrides } from "./config.mjs";
+import {
+  CONFIG_FILES,
+  PI_MODEL,
+  PI_THINKING,
+  REFERENCE,
+  SECRET_LINK_NAMES,
+  SOURCE_ROOT,
+  benchmarkEnvironmentOverrides,
+} from "./config.mjs";
 import { fail, runGit, sha256File } from "./io.mjs";
 
-export function configFingerprint(worktree, benchmarkOverlays, benchmarkEnvironmentOverrides) {
-  const files = CONFIG_FILES.map((path) => ({ path, sha256: sha256File(join(worktree, path)) }));
+export function configFingerprint(
+  worktree,
+  benchmarkOverlays,
+  benchmarkEnvironmentOverrides,
+) {
+  const files = CONFIG_FILES.map((path) => ({
+    path,
+    sha256: sha256File(join(worktree, path)),
+  }));
   const configHash = createHash("sha256")
     .update(files.map((file) => `${file.path}\0${file.sha256}\n`).join(""))
     .digest("hex");
@@ -42,7 +65,8 @@ export function configFingerprint(worktree, benchmarkOverlays, benchmarkEnvironm
 export function createCredentialLinks(worktree) {
   for (const name of SECRET_LINK_NAMES) {
     const destination = join(worktree, name);
-    if (existsSync(destination)) fail(`Refusing to replace existing worktree file '${name}'.`);
+    if (existsSync(destination))
+      fail(`Refusing to replace existing worktree file '${name}'.`);
     // Do not inspect either file: symlink creation is the only credential I/O.
     symlinkSync(join(SOURCE_ROOT, name), destination);
   }
@@ -57,7 +81,8 @@ export function removeCredentialLinks(worktree) {
     } catch {
       continue;
     }
-    if (!stat.isSymbolicLink()) fail(`Refusing to remove non-symlink '${name}' from P3 worktree.`);
+    if (!stat.isSymbolicLink())
+      fail(`Refusing to remove non-symlink '${name}' from P3 worktree.`);
     rmSync(destination, { force: true });
   }
 }
@@ -65,8 +90,10 @@ export function removeCredentialLinks(worktree) {
 export function linkRuntimeDependencies(worktree) {
   const sourceModules = join(SOURCE_ROOT, "npm", "node_modules");
   const destination = join(worktree, "npm", "node_modules");
-  if (!existsSync(sourceModules)) fail("P3 requires npm/node_modules in the source checkout.");
-  if (existsSync(destination)) fail("Refusing to replace an existing worktree npm/node_modules path.");
+  if (!existsSync(sourceModules))
+    fail("P3 requires npm/node_modules in the source checkout.");
+  if (existsSync(destination))
+    fail("Refusing to replace an existing worktree npm/node_modules path.");
   symlinkSync(sourceModules, destination);
 }
 

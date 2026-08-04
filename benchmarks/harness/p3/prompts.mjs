@@ -44,7 +44,10 @@ export function taskPrompt(run, worktree) {
       "Fasse am Ende zusammen, was in dieser Sitzung geändert wurde und ob noch etwas fehlt.",
     ];
   }
-  const spec = readFileSync(join(worktree, "benchmarks", "tasks", run.task, "TASK.md"), "utf8");
+  const spec = readFileSync(
+    join(worktree, "benchmarks", "tasks", run.task, "TASK.md"),
+    "utf8",
+  );
   const quoted = spec
     .split("\n")
     .filter((line) => line.startsWith("> "))
@@ -57,13 +60,21 @@ export function taskPrompt(run, worktree) {
 
 export function promptFingerprint(run, worktree) {
   return createHash("sha256")
-    .update(JSON.stringify({ prompts: taskPrompt(run, worktree), system: appendSystemPrompt(run) ?? null }))
+    .update(
+      JSON.stringify({
+        prompts: taskPrompt(run, worktree),
+        system: appendSystemPrompt(run) ?? null,
+      }),
+    )
     .digest("hex");
 }
 
 export function appendSystemPrompt(run) {
-  if (run.variant === "without-subagent") return "Bearbeite dies vollständig selbst, ohne das subagent-Tool zu verwenden.";
-  if (run.variant === "with-subagent") return "Du darfst Teilaufgaben an Subagenten delegieren, wenn das sinnvoll ist (zum Beispiel Recherche durch einen Scout).";
-  if (run.task === "09-hanging-tool-call") return "Für diese Aufgabe ist die projektlokale LSP-Testkonfiguration bereits vorbereitet. Nutze extensions/diff-viewer/change-tracker.ts als Ziel für den Definitions-Lookup.";
+  if (run.variant === "without-subagent")
+    return "Bearbeite dies vollständig selbst, ohne das subagent-Tool zu verwenden.";
+  if (run.variant === "with-subagent")
+    return "Du darfst Teilaufgaben an Subagenten delegieren, wenn das sinnvoll ist (zum Beispiel Recherche durch einen Scout).";
+  if (run.task === "09-hanging-tool-call")
+    return "Für diese Aufgabe ist die projektlokale LSP-Testkonfiguration bereits vorbereitet. Nutze extensions/diff-viewer/change-tracker.ts als Ziel für den Definitions-Lookup.";
   return undefined;
 }

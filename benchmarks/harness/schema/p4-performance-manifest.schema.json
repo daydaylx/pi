@@ -1,7 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["schemaVersion", "seriesId", "stackModes", "pilotRuns", "comparisonPlan", "measurement", "privateTaskContract"],
+  "required": [
+    "schemaVersion",
+    "seriesId",
+    "stackModes",
+    "pilotRuns",
+    "comparisonPlan",
+    "measurement",
+    "privateTaskContract"
+  ],
   "properties": {
     "schemaVersion": { "const": "1.0.0" },
     "seriesId": { "const": "P4" },

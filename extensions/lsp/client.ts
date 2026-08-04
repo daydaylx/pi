@@ -308,12 +308,7 @@ export class LspClient extends EventEmitter {
           ? "cancelled"
           : "request_failed";
     const data = isRpcError(error) ? error : undefined;
-    return this.toError(
-      kind,
-      formatErrorMessage(error),
-      method,
-      data,
-    );
+    return this.toError(kind, formatErrorMessage(error), method, data);
   }
 
   private toError(

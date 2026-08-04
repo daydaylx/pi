@@ -27,7 +27,8 @@ export function buildWorkflowTab(
       {
         id: "workflow-detailed-plan",
         label: "Architekturplan",
-        description: "Einen detaillierten Markdown-Plan erstellen oder ersetzen",
+        description:
+          "Einen detaillierten Markdown-Plan erstellen oder ersetzen",
         current: activeMode === "detailed_plan",
         value: "detailed_plan",
       },

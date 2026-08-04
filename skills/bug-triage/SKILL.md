@@ -15,9 +15,15 @@ Diagnostiziere den Fehler zuerst, statt ihn vorschnell zu reparieren. Respektier
 Strukturiere das Ergebnis mit:
 
 ## Fehlerbild
+
 ## Reproduktion
+
 ## Relevante Dateien
+
 ## Wahrscheinliche Ursache
+
 ## Ausschlüsse
+
 ## Risiken
+
 ## Fix-Optionen

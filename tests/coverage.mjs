@@ -28,7 +28,9 @@ function activeExtensionPaths() {
     readFileSync(path.join(ROOT, "settings.json"), "utf8"),
   );
   return settings.extensions
-    .filter((entry) => typeof entry === "string" && entry.startsWith("+extensions/"))
+    .filter(
+      (entry) => typeof entry === "string" && entry.startsWith("+extensions/"),
+    )
     .map((entry) => entry.slice(1));
 }
 
@@ -46,7 +48,9 @@ function functionCoverage(coverage, relativePath) {
   if (sources.length === 0) return { covered: 0, total: 0, percent: 0 };
   const functions = new Map();
   for (const source of sources) {
-    for (const fn of source.functions.filter((candidate) => candidate.functionName)) {
+    for (const fn of source.functions.filter(
+      (candidate) => candidate.functionName,
+    )) {
       const range = fn.ranges[0];
       const key = `${fn.functionName}:${range.startOffset}:${range.endOffset}`;
       functions.set(key, Math.max(functions.get(key) ?? 0, range.count ?? 0));
@@ -54,7 +58,11 @@ function functionCoverage(coverage, relativePath) {
   }
   const covered = [...functions.values()].filter((count) => count > 0).length;
   const total = functions.size;
-  return { covered, total, percent: total === 0 ? 100 : (covered / total) * 100 };
+  return {
+    covered,
+    total,
+    percent: total === 0 ? 100 : (covered / total) * 100,
+  };
 }
 
 function collectCoverage(directory, extensions) {
@@ -62,7 +70,10 @@ function collectCoverage(directory, extensions) {
     JSON.parse(readFileSync(file, "utf8")),
   );
   return Object.fromEntries(
-    extensions.map((extension) => [extension, functionCoverage(coverage, extension)]),
+    extensions.map((extension) => [
+      extension,
+      functionCoverage(coverage, extension),
+    ]),
   );
 }
 
@@ -72,7 +83,10 @@ function baselineFrom(results, extensions) {
     metric: "v8-function",
     activeExtensions: extensions,
     minimumFunctionCoverage: Object.fromEntries(
-      extensions.map((extension) => [extension, Math.floor(results[extension].percent)]),
+      extensions.map((extension) => [
+        extension,
+        Math.floor(results[extension].percent),
+      ]),
     ),
   };
 }
@@ -89,11 +103,15 @@ const extensions = activeExtensionPaths();
 const coverageDirectory = mkdtempSync(path.join(tmpdir(), "pi-v8-coverage-"));
 
 try {
-  const result = spawnSync(process.execPath, [path.join(__dirname, "run-all.mjs")], {
-    cwd: ROOT,
-    env: { ...process.env, NODE_V8_COVERAGE: coverageDirectory },
-    stdio: "inherit",
-  });
+  const result = spawnSync(
+    process.execPath,
+    [path.join(__dirname, "run-all.mjs")],
+    {
+      cwd: ROOT,
+      env: { ...process.env, NODE_V8_COVERAGE: coverageDirectory },
+      stdio: "inherit",
+    },
+  );
   if (result.error) throw result.error;
   if (result.status !== 0) process.exitCode = result.status ?? 1;
   if (process.exitCode) process.exit(process.exitCode);
@@ -105,14 +123,20 @@ try {
       BASELINE_PATH,
       JSON.stringify(baselineFrom(measurements, extensions), null, 2) + "\n",
     );
-    console.log(`Coverage baseline written: ${path.relative(ROOT, BASELINE_PATH)}`);
+    console.log(
+      `Coverage baseline written: ${path.relative(ROOT, BASELINE_PATH)}`,
+    );
     process.exit(0);
   }
 
   const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
   const expected = JSON.stringify(baseline.activeExtensions);
   const actual = JSON.stringify(extensions);
-  if (baseline.version !== 1 || baseline.metric !== "v8-function" || expected !== actual) {
+  if (
+    baseline.version !== 1 ||
+    baseline.metric !== "v8-function" ||
+    expected !== actual
+  ) {
     throw new Error(
       "Coverage baseline does not match the active extension list. Run npm run test:coverage:baseline after reviewing the changed coverage.",
     );
@@ -121,10 +145,14 @@ try {
     const measurement = measurements[extension];
     const minimum = baseline.minimumFunctionCoverage?.[extension];
     if (!measurement || !Number.isInteger(minimum)) {
-      throw new Error(`Coverage baseline has no valid minimum for ${extension}.`);
+      throw new Error(
+        `Coverage baseline has no valid minimum for ${extension}.`,
+      );
     }
     if (measurement.total === 0) {
-      throw new Error(`${extension} was not activated by the regression suite.`);
+      throw new Error(
+        `${extension} was not activated by the regression suite.`,
+      );
     }
     if (measurement.percent < minimum) {
       throw new Error(

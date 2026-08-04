@@ -2,7 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Pi P3 Benchmark Manifest",
   "type": "object",
-  "required": ["schemaVersion", "name", "reference", "model", "thinking", "scoredRunCount", "runs", "diagnostics"],
+  "required": [
+    "schemaVersion",
+    "name",
+    "reference",
+    "model",
+    "thinking",
+    "scoredRunCount",
+    "runs",
+    "diagnostics"
+  ],
   "properties": {
     "schemaVersion": { "const": "1.0.0" },
     "name": { "const": "pi-p3-benchmark" },
@@ -21,7 +30,13 @@
       "items": {
         "allOf": [
           { "$ref": "#/$defs/run" },
-          { "properties": { "scored": { "const": false }, "mode": { "enum": ["v8-cpu-prof", "v8-heap-prof"] } }, "required": ["mode"] }
+          {
+            "properties": {
+              "scored": { "const": false },
+              "mode": { "enum": ["v8-cpu-prof", "v8-heap-prof"] }
+            },
+            "required": ["mode"]
+          }
         ]
       }
     }
@@ -38,7 +53,10 @@
         "variant": { "type": "string" },
         "interaction": { "enum": ["four-turn"] },
         "mode": { "type": "string" },
-        "environment": { "type": "object", "additionalProperties": { "type": "string" } }
+        "environment": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
       },
       "additionalProperties": false
     }

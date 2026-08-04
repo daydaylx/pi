@@ -15,8 +15,13 @@ Ermittle die passenden Prüfungen und führe nur sichere, projektübliche Checks
 Strukturiere das Ergebnis mit:
 
 ## Testbefehle
+
 ## Ergebnis
+
 ## Fehlende Tests
+
 ## Instabile Tests
+
 ## CI-Risiken
+
 ## Empfehlung

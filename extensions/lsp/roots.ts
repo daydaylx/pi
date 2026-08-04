@@ -35,7 +35,10 @@ export function findWorkspaceRoot(
     for (const marker of markers) {
       const candidate = join(current, marker);
       if (existsSync(candidate)) {
-        logger?.("info", `workspace root found at ${current} (marker: ${marker})`);
+        logger?.(
+          "info",
+          `workspace root found at ${current} (marker: ${marker})`,
+        );
         return current;
       }
     }
@@ -44,6 +47,9 @@ export function findWorkspaceRoot(
     current = parent;
   }
 
-  logger?.("info", `no workspace root found for ${filePath} (markers: ${markers.join(", ")})`);
+  logger?.(
+    "info",
+    `no workspace root found for ${filePath} (markers: ${markers.join(", ")})`,
+  );
   return undefined;
 }

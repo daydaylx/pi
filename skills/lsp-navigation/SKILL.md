@@ -12,13 +12,13 @@ Shell-Kommandos. LSP kommt dann zum Einsatz, wenn die Fragestellung echte
 
 ## Wann LSP statt bash/grep?
 
-| Situation | LSP-Tool | Nutzen gegenüber Textsuche |
-|-----------|----------|----------------------------|
-| Definition eines Symbols finden (nicht nur Texttreffer) | `lsp_definition` | Findet die echte Deklaration statt Treffern in Strings oder Kommentaren |
-| Alle Verwendungen eines Symbols | `lsp_references` | Liefert semantische Referenzen statt bloßer Namensgleichheiten |
-| Typ, Signatur, Dokumentation einer Funktion/Variable | `lsp_hover` | Liefert Typinformationen, die grep nicht ermitteln kann |
-| Projektstruktur erkunden (Klassen, Funktionen) | `lsp_workspace_symbols` | Gibt einen semantischen Überblick über bekannte Symbole |
-| Compiler-Fehler/Warnungen prüfen | `lsp_diagnostics` | Liefert Server-Diagnosen ohne vollständigen Build-Prozess |
+| Situation                                               | LSP-Tool                | Nutzen gegenüber Textsuche                                              |
+| ------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------- |
+| Definition eines Symbols finden (nicht nur Texttreffer) | `lsp_definition`        | Findet die echte Deklaration statt Treffern in Strings oder Kommentaren |
+| Alle Verwendungen eines Symbols                         | `lsp_references`        | Liefert semantische Referenzen statt bloßer Namensgleichheiten          |
+| Typ, Signatur, Dokumentation einer Funktion/Variable    | `lsp_hover`             | Liefert Typinformationen, die grep nicht ermitteln kann                 |
+| Projektstruktur erkunden (Klassen, Funktionen)          | `lsp_workspace_symbols` | Gibt einen semantischen Überblick über bekannte Symbole                 |
+| Compiler-Fehler/Warnungen prüfen                        | `lsp_diagnostics`       | Liefert Server-Diagnosen ohne vollständigen Build-Prozess               |
 
 ## Wann NICHT LSP?
 

@@ -383,11 +383,7 @@ export const runtimeSections = {
   },
 
   "greenfield setup config and Aurora state contract": async (context) => {
-    const {
-      section,
-      setupConfig,
-      auroraState,
-    } = context;
+    const { section, setupConfig, auroraState } = context;
 
     await section(
       "greenfield setup config and Aurora state contract",
@@ -493,11 +489,7 @@ export const runtimeSections = {
   },
 
   "setup core lifecycle": async (context) => {
-    const {
-      section,
-      contextDiagnostics,
-      setupCore,
-    } = context;
+    const { section, contextDiagnostics, setupCore } = context;
 
     await section("setup core lifecycle", async () => {
       if (!setupCore) return;
@@ -703,10 +695,7 @@ export const runtimeSections = {
   },
 
   "setup doctor required profile completeness (P1-08)": async (context) => {
-    const {
-      section,
-      setupCore,
-    } = context;
+    const { section, setupCore } = context;
 
     await section(
       "setup doctor required profile completeness (P1-08)",
@@ -788,10 +777,7 @@ export const runtimeSections = {
   },
 
   "project verification profiles (#105)": async (context) => {
-    const {
-      section,
-      load,
-    } = context;
+    const { section, load } = context;
 
     await section("project verification profiles (#105)", async () => {
       const profilesMod = await load(
@@ -1085,10 +1071,7 @@ export const runtimeSections = {
   },
 
   "project_check tool (#123)": async (context) => {
-    const {
-      section,
-      setupCore,
-    } = context;
+    const { section, setupCore } = context;
 
     await section("project_check tool (#123)", async () => {
       if (!setupCore) return;
@@ -1401,10 +1384,7 @@ export const runtimeSections = {
   },
 
   "global control plane shortcuts": async (context) => {
-    const {
-      section,
-      controlPlane,
-    } = context;
+    const { section, controlPlane } = context;
 
     await section("global control plane shortcuts", async () => {
       if (!controlPlane) return;
@@ -1434,12 +1414,7 @@ export const runtimeSections = {
   },
 
   "shared output limits": async (context) => {
-    const {
-      section,
-      load,
-      lspTools,
-      outputLimits,
-    } = context;
+    const { section, load, lspTools, outputLimits } = context;
 
     await section("shared output limits", async () => {
       if (!outputLimits) return;
@@ -1599,11 +1574,7 @@ export const runtimeSections = {
   },
 
   "ask-user temporary dialog": async (context) => {
-    const {
-      section,
-      askUser,
-      askUserPolicy,
-    } = context;
+    const { section, askUser, askUserPolicy } = context;
 
     await section("ask-user temporary dialog", async () => {
       if (!askUser || !askUserPolicy) return;
@@ -1712,12 +1683,7 @@ export const runtimeSections = {
   },
 
   "Aurora UI lifecycle and responsive surfaces": async (context) => {
-    const {
-      section,
-      load,
-      auroraUi,
-      auroraFooter,
-    } = context;
+    const { section, load, auroraUi, auroraFooter } = context;
 
     await section("Aurora UI lifecycle and responsive surfaces", async () => {
       if (!auroraUi) return;

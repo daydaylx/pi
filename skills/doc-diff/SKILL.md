@@ -15,9 +15,15 @@ Vergleiche die vom Nutzer benannten oder für die Aufgabe relevanten Dokumente. 
 Strukturiere das Ergebnis mit:
 
 ## Vergleich
+
 ## Neue Inhalte
+
 ## Entfernte Inhalte
+
 ## Widersprüche
+
 ## Veraltete Inhalte
+
 ## Empfohlene Korrekturen
+
 ## Nicht automatisch entscheiden

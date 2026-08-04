@@ -16,9 +16,15 @@ Prüfe den Git-Zustand ohne ihn zu verändern. Respektiere `AGENTS.md` und die a
 Strukturiere das Ergebnis mit:
 
 ## Git-Zustand
+
 ## Remote-Zustand
+
 ## Offene Änderungen
+
 ## Branches
+
 ## Issues / PRs
+
 ## Risiken
+
 ## Empfehlung

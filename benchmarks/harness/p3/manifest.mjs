@@ -8,7 +8,17 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { agentModule, runtimePackagePath } from "./agent.mjs";
-import { CONFIG_FILES, GNU_TIME, MANIFEST_PATH, PI_MODEL, PI_THINKING, REFERENCE, SECRET_LINK_NAMES, SOURCE_ROOT, TASK_IDS } from "./config.mjs";
+import {
+  CONFIG_FILES,
+  GNU_TIME,
+  MANIFEST_PATH,
+  PI_MODEL,
+  PI_THINKING,
+  REFERENCE,
+  SECRET_LINK_NAMES,
+  SOURCE_ROOT,
+  TASK_IDS,
+} from "./config.mjs";
 import { fail, readJson, runGit } from "./io.mjs";
 
 export function loadManifest() {
@@ -22,43 +32,64 @@ function allRuns(manifest) {
 
 export function findRun(manifest, id) {
   const run = allRuns(manifest).find((candidate) => candidate.id === id);
-  if (!run) fail(`Unknown P3 run id '${id}'. Run 'validate' or inspect p3-manifest.json.`);
+  if (!run)
+    fail(
+      `Unknown P3 run id '${id}'. Run 'validate' or inspect p3-manifest.json.`,
+    );
   return run;
 }
 
 export function validateManifest(manifest) {
-  if (manifest.schemaVersion !== "1.0.0") fail("P3 manifest schemaVersion must be 1.0.0.");
-  if (manifest.reference !== REFERENCE) fail(`P3 manifest reference must be ${REFERENCE}.`);
-  if (manifest.scoredRunCount !== 33) fail("P3 manifest scoredRunCount must be 33.");
+  if (manifest.schemaVersion !== "1.0.0")
+    fail("P3 manifest schemaVersion must be 1.0.0.");
+  if (manifest.reference !== REFERENCE)
+    fail(`P3 manifest reference must be ${REFERENCE}.`);
+  if (manifest.scoredRunCount !== 33)
+    fail("P3 manifest scoredRunCount must be 33.");
   if (manifest.model !== PI_MODEL || manifest.thinking !== PI_THINKING) {
     fail(`P3 manifest must pin ${PI_MODEL} with ${PI_THINKING} thinking.`);
   }
   if (!Array.isArray(manifest.runs) || manifest.runs.length !== 33) {
     fail("P3 manifest must contain exactly 33 scored runs.");
   }
-  if (!manifest.runs.every((run) => run.scored === true)) fail("All P3 manifest runs must be scored.");
+  if (!manifest.runs.every((run) => run.scored === true))
+    fail("All P3 manifest runs must be scored.");
   const ids = allRuns(manifest).map((run) => run.id);
-  if (new Set(ids).size !== ids.length) fail("P3 manifest run ids must be unique.");
+  if (new Set(ids).size !== ids.length)
+    fail("P3 manifest run ids must be unique.");
   for (const run of allRuns(manifest)) {
     if (typeof run.id !== "string" || !/^p3-[a-z0-9-]+$/.test(run.id)) {
       fail("P3 manifest run ids must be path-safe p3 identifiers.");
     }
-    if (!TASK_IDS.has(run.task)) fail(`P3 manifest contains an unknown task '${run.task}'.`);
+    if (!TASK_IDS.has(run.task))
+      fail(`P3 manifest contains an unknown task '${run.task}'.`);
     if (Object.keys(run.environment ?? {}).length > 0) {
       fail(`P3 run '${run.id}' has an unsupported environment override.`);
     }
   }
 
   for (const number of ["01", "02", "03", "04", "05", "06", "07", "08", "09"]) {
-    const matching = manifest.runs.filter((run) => run.task.startsWith(`${number}-`));
-    if (matching.length !== 3) fail(`P3 task ${number} must have exactly three scored runs.`);
+    const matching = manifest.runs.filter((run) =>
+      run.task.startsWith(`${number}-`),
+    );
+    if (matching.length !== 3)
+      fail(`P3 task ${number} must have exactly three scored runs.`);
   }
   const task10 = manifest.runs.filter((run) => run.task.startsWith("10-"));
-  if (task10.length !== 6) fail("P3 task 10 must have three A/B pairs (six scored runs).");
+  if (task10.length !== 6)
+    fail("P3 task 10 must have three A/B pairs (six scored runs).");
   for (const pair of ["p3-10-1", "p3-10-2", "p3-10-3"]) {
-    const variants = task10.filter((run) => run.pair === pair).map((run) => run.variant).sort();
-    if (JSON.stringify(variants) !== JSON.stringify(["with-subagent", "without-subagent"])) {
-      fail(`P3 ${pair} must contain one with-subagent and one without-subagent run.`);
+    const variants = task10
+      .filter((run) => run.pair === pair)
+      .map((run) => run.variant)
+      .sort();
+    if (
+      JSON.stringify(variants) !==
+      JSON.stringify(["with-subagent", "without-subagent"])
+    ) {
+      fail(
+        `P3 ${pair} must contain one with-subagent and one without-subagent run.`,
+      );
     }
   }
   const expectedDiagnostics = new Set([
@@ -67,9 +98,16 @@ export function validateManifest(manifest) {
     "p3-diag-09-v8-cpu",
     "p3-diag-09-v8-heap",
   ]);
-  if (!Array.isArray(manifest.diagnostics) || manifest.diagnostics.length !== expectedDiagnostics.size ||
-      !manifest.diagnostics.every((run) => expectedDiagnostics.has(run.id) && run.scored === false)) {
-    fail("P3 manifest must expose the four unscored V8 diagnostics for tasks 02 and 09.");
+  if (
+    !Array.isArray(manifest.diagnostics) ||
+    manifest.diagnostics.length !== expectedDiagnostics.size ||
+    !manifest.diagnostics.every(
+      (run) => expectedDiagnostics.has(run.id) && run.scored === false,
+    )
+  ) {
+    fail(
+      "P3 manifest must expose the four unscored V8 diagnostics for tasks 02 and 09.",
+    );
   }
 }
 
@@ -79,16 +117,23 @@ export function validatePrerequisites() {
   if (timeVersion.status !== 0 || !/GNU time/i.test(timeVersion.stdout)) {
     fail("/usr/bin/time is not GNU time; P3 requires GNU time -v.");
   }
-  if (runGit(["cat-file", "-e", `${REFERENCE}^{commit}`], { allowFailure: true }) === null) {
+  if (
+    runGit(["cat-file", "-e", `${REFERENCE}^{commit}`], {
+      allowFailure: true,
+    }) === null
+  ) {
     fail(`Reference commit ${REFERENCE} is unavailable locally.`);
   }
   for (const configFile of CONFIG_FILES) {
-    if (!existsSync(join(SOURCE_ROOT, configFile))) fail(`Required non-sensitive config file is missing: ${configFile}`);
+    if (!existsSync(join(SOURCE_ROOT, configFile)))
+      fail(`Required non-sensitive config file is missing: ${configFile}`);
   }
   for (const name of SECRET_LINK_NAMES) {
     const source = join(SOURCE_ROOT, name);
     if (!existsSync(source) || !lstatSync(source).isFile()) {
-      fail(`Required credential source '${name}' is missing or is not a regular file.`);
+      fail(
+        `Required credential source '${name}' is missing or is not a regular file.`,
+      );
     }
   }
   const cli = agentModule();
