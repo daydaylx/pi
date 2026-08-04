@@ -199,6 +199,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
       global: loadedSetup.config.lsp,
       trusted,
       projectConfig,
+      projectRoot: ctx.cwd,
       sessionFlags: {
         ...(cliMode ? { mode: cliMode } : {}),
         ...sessionOverride,

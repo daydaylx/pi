@@ -16,6 +16,7 @@ import type {
   LspMode,
   ServerProfile,
 } from "./types.ts";
+import { relative, resolve, sep } from "node:path";
 import { PROFILES } from "./server-profiles.ts";
 
 /** Conservative extension defaults (plan §8/§10). */
@@ -37,33 +38,57 @@ const DEFAULTS: LspConfig = {
 export function resolveConfig(layers: ConfigLayers): LspConfig {
   const cfg = clone(DEFAULTS);
 
-  mergeLanguageProfiles(cfg.languages, layers.defaults?.languages);
+  const root = layers.projectRoot;
+  mergeLanguageProfiles(cfg.languages, layers.defaults?.languages, root);
 
   // 2. Global pi config
   if (layers.global) {
     mergeConfig(cfg, layers.global);
-    mergeLanguageProfiles(cfg.languages, layers.global.languages);
+    mergeLanguageProfiles(cfg.languages, layers.global.languages, root);
   }
 
   // 3. Project config (trust-gated)
   if (layers.trusted && layers.projectConfig) {
     mergeConfig(cfg, layers.projectConfig);
-    mergeLanguageProfiles(cfg.languages, layers.projectConfig.languages);
+    mergeLanguageProfiles(cfg.languages, layers.projectConfig.languages, root);
   }
 
   // 4. Session flags win
   if (layers.sessionFlags) {
     mergeConfig(cfg, layers.sessionFlags);
-    mergeLanguageProfiles(cfg.languages, layers.sessionFlags.languages);
+    mergeLanguageProfiles(cfg.languages, layers.sessionFlags.languages, root);
   }
 
   return cfg;
+}
+
+/**
+ * The set of binaries a profile may name.
+ *
+ * A trusted project's `.pi/lsp.json` used to choose `command` freely, and the
+ * registry spawned whatever it said — while the `lsp_*` tools are allow-listed
+ * as read-only and never reach a permission prompt. Trusting a repository
+ * therefore granted it arbitrary process execution. A command is now bound to
+ * either the built-in profile for that id or a binary the project installed
+ * into its own `node_modules/.bin`.
+ */
+function isAllowedCommand(
+  id: string,
+  command: string,
+  projectRoot: string | undefined,
+): boolean {
+  if (PROFILES[id]?.command === command) return true;
+  if (!projectRoot) return false;
+  const binDir = resolve(projectRoot, "node_modules", ".bin");
+  const rel = relative(binDir, resolve(projectRoot, command));
+  return rel !== "" && !rel.startsWith("..") && !rel.includes(sep);
 }
 
 /** Resolve a single profile entry: built-in default → project/session overrides. */
 export function resolveProfileOverrides(
   base: ServerProfile,
   overrides?: Partial<ServerProfile>,
+  projectRoot?: string,
 ): ServerProfile {
   if (!overrides) return base;
 
@@ -105,11 +130,18 @@ export function resolveProfileOverrides(
     }
   }
 
+  const command = overrides.command ?? base.command;
+  if (!isAllowedCommand(base.id, command, projectRoot)) {
+    throw new TypeError(
+      `command must be the built-in server for "${base.id}" or a binary in the project's node_modules/.bin, got ${command}`,
+    );
+  }
+
   return {
     id: base.id,
     label: overrides.label ?? base.label,
     enabled: overrides.enabled ?? base.enabled,
-    command: overrides.command ?? base.command,
+    command,
     args: overrides.args ?? base.args,
     rootMarkers: overrides.rootMarkers ?? base.rootMarkers,
     initializationOptions:
@@ -197,6 +229,7 @@ function mergeConfig(target: LspConfig, source: Partial<LspConfig>): void {
 function mergeLanguageProfiles(
   target: Record<string, ServerProfile>,
   source?: Record<string, unknown>,
+  projectRoot?: string,
 ): void {
   if (!source) return;
   for (const [id, partial] of Object.entries(source)) {
@@ -206,9 +239,14 @@ function mergeLanguageProfiles(
       target[id] = resolveProfileOverrides(
         existing,
         partial as Partial<ServerProfile>,
+        projectRoot,
       );
     } else {
-      target[id] = mergeWithBuiltin(id, partial as Partial<ServerProfile>);
+      target[id] = mergeWithBuiltin(
+        id,
+        partial as Partial<ServerProfile>,
+        projectRoot,
+      );
     }
   }
 }
@@ -216,20 +254,25 @@ function mergeLanguageProfiles(
 function mergeWithBuiltin(
   id: string,
   overrides: Partial<ServerProfile>,
+  projectRoot?: string,
 ): ServerProfile {
   const builtin = PROFILES[id];
-  if (builtin) return resolveProfileOverrides(builtin, overrides);
-  // Completely custom profile: built-in is a bare minimum.
+  if (builtin) return resolveProfileOverrides(builtin, overrides, projectRoot);
+  // Completely custom profile: built-in is a bare minimum. Its `command`
+  // placeholder is deliberately not a runnable name — a profile without a
+  // built-in has to point at the project's own node_modules/.bin, which
+  // resolveProfileOverrides enforces.
   return resolveProfileOverrides(
     {
       id,
       label: id,
       enabled: true,
-      command: id,
+      command: "",
       args: [],
       rootMarkers: [],
     },
     overrides,
+    projectRoot,
   );
 }
 

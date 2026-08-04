@@ -78,6 +78,10 @@ export function decideTool(
   // Explicit capability classes for local read-only and workflow tools.
   // Custom/MCP tools are deliberately not inferred from their names except
   // for the locally owned, fixed contracts below.
+  // The LSP request itself is read-only, but answering it starts a language
+  // server. This blanket allow therefore only holds because lsp/config.ts binds
+  // a profile's `command` to the built-in server or the project's own
+  // node_modules/.bin — a project cannot name the binary that gets spawned.
   if (LOCAL_LSP_TOOLS.has(event.toolName)) {
     return { action: "allow", reason: "LSP-Fähigkeit (nur lesend)" };
   }

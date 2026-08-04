@@ -29,11 +29,7 @@ const FAKE_LSP_FIXTURE = path.join(ROOT, "tests", "fixtures", "fake-lsp.py");
 
 export const lspSections = {
   "LSP Control Center file picker": async (context) => {
-    const {
-      section,
-      lspControlCenter,
-      lspTools,
-    } = context;
+    const { section, lspControlCenter, lspTools } = context;
 
     await section("LSP Control Center file picker", async () => {
       if (!lspControlCenter) return;
@@ -114,10 +110,7 @@ export const lspSections = {
   },
 
   "LSP transport, process and lifecycle (#93)": async (context) => {
-    const {
-      section,
-      load,
-    } = context;
+    const { section, load } = context;
 
     await section("LSP transport, process and lifecycle (#93)", async () => {
       const transportMod = await load("extensions/lsp/transport.ts");
@@ -464,10 +457,7 @@ export const lspSections = {
   "LSP config, root detection, registry and profiles (#94)": async (
     context,
   ) => {
-    const {
-      section,
-      load,
-    } = context;
+    const { section, load } = context;
 
     await section(
       "LSP config, root detection, registry and profiles (#94)",
@@ -648,18 +638,76 @@ export const lspSections = {
           "resolveProfileOverrides rejects a rootMarkers array with non-string entries",
         );
         eq(
-          configMod.resolveProfileOverrides(baseProfile, {
-            command: "other-lsp",
-            enabled: false,
-            rootMarkers: ["go.mod"],
-          }),
+          configMod.resolveProfileOverrides(
+            { ...baseProfile, id: "typescript" },
+            {
+              command: "typescript-language-server",
+              enabled: false,
+              rootMarkers: ["go.mod"],
+            },
+          ),
           {
             ...baseProfile,
-            command: "other-lsp",
+            id: "typescript",
+            command: "typescript-language-server",
             enabled: false,
             rootMarkers: ["go.mod"],
           },
           "resolveProfileOverrides still applies valid command/enabled/rootMarkers overrides",
+        );
+        // The command is what the registry spawns, so it is bound: the built-in
+        // server for that id, or a binary the project installed itself.
+        assert(
+          (() => {
+            try {
+              configMod.resolveProfileOverrides(baseProfile, {
+                command: "/bin/sh",
+              });
+              return false;
+            } catch (error) {
+              return (
+                error instanceof TypeError && /node_modules/.test(error.message)
+              );
+            }
+          })(),
+          "resolveProfileOverrides rejects a command outside the allowed set",
+        );
+        assert(
+          (() => {
+            try {
+              configMod.resolveProfileOverrides(baseProfile, {
+                command: "other-lsp",
+              });
+              return false;
+            } catch (error) {
+              return error instanceof TypeError;
+            }
+          })(),
+          "a bare binary name is not reachable either — PATH is not the allowlist",
+        );
+        eq(
+          configMod.resolveProfileOverrides(
+            baseProfile,
+            { command: "node_modules/.bin/custom-lsp" },
+            "/projects/demo",
+          ).command,
+          "node_modules/.bin/custom-lsp",
+          "a binary from the project's own node_modules/.bin is accepted",
+        );
+        assert(
+          (() => {
+            try {
+              configMod.resolveProfileOverrides(
+                baseProfile,
+                { command: "node_modules/.bin/../../../../bin/sh" },
+                "/projects/demo",
+              );
+              return false;
+            } catch (error) {
+              return error instanceof TypeError;
+            }
+          })(),
+          "a traversal out of node_modules/.bin does not pass the check",
         );
         // End-to-end: the same malformed value reaching resolveConfig
         // through a (trusted) project config must fail closed too, not only
@@ -854,10 +902,7 @@ export const lspSections = {
   },
 
   "LSP documents and diagnostics (#95)": async (context) => {
-    const {
-      section,
-      load,
-    } = context;
+    const { section, load } = context;
 
     await section("LSP documents and diagnostics (#95)", async () => {
       const documentsMod = await load("extensions/lsp/documents.ts");
@@ -1293,10 +1338,7 @@ export const lspSections = {
   },
 
   "LSP security and registry single-flight (P0.2, P1.1)": async (context) => {
-    const {
-      section,
-      load,
-    } = context;
+    const { section, load } = context;
 
     await section(
       "LSP security and registry single-flight (P0.2, P1.1)",
@@ -1523,10 +1565,7 @@ export const lspSections = {
   },
 
   "LSP navigation and symbol tools (#96)": async (context) => {
-    const {
-      section,
-      load,
-    } = context;
+    const { section, load } = context;
 
     await section("LSP navigation and symbol tools (#96)", async () => {
       const toolsMod = await load("extensions/lsp/tools.ts");
@@ -1862,12 +1901,7 @@ export const lspSections = {
   },
 
   "LSP command, status and trust (#97)": async (context) => {
-    const {
-      section,
-      load,
-      lspControlCenter,
-      lspExtensionMod,
-    } = context;
+    const { section, load, lspControlCenter, lspExtensionMod } = context;
 
     await section("LSP command, status and trust (#97)", async () => {
       if (!lspExtensionMod) return;

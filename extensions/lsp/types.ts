@@ -37,9 +37,7 @@ export interface JsonRpcNotification {
 }
 
 export type JsonRpcMessage =
-  | JsonRpcRequest
-  | JsonRpcResponse
-  | JsonRpcNotification;
+  JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
 
 /**
  * Discriminated, agent-friendly failure categories. Every LSP operation that
@@ -183,6 +181,12 @@ export interface ConfigLayers {
   sessionFlags?: Partial<LspConfig>;
   /** If false, `projectConfig` is ignored entirely. */
   trusted: boolean;
+  /**
+   * Project root. A profile may only name a command that belongs to a built-in
+   * profile or lives in this project's `node_modules/.bin`; without a root only
+   * the built-in commands remain reachable.
+   */
+  projectRoot?: string;
 }
 
 /** Normalised server capabilities used by #95 / #96 tools. */
