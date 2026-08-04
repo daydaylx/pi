@@ -70,6 +70,11 @@ assert.match(
 );
 assert.match(
   interactiveSource,
+  /onTerminalInput: \(handler\) => this\.addExtensionTerminalInputListener\(\(data\) => this\.ui\.focusedComponent === this\.editor \? handler\(data\) : undefined\)/,
+  "extension terminal listeners yield to focused selectors and overlays",
+);
+assert.match(
+  interactiveSource,
   /onExtensionShortcut = \(data\) => \{[\s\S]{0,900}Promise\.resolve\(shortcut\.handler\(createContext\(\)\)\)\.catch/,
   "extension shortcuts launch without awaiting the handler on the input path",
 );

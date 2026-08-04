@@ -437,12 +437,16 @@ export function createHarness(options = {}) {
     },
     sendTerminalInput(data) {
       let current = data;
-      for (const listener of [...terminalInputListeners]) {
-        const result = listener(current);
-        if (result?.consume) return { consumed: true, data: current };
-        if (result?.data !== undefined) current = result.data;
-      }
       const focused = focusStack.at(-1);
+      // The patched Pi runtime scopes extension terminal listeners to editor
+      // focus so they cannot preempt a selector or custom overlay.
+      if (!focused) {
+        for (const listener of [...terminalInputListeners]) {
+          const result = listener(current);
+          if (result?.consume) return { consumed: true, data: current };
+          if (result?.data !== undefined) current = result.data;
+        }
+      }
       if (current.length > 0 && typeof focused?.handleInput === "function") {
         focused.handleInput(current);
         return { consumed: true, data: current };

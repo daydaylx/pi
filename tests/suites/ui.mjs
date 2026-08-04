@@ -126,6 +126,14 @@ export const uiSections = {
         controlPlane.default(liveHarness.api);
         const liveContext = liveHarness.makeContext();
         await liveHarness.runHooks("session_start", {}, liveContext);
+        let globalNavigationConsumes = 0;
+        liveContext.ui.onTerminalInput((data) => {
+          if (data === "\u001b[57420u" || data === "\u001b") {
+            globalNavigationConsumes += 1;
+            return { consume: true };
+          }
+          return undefined;
+        });
 
         const dispatch = liveHarness.dispatchShortcut(
           "shift+tab",
@@ -183,6 +191,17 @@ export const uiSections = {
           latestStatus(liveHarness, "workflow"),
           "Architekturplan",
           "Escape closes the native selector without changing workflow",
+        );
+        eq(
+          globalNavigationConsumes,
+          0,
+          "global extension input listeners cannot consume modal navigation",
+        );
+        liveHarness.sendTerminalInput("\u001b[57420u");
+        eq(
+          globalNavigationConsumes,
+          1,
+          "global extension input listeners remain active at editor focus",
         );
       }
 

@@ -130,6 +130,16 @@ import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.js";`,
             },`,
   },
   {
+    id: "interactive-focus-scoped-terminal-input",
+    file: "dist/modes/interactive/interactive-mode.js",
+    summary: "Globale Extension-Eingaben bei modaler Fokusübernahme aussetzen",
+    detect: "P1: terminal input listeners are editor-scoped",
+    anchor: `            onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),`,
+    replacement: `            // P1: terminal input listeners are editor-scoped. A global listener
+            // must not consume arrows or Escape before a focused selector/overlay.
+            onTerminalInput: (handler) => this.addExtensionTerminalInputListener((data) => this.ui.focusedComponent === this.editor ? handler(data) : undefined),`,
+  },
+  {
     id: "loader-scoped-events",
     file: "dist/core/extensions/loader.js",
     summary: "Extension-Listener an den Extension-Lebenszyklus binden",

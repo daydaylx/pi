@@ -11,8 +11,10 @@ Git-Arbeitsbaums sind.
 > `scripts/apply-runtime-patches.mjs` versioniert, damit sich das Nachschreiben
 > von Hand nicht wiederholt.
 
-Am 2026-08-02 wurde der Patch gegen Pi `0.83.0` geprüft und neu gebunden. Alle
-neun Anker waren unverändert; der Patch-Umfang selbst blieb gleich.
+Am 2026-08-02 wurde der Patch gegen Pi `0.83.0` geprüft und neu gebunden. Am
+2026-08-05 kam die Fokusgrenze für globale Extension-Eingaben hinzu, nachdem
+ein Fleet-Dock-Listener Pfeiltasten und Escape vor modalen Selectoren konsumiert
+hatte.
 
 ## Wiederherstellen
 
@@ -61,7 +63,10 @@ Mit `--runtime <pfad>` lässt sich eine andere Installation ansprechen.
   dann Skill-Commands, wenn Skill-Commands in den Settings aktiviert sind.
 - `dist/modes/interactive/interactive-mode.js`: Die Extension-UI erhält
   `submitSlashCommand()`. Es akzeptiert genau eine Slash-Zeile und reicht sie
-  an denselben Dispatcher wie eine manuelle Eingabe weiter.
+  an denselben Dispatcher wie eine manuelle Eingabe weiter. Außerdem werden
+  über `onTerminalInput()` registrierte globale Extension-Listener nur bei
+  Editorfokus aufgerufen; fokussierte Selector und Overlays erhalten ihre
+  Navigation direkt.
 - `dist/core/package-manager.js`: neue Funktion
   `applyConfiguredExtensionOrder()`. `toResolvedPaths()` sortiert Extensions
   innerhalb derselben Präzedenz nach der Position ihres `+path`-Eintrags in
@@ -82,6 +87,11 @@ Ohne Inventar- und Dispatcher-Patch könnte `/commands` weder Pi-Built-ins
 vollständig anzeigen noch einen gewählten Eintrag direkt ausführen. Shortcuts,
 Menü und manuelle Slash-Eingabe würden dann unterschiedliche Ausführungswege
 verwenden.
+
+Ohne die Fokusgrenze laufen globale Extension-Terminal-Listener vor der
+fokussierten Komponente. Ein Fleet-Dock, das bei leerem Editor Pfeil runter zur
+Aktivierung verwendet, kann dadurch dieselbe Taste in einem sichtbaren Selector
+verschlucken und anschließend auch Escape konsumieren.
 
 ## Upgrade-Gate
 

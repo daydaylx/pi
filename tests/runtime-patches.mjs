@@ -86,6 +86,7 @@ check("the patch set covers what p1-runtime.mjs verifies", () => {
     "applyConfiguredExtensionOrder",
     "const builtinCommands = BUILTIN_SLASH_COMMANDS.map",
     "submitSlashCommand: async (commandLine)",
+    "P1: terminal input listeners are editor-scoped",
   ];
   const applied = PATCHES.map((patch) => patch.replacement).join("\n");
   for (const marker of runtimeMarkers) {
