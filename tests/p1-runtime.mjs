@@ -68,6 +68,21 @@ assert.match(
   /submitSlashCommand: async \(commandLine\)/,
   "interactive UI exposes canonical slash submission",
 );
+assert.match(
+  interactiveSource,
+  /onExtensionShortcut = \(data\) => \{[\s\S]{0,900}Promise\.resolve\(shortcut\.handler\(createContext\(\)\)\)\.catch/,
+  "extension shortcuts launch without awaiting the handler on the input path",
+);
+assert.match(
+  interactiveSource,
+  /addChild\(this\.extensionSelector\);[\s\S]{0,120}setFocus\(this\.extensionSelector\)/,
+  "native extension selectors explicitly take keyboard focus",
+);
+assert.match(
+  interactiveSource,
+  /hideExtensionSelector\(\) \{[\s\S]{0,260}setFocus\(this\.editor\)/,
+  "closing a native extension selector restores editor focus",
+);
 
 const { createEventBus } = await import(
   `${RUNTIME_ROOT}/dist/core/event-bus.js`

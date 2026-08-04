@@ -67,6 +67,7 @@ async function load(relativePath) {
 // Keep every existing preload ahead of suite selection. A broken extension
 // import must remain visible even when its owning section is filtered out.
 const menuUi = await load("extensions/shared/menu-ui.ts");
+const tabbedOverlay = await load("extensions/shared/tabbed-overlay.ts");
 const thinkingMenu = await load("extensions/shared/thinking-menu.ts");
 const lspControlCenter = await load("extensions/lsp/control-center.ts");
 const lspTools = await load("extensions/lsp/tools.ts");
@@ -100,6 +101,7 @@ const context = {
   section,
   load,
   menuUi,
+  tabbedOverlay,
   thinkingMenu,
   lspControlCenter,
   lspTools,

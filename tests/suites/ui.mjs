@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { assert, eq } from "../shared/assertions.mjs";
 import {
   assertNoGlobalChrome,
@@ -75,6 +76,171 @@ export const uiSections = {
             controlCenter.includes("Berechtigungsmodus · /permission") &&
             controlCenter.includes("LSP-Steuerung · /lsp"),
           "Super+Q exposes the canonical workflow, permission and LSP commands",
+        );
+      }
+
+      // This uses Pi's real selector component and the harness' non-blocking
+      // shortcut dispatcher. Unlike the mapping checks above, the selector
+      // promise stays open while terminal input is routed to its focus owner.
+      {
+        const selectorModule = await import(
+          pathToFileURL(
+            path.join(
+              ROOT,
+              "npm/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/extension-selector.js",
+            ),
+          ).href
+        );
+        const themeModule = await import(
+          pathToFileURL(
+            path.join(
+              ROOT,
+              "npm/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js",
+            ),
+          ).href
+        );
+        themeModule.initTheme("dark");
+        const { ExtensionSelectorComponent } = selectorModule;
+        let selectorCalls = 0;
+        let liveHarness;
+        const select = (labels, title) =>
+          new Promise((resolve) => {
+            selectorCalls += 1;
+            const close = (value) => {
+              liveHarness.setFocusedComponent(undefined);
+              resolve(value);
+            };
+            const selector = new ExtensionSelectorComponent(
+              title,
+              labels,
+              close,
+              () => close(undefined),
+            );
+            liveHarness.setFocusedComponent(selector);
+          });
+        liveHarness = createHarness({
+          editorText: "unverlorener Entwurf",
+          select,
+        });
+        planMode.default(liveHarness.api);
+        controlPlane.default(liveHarness.api);
+        const liveContext = liveHarness.makeContext();
+        await liveHarness.runHooks("session_start", {}, liveContext);
+
+        const dispatch = liveHarness.dispatchShortcut(
+          "shift+tab",
+          liveContext,
+        );
+        let completed = false;
+        void dispatch.completion.then(() => {
+          completed = true;
+        });
+        await Promise.resolve();
+        eq(dispatch.handled, true, "Shift+Tab is recognized by Pi's dispatcher");
+        eq(selectorCalls, 1, "Shift+Tab opens exactly one native selector");
+        eq(completed, false, "the native selector remains open for input");
+        assert(
+          Boolean(liveHarness.focusedComponent),
+          "the open native selector owns keyboard focus",
+        );
+        liveHarness.sendTerminalInput("\u001b[57420u");
+        liveHarness.sendTerminalInput("\u001b[13u");
+        await dispatch.completion;
+        eq(
+          latestStatus(liveHarness, "workflow"),
+          "Schnellplan",
+          "CSI-u navigation and selection apply the chosen workflow",
+        );
+        eq(
+          liveHarness.editorText,
+          "unverlorener Entwurf",
+          "shortcut completion restores the editor draft",
+        );
+        eq(
+          liveHarness.focusedComponent,
+          undefined,
+          "closing the selector returns focus from the modal test surface",
+        );
+
+        const manual = liveContext.ui.submitSlashCommand("/workflow");
+        liveHarness.sendTerminalInput("\u001b[B");
+        liveHarness.sendTerminalInput("\u001b[B");
+        liveHarness.sendTerminalInput("\r");
+        await manual;
+        eq(
+          latestStatus(liveHarness, "workflow"),
+          "Architekturplan",
+          "manual /workflow remains navigable through the same command handler",
+        );
+
+        const cancelled = liveHarness.dispatchShortcut(
+          "shift+tab",
+          liveContext,
+        );
+        liveHarness.sendTerminalInput("\u001b");
+        await cancelled.completion;
+        eq(
+          latestStatus(liveHarness, "workflow"),
+          "Architekturplan",
+          "Escape closes the native selector without changing workflow",
+        );
+      }
+
+      {
+        let selectorCalls = 0;
+        let releaseSelector;
+        const selectorResult = new Promise((resolve) => {
+          releaseSelector = resolve;
+        });
+        const guarded = createHarness({
+          select: () => {
+            selectorCalls += 1;
+            return selectorResult;
+          },
+        });
+        planMode.default(guarded.api);
+        controlPlane.default(guarded.api);
+        const guardedContext = guarded.makeContext();
+        await guarded.runHooks("session_start", {}, guardedContext);
+        const first = guarded.dispatchShortcut("shift+tab", guardedContext);
+        const second = guarded.dispatchShortcut("shift+tab", guardedContext);
+        eq(
+          selectorCalls,
+          1,
+          "same-turn repeated shortcuts cannot queue a duplicate modal command",
+        );
+        eq(
+          guarded.submittedCommands,
+          ["/workflow"],
+          "the duplicate guard submits the canonical command only once",
+        );
+        releaseSelector(undefined);
+        await Promise.all([first.completion, second.completion]);
+      }
+
+      {
+        const failing = createHarness({
+          editorText: "wichtiger Entwurf",
+          onSubmitSlashCommand: async () => {
+            throw new Error("simulierter Dispatcherfehler");
+          },
+        });
+        controlPlane.default(failing.api);
+        const failingContext = failing.makeContext();
+        const dispatch = failing.dispatchShortcut("shift+tab", failingContext);
+        await dispatch.completion;
+        eq(
+          failing.editorText,
+          "wichtiger Entwurf",
+          "a failed preserve-draft shortcut restores the editor text",
+        );
+        assert(
+          failing.notifications.some(
+            (entry) =>
+              entry.level === "error" &&
+              entry.message.includes("simulierter Dispatcherfehler"),
+          ),
+          "shortcut dispatch failures remain visible",
         );
       }
 
@@ -258,7 +424,7 @@ export const uiSections = {
   },
 
   "shared menu shell navigation and rendering": async (context) => {
-    const { section, menuUi } = context;
+    const { section, menuUi, tabbedOverlay } = context;
 
     await section("shared menu shell navigation and rendering", async () => {
       if (!menuUi) return;
@@ -348,6 +514,140 @@ export const uiSections = {
         "Enter selects only the explicit focused leaf action",
       );
       assertNoGlobalChrome(harness, "menu shell installs no permanent chrome");
+
+      const menuEntries = [
+        { id: "first", label: "Erster", value: "first" },
+        {
+          id: "disabled",
+          label: "Blockiert",
+          value: "disabled",
+          disabled: true,
+          disabledReason: "Nicht verfügbar",
+        },
+        { id: "last", label: "Letzter", value: "last" },
+      ];
+      async function openMenu() {
+        const menuHarness = createHarness();
+        const result = menuUi.runMenu(
+          menuHarness.makeContext(),
+          "Tastaturtest",
+          menuEntries,
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        return { harness: menuHarness, result };
+      }
+      async function isSettled(promise) {
+        let settled = false;
+        void promise.then(() => {
+          settled = true;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        return settled;
+      }
+
+      {
+        const opened = await openMenu();
+        opened.harness.sendTerminalInput("\u001b[B");
+        opened.harness.sendTerminalInput("\u001b[A");
+        opened.harness.sendTerminalInput("\u001b[57420u");
+        opened.harness.sendTerminalInput("\r");
+        eq(
+          await opened.result,
+          "last",
+          "legacy and CSI-u arrows navigate while skipping disabled entries",
+        );
+      }
+
+      {
+        const opened = await openMenu();
+        opened.harness.sendTerminalInput("j");
+        opened.harness.sendTerminalInput("k");
+        opened.harness.sendTerminalInput("j");
+        opened.harness.sendTerminalInput("\n");
+        eq(
+          await opened.result,
+          "last",
+          "j/k navigation and newline Enter select the focused enabled entry",
+        );
+      }
+
+      for (const [key, label] of [
+        ["\r", "carriage-return Enter"],
+        ["\n", "newline Enter"],
+      ]) {
+        const opened = await openMenu();
+        opened.harness.sendTerminalInput(key);
+        eq(await opened.result, "first", `${label} confirms the selection`);
+      }
+
+      for (const [key, label] of [
+        ["\u001b", "Escape"],
+        ["\u0003", "Ctrl+C"],
+      ]) {
+        const opened = await openMenu();
+        opened.harness.sendTerminalInput(key);
+        const closed = await isSettled(opened.result);
+        eq(closed, true, `${label} closes the custom menu`);
+        if (!closed) opened.harness.sendTerminalInput("\r");
+        eq(await opened.result, undefined, `${label} cancels without a value`);
+        eq(
+          opened.harness.focusedComponent,
+          undefined,
+          `${label} releases custom-menu focus`,
+        );
+      }
+
+      {
+        const opened = await openMenu();
+        opened.harness.sendTerminalInput("x");
+        eq(
+          await isSettled(opened.result),
+          false,
+          "an unknown single character leaves the menu open",
+        );
+        opened.harness.sendTerminalInput("\r");
+        eq(
+          await opened.result,
+          "first",
+          "an unknown single character does not move the selection",
+        );
+      }
+
+      if (tabbedOverlay) {
+        async function selectTab(key) {
+          const tabHarness = createHarness();
+          const result = tabbedOverlay.runTabbedOverlay(
+            tabHarness.makeContext(),
+            "Tabtest",
+            [
+              {
+                id: "one",
+                label: "Eins",
+                entries: [{ id: "one-entry", label: "Eins", value: "one" }],
+              },
+              {
+                id: "two",
+                label: "Zwei",
+                entries: [{ id: "two-entry", label: "Zwei", value: "two" }],
+              },
+            ],
+          );
+          await new Promise((resolve) => setImmediate(resolve));
+          tabHarness.sendTerminalInput(key);
+          tabHarness.sendTerminalInput("\r");
+          return result;
+        }
+
+        for (const [key, label] of [
+          ["\t", "raw Tab"],
+          ["\u001b[9u", "CSI-u Tab"],
+          ["\u001b[Z", "legacy Shift+Tab"],
+          ["\u001b[9;2u", "CSI-u Shift+Tab"],
+        ]) {
+          const selected = await selectTab(key);
+          eq(selected?.tabId, "two", `${label} changes the active tab`);
+        }
+      }
     });
   },
 };

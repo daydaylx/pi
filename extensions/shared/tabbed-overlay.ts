@@ -117,14 +117,9 @@ export async function runTabbedOverlay<T>(
         const cycleTab = (delta: number) => {
           active = (active + delta + states.length) % states.length;
         };
-        const isTab = (data: string) =>
-          data === "\t" || (Key as { tab?: string }).tab === data;
+        const isTab = (data: string) => matchesKey(data, Key.tab);
         const isShiftTab = (data: string) =>
-          data === "\u001b[Z" ||
-          data === "\u001b\t" ||
-          (Key as { shift?: (key: string) => string }).shift?.(
-            (Key as { tab?: string }).tab ?? "\t",
-          ) === data;
+          matchesKey(data, Key.shift(Key.tab)) || data === "\u001b\t";
 
         return {
           render(width: number): string[] {

@@ -114,6 +114,7 @@ export function createHarness(options = {}) {
   const appended = [];
   const sent = [];
   const customComponents = [];
+  const focusStack = [];
   const entryRenderers = new Map();
   const terminalInputListeners = new Set();
   const chrome = { footer: 0, editor: 0, widget: 0, header: 0 };
@@ -204,8 +205,10 @@ export function createHarness(options = {}) {
       terminalInputListeners.add(handler);
       return () => terminalInputListeners.delete(handler);
     },
-    select: async (_title, labels) =>
-      typeof options.select === "function" ? options.select(labels) : undefined,
+    select: async (title, labels, dialogOptions) =>
+      typeof options.select === "function"
+        ? options.select(labels, title, dialogOptions)
+        : undefined,
     input: async (title, placeholder) =>
       typeof options.input === "function"
         ? options.input(title, placeholder)
@@ -218,17 +221,27 @@ export function createHarness(options = {}) {
     },
     custom(factory) {
       return new Promise((resolve) => {
-        const component = factory(tui, theme, {}, resolve);
+        let component;
+        let closed = false;
+        const done = (value) => {
+          if (closed) return;
+          closed = true;
+          const focusIndex = focusStack.lastIndexOf(component);
+          if (focusIndex >= 0) focusStack.splice(focusIndex, 1);
+          resolve(value);
+        };
+        component = factory(tui, theme, {}, done);
         customComponents.push(component);
+        if (!closed) focusStack.push(component);
         const index = customCallIndex++;
         if (Array.isArray(options.customResults)) {
           const value =
             index < options.customResults.length
               ? options.customResults[index]
               : undefined;
-          queueMicrotask(() => resolve(value));
+          queueMicrotask(() => done(value));
         } else if ("customResult" in options) {
-          queueMicrotask(() => resolve(options.customResult));
+          queueMicrotask(() => done(options.customResult));
         }
       });
     },
@@ -400,6 +413,28 @@ export function createHarness(options = {}) {
     setIdle(value) {
       idle = value;
     },
+    dispatchShortcut(shortcut, context) {
+      const handler = shortcuts.get(shortcut);
+      if (!handler)
+        return { handled: false, completion: Promise.resolve(undefined) };
+      let result;
+      try {
+        result = handler(context);
+      } catch (error) {
+        result = Promise.reject(error);
+      }
+      const completion = Promise.resolve(result).catch((error) => {
+        notifications.push({
+          message: `Shortcut handler error: ${error instanceof Error ? error.message : String(error)}`,
+          level: "error",
+        });
+      });
+      return { handled: true, completion };
+    },
+    setFocusedComponent(component) {
+      focusStack.length = 0;
+      if (component) focusStack.push(component);
+    },
     sendTerminalInput(data) {
       let current = data;
       for (const listener of [...terminalInputListeners]) {
@@ -407,7 +442,15 @@ export function createHarness(options = {}) {
         if (result?.consume) return { consumed: true, data: current };
         if (result?.data !== undefined) current = result.data;
       }
+      const focused = focusStack.at(-1);
+      if (current.length > 0 && typeof focused?.handleInput === "function") {
+        focused.handleInput(current);
+        return { consumed: true, data: current };
+      }
       return { consumed: current.length === 0, data: current };
+    },
+    get focusedComponent() {
+      return focusStack.at(-1);
     },
     get terminalInputListenerCount() {
       return terminalInputListeners.size;

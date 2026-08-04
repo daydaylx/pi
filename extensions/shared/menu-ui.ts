@@ -503,6 +503,12 @@ async function selectWithCustomUi<T>(
                 label: entry.label,
               });
             else done(entry);
+          } else if (
+            matchesKey(data, Key.escape) ||
+            matchesKey(data, Key.ctrl("c"))
+          ) {
+            done(undefined);
+            return;
           } else if (data.length === 1) {
             const matched = current.entries.find(
               (entry) =>
@@ -522,13 +528,6 @@ async function selectWithCustomUi<T>(
               done(matched);
               return;
             }
-          } else if (
-            matchesKey(data, Key.escape) ||
-            data === "\x1b" ||
-            matchesKey(data, Key.ctrl("c"))
-          ) {
-            done(undefined);
-            return;
           } else return;
           refresh();
         },

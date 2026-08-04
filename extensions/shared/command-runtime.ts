@@ -43,7 +43,10 @@ export async function submitCanonicalCommand(
     return false;
   }
 
-  await ui.submitSlashCommand(normalized);
-  if (effect === "preserve-draft") ctx.ui.setEditorText(draft);
-  return true;
+  try {
+    await ui.submitSlashCommand(normalized);
+    return true;
+  } finally {
+    if (effect === "preserve-draft") ctx.ui.setEditorText(draft);
+  }
 }
