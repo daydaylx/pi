@@ -34,6 +34,18 @@ const SECRET_PATH_PATTERN = new RegExp(
 const ENV_EXAMPLE_PATTERN = /(^|[\s/\\])\.env\.example(?=[\s/\\]|$)/gi;
 const SYSTEM_PATHS = ["/etc", "/usr", "/bin", "/sbin", "/boot", "/var"];
 
+/**
+ * Project-internal paths where a write turns into execution later.
+ *
+ * Everything else inside the project is an ordinary file: the level decides.
+ * These are not. A `.git/hooks/pre-commit` runs on the next commit, a
+ * `.git/config` `core.pager`/`core.fsmonitor`/`alias.*` runs on the next git
+ * command, and `.pi/lsp.json` decides which binary the language-server
+ * registry spawns. Without this list they were the one way a plain in-project
+ * write escalated to code execution without ever passing a bash decision.
+ */
+const PROTECTED_PROJECT_PATHS = [".git", ".pi/lsp.json", ".pi/verify.json"];
+
 const CRITICAL_BASH_PATTERNS: Array<[RegExp, string]> = [
   [
     /\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i,
@@ -259,6 +271,15 @@ function isSystemPath(path: string): boolean {
   );
 }
 
+/** True for a path inside the project that later executes what is written. */
+function isProtectedProjectPath(absolutePath: string, cwd: string): boolean {
+  const rel = relative(resolve(cwd), absolutePath).split(sep).join("/");
+  if (!rel || rel.startsWith("../")) return false;
+  return PROTECTED_PROJECT_PATHS.some(
+    (entry) => rel === entry || rel.startsWith(`${entry}/`),
+  );
+}
+
 /**
  * Identifies a caller-defined write exception (e.g. the workflow extension's
  * plan file) that stays writable even under restrictive permission levels.
@@ -334,6 +355,19 @@ export function decideFileAccess(
       ? deny("Harte Projektgrenze: externe Änderung wurde blockiert.")
       : ask(`Änderung außerhalb des Projekts: ${scope.absolutePath}`);
   }
+  if (
+    operation === "write" &&
+    isProtectedProjectPath(scope.absolutePath, cwd)
+  ) {
+    return permissionLevel === "yolo"
+      ? deny(
+          "Harte Grenze: Ausführungspfad im Projekt wurde in YOLO blockiert.",
+        )
+      : ask(
+          `Änderung an einem Ausführungspfad im Projekt: ${scope.absolutePath}`,
+          true,
+        );
+  }
   if (operation === "write" && permissionLevel === "confirm-all") {
     return ask(`Mutation im Projekt: ${scope.absolutePath}`);
   }
@@ -372,10 +406,7 @@ export function parseReadOnlyShell(command: string): ParsedShell {
     // Command substitution is active outside quotes and inside double quotes;
     // it is literal only inside single quotes. Check before quote handling so
     // `echo "$(touch file)"` cannot pass the harmless `echo` allowlist.
-    if (
-      quote !== "'" &&
-      (char === "`" || (char === "$" && next === "("))
-    ) {
+    if (quote !== "'" && (char === "`" || (char === "$" && next === "("))) {
       return { segments: [], error: "Command-Substitution ist nicht erlaubt." };
     }
     if (quote) {
@@ -503,9 +534,10 @@ function hasAnyOption(tokens: string[], patterns: RegExp[]): boolean {
  * A first hit outside a root-owned system bin directory is rejected instead
  * of falling through to a later, trusted executable with the same basename.
  */
-function trustedExecutableName(rawExecutable: string, cwd: string):
-  | string
-  | undefined {
+function trustedExecutableName(
+  rawExecutable: string,
+  cwd: string,
+): string | undefined {
   if (
     SAFE_SHELL_BUILTINS.has(rawExecutable) &&
     !rawExecutable.includes("/") &&
@@ -536,9 +568,7 @@ function trustedExecutableName(rawExecutable: string, cwd: string):
     const canonical = realpathSync(candidate);
     if (!statSync(canonical).isFile()) return undefined;
     accessSync(canonical, constants.X_OK);
-    if (
-      !TRUSTED_EXECUTABLE_ROOTS.some((root) => isInside(root, canonical))
-    ) {
+    if (!TRUSTED_EXECUTABLE_ROOTS.some((root) => isInside(root, canonical))) {
       return undefined;
     }
     return canonical.split(sep).pop()?.toLowerCase();
@@ -749,20 +779,13 @@ function isSafePlanSegment(
     if (executable === "uniq" && !hasAtMostOneUniqInput(tokens)) return false;
     if (
       executable === "fd" &&
-      hasAnyOption(tokens, [
-        /^-x/,
-        /^-X/,
-        /^--exec(?:-batch)?(?:=|$)/i,
-      ])
+      hasAnyOption(tokens, [/^-x/, /^-X/, /^--exec(?:-batch)?(?:=|$)/i])
     ) {
       return false;
     }
     if (
       executable === "rg" &&
-      hasAnyOption(tokens, [
-        /^--pre(?:=|$)/i,
-        /^--hostname-bin(?:=|$)/i,
-      ])
+      hasAnyOption(tokens, [/^--pre(?:=|$)/i, /^--hostname-bin(?:=|$)/i])
     ) {
       return false;
     }
@@ -810,14 +833,9 @@ function isSafePlanSegment(
     if (subcommand === "audit") {
       return !hasAnyOption(tokens, [/^--fix(?:=|$)/i]);
     }
-    return [
-      "list",
-      "ls",
-      "view",
-      "info",
-      "search",
-      "outdated",
-    ].includes(subcommand);
+    return ["list", "ls", "view", "info", "search", "outdated"].includes(
+      subcommand,
+    );
   }
   if (["python", "python3"].includes(executable)) {
     return tokens.length === 2 && tokens[1] === "--version";
@@ -964,7 +982,9 @@ export function decideBash(
   if (permissionLevel === "readonly") {
     return isPlanSafeCommand(trimmed, cwd)
       ? ALLOW
-      : deny("Readonly: Das Kommando ist nicht nachweislich rein inspizierend.");
+      : deny(
+          "Readonly: Das Kommando ist nicht nachweislich rein inspizierend.",
+        );
   }
 
   if (isSensitiveReference(trimmed)) {
@@ -1008,7 +1028,9 @@ export function decideBash(
       );
     }
     if (/\b(?:sudo|su)\b/i.test(trimmed)) {
-      return deny("Harte Systemgrenze: erhöhte Rechte sind auch in YOLO blockiert.");
+      return deny(
+        "Harte Systemgrenze: erhöhte Rechte sind auch in YOLO blockiert.",
+      );
     }
     if (
       /\b(?:apt|apt-get|dnf|yum|pacman|zypper|brew)\s+(?:install|remove|purge|update|upgrade)\b/i.test(
@@ -1024,9 +1046,14 @@ export function decideBash(
       );
     }
     if (likelyExternalWrite(trimmed, cwd)) {
-      return deny("Harte Projektgrenze: externe Shell-Änderung wurde blockiert.");
+      return deny(
+        "Harte Projektgrenze: externe Shell-Änderung wurde blockiert.",
+      );
     }
-    return { action: "allow", reason: "Temporärer YOLO-Bypass innerhalb harter Grenzen" };
+    return {
+      action: "allow",
+      reason: "Temporärer YOLO-Bypass innerhalb harter Grenzen",
+    };
   }
 
   for (const [pattern, reason] of SENSITIVE_ASK_PATTERNS) {
@@ -1040,7 +1067,9 @@ export function decideBash(
     }
   }
   if (containsUnquotedVariableExpansion(trimmed)) {
-    return ask("Eine unquotierte Shell-Variable kann außerhalb des Projekts auflösen");
+    return ask(
+      "Eine unquotierte Shell-Variable kann außerhalb des Projekts auflösen",
+    );
   }
   if (likelyExternalWrite(trimmed, cwd)) {
     return ask("Bash-Änderung außerhalb des aktuellen Projekts");

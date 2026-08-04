@@ -47,6 +47,45 @@ await test("hard path boundaries block secrets and anything outside the project"
   );
 });
 
+await test("writes to in-project execution paths need confirmation, YOLO refuses them", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  const decide = (level, path) =>
+    permissionPolicy.decideFileAccess(level, "write", path, cwd).action;
+  for (const path of [
+    ".git/hooks/pre-commit",
+    ".git/config",
+    ".pi/lsp.json",
+    ".pi/verify.json",
+  ]) {
+    eq(
+      decide("project-write", path),
+      "ask",
+      `${path} turns a write into later execution and must be confirmed`,
+    );
+    eq(
+      decide("yolo", path),
+      "block",
+      `${path} stays refused under the temporary YOLO bypass`,
+    );
+  }
+  eq(
+    decide("project-write", "extensions/example.ts"),
+    "allow",
+    "an ordinary project file is unaffected",
+  );
+  eq(
+    decide("project-write", ".pi/setup.json"),
+    "allow",
+    "a .pi file that executes nothing stays an ordinary write",
+  );
+  eq(
+    decide("project-write", "src/.gitignore"),
+    "allow",
+    "the guard matches the .git directory, not every name starting with .git",
+  );
+});
+
 await test("containsUnquotedVariableExpansion detects real shell expansion, not literal text", () => {
   if (!permissionPolicy) return;
   assert(
