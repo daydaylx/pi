@@ -40,9 +40,6 @@ export function eq(actual, expected, message) {
   );
 }
 
-/** Compatibility alias for tests that use the older assertion spelling. */
-export const equal = eq;
-
 export function counters() {
   return { passed, failed };
 }

@@ -1,0 +1,8 @@
+# Commits, die nur Formatierung geändert haben. `git blame` soll durch sie
+# hindurch auf die fachliche Änderung zeigen.
+#
+# Lokal einmalig aktivieren:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply prettier to the whole tree
+a6d768974b08231bd9d541bbaef748c3d8d1125a

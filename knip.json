@@ -1,0 +1,39 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "extensions/setup-core/index.ts",
+    "extensions/plan-mode/index.ts",
+    "extensions/mode-permissions.ts",
+    "extensions/lsp/index.ts",
+    "extensions/ask-user.ts",
+    "extensions/diff-viewer/index.ts",
+    "extensions/control-plane.ts",
+    "extensions/aurora-ui/index.ts",
+    "tests/run-all.mjs",
+    "tests/run.mjs",
+    "tests/workflow-mode.mjs",
+    "tests/coverage.mjs",
+    "tests/p1-runtime.mjs",
+    "tests/runtime-patches.mjs",
+    "tests/**/*.test.mjs",
+    "scripts/*.mjs",
+    "benchmarks/harness/**/*.mjs"
+  ],
+  "project": ["extensions/**/*.ts", "tests/**/*.mjs", "scripts/**/*.mjs"],
+  "ignore": ["tests/fixtures/fake-lsp.mjs"],
+  "ignoreDependencies": [
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-agent-core",
+    "@earendil-works/pi-ai",
+    "@earendil-works/pi-tui",
+    "typebox",
+    "jiti"
+  ],
+  "rules": {
+    "exports": "off",
+    "types": "off",
+    "nsExports": "off",
+    "nsTypes": "off",
+    "enumMembers": "off"
+  }
+}
