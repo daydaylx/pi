@@ -24,29 +24,10 @@ export const uiSections = {
   "Control Center menus": async (context) => {
     const {
       section,
-      load,
-      policy,
-      menuUi,
       thinkingMenu,
-      lspControlCenter,
-      lspTools,
       modePermissions,
       planMode,
       controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section("Control Center menus", async () => {
@@ -253,29 +234,7 @@ export const uiSections = {
   "shared menu shell navigation and rendering": async (context) => {
     const {
       section,
-      load,
-      policy,
       menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section("shared menu shell navigation and rendering", async () => {

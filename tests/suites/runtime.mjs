@@ -22,32 +22,7 @@ import { ROOT } from "../shared/jiti-loader.mjs";
 
 export const runtimeSections = {
   "target runtime configuration": async (context) => {
-    const {
-      section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
-    } = context;
+    const { section } = context;
 
     await section("target runtime configuration", async () => {
       const settings = JSON.parse(
@@ -410,29 +385,8 @@ export const runtimeSections = {
   "greenfield setup config and Aurora state contract": async (context) => {
     const {
       section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
       setupConfig,
-      setupCore,
       auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section(
@@ -541,29 +495,8 @@ export const runtimeSections = {
   "setup core lifecycle": async (context) => {
     const {
       section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
       contextDiagnostics,
-      setupConfig,
       setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section("setup core lifecycle", async () => {
@@ -772,29 +705,7 @@ export const runtimeSections = {
   "setup doctor required profile completeness (P1-08)": async (context) => {
     const {
       section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
       setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section(
@@ -880,28 +791,6 @@ export const runtimeSections = {
     const {
       section,
       load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section("project verification profiles (#105)", async () => {
@@ -1198,29 +1087,7 @@ export const runtimeSections = {
   "project_check tool (#123)": async (context) => {
     const {
       section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
       setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section("project_check tool (#123)", async () => {
@@ -1333,32 +1200,7 @@ export const runtimeSections = {
   },
 
   "native subagent profiles": async (context) => {
-    const {
-      section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
-    } = context;
+    const { section } = context;
 
     await section("native subagent profiles", async () => {
       const expectedProfiles = [
@@ -1462,32 +1304,7 @@ export const runtimeSections = {
   },
 
   "native project skills": async (context) => {
-    const {
-      section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
-    } = context;
+    const { section } = context;
 
     await section("native project skills", async () => {
       const expectedSkills = [
@@ -1586,29 +1403,7 @@ export const runtimeSections = {
   "global control plane shortcuts": async (context) => {
     const {
       section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
       controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section("global control plane shortcuts", async () => {
@@ -1642,28 +1437,8 @@ export const runtimeSections = {
     const {
       section,
       load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
       lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
       outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section("shared output limits", async () => {
@@ -1826,29 +1601,8 @@ export const runtimeSections = {
   "ask-user temporary dialog": async (context) => {
     const {
       section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
       askUser,
       askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
     } = context;
 
     await section("ask-user temporary dialog", async () => {
@@ -1961,26 +1715,6 @@ export const runtimeSections = {
     const {
       section,
       load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
       auroraUi,
       auroraFooter,
     } = context;
@@ -2665,29 +2399,14 @@ export const runtimeSections = {
   "combined production extension stack": async (context) => {
     const {
       section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
       modePermissions,
       planMode,
       controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
       diffViewer,
       askUser,
-      askUserPolicy,
       lspExtensionMod,
-      outputLimits,
-      contextDiagnostics,
-      setupConfig,
       setupCore,
-      auroraState,
       auroraUi,
-      auroraFooter,
     } = context;
 
     await section("combined production extension stack", async () => {

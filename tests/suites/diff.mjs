@@ -24,29 +24,10 @@ export const diffSections = {
   'diff viewer regressions': async (context) => {
   const {
     section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
     diffAlgorithm,
     diffFallback,
     diffTracker,
     diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
   } = context;
 
     await section("diff viewer regressions", async () => {

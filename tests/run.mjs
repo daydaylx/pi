@@ -9,8 +9,11 @@ import {
   recordThrow,
   setCurrentSection,
 } from "./shared/assertions.mjs";
-import { ROOT, importModule } from "./shared/jiti-loader.mjs";
-import { SECTION_SUITES, RUN_MJS_SUITES } from "./shared/run-suite-registry.mjs";
+import { importModule } from "./shared/jiti-loader.mjs";
+import {
+  SECTION_SUITES,
+  RUN_MJS_SUITES,
+} from "./shared/run-suite-registry.mjs";
 import { runtimeSections } from "./suites/runtime.mjs";
 import { uiSections } from "./suites/ui.mjs";
 import { lspSections } from "./suites/lsp.mjs";
@@ -63,7 +66,6 @@ async function load(relativePath) {
 
 // Keep every existing preload ahead of suite selection. A broken extension
 // import must remain visible even when its owning section is filtered out.
-const policy = await load("extensions/shared/permission-policy.ts");
 const menuUi = await load("extensions/shared/menu-ui.ts");
 const thinkingMenu = await load("extensions/shared/thinking-menu.ts");
 const lspControlCenter = await load("extensions/lsp/control-center.ts");
@@ -79,7 +81,9 @@ const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const lspExtensionMod = await load("extensions/lsp/index.ts");
 const outputLimits = await load("extensions/shared/output-limits.ts");
-const contextDiagnostics = await load("extensions/setup-core/context-diagnostics.ts");
+const contextDiagnostics = await load(
+  "extensions/setup-core/context-diagnostics.ts",
+);
 const setupConfig = await load("extensions/setup-core/config.ts");
 const setupCore = await load("extensions/setup-core/index.ts");
 const auroraState = await load("extensions/aurora-ui/state.ts");
@@ -95,7 +99,6 @@ const sections = {
 const context = {
   section,
   load,
-  policy,
   menuUi,
   thinkingMenu,
   lspControlCenter,
