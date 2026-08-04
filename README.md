@@ -35,15 +35,18 @@ verschachtelter Delegation sind Eigenschaften der drei Profil-Tools.
 
 ## Berechtigungen und Freigaben
 
-Die normalen Stufen `readonly`, `project-write`, `confirm-all` und temporäres
-`yolo` bleiben erhalten. Planungsmodi erlauben sichere Analyse und das direkte
-Schreiben von `current-plan.md`; andere potenziell verändernde Aktionen fragen
-nach einer engen Einmal-, Sitzungs-, Projekt- oder optionalen Globalfreigabe.
+Berechtigungen sind eine reine Stufenwahl über `/permission`: `readonly`,
+`project-write`, `confirm-all` und temporäres `yolo`. Gespeicherte
+Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe nicht.
+Planungsmodi setzen den Kontext per Prompt und erlauben technisch nur das
+direkte Schreiben von `current-plan.md` — wer im Plan eine Schreibsperre will,
+wählt `readonly` bewusst.
 
-Harte Trust-, Secret-, Symlink-, Projekt- und Systemgrenzen bleiben immer
-blockiert. Dauerhafte Freigaben werden getrennt von Projektdateien im
-Pi-Agent-Verzeichnis gespeichert und können über `/permission` eingesehen,
-gelöscht oder projektweise zurückgesetzt werden.
+Harte Trust-, Secret-, Symlink-, Projekt- und Systemgrenzen bleiben auf jeder
+Stufe blockiert, YOLO eingeschlossen. Dazu zählen auch Ausführungspfade
+innerhalb des Projekts: Schreibzugriffe auf `.git/`, `.pi/lsp.json` und
+`.pi/verify.json` müssen bestätigt werden, weil dort Geschriebenes später
+ausgeführt wird.
 
 ## Verifikation
 
@@ -53,5 +56,19 @@ npm --prefix npm run test
 npm --prefix npm run verify
 ```
 
+`verify` schließt seit dem Audit-Gate `npm run audit:check` ein — ein lokal
+grüner Lauf deckt damit dieselben Abhängigkeitsbefunde ab wie CI.
+
 Abhängigkeiten werden nicht automatisch installiert. Commits, Pushes und
 Veröffentlichungen erfolgen nur auf ausdrücklichen Auftrag.
+
+## Lokale Laufzeitdaten
+
+`auth.json`, `models-store.json`, `run-history.jsonl`, `pi-crash.log` und
+`pi-debug.log` gehören nicht ins Repository (siehe `.gitignore`) und tragen
+`0600`. Das Pi-Runtime schreibt die drei letzten selbst; legt es eine davon neu
+an, ist der Modus erneut zu setzen:
+
+```bash
+chmod 600 run-history.jsonl pi-crash.log pi-debug.log
+```

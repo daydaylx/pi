@@ -12,18 +12,18 @@ keinen Server**, bevor nicht ein `lsp_*`-Werkzeug tatsächlich aufgerufen wird
 
 ## Aktivierung und Steuerung
 
-| Aktion | Befehl | Wirkung |
-|---|---|---|
-| Status anzeigen | `/lsp` oder `/lsp status` | Zeigt Zustand und alle laufenden Server. |
-| Aktivieren | `/lsp on` | LSP für die Session aktivieren. |
-| Deaktivieren | `/lsp off` | LSP deaktivieren und **alle Server sofort stoppen**. |
-| Neustart | `/lsp restart [id]` | Server stoppen; sie werden beim nächsten Bedarf neu gestartet. Ohne `id` alle. |
-| Server auflisten | `/lsp servers` | Alle aktiven Server mit Zustand und PID. |
-| Log anzeigen | `/lsp log` | Kürzliche LSP-Logeinträge. |
+| Aktion           | Befehl                    | Wirkung                                                                        |
+| ---------------- | ------------------------- | ------------------------------------------------------------------------------ |
+| Status anzeigen  | `/lsp` oder `/lsp status` | Zeigt Zustand und alle laufenden Server.                                       |
+| Aktivieren       | `/lsp on`                 | LSP für die Session aktivieren.                                                |
+| Deaktivieren     | `/lsp off`                | LSP deaktivieren und **alle Server sofort stoppen**.                           |
+| Neustart         | `/lsp restart [id]`       | Server stoppen; sie werden beim nächsten Bedarf neu gestartet. Ohne `id` alle. |
+| Server auflisten | `/lsp servers`            | Alle aktiven Server mit Zustand und PID.                                       |
+| Log anzeigen     | `/lsp log`                | Kürzliche LSP-Logeinträge.                                                     |
 
 Statuswerte in der Fußzeile (Aurora): `leerlauf` (aktiviert, kein Server
 läuft), `N aktiv` (N Server bereit), `eingeschränkt` (ein Server ist
-*degraded*), `aus` (deaktiviert oder Modus `off`).
+_degraded_), `aus` (deaktiviert oder Modus `off`).
 
 ## Werkzeuge (read-only)
 
@@ -49,8 +49,8 @@ in dieser Version bewusst **nicht** enthalten.
 
 ## Konservative Defaults
 
-- **TypeScript/JavaScript**: automatisch aktiv, aber *Automatic Type
-  Acquisition* deaktiviert und `maxTsServerMemory` begrenzt.
+- **TypeScript/JavaScript**: automatisch aktiv, aber _Automatic Type
+  Acquisition_ deaktiviert und `maxTsServerMemory` begrenzt.
 - **Python**: automatisch aktiv, keine unsichere Ausführung.
 - **Rust**: automatisch aktiv; Cargo-Build-Skripte und Proc-Macros bleiben
   aus Sicherheitsgründen deaktiviert.
@@ -59,14 +59,14 @@ in dieser Version bewusst **nicht** enthalten.
 
 ## Server-Matrix
 
-| Sprache | Profil-ID | Kommando | Default | Hinweis |
-|---|---|---|---|---|
-| TypeScript / JavaScript | `typescript` | `typescript-language-server --stdio` | aktiv | Benötigt `typescript-language-server` + `typescript` (global). |
-| Python | `python` | `pyright-langserver --stdio` | aktiv | Benötigt `pyright` (z. B. `npm i -g pyright`). |
-| Go | `go` | `gopls` | **opt-in** | Kann Toolchain-Kommandos ausführen; nicht in nicht vertrauten Projekten aktivieren. |
-| Rust | `rust` | `rust-analyzer` | aktiv | Build-Skripte/Proc-Macros standardmäßig deaktiviert. |
-| C / C++ | `c` | `clangd` | **opt-in** | Benötigt eine `compile_commands.json`; ohne diese sind die Ergebnisse schwach. |
-| Java | `java` | `eclipse.jdt.ls` | **opt-in** | Benötigt Java-Runtime + JDT-LS; ressourcenintensiv. |
+| Sprache                 | Profil-ID    | Kommando                             | Default    | Hinweis                                                                             |
+| ----------------------- | ------------ | ------------------------------------ | ---------- | ----------------------------------------------------------------------------------- |
+| TypeScript / JavaScript | `typescript` | `typescript-language-server --stdio` | aktiv      | Benötigt `typescript-language-server` + `typescript` (global).                      |
+| Python                  | `python`     | `pyright-langserver --stdio`         | aktiv      | Benötigt `pyright` (z. B. `npm i -g pyright`).                                      |
+| Go                      | `go`         | `gopls`                              | **opt-in** | Kann Toolchain-Kommandos ausführen; nicht in nicht vertrauten Projekten aktivieren. |
+| Rust                    | `rust`       | `rust-analyzer`                      | aktiv      | Build-Skripte/Proc-Macros standardmäßig deaktiviert.                                |
+| C / C++                 | `c`          | `clangd`                             | **opt-in** | Benötigt eine `compile_commands.json`; ohne diese sind die Ergebnisse schwach.      |
+| Java                    | `java`       | `eclipse.jdt.ls`                     | **opt-in** | Benötigt Java-Runtime + JDT-LS; ressourcenintensiv.                                 |
 
 Echte Server werden **nicht** automatisch installiert. Smoke-Tests gegen echte
 Server laufen im separaten Workflow `.github/workflows/lsp-smoke.yml` (manuell
@@ -80,32 +80,41 @@ Nur in vertrauenswürdigen Projekten gelesen. Siehe kommentiertes Beispiel unter
 ```jsonc
 {
   "enabled": true,
-  "mode": "auto",                 // "off" | "auto" | "force"
-  "requestTimeoutMs": 10000,      // 1000–120000
-  "idleShutdownMs": 600000,       // 10000–3600000 (Server-Idle-Shutdown)
-  "workspaceSymbolLimit": 50,     // 1–500
+  "mode": "auto", // "off" | "auto" | "force"
+  "requestTimeoutMs": 10000, // 1000–120000
+  "idleShutdownMs": 600000, // 10000–3600000 (Server-Idle-Shutdown)
+  "workspaceSymbolLimit": 50, // 1–500
   "languages": {
     "typescript": { "enabled": true },
-    "python":     { "enabled": true },
-    "rust":       { "enabled": true }
-  }
+    "python": { "enabled": true },
+    "rust": { "enabled": true },
+  },
 }
 ```
 
-`languages.*` kann ein eingebaututes Profil überschreiben (`enabled`, `command`,
-`args`, `rootMarkers`). Unbekannte Profil-IDs werden als vollständig eigenes
-Profil behandelt.
+`languages.*` kann ein eingebautes Profil überschreiben (`enabled`, `command`,
+`args`, `rootMarkers`). Unbekannte Profil-IDs werden als eigenes Profil
+behandelt.
+
+`command` ist dabei gebunden: erlaubt ist entweder genau das Kommando des
+eingebauten Profils für diese ID oder ein Binary direkt in
+`node_modules/.bin/` des Projekts. Jeder andere Wert wird verworfen und
+protokolliert — das Profil startet dann nicht. Grund: die `lsp_*`-Werkzeuge
+sind als lesend pauschal freigegeben, ihr Aufruf startet aber einen Prozess.
+Ohne diese Bindung würde Projektvertrauen zugleich beliebige Prozessausführung
+bedeuten. Ein global installierter Server ohne eingebautes Profil braucht
+deshalb einen Eintrag in `extensions/lsp/server-profiles.ts`.
 
 ## Troubleshooting
 
-| Symptom | Ursache | Behebung |
-|---|---|---|
-| `Server-Binärdatei installieren ('…')` | Profil aktiv, Binary fehlt | Server global installieren oder Profil in `.pi/lsp.json` deaktivieren. |
-| Status `aus`, trotz `.pi/lsp.json` | Projekt nicht vertrauenswürdig | Projekt vertrauen oder Werte global/über Session-Flag setzen. |
-| Status `eingeschränkt` | Server gecrasht / nicht erholt | `/lsp restart` oder Binary-Version prüfen; `/lsp log` zeigt Details. |
-| Diagnosen veraltet | externe Änderung nicht synchronisiert | Datei in Pi erneut öffnen/speichern oder `lsp_diagnostics` erneut aufrufen. |
-| Symlink abgelehnt | Schutzregel | Stattdessen das echte Ziel prüfen. |
-| Datei zu groß | Schutzregel | Große Dateien nicht via LSP prüfen. |
+| Symptom                                | Ursache                               | Behebung                                                                    |
+| -------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------- |
+| `Server-Binärdatei installieren ('…')` | Profil aktiv, Binary fehlt            | Server global installieren oder Profil in `.pi/lsp.json` deaktivieren.      |
+| Status `aus`, trotz `.pi/lsp.json`     | Projekt nicht vertrauenswürdig        | Projekt vertrauen oder Werte global/über Session-Flag setzen.               |
+| Status `eingeschränkt`                 | Server gecrasht / nicht erholt        | `/lsp restart` oder Binary-Version prüfen; `/lsp log` zeigt Details.        |
+| Diagnosen veraltet                     | externe Änderung nicht synchronisiert | Datei in Pi erneut öffnen/speichern oder `lsp_diagnostics` erneut aufrufen. |
+| Symlink abgelehnt                      | Schutzregel                           | Stattdessen das echte Ziel prüfen.                                          |
+| Datei zu groß                          | Schutzregel                           | Große Dateien nicht via LSP prüfen.                                         |
 
 ## Migration
 
