@@ -228,13 +228,14 @@ export async function runTabbedOverlay<T>(
             else if (isShiftTab(data)) cycleTab(-1);
             else if (matchesKey(data, Key.left)) cycleTab(-1);
             else if (matchesKey(data, Key.right)) cycleTab(1);
-            else if (matchesKey(data, Key.up))
+            // Keep vi-style navigation as a protocol-independent fallback.
+            else if (matchesKey(data, Key.up) || data === "k")
               state.selected = moveMenuIndex(
                 state.selected,
                 -1,
                 state.tab.entries,
               );
-            else if (matchesKey(data, Key.down))
+            else if (matchesKey(data, Key.down) || data === "j")
               state.selected = moveMenuIndex(
                 state.selected,
                 1,
@@ -265,7 +266,11 @@ export async function runTabbedOverlay<T>(
                   : undefined;
               if (entry && !entry.disabled)
                 options.onSpace?.({ tabId: state.tab.id, entry });
-            } else if (matchesKey(data, Key.enter)) {
+            } else if (
+              matchesKey(data, Key.enter) ||
+              data === "\r" ||
+              data === "\n"
+            ) {
               const entry =
                 state.selected >= 0
                   ? state.tab.entries[state.selected]
@@ -275,6 +280,7 @@ export async function runTabbedOverlay<T>(
               return;
             } else if (
               matchesKey(data, Key.escape) ||
+              data === "\x1b" ||
               matchesKey(data, Key.ctrl("c"))
             ) {
               done(undefined);

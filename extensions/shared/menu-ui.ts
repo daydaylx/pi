@@ -447,13 +447,15 @@ async function selectWithCustomUi<T>(
         invalidate() {},
         handleInput(data: string): void {
           const current = level();
-          if (matchesKey(data, Key.up))
+          // Literal fallbacks keep navigation usable when a terminal's
+          // extended keyboard protocol is negotiated inconsistently.
+          if (matchesKey(data, Key.up) || data === "k")
             current.selected = moveMenuIndex(
               current.selected,
               -1,
               current.entries,
             );
-          else if (matchesKey(data, Key.down))
+          else if (matchesKey(data, Key.down) || data === "j")
             current.selected = moveMenuIndex(
               current.selected,
               1,
@@ -483,7 +485,11 @@ async function selectWithCustomUi<T>(
           ) {
             if (stack.length > 1) stack.pop();
             else return;
-          } else if (matchesKey(data, Key.enter)) {
+          } else if (
+            matchesKey(data, Key.enter) ||
+            data === "\r" ||
+            data === "\n"
+          ) {
             const entry =
               current.selected >= 0
                 ? current.entries[current.selected]
@@ -518,6 +524,7 @@ async function selectWithCustomUi<T>(
             }
           } else if (
             matchesKey(data, Key.escape) ||
+            data === "\x1b" ||
             matchesKey(data, Key.ctrl("c"))
           ) {
             done(undefined);

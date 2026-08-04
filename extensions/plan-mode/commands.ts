@@ -3,11 +3,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { catalogDescription } from "../shared/command-catalog.ts";
-import {
-  buildWorkflowTab,
-  type WorkflowAction,
-} from "../shared/control-center-menu.ts";
-import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
+import { buildWorkflowTab } from "../shared/control-center-menu.ts";
 import { isPlanningMode, type WorkflowMode } from "../shared/workflow-mode.ts";
 import { editPlanMarkdown, viewPlanMarkdown } from "./plan-editor.ts";
 import { planExists } from "./plan-file.ts";
@@ -151,13 +147,12 @@ export function registerPlanCommands(
   pi.registerCommand("workflow", {
     description: catalogDescription("workflow"),
     handler: async (_args, ctx) => {
-      const selected = await runTabbedOverlay<WorkflowAction>(
-        ctx,
+      const entries = buildWorkflowTab(session.selectedMode).entries;
+      const choice = await ctx.ui.select(
         "Workflow wechseln · /workflow",
-        [buildWorkflowTab(session.selectedMode)],
-        { nonInteractiveHint: "Der Workflow-Wechsel benötigt den TUI-Modus." },
+        entries.map((entry) => entry.label),
       );
-      const action = selected?.entry.value;
+      const action = entries.find((entry) => entry.label === choice)?.value;
       if (action) await switchMode(session, action, ctx);
     },
   });

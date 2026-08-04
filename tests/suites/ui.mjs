@@ -35,6 +35,7 @@ export const uiSections = {
       // a workflow entry can never differ between them.
       {
         const seen = [];
+        let customCalls = 0;
         const shared = createHarness({
           select: (labels) => {
             seen.push([...labels]);
@@ -47,10 +48,16 @@ export const uiSections = {
           cwd: mkdtempSync(path.join(tmpdir(), "pi-cc-entries-")),
         });
         sharedContext.ui.custom = async () => {
+          customCalls += 1;
           throw new Error("use deterministic select fallback");
         };
         await shared.runHooks("session_start", {}, sharedContext);
         await shared.shortcuts.get("shift+tab")(sharedContext);
+        eq(
+          customCalls,
+          0,
+          "Shift+Tab uses Pi's native selector instead of a focus-capturing overlay",
+        );
         await shared.shortcuts.get("super+q")(sharedContext);
         // Super+Q routes through an event; the bus dispatches without awaiting the
         // async listener, so let the microtask queue drain before asserting.
@@ -149,6 +156,11 @@ export const uiSections = {
         choice = "Schnellplan";
         await harness.shortcuts.get("shift+tab")(context);
         eq(
+          latestStatus(harness, "workflow"),
+          "Schnellplan",
+          "the native workflow selector maps Schnellplan",
+        );
+        eq(
           harness.api.getThinkingLevel(),
           "xhigh",
           "manual Thinking survives a workflow transition",
@@ -163,9 +175,28 @@ export const uiSections = {
         choice = "Architekturplan";
         await harness.shortcuts.get("shift+tab")(context);
         eq(
+          latestStatus(harness, "workflow"),
+          "Architekturplan",
+          "the native workflow selector maps Architekturplan",
+        );
+        eq(
           harness.api.getThinkingLevel(),
           "medium",
           "manual Thinking stays at chosen level across workflow changes",
+        );
+        choice = "Work";
+        await harness.shortcuts.get("shift+tab")(context);
+        eq(
+          latestStatus(harness, "workflow"),
+          "Work",
+          "the native workflow selector maps Work",
+        );
+        choice = undefined;
+        await harness.shortcuts.get("shift+tab")(context);
+        eq(
+          latestStatus(harness, "workflow"),
+          "Work",
+          "cancelling the native workflow selector keeps the current mode",
         );
 
         // Sessions written before the auto mode was retired still carry

@@ -5,8 +5,67 @@
  * registered and emitted so a suite can drive hooks, commands, shortcuts and
  * tools without a running agent.
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { ROOT } from "./jiti-loader.mjs";
 import { eq } from "./assertions.mjs";
+
+/**
+ * The setup every extension test repeats: a temp project, a harness, the
+ * extension(s) registered against it, a context, `session_start`, and a
+ * cleanup that must run even when an assertion throws.
+ *
+ * Written out by hand, that is a dozen lines of prologue per case, which is
+ * why the suite files carry two to three times the scaffolding per assertion
+ * that the small focused test files do — and why a test tends not to get
+ * written for the parts that are awkward to reach.
+ *
+ * `extensions` are the loaded modules to register (each may be undefined, in
+ * which case `fn` is skipped — the suites already guard on that). `fn` gets
+ * `{ harness, context, cwd }`. `session_start` runs before it and
+ * `session_shutdown` after it, unless `sessionHooks: false`.
+ */
+export async function withHarness(options, fn) {
+  const {
+    extensions = [],
+    harness: harnessOptions = {},
+    context: contextOptions = {},
+    prefix = "pi-test-",
+    files = {},
+    sessionHooks = true,
+  } = options;
+  if (extensions.some((extension) => !extension)) return undefined;
+
+  const cwd = mkdtempSync(path.join(tmpdir(), prefix));
+  try {
+    for (const [relative, contents] of Object.entries(files)) {
+      const target = path.join(cwd, relative);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(
+        target,
+        typeof contents === "string" ? contents : JSON.stringify(contents),
+      );
+    }
+    const harness = createHarness(harnessOptions);
+    for (const extension of extensions) extension.default(harness.api);
+    const context = harness.makeContext({ cwd, ...contextOptions });
+    if (sessionHooks) await harness.runHooks("session_start", {}, context);
+    try {
+      return await fn({ harness, context, cwd });
+    } finally {
+      if (sessionHooks) {
+        // A failed assertion must not leave a server or widget behind for the
+        // next case; shutdown failures themselves are not the test's subject.
+        await harness
+          .runHooks("session_shutdown", {}, context)
+          .catch(() => undefined);
+      }
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
 
 export function stripAnsi(value) {
   return String(value).replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");

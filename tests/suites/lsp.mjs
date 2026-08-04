@@ -17,6 +17,7 @@ import {
   createHarness,
   latestStatus,
   stripAnsi,
+  withHarness,
 } from "../shared/harness.mjs";
 import { ROOT } from "../shared/jiti-loader.mjs";
 
@@ -1965,74 +1966,58 @@ export const lspSections = {
       );
 
       // --- Trust gate: untrusted project never reads .pi/lsp.json ---
+      // The same file, the same assertion target, only trust differs — so the
+      // two cases share one shape and the gate is the single variable.
       {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-trust-"));
-        mkdirSync(path.join(cwd, ".pi"), { recursive: true });
-        // Deliberately invalid JSON: if this were ever read and parsed, it would
-        // either throw (caught, logged) or — if the trust gate is broken and it
-        // gets applied — flip `enabled` to false below. Untrusted must ignore it
-        // outright, not merely fail to parse it.
-        writeFileSync(
-          path.join(cwd, ".pi", "lsp.json"),
-          JSON.stringify({ enabled: false }),
+        const disablingConfig = { ".pi/lsp.json": { enabled: false } };
+
+        await withHarness(
+          {
+            extensions: [lspExtensionMod],
+            context: { trusted: false },
+            prefix: "pi-lsp97-trust-",
+            files: disablingConfig,
+          },
+          async ({ harness, context }) => {
+            harness.api.events.emit("aurora-ui/state/request", {
+              type: "request",
+              requestId: "lsp-state",
+              sessionEpoch: "lsp-epoch",
+              requester: "test",
+            });
+            // If the trust gate were broken and enabled:false got applied
+            // anyway, /lsp status would report "aus" instead.
+            await harness.commands.get("lsp")("status", context);
+            const statusText = harness.notifications.at(-1)?.message ?? "";
+            assert(
+              statusText.includes("LSP: leerlauf") ||
+                statusText.includes("LSP: 1 aktiv"),
+              "untrusted project ignores .pi/lsp.json and keeps the default enabled config (got: " +
+                statusText +
+                ")",
+            );
+          },
         );
 
-        const harness = createHarness();
-        lspExtensionMod.default(harness.api);
-        const context = harness.makeContext({ cwd, trusted: false });
-        await harness.runHooks("session_start", {}, context);
-        harness.api.events.emit("aurora-ui/state/request", {
-          type: "request",
-          requestId: "lsp-state",
-          sessionEpoch: "lsp-epoch",
-          requester: "test",
-        });
-        // .pi/lsp.json sets enabled:false; if the trust gate were broken and it
-        // got applied anyway, /lsp status would report "off" instead.
-        await harness.commands.get("lsp")("status", context);
-        const statusText = harness.notifications.at(-1)?.message ?? "";
-        assert(
-          statusText.includes("LSP: leerlauf") ||
-            statusText.includes("LSP: 1 aktiv"),
-          "untrusted project ignores .pi/lsp.json and keeps the default enabled config (got: " +
-            statusText +
-            ")",
+        // --- Trust gate: trusted project applies .pi/lsp.json ---
+        await withHarness(
+          {
+            extensions: [lspExtensionMod],
+            context: { trusted: true },
+            prefix: "pi-lsp97-trusted-",
+            files: disablingConfig,
+          },
+          async ({ harness, context }) => {
+            await harness.commands.get("lsp")("status", context);
+            const statusText = harness.notifications.at(-1)?.message ?? "";
+            assert(
+              statusText.includes("LSP: aus"),
+              "trusted project applies .pi/lsp.json's enabled:false (got: " +
+                statusText +
+                ")",
+            );
+          },
         );
-        await harness.runHooks("session_shutdown", {}, context);
-        try {
-          rmSync(cwd, { recursive: true, force: true });
-        } catch {
-          /* ignore */
-        }
-      }
-
-      // --- Trust gate: trusted project applies .pi/lsp.json ---
-      {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-trusted-"));
-        mkdirSync(path.join(cwd, ".pi"), { recursive: true });
-        writeFileSync(
-          path.join(cwd, ".pi", "lsp.json"),
-          JSON.stringify({ enabled: false }),
-        );
-
-        const harness = createHarness();
-        lspExtensionMod.default(harness.api);
-        const context = harness.makeContext({ cwd, trusted: true });
-        await harness.runHooks("session_start", {}, context);
-        await harness.commands.get("lsp")("status", context);
-        const statusText = harness.notifications.at(-1)?.message ?? "";
-        assert(
-          statusText.includes("LSP: aus"),
-          "trusted project applies .pi/lsp.json's enabled:false (got: " +
-            statusText +
-            ")",
-        );
-        await harness.runHooks("session_shutdown", {}, context);
-        try {
-          rmSync(cwd, { recursive: true, force: true });
-        } catch {
-          /* ignore */
-        }
       }
 
       // --- /lsp on|off toggles config.enabled and stops/starts the registry ---
@@ -2258,116 +2243,86 @@ export const lspSections = {
       // repository actually takes: readProjectConfig -> buildConfig ->
       // resolveConfig. A rejected profile has to be logged and dropped, and
       // must not survive into the server list.
-      {
-        const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp-command-gate-"));
-        mkdirSync(path.join(cwd, ".pi"), { recursive: true });
-        writeFileSync(
-          path.join(cwd, ".pi", "lsp.json"),
-          JSON.stringify({
-            languages: { evil: { command: "/bin/sh", rootMarkers: ["."] } },
-          }),
-        );
+      await withHarness(
+        {
+          extensions: [lspExtensionMod],
+          context: { trusted: true },
+          prefix: "pi-lsp-command-gate-",
+          files: {
+            ".pi/lsp.json": {
+              languages: { evil: { command: "/bin/sh", rootMarkers: ["."] } },
+            },
+          },
+        },
+        async ({ harness, context }) => {
+          await harness.commands.get("lsp")("log", context);
+          const logText = harness.notifications.at(-1)?.message ?? "";
+          assert(
+            /node_modules/.test(logText),
+            "a project-chosen command is rejected with a logged reason (got: " +
+              logText +
+              ")",
+          );
 
-        const harness = createHarness();
-        lspExtensionMod.default(harness.api);
-        const context = harness.makeContext({ cwd, trusted: true });
-        await harness.runHooks("session_start", {}, context);
-
-        await harness.commands.get("lsp")("log", context);
-        const logText = harness.notifications.at(-1)?.message ?? "";
-        assert(
-          /node_modules/.test(logText),
-          "a project-chosen command is rejected with a logged reason (got: " +
-            logText +
-            ")",
-        );
-
-        await harness.commands.get("lsp")("servers", context);
-        const serverText = harness.notifications.at(-1)?.message ?? "";
-        assert(
-          !serverText.includes("evil"),
-          "the rejected profile never reaches the server list (got: " +
-            serverText +
-            ")",
-        );
-
-        await harness.runHooks("session_shutdown", {}, context);
-        try {
-          rmSync(cwd, { recursive: true, force: true });
-        } catch {
-          /* ignore */
-        }
-      }
+          await harness.commands.get("lsp")("servers", context);
+          const serverText = harness.notifications.at(-1)?.message ?? "";
+          assert(
+            !serverText.includes("evil"),
+            "the rejected profile never reaches the server list (got: " +
+              serverText +
+              ")",
+          );
+        },
+      );
 
       // --- Unreadable .pi/lsp.json is reported and ignored, never fatal ---
       // Both branches fail closed to "no project config", so a broken file
       // degrades to the defaults instead of taking the session down.
-      {
-        for (const [label, content, expected] of [
-          ["invalid JSON", "{not-json", /failed to parse/],
-          [
-            "a JSON scalar",
-            '"just a string"',
-            /does not contain a JSON object/,
-          ],
-        ]) {
-          const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp-badconfig-"));
-          mkdirSync(path.join(cwd, ".pi"), { recursive: true });
-          writeFileSync(path.join(cwd, ".pi", "lsp.json"), content);
+      for (const [label, content, expected] of [
+        ["invalid JSON", "{not-json", /failed to parse/],
+        ["a JSON scalar", '"just a string"', /does not contain a JSON object/],
+      ]) {
+        await withHarness(
+          {
+            extensions: [lspExtensionMod],
+            context: { trusted: true },
+            prefix: "pi-lsp-badconfig-",
+            files: { ".pi/lsp.json": content },
+          },
+          async ({ harness, context }) => {
+            await harness.commands.get("lsp")("log", context);
+            const logText = harness.notifications.at(-1)?.message ?? "";
+            assert(
+              expected.test(logText),
+              `${label} in .pi/lsp.json is reported (got: ${logText})`,
+            );
 
-          const harness = createHarness();
-          lspExtensionMod.default(harness.api);
-          const context = harness.makeContext({ cwd, trusted: true });
-          await harness.runHooks("session_start", {}, context);
-
-          await harness.commands.get("lsp")("log", context);
-          const logText = harness.notifications.at(-1)?.message ?? "";
-          assert(
-            expected.test(logText),
-            `${label} in .pi/lsp.json is reported (got: ${logText})`,
-          );
-
-          await harness.commands.get("lsp")("status", context);
-          const statusText = harness.notifications.at(-1)?.message ?? "";
-          assert(
-            !statusText.includes("aus"),
-            `${label} falls back to the defaults instead of disabling LSP (got: ${statusText})`,
-          );
-
-          await harness.runHooks("session_shutdown", {}, context);
-          try {
-            rmSync(cwd, { recursive: true, force: true });
-          } catch {
-            /* ignore */
-          }
-        }
+            await harness.commands.get("lsp")("status", context);
+            const statusText = harness.notifications.at(-1)?.message ?? "";
+            assert(
+              !statusText.includes("aus"),
+              `${label} falls back to the defaults instead of disabling LSP (got: ${statusText})`,
+            );
+          },
+        );
       }
 
       // --- Footer status only appears in TUI mode ---
-      {
-        for (const mode of ["json", "print", "rpc"]) {
-          const nonTui = createHarness();
-          lspExtensionMod.default(nonTui.api);
-          const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-nontui-"));
-          const contextForMode = nonTui.makeContext({
-            cwd,
-            mode,
-            hasUI: false,
-            trusted: true,
-          });
-          await nonTui.runHooks("session_start", {}, contextForMode);
-          eq(
-            nonTui.statusCalls.filter((c) => c.key === "lsp"),
-            [],
-            "lsp status is not published outside TUI mode (" + mode + ")",
-          );
-          await nonTui.runHooks("session_shutdown", {}, contextForMode);
-          try {
-            rmSync(cwd, { recursive: true, force: true });
-          } catch {
-            /* ignore */
-          }
-        }
+      for (const mode of ["json", "print", "rpc"]) {
+        await withHarness(
+          {
+            extensions: [lspExtensionMod],
+            context: { mode, hasUI: false, trusted: true },
+            prefix: "pi-lsp97-nontui-",
+          },
+          ({ harness }) => {
+            eq(
+              harness.statusCalls.filter((c) => c.key === "lsp"),
+              [],
+              "lsp status is not published outside TUI mode (" + mode + ")",
+            );
+          },
+        );
       }
 
       // --- session_shutdown leaves no orphan processes ---
