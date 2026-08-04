@@ -1,25 +1,40 @@
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { relative, resolve, sep } from "node:path";
-import { isSensitiveReference, isPlanSafeCommand, resolvePathScope } from "../shared/permission-policy.ts";
+import {
+  isSensitiveReference,
+  resolvePathScope,
+} from "../shared/permission-policy.ts";
 import type { WorkflowCapabilitySnapshot } from "../shared/workflow-capabilities.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { isPlanFilePath } from "../plan-mode/plan-file.ts";
 import { toolPath } from "./tool-event.ts";
 
-export type WorkflowActionClass = "safe-read" | "known-mutation" | "unknown-risk" | "hard-block";
-
+/**
+ * The hard boundaries that hold at every permission level, YOLO included.
+ *
+ * This module answers one question: must the action be refused outright? How
+ * a permitted action is then handled — allowed, confirmed or blocked — belongs
+ * to the active permission level and lives in tool-policy.ts and
+ * shared/permission-policy.ts. The finer classification this file used to
+ * compute fed the permission-grant dialog and has had no reader since that
+ * dialog was removed.
+ */
 export interface WorkflowAssessment {
-  classification: WorkflowActionClass;
+  blocked: boolean;
   reason: string;
-  impacts: string[];
 }
 
 export const LOCAL_LSP_TOOLS = new Set([
-  "lsp_diagnostics", "lsp_definition", "lsp_references", "lsp_hover", "lsp_workspace_symbols",
+  "lsp_diagnostics",
+  "lsp_definition",
+  "lsp_references",
+  "lsp_hover",
+  "lsp_workspace_symbols",
 ]);
 
-const READ_TOOLS = new Set(["read", "grep", "find", "ls", "ask_user", "wait"]);
 const WRITE_TOOLS = new Set(["write", "edit"]);
+
+const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 
 function inside(root: string, candidate: string): boolean {
   const rel = relative(root, candidate);
@@ -27,42 +42,54 @@ function inside(root: string, candidate: string): boolean {
 }
 
 function hardBash(command: string): string | undefined {
-  if (isSensitiveReference(command)) return "Harte Secret- oder Credential-Grenze";
+  if (isSensitiveReference(command))
+    return "Harte Secret- oder Credential-Grenze";
   if (/\b(?:sudo|su)\b/i.test(command)) return "Harte Grenze: erhöhte Rechte";
-  if (/\b(?:apt|apt-get|dnf|yum|pacman|zypper|brew)\s+(?:install|remove|purge|update|upgrade)\b/i.test(command)) return "Harte Systemgrenze: System-Paketoperation";
-  if (/\b(?:curl|wget)\b[^|;&]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh)\b/i.test(command)) return "Harte Grenze: Download-to-shell";
-  if (/\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i.test(command)) return "Harte Grenze: Löschen des Root-Dateisystems";
+  if (
+    /\b(?:apt|apt-get|dnf|yum|pacman|zypper|brew)\s+(?:install|remove|purge|update|upgrade)\b/i.test(
+      command,
+    )
+  )
+    return "Harte Systemgrenze: System-Paketoperation";
+  if (
+    /\b(?:curl|wget)\b[^|;&]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh)\b/i.test(
+      command,
+    )
+  )
+    return "Harte Grenze: Download-to-shell";
+  if (/\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i.test(command))
+    return "Harte Grenze: Löschen des Root-Dateisystems";
   return undefined;
 }
 
-export function assessBash(command: string, cwd: string): WorkflowAssessment {
+export function assessBash(command: string): WorkflowAssessment {
   const hard = hardBash(command);
-  if (hard) return { classification: "hard-block", reason: hard, impacts: [hard] };
-  if (isPlanSafeCommand(command, cwd)) {
-    return { classification: "safe-read", reason: "Nachweislich lesende Shell-Analyse", impacts: [] };
-  }
-  if (/\b(?:mkdir|touch|rm|cp|mv|tee|truncate|npm\s+(?:install|uninstall|update|ci)|pnpm\s+(?:add|remove|install|update)|yarn\s+(?:add|remove|install)|pip\s+install)\b|(?:^|[^<])>(?!>)/i.test(command)) {
-    return { classification: "known-mutation", reason: "Bekannte verändernde Shell-Aktion", impacts: ["Dateien oder Abhängigkeiten können verändert werden"] };
-  }
-  return { classification: "unknown-risk", reason: "Wirkung des Tool-Aufrufs konnte nicht sicher bestimmt werden", impacts: ["Shell-Ausführung oder externe Wirkung möglich"] };
+  return hard ? { blocked: true, reason: hard } : PERMITTED;
 }
 
-export function assessWorkflowTool(event: ToolCallEvent, cwd: string): WorkflowAssessment {
-  if (event.toolName === "bash") return assessBash(String((event.input as Record<string, unknown>).command ?? ""), cwd);
+export function assessWorkflowTool(
+  event: ToolCallEvent,
+  cwd: string,
+): WorkflowAssessment {
+  if (event.toolName === "bash")
+    return assessBash(
+      String((event.input as Record<string, unknown>).command ?? ""),
+    );
   const path = toolPath(event);
   if (path) {
     const scope = resolvePathScope(path, cwd);
-    if (isSensitiveReference(path) || scope.symlinkEscape || !inside(resolve(cwd), scope.absolutePath)) {
-      return { classification: "hard-block", reason: "Harte Projekt-, Symlink- oder Secret-Grenze", impacts: ["Zugriff ist nicht sicher begrenzbar"] };
+    if (
+      isSensitiveReference(path) ||
+      scope.symlinkEscape ||
+      !inside(resolve(cwd), scope.absolutePath)
+    ) {
+      return {
+        blocked: true,
+        reason: "Harte Projekt-, Symlink- oder Secret-Grenze",
+      };
     }
   }
-  if (READ_TOOLS.has(event.toolName) || LOCAL_LSP_TOOLS.has(event.toolName)) {
-    return { classification: "safe-read", reason: "Lesende Analyse", impacts: [] };
-  }
-  if (WRITE_TOOLS.has(event.toolName)) {
-    return { classification: "known-mutation", reason: "Datei kann verändert werden", impacts: ["Projektdatei kann verändert werden"] };
-  }
-  return { classification: "unknown-risk", reason: "Unbekanntes Tool oder unklare Wirkung", impacts: ["Wirkung konnte nicht sicher bestimmt werden"] };
+  return PERMITTED;
 }
 
 export function automaticallyAllowedInPlanMode(
@@ -70,7 +97,9 @@ export function automaticallyAllowedInPlanMode(
   event: ToolCallEvent,
   cwd: string,
 ): boolean {
-  return isPlanningMode(workflow.mode) &&
+  return (
+    isPlanningMode(workflow.mode) &&
     WRITE_TOOLS.has(event.toolName) &&
-    isPlanFilePath(toolPath(event), cwd);
+    isPlanFilePath(toolPath(event), cwd)
+  );
 }
