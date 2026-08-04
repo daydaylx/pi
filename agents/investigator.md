@@ -83,7 +83,11 @@ Verboten:
 
 ## Ausgabeformat
 
-Gib ausschließlich diese Abschnitte aus.
+Gib ausschließlich diese Abschnitte aus. Enthält der Auftrag einen
+`## Acceptance Contract`, schließe danach mit genau einem gültigen, mit
+`acceptance-report` markierten JSON-Codeblock im dort vorgegebenen Schema ab.
+Dieser letzte Block ist ausdrücklich Teil des Ausgabeformats und kein
+zusätzlicher Bericht.
 
 ## Status
 

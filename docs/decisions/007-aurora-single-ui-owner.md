@@ -12,9 +12,9 @@ erhalten (Rückbau ohne Datenverlust)".
 ## Entscheidung
 
 Die fünf Dateien sind gelöscht. Aurora (`extensions/aurora-ui/`) besitzt Editor,
-Widget, Aktivität und Motion; `pi-zentui` besitzt die Fußzeile und liest die
-Statuswerte aus `UI_STATUS_KEYS` (`workflow`, `permissions`, `lsp`), belegt über
-`zentui.json`.
+Widget, Aktivität und Motion. Die frühere Zuordnung der Fußzeile an `pi-zentui`
+ist durch [009](009-aurora-owns-the-footer.md) ersetzt: Aurora besitzt auch die
+Fußzeile und liest die dafür relevanten Statuswerte selbst.
 
 ## Begründung
 
@@ -28,8 +28,8 @@ Rückfallebene.
 
 - `CONTROL_CENTER_EVENTS` enthält nur noch Kanäle mit Emitter und Listener.
   `openContext`, `openChanges`, `snapshot` und `openThinkingView` sind entfernt.
-- `ZENTUI_STATUS_KEYS` heißt `UI_STATUS_KEYS`; die Stringwerte sind unverändert,
-  weil `zentui.json` sie als Platzierungsschlüssel referenziert.
+- `ZENTUI_STATUS_KEYS` heißt `UI_STATUS_KEYS`; die Stringwerte bleiben als
+  Schnittstelle zwischen ihren Providern und Aurora bestehen.
 - `tests/run.mjs` prüft, dass die fünf Dateien nicht mehr existieren — die
   stärkere Aussage als „ist deaktiviert".
 - Diese Entscheidung ersetzt den älteren Ledger-Eintrag zur Aufbewahrung

@@ -1,131 +1,67 @@
 /**
- * Thinking depth: state, workflow default and the Thinking & Reasoning menu.
- *
- * Lives next to the permission modules because both are persisted in one
- * session record and both react to a workflow change — but the two are not the
- * same concern, and mixing them is what made the original file hard to read.
- *
- * Auto mode follows the workflow (an architecture plan raises the depth
- * immediately); a manually chosen level is a user decision and is never
- * overridden.
+ * Thinking depth control: manual level selection only.
  */
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { CONTROL_CENTER_EVENTS } from "../shared/control-center-events.ts";
 import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
 import {
   buildThinkingMenu,
+  isSelectableThinkingLevel,
   thinkingLabel,
   type SelectableThinkingLevel,
 } from "../shared/thinking-menu.ts";
 
 export interface ThinkingControl {
-  mode(): "auto" | "manual";
-  manualLevel(): SelectableThinkingLevel | undefined;
-  /** Fields this control contributes to the shared persisted record. */
+  /** The fields this control contributes to the shared persisted record. */
   fields(): {
-    thinkingMode: "auto" | "manual";
-    manualThinkingLevel: SelectableThinkingLevel | undefined;
+    thinkingMode: "manual";
+    manualThinkingLevel: SelectableThinkingLevel;
   };
-  /** The level the active workflow asks for, or the current one. */
-  workflowDefault(): ThinkingLevel;
-  /** Apply the workflow default when the user has not chosen manually. */
-  followWorkflow(): void;
-  /** Restore from the persisted session record at session start. */
-  restore(data?: {
-    thinkingMode?: "auto" | "manual";
-    manualThinkingLevel?: SelectableThinkingLevel;
-  }): void;
+  restore(data?: { manualThinkingLevel?: unknown }): void;
   applySelection(
-    selection: "auto" | `manual:${SelectableThinkingLevel}`,
+    selection: SelectableThinkingLevel,
     ctx: ExtensionContext,
     isCurrentEpoch: () => boolean,
   ): void;
   openMenu(ctx: ExtensionContext, isCurrentEpoch: () => boolean): Promise<void>;
-  /** Wired by the extension entry so a change persists with the rest. */
   onPersist: () => void;
 }
 
 export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
-  let thinkingMode: "auto" | "manual" = "auto";
-  let manualThinkingLevel: SelectableThinkingLevel | undefined;
+  let manualThinkingLevel: SelectableThinkingLevel = "medium";
 
   const control: ThinkingControl = {
     onPersist: () => {},
 
-    mode: () => thinkingMode,
-    manualLevel: () => manualThinkingLevel,
-    fields: () => ({ thinkingMode, manualThinkingLevel }),
-
-    workflowDefault() {
-      let level: ThinkingLevel | undefined;
-      pi.events.emit(CONTROL_CENTER_EVENTS.workflowThinkingDefault, {
-        respond: (value: { mode: string; defaultLevel: ThinkingLevel }) => {
-          level = value.defaultLevel;
-        },
-      });
-      return level ?? pi.getThinkingLevel();
-    },
-
-    followWorkflow() {
-      if (thinkingMode === "auto")
-        pi.setThinkingLevel(control.workflowDefault());
-    },
+    fields: () => ({ thinkingMode: "manual", manualThinkingLevel }),
 
     restore(data) {
-      thinkingMode = data?.thinkingMode === "manual" ? "manual" : "auto";
-      manualThinkingLevel = data?.manualThinkingLevel;
-      if (thinkingMode === "manual" && manualThinkingLevel) {
-        pi.setThinkingLevel(manualThinkingLevel);
-      } else {
-        thinkingMode = "auto";
-        manualThinkingLevel = undefined;
-        pi.setThinkingLevel(control.workflowDefault());
-      }
+      // A record written before the auto mode was removed can still carry
+      // `"auto"` here, which is not a thinking level. Anything unknown falls
+      // back to the default instead of being handed to the agent as-is.
+      manualThinkingLevel = isSelectableThinkingLevel(data?.manualThinkingLevel)
+        ? data.manualThinkingLevel
+        : "medium";
+      pi.setThinkingLevel(manualThinkingLevel);
     },
 
-    applySelection(selectedLevel, ctx, isCurrentEpoch) {
+    applySelection(level, ctx, isCurrentEpoch) {
       if (!isCurrentEpoch()) return;
-      if (selectedLevel === "auto") {
-        thinkingMode = "auto";
-        manualThinkingLevel = undefined;
-        const level = control.workflowDefault();
-        pi.setThinkingLevel(level);
-        control.onPersist();
-        ctx.ui.notify(
-          `Thinking: ${thinkingLabel(thinkingMode, level)}.`,
-          "info",
-        );
-        return;
-      }
-
-      const level = selectedLevel.slice(
-        "manual:".length,
-      ) as SelectableThinkingLevel;
-      thinkingMode = "manual";
       manualThinkingLevel = level;
       pi.setThinkingLevel(level);
       control.onPersist();
-      ctx.ui.notify(`Thinking: ${thinkingLabel(thinkingMode, level)}.`, "info");
+      ctx.ui.notify(`Thinking: ${thinkingLabel(level)}.`, "info");
     },
 
     async openMenu(ctx, isCurrentEpoch) {
-      const entries = buildThinkingMenu(
-        pi.getThinkingLevel(),
-        thinkingMode,
-      ).filter((entry) => {
-        if (entry.value === "auto") return true;
-        const value = entry.value;
-        if (!value) return false;
-        const level = value.slice("manual:".length) as SelectableThinkingLevel;
-        return ctx.model?.thinkingLevelMap?.[level] !== null;
-      });
-      const selected = await runTabbedOverlay<
-        "auto" | `manual:${SelectableThinkingLevel}`
-      >(
+      const entries = buildThinkingMenu(pi.getThinkingLevel()).filter(
+        (entry) =>
+          entry.value !== undefined &&
+          ctx.model?.thinkingLevelMap?.[entry.value] !== null,
+      );
+      const selected = await runTabbedOverlay<SelectableThinkingLevel>(
         ctx,
         "Thinking & Reasoning",
         [
@@ -138,7 +74,8 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
         { nonInteractiveHint: "Thinking & Reasoning benötigt den TUI-Modus." },
       );
       const selectedLevel = selected?.entry.value;
-      if (selectedLevel) control.applySelection(selectedLevel, ctx, isCurrentEpoch);
+      if (selectedLevel)
+        control.applySelection(selectedLevel, ctx, isCurrentEpoch);
     },
   };
   return control;

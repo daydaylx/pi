@@ -41,7 +41,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -116,15 +115,7 @@ export const runtimeSections = {
         );
         eq(
           setup.permissions,
-          {
-            unknownTools: "ask",
-            bash: "allow",
-            workflowDefaults: {
-              work: "project-write",
-              simple_plan: "readonly",
-              detailed_plan: "readonly",
-            },
-          },
+          { unknownTools: "ask", bash: "allow" },
           "unknown tools and free bash fail to confirmation",
         );
         eq(
@@ -241,7 +232,6 @@ export const runtimeSections = {
             "+extensions/mode-permissions.ts",
             "+extensions/lsp/index.ts",
             "+extensions/ask-user.ts",
-            "+extensions/tool-output-guard.ts",
             "+extensions/diff-viewer/index.ts",
             "+extensions/control-plane.ts",
             "+extensions/aurora-ui/index.ts",
@@ -254,7 +244,6 @@ export const runtimeSections = {
           "+extensions/mode-permissions.ts",
           "+extensions/ask-user.ts",
           "+extensions/lsp/index.ts",
-          "+extensions/tool-output-guard.ts",
           "+extensions/aurora-ui/index.ts",
         ]) {
           assert(
@@ -333,7 +322,7 @@ export const runtimeSections = {
         );
         eq(
           subagentConfig.maxSubagentSpawnsPerSession,
-          12,
+          5,
           "active package config directly bounds spawns per session",
         );
         eq(
@@ -438,7 +427,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -459,15 +447,7 @@ export const runtimeSections = {
         );
         eq(
           defaults.permissions,
-          {
-            unknownTools: "ask",
-            bash: "allow",
-            workflowDefaults: {
-              work: "project-write",
-              simple_plan: "readonly",
-              detailed_plan: "readonly",
-            },
-          },
+          { unknownTools: "ask", bash: "allow" },
           "capability defaults require confirmation",
         );
         assert(
@@ -481,11 +461,7 @@ export const runtimeSections = {
           path.join(project, ".pi", "setup.json"),
           JSON.stringify({
             ui: { motion: "reduced" },
-            permissions: {
-              unknownTools: "allow",
-              bash: "allow",
-              workflowDefaults: { work: "full-access" },
-            },
+            permissions: { unknownTools: "allow", bash: "allow" },
             lsp: { requestTimeoutMs: 5000 },
           }),
         );
@@ -502,13 +478,7 @@ export const runtimeSections = {
         );
         eq(
           trusted.config.permissions,
-          {
-            ...defaults.permissions,
-            workflowDefaults: {
-              ...defaults.permissions.workflowDefaults,
-              work: "confirm-all",
-            },
-          },
+          defaults.permissions,
           "project may not relax global permissions",
         );
         assert(
@@ -588,7 +558,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -820,7 +789,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -928,7 +896,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -1248,7 +1215,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -1293,14 +1259,12 @@ export const runtimeSections = {
           trusted,
         );
         eq(
-          harness.execCalls.slice(-5).map((call) => call.command),
-          ["npm", "npm", "git", "git", "git"],
-          // The trailing three git calls are projectDiffFingerprint's
-          // unstaged diff, staged diff, and status calls (P0-07).
+          harness.execCalls.slice(-2).map((call) => call.command),
+          ["npm", "npm"],
           "project_check executes requested profiles in deterministic order",
         );
         eq(
-          harness.execCalls.at(-5)?.options?.cwd,
+          harness.execCalls.at(-2)?.options?.cwd,
           workspace,
           "project_check executes only at the bounded project cwd",
         );
@@ -1368,642 +1332,6 @@ export const runtimeSections = {
     });
   },
 
-  "project check freshness warning (#129)": async (context) => {
-    const {
-      section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      toolOutputGuard,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
-    } = context;
-
-    await section("project check freshness warning (#129)", async () => {
-      if (!setupCore) return;
-      const workspace = mkdtempSync(
-        path.join(tmpdir(), "pi-project-check-freshness-"),
-      );
-      mkdirSync(path.join(workspace, ".pi"), { recursive: true });
-      writeFileSync(
-        path.join(workspace, ".pi", "verify.json"),
-        JSON.stringify({
-          profiles: {
-            test: {
-              program: "node",
-              args: ["--version"],
-              classification: "required",
-            },
-          },
-        }),
-      );
-      const harness = createHarness({
-        exec(command) {
-          return {
-            code: 0,
-            stdout: command === "git" ? "diff --git a/a b/a\n" : "ok",
-            stderr: "",
-            killed: false,
-          };
-        },
-      });
-      setupCore.default(harness.api);
-      const context = harness.makeContext({ cwd: workspace, trusted: true });
-      await harness.runHooks("session_start", {}, context);
-      await harness.runHooks("agent_end", {}, context);
-      assert(
-        harness.notifications
-          .at(-1)
-          ?.message?.includes("kein erfolgreicher Projekt-Check"),
-        "agent end warns non-blockingly for a changed unchecked project",
-      );
-      const checks = harness.tools.get("project_check");
-      if (checks)
-        await checks.execute(
-          "fresh-check",
-          { profile: "test" },
-          undefined,
-          undefined,
-          context,
-        );
-      const warnings = harness.notifications.length;
-      await harness.runHooks("agent_end", {}, context);
-      eq(
-        harness.notifications.length,
-        warnings,
-        "a successful required check for the current diff suppresses the warning",
-      );
-      rmSync(workspace, { recursive: true, force: true });
-    });
-  },
-
-  "project check freshness detects staged and untracked changes (P0-07)":
-    async (context) => {
-      const {
-        section,
-        load,
-        policy,
-        menuUi,
-        thinkingMenu,
-        lspControlCenter,
-        lspTools,
-        modePermissions,
-        planMode,
-        controlPlane,
-        diffAlgorithm,
-        diffFallback,
-        diffTracker,
-        diffViewer,
-        askUser,
-        askUserPolicy,
-        lspExtensionMod,
-        outputLimits,
-        toolOutputGuard,
-        contextDiagnostics,
-        setupConfig,
-        setupCore,
-        auroraState,
-        auroraUi,
-        auroraFooter,
-      } = context;
-
-      await section(
-        "project check freshness detects staged and untracked changes (P0-07)",
-        async () => {
-          if (!setupCore) return;
-          // Only unstaged `git diff` used to be inspected, so a staged-only
-          // or untracked-only change looked identical to no change at all —
-          // an agent could stage an edit or add a new file and a required
-          // check would still look fresh against it.
-          async function assertDetected(exec, label) {
-            const workspace = mkdtempSync(
-              path.join(tmpdir(), "pi-project-check-freshness-diff-"),
-            );
-            mkdirSync(path.join(workspace, ".pi"), { recursive: true });
-            writeFileSync(
-              path.join(workspace, ".pi", "verify.json"),
-              JSON.stringify({
-                profiles: {
-                  test: {
-                    program: "node",
-                    args: ["--version"],
-                    classification: "required",
-                  },
-                },
-              }),
-            );
-            const harness = createHarness({ exec });
-            setupCore.default(harness.api);
-            const context = harness.makeContext({
-              cwd: workspace,
-              trusted: true,
-            });
-            await harness.runHooks("session_start", {}, context);
-            await harness.runHooks("agent_end", {}, context);
-            assert(
-              harness.notifications
-                .at(-1)
-                ?.message?.includes("kein erfolgreicher Projekt-Check"),
-              `${label} is detected as a project change`,
-            );
-            rmSync(workspace, { recursive: true, force: true });
-          }
-
-          await assertDetected((command, args) => {
-            if (command !== "git")
-              return { code: 0, stdout: "ok", stderr: "", killed: false };
-            if (args.includes("--cached"))
-              return {
-                code: 0,
-                stdout: "diff --git a/staged b/staged\n",
-                stderr: "",
-                killed: false,
-              };
-            return { code: 0, stdout: "", stderr: "", killed: false };
-          }, "a staged-only change");
-
-          await assertDetected((command, args) => {
-            if (command !== "git")
-              return { code: 0, stdout: "ok", stderr: "", killed: false };
-            if (args[0] === "status")
-              return {
-                code: 0,
-                stdout: "?? new-file.txt\n",
-                stderr: "",
-                killed: false,
-              };
-            return { code: 0, stdout: "", stderr: "", killed: false };
-          }, "a new untracked file");
-        },
-      );
-    },
-
-  "performance tool registrations": async (context) => {
-    const {
-      section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      toolOutputGuard,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
-    } = context;
-
-    await section("performance tool registrations", async () => {
-      if (!setupCore) return;
-      const workspace = mkdtempSync(
-        path.join(tmpdir(), "pi-performance-registration-"),
-      );
-      mkdirSync(path.join(workspace, ".pi"), { recursive: true });
-      writeFileSync(
-        path.join(workspace, ".pi", "performance.json"),
-        JSON.stringify({
-          profiles: {
-            quick: {
-              program: "bench",
-              args: [],
-              warmups: 0,
-              runs: 2,
-              metricSource: "json",
-              metric: "duration_ms",
-              direction: "lower_is_better",
-            },
-          },
-        }),
-      );
-      writeFileSync(
-        path.join(workspace, ".pi", "profiling.json"),
-        JSON.stringify({
-          profiles: {
-            compiler: {
-              adapter: "compiler-diagnostics",
-              program: "cc",
-              args: ["-c", "source.c"],
-            },
-          },
-        }),
-      );
-      let gitDiffOutput = "";
-      const harness = createHarness({
-        exec(command) {
-          if (command === "git")
-            return {
-              code: 0,
-              stdout: gitDiffOutput,
-              stderr: "",
-              killed: false,
-            };
-          if (command === "bench")
-            return {
-              code: 0,
-              stdout: '{"duration_ms":10}',
-              stderr: "",
-              killed: false,
-            };
-          if (command === "cc")
-            return {
-              code: 0,
-              stdout: "source.c:1:1: remark: loop vectorized",
-              stderr: "",
-              killed: false,
-            };
-          return {
-            code: 1,
-            stdout: "",
-            stderr: "unexpected command",
-            killed: false,
-          };
-        },
-      });
-      setupCore.default(harness.api);
-      const context = harness.makeContext({ cwd: workspace, trusted: true });
-      await harness.runHooks("session_start", {}, context);
-      const profile = harness.tools.get("performance_profile");
-      const measure = harness.tools.get("performance_measure");
-      const compare = harness.tools.get("performance_compare");
-      const state = harness.tools.get("performance_state");
-      if (profile) {
-        const result = await profile.execute(
-          "profile-compiler",
-          { profile: "compiler" },
-          undefined,
-          undefined,
-          context,
-        );
-        eq(
-          result.isError,
-          false,
-          "profiling executes a configured trusted profile",
-        );
-      }
-      if (measure) {
-        const result = await measure.execute(
-          "measure-quick",
-          { profile: "quick" },
-          undefined,
-          undefined,
-          context,
-        );
-        eq(
-          result.isError,
-          false,
-          "performance measurement accepts a complete profile",
-        );
-        assert(
-          result.content[0].text.includes("median=10.000"),
-          "measurement reports its compact median summary",
-        );
-      }
-      if (compare) {
-        const result = await compare.execute(
-          "compare-missing",
-          { baseline: "none", candidate: "none" },
-          undefined,
-          undefined,
-          context,
-        );
-        eq(
-          result.isError,
-          true,
-          "comparison rejects measurements not held in the session",
-        );
-      }
-      if (measure && compare) {
-        // P0-01 regression: baseline measured on a clean workspace, candidate
-        // measured after a real code change (the git diff stub now reports a
-        // non-empty diff). The two measurements share the same benchmark
-        // command, so the real before/after comparison must succeed even
-        // though the source state genuinely differs.
-        gitDiffOutput = "";
-        const baseline = await measure.execute(
-          "measure-baseline",
-          { profile: "quick" },
-          undefined,
-          undefined,
-          context,
-        );
-        eq(
-          baseline.isError,
-          false,
-          "baseline measurement on a clean workspace succeeds",
-        );
-        gitDiffOutput =
-          "diff --git a/src/hot.js b/src/hot.js\n+faster implementation\n";
-        const afterChange = await measure.execute(
-          "measure-after-change",
-          { profile: "quick" },
-          undefined,
-          undefined,
-          context,
-        );
-        eq(
-          afterChange.isError,
-          false,
-          "candidate measurement after a real code change succeeds",
-        );
-        assert(
-          baseline.details.sourceFingerprint !==
-            afterChange.details.sourceFingerprint,
-          "baseline and candidate carry different source fingerprints",
-        );
-        eq(
-          baseline.details.benchmarkInputFingerprint,
-          afterChange.details.benchmarkInputFingerprint,
-          "same profile keeps the same benchmark input fingerprint across a code change",
-        );
-        const comparison = await compare.execute(
-          "compare-before-after",
-          { baseline: baseline.details.id, candidate: afterChange.details.id },
-          undefined,
-          undefined,
-          context,
-        );
-        eq(
-          comparison.isError,
-          false,
-          "a normal before/after benchmark comparison is not rejected as an incompatible input (P0-01)",
-        );
-        eq(
-          comparison.details.sourceChanged,
-          true,
-          "the differing source state is surfaced in the comparison, not treated as an error",
-        );
-        gitDiffOutput = "";
-      }
-      if (state) {
-        const result = await state.execute(
-          "state-show",
-          { action: "show" },
-          undefined,
-          undefined,
-          context,
-        );
-        eq(
-          result.isError,
-          false,
-          "performance state can be inspected without mutating the project",
-        );
-      }
-      rmSync(workspace, { recursive: true, force: true });
-    });
-
-    /** Gate exec stub whose typecheck step fails; used by the sections below. */
-  },
-
-  "performance_state correctness verification (P0-02)": async (context) => {
-    const {
-      section,
-      load,
-      policy,
-      menuUi,
-      thinkingMenu,
-      lspControlCenter,
-      lspTools,
-      modePermissions,
-      planMode,
-      controlPlane,
-      diffAlgorithm,
-      diffFallback,
-      diffTracker,
-      diffViewer,
-      askUser,
-      askUserPolicy,
-      lspExtensionMod,
-      outputLimits,
-      toolOutputGuard,
-      contextDiagnostics,
-      setupConfig,
-      setupCore,
-      auroraState,
-      auroraUi,
-      auroraFooter,
-    } = context;
-
-    await section(
-      "performance_state correctness verification (P0-02)",
-      async () => {
-        if (!setupCore) return;
-        const workspace = mkdtempSync(
-          path.join(tmpdir(), "pi-performance-state-correctness-"),
-        );
-        mkdirSync(path.join(workspace, ".pi"), { recursive: true });
-        writeFileSync(
-          path.join(workspace, ".pi", "verify.json"),
-          JSON.stringify({
-            profiles: {
-              typecheck: {
-                program: "node",
-                args: ["--version"],
-                classification: "required",
-              },
-            },
-          }),
-        );
-        writeFileSync(
-          path.join(workspace, ".pi", "performance.json"),
-          JSON.stringify({
-            profiles: {
-              quick: {
-                program: "bench",
-                args: [],
-                warmups: 0,
-                runs: 2,
-                metricSource: "json",
-                metric: "duration_ms",
-                direction: "lower_is_better",
-              },
-            },
-          }),
-        );
-        let gitDiffOutput = "";
-        const harness = createHarness({
-          exec(command) {
-            if (command === "git")
-              return {
-                code: 0,
-                stdout: gitDiffOutput,
-                stderr: "",
-                killed: false,
-              };
-            if (command === "bench")
-              return {
-                code: 0,
-                stdout: '{"duration_ms":10}',
-                stderr: "",
-                killed: false,
-              };
-            if (command === "node")
-              return { code: 0, stdout: "v22.0.0", stderr: "", killed: false };
-            return {
-              code: 1,
-              stdout: "",
-              stderr: "unexpected command",
-              killed: false,
-            };
-          },
-        });
-        setupCore.default(harness.api);
-        const trusted = harness.makeContext({ cwd: workspace, trusted: true });
-        await harness.runHooks("session_start", {}, trusted);
-        const measure = harness.tools.get("performance_measure");
-        const state = harness.tools.get("performance_state");
-        const check = harness.tools.get("project_check");
-        if (measure && state && check) {
-          gitDiffOutput = "";
-          const baselineMeasurement = await measure.execute(
-            "m-baseline",
-            { profile: "quick" },
-            undefined,
-            undefined,
-            trusted,
-          );
-          const baselineAttempt = await state.execute(
-            "a-baseline",
-            {
-              action: "record_attempt",
-              measurementId: baselineMeasurement.details.id,
-              hypothesis: "baseline",
-              correctness: "unknown",
-            },
-            undefined,
-            undefined,
-            trusted,
-          );
-          eq(
-            baselineAttempt.details.attempt.decision,
-            "kept",
-            "the very first attempt always establishes the baseline",
-          );
-
-          gitDiffOutput = "diff --git a/src/hot.js b/src/hot.js\n+faster\n";
-          const candidateMeasurement = await measure.execute(
-            "m-candidate",
-            { profile: "quick" },
-            undefined,
-            undefined,
-            trusted,
-          );
-          const unverifiedAttempt = await state.execute(
-            "a-candidate-unverified",
-            {
-              action: "record_attempt",
-              measurementId: candidateMeasurement.details.id,
-              hypothesis: "candidate, no project_check yet",
-              correctness: "passed",
-            },
-            undefined,
-            undefined,
-            trusted,
-          );
-          eq(
-            unverifiedAttempt.details.attempt.correctness,
-            "unknown",
-            "a 'passed' claim with no matching project_check run is downgraded to 'unknown' (P0-02)",
-          );
-          assert(
-            unverifiedAttempt.content[0].text.includes("herabgestuft"),
-            "the tool response explains why the claim was downgraded",
-          );
-
-          const checkResult = await check.execute(
-            "check-candidate",
-            { profile: "typecheck" },
-            undefined,
-            undefined,
-            trusted,
-          );
-          eq(
-            checkResult.isError,
-            false,
-            "the required profile succeeds for the candidate's exact code state",
-          );
-
-          const verifiedAttempt = await state.execute(
-            "a-candidate-verified",
-            {
-              action: "record_attempt",
-              measurementId: candidateMeasurement.details.id,
-              hypothesis: "candidate, verified by project_check",
-              correctness: "passed",
-            },
-            undefined,
-            undefined,
-            trusted,
-          );
-          eq(
-            verifiedAttempt.details.attempt.correctness,
-            "passed",
-            "a 'passed' claim backed by a matching project_check run is trusted (P0-02)",
-          );
-          assert(
-            !verifiedAttempt.content[0].text.includes("herabgestuft"),
-            "no downgrade notice once project_check verified this exact code state",
-          );
-
-          const failedAttempt = await state.execute(
-            "a-candidate-failed",
-            {
-              action: "record_attempt",
-              measurementId: candidateMeasurement.details.id,
-              hypothesis: "candidate, claimed failed",
-              correctness: "failed",
-            },
-            undefined,
-            undefined,
-            trusted,
-          );
-          eq(
-            failedAttempt.details.attempt.correctness,
-            "failed",
-            "a 'failed' claim needs no project_check and is trusted directly",
-          );
-          eq(
-            failedAttempt.details.attempt.decision,
-            "rejected",
-            "a candidate claimed failed is always rejected",
-          );
-        }
-        rmSync(workspace, { recursive: true, force: true });
-      },
-    );
-  },
-
   "native subagent profiles": async (context) => {
     const {
       section,
@@ -2024,7 +1352,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -2154,7 +1481,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -2277,7 +1603,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -2313,7 +1638,7 @@ export const runtimeSections = {
     });
   },
 
-  "shared output limits and subagent guard": async (context) => {
+  "shared output limits": async (context) => {
     const {
       section,
       load,
@@ -2333,7 +1658,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -2342,8 +1666,8 @@ export const runtimeSections = {
       auroraFooter,
     } = context;
 
-    await section("shared output limits and subagent guard", async () => {
-      if (!outputLimits || !toolOutputGuard) return;
+    await section("shared output limits", async () => {
+      if (!outputLimits) return;
       const largeText = [
         "HEAD_SENTINEL",
         ...Array.from(
@@ -2389,7 +1713,7 @@ export const runtimeSections = {
         "a long single UTF-8 line retains both head and tail sentinels",
       );
       assert(
-        !limitedUtf8.text.includes("�"),
+        !limitedUtf8.text.includes("\uFFFD"),
         "partial single-line truncation never splits a UTF-8 code point",
       );
       assert(
@@ -2429,169 +1753,10 @@ export const runtimeSections = {
       assert(
         subagentUtf8.text.startsWith("HEAD_SUBAGENT_UTF8-") &&
           subagentUtf8.text.endsWith("-TAIL_SUBAGENT_UTF8") &&
-          !subagentUtf8.text.includes("�") &&
+          !subagentUtf8.text.includes("\uFFFD") &&
           Buffer.byteLength(subagentUtf8.text, "utf8") <=
             outputLimits.SUBAGENT_MAX_BYTES,
         "subagent UTF-8 truncation is byte-safe and retains head and tail",
-      );
-
-      const harness = createHarness();
-      toolOutputGuard.default(harness.api);
-      const unconstrainedCall = {
-        type: "tool_call",
-        toolCallId: "subagent-unbounded",
-        toolName: "subagent",
-        input: { agent: "scout", task: "inspect" },
-      };
-      await harness.runHooks(
-        "tool_call",
-        unconstrainedCall,
-        harness.makeContext(),
-      );
-      eq(
-        unconstrainedCall.input.maxOutput,
-        undefined,
-        "the guard leaves package-side subagent output settings untouched",
-      );
-
-      const strictCall = {
-        type: "tool_call",
-        toolCallId: "subagent-strict",
-        toolName: "subagent",
-        input: {
-          agent: "scout",
-          task: "inspect",
-          maxOutput: { bytes: 4096, lines: 100 },
-        },
-      };
-      await harness.runHooks("tool_call", strictCall, harness.makeContext());
-      eq(
-        strictCall.input.maxOutput,
-        { bytes: 4096, lines: 100 },
-        "the guard does not mutate caller-provided subagent limits",
-      );
-
-      const details = { runId: "child-1", artifact: "/tmp/result.json" };
-      const guardedResult = (
-        await harness.runHooks(
-          "tool_result",
-          {
-            type: "tool_result",
-            toolCallId: "subagent-result",
-            toolName: "subagent",
-            input: {},
-            content: [{ type: "text", text: largeText }],
-            details,
-            isError: true,
-          },
-          harness.makeContext(),
-        )
-      )[0];
-      assert(
-        guardedResult.content[0].text.includes("[Ausgabe gekürzt:"),
-        "the subagent result backstop visibly truncates oversized text",
-      );
-      assert(
-        guardedResult.content[0].text.startsWith("HEAD_SENTINEL") &&
-          guardedResult.content[0].text.endsWith("TAIL_SENTINEL"),
-        "the subagent result backstop preserves explicit head and tail sentinels",
-      );
-      eq(
-        guardedResult.details,
-        { ...details, truncation: guardedResult.details.truncation },
-        "the backstop preserves result details and adds truncation metadata",
-      );
-      assert(
-        guardedResult.details.truncation.totalBytes >
-          guardedResult.details.truncation.outputBytes,
-        "subagent truncation metadata records original and retained bytes",
-      );
-      eq(guardedResult.isError, true, "the backstop preserves isError");
-
-      const upstreamTruncation = { truncated: true, source: "package" };
-      const guardedExistingTruncation = (
-        await harness.runHooks(
-          "tool_result",
-          {
-            type: "tool_result",
-            toolCallId: "subagent-existing-truncation",
-            toolName: "subagent",
-            input: {},
-            content: [{ type: "text", text: largeText }],
-            details: {
-              artifact: "/tmp/upstream.json",
-              truncation: upstreamTruncation,
-            },
-            isError: false,
-          },
-          harness.makeContext(),
-        )
-      )[0];
-      eq(
-        guardedExistingTruncation.details.upstreamTruncation,
-        upstreamTruncation,
-        "the backstop preserves an upstream truncation detail separately",
-      );
-      assert(
-        guardedExistingTruncation.details.truncation.totalBytes >
-          guardedExistingTruncation.details.truncation.outputBytes,
-        "the backstop still records its own delivered-output metadata",
-      );
-
-      const multiBlock = (
-        await harness.runHooks(
-          "tool_result",
-          {
-            type: "tool_result",
-            toolCallId: "subagent-multi-block",
-            toolName: "subagent",
-            input: {},
-            content: [
-              { type: "text", text: "FIRST_BLOCK\n" + largeText },
-              { type: "image", data: "image-data", mimeType: "image/png" },
-              { type: "text", text: largeText + "\nLAST_BLOCK" },
-            ],
-            details: { artifact: "/tmp/child-result.json" },
-            isError: false,
-          },
-          harness.makeContext(),
-        )
-      )[0];
-      eq(
-        multiBlock.content.length,
-        2,
-        "subagent guard combines text blocks without dropping non-text blocks",
-      );
-      eq(
-        multiBlock.content[1],
-        { type: "image", data: "image-data", mimeType: "image/png" },
-        "subagent guard preserves structured artifact blocks",
-      );
-      assert(
-        multiBlock.content[0].text.startsWith("FIRST_BLOCK") &&
-          multiBlock.content[0].text.endsWith("LAST_BLOCK") &&
-          multiBlock.details.artifact === "/tmp/child-result.json" &&
-          multiBlock.details.truncation,
-        "multi-block subagent output keeps head/tail and structured detail metadata",
-      );
-
-      const unrelated = await harness.runHooks(
-        "tool_result",
-        {
-          type: "tool_result",
-          toolCallId: "other-result",
-          toolName: "other",
-          input: {},
-          content: [{ type: "text", text: largeText }],
-          details: undefined,
-          isError: false,
-        },
-        harness.makeContext(),
-      );
-      eq(
-        unrelated[0],
-        undefined,
-        "the output guard does not alter non-subagent tool results",
       );
 
       const lspTools = await load("extensions/lsp/tools.ts");
@@ -2678,7 +1843,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -2813,7 +1977,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -3519,7 +2682,6 @@ export const runtimeSections = {
       askUserPolicy,
       lspExtensionMod,
       outputLimits,
-      toolOutputGuard,
       contextDiagnostics,
       setupConfig,
       setupCore,
@@ -3535,7 +2697,6 @@ export const runtimeSections = {
         !setupCore ||
         !askUser ||
         !lspExtensionMod ||
-        !toolOutputGuard ||
         !diffViewer ||
         !controlPlane ||
         !auroraUi
@@ -3547,7 +2708,6 @@ export const runtimeSections = {
         "+extensions/mode-permissions.ts": modePermissions.default,
         "+extensions/lsp/index.ts": lspExtensionMod.default,
         "+extensions/ask-user.ts": askUser.default,
-        "+extensions/tool-output-guard.ts": toolOutputGuard.default,
         "+extensions/diff-viewer/index.ts": diffViewer.default,
         "+extensions/control-plane.ts": controlPlane.default,
         "+extensions/aurora-ui/index.ts": auroraUi.default,
@@ -3595,10 +2755,6 @@ export const runtimeSections = {
           "lsp_hover",
           "lsp_references",
           "lsp_workspace_symbols",
-          "performance_compare",
-          "performance_measure",
-          "performance_profile",
-          "performance_state",
           "project_check",
           "verify",
         ],

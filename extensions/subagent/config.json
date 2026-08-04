@@ -5,7 +5,7 @@
     "concurrency": 3
   },
   "globalConcurrencyLimit": 3,
-  "maxSubagentSpawnsPerSession": 12,
+  "maxSubagentSpawnsPerSession": 5,
   "ui": {
     "showAsyncWidget": false,
     "fleetView": true,

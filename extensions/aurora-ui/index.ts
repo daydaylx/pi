@@ -277,9 +277,13 @@ class AuroraEditor extends CustomEditor {
 
   render(width: number): string[] {
     const workflow = this.auroraState.workflow;
+    const progress =
+      workflow.completed !== undefined && workflow.total !== undefined
+        ? ` · ${workflow.completed}/${workflow.total}`
+        : "";
     const active = this.auroraState.activity.kind !== "idle";
     return [
-      renderBar(this.auroraTheme, workflow.label, width, active),
+      renderBar(this.auroraTheme, `${workflow.label}${progress}`, width, active),
       ...super.render(width),
     ];
   }
@@ -361,23 +365,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const active = state.activity.kind !== "idle";
     ticker.setAnimationActive(active);
 
-    if (!active) {
-      ctx.ui.setWorkingVisible(false);
-      return;
-    }
-    if (ticker.motion === "off") {
-      ctx.ui.setWorkingIndicator({ frames: [] });
-      ctx.ui.setWorkingVisible(false);
-      return;
-    }
-    ctx.ui.setWorkingIndicator({
-      frames: [workingFrame(ctx.ui.theme, ticker.motion, ticker.frame)],
-    });
-    // The specific activity text (e.g. "N Tools aktiv") lives exclusively in
-    // the activity widget's heading (renderActivityWidget below). Passing it
-    // here too would show the same text on both surfaces at once.
-    ctx.ui.setWorkingMessage("Arbeite …");
-    ctx.ui.setWorkingVisible(true);
+    // Aurora's activity widget is the single live-work surface. Keeping Pi's
+    // native indicator visible as well creates a second moving signal next to
+    // the editor; motion is rendered by the widget itself when enabled.
+    ctx.ui.setWorkingVisible(false);
   }
 
   function updateState(ctx: ExtensionContext, patch: AuroraUiStatePatch): void {
@@ -513,14 +504,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       );
     }
 
-    ticker = new AnimationTicker(loaded.config.ui.motion, (frame) => {
-      if (!state || disposed || !activeContext || !ticker) return;
-      if (state.activity.kind !== "idle" && ticker.motion !== "off") {
-        activeContext.ui.setWorkingIndicator({
-          frames: [workingFrame(activeContext.ui.theme, ticker.motion, frame)],
-        });
-      }
-    });
+    ticker = new AnimationTicker(loaded.config.ui.motion, () => {});
 
     const sessionCtx = ctx;
     ctx.ui.setEditorComponent(

@@ -41,7 +41,6 @@ export const diffSections = {
     askUserPolicy,
     lspExtensionMod,
     outputLimits,
-    toolOutputGuard,
     contextDiagnostics,
     setupConfig,
     setupCore,

@@ -1,14 +1,14 @@
 /**
- * Permission mode state: selection, workflow defaults, YOLO and persistence.
+ * Permission mode state: selection, YOLO and persistence.
  *
- * Three values, deliberately distinct:
+ * Two values, deliberately distinct:
  *   selectedPermissionLevel/State — what the user chose (persisted)
- *   workflowDefaultPermission     — what the active workflow asks for
  *   permissionLevel/State         — what is actually in force right now
  *
- * YOLO only ever exists in the effective pair. It is a temporary bypass, never
- * a preference: it is never persisted, a workflow transition exits it, and the
- * hard secret/system/symlink/trust boundaries stay active throughout.
+ * The workflow mode no longer chooses a level; it is recorded for the audit
+ * entry only. YOLO exists in the effective pair alone. It is a temporary
+ * bypass, never a preference: it is never persisted, and the hard
+ * secret/system/symlink/trust boundaries stay active throughout.
  *
  * The session epoch guards against a menu that resolves after the session it
  * belonged to has ended.
@@ -39,16 +39,7 @@ import {
   type PolicyAction as ConfiguredPolicyAction,
 } from "../setup-core/config.ts";
 import { permissionWarning } from "./tool-policy.ts";
-import type { SelectableThinkingLevel } from "../shared/thinking-menu.ts";
 import type { ThinkingControl } from "./thinking-control.ts";
-import {
-  PermissionGrantStore,
-  type GrantChoice,
-  type GrantDescriptor,
-  type PermissionGrant,
-} from "./grants.ts";
-
-export type { PermissionGrant } from "./grants.ts";
 
 export const PERSISTED_STATE_KEY = "mode-permissions";
 
@@ -57,8 +48,11 @@ interface PersistedPermissionState {
   permissionLevel?: unknown;
   selectedPermissionLevel?: unknown;
   selectedPermissionState?: unknown;
-  thinkingMode?: "auto" | "manual";
-  manualThinkingLevel?: SelectableThinkingLevel;
+  // Records written before the auto thinking mode was retired can still carry
+  // `"auto"` in either field, so both stay deliberately untyped here and are
+  // validated on restore.
+  thinkingMode?: unknown;
+  manualThinkingLevel?: unknown;
 }
 
 export interface ConfiguredToolPolicy {
@@ -90,18 +84,8 @@ export interface PermissionSession {
   ): Promise<void>;
   /** True when the event belongs to the session that is currently active. */
   ownsSession(sessionId: string, cwd: string): boolean;
-  workflowDefaultLevel(): Exclude<PermissionLevel, "yolo">;
   beginSession(ctx: ExtensionContext, workflowMode: WorkflowMode): void;
   endSession(ctx: ExtensionContext): void;
-  hasGrant(descriptor: GrantDescriptor, cwd: string): boolean;
-  saveGrant(
-    choice: Exclude<GrantChoice, "once" | "deny">,
-    descriptor: GrantDescriptor,
-    cwd: string,
-  ): boolean;
-  listGrants(scope: "project" | "global", cwd: string): PermissionGrant[];
-  removeGrant(id: string): boolean;
-  clearProjectGrants(cwd: string): void;
 }
 
 export function createPermissionSession(
@@ -110,10 +94,7 @@ export function createPermissionSession(
 ): PermissionSession {
   let configuredPolicy = defaultSetupConfig().permissions;
   let activeWorkflowMode: WorkflowMode = "work";
-  let workflowDefaultPermission: Exclude<PermissionLevel, "yolo"> =
-    configuredPolicy.workflowDefaults.work;
-  let selectedPermissionLevel: Exclude<PermissionLevel, "yolo"> =
-    workflowDefaultPermission;
+  let selectedPermissionLevel: PermissionLevel = "project-write";
   let selectedPermissionState: Exclude<PermissionState, "YOLO_OVERRIDE"> =
     "DEFAULT";
   let permissionState: PermissionState = "DEFAULT";
@@ -123,7 +104,6 @@ export function createPermissionSession(
   let activeContext: ExtensionContext | undefined;
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
-  const grants = new PermissionGrantStore();
 
   function publishStatus(ctx: ExtensionContext): void {
     setTuiStatus(
@@ -158,8 +138,6 @@ export function createPermissionSession(
   function auditTransition(
     source: "command" | "shortcut" | "workflow" | "session",
   ): void {
-    // This is a persistent session audit entry. It intentionally records no
-    // command text, paths, tool input, or other potentially sensitive data.
     pi.appendEntry("permission-transition", {
       timestamp: new Date().toISOString(),
       source,
@@ -167,7 +145,6 @@ export function createPermissionSession(
       selectedState: selectedPermissionState,
       effectiveLevel: permissionLevel,
       selectedLevel: selectedPermissionLevel,
-      workflowDefaultLevel: workflowDefaultPermission,
       workflowMode: activeWorkflowMode,
     });
   }
@@ -178,12 +155,6 @@ export function createPermissionSession(
     context: () => activeContext,
     epoch: () => sessionEpoch,
     isCurrentEpoch: (epoch) => epoch === sessionEpoch,
-    workflowDefaultLevel: () => workflowDefaultPermission,
-    hasGrant: (descriptor, cwd) => grants.matches(descriptor, cwd),
-    saveGrant: (choice, descriptor, cwd) => grants.add(choice, descriptor, cwd),
-    listGrants: (scope, cwd) => grants.list(scope, cwd),
-    removeGrant: (id) => grants.remove(id),
-    clearProjectGrants: (cwd) => grants.clearProject(cwd),
 
     ownsSession(sessionId, cwd) {
       return Boolean(
@@ -196,7 +167,6 @@ export function createPermissionSession(
     persist() {
       pi.appendEntry(PERSISTED_STATE_KEY, {
         permissionLevel: selectedPermissionLevel,
-        workflowDefaultPermission,
         selectedPermissionLevel,
         selectedPermissionState,
         permissionState: selectedPermissionState,
@@ -207,30 +177,10 @@ export function createPermissionSession(
 
     applyWorkflowDefaults(workflowMode, ctx, source) {
       activeWorkflowMode = workflowMode;
-      workflowDefaultPermission =
-        configuredPolicy.workflowDefaults[workflowMode];
-      if (selectedPermissionState === "DEFAULT") {
-        selectedPermissionLevel = workflowDefaultPermission;
-      }
-      // YOLO is a temporary bypass, never a workflow preference.  A workflow
-      // transition therefore exits it, while an explicitly selected normal
-      // level remains intact.
-      permissionState = selectedPermissionState;
-      permissionLevel = selectedPermissionLevel;
-      // Auto thinking has to follow the workflow, not just the session start:
-      // switching to an architecture plan must raise the depth immediately. A
-      // manually chosen level is a user decision and stays untouched.
-      thinking.followWorkflow();
+      // Workflow mode changes no longer automatically alter user's chosen permission level.
       publishStatus(ctx);
       session.persist();
       auditTransition(source);
-      if (source === "workflow") {
-        const detail =
-          selectedPermissionState === "MANUAL"
-            ? `manuelle Stufe ${PERMISSION_LEVEL_LABEL[selectedPermissionLevel]} bleibt aktiv`
-            : `Default ${PERMISSION_LEVEL_LABEL[workflowDefaultPermission]} aktiv`;
-        ctx.ui.notify(`🔄 Workflow ${workflowMode}: ${detail}.`, "info");
-      }
     },
 
     async toggleYolo(ctx, source, epoch = sessionEpoch) {
@@ -259,7 +209,7 @@ export function createPermissionSession(
         return;
       }
       const nextState: Exclude<PermissionState, "YOLO_OVERRIDE"> =
-        level === workflowDefaultPermission ? "DEFAULT" : "MANUAL";
+        level === "project-write" ? "DEFAULT" : "MANUAL";
       if (
         permissionState !== "YOLO_OVERRIDE" &&
         selectedPermissionState === nextState &&
@@ -297,8 +247,7 @@ export function createPermissionSession(
         )
         .pop() as { data?: PersistedPermissionState } | undefined;
       thinking.restore(latestState?.data);
-      // A persisted `yolo` is downgraded rather than restored: the bypass must
-      // never survive a session boundary.
+
       const persistedRaw =
         latestState?.data?.selectedPermissionLevel ??
         latestState?.data?.permissionLevel;
@@ -307,15 +256,11 @@ export function createPermissionSession(
         normalizedPersistedLevel === "yolo"
           ? "project-write"
           : normalizedPersistedLevel;
-      const persistedManual =
-        latestState?.data?.selectedPermissionState === "MANUAL" ||
-        persistedRaw === "yolo" ||
-        (latestState?.data?.selectedPermissionState === undefined &&
-          restoredLevel !== undefined);
-      selectedPermissionLevel =
-        restoredLevel ?? configuredPolicy.workflowDefaults.work;
-      selectedPermissionState = persistedManual ? "MANUAL" : "DEFAULT";
-      permissionState = "DEFAULT";
+      selectedPermissionLevel = restoredLevel ?? "project-write";
+      selectedPermissionState =
+        selectedPermissionLevel === "project-write" ? "DEFAULT" : "MANUAL";
+      permissionState = selectedPermissionState;
+      permissionLevel = selectedPermissionLevel;
       session.applyWorkflowDefaults(workflowMode, ctx, "session");
     },
 

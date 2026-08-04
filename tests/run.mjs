@@ -79,7 +79,6 @@ const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const lspExtensionMod = await load("extensions/lsp/index.ts");
 const outputLimits = await load("extensions/shared/output-limits.ts");
-const toolOutputGuard = await load("extensions/tool-output-guard.ts");
 const contextDiagnostics = await load("extensions/setup-core/context-diagnostics.ts");
 const setupConfig = await load("extensions/setup-core/config.ts");
 const setupCore = await load("extensions/setup-core/index.ts");
@@ -112,7 +111,6 @@ const context = {
   askUserPolicy,
   lspExtensionMod,
   outputLimits,
-  toolOutputGuard,
   contextDiagnostics,
   setupConfig,
   setupCore,

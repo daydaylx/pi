@@ -19,24 +19,10 @@
     "permissions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["unknownTools", "bash", "workflowDefaults"],
+      "required": ["unknownTools", "bash"],
       "properties": {
         "unknownTools": { "enum": ["block", "ask", "allow"] },
-        "bash": { "enum": ["block", "ask", "allow"] },
-        "workflowDefaults": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["work", "simple_plan", "detailed_plan"],
-          "properties": {
-            "work": { "enum": ["readonly", "project-write", "confirm-all"] },
-            "simple_plan": {
-              "enum": ["readonly", "project-write", "confirm-all"]
-            },
-            "detailed_plan": {
-              "enum": ["readonly", "project-write", "confirm-all"]
-            }
-          }
-        }
+        "bash": { "enum": ["block", "ask", "allow"] }
       }
     },
     "lsp": {

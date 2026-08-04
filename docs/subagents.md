@@ -55,6 +55,10 @@ Laufzeitangabe für spätere Diagnose und keine Persistenz von Prompt- oder
 Tool-Inhalten. Die Paket-Artefakte und `status` bleiben die Quelle für
 asynchrone Run-Informationen.
 
+Read-only Rollen liefern ihre Befunde inline. Aufrufer geben ihnen keinen
+`output`-Pfad vor; bei Bedarf werden die Paket-Artefakte statt einer vom Kind
+zu schreibenden Zieldatei verwendet.
+
 ## Betriebsgrenzen
 
 - Keine automatische Installation oder Aktualisierung des Pakets.

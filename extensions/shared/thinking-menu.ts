@@ -11,7 +11,12 @@ export const THINKING_LEVELS = [
 ] as const;
 
 export type SelectableThinkingLevel = (typeof THINKING_LEVELS)[number];
-export type ThinkingMenuSelection = "auto" | `manual:${SelectableThinkingLevel}`;
+
+export function isSelectableThinkingLevel(
+  value: unknown,
+): value is SelectableThinkingLevel {
+  return THINKING_LEVELS.includes(value as SelectableThinkingLevel);
+}
 
 const THINKING_LEVEL_LABEL: Record<SelectableThinkingLevel, string> = {
   off: "Aus",
@@ -31,31 +36,18 @@ const THINKING_LEVEL_DESCRIPTION: Record<SelectableThinkingLevel, string> = {
   xhigh: "Maximales Nachdenken für die komplexesten Aufgaben",
 };
 
-export function thinkingLabel(
-  mode: "auto" | "manual",
-  level: ThinkingLevel,
-): string {
-  return mode === "auto" ? `Auto (${level})` : `Manuell (${level})`;
+export function thinkingLabel(level: ThinkingLevel): string {
+  return `Manuell (${level})`;
 }
 
 export function buildThinkingMenu(
   current: ThinkingLevel,
-  mode: "auto" | "manual" = "manual",
-): MenuEntry<ThinkingMenuSelection>[] {
-  return [
-    {
-      id: "thinking-auto",
-      label: "Auto",
-      description: "Folgt dem Denkstandard des aktiven Workflow-Modus",
-      value: "auto",
-      current: mode === "auto",
-    },
-    ...THINKING_LEVELS.map((level) => ({
-      id: `thinking-${level}`,
-      label: `Manuell: ${THINKING_LEVEL_LABEL[level]}`,
-      description: THINKING_LEVEL_DESCRIPTION[level],
-      value: `manual:${level}` as const,
-      current: mode === "manual" && current === level,
-    })),
-  ];
+): MenuEntry<SelectableThinkingLevel>[] {
+  return THINKING_LEVELS.map((level) => ({
+    id: `thinking-${level}`,
+    label: `Manuell: ${THINKING_LEVEL_LABEL[level]}`,
+    description: THINKING_LEVEL_DESCRIPTION[level],
+    value: level,
+    current: current === level,
+  }));
 }

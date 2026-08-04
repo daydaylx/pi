@@ -6,12 +6,7 @@
   },
   "permissions": {
     "unknownTools": "ask",
-    "bash": "allow",
-    "workflowDefaults": {
-      "work": "project-write",
-      "simple_plan": "readonly",
-      "detailed_plan": "readonly"
-    }
+    "bash": "allow"
   },
   "lsp": {
     "enabled": true,
@@ -25,32 +20,17 @@
   "verification": {
     "typecheck": {
       "command": "npm",
-      "args": [
-        "--prefix",
-        "npm",
-        "run",
-        "typecheck"
-      ],
+      "args": ["--prefix", "npm", "run", "typecheck"],
       "timeoutMs": 120000
     },
     "test": {
       "command": "npm",
-      "args": [
-        "--prefix",
-        "npm",
-        "run",
-        "test"
-      ],
+      "args": ["--prefix", "npm", "run", "test"],
       "timeoutMs": 300000
     },
     "verify": {
       "command": "npm",
-      "args": [
-        "--prefix",
-        "npm",
-        "run",
-        "verify"
-      ],
+      "args": ["--prefix", "npm", "run", "verify"],
       "timeoutMs": 420000
     }
   },

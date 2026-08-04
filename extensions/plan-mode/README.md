@@ -9,3 +9,12 @@ Die Markdown-Struktur ist eine Empfehlung und wird nie validiert.
 
 Work bindet einen vorhandenen Plan nur als hilfreichen, abweichbaren Kontext
 ein. Alte `.agent/plans/*.json`-Sidecars und Archive werden ignoriert.
+
+## Durchsetzung
+
+Der Kontext ist ein Prompt, keine Schreibsperre: ein Moduswechsel ändert die
+Berechtigungsstufe nicht. Technisch erzwungen sind allein die Plandatei als
+automatisch erlaubtes Schreibziel (`automaticallyAllowedInPlanMode`) und die
+harten Secret-, System-, Symlink- und Trust-Grenzen, die in jedem Modus gelten.
+Wer eine Schreibsperre im Planmodus will, wählt die Stufe `readonly` bewusst
+über `/permission`. Das ist eine bewusste Komfortentscheidung.

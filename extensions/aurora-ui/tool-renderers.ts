@@ -57,11 +57,18 @@ export function renderActiveTools(
   now: number,
 ): string[] {
   const available = Math.max(1, width);
-  return tools.slice(0, layoutFor(width) === "narrow" ? 1 : 3).map((tool) => {
+  const limit = layoutFor(width) === "narrow" ? 1 : 3;
+  const visible = tools.slice(0, limit).map((tool) => {
     const elapsed = Math.max(0, Math.floor((now - tool.startedAt) / 1000));
     const target = tool.target ? `  ${theme.fg("muted", tool.target)}` : "";
     const badge = theme.fg("accent", "◆");
     const line = `${badge} ${theme.bold(tool.name)}${target} ${theme.fg("dim", `${elapsed}s`)}`;
     return truncateToWidth(line, available, "…");
   });
+  const hidden = tools.length - visible.length;
+  if (hidden > 0)
+    visible.push(
+      truncateToWidth(theme.fg("muted", `↳ +${hidden} weitere Tools`), available, "…"),
+    );
+  return visible;
 }

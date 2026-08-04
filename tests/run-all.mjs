@@ -19,7 +19,6 @@ const suites = [
     file: "run.mjs",
     env: { PI_TEST_SUITE: name },
   })),
-  { name: "performance-tools", file: "performance-tools.mjs", env: {} },
   {
     name: "p4-manifest",
     file: "../benchmarks/harness/test/p4-manifest.test.mjs",

@@ -10,7 +10,7 @@
  *   tool-event.ts       reading the path out of a tool call
  *   workflow-policy.ts  workflow-scoped decisions   [pure]
  *   tool-policy.ts      permission-level decisions  [pure]
- *   session-state.ts    mode, workflow defaults, YOLO, persistence, audit
+ *   session-state.ts    mode, YOLO, persistence, audit
  *   thinking-control.ts thinking depth and its menu
  *   menus.ts            permission selection menu
  *   guards.ts           the tool_call / user_bash interceptors
@@ -21,20 +21,13 @@ import {
   CONTROL_CENTER_EVENTS,
   type OpenControlCenterMenuEvent,
 } from "./shared/control-center-events.ts";
-import {
-  THINKING_LEVELS,
-  type SelectableThinkingLevel,
-} from "./shared/thinking-menu.ts";
+import { isSelectableThinkingLevel } from "./shared/thinking-menu.ts";
 import {
   PERMISSION_LEVEL_LABEL,
   normalizePermissionLevel,
   type PermissionLevel,
 } from "./shared/workflow-status.ts";
-import {
-  WORKFLOW_CAPABILITY_EVENTS,
-  requestWorkflowCapabilities,
-  type WorkflowActivatedEvent,
-} from "./shared/workflow-capabilities.ts";
+import { requestWorkflowCapabilities } from "./shared/workflow-capabilities.ts";
 import { registerPermissionGuards } from "./permissions/guards.ts";
 import { openPermissionMenu } from "./permissions/menus.ts";
 import { createPermissionSession } from "./permissions/session-state.ts";
@@ -75,7 +68,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("thinking", {
-    description: `${catalogDescription("thinking")}: auto | off | minimal | low | medium | high | xhigh`,
+    description: `${catalogDescription("thinking")}: off | minimal | low | medium | high | xhigh`,
     handler: async (args, ctx) => {
       const epoch = session.epoch();
       const value = args.trim().toLowerCase();
@@ -83,24 +76,14 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
         await thinking.openMenu(ctx, () => session.isCurrentEpoch(epoch));
         return;
       }
-      if (value === "auto") {
-        thinking.applySelection(
-          "auto",
-          ctx,
-          () => session.isCurrentEpoch(epoch),
-        );
-        return;
-      }
-      if (THINKING_LEVELS.includes(value as SelectableThinkingLevel)) {
-        thinking.applySelection(
-          `manual:${value as SelectableThinkingLevel}`,
-          ctx,
-          () => session.isCurrentEpoch(epoch),
+      if (isSelectableThinkingLevel(value)) {
+        thinking.applySelection(value, ctx, () =>
+          session.isCurrentEpoch(epoch),
         );
         return;
       }
       ctx.ui.notify(
-        "Nutzung: /thinking auto|off|minimal|low|medium|high|xhigh",
+        "Nutzung: /thinking off|minimal|low|medium|high|xhigh",
         "info",
       );
     },
@@ -116,12 +99,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     const ctx = (event as OpenControlCenterMenuEvent).ctx;
     const epoch = session.epoch();
     await thinking.openMenu(ctx, () => session.isCurrentEpoch(epoch));
-  });
-  pi.events.on(WORKFLOW_CAPABILITY_EVENTS.activated, (event) => {
-    const activated = event as WorkflowActivatedEvent;
-    if (!session.ownsSession(activated.sessionId, activated.cwd)) return;
-    const ctx = session.context();
-    if (ctx) session.applyWorkflowDefaults(activated.mode, ctx, "workflow");
   });
 
   registerPermissionGuards(pi, session);

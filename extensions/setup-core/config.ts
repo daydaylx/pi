@@ -1,11 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import {
-  normalizePermissionLevel,
-  type PermissionLevel,
-  type WorkflowMode,
-} from "../shared/workflow-status.ts";
 import type {
   RoutingLevel,
   RoutingProfileConfig,
@@ -16,7 +11,6 @@ export type MotionMode = "contextual" | "reduced" | "off";
 export type PolicyAction = "block" | "ask" | "allow";
 export type LspMode = "off" | "auto" | "force";
 export type VerificationName = "typecheck" | "test" | "verify";
-export type WorkflowDefaultPermissionLevel = Exclude<PermissionLevel, "yolo">;
 
 export interface VerificationCommand {
   command: string;
@@ -29,7 +23,6 @@ export interface SetupConfig {
   permissions: {
     unknownTools: PolicyAction;
     bash: PolicyAction;
-    workflowDefaults: Record<WorkflowMode, WorkflowDefaultPermissionLevel>;
   };
   lsp: {
     enabled: boolean;
@@ -59,11 +52,6 @@ const DEFAULT_CONFIG: SetupConfig = {
   permissions: {
     unknownTools: "ask",
     bash: "allow",
-    workflowDefaults: {
-      work: "project-write",
-      simple_plan: "readonly",
-      detailed_plan: "readonly",
-    },
   },
   lsp: {
     enabled: true,
@@ -313,20 +301,9 @@ function applyUserLayer(
   if (permissions)
     reportUnknownKeys(
       permissions,
-      ["unknownTools", "bash", "workflowDefaults"],
+      ["unknownTools", "bash"],
       source,
       "permissions.",
-      diagnostics,
-    );
-  const workflowDefaults = isObject(permissions?.workflowDefaults)
-    ? permissions.workflowDefaults
-    : undefined;
-  if (workflowDefaults)
-    reportUnknownKeys(
-      workflowDefaults,
-      ["work", "simple_plan", "detailed_plan"],
-      source,
-      "permissions.workflowDefaults.",
       diagnostics,
     );
   if (lsp)
@@ -386,25 +363,6 @@ function applyUserLayer(
     "permissions.bash",
     diagnostics,
   );
-  for (const mode of ["work", "simple_plan", "detailed_plan"] as const) {
-    const rawDefault = workflowDefaults?.[mode];
-    // Single legacy boundary: normalizePermissionLevel owns the v1/v2 mapping,
-    // including "yolo" -> "project-write". That has to happen BEFORE the enum
-    // filter below, otherwise a persisted "yolo" would silently fall back to
-    // the built-in default instead of the conservative downgrade.
-    const migratedDefault =
-      rawDefault === undefined
-        ? undefined
-        : (normalizePermissionLevel(rawDefault) ?? rawDefault);
-    next.permissions.workflowDefaults[mode] = enumValue(
-      migratedDefault,
-      ["readonly", "project-write", "confirm-all"],
-      next.permissions.workflowDefaults[mode],
-      source,
-      `permissions.workflowDefaults.${mode}`,
-      diagnostics,
-    );
-  }
   if (typeof lsp?.enabled === "boolean") next.lsp.enabled = lsp.enabled;
   next.lsp.mode = enumValue(
     lsp?.mode,
@@ -497,12 +455,6 @@ const ACTION_RANK: Record<PolicyAction, number> = {
   allow: 2,
 };
 
-const PERMISSION_RANK: Record<WorkflowDefaultPermissionLevel, number> = {
-  readonly: 0,
-  "confirm-all": 1,
-  "project-write": 2,
-};
-
 function applyTrustedProjectLayer(
   base: SetupConfig,
   raw: Record<string, unknown>,
@@ -525,24 +477,6 @@ function applyTrustedProjectLayer(
         message: `Projektkonfiguration darf Berechtigungen.${key} nicht lockern; globaler Wert beibehalten`,
       });
       candidate.permissions[key] = base.permissions[key];
-    }
-  }
-  const projectWorkflowDefaults = isObject(projectPermissions?.workflowDefaults)
-    ? projectPermissions.workflowDefaults
-    : undefined;
-  for (const mode of ["work", "simple_plan", "detailed_plan"] as const) {
-    if (
-      projectWorkflowDefaults?.[mode] !== undefined &&
-      PERMISSION_RANK[candidate.permissions.workflowDefaults[mode]] >
-        PERMISSION_RANK[base.permissions.workflowDefaults[mode]]
-    ) {
-      diagnostics.push({
-        level: "warning",
-        source,
-        message: `Projektkonfiguration darf Berechtigungen.workflowDefaults.${mode} nicht lockern; globaler Wert beibehalten`,
-      });
-      candidate.permissions.workflowDefaults[mode] =
-        base.permissions.workflowDefaults[mode];
     }
   }
   // A repository must never choose commands that execute on the host.

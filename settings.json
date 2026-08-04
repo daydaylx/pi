@@ -54,7 +54,6 @@
     "+extensions/mode-permissions.ts",
     "+extensions/lsp/index.ts",
     "+extensions/ask-user.ts",
-    "+extensions/tool-output-guard.ts",
     "+extensions/diff-viewer/index.ts",
     "+extensions/control-plane.ts",
     "+extensions/aurora-ui/index.ts"

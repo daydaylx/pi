@@ -6,11 +6,7 @@ import { renderSegment, statusSeparator } from "../shared/ui-theme.ts";
 import { crop, layoutFor, type Layout } from "./layout.ts";
 import type { AuroraUiState } from "./state.ts";
 
-/**
- * Since Aurora reduced the editor frame to workflow and step, the footer is the
- * only place that reports model, thinking level, project, permissions, LSP and
- * context. Nothing here may be duplicated by another surface.
- */
+/** Aurora's compact fallback when the Fleet Status Dock is not active. */
 export interface SubagentInfo {
   agent: string;
   phase?: string;
@@ -29,17 +25,8 @@ export interface FooterInput {
   subagents?: SubagentInfo[];
 }
 
-/**
- * Order in which segments give up their place when the line does not fit.
- * Dropping whole segments keeps the remaining ones readable; cropping the
- * joined line instead would shave characters off whatever happens to sit at
- * the edge. Permissions, project and model never drop — they are the reason
- * the footer exists.
- */
-const DROP_ORDER = ["thinking", "lsp", "branch"] as const;
-type Droppable = (typeof DROP_ORDER)[number];
-
 const GROUP_GAP = "   ";
+const CONTEXT_WARNING_PERCENT = 70;
 
 export function compactCwd(cwd: string): string {
   const normalized = normalize(cwd);
@@ -65,16 +52,11 @@ export function formatTokens(value: number): string {
 export function renderContextGauge(percent: number, theme: Theme): string {
   const filled = Math.min(10, Math.max(0, Math.floor(percent / 10)));
   const bar = "▓".repeat(filled) + "░".repeat(10 - filled);
-  const color = percent >= 90 ? "error" : percent >= 70 ? "warning" : "success";
+  const color = percent >= 90 ? "error" : percent >= CONTEXT_WARNING_PERCENT ? "warning" : "success";
   return `${theme.fg(color, bar)} ${theme.fg(color, `${Math.round(percent)}%`)}`;
 }
 
-function joinSides(
-  theme: Theme,
-  left: string,
-  right: string,
-  width: number,
-): string {
+function joinSides(theme: Theme, left: string, right: string, width: number): string {
   const available = Math.max(1, width);
   const gap = available - visibleWidth(left) - visibleWidth(right);
   if (gap >= 1) return left + " ".repeat(gap) + right;
@@ -83,196 +65,157 @@ function joinSides(
   const clippedLeft = crop(left, Math.max(1, Math.floor(available * 0.55)));
   return crop(
     clippedLeft +
-      " ".repeat(
-        Math.max(
-          1,
-          available - visibleWidth(clippedLeft) - visibleWidth(right),
-        ),
-      ) +
+      " ".repeat(Math.max(1, available - visibleWidth(clippedLeft) - visibleWidth(right))) +
       right,
     available,
   );
 }
 
-/**
- * The permission mode, not the bash policy. `permissions/session-state.ts`
- * answers Aurora's state request with the short German mode label, which is
- * what belongs here — the `permissions` status key instead carries a risk
- * banner ("🛡 DEFAULT · PROJECT WRITE") that is far too wide for one segment.
- */
+function permissionTone(state: AuroraUiState): "text" | "muted" | "warning" | "error" {
+  switch (state.permissions.level) {
+    case "yolo":
+      return "error";
+    case "confirm-all":
+      return "warning";
+    case "readonly":
+      return "muted";
+    default:
+      return "text";
+  }
+}
+
+function lspTone(state: string): "muted" | "success" | "warning" | "error" {
+  if (state === "ready") return "success";
+  if (state === "eingeschränkt") return "error";
+  if (state === "aus") return "muted";
+  return "warning";
+}
+
+function lspState(input: FooterInput): string {
+  return input.statuses.get("lsp") ?? input.state.lsp.state ?? "—";
+}
+
 function permissionLabel(input: FooterInput): string {
   return input.state.permissions.label ?? "—";
 }
 
-interface Blocks {
-  left: string;
-  center: string;
-  right: string;
-}
+function diagnostics(theme: Theme, input: FooterInput, includeRoutine: boolean): string[] {
+  const lines: string[] = [];
+  const lsp = lspState(input);
+  const context = input.contextPercent;
+  const lspNeedsAttention = !["ready", "leerlauf", "aus", "—"].includes(lsp);
+  const contextNeedsAttention = context !== null && context >= CONTEXT_WARNING_PERCENT;
 
-function buildBlocks(
-  theme: Theme,
-  input: FooterInput,
-  layout: Layout,
-  dropped: ReadonlySet<Droppable>,
-): Blocks {
-  const { state } = input;
-  const modelWidth = layout === "wide" ? 32 : 18;
-  const projectWidth = layout === "wide" ? 36 : 24;
+  if (!includeRoutine && !lspNeedsAttention && !contextNeedsAttention) return lines;
 
-  const left = [
-    renderSegment(theme, crop(state.model.id ?? "kein Modell", modelWidth), {
-      tone: "accent",
-    }),
+  const parts = [
+    renderSegment(theme, `LSP ${lsp}`, { tone: lspTone(lsp) }),
   ];
-  if (!dropped.has("thinking") && layout !== "narrow") {
-    left.push(
-      renderSegment(theme, `Denken ${state.model.thinking ?? "aus"}`, {
-        tone: "muted",
-      }),
-    );
+  if (context !== null) {
+    const tone = context >= 90 ? "error" : context >= CONTEXT_WARNING_PERCENT ? "warning" : "muted";
+    parts.push(renderSegment(theme, `Kontext ${Math.round(context)}%`, { tone }));
   }
-
-  const branchText =
-    input.branch && !dropped.has("branch")
-      ? ` git:${crop(input.branch, 16)}`
-      : "";
-  const center = renderSegment(
-    theme,
-    `${crop(compactCwd(input.cwd), projectWidth)}${branchText}`,
-    { tone: "text", bold: true },
-  );
-
-  const right: string[] = [];
-  right.push(
-    renderSegment(theme, permissionLabel(input), {
-      tone: "warning",
-      bold: true,
-    }),
-  );
-  const lsp = input.statuses.get("lsp") ?? state.lsp.state ?? "—";
-  if (!dropped.has("lsp") && layout !== "narrow") {
-    right.push(
-      renderSegment(theme, `LSP ${lsp}`, {
-        tone: lsp === "eingeschränkt" ? "error" : "success",
-      }),
-    );
-  }
-
-  const sep = statusSeparator(theme);
-  return {
-    left: left.join(sep),
-    center,
-    right: right.join(sep),
-  };
+  lines.push(parts.join(statusSeparator(theme)));
+  return lines;
 }
 
-function blocksWidth(blocks: Blocks): number {
-  return (
-    visibleWidth(blocks.left) +
-    visibleWidth(blocks.center) +
-    visibleWidth(blocks.right) +
-    visibleWidth(GROUP_GAP) * 2
-  );
+function renderNarrow(theme: Theme, width: number, input: FooterInput): string[] {
+  const project = renderSegment(theme, crop(compactCwd(input.cwd), 30), {
+    tone: "text",
+    bold: true,
+  });
+  const permission = renderSegment(theme, permissionLabel(input), {
+    tone: permissionTone(input.state),
+    bold: true,
+  });
+  return [joinSides(theme, project, permission, width), ...diagnostics(theme, input, false).map((line) => crop(line, width))];
 }
 
-function layoutLine(
-  theme: Theme,
-  blocks: Blocks,
-  layout: Layout,
-  width: number,
-): string {
-  if (layout === "wide" && blocksWidth(blocks) + 2 <= width) {
-    // Three balanced columns: the project sits centred between model and status.
-    const leftW = visibleWidth(blocks.left);
-    const centerW = visibleWidth(blocks.center);
-    const rightW = visibleWidth(blocks.right);
-    const slack = width - leftW - centerW - rightW;
-    const spaceLeft = Math.max(1, Math.floor(slack / 2));
-    const spaceRight = Math.max(1, slack - spaceLeft);
-    return crop(
-      blocks.left +
-        " ".repeat(spaceLeft) +
-        blocks.center +
-        " ".repeat(spaceRight) +
-        blocks.right,
-      width,
-    );
-  }
-  return joinSides(
-    theme,
-    `${blocks.left}${GROUP_GAP}${blocks.center}`,
-    blocks.right,
+function renderNormal(theme: Theme, width: number, input: FooterInput): string[] {
+  const model = renderSegment(theme, crop(input.state.model.id ?? "kein Modell", 18), {
+    tone: "accent",
+  });
+  const project = renderSegment(theme, crop(compactCwd(input.cwd), 24), {
+    tone: "text",
+    bold: true,
+  });
+  const permission = renderSegment(theme, permissionLabel(input), {
+    tone: permissionTone(input.state),
+    bold: true,
+  });
+  return [
+    joinSides(theme, `${model}${statusSeparator(theme)}${project}`, permission, width),
+    ...diagnostics(theme, input, true).map((line) => crop(line, width)),
+  ];
+}
+
+function renderWide(theme: Theme, width: number, input: FooterInput): string[] {
+  const model = renderSegment(theme, crop(input.state.model.id ?? "kein Modell", 32), {
+    tone: "accent",
+  });
+  const thinking = renderSegment(theme, `Denken ${input.state.model.thinking ?? "aus"}`, {
+    tone: "muted",
+  });
+  const branch = input.branch ? ` git:${crop(input.branch, 16)}` : "";
+  const project = renderSegment(theme, `${crop(compactCwd(input.cwd), 36)}${branch}`, {
+    tone: "text",
+    bold: true,
+  });
+  const permission = renderSegment(theme, permissionLabel(input), {
+    tone: permissionTone(input.state),
+    bold: true,
+  });
+  const lsp = lspState(input);
+  const lspSegment = renderSegment(theme, `LSP ${lsp}`, { tone: lspTone(lsp) });
+  const left = `${model}${statusSeparator(theme)}${thinking}`;
+  const right = `${permission}${statusSeparator(theme)}${lspSegment}`;
+  const primary = joinSides(theme, `${left}${GROUP_GAP}${project}`, right, width);
+  const context = input.contextPercent === null
+    ? ""
+    : `${statusSeparator(theme)}Kontext ${renderContextGauge(input.contextPercent, theme)}`;
+  const secondary = crop(
+    theme.fg("dim", `Sitzung ${input.sessionName ?? "unbenannt"}`) +
+      statusSeparator(theme) +
+      theme.fg("dim", `↑${formatTokens(input.tokens.input)} ↓${formatTokens(input.tokens.output)}`) +
+      context,
     width,
   );
+  return [primary, secondary];
 }
 
-export function renderFooterLines(
-  theme: Theme,
-  width: number,
-  input: FooterInput,
-): string[] {
-  const layout = layoutFor(width);
-  const dropped = new Set<Droppable>();
-  let blocks = buildBlocks(theme, input, layout, dropped);
-  for (const candidate of DROP_ORDER) {
-    if (blocksWidth(blocks) <= width) break;
-    dropped.add(candidate);
-    blocks = buildBlocks(theme, input, layout, dropped);
-  }
+function renderSubagents(theme: Theme, width: number, subagents: readonly SubagentInfo[]): string[] {
+  if (subagents.length === 0) return [];
+  const attention = subagents.filter((entry) => entry.status === "needs_attention").length;
+  const suffix = attention > 0 ? `${statusSeparator(theme)}${theme.fg("error", `${attention} Aufmerksamkeit`)}` : "";
+  const summary = crop(
+    `${theme.fg("accent", "⚡")} ${theme.fg("text", `${subagents.length} Subagent${subagents.length === 1 ? "" : "en"} aktiv`)}${suffix}`,
+    width,
+  );
+  const prioritized = [...subagents].sort((a, b) => Number(b.status === "needs_attention") - Number(a.status === "needs_attention"));
+  const visible = prioritized.slice(0, 3);
+  const details =
+    subagents.length > visible.length
+      ? [theme.fg("muted", `+${subagents.length - visible.length} weitere`)]
+      : [];
+  details.push(...visible.map((entry) => {
+    const tone = entry.status === "running" ? "success" : entry.status === "paused" ? "warning" : entry.status === "needs_attention" ? "error" : "muted";
+    return `${entry.agent}${entry.phase ? ` ${entry.phase}` : ""}${statusSeparator(theme)}${theme.fg(tone, entry.status)}`;
+  }));
+  return [summary, crop(`  ${details.join("    ")}`, width)];
+}
 
-  const lines = [layoutLine(theme, blocks, layout, width)];
-  if (layout === "wide") {
-    const sep = statusSeparator(theme);
-    const gauge =
-      input.contextPercent === null
-        ? ""
-        : `${sep}Kontext ${renderContextGauge(input.contextPercent, theme)}`;
-    lines.push(
-      crop(
-        theme.fg("dim", `Sitzung ${input.sessionName ?? "unbenannt"}`) +
-          sep +
-          theme.fg(
-            "dim",
-            `↑${formatTokens(input.tokens.input)} ↓${formatTokens(input.tokens.output)}`,
-          ) +
-          gauge,
-        width,
-      ),
-    );
-
-    // Subagenten-Zeilen (nur wenn aktiv)
-    if (input.subagents && input.subagents.length > 0) {
-      const count = input.subagents.length;
-      const summary = crop(
-        `${theme.fg("accent", "⚡")} ${theme.fg("text", `${count} Subagent${count === 1 ? "" : "en"} aktiv`)}`,
-        width,
-      );
-      lines.push(summary);
-
-      const details = input.subagents
-        .slice(0, 3)
-        .map((sa) => {
-          const parts = [sa.agent];
-          if (sa.phase) parts.push(sa.phase);
-          const statusColor =
-            sa.status === "running"
-              ? "success"
-              : sa.status === "paused"
-                ? "warning"
-                : sa.status === "needs_attention"
-                  ? "error"
-                  : "muted";
-          parts.push(theme.fg(statusColor, sa.status));
-          return parts.join(statusSeparator(theme));
-        })
-        .join("    ");
-      const truncated =
-        input.subagents.length > 3 ? `  ${theme.fg("muted", "...")}` : "";
-      lines.push(
-        crop(`  ${theme.fg("muted", details)}${truncated}`, width),
-      );
-    }
-  }
+/**
+ * Three deliberate layouts: narrow protects project, permissions and warnings;
+ * normal adds model plus routine diagnostics; wide adds session detail.
+ */
+export function renderFooterLines(theme: Theme, width: number, input: FooterInput): string[] {
+  const layout: Layout = layoutFor(width);
+  const lines = layout === "narrow"
+    ? renderNarrow(theme, width, input)
+    : layout === "normal"
+      ? renderNormal(theme, width, input)
+      : renderWide(theme, width, input);
+  if (layout === "wide" && input.subagents)
+    lines.push(...renderSubagents(theme, width, input.subagents));
   return lines;
 }

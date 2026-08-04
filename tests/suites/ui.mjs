@@ -21,37 +21,37 @@ import {
 import { ROOT } from "../shared/jiti-loader.mjs";
 
 export const uiSections = {
-  'Control Center menus and routing': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "Control Center menus and routing": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("Control Center menus and routing", async () => {
-      if (!thinkingMenu || !modePermissions || !planMode || !controlPlane) return;
+      if (!thinkingMenu || !modePermissions || !planMode || !controlPlane)
+        return;
 
       // Two entry points, different scope, one definition: Shift+Tab is the
       // workflow switch, Super+Q the full Control Center whose first tab IS that
@@ -83,11 +83,7 @@ export const uiSections = {
         const [workflowSwitch, controlCenter] = seen;
         eq(
           workflowSwitch,
-          [
-            "Work",
-            "Schnellplan",
-            "Architekturplan",
-          ],
+          ["Work", "Schnellplan", "Architekturplan"],
           "Shift+Tab exposes only the three workflow modes",
         );
         assert(
@@ -99,15 +95,21 @@ export const uiSections = {
         );
       }
 
-      const thinkingEntries = thinkingMenu.buildThinkingMenu("high", "auto");
-      eq(
-        thinkingEntries[0].value,
-        "auto",
-        "Thinking menu starts with explicit Auto",
+      const thinkingEntries = thinkingMenu.buildThinkingMenu("high");
+      assert(
+        thinkingEntries.every((entry) =>
+          thinkingMenu.THINKING_LEVELS.includes(entry.value),
+        ),
+        "Thinking menu offers real thinking levels only",
       );
       assert(
-        thinkingEntries.some((entry) => entry.value === "manual:xhigh"),
-        "Thinking menu exposes manual levels distinctly",
+        thinkingEntries.some((entry) => entry.value === "xhigh"),
+        "Thinking menu exposes every manual level",
+      );
+      eq(
+        thinkingEntries.find((entry) => entry.current)?.value,
+        "high",
+        "Thinking menu marks the active level",
       );
 
       const cwd = mkdtempSync(path.join(tmpdir(), "pi-control-center-"));
@@ -115,8 +117,6 @@ export const uiSections = {
         let choice = "Manuell: Sehr hoch";
         const harness = createHarness({
           select: (labels) => {
-            if (choice === "__thinking__")
-              return labels.find((label) => label.endsWith("Denken: Auto (high)"));
             if (choice === "__permissions__")
               return labels.find((label) =>
                 label.endsWith("Berechtigungen: Lesen + Schreiben"),
@@ -142,7 +142,11 @@ export const uiSections = {
         controlPlane.default(harness.api);
         const context = harness.makeContext({
           cwd,
-          model: { provider: "openai-codex", id: "gpt-5.4", thinkingLevelMap: {} },
+          model: {
+            provider: "openai-codex",
+            id: "gpt-5.4",
+            thinkingLevelMap: {},
+          },
         });
         context.ui.custom = async () => {
           throw new Error("use deterministic select fallback");
@@ -173,58 +177,40 @@ export const uiSections = {
           "xhigh",
           "manual Thinking survives a workflow transition",
         );
-        choice = "Auto";
+        choice = "Manuell: Mittel";
         await harness.shortcuts.get("super+d")(context);
         eq(
           harness.api.getThinkingLevel(),
           "medium",
-          "Auto restores the active workflow default",
+          "manual Thinking selection applies medium level",
         );
         choice = "Architekturplan";
         await harness.shortcuts.get("shift+tab")(context);
         eq(
           harness.api.getThinkingLevel(),
-          // detailed_plan maps to "high" since 4c7a201 (the retired MODE_THINKING
-          // table used "xhigh"); what matters here is that Auto follows at all.
-          "high",
-          "Auto follows later workflow transitions",
+          "medium",
+          "manual Thinking stays at chosen level across workflow changes",
         );
 
-        let staleThinkingContext;
-        let staleThinkingHarness;
-        staleThinkingHarness = createHarness({
+        // Sessions written before the auto mode was retired still carry
+        // `manualThinkingLevel: "auto"`, which is not a thinking level.
+        const legacyHarness = createHarness({
           thinkingLevel: "low",
-          select: async (labels) => {
-            await staleThinkingHarness.runHooks(
-              "session_start",
-              {},
-              staleThinkingContext,
-            );
-            return labels.find((label) => label === "Manuell: Sehr hoch");
-          },
+          entries: [
+            {
+              type: "custom",
+              customType: "mode-permissions",
+              data: { thinkingMode: "auto", manualThinkingLevel: "auto" },
+            },
+          ],
         });
-        modePermissions.default(staleThinkingHarness.api);
-        controlPlane.default(staleThinkingHarness.api);
-        staleThinkingContext = staleThinkingHarness.makeContext({ cwd });
-        staleThinkingContext.ui.custom = async () => {
-          throw new Error("use deterministic select fallback");
-        };
-        await staleThinkingHarness.runHooks(
-          "session_start",
-          {},
-          staleThinkingContext,
-        );
-        await staleThinkingHarness.shortcuts.get("super+d")(staleThinkingContext);
+        modePermissions.default(legacyHarness.api);
+        const legacyContext = legacyHarness.makeContext({ cwd });
+        await legacyHarness.runHooks("session_start", {}, legacyContext);
         eq(
-          staleThinkingHarness.api.getThinkingLevel(),
-          "low",
-          "a Thinking selection from the previous session cannot change the new session",
-        );
-        assert(
-          staleThinkingHarness.appended.every(
-            (entry) => entry.data?.thinkingMode !== "manual",
-          ),
-          "a stale Thinking selection is not persisted in the new session",
+          legacyHarness.api.getThinkingLevel(),
+          "medium",
+          "a persisted auto Thinking record falls back to the default level",
         );
 
         choice = "__models__";
@@ -262,37 +248,35 @@ export const uiSections = {
         rmSync(cwd, { recursive: true, force: true });
       }
     });
-
   },
 
-  'shared menu shell navigation and rendering': async (context) => {
-  const {
-    section,
-    load,
-    policy,
-    menuUi,
-    thinkingMenu,
-    lspControlCenter,
-    lspTools,
-    modePermissions,
-    planMode,
-    controlPlane,
-    diffAlgorithm,
-    diffFallback,
-    diffTracker,
-    diffViewer,
-    askUser,
-    askUserPolicy,
-    lspExtensionMod,
-    outputLimits,
-    toolOutputGuard,
-    contextDiagnostics,
-    setupConfig,
-    setupCore,
-    auroraState,
-    auroraUi,
-    auroraFooter,
-  } = context;
+  "shared menu shell navigation and rendering": async (context) => {
+    const {
+      section,
+      load,
+      policy,
+      menuUi,
+      thinkingMenu,
+      lspControlCenter,
+      lspTools,
+      modePermissions,
+      planMode,
+      controlPlane,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      askUser,
+      askUserPolicy,
+      lspExtensionMod,
+      outputLimits,
+      contextDiagnostics,
+      setupConfig,
+      setupCore,
+      auroraState,
+      auroraUi,
+      auroraFooter,
+    } = context;
 
     await section("shared menu shell navigation and rendering", async () => {
       if (!menuUi) return;
@@ -383,7 +367,5 @@ export const uiSections = {
       );
       assertNoGlobalChrome(harness, "menu shell installs no permanent chrome");
     });
-
   },
-
 };
