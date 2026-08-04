@@ -15,10 +15,10 @@
     "extensions/setup-core/index.ts": 100,
     "extensions/plan-mode/index.ts": 100,
     "extensions/mode-permissions.ts": 60,
-    "extensions/lsp/index.ts": 20,
-    "extensions/ask-user.ts": 36,
+    "extensions/lsp/index.ts": 52,
+    "extensions/ask-user.ts": 47,
     "extensions/diff-viewer/index.ts": 50,
     "extensions/control-plane.ts": 100,
-    "extensions/aurora-ui/index.ts": 93
+    "extensions/aurora-ui/index.ts": 100
   }
 }

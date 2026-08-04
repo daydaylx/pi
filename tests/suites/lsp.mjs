@@ -2252,6 +2252,97 @@ export const lspSections = {
         }
       }
 
+      // --- A trusted project's .pi/lsp.json cannot choose the binary ---
+      // resolveProfileOverrides is covered directly further up; this asserts
+      // the same boundary through the extension, because that is the path a
+      // repository actually takes: readProjectConfig -> buildConfig ->
+      // resolveConfig. A rejected profile has to be logged and dropped, and
+      // must not survive into the server list.
+      {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp-command-gate-"));
+        mkdirSync(path.join(cwd, ".pi"), { recursive: true });
+        writeFileSync(
+          path.join(cwd, ".pi", "lsp.json"),
+          JSON.stringify({
+            languages: { evil: { command: "/bin/sh", rootMarkers: ["."] } },
+          }),
+        );
+
+        const harness = createHarness();
+        lspExtensionMod.default(harness.api);
+        const context = harness.makeContext({ cwd, trusted: true });
+        await harness.runHooks("session_start", {}, context);
+
+        await harness.commands.get("lsp")("log", context);
+        const logText = harness.notifications.at(-1)?.message ?? "";
+        assert(
+          /node_modules/.test(logText),
+          "a project-chosen command is rejected with a logged reason (got: " +
+            logText +
+            ")",
+        );
+
+        await harness.commands.get("lsp")("servers", context);
+        const serverText = harness.notifications.at(-1)?.message ?? "";
+        assert(
+          !serverText.includes("evil"),
+          "the rejected profile never reaches the server list (got: " +
+            serverText +
+            ")",
+        );
+
+        await harness.runHooks("session_shutdown", {}, context);
+        try {
+          rmSync(cwd, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // --- Unreadable .pi/lsp.json is reported and ignored, never fatal ---
+      // Both branches fail closed to "no project config", so a broken file
+      // degrades to the defaults instead of taking the session down.
+      {
+        for (const [label, content, expected] of [
+          ["invalid JSON", "{not-json", /failed to parse/],
+          [
+            "a JSON scalar",
+            '"just a string"',
+            /does not contain a JSON object/,
+          ],
+        ]) {
+          const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp-badconfig-"));
+          mkdirSync(path.join(cwd, ".pi"), { recursive: true });
+          writeFileSync(path.join(cwd, ".pi", "lsp.json"), content);
+
+          const harness = createHarness();
+          lspExtensionMod.default(harness.api);
+          const context = harness.makeContext({ cwd, trusted: true });
+          await harness.runHooks("session_start", {}, context);
+
+          await harness.commands.get("lsp")("log", context);
+          const logText = harness.notifications.at(-1)?.message ?? "";
+          assert(
+            expected.test(logText),
+            `${label} in .pi/lsp.json is reported (got: ${logText})`,
+          );
+
+          await harness.commands.get("lsp")("status", context);
+          const statusText = harness.notifications.at(-1)?.message ?? "";
+          assert(
+            !statusText.includes("aus"),
+            `${label} falls back to the defaults instead of disabling LSP (got: ${statusText})`,
+          );
+
+          await harness.runHooks("session_shutdown", {}, context);
+          try {
+            rmSync(cwd, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
       // --- Footer status only appears in TUI mode ---
       {
         for (const mode of ["json", "print", "rpc"]) {

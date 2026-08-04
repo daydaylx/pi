@@ -1679,6 +1679,97 @@ export const runtimeSections = {
         0,
         "ask_user opens no dialog outside TUI",
       );
+
+      // Keyboard navigation and the free-text path. Digit selection above is
+      // the shortcut; these are the routes a user takes when the option they
+      // want is not one of the first nine, or is not offered at all.
+      const ESC = String.fromCharCode(27);
+      const KEYS = {
+        up: ESC + "[A",
+        down: ESC + "[B",
+        home: ESC + "[H",
+        end: ESC + "[F",
+        pageUp: ESC + "[5~",
+        pageDown: ESC + "[6~",
+        enter: "\r",
+        escape: ESC,
+        ctrlC: String.fromCharCode(3),
+      };
+
+      async function openDialog(id) {
+        const dialogHarness = createHarness({ columns: 80 });
+        askUser.default(dialogHarness.api);
+        const pendingResult = dialogHarness.tools
+          .get("ask_user")
+          .execute(
+            id,
+            params,
+            undefined,
+            undefined,
+            dialogHarness.makeContext(),
+          );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return {
+          harness: dialogHarness,
+          pending: pendingResult,
+          dialog: dialogHarness.customComponents.at(-1),
+        };
+      }
+
+      {
+        // End jumps past the real options onto the free-text entry, Enter opens
+        // it, and Escape leaves edit mode without ending the dialog.
+        const { pending, dialog } = await openDialog("ask-user-freetext");
+        dialog.handleInput(KEYS.end);
+        dialog.handleInput(KEYS.enter);
+        const editing = stripAnsi(dialog.render(80).join("\n"));
+        dialog.handleInput(KEYS.escape);
+        assert(
+          stripAnsi(dialog.render(80).join("\n")) !== editing,
+          "Escape leaves the free-text editor instead of closing the dialog",
+        );
+        dialog.handleInput(KEYS.home);
+        dialog.handleInput(KEYS.enter);
+        const result = await pending;
+        eq(
+          result.details.answer,
+          "Lesen",
+          "Home returns to the first option and Enter selects it",
+        );
+      }
+
+      {
+        // Down/up/pageDown/pageUp all move within bounds; the dialog must not
+        // run off either end.
+        const { pending, dialog } = await openDialog("ask-user-navigation");
+        dialog.handleInput(KEYS.pageUp);
+        dialog.handleInput(KEYS.up);
+        dialog.handleInput(KEYS.down);
+        dialog.handleInput(KEYS.pageDown);
+        dialog.handleInput(KEYS.pageDown);
+        dialog.handleInput(KEYS.up);
+        dialog.handleInput(KEYS.enter);
+        const result = await pending;
+        eq(
+          result.details.answer,
+          "Planen",
+          "navigation stays inside the option list and selects the second entry",
+        );
+      }
+
+      for (const [key, label] of [
+        [KEYS.escape, "Escape"],
+        [KEYS.ctrlC, "Ctrl+C"],
+      ]) {
+        const { pending, dialog } = await openDialog("ask-user-cancel");
+        dialog.handleInput(key);
+        const result = await pending;
+        assert(
+          result.isError === true ||
+            /abgebrochen|cancel/i.test(result.content[0].text),
+          `${label} cancels the dialog instead of answering it`,
+        );
+      }
     });
   },
 

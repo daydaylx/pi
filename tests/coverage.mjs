@@ -23,6 +23,9 @@ const ROOT = path.resolve(__dirname, "..");
 const BASELINE_PATH = path.join(__dirname, "coverage-baseline.json");
 const writeBaseline = process.argv.includes("--write-baseline");
 
+/** How far above its floor a measurement may drift before the floor is stale. */
+const STALE_MARGIN_POINTS = 5;
+
 function activeExtensionPaths() {
   const settings = JSON.parse(
     readFileSync(path.join(ROOT, "settings.json"), "utf8"),
@@ -49,7 +52,16 @@ function functionCoverage(coverage, relativePath) {
   const functions = new Map();
   for (const source of sources) {
     for (const fn of source.functions.filter(
-      (candidate) => candidate.functionName,
+      (candidate) =>
+        candidate.functionName &&
+        // jiti's ESM interop emits one bare `get` accessor per imported or
+        // re-exported binding. They are module plumbing, not code under test,
+        // and they only count as "covered" when the binding happens to be
+        // dereferenced at runtime — which inflated the denominator of any file
+        // with a large `export … from` block. extensions/lsp/index.ts read 20%
+        // while 22 of its 30 uncovered "functions" were these accessors.
+        // Source getters are safe: V8 names them `get <property>`, never `get`.
+        candidate.functionName !== "get",
     )) {
       const range = fn.ranges[0];
       const key = `${fn.functionName}:${range.startOffset}:${range.endOffset}`;
@@ -157,6 +169,14 @@ try {
     if (measurement.percent < minimum) {
       throw new Error(
         `${extension} regressed to ${measurement.percent.toFixed(1)}%; minimum is ${minimum}%.`,
+      );
+    }
+    // A floor written from a past measurement only stops regression. Once the
+    // suite has moved well past it, the floor is a record of history rather
+    // than a commitment, and the next regression can hide underneath it.
+    if (measurement.percent - minimum > STALE_MARGIN_POINTS) {
+      console.warn(
+        `WARNING: ${extension} is at ${measurement.percent.toFixed(1)}% but its floor is ${minimum}%. Run npm run test:coverage:baseline to lock in the gain.`,
       );
     }
   }

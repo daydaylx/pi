@@ -194,17 +194,31 @@ export default function lspExtension(pi: ExtensionAPI): void {
     const projectConfig = trusted
       ? readProjectConfig(ctx.cwd, logger)
       : undefined;
-    return resolveConfig({
+    const layers = {
       defaults: defaultConfig(),
       global: loadedSetup.config.lsp,
       trusted,
-      projectConfig,
       projectRoot: ctx.cwd,
       sessionFlags: {
         ...(cliMode ? { mode: cliMode } : {}),
         ...sessionOverride,
       },
-    });
+    };
+    try {
+      return resolveConfig({ ...layers, projectConfig });
+    } catch (error) {
+      // resolveConfig rejects a project profile it will not run — a malformed
+      // value or a command outside the allowed set. readProjectConfig only
+      // guards the JSON parse, so without this the throw would take
+      // session_start down: a broken .pi/lsp.json would become a denial of
+      // service. Drop the project layer entirely and keep going on the
+      // defaults; the reason stays in the log for `/lsp log`.
+      logger(
+        "error",
+        `.pi/lsp.json was ignored: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return resolveConfig(layers);
+    }
   }
 
   function auroraLspState(): NonNullable<AuroraUiStatePatch["lsp"]> {
