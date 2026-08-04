@@ -172,7 +172,6 @@ export default function lspExtension(pi: ExtensionAPI): void {
   let sessionOverride: Partial<LspConfig> = {};
   let sessionEpoch = 0;
   let activeSessionId: string | undefined;
-  let activeProjectRoot: string | undefined;
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
   const logBuffer: string[] = [];
@@ -310,7 +309,6 @@ export default function lspExtension(pi: ExtensionAPI): void {
     const previousRegistry = registry;
     sessionEpoch += 1;
     activeSessionId = ctx.sessionManager.getSessionId();
-    activeProjectRoot = ctx.cwd;
     registry = undefined;
     await previousRegistry?.shutdownAll();
     sessionOverride = {};
@@ -325,7 +323,6 @@ export default function lspExtension(pi: ExtensionAPI): void {
     const previousRegistry = registry;
     sessionEpoch += 1;
     activeSessionId = undefined;
-    activeProjectRoot = undefined;
     registry = undefined;
     await previousRegistry?.shutdownAll();
     sessionOverride = {};

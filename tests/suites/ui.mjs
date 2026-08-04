@@ -21,7 +21,7 @@ import {
 import { ROOT } from "../shared/jiti-loader.mjs";
 
 export const uiSections = {
-  "Control Center menus and routing": async (context) => {
+  "Control Center menus": async (context) => {
     const {
       section,
       load,
@@ -49,7 +49,7 @@ export const uiSections = {
       auroraFooter,
     } = context;
 
-    await section("Control Center menus and routing", async () => {
+    await section("Control Center menus", async () => {
       if (!thinkingMenu || !modePermissions || !planMode || !controlPlane)
         return;
 

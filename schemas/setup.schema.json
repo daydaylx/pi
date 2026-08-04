@@ -61,23 +61,6 @@
         "test": { "$ref": "#/$defs/check" },
         "verify": { "$ref": "#/$defs/check" }
       }
-    },
-    "routingProfiles": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["levels"],
-      "properties": {
-        "levels": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["low", "standard", "high"],
-          "properties": {
-            "low": { "$ref": "#/$defs/routingProfile" },
-            "standard": { "$ref": "#/$defs/routingProfile" },
-            "high": { "$ref": "#/$defs/routingProfile" }
-          }
-        }
-      }
     }
   },
   "$defs": {
@@ -93,16 +76,6 @@
           "maxItems": 12
         },
         "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 900000 }
-      }
-    },
-    "routingProfile": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["worker"],
-      "properties": {
-        "planner": { "type": "string", "minLength": 1 },
-        "worker": { "type": "string", "minLength": 1 },
-        "reviewer": { "type": "string", "minLength": 1 }
       }
     }
   }

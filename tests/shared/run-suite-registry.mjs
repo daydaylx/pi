@@ -8,7 +8,7 @@ export const SECTION_SUITES = {
   "project_check tool (#123)": "runtime",
   "native subagent profiles": "runtime",
   "native project skills": "runtime",
-  "Control Center menus and routing": "ui",
+  "Control Center menus": "ui",
   "global control plane shortcuts": "runtime",
   "LSP Control Center file picker": "lsp",
   "shared output limits": "runtime",

@@ -2,15 +2,14 @@
 
 ## Shortcuts
 
-| Shortcut | Funktion |
-| --- | --- |
+| Shortcut    | Funktion    |
+| ----------- | ----------- |
 | `Shift+Tab` | `/workflow` |
-| `Super+P` | `/plan` |
-| `Super+M` | `/model` |
-| `Super+D` | `/thinking` |
-| `Super+Y` | `/yolo` |
-| `Super+S` | `/agent-models` |
-| `Super+Q` | `/commands` |
+| `Super+P`   | `/plan`     |
+| `Super+M`   | `/model`    |
+| `Super+D`   | `/thinking` |
+| `Super+Y`   | `/yolo`     |
+| `Super+Q`   | `/commands` |
 
 `/commands` teilt die kanonischen Namen, Kategorien und Beschreibungen
 zwischen Menü, Autocomplete und Shortcuts (`extensions/shared/command-catalog.ts`
