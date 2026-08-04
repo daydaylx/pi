@@ -1,0 +1,27 @@
+# Fremder oder generierter Bestand — nie formatieren.
+node_modules/
+npm/node_modules/
+npm/package-lock.json
+package-lock.json
+
+# Lokale Laufzeitdaten und Kopien (siehe .gitignore).
+sessions/
+backups/
+git/
+.pi-subagents/
+auth.json
+models-store.json
+run-history.jsonl
+openrouter-free-models.json
+*.log
+*.bak-*
+*.backup.*
+
+# Benchmark-Fixtures sind Prüfmaterial: ihre Formatierung ist Teil der Aufgabe
+# und darf sich nicht ändern, sonst misst der Lauf etwas anderes als vorher.
+benchmarks/tasks/*/fixture/
+
+# Archivierte Dokumente und Planartefakte bleiben so, wie sie archiviert
+# wurden — sie sind Aufzeichnung, nicht gepflegter Bestand.
+docs/archive/
+.agent/

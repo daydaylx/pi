@@ -14,8 +14,10 @@
     "test:patches": "node ../tests/runtime-patches.mjs",
     "patch:runtime": "node ../scripts/apply-runtime-patches.mjs",
     "audit:check": "node ../scripts/check-npm-audit.mjs",
+    "format": "prettier --write ..",
+    "format:check": "prettier --check ..",
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
-    "verify": "npm run typecheck && npm run test:coverage && npm run test:patches && npm run test:runtime && npm run audit:check"
+    "verify": "npm run format:check && npm run typecheck && npm run test:coverage && npm run test:patches && npm run test:runtime && npm run audit:check"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
@@ -26,6 +28,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@types/node": "24.12.4",
+    "prettier": "3.9.6",
     "typescript": "7.0.2"
   },
   "overrides": {
