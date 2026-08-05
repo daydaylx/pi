@@ -6,7 +6,6 @@ import { catalogDescription } from "../shared/command-catalog.ts";
 import { buildWorkflowTab } from "../shared/control-center-menu.ts";
 import { isPlanningMode, type WorkflowMode } from "../shared/workflow-mode.ts";
 import { editPlanMarkdown, viewPlanMarkdown } from "./plan-editor.ts";
-import { planExists } from "./plan-file.ts";
 import type { WorkflowSession } from "./session.ts";
 import { openCommandCenter } from "./command-center.ts";
 
@@ -50,13 +49,6 @@ export async function switchMode(
       "error",
     );
     return false;
-  }
-  if (planExists(ctx.cwd)) {
-    const accepted = await ctx.ui.confirm(
-      "Vorhandenen Plan überschreiben?",
-      "Der nächste Planungsturn darf current-plan.md vollständig ersetzen.",
-    );
-    if (!accepted) return false;
   }
   session.setMode(ctx, mode);
   return true;

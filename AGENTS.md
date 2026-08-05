@@ -64,7 +64,7 @@ verschachtelte Delegation.
 - Die Laufzeitquellen sind direkt: `settings.json` deaktiviert Paket-Builtins
   mit `subagents.disableBuiltins`; `extensions/subagent/config.json` setzt
   `maxTasks: 4`, `concurrency: 3`, `globalConcurrencyLimit: 3` und
-  `maxSubagentSpawnsPerSession: 12`.
+  `maxSubagentSpawnsPerSession: 5`.
 - Ergebnisse kompakt synthetisieren und Belege, betroffene Dateien, Risiken, offene Fragen und Empfehlung nennen; keine vollständigen Unterhaltungen zurückkopieren.
 - Profilauswahl und Detailregeln nur bei Bedarf aus
   `/home/d/.pi/agent/docs/subagents.md` lesen.

@@ -50,37 +50,27 @@ await test("work is the default and ignores legacy sidecars", async () => {
   }
 });
 
-await test("planning modes ask once before replacing an existing plan", async () => {
+await test("planning modes non-blockingly replace an existing plan without modal confirmation", async () => {
   if (!planMode) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-mode-"));
   try {
     mkdirSync(join(cwd, ".agent", "plans"), { recursive: true });
     const file = join(cwd, ".agent", "plans", "current-plan.md");
     writeFileSync(file, "# Freier alter Plan\n");
-    let accepted = false;
-    const harness = createHarness({ confirm: () => accepted });
+    const harness = createHarness({ confirm: () => { throw new Error("Confirm should not be called"); } });
     const ctx = harness.makeContext({ cwd });
     planMode.default(harness.api);
     await hooks(harness, "session_start", ctx);
-    await harness.commands.get("plan")("simple", ctx);
+    await harness.commands.get("plan")("detailed", ctx);
     eq(
       harness.lifecycleCalls.filter((entry) => entry.kind === "confirm").length,
-      1,
-      "exactly one overwrite confirmation",
+      0,
+      "zero overwrite confirmation prompts",
     );
-    const declinedPrompt = await hooks(harness, "before_agent_start", ctx);
-    assert(
-      declinedPrompt[0]?.message?.content.includes("PI WORKMODUS"),
-      "declining leaves work active",
-    );
-    eq(existsSync(file), true, "declining does not change the plan file");
-    eq(harness.sent.length, 0, "declining starts no planning turn");
-    accepted = true;
-    await harness.commands.get("plan")("detailed", ctx);
     const prompt = await hooks(harness, "before_agent_start", ctx);
     assert(
       prompt[0]?.message?.content.includes("PI PLANMODUS"),
-      "accepted selection enters plan mode",
+      "direct plan command enters plan mode non-blockingly",
     );
     assert(
       !prompt[0]?.message?.content.includes("## Abschlusskriterien"),
@@ -89,7 +79,7 @@ await test("planning modes ask once before replacing an existing plan", async ()
     eq(
       harness.sent.length,
       1,
-      "accepted direct plan command starts one planning turn",
+      "direct plan command starts one planning turn",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
