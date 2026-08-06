@@ -130,6 +130,23 @@
               "items": {
                 "type": "string"
               }
+            },
+            "snapshot": {
+              "type": "object",
+              "description": "Kanonische, inhaltsfreie Workspace-Sicht. Patches und Dateiinhalte werden nicht gespeichert.",
+              "properties": {
+                "schemaVersion": { "type": "string" },
+                "fingerprint": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "head": { "type": "string" },
+                "staged": { "type": "array" },
+                "unstaged": { "type": "array" },
+                "untracked": { "type": "array", "items": { "type": "string" } },
+                "renames": { "type": "array" },
+                "deletions": { "type": "array" }
+              }
             }
           }
         },

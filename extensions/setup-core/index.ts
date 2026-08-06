@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { catalogDescription } from "../shared/command-catalog.ts";
+import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles, runProfile } from "./verify-profiles.ts";
@@ -11,6 +12,13 @@ import {
   collectContextDiagnostics,
   formatContextDiagnostics,
 } from "./context-diagnostics.ts";
+import {
+  checkResultFromReports,
+  formatVerificationStatus,
+  verificationStatus,
+  type VerificationLedger,
+  type VerificationStatus,
+} from "./verification-status.ts";
 
 const CheckParams = Type.Object({
   check: Type.Union([
@@ -108,10 +116,54 @@ function packageVersion(path: string): string | undefined {
 export default function setupCore(pi: ExtensionAPI): void {
   let activeCwd = process.cwd();
   let trusted = false;
+  let verificationLedger: VerificationLedger = {};
+  let lastSettledStatus: VerificationStatus | undefined;
+
+  function workspaceSnapshot(cwd: string) {
+    try {
+      return collectWorkspaceSnapshot(cwd);
+    } catch {
+      return undefined;
+    }
+  }
 
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
     trusted = ctx.isProjectTrusted();
+    verificationLedger = {};
+    lastSettledStatus = undefined;
+    if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
+  });
+
+  pi.on("agent_settled", (_event, ctx) => {
+    const statusEnabled = loadSetupConfig(
+      ctx.cwd,
+      ctx.isProjectTrusted(),
+    ).config.verificationStatus.enabled;
+    if (!statusEnabled) {
+      if (lastSettledStatus !== undefined && ctx.hasUI)
+        ctx.ui.setStatus("verification", undefined);
+      lastSettledStatus = undefined;
+      return;
+    }
+    const profiles = loadVerifyProfiles(ctx.cwd, ctx.isProjectTrusted());
+    const hasRequiredProfile = Object.values(profiles.profiles).some(
+      (profile) => profile.classification === "required",
+    );
+    const status = verificationStatus(
+      workspaceSnapshot(ctx.cwd),
+      verificationLedger,
+      ctx.isProjectTrusted() && hasRequiredProfile,
+    );
+    if (status === lastSettledStatus || !ctx.hasUI) return;
+    lastSettledStatus = status;
+    ctx.ui.setStatus("verification", formatVerificationStatus(status));
+  });
+
+  pi.on("session_shutdown", (_event, ctx) => {
+    verificationLedger = {};
+    lastSettledStatus = undefined;
+    if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
   });
 
   pi.registerTool({
@@ -223,6 +275,9 @@ export default function setupCore(pi: ExtensionAPI): void {
         };
       }
 
+      // Capture before execution: a later workspace change must make this
+      // check stale even if the command itself succeeds.
+      const checkSnapshot = workspaceSnapshot(ctx.cwd);
       const reports = [];
       for (const profileId of requested.ids) {
         const profile = loaded.profiles[profileId]!;
@@ -279,6 +334,19 @@ export default function setupCore(pi: ExtensionAPI): void {
             report.status === "missing_binary"
           ),
       );
+      const requiredCheckResult = checkResultFromReports(reports);
+      if (requiredCheckResult && checkSnapshot) {
+        verificationLedger = {
+          lastRequiredCheck: {
+            profileIds: reports
+              .filter((report) => report.classification === "required")
+              .map((report) => report.profileId),
+            result: requiredCheckResult,
+            workspaceFingerprint: checkSnapshot.fingerprint,
+            completedAt: new Date().toISOString(),
+          },
+        };
+      }
       return {
         content: [{ type: "text" as const, text: limited.text }],
         details: {

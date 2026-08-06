@@ -25,6 +25,7 @@ import {
   isVariantViolation,
   subagentSpawnCap,
 } from "./subagent-variant.mjs";
+import { collectWorkspaceSnapshot } from "./workspace-snapshot.mjs";
 
 function hash(value) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -242,52 +243,19 @@ export function validateRoleHistory(history, manifestRoles, parentRunId) {
   });
 }
 
-// P0-07: staged changes and new untracked files used to be entirely
-// invisible here (only unstaged diff against tracked files was inspected),
-// so an agent's staged-but-not-committed edit, or a new file it never
-// staged, would not show up in the result's diff/changedFiles at all.
+// P4 and the generic benchmark collector share this snapshot contract so
+// staged, unstaged, untracked, renamed, and deleted paths have one meaning.
 export function inspectAgentChanges(worktree) {
-  const unstagedDiff = git(worktree, ["diff", "--no-ext-diff", "--binary"]);
-  const stagedDiff = git(worktree, [
-    "diff",
-    "--cached",
-    "--no-ext-diff",
-    "--binary",
-  ]);
-  const status = git(worktree, [
-    "status",
-    "--porcelain=v1",
-    "--untracked-files=all",
-  ]);
-  const unstagedFiles = git(worktree, ["diff", "--no-ext-diff", "--name-only"])
-    .split("\n")
-    .filter(Boolean);
-  const stagedFiles = git(worktree, [
-    "diff",
-    "--cached",
-    "--no-ext-diff",
-    "--name-only",
-  ])
-    .split("\n")
-    .filter(Boolean);
-  const untrackedFiles = status
-    .split("\n")
-    .filter((line) => line.startsWith("?? "))
-    .map((line) => line.slice(3));
-  const changedFiles = [
-    ...new Set([...unstagedFiles, ...stagedFiles, ...untrackedFiles]),
-  ].sort();
-  const visibleTestChanges = changedFiles.filter((path) =>
+  const snapshot = collectWorkspaceSnapshot(worktree);
+  const visibleTestChanges = snapshot.changedFiles.filter((path) =>
     /(^|\/)(?:test|tests|__tests__|spec)(?:\/|\.|$)/i.test(path),
   );
-  const benchmarkChanges = changedFiles.filter((path) =>
+  const benchmarkChanges = snapshot.changedFiles.filter((path) =>
     /(^|\/)(?:bench|benchmark)(?:\/|\.|$)/i.test(path),
   );
   return {
-    diffFingerprint: createHash("sha256")
-      .update(`${unstagedDiff}\0${stagedDiff}\0${status}`)
-      .digest("hex"),
-    changedFiles,
+    ...snapshot,
+    diffFingerprint: snapshot.fingerprint,
     visibleTestChanges,
     benchmarkChanges,
   };

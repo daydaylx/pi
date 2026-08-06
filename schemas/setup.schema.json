@@ -4,7 +4,14 @@
   "title": "Pi Greenfield Setup",
   "type": "object",
   "additionalProperties": false,
-  "required": ["ui", "permissions", "lsp", "subagents", "verification"],
+  "required": [
+    "ui",
+    "permissions",
+    "lsp",
+    "subagents",
+    "verificationStatus",
+    "verification"
+  ],
   "properties": {
     "$schema": { "type": "string" },
     "ui": {
@@ -50,6 +57,14 @@
       "required": ["concurrency"],
       "properties": {
         "concurrency": { "type": "integer", "minimum": 1, "maximum": 8 }
+      }
+    },
+    "verificationStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
       }
     },
     "verification": {

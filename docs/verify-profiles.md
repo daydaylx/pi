@@ -39,11 +39,15 @@ project_check({ "profile": "typecheck" })
 project_check({ "profiles": ["typecheck", "tests"] })
 ```
 
-Bei einem `agent_end` mit Projektänderungen erscheint eine kurze, nicht
-blockierende Warnung, falls seit dem aktuellen Diff kein erfolgreicher
-`required`-Check lief. Ein Check vor einer weiteren Änderung gilt dabei nicht
-als aktuell. Ohne Pflichtprofil erscheint höchstens ein Hinweis; es gibt weder
-einen automatischen Testlauf noch eine Completion- oder Planphase.
+Bei `agent_settled` zeigt die Footer-Statuszeile den rein technischen
+Verifikationsstatus des aktuellen Workspace: `clean`, `changed_unverified`,
+`verified`, `checks_failed` oder `checks_unavailable`. Ein erfolgreicher
+`required`-Check ist nur für genau den Workspace-Snapshot aktuell, den er vor
+seiner Ausführung erfasst hat; eine spätere Änderung macht ihn veraltet.
+`agent_end` ist kein Completion- oder Verifikationssignal. Ohne Pflichtprofil
+bleibt der Status bei Änderungen `checks_unavailable`; es gibt weder einen
+automatischen Testlauf noch eine Completion- oder Planphase. Die Anzeige kann
+über `verificationStatus.enabled` in der Setup-Konfiguration deaktiviert werden.
 
 Pro Profil enthält das Ergebnis Profil-ID, redigiertes Programm und Argumente,
 relatives Arbeitsverzeichnis, Klassifikation, Start- und Endzeit, Exit-Code,

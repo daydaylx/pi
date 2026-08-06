@@ -19,8 +19,9 @@
 // Alle Pfade sind optional; fehlende Quellen führen zu null-Feldern statt
 // erfundenen Werten (siehe Änderungsregeln: keine Benchmarkergebnisse
 // erfinden).
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { collectWorkspaceSnapshot } from "./workspace-snapshot.mjs";
 
 // Siehe harness/BASELINE.md: Referenzcommit 7b886a3 hat 5 bekannte, vom
 // Agenten unabhängige Testfehlschläge, sobald verify außerhalb von
@@ -199,39 +200,74 @@ function collectRunHistoryMetrics(entries, windowStart, windowEnd) {
   };
 }
 
+function numstatTotals(worktreePath, args) {
+  const raw = execFileSync("git", args, {
+    cwd: worktreePath,
+    encoding: "utf-8",
+  });
+  return raw
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .reduce(
+      (totals, line) => {
+        const [added, removed] = line.split("\t");
+        return {
+          linesAdded: totals.linesAdded + (added === "-" ? 0 : Number(added)),
+          linesRemoved:
+            totals.linesRemoved + (removed === "-" ? 0 : Number(removed)),
+        };
+      },
+      { linesAdded: 0, linesRemoved: 0 },
+    );
+}
+
+function untrackedLineCount(worktreePath, path) {
+  const absolute = `${worktreePath}/${path}`;
+  if (lstatSync(absolute).isSymbolicLink()) return 1;
+  const contents = readFileSync(absolute);
+  if (contents.length === 0) return 0;
+  return contents.toString("utf8").split("\n").length -
+    (contents[contents.length - 1] === 10 ? 1 : 0);
+}
+
 function collectDiffStat(worktreePath, allowedFiles) {
   if (!worktreePath) return null;
-  let raw;
   try {
-    raw = execFileSync("git", ["diff", "--numstat"], {
-      cwd: worktreePath,
-      encoding: "utf-8",
-    });
+    const snapshot = collectWorkspaceSnapshot(worktreePath);
+    const unstaged = numstatTotals(worktreePath, ["diff", "--numstat", "-M"]);
+    const staged = numstatTotals(worktreePath, [
+      "diff",
+      "--cached",
+      "--numstat",
+      "-M",
+    ]);
+    const untrackedAdded = snapshot.untracked.reduce(
+      (total, path) => total + untrackedLineCount(worktreePath, path),
+      0,
+    );
+    const allowed = new Set(allowedFiles ?? []);
+    return {
+      changedFiles: snapshot.changedFiles,
+      changedFileCount: snapshot.changedFiles.length,
+      linesAdded: unstaged.linesAdded + staged.linesAdded + untrackedAdded,
+      linesRemoved: unstaged.linesRemoved + staged.linesRemoved,
+      outOfScopeFiles: allowedFiles
+        ? snapshot.changedFiles.filter((path) => !allowed.has(path))
+        : null,
+      snapshot: {
+        schemaVersion: snapshot.schemaVersion,
+        fingerprint: snapshot.fingerprint,
+        head: snapshot.head,
+        staged: snapshot.staged,
+        unstaged: snapshot.unstaged,
+        untracked: snapshot.untracked,
+        renames: snapshot.renames,
+        deletions: snapshot.deletions,
+      },
+    };
   } catch {
     return null;
   }
-  const files = raw
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => {
-      const [added, removed, file] = line.split("\t");
-      return {
-        file,
-        added: added === "-" ? null : Number(added),
-        removed: removed === "-" ? null : Number(removed),
-      };
-    });
-  const allowed = new Set(allowedFiles ?? []);
-  const outOfScope = allowedFiles
-    ? files.filter((f) => !allowed.has(f.file))
-    : [];
-  return {
-    changedFiles: files.map((f) => f.file),
-    changedFileCount: files.length,
-    linesAdded: files.reduce((sum, f) => sum + (f.added ?? 0), 0),
-    linesRemoved: files.reduce((sum, f) => sum + (f.removed ?? 0), 0),
-    outOfScopeFiles: allowedFiles ? outOfScope.map((f) => f.file) : null,
-  };
 }
 
 function collectVerifyResult(verifyResultPath) {
@@ -307,7 +343,7 @@ async function main() {
   const resources = readOptionalJsonObject(args.resourcesFile, "resources");
 
   const result = {
-    schemaVersion: "1.0.0",
+    schemaVersion: "1.1.0",
     task: args.task,
     collectedAt: new Date().toISOString(),
     automatic: {

@@ -53,8 +53,8 @@ reproduzierbaren Bedingungen.
 | ------------------------------- | --------------------------------------------- |
 | Erfolg ohne Nachkorrektur       | `collect-metrics.mjs` + `manualAssessment`    |
 | Benötigte Nutzerkorrekturen     | `manualAssessment`                            |
-| Unnötig geänderte Dateien       | `git diff --stat` vs. erwarteten Scope        |
-| Unnötig geänderte Zeilen        | `git diff --numstat`                          |
+| Unnötig geänderte Dateien       | versionierter Workspace-Snapshot vs. erwarteten Scope |
+| Unnötig geänderte Zeilen        | staged, unstaged und untracked Snapshot-Daten |
 | Fehlgeschlagene Tool-Aufrufe    | `isError: true` im Session-Verlauf            |
 | Test-/Typecheck-/Build-Ergebnis | `run-verify.sh` Exit-Code                     |
 | Tokenverbrauch                  | Session-Metadaten                             |
@@ -65,6 +65,15 @@ reproduzierbaren Bedingungen.
 | Wiederholte identische Fehler   | Session-JSONL (`toolCall`/`toolResult`)       |
 | Verifikations-Ergebnis          | `run-verify.sh` Exit-Code                     |
 | Unnötige Edit-Wiederholungen    | `git diff --numstat` + manuelle Scope-Prüfung |
+
+## Workspace-Snapshot
+
+P4 und der allgemeine Collector verwenden denselben versionierten Snapshot. Er
+enthält den Git-Stand, staged und unstaged Änderungen, untracked Dateien,
+Renames und Deletes sowie einen inhaltssensitiven Fingerprint. Ergebnisdaten
+enthalten nur Pfade, Zustände und Hashes; Patches, Dateiinhalte und absolute
+Pfade werden nicht gespeichert. Damit ist ein erfolgreicher Lauf mit
+indexierten oder untracked Agentenänderungen nicht länger unsichtbar.
 
 ## Stichproben-Design
 

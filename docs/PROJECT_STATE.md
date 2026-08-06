@@ -1,34 +1,42 @@
 # Project State
 
-Der Planworkflow wurde auf die drei flüchtigen Modi `work`, `simple_plan` und
-`detailed_plan` zurückgebaut. `current-plan.md` ist freier Markdown; v3-
-Status, Sidecars, Completion, Direct Tasks, Recovery und Migration sind nicht
-mehr Teil der Laufzeit.
+## Aktuelle Arbeit
 
-Berechtigungen sind eine reine Stufenwahl über `/permission`. Gespeicherte
-Einzelfreigaben und die modusgekoppelten Berechtigungsdefaults sind entfernt;
-ein Workflowwechsel ändert die Stufe nicht mehr. Die laufende Verifikation und
-bekannte Risiken stehen in der jeweiligen Arbeitsübergabe; dauerhafte
-Architekturentscheidungen gehören in `docs/CONTEXT_LEDGER.md`.
+Die Umsetzung von `pi-harness-hardening-v2` hat mit der gemeinsamen
+Workspace-Snapshot-Basis begonnen. Neu ist
+`benchmarks/harness/workspace-snapshot.mjs`: P4 und der allgemeine
+Benchmark-Collector erfassen nun mit derselben versionierten Logik `HEAD`,
+staged, unstaged und untracked Änderungen sowie Renames und Deletes. Das
+Ergebnis enthält ausschließlich Pfade, Zustände und Fingerprints; Patches,
+Dateiinhalte und absolute Pfade bleiben privat.
 
-## Letzter Arbeitsstand
+`collect-metrics.mjs` zählt nun auch staged und untracked Änderungen und gibt
+den Snapshot als Teil des Diff-Ergebnisses aus. P4 verwendet denselben
+Contract. Tests für den gemischten Git-Zustand und die Collector-Integration
+sind in `benchmarks/harness/test/workspace-snapshot.test.mjs` ergänzt und in
+den Gesamttest eingebunden. Die Ergebnis-Schema- und Benchmark-Dokumentation
+beschreiben den zusätzlichen Snapshot.
 
-Aurora zeigt strukturierten Workflow-Fortschritt im Editorrahmen, bündelt die
-Live-Aktivität im eigenen Widget und priorisiert Footer-Informationen je nach
-Terminalbreite. Warnungen zu Kontext und LSP bleiben in der schmalen Ansicht
-sichtbar; parallele Tools und Subagenten weisen auf ausgeblendete Einträge hin.
-Die Footer-Ownership ist in Entscheidung 007 an Entscheidung 009 angepasst.
+Der Setup Core führt nun einen kleinen sitzungsgebundenen Ledger für Required
+Project Checks. Bei `agent_settled` zeigt die bestehende Footer-Statuszeile
+`clean`, `changed_unverified`, `verified`, `checks_failed` oder
+`checks_unavailable`; `agent_end` wird nicht verwendet. Der Status ist
+abschaltbar, dedupliziert, wird nur in interaktiven Oberflächen angezeigt und
+führt nie automatisch einen Check aus. Der erfolgreiche Required-Check wird
+an den vor seiner Ausführung erfassten Snapshot gebunden.
 
-Parallel dazu sind drei Fähigkeiten zurückgebaut: die gespeicherten
-Permission-Grants, das Performance-/Profiling-Tooling samt `agent_end`-
-Frischewarner und `tool-output-guard`. Die Doku zum Performance-Tooling liegt
-unter `docs/archive/performance-tools.md`.
+Die vollständige Prüfung `npm --prefix npm run verify` lief erfolgreich; sie
+umfasste Formatierung, Typecheck, Dead-Code-Prüfung, alle Test-Suites,
+Runtime-Patches und Audit.
+
+Vorhandene, nicht zu dieser Arbeit gehörende Änderungen in Runtime-Doku,
+Runtime-Patches, Settings und Runtime-Tests wurden nicht verändert.
 
 Nächste Schritte:
 
-1. Die Aurora-Oberfläche in einem echten Terminal mit den üblichen Breiten und
-   Terminalhintergründen visuell prüfen.
-2. Bei einem späteren Workflow-Provider strukturierten Fortschritt
-   (`completed`/`total`) senden, damit die neue Rahmenanzeige ihn nutzen kann.
-3. Den Rückbau in getrennten Commits übernehmen (Aurora, Grants, Performance,
-   Tool-Output-Guard, Sonstiges).
+1. Mehrere kontrollierte Baseline- und Holdout-Läufe mit dem neuen Snapshot
+   durchführen und Infrastrukturfehler referenzgebunden dokumentieren.
+2. Trace-Metriken für Wiederholungen, No-Action-Turns und objektiven
+   Fortschritt ergänzen, ohne Nudge- oder Blockadelogik.
+3. Tool- und Kontextqualität für `verify`, `project_check`, Profilmetadaten
+   und Fehlerklassen gezielt verbessern.

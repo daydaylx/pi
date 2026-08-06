@@ -40,6 +40,11 @@ const suites = [
     env: {},
   },
   {
+    name: "workspace-snapshot",
+    file: "../benchmarks/harness/test/workspace-snapshot.test.mjs",
+    env: {},
+  },
+  {
     name: "p4-controller",
     file: "../benchmarks/harness/test/p4-controller.test.mjs",
     env: {},

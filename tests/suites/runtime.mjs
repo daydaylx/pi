@@ -8,6 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { assert, eq } from "../shared/assertions.mjs";
@@ -400,6 +401,11 @@ export const runtimeSections = {
           { unknownTools: "ask", bash: "allow" },
           "capability defaults require confirmation",
         );
+        eq(
+          defaults.verificationStatus,
+          { enabled: true },
+          "verification status is enabled by default and can be configured",
+        );
         assert(
           !Object.hasOwn(defaults, "models"),
           "native Pi scoped models replace setup roles",
@@ -692,6 +698,176 @@ export const runtimeSections = {
     // universal verification gate (#102); separate from the inviolable setup
     // `verify` tool. No real process is spawned (exec is injected).
     // ---------------------------------------------------------------------------
+  },
+
+  "verification status layer": async (context) => {
+    const { section, load, setupCore } = context;
+
+    await section("verification status layer", async () => {
+      const status = await load("extensions/setup-core/verification-status.ts");
+      const cleanSnapshot = {
+        changedFiles: [],
+        fingerprint: "clean",
+      };
+      const changedSnapshot = {
+        changedFiles: ["source.ts"],
+        fingerprint: "changed",
+      };
+      eq(
+        status.verificationStatus(cleanSnapshot, {}),
+        "clean",
+        "a clean workspace is clean without a check",
+      );
+      eq(
+        status.verificationStatus(changedSnapshot, {}),
+        "changed_unverified",
+        "a changed workspace without a required check is unverified",
+      );
+      eq(
+        status.verificationStatus(changedSnapshot, {
+          lastRequiredCheck: {
+            profileIds: ["typecheck"],
+            result: "success",
+            workspaceFingerprint: "changed",
+            completedAt: "2026-08-06T00:00:00.000Z",
+          },
+        }),
+        "verified",
+        "a successful required check for the current snapshot is verified",
+      );
+      eq(
+        status.verificationStatus(changedSnapshot, {
+          lastRequiredCheck: {
+            profileIds: ["typecheck"],
+            result: "success",
+            workspaceFingerprint: "older",
+            completedAt: "2026-08-06T00:00:00.000Z",
+          },
+        }),
+        "changed_unverified",
+        "a workspace change makes a previous check stale",
+      );
+      eq(
+        status.checkResultFromReports([
+          {
+            classification: "required",
+            status: "spawn_failed",
+            exitCode: 1,
+            killed: false,
+          },
+        ]),
+        "failed",
+        "a required command failure is distinct from an unavailable check",
+      );
+      eq(
+        status.checkResultFromReports([
+          {
+            classification: "required",
+            status: "timeout",
+            exitCode: null,
+            killed: true,
+          },
+        ]),
+        "unavailable",
+        "a timeout is reported as an unavailable check",
+      );
+
+      if (!setupCore) return;
+      const workspace = mkdtempSync(path.join(tmpdir(), "pi-verification-status-"));
+      const git = (args) =>
+        execFileSync("git", args, { cwd: workspace, encoding: "utf8" });
+      try {
+        git(["init", "--quiet"]);
+        git(["config", "user.email", "verification@example.test"]);
+        git(["config", "user.name", "Verification Test"]);
+        mkdirSync(path.join(workspace, ".pi"), { recursive: true });
+        writeFileSync(
+          path.join(workspace, ".pi", "verify.json"),
+          JSON.stringify({
+            profiles: {
+              typecheck: {
+                program: "npm",
+                args: ["run", "typecheck"],
+                classification: "required",
+              },
+            },
+          }),
+        );
+        writeFileSync(path.join(workspace, "source.ts"), "export const value = 1;\n");
+        git(["add", "."]);
+        git(["commit", "--quiet", "-m", "baseline"]);
+
+        const harness = createHarness();
+        setupCore.default(harness.api);
+        const trusted = harness.makeContext({ cwd: workspace, trusted: true });
+        await harness.runHooks("session_start", {}, trusted);
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          "Verify: clean",
+          "agent_settled publishes a compact clean technical status",
+        );
+
+        writeFileSync(path.join(workspace, "source.ts"), "export const value = 2;\n");
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          "Verify: changed_unverified",
+          "agent_settled reports a changed workspace without a current check",
+        );
+        const beforeDuplicateSettle = harness.statusCalls.length;
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          harness.statusCalls.length,
+          beforeDuplicateSettle,
+          "identical settled statuses are deduplicated",
+        );
+
+        const projectCheck = harness.tools.get("project_check");
+        assert(projectCheck, "project_check is available for a required profile");
+        if (projectCheck) {
+          await projectCheck.execute(
+            "verification-status-required-check",
+            { profile: "typecheck" },
+            undefined,
+            undefined,
+            trusted,
+          );
+        }
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          "Verify: verified",
+          "a successful required project check verifies its exact snapshot",
+        );
+
+        writeFileSync(path.join(workspace, "source.ts"), "export const value = 3;\n");
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          "Verify: changed_unverified",
+          "the status becomes stale after a later workspace change",
+        );
+        writeFileSync(
+          path.join(workspace, ".pi", "setup.json"),
+          JSON.stringify({ verificationStatus: { enabled: false } }),
+        );
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          undefined,
+          "the configured status layer can be disabled without running a check",
+        );
+        await harness.runHooks("session_shutdown", {}, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          undefined,
+          "session shutdown removes the transient verification status",
+        );
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    });
   },
 
   "setup doctor required profile completeness (P1-08)": async (context) => {

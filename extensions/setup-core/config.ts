@@ -26,6 +26,7 @@ export interface SetupConfig {
     idleShutdownMs: number;
   };
   subagents: { concurrency: number };
+  verificationStatus: { enabled: boolean };
   verification: Record<VerificationName, VerificationCommand>;
 }
 
@@ -54,6 +55,7 @@ const DEFAULT_CONFIG: SetupConfig = {
     idleShutdownMs: 600_000,
   },
   subagents: { concurrency: 3 },
+  verificationStatus: { enabled: true },
   verification: {
     typecheck: {
       command: "npm",
@@ -159,7 +161,15 @@ function applyUserLayer(
   const next = structuredClone(base);
   reportUnknownKeys(
     raw,
-    ["$schema", "ui", "permissions", "lsp", "subagents", "verification"],
+    [
+      "$schema",
+      "ui",
+      "permissions",
+      "lsp",
+      "subagents",
+      "verificationStatus",
+      "verification",
+    ],
     source,
     "",
     diagnostics,
@@ -168,6 +178,9 @@ function applyUserLayer(
   const permissions = isObject(raw.permissions) ? raw.permissions : undefined;
   const lsp = isObject(raw.lsp) ? raw.lsp : undefined;
   const subagents = isObject(raw.subagents) ? raw.subagents : undefined;
+  const verificationStatus = isObject(raw.verificationStatus)
+    ? raw.verificationStatus
+    : undefined;
   const verification = isObject(raw.verification)
     ? raw.verification
     : undefined;
@@ -196,6 +209,14 @@ function applyUserLayer(
       ["concurrency"],
       source,
       "subagents.",
+      diagnostics,
+    );
+  if (verificationStatus)
+    reportUnknownKeys(
+      verificationStatus,
+      ["enabled"],
+      source,
+      "verificationStatus.",
       diagnostics,
     );
   if (verification)
@@ -275,6 +296,15 @@ function applyUserLayer(
     "subagents.concurrency",
     diagnostics,
   );
+  if (typeof verificationStatus?.enabled === "boolean") {
+    next.verificationStatus.enabled = verificationStatus.enabled;
+  } else if (verificationStatus?.enabled !== undefined) {
+    diagnostics.push({
+      level: "error",
+      source,
+      message: "verificationStatus.enabled muss boolean sein",
+    });
+  }
   for (const name of ["typecheck", "test", "verify"] as const) {
     const rawCheck = verification?.[name];
     if (!isObject(rawCheck)) continue;

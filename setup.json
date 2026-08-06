@@ -17,6 +17,9 @@
   "subagents": {
     "concurrency": 3
   },
+  "verificationStatus": {
+    "enabled": true
+  },
   "verification": {
     "typecheck": {
       "command": "npm",
