@@ -15,6 +15,7 @@
     "tests/coverage.mjs",
     "tests/p1-runtime.mjs",
     "tests/runtime-patches.mjs",
+    "tests/pi-subagents-patch.mjs",
     "tests/**/*.test.mjs",
     "scripts/*.mjs",
     "benchmarks/harness/**/*.mjs"

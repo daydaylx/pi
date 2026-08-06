@@ -7,6 +7,7 @@ import {
   statSync,
 } from "node:fs";
 import { delimiter, isAbsolute, relative, resolve, sep } from "node:path";
+import { isInside } from "./path-utils.ts";
 import type { PermissionLevel } from "./workflow-status.ts";
 
 export type PolicyAction = "allow" | "ask" | "block";
@@ -180,11 +181,6 @@ function deny(reason: string): PolicyDecision {
 
 function ask(reason: string, hard = false): PolicyDecision {
   return { action: "ask", reason, hard };
-}
-
-function isInside(basePath: string, candidatePath: string): boolean {
-  const rel = relative(basePath, candidatePath);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
 function hasSymlinkComponent(basePath: string, candidatePath: string): boolean {

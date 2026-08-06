@@ -1,5 +1,5 @@
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
-import { extname, join, relative, resolve, sep } from "node:path";
+import { extname, join, relative, resolve } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -14,6 +14,7 @@ import {
   runMenu,
   type MenuEntry,
 } from "../shared/menu-ui.ts";
+import { isInside } from "../shared/path-utils.ts";
 import { EXTENSION_LANGUAGE_MAP } from "./server-profiles.ts";
 import { runLspDiagnostics, type LspToolsDeps } from "./tools.ts";
 
@@ -30,11 +31,6 @@ const IGNORED_DIRECTORIES = new Set([
   "target",
   "vendor",
 ]);
-
-function isInside(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`));
-}
 
 /** Lists a bounded set of regular, supported files below the workspace root. */
 export function findLspDiagnosticCandidates(

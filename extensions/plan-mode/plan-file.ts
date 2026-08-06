@@ -1,12 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, relative, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
+import { isInside } from "../shared/path-utils.ts";
 
 export const PLAN_RELATIVE_PATH = ".agent/plans/current-plan.md";
-
-function isInside(base: string, target: string): boolean {
-  const rel = relative(base, target);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`));
-}
 
 /** Resolve the one plan file without accepting path traversal. */
 export function planPath(cwd: string): string {

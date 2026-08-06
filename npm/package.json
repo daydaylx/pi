@@ -12,13 +12,15 @@
     "test:coverage:baseline": "node ../tests/coverage.mjs --write-baseline",
     "test:runtime": "node ../tests/p1-runtime.mjs",
     "test:patches": "node ../tests/runtime-patches.mjs",
+    "test:patches:pi-subagents": "node ../tests/pi-subagents-patch.mjs",
     "patch:runtime": "node ../scripts/apply-runtime-patches.mjs",
+    "patch:pi-subagents": "node ../scripts/apply-pi-subagents-patch.mjs",
     "audit:check": "node ../scripts/check-npm-audit.mjs",
     "format": "prettier --write ..",
     "format:check": "prettier --check ..",
     "deadcode": "knip --directory ..",
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
-    "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:runtime && npm run audit:check"
+    "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:patches:pi-subagents && npm run test:runtime && npm run audit:check"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
@@ -27,7 +29,7 @@
     "pi-zentui": "0.3.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.83.0",
+    "@earendil-works/pi-coding-agent": "0.84.0",
     "@types/node": "24.12.4",
     "knip": "6.31.0",
     "prettier": "3.9.6",

@@ -17,6 +17,20 @@ import { toolPath } from "./tool-event.ts";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "ask_user"];
 
+// Custom-/MCP-Tools ohne path/filePath-Feld (z. B. subagent) hätten sonst ein
+// leeres Subject und der Mensch würde blind bestätigen.
+const MAX_INPUT_PREVIEW = 300;
+
+function toolSubject(event: ToolCallEvent): string {
+  if (event.toolName === "bash") {
+    return String((event.input as Record<string, unknown>).command ?? "");
+  }
+  const path = toolPath(event);
+  if (path !== undefined) return `${event.toolName}: ${path}`;
+  const preview = JSON.stringify(event.input ?? {}).slice(0, MAX_INPUT_PREVIEW);
+  return `${event.toolName}: ${preview}`;
+}
+
 export function registerPermissionGuards(
   pi: ExtensionAPI,
   session: PermissionSession,
@@ -46,10 +60,7 @@ export function registerPermissionGuards(
     if (decision.action === "block") {
       return { block: true, reason: decision.reason };
     }
-    const subject =
-      event.toolName === "bash"
-        ? String((event.input as Record<string, unknown>).command ?? "")
-        : `${event.toolName}: ${toolPath(event) ?? ""}`;
+    const subject = toolSubject(event);
     const confirmed = await confirmAction(
       ctx,
       decision,
