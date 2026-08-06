@@ -2,8 +2,8 @@
 
 | Komponente          | Gepinnte Version / Wert                                          | Verifikation                                                         |
 | ------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Pi-Runtime          | `0.83.0`                                                         | installiertes globales Paket und `pi --version`                      |
-| Pi-Dev-Abhängigkeit | `0.83.0`                                                         | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
+| Pi-Runtime          | `0.84.0`                                                         | installiertes globales Paket und `pi --version`                      |
+| Pi-Dev-Abhängigkeit | `0.84.0`                                                         | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
 | Node.js             | `22.22.2`                                                        | `node --version`                                                     |
 | npm                 | `10.9.7`                                                         | `npm --version`                                                      |
 | Aurora UI           | lokales TypeScript                                               | Typecheck, Lifecycle- und responsive Render-Tests                    |
@@ -16,12 +16,12 @@
 
 ## Release-Gate
 
-`npm run verify` muss ohne bekannte Fehlschläge bestehen. Die installierte Pi-Runtime
-(`0.82.1`) und die gepinnte Entwicklungsabhängigkeit (`0.80.6`) unterscheiden sich um eine
-**Minor-Version**. Typen und Tests laufen damit gegen eine ältere API als die produktiv
-ausgeführte — Abweichungen im Laufzeitverhalten sind möglich. Eine Angleichung erfordert
-eine ausdrücklich freigegebene Abhängigkeitsaktualisierung und Lockfile-Auffrischung. Bis
-dahin hält `/setup-doctor` die Abweichung sichtbar.
+`npm run verify` muss ohne bekannte Fehlschläge bestehen. Die installierte Pi-Runtime und
+die gepinnte Entwicklungsabhängigkeit stehen beide auf `0.84.0`. Weicht eine der beiden
+künftig wieder ab, laufen Typen und Tests gegen eine andere API als die produktiv
+ausgeführte — Abweichungen im Laufzeitverhalten sind dann möglich. `/setup-doctor` hält
+eine solche Abweichung sichtbar; siehe `docs/RUNTIME_PATCHES.md` für das Vorgehen bei
+einem Runtime-Upgrade.
 
 LSP-Binärdateien sind Host-Voraussetzungen, keine verwalteten Abhängigkeiten. Fehlende
 Binärdateien müssen einen strukturierten Soft-Fehler erzeugen und dürfen niemals eine

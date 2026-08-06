@@ -2,7 +2,7 @@
 
 Die tatsächlich gestartete Pi-Runtime liegt unter
 `/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent` und hat
-Version `0.83.0`. Sie enthält bewusst lokale P1-Patches, die nicht Teil dieses
+Version `0.84.0`. Sie enthält bewusst lokale P1-Patches, die nicht Teil dieses
 Git-Arbeitsbaums sind.
 
 > **Historie:** Das Upgrade von `0.82.0` auf `0.82.1` hat die gepatchten Dateien
@@ -15,6 +15,12 @@ Am 2026-08-02 wurde der Patch gegen Pi `0.83.0` geprüft und neu gebunden. Am
 2026-08-05 kam die Fokusgrenze für globale Extension-Eingaben hinzu, nachdem
 ein Fleet-Dock-Listener Pfeiltasten und Escape vor modalen Selectoren konsumiert
 hatte.
+
+Am 2026-08-06 wurde der Patch gegen Pi `0.84.0` geprüft und neu gebunden. Dabei
+stellte sich heraus, dass Upstream das Problem hinter vier der bisherigen
+Eingriffe (`loader-scoped-events`, `loader-unsubscriber-list`, `runner-dispose`,
+`session-reload-dispose`) inzwischen selbst löst — siehe **Retirement** unten.
+Die verbliebenen sechs Patches griffen unverändert.
 
 ## Wiederherstellen
 
@@ -50,17 +56,9 @@ Mit `--runtime <pfad>` lässt sich eine andere Installation ansprechen.
 
 ## Umfang
 
-- `dist/core/extensions/loader.js`: `createExtension()` führt eine Liste
-  `eventUnsubscribers`; `createExtensionAPI()` reicht statt des rohen Event-Bus
-  einen Wrapper durch, dessen `on()` den Unsubscriber dort ablegt. `emit` und
-  `clear` bleiben unverändert durchgereicht.
-- `dist/core/extensions/runner.js`: neue Methode `ExtensionRunner.dispose()`.
-  Sie ruft `invalidate()` und ruft anschließend alle `eventUnsubscribers` jeder
-  Extension auf. Ein scheiternder Unsubscriber blockiert die übrigen nicht.
-- `dist/core/agent-session.js`: `reload()` ruft `dispose()` direkt nach
-  `emitSessionShutdownEvent` — bevor die neue Generation ihre Listener
-  registriert. `pi.getCommands()` liefert zusätzlich die 22 Built-ins und nur
-  dann Skill-Commands, wenn Skill-Commands in den Settings aktiviert sind.
+- `dist/core/agent-session.js`: `pi.getCommands()` liefert zusätzlich die 22
+  Built-ins und nur dann Skill-Commands, wenn Skill-Commands in den Settings
+  aktiviert sind.
 - `dist/modes/interactive/interactive-mode.js`: Die Extension-UI erhält
   `submitSlashCommand()`. Es akzeptiert genau eine Slash-Zeile und reicht sie
   an denselben Dispatcher wie eine manuelle Eingabe weiter. Außerdem werden
@@ -72,13 +70,30 @@ Mit `--runtime <pfad>` lässt sich eine andere Installation ansprechen.
   innerhalb derselben Präzedenz nach der Position ihres `+path`-Eintrags in
   `settings.json`; ohne solche Einträge bleibt die bisherige Sortierung.
 
-## Warum diese Patches
+## Retirement (0.84.0)
 
-Ohne den Listener-Patch beantworten nach einem Reload sowohl die alte als auch
-die neue Extension-Generation denselben Kanal: `pi.events.on()` registriert auf
-einem geteilten Bus, der beim Generationswechsel nicht geleert wurde. Das
-betrifft insbesondere die Capability-Bridges zwischen Workflow, Permissions und
-Thinking, die über `respond()`-Callbacks arbeiten.
+Die Patches `loader-scoped-events`, `loader-unsubscriber-list`,
+`runner-dispose` und `session-reload-dispose` bildeten zusammen einen
+Mechanismus: Extension-Listener auf `pi.events.on()` an die Lebensdauer ihrer
+Extension binden, damit nach einem Reload nicht sowohl die alte als auch die
+neue Generation denselben Kanal beantworten.
+
+Pi `0.84.0` löst genau dieses Problem jetzt nativ, mit einem anderen Aufbau:
+`createExtensionRuntime()` in `loader.js` führt ein generationsweites
+`eventBusUnsubscribers`-Set; `trackEventBusSubscription()` legt dort jeden
+`pi.events.on()`-Unsubscriber ab; `runtime.invalidate()` leert das Set.
+`ExtensionRunner.invalidate()` ruft `this.runtime.invalidate(message)` auf,
+und `agent-session.js` ruft in `reload()` bereits `oldRunner.invalidate()`
+direkt nach `emitSessionShutdownEvent` auf — der frühere Anknüpfungspunkt
+`this._extensionRunner.dispose()` existiert nicht mehr.
+
+Ein erneutes Aufsetzen dieser vier Patches würde entweder gar nicht mehr
+greifen (zwei der vier Anker fehlen inzwischen) oder totes Gewebe erzeugen
+(die anderen beiden Anker matchen zufällig noch, aber nichts liest das
+Ergebnis mehr). `tests/p1-runtime.mjs` prüft seit diesem Retirement direkt
+den nativen Mechanismus statt der alten Patch-Marker.
+
+## Warum die verbliebenen Patches
 
 Ohne den Reihenfolge-Patch ist die Sortierung innerhalb einer Präzedenzstufe die
 Verzeichnis-Scan-Reihenfolge, nicht die in `settings.json` deklarierte.

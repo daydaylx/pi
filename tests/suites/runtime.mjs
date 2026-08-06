@@ -525,7 +525,7 @@ export const runtimeSections = {
       assert(
         harness.notifications
           .at(-1)
-          ?.message?.includes("Pi CLI/dev package: 0.80.7/0.83.0") &&
+          ?.message?.includes("Pi CLI/dev package: 0.80.7/0.84.0") &&
           harness.notifications.at(-1)?.level === "error",
         "setup doctor makes CLI/dev version drift visible",
       );

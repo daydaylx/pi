@@ -1,4 +1,4 @@
-// P1 regression test for the locally patched Pi 0.83.0 runtime.
+// P1 regression test for the locally patched Pi 0.84.0 runtime.
 // It intentionally targets the executable runtime, not npm/node_modules,
 // because that is the Pi instance users actually start.
 import assert from "node:assert/strict";
@@ -13,8 +13,8 @@ const packageJson = JSON.parse(
 );
 assert.equal(
   packageJson.version,
-  "0.83.0",
-  "P1 runtime patch is pinned to Pi 0.83.0",
+  "0.84.0",
+  "P1 runtime patch is pinned to Pi 0.84.0",
 );
 
 const loaderSource = readFileSync(
@@ -38,20 +38,25 @@ const interactiveSource = readFileSync(
   "utf8",
 );
 
+// Retired in 0.84.0: loader-scoped-events / loader-unsubscriber-list /
+// runner-dispose / session-reload-dispose used to scope and drain extension
+// event-bus listeners by hand. Upstream now does this natively — a
+// generation-scoped set drained by invalidate() — so these assertions check
+// that native mechanism instead of the old patch markers.
 assert.match(
   loaderSource,
-  /eventUnsubscribers/,
-  "loader scopes event-bus listeners",
+  /trackEventBusSubscription/,
+  "loader scopes event-bus listeners to their generation",
 );
 assert.match(
   runnerSource,
-  /dispose\(message = /,
-  "runner disposes scoped listeners",
+  /invalidate\(message = [\s\S]{0,600}this\.runtime\.invalidate\(message\)/,
+  "runner invalidation forwards to the generation-scoped runtime",
 );
 assert.match(
   sessionSource,
-  /await emitSessionShutdownEvent[\s\S]{0,240}this\._extensionRunner\.dispose\(\)/,
-  "reload disposes the replaced runner",
+  /await emitSessionShutdownEvent[\s\S]{0,240}oldRunner\.invalidate\(\)/,
+  "reload invalidates the replaced runner",
 );
 assert.match(
   packageManagerSource,
@@ -104,7 +109,7 @@ let generation = 0;
 let activeRunner;
 
 for (let reload = 1; reload <= 10; reload += 1) {
-  activeRunner?.dispose();
+  activeRunner?.invalidate();
   const runtime = createExtensionRuntime();
   const instance = ++generation;
   const extension = await loadExtensionFromFactory(
@@ -140,18 +145,18 @@ for (let reload = 1; reload <= 10; reload += 1) {
   );
 }
 
-activeRunner.dispose();
-const postDisposeResponses = [];
+activeRunner.invalidate();
+const postInvalidateResponses = [];
 eventBus.emit("p1:reload-provider", {
   respond(value) {
-    postDisposeResponses.push(value);
+    postInvalidateResponses.push(value);
   },
 });
 await new Promise((resolve) => setImmediate(resolve));
 assert.deepEqual(
-  postDisposeResponses,
+  postInvalidateResponses,
   [],
-  "disposing the last runner removes its listener",
+  "invalidating the last runner removes its listener",
 );
 
 console.log("P1 runtime reload regression passed.");

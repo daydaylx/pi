@@ -77,12 +77,14 @@ for (const patch of PATCHES) {
 
 check("the patch set covers what p1-runtime.mjs verifies", () => {
   // These are the markers tests/p1-runtime.mjs asserts against the installed
-  // runtime. Each one has to come from a patch, otherwise a green patch run
-  // could still leave that test red.
+  // runtime that still come from a patch. Each one has to come from a patch,
+  // otherwise a green patch run could still leave that test red.
+  //
+  // Not listed here: the retired-in-0.84.0 markers (event-bus listener
+  // scoping / disposal) that p1-runtime.mjs now checks directly against
+  // upstream's native mechanism instead of a patch — see the P1-RETIRED
+  // comments in scripts/apply-runtime-patches.mjs.
   const runtimeMarkers = [
-    "eventUnsubscribers",
-    "dispose(message = ",
-    "this._extensionRunner.dispose()",
     "applyConfiguredExtensionOrder",
     "const builtinCommands = BUILTIN_SLASH_COMMANDS.map",
     "submitSlashCommand: async (commandLine)",

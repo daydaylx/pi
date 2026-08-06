@@ -32,14 +32,11 @@ import { fileURLToPath } from "node:url";
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The runtime version these patches were written and verified against. */
-export const EXPECTED_RUNTIME_VERSION = "0.83.0";
+export const EXPECTED_RUNTIME_VERSION = "0.84.0";
 
 export const DEFAULT_RUNTIME_ROOT =
   process.env.PI_RUNTIME_ROOT ??
   "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent";
-
-const STALE_CTX_MESSAGE =
-  '"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload()."';
 
 /**
  * One edit. `detect` proves the patch is already in place, `anchor` is the
@@ -139,106 +136,19 @@ import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.js";`,
             // must not consume arrows or Escape before a focused selector/overlay.
             onTerminalInput: (handler) => this.addExtensionTerminalInputListener((data) => this.ui.focusedComponent === this.editor ? handler(data) : undefined),`,
   },
-  {
-    id: "loader-scoped-events",
-    file: "dist/core/extensions/loader.js",
-    summary: "Extension-Listener an den Extension-Lebenszyklus binden",
-    detect: "extension.eventUnsubscribers.push(unsubscribe)",
-    anchor: `        events: eventBus,
-    };
-    return api;
-}`,
-    replacement: `        // P1: scope every extension listener to the extension lifecycle. The raw
-        // bus keeps listeners forever, so a reload left the previous generation
-        // answering alongside the new one.
-        events: {
-            emit: (channel, data) => eventBus.emit(channel, data),
-            on: (channel, handler) => {
-                const unsubscribe = eventBus.on(channel, handler);
-                extension.eventUnsubscribers.push(unsubscribe);
-                return () => {
-                    const index = extension.eventUnsubscribers.indexOf(unsubscribe);
-                    if (index >= 0)
-                        extension.eventUnsubscribers.splice(index, 1);
-                    unsubscribe();
-                };
-            },
-            clear: () => eventBus.clear(),
-        },
-    };
-    return api;
-}`,
-  },
-  {
-    id: "loader-unsubscriber-list",
-    file: "dist/core/extensions/loader.js",
-    summary: "Unsubscriber-Liste am Extension-Objekt anlegen",
-    detect: "eventUnsubscribers: [],",
-    anchor: `        commands: new Map(),
-        flags: new Map(),
-        shortcuts: new Map(),
-    };
-}`,
-    replacement: `        commands: new Map(),
-        flags: new Map(),
-        shortcuts: new Map(),
-        // P1: unsubscribers for this extension's event-bus listeners.
-        eventUnsubscribers: [],
-    };
-}`,
-  },
-  {
-    id: "runner-dispose",
-    file: "dist/core/extensions/runner.js",
-    summary: "ExtensionRunner.dispose() meldet die Listener ab",
-    detect: "dispose(message = ",
-    anchor: `    assertActive() {
-        if (this.staleMessage) {
-            throw new Error(this.staleMessage);
-        }
-    }`,
-    replacement: `    assertActive() {
-        if (this.staleMessage) {
-            throw new Error(this.staleMessage);
-        }
-    }
-    /**
-     * P1: invalidate this generation AND remove its event-bus listeners.
-     *
-     * invalidate() alone only marks contexts stale; the listeners registered
-     * through pi.events stayed on the shared bus, so after a reload both the
-     * old and the new generation answered the same channel.
-     */
-    dispose(message = ${STALE_CTX_MESSAGE}) {
-        this.invalidate(message);
-        for (const extension of this.extensions) {
-            const unsubscribers = extension.eventUnsubscribers;
-            if (!unsubscribers)
-                continue;
-            for (const unsubscribe of unsubscribers.splice(0)) {
-                try {
-                    unsubscribe();
-                }
-                catch {
-                    // A failing unsubscriber must not block the remaining ones.
-                }
-            }
-        }
-    }`,
-  },
-  {
-    id: "session-reload-dispose",
-    file: "dist/core/agent-session.js",
-    summary: "Reload verwirft die Listener der abgelösten Generation",
-    detect: "this._extensionRunner.dispose();",
-    anchor: `        await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
-        await this.settingsManager.reload();`,
-    replacement: `        await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
-        // P1: drop the replaced generation's event-bus listeners before the new
-        // one registers its own, otherwise both answer.
-        this._extensionRunner.dispose();
-        await this.settingsManager.reload();`,
-  },
+  // P1-RETIRED (0.84.0): "loader-scoped-events" and "loader-unsubscriber-list"
+  // used to scope each extension's pi.events.on() listeners to its own
+  // lifecycle, so a reload didn't leave the old generation still answering.
+  // Pi 0.84.0 solves the same problem natively via a generation-scoped
+  // `eventBusUnsubscribers` set (loader.js: createExtensionRuntime() +
+  // trackEventBusSubscription()), drained by runtime.invalidate(). See
+  // docs/RUNTIME_PATCHES.md for the full history.
+  // P1-RETIRED (0.84.0): "runner-dispose" and "session-reload-dispose" added
+  // ExtensionRunner.dispose() and wired it into agent-session.js's reload().
+  // reload() now calls the native oldRunner.invalidate() directly, which
+  // already drains the generation's event-bus listeners — dispose() would be
+  // an unused method calling into fields nothing else populates. See
+  // docs/RUNTIME_PATCHES.md for the full history.
   {
     id: "package-manager-order-helper",
     file: "dist/core/package-manager.js",
