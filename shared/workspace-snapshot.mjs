@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 
 export const WORKSPACE_SNAPSHOT_SCHEMA_VERSION = "1";
 
@@ -50,7 +50,8 @@ function hash(value) {
 function untrackedContentFingerprints(worktree, paths) {
   return paths.map((path) => {
     const absolute = resolve(worktree, path);
-    if (relative(worktree, absolute).startsWith("..")) {
+    const rel = relative(worktree, absolute);
+    if (rel === ".." || rel.startsWith(`..${sep}`)) {
       throw new Error("Untracked path is outside the workspace.");
     }
     let stat;
