@@ -68,7 +68,12 @@ const definitions = [
     "Work-Modus",
     "Normale Projektarbeit ohne Planpflicht aktivieren",
     "work",
-    ["go"],
+  ],
+  [
+    "go",
+    "Plan umsetzen",
+    "Aktuellen Plan einmalig als Kontext übernehmen und Work-Turn starten",
+    "work",
   ],
 
   [

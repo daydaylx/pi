@@ -5,10 +5,12 @@
  *   selectedPermissionLevel/State — what the user chose (persisted)
  *   permissionLevel/State         — what is actually in force right now
  *
- * The workflow mode no longer chooses a level; it is recorded for the audit
- * entry only. YOLO exists in the effective pair alone. It is a temporary
- * bypass, never a preference: it is never persisted, and the hard
- * secret/system/symlink/trust boundaries stay active throughout.
+ * The workflow mode does not live here: it is orthogonal to the permission
+ * level and is queried live from plan-mode via requestWorkflowCapabilities
+ * exactly where it matters for a decision (permissions/guards.ts). YOLO
+ * exists in the effective pair alone. It is a temporary bypass, never a
+ * preference: it is never persisted, and the hard secret/system/symlink/trust
+ * boundaries stay active throughout.
  *
  * The session epoch guards against a menu that resolves after the session it
  * belonged to has ended.
@@ -31,7 +33,6 @@ import {
   setTuiStatus,
   type PermissionLevel,
   type PermissionState,
-  type WorkflowMode,
 } from "../shared/workflow-status.ts";
 import {
   defaultSetupConfig,
@@ -67,11 +68,6 @@ export interface PermissionSession {
   isCurrentEpoch(epoch: number): boolean;
   epoch(): number;
   persist(): void;
-  applyWorkflowDefaults(
-    workflowMode: WorkflowMode,
-    ctx: ExtensionContext,
-    source: "workflow" | "session",
-  ): void;
   applyPermissionLevel(
     level: PermissionLevel,
     ctx: ExtensionContext,
@@ -84,7 +80,7 @@ export interface PermissionSession {
   ): Promise<void>;
   /** True when the event belongs to the session that is currently active. */
   ownsSession(sessionId: string, cwd: string): boolean;
-  beginSession(ctx: ExtensionContext, workflowMode: WorkflowMode): void;
+  beginSession(ctx: ExtensionContext): void;
   endSession(ctx: ExtensionContext): void;
 }
 
@@ -93,7 +89,6 @@ export function createPermissionSession(
   thinking: ThinkingControl,
 ): PermissionSession {
   let configuredPolicy = defaultSetupConfig().permissions;
-  let activeWorkflowMode: WorkflowMode = "work";
   let selectedPermissionLevel: PermissionLevel = "project-write";
   let selectedPermissionState: Exclude<PermissionState, "YOLO_OVERRIDE"> =
     "DEFAULT";
@@ -136,7 +131,7 @@ export function createPermissionSession(
   }
 
   function auditTransition(
-    source: "command" | "shortcut" | "workflow" | "session",
+    source: "command" | "shortcut" | "session",
   ): void {
     pi.appendEntry("permission-transition", {
       timestamp: new Date().toISOString(),
@@ -145,7 +140,6 @@ export function createPermissionSession(
       selectedState: selectedPermissionState,
       effectiveLevel: permissionLevel,
       selectedLevel: selectedPermissionLevel,
-      workflowMode: activeWorkflowMode,
     });
   }
 
@@ -170,17 +164,8 @@ export function createPermissionSession(
         selectedPermissionLevel,
         selectedPermissionState,
         permissionState: selectedPermissionState,
-        workflowMode: activeWorkflowMode,
         ...thinking.fields(),
       });
-    },
-
-    applyWorkflowDefaults(workflowMode, ctx, source) {
-      activeWorkflowMode = workflowMode;
-      // Workflow mode changes no longer automatically alter user's chosen permission level.
-      publishStatus(ctx);
-      session.persist();
-      auditTransition(source);
     },
 
     async toggleYolo(ctx, source, epoch = sessionEpoch) {
@@ -231,7 +216,7 @@ export function createPermissionSession(
       );
     },
 
-    beginSession(ctx, workflowMode) {
+    beginSession(ctx) {
       sessionEpoch += 1;
       activeSessionId = ctx.sessionManager.getSessionId();
       activeContext = ctx;
@@ -261,7 +246,9 @@ export function createPermissionSession(
         selectedPermissionLevel === "project-write" ? "DEFAULT" : "MANUAL";
       permissionState = selectedPermissionState;
       permissionLevel = selectedPermissionLevel;
-      session.applyWorkflowDefaults(workflowMode, ctx, "session");
+      publishStatus(ctx);
+      session.persist();
+      auditTransition("session");
     },
 
     endSession(ctx) {

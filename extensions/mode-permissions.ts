@@ -27,7 +27,6 @@ import {
   normalizePermissionLevel,
   type PermissionLevel,
 } from "./shared/workflow-status.ts";
-import { requestWorkflowCapabilities } from "./shared/workflow-capabilities.ts";
 import { registerPermissionGuards } from "./permissions/guards.ts";
 import { openPermissionMenu } from "./permissions/menus.ts";
 import { createPermissionSession } from "./permissions/session-state.ts";
@@ -104,10 +103,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   registerPermissionGuards(pi, session);
 
   pi.on("session_start", async (_event, ctx) => {
-    session.beginSession(
-      ctx,
-      requestWorkflowCapabilities(pi.events).mode ?? "work",
-    );
+    session.beginSession(ctx);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {

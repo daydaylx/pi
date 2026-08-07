@@ -11,15 +11,7 @@ import { WORKFLOW_MODES, type WorkflowMode } from "./workflow-mode.ts";
 
 export const WORKFLOW_CAPABILITY_EVENTS = {
   request: "workflow-capabilities:request",
-  activated: "workflow-capabilities:activated",
 } as const;
-
-/** Emitted only after a workflow activation was persisted successfully. */
-export interface WorkflowActivatedEvent {
-  cwd: string;
-  sessionId: string;
-  mode: WorkflowMode;
-}
 
 export interface WorkflowCapabilitySnapshot {
   /** The selected mode is the only workflow truth. */

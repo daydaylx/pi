@@ -37,7 +37,7 @@ Hauptagent bleibt alleiniger regulärer Patch-Eigentümer.
   Paket-Builtins.
 - `extensions/subagent/config.json`: die aktive Paketkonfiguration setzt
   `parallel.maxTasks: 4`, `parallel.concurrency: 3`,
-  `globalConcurrencyLimit: 3` und `maxSubagentSpawnsPerSession: 12`.
+  `globalConcurrencyLimit: 3` und `maxSubagentSpawnsPerSession: 5`.
 - Die Frontmatter der drei Profile: `defaultContext: fresh`,
   `inheritProjectContext: true`, `inheritSkills: false` und ihre jeweilige
   Toolliste. Keines der Profile hat ein Delegations-Tool.
