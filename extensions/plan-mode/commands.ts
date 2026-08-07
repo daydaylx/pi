@@ -6,6 +6,8 @@ import { catalogDescription } from "../shared/command-catalog.ts";
 import { buildWorkflowTab } from "../shared/control-center-menu.ts";
 import { isPlanningMode, type WorkflowMode } from "../shared/workflow-mode.ts";
 import { editPlanMarkdown, viewPlanMarkdown } from "./plan-editor.ts";
+import { readPlan, removePlan } from "./plan-file.ts";
+import { goHandoffPrompt } from "./prompts.ts";
 import type { WorkflowSession } from "./session.ts";
 import { openCommandCenter } from "./command-center.ts";
 
@@ -73,6 +75,16 @@ export function registerPlanCommands(
         return;
       }
       if (mode && (await switchMode(session, mode, ctx))) {
+        try {
+          removePlan(ctx.cwd);
+        } catch {
+          session.notify(
+            ctx,
+            "Alter Plan konnte nicht sicher verworfen werden. Neuer Planning-Turn wurde nicht gestartet.",
+            "error",
+          );
+          return;
+        }
         session.pi.sendMessage(
           {
             customType: "pi-plan-request",
@@ -94,9 +106,26 @@ export function registerPlanCommands(
     },
   });
   pi.registerCommand("go", {
-    description: "Alias für /work",
+    description: catalogDescription("go"),
     handler: async (_args, ctx) => {
       await switchMode(session, "work", ctx);
+      const plan = readPlan(ctx.cwd);
+      if (!plan) {
+        session.notify(
+          ctx,
+          "Kein aktueller Plan vorhanden. Nutze /plan oder arbeite direkt mit /work.",
+          "info",
+        );
+        return;
+      }
+      session.pi.sendMessage(
+        {
+          customType: "pi-plan-handoff",
+          content: goHandoffPrompt(plan),
+          display: true,
+        },
+        { triggerTurn: true },
+      );
     },
   });
   pi.registerCommand("view-plan", {

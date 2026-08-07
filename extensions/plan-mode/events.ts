@@ -11,7 +11,6 @@ import {
   type WorkflowCapabilityRequest,
 } from "../shared/workflow-capabilities.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
-import { readPlan } from "./plan-file.ts";
 import { planningPrompt, workPrompt } from "./prompts.ts";
 import {
   clearWorkflowPresentation,
@@ -46,10 +45,10 @@ export function registerPlanEvents(
         session.selectedMode === "detailed_plan" ? "high" : "medium",
     });
   });
-  pi.on("before_agent_start", async (_event, ctx) => {
+  pi.on("before_agent_start", async () => {
     const content = isPlanningMode(session.selectedMode)
       ? planningPrompt(session.selectedMode)
-      : workPrompt(readPlan(ctx.cwd));
+      : workPrompt();
     return {
       message: { customType: "pi-workflow-mode", content } as AgentMessage,
     };

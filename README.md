@@ -11,9 +11,14 @@ Der Workflow kennt nur drei flüchtige Modi:
 - `simple_plan` – schreibt ausschließlich `.agent/plans/current-plan.md`.
 - `detailed_plan` – schreibt dieselbe Datei mit einem Architekturplan.
 
-`/work` und `/go` wechseln sofort zu Work. `/plan simple` beziehungsweise
-`/plan detailed` und `/workflow` wählen einen Planmodus. Existiert bereits ein
-Plan, fragt die UI genau einmal: „Vorhandenen Plan überschreiben?“.
+`/work` wechselt sofort zu Work, ohne einen vorhandenen Plan erneut
+einzubinden — ein Plan aus einer alten Aufgabe oder Session beeinflusst
+spätere Work-Turns nicht automatisch. `/go` übernimmt einen vorhandenen Plan
+stattdessen einmalig als Umsetzungskontext: es wechselt nach Work und startet
+direkt einen Turn, der den Plan als hilfreichen, abweichbaren Kontext enthält.
+Ohne vorhandenen Plan meldet `/go` das kurz, ohne einen Turn zu starten.
+`/plan simple` beziehungsweise `/plan detailed` und `/workflow` wählen einen
+Planmodus; ein vorhandener Plan wird dabei ohne Rückfrage überschrieben.
 
 Der Plan ist normaler Markdown. Es gibt keine Metadaten, Step-IDs, Sidecars,
 Completion, Recovery, Migration oder Planpflicht.
@@ -30,7 +35,7 @@ Die Paket-Builtins sind in `settings.json` mit
 `subagents.disableBuiltins: true` deaktiviert. Die aktive Paketkonfiguration
 steht direkt in `extensions/subagent/config.json`: `maxTasks: 4`,
 `concurrency: 3`, `globalConcurrencyLimit: 3` und
-`maxSubagentSpawnsPerSession: 12`. Frischer Kontext und das Verbot
+`maxSubagentSpawnsPerSession: 5`. Frischer Kontext und das Verbot
 verschachtelter Delegation sind Eigenschaften der drei Profil-Tools.
 
 ## Berechtigungen und Freigaben
@@ -38,9 +43,12 @@ verschachtelter Delegation sind Eigenschaften der drei Profil-Tools.
 Berechtigungen sind eine reine Stufenwahl über `/permission`: `readonly`,
 `project-write`, `confirm-all` und temporäres `yolo`. Gespeicherte
 Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe nicht.
-Planungsmodi setzen den Kontext per Prompt und erlauben technisch nur das
-direkte Schreiben von `current-plan.md` — wer im Plan eine Schreibsperre will,
-wählt `readonly` bewusst.
+Plan Mode ist eine Agentenverhaltensanweisung und keine technische
+Read-only-Sandbox: technisch erzwungen ist allein die Plandatei als
+automatisch erlaubtes Schreibziel, alle anderen Schreibzugriffe folgen in
+jedem Modus derselben gewählten Berechtigungsstufe wie in Work. Wer im
+Planmodus eine echte Schreibsperre will, wählt `readonly` bewusst über
+`/permission`.
 
 Harte Trust-, Secret-, Symlink-, Projekt- und Systemgrenzen bleiben auf jeder
 Stufe blockiert, YOLO eingeschlossen. Dazu zählen auch Ausführungspfade

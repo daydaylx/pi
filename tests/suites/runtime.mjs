@@ -499,198 +499,213 @@ export const runtimeSections = {
 
     await section("setup core lifecycle", async () => {
       if (!setupCore) return;
-      const harness = createHarness();
-      setupCore.default(harness.api);
-      const context = harness.makeContext();
-      await harness.runHooks("session_start", {}, context);
-      assert(
-        Boolean(harness.tools.get("verify")),
-        "setup core registers the allowlisted verify tool",
-      );
-      assert(
-        Boolean(harness.tools.get("project_check")),
-        "setup core registers the trust-bound project_check tool (#123)",
-      );
-      assert(
-        !harness.commands.get("verify-gate"),
-        "setup core no longer owns /verify-gate; it belongs to the completion domain",
-      );
-      const doctor = harness.commands.get("setup-doctor");
-      assert(Boolean(doctor), "/setup-doctor is registered");
-      if (doctor) await doctor("", context);
-      assert(
-        harness.notifications.at(-1)?.message?.startsWith("Setup Doctor"),
-        "setup doctor reports effective configuration without mutation",
-      );
-      assert(
-        harness.notifications
-          .at(-1)
-          ?.message?.includes("Pi CLI/dev package: 0.80.7/0.84.0") &&
-          harness.notifications.at(-1)?.level === "error",
-        "setup doctor makes CLI/dev version drift visible",
-      );
-      assert(
-        harness.notifications
-          .at(-1)
-          ?.message?.includes(
-            "project verification profiles: keine .pi/verify.json",
-          ),
-        "setup doctor reports the project verification profile status (#105)",
-      );
-      assert(
-        harness.notifications
-          .at(-1)
-          ?.message?.includes(
-            "subagent baseline (setup.json): concurrency=3",
-          ) &&
+      // setup-core deliberately reads/executes from getAgentDir() (~/.pi/agent
+      // by default, see @earendil-works/pi-coding-agent's config.js) rather
+      // than the checkout cwd, so an active repository cannot replace its own
+      // verify command or lifecycle hooks. This repo doubles as a real Pi
+      // agent directory, so pointing PI_CODING_AGENT_DIR at ROOT for the
+      // duration of this section reproduces that deployment instead of
+      // assuming the checkout happens to sit at the tester's real ~/.pi/agent.
+      const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+      process.env.PI_CODING_AGENT_DIR = ROOT;
+      try {
+        const harness = createHarness();
+        setupCore.default(harness.api);
+        const context = harness.makeContext();
+        await harness.runHooks("session_start", {}, context);
+        assert(
+          Boolean(harness.tools.get("verify")),
+          "setup core registers the allowlisted verify tool",
+        );
+        assert(
+          Boolean(harness.tools.get("project_check")),
+          "setup core registers the trust-bound project_check tool (#123)",
+        );
+        assert(
+          !harness.commands.get("verify-gate"),
+          "setup core no longer owns /verify-gate; it belongs to the completion domain",
+        );
+        const doctor = harness.commands.get("setup-doctor");
+        assert(Boolean(doctor), "/setup-doctor is registered");
+        if (doctor) await doctor("", context);
+        assert(
+          harness.notifications.at(-1)?.message?.startsWith("Setup Doctor"),
+          "setup doctor reports effective configuration without mutation",
+        );
+        assert(
+          harness.notifications
+            .at(-1)
+            ?.message?.includes("Pi CLI/dev package: 0.80.7/0.84.0") &&
+            harness.notifications.at(-1)?.level === "error",
+          "setup doctor makes CLI/dev version drift visible",
+        );
+        assert(
           harness.notifications
             .at(-1)
             ?.message?.includes(
-              "active subagent package config: concurrency=3, globalConcurrencyLimit=3",
+              "project verification profiles: keine .pi/verify.json",
             ),
-        "setup doctor distinguishes the setup baseline from active package config",
-      );
-      assert(
-        !harness.notifications.at(-1)?.message?.includes("doom-loop status:") &&
-          !harness.notifications.at(-1)?.message?.includes("edit metrics:"),
-        "setup doctor omits removed automatic doom-loop and edit-metric workflows",
-      );
-      assert(
-        !harness.notifications.at(-1)?.message?.includes("recovery status:"),
-        "setup doctor leaves workflow recovery to the explicit v3 controller",
-      );
-      const contextHarness = createHarness({
-        systemPrompt: "System 🙂",
-        registeredTools: [
-          {
-            name: "zeta",
-            parameters: {
-              type: "object",
-              properties: { b: { type: "number" }, a: { type: "string" } },
+          "setup doctor reports the project verification profile status (#105)",
+        );
+        assert(
+          harness.notifications
+            .at(-1)
+            ?.message?.includes(
+              "subagent baseline (setup.json): concurrency=3",
+            ) &&
+            harness.notifications
+              .at(-1)
+              ?.message?.includes(
+                "active subagent package config: concurrency=3, globalConcurrencyLimit=3",
+              ),
+          "setup doctor distinguishes the setup baseline from active package config",
+        );
+        assert(
+          !harness.notifications.at(-1)?.message?.includes("doom-loop status:") &&
+            !harness.notifications.at(-1)?.message?.includes("edit metrics:"),
+          "setup doctor omits removed automatic doom-loop and edit-metric workflows",
+        );
+        assert(
+          !harness.notifications.at(-1)?.message?.includes("recovery status:"),
+          "setup doctor leaves workflow recovery to the explicit v3 controller",
+        );
+        const contextHarness = createHarness({
+          systemPrompt: "System 🙂",
+          registeredTools: [
+            {
+              name: "zeta",
+              parameters: {
+                type: "object",
+                properties: { b: { type: "number" }, a: { type: "string" } },
+              },
             },
-          },
-          {
-            name: "alpha",
-            parameters: { type: "object", required: ["value"] },
-          },
-        ],
-        activeTools: ["zeta", "dynamic-tool"],
-        entries: [
-          {
-            type: "message",
-            message: {
-              role: "assistant",
-              usage: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40 },
+            {
+              name: "alpha",
+              parameters: { type: "object", required: ["value"] },
             },
-          },
-          {
-            type: "compaction",
-            timestamp: "2026-08-02T10:00:00.000Z",
-            usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
-          },
-          {
-            type: "message",
-            message: {
-              role: "toolResult",
-              details: {
-                truncation: {
-                  truncated: true,
-                  totalBytes: 200,
-                  outputBytes: 80,
+          ],
+          activeTools: ["zeta", "dynamic-tool"],
+          entries: [
+            {
+              type: "message",
+              message: {
+                role: "assistant",
+                usage: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40 },
+              },
+            },
+            {
+              type: "compaction",
+              timestamp: "2026-08-02T10:00:00.000Z",
+              usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
+            },
+            {
+              type: "message",
+              message: {
+                role: "toolResult",
+                details: {
+                  truncation: {
+                    truncated: true,
+                    totalBytes: 200,
+                    outputBytes: 80,
+                  },
                 },
               },
             },
-          },
-        ],
-      });
-      setupCore.default(contextHarness.api);
-      const contextCommand = contextHarness.commands.get("setup-doctor");
-      const diagnosticContext = contextHarness.makeContext();
-      if (contextCommand) await contextCommand("context", diagnosticContext);
-      const contextReport = contextHarness.notifications.at(-1)?.message ?? "";
-      assert(
-        contextReport.includes("registered tools: 2 (alpha, zeta)") &&
-          contextReport.includes("active tools: 2 (dynamic-tool, zeta)"),
-        "context doctor reports sorted registered and dynamically active tools",
-      );
-      assert(
-        contextReport.includes("effective system prompt: 11 bytes") &&
-          contextReport.includes(
-            "real usage: input=11, output=22, cacheRead=33, cacheWrite=44",
-          ) &&
-          contextReport.includes(
-            "persisted compactions: 1 (2026-08-02T10:00:00.000Z)",
-          ) &&
-          contextReport.includes(
-            "persisted tool truncations: count=1, totalBytes=200, outputBytes=80",
-          ),
-        "context doctor reports only aggregate prompt, usage, compaction and truncation diagnostics",
-      );
-      if (contextCommand) await contextCommand("unexpected", diagnosticContext);
-      eq(
-        contextHarness.notifications.at(-1),
-        { message: "Usage: /setup-doctor [context]", level: "error" },
-        "context doctor rejects unknown arguments without running the default doctor",
-      );
-      eq(
-        contextHarness.execCalls.length,
-        0,
-        "context doctor does not invoke runtime or model commands",
-      );
-      if (contextDiagnostics) {
-        const empty = contextDiagnostics.collectContextDiagnostics({
-          registeredTools: [],
-          activeToolNames: [],
-          sessionEntries: [],
+          ],
         });
+        setupCore.default(contextHarness.api);
+        const contextCommand = contextHarness.commands.get("setup-doctor");
+        const diagnosticContext = contextHarness.makeContext();
+        if (contextCommand) await contextCommand("context", diagnosticContext);
+        const contextReport = contextHarness.notifications.at(-1)?.message ?? "";
+        assert(
+          contextReport.includes("registered tools: 2 (alpha, zeta)") &&
+            contextReport.includes("active tools: 2 (dynamic-tool, zeta)"),
+          "context doctor reports sorted registered and dynamically active tools",
+        );
+        assert(
+          contextReport.includes("effective system prompt: 11 bytes") &&
+            contextReport.includes(
+              "real usage: input=11, output=22, cacheRead=33, cacheWrite=44",
+            ) &&
+            contextReport.includes(
+              "persisted compactions: 1 (2026-08-02T10:00:00.000Z)",
+            ) &&
+            contextReport.includes(
+              "persisted tool truncations: count=1, totalBytes=200, outputBytes=80",
+            ),
+          "context doctor reports only aggregate prompt, usage, compaction and truncation diagnostics",
+        );
+        if (contextCommand) await contextCommand("unexpected", diagnosticContext);
         eq(
-          empty.schemaBytes,
-          2,
-          "empty context diagnostics have a deterministic empty schema size",
+          contextHarness.notifications.at(-1),
+          { message: "Usage: /setup-doctor [context]", level: "error" },
+          "context doctor rejects unknown arguments without running the default doctor",
         );
         eq(
-          empty.systemPromptBytes,
-          null,
-          "missing system prompt is reported as n/a",
+          contextHarness.execCalls.length,
+          0,
+          "context doctor does not invoke runtime or model commands",
         );
-        eq(empty.usage, null, "missing persisted usage is reported as n/a");
-        eq(
-          empty.toolTruncation,
-          { count: 0, totalBytes: 0, outputBytes: 0 },
-          "empty sessions have no persisted truncations",
-        );
+        if (contextDiagnostics) {
+          const empty = contextDiagnostics.collectContextDiagnostics({
+            registeredTools: [],
+            activeToolNames: [],
+            sessionEntries: [],
+          });
+          eq(
+            empty.schemaBytes,
+            2,
+            "empty context diagnostics have a deterministic empty schema size",
+          );
+          eq(
+            empty.systemPromptBytes,
+            null,
+            "missing system prompt is reported as n/a",
+          );
+          eq(empty.usage, null, "missing persisted usage is reported as n/a");
+          eq(
+            empty.toolTruncation,
+            { count: 0, totalBytes: 0, outputBytes: 0 },
+            "empty sessions have no persisted truncations",
+          );
+        }
+        const verify = harness.tools.get("verify");
+        if (verify) {
+          await verify.execute(
+            "verify-safe-cwd",
+            { check: "typecheck" },
+            undefined,
+            undefined,
+            context,
+          );
+          eq(
+            harness.execCalls.at(-1)?.options?.cwd,
+            ROOT,
+            "verify runs the setup's fixed command from the agent directory",
+          );
+        }
+        const projectCheck = harness.tools.get("project_check");
+        if (projectCheck) {
+          const missing = await projectCheck.execute(
+            "project-check-missing-config",
+            { profile: "tests" },
+            undefined,
+            undefined,
+            context,
+          );
+          eq(
+            missing.isError,
+            true,
+            "project_check reports a missing .pi/verify.json without guessing commands",
+          );
+        }
+        assertNoGlobalChrome(harness, "setup core owns no TUI chrome");
+      } finally {
+        if (previousAgentDir === undefined)
+          delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
       }
-      const verify = harness.tools.get("verify");
-      if (verify) {
-        await verify.execute(
-          "verify-safe-cwd",
-          { check: "typecheck" },
-          undefined,
-          undefined,
-          context,
-        );
-        eq(
-          harness.execCalls.at(-1)?.options?.cwd,
-          ROOT,
-          "verify runs the setup's fixed command from the agent directory",
-        );
-      }
-      const projectCheck = harness.tools.get("project_check");
-      if (projectCheck) {
-        const missing = await projectCheck.execute(
-          "project-check-missing-config",
-          { profile: "tests" },
-          undefined,
-          undefined,
-          context,
-        );
-        eq(
-          missing.isError,
-          true,
-          "project_check reports a missing .pi/verify.json without guessing commands",
-        );
-      }
-      assertNoGlobalChrome(harness, "setup core owns no TUI chrome");
     });
 
     // ---------------------------------------------------------------------------
