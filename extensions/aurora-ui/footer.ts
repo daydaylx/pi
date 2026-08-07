@@ -116,6 +116,31 @@ function permissionLabel(input: FooterInput): string {
   return input.state.permissions.label ?? "—";
 }
 
+/**
+ * setup-core publishes the technical verification status of the current
+ * workspace snapshot as `"Verify: <status>"`. Aurora replaces the runtime
+ * footer wholesale, so this is the only place it can surface.
+ */
+function verificationState(input: FooterInput): string | null {
+  const value = input.statuses.get("verification");
+  if (!value) return null;
+  return value.replace(/^Verify:\s*/, "");
+}
+
+function verificationTone(
+  state: string,
+): "muted" | "success" | "warning" | "error" {
+  if (state === "verified") return "success";
+  if (state === "clean") return "muted";
+  if (state === "checks_failed") return "error";
+  return "warning";
+}
+
+/** Only an unproven or failing workspace is worth the narrow layout's space. */
+function verificationNeedsAttention(state: string | null): boolean {
+  return state !== null && state !== "clean" && state !== "verified";
+}
+
 function diagnostics(
   theme: Theme,
   input: FooterInput,
@@ -124,14 +149,28 @@ function diagnostics(
   const lines: string[] = [];
   const lsp = lspState(input);
   const context = input.contextPercent;
+  const verification = verificationState(input);
   const lspNeedsAttention = !["ready", "leerlauf", "aus", "—"].includes(lsp);
   const contextNeedsAttention =
     context !== null && context >= CONTEXT_WARNING_PERCENT;
 
-  if (!includeRoutine && !lspNeedsAttention && !contextNeedsAttention)
+  if (
+    !includeRoutine &&
+    !lspNeedsAttention &&
+    !contextNeedsAttention &&
+    !verificationNeedsAttention(verification)
+  ) {
     return lines;
+  }
 
   const parts = [renderSegment(theme, `LSP ${lsp}`, { tone: lspTone(lsp) })];
+  if (verification !== null) {
+    parts.push(
+      renderSegment(theme, `Verify ${verification}`, {
+        tone: verificationTone(verification),
+      }),
+    );
+  }
   if (context !== null) {
     const tone =
       context >= 90
@@ -227,8 +266,17 @@ function renderWide(theme: Theme, width: number, input: FooterInput): string[] {
   });
   const lsp = lspState(input);
   const lspSegment = renderSegment(theme, `LSP ${lsp}`, { tone: lspTone(lsp) });
+  const verification = verificationState(input);
+  // The wide layout renders no diagnostics line, so the verification status
+  // joins the right-hand status group instead.
+  const verificationSegment =
+    verification === null
+      ? ""
+      : `${statusSeparator(theme)}${renderSegment(theme, `Verify ${verification}`, {
+          tone: verificationTone(verification),
+        })}`;
   const left = `${model}${statusSeparator(theme)}${thinking}`;
-  const right = `${permission}${statusSeparator(theme)}${lspSegment}`;
+  const right = `${permission}${statusSeparator(theme)}${lspSegment}${verificationSegment}`;
   const primary = joinSides(
     theme,
     `${left}${GROUP_GAP}${project}`,
