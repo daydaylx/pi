@@ -72,7 +72,15 @@ Daraus folgen drei Regeln:
   Wechsel des Workspace-Roots — verwirft die gesammelte Abdeckung vollständig.
 - **Keine widersprüchlichen Status.** Blockiert ein Lauf (Tool-Ergebnis ist ein
   Fehler), kann derselbe Snapshot nicht gleichzeitig `verified` sein. Das gilt
-  auch für einen bestätigten `recommended`-Fehlschlag.
+  auch für einen bestätigten `recommended`-Fehlschlag — und selbst dann, wenn
+  das Projekt gar kein `required`-Profil deklariert: `checks_failed` verdrängt
+  `checks_unavailable`.
+- **Nur ein Erfolg räumt einen Fehlschlag weg.** Ein bestätigter
+  `recommended`-Fehlschlag bleibt für seinen Snapshot bestehen, bis genau dieses
+  Profil erfolgreich erneut läuft. Verschwindet stattdessen sein Binary, ist das
+  Restrisiko — es setzt keinen neuen Block, löscht aber auch den bestehenden
+  nicht. Andernfalls könnte ein deinstalliertes Werkzeug `checks_failed` wieder
+  zu `verified` machen, ohne dass irgendetwas behoben wurde.
 
 Der Ledger, der das festhält, ist ein einziger flüchtiger Datensatz pro Session:
 an einen Workspace-Root und einen Fingerprint gebunden, nicht persistiert, keine
@@ -90,6 +98,7 @@ Datenbank. Nach dem Sitzungsende ist jede Abdeckung wieder offen.
 | `recommended`: Binary fehlt                  | ok            | unverändert (Restrisiko) |
 | `advisory` schlägt fehl                      | ok            | unverändert           |
 | Workspace nach dem Lauf geändert             | –             | `changed_unverified`  |
+| kein `required` deklariert, aber bestätigter Fehlschlag | –  | `checks_failed`       |
 | kein `required`-Profil deklariert / untrusted | –            | `checks_unavailable`  |
 | keine Änderungen im Workspace                | –             | `clean`               |
 

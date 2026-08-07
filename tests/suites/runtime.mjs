@@ -899,6 +899,11 @@ export const runtimeSections = {
         "a missing recommended binary stays a residual risk",
       );
       eq(recommendedMissing.blocking, false, "a missing recommended binary does not block");
+      eq(
+        recommendedMissing.clearedRecommendedIds.length,
+        0,
+        "a missing recommended binary clears nothing — only a success may",
+      );
 
       const advisoryFail = status.evaluateCheckRun(
         [report("typecheck", "required", "success"), report("audit", "advisory", "spawn_failed", 1)],
@@ -1006,6 +1011,49 @@ export const runtimeSections = {
         "verified",
         "re-running the recommended profile successfully clears its block",
       );
+      // A vanished binary must not launder a failure the same snapshot already
+      // confirmed: only a successful re-run may clear a block.
+      const vanished = status.mergeCheckRun(
+        blocked,
+        status.evaluateCheckRun(
+          [report("lint", "recommended", "missing_binary", null)],
+          ["tests", "typecheck"],
+        ),
+        ROOT_A,
+        "changed",
+      );
+      eq(
+        statusOf(changedSnapshot, vanished, ["tests", "typecheck"]),
+        "checks_failed",
+        "a missing binary does not erase an already confirmed recommended failure",
+      );
+      eq(
+        vanished.lastRequiredCheck.blockingRecommendedIds.join(","),
+        "lint",
+        "the confirmed recommended failure survives a later missing_binary run",
+      );
+
+      // A project with no required profile still cannot be verified, but a
+      // confirmed failure must not be hidden behind `checks_unavailable`.
+      const recommendedOnly = status.mergeCheckRun(
+        {},
+        status.evaluateCheckRun(
+          [report("lint", "recommended", "spawn_failed", 1)],
+          [],
+        ),
+        ROOT_A,
+        "changed",
+      );
+      eq(
+        statusOf(changedSnapshot, recommendedOnly, []),
+        "checks_failed",
+        "a confirmed recommended failure stays visible without any required profile",
+      );
+      eq(
+        statusOf(changedSnapshot, {}, []),
+        "checks_unavailable",
+        "a project without required profiles and without a failure is unavailable",
+      );
 
       // -- requiredCoverage --------------------------------------------------
       const coverage = status.requiredCoverage(firstRun.lastRequiredCheck, [
@@ -1056,13 +1104,21 @@ export const runtimeSections = {
         git(["add", "."]);
         git(["commit", "--quiet", "-m", "baseline"]);
 
-        // `lint` fails with a real exit code; the required profiles pass.
+        // `lint` fails with a real exit code, or its binary disappears; the
+        // required profiles pass.
         let lintFails = false;
+        let lintMissing = false;
         const harness = createHarness({
-          exec: (_program, args) =>
-            lintFails && args.includes("lint")
-              ? { stdout: "", stderr: "lint error", code: 1, killed: false }
-              : { stdout: "ok", stderr: "", code: 0, killed: false },
+          exec: (_program, args) => {
+            if (args.includes("lint")) {
+              if (lintMissing) {
+                throw new Error("spawn npm ENOENT");
+              }
+              if (lintFails)
+                return { stdout: "", stderr: "lint error", code: 1, killed: false };
+            }
+            return { stdout: "ok", stderr: "", code: 0, killed: false };
+          },
         });
         setupCore.default(harness.api);
         const trusted = harness.makeContext({ cwd: workspace, trusted: true });
@@ -1142,7 +1198,35 @@ export const runtimeSections = {
           "Verify: checks_failed",
           "a blocking recommended failure revokes the verified status",
         );
+
+        // P0 regression: losing the binary must not launder the failure the
+        // same snapshot already confirmed.
         lintFails = false;
+        lintMissing = true;
+        const vanishedBinary = await runCheck("verification-status-vanished", {
+          profile: "lint",
+        });
+        eq(
+          vanishedBinary.isError,
+          false,
+          "a missing recommended binary is a residual risk, not a tool error",
+        );
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          "Verify: checks_failed",
+          "a vanished recommended binary does not restore a verified status",
+        );
+        lintMissing = false;
+
+        // Only a successful re-run clears the block.
+        await runCheck("verification-status-lint-recovered", { profile: "lint" });
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          "Verify: verified",
+          "a successful recommended re-run restores the verified status",
+        );
 
         writeFileSync(path.join(workspace, "source.ts"), "export const value = 3;\n");
         await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);

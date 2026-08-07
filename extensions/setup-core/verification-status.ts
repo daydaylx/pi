@@ -98,8 +98,14 @@ export function evaluateCheckRun(
     }
     // recommended: a confirmed failure blocks; a missing tool stays a visible
     // residual risk and must not pretend the workspace is unverifiable.
-    if (report.status === "success" || report.status === "missing_binary") {
+    if (report.status === "success") {
       clearedRecommendedIds.push(report.profileId);
+      continue;
+    }
+    if (report.status === "missing_binary") {
+      // Residual risk only: it neither blocks nor clears. Clearing would let a
+      // vanished binary erase a failure the same snapshot already confirmed,
+      // turning checks_failed back into verified without anything being fixed.
       continue;
     }
     blockingRecommendedIds.push(report.profileId);
@@ -195,25 +201,29 @@ export function verificationStatus(
 ): VerificationStatus {
   if (!snapshot) return "checks_unavailable";
   if (snapshot.changedFiles.length === 0) return "clean";
-  if (options.declaredRequiredIds.length === 0) return "checks_unavailable";
 
   const last = ledger.lastRequiredCheck;
-  if (
-    !last ||
-    last.workspaceRoot !== options.workspaceRoot ||
-    last.workspaceFingerprint !== snapshot.fingerprint
-  ) {
-    return "changed_unverified";
-  }
+  const current =
+    last &&
+    last.workspaceRoot === options.workspaceRoot &&
+    last.workspaceFingerprint === snapshot.fingerprint
+      ? last
+      : undefined;
+  const outcomes = Object.values(current?.requiredOutcomes ?? {});
 
-  const outcomes = Object.values(last.requiredOutcomes);
-  // A check that ran and failed outranks one that never produced a verdict.
+  // A confirmed failure is reported before anything else can excuse it — a
+  // check that ran and said no outranks both a check without a verdict and a
+  // project that declares no required profile at all. Otherwise a blocking
+  // tool result and the published status would disagree again.
   if (outcomes.includes("failed")) return "checks_failed";
-  if (last.blockingRecommendedIds.length > 0) return "checks_failed";
+  if ((current?.blockingRecommendedIds.length ?? 0) > 0) return "checks_failed";
+
+  if (options.declaredRequiredIds.length === 0) return "checks_unavailable";
+  if (!current) return "changed_unverified";
   if (outcomes.includes("unavailable")) return "checks_unavailable";
   if (
     options.declaredRequiredIds.every(
-      (id) => last.requiredOutcomes[id] === "success",
+      (id) => current.requiredOutcomes[id] === "success",
     )
   ) {
     return "verified";
