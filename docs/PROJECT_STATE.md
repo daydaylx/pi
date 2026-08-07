@@ -2,6 +2,19 @@
 
 ## Aktuelle Arbeit
 
+Die Verifikationssemantik ist geschärft, ohne die Architektur zu erweitern.
+`verified` entsteht jetzt nur noch, wenn **alle deklarierten** `required`-Profile
+für denselben Workspace-Fingerprint erfolgreich waren; ein Teillauf ergibt
+`changed_unverified`. Ein bestätigter `recommended`-Fehlschlag kann nicht mehr
+neben `verified` stehen — Tool-Ergebnis, Ledger und Footer leiten sich aus einer
+einzigen Auswertung (`evaluateCheckRun`) ab. Der Ledger ist weiterhin ein
+einziger flüchtiger Datensatz, zusätzlich an den Workspace-Root gebunden.
+`project_check` meldet die akkumulierte Pflichtabdeckung und benennt offene
+Profile; es führt nach wie vor nichts von selbst aus. Der Verifikationsstatus
+wird jetzt tatsächlich in der Aurora-Footer gezeichnet — bisher wurde er
+berechnet und verworfen. `.pi/verify.json` in diesem Repo deklariert genau ein
+Pflichtprofil, das an `npm run verify` delegiert.
+
 Die Umsetzung von `pi-harness-hardening-v2` hat mit der gemeinsamen
 Workspace-Snapshot-Basis begonnen. Neu ist
 `benchmarks/harness/workspace-snapshot.mjs`: P4 und der allgemeine

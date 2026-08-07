@@ -539,13 +539,21 @@ export const runtimeSections = {
             harness.notifications.at(-1)?.level === "error",
           "setup doctor makes CLI/dev version drift visible",
         );
+        // This repo declares its own required profile in .pi/verify.json, so a
+        // trusted session at ROOT must load it rather than report none.
         assert(
           harness.notifications
             .at(-1)
             ?.message?.includes(
-              "project verification profiles: keine .pi/verify.json",
+              "project verification profiles: 1 Profil(e) geladen",
             ),
           "setup doctor reports the project verification profile status (#105)",
+        );
+        assert(
+          !harness.notifications
+            .at(-1)
+            ?.message?.includes("keine Pflichtprüfung"),
+          "this repo's own profile is a required check, so the doctor does not warn",
         );
         assert(
           harness.notifications
@@ -720,71 +728,297 @@ export const runtimeSections = {
 
     await section("verification status layer", async () => {
       const status = await load("extensions/setup-core/verification-status.ts");
-      const cleanSnapshot = {
-        changedFiles: [],
-        fingerprint: "clean",
-      };
-      const changedSnapshot = {
-        changedFiles: ["source.ts"],
-        fingerprint: "changed",
-      };
+      const cleanSnapshot = { changedFiles: [], fingerprint: "clean" };
+      const changedSnapshot = { changedFiles: ["source.ts"], fingerprint: "changed" };
+      const ROOT_A = "/workspace/a";
+      const ROOT_B = "/workspace/b";
+
+      const report = (profileId, classification, reportStatus, exitCode, killed) => ({
+        profileId,
+        classification,
+        status: reportStatus,
+        exitCode: exitCode ?? (reportStatus === "success" ? 0 : 1),
+        killed: killed ?? false,
+      });
+      const record = (requiredOutcomes, extra) => ({
+        lastRequiredCheck: {
+          workspaceRoot: ROOT_A,
+          workspaceFingerprint: "changed",
+          requiredOutcomes,
+          blockingRecommendedIds: [],
+          completedAt: "2026-08-06T00:00:00.000Z",
+          ...extra,
+        },
+      });
+      const statusOf = (snapshot, ledger, declaredRequiredIds, workspaceRoot) =>
+        status.verificationStatus(snapshot, ledger, {
+          declaredRequiredIds,
+          workspaceRoot: workspaceRoot ?? ROOT_A,
+        });
+
+      // -- verificationStatus ------------------------------------------------
       eq(
-        status.verificationStatus(cleanSnapshot, {}),
+        statusOf(cleanSnapshot, {}, ["typecheck"]),
         "clean",
         "a clean workspace is clean without a check",
       );
       eq(
-        status.verificationStatus(changedSnapshot, {}),
+        statusOf(changedSnapshot, {}, ["typecheck"]),
         "changed_unverified",
         "a changed workspace without a required check is unverified",
       );
       eq(
-        status.verificationStatus(changedSnapshot, {
-          lastRequiredCheck: {
-            profileIds: ["typecheck"],
-            result: "success",
-            workspaceFingerprint: "changed",
-            completedAt: "2026-08-06T00:00:00.000Z",
-          },
-        }),
+        statusOf(changedSnapshot, {}, []),
+        "checks_unavailable",
+        "a project that declares no required profile can never be verified",
+      );
+      eq(
+        statusOf(changedSnapshot, record({ typecheck: "success" }), ["typecheck"]),
         "verified",
         "a successful required check for the current snapshot is verified",
       );
+      // P0: partial coverage must never read as verified.
       eq(
-        status.verificationStatus(changedSnapshot, {
-          lastRequiredCheck: {
-            profileIds: ["typecheck"],
-            result: "success",
-            workspaceFingerprint: "older",
-            completedAt: "2026-08-06T00:00:00.000Z",
-          },
-        }),
+        statusOf(changedSnapshot, record({ typecheck: "success" }), [
+          "tests",
+          "typecheck",
+        ]),
+        "changed_unverified",
+        "a required profile that never ran leaves the snapshot unverified",
+      );
+      eq(
+        statusOf(
+          changedSnapshot,
+          record({ typecheck: "success" }, { workspaceFingerprint: "older" }),
+          ["typecheck"],
+        ),
         "changed_unverified",
         "a workspace change makes a previous check stale",
       );
+      // A check from another workspace must never verify this one.
       eq(
-        status.checkResultFromReports([
-          {
-            classification: "required",
-            status: "spawn_failed",
-            exitCode: 1,
-            killed: false,
-          },
-        ]),
-        "failed",
-        "a required command failure is distinct from an unavailable check",
+        statusOf(changedSnapshot, record({ typecheck: "success" }), ["typecheck"], ROOT_B),
+        "changed_unverified",
+        "a check recorded for another workspace root does not carry over",
       );
       eq(
-        status.checkResultFromReports([
-          {
-            classification: "required",
-            status: "timeout",
-            exitCode: null,
-            killed: true,
-          },
+        statusOf(changedSnapshot, record({ typecheck: "failed" }), ["typecheck"]),
+        "checks_failed",
+        "a failed required check is reported as failed",
+      );
+      eq(
+        statusOf(changedSnapshot, record({ typecheck: "unavailable" }), ["typecheck"]),
+        "checks_unavailable",
+        "a required check without a verdict is unavailable, not failed",
+      );
+      // A check that ran and said no outranks one that never produced a verdict.
+      eq(
+        statusOf(changedSnapshot, record({ tests: "failed", typecheck: "unavailable" }), [
+          "tests",
+          "typecheck",
         ]),
+        "checks_failed",
+        "a real required failure outranks a concurrent unavailable check",
+      );
+      // P0: a blocking recommended failure must not coexist with `verified`.
+      eq(
+        statusOf(
+          changedSnapshot,
+          record({ typecheck: "success" }, { blockingRecommendedIds: ["lint"] }),
+          ["typecheck"],
+        ),
+        "checks_failed",
+        "a blocking recommended failure cannot coexist with a verified status",
+      );
+      eq(
+        statusOf(undefined, {}, ["typecheck"]),
+        "checks_unavailable",
+        "a workspace without a snapshot is unavailable",
+      );
+
+      // -- evaluateCheckRun --------------------------------------------------
+      const requiredPass = status.evaluateCheckRun(
+        [report("typecheck", "required", "success")],
+        ["typecheck"],
+      );
+      eq(requiredPass.requiredOutcomes.typecheck, "success", "a passing required run succeeds");
+      eq(requiredPass.blocking, false, "a passing required run does not block");
+      eq(requiredPass.missingRequiredIds.length, 0, "a full run leaves nothing open");
+
+      const requiredPartial = status.evaluateCheckRun(
+        [report("typecheck", "required", "success")],
+        ["tests", "typecheck"],
+      );
+      eq(
+        requiredPartial.missingRequiredIds.join(","),
+        "tests",
+        "an unrun required profile is reported as missing coverage",
+      );
+      eq(
+        requiredPartial.blocking,
+        false,
+        "incomplete coverage is not itself a tool error",
+      );
+
+      const requiredFail = status.evaluateCheckRun(
+        [report("typecheck", "required", "spawn_failed", 1)],
+        ["typecheck"],
+      );
+      eq(requiredFail.requiredOutcomes.typecheck, "failed", "a required command failure fails");
+      eq(requiredFail.blocking, true, "a required failure blocks the tool call");
+
+      const requiredTimeout = status.evaluateCheckRun(
+        [report("typecheck", "required", "timeout", null, true)],
+        ["typecheck"],
+      );
+      eq(
+        requiredTimeout.requiredOutcomes.typecheck,
         "unavailable",
-        "a timeout is reported as an unavailable check",
+        "a timeout is an unavailable check, not a failure",
+      );
+      eq(requiredTimeout.blocking, true, "a required non-execution still blocks");
+
+      const recommendedFail = status.evaluateCheckRun(
+        [report("typecheck", "required", "success"), report("lint", "recommended", "spawn_failed", 1)],
+        ["typecheck"],
+      );
+      eq(
+        recommendedFail.blockingRecommendedIds.join(","),
+        "lint",
+        "a confirmed recommended failure is recorded",
+      );
+      eq(recommendedFail.blocking, true, "a confirmed recommended failure blocks");
+
+      const recommendedMissing = status.evaluateCheckRun(
+        [report("lint", "recommended", "missing_binary", null)],
+        [],
+      );
+      eq(
+        recommendedMissing.blockingRecommendedIds.length,
+        0,
+        "a missing recommended binary stays a residual risk",
+      );
+      eq(recommendedMissing.blocking, false, "a missing recommended binary does not block");
+
+      const advisoryFail = status.evaluateCheckRun(
+        [report("typecheck", "required", "success"), report("audit", "advisory", "spawn_failed", 1)],
+        ["typecheck"],
+      );
+      eq(advisoryFail.blocking, false, "an advisory finding never blocks");
+      eq(
+        Object.keys(advisoryFail.requiredOutcomes).join(","),
+        "typecheck",
+        "an advisory report never contributes to required coverage",
+      );
+
+      const undeclared = status.evaluateCheckRun(
+        [report("legacy", "required", "success")],
+        ["typecheck"],
+      );
+      eq(
+        Object.keys(undeclared.requiredOutcomes).length,
+        0,
+        "a required profile the project no longer declares contributes no coverage",
+      );
+
+      // -- mergeCheckRun -----------------------------------------------------
+      const firstRun = status.mergeCheckRun(
+        {},
+        status.evaluateCheckRun([report("typecheck", "required", "success")], [
+          "tests",
+          "typecheck",
+        ]),
+        ROOT_A,
+        "changed",
+      );
+      eq(
+        statusOf(changedSnapshot, firstRun, ["tests", "typecheck"]),
+        "changed_unverified",
+        "one of two required profiles is not enough to verify",
+      );
+      const secondRun = status.mergeCheckRun(
+        firstRun,
+        status.evaluateCheckRun([report("tests", "required", "success")], [
+          "tests",
+          "typecheck",
+        ]),
+        ROOT_A,
+        "changed",
+      );
+      eq(
+        statusOf(changedSnapshot, secondRun, ["tests", "typecheck"]),
+        "verified",
+        "coverage accumulates across runs of one identical snapshot",
+      );
+      const afterEdit = status.mergeCheckRun(
+        secondRun,
+        status.evaluateCheckRun([report("tests", "required", "success")], [
+          "tests",
+          "typecheck",
+        ]),
+        ROOT_A,
+        "edited",
+      );
+      eq(
+        Object.keys(afterEdit.lastRequiredCheck.requiredOutcomes).join(","),
+        "tests",
+        "a changed fingerprint discards previously accumulated coverage",
+      );
+      const otherRoot = status.mergeCheckRun(
+        secondRun,
+        status.evaluateCheckRun([report("tests", "required", "success")], [
+          "tests",
+          "typecheck",
+        ]),
+        ROOT_B,
+        "changed",
+      );
+      eq(
+        Object.keys(otherRoot.lastRequiredCheck.requiredOutcomes).join(","),
+        "tests",
+        "a different workspace root discards previously accumulated coverage",
+      );
+      const blocked = status.mergeCheckRun(
+        secondRun,
+        status.evaluateCheckRun([report("lint", "recommended", "spawn_failed", 1)], [
+          "tests",
+          "typecheck",
+        ]),
+        ROOT_A,
+        "changed",
+      );
+      eq(
+        statusOf(changedSnapshot, blocked, ["tests", "typecheck"]),
+        "checks_failed",
+        "a later recommended failure revokes an already verified snapshot",
+      );
+      const unblocked = status.mergeCheckRun(
+        blocked,
+        status.evaluateCheckRun([report("lint", "recommended", "success")], [
+          "tests",
+          "typecheck",
+        ]),
+        ROOT_A,
+        "changed",
+      );
+      eq(
+        statusOf(changedSnapshot, unblocked, ["tests", "typecheck"]),
+        "verified",
+        "re-running the recommended profile successfully clears its block",
+      );
+
+      // -- requiredCoverage --------------------------------------------------
+      const coverage = status.requiredCoverage(firstRun.lastRequiredCheck, [
+        "tests",
+        "typecheck",
+      ]);
+      eq(coverage.covered.join(","), "typecheck", "coverage lists what actually passed");
+      eq(coverage.missing.join(","), "tests", "coverage lists what is still open");
+      eq(coverage.total, 2, "coverage counts every declared required profile");
+      eq(
+        status.requiredCoverage(undefined, ["tests"]).missing.join(","),
+        "tests",
+        "an absent record covers nothing",
       );
 
       if (!setupCore) return;
@@ -805,6 +1039,16 @@ export const runtimeSections = {
                 args: ["run", "typecheck"],
                 classification: "required",
               },
+              tests: {
+                program: "npm",
+                args: ["test"],
+                classification: "required",
+              },
+              lint: {
+                program: "npm",
+                args: ["run", "lint"],
+                classification: "recommended",
+              },
             },
           }),
         );
@@ -812,7 +1056,14 @@ export const runtimeSections = {
         git(["add", "."]);
         git(["commit", "--quiet", "-m", "baseline"]);
 
-        const harness = createHarness();
+        // `lint` fails with a real exit code; the required profiles pass.
+        let lintFails = false;
+        const harness = createHarness({
+          exec: (_program, args) =>
+            lintFails && args.includes("lint")
+              ? { stdout: "", stderr: "lint error", code: 1, killed: false }
+              : { stdout: "ok", stderr: "", code: 0, killed: false },
+        });
         setupCore.default(harness.api);
         const trusted = harness.makeContext({ cwd: workspace, trusted: true });
         await harness.runHooks("session_start", {}, trusted);
@@ -840,21 +1091,58 @@ export const runtimeSections = {
 
         const projectCheck = harness.tools.get("project_check");
         assert(projectCheck, "project_check is available for a required profile");
-        if (projectCheck) {
-          await projectCheck.execute(
-            "verification-status-required-check",
-            { profile: "typecheck" },
-            undefined,
-            undefined,
-            trusted,
-          );
-        }
+        const runCheck = (id, params) =>
+          projectCheck.execute(id, params, undefined, undefined, trusted);
+
+        // P0 regression: one of two required profiles must not verify.
+        const partial = await runCheck("verification-status-partial", {
+          profile: "typecheck",
+        });
+        eq(partial.isError, false, "incomplete coverage is not a tool error");
+        eq(
+          partial.details.verification.missingRequiredIds.join(","),
+          "tests",
+          "project_check names the required profile that is still open",
+        );
+        assert(
+          partial.content[0].text.includes("Pflichtabdeckung: 1/2 — offen: tests"),
+          "project_check reports accumulated required coverage in its output",
+        );
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          "Verify: changed_unverified",
+          "a partially covered snapshot is never verified",
+        );
+
+        const complete = await runCheck("verification-status-complete", {
+          profile: "tests",
+        });
+        assert(
+          complete.content[0].text.includes("Pflichtabdeckung: 2/2"),
+          "project_check reports full coverage once every required profile passed",
+        );
         await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
         eq(
           latestStatus(harness, "verification"),
           "Verify: verified",
-          "a successful required project check verifies its exact snapshot",
+          "coverage accumulated over two calls verifies the identical snapshot",
         );
+
+        // P0 regression: a blocking recommended failure and `verified` must
+        // never describe the same run.
+        lintFails = true;
+        const recommended = await runCheck("verification-status-recommended", {
+          profile: "lint",
+        });
+        eq(recommended.isError, true, "a confirmed recommended failure is a tool error");
+        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          latestStatus(harness, "verification"),
+          "Verify: checks_failed",
+          "a blocking recommended failure revokes the verified status",
+        );
+        lintFails = false;
 
         writeFileSync(path.join(workspace, "source.ts"), "export const value = 3;\n");
         await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
@@ -884,7 +1172,6 @@ export const runtimeSections = {
       }
     });
   },
-
   "setup doctor required profile completeness (P1-08)": async (context) => {
     const { section, setupCore } = context;
 
@@ -2214,6 +2501,67 @@ export const runtimeSections = {
             normal.includes("LSP ready") &&
             normal.includes("Kontext 40%"),
           "the normal footer adds model and routine diagnostics",
+        );
+
+        // setup-core publishes the verification status via setStatus; Aurora
+        // replaces the runtime footer wholesale, so this is the only surface
+        // that can render it. It used to be computed and then dropped.
+        const withVerification = (value, extra) => ({
+          ...responsiveInput,
+          ...extra,
+          statuses: new Map([["verification", value]]),
+        });
+        const quiet = {
+          state: { ...responsiveInput.state, lsp: { state: "ready" } },
+          contextPercent: 10,
+        };
+        const failedNarrow = auroraFooter
+          .renderFooterLines(
+            context.ui.theme,
+            60,
+            withVerification("Verify: checks_failed", quiet),
+          )
+          .map(stripAnsi)
+          .join("\n");
+        const cleanNarrow = auroraFooter
+          .renderFooterLines(
+            context.ui.theme,
+            60,
+            withVerification("Verify: clean", quiet),
+          )
+          .map(stripAnsi)
+          .join("\n");
+        const verifiedNormal = auroraFooter
+          .renderFooterLines(
+            context.ui.theme,
+            90,
+            withVerification("Verify: verified", quiet),
+          )
+          .map(stripAnsi)
+          .join("\n");
+        const staleWide = auroraFooter
+          .renderFooterLines(
+            context.ui.theme,
+            140,
+            withVerification("Verify: changed_unverified", quiet),
+          )
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          failedNarrow.includes("Verify checks_failed"),
+          "a failing verification status claims space even in the narrow footer",
+        );
+        assert(
+          !cleanNarrow.includes("Verify"),
+          "a clean workspace does not spend narrow footer space on a verify segment",
+        );
+        assert(
+          verifiedNormal.includes("Verify verified"),
+          "the normal footer renders the routine verification status",
+        );
+        assert(
+          staleWide.includes("Verify changed_unverified"),
+          "the wide footer renders the verification status next to LSP",
         );
 
         const auroraTools = await load(

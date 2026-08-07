@@ -13,12 +13,15 @@ import {
   formatContextDiagnostics,
 } from "./context-diagnostics.ts";
 import {
-  checkResultFromReports,
+  evaluateCheckRun,
   formatVerificationStatus,
+  mergeCheckRun,
+  requiredCoverage,
   verificationStatus,
   type VerificationLedger,
   type VerificationStatus,
 } from "./verification-status.ts";
+import type { LoadedProfiles } from "./verify-profiles.ts";
 
 const CheckParams = Type.Object({
   check: Type.Union([
@@ -99,6 +102,25 @@ function requestedProfileIds(
   return { ids };
 }
 
+/**
+ * Every required profile the project declares — the set `verified` is measured
+ * against. Untrusted projects declare nothing, so no run can ever verify them.
+ */
+function declaredRequiredIds(loaded: LoadedProfiles, trusted: boolean): string[] {
+  if (!trusted) return [];
+  return Object.entries(loaded.profiles)
+    .filter(([, profile]) => profile.classification === "required")
+    .map(([id]) => id)
+    .sort();
+}
+
+function coverageLine(covered: number, total: number, missing: string[]): string {
+  if (total === 0)
+    return "Pflichtabdeckung: keine Pflichtprüfung deklariert (kein Lauf kann verifizieren).";
+  const head = `Pflichtabdeckung: ${covered}/${total}`;
+  return missing.length === 0 ? head : `${head} — offen: ${missing.join(", ")}`;
+}
+
 function readJson(path: string): Record<string, unknown> | undefined {
   if (!existsSync(path)) return undefined;
   try {
@@ -147,13 +169,16 @@ export default function setupCore(pi: ExtensionAPI): void {
       return;
     }
     const profiles = loadVerifyProfiles(ctx.cwd, ctx.isProjectTrusted());
-    const hasRequiredProfile = Object.values(profiles.profiles).some(
-      (profile) => profile.classification === "required",
-    );
     const status = verificationStatus(
       workspaceSnapshot(ctx.cwd),
       verificationLedger,
-      ctx.isProjectTrusted() && hasRequiredProfile,
+      {
+        declaredRequiredIds: declaredRequiredIds(
+          profiles,
+          ctx.isProjectTrusted(),
+        ),
+        workspaceRoot: ctx.cwd,
+      },
     );
     if (status === lastSettledStatus || !ctx.hasUI) return;
     lastSettledStatus = status;
@@ -310,6 +335,23 @@ export default function setupCore(pi: ExtensionAPI): void {
         });
       }
 
+      const required = declaredRequiredIds(loaded, ctx.isProjectTrusted());
+      const evaluation = evaluateCheckRun(reports, required);
+      if (checkSnapshot) {
+        verificationLedger = mergeCheckRun(
+          verificationLedger,
+          evaluation,
+          ctx.cwd,
+          checkSnapshot.fingerprint,
+        );
+      }
+      // Report accumulated coverage, not just this call's: the agent needs to
+      // know what is still open. Nothing here runs a check on its own.
+      const coverage = requiredCoverage(
+        checkSnapshot ? verificationLedger.lastRequiredCheck : undefined,
+        required,
+      );
+
       const text = reports
         .map((report) => {
           const exit =
@@ -324,38 +366,25 @@ export default function setupCore(pi: ExtensionAPI): void {
           ].join("\n");
         })
         .join("\n\n");
-      const limited = limitTextOutput(text);
-      const blockingFailure = reports.some(
-        (report) =>
-          report.status !== "success" &&
-          report.classification !== "advisory" &&
-          !(
-            report.classification === "recommended" &&
-            report.status === "missing_binary"
-          ),
+      const limited = limitTextOutput(
+        `${text}\n\n${coverageLine(coverage.covered.length, coverage.total, coverage.missing)}`,
       );
-      const requiredCheckResult = checkResultFromReports(reports);
-      if (requiredCheckResult && checkSnapshot) {
-        verificationLedger = {
-          lastRequiredCheck: {
-            profileIds: reports
-              .filter((report) => report.classification === "required")
-              .map((report) => report.profileId),
-            result: requiredCheckResult,
-            workspaceFingerprint: checkSnapshot.fingerprint,
-            completedAt: new Date().toISOString(),
-          },
-        };
-      }
       return {
         content: [{ type: "text" as const, text: limited.text }],
         details: {
           profiles: reports,
           availableProfileIds,
           diagnostics: loaded.diagnostics,
+          verification: {
+            declaredRequiredIds: required,
+            coveredRequiredIds: coverage.covered,
+            missingRequiredIds: coverage.missing,
+            blockingRecommendedIds: evaluation.blockingRecommendedIds,
+            blocking: evaluation.blocking,
+          },
           ...(limited.truncation ? { truncation: limited.truncation } : {}),
         },
-        isError: blockingFailure,
+        isError: evaluation.blocking,
       };
     },
   });
@@ -475,9 +504,7 @@ export default function setupCore(pi: ExtensionAPI): void {
       } else if (
         trusted &&
         projectProfiles.source &&
-        !Object.values(projectProfiles.profiles).some(
-          (profile) => profile.classification === "required",
-        )
+        declaredRequiredIds(projectProfiles, trusted).length === 0
       ) {
         lines.push(
           "  WARNING: Projekt-Prüfprofile enthalten keine Pflichtprüfung (classification: required) — kein Lauf kann als verifiziert gelten.",

@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "verify": {
+      "program": "npm",
+      "args": ["--prefix", "npm", "run", "verify"],
+      "cwd": ".",
+      "timeoutMs": 900000,
+      "classification": "required"
+    }
+  }
+}
