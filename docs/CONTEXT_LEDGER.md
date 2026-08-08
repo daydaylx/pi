@@ -21,6 +21,11 @@
 - `verify` bleibt eine feste Setup-Prüfung; `project_check` führt nur
   explizit angeforderte, vertrauensgebundene Projektprofile aus. Beide sind
   keine Abschlussbedingungen.
+- CI-`verify` benötigt vollständige Git-Historie (`fetch-depth: 0`), weil
+  `benchmarks/harness/p4-manifest.json` einen Referenz-Commit gegen die
+  lokale Historie prüft; ein flacher Checkout ließ CI unabhängig von
+  Codequalität rot laufen. `npm run test:runtime` ist bewusst nicht Teil der
+  `verify`-Kette, da es eine entwicklerspezifisch gepatchte Runtime prüft.
 - Der Verifikationsstatus ist sitzungsgebunden, an den gemeinsamen
   Workspace-Snapshot gebunden und rein technisch. Er erscheint dedupliziert
   bei `agent_settled`, ist abschaltbar und nutzt weder `agent_end` als
@@ -29,6 +34,15 @@
   (`docs/decisions/007`, `docs/decisions/009`).
 - Es gibt genau drei aktive Subagentenrollen — `investigator`, `debugger`,
   `verifier` (`docs/decisions/011`).
+- Shift+Tab (`/workflow`) ist die eine zentrale Implementierung des
+  Workflow-Wechsels; `/plan`, `/work`, `/go` rufen ausschließlich
+  `selectWorkflow()` auf. Dieselbe Änderung führte die
+  Delegationsvorlage (Original User Request / Constraints / Delegated
+  Question) in `AGENTS.md` ein.
+- Plan Mode besitzt zusätzlich zur Plandatei-Ausnahme einen technischen
+  Mutationsschutz bei `project-write`/`confirm-all`, der `readonly`s bereits
+  vorhandene Entscheidungsfunktionen wiederverwendet; `yolo` bleibt bewusst
+  unangetastet (`docs/decisions/012`).
 
 ## Nicht-Ziele
 
@@ -63,7 +77,15 @@
 
 - Schutzregeln zu Nutzeränderungen, Auftragsscope, Commits/Pushes: siehe
   `AGENTS.md`.
-- Nach relevanten Änderungen läuft `npm --prefix npm run verify`.
+- Nach relevanten Änderungen läuft `npm --prefix npm run verify`. Nur ein
+  `project_check`-Aufruf des Pflichtprofils `verify` aktualisiert den
+  Footer/Ledger — ein reiner `bash`-Lauf desselben Befehls (auch über den
+  `verify`-Tool oder aus `verifier` heraus) tut das nicht (siehe
+  `docs/verify-profiles.md`).
+- `npm run test:runtime` ist bewusst kein Teil von `verify`/CI: es prüft eine
+  lokal gepatchte Runtime unter einem entwicklerspezifischen Pfad
+  (`PI_RUNTIME_ROOT`), den kein CI-Runner besitzt (siehe
+  `docs/RUNTIME_PATCHES.md`).
 
 ## Aktuelle Prioritäten
 
