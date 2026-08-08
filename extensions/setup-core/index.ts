@@ -7,6 +7,7 @@ import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles, runProfile } from "./verify-profiles.ts";
+import { classifyCheckFailure } from "./check-baseline.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 import {
   collectContextDiagnostics,
@@ -332,6 +333,14 @@ export default function setupCore(pi: ExtensionAPI): void {
           output: result.output,
           ...(result.truncation ? { truncation: result.truncation } : {}),
           ...(result.error ? { error: result.error } : {}),
+          ...(result.ok
+            ? {}
+            : {
+                baseline: classifyCheckFailure(
+                  result.output,
+                  checkSnapshot?.changedFiles ?? [],
+                ),
+              }),
         });
       }
 

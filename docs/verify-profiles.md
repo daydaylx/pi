@@ -47,12 +47,30 @@ bleibt der Status bei Änderungen `checks_unavailable`; es gibt weder einen
 automatischen Testlauf noch eine Completion- oder Planphase. Die Anzeige kann
 über `verificationStatus.enabled` in der Setup-Konfiguration deaktiviert werden.
 
+Nur ein `project_check`-Aufruf des deklarierten Pflichtprofils aktualisiert
+diesen Status. Ein direkter `bash`-Lauf des gleichen Befehls — auch über den
+separaten `verify`-Tool oder aus einem Subagenten heraus (`verifier` besitzt
+kein `project_check`) — lässt den Footer bei `changed_unverified` stehen,
+selbst wenn der Lauf lokal grün war. Das ist keine Ungenauigkeit, sondern
+Konsequenz aus „Akkumulation nur bei identischem Snapshot" unten: nur
+`project_check` schreibt in den Ledger.
+
 Pro Profil enthält das Ergebnis Profil-ID, redigiertes Programm und Argumente,
 relatives Arbeitsverzeichnis, Klassifikation, Start- und Endzeit, Exit-Code,
 Dauer, Status und begrenzte relevante Ausgabe. `advisory`-Befunde machen den
 Tool-Aufruf nicht fehlerhaft; bei `recommended` bleibt ein fehlendes Binary als
 sichtbares Restrisiko erhalten. Ungültige, fehlende oder in nicht vertrauten
 Projekten liegende Profile werden nicht ausgeführt.
+
+Ein fehlgeschlagenes Profil trägt zusätzlich ein optionales `baseline`-Feld
+(`extensions/setup-core/check-baseline.ts`): eine billige, rein diagnostische
+Einschätzung `introduced` / `pre_existing` / `unknown`, gewonnen durch
+Abgleich der in der Ausgabe erwähnten Dateipfade mit den Snapshot-Änderungen.
+Es beeinflusst `verified`/`changed_unverified`/`checks_failed` nicht — reine
+Evidenz, kein zweiter Lauf gegen einen sauberen Stand. Bleibt der Abgleich
+uneindeutig, ist `unknown` die ehrliche Antwort statt einer Vermutung. Ein
+verlässlicherer, teurerer Vergleich (Check erneut gegen `HEAD`/einen Stash
+laufen lassen) existiert bewusst nicht als Automatik — bei Bedarf manuell.
 
 ## Was `verified` bedeutet
 
