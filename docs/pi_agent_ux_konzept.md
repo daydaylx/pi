@@ -35,9 +35,12 @@ registriert.
 Die Anzeige enthält Registry-Status, Kontextfenster, Output-Limit, Preisraten
 und vorhandenen Kontextverbrauch.
 
-`Super+D` bietet Auto sowie die vom aktiven Modell unterstützten Thinking-Stufen
-einschließlich `Off`. Im Auto-Modus folgt die Denktiefe dem Workflow; eine
-manuell gewählte Stufe bleibt unangetastet. Eine separate Status-Telemetrie-
+`Super+D` bietet die vom aktiven Modell unterstützten Thinking-Stufen
+einschließlich `Off`, ausschließlich manuell wählbar. Eine automatische,
+workflowabhängige Vorauswahl gibt es zur Laufzeit nicht (mehr) — die
+Zuordnung `detailed_plan → high` existiert nur als Reaktion auf ein Ereignis
+ohne bestätigten Absender in diesem Repository und wird nirgends angewendet
+(siehe `extensions/plan-mode/events.ts`). Eine separate Status-Telemetrie-
 Ansicht gibt es nicht mehr — der Status steht in der Fußzeile.
 
 ## Skills und Konfiguration
