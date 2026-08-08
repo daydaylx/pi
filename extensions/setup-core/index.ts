@@ -141,6 +141,15 @@ export default function setupCore(pi: ExtensionAPI): void {
   let trusted = false;
   let verificationLedger: VerificationLedger = {};
   let lastSettledStatus: VerificationStatus | undefined;
+  // Session-scoped record of which profile ids have ever been observed
+  // passing, independent of the workspace fingerprint (unlike
+  // verificationLedger.lastRequiredCheck, which is discarded whenever the
+  // fingerprint changes). This is the one genuine baseline
+  // check-baseline.ts's `introduced` classification relies on: if a profile
+  // passed earlier this session and now fails, that is a recorded
+  // regression, not a guess. Same lifecycle as verificationLedger — reset on
+  // session_start/session_shutdown, never persisted.
+  let passedProfileIds: Set<string> = new Set();
 
   function workspaceSnapshot(cwd: string) {
     try {
@@ -154,6 +163,7 @@ export default function setupCore(pi: ExtensionAPI): void {
     activeCwd = ctx.cwd;
     trusted = ctx.isProjectTrusted();
     verificationLedger = {};
+    passedProfileIds = new Set();
     lastSettledStatus = undefined;
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
   });
@@ -188,6 +198,7 @@ export default function setupCore(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", (_event, ctx) => {
     verificationLedger = {};
+    passedProfileIds = new Set();
     lastSettledStatus = undefined;
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
   });
@@ -196,7 +207,7 @@ export default function setupCore(pi: ExtensionAPI): void {
     name: "verify",
     label: "Verifizieren",
     description:
-      "Führt ausschließlich einen vorkonfigurierten Typecheck, Testlauf oder die vollständige Verifikation aus. Akzeptiert keine freien Shell-Kommandos.",
+      "Führt ausschließlich einen vorkonfigurierten Typecheck, Testlauf oder die vollständige Verifikation dieses Setups aus. Akzeptiert keine freien Shell-Kommandos. Aktualisiert nicht den Verifikations-Footer/-Ledger eines Projekts — dafür ist project_check({ profile: \"verify\" }) der kanonische Weg.",
     promptSnippet:
       "Run a configured typecheck, test, or full verification safely.",
     parameters: CheckParams,
@@ -314,6 +325,7 @@ export default function setupCore(pi: ExtensionAPI): void {
           exec: (program, args, options) => pi.exec(program, args, options),
         });
         const finishedAt = new Date().toISOString();
+        if (result.ok) passedProfileIds.add(profileId);
         reports.push({
           profileId,
           command: {
@@ -339,6 +351,7 @@ export default function setupCore(pi: ExtensionAPI): void {
                 baseline: classifyCheckFailure(
                   result.output,
                   checkSnapshot?.changedFiles ?? [],
+                  passedProfileIds.has(profileId),
                 ),
               }),
         });

@@ -1256,6 +1256,112 @@ export const runtimeSections = {
       }
     });
   },
+  "check-baseline diagnostics": async (context) => {
+    const { section, load } = context;
+
+    await section("check-baseline diagnostics", async () => {
+      const baseline = await load("extensions/setup-core/check-baseline.ts");
+
+      // No workspace changes at all: the workspace is defined as matching
+      // HEAD exactly (collectWorkspaceSnapshot's changedFiles is empty).
+      // That is a real, tautological baseline — a failure cannot have been
+      // introduced by a session that has made no changes yet — independent
+      // of whether the profile has ever passed before.
+      const noWorkspaceChanges = baseline.classifyCheckFailure(
+        "tests/example.test.ts:12 assertion failed",
+        [],
+        false,
+      );
+      eq(
+        noWorkspaceChanges.classification,
+        "pre_existing",
+        "no workspace changes is a genuine baseline: pre_existing",
+      );
+      assert(
+        !("pathRelation" in noWorkspaceChanges),
+        "pre_existing from a clean workspace carries no path-matching guess",
+      );
+
+      // A real comparison basis: this exact profile already passed earlier
+      // in the session, and now fails against a changed workspace. That is
+      // recorded evidence of a regression, not an inference from paths.
+      const regressed = baseline.classifyCheckFailure(
+        "tests/example.test.ts:12 assertion failed",
+        ["tests/example.test.ts"],
+        true,
+      );
+      eq(
+        regressed.classification,
+        "introduced",
+        "a profile that already passed this session and now fails is a genuine regression",
+      );
+
+      // No genuine baseline (never passed this session, workspace has
+      // changes): always unknown, regardless of how suggestively the
+      // output's paths line up with the diff — path text is not causal
+      // evidence. changed vs. output mismatch (paths outside the diff):
+      const outputOutsideDiff = baseline.classifyCheckFailure(
+        "src/unrelated/legacy.ts:40 type error",
+        ["src/feature/new-file.ts"],
+        false,
+      );
+      eq(
+        outputOutsideDiff.classification,
+        "unknown",
+        "output referencing only unchanged paths is still unknown, not pre_existing",
+      );
+      eq(outputOutsideDiff.pathRelation, "no_paths_changed");
+
+      // unchanged vs. output: all referenced paths are exactly the changed
+      // files, but still no recorded prior pass — must stay unknown, not
+      // promoted to "introduced" from path text alone.
+      const outputInsideDiff = baseline.classifyCheckFailure(
+        "src/feature/new-file.ts:5 type error",
+        ["src/feature/new-file.ts"],
+        false,
+      );
+      eq(
+        outputInsideDiff.classification,
+        "unknown",
+        "output referencing only changed paths is still unknown, not introduced, without a real baseline",
+      );
+      eq(outputInsideDiff.pathRelation, "all_paths_changed");
+      eq(outputInsideDiff.matchedPaths, ["src/feature/new-file.ts"]);
+
+      // mixed: some referenced paths changed, some did not.
+      const mixed = baseline.classifyCheckFailure(
+        "src/feature/new-file.ts:5 and src/unrelated/legacy.ts:40 both fail",
+        ["src/feature/new-file.ts"],
+        false,
+      );
+      eq(mixed.classification, "unknown");
+      eq(mixed.pathRelation, "mixed");
+
+      // no paths found in the output at all.
+      const noPaths = baseline.classifyCheckFailure(
+        "exit code 1",
+        ["src/feature/new-file.ts"],
+        false,
+      );
+      eq(noPaths.classification, "unknown");
+      eq(noPaths.pathRelation, "no_paths_found");
+      assert(
+        !("matchedPaths" in noPaths),
+        "no matchedPaths field when nothing was recognized in the output",
+      );
+
+      // Never gates or feeds evaluateCheckRun/mergeCheckRun/verificationStatus:
+      // classifyCheckFailure only takes output/changedFiles/session-history and
+      // returns diagnostic metadata, structurally unrelated to CheckReport's
+      // status/exitCode/classification fields those functions actually read.
+      const status = await load("extensions/setup-core/verification-status.ts");
+      assert(
+        typeof status.evaluateCheckRun === "function" &&
+          status.evaluateCheckRun.length === 2,
+        "evaluateCheckRun's signature has no baseline parameter to accidentally wire in",
+      );
+    });
+  },
   "setup doctor required profile completeness (P1-08)": async (context) => {
     const { section, setupCore } = context;
 

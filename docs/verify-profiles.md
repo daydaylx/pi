@@ -63,14 +63,36 @@ sichtbares Restrisiko erhalten. Ungültige, fehlende oder in nicht vertrauten
 Projekten liegende Profile werden nicht ausgeführt.
 
 Ein fehlgeschlagenes Profil trägt zusätzlich ein optionales `baseline`-Feld
-(`extensions/setup-core/check-baseline.ts`): eine billige, rein diagnostische
-Einschätzung `introduced` / `pre_existing` / `unknown`, gewonnen durch
-Abgleich der in der Ausgabe erwähnten Dateipfade mit den Snapshot-Änderungen.
-Es beeinflusst `verified`/`changed_unverified`/`checks_failed` nicht — reine
-Evidenz, kein zweiter Lauf gegen einen sauberen Stand. Bleibt der Abgleich
-uneindeutig, ist `unknown` die ehrliche Antwort statt einer Vermutung. Ein
-verlässlicherer, teurerer Vergleich (Check erneut gegen `HEAD`/einen Stash
-laufen lassen) existiert bewusst nicht als Automatik — bei Bedarf manuell.
+(`extensions/setup-core/check-baseline.ts`) mit einer Klassifikation
+`introduced` / `pre_existing` / `unknown`. Es beeinflusst
+`verified`/`changed_unverified`/`checks_failed` nicht — reine Evidenz, kein
+zweiter Lauf gegen einen sauberen Stand, keine Worktrees, kein Stash.
+
+`introduced` und `pre_existing` werden ausschließlich vergeben, wenn eine
+echte Vergleichsbasis vorliegt — nicht aus einem Abgleich referenzierter
+Dateipfade gegen den Diff (das beweist keine Kausalität: ein Pfad kann Teil
+der Änderung sein und der Fehler trotzdem vorbestehend sein, oder umgekehrt).
+Zwei Fälle liefern eine echte Basis, beide bereits vorhanden, ohne neuen Lauf:
+
+1. **Kein Workspace-Change.** Definition: `changedFiles` des
+   Workspace-Snapshots ist leer — der Workspace entspricht exakt `HEAD`
+   (keine staged, unstaged oder untracked Änderungen). Das ist tautologisch:
+   ohne jede Änderung kann die aktuelle Sitzung nichts eingeführt haben →
+   `pre_existing`.
+2. **Bereits erfolgreich in dieser Sitzung.** Dasselbe Profil ist zuvor in
+   derselben Sitzung schon einmal erfolgreich gelaufen (sitzungsgebunden,
+   unabhängig vom Fingerprint verfolgt — anders als der Ledger, der bei
+   jedem Fingerprint-Wechsel verwirft) und schlägt jetzt fehl → `introduced`,
+   eine belegte Regression, keine Vermutung.
+
+Liegt keiner der beiden Fälle vor, ist `unknown` die ehrliche Antwort. Dabei
+trägt das Ergebnis zusätzlich ein rein beschreibendes, nicht-kausales
+`pathRelation`-Feld (`all_paths_changed` / `no_paths_changed` / `mixed` /
+`no_paths_found`) als Hinweis, wo in der Ausgabe referenzierte Pfade relativ
+zum Diff liegen — ein Hinweis für die weitere Suche, niemals eine
+Klassifikation für sich. Ein verlässlicherer, teurerer Vergleich (Check
+erneut gegen `HEAD`/einen Stash laufen lassen) existiert bewusst nicht als
+Automatik — bei Bedarf manuell.
 
 ## Was `verified` bedeutet
 
