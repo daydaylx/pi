@@ -11,6 +11,7 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [009](009-aurora-owns-the-footer.md) — Aurora besitzt auch die Fußzeile
 - [010](010-compaction-recent-context-budget.md) — Recent-Context-Budget bleibt bei 12 KiB
 - [011](011-investigator-debugger-verifier.md) — Investigator, Debugger, Verifier ersetzen Planner, Worker, Reviewer
+- [012](012-plan-mode-mutation-guard.md) — Plan Mode bekommt einen technischen Mutationsschutz
 
 ## Nummernlücke 001–004, 006
 

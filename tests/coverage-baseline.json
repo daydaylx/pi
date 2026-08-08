@@ -14,7 +14,7 @@
   "minimumFunctionCoverage": {
     "extensions/setup-core/index.ts": 100,
     "extensions/plan-mode/index.ts": 100,
-    "extensions/mode-permissions.ts": 60,
+    "extensions/mode-permissions.ts": 80,
     "extensions/lsp/index.ts": 52,
     "extensions/ask-user.ts": 47,
     "extensions/diff-viewer/index.ts": 50,

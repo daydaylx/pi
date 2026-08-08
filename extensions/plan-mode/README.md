@@ -28,11 +28,18 @@ werden ignoriert.
 
 ## Durchsetzung
 
-Der Kontext ist ein Prompt, keine Schreibsperre — Plan Mode ist eine
-Agentenverhaltensanweisung und keine technische Read-only-Sandbox: ein
-Moduswechsel ändert die Berechtigungsstufe nicht. Technisch erzwungen sind
-allein die Plandatei als automatisch erlaubtes Schreibziel
-(`automaticallyAllowedInPlanMode`) und die harten Secret-, System-, Symlink-
-und Trust-Grenzen, die in jedem Modus gelten. Wer eine echte Schreibsperre im
-Planmodus will, wählt die Stufe `readonly` bewusst über `/permission`. Das ist
-eine bewusste Komfortentscheidung.
+Der Kontext ist primär ein Prompt: ein Moduswechsel ändert die
+Berechtigungsstufe selbst nicht, und Plan Mode bleibt keine allgemeine
+Read-only-Sandbox. Technisch erzwungen sind die Plandatei als automatisch
+erlaubtes Schreibziel (`automaticallyAllowedInPlanMode`), die harten Secret-,
+System-, Symlink- und Trust-Grenzen, die in jedem Modus gelten — und
+zusätzlich ein Planmodus-Mutationsschutz (`planModeMutationGuard` /
+`planModeBashGuard` in `extensions/permissions/workflow-policy.ts`): Bei den
+Stufen `project-write` und `confirm-all` verweigert er während `simple_plan`
+oder `detailed_plan` jeden Schreibzugriff außerhalb der Plandatei und jedes
+Bash-Kommando, das nicht nachweislich rein inspizierend ist — mit exakt der
+Logik, die die Stufe `readonly` an anderer Stelle bereits verwendet, ohne
+neue Muster. `readonly` selbst braucht keine gesonderte Behandlung (schon
+vollständig gesperrt); `yolo` wird bewusst nicht angefasst, weil die Wahl von
+YOLO selbst eine explizite, eindeutige Aufhebung der Standard-Sicherheit ist.
+Details und Abwägung: `docs/decisions/012-plan-mode-mutation-guard.md`.

@@ -144,3 +144,79 @@ await test("decideBash asks or blocks on unquoted shell variables at every non-r
     "single-quoted $HOME never expands and stays allowed",
   );
 });
+
+await test("planModeMutationGuard blocks non-plan writes at project-write/confirm-all during planning, allows the plan file", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "detailed_plan" };
+  const write = (level, path) =>
+    workflowPolicy.planModeMutationGuard(
+      planning,
+      level,
+      { toolName: "write", input: { path } },
+      cwd,
+    );
+  assert(
+    write("project-write", "extensions/example.ts").blocked,
+    "a non-plan write is blocked at project-write while planning",
+  );
+  assert(
+    write("confirm-all", "extensions/example.ts").blocked,
+    "a non-plan write is blocked at confirm-all while planning",
+  );
+  assert(
+    !write("project-write", ".agent/plans/current-plan.md").blocked,
+    "the plan file itself stays writable",
+  );
+});
+
+await test("planModeMutationGuard leaves readonly, yolo and work mode unaffected", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "simple_plan" };
+  const working = { mode: "work" };
+  const write = (workflow, level) =>
+    workflowPolicy.planModeMutationGuard(
+      workflow,
+      level,
+      { toolName: "write", input: { path: "extensions/example.ts" } },
+      cwd,
+    );
+  assert(
+    !write(planning, "readonly").blocked,
+    "readonly already denies this elsewhere; the plan guard does not duplicate it",
+  );
+  assert(
+    !write(planning, "yolo").blocked,
+    "yolo is an explicit override the plan guard must not second-guess",
+  );
+  assert(
+    !write(working, "project-write").blocked,
+    "work mode is never affected by the plan guard",
+  );
+});
+
+await test("planModeBashGuard blocks mutating commands and allows read-only ones during planning", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "detailed_plan" };
+  const working = { mode: "work" };
+  const bash = (workflow, level, command) =>
+    workflowPolicy.planModeBashGuard(workflow, level, command, cwd);
+  assert(
+    bash(planning, "project-write", "rm extensions/example.ts").blocked,
+    "a mutating command is blocked while planning",
+  );
+  assert(
+    !bash(planning, "project-write", "git status").blocked,
+    "a read-only command passes while planning",
+  );
+  assert(
+    !bash(planning, "yolo", "rm extensions/example.ts").blocked,
+    "yolo bypasses the plan-mode bash guard",
+  );
+  assert(
+    !bash(working, "project-write", "rm extensions/example.ts").blocked,
+    "work mode is never affected by the plan guard",
+  );
+});

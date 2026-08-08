@@ -12,6 +12,8 @@ import {
   assessBash,
   assessWorkflowTool,
   automaticallyAllowedInPlanMode,
+  planModeBashGuard,
+  planModeMutationGuard,
 } from "./workflow-policy.ts";
 import { toolPath } from "./tool-event.ts";
 
@@ -49,6 +51,16 @@ export function registerPermissionGuards(
       return { block: true, reason: assessment.reason };
     }
     if (automaticallyAllowedInPlanMode(workflow, event, ctx.cwd)) return;
+
+    const planGuard = planModeMutationGuard(
+      workflow,
+      session.level(),
+      event,
+      ctx.cwd,
+    );
+    if (planGuard.blocked) {
+      return { block: true, reason: planGuard.reason };
+    }
 
     const decision = decideTool(
       session.level(),
@@ -89,6 +101,23 @@ export function registerPermissionGuards(
       return {
         result: {
           output: assessment.reason,
+          exitCode: 126,
+          cancelled: true,
+          truncated: false,
+        },
+      };
+    }
+    const workflow = requestWorkflowCapabilities(pi.events);
+    const planGuard = planModeBashGuard(
+      workflow,
+      session.level(),
+      event.command,
+      event.cwd,
+    );
+    if (planGuard.blocked) {
+      return {
+        result: {
+          output: planGuard.reason,
           exitCode: 126,
           cancelled: true,
           truncated: false,
