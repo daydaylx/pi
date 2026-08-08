@@ -535,7 +535,7 @@ export const runtimeSections = {
         assert(
           harness.notifications
             .at(-1)
-            ?.message?.includes("Pi CLI/dev package: 0.80.7/0.84.0") &&
+            ?.message?.includes("Pi CLI/dev package: 0.80.7/0.84.1") &&
             harness.notifications.at(-1)?.level === "error",
           "setup doctor makes CLI/dev version drift visible",
         );
@@ -569,7 +569,9 @@ export const runtimeSections = {
           "setup doctor distinguishes the setup baseline from active package config",
         );
         assert(
-          !harness.notifications.at(-1)?.message?.includes("doom-loop status:") &&
+          !harness.notifications
+            .at(-1)
+            ?.message?.includes("doom-loop status:") &&
             !harness.notifications.at(-1)?.message?.includes("edit metrics:"),
           "setup doctor omits removed automatic doom-loop and edit-metric workflows",
         );
@@ -625,7 +627,8 @@ export const runtimeSections = {
         const contextCommand = contextHarness.commands.get("setup-doctor");
         const diagnosticContext = contextHarness.makeContext();
         if (contextCommand) await contextCommand("context", diagnosticContext);
-        const contextReport = contextHarness.notifications.at(-1)?.message ?? "";
+        const contextReport =
+          contextHarness.notifications.at(-1)?.message ?? "";
         assert(
           contextReport.includes("registered tools: 2 (alpha, zeta)") &&
             contextReport.includes("active tools: 2 (dynamic-tool, zeta)"),
@@ -644,7 +647,8 @@ export const runtimeSections = {
             ),
           "context doctor reports only aggregate prompt, usage, compaction and truncation diagnostics",
         );
-        if (contextCommand) await contextCommand("unexpected", diagnosticContext);
+        if (contextCommand)
+          await contextCommand("unexpected", diagnosticContext);
         eq(
           contextHarness.notifications.at(-1),
           { message: "Usage: /setup-doctor [context]", level: "error" },
@@ -729,11 +733,20 @@ export const runtimeSections = {
     await section("verification status layer", async () => {
       const status = await load("extensions/setup-core/verification-status.ts");
       const cleanSnapshot = { changedFiles: [], fingerprint: "clean" };
-      const changedSnapshot = { changedFiles: ["source.ts"], fingerprint: "changed" };
+      const changedSnapshot = {
+        changedFiles: ["source.ts"],
+        fingerprint: "changed",
+      };
       const ROOT_A = "/workspace/a";
       const ROOT_B = "/workspace/b";
 
-      const report = (profileId, classification, reportStatus, exitCode, killed) => ({
+      const report = (
+        profileId,
+        classification,
+        reportStatus,
+        exitCode,
+        killed,
+      ) => ({
         profileId,
         classification,
         status: reportStatus,
@@ -773,7 +786,9 @@ export const runtimeSections = {
         "a project that declares no required profile can never be verified",
       );
       eq(
-        statusOf(changedSnapshot, record({ typecheck: "success" }), ["typecheck"]),
+        statusOf(changedSnapshot, record({ typecheck: "success" }), [
+          "typecheck",
+        ]),
         "verified",
         "a successful required check for the current snapshot is verified",
       );
@@ -797,26 +812,36 @@ export const runtimeSections = {
       );
       // A check from another workspace must never verify this one.
       eq(
-        statusOf(changedSnapshot, record({ typecheck: "success" }), ["typecheck"], ROOT_B),
+        statusOf(
+          changedSnapshot,
+          record({ typecheck: "success" }),
+          ["typecheck"],
+          ROOT_B,
+        ),
         "changed_unverified",
         "a check recorded for another workspace root does not carry over",
       );
       eq(
-        statusOf(changedSnapshot, record({ typecheck: "failed" }), ["typecheck"]),
+        statusOf(changedSnapshot, record({ typecheck: "failed" }), [
+          "typecheck",
+        ]),
         "checks_failed",
         "a failed required check is reported as failed",
       );
       eq(
-        statusOf(changedSnapshot, record({ typecheck: "unavailable" }), ["typecheck"]),
+        statusOf(changedSnapshot, record({ typecheck: "unavailable" }), [
+          "typecheck",
+        ]),
         "checks_unavailable",
         "a required check without a verdict is unavailable, not failed",
       );
       // A check that ran and said no outranks one that never produced a verdict.
       eq(
-        statusOf(changedSnapshot, record({ tests: "failed", typecheck: "unavailable" }), [
-          "tests",
-          "typecheck",
-        ]),
+        statusOf(
+          changedSnapshot,
+          record({ tests: "failed", typecheck: "unavailable" }),
+          ["tests", "typecheck"],
+        ),
         "checks_failed",
         "a real required failure outranks a concurrent unavailable check",
       );
@@ -824,7 +849,10 @@ export const runtimeSections = {
       eq(
         statusOf(
           changedSnapshot,
-          record({ typecheck: "success" }, { blockingRecommendedIds: ["lint"] }),
+          record(
+            { typecheck: "success" },
+            { blockingRecommendedIds: ["lint"] },
+          ),
           ["typecheck"],
         ),
         "checks_failed",
@@ -841,9 +869,17 @@ export const runtimeSections = {
         [report("typecheck", "required", "success")],
         ["typecheck"],
       );
-      eq(requiredPass.requiredOutcomes.typecheck, "success", "a passing required run succeeds");
+      eq(
+        requiredPass.requiredOutcomes.typecheck,
+        "success",
+        "a passing required run succeeds",
+      );
       eq(requiredPass.blocking, false, "a passing required run does not block");
-      eq(requiredPass.missingRequiredIds.length, 0, "a full run leaves nothing open");
+      eq(
+        requiredPass.missingRequiredIds.length,
+        0,
+        "a full run leaves nothing open",
+      );
 
       const requiredPartial = status.evaluateCheckRun(
         [report("typecheck", "required", "success")],
@@ -864,8 +900,16 @@ export const runtimeSections = {
         [report("typecheck", "required", "spawn_failed", 1)],
         ["typecheck"],
       );
-      eq(requiredFail.requiredOutcomes.typecheck, "failed", "a required command failure fails");
-      eq(requiredFail.blocking, true, "a required failure blocks the tool call");
+      eq(
+        requiredFail.requiredOutcomes.typecheck,
+        "failed",
+        "a required command failure fails",
+      );
+      eq(
+        requiredFail.blocking,
+        true,
+        "a required failure blocks the tool call",
+      );
 
       const requiredTimeout = status.evaluateCheckRun(
         [report("typecheck", "required", "timeout", null, true)],
@@ -876,10 +920,17 @@ export const runtimeSections = {
         "unavailable",
         "a timeout is an unavailable check, not a failure",
       );
-      eq(requiredTimeout.blocking, true, "a required non-execution still blocks");
+      eq(
+        requiredTimeout.blocking,
+        true,
+        "a required non-execution still blocks",
+      );
 
       const recommendedFail = status.evaluateCheckRun(
-        [report("typecheck", "required", "success"), report("lint", "recommended", "spawn_failed", 1)],
+        [
+          report("typecheck", "required", "success"),
+          report("lint", "recommended", "spawn_failed", 1),
+        ],
         ["typecheck"],
       );
       eq(
@@ -887,7 +938,11 @@ export const runtimeSections = {
         "lint",
         "a confirmed recommended failure is recorded",
       );
-      eq(recommendedFail.blocking, true, "a confirmed recommended failure blocks");
+      eq(
+        recommendedFail.blocking,
+        true,
+        "a confirmed recommended failure blocks",
+      );
 
       const recommendedMissing = status.evaluateCheckRun(
         [report("lint", "recommended", "missing_binary", null)],
@@ -898,7 +953,11 @@ export const runtimeSections = {
         0,
         "a missing recommended binary stays a residual risk",
       );
-      eq(recommendedMissing.blocking, false, "a missing recommended binary does not block");
+      eq(
+        recommendedMissing.blocking,
+        false,
+        "a missing recommended binary does not block",
+      );
       eq(
         recommendedMissing.clearedRecommendedIds.length,
         0,
@@ -906,7 +965,10 @@ export const runtimeSections = {
       );
 
       const advisoryFail = status.evaluateCheckRun(
-        [report("typecheck", "required", "success"), report("audit", "advisory", "spawn_failed", 1)],
+        [
+          report("typecheck", "required", "success"),
+          report("audit", "advisory", "spawn_failed", 1),
+        ],
         ["typecheck"],
       );
       eq(advisoryFail.blocking, false, "an advisory finding never blocks");
@@ -929,10 +991,10 @@ export const runtimeSections = {
       // -- mergeCheckRun -----------------------------------------------------
       const firstRun = status.mergeCheckRun(
         {},
-        status.evaluateCheckRun([report("typecheck", "required", "success")], [
-          "tests",
-          "typecheck",
-        ]),
+        status.evaluateCheckRun(
+          [report("typecheck", "required", "success")],
+          ["tests", "typecheck"],
+        ),
         ROOT_A,
         "changed",
       );
@@ -943,10 +1005,10 @@ export const runtimeSections = {
       );
       const secondRun = status.mergeCheckRun(
         firstRun,
-        status.evaluateCheckRun([report("tests", "required", "success")], [
-          "tests",
-          "typecheck",
-        ]),
+        status.evaluateCheckRun(
+          [report("tests", "required", "success")],
+          ["tests", "typecheck"],
+        ),
         ROOT_A,
         "changed",
       );
@@ -957,10 +1019,10 @@ export const runtimeSections = {
       );
       const afterEdit = status.mergeCheckRun(
         secondRun,
-        status.evaluateCheckRun([report("tests", "required", "success")], [
-          "tests",
-          "typecheck",
-        ]),
+        status.evaluateCheckRun(
+          [report("tests", "required", "success")],
+          ["tests", "typecheck"],
+        ),
         ROOT_A,
         "edited",
       );
@@ -971,10 +1033,10 @@ export const runtimeSections = {
       );
       const otherRoot = status.mergeCheckRun(
         secondRun,
-        status.evaluateCheckRun([report("tests", "required", "success")], [
-          "tests",
-          "typecheck",
-        ]),
+        status.evaluateCheckRun(
+          [report("tests", "required", "success")],
+          ["tests", "typecheck"],
+        ),
         ROOT_B,
         "changed",
       );
@@ -985,10 +1047,10 @@ export const runtimeSections = {
       );
       const blocked = status.mergeCheckRun(
         secondRun,
-        status.evaluateCheckRun([report("lint", "recommended", "spawn_failed", 1)], [
-          "tests",
-          "typecheck",
-        ]),
+        status.evaluateCheckRun(
+          [report("lint", "recommended", "spawn_failed", 1)],
+          ["tests", "typecheck"],
+        ),
         ROOT_A,
         "changed",
       );
@@ -999,10 +1061,10 @@ export const runtimeSections = {
       );
       const unblocked = status.mergeCheckRun(
         blocked,
-        status.evaluateCheckRun([report("lint", "recommended", "success")], [
-          "tests",
-          "typecheck",
-        ]),
+        status.evaluateCheckRun(
+          [report("lint", "recommended", "success")],
+          ["tests", "typecheck"],
+        ),
         ROOT_A,
         "changed",
       );
@@ -1060,8 +1122,16 @@ export const runtimeSections = {
         "tests",
         "typecheck",
       ]);
-      eq(coverage.covered.join(","), "typecheck", "coverage lists what actually passed");
-      eq(coverage.missing.join(","), "tests", "coverage lists what is still open");
+      eq(
+        coverage.covered.join(","),
+        "typecheck",
+        "coverage lists what actually passed",
+      );
+      eq(
+        coverage.missing.join(","),
+        "tests",
+        "coverage lists what is still open",
+      );
       eq(coverage.total, 2, "coverage counts every declared required profile");
       eq(
         status.requiredCoverage(undefined, ["tests"]).missing.join(","),
@@ -1070,7 +1140,9 @@ export const runtimeSections = {
       );
 
       if (!setupCore) return;
-      const workspace = mkdtempSync(path.join(tmpdir(), "pi-verification-status-"));
+      const workspace = mkdtempSync(
+        path.join(tmpdir(), "pi-verification-status-"),
+      );
       const git = (args) =>
         execFileSync("git", args, { cwd: workspace, encoding: "utf8" });
       try {
@@ -1100,7 +1172,10 @@ export const runtimeSections = {
             },
           }),
         );
-        writeFileSync(path.join(workspace, "source.ts"), "export const value = 1;\n");
+        writeFileSync(
+          path.join(workspace, "source.ts"),
+          "export const value = 1;\n",
+        );
         git(["add", "."]);
         git(["commit", "--quiet", "-m", "baseline"]);
 
@@ -1115,7 +1190,12 @@ export const runtimeSections = {
                 throw new Error("spawn npm ENOENT");
               }
               if (lintFails)
-                return { stdout: "", stderr: "lint error", code: 1, killed: false };
+                return {
+                  stdout: "",
+                  stderr: "lint error",
+                  code: 1,
+                  killed: false,
+                };
             }
             return { stdout: "ok", stderr: "", code: 0, killed: false };
           },
@@ -1123,22 +1203,37 @@ export const runtimeSections = {
         setupCore.default(harness.api);
         const trusted = harness.makeContext({ cwd: workspace, trusted: true });
         await harness.runHooks("session_start", {}, trusted);
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           latestStatus(harness, "verification"),
           "Verify: clean",
           "agent_settled publishes a compact clean technical status",
         );
 
-        writeFileSync(path.join(workspace, "source.ts"), "export const value = 2;\n");
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        writeFileSync(
+          path.join(workspace, "source.ts"),
+          "export const value = 2;\n",
+        );
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           latestStatus(harness, "verification"),
           "Verify: changed_unverified",
           "agent_settled reports a changed workspace without a current check",
         );
         const beforeDuplicateSettle = harness.statusCalls.length;
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           harness.statusCalls.length,
           beforeDuplicateSettle,
@@ -1146,7 +1241,10 @@ export const runtimeSections = {
         );
 
         const projectCheck = harness.tools.get("project_check");
-        assert(projectCheck, "project_check is available for a required profile");
+        assert(
+          projectCheck,
+          "project_check is available for a required profile",
+        );
         const runCheck = (id, params) =>
           projectCheck.execute(id, params, undefined, undefined, trusted);
 
@@ -1161,10 +1259,16 @@ export const runtimeSections = {
           "project_check names the required profile that is still open",
         );
         assert(
-          partial.content[0].text.includes("Pflichtabdeckung: 1/2 — offen: tests"),
+          partial.content[0].text.includes(
+            "Pflichtabdeckung: 1/2 — offen: tests",
+          ),
           "project_check reports accumulated required coverage in its output",
         );
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           latestStatus(harness, "verification"),
           "Verify: changed_unverified",
@@ -1178,7 +1282,11 @@ export const runtimeSections = {
           complete.content[0].text.includes("Pflichtabdeckung: 2/2"),
           "project_check reports full coverage once every required profile passed",
         );
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           latestStatus(harness, "verification"),
           "Verify: verified",
@@ -1191,8 +1299,16 @@ export const runtimeSections = {
         const recommended = await runCheck("verification-status-recommended", {
           profile: "lint",
         });
-        eq(recommended.isError, true, "a confirmed recommended failure is a tool error");
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        eq(
+          recommended.isError,
+          true,
+          "a confirmed recommended failure is a tool error",
+        );
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           latestStatus(harness, "verification"),
           "Verify: checks_failed",
@@ -1211,7 +1327,11 @@ export const runtimeSections = {
           false,
           "a missing recommended binary is a residual risk, not a tool error",
         );
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           latestStatus(harness, "verification"),
           "Verify: checks_failed",
@@ -1220,16 +1340,29 @@ export const runtimeSections = {
         lintMissing = false;
 
         // Only a successful re-run clears the block.
-        await runCheck("verification-status-lint-recovered", { profile: "lint" });
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        await runCheck("verification-status-lint-recovered", {
+          profile: "lint",
+        });
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           latestStatus(harness, "verification"),
           "Verify: verified",
           "a successful recommended re-run restores the verified status",
         );
 
-        writeFileSync(path.join(workspace, "source.ts"), "export const value = 3;\n");
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        writeFileSync(
+          path.join(workspace, "source.ts"),
+          "export const value = 3;\n",
+        );
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           latestStatus(harness, "verification"),
           "Verify: changed_unverified",
@@ -1239,7 +1372,11 @@ export const runtimeSections = {
           path.join(workspace, ".pi", "setup.json"),
           JSON.stringify({ verificationStatus: { enabled: false } }),
         );
-        await harness.runHooks("agent_settled", { type: "agent_settled" }, trusted);
+        await harness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          trusted,
+        );
         eq(
           latestStatus(harness, "verification"),
           undefined,

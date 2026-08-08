@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The runtime version these patches were written and verified against. */
-export const EXPECTED_RUNTIME_VERSION = "0.84.0";
+export const EXPECTED_RUNTIME_VERSION = "0.84.1";
 
 export const DEFAULT_RUNTIME_ROOT =
   process.env.PI_RUNTIME_ROOT ??

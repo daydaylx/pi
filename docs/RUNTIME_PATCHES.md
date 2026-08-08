@@ -2,7 +2,7 @@
 
 Die tatsächlich gestartete Pi-Runtime liegt unter
 `/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent` und hat
-Version `0.84.0`. Sie enthält bewusst lokale P1-Patches, die nicht Teil dieses
+Version `0.84.1`. Sie enthält bewusst lokale P1-Patches, die nicht Teil dieses
 Git-Arbeitsbaums sind.
 
 > **Historie:** Das Upgrade von `0.82.0` auf `0.82.1` hat die gepatchten Dateien
@@ -21,6 +21,14 @@ stellte sich heraus, dass Upstream das Problem hinter vier der bisherigen
 Eingriffe (`loader-scoped-events`, `loader-unsubscriber-list`, `runner-dispose`,
 `session-reload-dispose`) inzwischen selbst löst — siehe **Retirement** unten.
 Die verbliebenen sechs Patches griffen unverändert.
+
+Am 2026-08-08 wurde die Runtime auf `0.84.1` aktualisiert, wodurch die Patches
+(wie in der Vergangenheit) aus `node_modules` verschwanden. Alle sechs Anker
+trafen unverändert; die Patches wurden erneut angewendet, `EXPECTED_RUNTIME_VERSION`
+und der Versionspin in `tests/p1-runtime.mjs` wurden auf `0.84.1` nachgezogen.
+Zusätzlich wurde die bis dahin bestehende Drift zur gepinnten Pi-Dev-Abhängigkeit
+in `npm/package.json` behoben (ebenfalls `0.84.0` → `0.84.1`, inklusive
+`npm install` für das Lockfile), siehe `docs/runtime-matrix.md`.
 
 ## Wiederherstellen
 
