@@ -11,14 +11,21 @@ Der Workflow kennt nur drei flüchtige Modi:
 - `simple_plan` – schreibt ausschließlich `.agent/plans/current-plan.md`.
 - `detailed_plan` – schreibt dieselbe Datei mit einem Architekturplan.
 
-`/work` wechselt sofort zu Work, ohne einen vorhandenen Plan erneut
-einzubinden — ein Plan aus einer alten Aufgabe oder Session beeinflusst
-spätere Work-Turns nicht automatisch. `/go` übernimmt einen vorhandenen Plan
-stattdessen einmalig als Umsetzungskontext: es wechselt nach Work und startet
-direkt einen Turn, der den Plan als hilfreichen, abweichbaren Kontext enthält.
-Ohne vorhandenen Plan meldet `/go` das kurz, ohne einen Turn zu starten.
-`/plan simple` beziehungsweise `/plan detailed` und `/workflow` wählen einen
-Planmodus; ein vorhandener Plan wird dabei ohne Rückfrage überschrieben.
+Shift+Tab (`/workflow`) ist die zentrale Steuerung für alle drei Modi und
+deckt dabei den vollständigen fachlichen Wechsel ab, nicht nur den Moduswert:
+Wahl von Schnellplan/Architekturplan verwirft einen vorhandenen Plan ohne
+Rückfrage und startet direkt den Planning-Turn; Wahl von Work schaltet in
+Work und übergibt einen gerade erst erstellten Plan genau einmal als
+hilfreichen, abweichbaren Umsetzungskontext — nur beim tatsächlichen Wechsel
+aus einem Planmodus heraus, nicht bei einem Work→Work-Wechsel und nicht bei
+einem Plan aus einer alten, längst verlassenen Aufgabe oder Session.
+
+`/plan`, `/work` und `/go` sind dünne Aliase derselben zentralen Aktion und
+verhalten sich exakt wie ihre jeweilige Shift+Tab-Auswahl: `/plan simple`
+beziehungsweise `/plan detailed` starten wie `/workflow` einen neuen
+Planning-Turn, `/work` wechselt wie `/workflow → Work` in den Work-Modus
+inklusive des einmaligen Handoffs, und `/go` tut dasselbe, meldet aber
+zusätzlich kurz, wenn dabei kein Plan vorhanden war.
 
 Der Plan ist normaler Markdown. Es gibt keine Metadaten, Step-IDs, Sidecars,
 Completion, Recovery, Migration oder Planpflicht.

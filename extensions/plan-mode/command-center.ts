@@ -51,9 +51,16 @@ function commandEntry(
   const shortcut = definition.shortcut
     ? `Shortcut: ${definition.shortcut}.`
     : undefined;
+  // "run-agent" has no standalone slash command of its own — /run <agent>
+  // is what guideCommand() actually submits, so the label reflects that
+  // instead of implying a non-existent /<agent-name> command.
+  const commandLine =
+    definition.guide === "run-agent"
+      ? `/run ${definition.name}`
+      : `/${definition.name}`;
   return {
     id: `command-${definition.name}`,
-    label: `${definition.label} · /${definition.name}`,
+    label: `${definition.label} · ${commandLine}`,
     description: [definition.description, shortcut].filter(Boolean).join(" "),
     details: aliases,
     disabled: Boolean(reason),
@@ -62,7 +69,7 @@ function commandEntry(
     tone: definition.dangerous ? "danger" : undefined,
     value: {
       name: definition.name,
-      commandLine: `/${definition.name}`,
+      commandLine,
       effect: definition.effect ?? "preserve-draft",
       guide: definition.guide,
     },
@@ -201,6 +208,15 @@ async function guideCommand(
     case "lsp": {
       const resolved = await resolveLspInteractiveCommand(ctx);
       return resolved ? `/lsp ${resolved}` : undefined;
+    }
+    case "run-agent": {
+      const task = cleanInput(
+        await ctx.ui.input(
+          `${action.name} · Aufgabe`,
+          "Konkrete, klar abgegrenzte Aufgabe für diesen Subagenten",
+        ),
+      );
+      return task ? `/run ${action.name} ${task}` : undefined;
     }
     case "name": {
       const name = cleanInput(

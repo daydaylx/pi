@@ -3,6 +3,7 @@ import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 export type CommandCategoryId =
   | "work"
   | "plan"
+  | "subagents"
   | "models"
   | "access"
   | "code"
@@ -28,7 +29,8 @@ export interface CommandDefinition {
   shortcut?: string;
   effect?: CommandEffect;
   dangerous?: boolean;
-  guide?: "compact" | "export" | "import" | "lsp" | "name" | "route";
+  guide?:
+    "compact" | "export" | "import" | "lsp" | "name" | "route" | "run-agent";
 }
 
 export interface AvailableCommand {
@@ -40,6 +42,7 @@ export interface AvailableCommand {
 export const COMMAND_CATEGORIES: readonly CommandCategory[] = [
   { id: "work", label: "Arbeit", shortcut: "A" },
   { id: "plan", label: "Plan", shortcut: "P" },
+  { id: "subagents", label: "Subagenten", shortcut: "U" },
   { id: "models", label: "Modelle & Denken", shortcut: "M" },
   { id: "access", label: "Rechte & Vertrauen", shortcut: "R" },
   { id: "code", label: "Code & Diagnose", shortcut: "C" },
@@ -89,6 +92,46 @@ const definitions = [
     "current-plan.md im aktiven Planmodus bearbeiten",
     "plan",
     ["plan-edit"],
+  ],
+
+  [
+    "investigator",
+    "Investigator",
+    "Repository untersuchen / Änderungssurface finden",
+    "subagents",
+    undefined,
+    undefined,
+    "starts-turn",
+    undefined,
+    "run-agent",
+  ],
+  [
+    "debugger",
+    "Debugger",
+    "Fehler reproduzieren / Ursache eingrenzen",
+    "subagents",
+    undefined,
+    undefined,
+    "starts-turn",
+    undefined,
+    "run-agent",
+  ],
+  [
+    "verifier",
+    "Verifier",
+    "Umsetzung unabhängig prüfen",
+    "subagents",
+    undefined,
+    undefined,
+    "starts-turn",
+    undefined,
+    "run-agent",
+  ],
+  [
+    "subagents-fleet",
+    "Status",
+    "Aktive/laufende Subagenten anzeigen",
+    "subagents",
   ],
 
   [

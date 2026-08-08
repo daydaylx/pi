@@ -55,6 +55,34 @@ Planung, Umsetzung, Triage und finale Nutzerkommunikation bleiben beim
 Hauptagenten. Es gibt keine automatische Pflichtdelegation und keine
 verschachtelte Delegation.
 
+### Delegationsvorlage
+
+Fresh-Context-Subagenten sehen den Parent-Dialog nicht automatisch. Das
+`task`-Feld ist deshalb die einzige Quelle des Originalauftrags und trägt ihn
+wortgetreu, nicht als eigene Zusammenfassung:
+
+```text
+Original User Request:
+<ursprünglicher Nutzerauftrag wortgetreu>
+
+Constraints / Non-Goals:
+<verbindliche Grenzen und Nicht-Ziele, sofern vorhanden>
+
+Delegated Question:
+<konkrete Teilfrage an den Subagenten>
+```
+
+Für `verifier` zusätzlich:
+
+```text
+Implementation / Diff to verify:
+<geänderte Dateien bzw. relevanter Diff, Implementation Surface>
+```
+
+Das ist Kontextübergabe im vorhandenen `task`-Feld, kein neuer Zustand, keine
+ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
+„Eingabe, die du benötigst" dieselbe Struktur aus Empfängersicht.
+
 ### Kontext und Ergebnis
 
 - Lokale Profile starten mit frischem Kontext, übernehmen die statischen

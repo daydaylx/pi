@@ -56,6 +56,65 @@ export async function switchMode(
   return true;
 }
 
+/**
+ * The one workflow implementation behind every entry point (Shift+Tab /
+ * /workflow, /plan, /work, /go): switching into a planning mode always
+ * discards the stale plan and starts a fresh planning turn; switching into
+ * work hands off the plan exactly once, only when the previous mode was a
+ * planning mode — a plain work→work reselect or a mode that was already
+ * work never resurrects a stale plan file.
+ *
+ * Returns whether a turn was actually started (planning turn or handoff),
+ * so thin command wrappers can decide on their own user feedback without
+ * owning any workflow logic themselves.
+ */
+export async function selectWorkflow(
+  session: WorkflowSession,
+  mode: WorkflowMode,
+  ctx: ExtensionContext,
+): Promise<boolean> {
+  if (mode === "work") {
+    const previousMode = session.selectedMode;
+    await switchMode(session, "work", ctx);
+    if (!isPlanningMode(previousMode)) return false;
+    const plan = readPlan(ctx.cwd);
+    if (!plan) return false;
+    session.pi.sendMessage(
+      {
+        customType: "pi-plan-handoff",
+        content: goHandoffPrompt(plan),
+        display: true,
+      },
+      { triggerTurn: true },
+    );
+    return true;
+  }
+
+  if (!(await switchMode(session, mode, ctx))) return false;
+  try {
+    removePlan(ctx.cwd);
+  } catch {
+    session.notify(
+      ctx,
+      "Alter Plan konnte nicht sicher verworfen werden. Neuer Planning-Turn wurde nicht gestartet.",
+      "error",
+    );
+    return false;
+  }
+  session.pi.sendMessage(
+    {
+      customType: "pi-plan-request",
+      content:
+        mode === "detailed_plan"
+          ? "Erstelle jetzt den Architekturplan."
+          : "Erstelle jetzt den Schnellplan.",
+      display: true,
+    },
+    { triggerTurn: true },
+  );
+  return true;
+}
+
 export function registerPlanCommands(
   pi: ExtensionAPI,
   session: WorkflowSession,
@@ -74,58 +133,26 @@ export function registerPlanCommands(
         );
         return;
       }
-      if (mode && (await switchMode(session, mode, ctx))) {
-        try {
-          removePlan(ctx.cwd);
-        } catch {
-          session.notify(
-            ctx,
-            "Alter Plan konnte nicht sicher verworfen werden. Neuer Planning-Turn wurde nicht gestartet.",
-            "error",
-          );
-          return;
-        }
-        session.pi.sendMessage(
-          {
-            customType: "pi-plan-request",
-            content:
-              mode === "detailed_plan"
-                ? "Erstelle jetzt den Architekturplan."
-                : "Erstelle jetzt den Schnellplan.",
-            display: true,
-          },
-          { triggerTurn: true },
-        );
-      }
+      if (mode) await selectWorkflow(session, mode, ctx);
     },
   });
   pi.registerCommand("work", {
     description: catalogDescription("work"),
     handler: async (_args, ctx) => {
-      await switchMode(session, "work", ctx);
+      await selectWorkflow(session, "work", ctx);
     },
   });
   pi.registerCommand("go", {
     description: catalogDescription("go"),
     handler: async (_args, ctx) => {
-      await switchMode(session, "work", ctx);
-      const plan = readPlan(ctx.cwd);
-      if (!plan) {
+      const didHandoff = await selectWorkflow(session, "work", ctx);
+      if (!didHandoff && !readPlan(ctx.cwd)) {
         session.notify(
           ctx,
           "Kein aktueller Plan vorhanden. Nutze /plan oder arbeite direkt mit /work.",
           "info",
         );
-        return;
       }
-      session.pi.sendMessage(
-        {
-          customType: "pi-plan-handoff",
-          content: goHandoffPrompt(plan),
-          display: true,
-        },
-        { triggerTurn: true },
-      );
     },
   });
   pi.registerCommand("view-plan", {
@@ -174,7 +201,7 @@ export function registerPlanCommands(
         entries.map((entry) => entry.label),
       );
       const action = entries.find((entry) => entry.label === choice)?.value;
-      if (action) await switchMode(session, action, ctx);
+      if (action) await selectWorkflow(session, action, ctx);
     },
   });
   pi.registerCommand("commands", {
