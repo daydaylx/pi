@@ -75,10 +75,16 @@ der Änderung sein und der Fehler trotzdem vorbestehend sein, oder umgekehrt).
 Zwei Fälle liefern eine echte Basis, beide bereits vorhanden, ohne neuen Lauf:
 
 1. **Kein Workspace-Change.** Definition: `changedFiles` des
-   Workspace-Snapshots ist leer — der Workspace entspricht exakt `HEAD`
-   (keine staged, unstaged oder untracked Änderungen). Das ist tautologisch:
-   ohne jede Änderung kann die aktuelle Sitzung nichts eingeführt haben →
-   `pre_existing`.
+   Workspace-Snapshots ist ein **leeres, aber tatsächlich erfasstes** Array —
+   der Workspace entspricht exakt `HEAD` (keine staged, unstaged oder
+   untracked Änderungen). Das ist tautologisch: ohne jede Änderung kann die
+   aktuelle Sitzung nichts eingeführt haben → `pre_existing`. Das ist etwas
+   anderes als **kein** Snapshot: konnte gar kein Snapshot erfasst werden
+   (z. B. kein Git-Repository, `git`-Aufruf schlägt fehl), übergibt der
+   Aufrufer `undefined`, nicht `[]` — `check-baseline.ts` behandelt das als
+   eigenen, unmittelbar geprüften `unknown`-Fall, bevor die
+   Leer-Array-Prüfung überhaupt greift, damit „nichts geändert“ und „Zustand
+   unbekannt“ nicht verwechselt werden.
 2. **Bereits erfolgreich in dieser Sitzung.** Dasselbe Profil ist zuvor in
    derselben Sitzung schon einmal erfolgreich gelaufen (sitzungsgebunden,
    unabhängig vom Fingerprint verfolgt — anders als der Ledger, der bei

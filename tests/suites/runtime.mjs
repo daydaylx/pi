@@ -1262,6 +1262,25 @@ export const runtimeSections = {
     await section("check-baseline diagnostics", async () => {
       const baseline = await load("extensions/setup-core/check-baseline.ts");
 
+      // Snapshot unavailable (undefined) must not collapse into "clean
+      // workspace" (empty array) — they are different states. A caller
+      // that could not collect a snapshot at all (e.g. no git repository)
+      // has no baseline whatsoever, not evidence the workspace is clean.
+      const snapshotUnavailable = baseline.classifyCheckFailure(
+        "tests/example.test.ts:12 assertion failed",
+        undefined,
+        false,
+      );
+      eq(
+        snapshotUnavailable.classification,
+        "unknown",
+        "an unavailable snapshot is unknown, not pre_existing",
+      );
+      assert(
+        !("pathRelation" in snapshotUnavailable),
+        "the undefined-snapshot case is checked before path-matching runs at all",
+      );
+
       // No workspace changes at all: the workspace is defined as matching
       // HEAD exactly (collectWorkspaceSnapshot's changedFiles is empty).
       // That is a real, tautological baseline — a failure cannot have been

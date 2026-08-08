@@ -13,7 +13,11 @@
  * 1. The workspace exactly matches HEAD (no staged/unstaged/untracked
  *    changes at all). A failure here cannot have been introduced by this
  *    session — there is nothing to have introduced it. Tautological, not a
- *    heuristic.
+ *    heuristic. Distinct from — and only checked once — a workspace
+ *    snapshot was actually collected: a caller that could not collect one
+ *    at all (e.g. not a git repository, or the git call failed) passes
+ *    `undefined`, which must not be conflated with "collected and empty."
+ *    That is its own, unrelated `unknown`, checked first.
  * 2. This exact profile has already been observed passing earlier in the
  *    same session (tracked by the caller across project_check calls). If it
  *    passed once and now fails, that is a real, recorded regression — not a
@@ -83,17 +87,27 @@ function describePathRelation(
 /**
  * @param output the failed profile's captured output (for the `unknown`
  *   case's descriptive pathRelation hint only).
- * @param changedFiles the current workspace snapshot's changed files. An
- *   empty array is itself baseline #1 above (workspace matches HEAD).
+ * @param changedFiles the current workspace snapshot's changed files, or
+ *   `undefined` if no snapshot could be collected at all. `undefined` and
+ *   `[]` are different states — see module doc comment — and must not be
+ *   conflated by the caller (e.g. via `?? []`). An empty array is itself
+ *   baseline #1 above (workspace matches HEAD).
  * @param hasPassedThisSession whether this exact profile id has already
  *   been recorded succeeding earlier in the current session (baseline #2
  *   above) — the caller tracks this across project_check calls.
  */
 export function classifyCheckFailure(
   output: string,
-  changedFiles: readonly string[],
+  changedFiles: readonly string[] | undefined,
   hasPassedThisSession: boolean,
 ): BaselineDiagnostic {
+  if (changedFiles === undefined) {
+    return {
+      classification: "unknown",
+      reason:
+        "Workspace-Snapshot konnte nicht ermittelt werden — keine belastbare Baseline.",
+    };
+  }
   if (changedFiles.length === 0) {
     return {
       classification: "pre_existing",

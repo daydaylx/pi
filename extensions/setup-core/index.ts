@@ -350,7 +350,7 @@ export default function setupCore(pi: ExtensionAPI): void {
             : {
                 baseline: classifyCheckFailure(
                   result.output,
-                  checkSnapshot?.changedFiles ?? [],
+                  checkSnapshot?.changedFiles,
                   passedProfileIds.has(profileId),
                 ),
               }),
