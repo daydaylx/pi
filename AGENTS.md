@@ -50,6 +50,13 @@ Triviale Teilaufgaben bleiben beim Hauptagenten.
 - **Unbekannter, intermittierender oder gescheiterter Bug:** `debugger` für
   Reproduktion und Hypothesentests.
 - **Unabhängige Prüfung nach nichttrivialer Implementierung:** `verifier`.
+  Konkrete Signale für „nichttrivial" (mindestens eines reicht, keine
+  Pflichtprüfung): mehrere Dateien oder mehrere Anforderungen/Akzeptanz-
+  kriterien betroffen, Regressionsrisiko in geteiltem oder kritischem Code,
+  Änderungen an Permission-, Workflow- oder Statuslogik, Änderungen an
+  öffentlicher API, Schema oder Konfiguration, hoher Blast-Radius, oder Fälle,
+  in denen bestehende Tests allein die Anforderung nicht belegen. Triviale,
+  klar lokalisierte Änderungen brauchen weiterhin keinen `verifier`.
 
 Planung, Umsetzung, Triage und finale Nutzerkommunikation bleiben beim
 Hauptagenten. Es gibt keine automatische Pflichtdelegation und keine
