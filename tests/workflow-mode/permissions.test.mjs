@@ -234,6 +234,9 @@ await test("planModeBashGuard allows ordinary diagnostics (test/typecheck/lint/v
     "npm run lint",
     "npm run verify",
     "npm run build",
+    "npm run test:coverage",
+    "npm ls",
+    "npm outdated",
     "tsc --noEmit",
     "eslint .",
     "git status",
@@ -245,6 +248,27 @@ await test("planModeBashGuard allows ordinary diagnostics (test/typecheck/lint/v
     assert(
       !bash(command).blocked,
       `${command} is a legitimate diagnostic and must pass during planning`,
+    );
+  }
+});
+
+await test("planModeBashGuard rejects npm run <arbitrary script> and non-diagnostic bare aliases", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "detailed_plan" };
+  const bash = (command) =>
+    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  for (const command of [
+    "npm run generate",
+    "npm run foo",
+    "npm run deploy",
+    "npm start",
+    "npm run lint:fix",
+    "npm run format:write",
+  ]) {
+    assert(
+      bash(command).blocked,
+      `${command} invokes an arbitrary or mutating project script and must stay blocked — an unrecognized npm run <script> is not provably diagnostic just because it isn't a known package-manager mutation`,
     );
   }
 });

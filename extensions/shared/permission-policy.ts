@@ -939,11 +939,8 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
 }
 
 // npm/pnpm/yarn subcommands that mutate the package tree, the registry, an
-// account, or local config/cache — as opposed to `run`/`test`/`start` and
-// bare script names, which just invoke whatever the package.json script
-// does (typically a diagnostic: test, typecheck, lint, build). Deliberately
-// a blocklist, not an allowlist: Plan Mode's bash guard trusts scripts by
-// default and only refuses recognizably mutating package-manager verbs.
+// account, or local config/cache. Checked first and unconditionally
+// blocked, regardless of anything below.
 const PLAN_MODE_MUTATING_PACKAGE_SUBCOMMANDS = new Set([
   "install",
   "i",
@@ -985,11 +982,86 @@ const PLAN_MODE_MUTATING_PACKAGE_SUBCOMMANDS = new Set([
   "x",
 ]);
 
+// npm's own built-in read/introspection subcommands: they never execute a
+// project-defined script, so — unlike `run`/bare-subcommand aliases below —
+// there is no script name to vet. Safe regardless of what the project
+// happens to be named or contains.
+const NPM_BUILTIN_READ_SUBCOMMANDS = new Set([
+  "list",
+  "ls",
+  "view",
+  "info",
+  "search",
+  "outdated",
+  "ping",
+  "whoami",
+  "root",
+  "prefix",
+  "explain",
+  "fund",
+  "doctor",
+]);
+
+// Category prefixes a package.json script name must start with (optionally
+// followed by `:`/`-`/`_` and a sub-namespace, e.g. `test:coverage`) to be
+// treated as diagnostic. Deliberately a short list of conventional
+// categories, not an attempt to enumerate every real project's script
+// names — an unrecognized name is refused, not guessed at.
+const DIAGNOSTIC_SCRIPT_NAME_PREFIXES = [
+  "test",
+  "typecheck",
+  "type-check",
+  "types",
+  "lint",
+  "check",
+  "verify",
+  "coverage",
+  "audit",
+  "build",
+];
+
+// Vetoes an otherwise-matching diagnostic prefix: catches the mutating
+// variant of a diagnostic-sounding name (`lint:fix`, `format:write`,
+// `eslint-fix`) that would otherwise pass the prefix check below.
+const NON_DIAGNOSTIC_SCRIPT_NAME_MARKER = /(?:^|[:_-])(?:fix|write)(?:$|[:_-])/i;
+
+/**
+ * Is this package.json script name provably diagnostic — the same bar
+ * "Tests, Typecheck, Lint (ohne --fix), Builds" from the brief holds any
+ * other command to — rather than an arbitrary, potentially destructive
+ * project-defined script (`generate`, `deploy`, a custom `npm foo` alias)?
+ * A script this permissive check refuses can still run through
+ * `project_check` against `.pi/verify.json`, which is the actual place to
+ * declare a project's own trusted checks — this is only Plan Mode's bash
+ * guard deciding what to trust *without* that declaration.
+ */
+function isDiagnosticScriptName(name: string | undefined): boolean {
+  if (!name) return false;
+  const normalized = name.toLowerCase();
+  if (NON_DIAGNOSTIC_SCRIPT_NAME_MARKER.test(normalized)) return false;
+  return DIAGNOSTIC_SCRIPT_NAME_PREFIXES.some(
+    (prefix) =>
+      normalized === prefix ||
+      normalized.startsWith(`${prefix}:`) ||
+      normalized.startsWith(`${prefix}-`) ||
+      normalized.startsWith(`${prefix}_`),
+  );
+}
+
 function isPlanModeSafePackageManagerCommand(tokens: string[]): boolean {
   const subcommand = tokens[1]?.toLowerCase();
   if (!subcommand) return true; // bare `npm`/`pnpm`/`yarn` just prints help
+  if (PLAN_MODE_MUTATING_PACKAGE_SUBCOMMANDS.has(subcommand)) return false;
   if (subcommand === "audit") return !hasAnyOption(tokens, [/^--fix(?:=|$)/i]);
-  return !PLAN_MODE_MUTATING_PACKAGE_SUBCOMMANDS.has(subcommand);
+  if (NPM_BUILTIN_READ_SUBCOMMANDS.has(subcommand)) return true;
+  if (subcommand === "run" || subcommand === "run-script") {
+    return isDiagnosticScriptName(tokens[2]);
+  }
+  // Any other bare subcommand doubles as a package.json script name under
+  // npm/pnpm/yarn's lifecycle-alias convention (`npm test`, `npm start`, or
+  // a custom `npm foo`) — not provably diagnostic just because it isn't a
+  // recognized package-manager verb; held to the same bar as `run` above.
+  return isDiagnosticScriptName(subcommand);
 }
 
 // A narrower, non-pager-obsessed read-only git surface than isSafeGit above:

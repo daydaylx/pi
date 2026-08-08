@@ -55,10 +55,15 @@ Zusätzlich gilt bei `project-write` und `confirm-all` während `simple_plan`
 oder `detailed_plan` ein technischer Mutationsschutz für den Agenten:
 Schreibzugriffe außerhalb der Plandatei werden verweigert, und Bash-Kommandos
 des Agenten müssen nachweislich Diagnose statt Mutation sein — Tests,
-Typecheck, Lint ohne `--fix`, Builds, `npm`/`pnpm`/`yarn run`/`test`/beliebige
-Skripte und `git status`/`diff`/`show`/`log` bleiben erlaubt, `rm`/`cp`/`mv`/
-`sed -i`/Redirection, `npm install`/`update`/`publish`, `eslint --fix` und
-mutierende `git`-Kommandos bleiben blockiert. `readonly` selbst ist
+Typecheck, Lint ohne `--fix`, Builds und `git status`/`diff`/`show`/`log`
+bleiben erlaubt. `npm`/`pnpm`/`yarn run`/`test`/bare Aliase gelten nur als
+Diagnose, wenn der Skriptname nach einer bekannten Kategorie aussieht
+(`test`, `typecheck`, `lint`, `check`, `verify`, `coverage`, `audit`,
+`build`, ggf. namensraum-erweitert, ohne `fix`/`write`-Marker) — ein
+unbekannter Skriptname wie `npm run generate` oder `npm start` gilt nicht
+automatisch als Diagnose. `rm`/`cp`/`mv`/`sed -i`/Redirection,
+`npm install`/`update`/`publish`, `eslint --fix` und mutierende
+`git`-Kommandos bleiben blockiert. `readonly` selbst ist
 unverändert vollständig gesperrt; `yolo` bleibt bewusst unangetastet, weil
 seine Wahl selbst die explizite Aufhebung der Standard-Sicherheit ist. Ein
 vom Menschen selbst per `!`/`!!` eingegebener Bash-Befehl durchläuft diesen

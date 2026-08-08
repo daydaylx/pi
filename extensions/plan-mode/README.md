@@ -40,8 +40,15 @@ während `simple_plan` oder `detailed_plan` jeden Schreibzugriff außerhalb der
 Plandatei und jedes Bash-Kommando des Agenten, das nicht nachweislich eine
 Diagnose ist. Für Bash ist das eine eigene, bewusst großzügigere Klassifikation
 (`isPlanModeDiagnosticCommand`) als `readonly`s Allowlist: Tests, Typecheck,
-Lint ohne `--fix`, Builds, `npm`/`pnpm`/`yarn run`/`test`/beliebige
-Skriptnamen sowie `git status`/`diff`/`show`/`log` sind erlaubt; echte
+Lint ohne `--fix`, Builds sowie `git status`/`diff`/`show`/`log` sind
+erlaubt. Für `npm`/`pnpm`/`yarn run`/`test`/bare Skript-Aliase gilt das nur,
+wenn der Skriptname selbst nach einer der bekannten Diagnose-Kategorien
+aussieht (`test`, `typecheck`, `lint`, `check`, `verify`, `coverage`,
+`audit`, `build`, optional mit `:`/`-`-Namensraum wie `test:coverage`, ohne
+einen `fix`/`write`-Marker wie in `lint:fix`) — ein beliebiger, unbekannter
+Skriptname (`npm run generate`, `npm start`, eigene Aliase) gilt nicht als
+nachweislich diagnostisch und bleibt blockiert; projekteigene, bewusst
+vertrauenswürdige Prüfungen laufen dafür über `project_check`. Echte
 Mutationen (`rm`/`cp`/`mv`/`mkdir`/`touch`/`sed -i`/Redirection, `npm
 install`/`update`/`ci`/`publish`/`exec`, `eslint --fix`, `git commit`/`push`/
 `add`/`checkout`/`reset`/`clean`/`merge`/…) bleiben blockiert. `readonly`
