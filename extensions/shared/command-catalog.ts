@@ -151,7 +151,7 @@ const definitions = [
   [
     "thinking",
     "Denktiefe",
-    "Automatische oder manuelle Denktiefe wählen",
+    "Denktiefe manuell wählen",
     "models",
     undefined,
     "Super+D",

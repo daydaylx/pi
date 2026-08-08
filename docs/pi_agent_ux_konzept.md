@@ -35,10 +35,15 @@ registriert.
 Die Anzeige enthält Registry-Status, Kontextfenster, Output-Limit, Preisraten
 und vorhandenen Kontextverbrauch.
 
-`Super+D` bietet Auto sowie die vom aktiven Modell unterstützten Thinking-Stufen
-einschließlich `Off`. Im Auto-Modus folgt die Denktiefe dem Workflow; eine
-manuell gewählte Stufe bleibt unangetastet. Eine separate Status-Telemetrie-
-Ansicht gibt es nicht mehr — der Status steht in der Fußzeile.
+`Super+D` bietet die vom aktiven Modell unterstützten Thinking-Stufen
+einschließlich `Off`, ausschließlich manuell wählbar. Eine automatische,
+workflowabhängige Vorauswahl gibt es zur Laufzeit nicht. Eine frühere
+`detailed_plan → high`-Zuordnung (`extensions/plan-mode/events.ts`) reagierte
+auf ein Event, für das weder dieses Repository noch das installierte
+`@earendil-works/pi-coding-agent`-Paket (geprüft im installierten
+`node_modules`) einen Sender besaßen — bestätigt toter Code ohne Consumer,
+inzwischen entfernt. Eine separate Status-Telemetrie-Ansicht gibt es nicht
+mehr — der Status steht in der Fußzeile.
 
 ## Skills und Konfiguration
 

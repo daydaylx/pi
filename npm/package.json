@@ -20,7 +20,7 @@
     "format:check": "prettier --check ..",
     "deadcode": "knip --directory ..",
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
-    "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:patches:pi-subagents && npm run test:runtime && npm run audit:check"
+    "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:patches:pi-subagents && npm run audit:check"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",

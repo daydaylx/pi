@@ -12,6 +12,7 @@ import {
   assessBash,
   assessWorkflowTool,
   automaticallyAllowedInPlanMode,
+  planModeMutationGuard,
 } from "./workflow-policy.ts";
 import { toolPath } from "./tool-event.ts";
 
@@ -50,6 +51,16 @@ export function registerPermissionGuards(
     }
     if (automaticallyAllowedInPlanMode(workflow, event, ctx.cwd)) return;
 
+    const planGuard = planModeMutationGuard(
+      workflow,
+      session.level(),
+      event,
+      ctx.cwd,
+    );
+    if (planGuard.blocked) {
+      return { block: true, reason: planGuard.reason };
+    }
+
     const decision = decideTool(
       session.level(),
       event,
@@ -72,6 +83,15 @@ export function registerPermissionGuards(
     }
   });
 
+  // user_bash fires only for a `!`/`!!`-prefixed command the human types
+  // directly (see @earendil-works/pi-coding-agent's UserBashEvent doc
+  // comment) — never for the agent's own `bash` tool calls, which go
+  // through tool_call above. The hard boundaries (assessBash) and the
+  // chosen permission level (decideBash) still apply, same as any other
+  // mode; planModeMutationGuard/planModeBashGuard deliberately do not run
+  // here — Plan Mode exists to keep the agent from quietly implementing
+  // during a planning turn, not to restrict what the operator types at
+  // their own keyboard.
   pi.on("user_bash", async (event, ctx: ExtensionContext) => {
     if (!ctx.isProjectTrusted()) {
       return {

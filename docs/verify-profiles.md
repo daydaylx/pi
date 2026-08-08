@@ -47,12 +47,52 @@ bleibt der Status bei Änderungen `checks_unavailable`; es gibt weder einen
 automatischen Testlauf noch eine Completion- oder Planphase. Die Anzeige kann
 über `verificationStatus.enabled` in der Setup-Konfiguration deaktiviert werden.
 
+Nur ein `project_check`-Aufruf des deklarierten Pflichtprofils aktualisiert
+diesen Status. Ein direkter `bash`-Lauf des gleichen Befehls — auch über den
+separaten `verify`-Tool oder aus einem Subagenten heraus (`verifier` besitzt
+kein `project_check`) — lässt den Footer bei `changed_unverified` stehen,
+selbst wenn der Lauf lokal grün war. Das ist keine Ungenauigkeit, sondern
+Konsequenz aus „Akkumulation nur bei identischem Snapshot" unten: nur
+`project_check` schreibt in den Ledger.
+
 Pro Profil enthält das Ergebnis Profil-ID, redigiertes Programm und Argumente,
 relatives Arbeitsverzeichnis, Klassifikation, Start- und Endzeit, Exit-Code,
 Dauer, Status und begrenzte relevante Ausgabe. `advisory`-Befunde machen den
 Tool-Aufruf nicht fehlerhaft; bei `recommended` bleibt ein fehlendes Binary als
 sichtbares Restrisiko erhalten. Ungültige, fehlende oder in nicht vertrauten
 Projekten liegende Profile werden nicht ausgeführt.
+
+Ein fehlgeschlagenes Profil trägt zusätzlich ein optionales `baseline`-Feld
+(`extensions/setup-core/check-baseline.ts`) mit einer Klassifikation
+`introduced` / `pre_existing` / `unknown`. Es beeinflusst
+`verified`/`changed_unverified`/`checks_failed` nicht — reine Evidenz, kein
+zweiter Lauf gegen einen sauberen Stand, keine Worktrees, kein Stash.
+
+`introduced` und `pre_existing` werden ausschließlich vergeben, wenn eine
+echte Vergleichsbasis vorliegt — nicht aus einem Abgleich referenzierter
+Dateipfade gegen den Diff (das beweist keine Kausalität: ein Pfad kann Teil
+der Änderung sein und der Fehler trotzdem vorbestehend sein, oder umgekehrt).
+Zwei Fälle liefern eine echte Basis, beide bereits vorhanden, ohne neuen Lauf:
+
+1. **Kein Workspace-Change.** Definition: `changedFiles` des
+   Workspace-Snapshots ist leer — der Workspace entspricht exakt `HEAD`
+   (keine staged, unstaged oder untracked Änderungen). Das ist tautologisch:
+   ohne jede Änderung kann die aktuelle Sitzung nichts eingeführt haben →
+   `pre_existing`.
+2. **Bereits erfolgreich in dieser Sitzung.** Dasselbe Profil ist zuvor in
+   derselben Sitzung schon einmal erfolgreich gelaufen (sitzungsgebunden,
+   unabhängig vom Fingerprint verfolgt — anders als der Ledger, der bei
+   jedem Fingerprint-Wechsel verwirft) und schlägt jetzt fehl → `introduced`,
+   eine belegte Regression, keine Vermutung.
+
+Liegt keiner der beiden Fälle vor, ist `unknown` die ehrliche Antwort. Dabei
+trägt das Ergebnis zusätzlich ein rein beschreibendes, nicht-kausales
+`pathRelation`-Feld (`all_paths_changed` / `no_paths_changed` / `mixed` /
+`no_paths_found`) als Hinweis, wo in der Ausgabe referenzierte Pfade relativ
+zum Diff liegen — ein Hinweis für die weitere Suche, niemals eine
+Klassifikation für sich. Ein verlässlicherer, teurerer Vergleich (Check
+erneut gegen `HEAD`/einen Stash laufen lassen) existiert bewusst nicht als
+Automatik — bei Bedarf manuell.
 
 ## Was `verified` bedeutet
 

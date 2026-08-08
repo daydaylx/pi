@@ -5,7 +5,6 @@ import {
   isAuroraUiStateRequest,
   publishAuroraUiSnapshot,
 } from "../aurora-ui/state.ts";
-import { CONTROL_CENTER_EVENTS } from "../shared/control-center-events.ts";
 import {
   WORKFLOW_CAPABILITY_EVENTS,
   type WorkflowCapabilityRequest,
@@ -33,17 +32,6 @@ export function registerPlanEvents(
   pi.events.on(WORKFLOW_CAPABILITY_EVENTS.request, (value) => {
     const request = value as Partial<WorkflowCapabilityRequest>;
     request.respond?.({ mode: session.selectedMode });
-  });
-  pi.events.on(CONTROL_CENTER_EVENTS.workflowThinkingDefault, (value) => {
-    (
-      value as {
-        respond?: (result: { mode: string; defaultLevel: string }) => void;
-      }
-    ).respond?.({
-      mode: session.selectedMode,
-      defaultLevel:
-        session.selectedMode === "detailed_plan" ? "high" : "medium",
-    });
   });
   pi.on("before_agent_start", async () => {
     const content = isPlanningMode(session.selectedMode)
