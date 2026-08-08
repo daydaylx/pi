@@ -37,11 +37,13 @@ und vorhandenen Kontextverbrauch.
 
 `Super+D` bietet die vom aktiven Modell unterstützten Thinking-Stufen
 einschließlich `Off`, ausschließlich manuell wählbar. Eine automatische,
-workflowabhängige Vorauswahl gibt es zur Laufzeit nicht (mehr) — die
-Zuordnung `detailed_plan → high` existiert nur als Reaktion auf ein Ereignis
-ohne bestätigten Absender in diesem Repository und wird nirgends angewendet
-(siehe `extensions/plan-mode/events.ts`). Eine separate Status-Telemetrie-
-Ansicht gibt es nicht mehr — der Status steht in der Fußzeile.
+workflowabhängige Vorauswahl gibt es zur Laufzeit nicht. Eine frühere
+`detailed_plan → high`-Zuordnung (`extensions/plan-mode/events.ts`) reagierte
+auf ein Event, für das weder dieses Repository noch das installierte
+`@earendil-works/pi-coding-agent`-Paket (geprüft im installierten
+`node_modules`) einen Sender besaßen — bestätigt toter Code ohne Consumer,
+inzwischen entfernt. Eine separate Status-Telemetrie-Ansicht gibt es nicht
+mehr — der Status steht in der Fußzeile.
 
 ## Skills und Konfiguration
 
