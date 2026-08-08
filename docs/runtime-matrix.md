@@ -1,18 +1,18 @@
 # Runtime-Matrix
 
-| Komponente          | Gepinnte Version / Wert                                          | Verifikation                                                         |
-| ------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Pi-Runtime          | `0.84.0`                                                         | installiertes globales Paket und `pi --version`                      |
-| Pi-Dev-Abhängigkeit | `0.84.0`                                                         | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
-| Node.js             | `22.22.2`                                                        | `node --version`                                                     |
-| npm                 | `10.9.7`                                                         | `npm --version`                                                      |
-| Aurora UI           | lokales TypeScript                                               | Typecheck, Lifecycle- und responsive Render-Tests                    |
-| Aurora-Theme        | lokales `aurora-night`                                           | Truecolor- und 256-Farb-Theme-Laden                                  |
-| Planmodus           | lokales TypeScript                                               | Modus-, Prompt- und Permission-Grant-Tests                           |
-| LSP                 | lokales TypeScript                                               | Fake-Server-Transport-, Dokument- und Tool-Suiten                    |
-| pi-subagents        | `daydaylx/pi-subagents@dd716cfc8c3a9b0ee35632752ac2b1736cd7de61` | exakter Laufzeitpaket-Pin                                            |
-| Betriebssystem      | Linux                                                            | CI und lokale Verifikation                                           |
-| Terminals           | schmales, normales und breites Layout                            | responsive UI-Harness                                                |
+| Komponente          | Gepinnte Version / Wert               | Verifikation                                                         |
+| ------------------- | ------------------------------------- | -------------------------------------------------------------------- |
+| Pi-Runtime          | `0.84.0`                              | installiertes globales Paket und `pi --version`                      |
+| Pi-Dev-Abhängigkeit | `0.84.0`                              | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
+| Node.js             | `22.22.2`                             | `node --version`                                                     |
+| npm                 | `10.9.7`                              | `npm --version`                                                      |
+| Aurora UI           | lokales TypeScript                    | Typecheck, Lifecycle- und responsive Render-Tests                    |
+| Aurora-Theme        | lokales `aurora-night`                | Truecolor- und 256-Farb-Theme-Laden                                  |
+| Planmodus           | lokales TypeScript                    | Modus-, Prompt- und Permission-Grant-Tests                           |
+| LSP                 | lokales TypeScript                    | Fake-Server-Transport-, Dokument- und Tool-Suiten                    |
+| pi-subagents        | siehe `settings.json` (`packages`)    | exakter Laufzeitpaket-Pin                                            |
+| Betriebssystem      | Linux                                 | CI und lokale Verifikation                                           |
+| Terminals           | schmales, normales und breites Layout | responsive UI-Harness                                                |
 
 ## Release-Gate
 

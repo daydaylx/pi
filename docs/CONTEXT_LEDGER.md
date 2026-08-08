@@ -7,8 +7,6 @@
   und Tool-/Kontextqualität.
 - Independent Verifier, Modellrouting, Compaction und Planmodus-Anomalien
   bleiben datengetriebene Experimente und sind keine Standardautomatik.
-- Keine Abhängigkeiten, Commits, Pushes oder Veröffentlichungen ohne
-  ausdrücklichen Nutzerauftrag.
 
 ## Architekturentscheidungen
 
@@ -27,6 +25,10 @@
   Workspace-Snapshot gebunden und rein technisch. Er erscheint dedupliziert
   bei `agent_settled`, ist abschaltbar und nutzt weder `agent_end` als
   Erledigung noch Heuristiken als `blocked`.
+- Aurora ist alleiniger Besitzer der TUI-Chrome inklusive Fußzeile
+  (`docs/decisions/007`, `docs/decisions/009`).
+- Es gibt genau drei aktive Subagentenrollen — `investigator`, `debugger`,
+  `verifier` (`docs/decisions/011`).
 
 ## Nicht-Ziele
 
@@ -59,9 +61,8 @@
 
 ## Wichtige Projektregeln
 
-- Bestehende Nutzeränderungen werden nicht überschrieben.
-- Änderungen bleiben auf den konkreten Auftrag begrenzt; breite Refactorings
-  und Formatierungen bleiben aus.
+- Schutzregeln zu Nutzeränderungen, Auftragsscope, Commits/Pushes: siehe
+  `AGENTS.md`.
 - Nach relevanten Änderungen läuft `npm --prefix npm run verify`.
 
 ## Aktuelle Prioritäten
