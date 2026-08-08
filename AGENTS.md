@@ -9,7 +9,7 @@ Diese Regeln gelten für alle Pi-Sitzungen.
 - Änderungen auf den konkreten Auftrag begrenzen; keine breiten Refactorings, Umbenennungen oder Formatierungen ohne Auftrag.
 - Bestehende, nicht zum Auftrag gehörende Nutzeränderungen erhalten.
 - Secrets, Zugangsdaten, Auth-Dateien, Umgebungsvariablen und SSH-Schlüssel weder offenlegen noch in Reports oder Versionskontrolle übernehmen.
-- Änderungen mit relevanten Tests und statischen Prüfungen verifizieren; Fehler und nicht ausführbare Prüfungen ausdrücklich nennen.
+- Änderungen mit relevanten Tests und statischen Prüfungen verifizieren; Fehler und nicht ausführbare Prüfungen ausdrücklich nennen. Für das deklarierte Pflichtprofil ist `project_check({ profile: "verify" })` der kanonische Weg — nur dieser Tool-Aufruf aktualisiert den Verifikations-Footer/-Ledger. Ein direkter `bash`-Lauf von `npm run verify` (oder gleichwertig) bleibt technisch möglich (z. B. zum Debuggen einzelner Schritte), zählt aber nicht als durchgeführte Verifikation im Footer-Sinn — siehe `docs/verify-profiles.md`.
 - Den aktiven Workflow- und Permission-Modus respektieren. Diese Datei erzwingt keinen zusätzlichen Planmodus.
 
 ## Kontextdisziplin
