@@ -15,6 +15,12 @@ wird jetzt tatsächlich in der Aurora-Footer gezeichnet — bisher wurde er
 berechnet und verworfen. `.pi/verify.json` in diesem Repo deklariert genau ein
 Pflichtprofil, das an `npm run verify` delegiert.
 
+`evaluateCheckRun` wurde danach (Commit `0429e71`) noch einmal geschärft: ein
+verschwundenes Binary bei einem bestätigten `recommended`-Fehlschlag setzt
+zwar keinen neuen Block, darf den bestehenden aber auch nicht mehr
+stillschweigend wegräumen — sonst hätte ein deinstalliertes Werkzeug
+`checks_failed` unbemerkt wieder zu `verified` gemacht.
+
 Die Umsetzung von `pi-harness-hardening-v2` hat mit der gemeinsamen
 Workspace-Snapshot-Basis begonnen. Neu ist
 `benchmarks/harness/workspace-snapshot.mjs`: P4 und der allgemeine
@@ -38,9 +44,25 @@ abschaltbar, dedupliziert, wird nur in interaktiven Oberflächen angezeigt und
 führt nie automatisch einen Check aus. Der erfolgreiche Required-Check wird
 an den vor seiner Ausführung erfassten Snapshot gebunden.
 
-Die vollständige Prüfung `npm --prefix npm run verify` lief erfolgreich; sie
-umfasste Formatierung, Typecheck, Dead-Code-Prüfung, alle Test-Suites,
-Runtime-Patches und Audit.
+Die vollständige Prüfung `npm --prefix npm run verify` lief zu diesem
+Zeitpunkt nur **lokal** erfolgreich — nicht CI-bestätigt. Tatsächlich war die
+CI-Pflichtprüfung zu dieser Zeit auf jedem Lauf rot: ein standardmäßig
+flacher Checkout (`fetch-depth: 1`) konnte den in
+`benchmarks/harness/p4-manifest.json` gepinnten Referenz-Commit nicht
+erreichen, wodurch `test:coverage` (und damit alles Nachfolgende in der
+`&&`-Kette) auf jedem Push scheiterte, unabhängig von echter Codequalität.
+Das „Quality-First Hardening"-Pass hat das behoben (`fetch-depth: 0` in
+`.github/workflows/verify.yml`) und zusätzlich `test:runtime` — das eine
+lokal gepatchte Runtime unter einem entwicklerspezifischen Pfad prüft — aus
+der `verify`-Kette entfernt, damit ein CI-grüner Lauf tatsächlich etwas über
+den Code aussagt statt über eine einzelne Maschine.
+
+Derselbe Hardening-Pass hat außerdem einen technischen
+Planmodus-Mutationsschutz ergänzt (`docs/decisions/012`), einen rein
+diagnostischen `introduced`/`pre_existing`/`unknown`-Klassifikator für
+fehlgeschlagene Checks (`extensions/setup-core/check-baseline.ts`) sowie den
+dokumentierten Zusammenhang zwischen `project_check` und dem
+Verifikations-Footer geschärft (`docs/verify-profiles.md`).
 
 Vorhandene, nicht zu dieser Arbeit gehörende Änderungen in Runtime-Doku,
 Runtime-Patches, Settings und Runtime-Tests wurden nicht verändert.

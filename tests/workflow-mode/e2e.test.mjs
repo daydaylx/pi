@@ -185,9 +185,9 @@ await test("Fall D: /workflow (Shift+Tab) performs exactly the same central acti
   }
 });
 
-await test("Fall E: Soft Plan Mode — the plan file bypass is independent of the permission level", async () => {
+await test("Fall E: Plan Mode mutation guard — technical enforcement at project-write/confirm-all, plan file always writable, YOLO bypasses", async () => {
   if (!planMode || !modePermissions) return;
-  const cwd = mkdtempSync(join(tmpdir(), "pi-soft-plan-mode-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-plan-mode-guard-"));
   try {
     const harness = createHarness();
     planMode.default(harness.api);
@@ -209,7 +209,31 @@ await test("Fall E: Soft Plan Mode — the plan file bypass is independent of th
       "plan file writes are auto-allowed under project-write",
     );
 
-    // project-write: an ordinary project write is unaffected by the planning mode.
+    // project-write: an ordinary project write is now technically blocked while planning.
+    result = await harness.runHooks(
+      "tool_call",
+      writeEvent("src/example.ts"),
+      ctx,
+    );
+    assert(
+      result.some((entry) => entry?.block),
+      "the plan-mode mutation guard blocks an ordinary write at project-write while planning",
+    );
+
+    // confirm-all: same technical guard applies.
+    await harness.commands.get("permission")("confirm-all", ctx);
+    result = await harness.runHooks(
+      "tool_call",
+      writeEvent("src/example.ts"),
+      ctx,
+    );
+    assert(
+      result.some((entry) => entry?.block),
+      "the plan-mode mutation guard also blocks an ordinary write at confirm-all while planning",
+    );
+
+    // YOLO: an explicit, deliberate override the plan guard does not second-guess.
+    await harness.commands.get("permission")("yolo", ctx);
     result = await harness.runHooks(
       "tool_call",
       writeEvent("src/example.ts"),
@@ -217,7 +241,7 @@ await test("Fall E: Soft Plan Mode — the plan file bypass is independent of th
     );
     assert(
       !result.some((entry) => entry?.block),
-      "an ordinary write follows the (permissive) project-write level",
+      "YOLO bypasses the plan-mode mutation guard",
     );
 
     // Switch to readonly: only the plan file keeps its automatic bypass.
@@ -240,7 +264,7 @@ await test("Fall E: Soft Plan Mode — the plan file bypass is independent of th
     );
     assert(
       result.some((entry) => entry?.block),
-      "readonly still blocks ordinary writes even in a planning mode: Plan Mode is not a read-only sandbox by itself",
+      "readonly still blocks ordinary writes even in a planning mode: readonly needs no separate guard handling",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

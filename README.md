@@ -49,13 +49,26 @@ verschachtelter Delegation sind Eigenschaften der drei Profil-Tools.
 
 Berechtigungen sind eine reine Stufenwahl über `/permission`: `readonly`,
 `project-write`, `confirm-all` und temporäres `yolo`. Gespeicherte
-Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe nicht.
-Plan Mode ist eine Agentenverhaltensanweisung und keine technische
-Read-only-Sandbox: technisch erzwungen ist allein die Plandatei als
-automatisch erlaubtes Schreibziel, alle anderen Schreibzugriffe folgen in
-jedem Modus derselben gewählten Berechtigungsstufe wie in Work. Wer im
-Planmodus eine echte Schreibsperre will, wählt `readonly` bewusst über
-`/permission`.
+Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe selbst
+nicht. Die Plandatei ist auf jeder Stufe automatisch erlaubtes Schreibziel.
+Zusätzlich gilt bei `project-write` und `confirm-all` während `simple_plan`
+oder `detailed_plan` ein technischer Mutationsschutz für den Agenten:
+Schreibzugriffe außerhalb der Plandatei werden verweigert, und Bash-Kommandos
+des Agenten müssen nachweislich Diagnose statt Mutation sein — Tests,
+Typecheck, Lint ohne `--fix`, Builds und `git status`/`diff`/`show`/`log`
+bleiben erlaubt. `npm`/`pnpm`/`yarn run`/`test`/bare Aliase gelten nur als
+Diagnose, wenn der Skriptname nach einer bekannten Kategorie aussieht
+(`test`, `typecheck`, `lint`, `check`, `verify`, `coverage`, `audit`,
+`build`, ggf. namensraum-erweitert, ohne `fix`/`write`-Marker) — ein
+unbekannter Skriptname wie `npm run generate` oder `npm start` gilt nicht
+automatisch als Diagnose. `rm`/`cp`/`mv`/`sed -i`/Redirection,
+`npm install`/`update`/`publish`, `eslint --fix` und mutierende
+`git`-Kommandos bleiben blockiert. `readonly` selbst ist
+unverändert vollständig gesperrt; `yolo` bleibt bewusst unangetastet, weil
+seine Wahl selbst die explizite Aufhebung der Standard-Sicherheit ist. Ein
+vom Menschen selbst per `!`/`!!` eingegebener Bash-Befehl durchläuft diesen
+Guard nicht — er schränkt nur den Agenten ein, nicht den Menschen an der
+eigenen Tastatur. Details: `docs/decisions/012-plan-mode-mutation-guard.md`.
 
 Harte Trust-, Secret-, Symlink-, Projekt- und Systemgrenzen bleiben auf jeder
 Stufe blockiert, YOLO eingeschlossen. Dazu zählen auch Ausführungspfade
@@ -73,6 +86,16 @@ npm --prefix npm run verify
 
 `verify` schließt seit dem Audit-Gate `npm run audit:check` ein — ein lokal
 grüner Lauf deckt damit dieselben Abhängigkeitsbefunde ab wie CI.
+
+Nur ein `project_check`-Aufruf des deklarierten Pflichtprofils (`verify`,
+siehe `.pi/verify.json`) aktualisiert den Verifikations-Footer. Ein direkter
+`bash`-Lauf derselben Befehle — auch über den `verify`-Tool oder aus einem
+Subagenten heraus — lässt den Footer bei `changed_unverified` stehen, selbst
+wenn der Lauf lokal grün war.
+
+`npm run test:runtime` (siehe „Lokale Laufzeitdaten" unten) ist bewusst kein
+Teil von `verify`/CI: es prüft die tatsächlich gestartete, lokal gepatchte
+Pi-Runtime unter `PI_RUNTIME_ROOT`, einem Pfad, den kein CI-Runner besitzt.
 
 Abhängigkeiten werden nicht automatisch installiert. Commits, Pushes und
 Veröffentlichungen erfolgen nur auf ausdrücklichen Auftrag.

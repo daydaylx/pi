@@ -28,11 +28,35 @@ werden ignoriert.
 
 ## Durchsetzung
 
-Der Kontext ist ein Prompt, keine Schreibsperre — Plan Mode ist eine
-Agentenverhaltensanweisung und keine technische Read-only-Sandbox: ein
-Moduswechsel ändert die Berechtigungsstufe nicht. Technisch erzwungen sind
-allein die Plandatei als automatisch erlaubtes Schreibziel
-(`automaticallyAllowedInPlanMode`) und die harten Secret-, System-, Symlink-
-und Trust-Grenzen, die in jedem Modus gelten. Wer eine echte Schreibsperre im
-Planmodus will, wählt die Stufe `readonly` bewusst über `/permission`. Das ist
-eine bewusste Komfortentscheidung.
+Der Kontext ist primär ein Prompt: ein Moduswechsel ändert die
+Berechtigungsstufe selbst nicht, und Plan Mode bleibt keine allgemeine
+Read-only-Sandbox. Technisch erzwungen sind die Plandatei als automatisch
+erlaubtes Schreibziel (`automaticallyAllowedInPlanMode`), die harten Secret-,
+System-, Symlink- und Trust-Grenzen, die in jedem Modus gelten — und
+zusätzlich ein Planmodus-Mutationsschutz (`planModeMutationGuard` /
+`planModeBashGuard` in `extensions/permissions/workflow-policy.ts`) für den
+Agenten: Bei den Stufen `project-write` und `confirm-all` verweigert er
+während `simple_plan` oder `detailed_plan` jeden Schreibzugriff außerhalb der
+Plandatei und jedes Bash-Kommando des Agenten, das nicht nachweislich eine
+Diagnose ist. Für Bash ist das eine eigene, bewusst großzügigere Klassifikation
+(`isPlanModeDiagnosticCommand`) als `readonly`s Allowlist: Tests, Typecheck,
+Lint ohne `--fix`, Builds sowie `git status`/`diff`/`show`/`log` sind
+erlaubt. Für `npm`/`pnpm`/`yarn run`/`test`/bare Skript-Aliase gilt das nur,
+wenn der Skriptname selbst nach einer der bekannten Diagnose-Kategorien
+aussieht (`test`, `typecheck`, `lint`, `check`, `verify`, `coverage`,
+`audit`, `build`, optional mit `:`/`-`-Namensraum wie `test:coverage`, ohne
+einen `fix`/`write`-Marker wie in `lint:fix`) — ein beliebiger, unbekannter
+Skriptname (`npm run generate`, `npm start`, eigene Aliase) gilt nicht als
+nachweislich diagnostisch und bleibt blockiert; projekteigene, bewusst
+vertrauenswürdige Prüfungen laufen dafür über `project_check`. Echte
+Mutationen (`rm`/`cp`/`mv`/`mkdir`/`touch`/`sed -i`/Redirection, `npm
+install`/`update`/`ci`/`publish`/`exec`, `eslint --fix`, `git commit`/`push`/
+`add`/`checkout`/`reset`/`clean`/`merge`/…) bleiben blockiert. `readonly`
+selbst braucht keine gesonderte Behandlung (schon vollständig gesperrt);
+`yolo` wird bewusst nicht angefasst, weil die Wahl von YOLO selbst eine
+explizite, eindeutige Aufhebung der Standard-Sicherheit ist. Der Guard läuft
+ausschließlich für den Agenten (`tool_call`, das `bash`-Tool) — ein vom
+Menschen selbst per `!`/`!!` eingegebener Befehl (`user_bash`) durchläuft ihn
+nicht, da Plan Mode den Agenten am impliziten Implementieren hindern soll,
+nicht den Menschen an der eigenen Tastatur einschränken. Details und
+Abwägung: `docs/decisions/012-plan-mode-mutation-guard.md`.

@@ -19,7 +19,7 @@ vollständig selbst, ohne das `subagent`-Tool zu verwenden."
 
 Lauf B — Anweisung im System-/Auftragstext ergänzt um: "Du darfst
 Teilaufgaben an Subagenten delegieren, wenn das sinnvoll ist (z. B. an
-`scout` für die Recherche)."
+`investigator` für die Recherche)."
 
 ## Referenzliste (vorab fixiert, vor dem ersten Lauf)
 
@@ -59,8 +59,8 @@ nicht beeinflussen.
 
 - Lauf A: Das `subagent`-Tool wird dennoch aufgerufen (Regelverstoß, Lauf
   ungültig, muss wiederholt werden).
-- Lauf B: Mehr als `maxSubagentSpawnsPerSession` (24, siehe
-  `docs/subagents.md`) werden ausgelöst.
+- Lauf B: Mehr als `maxSubagentSpawnsPerSession` (5, siehe
+  `extensions/subagent/config.json`) werden ausgelöst.
 
 ## Bewertungskriterien
 

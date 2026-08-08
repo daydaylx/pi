@@ -573,6 +573,40 @@ function trustedExecutableName(
   }
 }
 
+/**
+ * Executable-name extraction for Plan Mode's bash guard — deliberately not
+ * a filesystem/PATH trust check like trustedExecutableName. An earlier
+ * version tried resolving through PATH and requiring the real binary to
+ * live outside the project (mirroring trustedExecutableName's "outside a
+ * trusted root" check, just with a wider trusted area) — that broke on
+ * every ordinary setup: real npm/tsc/eslint commonly resolve through
+ * node_modules/.bin (legitimately inside the project — the standard way a
+ * project's own pinned devDependency versions run) or through a symlink to
+ * an internal implementation file (`npm` to `npm-cli.js`), so the check
+ * either rejected the exact in-project tool invocation the brief asks for
+ * or silently returned the wrong name to classify by.
+ *
+ * trustedExecutableName's PATH-hijack paranoia is the right call for
+ * `readonly`, a hard sandbox a user deliberately opts into, and stays
+ * completely unchanged there. Plan Mode's guard is a different thing: an
+ * accident-prevention layer on top of `project-write`/`confirm-all`, levels
+ * that already run arbitrary bash freely with no executable-trust
+ * verification at all outside this guard. Adding filesystem paranoia here
+ * raises the bar above the rest of that permission level for no real
+ * security gain (a renamed malicious binary placed early in PATH is an
+ * existing, accepted risk of running any bash command under project-write,
+ * on every permission level, in or out of Plan Mode) while breaking the
+ * exact commands this guard exists to allow. So: just classify by the
+ * literal token text, like the rest of this module's regex-based checks
+ * (PLAN_SIMPLE_COMMANDS, isWriteCapableCommand) already do — an executable
+ * name that doesn't match any recognized diagnostic tool still falls
+ * through to `false` (blocked) in isPlanModeDiagnosticSegment below.
+ */
+function diagnosticExecutableName(rawExecutable: string): string | undefined {
+  const name = rawExecutable.split(/[/\\]/).pop()?.toLowerCase();
+  return name || undefined;
+}
+
 function isSafeGit(tokens: string[], stdoutIsPiped: boolean): boolean {
   let subcommandIndex = 1;
   let pagerDisabled = stdoutIsPiped;
@@ -737,16 +771,15 @@ function isSafeSed(tokens: string[]): boolean {
   );
 }
 
-function isSafePlanSegment(
-  tokens: string[],
-  cwd: string,
-  stdoutIsPiped: boolean,
-): boolean {
-  const executable = trustedExecutableName(tokens[0], cwd);
-  if (!executable) return false;
-  if (tokens.some((token) => isSensitiveReference(token))) return false;
-  if (containsExternalPath(tokens, cwd)) return false;
-
+/**
+ * Per-tool classification shared by isSafePlanSegment (readonly, executable
+ * resolved via the strict system-root-only trustedExecutableName) and
+ * isPlanModeDiagnosticSegment's fallthrough (Plan Mode, executable taken
+ * from the literal command text via diagnosticExecutableName) — takes the
+ * already-resolved executable name so both callers share one body instead
+ * of two copies of the same tool-by-tool rules.
+ */
+function classifyToolSegment(executable: string, tokens: string[]): boolean {
   if (PLAN_SIMPLE_COMMANDS.has(executable)) {
     if (
       executable === "tree" &&
@@ -816,22 +849,8 @@ function isSafePlanSegment(
       /^-(?:delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/i,
     ]);
   }
-  if (executable === "sed") return isSafeSed(tokens);
-  if (executable === "git") return isSafeGit(tokens, stdoutIsPiped);
   if (executable === "node") {
     return tokens.length === 2 && ["-v", "--version"].includes(tokens[1]);
-  }
-  if (["npm", "pnpm", "yarn"].includes(executable)) {
-    if (tokens.length === 2 && ["-v", "--version"].includes(tokens[1])) {
-      return true;
-    }
-    const subcommand = tokens[1]?.toLowerCase();
-    if (subcommand === "audit") {
-      return !hasAnyOption(tokens, [/^--fix(?:=|$)/i]);
-    }
-    return ["list", "ls", "view", "info", "search", "outdated"].includes(
-      subcommand,
-    );
   }
   if (["python", "python3"].includes(executable)) {
     return tokens.length === 2 && tokens[1] === "--version";
@@ -882,6 +901,32 @@ function isSafePlanSegment(
   return false;
 }
 
+function isSafePlanSegment(
+  tokens: string[],
+  cwd: string,
+  stdoutIsPiped: boolean,
+): boolean {
+  const executable = trustedExecutableName(tokens[0], cwd);
+  if (!executable) return false;
+  if (tokens.some((token) => isSensitiveReference(token))) return false;
+  if (containsExternalPath(tokens, cwd)) return false;
+  if (executable === "sed") return isSafeSed(tokens);
+  if (executable === "git") return isSafeGit(tokens, stdoutIsPiped);
+  if (["npm", "pnpm", "yarn"].includes(executable)) {
+    if (tokens.length === 2 && ["-v", "--version"].includes(tokens[1])) {
+      return true;
+    }
+    const subcommand = tokens[1]?.toLowerCase();
+    if (subcommand === "audit") {
+      return !hasAnyOption(tokens, [/^--fix(?:=|$)/i]);
+    }
+    return ["list", "ls", "view", "info", "search", "outdated"].includes(
+      subcommand,
+    );
+  }
+  return classifyToolSegment(executable, tokens);
+}
+
 export function isPlanSafeCommand(command: string, cwd: string): boolean {
   if (containsUnquotedVariableExpansion(command)) return false;
   const parsed = parseReadOnlyShell(command);
@@ -890,6 +935,221 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
     parsed.segments.every((tokens, index) =>
       isSafePlanSegment(tokens, cwd, index < parsed.segments.length - 1),
     )
+  );
+}
+
+// npm/pnpm/yarn subcommands that mutate the package tree, the registry, an
+// account, or local config/cache. Checked first and unconditionally
+// blocked, regardless of anything below.
+const PLAN_MODE_MUTATING_PACKAGE_SUBCOMMANDS = new Set([
+  "install",
+  "i",
+  "add",
+  "ci",
+  "remove",
+  "rm",
+  "uninstall",
+  "un",
+  "update",
+  "up",
+  "upgrade",
+  "global",
+  "dlx",
+  "link",
+  "unlink",
+  "publish",
+  "unpublish",
+  "dedupe",
+  "prune",
+  "rebuild",
+  "pack",
+  "version",
+  "deprecate",
+  "owner",
+  "team",
+  "org",
+  "star",
+  "unstar",
+  "login",
+  "adduser",
+  "logout",
+  "token",
+  "init",
+  "set",
+  "config",
+  "cache",
+  "exec",
+  "x",
+]);
+
+// npm's own built-in read/introspection subcommands: they never execute a
+// project-defined script, so — unlike `run`/bare-subcommand aliases below —
+// there is no script name to vet. Safe regardless of what the project
+// happens to be named or contains.
+const NPM_BUILTIN_READ_SUBCOMMANDS = new Set([
+  "list",
+  "ls",
+  "view",
+  "info",
+  "search",
+  "outdated",
+  "ping",
+  "whoami",
+  "root",
+  "prefix",
+  "explain",
+  "fund",
+  "doctor",
+]);
+
+// Category prefixes a package.json script name must start with (optionally
+// followed by `:`/`-`/`_` and a sub-namespace, e.g. `test:coverage`) to be
+// treated as diagnostic. Deliberately a short list of conventional
+// categories, not an attempt to enumerate every real project's script
+// names — an unrecognized name is refused, not guessed at.
+const DIAGNOSTIC_SCRIPT_NAME_PREFIXES = [
+  "test",
+  "typecheck",
+  "type-check",
+  "types",
+  "lint",
+  "check",
+  "verify",
+  "coverage",
+  "audit",
+  "build",
+];
+
+// Vetoes an otherwise-matching diagnostic prefix: catches the mutating
+// variant of a diagnostic-sounding name (`lint:fix`, `format:write`,
+// `eslint-fix`) that would otherwise pass the prefix check below.
+const NON_DIAGNOSTIC_SCRIPT_NAME_MARKER = /(?:^|[:_-])(?:fix|write)(?:$|[:_-])/i;
+
+/**
+ * Is this package.json script name provably diagnostic — the same bar
+ * "Tests, Typecheck, Lint (ohne --fix), Builds" from the brief holds any
+ * other command to — rather than an arbitrary, potentially destructive
+ * project-defined script (`generate`, `deploy`, a custom `npm foo` alias)?
+ * A script this permissive check refuses can still run through
+ * `project_check` against `.pi/verify.json`, which is the actual place to
+ * declare a project's own trusted checks — this is only Plan Mode's bash
+ * guard deciding what to trust *without* that declaration.
+ */
+function isDiagnosticScriptName(name: string | undefined): boolean {
+  if (!name) return false;
+  const normalized = name.toLowerCase();
+  if (NON_DIAGNOSTIC_SCRIPT_NAME_MARKER.test(normalized)) return false;
+  return DIAGNOSTIC_SCRIPT_NAME_PREFIXES.some(
+    (prefix) =>
+      normalized === prefix ||
+      normalized.startsWith(`${prefix}:`) ||
+      normalized.startsWith(`${prefix}-`) ||
+      normalized.startsWith(`${prefix}_`),
+  );
+}
+
+function isPlanModeSafePackageManagerCommand(tokens: string[]): boolean {
+  const subcommand = tokens[1]?.toLowerCase();
+  if (!subcommand) return true; // bare `npm`/`pnpm`/`yarn` just prints help
+  if (PLAN_MODE_MUTATING_PACKAGE_SUBCOMMANDS.has(subcommand)) return false;
+  if (subcommand === "audit") return !hasAnyOption(tokens, [/^--fix(?:=|$)/i]);
+  if (NPM_BUILTIN_READ_SUBCOMMANDS.has(subcommand)) return true;
+  if (subcommand === "run" || subcommand === "run-script") {
+    return isDiagnosticScriptName(tokens[2]);
+  }
+  // Any other bare subcommand doubles as a package.json script name under
+  // npm/pnpm/yarn's lifecycle-alias convention (`npm test`, `npm start`, or
+  // a custom `npm foo`) — not provably diagnostic just because it isn't a
+  // recognized package-manager verb; held to the same bar as `run` above.
+  return isDiagnosticScriptName(subcommand);
+}
+
+// A narrower, non-pager-obsessed read-only git surface than isSafeGit above:
+// isSafeGit additionally demands --no-pager/--no-textconv on log/diff/show,
+// which is calibrated for the `readonly` permission level's output-integrity
+// concerns and rejects a plain `git diff`/`git show` outright — Plan Mode
+// only cares whether the command can change repository state, so it accepts
+// the plain form of the same read-only subcommands.
+const PLAN_MODE_SAFE_GIT_SUBCOMMANDS = new Set([
+  "status",
+  "diff",
+  "show",
+  "log",
+  "describe",
+  "blame",
+  "ls-files",
+  "ls-tree",
+  "rev-parse",
+  "shortlog",
+  "count-objects",
+]);
+
+function isPlanModeSafeGitCommand(tokens: string[]): boolean {
+  const subcommand = tokens[1]?.toLowerCase();
+  if (!subcommand) return false;
+  if (PLAN_MODE_SAFE_GIT_SUBCOMMANDS.has(subcommand)) return true;
+  if (subcommand === "branch") return isSafeGitBranch(tokens);
+  if (subcommand === "remote") {
+    const args = tokens.slice(2);
+    return args.length === 0 || (args.length === 1 && args[0] === "-v");
+  }
+  if (subcommand === "config") {
+    return tokens[2] === "--get" || tokens[2] === "--get-all";
+  }
+  return false;
+}
+
+/**
+ * Per-segment classification for Plan Mode's bash guard. Structurally a
+ * close copy of isSafePlanSegment (same trusted-executable check, same
+ * secret/external-path guards, same PLAN_SIMPLE_COMMANDS/tsc/eslint/biome/
+ * ruff/mypy/python/node/gh/sed/find branches — those already correctly
+ * allow `tsc --noEmit` and plain `eslint` while blocking `--fix`), widened
+ * in exactly the two places that made Plan Mode reject ordinary diagnostics:
+ * npm/pnpm/yarn (isSafePlanSegment only allowed list/view/info/search/
+ * outdated — not `run`/`test`, so `npm test`/`npm run typecheck`/
+ * `npm run verify` were rejected) and git (see isPlanModeSafeGitCommand
+ * above). Everything neither recognized here nor in isSafePlanSegment's
+ * other branches stays refused — this widens two specific allowlists, it
+ * does not flip the guard from an allowlist to a default-allow blocklist.
+ */
+function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
+  const executable = diagnosticExecutableName(tokens[0]);
+  if (!executable) return false;
+  if (tokens.some((token) => isSensitiveReference(token))) return false;
+  if (containsExternalPath(tokens, cwd)) return false;
+
+  if (["npm", "pnpm", "yarn"].includes(executable)) {
+    if (tokens.length === 2 && ["-v", "--version"].includes(tokens[1])) {
+      return true;
+    }
+    return isPlanModeSafePackageManagerCommand(tokens);
+  }
+  if (executable === "npx") return false; // arbitrary package execution
+
+  if (executable === "git") return isPlanModeSafeGitCommand(tokens);
+  if (executable === "sed") return isSafeSed(tokens);
+
+  return classifyToolSegment(executable, tokens);
+}
+
+/**
+ * Is this bash command safe to run while Plan Mode is active? Distinct from
+ * isPlanSafeCommand (which backs the `readonly` permission level and stays
+ * unchanged/unweakened) — see isPlanModeDiagnosticSegment for what differs
+ * and why. Shares the same shell-structure parser and hard guards
+ * (unquoted variable expansion, command substitution, chaining, redirection,
+ * secrets, external paths): only the per-tool classification is looser.
+ */
+export function isPlanModeDiagnosticCommand(
+  command: string,
+  cwd: string,
+): boolean {
+  if (containsUnquotedVariableExpansion(command)) return false;
+  const parsed = parseReadOnlyShell(command);
+  return (
+    !parsed.error &&
+    parsed.segments.every((tokens) => isPlanModeDiagnosticSegment(tokens, cwd))
   );
 }
 

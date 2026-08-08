@@ -51,8 +51,14 @@ Eigenschaften des Skripts:
   erzwingt den Lauf ausdrücklich und sichtbar.
 
 Mit `--runtime <pfad>` lässt sich eine andere Installation ansprechen.
-`tests/runtime-patches.mjs` prüft das Skript selbst und läuft in
-`npm run verify` mit.
+`tests/runtime-patches.mjs` prüft das Skript selbst (gegen eine Fixture, ohne
+eine echte Runtime-Installation) und läuft in `npm run verify` mit.
+
+`npm run test:runtime` (`tests/p1-runtime.mjs`) ist bewusst **kein** Teil von
+`npm run verify`/CI: es prüft die tatsächlich gestartete, lokal gepatchte
+Runtime unter `PI_RUNTIME_ROOT` — ein Pfad, den kein CI-Runner besitzt. Es
+bleibt ein eigenständiges, manuell auszuführendes Skript für das
+Upgrade-Gate unten.
 
 ## Umfang
 

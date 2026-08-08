@@ -26,7 +26,13 @@ umformuliert, verdichtet und schreibt.
    Arbeitsverzeichnis nutzen.
 2. Lies `docs/PROJECT_STATE.md` und `docs/CONTEXT_LEDGER.md` nur bei Fortsetzung
    einer bestehenden Aufgabe. Prüfe jede beibehaltene Aussage gegen den aktuellen
-   Auftrag, den Repository-Zustand und durchgeführte Prüfungen.
+   Auftrag, den Repository-Zustand und durchgeführte Prüfungen. Konkret: führe
+   `git log --oneline -1 -- docs/PROJECT_STATE.md` und dasselbe für
+   `docs/CONTEXT_LEDGER.md` aus, dann `git log --oneline <letzter-Touch-Commit>..HEAD`
+   für jede Datei. Prüfe jeden gefundenen Commit gegen die Bereiche, die die
+   jeweilige Datei beschreibt (Dateipfade/Module im Diff vs. im Dokument
+   genannte Komponenten), und kennzeichne widersprechende oder überholte
+   Aussagen ausdrücklich, statt sie stillschweigend beizubehalten.
 3. Ordne die gesammelten Informationen der richtigen Ebene zu:
    - **Ledger (dauerhaft):** bestätigte Nutzerentscheidungen, Architektur­ent­schei­dungen,
      Nicht-Ziele, bekannte Einschränkungen, offene Risiken, offene Fragen,
