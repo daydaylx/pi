@@ -220,3 +220,70 @@ await test("planModeBashGuard blocks mutating commands and allows read-only ones
     "work mode is never affected by the plan guard",
   );
 });
+
+await test("planModeBashGuard allows ordinary diagnostics (test/typecheck/lint/verify/build) during planning", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "detailed_plan" };
+  const bash = (command) =>
+    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  for (const command of [
+    "npm test",
+    "npm run test",
+    "npm run typecheck",
+    "npm run lint",
+    "npm run verify",
+    "npm run build",
+    "tsc --noEmit",
+    "eslint .",
+    "git status",
+    "git diff",
+    "git diff --stat",
+    "git show HEAD",
+    "git log",
+  ]) {
+    assert(
+      !bash(command).blocked,
+      `${command} is a legitimate diagnostic and must pass during planning`,
+    );
+  }
+});
+
+await test("planModeBashGuard still blocks real mutations during planning, even ones that look like diagnostics", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "detailed_plan" };
+  const bash = (command) =>
+    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  for (const command of [
+    "rm -rf node_modules",
+    "touch new-file.txt",
+    "cp a.ts b.ts",
+    "mv a.ts b.ts",
+    "mkdir new-dir",
+    "sed -i 's/a/b/' extensions/example.ts",
+    "echo hi > out.txt",
+    "echo hi >> out.txt",
+    "npm install",
+    "npm i lodash",
+    "npm update",
+    "npm ci",
+    "npm publish",
+    "npx some-package",
+    "eslint --fix .",
+    "eslint --fix-dry-run .",
+    "git commit -m x",
+    "git push",
+    "git add .",
+    "git checkout main",
+    "git reset --hard",
+    "git clean -fd",
+    "git stash",
+    "git merge main",
+  ]) {
+    assert(
+      bash(command).blocked,
+      `${command} is a mutation and must stay blocked during planning`,
+    );
+  }
+});

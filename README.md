@@ -52,13 +52,18 @@ Berechtigungen sind eine reine Stufenwahl über `/permission`: `readonly`,
 Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe selbst
 nicht. Die Plandatei ist auf jeder Stufe automatisch erlaubtes Schreibziel.
 Zusätzlich gilt bei `project-write` und `confirm-all` während `simple_plan`
-oder `detailed_plan` ein technischer Mutationsschutz: Schreibzugriffe
-außerhalb der Plandatei und nicht rein inspizierende Bash-Kommandos werden
-verweigert, mit derselben Logik, die `readonly` ohnehin verwendet — kein
-neuer Zustand, nur Wiederverwendung. `readonly` selbst ist unverändert
-vollständig gesperrt; `yolo` bleibt bewusst unangetastet, weil seine Wahl
-selbst die explizite Aufhebung der Standard-Sicherheit ist. Details:
-`docs/decisions/012-plan-mode-mutation-guard.md`.
+oder `detailed_plan` ein technischer Mutationsschutz für den Agenten:
+Schreibzugriffe außerhalb der Plandatei werden verweigert, und Bash-Kommandos
+des Agenten müssen nachweislich Diagnose statt Mutation sein — Tests,
+Typecheck, Lint ohne `--fix`, Builds, `npm`/`pnpm`/`yarn run`/`test`/beliebige
+Skripte und `git status`/`diff`/`show`/`log` bleiben erlaubt, `rm`/`cp`/`mv`/
+`sed -i`/Redirection, `npm install`/`update`/`publish`, `eslint --fix` und
+mutierende `git`-Kommandos bleiben blockiert. `readonly` selbst ist
+unverändert vollständig gesperrt; `yolo` bleibt bewusst unangetastet, weil
+seine Wahl selbst die explizite Aufhebung der Standard-Sicherheit ist. Ein
+vom Menschen selbst per `!`/`!!` eingegebener Bash-Befehl durchläuft diesen
+Guard nicht — er schränkt nur den Agenten ein, nicht den Menschen an der
+eigenen Tastatur. Details: `docs/decisions/012-plan-mode-mutation-guard.md`.
 
 Harte Trust-, Secret-, Symlink-, Projekt- und Systemgrenzen bleiben auf jeder
 Stufe blockiert, YOLO eingeschlossen. Dazu zählen auch Ausführungspfade

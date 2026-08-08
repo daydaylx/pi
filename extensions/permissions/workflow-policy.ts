@@ -1,8 +1,8 @@
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { relative, resolve, sep } from "node:path";
 import {
-  decideBash,
   decideFileAccess,
+  isPlanModeDiagnosticCommand,
   isSensitiveReference,
   resolvePathScope,
   type ProtectedWritePath,
@@ -118,16 +118,26 @@ function planFileProtectedWritePath(): ProtectedWritePath {
 /**
  * Plan Mode's own mutation guard, independent from the chosen permission
  * level. Plan Mode is a prompt instruction, not a lock by default (see
- * extensions/plan-mode/README.md) — but a write or a write-capable bash call
+ * extensions/plan-mode/README.md) — but a write or a mutating bash call
  * while planning is almost always a slip, not intent. This closes that gap
  * technically for `project-write` and `confirm-all` (the levels most
- * sessions plan under) by reusing the exact decision functions the
- * `readonly` permission level already relies on elsewhere in this module —
- * no new pattern list, no new state. `readonly` itself needs no separate
- * handling here: its own branch in decideFileAccess/decideBash already
- * denies everything but the plan file. `yolo` is deliberately left alone:
- * choosing YOLO is itself an explicit, unambiguous override of default
- * safety (see docs/decisions/012-plan-mode-mutation-guard.md).
+ * sessions plan under). File writes reuse decideFileAccess's `readonly`
+ * branch unchanged (see planModeMutationGuard below). Bash reuses
+ * isPlanModeDiagnosticCommand — a Plan-Mode-specific classifier, not
+ * decideBash("readonly", ...): the `readonly` permission level's bash
+ * policy only allows a narrow, provably-side-effect-free command surface
+ * and rejects `npm test`, `npm run typecheck/lint/verify`, and plain
+ * `git diff`/`git show` outright, which made Plan Mode block ordinary
+ * diagnostics along with real mutations. isPlanModeDiagnosticCommand
+ * shares the same parser and hard guards (chaining, redirection, command
+ * substitution, secrets, external paths, `sed -i`, file-mutating tools) and
+ * only widens the npm/pnpm/yarn and git branches to admit read-only/
+ * diagnostic subcommands — see its doc comment in shared/permission-policy.ts.
+ * `readonly` itself needs no separate handling here: its own branch in
+ * decideFileAccess/decideBash already denies everything but the plan file,
+ * and this guard is skipped entirely at that level (see below). `yolo` is
+ * deliberately left alone: choosing YOLO is itself an explicit, unambiguous
+ * override of default safety (see docs/decisions/012-plan-mode-mutation-guard.md).
  */
 export function planModeBashGuard(
   workflow: WorkflowCapabilitySnapshot,
@@ -138,13 +148,12 @@ export function planModeBashGuard(
   if (!isPlanningMode(workflow.mode)) return PERMITTED;
   if (permissionLevel === "readonly" || permissionLevel === "yolo")
     return PERMITTED;
-  const decision = decideBash("readonly", command, cwd);
-  return decision.action === "allow"
+  return isPlanModeDiagnosticCommand(command, cwd)
     ? PERMITTED
     : {
         blocked: true,
         reason:
-          "Planmodus: Dieses Shell-Kommando ist während der Planung nicht nachweislich rein inspizierend.",
+          "Planmodus: Dieses Shell-Kommando ist während der Planung nicht nachweislich rein diagnostisch (z. B. Tests, Typecheck, Lint ohne --fix, git status/diff).",
       };
 }
 

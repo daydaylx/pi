@@ -34,12 +34,22 @@ Read-only-Sandbox. Technisch erzwungen sind die Plandatei als automatisch
 erlaubtes Schreibziel (`automaticallyAllowedInPlanMode`), die harten Secret-,
 System-, Symlink- und Trust-Grenzen, die in jedem Modus gelten — und
 zusätzlich ein Planmodus-Mutationsschutz (`planModeMutationGuard` /
-`planModeBashGuard` in `extensions/permissions/workflow-policy.ts`): Bei den
-Stufen `project-write` und `confirm-all` verweigert er während `simple_plan`
-oder `detailed_plan` jeden Schreibzugriff außerhalb der Plandatei und jedes
-Bash-Kommando, das nicht nachweislich rein inspizierend ist — mit exakt der
-Logik, die die Stufe `readonly` an anderer Stelle bereits verwendet, ohne
-neue Muster. `readonly` selbst braucht keine gesonderte Behandlung (schon
-vollständig gesperrt); `yolo` wird bewusst nicht angefasst, weil die Wahl von
-YOLO selbst eine explizite, eindeutige Aufhebung der Standard-Sicherheit ist.
-Details und Abwägung: `docs/decisions/012-plan-mode-mutation-guard.md`.
+`planModeBashGuard` in `extensions/permissions/workflow-policy.ts`) für den
+Agenten: Bei den Stufen `project-write` und `confirm-all` verweigert er
+während `simple_plan` oder `detailed_plan` jeden Schreibzugriff außerhalb der
+Plandatei und jedes Bash-Kommando des Agenten, das nicht nachweislich eine
+Diagnose ist. Für Bash ist das eine eigene, bewusst großzügigere Klassifikation
+(`isPlanModeDiagnosticCommand`) als `readonly`s Allowlist: Tests, Typecheck,
+Lint ohne `--fix`, Builds, `npm`/`pnpm`/`yarn run`/`test`/beliebige
+Skriptnamen sowie `git status`/`diff`/`show`/`log` sind erlaubt; echte
+Mutationen (`rm`/`cp`/`mv`/`mkdir`/`touch`/`sed -i`/Redirection, `npm
+install`/`update`/`ci`/`publish`/`exec`, `eslint --fix`, `git commit`/`push`/
+`add`/`checkout`/`reset`/`clean`/`merge`/…) bleiben blockiert. `readonly`
+selbst braucht keine gesonderte Behandlung (schon vollständig gesperrt);
+`yolo` wird bewusst nicht angefasst, weil die Wahl von YOLO selbst eine
+explizite, eindeutige Aufhebung der Standard-Sicherheit ist. Der Guard läuft
+ausschließlich für den Agenten (`tool_call`, das `bash`-Tool) — ein vom
+Menschen selbst per `!`/`!!` eingegebener Befehl (`user_bash`) durchläuft ihn
+nicht, da Plan Mode den Agenten am impliziten Implementieren hindern soll,
+nicht den Menschen an der eigenen Tastatur einschränken. Details und
+Abwägung: `docs/decisions/012-plan-mode-mutation-guard.md`.
