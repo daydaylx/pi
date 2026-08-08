@@ -21,9 +21,13 @@ keinen Server**, bevor nicht ein `lsp_*`-Werkzeug tatsächlich aufgerufen wird
 | Server auflisten | `/lsp servers`            | Alle aktiven Server mit Zustand und PID.                                       |
 | Log anzeigen     | `/lsp log`                | Kürzliche LSP-Logeinträge.                                                     |
 
-Statuswerte in der Fußzeile (Aurora): `leerlauf` (aktiviert, kein Server
+Statuswerte (`extensions/lsp/status.ts`): `leerlauf` (aktiviert, kein Server
 läuft), `N aktiv` (N Server bereit), `eingeschränkt` (ein Server ist
 _degraded_), `aus` (deaktiviert oder Modus `off`).
+
+In der Fußzeile erscheint davon nur `eingeschränkt`, und dann bei jeder
+Terminalbreite. Die gesunden Zustände kosten keine Zeile; sie stehen weiterhin
+vollständig in `/lsp status`.
 
 ## Werkzeuge (read-only)
 
