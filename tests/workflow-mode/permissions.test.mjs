@@ -252,6 +252,27 @@ await test("planModeBashGuard allows ordinary diagnostics (test/typecheck/lint/v
   }
 });
 
+await test("planModeBashGuard allows `;`-chained diagnostics and /dev/null redirects during planning", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "detailed_plan" };
+  const bash = (command) =>
+    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  for (const command of [
+    "npm test; npm run lint",
+    "git status; git diff --stat",
+    "find extensions test tests -type f 2>/dev/null | grep -E 'foo' | head -120",
+    "ls -la .agent 2>/dev/null; ls -la .agent/plans 2>/dev/null; git status",
+    "npm run typecheck 1>/dev/null",
+    "eslint . &>/dev/null",
+  ]) {
+    assert(
+      !bash(command).blocked,
+      `${command} chains or redirects only provably read-only diagnostics and must pass during planning`,
+    );
+  }
+});
+
 await test("planModeBashGuard rejects npm run <arbitrary script> and non-diagnostic bare aliases", () => {
   if (!workflowPolicy) return;
   const cwd = process.cwd();
@@ -304,10 +325,30 @@ await test("planModeBashGuard still blocks real mutations during planning, even 
     "git clean -fd",
     "git stash",
     "git merge main",
+    "ls -la; rm -rf foo",
+    "npm test && npm run lint",
+    "eslint . 2>/tmp/out.txt",
+    "npm test 2>&1",
   ]) {
     assert(
       bash(command).blocked,
       `${command} is a mutation and must stay blocked during planning`,
+    );
+  }
+});
+
+await test("isPlanSafeCommand (readonly permission level) stays strict: no `;`-chaining or /dev/null redirect widening", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  for (const command of [
+    "npm test; npm run lint",
+    "ls -la .agent 2>/dev/null; ls -la .agent/plans 2>/dev/null; git status",
+    "npm run typecheck 1>/dev/null",
+    "eslint . &>/dev/null",
+  ]) {
+    assert(
+      !permissionPolicy.isPlanSafeCommand(command, cwd),
+      `${command} must stay blocked for the readonly permission level — only Plan Mode's diagnostic classification widens`,
     );
   }
 });

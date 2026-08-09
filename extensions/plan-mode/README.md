@@ -43,8 +43,14 @@ aussieht (`test`, `typecheck`, `lint`, `check`, `verify`, `coverage`,
 einen `fix`/`write`-Marker wie in `lint:fix`) — ein beliebiger, unbekannter
 Skriptname (`npm run generate`, `npm start`, eigene Aliase) gilt nicht als
 nachweislich diagnostisch und bleibt blockiert; projekteigene, bewusst
-vertrauenswürdige Prüfungen laufen dafür über `project_check`. Echte
-Mutationen (`rm`/`cp`/`mv`/`mkdir`/`touch`/`sed -i`/Redirection, `npm
+vertrauenswürdige Prüfungen laufen dafür über `project_check`. Diagnose-
+befehle dürfen mit `;` verkettet werden (jedes Segment einzeln geprüft;
+`&&`/`||`/ein alleinstehendes `&` bleiben blockiert), und `2>`/`1>`/`&>`
+nach exakt `/dev/null` sind als Redirect-Ziel erlaubt (z. B. `ls -la
+.agent 2>/dev/null`) — jedes andere Redirect-Ziel bleibt blockiert; für den
+`readonly`-Pfad (`isPlanSafeCommand`) gilt weiterhin die alte, strikte
+Regel. Echte Mutationen (`rm`/`cp`/`mv`/`mkdir`/`touch`/`sed -i`, sonstige
+Redirection, `npm
 install`/`update`/`ci`/`publish`/`exec`, `eslint --fix`, `git commit`/`push`/
 `add`/`checkout`/`reset`/`clean`/`merge`/…) bleiben blockiert. `readonly`
 selbst braucht keine gesonderte Behandlung (schon vollständig gesperrt);

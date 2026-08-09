@@ -43,11 +43,11 @@ verweigern", exakt das gewünschte Verhalten.
 
 **Bash-Kommandos** laufen über `isPlanModeDiagnosticCommand`
 (`extensions/shared/permission-policy.ts`) — eine eigene Klassifikation,
-**nicht** `decideBash("readonly", ...)`. Sie teilt sich Parser und harte
-Schutzmechanismen mit `isPlanSafeCommand` (Befehlsverkettung,
-Command-Substitution, Redirection, unquotierte Variablenexpansion,
-Secret-Referenzen, projektexterne Pfade bleiben in beiden verboten), weitet
-aber gezielt zwei Zweige gegenüber `readonly`s Allowlist:
+**nicht** `decideBash("readonly", ...)`. Sie teilt sich den Parser
+(`parseReadOnlyShell`) und die meisten harten Schutzmechanismen mit
+`isPlanSafeCommand` (Command-Substitution, unquotierte Variablenexpansion,
+Secret-Referenzen, projektexterne Pfade bleiben in beiden identisch
+verboten), weitet aber gezielt drei Zweige gegenüber `readonly`s Allowlist:
 
 - **npm/pnpm/yarn:** eine Blocklist mutierender Subcommands (`install`,
   `update`, `ci`, `publish`, `exec`, `config set`, …,
@@ -69,6 +69,18 @@ aber gezielt zwei Zweige gegenüber `readonly`s Allowlist:
   `PLAN_MODE_SAFE_GIT_SUBCOMMANDS`) ohne `readonly`s zusätzliche
   `--no-pager`/`--no-textconv`-Anforderung, die einen einfachen
   `git diff`/`git show` sonst ablehnt.
+- **Shell-Struktur:** `parseReadOnlyShell` nimmt für diesen Pfad ein
+  Optionsobjekt (`allowSemicolonChaining`, `allowDevNullRedirect`) entgegen.
+  `;` wird wie `|` in Segmente aufgeteilt statt hart geblockt — jedes
+  Segment durchläuft weiterhin einzeln dieselbe Diagnose-Klassifikation
+  (`ls -la; rm -rf foo` bleibt blockiert, weil `rm` durchfällt); `&&`/`||`/
+  ein alleinstehendes `&` bleiben unverändert hart geblockt. `2>`, `1>` und
+  `&>` nach exakt `/dev/null` werden als Redirect-Ziel akzeptiert (das
+  übliche „stderr beim Sondieren unterdrücken", z. B.
+  `ls -la .agent 2>/dev/null`); ein nacktes `>` ohne Filedescriptor-Präfix
+  oder jedes andere Redirect-Ziel bleibt hart geblockt. `isPlanSafeCommand`
+  (`readonly`) ruft `parseReadOnlyShell` weiterhin ohne Optionen auf und
+  bleibt dadurch unverändert streng.
 
 Die Ausführbarkeits-Prüfung klassifiziert rein über den Kommandotext, nicht
 über PATH-/Dateisystemauflösung wie `trustedExecutableName` (das bleibt
@@ -139,8 +151,12 @@ ersetzt.
   erlaubt den Plandatei-Schreibzugriff; blockiert echte Mutationen
   (`rm`/`cp`/`mv`/`sed -i`/Redirection/`npm install`/`eslint --fix`/
   mutierende `git`-Kommandos); erlaubt anerkannte Diagnosebefehle (`npm
-  test`, `npm run typecheck/lint/verify/build/test:coverage`,
-  `tsc --noEmit`, `eslint .`, `git status/diff/show/log`); blockiert
+test`, `npm run typecheck/lint/verify/build/test:coverage`,
+  `tsc --noEmit`, `eslint .`, `git status/diff/show/log`); erlaubt
+  `;`-verkettete Diagnosebefehle und `2>`/`1>`/`&>`-Redirects nach
+  `/dev/null` (jedes Segment einzeln geprüft, `&&`/`||`/nacktes `&` sowie
+  jedes andere Redirect-Ziel bleiben blockiert) und bestätigt, dass
+  `isPlanSafeCommand`/`readonly` dabei unverändert streng bleibt; blockiert
   unbekannte oder mutierende Skriptnamen (`npm run generate`, `npm start`,
   `npm run lint:fix`); Planmodus + `yolo` ist unverändert; Work-Modus ist
   unabhängig von der Stufe unverändert; `user_bash` ist von diesem Guard

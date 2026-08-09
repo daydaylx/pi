@@ -3,6 +3,31 @@
 Dieses Repository enthält die lokale Pi-Konfiguration für Aurora, Berechtigungen,
 LSP und einen kleinen Planmodus.
 
+## Installation oder Aktualisierung
+
+Zuerst die geplante Synchronisation prüfen:
+
+```bash
+npm run install:user
+```
+
+Danach die Konfiguration anwenden:
+
+```bash
+npm run install:user -- --apply
+```
+
+Standardziel ist `~/.pi/agent`; ein anderes Ziel wird mit `--target <pfad>`
+angegeben. Nach der Synchronisation die Abhängigkeiten im Zielverzeichnis
+installieren:
+
+```bash
+npm ci --prefix ~/.pi/agent/npm
+```
+
+Nach einem Pi-Runtime-Update die lokalen Runtime-Patches gemäß
+`docs/RUNTIME_PATCHES.md` prüfen und gegebenenfalls erneut anwenden.
+
 ## Planmodus
 
 Der Workflow kennt nur drei flüchtige Modi:
@@ -37,8 +62,8 @@ Hauptagenten; Delegation und Verifikation sind nie automatische Pflichtketten.
 
 Die Paket-Builtins sind in `settings.json` mit
 `subagents.disableBuiltins: true` deaktiviert. Die aktive Paketkonfiguration
-steht direkt in `extensions/subagent/config.json`: `maxTasks: 4`,
-`concurrency: 3`, `globalConcurrencyLimit: 3` und
+steht direkt in `extensions/subagent/config.json`: `parallel.maxTasks: 4`,
+`parallel.concurrency: 3`, `globalConcurrencyLimit: 3` und
 `maxSubagentSpawnsPerSession: 5`. Frischer Kontext und das Verbot
 verschachtelter Delegation sind Eigenschaften der drei Profil-Tools.
 
@@ -58,7 +83,11 @@ Diagnose, wenn der Skriptname nach einer bekannten Kategorie aussieht
 (`test`, `typecheck`, `lint`, `check`, `verify`, `coverage`, `audit`,
 `build`, ggf. namensraum-erweitert, ohne `fix`/`write`-Marker) — ein
 unbekannter Skriptname wie `npm run generate` oder `npm start` gilt nicht
-automatisch als Diagnose. `rm`/`cp`/`mv`/`sed -i`/Redirection,
+automatisch als Diagnose. Diagnosebefehle dürfen dabei mit `;` verkettet
+werden (jedes Segment einzeln geprüft; `&&`/`||`/ein alleinstehendes `&`
+bleiben blockiert), und `2>`/`1>`/`&>` nach exakt `/dev/null` sind als
+Redirect-Ziel erlaubt — jedes andere Redirect-Ziel bleibt blockiert.
+`rm`/`cp`/`mv`/`sed -i`, sonstige Redirection,
 `npm install`/`update`/`publish`, `eslint --fix` und mutierende
 `git`-Kommandos bleiben blockiert. `readonly` selbst ist
 unverändert vollständig gesperrt; `yolo` bleibt bewusst unangetastet, weil

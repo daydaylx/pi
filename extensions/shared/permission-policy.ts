@@ -375,11 +375,42 @@ interface ParsedShell {
   error?: string;
 }
 
+interface ParseReadOnlyShellOptions {
+  /**
+   * Treat `;` like `|`: split into segments instead of hard-blocking. Each
+   * segment still goes through the caller's own per-segment classification,
+   * so `ls -la; rm -rf foo` stays blocked — only the structural split is
+   * widened, not what counts as safe. Only `isPlanModeDiagnosticCommand`
+   * sets this; `isPlanSafeCommand` (readonly) and the other callers below
+   * keep the strict default.
+   */
+  allowSemicolonChaining?: boolean;
+  /**
+   * Accept `2>`, `1>` or `&>` redirected to exactly `/dev/null` as a safe,
+   * content-free target (the extremely common "suppress stderr while
+   * probing" idiom, e.g. `ls -la .agent 2>/dev/null`). A bare `>` with no fd
+   * prefix, or any target other than `/dev/null`, still hard-blocks — this
+   * does not open up writing to arbitrary files. Only
+   * `isPlanModeDiagnosticCommand` sets this.
+   */
+  allowDevNullRedirect?: boolean;
+}
+
+const DEV_NULL_AMP_REDIRECT = /^&>\/dev\/null(?=$|[\s;|])/;
+const DEV_NULL_TARGET = /^>\/dev\/null(?=$|[\s;|])/;
+const TRAILING_FD_ONE_OR_TWO = /(?:^|\s)[12]$/;
+
 /**
  * Conservative parser for Plan Mode. It accepts plain commands and pipelines,
  * but rejects shell constructs whose effects cannot be proven read-only.
+ * `options` widens exactly two constructs (see ParseReadOnlyShellOptions);
+ * every other caller passes no options and keeps the original strict
+ * behavior unchanged.
  */
-export function parseReadOnlyShell(command: string): ParsedShell {
+export function parseReadOnlyShell(
+  command: string,
+  options: ParseReadOnlyShellOptions = {},
+): ParsedShell {
   const segments: string[] = [];
   let current = "";
   let quote: "'" | '"' | undefined;
@@ -415,10 +446,42 @@ export function parseReadOnlyShell(command: string): ParsedShell {
       current += char;
       continue;
     }
-    if (char === "\n" || char === "\r" || char === ";" || char === "&") {
+    if (char === "\n" || char === "\r") {
       return { segments: [], error: "Shell-Verkettungen sind nicht erlaubt." };
     }
-    if (char === "<" || char === ">") {
+    if (char === ";") {
+      if (options.allowSemicolonChaining) {
+        if (!current.trim()) {
+          return { segments: [], error: "Leeres Pipeline-Segment." };
+        }
+        segments.push(current.trim());
+        current = "";
+        continue;
+      }
+      return { segments: [], error: "Shell-Verkettungen sind nicht erlaubt." };
+    }
+    if (char === "&") {
+      const ampRedirect = options.allowDevNullRedirect
+        ? DEV_NULL_AMP_REDIRECT.exec(command.slice(index))
+        : null;
+      if (ampRedirect) {
+        index += ampRedirect[0].length - 1;
+        continue;
+      }
+      return { segments: [], error: "Shell-Verkettungen sind nicht erlaubt." };
+    }
+    if (char === "<") {
+      return { segments: [], error: "Shell-Redirections sind nicht erlaubt." };
+    }
+    if (char === ">") {
+      const target = options.allowDevNullRedirect
+        ? DEV_NULL_TARGET.exec(command.slice(index))
+        : null;
+      if (target && TRAILING_FD_ONE_OR_TWO.test(current)) {
+        current = current.slice(0, -1);
+        index += target[0].length - 1;
+        continue;
+      }
       return { segments: [], error: "Shell-Redirections sind nicht erlaubt." };
     }
     if (char === "|") {
@@ -1139,16 +1202,23 @@ function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
  * Is this bash command safe to run while Plan Mode is active? Distinct from
  * isPlanSafeCommand (which backs the `readonly` permission level and stays
  * unchanged/unweakened) — see isPlanModeDiagnosticSegment for what differs
- * and why. Shares the same shell-structure parser and hard guards
- * (unquoted variable expansion, command substitution, chaining, redirection,
- * secrets, external paths): only the per-tool classification is looser.
+ * and why. Shares the same shell-structure parser and most hard guards
+ * (unquoted variable expansion, command substitution, secrets, external
+ * paths) but is the only caller that widens two structural constructs via
+ * parseReadOnlyShell's options: `;`-chaining of diagnostics (each segment
+ * still individually classified) and `2>`/`1>`/`&>` to `/dev/null`. Every
+ * other redirect target and `&&`/`||`/`&` stay hard-blocked exactly as
+ * before; the per-tool classification is looser on top of that.
  */
 export function isPlanModeDiagnosticCommand(
   command: string,
   cwd: string,
 ): boolean {
   if (containsUnquotedVariableExpansion(command)) return false;
-  const parsed = parseReadOnlyShell(command);
+  const parsed = parseReadOnlyShell(command, {
+    allowSemicolonChaining: true,
+    allowDevNullRedirect: true,
+  });
   return (
     !parsed.error &&
     parsed.segments.every((tokens) => isPlanModeDiagnosticSegment(tokens, cwd))
