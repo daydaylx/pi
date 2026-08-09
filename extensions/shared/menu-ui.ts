@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { layoutForSize, overlayMargin, type Layout } from "./layout.ts";
 import { statusSeparator } from "./ui-theme.ts";
 
 /** Pure menu data; menu builders never need to know about TUI rendering. */
@@ -123,16 +124,28 @@ export function calculateMenuViewport(
   return result;
 }
 
-type Layout = "compact" | "standard" | "comfortable";
 const ELLIPSIS = "…";
 
-function layoutFor(columns: number, rows: number): Layout {
-  if (columns < 52 || rows < 14) return "compact";
-  return columns >= 90 && rows >= 28 ? "comfortable" : "standard";
-}
+/** Desired share of the terminal, and the bounds that share is held between. */
+const OVERLAY_WIDTH_RATIO = 0.8;
+const OVERLAY_MAX_COLUMNS = 96;
+const OVERLAY_PREFERRED_MIN_COLUMNS = 48;
 
-function marginFor(columns: number, rows: number): number {
-  return columns < 36 || rows < 14 ? 1 : 2;
+/**
+ * `menuOverlayWidth` only receives a width. Passing a height that clears every
+ * row threshold keeps the margin decision purely column-based here, exactly as
+ * it was before the thresholds moved into `layout.ts`.
+ */
+const ASSUMED_TALL_TERMINAL_ROWS = 1_000;
+
+/**
+ * A menu never uses the wide class for anything of its own: a permanent side
+ * panel that exists only because the columns are there is exactly what the
+ * layout rules rule out. Wide therefore renders as comfortable.
+ */
+function menuLayout(columns: number, rows: number): Layout {
+  const layout = layoutForSize(columns, rows);
+  return layout === "wide" ? "comfortable" : layout;
 }
 
 /** Content-independent width avoids all ANSI and wide-character mismeasurement. */
@@ -142,14 +155,20 @@ export function menuOverlayWidth<T>(
   _entries: readonly MenuEntry<T>[],
 ): number {
   const columns = Math.max(1, Math.floor(terminalWidth));
-  const available = Math.max(1, columns - (columns < 36 ? 2 : 4));
+  const available = Math.max(
+    1,
+    columns - overlayMargin(columns, ASSUMED_TALL_TERMINAL_ROWS) * 2,
+  );
   return Math.max(
     1,
     Math.min(
       available,
       Math.max(
-        Math.min(48, available),
-        Math.min(96, Math.floor(columns * 0.8)),
+        Math.min(OVERLAY_PREFERRED_MIN_COLUMNS, available),
+        Math.min(
+          OVERLAY_MAX_COLUMNS,
+          Math.floor(columns * OVERLAY_WIDTH_RATIO),
+        ),
       ),
     ),
   );
@@ -317,7 +336,7 @@ async function selectWithCustomUi<T>(
       return {
         render(width: number): string[] {
           const size = terminal();
-          const layout = layoutFor(width, size.rows);
+          const layout = menuLayout(width, size.rows);
           const current = level();
           current.selected =
             current.selected >= 0 &&
@@ -330,7 +349,13 @@ async function selectWithCustomUi<T>(
             current.selected >= 0
               ? current.entries[current.selected]
               : undefined;
-          const crumbs = stack.map((item) => item.label).join(" › ");
+          // At the top level the breadcrumb is the title again. One line of
+          // chrome that repeats the line above it is noise, so it only appears
+          // once there is actually a path to show.
+          const crumbs =
+            stack.length > 1
+              ? stack.map((item) => item.label).join(" › ")
+              : undefined;
           const detail =
             layout === "comfortable" && selected
               ? wrapTextWithAnsi(
@@ -365,17 +390,18 @@ async function selectWithCustomUi<T>(
             .slice(0, layout === "compact" ? 1 : 2)
             .map((item) => pad(` ${item}`, inner));
           const paddingLines = layout === "compact" ? 0 : 2;
+          const showCrumbs = layout !== "compact" && crumbs !== undefined;
           const fixed =
             2 +
             1 +
-            (layout === "compact" ? 0 : 1) +
+            (showCrumbs ? 1 : 0) +
             2 +
             paddingLines +
             footer.length +
             (detail.length ? detail.length + 1 : 0);
           const budget = Math.max(
             1,
-            size.rows - marginFor(size.columns, size.rows) * 2 - fixed,
+            size.rows - overlayMargin(size.columns, size.rows) * 2 - fixed,
           );
           const renderedBlocks = blocks(inner, layout);
           const view = calculateMenuViewport(
@@ -425,9 +451,9 @@ async function selectWithCustomUi<T>(
           return [
             `${border("╭")}${border("─".repeat(inner))}${border("╮")}`,
             frame(fg("accent", theme.bold(pad(` ${title}`, inner))), inner),
-            ...(layout === "compact"
-              ? []
-              : [frame(fg("muted", pad(` ${crumbs}`, inner)), inner)]),
+            ...(showCrumbs
+              ? [frame(fg("muted", pad(` ${crumbs}`, inner)), inner)]
+              : []),
             divider(inner),
             ...(layout === "compact" ? [] : [emptyLine]),
             ...content.map((item) => frame(item, inner)),
@@ -537,7 +563,7 @@ async function selectWithCustomUi<T>(
       overlay: true,
       overlayOptions: () => {
         const size = terminal();
-        const margin = marginFor(size.columns, size.rows);
+        const margin = overlayMargin(size.columns, size.rows);
         const width = menuOverlayWidth(size.columns, title, entries);
         return {
           anchor: "center",

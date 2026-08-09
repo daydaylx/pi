@@ -18,6 +18,7 @@ export function isSelectableThinkingLevel(
   return THINKING_LEVELS.includes(value as SelectableThinkingLevel);
 }
 
+/** Manual selection is the only mode there is, so no label says so. */
 const THINKING_LEVEL_LABEL: Record<SelectableThinkingLevel, string> = {
   off: "Aus",
   minimal: "Minimal",
@@ -37,17 +38,32 @@ const THINKING_LEVEL_DESCRIPTION: Record<SelectableThinkingLevel, string> = {
 };
 
 export function thinkingLabel(level: ThinkingLevel): string {
-  return `Manuell (${level})`;
+  return isSelectableThinkingLevel(level)
+    ? THINKING_LEVEL_LABEL[level]
+    : String(level);
 }
 
+/**
+ * A level the active model does not implement is shown disabled rather than
+ * hidden: the list then always describes the same six steps, and the gap says
+ * "this model cannot" instead of silently renumbering the scale.
+ */
 export function buildThinkingMenu(
   current: ThinkingLevel,
+  supports: (level: SelectableThinkingLevel) => boolean = () => true,
 ): MenuEntry<SelectableThinkingLevel>[] {
-  return THINKING_LEVELS.map((level) => ({
-    id: `thinking-${level}`,
-    label: `Manuell: ${THINKING_LEVEL_LABEL[level]}`,
-    description: THINKING_LEVEL_DESCRIPTION[level],
-    value: level,
-    current: current === level,
-  }));
+  return THINKING_LEVELS.map((level) => {
+    const supported = supports(level);
+    return {
+      id: `thinking-${level}`,
+      label: THINKING_LEVEL_LABEL[level],
+      description: THINKING_LEVEL_DESCRIPTION[level],
+      value: level,
+      current: current === level,
+      disabled: !supported,
+      ...(supported
+        ? {}
+        : { disabledReason: "Dieses Modell unterstützt die Stufe nicht." }),
+    };
+  });
 }

@@ -17,8 +17,6 @@ export interface AuroraUiState {
   workflow: {
     phase: AuroraWorkflowPhase;
     label: string;
-    completed?: number;
-    total?: number;
   };
   permissions: {
     level?: string;
@@ -163,29 +161,6 @@ export function mergeAuroraUiState(
       state.workflow.phase = patch.workflow.phase;
     if (typeof patch.workflow.label === "string")
       state.workflow.label = patch.workflow.label;
-    if ("total" in patch.workflow) {
-      state.workflow.total =
-        typeof patch.workflow.total === "number" &&
-        Number.isSafeInteger(patch.workflow.total) &&
-        patch.workflow.total > 0
-          ? patch.workflow.total
-          : undefined;
-    }
-    if ("completed" in patch.workflow) {
-      state.workflow.completed =
-        typeof patch.workflow.completed === "number" &&
-        Number.isSafeInteger(patch.workflow.completed) &&
-        patch.workflow.completed >= 0
-          ? patch.workflow.completed
-          : undefined;
-    }
-    if (
-      state.workflow.total !== undefined &&
-      state.workflow.completed !== undefined &&
-      state.workflow.completed > state.workflow.total
-    ) {
-      state.workflow.completed = undefined;
-    }
   }
   if (patch.permissions) {
     if ("level" in patch.permissions)

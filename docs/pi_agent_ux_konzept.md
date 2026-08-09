@@ -31,12 +31,15 @@ registriert.
 
 ## Modelle und Thinking
 
-`Super+M` zeigt die über `settings.enabledModels` freigegebenen Modelle.
-Die Anzeige enthält Registry-Status, Kontextfenster, Output-Limit, Preisraten
-und vorhandenen Kontextverbrauch.
+`Super+M` übergibt an Pis kanonisches `/model`. Dieses Repository registriert
+keinen eigenen Modell-Handler, also bestimmt Pi selbst, welche Metadaten der
+Picker zeigt; freigegeben sind die Modelle aus `settings.enabledModels`.
 
-`Super+D` bietet die vom aktiven Modell unterstützten Thinking-Stufen
-einschließlich `Off`, ausschließlich manuell wählbar. Eine automatische,
+`Super+D` öffnet die Denktiefe in derselben Menüschale wie das Command Center
+(`shared/menu-ui.ts`) — eine flache Liste der sechs Stufen von `Aus` bis
+`Sehr hoch`, ausschließlich manuell wählbar. Stufen, die das aktive Modell
+nicht kennt, stehen deaktiviert in der Liste statt zu verschwinden: die Skala
+bleibt dieselbe, und die Lücke sagt „dieses Modell kann das nicht". Eine automatische,
 workflowabhängige Vorauswahl gibt es zur Laufzeit nicht. Eine frühere
 `detailed_plan → high`-Zuordnung (`extensions/plan-mode/events.ts`) reagierte
 auf ein Event, für das weder dieses Repository noch das installierte
@@ -44,6 +47,41 @@ auf ein Event, für das weder dieses Repository noch das installierte
 `node_modules`) einen Sender besaßen — bestätigt toter Code ohne Consumer,
 inzwischen entfernt. Eine separate Status-Telemetrie-Ansicht gibt es nicht
 mehr — der Status steht in der Fußzeile.
+
+## Statusflächen
+
+Es gibt genau zwei, und nur eine davon ist permanent.
+
+Die **Fußzeile** ist eine Zeile und trägt Arbeitsablauf, Modell, Denktiefe,
+Kontextanteil und Verifikationsstand. Wird es eng, fallen ganze Segmente vom
+unwichtigen Ende her weg statt am Rand abgeschnitten zu werden. Riskantes —
+YOLO, gescheiterte Verifikation, gestörter LSP — ignoriert die Größenklasse und
+verdrängt Gewöhnliches. Arbeitsverzeichnis, Git-Branch, Sitzungsname und
+Tokenzähler stehen nicht mehr dort; siehe
+`docs/decisions/009-aurora-owns-the-footer.md`.
+
+Das **Activity-Widget** über dem Eingabefeld erscheint nur während eines Turns
+und zeigt die Denkzeile, die laufenden Tools und die Subagenten des Turns.
+Abgeschlossenes verschwindet, statt zu einem Erfolgsblock zu werden.
+
+Die Größenklassen beider Flächen und der Menüs stehen gemeinsam in
+`extensions/shared/layout.ts`: kompakt unter 52×14, komfortabel ab 90×28, breit
+ab 120×30.
+
+## Eingabefeld
+
+Das Eingabefeld ist Pis eigener Editor; dieses Repository ersetzt ihn nicht.
+Er wächst mit dem Inhalt, reserviert keine Höhe im Voraus, scrollt intern ab
+`max(5, 30 % der Terminalzeilen)` und erhält dabei Cursorposition und Text
+(`pi-tui/dist/components/editor.js`).
+
+Damit sind die Eigenschaften erfüllt, auf die es ankommt — mitwachsen, nichts
+dauerhaft reservieren, kein Sprung beim Öffnen eines Menüs, da Menüs Overlays
+sind. Die genauen Grenzen weichen ab: die Untergrenze ist eine Zeile statt drei
+(drei leere Zeilen wären genau die Reservierung, die vermieden werden soll), und
+die Obergrenze erreicht 15 Zeilen erst bei etwa 50 Terminalzeilen. Diese Werte
+nachzubilden hieße, Pis Editor-Layout für Kosmetik nachzubauen — der Preis steht
+in keinem Verhältnis zum Unterschied.
 
 ## Skills und Konfiguration
 

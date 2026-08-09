@@ -11,6 +11,7 @@ import {
 import { execFileSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { assert, eq } from "../shared/assertions.mjs";
 import {
   assertNoGlobalChrome,
@@ -455,8 +456,6 @@ export const runtimeSections = {
           workflow: {
             phase: "simple_plan",
             label: "Schnellplan",
-            completed: 1,
-            total: 3,
           },
           lsp: { state: "ready" },
         });
@@ -470,15 +469,10 @@ export const runtimeSections = {
           "simple_plan",
           "Aurora rejects the retired legacy phase name",
         );
-        eq(state.workflow.completed, 1, "Aurora keeps workflow progress");
-        eq(state.workflow.total, 3, "Aurora keeps the workflow total");
-        auroraState.mergeAuroraUiState(state, {
-          workflow: { completed: 4, total: 3 },
-        });
         eq(
-          state.workflow.completed,
-          undefined,
-          "Aurora rejects progress beyond the declared total",
+          state.workflow.label,
+          "Schnellplan",
+          "Aurora merges the workflow label",
         );
         eq(state.lsp.state, "ready", "Aurora merges LSP patches");
         assert(
@@ -2619,8 +2613,6 @@ export const runtimeSections = {
             workflow: {
               phase: "detailed_plan",
               label: "Architekturplan",
-              completed: 1,
-              total: 3,
             },
             permissions: { level: "project-write", label: "Projekt schreiben" },
           },
@@ -2651,16 +2643,20 @@ export const runtimeSections = {
       );
       eq(
         harness.chrome,
-        { footer: 1, editor: 1, widget: 1, header: 0 },
+        { footer: 1, editor: 0, widget: 1, header: 0 },
         "Aurora is the single custom chrome owner",
       );
       assert(
         Boolean(harness.footerFactory),
         "Aurora installs a footer factory",
       );
-      assert(
-        Boolean(harness.editorFactory),
-        "Aurora installs an editor factory",
+      // The frame line above the editor is gone: the workflow it carried lives
+      // in the footer now, so Aurora leaves Pi's editor alone and the prompt is
+      // free to size itself to its own content.
+      eq(
+        harness.editorFactory,
+        undefined,
+        "Aurora replaces no editor component",
       );
 
       // A second consumer asks for the current state. Aurora answers on the
@@ -2725,53 +2721,52 @@ export const runtimeSections = {
           },
         );
         for (const width of [60, 90, 140]) {
+          const rendered = footer.render(width);
+          eq(
+            rendered.length,
+            1,
+            `Aurora footer is a single status line at ${width} columns`,
+          );
           assert(
-            footer
-              .render(width)
-              .every((line) => stripAnsi(line).length <= width),
+            stripAnsi(rendered[0]).length <= width,
             `Aurora footer fits ${width} columns`,
           );
         }
-        assert(
-          stripAnsi(footer.render(140)[0]).includes(
-            `~${path.sep}projects${path.sep}aurora-test`,
-          ),
-          "Aurora footer shows the current directory as a compact home-relative path",
-        );
 
         const wide = stripAnsi(footer.render(140)[0]);
         const narrow = stripAnsi(footer.render(60)[0]);
 
-        // The permission mode comes from the Aurora bus. The "permissions" status
-        // key carries a risk banner sized for dialogs, not for a footer segment.
+        // Decision 009 moved the workflow here: one permanent status surface,
+        // and the editor frame that used to carry it is gone.
         assert(
-          wide.includes("Projekt schreiben") && !wide.includes("Read + Write"),
-          "Aurora footer shows the permission mode from the bus, not the status banner",
-        );
-        assert(
-          narrow.includes("Projekt schreiben"),
-          "the permission mode survives the narrowest layout",
+          wide.startsWith("Architekturplan") &&
+            narrow.startsWith("Architekturplan"),
+          "the workflow label leads the footer at every width",
         );
 
-        // Segments give up their place whole rather than being shaved off at the
-        // edge, so what remains stays readable.
+        // The footer renders runtime state, never the wide risk banner the
+        // permission status key publishes for dialogs.
         assert(
-          wide.includes("Denken") && !narrow.includes("Denken"),
+          !wide.includes("ARBEIT 1/3") && !wide.includes("Read + Write"),
+          "Aurora footer renders runtime state, not status-key banners",
+        );
+
+        // A routine permission mode costs nothing; only a risky one speaks up.
+        assert(
+          !wide.includes("Projekt schreiben") &&
+            !narrow.includes("Projekt schreiben"),
+          "a routine permission mode does not spend footer space",
+        );
+
+        // Segments give up their place whole rather than being shaved off at
+        // the edge, so what remains stays readable.
+        assert(
+          wide.includes("high") && !narrow.includes("high"),
           "Aurora footer drops the thinking segment before it crowds a narrow line",
         );
 
-        // The editor frame is the only surface allowed to show workflow status
-        // (decision 009). The footer must never echo the "workflow" status key,
-        // even in the wide layout that has room for it.
         assert(
-          !wide.includes("ARBEIT 1/3"),
-          "Aurora footer no longer duplicates the workflow status from the editor frame",
-        );
-
-        // renderPill's bracket fallback fired on every render because "pillBg" is
-        // not a key the Pi theme schema knows.
-        assert(
-          !/[[\]]/.test(wide) && !/[[\]]/.test(narrow),
+          !/[\[\]]/.test(wide) && !/[\[\]]/.test(narrow),
           "Aurora footer segments are colored, not bracketed",
         );
         assert(
@@ -2779,136 +2774,241 @@ export const runtimeSections = {
           "Aurora footer never falls back to an unstyled separator",
         );
 
-        const wideLines = footer.render(140).map(stripAnsi);
-        eq(
-          wideLines.filter((line) => line.includes("Kontext")).length,
-          1,
-          "context is reported exactly once, on the second wide line",
-        );
-        assert(
-          !wideLines.some((line) => line.includes("Konf ")),
-          "the second footer line spells out Kontext",
-        );
-        const readsAfterFirstWideRender = harness.branchReads;
-        footer.render(140);
-        eq(
-          harness.branchReads,
-          readsAfterFirstWideRender,
-          "Aurora reuses token totals across unchanged footer renders",
-        );
+        // Nothing in the footer walks the session branch any more, so a branch
+        // change is a repaint trigger and not a recomputation.
+        const readsBeforeBranchChange = harness.branchReads;
         onBranchChange?.();
         footer.render(140);
         eq(
           harness.branchReads,
-          readsAfterFirstWideRender + 1,
-          "Aurora recomputes token totals exactly once after a branch change",
+          readsBeforeBranchChange,
+          "the footer never walks the session branch while rendering",
+        );
+
+        // The footer caches nothing, so dropping its caches changes nothing.
+        const beforeInvalidate = footer.render(140).map(stripAnsi);
+        footer.invalidate?.();
+        eq(
+          footer.render(140).map(stripAnsi),
+          beforeInvalidate,
+          "the footer holds no cache that invalidation could change",
         );
         footer.dispose?.();
       }
 
       {
-        const responsiveInput = {
-          state: {
-            sessionEpoch: "responsive-test",
-            workflow: { phase: "work", label: "Work" },
-            permissions: { level: "confirm-all", label: "Alles bestätigen" },
-            lsp: { state: "eingeschränkt" },
-            model: { id: "aurora-test-model", thinking: "hoch" },
-            activity: { kind: "idle", activeTools: 0 },
-          },
-          statuses: new Map(),
-          branch: "feature/aurora",
-          cwd: path.join(homedir(), "projects", "aurora-test"),
-          sessionName: "aurora-test",
-          tokens: { input: 1_000, output: 500 },
-          contextPercent: 92,
-        };
-        const narrow = auroraFooter
-          .renderFooterLines(context.ui.theme, 60, responsiveInput)
-          .map(stripAnsi)
-          .join("\n");
-        const normal = auroraFooter
-          .renderFooterLines(context.ui.theme, 90, {
-            ...responsiveInput,
-            state: { ...responsiveInput.state, lsp: { state: "ready" } },
-            contextPercent: 40,
-          })
-          .map(stripAnsi)
-          .join("\n");
+        // Layout assertions must measure terminal cells, so they use the same
+        // width function the footer itself does.
+        const { visibleWidth } = await import(
+          pathToFileURL(
+            path.join(
+              ROOT,
+              "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.js",
+            ),
+          ).href
+        );
+        const { LAYOUT_COLUMNS } = await load("extensions/shared/layout.ts");
+        const footerState = (overrides = {}) => ({
+          sessionEpoch: "responsive-test",
+          workflow: { phase: "work", label: "Work" },
+          permissions: { level: "project-write", label: "Projekt schreiben" },
+          lsp: { state: "ready" },
+          model: { id: "aurora-test-model", thinking: "high" },
+          activity: { kind: "idle", activeTools: 0 },
+          ...overrides,
+        });
+        const line = (width, input) =>
+          stripAnsi(
+            auroraFooter.renderFooterLines(context.ui.theme, width, {
+              statuses: new Map(),
+              contextPercent: null,
+              ...input,
+              state: footerState(input.state),
+            })[0],
+          );
+
+        // The information priority from the UX brief, tier by tier.
+        const quiet = { contextPercent: 38 };
         assert(
-          narrow.includes("Alles bestätigen") &&
-            narrow.includes("LSP eingeschränkt") &&
-            narrow.includes("Kontext 92%") &&
-            !narrow.includes("aurora-test-model"),
-          "the narrow footer protects permissions and warnings before model metadata",
+          line(140, quiet).includes("ctx 38%") &&
+            line(140, quiet).includes("high"),
+          "the wide footer shows thinking and context",
         );
         assert(
-          normal.includes("aurora-test-model") &&
-            normal.includes("LSP ready") &&
-            normal.includes("Kontext 40%"),
-          "the normal footer adds model and routine diagnostics",
+          !line(100, quiet).includes("ctx 38%") &&
+            line(100, quiet).includes("high"),
+          "the comfortable footer drops context before thinking",
+        );
+        const standard = line(70, quiet);
+        assert(
+          standard.includes("Work") &&
+            standard.includes("aurora-test-model") &&
+            !standard.includes("high"),
+          "the standard footer keeps workflow and model only",
+        );
+        const compact = line(45, quiet);
+        assert(
+          compact.includes("Work") && compact.includes("aurora-test-model"),
+          "the compact footer still names the workflow and the model",
         );
 
-        // setup-core publishes the verification status via setStatus; Aurora
-        // replaces the runtime footer wholesale, so this is the only surface
-        // that can render it. It used to be computed and then dropped.
-        const withVerification = (value, extra) => ({
-          ...responsiveInput,
-          ...extra,
-          statuses: new Map([["verification", value]]),
-        });
-        const quiet = {
-          state: { ...responsiveInput.state, lsp: { state: "ready" } },
-          contextPercent: 10,
-        };
-        const failedNarrow = auroraFooter
-          .renderFooterLines(
-            context.ui.theme,
-            60,
-            withVerification("Verify: checks_failed", quiet),
-          )
-          .map(stripAnsi)
-          .join("\n");
-        const cleanNarrow = auroraFooter
-          .renderFooterLines(
-            context.ui.theme,
-            60,
-            withVerification("Verify: clean", quiet),
-          )
-          .map(stripAnsi)
-          .join("\n");
-        const verifiedNormal = auroraFooter
-          .renderFooterLines(
-            context.ui.theme,
-            90,
-            withVerification("Verify: verified", quiet),
-          )
-          .map(stripAnsi)
-          .join("\n");
-        const staleWide = auroraFooter
-          .renderFooterLines(
+        // Risk outranks the tier: these claim space at any width.
+        const yolo = { state: { permissions: { level: "yolo" } } };
+        for (const width of [45, 70, 100, 140]) {
+          assert(
+            line(width, yolo).includes("⚠ YOLO"),
+            `YOLO displaces routine information at ${width} columns`,
+          );
+        }
+        assert(
+          line(45, {
+            statuses: new Map([["verification", "Verify: checks_failed"]]),
+          }).includes("checks_failed"),
+          "a failing verification claims space even in the compact footer",
+        );
+        assert(
+          !line(45, {
+            statuses: new Map([["verification", "Verify: clean"]]),
+          }).includes("clean"),
+          "a clean workspace does not spend compact footer space",
+        );
+        assert(
+          line(100, {
+            statuses: new Map([["verification", "Verify: verified"]]),
+          }).includes("verified"),
+          "the comfortable footer reports a proven workspace",
+        );
+        assert(
+          line(45, { state: { lsp: { state: "eingeschränkt" } } }).includes(
+            "LSP eingeschränkt",
+          ),
+          "a broken language server is reported at any width",
+        );
+        for (const healthy of ["ready", "leerlauf", "aus", "3 aktiv"]) {
+          assert(
+            !line(140, { state: { lsp: { state: healthy } } }).includes("LSP"),
+            `a language server reporting "${healthy}" stays off the line`,
+          );
+        }
+        // Colour and layout priority are separate. A filling context warns
+        // where there is room, but must not push the workflow or the model off
+        // a narrow line the way a genuine emergency may.
+        for (const columns of [45, 70]) {
+          assert(
+            !line(columns, { contextPercent: 75 }).includes("ctx 75%"),
+            `a 75% context does not claim space at ${columns} columns`,
+          );
+        }
+        for (const columns of [100, 140]) {
+          const filling = line(columns, { contextPercent: 75 });
+          assert(
+            columns >= LAYOUT_COLUMNS.wide
+              ? filling.includes("ctx 75%")
+              : !filling.includes("ctx 75%"),
+            `a 75% context follows the normal tier at ${columns} columns`,
+          );
+        }
+        {
+          const warned = auroraFooter.renderFooterLines(
             context.ui.theme,
             140,
-            withVerification("Verify: changed_unverified", quiet),
-          )
-          .map(stripAnsi)
-          .join("\n");
-        assert(
-          failedNarrow.includes("Verify checks_failed"),
-          "a failing verification status claims space even in the narrow footer",
-        );
-        assert(
-          !cleanNarrow.includes("Verify"),
-          "a clean workspace does not spend narrow footer space on a verify segment",
-        );
-        assert(
-          verifiedNormal.includes("Verify verified"),
-          "the normal footer renders the routine verification status",
-        );
-        assert(
-          staleWide.includes("Verify changed_unverified"),
-          "the wide footer renders the verification status next to LSP",
-        );
+            {
+              statuses: new Map(),
+              contextPercent: 75,
+              state: footerState(),
+            },
+          )[0];
+          assert(
+            warned.includes(context.ui.theme.fg("warning", "ctx 75%")),
+            "a 75% context is coloured as a warning where it is shown",
+          );
+        }
+
+        // Only a nearly exhausted context overrides the tier, at every size.
+        for (const columns of [40, 45, 52, 90, 120, 160]) {
+          const critical = auroraFooter.renderFooterLines(
+            context.ui.theme,
+            columns,
+            {
+              statuses: new Map(),
+              contextPercent: 95,
+              state: footerState(),
+            },
+          );
+          eq(critical.length, 1, `one line at ${columns} columns`);
+          assert(
+            stripAnsi(critical[0]).includes("ctx 95%"),
+            `an exhausted context survives the tier at ${columns} columns`,
+          );
+          assert(
+            visibleWidth(critical[0]) <= columns,
+            `an exhausted context does not overflow ${columns} columns`,
+          );
+        }
+
+        // Layout decisions must count terminal cells, not JavaScript
+        // characters: `⚠`, `✓` and CJK all occupy more cells than they do
+        // string length. Measuring length would let a line "fit" and then be
+        // truncated at the edge — losing part of a finished status instead of
+        // dropping a whole segment.
+        for (const columns of [40, 52, 70, 90, 120]) {
+          const wide = auroraFooter.renderFooterLines(
+            context.ui.theme,
+            columns,
+            {
+              statuses: new Map([
+                ["verification", "Verify: changed_unverified"],
+              ]),
+              contextPercent: 95,
+              state: footerState({
+                workflow: { phase: "work", label: "作業モード" },
+                model: { id: "模型-统一-推理-大", thinking: "high" },
+                permissions: { level: "yolo" },
+                lsp: { state: "eingeschränkt" },
+              }),
+            },
+          );
+          eq(wide.length, 1, `wide glyphs stay on one line at ${columns}`);
+          const rendered = wide[0];
+          assert(
+            visibleWidth(rendered) <= columns,
+            `wide glyphs never overflow ${columns} terminal cells`,
+          );
+          // Whatever survived is intact — the ellipsis would mean a segment was
+          // shaved at the edge instead of being dropped whole.
+          assert(
+            !stripAnsi(rendered).includes("…"),
+            `segments are dropped whole rather than truncated at ${columns}`,
+          );
+        }
+
+        // The responsive matrix from the UX brief. Every size gets the loudest
+        // possible state, so nothing can fit by being empty.
+        for (const columns of [40, 51, 52, 80, 89, 90, 119, 120, 160]) {
+          for (const input of [quiet, yolo]) {
+            const rendered = auroraFooter.renderFooterLines(
+              context.ui.theme,
+              columns,
+              {
+                statuses: new Map([
+                  ["verification", "Verify: changed_unverified"],
+                ]),
+                contextPercent: 88,
+                ...input,
+                state: footerState(input.state),
+              },
+            );
+            eq(
+              rendered.length,
+              1,
+              `the footer stays a single line at ${columns} columns`,
+            );
+            assert(
+              stripAnsi(rendered[0]).length <= columns,
+              `the footer never overflows ${columns} columns`,
+            );
+          }
+        }
 
         const auroraTools = await load(
           "extensions/aurora-ui/tool-renderers.ts",
@@ -2920,16 +3020,16 @@ export const runtimeSections = {
             startedAt: 0,
           }),
         );
-        const narrowTools = auroraTools
-          .renderActiveTools(activeTools, context.ui.theme, 60, 5_000)
+        const compactTools = auroraTools
+          .renderActiveTools(activeTools, context.ui.theme, 45, 5_000)
           .map(stripAnsi);
         const normalTools = auroraTools
           .renderActiveTools(activeTools, context.ui.theme, 90, 5_000)
           .map(stripAnsi);
         assert(
-          narrowTools.length === 2 &&
-            narrowTools.at(-1)?.includes("+3 weitere Tools"),
-          "the narrow activity surface discloses hidden parallel tools",
+          compactTools.length === 2 &&
+            compactTools.at(-1)?.includes("+3 weitere Tools"),
+          "the compact activity surface discloses hidden parallel tools",
         );
         assert(
           normalTools.length === 4 &&
@@ -2938,99 +3038,74 @@ export const runtimeSections = {
         );
       }
 
-      // Aurora owns the compact, live subagent summary in the footer. Rendering no
-      // subagents must leave the rest of the footer intact.
+      // Subagents are inline work: they show up next to the tool that started
+      // them, for as long as it runs. The footer never carries them.
       {
-        const footerState = {
-          sessionEpoch: "test-epoch",
-          workflow: { phase: "arbeit", label: "ARBEIT" },
-          permissions: { label: "Read + Write" },
-          lsp: { state: "ready" },
-          model: { id: "claude-opus-5", thinking: "aus" },
-          activity: { kind: "idle", activeTools: 0 },
-        };
-        const footerInput = (subagents) => ({
-          state: footerState,
-          statuses: new Map(),
-          branch: null,
-          cwd: process.cwd(),
-          sessionName: undefined,
-          tokens: { input: 0, output: 0 },
-          contextPercent: null,
-          subagents,
-        });
-        const withSubagents = auroraFooter
-          .renderFooterLines(
-            context.ui.theme,
-            140,
-            footerInput([
+        const auroraTools = await load(
+          "extensions/aurora-ui/tool-renderers.ts",
+        );
+        const withSubagents = auroraTools
+          .renderSubagents(
+            [
               { agent: "reviewer", status: "needs_attention" },
               { agent: "worker", status: "running" },
-            ]),
+            ],
+            context.ui.theme,
+            120,
           )
           .map(stripAnsi)
           .join("\n");
-        const handedOver = auroraFooter
-          .renderFooterLines(context.ui.theme, 140, footerInput(undefined))
-          .map(stripAnsi)
-          .join("\n");
         assert(
-          withSubagents.includes("2 Subagenten aktiv") &&
-            withSubagents.includes("reviewer"),
-          "Aurora footer reports active subagents",
+          withSubagents.includes("Subagents · 2 aktiv") &&
+            withSubagents.includes("reviewer") &&
+            withSubagents.includes("1 Aufmerksamkeit"),
+          "the activity widget reports active subagents and what needs a look",
         );
-        assert(
-          !handedOver.includes("Subagent") && !handedOver.includes("reviewer"),
-          "Aurora footer omits the subagent line when there are none",
+        eq(
+          auroraTools.renderSubagents([], context.ui.theme, 120),
+          [],
+          "no subagents means no lines at all",
         );
-        assert(
-          handedOver.length > 0 && handedOver.includes("Read + Write"),
-          "handing the subagent segment over leaves the rest of the footer intact",
+        eq(
+          auroraTools.renderSubagents(
+            [{ agent: "worker", phase: "analyse", status: "running" }],
+            context.ui.theme,
+            45,
+          ).length,
+          1,
+          "a compact terminal gets the summary line only",
         );
-        const overflow = auroraFooter
-          .renderFooterLines(
+        const overflow = auroraTools
+          .renderSubagents(
+            ["investigator", "debugger", "verifier", "reviewer"].map(
+              (agent) => ({
+                agent: `very-long-${agent}-name`,
+                phase: "very-long-analysis-phase",
+                status: "running",
+              }),
+            ),
             context.ui.theme,
             124,
-            footerInput([
-              {
-                agent: "very-long-investigator-name",
-                phase: "very-long-analysis-phase",
-                status: "running",
-              },
-              {
-                agent: "very-long-debugger-name",
-                phase: "very-long-analysis-phase",
-                status: "running",
-              },
-              {
-                agent: "very-long-verifier-name",
-                phase: "very-long-analysis-phase",
-                status: "running",
-              },
-              {
-                agent: "very-long-review-name",
-                phase: "very-long-analysis-phase",
-                status: "running",
-              },
-            ]),
           )
           .map(stripAnsi)
           .join("\n");
         assert(
           overflow.includes("+1 weitere"),
-          "the subagent overflow count survives long names in the compact wide footer",
+          "the subagent overflow count survives long names",
         );
       }
 
-      // The pure function contract above only proves renderFooterLines() itself
+      // The pure function contract above only proves renderSubagents() itself
       // behaves correctly. This proves the actual wiring: with the real, pinned
       // `extensions/subagent/config.json` (`ui.fleetView: true`), the running
-      // extension must read that file at session_start and hand the segment
+      // extension must read that file at session_start and hand the display
       // over end-to-end — not just when a test constructs the input by hand.
       {
         const dockHarness = createHarness();
         auroraUi.default(dockHarness.api);
+        let dockRequests = 0;
         dockHarness.api.events.on("subagents:rpc:v1:request", (request) => {
+          dockRequests += 1;
           dockHarness.api.events.emit(
             `subagents:rpc:v1:reply:${request.requestId}`,
             {
@@ -3043,15 +3118,6 @@ export const runtimeSections = {
         });
         const dockContext = dockHarness.makeContext();
         await dockHarness.runHooks("session_start", {}, dockContext);
-        const dockFooter = dockHarness.footerFactory?.(
-          { requestRender() {} },
-          dockContext.ui.theme,
-          {
-            getGitBranch: () => null,
-            getExtensionStatuses: () => new Map(),
-            onBranchChange: () => () => {},
-          },
-        );
         await dockHarness.runHooks(
           "tool_execution_start",
           {
@@ -3061,62 +3127,29 @@ export const runtimeSections = {
           },
           dockContext,
         );
-        dockFooter?.render(140);
-        await Promise.resolve();
-        await Promise.resolve();
+        dockHarness.api.events.emit("subagent:control-event", {});
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const dockActivity =
+          dockHarness.widgets.get("aurora-ui/activity")?.content;
         const dockRendered =
-          dockFooter?.render(140).map(stripAnsi).join("\n") ?? "";
+          typeof dockActivity === "function"
+            ? dockActivity({ requestRender() {} }, dockContext.ui.theme)
+                .render(140)
+                .map(stripAnsi)
+                .join("\n")
+            : "";
         assert(
           !dockRendered.includes("worker") &&
             !dockRendered.includes("async-test") &&
-            !dockRendered.includes("Subagent"),
-          "with the real pinned config, the Fleet Status Dock owns the subagent segment end-to-end and the footer shows none of it",
+            !dockRendered.includes("Subagents"),
+          "with the real pinned config, the Fleet Status Dock owns the subagent display end-to-end and Aurora shows none of it",
+        );
+        eq(
+          dockRequests,
+          0,
+          "handing the display over also stops Aurora from asking for status",
         );
         await dockHarness.runHooks("session_shutdown", {}, dockContext);
-      }
-
-      // The editor frame carries workflow and step only. Everything durable moved
-      // to the footer, so a status value must never appear on both surfaces.
-      if (harness.editorFactory) {
-        const identity = (value) => value;
-        const editor = harness.editorFactory(
-          {
-            requestRender() {},
-            write() {},
-            terminal: { rows: 40, columns: 140 },
-          },
-          {
-            borderColor: identity,
-            selectList: {
-              text: identity,
-              selectedText: identity,
-              description: identity,
-              scrollIndicator: identity,
-            },
-          },
-          { onAction() {}, get: () => undefined },
-        );
-        const framed = editor.render(140).map(stripAnsi);
-        const frame = framed.find((line) => line.startsWith("╭"));
-        assert(
-          Boolean(frame),
-          "the editor keeps exactly one frame line on top",
-        );
-        assert(
-          !framed.some((line) => line.startsWith("╰")),
-          "the lower frame line is gone with the values it used to carry",
-        );
-        assert(
-          frame?.includes("Architekturplan · 1/3"),
-          "the editor frame names the workflow and its structured progress",
-        );
-        for (const duplicated of ["Denken", "Kontext", "aurora-test-model"]) {
-          assert(
-            !frame?.includes(duplicated),
-            `the editor frame leaves ${duplicated} to the footer`,
-          );
-        }
-        editor.dispose?.();
       }
 
       await harness.runHooks("agent_start", {}, context);
@@ -3186,7 +3219,7 @@ export const runtimeSections = {
                   .join("\n")
               : "";
           assert(
-            rendered.includes("Analysiert die Aufgabe"),
+            rendered.includes("Thinking · "),
             `Aurora keeps its activity label visible with ${motion} motion`,
           );
           if (motion === "reduced")
@@ -3257,10 +3290,12 @@ export const runtimeSections = {
               2,
             ),
           );
-          const footerHarness = createHarness();
-          auroraUi.default(footerHarness.api);
-          footerHarness.api.events.on("subagents:rpc:v1:request", (request) => {
-            footerHarness.api.events.emit(
+          const widgetHarness = createHarness();
+          auroraUi.default(widgetHarness.api);
+          let statusRequests = 0;
+          widgetHarness.api.events.on("subagents:rpc:v1:request", (request) => {
+            statusRequests += 1;
+            widgetHarness.api.events.emit(
               `subagents:rpc:v1:reply:${request.requestId}`,
               {
                 success: true,
@@ -3270,54 +3305,215 @@ export const runtimeSections = {
               },
             );
           });
-          const footerContext = footerHarness.makeContext();
-          await footerHarness.runHooks("session_start", {}, footerContext);
-          const footer = footerHarness.footerFactory?.(
-            { requestRender() {} },
-            footerContext.ui.theme,
-            {
-              getGitBranch: () => null,
-              getExtensionStatuses: () => new Map(),
-              onBranchChange: () => () => {},
-            },
-          );
-          footer?.render(140);
-          await Promise.resolve();
-          await Promise.resolve();
-          footer?.invalidate?.();
-          assert(
-            footer
-              ?.render(140)
-              .some((line) => stripAnsi(line).includes("async-test")),
-            "Aurora renders active async runs from the pinned RPC response shape",
-          );
-          await footerHarness.runHooks(
+          const widgetContext = widgetHarness.makeContext();
+          await widgetHarness.runHooks("session_start", {}, widgetContext);
+          const activity =
+            widgetHarness.widgets.get("aurora-ui/activity")?.content;
+          const render = () =>
+            typeof activity === "function"
+              ? activity({ requestRender() {} }, widgetContext.ui.theme)
+                  .render(140)
+                  .map(stripAnsi)
+                  .join("\n")
+              : "";
+
+          await widgetHarness.runHooks(
             "tool_execution_start",
             {
               toolCallId: "foreground-subagent",
               toolName: "subagent",
               args: { agent: "worker" },
             },
-            footerContext,
+            widgetContext,
           );
           assert(
-            footer
-              ?.render(140)
-              .some((line) => stripAnsi(line).includes("worker")),
-            "Aurora renders a running foreground subagent immediately",
+            render().includes("worker"),
+            "a running foreground subagent appears straight from the tool call",
           );
-          await footerHarness.runHooks(
+
+          // Rendering must never be what triggers a status request — that was
+          // a poll in the render path. Only a subagent event triggers one, and
+          // a burst of them collapses into a single request.
+          render();
+          render();
+          const requestsFromRendering = statusRequests;
+          for (let index = 0; index < 5; index += 1)
+            widgetHarness.api.events.emit("subagent:control-event", {});
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          eq(
+            statusRequests - requestsFromRendering,
+            1,
+            "a burst of subagent events produces exactly one status request",
+          );
+          assert(
+            render().includes("async-test"),
+            "the widget renders active async runs from the pinned RPC response shape",
+          );
+
+          await widgetHarness.runHooks(
             "tool_execution_end",
             { toolCallId: "foreground-subagent", toolName: "subagent" },
-            footerContext,
+            widgetContext,
           );
           assert(
-            !footer
-              ?.render(140)
-              .some((line) => stripAnsi(line).includes("worker")),
+            !render().includes("worker"),
             "Aurora removes a foreground subagent when its tool call ends",
           );
-          await footerHarness.runHooks("session_shutdown", {}, footerContext);
+          await widgetHarness.runHooks("session_shutdown", {}, widgetContext);
+
+          // An event that arrives while a request is still unanswered must not
+          // be dropped — the cache would stay stale until something else
+          // happened to move. Any number of them owe exactly one follow-up.
+          {
+            const raceHarness = createHarness();
+            auroraUi.default(raceHarness.api);
+            const asked = [];
+            raceHarness.api.events.on("subagents:rpc:v1:request", (request) => {
+              asked.push(request.requestId);
+            });
+            const raceContext = raceHarness.makeContext();
+            await raceHarness.runHooks("session_start", {}, raceContext);
+
+            raceHarness.api.events.emit("subagent:control-event", {});
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(asked.length, 1, "the first event produces one request");
+
+            for (let index = 0; index < 3; index += 1)
+              raceHarness.api.events.emit("subagent:control-event", {});
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(
+              asked.length,
+              1,
+              "no second request goes out while the first is unanswered",
+            );
+
+            raceHarness.api.events.emit(`subagents:rpc:v1:reply:${asked[0]}`, {
+              success: true,
+              data: { text: "Active async runs: 0" },
+            });
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(
+              asked.length,
+              2,
+              "three events during one request owe exactly one follow-up",
+            );
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(asked.length, 2, "and the follow-up does not cascade");
+            await raceHarness.runHooks("session_shutdown", {}, raceContext);
+          }
+
+          // A request outlives the session that asked it. Its answer belongs to
+          // a session that no longer exists and must not reach the next one.
+          {
+            const staleHarness = createHarness();
+            auroraUi.default(staleHarness.api);
+            const asked = [];
+            staleHarness.api.events.on(
+              "subagents:rpc:v1:request",
+              (request) => {
+                asked.push(request.requestId);
+              },
+            );
+            const sessionA = staleHarness.makeContext();
+            await staleHarness.runHooks("session_start", {}, sessionA);
+            await staleHarness.runHooks(
+              "tool_execution_start",
+              {
+                toolCallId: "session-a-tool",
+                toolName: "subagent",
+                args: { agent: "session-a-worker" },
+              },
+              sessionA,
+            );
+            staleHarness.api.events.emit("subagent:control-event", {});
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(asked.length, 1, "session A has a request on the wire");
+
+            await staleHarness.runHooks("session_shutdown", {}, sessionA);
+            const sessionB = staleHarness.makeContext();
+            await staleHarness.runHooks("session_start", {}, sessionB);
+
+            // The late answer from session A, arriving inside session B.
+            staleHarness.api.events.emit(`subagents:rpc:v1:reply:${asked[0]}`, {
+              success: true,
+              data: {
+                text: "Active async runs: 1\n\n- stale-from-a | running | single | steps 1 | /tmp",
+              },
+            });
+            await new Promise((resolve) => setTimeout(resolve, 400));
+
+            const activityB = staleHarness.widgets.get("aurora-ui/activity")
+              ?.content;
+            await staleHarness.runHooks(
+              "tool_execution_start",
+              {
+                toolCallId: "session-b-tool",
+                toolName: "subagent",
+                args: { agent: "session-b-worker" },
+              },
+              sessionB,
+            );
+            const renderedB =
+              typeof activityB === "function"
+                ? activityB({ requestRender() {} }, sessionB.ui.theme)
+                    .render(140)
+                    .map(stripAnsi)
+                    .join("\n")
+                : "";
+            assert(
+              !renderedB.includes("stale-from-a") &&
+                !renderedB.includes("session-a-worker"),
+              "an answer from a retired session never reaches the next one",
+            );
+            assert(
+              renderedB.includes("session-b-worker"),
+              "the new session still tracks its own subagents",
+            );
+
+            // The retired request must also not leave the in-flight gate stuck:
+            // session B has to be able to ask for status itself.
+            staleHarness.api.events.emit("subagent:control-event", {});
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(
+              asked.length,
+              2,
+              "a session that replaced another can still request status",
+            );
+            await staleHarness.runHooks("session_shutdown", {}, sessionB);
+          }
+
+          // Nothing answers the status request here. The widget has to give up
+          // on its own and keep rendering the work it can see by itself,
+          // rather than waiting forever on an absent subagent package.
+          const silentHarness = createHarness();
+          auroraUi.default(silentHarness.api);
+          const silentContext = silentHarness.makeContext();
+          await silentHarness.runHooks("session_start", {}, silentContext);
+          await silentHarness.runHooks(
+            "tool_execution_start",
+            {
+              toolCallId: "foreground-only",
+              toolName: "subagent",
+              args: { agent: "lonely" },
+            },
+            silentContext,
+          );
+          silentHarness.api.events.emit("subagent:control-event", {});
+          await new Promise((resolve) => setTimeout(resolve, 1_600));
+          const silentActivity =
+            silentHarness.widgets.get("aurora-ui/activity")?.content;
+          const silentRendered =
+            typeof silentActivity === "function"
+              ? silentActivity({ requestRender() {} }, silentContext.ui.theme)
+                  .render(140)
+                  .map(stripAnsi)
+                  .join("\n")
+              : "";
+          assert(
+            silentRendered.includes("lonely"),
+            "an unanswered status request never hides the subagents Aurora already knows",
+          );
+          await silentHarness.runHooks("session_shutdown", {}, silentContext);
         } finally {
           writeFileSync(subagentConfigPath, originalSubagentConfig);
         }
@@ -3399,7 +3595,7 @@ export const runtimeSections = {
       await harness.runHooks("session_start", {}, context);
       eq(
         harness.chrome,
-        { footer: 1, editor: 1, widget: 1, header: 0 },
+        { footer: 1, editor: 0, widget: 1, header: 0 },
         "combined stack gives Aurora exclusive ownership of custom chrome",
       );
       eq(

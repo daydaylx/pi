@@ -1,365 +1,276 @@
-import { homedir } from "node:os";
-import { isAbsolute, normalize, relative, sep } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderSegment, statusSeparator } from "../shared/ui-theme.ts";
-import { crop, layoutFor, type Layout } from "./layout.ts";
+import { footerTier, type Layout } from "../shared/layout.ts";
+import {
+  renderSegment,
+  STATUS_SEPARATOR,
+  statusSeparator,
+  type Tone,
+} from "../shared/ui-theme.ts";
+import { crop } from "./layout.ts";
 import type { AuroraUiState } from "./state.ts";
 
-/** Aurora's compact fallback when the Fleet Status Dock is not active. */
-export interface SubagentInfo {
-  agent: string;
-  phase?: string;
-  label?: string;
-  status: "running" | "paused" | "needs_attention" | "queued";
-}
-
+/**
+ * The footer is the one permanent status surface, and it is one line.
+ *
+ * Everything it reports comes out of runtime state that some other extension
+ * already publishes on the Aurora bus or through `getExtensionStatuses()`.
+ * Nothing here starts a process, probes git or the LSP, asks a provider or
+ * touches the file system: `render` is called on every frame, so any of that
+ * would be paid for continuously and for nothing.
+ */
 export interface FooterInput {
   state: AuroraUiState;
   statuses: ReadonlyMap<string, string>;
-  branch: string | null;
-  cwd: string;
-  sessionName: string | undefined;
-  tokens: { input: number; output: number };
   contextPercent: number | null;
-  subagents?: SubagentInfo[];
 }
 
-const GROUP_GAP = "   ";
 const CONTEXT_WARNING_PERCENT = 70;
-
-export function compactCwd(cwd: string): string {
-  const normalized = normalize(cwd);
-  const home = normalize(homedir());
-  const fromHome = relative(home, normalized);
-  if (fromHome === "") return "~";
-  if (
-    !isAbsolute(fromHome) &&
-    fromHome !== ".." &&
-    !fromHome.startsWith(`..${sep}`)
-  ) {
-    return `~${sep}${fromHome}`;
-  }
-  return normalized;
-}
-
-export function formatTokens(value: number): string {
-  if (value < 1_000) return String(value);
-  if (value < 1_000_000) return `${(value / 1_000).toFixed(1)}k`;
-  return `${(value / 1_000_000).toFixed(1)}m`;
-}
-
-export function renderContextGauge(percent: number, theme: Theme): string {
-  const filled = Math.min(10, Math.max(0, Math.floor(percent / 10)));
-  const bar = "▓".repeat(filled) + "░".repeat(10 - filled);
-  const color =
-    percent >= 90
-      ? "error"
-      : percent >= CONTEXT_WARNING_PERCENT
-        ? "warning"
-        : "success";
-  return `${theme.fg(color, bar)} ${theme.fg(color, `${Math.round(percent)}%`)}`;
-}
-
-function joinSides(
-  theme: Theme,
-  left: string,
-  right: string,
-  width: number,
-): string {
-  const available = Math.max(1, width);
-  const gap = available - visibleWidth(left) - visibleWidth(right);
-  if (gap >= 1) return left + " ".repeat(gap) + right;
-  if (available < 52)
-    return crop(`${left}${statusSeparator(theme)}${right}`, available);
-  const clippedLeft = crop(left, Math.max(1, Math.floor(available * 0.55)));
-  return crop(
-    clippedLeft +
-      " ".repeat(
-        Math.max(
-          1,
-          available - visibleWidth(clippedLeft) - visibleWidth(right),
-        ),
-      ) +
-      right,
-    available,
-  );
-}
-
-function permissionTone(
-  state: AuroraUiState,
-): "text" | "muted" | "warning" | "error" {
-  switch (state.permissions.level) {
-    case "yolo":
-      return "error";
-    case "confirm-all":
-      return "warning";
-    case "readonly":
-      return "muted";
-    default:
-      return "text";
-  }
-}
-
-function lspTone(state: string): "muted" | "success" | "warning" | "error" {
-  if (state === "ready") return "success";
-  if (state === "eingeschränkt") return "error";
-  if (state === "aus") return "muted";
-  return "warning";
-}
-
-function lspState(input: FooterInput): string {
-  return input.statuses.get("lsp") ?? input.state.lsp.state ?? "—";
-}
-
-function permissionLabel(input: FooterInput): string {
-  return input.state.permissions.label ?? "—";
-}
+const CONTEXT_CRITICAL_PERCENT = 90;
+const MODEL_MAX_COLUMNS = 32;
 
 /**
- * setup-core publishes the technical verification status of the current
- * workspace snapshot as `"Verify: <status>"`. Aurora replaces the runtime
- * footer wholesale, so this is the only place it can surface.
+ * Where a segment sits on the line. Reading order is fixed and independent of
+ * how hard the segment fights to stay: risk is loud, but it belongs at the end
+ * where a scan finishes, not wedged between the model and the thinking level.
+ * A plain object rather than a `const enum` — the test loader transpiles
+ * without type information.
  */
-function verificationState(input: FooterInput): string | null {
-  const value = input.statuses.get("verification");
-  if (!value) return null;
-  return value.replace(/^Verify:\s*/, "");
+const Slot = {
+  workflow: 0,
+  model: 1,
+  thinking: 2,
+  context: 3,
+  verification: 4,
+  risk: 5,
+} as const;
+
+type Slot = (typeof Slot)[keyof typeof Slot];
+
+/**
+ * What gets dropped first when the line is too long — lowest survives longest.
+ * The workflow is last man standing. Everything that reports an actual problem
+ * outranks the model name: at the widths where this matters the user knows
+ * which model they picked, and does not yet know their language server died.
+ */
+const Priority = {
+  workflow: 0,
+  yolo: 1,
+  failedVerification: 2,
+  exhaustedContext: 3,
+  lsp: 4,
+  model: 5,
+  verification: 6,
+  thinking: 7,
+  context: 8,
+} as const;
+
+type Priority = (typeof Priority)[keyof typeof Priority];
+
+interface Segment {
+  slot: Slot;
+  priority: Priority;
+  text: string;
+  tone: Tone;
+  bold?: boolean;
+  /**
+   * A segment that reports a risk or a failure. It ignores the width tier,
+   * because a footer that hides YOLO or a failed verification to save four
+   * columns is worse than one that has to drop something else.
+   */
+  critical?: boolean;
 }
 
-function verificationTone(
-  state: string,
-): "muted" | "success" | "warning" | "error" {
+/** Which routine segments each width tier may show at all. */
+const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
+  wide: new Set([
+    Slot.workflow,
+    Slot.model,
+    Slot.thinking,
+    Slot.context,
+    Slot.verification,
+  ]),
+  comfortable: new Set([
+    Slot.workflow,
+    Slot.model,
+    Slot.thinking,
+    Slot.verification,
+  ]),
+  standard: new Set([Slot.workflow, Slot.model]),
+  compact: new Set([Slot.workflow, Slot.model]),
+};
+
+function verificationState(input: FooterInput): string | null {
+  const value = input.statuses.get("verification");
+  return value ? value.replace(/^Verify:\s*/, "") : null;
+}
+
+function verificationTone(state: string): Tone {
   if (state === "verified") return "success";
   if (state === "clean") return "muted";
   if (state === "checks_failed") return "error";
   return "warning";
 }
 
-/** Only an unproven or failing workspace is worth the narrow layout's space. */
+/** Only an unproven or failing workspace is worth defending space for. */
 function verificationNeedsAttention(state: string | null): boolean {
   return state !== null && state !== "clean" && state !== "verified";
 }
 
-function diagnostics(
-  theme: Theme,
-  input: FooterInput,
-  includeRoutine: boolean,
-): string[] {
-  const lines: string[] = [];
-  const lsp = lspState(input);
-  const context = input.contextPercent;
-  const verification = verificationState(input);
-  const lspNeedsAttention = !["ready", "leerlauf", "aus", "—"].includes(lsp);
-  const contextNeedsAttention =
-    context !== null && context >= CONTEXT_WARNING_PERCENT;
-
-  if (
-    !includeRoutine &&
-    !lspNeedsAttention &&
-    !contextNeedsAttention &&
-    !verificationNeedsAttention(verification)
-  ) {
-    return lines;
-  }
-
-  const parts = [renderSegment(theme, `LSP ${lsp}`, { tone: lspTone(lsp) })];
-  if (verification !== null) {
-    parts.push(
-      renderSegment(theme, `Verify ${verification}`, {
-        tone: verificationTone(verification),
-      }),
-    );
-  }
-  if (context !== null) {
-    const tone =
-      context >= 90
-        ? "error"
-        : context >= CONTEXT_WARNING_PERCENT
-          ? "warning"
-          : "muted";
-    parts.push(
-      renderSegment(theme, `Kontext ${Math.round(context)}%`, { tone }),
-    );
-  }
-  lines.push(parts.join(statusSeparator(theme)));
-  return lines;
-}
-
-function renderNarrow(
-  theme: Theme,
-  width: number,
-  input: FooterInput,
-): string[] {
-  const project = renderSegment(theme, crop(compactCwd(input.cwd), 30), {
-    tone: "text",
-    bold: true,
-  });
-  const permission = renderSegment(theme, permissionLabel(input), {
-    tone: permissionTone(input.state),
-    bold: true,
-  });
-  return [
-    joinSides(theme, project, permission, width),
-    ...diagnostics(theme, input, false).map((line) => crop(line, width)),
-  ];
-}
-
-function renderNormal(
-  theme: Theme,
-  width: number,
-  input: FooterInput,
-): string[] {
-  const model = renderSegment(
-    theme,
-    crop(input.state.model.id ?? "kein Modell", 18),
-    {
-      tone: "accent",
-    },
-  );
-  const project = renderSegment(theme, crop(compactCwd(input.cwd), 24), {
-    tone: "text",
-    bold: true,
-  });
-  const permission = renderSegment(theme, permissionLabel(input), {
-    tone: permissionTone(input.state),
-    bold: true,
-  });
-  return [
-    joinSides(
-      theme,
-      `${model}${statusSeparator(theme)}${project}`,
-      permission,
-      width,
-    ),
-    ...diagnostics(theme, input, true).map((line) => crop(line, width)),
-  ];
-}
-
-function renderWide(theme: Theme, width: number, input: FooterInput): string[] {
-  const model = renderSegment(
-    theme,
-    crop(input.state.model.id ?? "kein Modell", 32),
-    {
-      tone: "accent",
-    },
-  );
-  const thinking = renderSegment(
-    theme,
-    `Denken ${input.state.model.thinking ?? "aus"}`,
-    {
-      tone: "muted",
-    },
-  );
-  const branch = input.branch ? ` git:${crop(input.branch, 16)}` : "";
-  const project = renderSegment(
-    theme,
-    `${crop(compactCwd(input.cwd), 36)}${branch}`,
-    {
-      tone: "text",
-      bold: true,
-    },
-  );
-  const permission = renderSegment(theme, permissionLabel(input), {
-    tone: permissionTone(input.state),
-    bold: true,
-  });
-  const lsp = lspState(input);
-  const lspSegment = renderSegment(theme, `LSP ${lsp}`, { tone: lspTone(lsp) });
-  const verification = verificationState(input);
-  // The wide layout renders no diagnostics line, so the verification status
-  // joins the right-hand status group instead.
-  const verificationSegment =
-    verification === null
-      ? ""
-      : `${statusSeparator(theme)}${renderSegment(theme, `Verify ${verification}`, {
-          tone: verificationTone(verification),
-        })}`;
-  const left = `${model}${statusSeparator(theme)}${thinking}`;
-  const right = `${permission}${statusSeparator(theme)}${lspSegment}${verificationSegment}`;
-  const primary = joinSides(
-    theme,
-    `${left}${GROUP_GAP}${project}`,
-    right,
-    width,
-  );
-  const context =
-    input.contextPercent === null
-      ? ""
-      : `${statusSeparator(theme)}Kontext ${renderContextGauge(input.contextPercent, theme)}`;
-  const secondary = crop(
-    theme.fg("dim", `Sitzung ${input.sessionName ?? "unbenannt"}`) +
-      statusSeparator(theme) +
-      theme.fg(
-        "dim",
-        `↑${formatTokens(input.tokens.input)} ↓${formatTokens(input.tokens.output)}`,
-      ) +
-      context,
-    width,
-  );
-  return [primary, secondary];
-}
-
-function renderSubagents(
-  theme: Theme,
-  width: number,
-  subagents: readonly SubagentInfo[],
-): string[] {
-  if (subagents.length === 0) return [];
-  const attention = subagents.filter(
-    (entry) => entry.status === "needs_attention",
-  ).length;
-  const suffix =
-    attention > 0
-      ? `${statusSeparator(theme)}${theme.fg("error", `${attention} Aufmerksamkeit`)}`
-      : "";
-  const summary = crop(
-    `${theme.fg("accent", "⚡")} ${theme.fg("text", `${subagents.length} Subagent${subagents.length === 1 ? "" : "en"} aktiv`)}${suffix}`,
-    width,
-  );
-  const prioritized = [...subagents].sort(
-    (a, b) =>
-      Number(b.status === "needs_attention") -
-      Number(a.status === "needs_attention"),
-  );
-  const visible = prioritized.slice(0, 3);
-  const details =
-    subagents.length > visible.length
-      ? [theme.fg("muted", `+${subagents.length - visible.length} weitere`)]
-      : [];
-  details.push(
-    ...visible.map((entry) => {
-      const tone =
-        entry.status === "running"
-          ? "success"
-          : entry.status === "paused"
-            ? "warning"
-            : entry.status === "needs_attention"
-              ? "error"
-              : "muted";
-      return `${entry.agent}${entry.phase ? ` ${entry.phase}` : ""}${statusSeparator(theme)}${theme.fg(tone, entry.status)}`;
-    }),
-  );
-  return [summary, crop(`  ${details.join("    ")}`, width)];
+function lspState(input: FooterInput): string {
+  return input.statuses.get("lsp") ?? input.state.lsp.state ?? "—";
 }
 
 /**
- * Three deliberate layouts: narrow protects project, permissions and warnings;
- * normal adds model plus routine diagnostics; wide adds session detail.
+ * A working, idle or disabled language server is not news, so it stays off the
+ * line entirely. Only a degraded one is, and it claims space at any width.
+ *
+ * `extensions/lsp/status.ts` publishes a closed set: `aus`, `leerlauf`,
+ * `eingeschränkt` and `${n} aktiv`. Matching the one bad value is what keeps
+ * `3 aktiv` — a perfectly healthy server count — out of the warning slot.
  */
+function lspNeedsAttention(state: string): boolean {
+  return state === "eingeschränkt";
+}
+
+function collectSegments(input: FooterInput): Segment[] {
+  const segments: Segment[] = [
+    {
+      slot: Slot.workflow,
+      priority: Priority.workflow,
+      text: input.state.workflow.label,
+      tone: "text",
+      bold: true,
+    },
+    {
+      slot: Slot.model,
+      priority: Priority.model,
+      // The real runtime model id. Prettifying it into a marketing name would
+      // mean inventing a mapping the runtime never gave us.
+      text: crop(input.state.model.id ?? "kein Modell", MODEL_MAX_COLUMNS),
+      tone: "accent",
+    },
+  ];
+
+  if (input.state.model.thinking) {
+    segments.push({
+      slot: Slot.thinking,
+      priority: Priority.thinking,
+      text: input.state.model.thinking,
+      tone: "muted",
+    });
+  }
+
+  if (input.contextPercent !== null) {
+    // Colour and layout priority are separate judgements. A filling context is
+    // worth a warning colour long before it is worth taking a narrow line's
+    // space away from the workflow — only a nearly exhausted one is urgent
+    // enough to outrank the tier it would normally be filtered out by.
+    const exhausted = input.contextPercent >= CONTEXT_CRITICAL_PERCENT;
+    segments.push({
+      slot: Slot.context,
+      priority: exhausted ? Priority.exhaustedContext : Priority.context,
+      text: `ctx ${Math.round(input.contextPercent)}%`,
+      tone: exhausted
+        ? "error"
+        : input.contextPercent >= CONTEXT_WARNING_PERCENT
+          ? "warning"
+          : "muted",
+      critical: exhausted,
+    });
+  }
+
+  const verification = verificationState(input);
+  if (verification !== null) {
+    const attention = verificationNeedsAttention(verification);
+    segments.push({
+      slot: Slot.verification,
+      priority: attention
+        ? Priority.failedVerification
+        : Priority.verification,
+      text: `${verification === "verified" ? "✓" : attention ? "⚠" : ""} ${verification}`.trim(),
+      tone: verificationTone(verification),
+      critical: attention,
+    });
+  }
+
+  const lsp = lspState(input);
+  if (lspNeedsAttention(lsp)) {
+    segments.push({
+      slot: Slot.risk,
+      priority: Priority.lsp,
+      text: `⚠ LSP ${lsp}`,
+      tone: "error",
+      critical: true,
+    });
+  }
+
+  if (input.state.permissions.level === "yolo") {
+    segments.push({
+      slot: Slot.risk,
+      priority: Priority.yolo,
+      text: "⚠ YOLO",
+      tone: "error",
+      bold: true,
+      critical: true,
+    });
+  }
+
+  return segments;
+}
+
+/**
+ * Terminal cells, not JavaScript characters. `⚠`, `✓`, CJK and emoji all cost
+ * more cells than they do string length, and a selection that measured length
+ * would believe a line fits and then have to truncate a finished segment at
+ * the edge — the one thing this layout exists to avoid.
+ */
+function widthOf(segments: readonly Segment[]): number {
+  if (segments.length === 0) return 0;
+  return (
+    segments.reduce((total, segment) => total + visibleWidth(segment.text), 0) +
+    visibleWidth(STATUS_SEPARATOR) * (segments.length - 1)
+  );
+}
+
+/**
+ * Keep what the width tier allows plus everything critical, then, while the
+ * result is still too wide, drop the least important segment that is left.
+ * Segments give up their place entirely rather than being shaved at the edge,
+ * so whatever remains stays readable — and the survivors are then put back
+ * into reading order, which is not the order they were dropped in.
+ */
+function selectFooterSegments(
+  segments: readonly Segment[],
+  width: number,
+): Segment[] {
+  const allowed = ROUTINE_TIERS[footerTier(width)];
+  const kept = segments.filter(
+    (segment) => segment.critical || allowed.has(segment.slot),
+  );
+  while (kept.length > 1 && widthOf(kept) > width) {
+    let victim = 0;
+    for (let index = 1; index < kept.length; index += 1)
+      if (kept[index]!.priority > kept[victim]!.priority) victim = index;
+    kept.splice(victim, 1);
+  }
+  return kept.sort((a, b) => a.slot - b.slot);
+}
+
 export function renderFooterLines(
   theme: Theme,
   width: number,
   input: FooterInput,
 ): string[] {
-  const layout: Layout = layoutFor(width);
-  const lines =
-    layout === "narrow"
-      ? renderNarrow(theme, width, input)
-      : layout === "normal"
-        ? renderNormal(theme, width, input)
-        : renderWide(theme, width, input);
-  if (layout === "wide" && input.subagents)
-    lines.push(...renderSubagents(theme, width, input.subagents));
-  return lines;
+  const available = Math.max(1, width);
+  const selected = selectFooterSegments(collectSegments(input), available);
+  const line = selected
+    .map((segment) =>
+      renderSegment(theme, segment.text, {
+        tone: segment.tone,
+        bold: segment.bold,
+      }),
+    )
+    .join(statusSeparator(theme));
+  return [visibleWidth(line) > available ? crop(line, available) : line];
 }

@@ -31,7 +31,13 @@
   bei `agent_settled`, ist abschaltbar und nutzt weder `agent_end` als
   Erledigung noch Heuristiken als `blocked`.
 - Aurora ist alleiniger Besitzer der TUI-Chrome inklusive Fußzeile
-  (`docs/decisions/007`, `docs/decisions/009`).
+  (`docs/decisions/007`, `docs/decisions/009`). Die Fußzeile ist eine einzige
+  Zeile und die einzige permanente Statusfläche; der Editorrahmen ist entfallen,
+  Pis Editor bleibt unersetzt. Subagenten stehen im transienten
+  Activity-Widget, nicht in der Fußzeile.
+- Größenklassen für Menüs und Fußzeile stehen gemeinsam in
+  `extensions/shared/layout.ts` (52×14 / 90×28 / 120×30) und werden nirgends
+  als Literal wiederholt.
 - Es gibt genau drei aktive Subagentenrollen — `investigator`, `debugger`,
   `verifier` (`docs/decisions/011`).
 - Shift+Tab (`/workflow`) ist die eine zentrale Implementierung des

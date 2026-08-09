@@ -1,19 +1,13 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
 
 /**
- * The single place that maps a terminal width to a layout tier. Every Aurora
- * surface — editor frame, footer and the activity widget — switches at exactly
- * these thresholds, so they must never be restated as literals elsewhere.
+ * Aurora's width-safe truncation, accounting for ANSI escapes and wide glyphs.
+ *
+ * The size classes this file used to define moved to `shared/layout.ts`, where
+ * the menu shell reaches them too. Only the truncation stayed behind: it is the
+ * one piece that needs `pi-tui` at module scope, and `shared/layout.ts` has to
+ * remain import-free so the menu modules can use it under the jiti test loader.
  */
-export type Layout = "narrow" | "normal" | "wide";
-
-export function layoutFor(width: number): Layout {
-  if (width < 76) return "narrow";
-  if (width < 124) return "normal";
-  return "wide";
-}
-
-/** Width-safe truncation that accounts for ANSI escapes and wide glyphs. */
 export function crop(value: string, width: number): string {
   return truncateToWidth(value, Math.max(1, width), "…");
 }

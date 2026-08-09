@@ -5,7 +5,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { runTabbedOverlay } from "../shared/tabbed-overlay.ts";
+import { runMenu } from "../shared/menu-ui.ts";
 import {
   buildThinkingMenu,
   isSelectableThinkingLevel,
@@ -56,24 +56,18 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
     },
 
     async openMenu(ctx, isCurrentEpoch) {
-      const entries = buildThinkingMenu(pi.getThinkingLevel()).filter(
-        (entry) =>
-          entry.value !== undefined &&
-          ctx.model?.thinkingLevelMap?.[entry.value] !== null,
-      );
-      const selected = await runTabbedOverlay<SelectableThinkingLevel>(
+      // One flat list of the real levels — the shared menu shell, the same one
+      // the Command Center uses. A single-page tab dialog was chrome around
+      // nothing.
+      const selectedLevel = await runMenu<SelectableThinkingLevel>(
         ctx,
-        "Thinking & Reasoning",
-        [
-          {
-            id: "depth",
-            label: "Denktiefe",
-            entries,
-          },
-        ],
-        { nonInteractiveHint: "Thinking & Reasoning benötigt den TUI-Modus." },
+        "Thinking",
+        buildThinkingMenu(
+          pi.getThinkingLevel(),
+          (level) => ctx.model?.thinkingLevelMap?.[level] !== null,
+        ),
+        { nonInteractiveHint: "Die Denktiefe benötigt den TUI-Modus." },
       );
-      const selectedLevel = selected?.entry.value;
       if (selectedLevel)
         control.applySelection(selectedLevel, ctx, isCurrentEpoch);
     },

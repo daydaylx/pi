@@ -3,7 +3,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { catalogDescription } from "../shared/command-catalog.ts";
-import { buildWorkflowTab } from "../shared/control-center-menu.ts";
+import { buildWorkflowEntries } from "../shared/control-center-menu.ts";
 import { isPlanningMode, type WorkflowMode } from "../shared/workflow-mode.ts";
 import { editPlanMarkdown, viewPlanMarkdown } from "./plan-editor.ts";
 import { readPlan, removePlan } from "./plan-file.ts";
@@ -195,7 +195,7 @@ export function registerPlanCommands(
   pi.registerCommand("workflow", {
     description: catalogDescription("workflow"),
     handler: async (_args, ctx) => {
-      const entries = buildWorkflowTab(session.selectedMode).entries;
+      const entries = buildWorkflowEntries(session.selectedMode);
       const choice = await ctx.ui.select(
         "Workflow wechseln · /workflow",
         entries.map((entry) => entry.label),

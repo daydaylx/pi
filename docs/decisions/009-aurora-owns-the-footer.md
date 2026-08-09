@@ -13,18 +13,27 @@ Laufzeitpakete mehr sind. Die für den Typecheck nötigen Pins bleiben installie
 `footerFormat`, `footerSegments` oder `contextThresholds` und sah keine Wirkung.
 Dasselbe galt für `extensions/pi-tool-display/config.json`.
 
+Die ursprüngliche Fassung dieser Entscheidung teilte den Status danach auf zwei
+Flächen auf: die Fußzeile trug Modell, Denktiefe, Projekt, Berechtigung, LSP und
+Kontext, der Editorrahmen trug den Arbeitsablauf. Das war eine Verbesserung
+gegenüber der doppelten Anzeige davor, aber es blieb eine Aufteilung ohne Grund
+— und der Rahmen kostete dauerhaft eine Zeile direkt über dem Eingabefeld.
+
 ## Entscheidung
 
 Aurora ist der einzige Besitzer der gesamten TUI-Chrome, Fußzeile eingeschlossen.
 `zentui.json` und `extensions/pi-tool-display/config.json` sind gelöscht. Die
 npm-Pins für die noch benötigten Typen in `npm/package.json` bleiben unverändert
-— sie tragen den Typecheck, nicht die Laufzeit. Der ungenutzte
-`pi-tool-display`-Pin wurde entfernt, weil sein Peer-Bereich Pi 0.83 nicht
-unterstützt.
+— sie tragen den Typecheck, nicht die Laufzeit.
 
-Die Fußzeile ist zugleich die einzige Statusfläche. Modell, Denktiefe, Projekt,
-Berechtigung, LSP und Kontext stehen dort und auf keiner zweiten Fläche; der
-Editorrahmen trägt nur noch Arbeitsablauf und Schritt.
+Die Fußzeile ist die einzige permanente Statusfläche und **eine einzige Zeile**.
+Sie trägt in dieser Reihenfolge: Arbeitsablauf, Modell, Denktiefe, Kontext,
+Verifikationsstand — und verdrängend davor alles Riskante (YOLO, gescheiterte
+Verifikation, gestörter LSP).
+
+Aurora ersetzt **keine Editorkomponente** mehr. Der Rahmen über dem Eingabefeld
+ist ersatzlos entfallen; der Arbeitsablauf, den er trug, steht jetzt links in der
+Fußzeile.
 
 ## Begründung
 
@@ -32,10 +41,19 @@ Konfiguration, die nichts steuert, ist teurer als keine Konfiguration: sie sieht
 aus wie ein Stellhebel, kostet bei jeder Suche eine Prüfung und widerspricht der
 Dokumentation, ohne dass ein Test das bemerkt.
 
-Die doppelte Statusanzeige hatte denselben Charakter. Modell, Denktiefe, Kontext
-und Arbeitsablauf standen gleichzeitig im Editorrahmen und in der Fußzeile — im
-breiten Layout vier Rahmenzeilen um das Eingabefeld, mit zwei verschiedenen
-Darstellungen desselben Kontextwerts.
+Für die Aufteilung auf zwei Flächen galt dasselbe in kleinerem Maßstab. Ein Wert
+war nur deshalb im Rahmen statt in der Fußzeile, weil er historisch dort stand.
+Eine Fläche weniger heißt: eine Zeile mehr für Chat und Eingabe, keine Frage
+mehr, wo ein Status steht, und kein Layout-Sprung über dem Eingabefeld.
+
+Was die Fußzeile nicht mehr zeigt — Arbeitsverzeichnis, Git-Branch,
+Sitzungsname, Tokenzähler —, ist entweder ohnehin sichtbar (das Verzeichnis
+steht im Terminalprompt) oder auf Abruf verfügbar (`/session`). Eine permanente
+Zeile ist der falsche Ort für Werte, die man einmal pro Sitzung braucht.
+
+Die Berechtigungsstufe erscheint nur noch, wenn sie riskant ist. Eine ruhige
+Stufe permanent anzuzeigen trainiert an, die Stelle zu ignorieren, an der YOLO
+später auftaucht.
 
 ## Konsequenzen
 
@@ -43,9 +61,18 @@ Darstellungen desselben Kontextwerts.
   sie dort.
 - `UI_STATUS_KEYS` behält seine Stringwerte. Der Grund ist jetzt ein anderer:
   nicht `zentui.json`, sondern `aurora-ui/footer.ts` liest sie.
-- Berechtigungen erscheinen in der Fußzeile als kurzer Modus-Label aus
-  `PERMISSION_LEVEL_LABEL` (`Projekt schreiben`), nicht als Risikobanner des
-  `permissions`-Statuskanals (`🛡 DEFAULT · PROJECT WRITE`). Das Banner bleibt
-  für Dialoge reserviert; für ein Fußzeilensegment ist es zu breit.
-- Ein Test prüft, dass beide Konfigurationsdateien nicht wiederkehren — dieselbe
-  Form, die 007 für die fünf gelöschten Chrome-Dateien gewählt hat.
+- Das Risikobanner des `permissions`-Statuskanals (`🛡 DEFAULT · PROJECT WRITE`)
+  bleibt Dialogen vorbehalten. Die Fußzeile liest den Modus vom Aurora-Bus und
+  zeigt ihn nur als `⚠ YOLO`, wenn er riskant ist.
+- Die Größenklassen stehen in `extensions/shared/layout.ts` und gelten für
+  Menüs und Fußzeile gemeinsam. Vorher hatten beide eigene Grenzen (52/90
+  gegenüber 76/124).
+- `renderFooterLines` ist rein und liest ausschließlich Runtime-State. Es
+  startet keinen Prozess, prüft weder Git noch LSP, fragt keinen Provider und
+  liest keine Datei. Ein Test hält fest, dass es beim Rendern nicht durch den
+  Session-Branch läuft.
+- Subagenten stehen nicht mehr in der Fußzeile, sondern im transienten
+  Activity-Widget beim auslösenden Tool. Die Statusabfrage dorthin läuft
+  ereignisgesteuert mit 300-ms-Coalescing statt bei jedem Frame.
+- Ein Test prüft, dass beide gelöschten Konfigurationsdateien nicht wiederkehren
+  — dieselbe Form, die 007 für die fünf gelöschten Chrome-Dateien gewählt hat.

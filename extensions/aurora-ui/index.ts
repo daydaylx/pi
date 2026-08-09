@@ -1,18 +1,11 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import {
-  CustomEditor,
-  type ExtensionAPI,
-  type ExtensionContext,
-  type KeybindingsManager,
-  type Theme,
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  Theme,
 } from "@earendil-works/pi-coding-agent";
-import {
-  type EditorTheme,
-  type TUI,
-  visibleWidth,
-} from "@earendil-works/pi-tui";
+import type { TUI } from "@earendil-works/pi-tui";
 import { loadSetupConfig, type MotionMode } from "../setup-core/config.ts";
 import {
   AURORA_UI_CHANNELS,
@@ -28,10 +21,13 @@ import {
 import {
   compactToolTarget,
   renderActiveTools,
+  renderSubagents,
+  RUNNING_GLYPH,
   type ActiveToolView,
+  type SubagentInfo,
 } from "./tool-renderers.ts";
 import { crop } from "./layout.ts";
-import { renderFooterLines, type SubagentInfo } from "./footer.ts";
+import { renderFooterLines } from "./footer.ts";
 
 const OWNER = "aurora-ui";
 const ACTIVITY_WIDGET = "aurora-ui/activity";
@@ -39,22 +35,26 @@ const TICK_INTERVAL_MS = 100;
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
 );
-const SUBAGENT_STATUS_REFRESH_MS = 750;
+/**
+ * Bursts of subagent events collapse into one status request. Nothing here
+ * runs on a timer: the window only opens once an event has already arrived.
+ */
+const SUBAGENT_COALESCE_MS = 300;
+const SUBAGENT_RPC_TIMEOUT_MS = 1_000;
 const SUBAGENT_CONFIG_PATH = fileURLToPath(
   new URL("../subagent/config.json", import.meta.url),
 );
 
 /**
- * The footer is the only place that reports a given value — nothing here may be
- * duplicated by another surface (see the header comment in footer.ts). Once
- * pi-subagents runs its Fleet Status Dock, that dock is the richer surface for
- * the same information: one line per agent with its concrete activity, runtime
- * and tokens, right below the editor. The footer therefore hands the subagent
- * segment over instead of printing a second, poorer copy two lines further down.
+ * Once pi-subagents runs its Fleet Status Dock, that dock is the richer surface
+ * for the same information: one line per agent with its concrete activity,
+ * runtime and tokens, right below the editor. Aurora's activity widget hands
+ * the subagent lines over instead of printing a second, poorer copy.
  *
  * Read from the subagent extension's own config rather than from a shared
  * setting: the dock is opt-in there, and only that file knows whether it is on.
- * Any read or parse problem means "no dock", i.e. the footer keeps reporting.
+ * Any read or parse problem means "no dock", i.e. the widget keeps reporting.
+ * This runs once per session start, never from a render.
  */
 function fleetDockOwnsSubagentDisplay(): boolean {
   try {
@@ -182,34 +182,6 @@ function makeState(
   };
 }
 
-/**
- * The single frame line above the editor. It carries the workflow label
- * only — everything durable (model, thinking, project, context) lives in
- * the footer, so no value is shown on two surfaces at once.
- */
-function renderBar(
-  theme: Theme,
-  content: string,
-  width: number,
-  active: boolean,
-): string {
-  if (width <= 2) return crop(content, width);
-  const color = active ? "borderAccent" : "borderMuted";
-  const left = "╭─";
-  const right = "╮";
-  const inner = crop(` ${content} `, Math.max(1, width - 3));
-  const fill = "─".repeat(
-    Math.max(
-      0,
-      width - visibleWidth(left) - visibleWidth(inner) - visibleWidth(right),
-    ),
-  );
-  return crop(
-    theme.fg(color, left) + inner + theme.fg(color, fill + right),
-    width,
-  );
-}
-
 class AnimationTicker {
   private timer: ReturnType<typeof setInterval> | undefined;
   private tuiRefs = new Map<TUI, number>();
@@ -261,44 +233,6 @@ class AnimationTicker {
   }
 }
 
-class AuroraEditor extends CustomEditor {
-  private readonly detachTicker: () => void;
-
-  constructor(
-    tui: TUI,
-    editorTheme: EditorTheme,
-    keybindings: KeybindingsManager,
-    private readonly auroraTheme: Theme,
-    private readonly auroraState: AuroraUiState,
-    ticker: AnimationTicker,
-  ) {
-    super(tui, editorTheme, keybindings);
-    this.detachTicker = ticker.attach(tui);
-  }
-
-  dispose(): void {
-    this.detachTicker();
-  }
-
-  render(width: number): string[] {
-    const workflow = this.auroraState.workflow;
-    const progress =
-      workflow.completed !== undefined && workflow.total !== undefined
-        ? ` · ${workflow.completed}/${workflow.total}`
-        : "";
-    const active = this.auroraState.activity.kind !== "idle";
-    return [
-      renderBar(
-        this.auroraTheme,
-        `${workflow.label}${progress}`,
-        width,
-        active,
-      ),
-      ...super.render(width),
-    ];
-  }
-}
-
 function workingFrame(theme: Theme, motion: MotionMode, frame: number): string {
   if (motion === "off") return "";
   if (motion === "reduced") return theme.fg("accent", "●");
@@ -318,37 +252,27 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let disposed = true;
   let pendingRequestId: string | undefined;
   let busUnsubscribers: Array<() => void> = [];
-  let tokenTotalsDirty = true;
-  let tokenTotalsCache = { input: 0, output: 0 };
   let subagentsCache: SubagentInfo[] = [];
   let asyncSubagentsCache: SubagentInfo[] = [];
   const foregroundSubagents = new Map<string, SubagentInfo[]>();
-  let subagentsCacheDirty = true;
-  let subagentsLastFetchedAt = Number.NEGATIVE_INFINITY;
   let subagentsFetchInFlight: Promise<void> | undefined;
+  let subagentsCoalesceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** An event arrived while a request was in flight; ask again once, after. */
+  let subagentRefreshPending = false;
+  /**
+   * Bumped whenever a session ends. A reply carries the generation it was asked
+   * under, so an answer that outlives its session cannot write into the next
+   * one — the request itself is not cancellable, but its result is ignorable.
+   */
+  let subagentGeneration = 0;
   let fleetDockOwnsSubagents = false;
   const activeTools = new Map<string, ActiveToolView>();
 
-  function readAssistantTotals(ctx: ExtensionContext): {
-    input: number;
-    output: number;
-  } {
-    if (!tokenTotalsDirty) return tokenTotalsCache;
-    const branch = ctx.sessionManager.getBranch();
-    let input = 0;
-    let output = 0;
-    for (const entry of branch) {
-      if (entry.type !== "message" || entry.message.role !== "assistant")
-        continue;
-      const message = entry.message as AssistantMessage;
-      input += message.usage.input;
-      output += message.usage.output;
-    }
-    tokenTotalsCache = { input, output };
-    tokenTotalsDirty = false;
-    return tokenTotalsCache;
-  }
-
+  /**
+   * The transient work surface above the editor: what is running right now,
+   * and nothing that has already finished. It is pure — every value it prints
+   * was put into these caches by an event handler.
+   */
   function renderActivityWidget(theme: Theme, width: number): string[] {
     if (!state || state.activity.kind === "idle") return [];
     const icon = workingFrame(
@@ -357,17 +281,119 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       ticker?.frame ?? 0,
     );
     const label = state.activity.label ?? "Arbeite …";
-    const heading = crop(
-      `${icon ? `${icon} ` : ""}${theme.fg("muted", label)}`,
-      width,
-    );
+    // With motion off there is no animated frame, but the line still has to
+    // read as work in progress rather than as a finished result.
+    const marker = icon || theme.fg("muted", RUNNING_GLYPH);
+    const heading = crop(`${marker} ${theme.fg("muted", label)}`, width);
+    const inner = Math.max(1, width - 2);
     const tools = renderActiveTools(
       [...activeTools.values()],
       theme,
-      Math.max(1, width - 2),
+      inner,
       Date.now(),
     ).map((line) => `  ${line}`);
-    return [heading, ...tools];
+    const subagents = fleetDockOwnsSubagents
+      ? []
+      : renderSubagents(subagentsCache, theme, inner).map((line) => `  ${line}`);
+    return [heading, ...tools, ...subagents];
+  }
+
+  function mergeSubagents(): void {
+    const byKey = new Map<string, SubagentInfo>();
+    for (const entry of [
+      ...[...foregroundSubagents.values()].flat(),
+      ...asyncSubagentsCache,
+    ]) {
+      byKey.set(
+        `${entry.agent}\u0000${entry.phase ?? ""}\u0000${entry.label ?? ""}`,
+        entry,
+      );
+    }
+    subagentsCache = [...byKey.values()];
+  }
+
+  /** True while the answer to a request asked under `generation` still counts. */
+  function subagentReplyStillWanted(generation: number): boolean {
+    return !disposed && generation === subagentGeneration;
+  }
+
+  async function requestSubagentStatus(generation: number): Promise<void> {
+    const requestId = crypto.randomUUID();
+    // Subscribe before emitting, await after: a reply that arrives
+    // synchronously must still find its listener.
+    const reply = new Promise<unknown>((resolve) => {
+      const unsubscribe = pi.events.on(
+        `subagents:rpc:v1:reply:${requestId}`,
+        (value: unknown) => {
+          unsubscribe();
+          resolve(value);
+        },
+      );
+      setTimeout(() => {
+        unsubscribe();
+        resolve(null);
+      }, SUBAGENT_RPC_TIMEOUT_MS);
+    });
+    pi.events.emit("subagents:rpc:v1:request", {
+      version: 1,
+      requestId,
+      method: "status",
+      params: {},
+    });
+    const value = await reply;
+    if (!subagentReplyStillWanted(generation)) return;
+    asyncSubagentsCache = asyncSubagentsFromRpcReply(value);
+  }
+
+  /**
+   * Async subagent runs are only knowable by asking the subagent package, and
+   * this is the one place that asks. It is reached from the subagent event
+   * handler alone — never from a render — so the cost is bounded by how often
+   * subagents actually change state, not by the frame rate. A burst of events
+   * collapses into a single request.
+   *
+   * An event that arrives while a request is already in flight would otherwise
+   * be lost, leaving the cache stale for as long as nothing else happens. It
+   * sets a single pending flag instead, so any number of such events produce
+   * exactly one follow-up request once the current one has answered.
+   */
+  function refreshSubagents(): void {
+    if (fleetDockOwnsSubagents || disposed) return;
+    if (subagentsFetchInFlight) {
+      subagentRefreshPending = true;
+      return;
+    }
+    if (subagentsCoalesceTimer) return;
+    subagentsCoalesceTimer = setTimeout(() => {
+      subagentsCoalesceTimer = undefined;
+      if (disposed) return;
+      if (subagentsFetchInFlight) {
+        subagentRefreshPending = true;
+        return;
+      }
+      const generation = subagentGeneration;
+      subagentsFetchInFlight = requestSubagentStatus(generation)
+        .catch(() => {
+          if (subagentReplyStillWanted(generation)) asyncSubagentsCache = [];
+        })
+        .finally(() => {
+          // A stale request touches nothing at all — not even the in-flight
+          // gate, which by now may belong to the session that replaced it.
+          if (!subagentReplyStillWanted(generation)) return;
+          subagentsFetchInFlight = undefined;
+          mergeSubagents();
+          ticker?.requestRender();
+          if (!subagentRefreshPending) return;
+          subagentRefreshPending = false;
+          refreshSubagents();
+        });
+    }, SUBAGENT_COALESCE_MS);
+  }
+
+  /** Foreground runs are known from the tool call itself; no request needed. */
+  function refreshForegroundSubagents(): void {
+    mergeSubagents();
+    ticker?.requestRender();
   }
 
   function applyWorking(ctx: ExtensionContext): void {
@@ -438,6 +464,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           return;
         updateState(ctx, value.state);
       }),
+      // The one trigger for an async subagent status request. It lives with
+      // the session rather than with a component, so the request cannot be
+      // tied to how often anything happens to repaint.
+      pi.events.on("subagent:control-event", () => refreshSubagents()),
     ];
 
     pendingRequestId = `${state.sessionEpoch}:${OWNER}`;
@@ -455,14 +485,22 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     for (const unsubscribe of busUnsubscribers.splice(0)) unsubscribe();
     pendingRequestId = undefined;
     activeTools.clear();
-    tokenTotalsDirty = true;
-    tokenTotalsCache = { input: 0, output: 0 };
+    foregroundSubagents.clear();
+    subagentsCache = [];
+    asyncSubagentsCache = [];
+    // A request already on the wire cannot be recalled, so retire the
+    // generation it was asked under: whenever it answers, it answers for a
+    // session that no longer exists and is dropped instead of applied.
+    subagentGeneration += 1;
+    subagentRefreshPending = false;
+    subagentsFetchInFlight = undefined;
+    if (subagentsCoalesceTimer) clearTimeout(subagentsCoalesceTimer);
+    subagentsCoalesceTimer = undefined;
     ticker?.dispose();
     ticker = undefined;
 
     const uiContext = ctx ?? activeContext;
     if (uiContext?.mode === "tui" && uiContext.hasUI) {
-      uiContext.ui.setEditorComponent(undefined);
       uiContext.ui.setFooter(undefined);
       uiContext.ui.setWidget(ACTIVITY_WIDGET, undefined);
       uiContext.ui.setWorkingVisible(false);
@@ -517,120 +555,27 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     ticker = new AnimationTicker(loaded.config.ui.motion, () => {});
 
     const sessionCtx = ctx;
-    ctx.ui.setEditorComponent(
-      (tui, editorTheme, keybindings) =>
-        new AuroraEditor(
-          tui,
-          editorTheme,
-          keybindings,
-          sessionCtx.ui.theme,
-          state!,
-          ticker!,
-        ),
-    );
-
     ctx.ui.setFooter((tui, theme, footerData) => {
       const detachTicker = ticker!.attach(tui);
-      const unsubscribeBranch = footerData.onBranchChange(() => {
-        tokenTotalsDirty = true;
-        tui.requestRender();
-      });
-
-      const unsubscribeSubagentEvent = pi.events.on(
-        "subagent:control-event",
-        () => {
-          subagentsCacheDirty = true;
-          tui.requestRender();
-        },
+      // The footer reports the context share, which moves as the branch grows.
+      // The subscription exists to schedule a repaint, not to read anything:
+      // a value that only changes on an event is only redrawn on that event.
+      const unsubscribeBranch = footerData.onBranchChange(() =>
+        tui.requestRender(),
       );
 
-      function mergeSubagents(): void {
-        const currentForeground = [...foregroundSubagents.values()].flat();
-        const byKey = new Map<string, SubagentInfo>();
-        for (const entry of [...currentForeground, ...asyncSubagentsCache]) {
-          byKey.set(
-            `${entry.agent}\u0000${entry.phase ?? ""}\u0000${entry.label ?? ""}`,
-            entry,
-          );
-        }
-        subagentsCache = [...byKey.values()];
-      }
-
-      function fetchSubagentStatus(): void {
-        const now = Date.now();
-        if (
-          subagentsFetchInFlight ||
-          (!subagentsCacheDirty &&
-            now - subagentsLastFetchedAt < SUBAGENT_STATUS_REFRESH_MS)
-        ) {
-          return;
-        }
-        subagentsFetchInFlight = (async () => {
-          const requestId = crypto.randomUUID();
-          const replyPromise = new Promise<unknown>((resolve) => {
-            const unsubscribe = pi.events.on(
-              `subagents:rpc:v1:reply:${requestId}`,
-              (reply: unknown) => {
-                unsubscribe();
-                resolve(reply);
-              },
-            );
-            setTimeout(() => {
-              unsubscribe();
-              resolve(null);
-            }, 1000);
-          });
-
-          pi.events.emit("subagents:rpc:v1:request", {
-            version: 1,
-            requestId,
-            method: "status",
-            params: {},
-          });
-
-          const reply = await replyPromise;
-          asyncSubagentsCache = asyncSubagentsFromRpcReply(reply);
-          subagentsCacheDirty = false;
-          subagentsLastFetchedAt = Date.now();
-          mergeSubagents();
-          tui.requestRender();
-        })()
-          .catch(() => {
-            asyncSubagentsCache = [];
-            subagentsCacheDirty = false;
-            subagentsLastFetchedAt = Date.now();
-            mergeSubagents();
-          })
-          .finally(() => {
-            subagentsFetchInFlight = undefined;
-            tui.requestRender();
-          });
-      }
-
       return {
-        invalidate() {
-          subagentsCacheDirty = true;
-        },
+        invalidate() {},
         dispose() {
           unsubscribeBranch();
-          unsubscribeSubagentEvent();
           detachTicker();
         },
         render(width: number): string[] {
           if (!state) return [];
-          if (!fleetDockOwnsSubagents) {
-            mergeSubagents();
-            fetchSubagentStatus();
-          }
           return renderFooterLines(theme, width, {
             state,
             statuses: footerData.getExtensionStatuses(),
-            branch: footerData.getGitBranch(),
-            cwd: sessionCtx.cwd,
-            sessionName: pi.getSessionName(),
-            tokens: readAssistantTotals(sessionCtx),
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
-            subagents: fleetDockOwnsSubagents ? undefined : subagentsCache,
           });
         },
       };
@@ -662,11 +607,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   pi.on("agent_start", (_event, ctx) => {
     activeTools.clear();
     foregroundSubagents.clear();
-    subagentsCacheDirty = true;
+    refreshForegroundSubagents();
     updateState(ctx, {
       activity: {
         kind: "thinking",
-        label: "Analysiert die Aufgabe …",
+        // The real configured depth, never a guess: this is the only place
+        // thinking is visible while `hideThinkingBlock` is set.
+        label: `Thinking · ${pi.getThinkingLevel()}`,
         activeTools: 0,
       },
     });
@@ -683,7 +630,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       const subagents = foregroundSubagentsFromArgs(event.args);
       if (subagents.length > 0)
         foregroundSubagents.set(event.toolCallId, subagents);
-      subagentsCacheDirty = true;
+      refreshForegroundSubagents();
+      refreshSubagents();
     }
     updateState(ctx, {
       activity: {
@@ -698,7 +646,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     activeTools.delete(event.toolCallId);
     if (event.toolName === "subagent") {
       foregroundSubagents.delete(event.toolCallId);
-      subagentsCacheDirty = true;
+      refreshForegroundSubagents();
+      refreshSubagents();
     }
     updateState(ctx, {
       activity:
@@ -720,7 +669,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     if (!event.assistantMessageEvent.type.startsWith("text_")) return;
     activeTools.clear();
     foregroundSubagents.clear();
-    subagentsCacheDirty = true;
+    refreshForegroundSubagents();
     updateState(ctx, {
       activity: { kind: "idle", label: undefined, activeTools: 0 },
     });
@@ -737,7 +686,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   const settle = (_event: unknown, ctx: ExtensionContext) => {
     activeTools.clear();
     foregroundSubagents.clear();
-    subagentsCacheDirty = true;
+    refreshForegroundSubagents();
     updateState(ctx, {
       activity: { kind: "idle", label: undefined, activeTools: 0 },
     });

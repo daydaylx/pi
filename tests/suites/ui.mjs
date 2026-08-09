@@ -282,7 +282,7 @@ export const uiSections = {
 
       const cwd = mkdtempSync(path.join(tmpdir(), "pi-control-center-"));
       try {
-        let choice = "Manuell: Sehr hoch";
+        let choice = "Sehr hoch";
         const harness = createHarness({
           select: (labels) => {
             if (choice === "__permissions__")
@@ -331,7 +331,7 @@ export const uiSections = {
         assert(harness.shortcuts.has("super+d"), "Super+D opens Thinking");
         assert(harness.shortcuts.has("super+m"), "Super+M opens models");
 
-        choice = "Manuell: Sehr hoch";
+        choice = "Sehr hoch";
         await harness.shortcuts.get("super+d")(context);
         eq(
           harness.api.getThinkingLevel(),
@@ -350,7 +350,7 @@ export const uiSections = {
           "xhigh",
           "manual Thinking survives a workflow transition",
         );
-        choice = "Manuell: Mittel";
+        choice = "Mittel";
         await harness.shortcuts.get("super+d")(context);
         eq(
           harness.api.getThinkingLevel(),
@@ -443,7 +443,7 @@ export const uiSections = {
   },
 
   "shared menu shell navigation and rendering": async (context) => {
-    const { section, menuUi, tabbedOverlay } = context;
+    const { section, menuUi } = context;
 
     await section("shared menu shell navigation and rendering", async () => {
       if (!menuUi) return;
@@ -632,41 +632,9 @@ export const uiSections = {
         );
       }
 
-      if (tabbedOverlay) {
-        async function selectTab(key) {
-          const tabHarness = createHarness();
-          const result = tabbedOverlay.runTabbedOverlay(
-            tabHarness.makeContext(),
-            "Tabtest",
-            [
-              {
-                id: "one",
-                label: "Eins",
-                entries: [{ id: "one-entry", label: "Eins", value: "one" }],
-              },
-              {
-                id: "two",
-                label: "Zwei",
-                entries: [{ id: "two-entry", label: "Zwei", value: "two" }],
-              },
-            ],
-          );
-          await new Promise((resolve) => setImmediate(resolve));
-          tabHarness.sendTerminalInput(key);
-          tabHarness.sendTerminalInput("\r");
-          return result;
-        }
-
-        for (const [key, label] of [
-          ["\t", "raw Tab"],
-          ["\u001b[9u", "CSI-u Tab"],
-          ["\u001b[Z", "legacy Shift+Tab"],
-          ["\u001b[9;2u", "CSI-u Shift+Tab"],
-        ]) {
-          const selected = await selectTab(key);
-          eq(selected?.tabId, "two", `${label} changes the active tab`);
-        }
-      }
+      // The tab overlay was chrome around a single page. Its one caller, the
+      // thinking picker, now uses the same menu shell as every other picker,
+      // which the assertions above already cover.
     });
   },
 };
