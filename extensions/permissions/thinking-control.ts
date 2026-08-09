@@ -40,10 +40,18 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
     restore(data) {
       // A record written before the auto mode was removed can still carry
       // `"auto"` here, which is not a thinking level. Anything unknown falls
-      // back to the default instead of being handed to the agent as-is.
-      manualThinkingLevel = isSelectableThinkingLevel(data?.manualThinkingLevel)
-        ? data.manualThinkingLevel
-        : "medium";
+      // back to the runtime's current default (settings.json's
+      // defaultThinkingLevel) — read here, at session_start, because this is
+      // the first point where the extension runtime is initialized. Reading
+      // it eagerly at extension-load time throws.
+      if (isSelectableThinkingLevel(data?.manualThinkingLevel)) {
+        manualThinkingLevel = data.manualThinkingLevel;
+      } else {
+        const runtimeCurrent = pi.getThinkingLevel();
+        manualThinkingLevel = isSelectableThinkingLevel(runtimeCurrent)
+          ? runtimeCurrent
+          : "medium";
+      }
       pi.setThinkingLevel(manualThinkingLevel);
     },
 
