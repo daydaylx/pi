@@ -11,6 +11,7 @@ import {
 import { execFileSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { assert, eq } from "../shared/assertions.mjs";
 import {
   assertNoGlobalChrome,
@@ -2796,6 +2797,17 @@ export const runtimeSections = {
       }
 
       {
+        // Layout assertions must measure terminal cells, so they use the same
+        // width function the footer itself does.
+        const { visibleWidth } = await import(
+          pathToFileURL(
+            path.join(
+              ROOT,
+              "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.js",
+            ),
+          ).href
+        );
+        const { LAYOUT_COLUMNS } = await load("extensions/shared/layout.ts");
         const footerState = (overrides = {}) => ({
           sessionEpoch: "responsive-test",
           workflow: { phase: "work", label: "Work" },
@@ -2878,11 +2890,97 @@ export const runtimeSections = {
             `a language server reporting "${healthy}" stays off the line`,
           );
         }
-        assert(
-          line(140, { contextPercent: 95 }).includes("ctx 95%") &&
-            line(45, { contextPercent: 95 }).includes("ctx 95%"),
-          "a nearly exhausted context survives every tier",
-        );
+        // Colour and layout priority are separate. A filling context warns
+        // where there is room, but must not push the workflow or the model off
+        // a narrow line the way a genuine emergency may.
+        for (const columns of [45, 70]) {
+          assert(
+            !line(columns, { contextPercent: 75 }).includes("ctx 75%"),
+            `a 75% context does not claim space at ${columns} columns`,
+          );
+        }
+        for (const columns of [100, 140]) {
+          const filling = line(columns, { contextPercent: 75 });
+          assert(
+            columns >= LAYOUT_COLUMNS.wide
+              ? filling.includes("ctx 75%")
+              : !filling.includes("ctx 75%"),
+            `a 75% context follows the normal tier at ${columns} columns`,
+          );
+        }
+        {
+          const warned = auroraFooter.renderFooterLines(
+            context.ui.theme,
+            140,
+            {
+              statuses: new Map(),
+              contextPercent: 75,
+              state: footerState(),
+            },
+          )[0];
+          assert(
+            warned.includes(context.ui.theme.fg("warning", "ctx 75%")),
+            "a 75% context is coloured as a warning where it is shown",
+          );
+        }
+
+        // Only a nearly exhausted context overrides the tier, at every size.
+        for (const columns of [40, 45, 52, 90, 120, 160]) {
+          const critical = auroraFooter.renderFooterLines(
+            context.ui.theme,
+            columns,
+            {
+              statuses: new Map(),
+              contextPercent: 95,
+              state: footerState(),
+            },
+          );
+          eq(critical.length, 1, `one line at ${columns} columns`);
+          assert(
+            stripAnsi(critical[0]).includes("ctx 95%"),
+            `an exhausted context survives the tier at ${columns} columns`,
+          );
+          assert(
+            visibleWidth(critical[0]) <= columns,
+            `an exhausted context does not overflow ${columns} columns`,
+          );
+        }
+
+        // Layout decisions must count terminal cells, not JavaScript
+        // characters: `⚠`, `✓` and CJK all occupy more cells than they do
+        // string length. Measuring length would let a line "fit" and then be
+        // truncated at the edge — losing part of a finished status instead of
+        // dropping a whole segment.
+        for (const columns of [40, 52, 70, 90, 120]) {
+          const wide = auroraFooter.renderFooterLines(
+            context.ui.theme,
+            columns,
+            {
+              statuses: new Map([
+                ["verification", "Verify: changed_unverified"],
+              ]),
+              contextPercent: 95,
+              state: footerState({
+                workflow: { phase: "work", label: "作業モード" },
+                model: { id: "模型-统一-推理-大", thinking: "high" },
+                permissions: { level: "yolo" },
+                lsp: { state: "eingeschränkt" },
+              }),
+            },
+          );
+          eq(wide.length, 1, `wide glyphs stay on one line at ${columns}`);
+          const rendered = wide[0];
+          assert(
+            visibleWidth(rendered) <= columns,
+            `wide glyphs never overflow ${columns} terminal cells`,
+          );
+          // Whatever survived is intact — the ellipsis would mean a segment was
+          // shaved at the edge instead of being dropped whole.
+          assert(
+            !stripAnsi(rendered).includes("…"),
+            `segments are dropped whole rather than truncated at ${columns}`,
+          );
+        }
 
         // The responsive matrix from the UX brief. Every size gets the loudest
         // possible state, so nothing can fit by being empty.
@@ -3262,6 +3360,127 @@ export const runtimeSections = {
             "Aurora removes a foreground subagent when its tool call ends",
           );
           await widgetHarness.runHooks("session_shutdown", {}, widgetContext);
+
+          // An event that arrives while a request is still unanswered must not
+          // be dropped — the cache would stay stale until something else
+          // happened to move. Any number of them owe exactly one follow-up.
+          {
+            const raceHarness = createHarness();
+            auroraUi.default(raceHarness.api);
+            const asked = [];
+            raceHarness.api.events.on("subagents:rpc:v1:request", (request) => {
+              asked.push(request.requestId);
+            });
+            const raceContext = raceHarness.makeContext();
+            await raceHarness.runHooks("session_start", {}, raceContext);
+
+            raceHarness.api.events.emit("subagent:control-event", {});
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(asked.length, 1, "the first event produces one request");
+
+            for (let index = 0; index < 3; index += 1)
+              raceHarness.api.events.emit("subagent:control-event", {});
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(
+              asked.length,
+              1,
+              "no second request goes out while the first is unanswered",
+            );
+
+            raceHarness.api.events.emit(`subagents:rpc:v1:reply:${asked[0]}`, {
+              success: true,
+              data: { text: "Active async runs: 0" },
+            });
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(
+              asked.length,
+              2,
+              "three events during one request owe exactly one follow-up",
+            );
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(asked.length, 2, "and the follow-up does not cascade");
+            await raceHarness.runHooks("session_shutdown", {}, raceContext);
+          }
+
+          // A request outlives the session that asked it. Its answer belongs to
+          // a session that no longer exists and must not reach the next one.
+          {
+            const staleHarness = createHarness();
+            auroraUi.default(staleHarness.api);
+            const asked = [];
+            staleHarness.api.events.on(
+              "subagents:rpc:v1:request",
+              (request) => {
+                asked.push(request.requestId);
+              },
+            );
+            const sessionA = staleHarness.makeContext();
+            await staleHarness.runHooks("session_start", {}, sessionA);
+            await staleHarness.runHooks(
+              "tool_execution_start",
+              {
+                toolCallId: "session-a-tool",
+                toolName: "subagent",
+                args: { agent: "session-a-worker" },
+              },
+              sessionA,
+            );
+            staleHarness.api.events.emit("subagent:control-event", {});
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(asked.length, 1, "session A has a request on the wire");
+
+            await staleHarness.runHooks("session_shutdown", {}, sessionA);
+            const sessionB = staleHarness.makeContext();
+            await staleHarness.runHooks("session_start", {}, sessionB);
+
+            // The late answer from session A, arriving inside session B.
+            staleHarness.api.events.emit(`subagents:rpc:v1:reply:${asked[0]}`, {
+              success: true,
+              data: {
+                text: "Active async runs: 1\n\n- stale-from-a | running | single | steps 1 | /tmp",
+              },
+            });
+            await new Promise((resolve) => setTimeout(resolve, 400));
+
+            const activityB = staleHarness.widgets.get("aurora-ui/activity")
+              ?.content;
+            await staleHarness.runHooks(
+              "tool_execution_start",
+              {
+                toolCallId: "session-b-tool",
+                toolName: "subagent",
+                args: { agent: "session-b-worker" },
+              },
+              sessionB,
+            );
+            const renderedB =
+              typeof activityB === "function"
+                ? activityB({ requestRender() {} }, sessionB.ui.theme)
+                    .render(140)
+                    .map(stripAnsi)
+                    .join("\n")
+                : "";
+            assert(
+              !renderedB.includes("stale-from-a") &&
+                !renderedB.includes("session-a-worker"),
+              "an answer from a retired session never reaches the next one",
+            );
+            assert(
+              renderedB.includes("session-b-worker"),
+              "the new session still tracks its own subagents",
+            );
+
+            // The retired request must also not leave the in-flight gate stuck:
+            // session B has to be able to ask for status itself.
+            staleHarness.api.events.emit("subagent:control-event", {});
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            eq(
+              asked.length,
+              2,
+              "a session that replaced another can still request status",
+            );
+            await staleHarness.runHooks("session_shutdown", {}, sessionB);
+          }
 
           // Nothing answers the status request here. The widget has to give up
           // on its own and keep rendering the work it can see by itself,

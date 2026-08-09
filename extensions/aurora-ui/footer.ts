@@ -57,11 +57,12 @@ const Priority = {
   workflow: 0,
   yolo: 1,
   failedVerification: 2,
-  lsp: 3,
-  model: 4,
-  verification: 5,
-  thinking: 6,
-  context: 7,
+  exhaustedContext: 3,
+  lsp: 4,
+  model: 5,
+  verification: 6,
+  thinking: 7,
+  context: 8,
 } as const;
 
 type Priority = (typeof Priority)[keyof typeof Priority];
@@ -161,18 +162,21 @@ function collectSegments(input: FooterInput): Segment[] {
   }
 
   if (input.contextPercent !== null) {
-    const tight = input.contextPercent >= CONTEXT_WARNING_PERCENT;
+    // Colour and layout priority are separate judgements. A filling context is
+    // worth a warning colour long before it is worth taking a narrow line's
+    // space away from the workflow — only a nearly exhausted one is urgent
+    // enough to outrank the tier it would normally be filtered out by.
+    const exhausted = input.contextPercent >= CONTEXT_CRITICAL_PERCENT;
     segments.push({
       slot: Slot.context,
-      priority: Priority.context,
+      priority: exhausted ? Priority.exhaustedContext : Priority.context,
       text: `ctx ${Math.round(input.contextPercent)}%`,
-      tone:
-        input.contextPercent >= CONTEXT_CRITICAL_PERCENT
-          ? "error"
-          : tight
-            ? "warning"
-            : "muted",
-      critical: tight,
+      tone: exhausted
+        ? "error"
+        : input.contextPercent >= CONTEXT_WARNING_PERCENT
+          ? "warning"
+          : "muted",
+      critical: exhausted,
     });
   }
 
@@ -215,11 +219,17 @@ function collectSegments(input: FooterInput): Segment[] {
   return segments;
 }
 
+/**
+ * Terminal cells, not JavaScript characters. `⚠`, `✓`, CJK and emoji all cost
+ * more cells than they do string length, and a selection that measured length
+ * would believe a line fits and then have to truncate a finished segment at
+ * the edge — the one thing this layout exists to avoid.
+ */
 function widthOf(segments: readonly Segment[]): number {
   if (segments.length === 0) return 0;
   return (
-    segments.reduce((total, segment) => total + segment.text.length, 0) +
-    STATUS_SEPARATOR.length * (segments.length - 1)
+    segments.reduce((total, segment) => total + visibleWidth(segment.text), 0) +
+    visibleWidth(STATUS_SEPARATOR) * (segments.length - 1)
   );
 }
 

@@ -257,6 +257,14 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   const foregroundSubagents = new Map<string, SubagentInfo[]>();
   let subagentsFetchInFlight: Promise<void> | undefined;
   let subagentsCoalesceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** An event arrived while a request was in flight; ask again once, after. */
+  let subagentRefreshPending = false;
+  /**
+   * Bumped whenever a session ends. A reply carries the generation it was asked
+   * under, so an answer that outlives its session cannot write into the next
+   * one — the request itself is not cancellable, but its result is ignorable.
+   */
+  let subagentGeneration = 0;
   let fleetDockOwnsSubagents = false;
   const activeTools = new Map<string, ActiveToolView>();
 
@@ -304,7 +312,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     subagentsCache = [...byKey.values()];
   }
 
-  async function requestSubagentStatus(): Promise<void> {
+  /** True while the answer to a request asked under `generation` still counts. */
+  function subagentReplyStillWanted(generation: number): boolean {
+    return !disposed && generation === subagentGeneration;
+  }
+
+  async function requestSubagentStatus(generation: number): Promise<void> {
     const requestId = crypto.randomUUID();
     // Subscribe before emitting, await after: a reply that arrives
     // synchronously must still find its listener.
@@ -327,7 +340,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       method: "status",
       params: {},
     });
-    asyncSubagentsCache = asyncSubagentsFromRpcReply(await reply);
+    const value = await reply;
+    if (!subagentReplyStillWanted(generation)) return;
+    asyncSubagentsCache = asyncSubagentsFromRpcReply(value);
   }
 
   /**
@@ -336,20 +351,41 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
    * handler alone — never from a render — so the cost is bounded by how often
    * subagents actually change state, not by the frame rate. A burst of events
    * collapses into a single request.
+   *
+   * An event that arrives while a request is already in flight would otherwise
+   * be lost, leaving the cache stale for as long as nothing else happens. It
+   * sets a single pending flag instead, so any number of such events produce
+   * exactly one follow-up request once the current one has answered.
    */
   function refreshSubagents(): void {
-    if (fleetDockOwnsSubagents || subagentsCoalesceTimer) return;
+    if (fleetDockOwnsSubagents || disposed) return;
+    if (subagentsFetchInFlight) {
+      subagentRefreshPending = true;
+      return;
+    }
+    if (subagentsCoalesceTimer) return;
     subagentsCoalesceTimer = setTimeout(() => {
       subagentsCoalesceTimer = undefined;
-      if (subagentsFetchInFlight || disposed) return;
-      subagentsFetchInFlight = requestSubagentStatus()
+      if (disposed) return;
+      if (subagentsFetchInFlight) {
+        subagentRefreshPending = true;
+        return;
+      }
+      const generation = subagentGeneration;
+      subagentsFetchInFlight = requestSubagentStatus(generation)
         .catch(() => {
-          asyncSubagentsCache = [];
+          if (subagentReplyStillWanted(generation)) asyncSubagentsCache = [];
         })
         .finally(() => {
+          // A stale request touches nothing at all — not even the in-flight
+          // gate, which by now may belong to the session that replaced it.
+          if (!subagentReplyStillWanted(generation)) return;
           subagentsFetchInFlight = undefined;
           mergeSubagents();
           ticker?.requestRender();
+          if (!subagentRefreshPending) return;
+          subagentRefreshPending = false;
+          refreshSubagents();
         });
     }, SUBAGENT_COALESCE_MS);
   }
@@ -452,6 +488,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     foregroundSubagents.clear();
     subagentsCache = [];
     asyncSubagentsCache = [];
+    // A request already on the wire cannot be recalled, so retire the
+    // generation it was asked under: whenever it answers, it answers for a
+    // session that no longer exists and is dropped instead of applied.
+    subagentGeneration += 1;
+    subagentRefreshPending = false;
+    subagentsFetchInFlight = undefined;
     if (subagentsCoalesceTimer) clearTimeout(subagentsCoalesceTimer);
     subagentsCoalesceTimer = undefined;
     ticker?.dispose();
