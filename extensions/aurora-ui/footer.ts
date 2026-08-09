@@ -10,7 +10,7 @@ import {
 import { compactCwd } from "./cwd.ts";
 import { crop } from "./layout.ts";
 import type { AuroraUiState } from "./state.ts";
-import { thinkingTone } from "./thinking.ts";
+import { thinkingLabel, thinkingTone } from "./thinking.ts";
 
 /**
  * The footer is the one permanent status surface, and it is one line.
@@ -172,7 +172,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     segments.push({
       slot: Slot.thinking,
       priority: Priority.thinking,
-      text: input.state.model.thinking.toUpperCase(),
+      text: thinkingLabel(input.state.model.thinking),
       tone: thinkingTone(input.state.model.thinking),
       bold: true,
     });

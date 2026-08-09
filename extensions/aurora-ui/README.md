@@ -10,7 +10,7 @@ central setup configuration (`ui.motion`):
 
 - `contextual`: one shared 100 ms ticker runs only while work is visible.
 - `reduced`: static activity indicator; no extension ticker.
-- `off`: no animated/working indicator; activity text remains available.
+- `off`: no animated indicator; activity text remains available.
 
 ## The two surfaces
 
@@ -35,13 +35,22 @@ leave the widget immediately rather than turning into a success block. The
 welcome is never shown again within that session and is skipped for resumed
 conversations.
 
-`tool_execution_start` is Aurora's only source for a tool row. It classifies the
-runtime tool name and its real arguments as Read, Search, Edit, Bash, Test,
-Verify, LSP, Subagent or Generic; no tool is wrapped or called by the UI. The
-known LSP names are rendered as LSP activity only when one of those tools
-actually starts. LSP health remains a footer concern. A running verification
-uses the active circle rather than a success checkmark; completed tools vanish
-from this transient widget and Pi's result output remains the source of truth.
+Der Header zeigt während eines laufenden Turns `DENKT NACH` (mit Thinking-Level),
+`ARBEITET`, `ANTWORTET` oder nach vier Sekunden ohne konkretes Aurora-Ereignis
+`WARTET`, jeweils mit einer Laufzeit. `WARTET` bedeutet ausschließlich, dass der
+Turn weiterläuft und Aurora gerade kein genaueres Ereignis erhalten hat: Die
+Animation ist ein Lebenszeichen, keine Hänger- oder Fehlerdiagnose. `idle` wird
+nur beim tatsächlichen Turnabschluss (`agent_end` oder `agent_settled`) gesetzt,
+sofern keine asynchronen Subagenten weiterarbeiten.
+
+`tool_execution_start` ist Auroras einzige Quelle für eine Toolzeile. Es ordnet
+die realen Laufzeitdaten als Lesen, Suchen, Bearbeiten, Shell, Testen, Prüfen,
+LSP, Subagent oder Werkzeug ein; kein Tool wird von der UI gewrappt oder
+aufgerufen. Bekannte LSP-Namen erscheinen nur als LSP-Aktivität, wenn dieses
+Tool tatsächlich startet. LSP-Gesundheit bleibt eine Footer-Angelegenheit. Eine
+laufende Verifikation nutzt den aktiven Kreis statt eines Erfolgs-Häkchens;
+abgeschlossene Tools verschwinden aus der transienten Anzeige und Pis
+Ergebnisausgabe bleibt die Quelle der Wahrheit.
 
 Foreground subagents come from the `subagent` tool call itself. Async entries
 come from the subagent package's `subagent:async-started` and

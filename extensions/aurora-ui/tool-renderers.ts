@@ -49,16 +49,16 @@ interface ToolPresentation {
 }
 
 const PRESENTATIONS: Record<ActivityToolKind, ToolPresentation> = {
-  read: { glyph: "◌", label: "Read" },
-  search: { glyph: "⌕", label: "Search" },
-  edit: { glyph: "✎", label: "Edit" },
-  bash: { glyph: "›", label: "Bash" },
+  read: { glyph: "◌", label: "Lesen" },
+  search: { glyph: "⌕", label: "Suchen" },
+  edit: { glyph: "✎", label: "Bearbeiten" },
+  bash: { glyph: "›", label: "Shell" },
   lsp: { glyph: "◇", label: "LSP" },
-  test: { glyph: "▹", label: "Test" },
-  verification: { glyph: "✓", label: "Verify" },
+  test: { glyph: "▹", label: "Testen" },
+  verification: { glyph: "✓", label: "Prüfen" },
   subagent: { glyph: "◉", label: "Subagent" },
   web: { glyph: "◎", label: "Web" },
-  generic: { glyph: RUNNING_GLYPH, label: "Tool" },
+  generic: { glyph: RUNNING_GLYPH, label: "Werkzeug" },
 };
 
 const LSP_TOOLS = new Set([
@@ -184,18 +184,18 @@ function pathWithPosition(args: unknown): string | undefined {
 function lspTarget(toolName: string, args: unknown): string | undefined {
   switch (toolName.toLowerCase()) {
     case "lsp_diagnostics":
-      return `diagnostics · ${firstString(args, ["path"]) ?? ""}`.trim();
+      return `Diagnosen · ${firstString(args, ["path"]) ?? ""}`.trim();
     case "lsp_definition":
-      return `definition · ${pathWithPosition(args) ?? ""}`.trim();
+      return `Definition · ${pathWithPosition(args) ?? ""}`.trim();
     case "lsp_references":
-      return `references · ${pathWithPosition(args) ?? ""}`.trim();
+      return `Referenzen · ${pathWithPosition(args) ?? ""}`.trim();
     case "lsp_hover":
-      return `hover · ${pathWithPosition(args) ?? ""}`.trim();
+      return `Info · ${pathWithPosition(args) ?? ""}`.trim();
     case "lsp_workspace_symbols": {
       const query = firstString(args, ["query"]);
       return query
-        ? `workspace symbols · ${quote(query)}`
-        : "workspace symbols";
+        ? `Workspace-Symbole · ${quote(query)}`
+        : "Workspace-Symbole";
     }
     default:
       return undefined;
@@ -302,11 +302,7 @@ export function toolPresentation(
   name: string,
   args?: unknown,
 ): ToolPresentation {
-  const kind = classifyTool(name, args);
-  const presentation = PRESENTATIONS[kind];
-  return kind === "generic" && name
-    ? { ...presentation, label: name }
-    : presentation;
+  return PRESENTATIONS[classifyTool(name, args)];
 }
 
 function toneForTool(tool: ActiveToolView): "accent" | "warning" | "error" {

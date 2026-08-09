@@ -2796,7 +2796,7 @@ export const runtimeSections = {
         // Segments give up their place whole rather than being shaved off at
         // the edge, so what remains stays readable.
         assert(
-          wide.includes("HIGH") && !narrow.includes("HIGH"),
+          wide.includes("HOCH") && !narrow.includes("HOCH"),
           "Aurora footer drops the thinking segment before it crowds a narrow line",
         );
 
@@ -2931,13 +2931,13 @@ export const runtimeSections = {
         const quiet = { contextPercent: 38 };
         assert(
           line(140, quiet).includes("ctx 38%") &&
-            line(140, quiet).includes("HIGH") &&
+            line(140, quiet).includes("HOCH") &&
             line(140, quiet).includes("~/…/pi"),
           "the wide footer shows thinking, folder and context",
         );
         assert(
           !line(100, quiet).includes("ctx 38%") &&
-            line(100, quiet).includes("HIGH") &&
+            line(100, quiet).includes("HOCH") &&
             line(100, quiet).includes("~/…/pi"),
           "the comfortable footer drops context before thinking and compacts the folder",
         );
@@ -2946,7 +2946,7 @@ export const runtimeSections = {
           standard.includes("Work") &&
             standard.includes("aurora-test-model") &&
             standard.includes("~/…/pi") &&
-            !standard.includes("HIGH"),
+            !standard.includes("HOCH"),
           "the standard footer keeps workflow, model and folder",
         );
         const compact = line(45, quiet);
@@ -3119,8 +3119,23 @@ export const runtimeSections = {
         const auroraTools = await load(
           "extensions/aurora-ui/tool-renderers.ts",
         );
+        for (const [name, label] of [
+          ["read", "Lesen"],
+          ["grep", "Suchen"],
+          ["edit", "Bearbeiten"],
+          ["bash", "Shell"],
+          ["verify", "Prüfen"],
+          ["subagent", "Subagent"],
+          ["unknown_tool", "Werkzeug"],
+        ]) {
+          eq(
+            auroraTools.toolPresentation(name).label,
+            label,
+            `${name} uses its German Aurora presentation label`,
+          );
+        }
         const activeTools = ["read", "grep", "bash", "edit"].map(
-          (name, index) => ({
+          (name, index) => ({ 
             id: `${name}-${index}`,
             name,
             startedAt: 0,
@@ -3171,13 +3186,13 @@ export const runtimeSections = {
             "lsp_references",
             { path: "index.ts", line: 4, character: 2 },
             "lsp",
-            "references · index.ts:5:3",
+            "Referenzen · index.ts:5:3",
           ],
           [
             "lsp_workspace_symbols",
             { query: "Aurora" },
             "lsp",
-            'workspace symbols · "Aurora"',
+            'Workspace-Symbole · "Aurora"',
           ],
           ["ask_user", { question: "continue?" }, "generic", undefined],
         ];
@@ -3208,7 +3223,7 @@ export const runtimeSections = {
           .join("\n");
         assert(
           lspActivity.includes("◇ LSP") &&
-            lspActivity.includes("references · index.ts:5:3"),
+            lspActivity.includes("Referenzen · index.ts:5:3"),
           "LSP activity names the real operation and position without inventing a symbol",
         );
         for (const columns of [40, 52, 90, 120, 160]) {
@@ -3357,6 +3372,26 @@ export const runtimeSections = {
           !render().includes("stale-worker"),
           "an async event from another session never reaches Activity",
         );
+        subagentHarness.api.events.emit("subagent:async-started", {
+          id: "pre-settle-async",
+          sessionId: "async-activity-session",
+          agent: "pre-settle-worker",
+        });
+        subagentHarness.api.events.emit("subagent:async-complete", {
+          id: "pre-settle-async",
+          sessionId: "async-activity-session",
+        });
+        assert(
+          render().includes("ANTWORTET"),
+          "the last async completion cannot make an active parent turn idle",
+        );
+        await subagentHarness.runHooks("agent_settled", {}, subagentContext);
+        eq(
+          render(),
+          "",
+          "the parent completion, not async completion, clears Aurora activity",
+        );
+        await subagentHarness.runHooks("agent_start", {}, subagentContext);
 
         subagentHarness.api.events.emit("subagent:async-started", {
           id: "async-activity",
@@ -3404,6 +3439,20 @@ export const runtimeSections = {
       }
 
       await harness.runHooks("agent_start", {}, context);
+      const thinkingWidget = harness.widgets.get("aurora-ui/activity")?.content;
+      const thinkingHeader =
+        typeof thinkingWidget === "function"
+          ? thinkingWidget({ requestRender() {} }, context.ui.theme)
+              .render(120)
+              .map(stripAnsi)
+              .join("\n")
+          : "";
+      assert(
+        thinkingHeader.includes("DENKT NACH") &&
+          thinkingHeader.includes("HOCH") &&
+          /· \d+s/.test(thinkingHeader),
+        "Aurora shows a German Thinking header with level and elapsed seconds",
+      );
       eq(
         harness.workingVisibility.at(-1),
         false,
@@ -3429,6 +3478,11 @@ export const runtimeSections = {
           component.render(60).length >= 1,
           "Aurora activity renders in a narrow terminal",
         );
+        const toolHeader = stripAnsi(component.render(120)[0]);
+        assert(
+          toolHeader.includes("ARBEITET") && /· \d+s/.test(toolHeader),
+          "Aurora shows a German Tool header with elapsed seconds",
+        );
         // The widget is Aurora's only live-work surface; the native indicator
         // remains hidden so the editor does not show two competing signals.
         eq(
@@ -3437,7 +3491,7 @@ export const runtimeSections = {
           "the native working indicator remains hidden while a tool runs",
         );
         assert(
-          stripAnsi(component.render(60)[0]).includes("THINKING"),
+          stripAnsi(component.render(60)[0]).includes("ARBEITET"),
           "the configured Thinking state lives only in the activity widget",
         );
         component.invalidate?.();
@@ -3487,8 +3541,8 @@ export const runtimeSections = {
         railRendered.includes("│") &&
           railRendered.includes("├─") &&
           railRendered.includes("╰─") &&
-          railRendered.includes("◌ Read") &&
-          railRendered.includes("▹ Test"),
+          railRendered.includes("◌ Lesen") &&
+          railRendered.includes("▹ Testen"),
         "wide activity groups typed running tools with a lightweight rail",
       );
 
@@ -3541,7 +3595,7 @@ export const runtimeSections = {
       assert(
         lspRendered.includes("◇ LSP") &&
           lspRendered.includes(
-            "references · extensions/aurora-ui/index.ts:2:1",
+            "Referenzen · extensions/aurora-ui/index.ts:2:1",
           ),
         "a real LSP tool call appears in Activity with its actual position",
       );
@@ -3584,7 +3638,7 @@ export const runtimeSections = {
               .join("\n")
           : "";
       assert(
-        verifyRendered.includes("◌ Verify") &&
+        verifyRendered.includes("◌ Prüfen") &&
           verifyRendered.includes("verify"),
         "the running verification tool has a distinct, argument-backed Activity row without a false success mark",
       );
@@ -3593,6 +3647,62 @@ export const runtimeSections = {
         { toolCallId: "tool-aurora-verify", toolName: "verify" },
         context,
       );
+      await harness.runHooks(
+        "message_update",
+        { assistantMessageEvent: { type: "text_delta" } },
+        context,
+      );
+      const respondingRendered =
+        typeof widget === "function"
+          ? widget({ requestRender() {} }, context.ui.theme)
+              .render(120)
+              .map(stripAnsi)
+              .join("\n")
+          : "";
+      assert(
+        respondingRendered.includes("ANTWORTET"),
+        "a text update keeps the active turn visible as Responding",
+      );
+
+      // Rendering derives WARTET from the normal Aurora clock; the test moves
+      // that clock directly instead of waiting in real time.
+      {
+        const originalNow = Date.now;
+        const clock = originalNow() + 4_000;
+        Date.now = () => clock;
+        try {
+          const waitingRendered =
+            typeof widget === "function"
+              ? widget({ requestRender() {} }, context.ui.theme)
+                  .render(120)
+                  .map(stripAnsi)
+                  .join("\n")
+              : "";
+          assert(
+            waitingRendered.includes("WARTET") && waitingRendered.includes("0s"),
+            "Aurora derives WARTET only after its documented quiet threshold",
+          );
+          await harness.runHooks(
+            "message_update",
+            { assistantMessageEvent: { type: "text_delta" } },
+            context,
+          );
+          const resumedRendered =
+            typeof widget === "function"
+              ? widget({ requestRender() {} }, context.ui.theme)
+                  .render(120)
+                  .map(stripAnsi)
+                  .join("\n")
+              : "";
+          assert(
+            resumedRendered.includes("ANTWORTET") &&
+              !resumedRendered.includes("WARTET"),
+            "a concrete text event immediately replaces WARTET",
+          );
+        } finally {
+          Date.now = originalNow;
+        }
+      }
 
       for (const motion of ["reduced", "off"]) {
         const workspace = mkdtempSync(path.join(tmpdir(), "aurora-motion-"));
@@ -3620,12 +3730,12 @@ export const runtimeSections = {
                   .join("\n")
               : "";
           assert(
-            rendered.includes("THINKING") && rendered.includes("HIGH"),
+            rendered.includes("DENKT NACH") && rendered.includes("HOCH"),
             `Aurora keeps its Thinking header visible with ${motion} motion`,
           );
           assert(
-            rendered.includes("◉"),
-            `${motion} motion keeps an explicit non-animated activity state`,
+            motion === "reduced" ? rendered.includes("●") : !rendered.includes("●"),
+            `${motion} motion keeps the required static or text-only activity presentation`,
           );
           eq(
             motionHarness.workingVisibility.at(-1),
@@ -3654,6 +3764,16 @@ export const runtimeSections = {
           .render(140).length,
         0,
         "the activity widget renders nothing once the turn has settled",
+      );
+      await harness.runHooks("agent_start", {}, context);
+      await harness.runHooks("agent_settled", {}, context);
+      eq(
+        harness.widgets
+          .get("aurora-ui/activity")
+          ?.content({ requestRender() {} }, context.ui.theme)
+          .render(140).length,
+        0,
+        "agent_settled also clears Aurora activity without async work",
       );
 
       await harness.runHooks("session_shutdown", {}, context);

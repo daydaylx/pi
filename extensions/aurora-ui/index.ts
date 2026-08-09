@@ -35,6 +35,8 @@ import { thinkingLabel, thinkingTone } from "./thinking.ts";
 const OWNER = "aurora-ui";
 const ACTIVITY_WIDGET = "aurora-ui/activity";
 const TICK_INTERVAL_MS = 100;
+/** A running turn without a concrete Aurora event is presented as WARTET. */
+const WAITING_THRESHOLD_MS = 4_000;
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
 );
@@ -286,6 +288,14 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let sessionHome: string | undefined;
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
+  // Presentation-only timestamps: neither is published nor part of Aurora's
+  // activity-state contract.
+  let activityStartedAt = 0;
+  let lastRelevantActivityAt = 0;
+  // This records only that Pi has emitted a real turn-completion event while
+  // an async child remains visible; it does not introduce another activity
+  // state or lifecycle source.
+  let turnSettledWhileAsync = false;
 
   /**
    * The transient surface above the editor has two presentation-only variants:
@@ -313,13 +323,34 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
     const layout = layoutForSize(width, rows);
     const compact = layout === "compact";
-    const heading =
-      state.activity.kind === "responding"
-        ? theme.fg("accent", theme.bold("◉ RESPONDING"))
-        : theme.fg(
-            thinkingTone(state.model.thinking),
-            theme.bold(`◉ THINKING  ${thinkingLabel(state.model.thinking)}`),
-          );
+    const now = Date.now();
+    const waiting =
+      state.activity.kind !== "tool" &&
+      activeTools.size === 0 &&
+      asyncSubagents.size === 0 &&
+      lastRelevantActivityAt > 0 &&
+      now - lastRelevantActivityAt >= WAITING_THRESHOLD_MS;
+    const displayKind = waiting ? "waiting" : state.activity.kind;
+    const label =
+      displayKind === "thinking"
+        ? "DENKT NACH"
+        : displayKind === "tool"
+          ? "ARBEITET"
+          : displayKind === "responding"
+            ? "ANTWORTET"
+            : "WARTET";
+    const phaseStartedAt = waiting
+      ? lastRelevantActivityAt + WAITING_THRESHOLD_MS
+      : activityStartedAt;
+    const elapsed = Math.max(0, Math.floor((now - phaseStartedAt) / 1000));
+    const thinking =
+      displayKind === "thinking" ? ` · ${thinkingLabel(state.model.thinking)}` : "";
+    const glyph = workingFrame(theme, ticker?.motion ?? "off", ticker?.frame ?? 0);
+    const headingText = `${glyph ? `${glyph} ` : ""}${label}${thinking} · ${elapsed}s`;
+    const heading = theme.fg(
+      displayKind === "thinking" ? thinkingTone(state.model.thinking) : "accent",
+      theme.bold(headingText),
+    );
     const contentWidth = Math.max(1, width - (compact ? 0 : 3));
     const tools = renderActiveTools(
       [...activeTools.values()],
@@ -381,12 +412,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
    */
   function retainAsyncActivity(ctx: ExtensionContext): void {
     if (asyncSubagents.size === 0) return;
-    updateState(ctx, {
-      activity: {
-        kind: "tool",
-        label: `${subagentsCache.length} Subagent${subagentsCache.length === 1 ? "" : "en"} aktiv`,
-        activeTools: activeTools.size,
-      },
+    updateActivity(ctx, {
+      kind: "tool",
+      label: `${subagentsCache.length} Subagent${subagentsCache.length === 1 ? "" : "en"} aktiv`,
+      activeTools: activeTools.size,
     });
   }
 
@@ -411,6 +440,47 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     mergeAuroraUiState(state, patch);
     ticker?.requestRender();
     if (patch.activity) applyWorking(ctx);
+  }
+
+  /** Update a real Activity state and its local display timing together. */
+  function updateActivity(
+    ctx: ExtensionContext,
+    activity: AuroraUiStatePatch["activity"],
+  ): void {
+    const previousKind = state?.activity.kind;
+    const nextKind = activity?.kind ?? previousKind;
+    const now = Date.now();
+    if (nextKind === "idle") {
+      activityStartedAt = 0;
+      lastRelevantActivityAt = 0;
+    } else if (nextKind) {
+      const wasWaiting =
+        previousKind !== "tool" &&
+        activeTools.size === 0 &&
+        asyncSubagents.size === 0 &&
+        lastRelevantActivityAt > 0 &&
+        now - lastRelevantActivityAt >= WAITING_THRESHOLD_MS;
+      if (previousKind !== nextKind || activityStartedAt === 0 || wasWaiting)
+        activityStartedAt = now;
+      lastRelevantActivityAt = now;
+    }
+    updateState(ctx, { activity });
+  }
+
+  /** A concrete event replaces a derived WARTET label without adding a state. */
+  function noteRelevantActivity(): void {
+    if (!state || state.activity.kind === "idle") return;
+    const now = Date.now();
+    if (
+      state.activity.kind !== "tool" &&
+      activeTools.size === 0 &&
+      asyncSubagents.size === 0 &&
+      lastRelevantActivityAt > 0 &&
+      now - lastRelevantActivityAt >= WAITING_THRESHOLD_MS
+    )
+      activityStartedAt = now;
+    lastRelevantActivityAt = now;
+    ticker?.requestRender();
   }
 
   function emitSnapshot(request: AuroraUiStateRequest): void {
@@ -476,8 +546,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           activeTools.size === 0 &&
           state?.activity.kind === "tool"
         ) {
-          updateState(ctx, {
-            activity: { kind: "idle", label: undefined, activeTools: 0 },
+          updateActivity(ctx, {
+            kind: turnSettledWhileAsync ? "idle" : "responding",
+            label: undefined,
+            activeTools: 0,
           });
         }
       }),
@@ -515,6 +587,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     foregroundSubagents.clear();
     asyncSubagents.clear();
     subagentsCache = [];
+    activityStartedAt = 0;
+    lastRelevantActivityAt = 0;
+    turnSettledWhileAsync = false;
     ticker?.dispose();
     ticker = undefined;
 
@@ -646,17 +721,16 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_start", (_event, ctx) => {
     showStartscreen = false;
+    turnSettledWhileAsync = false;
     activeTools.clear();
     foregroundSubagents.clear();
     refreshSubagentDisplay();
-    updateState(ctx, {
-      activity: {
-        kind: "thinking",
-        // The real configured depth, never a guess: this is the only place
-        // thinking is visible while `hideThinkingBlock` is set.
-        label: `Thinking · ${pi.getThinkingLevel()}`,
-        activeTools: 0,
-      },
+    updateActivity(ctx, {
+      kind: "thinking",
+      // The real configured depth, never a guess: this is the only place
+      // thinking is visible while `hideThinkingBlock` is set.
+      label: `Thinking · ${pi.getThinkingLevel()}`,
+      activeTools: 0,
     });
   });
 
@@ -673,12 +747,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         foregroundSubagents.set(event.toolCallId, subagents);
       refreshSubagentDisplay();
     }
-    updateState(ctx, {
-      activity: {
-        kind: "tool",
-        label: `${activeTools.size} Tool${activeTools.size === 1 ? "" : "s"} aktiv`,
-        activeTools: activeTools.size,
-      },
+    updateActivity(ctx, {
+      kind: "tool",
+      label: `${activeTools.size} Tool${activeTools.size === 1 ? "" : "s"} aktiv`,
+      activeTools: activeTools.size,
     });
   });
 
@@ -688,7 +760,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const tool = activeTools.get(event.toolCallId);
     if (!tool || tool.tone === "error") return;
     tool.tone = "error";
-    ticker?.requestRender();
+    noteRelevantActivity();
   });
 
   pi.on("tool_execution_end", (event, ctx) => {
@@ -697,26 +769,26 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       foregroundSubagents.delete(event.toolCallId);
       refreshSubagentDisplay();
     }
-    updateState(ctx, {
-      activity:
-        activeTools.size > 0
+    updateActivity(
+      ctx,
+      activeTools.size > 0
+        ? {
+            kind: "tool",
+            label: `${activeTools.size} Tool${activeTools.size === 1 ? "" : "s"} aktiv`,
+            activeTools: activeTools.size,
+          }
+        : asyncSubagents.size > 0
           ? {
               kind: "tool",
-              label: `${activeTools.size} Tool${activeTools.size === 1 ? "" : "s"} aktiv`,
-              activeTools: activeTools.size,
+              label: `${subagentsCache.length} Subagent${subagentsCache.length === 1 ? "" : "en"} aktiv`,
+              activeTools: 0,
             }
-          : asyncSubagents.size > 0
-            ? {
-                kind: "tool",
-                label: `${subagentsCache.length} Subagent${subagentsCache.length === 1 ? "" : "en"} aktiv`,
-                activeTools: 0,
-              }
-            : {
-                kind: "responding",
-                label: undefined,
-                activeTools: 0,
-              },
-    });
+          : {
+              kind: "responding",
+              label: undefined,
+              activeTools: 0,
+            },
+    );
   });
 
   pi.on("message_update", (event, ctx) => {
@@ -728,8 +800,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       retainAsyncActivity(ctx);
       return;
     }
-    updateState(ctx, {
-      activity: { kind: "idle", label: undefined, activeTools: 0 },
+    // Text is still part of the active turn. Only agent_end/agent_settled may
+    // clear this surface; a first text_delta must never erase it.
+    updateActivity(ctx, {
+      kind: "responding",
+      label: undefined,
+      activeTools: 0,
     });
   });
 
@@ -739,9 +815,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   pi.on("thinking_level_select", (event, ctx) => {
     updateState(ctx, { model: { thinking: String(event.level) } });
+    noteRelevantActivity();
   });
 
   const settle = (_event: unknown, ctx: ExtensionContext) => {
+    turnSettledWhileAsync = true;
     activeTools.clear();
     foregroundSubagents.clear();
     refreshSubagentDisplay();
@@ -749,9 +827,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       retainAsyncActivity(ctx);
       return;
     }
-    updateState(ctx, {
-      activity: { kind: "idle", label: undefined, activeTools: 0 },
-    });
+    updateActivity(ctx, { kind: "idle", label: undefined, activeTools: 0 });
   };
   pi.on("agent_end", settle);
   pi.on("agent_settled", settle);
