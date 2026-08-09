@@ -133,9 +133,9 @@ await test("Fall C: /go without a plan gives a clear message and starts no turn"
   }
 });
 
-await test("Fall D: /workflow (Shift+Tab) performs exactly the same central action as /plan and /go", async () => {
+await test("Fall D: /workflow (Shift+Tab) changes only the mode and waits for user input", async () => {
   if (!planMode) return;
-  const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-vs-plan-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-mode-only-"));
   try {
     let selectCalls = 0;
     const harness = createHarness({
@@ -149,36 +149,33 @@ await test("Fall D: /workflow (Shift+Tab) performs exactly the same central acti
     const ctx = harness.makeContext({ cwd });
     planMode.default(harness.api);
     await hooks(harness, "session_start", ctx);
+    writePlan(cwd, "# Bestehender Plan\n\n## Ziel\nBleibt erhalten\n");
 
-    // Shift+Tab -> Workflow -> Architekturplan starts a planning turn, exactly
-    // like /plan detailed does: there is no longer a UI path with weaker
-    // semantics than the slash command.
+    // Shift+Tab -> Workflow -> Architekturplan changes the context, but does
+    // not submit an agent message. The user's next input owns that turn.
     await harness.commands.get("workflow")("", ctx);
     eq(
       harness.sent.length,
-      1,
-      "/workflow starting a planning mode starts exactly one planning turn",
+      0,
+      "/workflow changes to a planning mode without starting a turn",
     );
+    assert(existsSync(planFilePath(cwd)), "/workflow keeps an existing plan");
     const planPrompt = await hooks(harness, "before_agent_start", ctx);
     assert(
       planPrompt[0]?.message?.content.includes("PI PLANMODUS"),
-      "/workflow did switch into a planning mode",
+      "the next user-started turn receives the selected planning mode",
     );
 
-    // Simulate the planning turn actually writing its plan.
-    writePlan(cwd, "# Architekturplan\n\n## Ziel\nParität\n");
-
-    // Shift+Tab -> Workflow -> Work hands the fresh plan to work exactly
-    // once, the same handoff /go used to own exclusively.
+    // Switching back to Work likewise does not inject a plan or start a turn.
     await harness.commands.get("workflow")("", ctx);
     eq(
       harness.sent.length,
-      2,
-      "/workflow switching to work hands off the fresh plan exactly once",
+      0,
+      "/workflow switching to work does not start a handoff turn",
     );
     assert(
-      harness.sent[1].message.content.includes("Parität"),
-      "the handoff via /workflow carries the freshly planned content",
+      existsSync(planFilePath(cwd)),
+      "/workflow switching to work does not modify the existing plan",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -353,7 +350,7 @@ await test("Test 2: /plan discards the old plan, and /go hands over only the fre
   }
 });
 
-await test("Test 3: /workflow discards a stale plan before its planning turn, exactly like /plan", async () => {
+await test("Test 3: /workflow keeps an existing plan because it only changes mode", async () => {
   if (!planMode) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-keeps-plan-"));
   try {
@@ -370,12 +367,12 @@ await test("Test 3: /workflow discards a stale plan before its planning turn, ex
 
     eq(
       harness.sent.length,
-      1,
-      "/workflow starting a planning mode starts exactly one planning turn",
+      0,
+      "/workflow starting a planning mode waits for user input",
     );
     assert(
-      !existsSync(planFilePath(cwd)),
-      "/workflow discards the stale plan once the new planning turn starts, same as /plan",
+      existsSync(planFilePath(cwd)),
+      "/workflow does not discard a plan before a user starts a new planning turn",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

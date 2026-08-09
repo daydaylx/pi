@@ -40,9 +40,28 @@ const WRITE_TOOLS = new Set(["write", "edit"]);
 
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 
+// The installed pi-coding-agent runtime this repo patches — docs/
+// RUNTIME_PATCHES.md names it as this project's legitimate reference point
+// (its own README/docs/, not project source). Read-only, and only for the
+// `read` tool: `bash`/`write`/`edit` stay fully subject to the project
+// boundary below regardless of path.
+const EXTRA_READABLE_ROOTS = [
+  "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent",
+];
+
 function inside(root: string, candidate: string): boolean {
   const rel = relative(root, candidate);
   return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`));
+}
+
+function isDocumentedRuntimeDocsRead(
+  toolName: string,
+  absolutePath: string,
+): boolean {
+  return (
+    toolName === "read" &&
+    EXTRA_READABLE_ROOTS.some((root) => inside(root, absolutePath))
+  );
 }
 
 function hardBash(command: string): string | undefined {
@@ -82,10 +101,16 @@ export function assessWorkflowTool(
   const path = toolPath(event);
   if (path) {
     const scope = resolvePathScope(path, cwd);
+    if (isSensitiveReference(path) || scope.symlinkEscape) {
+      return {
+        blocked: true,
+        reason: "Harte Projekt-, Symlink- oder Secret-Grenze",
+      };
+    }
+    const outsideProject = !inside(resolve(cwd), scope.absolutePath);
     if (
-      isSensitiveReference(path) ||
-      scope.symlinkEscape ||
-      !inside(resolve(cwd), scope.absolutePath)
+      outsideProject &&
+      !isDocumentedRuntimeDocsRead(event.toolName, scope.absolutePath)
     ) {
       return {
         blocked: true,

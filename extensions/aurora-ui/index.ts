@@ -21,7 +21,7 @@ import {
   type AuroraUiSnapshotEvent,
 } from "./state.ts";
 import {
-  compactToolTarget,
+  describeToolActivity,
   renderActiveTools,
   renderSubagents,
   type ActiveToolView,
@@ -38,12 +38,6 @@ const TICK_INTERVAL_MS = 100;
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
 );
-/**
- * Bursts of subagent events collapse into one status request. Nothing here
- * runs on a timer: the window only opens once an event has already arrived.
- */
-const SUBAGENT_COALESCE_MS = 300;
-const SUBAGENT_RPC_TIMEOUT_MS = 1_000;
 const SUBAGENT_CONFIG_PATH = fileURLToPath(
   new URL("../subagent/config.json", import.meta.url),
 );
@@ -111,56 +105,85 @@ function foregroundSubagentsFromArgs(args: unknown): SubagentInfo[] {
   );
 }
 
-function textFromRpcReply(reply: unknown): string {
-  const envelope = record(reply);
-  const data = record(envelope?.data);
-  // The RPC bridge serializes AgentToolResult text as data.text. Keep the
-  // content-array fallback for the older bridge envelope.
-  if (typeof data?.text === "string") return data.text;
-  const content = data?.content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .flatMap((item) => {
-      const part = record(item);
-      return typeof part?.text === "string" ? [part.text] : [];
-    })
-    .join("\n");
+type AsyncSubagentStartEvent = {
+  id?: unknown;
+  sessionId?: unknown;
+  agent?: unknown;
+  agents?: unknown;
+  chain?: unknown;
+  mode?: unknown;
+};
+
+type SubagentControlEvent = {
+  type?: unknown;
+  agent?: unknown;
+  runId?: unknown;
+};
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is string => typeof item === "string" && Boolean(item),
+      )
+    : [];
 }
 
-function asyncSubagentsFromRpcReply(reply: unknown): SubagentInfo[] {
-  const envelope = record(reply);
-  if (!envelope || envelope.success !== true) return [];
+/**
+ * The subagent package publishes this when a background run is actually
+ * launched. Keeping Aurora on that event avoids asking its status RPC, whose
+ * handler executes a second, UI-initiated subagent action.
+ */
+function asyncSubagentsFromStart(
+  value: unknown,
+  sessionId: string | undefined,
+): { runId: string; entries: SubagentInfo[] } | undefined {
+  const event = record(value) as AsyncSubagentStartEvent | undefined;
+  const runId = event?.id;
+  if (!event || typeof runId !== "string") return undefined;
+  if (typeof event.sessionId === "string" && event.sessionId !== sessionId)
+    return undefined;
+  const agents = [
+    ...stringList(event.agents),
+    ...stringList(event.chain),
+    ...(typeof event.agent === "string" ? [event.agent] : []),
+  ];
+  const unique = [...new Set(agents)];
+  return {
+    runId,
+    entries: (unique.length > 0 ? unique : ["async"]).map((agent) => ({
+      agent,
+      runId,
+      // The package's own async tracker initially records this event as
+      // queued. Do not invent a stronger lifecycle state here.
+      status: "queued",
+    })),
+  };
+}
 
-  // This accepts the early structured bridge format too. The pinned bridge
-  // serializes its AgentToolResult text through data.text.
-  const data = record(envelope.data);
-  if (Array.isArray(data?.runs)) {
-    return data.runs.flatMap((item) => {
-      const run = record(item);
-      if (!run || typeof run.status !== "string") return [];
-      const config = record(run.config);
-      return [
-        {
-          agent: typeof config?.agent === "string" ? config.agent : "async",
-          phase: typeof config?.phase === "string" ? config.phase : undefined,
-          label: typeof config?.label === "string" ? config.label : undefined,
-          status: run.status as SubagentInfo["status"],
-        },
-      ];
-    });
-  }
+function asyncCompletionId(
+  value: unknown,
+  sessionId: string | undefined,
+): string | undefined {
+  const event = record(value);
+  if (!event || typeof event.id !== "string") return undefined;
+  if (typeof event.sessionId === "string" && event.sessionId !== sessionId)
+    return undefined;
+  return event.id;
+}
 
-  const runs: SubagentInfo[] = [];
-  const linePattern =
-    /^-\s+([^|\s]+)\s+\|\s+(queued|running)\b[^|]*\|\s+(single|parallel|chain)\b/gm;
-  for (const match of textFromRpcReply(reply).matchAll(linePattern)) {
-    runs.push({
-      agent: match[3] === "single" ? "async" : match[3]!,
-      phase: match[1],
-      status: match[2] as SubagentInfo["status"],
-    });
-  }
-  return runs;
+function attentionFromControlEvent(
+  value: unknown,
+): { runId: string; agent: string } | undefined {
+  const event = record(record(value)?.event) as
+    SubagentControlEvent | undefined;
+  if (
+    !event ||
+    event.type !== "needs_attention" ||
+    typeof event.runId !== "string" ||
+    typeof event.agent !== "string"
+  )
+    return undefined;
+  return { runId: event.runId, agent: event.agent };
 }
 
 function makeEpoch(sequence: number): string {
@@ -256,18 +279,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let pendingRequestId: string | undefined;
   let busUnsubscribers: Array<() => void> = [];
   let subagentsCache: SubagentInfo[] = [];
-  let asyncSubagentsCache: SubagentInfo[] = [];
   const foregroundSubagents = new Map<string, SubagentInfo[]>();
-  let subagentsFetchInFlight: Promise<void> | undefined;
-  let subagentsCoalesceTimer: ReturnType<typeof setTimeout> | undefined;
-  /** An event arrived while a request was in flight; ask again once, after. */
-  let subagentRefreshPending = false;
-  /**
-   * Bumped whenever a session ends. A reply carries the generation it was asked
-   * under, so an answer that outlives its session cannot write into the next
-   * one — the request itself is not cancellable, but its result is ignorable.
-   */
-  let subagentGeneration = 0;
+  const asyncSubagents = new Map<string, SubagentInfo[]>();
   let fleetDockOwnsSubagents = false;
   let sessionCwd: string | undefined;
   let sessionHome: string | undefined;
@@ -323,21 +336,29 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       return [crop(heading, width)];
 
     const rail = (glyph: "├─" | "╰─") => theme.fg("borderMuted", `${glyph} `);
-    const toolRows = tools.map((line, index) =>
-      `${rail(subagents.length > 0 || index < tools.length - 1 ? "├─" : "╰─")}${line}`,
+    const toolRows = tools.map(
+      (line, index) =>
+        `${rail(subagents.length > 0 || index < tools.length - 1 ? "├─" : "╰─")}${line}`,
     );
     const subagentRows =
       subagents.length === 0
         ? []
         : [`${rail("╰─")}${subagents[0]}`, ...subagents.slice(1)];
-    return [crop(heading, width), theme.fg("borderMuted", "│"), ...toolRows, ...subagentRows];
+    return [
+      crop(heading, width),
+      theme.fg("borderMuted", "│"),
+      ...toolRows,
+      ...subagentRows,
+    ];
   }
 
   function mergeSubagents(): void {
     const byKey = new Map<string, SubagentInfo>();
+    // A foreground tool call is the most immediate fact available, so it wins
+    // over the async launch event for the same agent while both are current.
     for (const entry of [
+      ...[...asyncSubagents.values()].flat(),
       ...[...foregroundSubagents.values()].flat(),
-      ...asyncSubagentsCache,
     ]) {
       byKey.set(
         `${entry.agent}\u0000${entry.phase ?? ""}\u0000${entry.label ?? ""}`,
@@ -347,88 +368,26 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     subagentsCache = [...byKey.values()];
   }
 
-  /** True while the answer to a request asked under `generation` still counts. */
-  function subagentReplyStillWanted(generation: number): boolean {
-    return !disposed && generation === subagentGeneration;
-  }
-
-  async function requestSubagentStatus(generation: number): Promise<void> {
-    const requestId = crypto.randomUUID();
-    // Subscribe before emitting, await after: a reply that arrives
-    // synchronously must still find its listener.
-    const reply = new Promise<unknown>((resolve) => {
-      const unsubscribe = pi.events.on(
-        `subagents:rpc:v1:reply:${requestId}`,
-        (value: unknown) => {
-          unsubscribe();
-          resolve(value);
-        },
-      );
-      setTimeout(() => {
-        unsubscribe();
-        resolve(null);
-      }, SUBAGENT_RPC_TIMEOUT_MS);
-    });
-    pi.events.emit("subagents:rpc:v1:request", {
-      version: 1,
-      requestId,
-      method: "status",
-      params: {},
-    });
-    const value = await reply;
-    if (!subagentReplyStillWanted(generation)) return;
-    asyncSubagentsCache = asyncSubagentsFromRpcReply(value);
+  /** All subagent data arrives through a real package event, never a render RPC. */
+  function refreshSubagentDisplay(): void {
+    mergeSubagents();
+    ticker?.requestRender();
   }
 
   /**
-   * Async subagent runs are only knowable by asking the subagent package, and
-   * this is the one place that asks. It is reached from the subagent event
-   * handler alone — never from a render — so the cost is bounded by how often
-   * subagents actually change state, not by the frame rate. A burst of events
-   * collapses into a single request.
-   *
-   * An event that arrives while a request is already in flight would otherwise
-   * be lost, leaving the cache stale for as long as nothing else happens. It
-   * sets a single pending flag instead, so any number of such events produce
-   * exactly one follow-up request once the current one has answered.
+   * An async child is still real current work after its parent tool returns.
+   * Keep the otherwise-transient widget visible until that child's own
+   * completion event arrives; no completed entry is retained afterwards.
    */
-  function refreshSubagents(): void {
-    if (fleetDockOwnsSubagents || disposed) return;
-    if (subagentsFetchInFlight) {
-      subagentRefreshPending = true;
-      return;
-    }
-    if (subagentsCoalesceTimer) return;
-    subagentsCoalesceTimer = setTimeout(() => {
-      subagentsCoalesceTimer = undefined;
-      if (disposed) return;
-      if (subagentsFetchInFlight) {
-        subagentRefreshPending = true;
-        return;
-      }
-      const generation = subagentGeneration;
-      subagentsFetchInFlight = requestSubagentStatus(generation)
-        .catch(() => {
-          if (subagentReplyStillWanted(generation)) asyncSubagentsCache = [];
-        })
-        .finally(() => {
-          // A stale request touches nothing at all — not even the in-flight
-          // gate, which by now may belong to the session that replaced it.
-          if (!subagentReplyStillWanted(generation)) return;
-          subagentsFetchInFlight = undefined;
-          mergeSubagents();
-          ticker?.requestRender();
-          if (!subagentRefreshPending) return;
-          subagentRefreshPending = false;
-          refreshSubagents();
-        });
-    }, SUBAGENT_COALESCE_MS);
-  }
-
-  /** Foreground runs are known from the tool call itself; no request needed. */
-  function refreshForegroundSubagents(): void {
-    mergeSubagents();
-    ticker?.requestRender();
+  function retainAsyncActivity(ctx: ExtensionContext): void {
+    if (asyncSubagents.size === 0) return;
+    updateState(ctx, {
+      activity: {
+        kind: "tool",
+        label: `${subagentsCache.length} Subagent${subagentsCache.length === 1 ? "" : "en"} aktiv`,
+        activeTools: activeTools.size,
+      },
+    });
   }
 
   function applyWorking(ctx: ExtensionContext): void {
@@ -499,10 +458,43 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           return;
         updateState(ctx, value.state);
       }),
-      // The one trigger for an async subagent status request. It lives with
-      // the session rather than with a component, so the request cannot be
-      // tied to how often anything happens to repaint.
-      pi.events.on("subagent:control-event", () => refreshSubagents()),
+      pi.events.on("subagent:async-started", (value) => {
+        if (disposed) return;
+        const started = asyncSubagentsFromStart(value, activeSessionId);
+        if (!started) return;
+        asyncSubagents.set(started.runId, started.entries);
+        refreshSubagentDisplay();
+        retainAsyncActivity(ctx);
+      }),
+      pi.events.on("subagent:async-complete", (value) => {
+        if (disposed) return;
+        const runId = asyncCompletionId(value, activeSessionId);
+        if (!runId || !asyncSubagents.delete(runId)) return;
+        refreshSubagentDisplay();
+        if (
+          asyncSubagents.size === 0 &&
+          activeTools.size === 0 &&
+          state?.activity.kind === "tool"
+        ) {
+          updateState(ctx, {
+            activity: { kind: "idle", label: undefined, activeTools: 0 },
+          });
+        }
+      }),
+      pi.events.on("subagent:control-event", (value) => {
+        if (disposed) return;
+        const attention = attentionFromControlEvent(value);
+        if (!attention) return;
+        const entries = asyncSubagents.get(attention.runId);
+        if (!entries) return;
+        const updated = entries.map((entry) =>
+          entry.agent === attention.agent
+            ? { ...entry, status: "needs_attention" as const }
+            : entry,
+        );
+        asyncSubagents.set(attention.runId, updated);
+        refreshSubagentDisplay();
+      }),
     ];
 
     pendingRequestId = `${state.sessionEpoch}:${OWNER}`;
@@ -521,16 +513,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     pendingRequestId = undefined;
     activeTools.clear();
     foregroundSubagents.clear();
+    asyncSubagents.clear();
     subagentsCache = [];
-    asyncSubagentsCache = [];
-    // A request already on the wire cannot be recalled, so retire the
-    // generation it was asked under: whenever it answers, it answers for a
-    // session that no longer exists and is dropped instead of applied.
-    subagentGeneration += 1;
-    subagentRefreshPending = false;
-    subagentsFetchInFlight = undefined;
-    if (subagentsCoalesceTimer) clearTimeout(subagentsCoalesceTimer);
-    subagentsCoalesceTimer = undefined;
     ticker?.dispose();
     ticker = undefined;
 
@@ -664,7 +648,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     showStartscreen = false;
     activeTools.clear();
     foregroundSubagents.clear();
-    refreshForegroundSubagents();
+    refreshSubagentDisplay();
     updateState(ctx, {
       activity: {
         kind: "thinking",
@@ -680,15 +664,14 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     activeTools.set(event.toolCallId, {
       id: event.toolCallId,
       name: event.toolName,
-      target: compactToolTarget(event.toolName, event.args),
+      ...describeToolActivity(event.toolName, event.args),
       startedAt: Date.now(),
     });
     if (event.toolName === "subagent") {
       const subagents = foregroundSubagentsFromArgs(event.args);
       if (subagents.length > 0)
         foregroundSubagents.set(event.toolCallId, subagents);
-      refreshForegroundSubagents();
-      refreshSubagents();
+      refreshSubagentDisplay();
     }
     updateState(ctx, {
       activity: {
@@ -699,12 +682,20 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     });
   });
 
+  pi.on("tool_execution_update", (event) => {
+    const partial = record(event.partialResult);
+    if (partial?.isError !== true) return;
+    const tool = activeTools.get(event.toolCallId);
+    if (!tool || tool.tone === "error") return;
+    tool.tone = "error";
+    ticker?.requestRender();
+  });
+
   pi.on("tool_execution_end", (event, ctx) => {
     activeTools.delete(event.toolCallId);
     if (event.toolName === "subagent") {
       foregroundSubagents.delete(event.toolCallId);
-      refreshForegroundSubagents();
-      refreshSubagents();
+      refreshSubagentDisplay();
     }
     updateState(ctx, {
       activity:
@@ -714,11 +705,17 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
               label: `${activeTools.size} Tool${activeTools.size === 1 ? "" : "s"} aktiv`,
               activeTools: activeTools.size,
             }
-          : {
-              kind: "responding",
-              label: undefined,
-              activeTools: 0,
-            },
+          : asyncSubagents.size > 0
+            ? {
+                kind: "tool",
+                label: `${subagentsCache.length} Subagent${subagentsCache.length === 1 ? "" : "en"} aktiv`,
+                activeTools: 0,
+              }
+            : {
+                kind: "responding",
+                label: undefined,
+                activeTools: 0,
+              },
     });
   });
 
@@ -726,7 +723,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     if (!event.assistantMessageEvent.type.startsWith("text_")) return;
     activeTools.clear();
     foregroundSubagents.clear();
-    refreshForegroundSubagents();
+    refreshSubagentDisplay();
+    if (asyncSubagents.size > 0) {
+      retainAsyncActivity(ctx);
+      return;
+    }
     updateState(ctx, {
       activity: { kind: "idle", label: undefined, activeTools: 0 },
     });
@@ -743,7 +744,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   const settle = (_event: unknown, ctx: ExtensionContext) => {
     activeTools.clear();
     foregroundSubagents.clear();
-    refreshForegroundSubagents();
+    refreshSubagentDisplay();
+    if (asyncSubagents.size > 0) {
+      retainAsyncActivity(ctx);
+      return;
+    }
     updateState(ctx, {
       activity: { kind: "idle", label: undefined, activeTools: 0 },
     });

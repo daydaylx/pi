@@ -94,7 +94,7 @@ export function renderFull(
 export function renderStatLine(
   stats: DiffStats,
   theme: Theme,
-  _width: number,
+  width: number,
 ): string {
   const parts: string[] = [];
   parts.push(theme.fg("accent", `📄 ${stats.path}`));
@@ -109,7 +109,7 @@ export function renderStatLine(
   if (stats.hunks > 1) {
     parts.push(theme.fg("dim", `  (${stats.hunks} Hunks)`));
   }
-  return parts.join("");
+  return truncate(parts.join(""), width);
 }
 
 /**

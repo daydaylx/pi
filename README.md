@@ -11,21 +11,18 @@ Der Workflow kennt nur drei flüchtige Modi:
 - `simple_plan` – schreibt ausschließlich `.agent/plans/current-plan.md`.
 - `detailed_plan` – schreibt dieselbe Datei mit einem Architekturplan.
 
-Shift+Tab (`/workflow`) ist die zentrale Steuerung für alle drei Modi und
-deckt dabei den vollständigen fachlichen Wechsel ab, nicht nur den Moduswert:
-Wahl von Schnellplan/Architekturplan verwirft einen vorhandenen Plan ohne
-Rückfrage und startet direkt den Planning-Turn; Wahl von Work schaltet in
-Work und übergibt einen gerade erst erstellten Plan genau einmal als
-hilfreichen, abweichbaren Umsetzungskontext — nur beim tatsächlichen Wechsel
-aus einem Planmodus heraus, nicht bei einem Work→Work-Wechsel und nicht bei
-einem Plan aus einer alten, längst verlassenen Aufgabe oder Session.
+Shift+Tab (`/workflow`) ist die zentrale Auswahl für alle drei Modi. Sie
+ändert ausschließlich den Modus und wartet dann auf die nächste eigene
+Eingabe; sie startet keinen Agent-Turn, verwirft keinen vorhandenen Plan und
+übergibt keinen Plan automatisch an Work.
 
-`/plan`, `/work` und `/go` sind dünne Aliase derselben zentralen Aktion und
-verhalten sich exakt wie ihre jeweilige Shift+Tab-Auswahl: `/plan simple`
-beziehungsweise `/plan detailed` starten wie `/workflow` einen neuen
-Planning-Turn, `/work` wechselt wie `/workflow → Work` in den Work-Modus
-inklusive des einmaligen Handoffs, und `/go` tut dasselbe, meldet aber
-zusätzlich kurz, wenn dabei kein Plan vorhanden war.
+`/plan`, `/work` und `/go` sind die expliziten Workflow-Aktionen: `/plan
+simple` beziehungsweise `/plan detailed` verwerfen einen vorhandenen Plan
+ohne Rückfrage und starten direkt einen neuen Planning-Turn. `/work` wechselt
+in Work und übergibt einen gerade erst erstellten Plan genau einmal als
+hilfreichen, abweichbaren Umsetzungskontext — nur beim tatsächlichen Wechsel
+aus einem Planmodus heraus. `/go` tut dasselbe, meldet aber zusätzlich kurz,
+wenn dabei kein Plan vorhanden war.
 
 Der Plan ist normaler Markdown. Es gibt keine Metadaten, Step-IDs, Sidecars,
 Completion, Recovery, Migration oder Planpflicht.

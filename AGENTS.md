@@ -9,12 +9,13 @@ Diese Regeln gelten für alle Pi-Sitzungen.
 - Änderungen auf den konkreten Auftrag begrenzen; keine breiten Refactorings, Umbenennungen oder Formatierungen ohne Auftrag.
 - Bestehende, nicht zum Auftrag gehörende Nutzeränderungen erhalten.
 - Secrets, Zugangsdaten, Auth-Dateien, Umgebungsvariablen und SSH-Schlüssel weder offenlegen noch in Reports oder Versionskontrolle übernehmen.
-- Änderungen mit relevanten Tests und statischen Prüfungen verifizieren; Fehler und nicht ausführbare Prüfungen ausdrücklich nennen. Für das deklarierte Pflichtprofil ist `project_check({ profile: "verify" })` der kanonische Weg — nur dieser Tool-Aufruf aktualisiert den Verifikations-Footer/-Ledger. Ein direkter `bash`-Lauf von `npm run verify` (oder gleichwertig) bleibt technisch möglich (z. B. zum Debuggen einzelner Schritte), zählt aber nicht als durchgeführte Verifikation im Footer-Sinn — siehe `docs/verify-profiles.md`.
+- Änderungen mit relevanten Tests und statischen Prüfungen verifizieren; Fehler und nicht ausführbare Prüfungen ausdrücklich nennen. Für das deklarierte Pflichtprofil ist `project_check({ profile: "verify" })` der kanonische Weg — nur dieser Tool-Aufruf aktualisiert den Verifikations-Footer/-Ledger. Ein direkter `bash`-Lauf von `npm run verify` (oder gleichwertig) bleibt technisch möglich (z. B. zum Debuggen einzelner Schritte), zählt aber nicht als durchgeführte Verifikation im Footer-Sinn — siehe `docs/verify-profiles.md`. Rohe Interpreteraufrufe (`node`, `python` u. Ä.) über `bash` können je nach Berechtigungsstufe hart blockiert werden — für Tests/Checks grundsätzlich `verify`/`project_check` statt direkter Interpreteraufrufe verwenden.
 - Den aktiven Workflow- und Permission-Modus respektieren. Diese Datei erzwingt keinen zusätzlichen Planmodus.
 
 ## Kontextdisziplin
 
-- Zuerst gezielt suchen und nur relevante Dateien oder Ausschnitte lesen.
+- Zuerst gezielt suchen und nur relevante Dateien oder Ausschnitte lesen. Für Code-/Dateisuche die eigenständigen `grep`- und `find`-Tools verwenden statt `bash rg`/`git grep`/`find` — sie sind vom Plan-Modus-Gate nicht betroffen (der greift nur bei `bash`/`write`/`edit`), liefern strukturierte Treffer statt Pfad-Raten und vermeiden ENOENT-Fehlversuche auf vermuteten Pfaden.
+- Im Plan-Modus Diagnosebefehle einzeln ausführen, nicht mit `;`/`&&` verketten: Verkettung wird dort grundsätzlich blockiert, auch wenn jeder Teilbefehl für sich zulässig wäre.
 - Große Logs mit Filtern, `head`, `tail` oder Suchmustern begrenzen; große JSON-Daten vor dem Lesen filtern.
 - Vor vollständigen Diffs `git diff --stat` verwenden und Diffs anschließend dateibezogen lesen.
 - Testergebnisse auf Zusammenfassung und relevante Fehlerstellen beschränken; keine vollständigen Verzeichnisbäume ohne Grund laden.

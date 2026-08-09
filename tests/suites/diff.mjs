@@ -38,6 +38,28 @@ export const diffSections = {
         typeof diffAlgorithm?.applyInlineHighlights === "function",
         "diff algorithm owns the shared inline-highlighting helper",
       );
+      const diffRenderer = await context.load(
+        "extensions/diff-viewer/diff-renderer.ts",
+      );
+      assert(
+        typeof diffRenderer?.renderStatLine === "function",
+        "diff renderer loads",
+      );
+      const statLine = diffRenderer.renderStatLine(
+        {
+          path: ".agent/plans/a-very-long-plan-name-that-overflows.md",
+          linesAdded: 25,
+          linesRemoved: 30,
+          hunks: 1,
+        },
+        { fg: (_tone, text) => text },
+        38,
+      );
+      const displayedStatLine = stripAnsi(statLine);
+      assert(
+        displayedStatLine.length <= 38 && displayedStatLine.endsWith("…"),
+        "diff statistic line truncates at narrow terminal widths",
+      );
       const diffFallbackSource = readFileSync(
         path.join(ROOT, "extensions", "diff-viewer", "git-diff.ts"),
         "utf8",

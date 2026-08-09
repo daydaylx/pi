@@ -1023,7 +1023,8 @@ const DIAGNOSTIC_SCRIPT_NAME_PREFIXES = [
 // Vetoes an otherwise-matching diagnostic prefix: catches the mutating
 // variant of a diagnostic-sounding name (`lint:fix`, `format:write`,
 // `eslint-fix`) that would otherwise pass the prefix check below.
-const NON_DIAGNOSTIC_SCRIPT_NAME_MARKER = /(?:^|[:_-])(?:fix|write)(?:$|[:_-])/i;
+const NON_DIAGNOSTIC_SCRIPT_NAME_MARKER =
+  /(?:^|[:_-])(?:fix|write)(?:$|[:_-])/i;
 
 /**
  * Is this package.json script name provably diagnostic — the same bar
@@ -1082,6 +1083,7 @@ const PLAN_MODE_SAFE_GIT_SUBCOMMANDS = new Set([
   "rev-parse",
   "shortlog",
   "count-objects",
+  "grep",
 ]);
 
 function isPlanModeSafeGitCommand(tokens: string[]): boolean {

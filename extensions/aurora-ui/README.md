@@ -30,17 +30,26 @@ continuously.
 
 **Activity widget** (`tool-renderers.ts`) — transient, above the editor. On a
 fresh empty session it briefly serves as the Aurora welcome; once a turn starts,
-it carries the thinking line, running tools and current subagents. Finished work
-leaves the widget rather than turning into a success block. The welcome is never
-shown again within that session and is skipped for resumed conversations.
+it carries the thinking line and only currently running work. Finished tools
+leave the widget immediately rather than turning into a success block. The
+welcome is never shown again within that session and is skipped for resumed
+conversations.
 
-Subagent status is the one thing Aurora cannot read directly. Foreground runs
-come off the `subagent` tool call itself; async runs need a request to the
-subagent package, and that request is triggered by `subagent:control-event`
-alone, never by a render, with a 300 ms window that collapses bursts into one.
-The active configuration keeps the Fleet Status Dock disabled, so Aurora owns
-the compact, transient subagent view. If a deployment enables that dock later,
-Aurora renders no duplicate subagents and sends no request at all.
+`tool_execution_start` is Aurora's only source for a tool row. It classifies the
+runtime tool name and its real arguments as Read, Search, Edit, Bash, Test,
+Verify, LSP, Subagent or Generic; no tool is wrapped or called by the UI. The
+known LSP names are rendered as LSP activity only when one of those tools
+actually starts. LSP health remains a footer concern. A running verification
+uses the active circle rather than a success checkmark; completed tools vanish
+from this transient widget and Pi's result output remains the source of truth.
+
+Foreground subagents come from the `subagent` tool call itself. Async entries
+come from the subagent package's `subagent:async-started` and
+`subagent:async-complete` lifecycle events; a `subagent:control-event` can mark
+a known async agent as needing attention. Aurora does not send the package's
+status RPC and therefore cannot initiate a status tool call. The active
+configuration keeps the Fleet Status Dock disabled, so Aurora owns the compact,
+transient `SUBAGENTS · N` view without a permanent dashboard.
 
 ## UI state event contract
 

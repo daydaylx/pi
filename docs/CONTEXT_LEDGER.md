@@ -40,9 +40,11 @@
   als Literal wiederholt.
 - Es gibt genau drei aktive Subagentenrollen — `investigator`, `debugger`,
   `verifier` (`docs/decisions/011`).
-- Shift+Tab (`/workflow`) ist die eine zentrale Implementierung des
-  Workflow-Wechsels; `/plan`, `/work`, `/go` rufen ausschließlich
-  `selectWorkflow()` auf. Dieselbe Änderung führte die
+- Shift+Tab (`/workflow`) ist eine reine Modusauswahl und wartet danach auf
+  die nächste Nutzereingabe; es startet weder einen Turn noch einen
+  Plan-Handoff und verändert keine vorhandene Plandatei. Die expliziten
+  Aktionen `/plan`, `/work`, `/go` rufen ausschließlich `selectWorkflow()`
+  auf. Dieselbe Änderung führte die
   Delegationsvorlage (Original User Request / Constraints / Delegated
   Question) in `AGENTS.md` ein.
 - Plan Mode besitzt zusätzlich zur Plandatei-Ausnahme einen technischen

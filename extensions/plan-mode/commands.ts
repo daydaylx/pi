@@ -57,12 +57,11 @@ export async function switchMode(
 }
 
 /**
- * The one workflow implementation behind every entry point (Shift+Tab /
- * /workflow, /plan, /work, /go): switching into a planning mode always
- * discards the stale plan and starts a fresh planning turn; switching into
- * work hands off the plan exactly once, only when the previous mode was a
- * planning mode — a plain work→work reselect or a mode that was already
- * work never resurrects a stale plan file.
+ * The explicit workflow actions behind /plan, /work and /go: switching into
+ * a planning mode discards the stale plan and starts a fresh planning turn;
+ * switching into work hands off the plan exactly once, only when the previous
+ * mode was a planning mode — a plain work→work reselect or a mode that was
+ * already work never resurrects a stale plan file.
  *
  * Returns whether a turn was actually started (planning turn or handoff),
  * so thin command wrappers can decide on their own user feedback without
@@ -201,7 +200,10 @@ export function registerPlanCommands(
         entries.map((entry) => entry.label),
       );
       const action = entries.find((entry) => entry.label === choice)?.value;
-      if (action) await selectWorkflow(session, action, ctx);
+      // Shift+Tab is a mode selector. It must leave the editor idle so the
+      // next turn starts only after the user has entered their own prompt.
+      // Explicit /plan, /work and /go keep their turn-start/handoff behavior.
+      if (action) await switchMode(session, action, ctx);
     },
   });
   pi.registerCommand("commands", {

@@ -2670,16 +2670,20 @@ export const runtimeSections = {
               .join("\n")
           : "";
       assert(
-        welcome.includes("A U R O R A") && welcome.includes("~/projects/aurora-test"),
+        welcome.includes("A U R O R A") &&
+          welcome.includes("~/projects/aurora-test"),
         "a fresh session shows the responsive Aurora welcome with its cwd",
       );
       const resumedHarness = createHarness({
-        entries: [{ type: "message", message: { role: "user", content: "resume" } }],
+        entries: [
+          { type: "message", message: { role: "user", content: "resume" } },
+        ],
       });
       auroraUi.default(resumedHarness.api);
       const resumedContext = resumedHarness.makeContext();
       await resumedHarness.runHooks("session_start", {}, resumedContext);
-      const resumedWidget = resumedHarness.widgets.get("aurora-ui/activity")?.content;
+      const resumedWidget =
+        resumedHarness.widgets.get("aurora-ui/activity")?.content;
       const resumedLines =
         typeof resumedWidget === "function"
           ? resumedWidget(
@@ -2859,8 +2863,16 @@ export const runtimeSections = {
           "~/…/pi",
           "a long home-relative cwd keeps its final directory",
         );
-        eq(auroraCwd.compactCwd("/", 8, homedir()), "/", "root cwd stays stable");
-        const unicodeCwd = auroraCwd.compactCwd("/srv/项目/aurora", 10, homedir());
+        eq(
+          auroraCwd.compactCwd("/", 8, homedir()),
+          "/",
+          "root cwd stays stable",
+        );
+        const unicodeCwd = auroraCwd.compactCwd(
+          "/srv/项目/aurora",
+          10,
+          homedir(),
+        );
         assert(
           visibleWidth(unicodeCwd) <= 10 && unicodeCwd.endsWith("aurora"),
           "an outside-home Unicode cwd is cell-safe and retains its leaf",
@@ -2903,7 +2915,12 @@ export const runtimeSections = {
             auroraFooter.renderFooterLines(context.ui.theme, width, {
               statuses: new Map(),
               contextPercent: null,
-              cwd: path.join(homedir(), "projects", "very-long-aurora-project", "pi"),
+              cwd: path.join(
+                homedir(),
+                "projects",
+                "very-long-aurora-project",
+                "pi",
+              ),
               homeDirectory: homedir(),
               ...input,
               state: footerState(input.state),
@@ -2995,15 +3012,11 @@ export const runtimeSections = {
           );
         }
         {
-          const warned = auroraFooter.renderFooterLines(
-            context.ui.theme,
-            140,
-            {
-              statuses: new Map(),
-              contextPercent: 75,
-              state: footerState(),
-            },
-          )[0];
+          const warned = auroraFooter.renderFooterLines(context.ui.theme, 140, {
+            statuses: new Map(),
+            contextPercent: 75,
+            state: footerState(),
+          })[0];
           assert(
             warned.includes(context.ui.theme.fg("warning", "ctx 75%")),
             "a 75% context is coloured as a warning where it is shown",
@@ -3080,7 +3093,12 @@ export const runtimeSections = {
                   ["verification", "Verify: changed_unverified"],
                 ]),
                 contextPercent: 88,
-                cwd: path.join(homedir(), "projects", "very-long-aurora-project", "pi"),
+                cwd: path.join(
+                  homedir(),
+                  "projects",
+                  "very-long-aurora-project",
+                  "pi",
+                ),
                 homeDirectory: homedir(),
                 ...input,
                 state: footerState(input.state),
@@ -3124,6 +3142,105 @@ export const runtimeSections = {
             normalTools.at(-1)?.includes("+1 weitere Tools"),
           "the normal activity surface discloses its remaining parallel tool",
         );
+
+        const activityCases = [
+          ["read", { path: "README.md" }, "read", "README.md"],
+          ["grep", { pattern: "aurora" }, "search", '"aurora"'],
+          ["find", { pattern: "*.ts" }, "search", '"*.ts"'],
+          ["edit", { path: "index.ts", edits: [] }, "edit", "index.ts"],
+          ["write", { path: "new.ts", content: "" }, "edit", "new.ts"],
+          ["bash", { command: "npm test" }, "test", "npm test"],
+          [
+            "bash",
+            { command: "cargo test -p aurora" },
+            "test",
+            "cargo test -p aurora",
+          ],
+          [
+            "bash",
+            { command: "npm run verify" },
+            "verification",
+            "npm run verify",
+          ],
+          ["bash", { command: "echo jest" }, "bash", "echo jest"],
+          ["verify", { check: "verify" }, "verification", "verify"],
+          ["project_check", { profile: "verify" }, "verification", "verify"],
+          ["subagent", { agent: "reviewer" }, "subagent", "reviewer"],
+          ["wait", { all: true }, "subagent", undefined],
+          [
+            "lsp_references",
+            { path: "index.ts", line: 4, character: 2 },
+            "lsp",
+            "references · index.ts:5:3",
+          ],
+          [
+            "lsp_workspace_symbols",
+            { query: "Aurora" },
+            "lsp",
+            'workspace symbols · "Aurora"',
+          ],
+          ["ask_user", { question: "continue?" }, "generic", undefined],
+        ];
+        for (const [name, args, kind, target] of activityCases) {
+          const described = auroraTools.describeToolActivity(name, args);
+          eq(described.kind, kind, `${name} has the expected Activity kind`);
+          eq(described.target, target, `${name} keeps only its real target`);
+        }
+        const lspActivity = auroraTools
+          .renderActiveTools(
+            [
+              {
+                id: "lsp",
+                name: "lsp_references",
+                ...auroraTools.describeToolActivity("lsp_references", {
+                  path: "index.ts",
+                  line: 4,
+                  character: 2,
+                }),
+                startedAt: 0,
+              },
+            ],
+            context.ui.theme,
+            120,
+            5_000,
+          )
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          lspActivity.includes("◇ LSP") &&
+            lspActivity.includes("references · index.ts:5:3"),
+          "LSP activity names the real operation and position without inventing a symbol",
+        );
+        for (const columns of [40, 52, 90, 120, 160]) {
+          const rendered = auroraTools.renderActiveTools(
+            [
+              {
+                id: "read",
+                name: "read",
+                ...auroraTools.describeToolActivity("read", {
+                  path: "a-very-long-file-name.ts",
+                }),
+                startedAt: 0,
+              },
+              {
+                id: "test",
+                name: "bash",
+                ...auroraTools.describeToolActivity("bash", {
+                  command: "npm test -- --runInBand",
+                }),
+                startedAt: 0,
+              },
+            ],
+            context.ui.theme,
+            columns,
+            5_000,
+            { compact: columns < 52 },
+          );
+          assert(
+            rendered.every((line) => visibleWidth(line) <= columns),
+            `typed activity fits ${columns} columns`,
+          );
+        }
       }
 
       // Subagents are inline work: they show up next to the tool that started
@@ -3144,7 +3261,7 @@ export const runtimeSections = {
           .map(stripAnsi)
           .join("\n");
         assert(
-          withSubagents.includes("SUBAGENTS  2 aktiv") &&
+          withSubagents.includes("SUBAGENTS · 2") &&
             withSubagents.includes("reviewer") &&
             withSubagents.includes("1 Aufmerksamkeit") &&
             withSubagents.includes("!") &&
@@ -3185,59 +3302,105 @@ export const runtimeSections = {
         );
       }
 
-      // The pure function contract above only proves renderSubagents() itself.
-      // The active configuration disables the package Fleet Dock, so Aurora
-      // must own the transient display end-to-end without polling from render.
+      // Async subagents are visible only from their actual lifecycle events.
+      // Aurora must not ask the package's status RPC, because that path itself
+      // executes a subagent status action on behalf of the UI.
       {
-        const dockHarness = createHarness();
-        auroraUi.default(dockHarness.api);
-        let dockRequests = 0;
-        dockHarness.api.events.on("subagents:rpc:v1:request", (request) => {
-          dockRequests += 1;
-          dockHarness.api.events.emit(
-            `subagents:rpc:v1:reply:${request.requestId}`,
-            {
-              success: true,
-              data: {
-                text: "Active async runs: 1\n\n- async-test | running | single | steps 1 | /tmp",
-              },
-            },
-          );
+        const subagentHarness = createHarness();
+        auroraUi.default(subagentHarness.api);
+        let rpcRequests = 0;
+        subagentHarness.api.events.on("subagents:rpc:v1:request", () => {
+          rpcRequests += 1;
         });
-        const dockContext = dockHarness.makeContext();
-        await dockHarness.runHooks("session_start", {}, dockContext);
-        await dockHarness.runHooks(
+        const subagentContext = subagentHarness.makeContext({
+          sessionId: "async-activity-session",
+        });
+        await subagentHarness.runHooks("session_start", {}, subagentContext);
+        await subagentHarness.runHooks("agent_start", {}, subagentContext);
+        const activity =
+          subagentHarness.widgets.get("aurora-ui/activity")?.content;
+        const render = () =>
+          typeof activity === "function"
+            ? activity(
+                { terminal: { columns: 140, rows: 30 }, requestRender() {} },
+                subagentContext.ui.theme,
+              )
+                .render(140)
+                .map(stripAnsi)
+                .join("\n")
+            : "";
+
+        await subagentHarness.runHooks(
           "tool_execution_start",
           {
             toolCallId: "foreground-subagent",
             toolName: "subagent",
             args: { agent: "worker" },
           },
-          dockContext,
+          subagentContext,
         );
-        dockHarness.api.events.emit("subagent:control-event", {});
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        const dockActivity =
-          dockHarness.widgets.get("aurora-ui/activity")?.content;
-        const dockRendered =
-          typeof dockActivity === "function"
-            ? dockActivity({ requestRender() {} }, dockContext.ui.theme)
-                .render(140)
-                .map(stripAnsi)
-                .join("\n")
-            : "";
         assert(
-          dockRendered.includes("worker") &&
-            dockRendered.includes("async") &&
-            dockRendered.includes("SUBAGENTS"),
-          "with the real pinned config, Aurora owns the transient subagent display end-to-end",
+          render().includes("worker") && render().includes("SUBAGENTS · 1"),
+          "a foreground subagent appears straight from its tool start",
         );
-        eq(
-          dockRequests,
-          1,
-          "the control event triggers exactly one cached status request",
+        await subagentHarness.runHooks(
+          "tool_execution_end",
+          { toolCallId: "foreground-subagent", toolName: "subagent" },
+          subagentContext,
         );
-        await dockHarness.runHooks("session_shutdown", {}, dockContext);
+        subagentHarness.api.events.emit("subagent:async-started", {
+          id: "stale-async-activity",
+          sessionId: "another-session",
+          agent: "stale-worker",
+        });
+        assert(
+          !render().includes("stale-worker"),
+          "an async event from another session never reaches Activity",
+        );
+
+        subagentHarness.api.events.emit("subagent:async-started", {
+          id: "async-activity",
+          sessionId: "async-activity-session",
+          agents: ["async-worker", "reviewer"],
+          mode: "parallel",
+        });
+        assert(
+          render().includes("async-worker") &&
+            render().includes("reviewer") &&
+            render().includes("SUBAGENTS · 2"),
+          "actual async-started data drives Aurora's transient subagent view",
+        );
+        await subagentHarness.runHooks(
+          "message_update",
+          { assistantMessageEvent: { type: "text_delta" } },
+          subagentContext,
+        );
+        await subagentHarness.runHooks("agent_settled", {}, subagentContext);
+        assert(
+          render().includes("async-worker") && render().includes("reviewer"),
+          "async subagents remain visible after the parent turn settles",
+        );
+        subagentHarness.api.events.emit("subagent:control-event", {
+          event: {
+            type: "needs_attention",
+            runId: "async-activity",
+            agent: "reviewer",
+          },
+        });
+        assert(
+          render().includes("reviewer") && render().includes("!"),
+          "a real control event marks only the known async agent for attention",
+        );
+        subagentHarness.api.events.emit("subagent:async-complete", {
+          id: "async-activity",
+          sessionId: "async-activity-session",
+        });
+        assert(
+          render() === "",
+          "an async completion removes the subagent instead of creating history",
+        );
+        eq(rpcRequests, 0, "Aurora never initiates a subagent status RPC");
+        await subagentHarness.runHooks("session_shutdown", {}, subagentContext);
       }
 
       await harness.runHooks("agent_start", {}, context);
@@ -3281,6 +3444,27 @@ export const runtimeSections = {
         component.dispose?.();
       }
       await harness.runHooks(
+        "tool_execution_update",
+        {
+          toolCallId: "tool-aurora",
+          toolName: "read",
+          args: { path: "README.md" },
+          partialResult: { isError: true },
+        },
+        context,
+      );
+      const erroredRead =
+        typeof widget === "function"
+          ? widget({ requestRender() {} }, context.ui.theme)
+              .render(60)
+              .join("\n")
+          : "";
+      assert(
+        erroredRead.includes(context.ui.theme.fg("error", "◌")),
+        "a real error partial styles the still-running Activity glyph as an error",
+      );
+
+      await harness.runHooks(
         "tool_execution_start",
         {
           toolCallId: "tool-aurora-bash",
@@ -3304,8 +3488,110 @@ export const runtimeSections = {
           railRendered.includes("├─") &&
           railRendered.includes("╰─") &&
           railRendered.includes("◌ Read") &&
-          railRendered.includes("› Bash"),
+          railRendered.includes("▹ Test"),
         "wide activity groups typed running tools with a lightweight rail",
+      );
+
+      const auroraEpoch = harness.emitted.find(
+        (entry) => entry.name === "aurora-ui/state/request",
+      )?.event?.sessionEpoch;
+      harness.api.events.emit("aurora-ui/state/patch", {
+        type: "patch",
+        sessionEpoch: auroraEpoch,
+        source: "lsp-test-provider",
+        patch: { lsp: { state: "eingeschränkt" } },
+      });
+      const healthOnlyRendered =
+        typeof widget === "function"
+          ? widget(
+              { terminal: { columns: 140, rows: 30 }, requestRender() {} },
+              context.ui.theme,
+            )
+              .render(140)
+              .map(stripAnsi)
+              .join("\n")
+          : "";
+      assert(
+        !healthOnlyRendered.includes("◇ LSP"),
+        "an LSP health patch never fabricates an LSP activity row",
+      );
+      await harness.runHooks(
+        "tool_execution_start",
+        {
+          toolCallId: "tool-aurora-lsp",
+          toolName: "lsp_references",
+          args: {
+            path: "extensions/aurora-ui/index.ts",
+            line: 1,
+            character: 0,
+          },
+        },
+        context,
+      );
+      const lspRendered =
+        typeof widget === "function"
+          ? widget(
+              { terminal: { columns: 140, rows: 30 }, requestRender() {} },
+              context.ui.theme,
+            )
+              .render(140)
+              .map(stripAnsi)
+              .join("\n")
+          : "";
+      assert(
+        lspRendered.includes("◇ LSP") &&
+          lspRendered.includes(
+            "references · extensions/aurora-ui/index.ts:2:1",
+          ),
+        "a real LSP tool call appears in Activity with its actual position",
+      );
+      await harness.runHooks(
+        "tool_execution_end",
+        { toolCallId: "tool-aurora-lsp", toolName: "lsp_references" },
+        context,
+      );
+      const settledLspRendered =
+        typeof widget === "function"
+          ? widget(
+              { terminal: { columns: 140, rows: 30 }, requestRender() {} },
+              context.ui.theme,
+            )
+              .render(140)
+              .map(stripAnsi)
+              .join("\n")
+          : "";
+      assert(
+        !settledLspRendered.includes("◇ LSP"),
+        "LSP Activity disappears as soon as its real tool call ends",
+      );
+      await harness.runHooks(
+        "tool_execution_start",
+        {
+          toolCallId: "tool-aurora-verify",
+          toolName: "verify",
+          args: { check: "verify" },
+        },
+        context,
+      );
+      const verifyRendered =
+        typeof widget === "function"
+          ? widget(
+              { terminal: { columns: 140, rows: 30 }, requestRender() {} },
+              context.ui.theme,
+            )
+              .render(140)
+              .map(stripAnsi)
+              .join("\n")
+          : "";
+      assert(
+        verifyRendered.includes("◌ Verify") &&
+          verifyRendered.includes("verify"),
+        "the running verification tool has a distinct, argument-backed Activity row without a false success mark",
+      );
+      await harness.runHooks(
+        "tool_execution_end",
+        { toolCallId: "tool-aurora-verify", toolName: "verify" },
+        context,
       );
 
       for (const motion of ["reduced", "off"]) {
@@ -3369,264 +3655,6 @@ export const runtimeSections = {
         0,
         "the activity widget renders nothing once the turn has settled",
       );
-      {
-        // This footer-level tracking (foreground subagents from tool-call args,
-        // async runs from the RPC reply) is what the footer falls back to when
-        // the Fleet Status Dock does not own the subagent display. With the
-        // pinned config's `ui.fleetView: true`, the dock owns it and the footer
-        // must show nothing here (see the handover test above) — so this block
-        // pins the real repo config to `fleetView: false` for its duration to
-        // exercise the tracking mechanism itself, then restores the real file.
-        const subagentConfigPath = path.join(
-          ROOT,
-          "extensions",
-          "subagent",
-          "config.json",
-        );
-        const originalSubagentConfig = readFileSync(subagentConfigPath, "utf8");
-        try {
-          writeFileSync(
-            subagentConfigPath,
-            JSON.stringify(
-              {
-                ...JSON.parse(originalSubagentConfig),
-                ui: {
-                  ...JSON.parse(originalSubagentConfig).ui,
-                  fleetView: false,
-                },
-              },
-              null,
-              2,
-            ),
-          );
-          const widgetHarness = createHarness();
-          auroraUi.default(widgetHarness.api);
-          let statusRequests = 0;
-          widgetHarness.api.events.on("subagents:rpc:v1:request", (request) => {
-            statusRequests += 1;
-            widgetHarness.api.events.emit(
-              `subagents:rpc:v1:reply:${request.requestId}`,
-              {
-                success: true,
-                data: {
-                  text: "Active async runs: 1\n\n- async-test | running | single | steps 1 | /tmp",
-                },
-              },
-            );
-          });
-          const widgetContext = widgetHarness.makeContext();
-          await widgetHarness.runHooks("session_start", {}, widgetContext);
-          const activity =
-            widgetHarness.widgets.get("aurora-ui/activity")?.content;
-          const render = () =>
-            typeof activity === "function"
-              ? activity({ requestRender() {} }, widgetContext.ui.theme)
-                  .render(140)
-                  .map(stripAnsi)
-                  .join("\n")
-              : "";
-
-          await widgetHarness.runHooks(
-            "tool_execution_start",
-            {
-              toolCallId: "foreground-subagent",
-              toolName: "subagent",
-              args: { agent: "worker" },
-            },
-            widgetContext,
-          );
-          assert(
-            render().includes("worker"),
-            "a running foreground subagent appears straight from the tool call",
-          );
-
-          // Rendering must never be what triggers a status request — that was
-          // a poll in the render path. Only a subagent event triggers one, and
-          // a burst of them collapses into a single request.
-          render();
-          render();
-          const requestsFromRendering = statusRequests;
-          for (let index = 0; index < 5; index += 1)
-            widgetHarness.api.events.emit("subagent:control-event", {});
-          await new Promise((resolve) => setTimeout(resolve, 400));
-          eq(
-            statusRequests - requestsFromRendering,
-            1,
-            "a burst of subagent events produces exactly one status request",
-          );
-          assert(
-            render().includes("async-test"),
-            "the widget renders active async runs from the pinned RPC response shape",
-          );
-
-          await widgetHarness.runHooks(
-            "tool_execution_end",
-            { toolCallId: "foreground-subagent", toolName: "subagent" },
-            widgetContext,
-          );
-          assert(
-            !render().includes("worker"),
-            "Aurora removes a foreground subagent when its tool call ends",
-          );
-          await widgetHarness.runHooks("session_shutdown", {}, widgetContext);
-
-          // An event that arrives while a request is still unanswered must not
-          // be dropped — the cache would stay stale until something else
-          // happened to move. Any number of them owe exactly one follow-up.
-          {
-            const raceHarness = createHarness();
-            auroraUi.default(raceHarness.api);
-            const asked = [];
-            raceHarness.api.events.on("subagents:rpc:v1:request", (request) => {
-              asked.push(request.requestId);
-            });
-            const raceContext = raceHarness.makeContext();
-            await raceHarness.runHooks("session_start", {}, raceContext);
-
-            raceHarness.api.events.emit("subagent:control-event", {});
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            eq(asked.length, 1, "the first event produces one request");
-
-            for (let index = 0; index < 3; index += 1)
-              raceHarness.api.events.emit("subagent:control-event", {});
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            eq(
-              asked.length,
-              1,
-              "no second request goes out while the first is unanswered",
-            );
-
-            raceHarness.api.events.emit(`subagents:rpc:v1:reply:${asked[0]}`, {
-              success: true,
-              data: { text: "Active async runs: 0" },
-            });
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            eq(
-              asked.length,
-              2,
-              "three events during one request owe exactly one follow-up",
-            );
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            eq(asked.length, 2, "and the follow-up does not cascade");
-            await raceHarness.runHooks("session_shutdown", {}, raceContext);
-          }
-
-          // A request outlives the session that asked it. Its answer belongs to
-          // a session that no longer exists and must not reach the next one.
-          {
-            const staleHarness = createHarness();
-            auroraUi.default(staleHarness.api);
-            const asked = [];
-            staleHarness.api.events.on(
-              "subagents:rpc:v1:request",
-              (request) => {
-                asked.push(request.requestId);
-              },
-            );
-            const sessionA = staleHarness.makeContext();
-            await staleHarness.runHooks("session_start", {}, sessionA);
-            await staleHarness.runHooks(
-              "tool_execution_start",
-              {
-                toolCallId: "session-a-tool",
-                toolName: "subagent",
-                args: { agent: "session-a-worker" },
-              },
-              sessionA,
-            );
-            staleHarness.api.events.emit("subagent:control-event", {});
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            eq(asked.length, 1, "session A has a request on the wire");
-
-            await staleHarness.runHooks("session_shutdown", {}, sessionA);
-            const sessionB = staleHarness.makeContext();
-            await staleHarness.runHooks("session_start", {}, sessionB);
-
-            // The late answer from session A, arriving inside session B.
-            staleHarness.api.events.emit(`subagents:rpc:v1:reply:${asked[0]}`, {
-              success: true,
-              data: {
-                text: "Active async runs: 1\n\n- stale-from-a | running | single | steps 1 | /tmp",
-              },
-            });
-            await new Promise((resolve) => setTimeout(resolve, 400));
-
-            const activityB = staleHarness.widgets.get("aurora-ui/activity")
-              ?.content;
-            await staleHarness.runHooks(
-              "tool_execution_start",
-              {
-                toolCallId: "session-b-tool",
-                toolName: "subagent",
-                args: { agent: "session-b-worker" },
-              },
-              sessionB,
-            );
-            const renderedB =
-              typeof activityB === "function"
-                ? activityB({ requestRender() {} }, sessionB.ui.theme)
-                    .render(140)
-                    .map(stripAnsi)
-                    .join("\n")
-                : "";
-            assert(
-              !renderedB.includes("stale-from-a") &&
-                !renderedB.includes("session-a-worker"),
-              "an answer from a retired session never reaches the next one",
-            );
-            assert(
-              renderedB.includes("session-b-worker"),
-              "the new session still tracks its own subagents",
-            );
-
-            // The retired request must also not leave the in-flight gate stuck:
-            // session B has to be able to ask for status itself.
-            staleHarness.api.events.emit("subagent:control-event", {});
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            eq(
-              asked.length,
-              2,
-              "a session that replaced another can still request status",
-            );
-            await staleHarness.runHooks("session_shutdown", {}, sessionB);
-          }
-
-          // Nothing answers the status request here. The widget has to give up
-          // on its own and keep rendering the work it can see by itself,
-          // rather than waiting forever on an absent subagent package.
-          const silentHarness = createHarness();
-          auroraUi.default(silentHarness.api);
-          const silentContext = silentHarness.makeContext();
-          await silentHarness.runHooks("session_start", {}, silentContext);
-          await silentHarness.runHooks(
-            "tool_execution_start",
-            {
-              toolCallId: "foreground-only",
-              toolName: "subagent",
-              args: { agent: "lonely" },
-            },
-            silentContext,
-          );
-          silentHarness.api.events.emit("subagent:control-event", {});
-          await new Promise((resolve) => setTimeout(resolve, 1_600));
-          const silentActivity =
-            silentHarness.widgets.get("aurora-ui/activity")?.content;
-          const silentRendered =
-            typeof silentActivity === "function"
-              ? silentActivity({ requestRender() {} }, silentContext.ui.theme)
-                  .render(140)
-                  .map(stripAnsi)
-                  .join("\n")
-              : "";
-          assert(
-            silentRendered.includes("lonely"),
-            "an unanswered status request never hides the subagents Aurora already knows",
-          );
-          await silentHarness.runHooks("session_shutdown", {}, silentContext);
-        } finally {
-          writeFileSync(subagentConfigPath, originalSubagentConfig);
-        }
-      }
 
       await harness.runHooks("session_shutdown", {}, context);
       eq(harness.widgets.size, 0, "Aurora removes its widget on shutdown");
