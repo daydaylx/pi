@@ -7,8 +7,10 @@ import {
   statusSeparator,
   type Tone,
 } from "../shared/ui-theme.ts";
+import { compactCwd } from "./cwd.ts";
 import { crop } from "./layout.ts";
 import type { AuroraUiState } from "./state.ts";
+import { thinkingTone } from "./thinking.ts";
 
 /**
  * The footer is the one permanent status surface, and it is one line.
@@ -23,11 +25,20 @@ export interface FooterInput {
   state: AuroraUiState;
   statuses: ReadonlyMap<string, string>;
   contextPercent: number | null;
+  /** Captured from ExtensionContext at session start; never read from render I/O. */
+  cwd?: string;
+  homeDirectory?: string;
 }
 
 const CONTEXT_WARNING_PERCENT = 70;
 const CONTEXT_CRITICAL_PERCENT = 90;
 const MODEL_MAX_COLUMNS = 32;
+const FOLDER_MAX_COLUMNS: Record<Layout, number> = {
+  wide: 34,
+  comfortable: 24,
+  standard: 18,
+  compact: 12,
+};
 
 /**
  * Where a segment sits on the line. Reading order is fixed and independent of
@@ -40,9 +51,10 @@ const Slot = {
   workflow: 0,
   model: 1,
   thinking: 2,
-  context: 3,
-  verification: 4,
-  risk: 5,
+  folder: 3,
+  context: 4,
+  verification: 5,
+  risk: 6,
 } as const;
 
 type Slot = (typeof Slot)[keyof typeof Slot];
@@ -59,10 +71,11 @@ const Priority = {
   failedVerification: 2,
   exhaustedContext: 3,
   lsp: 4,
-  model: 5,
-  verification: 6,
-  thinking: 7,
-  context: 8,
+  folder: 5,
+  model: 6,
+  verification: 7,
+  thinking: 8,
+  context: 9,
 } as const;
 
 type Priority = (typeof Priority)[keyof typeof Priority];
@@ -87,6 +100,7 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.workflow,
     Slot.model,
     Slot.thinking,
+    Slot.folder,
     Slot.context,
     Slot.verification,
   ]),
@@ -94,10 +108,11 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.workflow,
     Slot.model,
     Slot.thinking,
+    Slot.folder,
     Slot.verification,
   ]),
-  standard: new Set([Slot.workflow, Slot.model]),
-  compact: new Set([Slot.workflow, Slot.model]),
+  standard: new Set([Slot.workflow, Slot.model, Slot.folder]),
+  compact: new Set([Slot.workflow, Slot.model, Slot.folder]),
 };
 
 function verificationState(input: FooterInput): string | null {
@@ -133,13 +148,14 @@ function lspNeedsAttention(state: string): boolean {
   return state === "eingeschränkt";
 }
 
-function collectSegments(input: FooterInput): Segment[] {
+function collectSegments(input: FooterInput, width: number): Segment[] {
+  const tier = footerTier(width);
   const segments: Segment[] = [
     {
       slot: Slot.workflow,
       priority: Priority.workflow,
       text: input.state.workflow.label,
-      tone: "text",
+      tone: "accent",
       bold: true,
     },
     {
@@ -148,7 +164,7 @@ function collectSegments(input: FooterInput): Segment[] {
       // The real runtime model id. Prettifying it into a marketing name would
       // mean inventing a mapping the runtime never gave us.
       text: crop(input.state.model.id ?? "kein Modell", MODEL_MAX_COLUMNS),
-      tone: "accent",
+      tone: "text",
     },
   ];
 
@@ -156,7 +172,17 @@ function collectSegments(input: FooterInput): Segment[] {
     segments.push({
       slot: Slot.thinking,
       priority: Priority.thinking,
-      text: input.state.model.thinking,
+      text: input.state.model.thinking.toUpperCase(),
+      tone: thinkingTone(input.state.model.thinking),
+      bold: true,
+    });
+  }
+
+  if (input.cwd) {
+    segments.push({
+      slot: Slot.folder,
+      priority: Priority.folder,
+      text: compactCwd(input.cwd, FOLDER_MAX_COLUMNS[tier], input.homeDirectory),
       tone: "muted",
     });
   }
@@ -263,7 +289,10 @@ export function renderFooterLines(
   input: FooterInput,
 ): string[] {
   const available = Math.max(1, width);
-  const selected = selectFooterSegments(collectSegments(input), available);
+  const selected = selectFooterSegments(
+    collectSegments(input, available),
+    available,
+  );
   const line = selected
     .map((segment) =>
       renderSegment(theme, segment.text, {

@@ -66,7 +66,10 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
           pi.getThinkingLevel(),
           (level) => ctx.model?.thinkingLevelMap?.[level] !== null,
         ),
-        { nonInteractiveHint: "Die Denktiefe benötigt den TUI-Modus." },
+        {
+          nonInteractiveHint: "Die Denktiefe benötigt den TUI-Modus.",
+          headerShortcut: "Super+D",
+        },
       );
       if (selectedLevel)
         control.applySelection(selectedLevel, ctx, isCurrentEpoch);

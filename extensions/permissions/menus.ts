@@ -1,5 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { runMenu } from "../shared/menu-ui.ts";
 import {
+  PERMISSION_LEVEL_DESCRIPTION,
   PERMISSION_LEVEL_LABEL,
   type PermissionLevel,
 } from "../shared/workflow-status.ts";
@@ -10,11 +12,19 @@ export async function openPermissionMenu(
   ctx: ExtensionContext,
 ): Promise<void> {
   const levels = Object.keys(PERMISSION_LEVEL_LABEL) as PermissionLevel[];
-  const choices = levels.map(
-    (level) => `${PERMISSION_LEVEL_LABEL[level]} · ${level}`,
+  const selected = await runMenu(
+    ctx,
+    "Permissions",
+    levels.map((level) => ({
+      id: `permission-${level}`,
+      label: PERMISSION_LEVEL_LABEL[level],
+      description: PERMISSION_LEVEL_DESCRIPTION[level],
+      current: session.level() === level,
+      dangerous: level === "yolo",
+      tone: level === "yolo" ? "danger" : undefined,
+      value: level,
+    })),
+    { nonInteractiveHint: "Die Berechtigungen benötigen den TUI-Modus." },
   );
-  const selected = await ctx.ui.select("Berechtigungen", choices);
-  const index = choices.indexOf(selected ?? "");
-  if (index >= 0 && index < levels.length)
-    await session.applyPermissionLevel(levels[index], ctx);
+  if (selected) await session.applyPermissionLevel(selected, ctx);
 }

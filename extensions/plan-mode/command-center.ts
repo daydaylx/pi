@@ -292,9 +292,12 @@ export async function openCommandCenter(
       : [];
   const selected = await runMenu(
     ctx,
-    "Command Center · /commands",
+    "Command Center",
     buildCommandCenterEntries(available, state),
-    { nonInteractiveHint: "Das Command Center benötigt den TUI-Modus." },
+    {
+      nonInteractiveHint: "Das Command Center benötigt den TUI-Modus.",
+      headerShortcut: "Super+Q",
+    },
   );
   if (!selected) return;
   const commandLine = await guideCommand(ctx, selected);

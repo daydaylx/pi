@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type {
   ExtensionAPI,
@@ -6,6 +7,7 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
+import { layoutForSize } from "../shared/layout.ts";
 import { loadSetupConfig, type MotionMode } from "../setup-core/config.ts";
 import {
   AURORA_UI_CHANNELS,
@@ -22,12 +24,13 @@ import {
   compactToolTarget,
   renderActiveTools,
   renderSubagents,
-  RUNNING_GLYPH,
   type ActiveToolView,
   type SubagentInfo,
 } from "./tool-renderers.ts";
-import { crop } from "./layout.ts";
 import { renderFooterLines } from "./footer.ts";
+import { crop } from "./layout.ts";
+import { renderStartscreen } from "./startscreen.ts";
+import { thinkingLabel, thinkingTone } from "./thinking.ts";
 
 const OWNER = "aurora-ui";
 const ACTIVITY_WIDGET = "aurora-ui/activity";
@@ -266,36 +269,68 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
    */
   let subagentGeneration = 0;
   let fleetDockOwnsSubagents = false;
+  let sessionCwd: string | undefined;
+  let sessionHome: string | undefined;
+  let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
 
   /**
-   * The transient work surface above the editor: what is running right now,
-   * and nothing that has already finished. It is pure — every value it prints
-   * was put into these caches by an event handler.
+   * The transient surface above the editor has two presentation-only variants:
+   * a fresh-session welcome and current live work. Both consume cached session
+   * values only; rendering neither changes a workflow nor asks another system.
    */
-  function renderActivityWidget(theme: Theme, width: number): string[] {
-    if (!state || state.activity.kind === "idle") return [];
-    const icon = workingFrame(
-      theme,
-      ticker?.motion ?? "off",
-      ticker?.frame ?? 0,
-    );
-    const label = state.activity.label ?? "Arbeite …";
-    // With motion off there is no animated frame, but the line still has to
-    // read as work in progress rather than as a finished result.
-    const marker = icon || theme.fg("muted", RUNNING_GLYPH);
-    const heading = crop(`${marker} ${theme.fg("muted", label)}`, width);
-    const inner = Math.max(1, width - 2);
+  function renderActivityWidget(
+    theme: Theme,
+    width: number,
+    rows: number,
+  ): string[] {
+    if (!state) return [];
+    if (state.activity.kind === "idle") {
+      if (!showStartscreen || !sessionCwd) return [];
+      return renderStartscreen(theme, {
+        width,
+        rows,
+        workflow: state.workflow.label,
+        model: state.model.id,
+        thinking: state.model.thinking,
+        cwd: sessionCwd,
+        homeDirectory: sessionHome,
+      });
+    }
+
+    const layout = layoutForSize(width, rows);
+    const compact = layout === "compact";
+    const heading =
+      state.activity.kind === "responding"
+        ? theme.fg("accent", theme.bold("◉ RESPONDING"))
+        : theme.fg(
+            thinkingTone(state.model.thinking),
+            theme.bold(`◉ THINKING  ${thinkingLabel(state.model.thinking)}`),
+          );
+    const contentWidth = Math.max(1, width - (compact ? 0 : 3));
     const tools = renderActiveTools(
       [...activeTools.values()],
       theme,
-      inner,
+      contentWidth,
       Date.now(),
-    ).map((line) => `  ${line}`);
+      { compact },
+    );
     const subagents = fleetDockOwnsSubagents
       ? []
-      : renderSubagents(subagentsCache, theme, inner).map((line) => `  ${line}`);
-    return [heading, ...tools, ...subagents];
+      : renderSubagents(subagentsCache, theme, contentWidth, { compact });
+    if (compact) return [crop(heading, width), ...tools, ...subagents];
+    if (tools.length === 0 && subagents.length === 0)
+      return [crop(heading, width)];
+
+    const rail = (glyph: "├─" | "╰─") => theme.fg("borderMuted", `${glyph} `);
+    const toolRows = tools.map((line, index) =>
+      `${rail(subagents.length > 0 || index < tools.length - 1 ? "├─" : "╰─")}${line}`,
+    );
+    const subagentRows =
+      subagents.length === 0
+        ? []
+        : [`${rail("╰─")}${subagents[0]}`, ...subagents.slice(1)];
+    return [crop(heading, width), theme.fg("borderMuted", "│"), ...toolRows, ...subagentRows];
   }
 
   function mergeSubagents(): void {
@@ -516,6 +551,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       }
     }
     state = undefined;
+    sessionCwd = undefined;
+    sessionHome = undefined;
+    showStartscreen = false;
     activeContext = undefined;
     activeSessionId = undefined;
     previousTheme = undefined;
@@ -530,6 +568,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
     const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
     fleetDockOwnsSubagents = fleetDockOwnsSubagentDisplay();
+    sessionCwd = ctx.cwd;
+    sessionHome = homedir();
+    showStartscreen = !ctx.sessionManager
+      .getEntries()
+      .some((entry: { type?: string }) => entry.type === "message");
     const epoch = makeEpoch(++epochSequence);
     state = makeState(epoch, ctx, pi);
     // The permission label is deliberately left empty: it means the permission
@@ -576,6 +619,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             state,
             statuses: footerData.getExtensionStatuses(),
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
+            cwd: sessionCwd,
+            homeDirectory: sessionHome,
           });
         },
       };
@@ -588,7 +633,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         return {
           invalidate() {},
           dispose: detachTicker,
-          render: (width: number) => renderActivityWidget(theme, width),
+          render: (width: number) =>
+            renderActivityWidget(
+              theme,
+              width,
+              (tui as unknown as { terminal?: { rows?: number } }).terminal
+                ?.rows ?? 24,
+            ),
         };
       },
       { placement: "aboveEditor" },
@@ -604,7 +655,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     installBus(ctx);
   });
 
+  pi.on("before_agent_start", () => {
+    showStartscreen = false;
+    ticker?.requestRender();
+  });
+
   pi.on("agent_start", (_event, ctx) => {
+    showStartscreen = false;
     activeTools.clear();
     foregroundSubagents.clear();
     refreshForegroundSubagents();

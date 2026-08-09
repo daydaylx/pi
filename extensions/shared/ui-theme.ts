@@ -15,7 +15,13 @@ export type Tone =
   | "dim"
   | "text"
   | "border"
-  | "borderMuted";
+  | "borderMuted"
+  | "thinkingOff"
+  | "thinkingMinimal"
+  | "thinkingLow"
+  | "thinkingMedium"
+  | "thinkingHigh"
+  | "thinkingXhigh";
 
 /**
  * Renders one status segment for a TUI bar. Segments are told apart by their

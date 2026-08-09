@@ -15,29 +15,32 @@ central setup configuration (`ui.motion`):
 ## The two surfaces
 
 **Footer** (`footer.ts`) — the one permanent status surface, and one line.
-It shows the workflow, the model, the thinking level, the context share and the
-verification state, in that order of importance, and drops whole segments from
-the least important end as the terminal narrows. Risk segments — YOLO, a failed
-verification, a broken language server — ignore the width tier and are the last
-thing dropped. Size classes come from `shared/layout.ts`, shared with the menu
-shell.
+It shows the workflow, model, thinking level, session folder, context share and
+verification state, then drops whole segments from the least important end as
+the terminal narrows. The folder is derived from the session CWD captured at
+session start and compacted purely; it never probes the filesystem. Risk
+segments — YOLO, a failed verification, a broken language server — ignore the
+width tier and are the last thing dropped. Size classes come from
+`shared/layout.ts`, shared with the menu shell.
 
 `renderFooterLines` is pure. Everything it prints was already in runtime state:
 it starts no process, probes neither git nor the LSP, asks no provider and reads
 no file. It is called on every frame, so anything else would be paid for
 continuously.
 
-**Activity widget** (`tool-renderers.ts`) — transient, above the editor, present
-only while a turn is running. It carries the thinking line, the running tools
-and the subagents of the current turn. Finished work leaves the widget rather
-than turning into a success block.
+**Activity widget** (`tool-renderers.ts`) — transient, above the editor. On a
+fresh empty session it briefly serves as the Aurora welcome; once a turn starts,
+it carries the thinking line, running tools and current subagents. Finished work
+leaves the widget rather than turning into a success block. The welcome is never
+shown again within that session and is skipped for resumed conversations.
 
 Subagent status is the one thing Aurora cannot read directly. Foreground runs
 come off the `subagent` tool call itself; async runs need a request to the
 subagent package, and that request is triggered by `subagent:control-event`
 alone, never by a render, with a 300 ms window that collapses bursts into one.
-When `extensions/subagent/config.json` enables the Fleet Status Dock, Aurora
-renders no subagents and sends no request at all.
+The active configuration keeps the Fleet Status Dock disabled, so Aurora owns
+the compact, transient subagent view. If a deployment enables that dock later,
+Aurora renders no duplicate subagents and sends no request at all.
 
 ## UI state event contract
 

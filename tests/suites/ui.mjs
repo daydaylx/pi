@@ -534,6 +534,71 @@ export const uiSections = {
       );
       assertNoGlobalChrome(harness, "menu shell installs no permanent chrome");
 
+      const polishHarness = createHarness({
+        columns: 120,
+        rows: 40,
+        editorText: "unverlorener Entwurf",
+      });
+      const polishResult = menuUi.runMenu(
+        polishHarness.makeContext(),
+        "Thinking",
+        [
+          {
+            id: "active",
+            label: "Hoch",
+            description: "Gründliches Nachdenken für anspruchsvolle Aufgaben",
+            current: true,
+            value: "high",
+          },
+          {
+            id: "risk",
+            label: "Sehr hoch",
+            description: "Maximale Tiefe für komplexe Aufgaben",
+            dangerous: true,
+            tone: "danger",
+            value: "xhigh",
+          },
+          {
+            id: "disabled",
+            label: "Nicht verfügbar",
+            disabled: true,
+            disabledReason: "Dieses Modell unterstützt die Stufe nicht.",
+            value: "off",
+          },
+        ],
+        { headerShortcut: "Super+D" },
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      const polishComponent = polishHarness.customComponents.at(-1);
+      assert(Boolean(polishComponent), "polished menu opens a custom overlay");
+      if (polishComponent) {
+        const polished = polishComponent.render(120).map(stripAnsi).join("\n");
+        assert(
+          polished.includes("THINKING") &&
+            polished.includes("Super+D") &&
+            polished.includes("● AKTIV") &&
+            polished.includes("⚠ RISIKO") &&
+            polished.includes("× NICHT VERFÜGBAR") &&
+            polished.includes("▌"),
+          "menu header, semantic badges and Aurora selection marker stay visible",
+        );
+        for (const width of [30, 52, 90, 120]) {
+          assert(
+            polishComponent
+              .render(width)
+              .every((line) => stripAnsi(line).length <= width),
+            `polished menu remains compact and bounded at ${width} columns`,
+          );
+        }
+        polishComponent.handleInput("\u001b");
+      }
+      eq(await polishResult, undefined, "Escape cancels the polished menu");
+      eq(
+        polishHarness.editorText,
+        "unverlorener Entwurf",
+        "Escape leaves the editor draft unchanged",
+      );
+
       const menuEntries = [
         { id: "first", label: "Erster", value: "first" },
         {

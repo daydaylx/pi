@@ -2658,6 +2658,37 @@ export const runtimeSections = {
         undefined,
         "Aurora replaces no editor component",
       );
+      const welcomeWidget = harness.widgets.get("aurora-ui/activity")?.content;
+      const welcome =
+        typeof welcomeWidget === "function"
+          ? welcomeWidget(
+              { terminal: { columns: 120, rows: 30 }, requestRender() {} },
+              context.ui.theme,
+            )
+              .render(120)
+              .map(stripAnsi)
+              .join("\n")
+          : "";
+      assert(
+        welcome.includes("A U R O R A") && welcome.includes("~/projects/aurora-test"),
+        "a fresh session shows the responsive Aurora welcome with its cwd",
+      );
+      const resumedHarness = createHarness({
+        entries: [{ type: "message", message: { role: "user", content: "resume" } }],
+      });
+      auroraUi.default(resumedHarness.api);
+      const resumedContext = resumedHarness.makeContext();
+      await resumedHarness.runHooks("session_start", {}, resumedContext);
+      const resumedWidget = resumedHarness.widgets.get("aurora-ui/activity")?.content;
+      const resumedLines =
+        typeof resumedWidget === "function"
+          ? resumedWidget(
+              { terminal: { columns: 120, rows: 30 }, requestRender() {} },
+              resumedContext.ui.theme,
+            ).render(120)
+          : [];
+      eq(resumedLines, [], "a resumed conversation skips the welcome surface");
+      await resumedHarness.runHooks("session_shutdown", {}, resumedContext);
 
       // A second consumer asks for the current state. Aurora answers on the
       // snapshot channel — the contract aurora-ui/README.md documents.
@@ -2761,7 +2792,7 @@ export const runtimeSections = {
         // Segments give up their place whole rather than being shaved off at
         // the edge, so what remains stays readable.
         assert(
-          wide.includes("high") && !narrow.includes("high"),
+          wide.includes("HIGH") && !narrow.includes("HIGH"),
           "Aurora footer drops the thinking segment before it crowds a narrow line",
         );
 
@@ -2808,6 +2839,56 @@ export const runtimeSections = {
           ).href
         );
         const { LAYOUT_COLUMNS } = await load("extensions/shared/layout.ts");
+        const auroraCwd = await load("extensions/aurora-ui/cwd.ts");
+        const startscreen = await load("extensions/aurora-ui/startscreen.ts");
+        eq(
+          auroraCwd.compactCwd(
+            path.join(homedir(), "projects", "pi"),
+            40,
+            homedir(),
+          ),
+          "~/projects/pi",
+          "a home-relative cwd remains readable when it fits",
+        );
+        eq(
+          auroraCwd.compactCwd(
+            path.join(homedir(), "projects", "very-long-agent-project", "pi"),
+            12,
+            homedir(),
+          ),
+          "~/…/pi",
+          "a long home-relative cwd keeps its final directory",
+        );
+        eq(auroraCwd.compactCwd("/", 8, homedir()), "/", "root cwd stays stable");
+        const unicodeCwd = auroraCwd.compactCwd("/srv/项目/aurora", 10, homedir());
+        assert(
+          visibleWidth(unicodeCwd) <= 10 && unicodeCwd.endsWith("aurora"),
+          "an outside-home Unicode cwd is cell-safe and retains its leaf",
+        );
+        for (const [columns, rows] of [
+          [40, 14],
+          [52, 14],
+          [90, 28],
+          [120, 30],
+        ]) {
+          const rendered = startscreen.renderStartscreen(context.ui.theme, {
+            width: columns,
+            rows,
+            workflow: "Work",
+            model: "aurora-test-model",
+            thinking: "high",
+            cwd: path.join(homedir(), "projects", "pi"),
+            homeDirectory: homedir(),
+          });
+          assert(
+            rendered.every((row) => visibleWidth(row) <= columns),
+            `the ${columns}×${rows} startscreen fits its terminal cells`,
+          );
+          assert(
+            rendered.join("\n").includes("~/projects/pi"),
+            `the ${columns}×${rows} startscreen keeps the current folder`,
+          );
+        }
         const footerState = (overrides = {}) => ({
           sessionEpoch: "responsive-test",
           workflow: { phase: "work", label: "Work" },
@@ -2822,6 +2903,8 @@ export const runtimeSections = {
             auroraFooter.renderFooterLines(context.ui.theme, width, {
               statuses: new Map(),
               contextPercent: null,
+              cwd: path.join(homedir(), "projects", "very-long-aurora-project", "pi"),
+              homeDirectory: homedir(),
               ...input,
               state: footerState(input.state),
             })[0],
@@ -2831,25 +2914,28 @@ export const runtimeSections = {
         const quiet = { contextPercent: 38 };
         assert(
           line(140, quiet).includes("ctx 38%") &&
-            line(140, quiet).includes("high"),
-          "the wide footer shows thinking and context",
+            line(140, quiet).includes("HIGH") &&
+            line(140, quiet).includes("~/…/pi"),
+          "the wide footer shows thinking, folder and context",
         );
         assert(
           !line(100, quiet).includes("ctx 38%") &&
-            line(100, quiet).includes("high"),
-          "the comfortable footer drops context before thinking",
+            line(100, quiet).includes("HIGH") &&
+            line(100, quiet).includes("~/…/pi"),
+          "the comfortable footer drops context before thinking and compacts the folder",
         );
         const standard = line(70, quiet);
         assert(
           standard.includes("Work") &&
             standard.includes("aurora-test-model") &&
-            !standard.includes("high"),
-          "the standard footer keeps workflow and model only",
+            standard.includes("~/…/pi") &&
+            !standard.includes("HIGH"),
+          "the standard footer keeps workflow, model and folder",
         );
         const compact = line(45, quiet);
         assert(
-          compact.includes("Work") && compact.includes("aurora-test-model"),
-          "the compact footer still names the workflow and the model",
+          compact.includes("Work") && compact.includes("pi"),
+          "the compact footer keeps the workflow and final folder name",
         );
 
         // Risk outranks the tier: these claim space at any width.
@@ -2994,6 +3080,8 @@ export const runtimeSections = {
                   ["verification", "Verify: changed_unverified"],
                 ]),
                 contextPercent: 88,
+                cwd: path.join(homedir(), "projects", "very-long-aurora-project", "pi"),
+                homeDirectory: homedir(),
                 ...input,
                 state: footerState(input.state),
               },
@@ -3056,9 +3144,11 @@ export const runtimeSections = {
           .map(stripAnsi)
           .join("\n");
         assert(
-          withSubagents.includes("Subagents · 2 aktiv") &&
+          withSubagents.includes("SUBAGENTS  2 aktiv") &&
             withSubagents.includes("reviewer") &&
-            withSubagents.includes("1 Aufmerksamkeit"),
+            withSubagents.includes("1 Aufmerksamkeit") &&
+            withSubagents.includes("!") &&
+            withSubagents.includes("◉"),
           "the activity widget reports active subagents and what needs a look",
         );
         eq(
@@ -3095,11 +3185,9 @@ export const runtimeSections = {
         );
       }
 
-      // The pure function contract above only proves renderSubagents() itself
-      // behaves correctly. This proves the actual wiring: with the real, pinned
-      // `extensions/subagent/config.json` (`ui.fleetView: true`), the running
-      // extension must read that file at session_start and hand the display
-      // over end-to-end — not just when a test constructs the input by hand.
+      // The pure function contract above only proves renderSubagents() itself.
+      // The active configuration disables the package Fleet Dock, so Aurora
+      // must own the transient display end-to-end without polling from render.
       {
         const dockHarness = createHarness();
         auroraUi.default(dockHarness.api);
@@ -3139,15 +3227,15 @@ export const runtimeSections = {
                 .join("\n")
             : "";
         assert(
-          !dockRendered.includes("worker") &&
-            !dockRendered.includes("async-test") &&
-            !dockRendered.includes("Subagents"),
-          "with the real pinned config, the Fleet Status Dock owns the subagent display end-to-end and Aurora shows none of it",
+          dockRendered.includes("worker") &&
+            dockRendered.includes("async") &&
+            dockRendered.includes("SUBAGENTS"),
+          "with the real pinned config, Aurora owns the transient subagent display end-to-end",
         );
         eq(
           dockRequests,
-          0,
-          "handing the display over also stops Aurora from asking for status",
+          1,
+          "the control event triggers exactly one cached status request",
         );
         await dockHarness.runHooks("session_shutdown", {}, dockContext);
       }
@@ -3186,12 +3274,39 @@ export const runtimeSections = {
           "the native working indicator remains hidden while a tool runs",
         );
         assert(
-          stripAnsi(component.render(60)[0]).includes("Tool"),
-          "the specific activity text lives only in the activity widget",
+          stripAnsi(component.render(60)[0]).includes("THINKING"),
+          "the configured Thinking state lives only in the activity widget",
         );
         component.invalidate?.();
         component.dispose?.();
       }
+      await harness.runHooks(
+        "tool_execution_start",
+        {
+          toolCallId: "tool-aurora-bash",
+          toolName: "bash",
+          args: { command: "npm run test" },
+        },
+        context,
+      );
+      const railRendered =
+        typeof widget === "function"
+          ? widget(
+              { terminal: { columns: 140, rows: 30 }, requestRender() {} },
+              context.ui.theme,
+            )
+              .render(140)
+              .map(stripAnsi)
+              .join("\n")
+          : "";
+      assert(
+        railRendered.includes("│") &&
+          railRendered.includes("├─") &&
+          railRendered.includes("╰─") &&
+          railRendered.includes("◌ Read") &&
+          railRendered.includes("› Bash"),
+        "wide activity groups typed running tools with a lightweight rail",
+      );
 
       for (const motion of ["reduced", "off"]) {
         const workspace = mkdtempSync(path.join(tmpdir(), "aurora-motion-"));
@@ -3219,19 +3334,13 @@ export const runtimeSections = {
                   .join("\n")
               : "";
           assert(
-            rendered.includes("Thinking · "),
-            `Aurora keeps its activity label visible with ${motion} motion`,
+            rendered.includes("THINKING") && rendered.includes("HIGH"),
+            `Aurora keeps its Thinking header visible with ${motion} motion`,
           );
-          if (motion === "reduced")
-            assert(
-              rendered.includes("●"),
-              "reduced motion uses a static activity marker",
-            );
-          else
-            assert(
-              !rendered.includes("●"),
-              "off motion keeps activity text without a marker",
-            );
+          assert(
+            rendered.includes("◉"),
+            `${motion} motion keeps an explicit non-animated activity state`,
+          );
           eq(
             motionHarness.workingVisibility.at(-1),
             false,

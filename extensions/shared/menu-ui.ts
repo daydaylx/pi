@@ -222,11 +222,12 @@ async function selectWithCustomUi<T>(
   ctx: ExtensionContext,
   title: string,
   entries: readonly MenuEntry<T>[],
+  headerShortcut?: string,
 ): Promise<MenuEntry<T> | undefined> {
   if (typeof ctx.ui.custom !== "function")
     throw new Error("Benutzerdefiniertes TUI-Overlay wird nicht unterstützt.");
   // This must stay dynamic: static pi-tui imports break the jiti test loader.
-  const { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } =
+  const { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } =
     await import("@earendil-works/pi-tui");
   let terminal = () => ({
     columns: process.stdout.columns ?? 80,
@@ -273,12 +274,22 @@ async function selectWithCustomUi<T>(
       const tag = (entry: MenuEntry<T>) =>
         entry.badge ??
         (entry.disabled
-          ? "NICHT VERFÜGBAR"
+          ? "× NICHT VERFÜGBAR"
           : entry.dangerous
-            ? "RISIKO"
+            ? "⚠ RISIKO"
             : entry.current
-              ? "AKTIV"
+              ? "● AKTIV"
               : undefined);
+      const tagTone = (entry: MenuEntry<T>) =>
+        entry.disabled
+          ? "dim"
+          : entry.dangerous || entry.tone === "danger"
+            ? "error"
+            : entry.tone === "warning"
+              ? "warning"
+              : entry.current
+                ? "success"
+                : "muted";
       const selectedRow = (value: string, width: number) => {
         const row = pad(value, width);
         const themed = theme as unknown as {
@@ -309,17 +320,28 @@ async function selectWithCustomUi<T>(
               ),
             );
           const selectionLine = lines.length;
-          const suffix = `${entry.shortcut ? `  [${entry.shortcut}]` : ""}${tag(entry) ? ` [${tag(entry)}]` : ""}${entry.children ? " ›" : ""}`;
           const isSelected = index === level().selected;
           const indicator = isSelected ? fg("accent", "▌") : " ";
           const label =
             layout === "compact"
               ? (entry.compactLabel ?? entry.label)
               : entry.label;
-          const main = `${indicator} ${entry.icon ? `${entry.icon} ` : ""}${label}${suffix}`;
+          const status = tag(entry) ?? (entry.children ? "›" : "");
+          const prefix = `${indicator} ${entry.icon ? `${entry.icon} ` : ""}`;
+          const availableLabel = Math.max(
+            1,
+            inner - visibleWidth(prefix) - (status ? visibleWidth(status) + 2 : 0),
+          );
+          const clippedLabel = truncateToWidth(label, availableLabel, ELLIPSIS);
+          const gap = status
+            ? " ".repeat(
+                Math.max(1, inner - visibleWidth(prefix) - visibleWidth(clippedLabel) - visibleWidth(status)),
+              )
+            : "";
+          const main = `${prefix}${fg(tone(entry), clippedLabel)}${gap}${status ? fg(tagTone(entry), status) : ""}`;
           const rendered = isSelected
             ? selectedRow(main, inner)
-            : fg(tone(entry), pad(` ${main}`, inner));
+            : pad(main, inner);
           lines.push(rendered);
           const description = entry.disabled
             ? (entry.disabledReason ?? entry.description)
@@ -448,9 +470,25 @@ async function selectWithCustomUi<T>(
             content.push(fg("muted", " Keine Einträge verfügbar."));
           if (width < 4) return [truncateToWidth("Menü", width, ELLIPSIS)];
           const emptyLine = frame("", inner);
+          const titleText = title.toLocaleUpperCase("de-DE");
+          const showHeaderShortcut = layout !== "compact" && Boolean(headerShortcut);
+          const headerTitle = truncateToWidth(
+            titleText,
+            Math.max(
+              1,
+              inner - (showHeaderShortcut ? visibleWidth(headerShortcut!) + 2 : 0),
+            ),
+            ELLIPSIS,
+          );
+          const headerGap = showHeaderShortcut
+            ? " ".repeat(
+                Math.max(1, inner - visibleWidth(headerTitle) - visibleWidth(headerShortcut!)),
+              )
+            : "";
+          const header = `${fg("accent", theme.bold(headerTitle))}${headerGap}${showHeaderShortcut ? fg("dim", headerShortcut!) : ""}`;
           return [
             `${border("╭")}${border("─".repeat(inner))}${border("╮")}`,
-            frame(fg("accent", theme.bold(pad(` ${title}`, inner))), inner),
+            frame(header, inner),
             ...(showCrumbs
               ? [frame(fg("muted", pad(` ${crumbs}`, inner)), inner)]
               : []),
@@ -580,6 +618,8 @@ async function selectWithCustomUi<T>(
 export interface RunMenuOptions {
   fallbackPrompt?: string;
   nonInteractiveHint?: string;
+  /** Existing global shortcut shown in the custom-menu header, never registered here. */
+  headerShortcut?: string;
 }
 
 export async function runMenu<T>(
@@ -597,7 +637,7 @@ export async function runMenu<T>(
   }
   const selected = await selectMenuEntry(
     entries,
-    () => selectWithCustomUi(ctx, title, entries),
+    () => selectWithCustomUi(ctx, title, entries, options.headerShortcut),
     (labels) => ctx.ui.select(options.fallbackPrompt ?? title, labels),
   );
   return selected?.value;
