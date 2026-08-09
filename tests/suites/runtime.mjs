@@ -259,7 +259,7 @@ export const runtimeSections = {
             eq(
               (source.match(/\bsetInterval\s*\(/g) ?? []).length,
               1,
-              "Aurora owns one shared contextual ticker",
+              "Aurora owns one shared activity ticker",
             );
           } else {
             const isTemporaryDiffPreview =
@@ -322,22 +322,48 @@ export const runtimeSections = {
           setup.subagents.concurrency,
           "active package concurrency matches the setup baseline",
         );
-        const installerSource = readFileSync(
-          path.join(ROOT, "scripts", "install-user.mjs"),
-          "utf8",
+        // Verify installer ALLOWLIST covers every active extension's
+        // runtime imports (no string-grep; real structural assertions).
+        const { ALLOWLIST, NEVER_COPY, NEVER_COPY_SUBTREE, LEGACY_MANAGED } =
+          await import(
+            pathToFileURL(
+              path.join(ROOT, "scripts", "install-user.mjs"),
+            ).href
+          );
+        assert(
+          Array.isArray(ALLOWLIST) && ALLOWLIST.length > 0,
+          "installer has a non-empty ALLOWLIST",
         );
-        for (const required of [
-          '"package.json"',
-          '"tsconfig.json"',
-          '"npm/package.json"',
-          '"npm/package-lock.json"',
-          '"tests"',
-        ]) {
+        const requiredAllowlist = [
+          "shared",
+          ".pi/subagent-tool-description.md",
+          "extensions",
+          "agents",
+          "scripts",
+          "tests",
+        ];
+        for (const entry of requiredAllowlist) {
           assert(
-            installerSource.includes(required),
-            `greenfield installer includes verification support ${required}`,
+            ALLOWLIST.includes(entry),
+            `installer ALLOWLIST includes ${entry}`,
           );
         }
+        assert(
+          NEVER_COPY.has("auth.json") &&
+            NEVER_COPY.has("sessions") &&
+            NEVER_COPY.has("backups") &&
+            NEVER_COPY.has(".git") &&
+            NEVER_COPY.has("node_modules"),
+          "installer NEVER_COPY protects auth, sessions, backups, .git, node_modules",
+        );
+        assert(
+          NEVER_COPY_SUBTREE.has("docs/archive/session-logs"),
+          "installer excludes docs/archive/session-logs from user installations",
+        );
+        assert(
+          Array.isArray(LEGACY_MANAGED) && LEGACY_MANAGED.length > 0,
+          "installer declares known legacy managed paths for upgrade cleanup",
+        );
         for (const workflow of ["verify.yml", "lsp-smoke.yml"]) {
           const source = readFileSync(
             path.join(ROOT, ".github", "workflows", workflow),
@@ -380,6 +406,266 @@ export const runtimeSections = {
           );
         }
         return;
+      }
+    });
+  },
+
+  "installer greenfield deployment": async (context) => {
+    const { section } = context;
+    await section("installer greenfield deployment", async () => {
+      const { ALLOWLIST, NEVER_COPY, NEVER_COPY_SUBTREE, SOURCE, collect } =
+        await import(
+          pathToFileURL(
+            path.join(ROOT, "scripts", "install-user.mjs"),
+          ).href
+        );
+
+      // Greenfield: collect all files the installer would deploy, then
+      // verify the target can resolve every active extension's imports.
+      const deployed = ALLOWLIST.flatMap((entry) => {
+        const absolute = path.join(SOURCE, entry);
+        return existsSync(absolute) ? collect(SOURCE, entry) : [];
+      });
+
+      const deployedSet = new Set(deployed);
+
+      // shared/workspace-snapshot.mjs is required by setup-core at runtime.
+      assert(
+        deployedSet.has("shared/workspace-snapshot.mjs"),
+        "greenfield includes shared/workspace-snapshot.mjs",
+      );
+
+      // Custom subagent description must be installed.
+      assert(
+        deployedSet.has(".pi/subagent-tool-description.md"),
+        "greenfield includes .pi/subagent-tool-description.md",
+      );
+
+      // Exactly three agent profiles.
+      const agentFiles = deployed.filter((f) => f.startsWith("agents/"));
+      eq(
+        agentFiles.length,
+        3,
+        "greenfield installs exactly three agent profiles",
+      );
+      for (const role of ["investigator.md", "debugger.md", "verifier.md"]) {
+        assert(
+          deployedSet.has(`agents/${role}`),
+          `greenfield includes agents/${role}`,
+        );
+      }
+
+      // No legacy agent profiles.
+      for (const legacy of ["planner.md", "worker.md", "reviewer.md"]) {
+        assert(
+          !deployedSet.has(`agents/${legacy}`),
+          `greenfield does not include legacy agents/${legacy}`,
+        );
+      }
+
+      // Archive session logs must not be deployed.
+      const archiveFiles = deployed.filter((f) =>
+        f.startsWith("docs/archive/session-logs"),
+      );
+      eq(
+        archiveFiles.length,
+        0,
+        "greenfield excludes docs/archive/session-logs",
+      );
+
+      // Security: NEVER_COPY entries must not appear in deployed files.
+      for (const forbidden of NEVER_COPY) {
+        const violations = deployed.filter((f) =>
+          f.startsWith(forbidden + "/") || f === forbidden,
+        );
+        eq(
+          violations.length,
+          0,
+          `greenfield excludes NEVER_COPY entry ${forbidden}`,
+        );
+      }
+
+      // Security: NEVER_COPY_SUBTREE entries must not appear.
+      for (const subtree of NEVER_COPY_SUBTREE) {
+        const violations = deployed.filter((f) => f.startsWith(subtree));
+        eq(
+          violations.length,
+          0,
+          `greenfield excludes NEVER_COPY_SUBTREE entry ${subtree}`,
+        );
+      }
+
+      // Verify real deployment to a temporary target works.
+      const target = mkdtempSync(path.join(tmpdir(), "pi-install-greenfield-"));
+      try {
+        execFileSync(
+          process.execPath,
+          [path.join(ROOT, "scripts", "install-user.mjs"), "--apply", "--target", target],
+          { stdio: "pipe", timeout: 30_000 },
+        );
+
+        // shared/ must exist and be importable.
+        const snapshotPath = path.join(target, "shared", "workspace-snapshot.mjs");
+        assert(
+          existsSync(snapshotPath),
+          "deployed target contains shared/workspace-snapshot.mjs",
+        );
+
+        // Custom subagent description.
+        assert(
+          existsSync(
+            path.join(target, ".pi", "subagent-tool-description.md"),
+          ),
+          "deployed target contains .pi/subagent-tool-description.md",
+        );
+
+        // Exactly three agents.
+        const deployedAgents = readdirSync(path.join(target, "agents")).filter(
+          (f) => f.endsWith(".md"),
+        );
+        eq(
+          deployedAgents.length,
+          3,
+          "deployed target has exactly three agent profiles",
+        );
+
+        // No archive session logs.
+        const archivePath = path.join(
+          target,
+          "docs",
+          "archive",
+          "session-logs",
+        );
+        assert(
+          !existsSync(archivePath),
+          "deployed target does not contain docs/archive/session-logs",
+        );
+      } finally {
+        rmSync(target, { recursive: true, force: true });
+      }
+    });
+  },
+
+  "installer upgrade deployment": async (context) => {
+    const { section } = context;
+    await section("installer upgrade deployment", async () => {
+      const { LEGACY_MANAGED } = await import(
+        pathToFileURL(
+          path.join(ROOT, "scripts", "install-user.mjs"),
+        ).href
+      );
+
+      const target = mkdtempSync(path.join(tmpdir(), "pi-install-upgrade-"));
+      try {
+        // Pre-populate a target with known legacy agent profiles and one
+        // user-owned file.
+        mkdirSync(path.join(target, "agents"), { recursive: true });
+        writeFileSync(
+          path.join(target, "agents", "planner.md"),
+          "# legacy planner",
+        );
+        writeFileSync(
+          path.join(target, "agents", "worker.md"),
+          "# legacy worker",
+        );
+        writeFileSync(
+          path.join(target, "agents", "reviewer.md"),
+          "# legacy reviewer",
+        );
+        const userFile = path.join(target, "agents", "custom-user-agent.md");
+        writeFileSync(userFile, "# user-owned custom agent");
+
+        execFileSync(
+          process.execPath,
+          [path.join(ROOT, "scripts", "install-user.mjs"), "--apply", "--target", target],
+          { stdio: "pipe", timeout: 30_000 },
+        );
+
+        // Legacy managed files must be gone.
+        for (const legacy of LEGACY_MANAGED) {
+          assert(
+            !existsSync(path.join(target, legacy)),
+            `upgrade removes legacy ${legacy}`,
+          );
+        }
+
+        // User-owned file must survive.
+        assert(
+          existsSync(userFile),
+          "upgrade preserves user-owned file agents/custom-user-agent.md",
+        );
+
+        // Current agents are installed.
+        for (const role of ["investigator.md", "debugger.md", "verifier.md"]) {
+          assert(
+            existsSync(path.join(target, "agents", role)),
+            `upgrade installs agents/${role}`,
+          );
+        }
+      } finally {
+        rmSync(target, { recursive: true, force: true });
+      }
+    });
+  },
+
+  "installer security boundaries": async (context) => {
+    const { section } = context;
+    await section("installer security boundaries", async () => {
+      const target = mkdtempSync(path.join(tmpdir(), "pi-install-security-"));
+      try {
+        // Symlink in target path must be rejected.
+        const symDir = mkdtempSync(
+          path.join(tmpdir(), "pi-install-symlink-"),
+        );
+        const linkPath = path.join(symDir, "link");
+        symlinkSync(target, linkPath, "dir");
+        try {
+          execFileSync(
+            process.execPath,
+            [
+              path.join(ROOT, "scripts", "install-user.mjs"),
+              "--apply",
+              "--target",
+              path.join(linkPath, "sub"),
+            ],
+            { stdio: "pipe", timeout: 10_000 },
+          );
+          assert(false, "installer must reject symlink in target path");
+        } catch (error) {
+          assert(
+            error.stderr?.includes("Symlink") ||
+              error.message?.includes("Symlink") ||
+              error.code !== 0,
+            "installer rejects symlink in target path",
+          );
+        } finally {
+          rmSync(symDir, { recursive: true, force: true });
+        }
+
+        // Sensitive files must not appear in deployed target.
+        const { NEVER_COPY } = await import(
+          pathToFileURL(
+            path.join(ROOT, "scripts", "install-user.mjs"),
+          ).href
+        );
+        execFileSync(
+          process.execPath,
+          [
+            path.join(ROOT, "scripts", "install-user.mjs"),
+            "--apply",
+            "--target",
+            target,
+          ],
+          { stdio: "pipe", timeout: 30_000 },
+        );
+        for (const forbidden of NEVER_COPY) {
+          assert(
+            !existsSync(path.join(target, forbidden)),
+            `deployed target must not contain ${forbidden}`,
+          );
+        }
+      } finally {
+        rmSync(target, { recursive: true, force: true });
       }
     });
   },
@@ -1400,7 +1686,7 @@ export const runtimeSections = {
       const snapshotUnavailable = baseline.classifyCheckFailure(
         "tests/example.test.ts:12 assertion failed",
         undefined,
-        false,
+        undefined,
       );
       eq(
         snapshotUnavailable.classification,
@@ -1420,7 +1706,7 @@ export const runtimeSections = {
       const noWorkspaceChanges = baseline.classifyCheckFailure(
         "tests/example.test.ts:12 assertion failed",
         [],
-        false,
+        undefined,
       );
       eq(
         noWorkspaceChanges.classification,
@@ -1433,17 +1719,33 @@ export const runtimeSections = {
       );
 
       // A real comparison basis: this exact profile already passed earlier
-      // in the session, and now fails against a changed workspace. That is
-      // recorded evidence of a regression, not an inference from paths.
+      // in the session with fingerprint "abc", and now fails against a
+      // different fingerprint "xyz". That is recorded evidence of a
+      // regression, not an inference from paths.
       const regressed = baseline.classifyCheckFailure(
         "tests/example.test.ts:12 assertion failed",
         ["tests/example.test.ts"],
-        true,
+        "abc",
+        "xyz",
       );
       eq(
         regressed.classification,
         "introduced",
-        "a profile that already passed this session and now fails is a genuine regression",
+        "a profile that already passed this session and now fails on a different fingerprint is a genuine regression",
+      );
+
+      // Same fingerprint Pass→Fail: the workspace hasn't changed since the
+      // last passing run, so this is flaky, not a regression.
+      const flaky = baseline.classifyCheckFailure(
+        "tests/example.test.ts:12 assertion failed",
+        ["tests/example.test.ts"],
+        "abc",
+        "abc",
+      );
+      eq(
+        flaky.classification,
+        "flaky",
+        "same-fingerprint pass→fail is flaky, not introduced",
       );
 
       // No genuine baseline (never passed this session, workspace has
@@ -1453,7 +1755,8 @@ export const runtimeSections = {
       const outputOutsideDiff = baseline.classifyCheckFailure(
         "src/unrelated/legacy.ts:40 type error",
         ["src/feature/new-file.ts"],
-        false,
+        undefined,
+        "fingerprint-1",
       );
       eq(
         outputOutsideDiff.classification,
@@ -1468,7 +1771,8 @@ export const runtimeSections = {
       const outputInsideDiff = baseline.classifyCheckFailure(
         "src/feature/new-file.ts:5 type error",
         ["src/feature/new-file.ts"],
-        false,
+        undefined,
+        "fingerprint-1",
       );
       eq(
         outputInsideDiff.classification,
@@ -1482,7 +1786,8 @@ export const runtimeSections = {
       const mixed = baseline.classifyCheckFailure(
         "src/feature/new-file.ts:5 and src/unrelated/legacy.ts:40 both fail",
         ["src/feature/new-file.ts"],
-        false,
+        undefined,
+        "fingerprint-1",
       );
       eq(mixed.classification, "unknown");
       eq(mixed.pathRelation, "mixed");
@@ -1491,7 +1796,8 @@ export const runtimeSections = {
       const noPaths = baseline.classifyCheckFailure(
         "exit code 1",
         ["src/feature/new-file.ts"],
-        false,
+        undefined,
+        "fingerprint-1",
       );
       eq(noPaths.classification, "unknown");
       eq(noPaths.pathRelation, "no_paths_found");
@@ -1826,8 +2132,8 @@ export const runtimeSections = {
       eq(failRun.exitCode, 2, "exit code captured");
       eq(
         failRun.error.kind,
-        "spawn_failed",
-        "non-zero exit reported as spawn_failed",
+        "failed",
+        "non-zero exit reported as failed",
       );
 
       // --- runProfile: timeout -> killed, structured timeout error ---
@@ -3126,7 +3432,7 @@ export const runtimeSections = {
           ["bash", "Shell"],
           ["verify", "Prüfen"],
           ["subagent", "Subagent"],
-          ["unknown_tool", "Werkzeug"],
+          ["unknown_tool", "Werkzeug · unknown_tool"],
         ]) {
           eq(
             auroraTools.toolPresentation(name).label,
@@ -3134,8 +3440,28 @@ export const runtimeSections = {
             `${name} uses its German Aurora presentation label`,
           );
         }
+        const genericTool = auroraTools
+          .renderActiveTools(
+            [
+              {
+                id: "generic-ask",
+                name: "ask_user",
+                kind: "generic",
+                startedAt: 0,
+              },
+            ],
+            context.ui.theme,
+            90,
+            5_000,
+          )
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          genericTool.includes("Werkzeug · ask_user"),
+          "generic activity rows preserve the real runtime tool name",
+        );
         const activeTools = ["read", "grep", "bash", "edit"].map(
-          (name, index) => ({ 
+          (name, index) => ({
             id: `${name}-${index}`,
             name,
             startedAt: 0,
@@ -3722,13 +4048,23 @@ export const runtimeSections = {
           await motionHarness.runHooks("agent_start", {}, motionContext);
           const motionWidget =
             motionHarness.widgets.get("aurora-ui/activity")?.content;
-          const rendered =
+          let statusRepaints = 0;
+          const motionComponent =
             typeof motionWidget === "function"
-              ? motionWidget({ requestRender() {} }, motionContext.ui.theme)
-                  .render(60)
-                  .map(stripAnsi)
-                  .join("\n")
-              : "";
+              ? motionWidget(
+                  {
+                    requestRender() {
+                      statusRepaints += 1;
+                    },
+                  },
+                  motionContext.ui.theme,
+                )
+              : undefined;
+          const rendered =
+            motionComponent
+              ?.render(60)
+              .map(stripAnsi)
+              .join("\n") ?? "";
           assert(
             rendered.includes("DENKT NACH") && rendered.includes("HOCH"),
             `Aurora keeps its Thinking header visible with ${motion} motion`,
@@ -3736,6 +4072,12 @@ export const runtimeSections = {
           assert(
             motion === "reduced" ? rendered.includes("●") : !rendered.includes("●"),
             `${motion} motion keeps the required static or text-only activity presentation`,
+          );
+          const repaintsBeforeStatusTick = statusRepaints;
+          await new Promise((resolve) => setTimeout(resolve, 1_200));
+          assert(
+            statusRepaints > repaintsBeforeStatusTick,
+            `${motion} motion repaints elapsed time and WARTET without another runtime event`,
           );
           eq(
             motionHarness.workingVisibility.at(-1),

@@ -6,10 +6,13 @@ and lifecycle hooks. Core tools are not replaced or wrapped, and the editor is
 Pi's own — Aurora installs no editor component.
 
 The theme is `themes/aurora-night.json`. Motion is read from the effective
-central setup configuration (`ui.motion`):
+central setup configuration (`ui.motion`). One shared ticker runs only while
+work is visible: `contextual` repaints every 100 ms for animation, while
+`reduced` and `off` repaint once per second only to keep elapsed time and the
+`WARTET` transition current.
 
-- `contextual`: one shared 100 ms ticker runs only while work is visible.
-- `reduced`: static activity indicator; no extension ticker.
+- `contextual`: animated activity indicator.
+- `reduced`: static activity indicator.
 - `off`: no animated indicator; activity text remains available.
 
 ## The two surfaces
@@ -45,8 +48,8 @@ sofern keine asynchronen Subagenten weiterarbeiten.
 
 `tool_execution_start` ist Auroras einzige Quelle für eine Toolzeile. Es ordnet
 die realen Laufzeitdaten als Lesen, Suchen, Bearbeiten, Shell, Testen, Prüfen,
-LSP, Subagent oder Werkzeug ein; kein Tool wird von der UI gewrappt oder
-aufgerufen. Bekannte LSP-Namen erscheinen nur als LSP-Aktivität, wenn dieses
+LSP, Subagent oder Werkzeug ein; bei unbekannten Werkzeugen bleibt zusätzlich
+der echte Toolname sichtbar. Kein Tool wird von der UI gewrappt oder aufgerufen. Bekannte LSP-Namen erscheinen nur als LSP-Aktivität, wenn dieses
 Tool tatsächlich startet. LSP-Gesundheit bleibt eine Footer-Angelegenheit. Eine
 laufende Verifikation nutzt den aktiven Kreis statt eines Erfolgs-Häkchens;
 abgeschlossene Tools verschwinden aus der transienten Anzeige und Pis

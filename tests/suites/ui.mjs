@@ -392,8 +392,8 @@ export const uiSections = {
         await legacyHarness.runHooks("session_start", {}, legacyContext);
         eq(
           legacyHarness.api.getThinkingLevel(),
-          "medium",
-          "a persisted auto Thinking record falls back to the default level",
+          "low",
+          "a persisted auto Thinking record falls back to the runtime default level",
         );
 
         choice = "__models__";

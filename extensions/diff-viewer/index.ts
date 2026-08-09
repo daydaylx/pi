@@ -63,7 +63,7 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
     }
     const changes = tracker.changedFiles;
     if (changes.length === 0) {
-      ctx.ui.notify("Keine Änderungen in dieser Session", "info");
+      ctx.ui.notify("Keine Edit-/Write-Operationen in dieser Session.", "info");
       return;
     }
     await ctx.ui.custom<void>(

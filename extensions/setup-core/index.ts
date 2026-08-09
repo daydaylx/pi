@@ -142,14 +142,12 @@ export default function setupCore(pi: ExtensionAPI): void {
   let verificationLedger: VerificationLedger = {};
   let lastSettledStatus: VerificationStatus | undefined;
   // Session-scoped record of which profile ids have ever been observed
-  // passing, independent of the workspace fingerprint (unlike
-  // verificationLedger.lastRequiredCheck, which is discarded whenever the
-  // fingerprint changes). This is the one genuine baseline
-  // check-baseline.ts's `introduced` classification relies on: if a profile
-  // passed earlier this session and now fails, that is a recorded
-  // regression, not a guess. Same lifecycle as verificationLedger — reset on
+  // passing, and the workspace fingerprint at the time of that pass.
+  // Used by check-baseline.ts to distinguish flaky failures (same
+  // fingerprint) from genuine regressions (different fingerprint).
+  // Same lifecycle as verificationLedger — reset on
   // session_start/session_shutdown, never persisted.
-  let passedProfileIds: Set<string> = new Set();
+  let passedProfileIds: Map<string, string> = new Map();
 
   function workspaceSnapshot(cwd: string) {
     try {
@@ -163,7 +161,7 @@ export default function setupCore(pi: ExtensionAPI): void {
     activeCwd = ctx.cwd;
     trusted = ctx.isProjectTrusted();
     verificationLedger = {};
-    passedProfileIds = new Set();
+    passedProfileIds = new Map();
     lastSettledStatus = undefined;
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
   });
@@ -198,7 +196,7 @@ export default function setupCore(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", (_event, ctx) => {
     verificationLedger = {};
-    passedProfileIds = new Set();
+    passedProfileIds = new Map();
     lastSettledStatus = undefined;
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
   });
@@ -325,7 +323,7 @@ export default function setupCore(pi: ExtensionAPI): void {
           exec: (program, args, options) => pi.exec(program, args, options),
         });
         const finishedAt = new Date().toISOString();
-        if (result.ok) passedProfileIds.add(profileId);
+        if (result.ok) passedProfileIds.set(profileId, checkSnapshot?.fingerprint ?? "");
         reports.push({
           profileId,
           command: {
@@ -351,7 +349,8 @@ export default function setupCore(pi: ExtensionAPI): void {
                 baseline: classifyCheckFailure(
                   result.output,
                   checkSnapshot?.changedFiles,
-                  passedProfileIds.has(profileId),
+                  passedProfileIds.get(profileId),
+                  checkSnapshot?.fingerprint,
                 ),
               }),
         });

@@ -169,8 +169,8 @@ const definitions = [
 
   [
     "changes",
-    "Änderungen anzeigen",
-    "Session-Änderungen im Diff-Browser anzeigen",
+    "Edit-/Write-Verlauf",
+    "Edit-/Write-Verlauf dieser Session im Diff-Browser anzeigen",
     "code",
   ],
   [

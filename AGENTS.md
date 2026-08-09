@@ -97,6 +97,10 @@ Implementation / Diff to verify:
 
 Pre-existing workspace state (vor der ersten Änderung dieses Tasks erfasst):
 <Ausgabe von `git status --short` zu Taskbeginn, oder „clean" falls keine>
+
+Pre-existing dirty-path fingerprints:
+<Content-Fingerprint je vorbestehend geändertem Pfad, inklusive Marker für
+fehlende Dateien; mindestens für jeden Pfad, den der Task ebenfalls ändert>
 ```
 
 Für den `subagent`-Tool-Aufruf selbst kein eng geschätztes `turnBudget`
@@ -105,6 +109,14 @@ raten: `agents/verifier.md` setzt bereits ein großzügiges `timeoutMs`
 der Patchgröße abzuleiten. Wird dennoch ein `turnBudget` gesetzt, großzügig
 wählen — nicht knapper, als eine vollständige Verifikation in diesem Repo
 (mehrere Suiten, 700+ Tests) realistisch braucht.
+
+`git status --short` allein ist keine Inhaltsbaseline: Es zeigt nicht, ob der
+Task eine bereits vorher veränderte Datei zusätzlich geändert hat. Vor der
+ersten Task-Änderung deshalb reproduzierbare Content-Fingerprints (Hash des
+Dateiinhalts beziehungsweise ein eindeutiger Abwesenheitsmarker) erfassen.
+Mindestens jeder vorbestehend schmutzige Pfad, den der Task ebenfalls berührt,
+muss damit abgedeckt sein; ohne diesen Nachweis bleibt eine Same-Path-
+Abgrenzung ausdrücklich unverifizierbar.
 
 Das ist Kontextübergabe im vorhandenen `task`-Feld, kein neuer Zustand, keine
 ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter

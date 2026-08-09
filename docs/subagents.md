@@ -38,14 +38,15 @@ Hauptagent bleibt alleiniger regulärer Patch-Eigentümer.
 - `extensions/subagent/config.json`: die aktive Paketkonfiguration setzt
   `parallel.maxTasks: 4`, `parallel.concurrency: 3`,
   `globalConcurrencyLimit: 3`, `maxSubagentSpawnsPerSession: 5` und
-  `toolDescriptionMode: "custom"`. Die dadurch geladene
-  `.pi/subagent-tool-description.md` reduziert die für das Modell sichtbare
-  Tool-Beschreibung auf die drei aktiven Rollen und wann sie sich lohnen; die
-  zwingende Sicherheits-Guidance des Pakets bleibt über `{{safetyGuidance}}`
-  automatisch Teil der gerenderten Beschreibung. Die generische
-  Orchestrierungsfläche (chains, parallel fanout, scheduling, Agent-CRUD,
-  Worktrees, Steering, Resume) bleibt technisch nutzbar, taucht aber nicht
-  mehr prominent im Modellkontext auf.
+  `toolDescriptionMode: "custom"`. In diesem Modus registriert der Fork
+  ein reduziertes Tool-Schema, das nur SINGLE-Ausführung und
+  Status-Management (status/stop/interrupt) umfasst — Chain, Parallel,
+  CRUD, Scheduling, Worktrees, Sharing und Watchdog sind bereits auf
+  Schema-Ebene abgelehnt. Die geladene
+  `.pi/subagent-tool-description.md` reduziert die für das Modell
+  sichtbare Tool-Beschreibung auf die drei aktiven Rollen und wann sie
+  sich lohnen; die zwingende Sicherheits-Guidance des Pakets bleibt über
+  `{{safetyGuidance}}` automatisch Teil der gerenderten Beschreibung.
 - Die Frontmatter der drei Profile: `defaultContext: fresh`,
   `inheritProjectContext: true`, `inheritSkills: false` und ihre jeweilige
   Toolliste. Keines der Profile hat ein Delegations-Tool.

@@ -46,10 +46,12 @@ war nur deshalb im Rahmen statt in der Fußzeile, weil er historisch dort stand.
 Eine Fläche weniger heißt: eine Zeile mehr für Chat und Eingabe, keine Frage
 mehr, wo ein Status steht, und kein Layout-Sprung über dem Eingabefeld.
 
-Was die Fußzeile nicht mehr zeigt — Arbeitsverzeichnis, Git-Branch,
-Sitzungsname, Tokenzähler —, ist entweder ohnehin sichtbar (das Verzeichnis
-steht im Terminalprompt) oder auf Abruf verfügbar (`/session`). Eine permanente
-Zeile ist der falsche Ort für Werte, die man einmal pro Sitzung braucht.
+Was die Fußzeile nicht mehr zeigt — Git-Branch, Sitzungsname und
+Tokenzähler —, ist auf Abruf verfügbar (`/session`). Eine permanente Zeile ist
+der falsche Ort für Werte, die man einmal pro Sitzung braucht.
+
+> **Nachtrag:** Die aktuelle Aurora-Fußzeile zeigt zusätzlich den aus dem
+> Session-CWD abgeleiteten, kompakten Ordnernamen.
 
 Die Berechtigungsstufe erscheint nur noch, wenn sie riskant ist. Eine ruhige
 Stufe permanent anzuzeigen trainiert an, die Stelle zu ignorieren, an der YOLO

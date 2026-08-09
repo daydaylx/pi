@@ -17,7 +17,7 @@ nur im nativen Autocomplete; das Command-Center-Menü selbst bietet keine
 Texteingabe, sondern ausschließlich Pfeiltasten-Navigation und den
 Kategorie-Buchstaben als Einzeltasten-Sprung. Das Hauptmenü besteht aus Arbeit
 (`A`), Plan (`P`), Modelle & Denken (`M`), Rechte & Vertrauen (`R`), Code &
-Diagnose (`C`), Sitzungen & Kontext (`S`), Vorlagen & Skills (`V`) sowie
+Diagnose (`C`), Subagenten (`S`), Sitzungen & Kontext (`Z`), Vorlagen & Skills (`V`) sowie
 System & Transfer (`T`). Ein Buchstabe öffnet den Bereich direkt. Einträge
 zeigen den kanonischen `/command`; Aliase werden nur am Original erklärt.
 
@@ -58,8 +58,8 @@ Die **Fußzeile** ist eine Zeile und trägt Arbeitsablauf, Modell, Denktiefe,
 Kontextanteil und Verifikationsstand. Wird es eng, fallen ganze Segmente vom
 unwichtigen Ende her weg statt am Rand abgeschnitten zu werden. Riskantes —
 YOLO, gescheiterte Verifikation, gestörter LSP — ignoriert die Größenklasse und
-verdrängt Gewöhnliches. Arbeitsverzeichnis, Git-Branch, Sitzungsname und
-Tokenzähler stehen nicht mehr dort; siehe
+verdrängt Gewöhnliches. Git-Branch, Sitzungsname und Tokenzähler stehen nicht mehr dort; das
+Arbeitsverzeichnis erscheint weiterhin kompakt als Session-Ordner. Siehe
 `docs/decisions/009-aurora-owns-the-footer.md`.
 
 Das **Activity-Widget** über dem Eingabefeld erscheint nur während eines Turns

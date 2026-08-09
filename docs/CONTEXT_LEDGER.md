@@ -79,10 +79,7 @@
 
 ## Offene Fragen
 
-- Welche Ereignisse stellt die installierte Pi-Runtime für einen rein
-  informativen Verifikationsstatus zuverlässig bereit?
-- Welche wiederholten Toolfehler zeigen in realen oder kontrollierten Läufen
-  tatsächlich fehlende Recovery statt berechtigter erneuter Prüfung?
+_Keine offenen Fragen._
 
 ## Wichtige Projektregeln
 
@@ -100,8 +97,9 @@
 
 ## Aktuelle Prioritäten
 
-- Die Snapshot-Basis durch reale Baseline- und Holdout-Läufe absichern.
-- Danach Trace-Diagnostik zunächst nur beobachtend ergänzen.
+- P2-Cleanup: Restkomplexität, Dokumentation, Knip-Regeln.
+- Phase 3 (P1): Subagent-Tool-Surface im Fork begrenzen.
+- Subagent-Acceptance-Sicherheit im Fork (bereits lokal umgesetzt, neuer Commit-Pin nötig).
 
 ## Verworfene Optionen
 

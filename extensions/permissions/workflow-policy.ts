@@ -1,4 +1,5 @@
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { createRequire } from "node:module";
 import { relative, resolve, sep } from "node:path";
 import {
   decideFileAccess,
@@ -40,14 +41,28 @@ const WRITE_TOOLS = new Set(["write", "edit"]);
 
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 
-// The installed pi-coding-agent runtime this repo patches — docs/
-// RUNTIME_PATCHES.md names it as this project's legitimate reference point
-// (its own README/docs/, not project source). Read-only, and only for the
-// `read` tool: `bash`/`write`/`edit` stay fully subject to the project
-// boundary below regardless of path.
-const EXTRA_READABLE_ROOTS = [
-  "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent",
-];
+// Resolve the pi runtime installation root dynamically so the readable-docs
+// boundary works on any machine. Falls back to a derived default when the env
+// variable is not set, which is the common case.
+function resolvePiRuntimeRoot(): string {
+  if (process.env.PI_RUNTIME_ROOT) return process.env.PI_RUNTIME_ROOT;
+  try {
+    // Resolve the pi runtime package itself — this always points at the
+    // actual installation, whether global npm, pnpm, or a linked checkout.
+    const req = createRequire(import.meta.url);
+    const pkgRoot = req.resolve("@earendil-works/pi-coding-agent/package.json");
+    return relative("package.json", pkgRoot) === ""
+      ? pkgRoot.slice(0, -"package.json".length)
+      : resolve(pkgRoot, "..");
+  } catch {
+    // Last resort: the documented fallback path this project historically
+    // used. Keep it so existing installations keep working during a
+    // transition.
+    return "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent";
+  }
+}
+
+const EXTRA_READABLE_ROOTS = [resolvePiRuntimeRoot()];
 
 function inside(root: string, candidate: string): boolean {
   const rel = relative(root, candidate);

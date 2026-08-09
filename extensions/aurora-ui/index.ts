@@ -35,6 +35,7 @@ import { thinkingLabel, thinkingTone } from "./thinking.ts";
 const OWNER = "aurora-ui";
 const ACTIVITY_WIDGET = "aurora-ui/activity";
 const TICK_INTERVAL_MS = 100;
+const STATUS_TICK_INTERVAL_MS = 1_000;
 /** A running turn without a concrete Aurora event is presented as WARTET. */
 const WAITING_THRESHOLD_MS = 4_000;
 const THEME_PATH = fileURLToPath(
@@ -239,13 +240,22 @@ class AnimationTicker {
   }
 
   setAnimationActive(active: boolean): void {
-    this.animationActive = active && this.motion === "contextual";
+    // Reduced/off disable animated glyphs, not the time-based status itself.
+    // Keep a slower repaint alive so elapsed seconds and the derived WARTET
+    // transition remain visible without another runtime event.
+    this.animationActive = active;
     if (this.animationActive && !this.timer && !this.disposed) {
+      const intervalMs =
+        this.motion === "contextual"
+          ? TICK_INTERVAL_MS
+          : STATUS_TICK_INTERVAL_MS;
       this.timer = setInterval(() => {
-        this.frame = (this.frame + 1) % 10_000;
-        this.onFrame(this.frame);
+        if (this.motion === "contextual") {
+          this.frame = (this.frame + 1) % 10_000;
+          this.onFrame(this.frame);
+        }
         this.requestRender();
-      }, TICK_INTERVAL_MS);
+      }, intervalMs);
     } else if (!this.animationActive && this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;

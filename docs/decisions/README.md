@@ -5,13 +5,17 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 
 ## Aktive Entscheidungen
 
-- [005](005-three-agent-model.md) — Drei lokale Rollen: Planner, Worker, Reviewer (historisch, vollständig ersetzt durch 011)
 - [007](007-aurora-single-ui-owner.md) — Aurora ist einziger aktiver UI-Besitzer
 - [008](008-context-ledger-is-documentation.md) — Das Context Ledger ist Dokumentation, keine Laufzeitkomponente
 - [009](009-aurora-owns-the-footer.md) — Aurora besitzt auch die Fußzeile
 - [010](010-compaction-recent-context-budget.md) — Recent-Context-Budget bleibt bei 12 KiB
 - [011](011-investigator-debugger-verifier.md) — Investigator, Debugger, Verifier ersetzen Planner, Worker, Reviewer
 - [012](012-plan-mode-mutation-guard.md) — Plan Mode bekommt einen technischen Mutationsschutz
+
+## Historische, ersetzte Entscheidungen
+
+- [005](005-three-agent-model.md) — Drei lokale Rollen: Planner, Worker,
+  Reviewer (vollständig ersetzt durch 011)
 
 ## Nummernlücke 001–004, 006
 

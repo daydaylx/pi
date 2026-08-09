@@ -26,6 +26,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,7 +37,21 @@ export const EXPECTED_RUNTIME_VERSION = "0.84.1";
 
 export const DEFAULT_RUNTIME_ROOT =
   process.env.PI_RUNTIME_ROOT ??
-  "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent";
+  (() => {
+    try {
+      // Resolve the pi runtime from the npm node_modules inside the agent
+      // directory — the same install tree this script ships inside.
+      const npmReq = createRequire(
+        path.join(SOURCE, "npm", "package.json"),
+      );
+      const pkgPath = npmReq.resolve(
+        "@earendil-works/pi-coding-agent/package.json",
+      );
+      return path.resolve(pkgPath, "..");
+    } catch {
+      return "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent";
+    }
+  })();
 
 /**
  * One edit. `detect` proves the patch is already in place, `anchor` is the

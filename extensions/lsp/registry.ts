@@ -32,16 +32,20 @@ function makeKey(workspaceRoot: string, serverId: string): string {
 export interface RegistryOptions {
   config: LspConfig;
   logger?: LspLogger;
+  /** Called whenever any client's state changes, so callers can update UI. */
+  onStatusChange?: () => void;
 }
 
 export class ServerRegistry {
   private readonly entries = new Map<string, RegistryEntry>();
   private readonly config: LspConfig;
   private readonly logger: LspLogger;
+  private readonly onStatusChange: (() => void) | undefined;
 
   constructor(options: RegistryOptions) {
     this.config = options.config;
     this.logger = options.logger ?? (() => undefined);
+    this.onStatusChange = options.onStatusChange;
   }
 
   /** Number of tracked entries (for status/debug). */
@@ -89,6 +93,47 @@ export class ServerRegistry {
         this.clearIdle(existing);
         return existing.pendingAcquire;
       }
+      // When the client is starting or restarting but has no pendingAcquire
+      // (e.g. a process-triggered restart, not an acquire()-initiated one),
+      // create a fresh pendingAcquire that waits for the client to reach
+      // ready or degraded. This prevents a second parallel client from being
+      // spawned while the first one is still recovering.
+      if (state === "starting" || state === "restarting") {
+        existing.activeRequests += 1;
+        existing.lastActivity = Date.now();
+        this.clearIdle(existing);
+        existing.pendingAcquire = new Promise<{ client: LspClient }>(
+          (resolve, reject) => {
+            const onState = (newState: LspClientState) => {
+              if (newState === "ready") {
+                cleanup();
+                resolve({ client: existing.client });
+              } else if (
+                newState === "degraded" ||
+                newState === "shutdown"
+              ) {
+                cleanup();
+                reject(
+                  new LspError({
+                    kind: "request_failed",
+                    serverId: profile.id,
+                    workspaceRoot,
+                    cause: `Server entered ${newState} during restart`,
+                    remediation:
+                      "Server mit /lsp restart neu starten oder auf automatische Wiederherstellung warten.",
+                  }),
+                );
+              }
+            };
+            const cleanup = () => {
+              existing.client.removeListener("state", onState);
+              delete existing.pendingAcquire;
+            };
+            existing.client.on("state", onState);
+          },
+        );
+        return existing.pendingAcquire;
+      }
     }
 
     // Create new client, start it, and store the entry.
@@ -109,9 +154,12 @@ export class ServerRegistry {
         );
         return { client };
       } catch (error) {
-        // Clean up entry on start failure
-        this.shutdownEntry(entry).catch(() => undefined);
+        // Clean up entry on initial start failure. This is distinct from a
+        // process crash after the server was ready — that path goes through
+        // LspClient.onDegraded() and keeps the entry so the status shows
+        // "eingeschränkt" instead of "leerlauf".
         this.entries.delete(key);
+        await entry.client.shutdown().catch(() => undefined);
         if (error instanceof LspError) throw error;
         throw new LspError({
           kind: "spawn_error",
@@ -226,6 +274,12 @@ export class ServerRegistry {
       },
     };
     const client = new LspClient(opts);
+    // Propagate state changes to the status callback so the footer stays
+    // live without polling or waiting for tool results.
+    if (this.onStatusChange) {
+      client.on("state", () => this.onStatusChange?.());
+      client.on("degraded", () => this.onStatusChange?.());
+    }
     return client;
   }
 
@@ -255,12 +309,5 @@ export class ServerRegistry {
     );
     void entry.client.shutdown();
     this.entries.delete(key);
-  }
-
-  /**
-   * Shut down a single entry and clean up resources.
-   */
-  private async shutdownEntry(entry: RegistryEntry): Promise<void> {
-    entry.client.shutdown().catch(() => undefined);
   }
 }

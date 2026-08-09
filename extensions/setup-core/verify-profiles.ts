@@ -103,7 +103,7 @@ export interface RunProfileResult {
   durationMs: number;
   output: string;
   error?: {
-    kind: "missing_binary" | "timeout" | "spawn_failed";
+    kind: "missing_binary" | "timeout" | "spawn_failed" | "failed";
     message: string;
   };
   truncation?: ReturnType<typeof limitTextOutput>["truncation"];
@@ -468,7 +468,7 @@ export async function runProfile(
         message: `Zeitlimit ${profile.timeoutMs}ms überschritten`,
       }
     : result.code !== 0
-      ? { kind: "spawn_failed", message: `Exit-Code ${result.code}` }
+      ? { kind: "failed", message: `Exit-Code ${result.code}` }
       : undefined;
   return {
     ok,

@@ -33,7 +33,7 @@
  * classification by itself.
  */
 
-export type BaselineClassification = "introduced" | "pre_existing" | "unknown";
+export type BaselineClassification = "introduced" | "pre_existing" | "unknown" | "flaky";
 
 /**
  * Purely descriptive, non-causal relationship between a failure's output
@@ -92,14 +92,17 @@ function describePathRelation(
  *   `[]` are different states — see module doc comment — and must not be
  *   conflated by the caller (e.g. via `?? []`). An empty array is itself
  *   baseline #1 above (workspace matches HEAD).
- * @param hasPassedThisSession whether this exact profile id has already
- *   been recorded succeeding earlier in the current session (baseline #2
- *   above) — the caller tracks this across project_check calls.
+ * @param passedFingerprint the workspace fingerprint at the time this
+ *   profile was last observed passing in this session, or `undefined` if
+ *   it has never passed. When the current fingerprint matches the
+ *   fingerprint at pass time, a subsequent failure is classified as
+ *   `flaky` (same workspace) rather than `introduced`.
  */
 export function classifyCheckFailure(
   output: string,
   changedFiles: readonly string[] | undefined,
-  hasPassedThisSession: boolean,
+  passedFingerprint: string | undefined,
+  currentFingerprint?: string,
 ): BaselineDiagnostic {
   if (changedFiles === undefined) {
     return {
@@ -115,11 +118,24 @@ export function classifyCheckFailure(
         "Workspace entspricht exakt HEAD (keine Änderungen) — ein Fehlschlag kann nicht durch die aktuelle Sitzung eingeführt worden sein.",
     };
   }
-  if (hasPassedThisSession) {
+  if (passedFingerprint !== undefined) {
+    // The profile passed earlier this session. Distinguish:
+    // - same fingerprint: flaky (not a real regression)
+    // - different fingerprint: introduced (workspace changed since pass)
+    if (
+      currentFingerprint !== undefined &&
+      passedFingerprint === currentFingerprint
+    ) {
+      return {
+        classification: "flaky",
+        reason:
+          "Dieses Profil lief bereits erfolgreich auf demselben Workspace-Fingerprint in dieser Sitzung; der Fehlschlag ist kein belegter Regressionskandidat.",
+      };
+    }
     return {
       classification: "introduced",
       reason:
-        "Dieses Profil lief bereits erfolgreich in dieser Sitzung; der jetzige Fehlschlag ist eine belegte Regression seit diesem Lauf.",
+        "Dieses Profil lief bereits erfolgreich in dieser Sitzung, aber der Workspace hat sich seitdem geändert — der jetzige Fehlschlag ist eine belegte Regression seit diesem Lauf.",
     };
   }
   const { pathRelation, matchedPaths } = describePathRelation(

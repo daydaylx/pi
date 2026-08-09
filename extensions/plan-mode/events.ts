@@ -55,7 +55,10 @@ export function registerPlanEvents(
       } as AgentMessage,
     };
   });
-  pi.on("agent_end", async (_event, ctx) => {
+  // A low-level agent run may still be followed by an automatic retry or
+  // compaction. Capture the plan only once Pi confirms that no continuation
+  // remains, otherwise a partial retry result could become the handoff.
+  pi.on("agent_settled", async (_event, ctx) => {
     session.finishPlanningTurn(ctx.cwd);
   });
   pi.on("session_start", async (_event, ctx) => {

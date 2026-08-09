@@ -330,7 +330,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
     auroraEpoch = undefined;
     subscribeAuroraProvider();
     config = buildConfig(ctx);
-    registry = new ServerRegistry({ config, logger });
+    registry = new ServerRegistry({ config, logger, onStatusChange: () => refreshStatus(ctx) });
     refreshStatus(ctx);
   });
 

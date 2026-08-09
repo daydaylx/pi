@@ -104,7 +104,8 @@ Pro Agent-Konfiguration:
 
 ## Nächste Schritte
 
-1. **Pi-Baseline (30 Läufe):** `run-baseline.sh` für alle 10 Aufgaben, je 3×
+1. **Pi-P3-Baseline (33 Scored-Runs):** Die feste P3-Serie mit `prepare`,
+   `launch`, `finish` und `cleanup` gemäß `benchmarks/RUNBOOK.md` ausführen.
 2. **Externe Agenten:** gleiches Protokoll für Codex CLI / Claude Code
 3. **Regressionstest:** nach jeder Pi-Architekturänderung Baseline wiederholen
 4. **Benchmark versionieren:** `TASK.md`-Änderungen mit Git tracken

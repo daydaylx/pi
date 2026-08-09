@@ -302,7 +302,11 @@ export function toolPresentation(
   name: string,
   args?: unknown,
 ): ToolPresentation {
-  return PRESENTATIONS[classifyTool(name, args)];
+  const kind = classifyTool(name, args);
+  const presentation = PRESENTATIONS[kind];
+  return kind === "generic" && name.trim()
+    ? { ...presentation, label: `${presentation.label} · ${name}` }
+    : presentation;
 }
 
 function toneForTool(tool: ActiveToolView): "accent" | "warning" | "error" {
@@ -329,7 +333,7 @@ export function renderActiveTools(
   const visible = tools.slice(0, limit).map((tool) => {
     const elapsed = Math.max(0, Math.floor((now - tool.startedAt) / 1000));
     const presentation =
-      tool.kind === undefined
+      tool.kind === undefined || tool.kind === "generic"
         ? toolPresentation(tool.name)
         : PRESENTATIONS[tool.kind];
     const target = tool.target ? `  ${theme.fg("muted", tool.target)}` : "";

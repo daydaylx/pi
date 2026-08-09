@@ -87,7 +87,7 @@ await test("Shift+Tab → Work waits and does not execute an existing plan", asy
   }
 });
 
-await test("a fresh Plan → Work handoff is one-shot and Work → Work is inert", async () => {
+await test("a settled Plan → Work handoff ignores retry intermediates and stays one-shot", async () => {
   if (!planMode) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-handoff-"));
   try {
@@ -99,14 +99,20 @@ await test("a fresh Plan → Work handoff is one-shot and Work → Work is inert
 
     await chooseWorkflow(harness, ctx);
     await hooks(harness, "before_agent_start", ctx);
-    writePlan(cwd, "# Neuer Plan\n\nUmsetzen\n");
+    writePlan(cwd, "# Zwischenstand vor Retry\n");
     await hooks(harness, "agent_end", ctx);
+    writePlan(cwd, "# Neuer Plan\n\nUmsetzen\n");
+    await hooks(harness, "agent_settled", ctx);
 
     choice = "Work";
     await chooseWorkflow(harness, ctx);
     eq(harness.sent.length, 0, "switching to work still starts no turn");
     const handoff = await hooks(harness, "before_agent_start", ctx);
-    assert(handoff[0]?.message?.content.includes("Neuer Plan"), "fresh plan is included once");
+    assert(handoff[0]?.message?.content.includes("Neuer Plan"), "the settled plan is included once");
+    assert(
+      !handoff[0]?.message?.content.includes("Zwischenstand vor Retry"),
+      "an earlier low-level agent_end cannot freeze a retry intermediate",
+    );
 
     await chooseWorkflow(harness, ctx);
     const later = await hooks(harness, "before_agent_start", ctx);

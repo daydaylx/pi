@@ -28,6 +28,9 @@ Die Delegation soll enthalten:
 - bekannte Einschränkungen der Testumgebung
 - vorbestehender Dirty-State bei Taskbeginn (`git status --short` vor der
   ersten Änderung), falls vom Hauptagenten mitgegeben
+- dazugehörige Content-Fingerprints vorbestehend schmutziger Pfade, mindestens
+  für jeden Pfad, den der Task ebenfalls geändert hat; fehlende Dateien
+  benötigen einen eindeutigen Abwesenheitsmarker
 
 Fehlt ein unverzichtbarer Teil, kann das Urteil `UNVERIFIABLE` lauten.
 
@@ -66,10 +69,14 @@ danach den Git-Status und melde jede neue oder veränderte Datei.
    - Nachweis
 3. Prüfe Scope-Drift, unbeabsichtigte Konfigurationsänderungen und öffentliche
    Schnittstellen. Pfade aus einer mitgegebenen Pre-existing-workspace-state-
-   Liste zählen nur dann als Scope-`BLOCKER`, wenn ihr Diff-Inhalt zusätzlich
-   zum vorbestehenden Stand durch den aktuellen Patch verändert wurde — die
-   vorbestehende Änderung selbst nicht. Fehlt diese Liste, gilt die bisherige
-   Regel unverändert.
+   Liste zählen nur dann als Scope-`BLOCKER`, wenn der aktuelle Content-
+   Fingerprint vom vor Taskbeginn erfassten Fingerprint abweicht und die
+   Änderung außerhalb des Auftrags liegt. Ein identischer Fingerprint belegt,
+   dass nur die vorbestehende Änderung vorliegt. Fehlt für einen vom Task
+   ebenfalls berührten Dirty-Pfad der Vorher-Fingerprint, ist die Same-Path-
+   Abgrenzung `UNVERIFIABLE`; aus der Pfadliste allein darf weder „unverändert"
+   noch „zusätzlich geändert" gefolgert werden. Fehlt die gesamte Baseline,
+   gilt die bisherige Regel unverändert.
 4. Lies relevante Tests und stelle fest, ob sie den geänderten Pfad tatsächlich
    erreichen.
 5. Führe zuerst zielgerichtete, danach nur notwendige breitere Checks aus.
