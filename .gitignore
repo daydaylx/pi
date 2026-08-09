@@ -24,3 +24,6 @@ run-history.jsonl
 models-store.json
 pi-crash.log
 pi-debug.log
+
+# Lokale Arbeitsauftrags-Pakete
+pi-arbeitsauftraege-vereinfachung.zip
