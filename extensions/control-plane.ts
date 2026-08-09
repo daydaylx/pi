@@ -10,6 +10,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { submitCanonicalCommand } from "./shared/command-runtime.ts";
 import { SHORTCUTS } from "./shared/shortcuts.ts";
+import type { CommandEffect } from "./shared/command-catalog.ts";
 
 export default function controlPlaneExtension(pi: ExtensionAPI): void {
   let shortcutDispatchInFlight = false;
@@ -23,7 +24,7 @@ export default function controlPlaneExtension(pi: ExtensionAPI): void {
           await submitCanonicalCommand(
             ctx,
             binding.command,
-            "effect" in binding ? binding.effect : "preserve-draft",
+            (binding as { effect?: CommandEffect }).effect ?? "preserve-draft",
           );
         } finally {
           shortcutDispatchInFlight = false;

@@ -22,99 +22,51 @@ await test("work is the default and ignores legacy sidecars", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-mode-"));
   try {
     mkdirSync(join(cwd, ".agent", "plans"), { recursive: true });
-    writeFileSync(
-      join(cwd, ".agent", "plans", "current-plan.state.json"),
-      '{"status":"blocked"}',
-    );
+    writeFileSync(join(cwd, ".agent", "plans", "current-plan.state.json"), '{"status":"blocked"}');
     const harness = createHarness();
     const ctx = harness.makeContext({ cwd });
     planMode.default(harness.api);
     await hooks(harness, "session_start", ctx);
     const prompt = await hooks(harness, "before_agent_start", ctx);
-    assert(
-      prompt[0]?.message?.content.includes("PI WORKMODUS"),
-      "session starts in work mode",
-    );
-    assert(
-      !prompt[0]?.message?.content.includes("blocked"),
-      "legacy sidecar is ignored",
-    );
-    await harness.commands.get("work")("", ctx);
-    eq(
-      harness.lifecycleCalls.filter((entry) => entry.kind === "confirm").length,
-      0,
-      "/work needs no confirmation",
-    );
+    assert(prompt[0]?.message?.content.includes("PI WORKMODUS"), "session starts in work mode");
+    assert(!prompt[0]?.message?.content.includes("blocked"), "legacy sidecar is ignored");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-await test("planning modes non-blockingly replace an existing plan without modal confirmation", async () => {
-  if (!planMode) return;
-  const cwd = mkdtempSync(join(tmpdir(), "pi-mode-"));
-  try {
-    mkdirSync(join(cwd, ".agent", "plans"), { recursive: true });
-    const file = join(cwd, ".agent", "plans", "current-plan.md");
-    writeFileSync(file, "# Freier alter Plan\n");
-    const harness = createHarness({ confirm: () => { throw new Error("Confirm should not be called"); } });
-    const ctx = harness.makeContext({ cwd });
-    planMode.default(harness.api);
-    await hooks(harness, "session_start", ctx);
-    await harness.commands.get("plan")("detailed", ctx);
-    eq(
-      harness.lifecycleCalls.filter((entry) => entry.kind === "confirm").length,
-      0,
-      "zero overwrite confirmation prompts",
-    );
-    const prompt = await hooks(harness, "before_agent_start", ctx);
-    assert(
-      prompt[0]?.message?.content.includes("PI PLANMODUS"),
-      "direct plan command enters plan mode non-blockingly",
-    );
-    assert(
-      !prompt[0]?.message?.content.includes("## Abschlusskriterien"),
-      "plan prompt has no contract section",
-    );
-    eq(
-      harness.sent.length,
-      1,
-      "direct plan command starts one planning turn",
-    );
-  } finally {
-    rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-await test("workflow registers only the reduced command surface", () => {
+await test("workflow exposes no public slash commands or legacy shortcut", () => {
   if (!planMode) return;
   const harness = createHarness();
   planMode.default(harness.api);
-  for (const command of [
-    "work",
-    "go",
-    "plan",
-    "workflow",
-    "view-plan",
-    "show-plan",
-    "edit-plan",
-    "plan-edit",
-  ]) {
+  for (const command of ["plan", "work", "go", "workflow"]) {
+    assert(!harness.commands.has(command), `/${command} is not registered`);
+  }
+  for (const command of ["view-plan", "show-plan", "edit-plan", "plan-edit", "commands"]) {
     assert(harness.commands.has(command), `/${command} remains registered`);
   }
-  for (const command of [
-    "review-plan",
-    "plan-todos",
-    "done",
-    "finish",
-    "verify-gate",
-    "task",
-    "task-done",
-    "migrate-plan",
-    "recover-workflow-lock",
-    "discard-plan",
-  ]) {
-    assert(!harness.commands.has(command), `/${command} is removed`);
-  }
+  assert(harness.shortcuts.has("shift+tab"), "Shift+Tab remains the only workflow control");
+  assert(!harness.shortcuts.has("super+p"), "Super+P no longer opens a workflow command");
   assert(!harness.tools.has("plan_progress"), "plan_progress is removed");
+});
+
+await test("choosing a plan mode preserves a plan until the next agent turn", async () => {
+  if (!planMode) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-mode-"));
+  try {
+    const file = join(cwd, ".agent", "plans", "current-plan.md");
+    mkdirSync(join(cwd, ".agent", "plans"), { recursive: true });
+    writeFileSync(file, "# Freier alter Plan\n");
+    const harness = createHarness({ select: () => "Architekturplan" });
+    const ctx = harness.makeContext({ cwd });
+    planMode.default(harness.api);
+    await hooks(harness, "session_start", ctx);
+    await harness.shortcuts.get("shift+tab")(ctx);
+    assert(existsSync(file), "selection does not discard the plan");
+    eq(harness.sent.length, 0, "selection does not start a planning turn");
+    await hooks(harness, "before_agent_start", ctx);
+    assert(!existsSync(file), "the real planning turn may replace it");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

@@ -53,33 +53,6 @@ export const COMMAND_CATEGORIES: readonly CommandCategory[] = [
 
 const definitions = [
   [
-    "workflow",
-    "Workflow wechseln",
-    "Work, Schnellplan oder Architekturplan auswählen",
-    "work",
-  ],
-  [
-    "plan",
-    "Planmodus",
-    "Schnellplan oder Architekturplan auswählen",
-    "work",
-    undefined,
-    "Super+P",
-  ],
-  [
-    "work",
-    "Work-Modus",
-    "Normale Projektarbeit ohne Planpflicht aktivieren",
-    "work",
-  ],
-  [
-    "go",
-    "Plan umsetzen",
-    "Aktuellen Plan einmalig als Kontext übernehmen und Work-Turn starten",
-    "work",
-  ],
-
-  [
     "view-plan",
     "Plan anzeigen",
     "Vollständigen Markdown-Plan im Terminal anzeigen",

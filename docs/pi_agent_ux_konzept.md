@@ -4,8 +4,7 @@
 
 | Shortcut    | Funktion    |
 | ----------- | ----------- |
-| `Shift+Tab` | `/workflow` |
-| `Super+P`   | `/plan`     |
+| `Shift+Tab` | Workflow wählen |
 | `Super+M`   | `/model`    |
 | `Super+D`   | `/thinking` |
 | `Super+Y`   | `/yolo`     |
@@ -22,8 +21,11 @@ Diagnose (`C`), Sitzungen & Kontext (`S`), Vorlagen & Skills (`V`) sowie
 System & Transfer (`T`). Ein Buchstabe öffnet den Bereich direkt. Einträge
 zeigen den kanonischen `/command`; Aliase werden nur am Original erklärt.
 
-`/workflow` bietet nur Work, Schnellplan und Architekturplan. Ein vorhandener
-Plan ist im Work-Modus Kontext und in Planmodi frei formatierbares Markdown.
+Shift+Tab ist die einzige normale Workflow-Steuerung und bietet nur Work,
+Schnellplan und Architekturplan. Die Auswahl wartet auf die nächste echte
+Nutzereingabe und startet selbst keinen Turn. Ein vorhandener Plan bleibt bis
+zum Planning-Turn unverändert; ein gerade in derselben Sitzung erzeugter Plan
+kann beim nächsten Work-Turn einmalig hilfreicher Kontext sein.
 
 Die Shortcuts gelten im fokussierten Pi-Terminal und benötigen für `Super`
 das Kitty-/CSI-u-Protokoll. Sie werden nicht als systemweite Linux-Mint-Hotkeys

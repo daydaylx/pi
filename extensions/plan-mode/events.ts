@@ -11,6 +11,7 @@ import {
 } from "../shared/workflow-capabilities.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { planningPrompt, workPrompt } from "./prompts.ts";
+import { removePlan } from "./plan-file.ts";
 import {
   clearWorkflowPresentation,
   setAuroraEpoch,
@@ -33,15 +34,32 @@ export function registerPlanEvents(
     const request = value as Partial<WorkflowCapabilityRequest>;
     request.respond?.({ mode: session.selectedMode });
   });
-  pi.on("before_agent_start", async () => {
-    const content = isPlanningMode(session.selectedMode)
-      ? planningPrompt(session.selectedMode)
-      : workPrompt();
+  pi.on("before_agent_start", async (_event, ctx) => {
+    const mode = session.selectedMode;
+    if (isPlanningMode(mode)) {
+      // Mode selection preserves an existing plan. A real planning turn is the
+      // first point at which that plan may be replaced.
+      removePlan(ctx.cwd);
+      session.beginPlanningTurn();
+      return {
+        message: {
+          customType: "pi-workflow-mode",
+          content: planningPrompt(mode),
+        } as AgentMessage,
+      };
+    }
     return {
-      message: { customType: "pi-workflow-mode", content } as AgentMessage,
+      message: {
+        customType: "pi-workflow-mode",
+        content: workPrompt(session.consumePlanHandoff()),
+      } as AgentMessage,
     };
   });
+  pi.on("agent_end", async (_event, ctx) => {
+    session.finishPlanningTurn(ctx.cwd);
+  });
   pi.on("session_start", async (_event, ctx) => {
+    session.clearPlanHandoff();
     session.setMode(ctx, "work");
   });
   pi.on("session_shutdown", async (_event, ctx) => {

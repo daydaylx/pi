@@ -6,151 +6,68 @@ import { catalogDescription } from "../shared/command-catalog.ts";
 import { buildWorkflowEntries } from "../shared/control-center-menu.ts";
 import { isPlanningMode, type WorkflowMode } from "../shared/workflow-mode.ts";
 import { editPlanMarkdown, viewPlanMarkdown } from "./plan-editor.ts";
-import { readPlan, removePlan } from "./plan-file.ts";
-import { goHandoffPrompt } from "./prompts.ts";
 import type { WorkflowSession } from "./session.ts";
 import { openCommandCenter } from "./command-center.ts";
-
-function requestedPlanMode(
-  args: string,
-): Exclude<WorkflowMode, "work"> | undefined {
-  const value = args.trim().toLowerCase();
-  if (["simple", "quick", "schnell"].includes(value)) return "simple_plan";
-  if (["detailed", "architecture", "architektur"].includes(value))
-    return "detailed_plan";
-  return undefined;
-}
-
-async function selectPlanMode(
-  ctx: ExtensionContext,
-): Promise<Exclude<WorkflowMode, "work"> | undefined> {
-  const choice = await ctx.ui.select("Planart", [
-    "Schnellplan",
-    "Architekturplan",
-  ]);
-  return choice === "Schnellplan"
-    ? "simple_plan"
-    : choice === "Architekturplan"
-      ? "detailed_plan"
-      : undefined;
-}
 
 export async function switchMode(
   session: WorkflowSession,
   mode: WorkflowMode,
   ctx: ExtensionContext,
 ): Promise<boolean> {
-  if (mode === "work") {
-    session.setMode(ctx, mode);
-    return true;
-  }
-  if (!ctx.isProjectTrusted()) {
-    session.notify(
-      ctx,
-      "Harte Trust-Grenze: Planmodus ist im untrusted Projekt blockiert.",
-      "error",
-    );
-    return false;
+  if (isPlanningMode(mode)) {
+    if (!ctx.isProjectTrusted()) {
+      session.notify(
+        ctx,
+        "Harte Trust-Grenze: Planmodus ist im untrusted Projekt blockiert.",
+        "error",
+      );
+      return false;
+    }
+    // Selecting a new plan mode must not make an older completed plan
+    // eligible for a later work handoff.
+    session.clearPlanHandoff();
   }
   session.setMode(ctx, mode);
   return true;
 }
 
-/**
- * The explicit workflow actions behind /plan, /work and /go: switching into
- * a planning mode discards the stale plan and starts a fresh planning turn;
- * switching into work hands off the plan exactly once, only when the previous
- * mode was a planning mode — a plain work→work reselect or a mode that was
- * already work never resurrects a stale plan file.
- *
- * Returns whether a turn was actually started (planning turn or handoff),
- * so thin command wrappers can decide on their own user feedback without
- * owning any workflow logic themselves.
- */
-export async function selectWorkflow(
+export async function openWorkflowMenu(
   session: WorkflowSession,
-  mode: WorkflowMode,
   ctx: ExtensionContext,
-): Promise<boolean> {
-  if (mode === "work") {
-    const previousMode = session.selectedMode;
-    await switchMode(session, "work", ctx);
-    if (!isPlanningMode(previousMode)) return false;
-    const plan = readPlan(ctx.cwd);
-    if (!plan) return false;
-    session.pi.sendMessage(
-      {
-        customType: "pi-plan-handoff",
-        content: goHandoffPrompt(plan),
-        display: true,
-      },
-      { triggerTurn: true },
-    );
-    return true;
-  }
-
-  if (!(await switchMode(session, mode, ctx))) return false;
-  try {
-    removePlan(ctx.cwd);
-  } catch {
-    session.notify(
-      ctx,
-      "Alter Plan konnte nicht sicher verworfen werden. Neuer Planning-Turn wurde nicht gestartet.",
-      "error",
-    );
-    return false;
-  }
-  session.pi.sendMessage(
-    {
-      customType: "pi-plan-request",
-      content:
-        mode === "detailed_plan"
-          ? "Erstelle jetzt den Architekturplan."
-          : "Erstelle jetzt den Schnellplan.",
-      display: true,
-    },
-    { triggerTurn: true },
+): Promise<void> {
+  const entries = buildWorkflowEntries(session.selectedMode);
+  const choice = await ctx.ui.select(
+    "Workflow wechseln",
+    entries.map((entry) => entry.label),
   );
-  return true;
+  const action = entries.find((entry) => entry.label === choice)?.value;
+  // This is the only workflow UI: it changes context but leaves the editor
+  // idle, so the following turn can only come from a real user prompt.
+  if (action) await switchMode(session, action, ctx);
 }
 
 export function registerPlanCommands(
   pi: ExtensionAPI,
   session: WorkflowSession,
 ): void {
-  pi.registerCommand("plan", {
-    description: catalogDescription("plan"),
-    handler: async (args, ctx) => {
-      const mode =
-        requestedPlanMode(args) ??
-        (args.trim() ? undefined : await selectPlanMode(ctx));
-      if (!mode && args.trim()) {
+  let workflowMenuOpen = false;
+  pi.registerShortcut("shift+tab", {
+    description: "Workflow wechseln",
+    handler: async (ctx: ExtensionContext) => {
+      if (workflowMenuOpen) return;
+      workflowMenuOpen = true;
+      try {
+        await openWorkflowMenu(session, ctx);
+      } catch (error) {
         session.notify(
           ctx,
-          "Verwendung: /plan simple|quick|detailed|architecture",
-          "warning",
+          `Workflow-Auswahl fehlgeschlagen: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          "error",
         );
-        return;
-      }
-      if (mode) await selectWorkflow(session, mode, ctx);
-    },
-  });
-  pi.registerCommand("work", {
-    description: catalogDescription("work"),
-    handler: async (_args, ctx) => {
-      await selectWorkflow(session, "work", ctx);
-    },
-  });
-  pi.registerCommand("go", {
-    description: catalogDescription("go"),
-    handler: async (_args, ctx) => {
-      const didHandoff = await selectWorkflow(session, "work", ctx);
-      if (!didHandoff && !readPlan(ctx.cwd)) {
-        session.notify(
-          ctx,
-          "Kein aktueller Plan vorhanden. Nutze /plan oder arbeite direkt mit /work.",
-          "info",
-        );
+      } finally {
+        workflowMenuOpen = false;
       }
     },
   });
@@ -191,21 +108,6 @@ export function registerPlanCommands(
     },
   });
 
-  pi.registerCommand("workflow", {
-    description: catalogDescription("workflow"),
-    handler: async (_args, ctx) => {
-      const entries = buildWorkflowEntries(session.selectedMode);
-      const choice = await ctx.ui.select(
-        "Workflow wechseln · /workflow",
-        entries.map((entry) => entry.label),
-      );
-      const action = entries.find((entry) => entry.label === choice)?.value;
-      // Shift+Tab is a mode selector. It must leave the editor idle so the
-      // next turn starts only after the user has entered their own prompt.
-      // Explicit /plan, /work and /go keep their turn-start/handoff behavior.
-      if (action) await switchMode(session, action, ctx);
-    },
-  });
   pi.registerCommand("commands", {
     description: catalogDescription("commands"),
     handler: async (_args, ctx) =>

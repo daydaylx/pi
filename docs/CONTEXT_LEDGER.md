@@ -40,13 +40,16 @@
   als Literal wiederholt.
 - Es gibt genau drei aktive Subagentenrollen — `investigator`, `debugger`,
   `verifier` (`docs/decisions/011`).
-- Shift+Tab (`/workflow`) ist eine reine Modusauswahl und wartet danach auf
-  die nächste Nutzereingabe; es startet weder einen Turn noch einen
-  Plan-Handoff und verändert keine vorhandene Plandatei. Die expliziten
-  Aktionen `/plan`, `/work`, `/go` rufen ausschließlich `selectWorkflow()`
-  auf. Dieselbe Änderung führte die
-  Delegationsvorlage (Original User Request / Constraints / Delegated
-  Question) in `AGENTS.md` ein.
+- Shift+Tab ist die einzige normale Workflow-Steuerung: Die Auswahl Work,
+  Schnellplan oder Architekturplan wartet danach auf die nächste echte
+  Nutzereingabe, startet keinen Turn und verändert keine vorhandene
+  Plandatei. `/plan`, `/work`, `/go` und ihr `Super+P`-Shortcut sind keine
+  öffentlichen Workflow-Wege mehr. Ein Plan aus einem tatsächlich beendeten
+  Planning-Turn kann beim anschließenden Work-Turn einmalig als flüchtiger
+  Kontext dienen; alte Dateien und fortgesetzte Sitzungen werden nie
+  automatisch eingebunden. Dieselbe Änderung führte die Delegationsvorlage
+  (Original User Request / Constraints / Delegated Question) in `AGENTS.md`
+  ein.
 - Plan Mode besitzt zusätzlich zur Plandatei-Ausnahme einen technischen
   Mutationsschutz bei `project-write`/`confirm-all`, der `readonly`s bereits
   vorhandene Entscheidungsfunktionen wiederverwendet; `yolo` bleibt bewusst

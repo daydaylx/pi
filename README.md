@@ -11,18 +11,18 @@ Der Workflow kennt nur drei flüchtige Modi:
 - `simple_plan` – schreibt ausschließlich `.agent/plans/current-plan.md`.
 - `detailed_plan` – schreibt dieselbe Datei mit einem Architekturplan.
 
-Shift+Tab (`/workflow`) ist die zentrale Auswahl für alle drei Modi. Sie
-ändert ausschließlich den Modus und wartet dann auf die nächste eigene
-Eingabe; sie startet keinen Agent-Turn, verwirft keinen vorhandenen Plan und
-übergibt keinen Plan automatisch an Work.
+Shift+Tab ist die einzige normale Workflow-Steuerung. Es öffnet die Auswahl
+Work, Schnellplan oder Architekturplan, setzt ausschließlich den Modus und
+wartet dann auf die nächste echte Nutzereingabe. Die Auswahl startet keinen
+Agent-Turn, erzeugt keinen synthetischen Prompt und verändert keinen
+vorhandenen Plan.
 
-`/plan`, `/work` und `/go` sind die expliziten Workflow-Aktionen: `/plan
-simple` beziehungsweise `/plan detailed` verwerfen einen vorhandenen Plan
-ohne Rückfrage und starten direkt einen neuen Planning-Turn. `/work` wechselt
-in Work und übergibt einen gerade erst erstellten Plan genau einmal als
-hilfreichen, abweichbaren Umsetzungskontext — nur beim tatsächlichen Wechsel
-aus einem Planmodus heraus. `/go` tut dasselbe, meldet aber zusätzlich kurz,
-wenn dabei kein Plan vorhanden war.
+Erst der nächste User-Auftrag startet den Turn im gewählten Modus. Ein
+Planning-Turn darf den vorhandenen Plan dann ersetzen. Nach einem Wechsel von
+Plan zu Work kann ein gerade in derselben Sitzung erzeugter Plan beim nächsten
+Work-Turn einmalig als hilfreicher, abweichbarer Kontext erscheinen. Alte
+Plandateien, fortgesetzte Sitzungen und spätere Work-Turns übernehmen ihn nie
+automatisch.
 
 Der Plan ist normaler Markdown. Es gibt keine Metadaten, Step-IDs, Sidecars,
 Completion, Recovery, Migration oder Planpflicht.

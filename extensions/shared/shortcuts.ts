@@ -19,12 +19,6 @@ export interface ShortcutBinding {
 }
 
 export const SHORTCUTS = {
-  modeMenu: {
-    keys: "shift+tab",
-    label: "Shift+Tab",
-    description: `${catalogLabel("workflow")} · /workflow`,
-    command: "/workflow",
-  },
   modelMenu: {
     keys: "super+m",
     label: "Super+M",
@@ -42,13 +36,6 @@ export const SHORTCUTS = {
     label: "Super+Q",
     description: `${catalogLabel("commands")} · /commands`,
     command: "/commands",
-  },
-  planAssistant: {
-    keys: "super+p",
-    label: "Super+P",
-    description: `${catalogLabel("plan")} · /plan`,
-    command: "/plan",
-    effect: "starts-turn",
   },
   yoloToggle: {
     keys: "super+y",

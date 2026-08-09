@@ -47,16 +47,15 @@ Weg existiert. Die folgende Struktur ist eine Empfehlung, keine Validierungsrege
 ${structure}`;
 }
 
-export function workPrompt(): string {
-  return "[PI WORKMODUS]\nArbeite normal im Projekt. Es ist kein Plan erforderlich.";
-}
+export function workPrompt(plan?: string): string {
+  const base = "[PI WORKMODUS]\nArbeite normal im Projekt. Es ist kein Plan erforderlich.";
+  if (!plan) return base;
+  return `${base}
 
-export function goHandoffPrompt(plan: string): string {
-  return `[PI WORKMODUS]
-Setze den aktuellen Plan jetzt um. Der Plan ist hilfreicher Kontext und kein
-technischer Vertrag. Du darfst bei neuen Erkenntnissen nachvollziehbar davon
-abweichen. Melde keine Step-IDs, Evidence oder Workflow-Abschlüsse und starte
-keine Completion-Pipeline.
+Ein gerade in dieser Sitzung erstellter Plan folgt einmalig als hilfreicher
+Kontext. Der aktuelle User-Auftrag bleibt die Source of Truth; der Plan ist
+kein technischer Vertrag und darf bei neuen Erkenntnissen nachvollziehbar
+angepasst werden.
 
 <plan>
 ${plan}

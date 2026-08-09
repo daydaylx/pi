@@ -30,10 +30,8 @@ export const uiSections = {
       if (!thinkingMenu || !modePermissions || !planMode || !controlPlane)
         return;
 
-      // Two entry points, different scope, one definition: Shift+Tab is the
-      // workflow switch, Super+Q the full Control Center whose first tab IS that
-      // workflow switch. Both route through plan-mode's single action router, so
-      // a workflow entry can never differ between them.
+      // Shift+Tab is the sole workflow control. Super+Q remains the independent
+      // Command Center and must not offer an alternative workflow route.
       {
         const seen = [];
         let customCalls = 0;
@@ -72,10 +70,14 @@ export const uiSections = {
         );
         assert(
           controlCenter.length > workflowSwitch.length &&
-            controlCenter.includes("Workflow wechseln · /workflow") &&
+            !controlCenter.some((entry) =>
+              ["/plan", "/work", "/go", "/workflow"].some((command) =>
+                entry.includes(command),
+              ),
+            ) &&
             controlCenter.includes("Berechtigungsmodus · /permission") &&
             controlCenter.includes("LSP-Steuerung · /lsp"),
-          "Super+Q exposes the canonical workflow, permission and LSP commands",
+          "Super+Q has no alternative workflow command and keeps independent commands",
         );
       }
 
@@ -170,17 +172,6 @@ export const uiSections = {
           "closing the selector returns focus from the modal test surface",
         );
 
-        const manual = liveContext.ui.submitSlashCommand("/workflow");
-        liveHarness.sendTerminalInput("\u001b[B");
-        liveHarness.sendTerminalInput("\u001b[B");
-        liveHarness.sendTerminalInput("\r");
-        await manual;
-        eq(
-          latestStatus(liveHarness, "workflow"),
-          "Architekturplan",
-          "manual /workflow remains navigable through the same command handler",
-        );
-
         const cancelled = liveHarness.dispatchShortcut(
           "shift+tab",
           liveContext,
@@ -189,7 +180,7 @@ export const uiSections = {
         await cancelled.completion;
         eq(
           latestStatus(liveHarness, "workflow"),
-          "Architekturplan",
+          "Schnellplan",
           "Escape closes the native selector without changing workflow",
         );
         eq(
@@ -230,8 +221,8 @@ export const uiSections = {
         );
         eq(
           guarded.submittedCommands,
-          ["/workflow"],
-          "the duplicate guard submits the canonical command only once",
+          [],
+          "Shift+Tab opens the workflow selector directly without a slash command",
         );
         releaseSelector(undefined);
         await Promise.all([first.completion, second.completion]);
@@ -240,11 +231,11 @@ export const uiSections = {
       {
         const failing = createHarness({
           editorText: "wichtiger Entwurf",
-          onSubmitSlashCommand: async () => {
+          select: async () => {
             throw new Error("simulierter Dispatcherfehler");
           },
         });
-        controlPlane.default(failing.api);
+        planMode.default(failing.api);
         const failingContext = failing.makeContext();
         const dispatch = failing.dispatchShortcut("shift+tab", failingContext);
         await dispatch.completion;
