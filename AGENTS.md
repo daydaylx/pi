@@ -11,11 +11,20 @@ Diese Regeln gelten für alle Pi-Sitzungen.
 - Secrets, Zugangsdaten, Auth-Dateien, Umgebungsvariablen und SSH-Schlüssel weder offenlegen noch in Reports oder Versionskontrolle übernehmen.
 - Änderungen mit relevanten Tests und statischen Prüfungen verifizieren; Fehler und nicht ausführbare Prüfungen ausdrücklich nennen. Für das deklarierte Pflichtprofil ist `project_check({ profile: "verify" })` der kanonische Weg — nur dieser Tool-Aufruf aktualisiert den Verifikations-Footer/-Ledger. Ein direkter `bash`-Lauf von `npm run verify` (oder gleichwertig) bleibt technisch möglich (z. B. zum Debuggen einzelner Schritte), zählt aber nicht als durchgeführte Verifikation im Footer-Sinn — siehe `docs/verify-profiles.md`. Rohe Interpreteraufrufe (`node`, `python` u. Ä.) über `bash` können je nach Berechtigungsstufe hart blockiert werden — für Tests/Checks grundsätzlich `verify`/`project_check` statt direkter Interpreteraufrufe verwenden.
 - Den aktiven Workflow- und Permission-Modus respektieren. Diese Datei erzwingt keinen zusätzlichen Planmodus.
+- Ein `FAIL`- oder `UNVERIFIABLE`-Urteil sowie ein ergebnisloser `verifier`-
+  Lauf (Turnbudget, Timeout, Fehler) vor Commit oder Push nicht
+  unkommentiert lassen: entweder den Befund beheben und den `verifier`
+  erneut aufrufen, bis `PASS` oder `PASS_WITH_WARNINGS` vorliegt, oder den
+  offenen Punkt dem Nutzer ausdrücklich nennen, bevor auf ausdrücklichen
+  Auftrag committet wird. `project_check({ profile: "verify" })` ersetzt
+  keine bereits angeforderte oder versuchte unabhängige `verifier`-Prüfung.
 
 ## Kontextdisziplin
 
 - Zuerst gezielt suchen und nur relevante Dateien oder Ausschnitte lesen. Für Code-/Dateisuche die eigenständigen `grep`- und `find`-Tools verwenden statt `bash rg`/`git grep`/`find` — sie sind vom Plan-Modus-Gate nicht betroffen (der greift nur bei `bash`/`write`/`edit`), liefern strukturierte Treffer statt Pfad-Raten und vermeiden ENOENT-Fehlversuche auf vermuteten Pfaden.
-- Im Plan-Modus Diagnosebefehle einzeln ausführen, nicht mit `;`/`&&` verketten: Verkettung wird dort grundsätzlich blockiert, auch wenn jeder Teilbefehl für sich zulässig wäre.
+- Im Plan-Modus dürfen Diagnosebefehle mit `;` verkettet werden (jedes
+  Segment wird einzeln geprüft); `&&`/`||`/`&` bleiben dort grundsätzlich
+  blockiert, auch wenn jeder Teilbefehl für sich zulässig wäre.
 - Große Logs mit Filtern, `head`, `tail` oder Suchmustern begrenzen; große JSON-Daten vor dem Lesen filtern.
 - Vor vollständigen Diffs `git diff --stat` verwenden und Diffs anschließend dateibezogen lesen.
 - Testergebnisse auf Zusammenfassung und relevante Fehlerstellen beschränken; keine vollständigen Verzeichnisbäume ohne Grund laden.
@@ -85,7 +94,17 @@ Für `verifier` zusätzlich:
 ```text
 Implementation / Diff to verify:
 <geänderte Dateien bzw. relevanter Diff, Implementation Surface>
+
+Pre-existing workspace state (vor der ersten Änderung dieses Tasks erfasst):
+<Ausgabe von `git status --short` zu Taskbeginn, oder „clean" falls keine>
 ```
+
+Für den `subagent`-Tool-Aufruf selbst kein eng geschätztes `turnBudget`
+raten: `agents/verifier.md` setzt bereits ein großzügiges `timeoutMs`
+(aktuell 1200000 ms); darauf verlassen statt `maxTurns`/`graceTurns` aus
+der Patchgröße abzuleiten. Wird dennoch ein `turnBudget` gesetzt, großzügig
+wählen — nicht knapper, als eine vollständige Verifikation in diesem Repo
+(mehrere Suiten, 700+ Tests) realistisch braucht.
 
 Das ist Kontextübergabe im vorhandenen `task`-Feld, kein neuer Zustand, keine
 ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
@@ -99,8 +118,8 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
   benötigt werden.
 - Die Laufzeitquellen sind direkt: `settings.json` deaktiviert Paket-Builtins
   mit `subagents.disableBuiltins`; `extensions/subagent/config.json` setzt
-  `maxTasks: 4`, `concurrency: 3`, `globalConcurrencyLimit: 3` und
-  `maxSubagentSpawnsPerSession: 5`.
+  `parallel.maxTasks: 4`, `parallel.concurrency: 3`,
+  `globalConcurrencyLimit: 3` und `maxSubagentSpawnsPerSession: 5`.
 - Ergebnisse kompakt synthetisieren und Belege, betroffene Dateien, Risiken, offene Fragen und Empfehlung nennen; keine vollständigen Unterhaltungen zurückkopieren.
 - Profilauswahl und Detailregeln nur bei Bedarf aus
-  `/home/d/.pi/agent/docs/subagents.md` lesen.
+  `docs/subagents.md` lesen.

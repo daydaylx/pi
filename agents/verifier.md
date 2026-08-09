@@ -26,6 +26,8 @@ Die Delegation soll enthalten:
 - geänderte Dateien oder den zu prüfenden Diff
 - relevante Akzeptanz- oder Verifikationskriterien
 - bekannte Einschränkungen der Testumgebung
+- vorbestehender Dirty-State bei Taskbeginn (`git status --short` vor der
+  ersten Änderung), falls vom Hauptagenten mitgegeben
 
 Fehlt ein unverzichtbarer Teil, kann das Urteil `UNVERIFIABLE` lauten.
 
@@ -63,7 +65,11 @@ danach den Git-Status und melde jede neue oder veränderte Datei.
    - Implementierung
    - Nachweis
 3. Prüfe Scope-Drift, unbeabsichtigte Konfigurationsänderungen und öffentliche
-   Schnittstellen.
+   Schnittstellen. Pfade aus einer mitgegebenen Pre-existing-workspace-state-
+   Liste zählen nur dann als Scope-`BLOCKER`, wenn ihr Diff-Inhalt zusätzlich
+   zum vorbestehenden Stand durch den aktuellen Patch verändert wurde — die
+   vorbestehende Änderung selbst nicht. Fehlt diese Liste, gilt die bisherige
+   Regel unverändert.
 4. Lies relevante Tests und stelle fest, ob sie den geänderten Pfad tatsächlich
    erreichen.
 5. Führe zuerst zielgerichtete, danach nur notwendige breitere Checks aus.
