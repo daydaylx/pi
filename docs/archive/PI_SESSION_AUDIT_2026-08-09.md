@@ -228,9 +228,13 @@ kostet aber 2 Extra-Calls.
    prüfen**, statt Suchmuster zu variieren.
 4. **Vor dem Lesen langer Referenzdokumentation erst innerhalb der Datei
    grep'en**, dann gezielt lesen.
-5. **Nach Implementierung `reviewer`-Subagent gegen den Original-Auftrag
-   prüfen lassen**, bevor `npm run verify` als alleiniger Qualitäts-Gate gilt —
-   besonders bei einem derart langen, präskriptiven Auftrag.
+5. **Subagent-Tasks kompakt formulieren, nicht den vollständigen
+   Originalauftrag durchreichen.** Der erste `verifier`-Lauf mit dem vollen
+   29-Punkte-Auftrag scheiterte am Turn-Budget; der zweite mit einer
+   kompakten Zusammenfassung lieferte einen echten, wertvollen Bugfund. Bei
+   einem erneuten Budget-Abbruch (wie beim dritten Lauf, nach dem Fix) lohnt
+   ein weiterer Versuch mit noch engerem Scope, statt direkt auf manuelle
+   Prüfung zurückzufallen.
 
 ---
 
@@ -244,12 +248,12 @@ kostet aber 2 Extra-Calls.
 | Tool-Auswahl | 5/10 | Native `grep`/`find`/`ls` komplett ungenutzt trotz Kenntnis ihrer Existenz. |
 | Tool-Effizienz | 5/10 | Mehrere leere Wiederholungssuchen, ein Edit-Fehlversuch. |
 | LSP-Nutzung | 6/10 | Gutes proaktives Self-Check nach Edits; in Recherchephase ungenutzt. |
-| Subagent-Nutzung | 3/10 | Null Subagent-Aufrufe trotz recherchelastiger Aufgabe. |
-| Implementierungsqualität | 7/10 | Scope sauber eingehalten; Endqualität mangels Tests/Verify noch nicht abschließend beurteilbar. |
-| Verifikation | 4/10 | Nur punktuelle LSP-Checks beobachtet; Typecheck/Test/Verify zum Snapshot noch nicht gestartet. |
+| Subagent-Nutzung | 6/10 | 1 echter, wertvoller Treffer (`verifier` fand einen Bug, den Tests nicht fingen), aber 2 von 4 Aufrufen scheitern ergebnislos am Turn-Budget; `investigator`/`debugger` für die Recherchephase trotz Passung ungenutzt. |
+| Implementierungsqualität | 8/10 | Scope sauber eingehalten; ein vom Verifier gefundener echter Fehler wurde behoben und regressionsgetestet; Fix selbst aber nie unabhängig re-verifiziert. |
+| Verifikation | 8/10 | Mehrstufig und systematisch (5× Typecheck/Test-Zyklen, 1× voller `project_check verify`, 1 erfolgreicher unabhängiger Subagent-Check mit echtem Fund); Abzug, weil die Re-Verifikation des Fixes zweimal am Budget scheiterte und unbestätigt blieb. |
 | Kontext-Effizienz | 4/10 | ~528.000 Zeichen Rohlektüre im Hauptkontext vor der ersten Code-Zeile. |
-| Gesamteffizienz | 5/10 | Solide Grundrichtung, aber vermeidbare Umwege und ungenutzte Delegation. |
-| Erwartete Ausgabequalität | 7/10 | Plan- und Implementierungsdisziplin lassen ein korrektes Ergebnis erwarten, unter Vorbehalt fehlender Verifikation. |
+| Gesamteffizienz | 6/10 | Solide Grundrichtung mit echtem Qualitätsgewinn durch den Verifier-Fund; vermeidbare Umwege in Recherche und wiederholte Subagent-Budget-Fehlschläge drücken den Wert. |
+| Erwartete Ausgabequalität | 8/10 | Vollständiger `npm run verify`-Durchlauf bestanden, ein von unabhängiger Prüfung gefundener echter Fehler wurde behoben; verbleibendes Risiko ist der unbestätigte Fix und der noch nicht final abgeschlossene letzte Politur-Schritt. |
 
 ---
 
@@ -263,31 +267,46 @@ prüft eigene Edits proaktiv per LSP-Diagnose.
 **B. Wo verschwendet er Ressourcen?**
 ~130k Tokens Rohlektüre für Referenzdokumentation statt gezielter Suche; sechs
 leere `rg`-Aufrufe durch dieselbe gitignore-Falle an zwei unabhängigen
-Stellen; ein Edit-Fehlversuch durch unzureichenden Anker-Kontext.
+Stellen; zwei Edit-Fehlversuche durch unzureichenden Anker-Kontext; zwei von
+vier Subagent-Aufrufen (~230 s Gesamtlaufzeit) endeten ergebnislos am
+Turn-Budget.
 
 **C. Welche Fähigkeiten/Tools nutzt er zu wenig?**
 Native `grep`/`find`/`ls`-Tools (0 Aufrufe trotz Kenntnis), `lsp_references`/
-`lsp_definition` während der Recherche (0 Aufrufe), sämtliche Subagenten-Rollen
-des installierten `pi-subagents`-Pakets (`scout`, `researcher`, `worker`,
-`reviewer` — alle 0 Aufrufe).
+`lsp_definition` während der Recherche (0 Aufrufe), die projekteigenen
+`investigator`/`debugger`-Rollen für die Recherchephase (0 Aufrufe, obwohl
+`investigator` exakt für diesen Zweck beschrieben ist). Der `verifier` wurde
+genutzt — aber erst spät, und nach dem zweiten Fehlschlag nicht mit weiter
+reduziertem Scope erneut versucht.
 
 **D. Nutzt er Subagenten sinnvoll?**
-Nicht bewertbar im eigentlichen Sinn, da keine Subagenten-Rolle in dieser
-Sitzung überhaupt aufgerufen wurde.
+Teilweise. Der `verifier`-Einsatz nach der Implementierung war fachlich
+genau richtig platziert und lieferte in einem von zwei Läufen einen echten,
+für die Tests unsichtbaren Fund (asynchrone Subagenten verschwinden vor ihrem
+realen Abschluss-Event). Aber: `investigator`/`debugger` wurden nie genutzt,
+obwohl die Recherchephase dafür geeignet gewesen wäre, und die Task-Framing-
+Disziplin beim `verifier` war inkonsistent (voller Auftrag scheitert, knappe
+Zusammenfassung gelingt, spätere knappe Zusammenfassung scheitert erneut) —
+am Ende bleibt der wichtigste Fix der Sitzung ohne unabhängige Zweitbestätigung.
 
 **E. Braucht das Setup zusätzlich einen Worker?**
-Nein. Ein `worker`-Agent (ebenso `scout`, `researcher`, `reviewer`) ist im
-installierten `pi-subagents`-Paket bereits vorhanden und konfiguriert. Das
-beobachtete Problem ist nicht ein fehlendes Setup-Feature, sondern dass der
-Hauptagent die vorhandenen Rollen in dieser konkreten, dafür gut geeigneten
-Sitzung nicht in Anspruch genommen hat.
+Nein. `investigator`, `debugger` und `verifier` sind als projekteigene
+Custom-Agents bereits vorhanden und funktionsfähig (der `verifier`-Erfolgslauf
+belegt das). Das beobachtete Problem ist keine fehlende Fähigkeit im Setup,
+sondern zweierlei Nutzungsverhalten: `investigator`/`debugger` werden trotz
+Passung gar nicht aufgerufen, und der `verifier` wird mit inkonsistenter
+Task-Kompaktheit beauftragt, was die Erfolgsquote gegen das feste Turn-Budget
+senkt.
 
 **F. Die drei wichtigsten Änderungen**
-- **P1** — Recherchephasen an `scout`/`researcher` delegieren, statt Rohcode im
-  Hauptkontext zu behalten.
-- **P2** — Native `grep`/`find`/`ls`-Tools statt `bash`-Ersatzbefehlen
+- **P1** — `investigator`/`debugger` für Recherche- und Diagnosephasen
+  tatsächlich einsetzen, statt sie seriell im Hauptagenten zu erledigen —
+  besonders da der `verifier`-Erfolgslauf beweist, dass Subagenten in diesem
+  Setup echten Mehrwert liefern können.
+- **P2** — Subagent-Tasks konsequent kompakt formulieren (Zusammenfassung
+  statt vollständigem Originalauftrag) und bei Turn-Budget-Abbruch mit noch
+  engerem Scope erneut versuchen, statt nach dem zweiten Fehlschlag auf
+  rein manuelle Prüfung umzuschwenken.
+- **P3** — Native `grep`/`find`/`ls`-Tools statt `bash`-Ersatzbefehlen
   verwenden, inklusive sofortiger `--no-ignore`-Prüfung bei leeren Treffern in
   Vendor-Verzeichnissen.
-- **P3** — Verifikationsschritt (Tests/Typecheck/`npm run verify`, ggf.
-  `reviewer`-Subagent) unmittelbar nach Implementierung einplanen statt als
-  möglicherweise nachgelagerten letzten Schritt.
