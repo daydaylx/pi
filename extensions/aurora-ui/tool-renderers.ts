@@ -333,16 +333,54 @@ function toolStatus(tool: ActiveToolView): {
   return { tone: "accent", label: "LÄUFT" };
 }
 
-function toolSummary(tools: readonly ActiveToolView[]): string {
+/**
+ * The one status tally every overflow line uses. Counting in more than one
+ * place is how the same state ends up named two different ways in one frame.
+ */
+function tally(labels: readonly string[]): string {
   const counts = new Map<string, number>();
-  for (const tool of tools) {
-    const label = toolStatus(tool).label.toLowerCase();
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-  const statuses = [...counts.entries()]
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
+  return [...counts.entries()]
     .map(([label, count]) => `${count} ${label}`)
     .join(", ");
+}
+
+function toolTally(tools: readonly ActiveToolView[]): string {
+  return tally(tools.map((tool) => toolStatus(tool).label.toLowerCase()));
+}
+
+function subagentTally(subagents: readonly SubagentInfo[]): string {
+  return tally(
+    subagents.map((entry) => subagentStatusLabel(entry.status).toLowerCase()),
+  );
+}
+
+function toolSummary(tools: readonly ActiveToolView[]): string {
+  const statuses = toolTally(tools);
   return `+${tools.length} weitere Tools${statuses ? ` · ${statuses}` : ""}`;
+}
+
+/**
+ * The activity widget's combined overflow line. It lives here, next to the row
+ * renderers, so the labels and the tally have exactly one source; the widget
+ * only decides how many rows fit.
+ */
+export function hiddenActivitySummary(
+  hiddenTools: readonly ActiveToolView[],
+  hiddenSubagents: readonly SubagentInfo[],
+): string {
+  const parts: string[] = [];
+  if (hiddenTools.length > 0) {
+    const statuses = toolTally(hiddenTools);
+    parts.push(`${hiddenTools.length} Tools${statuses ? ` · ${statuses}` : ""}`);
+  }
+  if (hiddenSubagents.length > 0) {
+    const statuses = subagentTally(hiddenSubagents);
+    parts.push(
+      `${hiddenSubagents.length} Subagenten${statuses ? ` · ${statuses}` : ""}`,
+    );
+  }
+  return `↳ +${parts.join(" · ")}`;
 }
 
 function padToWidth(value: string, width: number): string {
@@ -449,15 +487,7 @@ function subagentStatusLabel(status: SubagentInfo["status"]): string {
 }
 
 function subagentSummary(subagents: readonly SubagentInfo[]): string {
-  const counts = new Map<string, number>();
-  for (const entry of subagents) {
-    const label = subagentStatusLabel(entry.status).toLowerCase();
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-  const statuses = [...counts.entries()]
-    .map(([label, count]) => `${count} ${label}`)
-    .join(", ");
-  return `+${subagents.length} weitere · ${statuses}`;
+  return `+${subagents.length} weitere · ${subagentTally(subagents)}`;
 }
 
 /**

@@ -486,22 +486,18 @@ export default function setupCore(pi: ExtensionAPI): void {
             (value): value is string => typeof value === "string",
           )
         : [];
-      const subagentParallel = subagentSettings?.parallel as
-        Record<string, unknown> | undefined;
-      const reducedHarnessSurface = subagentSettings?.toolDescriptionMode === "custom";
-      if (reducedHarnessSurface) {
-        if (subagentParallel !== undefined || subagentSettings?.globalConcurrencyLimit !== undefined) {
-          consistencyErrors.push(
-            "Die reduzierte Harness-Surface darf keine Parallelitätskonfiguration enthalten.",
-          );
-        }
-      } else if (
-        subagentParallel?.concurrency !== loaded.config.subagents.concurrency ||
-        subagentSettings?.globalConcurrencyLimit !==
-          loaded.config.subagents.concurrency
+      // The reduced surface is registered by toolSchemaMode alone.
+      // toolDescriptionMode only replaces the visible description text, so it
+      // is reported but never used to infer which parameters are accepted.
+      const reducedHarnessSurface =
+        subagentSettings?.toolSchemaMode === "harness";
+      if (
+        reducedHarnessSurface &&
+        (subagentSettings?.parallel !== undefined ||
+          subagentSettings?.globalConcurrencyLimit !== undefined)
       ) {
         consistencyErrors.push(
-          "Die aktive Paket-Parallelität weicht von der Setup-Basis ab.",
+          "Die reduzierte Harness-Surface darf keine Parallelitätskonfiguration enthalten.",
         );
       }
       const lines = [
@@ -511,10 +507,10 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  theme/motion: ${loaded.config.ui.theme}/${loaded.config.ui.motion}`,
         `  permissions: unknown=${loaded.config.permissions.unknownTools}, bash=${loaded.config.permissions.bash}`,
         `  LSP: ${loaded.config.lsp.enabled ? loaded.config.lsp.mode : "off"}`,
-        `  subagent baseline (setup.json): concurrency=${loaded.config.subagents.concurrency}`,
+        `  subagent tool surface: schema=${String(subagentSettings?.toolSchemaMode ?? "full")}, description=${String(subagentSettings?.toolDescriptionMode ?? "full")}`,
         reducedHarnessSurface
-          ? "  active subagent package config: reduced harness surface (parallel disabled)"
-          : `  active subagent package config: concurrency=${String(subagentParallel?.concurrency ?? "missing")}, globalConcurrencyLimit=${String(subagentSettings?.globalConcurrencyLimit ?? "missing")}`, 
+          ? "  active subagent package config: reduced harness surface (single execution, list/status/stop/interrupt)"
+          : "  active subagent package config: full subagent surface",
         `  scoped models: ${enabledModels.length || 0} Pattern(s) in settings.enabledModels`,
         `  Pi CLI/dev package: ${runtimeVersion ?? "unknown"}/${String(declaredVersion ?? "?")}`,
         `  installed dev package: ${devVersion ?? "missing"}`,

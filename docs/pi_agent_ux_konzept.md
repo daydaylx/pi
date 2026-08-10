@@ -75,22 +75,21 @@ ab 120×30.
 
 ## Eingabefeld
 
-Das Eingabefeld erweitert Pis `CustomEditor` ausschließlich um zwei ruhige,
-beschriftete Rahmenlinien. Textbearbeitung, History, Completion, Cursor und
-Shortcuts delegiert Aurora vollständig an Pi. Der Editor wächst mit dem Inhalt,
-reserviert keine Höhe im Voraus, scrollt intern ab
+Das Eingabefeld ist unverändert Pis eigener Editor. Aurora installiert keine
+eigene Editor-Komponente, sodass Textbearbeitung, History, Completion, Cursor,
+Shortcuts sowie `editorPaddingX` und `autocompleteMaxVisible` aus
+`settings.json` direkt aus der Laufzeit kommen. Der Editor wächst mit dem
+Inhalt, reserviert keine Höhe im Voraus, scrollt intern ab
 `max(5, 30 % der Terminalzeilen)` und erhält dabei Cursorposition und Text
 (`pi-tui/dist/components/editor.js`).
 
 Damit sind die Eigenschaften erfüllt, auf die es ankommt — mitwachsen, nichts
 dauerhaft reservieren, kein Sprung beim Öffnen eines Menüs, da Menüs Overlays
-sind. Die genauen Grenzen weichen ab: die Untergrenze ist eine Zeile statt drei
-(drei leere Zeilen wären genau die Reservierung, die vermieden werden soll), und
-die Obergrenze erreicht 15 Zeilen erst bei etwa 50 Terminalzeilen. Diese Werte
-nachzubilden hieße, Pis Editor-Layout für Kosmetik nachzubauen — der Preis steht
-in keinem Verhältnis zum Unterschied. Der Accent-Titel `EINGABE` macht den
-fokussierten Interaktionsbereich sichtbar, ohne zusätzliche Höhe oder eine
-zweite Statusfläche zu erzeugen.
+sind. Die früheren beschrifteten Rahmenlinien (`EINGABE`, `Enter senden`)
+stammten aus einer eigenen `CustomEditor`-Subklasse; sie sind entfernt, weil
+Dekoration keine dauerhafte Kopplung an Editor-Interna und keine zweite
+Konfigurationsquelle für Editor-Einstellungen wert ist
+(`docs/decisions/013-aurora-keeps-the-native-editor.md`).
 
 ## Skills und Konfiguration
 

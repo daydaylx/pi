@@ -66,6 +66,9 @@ const LEGACY_MANAGED = [
   "agents/planner.md",
   "agents/worker.md",
   "agents/reviewer.md",
+  // Aurora no longer installs an editor component; a copy left behind by an
+  // older install would be an orphan the tree no longer imports.
+  "extensions/aurora-ui/editor.ts",
 ];
 
 function parseArgs(argv) {

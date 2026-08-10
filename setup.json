@@ -14,9 +14,6 @@
     "requestTimeoutMs": 10000,
     "idleShutdownMs": 600000
   },
-  "subagents": {
-    "concurrency": 3
-  },
   "verificationStatus": {
     "enabled": true
   },
