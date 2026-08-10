@@ -1233,10 +1233,27 @@ function referencesSystemPath(command: string): boolean {
   );
 }
 
+/**
+ * `;`/`2>`-etc. make `parseReadOnlyShell` reject the command outright (see
+ * its strict default), so this fallback re-tokenizes the raw text instead of
+ * giving up. Redirects to `/dev/null` must be stripped whole (operator +
+ * target), not just the operator: leaving `/dev/null` behind as a bare token
+ * makes it look like a reference to a path outside the project and trips
+ * `containsExternalPath` on the extremely common `cmd 2>/dev/null` idiom,
+ * even though nothing is actually written there. Redirects to any other
+ * target keep their target token so a real external write still gets
+ * caught.
+ */
+const DEV_NULL_REDIRECT_TOKEN = /\d*(?:>>?|<<?)\s*\/dev\/null\b/g;
+const BARE_REDIRECT_OPERATOR = /\d*(?:>>?|<<?)/g;
+
 function likelyExternalWrite(command: string, cwd: string): boolean {
   const parsed = parseReadOnlyShell(command);
   const tokens = parsed.error
-    ? command.replace(/\d*(?:>>?|<<?)/g, " ").split(/\s+/)
+    ? command
+        .replace(DEV_NULL_REDIRECT_TOKEN, " ")
+        .replace(BARE_REDIRECT_OPERATOR, " ")
+        .split(/\s+/)
     : parsed.segments.flat();
   return isWriteCapableCommand(command) && containsExternalPath(tokens, cwd);
 }

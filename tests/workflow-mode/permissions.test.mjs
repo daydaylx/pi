@@ -337,6 +337,33 @@ await test("planModeBashGuard still blocks real mutations during planning, even 
   }
 });
 
+await test("decideBash (yolo) does not mistake /dev/null redirects on internal paths for an external write", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  const decide = (command) => permissionPolicy.decideBash("yolo", command, cwd);
+  for (const command of [
+    "ls -la .agent 2>/dev/null",
+    "ls -la .agent 2>/dev/null; ls -la .agent/plans 2>/dev/null",
+    "ls -la .agent 2>/dev/null || echo missing",
+    "ls .git/config 2>/dev/null && head -20 .git/config",
+    "npm run typecheck 1>/dev/null",
+    "eslint . &>/dev/null",
+  ]) {
+    eq(
+      decide(command).action,
+      "allow",
+      `${command} only redirects to /dev/null and touches nothing outside the project, so yolo must allow it`,
+    );
+  }
+  // The /dev/null fix must not weaken the actual external-write boundary:
+  // a real write target outside the project still has to block.
+  eq(
+    decide("touch /tmp/pi-policy-audit 2>/dev/null").action,
+    "block",
+    "a genuine write outside the project must still block even with a /dev/null-decorated command",
+  );
+});
+
 await test("isPlanSafeCommand (readonly permission level) stays strict: no `;`-chaining or /dev/null redirect widening", () => {
   if (!permissionPolicy) return;
   const cwd = process.cwd();
