@@ -36,16 +36,16 @@ Hauptagent bleibt alleiniger regulärer Patch-Eigentümer.
 - `settings.json`: `subagents.disableBuiltins: true` deaktiviert alle
   Paket-Builtins.
 - `extensions/subagent/config.json`: die aktive Paketkonfiguration setzt
-  `parallel.maxTasks: 4`, `parallel.concurrency: 3`,
-  `globalConcurrencyLimit: 3`, `maxSubagentSpawnsPerSession: 5` und
-  `toolDescriptionMode: "custom"`. In diesem Modus registriert der Fork
-  ein reduziertes Tool-Schema, das nur SINGLE-Ausführung und
-  Status-Management (status/stop/interrupt) umfasst — Chain, Parallel,
-  CRUD, Scheduling, Worktrees, Sharing und Watchdog sind bereits auf
-  Schema-Ebene abgelehnt. Die geladene
-  `.pi/subagent-tool-description.md` reduziert die für das Modell
-  sichtbare Tool-Beschreibung auf die drei aktiven Rollen und wann sie
-  sich lohnen; die zwingende Sicherheits-Guidance des Pakets bleibt über
+  `maxSubagentSpawnsPerSession: 5` und `toolDescriptionMode: "custom"`.
+  In diesem Modus registriert der Fork ein reduziertes Tool-Schema, das nur
+  SINGLE-Ausführung sowie `list` und Status-Management
+  (`status`/`stop`/`interrupt`) umfasst — Chain, Parallel, CRUD,
+  Scheduling, Worktrees, Sharing und Watchdog sind bereits auf Schema-Ebene
+  abgelehnt. Die agentweite `subagent-tool-description.md` reduziert die
+  für das Modell sichtbare Tool-Beschreibung auf die drei aktiven Rollen und
+  wann sie sich lohnen; eine `.pi/subagent-tool-description.md` des
+  geöffneten Projekts darf diese Standardbeschreibung gezielt übersteuern.
+  Die zwingende Sicherheits-Guidance des Pakets bleibt über
   `{{safetyGuidance}}` automatisch Teil der gerenderten Beschreibung.
 - Die Frontmatter der drei Profile: `defaultContext: fresh`,
   `inheritProjectContext: true`, `inheritSkills: false` und ihre jeweilige

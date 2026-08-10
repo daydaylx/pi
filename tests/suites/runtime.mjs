@@ -335,7 +335,7 @@ export const runtimeSections = {
         );
         const requiredAllowlist = [
           "shared",
-          ".pi/subagent-tool-description.md",
+          "subagent-tool-description.md",
           "extensions",
           "agents",
           "scripts",
@@ -436,8 +436,12 @@ export const runtimeSections = {
 
       // Custom subagent description must be installed.
       assert(
-        deployedSet.has(".pi/subagent-tool-description.md"),
-        "greenfield includes .pi/subagent-tool-description.md",
+        deployedSet.has("subagent-tool-description.md"),
+        "greenfield includes the agent-level custom subagent description",
+      );
+      assert(
+        !deployedSet.has(".pi/subagent-tool-description.md"),
+        "greenfield does not deploy the retired agent-shipped .pi description",
       );
 
       // Exactly three agent profiles.
@@ -512,10 +516,14 @@ export const runtimeSections = {
 
         // Custom subagent description.
         assert(
-          existsSync(
+          existsSync(path.join(target, "subagent-tool-description.md")),
+          "deployed target contains the agent-level custom subagent description",
+        );
+        assert(
+          !existsSync(
             path.join(target, ".pi", "subagent-tool-description.md"),
           ),
-          "deployed target contains .pi/subagent-tool-description.md",
+          "deployed target has no retired agent-shipped .pi description",
         );
 
         // Exactly three agents.
@@ -571,6 +579,13 @@ export const runtimeSections = {
           path.join(target, "agents", "reviewer.md"),
           "# legacy reviewer",
         );
+        const legacyDescription = path.join(
+          target,
+          ".pi",
+          "subagent-tool-description.md",
+        );
+        mkdirSync(path.dirname(legacyDescription), { recursive: true });
+        writeFileSync(legacyDescription, "# legacy installer description");
         const userFile = path.join(target, "agents", "custom-user-agent.md");
         writeFileSync(userFile, "# user-owned custom agent");
 
@@ -587,6 +602,10 @@ export const runtimeSections = {
             `upgrade removes legacy ${legacy}`,
           );
         }
+        assert(
+          existsSync(path.join(target, "subagent-tool-description.md")),
+          "upgrade installs the current agent-level custom subagent description",
+        );
 
         // User-owned file must survive.
         assert(

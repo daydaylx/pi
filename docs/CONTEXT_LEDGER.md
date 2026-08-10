@@ -69,6 +69,10 @@
   noch aus.
 - Vorbestehende Änderungen im Arbeitsbaum außerhalb des Hardening-Scopes
   müssen erhalten bleiben.
+- Der kanonische Verify-Lauf bleibt derzeit außerhalb des AP3-Scopes rot:
+  `extensions/aurora-ui/index.ts` liegt mit 97,4 % unter der geforderten
+  100-%-Coverage. Der Befund ist nach AP3 bestätigt, die Datei ist nicht Teil
+  des AP3-Diffs.
 
 ## Offene Risiken
 
@@ -98,8 +102,8 @@ _Keine offenen Fragen._
 ## Aktuelle Prioritäten
 
 - P2-Cleanup: Restkomplexität, Dokumentation, Knip-Regeln.
-- Phase 3 (P1): Subagent-Tool-Surface im Fork begrenzen.
-- Subagent-Acceptance-Sicherheit im Fork (bereits lokal umgesetzt, neuer Commit-Pin nötig).
+- Die verbleibenden Arbeitspakete aus `resprobleme_auftrag` in der festgelegten
+  Reihenfolge fortsetzen; AP1–AP3 sind abgeschlossen.
 
 ## Verworfene Optionen
 

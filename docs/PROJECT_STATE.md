@@ -4,10 +4,13 @@
 
 Pi-Harness-Audit und Arbeitsaufträge (August 2026) — umgesetzte Phasen:
 
-- **P0 Installer**: `shared/` und Custom-Subagentbeschreibung in Allowlist,
-  `docs/archive/session-logs` ausgeschlossen, Legacy-Dateien (`planner.md`,
-  `worker.md`, `reviewer.md`) werden bei Upgrade bereinigt. Greenfield- und
-  Upgrade-Integrationstests statt Quelltext-Stringprüfungen.
+- **P0 Installer / AP3**: `shared/` und die agentweite
+  `subagent-tool-description.md` in Allowlist, `docs/archive/session-logs`
+  ausgeschlossen. Beim Upgrade werden Legacy-Dateien (`planner.md`,
+  `worker.md`, `reviewer.md`) sowie die frühere, den Fallback überschattende
+  `.pi/subagent-tool-description.md` bereinigt. Greenfield- und
+  Upgrade-Integrationstests statt Quelltext-Stringprüfungen; ein geöffnetes
+  Projekt darf die Standardbeschreibung weiterhin gezielt übersteuern.
 - **P0 Subagent-Sicherheit**: `runVerifyCommand()` im Fork von `shell: true`
   auf strukturiertes `program + args` umgestellt. `cwd`-Symlink-Escapes
   werden blockiert. Shell-Metazeichen führen zu fail-closed. Totes
@@ -29,8 +32,13 @@ Pi-Harness-Audit und Arbeitsaufträge (August 2026) — umgesetzte Phasen:
   Leermeldung präzisiert. `docs/pi_agent_ux_konzept.md`: Subagenten-Kategorie
   und Footer-Korrekturen.
 
+## Letzte Verifikation
+
+- Typecheck und vollständige Harness-Tests sind nach AP3 grün.
+- Der kanonische Verify-Lauf bleibt wegen einer fachfremden Aurora-Coverage-
+  Abweichung rot: `extensions/aurora-ui/index.ts` erreicht 97,4 % statt der
+  geforderten 100 %. Diese Datei ist nicht Teil des AP3-Diffs.
+
 ## Nächste Schritte
 
 - Phase 8 (P2): Restkomplexität, Dokumentation und Knip-Regeln bereinigen.
-- Phase 3 (P1): Subagent-Tool-Surface im Fork auf tatsächlich genutzte
-  Fähigkeiten begrenzen (benötigt Fork-Commit).

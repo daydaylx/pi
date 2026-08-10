@@ -19,7 +19,7 @@ const ALLOWLIST = [
   "setup.json",
   "tsconfig.json",
   "keybindings.json",
-  ".pi/subagent-tool-description.md",
+  "subagent-tool-description.md",
   "agents",
   "docs",
   "extensions",
@@ -59,6 +59,10 @@ const NEVER_COPY_SUBTREE = new Set([
  * glob expansion or recursive deletion.
  */
 const LEGACY_MANAGED = [
+  // This file was shipped by an older installer below the agent directory.
+  // It shadows the current root-level fallback when Pi runs with the agent
+  // directory as cwd, so remove only this known installer-owned copy.
+  ".pi/subagent-tool-description.md",
   "agents/planner.md",
   "agents/worker.md",
   "agents/reviewer.md",
