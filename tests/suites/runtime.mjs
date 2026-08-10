@@ -2428,12 +2428,9 @@ export const runtimeSections = {
         );
       }
       const archivedRoot = path.join(ROOT, "docs", "archive", "subagents-v1");
-      eq(
-        readdirSync(archivedRoot)
-          .filter((name) => name.endsWith(".md"))
-          .sort(),
-        ["planner.md", "reviewer.md", "worker.md"],
-        "retired profiles are preserved outside the active agent directory",
+      assert(
+        !existsSync(archivedRoot),
+        "retired v1 subagent profiles have been cleaned up; only the active 3-role model remains",
       );
       for (const activeDoc of ["AGENTS.md", "README.md", "docs/subagents.md"]) {
         const source = readFileSync(path.join(ROOT, activeDoc), "utf8");
@@ -3685,6 +3682,46 @@ export const runtimeSections = {
         assert(
           overflow.includes("+1 weitere"),
           "the subagent overflow count survives long names",
+        );
+      }
+
+      // When the combined tool+subagent detail count exceeds the budget,
+      // hiddenActivitySummary kicks in so the widget still fits the terminal.
+      {
+        const overflowHarness = createHarness();
+        auroraUi.default(overflowHarness.api);
+        const overflowCtx = overflowHarness.makeContext({
+          sessionId: "overflow-summary-session",
+        });
+        await overflowHarness.runHooks("session_start", {}, overflowCtx);
+        await overflowHarness.runHooks("agent_start", {}, overflowCtx);
+        // Pump enough tool starts to overflow the detail budget (max 7).
+        for (let i = 0; i < 9; i++) {
+          await overflowHarness.runHooks(
+            "tool_execution_start",
+            {
+              toolCallId: `overflow-tool-${i}`,
+              toolName: "read",
+              input: { path: `file-${i}.ts` },
+            },
+            overflowCtx,
+          );
+        }
+        const widget = overflowHarness.widgets.get("aurora-ui/activity");
+        const rendered =
+          typeof widget?.content === "function"
+            ? widget
+                .content(
+                  { terminal: { columns: 140, rows: 24 }, requestRender() {} },
+                  overflowCtx.ui.theme,
+                )
+                .render(140)
+                .map(stripAnsi)
+                .join("\n")
+            : "";
+        assert(
+          rendered.includes("↳ +") && rendered.includes("Tool"),
+          "hiddenActivitySummary compacts the overflow into a single summary line",
         );
       }
 

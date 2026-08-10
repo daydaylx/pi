@@ -16,6 +16,8 @@ openrouter-free-models.json
 /git/
 
 # Subagent runtime artifacts
+# pi-subagents/ = npm package working copy (installed by npm, runtime dep)
+# /git/github.com/daydaylx/pi-subagents/ = upstream git clone for development
 .pi-subagents/
 pi-subagents/
 run-history.jsonl
