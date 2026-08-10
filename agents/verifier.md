@@ -2,6 +2,8 @@
 name: verifier
 description: "Use after a non-trivial implementation to independently verify requirements, scope, diff, tests, and regressions. Do not use as a general style reviewer or let it repair findings. Read-only for project files."
 tools: read, grep, find, ls, bash
+model: anthropic/claude-sonnet-5
+fallbackModels: openai-codex/gpt-5.6-terra
 defaultContext: fresh
 inheritProjectContext: true
 inheritSkills: false

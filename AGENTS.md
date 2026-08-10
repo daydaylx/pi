@@ -18,10 +18,27 @@ Diese Regeln gelten für alle Pi-Sitzungen.
   offenen Punkt dem Nutzer ausdrücklich nennen, bevor auf ausdrücklichen
   Auftrag committet wird. `project_check({ profile: "verify" })` ersetzt
   keine bereits angeforderte oder versuchte unabhängige `verifier`-Prüfung.
+- Vor einem Shell-Aufruf prüfen, ob er außerhalb des Projektpfads schreibt,
+  unquotierte Variablen verwendet oder Secret-/Credential-Grenzen berührt.
+  Nach einer Schutzgrenzen-Blockierung nicht dieselbe Strategie variieren,
+  sondern die Ursache bestimmen und eine zulässige projektlokale Alternative
+  wählen.
+- Einen Teilauftrag erst als funktional umgesetzt oder abgeschlossen
+  bezeichnen, wenn der zugehörige Testlauf beendet und sein Ergebnis
+  dokumentiert ist. Vor dem finalen Abschluss ist zusätzlich
+  `project_check({ profile: "verify" })` auszuführen.
 
 ## Kontextdisziplin
 
 - Zuerst gezielt suchen und nur relevante Dateien oder Ausschnitte lesen. Für Code-/Dateisuche die eigenständigen `grep`- und `find`-Tools verwenden statt `bash rg`/`git grep`/`find` — sie sind vom Plan-Modus-Gate nicht betroffen (der greift nur bei `bash`/`write`/`edit`), liefern strukturierte Treffer statt Pfad-Raten und vermeiden ENOENT-Fehlversuche auf vermuteten Pfaden.
+- Vor der ersten Änderung Arbeitsauftrag, betroffene Implementierung und
+  zugehörige Tests gezielt lokalisieren; keine Pfade oder Patch-Kontexte
+  raten. Nach zwei fehlgeschlagenen Lese-, Pfad- oder Editversuchen den
+  tatsächlichen Kontext erneut lesen, bevor ein weiterer Versuch erfolgt.
+- Änderungen in kleinen, testbaren Schritten vornehmen und nach jedem
+  abgeschlossenen Teilpaket zuerst den engsten betroffenen Test ausführen.
+  Vorbestehende Fehler nur mit einer belegten Ausgangsbaseline als solche
+  ausweisen.
 - Im Plan-Modus dürfen Diagnosebefehle mit `;` verkettet werden (jedes
   Segment wird einzeln geprüft); `&&`/`||`/`&` bleiben dort grundsätzlich
   blockiert, auch wenn jeder Teilbefehl für sich zulässig wäre.
@@ -59,18 +76,19 @@ Triviale Teilaufgaben bleiben beim Hauptagenten.
   `investigator` für eine belegte, reine Analyse.
 - **Unbekannter, intermittierender oder gescheiterter Bug:** `debugger` für
   Reproduktion und Hypothesentests.
-- **Unabhängige Prüfung nach nichttrivialer Implementierung:** `verifier`.
-  Konkrete Signale für „nichttrivial" (mindestens eines reicht, keine
-  Pflichtprüfung): mehrere Dateien oder mehrere Anforderungen/Akzeptanz-
-  kriterien betroffen, Regressionsrisiko in geteiltem oder kritischem Code,
-  Änderungen an Permission-, Workflow- oder Statuslogik, Änderungen an
-  öffentlicher API, Schema oder Konfiguration, hoher Blast-Radius, oder Fälle,
-  in denen bestehende Tests allein die Anforderung nicht belegen. Triviale,
-  klar lokalisierte Änderungen brauchen weiterhin keinen `verifier`.
+- **Unabhängige Prüfung nach nichttrivialer Implementierung:** `verifier`
+  beauftragen. Konkrete Signale für „nichttrivial" (mindestens eines reicht):
+  mehrere Dateien oder mehrere Anforderungen/Akzeptanzkriterien betroffen,
+  Regressionsrisiko in geteiltem oder kritischem Code, Änderungen an
+  Permission-, Workflow- oder Statuslogik, Änderungen an öffentlicher API,
+  Schema oder Konfiguration, hoher Blast-Radius, oder Fälle, in denen
+  bestehende Tests allein die Anforderung nicht belegen. Triviale, klar
+  lokalisierte Änderungen brauchen weiterhin keinen `verifier`.
 
 Planung, Umsetzung, Triage und finale Nutzerkommunikation bleiben beim
-Hauptagenten. Es gibt keine automatische Pflichtdelegation und keine
-verschachtelte Delegation.
+Hauptagenten. Für die oben definierten nichttrivialen Änderungen ist die
+Verifier-Delegation verpflichtend; darüber hinaus gibt es keine automatische
+Pflichtdelegation und keine verschachtelte Delegation.
 
 ### Delegationsvorlage
 
