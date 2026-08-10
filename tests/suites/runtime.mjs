@@ -289,13 +289,13 @@ export const runtimeSections = {
         }
         eq(
           subagentConfig.parallel,
-          { maxTasks: 4, concurrency: 3 },
-          "active package config directly bounds subagent tasks and concurrency",
+          undefined,
+          "reduced harness config exposes no inactive parallel task surface",
         );
         eq(
           subagentConfig.globalConcurrencyLimit,
-          3,
-          "active package config directly bounds global concurrency",
+          undefined,
+          "reduced harness config exposes no inactive global concurrency limit",
         );
         eq(
           subagentConfig.maxSubagentSpawnsPerSession,
@@ -317,10 +317,9 @@ export const runtimeSections = {
           { concurrency: { type: "integer", minimum: 1, maximum: 8 } },
           "setup schema exposes no runtime package limits",
         );
-        eq(
-          subagentConfig.parallel.concurrency,
-          setup.subagents.concurrency,
-          "active package concurrency matches the setup baseline",
+        assert(
+          setup.subagents.concurrency >= 1,
+          "setup concurrency baseline remains valid for non-harness tooling",
         );
         // Verify installer ALLOWLIST covers every active extension's
         // runtime imports (no string-grep; real structural assertions).
@@ -849,7 +848,7 @@ export const runtimeSections = {
             harness.notifications
               .at(-1)
               ?.message?.includes(
-                "active subagent package config: concurrency=3, globalConcurrencyLimit=3",
+                "active subagent package config: reduced harness surface (parallel disabled)",
               ),
           "setup doctor distinguishes the setup baseline from active package config",
         );

@@ -488,7 +488,14 @@ export default function setupCore(pi: ExtensionAPI): void {
         : [];
       const subagentParallel = subagentSettings?.parallel as
         Record<string, unknown> | undefined;
-      if (
+      const reducedHarnessSurface = subagentSettings?.toolDescriptionMode === "custom";
+      if (reducedHarnessSurface) {
+        if (subagentParallel !== undefined || subagentSettings?.globalConcurrencyLimit !== undefined) {
+          consistencyErrors.push(
+            "Die reduzierte Harness-Surface darf keine Parallelitätskonfiguration enthalten.",
+          );
+        }
+      } else if (
         subagentParallel?.concurrency !== loaded.config.subagents.concurrency ||
         subagentSettings?.globalConcurrencyLimit !==
           loaded.config.subagents.concurrency
@@ -505,7 +512,9 @@ export default function setupCore(pi: ExtensionAPI): void {
         `  permissions: unknown=${loaded.config.permissions.unknownTools}, bash=${loaded.config.permissions.bash}`,
         `  LSP: ${loaded.config.lsp.enabled ? loaded.config.lsp.mode : "off"}`,
         `  subagent baseline (setup.json): concurrency=${loaded.config.subagents.concurrency}`,
-        `  active subagent package config: concurrency=${String(subagentParallel?.concurrency ?? "missing")}, globalConcurrencyLimit=${String(subagentSettings?.globalConcurrencyLimit ?? "missing")}`,
+        reducedHarnessSurface
+          ? "  active subagent package config: reduced harness surface (parallel disabled)"
+          : `  active subagent package config: concurrency=${String(subagentParallel?.concurrency ?? "missing")}, globalConcurrencyLimit=${String(subagentSettings?.globalConcurrencyLimit ?? "missing")}`, 
         `  scoped models: ${enabledModels.length || 0} Pattern(s) in settings.enabledModels`,
         `  Pi CLI/dev package: ${runtimeVersion ?? "unknown"}/${String(declaredVersion ?? "?")}`,
         `  installed dev package: ${devVersion ?? "missing"}`,
