@@ -32,8 +32,6 @@ export interface AuroraUiState {
   };
   activity: {
     kind: AuroraActivityKind;
-    label?: string;
-    activeTools: number;
   };
 }
 
@@ -144,10 +142,12 @@ export function isAuroraUiSnapshotEvent(
   );
 }
 
+/** Returns whether the presentation state actually changed. */
 export function mergeAuroraUiState(
   state: AuroraUiState,
   patch: AuroraUiStatePatch,
-): void {
+): boolean {
+  let changed = false;
   const workflowPhases: readonly AuroraWorkflowPhase[] = WORKFLOW_MODES;
   const activityKinds: readonly AuroraActivityKind[] = [
     "idle",
@@ -157,53 +157,91 @@ export function mergeAuroraUiState(
   ];
 
   if (patch.workflow) {
-    if (patch.workflow.phase && workflowPhases.includes(patch.workflow.phase))
+    if (
+      patch.workflow.phase &&
+      workflowPhases.includes(patch.workflow.phase) &&
+      state.workflow.phase !== patch.workflow.phase
+    ) {
       state.workflow.phase = patch.workflow.phase;
-    if (typeof patch.workflow.label === "string")
+      changed = true;
+    }
+    if (
+      typeof patch.workflow.label === "string" &&
+      state.workflow.label !== patch.workflow.label
+    ) {
       state.workflow.label = patch.workflow.label;
+      changed = true;
+    }
   }
   if (patch.permissions) {
-    if ("level" in patch.permissions)
-      state.permissions.level =
+    if ("level" in patch.permissions) {
+      const level =
         typeof patch.permissions.level === "string"
           ? patch.permissions.level
           : undefined;
-    if ("label" in patch.permissions)
-      state.permissions.label =
+      if (state.permissions.level !== level) {
+        state.permissions.level = level;
+        changed = true;
+      }
+    }
+    if ("label" in patch.permissions) {
+      const label =
         typeof patch.permissions.label === "string"
           ? patch.permissions.label
           : undefined;
+      if (state.permissions.label !== label) {
+        state.permissions.label = label;
+        changed = true;
+      }
+    }
   }
   if (patch.lsp) {
-    if ("state" in patch.lsp)
-      state.lsp.state =
+    if ("state" in patch.lsp) {
+      const lspState =
         typeof patch.lsp.state === "string" ? patch.lsp.state : undefined;
-    if ("detail" in patch.lsp)
-      state.lsp.detail =
+      if (state.lsp.state !== lspState) {
+        state.lsp.state = lspState;
+        changed = true;
+      }
+    }
+    if ("detail" in patch.lsp) {
+      const detail =
         typeof patch.lsp.detail === "string" ? patch.lsp.detail : undefined;
+      if (state.lsp.detail !== detail) {
+        state.lsp.detail = detail;
+        changed = true;
+      }
+    }
   }
   if (patch.model) {
-    if ("id" in patch.model)
-      state.model.id =
+    if ("id" in patch.model) {
+      const id =
         typeof patch.model.id === "string" ? patch.model.id : undefined;
-    if ("thinking" in patch.model)
-      state.model.thinking =
+      if (state.model.id !== id) {
+        state.model.id = id;
+        changed = true;
+      }
+    }
+    if ("thinking" in patch.model) {
+      const thinking =
         typeof patch.model.thinking === "string"
           ? patch.model.thinking
           : undefined;
+      if (state.model.thinking !== thinking) {
+        state.model.thinking = thinking;
+        changed = true;
+      }
+    }
   }
   if (patch.activity) {
-    if (patch.activity.kind && activityKinds.includes(patch.activity.kind))
+    if (
+      patch.activity.kind &&
+      activityKinds.includes(patch.activity.kind) &&
+      state.activity.kind !== patch.activity.kind
+    ) {
       state.activity.kind = patch.activity.kind;
-    if ("label" in patch.activity)
-      state.activity.label =
-        typeof patch.activity.label === "string"
-          ? patch.activity.label
-          : undefined;
-    if (typeof patch.activity.activeTools === "number")
-      state.activity.activeTools = Math.max(
-        0,
-        Math.floor(patch.activity.activeTools),
-      );
+      changed = true;
+    }
   }
+  return changed;
 }

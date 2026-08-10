@@ -36,8 +36,8 @@ const MODEL_MAX_COLUMNS = 32;
 const FOLDER_MAX_COLUMNS: Record<Layout, number> = {
   wide: 34,
   comfortable: 24,
-  standard: 18,
-  compact: 12,
+  standard: 14,
+  compact: 10,
 };
 
 /**
@@ -109,9 +109,15 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.model,
     Slot.thinking,
     Slot.folder,
+    Slot.context,
     Slot.verification,
   ]),
-  standard: new Set([Slot.workflow, Slot.model, Slot.folder]),
+  standard: new Set([
+    Slot.workflow,
+    Slot.model,
+    Slot.thinking,
+    Slot.folder,
+  ]),
   compact: new Set([Slot.workflow, Slot.model, Slot.folder]),
 };
 
@@ -172,7 +178,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     segments.push({
       slot: Slot.thinking,
       priority: Priority.thinking,
-      text: thinkingLabel(input.state.model.thinking),
+      text: `Denken ${thinkingLabel(input.state.model.thinking)}`,
       tone: thinkingTone(input.state.model.thinking),
       bold: true,
     });
@@ -196,7 +202,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     segments.push({
       slot: Slot.context,
       priority: exhausted ? Priority.exhaustedContext : Priority.context,
-      text: `ctx ${Math.round(input.contextPercent)}%`,
+      text: `Kontext ${Math.round(input.contextPercent)}%`,
       tone: exhausted
         ? "error"
         : input.contextPercent >= CONTEXT_WARNING_PERCENT

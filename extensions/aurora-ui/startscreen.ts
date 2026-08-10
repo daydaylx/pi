@@ -14,14 +14,6 @@ export interface StartscreenInput {
   homeDirectory?: string;
 }
 
-const WORDMARK = [
-  " █████╗ ██╗   ██╗██████╗  ██████╗ ██████╗ ",
-  "██╔══██╗██║   ██║██╔══██╗██╔═══██╗██╔══██╗",
-  "███████║██║   ██║██████╔╝██║   ██║██████╔╝",
-  "██╔══██║██║   ██║██╔══██╗██║   ██║██╔══██╗ ",
-  "██║  ██║╚██████╔╝██║  ██║╚██████╔╝██║  ██║ ",
-];
-
 function center(value: string, width: number): string {
   const clipped = truncateToWidth(value, Math.max(1, width), "…");
   return `${" ".repeat(Math.max(0, Math.floor((width - visibleWidth(clipped)) / 2)))}${clipped}`;
@@ -65,12 +57,13 @@ export function renderStartscreen(
       folder,
     ];
 
-  const shortcuts = [
-    "Shift+Tab  Workflow",
-    "Super+M    Model",
-    "Super+D    Thinking",
-    "Super+Q    Command Center",
-  ].map((line) => center(theme.fg("dim", line), width));
+  const shortcuts = center(
+    theme.fg(
+      "dim",
+      "Shift+Tab Workflow  ·  Super+M Modell  ·  Super+D Denken  ·  Super+Q Befehle",
+    ),
+    width,
+  );
 
   if (layout === "standard")
     return [
@@ -78,17 +71,14 @@ export function renderStartscreen(
       "",
       metadata(theme, input, width),
       folder,
-      "",
-      ...shortcuts,
+      shortcuts,
     ];
 
   return [
-    ...WORDMARK.map((line) => center(theme.fg("border", line), width)),
-    center(theme.fg("accent", theme.bold("A U R O R A")), width),
+    center(theme.fg("accent", theme.bold("PI · AURORA")), width),
     "",
     metadata(theme, input, width),
     folder,
-    "",
-    ...shortcuts,
+    shortcuts,
   ];
 }

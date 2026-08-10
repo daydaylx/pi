@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { footerTier } from "../shared/layout.ts";
 
 /** The compact running marker shared by tool rows. */
@@ -15,6 +15,7 @@ export type ActivityToolKind =
   | "test"
   | "verification"
   | "subagent"
+  | "wait"
   | "web"
   | "generic";
 
@@ -57,6 +58,7 @@ const PRESENTATIONS: Record<ActivityToolKind, ToolPresentation> = {
   test: { glyph: "▹", label: "Testen" },
   verification: { glyph: "✓", label: "Prüfen" },
   subagent: { glyph: "◉", label: "Subagent" },
+  wait: { glyph: "◌", label: "Warten" },
   web: { glyph: "◎", label: "Web" },
   generic: { glyph: RUNNING_GLYPH, label: "Werkzeug" },
 };
@@ -159,8 +161,12 @@ export function classifyTool(
     case "project_check":
       return "verification";
     case "subagent":
-    case "wait":
       return "subagent";
+    case "wait":
+      return "wait";
+    case "web":
+    case "web__run":
+      return "web";
     case "bash": {
       const command = normalizedCommand(args);
       if (!command) return "bash";
@@ -265,6 +271,13 @@ function genericTarget(args: unknown): string | undefined {
   ]);
 }
 
+function waitTarget(args: unknown): string | undefined {
+  const input = record(args);
+  if (!input) return undefined;
+  if (input.all === true) return "alle Subagenten";
+  return firstString(args, ["agent", "runId", "target"]);
+}
+
 /** Derive an Activity line entirely from the tool execution start payload. */
 export function describeToolActivity(
   toolName: string,
@@ -292,6 +305,8 @@ export function describeToolActivity(
       };
     case "subagent":
       return { kind, target: subagentTarget(args) };
+    case "wait":
+      return { kind, target: waitTarget(args) };
     case "web":
     case "generic":
       return { kind, target: genericTarget(args) };
@@ -309,10 +324,29 @@ export function toolPresentation(
     : presentation;
 }
 
-function toneForTool(tool: ActiveToolView): "accent" | "warning" | "error" {
-  if (tool.tone === "error") return "error";
-  if (tool.tone === "warning") return "warning";
-  return "accent";
+function toolStatus(tool: ActiveToolView): {
+  tone: "accent" | "warning" | "error";
+  label: string;
+} {
+  if (tool.tone === "error") return { tone: "error", label: "FEHLER" };
+  if (tool.tone === "warning") return { tone: "warning", label: "HINWEIS" };
+  return { tone: "accent", label: "LÄUFT" };
+}
+
+function toolSummary(tools: readonly ActiveToolView[]): string {
+  const counts = new Map<string, number>();
+  for (const tool of tools) {
+    const label = toolStatus(tool).label.toLowerCase();
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const statuses = [...counts.entries()]
+    .map(([label, count]) => `${count} ${label}`)
+    .join(", ");
+  return `+${tools.length} weitere Tools${statuses ? ` · ${statuses}` : ""}`;
+}
+
+function padToWidth(value: string, width: number): string {
+  return `${value}${" ".repeat(Math.max(0, width - visibleWidth(value)))}`;
 }
 
 /**
@@ -325,32 +359,47 @@ export function renderActiveTools(
   theme: Theme,
   width: number,
   now: number,
-  options: { compact?: boolean } = {},
+  options: { compact?: boolean; wide?: boolean; limit?: number } = {},
 ): string[] {
   const available = Math.max(1, width);
   const compact = options.compact ?? footerTier(width) === "compact";
-  const limit = compact ? 1 : 3;
+  const wide = options.wide ?? footerTier(width) === "wide";
+  const limit = options.limit ?? (compact ? 1 : 3);
   const visible = tools.slice(0, limit).map((tool) => {
     const elapsed = Math.max(0, Math.floor((now - tool.startedAt) / 1000));
     const presentation =
       tool.kind === undefined || tool.kind === "generic"
         ? toolPresentation(tool.name)
         : PRESENTATIONS[tool.kind];
-    const target = tool.target ? `  ${theme.fg("muted", tool.target)}` : "";
+    const target = tool.target ? ` · ${theme.fg("muted", tool.target)}` : "";
     // A checkmark would falsely claim success while the verification is still
     // running. Completed tools disappear from this transient surface, so only
     // Pi's real result renderer may show the success glyph.
     const glyph =
       tool.kind === "verification" ? RUNNING_GLYPH : presentation.glyph;
-    const marker = theme.fg(toneForTool(tool), glyph);
-    const line = `${marker} ${theme.bold(presentation.label)}${target} ${theme.fg("dim", `${elapsed}s`)}`;
+    const status = toolStatus(tool);
+    const marker = theme.fg(status.tone, glyph);
+    if (wide) {
+      const type = padToWidth(theme.bold(presentation.label), 12);
+      const suffix = ` · ${theme.fg(status.tone, status.label)} · ${theme.fg("dim", `${elapsed}s`)}`;
+      const targetWidth = Math.max(
+        1,
+        available - visibleWidth(`${marker} ${type} `) - visibleWidth(suffix),
+      );
+      const target = theme.fg(
+        "muted",
+        padToWidth(truncateToWidth(tool.target ?? "—", targetWidth, "…"), targetWidth),
+      );
+      return `${marker} ${type} ${target}${suffix}`;
+    }
+    const line = `${marker} ${theme.bold(presentation.label)}${target} · ${theme.fg(status.tone, status.label)} · ${theme.fg("dim", `${elapsed}s`)}`;
     return truncateToWidth(line, available, "…");
   });
-  const hidden = tools.length - visible.length;
-  if (hidden > 0)
+  const hidden = tools.slice(visible.length);
+  if (hidden.length > 0)
     visible.push(
       truncateToWidth(
-        theme.fg("muted", `↳ +${hidden} weitere Tools`),
+        theme.fg("muted", `↳ ${toolSummary(hidden)}`),
         available,
         "…",
       ),
@@ -386,6 +435,31 @@ function subagentGlyph(status: SubagentInfo["status"]): string {
   }
 }
 
+function subagentStatusLabel(status: SubagentInfo["status"]): string {
+  switch (status) {
+    case "running":
+      return "LÄUFT";
+    case "queued":
+      return "WARTET";
+    case "paused":
+      return "PAUSIERT";
+    case "needs_attention":
+      return "AUFMERKSAMKEIT";
+  }
+}
+
+function subagentSummary(subagents: readonly SubagentInfo[]): string {
+  const counts = new Map<string, number>();
+  for (const entry of subagents) {
+    const label = subagentStatusLabel(entry.status).toLowerCase();
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const statuses = [...counts.entries()]
+    .map(([label, count]) => `${count} ${label}`)
+    .join(", ");
+  return `+${subagents.length} weitere · ${statuses}`;
+}
+
 /**
  * Subagents appear inline with the work that started them, for as long as that
  * work runs — no permanent tab strip, no navigation level of their own. When
@@ -395,7 +469,7 @@ export function renderSubagents(
   subagents: readonly SubagentInfo[],
   theme: Theme,
   width: number,
-  options: { compact?: boolean } = {},
+  options: { compact?: boolean; limit?: number; summary?: boolean } = {},
 ): string[] {
   if (subagents.length === 0) return [];
   const available = Math.max(1, width);
@@ -413,27 +487,27 @@ export function renderSubagents(
     ? theme.fg("error", ` · ${attention} Aufmerksamkeit`)
     : "";
   const summaryWithAttention = clip(`${summary}${attentionLine}`);
-  if (compact) return [summaryWithAttention];
-
   // Whatever needs a decision is worth the few lines this surface has.
   const ordered = [...subagents].sort(
     (a, b) =>
       Number(b.status === "needs_attention") -
       Number(a.status === "needs_attention"),
   );
-  const visible = ordered.slice(0, 3);
-  const lines = visible.flatMap((entry) => {
+  const limit = options.limit ?? (compact ? 0 : 3);
+  const visible = ordered.slice(0, limit);
+  const lines = visible.map((entry) => {
     const glyph = theme.fg(
       subagentTone(entry.status),
       subagentGlyph(entry.status),
     );
-    const rows = [clip(`   ${glyph} ${theme.bold(entry.agent)}`)];
     const detail = entry.phase ?? entry.label;
-    if (detail) rows.push(clip(`     ${theme.fg("muted", `↳ ${detail}`)}`));
-    return rows;
+    const suffix = detail ? ` · ${theme.fg("muted", detail)}` : "";
+    return clip(
+      `   ${glyph} ${theme.bold(entry.agent)} · ${theme.fg(subagentTone(entry.status), subagentStatusLabel(entry.status))}${suffix}`,
+    );
   });
-  const hidden = subagents.length - visible.length;
-  if (hidden > 0)
-    lines.push(clip(`   ${theme.fg("muted", `↳ +${hidden} weitere`)}`));
-  return [summaryWithAttention, ...lines];
+  const hidden = ordered.slice(visible.length);
+  if (hidden.length > 0)
+    lines.push(clip(`   ${theme.fg("muted", `↳ ${subagentSummary(hidden)}`)}`));
+  return options.summary === false ? lines : [summaryWithAttention, ...lines];
 }

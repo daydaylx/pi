@@ -736,7 +736,7 @@ export const runtimeSections = {
           permissions: {},
           lsp: {},
           model: {},
-          activity: { kind: "idle", activeTools: 0 },
+          activity: { kind: "idle" },
         };
         auroraState.mergeAuroraUiState(state, {
           workflow: {
@@ -761,6 +761,11 @@ export const runtimeSections = {
           "Aurora merges the workflow label",
         );
         eq(state.lsp.state, "ready", "Aurora merges LSP patches");
+        eq(
+          auroraState.mergeAuroraUiState(state, { lsp: { state: "ready" } }),
+          false,
+          "Aurora ignores a state patch that changes no presentation data",
+        );
         assert(
           auroraState.isAuroraUiStateRequest({
             type: "request",
@@ -2949,21 +2954,35 @@ export const runtimeSections = {
       );
       eq(
         harness.chrome,
-        { footer: 1, editor: 0, widget: 1, header: 0 },
+        { footer: 1, editor: 1, widget: 1, header: 0 },
         "Aurora is the single custom chrome owner",
       );
       assert(
         Boolean(harness.footerFactory),
         "Aurora installs a footer factory",
       );
-      // The frame line above the editor is gone: the workflow it carried lives
-      // in the footer now, so Aurora leaves Pi's editor alone and the prompt is
-      // free to size itself to its own content.
       eq(
-        harness.editorFactory,
-        undefined,
-        "Aurora replaces no editor component",
+        typeof harness.editorFactory,
+        "function",
+        "Aurora installs a delegating visual editor",
       );
+      if (typeof harness.editorFactory === "function") {
+        const editor = harness.editorFactory(
+          { terminal: { rows: 24 }, requestRender() {} },
+          { borderColor: (value) => value, selectList: {} },
+          {},
+        );
+        editor.focused = true;
+        const rails = editor.render(80).map(stripAnsi).join("\n");
+        assert(
+          rails.includes("EINGABE") && rails.includes("Enter senden"),
+          "the Aurora editor adds focus rails without replacing core editing",
+        );
+        assert(
+          typeof editor.handleInput === "function",
+          "the Aurora editor keeps CustomEditor's input delegation",
+        );
+      }
       const welcomeWidget = harness.widgets.get("aurora-ui/activity")?.content;
       const welcome =
         typeof welcomeWidget === "function"
@@ -2976,7 +2995,7 @@ export const runtimeSections = {
               .join("\n")
           : "";
       assert(
-        welcome.includes("A U R O R A") &&
+        welcome.includes("PI · AURORA") &&
           welcome.includes("~/projects/aurora-test"),
         "a fresh session shows the responsive Aurora welcome with its cwd",
       );
@@ -3102,8 +3121,8 @@ export const runtimeSections = {
         // Segments give up their place whole rather than being shaved off at
         // the edge, so what remains stays readable.
         assert(
-          wide.includes("HOCH") && !narrow.includes("HOCH"),
-          "Aurora footer drops the thinking segment before it crowds a narrow line",
+          wide.includes("Denken HOCH") && narrow.includes("Denken HOCH"),
+          "Aurora retains the explicit thinking segment while the line has room",
         );
 
         assert(
@@ -3213,7 +3232,7 @@ export const runtimeSections = {
           permissions: { level: "project-write", label: "Projekt schreiben" },
           lsp: { state: "ready" },
           model: { id: "aurora-test-model", thinking: "high" },
-          activity: { kind: "idle", activeTools: 0 },
+          activity: { kind: "idle" },
           ...overrides,
         });
         const line = (width, input) =>
@@ -3236,13 +3255,13 @@ export const runtimeSections = {
         // The information priority from the UX brief, tier by tier.
         const quiet = { contextPercent: 38 };
         assert(
-          line(140, quiet).includes("ctx 38%") &&
+          line(140, quiet).includes("Kontext 38%") &&
             line(140, quiet).includes("HOCH") &&
             line(140, quiet).includes("~/…/pi"),
           "the wide footer shows thinking, folder and context",
         );
         assert(
-          !line(100, quiet).includes("ctx 38%") &&
+          line(100, quiet).includes("Kontext 38%") &&
             line(100, quiet).includes("HOCH") &&
             line(100, quiet).includes("~/…/pi"),
           "the comfortable footer drops context before thinking and compacts the folder",
@@ -3252,8 +3271,8 @@ export const runtimeSections = {
           standard.includes("Work") &&
             standard.includes("aurora-test-model") &&
             standard.includes("~/…/pi") &&
-            !standard.includes("HOCH"),
-          "the standard footer keeps workflow, model and folder",
+            standard.includes("Denken HOCH"),
+          "the standard footer keeps workflow, model, thinking and folder",
         );
         const compact = line(45, quiet);
         assert(
@@ -3304,16 +3323,14 @@ export const runtimeSections = {
         // a narrow line the way a genuine emergency may.
         for (const columns of [45, 70]) {
           assert(
-            !line(columns, { contextPercent: 75 }).includes("ctx 75%"),
+            !line(columns, { contextPercent: 75 }).includes("Kontext 75%"),
             `a 75% context does not claim space at ${columns} columns`,
           );
         }
         for (const columns of [100, 140]) {
           const filling = line(columns, { contextPercent: 75 });
           assert(
-            columns >= LAYOUT_COLUMNS.wide
-              ? filling.includes("ctx 75%")
-              : !filling.includes("ctx 75%"),
+            filling.includes("Kontext 75%"),
             `a 75% context follows the normal tier at ${columns} columns`,
           );
         }
@@ -3324,7 +3341,7 @@ export const runtimeSections = {
             state: footerState(),
           })[0];
           assert(
-            warned.includes(context.ui.theme.fg("warning", "ctx 75%")),
+            warned.includes(context.ui.theme.fg("warning", "Kontext 75%")),
             "a 75% context is coloured as a warning where it is shown",
           );
         }
@@ -3342,7 +3359,7 @@ export const runtimeSections = {
           );
           eq(critical.length, 1, `one line at ${columns} columns`);
           assert(
-            stripAnsi(critical[0]).includes("ctx 95%"),
+            stripAnsi(critical[0]).includes("Kontext 95%"),
             `an exhausted context survives the tier at ${columns} columns`,
           );
           assert(
@@ -3507,7 +3524,7 @@ export const runtimeSections = {
           ["verify", { check: "verify" }, "verification", "verify"],
           ["project_check", { profile: "verify" }, "verification", "verify"],
           ["subagent", { agent: "reviewer" }, "subagent", "reviewer"],
-          ["wait", { all: true }, "subagent", undefined],
+          ["wait", { all: true }, "wait", "alle Subagenten"],
           [
             "lsp_references",
             { path: "index.ts", line: 4, character: 2 },
@@ -3620,8 +3637,8 @@ export const runtimeSections = {
             context.ui.theme,
             45,
           ).length,
-          1,
-          "a compact terminal gets the summary line only",
+          2,
+          "a compact terminal keeps the active worker plus its summary",
         );
         const overflow = auroraTools
           .renderSubagents(
@@ -3681,7 +3698,7 @@ export const runtimeSections = {
           subagentContext,
         );
         assert(
-          render().includes("worker") && render().includes("SUBAGENTS · 1"),
+          render().includes("worker") && render().includes("LÄUFT"),
           "a foreground subagent appears straight from its tool start",
         );
         await subagentHarness.runHooks(
@@ -3726,9 +3743,9 @@ export const runtimeSections = {
           mode: "parallel",
         });
         assert(
-          render().includes("async-worker") &&
+            render().includes("async-worker") &&
             render().includes("reviewer") &&
-            render().includes("SUBAGENTS · 2"),
+            render().includes("WARTET"),
           "actual async-started data drives Aurora's transient subagent view",
         );
         await subagentHarness.runHooks(
@@ -4194,7 +4211,7 @@ export const runtimeSections = {
       await harness.runHooks("session_start", {}, context);
       eq(
         harness.chrome,
-        { footer: 1, editor: 0, widget: 1, header: 0 },
+        { footer: 1, editor: 1, widget: 1, header: 0 },
         "combined stack gives Aurora exclusive ownership of custom chrome",
       );
       eq(

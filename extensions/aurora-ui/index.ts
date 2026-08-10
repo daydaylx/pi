@@ -28,6 +28,7 @@ import {
   type SubagentInfo,
 } from "./tool-renderers.ts";
 import { renderFooterLines } from "./footer.ts";
+import { AuroraEditor } from "./editor.ts";
 import { crop } from "./layout.ts";
 import { renderStartscreen } from "./startscreen.ts";
 import { thinkingLabel, thinkingTone } from "./thinking.ts";
@@ -92,7 +93,10 @@ function agentNamesFromTaskList(value: unknown): string[] {
   });
 }
 
-function foregroundSubagentsFromArgs(args: unknown): SubagentInfo[] {
+function foregroundSubagentsFromArgs(
+  args: unknown,
+  runId: string,
+): SubagentInfo[] {
   const input = args as SubagentToolArgs | undefined;
   if (!input || input.action !== undefined || input.async === true) return [];
   const agents = [
@@ -103,6 +107,7 @@ function foregroundSubagentsFromArgs(args: unknown): SubagentInfo[] {
   return [...new Set(agents.length > 0 ? agents : ["subagent"])].map(
     (agent) => ({
       agent,
+      runId,
       status: "running",
     }),
   );
@@ -207,14 +212,14 @@ function makeState(
       id: ctx.model?.id,
       thinking: String(pi.getThinkingLevel()),
     },
-    activity: { kind: "idle", activeTools: 0 },
+    activity: { kind: "idle" },
   };
 }
 
 class AnimationTicker {
   private timer: ReturnType<typeof setInterval> | undefined;
   private tuiRefs = new Map<TUI, number>();
-  private animationActive = false;
+  private intervalMs: number | undefined;
   private disposed = false;
   frame = 0;
 
@@ -239,41 +244,124 @@ class AnimationTicker {
     for (const tui of this.tuiRefs.keys()) tui.requestRender();
   }
 
-  setAnimationActive(active: boolean): void {
-    // Reduced/off disable animated glyphs, not the time-based status itself.
-    // Keep a slower repaint alive so elapsed seconds and the derived WARTET
-    // transition remain visible without another runtime event.
-    this.animationActive = active;
-    if (this.animationActive && !this.timer && !this.disposed) {
-      const intervalMs =
-        this.motion === "contextual"
-          ? TICK_INTERVAL_MS
-          : STATUS_TICK_INTERVAL_MS;
-      this.timer = setInterval(() => {
-        if (this.motion === "contextual") {
-          this.frame = (this.frame + 1) % 10_000;
-          this.onFrame(this.frame);
-        }
-        this.requestRender();
-      }, intervalMs);
-    } else if (!this.animationActive && this.timer) {
+  setActivity(active: boolean, animate: boolean): void {
+    const intervalMs = active
+      ? this.motion === "contextual" && animate
+        ? TICK_INTERVAL_MS
+        : STATUS_TICK_INTERVAL_MS
+      : undefined;
+    if (intervalMs === this.intervalMs) return;
+    if (this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
     }
+    this.intervalMs = intervalMs;
+    if (!intervalMs || this.disposed) return;
+    this.timer = setInterval(() => {
+      this.frame = (this.frame + 1) % 10_000;
+      this.onFrame(this.frame);
+      this.requestRender();
+    }, intervalMs);
   }
 
   dispose(): void {
     this.disposed = true;
-    this.animationActive = false;
+    this.intervalMs = undefined;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     this.tuiRefs.clear();
   }
 }
 
-function workingFrame(theme: Theme, motion: MotionMode, frame: number): string {
+type DisplayActivityKind = "thinking" | "tool" | "responding" | "waiting";
+
+function activityPresentation(
+  state: AuroraUiState,
+  activeTools: number,
+  activeAsyncRuns: number,
+  now: number,
+  activityStartedAt: number,
+  lastRelevantActivityAt: number,
+): { kind: DisplayActivityKind; startedAt: number; label: string } {
+  const waiting =
+    state.activity.kind !== "tool" &&
+    activeTools === 0 &&
+    activeAsyncRuns === 0 &&
+    lastRelevantActivityAt > 0 &&
+    now - lastRelevantActivityAt >= WAITING_THRESHOLD_MS;
+  if (waiting)
+    return {
+      kind: "waiting",
+      startedAt: lastRelevantActivityAt + WAITING_THRESHOLD_MS,
+      label: "WARTET",
+    };
+  switch (state.activity.kind) {
+    case "thinking":
+      return { kind: "thinking", startedAt: activityStartedAt, label: "DENKT NACH" };
+    case "tool":
+      return { kind: "tool", startedAt: activityStartedAt, label: "ARBEITET" };
+    case "responding":
+      return { kind: "responding", startedAt: activityStartedAt, label: "ANTWORTET" };
+    case "idle":
+      return { kind: "waiting", startedAt: activityStartedAt, label: "WARTET" };
+  }
+}
+
+function hiddenActivitySummary(
+  hiddenTools: readonly ActiveToolView[],
+  hiddenSubagents: readonly SubagentInfo[],
+): string {
+  const parts: string[] = [];
+  if (hiddenTools.length > 0) {
+    const statuses = new Map<string, number>();
+    for (const tool of hiddenTools) {
+      const label =
+        tool.tone === "error"
+          ? "Fehler"
+          : tool.tone === "warning"
+            ? "Hinweis"
+            : "läuft";
+      statuses.set(label, (statuses.get(label) ?? 0) + 1);
+    }
+    const detail = [...statuses.entries()]
+      .map(([label, count]) => `${count} ${label}`)
+      .join(", ");
+    parts.push(`${hiddenTools.length} Tools${detail ? ` · ${detail}` : ""}`);
+  }
+  if (hiddenSubagents.length > 0) {
+    const statuses = new Map<string, number>();
+    for (const entry of hiddenSubagents) {
+      const label =
+        entry.status === "running"
+          ? "läuft"
+          : entry.status === "queued"
+            ? "wartet"
+            : entry.status === "paused"
+              ? "pausiert"
+              : "Aufmerksamkeit";
+      statuses.set(label, (statuses.get(label) ?? 0) + 1);
+    }
+    const detail = [...statuses.entries()]
+      .map(([label, count]) => `${count} ${label}`)
+      .join(", ");
+    parts.push(`${hiddenSubagents.length} Subagenten${detail ? ` · ${detail}` : ""}`);
+  }
+  return `↳ +${parts.join(" · ")}`;
+}
+
+function activityGlyph(
+  theme: Theme,
+  motion: MotionMode,
+  frame: number,
+  kind: "thinking" | "tool" | "responding" | "waiting",
+): string {
+  if (kind === "waiting") return theme.fg("muted", "·");
   if (motion === "off") return "";
   if (motion === "reduced") return theme.fg("accent", "●");
+  if (kind === "responding") {
+    const frames = ["·", "·", "•", "·"];
+    return theme.fg("muted", frames[frame % frames.length]!);
+  }
   const frames = ["·", "•", "●", "•"];
   const color = frame % frames.length === 2 ? "accent" : "muted";
   return theme.fg(color, frames[frame % frames.length]!);
@@ -334,75 +422,103 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const layout = layoutForSize(width, rows);
     const compact = layout === "compact";
     const now = Date.now();
-    const waiting =
-      state.activity.kind !== "tool" &&
-      activeTools.size === 0 &&
-      asyncSubagents.size === 0 &&
-      lastRelevantActivityAt > 0 &&
-      now - lastRelevantActivityAt >= WAITING_THRESHOLD_MS;
-    const displayKind = waiting ? "waiting" : state.activity.kind;
-    const label =
-      displayKind === "thinking"
-        ? "DENKT NACH"
-        : displayKind === "tool"
-          ? "ARBEITET"
-          : displayKind === "responding"
-            ? "ANTWORTET"
-            : "WARTET";
-    const phaseStartedAt = waiting
-      ? lastRelevantActivityAt + WAITING_THRESHOLD_MS
-      : activityStartedAt;
-    const elapsed = Math.max(0, Math.floor((now - phaseStartedAt) / 1000));
+    const presentation = activityPresentation(
+      state,
+      activeTools.size,
+      asyncSubagents.size,
+      now,
+      activityStartedAt,
+      lastRelevantActivityAt,
+    );
+    const elapsed = Math.max(
+      0,
+      Math.floor((now - presentation.startedAt) / 1000),
+    );
     const thinking =
-      displayKind === "thinking" ? ` · ${thinkingLabel(state.model.thinking)}` : "";
-    const glyph = workingFrame(theme, ticker?.motion ?? "off", ticker?.frame ?? 0);
-    const headingText = `${glyph ? `${glyph} ` : ""}${label}${thinking} · ${elapsed}s`;
+      presentation.kind === "thinking"
+        ? ` · ${thinkingLabel(state.model.thinking)}`
+        : "";
+    const glyph = activityGlyph(
+      theme,
+      ticker?.motion ?? "off",
+      ticker?.frame ?? 0,
+      presentation.kind,
+    );
+    const headingText = `${glyph ? `${glyph} ` : ""}${presentation.label}${thinking} · ${elapsed}s`;
     const heading = theme.fg(
-      displayKind === "thinking" ? thinkingTone(state.model.thinking) : "accent",
+      presentation.kind === "thinking" ? thinkingTone(state.model.thinking) :
+        presentation.kind === "waiting" ? "muted" : "accent",
       theme.bold(headingText),
     );
     const contentWidth = Math.max(1, width - (compact ? 0 : 3));
-    const tools = renderActiveTools(
-      [...activeTools.values()],
-      theme,
-      contentWidth,
-      Date.now(),
-      { compact },
-    );
-    const subagents = fleetDockOwnsSubagents
+    const toolViews = [...activeTools.values()];
+    const agentViews = fleetDockOwnsSubagents
       ? []
-      : renderSubagents(subagentsCache, theme, contentWidth, { compact });
-    if (compact) return [crop(heading, width), ...tools, ...subagents];
-    if (tools.length === 0 && subagents.length === 0)
-      return [crop(heading, width)];
+      : [...subagentsCache].sort(
+          (a, b) =>
+            Number(b.status === "needs_attention") -
+            Number(a.status === "needs_attention"),
+        );
+    const detailBudget = Math.max(0, Math.min(8, Math.max(1, rows - 6)) - 1);
+    const allDetails = [
+      ...renderActiveTools(
+        toolViews,
+        theme,
+        contentWidth,
+        now,
+        {
+          compact,
+          wide: layout === "wide",
+          limit: Number.POSITIVE_INFINITY,
+        },
+      ),
+      ...renderSubagents(agentViews, theme, contentWidth, {
+        compact,
+        limit: Number.POSITIVE_INFINITY,
+        summary: false,
+      }),
+    ];
+    const overflow = allDetails.length > detailBudget;
+    const visibleDetails = overflow
+      ? allDetails.slice(0, Math.max(0, detailBudget - 1))
+      : allDetails;
+    const visibleToolCount = Math.min(toolViews.length, visibleDetails.length);
+    const visibleAgentCount = Math.max(0, visibleDetails.length - visibleToolCount);
+    const details = overflow
+      ? [
+          ...visibleDetails,
+          theme.fg(
+            "muted",
+            hiddenActivitySummary(
+              toolViews.slice(visibleToolCount),
+              agentViews.slice(visibleAgentCount),
+            ),
+          ),
+        ]
+      : visibleDetails;
+    if (compact) return [crop(heading, width), ...details];
+    if (details.length === 0) return [crop(heading, width)];
 
-    const rail = (glyph: "├─" | "╰─") => theme.fg("borderMuted", `${glyph} `);
-    const toolRows = tools.map(
-      (line, index) =>
-        `${rail(subagents.length > 0 || index < tools.length - 1 ? "├─" : "╰─")}${line}`,
-    );
-    const subagentRows =
-      subagents.length === 0
-        ? []
-        : [`${rail("╰─")}${subagents[0]}`, ...subagents.slice(1)];
+    const rail = (last: boolean) =>
+      theme.fg("borderMuted", `${last ? "╰─" : "├─"} `);
     return [
       crop(heading, width),
       theme.fg("borderMuted", "│"),
-      ...toolRows,
-      ...subagentRows,
+      ...details.map((line, index) =>
+        `${rail(index === details.length - 1)}${line}`,
+      ),
     ];
   }
 
   function mergeSubagents(): void {
     const byKey = new Map<string, SubagentInfo>();
-    // A foreground tool call is the most immediate fact available, so it wins
-    // over the async launch event for the same agent while both are current.
+    // Event-provided run ids keep simultaneous equal-named agents distinct.
     for (const entry of [
       ...[...asyncSubagents.values()].flat(),
       ...[...foregroundSubagents.values()].flat(),
     ]) {
       byKey.set(
-        `${entry.agent}\u0000${entry.phase ?? ""}\u0000${entry.label ?? ""}`,
+        `${entry.runId ?? entry.agent}\u0000${entry.agent}`,
         entry,
       );
     }
@@ -424,15 +540,16 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     if (asyncSubagents.size === 0) return;
     updateActivity(ctx, {
       kind: "tool",
-      label: `${subagentsCache.length} Subagent${subagentsCache.length === 1 ? "" : "en"} aktiv`,
-      activeTools: activeTools.size,
     });
   }
 
   function applyWorking(ctx: ExtensionContext): void {
     if (!state || !ticker) return;
     const active = state.activity.kind !== "idle";
-    ticker.setAnimationActive(active);
+    ticker.setActivity(
+      active,
+      state.activity.kind === "thinking" || state.activity.kind === "tool",
+    );
 
     // Aurora's activity widget is the single live-work surface. Keeping Pi's
     // native indicator visible as well creates a second moving signal next to
@@ -440,22 +557,27 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     ctx.ui.setWorkingVisible(false);
   }
 
-  function updateState(ctx: ExtensionContext, patch: AuroraUiStatePatch): void {
+  function updateState(
+    ctx: ExtensionContext,
+    patch: AuroraUiStatePatch,
+  ): boolean {
     if (
       !state ||
       disposed ||
       ctx.sessionManager.getSessionId() !== activeSessionId
     )
-      return;
-    mergeAuroraUiState(state, patch);
+      return false;
+    const changed = mergeAuroraUiState(state, patch);
+    if (!changed) return false;
     ticker?.requestRender();
     if (patch.activity) applyWorking(ctx);
+    return true;
   }
 
   /** Update a real Activity state and its local display timing together. */
   function updateActivity(
     ctx: ExtensionContext,
-    activity: AuroraUiStatePatch["activity"],
+    activity: NonNullable<AuroraUiStatePatch["activity"]>,
   ): void {
     const previousKind = state?.activity.kind;
     const nextKind = activity?.kind ?? previousKind;
@@ -474,7 +596,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         activityStartedAt = now;
       lastRelevantActivityAt = now;
     }
-    updateState(ctx, { activity });
+    if (!updateState(ctx, { activity })) ticker?.requestRender();
   }
 
   /** A concrete event replaces a derived WARTET label without adding a state. */
@@ -558,8 +680,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         ) {
           updateActivity(ctx, {
             kind: turnSettledWhileAsync ? "idle" : "responding",
-            label: undefined,
-            activeTools: 0,
           });
         }
       }),
@@ -606,6 +726,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const uiContext = ctx ?? activeContext;
     if (uiContext?.mode === "tui" && uiContext.hasUI) {
       uiContext.ui.setFooter(undefined);
+      uiContext.ui.setEditorComponent(undefined);
       uiContext.ui.setWidget(ACTIVITY_WIDGET, undefined);
       uiContext.ui.setWorkingVisible(false);
       uiContext.ui.setWorkingMessage();
@@ -664,6 +785,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       );
     }
 
+    ctx.ui.setEditorComponent((tui, editorTheme, keybindings) =>
+      new AuroraEditor(tui, editorTheme, keybindings, ctx.ui.theme),
+    );
+
     ticker = new AnimationTicker(loaded.config.ui.motion, () => {});
 
     const sessionCtx = ctx;
@@ -718,7 +843,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       loaded.config.ui.motion === "off"
         ? { frames: [] }
         : {
-            frames: [workingFrame(ctx.ui.theme, loaded.config.ui.motion, 0)],
+        frames: [activityGlyph(ctx.ui.theme, loaded.config.ui.motion, 0, "tool")],
           },
     );
     installBus(ctx);
@@ -737,10 +862,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     refreshSubagentDisplay();
     updateActivity(ctx, {
       kind: "thinking",
-      // The real configured depth, never a guess: this is the only place
-      // thinking is visible while `hideThinkingBlock` is set.
-      label: `Thinking · ${pi.getThinkingLevel()}`,
-      activeTools: 0,
     });
   });
 
@@ -752,15 +873,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       startedAt: Date.now(),
     });
     if (event.toolName === "subagent") {
-      const subagents = foregroundSubagentsFromArgs(event.args);
+      const subagents = foregroundSubagentsFromArgs(event.args, event.toolCallId);
       if (subagents.length > 0)
         foregroundSubagents.set(event.toolCallId, subagents);
       refreshSubagentDisplay();
     }
     updateActivity(ctx, {
       kind: "tool",
-      label: `${activeTools.size} Tool${activeTools.size === 1 ? "" : "s"} aktiv`,
-      activeTools: activeTools.size,
     });
   });
 
@@ -784,20 +903,14 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       activeTools.size > 0
         ? {
             kind: "tool",
-            label: `${activeTools.size} Tool${activeTools.size === 1 ? "" : "s"} aktiv`,
-            activeTools: activeTools.size,
           }
         : asyncSubagents.size > 0
           ? {
               kind: "tool",
-              label: `${subagentsCache.length} Subagent${subagentsCache.length === 1 ? "" : "en"} aktiv`,
-              activeTools: 0,
             }
           : {
-              kind: "responding",
-              label: undefined,
-              activeTools: 0,
-            },
+            kind: "responding",
+          },
     );
   });
 
@@ -814,8 +927,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     // clear this surface; a first text_delta must never erase it.
     updateActivity(ctx, {
       kind: "responding",
-      label: undefined,
-      activeTools: 0,
     });
   });
 
@@ -837,7 +948,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       retainAsyncActivity(ctx);
       return;
     }
-    updateActivity(ctx, { kind: "idle", label: undefined, activeTools: 0 });
+    updateActivity(ctx, { kind: "idle" });
   };
   pi.on("agent_end", settle);
   pi.on("agent_settled", settle);

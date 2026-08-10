@@ -17,7 +17,7 @@
   },
   "colors": {
     "accent": "cyan",
-    "border": "violet",
+    "border": "dim",
     "borderAccent": "cyan",
     "borderMuted": "dim",
     "success": "green",
@@ -63,10 +63,10 @@
     "thinkingOff": "dim",
     "thinkingMinimal": "muted",
     "thinkingLow": "cyan",
-    "thinkingMedium": "violet",
-    "thinkingHigh": "magenta",
-    "thinkingXhigh": "red",
-    "thinkingMax": "amber",
+    "thinkingMedium": "#78BDF2",
+    "thinkingHigh": "#9BA8F5",
+    "thinkingXhigh": "#B7A2F6",
+    "thinkingMax": "#C4B5FD",
     "bashMode": "green"
   },
   "export": {

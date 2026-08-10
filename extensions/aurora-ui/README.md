@@ -1,15 +1,16 @@
 # Aurora UI
 
-Aurora UI owns Pi's footer, its transient activity widget and the working
-indicator while the extension is active. It uses only the public extension UI
-and lifecycle hooks. Core tools are not replaced or wrapped, and the editor is
-Pi's own — Aurora installs no editor component.
+Aurora UI owns Pi's footer, its transient activity widget, the working
+indicator and the visual editor rails while the extension is active. It uses
+only public extension UI and lifecycle hooks. Core tools are not replaced or
+wrapped; the Aurora editor delegates editing, history, completion and shortcuts
+unchanged to Pi's `CustomEditor`.
 
 The theme is `themes/aurora-night.json`. Motion is read from the effective
 central setup configuration (`ui.motion`). One shared ticker runs only while
-work is visible: `contextual` repaints every 100 ms for animation, while
-`reduced` and `off` repaint once per second only to keep elapsed time and the
-`WARTET` transition current.
+work is visible: active thinking and tools animate every 100 ms in
+`contextual`; responding uses a subtle one-second pulse, and static states
+repaint once per second only for elapsed time and the `WARTET` transition.
 
 - `contextual`: animated activity indicator.
 - `reduced`: static activity indicator.
@@ -72,6 +73,6 @@ answer on `aurora-ui/state/snapshot`, then publish later changes on
 epochs. `publishAuroraUiPatch` and `publishAuroraUiSnapshot` are the typed
 publisher helpers.
 
-Cleanup on session replacement, reload and shutdown restores the core footer and
-working indicator, removes the widget, unsubscribes from the event bus, cancels
-any pending subagent request and stops the shared ticker.
+Cleanup on session replacement, reload and shutdown restores the core footer,
+editor and working indicator, removes the widget, unsubscribes from the event
+bus, cancels any pending subagent request and stops the shared ticker.

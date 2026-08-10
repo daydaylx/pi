@@ -31,8 +31,10 @@ Sie trägt in dieser Reihenfolge: Arbeitsablauf, Modell, Denktiefe, Kontext,
 Verifikationsstand — und verdrängend davor alles Riskante (YOLO, gescheiterte
 Verifikation, gestörter LSP).
 
-Aurora ersetzt **keine Editorkomponente** mehr. Der Rahmen über dem Eingabefeld
-ist ersatzlos entfallen; der Arbeitsablauf, den er trug, steht jetzt links in der
+Aurora zeigt keine zweite Statusfläche am Editor. Es installiert einen schmalen
+`CustomEditor`-Ableger, der ausschließlich die beiden horizontalen Eingaberails
+beschriftet und alle Bearbeitungs-, History-, Completion- und Shortcutpfade an
+Pi delegiert. Der Arbeitsablauf steht weiterhin ausschließlich links in der
 Fußzeile.
 
 ## Begründung
@@ -44,7 +46,9 @@ Dokumentation, ohne dass ein Test das bemerkt.
 Für die Aufteilung auf zwei Flächen galt dasselbe in kleinerem Maßstab. Ein Wert
 war nur deshalb im Rahmen statt in der Fußzeile, weil er historisch dort stand.
 Eine Fläche weniger heißt: eine Zeile mehr für Chat und Eingabe, keine Frage
-mehr, wo ein Status steht, und kein Layout-Sprung über dem Eingabefeld.
+mehr, wo ein Status steht, und kein Layout-Sprung über dem Eingabefeld. Die
+später ergänzten Eingaberails tragen keinen Systemstatus und reservieren keine
+zusätzliche Zeile; sie schaffen deshalb keine konkurrierende Fläche.
 
 Was die Fußzeile nicht mehr zeigt — Git-Branch, Sitzungsname und
 Tokenzähler —, ist auf Abruf verfügbar (`/session`). Eine permanente Zeile ist
