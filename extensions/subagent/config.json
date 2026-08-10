@@ -1,10 +1,5 @@
 {
   "toolDescriptionMode": "custom",
-  "parallel": {
-    "maxTasks": 4,
-    "concurrency": 3
-  },
-  "globalConcurrencyLimit": 3,
   "maxSubagentSpawnsPerSession": 5,
   "ui": {
     "showAsyncWidget": false,

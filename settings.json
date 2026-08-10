@@ -41,7 +41,7 @@
     "openrouter/openai/gpt-oss-120b"
   ],
   "packages": [
-    "git:github.com/daydaylx/pi-subagents@170a2808d18dc0fc52f1864e82f0d28bfa4a1355"
+    "git:github.com/daydaylx/pi-subagents@2004b72"
   ],
   "subagents": {
     "disableBuiltins": true
