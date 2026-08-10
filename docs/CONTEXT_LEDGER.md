@@ -30,16 +30,33 @@
   Workspace-Snapshot gebunden und rein technisch. Er erscheint dedupliziert
   bei `agent_settled`, ist abschaltbar und nutzt weder `agent_end` als
   Erledigung noch Heuristiken als `blocked`.
-- Aurora ist alleiniger Besitzer der TUI-Chrome inklusive Fußzeile
+- Aurora besitzt Fußzeile und transientes Activity-Widget
   (`docs/decisions/007`, `docs/decisions/009`). Die Fußzeile ist eine einzige
-  Zeile und die einzige permanente Statusfläche; der Editorrahmen ist entfallen,
-  Pis Editor bleibt unersetzt. Subagenten stehen im transienten
-  Activity-Widget, nicht in der Fußzeile.
+  Zeile und die einzige permanente Statusfläche. Das Eingabefeld ist Pis
+  eigener Editor: Aurora installiert keine Editor-Komponente mehr
+  (`docs/decisions/013`), sodass `editorPaddingX` und
+  `autocompleteMaxVisible` aus `settings.json` wieder wirken. Subagenten
+  stehen im Activity-Widget, nicht in der Fußzeile.
+- Aurora animiert nur echte laufende Arbeit: `DENKT NACH` und `ARBEITET`
+  wechseln in `contextual` ihren Glyph, `ANTWORTET` und `WARTET` bleiben
+  statisch und werden nur für die Laufzeitanzeige neu gezeichnet. Statuslabels,
+  Ton-Zuordnung und Overflow-Zusammenfassung liegen ausschließlich in
+  `extensions/aurora-ui/tool-renderers.ts`.
 - Größenklassen für Menüs und Fußzeile stehen gemeinsam in
   `extensions/shared/layout.ts` (52×14 / 90×28 / 120×30) und werden nirgends
   als Literal wiederholt.
 - Es gibt genau drei aktive Subagentenrollen — `investigator`, `debugger`,
-  `verifier` (`docs/decisions/011`).
+  `verifier` (`docs/decisions/011`). Die `verifier`-Delegation ist
+  risikobasiert: verpflichtend nur bei Sicherheits-, Permission-/Plan-Mode-,
+  Workflow-/Activity-State-, API-/Schema-, Installations-/Upgrade- oder
+  Verifikationslogik, hohem Blast-Radius oder auf ausdrückliche
+  Nutzeranforderung. Mehrere betroffene Dateien allein lösen keine Pflicht aus.
+- Die Subagent-Tool-Surface wird durch `toolSchemaMode: "harness"` reduziert,
+  nicht mehr als Nebenwirkung von `toolDescriptionMode: "custom"`
+  (`docs/decisions/014`). `action` ist ein geschlossenes Enum aus `list`,
+  `status`, `stop`, `interrupt`; zusätzliche Eigenschaften werden abgelehnt.
+  Es gibt keine Subagent-Parallelitätskonfiguration mehr — sie hatte keinen
+  Laufzeitverbraucher.
 - Shift+Tab ist die einzige normale Workflow-Steuerung: Die Auswahl Work,
   Schnellplan oder Architekturplan wartet danach auf die nächste echte
   Nutzereingabe, startet keinen Turn und verändert keine vorhandene
@@ -69,10 +86,10 @@
   noch aus.
 - Vorbestehende Änderungen im Arbeitsbaum außerhalb des Hardening-Scopes
   müssen erhalten bleiben.
-- Der kanonische Verify-Lauf bleibt derzeit außerhalb des AP3-Scopes rot:
-  `extensions/aurora-ui/index.ts` liegt mit 97,4 % unter der geforderten
-  100-%-Coverage. Der Befund ist nach AP3 bestätigt, die Datei ist nicht Teil
-  des AP3-Diffs.
+- Der Fork `daydaylx/pi-subagents` ist im Typecheck vorbestehend rot
+  (Testdateien und Altbestände in `src/`). Er ist deshalb nicht Teil einer
+  Pflichtprüfung des Hauptrepos; seine Unit-, Integrations- und E2E-Suiten
+  sind grün.
 
 ## Offene Risiken
 
@@ -102,8 +119,9 @@ _Keine offenen Fragen._
 ## Aktuelle Prioritäten
 
 - P2-Cleanup: Restkomplexität, Dokumentation, Knip-Regeln.
-- Die verbleibenden Arbeitspakete aus `resprobleme_auftrag` in der festgelegten
-  Reihenfolge fortsetzen; AP1–AP3 sind abgeschlossen.
+- Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA. Vor jeder
+  Pin-Änderung die Erreichbarkeit manuell prüfen; die lokale Test-Suite bleibt
+  bewusst offline.
 
 ## Verworfene Optionen
 

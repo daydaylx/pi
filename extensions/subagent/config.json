@@ -1,10 +1,9 @@
 {
   "toolDescriptionMode": "custom",
+  "toolSchemaMode": "harness",
   "maxSubagentSpawnsPerSession": 5,
   "ui": {
     "showAsyncWidget": false,
-    "fleetView": false,
-    "fleetViewPlacement": "belowEditor",
-    "asyncWidget": false
+    "fleetView": false
   }
 }

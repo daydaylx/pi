@@ -302,24 +302,32 @@ export const runtimeSections = {
           5,
           "active package config directly bounds spawns per session",
         );
+        // The reduced parameter surface is registered by toolSchemaMode alone.
+        // toolDescriptionMode only replaces the visible description text.
         eq(
-          setup.subagents,
-          { concurrency: 3 },
-          "setup.json supplies only the concurrency baseline",
+          subagentConfig.toolSchemaMode,
+          "harness",
+          "the reduced tool surface is requested explicitly",
         );
         eq(
-          schema.properties.subagents.required,
-          ["concurrency"],
-          "setup schema requires only the concurrency baseline",
+          subagentConfig.toolDescriptionMode,
+          "custom",
+          "the visible tool description stays project-owned",
         );
-        eq(
-          schema.properties.subagents.properties,
-          { concurrency: { type: "integer", minimum: 1, maximum: 8 } },
-          "setup schema exposes no runtime package limits",
+        // Nothing in the active harness consumes a subagent concurrency
+        // baseline any more, so keeping one would be configuration without a
+        // runtime consumer.
+        assert(
+          !Object.hasOwn(setup, "subagents"),
+          "setup.json carries no dead subagent parallelism baseline",
         );
         assert(
-          setup.subagents.concurrency >= 1,
-          "setup concurrency baseline remains valid for non-harness tooling",
+          !Object.hasOwn(schema.properties, "subagents"),
+          "setup schema carries no dead subagent parallelism baseline",
+        );
+        assert(
+          !schema.required.includes("subagents"),
+          "setup schema no longer requires a subagent section",
         );
         // Verify installer ALLOWLIST covers every active extension's
         // runtime imports (no string-grep; real structural assertions).
@@ -586,6 +594,16 @@ export const runtimeSections = {
         );
         mkdirSync(path.dirname(legacyDescription), { recursive: true });
         writeFileSync(legacyDescription, "# legacy installer description");
+        // Aurora dropped its editor component; an older install still carries
+        // the file, and the upgrade has to remove it rather than orphan it.
+        const legacyEditor = path.join(
+          target,
+          "extensions",
+          "aurora-ui",
+          "editor.ts",
+        );
+        mkdirSync(path.dirname(legacyEditor), { recursive: true });
+        writeFileSync(legacyEditor, "// legacy Aurora editor");
         const userFile = path.join(target, "agents", "custom-user-agent.md");
         writeFileSync(userFile, "# user-owned custom agent");
 
@@ -862,14 +880,20 @@ export const runtimeSections = {
           harness.notifications
             .at(-1)
             ?.message?.includes(
-              "subagent baseline (setup.json): concurrency=3",
+              "subagent tool surface: schema=harness, description=custom",
             ) &&
             harness.notifications
               .at(-1)
               ?.message?.includes(
-                "active subagent package config: reduced harness surface (parallel disabled)",
+                "active subagent package config: reduced harness surface (single execution, list/status/stop/interrupt)",
               ),
-          "setup doctor distinguishes the setup baseline from active package config",
+          "setup doctor reports both tool-surface settings and the active surface",
+        );
+        assert(
+          !harness.notifications
+            .at(-1)
+            ?.message?.includes("subagent baseline (setup.json)"),
+          "setup doctor no longer reports a removed concurrency baseline",
         );
         assert(
           !harness.notifications
@@ -2970,37 +2994,23 @@ export const runtimeSections = {
         "aurora-night",
         "Aurora activates its central theme",
       );
+      // Aurora owns the footer and the activity widget only. The editor stays
+      // Pi's own component, so its padding, autocomplete and shortcuts come
+      // from the runtime settings rather than from a decorative subclass.
       eq(
         harness.chrome,
-        { footer: 1, editor: 1, widget: 1, header: 0 },
-        "Aurora is the single custom chrome owner",
+        { footer: 1, editor: 0, widget: 1, header: 0 },
+        "Aurora is the single custom chrome owner and leaves the editor alone",
       );
       assert(
         Boolean(harness.footerFactory),
         "Aurora installs a footer factory",
       );
       eq(
-        typeof harness.editorFactory,
-        "function",
-        "Aurora installs a delegating visual editor",
+        harness.editorFactory,
+        undefined,
+        "Aurora installs no editor component of its own",
       );
-      if (typeof harness.editorFactory === "function") {
-        const editor = harness.editorFactory(
-          { terminal: { rows: 24 }, requestRender() {} },
-          { borderColor: (value) => value, selectList: {} },
-          {},
-        );
-        editor.focused = true;
-        const rails = editor.render(80).map(stripAnsi).join("\n");
-        assert(
-          rails.includes("EINGABE") && rails.includes("Enter senden"),
-          "the Aurora editor adds focus rails without replacing core editing",
-        );
-        assert(
-          typeof editor.handleInput === "function",
-          "the Aurora editor keeps CustomEditor's input delegation",
-        );
-      }
       const welcomeWidget = harness.widgets.get("aurora-ui/activity")?.content;
       const welcome =
         typeof welcomeWidget === "function"
@@ -4065,6 +4075,128 @@ export const runtimeSections = {
         }
       }
 
+      // Only thinking and running tools are moving work. Responding keeps a
+      // fixed glyph while the slow status ticker still repaints the line, so
+      // the glyph is sampled across a full four-frame cycle of the old pulse.
+      {
+        const headGlyph = () => {
+          const rendered =
+            typeof widget === "function"
+              ? stripAnsi(
+                  widget({ requestRender() {} }, context.ui.theme).render(120)[0],
+                )
+              : "";
+          return rendered.slice(0, rendered.indexOf(" "));
+        };
+        const samples = [headGlyph()];
+        for (let tick = 0; tick < 3; tick += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1_050));
+          // Keep the turn in Responding; without a concrete event the clock
+          // would derive WARTET and change the glyph for that reason instead.
+          await harness.runHooks(
+            "message_update",
+            { assistantMessageEvent: { type: "text_delta" } },
+            context,
+          );
+          samples.push(headGlyph());
+        }
+        eq(
+          [...new Set(samples)],
+          [samples[0]],
+          "ANTWORTET keeps one static glyph while the status ticker runs",
+        );
+        assert(
+          samples[0] !== "·",
+          "the static responding glyph stays distinguishable from WARTET",
+        );
+      }
+
+      // The same widget, in the same contextual motion mode, must still animate
+      // while the model is thinking.
+      {
+        await harness.runHooks("agent_start", {}, context);
+        const thinkingGlyph = () => {
+          const rendered =
+            typeof widget === "function"
+              ? stripAnsi(
+                  widget({ requestRender() {} }, context.ui.theme).render(120)[0],
+                )
+              : "";
+          return rendered.slice(0, rendered.indexOf(" "));
+        };
+        const frames = new Set([thinkingGlyph()]);
+        for (let tick = 0; tick < 4; tick += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 110));
+          frames.add(thinkingGlyph());
+        }
+        assert(
+          frames.size > 1,
+          "DENKT NACH still animates in contextual motion",
+        );
+      }
+
+      // The overflow line is the widget's only place where counts and status
+      // labels are aggregated, and it must show both surfaces at once.
+      {
+        for (let index = 0; index < 8; index += 1) {
+          await harness.runHooks(
+            "tool_execution_start",
+            {
+              toolCallId: `overflow-tool-${index}`,
+              toolName: "read",
+              args: { path: `src/overflow-${index}.ts` },
+            },
+            context,
+          );
+        }
+        await harness.runHooks(
+          "tool_execution_update",
+          {
+            toolCallId: "overflow-tool-7",
+            toolName: "read",
+            partialResult: { isError: true },
+          },
+          context,
+        );
+        harness.api.events.emit("subagent:async-started", {
+          id: "overflow-async",
+          sessionId: context.sessionManager.getSessionId(),
+          agents: ["investigator", "debugger"],
+        });
+        const overflowRendered =
+          typeof widget === "function"
+            ? widget(
+                { terminal: { columns: 140, rows: 30 }, requestRender() {} },
+                context.ui.theme,
+              )
+                .render(140)
+                .map(stripAnsi)
+                .join("\n")
+            : "";
+        assert(
+          overflowRendered.includes(
+            "↳ +2 Tools · 1 läuft, 1 fehler · 2 Subagenten · 2 wartet",
+          ),
+          "the overflow line counts both hidden surfaces with the shared status labels",
+        );
+        assert(
+          !overflowRendered.includes("Fehler") &&
+            !overflowRendered.includes("Aufmerksamkeit"),
+          "the overflow line uses the shared lowercase status labels, not a second wording",
+        );
+        for (let index = 0; index < 8; index += 1) {
+          await harness.runHooks(
+            "tool_execution_end",
+            { toolCallId: `overflow-tool-${index}`, toolName: "read" },
+            context,
+          );
+        }
+        harness.api.events.emit("subagent:async-complete", {
+          id: "overflow-async",
+          sessionId: context.sessionManager.getSessionId(),
+        });
+      }
+
       for (const motion of ["reduced", "off"]) {
         const workspace = mkdtempSync(path.join(tmpdir(), "aurora-motion-"));
         try {
@@ -4229,7 +4361,7 @@ export const runtimeSections = {
       await harness.runHooks("session_start", {}, context);
       eq(
         harness.chrome,
-        { footer: 1, editor: 1, widget: 1, header: 0 },
+        { footer: 1, editor: 0, widget: 1, header: 0 },
         "combined stack gives Aurora exclusive ownership of custom chrome",
       );
       eq(

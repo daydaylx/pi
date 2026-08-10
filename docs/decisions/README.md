@@ -11,6 +11,8 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [010](010-compaction-recent-context-budget.md) — Recent-Context-Budget bleibt bei 12 KiB
 - [011](011-investigator-debugger-verifier.md) — Investigator, Debugger, Verifier ersetzen Planner, Worker, Reviewer
 - [012](012-plan-mode-mutation-guard.md) — Plan Mode bekommt einen technischen Mutationsschutz
+- [013](013-aurora-keeps-the-native-editor.md) — Aurora behält Pis nativen Editor (ersetzt den Editor-Teil von 009)
+- [014](014-reduced-subagent-tool-surface.md) — Die reduzierte Subagent-Tool-Surface ist ein eigener Schalter
 
 ## Historische, ersetzte Entscheidungen
 

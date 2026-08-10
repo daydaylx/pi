@@ -1,16 +1,19 @@
 # Aurora UI
 
-Aurora UI owns Pi's footer, its transient activity widget, the working
-indicator and the visual editor rails while the extension is active. It uses
-only public extension UI and lifecycle hooks. Core tools are not replaced or
-wrapped; the Aurora editor delegates editing, history, completion and shortcuts
-unchanged to Pi's `CustomEditor`.
+Aurora UI owns Pi's footer, its transient activity widget and the working
+indicator while the extension is active. It uses only public extension UI and
+lifecycle hooks. Core tools are not replaced or wrapped, and the editor stays
+Pi's own component: Aurora installs no editor of its own, so editing, history,
+completion, shortcuts and the `editorPaddingX` / `autocompleteMaxVisible`
+settings all come from the runtime (see
+`docs/decisions/013-aurora-keeps-the-native-editor.md`).
 
 The theme is `themes/aurora-night.json`. Motion is read from the effective
 central setup configuration (`ui.motion`). One shared ticker runs only while
-work is visible: active thinking and tools animate every 100 ms in
-`contextual`; responding uses a subtle one-second pulse, and static states
-repaint once per second only for elapsed time and the `WARTET` transition.
+work is visible. Only real moving work animates: in `contextual`, active
+thinking and running tools cycle their glyph every 100 ms, while `ANTWORTET`
+and `WARTET` keep a fixed glyph and repaint once per second for the elapsed
+time and the `WARTET` transition alone.
 
 - `contextual`: animated activity indicator.
 - `reduced`: static activity indicator.
@@ -32,7 +35,10 @@ it starts no process, probes neither git nor the LSP, asks no provider and reads
 no file. It is called on every frame, so anything else would be paid for
 continuously.
 
-**Activity widget** (`tool-renderers.ts`) — transient, above the editor. On a
+**Activity widget** (`tool-renderers.ts`) — transient, above the editor. The
+status labels, the tone mapping, the tool and subagent counts and the overflow
+summary all live in `tool-renderers.ts`; `index.ts` only decides how many rows
+fit and asks for the overflow line. On a
 fresh empty session it briefly serves as the Aurora welcome; once a turn starts,
 it carries the thinking line and only currently running work. Finished tools
 leave the widget immediately rather than turning into a success block. The
@@ -73,6 +79,6 @@ answer on `aurora-ui/state/snapshot`, then publish later changes on
 epochs. `publishAuroraUiPatch` and `publishAuroraUiSnapshot` are the typed
 publisher helpers.
 
-Cleanup on session replacement, reload and shutdown restores the core footer,
-editor and working indicator, removes the widget, unsubscribes from the event
-bus, cancels any pending subagent request and stops the shared ticker.
+Cleanup on session replacement, reload and shutdown restores the core footer
+and working indicator, removes the widget, unsubscribes from the event bus,
+cancels any pending subagent request and stops the shared ticker.

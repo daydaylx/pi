@@ -56,15 +56,20 @@ Completion, Recovery, Migration oder Planpflicht.
 
 Es gibt ausschließlich drei lokale Rollen: `investigator` für die belegte
 Analyse unbekannter Bereiche, `debugger` für Reproduktion und Diagnose
-unbekannter Bugs sowie `verifier` für die unabhängige Prüfung nichttrivialer
+unbekannter Bugs sowie `verifier` für die unabhängige Prüfung riskanter
 Umsetzungen. Planung, Implementierung und finale Kommunikation bleiben beim
-Hauptagenten; Delegation und Verifikation sind nie automatische Pflichtketten.
+Hauptagenten; Delegation ist nie eine automatische Pflichtkette. Der
+`verifier` ist nur bei den in `AGENTS.md` aufgezählten Risikofaktoren
+verpflichtend — der Umfang eines Diffs allein löst keine Delegation aus.
 
 Die Paket-Builtins sind in `settings.json` mit
 `subagents.disableBuiltins: true` deaktiviert. Die aktive Paketkonfiguration
-steht direkt in `extensions/subagent/config.json`: `parallel.maxTasks: 4`,
-`parallel.concurrency: 3`, `globalConcurrencyLimit: 3` und
-`maxSubagentSpawnsPerSession: 5`. Frischer Kontext und das Verbot
+steht direkt in `extensions/subagent/config.json`: `toolSchemaMode: "harness"`
+reduziert die akzeptierten Parameter auf SINGLE-Ausführung sowie `list`,
+`status`, `stop` und `interrupt`; `toolDescriptionMode: "custom"` steuert nur
+den sichtbaren Beschreibungstext; `maxSubagentSpawnsPerSession: 5` begrenzt die
+Starts pro Sitzung. Es gibt keine Parallelitätskonfiguration — das Harness
+führt keine parallelen Subagenten aus. Frischer Kontext und das Verbot
 verschachtelter Delegation sind Eigenschaften der drei Profil-Tools.
 
 ## Berechtigungen und Freigaben

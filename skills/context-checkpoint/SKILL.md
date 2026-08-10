@@ -50,6 +50,29 @@ umformuliert, verdichtet und schreibt.
 6. Halte `docs/PROJECT_STATE.md` unter 250 Zeilen und dupliziere keine
    dauerhaften Fakten, die bereits im Ledger stehen — dort referenzieren.
 
+## Wann ein Checkpoint fällig ist
+
+Diese Ablaufregeln greifen nur in längeren oder gestörten Sitzungen und stehen
+deshalb hier statt in `AGENTS.md`:
+
+- Bei langen zusammenhängenden Aufgaben vor Compaction, Modellwechsel oder
+  Sessionwechsel einen kompakten Checkpoint erstellen.
+- Vor umfangreicher Log-Recherche oder einem großen Kontextwechsel den
+  Checkpoint **vorher** erstellen, statt den vollständigen Verlauf erneut in
+  den Kontext zu laden.
+- Nach zwei aufeinanderfolgenden Provider- oder Transportfehlern keinen großen
+  Kontext erneut aufbauen: Checkpoint erstellen und in einer frischen Session
+  fortsetzen. Die frische Session startet aus `docs/PROJECT_STATE.md` und
+  `docs/CONTEXT_LEDGER.md`, nicht aus dem alten Verlauf.
+- Bei Wechsel des Hauptziels oder Projekts eine neue Session verwenden.
+- Sitzungs-JSONLs nur nach Zeitfenster, Eventtyp oder konkretem Suchbegriff
+  auswerten und die Ausgabe auf den notwendigen Ausschnitt (in der Regel
+  höchstens 100 Zeilen) begrenzen. Vollständige Sitzungslogs nicht in den
+  Kontext laden.
+- `/fork` für Alternativen, `/clone` für eine separate Zweigkopie, `/tree` für
+  Navigation innerhalb einer Session und `/compact` für lange, weiterhin
+  zusammenhängende Aufgaben verwenden.
+
 ## Leitplanken
 
 - Speichere keine vollständigen Tool-Ausgaben, Logs, Chat-Auszüge, Secrets,

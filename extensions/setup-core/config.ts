@@ -25,7 +25,6 @@ export interface SetupConfig {
     requestTimeoutMs: number;
     idleShutdownMs: number;
   };
-  subagents: { concurrency: number };
   verificationStatus: { enabled: boolean };
   verification: Record<VerificationName, VerificationCommand>;
 }
@@ -54,7 +53,6 @@ const DEFAULT_CONFIG: SetupConfig = {
     requestTimeoutMs: 10_000,
     idleShutdownMs: 600_000,
   },
-  subagents: { concurrency: 3 },
   verificationStatus: { enabled: true },
   verification: {
     typecheck: {
@@ -166,7 +164,6 @@ function applyUserLayer(
       "ui",
       "permissions",
       "lsp",
-      "subagents",
       "verificationStatus",
       "verification",
     ],
@@ -177,7 +174,6 @@ function applyUserLayer(
   const ui = isObject(raw.ui) ? raw.ui : undefined;
   const permissions = isObject(raw.permissions) ? raw.permissions : undefined;
   const lsp = isObject(raw.lsp) ? raw.lsp : undefined;
-  const subagents = isObject(raw.subagents) ? raw.subagents : undefined;
   const verificationStatus = isObject(raw.verificationStatus)
     ? raw.verificationStatus
     : undefined;
@@ -201,14 +197,6 @@ function applyUserLayer(
       ["enabled", "mode", "requestTimeoutMs", "idleShutdownMs"],
       source,
       "lsp.",
-      diagnostics,
-    );
-  if (subagents)
-    reportUnknownKeys(
-      subagents,
-      ["concurrency"],
-      source,
-      "subagents.",
       diagnostics,
     );
   if (verificationStatus)
@@ -285,15 +273,6 @@ function applyUserLayer(
     3_600_000,
     source,
     "lsp.idleShutdownMs",
-    diagnostics,
-  );
-  next.subagents.concurrency = boundedInt(
-    subagents?.concurrency,
-    next.subagents.concurrency,
-    1,
-    8,
-    source,
-    "subagents.concurrency",
     diagnostics,
   );
   if (typeof verificationStatus?.enabled === "boolean") {
@@ -381,7 +360,6 @@ function applyTrustedProjectLayer(
   }
   // A repository must never choose commands that execute on the host.
   candidate.verification = structuredClone(base.verification);
-  candidate.subagents = structuredClone(base.subagents);
   return candidate;
 }
 

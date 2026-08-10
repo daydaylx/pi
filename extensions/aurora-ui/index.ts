@@ -22,13 +22,13 @@ import {
 } from "./state.ts";
 import {
   describeToolActivity,
+  hiddenActivitySummary,
   renderActiveTools,
   renderSubagents,
   type ActiveToolView,
   type SubagentInfo,
 } from "./tool-renderers.ts";
 import { renderFooterLines } from "./footer.ts";
-import { AuroraEditor } from "./editor.ts";
 import { crop } from "./layout.ts";
 import { renderStartscreen } from "./startscreen.ts";
 import { thinkingLabel, thinkingTone } from "./thinking.ts";
@@ -307,61 +307,21 @@ function activityPresentation(
   }
 }
 
-function hiddenActivitySummary(
-  hiddenTools: readonly ActiveToolView[],
-  hiddenSubagents: readonly SubagentInfo[],
-): string {
-  const parts: string[] = [];
-  if (hiddenTools.length > 0) {
-    const statuses = new Map<string, number>();
-    for (const tool of hiddenTools) {
-      const label =
-        tool.tone === "error"
-          ? "Fehler"
-          : tool.tone === "warning"
-            ? "Hinweis"
-            : "läuft";
-      statuses.set(label, (statuses.get(label) ?? 0) + 1);
-    }
-    const detail = [...statuses.entries()]
-      .map(([label, count]) => `${count} ${label}`)
-      .join(", ");
-    parts.push(`${hiddenTools.length} Tools${detail ? ` · ${detail}` : ""}`);
-  }
-  if (hiddenSubagents.length > 0) {
-    const statuses = new Map<string, number>();
-    for (const entry of hiddenSubagents) {
-      const label =
-        entry.status === "running"
-          ? "läuft"
-          : entry.status === "queued"
-            ? "wartet"
-            : entry.status === "paused"
-              ? "pausiert"
-              : "Aufmerksamkeit";
-      statuses.set(label, (statuses.get(label) ?? 0) + 1);
-    }
-    const detail = [...statuses.entries()]
-      .map(([label, count]) => `${count} ${label}`)
-      .join(", ");
-    parts.push(`${hiddenSubagents.length} Subagenten${detail ? ` · ${detail}` : ""}`);
-  }
-  return `↳ +${parts.join(" · ")}`;
-}
-
+/**
+ * Only thinking and running tools are actual moving work, so only they animate.
+ * Responding and waiting keep a fixed glyph: their widget line is still
+ * repainted once a second, but for the elapsed time, not for a new frame.
+ */
 function activityGlyph(
   theme: Theme,
   motion: MotionMode,
   frame: number,
-  kind: "thinking" | "tool" | "responding" | "waiting",
+  kind: DisplayActivityKind,
 ): string {
   if (kind === "waiting") return theme.fg("muted", "·");
   if (motion === "off") return "";
+  if (kind === "responding") return theme.fg("accent", "•");
   if (motion === "reduced") return theme.fg("accent", "●");
-  if (kind === "responding") {
-    const frames = ["·", "·", "•", "·"];
-    return theme.fg("muted", frames[frame % frames.length]!);
-  }
   const frames = ["·", "•", "●", "•"];
   const color = frame % frames.length === 2 ? "accent" : "muted";
   return theme.fg(color, frames[frame % frames.length]!);
@@ -726,7 +686,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const uiContext = ctx ?? activeContext;
     if (uiContext?.mode === "tui" && uiContext.hasUI) {
       uiContext.ui.setFooter(undefined);
-      uiContext.ui.setEditorComponent(undefined);
       uiContext.ui.setWidget(ACTIVITY_WIDGET, undefined);
       uiContext.ui.setWorkingVisible(false);
       uiContext.ui.setWorkingMessage();
@@ -785,9 +744,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       );
     }
 
-    ctx.ui.setEditorComponent((tui, editorTheme, keybindings) =>
-      new AuroraEditor(tui, editorTheme, keybindings, ctx.ui.theme),
-    );
+    // Aurora owns the footer and the activity widget. The editor stays Pi's
+    // own component: subclassing it only to draw rails meant duplicating
+    // editor settings and depending on core editor internals for decoration.
 
     ticker = new AnimationTicker(loaded.config.ui.motion, () => {});
 
