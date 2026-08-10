@@ -18,6 +18,9 @@ Diese Regeln gelten für alle Pi-Sitzungen.
   offenen Punkt dem Nutzer ausdrücklich nennen, bevor auf ausdrücklichen
   Auftrag committet wird. `project_check({ profile: "verify" })` ersetzt
   keine bereits angeforderte oder versuchte unabhängige `verifier`-Prüfung.
+- Commit und Push als getrennte Schritte ausführen. Nach einem Push-Fehler den
+  lokalen Commit- und Upstream-Status berichten und höchstens einen gezielten
+  Retry durchführen.
 - Vor einem Shell-Aufruf prüfen, ob er außerhalb des Projektpfads schreibt,
   unquotierte Variablen verwendet oder Secret-/Credential-Grenzen berührt.
   Nach einer Schutzgrenzen-Blockierung nicht dieselbe Strategie variieren,
@@ -43,8 +46,14 @@ Diese Regeln gelten für alle Pi-Sitzungen.
   Segment wird einzeln geprüft); `&&`/`||`/`&` bleiben dort grundsätzlich
   blockiert, auch wenn jeder Teilbefehl für sich zulässig wäre.
 - Große Logs mit Filtern, `head`, `tail` oder Suchmustern begrenzen; große JSON-Daten vor dem Lesen filtern.
+- Sitzungs-JSONLs nur nach Zeitfenster, Eventtyp oder konkretem Suchbegriff
+  auswerten und die Ausgabe auf den notwendigen Ausschnitt (in der Regel höchstens
+  100 Zeilen) begrenzen. Vollständige Sitzungslogs nicht in den Kontext laden.
 - Vor vollständigen Diffs `git diff --stat` verwenden und Diffs anschließend dateibezogen lesen.
 - Testergebnisse auf Zusammenfassung und relevante Fehlerstellen beschränken; keine vollständigen Verzeichnisbäume ohne Grund laden.
+- Einen vollständigen Testlauf nicht ohne Änderung des geprüften Stands
+  wiederholen. Nach einem gezielten Test stattdessen nur den noch fehlenden
+  kanonischen `verify`- oder `project_check`-Nachweis ausführen.
 - Gekürzte Ausgaben sichtbar kennzeichnen. `!!command` nur verwenden, wenn der Nutzer die Ausgabe sehen soll, das Modell sie aber nicht weiter benötigt.
 - Dauerregeln in `AGENTS.md`, ausführliche Referenz in `docs/`, dauerhaftes Projektgedächtnis (Entscheidungen, Nicht-Ziele, Risiken, Regeln) in `docs/CONTEXT_LEDGER.md` und flüchtigen Arbeitsstand in `docs/PROJECT_STATE.md` trennen; dauerhafte Fakten nicht duplizieren.
 
@@ -52,6 +61,12 @@ Diese Regeln gelten für alle Pi-Sitzungen.
 
 - Bei Wechsel des Hauptziels oder Projekts eine neue Session verwenden.
 - Bei langen zusammenhängenden Aufgaben vor Compaction, Modellwechsel oder Sessionwechsel über den Skill `context-checkpoint` einen kompakten Checkpoint erstellen. Er pflegt bei Bedarf `docs/PROJECT_STATE.md` und `docs/CONTEXT_LEDGER.md`; die Laufzeit konsolidiert diese Dateien nicht automatisch.
+- Vor umfangreicher Log-Recherche oder einem großen Kontextwechsel frühzeitig
+  einen kompakten Checkpoint erstellen, statt den vollständigen Verlauf erneut
+  in den Kontext zu laden.
+- Nach zwei aufeinanderfolgenden Provider- oder Transportfehlern keinen großen
+  Kontext erneut aufbauen: einen kompakten Checkpoint erstellen und die Arbeit
+  in einer frischen Session fortsetzen.
 - `/fork` für Alternativen, `/clone` für eine separate Zweigkopie, `/tree` für Navigation innerhalb einer Session und `/compact` für lange weiterhin zusammenhängende Aufgaben verwenden.
 
 ## Subagenten
