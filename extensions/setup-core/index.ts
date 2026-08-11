@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { catalogDescription } from "../shared/command-catalog.ts";
+import { trackedExec } from "../shared/tracked-exec.ts";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
@@ -107,7 +108,10 @@ function requestedProfileIds(
  * Every required profile the project declares — the set `verified` is measured
  * against. Untrusted projects declare nothing, so no run can ever verify them.
  */
-function declaredRequiredIds(loaded: LoadedProfiles, trusted: boolean): string[] {
+function declaredRequiredIds(
+  loaded: LoadedProfiles,
+  trusted: boolean,
+): string[] {
   if (!trusted) return [];
   return Object.entries(loaded.profiles)
     .filter(([, profile]) => profile.classification === "required")
@@ -115,7 +119,11 @@ function declaredRequiredIds(loaded: LoadedProfiles, trusted: boolean): string[]
     .sort();
 }
 
-function coverageLine(covered: number, total: number, missing: string[]): string {
+function coverageLine(
+  covered: number,
+  total: number,
+  missing: string[],
+): string {
   if (total === 0)
     return "Pflichtabdeckung: keine Pflichtprüfung deklariert (kein Lauf kann verifizieren).";
   const head = `Pflichtabdeckung: ${covered}/${total}`;
@@ -136,7 +144,15 @@ function packageVersion(path: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-export default function setupCore(pi: ExtensionAPI): void {
+export default function setupCore(
+  pi: ExtensionAPI,
+  deps: { exec?: typeof trackedExec } = {},
+): void {
+  // Real Pi's own `pi.exec()` only signals the direct child on timeout/abort
+  // and leaves grandchildren (e.g. `npm` -> `node` workers) running as
+  // orphans; `trackedExec` fixes that with a real process-group kill. Tests
+  // inject a deterministic fake here instead of spawning real processes.
+  const exec = deps.exec ?? trackedExec;
   let activeCwd = process.cwd();
   let trusted = false;
   let verificationLedger: VerificationLedger = {};
@@ -167,10 +183,8 @@ export default function setupCore(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", (_event, ctx) => {
-    const statusEnabled = loadSetupConfig(
-      ctx.cwd,
-      ctx.isProjectTrusted(),
-    ).config.verificationStatus.enabled;
+    const statusEnabled = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted())
+      .config.verificationStatus.enabled;
     if (!statusEnabled) {
       if (lastSettledStatus !== undefined && ctx.hasUI)
         ctx.ui.setStatus("verification", undefined);
@@ -205,7 +219,7 @@ export default function setupCore(pi: ExtensionAPI): void {
     name: "verify",
     label: "Verifizieren",
     description:
-      "Führt ausschließlich einen vorkonfigurierten Typecheck, Testlauf oder die vollständige Verifikation dieses Setups aus. Akzeptiert keine freien Shell-Kommandos. Aktualisiert nicht den Verifikations-Footer/-Ledger eines Projekts — dafür ist project_check({ profile: \"verify\" }) der kanonische Weg.",
+      'Führt ausschließlich einen vorkonfigurierten Typecheck, Testlauf oder die vollständige Verifikation dieses Setups aus. Akzeptiert keine freien Shell-Kommandos. Aktualisiert nicht den Verifikations-Footer/-Ledger eines Projekts — dafür ist project_check({ profile: "verify" }) der kanonische Weg.',
     promptSnippet:
       "Run a configured typecheck, test, or full verification safely.",
     parameters: CheckParams,
@@ -216,25 +230,42 @@ export default function setupCore(pi: ExtensionAPI): void {
       // Verification is a capability of this setup, not a generic project
       // script runner. Keeping the cwd at the agent directory prevents an
       // active repository from replacing npm/package.json or lifecycle hooks.
-      const result = await pi.exec(spec.command, spec.args, {
-        cwd: getAgentDir(),
-        timeout: spec.timeoutMs,
-        signal,
-      });
-      const combined = [result.stdout, result.stderr]
-        .filter(Boolean)
-        .join("\n");
-      const limited = limitTextOutput(combined || "(keine Ausgabe)");
-      return {
-        content: [{ type: "text" as const, text: limited.text }],
-        details: {
-          check: params.check,
-          exitCode: result.code,
-          killed: result.killed,
-          ...(limited.truncation ? { truncation: limited.truncation } : {}),
-        },
-        isError: result.code !== 0,
-      };
+      try {
+        const result = await exec(spec.command, spec.args, {
+          cwd: getAgentDir(),
+          timeout: spec.timeoutMs,
+          signal,
+        });
+        const combined = [result.stdout, result.stderr]
+          .filter(Boolean)
+          .join("\n");
+        const limited = limitTextOutput(combined || "(keine Ausgabe)");
+        return {
+          content: [{ type: "text" as const, text: limited.text }],
+          details: {
+            check: params.check,
+            exitCode: result.code,
+            killed: result.killed,
+            ...(limited.truncation ? { truncation: limited.truncation } : {}),
+          },
+          isError: result.code !== 0 || result.killed,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const limited = limitTextOutput(
+          message || "Ausführung konnte nicht gestartet werden.",
+        );
+        return {
+          content: [{ type: "text" as const, text: limited.text }],
+          details: {
+            check: params.check,
+            exitCode: null,
+            killed: false,
+            ...(limited.truncation ? { truncation: limited.truncation } : {}),
+          },
+          isError: true,
+        };
+      }
     },
   });
 
@@ -320,10 +351,11 @@ export default function setupCore(pi: ExtensionAPI): void {
         const result = await runProfile(profile, {
           projectRoot: ctx.cwd,
           signal,
-          exec: (program, args, options) => pi.exec(program, args, options),
+          exec: (program, args, options) => exec(program, args, options),
         });
         const finishedAt = new Date().toISOString();
-        if (result.ok) passedProfileIds.set(profileId, checkSnapshot?.fingerprint ?? "");
+        if (result.ok)
+          passedProfileIds.set(profileId, checkSnapshot?.fingerprint ?? "");
         reports.push({
           profileId,
           command: {

@@ -212,6 +212,7 @@ export const runtimeSections = {
             "+extensions/diff-viewer/index.ts",
             "+extensions/control-plane.ts",
             "+extensions/aurora-ui/index.ts",
+            "+extensions/resilience/index.ts",
           ],
           "settings declare the dependency-safe local extension order",
         );
@@ -222,6 +223,7 @@ export const runtimeSections = {
           "+extensions/ask-user.ts",
           "+extensions/lsp/index.ts",
           "+extensions/aurora-ui/index.ts",
+          "+extensions/resilience/index.ts",
         ]) {
           assert(
             activeExtensions.includes(extension),
@@ -816,7 +818,7 @@ export const runtimeSections = {
   },
 
   "setup core lifecycle": async (context) => {
-    const { section, contextDiagnostics, setupCore } = context;
+    const { section, contextDiagnostics, setupCore, trackedExec } = context;
 
     await section("setup core lifecycle", async () => {
       if (!setupCore) return;
@@ -831,7 +833,7 @@ export const runtimeSections = {
       process.env.PI_CODING_AGENT_DIR = ROOT;
       try {
         const harness = createHarness();
-        setupCore.default(harness.api);
+        setupCore.default(harness.api, { exec: harness.api.exec });
         const context = harness.makeContext();
         await harness.runHooks("session_start", {}, context);
         assert(
@@ -950,7 +952,7 @@ export const runtimeSections = {
             },
           ],
         });
-        setupCore.default(contextHarness.api);
+        setupCore.default(contextHarness.api, { exec: contextHarness.api.exec });
         const contextCommand = contextHarness.commands.get("setup-doctor");
         const diagnosticContext = contextHarness.makeContext();
         if (contextCommand) await contextCommand("context", diagnosticContext);
@@ -1023,6 +1025,109 @@ export const runtimeSections = {
             ROOT,
             "verify runs the setup's fixed command from the agent directory",
           );
+        }
+        const rejectedHarness = createHarness();
+        setupCore.default(rejectedHarness.api, {
+          exec: async () => {
+            throw new Error("spawn ENOENT");
+          },
+        });
+        const rejectedContext = rejectedHarness.makeContext();
+        const rejectedVerify = rejectedHarness.tools.get("verify");
+        if (rejectedVerify) {
+          const rejected = await rejectedVerify.execute(
+            "verify-spawn-failure",
+            { check: "typecheck" },
+            undefined,
+            undefined,
+            rejectedContext,
+          );
+          eq(rejected.isError, true, "verify reports executor startup failures");
+          eq(rejected.details.exitCode, null, "verify preserves missing exit code");
+          assert(
+            rejected.content[0]?.text.includes("spawn ENOENT"),
+            "verify returns the bounded executor error as tool output",
+          );
+        }
+        const killedHarness = createHarness();
+        setupCore.default(killedHarness.api, {
+          exec: async () => ({
+            code: 0,
+            stdout: "",
+            stderr: "",
+            killed: true,
+          }),
+        });
+        const killedVerify = killedHarness.tools.get("verify");
+        if (killedVerify) {
+          const killedResult = await killedVerify.execute(
+            "verify-killed",
+            { check: "typecheck" },
+            undefined,
+            undefined,
+            killedHarness.makeContext(),
+          );
+          eq(
+            killedResult.isError,
+            true,
+            "verify never reports a killed process as successful",
+          );
+        }
+        if (trackedExec) {
+          const trailingOutput = await trackedExec.trackedExec(
+            process.execPath,
+            [
+              "-e",
+              `const { spawn } = require("node:child_process");\nspawn(process.execPath, ["-e", "setTimeout(() => console.log('CHILD_TAIL'), 20)"], { stdio: "inherit" });`,
+            ],
+            { timeout: 1_000 },
+          );
+          assert(
+            trailingOutput.stdout.includes("CHILD_TAIL"),
+            "tracked executor drains output inherited by a child after leader exit",
+          );
+
+          if (process.platform !== "win32") {
+            const processDir = mkdtempSync(path.join(tmpdir(), "pi-tracked-exec-"));
+            const pidFile = path.join(processDir, "child.pid");
+            let childPid;
+            try {
+              const result = await trackedExec.trackedExec(
+                process.execPath,
+                [
+                  "-e",
+                  `const { spawn } = require("node:child_process");\nconst child = spawn(process.execPath, ["-e", "const { writeFileSync } = require('node:fs'); writeFileSync(process.argv[1], String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1_000);", ${JSON.stringify(pidFile)}], { stdio: "ignore" });\nchild.unref();\nsetInterval(() => {}, 1_000);`,
+                ],
+                { timeout: 100, killGraceMs: 50 },
+              );
+              eq(result.killed, true, "tracked executor reports the timed-out process tree");
+              childPid = Number(readFileSync(pidFile, "utf8"));
+              let childStillExists = true;
+              for (let attempt = 0; attempt < 20 && childStillExists; attempt += 1) {
+                try {
+                  process.kill(childPid, 0);
+                } catch {
+                  childStillExists = false;
+                  break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 25));
+              }
+              eq(
+                childStillExists,
+                false,
+                "tracked executor escalates to SIGKILL after the leader accepts SIGTERM",
+              );
+            } finally {
+              if (childPid) {
+                try {
+                  process.kill(childPid, "SIGKILL");
+                } catch {
+                  // The assertion expects this process to be gone already.
+                }
+              }
+              rmSync(processDir, { recursive: true, force: true });
+            }
+          }
         }
         const projectCheck = harness.tools.get("project_check");
         if (projectCheck) {
@@ -1527,7 +1632,7 @@ export const runtimeSections = {
             return { stdout: "ok", stderr: "", code: 0, killed: false };
           },
         });
-        setupCore.default(harness.api);
+        setupCore.default(harness.api, { exec: harness.api.exec });
         const trusted = harness.makeContext({ cwd: workspace, trusted: true });
         await harness.runHooks("session_start", {}, trusted);
         await harness.runHooks(
@@ -1879,7 +1984,7 @@ export const runtimeSections = {
         // missing outright.
         async function doctorReport(workspace) {
           const harness = createHarness();
-          setupCore.default(harness.api);
+          setupCore.default(harness.api, { exec: harness.api.exec });
           const context = harness.makeContext({
             cwd: workspace,
             trusted: true,
@@ -2197,6 +2302,51 @@ export const runtimeSections = {
       eq(timeoutRun.killed, true, "killed flag surfaced");
       eq(timeoutRun.error.kind, "timeout", "timeout reported as timeout");
 
+      // --- runProfile: killed by an external abort signal, not the
+      // profile's own timeoutMs -> distinct "aborted" classification,
+      // not a misleading "Zeitlimit ... überschritten" message ---
+      const abortedRun = await profilesMod.runProfile(profile, {
+        projectRoot: root,
+        exec: async () => ({
+          code: null,
+          stdout: "",
+          stderr: "",
+          killed: true,
+          killReason: "abort-signal",
+        }),
+      });
+      eq(abortedRun.ok, false, "aborted -> not ok");
+      eq(abortedRun.killed, true, "killed flag surfaced");
+      eq(
+        abortedRun.error.kind,
+        "aborted",
+        "external abort reported as aborted, not timeout",
+      );
+      eq(
+        abortedRun.error.message.includes(String(profile.timeoutMs)),
+        false,
+        "aborted message does not blame the profile's timeoutMs",
+      );
+
+      // --- runProfile: process exited via signal (code null) without the
+      // killed flag set -> reported honestly, never masked as exit code 0 ---
+      const signalExitRun = await profilesMod.runProfile(profile, {
+        projectRoot: root,
+        exec: async () => ({
+          code: null,
+          stdout: "",
+          stderr: "",
+          killed: false,
+        }),
+      });
+      eq(signalExitRun.ok, false, "null exit code -> not ok");
+      eq(signalExitRun.exitCode, null, "null exit code surfaced, not coerced to 0");
+      eq(
+        signalExitRun.error.kind,
+        "failed",
+        "signal-terminated process reported as failed",
+      );
+
       // --- runProfile: missing binary (ENOENT) -> missing_binary, no crash ---
       const missingRun = await profilesMod.runProfile(profile, {
         projectRoot: root,
@@ -2266,7 +2416,7 @@ export const runtimeSections = {
         }),
       );
       const harness = createHarness();
-      setupCore.default(harness.api);
+      setupCore.default(harness.api, { exec: harness.api.exec });
       const trusted = harness.makeContext({ cwd: workspace, trusted: true });
       await harness.runHooks("session_start", {}, trusted);
       const tool = harness.tools.get("project_check");
@@ -3526,6 +3676,57 @@ export const runtimeSections = {
           "the normal activity surface discloses its remaining parallel tool",
         );
 
+        // A tool that is still producing output (e.g. bash streaming stdout)
+        // must not be flagged as stalled just because it has run a while.
+        const activeStreaming = auroraTools
+          .renderActiveTools(
+            [
+              {
+                id: "bash-streaming",
+                name: "bash",
+                kind: "bash",
+                startedAt: 0,
+                lastUpdateAt: 4_500,
+              },
+            ],
+            context.ui.theme,
+            90,
+            5_000,
+            { wide: true },
+          )
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          !activeStreaming.includes("KEINE AUSGABE"),
+          "recent output keeps the tool row in the normal running state",
+        );
+
+        // A tool with no update for longer than the stall threshold surfaces
+        // a neutral "keine Ausgabe" state instead of the generic running one
+        // — the signal this whole change exists to add to Aurora.
+        const stalled = auroraTools
+          .renderActiveTools(
+            [
+              {
+                id: "bash-stalled",
+                name: "bash",
+                kind: "bash",
+                startedAt: 0,
+                lastUpdateAt: 0,
+              },
+            ],
+            context.ui.theme,
+            90,
+            20_000,
+            { wide: true },
+          )
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          stalled.includes("KEINE AUSGABE SEIT 20S"),
+          "no output for longer than the stall threshold is surfaced with its silent duration",
+        );
+
         const activityCases = [
           ["read", { path: "README.md" }, "read", "README.md"],
           ["grep", { pattern: "aurora" }, "search", '"aurora"'],
@@ -3723,6 +3924,7 @@ export const runtimeSections = {
           rendered.includes("↳ +") && rendered.includes("Tool"),
           "hiddenActivitySummary compacts the overflow into a single summary line",
         );
+        await overflowHarness.runHooks("session_shutdown", {}, overflowCtx);
       }
 
       // Async subagents are visible only from their actual lifecycle events.
@@ -4337,6 +4539,189 @@ export const runtimeSections = {
     });
   },
 
+  "resilience telemetry and recovery": async (context) => {
+    const { section, resilience } = context;
+
+    await section("resilience telemetry and recovery", async () => {
+      if (!resilience) return;
+      const harness = createHarness();
+      resilience.default(harness.api);
+      const ctx = harness.makeContext({ cwd: ROOT });
+      await harness.runHooks("session_start", {}, ctx);
+
+      await harness.runHooks("before_agent_start", {}, ctx);
+      const start = harness.appended.at(-1);
+      eq(start?.customType, "resilience.turn-start", "turn start is persisted");
+      eq(start?.data.workflowMode, "work", "turn start records workflow mode");
+      eq(start?.data.provider, "main-provider", "turn start records provider");
+      await harness.runHooks("agent_start", {}, ctx);
+      await harness.runHooks("after_provider_response", { status: 503 }, ctx);
+      await harness.runHooks(
+        "message_update",
+        {
+          assistantMessageEvent: {
+            type: "error",
+            error: { errorMessage: "ECONNRESET" },
+          },
+        },
+        ctx,
+      );
+      await harness.runHooks(
+        "tool_execution_start",
+        { toolName: "bash", toolCallId: "tool-1", args: {} },
+        ctx,
+      );
+      await harness.dispatchEvent("subagent:async-started", {});
+      await harness.runHooks(
+        "session_before_compact",
+        { reason: "threshold", willRetry: false },
+        ctx,
+      );
+      await harness.runHooks(
+        "session_compact",
+        { reason: "threshold", willRetry: false },
+        ctx,
+      );
+      await harness.dispatchEvent("subagent:async-complete", {});
+      // A following agent start represents Pi's own retry. The extension only
+      // observes it; it does not start a retry or alter retry configuration.
+      await harness.runHooks("agent_start", {}, ctx);
+      await harness.runHooks("agent_settled", {}, ctx);
+
+      const failures = harness.appended.filter(
+        (entry) => entry.customType === "resilience.failure",
+      );
+      eq(failures.length, 2, "HTTP and network failures are observed separately");
+      eq(failures[0]?.data.errorCode, "HTTP_503", "HTTP failure keeps status only");
+      eq(failures[1]?.data.errorCode, "ECONNRESET", "network failure keeps code only");
+      const boundaries = harness.appended.filter(
+        (entry) => entry.customType === "resilience.compaction-boundary",
+      );
+      eq(boundaries.map((entry) => entry.data.boundary), ["started", "completed"], "compaction boundaries are persisted");
+      const settled = harness.appended.at(-1);
+      eq(settled?.customType, "resilience.turn-settled", "settled turn is persisted");
+      eq(settled?.data.outcome, "completed", "successful native retry settles completed");
+      eq(settled?.data.observedFailureCount, 2, "settled turn preserves observed failures");
+
+      await harness.runHooks("before_agent_start", {}, ctx);
+      await harness.runHooks("agent_start", {}, ctx);
+      await harness.runHooks(
+        "agent_end",
+        {
+          messages: [
+            {
+              role: "assistant",
+              stopReason: "error",
+              errorMessage: "ETIMEDOUT",
+            },
+          ],
+        },
+        ctx,
+      );
+      await harness.runHooks("agent_settled", {}, ctx);
+      const recovery = harness.appended.at(-1);
+      eq(recovery?.customType, "resilience.recovery-required", "final failure requests safe recovery");
+      eq(recovery?.data.reason, "final_failure", "final failure is classified");
+
+      const nextTurnResults = await harness.runHooks("before_agent_start", {}, ctx);
+      eq(
+        nextTurnResults.at(-1)?.message?.customType,
+        "pi-resilience-recovery",
+        "next turn receives a recovery instruction instead of a replay",
+      );
+
+      const resumed = createHarness({
+        entries: [
+          {
+            type: "custom",
+            customType: "resilience.turn-start",
+            data: {
+              schemaVersion: 1,
+              timestamp: "2026-08-10T20:00:00.000Z",
+              workspaceFingerprint: "unavailable",
+              workflowMode: "work",
+              provider: "provider",
+              model: "model",
+              contextPercent: 42,
+            },
+          },
+        ],
+      });
+      resilience.default(resumed.api);
+      const resumedCtx = resumed.makeContext({ cwd: ROOT });
+      await resumed.runHooks("session_start", {}, resumedCtx);
+      eq(
+        resumed.appended.at(-1)?.customType,
+        "resilience.recovery-required",
+        "resumed open turn is marked for inspection once",
+      );
+      const resumedTurn = await resumed.runHooks("before_agent_start", {}, resumedCtx);
+      assert(
+        resumedTurn.at(-1)?.message?.content.includes("git status --short"),
+        "changed or unavailable workspace requires inspection before mutation",
+      );
+
+      const resumedFinalFailure = createHarness({
+        entries: [
+          {
+            type: "custom",
+            customType: "resilience.turn-start",
+            data: {
+              schemaVersion: 1,
+              timestamp: "2026-08-10T20:01:00.000Z",
+              workspaceFingerprint: "unavailable",
+              workflowMode: "work",
+              provider: "provider",
+              model: "model",
+              contextPercent: 42,
+            },
+          },
+          {
+            type: "custom",
+            customType: "resilience.turn-settled",
+            data: {
+              schemaVersion: 1,
+              timestamp: "2026-08-10T20:01:01.000Z",
+              turnStartedAt: "2026-08-10T20:01:00.000Z",
+              workspaceFingerprint: "unavailable",
+              outcome: "failed",
+              observedFailureCount: 1,
+            },
+          },
+          {
+            type: "custom",
+            customType: "resilience.recovery-required",
+            data: {
+              schemaVersion: 1,
+              timestamp: "2026-08-10T20:01:02.000Z",
+              turnStartedAt: "2026-08-10T20:01:00.000Z",
+              reason: "final_failure",
+              workspaceChangedSinceTurnStart: true,
+              toolMayHaveMutatedWorkspace: true,
+            },
+          },
+        ],
+      });
+      resilience.default(resumedFinalFailure.api);
+      const finalFailureCtx = resumedFinalFailure.makeContext({ cwd: ROOT });
+      await resumedFinalFailure.runHooks("session_start", {}, finalFailureCtx);
+      eq(
+        resumedFinalFailure.appended.length,
+        0,
+        "existing recovery marker is not duplicated on resume",
+      );
+      const finalFailureTurn = await resumedFinalFailure.runHooks(
+        "before_agent_start",
+        {},
+        finalFailureCtx,
+      );
+      assert(
+        finalFailureTurn.at(-1)?.message?.content.includes("git status --short"),
+        "resume after a persisted final failure still injects recovery guidance",
+      );
+    });
+  },
+
   "combined production extension stack": async (context) => {
     const {
       section,
@@ -4348,6 +4733,7 @@ export const runtimeSections = {
       lspExtensionMod,
       setupCore,
       auroraUi,
+      resilience,
     } = context;
 
     await section("combined production extension stack", async () => {
@@ -4359,7 +4745,8 @@ export const runtimeSections = {
         !lspExtensionMod ||
         !diffViewer ||
         !controlPlane ||
-        !auroraUi
+        !auroraUi ||
+        !resilience
       )
         return;
       const factoryByExtension = {
@@ -4371,6 +4758,7 @@ export const runtimeSections = {
         "+extensions/diff-viewer/index.ts": diffViewer.default,
         "+extensions/control-plane.ts": controlPlane.default,
         "+extensions/aurora-ui/index.ts": auroraUi.default,
+        "+extensions/resilience/index.ts": resilience.default,
       };
       const settings = JSON.parse(
         readFileSync(path.join(ROOT, "settings.json"), "utf8"),

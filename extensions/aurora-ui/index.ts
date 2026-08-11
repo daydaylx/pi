@@ -297,11 +297,19 @@ function activityPresentation(
     };
   switch (state.activity.kind) {
     case "thinking":
-      return { kind: "thinking", startedAt: activityStartedAt, label: "DENKT NACH" };
+      return {
+        kind: "thinking",
+        startedAt: activityStartedAt,
+        label: "DENKT NACH",
+      };
     case "tool":
       return { kind: "tool", startedAt: activityStartedAt, label: "ARBEITET" };
     case "responding":
-      return { kind: "responding", startedAt: activityStartedAt, label: "ANTWORTET" };
+      return {
+        kind: "responding",
+        startedAt: activityStartedAt,
+        label: "ANTWORTET",
+      };
     case "idle":
       return { kind: "waiting", startedAt: activityStartedAt, label: "WARTET" };
   }
@@ -406,8 +414,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     );
     const headingText = `${glyph ? `${glyph} ` : ""}${presentation.label}${thinking} · ${elapsed}s`;
     const heading = theme.fg(
-      presentation.kind === "thinking" ? thinkingTone(state.model.thinking) :
-        presentation.kind === "waiting" ? "muted" : "accent",
+      presentation.kind === "thinking"
+        ? thinkingTone(state.model.thinking)
+        : presentation.kind === "waiting"
+          ? "muted"
+          : "accent",
       theme.bold(headingText),
     );
     const contentWidth = Math.max(1, width - (compact ? 0 : 3));
@@ -421,17 +432,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         );
     const detailBudget = Math.max(0, Math.min(8, Math.max(1, rows - 6)) - 1);
     const allDetails = [
-      ...renderActiveTools(
-        toolViews,
-        theme,
-        contentWidth,
-        now,
-        {
-          compact,
-          wide: layout === "wide",
-          limit: Number.POSITIVE_INFINITY,
-        },
-      ),
+      ...renderActiveTools(toolViews, theme, contentWidth, now, {
+        compact,
+        wide: layout === "wide",
+        limit: Number.POSITIVE_INFINITY,
+      }),
       ...renderSubagents(agentViews, theme, contentWidth, {
         compact,
         limit: Number.POSITIVE_INFINITY,
@@ -443,7 +448,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       ? allDetails.slice(0, Math.max(0, detailBudget - 1))
       : allDetails;
     const visibleToolCount = Math.min(toolViews.length, visibleDetails.length);
-    const visibleAgentCount = Math.max(0, visibleDetails.length - visibleToolCount);
+    const visibleAgentCount = Math.max(
+      0,
+      visibleDetails.length - visibleToolCount,
+    );
     const details = overflow
       ? [
           ...visibleDetails,
@@ -452,6 +460,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             hiddenActivitySummary(
               toolViews.slice(visibleToolCount),
               agentViews.slice(visibleAgentCount),
+              now,
             ),
           ),
         ]
@@ -464,8 +473,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     return [
       crop(heading, width),
       theme.fg("borderMuted", "│"),
-      ...details.map((line, index) =>
-        `${rail(index === details.length - 1)}${line}`,
+      ...details.map(
+        (line, index) => `${rail(index === details.length - 1)}${line}`,
       ),
     ];
   }
@@ -477,10 +486,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       ...[...asyncSubagents.values()].flat(),
       ...[...foregroundSubagents.values()].flat(),
     ]) {
-      byKey.set(
-        `${entry.runId ?? entry.agent}\u0000${entry.agent}`,
-        entry,
-      );
+      byKey.set(`${entry.runId ?? entry.agent}\u0000${entry.agent}`, entry);
     }
     subagentsCache = [...byKey.values()];
   }
@@ -802,7 +808,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       loaded.config.ui.motion === "off"
         ? { frames: [] }
         : {
-        frames: [activityGlyph(ctx.ui.theme, loaded.config.ui.motion, 0, "tool")],
+            frames: [
+              activityGlyph(ctx.ui.theme, loaded.config.ui.motion, 0, "tool"),
+            ],
           },
     );
     installBus(ctx);
@@ -825,14 +833,19 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_execution_start", (event, ctx) => {
+    const startedAt = Date.now();
     activeTools.set(event.toolCallId, {
       id: event.toolCallId,
       name: event.toolName,
       ...describeToolActivity(event.toolName, event.args),
-      startedAt: Date.now(),
+      startedAt,
+      lastUpdateAt: startedAt,
     });
     if (event.toolName === "subagent") {
-      const subagents = foregroundSubagentsFromArgs(event.args, event.toolCallId);
+      const subagents = foregroundSubagentsFromArgs(
+        event.args,
+        event.toolCallId,
+      );
       if (subagents.length > 0)
         foregroundSubagents.set(event.toolCallId, subagents);
       refreshSubagentDisplay();
@@ -843,9 +856,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_execution_update", (event) => {
+    const tool = activeTools.get(event.toolCallId);
+    if (tool) tool.lastUpdateAt = Date.now();
     const partial = record(event.partialResult);
     if (partial?.isError !== true) return;
-    const tool = activeTools.get(event.toolCallId);
     if (!tool || tool.tone === "error") return;
     tool.tone = "error";
     noteRelevantActivity();
@@ -868,8 +882,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
               kind: "tool",
             }
           : {
-            kind: "responding",
-          },
+              kind: "responding",
+            },
     );
   });
 

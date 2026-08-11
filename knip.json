@@ -9,6 +9,7 @@
     "extensions/diff-viewer/index.ts",
     "extensions/control-plane.ts",
     "extensions/aurora-ui/index.ts",
+    "extensions/resilience/index.ts",
     "tests/run-all.mjs",
     "tests/run.mjs",
     "tests/workflow-mode.mjs",

@@ -20,6 +20,7 @@ export const SECTION_SUITES = {
   "ask-user temporary dialog": "runtime",
   "shared menu shell navigation and rendering": "ui",
   "Aurora UI lifecycle and responsive surfaces": "runtime",
+  "resilience telemetry and recovery": "runtime",
   "combined production extension stack": "runtime",
   "LSP transport, process and lifecycle (#93)": "lsp",
   "LSP config, root detection, registry and profiles (#94)": "lsp",

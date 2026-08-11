@@ -78,6 +78,8 @@ export interface ExecResult {
   stdout: string;
   stderr: string;
   killed: boolean;
+  /** Which channel triggered the kill, if any. */
+  killReason?: "timeout" | "abort-signal";
 }
 
 /**
@@ -103,7 +105,7 @@ export interface RunProfileResult {
   durationMs: number;
   output: string;
   error?: {
-    kind: "missing_binary" | "timeout" | "spawn_failed" | "failed";
+    kind: "missing_binary" | "timeout" | "aborted" | "spawn_failed" | "failed";
     message: string;
   };
   truncation?: ReturnType<typeof limitTextOutput>["truncation"];
@@ -463,13 +465,21 @@ export async function runProfile(
   const killed = Boolean(result.killed);
   const ok = result.code === 0 && !killed;
   const error: RunProfileResult["error"] = killed
-    ? {
-        kind: "timeout",
-        message: `Zeitlimit ${profile.timeoutMs}ms überschritten`,
-      }
-    : result.code !== 0
-      ? { kind: "failed", message: `Exit-Code ${result.code}` }
-      : undefined;
+    ? result.killReason === "abort-signal"
+      ? {
+          kind: "aborted",
+          message:
+            "Lauf wurde von außen abgebrochen (nicht durch das Profil-Zeitlimit)",
+        }
+      : {
+          kind: "timeout",
+          message: `Zeitlimit ${profile.timeoutMs}ms überschritten`,
+        }
+    : result.code === null
+      ? { kind: "failed", message: "Prozess durch Signal beendet" }
+      : result.code !== 0
+        ? { kind: "failed", message: `Exit-Code ${result.code}` }
+        : undefined;
   return {
     ok,
     exitCode: result.code,

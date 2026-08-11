@@ -5,6 +5,13 @@ import { footerTier } from "../shared/layout.ts";
 /** The compact running marker shared by tool rows. */
 export const RUNNING_GLYPH = "◌";
 
+/**
+ * No further progress (e.g. bash producing no new output) for this long is
+ * shown as a neutral "keine Ausgabe" state — informational, not an error:
+ * plenty of legitimate commands (sleep, slow installs) go quiet for a while.
+ */
+const STALL_THRESHOLD_MS = 15_000;
+
 /** Presentation-only categories; tool execution remains entirely in Pi core. */
 export type ActivityToolKind =
   | "read"
@@ -27,6 +34,8 @@ export interface ActiveToolView {
   kind?: ActivityToolKind;
   target?: string;
   startedAt: number;
+  /** Timestamp of the last observed progress (e.g. new bash output). */
+  lastUpdateAt?: number;
   tone?: ActivityToolTone;
 }
 
@@ -324,12 +333,22 @@ export function toolPresentation(
     : presentation;
 }
 
-function toolStatus(tool: ActiveToolView): {
+function toolStatus(
+  tool: ActiveToolView,
+  now: number,
+): {
   tone: "accent" | "warning" | "error";
   label: string;
 } {
   if (tool.tone === "error") return { tone: "error", label: "FEHLER" };
   if (tool.tone === "warning") return { tone: "warning", label: "HINWEIS" };
+  const sinceUpdate = now - (tool.lastUpdateAt ?? tool.startedAt);
+  if (sinceUpdate >= STALL_THRESHOLD_MS) {
+    return {
+      tone: "warning",
+      label: `KEINE AUSGABE SEIT ${Math.floor(sinceUpdate / 1000)}S`,
+    };
+  }
   return { tone: "accent", label: "LÄUFT" };
 }
 
@@ -345,8 +364,8 @@ function tally(labels: readonly string[]): string {
     .join(", ");
 }
 
-function toolTally(tools: readonly ActiveToolView[]): string {
-  return tally(tools.map((tool) => toolStatus(tool).label.toLowerCase()));
+function toolTally(tools: readonly ActiveToolView[], now: number): string {
+  return tally(tools.map((tool) => toolStatus(tool, now).label.toLowerCase()));
 }
 
 function subagentTally(subagents: readonly SubagentInfo[]): string {
@@ -355,8 +374,8 @@ function subagentTally(subagents: readonly SubagentInfo[]): string {
   );
 }
 
-function toolSummary(tools: readonly ActiveToolView[]): string {
-  const statuses = toolTally(tools);
+function toolSummary(tools: readonly ActiveToolView[], now: number): string {
+  const statuses = toolTally(tools, now);
   return `+${tools.length} weitere Tools${statuses ? ` · ${statuses}` : ""}`;
 }
 
@@ -368,11 +387,14 @@ function toolSummary(tools: readonly ActiveToolView[]): string {
 export function hiddenActivitySummary(
   hiddenTools: readonly ActiveToolView[],
   hiddenSubagents: readonly SubagentInfo[],
+  now: number,
 ): string {
   const parts: string[] = [];
   if (hiddenTools.length > 0) {
-    const statuses = toolTally(hiddenTools);
-    parts.push(`${hiddenTools.length} Tools${statuses ? ` · ${statuses}` : ""}`);
+    const statuses = toolTally(hiddenTools, now);
+    parts.push(
+      `${hiddenTools.length} Tools${statuses ? ` · ${statuses}` : ""}`,
+    );
   }
   if (hiddenSubagents.length > 0) {
     const statuses = subagentTally(hiddenSubagents);
@@ -415,7 +437,7 @@ export function renderActiveTools(
     // Pi's real result renderer may show the success glyph.
     const glyph =
       tool.kind === "verification" ? RUNNING_GLYPH : presentation.glyph;
-    const status = toolStatus(tool);
+    const status = toolStatus(tool, now);
     const marker = theme.fg(status.tone, glyph);
     if (wide) {
       const type = padToWidth(theme.bold(presentation.label), 12);
@@ -426,7 +448,10 @@ export function renderActiveTools(
       );
       const target = theme.fg(
         "muted",
-        padToWidth(truncateToWidth(tool.target ?? "—", targetWidth, "…"), targetWidth),
+        padToWidth(
+          truncateToWidth(tool.target ?? "—", targetWidth, "…"),
+          targetWidth,
+        ),
       );
       return `${marker} ${type} ${target}${suffix}`;
     }
@@ -437,7 +462,7 @@ export function renderActiveTools(
   if (hidden.length > 0)
     visible.push(
       truncateToWidth(
-        theme.fg("muted", `↳ ${toolSummary(hidden)}`),
+        theme.fg("muted", `↳ ${toolSummary(hidden, now)}`),
         available,
         "…",
       ),

@@ -55,7 +55,8 @@
     "+extensions/ask-user.ts",
     "+extensions/diff-viewer/index.ts",
     "+extensions/control-plane.ts",
-    "+extensions/aurora-ui/index.ts"
+    "+extensions/aurora-ui/index.ts",
+    "+extensions/resilience/index.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",

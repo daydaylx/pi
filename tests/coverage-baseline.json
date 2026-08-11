@@ -9,7 +9,8 @@
     "extensions/ask-user.ts",
     "extensions/diff-viewer/index.ts",
     "extensions/control-plane.ts",
-    "extensions/aurora-ui/index.ts"
+    "extensions/aurora-ui/index.ts",
+    "extensions/resilience/index.ts"
   ],
   "minimumFunctionCoverage": {
     "extensions/setup-core/index.ts": 100,
@@ -19,6 +20,7 @@
     "extensions/ask-user.ts": 47,
     "extensions/diff-viewer/index.ts": 50,
     "extensions/control-plane.ts": 100,
-    "extensions/aurora-ui/index.ts": 100
+    "extensions/aurora-ui/index.ts": 100,
+    "extensions/resilience/index.ts": 100
   }
 }

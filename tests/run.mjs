@@ -81,6 +81,7 @@ const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const lspExtensionMod = await load("extensions/lsp/index.ts");
 const outputLimits = await load("extensions/shared/output-limits.ts");
+const trackedExec = await load("extensions/shared/tracked-exec.ts");
 const contextDiagnostics = await load(
   "extensions/setup-core/context-diagnostics.ts",
 );
@@ -89,6 +90,7 @@ const setupCore = await load("extensions/setup-core/index.ts");
 const auroraState = await load("extensions/aurora-ui/state.ts");
 const auroraUi = await load("extensions/aurora-ui/index.ts");
 const auroraFooter = await load("extensions/aurora-ui/footer.ts");
+const resilience = await load("extensions/resilience/index.ts");
 
 const sections = {
   ...runtimeSections,
@@ -114,12 +116,14 @@ const context = {
   askUserPolicy,
   lspExtensionMod,
   outputLimits,
+  trackedExec,
   contextDiagnostics,
   setupConfig,
   setupCore,
   auroraState,
   auroraUi,
   auroraFooter,
+  resilience,
 };
 
 for (const name of Object.keys(SECTION_SUITES)) {
