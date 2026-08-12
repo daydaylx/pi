@@ -4,7 +4,7 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.6-terra",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "medium",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -41,7 +41,7 @@
     "openrouter/openai/gpt-oss-120b"
   ],
   "packages": [
-    "git:github.com/daydaylx/pi-subagents@18c4851fe19e6635e42b7d8911b8a91e1747f7f9"
+    "git:github.com/daydaylx/pi-subagents@2934a93f3300b2ece192b11f885eb2dc5dd7c095"
   ],
   "subagents": {
     "disableBuiltins": true
