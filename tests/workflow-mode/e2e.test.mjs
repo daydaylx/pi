@@ -47,20 +47,36 @@ for (const [label, modeLabel, mode] of [
       await hooks(harness, "session_start", ctx);
 
       await chooseWorkflow(harness, ctx);
-      eq(latestStatus(harness, "workflow"), label, `${mode} is active after selection`);
+      eq(
+        latestStatus(harness, "workflow"),
+        label,
+        `${mode} is active after selection`,
+      );
       eq(harness.sent.length, 0, "mode selection sends no synthetic prompt");
-      assert(existsSync(planFilePath(cwd)), "mode selection preserves the plan");
+      assert(
+        existsSync(planFilePath(cwd)),
+        "mode selection preserves the plan",
+      );
 
       const prompt = await hooks(harness, "before_agent_start", ctx);
       assert(
-        prompt[0]?.message?.content.includes(modeLabel),
-        "the next real user turn receives planning context",
+        prompt[0]?.systemPrompt?.includes(modeLabel),
+        "the next real user turn receives planning context in its ephemeral system prompt",
+      );
+      eq(
+        prompt[0]?.message,
+        undefined,
+        "the mode instruction is not a persisted custom message",
       );
       assert(
         existsSync(planFilePath(cwd)),
         "the old plan remains until a successful replacement exists",
       );
-      eq(harness.sent.length, 0, "the planning context does not synthesize a user message");
+      eq(
+        harness.sent.length,
+        0,
+        "the planning context does not synthesize a user message",
+      );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -79,10 +95,19 @@ await test("Shift+Tab → Work waits and does not execute an existing plan", asy
 
     await chooseWorkflow(harness, ctx);
     eq(harness.sent.length, 0, "work selection starts no turn");
-    assert(existsSync(planFilePath(cwd)), "work selection leaves the plan untouched");
+    assert(
+      existsSync(planFilePath(cwd)),
+      "work selection leaves the plan untouched",
+    );
     const prompt = await hooks(harness, "before_agent_start", ctx);
-    assert(prompt[0]?.message?.content.includes("PI WORKMODUS"), "the next real prompt is work");
-    assert(!prompt[0]?.message?.content.includes("Bestehender Plan"), "a stale plan is not injected");
+    assert(
+      prompt[0]?.systemPrompt?.includes("PI WORKMODUS"),
+      "the next real prompt is work",
+    );
+    assert(
+      !prompt[0]?.systemPrompt?.includes("Bestehender Plan"),
+      "a stale plan is not injected",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -105,7 +130,11 @@ await test("a settled Plan → Work handoff ignores retry intermediates and stay
     writePlan(cwd, "# Neuer Plan\n\nUmsetzen\n");
     await harness.runHooks(
       "tool_result",
-      { toolName: "write", input: { path: ".agent/plans/current-plan.md" }, isError: false },
+      {
+        toolName: "write",
+        input: { path: ".agent/plans/current-plan.md" },
+        isError: false,
+      },
       ctx,
     );
     await hooks(harness, "agent_settled", ctx);
@@ -114,15 +143,21 @@ await test("a settled Plan → Work handoff ignores retry intermediates and stay
     await chooseWorkflow(harness, ctx);
     eq(harness.sent.length, 0, "switching to work still starts no turn");
     const handoff = await hooks(harness, "before_agent_start", ctx);
-    assert(handoff[0]?.message?.content.includes("Neuer Plan"), "the settled plan is included once");
     assert(
-      !handoff[0]?.message?.content.includes("Zwischenstand vor Retry"),
+      handoff[0]?.systemPrompt?.includes("Neuer Plan"),
+      "the settled plan is included once",
+    );
+    assert(
+      !handoff[0]?.systemPrompt?.includes("Zwischenstand vor Retry"),
       "an earlier low-level agent_end cannot freeze a retry intermediate",
     );
 
     await chooseWorkflow(harness, ctx);
     const later = await hooks(harness, "before_agent_start", ctx);
-    assert(!later[0]?.message?.content.includes("Neuer Plan"), "Work → Work does not resurrect the handoff");
+    assert(
+      !later[0]?.systemPrompt?.includes("Neuer Plan"),
+      "Work → Work does not resurrect the handoff",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -142,7 +177,11 @@ await test("a failed or missing planning result restores the old plan", async ()
     writePlan(cwd, "# Teilplan\n");
     await harness.runHooks(
       "tool_result",
-      { toolName: "write", input: { path: ".agent/plans/current-plan.md" }, isError: false },
+      {
+        toolName: "write",
+        input: { path: ".agent/plans/current-plan.md" },
+        isError: false,
+      },
       ctx,
     );
     await harness.runHooks(
@@ -151,11 +190,19 @@ await test("a failed or missing planning result restores the old plan", async ()
       ctx,
     );
     await hooks(harness, "agent_settled", ctx);
-    eq(readFileSync(planFilePath(cwd), "utf8"), "# Alter Plan\n", "a failed plan run restores the old plan");
+    eq(
+      readFileSync(planFilePath(cwd), "utf8"),
+      "# Alter Plan\n",
+      "a failed plan run restores the old plan",
+    );
 
     await hooks(harness, "before_agent_start", ctx);
     await hooks(harness, "agent_settled", ctx);
-    eq(readFileSync(planFilePath(cwd), "utf8"), "# Alter Plan\n", "a missing replacement changes nothing");
+    eq(
+      readFileSync(planFilePath(cwd), "utf8"),
+      "# Alter Plan\n",
+      "a missing replacement changes nothing",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -171,7 +218,10 @@ await test("a resumed session never hands off a plan file from an earlier sessio
     planMode.default(harness.api);
     await hooks(harness, "session_start", ctx);
     const prompt = await hooks(harness, "before_agent_start", ctx);
-    assert(!prompt[0]?.message?.content.includes("Plan der alten Sitzung"), "resumed work ignores stale plan files");
+    assert(
+      !prompt[0]?.systemPrompt?.includes("Plan der alten Sitzung"),
+      "resumed work ignores stale plan files",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -189,38 +239,98 @@ await test("Plan Mode mutation guard keeps the plan file writable", async () => 
     await chooseWorkflow(harness, ctx);
 
     const writeEvent = (path) => ({ toolName: "write", input: { path } });
-    let result = await harness.runHooks("tool_call", writeEvent(".agent/plans/current-plan.md"), ctx);
-    assert(!result.some((entry) => entry?.block), "the plan file is auto-allowed");
-    result = await harness.runHooks("tool_call", writeEvent("src/example.ts"), ctx);
-    assert(result.some((entry) => entry?.block), "other writes remain blocked while planning");
+    let result = await harness.runHooks(
+      "tool_call",
+      writeEvent(".agent/plans/current-plan.md"),
+      ctx,
+    );
+    assert(
+      !result.some((entry) => entry?.block),
+      "the plan file is auto-allowed",
+    );
+    result = await harness.runHooks(
+      "tool_call",
+      writeEvent("src/example.ts"),
+      ctx,
+    );
+    assert(
+      result.some((entry) => entry?.block),
+      "other writes remain blocked while planning",
+    );
 
     for (const event of [
       { toolName: "bash", input: { command: "npm test" } },
       { toolName: "bash", input: { command: "npm run build" } },
       { toolName: "project_check", input: { profile: "verify" } },
-      { toolName: "subagent", input: { agent: "verifier", task: "x", output: "report.md" } },
+      {
+        toolName: "subagent",
+        input: { agent: "verifier", task: "x", output: "report.md" },
+      },
     ]) {
       result = await harness.runHooks("tool_call", event, ctx);
-      assert(result.some((entry) => entry?.block), `${event.toolName} cannot bypass Plan Mode`);
+      assert(
+        result.some((entry) => entry?.block),
+        `${event.toolName} cannot bypass Plan Mode`,
+      );
     }
-    for (const command of ["git status", "git diff", "git log", "rg plan extensions"]) {
-      result = await harness.runHooks("tool_call", { toolName: "bash", input: { command } }, ctx);
-      assert(!result.some((entry) => entry?.block), `${command} remains read-only in Plan Mode`);
+    for (const command of [
+      "git status",
+      "git diff",
+      "git log",
+      "rg plan extensions",
+    ]) {
+      result = await harness.runHooks(
+        "tool_call",
+        { toolName: "bash", input: { command } },
+        ctx,
+      );
+      assert(
+        !result.some((entry) => entry?.block),
+        `${command} remains read-only in Plan Mode`,
+      );
     }
 
     await harness.commands.get("permission")("confirm-all", ctx);
-    result = await harness.runHooks("tool_call", writeEvent("src/example.ts"), ctx);
-    assert(result.some((entry) => entry?.block), "confirm-all keeps the planning guard");
+    result = await harness.runHooks(
+      "tool_call",
+      writeEvent("src/example.ts"),
+      ctx,
+    );
+    assert(
+      result.some((entry) => entry?.block),
+      "confirm-all keeps the planning guard",
+    );
 
     await harness.commands.get("permission")("yolo", ctx);
-    result = await harness.runHooks("tool_call", writeEvent("src/example.ts"), ctx);
-    assert(!result.some((entry) => entry?.block), "YOLO deliberately bypasses the planning guard");
+    result = await harness.runHooks(
+      "tool_call",
+      writeEvent("src/example.ts"),
+      ctx,
+    );
+    assert(
+      !result.some((entry) => entry?.block),
+      "YOLO deliberately bypasses the planning guard",
+    );
 
     await harness.commands.get("permission")("readonly", ctx);
-    result = await harness.runHooks("tool_call", writeEvent(".agent/plans/current-plan.md"), ctx);
-    assert(!result.some((entry) => entry?.block), "the plan file bypass works in readonly too");
-    result = await harness.runHooks("tool_call", writeEvent("src/example.ts"), ctx);
-    assert(result.some((entry) => entry?.block), "readonly still blocks other project writes");
+    result = await harness.runHooks(
+      "tool_call",
+      writeEvent(".agent/plans/current-plan.md"),
+      ctx,
+    );
+    assert(
+      !result.some((entry) => entry?.block),
+      "the plan file bypass works in readonly too",
+    );
+    result = await harness.runHooks(
+      "tool_call",
+      writeEvent("src/example.ts"),
+      ctx,
+    );
+    assert(
+      result.some((entry) => entry?.block),
+      "readonly still blocks other project writes",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

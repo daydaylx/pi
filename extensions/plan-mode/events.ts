@@ -1,4 +1,3 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   AURORA_UI_CHANNELS,
@@ -34,22 +33,17 @@ export function registerPlanEvents(
     const request = value as Partial<WorkflowCapabilityRequest>;
     request.respond?.({ mode: session.selectedMode });
   });
-  pi.on("before_agent_start", async (_event, ctx) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     const mode = session.selectedMode;
-    if (isPlanningMode(mode)) {
-      session.beginPlanningTurn(ctx.cwd);
-      return {
-        message: {
-          customType: "pi-workflow-mode",
-          content: planningPrompt(mode),
-        } as AgentMessage,
-      };
-    }
+    const instruction = isPlanningMode(mode)
+      ? planningPrompt(mode)
+      : workPrompt(session.consumePlanHandoff());
+    if (isPlanningMode(mode)) session.beginPlanningTurn(ctx.cwd);
+    // `systemPrompt` is applied only to this provider request by Pi's runtime.
+    // Returning a custom message here would persist the same mode text on every
+    // turn and make it part of all later provider contexts.
     return {
-      message: {
-        customType: "pi-workflow-mode",
-        content: workPrompt(session.consumePlanHandoff()),
-      } as AgentMessage,
+      systemPrompt: `${event.systemPrompt}\n\n${instruction}`,
     };
   });
   // A low-level agent run may still be followed by an automatic retry or
@@ -64,7 +58,8 @@ export function registerPlanEvents(
   pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "write" && event.toolName !== "edit") return;
     const args = event.input as { path?: unknown };
-    if (isPlanFilePath(args.path, ctx.cwd)) session.recordPlanWrite(!event.isError);
+    if (isPlanFilePath(args.path, ctx.cwd))
+      session.recordPlanWrite(!event.isError);
   });
   pi.on("session_start", async (_event, ctx) => {
     session.clearPlanHandoff();

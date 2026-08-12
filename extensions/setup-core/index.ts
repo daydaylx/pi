@@ -7,6 +7,7 @@ import { trackedExec } from "../shared/tracked-exec.ts";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
+import { limitSubagentToolResult } from "./subagent-output-guard.ts";
 import { loadVerifyProfiles, runProfile } from "./verify-profiles.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 import {
@@ -143,6 +144,35 @@ function packageVersion(path: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function readCompactionSettings(
+  agentDir: string,
+  cwd: string,
+): { enabled?: boolean; reserveTokens?: number; keepRecentTokens?: number } {
+  const global = readJson(join(agentDir, "settings.json"))?.compaction;
+  const project = readJson(join(cwd, ".pi", "settings.json"))?.compaction;
+  const globalSettings =
+    global && typeof global === "object" && !Array.isArray(global)
+      ? global
+      : {};
+  const projectSettings =
+    project && typeof project === "object" && !Array.isArray(project)
+      ? project
+      : {};
+  const merged = { ...globalSettings, ...projectSettings } as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...(typeof merged.enabled === "boolean" ? { enabled: merged.enabled } : {}),
+    ...(typeof merged.reserveTokens === "number"
+      ? { reserveTokens: merged.reserveTokens }
+      : {}),
+    ...(typeof merged.keepRecentTokens === "number"
+      ? { keepRecentTokens: merged.keepRecentTokens }
+      : {}),
+  };
+}
+
 export default function setupCore(
   pi: ExtensionAPI,
   deps: { exec?: typeof trackedExec } = {},
@@ -167,6 +197,17 @@ export default function setupCore(
       return undefined;
     }
   }
+
+  // `subagent` is a package-defined custom tool, so the shipped overload set
+  // does not name it even though ToolResultEvent supports custom tool names.
+  (
+    pi.on as unknown as (
+      event: "tool_result",
+      handler: (
+        event: Parameters<typeof limitSubagentToolResult>[0],
+      ) => unknown,
+    ) => void
+  )("tool_result", (event) => limitSubagentToolResult(event));
 
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;
@@ -447,6 +488,9 @@ export default function setupCore(
           activeToolNames: pi.getActiveTools(),
           systemPrompt: ctx.getSystemPrompt(),
           sessionEntries: ctx.sessionManager.getEntries(),
+          activeContext: ctx.getContextUsage(),
+          model: ctx.model,
+          compaction: readCompactionSettings(getAgentDir(), ctx.cwd),
         });
         ctx.ui.notify(formatContextDiagnostics(diagnostics), "info");
         return;

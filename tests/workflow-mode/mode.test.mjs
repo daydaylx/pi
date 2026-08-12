@@ -22,14 +22,27 @@ await test("work is the default and ignores legacy sidecars", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-mode-"));
   try {
     mkdirSync(join(cwd, ".agent", "plans"), { recursive: true });
-    writeFileSync(join(cwd, ".agent", "plans", "current-plan.state.json"), '{"status":"blocked"}');
+    writeFileSync(
+      join(cwd, ".agent", "plans", "current-plan.state.json"),
+      '{"status":"blocked"}',
+    );
     const harness = createHarness();
     const ctx = harness.makeContext({ cwd });
     planMode.default(harness.api);
     await hooks(harness, "session_start", ctx);
     const prompt = await hooks(harness, "before_agent_start", ctx);
-    assert(prompt[0]?.message?.content.includes("PI WORKMODUS"), "session starts in work mode");
-    assert(!prompt[0]?.message?.content.includes("blocked"), "legacy sidecar is ignored");
+    assert(
+      prompt[0]?.systemPrompt?.includes("PI WORKMODUS"),
+      "session starts in work mode",
+    );
+    assert(
+      !prompt[0]?.systemPrompt?.includes("blocked"),
+      "legacy sidecar is ignored",
+    );
+    assert(
+      !prompt[0]?.message,
+      "work mode injects no persisted custom message",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -42,11 +55,23 @@ await test("workflow exposes no public slash commands or legacy shortcut", () =>
   for (const command of ["plan", "work", "go", "workflow"]) {
     assert(!harness.commands.has(command), `/${command} is not registered`);
   }
-  for (const command of ["view-plan", "show-plan", "edit-plan", "plan-edit", "commands"]) {
+  for (const command of [
+    "view-plan",
+    "show-plan",
+    "edit-plan",
+    "plan-edit",
+    "commands",
+  ]) {
     assert(harness.commands.has(command), `/${command} remains registered`);
   }
-  assert(harness.shortcuts.has("shift+tab"), "Shift+Tab remains the only workflow control");
-  assert(!harness.shortcuts.has("super+p"), "Super+P no longer opens a workflow command");
+  assert(
+    harness.shortcuts.has("shift+tab"),
+    "Shift+Tab remains the only workflow control",
+  );
+  assert(
+    !harness.shortcuts.has("super+p"),
+    "Super+P no longer opens a workflow command",
+  );
   assert(!harness.tools.has("plan_progress"), "plan_progress is removed");
 });
 
@@ -65,7 +90,10 @@ await test("choosing a plan mode preserves a plan until the next agent turn", as
     assert(existsSync(file), "selection does not discard the plan");
     eq(harness.sent.length, 0, "selection does not start a planning turn");
     await hooks(harness, "before_agent_start", ctx);
-    assert(existsSync(file), "the real planning turn preserves it until a successful replacement");
+    assert(
+      existsSync(file),
+      "the real planning turn preserves it until a successful replacement",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

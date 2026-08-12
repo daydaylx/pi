@@ -523,10 +523,12 @@ export function createHarness(options = {}) {
           }
         },
         getContextUsage() {
-          return {
-            percent: options.contextPercent ?? 42,
-            contextWindow: 100000,
-          };
+          return (
+            options.contextUsage ?? {
+              percent: options.contextPercent ?? 42,
+              contextWindow: 100000,
+            }
+          );
         },
         getSystemPrompt() {
           return options.systemPrompt ?? "";
