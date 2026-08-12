@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { isInside } from "../shared/path-utils.ts";
 
@@ -25,6 +25,12 @@ export function readPlan(cwd: string): string | undefined {
 /** Idempotent: a missing plan file is not an error, a real removal failure still throws. */
 export function removePlan(cwd: string): void {
   rmSync(planPath(cwd), { force: true });
+}
+
+export function writePlan(cwd: string, content: string): void {
+  const path = planPath(cwd);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content, "utf8");
 }
 
 export function planParentPath(cwd: string): string {

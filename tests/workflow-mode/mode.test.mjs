@@ -65,7 +65,7 @@ await test("choosing a plan mode preserves a plan until the next agent turn", as
     assert(existsSync(file), "selection does not discard the plan");
     eq(harness.sent.length, 0, "selection does not start a planning turn");
     await hooks(harness, "before_agent_start", ctx);
-    assert(!existsSync(file), "the real planning turn may replace it");
+    assert(existsSync(file), "the real planning turn preserves it until a successful replacement");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

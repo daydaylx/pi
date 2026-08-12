@@ -105,7 +105,11 @@ function isMutatingTool(toolName: string): boolean {
 
 function customData<T>(entry: unknown, customType: string): T | undefined {
   if (!entry || typeof entry !== "object") return undefined;
-  const candidate = entry as { type?: unknown; customType?: unknown; data?: unknown };
+  const candidate = entry as {
+    type?: unknown;
+    customType?: unknown;
+    data?: unknown;
+  };
   return candidate.type === "custom" && candidate.customType === customType
     ? (candidate.data as T)
     : undefined;
@@ -126,7 +130,10 @@ function latestRecoveryState(entries: readonly unknown[]): {
       finalFailure = undefined;
       continue;
     }
-    const settled = customData<TurnSettledMarker>(entry, "resilience.turn-settled");
+    const settled = customData<TurnSettledMarker>(
+      entry,
+      "resilience.turn-settled",
+    );
     if (settled && openTurn?.timestamp === settled.turnStartedAt) {
       openTurn = undefined;
       if (settled.outcome === "failed") finalFailure = settled;
@@ -171,7 +178,9 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       model: openTurn.marker.model,
       contextPercent: contextPercent(ctx),
       errorClass: classification.errorClass,
-      ...(classification.errorCode ? { errorCode: classification.errorCode } : {}),
+      ...(classification.errorCode
+        ? { errorCode: classification.errorCode }
+        : {}),
       phase: openTurn.phase,
       workspaceChangedSinceTurnStart: workspaceChanged(
         openTurn.marker.workspaceFingerprint,
@@ -191,7 +200,10 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     toolMayHaveMutatedWorkspace: boolean,
   ): NonNullable<typeof pendingRecovery> {
     const recovery = {
-      workspaceWasChanged: workspaceChanged(marker.workspaceFingerprint, sessionCwd),
+      workspaceWasChanged: workspaceChanged(
+        marker.workspaceFingerprint,
+        sessionCwd,
+      ),
       toolMayHaveMutatedWorkspace,
     };
     pendingRecovery = recovery;
@@ -224,16 +236,23 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     const prior = latestRecoveryState(entries);
     if (prior.openTurn) {
       const existing = prior.requiredByTurn.get(prior.openTurn.timestamp);
-      if (existing) armRecovery(prior.openTurn, existing.toolMayHaveMutatedWorkspace);
+      if (existing)
+        armRecovery(prior.openTurn, existing.toolMayHaveMutatedWorkspace);
       else appendRecoveryRequired("interrupted", prior.openTurn, false);
       return;
     }
     if (prior.finalFailure) {
       const start = entries
-        .map((entry) => customData<TurnStartMarker>(entry, "resilience.turn-start"))
-        .find((marker) => marker?.timestamp === prior.finalFailure?.turnStartedAt);
+        .map((entry) =>
+          customData<TurnStartMarker>(entry, "resilience.turn-start"),
+        )
+        .find(
+          (marker) => marker?.timestamp === prior.finalFailure?.turnStartedAt,
+        );
       if (!start) return;
-      const existing = prior.requiredByTurn.get(prior.finalFailure.turnStartedAt);
+      const existing = prior.requiredByTurn.get(
+        prior.finalFailure.turnStartedAt,
+      );
       if (existing) armRecovery(start, existing.toolMayHaveMutatedWorkspace);
       else appendRecoveryRequired("final_failure", start, false);
     }
@@ -297,7 +316,8 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   pi.on("tool_execution_start", (event) => {
     if (!openTurn) return;
     openTurn.phase = "tool_running";
-    if (isMutatingTool(event.toolName)) openTurn.toolMayHaveMutatedWorkspace = true;
+    if (isMutatingTool(event.toolName))
+      openTurn.toolMayHaveMutatedWorkspace = true;
   });
 
   pi.on("tool_execution_end", () => {
@@ -317,6 +337,41 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       contextPercent: contextPercent(ctx),
     };
     pi.appendEntry("resilience.compaction-boundary", marker);
+  });
+
+  // The runtime patch "agent-session-compaction-failure-*" (see
+  // scripts/apply-runtime-patches.mjs) forwards this event from the core
+  // compaction paths. It is not part of the shipped ExtensionAPI .d.ts, so
+  // only this registration is cast; every other hook stays fully typed.
+  type SessionCompactFailedEvent = {
+    type: "session_compact_failed";
+    reason: "manual" | "threshold" | "overflow";
+    errorMessage: string;
+    willRetry: boolean;
+  };
+  (
+    pi.on as unknown as (
+      event: "session_compact_failed",
+      handler: (
+        event: SessionCompactFailedEvent,
+        ctx: ExtensionContext,
+      ) => void,
+    ) => void
+  )("session_compact_failed", (event, ctx) => {
+    if (openTurn) openTurn.phase = "compaction";
+    const marker: CompactionBoundaryMarker = {
+      schemaVersion: SCHEMA_VERSION,
+      timestamp: new Date().toISOString(),
+      boundary: "failed",
+      reason: event.reason,
+      willRetry: event.willRetry,
+      workspaceFingerprint: workspaceFingerprint(ctx.cwd),
+      workflowMode: requestWorkflowCapabilities(pi.events).mode,
+      contextPercent: contextPercent(ctx),
+      errorMessage: event.errorMessage,
+    };
+    pi.appendEntry("resilience.compaction-boundary", marker);
+    appendFailure(ctx, event.errorMessage);
   });
 
   pi.on("session_compact", (event, ctx) => {
@@ -365,6 +420,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   });
 
   pi.events.on("subagent:async-complete", () => {
-    if (openTurn) openTurn.activeSubagents = Math.max(0, openTurn.activeSubagents - 1);
+    if (openTurn)
+      openTurn.activeSubagents = Math.max(0, openTurn.activeSubagents - 1);
   });
 }

@@ -335,9 +335,7 @@ export const runtimeSections = {
         // runtime imports (no string-grep; real structural assertions).
         const { ALLOWLIST, NEVER_COPY, NEVER_COPY_SUBTREE, LEGACY_MANAGED } =
           await import(
-            pathToFileURL(
-              path.join(ROOT, "scripts", "install-user.mjs"),
-            ).href
+            pathToFileURL(path.join(ROOT, "scripts", "install-user.mjs")).href
           );
         assert(
           Array.isArray(ALLOWLIST) && ALLOWLIST.length > 0,
@@ -424,9 +422,7 @@ export const runtimeSections = {
     await section("installer greenfield deployment", async () => {
       const { ALLOWLIST, NEVER_COPY, NEVER_COPY_SUBTREE, SOURCE, collect } =
         await import(
-          pathToFileURL(
-            path.join(ROOT, "scripts", "install-user.mjs"),
-          ).href
+          pathToFileURL(path.join(ROOT, "scripts", "install-user.mjs")).href
         );
 
       // Greenfield: collect all files the installer would deploy, then
@@ -488,8 +484,8 @@ export const runtimeSections = {
 
       // Security: NEVER_COPY entries must not appear in deployed files.
       for (const forbidden of NEVER_COPY) {
-        const violations = deployed.filter((f) =>
-          f.startsWith(forbidden + "/") || f === forbidden,
+        const violations = deployed.filter(
+          (f) => f.startsWith(forbidden + "/") || f === forbidden,
         );
         eq(
           violations.length,
@@ -513,12 +509,21 @@ export const runtimeSections = {
       try {
         execFileSync(
           process.execPath,
-          [path.join(ROOT, "scripts", "install-user.mjs"), "--apply", "--target", target],
+          [
+            path.join(ROOT, "scripts", "install-user.mjs"),
+            "--apply",
+            "--target",
+            target,
+          ],
           { stdio: "pipe", timeout: 30_000 },
         );
 
         // shared/ must exist and be importable.
-        const snapshotPath = path.join(target, "shared", "workspace-snapshot.mjs");
+        const snapshotPath = path.join(
+          target,
+          "shared",
+          "workspace-snapshot.mjs",
+        );
         assert(
           existsSync(snapshotPath),
           "deployed target contains shared/workspace-snapshot.mjs",
@@ -530,9 +535,7 @@ export const runtimeSections = {
           "deployed target contains the agent-level custom subagent description",
         );
         assert(
-          !existsSync(
-            path.join(target, ".pi", "subagent-tool-description.md"),
-          ),
+          !existsSync(path.join(target, ".pi", "subagent-tool-description.md")),
           "deployed target has no retired agent-shipped .pi description",
         );
 
@@ -567,9 +570,7 @@ export const runtimeSections = {
     const { section } = context;
     await section("installer upgrade deployment", async () => {
       const { LEGACY_MANAGED } = await import(
-        pathToFileURL(
-          path.join(ROOT, "scripts", "install-user.mjs"),
-        ).href
+        pathToFileURL(path.join(ROOT, "scripts", "install-user.mjs")).href
       );
 
       const target = mkdtempSync(path.join(tmpdir(), "pi-install-upgrade-"));
@@ -611,7 +612,12 @@ export const runtimeSections = {
 
         execFileSync(
           process.execPath,
-          [path.join(ROOT, "scripts", "install-user.mjs"), "--apply", "--target", target],
+          [
+            path.join(ROOT, "scripts", "install-user.mjs"),
+            "--apply",
+            "--target",
+            target,
+          ],
           { stdio: "pipe", timeout: 30_000 },
         );
 
@@ -652,9 +658,7 @@ export const runtimeSections = {
       const target = mkdtempSync(path.join(tmpdir(), "pi-install-security-"));
       try {
         // Symlink in target path must be rejected.
-        const symDir = mkdtempSync(
-          path.join(tmpdir(), "pi-install-symlink-"),
-        );
+        const symDir = mkdtempSync(path.join(tmpdir(), "pi-install-symlink-"));
         const linkPath = path.join(symDir, "link");
         symlinkSync(target, linkPath, "dir");
         try {
@@ -682,9 +686,7 @@ export const runtimeSections = {
 
         // Sensitive files must not appear in deployed target.
         const { NEVER_COPY } = await import(
-          pathToFileURL(
-            path.join(ROOT, "scripts", "install-user.mjs"),
-          ).href
+          pathToFileURL(path.join(ROOT, "scripts", "install-user.mjs")).href
         );
         execFileSync(
           process.execPath,
@@ -952,7 +954,9 @@ export const runtimeSections = {
             },
           ],
         });
-        setupCore.default(contextHarness.api, { exec: contextHarness.api.exec });
+        setupCore.default(contextHarness.api, {
+          exec: contextHarness.api.exec,
+        });
         const contextCommand = contextHarness.commands.get("setup-doctor");
         const diagnosticContext = contextHarness.makeContext();
         if (contextCommand) await contextCommand("context", diagnosticContext);
@@ -1042,8 +1046,16 @@ export const runtimeSections = {
             undefined,
             rejectedContext,
           );
-          eq(rejected.isError, true, "verify reports executor startup failures");
-          eq(rejected.details.exitCode, null, "verify preserves missing exit code");
+          eq(
+            rejected.isError,
+            true,
+            "verify reports executor startup failures",
+          );
+          eq(
+            rejected.details.exitCode,
+            null,
+            "verify preserves missing exit code",
+          );
           assert(
             rejected.content[0]?.text.includes("spawn ENOENT"),
             "verify returns the bounded executor error as tool output",
@@ -1088,7 +1100,9 @@ export const runtimeSections = {
           );
 
           if (process.platform !== "win32") {
-            const processDir = mkdtempSync(path.join(tmpdir(), "pi-tracked-exec-"));
+            const processDir = mkdtempSync(
+              path.join(tmpdir(), "pi-tracked-exec-"),
+            );
             const pidFile = path.join(processDir, "child.pid");
             let childPid;
             try {
@@ -1100,10 +1114,18 @@ export const runtimeSections = {
                 ],
                 { timeout: 100, killGraceMs: 50 },
               );
-              eq(result.killed, true, "tracked executor reports the timed-out process tree");
+              eq(
+                result.killed,
+                true,
+                "tracked executor reports the timed-out process tree",
+              );
               childPid = Number(readFileSync(pidFile, "utf8"));
               let childStillExists = true;
-              for (let attempt = 0; attempt < 20 && childStillExists; attempt += 1) {
+              for (
+                let attempt = 0;
+                attempt < 20 && childStillExists;
+                attempt += 1
+              ) {
                 try {
                   process.kill(childPid, 0);
                 } catch {
@@ -1825,151 +1847,6 @@ export const runtimeSections = {
       }
     });
   },
-  "check-baseline diagnostics": async (context) => {
-    const { section, load } = context;
-
-    await section("check-baseline diagnostics", async () => {
-      const baseline = await load("extensions/setup-core/check-baseline.ts");
-
-      // Snapshot unavailable (undefined) must not collapse into "clean
-      // workspace" (empty array) — they are different states. A caller
-      // that could not collect a snapshot at all (e.g. no git repository)
-      // has no baseline whatsoever, not evidence the workspace is clean.
-      const snapshotUnavailable = baseline.classifyCheckFailure(
-        "tests/example.test.ts:12 assertion failed",
-        undefined,
-        undefined,
-      );
-      eq(
-        snapshotUnavailable.classification,
-        "unknown",
-        "an unavailable snapshot is unknown, not pre_existing",
-      );
-      assert(
-        !("pathRelation" in snapshotUnavailable),
-        "the undefined-snapshot case is checked before path-matching runs at all",
-      );
-
-      // No workspace changes at all: the workspace is defined as matching
-      // HEAD exactly (collectWorkspaceSnapshot's changedFiles is empty).
-      // That is a real, tautological baseline — a failure cannot have been
-      // introduced by a session that has made no changes yet — independent
-      // of whether the profile has ever passed before.
-      const noWorkspaceChanges = baseline.classifyCheckFailure(
-        "tests/example.test.ts:12 assertion failed",
-        [],
-        undefined,
-      );
-      eq(
-        noWorkspaceChanges.classification,
-        "pre_existing",
-        "no workspace changes is a genuine baseline: pre_existing",
-      );
-      assert(
-        !("pathRelation" in noWorkspaceChanges),
-        "pre_existing from a clean workspace carries no path-matching guess",
-      );
-
-      // A real comparison basis: this exact profile already passed earlier
-      // in the session with fingerprint "abc", and now fails against a
-      // different fingerprint "xyz". That is recorded evidence of a
-      // regression, not an inference from paths.
-      const regressed = baseline.classifyCheckFailure(
-        "tests/example.test.ts:12 assertion failed",
-        ["tests/example.test.ts"],
-        "abc",
-        "xyz",
-      );
-      eq(
-        regressed.classification,
-        "introduced",
-        "a profile that already passed this session and now fails on a different fingerprint is a genuine regression",
-      );
-
-      // Same fingerprint Pass→Fail: the workspace hasn't changed since the
-      // last passing run, so this is flaky, not a regression.
-      const flaky = baseline.classifyCheckFailure(
-        "tests/example.test.ts:12 assertion failed",
-        ["tests/example.test.ts"],
-        "abc",
-        "abc",
-      );
-      eq(
-        flaky.classification,
-        "flaky",
-        "same-fingerprint pass→fail is flaky, not introduced",
-      );
-
-      // No genuine baseline (never passed this session, workspace has
-      // changes): always unknown, regardless of how suggestively the
-      // output's paths line up with the diff — path text is not causal
-      // evidence. changed vs. output mismatch (paths outside the diff):
-      const outputOutsideDiff = baseline.classifyCheckFailure(
-        "src/unrelated/legacy.ts:40 type error",
-        ["src/feature/new-file.ts"],
-        undefined,
-        "fingerprint-1",
-      );
-      eq(
-        outputOutsideDiff.classification,
-        "unknown",
-        "output referencing only unchanged paths is still unknown, not pre_existing",
-      );
-      eq(outputOutsideDiff.pathRelation, "no_paths_changed");
-
-      // unchanged vs. output: all referenced paths are exactly the changed
-      // files, but still no recorded prior pass — must stay unknown, not
-      // promoted to "introduced" from path text alone.
-      const outputInsideDiff = baseline.classifyCheckFailure(
-        "src/feature/new-file.ts:5 type error",
-        ["src/feature/new-file.ts"],
-        undefined,
-        "fingerprint-1",
-      );
-      eq(
-        outputInsideDiff.classification,
-        "unknown",
-        "output referencing only changed paths is still unknown, not introduced, without a real baseline",
-      );
-      eq(outputInsideDiff.pathRelation, "all_paths_changed");
-      eq(outputInsideDiff.matchedPaths, ["src/feature/new-file.ts"]);
-
-      // mixed: some referenced paths changed, some did not.
-      const mixed = baseline.classifyCheckFailure(
-        "src/feature/new-file.ts:5 and src/unrelated/legacy.ts:40 both fail",
-        ["src/feature/new-file.ts"],
-        undefined,
-        "fingerprint-1",
-      );
-      eq(mixed.classification, "unknown");
-      eq(mixed.pathRelation, "mixed");
-
-      // no paths found in the output at all.
-      const noPaths = baseline.classifyCheckFailure(
-        "exit code 1",
-        ["src/feature/new-file.ts"],
-        undefined,
-        "fingerprint-1",
-      );
-      eq(noPaths.classification, "unknown");
-      eq(noPaths.pathRelation, "no_paths_found");
-      assert(
-        !("matchedPaths" in noPaths),
-        "no matchedPaths field when nothing was recognized in the output",
-      );
-
-      // Never gates or feeds evaluateCheckRun/mergeCheckRun/verificationStatus:
-      // classifyCheckFailure only takes output/changedFiles/session-history and
-      // returns diagnostic metadata, structurally unrelated to CheckReport's
-      // status/exitCode/classification fields those functions actually read.
-      const status = await load("extensions/setup-core/verification-status.ts");
-      assert(
-        typeof status.evaluateCheckRun === "function" &&
-          status.evaluateCheckRun.length === 2,
-        "evaluateCheckRun's signature has no baseline parameter to accidentally wire in",
-      );
-    });
-  },
   "setup doctor required profile completeness (P1-08)": async (context) => {
     const { section, setupCore } = context;
 
@@ -2282,11 +2159,7 @@ export const runtimeSections = {
       });
       eq(failRun.ok, false, "non-zero exit -> not ok");
       eq(failRun.exitCode, 2, "exit code captured");
-      eq(
-        failRun.error.kind,
-        "failed",
-        "non-zero exit reported as failed",
-      );
+      eq(failRun.error.kind, "failed", "non-zero exit reported as failed");
 
       // --- runProfile: timeout -> killed, structured timeout error ---
       const timeoutRun = await profilesMod.runProfile(profile, {
@@ -2340,7 +2213,11 @@ export const runtimeSections = {
         }),
       });
       eq(signalExitRun.ok, false, "null exit code -> not ok");
-      eq(signalExitRun.exitCode, null, "null exit code surfaced, not coerced to 0");
+      eq(
+        signalExitRun.exitCode,
+        null,
+        "null exit code surfaced, not coerced to 0",
+      );
       eq(
         signalExitRun.error.kind,
         "failed",
@@ -4010,7 +3887,7 @@ export const runtimeSections = {
           mode: "parallel",
         });
         assert(
-            render().includes("async-worker") &&
+          render().includes("async-worker") &&
             render().includes("reviewer") &&
             render().includes("WARTET"),
           "actual async-started data drives Aurora's transient subagent view",
@@ -4289,7 +4166,8 @@ export const runtimeSections = {
                   .join("\n")
               : "";
           assert(
-            waitingRendered.includes("WARTET") && waitingRendered.includes("0s"),
+            waitingRendered.includes("WARTET") &&
+              waitingRendered.includes("0s"),
             "Aurora derives WARTET only after its documented quiet threshold",
           );
           await harness.runHooks(
@@ -4467,16 +4345,15 @@ export const runtimeSections = {
                 )
               : undefined;
           const rendered =
-            motionComponent
-              ?.render(60)
-              .map(stripAnsi)
-              .join("\n") ?? "";
+            motionComponent?.render(60).map(stripAnsi).join("\n") ?? "";
           assert(
             rendered.includes("DENKT NACH") && rendered.includes("HOCH"),
             `Aurora keeps its Thinking header visible with ${motion} motion`,
           );
           assert(
-            motion === "reduced" ? rendered.includes("●") : !rendered.includes("●"),
+            motion === "reduced"
+              ? rendered.includes("●")
+              : !rendered.includes("●"),
             `${motion} motion keeps the required static or text-only activity presentation`,
           );
           const repaintsBeforeStatusTick = statusRepaints;
@@ -4591,17 +4468,84 @@ export const runtimeSections = {
       const failures = harness.appended.filter(
         (entry) => entry.customType === "resilience.failure",
       );
-      eq(failures.length, 2, "HTTP and network failures are observed separately");
-      eq(failures[0]?.data.errorCode, "HTTP_503", "HTTP failure keeps status only");
-      eq(failures[1]?.data.errorCode, "ECONNRESET", "network failure keeps code only");
+      eq(
+        failures.length,
+        2,
+        "HTTP and network failures are observed separately",
+      );
+      eq(
+        failures[0]?.data.errorCode,
+        "HTTP_503",
+        "HTTP failure keeps status only",
+      );
+      eq(
+        failures[1]?.data.errorCode,
+        "ECONNRESET",
+        "network failure keeps code only",
+      );
       const boundaries = harness.appended.filter(
         (entry) => entry.customType === "resilience.compaction-boundary",
       );
-      eq(boundaries.map((entry) => entry.data.boundary), ["started", "completed"], "compaction boundaries are persisted");
+      eq(
+        boundaries.map((entry) => entry.data.boundary),
+        ["started", "completed"],
+        "compaction boundaries are persisted",
+      );
       const settled = harness.appended.at(-1);
-      eq(settled?.customType, "resilience.turn-settled", "settled turn is persisted");
-      eq(settled?.data.outcome, "completed", "successful native retry settles completed");
-      eq(settled?.data.observedFailureCount, 2, "settled turn preserves observed failures");
+      eq(
+        settled?.customType,
+        "resilience.turn-settled",
+        "settled turn is persisted",
+      );
+      eq(
+        settled?.data.outcome,
+        "completed",
+        "successful native retry settles completed",
+      );
+      eq(
+        settled?.data.observedFailureCount,
+        2,
+        "settled turn preserves observed failures",
+      );
+
+      // A manual /compact between turns (no open turn) that the runtime patch
+      // reports as failed must still be persisted with its error message,
+      // even though there is no turn to attach an observed-failure count to.
+      const failureCountBeforeCompactFailure = harness.appended.filter(
+        (entry) => entry.customType === "resilience.failure",
+      ).length;
+      await harness.runHooks(
+        "session_compact_failed",
+        {
+          reason: "manual",
+          errorMessage: "This model's maximum context length is 200000 tokens",
+          willRetry: false,
+        },
+        ctx,
+      );
+      const failedBoundary = harness.appended.at(-1);
+      eq(
+        failedBoundary?.customType,
+        "resilience.compaction-boundary",
+        "a failed compaction attempt is persisted",
+      );
+      eq(
+        failedBoundary?.data.boundary,
+        "failed",
+        "the boundary marks the attempt as failed",
+      );
+      eq(
+        failedBoundary?.data.errorMessage,
+        "This model's maximum context length is 200000 tokens",
+        "the failure reason is preserved for diagnosis",
+      );
+      eq(
+        harness.appended.filter(
+          (entry) => entry.customType === "resilience.failure",
+        ).length,
+        failureCountBeforeCompactFailure,
+        "a compaction failure with no open turn does not fabricate a turn failure",
+      );
 
       await harness.runHooks("before_agent_start", {}, ctx);
       await harness.runHooks("agent_start", {}, ctx);
@@ -4620,10 +4564,18 @@ export const runtimeSections = {
       );
       await harness.runHooks("agent_settled", {}, ctx);
       const recovery = harness.appended.at(-1);
-      eq(recovery?.customType, "resilience.recovery-required", "final failure requests safe recovery");
+      eq(
+        recovery?.customType,
+        "resilience.recovery-required",
+        "final failure requests safe recovery",
+      );
       eq(recovery?.data.reason, "final_failure", "final failure is classified");
 
-      const nextTurnResults = await harness.runHooks("before_agent_start", {}, ctx);
+      const nextTurnResults = await harness.runHooks(
+        "before_agent_start",
+        {},
+        ctx,
+      );
       eq(
         nextTurnResults.at(-1)?.message?.customType,
         "pi-resilience-recovery",
@@ -4655,7 +4607,11 @@ export const runtimeSections = {
         "resilience.recovery-required",
         "resumed open turn is marked for inspection once",
       );
-      const resumedTurn = await resumed.runHooks("before_agent_start", {}, resumedCtx);
+      const resumedTurn = await resumed.runHooks(
+        "before_agent_start",
+        {},
+        resumedCtx,
+      );
       assert(
         resumedTurn.at(-1)?.message?.content.includes("git status --short"),
         "changed or unavailable workspace requires inspection before mutation",
@@ -4716,7 +4672,9 @@ export const runtimeSections = {
         finalFailureCtx,
       );
       assert(
-        finalFailureTurn.at(-1)?.message?.content.includes("git status --short"),
+        finalFailureTurn
+          .at(-1)
+          ?.message?.content.includes("git status --short"),
         "resume after a persisted final failure still injects recovery guidance",
       );
     });

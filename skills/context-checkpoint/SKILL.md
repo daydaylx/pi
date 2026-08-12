@@ -22,33 +22,20 @@ umformuliert, verdichtet und schreibt.
 
 ## Ablauf
 
-1. Ermittle das Projekt-Root über Git, falls verfügbar; andernfalls das aktuelle
-   Arbeitsverzeichnis nutzen.
-2. Lies `docs/PROJECT_STATE.md` und `docs/CONTEXT_LEDGER.md` nur bei Fortsetzung
-   einer bestehenden Aufgabe. Prüfe jede beibehaltene Aussage gegen den aktuellen
-   Auftrag, den Repository-Zustand und durchgeführte Prüfungen. Konkret: führe
-   `git log --oneline -1 -- docs/PROJECT_STATE.md` und dasselbe für
-   `docs/CONTEXT_LEDGER.md` aus, dann `git log --oneline <letzter-Touch-Commit>..HEAD`
-   für jede Datei. Prüfe jeden gefundenen Commit gegen die Bereiche, die die
-   jeweilige Datei beschreibt (Dateipfade/Module im Diff vs. im Dokument
-   genannte Komponenten), und kennzeichne widersprechende oder überholte
-   Aussagen ausdrücklich, statt sie stillschweigend beizubehalten.
-3. Ordne die gesammelten Informationen der richtigen Ebene zu:
+1. Ermittle das Projekt-Root und prüfe bei einer Fortsetzung
+   `docs/PROJECT_STATE.md`, `docs/CONTEXT_LEDGER.md`, Auftrag,
+   Repository-Zustand und bereits durchgeführte Prüfungen auf Widersprüche.
+2. Ordne die bestätigten Informationen der richtigen Ebene zu:
    - **Ledger (dauerhaft):** bestätigte Nutzerentscheidungen, Architektur­ent­schei­dungen,
      Nicht-Ziele, bekannte Einschränkungen, offene Risiken, offene Fragen,
      wichtige Projektregeln, aktuelle Prioritäten, verworfene Optionen mit Grund.
    - **PROJECT_STATE (flüchtig):** aktuelle Phase, umgesetzte Punkte dieser
      Sitzung, gelesene/geänderte Dateien, letzte Verifikation, genau drei
      nächste Schritte.
-4. Aktualisiere die Dateien nur, wenn der aktive Berechtigungsmodus
-   Dokumentationsschreibzugriffe erlaubt. Andernfalls den Checkpoint in der
-   Antwort zurückgeben, ohne zu schreiben.
-5. Halte den Ledger unter 200 Zeilen und diese Abschnitte ein:
-   `Bestätigte Nutzerentscheidungen`, `Architekturentscheidungen`, `Nicht-Ziele`,
-   `Bekannte Einschränkungen`, `Offene Risiken`, `Offene Fragen`,
-   `Wichtige Projektregeln`, `Aktuelle Prioritäten`, `Verworfene Optionen`.
-6. Halte `docs/PROJECT_STATE.md` unter 250 Zeilen und dupliziere keine
-   dauerhaften Fakten, die bereits im Ledger stehen — dort referenzieren.
+3. Aktualisiere die Dateien nur bei erlaubten Dokumentationsschreibzugriffen:
+   Ledger unter 200 Zeilen mit den bestehenden Abschnitten halten,
+   `PROJECT_STATE.md` unter 250 Zeilen und ohne dauerhafte Duplikate. Sonst
+   den Checkpoint nur in der Antwort zurückgeben.
 
 ## Wann ein Checkpoint fällig ist
 

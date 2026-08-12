@@ -1,6 +1,6 @@
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
-import { createRequire } from "node:module";
 import { relative, resolve, sep } from "node:path";
+import { resolveRuntimeRoot } from "../../shared/runtime-resolution.mjs";
 import {
   decideFileAccess,
   isPlanModeDiagnosticCommand,
@@ -38,31 +38,30 @@ export const LOCAL_LSP_TOOLS = new Set([
 ]);
 
 const WRITE_TOOLS = new Set(["write", "edit"]);
+const PLAN_MODE_READ_ONLY_TOOLS = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "ask_user",
+  ...LOCAL_LSP_TOOLS,
+]);
 
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 
 // Resolve the pi runtime installation root dynamically so the readable-docs
 // boundary works on any machine. Falls back to a derived default when the env
 // variable is not set, which is the common case.
-function resolvePiRuntimeRoot(): string {
-  if (process.env.PI_RUNTIME_ROOT) return process.env.PI_RUNTIME_ROOT;
+function resolvePiRuntimeRoot(): string | undefined {
   try {
-    // Resolve the pi runtime package itself — this always points at the
-    // actual installation, whether global npm, pnpm, or a linked checkout.
-    const req = createRequire(import.meta.url);
-    const pkgRoot = req.resolve("@earendil-works/pi-coding-agent/package.json");
-    return relative("package.json", pkgRoot) === ""
-      ? pkgRoot.slice(0, -"package.json".length)
-      : resolve(pkgRoot, "..");
+    return resolveRuntimeRoot().root;
   } catch {
-    // Last resort: the documented fallback path this project historically
-    // used. Keep it so existing installations keep working during a
-    // transition.
-    return "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent";
+    return undefined;
   }
 }
 
-const EXTRA_READABLE_ROOTS = [resolvePiRuntimeRoot()];
+const runtimeRoot = resolvePiRuntimeRoot();
+const EXTRA_READABLE_ROOTS = runtimeRoot ? [runtimeRoot] : [];
 
 function inside(root: string, candidate: string): boolean {
   const rel = relative(root, candidate);
@@ -156,28 +155,9 @@ function planFileProtectedWritePath(): ProtectedWritePath {
 }
 
 /**
- * Plan Mode's own mutation guard, independent from the chosen permission
- * level. Plan Mode is a prompt instruction, not a lock by default (see
- * extensions/plan-mode/README.md) — but a write or a mutating bash call
- * while planning is almost always a slip, not intent. This closes that gap
- * technically for `project-write` and `confirm-all` (the levels most
- * sessions plan under). File writes reuse decideFileAccess's `readonly`
- * branch unchanged (see planModeMutationGuard below). Bash reuses
- * isPlanModeDiagnosticCommand — a Plan-Mode-specific classifier, not
- * decideBash("readonly", ...): the `readonly` permission level's bash
- * policy only allows a narrow, provably-side-effect-free command surface
- * and rejects `npm test`, `npm run typecheck/lint/verify`, and plain
- * `git diff`/`git show` outright, which made Plan Mode block ordinary
- * diagnostics along with real mutations. isPlanModeDiagnosticCommand
- * shares the same parser and hard guards (chaining, redirection, command
- * substitution, secrets, external paths, `sed -i`, file-mutating tools) and
- * only widens the npm/pnpm/yarn and git branches to admit read-only/
- * diagnostic subcommands — see its doc comment in shared/permission-policy.ts.
- * `readonly` itself needs no separate handling here: its own branch in
- * decideFileAccess/decideBash already denies everything but the plan file,
- * and this guard is skipped entirely at that level (see below). `yolo` is
- * deliberately left alone: choosing YOLO is itself an explicit, unambiguous
- * override of default safety (see docs/decisions/012-plan-mode-mutation-guard.md).
+ * Plan Mode permits only fixed read-only capabilities. It deliberately does
+ * not infer safety from project-script names: `npm test` and `npm run build`
+ * can run arbitrary lifecycle code. YOLO remains the explicit override.
  */
 export function planModeBashGuard(
   workflow: WorkflowCapabilitySnapshot,
@@ -215,7 +195,14 @@ export function planModeMutationGuard(
       cwd,
     );
   }
-  if (!WRITE_TOOLS.has(event.toolName)) return PERMITTED;
+  if (PLAN_MODE_READ_ONLY_TOOLS.has(event.toolName)) return PERMITTED;
+  if (!WRITE_TOOLS.has(event.toolName)) {
+    return {
+      blocked: true,
+      reason:
+        "Planmodus: Dieses Tool ist nicht als nachweislich lesend freigegeben.",
+    };
+  }
 
   const path = toolPath(event) ?? "";
   const decision = decideFileAccess("readonly", "write", path, cwd, {

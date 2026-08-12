@@ -375,42 +375,11 @@ interface ParsedShell {
   error?: string;
 }
 
-interface ParseReadOnlyShellOptions {
-  /**
-   * Treat `;` like `|`: split into segments instead of hard-blocking. Each
-   * segment still goes through the caller's own per-segment classification,
-   * so `ls -la; rm -rf foo` stays blocked — only the structural split is
-   * widened, not what counts as safe. Only `isPlanModeDiagnosticCommand`
-   * sets this; `isPlanSafeCommand` (readonly) and the other callers below
-   * keep the strict default.
-   */
-  allowSemicolonChaining?: boolean;
-  /**
-   * Accept `2>`, `1>` or `&>` redirected to exactly `/dev/null` as a safe,
-   * content-free target (the extremely common "suppress stderr while
-   * probing" idiom, e.g. `ls -la .agent 2>/dev/null`). A bare `>` with no fd
-   * prefix, or any target other than `/dev/null`, still hard-blocks — this
-   * does not open up writing to arbitrary files. Only
-   * `isPlanModeDiagnosticCommand` sets this.
-   */
-  allowDevNullRedirect?: boolean;
-}
-
-const DEV_NULL_AMP_REDIRECT = /^&>\/dev\/null(?=$|[\s;|])/;
-const DEV_NULL_TARGET = /^>\/dev\/null(?=$|[\s;|])/;
-const TRAILING_FD_ONE_OR_TWO = /(?:^|\s)[12]$/;
-
 /**
  * Conservative parser for Plan Mode. It accepts plain commands and pipelines,
  * but rejects shell constructs whose effects cannot be proven read-only.
- * `options` widens exactly two constructs (see ParseReadOnlyShellOptions);
- * every other caller passes no options and keeps the original strict
- * behavior unchanged.
  */
-export function parseReadOnlyShell(
-  command: string,
-  options: ParseReadOnlyShellOptions = {},
-): ParsedShell {
+export function parseReadOnlyShell(command: string): ParsedShell {
   const segments: string[] = [];
   let current = "";
   let quote: "'" | '"' | undefined;
@@ -450,38 +419,15 @@ export function parseReadOnlyShell(
       return { segments: [], error: "Shell-Verkettungen sind nicht erlaubt." };
     }
     if (char === ";") {
-      if (options.allowSemicolonChaining) {
-        if (!current.trim()) {
-          return { segments: [], error: "Leeres Pipeline-Segment." };
-        }
-        segments.push(current.trim());
-        current = "";
-        continue;
-      }
       return { segments: [], error: "Shell-Verkettungen sind nicht erlaubt." };
     }
     if (char === "&") {
-      const ampRedirect = options.allowDevNullRedirect
-        ? DEV_NULL_AMP_REDIRECT.exec(command.slice(index))
-        : null;
-      if (ampRedirect) {
-        index += ampRedirect[0].length - 1;
-        continue;
-      }
       return { segments: [], error: "Shell-Verkettungen sind nicht erlaubt." };
     }
     if (char === "<") {
       return { segments: [], error: "Shell-Redirections sind nicht erlaubt." };
     }
     if (char === ">") {
-      const target = options.allowDevNullRedirect
-        ? DEV_NULL_TARGET.exec(command.slice(index))
-        : null;
-      if (target && TRAILING_FD_ONE_OR_TWO.test(current)) {
-        current = current.slice(0, -1);
-        index += target[0].length - 1;
-        continue;
-      }
       return { segments: [], error: "Shell-Redirections sind nicht erlaubt." };
     }
     if (char === "|") {
@@ -1001,182 +947,24 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
   );
 }
 
-// npm/pnpm/yarn subcommands that mutate the package tree, the registry, an
-// account, or local config/cache. Checked first and unconditionally
-// blocked, regardless of anything below.
-const PLAN_MODE_MUTATING_PACKAGE_SUBCOMMANDS = new Set([
-  "install",
-  "i",
-  "add",
-  "ci",
-  "remove",
-  "rm",
-  "uninstall",
-  "un",
-  "update",
-  "up",
-  "upgrade",
-  "global",
-  "dlx",
-  "link",
-  "unlink",
-  "publish",
-  "unpublish",
-  "dedupe",
-  "prune",
-  "rebuild",
-  "pack",
-  "version",
-  "deprecate",
-  "owner",
-  "team",
-  "org",
-  "star",
-  "unstar",
-  "login",
-  "adduser",
-  "logout",
-  "token",
-  "init",
-  "set",
-  "config",
-  "cache",
-  "exec",
-  "x",
-]);
-
-// npm's own built-in read/introspection subcommands: they never execute a
-// project-defined script, so — unlike `run`/bare-subcommand aliases below —
-// there is no script name to vet. Safe regardless of what the project
-// happens to be named or contains.
-const NPM_BUILTIN_READ_SUBCOMMANDS = new Set([
-  "list",
-  "ls",
-  "view",
-  "info",
-  "search",
-  "outdated",
-  "ping",
-  "whoami",
-  "root",
-  "prefix",
-  "explain",
-  "fund",
-  "doctor",
-]);
-
-// Category prefixes a package.json script name must start with (optionally
-// followed by `:`/`-`/`_` and a sub-namespace, e.g. `test:coverage`) to be
-// treated as diagnostic. Deliberately a short list of conventional
-// categories, not an attempt to enumerate every real project's script
-// names — an unrecognized name is refused, not guessed at.
-const DIAGNOSTIC_SCRIPT_NAME_PREFIXES = [
-  "test",
-  "typecheck",
-  "type-check",
-  "types",
-  "lint",
-  "check",
-  "verify",
-  "coverage",
-  "audit",
-  "build",
-];
-
-// Vetoes an otherwise-matching diagnostic prefix: catches the mutating
-// variant of a diagnostic-sounding name (`lint:fix`, `format:write`,
-// `eslint-fix`) that would otherwise pass the prefix check below.
-const NON_DIAGNOSTIC_SCRIPT_NAME_MARKER =
-  /(?:^|[:_-])(?:fix|write)(?:$|[:_-])/i;
-
-/**
- * Is this package.json script name provably diagnostic — the same bar
- * "Tests, Typecheck, Lint (ohne --fix), Builds" from the brief holds any
- * other command to — rather than an arbitrary, potentially destructive
- * project-defined script (`generate`, `deploy`, a custom `npm foo` alias)?
- * A script this permissive check refuses can still run through
- * `project_check` against `.pi/verify.json`, which is the actual place to
- * declare a project's own trusted checks — this is only Plan Mode's bash
- * guard deciding what to trust *without* that declaration.
- */
-function isDiagnosticScriptName(name: string | undefined): boolean {
-  if (!name) return false;
-  const normalized = name.toLowerCase();
-  if (NON_DIAGNOSTIC_SCRIPT_NAME_MARKER.test(normalized)) return false;
-  return DIAGNOSTIC_SCRIPT_NAME_PREFIXES.some(
-    (prefix) =>
-      normalized === prefix ||
-      normalized.startsWith(`${prefix}:`) ||
-      normalized.startsWith(`${prefix}-`) ||
-      normalized.startsWith(`${prefix}_`),
-  );
-}
-
-function isPlanModeSafePackageManagerCommand(tokens: string[]): boolean {
-  const subcommand = tokens[1]?.toLowerCase();
-  if (!subcommand) return true; // bare `npm`/`pnpm`/`yarn` just prints help
-  if (PLAN_MODE_MUTATING_PACKAGE_SUBCOMMANDS.has(subcommand)) return false;
-  if (subcommand === "audit") return !hasAnyOption(tokens, [/^--fix(?:=|$)/i]);
-  if (NPM_BUILTIN_READ_SUBCOMMANDS.has(subcommand)) return true;
-  if (subcommand === "run" || subcommand === "run-script") {
-    return isDiagnosticScriptName(tokens[2]);
-  }
-  // Any other bare subcommand doubles as a package.json script name under
-  // npm/pnpm/yarn's lifecycle-alias convention (`npm test`, `npm start`, or
-  // a custom `npm foo`) — not provably diagnostic just because it isn't a
-  // recognized package-manager verb; held to the same bar as `run` above.
-  return isDiagnosticScriptName(subcommand);
-}
-
-// A narrower, non-pager-obsessed read-only git surface than isSafeGit above:
-// isSafeGit additionally demands --no-pager/--no-textconv on log/diff/show,
-// which is calibrated for the `readonly` permission level's output-integrity
-// concerns and rejects a plain `git diff`/`git show` outright — Plan Mode
-// only cares whether the command can change repository state, so it accepts
-// the plain form of the same read-only subcommands.
+// Plan Mode deliberately has a small, direct git allowlist. These commands
+// only inspect repository state and never run a project-defined script.
 const PLAN_MODE_SAFE_GIT_SUBCOMMANDS = new Set([
   "status",
   "diff",
-  "show",
   "log",
-  "describe",
-  "blame",
-  "ls-files",
-  "ls-tree",
-  "rev-parse",
-  "shortlog",
-  "count-objects",
-  "grep",
 ]);
 
 function isPlanModeSafeGitCommand(tokens: string[]): boolean {
   const subcommand = tokens[1]?.toLowerCase();
   if (!subcommand) return false;
   if (PLAN_MODE_SAFE_GIT_SUBCOMMANDS.has(subcommand)) return true;
-  if (subcommand === "branch") return isSafeGitBranch(tokens);
-  if (subcommand === "remote") {
-    const args = tokens.slice(2);
-    return args.length === 0 || (args.length === 1 && args[0] === "-v");
-  }
-  if (subcommand === "config") {
-    return tokens[2] === "--get" || tokens[2] === "--get-all";
-  }
   return false;
 }
 
 /**
- * Per-segment classification for Plan Mode's bash guard. Structurally a
- * close copy of isSafePlanSegment (same trusted-executable check, same
- * secret/external-path guards, same PLAN_SIMPLE_COMMANDS/tsc/eslint/biome/
- * ruff/mypy/python/node/gh/sed/find branches — those already correctly
- * allow `tsc --noEmit` and plain `eslint` while blocking `--fix`), widened
- * in exactly the two places that made Plan Mode reject ordinary diagnostics:
- * npm/pnpm/yarn (isSafePlanSegment only allowed list/view/info/search/
- * outdated — not `run`/`test`, so `npm test`/`npm run typecheck`/
- * `npm run verify` were rejected) and git (see isPlanModeSafeGitCommand
- * above). Everything neither recognized here nor in isSafePlanSegment's
- * other branches stays refused — this widens two specific allowlists, it
- * does not flip the guard from an allowlist to a default-allow blocklist.
+ * Per-segment classification for Plan Mode's bash guard. Do not trust a
+ * command because its name sounds diagnostic: project scripts can mutate.
  */
 function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
   const executable = diagnosticExecutableName(tokens[0]);
@@ -1184,41 +972,27 @@ function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
   if (tokens.some((token) => isSensitiveReference(token))) return false;
   if (containsExternalPath(tokens, cwd)) return false;
 
-  if (["npm", "pnpm", "yarn"].includes(executable)) {
-    if (tokens.length === 2 && ["-v", "--version"].includes(tokens[1])) {
-      return true;
-    }
-    return isPlanModeSafePackageManagerCommand(tokens);
+  if (executable === "git") {
+    const subcommand = tokens[1]?.toLowerCase();
+    return (
+      ["status", "diff", "log"].includes(subcommand ?? "") &&
+      isPlanModeSafeGitCommand(tokens)
+    );
   }
-  if (executable === "npx") return false; // arbitrary package execution
-
-  if (executable === "git") return isPlanModeSafeGitCommand(tokens);
-  if (executable === "sed") return isSafeSed(tokens);
-
-  return classifyToolSegment(executable, tokens);
+  return executable === "rg" && classifyToolSegment(executable, tokens);
 }
 
 /**
- * Is this bash command safe to run while Plan Mode is active? Distinct from
- * isPlanSafeCommand (which backs the `readonly` permission level and stays
- * unchanged/unweakened) — see isPlanModeDiagnosticSegment for what differs
- * and why. Shares the same shell-structure parser and most hard guards
- * (unquoted variable expansion, command substitution, secrets, external
- * paths) but is the only caller that widens two structural constructs via
- * parseReadOnlyShell's options: `;`-chaining of diagnostics (each segment
- * still individually classified) and `2>`/`1>`/`&>` to `/dev/null`. Every
- * other redirect target and `&&`/`||`/`&` stay hard-blocked exactly as
- * before; the per-tool classification is looser on top of that.
+ * Is this bash command safe to run while Plan Mode is active? Only the
+ * explicit Git inspection commands and ripgrep pass; project scripts are
+ * never trusted merely because they sound like checks.
  */
 export function isPlanModeDiagnosticCommand(
   command: string,
   cwd: string,
 ): boolean {
   if (containsUnquotedVariableExpansion(command)) return false;
-  const parsed = parseReadOnlyShell(command, {
-    allowSemicolonChaining: true,
-    allowDevNullRedirect: true,
-  });
+  const parsed = parseReadOnlyShell(command);
   return (
     !parsed.error &&
     parsed.segments.every((tokens) => isPlanModeDiagnosticSegment(tokens, cwd))

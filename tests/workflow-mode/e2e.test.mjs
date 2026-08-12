@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -56,8 +57,8 @@ for (const [label, modeLabel, mode] of [
         "the next real user turn receives planning context",
       );
       assert(
-        !existsSync(planFilePath(cwd)),
-        "the old plan is replaced only when the planning turn starts",
+        existsSync(planFilePath(cwd)),
+        "the old plan remains until a successful replacement exists",
       );
       eq(harness.sent.length, 0, "the planning context does not synthesize a user message");
     } finally {
@@ -102,6 +103,11 @@ await test("a settled Plan → Work handoff ignores retry intermediates and stay
     writePlan(cwd, "# Zwischenstand vor Retry\n");
     await hooks(harness, "agent_end", ctx);
     writePlan(cwd, "# Neuer Plan\n\nUmsetzen\n");
+    await harness.runHooks(
+      "tool_result",
+      { toolName: "write", input: { path: ".agent/plans/current-plan.md" }, isError: false },
+      ctx,
+    );
     await hooks(harness, "agent_settled", ctx);
 
     choice = "Work";
@@ -117,6 +123,39 @@ await test("a settled Plan → Work handoff ignores retry intermediates and stay
     await chooseWorkflow(harness, ctx);
     const later = await hooks(harness, "before_agent_start", ctx);
     assert(!later[0]?.message?.content.includes("Neuer Plan"), "Work → Work does not resurrect the handoff");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("a failed or missing planning result restores the old plan", async () => {
+  if (!planMode) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-transaction-"));
+  try {
+    writePlan(cwd, "# Alter Plan\n");
+    const harness = createHarness({ select: () => "Schnellplan" });
+    const ctx = harness.makeContext({ cwd });
+    planMode.default(harness.api);
+    await hooks(harness, "session_start", ctx);
+    await chooseWorkflow(harness, ctx);
+    await hooks(harness, "before_agent_start", ctx);
+    writePlan(cwd, "# Teilplan\n");
+    await harness.runHooks(
+      "tool_result",
+      { toolName: "write", input: { path: ".agent/plans/current-plan.md" }, isError: false },
+      ctx,
+    );
+    await harness.runHooks(
+      "agent_end",
+      { messages: [{ stopReason: "error", errorMessage: "provider failed" }] },
+      ctx,
+    );
+    await hooks(harness, "agent_settled", ctx);
+    eq(readFileSync(planFilePath(cwd), "utf8"), "# Alter Plan\n", "a failed plan run restores the old plan");
+
+    await hooks(harness, "before_agent_start", ctx);
+    await hooks(harness, "agent_settled", ctx);
+    eq(readFileSync(planFilePath(cwd), "utf8"), "# Alter Plan\n", "a missing replacement changes nothing");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -154,6 +193,20 @@ await test("Plan Mode mutation guard keeps the plan file writable", async () => 
     assert(!result.some((entry) => entry?.block), "the plan file is auto-allowed");
     result = await harness.runHooks("tool_call", writeEvent("src/example.ts"), ctx);
     assert(result.some((entry) => entry?.block), "other writes remain blocked while planning");
+
+    for (const event of [
+      { toolName: "bash", input: { command: "npm test" } },
+      { toolName: "bash", input: { command: "npm run build" } },
+      { toolName: "project_check", input: { profile: "verify" } },
+      { toolName: "subagent", input: { agent: "verifier", task: "x", output: "report.md" } },
+    ]) {
+      result = await harness.runHooks("tool_call", event, ctx);
+      assert(result.some((entry) => entry?.block), `${event.toolName} cannot bypass Plan Mode`);
+    }
+    for (const command of ["git status", "git diff", "git log", "rg plan extensions"]) {
+      result = await harness.runHooks("tool_call", { toolName: "bash", input: { command } }, ctx);
+      assert(!result.some((entry) => entry?.block), `${command} remains read-only in Plan Mode`);
+    }
 
     await harness.commands.get("permission")("confirm-all", ctx);
     result = await harness.runHooks("tool_call", writeEvent("src/example.ts"), ctx);

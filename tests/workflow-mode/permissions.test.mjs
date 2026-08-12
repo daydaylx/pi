@@ -221,30 +221,13 @@ await test("planModeBashGuard blocks mutating commands and allows read-only ones
   );
 });
 
-await test("planModeBashGuard allows ordinary diagnostics (test/typecheck/lint/verify/build) during planning", () => {
+await test("planModeBashGuard allows only explicit read-only shell tools during planning", () => {
   if (!workflowPolicy) return;
   const cwd = process.cwd();
   const planning = { mode: "detailed_plan" };
   const bash = (command) =>
     workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
-  for (const command of [
-    "npm test",
-    "npm run test",
-    "npm run typecheck",
-    "npm run lint",
-    "npm run verify",
-    "npm run build",
-    "npm run test:coverage",
-    "npm ls",
-    "npm outdated",
-    "tsc --noEmit",
-    "eslint .",
-    "git status",
-    "git diff",
-    "git diff --stat",
-    "git show HEAD",
-    "git log",
-  ]) {
+  for (const command of ["git status", "git diff", "git log", "rg plan extensions"]) {
     assert(
       !bash(command).blocked,
       `${command} is a legitimate diagnostic and must pass during planning`,
@@ -252,23 +235,22 @@ await test("planModeBashGuard allows ordinary diagnostics (test/typecheck/lint/v
   }
 });
 
-await test("planModeBashGuard allows `;`-chained diagnostics and /dev/null redirects during planning", () => {
+await test("planModeBashGuard rejects project scripts and shell composition during planning", () => {
   if (!workflowPolicy) return;
   const cwd = process.cwd();
   const planning = { mode: "detailed_plan" };
   const bash = (command) =>
     workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
   for (const command of [
-    "npm test; npm run lint",
-    "git status; git diff --stat",
-    "find extensions test tests -type f 2>/dev/null | grep -E 'foo' | head -120",
-    "ls -la .agent 2>/dev/null; ls -la .agent/plans 2>/dev/null; git status",
-    "npm run typecheck 1>/dev/null",
-    "eslint . &>/dev/null",
+    "npm test",
+    "npm run build",
+    "npm run verify",
+    "git status; git diff",
+    "rg plan extensions 2>/dev/null",
   ]) {
     assert(
-      !bash(command).blocked,
-      `${command} chains or redirects only provably read-only diagnostics and must pass during planning`,
+      bash(command).blocked,
+      `${command} is not part of Plan Mode's fixed read-only shell surface`,
     );
   }
 });

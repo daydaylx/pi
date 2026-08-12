@@ -7,12 +7,7 @@ export type TurnPhase =
   | "compaction";
 
 export type ErrorClass =
-  | "network"
-  | "http"
-  | "auth"
-  | "timeout"
-  | "stream"
-  | "unknown";
+  "network" | "http" | "auth" | "timeout" | "stream" | "unknown";
 
 export interface TurnStartMarker {
   schemaVersion: 1;
@@ -51,12 +46,13 @@ export interface FailureDiagnostic {
 export interface CompactionBoundaryMarker {
   schemaVersion: 1;
   timestamp: string;
-  boundary: "started" | "completed";
+  boundary: "started" | "completed" | "failed";
   reason: "manual" | "threshold" | "overflow";
   willRetry: boolean;
   workspaceFingerprint: string;
   workflowMode: string;
   contextPercent: number | null;
+  errorMessage?: string;
 }
 
 export interface RecoveryRequiredMarker {

@@ -67,10 +67,10 @@
   automatisch eingebunden. Dieselbe Änderung führte die Delegationsvorlage
   (Original User Request / Constraints / Delegated Question) in `AGENTS.md`
   ein.
-- Plan Mode besitzt zusätzlich zur Plandatei-Ausnahme einen technischen
-  Mutationsschutz bei `project-write`/`confirm-all`, der `readonly`s bereits
-  vorhandene Entscheidungsfunktionen wiederverwendet; `yolo` bleibt bewusst
-  unangetastet (`docs/decisions/012`).
+- Plan Mode erlaubt neben der Plandatei nur nachweislich lesende Git- und
+  Ripgrep-Aufrufe; Projekt-Skripte, `project_check` und `subagent` sind
+  gesperrt. `yolo` bleibt die ausdrückliche Ausnahme
+  (`docs/decisions/012`).
 
 ## Nicht-Ziele
 
@@ -90,6 +90,9 @@
   (Testdateien und Altbestände in `src/`). Er ist deshalb nicht Teil einer
   Pflichtprüfung des Hauptrepos; seine Unit-, Integrations- und E2E-Suiten
   sind grün.
+- Für P2 liegen noch keine konkret priorisierten Befunde zu Restkomplexität,
+  Dokumentation oder Knip-Regeln vor; diese müssen vor einer Bereinigung
+  gezielt erhoben werden.
 
 ## Offene Risiken
 
@@ -118,7 +121,8 @@ _Keine offenen Fragen._
 
 ## Aktuelle Prioritäten
 
-- P2-Cleanup: Restkomplexität, Dokumentation, Knip-Regeln.
+- P2: Konkrete Befunde zu Restkomplexität, Dokumentation und Knip-Regeln
+  erheben und daraus gezielte Folgearbeiten ableiten.
 - Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA. Vor jeder
   Pin-Änderung die Erreichbarkeit manuell prüfen; die lokale Test-Suite bleibt
   bewusst offline.

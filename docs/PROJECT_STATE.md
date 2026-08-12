@@ -43,6 +43,12 @@ Umgesetzte Phasen:
   Checkpoint-, Providerfehler- und Sitzungsablaufregeln stehen im Skill
   `context-checkpoint`, die Delegationsvorlage und die Fingerprint-Mechanik in
   `docs/subagents.md`. Keine neue Dokumentationsschicht.
+- **Runtime-Auflösung zusammengeführt**: Skripte und Extensions lösen Paket und
+  Version des Pi-Runtimes über das gemeinsame `shared/runtime-resolution.mjs`
+  auf; Entwicklungs-`node_modules` und Benutzerpfade sind kein Fallback mehr.
+- **Verifikationsdiagnostik vereinfacht**: Nur das optionale, nicht-kausale
+  `changed_since_pass` bleibt bei einem vorher erfolgreichen Profil;
+  Baseline-Maps, Pfadheuristiken und kausale Labels sind entfernt.
 
 ## Letzte Verifikation
 
@@ -64,3 +70,4 @@ Umgesetzte Phasen:
   gepinnten Fork durchführen; im Repo ist bislang nur der
   Installer-Integrationstest abgedeckt.
 - Restkomplexität und Knip-Regeln im P2-Cleanup weiterführen.
+- Nur belegte Restbefunde dokumentieren.

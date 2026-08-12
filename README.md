@@ -43,11 +43,12 @@ Agent-Turn, erzeugt keinen synthetischen Prompt und verändert keinen
 vorhandenen Plan.
 
 Erst der nächste User-Auftrag startet den Turn im gewählten Modus. Ein
-Planning-Turn darf den vorhandenen Plan dann ersetzen. Nach einem Wechsel von
-Plan zu Work kann ein gerade in derselben Sitzung erzeugter Plan beim nächsten
-Work-Turn einmalig als hilfreicher, abweichbarer Kontext erscheinen. Alte
-Plandateien, fortgesetzte Sitzungen und spätere Work-Turns übernehmen ihn nie
-automatisch.
+Planning-Turn ersetzt den vorhandenen Plan nur, wenn der neue Plan erfolgreich
+geschrieben wurde und der Turn erfolgreich endet. Bei Fehlern oder fehlendem
+Ersatz bleibt der bisherige Plan erhalten. Nach einem Wechsel von Plan zu Work
+kann ein gerade in derselben Sitzung erzeugter Plan beim nächsten Work-Turn
+einmalig als hilfreicher, abweichbarer Kontext erscheinen. Alte Plandateien,
+fortgesetzte Sitzungen und spätere Work-Turns übernehmen ihn nie automatisch.
 
 Der Plan ist normaler Markdown. Es gibt keine Metadaten, Step-IDs, Sidecars,
 Completion, Recovery, Migration oder Planpflicht.
@@ -80,19 +81,12 @@ Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe selbst
 nicht. Die Plandatei ist auf jeder Stufe automatisch erlaubtes Schreibziel.
 Zusätzlich gilt bei `project-write` und `confirm-all` während `simple_plan`
 oder `detailed_plan` ein technischer Mutationsschutz für den Agenten:
-Schreibzugriffe außerhalb der Plandatei werden verweigert, und Bash-Kommandos
-des Agenten müssen nachweislich Diagnose statt Mutation sein — Tests,
-Typecheck, Lint ohne `--fix`, Builds und `git status`/`diff`/`show`/`log`
-bleiben erlaubt. `npm`/`pnpm`/`yarn run`/`test`/bare Aliase gelten nur als
-Diagnose, wenn der Skriptname nach einer bekannten Kategorie aussieht
-(`test`, `typecheck`, `lint`, `check`, `verify`, `coverage`, `audit`,
-`build`, ggf. namensraum-erweitert, ohne `fix`/`write`-Marker) — ein
-unbekannter Skriptname wie `npm run generate` oder `npm start` gilt nicht
-automatisch als Diagnose. Diagnosebefehle dürfen dabei mit `;` verkettet
-werden (jedes Segment einzeln geprüft; `&&`/`||`/ein alleinstehendes `&`
-bleiben blockiert), und `2>`/`1>`/`&>` nach exakt `/dev/null` sind als
-Redirect-Ziel erlaubt — jedes andere Redirect-Ziel bleibt blockiert.
-`rm`/`cp`/`mv`/`sed -i`, sonstige Redirection,
+Schreibzugriffe außerhalb der Plandatei werden verweigert. Als Bash bleiben
+nur `git status`, `git diff`, `git log` und `rg` zulässig; Projekt-Skripte
+wie `npm test` oder `npm run build` sind nicht automatisch vertrauenswürdig.
+`project_check` und `subagent` (auch mit `output`) sind ebenfalls
+blockiert, damit kein Tool den Guard umgehen kann.
+`rm`/`cp`/`mv`/`sed -i`, Redirection, Projekt-Skripte,
 `npm install`/`update`/`publish`, `eslint --fix` und mutierende
 `git`-Kommandos bleiben blockiert. `readonly` selbst ist
 unverändert vollständig gesperrt; `yolo` bleibt bewusst unangetastet, weil
@@ -125,8 +119,8 @@ Subagenten heraus — lässt den Footer bei `changed_unverified` stehen, selbst
 wenn der Lauf lokal grün war.
 
 `npm run test:runtime` (siehe „Lokale Laufzeitdaten" unten) ist bewusst kein
-Teil von `verify`/CI: es prüft die tatsächlich gestartete, lokal gepatchte
-Pi-Runtime unter `PI_RUNTIME_ROOT`, einem Pfad, den kein CI-Runner besitzt.
+Teil von `verify`/CI: es prüft die explizit gewählte oder lokal erkannte
+Pi-Runtime.
 
 Abhängigkeiten werden nicht automatisch installiert. Commits, Pushes und
 Veröffentlichungen erfolgen nur auf ausdrücklichen Auftrag.

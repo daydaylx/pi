@@ -7,7 +7,6 @@ export const SECTION_SUITES = {
   "greenfield setup config and Aurora state contract": "runtime",
   "setup core lifecycle": "runtime",
   "verification status layer": "runtime",
-  "check-baseline diagnostics": "runtime",
   "setup doctor required profile completeness (P1-08)": "runtime",
   "project verification profiles (#105)": "runtime",
   "project_check tool (#123)": "runtime",

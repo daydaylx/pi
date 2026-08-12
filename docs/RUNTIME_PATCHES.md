@@ -1,9 +1,10 @@
 # Lokale Pi-Runtime-Patches
 
-Die tatsächlich gestartete Pi-Runtime liegt unter
-`/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent` und hat
-Version `0.84.1`. Sie enthält bewusst lokale P1-Patches, die nicht Teil dieses
-Git-Arbeitsbaums sind.
+Die Pi-Runtime wird nicht aus dem Entwicklungs-`node_modules` erraten. Patch
+und Runtime-Test verwenden dieselbe Auflösung: `--runtime <pfad>` hat Vorrang,
+dann `PI_RUNTIME_ROOT`, anschließend das auf `PATH` gefundene `pi`.
+Ist kein eindeutiges Paket `@earendil-works/pi-coding-agent` auffindbar,
+brechen beide mit einer Anleitung zu `--runtime` oder `PI_RUNTIME_ROOT` ab.
 
 > **Historie:** Das Upgrade von `0.82.0` auf `0.82.1` hat die gepatchten Dateien
 > überschrieben; die Patches waren zwischenzeitlich unbemerkt verloren. Am
@@ -30,15 +31,23 @@ Zusätzlich wurde die bis dahin bestehende Drift zur gepinnten Pi-Dev-Abhängigk
 in `npm/package.json` behoben (ebenfalls `0.84.0` → `0.84.1`, inklusive
 `npm install` für das Lockfile), siehe `docs/runtime-matrix.md`.
 
+Am 2026-08-11 kamen zwei Patches gegen `dist/core/agent-session.js` hinzu,
+nachdem eine Sitzungsanalyse zeigte, dass eine gescheiterte Kompaktierung
+spurlos blieb: `compact()` und `_runAutoCompaction()` melden eine
+fehlgeschlagene Kompaktierung jetzt zusätzlich über ein neues
+`session_compact_failed`-Event an den `ExtensionRunner`, das die
+`resilience`-Extension in einen `resilience.compaction-boundary`-Eintrag mit
+`boundary: "failed"` und der originalen Fehlermeldung übersetzt.
+
 ## Wiederherstellen
 
 Die Patches liegen in `node_modules` und überleben kein `npm update` der
 Runtime. Der Quelltext der Eingriffe steht deshalb versioniert im Repository:
 
 ```sh
-node scripts/apply-runtime-patches.mjs            # Vorschau, schreibt nichts
-node scripts/apply-runtime-patches.mjs --apply    # anwenden
-node tests/p1-runtime.mjs                         # verifizieren
+node scripts/apply-runtime-patches.mjs --runtime /pfad/zur/runtime
+node scripts/apply-runtime-patches.mjs --runtime /pfad/zur/runtime --apply
+node tests/p1-runtime.mjs --runtime /pfad/zur/runtime
 ```
 
 Gleichwertig über npm: `npm --prefix npm run patch:runtime -- --apply`.
@@ -58,15 +67,14 @@ Eigenschaften des Skripts:
   `EXPECTED_RUNTIME_VERSION` ab, bricht das Skript ab. `--allow-version-drift`
   erzwingt den Lauf ausdrücklich und sichtbar.
 
-Mit `--runtime <pfad>` lässt sich eine andere Installation ansprechen.
+Mit `--runtime <pfad>` lässt sich eine Runtime eindeutig wählen;
+`PI_RUNTIME_ROOT` ist die portable Alternative für wiederholte lokale Läufe.
 `tests/runtime-patches.mjs` prüft das Skript selbst (gegen eine Fixture, ohne
 eine echte Runtime-Installation) und läuft in `npm run verify` mit.
 
 `npm run test:runtime` (`tests/p1-runtime.mjs`) ist bewusst **kein** Teil von
-`npm run verify`/CI: es prüft die tatsächlich gestartete, lokal gepatchte
-Runtime unter `PI_RUNTIME_ROOT` — ein Pfad, den kein CI-Runner besitzt. Es
-bleibt ein eigenständiges, manuell auszuführendes Skript für das
-Upgrade-Gate unten.
+`npm run verify`/CI. Es bleibt ein eigenständiges Upgrade-Gate gegen die
+explizit gewählte oder lokal erkannte Runtime.
 
 ## Umfang
 
@@ -83,6 +91,13 @@ Upgrade-Gate unten.
   `applyConfiguredExtensionOrder()`. `toResolvedPaths()` sortiert Extensions
   innerhalb derselben Präzedenz nach der Position ihres `+path`-Eintrags in
   `settings.json`; ohne solche Einträge bleibt die bisherige Sortierung.
+- `dist/core/agent-session.js`: `compact()` und `_runAutoCompaction()` melden
+  eine gescheiterte manuelle oder automatische Kompaktierung zusätzlich zum
+  bestehenden `compaction_end`-Event (das nur die Mode-Schicht sieht) über
+  `session_compact_failed` an den `ExtensionRunner`. Ohne diesen Patch sah die
+  `resilience`-Extension einen fehlgeschlagenen Kompaktierungsversuch nicht:
+  im Session-JSONL blieb nur ein `resilience.compaction-boundary`-Eintrag mit
+  `boundary: "started"` ohne passendes `"completed"`, ohne Fehlermeldung.
 
 ## Retirement (0.84.0)
 
@@ -127,12 +142,10 @@ verschlucken und anschließend auch Escape konsumieren.
 Vor und nach jedem Pi-Update ausführen:
 
 ```sh
-node /home/d/.pi/agent/tests/p1-runtime.mjs
+node tests/p1-runtime.mjs --runtime /pfad/zur/runtime
 ```
 
 Der Test prüft die Version, die erwarteten Runtime-Eingriffspunkte und zehn
-aufeinanderfolgende Reloads ohne liegen gebliebene Event-Provider. Bei einer
-anderen Runtime-Installation kann `PI_RUNTIME_ROOT` auf ihr
-`@earendil-works/pi-coding-agent`-Verzeichnis gesetzt werden. Ein
+aufeinanderfolgende Reloads ohne liegen gebliebene Event-Provider. Ein
 Versionsfehler bedeutet: Patch gegen die neue Runtime prüfen und portieren,
 nicht den Test abschwächen.

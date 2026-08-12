@@ -26,32 +26,14 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRuntimeRoot } from "../shared/runtime-resolution.mjs";
 
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The runtime version these patches were written and verified against. */
 export const EXPECTED_RUNTIME_VERSION = "0.84.1";
-
-export const DEFAULT_RUNTIME_ROOT =
-  process.env.PI_RUNTIME_ROOT ??
-  (() => {
-    try {
-      // Resolve the pi runtime from the npm node_modules inside the agent
-      // directory — the same install tree this script ships inside.
-      const npmReq = createRequire(
-        path.join(SOURCE, "npm", "package.json"),
-      );
-      const pkgPath = npmReq.resolve(
-        "@earendil-works/pi-coding-agent/package.json",
-      );
-      return path.resolve(pkgPath, "..");
-    } catch {
-      return "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent";
-    }
-  })();
 
 /**
  * One edit. `detect` proves the patch is already in place, `anchor` is the
@@ -273,6 +255,90 @@ function applyConfiguredExtensionOrder(resolved, overrides, fallbackBaseDir) {
         return {
             extensions: mapToResolved(accumulator.extensions, extensionOverrides),`,
   },
+  {
+    id: "agent-session-compaction-failure-manual",
+    file: "dist/core/agent-session.js",
+    summary: "Fehlgeschlagene manuelle Kompaktierung an Extensions melden",
+    detect:
+      'if (!aborted && this._extensionRunner.hasHandlers("session_compact_failed")) {',
+    anchor: `            this._emit({
+                type: "compaction_end",
+                reason: "manual",
+                result: undefined,
+                aborted,
+                willRetry: false,
+                errorMessage: aborted ? undefined : \`Compaction failed: \${message}\`,
+            });
+            throw error;
+        }
+        finally {
+            this._compactionAbortController = undefined;
+        }
+    }`,
+    replacement: `            this._emit({
+                type: "compaction_end",
+                reason: "manual",
+                result: undefined,
+                aborted,
+                willRetry: false,
+                errorMessage: aborted ? undefined : \`Compaction failed: \${message}\`,
+            });
+            if (!aborted && this._extensionRunner.hasHandlers("session_compact_failed")) {
+                await this._extensionRunner.emit({
+                    type: "session_compact_failed",
+                    reason: "manual",
+                    errorMessage: message,
+                    willRetry: false,
+                });
+            }
+            throw error;
+        }
+        finally {
+            this._compactionAbortController = undefined;
+        }
+    }`,
+  },
+  {
+    id: "agent-session-compaction-failure-auto",
+    file: "dist/core/agent-session.js",
+    summary: "Fehlgeschlagene automatische Kompaktierung an Extensions melden",
+    detect:
+      'if (this._extensionRunner.hasHandlers("session_compact_failed")) {',
+    anchor: `            if (started) {
+                this._emit({
+                    type: "compaction_end",
+                    reason,
+                    result: undefined,
+                    aborted: false,
+                    willRetry: false,
+                    errorMessage: reason === "overflow"
+                        ? \`Context overflow recovery failed: \${errorMessage}\`
+                        : \`Auto-compaction failed: \${errorMessage}\`,
+                });
+            }
+            return false;`,
+    replacement: `            if (started) {
+                this._emit({
+                    type: "compaction_end",
+                    reason,
+                    result: undefined,
+                    aborted: false,
+                    willRetry: false,
+                    errorMessage: reason === "overflow"
+                        ? \`Context overflow recovery failed: \${errorMessage}\`
+                        : \`Auto-compaction failed: \${errorMessage}\`,
+                });
+                if (this._extensionRunner.hasHandlers("session_compact_failed")) {
+                    await this._extensionRunner.emit({
+                        type: "session_compact_failed",
+                        reason,
+                        errorMessage,
+                        willRetry: false,
+                    });
+                }
+            }
+            return false;`,
+  },
 ];
 
 /**
@@ -313,7 +379,7 @@ export function planPatch(patch, content) {
 
 function parseArgs(argv) {
   let apply = false;
-  let runtime = DEFAULT_RUNTIME_ROOT;
+  let runtime;
   let allowVersionDrift = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -329,7 +395,7 @@ function parseArgs(argv) {
       throw new Error(`Unbekanntes Argument: ${arg}`);
     }
   }
-  return { apply, runtime: path.resolve(runtime), allowVersionDrift };
+  return { apply, runtime, allowVersionDrift };
 }
 
 function assertNoSymlinkComponents(candidate) {
@@ -360,8 +426,11 @@ function readRuntimeVersion(runtime) {
 }
 
 function main(argv) {
-  const { apply, runtime, allowVersionDrift } = parseArgs(argv);
+  const { apply, runtime: requestedRuntime, allowVersionDrift } = parseArgs(argv);
+  const { root: runtime, source } = resolveRuntimeRoot({ runtime: requestedRuntime });
   assertNoSymlinkComponents(runtime);
+
+  console.log(`Runtime-Ziel: ${runtime} (${source})`);
 
   const version = readRuntimeVersion(runtime);
   if (version !== EXPECTED_RUNTIME_VERSION) {

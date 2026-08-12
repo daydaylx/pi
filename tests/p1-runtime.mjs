@@ -3,18 +3,19 @@
 // because that is the Pi instance users actually start.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { EXPECTED_RUNTIME_VERSION } from "../scripts/apply-runtime-patches.mjs";
+import { resolveRuntimeForRuntimeTest } from "./shared/runtime-test-resolution.mjs";
 
-const RUNTIME_ROOT =
-  process.env.PI_RUNTIME_ROOT ??
-  "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent";
+const { root: RUNTIME_ROOT, source: runtimeSource } = resolveRuntimeForRuntimeTest();
+console.log(`Runtime-Ziel: ${RUNTIME_ROOT} (${runtimeSource})`);
 
 const packageJson = JSON.parse(
   readFileSync(`${RUNTIME_ROOT}/package.json`, "utf8"),
 );
 assert.equal(
   packageJson.version,
-  "0.84.1",
-  "P1 runtime patch is pinned to Pi 0.84.1",
+  EXPECTED_RUNTIME_VERSION,
+  `P1 runtime patch is pinned to Pi ${EXPECTED_RUNTIME_VERSION}`,
 );
 
 const loaderSource = readFileSync(
@@ -67,6 +68,16 @@ assert.match(
   sessionSource,
   /const builtinCommands = BUILTIN_SLASH_COMMANDS\.map/,
   "command inventory includes Pi built-ins",
+);
+assert.match(
+  sessionSource,
+  /if \(!aborted && this\._extensionRunner\.hasHandlers\("session_compact_failed"\)\)/,
+  "a failed manual compaction is reported to extensions",
+);
+assert.match(
+  sessionSource,
+  /if \(this\._extensionRunner\.hasHandlers\("session_compact_failed"\)\) \{[\s\S]{0,200}reason,\n\s*errorMessage,/,
+  "a failed auto-compaction is reported to extensions",
 );
 assert.match(
   interactiveSource,

@@ -11,11 +11,16 @@
  * the two cannot drift into disagreeing about what "patched" means.
  */
 import assert from "node:assert/strict";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   EXPECTED_RUNTIME_VERSION,
   PATCHES,
   planPatch,
 } from "../scripts/apply-runtime-patches.mjs";
+import { resolveRuntimeRoot } from "../shared/runtime-resolution.mjs";
+import { resolveRuntimeForRuntimeTest } from "./shared/runtime-test-resolution.mjs";
 
 let checks = 0;
 function check(description, fn) {
@@ -25,6 +30,25 @@ function check(description, fn) {
 }
 
 console.log(`runtime patches (Pi ${EXPECTED_RUNTIME_VERSION})`);
+
+check("patch and runtime verification resolve the identical explicit target", () => {
+  const root = path.join(tmpdir(), `pi-runtime-resolution-${process.pid}`);
+  const runtime = path.join(root, "runtime");
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(runtime, { recursive: true });
+  writeFileSync(
+    path.join(runtime, "package.json"),
+    JSON.stringify({ name: "@earendil-works/pi-coding-agent" }),
+  );
+  try {
+    const env = { PATH: "", PI_RUNTIME_ROOT: path.join(root, "wrong") };
+    const patchTarget = resolveRuntimeRoot({ runtime, env });
+    const testTarget = resolveRuntimeForRuntimeTest(["--runtime", runtime], env);
+    assert.deepEqual(testTarget, patchTarget);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 check("every patch is uniquely identified", () => {
   const ids = PATCHES.map((patch) => patch.id);
@@ -89,6 +113,8 @@ check("the patch set covers what p1-runtime.mjs verifies", () => {
     "const builtinCommands = BUILTIN_SLASH_COMMANDS.map",
     "submitSlashCommand: async (commandLine)",
     "P1: terminal input listeners are editor-scoped",
+    'if (!aborted && this._extensionRunner.hasHandlers("session_compact_failed")) {',
+    'if (this._extensionRunner.hasHandlers("session_compact_failed")) {',
   ];
   const applied = PATCHES.map((patch) => patch.replacement).join("\n");
   for (const marker of runtimeMarkers) {

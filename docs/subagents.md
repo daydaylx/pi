@@ -129,20 +129,10 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
 
 ## Ergebnisbudget und Artefakte
 
-Die generische Tool-Ausgabegrenze bleibt unverändert. Für Ergebnisse des
-`subagent`-Tools gilt zusätzlich ein eigener Backstop von 12 KiB oder 240
-Zeilen. Bei einer Kürzung bleiben Anfang und Ende des zusammengeführten
-Textes sichtbar; strukturierte Nicht-Text-Blöcke bleiben erhalten.
-
-Die Antwortdetails bleiben ebenfalls erhalten und erhalten ergänzend die
-Kürzungsmetadaten (`details.truncation`). Das ist eine strukturierte
-Laufzeitangabe für spätere Diagnose und keine Persistenz von Prompt- oder
-Tool-Inhalten. Die Paket-Artefakte und `status` bleiben die Quelle für
-asynchrone Run-Informationen.
-
-Read-only Rollen liefern ihre Befunde inline. Aufrufer geben ihnen keinen
-`output`-Pfad vor; bei Bedarf werden die Paket-Artefakte statt einer vom Kind
-zu schreibenden Zieldatei verwendet.
+Die reduzierte API nimmt keine Ausgabepfade, Kontext-, Skill-, Arbeitsverzeichnis-
+oder Modellparameter entgegen. Ergebnisse gehören zum einzelnen Run; `list`
+und `status` liefern die Laufzeitübersicht. Es gibt keine Chain-, Parallel-,
+Worktree- oder Delegations-API.
 
 ## Betriebsgrenzen
 

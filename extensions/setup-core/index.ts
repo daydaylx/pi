@@ -8,7 +8,6 @@ import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import { Type } from "typebox";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import { loadVerifyProfiles, runProfile } from "./verify-profiles.ts";
-import { classifyCheckFailure } from "./check-baseline.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 import {
   collectContextDiagnostics,
@@ -157,12 +156,8 @@ export default function setupCore(
   let trusted = false;
   let verificationLedger: VerificationLedger = {};
   let lastSettledStatus: VerificationStatus | undefined;
-  // Session-scoped record of which profile ids have ever been observed
-  // passing, and the workspace fingerprint at the time of that pass.
-  // Used by check-baseline.ts to distinguish flaky failures (same
-  // fingerprint) from genuine regressions (different fingerprint).
-  // Same lifecycle as verificationLedger — reset on
-  // session_start/session_shutdown, never persisted.
+  // Session-local evidence only: whether a profile passed before the current
+  // snapshot. It is not a task-status or causal-regression classifier.
   let passedProfileIds: Map<string, string> = new Map();
 
   function workspaceSnapshot(cwd: string) {
@@ -347,6 +342,7 @@ export default function setupCore(
       const reports = [];
       for (const profileId of requested.ids) {
         const profile = loaded.profiles[profileId]!;
+        const previousPassFingerprint = passedProfileIds.get(profileId);
         const startedAt = new Date().toISOString();
         const result = await runProfile(profile, {
           projectRoot: ctx.cwd,
@@ -377,14 +373,13 @@ export default function setupCore(
           ...(result.error ? { error: result.error } : {}),
           ...(result.ok
             ? {}
-            : {
-                baseline: classifyCheckFailure(
-                  result.output,
-                  checkSnapshot?.changedFiles,
-                  passedProfileIds.get(profileId),
-                  checkSnapshot?.fingerprint,
-                ),
-              }),
+            : previousPassFingerprint !== undefined &&
+                checkSnapshot?.fingerprint !== undefined
+              ? {
+                  changed_since_pass:
+                    previousPassFingerprint !== checkSnapshot.fingerprint,
+                }
+              : {}),
         });
       }
 

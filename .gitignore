@@ -3,6 +3,7 @@ auth.json
 
 # Session-Daten (groß + sensibel)
 sessions/
+docs/archive/session-logs/
 
 # Backups
 backups/

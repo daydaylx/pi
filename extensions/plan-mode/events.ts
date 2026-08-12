@@ -11,7 +11,7 @@ import {
 } from "../shared/workflow-capabilities.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { planningPrompt, workPrompt } from "./prompts.ts";
-import { removePlan } from "./plan-file.ts";
+import { isPlanFilePath } from "./plan-file.ts";
 import {
   clearWorkflowPresentation,
   setAuroraEpoch,
@@ -37,10 +37,7 @@ export function registerPlanEvents(
   pi.on("before_agent_start", async (_event, ctx) => {
     const mode = session.selectedMode;
     if (isPlanningMode(mode)) {
-      // Mode selection preserves an existing plan. A real planning turn is the
-      // first point at which that plan may be replaced.
-      removePlan(ctx.cwd);
-      session.beginPlanningTurn();
+      session.beginPlanningTurn(ctx.cwd);
       return {
         message: {
           customType: "pi-workflow-mode",
@@ -60,6 +57,14 @@ export function registerPlanEvents(
   // remains, otherwise a partial retry result could become the handoff.
   pi.on("agent_settled", async (_event, ctx) => {
     session.finishPlanningTurn(ctx.cwd);
+  });
+  pi.on("agent_end", async (event, _ctx) => {
+    session.recordPlanningAgentEnd(event.messages);
+  });
+  pi.on("tool_result", async (event, ctx) => {
+    if (event.toolName !== "write" && event.toolName !== "edit") return;
+    const args = event.input as { path?: unknown };
+    if (isPlanFilePath(args.path, ctx.cwd)) session.recordPlanWrite(!event.isError);
   });
   pi.on("session_start", async (_event, ctx) => {
     session.clearPlanHandoff();
