@@ -361,3 +361,122 @@ await test("isPlanSafeCommand (readonly permission level) stays strict: no `;`-c
     );
   }
 });
+
+// Characterization of the whole plan-mode tool surface. README documents
+// project_check and subagent (with and without `output`) as blocked so no tool
+// can route around the file boundary, and the guard is fail-closed for
+// anything it does not positively recognise as read-only. None of that was
+// pinned by a test.
+await test("plan mode admits only positively known read-only tools", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "simple_plan" };
+  const decide = (level, toolName, input) =>
+    workflowPolicy.planModeMutationGuard(
+      planning,
+      level,
+      { toolName, input },
+      cwd,
+    ).blocked;
+
+  for (const [toolName, input] of [
+    ["read", { path: "src/a.ts" }],
+    ["grep", { pattern: "x" }],
+    ["ls", { path: "." }],
+    ["ask_user", { question: "weiter?" }],
+    ["write", { path: ".agent/plans/current-plan.md" }],
+  ]) {
+    assert(
+      !decide("project-write", toolName, input),
+      `${toolName} is a read-only capability (or the plan file) and stays available while planning`,
+    );
+  }
+
+  for (const [toolName, input, why] of [
+    ["write", { path: "src/a.ts" }, "a write outside the plan file"],
+    ["edit", { path: "src/a.ts" }, "an edit outside the plan file"],
+    ["project_check", { profile: "verify" }, "a project check runs project scripts"],
+    ["subagent", { agent: "investigator" }, "a subagent can act on its own"],
+    [
+      "subagent",
+      { agent: "investigator", output: "/tmp/report.md" },
+      "an output path must not become a second write channel",
+    ],
+    ["frobnicate", {}, "an unrecognised tool is fail-closed, not fail-open"],
+  ]) {
+    assert(
+      decide("project-write", toolName, input),
+      `${toolName} must stay blocked while planning: ${why}`,
+    );
+  }
+
+  // yolo is the documented, explicit override and stays untouched.
+  for (const [toolName, input] of [
+    ["write", { path: "src/a.ts" }],
+    ["subagent", { agent: "investigator" }],
+    ["frobnicate", {}],
+  ]) {
+    assert(
+      !decide("yolo", toolName, input),
+      `${toolName} stays available under yolo, which is an explicit override`,
+    );
+  }
+});
+
+// The structural shell cases across all four levels, so a change to the parser
+// or to a level's policy cannot silently move a trust boundary.
+await test("shell structure decides consistently across all permission levels", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  const decide = (level, command) =>
+    permissionPolicy.decideBash(level, command, cwd).action;
+
+  // readonly proves nothing but plainly read-only commands.
+  for (const command of [
+    "echo $(whoami)",
+    "ls -la; ls -la .agent",
+    "ls -la && ls -la .agent",
+    "ls -la > out.txt",
+    "npm test",
+    "frobnicate --all",
+    "rm -rf build",
+  ]) {
+    eq(decide("readonly", command), "block", `readonly blocks: ${command}`);
+  }
+  for (const command of ["git status", "git status | head -20"]) {
+    eq(decide("readonly", command), "allow", `readonly allows: ${command}`);
+  }
+
+  // confirm-all confirms everything that is not provably read-only.
+  for (const command of [
+    "echo $(whoami)",
+    "npm test",
+    "frobnicate --all",
+    "rm -rf build",
+  ]) {
+    eq(decide("confirm-all", command), "ask", `confirm-all asks: ${command}`);
+  }
+  eq(
+    decide("confirm-all", "git status"),
+    "allow",
+    "confirm-all does not interrupt for a provably read-only command",
+  );
+
+  // A write that leaves the project is the boundary neither project-write nor
+  // yolo may wave through.
+  eq(
+    decide("project-write", "ls -la > /etc/out.txt"),
+    "ask",
+    "project-write confirms a redirect that writes outside the project",
+  );
+  eq(
+    decide("yolo", "ls -la > /etc/out.txt"),
+    "block",
+    "yolo blocks a redirect that writes outside the project",
+  );
+  eq(
+    decide("project-write", "ls -la > out.txt"),
+    "allow",
+    "a redirect inside the project is ordinary project work",
+  );
+});
