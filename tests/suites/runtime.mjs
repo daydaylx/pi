@@ -4363,7 +4363,9 @@ export const runtimeSections = {
           const rendered =
             typeof widget === "function"
               ? stripAnsi(
-                  widget({ requestRender() {} }, context.ui.theme).render(120)[0],
+                  widget({ requestRender() {} }, context.ui.theme).render(
+                    120,
+                  )[0],
                 )
               : "";
           return rendered.slice(0, rendered.indexOf(" "));
@@ -4399,7 +4401,9 @@ export const runtimeSections = {
           const rendered =
             typeof widget === "function"
               ? stripAnsi(
-                  widget({ requestRender() {} }, context.ui.theme).render(120)[0],
+                  widget({ requestRender() {} }, context.ui.theme).render(
+                    120,
+                  )[0],
                 )
               : "";
           return rendered.slice(0, rendered.indexOf(" "));
@@ -4548,9 +4552,8 @@ export const runtimeSections = {
         let clock = 1_000_000;
         Date.now = () => clock;
         const renderActivity = () => {
-          const factory = lifecycleHarness.widgets.get(
-            "aurora-ui/activity",
-          )?.content;
+          const factory =
+            lifecycleHarness.widgets.get("aurora-ui/activity")?.content;
           return typeof factory === "function"
             ? factory(
                 { terminal: { columns: 140, rows: 30 }, requestRender() {} },
@@ -4593,7 +4596,11 @@ export const runtimeSections = {
             {},
             lifecycleContext,
           );
-          eq(renderActivity(), "", "agent_settled alone clears normal activity");
+          eq(
+            renderActivity(),
+            "",
+            "agent_settled alone clears normal activity",
+          );
 
           // A transient provider failure produces agent_end before Pi waits and
           // starts the retry. Neither boundary may create an idle gap.
@@ -4615,7 +4622,11 @@ export const runtimeSections = {
             {},
             lifecycleContext,
           );
-          eq(renderActivity(), "", "the retried turn clears only after settling");
+          eq(
+            renderActivity(),
+            "",
+            "the retried turn clears only after settling",
+          );
 
           // Overflow recovery compacts between loops. Aurora has no synthetic
           // compaction state, so existing activity must survive both events.
@@ -4710,11 +4721,7 @@ export const runtimeSections = {
               {},
               lifecycleContext,
             );
-            eq(
-              renderActivity(),
-              "",
-              `${outcome} clears only at agent_settled`,
-            );
+            eq(renderActivity(), "", `${outcome} clears only at agent_settled`);
           }
 
           // A tool followed by assistant text switches presentation normally;
