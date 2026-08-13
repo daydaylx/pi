@@ -101,8 +101,10 @@ Stand `05fbd01`.
   `npm run typecheck` bleibt dort vorbestehend rot (810 Fehler, davon 49 in
   `src/`); durch diese Arbeit kamen keine hinzu.
 - Manuell geprüft: `settings.json` pinnt
-  `18c4851fe19e6635e42b7d8911b8a91e1747f7f9`; dieser SHA ist über die GitHub-API
-  erreichbar und dauerhaft über `agent/simplify-and-stabilize` referenziert.
+  `18c4851fe19e6635e42b7d8911b8a91e1747f7f9`. Der Fork-`main` wurde per
+  Fast-Forward (`behind_by: 0`, ohne `force`) auf denselben SHA nachgezogen und
+  trägt den Sicherheitsfix jetzt selbst — `src/runs/shared/acceptance.ts` steht
+  auf `main` auf `shell: false`. Pin und Default-Branch sind damit deckungsgleich.
 - Nicht ausgeführt: der Live-Smoke. Aurora im echten Terminal, Shift+Tab, der
   reale Plan→Work-Handoff, `project_check` gegen den echten Footer und ein
   echter Investigator-Aufruf sind unbelegt (`docs/manual-smoke-checklist.md`).
@@ -112,8 +114,9 @@ Stand `05fbd01`.
 - Live-Smoke nach `docs/manual-smoke-checklist.md` in einer authentifizierten
   Sitzung durchführen. Erst danach darf `#137` geschlossen und das Urteil von
   `BEDINGT STABIL` auf `STABIL` gehoben werden.
-- `main` des Forks per Fast-Forward auf `18c4851f` nachziehen, damit der
-  Default-Branch den Sicherheitsfix trägt und ein künftiger Repin auf
-  „main HEAD" keinen Rückschritt mehr auslöst.
 - `tests/suites/runtime.mjs` (5276 Zeilen) entlang der vorhandenen
   `SECTION_SUITES`-Registry aufteilen — P2, erst nach dem Live-Smoke.
+- Den lokalen, gitignorierten Klon `pi-subagents/` klären: Er trägt den Commit
+  `2004b72`, den GitHub nicht kennt (`422`), plus rund 4.644 uncommittete
+  Löschungen. Vermutlich überholt durch `18c4851f`, aber unbelegt — sichern,
+  vergleichen oder verwerfen ist eine eigene Entscheidung.
