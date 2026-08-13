@@ -100,12 +100,15 @@ await test("Shift+Tab → Work waits and does not execute an existing plan", asy
       "work selection leaves the plan untouched",
     );
     const prompt = await hooks(harness, "before_agent_start", ctx);
-    assert(
-      prompt[0]?.systemPrompt?.includes("PI WORKMODUS"),
-      "the next real prompt is work",
+    eq(
+      prompt[0],
+      undefined,
+      "a work turn without a handoff adds no instruction of its own",
     );
     assert(
-      !prompt[0]?.systemPrompt?.includes("Bestehender Plan"),
+      !prompt.some((entry) =>
+        entry?.systemPrompt?.includes("Bestehender Plan"),
+      ),
       "a stale plan is not injected",
     );
   } finally {
@@ -154,9 +157,10 @@ await test("a settled Plan → Work handoff ignores retry intermediates and stay
 
     await chooseWorkflow(harness, ctx);
     const later = await hooks(harness, "before_agent_start", ctx);
-    assert(
-      !later[0]?.systemPrompt?.includes("Neuer Plan"),
-      "Work → Work does not resurrect the handoff",
+    eq(
+      later[0],
+      undefined,
+      "Work → Work does not resurrect the handoff and adds nothing at all",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -202,6 +206,97 @@ await test("a failed or missing planning result restores the old plan", async ()
       readFileSync(planFilePath(cwd), "utf8"),
       "# Alter Plan\n",
       "a missing replacement changes nothing",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("an aborted planning run restores the old plan and hands nothing off", async () => {
+  if (!planMode) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-abort-"));
+  try {
+    writePlan(cwd, "# Alter Plan\n");
+    let choice = "Schnellplan";
+    const harness = createHarness({ select: () => choice });
+    const ctx = harness.makeContext({ cwd });
+    planMode.default(harness.api);
+    await hooks(harness, "session_start", ctx);
+    await chooseWorkflow(harness, ctx);
+    await hooks(harness, "before_agent_start", ctx);
+
+    writePlan(cwd, "# Halbfertiger Plan\n");
+    await harness.runHooks(
+      "tool_result",
+      {
+        toolName: "write",
+        input: { path: ".agent/plans/current-plan.md" },
+        isError: false,
+      },
+      ctx,
+    );
+    await harness.runHooks(
+      "agent_end",
+      { messages: [{ stopReason: "aborted" }] },
+      ctx,
+    );
+    await hooks(harness, "agent_settled", ctx);
+    eq(
+      readFileSync(planFilePath(cwd), "utf8"),
+      "# Alter Plan\n",
+      "a user abort restores the plan that was there before the run",
+    );
+
+    choice = "Work";
+    await chooseWorkflow(harness, ctx);
+    const prompt = await hooks(harness, "before_agent_start", ctx);
+    assert(
+      !prompt[0]?.systemPrompt?.includes("Halbfertiger Plan"),
+      "an aborted run hands off nothing",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("a failed plan write is not a successful replacement", async () => {
+  if (!planMode) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-write-error-"));
+  try {
+    writePlan(cwd, "# Alter Plan\n");
+    let choice = "Schnellplan";
+    const harness = createHarness({ select: () => choice });
+    const ctx = harness.makeContext({ cwd });
+    planMode.default(harness.api);
+    await hooks(harness, "session_start", ctx);
+    await chooseWorkflow(harness, ctx);
+    await hooks(harness, "before_agent_start", ctx);
+
+    // The tool reported an error, but something left content behind anyway.
+    writePlan(cwd, "# Kaputter Plan\n");
+    await harness.runHooks(
+      "tool_result",
+      {
+        toolName: "write",
+        input: { path: ".agent/plans/current-plan.md" },
+        isError: true,
+      },
+      ctx,
+    );
+    await hooks(harness, "agent_end", ctx);
+    await hooks(harness, "agent_settled", ctx);
+    eq(
+      readFileSync(planFilePath(cwd), "utf8"),
+      "# Alter Plan\n",
+      "a write the tool reported as failed does not replace the plan",
+    );
+
+    choice = "Work";
+    await chooseWorkflow(harness, ctx);
+    const prompt = await hooks(harness, "before_agent_start", ctx);
+    assert(
+      !prompt[0]?.systemPrompt?.includes("Kaputter Plan"),
+      "a failed write hands off nothing",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

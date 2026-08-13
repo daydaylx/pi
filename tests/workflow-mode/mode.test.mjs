@@ -31,16 +31,17 @@ await test("work is the default and ignores legacy sidecars", async () => {
     planMode.default(harness.api);
     await hooks(harness, "session_start", ctx);
     const prompt = await hooks(harness, "before_agent_start", ctx);
-    assert(
-      prompt[0]?.systemPrompt?.includes("PI WORKMODUS"),
-      "session starts in work mode",
+    eq(
+      prompt[0],
+      undefined,
+      "an ordinary work turn adds nothing to the request at all",
     );
     assert(
-      !prompt[0]?.systemPrompt?.includes("blocked"),
+      !prompt.some((entry) => entry?.systemPrompt?.includes("blocked")),
       "legacy sidecar is ignored",
     );
     assert(
-      !prompt[0]?.message,
+      !prompt.some((entry) => entry?.message),
       "work mode injects no persisted custom message",
     );
   } finally {

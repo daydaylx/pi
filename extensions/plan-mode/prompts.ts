@@ -47,10 +47,15 @@ Weg existiert. Die folgende Struktur ist eine Empfehlung, keine Validierungsrege
 ${structure}`;
 }
 
-export function workPrompt(plan?: string): string {
-  const base = "[PI WORKMODUS]\nArbeite normal im Projekt. Es ist kein Plan erforderlich.";
-  if (!plan) return base;
-  return `${base}
+/**
+ * Work mode is Pi's normal state, so it needs no instruction of its own —
+ * telling the model to "work normally" on every turn costs context and says
+ * nothing. Only a plan handed over from a planning turn in this session is
+ * worth injecting, and only once.
+ */
+export function workPrompt(plan?: string): string | undefined {
+  if (!plan) return undefined;
+  return `[PI WORKMODUS]
 
 Ein gerade in dieser Sitzung erstellter Plan folgt einmalig als hilfreicher
 Kontext. Der aktuelle User-Auftrag bleibt die Source of Truth; der Plan ist

@@ -39,6 +39,9 @@ export function registerPlanEvents(
       ? planningPrompt(mode)
       : workPrompt(session.consumePlanHandoff());
     if (isPlanningMode(mode)) session.beginPlanningTurn(ctx.cwd);
+    // An ordinary work turn carries no instruction at all, so it must not
+    // touch the system prompt.
+    if (!instruction) return;
     // `systemPrompt` is applied only to this provider request by Pi's runtime.
     // Returning a custom message here would persist the same mode text on every
     // turn and make it part of all later provider contexts.
