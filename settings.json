@@ -64,8 +64,8 @@
   "autocompleteMaxVisible": 8,
   "compaction": {
     "enabled": true,
-    "reserveTokens": 32768,
-    "keepRecentTokens": 12000
+    "reserveTokens": 49152,
+    "keepRecentTokens": 20000
   },
   "branchSummary": {
     "reserveTokens": 16384,

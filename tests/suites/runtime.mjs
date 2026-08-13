@@ -76,6 +76,57 @@ export const runtimeSections = {
           { disableBuiltins: true },
           "settings directly disable package-built-in agent profiles",
         );
+
+        // Compaction budget, measured rather than guessed (docs/decisions/010).
+        // Pinned here because both values were previously set without a run
+        // that ever reached a compaction, and a silent revert is invisible
+        // until a long session overflows.
+        const { shouldCompact, DEFAULT_COMPACTION_SETTINGS } = await import(
+          pathToFileURL(
+            path.join(
+              ROOT,
+              "npm/node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/compaction.js",
+            ),
+          ).href
+        );
+        const compaction = settings.compaction;
+        assert(
+          compaction.keepRecentTokens >=
+            DEFAULT_COMPACTION_SETTINGS.keepRecentTokens,
+          "the recent-context budget never drops below the runtime's own default",
+        );
+        assert(
+          compaction.reserveTokens >
+            DEFAULT_COMPACTION_SETTINGS.reserveTokens * 2,
+          "the reserve stays large enough to survive a turn that outgrows it",
+        );
+        // The default model's window. Not readable from a tracked file
+        // (models-store.json is runtime data), so it is stated here as the
+        // assumption the two values above were measured against.
+        const CONTEXT_WINDOW = 272_000;
+        const trigger = CONTEXT_WINDOW - compaction.reserveTokens;
+        assert(
+          trigger / CONTEXT_WINDOW <= 0.85,
+          "compaction triggers early enough to leave room for a real turn",
+        );
+        eq(
+          shouldCompact(trigger, CONTEXT_WINDOW, compaction),
+          false,
+          "the trigger boundary itself does not compact",
+        );
+        eq(
+          shouldCompact(trigger + 1, CONTEXT_WINDOW, compaction),
+          true,
+          "one token past the boundary compacts",
+        );
+        eq(
+          shouldCompact(trigger + 1, CONTEXT_WINDOW, {
+            ...compaction,
+            enabled: false,
+          }),
+          false,
+          "disabled compaction never triggers",
+        );
         assert(
           !Object.hasOwn(setup, "models"),
           "setup.json contains no duplicate model-role configuration",
@@ -1018,9 +1069,9 @@ export const runtimeSections = {
           contextReport.includes("Model: main-provider/main-model") &&
             contextReport.includes("Context Window: 272000") &&
             contextReport.includes("Active Context Tokens: n/a") &&
-            contextReport.includes("Compaction Trigger: 239232") &&
-            contextReport.includes("Reserve Tokens: 32768") &&
-            contextReport.includes("Keep Recent Tokens: 12000") &&
+            contextReport.includes("Compaction Trigger: 222848") &&
+            contextReport.includes("Reserve Tokens: 49152") &&
+            contextReport.includes("Keep Recent Tokens: 20000") &&
             contextReport.includes("Compaction Enabled: true") &&
             contextReport.includes("Usage Source: pending fresh usage") &&
             contextReport.includes("effective system prompt: 11 bytes") &&
