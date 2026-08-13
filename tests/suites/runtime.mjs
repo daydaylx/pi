@@ -854,6 +854,34 @@ export const runtimeSections = {
           Boolean(harness.tools.get("project_check")),
           "setup core registers the trust-bound project_check tool (#123)",
         );
+        // One canonical route for the full project verification. The verify
+        // tool offers fast partial checks only; it does not update the
+        // footer/ledger, so offering the same command under both tools made
+        // an unverified workspace look checked.
+        eq(
+          harness.tools
+            .get("verify")
+            ?.parameters?.properties?.check?.anyOf?.map((entry) => entry.const),
+          ["typecheck", "test"],
+          "the verify tool no longer offers the full project verification",
+        );
+        eq(
+          Object.keys(
+            JSON.parse(readFileSync(path.join(ROOT, "setup.json"), "utf8"))
+              .verification,
+          ).sort(),
+          ["test", "typecheck"],
+          "setup.json declares no check that duplicates a project profile",
+        );
+        assert(
+          Object.hasOwn(
+            JSON.parse(
+              readFileSync(path.join(ROOT, ".pi", "verify.json"), "utf8"),
+            ).profiles,
+            "verify",
+          ),
+          "the full verification stays available as the required project profile",
+        );
         assert(
           !harness.commands.get("verify-gate"),
           "setup core no longer owns /verify-gate; it belongs to the completion domain",

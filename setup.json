@@ -27,11 +27,6 @@
       "command": "npm",
       "args": ["--prefix", "npm", "run", "test"],
       "timeoutMs": 300000
-    },
-    "verify": {
-      "command": "npm",
-      "args": ["--prefix", "npm", "run", "verify"],
-      "timeoutMs": 420000
     }
   }
 }

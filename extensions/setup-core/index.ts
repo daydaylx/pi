@@ -26,11 +26,7 @@ import {
 import type { LoadedProfiles } from "./verify-profiles.ts";
 
 const CheckParams = Type.Object({
-  check: Type.Union([
-    Type.Literal("typecheck"),
-    Type.Literal("test"),
-    Type.Literal("verify"),
-  ]),
+  check: Type.Union([Type.Literal("typecheck"), Type.Literal("test")]),
 });
 
 const MAX_PROJECT_PROFILES_PER_CALL = 8;
@@ -255,9 +251,8 @@ export default function setupCore(
     name: "verify",
     label: "Verifizieren",
     description:
-      'Führt ausschließlich einen vorkonfigurierten Typecheck, Testlauf oder die vollständige Verifikation dieses Setups aus. Akzeptiert keine freien Shell-Kommandos. Aktualisiert nicht den Verifikations-Footer/-Ledger eines Projekts — dafür ist project_check({ profile: "verify" }) der kanonische Weg.',
-    promptSnippet:
-      "Run a configured typecheck, test, or full verification safely.",
+      'Führt einen schnellen Teilcheck dieses Setups aus (Typecheck oder Tests). Akzeptiert keine freien Shell-Kommandos und aktualisiert weder Verifikations-Footer noch Ledger. Die vollständige Projektverifikation läuft ausschließlich über project_check({ profile: "verify" }).',
+    promptSnippet: "Run a configured typecheck or test run safely.",
     parameters: CheckParams,
     executionMode: "sequential",
     async execute(_id, params, signal, _onUpdate, ctx) {

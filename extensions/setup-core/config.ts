@@ -5,7 +5,10 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 export type MotionMode = "contextual" | "reduced" | "off";
 export type PolicyAction = "block" | "ask" | "allow";
 export type LspMode = "off" | "auto" | "force";
-export type VerificationName = "typecheck" | "test" | "verify";
+// The full project verification is deliberately absent here: it is reachable
+// only through project_check, which is the one route that updates the
+// verification footer and ledger. See docs/verify-profiles.md.
+export type VerificationName = "typecheck" | "test";
 
 export interface VerificationCommand {
   command: string;
@@ -64,11 +67,6 @@ const DEFAULT_CONFIG: SetupConfig = {
       command: "npm",
       args: ["--prefix", "npm", "run", "test"],
       timeoutMs: 300_000,
-    },
-    verify: {
-      command: "npm",
-      args: ["--prefix", "npm", "run", "verify"],
-      timeoutMs: 420_000,
     },
   },
 };
@@ -210,7 +208,7 @@ function applyUserLayer(
   if (verification)
     reportUnknownKeys(
       verification,
-      ["typecheck", "test", "verify"],
+      ["typecheck", "test"],
       source,
       "verification.",
       diagnostics,
@@ -284,7 +282,7 @@ function applyUserLayer(
       message: "verificationStatus.enabled muss boolean sein",
     });
   }
-  for (const name of ["typecheck", "test", "verify"] as const) {
+  for (const name of ["typecheck", "test"] as const) {
     const rawCheck = verification?.[name];
     if (!isObject(rawCheck)) continue;
     reportUnknownKeys(

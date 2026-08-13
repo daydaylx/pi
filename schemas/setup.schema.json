@@ -61,11 +61,10 @@
     "verification": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["typecheck", "test", "verify"],
+      "required": ["typecheck", "test"],
       "properties": {
         "typecheck": { "$ref": "#/$defs/check" },
-        "test": { "$ref": "#/$defs/check" },
-        "verify": { "$ref": "#/$defs/check" }
+        "test": { "$ref": "#/$defs/check" }
       }
     }
   },
