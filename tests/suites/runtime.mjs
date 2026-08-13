@@ -472,9 +472,14 @@ export const runtimeSections = {
         );
       }
 
-      // Archive session logs must not be deployed.
-      const archiveFiles = deployed.filter((f) =>
-        f.startsWith("docs/archive/session-logs"),
+      // Archive session logs must not be deployed. Match on a path boundary,
+      // not a raw string prefix - docs/archive/session-logs.md is a policy
+      // note (not a log), and a plain startsWith() would false-positive on
+      // it merely because it shares a prefix with the excluded directory.
+      const archiveFiles = deployed.filter(
+        (f) =>
+          f === "docs/archive/session-logs" ||
+          f.startsWith("docs/archive/session-logs/"),
       );
       eq(
         archiveFiles.length,
@@ -494,9 +499,12 @@ export const runtimeSections = {
         );
       }
 
-      // Security: NEVER_COPY_SUBTREE entries must not appear.
+      // Security: NEVER_COPY_SUBTREE entries must not appear. Path-boundary
+      // match, same reasoning as the docs/archive/session-logs check above.
       for (const subtree of NEVER_COPY_SUBTREE) {
-        const violations = deployed.filter((f) => f.startsWith(subtree));
+        const violations = deployed.filter(
+          (f) => f === subtree || f.startsWith(subtree + "/"),
+        );
         eq(
           violations.length,
           0,
@@ -926,6 +934,7 @@ export const runtimeSections = {
             },
           ],
           activeTools: ["zeta", "dynamic-tool"],
+          contextUsage: { tokens: null, contextWindow: 272000, percent: null },
           entries: [
             {
               type: "message",
@@ -938,6 +947,16 @@ export const runtimeSections = {
               type: "compaction",
               timestamp: "2026-08-02T10:00:00.000Z",
               usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
+            },
+            {
+              type: "custom",
+              customType: "resilience.compaction-boundary",
+              data: {
+                timestamp: "2026-08-02T10:01:00.000Z",
+                boundary: "failed",
+                reason: "threshold",
+                errorMessage: "summary provider failed",
+              },
             },
             {
               type: "message",
@@ -968,17 +987,29 @@ export const runtimeSections = {
           "context doctor reports sorted registered and dynamically active tools",
         );
         assert(
-          contextReport.includes("effective system prompt: 11 bytes") &&
+          contextReport.includes("Model: main-provider/main-model") &&
+            contextReport.includes("Context Window: 272000") &&
+            contextReport.includes("Active Context Tokens: n/a") &&
+            contextReport.includes("Compaction Trigger: 239232") &&
+            contextReport.includes("Reserve Tokens: 32768") &&
+            contextReport.includes("Keep Recent Tokens: 12000") &&
+            contextReport.includes("Compaction Enabled: true") &&
+            contextReport.includes("Usage Source: pending fresh usage") &&
+            contextReport.includes("effective system prompt: 11 bytes") &&
+            /active tool schemas: \d+ bytes/.test(contextReport) &&
             contextReport.includes(
-              "real usage: input=11, output=22, cacheRead=33, cacheWrite=44",
+              "Lifetime Usage: input=11, output=22, cacheRead=33, cacheWrite=44",
             ) &&
             contextReport.includes(
-              "persisted compactions: 1 (2026-08-02T10:00:00.000Z)",
+              "Last Successful Compaction: 2026-08-02T10:00:00.000Z",
+            ) &&
+            contextReport.includes(
+              "Last Compaction Attempt: 2026-08-02T10:01:00.000Z (failed, threshold: summary provider failed)",
             ) &&
             contextReport.includes(
               "persisted tool truncations: count=1, totalBytes=200, outputBytes=80",
             ),
-          "context doctor reports only aggregate prompt, usage, compaction and truncation diagnostics",
+          "context doctor separates active context from lifetime usage and shows compaction status",
         );
         if (contextCommand)
           await contextCommand("unexpected", diagnosticContext);
@@ -1008,13 +1039,117 @@ export const runtimeSections = {
             null,
             "missing system prompt is reported as n/a",
           );
-          eq(empty.usage, null, "missing persisted usage is reported as n/a");
+          eq(
+            empty.lifetimeUsage,
+            null,
+            "missing persisted lifetime usage is reported as n/a",
+          );
           eq(
             empty.toolTruncation,
             { count: 0, totalBytes: 0, outputBytes: 0 },
             "empty sessions have no persisted truncations",
           );
         }
+        const largeSubagentReport = [
+          "SUBAGENT_HEAD",
+          ...Array.from(
+            { length: 500 },
+            (_, index) => `report-${index}-${"x".repeat(80)}`,
+          ),
+          "SUBAGENT_TAIL",
+        ].join("\n");
+        const subagentResults = await contextHarness.runHooks(
+          "tool_result",
+          {
+            toolName: "subagent",
+            toolCallId: "subagent-call",
+            input: { agent: "investigator", task: "inspect" },
+            content: [
+              { type: "text", text: largeSubagentReport },
+              { type: "image", data: "image-data", mimeType: "image/png" },
+              { type: "text", text: "SECOND_TEXT_BLOCK" },
+            ],
+            details: {
+              mode: "single",
+              runId: "run-1",
+              results: [
+                {
+                  agent: "investigator",
+                  finalOutput: largeSubagentReport,
+                  messages: [{ role: "assistant", content: [] }],
+                  sessionFile: "/tmp/child.jsonl",
+                  transcriptPath: "/tmp/child.md",
+                  artifactPaths: { output: "/tmp/report.md" },
+                  acceptance: {
+                    status: "accepted",
+                    childReport: { verbose: largeSubagentReport },
+                    verifyRuns: [
+                      {
+                        stdout: largeSubagentReport,
+                        stderr: largeSubagentReport,
+                      },
+                    ],
+                  },
+                },
+              ],
+              outputs: {
+                child: {
+                  text: largeSubagentReport,
+                  structured: { report: largeSubagentReport },
+                  outputFile: "/tmp/report.md",
+                },
+              },
+            },
+            isError: true,
+            usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
+          },
+          diagnosticContext,
+        );
+        const boundedSubagent = subagentResults.find(Boolean);
+        const persistedSubagentContent = boundedSubagent?.content ?? [];
+        const persistedSubagentText = persistedSubagentContent
+          .filter((block) => block.type === "text")
+          .map((block) => block.text)
+          .join("\n");
+        assert(
+          Buffer.byteLength(persistedSubagentText, "utf8") <= 12 * 1024 &&
+            persistedSubagentText.includes("SUBAGENT_HEAD") &&
+            persistedSubagentText.includes("SECOND_TEXT_BLOCK") &&
+            persistedSubagentText.includes("[Ausgabe gekürzt:") &&
+            persistedSubagentContent.some((block) => block.type === "image"),
+          "the active setup-core tool_result hook bounds the parent-facing subagent result while retaining text ends and images",
+        );
+        eq(
+          boundedSubagent?.isError,
+          true,
+          "subagent result guard preserves isError",
+        );
+        eq(
+          boundedSubagent?.details?.results?.[0]?.finalOutput,
+          undefined,
+          "the parent-persisted subagent details omit the duplicate full child report",
+        );
+        eq(
+          boundedSubagent?.details?.results?.[0]?.sessionFile,
+          "/tmp/child.jsonl",
+          "the parent-persisted subagent details retain child artifact references",
+        );
+        eq(
+          boundedSubagent?.details?.truncation?.maxBytes,
+          12 * 1024,
+          "the parent-persisted subagent details record the real truncation boundary",
+        );
+        eq(
+          boundedSubagent?.details?.results?.[0]?.acceptance?.verifyRuns?.[0]
+            ?.stdout,
+          undefined,
+          "the parent-persisted acceptance details omit verify command output copies",
+        );
+        eq(
+          boundedSubagent?.details?.outputs?.child?.structured,
+          undefined,
+          "the parent-persisted chain details omit structured output copies",
+        );
         const verify = harness.tools.get("verify");
         if (verify) {
           await verify.execute(

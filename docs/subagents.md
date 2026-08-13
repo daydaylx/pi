@@ -130,7 +130,11 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
 ## Ergebnisbudget und Artefakte
 
 Die reduzierte API nimmt keine Ausgabepfade, Kontext-, Skill-, Arbeitsverzeichnis-
-oder Modellparameter entgegen. Ergebnisse gehören zum einzelnen Run; `list`
+oder Modellparameter entgegen. Da `investigator`, `debugger` und `verifier`
+schreibgeschützt bleiben (kein `edit`/`write`), landen ihre Befunde inline im
+Abschlussbericht statt in einer Datei, die ein Kind-Prozess schreiben müsste:
+Aufrufer geben ihnen keinen
+`output`-Pfad vor. Ergebnisse gehören zum einzelnen Run; `list`
 und `status` liefern die Laufzeitübersicht. Es gibt keine Chain-, Parallel-,
 Worktree- oder Delegations-API.
 
