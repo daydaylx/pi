@@ -87,7 +87,7 @@ geschlossen:
 
 ## Letzte Verifikation
 
-Hauptrepo mit Fork-Pin `ba5edbd`.
+Hauptrepo mit Fork-Pin `0107312`.
 
 - Hauptrepo: `npm --prefix npm run verify` Exit 0 — Prettier, Typecheck, Knip,
   Coverage-Gates, Runtime-Patches und Dependency-Audit. 1314 Tests: runtime 811,
@@ -97,13 +97,13 @@ Hauptrepo mit Fork-Pin `ba5edbd`.
   Zählung sank von 38, weil der Aurora-Fix die gemeinsame `settle`-Closure
   entfernt hat; die Schwelle wurde nicht gesenkt und keine Datei ausgeschlossen.
 - CI grün: Läufe `31744481889` und `31744759696` auf `main`.
-- Fork (`ba5edbd`): `test:unit` 1152/1152 und `test:e2e` 1/1 grün.
-  `test:integration` steht bei 486/6 — die sechs `/run`-Slash-Command-Fälle sind
-  **vorbestehend** und auf einem unberührten Checkout desselben Stands identisch
-  rot; die frühere Angabe „492/492 grün" traf nicht zu. `npm run typecheck`
-  bleibt dort vorbestehend rot (810 Fehler, davon 49 in `src/`).
+- Fork (`0107312`): `test:unit` 1152/1152, `test:integration` 492/492 und
+  `test:e2e` 1/1 grün. Die sechs `/run`- und `/parallel`-Fälle, die zuvor auf
+  jedem Rechner ohne passenden Agenten im Home rot waren, laufen jetzt gegen ein
+  isoliertes Fixture. `npm run typecheck` bleibt dort vorbestehend rot
+  (810 Fehler, davon 49 in `src/`).
 - Manuell geprüft: `settings.json` pinnt
-  `ba5edbdc2053f834a791b7797dd8fd6552a3015c`. Der Fork-`main` wurde zuvor per
+  `010731209991f727e47ca823c98eb3ae37d8a1bd`. Der Fork-`main` wurde zuvor per
   Fast-Forward (`behind_by: 0`, ohne `force`) auf denselben SHA nachgezogen und
   trägt den Sicherheitsfix jetzt selbst — `src/runs/shared/acceptance.ts` steht
   auf `main` auf `shell: false`. Pin und Default-Branch sind damit deckungsgleich.
@@ -118,8 +118,5 @@ Hauptrepo mit Fork-Pin `ba5edbd`.
   `BEDINGT STABIL` auf `STABIL` gehoben werden.
 - `tests/suites/runtime.mjs` (5276 Zeilen) entlang der vorhandenen
   `SECTION_SUITES`-Registry aufteilen — P2, erst nach dem Live-Smoke.
-- Den lokalen, gitignorierten Klon `pi-subagents/` aufräumen. Sein Inhalt ist
-  ausgewertet und das Brauchbare ist als `9c6173c` und `ba5edbd` im Fork: die
-  env-Härtung und der Modul-Split. Was dort liegen bleibt — der überholte
-  Commit `2004b72` mit seinem roten Watchdog-Test — wird nicht mehr gebraucht;
-  ein Reset auf `origin/main` ist damit gefahrlos, bleibt aber deine Entscheidung.
+- `tests/suites/runtime.mjs` bleibt der einzige belegte P2-Befund; alles andere
+  aus der ursprünglichen P2-Bestandsaufnahme ist erledigt.
