@@ -1326,14 +1326,31 @@ export const runtimeSections = {
                   "-e",
                   `const { spawn } = require("node:child_process");\nconst child = spawn(process.execPath, ["-e", "const { writeFileSync } = require('node:fs'); writeFileSync(process.argv[1], String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1_000);", ${JSON.stringify(pidFile)}], { stdio: "ignore" });\nchild.unref();\nsetInterval(() => {}, 1_000);`,
                 ],
-                { timeout: 100, killGraceMs: 50 },
+                // The grandchild has to get far enough to record its pid
+                // before the tree is torn down. A 100 ms budget did not
+                // reliably cover a Node start under parallel load, which made
+                // the read below throw ENOENT roughly one run in six. The
+                // leader loops forever, so a longer timeout still fires.
+                { timeout: 1_000, killGraceMs: 50 },
               );
               eq(
                 result.killed,
                 true,
                 "tracked executor reports the timed-out process tree",
               );
-              childPid = Number(readFileSync(pidFile, "utf8"));
+              let pidRaw;
+              for (let attempt = 0; attempt < 40 && !pidRaw; attempt += 1) {
+                try {
+                  pidRaw = readFileSync(pidFile, "utf8");
+                } catch {
+                  await new Promise((resolve) => setTimeout(resolve, 25));
+                }
+              }
+              assert(
+                Boolean(pidRaw),
+                "the grandchild recorded its pid before the tree was torn down",
+              );
+              childPid = Number(pidRaw);
               let childStillExists = true;
               for (
                 let attempt = 0;
