@@ -87,7 +87,7 @@ geschlossen:
 
 ## Letzte Verifikation
 
-Stand `05fbd01`.
+Hauptrepo mit Fork-Pin `ba5edbd`.
 
 - Hauptrepo: `npm --prefix npm run verify` Exit 0 — Prettier, Typecheck, Knip,
   Coverage-Gates, Runtime-Patches und Dependency-Audit. 1314 Tests: runtime 811,
@@ -97,11 +97,13 @@ Stand `05fbd01`.
   Zählung sank von 38, weil der Aurora-Fix die gemeinsame `settle`-Closure
   entfernt hat; die Schwelle wurde nicht gesenkt und keine Datei ausgeschlossen.
 - CI grün: Läufe `31744481889` und `31744759696` auf `main`.
-- Fork: `test:unit` 1151/1151, `test:integration` 492/492, `test:e2e` 1/1 grün.
-  `npm run typecheck` bleibt dort vorbestehend rot (810 Fehler, davon 49 in
-  `src/`); durch diese Arbeit kamen keine hinzu.
+- Fork (`ba5edbd`): `test:unit` 1152/1152 und `test:e2e` 1/1 grün.
+  `test:integration` steht bei 486/6 — die sechs `/run`-Slash-Command-Fälle sind
+  **vorbestehend** und auf einem unberührten Checkout desselben Stands identisch
+  rot; die frühere Angabe „492/492 grün" traf nicht zu. `npm run typecheck`
+  bleibt dort vorbestehend rot (810 Fehler, davon 49 in `src/`).
 - Manuell geprüft: `settings.json` pinnt
-  `18c4851fe19e6635e42b7d8911b8a91e1747f7f9`. Der Fork-`main` wurde per
+  `ba5edbdc2053f834a791b7797dd8fd6552a3015c`. Der Fork-`main` wurde zuvor per
   Fast-Forward (`behind_by: 0`, ohne `force`) auf denselben SHA nachgezogen und
   trägt den Sicherheitsfix jetzt selbst — `src/runs/shared/acceptance.ts` steht
   auf `main` auf `shell: false`. Pin und Default-Branch sind damit deckungsgleich.
@@ -116,7 +118,8 @@ Stand `05fbd01`.
   `BEDINGT STABIL` auf `STABIL` gehoben werden.
 - `tests/suites/runtime.mjs` (5276 Zeilen) entlang der vorhandenen
   `SECTION_SUITES`-Registry aufteilen — P2, erst nach dem Live-Smoke.
-- Den lokalen, gitignorierten Klon `pi-subagents/` klären: Er trägt den Commit
-  `2004b72`, den GitHub nicht kennt (`422`), plus rund 4.644 uncommittete
-  Löschungen. Vermutlich überholt durch `18c4851f`, aber unbelegt — sichern,
-  vergleichen oder verwerfen ist eine eigene Entscheidung.
+- Den lokalen, gitignorierten Klon `pi-subagents/` aufräumen. Sein Inhalt ist
+  ausgewertet und das Brauchbare ist als `9c6173c` und `ba5edbd` im Fork: die
+  env-Härtung und der Modul-Split. Was dort liegen bleibt — der überholte
+  Commit `2004b72` mit seinem roten Watchdog-Test — wird nicht mehr gebraucht;
+  ein Reset auf `origin/main` ist damit gefahrlos, bleibt aber deine Entscheidung.
