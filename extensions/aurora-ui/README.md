@@ -50,8 +50,10 @@ Der Header zeigt während eines laufenden Turns `DENKT NACH` (mit Thinking-Level
 `WARTET`, jeweils mit einer Laufzeit. `WARTET` bedeutet ausschließlich, dass der
 Turn weiterläuft und Aurora gerade kein genaueres Ereignis erhalten hat: Die
 Animation ist ein Lebenszeichen, keine Hänger- oder Fehlerdiagnose. `idle` wird
-nur beim tatsächlichen Turnabschluss (`agent_end` oder `agent_settled`) gesetzt,
-sofern keine asynchronen Subagenten weiterarbeiten.
+nur beim tatsächlichen Turnabschluss (`agent_settled`) gesetzt, sofern keine
+asynchronen Subagenten weiterarbeiten. `agent_end` beendet nur einen einzelnen
+Agentenlauf; Pi kann danach noch automatisch retryen, kompaktieren oder einen
+weiteren Lauf starten.
 
 `tool_execution_start` ist Auroras einzige Quelle für eine Toolzeile. Es ordnet
 die realen Laufzeitdaten als Lesen, Suchen, Bearbeiten, Shell, Testen, Prüfen,

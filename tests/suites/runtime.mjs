@@ -4508,33 +4508,239 @@ export const runtimeSections = {
         }
       }
 
-      // A turn that ends while a tool is still registered must not leave the
-      // activity surface claiming work. agent_end and agent_settled share one
-      // handler, so both have to clear it.
-      await harness.runHooks("agent_end", {}, context);
-      eq(
-        harness.workingVisibility.at(-1),
-        false,
-        "Aurora settles the activity surface when the turn ends",
-      );
-      eq(
-        harness.widgets
-          .get("aurora-ui/activity")
-          ?.content({ requestRender() {} }, context.ui.theme)
-          .render(140).length,
-        0,
-        "the activity widget renders nothing once the turn has settled",
-      );
-      await harness.runHooks("agent_start", {}, context);
-      await harness.runHooks("agent_settled", {}, context);
-      eq(
-        harness.widgets
-          .get("aurora-ui/activity")
-          ?.content({ requestRender() {} }, context.ui.theme)
-          .render(140).length,
-        0,
-        "agent_settled also clears Aurora activity without async work",
-      );
+      // Pi may emit agent_end before retry, compaction, or another agent run.
+      // Aurora must keep its existing activity visible until agent_settled.
+      {
+        const lifecycleHarness = createHarness();
+        auroraUi.default(lifecycleHarness.api);
+        const lifecycleContext = lifecycleHarness.makeContext({
+          sessionId: "aurora-lifecycle-session",
+        });
+        const originalNow = Date.now;
+        let clock = 1_000_000;
+        Date.now = () => clock;
+        const renderActivity = () => {
+          const factory = lifecycleHarness.widgets.get(
+            "aurora-ui/activity",
+          )?.content;
+          return typeof factory === "function"
+            ? factory(
+                { terminal: { columns: 140, rows: 30 }, requestRender() {} },
+                lifecycleContext.ui.theme,
+              )
+                .render(140)
+                .map(stripAnsi)
+                .join("\\n")
+            : "";
+        };
+        try {
+          await lifecycleHarness.runHooks(
+            "session_start",
+            {},
+            lifecycleContext,
+          );
+
+          // Normal success: agent_end retains both the response status and its
+          // clock; the subsequent terminal event alone makes Aurora idle.
+          await lifecycleHarness.runHooks("agent_start", {}, lifecycleContext);
+          await lifecycleHarness.runHooks(
+            "message_update",
+            { assistantMessageEvent: { type: "text_delta" } },
+            lifecycleContext,
+          );
+          clock += 3_000;
+          await lifecycleHarness.runHooks("agent_end", {}, lifecycleContext);
+          const afterEnd = renderActivity();
+          assert(
+            afterEnd.includes("ANTWORTET") && afterEnd.includes("3s"),
+            "agent_end keeps a successful turn's response status and timer visible",
+          );
+          eq(
+            lifecycleHarness.workingVisibility.at(-1),
+            false,
+            "agent_end leaves Aurora as the sole visible work indicator",
+          );
+          await lifecycleHarness.runHooks(
+            "agent_settled",
+            {},
+            lifecycleContext,
+          );
+          eq(renderActivity(), "", "agent_settled alone clears normal activity");
+
+          // A transient provider failure produces agent_end before Pi waits and
+          // starts the retry. Neither boundary may create an idle gap.
+          await lifecycleHarness.runHooks("agent_start", {}, lifecycleContext);
+          clock += 3_000;
+          await lifecycleHarness.runHooks("agent_end", {}, lifecycleContext);
+          assert(
+            renderActivity().includes("DENKT NACH") &&
+              renderActivity().includes("3s"),
+            "agent_end keeps retry activity and its timer visible while Pi prepares the next run",
+          );
+          await lifecycleHarness.runHooks("agent_start", {}, lifecycleContext);
+          assert(
+            renderActivity().includes("DENKT NACH"),
+            "the retry's next agent run has no idle-widget gap",
+          );
+          await lifecycleHarness.runHooks(
+            "agent_settled",
+            {},
+            lifecycleContext,
+          );
+          eq(renderActivity(), "", "the retried turn clears only after settling");
+
+          // Overflow recovery compacts between loops. Aurora has no synthetic
+          // compaction state, so existing activity must survive both events.
+          await lifecycleHarness.runHooks("agent_start", {}, lifecycleContext);
+          await lifecycleHarness.runHooks(
+            "message_update",
+            { assistantMessageEvent: { type: "text_delta" } },
+            lifecycleContext,
+          );
+          clock += 3_000;
+          await lifecycleHarness.runHooks("agent_end", {}, lifecycleContext);
+          await lifecycleHarness.runHooks(
+            "session_before_compact",
+            { reason: "overflow", willRetry: true },
+            lifecycleContext,
+          );
+          await lifecycleHarness.runHooks(
+            "session_compact",
+            { reason: "overflow", willRetry: true },
+            lifecycleContext,
+          );
+          assert(
+            renderActivity().includes("ANTWORTET") &&
+              renderActivity().includes("3s"),
+            "compaction after agent_end retains the active response widget and timer",
+          );
+          await lifecycleHarness.runHooks("agent_start", {}, lifecycleContext);
+          assert(
+            renderActivity().includes("DENKT NACH"),
+            "the post-compaction agent run remains active",
+          );
+          await lifecycleHarness.runHooks(
+            "agent_settled",
+            {},
+            lifecycleContext,
+          );
+          eq(
+            renderActivity(),
+            "",
+            "the post-compaction turn clears only after settling",
+          );
+
+          // agent_end must not discard an in-flight foreground subagent. The
+          // terminal settle boundary remains responsible for that cleanup.
+          await lifecycleHarness.runHooks("agent_start", {}, lifecycleContext);
+          await lifecycleHarness.runHooks(
+            "tool_execution_start",
+            {
+              toolCallId: "lifecycle-subagent",
+              toolName: "subagent",
+              args: { agent: "lifecycle-worker" },
+            },
+            lifecycleContext,
+          );
+          await lifecycleHarness.runHooks("agent_end", {}, lifecycleContext);
+          assert(
+            renderActivity().includes("lifecycle-worker"),
+            "agent_end retains visible foreground subagent activity",
+          );
+          await lifecycleHarness.runHooks(
+            "agent_settled",
+            {},
+            lifecycleContext,
+          );
+          eq(
+            renderActivity(),
+            "",
+            "agent_settled clears foreground subagent activity",
+          );
+
+          // Final provider errors and a user abort follow the same terminal
+          // contract: their agent_end is not an Aurora completion signal.
+          for (const outcome of ["provider error", "user abort"]) {
+            await lifecycleHarness.runHooks(
+              "agent_start",
+              {},
+              lifecycleContext,
+            );
+            clock += 2_000;
+            await lifecycleHarness.runHooks(
+              "agent_end",
+              { outcome },
+              lifecycleContext,
+            );
+            assert(
+              renderActivity().includes("DENKT NACH") &&
+                renderActivity().includes("2s"),
+              `${outcome} remains active with its timer until agent_settled`,
+            );
+            await lifecycleHarness.runHooks(
+              "agent_settled",
+              {},
+              lifecycleContext,
+            );
+            eq(
+              renderActivity(),
+              "",
+              `${outcome} clears only at agent_settled`,
+            );
+          }
+
+          // A tool followed by assistant text switches presentation normally;
+          // agent_end keeps that final response visible until it settles.
+          await lifecycleHarness.runHooks("agent_start", {}, lifecycleContext);
+          await lifecycleHarness.runHooks(
+            "tool_execution_start",
+            { toolCallId: "lifecycle-tool", toolName: "read", args: {} },
+            lifecycleContext,
+          );
+          assert(
+            renderActivity().includes("ARBEITET"),
+            "a tool call shows Tool activity",
+          );
+          await lifecycleHarness.runHooks(
+            "tool_execution_end",
+            { toolCallId: "lifecycle-tool", toolName: "read" },
+            lifecycleContext,
+          );
+          await lifecycleHarness.runHooks(
+            "message_update",
+            { assistantMessageEvent: { type: "text_delta" } },
+            lifecycleContext,
+          );
+          assert(
+            renderActivity().includes("ANTWORTET"),
+            "assistant text after a tool call shows Responding activity",
+          );
+          clock += 1_000;
+          await lifecycleHarness.runHooks("agent_end", {}, lifecycleContext);
+          assert(
+            renderActivity().includes("ANTWORTET") &&
+              renderActivity().includes("1s"),
+            "agent_end does not hide tool-and-text activity or stop its timer",
+          );
+          await lifecycleHarness.runHooks(
+            "agent_settled",
+            {},
+            lifecycleContext,
+          );
+          eq(
+            renderActivity(),
+            "",
+            "tool-and-text activity clears at agent_settled",
+          );
+        } finally {
+          Date.now = originalNow;
+          await lifecycleHarness.runHooks(
+            "session_shutdown",
+            {},
+            lifecycleContext,
+          );
+        }
+      }
 
       await harness.runHooks("session_shutdown", {}, context);
       eq(harness.widgets.size, 0, "Aurora removes its widget on shutdown");

@@ -896,8 +896,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       retainAsyncActivity(ctx);
       return;
     }
-    // Text is still part of the active turn. Only agent_end/agent_settled may
-    // clear this surface; a first text_delta must never erase it.
+    // Text is still part of the active turn. Only agent_settled may clear this
+    // surface; a first text_delta must never erase it.
     updateActivity(ctx, {
       kind: "responding",
     });
@@ -912,7 +912,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     noteRelevantActivity();
   });
 
-  const settle = (_event: unknown, ctx: ExtensionContext) => {
+  // Pi 0.84.1 emits agent_end after each individual agent loop. Retry,
+  // compaction, and queued continuations can all start another loop after it;
+  // agent_settled is the sole terminal lifecycle event for Aurora.
+  pi.on("agent_settled", (_event, ctx) => {
     turnSettledWhileAsync = true;
     activeTools.clear();
     foregroundSubagents.clear();
@@ -922,8 +925,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       return;
     }
     updateActivity(ctx, { kind: "idle" });
-  };
-  pi.on("agent_end", settle);
-  pi.on("agent_settled", settle);
+  });
   pi.on("session_shutdown", (_event, ctx) => disposeSession(ctx));
 }
