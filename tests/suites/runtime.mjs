@@ -1389,8 +1389,8 @@ export const runtimeSections = {
       // -- verificationStatus ------------------------------------------------
       eq(
         statusOf(cleanSnapshot, {}, ["typecheck"]),
-        "clean",
-        "a clean workspace is clean without a check",
+        "unchanged",
+        "an unmodified workspace reports unchanged, never a passed check",
       );
       eq(
         statusOf(changedSnapshot, {}, ["typecheck"]),
@@ -1827,8 +1827,8 @@ export const runtimeSections = {
         );
         eq(
           latestStatus(harness, "verification"),
-          "Verify: clean",
-          "agent_settled publishes a compact clean technical status",
+          "Verify: unchanged",
+          "agent_settled publishes the unchanged workspace state, not a verdict",
         );
 
         writeFileSync(
@@ -3511,9 +3511,9 @@ export const runtimeSections = {
         );
         assert(
           !line(45, {
-            statuses: new Map([["verification", "Verify: clean"]]),
-          }).includes("clean"),
-          "a clean workspace does not spend compact footer space",
+            statuses: new Map([["verification", "Verify: unchanged"]]),
+          }).includes("unchanged"),
+          "an unchanged workspace does not spend compact footer space",
         );
         assert(
           line(100, {

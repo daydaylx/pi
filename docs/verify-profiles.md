@@ -48,9 +48,9 @@ automatischen Testlauf noch eine Completion- oder Planphase. Die Anzeige kann
 über `verificationStatus.enabled` in der Setup-Konfiguration deaktiviert werden.
 
 Nur ein `project_check`-Aufruf des deklarierten Pflichtprofils aktualisiert
-diesen Status. Ein direkter `bash`-Lauf des gleichen Befehls — auch über den
-separaten `verify`-Tool oder aus einem Subagenten heraus (`verifier` besitzt
-kein `project_check`) — lässt den Footer bei `changed_unverified` stehen,
+diesen Status. Ein direkter `bash`-Lauf des gleichen Befehls — oder ein Lauf
+aus einem Subagenten heraus (`verifier` besitzt kein `project_check`) — lässt
+den Footer bei `changed_unverified` stehen,
 selbst wenn der Lauf lokal grün war. Das ist keine Ungenauigkeit, sondern
 Konsequenz aus „Akkumulation nur bei identischem Snapshot" unten: nur
 `project_check` schreibt in den Ledger.

@@ -18,9 +18,11 @@
   versionierten Workspace-Snapshot. Er erfasst `HEAD`, staged, unstaged und
   untracked Änderungen, Renames und Deletes und speichert keine Patches,
   Dateiinhalte oder absoluten Pfade.
-- `verify` bleibt eine feste Setup-Prüfung; `project_check` führt nur
-  explizit angeforderte, vertrauensgebundene Projektprofile aus. Beide sind
-  keine Abschlussbedingungen.
+- `project_check` ist der einzige Weg zur vollständigen Projektverifikation
+  und der einzige, der Footer und Ledger fortschreibt. Das `verify`-Tool
+  bietet nur noch die schnellen Teilprüfungen `typecheck` und `test` an;
+  vorher boten beide denselben Befehl an, wovon aber nur `project_check` den
+  Status aktualisierte. Keines von beiden ist eine Abschlussbedingung.
 - CI-`verify` benötigt vollständige Git-Historie (`fetch-depth: 0`), weil
   `benchmarks/harness/p4-manifest.json` einen Referenz-Commit gegen die
   lokale Historie prüft; ein flacher Checkout ließ CI unabhängig von
@@ -111,9 +113,8 @@ _Keine offenen Fragen._
   `AGENTS.md`.
 - Nach relevanten Änderungen läuft `npm --prefix npm run verify`. Nur ein
   `project_check`-Aufruf des Pflichtprofils `verify` aktualisiert den
-  Footer/Ledger — ein reiner `bash`-Lauf desselben Befehls (auch über den
-  `verify`-Tool oder aus `verifier` heraus) tut das nicht (siehe
-  `docs/verify-profiles.md`).
+  Footer/Ledger — ein reiner `bash`-Lauf desselben Befehls oder ein Lauf aus
+  `verifier` heraus tut das nicht (siehe `docs/verify-profiles.md`).
 - `npm run test:runtime` ist bewusst kein Teil von `verify`/CI: es prüft eine
   lokal gepatchte Runtime unter einem entwicklerspezifischen Pfad
   (`PI_RUNTIME_ROOT`), den kein CI-Runner besitzt (siehe

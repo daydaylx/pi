@@ -14,7 +14,7 @@
 import type { WorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 
 export type VerificationStatus =
-  | "clean"
+  | "unchanged"
   | "changed_unverified"
   | "verified"
   | "checks_failed"
@@ -200,7 +200,10 @@ export function verificationStatus(
   options: VerificationStatusOptions,
 ): VerificationStatus {
   if (!snapshot) return "checks_unavailable";
-  if (snapshot.changedFiles.length === 0) return "clean";
+  // Nothing has changed since HEAD. That is a statement about the workspace,
+  // not about verification: no check has necessarily ever run here. It must
+  // never read as a passed check, hence "unchanged" rather than "clean".
+  if (snapshot.changedFiles.length === 0) return "unchanged";
 
   const last = ledger.lastRequiredCheck;
   const current =
@@ -234,8 +237,8 @@ export function verificationStatus(
 
 export function formatVerificationStatus(status: VerificationStatus): string {
   switch (status) {
-    case "clean":
-      return "Verify: clean";
+    case "unchanged":
+      return "Verify: unchanged";
     case "changed_unverified":
       return "Verify: changed_unverified";
     case "verified":

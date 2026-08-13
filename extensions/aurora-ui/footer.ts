@@ -128,14 +128,14 @@ function verificationState(input: FooterInput): string | null {
 
 function verificationTone(state: string): Tone {
   if (state === "verified") return "success";
-  if (state === "clean") return "muted";
+  if (state === "unchanged") return "muted";
   if (state === "checks_failed") return "error";
   return "warning";
 }
 
 /** Only an unproven or failing workspace is worth defending space for. */
 function verificationNeedsAttention(state: string | null): boolean {
-  return state !== null && state !== "clean" && state !== "verified";
+  return state !== null && state !== "unchanged" && state !== "verified";
 }
 
 function lspState(input: FooterInput): string {

@@ -113,10 +113,16 @@ npm --prefix npm run verify
 grüner Lauf deckt damit dieselben Abhängigkeitsbefunde ab wie CI.
 
 Nur ein `project_check`-Aufruf des deklarierten Pflichtprofils (`verify`,
-siehe `.pi/verify.json`) aktualisiert den Verifikations-Footer. Ein direkter
-`bash`-Lauf derselben Befehle — auch über den `verify`-Tool oder aus einem
-Subagenten heraus — lässt den Footer bei `changed_unverified` stehen, selbst
-wenn der Lauf lokal grün war.
+siehe `.pi/verify.json`) aktualisiert den Verifikations-Footer, und
+`project_check` ist auch der einzige Weg, diese vollständige Verifikation
+überhaupt auszulösen. Das `verify`-Tool bietet nur noch die schnellen
+Teilprüfungen `typecheck` und `test`. Ein direkter `bash`-Lauf derselben
+Befehle oder ein Lauf aus einem Subagenten heraus lässt den Footer bei
+`changed_unverified` stehen, selbst wenn der Lauf lokal grün war.
+
+Ein unveränderter Workspace meldet `unchanged`. Das ist eine Aussage über den
+Arbeitsbaum, nicht über eine bestandene Prüfung — vorher hieß dieser Zustand
+`clean` und las sich wie ein Prüfergebnis.
 
 `npm run test:runtime` (siehe „Lokale Laufzeitdaten" unten) ist bewusst kein
 Teil von `verify`/CI: es prüft die explizit gewählte oder lokal erkannte

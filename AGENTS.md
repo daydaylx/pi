@@ -69,7 +69,7 @@ Checkpoint-Ablauf im Skill `context-checkpoint`, Subagenten-Details in
   Testergebnisse auf Zusammenfassung und relevante Fehlerstellen beschränken.
 - Einen vollständigen Testlauf nicht ohne Änderung des geprüften Stands
   wiederholen. Nach einem gezielten Test stattdessen nur den noch fehlenden
-  kanonischen `verify`- oder `project_check`-Nachweis ausführen.
+  kanonischen `project_check`-Nachweis ausführen.
 - Gekürzte Ausgaben sichtbar kennzeichnen. `!!command` nur verwenden, wenn der
   Nutzer die Ausgabe sehen soll, das Modell sie aber nicht weiter benötigt.
 - Dauerregeln in `AGENTS.md`, ausführliche Referenz in `docs/`, dauerhaftes
