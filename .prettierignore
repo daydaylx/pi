@@ -12,6 +12,10 @@ git/
 auth.json
 models-store.json
 run-history.jsonl
+# settings.json gehört zur Laufzeit: Pi schreibt sie bei jeder Änderung über
+# die UI (Thinking-Level, Modell, Theme) selbst zurück — ohne abschließenden
+# Zeilenumbruch. Als Formatprüfling machte sie `npm run verify` allein durch
+# normale Benutzung rot.
 openrouter-free-models.json
 *.log
 *.bak-*
@@ -25,3 +29,4 @@ benchmarks/tasks/*/fixture/
 # wurden — sie sind Aufzeichnung, nicht gepflegter Bestand.
 docs/archive/
 .agent/
+settings.json
