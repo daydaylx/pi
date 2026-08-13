@@ -73,6 +73,13 @@
   Ripgrep-Aufrufe; Projekt-Skripte, `project_check` und `subagent` sind
   gesperrt. `yolo` bleibt die ausdrückliche Ausnahme
   (`docs/decisions/012`).
+- Das Compaction-Budget ist gemessen, nicht geschätzt (`docs/decisions/010`):
+  Reserve 49152, Recent 20000, Auslösung bei 81,9 % des Fensters. Entscheidend
+  ist, dass `reserveTokens` **zwei** Dinge zugleich steuert — die Schwelle und
+  das Summary-Budget (`0,8 × reserve`). Die frühere Reserve ließ nur 32768
+  Tokens Luft, während 25,3 % realer Turns um mehr als das wuchsen; ein
+  Überlauf ist nur einmal wiederherstellbar, danach ist der Turn verloren.
+  Werte sind im Runtime-Test gegen einen stillen Rückbau festgenagelt.
 
 ## Nicht-Ziele
 
@@ -94,7 +101,18 @@
   sind grün.
 - Für P2 liegen noch keine konkret priorisierten Befunde zu Restkomplexität,
   Dokumentation oder Knip-Regeln vor; diese müssen vor einer Bereinigung
-  gezielt erhoben werden.
+  gezielt erhoben werden. Belegt ist bislang nur `tests/suites/runtime.mjs`
+  (5276 Zeilen); die Aufteilung kann die vorhandene `SECTION_SUITES`-Registry
+  als Schnittkante nutzen.
+- Die lokale Toolchain weicht bewusst vom Pin ab: Host `node 22.23.2` /
+  `npm 10.9.8` gegen `22.22.2` / `10.9.7` in `.nvmrc` und `engines`. Es ist
+  keine Versionsverwaltung installiert; es ist ein reiner Patch-Level-Unterschied
+  und alle Suiten sowie CI sind darauf grün. Akzeptiert, bis ein Befund das
+  Gegenteil zeigt — npm meldet dazu `EBADENGINE`-Warnungen.
+- Der Live-Smoke ist aus einer nicht-interaktiven Umgebung nicht durchführbar.
+  Aurora-Sichtbarkeit, Shift+Tab, der reale Plan→Work-Handoff und ein echter
+  Subagent-Aufruf bleiben ohne authentifizierte TTY-Sitzung unbelegt
+  (`docs/manual-smoke-checklist.md`).
 
 ## Offene Risiken
 
@@ -122,8 +140,10 @@ _Keine offenen Fragen._
 
 ## Aktuelle Prioritäten
 
-- P2: Konkrete Befunde zu Restkomplexität, Dokumentation und Knip-Regeln
-  erheben und daraus gezielte Folgearbeiten ableiten.
+- Der Live-Smoke ist der einzige offene P0-Punkt (`#137`). Ohne ihn bleibt der
+  Stand `BEDINGT STABIL`, unabhängig davon, wie grün Verifikation und CI sind.
+- P2 erst danach: Konkrete Befunde zu Restkomplexität, Dokumentation und
+  Knip-Regeln erheben und daraus gezielte Folgearbeiten ableiten.
 - Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA. Vor jeder
   Pin-Änderung die Erreichbarkeit manuell prüfen; die lokale Test-Suite bleibt
   bewusst offline.

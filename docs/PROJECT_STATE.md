@@ -53,24 +53,67 @@ Umgesetzte Phasen:
   `changed_since_pass` bleibt bei einem vorher erfolgreichen Profil;
   Baseline-Maps, Pfadheuristiken und kausale Labels sind entfernt.
 
+Abgeschlossene P0-Stabilisierung (`#137`–`#142`, Stand `05fbd01`). Jeder Verdacht
+wurde vor einer Korrektur reproduziert; nicht reproduzierbare wurden als solche
+geschlossen:
+
+- **Fork-Pin-Rückschritt entfernt** (`#137`): Der Repin auf den damaligen
+  `main`-HEAD war ein Rückschritt um drei Commits (`behind_by: 3`,
+  `ahead_by: 0`) und entfernte den Sicherheitsfix `170a2808` aus der
+  Auslieferung — am gepinnten Stand lief `acceptance.ts` weiterhin über
+  `shell: true`. Die Pin-Regel im Ledger verlangt jetzt einen Lineage-Vergleich,
+  nicht nur Erreichbarkeit.
+- **Aurora-Lifecycle** (`#138`): Ein gemeinsamer `settle`-Handler auf `agent_end`
+  **und** `agent_settled` ließ Aurora mitten im Turn auf Leerlauf fallen, weil
+  Pi 0.84.1 `agent_end` nach jedem einzelnen Agentenlauf sendet. Nur noch
+  `agent_settled` beendet die Anzeige. Vorher 7 fokussierte Fehlschläge.
+- **Plan-Handoff** (`#139`): Gegen `04faefa` schlagen 28 Assertions fehl —
+  persistierte Custom-Message, Plandatei beim _Start_ des Planning-Turns
+  gelöscht, Teilplan nach Fehler/Abbruch. Zusätzlich entfällt der inhaltsleere
+  `[PI WORKMODUS]`-Block bei jedem Work-Turn.
+- **Verifikationsoberfläche** (`#140`): `setup.json` und `.pi/verify.json` boten
+  denselben Befehl über zwei Tools an, aber nur `project_check` schreibt den
+  Ledger. `clean` hieß „keine Änderungen" und las sich wie ein Prüfergebnis;
+  jetzt `unchanged`.
+- **Compaction-Budget** (`#141`): Gegen 12 reale Transkripte gemessen statt
+  geschätzt (`docs/decisions/010`).
+- **Permission-Policy** (`#142`): Vollständig charakterisiert, **keine**
+  fehlerhafte Entscheidung gefunden, daher keine Policy geändert. Zwei in der
+  README zugesicherte Eigenschaften waren ungetestet und sind es jetzt nicht
+  mehr.
+- **Test-Race behoben**: Ein Enkelprozess bekam 100 ms für seine PID-Datei, die
+  dann bedingungslos gelesen wurde — unter Parallellast ENOENT und damit ein
+  rotes `verify` ohne Codefehler.
+
 ## Letzte Verifikation
 
-- Hauptrepo: `npm run verify` vollständig grün — Prettier, Typecheck, Knip,
-  alle Suiten und die Coverage-Gates. `extensions/aurora-ui/index.ts` liegt bei
-  38/38 Funktionen (100 %); die Schwelle wurde nicht gesenkt und keine Datei
-  ausgeschlossen.
+Stand `05fbd01`.
+
+- Hauptrepo: `npm --prefix npm run verify` Exit 0 — Prettier, Typecheck, Knip,
+  Coverage-Gates, Runtime-Patches und Dependency-Audit. 1314 Tests: runtime 811,
+  workflow-mode 189, LSP 182, UI 77, diff 15, Patches 37, Audit 3.
+  `git diff --check` Exit 0, Arbeitsbaum sauber.
+- `extensions/aurora-ui/index.ts` liegt bei **37/37 Funktionen (100 %)**. Die
+  Zählung sank von 38, weil der Aurora-Fix die gemeinsame `settle`-Closure
+  entfernt hat; die Schwelle wurde nicht gesenkt und keine Datei ausgeschlossen.
+- CI grün: Läufe `31744481889` und `31744759696` auf `main`.
 - Fork: `test:unit` 1151/1151, `test:integration` 492/492, `test:e2e` 1/1 grün.
   `npm run typecheck` bleibt dort vorbestehend rot (810 Fehler, davon 49 in
-  `src/`); durch diese Arbeit kamen keine hinzu, fünf in
-  `src/extension/index.ts` sind entfallen.
-- Manuell geprüft: `18c4851fe19e6635e42b7d8911b8a91e1747f7f9` ist über die
-  GitHub-API erreichbar, der alte Pin antwortet mit `422 No commit found`.
+  `src/`); durch diese Arbeit kamen keine hinzu.
+- Manuell geprüft: `settings.json` pinnt
+  `18c4851fe19e6635e42b7d8911b8a91e1747f7f9`; dieser SHA ist über die GitHub-API
+  erreichbar und dauerhaft über `agent/simplify-and-stabilize` referenziert.
+- Nicht ausgeführt: der Live-Smoke. Aurora im echten Terminal, Shift+Tab, der
+  reale Plan→Work-Handoff, `project_check` gegen den echten Footer und ein
+  echter Investigator-Aufruf sind unbelegt (`docs/manual-smoke-checklist.md`).
 
 ## Nächste Schritte
 
-- Eine echte Greenfield-Installation auf einer frischen Maschine
-  (`npm run install:user` plus Paketauflösung des neuen Pins) gegen den
-  gepinnten Fork durchführen; im Repo ist bislang nur der
-  Installer-Integrationstest abgedeckt.
-- Restkomplexität und Knip-Regeln im P2-Cleanup weiterführen.
-- Nur belegte Restbefunde dokumentieren.
+- Live-Smoke nach `docs/manual-smoke-checklist.md` in einer authentifizierten
+  Sitzung durchführen. Erst danach darf `#137` geschlossen und das Urteil von
+  `BEDINGT STABIL` auf `STABIL` gehoben werden.
+- `main` des Forks per Fast-Forward auf `18c4851f` nachziehen, damit der
+  Default-Branch den Sicherheitsfix trägt und ein künftiger Repin auf
+  „main HEAD" keinen Rückschritt mehr auslöst.
+- `tests/suites/runtime.mjs` (5276 Zeilen) entlang der vorhandenen
+  `SECTION_SUITES`-Registry aufteilen — P2, erst nach dem Live-Smoke.
