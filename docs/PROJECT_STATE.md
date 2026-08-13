@@ -11,7 +11,10 @@ Umgesetzte Phasen:
   scheiterte daran. Die Arbeit wurde vom letzten erreichbaren Stand
   (`170a2808`, `agent/simplify-and-stabilize`) fortgesetzt und als
   `18c4851fe19e6635e42b7d8911b8a91e1747f7f9` gepusht. `settings.json` pinnt
-  diesen erreichbaren, vollständigen SHA.
+  diesen erreichbaren, vollständigen SHA. Ein späterer Repin auf den damaligen
+  `main`-HEAD (`2934a93f`) hatte den Pin um drei Commits zurückgesetzt und
+  dabei den Sicherheitsfix `170a2808` sowie die Tool-Surface-Trennung wieder
+  aus der Auslieferung entfernt; das ist zurückgenommen.
 - **Reduzierte Tool-Surface entkoppelt**: Der Fork kennt jetzt
   `toolSchemaMode: "full" | "harness"` getrennt von `toolDescriptionMode`.
   `action` ist ein geschlossenes Enum (`list`, `status`, `stop`, `interrupt`),

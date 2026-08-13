@@ -126,6 +126,12 @@ _Keine offenen Fragen._
 - Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA. Vor jeder
   Pin-Änderung die Erreichbarkeit manuell prüfen; die lokale Test-Suite bleibt
   bewusst offline.
+- Erreichbarkeit allein genügt nicht: Ein neuer Pin muss den alten auch
+  enthalten. `main` des Forks ist nicht automatisch der neueste Stand — die
+  Arbeit liegt teils auf Themenbranches. Vor jeder Pin-Änderung
+  `compare/<alt>...<neu>` prüfen und nur setzen, wenn `behind_by` 0 ist.
+  Ein Rückschritt hat schon einmal unbemerkt einen Sicherheitsfix aus der
+  Auslieferung entfernt.
 
 ## Verworfene Optionen
 
