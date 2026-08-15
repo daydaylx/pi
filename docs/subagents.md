@@ -31,7 +31,7 @@ besitzt `edit` oder `write`. `debugger` und `verifier` dürfen technisch Shell
 ausführen, ihre Profile verbieten aber ausdrücklich Projektänderungen; der
 Hauptagent bleibt alleiniger regulärer Patch-Eigentümer.
 
-`agents/verifier.md` läuft auf `anthropic/claude-sonnet-5` mit
+`agents/verifier.md` läuft auf `zai/glm-5.2` mit
 `openai-codex/gpt-5.6-terra` als `fallbackModels`. Beide Modell-IDs stehen in
 `settings.enabledModels`, und der Fork wertet `fallbackModels` aus; sonst wäre
 der Fallback eine Angabe ohne Wirkung.

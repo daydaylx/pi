@@ -2,7 +2,7 @@
 name: verifier
 description: "Use after a risky implementation — security, permissions, plan mode, workflow or activity state, public API or schema, install/upgrade, verification logic, or a high blast radius — to independently verify requirements, scope, diff, tests, and regressions. Diff size alone is not a reason. Do not use as a general style reviewer or let it repair findings. Read-only for project files."
 tools: read, grep, find, ls, bash
-model: anthropic/claude-sonnet-5
+model: zai/glm-5.2
 fallbackModels: openai-codex/gpt-5.6-terra
 defaultContext: fresh
 inheritProjectContext: true
