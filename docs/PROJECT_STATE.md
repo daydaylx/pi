@@ -110,6 +110,17 @@ Hauptrepo mit Fork-Pin `0107312`.
 - Nicht ausgeführt: der Live-Smoke. Aurora im echten Terminal, Shift+Tab, der
   reale Plan→Work-Handoff, `project_check` gegen den echten Footer und ein
   echter Investigator-Aufruf sind unbelegt (`docs/manual-smoke-checklist.md`).
+- **2026-08-15, Repin auf `33b4ff1`**: Ein Verifier-Lauf (read-only per
+  Tool-Profil) wurde bei Task-Text mit Wörtern wie "security"/"migration" über
+  `inferLevel()`s risky-Klausel automatisch auf Acceptance-Level `reviewed`
+  hochgestuft, obwohl die Rolle `reviewer`, auf die `reviewed` rekursiv
+  verweist, hier gar nicht existiert — Folge war ein dauerhaftes, nie
+  aufgelöstes `needs-parent-decision`-Finding trotz erfolgreichem Lauf.
+  `src/runs/shared/acceptance.ts` gated die risky-Wortklausel jetzt auf
+  `!readOnlyAgent` und nimmt `verifier` in den `readOnlyAgent`-Regex auf;
+  Ausführungskontext-Risiko (`async`/`dynamic`) bleibt für alle Rollen
+  scharf. `test:unit` 1153/1153 (neuer Fall ergänzt). `npm run typecheck`
+  bleibt im Fork weiterhin vorbestehend rot, unverändert durch diesen Fix.
 
 ## Nächste Schritte
 
