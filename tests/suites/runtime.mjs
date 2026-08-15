@@ -4905,6 +4905,19 @@ export const runtimeSections = {
         ctx,
       );
       await harness.runHooks(
+        "message_update",
+        {
+          assistantMessageEvent: {
+            type: "error",
+            error: {
+              errorMessage:
+                'Error: 403: {"message":"Access to model denied","type":"AccessDenied.Unpurchased"}',
+            },
+          },
+        },
+        ctx,
+      );
+      await harness.runHooks(
         "tool_execution_start",
         { toolName: "bash", toolCallId: "tool-1", args: {} },
         ctx,
@@ -4931,8 +4944,8 @@ export const runtimeSections = {
       );
       eq(
         failures.length,
-        2,
-        "HTTP and network failures are observed separately",
+        3,
+        "HTTP, network, and model access failures are observed separately",
       );
       eq(
         failures[0]?.data.errorCode,
@@ -4943,6 +4956,16 @@ export const runtimeSections = {
         failures[1]?.data.errorCode,
         "ECONNRESET",
         "network failure keeps code only",
+      );
+      eq(
+        failures[2]?.data.errorClass,
+        "auth",
+        "model access denied error is classified as auth",
+      );
+      eq(
+        failures[2]?.data.errorCode,
+        "MODEL_ACCESS_DENIED",
+        "model access denied error code is MODEL_ACCESS_DENIED",
       );
       const boundaries = harness.appended.filter(
         (entry) => entry.customType === "resilience.compaction-boundary",
@@ -4965,7 +4988,7 @@ export const runtimeSections = {
       );
       eq(
         settled?.data.observedFailureCount,
-        2,
+        3,
         "settled turn preserves observed failures",
       );
 

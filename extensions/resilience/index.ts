@@ -64,6 +64,13 @@ function classifyFailure(errorMessage: string | undefined): {
       errorCode: code,
     };
   }
+  if (
+    /\b(AccessDenied|Unpurchased|eligible for using the model|access to model denied)\b/i.test(
+      message,
+    )
+  ) {
+    return { errorClass: "auth", errorCode: "MODEL_ACCESS_DENIED" };
+  }
   const status = message.match(/\b([45]\d\d)\b/)?.[1];
   if (status) return { errorClass: "http", errorCode: `HTTP_${status}` };
   if (/\b(auth|unauthori[sz]ed|forbidden|api key)\b/i.test(message)) {
