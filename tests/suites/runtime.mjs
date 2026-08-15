@@ -1253,27 +1253,21 @@ export const runtimeSections = {
         const rejectedContext = rejectedHarness.makeContext();
         const rejectedVerify = rejectedHarness.tools.get("verify");
         if (rejectedVerify) {
-          const rejected = await rejectedVerify.execute(
-            "verify-spawn-failure",
-            { check: "typecheck" },
-            undefined,
-            undefined,
-            rejectedContext,
-          );
-          eq(
-            rejected.isError,
-            true,
-            "verify reports executor startup failures",
-          );
-          eq(
-            rejected.details.exitCode,
-            null,
-            "verify preserves missing exit code",
-          );
-          assert(
-            rejected.content[0]?.text.includes("spawn ENOENT"),
-            "verify returns the bounded executor error as tool output",
-          );
+          try {
+            await rejectedVerify.execute(
+              "verify-spawn-failure",
+              { check: "typecheck" },
+              undefined,
+              undefined,
+              rejectedContext,
+            );
+            assert(false, "verify reports executor startup failures");
+          } catch (error) {
+            assert(
+              error instanceof Error && error.message.includes("spawn ENOENT"),
+              "verify throws the bounded executor error as tool output",
+            );
+          }
         }
         const killedHarness = createHarness();
         setupCore.default(killedHarness.api, {
@@ -1286,18 +1280,24 @@ export const runtimeSections = {
         });
         const killedVerify = killedHarness.tools.get("verify");
         if (killedVerify) {
-          const killedResult = await killedVerify.execute(
-            "verify-killed",
-            { check: "typecheck" },
-            undefined,
-            undefined,
-            killedHarness.makeContext(),
-          );
-          eq(
-            killedResult.isError,
-            true,
-            "verify never reports a killed process as successful",
-          );
+          try {
+            await killedVerify.execute(
+              "verify-killed",
+              { check: "typecheck" },
+              undefined,
+              undefined,
+              killedHarness.makeContext(),
+            );
+            assert(
+              false,
+              "verify never reports a killed process as successful",
+            );
+          } catch (error) {
+            assert(
+              error instanceof Error,
+              "verify throws on a killed process instead of returning success",
+            );
+          }
         }
         if (trackedExec) {
           const trailingOutput = await trackedExec.trackedExec(
@@ -1384,18 +1384,24 @@ export const runtimeSections = {
         }
         const projectCheck = harness.tools.get("project_check");
         if (projectCheck) {
-          const missing = await projectCheck.execute(
-            "project-check-missing-config",
-            { profile: "tests" },
-            undefined,
-            undefined,
-            context,
-          );
-          eq(
-            missing.isError,
-            true,
-            "project_check reports a missing .pi/verify.json without guessing commands",
-          );
+          try {
+            await projectCheck.execute(
+              "project-check-missing-config",
+              { profile: "tests" },
+              undefined,
+              undefined,
+              context,
+            );
+            assert(
+              false,
+              "project_check reports a requested profile it cannot run without guessing commands",
+            );
+          } catch (error) {
+            assert(
+              error instanceof Error,
+              "project_check throws on a requested profile it cannot run without guessing commands",
+            );
+          }
         }
         assertNoGlobalChrome(harness, "setup core owns no TUI chrome");
       } finally {
@@ -1937,7 +1943,7 @@ export const runtimeSections = {
         const partial = await runCheck("verification-status-partial", {
           profile: "typecheck",
         });
-        eq(partial.isError, false, "incomplete coverage is not a tool error");
+        assert(!partial.isError, "incomplete coverage is not a tool error");
         eq(
           partial.details.verification.missingRequiredIds.join(","),
           "tests",
@@ -1981,14 +1987,17 @@ export const runtimeSections = {
         // P0 regression: a blocking recommended failure and `verified` must
         // never describe the same run.
         lintFails = true;
-        const recommended = await runCheck("verification-status-recommended", {
-          profile: "lint",
-        });
-        eq(
-          recommended.isError,
-          true,
-          "a confirmed recommended failure is a tool error",
-        );
+        try {
+          await runCheck("verification-status-recommended", {
+            profile: "lint",
+          });
+          assert(false, "a confirmed recommended failure is a tool error");
+        } catch (error) {
+          assert(
+            error instanceof Error,
+            "a confirmed recommended failure throws a tool error",
+          );
+        }
         await harness.runHooks(
           "agent_settled",
           { type: "agent_settled" },
@@ -2007,9 +2016,8 @@ export const runtimeSections = {
         const vanishedBinary = await runCheck("verification-status-vanished", {
           profile: "lint",
         });
-        eq(
-          vanishedBinary.isError,
-          false,
+        assert(
+          !vanishedBinary.isError,
           "a missing recommended binary is a residual risk, not a tool error",
         );
         await harness.runHooks(
@@ -2547,9 +2555,8 @@ export const runtimeSections = {
           workspace,
           "project_check executes only at the bounded project cwd",
         );
-        eq(
-          result.isError,
-          false,
+        assert(
+          !result.isError,
           "successful required and advisory profiles pass",
         );
         eq(
@@ -2562,50 +2569,60 @@ export const runtimeSections = {
             !result.content[0].text.includes("do-not-leak"),
           "project_check redacts credential-like command arguments",
         );
-        const unknown = await tool.execute(
-          "project-check-unknown",
-          { profile: "does-not-exist" },
-          undefined,
-          undefined,
-          trusted,
-        );
-        eq(unknown.isError, true, "project_check rejects unknown profile IDs");
-        assert(
-          unknown.content[0].text.includes("Verfügbar: lint, typecheck"),
-          "unknown profile errors list available profile IDs",
-        );
-        const invalid = await tool.execute(
-          "project-check-ambiguous",
-          { profile: "lint", profiles: ["typecheck"] },
-          undefined,
-          undefined,
-          trusted,
-        );
-        eq(
-          invalid.isError,
-          true,
-          "project_check rejects ambiguous single-plus-list calls",
-        );
+        try {
+          await tool.execute(
+            "project-check-unknown",
+            { profile: "does-not-exist" },
+            undefined,
+            undefined,
+            trusted,
+          );
+          assert(false, "project_check rejects unknown profile IDs");
+        } catch (error) {
+          assert(
+            error instanceof Error &&
+              error.message.includes("Verfügbar: lint, typecheck"),
+            "unknown profile errors list available profile IDs",
+          );
+        }
+        try {
+          await tool.execute(
+            "project-check-ambiguous",
+            { profile: "lint", profiles: ["typecheck"] },
+            undefined,
+            undefined,
+            trusted,
+          );
+          assert(
+            false,
+            "project_check rejects ambiguous single-plus-list calls",
+          );
+        } catch (error) {
+          assert(
+            error instanceof Error,
+            "project_check throws on ambiguous single-plus-list calls",
+          );
+        }
       }
       const untrusted = harness.makeContext({ cwd: workspace, trusted: false });
       await harness.runHooks("session_start", {}, untrusted);
       if (tool) {
-        const result = await tool.execute(
-          "project-check-untrusted",
-          { profile: "typecheck" },
-          undefined,
-          undefined,
-          untrusted,
-        );
-        eq(
-          result.isError,
-          true,
-          "project_check refuses untrusted project profiles",
-        );
-        assert(
-          result.content[0].text.includes("vertrauten Projekten"),
-          "project_check explains the trust requirement",
-        );
+        try {
+          await tool.execute(
+            "project-check-untrusted",
+            { profile: "typecheck" },
+            undefined,
+            undefined,
+            untrusted,
+          );
+          assert(false, "project_check refuses untrusted project profiles");
+        } catch (error) {
+          assert(
+            error instanceof Error &&
+              error.message.includes("vertrauten Projekten"),
+            "project_check explains the trust requirement",
+          );
+        }
       }
       rmSync(workspace, { recursive: true, force: true });
     });

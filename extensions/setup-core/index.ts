@@ -23,7 +23,7 @@ import {
   type VerificationLedger,
   type VerificationStatus,
 } from "./verification-status.ts";
-import type { LoadedProfiles } from "./verify-profiles.ts";
+import type { LoadedProfiles, ProfileDiagnostic } from "./verify-profiles.ts";
 
 const CheckParams = Type.Object({
   check: Type.Union([Type.Literal("typecheck"), Type.Literal("test")]),
@@ -124,6 +124,30 @@ function coverageLine(
     return "Pflichtabdeckung: keine Pflichtprüfung deklariert (kein Lauf kann verifizieren).";
   const head = `Pflichtabdeckung: ${covered}/${total}`;
   return missing.length === 0 ? head : `${head} — offen: ${missing.join(", ")}`;
+}
+
+/**
+ * Signals a tool failure. The installed runtime resolves execute() with
+ * isError:false on every normal return and only marks the persisted
+ * ToolResult as an error when execute() throws
+ * (@earendil-works/pi-agent-core dist/agent-loop.js, executePreparedToolCall)
+ * — documented upstream behavior (earendil-works/pi-agent-core #1881,
+ * #5209), not a bug. A returned { isError: true } is silently ignored, so
+ * error paths must throw instead.
+ *
+ * The runtime's catch path also discards `details` (replaces it with `{}`),
+ * so anything worth keeping must be folded into `text` first.
+ */
+function toolError(
+  text: string,
+  diagnostics?: readonly ProfileDiagnostic[],
+): never {
+  const body = diagnostics?.length
+    ? `${text}\n\n${diagnostics
+        .map((d) => `  ${d.level.toUpperCase()}: ${d.message} (${d.source})`)
+        .join("\n")}`
+    : text;
+  throw new Error(body);
 }
 
 function readJson(path: string): Record<string, unknown> | undefined {
@@ -271,6 +295,11 @@ export default function setupCore(
           .filter(Boolean)
           .join("\n");
         const limited = limitTextOutput(combined || "(keine Ausgabe)");
+        if (result.code !== 0 || result.killed) {
+          toolError(
+            `${limited.text}\n\n(Exit-Code ${result.code === null ? "unbekannt" : result.code}${result.killed ? ", killed" : ""})`,
+          );
+        }
         return {
           content: [{ type: "text" as const, text: limited.text }],
           details: {
@@ -279,23 +308,13 @@ export default function setupCore(
             killed: result.killed,
             ...(limited.truncation ? { truncation: limited.truncation } : {}),
           },
-          isError: result.code !== 0 || result.killed,
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const limited = limitTextOutput(
           message || "Ausführung konnte nicht gestartet werden.",
         );
-        return {
-          content: [{ type: "text" as const, text: limited.text }],
-          details: {
-            check: params.check,
-            exitCode: null,
-            killed: false,
-            ...(limited.truncation ? { truncation: limited.truncation } : {}),
-          },
-          isError: true,
-        };
+        toolError(limited.text);
       }
     },
   });
@@ -312,64 +331,30 @@ export default function setupCore(
     async execute(_id, params, signal, _onUpdate, ctx) {
       const requested = requestedProfileIds(params as ProjectCheckParamsValue);
       if ("error" in requested) {
-        return {
-          content: [{ type: "text" as const, text: requested.error }],
-          details: { profiles: [] },
-          isError: true,
-        };
+        toolError(requested.error);
       }
 
       const loaded = loadVerifyProfiles(ctx.cwd, ctx.isProjectTrusted());
       const availableProfileIds = Object.keys(loaded.profiles).sort();
       if (!ctx.isProjectTrusted()) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: ".pi/verify.json wird nur in vertrauten Projekten ausgeführt.",
-            },
-          ],
-          details: {
-            profiles: [],
-            availableProfileIds: [],
-            diagnostics: loaded.diagnostics,
-          },
-          isError: true,
-        };
+        toolError(
+          ".pi/verify.json wird nur in vertrauten Projekten ausgeführt.",
+          loaded.diagnostics,
+        );
       }
       if (!loaded.source) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: "Kein Projekt-Prüfprofil definiert: .pi/verify.json fehlt. Dokumentation: docs/verify-profiles.md",
-            },
-          ],
-          details: {
-            profiles: [],
-            availableProfileIds,
-            diagnostics: loaded.diagnostics,
-          },
-          isError: true,
-        };
+        toolError(
+          "Kein Projekt-Prüfprofil definiert: .pi/verify.json fehlt. Dokumentation: docs/verify-profiles.md",
+          loaded.diagnostics,
+        );
       }
 
       const missingIds = requested.ids.filter((id) => !(id in loaded.profiles));
       if (missingIds.length > 0) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Unbekannte(s) Projekt-Prüfprofil(e): ${missingIds.join(", ")}. Verfügbar: ${availableProfileIds.join(", ") || "keine (Konfiguration prüfen)"}.`,
-            },
-          ],
-          details: {
-            profiles: [],
-            availableProfileIds,
-            diagnostics: loaded.diagnostics,
-          },
-          isError: true,
-        };
+        toolError(
+          `Unbekannte(s) Projekt-Prüfprofil(e): ${missingIds.join(", ")}. Verfügbar: ${availableProfileIds.join(", ") || "keine (Konfiguration prüfen)"}.`,
+          loaded.diagnostics,
+        );
       }
 
       // Capture before execution: a later workspace change must make this
@@ -453,6 +438,9 @@ export default function setupCore(
       const limited = limitTextOutput(
         `${text}\n\n${coverageLine(coverage.covered.length, coverage.total, coverage.missing)}`,
       );
+      if (evaluation.blocking) {
+        toolError(limited.text);
+      }
       return {
         content: [{ type: "text" as const, text: limited.text }],
         details: {
@@ -468,7 +456,6 @@ export default function setupCore(
           },
           ...(limited.truncation ? { truncation: limited.truncation } : {}),
         },
-        isError: evaluation.blocking,
       };
     },
   });
