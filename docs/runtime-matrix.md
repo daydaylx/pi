@@ -4,8 +4,8 @@
 | ------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | Pi-Runtime          | `0.84.2`                              | installiertes globales Paket und `pi --version`                      |
 | Pi-Dev-Abhängigkeit | `0.84.2`                              | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
-| Node.js             | `22.22.2`                             | `node --version`                                                     |
-| npm                 | `10.9.7`                              | `npm --version`                                                      |
+| Node.js             | `22.23.2`                             | `node --version`                                                     |
+| npm                 | `10.9.8`                              | `npm --version`                                                      |
 | Aurora UI           | lokales TypeScript                    | Typecheck, Lifecycle- und responsive Render-Tests                    |
 | Aurora-Theme        | lokales `aurora-night`                | Truecolor- und 256-Farb-Theme-Laden                                  |
 | Planmodus           | lokales TypeScript                    | Modus-, Prompt- und Permission-Grant-Tests                           |
