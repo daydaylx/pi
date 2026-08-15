@@ -2,8 +2,8 @@
 
 | Komponente          | Gepinnte Version / Wert               | Verifikation                                                         |
 | ------------------- | ------------------------------------- | -------------------------------------------------------------------- |
-| Pi-Runtime          | `0.84.1`                              | installiertes globales Paket und `pi --version`                      |
-| Pi-Dev-Abhängigkeit | `0.84.1`                              | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
+| Pi-Runtime          | `0.84.2`                              | installiertes globales Paket und `pi --version`                      |
+| Pi-Dev-Abhängigkeit | `0.84.2`                              | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
 | Node.js             | `22.22.2`                             | `node --version`                                                     |
 | npm                 | `10.9.7`                              | `npm --version`                                                      |
 | Aurora UI           | lokales TypeScript                    | Typecheck, Lifecycle- und responsive Render-Tests                    |
@@ -17,7 +17,7 @@
 ## Release-Gate
 
 `npm run verify` muss ohne bekannte Fehlschläge bestehen. Die installierte Pi-Runtime und
-die gepinnte Entwicklungsabhängigkeit stehen beide auf `0.84.1`. Weicht eine der beiden
+die gepinnte Entwicklungsabhängigkeit stehen beide auf `0.84.2`. Weicht eine der beiden
 künftig wieder ab, laufen Typen und Tests gegen eine andere API als die produktiv
 ausgeführte — Abweichungen im Laufzeitverhalten sind dann möglich. `/setup-doctor` hält
 eine solche Abweichung sichtbar; siehe `docs/RUNTIME_PATCHES.md` für das Vorgehen bei

@@ -1,4 +1,4 @@
-// P1 regression test for the locally patched Pi 0.84.1 runtime.
+// P1 regression test for the locally patched Pi 0.84.2 runtime.
 // It intentionally targets the executable runtime, not npm/node_modules,
 // because that is the Pi instance users actually start.
 import assert from "node:assert/strict";

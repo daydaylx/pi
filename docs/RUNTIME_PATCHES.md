@@ -39,6 +39,10 @@ fehlgeschlagene Kompaktierung jetzt zusätzlich über ein neues
 `resilience`-Extension in einen `resilience.compaction-boundary`-Eintrag mit
 `boundary: "failed"` und der originalen Fehlermeldung übersetzt.
 
+Am 2026-08-15 wurde Pi auf `0.84.2` aktualisiert. Alle acht aktiven
+Patch-Anker trafen unverändert; die Patches wurden erneut angewendet und der
+Versionspin auf `0.84.2` nachgezogen.
+
 ## Wiederherstellen
 
 Die Patches liegen in `node_modules` und überleben kein `npm update` der
