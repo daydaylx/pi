@@ -3,8 +3,9 @@
  * Full custom UI: options list + inline editor for "Freitext eingeben..."
  * Escape in editor returns to options, Escape in options cancels
  *
- * Registered as `ask_user` because extensions/plan-mode/index.ts already
- * references this exact tool name in PLAN_MODE_TOOLS and its system prompts.
+ * Registered as `ask_user` because extensions/permissions/workflow-policy.ts
+ * already references this exact tool name in PLAN_MODE_READ_ONLY_TOOLS, and
+ * extensions/plan-mode/prompts.ts references it in its system prompt text.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

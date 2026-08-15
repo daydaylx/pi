@@ -42,7 +42,12 @@ technischer Vertrag: keine Metadaten, IDs, Schrittstatus oder Abschlusskriterien
 Verifikation beschreibt sinnvolle Prüfungen (Tests, Typecheck, Linter, konkrete
 manuelle Prüfung, erwartetes Verhalten) als Teil der Planqualität, nicht als
 technisches Gate. Erfinde keine künstlichen Optionen, wenn nur ein sinnvoller
-Weg existiert. Die folgende Struktur ist eine Empfehlung, keine Validierungsregel:
+Weg existiert. Stößt du auf eine echte Entscheidung mit mehreren sinnvollen,
+unterschiedlich riskanten Wegen, kläre sie aktiv über das Tool \`ask_user\`,
+statt sie nur im Optionen-Abschnitt zu dokumentieren oder stillschweigend
+anzunehmen. Setze das sparsam ein: typischerweise 0–3 Fragen, nur wenn die
+Antwort den Plan tatsächlich ändern würde. Die folgende Struktur ist eine
+Empfehlung, keine Validierungsregel:
 
 ${structure}`;
 }
