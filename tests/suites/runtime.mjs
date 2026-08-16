@@ -2692,6 +2692,83 @@ export const runtimeSections = {
         }
       }
       rmSync(truncWorkspace, { recursive: true, force: true });
+
+      // Sorting alone is not enough once *multiple* profiles fail: a small
+      // failing profile sandwiched between two large failing profiles is
+      // just as exposed as one sandwiched between two large passing ones —
+      // the balanced head/tail truncator can drop it (and even a large
+      // neighbor) entirely. Each failing report needs its own reserved,
+      // non-zero slice of the text so no failure is ever fully crowded out
+      // by its siblings, no matter how many of them there are.
+      const multiFailWorkspace = mkdtempSync(
+        path.join(tmpdir(), "pi-project-check-multi-fail-"),
+      );
+      mkdirSync(path.join(multiFailWorkspace, ".pi"), { recursive: true });
+      const multiFailNames = ["fail1", "beta", "fail3"];
+      writeFileSync(
+        path.join(multiFailWorkspace, ".pi", "verify.json"),
+        JSON.stringify({
+          profiles: Object.fromEntries(
+            multiFailNames.map((name) => [
+              name,
+              { program: "npm", args: ["run", name], classification: "required" },
+            ]),
+          ),
+        }),
+      );
+      const largeFailureBody = Array.from(
+        { length: 150 },
+        (_, i) => `line-${i}-${"e".repeat(200)}`,
+      ).join("\n");
+      const multiFailHarness = createHarness({
+        exec: (_program, args) => {
+          const name = args[1];
+          const marker = `MARKER-${name.toUpperCase()}-UNIQUE`;
+          if (name === "beta") {
+            return {
+              stdout: `${marker}: real type error at line 42`,
+              stderr: "",
+              code: 1,
+              killed: false,
+            };
+          }
+          return {
+            stdout: `${marker}: first line\n${largeFailureBody}`,
+            stderr: "",
+            code: 1,
+            killed: false,
+          };
+        },
+      });
+      setupCore.default(multiFailHarness.api, { exec: multiFailHarness.api.exec });
+      const multiFailTrusted = multiFailHarness.makeContext({
+        cwd: multiFailWorkspace,
+        trusted: true,
+      });
+      await multiFailHarness.runHooks("session_start", {}, multiFailTrusted);
+      const multiFailTool = multiFailHarness.tools.get("project_check");
+      if (multiFailTool) {
+        try {
+          await multiFailTool.execute(
+            "project-check-multi-fail",
+            { profiles: multiFailNames },
+            undefined,
+            undefined,
+            multiFailTrusted,
+          );
+          assert(false, "three failing profiles block the call");
+        } catch (error) {
+          for (const name of multiFailNames) {
+            const marker = `MARKER-${name.toUpperCase()}-UNIQUE`;
+            assert(
+              error instanceof Error && error.message.includes(marker),
+              `${name}'s diagnostic survives even with two large failing ` +
+                "profiles competing for the same truncation budget",
+            );
+          }
+        }
+      }
+      rmSync(multiFailWorkspace, { recursive: true, force: true });
     });
   },
 

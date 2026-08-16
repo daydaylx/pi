@@ -6,7 +6,7 @@ import { catalogDescription } from "../shared/command-catalog.ts";
 import { trackedExec } from "../shared/tracked-exec.ts";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import { Type } from "typebox";
-import { limitTextOutput } from "../shared/output-limits.ts";
+import { DEFAULT_MAX_BYTES, limitTextOutput } from "../shared/output-limits.ts";
 import { limitSubagentToolResult } from "./subagent-output-guard.ts";
 import { loadVerifyProfiles, runProfile } from "./verify-profiles.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
@@ -23,7 +23,28 @@ import {
   type VerificationLedger,
   type VerificationStatus,
 } from "./verification-status.ts";
-import type { LoadedProfiles, ProfileDiagnostic } from "./verify-profiles.ts";
+import type {
+  LoadedProfiles,
+  ProfileDiagnostic,
+  RunProfileResult,
+} from "./verify-profiles.ts";
+
+interface ProfileReport {
+  profileId: string;
+  command: { program: string; args: string[] };
+  cwd: string;
+  classification: "required" | "recommended" | "advisory";
+  startedAt: string;
+  finishedAt: string;
+  status: string;
+  exitCode: number | null;
+  durationMs: number;
+  killed: boolean;
+  output: string;
+  truncation?: RunProfileResult["truncation"];
+  error?: RunProfileResult["error"];
+  changed_since_pass?: boolean;
+}
 
 const CheckParams = Type.Object({
   check: Type.Union([Type.Literal("typecheck"), Type.Literal("test")]),
@@ -360,7 +381,7 @@ export default function setupCore(
       // Capture before execution: a later workspace change must make this
       // check stale even if the command itself succeeds.
       const checkSnapshot = workspaceSnapshot(ctx.cwd);
-      const reports = [];
+      const reports: ProfileReport[] = [];
       for (const profileId of requested.ids) {
         const profile = loaded.profiles[profileId]!;
         const previousPassFingerprint = passedProfileIds.get(profileId);
@@ -421,28 +442,50 @@ export default function setupCore(
         required,
       );
 
-      // Non-successful reports render first: the aggregate text below is
+      // Non-successful reports render first and get a guaranteed, bounded
+      // share of the aggregate text budget each: the aggregate text below is
       // truncated a second time (each report's own output is already
-      // per-profile limited), and the balanced head/tail truncator keeps
-      // whatever sits at the head. A large *passing* profile must never push
-      // a smaller failing profile's diagnostics out of what survives.
-      const orderedForText = [...reports].sort(
-        (a, b) => Number(b.status !== "success") - Number(a.status !== "success"),
-      );
-      const text = orderedForText
-        .map((report) => {
-          const exit =
-            report.exitCode === null
-              ? "kein Exit-Code"
-              : `Exit-Code ${report.exitCode}`;
-          return [
-            `${report.profileId} [${report.classification}]: ${report.status} (${exit}, ${report.durationMs} ms)`,
-            `  Kommando: ${profileCommandSummary(report.command.program, report.command.args)}`,
-            `  cwd: ${report.cwd}`,
-            `  Ausgabe: ${report.output}`,
-          ].join("\n");
-        })
-        .join("\n\n");
+      // per-profile limited to DEFAULT_MAX_BYTES), and the balanced
+      // head/tail truncator only preserves what sits at the head and tail of
+      // the *combined* blob. Sorting failures first is not enough on its
+      // own — with several large failing profiles, a middle one can still
+      // fall entirely into the discarded middle section. Reserving each
+      // failing report its own slice up front guarantees every failure
+      // contributes at least some diagnostic text, however many there are.
+      const nonSuccessReports = reports.filter((r) => r.status !== "success");
+      const successReports = reports.filter((r) => r.status === "success");
+      const perFailureBudget =
+        nonSuccessReports.length > 1
+          ? Math.max(
+              2048,
+              Math.floor((DEFAULT_MAX_BYTES * 0.9) / nonSuccessReports.length),
+            )
+          : undefined;
+      const renderReport = (
+        report: ProfileReport,
+        maxBytes?: number,
+      ) => {
+        const exit =
+          report.exitCode === null
+            ? "kein Exit-Code"
+            : `Exit-Code ${report.exitCode}`;
+        const output =
+          maxBytes !== undefined
+            ? limitTextOutput(report.output, { maxBytes }).text
+            : report.output;
+        return [
+          `${report.profileId} [${report.classification}]: ${report.status} (${exit}, ${report.durationMs} ms)`,
+          `  Kommando: ${profileCommandSummary(report.command.program, report.command.args)}`,
+          `  cwd: ${report.cwd}`,
+          `  Ausgabe: ${output}`,
+        ].join("\n");
+      };
+      const text = [
+        ...nonSuccessReports.map((report) =>
+          renderReport(report, perFailureBudget),
+        ),
+        ...successReports.map((report) => renderReport(report)),
+      ].join("\n\n");
       const limited = limitTextOutput(
         `${text}\n\n${coverageLine(coverage.covered.length, coverage.total, coverage.missing)}`,
       );
