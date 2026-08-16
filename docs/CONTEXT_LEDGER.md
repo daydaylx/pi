@@ -102,8 +102,8 @@
 - Für P2 liegen noch keine konkret priorisierten Befunde zu Restkomplexität,
   Dokumentation oder Knip-Regeln vor; diese müssen vor einer Bereinigung
   gezielt erhoben werden. Belegt ist bislang nur `tests/suites/runtime.mjs`
-  (5276 Zeilen); die Aufteilung kann die vorhandene `SECTION_SUITES`-Registry
-  als Schnittkante nutzen.
+  (5383 Zeilen, Stand dieses Commits); die Aufteilung kann die vorhandene
+  `SECTION_SUITES`-Registry als Schnittkante nutzen.
 - (Historisch, behoben.) Bis zum Repin auf `node 22.23.2` / `npm 10.9.8` in
   `.nvmrc` und `engines` (Commit `432517c`) lief der lokale Host bereits auf
   dieser Version, während `.nvmrc`/`engines` noch `22.22.2` / `10.9.7`

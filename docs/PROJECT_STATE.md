@@ -87,7 +87,10 @@ geschlossen:
 
 ## Letzte Verifikation
 
-Hauptrepo mit Fork-Pin `0107312`.
+Hauptrepo mit Fork-Pin `0107312` — Stand jener Verifikation, historisch. Der
+aktuelle Pin in `settings.json` ist `33b4ff10e7374ced7830e586c859a911bf831547`
+(siehe den Eintrag "2026-08-15, Repin auf `33b4ff1`" weiter unten in diesem
+Abschnitt).
 
 - Hauptrepo: `npm --prefix npm run verify` Exit 0 — Prettier, Typecheck, Knip,
   Coverage-Gates, Runtime-Patches und Dependency-Audit. 1314 Tests: runtime 811,
@@ -136,7 +139,8 @@ Hauptrepo mit Fork-Pin `0107312`.
 - Live-Smoke nach `docs/manual-smoke-checklist.md` in einer authentifizierten
   Sitzung durchführen. Erst danach darf `#137` geschlossen und das Urteil von
   `BEDINGT STABIL` auf `STABIL` gehoben werden.
-- `tests/suites/runtime.mjs` (5276 Zeilen) entlang der vorhandenen
-  `SECTION_SUITES`-Registry aufteilen — P2, erst nach dem Live-Smoke.
+- `tests/suites/runtime.mjs` (5383 Zeilen, Stand dieses Commits) entlang der
+  vorhandenen `SECTION_SUITES`-Registry aufteilen — P2, erst nach dem
+  Live-Smoke.
 - `tests/suites/runtime.mjs` bleibt der einzige belegte P2-Befund; alles andere
   aus der ursprünglichen P2-Bestandsaufnahme ist erledigt.
