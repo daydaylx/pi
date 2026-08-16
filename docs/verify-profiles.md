@@ -40,7 +40,7 @@ project_check({ "profiles": ["typecheck", "tests"] })
 ```
 
 Bei `agent_settled` zeigt die Footer-Statuszeile den rein technischen
-Verifikationsstatus des aktuellen Workspace: `clean`, `changed_unverified`,
+Verifikationsstatus des aktuellen Workspace: `unchanged`, `changed_unverified`,
 `verified`, `checks_failed` oder `checks_unavailable`.
 `agent_end` ist kein Completion- oder Verifikationssignal. Ohne Pflichtprofil
 bleibt der Status bei Änderungen `checks_unavailable`; es gibt weder einen
@@ -115,13 +115,13 @@ Datenbank. Nach dem Sitzungsende ist jede Abdeckung wieder offen.
 | Workspace nach dem Lauf geändert             | –             | `changed_unverified`  |
 | kein `required` deklariert, aber bestätigter Fehlschlag | –  | `checks_failed`       |
 | kein `required`-Profil deklariert / untrusted | –            | `checks_unavailable`  |
-| keine Änderungen im Workspace                | –             | `clean`               |
+| keine Änderungen im Workspace                | –             | `unchanged`               |
 
 Ein echter `required`-Fehlschlag hat Vorrang vor einem gleichzeitigen Lauf ohne
 Verdikt: `checks_failed` verdrängt `checks_unavailable`.
 
-Ist der Workspace unverändert, meldet der Status `clean` — auch dann, wenn eine
-Prüfung auf dem unveränderten Stand fehlschlagen würde. `clean` beschreibt
+Ist der Workspace unverändert, meldet der Status `unchanged` — auch dann, wenn eine
+Prüfung auf dem unveränderten Stand fehlschlagen würde. `unchanged` beschreibt
 ausschließlich „nichts geändert", nicht „alles in Ordnung".
 
 ## Schema

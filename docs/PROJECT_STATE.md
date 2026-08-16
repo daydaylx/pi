@@ -121,6 +121,15 @@ Hauptrepo mit Fork-Pin `0107312`.
   Ausführungskontext-Risiko (`async`/`dynamic`) bleibt für alle Rollen
   scharf. `test:unit` 1153/1153 (neuer Fall ergänzt). `npm run typecheck`
   bleibt im Fork weiterhin vorbestehend rot, unverändert durch diesen Fix.
+- **2026-08-16, CI-Toolchain-Drift behoben**: Commit `432517c` hatte `.nvmrc`,
+  `engines` und `docs/runtime-matrix.md` auf `node 22.23.2` / `npm 10.9.8`
+  angehoben, aber `.github/workflows/verify.yml` und `lsp-smoke.yml` nicht
+  mitgezogen — beide installierten weiterhin `node 22.22.2` / `npm 10.9.7`
+  fest kodiert. Ein echter CI-Lauf (`31905951560`) belegt eine dabei
+  ignorierte `npm warn EBADENGINE`-Warnung bei jedem Durchlauf. Beide
+  Workflows lesen die Node-Version jetzt über `node-version-file: ".nvmrc"`;
+  `npm ci` läuft mit `--engine-strict`, sodass eine künftige Abweichung den
+  Build hart fehlschlagen lässt statt nur zu warnen.
 
 ## Nächste Schritte
 

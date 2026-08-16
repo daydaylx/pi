@@ -104,11 +104,18 @@
   gezielt erhoben werden. Belegt ist bislang nur `tests/suites/runtime.mjs`
   (5276 Zeilen); die Aufteilung kann die vorhandene `SECTION_SUITES`-Registry
   als Schnittkante nutzen.
-- Die lokale Toolchain weicht bewusst vom Pin ab: Host `node 22.23.2` /
-  `npm 10.9.8` gegen `22.22.2` / `10.9.7` in `.nvmrc` und `engines`. Es ist
-  keine Versionsverwaltung installiert; es ist ein reiner Patch-Level-Unterschied
-  und alle Suiten sowie CI sind darauf grün. Akzeptiert, bis ein Befund das
-  Gegenteil zeigt — npm meldet dazu `EBADENGINE`-Warnungen.
+- (Historisch, behoben.) Bis zum Repin auf `node 22.23.2` / `npm 10.9.8` in
+  `.nvmrc` und `engines` (Commit `432517c`) lief der lokale Host bereits auf
+  dieser Version, während `.nvmrc`/`engines` noch `22.22.2` / `10.9.7`
+  forderten — ein reiner Patch-Level-Unterschied ohne Versionsverwaltung, den
+  alle Suiten und die CI tolerierten. Der Repin hat diesen Host-vs-Pin-Abstand
+  geschlossen, aber `.github/workflows/verify.yml` und `lsp-smoke.yml` blieben
+  unverändert auf `node-version: 22.22.2` hart kodiert — die Abweichung
+  wanderte unbemerkt von „Host vs. Pin" zu „CI vs. Pin" und produzierte bei
+  jedem CI-Lauf eine ignorierte `EBADENGINE`-Warnung. Behoben: beide Workflows
+  lesen die Node-Version jetzt über `node-version-file: ".nvmrc"`, und
+  `npm ci` läuft mit `--engine-strict`, sodass eine künftige Abweichung den
+  Build hart fehlschlagen lässt statt nur zu warnen.
 - Der Live-Smoke ist aus einer nicht-interaktiven Umgebung nicht durchführbar.
   Aurora-Sichtbarkeit, Shift+Tab, der reale Plan→Work-Handoff und ein echter
   Subagent-Aufruf bleiben ohne authentifizierte TTY-Sitzung unbelegt
