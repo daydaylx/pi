@@ -33,12 +33,12 @@ jobs:
       # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 22.22.2
+          node-version-file: ".nvmrc"
           cache: npm
           cache-dependency-path: npm/package-lock.json
 
       - name: Install Pi dev dependencies
-        run: npm ci --prefix npm
+        run: npm ci --prefix npm --engine-strict
 
       # Pinned versions for reproducibility. These are installed on the runner
       # only; they are never added to the repo manifests.
