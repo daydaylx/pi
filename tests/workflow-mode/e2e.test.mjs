@@ -14,6 +14,7 @@ import { importModule as load } from "../shared/jiti-loader.mjs";
 
 const planMode = await load("extensions/plan-mode/index.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
+const planPrompts = await load("extensions/plan-mode/prompts.ts");
 
 async function hooks(harness, name, ctx) {
   return harness.runHooks(name, {}, ctx);
@@ -82,6 +83,30 @@ for (const [label, modeLabel, mode] of [
     }
   });
 }
+
+await test("planningPrompt() actively asks the agent to use ask_user for real decisions", async () => {
+  if (!planPrompts) return;
+  for (const mode of ["simple_plan", "detailed_plan"]) {
+    const prompt = planPrompts.planningPrompt(mode);
+    assert(
+      prompt.includes("ask_user"),
+      `${mode} planning prompt references the ask_user tool`,
+    );
+    assert(
+      prompt.includes("kläre sie aktiv über das Tool"),
+      `${mode} planning prompt actively asks for ask_user on real decisions, not just documenting them as options`,
+    );
+  }
+});
+
+await test("workPrompt() does not leak the planning-only ask_user hint into work mode", async () => {
+  if (!planPrompts) return;
+  const prompt = planPrompts.workPrompt("# Ein Plan\n");
+  assert(
+    !prompt.includes("ask_user"),
+    "the work prompt is a separate template and never carries the planning-only ask_user hint",
+  );
+});
 
 await test("Shift+Tab → Work waits and does not execute an existing plan", async () => {
   if (!planMode) return;
