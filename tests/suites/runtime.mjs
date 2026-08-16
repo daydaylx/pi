@@ -2625,6 +2625,73 @@ export const runtimeSections = {
         }
       }
       rmSync(workspace, { recursive: true, force: true });
+
+      // A large *passing* profile's output must never push a smaller
+      // *failing* profile's diagnostics out of the truncated aggregate text
+      // — the per-report text is truncated once individually and once again
+      // in aggregate, and the second pass used to keep whatever happened to
+      // sit at the head/tail regardless of which profile actually failed.
+      const truncWorkspace = mkdtempSync(
+        path.join(tmpdir(), "pi-project-check-truncation-"),
+      );
+      mkdirSync(path.join(truncWorkspace, ".pi"), { recursive: true });
+      const truncNames = ["filler1", "beta", "filler2"];
+      writeFileSync(
+        path.join(truncWorkspace, ".pi", "verify.json"),
+        JSON.stringify({
+          profiles: Object.fromEntries(
+            truncNames.map((name) => [
+              name,
+              { program: "npm", args: ["run", name], classification: "required" },
+            ]),
+          ),
+        }),
+      );
+      const fillerBody = Array.from(
+        { length: 100 },
+        (_, i) => `line-${i}-${"f".repeat(300)}`,
+      ).join("\n");
+      const truncHarness = createHarness({
+        exec: (_program, args) => {
+          const name = args[1];
+          if (name === "beta") {
+            return {
+              stdout: "MARKER-BETA-UNIQUE: real type error at line 42",
+              stderr: "",
+              code: 1,
+              killed: false,
+            };
+          }
+          return { stdout: fillerBody, stderr: "", code: 0, killed: false };
+        },
+      });
+      setupCore.default(truncHarness.api, { exec: truncHarness.api.exec });
+      const truncTrusted = truncHarness.makeContext({
+        cwd: truncWorkspace,
+        trusted: true,
+      });
+      await truncHarness.runHooks("session_start", {}, truncTrusted);
+      const truncTool = truncHarness.tools.get("project_check");
+      if (truncTool) {
+        try {
+          await truncTool.execute(
+            "project-check-truncation-priority",
+            { profiles: truncNames },
+            undefined,
+            undefined,
+            truncTrusted,
+          );
+          assert(false, "the failing beta profile blocks the call");
+        } catch (error) {
+          assert(
+            error instanceof Error &&
+              error.message.includes("MARKER-BETA-UNIQUE"),
+            "the failing profile's diagnostic survives aggregate truncation " +
+              "even when surrounded by much larger passing profiles",
+          );
+        }
+      }
+      rmSync(truncWorkspace, { recursive: true, force: true });
     });
   },
 

@@ -421,7 +421,15 @@ export default function setupCore(
         required,
       );
 
-      const text = reports
+      // Non-successful reports render first: the aggregate text below is
+      // truncated a second time (each report's own output is already
+      // per-profile limited), and the balanced head/tail truncator keeps
+      // whatever sits at the head. A large *passing* profile must never push
+      // a smaller failing profile's diagnostics out of what survives.
+      const orderedForText = [...reports].sort(
+        (a, b) => Number(b.status !== "success") - Number(a.status !== "success"),
+      );
+      const text = orderedForText
         .map((report) => {
           const exit =
             report.exitCode === null
