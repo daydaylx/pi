@@ -6,6 +6,7 @@
  * shared/permission-policy.ts and are not duplicated here.
  */
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import {
   decideBash,
   decideFileAccess,
@@ -85,7 +86,7 @@ export function decideTool(
   if (LOCAL_LSP_TOOLS.has(event.toolName)) {
     return { action: "allow", reason: "LSP-Fähigkeit (nur lesend)" };
   }
-  if (event.toolName === "ask_user") {
+  if (event.toolName === ASK_USER_TOOL_NAME) {
     return { action: "allow", reason: "Controlled workflow capability" };
   }
   if (event.toolName === "verify") {
@@ -114,7 +115,7 @@ export function decideTool(
     };
   }
 
-  if (permissionLevel === "readonly" && event.toolName !== "ask_user") {
+  if (permissionLevel === "readonly") {
     return {
       action: "block",
       reason: `${PERMISSION_LEVEL_LABEL[permissionLevel]}: Tool "${event.toolName}" ist nicht freigegeben.`,

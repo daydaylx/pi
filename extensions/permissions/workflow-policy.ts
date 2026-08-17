@@ -1,6 +1,7 @@
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { relative, resolve, sep } from "node:path";
 import { resolveRuntimeRoot } from "../../shared/runtime-resolution.mjs";
+import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import {
   decideFileAccess,
   isPlanModeDiagnosticCommand,
@@ -43,7 +44,7 @@ const PLAN_MODE_READ_ONLY_TOOLS = new Set([
   "grep",
   "find",
   "ls",
-  "ask_user",
+  ASK_USER_TOOL_NAME,
   ...LOCAL_LSP_TOOLS,
 ]);
 

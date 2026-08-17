@@ -3338,6 +3338,51 @@ export const runtimeSections = {
         undefined,
         "digits never select the custom-input row",
       );
+      eq(
+        askUserPolicy.clampRecommendedIndex(4, 2),
+        2,
+        "clampRecommendedIndex caps a schema-valid but out-of-range index to the last real option",
+      );
+      eq(
+        askUserPolicy.clampRecommendedIndex(0, 2),
+        1,
+        "clampRecommendedIndex floors a zero index to the first option",
+      );
+      eq(
+        askUserPolicy.clampRecommendedIndex(-3, 2),
+        1,
+        "clampRecommendedIndex floors a negative index to the first option",
+      );
+      eq(
+        askUserPolicy.clampRecommendedIndex(1.5, 2),
+        1,
+        "clampRecommendedIndex falls back to 1 for a non-integer index",
+      );
+      eq(
+        askUserPolicy.clampRecommendedIndex(2, 0),
+        1,
+        "clampRecommendedIndex never returns below 1 even with zero options",
+      );
+      eq(
+        askUserPolicy.isValidRecommendedIndex(4, 2),
+        false,
+        "isValidRecommendedIndex rejects an index beyond the actual option count",
+      );
+      eq(
+        askUserPolicy.isValidRecommendedIndex(0, 2),
+        false,
+        "isValidRecommendedIndex rejects a zero index",
+      );
+      eq(
+        askUserPolicy.isValidRecommendedIndex(1.5, 2),
+        false,
+        "isValidRecommendedIndex rejects a non-integer index",
+      );
+      eq(
+        askUserPolicy.isValidRecommendedIndex(2, 2),
+        true,
+        "isValidRecommendedIndex accepts an index equal to the option count",
+      );
 
       const harness = createHarness({ columns: 24 });
       askUser.default(harness.api);

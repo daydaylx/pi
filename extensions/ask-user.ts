@@ -3,9 +3,9 @@
  * Full custom UI: options list + inline editor for "Freitext eingeben..."
  * Escape in editor returns to options, Escape in options cancels
  *
- * Registered as `ask_user` because extensions/permissions/workflow-policy.ts
- * already references this exact tool name in PLAN_MODE_READ_ONLY_TOOLS, and
- * extensions/plan-mode/prompts.ts references it in its system prompt text.
+ * Registered under ASK_USER_TOOL_NAME (shared/ask-user-policy.ts), which the
+ * permission-policy layers and extensions/plan-mode/prompts.ts also import —
+ * see that constant's doc comment for why it's centralized.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -22,6 +22,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
+  ASK_USER_TOOL_NAME,
   clampRecommendedIndex,
   digitSelection,
   hasValidQuestionOptionCount,
@@ -67,9 +68,14 @@ function levelMarker(level: Level): string {
 
 // Options with label, description, effort/risk, and optional pro/contra
 const OptionSchema = Type.Object({
-  label: Type.String({ description: "Kurzer Titel der Option" }),
+  label: Type.String({
+    minLength: 1,
+    description: "Kurzer Titel der Option, in einfacher Sprache",
+  }),
   description: Type.String({
-    description: "Kurzbeschreibung: was diese Option konkret bedeutet",
+    minLength: 1,
+    description:
+      "Kurzbeschreibung in einfacher, allgemeinverständlicher Sprache ohne Fachjargon: was diese Option konkret bedeutet und welche Konsequenz sie hat",
   }),
   effort: StringEnum(LEVELS, {
     description: "Geschätzter Umsetzungsaufwand dieser Option",
@@ -86,7 +92,11 @@ const OptionSchema = Type.Object({
 });
 
 const QuestionParams = Type.Object({
-  question: Type.String({ description: "Die konkrete Entscheidungsfrage" }),
+  question: Type.String({
+    minLength: 1,
+    description:
+      "Die konkrete Entscheidungsfrage, in einfacher Sprache formuliert",
+  }),
   why: Type.Optional(
     Type.String({
       description:
@@ -106,17 +116,18 @@ const QuestionParams = Type.Object({
       "1-basierter Index (Position in `options`, gezählt ab 1) der empfohlenen Option.",
   }),
   recommendationReason: Type.String({
+    minLength: 1,
     description:
-      "Kurze Begründung, warum die durch recommendedIndex markierte Option empfohlen wird",
+      "Kurze, in einfacher Sprache gehaltene Begründung, warum die durch recommendedIndex markierte Option empfohlen wird. Pflichtfeld — jede Frage braucht eine erkennbare Empfehlung, keine reine Optionsliste.",
   }),
 });
 
 export default function askUser(pi: ExtensionAPI) {
   pi.registerTool({
-    name: "ask_user",
+    name: ASK_USER_TOOL_NAME,
     label: "Nutzer fragen",
     description:
-      "Stellt dem Nutzer eine fokussierte Entscheidungsfrage mit 2–4 Optionen. Jede Option braucht Titel, Kurzbeschreibung, Aufwand und Risiko; genau eine Option wird über recommendedIndex als Empfehlung markiert und über recommendationReason begründet. Nutzen, wenn eine echte Nutzerentscheidung nötig ist, um fortzufahren.",
+      "Stellt dem Nutzer eine fokussierte Entscheidungsfrage mit 2–4 Optionen. Jede Option braucht Titel, eine in einfacher, allgemeinverständlicher Sprache gehaltene Kurzbeschreibung ohne Fachjargon, Aufwand und Risiko; genau eine Option wird über recommendedIndex als klare Empfehlung markiert und über recommendationReason nachvollziehbar begründet — eine Empfehlung ist Pflicht, keine optionale Ergänzung. Nutzen (nicht nur erwägen), wenn eine echte Nutzerentscheidung nötig ist, um fortzufahren.",
     parameters: QuestionParams,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

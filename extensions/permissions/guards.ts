@@ -3,6 +3,7 @@ import type {
   ExtensionContext,
   ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
+import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import { confirmAction } from "../shared/permission-dialog.ts";
 import { decideBash } from "../shared/permission-policy.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
@@ -16,7 +17,7 @@ import {
 } from "./workflow-policy.ts";
 import { toolPath } from "./tool-event.ts";
 
-const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "ask_user"];
+const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", ASK_USER_TOOL_NAME];
 
 // Custom-/MCP-Tools ohne path/filePath-Feld (z. B. subagent) hätten sonst ein
 // leeres Subject und der Mensch würde blind bestätigen.

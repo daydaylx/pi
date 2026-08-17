@@ -1,3 +1,8 @@
+/** Single source of truth for the tool name so registration and the three
+ * permission-policy layers (workflow-policy.ts, tool-policy.ts, guards.ts)
+ * can't drift apart on a rename. */
+export const ASK_USER_TOOL_NAME = "ask_user";
+
 export const MIN_QUESTION_OPTIONS = 2;
 export const MAX_QUESTION_OPTIONS = 4;
 

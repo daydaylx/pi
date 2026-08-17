@@ -93,8 +93,12 @@ await test("planningPrompt() actively asks the agent to use ask_user for real de
       `${mode} planning prompt references the ask_user tool`,
     );
     assert(
-      prompt.includes("kläre sie aktiv über das Tool"),
-      `${mode} planning prompt actively asks for ask_user on real decisions, not just documenting them as options`,
+      prompt.includes("ausdrücklich erwünscht"),
+      `${mode} planning prompt encourages ask_user on real decisions, not just documenting them as options`,
+    );
+    assert(
+      prompt.includes("einfacher, für Laien verständlicher Sprache"),
+      `${mode} planning prompt requires plain-language options`,
     );
   }
 });

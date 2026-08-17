@@ -43,11 +43,14 @@ Verifikation beschreibt sinnvolle Prüfungen (Tests, Typecheck, Linter, konkrete
 manuelle Prüfung, erwartetes Verhalten) als Teil der Planqualität, nicht als
 technisches Gate. Erfinde keine künstlichen Optionen, wenn nur ein sinnvoller
 Weg existiert. Stößt du auf eine echte Entscheidung mit mehreren sinnvollen,
-unterschiedlich riskanten Wegen, kläre sie aktiv über das Tool \`ask_user\`,
-statt sie nur im Optionen-Abschnitt zu dokumentieren oder stillschweigend
-anzunehmen. Setze das sparsam ein: typischerweise 0–3 Fragen, nur wenn die
-Antwort den Plan tatsächlich ändern würde. Die folgende Struktur ist eine
-Empfehlung, keine Validierungsregel:
+unterschiedlich riskanten Wegen, ist es ausdrücklich erwünscht, sie aktiv
+über das Tool \`ask_user\` zu klären, statt sie nur im Optionen-Abschnitt zu
+dokumentieren oder stillschweigend anzunehmen. Formuliere die Optionen dabei
+in einfacher, für Laien verständlicher Sprache statt in Fachjargon, und
+nenne immer eine klare Empfehlung mit Begründung. Nutze das Tool sparsam
+(typischerweise 0–3 Fragen) und nur, wenn die Antwort den Plan tatsächlich
+ändern würde. Die folgende Struktur ist eine Empfehlung,
+keine Validierungsregel:
 
 ${structure}`;
 }
