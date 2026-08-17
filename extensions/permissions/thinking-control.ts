@@ -1,6 +1,7 @@
 /**
  * Thinking depth control: manual level selection only.
  */
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -72,7 +73,10 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
         "Thinking",
         buildThinkingMenu(
           pi.getThinkingLevel(),
-          (level) => ctx.model?.thinkingLevelMap?.[level] !== null,
+          (level) =>
+            ctx.model
+              ? getSupportedThinkingLevels(ctx.model).includes(level)
+              : true,
         ),
         {
           nonInteractiveHint: "Die Denktiefe benötigt den TUI-Modus.",

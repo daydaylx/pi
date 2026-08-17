@@ -6,7 +6,8 @@ export type ThinkingTone =
   | "thinkingLow"
   | "thinkingMedium"
   | "thinkingHigh"
-  | "thinkingXhigh";
+  | "thinkingXhigh"
+  | "thinkingMax";
 
 const TONE_BY_LEVEL: Record<string, ThinkingTone> = {
   off: "thinkingOff",
@@ -15,6 +16,7 @@ const TONE_BY_LEVEL: Record<string, ThinkingTone> = {
   medium: "thinkingMedium",
   high: "thinkingHigh",
   xhigh: "thinkingXhigh",
+  max: "thinkingMax",
 };
 
 const LABEL_BY_LEVEL: Record<string, string> = {
@@ -24,6 +26,7 @@ const LABEL_BY_LEVEL: Record<string, string> = {
   medium: "MITTEL",
   high: "HOCH",
   xhigh: "XHIGH",
+  max: "MAX",
 };
 
 /** The configured thinking level is display-only; unknown values stay muted. */

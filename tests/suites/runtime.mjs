@@ -73,8 +73,34 @@ export const runtimeSections = {
         );
         eq(
           settings.subagents,
-          { disableBuiltins: true },
-          "settings directly disable package-built-in agent profiles",
+          {
+            disableBuiltins: true,
+            agentOverrides: {
+              investigator: {
+                model: "qwen-token-plan-individual/qwen3.7-plus",
+                fallbackModels: ["qwen-token-plan-individual/qwen3.8-max"],
+              },
+              debugger: {
+                model: "qwen-token-plan-individual/glm-5.2",
+                thinking: "max",
+                fallbackModels: ["qwen-token-plan-individual/qwen3.8-max"],
+              },
+              verifier: {
+                model: "anthropic/claude-sonnet-5",
+                thinking: "max",
+                fallbackModels: ["openai-codex/gpt-5.6-terra"],
+              },
+            },
+            modelScope: {
+              enforce: true,
+              allow: [
+                "qwen-token-plan-individual/*",
+                "anthropic/claude-sonnet-5",
+                "openai-codex/gpt-5.6-terra",
+              ],
+            },
+          },
+          "subagent models, thinking and fallbacks live only in settings.json; investigator and debugger stay inside the Qwen Token Plan, verifier is a deliberate exception on Sonnet with a GPT Terra fallback",
         );
 
         // Compaction budget, measured rather than guessed (docs/decisions/010).
@@ -131,10 +157,109 @@ export const runtimeSections = {
           !Object.hasOwn(setup, "models"),
           "setup.json contains no duplicate model-role configuration",
         );
+        eq(
+          settings.defaultProvider,
+          "qwen-token-plan-individual",
+          "the default provider is the native Qwen Token Plan Individual",
+        );
+        eq(
+          settings.defaultModel,
+          "qwen3.8-max",
+          "the main model stays Qwen3.8-Max",
+        );
+        eq(
+          settings.defaultThinkingLevel,
+          "max",
+          "the thinking default is max; the runtime clamps per model",
+        );
         const defaultModelId = `${settings.defaultProvider}/${settings.defaultModel}`;
         assert(
           settings.enabledModels.includes(defaultModelId),
           `the active default model (${defaultModelId}) is contained in Pi's scoped models`,
+        );
+        // The Individual Plan catalog, exactly as the runtime ships it: no
+        // Kimi, no MiniMax, no external token plans.
+        const individualCatalog = JSON.parse(
+          readFileSync(
+            path.join(
+              ROOT,
+              "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/providers/data/qwen-token-plan-individual.json",
+            ),
+            "utf8",
+          ),
+        );
+        const individualModels = Object.values(
+          individualCatalog["openai-completions"],
+        );
+        eq(
+          individualModels.map((model) => model.id).sort(),
+          [
+            "deepseek-v4-flash-0731",
+            "deepseek-v4-pro",
+            "glm-5.2",
+            "qwen3.6-flash",
+            "qwen3.7-max",
+            "qwen3.7-plus",
+            "qwen3.8-max",
+          ],
+          "the Individual Plan catalog matches the expected model set",
+        );
+        for (const model of individualModels) {
+          assert(
+            settings.enabledModels.includes(
+              `qwen-token-plan-individual/${model.id}`,
+            ),
+            `the Individual Plan model ${model.id} stays selectable for the main agent`,
+          );
+        }
+        assert(
+          settings.enabledModels.every(
+            (entry) =>
+              !entry.startsWith("qwen-token-plan/") &&
+              !entry.startsWith("qwen-token-plan-cn/"),
+          ),
+          "retired token plan variants leave no scoped models behind",
+        );
+        // xhigh and max are separate real levels; which one a model reaches is
+        // declared by the catalog and enforced by the runtime clamp, not by
+        // any local mapping.
+        const modelById = (id) =>
+          individualModels.find((model) => model.id === id);
+        eq(
+          modelById("qwen3.8-max").thinkingLevelMap.xhigh,
+          "xhigh",
+          "Qwen3.8-Max reaches xhigh",
+        );
+        eq(
+          modelById("qwen3.8-max").thinkingLevelMap.max,
+          null,
+          "Qwen3.8-Max does not support max",
+        );
+        for (const id of ["glm-5.2", "deepseek-v4-pro"]) {
+          eq(modelById(id).thinkingLevelMap.max, "max", `${id} supports max`);
+        }
+        const { clampThinkingLevel } = await import(
+          pathToFileURL(
+            path.join(
+              ROOT,
+              "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/models.js",
+            ),
+          ).href
+        );
+        eq(
+          clampThinkingLevel(modelById("qwen3.8-max"), "max"),
+          "xhigh",
+          "the runtime clamps Qwen3.8-Max from max down to xhigh",
+        );
+        eq(
+          clampThinkingLevel(modelById("glm-5.2"), "max"),
+          "max",
+          "the runtime keeps max for GLM-5.2",
+        );
+        eq(
+          clampThinkingLevel(modelById("deepseek-v4-pro"), "max"),
+          "max",
+          "the runtime keeps max for DeepSeek-V4-Pro",
         );
         eq(
           setup.ui,
@@ -162,15 +287,23 @@ export const runtimeSections = {
           "Aurora theme has its stable runtime name",
         );
         eq(
-          auroraTheme.vars.dim,
-          "#7384AA",
-          "Aurora dim uses the accessible P2 contrast color",
+          auroraTheme.vars.bg,
+          "#0b0d16",
+          "Aurora retains its dark blue-black page background",
+        );
+        eq(
+          auroraTheme.vars.bgDark,
+          "#090a12",
+          "Aurora retains its darker terminal background variant",
         );
         assert(
-          contrastRatio(auroraTheme.vars.dim, auroraTheme.vars.navy) >= 4.5 &&
-            contrastRatio(auroraTheme.vars.dim, auroraTheme.vars.surface) >=
-              4.5,
-          "Aurora dim meets AA contrast on both default backgrounds",
+          contrastRatio(auroraTheme.vars.textMuted, auroraTheme.vars.bg) >=
+            4.5 &&
+            contrastRatio(
+              auroraTheme.vars.textMuted,
+              auroraTheme.vars.surface,
+            ) >= 4.5,
+          "Aurora muted text meets AA contrast on both primary backgrounds",
         );
         for (const color of [
           "accent",
@@ -179,6 +312,7 @@ export const runtimeSections = {
           "warning",
           "error",
           "thinkingXhigh",
+          "thinkingMax",
         ]) {
           assert(
             Boolean(auroraTheme.colors?.[color]),
@@ -2642,7 +2776,11 @@ export const runtimeSections = {
           profiles: Object.fromEntries(
             truncNames.map((name) => [
               name,
-              { program: "npm", args: ["run", name], classification: "required" },
+              {
+                program: "npm",
+                args: ["run", name],
+                classification: "required",
+              },
             ]),
           ),
         }),
@@ -2711,7 +2849,11 @@ export const runtimeSections = {
           profiles: Object.fromEntries(
             multiFailNames.map((name) => [
               name,
-              { program: "npm", args: ["run", name], classification: "required" },
+              {
+                program: "npm",
+                args: ["run", name],
+                classification: "required",
+              },
             ]),
           ),
         }),
@@ -2740,7 +2882,9 @@ export const runtimeSections = {
           };
         },
       });
-      setupCore.default(multiFailHarness.api, { exec: multiFailHarness.api.exec });
+      setupCore.default(multiFailHarness.api, {
+        exec: multiFailHarness.api.exec,
+      });
       const multiFailTrusted = multiFailHarness.makeContext({
         cwd: multiFailWorkspace,
         trusted: true,
@@ -2825,6 +2969,10 @@ export const runtimeSections = {
         assert(
           !/^tools:.*\b(?:edit|write)\b/m.test(profileSources[name]),
           `${name} has no project write tool`,
+        );
+        assert(
+          !/^(?:model|fallbackModels|thinking):/m.test(profileSources[name]),
+          `${name} carries no model or thinking fields; settings.json agentOverrides are the single model source`,
         );
       }
       for (const name of ["investigator.md", "verifier.md"]) {

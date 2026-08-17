@@ -33,23 +33,29 @@ zusätzlich ein Planmodus-Mutationsschutz (`planModeMutationGuard` /
 Agenten: Bei den Stufen `project-write` und `confirm-all` verweigert er
 während `simple_plan` oder `detailed_plan` jeden Schreibzugriff außerhalb der
 Plandatei und jedes Bash-Kommando des Agenten, das nicht nachweislich eine
-Diagnose ist. Für Bash ist das eine eigene, bewusst großzügigere Klassifikation
-(`isPlanModeDiagnosticCommand`) als `readonly`s Allowlist: Tests, Typecheck,
-Lint ohne `--fix`, Builds sowie `git status`/`diff`/`show`/`log` sind
-erlaubt. Für `npm`/`pnpm`/`yarn run`/`test`/bare Skript-Aliase gilt das nur,
-wenn der Skriptname selbst nach einer der bekannten Diagnose-Kategorien
-aussieht (`test`, `typecheck`, `lint`, `check`, `verify`, `coverage`,
-`audit`, `build`, optional mit `:`/`-`-Namensraum wie `test:coverage`, ohne
-einen `fix`/`write`-Marker wie in `lint:fix`) — ein beliebiger, unbekannter
-Skriptname (`npm run generate`, `npm start`, eigene Aliase) gilt nicht als
-nachweislich diagnostisch und bleibt blockiert; projekteigene, bewusst
-vertrauenswürdige Prüfungen laufen dafür über `project_check`. Diagnose-
-befehle dürfen mit `;` verkettet werden (jedes Segment einzeln geprüft;
-`&&`/`||`/ein alleinstehendes `&` bleiben blockiert), und `2>`/`1>`/`&>`
-nach exakt `/dev/null` sind als Redirect-Ziel erlaubt (z. B. `ls -la
-.agent 2>/dev/null`) — jedes andere Redirect-Ziel bleibt blockiert; für den
-`readonly`-Pfad (`isPlanSafeCommand`) gilt weiterhin die alte, strikte
-Regel. Echte Mutationen (`rm`/`cp`/`mv`/`mkdir`/`touch`/`sed -i`, sonstige
+Diagnose ist. Für Bash ist das eine bewusst eng gehaltene Klassifikation
+(`isPlanModeDiagnosticCommand`): `git status`/`diff`/`log`, `rg`, `find`
+(ohne `-exec`/`-delete`/…) sowie eine kleine Gruppe reiner Lesewerkzeuge
+ohne Skriptcharakter (`pwd`, `ls`, `cat`, `head`, `tail`, `wc`, `stat`, `du`,
+`df`, `tree`, `sort`/`uniq` ohne `-o`) sind erlaubt — kein Test, kein
+Typecheck, kein Lint, kein Build und kein `git show` über Bash, unabhängig
+davon, wie diagnostisch der Befehl klingt. Projekteigene Skripte
+(`npm`/`pnpm`/`yarn run`/`test`/bare
+Skript-Aliase) werden nie allein am Namen als sicher eingestuft, weil sie
+beliebigen Lifecycle-Code ausführen können. Die `verify`- und
+`project_check`-Tools laufen ausführbare Prüfungen zwar außerhalb von Bash,
+sind während `simple_plan`/`detailed_plan` aber ebenfalls gesperrt (jedes
+Tool außerhalb der festen Lese-Allowlist und `write`/`edit` auf die
+Plandatei ist blockiert) — Tests, Typecheck, Lint und Build lassen sich im
+Planmodus über keinen Weg ausführen; dafür ist ein Wechsel in den
+Arbeitsmodus nötig. Der zugrunde liegende Parser
+(`parseReadOnlyShell`, gemeinsam mit dem `readonly`-Pfad genutzt) lässt
+keine Shell-Verkettung zu: weder `;` noch `&&`/`||`/ein alleinstehendes `&`
+noch Redirections (`<`/`>`, auch nicht `2>/dev/null`) — nur eine einzelne
+Pipeline aus `|`-verbundenen Segmenten ist erlaubt, jedes Segment einzeln
+gegen die jeweilige Allowlist geprüft; für den `readonly`-Pfad
+(`isPlanSafeCommand`) gilt derselbe Parser mit einer eigenen, unabhängigen
+Segment-Allowlist. Echte Mutationen (`rm`/`cp`/`mv`/`mkdir`/`touch`/`sed -i`, sonstige
 Redirection, `npm
 install`/`update`/`ci`/`publish`/`exec`, `eslint --fix`, `git commit`/`push`/
 `add`/`checkout`/`reset`/`clean`/`merge`/…) bleiben blockiert. `readonly`

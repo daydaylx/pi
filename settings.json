@@ -1,10 +1,10 @@
 {
   "lastChangelogVersion": "0.84.2",
   "theme": "aurora-night",
-  "defaultProvider": "qwen-token-plan",
+  "defaultProvider": "qwen-token-plan-individual",
   "defaultModel": "qwen3.8-max",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "xhigh",
+  "defaultThinkingLevel": "max",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -17,6 +17,13 @@
   "collapseChangelog": true,
   "enableInstallTelemetry": false,
   "enabledModels": [
+    "qwen-token-plan-individual/qwen3.8-max",
+    "qwen-token-plan-individual/qwen3.7-max",
+    "qwen-token-plan-individual/qwen3.7-plus",
+    "qwen-token-plan-individual/qwen3.6-flash",
+    "qwen-token-plan-individual/glm-5.2",
+    "qwen-token-plan-individual/deepseek-v4-pro",
+    "qwen-token-plan-individual/deepseek-v4-flash-0731",
     "openai-codex/gpt-5.4-mini",
     "openai-codex/gpt-5.4",
     "openai-codex/gpt-5.5",
@@ -40,14 +47,43 @@
     "opencode-go/deepseek-v4-pro",
     "openrouter/openai/gpt-oss-120b",
     "zai/glm-5.3",
-    "qwen-token-plan/kimi-k2.7-code",
-    "qwen-token-plan/qwen3.8-max"
+    "zai-coding-cn/glm-5.3"
   ],
   "packages": [
     "git:github.com/daydaylx/pi-subagents@33b4ff10e7374ced7830e586c859a911bf831547"
   ],
   "subagents": {
-    "disableBuiltins": true
+    "disableBuiltins": true,
+    "agentOverrides": {
+      "investigator": {
+        "model": "qwen-token-plan-individual/qwen3.7-plus",
+        "fallbackModels": [
+          "qwen-token-plan-individual/qwen3.8-max"
+        ]
+      },
+      "debugger": {
+        "model": "qwen-token-plan-individual/glm-5.2",
+        "thinking": "max",
+        "fallbackModels": [
+          "qwen-token-plan-individual/qwen3.8-max"
+        ]
+      },
+      "verifier": {
+        "model": "anthropic/claude-sonnet-5",
+        "thinking": "max",
+        "fallbackModels": [
+          "openai-codex/gpt-5.6-terra"
+        ]
+      }
+    },
+    "modelScope": {
+      "enforce": true,
+      "allow": [
+        "qwen-token-plan-individual/*",
+        "anthropic/claude-sonnet-5",
+        "openai-codex/gpt-5.6-terra"
+      ]
+    }
   },
   "extensions": [
     "!extensions/**",

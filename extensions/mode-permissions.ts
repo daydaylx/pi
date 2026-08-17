@@ -67,7 +67,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("thinking", {
-    description: `${catalogDescription("thinking")}: off | minimal | low | medium | high | xhigh`,
+    description: `${catalogDescription("thinking")}: off | minimal | low | medium | high | xhigh | max`,
     handler: async (args, ctx) => {
       const epoch = session.epoch();
       const value = args.trim().toLowerCase();
@@ -82,7 +82,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
         return;
       }
       ctx.ui.notify(
-        "Nutzung: /thinking off|minimal|low|medium|high|xhigh",
+        "Nutzung: /thinking off|minimal|low|medium|high|xhigh|max",
         "info",
       );
     },

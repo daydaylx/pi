@@ -227,10 +227,66 @@ await test("planModeBashGuard allows only explicit read-only shell tools during 
   const planning = { mode: "detailed_plan" };
   const bash = (command) =>
     workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
-  for (const command of ["git status", "git diff", "git log", "rg plan extensions"]) {
+  for (const command of [
+    "git status",
+    "git diff",
+    "git log",
+    "rg plan extensions",
+  ]) {
     assert(
       !bash(command).blocked,
       `${command} is a legitimate diagnostic and must pass during planning`,
+    );
+  }
+});
+
+await test("planModeBashGuard allows the widened read-only system tool set during planning", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "detailed_plan" };
+  const bash = (command) =>
+    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  for (const command of [
+    "pwd",
+    "ls -la",
+    "ls -la .agent",
+    "cat package.json",
+    "head -20 package.json",
+    "tail -20 package.json",
+    "wc -l package.json",
+    "stat package.json",
+    "du -sh .",
+    "df -h",
+    "tree -L 2",
+    "sort package.json",
+    "uniq package.json",
+    "find . -maxdepth 2 -type f",
+    "cat package.json | head -5",
+  ]) {
+    assert(
+      !bash(command).blocked,
+      `${command} is a harmless, non-script read tool and must pass during planning`,
+    );
+  }
+});
+
+await test("planModeBashGuard still blocks write-capable flags on the widened tool set during planning", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "detailed_plan" };
+  const bash = (command) =>
+    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  for (const command of [
+    "find . -maxdepth 2 -exec rm {} ;",
+    "find . -delete",
+    "sort -o out.txt package.json",
+    "tree -o out.txt",
+    "whoami",
+    "echo hi",
+  ]) {
+    assert(
+      bash(command).blocked,
+      `${command} either mutates or is outside the widened allowlist and must stay blocked`,
     );
   }
 });
@@ -395,7 +451,11 @@ await test("plan mode admits only positively known read-only tools", () => {
   for (const [toolName, input, why] of [
     ["write", { path: "src/a.ts" }, "a write outside the plan file"],
     ["edit", { path: "src/a.ts" }, "an edit outside the plan file"],
-    ["project_check", { profile: "verify" }, "a project check runs project scripts"],
+    [
+      "project_check",
+      { profile: "verify" },
+      "a project check runs project scripts",
+    ],
     ["subagent", { agent: "investigator" }, "a subagent can act on its own"],
     [
       "subagent",

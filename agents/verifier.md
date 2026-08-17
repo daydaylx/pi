@@ -2,8 +2,6 @@
 name: verifier
 description: "Use after a risky implementation — security, permissions, plan mode, workflow or activity state, public API or schema, install/upgrade, verification logic, or a high blast radius — to independently verify requirements, scope, diff, tests, and regressions. Diff size alone is not a reason. Do not use as a general style reviewer or let it repair findings. Read-only for project files."
 tools: read, grep, find, ls, bash
-model: zai/glm-5.2
-fallbackModels: openai-codex/gpt-5.6-terra
 defaultContext: fresh
 inheritProjectContext: true
 inheritSkills: false
@@ -62,9 +60,13 @@ danach den Git-Status und melde jede neue oder veränderte Datei.
 ## Vorgehen
 
 1. Prüfe den Ausgangszustand und den Änderungsumfang:
-   - `git status --short`
-   - `git diff --stat`
-   - danach nur relevante dateibezogene Diffs
+   - Enthält der Auftrag bereits einen Diff-Text, überspringe die eigene
+     Neubeschaffung per `git status`/`git diff` und fahre direkt mit
+     Schritt 2 fort — auch wenn der Auftrag Bash nicht ausdrücklich
+     verbietet. Das gilt unabhängig vom eigenen Tool-Zugriff.
+   - Andernfalls (kein Diff mitgegeben, oder Aktualität muss geprüft
+     werden): `git status --short`, `git diff --stat`, danach nur
+     relevante dateibezogene Diffs.
 2. Erstelle eine kurze Zuordnung:
    - Anforderung
    - Implementierung

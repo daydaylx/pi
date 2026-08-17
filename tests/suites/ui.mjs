@@ -265,11 +265,56 @@ export const uiSections = {
         thinkingEntries.some((entry) => entry.value === "xhigh"),
         "Thinking menu exposes every manual level",
       );
+      assert(
+        thinkingEntries.some((entry) => entry.value === "max"),
+        "Thinking menu exposes max as its own level",
+      );
+      eq(
+        thinkingEntries.map((entry) => entry.value),
+        [...thinkingMenu.THINKING_LEVELS],
+        "Thinking menu lists the complete scale in order",
+      );
       eq(
         thinkingEntries.find((entry) => entry.current)?.value,
         "high",
         "Thinking menu marks the active level",
       );
+      // Qwen3.8-Max declares xhigh but not max; the menu shows the gap as a
+      // disabled entry instead of renumbering the scale.
+      const qwenMaxMap = {
+        minimal: null,
+        low: "low",
+        medium: "medium",
+        high: null,
+        xhigh: "xhigh",
+        max: null,
+      };
+      const clampedMenu = thinkingMenu.buildThinkingMenu(
+        "xhigh",
+        (level) => qwenMaxMap[level] !== null,
+      );
+      eq(
+        clampedMenu.find((entry) => entry.value === "max")?.disabled,
+        true,
+        "an unsupported max stays visible but disabled",
+      );
+      eq(
+        clampedMenu.find((entry) => entry.value === "xhigh")?.disabled,
+        false,
+        "xhigh stays selectable where max is unavailable",
+      );
+      const noExtendedMapMenu = thinkingMenu.buildThinkingMenu(
+        "medium",
+        (level) =>
+          ["off", "minimal", "low", "medium", "high"].includes(level),
+      );
+      for (const level of ["xhigh", "max"]) {
+        eq(
+          noExtendedMapMenu.find((entry) => entry.value === level)?.disabled,
+          true,
+          `${level} stays disabled without an explicit model mapping`,
+        );
+      }
 
       const cwd = mkdtempSync(path.join(tmpdir(), "pi-control-center-"));
       try {
@@ -304,7 +349,8 @@ export const uiSections = {
           model: {
             provider: "openai-codex",
             id: "gpt-5.4",
-            thinkingLevelMap: {},
+            reasoning: true,
+            thinkingLevelMap: { xhigh: "xhigh" },
           },
         });
         context.ui.custom = async () => {

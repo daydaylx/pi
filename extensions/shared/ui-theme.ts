@@ -21,7 +21,8 @@ export type Tone =
   | "thinkingLow"
   | "thinkingMedium"
   | "thinkingHigh"
-  | "thinkingXhigh";
+  | "thinkingXhigh"
+  | "thinkingMax";
 
 /**
  * Renders one status segment for a TUI bar. Segments are told apart by their

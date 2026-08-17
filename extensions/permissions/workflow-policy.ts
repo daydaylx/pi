@@ -173,7 +173,7 @@ export function planModeBashGuard(
     : {
         blocked: true,
         reason:
-          "Planmodus: Dieses Shell-Kommando ist während der Planung nicht nachweislich rein diagnostisch (z. B. Tests, Typecheck, Lint ohne --fix, git status/diff).",
+          "Planmodus: Dieses Shell-Kommando ist während der Planung nicht erlaubt. Bash ist auf git status/diff/log, rg, find sowie eine kleine Gruppe reiner Lesewerkzeuge (pwd, ls, cat, head, tail, wc, stat, du, df, tree, sort/uniq) begrenzt — keine Verkettung, keine Redirections.",
       };
 }
 

@@ -949,10 +949,26 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
 
 // Plan Mode deliberately has a small, direct git allowlist. These commands
 // only inspect repository state and never run a project-defined script.
-const PLAN_MODE_SAFE_GIT_SUBCOMMANDS = new Set([
-  "status",
-  "diff",
-  "log",
+const PLAN_MODE_SAFE_GIT_SUBCOMMANDS = new Set(["status", "diff", "log"]);
+
+// Read-only system tools already vetted as flag-safe by classifyToolSegment
+// (via PLAN_SIMPLE_COMMANDS or find's dedicated branch). Unlike npm/pnpm/yarn
+// scripts, none of these depend on project content to decide whether they
+// mutate anything, so trusting the literal executable name carries no more
+// risk here than it already does for `git`/`rg`.
+const PLAN_MODE_DIAGNOSTIC_TOOLS = new Set([
+  "pwd",
+  "ls",
+  "cat",
+  "head",
+  "tail",
+  "wc",
+  "stat",
+  "du",
+  "df",
+  "tree",
+  "sort",
+  "uniq",
 ]);
 
 function isPlanModeSafeGitCommand(tokens: string[]): boolean {
@@ -979,13 +995,20 @@ function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
       isPlanModeSafeGitCommand(tokens)
     );
   }
-  return executable === "rg" && classifyToolSegment(executable, tokens);
+  if (executable === "rg" || executable === "find") {
+    return classifyToolSegment(executable, tokens);
+  }
+  if (PLAN_MODE_DIAGNOSTIC_TOOLS.has(executable)) {
+    return classifyToolSegment(executable, tokens);
+  }
+  return false;
 }
 
 /**
  * Is this bash command safe to run while Plan Mode is active? Only the
- * explicit Git inspection commands and ripgrep pass; project scripts are
- * never trusted merely because they sound like checks.
+ * explicit Git inspection commands, ripgrep, and a small set of read-only,
+ * non-script system tools (PLAN_MODE_DIAGNOSTIC_TOOLS, `find`) pass; project
+ * scripts are never trusted merely because they sound like checks.
  */
 export function isPlanModeDiagnosticCommand(
   command: string,

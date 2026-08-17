@@ -8,6 +8,7 @@ export const THINKING_LEVELS = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ] as const;
 
 export type SelectableThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -26,6 +27,7 @@ const THINKING_LEVEL_LABEL: Record<SelectableThinkingLevel, string> = {
   medium: "Mittel",
   high: "Hoch",
   xhigh: "Sehr hoch",
+  max: "Maximum",
 };
 
 const THINKING_LEVEL_DESCRIPTION: Record<SelectableThinkingLevel, string> = {
@@ -35,6 +37,7 @@ const THINKING_LEVEL_DESCRIPTION: Record<SelectableThinkingLevel, string> = {
   medium: "Ausgewogenes Nachdenken für normale Aufgaben",
   high: "Gründliches Nachdenken für anspruchsvolle Aufgaben",
   xhigh: "Maximales Nachdenken für die komplexesten Aufgaben",
+  max: "Absolute Höchststufe für maximale Denktiefe",
 };
 
 export function thinkingLabel(level: ThinkingLevel): string {
@@ -45,8 +48,8 @@ export function thinkingLabel(level: ThinkingLevel): string {
 
 /**
  * A level the active model does not implement is shown disabled rather than
- * hidden: the list then always describes the same six steps, and the gap says
- * "this model cannot" instead of silently renumbering the scale.
+ * hidden: the list then always describes the same seven steps, and the gap
+ * says "this model cannot" instead of silently renumbering the scale.
  */
 export function buildThinkingMenu(
   current: ThinkingLevel,

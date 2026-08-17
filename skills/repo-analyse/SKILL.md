@@ -7,6 +7,8 @@ description: "Analysiere ein Software-Repository: Struktur, Technologien, Einsti
 
 Untersuche das angefragte Repository zunächst ohne Änderungen. Respektiere `AGENTS.md` und die aktive Permission-Policy.
 
+- Für Code- und Dateisuche die nativen `grep`- und `find`-Tools verwenden, nicht `bash rg`/`git grep`/`find` (siehe `AGENTS.md`, Abschnitt "Kontextdisziplin") — sie sind vom Plan-Modus-Gate nicht betroffen und liefern strukturierte Treffer.
+- Bei unbekanntem Repository-Bereich oder unklarer Änderungssurface eine Delegation an `investigator` erwägen, statt die gesamte Recherche seriell im Hauptkontext durchzuführen (siehe `AGENTS.md`, Abschnitt "Subagenten" / Delegationsmuster).
 - Verschaffe dir einen Überblick über Struktur, Sprachen, Frameworks, Build-Konfiguration und Abhängigkeiten.
 - Finde Einstiegspunkte, zentrale Konfigurationen und erkennbare Architekturmuster.
 - Benenne technische Risiken, Auffälligkeiten und Informationslücken; behaupte keine Fakten ohne Fundstelle.
