@@ -4,7 +4,9 @@ import { importModule as load } from "../shared/jiti-loader.mjs";
 const workflowPolicy = await load("extensions/permissions/workflow-policy.ts");
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
 const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
-const subagentGuard = await load("extensions/setup-core/subagent-output-guard.ts");
+const subagentGuard = await load(
+  "extensions/setup-core/subagent-output-guard.ts",
+);
 const modelFallback = await load(
   "npm/node_modules/pi-subagents/src/runs/shared/model-fallback.ts",
 );
@@ -565,37 +567,35 @@ await test("plan mode guards hold even under an active YOLO level", () => {
     "a write outside the plan file stays blocked under YOLO",
   );
   assert(
-    workflowPolicy
-      .planModeMutationGuard(
-        planning,
-        "yolo",
-        { toolName: "bash", input: { command: "npm test" } },
-        cwd,
-      )
-      .blocked,
+    workflowPolicy.planModeMutationGuard(
+      planning,
+      "yolo",
+      { toolName: "bash", input: { command: "npm test" } },
+      cwd,
+    ).blocked,
     "a mutating shell call stays blocked under YOLO",
   );
   assert(
-    !workflowPolicy
-      .planModeMutationGuard(
-        planning,
-        "yolo",
-        { toolName: "bash", input: { command: "git status --short" } },
-        cwd,
-      )
-      .blocked,
+    !workflowPolicy.planModeMutationGuard(
+      planning,
+      "yolo",
+      { toolName: "bash", input: { command: "git status --short" } },
+      cwd,
+    ).blocked,
     "diagnostic shell stays available under YOLO",
   );
   assert(
-    !workflowPolicy
-      .planModeMutationGuard(planning, "readonly", writeEvent, cwd)
+    !workflowPolicy.planModeMutationGuard(planning, "readonly", writeEvent, cwd)
       .blocked,
     "readonly still hands the decision to the permission level",
   );
   assert(
-    !workflowPolicy
-      .planModeMutationGuard({ mode: "work" }, "yolo", writeEvent, cwd)
-      .blocked,
+    !workflowPolicy.planModeMutationGuard(
+      { mode: "work" },
+      "yolo",
+      writeEvent,
+      cwd,
+    ).blocked,
     "outside plan mode YOLO keeps its ordinary meaning",
   );
 });
@@ -655,6 +655,43 @@ await test("verifier delegations require the full inspection contract", () => {
   assert(
     budgeted.blocked && budgeted.reason.includes("turnBudget"),
     "a per-run turnBudget is refused for verifier delegations",
+  );
+  const overridden = {
+    agent: "verifier",
+    task: completeTask,
+    acceptance: "reviewed",
+  };
+  assert(
+    !assess(overridden).blocked,
+    "an explicit acceptance:'reviewed' is normalized, not blocked",
+  );
+  eq(
+    overridden.acceptance.level,
+    "none",
+    "the package acceptance system is disabled for verifier delegations",
+  );
+  assert(
+    typeof overridden.acceptance.reason === "string" &&
+      overridden.acceptance.reason.trim().length > 0,
+    "the acceptance override carries a non-empty reason (required to disable the package's level check)",
+  );
+  const noAcceptance = { agent: "verifier", task: completeTask };
+  assess(noAcceptance);
+  eq(
+    noAcceptance.acceptance.level,
+    "none",
+    "acceptance is normalized even when the caller omits it, closing the implicit inferLevel() escalation",
+  );
+  const otherRole = {
+    agent: "investigator",
+    task: "anything",
+    acceptance: "reviewed",
+  };
+  assess(otherRole);
+  eq(
+    otherRole.acceptance,
+    "reviewed",
+    "the acceptance override only applies to verifier delegations",
   );
 });
 

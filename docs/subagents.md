@@ -31,7 +31,7 @@ besitzt `edit` oder `write`. `debugger` und `verifier` dürfen technisch Shell
 ausführen, ihre Profile verbieten aber ausdrücklich Projektänderungen; der
 Hauptagent bleibt alleiniger regulärer Patch-Eigentümer.
 
-`agents/verifier.md` läuft auf `zai/glm-5.2` mit
+`agents/verifier.md` läuft auf `anthropic/claude-sonnet-5` mit
 `openai-codex/gpt-5.6-terra` als `fallbackModels`. Beide Modell-IDs stehen in
 `settings.enabledModels`, und der Fork wertet `fallbackModels` aus; sonst wäre
 der Fallback eine Angabe ohne Wirkung.
@@ -145,11 +145,33 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
   (`isRetryableModelFailure` im Paket), nie bei Timeout, Turn-Budget oder
   einem `FAIL`-Urteil; Tests in `tests/workflow-mode/permissions.test.mjs`
   zementieren das gegen die installierte Paketversion.
-- **Bekannter Befund (Paket-Drift):** Das installierte `pi-subagents`
-  (`npm/node_modules`) kennt den in `extensions/subagent/config.json`
-  gesetzten Wert `toolSchemaMode: "harness"` nicht; das reduzierte Schema
-  ist dort faktisch nicht aktiv. Die Verifier-Erzwingung liegt deshalb in
-  Auroras Guard-Schicht und wirkt unabhängig davon. Die Reparatur der
+- Jede Verifier-Delegation bekommt `acceptance: { level: "none", reason: … }`
+  von `verifier-policy.ts` erzwungen, unabhängig davon, was der Aufrufer
+  übergeben hat oder ob er `acceptance` weggelassen hat. Grund: Das
+  installierte `pi-subagents`-Paket eskaliert Task-Text sonst automatisch
+  (`inferLevel()`) auf `"reviewed"` (verlangt eine zusätzliche unabhängige
+  Prüfrolle, die im aktuellen 3-Rollen-Modell bewusst nicht existiert,
+  Entscheidung 011) oder `"checked"` (verlangt
+  Evidenz wie `tests-added`, die ein read-only Verifier nie liefern kann) —
+  beides führt zu einem garantierten `exit:1` nach vollem Timeout, ohne dass
+  der Verifier je ein Urteil bilden konnte. Aurora erzwingt Vollständigkeit
+  und Urteil bereits über diese Policy und `subagent-output-guard.ts`; das
+  Paket-Acceptance-System ist für den Verifier redundant.
+  Siehe `docs/decisions/017-verifier-acceptance-none.md`.
+- **Bekannter Befund (Paket-Drift):** `pi list` zeigt, dass die
+  Live-Runtime ausschließlich den in `settings.json` (`packages`)
+  gepinnten Git-Fork lädt (`~/.pi/agent/git/github.com/daydaylx/pi-subagents`).
+  Dieser Klon steht jedoch tatsächlich auf einem älteren Commit als dem
+  konfigurierten Pin, weil nach dem letzten Repin kein
+  `pi update --extensions`/`--all` gelaufen ist — die von Pi dokumentierte
+  Reconciliation auf den Pin-Commit fand nie statt. `npm/node_modules/
+pi-subagents` (npm-Registry) ist ein davon unabhängiges, gleichnamiges
+  Paket: es ist nur eine gewöhnliche Abhängigkeit von Auroras eigenem
+  `npm/`-Testbaum (`npm --prefix npm run test`/`verify`) und wird von
+  keiner echten `pi`-Sitzung geladen. Der in `extensions/subagent/config.json`
+  gesetzte Wert `toolSchemaMode: "harness"` bleibt davon unberührt wirkungslos,
+  solange der geladene Klon ihn nicht kennt. Die Verifier-Erzwingung liegt
+  deshalb in Auroras Guard-Schicht und wirkt unabhängig davon. Die Reparatur der
   Paketinstallation ist ein separater Folgeschritt.
   Siehe `docs/decisions/015-verifier-delegation-guard.md`.
 

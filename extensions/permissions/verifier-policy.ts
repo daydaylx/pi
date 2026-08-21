@@ -81,5 +81,20 @@ export function assessVerifierDelegation(
   if (errors.length > 0) {
     return { blocked: true, reason: errors.join(" ") };
   }
+  // Das installierte pi-subagents-Paket eskaliert je nach Task-Wortlaut
+  // (explizit oder implizit über inferLevel()) auf Acceptance-Level wie
+  // "reviewed" (verlangt einen "reviewer"-Agenten, den Aurora bewusst nicht
+  // hat) oder "checked" (verlangt Evidenz wie "tests-added", die ein
+  // read-only Verifier nie liefern kann). Beides führt zu einem
+  // garantierten exit:1 nach dem vollen Timeout, ohne dass der Verifier
+  // selbst je ein Urteil bilden konnte. Aurora erzwingt Vollständigkeit und
+  // Urteil bereits über diese Policy und subagent-output-guard.ts — das
+  // Paket-Acceptance-System ist für den Verifier redundant und wird daher
+  // unabhängig vom Aufrufer-Input auf "none" normalisiert.
+  input.acceptance = {
+    level: "none",
+    reason:
+      "Aurora erzwingt Verifier-Vollständigkeit und -Urteil bereits über verifier-policy.ts und subagent-output-guard.ts; das Paket-Acceptance-System ist für den Verifier redundant und darf einen sonst erfolgreichen Lauf nicht per Report-Format oder Evidenzanforderung zu Fall bringen.",
+  };
   return PERMITTED;
 }

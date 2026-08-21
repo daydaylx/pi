@@ -50,30 +50,24 @@
     "zai-coding-cn/glm-5.3"
   ],
   "packages": [
-    "git:github.com/daydaylx/pi-subagents@33b4ff10e7374ced7830e586c859a911bf831547"
+    "git:github.com/daydaylx/pi-subagents@54c701242710b1dab39a47f23ef8020f40b82bd4"
   ],
   "subagents": {
     "disableBuiltins": true,
     "agentOverrides": {
       "investigator": {
         "model": "qwen-token-plan-individual/qwen3.7-plus",
-        "fallbackModels": [
-          "qwen-token-plan-individual/qwen3.8-max"
-        ]
+        "fallbackModels": ["qwen-token-plan-individual/qwen3.8-max"]
       },
       "debugger": {
         "model": "qwen-token-plan-individual/glm-5.2",
         "thinking": "max",
-        "fallbackModels": [
-          "qwen-token-plan-individual/qwen3.8-max"
-        ]
+        "fallbackModels": ["qwen-token-plan-individual/qwen3.8-max"]
       },
       "verifier": {
         "model": "anthropic/claude-sonnet-5",
         "thinking": "max",
-        "fallbackModels": [
-          "openai-codex/gpt-5.6-terra"
-        ]
+        "fallbackModels": ["openai-codex/gpt-5.6-terra"]
       }
     },
     "modelScope": {

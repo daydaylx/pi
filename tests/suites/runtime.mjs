@@ -585,7 +585,6 @@ export const runtimeSections = {
         for (const [name, version] of [
           ["pi-zentui", "0.3.0"],
           ["@ujjwalgrover/pi-catppuccin", "1.0.0"],
-          ["pi-subagents", "0.34.0"],
         ]) {
           eq(
             packageJson.dependencies?.[name],
@@ -598,6 +597,25 @@ export const runtimeSections = {
             name + " remains locked",
           );
         }
+        // pi-subagents is pinned to the same git-fork commit the live runtime
+        // loads (settings.json packages), not an npm-registry version — this
+        // closes the drift where the harness typechecked a different codebase
+        // than the one interactive sessions actually run. See
+        // docs/decisions/017-verifier-acceptance-none.md.
+        assert(
+          /^github:daydaylx\/pi-subagents#[0-9a-f]{40}$/.test(
+            packageJson.dependencies?.["pi-subagents"] ?? "",
+          ),
+          "pi-subagents is pinned to an exact git-fork commit in the harness",
+        );
+        assert(
+          typeof lock.packages?.["node_modules/pi-subagents"]?.resolved ===
+            "string" &&
+            lock.packages["node_modules/pi-subagents"].resolved.includes(
+              "daydaylx/pi-subagents.git#",
+            ),
+          "pi-subagents is locked to the daydaylx fork, not the npm registry",
+        );
         return;
       }
     });
