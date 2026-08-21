@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { ellipsizeMiddle } from "../shared/paths.ts";
 
 /**
  * Pure, terminal-cell-safe display form for the session cwd.
@@ -12,7 +12,6 @@ export function compactCwd(
   maxColumns: number,
   homeDirectory?: string,
 ): string {
-  const available = Math.max(1, Math.floor(maxColumns));
   const home = homeDirectory?.replace(/\/+$/, "");
   const normalized = cwd || "/";
   const withinHome = Boolean(
@@ -24,18 +23,5 @@ export function compactCwd(
       : `~${normalized.slice(home!.length)}`
     : normalized;
 
-  if (visibleWidth(display) <= available) return display;
-
-  const parts = display.split("/").filter(Boolean);
-  const leaf = parts.at(-1) ?? display;
-  const rooted = display.startsWith("/");
-  const prefix = display.startsWith("~") ? "~" : rooted ? "/" : "";
-  const ellipsized = prefix
-    ? `${prefix}/…/${leaf}`
-    : `…/${leaf}`;
-  if (visibleWidth(ellipsized) <= available) return ellipsized;
-
-  const short = prefix ? `${prefix}/${leaf}` : leaf;
-  if (visibleWidth(short) <= available) return short;
-  return truncateToWidth(leaf, available, "…");
+  return ellipsizeMiddle(display, maxColumns);
 }

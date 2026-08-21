@@ -46,6 +46,7 @@ export function normalizePermissionLevel(
 export const UI_STATUS_KEYS = {
   permissions: "permissions",
   workflow: "workflow",
+  recovery: "recovery",
 } as const;
 
 export type PermissionRiskStatusValue =

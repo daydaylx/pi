@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { footerTier } from "../shared/layout.ts";
+import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
 
 /** The compact running marker shared by tool rows. */
 export const RUNNING_GLYPH = "◌";
@@ -67,7 +68,7 @@ const PRESENTATIONS: Record<ActivityToolKind, ToolPresentation> = {
   test: { glyph: "▹", label: "Testen" },
   verification: { glyph: "✓", label: "Prüfen" },
   subagent: { glyph: "◉", label: "Subagent" },
-  wait: { glyph: "◌", label: "Warten" },
+  wait: { glyph: "⋯", label: "Warten" },
   web: { glyph: "◎", label: "Web" },
   generic: { glyph: RUNNING_GLYPH, label: "Werkzeug" },
 };
@@ -187,25 +188,32 @@ export function classifyTool(
   }
 }
 
-function pathWithPosition(args: unknown): string | undefined {
+function pathWithPosition(cwd: string, args: unknown): string | undefined {
   const path = firstString(args, ["path"]);
   if (!path) return undefined;
+  const relPath = toWorkspaceRelative(cwd, path);
   const line = numberValue(args, "line");
   const character = numberValue(args, "character");
-  if (line === undefined || character === undefined) return path;
-  return `${path}:${line + 1}:${character + 1}`;
+  if (line === undefined || character === undefined) return relPath;
+  return `${relPath}:${line + 1}:${character + 1}`;
 }
 
-function lspTarget(toolName: string, args: unknown): string | undefined {
+function lspTarget(
+  cwd: string,
+  toolName: string,
+  args: unknown,
+): string | undefined {
   switch (toolName.toLowerCase()) {
-    case "lsp_diagnostics":
-      return `Diagnosen · ${firstString(args, ["path"]) ?? ""}`.trim();
+    case "lsp_diagnostics": {
+      const path = firstString(args, ["path"]);
+      return `Diagnosen · ${path ? toWorkspaceRelative(cwd, path) : ""}`.trim();
+    }
     case "lsp_definition":
-      return `Definition · ${pathWithPosition(args) ?? ""}`.trim();
+      return `Definition · ${pathWithPosition(cwd, args) ?? ""}`.trim();
     case "lsp_references":
-      return `Referenzen · ${pathWithPosition(args) ?? ""}`.trim();
+      return `Referenzen · ${pathWithPosition(cwd, args) ?? ""}`.trim();
     case "lsp_hover":
-      return `Info · ${pathWithPosition(args) ?? ""}`.trim();
+      return `Info · ${pathWithPosition(cwd, args) ?? ""}`.trim();
     case "lsp_workspace_symbols": {
       const query = firstString(args, ["query"]);
       return query
@@ -258,19 +266,22 @@ function verificationTarget(args: unknown): string | undefined {
   return undefined;
 }
 
-function searchTarget(toolName: string, args: unknown): string | undefined {
+function searchTarget(
+  cwd: string,
+  toolName: string,
+  args: unknown,
+): string | undefined {
   const query = firstString(args, ["query", "pattern"]);
   if (query) return quote(query);
-  return toolName.toLowerCase() === "find"
-    ? firstString(args, ["path"])
-    : undefined;
+  if (toolName.toLowerCase() !== "find") return undefined;
+  const path = firstString(args, ["path"]);
+  return path ? toWorkspaceRelative(cwd, path) : undefined;
 }
 
-function genericTarget(args: unknown): string | undefined {
+function genericTarget(cwd: string, args: unknown): string | undefined {
+  const path = firstString(args, ["path", "file_path", "file"]);
+  if (path) return toWorkspaceRelative(cwd, path);
   return firstString(args, [
-    "path",
-    "file_path",
-    "file",
     "query",
     "pattern",
     "url",
@@ -291,19 +302,25 @@ function waitTarget(args: unknown): string | undefined {
 export function describeToolActivity(
   toolName: string,
   args: unknown,
+  cwd: string,
 ): Pick<ActiveToolView, "kind" | "target"> {
   const kind = classifyTool(toolName, args);
   switch (kind) {
     case "read":
-    case "edit":
-      return { kind, target: firstString(args, ["path"]) };
+    case "edit": {
+      const path = firstString(args, ["path"]);
+      return {
+        kind,
+        target: path ? toWorkspaceRelative(cwd, path) : undefined,
+      };
+    }
     case "search":
-      return { kind, target: searchTarget(toolName, args) };
+      return { kind, target: searchTarget(cwd, toolName, args) };
     case "bash":
     case "test":
       return { kind, target: normalizedCommand(args) };
     case "lsp":
-      return { kind, target: lspTarget(toolName, args) };
+      return { kind, target: lspTarget(cwd, toolName, args) };
     case "verification":
       return {
         kind,
@@ -318,7 +335,7 @@ export function describeToolActivity(
       return { kind, target: waitTarget(args) };
     case "web":
     case "generic":
-      return { kind, target: genericTarget(args) };
+      return { kind, target: genericTarget(cwd, args) };
   }
 }
 
@@ -431,7 +448,6 @@ export function renderActiveTools(
       tool.kind === undefined || tool.kind === "generic"
         ? toolPresentation(tool.name)
         : PRESENTATIONS[tool.kind];
-    const target = tool.target ? ` · ${theme.fg("muted", tool.target)}` : "";
     // A checkmark would falsely claim success while the verification is still
     // running. Completed tools disappear from this transient surface, so only
     // Pi's real result renderer may show the success glyph.
@@ -439,24 +455,26 @@ export function renderActiveTools(
       tool.kind === "verification" ? RUNNING_GLYPH : presentation.glyph;
     const status = toolStatus(tool, now);
     const marker = theme.fg(status.tone, glyph);
-    if (wide) {
-      const type = padToWidth(theme.bold(presentation.label), 12);
-      const suffix = ` · ${theme.fg(status.tone, status.label)} · ${theme.fg("dim", `${elapsed}s`)}`;
-      const targetWidth = Math.max(
-        1,
-        available - visibleWidth(`${marker} ${type} `) - visibleWidth(suffix),
-      );
-      const target = theme.fg(
-        "muted",
-        padToWidth(
-          truncateToWidth(tool.target ?? "—", targetWidth, "…"),
-          targetWidth,
-        ),
-      );
-      return `${marker} ${type} ${target}${suffix}`;
+    const label = compact
+      ? theme.bold(presentation.label)
+      : padToWidth(theme.bold(presentation.label), 12);
+    const suffix = ` · ${theme.fg(status.tone, status.label)} · ${theme.fg("dim", `${elapsed}s`)}`;
+    if (!tool.target) {
+      return truncateToWidth(`${marker} ${label}${suffix}`, available, "…");
     }
-    const line = `${marker} ${theme.bold(presentation.label)}${target} · ${theme.fg(status.tone, status.label)} · ${theme.fg("dim", `${elapsed}s`)}`;
-    return truncateToWidth(line, available, "…");
+    // The target field is ellipsized on its own, leaf-preserving, so a long
+    // path never eats into the status/runtime suffix — the one part a
+    // failing tool most needs visible.
+    const targetWidth = Math.max(
+      1,
+      available - visibleWidth(`${marker} ${label} `) - visibleWidth(suffix),
+    );
+    const shortened = ellipsizeMiddle(tool.target, targetWidth);
+    const target = theme.fg(
+      "muted",
+      wide ? padToWidth(shortened, targetWidth) : shortened,
+    );
+    return `${marker} ${label} ${target}${suffix}`;
   });
   const hidden = tools.slice(visible.length);
   if (hidden.length > 0)
@@ -472,10 +490,12 @@ export function renderActiveTools(
 
 function subagentTone(
   status: SubagentInfo["status"],
-): "success" | "warning" | "error" | "muted" {
+): "accent" | "warning" | "error" | "muted" {
   switch (status) {
+    // Matches the "running" tone of a normal tool row — green stays reserved
+    // for real, finished success (see themes/aurora-night.json `success`).
     case "running":
-      return "success";
+      return "accent";
     case "paused":
       return "warning";
     case "needs_attention":

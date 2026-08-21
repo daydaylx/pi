@@ -39,6 +39,8 @@ import {
   loadSetupConfig,
   type PolicyAction as ConfiguredPolicyAction,
 } from "../setup-core/config.ts";
+import { isPlanningMode } from "../shared/workflow-mode.ts";
+import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import { permissionWarning } from "./tool-policy.ts";
 import type { ThinkingControl } from "./thinking-control.ts";
 
@@ -62,6 +64,7 @@ export interface ConfiguredToolPolicy {
 }
 
 export interface PermissionSession {
+  readonly pi: ExtensionAPI;
   level(): PermissionLevel;
   configured(): ConfiguredToolPolicy;
   context(): ExtensionContext | undefined;
@@ -143,7 +146,33 @@ export function createPermissionSession(
     });
   }
 
+  /**
+   * YOLO ist im Planmodus gesperrt: Der Eintritt wird ohne jede
+   * Zustandsänderung verweigert und auditierbar protokolliert. Der Austritt
+   * aus einem bestehenden YOLO_OVERRIDE bleibt jederzeit möglich.
+   */
+  function yoloDeniedInPlanMode(
+    ctx: ExtensionContext,
+    source: "command" | "shortcut" | "session",
+  ): boolean {
+    const mode = requestWorkflowCapabilities(pi.events).mode;
+    if (!isPlanningMode(mode)) return false;
+    pi.appendEntry("permission-transition-denied", {
+      timestamp: new Date().toISOString(),
+      source,
+      attemptedLevel: "yolo",
+      mode,
+      reason: "YOLO ist im Planmodus gesperrt.",
+    });
+    ctx.ui.notify(
+      "YOLO ist im Planmodus gesperrt. Wechsle zuerst explizit nach work (Shift+Tab).",
+      "warning",
+    );
+    return true;
+  }
+
   const session: PermissionSession = {
+    pi,
     level: () => permissionLevel,
     configured: () => configuredPolicy,
     context: () => activeContext,
@@ -170,6 +199,9 @@ export function createPermissionSession(
 
     async toggleYolo(ctx, source, epoch = sessionEpoch) {
       if (epoch !== sessionEpoch) return;
+      if (permissionState !== "YOLO_OVERRIDE") {
+        if (yoloDeniedInPlanMode(ctx, source)) return;
+      }
       if (permissionState === "YOLO_OVERRIDE") {
         permissionState = selectedPermissionState;
         permissionLevel = selectedPermissionLevel;

@@ -94,18 +94,23 @@ Delegated Question:
 <konkrete Teilfrage an den Subagenten>
 ```
 
-Für `verifier` zusätzlich:
+Für `verifier` zusätzlich — diese Abschnitte sind keine Empfehlung, sondern
+werden von der Guard-Schicht (`extensions/permissions/verifier-policy.ts`)
+vor dem Start geprüft; ein unvollständiger Auftrag wird geblockt:
 
 ```text
 Implementation / Diff to verify:
 <geänderte Dateien bzw. relevanter Diff, Implementation Surface>
 
 Pre-existing workspace state (vor der ersten Änderung dieses Tasks erfasst):
-<Ausgabe von `git status --short` zu Taskbeginn, oder „clean" falls keine>
+<Ausgabe von `git status --short` zu Taskbeginn, oder „clean“ falls keine>
 
 Pre-existing dirty-path fingerprints:
 <Content-Fingerprint je vorbestehend geändertem Pfad, inklusive Marker für
 fehlende Dateien; mindestens für jeden Pfad, den der Task ebenfalls ändert>
+
+Acceptance / Akzeptanzkriterien:
+<woran die Verifikation die Umsetzung misst>
 ```
 
 `git status --short` allein ist keine Inhaltsbaseline: Es zeigt nicht, ob der
@@ -116,16 +121,37 @@ Mindestens jeder vorbestehend schmutzige Pfad, den der Task ebenfalls berührt,
 muss damit abgedeckt sein; ohne diesen Nachweis bleibt eine Same-Path-
 Abgrenzung ausdrücklich unverifizierbar.
 
-Für den `subagent`-Tool-Aufruf selbst kein eng geschätztes `turnBudget` raten:
-`agents/verifier.md` setzt bereits ein großzügiges `timeoutMs` (aktuell
-1200000 ms); darauf verlassen statt `maxTurns`/`graceTurns` aus der Patchgröße
-abzuleiten. Wird dennoch ein `turnBudget` gesetzt, großzügig wählen — nicht
-knapper, als eine vollständige Verifikation in diesem Repo (mehrere Suiten,
-700+ Tests) realistisch braucht.
+Für den `subagent`-Tool-Aufruf selbst gilt: kein `turnBudget`. Das ist
+inzwischen technisch erzwungen — ein per Run gesetztes `turnBudget` wird für
+`verifier`-Delegationen vor dem Start geblockt. Maßgeblich ist ausschließlich
+das großzügige Profil-`timeoutMs` aus `agents/verifier.md` (aktuell
+1200000 ms).
 
 Das ist Kontextübergabe im vorhandenen `task`-Feld, kein neuer Zustand, keine
 ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
-„Eingabe, die du benötigst" dieselbe Struktur aus Empfängersicht.
+„Eingabe, die du benötigst“ dieselbe Struktur aus Empfängersicht.
+
+## Verifier-Zuverlässigkeit (technisch erzwungen)
+
+- Ein `verifier`-Aufruf ohne die Pflichtabschnitte oben oder mit einem
+  per Run gesetzten `turnBudget` wird vor dem Start geblockt.
+- Ein abgebrochener, zeitüberschrittener oder providerfehlerhafter Lauf
+  schreibt einen `verifier-run`-Session-Eintrag mit `status: "incomplete"`
+  und einen sichtbaren INCOMPLETE-Vorsatz im Tool-Result. Ein solcher Lauf
+  zählt nie als unabhängige Verifikation.
+- Ein fachliches `FAIL` bei erfolgreichem Lauf bleibt `completed` mit
+  `verdict: "FAIL"` — es wird nicht durch Wiederholung oder Fallback ersetzt.
+- Fallback-Modelle greifen nur bei Provider-/Netzwerk-/Auth-Fehlern
+  (`isRetryableModelFailure` im Paket), nie bei Timeout, Turn-Budget oder
+  einem `FAIL`-Urteil; Tests in `tests/workflow-mode/permissions.test.mjs`
+  zementieren das gegen die installierte Paketversion.
+- **Bekannter Befund (Paket-Drift):** Das installierte `pi-subagents`
+  (`npm/node_modules`) kennt den in `extensions/subagent/config.json`
+  gesetzten Wert `toolSchemaMode: "harness"` nicht; das reduzierte Schema
+  ist dort faktisch nicht aktiv. Die Verifier-Erzwingung liegt deshalb in
+  Auroras Guard-Schicht und wirkt unabhängig davon. Die Reparatur der
+  Paketinstallation ist ein separater Folgeschritt.
+  Siehe `docs/decisions/015-verifier-delegation-guard.md`.
 
 ## Ergebnisbudget und Artefakte
 

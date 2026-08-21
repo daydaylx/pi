@@ -128,26 +128,30 @@ Hauptagenten. Es gibt keine verschachtelte Delegation.
 
 Fresh-Context-Subagenten sehen den Parent-Dialog nicht. Das `task`-Feld trägt
 deshalb den ursprünglichen Nutzerauftrag wortgetreu, dazu Nicht-Ziele und die
-konkrete Teilfrage. Für den `verifier` ist zusätzlich Pflicht:
+konkrete Teilfrage.
 
-- **Der zu prüfende Diff-Text selbst**, nicht nur eine Dateiliste. Ohne ihn
-  beschafft sich der Verifier ihn per `git status`/`git diff` selbst und
-  verliert dabei Turns aus seinem knappen Budget — ein häufiger Grund für
-  ergebnislose Turn-Budget-Abbrüche.
-- Die vor der ersten Änderung erfasste Workspace-Baseline samt
-  Content-Fingerprints der vorbestehend schmutzigen Pfade — `git status
---short` allein ist keine Inhaltsbaseline.
+Für den `verifier` wird die vollständige Übergabe technisch erzwungen, nicht
+nur empfohlen: Ein Aufruf ohne Ziel, Scope, Diff, Baseline und
+Akzeptanzkriterien oder mit einem per Run gesetzten `turnBudget` wird vor dem
+Start geblockt. Pflicht sind deshalb die Abschnitte der Vorlage aus
+`docs/subagents.md` — insbesondere der zu prüfende Diff-Text selbst (nicht nur
+eine Dateiliste) und die vor der ersten Änderung erfasste Workspace-Baseline
+samt Content-Fingerprints vorbestehend schmutziger Pfade. Maßgebliches
+Zeitlimit ist ausschließlich das großzügige `timeoutMs` aus
+`agents/verifier.md`; ein eng geschätztes `turnBudget` ist verboten und wird
+abgelehnt.
 
-Die vollständige Vorlage, die Fingerprint-Regeln und die Laufzeitquellen
-stehen in `docs/subagents.md`. Für den `verifier`-Aufruf kein eng
-geschätztes `turnBudget` raten: `agents/verifier.md` setzt bereits ein
-großzügiges `timeoutMs` (1200000 ms) — ohne gesetztes `turnBudget` gilt nur
-dieses Wanduhr-Limit, ohne Turn-Zählung. Wird dennoch eines gesetzt,
-großzügig wählen, nie knapper als eine vollständige Verifikation
-realistisch braucht. Zwei weitere Stolpersteine: `toolBudget.block` sperrt
-Werkzeuge erst nach Überschreiten von `hard`, nicht ab dem ersten Aufruf —
-für ein hartes Bash-Verbot taugt es allein nicht; und `block` ist immer ein
-Array, auch bei genau einem Tool.
+Ein abgebrochener, zeitüberschrittener oder providerfehlerhafter
+`verifier`-Lauf wird als `INCOMPLETE` erfasst und zählt niemals als
+unabhängige Verifikation. Ein fachliches `FAIL` ist ein Befund und wird nicht
+durch Wiederholung oder Fallback „geheilt“. Fallback-Modelle greifen nur bei
+Provider-/Netzwerk-/Auth-Fehlern, nie bei einem `FAIL`-Urteil oder
+Turn-Budget-Überschreitung.
+
+Zwei technische Stolpersteine bleiben bestehen: `toolBudget.block` sperrt
+Werkzeuge erst nach Überschreiten von `hard`, nicht ab dem ersten Aufruf — für
+ein hartes Bash-Verbot taugt es allein nicht; und `block` ist immer ein Array,
+auch bei genau einem Tool.
 
 Ergebnisse kompakt synthetisieren und Belege, betroffene Dateien, Risiken,
 offene Fragen und Empfehlung nennen; keine vollständigen Unterhaltungen

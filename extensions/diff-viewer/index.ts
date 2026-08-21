@@ -1,6 +1,6 @@
 /** Verbesserte, session-basierte Diff-Darstellung für edit/write-Operationen. */
 import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -9,6 +9,7 @@ import type {
 import type { TUI } from "@earendil-works/pi-tui";
 import { Text } from "@earendil-works/pi-tui";
 import { catalogDescription } from "../shared/command-catalog.ts";
+import { toWorkspaceRelative } from "../shared/paths.ts";
 import type { DiffViewEntryData } from "./types.ts";
 import { ChangeTracker } from "./change-tracker.ts";
 import { computeFallbackDiff } from "./git-diff.ts";
@@ -35,19 +36,6 @@ async function readCurrentFile(
   } catch {
     return null;
   }
-}
-
-function displayPath(cwd: string, path: string): string {
-  const target = isAbsolute(path) ? path : resolve(cwd, path);
-  const relativePath = relative(cwd, target);
-  if (
-    relativePath &&
-    relativePath !== ".." &&
-    !relativePath.startsWith(`..${sep}`)
-  ) {
-    return relativePath;
-  }
-  return path;
 }
 
 export default function diffViewerExtension(pi: ExtensionAPI): void {
@@ -174,7 +162,7 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
     }
     if (expectedContent === undefined) return;
 
-    const path = displayPath(cwd, args.path);
+    const path = toWorkspaceRelative(cwd, args.path);
     const timestamp = Date.now();
     let preview: DiffViewEntryData | undefined;
     if (ctx.mode === "tui" && ctx.hasUI) {

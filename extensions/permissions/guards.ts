@@ -5,7 +5,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import { confirmAction } from "../shared/permission-dialog.ts";
-import { decideBash } from "../shared/permission-policy.ts";
+import { decideBash, isPlanModeDiagnosticCommand } from "../shared/permission-policy.ts";
+import { requestRecoveryStatus } from "../shared/recovery-capabilities.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import type { PermissionSession } from "./session-state.ts";
 import { decideTool } from "./tool-policy.ts";
@@ -15,9 +16,37 @@ import {
   automaticallyAllowedInPlanMode,
   planModeMutationGuard,
 } from "./workflow-policy.ts";
+import { assessVerifierDelegation } from "./verifier-policy.ts";
 import { toolPath } from "./tool-event.ts";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", ASK_USER_TOOL_NAME];
+
+/**
+ * Das Recovery-Gate sperrt nach einem fehlgeschlagenen oder unterbrochenen
+ * Turn mit möglicher Mutation genau die Werkzeuge, die den Workspace weiter
+ * verändern könnten. `recovery_check` bleibt als Entsperre frei. Die
+ * Entscheidung gilt unabhängig von der Zugriffsstufe — auch YOLO hebt sie
+ * nicht auf.
+ */
+function recoveryGateBlocks(
+  armed: boolean,
+  event: ToolCallEvent,
+  cwd: string,
+): boolean {
+  if (!armed) return false;
+  if (event.toolName === "write" || event.toolName === "edit") return true;
+  if (event.toolName !== "bash") return false;
+  const command = String((event.input as Record<string, unknown>).command ?? "");
+  return !isPlanModeDiagnosticCommand(command, cwd);
+}
+
+function recoveryBlockReason(reason: string | undefined): string {
+  const cause =
+    reason === "workspace-changed"
+      ? "Der Workspace hat sich seit dem letzten Recovery-Check verändert."
+      : "Der vorherige Turn wurde unterbrochen oder endete mit einem Fehler.";
+  return `Recovery-Gate aktiv: ${cause} Schreibzugriffe sind gesperrt, bis recovery_check den Workspace geprüft hat. Lesen und recovery_check bleiben erlaubt.`;
+}
 
 // Custom-/MCP-Tools ohne path/filePath-Feld (z. B. subagent) hätten sonst ein
 // leeres Subject und der Mensch würde blind bestätigen.
@@ -49,6 +78,17 @@ export function registerPermissionGuards(
     const assessment = assessWorkflowTool(event, ctx.cwd);
     if (assessment.blocked) {
       return { block: true, reason: assessment.reason };
+    }
+    const verifierAssessment = assessVerifierDelegation(event);
+    if (verifierAssessment.blocked) {
+      return { block: true, reason: verifierAssessment.reason };
+    }
+    // Das Recovery-Gate prüft vor der Planmodus-Freigabe, damit auch
+    // Schreibzugriffe auf die Plandatei nach einem Fehlturn nicht
+    // stillschweigend durchlaufen.
+    const recovery = requestRecoveryStatus(pi.events);
+    if (recoveryGateBlocks(recovery.armed, event, ctx.cwd)) {
+      return { block: true, reason: recoveryBlockReason(recovery.reason) };
     }
     if (automaticallyAllowedInPlanMode(workflow, event, ctx.cwd)) return;
 

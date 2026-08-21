@@ -11,20 +11,40 @@ import type {
   ExtensionContext,
   MessageUpdateEvent,
 } from "@earendil-works/pi-coding-agent";
+import { execFileSync } from "node:child_process";
+import { Type } from "typebox";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
+import {
+  RECOVERY_CAPABILITY_EVENTS,
+  type RecoveryStatusRequest,
+  type RecoveryStatusSnapshot,
+} from "../shared/recovery-capabilities.ts";
+import {
+  UI_STATUS_KEYS,
+  setTuiStatus,
+} from "../shared/workflow-status.ts";
+import { limitTextOutput } from "../shared/output-limits.ts";
+import {
+  customData,
+  gateRequiresInspection,
+  latestRecoveryGate,
+  type RecoveryGateState,
+} from "./recovery-state.ts";
 import type {
   CompactionBoundaryMarker,
   ErrorClass,
   FailureDiagnostic,
   OpenTurn,
+  RecoveryCheckedMarker,
   RecoveryRequiredMarker,
   TurnPhase,
   TurnSettledMarker,
   TurnStartMarker,
 } from "./types.ts";
+import { ERROR_MESSAGE_MAX } from "./types.ts";
 
-const SCHEMA_VERSION = 1 as const;
+const SCHEMA_VERSION = 2 as const;
 
 function contextPercent(ctx: ExtensionContext): number | null {
   return ctx.getContextUsage()?.percent ?? null;
@@ -47,11 +67,19 @@ function workspaceChanged(startFingerprint: string, cwd: string): boolean {
   );
 }
 
-function classifyFailure(errorMessage: string | undefined): {
+function classifyFailure(
+  errorMessage: string | undefined,
+  phase: TurnPhase,
+): {
   errorClass: ErrorClass;
   errorCode?: string;
 } {
   const message = errorMessage ?? "";
+  if (!message.trim() && phase.startsWith("streaming")) {
+    // Ein Streaming-Abbruch ohne Fehlertext darf nicht als unbekannter Fehler
+    // ohne Kontext erscheinen — die Phase selbst ist der Beleg.
+    return { errorClass: "stream", errorCode: "STREAM_PHASE" };
+  }
   const code = message.match(
     /\b(ECONNRESET|ECONNREFUSED|EPIPE|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ESOCKETTIMEDOUT)\b/,
   )?.[1];
@@ -85,6 +113,21 @@ function classifyFailure(errorMessage: string | undefined): {
   return { errorClass: "unknown" };
 }
 
+function truncateErrorMessage(message: string | undefined): string | undefined {
+  if (!message) return undefined;
+  return message.length > ERROR_MESSAGE_MAX
+    ? `${message.slice(0, ERROR_MESSAGE_MAX)}…`
+    : message;
+}
+
+function gitText(cwd: string, args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
 function phaseFromMessage(event: MessageUpdateEvent): TurnPhase | undefined {
   if (event.assistantMessageEvent.type.startsWith("text_")) {
     return "streaming_text";
@@ -108,18 +151,6 @@ function lastAssistantError(event: AgentEndEvent): string | undefined {
 
 function isMutatingTool(toolName: string): boolean {
   return toolName === "edit" || toolName === "write" || toolName === "bash";
-}
-
-function customData<T>(entry: unknown, customType: string): T | undefined {
-  if (!entry || typeof entry !== "object") return undefined;
-  const candidate = entry as {
-    type?: unknown;
-    customType?: unknown;
-    data?: unknown;
-  };
-  return candidate.type === "custom" && candidate.customType === customType
-    ? (candidate.data as T)
-    : undefined;
 }
 
 function latestRecoveryState(entries: readonly unknown[]): {
@@ -168,16 +199,53 @@ function recoveryInstruction(
 export default function resilienceExtension(pi: ExtensionAPI): void {
   let openTurn: OpenTurn | undefined;
   let sessionCwd = "";
+  let activeContext: ExtensionContext | undefined;
+  let gate: RecoveryGateState | undefined;
   let pendingRecovery:
     | { workspaceWasChanged: boolean; toolMayHaveMutatedWorkspace: boolean }
     | undefined;
+
+  /**
+   * Der Recovery-Status für Guard und UI. Ein geprüftes Gate bleibt nur
+   * offen, solange der Workspace-Fingerprint dem Prüfzeitpunkt entspricht.
+   */
+  function recoverySnapshot(): RecoveryStatusSnapshot {
+    if (!gate || !gateRequiresInspection(gate.required)) {
+      return { armed: false };
+    }
+    if (!gate.checked) {
+      return {
+        armed: true,
+        turnStartedAt: gate.required.turnStartedAt,
+        reason: gate.required.reason,
+      };
+    }
+    if (workspaceChanged(gate.checked.workspaceFingerprint, sessionCwd)) {
+      return {
+        armed: true,
+        turnStartedAt: gate.required.turnStartedAt,
+        reason: "workspace-changed",
+      };
+    }
+    return { armed: false };
+  }
+
+  function updateRecoveryStatus(): void {
+    if (!activeContext) return;
+    const snapshot = recoverySnapshot();
+    setTuiStatus(
+      activeContext,
+      UI_STATUS_KEYS.recovery,
+      snapshot.armed ? "⚠ Recovery-Check offen" : undefined,
+    );
+  }
 
   function appendFailure(
     ctx: ExtensionContext,
     errorMessage: string | undefined,
   ): void {
     if (!openTurn) return;
-    const classification = classifyFailure(errorMessage);
+    const classification = classifyFailure(errorMessage, openTurn.phase);
     const diagnostic: FailureDiagnostic = {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
@@ -187,6 +255,9 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       errorClass: classification.errorClass,
       ...(classification.errorCode
         ? { errorCode: classification.errorCode }
+        : {}),
+      ...(truncateErrorMessage(errorMessage)
+        ? { errorMessage: truncateErrorMessage(errorMessage) }
         : {}),
       phase: openTurn.phase,
       workspaceChangedSinceTurnStart: workspaceChanged(
@@ -221,7 +292,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     reason: RecoveryRequiredMarker["reason"],
     marker: TurnStartMarker,
     toolMayHaveMutatedWorkspace: boolean,
-  ): void {
+  ): RecoveryRequiredMarker {
     const recovery = armRecovery(marker, toolMayHaveMutatedWorkspace);
     const record: RecoveryRequiredMarker = {
       schemaVersion: SCHEMA_VERSION,
@@ -232,23 +303,29 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       toolMayHaveMutatedWorkspace,
     };
     pi.appendEntry("resilience.recovery-required", record);
+    return record;
   }
 
   pi.on("session_start", (_event, ctx) => {
     sessionCwd = ctx.cwd;
+    activeContext = ctx;
     openTurn = undefined;
     pendingRecovery = undefined;
-
     const entries = ctx.sessionManager.getBranch();
+    // Neustart-Wahrheit zuerst aus den Einträgen: Ein bereits geprüftes Gate
+    // behält seinen checked-Zustand über die Sitzung hinaus.
+    gate = latestRecoveryGate(entries);
     const prior = latestRecoveryState(entries);
     if (prior.openTurn) {
       const existing = prior.requiredByTurn.get(prior.openTurn.timestamp);
-      if (existing)
+      if (existing) {
         armRecovery(prior.openTurn, existing.toolMayHaveMutatedWorkspace);
-      else appendRecoveryRequired("interrupted", prior.openTurn, false);
-      return;
-    }
-    if (prior.finalFailure) {
+      } else {
+        gate = {
+          required: appendRecoveryRequired("interrupted", prior.openTurn, false),
+        };
+      }
+    } else if (prior.finalFailure) {
       const start = entries
         .map((entry) =>
           customData<TurnStartMarker>(entry, "resilience.turn-start"),
@@ -256,13 +333,20 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
         .find(
           (marker) => marker?.timestamp === prior.finalFailure?.turnStartedAt,
         );
-      if (!start) return;
-      const existing = prior.requiredByTurn.get(
-        prior.finalFailure.turnStartedAt,
-      );
-      if (existing) armRecovery(start, existing.toolMayHaveMutatedWorkspace);
-      else appendRecoveryRequired("final_failure", start, false);
+      if (start) {
+        const existing = prior.requiredByTurn.get(
+          prior.finalFailure.turnStartedAt,
+        );
+        if (existing) {
+          armRecovery(start, existing.toolMayHaveMutatedWorkspace);
+        } else {
+          gate = {
+            required: appendRecoveryRequired("final_failure", start, false),
+          };
+        }
+      }
     }
+    updateRecoveryStatus();
   });
 
   pi.on("before_agent_start", (_event, ctx) => {
@@ -403,23 +487,121 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_settled", (_event, ctx) => {
     if (!openTurn) return;
+    const failed = openTurn.currentAttemptFailed;
+    const outcome: TurnSettledMarker["outcome"] = failed
+      ? "failed"
+      : openTurn.observedFailureCount > 0
+        ? "completed_after_failure"
+        : "completed";
     const settled: TurnSettledMarker = {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
       turnStartedAt: openTurn.marker.timestamp,
       workspaceFingerprint: workspaceFingerprint(ctx.cwd),
-      outcome: openTurn.currentAttemptFailed ? "failed" : "completed",
+      outcome,
       observedFailureCount: openTurn.observedFailureCount,
+      ...(failed ? { recoveryPending: true } : {}),
     };
     pi.appendEntry("resilience.turn-settled", settled);
-    if (settled.outcome === "failed") {
-      appendRecoveryRequired(
+    if (failed) {
+      const required = appendRecoveryRequired(
         "final_failure",
         openTurn.marker,
         openTurn.toolMayHaveMutatedWorkspace,
       );
+      // Das Gate sperrt nur bei möglicher Mutation; ein Fehlturn ohne jede
+      // Workspace-Spur verlangt eine Fortsetzungs-Anweisung, keinen Check.
+      gate = gateRequiresInspection(required) ? { required } : undefined;
+      updateRecoveryStatus();
     }
     openTurn = undefined;
+  });
+
+  pi.on("session_shutdown", (_event, ctx) => {
+    activeContext = undefined;
+    gate = undefined;
+    pendingRecovery = undefined;
+    setTuiStatus(ctx, UI_STATUS_KEYS.recovery, undefined);
+  });
+
+  pi.events.on(RECOVERY_CAPABILITY_EVENTS.request, (value) => {
+    const request = value as Partial<RecoveryStatusRequest>;
+    request.respond?.(recoverySnapshot());
+  });
+
+  pi.registerTool({
+    name: "recovery_check",
+    label: "Recovery prüfen",
+    description:
+      "Read-only-Recovery-Check nach einem unterbrochenen oder fehlgeschlagenen Turn: erfasst Workspace-Snapshot, git status --short und eine begrenzte Diff-Zusammenfassung und hebt die Recovery-Schreibsperre auf, solange der Workspace-Fingerprint danach unverändert bleibt. Führt selbst keine Schreiboperationen aus und wiederholt nichts.",
+    promptSnippet:
+      "Inspect the workspace after an interrupted or failed turn and release the recovery write gate.",
+    parameters: Type.Object({}),
+    executionMode: "sequential",
+    async execute(_id, _params, _signal, _onUpdate, ctx) {
+      let snapshot;
+      try {
+        snapshot = collectWorkspaceSnapshot(ctx.cwd);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Recovery-Check fehlgeschlagen: kein Workspace-Snapshot (${message}). Die Schreibsperre bleibt bestehen.`,
+        );
+      }
+      let gitStatus: string;
+      try {
+        gitStatus = gitText(ctx.cwd, ["status", "--short"]);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Recovery-Check fehlgeschlagen: git status nicht lesbar (${message}). Die Schreibsperre bleibt bestehen.`,
+        );
+      }
+      let diffStat = "";
+      try {
+        diffStat = gitText(ctx.cwd, ["diff", "--stat"]);
+      } catch {
+        diffStat = "(Diff-Zusammenfassung nicht verfügbar)";
+      }
+
+      const openRequired = gate?.required;
+      if (openRequired) {
+        const record: RecoveryCheckedMarker = {
+          schemaVersion: SCHEMA_VERSION,
+          timestamp: new Date().toISOString(),
+          turnStartedAt: openRequired.turnStartedAt,
+          workspaceFingerprint: snapshot.fingerprint,
+        };
+        pi.appendEntry("resilience.recovery-checked", record);
+        gate = { required: openRequired, checked: record };
+      }
+      updateRecoveryStatus();
+
+      const statusText = gitStatus.trim() || "(keine Änderungen)";
+      const lines = [
+        openRequired
+          ? "Recovery-Check abgeschlossen: Die Schreibsperre ist aufgehoben, solange der Workspace-Fingerprint unverändert bleibt."
+          : "Kein offenes Recovery-Gate gefunden; der Workspace wurde trotzdem geprüft.",
+        `Workspace-Fingerprint: ${snapshot.fingerprint}`,
+        "",
+        "git status --short:",
+        statusText,
+      ];
+      if (diffStat.trim()) {
+        lines.push("", "git diff --stat:", diffStat.trim());
+      }
+      const limited = limitTextOutput(lines.join("\n"));
+      return {
+        content: [{ type: "text" as const, text: limited.text }],
+        details: {
+          turnStartedAt: openRequired?.turnStartedAt,
+          changedFiles: snapshot.changedFiles,
+          ...(limited.truncation ? { truncation: limited.truncation } : {}),
+        },
+      };
+    },
   });
 
   pi.events.on("subagent:async-started", () => {

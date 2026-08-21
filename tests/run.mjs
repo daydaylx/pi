@@ -91,6 +91,12 @@ const auroraState = await load("extensions/aurora-ui/state.ts");
 const auroraUi = await load("extensions/aurora-ui/index.ts");
 const auroraFooter = await load("extensions/aurora-ui/footer.ts");
 const resilience = await load("extensions/resilience/index.ts");
+const recoveryState = await load("extensions/resilience/recovery-state.ts");
+const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
+const sessionHealthAnalyze = await load(
+  "extensions/session-health/analyze.ts",
+);
+const sessionHealth = await load("extensions/session-health/index.ts");
 
 const sections = {
   ...runtimeSections,
@@ -124,6 +130,10 @@ const context = {
   auroraUi,
   auroraFooter,
   resilience,
+  recoveryState,
+  verifierPolicy,
+  sessionHealthAnalyze,
+  sessionHealth,
 };
 
 for (const name of Object.keys(SECTION_SUITES)) {

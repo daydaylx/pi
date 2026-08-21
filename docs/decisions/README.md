@@ -13,6 +13,8 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [012](012-plan-mode-mutation-guard.md) — Plan Mode bekommt einen technischen Mutationsschutz
 - [013](013-aurora-keeps-the-native-editor.md) — Aurora behält Pis nativen Editor (ersetzt den Editor-Teil von 009)
 - [014](014-reduced-subagent-tool-surface.md) — Die reduzierte Subagent-Tool-Surface ist ein eigener Schalter
+- [015](015-verifier-delegation-guard.md) — Verifier-Delegationen werden technisch erzwungen, nicht appelliert
+- [016](016-plan-mode-yolo-lock-and-recovery-gate.md) — YOLO-Sperre im Planmodus und Recovery-Gate vor Schreibzugriffen
 
 ## Historische, ersetzte Entscheidungen
 

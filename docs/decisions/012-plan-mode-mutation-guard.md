@@ -11,7 +11,9 @@ Projekt-Skripte werden nicht anhand ihres Namens als sicher eingestuft:
 `npm test`, `npm run build`, `verify` und `project_check` bleiben
 gesperrt. `subagent` ist ebenfalls gesperrt, unabhängig von einem
 `output`-Parameter, damit die Dateigrenze nicht indirekt umgangen werden
-kann. `yolo` bleibt die ausdrückliche Ausnahme.
+kann. Die frühere Ausnahme „`yolo` bleibt die ausdrückliche Ausnahme“ ist
+durch [016](016-plan-mode-yolo-lock-and-recovery-gate.md) ersetzt: YOLO
+hebt die Planmodus-Grenzen für Agenten-Tool-Aufrufe nicht mehr auf.
 
 ## Begründung
 
@@ -26,5 +28,6 @@ Permission-State-Machine.
   erhalten; nur ein erfolgreich geschriebener, erfolgreich beendeter Turn
   ersetzt ihn.
 - Tests prüfen End-to-End: Projekt-Skripte blockiert, Git-Lesen erlaubt,
-  Subagent-Umgehung blockiert und YOLO unverändert.
+  Subagent-Umgehung blockiert. Die frühere YOLO-Ausnahme ist durch 016
+  abgelöst: YOLO bleibt im Planmodus für Agenten-Tool-Aufrufe gesperrt.
 - Shift+Tab bleibt die einzige Workflow-Steuerung.

@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { assert, eq } from "../shared/assertions.mjs";
 import {
   assertNoGlobalChrome,
@@ -18,7 +19,7 @@ import {
   latestStatus,
   stripAnsi,
 } from "../shared/harness.mjs";
-import { ROOT } from "../shared/jiti-loader.mjs";
+import { ROOT, npmModuleEntry } from "../shared/jiti-loader.mjs";
 
 export const diffSections = {
   "diff viewer regressions": async (context) => {
@@ -59,6 +60,55 @@ export const diffSections = {
       assert(
         displayedStatLine.length <= 38 && displayedStatLine.endsWith("…"),
         "diff statistic line truncates at narrow terminal widths",
+      );
+      const { visibleWidth } = await import(
+        pathToFileURL(npmModuleEntry("@earendil-works/pi-tui")).href
+      );
+      const themeModule = await import(
+        pathToFileURL(
+          path.join(
+            ROOT,
+            "npm/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js",
+          ),
+        ).href
+      );
+      themeModule.initTheme("dark");
+      const { DiffEntryComponent } = await context.load(
+        "extensions/diff-viewer/diff-entry.ts",
+      );
+      const collapsedEntry = new DiffEntryComponent(
+        { fg: (_tone, text) => text },
+        {
+          path: "sample.txt",
+          stats: {
+            path: "sample.txt",
+            linesAdded: 7,
+            linesRemoved: 0,
+            hunks: 1,
+          },
+          hunks: [
+            {
+              oldStart: 1,
+              oldCount: 0,
+              newStart: 1,
+              newCount: 7,
+              lines: Array.from({ length: 7 }, (_, index) => ({
+                kind: "added",
+                newLine: index + 1,
+                text: `line ${index + 1}`,
+              })),
+            },
+          ],
+          toolName: "write",
+          timestamp: 0,
+        },
+        false,
+      );
+      const collapsedLines = collapsedEntry.render(10);
+      assert(
+        visibleWidth(collapsedLines.at(-1)) <= 10 &&
+          stripAnsi(collapsedLines.at(-1)).endsWith("…"),
+        "collapsed diff expand hint fits narrow terminal widths",
       );
       const diffFallbackSource = readFileSync(
         path.join(ROOT, "extensions", "diff-viewer", "git-diff.ts"),

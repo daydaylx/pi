@@ -7,6 +7,111 @@ function isRecord(value: unknown): value is UnknownRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+export type VerifierRunStatus = "completed" | "incomplete";
+
+export type VerifierVerdict =
+  | "PASS"
+  | "PASS_WITH_WARNINGS"
+  | "FAIL"
+  | "UNVERIFIABLE";
+
+export interface VerifierRunRecord {
+  timestamp: string;
+  agent: "verifier";
+  status: VerifierRunStatus;
+  /** timeout | turn-budget | interrupted | detached | provider-error | exit-<n> */
+  reason?: string;
+  /** Nur bei erfolgreichen Läufen, falls das Urteil erkennbar ist. */
+  verdict?: VerifierVerdict;
+  attemptedModels?: string[];
+}
+
+/**
+ * Muster für Provider-/Netzwerk-/Auth-Fehler. Sie entscheiden nur über die
+ * Benennung eines abnormalen Laufendes — niemals über Fallback oder
+ * Wiederholung.
+ */
+const PROVIDER_ERROR_PATTERN =
+  /rate.?limit|too many requests|\b429\b|quota|auth(?:entication)?|unauthori[sz]ed|forbidden|api key|provider|service unavailable|overloaded|connection|network|socket|timed? ?out|timeout|\b50[0234]\b|fetch failed|empty response/i;
+
+export function parseVerifierVerdict(
+  text: string,
+): VerifierVerdict | undefined {
+  const match = text.match(/^\s*(PASS_WITH_WARNINGS|PASS|FAIL|UNVERIFIABLE)\b/m);
+  return match?.[1] as VerifierVerdict | undefined;
+}
+
+/**
+ * Leitet aus dem Tool-Result eines Verifier-Laufs den strukturierten
+ * Session-Eintrag ab. Abgebrochene, zeitüberschrittene oder
+ * providerfehlerhafte Läufe sind `incomplete` und dürfen nie als
+ * unabhängige Verifikation zählen; ein fachliches FAIL bei erfolgreichem
+ * Lauf bleibt `completed` mit `verdict: "FAIL"`.
+ */
+export function extractVerifierRunRecord(
+  details: unknown,
+): VerifierRunRecord | undefined {
+  if (!isRecord(details)) return undefined;
+  const results = Array.isArray(details.results) ? details.results : [];
+  const result = results[0];
+  if (!isRecord(result) || result.agent !== "verifier") return undefined;
+
+  const record: VerifierRunRecord = {
+    timestamp: new Date().toISOString(),
+    agent: "verifier",
+    status: "completed",
+  };
+  if (Array.isArray(result.attemptedModels)) {
+    const models = result.attemptedModels.filter(
+      (model): model is string => typeof model === "string",
+    );
+    if (models.length > 0) record.attemptedModels = models;
+  }
+
+  const incompleteReason = result.timedOut
+    ? "timeout"
+    : result.turnBudgetExceeded
+      ? "turn-budget"
+      : result.interrupted
+        ? "interrupted"
+        : result.detached
+          ? "detached"
+          : undefined;
+  if (incompleteReason) {
+    record.status = "incomplete";
+    record.reason = incompleteReason;
+    return record;
+  }
+  if (typeof result.exitCode === "number" && result.exitCode !== 0) {
+    record.status = "incomplete";
+    const error = typeof result.error === "string" ? result.error : "";
+    record.reason = PROVIDER_ERROR_PATTERN.test(error)
+      ? "provider-error"
+      : `exit-${result.exitCode}`;
+    return record;
+  }
+  const output = typeof result.finalOutput === "string" ? result.finalOutput : "";
+  const verdict = parseVerifierVerdict(output);
+  if (verdict) record.verdict = verdict;
+  return record;
+}
+
+export function verifierIncompleteBanner(reason: string | undefined): string {
+  const cause =
+    reason === "timeout"
+      ? "wegen Zeitüberschreitung abgebrochen"
+      : reason === "turn-budget"
+        ? "wegen Überschreitung des Turn-Budgets abgebrochen (turnBudget ist für Verifier verboten)"
+        : reason === "interrupted"
+          ? "unterbrochen"
+          : reason === "detached"
+            ? "vor Abschluss abgelöst"
+            : reason === "provider-error"
+              ? "durch einen Provider-/Netzwerkfehler beendet"
+              : `mit Fehler beendet (${reason ?? "unbekannt"})`;
+  return `⚠ INCOMPLETE — Dieser Verifier-Lauf wurde ${cause} und zählt nicht als unabhängige Verifikation. Er ersetzt keine bestandene Prüfung und darf nicht als Verifikationsnachweis übernommen werden.\n\n`;
+}
+
 /**
  * Removes report copies that are useful in child artifacts but unnecessarily
  * persist alongside the model-facing, bounded tool result in the parent.

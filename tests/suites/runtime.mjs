@@ -398,6 +398,7 @@ export const runtimeSections = {
             "+extensions/control-plane.ts",
             "+extensions/aurora-ui/index.ts",
             "+extensions/resilience/index.ts",
+            "+extensions/session-health/index.ts",
           ],
           "settings declare the dependency-safe local extension order",
         );
@@ -4189,6 +4190,7 @@ export const runtimeSections = {
           "no output for longer than the stall threshold is surfaced with its silent duration",
         );
 
+        const testCwd = "/workspace";
         const activityCases = [
           ["read", { path: "README.md" }, "read", "README.md"],
           ["grep", { pattern: "aurora" }, "search", '"aurora"'],
@@ -4228,21 +4230,81 @@ export const runtimeSections = {
           ["ask_user", { question: "continue?" }, "generic", undefined],
         ];
         for (const [name, args, kind, target] of activityCases) {
-          const described = auroraTools.describeToolActivity(name, args);
+          const described = auroraTools.describeToolActivity(
+            name,
+            args,
+            testCwd,
+          );
           eq(described.kind, kind, `${name} has the expected Activity kind`);
           eq(described.target, target, `${name} keeps only its real target`);
         }
+        const absoluteWithinCwd = auroraTools.describeToolActivity(
+          "read",
+          { path: `${testCwd}/extensions/aurora-ui/tool-renderers.ts` },
+          testCwd,
+        );
+        eq(
+          absoluteWithinCwd.target,
+          "extensions/aurora-ui/tool-renderers.ts",
+          "an absolute path inside the workspace is shown workspace-relative",
+        );
+        const narrowNestedRead = auroraTools
+          .renderActiveTools(
+            [
+              {
+                id: "read-nested",
+                name: "read",
+                ...auroraTools.describeToolActivity(
+                  "read",
+                  { path: `${testCwd}/extensions/aurora-ui/tool-renderers.ts` },
+                  testCwd,
+                ),
+                startedAt: 0,
+              },
+            ],
+            context.ui.theme,
+            50,
+            5_000,
+            { compact: true },
+          )
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          narrowNestedRead.includes("tool-renderers.ts"),
+          "a long nested path keeps its filename instead of losing it to end-truncation",
+        );
+        const waitRow = auroraTools
+          .renderActiveTools(
+            [
+              {
+                id: "wait",
+                name: "wait",
+                kind: "wait",
+                target: "reviewer",
+                startedAt: 0,
+              },
+            ],
+            context.ui.theme,
+            90,
+            5_000,
+          )
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          waitRow.includes("⋯") && !waitRow.includes("◌"),
+          "wait uses its own glyph, distinct from read's running marker",
+        );
         const lspActivity = auroraTools
           .renderActiveTools(
             [
               {
                 id: "lsp",
                 name: "lsp_references",
-                ...auroraTools.describeToolActivity("lsp_references", {
-                  path: "index.ts",
-                  line: 4,
-                  character: 2,
-                }),
+                ...auroraTools.describeToolActivity(
+                  "lsp_references",
+                  { path: "index.ts", line: 4, character: 2 },
+                  testCwd,
+                ),
                 startedAt: 0,
               },
             ],
@@ -4263,17 +4325,21 @@ export const runtimeSections = {
               {
                 id: "read",
                 name: "read",
-                ...auroraTools.describeToolActivity("read", {
-                  path: "a-very-long-file-name.ts",
-                }),
+                ...auroraTools.describeToolActivity(
+                  "read",
+                  { path: "a-very-long-file-name.ts" },
+                  testCwd,
+                ),
                 startedAt: 0,
               },
               {
                 id: "test",
                 name: "bash",
-                ...auroraTools.describeToolActivity("bash", {
-                  command: "npm test -- --runInBand",
-                }),
+                ...auroraTools.describeToolActivity(
+                  "bash",
+                  { command: "npm test -- --runInBand" },
+                  testCwd,
+                ),
                 startedAt: 0,
               },
             ],
@@ -4313,6 +4379,27 @@ export const runtimeSections = {
             withSubagents.includes("!") &&
             withSubagents.includes("◉"),
           "the activity widget reports active subagents and what needs a look",
+        );
+        // The section theme's `fg` is a transparent stub (it returns its text
+        // unchanged), so a tone spy — not an ANSI-code comparison — is the
+        // only way to observe which tone a glyph actually renders with.
+        const toneCalls = [];
+        const spyTheme = {
+          fg: (tone, text) => {
+            toneCalls.push({ tone, text });
+            return text;
+          },
+          bold: (text) => text,
+        };
+        auroraTools.renderSubagents(
+          [{ agent: "worker", status: "running" }],
+          spyTheme,
+          120,
+        );
+        eq(
+          toneCalls.find((call) => call.text === "◉")?.tone,
+          "accent",
+          "a running subagent uses the same accent tone as a running tool, leaving green for real success",
         );
         eq(
           auroraTools.renderSubagents([], context.ui.theme, 120),
@@ -5215,7 +5302,7 @@ export const runtimeSections = {
   },
 
   "resilience telemetry and recovery": async (context) => {
-    const { section, resilience } = context;
+    const { section, resilience, modePermissions } = context;
 
     await section("resilience telemetry and recovery", async () => {
       if (!resilience) return;
@@ -5295,6 +5382,11 @@ export const runtimeSections = {
         "network failure keeps code only",
       );
       eq(
+        failures[1]?.data.errorMessage,
+        "ECONNRESET",
+        "the concrete provider error text is preserved for diagnosis",
+      );
+      eq(
         failures[2]?.data.errorClass,
         "auth",
         "model access denied error is classified as auth",
@@ -5320,13 +5412,18 @@ export const runtimeSections = {
       );
       eq(
         settled?.data.outcome,
-        "completed",
-        "successful native retry settles completed",
+        "completed_after_failure",
+        "a native retry after observed failures settles as completed_after_failure",
       );
       eq(
         settled?.data.observedFailureCount,
         3,
         "settled turn preserves observed failures",
+      );
+      eq(
+        settled?.data.recoveryPending,
+        undefined,
+        "a turn that recovered through retry carries no pending recovery",
       );
 
       // A manual /compact between turns (no open turn) that the runtime patch
@@ -5498,6 +5595,256 @@ export const runtimeSections = {
           ?.message?.content.includes("git status --short"),
         "resume after a persisted final failure still injects recovery guidance",
       );
+
+      // --- Recovery-Gate: Schreibsperre bis zum recovery_check ---
+      const gateHarness = createHarness();
+      modePermissions.default(gateHarness.api);
+      resilience.default(gateHarness.api);
+      const gateCtx = gateHarness.makeContext({ cwd: ROOT });
+      await gateHarness.runHooks("session_start", {}, gateCtx);
+      await gateHarness.runHooks("before_agent_start", {}, gateCtx);
+      await gateHarness.runHooks("agent_start", {}, gateCtx);
+      await gateHarness.runHooks(
+        "message_update",
+        { assistantMessageEvent: { type: "text_start" } },
+        gateCtx,
+      );
+      await gateHarness.runHooks(
+        "message_update",
+        {
+          assistantMessageEvent: { type: "error", error: { errorMessage: "" } },
+        },
+        gateCtx,
+      );
+      const streamFailure = gateHarness.appended.at(-1);
+      eq(
+        streamFailure?.customType,
+        "resilience.failure",
+        "a streaming error without text is observed",
+      );
+      eq(
+        streamFailure?.data.errorClass,
+        "stream",
+        "a textless streaming failure is classified as stream, not unknown",
+      );
+      eq(
+        streamFailure?.data.errorCode,
+        "STREAM_PHASE",
+        "the streaming phase is preserved as error context",
+      );
+      await gateHarness.runHooks(
+        "tool_execution_start",
+        { toolName: "edit", toolCallId: "gate-edit", args: {} },
+        gateCtx,
+      );
+      await gateHarness.runHooks("agent_settled", {}, gateCtx);
+      const gateSettled = gateHarness.appended
+        .filter((entry) => entry.customType === "resilience.turn-settled")
+        .at(-1);
+      eq(gateSettled?.data.outcome, "failed", "the gate turn settles failed");
+      eq(
+        gateSettled?.data.recoveryPending,
+        true,
+        "a failed turn marks its recovery as pending",
+      );
+      const gateRequired = gateHarness.appended
+        .filter((entry) => entry.customType === "resilience.recovery-required")
+        .at(-1);
+      eq(
+        gateRequired?.data.toolMayHaveMutatedWorkspace,
+        true,
+        "the failed turn may have mutated the workspace",
+      );
+      eq(
+        latestStatus(gateHarness, "recovery"),
+        "⚠ Recovery-Check offen",
+        "an armed recovery gate stays visible in the TUI",
+      );
+
+      const blockedWrite = await gateHarness.runHooks(
+        "tool_call",
+        { toolName: "write", input: { path: "example.txt", content: "x" } },
+        gateCtx,
+      );
+      assert(
+        blockedWrite.some(
+          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+        ),
+        "writes are blocked while the recovery gate is armed",
+      );
+      const blockedBash = await gateHarness.runHooks(
+        "tool_call",
+        { toolName: "bash", input: { command: "npm test" } },
+        gateCtx,
+      );
+      assert(
+        blockedBash.some(
+          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+        ),
+        "potentially mutating shell calls are blocked while armed",
+      );
+      const freeRead = await gateHarness.runHooks(
+        "tool_call",
+        { toolName: "read", input: { path: "README.md" } },
+        gateCtx,
+      );
+      assert(
+        freeRead.every((result) => !result?.block),
+        "read-only tools stay available while armed",
+      );
+      const freeDiagnosticBash = await gateHarness.runHooks(
+        "tool_call",
+        { toolName: "bash", input: { command: "git status --short" } },
+        gateCtx,
+      );
+      assert(
+        freeDiagnosticBash.every((result) => !result?.block),
+        "diagnostic shell commands stay available while armed",
+      );
+      const freeRecoveryCall = await gateHarness.runHooks(
+        "tool_call",
+        { toolName: "recovery_check", input: {} },
+        gateCtx,
+      );
+      assert(
+        freeRecoveryCall.every((result) => !result?.block),
+        "recovery_check itself is never blocked by its own gate",
+      );
+
+      const recoveryTool = gateHarness.tools.get("recovery_check");
+      assert(Boolean(recoveryTool), "recovery_check is registered as a tool");
+      const recoveryResult = await recoveryTool.execute(
+        "check-1",
+        {},
+        undefined,
+        undefined,
+        gateCtx,
+      );
+      assert(
+        recoveryResult.content[0]?.text.includes(
+          "Recovery-Check abgeschlossen",
+        ),
+        "recovery_check reports the released gate",
+      );
+      const checked = gateHarness.appended.filter(
+        (entry) => entry.customType === "resilience.recovery-checked",
+      );
+      eq(checked.length, 1, "the successful check is persisted exactly once");
+      eq(
+        checked[0]?.data.turnStartedAt,
+        gateRequired?.data.turnStartedAt,
+        "the check references the failed turn",
+      );
+      eq(
+        latestStatus(gateHarness, "recovery"),
+        undefined,
+        "a successful check clears the recovery status",
+      );
+      const unblockedWrite = await gateHarness.runHooks(
+        "tool_call",
+        { toolName: "write", input: { path: "example.txt", content: "x" } },
+        gateCtx,
+      );
+      assert(
+        unblockedWrite.every((result) => !result?.block),
+        "writes are released after a successful recovery check",
+      );
+
+      // A different workspace fingerprint re-arms the checked gate.
+      const otherCwd = mkdtempSync(path.join(tmpdir(), "pi-recovery-gate-"));
+      try {
+        const otherCtx = gateHarness.makeContext({ cwd: otherCwd });
+        await gateHarness.runHooks("before_agent_start", {}, otherCtx);
+        const reblockedWrite = await gateHarness.runHooks(
+          "tool_call",
+          { toolName: "write", input: { path: "example.txt", content: "x" } },
+          otherCtx,
+        );
+        assert(
+          reblockedWrite.some(
+            (result) => result?.block && /Recovery-Gate/.test(result.reason),
+          ),
+          "a changed workspace re-arms a checked recovery gate",
+        );
+      } finally {
+        rmSync(otherCwd, { recursive: true, force: true });
+      }
+
+      // Persisted recovery survives a restart and unlocks through the check.
+      const restarted = createHarness({
+        entries: [
+          {
+            type: "custom",
+            customType: "resilience.turn-start",
+            data: {
+              schemaVersion: 2,
+              timestamp: "2026-08-19T00:00:00.000Z",
+              workspaceFingerprint: "unavailable",
+              workflowMode: "work",
+              provider: "provider",
+              model: "model",
+              contextPercent: 10,
+            },
+          },
+          {
+            type: "custom",
+            customType: "resilience.turn-settled",
+            data: {
+              schemaVersion: 2,
+              timestamp: "2026-08-19T00:00:01.000Z",
+              turnStartedAt: "2026-08-19T00:00:00.000Z",
+              workspaceFingerprint: "unavailable",
+              outcome: "failed",
+              observedFailureCount: 1,
+              recoveryPending: true,
+            },
+          },
+          {
+            type: "custom",
+            customType: "resilience.recovery-required",
+            data: {
+              schemaVersion: 2,
+              timestamp: "2026-08-19T00:00:02.000Z",
+              turnStartedAt: "2026-08-19T00:00:00.000Z",
+              reason: "final_failure",
+              workspaceChangedSinceTurnStart: false,
+              toolMayHaveMutatedWorkspace: true,
+            },
+          },
+        ],
+      });
+      modePermissions.default(restarted.api);
+      resilience.default(restarted.api);
+      const restartedCtx = restarted.makeContext({ cwd: ROOT });
+      await restarted.runHooks("session_start", {}, restartedCtx);
+      const restartedBlocked = await restarted.runHooks(
+        "tool_call",
+        { toolName: "write", input: { path: "example.txt", content: "x" } },
+        restartedCtx,
+      );
+      assert(
+        restartedBlocked.some(
+          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+        ),
+        "a persisted recovery gate still blocks writes after a restart",
+      );
+      const restartedTool = restarted.tools.get("recovery_check");
+      await restartedTool.execute(
+        "check-2",
+        {},
+        undefined,
+        undefined,
+        restartedCtx,
+      );
+      const restartedUnblocked = await restarted.runHooks(
+        "tool_call",
+        { toolName: "write", input: { path: "example.txt", content: "x" } },
+        restartedCtx,
+      );
+      assert(
+        restartedUnblocked.every((result) => !result?.block),
+        "recovery_check unlocks a restored gate after restart",
+      );
     });
   },
 
@@ -5513,6 +5860,7 @@ export const runtimeSections = {
       setupCore,
       auroraUi,
       resilience,
+      sessionHealth,
     } = context;
 
     await section("combined production extension stack", async () => {
@@ -5525,7 +5873,8 @@ export const runtimeSections = {
         !diffViewer ||
         !controlPlane ||
         !auroraUi ||
-        !resilience
+        !resilience ||
+        !sessionHealth
       )
         return;
       const factoryByExtension = {
@@ -5538,6 +5887,7 @@ export const runtimeSections = {
         "+extensions/control-plane.ts": controlPlane.default,
         "+extensions/aurora-ui/index.ts": auroraUi.default,
         "+extensions/resilience/index.ts": resilience.default,
+        "+extensions/session-health/index.ts": sessionHealth.default,
       };
       const settings = JSON.parse(
         readFileSync(path.join(ROOT, "settings.json"), "utf8"),
@@ -5583,6 +5933,7 @@ export const runtimeSections = {
           "lsp_references",
           "lsp_workspace_symbols",
           "project_check",
+          "recovery_check",
           "verify",
         ],
         "only local functional tools register locally",

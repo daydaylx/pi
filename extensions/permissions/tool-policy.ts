@@ -89,6 +89,11 @@ export function decideTool(
   if (event.toolName === ASK_USER_TOOL_NAME) {
     return { action: "allow", reason: "Controlled workflow capability" };
   }
+  if (event.toolName === "recovery_check") {
+    // Der Recovery-Check ist die einzige Möglichkeit, das Recovery-Gate zu
+    // öffnen; er ist read-only und darf niemals hinter einem Dialog stehen.
+    return { action: "allow", reason: "Read-only-Recovery-Check" };
+  }
   if (event.toolName === "verify") {
     return permissionLevel === "readonly"
       ? {

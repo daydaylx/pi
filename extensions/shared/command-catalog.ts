@@ -335,6 +335,12 @@ const definitions = [
     undefined,
     "Super+Q",
   ],
+  [
+    "session-health",
+    "Session-Health",
+    "Read-only-Diagnose der Session-Historie: Turns, Recovery, Fehler, Berechtigungen, Verifier-Urteile [--days N] [--json]",
+    "sessions",
+  ],
 ] as const satisfies ReadonlyArray<
   readonly [
     name: string,

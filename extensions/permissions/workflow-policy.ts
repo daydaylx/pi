@@ -44,6 +44,7 @@ const PLAN_MODE_READ_ONLY_TOOLS = new Set([
   "grep",
   "find",
   "ls",
+  "recovery_check",
   ASK_USER_TOOL_NAME,
   ...LOCAL_LSP_TOOLS,
 ]);
@@ -158,7 +159,10 @@ function planFileProtectedWritePath(): ProtectedWritePath {
 /**
  * Plan Mode permits only fixed read-only capabilities. It deliberately does
  * not infer safety from project-script names: `npm test` and `npm run build`
- * can run arbitrary lifecycle code. YOLO remains the explicit override.
+ * can run arbitrary lifecycle code. YOLO hebt diese Grenzen für
+ * Agenten-Tool-Aufrufe nicht auf — der Planmodus bleibt auch bei aktivem
+ * YOLO eine harte Schreibgrenze; nur `readonly` reicht die Entscheidung an
+ * die Zugriffsstufe weiter.
  */
 export function planModeBashGuard(
   workflow: WorkflowCapabilitySnapshot,
@@ -167,8 +171,7 @@ export function planModeBashGuard(
   cwd: string,
 ): WorkflowAssessment {
   if (!isPlanningMode(workflow.mode)) return PERMITTED;
-  if (permissionLevel === "readonly" || permissionLevel === "yolo")
-    return PERMITTED;
+  if (permissionLevel === "readonly") return PERMITTED;
   return isPlanModeDiagnosticCommand(command, cwd)
     ? PERMITTED
     : {
@@ -185,8 +188,7 @@ export function planModeMutationGuard(
   cwd: string,
 ): WorkflowAssessment {
   if (!isPlanningMode(workflow.mode)) return PERMITTED;
-  if (permissionLevel === "readonly" || permissionLevel === "yolo")
-    return PERMITTED;
+  if (permissionLevel === "readonly") return PERMITTED;
 
   if (event.toolName === "bash") {
     return planModeBashGuard(

@@ -837,7 +837,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     activeTools.set(event.toolCallId, {
       id: event.toolCallId,
       name: event.toolName,
-      ...describeToolActivity(event.toolName, event.args),
+      ...describeToolActivity(event.toolName, event.args, ctx.cwd),
       startedAt,
       lastUpdateAt: startedAt,
     });

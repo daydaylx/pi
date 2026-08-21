@@ -5,6 +5,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { keyHint } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { DiffViewEntryData } from "./types.ts";
 import { renderCompact, renderFull } from "./diff-renderer.ts";
 
@@ -58,11 +59,15 @@ export class DiffEntryComponent implements Component {
       // Key-Hint zum Erweitern
       const totalLines = this.countTotalLines();
       if (totalLines > 6) {
+        const expandHint = th.fg(
+          "dim",
+          `  ${keyHint("app.tools.expand", "zum Erweitern")} – ${totalLines} Zeilen gesamt`,
+        );
+        const availableWidth = Math.max(1, width);
         lines.push(
-          th.fg(
-            "dim",
-            `  ${keyHint("app.tools.expand", "zum Erweitern")} – ${totalLines} Zeilen gesamt`,
-          ),
+          visibleWidth(expandHint) > availableWidth
+            ? truncateToWidth(expandHint, availableWidth, "…")
+            : expandHint,
         );
       }
     }

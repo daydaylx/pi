@@ -7,7 +7,11 @@ import { trackedExec } from "../shared/tracked-exec.ts";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import { Type } from "typebox";
 import { DEFAULT_MAX_BYTES, limitTextOutput } from "../shared/output-limits.ts";
-import { limitSubagentToolResult } from "./subagent-output-guard.ts";
+import {
+  extractVerifierRunRecord,
+  limitSubagentToolResult,
+  verifierIncompleteBanner,
+} from "./subagent-output-guard.ts";
 import { loadVerifyProfiles, runProfile } from "./verify-profiles.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 import {
@@ -248,7 +252,26 @@ export default function setupCore(
         event: Parameters<typeof limitSubagentToolResult>[0],
       ) => unknown,
     ) => void
-  )("tool_result", (event) => limitSubagentToolResult(event));
+  )("tool_result", (event) => {
+    // Verifier-Läufe werden strukturiert erfasst: incomplete-Läufe zählen
+    // nie als unabhängige Verifikation und bekommen das sichtbar ins
+    // Tool-Result geschrieben.
+    const record = extractVerifierRunRecord(event.details);
+    if (record) pi.appendEntry("verifier-run", record);
+    const limited = limitSubagentToolResult(event);
+    if (!limited || record?.status !== "incomplete") return limited;
+    const banner = verifierIncompleteBanner(record.reason);
+    let inserted = false;
+    const content = limited.content.map((block) => {
+      if (block.type !== "text" || inserted) return block;
+      inserted = true;
+      return { ...block, text: `${banner}${block.text}` };
+    });
+    if (!inserted && limited.content.length === 0) {
+      content.unshift({ type: "text" as const, text: banner.trimEnd() });
+    }
+    return { ...limited, content };
+  });
 
   pi.on("session_start", (_event, ctx) => {
     activeCwd = ctx.cwd;

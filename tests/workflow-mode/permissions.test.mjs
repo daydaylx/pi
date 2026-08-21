@@ -3,6 +3,11 @@ import { importModule as load } from "../shared/jiti-loader.mjs";
 
 const workflowPolicy = await load("extensions/permissions/workflow-policy.ts");
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
+const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
+const subagentGuard = await load("extensions/setup-core/subagent-output-guard.ts");
+const modelFallback = await load(
+  "npm/node_modules/pi-subagents/src/runs/shared/model-fallback.ts",
+);
 
 await test("hard shell boundaries hold at every permission level", () => {
   if (!workflowPolicy) return;
@@ -170,7 +175,7 @@ await test("planModeMutationGuard blocks non-plan writes at project-write/confir
   );
 });
 
-await test("planModeMutationGuard leaves readonly, yolo and work mode unaffected", () => {
+await test("planModeMutationGuard leaves readonly and work mode unaffected", () => {
   if (!workflowPolicy) return;
   const cwd = process.cwd();
   const planning = { mode: "simple_plan" };
@@ -187,12 +192,16 @@ await test("planModeMutationGuard leaves readonly, yolo and work mode unaffected
     "readonly already denies this elsewhere; the plan guard does not duplicate it",
   );
   assert(
-    !write(planning, "yolo").blocked,
-    "yolo is an explicit override the plan guard must not second-guess",
+    write(planning, "yolo").blocked,
+    "yolo does not unlock agent writes while planning",
   );
   assert(
     !write(working, "project-write").blocked,
     "work mode is never affected by the plan guard",
+  );
+  assert(
+    !write(working, "yolo").blocked,
+    "yolo keeps its ordinary meaning outside plan mode",
   );
 });
 
@@ -212,8 +221,12 @@ await test("planModeBashGuard blocks mutating commands and allows read-only ones
     "a read-only command passes while planning",
   );
   assert(
-    !bash(planning, "yolo", "rm extensions/example.ts").blocked,
-    "yolo bypasses the plan-mode bash guard",
+    bash(planning, "yolo", "rm extensions/example.ts").blocked,
+    "yolo does not bypass the plan-mode bash guard",
+  );
+  assert(
+    !bash(planning, "yolo", "git status").blocked,
+    "diagnostics stay available under yolo while planning",
   );
   assert(
     !bash(working, "project-write", "rm extensions/example.ts").blocked,
@@ -470,15 +483,15 @@ await test("plan mode admits only positively known read-only tools", () => {
     );
   }
 
-  // yolo is the documented, explicit override and stays untouched.
+  // YOLO hebt die Planmodus-Grenzen für Agenten-Tool-Aufrufe nicht auf.
   for (const [toolName, input] of [
     ["write", { path: "src/a.ts" }],
     ["subagent", { agent: "investigator" }],
     ["frobnicate", {}],
   ]) {
     assert(
-      !decide("yolo", toolName, input),
-      `${toolName} stays available under yolo, which is an explicit override`,
+      decide("yolo", toolName, input),
+      `${toolName} stays blocked while planning, even under yolo`,
     );
   }
 });
@@ -538,5 +551,191 @@ await test("shell structure decides consistently across all permission levels", 
     decide("project-write", "ls -la > out.txt"),
     "allow",
     "a redirect inside the project is ordinary project work",
+  );
+});
+
+await test("plan mode guards hold even under an active YOLO level", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "simple_plan" };
+  const writeEvent = { toolName: "write", input: { path: "src/x.ts" } };
+  assert(
+    workflowPolicy.planModeMutationGuard(planning, "yolo", writeEvent, cwd)
+      .blocked,
+    "a write outside the plan file stays blocked under YOLO",
+  );
+  assert(
+    workflowPolicy
+      .planModeMutationGuard(
+        planning,
+        "yolo",
+        { toolName: "bash", input: { command: "npm test" } },
+        cwd,
+      )
+      .blocked,
+    "a mutating shell call stays blocked under YOLO",
+  );
+  assert(
+    !workflowPolicy
+      .planModeMutationGuard(
+        planning,
+        "yolo",
+        { toolName: "bash", input: { command: "git status --short" } },
+        cwd,
+      )
+      .blocked,
+    "diagnostic shell stays available under YOLO",
+  );
+  assert(
+    !workflowPolicy
+      .planModeMutationGuard(planning, "readonly", writeEvent, cwd)
+      .blocked,
+    "readonly still hands the decision to the permission level",
+  );
+  assert(
+    !workflowPolicy
+      .planModeMutationGuard({ mode: "work" }, "yolo", writeEvent, cwd)
+      .blocked,
+    "outside plan mode YOLO keeps its ordinary meaning",
+  );
+});
+
+await test("recovery_check is a read-only plan-mode capability", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "detailed_plan" };
+  assert(
+    !workflowPolicy.planModeMutationGuard(
+      planning,
+      "project-write",
+      { toolName: "recovery_check", input: {} },
+      cwd,
+    ).blocked,
+    "recovery_check stays usable while planning",
+  );
+});
+
+await test("verifier delegations require the full inspection contract", () => {
+  if (!verifierPolicy) return;
+  const completeTask = [
+    "Original User Request:\nDen Recovery-Gate-Auftrag umsetzen.",
+    "Constraints / Non-Goals:\nKeine WezTerm-Änderungen.",
+    "Delegated Question:\nErfüllt der Diff den Auftrag?",
+    "Implementation / Diff to verify:\n<relevanter Diff>",
+    "Pre-existing workspace state (vor der ersten Änderung dieses Tasks erfasst):\nclean",
+    "Pre-existing dirty-path fingerprints:\nkeine",
+    "Acceptance criteria: project_check verify besteht.",
+  ].join("\n\n");
+  const assess = (input) =>
+    verifierPolicy.assessVerifierDelegation({ toolName: "subagent", input });
+  assert(
+    !assess({ agent: "investigator", task: "anything" }).blocked,
+    "other roles are not restricted by the verifier contract",
+  );
+  assert(
+    !assess({ action: "list" }).blocked,
+    "management actions bypass the verifier contract",
+  );
+  assert(assess({ agent: "verifier" }).blocked, "a missing task is refused");
+  const incomplete = assess({ agent: "verifier", task: "Prüfe das kurz." });
+  assert(incomplete.blocked, "a task without the contract sections is refused");
+  assert(
+    incomplete.reason.includes("Original User Request"),
+    "the refusal names the missing sections",
+  );
+  assert(
+    !assess({ agent: "verifier", task: completeTask }).blocked,
+    "a complete delegation passes",
+  );
+  const budgeted = assess({
+    agent: "verifier",
+    task: completeTask,
+    turnBudget: { maxTurns: 5 },
+  });
+  assert(
+    budgeted.blocked && budgeted.reason.includes("turnBudget"),
+    "a per-run turnBudget is refused for verifier delegations",
+  );
+});
+
+await test("verifier runs are classified completed or INCOMPLETE", () => {
+  if (!subagentGuard) return;
+  const extract = (result) =>
+    subagentGuard.extractVerifierRunRecord({ results: [result] });
+  eq(
+    extract({ agent: "debugger", exitCode: 1 }) ?? "ignored",
+    "ignored",
+    "non-verifier runs produce no record",
+  );
+  const passed = extract({
+    agent: "verifier",
+    exitCode: 0,
+    finalOutput: "## Urteil\n\nPASS\n\nAlles belegt.",
+    attemptedModels: ["anthropic/claude-sonnet-5"],
+  });
+  eq(passed.status, "completed", "a clean run is completed");
+  eq(passed.verdict, "PASS", "the verdict is parsed from the report");
+  const judgedFail = extract({
+    agent: "verifier",
+    exitCode: 0,
+    finalOutput: "## Urteil\n\nFAIL\n\nKernanforderung fehlt.",
+  });
+  eq(
+    judgedFail.status,
+    "completed",
+    "a substantive FAIL verdict is a completed run, never INCOMPLETE",
+  );
+  eq(judgedFail.verdict, "FAIL", "the FAIL verdict is preserved");
+  for (const [result, reason] of [
+    [{ agent: "verifier", exitCode: 1, timedOut: true }, "timeout"],
+    [
+      { agent: "verifier", exitCode: 1, turnBudgetExceeded: true },
+      "turn-budget",
+    ],
+    [{ agent: "verifier", exitCode: 1, interrupted: true }, "interrupted"],
+    [
+      {
+        agent: "verifier",
+        exitCode: 1,
+        error: "upstream connection refused",
+      },
+      "provider-error",
+    ],
+    [{ agent: "verifier", exitCode: 2, error: "boom" }, "exit-2"],
+  ]) {
+    const record = extract(result);
+    eq(record.status, "incomplete", `${reason} marks the run incomplete`);
+    eq(record.reason, reason, `${reason} is named as the reason`);
+  }
+  const banner = subagentGuard.verifierIncompleteBanner("turn-budget");
+  assert(
+    banner.includes("INCOMPLETE") && banner.includes("turnBudget"),
+    "the banner makes the invalid verification visible",
+  );
+});
+
+await test("subagent fallback triggers only on provider-class failures", () => {
+  if (!modelFallback) return;
+  for (const error of [
+    "rate limit exceeded",
+    "401 unauthorized",
+    "connection refused",
+    "service unavailable",
+    "503",
+  ]) {
+    assert(
+      modelFallback.isRetryableModelFailure(error),
+      `provider-class failure may fall back: ${error}`,
+    );
+  }
+  eq(
+    modelFallback.isRetryableModelFailure(undefined),
+    false,
+    "no error means no fallback",
+  );
+  eq(
+    modelFallback.isRetryableModelFailure("verification failed: test X"),
+    false,
+    "a substantive failure text never triggers a model fallback",
   );
 });

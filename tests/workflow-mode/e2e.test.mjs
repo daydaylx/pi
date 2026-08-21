@@ -426,14 +426,31 @@ await test("Plan Mode mutation guard keeps the plan file writable", async () => 
     );
 
     await harness.commands.get("permission")("yolo", ctx);
+    const denied = harness.appended.filter(
+      (entry) => entry.customType === "permission-transition-denied",
+    );
+    assert(
+      denied.length >= 1,
+      "a YOLO attempt in plan mode is audited as denied",
+    );
+    eq(
+      denied.at(-1)?.data.attemptedLevel,
+      "yolo",
+      "the denied entry names the attempted level",
+    );
     result = await harness.runHooks(
       "tool_call",
       writeEvent("src/example.ts"),
       ctx,
     );
     assert(
-      !result.some((entry) => entry?.block),
-      "YOLO deliberately bypasses the planning guard",
+      result.some((entry) => entry?.block),
+      "the denied YOLO attempt does not lift the planning guard",
+    );
+    eq(
+      latestStatus(harness, "permissions"),
+      "🛡 MANUELL · CONFIRM ALL",
+      "a denied YOLO attempt leaves the permission level unchanged",
     );
 
     await harness.commands.get("permission")("readonly", ctx);
@@ -454,6 +471,70 @@ await test("Plan Mode mutation guard keeps the plan file writable", async () => 
     assert(
       result.some((entry) => entry?.block),
       "readonly still blocks other project writes",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("YOLO stays available in work mode but never unlocks plan mode", async () => {
+  if (!planMode || !modePermissions) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-yolo-lock-"));
+  try {
+    const harness = createHarness({ select: () => "Architekturplan" });
+    planMode.default(harness.api);
+    modePermissions.default(harness.api);
+    const ctx = harness.makeContext({ cwd });
+    await hooks(harness, "session_start", ctx);
+
+    await harness.commands.get("yolo")("", ctx);
+    eq(
+      latestStatus(harness, "permissions"),
+      "⚠ YOLO · TEMPORÄR",
+      "work mode still allows entering YOLO",
+    );
+    let result = await harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: "src/example.ts" } },
+      ctx,
+    );
+    assert(
+      !result.some((entry) => entry?.block),
+      "YOLO keeps its ordinary meaning in work mode",
+    );
+
+    await chooseWorkflow(harness, ctx);
+    result = await harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: "src/example.ts" } },
+      ctx,
+    );
+    assert(
+      result.some((entry) => entry?.block),
+      "an active YOLO does not unlock agent writes in plan mode",
+    );
+    result = await harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: ".agent/plans/current-plan.md" } },
+      ctx,
+    );
+    assert(
+      !result.some((entry) => entry?.block),
+      "the plan file stays the only writable target while planning",
+    );
+
+    await harness.commands.get("yolo")("", ctx);
+    eq(
+      latestStatus(harness, "permissions"),
+      "🛡 DEFAULT · PROJECT WRITE",
+      "leaving YOLO stays possible while planning",
+    );
+    eq(
+      harness.appended.filter(
+        (entry) => entry.customType === "permission-transition-denied",
+      ).length,
+      0,
+      "toggling YOLO off is never a denied attempt",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

@@ -68,14 +68,15 @@ type Slot = (typeof Slot)[keyof typeof Slot];
 const Priority = {
   workflow: 0,
   yolo: 1,
-  failedVerification: 2,
-  exhaustedContext: 3,
-  lsp: 4,
-  folder: 5,
-  model: 6,
-  verification: 7,
-  thinking: 8,
-  context: 9,
+  recovery: 2,
+  failedVerification: 3,
+  exhaustedContext: 4,
+  lsp: 5,
+  folder: 6,
+  model: 7,
+  verification: 8,
+  thinking: 9,
+  context: 10,
 } as const;
 
 type Priority = (typeof Priority)[keyof typeof Priority];
@@ -112,12 +113,7 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.context,
     Slot.verification,
   ]),
-  standard: new Set([
-    Slot.workflow,
-    Slot.model,
-    Slot.thinking,
-    Slot.folder,
-  ]),
+  standard: new Set([Slot.workflow, Slot.model, Slot.thinking, Slot.folder]),
   compact: new Set([Slot.workflow, Slot.model, Slot.folder]),
 };
 
@@ -188,7 +184,11 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     segments.push({
       slot: Slot.folder,
       priority: Priority.folder,
-      text: compactCwd(input.cwd, FOLDER_MAX_COLUMNS[tier], input.homeDirectory),
+      text: compactCwd(
+        input.cwd,
+        FOLDER_MAX_COLUMNS[tier],
+        input.homeDirectory,
+      ),
       tone: "muted",
     });
   }
@@ -217,9 +217,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     const attention = verificationNeedsAttention(verification);
     segments.push({
       slot: Slot.verification,
-      priority: attention
-        ? Priority.failedVerification
-        : Priority.verification,
+      priority: attention ? Priority.failedVerification : Priority.verification,
       text: `${verification === "verified" ? "✓" : attention ? "⚠" : ""} ${verification}`.trim(),
       tone: verificationTone(verification),
       critical: attention,
@@ -242,6 +240,20 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
       slot: Slot.risk,
       priority: Priority.yolo,
       text: "⚠ YOLO",
+      tone: "error",
+      bold: true,
+      critical: true,
+    });
+  }
+
+  const recovery = input.statuses.get("recovery");
+  if (recovery) {
+    // Eine offene Recovery-Sperre ist eine aktive Schreibgrenze und bleibt
+    // deshalb unabhängig von der Breite sichtbar.
+    segments.push({
+      slot: Slot.risk,
+      priority: Priority.recovery,
+      text: recovery,
       tone: "error",
       bold: true,
       critical: true,

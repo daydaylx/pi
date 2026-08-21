@@ -4,6 +4,7 @@
  */
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
+import { ellipsizeMiddle } from "../shared/paths.ts";
 import type { DiffHunk, DiffStats, FileDiff } from "./types.ts";
 
 /** Maximale Anzahl Hunk-Zeilen im Compact-Modus. */
@@ -89,7 +90,7 @@ export function renderFull(
 }
 
 /**
- * Rendert die Statistik-Zeile: "📄 path/to/file  +N −M  (K Hunks)"
+ * Rendert die Statistik-Zeile: "✎ path/to/file  +N −M  (K Hunks)"
  */
 export function renderStatLine(
   stats: DiffStats,
@@ -97,7 +98,8 @@ export function renderStatLine(
   width: number,
 ): string {
   const parts: string[] = [];
-  parts.push(theme.fg("accent", `📄 ${stats.path}`));
+  const path = ellipsizeMiddle(stats.path, Math.max(1, width - 2));
+  parts.push(theme.fg("accent", `✎ ${path}`));
   parts.push("  ");
   if (stats.linesAdded > 0) {
     parts.push(theme.fg("toolDiffAdded", `+${stats.linesAdded}`));
