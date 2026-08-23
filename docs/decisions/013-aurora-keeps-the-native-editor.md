@@ -51,3 +51,13 @@ Widget.
   von Aurora kamen.
 - `extensions/aurora-ui/README.md` beschreibt nur noch Fußzeile und Widget als
   Auroras Flächen.
+- Aus demselben Grund bleibt `Shift+Tab` (`extensions/plan-mode/commands.ts`,
+  `extensions/shared/control-center-menu.ts`) Pis nativer 3-Eintrags-Selector
+  (Work / Schnellplan / Architekturplan) und wird nicht zu einem eigenen
+  Tab-Overlay (z. B. Workflow/Tasks/Skills, wie ein früheres UI-Rework-Konzept
+  vorschlug) ausgebaut. Ein eigenes Overlay würde den Tastaturfokus aus dem
+  schnellsten Wechselpfad der UI abziehen — genau die Kopplungs-/Kostenfalle,
+  die diese Entscheidung schon beim Editor vermeidet. Der neue,
+  on-demand-geöffnete Inspector (`/inspect`, `extensions/aurora-ui/README.md`)
+  folgt demselben Prinzip: er ersetzt Shift+Tab nicht, sondern öffnet über
+  denselben nativen Selector-Mechanismus.

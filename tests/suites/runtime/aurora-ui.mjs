@@ -1740,6 +1740,692 @@ export const auroraUiSections = {
         }
       }
 
+      // Task Projection, Receipts, and Task Workspace rendering tests
+      {
+        const receiptsMod = await load("extensions/aurora-ui/receipts.ts");
+        const projectionMod = await load(
+          "extensions/aurora-ui/task-projection.ts",
+        );
+        const inspectorMod = await load("extensions/aurora-ui/inspector.ts");
+        const renderersMod = await load(
+          "extensions/aurora-ui/tool-renderers.ts",
+        );
+
+        if (receiptsMod && projectionMod && inspectorMod && renderersMod) {
+          const { ReceiptAggregator } = receiptsMod;
+          const {
+            projectTaskViewModel,
+            determineTaskPhase,
+            extractTaskTitle,
+            projectVerificationState,
+            projectSubagentBranches,
+          } = projectionMod;
+          const {
+            renderProgressBar,
+            renderSubagentBranches,
+            renderVerificationBlock,
+            renderTaskWorkspace,
+            renderTaskHeader,
+            renderChangingFiles,
+          } = renderersMod;
+          const { renderInspectorBox } = inspectorMod;
+
+          // 1. ReceiptAggregator unit tests
+          const agg = new ReceiptAggregator();
+          agg.recordStart("1", "read", { path: "src/main.ts" }, 1000);
+          agg.recordEnd("1", "content", false, 1100);
+          agg.recordStart("2", "read", { path: "src/utils.ts" }, 1200);
+          agg.recordEnd("2", "content", false, 1300);
+          agg.recordStart("3", "grep", { query: "export function" }, 1400);
+          agg.recordEnd("3", "matches", false, 1500);
+          agg.recordFileEdit("src/main.ts", 15, 3);
+          agg.recordTestRun(10, 0, 10);
+
+          const receipts = agg.getReceipts();
+          eq(
+            receipts.length,
+            4,
+            "ReceiptAggregator aggregates investigation, search, edits, and tests",
+          );
+          assert(
+            receipts.some(
+              (r) =>
+                r.kind === "investigation" && r.summary.includes("2 Dateien"),
+            ),
+            "investigation receipt aggregated",
+          );
+          assert(
+            receipts.some(
+              (r) => r.kind === "search" && r.summary.includes("1 Suchabfrage"),
+            ),
+            "search receipt aggregated",
+          );
+          assert(
+            receipts.some(
+              (r) => r.kind === "edit" && r.summary.includes("+15 −3"),
+            ),
+            "edit receipt aggregated",
+          );
+          assert(
+            receipts.some(
+              (r) =>
+                r.kind === "test" && r.summary.includes("10 / 10 bestanden"),
+            ),
+            "test receipt aggregated",
+          );
+
+          // Error preservation
+          agg.recordStart("err1", "bash", { command: "exit 1" }, 1600);
+          agg.recordEnd("err1", "Command failed with code 1", true, 1700);
+          const withError = agg.getReceipts();
+          assert(
+            withError.some(
+              (r) =>
+                r.status === "failed" &&
+                r.errorDetails?.includes("failed with code 1"),
+            ),
+            "tool errors are preserved in receipts",
+          );
+
+          // 1b. detailRef resolves back to the underlying raw record via
+          // getRecord() — investigation/search receipts are built from real
+          // recordStart/recordEnd calls above, so their detailRef must
+          // resolve, and an error receipt's detailRef must point at the
+          // record that actually failed.
+          const investigationReceipt = withError.find(
+            (r) => r.kind === "investigation",
+          );
+          assert(
+            investigationReceipt?.detailRef &&
+              agg.getRecord(investigationReceipt.detailRef)?.toolName ===
+                "read",
+            "investigation receipt's detailRef resolves back to a real read record",
+          );
+          const searchReceipt = withError.find((r) => r.kind === "search");
+          assert(
+            searchReceipt?.detailRef &&
+              agg.getRecord(searchReceipt.detailRef)?.toolName === "grep",
+            "search receipt's detailRef resolves back to a real grep record",
+          );
+          const errorReceipt = withError.find(
+            (r) => r.status === "failed" && r.kind === "generic",
+          );
+          eq(
+            errorReceipt?.detailRef,
+            "err1",
+            "error receipt's detailRef is the id of the record that failed",
+          );
+          eq(
+            agg.getRecord("err1")?.toolName,
+            "bash",
+            "the failing record itself resolves via getRecord",
+          );
+
+          // 1c. An edit receipt built from a real tool record (not the
+          // manual recordFileEdit() counter bump used above) carries a
+          // resolvable detailRef pointing at the last-touched file's record.
+          const editAgg = new ReceiptAggregator();
+          editAgg.recordStart("e1", "edit", { path: "src/app.ts" }, 100);
+          editAgg.recordEnd("e1", "ok", false, 200);
+          const editReceipt = editAgg
+            .getReceipts()
+            .find((r) => r.kind === "edit");
+          assert(
+            editReceipt?.detailRef === "e1" &&
+              editAgg.getRecord("e1")?.args?.path === "src/app.ts",
+            "edit receipt's detailRef resolves to the record for the last touched file",
+          );
+
+          // 1d. The recent-records ring buffer is bounded: the oldest record
+          // is evicted once it fills up, but that never removes the receipt
+          // itself or the error detail already embedded inline on it.
+          const ringAgg = new ReceiptAggregator();
+          ringAgg.recordStart("first", "bash", { command: "echo 1" }, 0);
+          ringAgg.recordEnd("first", "1", false, 1);
+          for (let i = 0; i < 25; i++) {
+            ringAgg.recordStart(
+              `fill-${i}`,
+              "bash",
+              { command: "noop" },
+              i + 2,
+            );
+            ringAgg.recordEnd(`fill-${i}`, "ok", false, i + 3);
+          }
+          eq(
+            ringAgg.getRecord("first"),
+            undefined,
+            "the oldest record is evicted once the recent-records ring buffer fills up",
+          );
+          eq(
+            ringAgg.getRecord("fill-24")?.toolName,
+            "bash",
+            "the most recently completed record is still resolvable",
+          );
+
+          const ringErrAgg = new ReceiptAggregator();
+          ringErrAgg.recordStart(
+            "early-error",
+            "bash",
+            { command: "exit 1" },
+            0,
+          );
+          ringErrAgg.recordEnd("early-error", "boom", true, 1);
+          for (let i = 0; i < 25; i++) {
+            ringErrAgg.recordStart(
+              `noise-${i}`,
+              "bash",
+              { command: "ok" },
+              i + 2,
+            );
+            ringErrAgg.recordEnd(`noise-${i}`, "ok", false, i + 3);
+          }
+          const survivingErrorReceipt = ringErrAgg
+            .getReceipts()
+            .find((r) => r.id === "early-error");
+          assert(
+            survivingErrorReceipt?.errorDetails?.includes("boom"),
+            "an error receipt's errorDetails survives ring-buffer eviction of its raw record",
+          );
+          eq(
+            ringErrAgg.getRecord("early-error"),
+            undefined,
+            "only the stale detailRef lookup is lost on eviction, never the receipt itself",
+          );
+
+          // 2. Task Phase determination
+          eq(
+            determineTaskPhase("simple_plan", "tool", null, false).phase,
+            "plan",
+            "plan mode maps to plan phase",
+          );
+          eq(
+            determineTaskPhase("work", "thinking", null, false).phase,
+            "understand",
+            "work thinking maps to understand phase",
+          );
+          eq(
+            determineTaskPhase("work", "tool", null, false).phase,
+            "work",
+            "work tool maps to work phase",
+          );
+          eq(
+            determineTaskPhase("work", "idle", "checks_failed", false).phase,
+            "verify",
+            "failed verification maps to verify phase",
+          );
+          eq(
+            determineTaskPhase("work", "idle", "verified", false).phase,
+            "done",
+            "verified status maps to done phase",
+          );
+
+          // 3. Task Title extraction
+          eq(
+            extractTaskTitle(
+              undefined,
+              "# Fix Compaction\n\nZiel: threshold fix",
+            ).title,
+            "Fix Compaction",
+            "plan title extracted",
+          );
+          eq(
+            extractTaskTitle("/work Fix the broken test").title,
+            "Fix the broken test",
+            "prompt title extracted",
+          );
+
+          // 4. Progress bar rendering
+          const pb = renderProgressBar("work", context.ui.theme, 120);
+          assert(
+            pb.includes("Understand") &&
+              pb.includes("Work") &&
+              pb.includes("Done"),
+            "progress bar renders all phases",
+          );
+
+          // 5. Subagent branch rendering
+          const subagentBranches = renderSubagentBranches(
+            [
+              {
+                agent: "investigator",
+                status: "completed",
+                focus: "Found 2 root causes",
+              },
+              { agent: "verifier", status: "running", focus: "Running tests" },
+            ],
+            context.ui.theme,
+            120,
+          );
+          assert(
+            subagentBranches.some((l) => l.includes("investigator")) &&
+              subagentBranches.some((l) => l.includes("Found 2 root causes")),
+            "subagent branch rendered with findings",
+          );
+
+          // 5b. Every SubagentBranchInfo status renders a distinct, labeled
+          // line — including "paused", which previously had no branch
+          // rendering at all and fell through projectSubagentBranches as a
+          // mislabeled "completed" (see the regression test below).
+          for (const status of [
+            "running",
+            "paused",
+            "completed",
+            "failed",
+            "needs_attention",
+            "queued",
+          ]) {
+            const lines = renderSubagentBranches(
+              [{ agent: "a", status }],
+              context.ui.theme,
+              120,
+            );
+            assert(
+              lines.length > 0 && lines[0].includes("a"),
+              `renderSubagentBranches renders a "${status}" branch`,
+            );
+          }
+
+          // 5c. projectSubagentBranches maps every live SubagentInfo status
+          // explicitly — "paused" must not fall through to "completed".
+          const pausedBranch = projectSubagentBranches([
+            { agent: "investigator", status: "paused" },
+          ])[0];
+          eq(
+            pausedBranch.status,
+            "paused",
+            "a paused subagent is projected as paused, not completed",
+          );
+          const otherStatuses = projectSubagentBranches([
+            { agent: "a", status: "running" },
+            { agent: "b", status: "needs_attention" },
+            { agent: "c", status: "queued" },
+          ]).map((b) => b.status);
+          eq(
+            otherStatuses.join(","),
+            "running,needs_attention,queued",
+            "the other live subagent statuses still map straight through",
+          );
+
+          // 6. Verification block rendering
+          const verifyBlock = renderVerificationBlock(
+            {
+              verdict: "READY",
+              criteria: [{ label: "Unit tests passing", status: "passed" }],
+              blockers: [],
+            },
+            context.ui.theme,
+            120,
+          );
+          assert(
+            verifyBlock.some(
+              (l) => l.includes("VERIFY") && l.includes("READY"),
+            ),
+            "verification block renders ready verdict",
+          );
+
+          // 7. Inspector box rendering
+          const inspectorBox = renderInspectorBox(
+            {
+              title: "CHANGES",
+              badge: "3 files",
+              sections: [
+                { title: "Modified", lines: ["src/main.ts (+10 -2)"] },
+              ],
+              actions: [{ label: "Open Diff", key: "Enter" }],
+            },
+            context.ui.theme,
+            80,
+          );
+          assert(
+            inspectorBox.some(
+              (l) => l.includes("CHANGES") && l.includes("3 files"),
+            ),
+            "inspector box renders header and badge",
+          );
+
+          // 8. Full task view model & workspace rendering
+          const tvm = projectTaskViewModel({
+            state: {
+              sessionEpoch: "test-epoch",
+              workflow: { phase: "work", label: "Work" },
+              permissions: {},
+              lsp: {},
+              model: { id: "test-model", thinking: "medium" },
+              activity: { kind: "tool" },
+            },
+            activeTools: new Map([
+              [
+                "t1",
+                {
+                  id: "t1",
+                  name: "edit",
+                  kind: "edit",
+                  target: "src/main.ts",
+                  startedAt: Date.now() - 5000,
+                },
+              ],
+            ]),
+            subagents: [],
+            receiptAggregator: agg,
+            now: Date.now(),
+          });
+          eq(tvm.phase, "work", "task view model computes correct phase");
+          const workspaceLines = renderTaskWorkspace(
+            tvm,
+            context.ui.theme,
+            120,
+          );
+          assert(
+            workspaceLines.some((l) => l.includes("CURRENT WORK")),
+            "renderTaskWorkspace includes current work block",
+          );
+
+          // 8b. changesSummary flows into currentWork.changingFiles as the
+          // cumulative change list, not the single currently-running tool's
+          // target (regression guard for the earlier duplication with the
+          // active-tool line).
+          const tvmWithChanges = projectTaskViewModel({
+            state: {
+              sessionEpoch: "test-epoch",
+              workflow: { phase: "work", label: "Work" },
+              permissions: {},
+              lsp: {},
+              model: { id: "test-model", thinking: "medium" },
+              activity: { kind: "tool" },
+              changes: {
+                filesCount: 2,
+                files: ["src/main.ts", "src/utils.ts"],
+                linesAdded: 20,
+                linesRemoved: 5,
+              },
+              verification: null,
+            },
+            activeTools: new Map([
+              [
+                "t1",
+                {
+                  id: "t1",
+                  name: "edit",
+                  kind: "edit",
+                  target: "src/main.ts",
+                  startedAt: Date.now() - 2000,
+                },
+              ],
+            ]),
+            subagents: [],
+            receiptAggregator: agg,
+            now: Date.now(),
+          });
+          assert(
+            tvmWithChanges.changesSummary?.filesCount === 2 &&
+              tvmWithChanges.changesSummary.files.includes("src/main.ts") &&
+              tvmWithChanges.changesSummary.files.includes("src/utils.ts"),
+            "changesSummary is projected from state.changes",
+          );
+          assert(
+            tvmWithChanges.currentWork?.changingFiles?.length === 2 &&
+              tvmWithChanges.currentWork.changingFiles.includes("src/utils.ts"),
+            "currentWork.changingFiles reflects the cumulative change list, not just the active tool's target",
+          );
+          const changingFilesLines = renderChangingFiles(
+            tvmWithChanges.currentWork,
+            context.ui.theme,
+            120,
+          );
+          assert(
+            changingFilesLines.some(
+              (l) =>
+                l.includes("Changing:") &&
+                l.includes("src/main.ts") &&
+                l.includes("src/utils.ts"),
+            ),
+            "renderChangingFiles renders the full cumulative change list",
+          );
+          eq(
+            renderChangingFiles(
+              { changingFiles: undefined },
+              context.ui.theme,
+              120,
+            ).length,
+            0,
+            "renderChangingFiles renders nothing without changed files",
+          );
+
+          // 8c. projectVerificationState: dynamic checks from a structured
+          // verification summary (setup-core's requiredOutcomes/blockingRecommendedIds),
+          // covering every negative case the test plan requires plus a
+          // false-positive-READY guard.
+          const noActiveTools = new Map();
+          const verifyToolActive = new Map([
+            [
+              "v1",
+              {
+                id: "v1",
+                name: "verify",
+                kind: "verification",
+                startedAt: Date.now(),
+              },
+            ],
+          ]);
+
+          // Case 1: a required check failed.
+          const failedCase = projectVerificationState(
+            "checks_failed",
+            noActiveTools,
+            {
+              status: "checks_failed",
+              declaredRequiredIds: ["typecheck"],
+              requiredOutcomes: { typecheck: "failed" },
+              blockingRecommendedIds: [],
+            },
+          );
+          eq(
+            failedCase.verdict,
+            "NOT_READY",
+            "a failed required check is NOT_READY",
+          );
+          assert(
+            failedCase.checks.some(
+              (c) => c.id === "typecheck" && c.status === "failed",
+            ),
+            "failed required check is reflected in checks[]",
+          );
+          assert(
+            failedCase.blockers.some((b) => b.includes("typecheck")),
+            "failed required check produces a blocker",
+          );
+
+          // Case 2: a declared required check never ran (open criterion).
+          const openCase = projectVerificationState(
+            "changed_unverified",
+            noActiveTools,
+            {
+              status: "changed_unverified",
+              declaredRequiredIds: ["typecheck", "lint"],
+              requiredOutcomes: { typecheck: "success" },
+              blockingRecommendedIds: [],
+            },
+          );
+          eq(
+            openCase.verdict,
+            "UNVERIFIED",
+            "an open required check is UNVERIFIED",
+          );
+          assert(
+            openCase.checks.some(
+              (c) => c.id === "lint" && c.status === "pending",
+            ),
+            "a required check missing from requiredOutcomes shows as pending, not passed",
+          );
+
+          // Case 3: a blocking recommended (non-required) check failed.
+          const recommendedBlockedCase = projectVerificationState(
+            "checks_failed",
+            noActiveTools,
+            {
+              status: "checks_failed",
+              declaredRequiredIds: ["typecheck"],
+              requiredOutcomes: { typecheck: "success" },
+              blockingRecommendedIds: ["security-scan"],
+            },
+          );
+          eq(
+            recommendedBlockedCase.verdict,
+            "NOT_READY",
+            "a blocking recommended check is NOT_READY even with all required checks passing",
+          );
+          assert(
+            recommendedBlockedCase.evidence.some((e) =>
+              e.includes("security-scan"),
+            ),
+            "blocking recommended id appears in evidence",
+          );
+
+          // Case 4: a required check could not run at all (aborted/unavailable).
+          const unavailableCase = projectVerificationState(
+            "checks_unavailable",
+            noActiveTools,
+            {
+              status: "checks_unavailable",
+              declaredRequiredIds: ["typecheck"],
+              requiredOutcomes: { typecheck: "unavailable" },
+              blockingRecommendedIds: [],
+            },
+          );
+          eq(
+            unavailableCase.verdict,
+            "UNVERIFIED",
+            "an unavailable required check is UNVERIFIED, never a silent pass",
+          );
+          assert(
+            unavailableCase.checks.every((c) => c.status !== "passed"),
+            "no check is falsely reported as passed when it never ran",
+          );
+
+          // Case 5: no structured verification summary at all (setup-core
+          // disabled/untrusted project) — falls back to the coarse status
+          // string. Also asserts the previously hardcoded, always-"passed"
+          // "Kontext und Problem analysiert" criterion is gone for good.
+          const fallbackCase = projectVerificationState(
+            "checks_failed",
+            noActiveTools,
+            null,
+          );
+          eq(
+            fallbackCase.verdict,
+            "NOT_READY",
+            "fallback path still derives a verdict from the coarse status string",
+          );
+          assert(
+            fallbackCase.checks.length === 0 &&
+              !fallbackCase.criteria.some((c) =>
+                c.label.includes("Kontext und Problem analysiert"),
+              ),
+            "fallback path never fabricates an always-passed criterion",
+          );
+
+          // Case 6: false-positive-READY guard — "verified" with zero
+          // declared required checks is a contradiction and must not render
+          // as READY.
+          const noDeclaredCase = projectVerificationState(
+            "verified",
+            noActiveTools,
+            {
+              status: "verified",
+              declaredRequiredIds: [],
+              requiredOutcomes: {},
+              blockingRecommendedIds: [],
+            },
+          );
+          eq(
+            noDeclaredCase.verdict,
+            "UNVERIFIED",
+            "verified with no declared required checks is never shown as READY",
+          );
+
+          // An active verification tool run overrides a stale "verified"
+          // summary from a previous run — the in-progress check must not
+          // still read as READY while it is running.
+          const inProgressCase = projectVerificationState(
+            "verified",
+            verifyToolActive,
+            {
+              status: "verified",
+              declaredRequiredIds: ["typecheck"],
+              requiredOutcomes: { typecheck: "success" },
+              blockingRecommendedIds: [],
+            },
+          );
+          eq(
+            inProgressCase.verdict,
+            "UNVERIFIED",
+            "an active verification tool run overrides a stale READY verdict",
+          );
+
+          // A genuinely passing run is still READY.
+          const readyCase = projectVerificationState(
+            "verified",
+            noActiveTools,
+            {
+              status: "verified",
+              declaredRequiredIds: ["typecheck"],
+              requiredOutcomes: { typecheck: "success" },
+              blockingRecommendedIds: [],
+            },
+          );
+          eq(
+            readyCase.verdict,
+            "READY",
+            "all declared required checks passing is READY",
+          );
+
+          // 9. renderTaskHeader: title-only, title+goal, width crop
+          const titleOnly = renderTaskHeader(tvm, context.ui.theme, 120);
+          eq(titleOnly.length, 1, "title-only header renders a single line");
+          assert(
+            titleOnly[0].includes("AKTUELLE AUFGABE"),
+            "title-only header renders the uppercased fallback title",
+          );
+
+          const tvmWithGoal = projectTaskViewModel({
+            state: tvm && {
+              sessionEpoch: "test-epoch",
+              workflow: { phase: "work", label: "Work" },
+              permissions: {},
+              lsp: {},
+              model: { id: "test-model", thinking: "medium" },
+              activity: { kind: "tool" },
+            },
+            activeTools: new Map(),
+            subagents: [],
+            receiptAggregator: agg,
+            now: Date.now(),
+            userPrompt: "Fix the flaky test\nIt fails intermittently in CI.",
+          });
+          const titleAndGoal = renderTaskHeader(
+            tvmWithGoal,
+            context.ui.theme,
+            120,
+          );
+          assert(
+            titleAndGoal.length === 2 &&
+              titleAndGoal[0].includes("FIX THE FLAKY TEST") &&
+              titleAndGoal[1].includes("It fails intermittently in CI."),
+            "title+goal header renders both lines",
+          );
+
+          const croppedTitle = renderTaskHeader(
+            tvmWithGoal,
+            context.ui.theme,
+            10,
+          );
+          assert(
+            croppedTitle.every((l) => stripAnsi(l).length <= 10),
+            "renderTaskHeader crops every line to the given width",
+          );
+        }
+      }
+
       await harness.runHooks("session_shutdown", {}, context);
       eq(harness.widgets.size, 0, "Aurora removes its widget on shutdown");
       eq(

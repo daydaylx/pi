@@ -12,6 +12,20 @@ export type AuroraWorkflowPhase = WorkflowMode;
 
 export type AuroraActivityKind = "idle" | "thinking" | "tool" | "responding";
 
+export interface AuroraTaskChanges {
+  filesCount: number;
+  files: string[];
+  linesAdded: number;
+  linesRemoved: number;
+}
+
+export interface AuroraVerificationSummary {
+  status?: string;
+  declaredRequiredIds: string[];
+  requiredOutcomes: Record<string, string>;
+  blockingRecommendedIds: string[];
+}
+
 export interface AuroraUiState {
   sessionEpoch: string;
   workflow: {
@@ -33,6 +47,8 @@ export interface AuroraUiState {
   activity: {
     kind: AuroraActivityKind;
   };
+  changes: AuroraTaskChanges | null;
+  verification: AuroraVerificationSummary | null;
 }
 
 export interface AuroraUiStatePatch {
@@ -41,6 +57,8 @@ export interface AuroraUiStatePatch {
   lsp?: Partial<AuroraUiState["lsp"]>;
   model?: Partial<AuroraUiState["model"]>;
   activity?: Partial<AuroraUiState["activity"]>;
+  changes?: AuroraTaskChanges | null;
+  verification?: AuroraVerificationSummary | null;
 }
 
 export interface AuroraUiStateRequest {
@@ -240,6 +258,20 @@ export function mergeAuroraUiState(
       state.activity.kind !== patch.activity.kind
     ) {
       state.activity.kind = patch.activity.kind;
+      changed = true;
+    }
+  }
+  if ("changes" in patch) {
+    const next = patch.changes ?? null;
+    if (JSON.stringify(state.changes) !== JSON.stringify(next)) {
+      state.changes = next;
+      changed = true;
+    }
+  }
+  if ("verification" in patch) {
+    const next = patch.verification ?? null;
+    if (JSON.stringify(state.verification) !== JSON.stringify(next)) {
+      state.verification = next;
       changed = true;
     }
   }

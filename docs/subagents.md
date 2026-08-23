@@ -19,9 +19,12 @@ Normale Änderungen mit bekannter Änderungssurface plant und implementiert der
 Hauptagent ebenfalls selbst.
 `investigator` wird nur bei unbekanntem Bereich oder unklarer
 Änderungssurface gestartet; `debugger` nur bei unbekannten, intermittierenden
-oder gescheiterten Bugs. Wann der `verifier` verpflichtend und wann er optional
-ist, steht in `AGENTS.md`: maßgeblich ist der Risikofaktor der Änderung, nicht
-die Zahl der berührten Dateien. Es gibt keine verschachtelte Delegation.
+oder gescheiterten Bugs. Im Simple oder Detailed Plan ist ausschließlich eine
+synchrone, artefaktfreie Investigator-SINGLE-Delegation zulässig; Debugger,
+Verifier, andere Rollen und Management-Aktionen bleiben dort blockiert. Wann
+der `verifier` verpflichtend und wann er optional ist, steht in `AGENTS.md`:
+maßgeblich ist der Risikofaktor der Änderung, nicht die Zahl der berührten
+Dateien. Es gibt keine verschachtelte Delegation.
 
 Alle lokalen Profile starten laut Profil-Tools mit frischem Child-Kontext,
 übernehmen die statischen Projektregeln und nicht automatisch den

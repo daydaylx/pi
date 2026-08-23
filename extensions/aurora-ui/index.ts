@@ -8,6 +8,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { layoutForSize } from "../shared/layout.ts";
+import { isPlanningMode } from "../shared/workflow-mode.ts";
+import { readPlan } from "../plan-mode/plan-file.ts";
 import { loadSetupConfig, type MotionMode } from "../setup-core/config.ts";
 import {
   AURORA_UI_CHANNELS,
@@ -24,7 +26,11 @@ import {
   describeToolActivity,
   hiddenActivitySummary,
   renderActiveTools,
-  renderSubagents,
+  renderChangingFiles,
+  renderProgressBar,
+  renderSubagentBranches,
+  renderTaskHeader,
+  renderVerificationBlock,
   type ActiveToolView,
   type SubagentInfo,
 } from "./tool-renderers.ts";
@@ -32,6 +38,50 @@ import { renderFooterLines } from "./footer.ts";
 import { crop } from "./layout.ts";
 import { renderStartscreen } from "./startscreen.ts";
 import { thinkingLabel, thinkingTone } from "./thinking.ts";
+import { ReceiptAggregator, renderReceiptLines } from "./receipts.ts";
+import { projectTaskViewModel } from "./task-projection.ts";
+import type { TaskViewModel } from "./task-view-model.ts";
+import { registerInspectorCommand } from "./inspector-command.ts";
+export {
+  renderInspectorBox,
+  type InspectorContent,
+  type InspectorSection,
+} from "./inspector.ts";
+export {
+  ReceiptAggregator,
+  receiptGlyph,
+  renderReceiptLines,
+} from "./receipts.ts";
+export {
+  determineTaskPhase,
+  extractTaskTitle,
+  projectCurrentWork,
+  projectSubagentBranches,
+  projectTaskViewModel,
+  projectVerificationState,
+} from "./task-projection.ts";
+export type {
+  CurrentWorkViewModel,
+  FindingSeverity,
+  ReceiptKind,
+  ReceiptStatus,
+  SubagentBranchInfo,
+  TaskChangesSummary,
+  TaskFinding,
+  TaskPhase,
+  TaskReceipt,
+  TaskViewModel,
+  VerificationCriterion,
+  VerificationViewModel,
+} from "./task-view-model.ts";
+export {
+  renderChangingFiles,
+  renderProgressBar,
+  renderSubagentBranches,
+  renderTaskHeader,
+  renderTaskWorkspace,
+  renderVerificationBlock,
+} from "./tool-renderers.ts";
 
 const OWNER = "aurora-ui";
 const ACTIVITY_WIDGET = "aurora-ui/activity";
@@ -213,6 +263,8 @@ function makeState(
       thinking: String(pi.getThinkingLevel()),
     },
     activity: { kind: "idle" },
+    changes: null,
+    verification: null,
   };
 }
 
@@ -342,6 +394,9 @@ function activityGlyph(
 export default function auroraUiExtension(pi: ExtensionAPI): void {
   let epochSequence = 0;
   let state: AuroraUiState | undefined;
+  // Last task view model computed by renderActivityWidget, reused by the
+  // inspector command so it never re-derives verification independently.
+  let lastTask: TaskViewModel | undefined;
   let ticker: AnimationTicker | undefined;
   let previousTheme: string | undefined;
   let selectedTheme: string | undefined;
@@ -356,8 +411,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let fleetDockOwnsSubagents = false;
   let sessionCwd: string | undefined;
   let sessionHome: string | undefined;
+  let currentUserPrompt: string | undefined;
+  let currentPlanText: string | undefined;
+  let lastVerificationStatus: string | null = null;
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
+  const receiptAggregator = new ReceiptAggregator();
   // Presentation-only timestamps: neither is published nor part of Aurora's
   // activity-state contract.
   let activityStartedAt = 0;
@@ -435,17 +494,55 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             Number(a.status === "needs_attention"),
         );
     const detailBudget = Math.max(0, Math.min(8, Math.max(1, rows - 6)) - 1);
+
+    const task = projectTaskViewModel({
+      state,
+      activeTools,
+      subagents: agentViews,
+      receiptAggregator,
+      now,
+      verificationStatus: lastVerificationStatus,
+      currentPlan: currentPlanText,
+      userPrompt: currentUserPrompt,
+      contextPercent: activeContext?.getContextUsage()?.percent ?? null,
+    });
+    lastTask = task;
+    const taskHeader =
+      !compact && rows > 10 ? renderTaskHeader(task, theme, contentWidth) : [];
+    const progressBar =
+      !compact && rows > 10 && (toolViews.length > 0 || agentViews.length > 0)
+        ? [renderProgressBar(task.phase, theme, contentWidth)]
+        : [];
+    const receiptLines = renderReceiptLines(
+      task.receipts,
+      theme,
+      contentWidth,
+      2,
+    );
+
     const allDetails = [
+      ...taskHeader,
+      ...progressBar,
       ...renderActiveTools(toolViews, theme, contentWidth, now, {
         compact,
         wide: layout === "wide",
         limit: Number.POSITIVE_INFINITY,
       }),
-      ...renderSubagents(agentViews, theme, contentWidth, {
-        compact,
-        limit: Number.POSITIVE_INFINITY,
-        summary: false,
-      }),
+      ...renderSubagentBranches(
+        task.subagents,
+        theme,
+        contentWidth,
+        agentViews.length || 3,
+      ),
+      ...(task.currentWork
+        ? renderChangingFiles(task.currentWork, theme, contentWidth)
+        : []),
+      ...(toolViews.length === 0 && agentViews.length === 0
+        ? receiptLines
+        : []),
+      ...(task.verification
+        ? renderVerificationBlock(task.verification, theme, contentWidth)
+        : []),
     ];
     const overflow = allDetails.length > detailBudget;
     const visibleDetails = overflow
@@ -687,9 +784,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     foregroundSubagents.clear();
     asyncSubagents.clear();
     subagentsCache = [];
+    receiptAggregator.reset();
     activityStartedAt = 0;
     lastRelevantActivityAt = 0;
     turnSettledWhileAsync = false;
+    currentUserPrompt = undefined;
+    currentPlanText = undefined;
+    lastVerificationStatus = null;
     ticker?.dispose();
     ticker = undefined;
 
@@ -721,8 +822,14 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   pi.on("resources_discover", () => ({ themePaths: [THEME_PATH] }));
 
+  registerInspectorCommand(pi, {
+    getState: () => state,
+    getTask: () => lastTask,
+  });
+
   pi.on("session_start", (_event, ctx) => {
     disposeSession(activeContext);
+    receiptAggregator.reset();
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
 
     const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
@@ -778,9 +885,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         },
         render(width: number): string[] {
           if (!state) return [];
+          const statuses = footerData.getExtensionStatuses();
+          lastVerificationStatus = statuses.get("verification") ?? null;
           return renderFooterLines(theme, width, {
             state,
-            statuses: footerData.getExtensionStatuses(),
+            statuses,
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
             cwd: sessionCwd,
             homeDirectory: sessionHome,
@@ -820,7 +929,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     installBus(ctx);
   });
 
-  pi.on("before_agent_start", () => {
+  pi.on("before_agent_start", (event) => {
+    currentUserPrompt = event.prompt;
     showStartscreen = false;
     ticker?.requestRender();
   });
@@ -838,6 +948,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   pi.on("tool_execution_start", (event, ctx) => {
     const startedAt = Date.now();
+    receiptAggregator.recordStart(
+      event.toolCallId,
+      event.toolName,
+      event.args,
+      startedAt,
+    );
     activeTools.set(event.toolCallId, {
       id: event.toolCallId,
       name: event.toolName,
@@ -871,6 +987,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   pi.on("tool_execution_end", (event, ctx) => {
     activeTools.delete(event.toolCallId);
+    receiptAggregator.recordEnd(
+      event.toolCallId,
+      event.result,
+      event.isError,
+      Date.now(),
+    );
     if (event.toolName === "subagent") {
       foregroundSubagents.delete(event.toolCallId);
       refreshSubagentDisplay();
@@ -924,6 +1046,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     activeTools.clear();
     foregroundSubagents.clear();
     refreshSubagentDisplay();
+    if (sessionCwd && state && isPlanningMode(state.workflow.phase)) {
+      currentPlanText = readPlan(sessionCwd);
+    }
     if (asyncSubagents.size > 0) {
       retainAsyncActivity(ctx);
       return;

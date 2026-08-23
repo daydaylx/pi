@@ -425,6 +425,7 @@ export const verificationSections = {
       );
 
       if (!setupCore) return;
+      const auroraStateMod = await load("extensions/aurora-ui/state.ts");
       const workspace = mkdtempSync(
         path.join(tmpdir(), "pi-verification-status-"),
       );
@@ -488,6 +489,33 @@ export const verificationSections = {
         setupCore.default(harness.api, { exec: harness.api.exec });
         const trusted = harness.makeContext({ cwd: workspace, trusted: true });
         await harness.runHooks("session_start", {}, trusted);
+
+        // setup-core participates in the Aurora UI state bus: it answers a
+        // state request with its current (still empty) verification summary
+        // and, from then on, republishes it as a patch whenever it changes.
+        if (auroraStateMod) {
+          harness.api.events.emit(auroraStateMod.AURORA_UI_CHANNELS.request, {
+            type: "request",
+            requestId: "aurora-req-1",
+            sessionEpoch: "aurora-epoch-1",
+            requester: "aurora-ui",
+          });
+          const initialSnapshot = harness.emitted.find(
+            (e) =>
+              e.name === auroraStateMod.AURORA_UI_CHANNELS.snapshot &&
+              e.event.source === "setup-core",
+          );
+          assert(
+            initialSnapshot,
+            "setup-core answers an Aurora state request with a snapshot",
+          );
+          eq(
+            initialSnapshot.event.state.verification,
+            null,
+            "setup-core has nothing to report before the first agent_settled",
+          );
+        }
+
         await harness.runHooks(
           "agent_settled",
           { type: "agent_settled" },
@@ -577,6 +605,36 @@ export const verificationSections = {
           "Verify: verified",
           "coverage accumulated over two calls verifies the identical snapshot",
         );
+        if (auroraStateMod) {
+          const verifiedPatch = [...harness.emitted]
+            .reverse()
+            .find(
+              (e) =>
+                e.name === auroraStateMod.AURORA_UI_CHANNELS.patch &&
+                e.event.source === "setup-core",
+            );
+          assert(
+            verifiedPatch,
+            "setup-core publishes a verification patch on the Aurora bus",
+          );
+          eq(
+            verifiedPatch.event.patch.verification.status,
+            "verified",
+            "the published patch carries the same verdict as the status line",
+          );
+          eq(
+            [...verifiedPatch.event.patch.verification.declaredRequiredIds]
+              .sort()
+              .join(","),
+            "tests,typecheck",
+            "the published patch names every declared required profile",
+          );
+          eq(
+            verifiedPatch.event.patch.verification.requiredOutcomes.tests,
+            "success",
+            "the published patch carries the real per-profile outcome, not just the coarse verdict",
+          );
+        }
 
         // P0 regression: a blocking recommended failure and `verified` must
         // never describe the same run.

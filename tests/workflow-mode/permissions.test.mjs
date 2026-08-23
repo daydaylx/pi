@@ -433,12 +433,10 @@ await test("isPlanSafeCommand (readonly permission level) stays strict: no `;`-c
   }
 });
 
-// Characterization of the whole plan-mode tool surface. README documents
-// project_check and subagent (with and without `output`) as blocked so no tool
-// can route around the file boundary, and the guard is fail-closed for
-// anything it does not positively recognise as read-only. None of that was
-// pinned by a test.
-await test("plan mode admits only positively known read-only tools", () => {
+// The generic plan-mode guard remains fail-closed for tools it cannot prove
+// read-only. The specialized Investigator-SINGLE exception is checked below
+// and runs before this guard in registerPermissionGuards.
+await test("generic plan-mode guard admits only positively known read-only tools", () => {
   if (!workflowPolicy) return;
   const cwd = process.cwd();
   const planning = { mode: "simple_plan" };
@@ -471,7 +469,6 @@ await test("plan mode admits only positively known read-only tools", () => {
       { profile: "verify" },
       "a project check runs project scripts",
     ],
-    ["subagent", { agent: "investigator" }, "a subagent can act on its own"],
     [
       "subagent",
       { agent: "investigator", output: "/tmp/report.md" },
@@ -488,12 +485,83 @@ await test("plan mode admits only positively known read-only tools", () => {
   // YOLO hebt die Planmodus-Grenzen für Agenten-Tool-Aufrufe nicht auf.
   for (const [toolName, input] of [
     ["write", { path: "src/a.ts" }],
-    ["subagent", { agent: "investigator" }],
     ["frobnicate", {}],
   ]) {
     assert(
       decide("yolo", toolName, input),
       `${toolName} stays blocked while planning, even under yolo`,
+    );
+  }
+});
+
+await test("plan mode permits only the artifact-free Investigator SINGLE exception", () => {
+  if (!workflowPolicy) return;
+  const allowed = (mode, level, input) =>
+    workflowPolicy.planModeInvestigatorSingleAllowed(
+      { mode },
+      level,
+      { toolName: "subagent", input },
+    );
+  const valid = { agent: "investigator", task: "Locate the owner" };
+
+  for (const mode of ["simple_plan", "detailed_plan"]) {
+    for (const level of ["project-write", "confirm-all", "yolo"]) {
+      assert(
+        allowed(mode, level, valid),
+        `${mode}/${level} permits the standard Investigator SINGLE call`,
+      );
+    }
+    assert(
+      !allowed(mode, "readonly", valid),
+      `${mode}/readonly remains blocked by its complete tool boundary`,
+    );
+  }
+  assert(
+    !allowed("work", "project-write", valid),
+    "work mode does not take the plan-mode exception",
+  );
+
+  for (const [input, why] of [
+    [{ agent: "debugger", task: "Locate the owner" }, "debugger role"],
+    [{ agent: "verifier", task: "Locate the owner" }, "verifier role"],
+    [{ agent: "unknown", task: "Locate the owner" }, "unknown role"],
+    [
+      { agent: "investigator", task: "Locate the owner", action: "list" },
+      "management action",
+    ],
+    [
+      { agent: "investigator", task: "Locate the owner", async: true },
+      "background execution",
+    ],
+    [
+      { agent: "investigator", task: "Locate the owner", output: "report.md" },
+      "output file",
+    ],
+    [
+      { agent: "investigator", task: "Locate the owner", artifacts: true },
+      "debug artifacts",
+    ],
+    [
+      { agent: "investigator", task: "Locate the owner", context: "fork" },
+      "context override",
+    ],
+    [
+      { agent: "investigator", task: "Locate the owner", cwd: "/tmp" },
+      "cwd override",
+    ],
+    [
+      { agent: "investigator", task: "Locate the owner", skill: "extra" },
+      "skill override",
+    ],
+    [{ agent: "investigator", task: "  " }, "empty task"],
+  ]) {
+    assert(
+      !allowed("simple_plan", "project-write", input),
+      `simple_plan blocks Investigator delegation with ${why}`,
+    );
+    assert(
+      !allowed("detailed_plan", "project-write", input),
+      `detailed_plan blocks Investigator delegation with ${why}`,
     );
   }
 });

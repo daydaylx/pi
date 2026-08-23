@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.84.2",
   "theme": "aurora-night",
-  "defaultProvider": "openrouter",
-  "defaultModel": "stealth/ox-alpha",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-terra",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -53,7 +53,8 @@
     "openrouter/z-ai/glm-5.2:free"
   ],
   "packages": [
-    "git:github.com/daydaylx/pi-subagents@54c701242710b1dab39a47f23ef8020f40b82bd4"
+    "git:github.com/daydaylx/pi-subagents@54c701242710b1dab39a47f23ef8020f40b82bd4",
+    "npm:pi-web-access@0.24.2"
   ],
   "subagents": {
     "disableBuiltins": true,

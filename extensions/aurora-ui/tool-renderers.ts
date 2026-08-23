@@ -2,6 +2,14 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { footerTier } from "../shared/layout.ts";
 import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
+import { crop } from "./layout.ts";
+import type {
+  CurrentWorkViewModel,
+  SubagentBranchInfo,
+  TaskPhase,
+  TaskViewModel,
+  VerificationViewModel,
+} from "./task-view-model.ts";
 
 /** The compact running marker shared by tool rows. */
 export const RUNNING_GLYPH = "◌";
@@ -585,4 +593,215 @@ export function renderSubagents(
   if (hidden.length > 0)
     lines.push(clip(`   ${theme.fg("muted", `↳ ${subagentSummary(hidden)}`)}`));
   return options.summary === false ? lines : [summaryWithAttention, ...lines];
+}
+
+const PHASES: Array<{ id: TaskPhase; label: string }> = [
+  { id: "understand", label: "Understand" },
+  { id: "plan", label: "Plan" },
+  { id: "work", label: "Work" },
+  { id: "verify", label: "Verify" },
+  { id: "done", label: "Done" },
+];
+
+export function renderProgressBar(
+  currentPhase: TaskPhase,
+  theme: Theme,
+  width: number,
+): string {
+  const currentIndex = PHASES.findIndex((p) => p.id === currentPhase);
+  const segments = PHASES.map((phase, index) => {
+    if (index < currentIndex) {
+      return `${theme.fg("success", "●")} ${theme.fg("muted", phase.label)}`;
+    }
+    if (index === currentIndex) {
+      return `${theme.fg("accent", "●")} ${theme.bold(phase.label)}`;
+    }
+    return `${theme.fg("muted", "○")} ${theme.fg("dim", phase.label)}`;
+  });
+  const separator = theme.fg("borderMuted", " ─ ");
+  return crop(segments.join(separator), width);
+}
+
+function branchTone(
+  status: SubagentBranchInfo["status"],
+): "success" | "error" | "accent" | "warning" | "muted" {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "failed":
+    case "needs_attention":
+      return "error";
+    case "paused":
+      return "warning";
+    case "queued":
+      return "muted";
+    case "running":
+      return "accent";
+  }
+}
+
+function branchGlyph(status: SubagentBranchInfo["status"]): string {
+  switch (status) {
+    case "completed":
+      return "✓";
+    case "failed":
+      return "✗";
+    case "needs_attention":
+      return "!";
+    case "paused":
+      return "◌";
+    case "queued":
+      return "○";
+    case "running":
+      return "●";
+  }
+}
+
+// Same German vocabulary as subagentStatusLabel() above, so a subagent's
+// status reads the same whether it shows up in the flat SUBAGENTS list or
+// here in the branch tree.
+function branchStatusLabel(status: SubagentBranchInfo["status"]): string {
+  switch (status) {
+    case "completed":
+      return "FERTIG";
+    case "failed":
+      return "FEHLGESCHLAGEN";
+    case "needs_attention":
+      return "AUFMERKSAMKEIT";
+    case "paused":
+      return "PAUSIERT";
+    case "queued":
+      return "IM HINTERGRUND";
+    case "running":
+      return "LÄUFT";
+  }
+}
+
+export function renderSubagentBranches(
+  branches: readonly SubagentBranchInfo[],
+  theme: Theme,
+  width: number,
+  limit = 3,
+): string[] {
+  if (branches.length === 0) return [];
+  const lines: string[] = [];
+  const visible = branches.slice(0, limit);
+
+  for (let i = 0; i < visible.length; i++) {
+    const branch = visible[i]!;
+    const isLast = i === visible.length - 1;
+    const rail = isLast ? "└─ " : "├─ ";
+    const tone = branchTone(branch.status);
+    const glyph = theme.fg(tone, branchGlyph(branch.status));
+    const label = theme.fg(tone, branchStatusLabel(branch.status));
+
+    const header = `${theme.fg("borderMuted", rail)}${theme.bold(branch.agent)} ${glyph} ${label}`;
+    lines.push(crop(header, width));
+
+    if (branch.focus || branch.progress) {
+      const detail = branch.focus ?? branch.progress ?? "";
+      const subRail = isLast ? "   " : "│  ";
+      lines.push(
+        crop(
+          `${theme.fg("borderMuted", subRail)}${theme.fg("muted", detail)}`,
+          width,
+        ),
+      );
+    }
+  }
+
+  return lines;
+}
+
+export function renderVerificationBlock(
+  verification: VerificationViewModel,
+  theme: Theme,
+  width: number,
+): string[] {
+  const lines: string[] = [];
+  const isReady = verification.verdict === "READY";
+  const isFailed = verification.verdict === "NOT_READY";
+
+  const verdictText = isReady
+    ? `${theme.fg("success", "✓ READY")}`
+    : isFailed
+      ? `${theme.fg("error", "⚠ NOT READY")}`
+      : `${theme.fg("muted", "○ UNVERIFIED")}`;
+
+  lines.push(crop(`${theme.bold("VERIFY")} · ${verdictText}`, width));
+
+  for (const criterion of verification.criteria) {
+    const glyph =
+      criterion.status === "passed"
+        ? theme.fg("success", "✓")
+        : criterion.status === "failed"
+          ? theme.fg("error", "✗")
+          : theme.fg("muted", "○");
+    lines.push(crop(` ${glyph} ${criterion.label}`, width));
+  }
+
+  const visibleBlockers = (verification.blockers ?? []).slice(0, 3);
+  for (const blocker of visibleBlockers) {
+    lines.push(crop(` ${theme.fg("error", "Blocker:")} ${blocker}`, width));
+  }
+  const hiddenBlockerCount =
+    (verification.blockers?.length ?? 0) - visibleBlockers.length;
+  if (hiddenBlockerCount > 0) {
+    lines.push(
+      crop(theme.fg("muted", ` +${hiddenBlockerCount} weitere`), width),
+    );
+  }
+
+  return lines;
+}
+
+/** Just the title (+ optional goal) line, for callers that already render
+ * their own progress bar and current-work detail via the dedicated
+ * functions and would otherwise duplicate them through {@link renderTaskWorkspace}. */
+export function renderTaskHeader(
+  task: TaskViewModel,
+  theme: Theme,
+  width: number,
+): string[] {
+  const lines = [crop(theme.bold(task.title.toUpperCase()), width)];
+  if (task.goal) {
+    lines.push(crop(theme.fg("muted", task.goal), width));
+  }
+  return lines;
+}
+
+/** Just the "Changing: a, b, c" line, for callers that show the cumulative
+ * change list without the rest of {@link renderTaskWorkspace}'s current-work
+ * block (e.g. alongside {@link renderActiveTools}, which already covers the
+ * currently running tool). */
+export function renderChangingFiles(
+  work: CurrentWorkViewModel,
+  theme: Theme,
+  width: number,
+): string[] {
+  if (!work.changingFiles || work.changingFiles.length === 0) return [];
+  return [
+    crop(
+      theme.fg("muted", `Changing: ${work.changingFiles.join(", ")}`),
+      width,
+    ),
+  ];
+}
+
+export function renderTaskWorkspace(
+  task: TaskViewModel,
+  theme: Theme,
+  width: number,
+): string[] {
+  const lines: string[] = [];
+  lines.push(crop(theme.bold(task.title.toUpperCase()), width));
+  lines.push(renderProgressBar(task.phase, theme, width));
+
+  if (task.currentWork) {
+    lines.push(crop(theme.bold("CURRENT WORK"), width));
+    lines.push(crop(task.currentWork.summary ?? task.currentWork.title, width));
+    lines.push(...renderChangingFiles(task.currentWork, theme, width));
+  }
+
+  return lines;
 }

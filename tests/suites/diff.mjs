@@ -23,8 +23,14 @@ import { ROOT, npmModuleEntry } from "../shared/jiti-loader.mjs";
 
 export const diffSections = {
   "diff viewer regressions": async (context) => {
-    const { section, diffAlgorithm, diffFallback, diffTracker, diffViewer } =
-      context;
+    const {
+      section,
+      diffAlgorithm,
+      diffFallback,
+      diffTracker,
+      diffViewer,
+      auroraState,
+    } = context;
 
     await section("diff viewer regressions", async () => {
       assert(
@@ -173,6 +179,32 @@ export const diffSections = {
           diffViewer.default(harness.api);
           const context = harness.makeContext({ cwd });
           await harness.runHooks("session_start", {}, context);
+
+          // diff-viewer participates in the Aurora UI state bus: it answers
+          // a state request with its current (still empty) change summary.
+          if (auroraState) {
+            harness.api.events.emit(auroraState.AURORA_UI_CHANNELS.request, {
+              type: "request",
+              requestId: "aurora-req-1",
+              sessionEpoch: "aurora-epoch-1",
+              requester: "aurora-ui",
+            });
+            const initialSnapshot = harness.emitted.find(
+              (e) =>
+                e.name === auroraState.AURORA_UI_CHANNELS.snapshot &&
+                e.event.source === "diff-viewer",
+            );
+            assert(
+              initialSnapshot,
+              "diff-viewer answers an Aurora state request with a snapshot",
+            );
+            eq(
+              initialSnapshot.event.state.changes,
+              null,
+              "diff-viewer has nothing to report before any edit",
+            );
+          }
+
           const changesCommand = harness.commands.get("changes");
           assert(
             typeof changesCommand === "function",
@@ -247,6 +279,29 @@ export const diffSections = {
             { path: "sample.txt", linesAdded: 2, linesRemoved: 1, hunks: 1 },
             "diff viewer records the actual content when it differs from the preview",
           );
+          if (auroraState) {
+            const changesPatch = [...harness.emitted]
+              .reverse()
+              .find(
+                (e) =>
+                  e.name === auroraState.AURORA_UI_CHANNELS.patch &&
+                  e.event.source === "diff-viewer",
+              );
+            assert(
+              changesPatch,
+              "diff-viewer publishes a changes patch on the Aurora bus after a recorded edit",
+            );
+            eq(
+              changesPatch.event.patch.changes,
+              {
+                filesCount: 1,
+                files: ["sample.txt"],
+                linesAdded: 2,
+                linesRemoved: 1,
+              },
+              "the published patch carries the real, aggregated diff stats",
+            );
+          }
         } finally {
           rmSync(cwd, { recursive: true, force: true });
         }

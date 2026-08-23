@@ -190,6 +190,12 @@ const definitions = [
     "Konfiguration und Runtime-Konsistenz diagnostizieren",
     "code",
   ],
+  [
+    "inspect",
+    "Inspector",
+    "Changes, Kontext, Verification, Modelle, Reasoning oder Diagnostics im Detail ansehen",
+    "code",
+  ],
 
   [
     "new",

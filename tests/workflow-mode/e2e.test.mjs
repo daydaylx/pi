@@ -477,6 +477,74 @@ await test("Plan Mode mutation guard keeps the plan file writable", async () => 
   }
 });
 
+await test("both plan modes admit only the normalized Investigator SINGLE call", async () => {
+  if (!planMode || !modePermissions) return;
+  for (const label of ["Schnellplan", "Architekturplan"]) {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-plan-investigator-"));
+    try {
+      const harness = createHarness({ select: () => label });
+      planMode.default(harness.api);
+      modePermissions.default(harness.api);
+      const ctx = harness.makeContext({ cwd });
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+
+      const investigatorInput = {
+        agent: "investigator",
+        task: "Locate the relevant implementation",
+      };
+      let result = await harness.runHooks(
+        "tool_call",
+        { toolName: "subagent", input: investigatorInput },
+        ctx,
+      );
+      assert(
+        !result.some((entry) => entry?.block),
+        `${label} permits Investigator SINGLE`,
+      );
+      eq(
+        investigatorInput.artifacts,
+        false,
+        `${label} disables package debug artifacts before execution`,
+      );
+
+      for (const [input, labelSuffix] of [
+        [{ agent: "debugger", task: "x" }, "debugger"],
+        [{ agent: "verifier", task: "x" }, "verifier"],
+        [{ agent: "unknown", task: "x" }, "unknown role"],
+        [{ agent: "investigator", task: "x", action: "list" }, "action"],
+        [{ agent: "investigator", task: "x", async: true }, "async"],
+        [{ agent: "investigator", task: "x", output: "report.md" }, "output"],
+        [{ agent: "investigator", task: "x", artifacts: true }, "artifacts"],
+        [{ agent: "investigator", task: "x", context: "fork" }, "context"],
+        [{ agent: "investigator", task: "x", cwd: "/tmp" }, "cwd"],
+        [{ agent: "investigator", task: "x", skill: "extra" }, "skill"],
+      ]) {
+        result = await harness.runHooks(
+          "tool_call",
+          { toolName: "subagent", input },
+          ctx,
+        );
+        assert(
+          result.some((entry) => entry?.block),
+          `${label} blocks ${labelSuffix} subagent input`,
+        );
+      }
+      result = await harness.runHooks(
+        "tool_call",
+        { toolName: "frobnicate", input: {} },
+        ctx,
+      );
+      assert(
+        result.some((entry) => entry?.block),
+        `${label} keeps unknown custom tools blocked`,
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
 await test("YOLO stays available in work mode but never unlocks plan mode", async () => {
   if (!planMode || !modePermissions) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-yolo-lock-"));

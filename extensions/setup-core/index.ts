@@ -19,6 +19,13 @@ import {
   formatContextDiagnostics,
 } from "./context-diagnostics.ts";
 import {
+  AURORA_UI_CHANNELS,
+  isAuroraUiStateRequest,
+  publishAuroraUiPatch,
+  publishAuroraUiSnapshot,
+  type AuroraVerificationSummary,
+} from "../aurora-ui/state.ts";
+import {
   evaluateCheckRun,
   formatVerificationStatus,
   mergeCheckRun,
@@ -234,6 +241,39 @@ export default function setupCore(
   // Session-local evidence only: whether a profile passed before the current
   // snapshot. It is not a task-status or causal-regression classifier.
   let passedProfileIds: Map<string, string> = new Map();
+  let lastDeclaredRequiredIds: string[] = [];
+  let auroraEpoch: string | undefined;
+  let unsubscribeAurora: (() => void) | undefined;
+
+  function auroraVerificationSnapshot(): AuroraVerificationSummary | null {
+    if (lastSettledStatus === undefined) return null;
+    return {
+      status: lastSettledStatus,
+      declaredRequiredIds: lastDeclaredRequiredIds,
+      requiredOutcomes:
+        verificationLedger.lastRequiredCheck?.requiredOutcomes ?? {},
+      blockingRecommendedIds:
+        verificationLedger.lastRequiredCheck?.blockingRecommendedIds ?? [],
+    };
+  }
+
+  function publishAuroraVerification(): void {
+    if (!auroraEpoch) return;
+    publishAuroraUiPatch(pi, auroraEpoch, "setup-core", {
+      verification: auroraVerificationSnapshot(),
+    });
+  }
+
+  function subscribeAuroraProvider(): void {
+    unsubscribeAurora?.();
+    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
+      if (!isAuroraUiStateRequest(value)) return;
+      auroraEpoch = value.sessionEpoch;
+      publishAuroraUiSnapshot(pi, value, "setup-core", {
+        verification: auroraVerificationSnapshot(),
+      });
+    });
+  }
 
   function workspaceSnapshot(cwd: string) {
     try {
@@ -279,7 +319,10 @@ export default function setupCore(
     verificationLedger = {};
     passedProfileIds = new Map();
     lastSettledStatus = undefined;
+    lastDeclaredRequiredIds = [];
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
+    auroraEpoch = undefined;
+    subscribeAuroraProvider();
   });
 
   pi.on("agent_settled", (_event, ctx) => {
@@ -289,30 +332,36 @@ export default function setupCore(
       if (lastSettledStatus !== undefined && ctx.hasUI)
         ctx.ui.setStatus("verification", undefined);
       lastSettledStatus = undefined;
+      lastDeclaredRequiredIds = [];
+      publishAuroraVerification();
       return;
     }
     const profiles = loadVerifyProfiles(ctx.cwd, ctx.isProjectTrusted());
+    const declaredIds = declaredRequiredIds(profiles, ctx.isProjectTrusted());
     const status = verificationStatus(
       workspaceSnapshot(ctx.cwd),
       verificationLedger,
       {
-        declaredRequiredIds: declaredRequiredIds(
-          profiles,
-          ctx.isProjectTrusted(),
-        ),
+        declaredRequiredIds: declaredIds,
         workspaceRoot: ctx.cwd,
       },
     );
     if (status === lastSettledStatus || !ctx.hasUI) return;
     lastSettledStatus = status;
+    lastDeclaredRequiredIds = declaredIds;
     ctx.ui.setStatus("verification", formatVerificationStatus(status));
+    publishAuroraVerification();
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
     verificationLedger = {};
     passedProfileIds = new Map();
     lastSettledStatus = undefined;
+    lastDeclaredRequiredIds = [];
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
+    unsubscribeAurora?.();
+    unsubscribeAurora = undefined;
+    auroraEpoch = undefined;
   });
 
   pi.registerTool({
@@ -484,10 +533,7 @@ export default function setupCore(
               Math.floor((DEFAULT_MAX_BYTES * 0.9) / nonSuccessReports.length),
             )
           : undefined;
-      const renderReport = (
-        report: ProfileReport,
-        maxBytes?: number,
-      ) => {
+      const renderReport = (report: ProfileReport, maxBytes?: number) => {
         const exit =
           report.exitCode === null
             ? "kein Exit-Code"

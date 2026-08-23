@@ -84,13 +84,16 @@ oder `detailed_plan` ein technischer Mutationsschutz für den Agenten:
 Schreibzugriffe außerhalb der Plandatei werden verweigert. Als Bash bleiben
 nur `git status`, `git diff`, `git log` und `rg` zulässig; Projekt-Skripte
 wie `npm test` oder `npm run build` sind nicht automatisch vertrauenswürdig.
-`project_check` und `subagent` (auch mit `output`) sind ebenfalls
-blockiert, damit kein Tool den Guard umgehen kann.
-`rm`/`cp`/`mv`/`sed -i`, Redirection, Projekt-Skripte,
+`project_check` bleibt blockiert. Ausschließlich eine synchrone,
+artefaktfreie Investigator-SINGLE-Delegation (`subagent({ agent:
+"investigator", task: ... })`) darf passieren, wenn Repository-Bereich,
+Kontrollfluss oder Änderungssurface noch unbekannt sind; Debugger, Verifier,
+unbekannte Rollen, Management-Aktionen, Hintergrundläufe und `output` bleiben
+blockiert. `rm`/`cp`/`mv`/`sed -i`, Redirection, Projekt-Skripte,
 `npm install`/`update`/`publish`, `eslint --fix` und mutierende
-`git`-Kommandos bleiben blockiert. `readonly` selbst ist
-unverändert vollständig gesperrt; `yolo` bleibt bewusst unangetastet, weil
-seine Wahl selbst die explizite Aufhebung der Standard-Sicherheit ist. Ein
+`git`-Kommandos bleiben blockiert. `readonly` selbst ist unverändert
+vollständig gesperrt; `yolo` hebt die Plan-Mode-Grenzen für Agenten-Tool-Aufrufe
+nicht auf. Ein
 vom Menschen selbst per `!`/`!!` eingegebener Bash-Befehl durchläuft diesen
 Guard nicht — er schränkt nur den Agenten ein, nicht den Menschen an der
 eigenen Tastatur. Details: `docs/decisions/012-plan-mode-mutation-guard.md`.

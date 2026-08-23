@@ -88,6 +88,44 @@ answer on `aurora-ui/state/snapshot`, then publish later changes on
 epochs. `publishAuroraUiPatch` and `publishAuroraUiSnapshot` are the typed
 publisher helpers.
 
+Besides `workflow`, `permissions`, `lsp`, `model` and `activity`, two owner
+groups feed the task-centric view (`task-projection.ts`) and the inspector:
+
+- `changes` — published by `extensions/diff-viewer/index.ts` after every
+  recorded edit/write, aggregated straight from its `ChangeTracker` (real
+  per-file diff stats, never estimated). Drives the cumulative "Changing:"
+  line under Current Work and the Inspector's Changes section.
+- `verification` — published by `extensions/setup-core/index.ts` alongside
+  its existing `ctx.ui.setStatus("verification", …)` calls. Carries the
+  structured per-profile outcome (`declaredRequiredIds`, `requiredOutcomes`,
+  `blockingRecommendedIds`), not just the coarse status string, so
+  `projectVerificationState` can derive real checks/evidence instead of
+  three hardcoded, always-`passed` criteria.
+
+Both are `null` until their owning extension has something to report — Aurora
+never fabricates a value for either.
+
 Cleanup on session replacement, reload and shutdown restores the core footer
 and working indicator, removes the widget, unsubscribes from the event bus,
 cancels any pending subagent request and stops the shared ticker.
+
+## The inspector (third, on-demand surface)
+
+`/inspect` (`inspector-command.ts`, catalogued under the `code` category, so
+it surfaces through the existing Super+Q command center — no new shortcut, no
+command palette) opens Pi's native selector with six entries: Changes,
+Kontext, Verification Evidence, Modelle, Reasoning, Diagnostics. Picking one
+renders `renderInspectorBox` (`inspector.ts`) — the one shared box shell for
+secondary information — and shows it via `ctx.ui.notify`, the same
+integration style `/setup-doctor context` already uses.
+
+It reads state, never owns it: Changes and Verification reuse the same
+`state.changes` / task `verification` the main view already shows; Kontext and
+Diagnostics call `collectContextDiagnostics`
+(`extensions/setup-core/context-diagnostics.ts`) directly, on demand only —
+never from the per-frame footer/widget render path, since it walks the full
+session history. The Kontext section deliberately shows only what the runtime
+reports exactly (token/window counts, deterministic byte counts, compaction
+timestamps, cumulative lifetime usage) and never a per-category breakdown
+(conversation/files/tool results/memory): that would need a token estimate
+per category the runtime cannot provide without guessing.

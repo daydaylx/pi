@@ -14,9 +14,11 @@ import {
   assessBash,
   assessWorkflowTool,
   automaticallyAllowedInPlanMode,
+  planModeInvestigatorSingleAllowed,
   planModeMutationGuard,
 } from "./workflow-policy.ts";
 import { assessVerifierDelegation } from "./verifier-policy.ts";
+import { assessWebToolInput } from "./web-tools.ts";
 import { toolPath } from "./tool-event.ts";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", ASK_USER_TOOL_NAME];
@@ -79,6 +81,11 @@ export function registerPermissionGuards(
     if (assessment.blocked) {
       return { block: true, reason: assessment.reason };
     }
+    // Harte Web-Eingabegrenze: fetch_content nur http(s), kein auth.
+    const webAssessment = assessWebToolInput(event);
+    if (webAssessment.blocked) {
+      return { block: true, reason: webAssessment.reason };
+    }
     const verifierAssessment = assessVerifierDelegation(event);
     if (verifierAssessment.blocked) {
       return { block: true, reason: verifierAssessment.reason };
@@ -91,6 +98,11 @@ export function registerPermissionGuards(
       return { block: true, reason: recoveryBlockReason(recovery.reason) };
     }
     if (automaticallyAllowedInPlanMode(workflow, event, ctx.cwd)) return;
+    if (planModeInvestigatorSingleAllowed(workflow, session.level(), event)) {
+      // The package would otherwise write debug artifacts below ctx.cwd.
+      (event.input as Record<string, unknown>).artifacts = false;
+      return;
+    }
 
     const planGuard = planModeMutationGuard(
       workflow,

@@ -17,6 +17,7 @@ import {
   type PermissionLevel,
 } from "../shared/workflow-status.ts";
 import type { PolicyAction as ConfiguredPolicyAction } from "../setup-core/config.ts";
+import { WEB_TOOLS, decideWebTool } from "./web-tools.ts";
 import { LOCAL_LSP_TOOLS } from "./workflow-policy.ts";
 import { toolPath } from "./tool-event.ts";
 
@@ -106,6 +107,13 @@ export function decideTool(
             reason: "Verifikation kann Projektartefakte erzeugen.",
           }
         : { action: "allow", reason: "Allowlisted verification capability" };
+  }
+
+  if (WEB_TOOLS.has(event.toolName)) {
+    // Externe Websuche/Fetch: gleiche Stufenlogik wie verify. Die harte
+    // Trust-Grenze in guards.ts läuft vorher und blockiert im untrusted
+    // Projekt; Eingabegrenzen prüft assessWebToolInput.
+    return decideWebTool(permissionLevel);
   }
 
   if (event.toolName === "write" || event.toolName === "edit") {

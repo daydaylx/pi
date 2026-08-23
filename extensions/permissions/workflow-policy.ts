@@ -46,6 +46,11 @@ const PLAN_MODE_READ_ONLY_TOOLS = new Set([
   "ls",
   "recovery_check",
   ASK_USER_TOOL_NAME,
+  // Extern read-only (pi-web-access): nur trusted wirksam, weil das
+  // Trust-Gate in guards.ts vorgeschaltet ist und der Planmodus selbst im
+  // untrusted Projekt gesperrt ist.
+  "web_search",
+  "fetch_content",
   ...LOCAL_LSP_TOOLS,
 ]);
 
@@ -146,6 +151,43 @@ export function automaticallyAllowedInPlanMode(
     isPlanningMode(workflow.mode) &&
     WRITE_TOOLS.has(event.toolName) &&
     isPlanFilePath(toolPath(event), cwd)
+  );
+}
+
+/**
+ * A Plan-Mode delegation is safe only when it preserves the investigator
+ * profile's fresh, project-local, read-only contract. The guard normalizes
+ * its omitted `artifacts` flag to false before the executor starts, because
+ * the package default otherwise writes debug artifacts below the project.
+ */
+export function planModeInvestigatorSingleAllowed(
+  workflow: WorkflowCapabilitySnapshot,
+  permissionLevel: PermissionLevel,
+  event: ToolCallEvent,
+): boolean {
+  if (
+    !isPlanningMode(workflow.mode) ||
+    permissionLevel === "readonly" ||
+    event.toolName !== "subagent"
+  ) {
+    return false;
+  }
+  const input = event.input;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return false;
+  }
+  const params = input as Record<string, unknown>;
+  return (
+    params.action === undefined &&
+    params.agent === "investigator" &&
+    typeof params.task === "string" &&
+    params.task.trim().length > 0 &&
+    (params.async === undefined || params.async === false) &&
+    params.output === undefined &&
+    (params.artifacts === undefined || params.artifacts === false) &&
+    params.context === undefined &&
+    params.cwd === undefined &&
+    params.skill === undefined
   );
 }
 

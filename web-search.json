@@ -1,0 +1,22 @@
+{
+  "workflow": "none",
+  "autoOpenBrowser": false,
+  "allowBrowserCookies": false,
+  "tools": {
+    "webSearch": { "enabled": true },
+    "sourceCheck": { "enabled": false },
+    "fetchContent": { "enabled": true },
+    "getSearchContent": { "enabled": false }
+  },
+  "commands": {
+    "websearch": { "enabled": false },
+    "curator": { "enabled": false },
+    "google-account": { "enabled": false },
+    "search": { "enabled": false }
+  },
+  "githubClone": { "enabled": false },
+  "youtube": { "enabled": false },
+  "video": { "enabled": false },
+  "fetchRouting": { "allowRemoteHostedProviders": false },
+  "ssrf": { "trustEnvProxy": false }
+}

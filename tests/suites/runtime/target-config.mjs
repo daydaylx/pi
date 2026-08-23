@@ -45,14 +45,20 @@ export const targetConfigSections = {
         );
         eq(
           packageSources.length,
-          1,
-          "only subagent orchestration remains an active package",
+          2,
+          "subagent orchestration and minimal web access are the only active packages",
         );
         assert(
-          /^git:github\.com\/daydaylx\/pi-subagents@[0-9a-f]{40}$/.test(
-            packageSources[0] ?? "",
+          packageSources.some((source) =>
+            /^git:github\.com\/daydaylx\/pi-subagents@[0-9a-f]{40}$/.test(
+              source ?? "",
+            ),
           ),
           "subagent runtime remains immutable-pinned",
+        );
+        assert(
+          packageSources.includes("npm:pi-web-access@0.24.2"),
+          "web access runtime remains exact-version-pinned",
         );
         eq(
           settings.subagents,

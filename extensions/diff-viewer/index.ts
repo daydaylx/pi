@@ -10,6 +10,13 @@ import type { TUI } from "@earendil-works/pi-tui";
 import { Text } from "@earendil-works/pi-tui";
 import { catalogDescription } from "../shared/command-catalog.ts";
 import { toWorkspaceRelative } from "../shared/paths.ts";
+import {
+  AURORA_UI_CHANNELS,
+  isAuroraUiStateRequest,
+  publishAuroraUiPatch,
+  publishAuroraUiSnapshot,
+  type AuroraTaskChanges,
+} from "../aurora-ui/state.ts";
 import type { DiffViewEntryData } from "./types.ts";
 import { ChangeTracker } from "./change-tracker.ts";
 import { computeFallbackDiff } from "./git-diff.ts";
@@ -38,11 +45,52 @@ async function readCurrentFile(
   }
 }
 
+function summarizeChanges(tracker: ChangeTracker): AuroraTaskChanges {
+  const changes = tracker.changedFiles;
+  let linesAdded = 0;
+  let linesRemoved = 0;
+  for (const change of changes) {
+    linesAdded += change.stats.linesAdded;
+    linesRemoved += change.stats.linesRemoved;
+  }
+  return {
+    filesCount: changes.length,
+    files: changes.map((change) => change.path),
+    linesAdded,
+    linesRemoved,
+  };
+}
+
 export default function diffViewerExtension(pi: ExtensionAPI): void {
   const tracker = new ChangeTracker();
   const pendingDiffs = new Map<string, PendingDiff>();
   const livePreviews = new Map<string, DiffViewEntryData>();
   let activeCtx: ExtensionContext | null = null;
+  let auroraEpoch: string | undefined;
+  let unsubscribeAurora: (() => void) | undefined;
+
+  function auroraChangesState(): AuroraTaskChanges | null {
+    const summary = summarizeChanges(tracker);
+    return summary.filesCount > 0 ? summary : null;
+  }
+
+  function publishChanges(): void {
+    if (!auroraEpoch) return;
+    publishAuroraUiPatch(pi, auroraEpoch, "diff-viewer", {
+      changes: auroraChangesState(),
+    });
+  }
+
+  function subscribeAuroraProvider(): void {
+    unsubscribeAurora?.();
+    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
+      if (!isAuroraUiStateRequest(value)) return;
+      auroraEpoch = value.sessionEpoch;
+      publishAuroraUiSnapshot(pi, value, "diff-viewer", {
+        changes: auroraChangesState(),
+      });
+    });
+  }
 
   async function openChanges(ctx: ExtensionContext): Promise<void> {
     if (ctx.mode !== "tui") {
@@ -122,6 +170,8 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     activeCtx = ctx;
     tracker.reconstructFromSession(ctx);
+    auroraEpoch = undefined;
+    subscribeAuroraProvider();
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
@@ -131,6 +181,9 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
     if (ctx.mode === "tui" && ctx.hasUI)
       ctx.ui.setWidget(LIVE_PREVIEW_WIDGET, undefined);
     activeCtx = null;
+    unsubscribeAurora?.();
+    unsubscribeAurora = undefined;
+    auroraEpoch = undefined;
   });
 
   pi.registerEntryRenderer("diff-view", (entry, options, theme) => {
@@ -239,6 +292,7 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
           data.hunks,
           data.timestamp,
         );
+        publishChanges();
       }
     } finally {
       pendingDiffs.delete(event.toolCallId);

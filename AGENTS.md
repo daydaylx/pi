@@ -79,6 +79,13 @@ Checkpoint-Ablauf im Skill `context-checkpoint`, Subagenten-Details in
   dort stehen auch die Regeln für Checkpoints, Providerfehler und
   Sitzungswechsel.
 
+## Webtools (`web_search` / `fetch_content`)
+
+- `web_search` nur bei echtem Aktualitätsbedarf: aktuelle Library-/Framework-Versionen, externe API-Doku, unbekannte aktuelle Fehlermeldungen, Provider-/Tool-Verhalten, das lokal nicht prüfbar ist — und nur wenn lokale Repository-Evidenz nicht reicht. Nie „vorsichtshalber“; was im Repo steht oder per `grep`/`find`/`read`/LSP/Investigator beantwortbar ist, bleibt lokal.
+- Standardablauf: erst `web_search`, dann gezielt die relevanten Quellen mit `fetch_content` öffnen; `includeContent` standardmäßig nicht setzen, nur bei konkretem begründetem Bedarf; keine breitflächigen Fetch-Ketten.
+- `fetch_content` nur mit konkreter, relevanter http(s)-URL (Doku-Seiten, PDFs, GitHub-Webseiten als normale HTTP-Quellen) — nie für lokale Pfade, nie mit `auth`, kein Repo-Clone über die Extension (GitHub-Cloning ist deaktiviert); Repos bleiben beim bestehenden Git-/Investigator-Workflow.
+- Investigator/Subagenten arbeiten rein lokal; keine automatische Kopplung an Websuche.
+
 ## Subagenten
 
 ### Harte Kriterien
@@ -97,7 +104,9 @@ Triviale Teilaufgaben bleiben beim Hauptagenten.
 
 - **Triviale, klar lokalisierte Aufgabe:** Hauptagent direkt.
 - **Unbekannter Repository-Bereich oder unklare Änderungssurface:**
-  `investigator` für eine belegte, reine Analyse.
+  `investigator` für eine belegte, reine Analyse. Im Simple oder Detailed
+  Plan ist nur diese synchrone read-only SINGLE-Delegation zulässig; bei
+  bekanntem lokalen Pfad bleibt der Hauptagent zuständig.
 - **Unbekannter, intermittierender oder gescheiterter Bug:** `debugger` für
   Reproduktion und Hypothesentests.
 - **Unabhängige Prüfung nach einer riskanten Umsetzung:** `verifier`.
