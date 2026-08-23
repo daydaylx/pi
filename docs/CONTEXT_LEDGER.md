@@ -40,7 +40,7 @@
   `autocompleteMaxVisible` aus `settings.json` wieder wirken. Subagenten
   stehen im Activity-Widget, nicht in der Fußzeile.
 - Aurora animiert nur echte laufende Arbeit: `DENKT NACH` und `ARBEITET`
-  wechseln in `contextual` ihren Glyph, `ANTWORTET` und `WARTET` bleiben
+  wechseln in `contextual` ihren Glyph, `ANTWORTET` und `WARTET AUF MODELL` bleiben
   statisch und werden nur für die Laufzeitanzeige neu gezeichnet. Statuslabels,
   Ton-Zuordnung und Overflow-Zusammenfassung liegen ausschließlich in
   `extensions/aurora-ui/tool-renderers.ts`.

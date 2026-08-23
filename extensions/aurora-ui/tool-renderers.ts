@@ -523,7 +523,7 @@ function subagentStatusLabel(status: SubagentInfo["status"]): string {
     case "running":
       return "LÄUFT";
     case "queued":
-      return "WARTET";
+      return "IM HINTERGRUND";
     case "paused":
       return "PAUSIERT";
     case "needs_attention":

@@ -37,7 +37,7 @@ Umgesetzte Phasen:
   entfernt; das Eingabefeld ist wieder Pis nativer Editor, wodurch
   `editorPaddingX` und `autocompleteMaxVisible` aus `settings.json` wieder
   wirken (`docs/decisions/013`). Im Modus `contextual` animieren nur noch
-  `DENKT NACH` und `ARBEITET`; `ANTWORTET` und `WARTET` sind statisch, der
+  `DENKT NACH` und `ARBEITET`; `ANTWORTET` und `WARTET AUF MODELL` sind statisch, der
   langsame Ticker aktualisiert dort nur die Sekundenanzeige.
   `hiddenActivitySummary()` liegt jetzt in `tool-renderers.ts` und nutzt
   dieselben Statuslabels und dieselbe Zählung wie die übrigen

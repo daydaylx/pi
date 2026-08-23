@@ -73,6 +73,7 @@ const lspTools = await load("extensions/lsp/tools.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
 const controlPlane = await load("extensions/control-plane.ts");
+const compactTools = await load("extensions/compact-tools/index.ts");
 const diffAlgorithm = await load("extensions/diff-viewer/diff-algorithm.ts");
 const diffFallback = await load("extensions/diff-viewer/git-diff.ts");
 const diffTracker = await load("extensions/diff-viewer/change-tracker.ts");
@@ -93,9 +94,7 @@ const auroraFooter = await load("extensions/aurora-ui/footer.ts");
 const resilience = await load("extensions/resilience/index.ts");
 const recoveryState = await load("extensions/resilience/recovery-state.ts");
 const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
-const sessionHealthAnalyze = await load(
-  "extensions/session-health/analyze.ts",
-);
+const sessionHealthAnalyze = await load("extensions/session-health/analyze.ts");
 const sessionHealth = await load("extensions/session-health/index.ts");
 
 const sections = {
@@ -114,6 +113,7 @@ const context = {
   modePermissions,
   planMode,
   controlPlane,
+  compactTools,
   diffAlgorithm,
   diffFallback,
   diffTracker,

@@ -1,4 +1,4 @@
-# Manuelle Restprüfung — Stand `8bd6f9f`
+# Manuelle Restprüfung
 
 Alles Codebasierte ist automatisiert und grün. Was hier steht, lässt sich **nur**
 in einer echten interaktiven Pi-Sitzung mit Provider-Zugang beobachten und ist
@@ -11,7 +11,8 @@ etwas ab, den Schritt notieren und `#137` offen lassen.
 
 ```bash
 cd /home/d/.pi/agent
-git log --oneline -1          # erwartet: 8bd6f9f
+git status --short            # erwartet: keine Ausgabe
+git log --oneline -1          # aktuellen geprüften Commit dokumentieren
 npm --prefix npm run verify   # erwartet: Exit 0
 ```
 
@@ -20,23 +21,23 @@ npm --prefix npm run verify   # erwartet: Exit 0
 | #   | Schritt                                          | Erwartet                                                             | Beobachtet | ✓/✗ |
 | --- | ------------------------------------------------ | -------------------------------------------------------------------- | ---------- | --- |
 | 1   | `npm run install:user -- --apply --target <tmp>` | Installation läuft durch, `docs/archive/session-logs/` fehlt im Ziel |            |     |
-| 2   | `npm ci --prefix <tmp>/npm`                      | `@earendil-works/pi-coding-agent@0.84.1` installiert                 |            |     |
+| 2   | `npm ci --prefix <tmp>/npm`                      | `@earendil-works/pi-coding-agent@0.84.2` installiert                 |            |     |
 | 3   | Pi im Zielverzeichnis starten                    | Neue Session, Extensions laden, keine unerwarteten Startfehler       |            |     |
-| 4   | Fork-Pin prüfen                                  | Checkout auf `18c4851f…`, **nicht** `2934a93f…`                      |            |     |
+| 4   | Fork-Pin prüfen                                  | Checkout auf `54c701242710b1dab39a47f23ef8020f40b82bd4`              |            |     |
 
 ## Aurora und Workflow
 
-| #   | Schritt                          | Erwartet                                                             | Beobachtet | ✓/✗ |
-| --- | -------------------------------- | -------------------------------------------------------------------- | ---------- | --- |
-| 5   | Sitzung öffnen                   | Aurora-Fußzeile sichtbar, eine Zeile                                 |            |     |
-| 6   | Shift+Tab                        | Modusauswahl öffnet sich                                             |            |     |
-| 7   | „Schnellplan" wählen             | Modus aktiv, **kein** Turn startet, vorhandene Plandatei unverändert |            |     |
-| 8   | Eigenen Planungsauftrag eingeben | Plan wird erstellt, `.agent/plans/current-plan.md` geschrieben       |            |     |
-| 9   | Während des Laufs zusehen        | `DENKT NACH` → `ARBEITET` → `ANTWORTET`, Laufzeit zählt hoch         |            |     |
-| 10  | Shift+Tab → „Work"               | Modus wechselt, **kein** Turn startet                                |            |     |
-| 11  | Umsetzungsauftrag eingeben       | Plan erscheint **genau einmal** als Kontext                          |            |     |
-| 12  | Zweiten Work-Turn starten        | Plan wird **nicht** erneut eingebunden                               |            |     |
-| 13  | Tool-Ausführung beobachten       | Toolzeile erscheint und verschwindet mit dem Tool                    |            |     |
+| #   | Schritt                          | Erwartet                                                                                                                               | Beobachtet | ✓/✗ |
+| --- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------- | --- |
+| 5   | Sitzung öffnen                   | Aurora-Fußzeile sichtbar, eine Zeile                                                                                                   |            |     |
+| 6   | Shift+Tab                        | Modusauswahl öffnet sich                                                                                                               |            |     |
+| 7   | „Schnellplan" wählen             | Modus aktiv, **kein** Turn startet, vorhandene Plandatei unverändert                                                                   |            |     |
+| 8   | Eigenen Planungsauftrag eingeben | Plan wird erstellt, `.agent/plans/current-plan.md` geschrieben                                                                         |            |     |
+| 9   | Während des Laufs zusehen        | `DENKT NACH` → `ARBEITET` → `ANTWORTET`, Laufzeit zählt hoch (bei Provider-Pausen ≥4s zwischenzeitlich `WARTET AUF MODELL` — kein Bug) |            |     |
+| 10  | Shift+Tab → „Work"               | Modus wechselt, **kein** Turn startet                                                                                                  |            |     |
+| 11  | Umsetzungsauftrag eingeben       | Plan erscheint **genau einmal** als Kontext                                                                                            |            |     |
+| 12  | Zweiten Work-Turn starten        | Plan wird **nicht** erneut eingebunden                                                                                                 |            |     |
+| 13  | Tool-Ausführung beobachten       | Toolzeile erscheint und verschwindet mit dem Tool                                                                                      |            |     |
 
 ### 14 · Der eigentliche Aurora-Fix
 

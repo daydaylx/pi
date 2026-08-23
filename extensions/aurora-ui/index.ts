@@ -37,7 +37,7 @@ const OWNER = "aurora-ui";
 const ACTIVITY_WIDGET = "aurora-ui/activity";
 const TICK_INTERVAL_MS = 100;
 const STATUS_TICK_INTERVAL_MS = 1_000;
-/** A running turn without a concrete Aurora event is presented as WARTET. */
+/** A running turn without a concrete Aurora event is presented as WARTET AUF MODELL. */
 const WAITING_THRESHOLD_MS = 4_000;
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
@@ -293,7 +293,7 @@ function activityPresentation(
     return {
       kind: "waiting",
       startedAt: lastRelevantActivityAt + WAITING_THRESHOLD_MS,
-      label: "WARTET",
+      label: "WARTET AUF MODELL",
     };
   switch (state.activity.kind) {
     case "thinking":
@@ -311,7 +311,11 @@ function activityPresentation(
         label: "ANTWORTET",
       };
     case "idle":
-      return { kind: "waiting", startedAt: activityStartedAt, label: "WARTET" };
+      return {
+        kind: "waiting",
+        startedAt: activityStartedAt,
+        label: "WARTET AUF MODELL",
+      };
   }
 }
 

@@ -42,6 +42,14 @@ Aurora erkennt solche Läufe bereits korrekt als `INCOMPLETE`
 gab keinen präventiven Guard, der einen von vornherein garantiert
 scheiternden Lauf vor dem Timeout abfängt.
 
+## Statusupdate (21.08.2026)
+
+Die vorstehende Paket-Drift ist historischer Kontext. Der von `pi list`
+geladene Checkout steht inzwischen auf dem aktuell in `settings.json`
+gepinnten Commit `54c701242710b1dab39a47f23ef8020f40b82bd4`. Die
+Verifier-Erzwingung bleibt dennoch bewusst unabhängig von Paketversion und
+paketinternen Konfigurationsoptionen.
+
 ## Entscheidung
 
 `extensions/permissions/verifier-policy.ts` (`assessVerifierDelegation()`)

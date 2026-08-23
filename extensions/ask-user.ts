@@ -32,6 +32,8 @@ import {
   MIN_QUESTION_OPTIONS,
   type Level,
 } from "./shared/ask-user-policy.ts";
+import { overlayMargin } from "./shared/layout.ts";
+import { calculateMenuViewport } from "./shared/menu-ui.ts";
 
 interface QuestionOption {
   label: string;
@@ -173,281 +175,401 @@ export default function askUser(pi: ExtensionAPI) {
         { label: "Freitext eingeben.", isOther: true },
       ];
 
+      let terminal = () => ({
+        columns: process.stdout.columns ?? 80,
+        rows: process.stdout.rows ?? 24,
+      });
       const result = await ctx.ui.custom<{
         answer: string;
         wasCustom: boolean;
         index?: number;
-      } | null>((tui, theme, _kb, done) => {
-        const recommendedDisplayIndex = recommendedIndex - 1;
-        let optionIndex = recommendedDisplayIndex;
-        let editMode = false;
-        let cachedLines: string[] | undefined;
+      } | null>(
+        (tui, theme, _kb, done) => {
+          terminal = () => ({
+            columns: tui.terminal.columns,
+            rows: tui.terminal.rows,
+          });
+          const recommendedDisplayIndex = recommendedIndex - 1;
+          let optionIndex = recommendedDisplayIndex;
+          let editMode = false;
+          let cachedLines: string[] | undefined;
+          let cachedWidth: number | undefined;
+          let cachedRows: number | undefined;
+          let viewportStart = 0;
+          let visibleEntries = allOptions.length;
 
-        const editorTheme: EditorTheme = {
-          borderColor: (s) => theme.fg("accent", s),
-          selectList: {
-            selectedPrefix: (t) => theme.fg("accent", t),
-            selectedText: (t) => theme.fg("accent", t),
-            description: (t) => theme.fg("muted", t),
-            scrollInfo: (t) => theme.fg("dim", t),
-            noMatch: (t) => theme.fg("warning", t),
-          },
-        };
-        const editor = new Editor(tui, editorTheme);
+          const editorTheme: EditorTheme = {
+            borderColor: (s) => theme.fg("accent", s),
+            selectList: {
+              selectedPrefix: (t) => theme.fg("accent", t),
+              selectedText: (t) => theme.fg("accent", t),
+              description: (t) => theme.fg("muted", t),
+              scrollInfo: (t) => theme.fg("dim", t),
+              noMatch: (t) => theme.fg("warning", t),
+            },
+          };
+          const editor = new Editor(tui, editorTheme);
 
-        editor.onSubmit = (value) => {
-          const trimmed = value.trim();
-          if (trimmed) {
-            done({ answer: trimmed, wasCustom: true });
-          } else {
-            editMode = false;
-            editor.setText("");
-            refresh();
-          }
-        };
-
-        function refresh() {
-          cachedLines = undefined;
-          tui.requestRender();
-        }
-
-        function handleInput(data: string) {
-          if (matchesKey(data, Key.ctrl("c"))) {
-            done(null);
-            return;
-          }
-          if (editMode) {
-            if (matchesKey(data, Key.escape)) {
+          editor.onSubmit = (value) => {
+            const trimmed = value.trim();
+            if (trimmed) {
+              done({ answer: trimmed, wasCustom: true });
+            } else {
               editMode = false;
               editor.setText("");
               refresh();
+            }
+          };
+
+          function refresh() {
+            cachedLines = undefined;
+            tui.requestRender();
+          }
+
+          function handleInput(data: string) {
+            if (matchesKey(data, Key.ctrl("c"))) {
+              done(null);
               return;
             }
-            editor.handleInput(data);
-            refresh();
-            return;
-          }
-
-          // Zahlentasten 1..N wählen eine echte Option direkt. Die
-          // Freitext-Zeile bleibt über Pfeil + Enter erreichbar.
-          const directPick = digitSelection(data, params.options.length);
-          if (directPick !== undefined) {
-            const selected = params.options[directPick - 1];
-            done({
-              answer: selected.label,
-              wasCustom: false,
-              index: directPick,
-            });
-            return;
-          }
-
-          if (matchesKey(data, Key.up)) {
-            optionIndex = Math.max(0, optionIndex - 1);
-            refresh();
-            return;
-          }
-          if (matchesKey(data, Key.down)) {
-            optionIndex = Math.min(allOptions.length - 1, optionIndex + 1);
-            refresh();
-            return;
-          }
-          if (matchesKey(data, Key.home)) {
-            optionIndex = 0;
-            refresh();
-            return;
-          }
-          if (matchesKey(data, Key.end)) {
-            optionIndex = allOptions.length - 1;
-            refresh();
-            return;
-          }
-          if (matchesKey(data, Key.pageUp)) {
-            optionIndex = Math.max(0, optionIndex - 3);
-            refresh();
-            return;
-          }
-          if (matchesKey(data, Key.pageDown)) {
-            optionIndex = Math.min(allOptions.length - 1, optionIndex + 3);
-            refresh();
-            return;
-          }
-
-          if (matchesKey(data, Key.enter)) {
-            const selected = allOptions[optionIndex];
-            if (selected.isOther) {
-              editMode = true;
+            if (editMode) {
+              if (matchesKey(data, Key.escape)) {
+                editMode = false;
+                editor.setText("");
+                refresh();
+                return;
+              }
+              editor.handleInput(data);
               refresh();
-            } else {
+              return;
+            }
+
+            // Zahlentasten 1..N wählen eine echte Option direkt. Die
+            // Freitext-Zeile bleibt über Pfeil + Enter erreichbar.
+            const directPick = digitSelection(data, params.options.length);
+            if (directPick !== undefined) {
+              const selected = params.options[directPick - 1];
               done({
                 answer: selected.label,
                 wasCustom: false,
-                index: optionIndex + 1,
+                index: directPick,
               });
-            }
-            return;
-          }
-
-          if (matchesKey(data, Key.escape)) {
-            done(null);
-          }
-        }
-
-        function render(width: number): string[] {
-          if (cachedLines) return cachedLines;
-
-          const lines: string[] = [];
-          const renderWidth = Math.max(1, width);
-          const optionIndent = renderWidth < 48 ? "  " : "     ";
-
-          function addWrapped(text: string) {
-            lines.push(...wrapTextWithAnsi(text, renderWidth));
-          }
-
-          function addWrappedWithPrefix(prefix: string, text: string) {
-            const prefixWidth = visibleWidth(prefix);
-            if (prefixWidth >= renderWidth) {
-              addWrapped(prefix + text);
               return;
             }
-            const wrapped = wrapTextWithAnsi(text, renderWidth - prefixWidth);
-            const continuationPrefix = " ".repeat(prefixWidth);
-            for (let i = 0; i < wrapped.length; i++) {
-              lines.push(
-                `${i === 0 ? prefix : continuationPrefix}${wrapped[i]}`,
+
+            if (matchesKey(data, Key.up)) {
+              optionIndex = Math.max(0, optionIndex - 1);
+              refresh();
+              return;
+            }
+            if (matchesKey(data, Key.down)) {
+              optionIndex = Math.min(allOptions.length - 1, optionIndex + 1);
+              refresh();
+              return;
+            }
+            if (matchesKey(data, Key.home)) {
+              optionIndex = 0;
+              viewportStart = 0;
+              refresh();
+              return;
+            }
+            if (matchesKey(data, Key.end)) {
+              optionIndex = allOptions.length - 1;
+              viewportStart = optionIndex;
+              refresh();
+              return;
+            }
+            if (matchesKey(data, Key.pageUp)) {
+              optionIndex = Math.max(0, optionIndex - visibleEntries);
+              viewportStart = optionIndex;
+              refresh();
+              return;
+            }
+            if (matchesKey(data, Key.pageDown)) {
+              optionIndex = Math.min(
+                allOptions.length - 1,
+                optionIndex + visibleEntries,
               );
+              viewportStart = optionIndex;
+              refresh();
+              return;
+            }
+
+            if (matchesKey(data, Key.enter)) {
+              const selected = allOptions[optionIndex];
+              if (selected.isOther) {
+                editMode = true;
+                refresh();
+              } else {
+                done({
+                  answer: selected.label,
+                  wasCustom: false,
+                  index: optionIndex + 1,
+                });
+              }
+              return;
+            }
+
+            if (matchesKey(data, Key.escape)) {
+              done(null);
             }
           }
 
-          lines.push(theme.fg("accent", "─".repeat(renderWidth)));
-          addWrappedWithPrefix(
-            " ",
-            theme.fg("text", `ENTSCHEIDUNG: ${params.question}`),
-          );
-          if (params.why) {
-            lines.push("");
+          function render(width: number): string[] {
+            const renderWidth = Math.max(1, width);
+            const rows = tui.terminal.rows;
+            if (
+              cachedLines &&
+              cachedWidth === renderWidth &&
+              cachedRows === rows
+            ) {
+              return cachedLines;
+            }
+
+            const optionIndent = renderWidth < 48 ? "  " : "     ";
+
+            function addWrapped(text: string, target: string[]) {
+              target.push(...wrapTextWithAnsi(text, renderWidth));
+            }
+
+            function addWrappedWithPrefix(
+              prefix: string,
+              text: string,
+              target: string[],
+            ) {
+              const prefixWidth = visibleWidth(prefix);
+              if (prefixWidth >= renderWidth) {
+                addWrapped(prefix + text, target);
+                return;
+              }
+              const wrapped = wrapTextWithAnsi(text, renderWidth - prefixWidth);
+              const continuationPrefix = " ".repeat(prefixWidth);
+              for (let i = 0; i < wrapped.length; i++) {
+                target.push(
+                  `${i === 0 ? prefix : continuationPrefix}${wrapped[i]}`,
+                );
+              }
+            }
+
+            // Kopf (Frage/Warum) bleibt immer sichtbar, unabhängig vom Scroll-Fenster.
+            const lines: string[] = [];
+            lines.push(theme.fg("accent", "─".repeat(renderWidth)));
             addWrappedWithPrefix(
               " ",
-              theme.fg("muted", "Warum das wichtig ist: ") +
-                theme.fg("text", params.why),
+              theme.fg("text", `ENTSCHEIDUNG: ${params.question}`),
+              lines,
             );
-          }
-          lines.push("");
-
-          for (let i = 0; i < allOptions.length; i++) {
-            const opt = allOptions[i];
-            const selected = i === optionIndex;
-            const prefix = selected ? theme.fg("accent", "> ") : "  ";
-
-            if (opt.isOther === true) {
-              const label = `${i + 1}. ${opt.label}${editMode ? " ✎" : ""}`;
-              const color = selected || editMode ? "accent" : "text";
-              addWrappedWithPrefix(prefix, theme.fg(color, label));
+            if (params.why) {
               lines.push("");
-              continue;
-            }
-
-            const isRecommended = i === recommendedDisplayIndex;
-            const color = selected ? "accent" : "text";
-            const tag = isRecommended ? theme.fg("success", "  EMPFOHLEN") : "";
-            addWrappedWithPrefix(
-              prefix,
-              theme.fg(color, `${i + 1}. ${opt.label}`) + tag,
-            );
-            addWrappedWithPrefix(
-              optionIndent,
-              theme.fg("muted", opt.description),
-            );
-            addWrappedWithPrefix(
-              optionIndent,
-              theme.fg("muted", "Aufwand: ") +
-                theme.fg(
-                  levelColor(opt.effort),
-                  `${levelMarker(opt.effort)} ${opt.effort}`,
-                ) +
-                theme.fg("muted", " · Risiko: ") +
-                theme.fg(
-                  levelColor(opt.risk),
-                  `${levelMarker(opt.risk)} ${opt.risk}`,
-                ),
-            );
-            if (opt.pro) {
               addWrappedWithPrefix(
-                optionIndent,
-                theme.fg("muted", `Vorteil: ${opt.pro}`),
-              );
-            }
-            if (opt.contra) {
-              addWrappedWithPrefix(
-                optionIndent,
-                theme.fg("muted", `Nachteil: ${opt.contra}`),
+                " ",
+                theme.fg("muted", "Warum das wichtig ist: ") +
+                  theme.fg("text", params.why),
+                lines,
               );
             }
             lines.push("");
-          }
 
-          if (editMode) {
-            addWrappedWithPrefix(" ", theme.fg("muted", "Deine Antwort:"));
-            for (const line of editor.render(Math.max(1, renderWidth - 2))) {
-              lines.push(` ${line}`);
-            }
-            lines.push("");
-          } else {
-            const recommended = params.options[recommendedIndex - 1];
-            addWrappedWithPrefix(
-              " ",
-              theme.fg("success", "Empfehlung: ") +
+            // Fuß (Empfehlung/Editor + Hilfezeile + Rahmenzeile) bleibt ebenfalls
+            // immer sichtbar; seine Länge muss vor dem Scroll-Budget feststehen.
+            const footerLines: string[] = [];
+            if (editMode) {
+              addWrappedWithPrefix(
+                " ",
+                theme.fg("muted", "Deine Antwort:"),
+                footerLines,
+              );
+              for (const line of editor.render(Math.max(1, renderWidth - 2))) {
+                footerLines.push(` ${line}`);
+              }
+              footerLines.push("");
+              addWrappedWithPrefix(
+                " ",
+                theme.fg("dim", "Enter senden · Esc zurück · Ctrl+C abbrechen"),
+                footerLines,
+              );
+            } else {
+              const recommended = params.options[recommendedIndex - 1];
+              addWrappedWithPrefix(
+                " ",
+                theme.fg("success", "Empfehlung: ") +
+                  theme.fg(
+                    "text",
+                    `${recommendedIndex}. ${recommended.label} — ${params.recommendationReason}`,
+                  ),
+                footerLines,
+              );
+              footerLines.push("");
+              addWrappedWithPrefix(
+                " ",
                 theme.fg(
-                  "text",
-                  `${recommendedIndex}. ${recommended.label} — ${params.recommendationReason}`,
+                  "dim",
+                  `[1–${params.options.length}] Ziffer · [↑/↓] Auswahl · [Enter] Auswählen · [Esc] Abbrechen`,
                 ),
+                footerLines,
+              );
+            }
+            footerLines.push(theme.fg("accent", "─".repeat(renderWidth)));
+
+            function buildOptionBlock(opt: DisplayOption, i: number): string[] {
+              const block: string[] = [];
+              const selected = i === optionIndex;
+              const prefix = selected ? theme.fg("accent", "> ") : "  ";
+
+              if (opt.isOther === true) {
+                const label = `${i + 1}. ${opt.label}${editMode ? " ✎" : ""}`;
+                const color = selected || editMode ? "accent" : "text";
+                addWrappedWithPrefix(prefix, theme.fg(color, label), block);
+                block.push("");
+                return block;
+              }
+
+              const isRecommended = i === recommendedDisplayIndex;
+              const color = selected ? "accent" : "text";
+              const tag = isRecommended
+                ? theme.fg("success", "  EMPFOHLEN")
+                : "";
+              addWrappedWithPrefix(
+                prefix,
+                theme.fg(color, `${i + 1}. ${opt.label}`) + tag,
+                block,
+              );
+              addWrappedWithPrefix(
+                optionIndent,
+                theme.fg("muted", opt.description),
+                block,
+              );
+              addWrappedWithPrefix(
+                optionIndent,
+                theme.fg("muted", "Aufwand: ") +
+                  theme.fg(
+                    levelColor(opt.effort),
+                    `${levelMarker(opt.effort)} ${opt.effort}`,
+                  ) +
+                  theme.fg("muted", " · Risiko: ") +
+                  theme.fg(
+                    levelColor(opt.risk),
+                    `${levelMarker(opt.risk)} ${opt.risk}`,
+                  ),
+                block,
+              );
+              if (opt.pro) {
+                addWrappedWithPrefix(
+                  optionIndent,
+                  theme.fg("muted", `Vorteil: ${opt.pro}`),
+                  block,
+                );
+              }
+              if (opt.contra) {
+                addWrappedWithPrefix(
+                  optionIndent,
+                  theme.fg("muted", `Nachteil: ${opt.contra}`),
+                  block,
+                );
+              }
+              block.push("");
+              return block;
+            }
+
+            // Jede Option ist ein Block mit variabler Höhe (Label + Beschreibung +
+            // Aufwand/Risiko + optional Vor-/Nachteil). calculateMenuViewport hält
+            // die aktuelle Auswahl im sichtbaren Fenster, unabhängig davon, wie
+            // hoch die einzelnen Blöcke sind.
+            const optionBlocks = allOptions.map((opt, i) =>
+              buildOptionBlock(opt, i),
             );
-            lines.push("");
+            const lineCounts = optionBlocks.map((block) => block.length);
+
+            const margin = overlayMargin(tui.terminal.columns, rows);
+            const maxHeight = Math.max(1, rows - margin * 2);
+            const fixed = lines.length + footerLines.length;
+            const budget = Math.max(1, maxHeight - fixed);
+            const view = calculateMenuViewport(
+              lineCounts,
+              optionIndex,
+              viewportStart,
+              budget,
+            );
+            viewportStart = view.start;
+            visibleEntries = Math.max(1, view.end - view.start);
+
+            if (view.showAbove) {
+              addWrappedWithPrefix(
+                " ",
+                theme.fg("dim", `↑ ${view.start} weitere Optionen`),
+                lines,
+              );
+            }
+            let remaining = view.contentLineBudget;
+            for (
+              let index = view.start;
+              index < view.end && remaining > 0;
+              index++
+            ) {
+              const block = optionBlocks[index]!;
+              const fitted =
+                block.length <= remaining ? block : block.slice(0, remaining);
+              lines.push(...fitted);
+              remaining -= fitted.length;
+            }
+            if (view.showBelow) {
+              addWrappedWithPrefix(
+                " ",
+                theme.fg(
+                  "dim",
+                  `↓ ${allOptions.length - view.end} weitere Optionen`,
+                ),
+                lines,
+              );
+            }
+
+            lines.push(...footerLines);
+
+            if (renderWidth < 4) {
+              cachedLines = lines;
+              cachedWidth = renderWidth;
+              cachedRows = rows;
+              return lines;
+            }
+            const innerWidth = renderWidth - 2;
+            const border = theme.fg("border", "│");
+            const framed = [
+              theme.fg("border", `╭${"─".repeat(innerWidth)}╮`),
+              ...lines
+                .slice(1, -1)
+                .map(
+                  (entry) =>
+                    `${border}${truncateToWidth(entry, innerWidth, "…", true)}${border}`,
+                ),
+              theme.fg("border", `╰${"─".repeat(innerWidth)}╯`),
+            ];
+            cachedLines = framed;
+            cachedWidth = renderWidth;
+            cachedRows = rows;
+            return framed;
           }
 
-          if (editMode) {
-            addWrappedWithPrefix(
-              " ",
-              theme.fg("dim", "Enter senden · Esc zurück · Ctrl+C abbrechen"),
-            );
-          } else {
-            addWrappedWithPrefix(
-              " ",
-              theme.fg(
-                "dim",
-                `[1–${params.options.length}] Ziffer · [↑/↓] Auswahl · [Enter] Auswählen · [Esc] Abbrechen`,
-              ),
-            );
-          }
-          lines.push(theme.fg("accent", "─".repeat(renderWidth)));
-
-          if (renderWidth < 4) {
-            cachedLines = lines;
-            return lines;
-          }
-          const innerWidth = renderWidth - 2;
-          const border = theme.fg("border", "│");
-          const framed = [
-            theme.fg("border", `╭${"─".repeat(innerWidth)}╮`),
-            ...lines
-              .slice(1, -1)
-              .map(
-                (entry) =>
-                  `${border}${truncateToWidth(entry, innerWidth, "…", true)}${border}`,
-              ),
-            theme.fg("border", `╰${"─".repeat(innerWidth)}╯`),
-          ];
-          cachedLines = framed;
-          return framed;
-        }
-
-        return {
-          render,
-          invalidate: () => {
-            cachedLines = undefined;
+          return {
+            render,
+            invalidate: () => {
+              cachedLines = undefined;
+            },
+            handleInput,
+          };
+        },
+        {
+          overlay: true,
+          overlayOptions: () => {
+            const size = terminal();
+            const margin = overlayMargin(size.columns, size.rows);
+            return {
+              anchor: "center",
+              width: "90%",
+              maxHeight: Math.max(1, size.rows - margin * 2),
+              margin,
+            };
           },
-          handleInput,
-        };
-      });
+        },
+      );
 
       // Build simple options list for details
       const simpleOptions = params.options.map((o) => o.label);

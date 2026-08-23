@@ -173,6 +173,25 @@ export const diffSections = {
           diffViewer.default(harness.api);
           const context = harness.makeContext({ cwd });
           await harness.runHooks("session_start", {}, context);
+          const changesCommand = harness.commands.get("changes");
+          assert(
+            typeof changesCommand === "function",
+            "diff viewer registers the changes command",
+          );
+          const nonTuiContext = harness.makeContext({
+            cwd,
+            mode: "text",
+            hasUI: false,
+          });
+          await changesCommand("", nonTuiContext);
+          eq(
+            harness.notifications.at(-1),
+            {
+              message: "Diff-Check benötigt den interaktiven Modus",
+              level: "warning",
+            },
+            "changes command reports its interactive-mode requirement",
+          );
           await harness.runHooks(
             "tool_call",
             {

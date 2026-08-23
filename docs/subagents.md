@@ -158,22 +158,14 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
   und Urteil bereits über diese Policy und `subagent-output-guard.ts`; das
   Paket-Acceptance-System ist für den Verifier redundant.
   Siehe `docs/decisions/017-verifier-acceptance-none.md`.
-- **Bekannter Befund (Paket-Drift):** `pi list` zeigt, dass die
-  Live-Runtime ausschließlich den in `settings.json` (`packages`)
-  gepinnten Git-Fork lädt (`~/.pi/agent/git/github.com/daydaylx/pi-subagents`).
-  Dieser Klon steht jedoch tatsächlich auf einem älteren Commit als dem
-  konfigurierten Pin, weil nach dem letzten Repin kein
-  `pi update --extensions`/`--all` gelaufen ist — die von Pi dokumentierte
-  Reconciliation auf den Pin-Commit fand nie statt. `npm/node_modules/
-pi-subagents` (npm-Registry) ist ein davon unabhängiges, gleichnamiges
-  Paket: es ist nur eine gewöhnliche Abhängigkeit von Auroras eigenem
-  `npm/`-Testbaum (`npm --prefix npm run test`/`verify`) und wird von
-  keiner echten `pi`-Sitzung geladen. Der in `extensions/subagent/config.json`
-  gesetzte Wert `toolSchemaMode: "harness"` bleibt davon unberührt wirkungslos,
-  solange der geladene Klon ihn nicht kennt. Die Verifier-Erzwingung liegt
-  deshalb in Auroras Guard-Schicht und wirkt unabhängig davon. Die Reparatur der
-  Paketinstallation ist ein separater Folgeschritt.
-  Siehe `docs/decisions/015-verifier-delegation-guard.md`.
+- **Live-Pin-Status:** `pi list` lädt ausschließlich den in `settings.json`
+  (`packages`) gepinnten Git-Fork unter
+  `~/.pi/agent/git/github.com/daydaylx/pi-subagents`; dessen Checkout steht
+  auf `54c701242710b1dab39a47f23ef8020f40b82bd4`. `npm/node_modules/
+pi-subagents` (npm-Registry) ist davon unabhängig und dient nur Auroras
+  Testbaum (`npm --prefix npm run test`/`verify`), nicht einer echten
+  Pi-Sitzung. Die Verifier-Erzwingung bleibt bewusst in Auroras Guard-Schicht
+  und damit unabhängig von paketinternen Konfigurationsoptionen.
 
 ## Ergebnisbudget und Artefakte
 

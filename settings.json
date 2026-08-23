@@ -1,10 +1,10 @@
 {
   "lastChangelogVersion": "0.84.2",
   "theme": "aurora-night",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-luna",
+  "defaultProvider": "openrouter",
+  "defaultModel": "stealth/ox-alpha",
   "hideThinkingBlock": true,
-  "defaultThinkingLevel": "xhigh",
+  "defaultThinkingLevel": "high",
   "thinkingBudgets": {
     "minimal": 1024,
     "low": 4096,
@@ -47,7 +47,10 @@
     "opencode-go/deepseek-v4-pro",
     "openrouter/openai/gpt-oss-120b",
     "zai/glm-5.3",
-    "zai-coding-cn/glm-5.3"
+    "zai-coding-cn/glm-5.3",
+    "openrouter/stealth/ox-alpha",
+    "openrouter/dots-studio/dots-3-note-preview:free",
+    "openrouter/z-ai/glm-5.2:free"
   ],
   "packages": [
     "git:github.com/daydaylx/pi-subagents@54c701242710b1dab39a47f23ef8020f40b82bd4"
@@ -57,17 +60,23 @@
     "agentOverrides": {
       "investigator": {
         "model": "qwen-token-plan-individual/qwen3.7-plus",
-        "fallbackModels": ["qwen-token-plan-individual/qwen3.8-max"]
+        "fallbackModels": [
+          "qwen-token-plan-individual/qwen3.8-max"
+        ]
       },
       "debugger": {
         "model": "qwen-token-plan-individual/glm-5.2",
         "thinking": "max",
-        "fallbackModels": ["qwen-token-plan-individual/qwen3.8-max"]
+        "fallbackModels": [
+          "qwen-token-plan-individual/qwen3.8-max"
+        ]
       },
       "verifier": {
         "model": "anthropic/claude-sonnet-5",
         "thinking": "max",
-        "fallbackModels": ["openai-codex/gpt-5.6-terra"]
+        "fallbackModels": [
+          "openai-codex/gpt-5.6-terra"
+        ]
       }
     },
     "modelScope": {
@@ -88,6 +97,7 @@
     "+extensions/ask-user.ts",
     "+extensions/diff-viewer/index.ts",
     "+extensions/control-plane.ts",
+    "+extensions/compact-tools/index.ts",
     "+extensions/aurora-ui/index.ts",
     "+extensions/resilience/index.ts",
     "+extensions/session-health/index.ts"

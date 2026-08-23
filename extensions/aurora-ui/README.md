@@ -12,8 +12,8 @@ The theme is `themes/aurora-night.json`. Motion is read from the effective
 central setup configuration (`ui.motion`). One shared ticker runs only while
 work is visible. Only real moving work animates: in `contextual`, active
 thinking and running tools cycle their glyph every 100 ms, while `ANTWORTET`
-and `WARTET` keep a fixed glyph and repaint once per second for the elapsed
-time and the `WARTET` transition alone.
+and `WARTET AUF MODELL` keep a fixed glyph and repaint once per second for the
+elapsed time and the `WARTET AUF MODELL` transition alone.
 
 - `contextual`: animated activity indicator.
 - `reduced`: static activity indicator.
@@ -47,13 +47,20 @@ conversations.
 
 Der Header zeigt während eines laufenden Turns `DENKT NACH` (mit Thinking-Level),
 `ARBEITET`, `ANTWORTET` oder nach vier Sekunden ohne konkretes Aurora-Ereignis
-`WARTET`, jeweils mit einer Laufzeit. `WARTET` bedeutet ausschließlich, dass der
-Turn weiterläuft und Aurora gerade kein genaueres Ereignis erhalten hat: Die
-Animation ist ein Lebenszeichen, keine Hänger- oder Fehlerdiagnose. `idle` wird
-nur beim tatsächlichen Turnabschluss (`agent_settled`) gesetzt, sofern keine
-asynchronen Subagenten weiterarbeiten. `agent_end` beendet nur einen einzelnen
-Agentenlauf; Pi kann danach noch automatisch retryen, kompaktieren oder einen
-weiteren Lauf starten.
+`WARTET AUF MODELL`, jeweils mit einer Laufzeit. `WARTET AUF MODELL` bedeutet,
+dass weder ein Tool noch ein asynchroner Subagent läuft und der Turn nur auf
+die nächste Rückmeldung vom Modell/Provider wartet: Die Animation bleibt ein
+Lebenszeichen, keine Hänger- oder Fehlerdiagnose, macht aber jetzt explizit,
+_worauf_ gewartet wird. `idle` wird nur beim tatsächlichen Turnabschluss
+(`agent_settled`) gesetzt, sofern keine asynchronen Subagenten weiterarbeiten.
+`agent_end` beendet nur einen einzelnen Agentenlauf; Pi kann danach noch
+automatisch retryen, kompaktieren oder einen weiteren Lauf starten.
+
+Ein Async-Subagent, der gestartet, aber noch im Status `queued` ist, zeigt in
+seiner Kachel dagegen `IM HINTERGRUND` statt `WARTET` — bewusst ein anderer
+Text als der Turn-Header, da beide unterschiedliche Sachverhalte beschreiben
+(Turn wartet auf das Modell vs. Subagent läuft bereits im Hintergrund) und
+zuvor identische Strings die beiden leicht verwechselbar machten.
 
 `tool_execution_start` ist Auroras einzige Quelle für eine Toolzeile. Es ordnet
 die realen Laufzeitdaten als Lesen, Suchen, Bearbeiten, Shell, Testen, Prüfen,
