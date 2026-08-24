@@ -24,6 +24,7 @@ export interface TaskProjectionContext {
   subagents: readonly SubagentInfo[];
   receiptAggregator?: ReceiptAggregator;
   verificationStatus?: string | null;
+  workspaceChangedSinceVerification?: boolean;
   currentPlan?: string;
   userPrompt?: string;
   contextPercent?: number | null;
@@ -162,9 +163,9 @@ function criteriaFromChecks(
  * unverified rather than trusted at face value. */
 function verdictFromSummary(
   summary: AuroraVerificationSummary,
-  hasActiveVerificationTool: boolean,
+  verificationIsStale: boolean,
 ): VerificationViewModel["verdict"] {
-  if (hasActiveVerificationTool) return "UNVERIFIED";
+  if (verificationIsStale) return "UNVERIFIED";
   if (summary.status === "verified") {
     return summary.declaredRequiredIds.length > 0 ? "READY" : "UNVERIFIED";
   }
@@ -174,7 +175,7 @@ function verdictFromSummary(
 
 function projectVerificationFromSummary(
   summary: AuroraVerificationSummary,
-  hasActiveVerificationTool: boolean,
+  verificationIsStale: boolean,
 ): VerificationViewModel {
   const checks = checksFromVerificationSummary(summary);
   const failedOrUnavailable = checks.filter(
@@ -182,7 +183,7 @@ function projectVerificationFromSummary(
   );
 
   return {
-    verdict: verdictFromSummary(summary, hasActiveVerificationTool),
+    verdict: verdictFromSummary(summary, verificationIsStale),
     criteria: criteriaFromChecks(checks),
     checks,
     evidence: failedOrUnavailable.map(
@@ -203,14 +204,14 @@ function projectVerificationFromSummary(
  * plain status string instead of showing nothing. */
 function projectVerificationFallback(
   status: string | null | undefined,
-  hasActiveVerificationTool: boolean,
+  verificationIsStale: boolean,
 ): VerificationViewModel | undefined {
-  if (!status && !hasActiveVerificationTool) return undefined;
+  if (!status && !verificationIsStale) return undefined;
 
   const normalized = status ? status.replace(/^Verify:\s*/, "") : null;
   const isVerified = normalized === "verified";
   const isFailed = normalized === "checks_failed";
-  const verdict = hasActiveVerificationTool
+  const verdict = verificationIsStale
     ? "UNVERIFIED"
     : isVerified
       ? "READY"
@@ -242,19 +243,24 @@ export function projectVerificationState(
   status: string | null | undefined,
   activeTools: ReadonlyMap<string, ActiveToolView>,
   verificationSummary?: AuroraVerificationSummary | null,
+  workspaceChangedSinceVerification = false,
 ): VerificationViewModel | undefined {
-  const hasActiveVerificationTool = [...activeTools.values()].some(
-    (t) => t.kind === "verification",
-  );
+  // A check in flight cannot be final, and neither can an earlier successful
+  // check while an edit is running or has completed since that check.
+  const verificationIsStale =
+    workspaceChangedSinceVerification ||
+    [...activeTools.values()].some(
+      (t) => t.kind === "verification" || t.kind === "edit",
+    );
 
   if (verificationSummary) {
     return projectVerificationFromSummary(
       verificationSummary,
-      hasActiveVerificationTool,
+      verificationIsStale,
     );
   }
 
-  return projectVerificationFallback(status, hasActiveVerificationTool);
+  return projectVerificationFallback(status, verificationIsStale);
 }
 
 export function projectCurrentWork(
@@ -342,6 +348,7 @@ export function projectTaskViewModel(
     context.verificationStatus,
     context.activeTools,
     context.state.verification,
+    context.workspaceChangedSinceVerification,
   );
   const changesSummary = context.state.changes ?? undefined;
   const currentWork = projectCurrentWork(

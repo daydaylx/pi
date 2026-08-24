@@ -1778,14 +1778,14 @@ export const auroraUiSections = {
           agg.recordEnd("2", "content", false, 1300);
           agg.recordStart("3", "grep", { query: "export function" }, 1400);
           agg.recordEnd("3", "matches", false, 1500);
-          agg.recordFileEdit("src/main.ts", 15, 3);
-          agg.recordTestRun(10, 0, 10);
+          agg.recordStart("4", "edit", { path: "src/main.ts" }, 1600);
+          agg.recordEnd("4", "ok", false, 1700);
 
           const receipts = agg.getReceipts();
           eq(
             receipts.length,
-            4,
-            "ReceiptAggregator aggregates investigation, search, edits, and tests",
+            3,
+            "ReceiptAggregator aggregates investigation, search, and real edit events",
           );
           assert(
             receipts.some(
@@ -1802,21 +1802,18 @@ export const auroraUiSections = {
           );
           assert(
             receipts.some(
-              (r) => r.kind === "edit" && r.summary.includes("+15 −3"),
-            ),
-            "edit receipt aggregated",
-          );
-          assert(
-            receipts.some(
               (r) =>
-                r.kind === "test" && r.summary.includes("10 / 10 bestanden"),
+                r.kind === "edit" &&
+                r.summary === "1 Datei geändert" &&
+                !r.summary.includes("+") &&
+                r.metrics?.join(" ") === "1 files",
             ),
-            "test receipt aggregated",
+            "edit receipt reports only the file count supplied by its real event",
           );
 
           // Error preservation
-          agg.recordStart("err1", "bash", { command: "exit 1" }, 1600);
-          agg.recordEnd("err1", "Command failed with code 1", true, 1700);
+          agg.recordStart("err1", "bash", { command: "exit 1" }, 1800);
+          agg.recordEnd("err1", "Command failed with code 1", true, 1900);
           const withError = agg.getReceipts();
           assert(
             withError.some(
@@ -1861,8 +1858,7 @@ export const auroraUiSections = {
             "the failing record itself resolves via getRecord",
           );
 
-          // 1c. An edit receipt built from a real tool record (not the
-          // manual recordFileEdit() counter bump used above) carries a
+          // 1c. An edit receipt built from a real tool record carries a
           // resolvable detailRef pointing at the last-touched file's record.
           const editAgg = new ReceiptAggregator();
           editAgg.recordStart("e1", "edit", { path: "src/app.ts" }, 100);
@@ -2360,6 +2356,50 @@ export const auroraUiSections = {
             inProgressCase.verdict,
             "UNVERIFIED",
             "an active verification tool run overrides a stale READY verdict",
+          );
+
+          const editToolActive = new Map([
+            [
+              "e1",
+              {
+                id: "e1",
+                name: "edit",
+                kind: "edit",
+                startedAt: Date.now(),
+              },
+            ],
+          ]);
+          const activeEditCase = projectVerificationState(
+            "verified",
+            editToolActive,
+            {
+              status: "verified",
+              declaredRequiredIds: ["typecheck"],
+              requiredOutcomes: { typecheck: "success" },
+              blockingRecommendedIds: [],
+            },
+          );
+          eq(
+            activeEditCase.verdict,
+            "UNVERIFIED",
+            "an active edit invalidates a stale READY verdict",
+          );
+
+          const completedEditCase = projectVerificationState(
+            "verified",
+            noActiveTools,
+            {
+              status: "verified",
+              declaredRequiredIds: ["typecheck"],
+              requiredOutcomes: { typecheck: "success" },
+              blockingRecommendedIds: [],
+            },
+            true,
+          );
+          eq(
+            completedEditCase.verdict,
+            "UNVERIFIED",
+            "a completed edit stays unverified until setup-core publishes a new status",
           );
 
           // A genuinely passing run is still READY.

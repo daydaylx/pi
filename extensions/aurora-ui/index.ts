@@ -414,6 +414,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let currentUserPrompt: string | undefined;
   let currentPlanText: string | undefined;
   let lastVerificationStatus: string | null = null;
+  let workspaceChangedSinceVerification = false;
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
   const receiptAggregator = new ReceiptAggregator();
@@ -502,6 +503,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       receiptAggregator,
       now,
       verificationStatus: lastVerificationStatus,
+      workspaceChangedSinceVerification,
       currentPlan: currentPlanText,
       userPrompt: currentUserPrompt,
       contextPercent: activeContext?.getContextUsage()?.percent ?? null,
@@ -714,6 +716,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           value.sessionEpoch !== state.sessionEpoch
         )
           return;
+        if ("verification" in value.patch)
+          workspaceChangedSinceVerification = false;
         updateState(ctx, value.patch);
       }),
       pi.events.on(AURORA_UI_CHANNELS.snapshot, (value) => {
@@ -725,6 +729,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           value.sessionEpoch !== state.sessionEpoch
         )
           return;
+        if ("verification" in value.state)
+          workspaceChangedSinceVerification = false;
         updateState(ctx, value.state);
       }),
       pi.events.on("subagent:async-started", (value) => {
@@ -791,6 +797,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     currentUserPrompt = undefined;
     currentPlanText = undefined;
     lastVerificationStatus = null;
+    workspaceChangedSinceVerification = false;
     ticker?.dispose();
     ticker = undefined;
 
@@ -993,6 +1000,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       event.isError,
       Date.now(),
     );
+    if (
+      !event.isError &&
+      (event.toolName === "edit" || event.toolName === "write")
+    ) {
+      workspaceChangedSinceVerification = true;
+    }
     if (event.toolName === "subagent") {
       foregroundSubagents.delete(event.toolCallId);
       refreshSubagentDisplay();

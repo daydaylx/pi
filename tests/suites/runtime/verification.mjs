@@ -542,6 +542,13 @@ export const verificationSections = {
           "agent_settled reports a changed workspace without a current check",
         );
         const beforeDuplicateSettle = harness.statusCalls.length;
+        const beforeDuplicateAuroraPatches = auroraStateMod
+          ? harness.emitted.filter(
+              (e) =>
+                e.name === auroraStateMod.AURORA_UI_CHANNELS.patch &&
+                e.event.source === "setup-core",
+            ).length
+          : 0;
         await harness.runHooks(
           "agent_settled",
           { type: "agent_settled" },
@@ -552,6 +559,17 @@ export const verificationSections = {
           beforeDuplicateSettle,
           "identical settled statuses are deduplicated",
         );
+        if (auroraStateMod) {
+          eq(
+            harness.emitted.filter(
+              (e) =>
+                e.name === auroraStateMod.AURORA_UI_CHANNELS.patch &&
+                e.event.source === "setup-core",
+            ).length,
+            beforeDuplicateAuroraPatches + 1,
+            "an identical status still republishes Aurora verification evidence",
+          );
+        }
 
         const projectCheck = harness.tools.get("project_check");
         assert(

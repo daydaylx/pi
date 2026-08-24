@@ -346,10 +346,14 @@ export default function setupCore(
         workspaceRoot: ctx.cwd,
       },
     );
-    if (status === lastSettledStatus || !ctx.hasUI) return;
+    if (!ctx.hasUI) return;
+    const statusChanged = status !== lastSettledStatus;
     lastSettledStatus = status;
     lastDeclaredRequiredIds = declaredIds;
-    ctx.ui.setStatus("verification", formatVerificationStatus(status));
+    // Keep the persistent footer quiet when its label is unchanged, but still
+    // publish the current evidence so Aurora can clear a stale local edit flag.
+    if (statusChanged)
+      ctx.ui.setStatus("verification", formatVerificationStatus(status));
     publishAuroraVerification();
   });
 

@@ -3,7 +3,6 @@ import { crop } from "./layout.ts";
 import type {
   ReceiptKind,
   ReceiptStatus,
-  TaskFinding,
   TaskReceipt,
 } from "./task-view-model.ts";
 
@@ -33,12 +32,7 @@ export class ReceiptAggregator {
   // Aggregated counters
   private inspectedFiles = new Set<string>();
   private searchQueries = new Set<string>();
-  private editedFiles = new Map<
-    string,
-    { linesAdded: number; linesRemoved: number }
-  >();
-  private testsRun = { passed: 0, failed: 0, total: 0 };
-  private findings: TaskFinding[] = [];
+  private editedFiles = new Set<string>();
   // Id of the most recent completed record behind each aggregated receipt,
   // used as that receipt's detailRef — never invented, only ever a real id.
   private lastRecordId: {
@@ -93,30 +87,7 @@ export class ReceiptAggregator {
     this.inspectedFiles.clear();
     this.searchQueries.clear();
     this.editedFiles.clear();
-    this.testsRun = { passed: 0, failed: 0, total: 0 };
-    this.findings = [];
     this.lastRecordId = {};
-  }
-
-  addFinding(finding: TaskFinding): void {
-    this.findings.push(finding);
-  }
-
-  recordTestRun(passed: number, failed: number, total: number): void {
-    this.testsRun.passed += passed;
-    this.testsRun.failed += failed;
-    this.testsRun.total += total;
-  }
-
-  recordFileEdit(path: string, linesAdded: number, linesRemoved: number): void {
-    const existing = this.editedFiles.get(path) ?? {
-      linesAdded: 0,
-      linesRemoved: 0,
-    };
-    this.editedFiles.set(path, {
-      linesAdded: existing.linesAdded + linesAdded,
-      linesRemoved: existing.linesRemoved + linesRemoved,
-    });
   }
 
   private extractPath(args: unknown): string | undefined {
@@ -161,9 +132,7 @@ export class ReceiptAggregator {
       toolName === "write_to_file"
     ) {
       if (target) {
-        if (!this.editedFiles.has(target)) {
-          this.editedFiles.set(target, { linesAdded: 1, linesRemoved: 0 });
-        }
+        this.editedFiles.add(target);
         this.lastRecordId.edit = record.id;
       }
     }
@@ -225,37 +194,18 @@ export class ReceiptAggregator {
 
     // Changes receipt
     if (this.editedFiles.size > 0) {
-      let totalAdded = 0;
-      let totalRemoved = 0;
-      for (const stats of this.editedFiles.values()) {
-        totalAdded += stats.linesAdded;
-        totalRemoved += stats.linesRemoved;
-      }
       const count = this.editedFiles.size;
       receipts.push({
         id: "receipt-edits",
         kind: "edit",
         status: "completed",
         title: "Änderungen",
-        summary: `${count} ${count === 1 ? "Datei geändert" : "Dateien geändert"} (+${totalAdded} −${totalRemoved})`,
-        metrics: [`${count} files`, `+${totalAdded} −${totalRemoved}`],
-        evidenceRefs: [...this.editedFiles.keys()].slice(0, 5),
+        // Diff statistics belong to diff-viewer, which is the only component
+        // with the actual before/after snapshots. A receipt must not guess.
+        summary: `${count} ${count === 1 ? "Datei geändert" : "Dateien geändert"}`,
+        metrics: [`${count} files`],
+        evidenceRefs: [...this.editedFiles].slice(0, 5),
         detailRef: this.lastRecordId.edit,
-      });
-    }
-
-    // Tests receipt
-    if (this.testsRun.total > 0) {
-      receipts.push({
-        id: "receipt-tests",
-        kind: "test",
-        status: this.testsRun.failed > 0 ? "failed" : "completed",
-        title: "Testlauf",
-        summary: `${this.testsRun.passed} / ${this.testsRun.total} bestanden`,
-        metrics: [
-          `${this.testsRun.passed} passed`,
-          `${this.testsRun.failed} failed`,
-        ],
       });
     }
 

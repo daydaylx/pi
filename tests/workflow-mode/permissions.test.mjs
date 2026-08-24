@@ -526,6 +526,30 @@ await test("plan mode permits only the artifact-free Investigator SINGLE excepti
     [{ agent: "verifier", task: "Locate the owner" }, "verifier role"],
     [{ agent: "unknown", task: "Locate the owner" }, "unknown role"],
     [
+      {
+        agent: "investigator",
+        task: "Locate the owner",
+        chain: ["untrusted-chain"],
+      },
+      "chain override",
+    ],
+    [
+      {
+        agent: "investigator",
+        task: "Locate the owner",
+        tasks: [{ agent: "investigator", task: "nested" }],
+      },
+      "tasks override",
+    ],
+    [
+      {
+        agent: "investigator",
+        task: "Locate the owner",
+        config: { mode: "chain" },
+      },
+      "config override",
+    ],
+    [
       { agent: "investigator", task: "Locate the owner", action: "list" },
       "management action",
     ],

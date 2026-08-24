@@ -179,6 +179,9 @@ export function planModeInvestigatorSingleAllowed(
   const params = input as Record<string, unknown>;
   return (
     params.action === undefined &&
+    params.chain === undefined &&
+    params.tasks === undefined &&
+    params.config === undefined &&
     params.agent === "investigator" &&
     typeof params.task === "string" &&
     params.task.trim().length > 0 &&
