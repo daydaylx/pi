@@ -1,4 +1,4 @@
-// P1 regression test for the locally patched Pi 0.84.2 runtime.
+// P1 regression test for the locally patched Pi 0.84.3 runtime.
 // It intentionally targets the executable runtime, not npm/node_modules,
 // because that is the Pi instance users actually start.
 import assert from "node:assert/strict";
@@ -69,14 +69,25 @@ assert.match(
   /const builtinCommands = BUILTIN_SLASH_COMMANDS\.map/,
   "command inventory includes Pi built-ins",
 );
+// Retired in 0.84.3: "agent-session-compaction-failure-manual" and
+// "agent-session-compaction-failure-auto" used to hand-emit
+// session_compact_failed from compact()'s catch block and from
+// _runAutoCompaction(). Upstream now does this natively via a generic
+// _emitSessionCompactFailed() helper called from both places, so these
+// assertions check that native mechanism instead of the old patch markers.
 assert.match(
   sessionSource,
-  /if \(!aborted && this\._extensionRunner\.hasHandlers\("session_compact_failed"\)\)/,
+  /async _emitSessionCompactFailed\(event\) \{[\s\S]{0,200}this\._extensionRunner\.hasHandlers\("session_compact_failed"\)/,
+  "a generic helper reports failed compaction to extensions",
+);
+assert.match(
+  sessionSource,
+  /await this\._emitSessionCompactFailed\(\{\s*\n\s*reason: "manual",/,
   "a failed manual compaction is reported to extensions",
 );
 assert.match(
   sessionSource,
-  /if \(this\._extensionRunner\.hasHandlers\("session_compact_failed"\)\) \{[\s\S]{0,200}reason,\n\s*errorMessage,/,
+  /_runAutoCompaction\(reason, willRetry\) \{[\s\S]{0,4000}await this\._emitSessionCompactFailed\(/,
   "a failed auto-compaction is reported to extensions",
 );
 assert.match(

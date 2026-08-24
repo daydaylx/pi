@@ -43,6 +43,15 @@ Am 2026-08-15 wurde Pi auf `0.84.2` aktualisiert. Alle acht aktiven
 Patch-Anker trafen unverändert; die Patches wurden erneut angewendet und der
 Versionspin auf `0.84.2` nachgezogen.
 
+Am 2026-08-24 wurde Pi auf `0.84.3` aktualisiert. Sechs der acht Anker trafen
+unverändert. Die beiden übrigen (`agent-session-compaction-failure-manual`
+und `agent-session-compaction-failure-auto`) griffen nicht mehr: Upstream hat
+das Problem, das sie lösten, inzwischen selbst mit einer generischen
+`_emitSessionCompactFailed()`-Methode auf `AgentSession` gelöst, aufgerufen
+sowohl aus `compact()`s catch-Block als auch aus `_runAutoCompaction()` — siehe
+**Retirement (0.84.3)** unten. Die verbliebenen sechs Patches wurden erneut
+angewendet und `EXPECTED_RUNTIME_VERSION` auf `0.84.3` nachgezogen.
+
 ## Wiederherstellen
 
 Die Patches liegen in `node_modules` und überleben kein `npm update` der
@@ -95,13 +104,6 @@ explizit gewählte oder lokal erkannte Runtime.
   `applyConfiguredExtensionOrder()`. `toResolvedPaths()` sortiert Extensions
   innerhalb derselben Präzedenz nach der Position ihres `+path`-Eintrags in
   `settings.json`; ohne solche Einträge bleibt die bisherige Sortierung.
-- `dist/core/agent-session.js`: `compact()` und `_runAutoCompaction()` melden
-  eine gescheiterte manuelle oder automatische Kompaktierung zusätzlich zum
-  bestehenden `compaction_end`-Event (das nur die Mode-Schicht sieht) über
-  `session_compact_failed` an den `ExtensionRunner`. Ohne diesen Patch sah die
-  `resilience`-Extension einen fehlgeschlagenen Kompaktierungsversuch nicht:
-  im Session-JSONL blieb nur ein `resilience.compaction-boundary`-Eintrag mit
-  `boundary: "started"` ohne passendes `"completed"`, ohne Fehlermeldung.
 
 ## Retirement (0.84.0)
 
@@ -125,6 +127,25 @@ greifen (zwei der vier Anker fehlen inzwischen) oder totes Gewebe erzeugen
 (die anderen beiden Anker matchen zufällig noch, aber nichts liest das
 Ergebnis mehr). `tests/p1-runtime.mjs` prüft seit diesem Retirement direkt
 den nativen Mechanismus statt der alten Patch-Marker.
+
+## Retirement (0.84.3)
+
+Die Patches `agent-session-compaction-failure-manual` und
+`agent-session-compaction-failure-auto` fügten `compact()`s catch-Block und
+`_runAutoCompaction()` jeweils von Hand einen `session_compact_failed`-Emit
+hinzu, weil ohne ihn nur die Mode-Schicht (`compaction_end`) eine fehlgeschlagene
+Kompaktierung sah — die `resilience`-Extension blieb blind dafür.
+
+Pi `0.84.3` löst dasselbe Problem jetzt mit einer generischen
+`_emitSessionCompactFailed(event)`-Methode auf `AgentSession`, die aus
+`compact()`s catch-Block (mit `reason: "manual"`) und aus
+`_runAutoCompaction()` (mit `reason: "overflow"`/`"threshold"`) aufgerufen
+wird. Ein Wiederaufsetzen der beiden alten Patches würde entweder scheitern
+(der `-manual`-Anker existiert nicht mehr in dieser Form) oder totes Gewebe
+erzeugen (der `-auto`-Anker matcht nur noch zufällig auf die neue generische
+Methode, nicht auf den ursprünglich gemeinten Ort). `tests/p1-runtime.mjs`
+prüft seit diesem Retirement direkt den nativen `_emitSessionCompactFailed()`-
+Mechanismus statt der alten Patch-Marker.
 
 ## Warum die verbliebenen Patches
 

@@ -21,9 +21,9 @@ npm --prefix npm run verify   # erwartet: Exit 0
 | #   | Schritt                                          | Erwartet                                                             | Beobachtet | ✓/✗ |
 | --- | ------------------------------------------------ | -------------------------------------------------------------------- | ---------- | --- |
 | 1   | `npm run install:user -- --apply --target <tmp>` | Installation läuft durch, `docs/archive/session-logs/` fehlt im Ziel |            |     |
-| 2   | `npm ci --prefix <tmp>/npm`                      | `@earendil-works/pi-coding-agent@0.84.2` installiert                 |            |     |
+| 2   | `npm ci --prefix <tmp>/npm`                      | `@earendil-works/pi-coding-agent@0.84.3` installiert                 |            |     |
 | 3   | Pi im Zielverzeichnis starten                    | Neue Session, Extensions laden, keine unerwarteten Startfehler       |            |     |
-| 4   | Fork-Pin prüfen                                  | Checkout auf `54c701242710b1dab39a47f23ef8020f40b82bd4`              |            |     |
+| 4   | Fork-Pin prüfen                                  | Checkout auf `f56dfda29789265f4a1b4793477c7b135778f0a5`              |            |     |
 
 ## Aurora und Workflow
 

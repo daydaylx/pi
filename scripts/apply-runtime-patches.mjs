@@ -33,7 +33,7 @@ import { resolveRuntimeRoot } from "../shared/runtime-resolution.mjs";
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The runtime version these patches were written and verified against. */
-export const EXPECTED_RUNTIME_VERSION = "0.84.2";
+export const EXPECTED_RUNTIME_VERSION = "0.84.3";
 
 /**
  * One edit. `detect` proves the patch is already in place, `anchor` is the
@@ -255,90 +255,14 @@ function applyConfiguredExtensionOrder(resolved, overrides, fallbackBaseDir) {
         return {
             extensions: mapToResolved(accumulator.extensions, extensionOverrides),`,
   },
-  {
-    id: "agent-session-compaction-failure-manual",
-    file: "dist/core/agent-session.js",
-    summary: "Fehlgeschlagene manuelle Kompaktierung an Extensions melden",
-    detect:
-      'if (!aborted && this._extensionRunner.hasHandlers("session_compact_failed")) {',
-    anchor: `            this._emit({
-                type: "compaction_end",
-                reason: "manual",
-                result: undefined,
-                aborted,
-                willRetry: false,
-                errorMessage: aborted ? undefined : \`Compaction failed: \${message}\`,
-            });
-            throw error;
-        }
-        finally {
-            this._compactionAbortController = undefined;
-        }
-    }`,
-    replacement: `            this._emit({
-                type: "compaction_end",
-                reason: "manual",
-                result: undefined,
-                aborted,
-                willRetry: false,
-                errorMessage: aborted ? undefined : \`Compaction failed: \${message}\`,
-            });
-            if (!aborted && this._extensionRunner.hasHandlers("session_compact_failed")) {
-                await this._extensionRunner.emit({
-                    type: "session_compact_failed",
-                    reason: "manual",
-                    errorMessage: message,
-                    willRetry: false,
-                });
-            }
-            throw error;
-        }
-        finally {
-            this._compactionAbortController = undefined;
-        }
-    }`,
-  },
-  {
-    id: "agent-session-compaction-failure-auto",
-    file: "dist/core/agent-session.js",
-    summary: "Fehlgeschlagene automatische Kompaktierung an Extensions melden",
-    detect:
-      'if (this._extensionRunner.hasHandlers("session_compact_failed")) {',
-    anchor: `            if (started) {
-                this._emit({
-                    type: "compaction_end",
-                    reason,
-                    result: undefined,
-                    aborted: false,
-                    willRetry: false,
-                    errorMessage: reason === "overflow"
-                        ? \`Context overflow recovery failed: \${errorMessage}\`
-                        : \`Auto-compaction failed: \${errorMessage}\`,
-                });
-            }
-            return false;`,
-    replacement: `            if (started) {
-                this._emit({
-                    type: "compaction_end",
-                    reason,
-                    result: undefined,
-                    aborted: false,
-                    willRetry: false,
-                    errorMessage: reason === "overflow"
-                        ? \`Context overflow recovery failed: \${errorMessage}\`
-                        : \`Auto-compaction failed: \${errorMessage}\`,
-                });
-                if (this._extensionRunner.hasHandlers("session_compact_failed")) {
-                    await this._extensionRunner.emit({
-                        type: "session_compact_failed",
-                        reason,
-                        errorMessage,
-                        willRetry: false,
-                    });
-                }
-            }
-            return false;`,
-  },
+  // P1-RETIRED (0.84.3): "agent-session-compaction-failure-manual" and
+  // "agent-session-compaction-failure-auto" used to hand-emit a
+  // `session_compact_failed` event from compact()'s catch block and from
+  // _runAutoCompaction() so extensions would see a failed compaction that
+  // compaction_end alone doesn't surface to them. Pi 0.84.3 introduced a
+  // generic `_emitSessionCompactFailed()` helper on AgentSession and calls it
+  // from exactly those two places natively — see docs/RUNTIME_PATCHES.md for
+  // the full history.
 ];
 
 /**

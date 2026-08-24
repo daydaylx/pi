@@ -23,6 +23,7 @@
     "qwen-token-plan-individual/qwen3.6-flash",
     "qwen-token-plan-individual/glm-5.2",
     "qwen-token-plan-individual/deepseek-v4-pro",
+    "qwen-token-plan-individual/deepseek-v4-pro-0813",
     "qwen-token-plan-individual/deepseek-v4-flash-0731",
     "openai-codex/gpt-5.4-mini",
     "openai-codex/gpt-5.4",

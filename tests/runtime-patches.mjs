@@ -105,16 +105,15 @@ check("the patch set covers what p1-runtime.mjs verifies", () => {
   // otherwise a green patch run could still leave that test red.
   //
   // Not listed here: the retired-in-0.84.0 markers (event-bus listener
-  // scoping / disposal) that p1-runtime.mjs now checks directly against
-  // upstream's native mechanism instead of a patch — see the P1-RETIRED
-  // comments in scripts/apply-runtime-patches.mjs.
+  // scoping / disposal) and the retired-in-0.84.3 markers (manual/auto
+  // compaction-failure reporting) that p1-runtime.mjs now checks directly
+  // against upstream's native mechanism instead of a patch — see the
+  // P1-RETIRED comments in scripts/apply-runtime-patches.mjs.
   const runtimeMarkers = [
     "applyConfiguredExtensionOrder",
     "const builtinCommands = BUILTIN_SLASH_COMMANDS.map",
     "submitSlashCommand: async (commandLine)",
     "P1: terminal input listeners are editor-scoped",
-    'if (!aborted && this._extensionRunner.hasHandlers("session_compact_failed")) {',
-    'if (this._extensionRunner.hasHandlers("session_compact_failed")) {',
   ];
   const applied = PATCHES.map((patch) => patch.replacement).join("\n");
   for (const marker of runtimeMarkers) {
