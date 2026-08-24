@@ -6,6 +6,19 @@
  * 0.83.0. `tests/p1-runtime.mjs` notices the loss; this script repairs it
  * without anyone having to rewrite the edits by hand.
  *
+ * `pi`'s `bin` entry (`dist/bundle/cli.js`) does not run the PATCHES files
+ * above at all — it imports a separately pre-built, minified bundle under
+ * `dist/bundle/chunks/*.js` that ships as a static build artifact inside the
+ * npm tarball, with no rebuild step on install. Patching only `dist/core/*`
+ * and `dist/modes/*` therefore has zero effect on the actual interactive
+ * process; every Super+* shortcut and menu action keeps failing with "Die
+ * direkte Command-Ausführung fehlt in der Pi-Runtime" no matter how many
+ * times the session is restarted. BUNDLE_PATCHES below carries the same six
+ * edits, hand-adapted to the minified form, applied to whichever chunk file
+ * actually contains each anchor (the chunk's content-hash filename is not
+ * assumed stable across rebuilds — see findBundleChunkFile). Discovered and
+ * fixed 2026-08-24; see docs/RUNTIME_PATCHES.md.
+ *
  * Three rules it will not bend:
  *   - idempotent: an already patched file is reported and left alone;
  *   - loud: an anchor that no longer matches aborts the whole run, because a
@@ -23,6 +36,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -265,6 +279,146 @@ function applyConfiguredExtensionOrder(resolved, overrides, fallbackBaseDir) {
   // the full history.
 ];
 
+/** Directory (relative to the runtime root) holding the pre-built, minified
+ * bundle chunks that `dist/bundle/cli.js` actually imports at runtime. */
+export const BUNDLE_CHUNKS_DIR = "dist/bundle/chunks";
+
+/**
+ * The same six edits as PATCHES, hand-adapted to the minified bundle form
+ * (no whitespace between tokens, local parameter names can differ from the
+ * unbundled source — but `this.*` property access and top-level function
+ * names survive esbuild's default minification unchanged, which is what
+ * every anchor below relies on). "agent-session-builtin-command-import" and
+ * "agent-session-complete-command-inventory" are folded into one entry
+ * here because both touch the same `getCommands` closure and cannot be
+ * applied independently once minified onto one line.
+ *
+ * These have no `file` field: the bundle's chunk filename is a content
+ * hash that a rebuild can change, so main() resolves each patch against
+ * whichever file under BUNDLE_CHUNKS_DIR actually contains its anchor
+ * (see findBundleChunkFile) instead of a hardcoded path.
+ */
+export const BUNDLE_PATCHES = [
+  {
+    id: "bundle-interactive-submit-slash-command",
+    summary: "Slash-Commands aus Extension-Menüs direkt absenden (Bundle)",
+    detect: "submitSlashCommand:async commandLine=>",
+    anchor:
+      "getEditorText:()=>this.editor.getExpandedText?.()??this.editor.getText(),editor:(title,prefill)=>this.showExtensionEditor(title,prefill),",
+    replacement:
+      "getEditorText:()=>this.editor.getExpandedText?.()??this.editor.getText()," +
+      "submitSlashCommand:async commandLine=>{" +
+      "let normalized=commandLine.trim();" +
+      "if(!/^\\/[^\\s/]+(?:\\s[^\\r\\n]*)?$/.test(normalized))" +
+      'throw new Error("submitSlashCommand accepts one slash command only");' +
+      "await this.defaultEditor.onSubmit?.(normalized)}," +
+      "editor:(title,prefill)=>this.showExtensionEditor(title,prefill),",
+  },
+  {
+    id: "bundle-interactive-focus-scoped-terminal-input",
+    summary:
+      "Globale Extension-Eingaben bei modaler Fokusübernahme aussetzen (Bundle)",
+    detect:
+      "onTerminalInput:handler=>this.addExtensionTerminalInputListener(data=>this.ui.focusedComponent===this.editor?handler(data):void 0)",
+    anchor:
+      "onTerminalInput:handler=>this.addExtensionTerminalInputListener(handler)",
+    replacement:
+      "onTerminalInput:handler=>this.addExtensionTerminalInputListener(data=>this.ui.focusedComponent===this.editor?handler(data):void 0)",
+  },
+  {
+    id: "bundle-agent-session-command-inventory",
+    summary:
+      "pi.getCommands() um Built-ins und aktive Skills ergänzen (Bundle, kombiniert)",
+    detect: "let builtinCommands=BUILTIN_SLASH_COMMANDS.map(command=>",
+    anchor:
+      'let getCommands=()=>{let extensionCommands=runner.getRegisteredCommands().map(command=>({name:command.invocationName,description:command.description,source:"extension",sourceInfo:command.sourceInfo})),templates=this.promptTemplates.map(template=>({name:template.name,description:template.description,source:"prompt",sourceInfo:template.sourceInfo})),skills=this._resourceLoader.getSkills().skills.map(skill=>({name:`skill:${skill.name}`,description:skill.description,source:"skill",sourceInfo:skill.sourceInfo}));return[...extensionCommands,...templates,...skills]}',
+    replacement:
+      "let getCommands=()=>{" +
+      'let builtinCommands=BUILTIN_SLASH_COMMANDS.map(command=>({name:command.name,description:command.description,source:"builtin",sourceInfo:createSyntheticSourceInfo(`<builtin-command:${command.name}>`,{source:"builtin"})})),' +
+      'extensionCommands=runner.getRegisteredCommands().map(command=>({name:command.invocationName,description:command.description,source:"extension",sourceInfo:command.sourceInfo})),' +
+      'templates=this.promptTemplates.map(template=>({name:template.name,description:template.description,source:"prompt",sourceInfo:template.sourceInfo})),' +
+      'skills=this.settingsManager.getEnableSkillCommands()?this._resourceLoader.getSkills().skills.map(skill=>({name:`skill:${skill.name}`,description:skill.description,source:"skill",sourceInfo:skill.sourceInfo})):[];' +
+      "return[...builtinCommands,...extensionCommands,...templates,...skills]}",
+  },
+  {
+    id: "bundle-package-manager-order-helper",
+    summary:
+      "Sortierfunktion für die deklarierte Extension-Reihenfolge (Bundle)",
+    detect:
+      "function applyConfiguredExtensionOrder(resolved,overrides,fallbackBaseDir){",
+    anchor: "function getOverridePatterns(entries){",
+    replacement:
+      "function applyConfiguredExtensionOrder(resolved,overrides,fallbackBaseDir){" +
+      'let forceIncludes=getOverridePatterns(overrides).filter(pattern=>pattern.startsWith("+")).map(pattern=>pattern.slice(1));' +
+      "if(forceIncludes.length===0)return resolved;" +
+      "let declaredIndex=entry=>{" +
+      "let baseDir=entry.metadata?.baseDir??fallbackBaseDir;" +
+      "if(!baseDir)return forceIncludes.length;" +
+      "for(let index=0;index<forceIncludes.length;index+=1)" +
+      "if(matchesAnyExactPattern(entry.path,[forceIncludes[index]],baseDir))return index;" +
+      "return forceIncludes.length};" +
+      "return resolved.map((entry,index)=>({entry,index,declared:declaredIndex(entry)}))" +
+      ".sort((a,b)=>resourcePrecedenceRank(a.entry.metadata)-resourcePrecedenceRank(b.entry.metadata)||a.declared-b.declared||a.index-b.index)" +
+      ".map(item=>item.entry)}" +
+      "function getOverridePatterns(entries){",
+  },
+  {
+    id: "bundle-package-manager-order-use",
+    summary: "toResolvedPaths() wendet die deklarierte Reihenfolge an (Bundle)",
+    detect:
+      "let globalSettings=this.settingsManager.getGlobalSettings(),extensionOverrides=",
+    anchor:
+      "toResolvedPaths(accumulator){let mapToResolved=entries=>{let resolved=Array.from(entries.entries()).map(([path14,{metadata,enabled}])=>({path:path14,enabled,metadata}));" +
+      "resolved.sort((a,b2)=>resourcePrecedenceRank(a.metadata)-resourcePrecedenceRank(b2.metadata));" +
+      "let seen=new Set;" +
+      "return resolved.filter(entry=>{let canonicalPath=canonicalizePath(entry.path);return seen.has(canonicalPath)?!1:(seen.add(canonicalPath),!0)})};" +
+      "return{extensions:mapToResolved(accumulator.extensions),skills:mapToResolved(accumulator.skills),prompts:mapToResolved(accumulator.prompts),themes:mapToResolved(accumulator.themes)}}",
+    replacement:
+      "toResolvedPaths(accumulator){let mapToResolved=(entries,extensionOverrides)=>{let resolved=Array.from(entries.entries()).map(([path14,{metadata,enabled}])=>({path:path14,enabled,metadata}));" +
+      "if(extensionOverrides)resolved=applyConfiguredExtensionOrder(resolved,extensionOverrides,this.agentDir);" +
+      "else resolved.sort((a,b2)=>resourcePrecedenceRank(a.metadata)-resourcePrecedenceRank(b2.metadata));" +
+      "let seen=new Set;" +
+      "return resolved.filter(entry=>{let canonicalPath=canonicalizePath(entry.path);return seen.has(canonicalPath)?!1:(seen.add(canonicalPath),!0)})};" +
+      "let globalSettings=this.settingsManager.getGlobalSettings(),extensionOverrides=[...(globalSettings.extensions??[])];" +
+      "return{extensions:mapToResolved(accumulator.extensions,extensionOverrides),skills:mapToResolved(accumulator.skills),prompts:mapToResolved(accumulator.prompts),themes:mapToResolved(accumulator.themes)}}",
+  },
+];
+
+/**
+ * Find the single chunk file under BUNDLE_CHUNKS_DIR whose content contains
+ * the given patch's anchor or detect string. Throws if none or more than one
+ * chunk matches — same "loud, not findy" rule as planPatch, because a bundle
+ * rebuild can move code between chunks as easily as it can rename them.
+ */
+export function findBundleChunkFile(runtime, patch) {
+  const chunksDir = path.join(runtime, BUNDLE_CHUNKS_DIR);
+  if (!existsSync(chunksDir)) {
+    throw new Error(`Bundle-Chunk-Verzeichnis fehlt: ${chunksDir}`);
+  }
+  const candidates = readdirSync(chunksDir).filter((name) =>
+    name.endsWith(".js"),
+  );
+  const matches = [];
+  for (const name of candidates) {
+    const absolute = path.join(chunksDir, name);
+    const content = readFileSync(absolute, "utf8");
+    if (content.includes(patch.anchor) || content.includes(patch.detect)) {
+      matches.push(path.join(BUNDLE_CHUNKS_DIR, name));
+    }
+  }
+  if (matches.length === 0) {
+    throw new Error(
+      `Patch '${patch.id}': kein Bundle-Chunk unter ${BUNDLE_CHUNKS_DIR} enthält den Anker. Die Runtime hat sich geändert — Patch prüfen und portieren, nicht erzwingen.`,
+    );
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Patch '${patch.id}': Anker kommt in ${matches.length} Bundle-Chunks vor (${matches.join(", ")}) und ist damit nicht eindeutig.`,
+    );
+  }
+  return matches[0];
+}
+
 /**
  * Decide what a single patch would do to `content`, without writing.
  * Throws when the anchor is gone — a changed runtime needs a human, not a
@@ -350,8 +504,14 @@ function readRuntimeVersion(runtime) {
 }
 
 function main(argv) {
-  const { apply, runtime: requestedRuntime, allowVersionDrift } = parseArgs(argv);
-  const { root: runtime, source } = resolveRuntimeRoot({ runtime: requestedRuntime });
+  const {
+    apply,
+    runtime: requestedRuntime,
+    allowVersionDrift,
+  } = parseArgs(argv);
+  const { root: runtime, source } = resolveRuntimeRoot({
+    runtime: requestedRuntime,
+  });
   assertNoSymlinkComponents(runtime);
 
   console.log(`Runtime-Ziel: ${runtime} (${source})`);
@@ -367,11 +527,20 @@ function main(argv) {
     console.warn(`WARNUNG: ${message} Fortsetzung wurde ausdrücklich erlaubt.`);
   }
 
+  // Bundle patches have no fixed `file` — resolve each against whichever
+  // chunk under BUNDLE_CHUNKS_DIR actually contains its anchor first, so the
+  // rest of the pipeline can treat them exactly like the unbundled patches.
+  const resolvedBundlePatches = BUNDLE_PATCHES.map((patch) => ({
+    ...patch,
+    file: findBundleChunkFile(runtime, patch),
+  }));
+  const allPatches = [...PATCHES, ...resolvedBundlePatches];
+
   // Plan every patch before touching anything: a single bad anchor must not
   // leave the runtime half patched.
   const byFile = new Map();
   const results = [];
-  for (const patch of PATCHES) {
+  for (const patch of allPatches) {
     const absolute = path.join(runtime, patch.file);
     if (!existsSync(absolute)) {
       throw new Error(`Runtime-Datei fehlt: ${absolute}`);
@@ -396,13 +565,13 @@ function main(argv) {
 
   if (pending.length === 0) {
     console.log(
-      `\nAlle ${PATCHES.length} Patches sind bereits angewendet (Runtime ${version}).`,
+      `\nAlle ${allPatches.length} Patches sind bereits angewendet (Runtime ${version}).`,
     );
     return;
   }
   if (!apply) {
     console.log(
-      `\n${pending.length} von ${PATCHES.length} Patches fehlen; --apply schreibt sie.`,
+      `\n${pending.length} von ${allPatches.length} Patches fehlen; --apply schreibt sie.`,
     );
     return;
   }

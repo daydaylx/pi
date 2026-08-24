@@ -3,10 +3,15 @@
 // because that is the Pi instance users actually start.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { EXPECTED_RUNTIME_VERSION } from "../scripts/apply-runtime-patches.mjs";
+import {
+  BUNDLE_PATCHES,
+  EXPECTED_RUNTIME_VERSION,
+  findBundleChunkFile,
+} from "../scripts/apply-runtime-patches.mjs";
 import { resolveRuntimeForRuntimeTest } from "./shared/runtime-test-resolution.mjs";
 
-const { root: RUNTIME_ROOT, source: runtimeSource } = resolveRuntimeForRuntimeTest();
+const { root: RUNTIME_ROOT, source: runtimeSource } =
+  resolveRuntimeForRuntimeTest();
 console.log(`Runtime-Ziel: ${RUNTIME_ROOT} (${runtimeSource})`);
 
 const packageJson = JSON.parse(
@@ -115,6 +120,23 @@ assert.match(
   /hideExtensionSelector\(\) \{[\s\S]{0,260}setFocus\(this\.editor\)/,
   "closing a native extension selector restores editor focus",
 );
+
+// `pi`'s bin entry (dist/bundle/cli.js) never imports the unbundled dist/
+// files checked above — it runs a separately pre-built, minified bundle
+// under dist/bundle/chunks/*.js instead. Patching only the unbundled files
+// has zero effect on the actual interactive process, and every assertion
+// above stayed green through that regardless because it only ever read the
+// unbundled sources. Discovered 2026-08-24: see docs/RUNTIME_PATCHES.md.
+// Each BUNDLE_PATCHES entry must be present in whichever chunk contains its
+// anchor, so this loop is what actually would have caught the gap.
+for (const patch of BUNDLE_PATCHES) {
+  const chunkRelPath = findBundleChunkFile(RUNTIME_ROOT, patch);
+  const chunkContent = readFileSync(`${RUNTIME_ROOT}/${chunkRelPath}`, "utf8");
+  assert.ok(
+    chunkContent.includes(patch.detect),
+    `bundle chunk ${chunkRelPath} has the '${patch.id}' patch applied`,
+  );
+}
 
 const { createEventBus } = await import(
   `${RUNTIME_ROOT}/dist/core/event-bus.js`

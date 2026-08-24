@@ -52,6 +52,20 @@ sowohl aus `compact()`s catch-Block als auch aus `_runAutoCompaction()` — sieh
 **Retirement (0.84.3)** unten. Die verbliebenen sechs Patches wurden erneut
 angewendet und `EXPECTED_RUNTIME_VERSION` auf `0.84.3` nachgezogen.
 
+Trotz erneutem Anwenden und grünem `p1-runtime.mjs` blieb `Super+S` (und jeder
+andere Shortcut) mit "Die direkte Command-Ausführung fehlt in der
+Pi-Runtime" fehlgeschlagen — auch nach vollständigem Neustart des Terminals.
+Ursache: `pi`s `bin`-Eintrag (`dist/bundle/cli.js`) lädt gar nicht die oben
+gepatchten `dist/core/*`/`dist/modes/*`-Dateien, sondern einen separat
+vorgebauten, minifizierten Bundle-Chunk unter `dist/bundle/chunks/*.js`, der
+als statisches Build-Artefakt im npm-Tarball mitkommt — kein Rebuild-Schritt
+bei der Installation übernimmt Änderungen an den unbebündelten Dateien dort
+hinein. Alle sechs Patches (fünf nach Zusammenlegung zweier ineinandergreifender
+Edits) wurden zusätzlich in der minifizierten Form auf den Bundle-Chunk
+angewendet — siehe **Bundle-Patches** unten. `tests/p1-runtime.mjs` prüfte bis
+dahin ausschließlich die unbebündelten Dateien und wäre diese Lücke nie
+aufgefallen; es prüft jetzt zusätzlich den Bundle-Chunk.
+
 ## Wiederherstellen
 
 Die Patches liegen in `node_modules` und überleben kein `npm update` der
@@ -88,6 +102,46 @@ eine echte Runtime-Installation) und läuft in `npm run verify` mit.
 `npm run test:runtime` (`tests/p1-runtime.mjs`) ist bewusst **kein** Teil von
 `npm run verify`/CI. Es bleibt ein eigenständiges Upgrade-Gate gegen die
 explizit gewählte oder lokal erkannte Runtime.
+
+Derselbe Lauf patcht seit 2026-08-24 immer beides: die unbebündelten Dateien
+(`PATCHES`) und den Bundle-Chunk (`BUNDLE_PATCHES`) — siehe **Bundle-Patches**
+unten. Ein Lauf, der nur eine der beiden Seiten anwendet, lässt den
+tatsächlich ausgeführten `pi`-Prozess unverändert.
+
+## Bundle-Patches
+
+`pi`s `package.json` deklariert `"bin": {"pi": "dist/bundle/cli.js"}`. Diese
+Datei ist nur ein winziger Loader (`import ... from "./chunks/chunk-XXXX.js"`);
+der eigentliche interaktive Code liegt in einem oder mehreren vorgebauten,
+minifizierten Chunks unter `dist/bundle/chunks/`. Diese Chunks sind ein
+statisches Build-Artefakt des `pi-coding-agent`-Pakets selbst
+(`npm run build` dort führt zuerst `tsgo` für die unbebündelten `dist/core/*`-
+und `dist/modes/*`-Dateien aus und **danach** einen separaten esbuild-Lauf für
+den Bundle) — sie kommen fertig aus dem npm-Tarball, ohne dass `npm install`
+im Wurzel-Repo sie neu erzeugt. Patches an den unbebündelten Dateien haben
+deshalb keinerlei Wirkung auf den tatsächlich laufenden `pi`-Prozess.
+
+`BUNDLE_PATCHES` in `scripts/apply-runtime-patches.mjs` trägt dieselben sechs
+Eingriffe wie `PATCHES`, von Hand an die minifizierte Form angepasst:
+
+- Keine Zeilenumbrüche/Leerzeichen zwischen Tokens — die Anker sind daher
+  Ein-Zeiler statt des mehrzeiligen `PATCHES`-Texts.
+- `this.*`-Property-Zugriffe und Top-Level-Funktionsnamen (`resourcePrecedenceRank`,
+  `matchesAnyExactPattern`, `getOverridePatterns`, `BUILTIN_SLASH_COMMANDS`,
+  `createSyntheticSourceInfo`, …) überleben esbuilds Standard-Minifizierung
+  unverändert; nur lokale `let`/`const`-Bezeichner und Funktionsparameter
+  können umbenannt sein (z. B. `path` → `path14` bei einer Namenskollision).
+- "agent-session-builtin-command-import" und "agent-session-complete-command-inventory"
+  sind zu einem Eintrag (`bundle-agent-session-command-inventory`)
+  zusammengelegt, weil beide denselben `getCommands`-Closure-Body treffen und
+  im minifizierten Ein-Zeiler nicht unabhängig voneinander anwendbar sind.
+
+Jeder `BUNDLE_PATCHES`-Eintrag trägt bewusst **kein** `file`-Feld: Der
+Chunk-Dateiname (`chunk-E5KXRMZK.js` zum Zeitpunkt dieser Entdeckung) ist ein
+Content-Hash, den ein Rebuild ändern kann. `findBundleChunkFile()` durchsucht
+stattdessen alle `.js`-Dateien unter `dist/bundle/chunks/` zur Laufzeit und
+patcht die eine Datei, die den Anker tatsächlich enthält — nach derselben
+"laut statt findig"-Regel: null oder mehr als ein Treffer brechen den Lauf ab.
 
 ## Umfang
 

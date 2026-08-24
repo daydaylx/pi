@@ -15,8 +15,11 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  BUNDLE_CHUNKS_DIR,
+  BUNDLE_PATCHES,
   EXPECTED_RUNTIME_VERSION,
   PATCHES,
+  findBundleChunkFile,
   planPatch,
 } from "../scripts/apply-runtime-patches.mjs";
 import { resolveRuntimeRoot } from "../shared/runtime-resolution.mjs";
@@ -31,32 +34,39 @@ function check(description, fn) {
 
 console.log(`runtime patches (Pi ${EXPECTED_RUNTIME_VERSION})`);
 
-check("patch and runtime verification resolve the identical explicit target", () => {
-  const root = path.join(tmpdir(), `pi-runtime-resolution-${process.pid}`);
-  const runtime = path.join(root, "runtime");
-  rmSync(root, { recursive: true, force: true });
-  mkdirSync(runtime, { recursive: true });
-  writeFileSync(
-    path.join(runtime, "package.json"),
-    JSON.stringify({ name: "@earendil-works/pi-coding-agent" }),
-  );
-  try {
-    const env = { PATH: "", PI_RUNTIME_ROOT: path.join(root, "wrong") };
-    const patchTarget = resolveRuntimeRoot({ runtime, env });
-    const testTarget = resolveRuntimeForRuntimeTest(["--runtime", runtime], env);
-    assert.deepEqual(testTarget, patchTarget);
-  } finally {
+check(
+  "patch and runtime verification resolve the identical explicit target",
+  () => {
+    const root = path.join(tmpdir(), `pi-runtime-resolution-${process.pid}`);
+    const runtime = path.join(root, "runtime");
     rmSync(root, { recursive: true, force: true });
-  }
-});
+    mkdirSync(runtime, { recursive: true });
+    writeFileSync(
+      path.join(runtime, "package.json"),
+      JSON.stringify({ name: "@earendil-works/pi-coding-agent" }),
+    );
+    try {
+      const env = { PATH: "", PI_RUNTIME_ROOT: path.join(root, "wrong") };
+      const patchTarget = resolveRuntimeRoot({ runtime, env });
+      const testTarget = resolveRuntimeForRuntimeTest(
+        ["--runtime", runtime],
+        env,
+      );
+      assert.deepEqual(testTarget, patchTarget);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 check("every patch is uniquely identified", () => {
-  const ids = PATCHES.map((patch) => patch.id);
+  const ids = [...PATCHES, ...BUNDLE_PATCHES].map((patch) => patch.id);
   assert.equal(new Set(ids).size, ids.length, "patch ids must be unique");
   assert.ok(PATCHES.length > 0, "there is at least one patch");
+  assert.ok(BUNDLE_PATCHES.length > 0, "there is at least one bundle patch");
 });
 
-for (const patch of PATCHES) {
+for (const patch of [...PATCHES, ...BUNDLE_PATCHES]) {
   check(`${patch.id}: applies to its anchor`, () => {
     const planned = planPatch(patch, patch.anchor);
     assert.equal(planned.state, "pending");
@@ -138,6 +148,74 @@ check("patches stay within the allowlisted runtime files", () => {
       `patch '${patch.id}' targets an unexpected path: ${patch.file}`,
     );
   }
+  // Bundle patches deliberately carry no `file` — their chunk filename is a
+  // content hash a rebuild can change, so main() resolves it dynamically via
+  // findBundleChunkFile instead of a fixed allowlisted path.
+  for (const patch of BUNDLE_PATCHES) {
+    assert.ok(
+      patch.file === undefined,
+      `bundle patch '${patch.id}' must not declare a fixed file`,
+    );
+  }
 });
+
+check(
+  "findBundleChunkFile locates the chunk containing a patch's anchor",
+  () => {
+    const root = path.join(
+      tmpdir(),
+      `pi-bundle-chunk-resolution-${process.pid}`,
+    );
+    rmSync(root, { recursive: true, force: true });
+    const chunksDir = path.join(root, BUNDLE_CHUNKS_DIR);
+    mkdirSync(chunksDir, { recursive: true });
+    try {
+      const [samplePatch] = BUNDLE_PATCHES;
+      writeFileSync(
+        path.join(chunksDir, "chunk-A.js"),
+        "// unrelated bundle code\n",
+      );
+      writeFileSync(
+        path.join(chunksDir, "chunk-B.js"),
+        `// prefix\n${samplePatch.anchor}\n// suffix\n`,
+      );
+      assert.equal(
+        findBundleChunkFile(root, samplePatch),
+        path.join(BUNDLE_CHUNKS_DIR, "chunk-B.js"),
+        "resolves to the one chunk that actually contains the anchor",
+      );
+
+      writeFileSync(
+        path.join(chunksDir, "chunk-A.js"),
+        "// unrelated bundle code\n",
+      );
+      writeFileSync(
+        path.join(chunksDir, "chunk-B.js"),
+        "// no longer has the anchor either\n",
+      );
+      assert.throws(
+        () => findBundleChunkFile(root, samplePatch),
+        /kein Bundle-Chunk/,
+        "throws when no chunk contains the anchor",
+      );
+
+      writeFileSync(
+        path.join(chunksDir, "chunk-A.js"),
+        `// also has it\n${samplePatch.anchor}\n`,
+      );
+      writeFileSync(
+        path.join(chunksDir, "chunk-B.js"),
+        `// prefix\n${samplePatch.anchor}\n// suffix\n`,
+      );
+      assert.throws(
+        () => findBundleChunkFile(root, samplePatch),
+        /nicht eindeutig/,
+        "throws when more than one chunk contains the anchor",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 console.log(`\nPASS: ${checks} passed, 0 failed`);
