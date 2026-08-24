@@ -134,6 +134,14 @@ export function decideTool(
       reason: `${PERMISSION_LEVEL_LABEL[permissionLevel]}: Tool "${event.toolName}" ist nicht freigegeben.`,
     };
   }
+  // Delegation ohne Bestätigungsdialog; readonly bleibt bewusst gesperrt,
+  // weil Kind-Läufe eigene Pi-Prozesse sind und nicht beweisbar read-only.
+  if (event.toolName === "subagent") {
+    return {
+      action: "allow",
+      reason: "Subagenten-Delegation ist ohne Bestätigung erlaubt",
+    };
+  }
   switch (configured.unknownTools) {
     case "block":
       return {

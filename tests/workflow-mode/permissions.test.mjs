@@ -3,6 +3,7 @@ import { importModule as load } from "../shared/jiti-loader.mjs";
 
 const workflowPolicy = await load("extensions/permissions/workflow-policy.ts");
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
+const toolPolicy = await load("extensions/permissions/tool-policy.ts");
 const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
 const subagentGuard = await load(
   "extensions/setup-core/subagent-output-guard.ts",
@@ -645,6 +646,38 @@ await test("shell structure decides consistently across all permission levels", 
     decide("project-write", "ls -la > out.txt"),
     "allow",
     "a redirect inside the project is ordinary project work",
+  );
+});
+
+await test("subagent delegations are allowed without confirmation outside readonly", () => {
+  if (!toolPolicy) return;
+  const cwd = process.cwd();
+  const configured = { unknownTools: "ask", bash: "allow" };
+  const decide = (level, toolName = "subagent", input = {}) =>
+    toolPolicy.decideTool(level, { toolName, input }, cwd, configured).action;
+  for (const level of ["project-write", "confirm-all", "yolo"]) {
+    eq(
+      decide(level),
+      "allow",
+      `subagent needs no confirmation at ${level}`,
+    );
+  }
+  for (const agent of ["investigator", "debugger", "verifier"]) {
+    eq(
+      decide("project-write", "subagent", { agent, task: "x" }),
+      "allow",
+      `the ${agent} role is allowed without confirmation`,
+    );
+  }
+  eq(
+    decide("readonly"),
+    "block",
+    "readonly keeps its complete tool boundary: child runs are not provably read-only",
+  );
+  eq(
+    decide("project-write", "frobnicate"),
+    "ask",
+    "other unknown tools still follow the configured unknownTools policy",
   );
 });
 

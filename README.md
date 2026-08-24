@@ -79,6 +79,10 @@ Berechtigungen sind eine reine Stufenwahl über `/permission`: `readonly`,
 `project-write`, `confirm-all` und temporäres `yolo`. Gespeicherte
 Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe selbst
 nicht. Die Plandatei ist auf jeder Stufe automatisch erlaubtes Schreibziel.
+Subagenten-Delegationen (`subagent`) sind auf `project-write`, `confirm-all`
+und `yolo` ohne Bestätigung erlaubt (Entscheidung 018); `readonly` bleibt
+vollständig gesperrt. Planmodus-Guard, Verifier-Vertragsprüfung und die
+harten Grenzen gelten unverändert weiter.
 Zusätzlich gilt bei `project-write` und `confirm-all` während `simple_plan`
 oder `detailed_plan` ein technischer Mutationsschutz für den Agenten:
 Schreibzugriffe außerhalb der Plandatei werden verweigert. Als Bash bleiben
