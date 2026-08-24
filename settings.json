@@ -54,7 +54,7 @@
     "openrouter/z-ai/glm-5.2:free"
   ],
   "packages": [
-    "git:github.com/daydaylx/pi-subagents@f56dfda29789265f4a1b4793477c7b135778f0a5",
+    "git:github.com/daydaylx/pi-subagents@0a3c4dea1b3712dcc86bb4ac74ff434b4101521f",
     "npm:pi-web-access@0.24.2"
   ],
   "subagents": {

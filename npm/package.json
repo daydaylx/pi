@@ -23,7 +23,7 @@
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
     "jiti": "2.7.0",
-    "pi-subagents": "github:daydaylx/pi-subagents#f56dfda29789265f4a1b4793477c7b135778f0a5",
+    "pi-subagents": "github:daydaylx/pi-subagents#0a3c4dea1b3712dcc86bb4ac74ff434b4101521f",
     "pi-web-access": "0.24.2",
     "pi-zentui": "0.3.0"
   },
