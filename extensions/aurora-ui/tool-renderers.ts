@@ -3,6 +3,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { footerTier } from "../shared/layout.ts";
 import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
 import { crop } from "./layout.ts";
+import { renderPanel } from "./panel.ts";
 import type {
   CurrentWorkViewModel,
   SubagentBranchInfo,
@@ -596,11 +597,11 @@ export function renderSubagents(
 }
 
 const PHASES: Array<{ id: TaskPhase; label: string }> = [
-  { id: "understand", label: "Understand" },
-  { id: "plan", label: "Plan" },
-  { id: "work", label: "Work" },
-  { id: "verify", label: "Verify" },
-  { id: "done", label: "Done" },
+  { id: "understand", label: "Verstehen" },
+  { id: "plan", label: "Planen" },
+  { id: "work", label: "Arbeiten" },
+  { id: "verify", label: "Prüfen" },
+  { id: "done", label: "Fertig" },
 ];
 
 export function renderProgressBar(
@@ -723,12 +724,12 @@ export function renderVerificationBlock(
   const isFailed = verification.verdict === "NOT_READY";
 
   const verdictText = isReady
-    ? `${theme.fg("success", "✓ READY")}`
+    ? `${theme.fg("success", "✓ BEREIT")}`
     : isFailed
-      ? `${theme.fg("error", "⚠ NOT READY")}`
-      : `${theme.fg("muted", "○ UNVERIFIED")}`;
+      ? `${theme.fg("error", "⚠ NICHT BEREIT")}`
+      : `${theme.fg("muted", "○ UNGEPRÜFT")}`;
 
-  lines.push(crop(`${theme.bold("VERIFY")} · ${verdictText}`, width));
+  lines.push(crop(`${theme.bold("PRÜFUNGEN")} · ${verdictText}`, width));
 
   for (const criterion of verification.criteria) {
     const glyph =
@@ -742,7 +743,7 @@ export function renderVerificationBlock(
 
   const visibleBlockers = (verification.blockers ?? []).slice(0, 3);
   for (const blocker of visibleBlockers) {
-    lines.push(crop(` ${theme.fg("error", "Blocker:")} ${blocker}`, width));
+    lines.push(crop(` ${theme.fg("error", "Blockiert:")} ${blocker}`, width));
   }
   const hiddenBlockerCount =
     (verification.blockers?.length ?? 0) - visibleBlockers.length;
@@ -782,7 +783,7 @@ export function renderChangingFiles(
   if (!work.changingFiles || work.changingFiles.length === 0) return [];
   return [
     crop(
-      theme.fg("muted", `Changing: ${work.changingFiles.join(", ")}`),
+      theme.fg("muted", `Geändert: ${work.changingFiles.join(", ")}`),
       width,
     ),
   ];
@@ -798,10 +799,136 @@ export function renderTaskWorkspace(
   lines.push(renderProgressBar(task.phase, theme, width));
 
   if (task.currentWork) {
-    lines.push(crop(theme.bold("CURRENT WORK"), width));
+    lines.push(crop(theme.bold("AKTUELLE ARBEIT"), width));
     lines.push(crop(task.currentWork.summary ?? task.currentWork.title, width));
     lines.push(...renderChangingFiles(task.currentWork, theme, width));
   }
 
   return lines;
+}
+
+export interface DashboardInput {
+  activityLines: readonly string[];
+  maxRows: number;
+  compact?: boolean;
+}
+
+/**
+ * A persistent session overview composed only from the task projection and
+ * current runtime activity. The caller owns row budgeting; this renderer keeps
+ * panels intact instead of truncating a frame halfway through.
+ */
+export function renderDashboard(
+  task: TaskViewModel,
+  theme: Theme,
+  width: number,
+  input: DashboardInput,
+): string[] {
+  const available = Math.max(1, width);
+  const compact = input.compact ?? false;
+  const verification = task.verification;
+  const hasFailure = verification?.verdict === "NOT_READY";
+
+  if (compact) {
+    const lines = [
+      crop(
+        `${theme.bold(task.phaseLabel.toUpperCase())} · ${task.title}`,
+        available,
+      ),
+    ];
+    if (hasFailure) {
+      lines.push(
+        crop(theme.fg("error", "⚠ Prüfung fehlgeschlagen"), available),
+      );
+    } else if (input.activityLines[0]) {
+      lines.push(crop(input.activityLines[0], available));
+    }
+    return lines.slice(0, Math.max(1, input.maxRows));
+  }
+
+  const showProgress =
+    !hasFailure && (input.activityLines.length === 0 || input.maxRows > 8);
+  const taskPanel = renderPanel(theme, available, {
+    title: "AUFGABE",
+    badge: task.phaseLabel.toUpperCase(),
+    tone: "accent",
+    lines: [
+      theme.bold(task.title),
+      ...(task.goal && !hasFailure ? [theme.fg("muted", task.goal)] : []),
+      ...(showProgress ? [renderProgressBar(task.phase, theme, available - 4)] : []),
+    ],
+  });
+  const activityPanel = renderPanel(theme, available, {
+    title: "AKTIVITÄT",
+    badge: input.activityLines.length > 0 ? "LÄUFT" : "BEREIT",
+    tone: input.activityLines.length > 0 ? "accent" : "muted",
+    lines:
+      input.activityLines.length > 0
+        ? input.activityLines
+        : [
+            theme.fg(
+              "muted",
+              task.phase === "done"
+                ? "Letzte Aufgabe abgeschlossen."
+                : "Bereit für die nächste Aufgabe.",
+            ),
+          ],
+  });
+  const changes = task.changesSummary;
+  const changesPanel = changes
+    ? renderPanel(theme, available, {
+        title: "ÄNDERUNGEN",
+        badge: `${changes.filesCount} ${changes.filesCount === 1 ? "DATEI" : "DATEIEN"}`,
+        tone: "accent",
+        lines: [
+          `${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`,
+          theme.fg("muted", changes.files.slice(0, 3).join(" · ")),
+        ],
+      })
+    : [];
+  const verificationPanel = verification
+    ? renderPanel(theme, available, {
+        title: "PRÜFUNGEN",
+        badge:
+          verification.verdict === "READY"
+            ? "BEREIT"
+            : verification.verdict === "NOT_READY"
+              ? "NICHT BEREIT"
+              : "OFFEN",
+        tone:
+          verification.verdict === "READY"
+            ? "success"
+            : verification.verdict === "NOT_READY"
+              ? "error"
+              : "muted",
+        lines: renderVerificationBlock(verification, theme, available - 4).slice(
+          1,
+          hasFailure ? 3 : 2,
+        ),
+      })
+    : [];
+  // At a standard terminal's shortest supported heights, preserve the failure
+  // verdict before any routine activity. A frame with title and badge costs two
+  // rows and, paired with the compact task panel, fits the five-row budget.
+  const failedVerificationFallback =
+    hasFailure &&
+    taskPanel.length + verificationPanel.length > input.maxRows
+      ? renderPanel(theme, available, {
+          title: "PRÜFUNGEN",
+          badge: "NICHT BEREIT",
+          tone: "error",
+          lines: [],
+        })
+      : verificationPanel;
+
+  const candidates = hasFailure
+    ? [taskPanel, failedVerificationFallback, activityPanel, changesPanel]
+    : [taskPanel, activityPanel, changesPanel, verificationPanel];
+  const lines: string[] = [];
+  for (const panel of candidates) {
+    if (panel.length === 0) continue;
+    if (lines.length > 0 && lines.length + panel.length > input.maxRows) continue;
+    lines.push(...panel);
+  }
+  return lines.length > 0 ? lines : taskPanel;
 }

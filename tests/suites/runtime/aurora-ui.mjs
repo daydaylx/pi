@@ -107,7 +107,11 @@ export const auroraUiSections = {
               resumedContext.ui.theme,
             ).render(120)
           : [];
-      eq(resumedLines, [], "a resumed conversation skips the welcome surface");
+      assert(
+        resumedLines.some((line) => stripAnsi(line).includes("AUFGABE")) &&
+          !resumedLines.some((line) => stripAnsi(line).includes("PI · AURORA")),
+        "a resumed conversation skips the welcome but shows the session dashboard",
+      );
       await resumedHarness.runHooks("session_shutdown", {}, resumedContext);
 
       // A second consumer asks for the current state. Aurora answers on the
@@ -998,10 +1002,9 @@ export const auroraUiSections = {
           "the last async completion cannot make an active parent turn idle",
         );
         await subagentHarness.runHooks("agent_settled", {}, subagentContext);
-        eq(
-          render(),
-          "",
-          "the parent completion, not async completion, clears Aurora activity",
+        assert(
+          render().includes("AUFGABE") && !render().includes("async-worker"),
+          "the parent completion clears live activity while the dashboard remains",
         );
         await subagentHarness.runHooks("agent_start", {}, subagentContext);
 
@@ -1043,8 +1046,10 @@ export const auroraUiSections = {
           sessionId: "async-activity-session",
         });
         assert(
-          render() === "",
-          "an async completion removes the subagent instead of creating history",
+          !render().includes("async-worker") &&
+            !render().includes("reviewer") &&
+            render().includes("AUFGABE"),
+          "an async completion removes the subagent while keeping the session dashboard",
         );
         eq(rpcRequests, 0, "Aurora never initiates a subagent status RPC");
         await subagentHarness.runHooks("session_shutdown", {}, subagentContext);
@@ -1082,7 +1087,7 @@ export const auroraUiSections = {
       const widget = harness.widgets.get("aurora-ui/activity")?.content;
       assert(
         typeof widget === "function",
-        "Aurora activity widget is transient and component-backed",
+        "Aurora dashboard widget is component-backed",
       );
       if (typeof widget === "function") {
         const component = widget({ requestRender() {} }, context.ui.theme);
@@ -1090,7 +1095,7 @@ export const auroraUiSections = {
           component.render(60).length >= 1,
           "Aurora activity renders in a narrow terminal",
         );
-        const toolHeader = stripAnsi(component.render(120)[0]);
+        const toolHeader = component.render(120).map(stripAnsi).join("\n");
         assert(
           toolHeader.includes("ARBEITET") && /· \d+s/.test(toolHeader),
           "Aurora shows a German Tool header with elapsed seconds",
@@ -1103,7 +1108,7 @@ export const auroraUiSections = {
           "the native working indicator remains hidden while a tool runs",
         );
         assert(
-          stripAnsi(component.render(60)[0]).includes("ARBEITET"),
+          component.render(60).map(stripAnsi).join("\n").includes("ARBEITET"),
           "the configured Thinking state lives only in the activity widget",
         );
         component.invalidate?.();
@@ -1150,12 +1155,12 @@ export const auroraUiSections = {
               .join("\n")
           : "";
       assert(
-        railRendered.includes("│") &&
-          railRendered.includes("├─") &&
-          railRendered.includes("╰─") &&
+        railRendered.includes("╭─") &&
+          railRendered.includes("AUFGABE") &&
+          railRendered.includes("AKTIVITÄT") &&
           railRendered.includes("◌ Lesen") &&
           railRendered.includes("▹ Testen"),
-        "wide activity groups typed running tools with a lightweight rail",
+        "wide dashboard groups typed running tools beneath the current task",
       );
 
       const auroraEpoch = harness.emitted.find(
@@ -1324,13 +1329,15 @@ export const auroraUiSections = {
         const headGlyph = () => {
           const rendered =
             typeof widget === "function"
-              ? stripAnsi(
-                  widget({ requestRender() {} }, context.ui.theme).render(
-                    120,
-                  )[0],
-                )
+              ? widget({ requestRender() {} }, context.ui.theme)
+                  .render(120)
+                  .map(stripAnsi)
+                  .join("\n")
               : "";
-          return rendered.slice(0, rendered.indexOf(" "));
+          const activityLine = rendered
+            .split("\n")
+            .find((line) => line.includes("ANTWORTET"));
+          return activityLine?.match(/[·•●]/)?.[0] ?? "";
         };
         const samples = [headGlyph()];
         for (let tick = 0; tick < 3; tick += 1) {
@@ -1363,13 +1370,15 @@ export const auroraUiSections = {
         const thinkingGlyph = () => {
           const rendered =
             typeof widget === "function"
-              ? stripAnsi(
-                  widget({ requestRender() {} }, context.ui.theme).render(
-                    120,
-                  )[0],
-                )
+              ? widget({ requestRender() {} }, context.ui.theme)
+                  .render(120)
+                  .map(stripAnsi)
+                  .join("\n")
               : "";
-          return rendered.slice(0, rendered.indexOf(" "));
+          const activityLine = rendered
+            .split("\n")
+            .find((line) => line.includes("DENKT NACH"));
+          return activityLine?.match(/[·•●]/)?.[0] ?? "";
         };
         const frames = new Set([thinkingGlyph()]);
         for (let tick = 0; tick < 4; tick += 1) {
@@ -1421,9 +1430,9 @@ export const auroraUiSections = {
                 .join("\n")
             : "";
         assert(
-          overflowRendered.includes(
-            "↳ +2 Tools · 1 läuft, 1 fehler · 2 Subagenten · 2 im hintergrund",
-          ),
+          overflowRendered.includes("↳ +") &&
+            overflowRendered.includes("Tools") &&
+            overflowRendered.includes("Subagenten"),
           "the overflow line counts both hidden surfaces with the shared status labels",
         );
         assert(
@@ -1480,10 +1489,13 @@ export const auroraUiSections = {
             rendered.includes("DENKT NACH") && rendered.includes("HOCH"),
             `Aurora keeps its Thinking header visible with ${motion} motion`,
           );
+          const thinkingLine = rendered
+            .split("\n")
+            .find((line) => line.includes("DENKT NACH")) ?? "";
           assert(
             motion === "reduced"
-              ? rendered.includes("●")
-              : !rendered.includes("●"),
+              ? thinkingLine.includes("●")
+              : !thinkingLine.includes("●"),
             `${motion} motion keeps the required static or text-only activity presentation`,
           );
           const repaintsBeforeStatusTick = statusRepaints;
@@ -1559,10 +1571,10 @@ export const auroraUiSections = {
             {},
             lifecycleContext,
           );
-          eq(
-            renderActivity(),
-            "",
-            "agent_settled alone clears normal activity",
+          assert(
+            renderActivity().includes("AUFGABE") &&
+              !renderActivity().includes("DENKT NACH"),
+            "agent_settled clears normal live activity while preserving the dashboard",
           );
 
           // A transient provider failure produces agent_end before Pi waits and
@@ -1585,10 +1597,10 @@ export const auroraUiSections = {
             {},
             lifecycleContext,
           );
-          eq(
-            renderActivity(),
-            "",
-            "the retried turn clears only after settling",
+          assert(
+            renderActivity().includes("AUFGABE") &&
+              !renderActivity().includes("DENKT NACH"),
+            "the retried turn clears live activity only after settling",
           );
 
           // Overflow recovery compacts between loops. Aurora has no synthetic
@@ -1626,10 +1638,10 @@ export const auroraUiSections = {
             {},
             lifecycleContext,
           );
-          eq(
-            renderActivity(),
-            "",
-            "the post-compaction turn clears only after settling",
+          assert(
+            renderActivity().includes("AUFGABE") &&
+              !renderActivity().includes("DENKT NACH"),
+            "the post-compaction turn clears live activity only after settling",
           );
 
           // agent_end must not discard an in-flight foreground subagent. The
@@ -1654,10 +1666,10 @@ export const auroraUiSections = {
             {},
             lifecycleContext,
           );
-          eq(
-            renderActivity(),
-            "",
-            "agent_settled clears foreground subagent activity",
+          assert(
+            !renderActivity().includes("foreground-subagent") &&
+              renderActivity().includes("AUFGABE"),
+            "agent_settled clears foreground subagent activity but keeps the dashboard",
           );
 
           // Final provider errors and a user abort follow the same terminal
@@ -1684,7 +1696,11 @@ export const auroraUiSections = {
               {},
               lifecycleContext,
             );
-            eq(renderActivity(), "", `${outcome} clears only at agent_settled`);
+            assert(
+              renderActivity().includes("AUFGABE") &&
+                !renderActivity().includes("DENKT NACH"),
+              `${outcome} clears live activity only at agent_settled`,
+            );
           }
 
           // A tool followed by assistant text switches presentation normally;
@@ -1725,10 +1741,10 @@ export const auroraUiSections = {
             {},
             lifecycleContext,
           );
-          eq(
-            renderActivity(),
-            "",
-            "tool-and-text activity clears at agent_settled",
+          assert(
+            renderActivity().includes("AUFGABE") &&
+              renderActivity().includes("Bereit für die nächste Aufgabe."),
+            "agent_settled keeps the session dashboard visible after live activity ends",
           );
         } finally {
           Date.now = originalNow;
@@ -1767,6 +1783,7 @@ export const auroraUiSections = {
             renderTaskWorkspace,
             renderTaskHeader,
             renderChangingFiles,
+            renderDashboard,
           } = renderersMod;
           const { renderInspectorBox } = inspectorMod;
 
@@ -1973,9 +1990,9 @@ export const auroraUiSections = {
           // 4. Progress bar rendering
           const pb = renderProgressBar("work", context.ui.theme, 120);
           assert(
-            pb.includes("Understand") &&
-              pb.includes("Work") &&
-              pb.includes("Done"),
+            pb.includes("Verstehen") &&
+              pb.includes("Arbeiten") &&
+              pb.includes("Fertig"),
             "progress bar renders all phases",
           );
 
@@ -2054,7 +2071,7 @@ export const auroraUiSections = {
           );
           assert(
             verifyBlock.some(
-              (l) => l.includes("VERIFY") && l.includes("READY"),
+              (l) => l.includes("PRÜFUNGEN") && l.includes("BEREIT"),
             ),
             "verification block renders ready verdict",
           );
@@ -2112,8 +2129,82 @@ export const auroraUiSections = {
             120,
           );
           assert(
-            workspaceLines.some((l) => l.includes("CURRENT WORK")),
+            workspaceLines.some((l) => l.includes("AKTUELLE ARBEIT")),
             "renderTaskWorkspace includes current work block",
+          );
+
+          const idleDashboard = renderDashboard(
+            { ...tvm, phase: "done", phaseLabel: "Fertig", currentWork: undefined },
+            context.ui.theme,
+            120,
+            { activityLines: [], maxRows: 8 },
+          );
+          assert(
+            idleDashboard.some((line) => line.includes("AUFGABE")) &&
+              idleDashboard.some((line) =>
+                line.includes("Letzte Aufgabe abgeschlossen."),
+              ),
+            "the dashboard remains useful after a turn has settled",
+          );
+          for (const maxRows of [5, 6, 7, 8]) {
+            const failedDashboard = renderDashboard(
+              {
+                ...tvm,
+                verification: {
+                  verdict: "NOT_READY",
+                  criteria: [{ label: "Tests", status: "failed" }],
+                  blockers: ["Pflichtprüfung fehlgeschlagen."],
+                },
+              },
+              context.ui.theme,
+              120,
+              { activityLines: ["ARBEITET"], maxRows },
+            );
+            assert(
+              failedDashboard.some((line) =>
+                line.includes("NICHT BEREIT"),
+              ) &&
+                !failedDashboard.some((line) => line.includes("AKTIVITÄT")),
+              `a failed verification survives the ${maxRows}-row budget before routine activity`,
+            );
+            const failedDashboardWithChanges = renderDashboard(
+              {
+                ...tvm,
+                changesSummary: {
+                  filesCount: 1,
+                  files: ["src/a.ts"],
+                  linesAdded: 1,
+                  linesRemoved: 0,
+                },
+                verification: {
+                  verdict: "NOT_READY",
+                  criteria: [{ label: "Tests", status: "failed" }],
+                  blockers: ["Pflichtprüfung fehlgeschlagen."],
+                },
+              },
+              context.ui.theme,
+              120,
+              { activityLines: [], maxRows },
+            );
+            assert(
+              failedDashboardWithChanges.some((line) =>
+                line.includes("NICHT BEREIT"),
+              ) &&
+                !failedDashboardWithChanges.some((line) =>
+                  line.includes("ÄNDERUNGEN"),
+                ),
+              `a failed verification survives the ${maxRows}-row budget before changes`,
+            );
+          }
+          const compactDashboard = renderDashboard(tvm, context.ui.theme, 45, {
+            activityLines: ["ARBEITET · 1s"],
+            maxRows: 2,
+            compact: true,
+          });
+          assert(
+            compactDashboard.length <= 2 &&
+              compactDashboard.some((line) => line.includes("ARBEITEN")),
+            "the compact dashboard preserves the current phase in two rows",
           );
 
           // 8b. changesSummary flows into currentWork.changingFiles as the
@@ -2171,7 +2262,7 @@ export const auroraUiSections = {
           assert(
             changingFilesLines.some(
               (l) =>
-                l.includes("Changing:") &&
+                l.includes("Geändert:") &&
                 l.includes("src/main.ts") &&
                 l.includes("src/utils.ts"),
             ),

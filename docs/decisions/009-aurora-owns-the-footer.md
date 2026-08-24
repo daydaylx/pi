@@ -26,16 +26,16 @@ Aurora ist der einzige Besitzer der gesamten TUI-Chrome, Fußzeile eingeschlosse
 npm-Pins für die noch benötigten Typen in `npm/package.json` bleiben unverändert
 — sie tragen den Typecheck, nicht die Laufzeit.
 
-Die Fußzeile ist die einzige permanente Statusfläche und **eine einzige Zeile**.
-Sie trägt in dieser Reihenfolge: Arbeitsablauf, Modell, Denktiefe, Kontext,
-Verifikationsstand — und verdrängend davor alles Riskante (YOLO, gescheiterte
-Verifikation, gestörter LSP).
+Die Fußzeile bleibt das permanente globale Statusband und **eine einzige
+Zeile**. Sie trägt Arbeitsablauf, Modell und kritische Hinweise; bei wenig Platz
+verdrängen YOLO, gescheiterte Verifikation und gestörter LSP die Routinewerte.
 
-Aurora zeigt keine zweite Statusfläche am Editor. Es installiert einen schmalen
-`CustomEditor`-Ableger, der ausschließlich die beiden horizontalen Eingaberails
-beschriftet und alle Bearbeitungs-, History-, Completion- und Shortcutpfade an
-Pi delegiert. Der Arbeitsablauf steht weiterhin ausschließlich links in der
-Fußzeile.
+Das Dashboard oberhalb des Editors ist die zweite, dauerhafte Oberfläche für
+den konkreten Arbeitsstand: Aufgabe, Phase, laufende Arbeit, Änderungen und
+Prüfungen. Es zeigt ausschließlich bereits vorhandene Runtime-Daten und wird
+auf kleinen oder niedrigen Terminals zu einer kompakten Zusammenfassung.
+Aurora installiert keinen eigenen Editor; Bearbeiten, History, Completion und
+Shortcuts bleiben vollständig bei Pi.
 
 ## Begründung
 
@@ -43,12 +43,12 @@ Konfiguration, die nichts steuert, ist teurer als keine Konfiguration: sie sieht
 aus wie ein Stellhebel, kostet bei jeder Suche eine Prüfung und widerspricht der
 Dokumentation, ohne dass ein Test das bemerkt.
 
-Für die Aufteilung auf zwei Flächen galt dasselbe in kleinerem Maßstab. Ein Wert
-war nur deshalb im Rahmen statt in der Fußzeile, weil er historisch dort stand.
-Eine Fläche weniger heißt: eine Zeile mehr für Chat und Eingabe, keine Frage
-mehr, wo ein Status steht, und kein Layout-Sprung über dem Eingabefeld. Die
-später ergänzten Eingaberails tragen keinen Systemstatus und reservieren keine
-zusätzliche Zeile; sie schaffen deshalb keine konkurrierende Fläche.
+Die dauerhafte Aufteilung folgt nun der Nutzeraufgabe: Das globale Statusband
+bleibt kurz, während der Arbeitsstand als kompakte Übersicht direkt am Editor
+sichtbar ist. Das verhindert, dass technische Footer-Segmente mit Aufgaben-,
+Änderungs- und Prüfdetails um dieselbe Zeile konkurrieren. Die responsive
+Zeilenbudgetierung erhält auf kleinen Terminals die Editorfläche und lässt
+kritische Hinweise nie verschwinden.
 
 Was die Fußzeile nicht mehr zeigt — Git-Branch, Sitzungsname und
 Tokenzähler —, ist auf Abruf verfügbar (`/session`). Eine permanente Zeile ist
@@ -77,8 +77,8 @@ später auftaucht.
   startet keinen Prozess, prüft weder Git noch LSP, fragt keinen Provider und
   liest keine Datei. Ein Test hält fest, dass es beim Rendern nicht durch den
   Session-Branch läuft.
-- Subagenten stehen nicht mehr in der Fußzeile, sondern im transienten
-  Activity-Widget beim auslösenden Tool. Die Statusabfrage dorthin läuft
-  ereignisgesteuert mit 300-ms-Coalescing statt bei jedem Frame.
+- Subagenten stehen nicht mehr in der Fußzeile, sondern im Dashboard beim
+  auslösenden Tool. Die Statusabfrage dorthin läuft ereignisgesteuert statt bei
+  jedem Frame.
 - Ein Test prüft, dass beide gelöschten Konfigurationsdateien nicht wiederkehren
   — dieselbe Form, die 007 für die fünf gelöschten Chrome-Dateien gewählt hat.

@@ -4,8 +4,19 @@ import type { DiffHunk, DiffLine, InlineSegment } from "./types.ts";
 type EditOp = "keep" | "insert" | "delete";
 
 const MAX_LINES = 10_000;
-const MAX_BYTES = 50_000;
-const MAX_MYERS_LENGTH = 4_000;
+// Myers ist O((N+M)*D) mit D = Edit-Distanz, nicht mit der Dateigröße selbst
+// teuer — bei kleinen, lokalisierten Änderungen ist D klein, auch in langen
+// Dateien. Die alten Werte (50_000 Bytes / 4_000 Zeilen) lagen unter der
+// Größe gewöhnlicher Quelldateien dieses Repos (z. B. tool-renderers.ts,
+// index.ts, tests/suites/runtime/aurora-ui.mjs) und ließen den Fallback
+// dadurch bei praktisch jeder Bearbeitung dieser Dateien greifen: Statt
+// eines echten Diffs zeigte die Ansicht "ganze Datei gelöscht + neu
+// eingefügt". Die neuen Grenzwerte decken die realen Dateigrößen dieses
+// Repos mit deutlichem Puffer ab und bleiben trotzdem klein genug, um ein
+// pathologisches Worst-Case (komplett verschiedene Dateien) nicht spürbar
+// zu verlangsamen.
+const MAX_BYTES = 500_000;
+const MAX_MYERS_LENGTH = 20_000;
 const MAX_INLINE_TOKENS = 512;
 const MAX_INLINE_MATRIX_CELLS = 65_536;
 

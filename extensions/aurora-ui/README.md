@@ -1,6 +1,6 @@
 # Aurora UI
 
-Aurora UI owns Pi's footer, its transient activity widget and the working
+Aurora UI owns Pi's footer, its persistent session dashboard and the working
 indicator while the extension is active. It uses only public extension UI and
 lifecycle hooks. Core tools are not replaced or wrapped, and the editor stays
 Pi's own component: Aurora installs no editor of its own, so editing, history,
@@ -19,7 +19,7 @@ elapsed time and the `WARTET AUF MODELL` transition alone.
 - `reduced`: static activity indicator.
 - `off`: no animated indicator; activity text remains available.
 
-## The two surfaces
+## The permanent surfaces
 
 **Footer** (`footer.ts`) — the one permanent status surface, and one line.
 It shows the workflow, model, thinking level, session folder, context share and
@@ -35,15 +35,15 @@ it starts no process, probes neither git nor the LSP, asks no provider and reads
 no file. It is called on every frame, so anything else would be paid for
 continuously.
 
-**Activity widget** (`tool-renderers.ts`) — transient, above the editor. The
-status labels, the tone mapping, the tool and subagent counts and the overflow
-summary all live in `tool-renderers.ts`; `index.ts` only decides how many rows
-fit and asks for the overflow line. On a
-fresh empty session it briefly serves as the Aurora welcome; once a turn starts,
-it carries the thinking line and only currently running work. Finished tools
-leave the widget immediately rather than turning into a success block. The
-welcome is never shown again within that session and is skipped for resumed
-conversations.
+**Session dashboard** (`tool-renderers.ts`) — permanent, above the editor. The
+status labels, tone mapping and panel rendering live in `tool-renderers.ts`;
+`index.ts` only derives the existing runtime view model and applies the terminal
+row budget. A fresh empty session starts with the Aurora welcome, then changes
+without a visual break into panels for Aufgabe, Aktivität, Änderungen and
+Prüfungen. Finished tools still leave the live activity list immediately; their
+real change and verification results remain visible through the relevant
+session panels. The welcome is never shown again within that session and is
+skipped for resumed conversations.
 
 Der Header zeigt während eines laufenden Turns `DENKT NACH` (mit Thinking-Level),
 `ARBEITET`, `ANTWORTET` oder nach vier Sekunden ohne konkretes Aurora-Ereignis
@@ -76,8 +76,8 @@ come from the subagent package's `subagent:async-started` and
 `subagent:async-complete` lifecycle events; a `subagent:control-event` can mark
 a known async agent as needing attention. Aurora does not send the package's
 status RPC and therefore cannot initiate a status tool call. The active
-configuration keeps the Fleet Status Dock disabled, so Aurora owns the compact,
-transient `SUBAGENTS · N` view without a permanent dashboard.
+configuration keeps the Fleet Status Dock disabled, so Aurora owns the compact
+subagent view inside its session dashboard.
 
 ## UI state event contract
 
@@ -93,8 +93,8 @@ groups feed the task-centric view (`task-projection.ts`) and the inspector:
 
 - `changes` — published by `extensions/diff-viewer/index.ts` after every
   recorded edit/write, aggregated straight from its `ChangeTracker` (real
-  per-file diff stats, never estimated). Drives the cumulative "Changing:"
-  line under Current Work and the Inspector's Changes section.
+  per-file diff stats, never estimated). Drives the Änderungen panel and the
+  Inspector's Changes section.
 - `verification` — published by `extensions/setup-core/index.ts` alongside
   its existing `ctx.ui.setStatus("verification", …)` calls. Carries the
   structured per-profile outcome (`declaredRequiredIds`, `requiredOutcomes`,

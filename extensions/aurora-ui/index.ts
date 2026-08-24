@@ -26,19 +26,15 @@ import {
   describeToolActivity,
   hiddenActivitySummary,
   renderActiveTools,
-  renderChangingFiles,
-  renderProgressBar,
+  renderDashboard,
   renderSubagentBranches,
-  renderTaskHeader,
-  renderVerificationBlock,
   type ActiveToolView,
   type SubagentInfo,
 } from "./tool-renderers.ts";
 import { renderFooterLines } from "./footer.ts";
-import { crop } from "./layout.ts";
 import { renderStartscreen } from "./startscreen.ts";
 import { thinkingLabel, thinkingTone } from "./thinking.ts";
-import { ReceiptAggregator, renderReceiptLines } from "./receipts.ts";
+import { ReceiptAggregator } from "./receipts.ts";
 import { projectTaskViewModel } from "./task-projection.ts";
 import type { TaskViewModel } from "./task-view-model.ts";
 import { registerInspectorCommand } from "./inspector-command.ts";
@@ -76,6 +72,7 @@ export type {
 } from "./task-view-model.ts";
 export {
   renderChangingFiles,
+  renderDashboard,
   renderProgressBar,
   renderSubagentBranches,
   renderTaskHeader,
@@ -428,9 +425,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let turnSettledWhileAsync = false;
 
   /**
-   * The transient surface above the editor has two presentation-only variants:
-   * a fresh-session welcome and current live work. Both consume cached session
-   * values only; rendering neither changes a workflow nor asks another system.
+   * The surface above the editor is a fresh-session welcome followed by a
+   * persistent dashboard. It consumes cached runtime values only: rendering
+   * never changes workflow state or asks another system for information.
    */
   function renderActivityWidget(
     theme: Theme,
@@ -438,8 +435,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     rows: number,
   ): string[] {
     if (!state) return [];
-    if (state.activity.kind === "idle") {
-      if (!showStartscreen || !sessionCwd) return [];
+    if (state.activity.kind === "idle" && showStartscreen && sessionCwd) {
       return renderStartscreen(theme, {
         width,
         rows,
@@ -454,38 +450,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const layout = layoutForSize(width, rows);
     const compact = layout === "compact";
     const now = Date.now();
-    const presentation = activityPresentation(
-      state,
-      activeTools.size,
-      asyncSubagents.size,
-      now,
-      activityStartedAt,
-      lastRelevantActivityAt,
-    );
-    const elapsed = Math.max(
-      0,
-      Math.floor((now - presentation.startedAt) / 1000),
-    );
-    const thinking =
-      presentation.kind === "thinking"
-        ? ` · ${thinkingLabel(state.model.thinking)}`
-        : "";
-    const glyph = activityGlyph(
-      theme,
-      ticker?.motion ?? "off",
-      ticker?.frame ?? 0,
-      presentation.kind,
-    );
-    const headingText = `${glyph ? `${glyph} ` : ""}${presentation.label}${thinking} · ${elapsed}s`;
-    const heading = theme.fg(
-      presentation.kind === "thinking"
-        ? thinkingTone(state.model.thinking)
-        : presentation.kind === "waiting"
-          ? "muted"
-          : "accent",
-      theme.bold(headingText),
-    );
-    const contentWidth = Math.max(1, width - (compact ? 0 : 3));
     const toolViews = [...activeTools.values()];
     const agentViews = fleetDockOwnsSubagents
       ? []
@@ -494,8 +458,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             Number(b.status === "needs_attention") -
             Number(a.status === "needs_attention"),
         );
-    const detailBudget = Math.max(0, Math.min(8, Math.max(1, rows - 6)) - 1);
-
     const task = projectTaskViewModel({
       state,
       activeTools,
@@ -509,77 +471,85 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       contextPercent: activeContext?.getContextUsage()?.percent ?? null,
     });
     lastTask = task;
-    const taskHeader =
-      !compact && rows > 10 ? renderTaskHeader(task, theme, contentWidth) : [];
-    const progressBar =
-      !compact && rows > 10 && (toolViews.length > 0 || agentViews.length > 0)
-        ? [renderProgressBar(task.phase, theme, contentWidth)]
-        : [];
-    const receiptLines = renderReceiptLines(
-      task.receipts,
-      theme,
-      contentWidth,
-      2,
-    );
 
-    const allDetails = [
-      ...taskHeader,
-      ...progressBar,
-      ...renderActiveTools(toolViews, theme, contentWidth, now, {
-        compact,
-        wide: layout === "wide",
-        limit: Number.POSITIVE_INFINITY,
-      }),
-      ...renderSubagentBranches(
-        task.subagents,
+    const activityLines: string[] = [];
+    if (state.activity.kind !== "idle") {
+      const presentation = activityPresentation(
+        state,
+        activeTools.size,
+        asyncSubagents.size,
+        now,
+        activityStartedAt,
+        lastRelevantActivityAt,
+      );
+      const elapsed = Math.max(
+        0,
+        Math.floor((now - presentation.startedAt) / 1000),
+      );
+      const thinking =
+        presentation.kind === "thinking"
+          ? ` · ${thinkingLabel(state.model.thinking)}`
+          : "";
+      const glyph = activityGlyph(
         theme,
-        contentWidth,
-        agentViews.length || 3,
-      ),
-      ...(task.currentWork
-        ? renderChangingFiles(task.currentWork, theme, contentWidth)
-        : []),
-      ...(toolViews.length === 0 && agentViews.length === 0
-        ? receiptLines
-        : []),
-      ...(task.verification
-        ? renderVerificationBlock(task.verification, theme, contentWidth)
-        : []),
-    ];
-    const overflow = allDetails.length > detailBudget;
-    const visibleDetails = overflow
-      ? allDetails.slice(0, Math.max(0, detailBudget - 1))
-      : allDetails;
-    const visibleToolCount = Math.min(toolViews.length, visibleDetails.length);
-    const visibleAgentCount = Math.max(
-      0,
-      visibleDetails.length - visibleToolCount,
-    );
-    const details = overflow
-      ? [
-          ...visibleDetails,
-          theme.fg(
-            "muted",
-            hiddenActivitySummary(
-              toolViews.slice(visibleToolCount),
-              agentViews.slice(visibleAgentCount),
-              now,
-            ),
-          ),
-        ]
-      : visibleDetails;
-    if (compact) return [crop(heading, width), ...details];
-    if (details.length === 0) return [crop(heading, width)];
+        ticker?.motion ?? "off",
+        ticker?.frame ?? 0,
+        presentation.kind,
+      );
+      const heading = theme.fg(
+        presentation.kind === "thinking"
+          ? thinkingTone(state.model.thinking)
+          : presentation.kind === "waiting"
+            ? "muted"
+            : "accent",
+        theme.bold(
+          `${glyph ? `${glyph} ` : ""}${presentation.label}${thinking} · ${elapsed}s`,
+        ),
+      );
+      const detailLimit = layout === "wide" ? 3 : compact ? 0 : 1;
+      const visibleToolCount = Math.min(toolViews.length, detailLimit);
+      const visibleAgentCount = Math.min(
+        agentViews.length,
+        Math.max(0, detailLimit - visibleToolCount),
+      );
+      activityLines.push(
+        heading,
+        ...renderActiveTools(
+          toolViews.slice(0, visibleToolCount),
+          theme,
+          width - 4,
+          now,
+          { compact, wide: layout === "wide", limit: visibleToolCount },
+        ),
+        ...renderSubagentBranches(
+          task.subagents.slice(0, visibleAgentCount),
+          theme,
+          width - 4,
+          visibleAgentCount,
+        ),
+      );
+      const hiddenSummary = hiddenActivitySummary(
+        toolViews.slice(visibleToolCount),
+        agentViews.slice(visibleAgentCount),
+        now,
+      );
+      if (visibleToolCount < toolViews.length || visibleAgentCount < agentViews.length) {
+        activityLines.push(theme.fg("muted", hiddenSummary));
+      }
+    }
 
-    const rail = (last: boolean) =>
-      theme.fg("borderMuted", `${last ? "╰─" : "├─"} `);
-    return [
-      crop(heading, width),
-      theme.fg("borderMuted", "│"),
-      ...details.map(
-        (line, index) => `${rail(index === details.length - 1)}${line}`,
-      ),
-    ];
+    const maxRows = compact
+      ? 2
+      : layout === "wide"
+        ? 14
+        : layout === "comfortable"
+          ? 11
+          : Math.max(5, Math.min(8, rows - 10));
+    return renderDashboard(task, theme, width, {
+      activityLines,
+      maxRows,
+      compact,
+    });
   }
 
   function mergeSubagents(): void {
