@@ -43,4 +43,10 @@ export const SHORTCUTS = {
     description: `${catalogLabel("yolo")} · /yolo`,
     command: "/yolo",
   },
+  rolesModelMenu: {
+    keys: "super+s",
+    label: "Super+S",
+    description: `${catalogLabel("subagents-set-model")} · /subagents-set-model`,
+    command: "/subagents-set-model",
+  },
 } as const satisfies Record<string, ShortcutBinding>;

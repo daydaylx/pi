@@ -60,7 +60,7 @@ export function renderStartscreen(
   const shortcuts = center(
     theme.fg(
       "dim",
-      "Shift+Tab Workflow  ·  Super+M Modell  ·  Super+D Denken  ·  Super+Q Befehle",
+      "Shift+Tab Workflow  ·  Super+M Modell  ·  Super+D Denken  ·  Super+Q Befehle  ·  Super+S Rollen",
     ),
     width,
   );

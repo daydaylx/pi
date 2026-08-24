@@ -106,6 +106,14 @@ const definitions = [
     "Aktive/laufende Subagenten anzeigen",
     "subagents",
   ],
+  [
+    "subagents-set-model",
+    "Rollen-Modelle",
+    "Modell pro Subagenten-Rolle auswählen und dauerhaft speichern",
+    "subagents",
+    undefined,
+    "Super+S",
+  ],
 
   [
     "model",
