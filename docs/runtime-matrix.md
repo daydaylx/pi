@@ -23,6 +23,23 @@ ausgeführte — Abweichungen im Laufzeitverhalten sind dann möglich. `/setup-d
 eine solche Abweichung sichtbar; siehe `docs/RUNTIME_PATCHES.md` für das Vorgehen bei
 einem Runtime-Upgrade.
 
+**Pin-Bump bei `git:`-Packages (z. B. `pi-subagents`) reicht allein nicht.** Pi löst
+`git:`-Einträge aus `settings.json`s `packages` gegen ein eigenes Cache-Verzeichnis auf
+(`<agentDir>/git/<host>/<path>`, hier `/home/d/.pi/agent/git/github.com/daydaylx/pi-subagents`)
+— getrennt vom Entwickler-Checkout, in dem der neue Commit entsteht und gepusht wird.
+Existiert der Cache-Ordner bereits, installiert Pi beim Sessionstart nichts nach: ein
+geänderter Pin in `settings.json` wird stillschweigend ignoriert, solange niemand explizit
+synchronisiert. Nach jedem Pin-Bump zusätzlich ausführen:
+
+```sh
+pi update git:github.com/daydaylx/pi-subagents
+```
+
+(oder `pi update --extensions` für alle Git-Packages), danach in der laufenden Session
+`/reload`. Ohne diesen Schritt bleibt der alte Cache-Stand aktiv und neue Slash-Commands
+aus dem gepushten Commit fehlen — sie gehen dann als normaler Chat-Prompt statt als
+Command-Aufruf raus.
+
 LSP-Binärdateien sind Host-Voraussetzungen, keine verwalteten Abhängigkeiten. Fehlende
 Binärdateien müssen einen strukturierten Soft-Fehler erzeugen und dürfen niemals eine
 automatische Installation auslösen.
