@@ -31,12 +31,35 @@ export interface TaskProjectionContext {
   now?: number;
 }
 
-export function determineTaskPhase(
-  mode: WorkflowMode,
-  activityKind: AuroraUiState["activity"]["kind"],
-  verificationStatus: string | null | undefined,
-  hasActiveVerificationTool: boolean,
-): { phase: TaskPhase; label: string } {
+/**
+ * Phase describes what is happening right now; verification describes how much
+ * the workspace can be trusted (see 02-target-behavior.md phase rules).
+ *
+ * Precedence:
+ * 1. Planning modes keep their explicit planning semantics.
+ * 2. Only a real running verification tool claims "Prüfen".
+ * 3. Active edit/bash/other work stays "Arbeiten" even after a failed check.
+ * 4. Active thinking means "understand" unless planning mode applies.
+ * 5. `done` requires idle plus a current successful verification — a stale one
+ *    (workspace mutated since the check) never yields `done`.
+ * 6. A failed check alone never claims that verification is currently running;
+ *    only idle + failed may show it as an invitation to re-check.
+ */
+export interface TaskPhaseInput {
+  mode: WorkflowMode;
+  activityKind: AuroraUiState["activity"]["kind"];
+  verificationStatus: string | null | undefined;
+  hasActiveVerificationTool: boolean;
+  verificationIsCurrent?: boolean;
+}
+
+export function determineTaskPhase({
+  mode,
+  activityKind,
+  verificationStatus,
+  hasActiveVerificationTool,
+  verificationIsCurrent = true,
+}: TaskPhaseInput): { phase: TaskPhase; label: string } {
   if (isPlanningMode(mode)) {
     if (activityKind === "thinking") {
       return { phase: "understand", label: "Verstehen" };
@@ -44,12 +67,8 @@ export function determineTaskPhase(
     return { phase: "plan", label: workflowModeLabel(mode) };
   }
 
-  if (hasActiveVerificationTool || verificationStatus === "checks_failed") {
+  if (hasActiveVerificationTool) {
     return { phase: "verify", label: "Prüfen" };
-  }
-
-  if (verificationStatus === "verified" && activityKind === "idle") {
-    return { phase: "done", label: "Abgeschlossen" };
   }
 
   if (activityKind === "thinking") {
@@ -61,9 +80,13 @@ export function determineTaskPhase(
   }
 
   if (activityKind === "idle") {
-    return verificationStatus === "verified"
-      ? { phase: "done", label: "Fertig" }
-      : { phase: "work", label: "Bereit" };
+    if (verificationStatus === "verified" && verificationIsCurrent) {
+      return { phase: "done", label: "Abgeschlossen" };
+    }
+    if (verificationStatus === "checks_failed") {
+      return { phase: "verify", label: "Prüfen" };
+    }
+    return { phase: "work", label: "Bereit" };
   }
 
   return { phase: "work", label: "Arbeiten" };
@@ -163,9 +186,9 @@ function criteriaFromChecks(
  * unverified rather than trusted at face value. */
 function verdictFromSummary(
   summary: AuroraVerificationSummary,
-  verificationIsStale: boolean,
+  isStale: boolean,
 ): VerificationViewModel["verdict"] {
-  if (verificationIsStale) return "UNVERIFIED";
+  if (isStale) return "UNVERIFIED";
   if (summary.status === "verified") {
     return summary.declaredRequiredIds.length > 0 ? "READY" : "UNVERIFIED";
   }
@@ -175,7 +198,7 @@ function verdictFromSummary(
 
 function projectVerificationFromSummary(
   summary: AuroraVerificationSummary,
-  verificationIsStale: boolean,
+  isStale: boolean,
 ): VerificationViewModel {
   const checks = checksFromVerificationSummary(summary);
   const failedOrUnavailable = checks.filter(
@@ -183,7 +206,7 @@ function projectVerificationFromSummary(
   );
 
   return {
-    verdict: verdictFromSummary(summary, verificationIsStale),
+    verdict: verdictFromSummary(summary, isStale),
     criteria: criteriaFromChecks(checks),
     checks,
     evidence: failedOrUnavailable.map(
@@ -204,14 +227,14 @@ function projectVerificationFromSummary(
  * plain status string instead of showing nothing. */
 function projectVerificationFallback(
   status: string | null | undefined,
-  verificationIsStale: boolean,
+  isStale: boolean,
 ): VerificationViewModel | undefined {
-  if (!status && !verificationIsStale) return undefined;
+  if (!status && !isStale) return undefined;
 
   const normalized = status ? status.replace(/^Verify:\s*/, "") : null;
   const isVerified = normalized === "verified";
   const isFailed = normalized === "checks_failed";
-  const verdict = verificationIsStale
+  const verdict = isStale
     ? "UNVERIFIED"
     : isVerified
       ? "READY"
@@ -239,28 +262,37 @@ function projectVerificationFallback(
   };
 }
 
+/** The one staleness definition for both verdict and phase: an earlier check
+ * no longer describes the workspace once an edit ran or is running, or once
+ * the caller recorded a mutation after the last completed check. */
+export function verificationIsStale(
+  activeTools: ReadonlyMap<string, ActiveToolView>,
+  workspaceChangedSinceVerification: boolean,
+): boolean {
+  return (
+    workspaceChangedSinceVerification ||
+    [...activeTools.values()].some(
+      (t) => t.kind === "verification" || t.kind === "edit",
+    )
+  );
+}
+
 export function projectVerificationState(
   status: string | null | undefined,
   activeTools: ReadonlyMap<string, ActiveToolView>,
   verificationSummary?: AuroraVerificationSummary | null,
   workspaceChangedSinceVerification = false,
 ): VerificationViewModel | undefined {
-  // A check in flight cannot be final, and neither can an earlier successful
-  // check while an edit is running or has completed since that check.
-  const verificationIsStale =
-    workspaceChangedSinceVerification ||
-    [...activeTools.values()].some(
-      (t) => t.kind === "verification" || t.kind === "edit",
-    );
+  const isStale = verificationIsStale(
+    activeTools,
+    workspaceChangedSinceVerification,
+  );
 
   if (verificationSummary) {
-    return projectVerificationFromSummary(
-      verificationSummary,
-      verificationIsStale,
-    );
+    return projectVerificationFromSummary(verificationSummary, isStale);
   }
 
-  return projectVerificationFallback(status, verificationIsStale);
+  return projectVerificationFallback(status, isStale);
 }
 
 export function projectCurrentWork(
@@ -326,13 +358,20 @@ export function projectTaskViewModel(
   const hasActiveVerification = [...context.activeTools.values()].some(
     (t) => t.kind === "verification",
   );
-
-  const { phase, label: phaseLabel } = determineTaskPhase(
-    mode,
-    context.state.activity.kind,
-    context.verificationStatus,
-    hasActiveVerification,
+  // One staleness judgement feeds both the verdict and the phase, so they can
+  // never disagree about whether the last check still applies.
+  const stale = verificationIsStale(
+    context.activeTools,
+    context.workspaceChangedSinceVerification ?? false,
   );
+
+  const { phase, label: phaseLabel } = determineTaskPhase({
+    mode,
+    activityKind: context.state.activity.kind,
+    verificationStatus: context.verificationStatus,
+    hasActiveVerificationTool: hasActiveVerification,
+    verificationIsCurrent: !stale,
+  });
 
   const { title, goal } = extractTaskTitle(
     context.userPrompt,

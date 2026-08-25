@@ -28,6 +28,10 @@ export interface FooterInput {
   /** Captured from ExtensionContext at session start; never read from render I/O. */
   cwd?: string;
   homeDirectory?: string;
+  /** True while a dashboard surface (auto/compact/expanded) is active: it owns
+   * routine verification reporting, so the footer stops duplicating a plain
+   * "verified". Failed/stale checks stay critical footer risks regardless. */
+  dashboardVisible?: boolean;
 }
 
 const CONTEXT_WARNING_PERCENT = 70;
@@ -215,13 +219,19 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
   const verification = verificationState(input);
   if (verification !== null) {
     const attention = verificationNeedsAttention(verification);
-    segments.push({
-      slot: Slot.verification,
-      priority: attention ? Priority.failedVerification : Priority.verification,
-      text: `${verification === "verified" ? "✓" : attention ? "⚠" : ""} ${verification}`.trim(),
-      tone: verificationTone(verification),
-      critical: attention,
-    });
+    // Ownership rule: a successful check belongs to the visible dashboard
+    // (or the inspector when auto mode shows nothing right now); the footer
+    // only carries verification that demands attention.
+    const ownedByDashboard = input.dashboardVisible === true && !attention;
+    if (!ownedByDashboard) {
+      segments.push({
+        slot: Slot.verification,
+        priority: attention ? Priority.failedVerification : Priority.verification,
+        text: `${verification === "verified" ? "✓" : attention ? "⚠" : ""} ${verification}`.trim(),
+        tone: verificationTone(verification),
+        critical: attention,
+      });
+    }
   }
 
   const lsp = lspState(input);

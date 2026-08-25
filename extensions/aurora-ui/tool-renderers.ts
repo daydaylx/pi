@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { footerTier } from "../shared/layout.ts";
+import { footerTier, type Layout } from "../shared/layout.ts";
 import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
 import { crop } from "./layout.ts";
 import { renderPanel } from "./panel.ts";
@@ -16,11 +16,13 @@ import type {
 export const RUNNING_GLYPH = "◌";
 
 /**
- * No further progress (e.g. bash producing no new output) for this long is
- * shown as a neutral "keine Ausgabe" state — informational, not an error:
- * plenty of legitimate commands (sleep, slow installs) go quiet for a while.
+ * No further progress (e.g. bash producing no new output) is reported in two
+ * neutral stages — informational, not an alarm: plenty of legitimate commands
+ * (sleep, slow installs) go quiet for a while. Only real failures or explicit
+ * attention events ever get warning/error tone.
  */
-const STALL_THRESHOLD_MS = 15_000;
+const QUIET_STILL_THRESHOLD_MS = 15_000;
+const QUIET_INFO_THRESHOLD_MS = 30_000;
 
 /** Presentation-only categories; tool execution remains entirely in Pi core. */
 export type ActivityToolKind =
@@ -363,17 +365,23 @@ function toolStatus(
   tool: ActiveToolView,
   now: number,
 ): {
-  tone: "accent" | "warning" | "error";
+  tone: "accent" | "warning" | "error" | "muted";
   label: string;
 } {
   if (tool.tone === "error") return { tone: "error", label: "FEHLER" };
   if (tool.tone === "warning") return { tone: "warning", label: "HINWEIS" };
   const sinceUpdate = now - (tool.lastUpdateAt ?? tool.startedAt);
-  if (sinceUpdate >= STALL_THRESHOLD_MS) {
+  // Neutral silence is not an alarm: first a calm still-active marker,
+  // then the silent duration itself — both without warning tone.
+  // Evidence-backed problems carry their own tone via tool.tone above.
+  if (sinceUpdate >= QUIET_INFO_THRESHOLD_MS) {
     return {
-      tone: "warning",
-      label: `KEINE AUSGABE SEIT ${Math.floor(sinceUpdate / 1000)}S`,
+      tone: "muted",
+      label: `${Math.floor(sinceUpdate / 1000)}s ohne neue Ausgabe`,
     };
+  }
+  if (sinceUpdate >= QUIET_STILL_THRESHOLD_MS) {
+    return { tone: "muted", label: "STILL AKTIV" };
   }
   return { tone: "accent", label: "LÄUFT" };
 }
@@ -445,7 +453,14 @@ export function renderActiveTools(
   theme: Theme,
   width: number,
   now: number,
-  options: { compact?: boolean; wide?: boolean; limit?: number } = {},
+  options: {
+    compact?: boolean;
+    wide?: boolean;
+    limit?: number;
+    /** Omit the per-row LÄUFT/elapsed suffix when the activity heading above
+     * already says exactly that — one fact, one row. */
+    suppressRunningStatus?: boolean;
+  } = {},
 ): string[] {
   const available = Math.max(1, width);
   const compact = options.compact ?? footerTier(width) === "compact";
@@ -467,7 +482,12 @@ export function renderActiveTools(
     const label = compact
       ? theme.bold(presentation.label)
       : padToWidth(theme.bold(presentation.label), 12);
-    const suffix = ` · ${theme.fg(status.tone, status.label)} · ${theme.fg("dim", `${elapsed}s`)}`;
+    const statusIsPlainRunning =
+      status.tone === "accent" && status.label === "LÄUFT";
+    const suffix =
+      options.suppressRunningStatus && statusIsPlainRunning
+        ? ""
+        : ` · ${theme.fg(status.tone, status.label)} · ${theme.fg("dim", `${elapsed}s`)}`;
     if (!tool.target) {
       return truncateToWidth(`${marker} ${label}${suffix}`, available, "…");
     }
@@ -813,6 +833,40 @@ export interface DashboardInput {
   compact?: boolean;
 }
 
+/** The runtime signals auto mode needs beyond the task view model itself. */
+export interface AutoDashboardInput {
+  activityLines: readonly string[];
+  layout: Layout;
+  /** At least one tool or subagent is running right now. */
+  hasActiveWork: boolean;
+  /** A completed check no longer describes the workspace (mutation since). */
+  verificationStale: boolean;
+  /** Any verification status is known for this session (a check ran). */
+  verificationKnown: boolean;
+}
+
+/** Row budget for auto mode per width tier. Sized to carry the fullest
+ * active presentation (task line + heading + 3 live rows + overflow summary)
+ * without truncation; compact stays at two rows with risks kept visible. */
+const AUTO_MAX_ROWS: Record<Layout, number> = {
+  compact: 2,
+  standard: 6,
+  comfortable: 7,
+  wide: 7,
+};
+
+/** The one "first 3 files, then a +N indicator" rule, shared by every
+ * changed-files preview so the auto and expanded dashboards never disagree
+ * on how much detail they show. */
+function summarizeChangedFiles(
+  changes: NonNullable<TaskViewModel["changesSummary"]>,
+  separator: string,
+): string {
+  const files = changes.files.slice(0, 3).join(separator);
+  const more = changes.filesCount > 3 ? `, … +${changes.filesCount - 3}` : "";
+  return `${files}${more}`;
+}
+
 /**
  * A persistent session overview composed only from the task projection and
  * current runtime activity. The caller owns row budgeting; this renderer keeps
@@ -855,7 +909,9 @@ export function renderDashboard(
     lines: [
       theme.bold(task.title),
       ...(task.goal && !hasFailure ? [theme.fg("muted", task.goal)] : []),
-      ...(showProgress ? [renderProgressBar(task.phase, theme, available - 4)] : []),
+      ...(showProgress
+        ? [renderProgressBar(task.phase, theme, available - 4)]
+        : []),
     ],
   });
   const activityPanel = renderPanel(theme, available, {
@@ -882,7 +938,7 @@ export function renderDashboard(
         tone: "accent",
         lines: [
           `${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`,
-          theme.fg("muted", changes.files.slice(0, 3).join(" · ")),
+          theme.fg("muted", summarizeChangedFiles(changes, " · ")),
         ],
       })
     : [];
@@ -901,18 +957,18 @@ export function renderDashboard(
             : verification.verdict === "NOT_READY"
               ? "error"
               : "muted",
-        lines: renderVerificationBlock(verification, theme, available - 4).slice(
-          1,
-          hasFailure ? 3 : 2,
-        ),
+        lines: renderVerificationBlock(
+          verification,
+          theme,
+          available - 4,
+        ).slice(1, hasFailure ? 3 : 2),
       })
     : [];
   // At a standard terminal's shortest supported heights, preserve the failure
   // verdict before any routine activity. A frame with title and badge costs two
   // rows and, paired with the compact task panel, fits the five-row budget.
   const failedVerificationFallback =
-    hasFailure &&
-    taskPanel.length + verificationPanel.length > input.maxRows
+    hasFailure && taskPanel.length + verificationPanel.length > input.maxRows
       ? renderPanel(theme, available, {
           title: "PRÜFUNGEN",
           badge: "NICHT BEREIT",
@@ -927,8 +983,89 @@ export function renderDashboard(
   const lines: string[] = [];
   for (const panel of candidates) {
     if (panel.length === 0) continue;
-    if (lines.length > 0 && lines.length + panel.length > input.maxRows) continue;
+    if (lines.length > 0 && lines.length + panel.length > input.maxRows)
+      continue;
     lines.push(...panel);
   }
   return lines.length > 0 ? lines : taskPanel;
+}
+
+function autoChangesSummary(
+  changes: TaskViewModel["changesSummary"],
+): string | undefined {
+  if (!changes || changes.filesCount === 0) return undefined;
+  const files = summarizeChangedFiles(changes, ", ");
+  return `Geändert (${changes.filesCount}): +${changes.linesAdded} −${changes.linesRemoved}${files ? ` · ${files}` : ""}`;
+}
+
+/**
+ * The state-dependent auto presentation (02-target-behavior.md):
+ * normal state consumes little space, active work shows live information,
+ * and a failed/stale verification outranks routine status.
+ *
+ * - Fresh sessions are handled by the caller (start screen).
+ * - Idle without changes or verification problem emits no dashboard at all:
+ *   readiness is already evident from editor and footer.
+ * - Completed changes become one summary line instead of a framed panel.
+ * - Small terminals get at most two rows, with risks kept visible.
+ */
+export function renderAutoDashboard(
+  task: TaskViewModel,
+  theme: Theme,
+  width: number,
+  input: AutoDashboardInput,
+): string[] {
+  const available = Math.max(1, width);
+  const budget = AUTO_MAX_ROWS[input.layout];
+  const clip = (value: string) => truncateToWidth(value, available, "…");
+  const lines: string[] = [];
+
+  const verification = task.verification;
+  const failed = verification?.verdict === "NOT_READY";
+  // Stale means a check completed earlier but the workspace changed since;
+  // a plain UNVERIFIED without any check so far is just "nothing verified yet".
+  // While a verification tool is actively running (phase "verify"), the task
+  // heading already says so — repeating it here as "changes since the last
+  // check" would misstate the cause and duplicate the same information.
+  const stale =
+    !failed &&
+    task.phase !== "verify" &&
+    input.verificationStale &&
+    (verification?.verdict !== undefined || input.verificationKnown);
+
+  // 6. Failure/stale before routine information.
+  if (failed) {
+    lines.push(clip(theme.fg("error", theme.bold("⚠ PRÜFUNG FEHLGESCHLAGEN"))));
+    const blocker = verification?.blockers?.[0];
+    if (blocker) lines.push(clip(theme.fg("muted", `  ${blocker}`)));
+  } else if (stale) {
+    lines.push(
+      clip(
+        theme.fg(
+          "warning",
+          "○ UNGEPRÜFT · Änderungen seit der letzten Prüfung",
+        ),
+      ),
+    );
+  }
+
+  const taskLine = clip(
+    `${theme.fg("accent", theme.bold(task.phaseLabel.toUpperCase()))} · ${task.title}`,
+  );
+
+  if (!input.hasActiveWork) {
+    // Completed changes stay visible as one compact summary row.
+    const changes = autoChangesSummary(task.changesSummary);
+    if (changes) lines.push(clip(theme.fg("muted", changes)));
+    // Idle without anything noteworthy stays out of the way entirely.
+    if (lines.length === 0) return [];
+    if (lines.length < budget && !failed && !stale) lines.push(taskLine);
+    return lines.slice(0, budget);
+  }
+
+  // Active work: task title, then the live rows the widget assembled
+  // (heading plus prioritized tools/subagents).
+  lines.push(taskLine);
+  lines.push(...input.activityLines.map((line) => clip(line)));
+  return lines.slice(0, Math.max(2, budget));
 }

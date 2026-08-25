@@ -681,7 +681,7 @@ export default function setupCore(
         "Setup Doctor",
         `  config: ${loaded.sources.length ? loaded.sources.join(" → ") : "defaults"}`,
         `  project trust: ${trusted ? "trusted" : "untrusted"}`,
-        `  theme/motion: ${loaded.config.ui.theme}/${loaded.config.ui.motion}`,
+        `  theme/motion/dashboard: ${loaded.config.ui.theme}/${loaded.config.ui.motion}/${loaded.config.ui.dashboard}`,
         `  permissions: unknown=${loaded.config.permissions.unknownTools}, bash=${loaded.config.permissions.bash}`,
         `  LSP: ${loaded.config.lsp.enabled ? loaded.config.lsp.mode : "off"}`,
         `  subagent tool surface: schema=${String(subagentSettings?.toolSchemaMode ?? "full")}, description=${String(subagentSettings?.toolDescriptionMode ?? "full")}`,

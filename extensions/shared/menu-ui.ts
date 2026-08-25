@@ -223,6 +223,7 @@ async function selectWithCustomUi<T>(
   title: string,
   entries: readonly MenuEntry<T>[],
   headerShortcut?: string,
+  appearance: MenuAppearance = "default",
 ): Promise<MenuEntry<T> | undefined> {
   if (typeof ctx.ui.custom !== "function")
     throw new Error("Benutzerdefiniertes TUI-Overlay wird nicht unterstützt.");
@@ -243,22 +244,72 @@ async function selectWithCustomUi<T>(
           label: title,
         },
       ];
-      let visibleEntries = 1;
+      // Fuzzy filter for large menus. While it is non-empty every typed
+      // character edits it; single-letter quick actions apply only when the
+      // filter is empty (02-target-behavior.md menu behavior).
+      let filterText = "";
+      let visibleEntriesCount = 1;
       terminal = () => ({
         columns: tui.terminal.columns,
         rows: tui.terminal.rows,
       });
       const level = () => stack[stack.length - 1]!;
       const refresh = () => tui.requestRender();
+      /** Ordered-subsequence match on label and section; empty filter matches all. */
+      const matchesFilter = (entry: MenuEntry<T>, query: string): boolean => {
+        if (!query) return true;
+        const haystack = `${entry.label} ${entry.section ?? ""}`.toLowerCase();
+        let cursor = 0;
+        for (const character of haystack) {
+          if (character === query[cursor]) cursor += 1;
+          if (cursor === query.length) return true;
+        }
+        return cursor === query.length;
+      };
+      const visibleEntries = (): MenuEntry<T>[] => {
+        const query = filterText.trim().toLowerCase();
+        if (!query) return [...level().entries];
+        return level().entries.filter((entry) => matchesFilter(entry, query));
+      };
       const pad = (value: string, width: number) =>
         truncateToWidth(value, Math.max(1, width), ELLIPSIS, true);
       const fg = (color: string, value: string) =>
         theme.fg(color as never, value);
       const border = (value: string) => fg("border", value);
+      const isCommandCenter = appearance === "command-center";
+      // Resolved once: the two appearances only ever differ in which glyphs
+      // they use, never in the frame/divider structure itself.
+      const glyphs = isCommandCenter
+        ? {
+            side: "║",
+            dividerLeft: "╟",
+            dividerRight: "╢",
+            topLeft: "╔",
+            topRight: "╗",
+            topFill: "═",
+            bottomLeft: "╚",
+            bottomRight: "╝",
+            bottomFill: "═",
+          }
+        : {
+            side: "│",
+            dividerLeft: "├",
+            dividerRight: "┤",
+            topLeft: "╭",
+            topRight: "╮",
+            topFill: "─",
+            bottomLeft: "╰",
+            bottomRight: "╯",
+            bottomFill: "─",
+          };
       const frame = (value: string, inner: number) =>
-        `${border("│")}${pad(value, inner)}${border("│")}`;
+        `${border(glyphs.side)}${pad(value, inner)}${border(glyphs.side)}`;
       const divider = (inner: number) =>
-        `${border("├")}${border("─".repeat(Math.max(1, inner)))}${border("┤")}`;
+        `${border(glyphs.dividerLeft)}${border("─".repeat(Math.max(1, inner)))}${border(glyphs.dividerRight)}`;
+      const topFrame = (inner: number) =>
+        `${border(glyphs.topLeft)}${border(glyphs.topFill.repeat(inner))}${border(glyphs.topRight)}`;
+      const bottomFrame = (inner: number) =>
+        `${border(glyphs.bottomLeft)}${border(glyphs.bottomFill.repeat(inner))}${border(glyphs.bottomRight)}`;
       const tone = (entry: MenuEntry<T>) =>
         entry.disabled
           ? "dim"
@@ -302,14 +353,17 @@ async function selectWithCustomUi<T>(
             ? themed.inverse(row)
             : fg("accent", theme.bold(row));
       };
-      const blocks = (inner: number, layout: Layout) =>
-        level().entries.map((entry, index) => {
+      const blocks = (
+        inner: number,
+        layout: Layout,
+        entriesInView: readonly MenuEntry<T>[],
+      ) =>
+        entriesInView.map((entry, index) => {
           const lines: string[] = [];
           if (
             layout !== "compact" &&
             entry.section &&
-            (index === 0 ||
-              entry.section !== level().entries[index - 1]?.section)
+            (index === 0 || entry.section !== entriesInView[index - 1]?.section)
           )
             lines.push(
               fg(
@@ -330,29 +384,29 @@ async function selectWithCustomUi<T>(
           const prefix = `${indicator} ${entry.icon ? `${entry.icon} ` : ""}`;
           const availableLabel = Math.max(
             1,
-            inner - visibleWidth(prefix) - (status ? visibleWidth(status) + 2 : 0),
+            inner -
+              visibleWidth(prefix) -
+              (status ? visibleWidth(status) + 2 : 0),
           );
           const clippedLabel = truncateToWidth(label, availableLabel, ELLIPSIS);
           const gap = status
             ? " ".repeat(
-                Math.max(1, inner - visibleWidth(prefix) - visibleWidth(clippedLabel) - visibleWidth(status)),
+                Math.max(
+                  1,
+                  inner -
+                    visibleWidth(prefix) -
+                    visibleWidth(clippedLabel) -
+                    visibleWidth(status),
+                ),
               )
             : "";
           const main = `${prefix}${fg(tone(entry), clippedLabel)}${gap}${status ? fg(tagTone(entry), status) : ""}`;
           const rendered = isSelected
             ? selectedRow(main, inner)
             : pad(main, inner);
+          // One list row per entry: descriptions live only in the detail
+          // region below the list, never repeated under every entry.
           lines.push(rendered);
-          const description = entry.disabled
-            ? (entry.disabledReason ?? entry.description)
-            : entry.description;
-          if (description && layout !== "compact") {
-            for (const part of wrapTextWithAnsi(
-              fg(entry.disabled ? "dim" : "muted", description),
-              Math.max(1, inner - 4),
-            ).slice(0, layout === "comfortable" ? 2 : 1))
-              lines.push(pad(`    ${part}`, inner));
-          }
           return { lines, selectionLine };
         });
       return {
@@ -360,17 +414,20 @@ async function selectWithCustomUi<T>(
           const size = terminal();
           const layout = menuLayout(width, size.rows);
           const current = level();
-          current.selected =
-            current.selected >= 0 &&
-            current.selected < current.entries.length &&
-            !current.entries[current.selected]?.disabled
-              ? current.selected
-              : initialMenuIndex(current.entries);
+          const entriesInView = visibleEntries();
+          if (entriesInView.length === 0) {
+            current.selected = -1;
+          } else {
+            current.selected =
+              current.selected >= 0 &&
+              current.selected < entriesInView.length &&
+              !entriesInView[current.selected]?.disabled
+                ? current.selected
+                : initialMenuIndex(entriesInView);
+          }
           const inner = Math.max(1, width - 2);
           const selected =
-            current.selected >= 0
-              ? current.entries[current.selected]
-              : undefined;
+            current.selected >= 0 ? entriesInView[current.selected] : undefined;
           // At the top level the breadcrumb is the title again. One line of
           // chrome that repeats the line above it is noise, so it only appears
           // once there is actually a path to show.
@@ -378,8 +435,10 @@ async function selectWithCustomUi<T>(
             stack.length > 1
               ? stack.map((item) => item.label).join(" › ")
               : undefined;
+          // The selected entry's description lives here and only here — one
+          // dedicated region instead of a copy under every list row.
           const detail =
-            layout === "comfortable" && selected
+            layout !== "compact" && selected
               ? wrapTextWithAnsi(
                   fg(
                     selected.dangerous
@@ -396,7 +455,7 @@ async function selectWithCustomUi<T>(
                   ),
                   Math.max(1, inner - 2),
                 )
-                  .slice(0, 4)
+                  .slice(0, layout === "comfortable" ? 4 : 2)
                   .map((item) => pad(` ${item}`, inner))
               : [];
           const footerText = [
@@ -411,12 +470,24 @@ async function selectWithCustomUi<T>(
           const footer = wrapTextWithAnsi(footerText, Math.max(1, inner))
             .slice(0, layout === "compact" ? 1 : 2)
             .map((item) => pad(` ${item}`, inner));
-          const paddingLines = layout === "compact" ? 0 : 2;
+          const paddingLines = layout === "compact" ? 0 : 1;
           const showCrumbs = layout !== "compact" && crumbs !== undefined;
+          const commandCenterBand =
+            isCommandCenter && layout !== "compact"
+              ? stack.length === 1
+                ? " BEREICHE · Buchstabe öffnet direkt"
+                : ` BEFEHLSZENTRALE › ${current.label}`
+              : undefined;
+          const filterLine =
+            filterText && layout !== "compact"
+              ? fg("accent", theme.bold(pad(` ⌕ ${filterText}▏`, inner)))
+              : undefined;
           const fixed =
             2 +
             1 +
             (showCrumbs ? 1 : 0) +
+            (commandCenterBand ? 1 : 0) +
+            (filterLine ? 1 : 0) +
             2 +
             paddingLines +
             footer.length +
@@ -425,7 +496,7 @@ async function selectWithCustomUi<T>(
             1,
             size.rows - overlayMargin(size.columns, size.rows) * 2 - fixed,
           );
-          const renderedBlocks = blocks(inner, layout);
+          const renderedBlocks = blocks(inner, layout, entriesInView);
           const view = calculateMenuViewport(
             renderedBlocks.map((block) => block.lines.length),
             current.selected,
@@ -433,7 +504,7 @@ async function selectWithCustomUi<T>(
             budget,
           );
           current.viewportStart = view.start;
-          visibleEntries = Math.max(1, view.end - view.start);
+          visibleEntriesCount = Math.max(1, view.end - view.start);
           const content: string[] = [];
           if (view.showAbove)
             content.push(fg("dim", ` ↑ ${view.start} weitere Einträge`));
@@ -463,35 +534,51 @@ async function selectWithCustomUi<T>(
             content.push(
               fg(
                 "dim",
-                ` ↓ ${current.entries.length - view.end} weitere Einträge`,
+                ` ↓ ${entriesInView.length - view.end} weitere Einträge`,
               ),
             );
           if (content.length === 0)
             content.push(fg("muted", " Keine Einträge verfügbar."));
           if (width < 4) return [truncateToWidth("Menü", width, ELLIPSIS)];
           const emptyLine = frame("", inner);
-          const titleText = title.toLocaleUpperCase("de-DE");
-          const showHeaderShortcut = layout !== "compact" && Boolean(headerShortcut);
+          const titleText = `${isCommandCenter ? "⌘ " : ""}${title.toLocaleUpperCase("de-DE")}`;
+          const showHeaderShortcut =
+            layout !== "compact" && Boolean(headerShortcut);
           const headerTitle = truncateToWidth(
             titleText,
             Math.max(
               1,
-              inner - (showHeaderShortcut ? visibleWidth(headerShortcut!) + 2 : 0),
+              inner -
+                (showHeaderShortcut ? visibleWidth(headerShortcut!) + 2 : 0),
             ),
             ELLIPSIS,
           );
           const headerGap = showHeaderShortcut
             ? " ".repeat(
-                Math.max(1, inner - visibleWidth(headerTitle) - visibleWidth(headerShortcut!)),
+                Math.max(
+                  1,
+                  inner -
+                    visibleWidth(headerTitle) -
+                    visibleWidth(headerShortcut!),
+                ),
               )
             : "";
           const header = `${fg("accent", theme.bold(headerTitle))}${headerGap}${showHeaderShortcut ? fg("dim", headerShortcut!) : ""}`;
           return [
-            `${border("╭")}${border("─".repeat(inner))}${border("╮")}`,
+            topFrame(inner),
             frame(header, inner),
+            ...(commandCenterBand
+              ? [
+                  frame(
+                    fg("muted", theme.bold(pad(commandCenterBand, inner))),
+                    inner,
+                  ),
+                ]
+              : []),
             ...(showCrumbs
               ? [frame(fg("muted", pad(` ${crumbs}`, inner)), inner)]
               : []),
+            ...(filterLine ? [frame(filterLine, inner)] : []),
             divider(inner),
             ...(layout === "compact" ? [] : [emptyLine]),
             ...content.map((item) => frame(item, inner)),
@@ -505,93 +592,155 @@ async function selectWithCustomUi<T>(
               : []),
             divider(inner),
             ...footer.map((item) => frame(item, inner)),
-            `${border("╰")}${border("─".repeat(inner))}${border("╯")}`,
+            bottomFrame(inner),
           ];
         },
         invalidate() {},
         handleInput(data: string): void {
           const current = level();
-          // Literal fallbacks keep navigation usable when a terminal's
-          // extended keyboard protocol is negotiated inconsistently.
-          if (matchesKey(data, Key.up) || data === "k")
-            current.selected = moveMenuIndex(
-              current.selected,
-              -1,
-              current.entries,
-            );
-          else if (matchesKey(data, Key.down) || data === "j")
-            current.selected = moveMenuIndex(
-              current.selected,
-              1,
-              current.entries,
-            );
-          else if (matchesKey(data, Key.pageUp)) {
-            current.selected = Math.max(0, current.selected - visibleEntries);
-            current.viewportStart = current.selected;
-          } else if (matchesKey(data, Key.pageDown))
-            current.selected = Math.min(
-              current.entries.length - 1,
-              current.selected + visibleEntries,
-            );
-          else if (matchesKey(data, Key.home)) {
-            current.selected = initialMenuIndex(current.entries);
-            current.viewportStart = 0;
-          } else if (matchesKey(data, Key.end)) {
-            current.selected =
-              [...current.entries]
-                .map((entry, index) => ({ entry, index }))
-                .reverse()
-                .find((item) => !item.entry.disabled)?.index ?? -1;
-            current.viewportStart = Math.max(0, current.selected);
-          } else if (
-            matchesKey(data, Key.left) ||
-            matchesKey(data, Key.backspace)
-          ) {
-            if (stack.length > 1) stack.pop();
-            else return;
-          } else if (
-            matchesKey(data, Key.enter) ||
-            data === "\r" ||
-            data === "\n"
-          ) {
-            const entry =
-              current.selected >= 0
-                ? current.entries[current.selected]
-                : undefined;
-            if (!entry || entry.disabled) return;
-            if (entry.children)
-              stack.push({
-                entries: entry.children,
-                selected: initialMenuIndex(entry.children),
-                viewportStart: 0,
-                label: entry.label,
-              });
-            else done(entry);
-          } else if (
-            matchesKey(data, Key.escape) ||
-            matchesKey(data, Key.ctrl("c"))
-          ) {
-            done(undefined);
-            return;
-          } else if (data.length === 1) {
+          const entriesInView = visibleEntries();
+          // While a filter is active, every printable character edits it —
+          // including letters that double as navigation fallbacks (j/k) or
+          // quick actions. Those apply only with an empty filter.
+          const filterActive = filterText.length > 0;
+          const printable =
+            data.length === 1 &&
+            data >= " " &&
+            data !== "\x7f" &&
+            !matchesKey(data, Key.escape);
+          if (!filterActive && printable && data !== "j" && data !== "k") {
             const matched = current.entries.find(
               (entry) =>
                 !entry.disabled &&
                 entry.shortcut?.toLocaleLowerCase("de-DE") ===
                   data.toLocaleLowerCase("de-DE"),
             );
-            if (!matched) return;
-            if (matched.children) {
-              stack.push({
-                entries: matched.children,
-                selected: initialMenuIndex(matched.children),
-                viewportStart: 0,
-                label: matched.label,
-              });
-            } else {
-              done(matched);
+            if (matched) {
+              if (matched.children) {
+                stack.push({
+                  entries: matched.children,
+                  selected: initialMenuIndex(matched.children),
+                  viewportStart: 0,
+                  label: matched.label,
+                });
+                refresh();
+              } else {
+                done(matched);
+              }
               return;
             }
+          }
+          if (filterActive && printable) {
+            filterText += data;
+            current.selected = 0;
+            current.viewportStart = 0;
+            refresh();
+            return;
+          }
+          // Literal fallbacks keep navigation usable when a terminal's
+          // extended keyboard protocol is negotiated inconsistently. j/k are
+          // deliberately checked before the shortcut path above could start
+          // an accidental filter — but only while the filter is empty.
+          if (matchesKey(data, Key.up) || data === "k")
+            current.selected = moveMenuIndex(
+              current.selected,
+              -1,
+              entriesInView,
+            );
+          else if (matchesKey(data, Key.down) || data === "j")
+            current.selected = moveMenuIndex(
+              current.selected,
+              1,
+              entriesInView,
+            );
+          else if (matchesKey(data, Key.pageUp)) {
+            current.selected = Math.max(
+              0,
+              current.selected - visibleEntriesCount,
+            );
+            current.viewportStart = current.selected;
+          } else if (matchesKey(data, Key.pageDown))
+            current.selected = Math.min(
+              entriesInView.length - 1,
+              current.selected + visibleEntriesCount,
+            );
+          else if (matchesKey(data, Key.home)) {
+            current.selected = initialMenuIndex(entriesInView);
+            current.viewportStart = 0;
+          } else if (matchesKey(data, Key.end)) {
+            current.selected =
+              [...entriesInView]
+                .map((entry, index) => ({ entry, index }))
+                .reverse()
+                .find((item) => !item.entry.disabled)?.index ?? -1;
+            current.viewportStart = Math.max(0, current.selected);
+          } else if (matchesKey(data, Key.left)) {
+            if (stack.length > 1) {
+              stack.pop();
+              filterText = "";
+            } else return;
+          } else if (
+            matchesKey(data, Key.backspace) ||
+            data === "\x7f" ||
+            data === "\b"
+          ) {
+            if (filterText) {
+              filterText = filterText.slice(0, -1);
+              current.selected = 0;
+              current.viewportStart = 0;
+            } else if (stack.length > 1) {
+              stack.pop();
+            } else return;
+          } else if (
+            matchesKey(data, Key.enter) ||
+            data === "\r" ||
+            data === "\n"
+          ) {
+            // A previous render may have parked the selection at -1 while the
+            // filter matched nothing; re-anchor it before acting on Enter.
+            if (
+              entriesInView.length > 0 &&
+              (current.selected < 0 ||
+                current.selected >= entriesInView.length ||
+                entriesInView[current.selected]?.disabled)
+            ) {
+              current.selected = initialMenuIndex(entriesInView);
+            }
+            const entry =
+              current.selected >= 0
+                ? entriesInView[current.selected]
+                : undefined;
+            if (!entry || entry.disabled) return;
+            if (entry.children) {
+              stack.push({
+                entries: entry.children,
+                selected: initialMenuIndex(entry.children),
+                viewportStart: 0,
+                label: entry.label,
+              });
+              filterText = "";
+            } else done(entry);
+          } else if (
+            matchesKey(data, Key.escape) ||
+            matchesKey(data, Key.ctrl("c"))
+          ) {
+            // Escape clears an active filter first and closes the menu only
+            // from an empty filter.
+            if (filterText) {
+              filterText = "";
+              current.selected = 0;
+              current.viewportStart = 0;
+            } else {
+              done(undefined);
+              return;
+            }
+          } else if (data.length === 1) {
+            // Empty-filter printable that matched no shortcut starts a filter.
+            if (/[a-zäöüß0-9]/i.test(data)) {
+              filterText = data;
+              current.selected = 0;
+              current.viewportStart = 0;
+            } else return;
           } else return;
           refresh();
         },
@@ -615,11 +764,15 @@ async function selectWithCustomUi<T>(
   );
 }
 
+export type MenuAppearance = "default" | "command-center";
+
 export interface RunMenuOptions {
   fallbackPrompt?: string;
   nonInteractiveHint?: string;
   /** Existing global shortcut shown in the custom-menu header, never registered here. */
   headerShortcut?: string;
+  /** Visual variant; the default preserves the shared picker appearance. */
+  appearance?: MenuAppearance;
 }
 
 export async function runMenu<T>(
@@ -637,7 +790,14 @@ export async function runMenu<T>(
   }
   const selected = await selectMenuEntry(
     entries,
-    () => selectWithCustomUi(ctx, title, entries, options.headerShortcut),
+    () =>
+      selectWithCustomUi(
+        ctx,
+        title,
+        entries,
+        options.headerShortcut,
+        options.appearance,
+      ),
     (labels) => ctx.ui.select(options.fallbackPrompt ?? title, labels),
   );
   return selected?.value;

@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export type MotionMode = "contextual" | "reduced" | "off";
+export type DashboardMode = "auto" | "compact" | "expanded" | "hidden";
 export type PolicyAction = "block" | "ask" | "allow";
 export type LspMode = "off" | "auto" | "force";
 // The full project verification is deliberately absent here: it is reachable
@@ -17,7 +19,7 @@ export interface VerificationCommand {
 }
 
 export interface SetupConfig {
-  ui: { theme: "aurora-night"; motion: MotionMode };
+  ui: { theme: "aurora-night"; motion: MotionMode; dashboard: DashboardMode };
   permissions: {
     unknownTools: PolicyAction;
     bash: PolicyAction;
@@ -45,7 +47,7 @@ export interface LoadedSetupConfig {
 }
 
 const DEFAULT_CONFIG: SetupConfig = {
-  ui: { theme: "aurora-night", motion: "contextual" },
+  ui: { theme: "aurora-night", motion: "contextual", dashboard: "auto" },
   permissions: {
     unknownTools: "ask",
     bash: "allow",
@@ -180,7 +182,13 @@ function applyUserLayer(
     : undefined;
 
   if (ui)
-    reportUnknownKeys(ui, ["theme", "motion"], source, "ui.", diagnostics);
+    reportUnknownKeys(
+      ui,
+      ["theme", "motion", "dashboard"],
+      source,
+      "ui.",
+      diagnostics,
+    );
   if (permissions)
     reportUnknownKeys(
       permissions,
@@ -228,6 +236,14 @@ function applyUserLayer(
     next.ui.motion,
     source,
     "ui.motion",
+    diagnostics,
+  );
+  next.ui.dashboard = enumValue(
+    ui?.dashboard,
+    ["auto", "compact", "expanded", "hidden"],
+    next.ui.dashboard,
+    source,
+    "ui.dashboard",
     diagnostics,
   );
   next.permissions.unknownTools = enumValue(
@@ -401,4 +417,27 @@ export function loadSetupConfig(
 
 export function defaultSetupConfig(): SetupConfig {
   return structuredClone(DEFAULT_CONFIG);
+}
+
+/**
+ * Persists one UI preference in the global setup.json — the single documented
+ * home for `ui.*` settings. Reads, patches and rewrites only that file;
+ * anything unparseable or unwritable is reported to the caller instead of
+ * being silently dropped.
+ */
+export async function persistUiPreference(patch: {
+  dashboard?: DashboardMode;
+}): Promise<void> {
+  const globalPath = join(getAgentDir(), "setup.json");
+  let raw: Record<string, unknown> = {};
+  if (existsSync(globalPath)) {
+    const parsed: unknown = JSON.parse(await readFile(globalPath, "utf8"));
+    if (!isObject(parsed))
+      throw new Error("Setup-Konfiguration muss ein Objekt sein");
+    raw = parsed;
+  }
+  const ui = isObject(raw.ui) ? structuredClone(raw.ui) : {};
+  if (patch.dashboard !== undefined) ui.dashboard = patch.dashboard;
+  raw.ui = ui;
+  await writeFile(globalPath, `${JSON.stringify(raw, null, 2)}\n`);
 }

@@ -10,7 +10,14 @@ import type { TUI } from "@earendil-works/pi-tui";
 import { layoutForSize } from "../shared/layout.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { readPlan } from "../plan-mode/plan-file.ts";
-import { loadSetupConfig, type MotionMode } from "../setup-core/config.ts";
+import {
+  loadSetupConfig,
+  persistUiPreference,
+  type DashboardMode,
+  type MotionMode,
+} from "../setup-core/config.ts";
+import { catalogDescription } from "../shared/command-catalog.ts";
+import { runMenu } from "../shared/menu-ui.ts";
 import {
   AURORA_UI_CHANNELS,
   isAuroraUiPatchEvent,
@@ -26,6 +33,7 @@ import {
   describeToolActivity,
   hiddenActivitySummary,
   renderActiveTools,
+  renderAutoDashboard,
   renderDashboard,
   renderSubagentBranches,
   type ActiveToolView,
@@ -35,7 +43,11 @@ import { renderFooterLines } from "./footer.ts";
 import { renderStartscreen } from "./startscreen.ts";
 import { thinkingLabel, thinkingTone } from "./thinking.ts";
 import { ReceiptAggregator } from "./receipts.ts";
-import { projectTaskViewModel } from "./task-projection.ts";
+import { auroraDiagnostics } from "./dev-diagnostics.ts";
+import {
+  projectTaskViewModel,
+  verificationIsStale,
+} from "./task-projection.ts";
 import type { TaskViewModel } from "./task-view-model.ts";
 import { registerInspectorCommand } from "./inspector-command.ts";
 export {
@@ -305,6 +317,7 @@ class AnimationTicker {
       this.timer = undefined;
     }
     this.intervalMs = intervalMs;
+    auroraDiagnostics.recordTickInterval(intervalMs ?? null);
     if (!intervalMs || this.disposed) return;
     this.timer = setInterval(() => {
       this.frame = (this.frame + 1) % 10_000;
@@ -316,6 +329,7 @@ class AnimationTicker {
   dispose(): void {
     this.disposed = true;
     this.intervalMs = undefined;
+    auroraDiagnostics.recordTickInterval(null);
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     this.tuiRefs.clear();
@@ -412,6 +426,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let currentPlanText: string | undefined;
   let lastVerificationStatus: string | null = null;
   let workspaceChangedSinceVerification = false;
+  // One owner: ui.dashboard from setup.json, switched via /dashboard
+  // (Super+Q Command Center entry), read per frame by the widget.
+  let dashboardMode: DashboardMode = "auto";
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
   const receiptAggregator = new ReceiptAggregator();
@@ -434,7 +451,18 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     width: number,
     rows: number,
   ): string[] {
+    return auroraDiagnostics.measure(() =>
+      renderActivityWidgetMeasured(theme, width, rows),
+    );
+  }
+
+  function renderActivityWidgetMeasured(
+    theme: Theme,
+    width: number,
+    rows: number,
+  ): string[] {
     if (!state) return [];
+    if (dashboardMode === "hidden") return [];
     if (state.activity.kind === "idle" && showStartscreen && sessionCwd) {
       return renderStartscreen(theme, {
         width,
@@ -506,12 +534,26 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           `${glyph ? `${glyph} ` : ""}${presentation.label}${thinking} · ${elapsed}s`,
         ),
       );
-      const detailLimit = layout === "wide" ? 3 : compact ? 0 : 1;
+      const detailLimit =
+        dashboardMode === "auto"
+          ? layout === "compact"
+            ? 0
+            : 3
+          : layout === "wide"
+            ? 3
+            : compact
+              ? 0
+              : 1;
       const visibleToolCount = Math.min(toolViews.length, detailLimit);
       const visibleAgentCount = Math.min(
         agentViews.length,
         Math.max(0, detailLimit - visibleToolCount),
       );
+      // With exactly one running tool the heading already carries ARBEITET ·
+      // Xs; repeating LÄUFT · Xs one row below is duplication, so the plain
+      // running suffix is dropped (a stalled/error status still shows).
+      const singleRunningTool =
+        toolViews.length === 1 && state.activity.kind === "tool";
       activityLines.push(
         heading,
         ...renderActiveTools(
@@ -519,7 +561,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           theme,
           width - 4,
           now,
-          { compact, wide: layout === "wide", limit: visibleToolCount },
+          {
+            compact,
+            wide: layout === "wide",
+            limit: visibleToolCount,
+            suppressRunningStatus: singleRunningTool,
+          },
         ),
         ...renderSubagentBranches(
           task.subagents.slice(0, visibleAgentCount),
@@ -533,23 +580,53 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         agentViews.slice(visibleAgentCount),
         now,
       );
-      if (visibleToolCount < toolViews.length || visibleAgentCount < agentViews.length) {
+      if (
+        visibleToolCount < toolViews.length ||
+        visibleAgentCount < agentViews.length
+      ) {
         activityLines.push(theme.fg("muted", hiddenSummary));
       }
     }
 
-    const maxRows = compact
-      ? 2
-      : layout === "wide"
-        ? 14
-        : layout === "comfortable"
-          ? 11
-          : Math.max(5, Math.min(8, rows - 10));
-    return renderDashboard(task, theme, width, {
+    if (dashboardMode === "auto") {
+      const hasActiveWork =
+        state.activity.kind !== "idle" ||
+        activeTools.size > 0 ||
+        agentViews.length > 0;
+      const autoLines = renderAutoDashboard(task, theme, width, {
+        activityLines,
+        layout,
+        hasActiveWork,
+        verificationStale: verificationIsStale(
+          activeTools,
+          workspaceChangedSinceVerification,
+        ),
+        verificationKnown: lastVerificationStatus !== null,
+      });
+      auroraDiagnostics.recordDashboardRows(autoLines);
+      return autoLines;
+    }
+
+    const maxRows =
+      dashboardMode === "compact"
+        ? 2
+        : Math.min(
+            layout === "wide"
+              ? 14
+              : layout === "comfortable"
+                ? 11
+                : Math.max(5, Math.min(8, rows - 10)),
+            // Expanded keeps its richer panels but never eats the chat:
+            // at most ~40% of terminal rows, always a few rows minimum.
+            Math.max(4, Math.floor(rows * 0.4)),
+          );
+    const lines = renderDashboard(task, theme, width, {
       activityLines,
       maxRows,
-      compact,
+      compact: dashboardMode === "compact" || layout === "compact",
     });
+    auroraDiagnostics.recordDashboardRows(lines);
+    return lines;
   }
 
   function mergeSubagents(): void {
@@ -804,12 +881,51 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     getTask: () => lastTask,
   });
 
+  // Dashboard mode lives in exactly one place (ui.dashboard in setup.json,
+  // schema-validated) and is reached through the existing command system —
+  // the Super+Q Command Center lists /dashboard; no new shortcut exists.
+  pi.registerCommand("dashboard", {
+    description: catalogDescription("dashboard"),
+    handler: async (args, ctx) => {
+      const modes: DashboardMode[] = ["auto", "compact", "expanded", "hidden"];
+      const requested = args.trim().toLowerCase();
+      let next = modes.find((mode) => mode === requested);
+      if (!next) {
+        next = await runMenu(
+          ctx,
+          "Dashboard-Modus",
+          modes.map((mode) => ({
+            id: `dashboard-${mode}`,
+            label: mode,
+            current: mode === dashboardMode,
+            value: mode,
+          })),
+        );
+        if (!next) return;
+      }
+      try {
+        await persistUiPreference({ dashboard: next });
+      } catch (error) {
+        ctx.ui.notify(
+          `Dashboard-Modus konnte nicht gespeichert werden: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          "error",
+        );
+        return;
+      }
+      dashboardMode = next;
+      ticker?.requestRender();
+    },
+  });
+
   pi.on("session_start", (_event, ctx) => {
     disposeSession(activeContext);
     receiptAggregator.reset();
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
 
     const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
+    dashboardMode = loaded.config.ui.dashboard;
     fleetDockOwnsSubagents = fleetDockOwnsSubagentDisplay();
     sessionCwd = ctx.cwd;
     sessionHome = homedir();
@@ -870,6 +986,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
             cwd: sessionCwd,
             homeDirectory: sessionHome,
+            // "auto" never renders a routine verified/unchanged line of its
+            // own (renderAutoDashboard stays silent for idle-with-no-changes,
+            // and shows a changes summary rather than the verification text
+            // otherwise) — only compact/expanded always carry a verification
+            // panel, so only those may tell the footer to stand down.
+            dashboardVisible:
+              dashboardMode === "compact" || dashboardMode === "expanded",
           });
         },
       };
