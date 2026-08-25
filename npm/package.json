@@ -18,12 +18,14 @@
     "format:check": "prettier --check ..",
     "deadcode": "knip --directory ..",
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
+    "check:imports": "node ../scripts/check-relative-imports.mjs",
+    "check:versioned-tree": "node ../scripts/check-versioned-tree.mjs",
     "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run audit:check"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
     "jiti": "2.7.0",
-    "pi-subagents": "github:daydaylx/pi-subagents#0a3c4dea1b3712dcc86bb4ac74ff434b4101521f",
+    "pi-subagents": "github:daydaylx/pi-subagents#11f3fcbc0e346f747df2bd8342d77cb8c9f8c962",
     "pi-web-access": "0.24.2",
     "pi-zentui": "0.3.0"
   },

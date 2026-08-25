@@ -571,6 +571,62 @@ export const uiSections = {
       );
       assertNoGlobalChrome(harness, "menu shell installs no permanent chrome");
 
+      const commandCenterHarness = createHarness({ columns: 120, rows: 40 });
+      const commandCenterResult = menuUi.runMenu(
+        commandCenterHarness.makeContext(),
+        "Command Center",
+        [
+          {
+            id: "work",
+            label: "Arbeit",
+            description: "Befehle für die aktuelle Aufgabe",
+            children: [
+              { id: "go", label: "Ausführen", value: "go" },
+            ],
+          },
+        ],
+        { headerShortcut: "Super+Q", appearance: "command-center" },
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      const commandCenterComponent = commandCenterHarness.customComponents.at(-1);
+      assert(
+        Boolean(commandCenterComponent),
+        "Command Center opens a custom overlay",
+      );
+      if (commandCenterComponent) {
+        const renderedCommandCenter = commandCenterComponent
+          .render(120)
+          .map(stripAnsi)
+          .join("\n");
+        assert(
+          stripAnsi(commandCenterComponent.render(120)[0]).startsWith("╔") &&
+            renderedCommandCenter.includes("⌘ COMMAND CENTER") &&
+            renderedCommandCenter.includes("BEREICHE"),
+          "Command Center has its own double frame, command mark and area band",
+        );
+        for (const width of [30, 50, 80, 120]) {
+          assert(
+            commandCenterComponent
+              .render(width)
+              .every((line) => stripAnsi(line).length <= width),
+            `Command Center remains bounded at ${width} columns`,
+          );
+        }
+        commandCenterComponent.handleInput("\r");
+        const submenu = commandCenterComponent.render(120).map(stripAnsi).join("\n");
+        assert(
+          submenu.includes("Command Center › Arbeit") &&
+            submenu.includes("BEFEHLSZENTRALE › Arbeit"),
+          "Command Center keeps its identity and breadcrumb in submenus",
+        );
+        commandCenterComponent.handleInput("\r");
+      }
+      eq(
+        await commandCenterResult,
+        "go",
+        "Command Center appearance keeps Enter selection unchanged",
+      );
+
       const polishHarness = createHarness({
         columns: 120,
         rows: 40,
@@ -692,13 +748,13 @@ export const uiSections = {
         );
       }
 
-      for (const [key, label] of [
-        ["\r", "carriage-return Enter"],
-        ["\n", "newline Enter"],
-      ]) {
+      {
         const opened = await openMenu();
-        opened.harness.sendTerminalInput(key);
-        eq(await opened.result, "first", `${label} confirms the selection`);
+        opened.harness.sendTerminalInput("\r");
+        eq(await opened.result, "first", "carriage-return Enter confirms the selection");
+        const opened2 = await openMenu();
+        opened2.harness.sendTerminalInput("\n");
+        eq(await opened2.result, "first", "newline Enter confirms the selection");
       }
 
       for (const [key, label] of [
@@ -726,11 +782,60 @@ export const uiSections = {
           false,
           "an unknown single character leaves the menu open",
         );
+        // Typing now starts the fuzzy filter: it narrows the visible list
+        // instead of doing nothing, so "x" matches no entry at all.
+        const filterComponent = opened.harness.customComponents.at(-1);
+        const filtered = filterComponent
+          ? filterComponent.render(80).map(stripAnsi).join("\n")
+          : "";
+        assert(
+          filtered.includes("⌕ x"),
+          "typed characters become a visible filter input",
+        );
+        assert(
+          !filtered.includes("Erster") && !filtered.includes("Letzter"),
+          "the filter hides non-matching entries",
+        );
+        opened.harness.sendTerminalInput("\u007f");
         opened.harness.sendTerminalInput("\r");
         eq(
           await opened.result,
           "first",
-          "an unknown single character does not move the selection",
+          "backspace clears the filter and Enter confirms the restored selection",
+        );
+      }
+
+      {
+        const opened = await openMenu();
+        // "tz" uniquely fuzzy-matches "Letzter" ("Blockiert" has no "z",
+        // "Erster" no leading t/z subsequence after its letters).
+        opened.harness.sendTerminalInput("t");
+        opened.harness.sendTerminalInput("z");
+        opened.harness.sendTerminalInput("\r");
+        eq(
+          await opened.result,
+          "last",
+          "a fuzzy filter narrows to the matching entry and Enter selects it",
+        );
+      }
+
+      {
+        const opened = await openMenu();
+        opened.harness.sendTerminalInput("x");
+        opened.harness.sendTerminalInput("\u001b");
+        const filterComponent = opened.harness.customComponents.at(-1);
+        const cleared = filterComponent
+          ? filterComponent.render(80).map(stripAnsi).join("\n")
+          : "";
+        assert(
+          cleared.includes("Erster") && !cleared.includes("⌕"),
+          "Escape clears an active filter first and keeps the menu open",
+        );
+        opened.harness.sendTerminalInput("\u001b");
+        eq(
+          await opened.result,
+          undefined,
+          "Escape from an empty filter closes the menu",
         );
       }
 

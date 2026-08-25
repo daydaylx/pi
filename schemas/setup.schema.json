@@ -19,7 +19,11 @@
       "required": ["theme", "motion"],
       "properties": {
         "theme": { "const": "aurora-night" },
-        "motion": { "enum": ["contextual", "reduced", "off"] }
+        "motion": { "enum": ["contextual", "reduced", "off"] },
+        "dashboard": {
+          "enum": ["auto", "compact", "expanded", "hidden"],
+          "description": "Präsentation des Aurora-Dashboards; auto = dauerhaft sichtbar und responsiv (Default)."
+        }
       }
     },
     "permissions": {

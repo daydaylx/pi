@@ -845,12 +845,12 @@ export interface AutoDashboardInput {
   verificationKnown: boolean;
 }
 
-/** Row budget for auto mode per width tier. Sized to carry the fullest
- * active presentation (task line + heading + 3 live rows + overflow summary)
- * without truncation; compact stays at two rows with risks kept visible. */
+/** Row budget for the responsive default dashboard. The regular presentation
+ * stays short enough to leave the editor dominant; compact terminals keep the
+ * one-line summary plus the most important state. */
 const AUTO_MAX_ROWS: Record<Layout, number> = {
   compact: 2,
-  standard: 6,
+  standard: 7,
   comfortable: 7,
   wide: 7,
 };
@@ -990,24 +990,11 @@ export function renderDashboard(
   return lines.length > 0 ? lines : taskPanel;
 }
 
-function autoChangesSummary(
-  changes: TaskViewModel["changesSummary"],
-): string | undefined {
-  if (!changes || changes.filesCount === 0) return undefined;
-  const files = summarizeChangedFiles(changes, ", ");
-  return `Geändert (${changes.filesCount}): +${changes.linesAdded} −${changes.linesRemoved}${files ? ` · ${files}` : ""}`;
-}
-
 /**
- * The state-dependent auto presentation (02-target-behavior.md):
- * normal state consumes little space, active work shows live information,
- * and a failed/stale verification outranks routine status.
- *
- * - Fresh sessions are handled by the caller (start screen).
- * - Idle without changes or verification problem emits no dashboard at all:
- *   readiness is already evident from editor and footer.
- * - Completed changes become one summary line instead of a framed panel.
- * - Small terminals get at most two rows, with risks kept visible.
+ * Aurora's responsive default presentation. Unlike the old state-dependent
+ * auto mode, it remains useful after a turn settles: one small session card
+ * gives task, activity, changes and verification stable places. Only the
+ * compact width tier falls back to two unframed rows.
  */
 export function renderAutoDashboard(
   task: TaskViewModel,
@@ -1018,54 +1005,95 @@ export function renderAutoDashboard(
   const available = Math.max(1, width);
   const budget = AUTO_MAX_ROWS[input.layout];
   const clip = (value: string) => truncateToWidth(value, available, "…");
-  const lines: string[] = [];
-
   const verification = task.verification;
   const failed = verification?.verdict === "NOT_READY";
-  // Stale means a check completed earlier but the workspace changed since;
-  // a plain UNVERIFIED without any check so far is just "nothing verified yet".
-  // While a verification tool is actively running (phase "verify"), the task
-  // heading already says so — repeating it here as "changes since the last
-  // check" would misstate the cause and duplicate the same information.
   const stale =
     !failed &&
     task.phase !== "verify" &&
     input.verificationStale &&
     (verification?.verdict !== undefined || input.verificationKnown);
+  const taskLine = theme.bold(task.title);
 
-  // 6. Failure/stale before routine information.
+  const problemLines: string[] = [];
   if (failed) {
-    lines.push(clip(theme.fg("error", theme.bold("⚠ PRÜFUNG FEHLGESCHLAGEN"))));
+    problemLines.push(theme.fg("error", theme.bold("⚠ Prüfung fehlgeschlagen")));
     const blocker = verification?.blockers?.[0];
-    if (blocker) lines.push(clip(theme.fg("muted", `  ${blocker}`)));
+    if (blocker) problemLines.push(theme.fg("muted", `  ${blocker}`));
   } else if (stale) {
-    lines.push(
-      clip(
-        theme.fg(
-          "warning",
-          "○ UNGEPRÜFT · Änderungen seit der letzten Prüfung",
-        ),
-      ),
+    problemLines.push(
+      theme.fg("warning", "○ Prüfung offen · Änderungen seit dem letzten Lauf"),
     );
   }
 
-  const taskLine = clip(
-    `${theme.fg("accent", theme.bold(task.phaseLabel.toUpperCase()))} · ${task.title}`,
-  );
+  // Live rows exist only during real work; idle sessions get no readiness
+  // claim of their own — the panel badge already names the phase.
+  const activityLines = input.hasActiveWork
+    ? input.activityLines.map((line) => theme.fg("accent", `◌ Aktivität · ${line}`))
+    : [];
+  const changes = task.changesSummary;
+  // Routine rows only ever appear when they carry state: "no changes yet" and
+  // "never checked" are zero statements and stay off the dashboard.
+  const changesLine = changes
+    ? `${theme.fg("accent", "◇ Änderungen")} · ${changes.filesCount} ${changes.filesCount === 1 ? "Datei" : "Dateien"} · ${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`
+    : undefined;
+  // Only a successful, current verification is routine information. Failed
+  // and stale states already have a higher-priority problem line; UNVERIFIED
+  // is a zero statement and must not consume dashboard space.
+  const verdictLine =
+    verification?.verdict === "READY"
+      ? theme.fg("success", "✓ Prüfung · Bereit")
+      : undefined;
+  const idleSegments = [
+    changes && changes.filesCount > 0
+      ? `${theme.fg("accent", "◇")} ${changes.filesCount} ${changes.filesCount === 1 ? "Datei" : "Dateien"} · ${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`
+      : undefined,
+    verdictLine,
+  ].filter((segment) => segment !== undefined);
+  const idleSummary =
+    idleSegments.length > 0 ? idleSegments.join(" · ") : undefined;
 
-  if (!input.hasActiveWork) {
-    // Completed changes stay visible as one compact summary row.
-    const changes = autoChangesSummary(task.changesSummary);
-    if (changes) lines.push(clip(theme.fg("muted", changes)));
-    // Idle without anything noteworthy stays out of the way entirely.
-    if (lines.length === 0) return [];
-    if (lines.length < budget && !failed && !stale) lines.push(taskLine);
-    return lines.slice(0, budget);
+  if (input.layout === "compact") {
+    // Two unframed rows are the whole budget here: the phase line plus at most
+    // one information-bearing row. An unrun check stays silent rather than
+    // spending half the dashboard on a zero statement.
+    const secondRow = problemLines[0] ?? activityLines[0] ?? idleSummary;
+    return [
+      clip(`${task.phaseLabel.toUpperCase()} · ${theme.bold(task.title)}`),
+      ...(secondRow !== undefined ? [clip(secondRow)] : []),
+    ].slice(0, budget);
   }
 
-  // Active work: task title, then the live rows the widget assembled
-  // (heading plus prioritized tools/subagents).
-  lines.push(taskLine);
-  lines.push(...input.activityLines.map((line) => clip(line)));
-  return lines.slice(0, Math.max(2, budget));
+  // A frame costs two rows. Select full sections before framing so a terminal
+  // never receives a cropped box and failures retain precedence over routine
+  // activity and metadata.
+  const contentBudget = Math.max(1, budget - 2);
+  // A failure or stale line already owns the verification meaning. Do not
+  // repeat it as a second generic verification row; spend that row on the
+  // active work or change summary instead. Idle collapses routine metadata
+  // into one condensed line — or none, when nothing has a state to report.
+  const routineLines = (
+    problemLines.length > 0
+      ? [changesLine]
+      : input.hasActiveWork
+        ? [changesLine, verdictLine]
+        : [idleSummary]
+  ).filter((line) => line !== undefined);
+  const activityBudget = Math.max(
+    1,
+    contentBudget - 1 - problemLines.length - routineLines.length,
+  );
+  const content = [
+    taskLine,
+    ...problemLines,
+    ...activityLines.slice(0, activityBudget),
+    ...routineLines,
+  ]
+    .slice(0, contentBudget)
+    .map(clip);
+  return renderPanel(theme, available, {
+    title: "Sitzung",
+    badge: task.phaseLabel.toUpperCase(),
+    tone: failed ? "error" : stale ? "warning" : "accent",
+    lines: content,
+  });
 }

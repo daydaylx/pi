@@ -47,6 +47,8 @@ export interface LoadedSetupConfig {
 }
 
 const DEFAULT_CONFIG: SetupConfig = {
+  // `auto` is Aurora's responsive, permanent dashboard; `compact` and
+  // `hidden` remain explicit space-saving preferences.
   ui: { theme: "aurora-night", motion: "contextual", dashboard: "auto" },
   permissions: {
     unknownTools: "ask",

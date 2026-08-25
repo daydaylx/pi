@@ -54,20 +54,20 @@
     "openrouter/z-ai/glm-5.2:free"
   ],
   "packages": [
-    "git:github.com/daydaylx/pi-subagents@0a3c4dea1b3712dcc86bb4ac74ff434b4101521f",
+    "git:github.com/daydaylx/pi-subagents@11f3fcbc0e346f747df2bd8342d77cb8c9f8c962",
     "npm:pi-web-access@0.24.2"
   ],
   "subagents": {
     "disableBuiltins": true,
     "agentOverrides": {
       "investigator": {
-        "model": "qwen-token-plan-individual/qwen3.7-plus",
+        "model": "openai-codex/gpt-5.6-terra",
         "fallbackModels": [
           "qwen-token-plan-individual/qwen3.8-max"
         ]
       },
       "debugger": {
-        "model": "qwen-token-plan-individual/glm-5.2",
+        "model": "openai-codex/gpt-5.6-terra",
         "thinking": "max",
         "fallbackModels": [
           "qwen-token-plan-individual/qwen3.8-max"

@@ -12,14 +12,16 @@
 
 `/commands` teilt die kanonischen Namen, Kategorien und Beschreibungen
 zwischen Menü, Autocomplete und Shortcuts (`extensions/shared/command-catalog.ts`
-ist dafür die einzige Quelle). Freitextsuche über alle Commands gibt es aber
-nur im nativen Autocomplete; das Command-Center-Menü selbst bietet keine
-Texteingabe, sondern ausschließlich Pfeiltasten-Navigation und den
-Kategorie-Buchstaben als Einzeltasten-Sprung. Das Hauptmenü besteht aus Arbeit
-(`A`), Plan (`P`), Modelle & Denken (`M`), Rechte & Vertrauen (`R`), Code &
-Diagnose (`C`), Subagenten (`S`), Sitzungen & Kontext (`Z`), Vorlagen & Skills (`V`) sowie
-System & Transfer (`T`). Ein Buchstabe öffnet den Bereich direkt. Einträge
-zeigen den kanonischen `/command`; Aliase werden nur am Original erklärt.
+ist dafür die einzige Quelle). Das Command-Center besitzt eine Texteingabe mit
+Fuzzy-Filter: Tippen grenzt die sichtbaren Einträge ein, Backspace bearbeitet
+den Filter, Escape löscht zunächst den Filter und schließt erst beim leeren
+Filter das Menü. Kategorie-Shortcuts gelten nur bei leerem Filter; Enter
+verankert die Auswahl nach einem Filterwechsel neu. Das Hauptmenü besteht aus
+Arbeit (`A`), Plan (`P`), Modelle & Denken (`M`), Rechte & Vertrauen (`R`), Code
+& Diagnose (`C`), Subagenten (`S`), Sitzungen & Kontext (`Z`), Vorlagen & Skills
+(`V`) sowie System & Transfer (`T`). Ein Buchstabe öffnet den Bereich direkt.
+Einträge zeigen den kanonischen `/command`; Aliase werden nur am Original
+erklärt.
 
 Shift+Tab ist die einzige normale Workflow-Steuerung und bietet nur Work,
 Schnellplan und Architekturplan. Die Auswahl wartet auf die nächste echte
@@ -52,22 +54,27 @@ mehr — der Status steht in der Fußzeile.
 
 ## Statusflächen
 
-Es gibt genau zwei, und nur eine davon ist permanent.
+Es gibt zwei Renderer-Slots, und nur die Fußzeile ist permanent.
 
 Die **Fußzeile** ist eine Zeile und trägt Arbeitsablauf, Modell, Denktiefe,
-Kontextanteil und Verifikationsstand. Wird es eng, fallen ganze Segmente vom
-unwichtigen Ende her weg statt am Rand abgeschnitten zu werden. Riskantes —
-YOLO, gescheiterte Verifikation, gestörter LSP — ignoriert die Größenklasse und
-verdrängt Gewöhnliches. Git-Branch, Sitzungsname und Tokenzähler stehen nicht mehr dort; das
-Arbeitsverzeichnis erscheint weiterhin kompakt als Session-Ordner. Siehe
-`docs/decisions/009-aurora-owns-the-footer.md`.
+Kontextanteil und eskalierte Risiken. Wird es eng, fallen ganze Segmente vom
+unwichtigen Ende her weg statt am Rand abgeschnitten zu werden. YOLO,
+gescheiterte Verifikation und gestörter LSP ignorieren die Größenklasse und
+verdrängen Gewöhnliches. Git-Branch, Sitzungsname und Tokenzähler stehen nicht
+mehr dort; das Arbeitsverzeichnis erscheint weiterhin kompakt als
+Session-Ordner. Siehe `docs/decisions/009-aurora-owns-the-footer.md`.
 
-Das **Activity-Widget** über dem Eingabefeld erscheint nur während eines Turns
-und zeigt Denkphase, laufende Tools und Subagenten als flache Liste. Jede
-Tool-Zeile benennt Typ, Ziel, Status und Dauer; abgeschlossene Arbeit
-verschwindet, statt zu einem Erfolgsblock zu werden. In kleinen Terminals
-bleiben Einträge bis zum Viewport sichtbar, danach fasst Aurora sie
-statusgenau zusammen.
+Das **Aurora-Widget** über dem Eingabefeld enthält das Session-Dashboard und,
+während eines Turns, die flache Activity-Liste mit Denkphase, laufenden Tools
+und Subagenten. `ui.dashboard` steuert das Dashboard über `auto` (Default),
+`compact`, `expanded` oder `hidden`; `/dashboard` schaltet es ohne neuen
+Shortcut um. Auto priorisiert fehlgeschlagene oder stale Verifikation vor
+Routineinformationen, nutzt in kleinen Terminals höchstens zwei Zeilen und
+verdichtet Idle-Informationen statt Null-Aussagen zu zeigen. Während aktiver
+Arbeit benennen Tool-Zeilen Typ, Ziel, Status und Dauer; abgeschlossene Arbeit
+verschwindet statt zu einem Erfolgsblock zu werden. Phase und
+Verifikationsurteil teilen dieselbe Staleness-Definition; Details stehen in
+Decision 019.
 
 Die Größenklassen beider Flächen und der Menüs stehen gemeinsam in
 `extensions/shared/layout.ts`: kompakt unter 52×14, komfortabel ab 90×28, breit

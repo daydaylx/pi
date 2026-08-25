@@ -2,145 +2,88 @@
 
 ## Aktuelle Arbeit
 
-Stabilisierung und Vereinfachung der letzten Pi-Änderungen (August 2026).
-Umgesetzte Phasen:
+Repository-Audit und gezielte Nachbesserungen (Plan:
+`.agent/plans/current-plan.md`, Ausgangs-HEAD `a25f1f7`). Ziel: ausgelieferte
+Importfehler verhindern, Aurora-/Dashboard-Tests stabilisieren, Tool-Ausgaben
+verbessern, Installer/Doku/Verifikation konsistent machen, Benchmark-
+Konfiguration prüfen. Der Arbeitsbaum enthielt bereits umfangreiche
+fremde Änderungen — sie wurden vollständig erhalten.
 
-- **Fork-Pin repariert**: Der gepinnte SHA
-  `2004b727d2362363b47c95a93ff40cfc4204ad19` existierte nur lokal und war bei
-  GitHub nicht erreichbar (`422 No commit found`); eine saubere Neuinstallation
-  scheiterte daran. Die Arbeit wurde vom letzten erreichbaren Stand
-  (`170a2808`, `agent/simplify-and-stabilize`) fortgesetzt und als
-  `18c4851fe19e6635e42b7d8911b8a91e1747f7f9` gepusht. `settings.json` pinnt
-  diesen erreichbaren, vollständigen SHA. Ein späterer Repin auf den damaligen
-  `main`-HEAD (`2934a93f`) hatte den Pin um drei Commits zurückgesetzt und
-  dabei den Sicherheitsfix `170a2808` sowie die Tool-Surface-Trennung wieder
-  aus der Auslieferung entfernt; das ist zurückgenommen.
-- **Reduzierte Tool-Surface entkoppelt**: Der Fork kennt jetzt
-  `toolSchemaMode: "full" | "harness"` getrennt von `toolDescriptionMode`.
-  `action` ist ein geschlossenes Enum (`list`, `status`, `stop`, `interrupt`),
-  und das Schema setzt `additionalProperties: false` — Chain, Parallel, CRUD,
-  Scheduling, Worktrees, Sharing, Watchdog, `resume`, `steer` und
-  `append-step` scheitern jetzt tatsächlich an der Argumentvalidierung statt
-  nur in der Dokumentation (`docs/decisions/014`).
-- **Tote Parallelitätskonfiguration entfernt**: `subagents.concurrency` ist aus
-  `setup.json`, `schemas/setup.schema.json`, `extensions/setup-core/config.ts`
-  (Default, Typ, Parser, Validierung, Projekt-Layer), der Setup-Doctor-Ausgabe,
-  den Tests und der Dokumentation verschwunden. `/setup-doctor` meldet
-  stattdessen beide Tool-Surface-Schalter.
-- **Verifier-Regeln risikobasiert**: Mehrere betroffene Dateien lösen keine
-  Pflichtdelegation mehr aus. Verpflichtend bleibt der `verifier` bei
-  Sicherheits-, Permission-/Plan-Mode-, Workflow-/Activity-State-, API-/Schema-,
-  Installations-/Upgrade- und Verifikationslogik, hohem Blast-Radius oder auf
-  ausdrückliche Nutzeranforderung. Dirty-State- und Content-Fingerprint-Regeln
-  bleiben erhalten und stehen jetzt vollständig in `docs/subagents.md`.
-- **Aurora vereinfacht**: `AuroraEditor` und `setEditorComponent()` sind
-  entfernt; das Eingabefeld ist wieder Pis nativer Editor, wodurch
-  `editorPaddingX` und `autocompleteMaxVisible` aus `settings.json` wieder
-  wirken (`docs/decisions/013`). Im Modus `contextual` animieren nur noch
-  `DENKT NACH` und `ARBEITET`; `ANTWORTET` und `WARTET AUF MODELL` sind statisch, der
-  langsame Ticker aktualisiert dort nur die Sekundenanzeige.
-  `hiddenActivitySummary()` liegt jetzt in `tool-renderers.ts` und nutzt
-  dieselben Statuslabels und dieselbe Zählung wie die übrigen
-  Overflow-Zusammenfassungen.
-- **AGENTS.md gekürzt**: Nur noch Regeln, die in fast jeder Sitzung gelten.
-  Checkpoint-, Providerfehler- und Sitzungsablaufregeln stehen im Skill
-  `context-checkpoint`, die Delegationsvorlage und die Fingerprint-Mechanik in
-  `docs/subagents.md`. Keine neue Dokumentationsschicht.
-- **Runtime-Auflösung zusammengeführt**: Skripte und Extensions lösen Paket und
-  Version des Pi-Runtimes über das gemeinsame `shared/runtime-resolution.mjs`
-  auf; Entwicklungs-`node_modules` und Benutzerpfade sind kein Fallback mehr.
-- **Verifikationsdiagnostik vereinfacht**: Nur das optionale, nicht-kausale
-  `changed_since_pass` bleibt bei einem vorher erfolgreichen Profil;
-  Baseline-Maps, Pfadheuristiken und kausale Labels sind entfernt.
+## Umgesetzt (dieser Auftrag)
 
-Abgeschlossene P0-Stabilisierung (`#137`–`#142`, Stand `05fbd01`). Jeder Verdacht
-wurde vor einer Korrektur reproduziert; nicht reproduzierbare wurden als solche
-geschlossen:
+- **Release-Defekt beherrschbar gemacht**: Ursache von CI-Verify-Failure
+  #156 war `extensions/aurora-ui/index.ts` → `./dev-diagnostics.ts` ohne
+  versionierte Datei. Die Datei bleibt (inert ohne `PI_AURORA_DIAG=1`,
+  Vertragstests in der Runtime-Suite). Neu:
+  `scripts/check-relative-imports.mjs` (lexerbasierter Literal-Check, grün)
+  und `scripts/check-versioned-tree.mjs` (exportiert `HEAD`, prüft Imports,
+  lädt aktive Extensions). Gegen den aktuellen HEAD schlägt der Check
+  **erwartungsgemäß** fehl, bis `dev-diagnostics.ts` committet ist — das ist
+  der beabsichtigte Nachweis der Commit-Grenze. npm-Skripte
+  `check:imports`/`check:versioned-tree` vorhanden.
+- **Dashboard/UNVERIFIED**: `UNVERIFIED` erzeugt keine platzfressende
+  „Noch nicht bereit“-Zeile mehr; drei veraltete Runtime-Assertions an die
+  dokumentierte Präzedenz (Decision 019/README) angepasst.
+- **Compact-Tool-Receipts**: `collapse-result.ts` zeigt informative
+  Einzeilen-Receipts (read/grep/find/ls/write/bash) statt nur Ctrl+O-Hint;
+  Fehler, Partial Output, Truncation und leere Ergebnisse bleiben beim
+  nativen Renderer; `read`/`write` mit Collapser verdrahtet; 11 Receipt-Tests.
+- **Installer/Doku**: `APPEND_SYSTEM.md` auf phasenbasierte Narration
+  umgestellt; Installer-Allowlist umfasst jetzt `APPEND_SYSTEM.md` und
+  `prompts/` samt Installer-Test; README dokumentiert die
+  Installationsgleichheit; Manual-Smoke-Checkliste trennt
+  Arbeitsbaum-/HEAD-/CI-Nachweise und enthält Terminal-Matrix (Kitty,
+  WezTerm, Ghostty) plus manuelle GitHub-Ruleset-Anleitung; UX-Doku an das
+  tatsächliche Command-Center-Fuzzy-Filter- und Dashboard-Verhalten
+  angepasst; Decision-Index 010 auf 20.000-Token-Upstream-Default korrigiert.
+- **Verifikationsausgabe**: `project_check` nennt jetzt explizit den
+  Prüfstand („Workspace-Snapshot …, versionierter HEAD nicht geprüft“) in
+  Text und Details (`checkedWorkspaceFingerprint`, `checkedVersionedHead`);
+  Runtime-Test mit echtem Git-Temp-Repo.
+- **Benchmarks**: `p4-production-stack-manifest.json` auf Produktionsrollen
+  aus Settings plus 15 vorbereitete Baseline-Läufe erweitert (01/04/08 je
+  3×, Task 10 mit/ohne Subagent je 3×). Tokenmetrik präzisiert:
+  `cacheRead`/`cacheWrite` getrennt, `providerReportedTotal` = rohes
+  `usage.totalTokens` (kann Cache-Anteile enthalten, keine Formel aus
+  input+output+reasoning); SCORING.md korrigiert, Schema erweitert,
+  Aggregationstest ergänzt. **Keine kostenpflichtigen Provider-Läufe
+  gestartet** (Freigabe ausstehend).
+- **TUI-Grenzfälle**: Startscreen-Matrix um 40×12 ergänzt (52×14/90×28/
+  120×30 bereits vorhanden); Filter/Escape/Backspace/Long-Path-Fälle waren
+  bereits abgedeckt.
+- **Konsistenztest**: `pi-subagents`-Commit-Pin in `settings.json`,
+  `npm/package.json` und Lockfile wird auf Gleichheit geprüft.
 
-- **Fork-Pin-Rückschritt entfernt** (`#137`): Der Repin auf den damaligen
-  `main`-HEAD war ein Rückschritt um drei Commits (`behind_by: 3`,
-  `ahead_by: 0`) und entfernte den Sicherheitsfix `170a2808` aus der
-  Auslieferung — am gepinnten Stand lief `acceptance.ts` weiterhin über
-  `shell: true`. Die Pin-Regel im Ledger verlangt jetzt einen Lineage-Vergleich,
-  nicht nur Erreichbarkeit.
-- **Aurora-Lifecycle** (`#138`): Ein gemeinsamer `settle`-Handler auf `agent_end`
-  **und** `agent_settled` ließ Aurora mitten im Turn auf Leerlauf fallen, weil
-  Pi 0.84.1 `agent_end` nach jedem einzelnen Agentenlauf sendet. Nur noch
-  `agent_settled` beendet die Anzeige. Vorher 7 fokussierte Fehlschläge.
-- **Plan-Handoff** (`#139`): Gegen `04faefa` schlagen 28 Assertions fehl —
-  persistierte Custom-Message, Plandatei beim _Start_ des Planning-Turns
-  gelöscht, Teilplan nach Fehler/Abbruch. Zusätzlich entfällt der inhaltsleere
-  `[PI WORKMODUS]`-Block bei jedem Work-Turn.
-- **Verifikationsoberfläche** (`#140`): `setup.json` und `.pi/verify.json` boten
-  denselben Befehl über zwei Tools an, aber nur `project_check` schreibt den
-  Ledger. `clean` hieß „keine Änderungen" und las sich wie ein Prüfergebnis;
-  jetzt `unchanged`.
-- **Compaction-Budget** (`#141`): Gegen 12 reale Transkripte gemessen statt
-  geschätzt (`docs/decisions/010`).
-- **Permission-Policy** (`#142`): Vollständig charakterisiert, **keine**
-  fehlerhafte Entscheidung gefunden, daher keine Policy geändert. Zwei in der
-  README zugesicherte Eigenschaften waren ungetestet und sind es jetzt nicht
-  mehr.
-- **Test-Race behoben**: Ein Enkelprozess bekam 100 ms für seine PID-Datei, die
-  dann bedingungslos gelesen wurde — unter Parallellast ENOENT und damit ein
-  rotes `verify` ohne Codefehler.
+## Geänderte/Neue Dateien (dieser Auftrag)
+
+Neu: `scripts/check-relative-imports.mjs`, `scripts/check-versioned-tree.mjs`,
+`tests/check-relative-imports.test.mjs`, `tests/collapse-result.test.mjs`,
+`benchmarks/harness/test/collect-metrics.test.mjs`.
+Geändert: `extensions/aurora-ui/{tool-renderers,index,footer}.ts`,
+`extensions/compact-tools/{collapse-result,index}.ts`,
+`extensions/setup-core/index.ts`, `extensions/shared/layout.ts`,
+`benchmarks/harness/{collect-metrics.mjs,schema/run-result.schema.json,
+p4-production-stack-manifest.json}`, `benchmarks/SCORING.md`,
+`scripts/install-user.mjs`, `APPEND_SYSTEM.md`, `README.md`,
+`docs/manual-smoke-checklist.md`, `docs/pi_agent_ux_konzept.md`,
+`docs/decisions/README.md`, `npm/package.json`, `tests/run-all.mjs`,
+`tests/suites/runtime/{aurora-ui,installer,setup-core,target-config}.mjs`.
 
 ## Letzte Verifikation
 
-Hauptrepo mit Fork-Pin `0107312` — Stand jener Verifikation, historisch. Der
-aktuelle Pin in `settings.json` ist `33b4ff10e7374ced7830e586c859a911bf831547`
-(siehe den Eintrag "2026-08-15, Repin auf `33b4ff1`" weiter unten in diesem
-Abschnitt).
-
-- Hauptrepo: `npm --prefix npm run verify` Exit 0 — Prettier, Typecheck, Knip,
-  Coverage-Gates, Runtime-Patches und Dependency-Audit. 1314 Tests: runtime 811,
-  workflow-mode 189, LSP 182, UI 77, diff 15, Patches 37, Audit 3.
-  `git diff --check` Exit 0, Arbeitsbaum sauber.
-- `extensions/aurora-ui/index.ts` liegt bei **37/37 Funktionen (100 %)**. Die
-  Zählung sank von 38, weil der Aurora-Fix die gemeinsame `settle`-Closure
-  entfernt hat; die Schwelle wurde nicht gesenkt und keine Datei ausgeschlossen.
-- CI grün: Läufe `31744481889` und `31744759696` auf `main`.
-- Fork (`0107312`): `test:unit` 1152/1152, `test:integration` 492/492 und
-  `test:e2e` 1/1 grün. Die sechs `/run`- und `/parallel`-Fälle, die zuvor auf
-  jedem Rechner ohne passenden Agenten im Home rot waren, laufen jetzt gegen ein
-  isoliertes Fixture. `npm run typecheck` bleibt dort vorbestehend rot
-  (810 Fehler, davon 49 in `src/`).
-- Manuell geprüft: `settings.json` pinnt
-  `010731209991f727e47ca823c98eb3ae37d8a1bd`. Der Fork-`main` wurde zuvor per
-  Fast-Forward (`behind_by: 0`, ohne `force`) auf denselben SHA nachgezogen und
-  trägt den Sicherheitsfix jetzt selbst — `src/runs/shared/acceptance.ts` steht
-  auf `main` auf `shell: false`. Pin und Default-Branch sind damit deckungsgleich.
-- Nicht ausgeführt: der Live-Smoke. Aurora im echten Terminal, Shift+Tab, der
-  reale Plan→Work-Handoff, `project_check` gegen den echten Footer und ein
-  echter Investigator-Aufruf sind unbelegt (`docs/manual-smoke-checklist.md`).
-- **2026-08-15, Repin auf `33b4ff1`**: Ein Verifier-Lauf (read-only per
-  Tool-Profil) wurde bei Task-Text mit Wörtern wie "security"/"migration" über
-  `inferLevel()`s risky-Klausel automatisch auf Acceptance-Level `reviewed`
-  hochgestuft, obwohl die Rolle `reviewer`, auf die `reviewed` rekursiv
-  verweist, hier gar nicht existiert — Folge war ein dauerhaftes, nie
-  aufgelöstes `needs-parent-decision`-Finding trotz erfolgreichem Lauf.
-  `src/runs/shared/acceptance.ts` gated die risky-Wortklausel jetzt auf
-  `!readOnlyAgent` und nimmt `verifier` in den `readOnlyAgent`-Regex auf;
-  Ausführungskontext-Risiko (`async`/`dynamic`) bleibt für alle Rollen
-  scharf. `test:unit` 1153/1153 (neuer Fall ergänzt). `npm run typecheck`
-  bleibt im Fork weiterhin vorbestehend rot, unverändert durch diesen Fix.
-- **2026-08-16, CI-Toolchain-Drift behoben**: Commit `432517c` hatte `.nvmrc`,
-  `engines` und `docs/runtime-matrix.md` auf `node 22.23.2` / `npm 10.9.8`
-  angehoben, aber `.github/workflows/verify.yml` und `lsp-smoke.yml` nicht
-  mitgezogen — beide installierten weiterhin `node 22.22.2` / `npm 10.9.7`
-  fest kodiert. Ein echter CI-Lauf (`31905951560`) belegt eine dabei
-  ignorierte `npm warn EBADENGINE`-Warnung bei jedem Durchlauf. Beide
-  Workflows lesen die Node-Version jetzt über `node-version-file: ".nvmrc"`;
-  `npm ci` läuft mit `--engine-strict`, sodass eine künftige Abweichung den
-  Build hart fehlschlagen lässt statt nur zu warnen.
+`project_check({ profile: "verify" })`: Exit 0, Pflichtabdeckung 1/1.
+Runtime-Suite **1111/1111**, UI-Suite 96, workflow-mode 381, LSP 182, diff 22,
+Patches 50, Audit sauber; Prettier/Typecheck/Knip/Coverage grün.
+Advisory: diff-viewer Coverage 75 % über Floor (62 %) — nur Hinweis.
+`scripts/check-versioned-tree.mjs` schlägt gegen HEAD erwartungsgemäß fehl
+(unversioniertes `dev-diagnostics.ts`), bis committet wird.
 
 ## Nächste Schritte
 
-- Live-Smoke nach `docs/manual-smoke-checklist.md` in einer authentifizierten
-  Sitzung durchführen. Erst danach darf `#137` geschlossen und das Urteil von
-  `BEDINGT STABIL` auf `STABIL` gehoben werden.
-- `tests/suites/runtime.mjs` (5383 Zeilen, Stand dieses Commits) entlang der
-  vorhandenen `SECTION_SUITES`-Registry aufteilen — P2, erst nach dem
-  Live-Smoke.
-- `tests/suites/runtime.mjs` bleibt der einzige belegte P2-Befund; alles andere
-  aus der ursprünglichen P2-Bestandsaufnahme ist erledigt.
+1. Nutzerentscheidung: Commit der Arbeitsbaumänderungen einfordern —
+   insbesondere `extensions/aurora-ui/dev-diagnostics.ts` versionieren;
+   erst danach wird `check:versioned-tree` grün und CI kann liefern.
+2. Manuellen Live-Smoke laut `docs/manual-smoke-checklist.md` in echter
+   TTY-Sitzung (Kitty/WezTerm/Ghostty) durchführen.
+3. Kostenpflichtige Benchmark-Baseline-Läufe nur nach expliziter
+   Kosten-/Laufzeitfreigabe starten (Manifest ist vorbereitet).

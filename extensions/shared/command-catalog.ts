@@ -282,6 +282,12 @@ const definitions = [
   ["settings", "Einstellungen", "Pi-Einstellungen öffnen", "system"],
   ["hotkeys", "Tastenkürzel", "Alle aktiven Tastenkürzel anzeigen", "system"],
   [
+    "dashboard",
+    "Dashboard-Modus",
+    "Aurora-Dashboard umschalten: auto, compact, expanded oder hidden (dauerhaft gespeichert)",
+    "system",
+  ],
+  [
     "changelog",
     "Änderungsprotokoll",
     "Pi-Änderungsprotokoll anzeigen",

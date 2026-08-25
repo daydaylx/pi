@@ -21,6 +21,8 @@
 // erfinden).
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { collectWorkspaceSnapshot } from "./workspace-snapshot.mjs";
 
 // Siehe harness/BASELINE.md: Referenzcommit 7b886a3 hat 5 bekannte, vom
@@ -89,7 +91,7 @@ function readOptionalJsonObject(filePath, label) {
 
 // --- Session-Metriken (Tokenverbrauch, Modellaufrufe, Tool-Fehlschläge,
 // Nutzerkorrekturen, Laufzeit, wiederholte identische Fehler) ---
-function collectSessionMetrics(entries) {
+export function collectSessionMetrics(entries) {
   const assistantMessages = entries.filter(
     (e) => e.type === "message" && e.message?.role === "assistant",
   );
@@ -107,10 +109,21 @@ function collectSessionMetrics(entries) {
       acc.input += usage.input ?? 0;
       acc.output += usage.output ?? 0;
       acc.reasoning += usage.reasoning ?? 0;
-      acc.total += usage.totalTokens ?? 0;
+      acc.cacheRead += usage.cacheRead ?? 0;
+      acc.cacheWrite += usage.cacheWrite ?? 0;
+      // Provider-reported total can include cached-token accounting and is
+      // intentionally not presented as input + output + reasoning.
+      acc.providerReportedTotal += usage.totalTokens ?? 0;
       return acc;
     },
-    { input: 0, output: 0, reasoning: 0, total: 0 },
+    {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      providerReportedTotal: 0,
+    },
   );
 
   const failedToolResults = toolResults.filter(
@@ -356,8 +369,13 @@ async function main() {
         reasoning:
           sessionMetrics.tokens.reasoning +
           subagentSessionMetrics.tokens.reasoning,
-        total:
-          sessionMetrics.tokens.total + subagentSessionMetrics.tokens.total,
+        cacheRead:
+          sessionMetrics.tokens.cacheRead + subagentSessionMetrics.tokens.cacheRead,
+        cacheWrite:
+          sessionMetrics.tokens.cacheWrite + subagentSessionMetrics.tokens.cacheWrite,
+        providerReportedTotal:
+          sessionMetrics.tokens.providerReportedTotal +
+          subagentSessionMetrics.tokens.providerReportedTotal,
       },
       failedToolCalls: sessionMetrics.failedToolCalls,
       repeatedIdenticalFailures: sessionMetrics.repeatedIdenticalFailures,
@@ -394,4 +412,6 @@ async function main() {
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

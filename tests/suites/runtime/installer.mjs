@@ -48,6 +48,17 @@ export const installerSections = {
         "greenfield does not deploy the retired agent-shipped .pi description",
       );
 
+      assert(
+        deployedSet.has("APPEND_SYSTEM.md"),
+        "greenfield includes the active communication rules",
+      );
+      for (const prompt of ["analyse.md", "docs-check.md", "review.md", "ui-review.md"]) {
+        assert(
+          deployedSet.has(`prompts/${prompt}`),
+          `greenfield includes prompt template prompts/${prompt}`,
+        );
+      }
+
       // Exactly three agent profiles.
       const agentFiles = deployed.filter((f) => f.startsWith("agents/"));
       eq(

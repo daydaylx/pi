@@ -8,13 +8,16 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [007](007-aurora-single-ui-owner.md) — Aurora ist einziger aktiver UI-Besitzer
 - [008](008-context-ledger-is-documentation.md) — Das Context Ledger ist Dokumentation, keine Laufzeitkomponente
 - [009](009-aurora-owns-the-footer.md) — Aurora besitzt auch die Fußzeile
-- [010](010-compaction-recent-context-budget.md) — Recent-Context-Budget bleibt bei 12 KiB
+- [010](010-compaction-recent-context-budget.md) — Recent-Context-Budget nutzt den Upstream-Default von 20.000 Tokens
 - [011](011-investigator-debugger-verifier.md) — Investigator, Debugger, Verifier ersetzen Planner, Worker, Reviewer
 - [012](012-plan-mode-mutation-guard.md) — Plan Mode bekommt einen technischen Mutationsschutz
 - [013](013-aurora-keeps-the-native-editor.md) — Aurora behält Pis nativen Editor (ersetzt den Editor-Teil von 009)
 - [014](014-reduced-subagent-tool-surface.md) — Die reduzierte Subagent-Tool-Surface ist ein eigener Schalter
 - [015](015-verifier-delegation-guard.md) — Verifier-Delegationen werden technisch erzwungen, nicht appelliert
 - [016](016-plan-mode-yolo-lock-and-recovery-gate.md) — YOLO-Sperre im Planmodus und Recovery-Gate vor Schreibzugriffen
+- [017](017-verifier-acceptance-none.md) — Verifier-Akzeptanz ohne eigenes Urteil
+- [018](018-subagent-delegation-always-allowed.md) — Subagent-Delegationen immer erlaubt
+- [019](019-dashboard-modes-and-phase-precedence.md) — Dashboard-Modi mit einer Staleness-Wahrheit für Phase und Verifikation
 
 ## Historische, ersetzte Entscheidungen
 

@@ -1,26 +1,20 @@
 # Kommunikationsverhalten
 
-Diese Regeln gelten zusätzlich zur Grundregel "Be concise in your responses", nicht
-anstelle davon: einzelne Sätze bleiben kurz, werden aber deutlich häufiger
-ausgegeben als im Standardverhalten.
+Diese Regeln ergänzen „Be concise in your responses“. Sichtbarer Fortschritt soll
+orientieren, nicht jeden einzelnen Werkzeugaufruf kommentieren.
 
-- Vor jedem Werkzeugaufruf: ein kurzer Satz, was jetzt getan wird und warum. Danach
-  erst der Aufruf. Beispiel: "Ich lese zuerst die Konfigurationsdatei, um die
-  aktuellen Werte zu sehen."
-- Nach einem Ergebnis, das die weitere Vorgehensweise beeinflusst: ein Satz, was
-  gefunden wurde, bevor der nächste Schritt beginnt. Beispiel: "Gefunden: die
-  Funktion existiert bereits in utils.ts — ich nutze sie weiter statt einer neuen."
-- Bei Richtungswechseln oder Phasenübergängen: kurz markieren. Beispiel: "Die
-  Analyse ist abgeschlossen, ich beginne jetzt mit der Umsetzung."
-- Bei einem Fehler oder unerwarteten Befund: sofort in einem Satz benennen, bevor
-  mit der Korrektur fortgefahren wird.
-- Am Ende eines Turns: ein knapper Abschlusssatz, was geändert wurde und was als
-  Nächstes ansteht.
+- Vor dem ersten Werkzeug einer neuen Arbeitsphase einen kurzen Satz zum Ziel der
+  Phase ausgeben.
+- Bei einem wichtigen Befund, Richtungswechsel, Fehler oder Blocker einen kurzen
+  Satz zum Ergebnis und dem nächsten Schritt ausgeben.
+- Bei länger dauernder Arbeit ungefähr alle 60 Sekunden einen knappen
+  Fortschrittsstand ausgeben.
+- Am Ende eines Turns in einem kurzen Satz sagen, was geändert oder geprüft wurde
+  und was noch offen ist.
 
 Nicht tun:
 
-- Kein Ausformulieren von internem Reasoning oder Abwägungen — nur die Aussage, was
-  jetzt passiert und warum.
-- Nichts wiederholen, was der folgende Werkzeugaufruf ohnehin gleich zeigt (z. B.
-  nicht den Dateiinhalt vorwegnehmen, den ein Lese-Tool sowieso ausgibt).
-- Keine Meta-Kommentare über diese Regeln selbst.
+- Kein Statussatz vor jedem einzelnen Tool-Aufruf.
+- Nichts wiederholen, was der folgende Tool-Aufruf bereits sichtbar macht.
+- Kein ausformuliertes internes Reasoning oder lange Abwägungen.
+- Keine künstliche Sequenz aus Statussatz und Einzeltool.

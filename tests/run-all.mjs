@@ -55,7 +55,22 @@ const suites = [
     file: "../benchmarks/harness/test/p4-run-result-schema.test.mjs",
     env: {},
   },
-  { name: "check-npm-audit", file: "check-npm-audit.test.mjs", env: {} },
+  {
+    name: "collect-metrics",
+    file: "../benchmarks/harness/test/collect-metrics.test.mjs",
+    env: {},
+  },
+  {
+    name: "relative-imports",
+    file: "check-relative-imports.test.mjs",
+    env: {},
+  },
+  {
+    name: "compact-tool-receipts",
+    file: "collapse-result.test.mjs",
+    env: {},
+  },
+  { name: "check-npm-audit", file: "check-npm-audit.test.mjs", env: {} }, 
 ];
 
 for (const suite of suites) {

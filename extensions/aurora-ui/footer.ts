@@ -229,6 +229,9 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
         priority: attention ? Priority.failedVerification : Priority.verification,
         text: `${verification === "verified" ? "✓" : attention ? "⚠" : ""} ${verification}`.trim(),
         tone: verificationTone(verification),
+        // Without a dashboard surface owning the verdict, the routine success
+        // stays visible in the footer — but it is not a risk: it keeps normal
+        // priority and yields to real risks on narrow lines like any metadata.
         critical: attention,
       });
     }

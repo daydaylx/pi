@@ -8,12 +8,13 @@ completion, shortcuts and the `editorPaddingX` / `autocompleteMaxVisible`
 settings all come from the runtime (see
 `docs/decisions/013-aurora-keeps-the-native-editor.md`).
 
-The theme is `themes/aurora-night.json`. Motion is read from the effective
-central setup configuration (`ui.motion`). One shared ticker runs only while
-work is visible. Only real moving work animates: in `contextual`, active
-thinking and running tools cycle their glyph every 100 ms, while `ANTWORTET`
-and `WARTET AUF MODELL` keep a fixed glyph and repaint once per second for the
-elapsed time and the `WARTET AUF MODELL` transition alone.
+The theme is `themes/aurora-night.json`. Motion and the dashboard presentation
+are read from the effective central setup configuration (`ui.motion`,
+`ui.dashboard`). One shared ticker runs only while work is visible. Only real
+moving work animates: in `contextual`, active thinking and running tools cycle
+their glyph every 100 ms, while `ANTWORTET` and `WARTET AUF MODELL` keep a fixed
+glyph and repaint once per second for the elapsed time and the `WARTET AUF
+MODELL` transition alone.
 
 - `contextual`: animated activity indicator.
 - `reduced`: static activity indicator.
@@ -24,23 +25,44 @@ elapsed time and the `WARTET AUF MODELL` transition alone.
 **Footer** (`footer.ts`) — the one permanent status surface, and one line.
 It shows the workflow, model, thinking level, session folder, context share and
 verification state, then drops whole segments from the least important end as
-the terminal narrows. The folder is derived from the session CWD captured at
-session start and compacted purely; it never probes the filesystem. Risk
-segments — YOLO, a failed verification, a broken language server — ignore the
-width tier and are the last thing dropped. Size classes come from
-`shared/layout.ts`, shared with the menu shell.
+the terminal narrows. Whenever a visible dashboard surface owns verification reporting
+(auto/compact/expanded), the footer suppresses the routine successful state;
+failed or stale checks remain critical footer risks at every width. The folder
+is derived from the session CWD captured at session start and compacted purely;
+it never probes the filesystem. Risk segments — YOLO, a failed verification, a
+broken language server — ignore the width tier and are the last thing dropped.
+Size classes come from `shared/layout.ts`, shared with the menu shell.
 
 `renderFooterLines` is pure. Everything it prints was already in runtime state:
 it starts no process, probes neither git nor the LSP, asks no provider and reads
 no file. It is called on every frame, so anything else would be paid for
 continuously.
 
-**Session dashboard** (`tool-renderers.ts`) — permanent, above the editor. The
-status labels, tone mapping and panel rendering live in `tool-renderers.ts`;
+**Session dashboard** (`tool-renderers.ts`) — permanent, above the editor, with
+four presentation modes owned by the single setting `ui.dashboard` in setup.json
+(`auto|compact|expanded|hidden`, default `auto`), switched through `/dashboard`
+which surfaces in the Super+Q command center — no new shortcut:
+
+- **`auto`** is the responsive permanent default (`renderAutoDashboard`): after
+  the fresh-session welcome it keeps a compact session card with task,
+  activity, changes and verification visible, including during idle. Failed or
+  stale verification appears before routine information; narrow terminals fall
+  back to at most two unframed rows while keeping risks visible.
+- **`compact`** caps the dashboard at two hard rows.
+- **`expanded`** keeps the richer multi-panel view (Aufgabe/Aktivität/
+  Änderungen/Prüfungen) within a tested height budget of roughly 40 % of
+  terminal rows.
+- **`hidden`** emits no dashboard at all while workflow state, footer risks and
+  the inspector stay fully alive.
+
+Phase and verification verdict are derived separately but share one staleness
+definition (`verificationIsStale()`): `done` requires idle plus a current
+`READY` check, only a real running verification tool shows `Prüfen`, and active
+work stays `Arbeiten` even after an earlier failed check — see
+[decision 019](../../docs/decisions/019-dashboard-modes-and-phase-precedence.md).
+The status labels, tone mapping and panel rendering live in `tool-renderers.ts`;
 `index.ts` only derives the existing runtime view model and applies the terminal
-row budget. A fresh empty session starts with the Aurora welcome, then changes
-without a visual break into panels for Aufgabe, Aktivität, Änderungen and
-Prüfungen. Finished tools still leave the live activity list immediately; their
+row budget. Finished tools still leave the live activity list immediately; their
 real change and verification results remain visible through the relevant
 session panels. The welcome is never shown again within that session and is
 skipped for resumed conversations.
@@ -108,6 +130,16 @@ never fabricates a value for either.
 Cleanup on session replacement, reload and shutdown restores the core footer
 and working indicator, removes the widget, unsubscribes from the event bus,
 cancels any pending subagent request and stops the shared ticker.
+
+## Render diagnostics (development only)
+
+`dev-diagnostics.ts` counts widget renders, approximates their duration,
+reports the active tick interval and the last dashboard row count. It is inert
+unless `PI_AURORA_DIAG=1` is set at process start; normal sessions pay nothing.
+The runtime suite's `[render-measure]` line records the current cost of one full
+widget frame (~0.9 ms with four active tools) — far below the 100 ms tick
+budget, which is why frame caching and a slower ticker were deliberately not
+built (decision 019).
 
 ## The inspector (third, on-demand surface)
 

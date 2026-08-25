@@ -118,14 +118,14 @@ export const auroraUiSections = {
                 resumedContext.ui.theme,
               ).render(120)
             : [];
-        // Auto mode keeps an idle, unremarkable resumed session out of the
-        // way entirely — readiness is already evident from editor and footer —
-        // while expanded still offers the panel dashboard on demand.
+        // Auto mode is the responsive default dashboard: resumed sessions skip
+        // the welcome but keep task, activity and verification orientation.
         const autoLines = resumedLines;
         assert(
-          !autoLines.some((line) => stripAnsi(line).includes("PI · AURORA")) &&
-            !autoLines.some((line) => stripAnsi(line).includes("AUFGABE")),
-          "a resumed idle session skips both welcome and idle dashboard in auto mode",
+          autoLines.some((line) => stripAnsi(line).includes("Sitzung")) &&
+            !autoLines.some((line) => stripAnsi(line).includes("◌ Aktivität")) &&
+            !autoLines.some((line) => stripAnsi(line).includes("PI · AURORA")),
+          "a resumed idle session keeps the session card without welcome or invented activity",
         );
         await resumedContext.ui.submitSlashCommand("/dashboard expanded");
         const expandedLines =
@@ -328,7 +328,7 @@ export const auroraUiSections = {
             "an outside-home Unicode cwd is cell-safe and retains its leaf",
           );
           for (const [columns, rows] of [
-            [40, 14],
+            [40, 12],
             [52, 14],
             [90, 28],
             [120, 30],
@@ -429,7 +429,28 @@ export const auroraUiSections = {
             line(100, {
               statuses: new Map([["verification", "Verify: verified"]]),
             }).includes("verified"),
-            "the comfortable footer reports a proven workspace",
+            "the footer reports a proven workspace when no dashboard owns it",
+          );
+          assert(
+            !line(100, {
+              statuses: new Map([["verification", "Verify: verified"]]),
+              dashboardVisible: true,
+            }).includes("verified"),
+            "a dashboard-owned routine verification is not duplicated in the footer",
+          );
+          assert(
+            line(100, {
+              statuses: new Map([["verification", "Verify: verified"]]),
+              dashboardVisible: false,
+            }).includes("verified"),
+            "the footer retains routine verification when a two-row dashboard uses its status row for live work",
+          );
+          assert(
+            !line(45, {
+              statuses: new Map([["verification", "Verify: verified"]]),
+              dashboardVisible: false,
+            }).includes("verified"),
+            "routine verification without a dashboard owner is metadata again — it yields to width tiers",
           );
           assert(
             line(45, { state: { lsp: { state: "eingeschränkt" } } }).includes(
@@ -1593,8 +1614,8 @@ export const auroraUiSections = {
         }
 
         // Dashboard modes: hidden restores the space, compact caps at two rows,
-        // auto is state-dependent. Each block pins its mode explicitly via the
-        // /dashboard command so the assertions never depend on test order.
+        // and auto is the responsive permanent default. Each block pins its mode
+        // explicitly via /dashboard so assertions never depend on test order.
         {
           const modeHarness = createHarness();
           auroraUi.default(modeHarness.api);
@@ -1612,15 +1633,15 @@ export const auroraUiSections = {
             },
             modeContext,
           );
-          const renderMode = () => {
+          const renderMode = (columns = 100, rows = 30) => {
             const factory =
               modeHarness.widgets.get("aurora-ui/activity")?.content;
             return typeof factory === "function"
               ? factory(
-                  { terminal: { columns: 100, rows: 30 }, requestRender() {} },
+                  { terminal: { columns, rows }, requestRender() {} },
                   modeContext.ui.theme,
                 )
-                  .render(100)
+                  .render(columns)
                   .map(stripAnsi)
               : [];
           };
@@ -1645,12 +1666,196 @@ export const auroraUiSections = {
           assert(
             autoMode.length > 0 &&
               autoMode.length <= 7 &&
-              autoMode[0].includes("ARBEITEN") &&
+              autoMode.some((line) => line.includes("Sitzung")) &&
+              autoMode.some((line) => line.includes("ARBEITET")) &&
               autoMode.some((line) => line.includes("Testen")),
-            "auto mode leads with the task line and keeps typed tool rows within budget",
+            "auto mode keeps the framed session overview and typed tool rows within budget",
+          );
+          const lowestStandardAuto = renderMode(52, 14);
+          assert(
+            lowestStandardAuto.length <= 7,
+            "auto mode preserves at least half of the smallest standard terminal for editor and footer",
           );
 
           await modeHarness.runHooks("session_shutdown", {}, modeContext);
+        }
+
+        // Routine success never becomes a critical footer segment merely
+        // because the compact live fallback has no room for it. At standard
+        // width the visible dashboard owns the duplicate-free report.
+        {
+          const footerHarness = createHarness();
+          auroraUi.default(footerHarness.api);
+          const footerContext = footerHarness.makeContext({
+            sessionId: "aurora-compact-footer",
+          });
+          await footerHarness.runHooks("session_start", {}, footerContext);
+          await footerHarness.runHooks("agent_start", {}, footerContext);
+          await footerHarness.runHooks(
+            "tool_execution_start",
+            {
+              toolCallId: "footer-tool",
+              toolName: "read",
+              args: { path: "README.md" },
+            },
+            footerContext,
+          );
+          const footerData = {
+            getExtensionStatuses: () =>
+              new Map([["verification", "Verify: verified"]]),
+            onBranchChange: () => () => {},
+          };
+          const compactFooter = footerHarness.footerFactory?.(
+            { terminal: { rows: 24 }, requestRender() {} },
+            footerContext.ui.theme,
+            footerData,
+          );
+          const standardFooter = footerHarness.footerFactory?.(
+            { terminal: { rows: 24 }, requestRender() {} },
+            footerContext.ui.theme,
+            footerData,
+          );
+          assert(
+            !stripAnsi(compactFooter?.render(40)[0] ?? "").includes("verified") &&
+              !stripAnsi(standardFooter?.render(100)[0] ?? "").includes(
+                "verified",
+              ),
+            "routine verification yields on compact terminals and is dashboard-owned at standard width",
+          );
+          await footerHarness.runHooks("session_shutdown", {}, footerContext);
+        }
+
+        // A subagent refreshes its branch before the tool hook publishes the
+        // coarser `tool` activity state. A synchronous render at that exact
+        // point must still show the factual active tool, not idle.
+        {
+          const raceHarness = createHarness();
+          auroraUi.default(raceHarness.api);
+          const raceContext = raceHarness.makeContext({
+            sessionId: "aurora-idle-tool-race",
+          });
+          await raceHarness.runHooks("session_start", {}, raceContext);
+          await raceHarness.runHooks("agent_start", {}, raceContext);
+          await raceHarness.runHooks("agent_settled", {}, raceContext);
+          const factory = raceHarness.widgets.get("aurora-ui/activity")?.content;
+          let renderedDuringRefresh = "";
+          let component;
+          if (typeof factory === "function") {
+            component = factory(
+              {
+                terminal: { columns: 100, rows: 30 },
+                requestRender() {
+                  renderedDuringRefresh = component
+                    .render(100)
+                    .map(stripAnsi)
+                    .join("\n");
+                },
+              },
+              raceContext.ui.theme,
+            );
+            await raceHarness.runHooks(
+              "tool_execution_start",
+              {
+                toolCallId: "idle-subagent",
+                toolName: "subagent",
+                args: { agent: "investigator" },
+              },
+              raceContext,
+            );
+          }
+          assert(
+            renderedDuringRefresh.includes("ARBEITET") &&
+              renderedDuringRefresh.includes("Subagent"),
+            "a synchronous subagent refresh keeps an active tool visible before the agent state updates",
+          );
+          await raceHarness.runHooks("session_shutdown", {}, raceContext);
+        }
+
+        // Diagnostics contract: a disabled instance must be a pure pass-through
+        // (normal sessions pay nothing), while an enabled instance counts,
+        // snapshots, and resets load counters without losing tick-interval
+        // configuration.
+        {
+          const diagContract = await load("extensions/aurora-ui/dev-diagnostics.ts");
+          if (diagContract) {
+            const expectedDefault =
+              process.env.PI_AURORA_DIAG === "1" ||
+              process.env.PI_AURORA_DIAG === "true";
+            eq(
+              diagContract.auroraDiagnostics.enabled,
+              expectedDefault,
+              "singleton enablement follows PI_AURORA_DIAG exactly",
+            );
+
+            const inert = diagContract.createAuroraDiagnostics({ enabled: false });
+            eq(inert.enabled, false, "explicitly disabled instance reports disabled");
+            const marker = { value: 42 };
+            eq(
+              inert.measure(() => marker),
+              marker,
+              "measure() passes through the result when disabled",
+            );
+            inert.recordDashboardRows(["a", "b"]);
+            inert.recordTickInterval(100);
+            eq(
+              JSON.stringify(inert.snapshot()),
+              JSON.stringify({
+                renderCount: 0,
+                totalRenderMs: 0,
+                maxRenderMs: 0,
+                lastDashboardRows: 0,
+                activeTickIntervalMs: null,
+              }),
+              "disabled diagnostics never record anything",
+            );
+            eq(inert.report(), undefined, "report() stays silent when disabled");
+
+            const active = diagContract.createAuroraDiagnostics({ enabled: true });
+            eq(active.enabled, true, "factory can enable an isolated instance");
+            let calls = 0;
+            active.measure(() => {
+              calls += 1;
+            });
+            active.measure(() => {
+              calls += 1;
+            });
+            eq(calls, 2, "measure() always runs the wrapped function");
+            eq(active.snapshot().renderCount, 2, "measure() counts each call");
+            const snap = active.snapshot();
+            assert(
+              snap.totalRenderMs >= 0 && snap.maxRenderMs >= 0,
+              "measure() records non-negative durations",
+            );
+            assert(
+              snap.maxRenderMs <= snap.totalRenderMs + 1e-9,
+              "max duration never exceeds the accumulated total",
+            );
+            active.recordDashboardRows(["x", "y", "z"]);
+            active.recordTickInterval(250);
+            eq(
+              active.snapshot().lastDashboardRows,
+              3,
+              "recordDashboardRows stores the row count",
+            );
+            eq(
+              active.snapshot().activeTickIntervalMs,
+              250,
+              "recordTickInterval stores the interval",
+            );
+            active.reset();
+            const afterReset = active.snapshot();
+            eq(afterReset.renderCount, 0, "reset() clears the render count");
+            eq(afterReset.lastDashboardRows, 0, "reset() clears dashboard rows");
+            eq(
+              afterReset.activeTickIntervalMs,
+              250,
+              "reset() keeps tick-interval configuration",
+            );
+            assert(typeof active.report() === "string", "report() renders a line when enabled");
+
+            const isolated = diagContract.createAuroraDiagnostics({ enabled: false });
+            eq(isolated.snapshot().renderCount, 0, "instances keep isolated state");
+          }
         }
 
         // Render-cost measurement (Phase-0 diagnostics). The widget re-renders
@@ -2666,7 +2871,7 @@ export const auroraUiSections = {
               "the compact dashboard preserves the current phase in two rows",
             );
 
-            // 8c. Auto-mode presentation matrix (02-target-behavior.md).
+            // 8c. Responsive permanent auto-dashboard matrix.
             const failedAuto = renderAutoDashboard(
               {
                 ...tvm,
@@ -2688,14 +2893,15 @@ export const auroraUiSections = {
             );
             const failedAutoText = failedAuto.map(stripAnsi).join("\n");
             assert(
-              failedAutoText.indexOf("PRÜFUNG FEHLGESCHLAGEN") !== -1 &&
-                failedAutoText.indexOf("PRÜFUNG FEHLGESCHLAGEN") <
+              failedAutoText.indexOf("Prüfung fehlgeschlagen") !== -1 &&
+                failedAutoText.indexOf("Prüfung fehlgeschlagen") <
                   failedAutoText.indexOf("ARBEITET"),
               "auto mode shows the failure verdict before routine activity",
             );
             assert(
-              failedAuto.some((line) => line.includes("ist fehlgeschlagen")),
-              "auto mode names the most relevant blocker",
+              failedAuto.some((line) => line.includes("ist fehlgeschlagen")) &&
+                !failedAutoText.includes("Prüfung · Nicht bereit"),
+              "auto mode names the most relevant blocker without duplicating its verdict",
             );
 
             const staleAuto = renderAutoDashboard(
@@ -2711,9 +2917,14 @@ export const auroraUiSections = {
               },
             );
             assert(
-              staleAuto.some((line) => stripAnsi(line).includes("UNGEPRÜFT")) &&
-                !staleAuto.some((line) => stripAnsi(line).includes("FERTIG")),
-              "a stale check is reported as unverified, never as finished",
+              staleAuto.some((line) =>
+                stripAnsi(line).includes("Prüfung offen"),
+              ) &&
+                !staleAuto.some((line) =>
+                  stripAnsi(line).includes("Prüfung · Offen"),
+                ) &&
+                !staleAuto.some((line) => stripAnsi(line).includes("Fertig")),
+              "a stale check is reported as open once, never as finished",
             );
 
             const changesAuto = renderAutoDashboard(
@@ -2741,9 +2952,11 @@ export const auroraUiSections = {
             assert(
               changesAuto.length <= 7 &&
                 changesAuto.some((line) =>
-                  stripAnsi(line).includes("Geändert (4)"),
-                ),
-              "completed changes become one compact summary row in auto mode",
+                  stripAnsi(line).includes("4 Dateien"),
+                ) &&
+                changesAuto.some((line) => stripAnsi(line).includes("+30 −5")) &&
+                changesAuto.some((line) => stripAnsi(line).includes("FERTIG")),
+              "idle sessions condense completed changes into one summary line under an uppercase phase badge",
             );
 
             const cleanIdleAuto = renderAutoDashboard(
@@ -2758,10 +2971,20 @@ export const auroraUiSections = {
                 verificationKnown: false,
               },
             );
-            eq(
-              cleanIdleAuto.length,
-              0,
-              "idle without changes or verification problem consumes no dashboard rows",
+            assert(
+              cleanIdleAuto.length > 0 &&
+                cleanIdleAuto.length <= 4 &&
+                cleanIdleAuto.some((line) => stripAnsi(line).includes("Sitzung")) &&
+                !stripAnsi(cleanIdleAuto.join("\n")).includes(
+                  "Noch keine Änderungen",
+                ) &&
+                !stripAnsi(cleanIdleAuto.join("\n")).includes(
+                  "Noch nicht ausgeführt",
+                ) &&
+                !stripAnsi(cleanIdleAuto.join("\n")).includes(
+                  "Bereit für die nächste Aufgabe",
+                ),
+              "an idle session without state keeps only the card frame plus its task row — no zero statements",
             );
 
             const narrowAuto = renderAutoDashboard(tvm, context.ui.theme, 40, {
@@ -2783,6 +3006,60 @@ export const auroraUiSections = {
               narrowAuto.length <= 2 &&
                 narrowAuto.every((line) => cellWidth(stripAnsi(line)) <= 40),
               "small terminals get at most two width-safe auto rows",
+            );
+
+            // 8d. The two-row fallback never spends a row on a zero statement.
+            const narrowIdleAuto = renderAutoDashboard(
+              tvm,
+              context.ui.theme,
+              40,
+              {
+                activityLines: [],
+                layout: "compact",
+                hasActiveWork: false,
+                verificationStale: false,
+                verificationKnown: false,
+              },
+            );
+            assert(
+              stripAnsi(narrowIdleAuto.join("\n")).includes("ARBEITEN") &&
+                !stripAnsi(narrowIdleAuto.join("\n")).includes(
+                  "Noch nicht ausgeführt",
+                ) &&
+                !stripAnsi(narrowIdleAuto.join("\n")).includes(
+                  "Noch nicht bereit",
+                ) &&
+                narrowIdleAuto.length === 1,
+              "a small idle terminal never spends its second auto row on an unrun-check statement",
+            );
+
+            const narrowSettledAuto = renderAutoDashboard(
+              {
+                ...tvm,
+                verification: { verdict: "READY" },
+                changesSummary: {
+                  filesCount: 3,
+                  files: ["src/a.ts", "src/b.ts", "src/c.ts"],
+                  linesAdded: 7,
+                  linesRemoved: 2,
+                },
+              },
+              context.ui.theme,
+              40,
+              {
+                activityLines: [],
+                layout: "compact",
+                hasActiveWork: false,
+                verificationStale: false,
+                verificationKnown: true,
+              },
+            );
+            const narrowSettledText = stripAnsi(narrowSettledAuto.join("\n"));
+            assert(
+              narrowSettledAuto.length === 2 &&
+                narrowSettledText.includes("+7") &&
+                narrowSettledText.includes("Prüfung · Bereit"),
+              "with real state present, the second compact row condenses changes plus verdict into one line",
             );
 
             // 8b. changesSummary flows into currentWork.changingFiles as the

@@ -13,6 +13,9 @@ import { fileURLToPath } from "node:url";
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ALLOWLIST = [
   "AGENTS.md",
+  // Runtime communication rules and prompt templates must behave identically
+  // in a checkout and a user installation.
+  "APPEND_SYSTEM.md",
   "README.md",
   "package.json",
   "settings.json",
@@ -22,6 +25,7 @@ const ALLOWLIST = [
   "subagent-tool-description.md",
   "agents",
   "docs",
+  "prompts",
   "extensions",
   "npm/package.json",
   "npm/package-lock.json",

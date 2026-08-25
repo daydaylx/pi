@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -22,7 +23,7 @@ export const setupCoreSections = {
         const defaults = setupConfig.defaultSetupConfig();
         eq(
           defaults.ui,
-          { theme: "aurora-night", motion: "contextual" },
+          { theme: "aurora-night", motion: "contextual", dashboard: "auto" },
           "Aurora is the central UI default",
         );
         eq(
@@ -644,6 +645,70 @@ export const setupCoreSections = {
               error instanceof Error,
               "project_check throws on a requested profile it cannot run without guessing commands",
             );
+          }
+
+          const verifiedWorkspace = mkdtempSync(
+            path.join(tmpdir(), "pi-project-check-snapshot-"),
+          );
+          try {
+            mkdirSync(path.join(verifiedWorkspace, ".pi"), { recursive: true });
+            writeFileSync(
+              path.join(verifiedWorkspace, ".pi", "verify.json"),
+              JSON.stringify({
+                profiles: {
+                  pass: {
+                    program: process.execPath,
+                    args: ["-e", ""],
+                    classification: "required",
+                  },
+                },
+              }),
+            );
+            // A workspace fingerprint only exists for a Git workspace; without
+            // it the snapshot helper yields nothing and the snapshot line
+            // degrades to the "unavailable" variant.
+            execFileSync("git", ["init", "--quiet"], { cwd: verifiedWorkspace });
+            execFileSync(
+              "git",
+              ["config", "user.email", "setup-core@example.test"],
+              { cwd: verifiedWorkspace },
+            );
+            execFileSync(
+              "git",
+              ["config", "user.name", "Setup Core Test"],
+              { cwd: verifiedWorkspace },
+            );
+            execFileSync("git", ["add", "-A"], { cwd: verifiedWorkspace });
+            execFileSync(
+              "git",
+              ["commit", "--quiet", "-m", "fixture"],
+              { cwd: verifiedWorkspace },
+            );
+            const result = await projectCheck.execute(
+              "project-check-snapshot",
+              { profile: "pass" },
+              undefined,
+              undefined,
+              harness.makeContext({ cwd: verifiedWorkspace, trusted: true }),
+            );
+            const text = result.content[0]?.text ?? "";
+            assert(
+              text.includes("Prüfstand: Workspace-Snapshot") &&
+                text.includes("versionierter HEAD nicht geprüft"),
+              "project_check identifies the exact workspace scope of its result",
+            );
+            eq(
+              result.details.verification.checkedVersionedHead,
+              false,
+              "project_check does not imply that versioned HEAD was checked",
+            );
+            assert(
+              typeof result.details.verification.checkedWorkspaceFingerprint ===
+                "string",
+              "project_check exposes the checked workspace fingerprint",
+            );
+          } finally {
+            rmSync(verifiedWorkspace, { recursive: true, force: true });
           }
         }
         assertNoGlobalChrome(harness, "setup core owns no TUI chrome");

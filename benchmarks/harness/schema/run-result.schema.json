@@ -45,9 +45,18 @@
               "type": "integer",
               "minimum": 0
             },
-            "total": {
+            "cacheRead": {
               "type": "integer",
               "minimum": 0
+            },
+            "cacheWrite": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "providerReportedTotal": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Raw usage.totalTokens; may include provider cache accounting."
             }
           }
         },
@@ -90,9 +99,18 @@
               "type": "integer",
               "minimum": 0
             },
-            "total": {
+            "cacheRead": {
               "type": "integer",
               "minimum": 0
+            },
+            "cacheWrite": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "providerReportedTotal": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Raw usage.totalTokens; may include provider cache accounting."
             }
           }
         },

@@ -639,6 +639,7 @@ export const resilienceSections = {
         [...harness.tools.keys()].sort(),
         [
           "ask_user",
+          "bash",
           "find",
           "grep",
           "ls",

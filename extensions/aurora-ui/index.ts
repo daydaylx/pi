@@ -7,7 +7,10 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import { layoutForSize } from "../shared/layout.ts";
+import {
+  dashboardOwnsVerification,
+  layoutForSize,
+} from "../shared/layout.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { readPlan } from "../plan-mode/plan-file.ts";
 import {
@@ -358,6 +361,11 @@ function activityPresentation(
       startedAt: lastRelevantActivityAt + WAITING_THRESHOLD_MS,
       label: "WARTET AUF MODELL",
     };
+  // Tool events are Aurora's factual activity source. A tool can reach the
+  // dashboard one frame before the coarser agent state changes, so never hide
+  // concrete work behind an inherited idle state.
+  if (activeTools > 0)
+    return { kind: "tool", startedAt: activityStartedAt, label: "ARBEITET" };
   switch (state.activity.kind) {
     case "thinking":
       return {
@@ -501,7 +509,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     lastTask = task;
 
     const activityLines: string[] = [];
-    if (state.activity.kind !== "idle") {
+    if (
+      state.activity.kind !== "idle" ||
+      toolViews.length > 0 ||
+      agentViews.length > 0
+    ) {
       const presentation = activityPresentation(
         state,
         activeTools.size,
@@ -986,13 +998,15 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
             cwd: sessionCwd,
             homeDirectory: sessionHome,
-            // "auto" never renders a routine verified/unchanged line of its
-            // own (renderAutoDashboard stays silent for idle-with-no-changes,
-            // and shows a changes summary rather than the verification text
-            // otherwise) — only compact/expanded always carry a verification
-            // panel, so only those may tell the footer to stand down.
-            dashboardVisible:
-              dashboardMode === "compact" || dashboardMode === "expanded",
+            // One shared rule decides whether a visible dashboard surface owns
+            // the routine verification report; the footer stays the escalation
+            // surface for risks either way.
+            dashboardVisible: dashboardOwnsVerification(
+              dashboardMode,
+              width,
+              tui.terminal?.rows ?? 24,
+              state.activity.kind !== "idle" || activeTools.size > 0,
+            ),
           });
         },
       };

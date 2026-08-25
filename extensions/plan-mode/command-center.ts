@@ -297,6 +297,7 @@ export async function openCommandCenter(
     {
       nonInteractiveHint: "Das Command Center benötigt den TUI-Modus.",
       headerShortcut: "Super+Q",
+      appearance: "command-center",
     },
   );
   if (!selected) return;

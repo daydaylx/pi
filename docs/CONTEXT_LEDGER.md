@@ -10,6 +10,18 @@
 
 ## Architekturentscheidungen
 
+- Aurora-Dashboard-Präsentation hat einen Besitzer: `ui.dashboard`
+  (`auto|compact|expanded|hidden`, Default `auto`) im zentralen Setup-Schema;
+  Umschaltung nur über `/dashboard` (Super+Q-Command-Center), kein neuer
+  Shortcut (`docs/decisions/019`). Phase und Verifikationsurteil werden getrennt
+  hergeleitet, teilen aber genau eine Staleness-Definition; `done` erfordert
+  idle plus aktuellen `READY`-Check, und nur ein real laufendes Verification-Tool
+  zeigt `Prüfen`. Routine-`verified` gehört dem sichtbaren Dashboard, nicht dem
+  Footer; failed/stale bleiben kritische Footer-Risiken. Der Fünfstufen-
+  Fortschrittsbalken existiert nur noch im Expanded-Modus. Quiet-Tools melden
+  sich neutral ohne Warnton. Renderentscheidungen (Ticker, Caching) folgen
+  Messwerten, nicht Annahmen — ein volles Widget-Frame kostet ~1 ms.
+
 - Aurora Night bleibt die aktive UI; die normalen Permission-Level und
   Trust-Grenzen bleiben erhalten.
 - Der Planmodus besitzt nur `work`, `simple_plan` und `detailed_plan`.
@@ -73,13 +85,32 @@
   Ripgrep-Aufrufe; Projekt-Skripte, `project_check` und `subagent` sind
   gesperrt. `yolo` bleibt die ausdrückliche Ausnahme
   (`docs/decisions/012`).
-- Das Compaction-Budget ist gemessen, nicht geschätzt (`docs/decisions/010`):
-  Reserve 49152, Recent 20000, Auslösung bei 81,9 % des Fensters. Entscheidend
-  ist, dass `reserveTokens` **zwei** Dinge zugleich steuert — die Schwelle und
-  das Summary-Budget (`0,8 × reserve`). Die frühere Reserve ließ nur 32768
-  Tokens Luft, während 25,3 % realer Turns um mehr als das wuchsen; ein
-  Überlauf ist nur einmal wiederherstellbar, danach ist der Turn verloren.
-  Werte sind im Runtime-Test gegen einen stillen Rückbau festgenagelt.
+- Ausgelieferte Erweiterungen müssen ohne Arbeitsbaum-Kontext laden: Ein
+  lexerbasierter Literal-Importcheck (`scripts/check-relative-imports.mjs`)
+  und ein Versioned-Tree-Check (`scripts/check-versioned-tree.mjs`,
+  `git archive HEAD` + Importcheck + Laden der aktiven Extensions) sichern
+  ab, dass kein `index.ts` eine unversionierte Datei importiert. Der Check
+  gilt nur für HEAD, nicht für den Arbeitsbaum, und ersetzt keine CI-Pipeline.
+- Tool-Receipts im Collapsed-Zustand sind informative Einzeilen
+  (`collapse-result.ts`): Fehler, Partial Output, Truncation und leere
+  Ergebnisse bleiben immer sichtbar beim nativen Renderer.
+- Tokenmetriken trennen Cache-Anteile: `cacheRead`/`cacheWrite` werden
+  separat summiert; `providerReportedTotal` ist das rohe `usage.totalTokens`
+  und darf Cache-Buchhaltung enthalten — es ist keine Formel aus
+  input+output+reasoning (`benchmarks/SCORING.md`,
+  `harness/schema/run-result.schema.json`).
+- `project_check` benennt seinen Prüfstand explizit: Das Ergebnis gilt für
+  den Workspace-Snapshot (Fingerprint), niemals automatisch für den
+  versionierten HEAD.
+- Der Nutzer-Installer liefert `APPEND_SYSTEM.md` und `prompts/` mit; die
+  Allowlist in `scripts/install-user.mjs` ist die einzige Quelle dafür.
+- `APPEND_SYSTEM.md` beschreibt phasenbasierte Narration, keine
+  Tool-für-Tool-Kommentierung.
+- Das Compaction-Budget ist gemessen (`docs/decisions/010`): Reserve 49152,
+  Recent 20000, Auslösung bei 81,9 % des Fensters. `reserveTokens` steuert
+  Schwelle und Summary-Budget (`0,8 × reserve`) zugleich; ein Überlauf ist nur
+  einmal wiederherstellbar. Die Werte sind im Runtime-Test gegen stillen
+  Rückbau festgenagelt (Upstream-Default: 20.000 Tokens).
 
 ## Nicht-Ziele
 
@@ -99,23 +130,15 @@
   (Testdateien und Altbestände in `src/`). Er ist deshalb nicht Teil einer
   Pflichtprüfung des Hauptrepos; seine Unit-, Integrations- und E2E-Suiten
   sind grün.
-- Für P2 liegen noch keine konkret priorisierten Befunde zu Restkomplexität,
-  Dokumentation oder Knip-Regeln vor; diese müssen vor einer Bereinigung
-  gezielt erhoben werden. Belegt ist bislang nur `tests/suites/runtime.mjs`
-  (5383 Zeilen, Stand dieses Commits); die Aufteilung kann die vorhandene
-  `SECTION_SUITES`-Registry als Schnittkante nutzen.
-- (Historisch, behoben.) Bis zum Repin auf `node 22.23.2` / `npm 10.9.8` in
-  `.nvmrc` und `engines` (Commit `432517c`) lief der lokale Host bereits auf
-  dieser Version, während `.nvmrc`/`engines` noch `22.22.2` / `10.9.7`
-  forderten — ein reiner Patch-Level-Unterschied ohne Versionsverwaltung, den
-  alle Suiten und die CI tolerierten. Der Repin hat diesen Host-vs-Pin-Abstand
-  geschlossen, aber `.github/workflows/verify.yml` und `lsp-smoke.yml` blieben
-  unverändert auf `node-version: 22.22.2` hart kodiert — die Abweichung
-  wanderte unbemerkt von „Host vs. Pin" zu „CI vs. Pin" und produzierte bei
-  jedem CI-Lauf eine ignorierte `EBADENGINE`-Warnung. Behoben: beide Workflows
-  lesen die Node-Version jetzt über `node-version-file: ".nvmrc"`, und
-  `npm ci` läuft mit `--engine-strict`, sodass eine künftige Abweichung den
-  Build hart fehlschlagen lässt statt nur zu warnen.
+- Für P2 fehlen priorisierte Befunde zu Restkomplexität, Dokumentation und
+  Knip-Regeln; belegt ist bislang nur `tests/suites/runtime.mjs` (5383
+  Zeilen) — die Aufteilung kann die `SECTION_SUITES`-Registry als
+  Schnittkante nutzen.
+- (Historisch, behoben.) Der Node-Pin-Drift wanderte unbemerkt von
+  „Host vs. Pin" zu „CI vs. Pin" (ignorierte `EBADENGINE`-Warnungen). Seit
+  Commit `432517c` lesen beide Workflows die Version aus `.nvmrc`, und
+  `npm ci` läuft mit `--engine-strict` — eine künftige Abweichung lässt den
+  Build hart fehlschlagen.
 - Der Live-Smoke ist aus einer nicht-interaktiven Umgebung nicht durchführbar.
   Aurora-Sichtbarkeit, Shift+Tab, der reale Plan→Work-Handoff und ein echter
   Subagent-Aufruf bleiben ohne authentifizierte TTY-Sitzung unbelegt
@@ -127,6 +150,9 @@
   bei allen unterstützten Git-Versionen gleich behandelt werden.
 - Zusätzliche Metriken oder Statushinweise können Schemakompatibilität,
   Tokenverbrauch und Warnungsdichte beeinträchtigen.
+- `extensions/aurora-ui/dev-diagnostics.ts` ist unversioniert, wird aber von
+  `index.ts` importiert: Bis zum Commit bleibt `check:versioned-tree` rot
+  und ein Ausliefern von HEAD reproduziert den CI-Verify-Failure #156.
 
 ## Offene Fragen
 
@@ -147,6 +173,9 @@ _Keine offenen Fragen._
 
 ## Aktuelle Prioritäten
 
+- Commit von `extensions/aurora-ui/dev-diagnostics.ts` (und der übrigen
+  Audit-Änderungen) — erst danach sind Versioned-Tree-Check und CI grün.
+  Commits nur auf ausdrücklichen Auftrag.
 - Der Live-Smoke ist der einzige offene P0-Punkt (`#137`). Ohne ihn bleibt der
   Stand `BEDINGT STABIL`, unabhängig davon, wie grün Verifikation und CI sind.
 - P2 erst danach: Konkrete Befunde zu Restkomplexität, Dokumentation und
@@ -166,3 +195,6 @@ _Keine offenen Fragen._
 - Ein großer allgemeiner Runtime-State, automatische `blocked`-Klassifikation
   und standardmäßig aktive Recovery-Nudges sind verworfen, bis Messdaten
   ihren Nutzen belegen.
+- Eine zweite vollständige Verify-Pipeline (z. B. ein eigener CI-Workflow
+  für den Arbeitsbaum) ist verworfen; stattdessen gibt es den schlanken
+  Versioned-Tree-Check plus den dokumentierten `git archive HEAD`-Weg.

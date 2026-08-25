@@ -18,8 +18,10 @@ npm run install:user -- --apply
 ```
 
 Standardziel ist `~/.pi/agent`; ein anderes Ziel wird mit `--target <pfad>`
-angegeben. Nach der Synchronisation die Abhängigkeiten im Zielverzeichnis
-installieren:
+angegeben. Die Synchronisation enthält auch `APPEND_SYSTEM.md` (phasenbasierte
+Kommunikationsregeln) und `prompts/`, damit Checkout und Installation dieselbe
+aktive Konfiguration verwenden. Nach der Synchronisation die Abhängigkeiten im
+Zielverzeichnis installieren:
 
 ```bash
 npm ci --prefix ~/.pi/agent/npm

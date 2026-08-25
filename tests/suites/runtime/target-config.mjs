@@ -60,36 +60,65 @@ export const targetConfigSections = {
           packageSources.includes("npm:pi-web-access@0.24.2"),
           "web access runtime remains exact-version-pinned",
         );
+        const subagentSettings = settings.subagents;
+        assert(
+          subagentSettings?.disableBuiltins === true,
+          "subagent builtins stay disabled in favor of the local role set",
+        );
+        const allowedSubagentModels = Array.isArray(
+          subagentSettings?.modelScope?.allow,
+        )
+          ? subagentSettings.modelScope.allow
+          : [];
+        assert(
+          subagentSettings?.modelScope?.enforce === true &&
+            allowedSubagentModels.length > 0,
+          "subagent model scope stays enabled with an allow list",
+        );
+        const isScopedSubagentModel = (model) =>
+          allowedSubagentModels.some((pattern) =>
+            pattern.endsWith("/*")
+              ? model.startsWith(pattern.slice(0, -1))
+              : model === pattern,
+          );
+        for (const role of ["investigator", "debugger", "verifier"]) {
+          const override = subagentSettings?.agentOverrides?.[role];
+          const model = override?.model;
+          const hasModel = typeof model === "string" && model.length > 0;
+          assert(hasModel, `${role} has an explicit model override`);
+          if (!hasModel) continue;
+          assert(
+            settings.enabledModels.includes(model),
+            `${role}'s model is enabled for Pi`,
+          );
+          assert(
+            isScopedSubagentModel(model),
+            `${role}'s model is allowed by the subagent scope`,
+          );
+          const fallbacks = override?.fallbackModels;
+          const hasFallbacks =
+            Array.isArray(fallbacks) && fallbacks.length > 0;
+          assert(hasFallbacks, `${role} has fallback models`);
+          if (!hasFallbacks) continue;
+          assert(
+            fallbacks.every(
+              (fallback) =>
+                typeof fallback === "string" &&
+                settings.enabledModels.includes(fallback) &&
+                isScopedSubagentModel(fallback),
+            ),
+            `${role}'s fallback models are enabled and in scope`,
+          );
+        }
         eq(
-          settings.subagents,
-          {
-            disableBuiltins: true,
-            agentOverrides: {
-              investigator: {
-                model: "qwen-token-plan-individual/qwen3.7-plus",
-                fallbackModels: ["qwen-token-plan-individual/qwen3.8-max"],
-              },
-              debugger: {
-                model: "qwen-token-plan-individual/glm-5.2",
-                thinking: "max",
-                fallbackModels: ["qwen-token-plan-individual/qwen3.8-max"],
-              },
-              verifier: {
-                model: "anthropic/claude-sonnet-5",
-                thinking: "max",
-                fallbackModels: ["openai-codex/gpt-5.6-terra"],
-              },
-            },
-            modelScope: {
-              enforce: true,
-              allow: [
-                "qwen-token-plan-individual/*",
-                "anthropic/claude-sonnet-5",
-                "openai-codex/gpt-5.6-terra",
-              ],
-            },
-          },
-          "subagent models, thinking and fallbacks live only in settings.json; investigator and debugger stay inside the Qwen Token Plan, verifier is a deliberate exception on Sonnet with a GPT Terra fallback",
+          subagentSettings?.agentOverrides?.debugger?.thinking,
+          "max",
+          "debugger retains the required maximum thinking level",
+        );
+        eq(
+          subagentSettings?.agentOverrides?.verifier?.thinking,
+          "max",
+          "verifier retains the required maximum thinking level",
         );
 
         // Compaction budget, measured rather than guessed (docs/decisions/010).
@@ -611,13 +640,28 @@ export const targetConfigSections = {
           ),
           "pi-subagents is pinned to an exact git-fork commit in the harness",
         );
-        assert(
-          typeof lock.packages?.["node_modules/pi-subagents"]?.resolved ===
-            "string" &&
-            lock.packages["node_modules/pi-subagents"].resolved.includes(
-              "daydaylx/pi-subagents.git#",
-            ),
-          "pi-subagents is locked to the daydaylx fork, not the npm registry",
+        const runtimePin = settings.packages.find(
+          (entry) =>
+            typeof entry === "string" &&
+            entry.startsWith("git:github.com/daydaylx/pi-subagents@"),
+        );
+        const runtimeHash = runtimePin?.match(/@([0-9a-f]{40})$/)?.[1];
+        const harnessHash = packageJson.dependencies?.["pi-subagents"]?.match(
+          /#([0-9a-f]{40})$/,
+        )?.[1];
+        const lockResolved = lock.packages?.["node_modules/pi-subagents"]?.resolved;
+        const lockHash = typeof lockResolved === "string"
+          ? lockResolved.match(/#([0-9a-f]{40})$/)?.[1]
+          : undefined;
+        eq(
+          runtimeHash,
+          harnessHash,
+          "settings.json and npm/package.json use the identical pi-subagents commit",
+        );
+        eq(
+          runtimeHash,
+          lockHash,
+          "settings.json and package-lock.json use the identical pi-subagents commit",
         );
         return;
       }

@@ -559,8 +559,11 @@ export default function setupCore(
         ),
         ...successReports.map((report) => renderReport(report)),
       ].join("\n\n");
+      const verificationTarget = checkSnapshot
+        ? `Prüfstand: Workspace-Snapshot ${checkSnapshot.fingerprint.slice(0, 12)} (versionierter HEAD nicht geprüft)`
+        : "Prüfstand: Workspace-Snapshot nicht verfügbar (versionierter HEAD nicht geprüft)";
       const limited = limitTextOutput(
-        `${text}\n\n${coverageLine(coverage.covered.length, coverage.total, coverage.missing)}`,
+        `${text}\n\n${coverageLine(coverage.covered.length, coverage.total, coverage.missing)}\n${verificationTarget}`,
       );
       if (evaluation.blocking) {
         toolError(limited.text);
@@ -577,6 +580,8 @@ export default function setupCore(
             missingRequiredIds: coverage.missing,
             blockingRecommendedIds: evaluation.blockingRecommendedIds,
             blocking: evaluation.blocking,
+            checkedWorkspaceFingerprint: checkSnapshot?.fingerprint ?? null,
+            checkedVersionedHead: false,
           },
           ...(limited.truncation ? { truncation: limited.truncation } : {}),
         },
