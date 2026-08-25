@@ -30,3 +30,6 @@ pi-debug.log
 
 # Lokale Arbeitsauftrags-Pakete
 pi-arbeitsauftraege-vereinfachung.zip
+
+# Agent-Sitzungs-Scratch (Pläne, Debug-Skripte) — nie Teil des Repos
+.agent/
