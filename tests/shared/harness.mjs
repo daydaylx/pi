@@ -141,7 +141,9 @@ export function createHarness(options = {}) {
   const theme = {
     name: "test-theme",
     fg: (_color, text) => String(text),
+    bg: (_color, text) => String(text),
     bold: (text) => String(text),
+    inverse: (text) => String(text),
   };
   const tui = {
     terminal: {

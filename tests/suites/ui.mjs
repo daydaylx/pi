@@ -844,4 +844,282 @@ export const uiSections = {
       // which the assertions above already cover.
     });
   },
+
+  "Aurora tiles and status pills": async (context) => {
+    const { section, load } = context;
+
+    await section("Aurora tiles and status pills", async () => {
+      const themeModule = await import(
+        pathToFileURL(
+          path.join(
+            ROOT,
+            "npm/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js",
+          ),
+        ).href
+      );
+      themeModule.initTheme("dark");
+      const theme = themeModule.getThemeByName("dark");
+      const { visibleWidth } = await import(
+        pathToFileURL(
+          path.join(
+            ROOT,
+            "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.js",
+          ),
+        ).href
+      );
+      const tile = await load("extensions/aurora-ui/tile.ts");
+      const renderers = await load("extensions/aurora-ui/tool-renderers.ts");
+      const startscreen = await load("extensions/aurora-ui/startscreen.ts");
+      const auroraFooter = await load("extensions/aurora-ui/footer.ts");
+      if (!theme || !tile || !renderers || !startscreen || !auroraFooter)
+        return;
+
+      const pendingBg = theme.getBgAnsi("toolPendingBg");
+      const successBg = theme.getBgAnsi("toolSuccessBg");
+      const errorBg = theme.getBgAnsi("toolErrorBg");
+      const selectedBg = theme.getBgAnsi("selectedBg");
+
+      // 1. A filled tile is one solid surface: every row has exactly the tile
+      // width in cells, and title plus body rows carry the fill background.
+      const card = tile.renderTile(theme, 60, {
+        title: "AUFGABE",
+        badge: "ARBEITEN",
+        tone: "accent",
+        fill: tile.NEUTRAL_TILE_FILL,
+        lines: [theme.bold("Titel der Aufgabe"), theme.fg("muted", "Ziel")],
+      });
+      eq(card.length, 4, "a tile is frame plus one row per content line");
+      assert(
+        card.every((row) => visibleWidth(row) === 60),
+        "every tile row spans exactly the tile width",
+      );
+      assert(
+        card[0].includes(pendingBg) && card[1].includes(pendingBg),
+        "the title row and body rows are painted with the fill background",
+      );
+
+      // 1b. A styled content line that gets truncated must not leave its
+      // colour open past the ellipsis: the tile-fill close only resets the
+      // background, never bold or foreground. Regression for a bug where a
+      // long, coloured title/goal line leaked its styling into the tile's
+      // border (and, in a two-column grid, into the neighbouring tile).
+      const longLine = theme.fg(
+        "muted",
+        "Ein wirklich sehr langer Text, der auf einer schmalen Kachel garantiert abgeschnitten wird",
+      );
+      const truncatedCard = tile.renderTile(theme, 30, {
+        title: "ZIEL",
+        tone: "accent",
+        fill: tile.NEUTRAL_TILE_FILL,
+        lines: [longLine],
+      });
+      const contentRow = truncatedCard[1];
+      assert(
+        stripAnsi(contentRow).includes("…"),
+        "the long line actually truncates at this width",
+      );
+      const fgOpens = contentRow.match(/\x1b\[38;2;[0-9;]*m/g) ?? [];
+      const fgCloses = contentRow.match(/\x1b\[39m/g) ?? [];
+      eq(
+        fgOpens.length,
+        fgCloses.length,
+        "a truncated styled line closes its foreground colour instead of leaking past the ellipsis",
+      );
+      eq(
+        tile.statusFill("success"),
+        "toolSuccessBg",
+        "a successful status paints the success surface",
+      );
+      eq(
+        tile.statusFill("error"),
+        "toolErrorBg",
+        "a failed status paints the error surface",
+      );
+      eq(
+        tile.statusFill("accent"),
+        tile.NEUTRAL_TILE_FILL,
+        "routine tones stay on the neutral card surface",
+      );
+
+      // 2. Pills: loud tones get a filled chip, routine tones stay flat.
+      const accentPill = tile.renderPill(theme, "ARBEITEN", "accent");
+      assert(
+        accentPill.includes(selectedBg) &&
+          stripAnsi(accentPill) === " ARBEITEN ",
+        "an accent pill is a padded chip on the selection surface",
+      );
+      const errorPill = tile.renderPill(theme, "⚠ YOLO", "error");
+      assert(
+        errorPill.includes(errorBg),
+        "an error pill is a padded chip on the error surface",
+      );
+      eq(
+        tile.renderPill(theme, "unwichtig", "muted"),
+        theme.fg("muted", "unwichtig"),
+        "a muted pill stays flat text",
+      );
+      eq(
+        tile.pillExtraCells("warning"),
+        2,
+        "a warning chip pays two padding cells",
+      );
+      eq(tile.pillExtraCells("muted"), 0, "a flat segment pays no padding");
+
+      // 3. The wide dashboard is a 2×2 card grid: paired tiles share one row.
+      const tvm = {
+        sessionEpoch: "tile-test",
+        phase: "work",
+        phaseLabel: "Arbeiten",
+        title: "Kacheln prüfen",
+        goal: "GUI-Optik",
+      };
+      const wideDashboard = renderers.renderDashboard(
+        tvm,
+        theme,
+        120,
+        { activityLines: ["ARBEITET · 3s"], maxRows: 14 },
+      );
+      const wideText = wideDashboard.map(stripAnsi);
+      assert(
+        wideText.some((line) => line.includes("╭")) &&
+          wideText.some((line) => line.includes("╰")),
+        "the wide dashboard keeps card frames",
+      );
+      assert(
+        wideText.some(
+          (line) => line.includes("AUFGABE") && line.includes("AKTIVITÄT"),
+        ),
+        "the wide dashboard pairs task and activity tiles on one row",
+      );
+      assert(
+        wideDashboard.some((line) => line.includes(pendingBg)),
+        "wide dashboard tiles carry the card fill",
+      );
+
+      // 4. Below the grid threshold the same tiles stack, and the compact
+      // dashboard stays frame-free.
+      const stackedDashboard = renderers.renderDashboard(
+        tvm,
+        theme,
+        80,
+        { activityLines: ["ARBEITET · 3s"], maxRows: 14 },
+      );
+      const stackedText = stackedDashboard.map(stripAnsi);
+      assert(
+        !stackedText.some(
+          (line) => line.includes("AUFGABE") && line.includes("AKTIVITÄT"),
+        ),
+        "below the wide threshold tiles stack instead of pairing",
+      );
+      const compactDashboard = renderers.renderDashboard(
+        tvm,
+        theme,
+        45,
+        { activityLines: ["ARBEITET"], maxRows: 2, compact: true },
+      );
+      assert(
+        compactDashboard.every((line) => !stripAnsi(line).includes("╭")),
+        "the compact dashboard keeps its frame-free rows",
+      );
+
+      // 5. A failed check owns the error surface and never disappears.
+      const failedDashboard = renderers.renderDashboard(
+        {
+          ...tvm,
+          verification: {
+            verdict: "NOT_READY",
+            criteria: [{ label: "Tests", status: "failed" }],
+            blockers: ["Pflichtprüfung fehlgeschlagen."],
+          },
+        },
+        theme,
+        120,
+        { activityLines: ["ARBEITET"], maxRows: 5 },
+      );
+      assert(
+        failedDashboard.some(
+          (line) => stripAnsi(line).includes("NICHT BEREIT"),
+        ) && failedDashboard.some((line) => line.includes(errorBg)),
+        "a failed check stays visible and paints the error surface",
+      );
+
+      // 6. The welcome window is a centered card with fields and chips.
+      for (const [columns, rows] of [
+        [52, 14],
+        [90, 28],
+        [120, 30],
+      ]) {
+        const welcome = startscreen.renderStartscreen(theme, {
+          width: columns,
+          rows,
+          workflow: "Work",
+          model: "aurora-test-model",
+          thinking: "high",
+          cwd: path.join(homedir(), "projects", "pi"),
+          homeDirectory: homedir(),
+        });
+        assert(
+          welcome.every((row) => visibleWidth(row) <= columns),
+          `the welcome card fits ${columns}×${rows} cells`,
+        );
+        assert(
+          welcome.some((row) => row.includes(pendingBg)) &&
+            stripAnsi(welcome.join("\n")).includes("WORKFLOW"),
+          `the welcome card is filled and carries labelled fields at ${columns}×${rows}`,
+        );
+      }
+
+      // 7. Overlong titles and goals never break the frame: every row stays
+      // within the dashboard width, cropped instead of overflowing.
+      const longTitle = renderers.renderDashboard(
+        {
+          ...tvm,
+          title: "Eine wirklich sehr lange Aufgabenstellung, die jeden Rahmen sprengen würde".repeat(
+            4,
+          ),
+          goal: "Ein ebenso langes Ziel, das vollständig in der Kachel bleiben muss".repeat(
+            4,
+          ),
+        },
+        theme,
+        120,
+        { activityLines: [], maxRows: 14 },
+      );
+      assert(
+        longTitle.every((row) => visibleWidth(row) <= 120) &&
+          stripAnsi(longTitle.join("\n")).includes("╭"),
+        "overlong titles and goals are cropped inside intact frames",
+      );
+
+      // 8. The footer upgrades workflow and risks to chips on wide tiers only.
+      const footerState = {
+        sessionEpoch: "tile-test",
+        workflow: { phase: "work", label: "Work" },
+        permissions: { level: "yolo" },
+        lsp: {},
+        model: { id: "aurora-test-model", thinking: "high" },
+        activity: { kind: "idle" },
+      };
+      const wideFooter = auroraFooter.renderFooterLines(theme, 140, {
+        state: footerState,
+        statuses: new Map(),
+        contextPercent: null,
+      })[0];
+      assert(
+        wideFooter.includes(selectedBg) && wideFooter.includes(errorBg),
+        "the wide footer paints the workflow chip and the YOLO risk chip",
+      );
+      const standardFooter = auroraFooter.renderFooterLines(theme, 70, {
+        state: footerState,
+        statuses: new Map(),
+        contextPercent: null,
+      })[0];
+      assert(
+        !standardFooter.includes(selectedBg) &&
+          !standardFooter.includes(errorBg) &&
+          stripAnsi(standardFooter).includes("⚠ YOLO"),
+        "the standard footer stays flat but keeps the YOLO risk visible",
+      );
+    });
+  },
 };

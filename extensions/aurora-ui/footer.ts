@@ -10,6 +10,7 @@ import {
 import { compactCwd } from "./cwd.ts";
 import { crop } from "./layout.ts";
 import type { AuroraUiState } from "./state.ts";
+import { pillExtraCells, renderPill } from "./tile.ts";
 import { thinkingLabel, thinkingTone } from "./thinking.ts";
 
 /**
@@ -280,14 +281,39 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
  * Terminal cells, not JavaScript characters. `⚠`, `✓`, CJK and emoji all cost
  * more cells than they do string length, and a selection that measured length
  * would believe a line fits and then have to truncate a finished segment at
- * the edge — the one thing this layout exists to avoid.
+ * the edge — the one thing this layout exists to avoid. Pills pay their two
+ * padding cells here too, so the width budget sees exactly what renders.
  */
-function widthOf(segments: readonly Segment[]): number {
+function widthOf(segments: readonly Segment[], pillTier: boolean): number {
   if (segments.length === 0) return 0;
   return (
-    segments.reduce((total, segment) => total + visibleWidth(segment.text), 0) +
-    visibleWidth(STATUS_SEPARATOR) * (segments.length - 1)
+    segments.reduce(
+      (total, segment) =>
+        total + visibleWidth(segment.text) + segmentCells(segment, pillTier),
+      0,
+    ) + visibleWidth(STATUS_SEPARATOR) * (segments.length - 1)
   );
+}
+
+/** Whether the footer renders segments as filled pills at this tier. */
+function isPillTier(tier: Layout): boolean {
+  return tier === "comfortable" || tier === "wide";
+}
+
+/**
+ * Whether this segment renders as a pill when the tier allows it: workflow
+ * identity and every critical risk; routine metadata never does. Shared by
+ * the width budget (`segmentCells`) and the actual render decision below, so
+ * the two can never silently drift apart.
+ */
+function isPillSegment(segment: Segment): boolean {
+  return segment.critical || segment.slot === Slot.workflow;
+}
+
+/** The extra cells a segment pays when it renders as a filled pill. */
+function segmentCells(segment: Segment, pillTier: boolean): number {
+  if (!pillTier || !isPillSegment(segment)) return 0;
+  return pillExtraCells(segment.tone);
 }
 
 /**
@@ -301,11 +327,13 @@ function selectFooterSegments(
   segments: readonly Segment[],
   width: number,
 ): Segment[] {
-  const allowed = ROUTINE_TIERS[footerTier(width)];
+  const tier = footerTier(width);
+  const pillTier = isPillTier(tier);
+  const allowed = ROUTINE_TIERS[tier];
   const kept = segments.filter(
     (segment) => segment.critical || allowed.has(segment.slot),
   );
-  while (kept.length > 1 && widthOf(kept) > width) {
+  while (kept.length > 1 && widthOf(kept, pillTier) > width) {
     let victim = 0;
     for (let index = 1; index < kept.length; index += 1)
       if (kept[index]!.priority > kept[victim]!.priority) victim = index;
@@ -324,12 +352,18 @@ export function renderFooterLines(
     collectSegments(input, available),
     available,
   );
+  // From comfortable width on, the workflow identity and every risk read as
+  // filled chips; routine metadata stays flat so the line never turns into a
+  // wall of colour. Narrow tiers keep the flat look entirely.
+  const pillTier = isPillTier(footerTier(available));
   const line = selected
     .map((segment) =>
-      renderSegment(theme, segment.text, {
-        tone: segment.tone,
-        bold: segment.bold,
-      }),
+      pillTier && isPillSegment(segment)
+        ? renderPill(theme, segment.text, segment.tone)
+        : renderSegment(theme, segment.text, {
+            tone: segment.tone,
+            bold: segment.bold,
+          }),
     )
     .join(statusSeparator(theme));
   return [visibleWidth(line) > available ? crop(line, available) : line];
