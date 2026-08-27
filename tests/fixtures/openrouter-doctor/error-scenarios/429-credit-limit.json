@@ -1,0 +1,1 @@
+{ "status": 429, "error": { "code": "insufficient_quota", "message": "You have exceeded your credit budget for this month" } }

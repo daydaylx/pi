@@ -14,6 +14,7 @@
     "extensions/session-health/index.ts",
     "extensions/frontend-protocol/index.ts",
     "extensions/frontend-bridge/index.ts",
+    "extensions/openrouter-doctor/index.ts",
     "tests/run-all.mjs",
     "tests/run.mjs",
     "tests/workflow-mode.mjs",
@@ -21,6 +22,7 @@
     "tests/p1-runtime.mjs",
     "tests/runtime-patches.mjs",
     "tests/**/*.test.mjs",
+    "tests/openrouter-doctor/live/manual-live-check.mjs",
     "scripts/*.mjs",
     "benchmarks/harness/**/*.mjs"
   ],

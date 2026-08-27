@@ -96,6 +96,7 @@ const recoveryState = await load("extensions/resilience/recovery-state.ts");
 const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
 const sessionHealthAnalyze = await load("extensions/session-health/analyze.ts");
 const sessionHealth = await load("extensions/session-health/index.ts");
+const openrouterDoctor = await load("extensions/openrouter-doctor/index.ts");
 
 const sections = {
   ...runtimeSections,
@@ -134,6 +135,7 @@ const context = {
   verifierPolicy,
   sessionHealthAnalyze,
   sessionHealth,
+  openrouterDoctor,
 };
 
 for (const name of Object.keys(SECTION_SUITES)) {

@@ -70,7 +70,37 @@ const suites = [
     file: "collapse-result.test.mjs",
     env: {},
   },
-  { name: "check-npm-audit", file: "check-npm-audit.test.mjs", env: {} }, 
+  { name: "check-npm-audit", file: "check-npm-audit.test.mjs", env: {} },
+  {
+    name: "openrouter-doctor-normalize-error",
+    file: "openrouter-doctor/unit/normalize-error.test.mjs",
+    env: {},
+  },
+  {
+    name: "openrouter-doctor-status",
+    file: "openrouter-doctor/unit/status.test.mjs",
+    env: {},
+  },
+  {
+    name: "openrouter-doctor-catalog",
+    file: "openrouter-doctor/unit/catalog.test.mjs",
+    env: {},
+  },
+  {
+    name: "openrouter-doctor-report",
+    file: "openrouter-doctor/unit/report.test.mjs",
+    env: {},
+  },
+  {
+    name: "openrouter-doctor-runner",
+    file: "openrouter-doctor/integration/runner.test.mjs",
+    env: {},
+  },
+  {
+    name: "openrouter-doctor-extension",
+    file: "openrouter-doctor/integration/extension.test.mjs",
+    env: {},
+  },
 ];
 
 for (const suite of suites) {

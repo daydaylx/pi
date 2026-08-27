@@ -1,0 +1,1 @@
+{ "status": 400, "error": { "code": "invalid_request", "message": "'reasoning' is not supported for this endpoint" } }

@@ -1,0 +1,1 @@
+{ "status": 429, "retryAfterSeconds": 20, "error": { "code": "rate_limit_exceeded", "message": "Rate limit exceeded, please retry later" } }

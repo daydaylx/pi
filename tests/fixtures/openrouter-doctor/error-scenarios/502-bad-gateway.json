@@ -1,0 +1,1 @@
+{ "status": 502, "error": { "code": "bad_gateway", "message": "Upstream provider returned an invalid response" } }

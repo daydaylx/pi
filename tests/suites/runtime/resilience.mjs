@@ -572,6 +572,7 @@ export const resilienceSections = {
       auroraUi,
       resilience,
       sessionHealth,
+      openrouterDoctor,
     } = context;
     const frontendBridge = await load("extensions/frontend-bridge/index.ts");
 
@@ -587,7 +588,8 @@ export const resilienceSections = {
         !compactTools ||
         !auroraUi ||
         !resilience ||
-        !sessionHealth
+        !sessionHealth ||
+        !openrouterDoctor
       )
         return;
       const factoryByExtension = {
@@ -603,6 +605,7 @@ export const resilienceSections = {
         "+extensions/resilience/index.ts": resilience.default,
         "+extensions/session-health/index.ts": sessionHealth.default,
         "+extensions/frontend-bridge/index.ts": frontendBridge.default,
+        "+extensions/openrouter-doctor/index.ts": openrouterDoctor.default,
       };
       const settings = JSON.parse(
         readFileSync(path.join(ROOT, "settings.json"), "utf8"),

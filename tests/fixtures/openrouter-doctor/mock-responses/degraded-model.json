@@ -1,0 +1,11 @@
+{
+  "data": [
+    {
+      "id": "stealth/ox-alpha",
+      "name": "Ox Alpha (stealth)",
+      "context_length": 65536,
+      "supported_parameters": ["tools", "tool_choice"],
+      "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] }
+    }
+  ]
+}
