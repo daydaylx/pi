@@ -503,7 +503,13 @@ export function createHarness(options = {}) {
           getAvailable() {
             return options.models ? Object.values(options.models) : [];
           },
+          async getApiKeyAndHeaders(model) {
+            if (typeof options.getApiKeyAndHeaders === "function")
+              return options.getApiKeyAndHeaders(model);
+            return { ok: true, apiKey: "test-key" };
+          },
         },
+        scopedModels: options.scopedModels ?? [],
         isIdle() {
           return idle;
         },

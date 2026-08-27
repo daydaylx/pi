@@ -199,6 +199,12 @@ const definitions = [
     "code",
   ],
   [
+    "openrouter-doctor",
+    "OpenRouter Doctor",
+    "OpenRouter-Modelle diagnostizieren",
+    "code",
+  ],
+  [
     "inspect",
     "Inspector",
     "Changes, Kontext, Verification, Modelle, Reasoning oder Diagnostics im Detail ansehen",

@@ -1,0 +1,11 @@
+{
+  "data": [
+    {
+      "id": "openai/gpt-oss-120b",
+      "name": "GPT-OSS 120B",
+      "context_length": 131072,
+      "supported_parameters": ["tools"],
+      "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] }
+    }
+  ]
+}

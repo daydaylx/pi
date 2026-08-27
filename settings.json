@@ -102,7 +102,8 @@
     "+extensions/compact-tools/index.ts",
     "+extensions/aurora-ui/index.ts",
     "+extensions/resilience/index.ts",
-    "+extensions/session-health/index.ts"
+    "+extensions/session-health/index.ts",
+    "+extensions/openrouter-doctor/index.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",

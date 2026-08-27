@@ -571,6 +571,7 @@ export const resilienceSections = {
       auroraUi,
       resilience,
       sessionHealth,
+      openrouterDoctor,
     } = context;
 
     await section("combined production extension stack", async () => {
@@ -585,7 +586,8 @@ export const resilienceSections = {
         !compactTools ||
         !auroraUi ||
         !resilience ||
-        !sessionHealth
+        !sessionHealth ||
+        !openrouterDoctor
       )
         return;
       const factoryByExtension = {
@@ -600,6 +602,7 @@ export const resilienceSections = {
         "+extensions/aurora-ui/index.ts": auroraUi.default,
         "+extensions/resilience/index.ts": resilience.default,
         "+extensions/session-health/index.ts": sessionHealth.default,
+        "+extensions/openrouter-doctor/index.ts": openrouterDoctor.default,
       };
       const settings = JSON.parse(
         readFileSync(path.join(ROOT, "settings.json"), "utf8"),
