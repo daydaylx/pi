@@ -2,88 +2,100 @@
 
 ## Aktuelle Arbeit
 
-Repository-Audit und gezielte Nachbesserungen (Plan:
-`.agent/plans/current-plan.md`, Ausgangs-HEAD `a25f1f7`). Ziel: ausgelieferte
-Importfehler verhindern, Aurora-/Dashboard-Tests stabilisieren, Tool-Ausgaben
-verbessern, Installer/Doku/Verifikation konsistent machen, Benchmark-
-Konfiguration prüfen. Der Arbeitsbaum enthielt bereits umfangreiche
-fremde Änderungen — sie wurden vollständig erhalten.
+Pi Desktop-GUI nach Auftragspaket `pi_gui_arbeitsauftrag/` (Plan:
+`.agent/plans/current-plan.md`). **Phasen 0–8 abgeschlossen — das
+Auftragspaket ist vollständig abgearbeitet.** Phase 8 wurde durch die
+ausdrückliche Nutzerentscheidung beendet: **Option B — `pi gui` wird
+bevorzugte Oberfläche, `pi` (Aurora-TUI) bleibt Fallback**
+(`docs/gui-baseline/phase-8-report.md`). Keine automatische TUI-Reduktion;
+beide Oberflächen laufen gegen denselben Core.
 
 ## Umgesetzt (dieser Auftrag)
 
-- **Release-Defekt beherrschbar gemacht**: Ursache von CI-Verify-Failure
-  #156 war `extensions/aurora-ui/index.ts` → `./dev-diagnostics.ts` ohne
-  versionierte Datei. Die Datei bleibt (inert ohne `PI_AURORA_DIAG=1`,
-  Vertragstests in der Runtime-Suite). Neu:
-  `scripts/check-relative-imports.mjs` (lexerbasierter Literal-Check, grün)
-  und `scripts/check-versioned-tree.mjs` (exportiert `HEAD`, prüft Imports,
-  lädt aktive Extensions). Gegen den aktuellen HEAD schlägt der Check
-  **erwartungsgemäß** fehl, bis `dev-diagnostics.ts` committet ist — das ist
-  der beabsichtigte Nachweis der Commit-Grenze. npm-Skripte
-  `check:imports`/`check:versioned-tree` vorhanden.
-- **Dashboard/UNVERIFIED**: `UNVERIFIED` erzeugt keine platzfressende
-  „Noch nicht bereit“-Zeile mehr; drei veraltete Runtime-Assertions an die
-  dokumentierte Präzedenz (Decision 019/README) angepasst.
-- **Compact-Tool-Receipts**: `collapse-result.ts` zeigt informative
-  Einzeilen-Receipts (read/grep/find/ls/write/bash) statt nur Ctrl+O-Hint;
-  Fehler, Partial Output, Truncation und leere Ergebnisse bleiben beim
-  nativen Renderer; `read`/`write` mit Collapser verdrahtet; 11 Receipt-Tests.
-- **Installer/Doku**: `APPEND_SYSTEM.md` auf phasenbasierte Narration
-  umgestellt; Installer-Allowlist umfasst jetzt `APPEND_SYSTEM.md` und
-  `prompts/` samt Installer-Test; README dokumentiert die
-  Installationsgleichheit; Manual-Smoke-Checkliste trennt
-  Arbeitsbaum-/HEAD-/CI-Nachweise und enthält Terminal-Matrix (Kitty,
-  WezTerm, Ghostty) plus manuelle GitHub-Ruleset-Anleitung; UX-Doku an das
-  tatsächliche Command-Center-Fuzzy-Filter- und Dashboard-Verhalten
-  angepasst; Decision-Index 010 auf 20.000-Token-Upstream-Default korrigiert.
-- **Verifikationsausgabe**: `project_check` nennt jetzt explizit den
-  Prüfstand („Workspace-Snapshot …, versionierter HEAD nicht geprüft“) in
-  Text und Details (`checkedWorkspaceFingerprint`, `checkedVersionedHead`);
-  Runtime-Test mit echtem Git-Temp-Repo.
-- **Benchmarks**: `p4-production-stack-manifest.json` auf Produktionsrollen
-  aus Settings plus 15 vorbereitete Baseline-Läufe erweitert (01/04/08 je
-  3×, Task 10 mit/ohne Subagent je 3×). Tokenmetrik präzisiert:
-  `cacheRead`/`cacheWrite` getrennt, `providerReportedTotal` = rohes
-  `usage.totalTokens` (kann Cache-Anteile enthalten, keine Formel aus
-  input+output+reasoning); SCORING.md korrigiert, Schema erweitert,
-  Aggregationstest ergänzt. **Keine kostenpflichtigen Provider-Läufe
-  gestartet** (Freigabe ausstehend).
-- **TUI-Grenzfälle**: Startscreen-Matrix um 40×12 ergänzt (52×14/90×28/
-  120×30 bereits vorhanden); Filter/Escape/Backspace/Long-Path-Fälle waren
-  bereits abgedeckt.
-- **Konsistenztest**: `pi-subagents`-Commit-Pin in `settings.json`,
-  `npm/package.json` und Lockfile wird auf Gleichheit geprüft.
-
-## Geänderte/Neue Dateien (dieser Auftrag)
-
-Neu: `scripts/check-relative-imports.mjs`, `scripts/check-versioned-tree.mjs`,
-`tests/check-relative-imports.test.mjs`, `tests/collapse-result.test.mjs`,
-`benchmarks/harness/test/collect-metrics.test.mjs`.
-Geändert: `extensions/aurora-ui/{tool-renderers,index,footer}.ts`,
-`extensions/compact-tools/{collapse-result,index}.ts`,
-`extensions/setup-core/index.ts`, `extensions/shared/layout.ts`,
-`benchmarks/harness/{collect-metrics.mjs,schema/run-result.schema.json,
-p4-production-stack-manifest.json}`, `benchmarks/SCORING.md`,
-`scripts/install-user.mjs`, `APPEND_SYSTEM.md`, `README.md`,
-`docs/manual-smoke-checklist.md`, `docs/pi_agent_ux_konzept.md`,
-`docs/decisions/README.md`, `npm/package.json`, `tests/run-all.mjs`,
-`tests/suites/runtime/{aurora-ui,installer,setup-core,target-config}.mjs`.
+- Schritt 0 (beauftragte Commits): `351da66` Aurora-Kachel-Paket,
+  `459733b` Alt-GUI-Plan entfernt + Auftragspaket + `.gitignore`.
+- Phase 0: Baseline-Artefakte in `docs/gui-baseline/` (Architektur inkl.
+  praktischem RPC-Test von `pi --mode rpc`, Shortcuts, Menü-/Command-
+  Katalog, State-Owner, Tests-Inventar) plus `phase-0-report.md` (PASS).
+- Phase 1: Kandidaten-Klone unter `git/github.com/`, Audit + Pflicht-
+  Prototyp (`phase-1-gui-candidate-audit.md`, RPC end-to-end grün;
+  stale-ctx-Fehler bei hartem Shutdown im aktiven Turn = Phase-3-Fix).
+  `phase-1-report.md` (PASS).
+- Phase 2: Neues Protokollmodul `extensions/frontend-protocol/` (v1.0.0):
+  Command-Registry (23 Einträge inkl. aller Pflicht-IDs, Targets
+  rpc/slash/local/bridge/tui mit dokumentierten Lücken), State-Schema
+  (12 Pflichtfelder mit Core-Besitzern), Event-Mapping (9 Pflicht-
+  ereignisse), Shortcut→Command-Mapping, Compatibility-Adapter. Kanäle/
+  Schemata aus `aurora-ui/state.ts` in den neutralen Vertrag verschoben,
+  Aurora behält Legacy-Aliase; alle sechs Publisher unverändert.
+  Neue Contract-Section (runtime) mit ~196 Assertions. `phase-2-report.md`
+  (PASS).
+- Phase 3: `gui/` Minimal-GUI — main (index/pi-rpc-manager/ipc-handlers/
+  preload.cjs), renderer (Chat, Streaming, kompakte Tool-Cards, Cancel,
+  Banner, Statusleiste, Inspector-Panel), Session-Resume via Verzeichnis-
+  liste + switch_session, Extension-UI-Dialoge (select/confirm/input)
+  nativ gerendert; Security: contextIsolation+sandbox+IPC-Whitelist+CSP.
+  `bin/pi-gui` Launcher + `bin/pi` Shim für wörtliches `pi gui`
+  (`phase-3-report.md`, PASS).
+- Phase 4: Shortcut-/Menü-Parität — Aktionstabelle mit Klick+Tasten-
+  Triggern aus shortcuts.json (Spiegel des Protokolls); Picker für
+  Modell/Denken, Command-Palette über get_commands, Slash-Flows für
+  Permission/Rollenmodelle; Paritätssuite 4 PASS. workflow.open/set als
+  sichtbare Bridge-Lücke dokumentiert (R13; Empfehlung: plan-mode ergänzt
+  `/workflow-set` als Extension-Command in Phase 5) (`phase-4-report.md`,
+  PASS).
+- Phase 5: Kernzustände aus dem Core — neue Bridge-Extension
+  `extensions/frontend-bridge/` (merged Bus-Zustände + Subagent-Events +
+  letzte Nutzereingabe, throttled Custom-Entries `frontend-bridge/state`
+  über `pi.appendEntry`, Epoch-Fallback für den RPC-Modus).
+  Pflichtfix Testmatrix D: Graceful-Stop in `PiRpcManager.stop()`
+  (Abort+Drain vor stdin-Ende) statt Runtime-Eingriff.
+  `/workflow-set <mode>` als plan-mode-Extension-Command (Katalogeintrag,
+  im Command Center bewusst ausgeblendet); Protokoll-Targets
+  workflow.open→local, workflow.set→/workflow-set, permissions.set→
+  /permission. Zustandsschema um task/subagents erweitert; Inspector +
+  Status-Chips zeigen Workflow/Aufgabe/Verification/Changes/Subagents/
+  Permissions/LSP aus Core-State. Neue Runtime-Section (Bridge-Transport,
+  Coverage 100 %) + Divergenztest im Contract; E2E mit Bridge-Assertion
+  PASS; xvfb-Smokes PASS (`phase-5-report.md`, PASS).
+- Phase 6: UX bewusst neu gestaltet — 3-Spalten-Layout (Navigation |
+  Conversation | Kontext), Chat als Hauptfläche, kompakte
+  Aktivitätszeilen statt Tool-Card-Wand (reines Modul
+  `gui/renderer/activity-summary.js`, unit-getestet), Zustände als
+  klickbare Kontext-Zeilen mit Detail-Panels auf Abruf, responsive
+  (Drawer ≤ 1080px, Initialen-Nav ≤ 760px). Alle Shortcuts unverändert
+  (Parität grün). Smoke prüft jetzt zusätzlich die Aktivitätszeile.
+  Unit 13/13, Parität 4/4, E2E PASS, xvfb-Smokes PASS
+  (`phase-6-report.md`, PASS).
+- Phase 7: Hardening — statisches Sicherheits-Gate `gui/test/security.mjs`
+  (8 Assertions), Crash-Suite `gui/test/stability.mjs` (5 Assertions),
+  globaler web-contents-created-Guard, Linux-Packaging via
+  `scripts/package-gui.mjs` (selbsttragendes Verzeichnis + tar.gz,
+  Smokes aus dem Paket PASS), Rollback-Doku. GUI-Tests gesamt 26/26
+  (`phase-7-report.md`, PASS).
+- Phase 8: Nutzungsentscheidung — Evaluationsbericht mit Evidenz
+  (Bewertungsfragen-Tabelle, Optionen A–D); ausdrückliche
+  Nutzerentscheidung für **Option B** (GUI bevorzugt, TUI Fallback).
+  Kein Code-Umbau: Aurora bleibt vollständig erhalten und getestet
+  (`phase-8-report.md`, ABGESCHLOSSEN).
 
 ## Letzte Verifikation
 
-`project_check({ profile: "verify" })`: Exit 0, Pflichtabdeckung 1/1.
-Runtime-Suite **1111/1111**, UI-Suite 96, workflow-mode 381, LSP 182, diff 22,
-Patches 50, Audit sauber; Prettier/Typecheck/Knip/Coverage grün.
-Advisory: diff-viewer Coverage 75 % über Floor (62 %) — nur Hinweis.
-`scripts/check-versioned-tree.mjs` schlägt gegen HEAD erwartungsgemäß fehl
-(unversioniertes `dev-diagnostics.ts`), bis committet wird.
+`project_check({ profile: "verify" })`: Exit 0, Pflichtabdeckung 1/1
+(Snapshot 58db4a2152ee). Runtime-Suite 1331/1331, UI-Suite 124,
+workflow-mode 381, LSP 182, diff 22, Patches 50, Audit sauber;
+Prettier/Typecheck/Knip/Coverage grün (frontend-bridge 19/19).
+Vollsuite 1656/1656. GUI-eigene Gates: Unit 8, Shortcut-Parität 5,
+Security 8, Stabilität 5, Bridge-E2E PASS, xvfb-Smokes plain+tools PASS
+(auch aus dem Linux-Paket). Live-TTY-Smoke weiterhin unbelegt (#137);
+Reports/Evidenz in docs/gui-baseline/.
 
 ## Nächste Schritte
 
-1. Nutzerentscheidung: Commit der Arbeitsbaumänderungen einfordern —
-   insbesondere `extensions/aurora-ui/dev-diagnostics.ts` versionieren;
-   erst danach wird `check:versioned-tree` grün und CI kann liefern.
-2. Manuellen Live-Smoke laut `docs/manual-smoke-checklist.md` in echter
-   TTY-Sitzung (Kitty/WezTerm/Ghostty) durchführen.
-3. Kostenpflichtige Benchmark-Baseline-Läufe nur nach expliziter
-   Kosten-/Laufzeitfreigabe starten (Manifest ist vorbereitet).
+1. Beobachtungspunkte aus Entscheidung B im Alltag verfolgen: reale
+   Nutzungshäufigkeit, RAM/Startzeit, Langzeit-Session-Stabilität; bei
+   Widerlegung ist der Wechsel zu A verlustfrei möglich.
+2. Manuelle Sichtprüfung an einem realen Desktop + Issue-Triage der
+   Kandidaten nachholen (weiter offen).
+3. Kein Commits ohne Auftrag; `settings.json` enthält eine fremde
+   Änderung (Subagent-Modelle), die vor einem Commit zu trennen ist.

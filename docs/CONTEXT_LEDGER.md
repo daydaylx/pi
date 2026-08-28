@@ -2,29 +2,48 @@
 
 ## Bestätigte Nutzerentscheidungen
 
-- `pi-harness-hardening-v2` wird schrittweise umgesetzt. Seine vier
-  Kernphasen sind Workspace-Snapshot, Verifikationsstatus, Trace-Diagnostik
-  und Tool-/Kontextqualität.
+- `pi-harness-hardening-v2` wird schrittweise umgesetzt: Workspace-Snapshot,
+  Verifikationsstatus, Trace-Diagnostik, Tool-/Kontextqualität.
 - Independent Verifier, Modellrouting, Compaction und Planmodus-Anomalien
   bleiben datengetriebene Experimente und sind keine Standardautomatik.
+- GUI-Nutzungsentscheidung (Phase 8): Option B — `pi gui` ist bevorzugte
+  Oberfläche, `pi` (Aurora) bleibt Fallback; keine automatische
+  TUI-Reduktion.
 
 ## Architekturentscheidungen
 
+- Pi-Desktop-GUI folgt `pi_gui_arbeitsauftrag/` (Phase 0–8, STOP-Gates).
+  Eigenbau-Minimal-Shell `gui/` (Electron 44, vanilla Renderer; Entscheidung
+  gegen den pi-desktop-Fork, dieser bleibt Referenz; unser mode-permissions/
+  ask-user-Stack bleibt Wahrheit; Security: contextIsolation+sandbox+
+  IPC-Whitelist+CSP; `pi gui` via bin/pi Shim). Phase 5: Kernzustände liefert
+  `extensions/frontend-bridge/` (throttled `frontend-bridge/state`-Entries
+  via pi.appendEntry, Epoch-Fallback für RPC); GUI-Stopp macht Abort+Drain
+  vor stdin-Ende (Testmatrix D). `/workflow-set` ist der kanonische
+  Direktsetzer (im Command Center ausgeblendet); `verification.run` bleibt
+  Lücke. Phase 6: 3-Spalten-UX (Navigation | Chat | Kontext), kompakte
+  Aktivitätszeilen, Details auf Abruf, responsive. Phase 7: statisches
+  Security- und Crash-Gate (reproduzierbar ohne Electron), Linux-Paket via
+  `scripts/package-gui.mjs`; Rollback ist additiv und TUI-verlustfrei.
+  Phase 8: Nutzerentscheidung B — GUI bevorzugt, Aurora bleibt Fallback.
+- Phase-2-Vertrag (`extensions/frontend-protocol/`, v1.0.0): Kanäle und
+  Schemata gehören dem neutralen Modul, aurora-ui/state.ts nur noch
+  Legacy-Aliase. Command-Registry (rpc/slash/local/bridge/tui); Bridge-
+  Lücken sind seit Phase 5 weitgehend geschlossen (offen: verification.run).
+  Baseline für Phase 2: Shortcuts→Commands in `shortcuts.ts` +
+  `command-catalog.ts`; Event-Bus `aurora-ui/state/*`.
 - Aurora-Dashboard-Präsentation hat einen Besitzer: `ui.dashboard`
   (`auto|compact|expanded|hidden`, Default `auto`) im zentralen Setup-Schema;
   Umschaltung nur über `/dashboard` (Super+Q-Command-Center), kein neuer
   Shortcut (`docs/decisions/019`). Phase und Verifikationsurteil werden getrennt
   hergeleitet, teilen aber genau eine Staleness-Definition; `done` erfordert
-  idle plus aktuellen `READY`-Check, und nur ein real laufendes Verification-Tool
-  zeigt `Prüfen`. Routine-`verified` gehört dem sichtbaren Dashboard, nicht dem
-  Footer; failed/stale bleiben kritische Footer-Risiken. Der Fünfstufen-
-  Fortschrittsbalken existiert nur noch im Expanded-Modus. Quiet-Tools melden
-  sich neutral ohne Warnton. Renderentscheidungen (Ticker, Caching) folgen
-  Messwerten, nicht Annahmen — ein volles Widget-Frame kostet ~1 ms.
+  idle plus aktuellen `READY`-Check. Routine-`verified` gehört dem Dashboard,
+  nicht dem Footer; failed/stale bleiben kritische Footer-Risiken.
+  Renderentscheidungen folgen Messwerten (~1 ms pro Widget-Frame).
 
 - Aurora Night bleibt die aktive UI; die normalen Permission-Level und
   Trust-Grenzen bleiben erhalten.
-- Der Planmodus besitzt nur `work`, `simple_plan` und `detailed_plan`.
+- Planmodus: nur `work`, `simple_plan`, `detailed_plan`;
   `.agent/plans/current-plan.md` ist unverbindlicher Markdown-Kontext.
 - P4 und der allgemeine Benchmark-Collector verwenden einen gemeinsamen,
   versionierten Workspace-Snapshot. Er erfasst `HEAD`, staged, unstaged und
@@ -32,30 +51,28 @@
   Dateiinhalte oder absoluten Pfade.
 - `project_check` ist der einzige Weg zur vollständigen Projektverifikation
   und der einzige, der Footer und Ledger fortschreibt. Das `verify`-Tool
-  bietet nur noch die schnellen Teilprüfungen `typecheck` und `test` an;
-  vorher boten beide denselben Befehl an, wovon aber nur `project_check` den
-  Status aktualisierte. Keines von beiden ist eine Abschlussbedingung.
+  bietet nur die Teilprüfungen `typecheck`/`test` (keine Abschlussbedingung).
 - CI-`verify` benötigt vollständige Git-Historie (`fetch-depth: 0`), weil
   `benchmarks/harness/p4-manifest.json` einen Referenz-Commit gegen die
-  lokale Historie prüft; ein flacher Checkout ließ CI unabhängig von
-  Codequalität rot laufen. `npm run test:runtime` ist bewusst nicht Teil der
+  lokale Historie prüft. `npm run test:runtime` ist bewusst nicht Teil der
   `verify`-Kette, da es eine entwicklerspezifisch gepatchte Runtime prüft.
 - Der Verifikationsstatus ist sitzungsgebunden, an den gemeinsamen
   Workspace-Snapshot gebunden und rein technisch. Er erscheint dedupliziert
   bei `agent_settled`, ist abschaltbar und nutzt weder `agent_end` als
   Erledigung noch Heuristiken als `blocked`.
 - Aurora besitzt Fußzeile und transientes Activity-Widget
-  (`docs/decisions/007`, `docs/decisions/009`). Die Fußzeile ist eine einzige
-  Zeile und die einzige permanente Statusfläche. Das Eingabefeld ist Pis
-  eigener Editor: Aurora installiert keine Editor-Komponente mehr
-  (`docs/decisions/013`), sodass `editorPaddingX` und
-  `autocompleteMaxVisible` aus `settings.json` wieder wirken. Subagenten
-  stehen im Activity-Widget, nicht in der Fußzeile.
+  (`docs/decisions/007`, `009`). Die Fußzeile ist eine Zeile und die einzige
+  permanente Statusfläche. Das Eingabefeld ist Pis eigener Editor
+  (`docs/decisions/013`). Subagenten stehen im Activity-Widget, nicht in der
+  Fußzeile.
 - Aurora animiert nur echte laufende Arbeit: `DENKT NACH` und `ARBEITET`
-  wechseln in `contextual` ihren Glyph, `ANTWORTET` und `WARTET AUF MODELL` bleiben
-  statisch und werden nur für die Laufzeitanzeige neu gezeichnet. Statuslabels,
-  Ton-Zuordnung und Overflow-Zusammenfassung liegen ausschließlich in
-  `extensions/aurora-ui/tool-renderers.ts`.
+  wechseln in `contextual` ihren Glyph, `ANTWORTET` und `WARTET AUF MODELL`
+  bleiben statisch. Statuslabels und Overflow-Zusammenfassung liegen
+  ausschließlich in `extensions/aurora-ui/tool-renderers.ts`.
+- Auroras GUI-Optik kommt aus `extensions/aurora-ui/tile.ts`: gefüllte
+  Kacheln, Felder, Status-Pills und ab `wide` ein zweispaltiges Grid.
+  Füllungen nur über die acht `Theme.bg`-Flächen; Warnton nutzt `inverse`.
+  Unter 18 Spalten fallen Kacheln auf rahmenlose Zeilen zurück.
 - Größenklassen für Menüs und Fußzeile stehen gemeinsam in
   `extensions/shared/layout.ts` (52×14 / 90×28 / 120×30) und werden nirgends
   als Literal wiederholt.
@@ -85,12 +102,11 @@
   Ripgrep-Aufrufe; Projekt-Skripte, `project_check` und `subagent` sind
   gesperrt. `yolo` bleibt die ausdrückliche Ausnahme
   (`docs/decisions/012`).
-- Ausgelieferte Erweiterungen müssen ohne Arbeitsbaum-Kontext laden: Ein
-  lexerbasierter Literal-Importcheck (`scripts/check-relative-imports.mjs`)
-  und ein Versioned-Tree-Check (`scripts/check-versioned-tree.mjs`,
-  `git archive HEAD` + Importcheck + Laden der aktiven Extensions) sichern
-  ab, dass kein `index.ts` eine unversionierte Datei importiert. Der Check
-  gilt nur für HEAD, nicht für den Arbeitsbaum, und ersetzt keine CI-Pipeline.
+- Ausgelieferte Erweiterungen müssen ohne Arbeitsbaum-Kontext laden:
+  Literal-Importcheck (`scripts/check-relative-imports.mjs`) und Versioned-
+  Tree-Check (`scripts/check-versioned-tree.mjs`, `git archive HEAD` +
+  Importcheck + Laden der aktiven Extensions) sichern, dass kein `index.ts`
+  eine unversionierte Datei importiert. Gilt nur für HEAD, ersetzt keine CI.
 - Tool-Receipts im Collapsed-Zustand sind informative Einzeilen
   (`collapse-result.ts`): Fehler, Partial Output, Truncation und leere
   Ergebnisse bleiben immer sichtbar beim nativen Renderer.
@@ -122,27 +138,19 @@
 
 ## Bekannte Einschränkungen
 
-- Kontrollierte Baseline- und Holdout-Läufe für die neue Snapshotlogik stehen
-  noch aus.
-- Vorbestehende Änderungen im Arbeitsbaum außerhalb des Hardening-Scopes
-  müssen erhalten bleiben.
+- Kontrollierte Baseline- und Holdout-Läufe für die neue Snapshotlogik stehen noch aus.
 - Der Fork `daydaylx/pi-subagents` ist im Typecheck vorbestehend rot
   (Testdateien und Altbestände in `src/`). Er ist deshalb nicht Teil einer
   Pflichtprüfung des Hauptrepos; seine Unit-, Integrations- und E2E-Suiten
   sind grün.
 - Für P2 fehlen priorisierte Befunde zu Restkomplexität, Dokumentation und
-  Knip-Regeln; belegt ist bislang nur `tests/suites/runtime.mjs` (5383
-  Zeilen) — die Aufteilung kann die `SECTION_SUITES`-Registry als
-  Schnittkante nutzen.
-- (Historisch, behoben.) Der Node-Pin-Drift wanderte unbemerkt von
-  „Host vs. Pin" zu „CI vs. Pin" (ignorierte `EBADENGINE`-Warnungen). Seit
-  Commit `432517c` lesen beide Workflows die Version aus `.nvmrc`, und
-  `npm ci` läuft mit `--engine-strict` — eine künftige Abweichung lässt den
-  Build hart fehlschlagen.
-- Der Live-Smoke ist aus einer nicht-interaktiven Umgebung nicht durchführbar.
-  Aurora-Sichtbarkeit, Shift+Tab, der reale Plan→Work-Handoff und ein echter
-  Subagent-Aufruf bleiben ohne authentifizierte TTY-Sitzung unbelegt
-  (`docs/manual-smoke-checklist.md`).
+  Knip-Regeln; belegt ist bislang nur `tests/suites/runtime.mjs` — die
+  Aufteilung kann die `SECTION_SUITES`-Registry als Schnittkante nutzen.
+- Der Live-Smoke ist ohne authentifizierte TTY nicht durchführbar; Aurora-
+  Sichtbarkeit, Shift+Tab, Plan→Work-Handoff und Subagent-Aufruf bleiben
+  unbelegt (`docs/manual-smoke-checklist.md`).
+- GUI-Kandidaten-Audit: GitHub-Issue-Triage beider Projekte fehlt; vor weiterer
+  Übernahme aus den Referenz-Forks nachholen (Klone shallow unter `git/github.com/`).
 
 ## Offene Risiken
 
@@ -173,28 +181,19 @@ _Keine offenen Fragen._
 
 ## Aktuelle Prioritäten
 
-- Commit von `extensions/aurora-ui/dev-diagnostics.ts` (und der übrigen
-  Audit-Änderungen) — erst danach sind Versioned-Tree-Check und CI grün.
-  Commits nur auf ausdrücklichen Auftrag.
-- Der Live-Smoke ist der einzige offene P0-Punkt (`#137`). Ohne ihn bleibt der
-  Stand `BEDINGT STABIL`, unabhängig davon, wie grün Verifikation und CI sind.
-- P2 erst danach: Konkrete Befunde zu Restkomplexität, Dokumentation und
-  Knip-Regeln erheben und daraus gezielte Folgearbeiten ableiten.
-- Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA. Vor jeder
-  Pin-Änderung die Erreichbarkeit manuell prüfen; die lokale Test-Suite bleibt
+- GUI-Projekt: Auftragspaket Phasen 0–8 abgeschlossen (Entscheidung B).
+  Offen: reale Nutzungsbeobachtung (RAM/Startzeit, Langzeit-Sessions),
+  Issue-Triage der Kandidaten, manuelle Sichtprüfung an einem Desktop.
+- Der Live-Smoke (#137) bleibt offener P0 für die TUI-Seite.
+- Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA, der
+  den alten Pin enthält — `main` ist nicht automatisch der neueste Stand.
+  Vor jeder Pin-Änderung Erreichbarkeit prüfen; die lokale Suite bleibt
   bewusst offline.
-- Erreichbarkeit allein genügt nicht: Ein neuer Pin muss den alten auch
-  enthalten. `main` des Forks ist nicht automatisch der neueste Stand — die
-  Arbeit liegt teils auf Themenbranches. Vor jeder Pin-Änderung
-  `compare/<alt>...<neu>` prüfen und nur setzen, wenn `behind_by` 0 ist.
-  Ein Rückschritt hat schon einmal unbemerkt einen Sicherheitsfix aus der
-  Auslieferung entfernt.
 
 ## Verworfene Optionen
 
 - Ein großer allgemeiner Runtime-State, automatische `blocked`-Klassifikation
   und standardmäßig aktive Recovery-Nudges sind verworfen, bis Messdaten
   ihren Nutzen belegen.
-- Eine zweite vollständige Verify-Pipeline (z. B. ein eigener CI-Workflow
-  für den Arbeitsbaum) ist verworfen; stattdessen gibt es den schlanken
-  Versioned-Tree-Check plus den dokumentierten `git archive HEAD`-Weg.
+- Eine zweite vollständige Verify-Pipeline ist verworfen; stattdessen gibt es
+  den schlanken Versioned-Tree-Check plus den `git archive HEAD`-Weg.
