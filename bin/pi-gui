@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Startet die Minimal-GUI gegen den installierten (gepatchten) pi.
+# Nutzung: bin/pi-gui [Electron-Argumente]
+#   --smoke        headless-Smoke ohne Werkzeugaufruf (für xvfb)
+#   --smoke-tools    headless-Smoke inkl. Read-Werkzeugaufruf
+#   --smoke-dialogs  intern für gui/test/dialog-smoke.mjs (Test-Fixture nötig)
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(dirname "$here")"
+
+cd "$repo"
+exec ./gui/node_modules/.bin/electron "$repo/gui" "$@"

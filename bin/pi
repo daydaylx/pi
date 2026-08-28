@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Shim für `pi gui`: leitet nur den Unterbefehl "gui" an die Minimal-GUI
+# weiter; alles andere geht unverändert an das echte pi-Binary.
+#
+# Nutzung (PATH erweitern):
+#   PATH="$PWD/bin:$PATH" pi gui
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "${1:-}" == "gui" ]]; then
+  shift
+  exec "$here/pi-gui" "$@"
+fi
+
+real="${PI_GUI_REAL_PI:-}"
+if [[ -z "$real" ]]; then
+  IFS=":" read -ra dirs <<<"${PATH}"
+  for dir in "${dirs[@]}"; do
+    [[ "$dir" == "$here" ]] && continue
+    if [[ -x "$dir/pi" ]]; then
+      real="$dir/pi"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$real" ]]; then
+  echo "pi: echtes pi-Binary nicht gefunden (PI_GUI_REAL_PI setzen)" >&2
+  exit 127
+fi
+exec "$real" "$@"

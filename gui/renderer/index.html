@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'"
+    />
+    <title>Pi</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header id="status-bar">
+      <span id="brand">Pi</span>
+      <span id="project-label" title="Aktuelles Projekt">—</span>
+      <span id="workflow-label" class="chip" title="Workflow">Work</span>
+      <span id="permission-label" class="chip" hidden></span>
+      <span class="spacer"></span>
+      <span id="status-dot" class="dot idle"></span>
+      <span id="status-text">Nicht verbunden</span>
+      <span id="model-label"></span>
+      <span id="thinking-label"></span>
+      <button id="btn-model" title="Modellwahl (Super+M / Strg+Alt+M)">
+        Modell
+      </button>
+      <button id="btn-thinking" title="Denktiefe (Super+D / Strg+Alt+D)">
+        Denken
+      </button>
+      <button id="btn-palette" title="Command-Palette (Super+Q)">
+        Befehle
+      </button>
+      <button id="btn-new-session" title="Neue Sitzung">Neu</button>
+    </header>
+
+    <main id="layout">
+      <nav id="side-nav" aria-label="Ansichten">
+        <button data-view="chat" class="nav-item active" title="Chat">
+          Chat
+        </button>
+        <button data-view="changes" class="nav-item" title="Änderungen">
+          Änderungen
+        </button>
+        <button data-view="agents" class="nav-item" title="Subagenten">
+          Agenten
+        </button>
+        <button data-view="verify" class="nav-item" title="Verifikation">
+          Verifikation
+        </button>
+        <button data-view="sessions" class="nav-item" title="Sitzungen">
+          Sitzungen
+        </button>
+      </nav>
+
+      <section id="conversation">
+        <section id="chat" aria-live="polite"></section>
+        <div id="banner" hidden></div>
+        <footer id="composer">
+          <textarea
+            id="input"
+            rows="3"
+            placeholder="Nachricht an Pi … (Enter sendet, Shift+Enter neue Zeile)"
+          ></textarea>
+          <div id="composer-buttons">
+            <button id="btn-send" class="primary">Senden</button>
+            <button id="btn-stop" disabled>Stopp</button>
+            <button id="btn-jump-latest" hidden>Neueste</button>
+          </div>
+        </footer>
+      </section>
+
+      <aside id="context-area">
+        <div id="context-overview">
+          <h2>Kontext</h2>
+          <div id="context-rows">Keine Daten.</div>
+          <button id="btn-refresh-context" title="Kontext aktualisieren">
+            Aktualisieren
+          </button>
+        </div>
+        <div id="context-panel" hidden>
+          <div id="context-panel-head">
+            <h2 id="context-panel-title"></h2>
+            <button id="btn-panel-back" title="Zur Übersicht">Übersicht</button>
+          </div>
+          <div id="context-panel-body"></div>
+        </div>
+      </aside>
+    </main>
+
+    <dialog id="picker-dialog">
+      <h2 id="picker-title"></h2>
+      <input id="picker-filter" placeholder="Filtern …" />
+      <ul id="picker-list"></ul>
+      <form method="dialog">
+        <button value="close">Schließen</button>
+      </form>
+    </dialog>
+
+    <script src="activity-summary.js"></script>
+    <script src="interaction-helpers.js"></script>
+    <script src="renderer.js"></script>
+  </body>
+</html>
