@@ -19,6 +19,8 @@ export const SECTION_SUITES = {
   "ask-user temporary dialog": "runtime",
   "shared menu shell navigation and rendering": "ui",
   "Aurora tiles and status pills": "ui",
+  "Frontend protocol contract v1": "runtime",
+  "frontend bridge core state transport": "runtime",
   "Aurora UI lifecycle and responsive surfaces": "runtime",
   "Aurora Inspector command": "runtime",
   "global shortcut regressions": "runtime",

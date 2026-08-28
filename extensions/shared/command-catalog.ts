@@ -66,6 +66,12 @@ const definitions = [
     "plan",
     ["plan-edit"],
   ],
+  [
+    "workflow-set",
+    "Workflow direkt setzen",
+    "Workflow-Modus ohne Selector setzen: work | simple_plan | detailed_plan",
+    "plan",
+  ],
 
   [
     "investigator",

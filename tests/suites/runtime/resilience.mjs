@@ -560,6 +560,7 @@ export const resilienceSections = {
   "combined production extension stack": async (context) => {
     const {
       section,
+      load,
       modePermissions,
       planMode,
       controlPlane,
@@ -572,6 +573,7 @@ export const resilienceSections = {
       resilience,
       sessionHealth,
     } = context;
+    const frontendBridge = await load("extensions/frontend-bridge/index.ts");
 
     await section("combined production extension stack", async () => {
       if (
@@ -600,6 +602,7 @@ export const resilienceSections = {
         "+extensions/aurora-ui/index.ts": auroraUi.default,
         "+extensions/resilience/index.ts": resilience.default,
         "+extensions/session-health/index.ts": sessionHealth.default,
+        "+extensions/frontend-bridge/index.ts": frontendBridge.default,
       };
       const settings = JSON.parse(
         readFileSync(path.join(ROOT, "settings.json"), "utf8"),

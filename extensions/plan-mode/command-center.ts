@@ -116,7 +116,12 @@ export function buildCommandCenterEntries(
     knownByCategory.set(category.id, []);
 
   for (const definition of COMMAND_DEFINITIONS) {
-    if (definition.name === "commands") continue;
+    // "commands" ist der Einstiegspunkt selbst; "workflow-set" ist ein
+    // programmatischer Direktsetzer für Frontends/RPC und wird bewusst nicht
+    // als alternative Workflow-Option im Command Center angeboten (der
+    // Workflow-Wechsel läuft über das Shift+Tab-Menü).
+    if (definition.name === "commands" || definition.name === "workflow-set")
+      continue;
     knownByCategory
       .get(definition.category)
       ?.push(commandEntry(definition, state));

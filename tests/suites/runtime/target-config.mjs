@@ -431,6 +431,7 @@ export const targetConfigSections = {
             "+extensions/aurora-ui/index.ts",
             "+extensions/resilience/index.ts",
             "+extensions/session-health/index.ts",
+            "+extensions/frontend-bridge/index.ts",
           ],
           "settings declare the dependency-safe local extension order",
         );
