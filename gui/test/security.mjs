@@ -117,3 +117,15 @@ test("Links im Markdown durchlaufen eine Schema-Positivliste", () => {
   assert.match(markdownSource, /SAFE_LINK_PROTOCOLS/);
   assert.match(markdownSource, /isSafeHref/);
 });
+
+test("Externe Links öffnen über eine main-seitig erneut geprüfte Positivliste, nie per In-App-Navigation", () => {
+  assert.match(ipcSource, /SAFE_EXTERNAL_PROTOCOLS/);
+  assert.match(ipcSource, /ipcMain\.handle\("gui:openExternal"/);
+  assert.match(ipcSource, /shell\.openExternal/);
+  assert.match(
+    preloadSource,
+    /openExternal: \(url\) => ipcRenderer\.invoke\("gui:openExternal", url\)/,
+  );
+  assert.match(rendererSource, /api\s*\n?\s*\.openExternal\(link\.href\)/);
+  assert.match(rendererSource, /event\.preventDefault\(\)/);
+});

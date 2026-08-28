@@ -5,6 +5,14 @@ darauf aufbauende Umsetzung von Phase 1–5 (Design-System, Layout,
 Chat-Rendering, Composer, Inspector) plus Teilen von Phase 6/7. Pi-Core,
 RPC-Vertrag, Aurora-TUI und das Sicherheitsmodell wurden nicht verändert.
 
+**Update nach Review von PR #145:** vier konkrete Punkte aus einer
+menschlichen Durchsicht wurden nachträglich behoben, bevor gemergt wird
+— Streaming-Markdown throttlen, externe Links tatsächlich öffnen, die
+verbliebene doppelte Inspector-Navigation entfernen, und die
+`#`-als-Kommentar-Heuristik im Codeblock-Highlighting auf Sprachen
+begrenzen, die das wirklich so handhaben. Details je Punkt unten in den
+Abschnitten 1 und 5/8.
+
 ## 1. Was wurde verändert?
 
 - **Design-System** (`gui/renderer/styles.css`): zentrale Tokens für
@@ -48,23 +56,64 @@ RPC-Vertrag, Aurora-TUI und das Sicherheitsmodell wurden nicht verändert.
   Top-Offset und überlappt den Header dadurch nicht mehr.
 - **Main-Prozess**: `gui:copyToClipboard` (neuer, gewhitelisteter
   IPC-Kanal über Electrons `clipboard`-Modul) für den Copy-Button;
+  `gui:openExternal` (neuer Kanal, siehe unten) für Markdown-Links;
   `listRecentSessions` in `main/ipc-handlers.js` läuft jetzt über
   `node:fs/promises` statt `readdirSync`/`statSync`/`readFileSync`
   (§21 — kein unnötiger Blocking-I/O mehr für den Sitzungslisting-Pfad).
+- **Streaming-Markdown throttlen** (Review-Fix): `text_delta`-Ereignisse
+  lösten vorher bei jedem Token einen vollständigen Markdown-Reparse +
+  DOM-Rebuild der Bubble aus (inkl. Neuaufbau aller Codeblock-DOM/Copy-
+  Buttons). Jetzt läuft der Stream über `streamAssistantText` +
+  `scheduleStreamRender` — ein Trailing-Throttle mit maximal einem
+  Rebuild pro 80ms, der letzte Text gewinnt. Der Abschluss
+  (`message_end`/Historie) läuft weiterhin über `setAssistantText`
+  und rendert sofort und exakt, unabhängig vom Throttle-Zeitpunkt.
+  Verifiziert per echtem Electron-Lauf: 150 simulierte Deltas über
+  ~630ms ergaben 8 Rebuilds statt 150, bei exakt korrektem Endtext.
+- **Externe Links öffnen tatsächlich** (Review-Fix): Markdown-Links
+  waren als `<a target="_blank">` klickbar gerendert, aber das Fenster
+  blockt jede Navigation/jedes neue Fenster (`main/index.js`) — ein
+  Klick tat vorher sichtbar nichts. Neuer Kanal `gui:openExternal`
+  (Main-Prozess, `shell.openExternal`) mit eigener, vom Renderer
+  unabhängiger Schema-Positivliste (`https:`/`http:`/`mailto:`); der
+  Renderer fängt Klicks auf `a[href]` im Chat ab, verhindert die
+  Default-Navigation und ruft den Kanal auf. Verifiziert per echtem
+  IPC-Roundtrip (Klick → Preload → Main → erfasste URL).
+- **Redundante Inspector-Navigation entfernt** (Review-Fix): die
+  Übersichtszeilen "Verifikation"/"Änderungen"/"Agenten" öffneten bis
+  hierhin noch dasselbe Detailpanel wie die Nav-Rail-Icons — eine
+  zweite Navigationsebene, die §2 der ursprünglichen Fassung dieses
+  Berichts fälschlich schon als erledigt auswies. Diese Zeilen sind
+  jetzt reine Statusanzeige (deaktivierter Button ohne die generische
+  Disabled-Abblendung); die Nav-Rail ist der einzige Weg zu den
+  Detailpanels. Workflow bleibt anklickbar (öffnet den Picker — eine
+  Aktion, keine Navigation).
+- **Codeblock-Highlighting: `#` nur noch dort ein Kommentar, wo es
+  einer ist** (Review-Fix): die Tokenisierung behandelte `#` bisher
+  sprachunabhängig als Zeilenkommentar, was CSS-Hexfarben
+  (`color: #fff`) und JS/TS-private Felder (`this.#state`) falsch
+  eingefärbt hätte (und den Rest der Zeile mitgerissen hätte). Die
+  Kommentar-Alternative im Tokenizer-Regex wird jetzt nur für Sprachen
+  gebaut, die `#` tatsächlich als Kommentar nutzen (Python, Bash/Shell,
+  Ruby, YAML, TOML, Dockerfile, Makefile, R, Perl, PowerShell).
 - **Tests**: `gui/test/markdown.mjs` (12 Parser-/XSS-Tests),
-  `gui/test/code-block.mjs` (6 Tokenizer-Tests), zwei neue Assertions
-  in `gui/test/security.mjs` (kein `innerHTML` in den neuen Modulen,
-  Assistant-Text läuft nachweisbar über den Markdown-Renderer), beide
-  neuen Dateien in `format-check.mjs` und `package.json#test` verdrahtet.
+  `gui/test/code-block.mjs` (8 Tokenizer-Tests, inkl. der beiden neuen
+  `#`-Regressionstests), vier neue Assertions in `gui/test/security.mjs`
+  (kein `innerHTML` in den neuen Modulen, Assistant-Text läuft
+  nachweisbar über den Markdown-Renderer, externe Links laufen über
+  die main-seitige Positivliste), beide neuen Dateien in
+  `format-check.mjs` und `package.json#test` verdrahtet.
 
 ## 2. Was wurde bewusst entfernt?
 
-- Die zweite Navigationsebene im Kontextbereich: vorher waren
-  "Änderungen"/"Agenten"/"Verifikation"/"Sitzungen" sowohl über die
-  linke Navigation als auch über anklickbare Zeilen in der
-  Kontext-Übersicht erreichbar. Die Übersichtszeilen bleiben als
-  Kurzstatus (Werte), aber die Navigation dorthin läuft jetzt
-  ausschließlich über die Icon-Rail.
+- Die zweite Navigationsebene im Kontextbereich: "Änderungen"/
+  "Agenten"/"Verifikation" waren sowohl über die linke Navigation als
+  auch über anklickbare Zeilen in der Kontext-Übersicht erreichbar
+  (dieselbe `openContextPanel`-Funktion). Die Übersichtszeilen bleiben
+  als Kurzstatus (Werte), sind aber nicht mehr klickbar — die
+  Navigation dorthin läuft jetzt ausschließlich über die Icon-Rail.
+  ("Sitzungen" hatte nie eine Übersichtszeile und war schon vorher nur
+  über die Rail erreichbar.)
 - Header-Buttons `#btn-model`/`#btn-thinking`: durch die
   Composer-Pills ersetzt, um dieselbe Information/Aktion nicht an zwei
   Stellen vorzuhalten (Header wirkte vorher wie ein Dashboard mit
@@ -102,10 +151,12 @@ RPC-Vertrag, Aurora-TUI und das Sicherheitsmodell wurden nicht verändert.
 
 ## 5. Welche bekannten Grenzen bestehen?
 
-- Streaming-Antworten rendern Markdown bei jedem Text-Delta komplett
-  neu (kein inkrementelles DOM-Patchen). Für normale Antwortlängen
-  unauffällig; bei sehr langen Live-Antworten mit vielen Codeblöcken
-  ein Beobachtungspunkt (siehe §7).
+- Streaming-Antworten rendern Markdown weiterhin komplett neu statt
+  inkrementell zu patchen — der Rebuild ist jetzt aber auf höchstens
+  einen pro 80ms throttled statt bei jedem Token zu laufen (siehe
+  Abschnitt 1). Für sehr lange Live-Antworten mit vielen Codeblöcken
+  bleibt echtes inkrementelles Patchen ein möglicher nächster Schritt,
+  ist aber kein akuter Performancefehler mehr.
 - Der Markdown-Parser ist bewusst kein vollständiger CommonMark-Parser
   (keine Referenz-Links, keine HTML-Block-Passthrough, einfache
   Verschachtelungstiefe bei Listen). Er deckt die in der Praxis
@@ -144,7 +195,8 @@ RPC-Vertrag, Aurora-TUI und das Sicherheitsmodell wurden nicht verändert.
   Quelltext-Grep als Monolith. Eine künftige Modularisierung muss diese
   Prüfungen auf die neuen Dateien verteilen, ohne ihre Aussagekraft zu
   schwächen.
-- Kein inkrementelles Markdown-Patching beim Streaming (siehe Punkt 5).
+- Kein inkrementelles Markdown-Patching beim Streaming — throttled statt
+  eliminiert (siehe Abschnitt 5).
 
 ## 7. Welche Punkte wurden bewusst nicht umgesetzt?
 
@@ -217,15 +269,50 @@ RPC-Vertrag, Aurora-TUI und das Sicherheitsmodell wurden nicht verändert.
   translateX(340px)` aus dem Sichtbereich verschoben; `--header-h`
   wechselt korrekt von 50.5px (einzeilig) auf 86.5px (umgebrochen bei
   640px Breite), und der Drawer-Top-Offset folgt diesem Wert live.
-- Nicht durchgeführt in diesem Durchlauf: Live-Modell-Smoke
-  (`npm run smoke`/`smoke:tools`) — in dieser Sandbox zwar über die
-  echte `api.anthropic.com`-Route erreichbar, aber ohne verifizierte
-  Auth-Konfiguration für den Smoke-Fixture-Wortlaut (`SMOKE-OK`)
-  reproduzierbar grün zu bekommen; `smoke:dialogs` (Fixture-basiert,
-  kein Modellzugriff nötig) wurde in diesem Durchlauf ebenfalls nicht
-  separat verifiziert. Beide sind laut `gui/README.md` ohnehin nicht
-  Teil von `npm run verify`, sondern Pflicht vor einem GUI-Release —
-  vor einem tatsächlichen Release nachzuholen.
+- **Review-Fixes gezielt nachgeprüft** (echter Electron-Prozess, echte
+  Preload-Bridge, echtes DOM/IPC, kein Mock): ein temporäres
+  Main-Skript (nicht Teil des Repos) hat drei konkrete Behauptungen
+  direkt gemessen statt nur zu behaupten:
+  1. **Streaming-Throttle**: 150 simulierte `text_delta`-Ereignisse in
+     ~2ms-Abstand (≈ Tokenrate eines echten Streams) über 628ms ergaben
+     **8 Markdown-Rebuilds statt 150** (`window.piGuiMarkdown.
+     renderMarkdown` instrumentiert), bei danach exakt korrektem
+     Endtext (`applyAssistantContent` überschreibt den Throttle beim
+     Abschluss sofort).
+  2. **Externe Links**: ein Klick auf einen `https://…`-Link im
+     gerenderten Chat löste über die echte Preload-Bridge einen echten
+     `gui:openExternal`-IPC-Aufruf mit exakt der erwarteten URL aus
+     (im Testprozess mit einem echten `ipcMain.handle`-Stub
+     abgefangen statt tatsächlich einen Browser zu öffnen); ein
+     `javascript:`-Link im selben Text wurde gar nicht erst als `<a>`
+     gerendert (nur 1 Anchor-Element für 2 Links im Quelltext).
+  3. **Inspector-Navigation**: nach dem Fix sind in der Übersicht nur
+     noch "Workflow" als klickbarer Button vorhanden; "Aufgabe",
+     "Verifikation", "Änderungen", "Agenten", "Kontext", "Modell" sind
+     `disabled` und behalten volle Deckkraft (`opacity: 1`, kein
+     ausgegrautes Erscheinungsbild).
+- **Live-Modell-Smoke (`npm run smoke`/`smoke:tools`) bleibt in dieser
+  Sandbox nicht erreichbar — Ursache geklärt, nicht nur vermutet.**
+  Direkte RPC-Diagnose (`PiRpcManager` isoliert angesprochen) zeigt:
+  das konfigurierte Modell ist `us.anthropic.claude-opus-4-6-v1` über
+  den Provider `amazon-bedrock`
+  (`https://bedrock-runtime.us-east-1.amazonaws.com`), nicht direkte
+  Anthropic-API. Der Sandbox-Proxy dieser Session erlaubt aber nur
+  `api.anthropic.com` (siehe Systemprompt-Netzwerkregeln), keine
+  AWS-Bedrock-Endpunkte. Der Turn läuft durch (`agent_settled`, kein
+  Fehler), liefert aber keinen einzigen `text_delta` — ein
+  Netzwerk-/Credential-Problem des Sandbox-Providers, keines der
+  GUI-Änderungen. `smoke:dialogs` (kein Modellzugriff nötig) scheitert
+  aus einem zweiten, unabhängigen Grund: diese Sandbox läuft als
+  root, und Electron verweigert unter root den Start ohne
+  `--no-sandbox` (`FATAL: Running as root without --no-sandbox is not
+  supported`); der ausgelieferte Launcher (`bin/pi-gui`) setzt dieses
+  Flag bewusst nicht (§19 — Sicherheit darf sich nicht verschlechtern,
+  und ein realer CI-Runner/Nutzer läuft nicht als root, dort greift
+  das Problem nicht). Beide Smokes sind laut `gui/README.md` ohnehin
+  nicht Teil von `npm run verify`, sondern Pflicht vor einem
+  GUI-Release auf einer Maschine ohne diese beiden
+  Sandbox-Eigenheiten.
 - DOM-Lasttest (100/500 Nachrichten) wurde nicht durchgeführt (siehe
   Punkt 7).
 

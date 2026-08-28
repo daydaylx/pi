@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld("piGui", {
   respondUiRequest: (payload) =>
     ipcRenderer.invoke("gui:respondUiRequest", payload),
   copyToClipboard: (text) => ipcRenderer.invoke("gui:copyToClipboard", text),
+  openExternal: (url) => ipcRenderer.invoke("gui:openExternal", url),
   onEvent: (callback) => {
     if (typeof callback !== "function") return;
     ipcRenderer.on("gui:event", (_event, payload) => callback(payload));

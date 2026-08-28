@@ -13,6 +13,10 @@ const { PiRpcManager, summarizeToolCall } = require("./pi-rpc-manager.js");
 
 const MAX_PROMPT_LENGTH = 100_000;
 const MAX_CLIPBOARD_LENGTH = 500_000;
+const MAX_URL_LENGTH = 2_048;
+/** Deckt sich bewusst mit chat/markdown.js SAFE_LINK_PROTOCOLS — der
+ * Main-Prozess vertraut der Renderer-Prüfung nicht und validiert erneut. */
+const SAFE_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
 
 /** Sessions-Basisverzeichnis — einzige Quelle für Listing UND Validierung
  * beim Wechseln (R14: kein Kanal darf großzügiger sein als sein Listing). */
@@ -421,6 +425,35 @@ function registerIpcHandlers(ipcMain, getWindow, shortcutsJson) {
     // (node:test) ladbar, ohne den echten Aufrufpfad zu ändern.
     require("electron").clipboard.writeText(text);
     return { copied: true };
+  });
+
+  /**
+   * Links im gerenderten Markdown (Phase 3): das Fenster blockt jede
+   * Navigation und jedes neue Fenster (siehe main/index.js), also muss
+   * ein Klick auf einen sicheren Link explizit über das OS geöffnet
+   * werden statt in-app zu navigieren. Zweite, unabhängige Prüfung
+   * gegen die Schema-Positivliste — der Renderer filtert bereits beim
+   * Rendern (chat/markdown.js), aber der Main-Prozess vertraut dem
+   * Renderer hier nicht blind (R14).
+   */
+  ipcMain.handle("gui:openExternal", async (_event, url) => {
+    if (typeof url !== "string" || url.length === 0) {
+      throw new Error("Ungültige URL");
+    }
+    if (url.length > MAX_URL_LENGTH) {
+      throw new Error("URL überschreitet die zulässige Länge");
+    }
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error("Ungültige URL");
+    }
+    if (!SAFE_EXTERNAL_PROTOCOLS.has(parsed.protocol)) {
+      throw new Error(`Nicht erlaubtes URL-Schema: ${parsed.protocol}`);
+    }
+    await require("electron").shell.openExternal(parsed.href);
+    return { opened: true };
   });
 }
 

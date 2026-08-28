@@ -354,6 +354,13 @@ button.ghost-button {
   background: var(--surface-2);
   border-color: var(--border);
 }
+/* Die meisten Übersichtszeilen sind reine Statusanzeige, kein
+   deaktivierter Button — volle Lesbarkeit statt der generischen
+   Disabled-Abblendung. */
+.context-row:disabled {
+  opacity: 1;
+  cursor: default;
+}
 .context-row .row-label {
   display: block;
   font-size: 10.5px;

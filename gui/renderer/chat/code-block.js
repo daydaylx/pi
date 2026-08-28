@@ -203,29 +203,61 @@ function normalizeLang(lang) {
   return LANG_ALIASES[l] || l;
 }
 
-const TOKEN_RE =
-  /(\/\/[^\n]*)|(#[^\n]*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)|(\s+)|([^\s\w]+)/g;
+// `#` is only a line comment in some languages (Python/shell/YAML/...); for
+// everything else it's ordinary punctuation (CSS hex colours, JS/TS private
+// class fields like `this.#state`). Building the alternative per language
+// keeps a false "#" match from swallowing the rest of the line as a
+// comment for languages where that would be wrong.
+const HASH_COMMENT_LANGS = new Set([
+  "python",
+  "bash",
+  "shell",
+  "ruby",
+  "yaml",
+  "toml",
+  "dockerfile",
+  "makefile",
+  "r",
+  "perl",
+  "powershell",
+]);
+
+function buildTokenRegex(language) {
+  const parts = ["(?<lineComment>\\/\\/[^\\n]*)"];
+  if (HASH_COMMENT_LANGS.has(language)) {
+    parts.push("(?<hashComment>#[^\\n]*)");
+  }
+  parts.push(
+    "(?<string>\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`)",
+    "(?<number>\\b\\d+(?:\\.\\d+)?\\b)",
+    "(?<word>[A-Za-z_][A-Za-z0-9_]*)",
+    "(?<space>\\s+)",
+    "(?<punct>[^\\s\\w]+)",
+  );
+  return new RegExp(parts.join("|"), "g");
+}
 
 /** Zerlegt Code in {text, cls}-Fragmente. `cls` ist null für unauffälligen Text. */
 function highlightTokens(code, lang) {
   const language = normalizeLang(lang);
   const keywords = new Set(KEYWORDS[language] || []);
   const source = String(code ?? "");
+  const tokenRe = buildTokenRegex(language);
   const tokens = [];
   let last = 0;
   let match;
-  TOKEN_RE.lastIndex = 0;
-  while ((match = TOKEN_RE.exec(source))) {
+  while ((match = tokenRe.exec(source))) {
     if (match.index > last)
       tokens.push({ text: source.slice(last, match.index), cls: null });
-    const [full, lineComment, hashComment, string, number, word] = match;
-    if (lineComment || hashComment) tokens.push({ text: full, cls: "cm" });
-    else if (string) tokens.push({ text: full, cls: "str" });
-    else if (number) tokens.push({ text: full, cls: "num" });
-    else if (word)
-      tokens.push({ text: full, cls: keywords.has(word) ? "kw" : null });
+    const g = match.groups;
+    const full = match[0];
+    if (g.lineComment || g.hashComment) tokens.push({ text: full, cls: "cm" });
+    else if (g.string) tokens.push({ text: full, cls: "str" });
+    else if (g.number) tokens.push({ text: full, cls: "num" });
+    else if (g.word)
+      tokens.push({ text: full, cls: keywords.has(g.word) ? "kw" : null });
     else tokens.push({ text: full, cls: null });
-    last = TOKEN_RE.lastIndex;
+    last = tokenRe.lastIndex;
   }
   if (last < source.length)
     tokens.push({ text: source.slice(last), cls: null });

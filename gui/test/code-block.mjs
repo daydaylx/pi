@@ -51,6 +51,24 @@ test("Unbekannte Sprache bricht nicht: keine Keywords markiert", () => {
   assert.equal(reassemble(tokens), "foo bar baz");
 });
 
+test("# ist nur in Hash-Kommentar-Sprachen ein Kommentar (nicht in JS/TS)", () => {
+  const code =
+    "class Foo {\n  #state = 1;\n  read() { return this.#state; }\n}";
+  const tokens = highlightTokens(code, "typescript");
+  assert.ok(
+    !tokens.some((t) => t.cls === "cm"),
+    "TypeScript-Quelltext mit privaten Feldern hat keine Kommentar-Tokens",
+  );
+  assert.equal(reassemble(tokens), code);
+});
+
+test("# in CSS-Hexfarben wird nicht als Kommentar verschluckt", () => {
+  const code = "body { color: #ffffff; background: #000; }";
+  const tokens = highlightTokens(code, "css");
+  assert.ok(!tokens.some((t) => t.cls === "cm"));
+  assert.equal(reassemble(tokens), code);
+});
+
 test("Sprach-Aliasse und Labels", () => {
   assert.equal(normalizeLang("js"), "javascript");
   assert.equal(normalizeLang("TS"), "typescript");

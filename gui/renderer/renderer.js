@@ -86,6 +86,9 @@ function scrollToBottom(force = false) {
 }
 
 function clearChat() {
+  if (state.currentAssistant?.pendingRenderTimer) {
+    clearTimeout(state.currentAssistant.pendingRenderTimer);
+  }
   chatEl.innerHTML = "";
   state.currentAssistant = null;
   state.pendingLocalEchoes = [];
@@ -135,7 +138,55 @@ function beginAssistantBlock() {
   bubble.className = "bubble";
   wrap.append(label, bubble);
   chatEl.appendChild(wrap);
-  return { wrap, bubble, text: "", thinking: "", thinkingView: null };
+  return {
+    wrap,
+    bubble,
+    text: "",
+    thinking: "",
+    thinkingView: null,
+    pendingRenderTimer: null,
+    lastRenderedAt: 0,
+  };
+}
+
+/**
+ * Streaming rendert Markdown bei jedem Token neu (Parser + volles
+ * Bubble-DOM), was bei langen Antworten mit vielen Codeblöcken spürbar
+ * teuer wird. Ein Trailing-Throttle begrenzt das auf höchstens einen
+ * Rebuild pro STREAM_RENDER_INTERVAL_MS, ohne Deltas zu verlieren: der
+ * jeweils letzte Text gewinnt, sobald das Intervall abgelaufen ist.
+ * `setAssistantText` (Abschluss/Historie) rendert weiterhin sofort.
+ */
+const STREAM_RENDER_INTERVAL_MS = 80;
+
+function scheduleStreamRender(block) {
+  const now = Date.now();
+  const elapsed = now - block.lastRenderedAt;
+  const fire = () => {
+    block.pendingRenderTimer = null;
+    block.lastRenderedAt = Date.now();
+    renderAssistantBubble(block.bubble, block.text);
+    scrollToBottom();
+  };
+  if (elapsed >= STREAM_RENDER_INTERVAL_MS) {
+    if (block.pendingRenderTimer) {
+      clearTimeout(block.pendingRenderTimer);
+      block.pendingRenderTimer = null;
+    }
+    fire();
+    return;
+  }
+  if (block.pendingRenderTimer) return;
+  block.pendingRenderTimer = setTimeout(
+    fire,
+    STREAM_RENDER_INTERVAL_MS - elapsed,
+  );
+}
+
+/** Live-Text-Delta: throttled statt bei jedem Token neu zu rendern. */
+function streamAssistantText(block, text) {
+  block.text = text;
+  scheduleStreamRender(block);
 }
 
 /** Reasoning bleibt sekundär (§12): kurze Zeile, Dauer erst beim Abschluss. */
@@ -179,6 +230,11 @@ function finalizeAssistantThinking(block, { live = false } = {}) {
 
 function setAssistantText(block, text) {
   block.text = text;
+  if (block.pendingRenderTimer) {
+    clearTimeout(block.pendingRenderTimer);
+    block.pendingRenderTimer = null;
+  }
+  block.lastRenderedAt = Date.now();
   renderAssistantBubble(block.bubble, text);
 }
 
@@ -290,11 +346,10 @@ function handleEvent(msg) {
       const ev = msg.assistantMessageEvent || {};
       if (!state.currentAssistant) break;
       if (ev.type === "text_delta") {
-        setAssistantText(
+        streamAssistantText(
           state.currentAssistant,
           state.currentAssistant.text + String(ev.delta ?? ""),
         );
-        scrollToBottom();
       } else if (ev.type === "thinking_delta") {
         setAssistantThinking(
           state.currentAssistant,
@@ -843,7 +898,6 @@ async function refreshContextOverview() {
         verificationPill(),
       raw: true,
       empty: !core?.verification?.status && !state.verificationStatus,
-      view: "verify",
     },
     {
       label: "Änderungen",
@@ -851,7 +905,6 @@ async function refreshContextOverview() {
         ? `${core.changes.filesCount} Dateien`
         : `${state.editedFiles.size} Dateien (Sitzung)`,
       empty: !core?.changes && state.editedFiles.size === 0,
-      view: "changes",
     },
     {
       label: "Agenten",
@@ -860,7 +913,6 @@ async function refreshContextOverview() {
           ? `${core.subagents.length} aktiv`
           : "keine",
       empty: !(core?.subagents?.length > 0),
-      view: "agents",
     },
     { label: "Kontext", value: contextPart, empty: contextPart === "—" },
     {
@@ -886,10 +938,12 @@ async function refreshContextOverview() {
       value.textContent = def.value;
     }
     button.append(label, value);
-    if (def.view) {
-      button.title = `${def.label} öffnen`;
-      button.addEventListener("click", () => openContextPanel(def.view));
-    } else if (def.label === "Workflow") {
+    // Die Übersicht ist nur eine kompakte Statuszeile (§6/§7): die einzige
+    // Navigation zu Changes/Agents/Verify/Sessions ist die Nav-Rail, damit
+    // hier keine zweite, konkurrierende Navigationsebene entsteht. Workflow
+    // bleibt anklickbar, weil das eine Aktion ist (Picker öffnen), keine
+    // Navigation zu einer anderen Ansicht.
+    if (def.label === "Workflow") {
       button.title = "Workflow wechseln";
       button.addEventListener("click", () => openWorkflowPicker());
     } else {
@@ -1307,6 +1361,22 @@ async function boot() {
     setFollowScroll(interactions.isNearBottom(chatEl));
   });
   el("btn-jump-latest").addEventListener("click", () => scrollToBottom(true));
+  // Markdown-Links (chat/markdown.js) sind echte <a>-Elemente, aber das
+  // Fenster blockt jede In-App-Navigation (main/index.js). Ohne diesen
+  // Handler sähen Links klickbar aus und würden nichts tun.
+  chatEl.addEventListener("click", (event) => {
+    const link =
+      event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!link || !chatEl.contains(link)) return;
+    event.preventDefault();
+    api
+      .openExternal(link.href)
+      .catch((error) =>
+        showBanner(
+          `Link konnte nicht geöffnet werden: ${error.message ?? error}`,
+        ),
+      );
+  });
 
   el("btn-send").addEventListener("click", () => {
     const text = inputEl.value;
