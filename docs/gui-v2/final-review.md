@@ -168,19 +168,33 @@ RPC-Vertrag, Aurora-TUI und das Sicherheitsmodell wurden nicht verändert.
 
 ## 8. Testergebnisse
 
-- `npm run verify` (Repo-Root): **1 vorbestehender, umgebungsbedingter
-  Fehltest außerhalb des GUI-Scopes** — `[setup core lifecycle] tracked
-  executor escalates to SIGKILL after the leader accepts SIGTERM` in
-  `tests/suites/runtime/setup-core.mjs`. Verifiziert: derselbe Test
-  schlägt identisch auf dem unveränderten `main`-Stand (Commit
-  `992a695`) in dieser Sandbox fehl (per `git worktree` gegengeprüft,
-  keine gui/docs-Änderung betroffen) — ein Timing-Test für
-  SIGTERM→SIGKILL-Eskalation, der unter diesem Container/dieser
-  Prozess-Isolation nicht wie erwartet reagiert. Kein GUI-v2-Regressions-
-  fund. Alle übrigen Verify-Schritte sind grün, einzeln nachvollzogen:
+- `npm run verify` (Repo-Root): **zwei vorbestehende, GUI-fremde
+  Fehltests**, beide außerhalb des GUI-Scopes und beide gegen den
+  unveränderten `main`-Stand (Commit `992a695`) per `git worktree`
+  gegengeprüft:
+  1. `[setup core lifecycle] tracked executor escalates to SIGKILL
+     after the leader accepts SIGTERM` (`tests/suites/runtime/
+     setup-core.mjs`) — ein sandbox-lokales Timing-Problem (SIGTERM→
+     SIGKILL-Eskalation reagiert unter diesem Container/dieser
+     Prozess-Isolation nicht wie erwartet). Läuft auf der tatsächlichen
+     CI-Runner-Umgebung (GitHub Actions) fehlerfrei durch (Runtime-Suite
+     dort 1339/1339) — reines Sandbox-Artefakt dieser Session, kein
+     CI-Befund.
+  2. `[Aurora tiles and status pills] a truncated styled line closes
+     its foreground colour instead of leaking past the ellipsis`
+     (`tests/suites/ui.mjs`) — ein echter, vorbestehender Bug in der
+     ANSI-Kürzungslogik der Aurora-Tile-Darstellung, reproduzierbar
+     sowohl in dieser Sandbox als auch auf dem echten CI-Runner
+     (GitHub Actions PR-Check, zweifach bestätigt), unabhängig vom
+     GUI-v2-Diff. Da dieser Auftrag Aurora explizit unangetastet lassen
+     soll, wurde er hier bewusst nicht mitgefixt; siehe PR-Kommentar
+     für die Gegenprüfung und das Angebot eines separaten Fix-PRs.
+  Beide Befunde sind auf dem PR (#145) dokumentiert. Alle übrigen
+  Verify-Schritte sind grün, einzeln nachvollzogen:
   `format:check` ✓, `typecheck` ✓, `deadcode` ✓, `test:coverage`
-  (1338/1339 bestanden, s. o.), `test:patches` ✓ (50/50), `test:gui` ✓
-  (vollständig, inkl. `format-check`, alle GUI-Unit-/Contract-/
+  (lokal 1338/1339, auf CI 1339 Runtime + 123/124 UI — jeweils nur der
+  oben genannte, GUI-fremde Befund fehlend), `test:patches` ✓ (50/50),
+  `test:gui` ✓ (vollständig, inkl. `format-check`, alle GUI-Unit-/Contract-/
   Security-/Stability-/Session-RPC-Tests), `audit:check` ✓.
 - `npm --prefix gui test`: alle Suiten grün — `unit.mjs`,
   `ipc-handlers.mjs`, `renderer-helpers.mjs`, `renderer-contract.mjs`,
