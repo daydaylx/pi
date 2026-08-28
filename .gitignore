@@ -33,3 +33,9 @@ pi-arbeitsauftraege-vereinfachung.zip
 
 # Agent-Sitzungs-Scratch (Pläne, Debug-Skripte) — nie Teil des Repos
 .agent/
+
+# GUI-Build-Artefakte (Eigenbau-Minimal-Shell)
+gui/node_modules/
+gui/.npm-cache/
+gui/.cache/
+dist/

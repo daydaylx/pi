@@ -12,6 +12,7 @@
     "test:coverage:baseline": "node ../tests/coverage.mjs --write-baseline",
     "test:runtime": "node ../tests/p1-runtime.mjs",
     "test:patches": "node ../tests/runtime-patches.mjs",
+    "test:gui": "node ../gui/test/format-check.mjs && npm --prefix ../gui test",
     "patch:runtime": "node ../scripts/apply-runtime-patches.mjs",
     "audit:check": "node ../scripts/check-npm-audit.mjs",
     "format": "prettier --write ..",
@@ -20,7 +21,7 @@
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
     "check:imports": "node ../scripts/check-relative-imports.mjs",
     "check:versioned-tree": "node ../scripts/check-versioned-tree.mjs",
-    "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run audit:check"
+    "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:gui && npm run audit:check"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
