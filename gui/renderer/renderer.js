@@ -93,6 +93,24 @@ function clearChat() {
   setFollowScroll(true);
 }
 
+/**
+ * Rendert eine Assistant-Antwort als sicheres Markdown (Phase 3, P0).
+ * `renderMarkdown` baut DOM ausschließlich über `createElement`/
+ * `textContent` (siehe chat/markdown.js) — kein `innerHTML` mit
+ * Modelltext, daher strukturell keine Injektionsfläche.
+ */
+function renderAssistantBubble(bubble, text) {
+  bubble.replaceChildren();
+  bubble.appendChild(
+    window.piGuiMarkdown.renderMarkdown(text, {
+      onCodeBlock: (lang, code) =>
+        window.piGuiCodeBlock.buildCodeBlock(lang, code, {
+          onCopy: (codeText) => api.copyToClipboard(codeText),
+        }),
+    }),
+  );
+}
+
 function appendUserBubble(text, { scroll = true } = {}) {
   const wrap = document.createElement("div");
   wrap.className = "msg user";
@@ -120,6 +138,7 @@ function beginAssistantBlock() {
   return { wrap, bubble, text: "", thinking: "", thinkingView: null };
 }
 
+/** Reasoning bleibt sekundär (§12): kurze Zeile, Dauer erst beim Abschluss. */
 function setAssistantThinking(block, text) {
   block.thinking = text;
   if (!text) {
@@ -128,26 +147,45 @@ function setAssistantThinking(block, text) {
     return;
   }
   if (!block.thinkingView) {
+    block.thinkingStartedAt = Date.now();
     const details = document.createElement("details");
     details.className = "thinking-block";
     const summary = document.createElement("summary");
-    summary.textContent = "Denken";
+    summary.textContent = "Denken …";
     const pre = document.createElement("pre");
+    pre.className = "mono";
     details.append(summary, pre);
     block.wrap.appendChild(details);
-    block.thinkingView = { details, pre };
+    block.thinkingView = { details, summary, pre };
   }
   block.thinkingView.pre.textContent = text;
 }
 
-function setAssistantText(block, text) {
-  block.text = text;
-  block.bubble.textContent = text;
+/** Live-Turns zeigen die gemessene Dauer; historische Nachrichten (aus
+ * geladenen Sitzungen) haben keine verlässliche Dauer und bleiben neutral. */
+function finalizeAssistantThinking(block, { live = false } = {}) {
+  const view = block.thinkingView;
+  if (!view) return;
+  if (live && block.thinkingStartedAt) {
+    const seconds = Math.max(
+      1,
+      Math.round((Date.now() - block.thinkingStartedAt) / 1000),
+    );
+    view.summary.textContent = `Denken · ${seconds}s`;
+  } else {
+    view.summary.textContent = "Denken";
+  }
 }
 
-function applyAssistantContent(block, content) {
+function setAssistantText(block, text) {
+  block.text = text;
+  renderAssistantBubble(block.bubble, text);
+}
+
+function applyAssistantContent(block, content, opts = {}) {
   setAssistantText(block, interactions.textFromContent(content).trim());
   setAssistantThinking(block, interactions.thinkingFromContent(content));
+  finalizeAssistantThinking(block, opts);
 }
 
 function appendAssistantMessage(message, { scroll = true } = {}) {
@@ -272,7 +310,9 @@ function handleEvent(msg) {
       if (message.role !== "assistant") break;
       if (!state.currentAssistant)
         state.currentAssistant = beginAssistantBlock();
-      applyAssistantContent(state.currentAssistant, message.content);
+      applyAssistantContent(state.currentAssistant, message.content, {
+        live: true,
+      });
       state.currentAssistant = null;
       scrollToBottom();
       break;
@@ -387,6 +427,7 @@ function refreshCoreChips() {
     permissionEl.textContent = core?.permissions?.label ?? "";
     permissionEl.hidden = !core?.permissions?.label;
   }
+  refreshComposerPills();
 }
 
 /* -------------------- Extension-UI-Anfragen (Dialoge) ------------------ */
@@ -986,10 +1027,27 @@ function applyRuntimeState(runtimeState) {
   state.modelLabel = runtimeState?.model ? `${runtimeState.model.name}` : "";
   state.thinkingLabel = runtimeState?.thinkingLevel ?? "";
   el("model-label").textContent = state.modelLabel;
-  el("thinking-label").textContent = state.thinkingLabel
-    ? `Denken ${state.thinkingLabel}`
-    : "";
   refreshStatusBar();
+  refreshComposerPills();
+}
+
+/** Composer-Pills (§13) spiegeln Workflow/Modell/Denken — mausbedienbar,
+ * ohne den Header mit denselben Werten doppelt zu belegen. */
+function refreshComposerPills() {
+  const workflowPill = el("pill-workflow");
+  const modelPill = el("pill-model");
+  const thinkingPill = el("pill-thinking");
+  if (workflowPill) {
+    workflowPill.textContent = state.core?.workflow?.label ?? "Work";
+  }
+  if (modelPill) {
+    modelPill.textContent = state.modelLabel || "Modell";
+  }
+  if (thinkingPill) {
+    thinkingPill.textContent = state.thinkingLabel
+      ? `Denken: ${state.thinkingLabel}`
+      : "Denken";
+  }
 }
 
 async function refreshStateLabels() {
@@ -1192,6 +1250,26 @@ function setupShortcuts() {
   });
 }
 
+/**
+ * §16-Fix: Der Header kann bei schmalen Fenstern umbrechen (mehrzeilig
+ * werden). `--header-h` darf dann keine feste Pixelannahme mehr sein,
+ * sonst überlappt der Inspector-Drawer den umgebrochenen Header. Statt
+ * eines CSS-Breakpoint-Ratens wird die tatsächliche Headerhöhe live
+ * gemessen und als CSS-Variable gespiegelt.
+ */
+function observeHeaderHeight() {
+  const header = el("status-bar");
+  if (!header || typeof ResizeObserver === "undefined") return;
+  const sync = () => {
+    document.documentElement.style.setProperty(
+      "--header-h",
+      `${Math.ceil(header.getBoundingClientRect().height)}px`,
+    );
+  };
+  new ResizeObserver(sync).observe(header);
+  sync();
+}
+
 /* -------------------------------- Boot --------------------------------- */
 
 async function boot() {
@@ -1249,9 +1327,11 @@ async function boot() {
     api.abort().catch(() => undefined);
   });
   el("btn-new-session").addEventListener("click", () => startFreshSession());
-  el("btn-model").addEventListener("click", () => openModelPicker());
-  el("btn-thinking").addEventListener("click", () => openThinkingPicker());
+  el("pill-workflow").addEventListener("click", () => openWorkflowPicker());
+  el("pill-model").addEventListener("click", () => openModelPicker());
+  el("pill-thinking").addEventListener("click", () => openThinkingPicker());
   el("btn-palette").addEventListener("click", () => openCommandPalette());
+  observeHeaderHeight();
 
   if (!isSmokeMode) {
     refreshProjectLabel();

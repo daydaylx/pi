@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("piGui", {
     ipcRenderer.invoke("gui:switchSession", sessionPath),
   respondUiRequest: (payload) =>
     ipcRenderer.invoke("gui:respondUiRequest", payload),
+  copyToClipboard: (text) => ipcRenderer.invoke("gui:copyToClipboard", text),
   onEvent: (callback) => {
     if (typeof callback !== "function") return;
     ipcRenderer.on("gui:event", (_event, payload) => callback(payload));

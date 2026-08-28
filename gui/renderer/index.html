@@ -11,43 +11,95 @@
   </head>
   <body>
     <header id="status-bar">
-      <span id="brand">Pi</span>
-      <span id="project-label" title="Aktuelles Projekt">—</span>
-      <span id="workflow-label" class="chip" title="Workflow">Work</span>
-      <span id="permission-label" class="chip" hidden></span>
-      <span class="spacer"></span>
-      <span id="status-dot" class="dot idle"></span>
-      <span id="status-text">Nicht verbunden</span>
-      <span id="model-label"></span>
-      <span id="thinking-label"></span>
-      <button id="btn-model" title="Modellwahl (Super+M / Strg+Alt+M)">
-        Modell
-      </button>
-      <button id="btn-thinking" title="Denktiefe (Super+D / Strg+Alt+D)">
-        Denken
-      </button>
-      <button id="btn-palette" title="Command-Palette (Super+Q)">
-        Befehle
-      </button>
-      <button id="btn-new-session" title="Neue Sitzung">Neu</button>
+      <div id="header-left">
+        <span id="brand">Pi</span>
+        <span id="project-label" title="Aktuelles Projekt">—</span>
+      </div>
+      <div id="header-center">
+        <span id="workflow-label" class="chip" title="Workflow">Work</span>
+        <span id="permission-label" class="chip chip-warn" hidden></span>
+      </div>
+      <div id="header-right">
+        <span id="model-label" class="header-model"></span>
+        <span id="status-dot" class="dot idle"></span>
+        <span id="status-text">Nicht verbunden</span>
+        <button
+          id="btn-palette"
+          class="icon-button"
+          title="Command-Palette (Super+Q)"
+        >
+          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+            <path d="M9 4l-4 16M17 4l-4 16M4 9h16M3 15h16" />
+          </svg>
+          <span class="sr-only">Befehle</span>
+        </button>
+        <button id="btn-new-session" title="Neue Sitzung">Neu</button>
+      </div>
     </header>
 
     <main id="layout">
       <nav id="side-nav" aria-label="Ansichten">
-        <button data-view="chat" class="nav-item active" title="Chat">
-          Chat
+        <button
+          data-view="chat"
+          class="nav-item active"
+          title="Chat"
+          aria-label="Chat"
+        >
+          <svg viewBox="0 0 24 24" class="nav-icon" aria-hidden="true">
+            <path
+              d="M4 5.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H9l-4.5 4V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"
+            />
+          </svg>
         </button>
-        <button data-view="changes" class="nav-item" title="Änderungen">
-          Änderungen
+        <button
+          data-view="changes"
+          class="nav-item"
+          title="Änderungen"
+          aria-label="Änderungen"
+        >
+          <svg viewBox="0 0 24 24" class="nav-icon" aria-hidden="true">
+            <path d="M7 3v7a3 3 0 0 0 3 3h7" />
+            <circle cx="7" cy="4" r="2" />
+            <circle cx="17" cy="14" r="2" />
+            <path d="M17 16v5" />
+            <circle cx="7" cy="19" r="2" />
+            <path d="M7 10v7" />
+          </svg>
         </button>
-        <button data-view="agents" class="nav-item" title="Subagenten">
-          Agenten
+        <button
+          data-view="agents"
+          class="nav-item"
+          title="Agenten"
+          aria-label="Agenten"
+        >
+          <svg viewBox="0 0 24 24" class="nav-icon" aria-hidden="true">
+            <circle cx="9" cy="8" r="3" />
+            <path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" />
+            <circle cx="17" cy="7" r="2.4" />
+            <path d="M15.5 13.2c2.6.4 4.5 2.6 4.5 5.3" />
+          </svg>
         </button>
-        <button data-view="verify" class="nav-item" title="Verifikation">
-          Verifikation
+        <button
+          data-view="verify"
+          class="nav-item"
+          title="Verifikation"
+          aria-label="Verifikation"
+        >
+          <svg viewBox="0 0 24 24" class="nav-icon" aria-hidden="true">
+            <path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6z" />
+            <path d="M9 12.5l2 2 4-4.5" />
+          </svg>
         </button>
-        <button data-view="sessions" class="nav-item" title="Sitzungen">
-          Sitzungen
+        <button
+          data-view="sessions"
+          class="nav-item"
+          title="Sitzungen"
+          aria-label="Sitzungen"
+        >
+          <svg viewBox="0 0 24 24" class="nav-icon" aria-hidden="true">
+            <circle cx="12" cy="12" r="8" />
+            <path d="M12 8v4l3 2" />
+          </svg>
         </button>
       </nav>
 
@@ -57,20 +109,50 @@
         <footer id="composer">
           <textarea
             id="input"
-            rows="3"
+            rows="2"
             placeholder="Nachricht an Pi … (Enter sendet, Shift+Enter neue Zeile)"
           ></textarea>
-          <div id="composer-buttons">
-            <button id="btn-send" class="primary">Senden</button>
-            <button id="btn-stop" disabled>Stopp</button>
-            <button id="btn-jump-latest" hidden>Neueste</button>
+          <div id="composer-toolbar">
+            <div id="composer-pills">
+              <button
+                id="pill-workflow"
+                class="pill-button"
+                type="button"
+                title="Workflow wechseln (Shift+Tab)"
+              >
+                Work
+              </button>
+              <button
+                id="pill-model"
+                class="pill-button"
+                type="button"
+                title="Modell wechseln (Super+M)"
+              >
+                Modell
+              </button>
+              <button
+                id="pill-thinking"
+                class="pill-button"
+                type="button"
+                title="Denktiefe wechseln (Super+D)"
+              >
+                Denken
+              </button>
+            </div>
+            <div id="composer-actions">
+              <button id="btn-jump-latest" class="ghost-button" hidden>
+                Neueste
+              </button>
+              <button id="btn-stop" class="ghost-button" disabled>Stopp</button>
+              <button id="btn-send" class="primary">Senden</button>
+            </div>
           </div>
         </footer>
       </section>
 
-      <aside id="context-area">
+      <aside id="context-area" aria-label="Inspector">
         <div id="context-overview">
-          <h2>Kontext</h2>
+          <h2>Inspector</h2>
           <div id="context-rows">Keine Daten.</div>
           <button id="btn-refresh-context" title="Kontext aktualisieren">
             Aktualisieren
@@ -78,8 +160,10 @@
         </div>
         <div id="context-panel" hidden>
           <div id="context-panel-head">
+            <button id="btn-panel-back" title="Zur Übersicht">
+              ← Übersicht
+            </button>
             <h2 id="context-panel-title"></h2>
-            <button id="btn-panel-back" title="Zur Übersicht">Übersicht</button>
           </div>
           <div id="context-panel-body"></div>
         </div>
@@ -95,6 +179,8 @@
       </form>
     </dialog>
 
+    <script src="chat/markdown.js"></script>
+    <script src="chat/code-block.js"></script>
     <script src="activity-summary.js"></script>
     <script src="interaction-helpers.js"></script>
     <script src="renderer.js"></script>

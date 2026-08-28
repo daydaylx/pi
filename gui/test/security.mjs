@@ -19,6 +19,8 @@ const ipcSource = read("main/ipc-handlers.js");
 const managerSource = read("main/pi-rpc-manager.js");
 const htmlSource = read("renderer/index.html");
 const rendererSource = read("renderer/renderer.js");
+const markdownSource = read("renderer/chat/markdown.js");
+const codeBlockSource = read("renderer/chat/code-block.js");
 const bridgeSource = read("../extensions/frontend-bridge/index.ts");
 
 test("Fenster läuft mit härtester Isolation", () => {
@@ -87,4 +89,31 @@ test("Keine Geheimnisse oder Umgebungsvariablen im Renderer", () => {
   assert.doesNotMatch(rendererSource, /process\.env/);
   assert.doesNotMatch(rendererSource, /API[_-]?KEY/i);
   assert.doesNotMatch(rendererSource, /readFileSync/);
+});
+
+/**
+ * XSS-Schutz für Markdown (Phase 3, P0): Die eigentliche Garantie ist
+ * strukturell, nicht Escaping — kein Codepfad in diesen Dateien darf
+ * Modelltext jemals über `innerHTML`/`outerHTML`/`document.write` in DOM
+ * verwandeln. Jeder Knoten entsteht über `createElement`/`textContent`/
+ * `createTextNode`, siehe chat/markdown.js.
+ */
+test("Markdown- und Codeblock-Renderer verwenden nie innerHTML mit Modelltext", () => {
+  assert.doesNotMatch(markdownSource, /\.innerHTML\s*=/);
+  assert.doesNotMatch(markdownSource, /\.outerHTML\s*=/);
+  assert.doesNotMatch(markdownSource, /document\.write/);
+  assert.doesNotMatch(codeBlockSource, /\.innerHTML\s*=/);
+  assert.doesNotMatch(codeBlockSource, /\.outerHTML\s*=/);
+  assert.doesNotMatch(codeBlockSource, /document\.write/);
+});
+
+test("Assistant-Antworten laufen über den sicheren Markdown-Renderer, nie über textContent-Rohtext", () => {
+  assert.match(rendererSource, /renderAssistantBubble/);
+  assert.match(rendererSource, /window\.piGuiMarkdown\.renderMarkdown/);
+  assert.doesNotMatch(rendererSource, /block\.bubble\.textContent\s*=/);
+});
+
+test("Links im Markdown durchlaufen eine Schema-Positivliste", () => {
+  assert.match(markdownSource, /SAFE_LINK_PROTOCOLS/);
+  assert.match(markdownSource, /isSafeHref/);
 });

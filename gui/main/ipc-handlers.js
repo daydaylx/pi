@@ -7,16 +7,12 @@
 
 const path = require("node:path");
 const os = require("node:os");
-const {
-  existsSync,
-  readdirSync,
-  statSync,
-  readFileSync,
-  realpathSync,
-} = require("node:fs");
+const { existsSync, realpathSync } = require("node:fs");
+const fsPromises = require("node:fs/promises");
 const { PiRpcManager, summarizeToolCall } = require("./pi-rpc-manager.js");
 
 const MAX_PROMPT_LENGTH = 100_000;
+const MAX_CLIPBOARD_LENGTH = 500_000;
 
 /** Sessions-Basisverzeichnis — einzige Quelle für Listing UND Validierung
  * beim Wechseln (R14: kein Kanal darf großzügiger sein als sein Listing). */
@@ -50,44 +46,52 @@ function resolveSessionPath(sessionPath) {
   }
 }
 
-/** Die letzten Sitzungsdateien (mtime-absteigend) für session.resume. */
-function listRecentSessions() {
+/**
+ * Die letzten Sitzungsdateien (mtime-absteigend) für session.resume.
+ * Asynchrones I/O (R21): das Durchlaufen vieler Sitzungsverzeichnisse darf
+ * den Main-Prozess nicht blockieren.
+ */
+async function listRecentSessions() {
   const baseDir = sessionsBaseDir();
   if (!existsSync(baseDir)) return [];
   const found = [];
-  const walk = (dir, depth) => {
+  async function walk(dir, depth) {
     if (depth > 3 || found.length > 80) return;
     let entries;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = await fsPromises.readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full, depth + 1);
-      else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      if (entry.isDirectory()) {
+        await walk(full, depth + 1);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
         try {
-          found.push({ path: full, mtimeMs: statSync(full).mtimeMs });
+          const stat = await fsPromises.stat(full);
+          found.push({ path: full, mtimeMs: stat.mtimeMs });
         } catch {
           /* verschwundene Datei überspringen */
         }
       }
     }
-  };
-  walk(baseDir, 0);
+  }
+  await walk(baseDir, 0);
   found.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return found.slice(0, 20).map((entry) => {
-    let title = path.basename(entry.path);
-    try {
-      const firstLine = readFileSync(entry.path, "utf8").split("\n")[0];
-      const header = JSON.parse(firstLine);
-      title = header.title || header.displayName || title;
-    } catch {
-      /* Dateiname bleibt Titel */
-    }
-    return { path: entry.path, mtimeMs: entry.mtimeMs, title };
-  });
+  return Promise.all(
+    found.slice(0, 20).map(async (entry) => {
+      let title = path.basename(entry.path);
+      try {
+        const content = await fsPromises.readFile(entry.path, "utf8");
+        const header = JSON.parse(content.split("\n")[0]);
+        title = header.title || header.displayName || title;
+      } catch {
+        /* Dateiname bleibt Titel */
+      }
+      return { path: entry.path, mtimeMs: entry.mtimeMs, title };
+    }),
+  );
 }
 
 const FORWARDABLE_EVENT_TYPES = new Set([
@@ -396,6 +400,27 @@ function registerIpcHandlers(ipcMain, getWindow, shortcutsJson) {
       );
     }
     return session.manager.respondToUiRequest(payload);
+  });
+
+  /**
+   * Copy-Button der Codeblock-Komponente (Phase 3, §9): geht über das
+   * Electron-`clipboard`-Modul im Main-Prozess statt über die Web-
+   * Clipboard-API im Renderer, damit das Verhalten unter `sandbox:true`
+   * deterministisch bleibt und keine Berechtigungsabfrage nötig ist.
+   */
+  ipcMain.handle("gui:copyToClipboard", (_event, text) => {
+    if (typeof text !== "string") {
+      throw new Error("Zwischenablage erwartet Text");
+    }
+    if (text.length > MAX_CLIPBOARD_LENGTH) {
+      throw new Error(
+        "Text für Zwischenablage überschreitet die zulässige Länge",
+      );
+    }
+    // Lazy require: hält main/ipc-handlers.js außerhalb von Electron
+    // (node:test) ladbar, ohne den echten Aufrufpfad zu ändern.
+    require("electron").clipboard.writeText(text);
+    return { copied: true };
   });
 }
 
