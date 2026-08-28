@@ -1,40 +1,57 @@
-# Pi Desktop-GUI (GUI-Arbeitsauftrag Phase 3–8)
+# Pi Desktop-GUI (GUI-Arbeitsauftrag Phase 3–8, GUI-v2)
 
 Electron-Desktop-GUI gegen den installierten, gepatchten `pi`-Prozess.
 Seit der Nutzerentscheidung B (Phase 8) ist `pi gui` die bevorzugte
 Oberfläche; `pi` (Aurora-TUI) bleibt vollständig erhaltener Fallback.
-Seit Phase 6 ist die Oberfläche bewusst kein CLI-Nachbau mehr: Chat ist
-die Hauptfläche, Tool-Aktivität ist sekundär, Zustände sind sichtbar,
-aber nicht dominant, Details gibt es auf Abruf.
+Seit GUI-v2 (siehe `docs/gui-v2/`) ist die Oberfläche eine eigenständige
+Desktop-Coding-Agent-Oberfläche statt einer in Electron übertragenen
+TUI: Chat ist die Hauptfläche mit sicherem Markdown-Rendering, Tool-
+Aktivität ist sekundär, Navigation ist eine kompakte Icon-Rail, und der
+rechte Bereich ist ein echter Inspector statt eines Dauer-Dashboards.
 
-## Oberfläche (Phase 6)
+## Oberfläche (GUI-v2)
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ Pi  Projekt  Workflow·Permission   ● Status  Modell  Denken  │
-├────────────┬───────────────────────────────┬─────────────────┤
-│ Navigation │ Conversation (Hauptfläche)    │ Kontext         │
-│ Chat       │                               │ Aufgabe         │
-│ Änderungen │                               │ Workflow        │
-│ Agenten    │                               │ Verifikation    │
-│ Verifikation│                              │ Änderungen      │
-│ Sitzungen  │                               │ Agenten         │
-│            │                               │ Kontext/Modell  │
-├────────────┴───────────────────────────────┴─────────────────┤
-│ Eingabe                                                      │
+│ Pi  Projekt        Work · Permission        Modell ● Status ⋯│
+├──┬────────────────────────────────────────────────┬──────────┤
+│  │                                                │          │
+│ ⛬│              Chat (Hauptfläche, Markdown)      │ Inspector│
+│ ⎇│                                                │ (kompakt,│
+│ ⚇│                                                │ Detail   │
+│ ✓│                                                │ auf      │
+│ ⏱│                                                │ Klick)   │
+├──┴────────────────────────────────────────────────┴──────────┤
+│ Nachricht …                                                  │
+│ [Work] [Modell] [Denken]              [Stopp] [Senden]       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **Navigation** (links): Jede Zeile öffnet ein Detail-Panel im
-  Kontextbereich. `Chat` schließt das Panel. Maus und Tastatur (Tab +
-  Enter) sind gleichwertig.
-- **Kontext** (rechts): kompakte Übersicht aus Core-State
+- **Navigation Rail** (links, 48–64px): Icons mit Tooltip statt
+  Textliste; keine zweite Navigationsebene im Kontextbereich mehr.
+- **Inspector** (rechts): kompakte Übersicht aus Core-State
   (frontend-bridge). Jede Zeile ist auf Abruf vertiefbar; keine
   Informationswand. Auf schmalen Fenstern wird daraus ein Drawer
-  (Super+I blendet ihn ein/aus).
+  (Super+I blendet ihn ein/aus). Der Drawer-Offset folgt der
+  tatsächlich gemessenen Headerhöhe (`--header-h`, per
+  `ResizeObserver` synchron gehalten), nicht einer festen Pixelzahl —
+  das behebt den früheren Überlapp bei umbrechendem Header.
+- **Composer**: Textarea + Pill-Reihe (Workflow/Modell/Denken, alle
+  mausbedienbar) + Stopp/Senden, statt reiner Textarea+Buttons.
+- **Assistant-Antworten** rendern sicheres Markdown (Überschriften,
+  Listen, Tabellen, Zitate, Links, Inline-Code) über
+  `renderer/chat/markdown.js`; Codeblöcke sind eine eigene Komponente
+  (`renderer/chat/code-block.js`) mit Sprache, Copy-Button,
+  horizontalem Scrollen und einfachem Syntax-Highlighting.
 - **Tool-Aktivität**: Werkzeuge erscheinen als eine kompakte
   Aktivitätszeile (`✓ 8 Reads · ● 1 Shell`); die Einzelkarten gibt es
   erst beim Aufklappen (reine `<details>`-Elemente, kein JS-State).
+  Fehlgeschlagene Tools sind farblich stärker hervorgehoben.
+- **Thinking** bleibt sekundär (`▸ Denken · 12s` nach Abschluss eines
+  Live-Turns; historische Nachrichten zeigen `▸ Denken` ohne Dauer).
+
+Details zu Audit, Designentscheidungen und offenen Punkten:
+`docs/gui-v2/audit.md` und `docs/gui-v2/final-review.md`.
 
 ## Architektur
 
@@ -47,10 +64,14 @@ gui/
 │   ├── ipc-handlers.js    IPC-Whitelist inkl. Payload-Validierung
 │   └── preload.cjs        contextBridge-API (window.piGui)
 ├── renderer/              vanilla DOM, kein Framework
-│   ├── renderer.js        Zustand, Navigation, Aktivitätsgruppen
+│   ├── renderer.js        Zustand, Navigation, Aktivitätsgruppen, Boot
 │   ├── activity-summary.js reine Verdichtung der Tool-Zeile (unit-getestet)
-│   ├── index.html         3-Spalten-Layout
-│   └── styles.css         responsive (Drawer + Initialen-Navigation)
+│   ├── interaction-helpers.js reine UI-Entscheidungshelfer (unit-getestet)
+│   ├── chat/
+│   │   ├── markdown.js    sicherer Markdown-Parser + DOM-Renderer (P0)
+│   │   └── code-block.js  Codeblock-Komponente (Highlight, Copy)
+│   ├── index.html         Nav-Rail + Chat + Inspector-Layout
+│   └── styles.css         Design-Tokens, responsive (Drawer + Nav-Rail)
 ├── shared/shortcuts.json  Shortcut-Tabelle (Spiegel des Protokolls)
 └── test/                  Unit-, Paritäts- und E2E-Smoke
 ```
@@ -66,7 +87,9 @@ hält nur Darstellungszustand. Der Contract liegt in
 
 - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`
 - IPC nur über die Whitelist in `main/ipc-handlers.js`; Payloads werden
-  validiert (Typen, Längen, Enum-Werte)
+  validiert (Typen, Längen, Enum-Werte). Der Copy-Button der Codeblock-
+  Komponente geht über `gui:copyToClipboard` (Electron-`clipboard`-Modul
+  im Main-Prozess), nicht über die Web-Clipboard-API im Renderer.
 - CSP: `default-src 'none'`, Skripte/Stile nur `self`
 - Navigation und Popups sind unterbunden
 - Keine Geheimnisse im Renderer; der Pi-Prozess trägt seine Auth selbst
@@ -130,3 +153,12 @@ gepackten Launcher. `dist/` ist git-ignoriert.
   ist das ein Beobachtungspunkt (Phase-7-Report).
 - Fenstergrößen jenseits der Responsive-Stufen sind nur manuell
   geprüft (xvfb deckt Logik, kein WM-Verhalten ab).
+- `renderer.js` bündelt weiterhin Boot, Navigation, Picker-Dialoge und
+  Ereignisverarbeitung in einer Datei. GUI-v2 hat bewusst zuerst die
+  Funktions-/Visualänderungen stabilisiert (Markdown, Layout, Composer)
+  und die volle Modul-Aufteilung (`app.js`/`state.js`/`events.js`/…)
+  zurückgestellt, um Refactoring nicht mit Funktionsänderungen zu
+  vermischen — siehe `docs/gui-v2/final-review.md`.
+- Streaming-Antworten rendern Markdown bei jedem Text-Delta neu (kein
+  inkrementelles Patchen des DOM-Baums). Für sehr lange Live-Antworten
+  mit vielen Codeblöcken ist das ein Beobachtungspunkt, nicht optimiert.

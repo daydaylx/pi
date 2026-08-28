@@ -86,11 +86,32 @@ function scrollToBottom(force = false) {
 }
 
 function clearChat() {
+  if (state.currentAssistant?.pendingRenderTimer) {
+    clearTimeout(state.currentAssistant.pendingRenderTimer);
+  }
   chatEl.innerHTML = "";
   state.currentAssistant = null;
   state.pendingLocalEchoes = [];
   closeActivityGroup();
   setFollowScroll(true);
+}
+
+/**
+ * Rendert eine Assistant-Antwort als sicheres Markdown (Phase 3, P0).
+ * `renderMarkdown` baut DOM ausschließlich über `createElement`/
+ * `textContent` (siehe chat/markdown.js) — kein `innerHTML` mit
+ * Modelltext, daher strukturell keine Injektionsfläche.
+ */
+function renderAssistantBubble(bubble, text) {
+  bubble.replaceChildren();
+  bubble.appendChild(
+    window.piGuiMarkdown.renderMarkdown(text, {
+      onCodeBlock: (lang, code) =>
+        window.piGuiCodeBlock.buildCodeBlock(lang, code, {
+          onCopy: (codeText) => api.copyToClipboard(codeText),
+        }),
+    }),
+  );
 }
 
 function appendUserBubble(text, { scroll = true } = {}) {
@@ -117,9 +138,58 @@ function beginAssistantBlock() {
   bubble.className = "bubble";
   wrap.append(label, bubble);
   chatEl.appendChild(wrap);
-  return { wrap, bubble, text: "", thinking: "", thinkingView: null };
+  return {
+    wrap,
+    bubble,
+    text: "",
+    thinking: "",
+    thinkingView: null,
+    pendingRenderTimer: null,
+    lastRenderedAt: 0,
+  };
 }
 
+/**
+ * Streaming rendert Markdown bei jedem Token neu (Parser + volles
+ * Bubble-DOM), was bei langen Antworten mit vielen Codeblöcken spürbar
+ * teuer wird. Ein Trailing-Throttle begrenzt das auf höchstens einen
+ * Rebuild pro STREAM_RENDER_INTERVAL_MS, ohne Deltas zu verlieren: der
+ * jeweils letzte Text gewinnt, sobald das Intervall abgelaufen ist.
+ * `setAssistantText` (Abschluss/Historie) rendert weiterhin sofort.
+ */
+const STREAM_RENDER_INTERVAL_MS = 80;
+
+function scheduleStreamRender(block) {
+  const now = Date.now();
+  const elapsed = now - block.lastRenderedAt;
+  const fire = () => {
+    block.pendingRenderTimer = null;
+    block.lastRenderedAt = Date.now();
+    renderAssistantBubble(block.bubble, block.text);
+    scrollToBottom();
+  };
+  if (elapsed >= STREAM_RENDER_INTERVAL_MS) {
+    if (block.pendingRenderTimer) {
+      clearTimeout(block.pendingRenderTimer);
+      block.pendingRenderTimer = null;
+    }
+    fire();
+    return;
+  }
+  if (block.pendingRenderTimer) return;
+  block.pendingRenderTimer = setTimeout(
+    fire,
+    STREAM_RENDER_INTERVAL_MS - elapsed,
+  );
+}
+
+/** Live-Text-Delta: throttled statt bei jedem Token neu zu rendern. */
+function streamAssistantText(block, text) {
+  block.text = text;
+  scheduleStreamRender(block);
+}
+
+/** Reasoning bleibt sekundär (§12): kurze Zeile, Dauer erst beim Abschluss. */
 function setAssistantThinking(block, text) {
   block.thinking = text;
   if (!text) {
@@ -128,26 +198,50 @@ function setAssistantThinking(block, text) {
     return;
   }
   if (!block.thinkingView) {
+    block.thinkingStartedAt = Date.now();
     const details = document.createElement("details");
     details.className = "thinking-block";
     const summary = document.createElement("summary");
-    summary.textContent = "Denken";
+    summary.textContent = "Denken …";
     const pre = document.createElement("pre");
+    pre.className = "mono";
     details.append(summary, pre);
     block.wrap.appendChild(details);
-    block.thinkingView = { details, pre };
+    block.thinkingView = { details, summary, pre };
   }
   block.thinkingView.pre.textContent = text;
 }
 
-function setAssistantText(block, text) {
-  block.text = text;
-  block.bubble.textContent = text;
+/** Live-Turns zeigen die gemessene Dauer; historische Nachrichten (aus
+ * geladenen Sitzungen) haben keine verlässliche Dauer und bleiben neutral. */
+function finalizeAssistantThinking(block, { live = false } = {}) {
+  const view = block.thinkingView;
+  if (!view) return;
+  if (live && block.thinkingStartedAt) {
+    const seconds = Math.max(
+      1,
+      Math.round((Date.now() - block.thinkingStartedAt) / 1000),
+    );
+    view.summary.textContent = `Denken · ${seconds}s`;
+  } else {
+    view.summary.textContent = "Denken";
+  }
 }
 
-function applyAssistantContent(block, content) {
+function setAssistantText(block, text) {
+  block.text = text;
+  if (block.pendingRenderTimer) {
+    clearTimeout(block.pendingRenderTimer);
+    block.pendingRenderTimer = null;
+  }
+  block.lastRenderedAt = Date.now();
+  renderAssistantBubble(block.bubble, text);
+}
+
+function applyAssistantContent(block, content, opts = {}) {
   setAssistantText(block, interactions.textFromContent(content).trim());
   setAssistantThinking(block, interactions.thinkingFromContent(content));
+  finalizeAssistantThinking(block, opts);
 }
 
 function appendAssistantMessage(message, { scroll = true } = {}) {
@@ -252,11 +346,10 @@ function handleEvent(msg) {
       const ev = msg.assistantMessageEvent || {};
       if (!state.currentAssistant) break;
       if (ev.type === "text_delta") {
-        setAssistantText(
+        streamAssistantText(
           state.currentAssistant,
           state.currentAssistant.text + String(ev.delta ?? ""),
         );
-        scrollToBottom();
       } else if (ev.type === "thinking_delta") {
         setAssistantThinking(
           state.currentAssistant,
@@ -272,7 +365,9 @@ function handleEvent(msg) {
       if (message.role !== "assistant") break;
       if (!state.currentAssistant)
         state.currentAssistant = beginAssistantBlock();
-      applyAssistantContent(state.currentAssistant, message.content);
+      applyAssistantContent(state.currentAssistant, message.content, {
+        live: true,
+      });
       state.currentAssistant = null;
       scrollToBottom();
       break;
@@ -387,6 +482,7 @@ function refreshCoreChips() {
     permissionEl.textContent = core?.permissions?.label ?? "";
     permissionEl.hidden = !core?.permissions?.label;
   }
+  refreshComposerPills();
 }
 
 /* -------------------- Extension-UI-Anfragen (Dialoge) ------------------ */
@@ -802,7 +898,6 @@ async function refreshContextOverview() {
         verificationPill(),
       raw: true,
       empty: !core?.verification?.status && !state.verificationStatus,
-      view: "verify",
     },
     {
       label: "Änderungen",
@@ -810,7 +905,6 @@ async function refreshContextOverview() {
         ? `${core.changes.filesCount} Dateien`
         : `${state.editedFiles.size} Dateien (Sitzung)`,
       empty: !core?.changes && state.editedFiles.size === 0,
-      view: "changes",
     },
     {
       label: "Agenten",
@@ -819,7 +913,6 @@ async function refreshContextOverview() {
           ? `${core.subagents.length} aktiv`
           : "keine",
       empty: !(core?.subagents?.length > 0),
-      view: "agents",
     },
     { label: "Kontext", value: contextPart, empty: contextPart === "—" },
     {
@@ -845,10 +938,12 @@ async function refreshContextOverview() {
       value.textContent = def.value;
     }
     button.append(label, value);
-    if (def.view) {
-      button.title = `${def.label} öffnen`;
-      button.addEventListener("click", () => openContextPanel(def.view));
-    } else if (def.label === "Workflow") {
+    // Die Übersicht ist nur eine kompakte Statuszeile (§6/§7): die einzige
+    // Navigation zu Changes/Agents/Verify/Sessions ist die Nav-Rail, damit
+    // hier keine zweite, konkurrierende Navigationsebene entsteht. Workflow
+    // bleibt anklickbar, weil das eine Aktion ist (Picker öffnen), keine
+    // Navigation zu einer anderen Ansicht.
+    if (def.label === "Workflow") {
       button.title = "Workflow wechseln";
       button.addEventListener("click", () => openWorkflowPicker());
     } else {
@@ -986,10 +1081,27 @@ function applyRuntimeState(runtimeState) {
   state.modelLabel = runtimeState?.model ? `${runtimeState.model.name}` : "";
   state.thinkingLabel = runtimeState?.thinkingLevel ?? "";
   el("model-label").textContent = state.modelLabel;
-  el("thinking-label").textContent = state.thinkingLabel
-    ? `Denken ${state.thinkingLabel}`
-    : "";
   refreshStatusBar();
+  refreshComposerPills();
+}
+
+/** Composer-Pills (§13) spiegeln Workflow/Modell/Denken — mausbedienbar,
+ * ohne den Header mit denselben Werten doppelt zu belegen. */
+function refreshComposerPills() {
+  const workflowPill = el("pill-workflow");
+  const modelPill = el("pill-model");
+  const thinkingPill = el("pill-thinking");
+  if (workflowPill) {
+    workflowPill.textContent = state.core?.workflow?.label ?? "Work";
+  }
+  if (modelPill) {
+    modelPill.textContent = state.modelLabel || "Modell";
+  }
+  if (thinkingPill) {
+    thinkingPill.textContent = state.thinkingLabel
+      ? `Denken: ${state.thinkingLabel}`
+      : "Denken";
+  }
 }
 
 async function refreshStateLabels() {
@@ -1192,6 +1304,26 @@ function setupShortcuts() {
   });
 }
 
+/**
+ * §16-Fix: Der Header kann bei schmalen Fenstern umbrechen (mehrzeilig
+ * werden). `--header-h` darf dann keine feste Pixelannahme mehr sein,
+ * sonst überlappt der Inspector-Drawer den umgebrochenen Header. Statt
+ * eines CSS-Breakpoint-Ratens wird die tatsächliche Headerhöhe live
+ * gemessen und als CSS-Variable gespiegelt.
+ */
+function observeHeaderHeight() {
+  const header = el("status-bar");
+  if (!header || typeof ResizeObserver === "undefined") return;
+  const sync = () => {
+    document.documentElement.style.setProperty(
+      "--header-h",
+      `${Math.ceil(header.getBoundingClientRect().height)}px`,
+    );
+  };
+  new ResizeObserver(sync).observe(header);
+  sync();
+}
+
 /* -------------------------------- Boot --------------------------------- */
 
 async function boot() {
@@ -1229,6 +1361,22 @@ async function boot() {
     setFollowScroll(interactions.isNearBottom(chatEl));
   });
   el("btn-jump-latest").addEventListener("click", () => scrollToBottom(true));
+  // Markdown-Links (chat/markdown.js) sind echte <a>-Elemente, aber das
+  // Fenster blockt jede In-App-Navigation (main/index.js). Ohne diesen
+  // Handler sähen Links klickbar aus und würden nichts tun.
+  chatEl.addEventListener("click", (event) => {
+    const link =
+      event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!link || !chatEl.contains(link)) return;
+    event.preventDefault();
+    api
+      .openExternal(link.href)
+      .catch((error) =>
+        showBanner(
+          `Link konnte nicht geöffnet werden: ${error.message ?? error}`,
+        ),
+      );
+  });
 
   el("btn-send").addEventListener("click", () => {
     const text = inputEl.value;
@@ -1249,9 +1397,11 @@ async function boot() {
     api.abort().catch(() => undefined);
   });
   el("btn-new-session").addEventListener("click", () => startFreshSession());
-  el("btn-model").addEventListener("click", () => openModelPicker());
-  el("btn-thinking").addEventListener("click", () => openThinkingPicker());
+  el("pill-workflow").addEventListener("click", () => openWorkflowPicker());
+  el("pill-model").addEventListener("click", () => openModelPicker());
+  el("pill-thinking").addEventListener("click", () => openThinkingPicker());
   el("btn-palette").addEventListener("click", () => openCommandPalette());
+  observeHeaderHeight();
 
   if (!isSmokeMode) {
     refreshProjectLabel();
