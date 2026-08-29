@@ -1,0 +1,72 @@
+[
+  {
+    "keys": "shift+tab",
+    "label": "Shift+Tab",
+    "command": "workflow.open",
+    "portable": true,
+    "note": "Seit Phase 5: GUI-Picker über WORKFLOW_MODES, Ausführung via /workflow-set."
+  },
+  {
+    "keys": "super+m",
+    "label": "Super+M",
+    "command": "model.open",
+    "portable": true
+  },
+  {
+    "keys": "super+d",
+    "label": "Super+D",
+    "command": "thinking.open",
+    "portable": true
+  },
+  {
+    "keys": "super+q",
+    "label": "Super+Q",
+    "command": "app.commandCenter",
+    "portable": true
+  },
+  {
+    "keys": "super+i",
+    "label": "Super+I",
+    "command": "inspector.open",
+    "portable": true,
+    "note": "GUI-spezifisch: blendet den Kontextbereich ein oder aus."
+  },
+  {
+    "keys": "super+y",
+    "label": "Super+Y",
+    "command": "yolo.toggle",
+    "portable": true
+  },
+  {
+    "keys": "super+s",
+    "label": "Super+S",
+    "command": "subagents.rolesModel",
+    "portable": true
+  },
+  {
+    "keys": "super+r",
+    "label": "Super+R",
+    "command": "session.resume",
+    "portable": true,
+    "note": "Auswahl liest das GUI aus dem Session-Verzeichnis; Ausführung via switch_session."
+  },
+  {
+    "keys": "super+t",
+    "label": "Super+T",
+    "command": "thinking.cycle",
+    "portable": true
+  },
+  {
+    "keys": "super+,",
+    "label": "Super+,",
+    "command": "model.cycle",
+    "portable": true
+  },
+  {
+    "keys": "super+shift+y",
+    "label": "Super+Shift+Y",
+    "command": "editor.yank",
+    "portable": false,
+    "note": "TUI-editornative Bindung ohne GUI-Entsprechung."
+  }
+]

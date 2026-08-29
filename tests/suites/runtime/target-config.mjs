@@ -432,6 +432,7 @@ export const targetConfigSections = {
             "+extensions/resilience/index.ts",
             "+extensions/session-health/index.ts",
             "+extensions/openrouter-doctor/index.ts",
+            "+extensions/frontend-bridge/index.ts",
           ],
           "settings declare the dependency-safe local extension order",
         );

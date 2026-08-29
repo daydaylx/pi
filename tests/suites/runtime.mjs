@@ -11,6 +11,8 @@ import { auroraInspectorSections } from "./runtime/aurora-inspector.mjs";
 import { resilienceSections } from "./runtime/resilience.mjs";
 import { webAccessSections } from "./runtime/web-access.mjs";
 import { shortcutsSections } from "./runtime/shortcuts.mjs";
+import { frontendProtocolSections } from "./runtime/frontend-protocol.mjs";
+import { frontendBridgeSections } from "./runtime/frontend-bridge.mjs";
 
 export const runtimeSections = {
   ...targetConfigSections,
@@ -25,4 +27,6 @@ export const runtimeSections = {
   ...resilienceSections,
   ...webAccessSections,
   ...shortcutsSections,
+  ...frontendProtocolSections,
+  ...frontendBridgeSections,
 };

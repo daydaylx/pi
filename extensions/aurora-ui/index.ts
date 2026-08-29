@@ -277,6 +277,8 @@ function makeState(
     activity: { kind: "idle" },
     changes: null,
     verification: null,
+    task: { title: "Aktuelle Aufgabe", phaseLabel: "Bereit" },
+    subagents: [],
   };
 }
 

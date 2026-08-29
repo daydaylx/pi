@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { renderPanel } from "./panel.ts";
+import { renderTile } from "./tile.ts";
 
 export interface InspectorSection {
   title: string;
@@ -32,9 +32,10 @@ export function renderInspectorBox(
       .join("   ");
     lines.push(theme.fg("muted", actionText));
   }
-  return renderPanel(theme, Math.min(width, 76), {
+  return renderTile(theme, Math.min(width, 76), {
     title: content.title,
     badge: content.badge,
+    fill: "toolPendingBg",
     lines,
   });
 }

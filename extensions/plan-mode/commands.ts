@@ -4,7 +4,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { catalogDescription } from "../shared/command-catalog.ts";
 import { buildWorkflowEntries } from "../shared/control-center-menu.ts";
-import { isPlanningMode, type WorkflowMode } from "../shared/workflow-mode.ts";
+import {
+  WORKFLOW_MODES,
+  isPlanningMode,
+  type WorkflowMode,
+} from "../shared/workflow-mode.ts";
 import { editPlanMarkdown, viewPlanMarkdown } from "./plan-editor.ts";
 import type { WorkflowSession } from "./session.ts";
 import { openCommandCenter } from "./command-center.ts";
@@ -112,5 +116,22 @@ export function registerPlanCommands(
     description: catalogDescription("commands"),
     handler: async (_args, ctx) =>
       openCommandCenter(pi, ctx, { activeMode: session.selectedMode }),
+  });
+
+  pi.registerCommand("workflow-set", {
+    description: catalogDescription("workflow-set"),
+    handler: async (args, ctx) => {
+      const requested = args.trim().toLowerCase();
+      const mode = WORKFLOW_MODES.find((m) => m === requested);
+      if (!mode) {
+        session.notify(
+          ctx,
+          `Unbekannter Workflow-Modus: ${requested}. Erlaubt: ${WORKFLOW_MODES.join(", ")}`,
+          "error",
+        );
+        return;
+      }
+      await switchMode(session, mode, ctx);
+    },
   });
 }

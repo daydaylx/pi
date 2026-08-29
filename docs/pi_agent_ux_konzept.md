@@ -60,13 +60,21 @@ Die **Fußzeile** ist eine Zeile und trägt Arbeitsablauf, Modell, Denktiefe,
 Kontextanteil und eskalierte Risiken. Wird es eng, fallen ganze Segmente vom
 unwichtigen Ende her weg statt am Rand abgeschnitten zu werden. YOLO,
 gescheiterte Verifikation und gestörter LSP ignorieren die Größenklasse und
-verdrängen Gewöhnliches. Git-Branch, Sitzungsname und Tokenzähler stehen nicht
-mehr dort; das Arbeitsverzeichnis erscheint weiterhin kompakt als
-Session-Ordner. Siehe `docs/decisions/009-aurora-owns-the-footer.md`.
+verdrängen Gewöhnliches. Ab komfortabler Breite erscheinen Arbeitsablauf und
+Risiken als gefüllte Status-Chips (Pills), Routine-Metadaten bleiben flach;
+schmale Klassen behalten den flachen Look. Git-Branch, Sitzungsname und
+Tokenzähler stehen nicht mehr dort; das Arbeitsverzeichnis erscheint weiterhin
+kompakt als Session-Ordner. Siehe
+`docs/decisions/009-aurora-owns-the-footer.md`.
 
 Das **Aurora-Widget** über dem Eingabefeld enthält das Session-Dashboard und,
 während eines Turns, die flache Activity-Liste mit Denkphase, laufenden Tools
-und Subagenten. `ui.dashboard` steuert das Dashboard über `auto` (Default),
+und Subagenten. Die Flächen sind als gefüllte Kacheln mit Titelzeile,
+Status-Pills und beschrifteten Feldern angelegt; Hintergründe laufen
+ausschließlich über die acht festen `Theme.bg`-Flächen, damit jedes Theme
+korrekt bleibt. Ab breiter Größe ordnet sich das Expanded-Dashboard als
+zweispaltiges Kachel-Grid (Aufgabe + Aktivität, Änderungen + Prüfungen).
+`ui.dashboard` steuert das Dashboard über `auto` (Default),
 `compact`, `expanded` oder `hidden`; `/dashboard` schaltet es ohne neuen
 Shortcut um. Auto priorisiert fehlgeschlagene oder stale Verifikation vor
 Routineinformationen, nutzt in kleinen Terminals höchstens zwei Zeilen und

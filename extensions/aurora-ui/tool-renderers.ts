@@ -1,9 +1,20 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { footerTier, type Layout } from "../shared/layout.ts";
+import {
+  footerTier,
+  LAYOUT_COLUMNS,
+  type Layout,
+} from "../shared/layout.ts";
 import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
 import { crop } from "./layout.ts";
-import { renderPanel } from "./panel.ts";
+import {
+  NEUTRAL_TILE_FILL,
+  renderTile,
+  renderTileGrid,
+  statusFill,
+  tileHeight,
+  type TileInput,
+} from "./tile.ts";
 import type {
   CurrentWorkViewModel,
   SubagentBranchInfo,
@@ -870,7 +881,11 @@ function summarizeChangedFiles(
 /**
  * A persistent session overview composed only from the task projection and
  * current runtime activity. The caller owns row budgeting; this renderer keeps
- * panels intact instead of truncating a frame halfway through.
+ * tiles intact instead of truncating a frame halfway through.
+ *
+ * From `wide` width on, tiles are paired side by side (task + activity,
+ * changes + verification): a pair costs the height of its taller member, not
+ * the sum, so a wide terminal sees a 2×2 card grid. Below that, tiles stack.
  */
 export function renderDashboard(
   task: TaskViewModel,
@@ -902,10 +917,17 @@ export function renderDashboard(
 
   const showProgress =
     !hasFailure && (input.activityLines.length === 0 || input.maxRows > 8);
-  const taskPanel = renderPanel(theme, available, {
+  const verificationTone =
+    verification?.verdict === "READY"
+      ? "success"
+      : verification?.verdict === "NOT_READY"
+        ? "error"
+        : "muted";
+  const taskTile: TileInput = {
     title: "AUFGABE",
     badge: task.phaseLabel.toUpperCase(),
     tone: "accent",
+    fill: NEUTRAL_TILE_FILL,
     lines: [
       theme.bold(task.title),
       ...(task.goal && !hasFailure ? [theme.fg("muted", task.goal)] : []),
@@ -913,11 +935,12 @@ export function renderDashboard(
         ? [renderProgressBar(task.phase, theme, available - 4)]
         : []),
     ],
-  });
-  const activityPanel = renderPanel(theme, available, {
+  };
+  const activityTile: TileInput = {
     title: "AKTIVITÄT",
     badge: input.activityLines.length > 0 ? "LÄUFT" : "BEREIT",
     tone: input.activityLines.length > 0 ? "accent" : "muted",
+    fill: NEUTRAL_TILE_FILL,
     lines:
       input.activityLines.length > 0
         ? input.activityLines
@@ -929,21 +952,22 @@ export function renderDashboard(
                 : "Bereit für die nächste Aufgabe.",
             ),
           ],
-  });
+  };
   const changes = task.changesSummary;
-  const changesPanel = changes
-    ? renderPanel(theme, available, {
+  const changesTile: TileInput | null = changes
+    ? {
         title: "ÄNDERUNGEN",
         badge: `${changes.filesCount} ${changes.filesCount === 1 ? "DATEI" : "DATEIEN"}`,
         tone: "accent",
+        fill: NEUTRAL_TILE_FILL,
         lines: [
           `${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`,
           theme.fg("muted", summarizeChangedFiles(changes, " · ")),
         ],
-      })
-    : [];
-  const verificationPanel = verification
-    ? renderPanel(theme, available, {
+      }
+    : null;
+  const verificationTile: TileInput | null = verification
+    ? {
         title: "PRÜFUNGEN",
         badge:
           verification.verdict === "READY"
@@ -951,43 +975,74 @@ export function renderDashboard(
             : verification.verdict === "NOT_READY"
               ? "NICHT BEREIT"
               : "OFFEN",
-        tone:
-          verification.verdict === "READY"
-            ? "success"
-            : verification.verdict === "NOT_READY"
-              ? "error"
-              : "muted",
+        tone: verificationTone,
+        fill: statusFill(verificationTone),
         lines: renderVerificationBlock(
           verification,
           theme,
           available - 4,
         ).slice(1, hasFailure ? 3 : 2),
-      })
-    : [];
-  // At a standard terminal's shortest supported heights, preserve the failure
-  // verdict before any routine activity. A frame with title and badge costs two
-  // rows and, paired with the compact task panel, fits the five-row budget.
-  const failedVerificationFallback =
-    hasFailure && taskPanel.length + verificationPanel.length > input.maxRows
-      ? renderPanel(theme, available, {
-          title: "PRÜFUNGEN",
-          badge: "NICHT BEREIT",
-          tone: "error",
-          lines: [],
-        })
-      : verificationPanel;
+      }
+    : null;
+  // At the shortest supported heights the full failure tile no longer fits:
+  // keep the verdict itself visible as a bare card instead of dropping it.
+  const bareVerificationTile: TileInput = {
+    title: "PRÜFUNGEN",
+    badge: "NICHT BEREIT",
+    tone: "error",
+    fill: "toolErrorBg",
+    lines: [],
+  };
 
-  const candidates = hasFailure
-    ? [taskPanel, failedVerificationFallback, activityPanel, changesPanel]
-    : [taskPanel, activityPanel, changesPanel, verificationPanel];
-  const lines: string[] = [];
-  for (const panel of candidates) {
-    if (panel.length === 0) continue;
-    if (lines.length > 0 && lines.length + panel.length > input.maxRows)
-      continue;
-    lines.push(...panel);
+  const grid = available >= LAYOUT_COLUMNS.wide;
+  const ordered = (
+    hasFailure
+      ? [taskTile, verificationTile, activityTile, changesTile]
+      : [taskTile, activityTile, changesTile, verificationTile]
+  ).filter((tile): tile is TileInput => tile !== null);
+  let groups: TileInput[][] = grid
+    ? ordered.reduce<TileInput[][]>((pairs, tile, index) => {
+        if (index % 2 === 0) pairs.push([tile]);
+        else pairs[pairs.length - 1]!.push(tile);
+        return pairs;
+      }, [])
+    : ordered.map((tile) => [tile]);
+
+  if (hasFailure && verificationTile) {
+    // Stacked tiles pay sequential heights, a paired grid pays the taller
+    // member only — the fallback condition mirrors each layout's real cost.
+    const tooTall = grid
+      ? Math.max(
+          tileHeight(taskTile),
+          tileHeight(verificationTile),
+        ) > input.maxRows
+      : tileHeight(taskTile) + tileHeight(verificationTile) > input.maxRows;
+    if (tooTall) {
+      groups = groups.map((group) =>
+        group.map((tile) =>
+          tile === verificationTile ? bareVerificationTile : tile,
+        ),
+      );
+    }
   }
-  return lines.length > 0 ? lines : taskPanel;
+
+  const groupHeight = (group: TileInput[]): number =>
+    grid
+      ? Math.max(...group.map((tile) => tileHeight(tile)))
+      : group.reduce((sum, tile) => sum + tileHeight(tile), 0);
+
+  const chosen: TileInput[][] = [];
+  let usedRows = 0;
+  for (const group of groups) {
+    const height = groupHeight(group);
+    if (chosen.length > 0 && usedRows + height > input.maxRows) continue;
+    chosen.push(group);
+    usedRows += height;
+  }
+  if (chosen.length === 0) return renderTile(theme, available, taskTile);
+  return chosen.flatMap((group) =>
+    renderTileGrid(theme, available, group, grid ? 2 : 1),
+  );
 }
 
 /**
@@ -1090,10 +1145,11 @@ export function renderAutoDashboard(
   ]
     .slice(0, contentBudget)
     .map(clip);
-  return renderPanel(theme, available, {
+  return renderTile(theme, available, {
     title: "Sitzung",
     badge: task.phaseLabel.toUpperCase(),
     tone: failed ? "error" : stale ? "warning" : "accent",
+    fill: failed ? "toolErrorBg" : NEUTRAL_TILE_FILL,
     lines: content,
   });
 }

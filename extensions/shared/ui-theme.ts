@@ -3,8 +3,12 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 /**
  * The subset of Pi's `ThemeColor` that this repository's chrome uses. Every
  * value here must exist in the Pi theme schema — `Theme.fg` throws on unknown
- * keys. A background option is deliberately not offered: `ThemeBg` accepts only
- * the six message and tool surfaces, none of which mean "status segment".
+ * keys.
+ *
+ * Backgrounds are allowed, but only through `aurora-ui/tile.ts` (tiles and
+ * pills): Pi's `Theme.bg` accepts exactly eight fixed surfaces, and the tile
+ * primitives map tones onto them, so every theme (including `light`) stays
+ * correct. Flat segments in this module never paint a background.
  */
 export type Tone =
   | "accent"
@@ -26,8 +30,9 @@ export type Tone =
 
 /**
  * Renders one status segment for a TUI bar. Segments are told apart by their
- * foreground color and by the separator their caller places between them, not
- * by a background fill.
+ * foreground color and by the separator their caller places between them; on
+ * wide tiers callers may upgrade individual segments to pills via
+ * `aurora-ui/tile.ts`, but the default stays a flat, background-free run.
  */
 export function renderSegment(
   theme: Theme,

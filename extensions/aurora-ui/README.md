@@ -25,7 +25,10 @@ MODELL` transition alone.
 **Footer** (`footer.ts`) — the one permanent status surface, and one line.
 It shows the workflow, model, thinking level, session folder, context share and
 verification state, then drops whole segments from the least important end as
-the terminal narrows. Whenever a visible dashboard surface owns verification reporting
+the terminal narrows. From comfortable width on, the workflow and every risk
+segment render as filled status chips (pills); routine metadata stays flat so
+the line never turns into a wall of colour, and narrow tiers keep the flat look
+entirely. Whenever a visible dashboard surface owns verification reporting
 (auto/compact/expanded), the footer suppresses the routine successful state;
 failed or stale checks remain critical footer risks at every width. The folder
 is derived from the session CWD captured at session start and compacted purely;
@@ -45,13 +48,16 @@ which surfaces in the Super+Q command center — no new shortcut:
 
 - **`auto`** is the responsive permanent default (`renderAutoDashboard`): after
   the fresh-session welcome it keeps a compact session card with task,
-  activity, changes and verification visible, including during idle. Failed or
-  stale verification appears before routine information; narrow terminals fall
-  back to at most two unframed rows while keeping risks visible.
+  activity, changes and verification visible, including during idle — a filled
+  tile that takes the error surface when verification fails. Failed or stale
+  verification appears before routine information; narrow terminals fall back
+  to at most two unframed rows while keeping risks visible.
 - **`compact`** caps the dashboard at two hard rows.
-- **`expanded`** keeps the richer multi-panel view (Aufgabe/Aktivität/
+- **`expanded`** keeps the richer multi-tile view (Aufgabe/Aktivität/
   Änderungen/Prüfungen) within a tested height budget of roughly 40 % of
-  terminal rows.
+  terminal rows. From `wide` width on the tiles form a two-column card grid
+  (Aufgabe + Aktivität, Änderungen + Prüfungen); a pair costs the height of
+  its taller member, so the failure verdict still outranks routine tiles.
 - **`hidden`** emits no dashboard at all while workflow state, footer risks and
   the inspector stay fully alive.
 
@@ -60,12 +66,24 @@ definition (`verificationIsStale()`): `done` requires idle plus a current
 `READY` check, only a real running verification tool shows `Prüfen`, and active
 work stays `Arbeiten` even after an earlier failed check — see
 [decision 019](../../docs/decisions/019-dashboard-modes-and-phase-precedence.md).
-The status labels, tone mapping and panel rendering live in `tool-renderers.ts`;
-`index.ts` only derives the existing runtime view model and applies the terminal
-row budget. Finished tools still leave the live activity list immediately; their
-real change and verification results remain visible through the relevant
-session panels. The welcome is never shown again within that session and is
-skipped for resumed conversations.
+The status labels, tone mapping and tile rendering live in `tool-renderers.ts`
+and `tile.ts`; `index.ts` only derives the existing runtime view model and
+applies the terminal row budget. Finished tools still leave the live activity
+list immediately; their real change and verification results remain visible
+through the relevant session tiles. The welcome is never shown again within
+that session and is skipped for resumed conversations.
+
+**Visual language** (`tile.ts`) — dashboard, welcome window and inspector
+render as filled cards: framed tiles whose title row and body rows are padded
+and painted through `Theme.bg`, plus labelled fields and status pills instead
+of loose text. Backgrounds never use hardcoded ANSI colours — Pi's public
+`Theme.bg` accepts exactly eight surfaces (`selectedBg`, `scrollbarThumb`,
+`searchMatchBg`, `userMessageBg`, `customMessageBg`, `toolPendingBg`,
+`toolSuccessBg`, `toolErrorBg`), and the tile primitives map tones onto them
+(neutral card: `toolPendingBg`, success: `toolSuccessBg`, error: `toolErrorBg`,
+accent chips: `selectedBg`, warning: inverse), so every theme including
+`light` stays correct. Under 18 columns tiles fall back to frameless rows;
+compact surfaces stay flat by design.
 
 Der Header zeigt während eines laufenden Turns `DENKT NACH` (mit Thinking-Level),
 `ARBEITET`, `ANTWORTET` oder nach vier Sekunden ohne konkretes Aurora-Ereignis
@@ -115,7 +133,7 @@ groups feed the task-centric view (`task-projection.ts`) and the inspector:
 
 - `changes` — published by `extensions/diff-viewer/index.ts` after every
   recorded edit/write, aggregated straight from its `ChangeTracker` (real
-  per-file diff stats, never estimated). Drives the Änderungen panel and the
+  per-file diff stats, never estimated). Drives the Änderungen tile and the
   Inspector's Changes section.
 - `verification` — published by `extensions/setup-core/index.ts` alongside
   its existing `ctx.ui.setStatus("verification", …)` calls. Carries the

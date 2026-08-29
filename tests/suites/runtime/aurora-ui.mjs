@@ -222,9 +222,10 @@ export const auroraUiSections = {
           const narrow = stripAnsi(footer.render(60)[0]);
 
           // Decision 009 moved the workflow here: one permanent status surface,
-          // and the editor frame that used to carry it is gone.
+          // and the editor frame that used to carry it is gone. From comfortable
+          // width on the workflow renders as a chip, so one padding cell leads.
           assert(
-            wide.startsWith("Architekturplan") &&
+            wide.startsWith(" Architekturplan") &&
               narrow.startsWith("Architekturplan"),
             "the workflow label leads the footer at every width",
           );
@@ -2807,7 +2808,12 @@ export const auroraUiSections = {
                 ),
               "the dashboard remains useful after a turn has settled",
             );
+            // Wide terminals pair tiles side by side: task + verification cost
+            // the taller member's height (4 rows), the activity/changes pair
+            // 3–4 more. The failure verdict stays visible at every budget;
+            // routine tiles join only once the grid actually fits the budget.
             for (const maxRows of [5, 6, 7, 8]) {
+              const activityFits = maxRows >= 7;
               const failedDashboard = renderDashboard(
                 {
                   ...tvm,
@@ -2823,9 +2829,15 @@ export const auroraUiSections = {
               );
               assert(
                 failedDashboard.some((line) => line.includes("NICHT BEREIT")) &&
-                  !failedDashboard.some((line) => line.includes("AKTIVITÄT")),
-                `a failed verification survives the ${maxRows}-row budget before routine activity`,
+                  failedDashboard.some((line) => line.includes("AKTIVITÄT")) ===
+                    activityFits,
+                `a failed verification survives the ${maxRows}-row budget${
+                  activityFits
+                    ? " while the grid still fits routine activity"
+                    : " before routine activity"
+                }`,
               );
+              const changesFits = maxRows >= 8;
               const failedDashboardWithChanges = renderDashboard(
                 {
                   ...tvm,
@@ -2849,10 +2861,15 @@ export const auroraUiSections = {
                 failedDashboardWithChanges.some((line) =>
                   line.includes("NICHT BEREIT"),
                 ) &&
-                  !failedDashboardWithChanges.some((line) =>
+                  failedDashboardWithChanges.some((line) =>
                     line.includes("ÄNDERUNGEN"),
-                  ),
-                `a failed verification survives the ${maxRows}-row budget before changes`,
+                  ) ===
+                    changesFits,
+                `a failed verification survives the ${maxRows}-row budget${
+                  changesFits
+                    ? " while the grid still fits the changes tile"
+                    : " before changes"
+                }`,
               );
             }
             const compactDashboard = renderDashboard(
