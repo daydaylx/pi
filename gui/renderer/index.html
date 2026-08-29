@@ -13,7 +13,14 @@
     <header id="status-bar">
       <div id="header-left">
         <span id="brand">Pi</span>
-        <span id="project-label" title="Aktuelles Projekt">—</span>
+        <button
+          id="project-label"
+          type="button"
+          title="Projekt öffnen"
+          aria-label="Projekt öffnen"
+        >
+          —
+        </button>
       </div>
       <div id="header-center">
         <span id="workflow-label" class="chip" title="Workflow">Work</span>
@@ -105,6 +112,12 @@
 
       <section id="conversation">
         <section id="chat" aria-live="polite"></section>
+        <div id="no-project" hidden>
+          <p>Kein Projekt geöffnet.</p>
+          <button id="btn-open-project" class="primary" type="button">
+            Projekt öffnen
+          </button>
+        </div>
         <div id="banner" hidden></div>
         <footer id="composer">
           <textarea
@@ -150,22 +163,20 @@
         </footer>
       </section>
 
+      <div
+        id="inspector-resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Inspector-Breite ändern"
+        tabindex="0"
+      ></div>
       <aside id="context-area" aria-label="Inspector">
         <div id="context-overview">
           <h2>Inspector</h2>
-          <div id="context-rows">Keine Daten.</div>
+          <div id="context-rows" class="skeleton">Wird geladen …</div>
           <button id="btn-refresh-context" title="Kontext aktualisieren">
             Aktualisieren
           </button>
-        </div>
-        <div id="context-panel" hidden>
-          <div id="context-panel-head">
-            <button id="btn-panel-back" title="Zur Übersicht">
-              ← Übersicht
-            </button>
-            <h2 id="context-panel-title"></h2>
-          </div>
-          <div id="context-panel-body"></div>
         </div>
       </aside>
     </main>

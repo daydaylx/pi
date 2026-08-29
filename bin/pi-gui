@@ -9,5 +9,10 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(dirname "$here")"
 
+# Das tatsächliche Arbeitsverzeichnis der Aufruferin sichern, bevor unten
+# ins Installationsverzeichnis gewechselt wird — sonst hat die GUI keine
+# Chance, ein sinnvolles Startprojekt zu erraten (siehe main/index.js).
+export PI_GUI_LAUNCH_CWD="$PWD"
+
 cd "$repo"
 exec ./gui/node_modules/.bin/electron "$repo/gui" "$@"

@@ -119,12 +119,21 @@ kbd {
   font-size: 14px;
 }
 #project-label {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--muted);
   max-width: 28ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+  padding: 3px 7px;
+}
+#project-label:hover {
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--border);
 }
 .chip {
   border: 1px solid var(--border);
@@ -247,7 +256,7 @@ button.ghost-button {
 #layout {
   flex: 1;
   display: grid;
-  grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--inspector-w);
+  grid-template-columns: var(--nav-w) minmax(0, 1fr) 6px var(--inspector-w);
   min-height: 0;
 }
 
@@ -306,9 +315,29 @@ button.ghost-button {
   padding: var(--space-5) clamp(16px, 6%, 96px);
   scroll-behavior: smooth;
 }
+/* Leerzustand ohne offenes Projekt (§1) — Composer bleibt deaktiviert,
+   solange kein Projekt gewählt ist (siehe renderNoProjectState()). */
+#no-project {
+  flex: 1;
+}
+#no-project:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--muted);
+  text-align: center;
+  padding: var(--space-5);
+}
+#no-project p {
+  margin: 0;
+  font-size: 14px;
+}
 
-/* Inspector (rechte Spalte): kompakte Übersicht, echtes Detailpanel bei
-   Auswahl statt permanentem Status-Dashboard. */
+/* Inspector (rechte Spalte): eine einzige, immer sichtbare Übersicht —
+   jede Zeile klappt ihren Inhalt inline auf statt in ein separates
+   Detailpanel zu wechseln (§5). */
 #context-area {
   border-left: 1px solid var(--border-soft);
   background: var(--surface);
@@ -325,41 +354,41 @@ button.ghost-button {
   text-transform: uppercase;
   font-weight: 600;
 }
-#context-panel-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-#context-panel-head h2 {
-  margin: 0;
-}
-#btn-panel-back {
-  background: transparent;
-  border-color: transparent;
+#context-rows.skeleton {
   color: var(--muted);
-  padding: 4px 8px;
+  font-style: italic;
+  padding: 8px 10px;
+}
+.context-row-wrap {
+  margin-bottom: 2px;
 }
 .context-row {
   width: 100%;
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   padding: 8px 10px;
-  margin-bottom: 2px;
   color: var(--text);
 }
-.context-row:hover:not(:disabled) {
+.context-row:hover {
   background: var(--surface-2);
   border-color: var(--border);
 }
-/* Die meisten Übersichtszeilen sind reine Statusanzeige, kein
-   deaktivierter Button — volle Lesbarkeit statt der generischen
-   Disabled-Abblendung. */
-.context-row:disabled {
-  opacity: 1;
+/* Reine Statuszeilen ohne aufklappbaren Inhalt: kein deaktivierter Button
+   (von Screenreadern meist übersprungen), sondern ein role="status"-Element
+   mit voller Lesbarkeit statt Disabled-Abblendung (§2). */
+.context-row.static {
   cursor: default;
+}
+.row-caret {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
 }
 .context-row .row-label {
   display: block;
@@ -400,18 +429,42 @@ button.ghost-button {
   background: var(--surface-2);
   color: var(--muted);
 }
-#context-panel-body {
-  margin-top: var(--space-3);
+.context-row-body {
+  margin: 0 2px var(--space-2);
+  padding-left: 18px;
   word-break: break-word;
 }
-#context-panel-body .panel-line {
+.panel-line {
   padding: 6px 2px;
   border-bottom: 1px solid var(--border-soft);
   font-size: 13px;
 }
+.panel-line.loading {
+  color: var(--muted);
+  font-style: italic;
+  border-bottom: none;
+}
 #btn-refresh-context {
   margin-top: var(--space-3);
   width: 100%;
+}
+
+/* Ziehgriff zwischen Konversation und Inspector (§3) — nur in der breiten
+   Spalten-Ansicht aktiv, siehe isNarrowLayout()/setupInspectorResize(). */
+#inspector-resize-handle {
+  width: 6px;
+  flex: none;
+  cursor: col-resize;
+  background: transparent;
+}
+#inspector-resize-handle:hover,
+#inspector-resize-handle:focus-visible {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  outline: none;
+}
+body.resizing-inspector {
+  cursor: col-resize;
+  user-select: none;
 }
 
 /* -------------------------------- Chat --------------------------------- */
@@ -717,19 +770,50 @@ details.thinking-block pre {
 
 /* -------------------------------- Banner ------------------------------- */
 
+/* Meldungen stapeln sich statt sich zu überschreiben (§4): jede ist ein
+   eigenes .banner-item, #banner selbst ist nur der Container. */
 #banner {
   flex: none;
+  font-size: 13px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+#banner:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+.banner-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 9px 16px;
   background: color-mix(in srgb, var(--err) 16%, var(--surface));
   color: #ffb4b6;
   border-top: 1px solid var(--err);
   white-space: pre-wrap;
-  font-size: 13px;
 }
-#banner.info {
+.banner-item.info {
   background: var(--surface-2);
   color: var(--text);
   border-top-color: var(--border);
+}
+.banner-text {
+  flex: 1;
+  min-width: 0;
+}
+.banner-dismiss {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 0 2px;
+  font-size: 15px;
+  line-height: 1.3;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.banner-dismiss:hover {
+  opacity: 1;
 }
 
 /* ------------------------------- Composer ------------------------------ */
@@ -810,6 +894,29 @@ dialog h2 {
   margin: 0 0 var(--space-3);
   font-size: 15px;
 }
+
+/* Extension-UI-Domologe (über dialogShell gerendert, dynamisch ins DOM).
+   Muss explizit gestylt werden — ohne Regel wirkt nur Browser-Default.
+   Orientiert sich am Picker-Dialog, aber flexibel für alle Typen.
+   Kein fixed max-height, damit längere Bestätigungstexte nicht abgeschnitten
+   werden (z.B. tool execution confirm mit langen Pfaden). */
+.dialog.ui-dialog {
+  width: min(620px, calc(100vw - 32px));
+  min-width: 0;
+  max-width: 620px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100;
+}
 #picker-filter {
   width: 100%;
   margin-bottom: var(--space-2);
@@ -885,7 +992,8 @@ dialog h2 {
   body.context-hidden #layout {
     grid-template-columns: var(--nav-w) minmax(0, 1fr);
   }
-  body.context-hidden #context-area {
+  body.context-hidden #context-area,
+  body.context-hidden #inspector-resize-handle {
     display: none;
   }
 }
@@ -896,6 +1004,10 @@ dialog h2 {
 @media (max-width: 1080px) {
   #layout {
     grid-template-columns: var(--nav-w) minmax(0, 1fr);
+  }
+  /* Drawer statt Spalte: keine feste Breite zum Ziehen. */
+  #inspector-resize-handle {
+    display: none;
   }
   #context-area {
     position: fixed;
@@ -916,8 +1028,11 @@ dialog h2 {
 /* Kleine Fenster: Header darf umbrechen (--header-h passt sich an),
    Projektname weicht, Composer bleibt bedienbar. */
 @media (max-width: 760px) {
+  /* Einziger Einstiegspunkt zur Projektauswahl: schrumpfen statt
+     verschwinden — sonst gibt es auf schmalen Fenstern keine Affordanz
+     mehr, um überhaupt ein Projekt zu öffnen. */
   #project-label {
-    display: none;
+    max-width: 9ch;
   }
   #header-center {
     order: 3;

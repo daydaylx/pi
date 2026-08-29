@@ -10,7 +10,7 @@
     "smoke:tools": "electron . --smoke-tools",
     "smoke:dialogs": "node test/dialog-smoke.mjs",
     "test:session-rpc": "node test/session-rpc.mjs",
-    "test": "node test/unit.mjs && node test/ipc-handlers.mjs && node test/renderer-helpers.mjs && node test/renderer-contract.mjs && node test/shortcut-parity.mjs && node test/security.mjs && node test/stability.mjs && node test/markdown.mjs && node test/code-block.mjs && node test/session-rpc.mjs"
+    "test": "node test/unit.mjs && node test/ipc-handlers.mjs && node test/recent-projects.mjs && node test/renderer-helpers.mjs && node test/renderer-contract.mjs && node test/shortcut-parity.mjs && node test/security.mjs && node test/stability.mjs && node test/markdown.mjs && node test/code-block.mjs && node test/session-rpc.mjs"
   },
   "devDependencies": {
     "electron": "^44.0.0"

@@ -10,6 +10,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("piGui", {
   startSession: (options) => ipcRenderer.invoke("gui:startSession", options),
   stopSession: () => ipcRenderer.invoke("gui:stopSession"),
+  pickProjectFolder: () => ipcRenderer.invoke("gui:pickProjectFolder"),
+  listRecentProjects: () => ipcRenderer.invoke("gui:listRecentProjects"),
   newSession: () => ipcRenderer.invoke("gui:newSession"),
   getMessages: () => ipcRenderer.invoke("gui:getMessages"),
   getState: () => ipcRenderer.invoke("gui:getState"),

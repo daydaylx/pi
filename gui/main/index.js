@@ -8,10 +8,33 @@
 "use strict";
 
 const path = require("node:path");
+const { statSync } = require("node:fs");
 const { app, BrowserWindow, ipcMain } = require("electron");
 
 const shortcutsJson = require("../shared/shortcuts.json");
 const { registerIpcHandlers } = require("./ipc-handlers.js");
+const { loadRecentProjects } = require("./recent-projects.js");
+
+function isDirectory(candidate) {
+  try {
+    return typeof candidate === "string" && candidate.length > 0
+      ? statSync(candidate).isDirectory()
+      : false;
+  } catch {
+    return false;
+  }
+}
+
+/** Startprojekt: bevorzugt das Verzeichnis, aus dem `pi gui` aufgerufen
+ * wurde (bin/pi-gui reicht es über PI_GUI_LAUNCH_CWD durch), sonst das
+ * zuletzt geöffnete Projekt, sonst keins (Renderer zeigt dann den
+ * Leerzustand statt stillschweigend im falschen Verzeichnis zu starten). */
+function resolveInitialCwd() {
+  const launchCwd = process.env.PI_GUI_LAUNCH_CWD;
+  if (isDirectory(launchCwd)) return launchCwd;
+  const recent = loadRecentProjects();
+  return recent.length > 0 ? recent[0].path : undefined;
+}
 
 let mainWindow = null;
 const smokeMode = process.argv.includes("--smoke-dialogs")
@@ -46,7 +69,13 @@ function createMainWindow() {
 
   const rendererPath = path.join(__dirname, "..", "renderer", "index.html");
   if (smokeMode) win.loadFile(rendererPath, { query: { smoke: smokeMode } });
-  else win.loadFile(rendererPath);
+  else {
+    const initialCwd = resolveInitialCwd();
+    win.loadFile(
+      rendererPath,
+      initialCwd ? { query: { cwd: initialCwd } } : undefined,
+    );
+  }
   return win;
 }
 

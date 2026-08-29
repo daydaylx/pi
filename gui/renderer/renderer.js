@@ -10,6 +10,8 @@ const api = window.piGui;
 const activity = window.piGuiActivity;
 const interactions = window.piGuiInteractions;
 const isSmokeMode = new URLSearchParams(window.location.search).has("smoke");
+const initialCwdParam =
+  new URLSearchParams(window.location.search).get("cwd") || "";
 
 /* ----------------------------- Zustand -------------------------------- */
 
@@ -30,6 +32,9 @@ const state = {
   sessionTransitioning: false,
   /** Kernzustand aus frontend-bridge/state-Einträgen (Phase 5). */
   core: null,
+  /** Welche Inspector-Übersichtszeilen gerade inline aufgeklappt sind (§5:
+   * eine Übersicht statt Übersicht/Detail-Umschaltung). */
+  expandedRows: new Set(),
 };
 
 /** Kanonisches Workflow-Modus-Set (shared/workflow-mode.ts). */
@@ -54,16 +59,45 @@ function setStatusText(text) {
   statusTextEl.textContent = text;
 }
 
-let bannerTimer = null;
+/** Meldungen stapeln sich statt sich gegenseitig zu überschreiben (§4):
+ * transiente info-Meldungen verschwinden automatisch, Fehler bleiben
+ * stehen bis zur expliziten Bestätigung. */
+const MAX_BANNERS = 5;
+let bannerIdCounter = 0;
+
+function dismissBanner(id) {
+  const item = bannerEl.querySelector(`[data-banner-id="${id}"]`);
+  if (item) item.remove();
+  bannerEl.hidden = bannerEl.children.length === 0;
+}
+
+function clearBanners() {
+  bannerEl.replaceChildren();
+  bannerEl.hidden = true;
+}
+
 function showBanner(message, kind = "error") {
-  bannerEl.textContent = message;
-  bannerEl.className = kind === "info" ? "info" : "";
+  const id = ++bannerIdCounter;
+  const item = document.createElement("div");
+  item.className = kind === "info" ? "banner-item info" : "banner-item";
+  item.dataset.bannerId = String(id);
+  const text = document.createElement("span");
+  text.className = "banner-text";
+  text.textContent = message;
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "banner-dismiss";
+  dismiss.setAttribute("aria-label", "Meldung schließen");
+  dismiss.textContent = "×";
+  dismiss.addEventListener("click", () => dismissBanner(id));
+  item.append(text, dismiss);
+  bannerEl.appendChild(item);
   bannerEl.hidden = false;
-  clearTimeout(bannerTimer);
+  while (bannerEl.children.length > MAX_BANNERS) {
+    bannerEl.firstElementChild.remove();
+  }
   if (kind === "info") {
-    bannerTimer = setTimeout(() => {
-      bannerEl.hidden = true;
-    }, 6000);
+    setTimeout(() => dismissBanner(id), 6000);
   }
 }
 
@@ -467,7 +501,6 @@ function applyCoreEntry(entry) {
   state.core = core;
   refreshCoreChips();
   refreshContextOverview();
-  if (el("context-panel").hidden === false) renderActivePanel();
 }
 
 function refreshCoreChips() {
@@ -776,6 +809,11 @@ async function openCommandPalette() {
 }
 
 async function openSessionResume() {
+  if (!window.__piGuiCwd) {
+    showBanner("Bitte zuerst ein Projekt öffnen.", "info");
+    await openProjectPicker();
+    return;
+  }
   try {
     const sessions = await api.listSessions();
     if (sessions.length === 0) {
@@ -798,13 +836,6 @@ async function openSessionResume() {
 
 /* --------------- Navigation und Kontextbereich (Phase 6) --------------- */
 
-const PANEL_TITLES = {
-  changes: "Änderungen",
-  agents: "Subagenten",
-  verify: "Verifikation",
-  sessions: "Sitzungen",
-};
-
 function setActiveNav(view) {
   for (const item of document.querySelectorAll(".nav-item")) {
     item.classList.toggle("active", item.dataset.view === view);
@@ -812,30 +843,32 @@ function setActiveNav(view) {
   state.activeView = view;
 }
 
+/** Nav-Rail/Shortcuts springen zur passenden Übersichtszeile und klappen
+ * sie auf, statt in einen separaten Panel-Modus zu wechseln — es gibt nur
+ * noch die eine, immer sichtbare Übersicht (§5). */
 function setActiveView(view) {
   setActiveNav(view);
   if (view === "chat") {
-    showContextOverview();
+    if (isNarrowLayout()) document.body.classList.remove("context-open");
     return;
   }
-  openContextPanel(view);
-}
-
-function openContextPanel(view) {
-  setActiveNav(view);
-  el("context-overview").hidden = true;
-  el("context-panel").hidden = false;
-  el("context-panel-title").textContent = PANEL_TITLES[view] ?? view;
-  state.panelView = view;
-  renderActivePanel();
+  expandRow(view);
   if (isNarrowLayout()) document.body.classList.add("context-open");
 }
 
-function showContextOverview() {
-  el("context-panel").hidden = true;
-  el("context-overview").hidden = false;
-  state.panelView = undefined;
-  refreshContextOverview();
+function expandRow(key) {
+  state.expandedRows.add(key);
+  void refreshContextOverview().then(() => {
+    document
+      .querySelector(`[data-expand-key="${key}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function toggleRow(key) {
+  if (state.expandedRows.has(key)) state.expandedRows.delete(key);
+  else state.expandedRows.add(key);
+  void refreshContextOverview();
 }
 
 function isNarrowLayout() {
@@ -865,125 +898,21 @@ function verificationPill() {
   return `<span class="pill warn">${esc(status)}</span>`;
 }
 
-/** Kompakte Übersicht: ein klickbarer Zustand pro Zeile, Details im Panel. */
-async function refreshContextOverview() {
-  const rows = el("context-rows");
-  if (!rows) return;
-  const core = state.core;
-  let contextPart = "—";
-  try {
-    const stats = await api.getStats();
-    if (stats?.contextUsage && stats.contextUsage.percent !== null) {
-      contextPart = `${stats.contextUsage.percent}% · ${stats.contextUsage.tokens} Tokens`;
-    }
-  } catch {
-    /* nicht verbunden */
-  }
-
-  const rowDefs = [
-    {
-      label: "Aufgabe",
-      value: core?.task?.title || "—",
-      empty: !core?.task?.title || core.task.title === "Aktuelle Aufgabe",
-    },
-    {
-      label: "Workflow",
-      value: core?.workflow?.label || "Work",
-      empty: !core?.workflow,
-    },
-    {
-      label: "Verifikation",
-      value:
-        esc(core?.verification?.status || state.verificationStatus || "—") +
-        verificationPill(),
-      raw: true,
-      empty: !core?.verification?.status && !state.verificationStatus,
-    },
-    {
-      label: "Änderungen",
-      value: core?.changes
-        ? `${core.changes.filesCount} Dateien`
-        : `${state.editedFiles.size} Dateien (Sitzung)`,
-      empty: !core?.changes && state.editedFiles.size === 0,
-    },
-    {
-      label: "Agenten",
-      value:
-        core?.subagents?.length > 0
-          ? `${core.subagents.length} aktiv`
-          : "keine",
-      empty: !(core?.subagents?.length > 0),
-    },
-    { label: "Kontext", value: contextPart, empty: contextPart === "—" },
-    {
-      label: "Modell",
-      value: `${state.modelLabel || "—"} · Denken ${state.thinkingLabel || "—"}`,
-      empty: !state.modelLabel,
-    },
-  ];
-
-  rows.innerHTML = "";
-  for (const def of rowDefs) {
-    const button = document.createElement("button");
-    button.className = "context-row";
-    button.type = "button";
-    const label = document.createElement("span");
-    label.className = "row-label";
-    label.textContent = def.label;
-    const value = document.createElement("span");
-    value.className = def.empty ? "row-value empty" : "row-value";
-    if (def.raw) {
-      value.innerHTML = def.value;
-    } else {
-      value.textContent = def.value;
-    }
-    button.append(label, value);
-    // Die Übersicht ist nur eine kompakte Statuszeile (§6/§7): die einzige
-    // Navigation zu Changes/Agents/Verify/Sessions ist die Nav-Rail, damit
-    // hier keine zweite, konkurrierende Navigationsebene entsteht. Workflow
-    // bleibt anklickbar, weil das eine Aktion ist (Picker öffnen), keine
-    // Navigation zu einer anderen Ansicht.
-    if (def.label === "Workflow") {
-      button.title = "Workflow wechseln";
-      button.addEventListener("click", () => openWorkflowPicker());
-    } else {
-      button.disabled = true;
-    }
-    rows.appendChild(button);
-  }
-
-  if (state.notifications.length > 0) {
-    const note = document.createElement("button");
-    note.className = "context-row";
-    note.type = "button";
-    note.disabled = true;
-    const label = document.createElement("span");
-    label.className = "row-label";
-    label.textContent = "Letzte Meldungen";
-    const value = document.createElement("span");
-    value.className = "row-value";
-    value.textContent = state.notifications.slice(0, 3).join(" · ");
-    note.append(label, value);
-    rows.appendChild(note);
-  }
-
-  if (state.panelView) renderActivePanel();
-}
-
-/** Detailpanel je Ansicht — gespeist aus Core-State, nie aus Chattext. */
-async function renderActivePanel() {
-  const body = el("context-panel-body");
-  if (!body || !state.panelView) return;
+/** Inline-Detailinhalt einer aufgeklappten Übersichtszeile — dieselbe
+ * Kategorie-Logik wie zuvor das separate Detailpanel, jetzt direkt unter
+ * der Zeile gerendert statt in einem eigenen Panel-Modus (§5). Gespeist
+ * aus Core-State, nie aus Chattext. */
+async function renderRowBody(body, key) {
   const core = state.core;
   body.innerHTML = "";
-  const line = (html) => {
+  const line = (html, extraClass = "") => {
     const div = document.createElement("div");
-    div.className = "panel-line";
+    div.className = extraClass ? `panel-line ${extraClass}` : "panel-line";
     div.innerHTML = html;
     body.appendChild(div);
   };
 
-  if (state.panelView === "changes") {
+  if (key === "changes") {
     const changes = core?.changes;
     if (changes) {
       line(
@@ -1001,7 +930,7 @@ async function renderActivePanel() {
     return;
   }
 
-  if (state.panelView === "agents") {
+  if (key === "agents") {
     const subagents = core?.subagents ?? [];
     if (subagents.length === 0) {
       line("Keine aktiven Subagenten.");
@@ -1013,7 +942,7 @@ async function renderActivePanel() {
     return;
   }
 
-  if (state.panelView === "verify") {
+  if (key === "verify") {
     const verification = core?.verification;
     if (!verification && !state.verificationStatus) {
       line("Noch keine Verifikation erfasst.");
@@ -1037,8 +966,8 @@ async function renderActivePanel() {
     return;
   }
 
-  if (state.panelView === "sessions") {
-    line("Lade Sitzungen …");
+  if (key === "sessions") {
+    line("Lade Sitzungen …", "loading");
     try {
       const sessions = await api.listSessions();
       body.innerHTML = "";
@@ -1067,6 +996,148 @@ async function renderActivePanel() {
       line(esc(String(err.message ?? err)));
     }
   }
+}
+
+/** Eine einzige, immer sichtbare Zeilenliste: Aufgabe/Kontext/Modell sind
+ * reine Statuszeilen, Workflow löst eine Aktion aus (Picker), Änderungen/
+ * Agenten/Verifikation/Sitzungen klappen ihren Inhalt inline auf statt in
+ * ein separates Panel zu wechseln (§5 — ersetzt die frühere
+ * Übersicht/Detail-Umschaltung). */
+async function refreshContextOverview() {
+  const rows = el("context-rows");
+  if (!rows) return;
+  const core = state.core;
+  let contextPart = "—";
+  try {
+    const stats = await api.getStats();
+    if (stats?.contextUsage && stats.contextUsage.percent !== null) {
+      contextPart = `${stats.contextUsage.percent}% · ${stats.contextUsage.tokens} Tokens`;
+    }
+  } catch {
+    /* nicht verbunden */
+  }
+
+  const rowDefs = [
+    {
+      label: "Aufgabe",
+      value: core?.task?.title || "—",
+      empty: !core?.task?.title || core.task.title === "Aktuelle Aufgabe",
+    },
+    {
+      label: "Workflow",
+      value: core?.workflow?.label || "Work",
+      empty: !core?.workflow,
+      action: () => openWorkflowPicker(),
+    },
+    {
+      key: "verify",
+      label: "Verifikation",
+      value:
+        esc(core?.verification?.status || state.verificationStatus || "—") +
+        verificationPill(),
+      raw: true,
+      empty: !core?.verification?.status && !state.verificationStatus,
+    },
+    {
+      key: "changes",
+      label: "Änderungen",
+      value: core?.changes
+        ? `${core.changes.filesCount} Dateien`
+        : `${state.editedFiles.size} Dateien (Sitzung)`,
+      empty: !core?.changes && state.editedFiles.size === 0,
+    },
+    {
+      key: "agents",
+      label: "Agenten",
+      value:
+        core?.subagents?.length > 0
+          ? `${core.subagents.length} aktiv`
+          : "keine",
+      empty: !(core?.subagents?.length > 0),
+    },
+    { label: "Kontext", value: contextPart, empty: contextPart === "—" },
+    {
+      label: "Modell",
+      value: `${state.modelLabel || "—"} · Denken ${state.thinkingLabel || "—"}`,
+      empty: !state.modelLabel,
+    },
+    { key: "sessions", label: "Sitzungen", value: "Verlauf", empty: false },
+  ];
+
+  rows.className = "";
+  rows.innerHTML = "";
+  const pending = [];
+  for (const def of rowDefs) {
+    const wrap = document.createElement("div");
+    wrap.className = "context-row-wrap";
+
+    const label = document.createElement("span");
+    label.className = "row-label";
+    label.textContent = def.label;
+    const value = document.createElement("span");
+    value.className = def.empty ? "row-value empty" : "row-value";
+    if (def.raw) value.innerHTML = def.value;
+    else value.textContent = def.value;
+
+    if (def.action) {
+      // Eine Aktion (Picker öffnen), keine Navigation zu einem Detail.
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "context-row";
+      button.title = `${def.label} wechseln`;
+      button.append(label, value);
+      button.addEventListener("click", def.action);
+      wrap.appendChild(button);
+    } else if (def.key) {
+      const expanded = state.expandedRows.has(def.key);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "context-row";
+      button.dataset.expandKey = def.key;
+      button.setAttribute("aria-expanded", String(expanded));
+      const caret = document.createElement("span");
+      caret.className = "row-caret";
+      caret.setAttribute("aria-hidden", "true");
+      caret.textContent = expanded ? "▾" : "▸";
+      button.append(caret, label, value);
+      button.addEventListener("click", () => toggleRow(def.key));
+      wrap.appendChild(button);
+      if (expanded) {
+        const body = document.createElement("div");
+        body.className = "context-row-body";
+        wrap.appendChild(body);
+        pending.push(renderRowBody(body, def.key));
+      }
+    } else {
+      // Reine Statuszeile ohne weiteren Inhalt: kein deaktivierter Button
+      // (von Screenreadern meist übersprungen), sondern ein Status-Element.
+      const row = document.createElement("div");
+      row.className = "context-row static";
+      row.setAttribute("role", "status");
+      row.append(label, value);
+      wrap.appendChild(row);
+    }
+    rows.appendChild(wrap);
+  }
+
+  if (state.notifications.length > 0) {
+    const wrap = document.createElement("div");
+    wrap.className = "context-row-wrap";
+    const row = document.createElement("div");
+    row.className = "context-row static";
+    row.setAttribute("role", "status");
+    const label = document.createElement("span");
+    label.className = "row-label";
+    label.textContent = "Letzte Meldungen";
+    const value = document.createElement("span");
+    value.className = "row-value";
+    value.textContent = state.notifications.slice(0, 3).join(" · ");
+    row.append(label, value);
+    wrap.appendChild(row);
+    rows.appendChild(wrap);
+  }
+
+  await Promise.all(pending);
 }
 
 /* --------------------------- Status & Verbindung ----------------------- */
@@ -1126,7 +1197,7 @@ function resetSessionView() {
   state.editedFiles.clear();
   state.core = null;
   clearChat();
-  bannerEl.hidden = true;
+  clearBanners();
 }
 
 async function withSessionTransition(operation) {
@@ -1182,6 +1253,12 @@ async function resumeSession(sessionPath) {
 }
 
 async function startFreshSession() {
+  if (!state.connected && !window.__piGuiCwd) {
+    // Kein Projekt gewählt: ein Start gegen ein unbestimmtes Verzeichnis
+    // wäre genau der ursprüngliche Projektauswahl-Bug.
+    await openProjectPicker();
+    return;
+  }
   if (state.busy) {
     showBanner("Pi arbeitet bereits. Stopp oder Warten.", "info");
     return;
@@ -1204,6 +1281,90 @@ async function startFreshSession() {
     setDot("error");
     setStatusText("Verbindung fehlgeschlagen");
     showBanner(`Verbindungsfehler: ${error.message ?? error}`);
+  });
+}
+
+function renderNoProjectState() {
+  chatEl.hidden = true;
+  el("no-project").hidden = false;
+  inputEl.disabled = true;
+  el("btn-send").disabled = true;
+  refreshProjectLabel();
+}
+
+function clearNoProjectState() {
+  chatEl.hidden = false;
+  el("no-project").hidden = true;
+  inputEl.disabled = false;
+  el("btn-send").disabled = false;
+}
+
+/** Öffnet ein anderes Projekt (oder zum ersten Mal eins): stoppt eine
+ * laufende Sitzung sauber und startet `pi --mode rpc` neu mit dem
+ * gewählten Arbeitsverzeichnis (PiRpcManager bindet cwd fest beim
+ * Spawnen, ein Wechsel ohne Stop-dann-Start ist nicht möglich). */
+async function switchProject(cwd) {
+  if (state.busy) {
+    showBanner("Pi arbeitet bereits. Stopp oder Warten.", "info");
+    return;
+  }
+  if (state.connected && cwd === window.__piGuiCwd) {
+    showBanner("Projekt ist bereits geöffnet.", "info");
+    return;
+  }
+  await withSessionTransition(async () => {
+    setDot("busy");
+    if (state.connected) await api.stopSession();
+    state.connected = false;
+    window.__piGuiCwd = cwd;
+    const result = await api.startSession({ cwd });
+    if (result?.cancelled) {
+      showBanner("Projektwechsel wurde abgebrochen.", "info");
+      return;
+    }
+    resetSessionView();
+    clearNoProjectState();
+    refreshProjectLabel();
+    await refreshStateLabels();
+    await loadConversation();
+    await refreshContextOverview();
+    showBanner("Projekt geöffnet.", "info");
+  }).catch((error) => {
+    setDot("error");
+    setStatusText("Verbindung fehlgeschlagen");
+    showBanner(
+      `Projekt konnte nicht geöffnet werden: ${error.message ?? error}`,
+    );
+  });
+}
+
+/** Ordner-Picker + zuletzt geöffnete Projekte (§1) — auf Basis der
+ * bestehenden generischen Listenauswahl `openPicker`. */
+async function openProjectPicker() {
+  let recent = [];
+  try {
+    recent = await api.listRecentProjects();
+  } catch {
+    /* Persistenz ist ein Komfortfeature, kein hartes Erfordernis */
+  }
+  const rows = [
+    { label: "Ordner wählen …", value: "__pick__" },
+    ...recent
+      .filter((entry) => entry.path !== window.__piGuiCwd)
+      .map((entry) => ({
+        label: entry.path.split("/").filter(Boolean).at(-1) || entry.path,
+        desc: entry.path,
+        value: entry.path,
+      })),
+  ];
+  openPicker("Projekt öffnen", rows, async (value) => {
+    let cwd = value;
+    if (value === "__pick__") {
+      const picked = await api.pickProjectFolder();
+      if (!picked || picked.cancelled || !picked.path) return;
+      cwd = picked.path;
+    }
+    await switchProject(cwd);
   });
 }
 
@@ -1324,6 +1485,85 @@ function observeHeaderHeight() {
   sync();
 }
 
+/* --------------------- Inspector-Resize (§3) --------------------------- */
+
+const INSPECTOR_MIN_W = 240;
+const INSPECTOR_MAX_W = 480;
+const INSPECTOR_W_STORAGE_KEY = "pi-gui-inspector-width";
+
+function currentInspectorWidth() {
+  return parseInt(
+    getComputedStyle(document.documentElement).getPropertyValue(
+      "--inspector-w",
+    ),
+    10,
+  );
+}
+
+function applyInspectorWidth(px) {
+  const clamped = Math.min(INSPECTOR_MAX_W, Math.max(INSPECTOR_MIN_W, px));
+  document.documentElement.style.setProperty("--inspector-w", `${clamped}px`);
+  return clamped;
+}
+
+function persistInspectorWidth() {
+  try {
+    localStorage.setItem(
+      INSPECTOR_W_STORAGE_KEY,
+      String(currentInspectorWidth()),
+    );
+  } catch {
+    /* Bedienkomfort, kein hartes Erfordernis */
+  }
+}
+
+function restoreInspectorWidth() {
+  try {
+    const stored = Number(localStorage.getItem(INSPECTOR_W_STORAGE_KEY));
+    if (Number.isFinite(stored) && stored > 0) applyInspectorWidth(stored);
+  } catch {
+    /* localStorage evtl. gesperrt (privater Modus) — Default bleibt gültig */
+  }
+}
+
+/** Nur in der breiten Spalten-Ansicht aktiv — im Drawer-Modus (schmales
+ * Fenster) hat der Inspector keine feste Spaltenbreite zum Ziehen. */
+function setupInspectorResize() {
+  const handle = el("inspector-resize-handle");
+  if (!handle) return;
+  let dragging = false;
+
+  const onPointerMove = (event) => {
+    if (!dragging) return;
+    applyInspectorWidth(window.innerWidth - event.clientX);
+  };
+  const onPointerUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove("resizing-inspector");
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+    persistInspectorWidth();
+  };
+  handle.addEventListener("pointerdown", (event) => {
+    if (isNarrowLayout()) return;
+    dragging = true;
+    document.body.classList.add("resizing-inspector");
+    event.preventDefault();
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  });
+  handle.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft")
+      applyInspectorWidth(currentInspectorWidth() + 16);
+    else if (event.key === "ArrowRight")
+      applyInspectorWidth(currentInspectorWidth() - 16);
+    else return;
+    event.preventDefault();
+    persistInspectorWidth();
+  });
+}
+
 /* -------------------------------- Boot --------------------------------- */
 
 async function boot() {
@@ -1350,10 +1590,6 @@ async function boot() {
   for (const item of document.querySelectorAll(".nav-item")) {
     item.addEventListener("click", () => setActiveView(item.dataset.view));
   }
-  el("btn-panel-back").addEventListener("click", () => {
-    setActiveView("chat");
-    if (isNarrowLayout()) document.body.classList.remove("context-open");
-  });
   el("btn-refresh-context").addEventListener("click", () =>
     refreshContextOverview(),
   );
@@ -1401,12 +1637,21 @@ async function boot() {
   el("pill-model").addEventListener("click", () => openModelPicker());
   el("pill-thinking").addEventListener("click", () => openThinkingPicker());
   el("btn-palette").addEventListener("click", () => openCommandPalette());
+  el("project-label").addEventListener("click", () => openProjectPicker());
+  el("btn-open-project").addEventListener("click", () => openProjectPicker());
   observeHeaderHeight();
+  restoreInspectorWidth();
+  setupInspectorResize();
 
   if (!isSmokeMode) {
-    refreshProjectLabel();
-    await startFreshSession();
-    await refreshContextOverview();
+    if (initialCwdParam) {
+      window.__piGuiCwd = initialCwdParam;
+      refreshProjectLabel();
+      await startFreshSession();
+      await refreshContextOverview();
+    } else {
+      renderNoProjectState();
+    }
   }
 }
 

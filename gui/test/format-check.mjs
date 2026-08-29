@@ -24,10 +24,7 @@ function pathToFileUrl(p) {
   return "file://" + p.replace(/\\/g, "/");
 }
 
-const configText = readFileSync(
-  path.join(repo, ".prettierrc.json"),
-  "utf8",
-);
+const configText = readFileSync(path.join(repo, ".prettierrc.json"), "utf8");
 const config = JSON.parse(configText);
 
 const files = [
@@ -35,6 +32,7 @@ const files = [
   "main/ipc-handlers.js",
   "main/pi-rpc-manager.js",
   "main/preload.cjs",
+  "main/recent-projects.js",
   "renderer/index.html",
   "renderer/renderer.js",
   "renderer/activity-summary.js",
@@ -46,6 +44,7 @@ const files = [
   "shared/shortcuts.json",
   "test/unit.mjs",
   "test/ipc-handlers.mjs",
+  "test/recent-projects.mjs",
   "test/renderer-helpers.mjs",
   "test/renderer-contract.mjs",
   "test/shortcut-parity.mjs",

@@ -10,6 +10,7 @@ const os = require("node:os");
 const { existsSync, realpathSync } = require("node:fs");
 const fsPromises = require("node:fs/promises");
 const { PiRpcManager, summarizeToolCall } = require("./pi-rpc-manager.js");
+const { loadRecentProjects, rememberProject } = require("./recent-projects.js");
 
 const MAX_PROMPT_LENGTH = 100_000;
 const MAX_CLIPBOARD_LENGTH = 500_000;
@@ -182,6 +183,14 @@ class GuiSession {
         : undefined;
     this.noSession = options.noSession === true;
     this.stopping = false;
+    if (cwdOption) {
+      rememberProject(cwdOption);
+      try {
+        this.win.setTitle(`Pi — ${path.basename(cwdOption)}`);
+      } catch {
+        /* Fenster evtl. bereits geschlossen */
+      }
+    }
     this.manager = new PiRpcManager({
       piPath: process.env.PI_GUI_PI_PATH || "pi",
       cwd: cwdOption || undefined,
@@ -240,6 +249,21 @@ function registerIpcHandlers(ipcMain, getWindow, shortcutsJson) {
     if (!session || !session.manager) return { stopped: false };
     return { stopped: await session.stop() };
   });
+
+  /** Nativer Ordner-Dialog für die Projektauswahl (Main-Prozess-only,
+   * keine CSP-Implikation für den Renderer). */
+  ipcMain.handle("gui:pickProjectFolder", async () => {
+    const { dialog } = require("electron");
+    const result = await dialog.showOpenDialog(getWindow(), {
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { cancelled: true };
+    }
+    return { path: result.filePaths[0] };
+  });
+
+  ipcMain.handle("gui:listRecentProjects", () => loadRecentProjects());
 
   ipcMain.handle("gui:getState", async () => {
     const session = sessionFor();
