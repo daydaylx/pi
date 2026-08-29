@@ -39,3 +39,7 @@ gui/node_modules/
 gui/.npm-cache/
 gui/.cache/
 dist/
+
+# Extern generierte Hooks (z. B. tty7 agent-hook bridge) — maschinenlokale
+# Integration einer Drittanbieter-App, nie Teil des Repos
+extensions/tty7/
