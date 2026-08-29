@@ -38,5 +38,8 @@ export function ellipsizeMiddle(display: string, maxColumns: number): string {
 
   const short = prefix ? `${prefix}/${leaf}` : leaf;
   if (visibleWidth(short) <= available) return short;
-  return truncateToWidth(leaf, available, "…");
+  // truncateToWidth wraps the ellipsis in full resets even for plain text;
+  // ellipsizeMiddle returns a display string that callers style themselves,
+  // so the artifacts would be re-wrapped and become visible colour leaks.
+  return truncateToWidth(leaf, available, "…").replace(/\x1b\[[0-9;]*m/g, "");
 }
