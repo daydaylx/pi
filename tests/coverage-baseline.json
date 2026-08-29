@@ -22,7 +22,7 @@
     "extensions/mode-permissions.ts": 100,
     "extensions/lsp/index.ts": 50,
     "extensions/ask-user.ts": 45,
-    "extensions/diff-viewer/index.ts": 62,
+    "extensions/diff-viewer/index.ts": 75,
     "extensions/control-plane.ts": 100,
     "extensions/compact-tools/index.ts": 100,
     "extensions/aurora-ui/index.ts": 100,
