@@ -81,29 +81,16 @@ export function renderField(
   return `${theme.fg("muted", theme.bold(label.toUpperCase()))}  ${value}`;
 }
 
-/**
- * `truncateToWidth` wraps an injected ellipsis in full resets
- * (`…`), which would punch an unfilled hole into a tile row.
- * Stripping the trailing pair lets the ellipsis inherit the tile fill — but
- * when the truncated value carries its own styling (`theme.bold(title)`,
- * `theme.fg("muted", goal)`), that reset was also the only thing closing it.
- * Re-closing bold/fg explicitly keeps a truncated title from leaving bold
- * (or a stray colour) open past this row: `theme.bg`'s own close only
- * resets the background, not bold or foreground.
- */
-function stripTruncationResets(value: string): string {
-  return value.replace(/\x1b\[0m(…)?\x1b\[0m$/, "$1\x1b[22m\x1b[39m");
-}
-
 function padFilled(
   theme: Theme,
   value: string,
   width: number,
   fill: TileFill,
 ): string {
-  const clipped = stripTruncationResets(crop(value, width));
-  // Cropping ANSI-styled content can leave a full reset behind, which would
-  // kill the fill under the padding: re-assert the background for the pad run.
+  // crop closes any fg/bold left open by the truncation, so the tile fill is
+  // not punctured by a stray full reset and no colour bleeds past this row
+  // into the frame or a neighbouring tile.
+  const clipped = crop(value, width);
   const padding = " ".repeat(Math.max(0, width - visibleWidth(clipped)));
   return `${theme.bg(fill, clipped)}${theme.bg(fill, padding)}`;
 }

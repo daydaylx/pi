@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   footerTier,
   LAYOUT_COLUMNS,
@@ -500,7 +500,7 @@ export function renderActiveTools(
         ? ""
         : ` · ${theme.fg(status.tone, status.label)} · ${theme.fg("dim", `${elapsed}s`)}`;
     if (!tool.target) {
-      return truncateToWidth(`${marker} ${label}${suffix}`, available, "…");
+      return crop(`${marker} ${label}${suffix}`, available);
     }
     // The target field is ellipsized on its own, leaf-preserving, so a long
     // path never eats into the status/runtime suffix — the one part a
@@ -519,10 +519,9 @@ export function renderActiveTools(
   const hidden = tools.slice(visible.length);
   if (hidden.length > 0)
     visible.push(
-      truncateToWidth(
+      crop(
         theme.fg("muted", `↳ ${toolSummary(hidden, now)}`),
         available,
-        "…",
       ),
     );
   return visible;
@@ -589,7 +588,7 @@ export function renderSubagents(
   if (subagents.length === 0) return [];
   const available = Math.max(1, width);
   const compact = options.compact ?? footerTier(width) === "compact";
-  const clip = (value: string) => truncateToWidth(value, available, "…");
+  const clip = (value: string) => crop(value, available);
   const attention = subagents.filter(
     (entry) => entry.status === "needs_attention",
   ).length;
@@ -1059,7 +1058,7 @@ export function renderAutoDashboard(
 ): string[] {
   const available = Math.max(1, width);
   const budget = AUTO_MAX_ROWS[input.layout];
-  const clip = (value: string) => truncateToWidth(value, available, "…");
+  const clip = (value: string) => crop(value, available);
   const verification = task.verification;
   const failed = verification?.verdict === "NOT_READY";
   const stale =
