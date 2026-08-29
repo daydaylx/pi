@@ -79,6 +79,15 @@ Checkpoint-Ablauf im Skill `context-checkpoint`, Subagenten-Details in
   dort stehen auch die Regeln für Checkpoints, Providerfehler und
   Sitzungswechsel.
 
+## Scope: CLI/TUI vs. GUI
+
+Zwei unabhängige Oberflächen: CLI/TUI (Aurora-Terminal-UI) und GUI
+(Electron-Desktop „pi gui"). Nennt der Auftrag eindeutig die eine Seite, nur
+deren Pfade lesen; die andere Seite bleibt außen vor, außer der Auftrag
+nennt ausdrücklich die Bridge/den Contract oder beide Seiten. Vollständige
+Pfadzuordnung: `docs/scope-cli-tui-vs-gui.md`. Achtung:
+`extensions/aurora-ui/` gehört trotz des Namens zur CLI/TUI, nicht zur GUI.
+
 ## Webtools (`web_search` / `fetch_content`)
 
 - `web_search` nur bei echtem Aktualitätsbedarf: aktuelle Library-/Framework-Versionen, externe API-Doku, unbekannte aktuelle Fehlermeldungen, Provider-/Tool-Verhalten, das lokal nicht prüfbar ist — und nur wenn lokale Repository-Evidenz nicht reicht. Nie „vorsichtshalber“; was im Repo steht oder per `grep`/`find`/`read`/LSP/Investigator beantwortbar ist, bleibt lokal.

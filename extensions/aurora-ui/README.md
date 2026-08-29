@@ -1,5 +1,8 @@
 # Aurora UI
 
+> **Scope:** reines Terminal-UI (CLI/TUI), nicht die Electron-GUI unter
+> `gui/` — siehe `docs/scope-cli-tui-vs-gui.md`.
+
 Aurora UI owns Pi's footer, its persistent session dashboard and the working
 indicator while the extension is active. It uses only public extension UI and
 lifecycle hooks. Core tools are not replaced or wrapped, and the editor stays

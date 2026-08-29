@@ -1,5 +1,10 @@
 # Pi Desktop-GUI (GUI-Arbeitsauftrag Phase 3–8, GUI-v2)
 
+> **Scope:** nur `gui/` + die Bridge/Contract-Schicht
+> (`extensions/frontend-bridge/`, `extensions/frontend-protocol/`).
+> `extensions/aurora-ui/` gehört nicht hierher — siehe
+> `docs/scope-cli-tui-vs-gui.md`.
+
 Electron-Desktop-GUI gegen den installierten, gepatchten `pi`-Prozess.
 Seit der Nutzerentscheidung B (Phase 8) ist `pi gui` die bevorzugte
 Oberfläche; `pi` (Aurora-TUI) bleibt vollständig erhaltener Fallback.
