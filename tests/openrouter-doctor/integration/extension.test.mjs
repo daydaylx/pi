@@ -12,6 +12,7 @@ import { importModule as load } from "../../shared/jiti-loader.mjs";
 const extension = await load("extensions/openrouter-doctor/index.ts");
 
 const originalFetch = globalThis.fetch;
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 function jsonResponse(status, body) {
   return {
@@ -30,7 +31,7 @@ const MODEL = {
   name: "GPT-OSS 120B",
   api: "openai-completions",
   provider: "openrouter",
-  baseUrl: "https://example.invalid",
+  baseUrl: OPENROUTER_BASE_URL,
   reasoning: true,
   input: ["text"],
   cost: { input: 0, output: 0 },
@@ -41,7 +42,7 @@ const MODEL = {
 function harnessWithModel(options = {}) {
   return createHarness({
     models: { "openrouter/openai/gpt-oss-120b": MODEL },
-    getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key", baseUrl: "https://example.invalid", headers: {} }),
+    getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key", baseUrl: OPENROUTER_BASE_URL, headers: {} }),
     ...options,
   });
 }
@@ -136,6 +137,34 @@ await test("Quick Check on a healthy model reports HEALTHY and never logs the AP
   });
 });
 
+await test("rejects an untrusted endpoint without sending OpenRouter credentials to it", async () => {
+  const requests = [];
+  await withFakeFetch(
+    async (url, init) => {
+      requests.push({ url: String(url), authorization: new Headers(init?.headers).get("authorization") });
+      return deepFetch(url, init);
+    },
+    async () => {
+      const harness = await runCommand(
+        harnessWithModel({
+          getApiKeyAndHeaders: async () => ({
+            ok: true,
+            apiKey: "test-key",
+            baseUrl: "https://untrusted.example/api/v1",
+            headers: {},
+          }),
+        }),
+        "openai/gpt-oss-120b",
+      );
+      const report = harness.notifications.at(-1).message;
+      assert(report.includes("Endpoint"), "reports the rejected endpoint configuration");
+      eq(requests.length, 1, "only the unauthenticated catalog request is made");
+      eq(requests[0].url, `${OPENROUTER_BASE_URL}/models`, "catalog stays on the official endpoint");
+      eq(requests[0].authorization, null, "never sends the API key to an untrusted endpoint");
+    },
+  );
+});
+
 await test("Quick Check on a model missing from the catalog reports BROKEN with an explanation", async () => {
   await withFakeFetch(
     (url) => (String(url).endsWith("/models") ? jsonResponse(200, { data: [] }) : deepFetch(url)),
@@ -149,10 +178,12 @@ await test("Quick Check on a model missing from the catalog reports BROKEN with 
 });
 
 await test("reports authentication failure as BROKEN when no provider auth is configured at all", async () => {
-  const harness = await runCommand(harnessWithModel({ models: {} }), "openai/gpt-oss-120b");
-  const report = harness.notifications.at(-1).message;
-  assert(report.includes("BROKEN"), "reports BROKEN");
-  assert(report.includes("Authentifizierung"), "explains the authentication problem");
+  await withFakeFetch(deepFetch, async () => {
+    const harness = await runCommand(harnessWithModel({ models: {} }), "openai/gpt-oss-120b");
+    const report = harness.notifications.at(-1).message;
+    assert(report.includes("BROKEN"), "reports BROKEN");
+    assert(report.includes("Authentifizierung"), "explains the authentication problem");
+  });
 });
 
 await test("Deep Check exercises tool calling, reasoning, strict routing and provider isolation, reporting DEGRADED", async () => {

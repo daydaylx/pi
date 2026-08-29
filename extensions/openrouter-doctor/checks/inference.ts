@@ -36,6 +36,7 @@ export async function checkInference(
     `${deps.baseUrl}/chat/completions`,
     { method: "POST", headers: deps.headers, body: JSON.stringify(body) },
     deps,
+    { maxRetries: 0 },
   );
   if (!result.ok) {
     return {

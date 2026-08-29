@@ -55,11 +55,13 @@ Inference funktionieren nicht).
 | Quick Check | 1× `/models` (frei), 1× `/key` (frei), 1× minimaler `/chat/completions` | 1 kleiner Inference-Request |
 | Deep Check zusätzlich | 1× Tools, 1× Reasoning, 1× Strict-Vergleich, ggf. 1× `/endpoints` (frei) + bis zu 3× Provider-Isolation | bis zu 6 kleine Inference-Requests |
 
-Alle Inference-Requests nutzen ein kleines `max_tokens`-Limit. Es werden nie
-mehr als 3 Requests gleichzeitig gestellt, jeder Request hat 10 s Timeout,
-und fehlgeschlagene Requests werden nur bei bestimmten Fehlerarten (Timeout,
-Netzwerk, 429/502/503/524/529) bis zu 3× mit exponentiellem Backoff wiederholt
-(bei 429 wird `Retry-After` beachtet). Nach 3 aufeinanderfolgenden
+Alle Inference-Requests nutzen ein kleines `max_tokens`-Limit und werden
+**nicht wiederholt**; dadurch bleiben die Tabellenobergrenzen verbindlich. Es
+werden nie mehr als 3 Requests gleichzeitig gestellt, jeder Request hat 10 s
+Timeout. Nur kostenfreie Metadaten-Requests (`/models`, `/key`, `/endpoints`)
+werden bei Timeout, Netzwerkfehlern oder 429/502/503/524/529 bis zu 3× mit
+exponentiellem Backoff wiederholt. Ein serverseitiges `Retry-After` wird dabei
+auf 10 s begrenzt und respektiert Abbruchsignale. Nach 3 aufeinanderfolgenden
 Netzwerkfehlern öffnet ein Circuit Breaker für 5 Minuten und meldet "OpenRouter
 scheint nicht verfügbar zu sein" statt weiter zu versuchen.
 
@@ -72,7 +74,9 @@ Der API-Key wird ausschließlich über Pi's eigene Credential-Verwaltung
 aufgelöst (`ctx.modelRegistry.getApiKeyAndHeaders`). Die Extension liest
 niemals `auth.json` direkt, speichert nie einen Key in einer eigenen Datei
 und gibt den Key nie aus — auch nicht im `--details`-Modus. Reports enthalten
-nie rohe Stack Traces.
+nie rohe Stack Traces. Credentials werden ausschließlich an den offiziellen
+HTTPS-Endpoint `https://openrouter.ai/api/v1` gesendet; abweichende Modell-
+oder Registry-Endpunkte werden vor jedem authentifizierten Request abgelehnt.
 
 Diese Version implementiert **keinen** separaten `OPENROUTER_DOCTOR_DEBUG`-
 Modus und schreibt keine Logdatei nach `~/.pi/logs/`: In diesem Repository
@@ -107,7 +111,8 @@ Detail-Modus und bleibt genauso key-frei wie die Standardansicht.
 - OpenRouter nicht erreichbar → klare deutsche Meldung, kein Absturz.
 - Timeout (10 s) → als eigene Fehlerkategorie erklärt, kein hängender
   Request bleibt zurück.
-- 429 → Meldung inkl. `Retry-After`, sofern vorhanden.
+- 429 → Meldung inkl. `Retry-After`, sofern vorhanden (maximal 10 s Wartezeit
+  für kostenfreie Metadaten-Requests).
 - Ein fehlschlagender Check blockiert die anderen Checks nicht — jeder Check
   läuft in seinem eigenen Fehler-Wrapper und liefert im Zweifel `unknown`
   statt den gesamten Lauf abzubrechen.

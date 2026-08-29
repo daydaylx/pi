@@ -44,6 +44,7 @@ export async function checkStrictParameters(
     `${deps.baseUrl}/chat/completions`,
     { method: "POST", headers: deps.headers, body: JSON.stringify(body) },
     deps,
+    { maxRetries: 0 },
   );
   if (result.ok) {
     return { id: "strict-parameters", label: "Strict Pi compatibility", status: "ok", summary: "Normal routing ✓, Strict Pi routing ✓." };

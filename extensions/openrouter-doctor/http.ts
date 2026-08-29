@@ -10,6 +10,7 @@ import {
   CIRCUIT_BREAKER_FAILURE_THRESHOLD,
   CIRCUIT_BREAKER_OPEN_MS,
   MAX_CONCURRENT_REQUESTS,
+  MAX_RETRY_AFTER_MS,
   MAX_RETRIES,
   REQUEST_TIMEOUT_MS,
   type RawCheckError,
@@ -82,11 +83,28 @@ function backoffMs(attempt: number): number {
   return Math.min(1000 * 2 ** attempt, 8000);
 }
 
-function parseRetryAfter(headers: Headers): number | undefined {
+export function parseRetryAfter(headers: Headers): number | undefined {
   const raw = headers.get("retry-after");
   if (!raw) return undefined;
   const seconds = Number(raw);
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+  return Number.isFinite(seconds) && seconds >= 0
+    ? Math.min(seconds, MAX_RETRY_AFTER_MS / 1000)
+    : undefined;
+}
+
+/** Waits for a retry without making a command ignore its caller's cancellation signal. */
+function waitForRetry(delayMs: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(() => finish(true), delayMs);
+    const onAbort = () => finish(false);
+    const finish = (completed: boolean) => {
+      clearTimeout(timeoutId);
+      signal.removeEventListener("abort", onAbort);
+      resolve(completed);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function parseErrorBody(response: Response): Promise<{ code?: string; message?: string }> {
@@ -148,6 +166,7 @@ export async function orFetchJson(
   url: string,
   init: RequestInit,
   deps: { gate: RequestGate; breaker: CircuitBreaker; signal: AbortSignal },
+  options: { maxRetries?: number } = {},
 ): Promise<OrFetchResult> {
   if (deps.breaker.isOpen()) {
     return { ok: false, error: { kind: "network", message: "circuit-open" } };
@@ -155,7 +174,8 @@ export async function orFetchJson(
   const release = await deps.gate.acquire();
   try {
     let lastResult: OrFetchResult = { ok: false, error: { kind: "network" } };
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    const maxRetries = options.maxRetries ?? MAX_RETRIES;
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       if (deps.signal.aborted) return { ok: false, error: { kind: "abort" } };
       lastResult = await performOnce(url, init, deps.signal);
       if (lastResult.ok) {
@@ -165,12 +185,14 @@ export async function orFetchJson(
       if (lastResult.error.kind === "network" || lastResult.error.kind === "timeout") {
         deps.breaker.recordFailure();
       }
-      if (attempt === MAX_RETRIES || !isRetryable(lastResult)) break;
+      if (attempt === maxRetries || !isRetryable(lastResult)) break;
       const waitMs =
         lastResult.error.kind === "http" && lastResult.error.retryAfterSeconds !== undefined
           ? lastResult.error.retryAfterSeconds * 1000
           : backoffMs(attempt);
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      if (!(await waitForRetry(waitMs, deps.signal))) {
+        return { ok: false, error: { kind: "abort" } };
+      }
     }
     return lastResult;
   } finally {

@@ -4,6 +4,16 @@ Alle nennenswerten Änderungen an dieser Extension werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/),
 Versionierung nach [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Geändert
+
+- Credentials werden nur noch an den offiziellen OpenRouter-HTTPS-Endpoint
+  gesendet; abweichende konfigurierte Endpoints werden abgelehnt.
+- Kostenpflichtige Inference-Requests werden nicht wiederholt. Retry-After
+  für kostenfreie Metadaten-Requests ist auf 10 Sekunden begrenzt und kann
+  abgebrochen werden.
+
 ## [1.0.0] — initial
 
 Kompatible Pi-Version zum Release: `@earendil-works/pi-coding-agent@0.84.3`.

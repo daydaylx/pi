@@ -6,7 +6,7 @@
 import { assert, counters, eq, test } from "../../shared/assertions.mjs";
 import { importModule as load } from "../../shared/jiti-loader.mjs";
 
-const { orFetchJson, createRequestGate, CircuitBreaker } = await load("extensions/openrouter-doctor/http.ts");
+const { orFetchJson, createRequestGate, CircuitBreaker, parseRetryAfter } = await load("extensions/openrouter-doctor/http.ts");
 const { checkCatalog } = await load("extensions/openrouter-doctor/checks/catalog.ts");
 const { checkAuth } = await load("extensions/openrouter-doctor/checks/auth.ts");
 const { checkInference } = await load("extensions/openrouter-doctor/checks/inference.ts");
@@ -95,6 +95,47 @@ await test("orFetchJson honors Retry-After and stops at the retry ceiling", asyn
       const result = await orFetchJson("https://example.invalid/x", {}, deps());
       assert(!result.ok, "still fails after exhausting retries");
       eq(calls, 4, "exactly MAX_RETRIES + 1 attempts");
+    },
+  );
+});
+
+await test("orFetchJson caps a server-provided Retry-After at ten seconds", () => {
+  eq(parseRetryAfter(new Headers({ "retry-after": "3600" })), 10, "wait is bounded at ten seconds");
+});
+
+await test("orFetchJson aborts during a Retry-After wait without another request", async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  await withFakeFetch(
+    async () => {
+      calls += 1;
+      return jsonResponse(429, { error: { message: "rate limited" } }, { "retry-after": "10" });
+    },
+    async () => {
+      setTimeout(() => controller.abort(), 0);
+      const result = await orFetchJson("https://example.invalid/x", {}, deps({ signal: controller.signal }));
+      assert(!result.ok, "aborted retry fails");
+      eq(result.error.kind, "abort", "reported as abort");
+      eq(calls, 1, "no retry follows an abort");
+    },
+  );
+});
+
+await test("checkInference does not retry a billable request", async () => {
+  let calls = 0;
+  await withFakeFetch(
+    async () => {
+      calls += 1;
+      return jsonResponse(503, { error: { message: "unavailable" } });
+    },
+    async () => {
+      const result = await checkInference("openai/gpt-oss-120b", {
+        baseUrl: "https://example.invalid",
+        headers: {},
+        ...deps(),
+      });
+      eq(result.status, "fail", "reports the failed inference request");
+      eq(calls, 1, "performs no billable retry");
     },
   );
 });

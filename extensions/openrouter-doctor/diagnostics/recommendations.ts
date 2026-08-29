@@ -6,6 +6,7 @@
 import type { CheckResult, ErrorCategory } from "../types.ts";
 
 const RECOMMENDATION_BY_CATEGORY: Partial<Record<ErrorCategory, string>> = {
+  configuration: "OpenRouter-Endpoint in der Modellkonfiguration prüfen.",
   authentication: "API-Key für OpenRouter prüfen.",
   permission: "OpenRouter-Account-Einstellungen und Budgetregeln prüfen.",
   "model-not-found": "Modell-ID korrigieren.",

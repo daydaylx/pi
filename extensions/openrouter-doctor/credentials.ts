@@ -24,6 +24,35 @@ export interface UnresolvedOpenRouterRequest {
 export type ResolveAuthResult = ResolvedOpenRouterRequest | UnresolvedOpenRouterRequest;
 
 /**
+ * The Doctor handles OpenRouter credentials, so it must never follow a
+ * configurable endpoint to an arbitrary origin. Returning the canonical URL
+ * also prevents a harmless trailing slash from producing double-slash paths.
+ */
+function trustedOpenRouterBaseUrl(candidate: string | undefined): string | undefined {
+  if (candidate === undefined) return OPENROUTER_API_BASE_URL;
+  try {
+    const url = new URL(candidate);
+    const expected = new URL(OPENROUTER_API_BASE_URL);
+    const normalizedPath = url.pathname.replace(/\/+$/, "") || "/";
+    if (
+      url.protocol !== "https:" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.hostname !== expected.hostname ||
+      url.port !== "" ||
+      normalizedPath !== expected.pathname ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      return undefined;
+    }
+    return OPENROUTER_API_BASE_URL;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Resolves auth for `model` via Pi's ModelRegistry. Never logs or returns
  * the raw key beyond building the one Authorization header this process
  * needs for its own outbound requests.
@@ -50,6 +79,22 @@ export async function resolveOpenRouterAuth(
       },
     };
   }
+  const baseUrl = trustedOpenRouterBaseUrl(resolved.baseUrl ?? model.baseUrl);
+  if (!baseUrl) {
+    return {
+      ok: false,
+      error: {
+        category: "configuration",
+        humanSummary: "Der konfigurierte OpenRouter-Endpoint ist nicht zulässig.",
+        likelyCauses: [
+          "Das OpenRouter-Modell verweist nicht auf https://openrouter.ai/api/v1",
+          "Die Endpoint-URL enthält eine Umleitung, Zugangsdaten, Query-Parameter oder einen abweichenden Pfad",
+        ],
+        recommendedAction:
+          "OpenRouter-Modell auf den offiziellen HTTPS-Endpoint https://openrouter.ai/api/v1 zurücksetzen.",
+      },
+    };
+  }
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (resolved.headers) {
     for (const [key, value] of Object.entries(resolved.headers)) {
@@ -60,6 +105,6 @@ export async function resolveOpenRouterAuth(
   return {
     ok: true,
     headers,
-    baseUrl: resolved.baseUrl ?? model.baseUrl ?? OPENROUTER_API_BASE_URL,
+    baseUrl,
   };
 }

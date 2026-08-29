@@ -17,6 +17,7 @@ export type CheckStatus = "ok" | "warn" | "fail" | "unknown";
 export type OverallStatus = "HEALTHY" | "DEGRADED" | "BROKEN";
 
 export type ErrorCategory =
+  | "configuration"
   | "authentication"
   | "permission"
   | "model-not-found"
@@ -102,6 +103,8 @@ export const MAX_PROVIDERS_TO_ISOLATE = 3;
 export const REQUEST_TIMEOUT_MS = 10_000;
 export const MAX_CONCURRENT_REQUESTS = 3;
 export const MAX_RETRIES = 3;
+/** A server-provided Retry-After must never keep the interactive command waiting indefinitely. */
+export const MAX_RETRY_AFTER_MS = 10_000;
 export const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 export const CIRCUIT_BREAKER_OPEN_MS = 5 * 60_000;
 export const INFERENCE_MAX_TOKENS = 8;

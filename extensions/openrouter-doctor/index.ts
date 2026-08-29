@@ -140,7 +140,16 @@ async function runDiagnosis(
   checks.push(checkCapabilities(entry));
 
   if (!auth.ok) {
-    checks.push({ id: "auth", label: "Authentication", status: "fail", summary: "Authentifizierung fehlgeschlagen.", error: auth.error });
+    checks.push({
+      id: "auth",
+      label: "Authentication",
+      status: "fail",
+      summary:
+        auth.error.category === "configuration"
+          ? "OpenRouter-Endpoint-Konfiguration abgelehnt."
+          : "Authentifizierung fehlgeschlagen.",
+      error: auth.error,
+    });
     checks.push({ id: "inference", label: "Inference", status: "unknown", summary: "Übersprungen (Authentifizierung fehlgeschlagen)." });
   } else {
     const deps: RunDeps = { baseUrl: auth.baseUrl, headers: auth.headers, gate, breaker, signal };

@@ -37,6 +37,7 @@ async function probeProvider(
     `${deps.baseUrl}/chat/completions`,
     { method: "POST", headers: deps.headers, body: JSON.stringify(body) },
     deps,
+    { maxRetries: 0 },
   );
   if (result.ok) return { providerName, status: "ok", summary: "Kompatibel." };
   const error = normalizeError(result.error);
