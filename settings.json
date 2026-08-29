@@ -31,7 +31,7 @@
     "zai/glm-5.2",
     "zai/glm-4.7",
     "openrouter/tencent/hy3",
-    "openrouter/openai/gpt-oss-20b:free",
+    "openrouter/openai/gpt-oss-20b",
     "opencode-go/qwen3.7-plus",
     "opencode-go/qwen3.7-max",
     "opencode-go/qwen3.6-plus",
@@ -51,7 +51,12 @@
     "zai-coding-cn/glm-5.3",
     "openrouter/stealth/ox-alpha",
     "openrouter/dots-studio/dots-3-note-preview:free",
-    "openrouter/z-ai/glm-5.2:free"
+    "openrouter/z-ai/glm-5.2:free",
+    "openrouter/minimax/minimax-m3:free",
+    "openrouter/poolside/laguna-s-2.1:free",
+    "openrouter/thinkingmachines/inkling:free",
+    "openrouter/inclusionai/ling-3.0-flash-fin:free",
+    "openrouter/nvidia/nemotron-3.5-lightning:free"
   ],
   "packages": [
     "git:github.com/daydaylx/pi-subagents@11f3fcbc0e346f747df2bd8342d77cb8c9f8c962",
