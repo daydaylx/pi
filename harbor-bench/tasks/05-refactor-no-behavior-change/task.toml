@@ -1,0 +1,31 @@
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "pi-harness/05-refactor-no-behavior-change"
+version = "1.0.0"
+description = "Refactor duplicated manual iteration in a small tracker class without changing observable behavior (fixture ported from benchmarks/tasks/05-refactor-no-behavior-change, same fixture content as the P3-P6 series)."
+keywords = ["refactor", "single-file"]
+[[task.authors]]
+name = "Benchmark v2"
+
+[metadata]
+
+[verifier]
+timeout_sec = 180.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 600.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]
