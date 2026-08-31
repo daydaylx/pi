@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld("piGui", {
   listSessions: () => ipcRenderer.invoke("gui:listSessions"),
   switchSession: (sessionPath) =>
     ipcRenderer.invoke("gui:switchSession", sessionPath),
+  getSessionDiffs: (sessionPath) =>
+    ipcRenderer.invoke("gui:getSessionDiffs", sessionPath),
   respondUiRequest: (payload) =>
     ipcRenderer.invoke("gui:respondUiRequest", payload),
   copyToClipboard: (text) => ipcRenderer.invoke("gui:copyToClipboard", text),

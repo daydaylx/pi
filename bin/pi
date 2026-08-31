@@ -6,7 +6,8 @@
 #   PATH="$PWD/bin:$PATH" pi gui
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_path="$(realpath "${BASH_SOURCE[0]}")"
+here="$(cd "$(dirname "$script_path")" && pwd)"
 
 if [[ "${1:-}" == "gui" ]]; then
   shift
@@ -17,9 +18,14 @@ real="${PI_GUI_REAL_PI:-}"
 if [[ -z "$real" ]]; then
   IFS=":" read -ra dirs <<<"${PATH}"
   for dir in "${dirs[@]}"; do
-    [[ "$dir" == "$here" ]] && continue
-    if [[ -x "$dir/pi" ]]; then
-      real="$dir/pi"
+    [[ -z "$dir" ]] && continue
+    candidate="$dir/pi"
+    if [[ -x "$candidate" ]]; then
+      resolved_candidate="$(realpath "$candidate" 2>/dev/null || true)"
+      if [[ "$resolved_candidate" == "$script_path" ]]; then
+        continue
+      fi
+      real="$candidate"
       break
     fi
   done

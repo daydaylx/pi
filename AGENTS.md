@@ -18,9 +18,18 @@ Checkpoint-Ablauf im Skill `context-checkpoint`, Subagenten-Details in
   unquotierte Variablen verwendet oder Secret-/Credential-Grenzen berührt.
   Nach einer Schutzgrenzen-Blockierung nicht dieselbe Strategie variieren,
   sondern die Ursache bestimmen und eine zulässige projektlokale Alternative
-  wählen.
+  wählen. Blockt derselbe Aufruf trotz variierter Strategie ein zweites Mal
+  identisch, nicht ein drittes Mal versuchen — stattdessen `ask_user`
+  einsetzen (im Planmodus wie in jedem anderen Modus jederzeit verfügbar)
+  und die Blockade konkret benennen, statt stillschweigend weiter zu
+  wiederholen.
 - Den aktiven Workflow- und Permission-Modus respektieren. Diese Datei
-  erzwingt keinen zusätzlichen Planmodus.
+  erzwingt keinen zusätzlichen Planmodus. Der Planmodus-Ausstieg ist eine
+  reine UI-Aktion der Nutzerin/des Nutzers (Workflow-Menü/Shift+Tab) und kein
+  Agenten-Tool — bei einem expliziten Umsetzungsauftrag während des
+  Planmodus nicht versuchen, die Sperre durch wiederholtes Schreiben der
+  Plandatei oder andere Umgehungen aufzuheben, sondern über `ask_user` um den
+  Moduswechsel bitten.
 
 ## Verifikation
 

@@ -51,6 +51,128 @@ function resolveSessionPath(sessionPath) {
   }
 }
 
+/** Obergrenze für den Tail-Read einer Sitzungsdatei (Task-Status-Ableitung,
+ * Phase 2 Task-Sidebar): groß genug für mehrere frontend-bridge/state-
+ * Einträge, klein genug um auch bei sehr langen Sitzungen nicht die ganze
+ * Datei einzulesen (R21). */
+const TASK_STATE_TAIL_BYTES = 200_000;
+
+/**
+ * Letzter bekannter Core-Zustand einer (ggf. nicht laufenden) Sitzung —
+ * reines Nachlesen der bereits vom frontend-bridge persistierten
+ * Custom-Einträge (kein neuer State, keine Core-Änderung, R2). Wird für
+ * die Task-Sidebar (Phase 2) genutzt, um ruhende Sitzungen ACTIVE/NEEDS
+ * INPUT/REVIEW/COMPLETED zuzuordnen, ohne dafür einen Prozess zu starten.
+ */
+async function readLastFrontendState(filePath) {
+  let raw;
+  try {
+    const stat = await fsPromises.stat(filePath);
+    if (stat.size <= TASK_STATE_TAIL_BYTES) {
+      raw = await fsPromises.readFile(filePath, "utf8");
+    } else {
+      const handle = await fsPromises.open(filePath, "r");
+      try {
+        const buf = Buffer.alloc(TASK_STATE_TAIL_BYTES);
+        await handle.read(
+          buf,
+          0,
+          TASK_STATE_TAIL_BYTES,
+          stat.size - TASK_STATE_TAIL_BYTES,
+        );
+        raw = buf.toString("utf8");
+      } finally {
+        await handle.close();
+      }
+    }
+  } catch {
+    return null;
+  }
+  const lines = raw.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line || !line.includes("frontend-bridge/state")) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (
+        parsed?.customType === "frontend-bridge/state" &&
+        parsed.data?.state
+      ) {
+        return parsed.data.state;
+      }
+    } catch {
+      /* am Tail-Beginn abgeschnittene Zeile oder Fremdformat überspringen */
+    }
+  }
+  return null;
+}
+
+/** Obergrenze für den Diff-Read einer Sitzungsdatei (Phase 6 Changes Review):
+ * groß genug für realistische Session-Diffs, klein genug um bei sehr langen
+ * Sitzungen den Main-Prozess nicht zu blockieren (R21). Wie bei
+ * TASK_STATE_TAIL_BYTES ein Tail-Read — sehr frühe Änderungen einer extrem
+ * langen Sitzung können dadurch fehlen (bekannte, dokumentierte Grenze,
+ * siehe Entscheidungslog Phase 6). */
+const DIFF_TAIL_BYTES = 1_000_000;
+
+/**
+ * Liest die "diff-view"-Custom-Einträge einer Sitzungsdatei (vom
+ * diff-viewer-Extension bereits persistiert, kein neuer Core-State, R2/R6)
+ * und reduziert sie auf den jeweils letzten Stand je Datei — dieselbe
+ * "letzter Eintrag gewinnt"-Semantik wie ChangeTracker.changedFiles in
+ * extensions/diff-viewer/change-tracker.ts, nur außerhalb des laufenden
+ * Prozesses nachgebildet für ruhende bzw. gerade gewechselte Sitzungen.
+ */
+async function readSessionDiffs(filePath) {
+  let raw;
+  try {
+    const stat = await fsPromises.stat(filePath);
+    if (stat.size <= DIFF_TAIL_BYTES) {
+      raw = await fsPromises.readFile(filePath, "utf8");
+    } else {
+      const handle = await fsPromises.open(filePath, "r");
+      try {
+        const buf = Buffer.alloc(DIFF_TAIL_BYTES);
+        await handle.read(buf, 0, DIFF_TAIL_BYTES, stat.size - DIFF_TAIL_BYTES);
+        raw = buf.toString("utf8");
+      } finally {
+        await handle.close();
+      }
+    }
+  } catch {
+    return [];
+  }
+  const byPath = new Map();
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.includes("diff-view")) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue; // am Tail-Beginn abgeschnittene Zeile überspringen
+    }
+    if (parsed?.customType !== "diff-view") continue;
+    const data = parsed.data;
+    if (
+      !data ||
+      typeof data.path !== "string" ||
+      !data.stats ||
+      !Array.isArray(data.hunks)
+    ) {
+      continue;
+    }
+    byPath.set(data.path, {
+      path: data.path,
+      stats: data.stats,
+      hunks: data.hunks,
+      toolName: typeof data.toolName === "string" ? data.toolName : "unknown",
+      timestamp: typeof data.timestamp === "number" ? data.timestamp : 0,
+    });
+  }
+  return [...byPath.values()].sort((a, b) => b.timestamp - a.timestamp);
+}
+
 /**
  * Die letzten Sitzungsdateien (mtime-absteigend) für session.resume.
  * Asynchrones I/O (R21): das Durchlaufen vieler Sitzungsverzeichnisse darf
@@ -94,7 +216,8 @@ async function listRecentSessions() {
       } catch {
         /* Dateiname bleibt Titel */
       }
-      return { path: entry.path, mtimeMs: entry.mtimeMs, title };
+      const lastState = await readLastFrontendState(entry.path);
+      return { path: entry.path, mtimeMs: entry.mtimeMs, title, lastState };
     }),
   );
 }
@@ -408,6 +531,17 @@ function registerIpcHandlers(ipcMain, getWindow, shortcutsJson) {
     return session.getStats();
   });
 
+  /** Phase 6 (Changes Review): letzter bekannter Diff-Stand je Datei einer
+   * Sitzung, reines Nachlesen persistierter Custom-Einträge (R2/R6, siehe
+   * readSessionDiffs). Genutzt beim Sitzungswechsel, damit die Changes-
+   * Ansicht auch für bereits vor dem Wechsel entstandene Änderungen echte
+   * Diffs zeigt statt nur die von diesem Zeitpunkt an live gestreamten. */
+  ipcMain.handle("gui:getSessionDiffs", async (_event, sessionPath) => {
+    const resolved = resolveSessionPath(sessionPath);
+    if (!resolved) throw new Error("Ungültiger Sitzungspfad");
+    return readSessionDiffs(resolved);
+  });
+
   /**
    * Extension-UI-Antworten (z. B. Selector des /permission-Flows).
    * Payload wird strikt auf die vom RPC-Dokument erlaubten Felder
@@ -481,4 +615,9 @@ function registerIpcHandlers(ipcMain, getWindow, shortcutsJson) {
   });
 }
 
-module.exports = { GuiSession, registerIpcHandlers, resolveSessionPath };
+module.exports = {
+  GuiSession,
+  registerIpcHandlers,
+  resolveSessionPath,
+  readSessionDiffs,
+};

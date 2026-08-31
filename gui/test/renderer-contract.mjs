@@ -43,6 +43,18 @@ test("Smoke startet keine normale persistente Boot-Session parallel", () => {
   assert.match(renderer, /if \(!isSmokeMode\) \{/);
 });
 
+test("Subagenten-Aufrufe verschiedener Rollen teilen sich keine Activity-Karte (Phase 10)", () => {
+  // ensureActivityCard trennt Karten zusätzlich per groupKey — sonst
+  // würden zwei verschiedene Subagenten-Rollen hintereinander in einer
+  // gemeinsamen, generisch betitelten "Subagent"-Karte verschwinden.
+  assert.match(
+    renderer,
+    /last\.phase === phase && last\.groupKey === groupKey/,
+  );
+  assert.match(renderer, /kind === "agent" && msg\.toolName === "subagent"/);
+  assert.match(renderer, /interactions\.agentDisplayLabel\(agentRole\)/);
+});
+
 test("Dialog-Smoke prüft Escape und die anschließende Core-Verbindung", () => {
   assert.match(main, /--smoke-dialogs/);
   assert.match(renderer, /mode === "dialogs"/);
@@ -64,7 +76,7 @@ test("Streaming erhält Thinking und Tool-Updates, ohne Leseposition zu erzwinge
   assert.match(renderer, /!force && !state\.followScroll/);
 });
 
-test("Schmale Dialoge und breiter Kontext-Toggle haben CSS-Regeln", () => {
+test("Schmale Dialoge und Inspector-Drawer-Toggle haben CSS-Regeln", () => {
   assert.match(styles, /width: min\(620px, calc\(100vw - 32px\)\)/);
-  assert.match(styles, /body\.context-hidden #context-area/);
+  assert.match(styles, /body\.context-open #context-area/);
 });

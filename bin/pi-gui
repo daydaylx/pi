@@ -6,7 +6,8 @@
 #   --smoke-dialogs  intern für gui/test/dialog-smoke.mjs (Test-Fixture nötig)
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_path="$(realpath "${BASH_SOURCE[0]}")"
+here="$(cd "$(dirname "$script_path")" && pwd)"
 repo="$(dirname "$here")"
 
 # Das tatsächliche Arbeitsverzeichnis der Aufruferin sichern, bevor unten

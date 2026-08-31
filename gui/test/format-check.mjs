@@ -35,7 +35,6 @@ const files = [
   "main/recent-projects.js",
   "renderer/index.html",
   "renderer/renderer.js",
-  "renderer/activity-summary.js",
   "renderer/interaction-helpers.js",
   "renderer/chat/markdown.js",
   "renderer/chat/code-block.js",

@@ -77,6 +77,14 @@ function summarizeToolCall(toolName, args) {
       return `FIND ${String(a.pattern ?? "")}`;
     case "ls":
       return `LS ${String(a.path ?? "")}`;
+    case "subagent": {
+      if (a.list) return "SUBAGENT list";
+      const role = String(a.agent ?? "").trim();
+      const task = String(a.task ?? "").slice(0, 60);
+      return role
+        ? `SUBAGENT ${role}: ${task}`.trim()
+        : `SUBAGENT ${task}`.trim();
+    }
     default: {
       const keys = Object.keys(a).slice(0, 2);
       const brief = keys.map((k) => String(a[k]).slice(0, 30)).join(" ");

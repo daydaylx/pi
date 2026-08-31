@@ -194,6 +194,31 @@ export function planModeInvestigatorSingleAllowed(
   );
 }
 
+/**
+ * `verify({ check: "typecheck" })` never writes: extensions/setup-core runs
+ * it with the setup's fixed typecheck command (--noEmit semantics), and
+ * Plan Mode is only reachable in a trusted project (see
+ * `switchMode`/`isProjectTrusted` in plan-mode/commands.ts), so a
+ * project-configured typecheck command carries no extra risk here that
+ * trust hasn't already accepted. `check: "test"` stays blocked: a test run
+ * can write coverage or snapshot files, which Plan Mode's read-only
+ * contract must not permit.
+ */
+export function planModeVerifyTypecheckAllowed(
+  workflow: WorkflowCapabilitySnapshot,
+  event: ToolCallEvent,
+): boolean {
+  if (!isPlanningMode(workflow.mode) || event.toolName !== "verify") {
+    return false;
+  }
+  const input = event.input;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return false;
+  }
+  const params = input as Record<string, unknown>;
+  return params.check === "typecheck" && Object.keys(params).length === 1;
+}
+
 function planFileProtectedWritePath(): ProtectedWritePath {
   return {
     matches: (rawPath, cwd) => isPlanFilePath(rawPath, cwd),
@@ -244,6 +269,7 @@ export function planModeMutationGuard(
     );
   }
   if (PLAN_MODE_READ_ONLY_TOOLS.has(event.toolName)) return PERMITTED;
+  if (planModeVerifyTypecheckAllowed(workflow, event)) return PERMITTED;
   if (!WRITE_TOOLS.has(event.toolName)) {
     return {
       blocked: true,

@@ -1,3 +1,12 @@
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { assert, eq, test } from "../shared/assertions.mjs";
 import { importModule as load } from "../shared/jiti-loader.mjs";
 
@@ -92,6 +101,92 @@ await test("writes to in-project execution paths need confirmation, YOLO refuses
     "allow",
     "the guard matches the .git directory, not every name starting with .git",
   );
+});
+
+await test("resolvePathScope flags a symlink only when its real target escapes the project", () => {
+  if (!permissionPolicy) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-symlink-scope-"));
+  const outside = mkdtempSync(join(tmpdir(), "pi-symlink-outside-"));
+  try {
+    // npm always links node_modules/.bin/<tool> -> ../<pkg>/... — an
+    // ordinary in-project symlink that must not read as an escape.
+    mkdirSync(join(cwd, "node_modules", ".bin"), { recursive: true });
+    mkdirSync(join(cwd, "node_modules", "prettier"), { recursive: true });
+    writeFileSync(join(cwd, "node_modules", "prettier", "cli.js"), "");
+    symlinkSync(
+      join("..", "prettier", "cli.js"),
+      join(cwd, "node_modules", ".bin", "prettier"),
+    );
+    assert(
+      !permissionPolicy.resolvePathScope("node_modules/.bin/prettier", cwd)
+        .symlinkEscape,
+      "an in-project .bin symlink resolves inside the project and is not an escape",
+    );
+
+    // A symlinked directory whose real target lies outside the project must
+    // still be caught, both for an existing file reached through it...
+    symlinkSync(outside, join(cwd, "escape-dir"));
+    writeFileSync(join(outside, "existing.txt"), "");
+    assert(
+      permissionPolicy.resolvePathScope("escape-dir/existing.txt", cwd)
+        .symlinkEscape,
+      "an existing file reached through an escaping symlinked directory is flagged",
+    );
+    // ...and for a brand-new file that does not exist yet (the common case
+    // for write/edit), where only the directory component is a symlink.
+    assert(
+      permissionPolicy.resolvePathScope("escape-dir/brand-new-file.txt", cwd)
+        .symlinkEscape,
+      "a new file under an escaping symlinked directory is flagged even though the file itself does not exist",
+    );
+
+    // A broken symlink's real target cannot be verified as staying inside
+    // the project, so it fails closed.
+    symlinkSync(
+      join(tmpdir(), "pi-symlink-scope-target-does-not-exist"),
+      join(cwd, "broken-link"),
+    );
+    assert(
+      permissionPolicy.resolvePathScope("broken-link/x.txt", cwd).symlinkEscape,
+      "a broken symlink is treated as an escape, not silently ignored",
+    );
+
+    assert(
+      !permissionPolicy.resolvePathScope("plain-file.txt", cwd).symlinkEscape,
+      "an ordinary path with no symlink involved is never flagged",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+await test("decideBash (yolo) allows node_modules/.bin invocations instead of misreading npm's own symlinks as an external write", () => {
+  if (!permissionPolicy) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-symlink-bash-"));
+  try {
+    mkdirSync(join(cwd, "gui", "node_modules", ".bin"), { recursive: true });
+    mkdirSync(join(cwd, "gui", "node_modules", "electron"), {
+      recursive: true,
+    });
+    writeFileSync(join(cwd, "gui", "node_modules", "electron", "cli.js"), "");
+    symlinkSync(
+      join("..", "electron", "cli.js"),
+      join(cwd, "gui", "node_modules", ".bin", "electron"),
+    );
+    for (const cmd of [
+      "du -sh gui/node_modules 2>/dev/null && ls gui/node_modules/.bin/ | head && readlink gui/node_modules/.bin/electron",
+      "command -v xvfb-run && xvfb-run -a gui/node_modules/.bin/electron gui --smoke 2>&1 | tail -3",
+    ]) {
+      eq(
+        permissionPolicy.decideBash("yolo", cmd, cwd).action,
+        "allow",
+        `an in-project .bin/electron reference must not trip the external-write hard boundary: ${cmd}`,
+      );
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 await test("containsUnquotedVariableExpansion detects real shell expansion, not literal text", () => {
@@ -455,6 +550,7 @@ await test("generic plan-mode guard admits only positively known read-only tools
     ["ls", { path: "." }],
     ["ask_user", { question: "weiter?" }],
     ["write", { path: ".agent/plans/current-plan.md" }],
+    ["verify", { check: "typecheck" }],
   ]) {
     assert(
       !decide("project-write", toolName, input),
@@ -470,6 +566,12 @@ await test("generic plan-mode guard admits only positively known read-only tools
       { profile: "verify" },
       "a project check runs project scripts",
     ],
+    [
+      "verify",
+      { check: "test" },
+      "a test run can write coverage or snapshot files",
+    ],
+    ["verify", {}, "a verify call without a check argument is not typecheck"],
     [
       "subagent",
       { agent: "investigator", output: "/tmp/report.md" },
@@ -493,16 +595,19 @@ await test("generic plan-mode guard admits only positively known read-only tools
       `${toolName} stays blocked while planning, even under yolo`,
     );
   }
+  assert(
+    !decide("yolo", "verify", { check: "typecheck" }),
+    "verify(typecheck) stays non-mutating regardless of permission level",
+  );
 });
 
 await test("plan mode permits only the artifact-free Investigator SINGLE exception", () => {
   if (!workflowPolicy) return;
   const allowed = (mode, level, input) =>
-    workflowPolicy.planModeInvestigatorSingleAllowed(
-      { mode },
-      level,
-      { toolName: "subagent", input },
-    );
+    workflowPolicy.planModeInvestigatorSingleAllowed({ mode }, level, {
+      toolName: "subagent",
+      input,
+    });
   const valid = { agent: "investigator", task: "Locate the owner" };
 
   for (const mode of ["simple_plan", "detailed_plan"]) {
@@ -591,6 +696,39 @@ await test("plan mode permits only the artifact-free Investigator SINGLE excepti
   }
 });
 
+await test("plan mode permits only verify(check: typecheck), never test or other tools", () => {
+  if (!workflowPolicy) return;
+  const allowed = (mode, toolName, input) =>
+    workflowPolicy.planModeVerifyTypecheckAllowed(
+      { mode },
+      { toolName, input },
+    );
+
+  for (const mode of ["simple_plan", "detailed_plan"]) {
+    assert(
+      allowed(mode, "verify", { check: "typecheck" }),
+      `${mode} permits verify(check: typecheck)`,
+    );
+  }
+  assert(
+    !allowed("work", "verify", { check: "typecheck" }),
+    "work mode does not take the plan-mode exception",
+  );
+
+  for (const [toolName, input, why] of [
+    ["verify", { check: "test" }, "test runs can write coverage/snapshots"],
+    ["verify", {}, "missing check argument"],
+    ["verify", { check: "typecheck", extra: true }, "extra argument present"],
+    ["project_check", { profile: "verify" }, "wrong tool entirely"],
+    ["verify", null, "non-object input"],
+  ]) {
+    assert(
+      !allowed("simple_plan", toolName, input),
+      `simple_plan blocks verify delegation: ${why}`,
+    );
+  }
+});
+
 // The structural shell cases across all four levels, so a change to the parser
 // or to a level's policy cannot silently move a trust boundary.
 await test("shell structure decides consistently across all permission levels", () => {
@@ -656,11 +794,7 @@ await test("subagent delegations are allowed without confirmation outside readon
   const decide = (level, toolName = "subagent", input = {}) =>
     toolPolicy.decideTool(level, { toolName, input }, cwd, configured).action;
   for (const level of ["project-write", "confirm-all", "yolo"]) {
-    eq(
-      decide(level),
-      "allow",
-      `subagent needs no confirmation at ${level}`,
-    );
+    eq(decide(level), "allow", `subagent needs no confirmation at ${level}`);
   }
   for (const agent of ["investigator", "debugger", "verifier"]) {
     eq(
@@ -781,6 +915,15 @@ await test("verifier delegations require the full inspection contract", () => {
     budgeted.blocked && budgeted.reason.includes("turnBudget"),
     "a per-run turnBudget is refused for verifier delegations",
   );
+  const timedOut = assess({
+    agent: "verifier",
+    task: completeTask,
+    timeoutMs: 60_000,
+  });
+  assert(
+    timedOut.blocked && timedOut.reason.includes("timeoutMs"),
+    "a caller-supplied timeoutMs override is refused for verifier delegations too, not just turnBudget",
+  );
   const overridden = {
     agent: "verifier",
     task: completeTask,
@@ -817,6 +960,43 @@ await test("verifier delegations require the full inspection contract", () => {
     otherRole.acceptance,
     "reviewed",
     "the acceptance override only applies to verifier delegations",
+  );
+});
+
+await test("debugger delegations keep the generous agents/debugger.md timeout", () => {
+  if (!verifierPolicy) return;
+  const assess = (input) =>
+    verifierPolicy.assessDebuggerDelegation({ toolName: "subagent", input });
+
+  assert(
+    !assess({ agent: "verifier", task: "anything" }).blocked,
+    "other roles are not restricted by the debugger budget contract",
+  );
+  assert(
+    !assess({ action: "list" }).blocked,
+    "management actions bypass the debugger budget contract",
+  );
+  assert(
+    !assess({ agent: "debugger", task: "Reproduziere den Absturz." }).blocked,
+    "a plain debugger delegation without any budget override passes",
+  );
+  const budgeted = assess({
+    agent: "debugger",
+    task: "Reproduziere den Absturz.",
+    turnBudget: { maxTurns: 5 },
+  });
+  assert(
+    budgeted.blocked && budgeted.reason.includes("turnBudget"),
+    "a per-run turnBudget is refused for debugger delegations",
+  );
+  const timedOut = assess({
+    agent: "debugger",
+    task: "Reproduziere den Absturz.",
+    timeoutMs: 120_000,
+  });
+  assert(
+    timedOut.blocked && timedOut.reason.includes("timeoutMs"),
+    "a shortened timeoutMs override is refused, closing the gap that let a real debugger run time out early",
   );
 });
 

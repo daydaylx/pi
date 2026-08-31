@@ -9,10 +9,6 @@ import {
   summarizeToolCall,
   PiRpcManager,
 } from "../main/pi-rpc-manager.js";
-import {
-  categoryFor,
-  formatActivityLine,
-} from "../renderer/activity-summary.js";
 
 test("buildPiArgs: RPC-Modus immer, Optionen korrekt", () => {
   assert.deepEqual(buildPiArgs(), ["--mode", "rpc"]);
@@ -90,26 +86,6 @@ test("JSONL-Reader trennt nur LF und erhält Unicode-Zeilentrenner", async () =>
   stream.end('{"type":"last"}');
   await ended;
   assert.deepEqual(seen, [first, '{"type":"last"}']);
-});
-
-test("activity-summary: Kategorien je Werkzeug", () => {
-  assert.equal(categoryFor("read"), "Reads");
-  assert.equal(categoryFor("grep"), "Suchen");
-  assert.equal(categoryFor("find"), "Suchen");
-  assert.equal(categoryFor("bash"), "Shell");
-  assert.equal(categoryFor("edit"), "Edits");
-  assert.equal(categoryFor("unknown_tool"), "Tools");
-});
-
-test("activity-summary: kompakte Zeile mit Status-Glyphen", () => {
-  const line = formatActivityLine([
-    { toolName: "read", running: false, isError: false },
-    { toolName: "read", running: false, isError: false },
-    { toolName: "bash", running: true, isError: false },
-    { toolName: "edit", running: false, isError: true },
-  ]);
-  assert.equal(line, "✓ 2 Reads · ● 1 Shell · ✗ 1 Edits");
-  assert.equal(formatActivityLine([]), "");
 });
 
 test("respondToUiRequest: erlaubt nur dokumentierte Antwortformen", () => {

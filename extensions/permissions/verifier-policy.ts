@@ -14,6 +14,35 @@ import type { WorkflowAssessment } from "./workflow-policy.ts";
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 
 const VERIFIER_AGENT = "verifier";
+const DEBUGGER_AGENT = "debugger";
+
+/**
+ * Both `verifier` and `debugger` ship a generous `timeoutMs` in their own
+ * agent frontmatter (agents/verifier.md, agents/debugger.md) specifically so
+ * an independent check or a hypothesis-testing run is never cut off mid-way.
+ * A caller-supplied `turnBudget` or `timeoutMs` would silently shrink that
+ * back down — observed in practice for `debugger` (a 120000ms override timed
+ * out with only partial output) — so both keys are rejected outright for
+ * these two roles rather than merely discouraged in prose.
+ */
+function budgetOverrideErrors(
+  input: Record<string, unknown>,
+  agentLabel: string,
+  docSource: string,
+): string[] {
+  const errors: string[] = [];
+  if (input.turnBudget !== undefined) {
+    errors.push(
+      `turnBudget ist für ${agentLabel}-Delegationen verboten; maßgeblich ist ausschließlich das Profil-Timeout aus ${docSource}.`,
+    );
+  }
+  if (input.timeoutMs !== undefined) {
+    errors.push(
+      `timeoutMs ist für ${agentLabel}-Delegationen verboten; maßgeblich ist ausschließlich das Profil-Timeout aus ${docSource}.`,
+    );
+  }
+  return errors;
+}
 
 /** Pflichtabschnitte der Delegationsvorlage aus docs/subagents.md. */
 export const VERIFIER_REQUIRED_SECTIONS = [
@@ -50,12 +79,11 @@ export function assessVerifierDelegation(
   if (typeof input.action === "string") return PERMITTED;
   if (input.agent !== VERIFIER_AGENT) return PERMITTED;
 
-  const errors: string[] = [];
-  if (input.turnBudget !== undefined) {
-    errors.push(
-      "turnBudget ist für Verifier-Delegationen verboten; maßgeblich ist ausschließlich das Profil-Timeout aus agents/verifier.md.",
-    );
-  }
+  const errors: string[] = budgetOverrideErrors(
+    input,
+    "Verifier",
+    "agents/verifier.md",
+  );
   const task = typeof input.task === "string" ? input.task : "";
   if (!task.trim()) {
     return {
@@ -96,5 +124,27 @@ export function assessVerifierDelegation(
     reason:
       "Aurora erzwingt Verifier-Vollständigkeit und -Urteil bereits über verifier-policy.ts und subagent-output-guard.ts; das Paket-Acceptance-System ist für den Verifier redundant und darf einen sonst erfolgreichen Lauf nicht per Report-Format oder Evidenzanforderung zu Fall bringen.",
   };
+  return PERMITTED;
+}
+
+/**
+ * Prüft einen einzelnen `subagent`-Tool-Call für die Debugger-Rolle.
+ * Anders als beim Verifier gibt es keine Pflichtvorlage — `agents/debugger.md`
+ * markiert fehlende Angaben selbst als Annahme —, aber dieselbe
+ * Budget-Grenze wie beim Verifier gilt: Der Hauptagent darf das großzügige
+ * `timeoutMs` aus der Agent-Definition nicht per Aufrufparameter verkürzen.
+ */
+export function assessDebuggerDelegation(
+  event: ToolCallEvent,
+): WorkflowAssessment {
+  if (event.toolName !== "subagent") return PERMITTED;
+  const input = isRecord(event.input) ? event.input : {};
+  if (typeof input.action === "string") return PERMITTED;
+  if (input.agent !== DEBUGGER_AGENT) return PERMITTED;
+
+  const errors = budgetOverrideErrors(input, "Debugger", "agents/debugger.md");
+  if (errors.length > 0) {
+    return { blocked: true, reason: errors.join(" ") };
+  }
   return PERMITTED;
 }

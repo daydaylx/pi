@@ -5,7 +5,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import { confirmAction } from "../shared/permission-dialog.ts";
-import { decideBash, isPlanModeDiagnosticCommand } from "../shared/permission-policy.ts";
+import {
+  decideBash,
+  isPlanModeDiagnosticCommand,
+} from "../shared/permission-policy.ts";
 import { requestRecoveryStatus } from "../shared/recovery-capabilities.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import type { PermissionSession } from "./session-state.ts";
@@ -17,7 +20,10 @@ import {
   planModeInvestigatorSingleAllowed,
   planModeMutationGuard,
 } from "./workflow-policy.ts";
-import { assessVerifierDelegation } from "./verifier-policy.ts";
+import {
+  assessDebuggerDelegation,
+  assessVerifierDelegation,
+} from "./verifier-policy.ts";
 import { assessWebToolInput } from "./web-tools.ts";
 import { toolPath } from "./tool-event.ts";
 
@@ -38,7 +44,9 @@ function recoveryGateBlocks(
   if (!armed) return false;
   if (event.toolName === "write" || event.toolName === "edit") return true;
   if (event.toolName !== "bash") return false;
-  const command = String((event.input as Record<string, unknown>).command ?? "");
+  const command = String(
+    (event.input as Record<string, unknown>).command ?? "",
+  );
   return !isPlanModeDiagnosticCommand(command, cwd);
 }
 
@@ -89,6 +97,10 @@ export function registerPermissionGuards(
     const verifierAssessment = assessVerifierDelegation(event);
     if (verifierAssessment.blocked) {
       return { block: true, reason: verifierAssessment.reason };
+    }
+    const debuggerAssessment = assessDebuggerDelegation(event);
+    if (debuggerAssessment.blocked) {
+      return { block: true, reason: debuggerAssessment.reason };
     }
     // Das Recovery-Gate prüft vor der Planmodus-Freigabe, damit auch
     // Schreibzugriffe auf die Plandatei nach einem Fehlturn nicht

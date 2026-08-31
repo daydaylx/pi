@@ -6,21 +6,49 @@
  */
 
 :root {
-  /* Farben: dunkle Oberfläche mit klarer Elevation statt Terminal-Flat. */
-  --bg: #16181c;
-  --surface: #1b1e23;
-  --surface-2: #23262c;
-  --surface-3: #2b2f36;
-  --text: #e7e9ec;
-  --text-dim: #b7bcc4;
-  --muted: #8b929c;
-  --accent: #6ea8fe;
-  --accent-ink: #0b1020;
+  /* Farben: dunkle Oberfläche mit klarer Elevation statt Terminal-Flat.
+     Statussemantik (Phase 9, §11 "Farbsemantik" — verbindlich, nicht nur
+     Namenskonvention): jede Farbe steht für GENAU eine Bedeutung, keine
+     Doppelverwendung über Status-Grenzen hinweg.
+       --accent → Primary (Auswahl, Aktion, Fokus)     = Violett
+       --running → Running (Aktivität läuft gerade)    = neutral/Blau
+       --ok      → Success (bestanden, abgeschlossen)  = Grün
+       --warn    → Warning (Hinweis, kein Fehlschlag)  = Orange
+       --err     → Error (fehlgeschlagen)               = Rot
+       --muted   → Inactive (sekundär, deaktiviert)     = Grau
+     "Running" ist bewusst von "Warning" getrennt: eine laufende Prüfung ist
+     kein Warnzustand. Vor Phase 9 teilten sich beide dieselbe Farbe
+     (--warn) — siehe Entscheidung 011. */
+  /* Warme Basis statt kühlem Blaugrau (Phase 9, Entscheidung 012): Grund-
+     flächen/Text/Border liegen im warmen Espresso-/Taupe-Bereich (Hue ~30°
+     statt ~215°). Die Statusfarben bleiben wie oben spezifiziert — sie
+     müssen als Signal auffallen und dürfen nicht zur Fläche "passen". */
+  --bg: #1c1815;
+  --surface: #221d18;
+  --surface-2: #2a241d;
+  --surface-3: #332b22;
+  --text: #f0e9e1;
+  --text-dim: #c9bfb2;
+  --muted: #9c9186;
+  --accent: #a78bfa;
+  --accent-ink: #1f1830;
+  --running: #6ea8fe;
   --ok: #4cc38a;
   --err: #e5484d;
   --warn: #f5a524;
-  --border: #2a2e35;
-  --border-soft: #22252b;
+  --border: #3a3025;
+  --border-soft: #2d271f;
+
+  /* Glasmorphismus (Phase 9, Entscheidung 012): nur für Flächen, die
+     tatsächlich ÜBER anderem Inhalt schweben (Inspector-Drawer, Dialoge,
+     Kopfleiste, Composer) — nie für dichten Lesetext (Code/Diff/Rohdaten),
+     da Unschärfe unter Text die Lesbarkeit verschlechtert. Helle statt
+     dunkle Kantenlinie, wie bei Frosted Glass üblich. */
+  --glass-bg: color-mix(in srgb, var(--surface) 88%, transparent);
+  --glass-bg-strong: color-mix(in srgb, var(--surface) 93%, transparent);
+  --glass-border: color-mix(in srgb, var(--text) 10%, transparent);
+  --glass-blur: blur(20px) saturate(115%);
+  --glass-shadow: 0 8px 32px rgba(10, 6, 2, 0.45);
 
   /* Typografie: UI-Schrift ist system-ui, nicht Monospace. */
   --font-ui:
@@ -44,7 +72,8 @@
      synchron zur tatsächlichen Headerhöhe gehalten (kein fixer Wert),
      damit ein umbrechender Header den Inspector-Drawer nicht verdeckt. */
   --header-h: 48px;
-  --nav-w: 56px;
+  --nav-w: 232px;
+  --nav-w-collapsed: 56px;
   --inspector-w: 300px;
 }
 
@@ -95,8 +124,10 @@ kbd {
   gap: var(--space-3);
   min-height: 48px;
   padding: var(--space-2) var(--space-4);
-  background: var(--surface);
-  border-bottom: 1px solid var(--border-soft);
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--glass-border);
   flex: none;
   flex-wrap: wrap;
 }
@@ -148,13 +179,19 @@ kbd {
   color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
 }
-.header-model {
-  color: var(--muted);
-  font-size: 12.5px;
-  white-space: nowrap;
+.header-sep {
+  color: var(--border);
+  font-size: 13px;
+}
+/* Aktueller Task: visueller Mittelpunkt des Headers (§Phase 1). */
+.task-title {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 22ch;
+  white-space: nowrap;
+  max-width: 40ch;
 }
 #status-text {
   color: var(--muted);
@@ -175,7 +212,7 @@ kbd {
   background: var(--ok);
 }
 .dot.busy {
-  background: var(--warn);
+  background: var(--running);
   animation: pulse 1.6s ease-in-out infinite;
 }
 .dot.error {
@@ -241,6 +278,11 @@ button.ghost-button {
   background: var(--surface-2);
   border-color: var(--border);
 }
+.icon-button.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+  border-color: var(--border);
+}
 .icon {
   width: 16px;
   height: 16px;
@@ -253,23 +295,163 @@ button.ghost-button {
 
 /* ------------------------------- Layout -------------------------------- */
 
+/* Inspector ist nie Teil des Grids (§Phase 1) — er öffnet immer als
+   Overlay-Drawer (siehe #context-area weiter unten), unabhängig von der
+   Fensterbreite. */
 #layout {
   flex: 1;
   display: grid;
-  grid-template-columns: var(--nav-w) minmax(0, 1fr) 6px var(--inspector-w);
+  grid-template-columns: var(--nav-w) minmax(0, 1fr);
   min-height: 0;
+  transition: grid-template-columns 0.15s ease-out;
+}
+/* Eingeklappte Task-Sidebar (§Phase 2): schrumpft auf Icon-Rail-Breite,
+   Text/Liste verschwinden — kein horizontaler Platzverlust. */
+body.task-sidebar-collapsed #layout {
+  grid-template-columns: var(--nav-w-collapsed) minmax(0, 1fr);
+}
+body.task-sidebar-collapsed .sidebar-text,
+body.task-sidebar-collapsed #task-groups {
+  display: none;
+}
+body.task-sidebar-collapsed #btn-collapse-tasks .nav-icon {
+  transform: rotate(180deg);
+}
+body.task-sidebar-collapsed #task-sidebar-header {
+  flex-direction: column;
+  gap: var(--space-1);
+}
+body.task-sidebar-collapsed #btn-new-task {
+  justify-content: center;
+  padding: 6px;
+  width: 100%;
 }
 
-/* Navigation Rail (links): kompakt, Icon-only mit Tooltip. */
+/* Task Sidebar (links, §Phase 2): task-orientierte Navigation statt reiner
+   Icon-Leiste. Eingeklappt (body.task-sidebar-collapsed) schrumpft sie auf
+   die alte Icon-Rail-Breite zurück — kein horizontaler Platzverlust. */
 #side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border-soft);
+  overflow: hidden;
+  min-width: 0;
+}
+#task-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2);
+  flex: none;
+  border-bottom: 1px solid var(--border-soft);
+}
+#btn-new-task {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: flex-start;
+  padding: 6px var(--space-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sidebar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#task-groups {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--space-2);
+  min-height: 0;
+}
+.task-group + .task-group {
+  margin-top: var(--space-3);
+}
+.task-group-label {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 var(--space-2) 4px;
+}
+.task-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 6px var(--space-2);
+  color: var(--text);
+  margin-bottom: 1px;
+}
+.task-row:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.task-row.current {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.task-row-marker {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  line-height: 1.5;
+  font-size: 13px;
+}
+.task-row-marker.status-active {
+  color: var(--ok);
+}
+.task-row-marker.status-needs_input {
+  color: var(--warn);
+}
+.task-row-marker.status-review {
+  color: var(--muted);
+}
+.task-row-marker.status-completed {
+  color: var(--muted);
+}
+.task-row-body {
+  min-width: 0;
+  flex: 1;
+}
+.task-row-title {
+  display: block;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-row-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-groups-empty {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-style: italic;
+  padding: var(--space-2);
+}
+#task-sidebar-footer {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-3) var(--space-1);
-  background: var(--surface);
-  border-right: 1px solid var(--border-soft);
-  overflow-y: auto;
+  padding: var(--space-2) var(--space-1);
+  flex: none;
+  border-top: 1px solid var(--border-soft);
 }
 .nav-item {
   display: flex;
@@ -335,16 +517,129 @@ button.ghost-button {
   font-size: 14px;
 }
 
-/* Inspector (rechte Spalte): eine einzige, immer sichtbare Übersicht —
-   jede Zeile klappt ihren Inhalt inline auf statt in ein separates
-   Detailpanel zu wechseln (§5). */
-#context-area {
-  border-left: 1px solid var(--border-soft);
+/* Startbildschirm (Phase 8, §10): Taskstart bleibt Primäraktion, Letzte
+   Projekte nur sekundär darunter — kein Dashboard, keine Statistikansicht. */
+#startscreen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: min(480px, 88vw);
+}
+#startscreen-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text);
+}
+#startscreen-subtitle {
+  margin: 0 0 var(--space-2);
+  font-size: 15px;
+}
+#startscreen-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
   background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  padding: var(--space-3);
+}
+#startscreen-input {
+  width: 100%;
+  resize: vertical;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+#startscreen-start {
+  align-self: flex-end;
+}
+#startscreen-recent {
+  width: 100%;
+  margin-top: var(--space-3);
+  text-align: left;
+}
+#startscreen-recent h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.startscreen-recent-row {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text);
+  text-align: left;
+}
+.startscreen-recent-row:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.startscreen-recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.startscreen-recent-time {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Leerzustand MIT offenem Projekt, aber ohne Nachrichten (frischer Task,
+   §10 "keine leere Hauptfläche") — kein zweites Eingabefeld, der echte
+   Composer steht am unteren Rand bereits bereit. */
+#chat-placeholder:not([hidden]) {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 15px;
+}
+#chat-placeholder p {
+  margin: 0;
+}
+
+/* Inspector: eine einzige Übersicht, deren Zeilen ihren Inhalt inline
+   aufklappen statt in ein separates Detailpanel zu wechseln (§5). Anders
+   als früher ist er nie permanenter Teil des Hauptlayouts (§Phase 1) —
+   er öffnet als Overlay-Drawer über der Konversation, ausgelöst über
+   Nav-Rail, Header-Button oder Super+I (siehe body.context-open). */
+#context-area {
+  border-left: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   padding: var(--space-4) var(--space-3);
   overflow-y: auto;
   font-size: 13px;
   min-width: 0;
+  position: fixed;
+  top: var(--header-h);
+  right: 0;
+  bottom: 0;
+  width: min(var(--inspector-w), 92vw);
+  transform: translateX(100%);
+  transition: transform 0.15s ease-out;
+  z-index: 20;
+  box-shadow: var(--glass-shadow);
+}
+body.context-open #context-area {
+  transform: translateX(0);
 }
 #context-area h2 {
   margin: var(--space-1) 0 var(--space-3);
@@ -425,6 +720,10 @@ button.ghost-button {
   background: color-mix(in srgb, var(--warn) 22%, transparent);
   color: var(--warn);
 }
+.pill.running {
+  background: color-mix(in srgb, var(--running) 22%, transparent);
+  color: var(--running);
+}
 .pill.muted {
   background: var(--surface-2);
   color: var(--muted);
@@ -449,13 +748,99 @@ button.ghost-button {
   width: 100%;
 }
 
-/* Ziehgriff zwischen Konversation und Inspector (§3) — nur in der breiten
-   Spalten-Ansicht aktiv, siehe isNarrowLayout()/setupInspectorResize(). */
-#inspector-resize-handle {
-  width: 6px;
+/* Changes Review (Phase 6, §08): Datei-Liste mit Diff direkt darunter statt
+   einer zweiten Spalte — der Inspector ist ein schmaler, verstellbarer
+   Drawer, kein Editor-Layout. */
+.diff-file {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+.diff-file summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  background: var(--surface-2);
+  font-size: 12.5px;
+}
+.diff-file summary:hover {
+  background: var(--surface-3, var(--surface-2));
+}
+.diff-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+}
+.diff-file-stat {
   flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+.diff-file-content {
+  max-height: 420px;
+  overflow: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.diff-line {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.diff-hunk-header {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+.diff-add {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+.diff-remove {
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  color: var(--err);
+}
+.diff-context {
+  color: var(--text);
+}
+.diff-empty {
+  padding: 6px 8px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Verification (Phase 7, §09): laufende Prüfung bleibt sichtbar statt nur
+   im letzten Toolcard-Status zu stecken. */
+.panel-line.verify-running {
+  color: var(--running);
+  font-weight: 600;
+}
+.verify-details-btn {
+  margin-top: var(--space-2);
+  width: 100%;
+}
+
+/* Ziehgriff zwischen Konversation und Inspector-Drawer (§3/§Phase 1):
+   fix positioniert direkt an der linken Kante des Drawers, nur sichtbar/
+   bedienbar, während der Drawer offen ist. */
+#inspector-resize-handle {
+  display: none;
+  width: 6px;
   cursor: col-resize;
   background: transparent;
+  position: fixed;
+  top: var(--header-h);
+  bottom: 0;
+  right: min(var(--inspector-w), 92vw);
+  z-index: 21;
+}
+body.context-open #inspector-resize-handle {
+  display: block;
 }
 #inspector-resize-handle:hover,
 #inspector-resize-handle:focus-visible {
@@ -656,38 +1041,97 @@ h6.md-heading {
   font-style: italic;
 }
 
-/* Kompakte Aktivitätszeile: Tool-Aufrufe bleiben sekundär (§11). */
-details.activity-group {
+/* Activity Stream (§Phase 3): semantische Karten statt Toolspam. Titel +
+   Kernzeilen sind IMMER sichtbar (kein <details> auf Kartenebene) — nur
+   die Rohdaten je Werkzeugaufruf (.activity-raw) sind aufklappbar, damit
+   Fehler nie durch Zuklappen verschwinden können. */
+.activity-card {
   margin: 4px 0 var(--space-3);
   max-width: 78ch;
-  border: none;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface);
 }
-details.activity-group > summary {
+.activity-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.activity-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.activity-header::before {
+  content: "●";
+  font-size: 11px;
+  color: var(--muted);
+}
+/* Eigenes Glyph statt eines nur umgefärbten Punkts (§11 "keine Farbe als
+   einziges Statussignal") — "laufend" unterscheidet sich auch in der Form
+   vom statischen Aufzähl-Punkt links und von ✓/✗ rechts. */
+.activity-card.running .activity-header::after {
+  content: "⋯";
+  color: var(--running);
+  font-weight: 700;
+  margin-left: auto;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.activity-card.done-ok .activity-header::after {
+  content: "✓";
+  color: var(--ok);
+  margin-left: auto;
+}
+.activity-card.done-error .activity-header::after {
+  content: "✗";
+  color: var(--err);
+  margin-left: auto;
+}
+.activity-card.done-error {
+  border-color: color-mix(in srgb, var(--err) 45%, var(--border));
+}
+.activity-lines {
+  margin-top: 4px;
+  padding-left: 15px;
+}
+.activity-line {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.activity-line.error {
+  color: var(--err);
+  font-weight: 500;
+}
+details.activity-raw {
+  margin-top: 4px;
+  padding-left: 15px;
+}
+details.activity-raw > summary {
   list-style: none;
   cursor: pointer;
   color: var(--muted);
-  font-size: 12.5px;
-  padding: 4px 8px;
+  font-size: 11.5px;
+  padding: 2px 4px;
   border-radius: var(--radius-sm);
+  width: fit-content;
 }
-details.activity-group > summary::-webkit-details-marker {
+details.activity-raw > summary::-webkit-details-marker {
   display: none;
 }
-details.activity-group > summary::before {
+details.activity-raw > summary::before {
   content: "▸ ";
   opacity: 0.7;
 }
-details.activity-group[open] > summary::before {
+details.activity-raw[open] > summary::before {
   content: "▾ ";
 }
-details.activity-group > summary:hover {
+details.activity-raw > summary:hover {
   background: var(--surface-2);
 }
-details.activity-group .activity-tools {
-  margin-top: 6px;
-}
 
-/* Kompakte Tool-Cards (nur innerhalb geöffneter Aktivität sichtbar). */
+/* Kompakte Tool-Cards (Rohdaten je Werkzeugaufruf, in .activity-raw). */
 details.tool-card {
   margin: 4px 0 4px 14px;
   border: 1px solid var(--border-soft);
@@ -710,8 +1154,10 @@ details.tool-card[open] summary::before {
   content: "▾ ";
 }
 details.tool-card.running summary::after {
-  content: " ●";
-  color: var(--warn);
+  content: " ⋯";
+  color: var(--running);
+  font-weight: 700;
+  animation: pulse 1.6s ease-in-out infinite;
 }
 details.tool-card.done-ok summary::after {
   content: " ✓";
@@ -788,7 +1234,7 @@ details.thinking-block pre {
   gap: 8px;
   padding: 9px 16px;
   background: color-mix(in srgb, var(--err) 16%, var(--surface));
-  color: #ffb4b6;
+  color: color-mix(in srgb, var(--err) 55%, white);
   border-top: 1px solid var(--err);
   white-space: pre-wrap;
 }
@@ -818,14 +1264,19 @@ details.thinking-block pre {
 
 /* ------------------------------- Composer ------------------------------ */
 
+/* Kein backdrop-filter hier (anders als Header/Drawer/Dialog): der
+   Composer liegt im normalen Fluss unter dem Inspector-Drawer — zwei
+   gestapelte Blur-Ebenen an derselben Stelle erzeugen einen sichtbaren
+   Kompositions-Fehler (getestet, Glow-Artefakt in der Ecke). Die getönte
+   Fläche allein reicht für die visuelle Zugehörigkeit zur Glas-Sprache. */
 #composer {
   flex: none;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-3) clamp(16px, 6%, 96px);
-  background: var(--surface);
-  border-top: 1px solid var(--border-soft);
+  background: var(--glass-bg-strong);
+  border-top: 1px solid var(--glass-border);
 }
 #input {
   resize: vertical;
@@ -881,14 +1332,18 @@ dialog {
   min-width: 0;
   max-width: 620px;
   max-height: 70vh;
-  background: var(--surface);
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
+  box-shadow: var(--glass-shadow);
 }
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(15, 10, 6, 0.55);
+  backdrop-filter: blur(3px);
 }
 dialog h2 {
   margin: 0 0 var(--space-3);
@@ -906,11 +1361,14 @@ dialog h2 {
   max-width: 620px;
   max-height: 80vh;
   overflow-y: auto;
-  background: var(--surface);
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
+  box-shadow: var(--glass-shadow);
   position: fixed;
   top: 50%;
   left: 50%;
@@ -987,44 +1445,6 @@ dialog h2 {
 
 /* ------------------------------ Responsive ----------------------------- */
 
-/* Breite Fenster: Inspector kann per GUI-Shortcut ausgeblendet werden. */
-@media (min-width: 1081px) {
-  body.context-hidden #layout {
-    grid-template-columns: var(--nav-w) minmax(0, 1fr);
-  }
-  body.context-hidden #context-area,
-  body.context-hidden #inspector-resize-handle {
-    display: none;
-  }
-}
-
-/* Mittelgroße Fenster: Inspector wird zum ausblendbaren Drawer. Der
-   Top-Offset folgt --header-h, das renderer.js live an die tatsächliche
-   (ggf. mehrzeilige) Headerhöhe anpasst — keine feste Pixelannahme. */
-@media (max-width: 1080px) {
-  #layout {
-    grid-template-columns: var(--nav-w) minmax(0, 1fr);
-  }
-  /* Drawer statt Spalte: keine feste Breite zum Ziehen. */
-  #inspector-resize-handle {
-    display: none;
-  }
-  #context-area {
-    position: fixed;
-    top: var(--header-h);
-    right: 0;
-    bottom: 0;
-    width: min(340px, 92vw);
-    transform: translateX(100%);
-    transition: transform 0.15s ease-out;
-    z-index: 20;
-    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
-  }
-  body.context-open #context-area {
-    transform: translateX(0);
-  }
-}
-
 /* Kleine Fenster: Header darf umbrechen (--header-h passt sich an),
    Projektname weicht, Composer bleibt bedienbar. */
 @media (max-width: 760px) {
@@ -1033,6 +1453,9 @@ dialog h2 {
      mehr, um überhaupt ein Projekt zu öffnen. */
   #project-label {
     max-width: 9ch;
+  }
+  .task-title {
+    max-width: 14ch;
   }
   #header-center {
     order: 3;
@@ -1051,9 +1474,15 @@ dialog h2 {
 
 @media (max-width: 640px) {
   :root {
-    --nav-w: 48px;
+    --nav-w-collapsed: 48px;
   }
-  .header-model {
+  /* Schmales Fenster: Task-Sidebar bleibt immer eingeklappt (§Phase 2) —
+     232px expandiert wäre auf so wenig Breite unbrauchbar. */
+  #layout {
+    grid-template-columns: var(--nav-w-collapsed) minmax(0, 1fr) !important;
+  }
+  .sidebar-text,
+  #task-groups {
     display: none;
   }
   #composer-pills .pill-button {

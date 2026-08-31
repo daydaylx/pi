@@ -183,15 +183,49 @@ function ask(reason: string, hard = false): PolicyDecision {
   return { action: "ask", reason, hard };
 }
 
+/**
+ * A symlink only escapes the project when its fully resolved real target
+ * does. Flagging any symlink component regardless of target (the previous
+ * behaviour here) treated every ordinary `node_modules/.bin/<tool>`
+ * invocation as an escape, since npm always links `.bin/*` — ubiquitous and
+ * project-internal, not an escape. This walks the path segment by segment,
+ * following each symlink to its real target so only a target that actually
+ * leaves the project counts. A component that does not exist yet (a file
+ * about to be created) is appended literally. A broken symlink cannot be
+ * verified as staying inside the project, so it fails closed (escape).
+ */
 function hasSymlinkComponent(basePath: string, candidatePath: string): boolean {
   const rel = relative(basePath, candidatePath);
   if (rel === "" || rel === ".") return false;
-  let current = basePath;
-  for (const segment of rel.split(sep).filter(Boolean)) {
-    current = resolve(current, segment);
-    if (existsSync(current) && lstatSync(current).isSymbolicLink()) return true;
+
+  let realBase: string;
+  try {
+    realBase = realpathSync(basePath);
+  } catch {
+    realBase = basePath;
   }
-  return false;
+
+  let current = realBase;
+  for (const segment of rel.split(sep).filter(Boolean)) {
+    const next = resolve(current, segment);
+    let stat: ReturnType<typeof lstatSync> | undefined;
+    try {
+      stat = lstatSync(next);
+    } catch {
+      current = next;
+      continue;
+    }
+    if (stat.isSymbolicLink()) {
+      try {
+        current = realpathSync(next);
+      } catch {
+        return true;
+      }
+      continue;
+    }
+    current = next;
+  }
+  return !isInside(realBase, current);
 }
 
 export function resolvePathScope(

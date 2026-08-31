@@ -9,7 +9,11 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { GuiSession, resolveSessionPath } from "../main/ipc-handlers.js";
+import {
+  GuiSession,
+  resolveSessionPath,
+  readSessionDiffs,
+} from "../main/ipc-handlers.js";
 import { loadRecentProjects } from "../main/recent-projects.js";
 
 test("Sitzungspfade bleiben nach Symlink-Auflösung im Session-Root", () => {
@@ -37,6 +41,57 @@ test("Sitzungspfade bleiben nach Symlink-Auflösung im Session-Root", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("readSessionDiffs nimmt je Datei nur den letzten Eintrag (Phase 6)", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "pi-gui-diffs-"));
+  const file = path.join(root, "session.jsonl");
+  const entry = (path_, linesAdded, timestamp) =>
+    JSON.stringify({
+      type: "custom",
+      customType: "diff-view",
+      data: {
+        path: path_,
+        stats: { path: path_, linesAdded, linesRemoved: 0, hunks: 1 },
+        hunks: [
+          {
+            oldStart: 1,
+            oldCount: 0,
+            newStart: 1,
+            newCount: linesAdded,
+            lines: [{ kind: "added", newLine: 1, text: "x" }],
+          },
+        ],
+        toolName: "edit",
+        timestamp,
+      },
+    });
+  try {
+    writeFileSync(
+      file,
+      [
+        entry("a.ts", 1, 100),
+        "not json at all",
+        entry("a.ts", 3, 200),
+        entry("b.ts", 5, 150),
+        JSON.stringify({ type: "custom", customType: "other", data: {} }),
+      ].join("\n") + "\n",
+    );
+    const diffs = await readSessionDiffs(file);
+    const byPath = Object.fromEntries(diffs.map((d) => [d.path, d]));
+    assert.equal(diffs.length, 2);
+    assert.equal(byPath["a.ts"].stats.linesAdded, 3);
+    assert.equal(byPath["b.ts"].stats.linesAdded, 5);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readSessionDiffs liefert eine leere Liste für eine fehlende Datei", async () => {
+  assert.deepEqual(
+    await readSessionDiffs("/nicht/vorhanden/session.jsonl"),
+    [],
+  );
 });
 
 test("erwarteter Shutdown lässt Hintergrund-Stats ohne IPC-Ausnahme auslaufen", async () => {

@@ -7,7 +7,6 @@
 "use strict";
 
 const api = window.piGui;
-const activity = window.piGuiActivity;
 const interactions = window.piGuiInteractions;
 const isSmokeMode = new URLSearchParams(window.location.search).has("smoke");
 const initialCwdParam =
@@ -35,6 +34,31 @@ const state = {
   /** Welche Inspector-Übersichtszeilen gerade inline aufgeklappt sind (§5:
    * eine Übersicht statt Übersicht/Detail-Umschaltung). */
   expandedRows: new Set(),
+  /** Rohdaten aus api.listSessions() (Task-Sidebar, Phase 2) — der aktuelle
+   * Task wird beim Rendern live aus state.core überlagert. */
+  taskListCache: [],
+  /** Fokus vor dem Öffnen des Inspector-Drawers (Phase 4), für die Rückkehr
+   * beim Schließen. */
+  contextDrawerPreviousFocus: null,
+  /** Letzter bekannter Diff je Datei (Pfad → DiffViewEntryData), Phase 6
+   * Changes Review. Gespeist aus live gestreamten "diff-view"-Custom-
+   * Einträgen und, beim Sitzungswechsel, aus api.getSessionDiffs(). Keine
+   * zweite Wahrheit (R6): dieselben Rohdaten, die der diff-viewer bereits
+   * in der Sitzungsdatei persistiert. */
+  fileDiffs: new Map(),
+  /** Welche Dateien in der Changes-Ansicht gerade den Diff aufgeklappt
+   * zeigen. */
+  expandedDiffFiles: new Set(),
+  /** Gerade laufende, als "verification" klassifizierte Werkzeugaufrufe
+   * (Phase 7): toolCallId → true. Reine Ableitung aus den ohnehin schon
+   * durchgereichten tool_execution_*-Ereignissen (R2/R6) — core.verification
+   * kennt nur abgeschlossene Läufe, kein Live-"läuft gerade". */
+  runningVerificationCalls: new Map(),
+  /** Letzter abgeschlossene Verification-Werkzeugaufruf (Phase 7): Sprungziel
+   * für "Details ansehen", da core.verification keine Rohausgabe je Check
+   * mitschickt, die Tool-Card das aber bereits anzeigt (Decision 005: Rohdaten
+   * bleiben zugänglich). */
+  lastVerificationToolCallId: null,
 };
 
 /** Kanonisches Workflow-Modus-Set (shared/workflow-mode.ts). */
@@ -110,6 +134,7 @@ function setFollowScroll(follow) {
 }
 
 function scrollToBottom(force = false) {
+  updateChatEmptyHint();
   if (!force && !state.followScroll) {
     const jumpButton = el("btn-jump-latest");
     if (jumpButton) jumpButton.hidden = false;
@@ -128,6 +153,7 @@ function clearChat() {
   state.pendingLocalEchoes = [];
   closeActivityGroup();
   setFollowScroll(true);
+  updateChatEmptyHint();
 }
 
 /**
@@ -159,6 +185,7 @@ function appendUserBubble(text, { scroll = true } = {}) {
   bubble.textContent = text;
   wrap.append(label, bubble);
   chatEl.appendChild(wrap);
+  updateChatEmptyHint();
   if (scroll) scrollToBottom();
 }
 
@@ -322,36 +349,158 @@ function setToolCardOutput(pre, result) {
   pre.textContent = output;
 }
 
-/* ------------------ Aktivitätsgruppen (Phase 6, R8) -------------------- */
-
+/* ------------------------ Activity Stream (Phase 3) --------------------- */
 /**
- * Eine Aktivitätsgruppe fasst die Werkzeugaufrufe zwischen zwei
- * Nachrichten zu einer kompakten Zeile zusammen; die Einzelkarten gibt
- * es erst auf Abruf (Details-Element).
+ * Ersetzt die frühere, rein technische Toolspam-Zeile durch semantische
+ * Aktivitätskarten (05_Phase_3_Activity_Stream.md): aufeinanderfolgende
+ * Werkzeugaufrufe derselben Phase (explore/edit/verify/agent/command)
+ * bilden EINE Karte. Titel + Kernzeilen sind immer sichtbar (auch bei
+ * Fehlern, §"Fehler dürfen niemals wegaggregiert werden") — nur die
+ * Rohdaten je Einzelaufruf (bestehende Tool-Cards) sind hinter "Details"
+ * versteckt ("Rohdaten bleiben zugänglich").
  */
-function ensureActivityGroup() {
-  if (state.currentActivity) return state.currentActivity;
-  const group = document.createElement("details");
-  group.className = "activity-group";
-  const summary = document.createElement("summary");
-  summary.textContent = "Aktivität …";
-  const tools = document.createElement("div");
-  tools.className = "activity-tools";
-  group.append(summary, tools);
-  chatEl.appendChild(group);
-  state.currentActivity = { group, summary, tools, entries: [] };
-  return state.currentActivity;
+/** groupKey trennt aufeinanderfolgende Aufrufe zusätzlich zur Phase — nur
+ * für "agent" genutzt (Phase 10, §12 "klare Zuordnung von Activity zu
+ * Agent"): zwei verschiedene Subagenten-Rollen hintereinander dürfen nicht
+ * in einer gemeinsamen, generisch betitelten Karte verschwinden. */
+function ensureActivityCard(kind, groupKey, cardTitle) {
+  const phase = interactions.activityPhaseFor(kind);
+  if (!state.currentActivity) state.currentActivity = { cards: [] };
+  const cards = state.currentActivity.cards;
+  const last = cards[cards.length - 1];
+  if (last && last.phase === phase && last.groupKey === groupKey) return last;
+  const card = buildActivityCard(phase, groupKey, cardTitle);
+  cards.push(card);
+  return card;
+}
+
+function buildActivityCard(phase, groupKey, cardTitle) {
+  const root = document.createElement("div");
+  root.className = `activity-card phase-${phase} running`;
+
+  const header = document.createElement("div");
+  header.className = "activity-header";
+  const title = document.createElement("span");
+  title.className = "activity-title";
+  title.textContent =
+    cardTitle || interactions.ACTIVITY_PHASE_LABELS[phase] || "Aktivität";
+  header.appendChild(title);
+
+  const lines = document.createElement("div");
+  lines.className = "activity-lines";
+
+  const raw = document.createElement("details");
+  raw.className = "activity-raw";
+  const rawSummary = document.createElement("summary");
+  rawSummary.textContent = "Details";
+  raw.appendChild(rawSummary);
+
+  root.append(header, lines, raw);
+  chatEl.appendChild(root);
+  return { root, header, title, lines, raw, phase, groupKey, entries: [] };
 }
 
 function closeActivityGroup() {
   state.currentActivity = null;
 }
 
-function refreshActivitySummary() {
-  const act = state.currentActivity;
-  if (!act) return;
-  const line = activity.formatActivityLine(act.entries);
-  act.summary.textContent = line || "Aktivität";
+function activityLineEl(text, kind) {
+  const line = document.createElement("div");
+  line.className = kind ? `activity-line ${kind}` : "activity-line";
+  line.textContent = text;
+  return line;
+}
+
+/** Kernzeilen je Phase — grobe, aber immer verständliche Verdichtung statt
+ * einer reinen Werkzeug-Aufzählung. */
+function activitySummaryLines(card) {
+  if (card.phase === "explore") {
+    const count = (kind) =>
+      card.entries.filter((entry) => entry.kind === kind).length;
+    const reads = count("file_read");
+    const searches = count("search");
+    const analysis = count("analysis");
+    const bits = [];
+    if (reads) {
+      bits.push(`${reads} ${reads === 1 ? "Datei" : "Dateien"} gelesen`);
+    }
+    if (searches) {
+      bits.push(`${searches} ${searches === 1 ? "Suche" : "Suchen"}`);
+    }
+    if (analysis) {
+      bits.push(`${analysis} ${analysis === 1 ? "Analyse" : "Analysen"}`);
+    }
+    return bits.length ? [bits.join(" · ")] : [];
+  }
+  if (card.phase === "edit") {
+    const files = new Set(
+      card.entries.map((entry) => entry.target).filter(Boolean),
+    );
+    const count = files.size || card.entries.length;
+    return [`${count} ${count === 1 ? "Datei" : "Dateien"} geändert`];
+  }
+  if (["verify", "command", "agent"].includes(card.phase)) {
+    return card.entries
+      .map((entry) => entry.target)
+      .filter(Boolean)
+      .slice(-3);
+  }
+  return card.entries.map((entry) => entry.toolName);
+}
+
+function refreshActivityCard(card) {
+  const running = card.entries.some((entry) => entry.running);
+  const failed = card.entries.filter(
+    (entry) => !entry.running && entry.isError,
+  );
+  card.root.classList.toggle("running", running);
+  card.root.classList.toggle("done-error", !running && failed.length > 0);
+  card.root.classList.toggle("done-ok", !running && failed.length === 0);
+
+  card.lines.innerHTML = "";
+  for (const text of activitySummaryLines(card)) {
+    card.lines.appendChild(activityLineEl(text));
+  }
+  for (const entry of failed) {
+    card.lines.appendChild(
+      activityLineEl(
+        `✗ fehlgeschlagen: ${entry.target || entry.toolName}`,
+        "error",
+      ),
+    );
+  }
+}
+
+/** Menschenlesbares Ziel aus der bereits server-seitig gebauten Tool-Card-
+ * Zusammenfassung ("READ pfad", "BASH befehl …") — keine zweite
+ * Argument-Interpretation im Renderer nötig. */
+function activityTargetFromSummary(summary) {
+  return String(summary ?? "")
+    .replace(/^[A-Z_]+\s*/, "")
+    .trim();
+}
+
+/** Werkzeugaufrufe verteilen sich jetzt auf mehrere Karten (eine je Phase)
+ * statt auf eine einzige flache Liste — Suche über alle Karten des
+ * aktuellen Turns hinweg (neueste zuerst, falls IDs kollidieren). */
+function findActivityCardByToolCallId(toolCallId) {
+  const cards = state.currentActivity?.cards ?? [];
+  for (let i = cards.length - 1; i >= 0; i--) {
+    if (cards[i].entries.some((entry) => entry.toolCallId === toolCallId)) {
+      return cards[i];
+    }
+  }
+  return null;
+}
+
+function findRawToolCard(toolCallId) {
+  const card = findActivityCardByToolCallId(toolCallId);
+  const root = card ? card.raw : chatEl;
+  const rawCards = root.querySelectorAll("details.tool-card");
+  for (const rawCard of Array.from(rawCards).reverse()) {
+    if (rawCard.__toolCallId === toolCallId) return rawCard;
+  }
+  return null;
 }
 
 /* ------------------------- Ereignisverarbeitung ------------------------ */
@@ -407,52 +556,65 @@ function handleEvent(msg) {
       break;
     }
     case "tool_execution_start": {
-      const act = ensureActivityGroup();
-      act.entries.push({
+      const kind = interactions.classifyActivityKind(msg.toolName, msg.args);
+      const agentRole =
+        kind === "agent" && msg.toolName === "subagent"
+          ? String(msg.args?.agent ?? "").trim() || undefined
+          : undefined;
+      const card = ensureActivityCard(
+        kind,
+        agentRole,
+        agentRole ? interactions.agentDisplayLabel(agentRole) : undefined,
+      );
+      card.entries.push({
         toolCallId: msg.toolCard.toolCallId,
         toolName: msg.toolCard.toolName,
+        kind,
+        target: activityTargetFromSummary(msg.toolCard.summary),
         running: true,
         isError: false,
       });
-      act.tools.appendChild(toolCardElement(msg.toolCard));
-      refreshActivitySummary();
+      card.raw.appendChild(toolCardElement(msg.toolCard));
+      refreshActivityCard(card);
+      if (kind === "verification") {
+        state.runningVerificationCalls.set(msg.toolCard.toolCallId, true);
+        void refreshContextOverview();
+      }
       scrollToBottom();
       break;
     }
     case "tool_execution_update": {
-      const act = state.currentActivity;
-      const root = act ? act.tools : chatEl;
-      const cards = root.querySelectorAll("details.tool-card");
-      for (const card of Array.from(cards).reverse()) {
-        if (card.__toolCallId !== msg.toolCallId) continue;
-        setToolCardOutput(card.querySelector("pre"), msg.partialResult);
-        break;
+      const rawCard = findRawToolCard(msg.toolCallId);
+      if (rawCard) {
+        setToolCardOutput(rawCard.querySelector("pre"), msg.partialResult);
       }
       break;
     }
     case "tool_execution_end": {
-      const act = state.currentActivity;
-      if (act) {
-        const entry = act.entries.find(
+      if (state.runningVerificationCalls.has(msg.toolCallId)) {
+        state.runningVerificationCalls.delete(msg.toolCallId);
+        state.lastVerificationToolCallId = msg.toolCallId;
+        void refreshContextOverview();
+      }
+      const card = findActivityCardByToolCallId(msg.toolCallId);
+      if (card) {
+        const entry = card.entries.find(
           (candidate) => candidate.toolCallId === msg.toolCallId,
         );
         if (entry) {
           entry.running = false;
           entry.isError = Boolean(msg.isError);
         }
-        refreshActivitySummary();
+        refreshActivityCard(card);
       }
-      const root = act ? act.tools : chatEl;
-      const cards = root.querySelectorAll("details.tool-card");
-      for (const card of Array.from(cards).reverse()) {
-        if (card.__toolCallId !== msg.toolCallId) continue;
-        card.classList.remove("running");
-        card.classList.add(msg.isError ? "done-error" : "done-ok");
-        setToolCardOutput(card.querySelector("pre"), msg.result);
+      const rawCard = findRawToolCard(msg.toolCallId);
+      if (rawCard) {
+        rawCard.classList.remove("running");
+        rawCard.classList.add(msg.isError ? "done-error" : "done-ok");
+        setToolCardOutput(rawCard.querySelector("pre"), msg.result);
         if (!msg.isError && ["edit", "write"].includes(String(msg.toolName))) {
           state.editedFiles.add(toolTargetPath(msg.args));
         }
-        break;
       }
       break;
     }
@@ -463,10 +625,10 @@ function handleEvent(msg) {
       refreshContextOverview();
       break;
     case "entry_appended":
-      applyCoreEntry(msg.entry);
+      applyCustomEntry(msg.entry);
       break;
     case "custom":
-      applyCoreEntry(msg);
+      applyCustomEntry(msg);
       break;
     case "extension_ui_request":
       handleUiRequest(msg);
@@ -481,6 +643,25 @@ function handleEvent(msg) {
 
 function toolTargetPath(args) {
   return args && typeof args === "object" ? String(args.path ?? "") : "";
+}
+
+/** Verteilt einen Custom-Entry an den passenden Übernahme-Pfad — je
+ * customType gibt es genau eine zuständige Stelle, keine doppelte
+ * Interpretation derselben Rohdaten (R6). */
+function applyCustomEntry(entry) {
+  if (!entry) return;
+  if (entry.customType === "frontend-bridge/state") applyCoreEntry(entry);
+  else if (entry.customType === "diff-view") applyDiffEntry(entry);
+}
+
+/** Live-Diff-Eintrag des diff-viewer-Extensions (Phase 6 Changes Review):
+ * dieselben Rohdaten, die auch in der Sitzungsdatei landen, hier nur
+ * unmittelbar statt erst beim nächsten Sitzungswechsel übernommen. */
+function applyDiffEntry(entry) {
+  const data = entry.data;
+  if (!data || typeof data.path !== "string" || !data.stats) return;
+  state.fileDiffs.set(data.path, data);
+  if (state.expandedRows.has("changes")) void refreshContextOverview();
 }
 
 /** Custom-Entry der frontend-bridge in den lokalen Kernzustand übernehmen. */
@@ -504,18 +685,28 @@ function applyCoreEntry(entry) {
 }
 
 function refreshCoreChips() {
-  const workflowEl = el("workflow-label");
   const permissionEl = el("permission-label");
   const core = state.core;
-  if (workflowEl) {
-    workflowEl.textContent = core?.workflow?.label ?? "Work";
-    workflowEl.title = `Workflow: ${core?.workflow?.label ?? "—"} (Shift+Tab)`;
-  }
   if (permissionEl) {
     permissionEl.textContent = core?.permissions?.label ?? "";
     permissionEl.hidden = !core?.permissions?.label;
   }
+  refreshTaskTitle();
   refreshComposerPills();
+  renderTaskSidebar();
+}
+
+/** Aktueller Task ist der visuelle Mittelpunkt des Headers (§Phase 1). */
+function refreshTaskTitle() {
+  const titleEl = el("task-title");
+  const sepEl = el("task-sep");
+  if (!titleEl || !sepEl) return;
+  const title = state.core?.task?.title;
+  const hasTitle = Boolean(title) && title !== "Aktuelle Aufgabe";
+  titleEl.hidden = !hasTitle;
+  sepEl.hidden = !hasTitle;
+  titleEl.textContent = hasTitle ? title : "";
+  titleEl.title = hasTitle ? title : "";
 }
 
 /* -------------------- Extension-UI-Anfragen (Dialoge) ------------------ */
@@ -849,11 +1040,48 @@ function setActiveNav(view) {
 function setActiveView(view) {
   setActiveNav(view);
   if (view === "chat") {
-    if (isNarrowLayout()) document.body.classList.remove("context-open");
+    closeContextDrawer();
     return;
   }
   expandRow(view);
-  if (isNarrowLayout()) document.body.classList.add("context-open");
+  openContextDrawer();
+}
+
+function syncInspectorToggleButton() {
+  el("btn-toggle-inspector")?.classList.toggle(
+    "active",
+    document.body.classList.contains("context-open"),
+  );
+}
+
+/** Fokus geht beim Öffnen in den Drawer und beim Schließen zurück zum
+ * auslösenden Element (§Phase 4 — Fokusmanagement). */
+function openContextDrawer() {
+  if (!document.body.classList.contains("context-open")) {
+    state.contextDrawerPreviousFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+  }
+  document.body.classList.add("context-open");
+  syncInspectorToggleButton();
+  queueMicrotask(() => {
+    const area = el("context-area");
+    const target = area?.querySelector(
+      "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+    );
+    (target ?? area)?.focus();
+  });
+}
+
+function closeContextDrawer() {
+  const wasOpen = document.body.classList.contains("context-open");
+  document.body.classList.remove("context-open");
+  syncInspectorToggleButton();
+  if (!wasOpen) return;
+  const previous = state.contextDrawerPreviousFocus;
+  state.contextDrawerPreviousFocus = null;
+  previous?.focus();
 }
 
 function expandRow(key) {
@@ -871,21 +1099,204 @@ function toggleRow(key) {
   void refreshContextOverview();
 }
 
-function isNarrowLayout() {
-  return window.matchMedia("(max-width: 1080px)").matches;
+/* ------------------------- Task Sidebar (Phase 2) ---------------------- */
+
+const TASK_STATUS_GROUPS = [
+  { key: "active", label: "Active", marker: "●" },
+  { key: "needs_input", label: "Needs Input", marker: "!" },
+  { key: "review", label: "Review", marker: "○" },
+  { key: "completed", label: "Completed", marker: "✓" },
+];
+
+const TASK_STATUS_TEXT = {
+  active: "Working",
+  needs_input: "Braucht Eingabe",
+  review: "Review",
+  completed: "Fertig",
+};
+
+const TASK_SIDEBAR_COLLAPSED_KEY = "pi-gui-task-sidebar-collapsed";
+
+/** Holt die Sitzungsliste (mit zuletzt bekanntem Core-Zustand je Sitzung,
+ * siehe ipc-handlers.js:readLastFrontendState) und rendert sie neu. Wird
+ * nach Sitzungswechsel/-erstellung aufgerufen; laufende Statusänderungen
+ * der AKTUELLEN Sitzung kommen dagegen günstig aus state.core (siehe
+ * refreshCoreChips) ohne erneuten IPC-Aufruf. */
+async function refreshTaskList() {
+  try {
+    state.taskListCache = await api.listSessions();
+  } catch {
+    state.taskListCache = [];
+  }
+  renderTaskSidebar();
 }
 
-/** Super+I: Kontextbereich ein-/ausblenden (breit) bzw. Drawer (schmal). */
+/** Baut die Task-Sidebar aus dem Sitzungs-Cache + dem Live-Core-State der
+ * aktuell verbundenen Sitzung (§Phase 2 — ersetzt die frühere flache
+ * "Sitzungen"-Liste im Inspector durch eine statusgruppierte Ansicht). */
+function renderTaskSidebar() {
+  const container = el("task-groups");
+  if (!container) return;
+  const entries = buildTaskEntries();
+  container.innerHTML = "";
+  if (entries.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "task-groups-empty";
+    empty.textContent = "Keine Aufgaben gefunden.";
+    container.appendChild(empty);
+    return;
+  }
+  for (const group of TASK_STATUS_GROUPS) {
+    const rows = entries.filter((entry) => entry.status === group.key);
+    if (rows.length === 0) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "task-group";
+    const label = document.createElement("span");
+    label.className = "task-group-label";
+    label.textContent = group.label;
+    wrap.appendChild(label);
+    for (const entry of rows) {
+      wrap.appendChild(renderTaskRow(entry, group));
+    }
+    container.appendChild(wrap);
+  }
+}
+
+/** Reine Ableitung, keine zweite Wahrheit (R6): Status kommt aus
+ * interactions.deriveTaskStatus (Core-Signale), Titel/Meta nur formatiert. */
+function buildTaskEntries() {
+  const entries = state.taskListCache.map((entry) => {
+    const isCurrent = Boolean(
+      state.sessionId && entry.path.includes(state.sessionId),
+    );
+    return buildTaskEntry(entry, isCurrent);
+  });
+  // Eine ganz frische Sitzung hat evtl. noch keine Datei auf der Platte
+  // (erster Custom-Entry kommt erst mit der ersten Antwort) — ohne diesen
+  // Ausgleich verschwindet der gerade aktive Task komplett aus der Liste
+  // (verletzt "aktueller Task ist eindeutig erkennbar", §Phase 1/2).
+  const hasCurrent = entries.some((entry) => entry.isCurrent);
+  if (!hasCurrent && state.sessionId) {
+    entries.unshift(
+      buildTaskEntry(
+        {
+          path: `__current__${state.sessionId}`,
+          title: "Neue Aufgabe",
+          mtimeMs: Date.now(),
+        },
+        true,
+      ),
+    );
+  }
+  return entries;
+}
+
+function buildTaskEntry(entry, isCurrent) {
+  const coreState = isCurrent && state.core ? state.core : entry.lastState;
+  const status = interactions.deriveTaskStatus(coreState, {
+    isCurrent,
+    busy: state.busy,
+  });
+  const title =
+    coreState?.task?.title && coreState.task.title !== "Aktuelle Aufgabe"
+      ? coreState.task.title
+      : entry.title;
+  const detail =
+    status === "review"
+      ? (() => {
+          const count = coreState?.changes?.filesCount ?? 0;
+          return `${count} ${count === 1 ? "Datei" : "Dateien"}`;
+        })()
+      : interactions.relativeTimeLabel(entry.mtimeMs);
+  return { path: entry.path, title, status, detail, isCurrent };
+}
+
+function renderTaskRow(entry, group) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = entry.isCurrent ? "task-row current" : "task-row";
+  button.setAttribute("role", "listitem");
+  if (entry.isCurrent) button.setAttribute("aria-current", "true");
+
+  const marker = document.createElement("span");
+  marker.className = `task-row-marker status-${entry.status}`;
+  marker.textContent = group.marker;
+  marker.setAttribute("aria-hidden", "true");
+
+  const body = document.createElement("span");
+  body.className = "task-row-body";
+  const title = document.createElement("span");
+  title.className = "task-row-title";
+  title.textContent = entry.title;
+  title.title = entry.title;
+  const meta = document.createElement("span");
+  meta.className = "task-row-meta";
+  meta.textContent = `${TASK_STATUS_TEXT[entry.status]} · ${entry.detail}`;
+  body.append(title, meta);
+
+  button.append(marker, body);
+  button.addEventListener("click", () => {
+    if (entry.isCurrent) return;
+    void resumeSession(entry.path);
+  });
+  return button;
+}
+
+function toggleTaskSidebarCollapsed() {
+  const collapsed = document.body.classList.toggle("task-sidebar-collapsed");
+  el("btn-collapse-tasks")?.setAttribute(
+    "aria-expanded",
+    collapsed ? "false" : "true",
+  );
+  try {
+    localStorage.setItem(TASK_SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* Bedienkomfort, kein hartes Erfordernis */
+  }
+}
+
+function restoreTaskSidebarCollapsed() {
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem(TASK_SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    /* Default bleibt ausgeklappt */
+  }
+  document.body.classList.toggle("task-sidebar-collapsed", collapsed);
+  el("btn-collapse-tasks")?.setAttribute(
+    "aria-expanded",
+    collapsed ? "false" : "true",
+  );
+}
+
+/** Super+I bzw. Header-Button: Inspector-Drawer ein-/ausblenden. Der
+ * Inspector ist nie mehr permanent Teil des Hauptlayouts (§Phase 1) — er
+ * öffnet als Overlay-Drawer unabhängig von der Fensterbreite. */
 function toggleContextArea() {
-  if (isNarrowLayout()) {
-    document.body.classList.toggle("context-open");
+  if (document.body.classList.contains("context-open")) {
+    closeContextDrawer();
   } else {
-    document.body.classList.toggle("context-hidden");
+    openContextDrawer();
   }
 }
 
 function esc(t) {
   return String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+/** Kollaps-Zeile "Agenten" im Inspector (Phase 10, §12 "aktive/wartende
+ * Agenten unterscheidbar" bereits ohne Aufklappen). */
+function agentsSummaryLabel(subagents) {
+  const list = Array.isArray(subagents) ? subagents : [];
+  if (list.length === 0) return "keine";
+  const attention = list.filter(
+    (entry) => entry?.status === "needs_attention",
+  ).length;
+  const rest = list.length - attention;
+  const parts = [];
+  if (rest > 0) parts.push(`${rest} aktiv`);
+  if (attention > 0) parts.push(`${attention} braucht Eingabe`);
+  return parts.join(" · ");
 }
 
 function verificationPill() {
@@ -913,20 +1324,7 @@ async function renderRowBody(body, key) {
   };
 
   if (key === "changes") {
-    const changes = core?.changes;
-    if (changes) {
-      line(
-        `<strong>${changes.filesCount}</strong> Datei(en) · ` +
-          `+${changes.linesAdded}/−${changes.linesRemoved}`,
-      );
-      for (const file of changes.files.slice(0, 40)) line(esc(file));
-    } else {
-      line("Keine Core-Änderungen gemeldet.");
-    }
-    if (state.editedFiles.size > 0) {
-      line("<strong>In dieser Sitzung editiert</strong>");
-      for (const file of state.editedFiles) line(esc(file));
-    }
+    renderChangesBody(body, core);
     return;
   }
 
@@ -937,72 +1335,249 @@ async function renderRowBody(body, key) {
       return;
     }
     for (const entry of subagents) {
-      line(`${esc(entry.role || entry.agent)} — ${esc(entry.status)}`);
+      const { marker, label, cls } = interactions.subagentStatusPresentation(
+        entry.status,
+      );
+      line(
+        `${esc(interactions.agentDisplayLabel(entry.role || entry.agent))} ` +
+          `<span class="pill ${cls}">${marker} ${esc(label)}</span>`,
+      );
     }
     return;
   }
 
   if (key === "verify") {
-    const verification = core?.verification;
-    if (!verification && !state.verificationStatus) {
-      line("Noch keine Verifikation erfasst.");
-      return;
-    }
-    if (verification?.status) {
-      line(`Status: <strong>${esc(verification.status)}</strong>`);
-    }
-    for (const id of verification?.declaredRequiredIds ?? []) {
-      const outcome = verification.requiredOutcomes?.[id] ?? "pending";
-      const marker =
-        outcome === "success" ? "✓" : outcome === "pending" ? "○" : "✗";
-      line(`${marker} ${esc(id)}: ${esc(outcome)}`);
-    }
-    for (const id of verification?.blockingRecommendedIds ?? []) {
-      line(`✗ ${esc(id)}: empfohlene Prüfung blockiert`);
-    }
-    if (state.verificationStatus) {
-      line(`Footer: ${esc(state.verificationStatus)}`);
-    }
+    renderVerificationBody(body, core, line);
+    return;
+  }
+}
+
+/* -------------------- Verification (Phase 7, §09) ----------------------- */
+
+/** Springt zur Rohausgabe des letzten Verification-Werkzeugaufrufs (Phase 7
+ * "Details aufklappbar"/"Fehlerdetails erreichbar"): core.verification
+ * liefert nur das reduzierte Ergebnis je Check (success/failed/unavailable),
+ * keine Rohausgabe — die liegt bereits in der zugehörigen Tool-Card der
+ * Activity-Stream (Decision 005: Rohdaten bleiben zugänglich). Keine neue
+ * Datenquelle, nur ein Sprung zu einer bereits vorhandenen. */
+function jumpToVerificationDetails() {
+  const toolCallId = state.lastVerificationToolCallId;
+  if (!toolCallId) return;
+  const rawCard = findRawToolCard(toolCallId);
+  if (!rawCard) return;
+  rawCard.open = true;
+  rawCard.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+/** Verification als First-Class-State (§09): pass/fail/running/offen klar
+ * unterschieden, abgebrochene/ergebnislose Checks (RequiredOutcome
+ * "unavailable") NIE als bestanden gewertet — eigener Marker statt
+ * Gleichsetzung mit "failed" oder "success". */
+function renderVerificationBody(body, core, line) {
+  const verification = core?.verification;
+  const running = state.runningVerificationCalls.size > 0;
+  const hasData =
+    verification ||
+    state.verificationStatus ||
+    running ||
+    state.lastVerificationToolCallId;
+  if (!hasData) {
+    line("Noch keine Verifikation erfasst.");
     return;
   }
 
-  if (key === "sessions") {
-    line("Lade Sitzungen …", "loading");
-    try {
-      const sessions = await api.listSessions();
-      body.innerHTML = "";
-      if (sessions.length === 0) {
-        line("Keine gespeicherten Sitzungen gefunden.");
-        return;
-      }
-      for (const session of sessions) {
-        const button = document.createElement("button");
-        button.className = "context-row";
-        button.type = "button";
-        const label = document.createElement("span");
-        label.className = "row-label";
-        label.textContent = new Date(session.mtimeMs).toLocaleString();
-        const value = document.createElement("span");
-        value.className = "row-value";
-        value.textContent = session.title;
-        button.append(label, value);
-        button.addEventListener("click", () => {
-          void resumeSession(session.path);
-        });
-        body.appendChild(button);
-      }
-    } catch (err) {
-      body.innerHTML = "";
-      line(esc(String(err.message ?? err)));
+  if (running) {
+    line("⏳ Prüfung läuft …", "verify-running");
+  }
+
+  if (verification?.status) {
+    line(
+      `Status: <strong>${esc(verification.status)}</strong>${verificationPill()}`,
+    );
+  } else if (state.verificationStatus) {
+    line(`Status: ${esc(state.verificationStatus)}`);
+  }
+
+  for (const id of verification?.declaredRequiredIds ?? []) {
+    const outcome = verification.requiredOutcomes?.[id];
+    const { marker, label, cls } =
+      interactions.verificationOutcomeMarker(outcome);
+    line(
+      `<span class="pill ${cls}">${marker}</span> ${esc(id)} — ${esc(label)}`,
+    );
+  }
+
+  for (const id of verification?.blockingRecommendedIds ?? []) {
+    line(
+      `<span class="pill err">✗</span> ${esc(id)} — empfohlene Prüfung blockiert`,
+    );
+  }
+
+  if (state.lastVerificationToolCallId) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost-button verify-details-btn";
+    button.textContent = "Details der letzten Prüfung ansehen";
+    button.addEventListener("click", jumpToVerificationDetails);
+    body.appendChild(button);
+  }
+}
+
+/* ------------------- Changes Review (Phase 6, §08) ---------------------- */
+
+/** Obergrenze gerenderter Diff-Zeilen je Datei — große Diffs bleiben so
+ * performant (Abschlusskriterium), ohne den Datenumfang zu verstecken:
+ * die Kürzung wird als eigene Zeile ausgewiesen (§"Fehler dürfen niemals
+ * wegaggregiert werden" gilt sinngemäß auch für Datenverlust). */
+const MAX_DIFF_LINES = 600;
+
+/** Datei-Liste + Diff direkt darunter statt in einer zweiten Spalte — der
+ * Inspector ist ein schmaler, in der Breite verstellbarer Drawer, kein
+ * Editor-Layout (Nicht-Ziel "kein vollständiger Editor", §Cursor-Referenz:
+ * Vorbild, keine 1:1-Kopie). Jede Datei ist ein eigenes <details>-Element
+ * (wie die Activity-Cards, §Phase 3): Dateiname + Statistik immer sichtbar,
+ * der eigentliche Diff wird erst beim Aufklappen gerendert (Performance). */
+function renderChangesBody(body, core) {
+  const changes = core?.changes;
+  const summary = document.createElement("div");
+  summary.className = "panel-line";
+  if (changes) {
+    summary.innerHTML =
+      `<strong>${changes.filesCount}</strong> Datei(en) · ` +
+      `+${changes.linesAdded}/−${changes.linesRemoved}`;
+  } else if (state.editedFiles.size > 0) {
+    summary.textContent = `${state.editedFiles.size} Datei(en) in dieser Sitzung editiert`;
+  } else {
+    summary.textContent = "Keine Änderungen gemeldet.";
+  }
+  body.appendChild(summary);
+
+  // Reihenfolge/Vollständigkeit kommt aus core.changes (Core-Wahrheit,
+  // R6); state.fileDiffs liefert dazu die Diff-Rohdaten, wo vorhanden.
+  // Dateien, die core.changes (noch) nicht kennt, aber lokal editiert oder
+  // schon als Diff aufgezeichnet wurden, ergänzen die Liste statt zu fehlen.
+  const paths = [];
+  const seen = new Set();
+  for (const path of changes?.files ?? []) {
+    if (seen.has(path)) continue;
+    seen.add(path);
+    paths.push(path);
+  }
+  for (const path of [...state.fileDiffs.keys(), ...state.editedFiles]) {
+    if (seen.has(path)) continue;
+    seen.add(path);
+    paths.push(path);
+  }
+
+  if (paths.length === 0) return;
+
+  const MAX_FILES = 60;
+  for (const path of paths.slice(0, MAX_FILES)) {
+    body.appendChild(renderChangedFileRow(path));
+  }
+  if (paths.length > MAX_FILES) {
+    const more = document.createElement("div");
+    more.className = "panel-line";
+    more.textContent = `… und ${paths.length - MAX_FILES} weitere Datei(en)`;
+    body.appendChild(more);
+  }
+}
+
+function renderChangedFileRow(path) {
+  const diff = state.fileDiffs.get(path);
+  const details = document.createElement("details");
+  details.className = "diff-file";
+  details.open = state.expandedDiffFiles.has(path);
+
+  const summary = document.createElement("summary");
+  const name = document.createElement("span");
+  name.className = "diff-file-path";
+  name.textContent = path;
+  name.title = path;
+  summary.appendChild(name);
+  if (diff?.stats) {
+    const stat = document.createElement("span");
+    stat.className = "diff-file-stat";
+    stat.textContent = `+${diff.stats.linesAdded}/−${diff.stats.linesRemoved}`;
+    summary.appendChild(stat);
+  }
+  details.appendChild(summary);
+
+  const content = document.createElement("div");
+  content.className = "diff-file-content";
+  details.appendChild(content);
+
+  // Lazy: der eigentliche Diff wird erst beim ersten Aufklappen gerendert
+  // (Abschlusskriterium "große Diffs bleiben performant").
+  let rendered = false;
+  details.addEventListener("toggle", () => {
+    if (details.open) state.expandedDiffFiles.add(path);
+    else state.expandedDiffFiles.delete(path);
+    if (details.open && !rendered) {
+      rendered = true;
+      renderFileDiffContent(content, diff);
+    }
+  });
+  if (details.open) {
+    rendered = true;
+    renderFileDiffContent(content, diff);
+  }
+  return details;
+}
+
+function renderFileDiffContent(content, diff) {
+  content.innerHTML = "";
+  if (!diff?.hunks?.length) {
+    const empty = document.createElement("div");
+    empty.className = "diff-empty";
+    empty.textContent =
+      "Diff nicht verfügbar (keine aufgezeichnete edit/write-Operation).";
+    content.appendChild(empty);
+    return;
+  }
+  let rendered = 0;
+  outer: for (const hunk of diff.hunks) {
+    const header = document.createElement("div");
+    header.className = "diff-line diff-hunk-header";
+    header.textContent =
+      `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@` +
+      (hunk.heading ? ` ${hunk.heading}` : "");
+    content.appendChild(header);
+    for (const diffLine of hunk.lines ?? []) {
+      if (rendered >= MAX_DIFF_LINES) break outer;
+      content.appendChild(renderDiffLineEl(diffLine));
+      rendered++;
     }
   }
+  if (rendered >= MAX_DIFF_LINES) {
+    const truncated = document.createElement("div");
+    truncated.className = "diff-empty";
+    truncated.textContent = `… Diff nach ${MAX_DIFF_LINES} Zeilen gekürzt`;
+    content.appendChild(truncated);
+  }
+}
+
+function renderDiffLineEl(diffLine) {
+  const row = document.createElement("div");
+  const kind =
+    diffLine.kind === "added"
+      ? "add"
+      : diffLine.kind === "removed"
+        ? "remove"
+        : "context";
+  row.className = `diff-line diff-${kind}`;
+  const marker = kind === "add" ? "+" : kind === "remove" ? "-" : " ";
+  row.textContent = `${marker} ${diffLine.text ?? ""}`;
+  return row;
 }
 
 /** Eine einzige, immer sichtbare Zeilenliste: Aufgabe/Kontext/Modell sind
  * reine Statuszeilen, Workflow löst eine Aktion aus (Picker), Änderungen/
- * Agenten/Verifikation/Sitzungen klappen ihren Inhalt inline auf statt in
- * ein separates Panel zu wechseln (§5 — ersetzt die frühere
- * Übersicht/Detail-Umschaltung). */
+ * Agenten/Verifikation klappen ihren Inhalt inline auf statt in ein
+ * separates Panel zu wechseln (§5 — ersetzt die frühere Übersicht/Detail-
+ * Umschaltung). Sitzungswechsel läuft seit Phase 2 über die Task-Sidebar
+ * (siehe renderTaskSidebar()), nicht mehr über eine zweite, flache Liste
+ * hier (§R6 — keine redundante Zustandsdarstellung). */
 async function refreshContextOverview() {
   const rows = el("context-rows");
   if (!rows) return;
@@ -1019,9 +1594,15 @@ async function refreshContextOverview() {
 
   const rowDefs = [
     {
-      label: "Aufgabe",
-      value: core?.task?.title || "—",
-      empty: !core?.task?.title || core.task.title === "Aktuelle Aufgabe",
+      // Der Task-Titel steht bereits prominent im Header (§Phase 1) — hier
+      // keine zweite Anzeige, nur der reine Lauf-Status (§Phase 4).
+      label: "Status",
+      value: !state.connected
+        ? "Nicht verbunden"
+        : state.busy
+          ? "Working"
+          : "Bereit",
+      empty: !state.connected,
     },
     {
       label: "Workflow",
@@ -1033,10 +1614,14 @@ async function refreshContextOverview() {
       key: "verify",
       label: "Verifikation",
       value:
+        (state.runningVerificationCalls.size > 0 ? "⏳ läuft … · " : "") +
         esc(core?.verification?.status || state.verificationStatus || "—") +
         verificationPill(),
       raw: true,
-      empty: !core?.verification?.status && !state.verificationStatus,
+      empty:
+        !core?.verification?.status &&
+        !state.verificationStatus &&
+        state.runningVerificationCalls.size === 0,
     },
     {
       key: "changes",
@@ -1049,10 +1634,7 @@ async function refreshContextOverview() {
     {
       key: "agents",
       label: "Agenten",
-      value:
-        core?.subagents?.length > 0
-          ? `${core.subagents.length} aktiv`
-          : "keine",
+      value: agentsSummaryLabel(core?.subagents),
       empty: !(core?.subagents?.length > 0),
     },
     { label: "Kontext", value: contextPart, empty: contextPart === "—" },
@@ -1061,7 +1643,6 @@ async function refreshContextOverview() {
       value: `${state.modelLabel || "—"} · Denken ${state.thinkingLabel || "—"}`,
       empty: !state.modelLabel,
     },
-    { key: "sessions", label: "Sitzungen", value: "Verlauf", empty: false },
   ];
 
   rows.className = "";
@@ -1151,23 +1732,24 @@ function applyRuntimeState(runtimeState) {
   }
   state.modelLabel = runtimeState?.model ? `${runtimeState.model.name}` : "";
   state.thinkingLabel = runtimeState?.thinkingLevel ?? "";
-  el("model-label").textContent = state.modelLabel;
   refreshStatusBar();
   refreshComposerPills();
+  renderTaskSidebar();
 }
 
-/** Composer-Pills (§13) spiegeln Workflow/Modell/Denken — mausbedienbar,
- * ohne den Header mit denselben Werten doppelt zu belegen. */
+/** Composer ist der Agent-Control-Point (§Phase 5): Work/Modell/Denken
+ * erscheinen nur hier, nicht zusätzlich im Header (keine Doppelanzeige). */
 function refreshComposerPills() {
   const workflowPill = el("pill-workflow");
-  const modelPill = el("pill-model");
-  const thinkingPill = el("pill-thinking");
   if (workflowPill) {
     workflowPill.textContent = state.core?.workflow?.label ?? "Work";
+    workflowPill.title = `Workflow: ${state.core?.workflow?.label ?? "—"} (Shift+Tab)`;
   }
+  const modelPill = el("pill-model");
   if (modelPill) {
     modelPill.textContent = state.modelLabel || "Modell";
   }
+  const thinkingPill = el("pill-thinking");
   if (thinkingPill) {
     thinkingPill.textContent = state.thinkingLabel
       ? `Denken: ${state.thinkingLabel}`
@@ -1196,8 +1778,25 @@ async function loadConversation() {
 function resetSessionView() {
   state.editedFiles.clear();
   state.core = null;
+  state.fileDiffs.clear();
+  state.expandedDiffFiles.clear();
+  state.runningVerificationCalls.clear();
+  state.lastVerificationToolCallId = null;
   clearChat();
   clearBanners();
+}
+
+/** Historische Diffs der Sitzung nachladen (Phase 6): Live-Events erfassen
+ * nur Änderungen ab dem Zeitpunkt, an dem diese Sitzung zur aktuellen
+ * wurde — frühere, bereits in der Sitzungsdatei persistierte Diffs kommen
+ * nur über diesen Weg (readSessionDiffs, R2/R6: reines Nachlesen). */
+async function loadSessionDiffs(sessionPath) {
+  try {
+    const diffs = await api.getSessionDiffs(sessionPath);
+    for (const diff of diffs) state.fileDiffs.set(diff.path, diff);
+  } catch {
+    /* Änderungsliste bleibt auf Basis von core.changes nutzbar */
+  }
 }
 
 async function withSessionTransition(operation) {
@@ -1243,7 +1842,9 @@ async function resumeSession(sessionPath) {
     resetSessionView();
     await refreshStateLabels();
     await loadConversation();
+    await loadSessionDiffs(sessionPath);
     await refreshContextOverview();
+    await refreshTaskList();
     showBanner("Sitzung geladen.", "info");
   }).catch((error) =>
     showBanner(
@@ -1277,6 +1878,7 @@ async function startFreshSession() {
     await refreshStateLabels();
     await loadConversation();
     await refreshContextOverview();
+    await refreshTaskList();
   }).catch((error) => {
     setDot("error");
     setStatusText("Verbindung fehlgeschlagen");
@@ -1284,12 +1886,20 @@ async function startFreshSession() {
   });
 }
 
+/** Startbildschirm (Phase 8, §10): ersetzt den vormals leeren, schwarzen
+ * Startzustand. Taskstart bleibt die Primäraktion — das Eingabefeld ist
+ * sofort fokussiert und nutzbar, "Letzte Projekte" ist rein sekundär
+ * darunter. */
 function renderNoProjectState() {
   chatEl.hidden = true;
+  el("chat-placeholder").hidden = true;
   el("no-project").hidden = false;
   inputEl.disabled = true;
   el("btn-send").disabled = true;
   refreshProjectLabel();
+  el("startscreen-input").value = "";
+  el("startscreen-input").focus();
+  void renderStartscreenRecentProjects();
 }
 
 function clearNoProjectState() {
@@ -1297,6 +1907,97 @@ function clearNoProjectState() {
   el("no-project").hidden = true;
   inputEl.disabled = false;
   el("btn-send").disabled = false;
+}
+
+/** "Letzte Projekte" (Phase 8): dieselbe Persistenz wie im Projekt-Picker
+ * (api.listRecentProjects()), hier aber direkt auf dem Startbildschirm
+ * sichtbar statt hinter einem Dialog verborgen — sekundär, aber ohne
+ * Umweg erreichbar. */
+async function renderStartscreenRecentProjects() {
+  const section = el("startscreen-recent");
+  const list = el("startscreen-recent-list");
+  let recent = [];
+  try {
+    recent = await api.listRecentProjects();
+  } catch {
+    /* Persistenz ist ein Komfortfeature, kein hartes Erfordernis */
+  }
+  list.innerHTML = "";
+  section.hidden = recent.length === 0;
+  if (recent.length === 0) return;
+  for (const entry of recent) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "startscreen-recent-row";
+    button.setAttribute("role", "listitem");
+    const name = document.createElement("span");
+    name.className = "startscreen-recent-name";
+    name.textContent = interactions.projectDisplayName(entry.path);
+    name.title = entry.path;
+    const time = document.createElement("span");
+    time.className = "startscreen-recent-time";
+    time.textContent = interactions.relativeTimeLabel(entry.lastOpened);
+    button.append(name, time);
+    button.addEventListener("click", () => {
+      void startProjectAndTask(entry.path, el("startscreen-input").value);
+    });
+    list.appendChild(button);
+  }
+}
+
+/** Primäraktion des Startbildschirms: Projekt öffnen (Ordnerwahl nur bei
+ * Bedarf, s. startProjectAndTask) und, falls beschrieben, den Task sofort
+ * senden — "neuer Task sofort startbar" ohne Zwischenschritt "erst Projekt
+ * wählen, dann erneut tippen". */
+async function startTaskFromStartscreen() {
+  const text = el("startscreen-input").value;
+  const picked = await api.pickProjectFolder();
+  if (!picked || picked.cancelled || !picked.path) return;
+  await startProjectAndTask(picked.path, text);
+}
+
+/** Startet eine Sitzung in `cwd` und sendet optional den mitgegebenen
+ * Text als ersten Prompt — gemeinsamer Kern für "Start →" (neuer Ordner)
+ * und einen Klick auf ein "Letzte Projekte"-Element (bestehender Ordner). */
+async function startProjectAndTask(cwd, text) {
+  if (state.busy) {
+    showBanner("Pi arbeitet bereits. Stopp oder Warten.", "info");
+    return;
+  }
+  await withSessionTransition(async () => {
+    setDot("busy");
+    window.__piGuiCwd = cwd;
+    const result = await api.startSession({ cwd });
+    if (result?.cancelled) {
+      showBanner("Projektstart wurde abgebrochen.", "info");
+      return;
+    }
+    resetSessionView();
+    clearNoProjectState();
+    refreshProjectLabel();
+    await refreshStateLabels();
+    await loadConversation();
+    await refreshContextOverview();
+    await refreshTaskList();
+    const trimmed = text.trim();
+    if (trimmed) await sendMessage(trimmed);
+  }).catch((error) => {
+    setDot("error");
+    setStatusText("Verbindung fehlgeschlagen");
+    showBanner(
+      `Projekt konnte nicht geöffnet werden: ${error.message ?? error}`,
+    );
+  });
+}
+
+/** Zeigt einen ruhigen Platzhalter statt einer leeren Hauptfläche, solange
+ * ein Projekt offen ist, aber noch keine Nachricht existiert (frischer
+ * Task) — Abschlusskriterium "keine leere Hauptfläche" (§10). Kein zweites
+ * Eingabefeld: der echte Composer steht bereits am unteren Rand. */
+function updateChatEmptyHint() {
+  const placeholder = el("chat-placeholder");
+  if (!placeholder) return;
+  placeholder.hidden = chatEl.hidden || chatEl.childElementCount > 0;
 }
 
 /** Öffnet ein anderes Projekt (oder zum ersten Mal eins): stoppt eine
@@ -1352,7 +2053,7 @@ async function openProjectPicker() {
     ...recent
       .filter((entry) => entry.path !== window.__piGuiCwd)
       .map((entry) => ({
-        label: entry.path.split("/").filter(Boolean).at(-1) || entry.path,
+        label: interactions.projectDisplayName(entry.path),
         desc: entry.path,
         value: entry.path,
       })),
@@ -1407,6 +2108,13 @@ function refreshStatusBar() {
   );
   setDot(!state.connected ? "idle" : state.busy ? "busy" : "ready");
   el("btn-stop").disabled = !state.busy;
+  // Composer als Agent-Control-Point (§Phase 5): Placeholder macht den
+  // laufenden Task sichtbar, auch wenn der Nutzer gerade nicht tippt.
+  if (inputEl) {
+    inputEl.placeholder = state.busy
+      ? "Anweisung an laufenden Task … (erst Stopp, dann senden)"
+      : "Nachricht an Pi … (Enter sendet, Shift+Enter neue Zeile)";
+  }
 }
 
 /* ---------------------- Shortcuts (Phase 4, R5) ------------------------ */
@@ -1448,6 +2156,17 @@ const actions = {
 
 function setupShortcuts() {
   window.addEventListener("keydown", (event) => {
+    // Escape schließt den Inspector-Drawer (§Phase 4) — tritt zurück, wenn
+    // gerade ein natives <dialog> offen ist (das behandelt Escape selbst).
+    if (
+      event.key === "Escape" &&
+      document.body.classList.contains("context-open") &&
+      !document.querySelector("dialog[open]")
+    ) {
+      event.preventDefault();
+      closeContextDrawer();
+      return;
+    }
     if (event.repeat) return;
     const combo = interactions.comboFromKeyboardEvent(event);
     if (!combo) return;
@@ -1526,8 +2245,8 @@ function restoreInspectorWidth() {
   }
 }
 
-/** Nur in der breiten Spalten-Ansicht aktiv — im Drawer-Modus (schmales
- * Fenster) hat der Inspector keine feste Spaltenbreite zum Ziehen. */
+/** Inspector ist immer ein Overlay-Drawer (§Phase 1) — die Breite bleibt
+ * bei jeder Fensterbreite per Ziehgriff einstellbar. */
 function setupInspectorResize() {
   const handle = el("inspector-resize-handle");
   if (!handle) return;
@@ -1546,7 +2265,6 @@ function setupInspectorResize() {
     persistInspectorWidth();
   };
   handle.addEventListener("pointerdown", (event) => {
-    if (isNarrowLayout()) return;
     dragging = true;
     document.body.classList.add("resizing-inspector");
     event.preventDefault();
@@ -1637,11 +2355,31 @@ async function boot() {
   el("pill-model").addEventListener("click", () => openModelPicker());
   el("pill-thinking").addEventListener("click", () => openThinkingPicker());
   el("btn-palette").addEventListener("click", () => openCommandPalette());
+  el("btn-toggle-inspector").addEventListener("click", () =>
+    toggleContextArea(),
+  );
   el("project-label").addEventListener("click", () => openProjectPicker());
-  el("btn-open-project").addEventListener("click", () => openProjectPicker());
+  el("btn-open-project").addEventListener("click", () =>
+    startTaskFromStartscreen(),
+  );
+  el("startscreen-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    void startTaskFromStartscreen();
+  });
+  el("startscreen-input").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void startTaskFromStartscreen();
+    }
+  });
+  el("btn-new-task").addEventListener("click", () => startFreshSession());
+  el("btn-collapse-tasks").addEventListener("click", () =>
+    toggleTaskSidebarCollapsed(),
+  );
   observeHeaderHeight();
   restoreInspectorWidth();
   setupInspectorResize();
+  restoreTaskSidebarCollapsed();
 
   if (!isSmokeMode) {
     if (initialCwdParam) {
@@ -1680,7 +2418,7 @@ window.__piGuiSmoke = async function __piGuiSmoke(mode, cwd) {
       }
       if (msg.type === "tool_execution_end") {
         sawActivitySummary = Boolean(
-          document.querySelector("details.activity-group > summary"),
+          document.querySelector(".activity-card .activity-title"),
         );
       }
     });
@@ -1743,7 +2481,7 @@ window.__piGuiSmoke = async function __piGuiSmoke(mode, cwd) {
     if (mode === "tools") {
       if (!sawToolStart) throw new Error("kein Tool-Ereignis gesehen");
       if (!sawActivitySummary)
-        throw new Error("keine Aktivitätszeile im Chat gerendert");
+        throw new Error("keine Aktivitätskarte im Chat gerendert");
     }
     const token = mode === "tools" ? "BASELINE-OK" : "SMOKE-OK";
     if (!assistantText.includes(token)) {
