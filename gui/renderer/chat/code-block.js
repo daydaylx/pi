@@ -222,6 +222,67 @@ const HASH_COMMENT_LANGS = new Set([
   "powershell",
 ]);
 
+const TYPES = new Set([
+  "string",
+  "number",
+  "boolean",
+  "any",
+  "void",
+  "never",
+  "unknown",
+  "object",
+  "symbol",
+  "bigint",
+  "Promise",
+  "Array",
+  "Map",
+  "Set",
+  "Record",
+  "Partial",
+  "Required",
+  "Readonly",
+  "int",
+  "float",
+  "str",
+  "dict",
+  "list",
+  "tuple",
+  "bool",
+  "Option",
+  "Result",
+  "Vec",
+  "String",
+  "u8",
+  "u16",
+  "u32",
+  "u64",
+  "i8",
+  "i16",
+  "i32",
+  "i64",
+  "usize",
+  "isize",
+  "f32",
+  "f64",
+  "char",
+  "byte",
+  "rune",
+  "error",
+]);
+
+const LITERALS = new Set([
+  "true",
+  "false",
+  "null",
+  "undefined",
+  "None",
+  "True",
+  "False",
+  "nil",
+  "NaN",
+  "Infinity",
+]);
+
 function buildTokenRegex(language) {
   const parts = ["(?<lineComment>\\/\\/[^\\n]*)"];
   if (HASH_COMMENT_LANGS.has(language)) {
@@ -230,7 +291,8 @@ function buildTokenRegex(language) {
   parts.push(
     "(?<string>\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`)",
     "(?<number>\\b\\d+(?:\\.\\d+)?\\b)",
-    "(?<word>[A-Za-z_][A-Za-z0-9_]*)",
+    "(?<fnCall>[A-Za-z_$][A-Za-z0-9_$]*(?=\\s*\\())",
+    "(?<word>[A-Za-z_$][A-Za-z0-9_$]*)",
     "(?<space>\\s+)",
     "(?<punct>[^\\s\\w]+)",
   );
@@ -251,12 +313,27 @@ function highlightTokens(code, lang) {
       tokens.push({ text: source.slice(last, match.index), cls: null });
     const g = match.groups;
     const full = match[0];
-    if (g.lineComment || g.hashComment) tokens.push({ text: full, cls: "cm" });
-    else if (g.string) tokens.push({ text: full, cls: "str" });
-    else if (g.number) tokens.push({ text: full, cls: "num" });
-    else if (g.word)
-      tokens.push({ text: full, cls: keywords.has(g.word) ? "kw" : null });
-    else tokens.push({ text: full, cls: null });
+    if (g.lineComment || g.hashComment) {
+      tokens.push({ text: full, cls: "cm" });
+    } else if (g.string) {
+      tokens.push({ text: full, cls: "str" });
+    } else if (g.number) {
+      tokens.push({ text: full, cls: "num" });
+    } else if (g.fnCall || g.word) {
+      if (keywords.has(full)) {
+        tokens.push({ text: full, cls: "kw" });
+      } else if (g.fnCall) {
+        tokens.push({ text: full, cls: "fn" });
+      } else if (TYPES.has(full) || /^[A-Z][a-zA-Z0-9_$]+$/.test(full)) {
+        tokens.push({ text: full, cls: "type" });
+      } else if (LITERALS.has(full)) {
+        tokens.push({ text: full, cls: "lit" });
+      } else {
+        tokens.push({ text: full, cls: null });
+      }
+    } else {
+      tokens.push({ text: full, cls: null });
+    }
     last = tokenRe.lastIndex;
   }
   if (last < source.length)
@@ -306,7 +383,7 @@ function buildCodeBlock(lang, code, opts = {}) {
   copyBtn.addEventListener("click", () => {
     let resetTimer = null;
     const done = (ok) => {
-      copyBtn.textContent = ok ? "Kopiert" : "Fehler";
+      copyBtn.textContent = ok ? "✓ Kopiert" : "Fehler";
       copyBtn.classList.toggle("copied", ok);
       copyBtn.classList.toggle("failed", !ok);
       clearTimeout(resetTimer);

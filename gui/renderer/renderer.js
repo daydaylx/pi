@@ -144,7 +144,7 @@ function clearChat() {
   updateChatEmptyHint();
 }
 
-function renderAssistantBubble(bubble, text) {
+function renderAssistantBubble(bubble, text, { isStreaming = false } = {}) {
   bubble.replaceChildren();
   bubble.appendChild(
     window.piGuiMarkdown.renderMarkdown(text, {
@@ -154,6 +154,12 @@ function renderAssistantBubble(bubble, text) {
         }),
     }),
   );
+  if (isStreaming) {
+    const cursor = document.createElement("span");
+    cursor.className = "streaming-cursor";
+    cursor.setAttribute("aria-hidden", "true");
+    bubble.appendChild(cursor);
+  }
 }
 
 function appendUserBubble(text, { scroll = true } = {}) {
@@ -200,7 +206,7 @@ function scheduleStreamRender(block) {
   const fire = () => {
     block.pendingRenderTimer = null;
     block.lastRenderedAt = Date.now();
-    renderAssistantBubble(block.bubble, block.text);
+    renderAssistantBubble(block.bubble, block.text, { isStreaming: true });
     scrollToBottom();
   };
   if (elapsed >= STREAM_RENDER_INTERVAL_MS) {

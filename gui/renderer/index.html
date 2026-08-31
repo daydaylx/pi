@@ -382,44 +382,46 @@
         <div id="banner" hidden></div>
 
         <footer id="composer">
-          <textarea
-            id="input"
-            rows="2"
-            placeholder="Was soll Pi tun? (Enter sendet, Shift+Enter neue Zeile)"
-          ></textarea>
-          <div id="composer-toolbar">
-            <div id="composer-pills">
-              <button
-                id="pill-workflow"
-                class="pill-button"
-                type="button"
-                title="Workflow wechseln (Shift+Tab)"
-              >
-                Work
-              </button>
-              <button
-                id="pill-model"
-                class="pill-button"
-                type="button"
-                title="Modell wechseln (Super+M)"
-              >
-                Modell
-              </button>
-              <button
-                id="pill-thinking"
-                class="pill-button"
-                type="button"
-                title="Denktiefe wechseln (Super+D)"
-              >
-                Denken
-              </button>
-            </div>
-            <div id="composer-actions">
-              <button id="btn-jump-latest" class="ghost-button" hidden>
-                ↓ Neueste
-              </button>
-              <button id="btn-stop" class="ghost-button" disabled>Stopp</button>
-              <button id="btn-send" class="primary">↑ Senden</button>
+          <div id="composer-box">
+            <textarea
+              id="input"
+              rows="2"
+              placeholder="Was soll Pi tun? (Enter sendet, Shift+Enter neue Zeile)"
+            ></textarea>
+            <div id="composer-toolbar">
+              <div id="composer-pills">
+                <button
+                  id="pill-workflow"
+                  class="pill-button"
+                  type="button"
+                  title="Workflow wechseln (Shift+Tab)"
+                >
+                  Work
+                </button>
+                <button
+                  id="pill-model"
+                  class="pill-button"
+                  type="button"
+                  title="Modell wechseln (Super+M)"
+                >
+                  Modell
+                </button>
+                <button
+                  id="pill-thinking"
+                  class="pill-button"
+                  type="button"
+                  title="Denktiefe wechseln (Super+D)"
+                >
+                  Denken
+                </button>
+              </div>
+              <div id="composer-actions">
+                <button id="btn-jump-latest" class="ghost-button" hidden>
+                  ↓ Neueste
+                </button>
+                <button id="btn-stop" class="ghost-button" disabled>Stopp</button>
+                <button id="btn-send" class="primary">↑ Senden</button>
+              </div>
             </div>
           </div>
         </footer>
