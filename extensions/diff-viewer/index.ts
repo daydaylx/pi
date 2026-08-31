@@ -11,12 +11,12 @@ import { Text } from "@earendil-works/pi-tui";
 import { catalogDescription } from "../shared/command-catalog.ts";
 import { toWorkspaceRelative } from "../shared/paths.ts";
 import {
-  AURORA_UI_CHANNELS,
-  isAuroraUiStateRequest,
-  publishAuroraUiPatch,
-  publishAuroraUiSnapshot,
-  type AuroraTaskChanges,
-} from "../aurora-ui/state.ts";
+  FRONTEND_UI_CHANNELS,
+  isFrontendUiStateRequest,
+  publishFrontendUiPatch,
+  publishFrontendUiSnapshot,
+  type FrontendTaskChanges,
+} from "../frontend-protocol/state-bus.ts";
 import type { DiffViewEntryData } from "./types.ts";
 import { ChangeTracker } from "./change-tracker.ts";
 import { computeFallbackDiff } from "./git-diff.ts";
@@ -45,7 +45,7 @@ async function readCurrentFile(
   }
 }
 
-function summarizeChanges(tracker: ChangeTracker): AuroraTaskChanges {
+function summarizeChanges(tracker: ChangeTracker): FrontendTaskChanges {
   const changes = tracker.changedFiles;
   let linesAdded = 0;
   let linesRemoved = 0;
@@ -69,24 +69,24 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
 
-  function auroraChangesState(): AuroraTaskChanges | null {
+  function auroraChangesState(): FrontendTaskChanges | null {
     const summary = summarizeChanges(tracker);
     return summary.filesCount > 0 ? summary : null;
   }
 
   function publishChanges(): void {
     if (!auroraEpoch) return;
-    publishAuroraUiPatch(pi, auroraEpoch, "diff-viewer", {
+    publishFrontendUiPatch(pi, auroraEpoch, "diff-viewer", {
       changes: auroraChangesState(),
     });
   }
 
   function subscribeAuroraProvider(): void {
     unsubscribeAurora?.();
-    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
-      if (!isAuroraUiStateRequest(value)) return;
+    unsubscribeAurora = pi.events.on(FRONTEND_UI_CHANNELS.request, (value) => {
+      if (!isFrontendUiStateRequest(value)) return;
       auroraEpoch = value.sessionEpoch;
-      publishAuroraUiSnapshot(pi, value, "diff-viewer", {
+      publishFrontendUiSnapshot(pi, value, "diff-viewer", {
         changes: auroraChangesState(),
       });
     });

@@ -19,12 +19,12 @@ import {
   formatContextDiagnostics,
 } from "./context-diagnostics.ts";
 import {
-  AURORA_UI_CHANNELS,
-  isAuroraUiStateRequest,
-  publishAuroraUiPatch,
-  publishAuroraUiSnapshot,
-  type AuroraVerificationSummary,
-} from "../aurora-ui/state.ts";
+  FRONTEND_UI_CHANNELS,
+  isFrontendUiStateRequest,
+  publishFrontendUiPatch,
+  publishFrontendUiSnapshot,
+  type FrontendVerificationSummary,
+} from "../frontend-protocol/state-bus.ts";
 import {
   evaluateCheckRun,
   formatVerificationStatus,
@@ -245,7 +245,7 @@ export default function setupCore(
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
 
-  function auroraVerificationSnapshot(): AuroraVerificationSummary | null {
+  function auroraVerificationSnapshot(): FrontendVerificationSummary | null {
     if (lastSettledStatus === undefined) return null;
     return {
       status: lastSettledStatus,
@@ -259,17 +259,17 @@ export default function setupCore(
 
   function publishAuroraVerification(): void {
     if (!auroraEpoch) return;
-    publishAuroraUiPatch(pi, auroraEpoch, "setup-core", {
+    publishFrontendUiPatch(pi, auroraEpoch, "setup-core", {
       verification: auroraVerificationSnapshot(),
     });
   }
 
   function subscribeAuroraProvider(): void {
     unsubscribeAurora?.();
-    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
-      if (!isAuroraUiStateRequest(value)) return;
+    unsubscribeAurora = pi.events.on(FRONTEND_UI_CHANNELS.request, (value) => {
+      if (!isFrontendUiStateRequest(value)) return;
       auroraEpoch = value.sessionEpoch;
-      publishAuroraUiSnapshot(pi, value, "setup-core", {
+      publishFrontendUiSnapshot(pi, value, "setup-core", {
         verification: auroraVerificationSnapshot(),
       });
     });

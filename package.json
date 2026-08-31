@@ -7,6 +7,7 @@
     "npm": "10.9.8"
   },
   "scripts": {
+    "build": "npm --prefix npm run build",
     "typecheck": "npm --prefix npm run typecheck",
     "test": "npm --prefix npm run test",
     "verify": "npm --prefix npm run verify",

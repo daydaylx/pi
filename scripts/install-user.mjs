@@ -23,12 +23,16 @@ const ALLOWLIST = [
   "tsconfig.json",
   "keybindings.json",
   "subagent-tool-description.md",
+  "bin/pi",
+  "bin/pi-frontend",
+  "frontend-server",
   "agents",
   "docs",
   "prompts",
   "extensions",
   "npm/package.json",
   "npm/package-lock.json",
+  "npm/packages/frontend-protocol",
   "schemas",
   // The runtime-patch script has to travel with the setup: the patches live in
   // node_modules and every runtime update removes them, so an installed agent
@@ -53,9 +57,7 @@ const NEVER_COPY = new Set([
  * user installations. Checked during collection so these subtrees are pruned
  * early.
  */
-const NEVER_COPY_SUBTREE = new Set([
-  "docs/archive/session-logs",
-]);
+const NEVER_COPY_SUBTREE = new Set(["docs/archive/session-logs"]);
 
 /**
  * Files and directories that were previously managed by this installer and
@@ -166,7 +168,9 @@ function runInstall(argv) {
         // symlinks.
         const legacyStat = lstatSync(legacyPath);
         if (legacyStat.isSymbolicLink()) {
-          console.log(`SKIP legacy ${legacy}: Symlink wird nicht automatisch entfernt.`);
+          console.log(
+            `SKIP legacy ${legacy}: Symlink wird nicht automatisch entfernt.`,
+          );
           continue;
         }
         rmSync(legacyPath, { recursive: true, force: true });
@@ -186,7 +190,14 @@ function runInstall(argv) {
   );
 }
 
-export { ALLOWLIST, NEVER_COPY, NEVER_COPY_SUBTREE, LEGACY_MANAGED, SOURCE, collect };
+export {
+  ALLOWLIST,
+  NEVER_COPY,
+  NEVER_COPY_SUBTREE,
+  LEGACY_MANAGED,
+  SOURCE,
+  collect,
+};
 
 // Only run as CLI, so tests can import the constants.
 const scriptPath = fileURLToPath(import.meta.url);

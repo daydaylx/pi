@@ -64,12 +64,16 @@ interface SubagentRun {
 }
 
 function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && Boolean(item))
+    ? value.filter(
+        (item): item is string => typeof item === "string" && Boolean(item),
+      )
     : [];
 }
 
@@ -108,7 +112,8 @@ function computeTaskPhaseLabel(
   if (activityKind === "thinking") {
     return isPlanningMode(workflowPhase) ? "Verstehen" : "Analysieren";
   }
-  if (activityKind === "tool" || activityKind === "responding") return "Arbeiten";
+  if (activityKind === "tool" || activityKind === "responding")
+    return "Arbeiten";
   return workflowModeLabel(workflowPhase);
 }
 
@@ -118,11 +123,16 @@ function updateTask(
 ): void {
   state.task = {
     title: computeTaskTitle(state.workflow.phase, lastUserPrompt),
-    phaseLabel: computeTaskPhaseLabel(state.workflow.phase, state.activity.kind),
+    phaseLabel: computeTaskPhaseLabel(
+      state.workflow.phase,
+      state.activity.kind,
+    ),
   };
 }
 
-function flattenSubagents(runs: Map<string, FrontendSubagentBranch[]>): FrontendSubagentBranch[] {
+function flattenSubagents(
+  runs: Map<string, FrontendSubagentBranch[]>,
+): FrontendSubagentBranch[] {
   const list: FrontendSubagentBranch[] = [];
   for (const entries of runs.values()) list.push(...entries);
   return list;
@@ -155,7 +165,9 @@ function subagentCompletionId(value: unknown): string | undefined {
   return typeof id === "string" ? id : undefined;
 }
 
-function subagentAttention(value: unknown): { runId: string; agent: string } | undefined {
+function subagentAttention(
+  value: unknown,
+): { runId: string; agent: string } | undefined {
   const event = record(record(value)?.event) as SubagentControlEvent;
   if (
     event.type !== "needs_attention" ||
@@ -167,6 +179,10 @@ function subagentAttention(value: unknown): { runId: string; agent: string } | u
 }
 
 export default function frontendBridgeExtension(pi: ExtensionAPI): void {
+  // The bridge persists transport snapshots for external frontends. Aurora
+  // consumes the in-process bus directly, so ordinary CLI/TUI sessions must
+  // remain free of frontend transport entries.
+  if (process.env.PI_FRONTEND_RPC !== "1") return;
   let state = defaultState();
   let sessionEpoch: string | undefined;
   let sessionId: string | undefined;
@@ -209,19 +225,25 @@ export default function frontendBridgeExtension(pi: ExtensionAPI): void {
 
   function handleRequest(value: unknown): void {
     const request = value as FrontendUiStateRequest;
-    if (!isFrontendUiStateRequest(request) || request.requester === OWNER) return;
+    if (!isFrontendUiStateRequest(request) || request.requester === OWNER)
+      return;
     if (request.requester !== "frontend-bridge/v1") sawExternalRequest = true;
     sessionEpoch = request.sessionEpoch;
     state.sessionEpoch = sessionEpoch;
   }
 
   function handlePatch(value: unknown): void {
-    if (!isFrontendUiPatchEvent(value) || value.sessionEpoch !== sessionEpoch) return;
+    if (!isFrontendUiPatchEvent(value) || value.sessionEpoch !== sessionEpoch)
+      return;
     applyPatch(value.patch);
   }
 
   function handleSnapshot(value: unknown): void {
-    if (!isFrontendUiSnapshotEvent(value) || value.sessionEpoch !== sessionEpoch) return;
+    if (
+      !isFrontendUiSnapshotEvent(value) ||
+      value.sessionEpoch !== sessionEpoch
+    )
+      return;
     applyPatch(value.state);
   }
 

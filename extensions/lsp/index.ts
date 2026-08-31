@@ -81,12 +81,12 @@ import type { LspToolsDeps } from "./tools.ts";
 import { computeLspStatus, publishLspStatus } from "./status.ts";
 import { defaultSetupConfig, loadSetupConfig } from "../setup-core/config.ts";
 import {
-  AURORA_UI_CHANNELS,
-  isAuroraUiStateRequest,
-  publishAuroraUiPatch,
-  publishAuroraUiSnapshot,
-  type AuroraUiStatePatch,
-} from "../aurora-ui/state.ts";
+  FRONTEND_UI_CHANNELS,
+  isFrontendUiStateRequest,
+  publishFrontendUiPatch,
+  publishFrontendUiSnapshot,
+  type FrontendUiStatePatch,
+} from "../frontend-protocol/state-bus.ts";
 export { PROFILES, EXTENSION_LANGUAGE_MAP } from "./server-profiles.ts";
 export type { LanguageMapping } from "./server-profiles.ts";
 export { resolveConfig, resolveProfileOverrides, parseMode } from "./config.ts";
@@ -221,7 +221,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
     }
   }
 
-  function auroraLspState(): NonNullable<AuroraUiStatePatch["lsp"]> {
+  function auroraLspState(): NonNullable<FrontendUiStatePatch["lsp"]> {
     const servers = registry?.list() ?? [];
     return {
       state: registry ? computeLspStatus(config, servers) : "aus",
@@ -239,7 +239,7 @@ export default function lspExtension(pi: ExtensionAPI): void {
       publishLspStatus(ctx, computeLspStatus(config, registry.list()));
     }
     if (auroraEpoch) {
-      publishAuroraUiPatch(pi, auroraEpoch, "lsp", {
+      publishFrontendUiPatch(pi, auroraEpoch, "lsp", {
         lsp: auroraLspState(),
       });
     }
@@ -247,10 +247,10 @@ export default function lspExtension(pi: ExtensionAPI): void {
 
   function subscribeAuroraProvider(): void {
     unsubscribeAurora?.();
-    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
-      if (!isAuroraUiStateRequest(value)) return;
+    unsubscribeAurora = pi.events.on(FRONTEND_UI_CHANNELS.request, (value) => {
+      if (!isFrontendUiStateRequest(value)) return;
       auroraEpoch = value.sessionEpoch;
-      publishAuroraUiSnapshot(pi, value, "lsp", {
+      publishFrontendUiSnapshot(pi, value, "lsp", {
         lsp: auroraLspState(),
       });
     });
@@ -330,7 +330,11 @@ export default function lspExtension(pi: ExtensionAPI): void {
     auroraEpoch = undefined;
     subscribeAuroraProvider();
     config = buildConfig(ctx);
-    registry = new ServerRegistry({ config, logger, onStatusChange: () => refreshStatus(ctx) });
+    registry = new ServerRegistry({
+      config,
+      logger,
+      onStatusChange: () => refreshStatus(ctx),
+    });
     refreshStatus(ctx);
   });
 

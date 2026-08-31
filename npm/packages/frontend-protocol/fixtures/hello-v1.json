@@ -1,0 +1,5 @@
+{
+  "kind": "hello",
+  "client": { "name": "pi-gui", "version": "0.1.0" },
+  "supportedProtocolVersions": [1]
+}

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_path="$(realpath "${BASH_SOURCE[0]}")"
+repo="$(dirname "$(dirname "$script_path")")"
+
+if [[ ! -f "$repo/npm/packages/frontend-protocol/dist/index.js" ]]; then
+  echo "pi-frontend: protocol build missing; run 'npm run build' in $repo" >&2
+  exit 78
+fi
+
+exec node "$repo/frontend-server/index.mjs" "$@"

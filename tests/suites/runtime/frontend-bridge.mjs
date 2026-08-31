@@ -18,6 +18,8 @@ export const frontendBridgeSections = {
       const channels = fp.FRONTEND_STATE_CHANNELS;
 
       const harness = createHarness();
+      const previousFrontendMode = process.env.PI_FRONTEND_RPC;
+      process.env.PI_FRONTEND_RPC = "1";
       bridgeModule.default(harness.api);
       const ctx = harness.makeContext({ cwd: process.cwd() });
       await harness.runHooks("session_start", {}, ctx);
@@ -112,7 +114,11 @@ export const frontendBridgeSections = {
         agents: ["investigator"],
       });
       harness.api.events.emit("subagent:control-event", {
-        event: { type: "needs_attention", runId: "run-1", agent: "investigator" },
+        event: {
+          type: "needs_attention",
+          runId: "run-1",
+          agent: "investigator",
+        },
       });
 
       await sleep(300);
@@ -121,7 +127,11 @@ export const frontendBridgeSections = {
       );
       assert(entries.length > 0, "die Bridge persistiert einen State-Eintrag");
       const last = entries.at(-1);
-      eq(last.data.v, fp.PROTOCOL_VERSION, "Eintrag trägt die Protokollversion");
+      eq(
+        last.data.v,
+        fp.PROTOCOL_VERSION,
+        "Eintrag trägt die Protokollversion",
+      );
       eq(last.data.sessionEpoch, "epoch-1", "Eintrag trägt die Epoch");
       eq(
         last.data.sessionId,
@@ -221,6 +231,28 @@ export const frontendBridgeSections = {
       );
 
       await harness.runHooks("session_shutdown", {}, nextCtx);
+      if (previousFrontendMode === undefined)
+        delete process.env.PI_FRONTEND_RPC;
+      else process.env.PI_FRONTEND_RPC = previousFrontendMode;
+
+      const tuiHarness = createHarness();
+      bridgeModule.default(tuiHarness.api);
+      const tuiCtx = tuiHarness.makeContext({ cwd: process.cwd() });
+      await tuiHarness.runHooks("session_start", {}, tuiCtx);
+      tuiHarness.api.events.emit(channels.request, {
+        type: "request",
+        requestId: "req-tui",
+        sessionEpoch: "epoch-tui",
+        requester: "aurora-ui",
+      });
+      await sleep(500);
+      eq(
+        tuiHarness.appended.filter(
+          (entry) => entry.customType === "frontend-bridge/state",
+        ).length,
+        0,
+        "gewöhnliche TUI-Sitzungen persistieren keine Frontend-Bridge-Einträge",
+      );
     });
   },
 };

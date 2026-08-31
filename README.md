@@ -1,7 +1,9 @@
-# Pi Agent — Aurora Setup
+# Pi Core CLI/TUI — Aurora Setup
 
-Dieses Repository enthält die lokale Pi-Konfiguration für Aurora, Berechtigungen,
-LSP und einen kleinen Planmodus.
+Pi is the core CLI/TUI agent runtime setup. Dieses Repository enthält die lokale
+Pi-Konfiguration für Aurora, Berechtigungen, LSP, Verification und Plan Mode.
+Die separate Desktop-Anwendung `daydaylx/pi-gui` ist ausschließlich ein
+Frontend für denselben Pi-Core.
 
 ## Installation oder Aktualisierung
 
@@ -25,10 +27,14 @@ Zielverzeichnis installieren:
 
 ```bash
 npm ci --prefix ~/.pi/agent/npm
+npm --prefix ~/.pi/agent run build
 ```
 
 Nach einem Pi-Runtime-Update die lokalen Runtime-Patches gemäß
 `docs/RUNTIME_PATCHES.md` prüfen und gegebenenfalls erneut anwenden.
+
+Externe Frontends starten `bin/pi-frontend` und verwenden ausschließlich die in
+`docs/frontend-api.md` dokumentierte, versionierte JSONL-Schnittstelle.
 
 ## Planmodus
 

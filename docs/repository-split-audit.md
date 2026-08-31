@@ -86,7 +86,7 @@ klassischer Zyklus.
 | `bin/pi-gui`                                | `pi/bin`                   | Launcher kennt eingebettetes GUI-Verzeichnis               | `pi-gui/bin/pi-gui`                                                  |
 | `scripts/package-gui.mjs`                   | `pi/scripts`               | Desktop-Packaging ist kein Core-Bestandteil                | `pi-gui/scripts/package-linux.mjs`                                   |
 | GUI-Historien und `pi_gui_cursor_redesign/` | Pi-Dokumentation/Root      | Implementierungs- und Designhistorie des Desktop-Frontends | `pi-gui/docs/design-history/`                                        |
-| `extensions/frontend-protocol/`             | interne Extension-Struktur | Nicht extern paketierbar und von Core-Typen abhängig       | `packages/frontend-protocol/`                                        |
+| `extensions/frontend-protocol/`             | interne Extension-Struktur | Nicht extern paketierbar und von Core-Typen abhängig       | `npm/packages/frontend-protocol/` innerhalb der Dependency-Grenze    |
 | neutrale Publisher in `aurora-ui/state.ts`  | TUI                        | Core muss TUI importieren                                  | neutraler Contract-/Bridge-State-Bus; Aurora als Konsument           |
 | Session-/Diff-Leser in GUI Main             | GUI                        | zweite Kenntnis der Pi-Speicherung                         | Pi-Frontend-Server, Zugriff über öffentliche Runtime-API             |
 | Task-/Tool-Klassifizierung in GUI           | Renderer-Helfer            | doppelte Geschäftslogik                                    | autoritative Pi-Projektion im Contract                               |
@@ -126,7 +126,9 @@ pi/
 │   ├── pi
 │   └── pi-frontend
 ├── frontend-server/
-├── packages/frontend-protocol/
+├── npm/
+│   ├── packages/frontend-protocol/
+│   └── ...                    # bestehende Dependency-/Testgrenze
 ├── extensions/
 │   ├── frontend-bridge/
 │   ├── aurora-ui/          # TUI
@@ -138,7 +140,7 @@ pi/
 ├── benchmarks/
 ├── docs/
 ├── scripts/
-└── npm/                    # bestehende Dependency-/Testgrenze
+└── ...
 
 pi-gui/
 ├── bin/pi-gui

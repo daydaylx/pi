@@ -2,3 +2,8 @@
 !.gitignore
 !package.json
 !package-lock.json
+!packages/
+!packages/frontend-protocol/
+!packages/frontend-protocol/**
+packages/frontend-protocol/node_modules/
+packages/frontend-protocol/dist/

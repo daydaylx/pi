@@ -3,9 +3,9 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
-  publishAuroraUiPatch,
-  type AuroraUiState,
-} from "../aurora-ui/state.ts";
+  publishFrontendUiPatch,
+  type FrontendUiState,
+} from "../frontend-protocol/state-bus.ts";
 import { setTuiStatus, UI_STATUS_KEYS } from "../shared/workflow-status.ts";
 import {
   type WorkflowMode,
@@ -18,7 +18,7 @@ export function setAuroraEpoch(epoch: string | undefined): void {
   auroraEpoch = epoch;
 }
 
-export function workflowUiState(mode: WorkflowMode): AuroraUiState["workflow"] {
+export function workflowUiState(mode: WorkflowMode): FrontendUiState["workflow"] {
   return { phase: mode, label: workflowModeLabel(mode) };
 }
 
@@ -29,7 +29,7 @@ export function updateWorkflowPresentation(
 ): void {
   setTuiStatus(ctx, UI_STATUS_KEYS.workflow, workflowModeLabel(mode));
   if (auroraEpoch && pi) {
-    publishAuroraUiPatch(pi, auroraEpoch, "plan-mode", {
+    publishFrontendUiPatch(pi, auroraEpoch, "plan-mode", {
       workflow: workflowUiState(mode),
     });
   }

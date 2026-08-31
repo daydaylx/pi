@@ -1,9 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-  AURORA_UI_CHANNELS,
-  isAuroraUiStateRequest,
-  publishAuroraUiSnapshot,
-} from "../aurora-ui/state.ts";
+  FRONTEND_UI_CHANNELS,
+  isFrontendUiStateRequest,
+  publishFrontendUiSnapshot,
+} from "../frontend-protocol/state-bus.ts";
 import {
   WORKFLOW_CAPABILITY_EVENTS,
   type WorkflowCapabilityRequest,
@@ -22,10 +22,10 @@ export function registerPlanEvents(
   pi: ExtensionAPI,
   session: WorkflowSession,
 ): void {
-  pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
-    if (!isAuroraUiStateRequest(value)) return;
+  pi.events.on(FRONTEND_UI_CHANNELS.request, (value) => {
+    if (!isFrontendUiStateRequest(value)) return;
     setAuroraEpoch(value.sessionEpoch);
-    publishAuroraUiSnapshot(pi, value, "plan-mode", {
+    publishFrontendUiSnapshot(pi, value, "plan-mode", {
       workflow: workflowUiState(session.selectedMode),
     });
   });

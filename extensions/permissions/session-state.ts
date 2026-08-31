@@ -20,11 +20,11 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
-  AURORA_UI_CHANNELS,
-  isAuroraUiStateRequest,
-  publishAuroraUiPatch,
-  publishAuroraUiSnapshot,
-} from "../aurora-ui/state.ts";
+  FRONTEND_UI_CHANNELS,
+  isFrontendUiStateRequest,
+  publishFrontendUiPatch,
+  publishFrontendUiSnapshot,
+} from "../frontend-protocol/state-bus.ts";
 import {
   PERMISSION_LEVEL_LABEL,
   UI_STATUS_KEYS,
@@ -110,7 +110,7 @@ export function createPermissionSession(
       permissionRiskStatusValue(permissionLevel, permissionState),
     );
     if (auroraEpoch) {
-      publishAuroraUiPatch(pi, auroraEpoch, "permissions", {
+      publishFrontendUiPatch(pi, auroraEpoch, "permissions", {
         permissions: {
           level: permissionLevel,
           label: PERMISSION_LEVEL_LABEL[permissionLevel],
@@ -121,10 +121,10 @@ export function createPermissionSession(
 
   function subscribeAuroraProvider(): void {
     unsubscribeAurora?.();
-    unsubscribeAurora = pi.events.on(AURORA_UI_CHANNELS.request, (value) => {
-      if (!isAuroraUiStateRequest(value)) return;
+    unsubscribeAurora = pi.events.on(FRONTEND_UI_CHANNELS.request, (value) => {
+      if (!isFrontendUiStateRequest(value)) return;
       auroraEpoch = value.sessionEpoch;
-      publishAuroraUiSnapshot(pi, value, "permissions", {
+      publishFrontendUiSnapshot(pi, value, "permissions", {
         permissions: {
           level: permissionLevel,
           label: PERMISSION_LEVEL_LABEL[permissionLevel],
@@ -133,9 +133,7 @@ export function createPermissionSession(
     });
   }
 
-  function auditTransition(
-    source: "command" | "shortcut" | "session",
-  ): void {
+  function auditTransition(source: "command" | "shortcut" | "session"): void {
     pi.appendEntry("permission-transition", {
       timestamp: new Date().toISOString(),
       source,
