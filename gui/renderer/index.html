@@ -45,13 +45,20 @@
           id="btn-palette"
           class="icon-button"
           title="Command-Palette (Super+Q)"
+          aria-label="Command-Palette"
         >
           <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
             <path d="M9 4l-4 16M17 4l-4 16M4 9h16M3 15h16" />
           </svg>
           <span class="sr-only">Befehle</span>
         </button>
-        <button id="btn-new-session" title="Neue Sitzung">Neu</button>
+        <button
+          id="btn-new-session"
+          class="ghost-button"
+          title="Neue Sitzung (Super+N)"
+        >
+          Neu
+        </button>
       </div>
     </header>
 
@@ -142,43 +149,243 @@
       </nav>
 
       <section id="conversation">
-        <section id="chat" aria-live="polite"></section>
-        <div id="chat-placeholder" hidden>
-          <p>Was möchtest du tun?</p>
-        </div>
-        <div id="no-project" hidden>
-          <div id="startscreen">
-            <h1 id="startscreen-title">Pi</h1>
-            <p id="startscreen-subtitle">Was möchtest du tun?</p>
-            <form id="startscreen-form">
-              <textarea
-                id="startscreen-input"
-                rows="3"
-                placeholder="Beschreibe deine Aufgabe …"
-              ></textarea>
-              <button id="startscreen-start" class="primary" type="submit">
-                Start →
-              </button>
-            </form>
-            <button id="btn-open-project" class="ghost-button" type="button">
-              Projekt öffnen …
-            </button>
-            <section
-              id="startscreen-recent"
-              aria-label="Letzte Projekte"
-              hidden
+        <!-- Workspace Tabs Bar -->
+        <nav id="workspace-tabs" aria-label="Arbeitsbereich-Tabs">
+          <div id="tabs-list" role="tablist">
+            <button
+              id="tab-chat"
+              class="workspace-tab active"
+              role="tab"
+              aria-selected="true"
+              data-tab-id="chat"
+              title="Hauptchat"
             >
-              <h2>Letzte Projekte</h2>
-              <div id="startscreen-recent-list" role="list"></div>
-            </section>
+              <svg viewBox="0 0 24 24" class="tab-icon" aria-hidden="true">
+                <path
+                  d="M4 5.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H9l-4.5 4V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"
+                />
+              </svg>
+              <span class="tab-title">Chat</span>
+            </button>
+          </div>
+        </nav>
+
+        <div id="workspace-content">
+          <!-- Chat View -->
+          <div id="chat-view">
+            <section id="chat" aria-live="polite"></section>
+            <div id="chat-placeholder" hidden>
+              <div class="empty-state-content">
+                <div class="empty-state-icon">
+                  <svg
+                    viewBox="0 0 24 24"
+                    class="icon-large"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2zm0 4a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0V7a1 1 0 0 0-1-1zm0 8a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5z"
+                    />
+                  </svg>
+                </div>
+                <h2>Was soll Pi für dich tun?</h2>
+                <p>
+                  Gib unten deine Aufgabe ein, oder starte mit einem
+                  Slash-Befehl wie <code>/workflow</code> oder
+                  <code>/permission</code>.
+                </p>
+                <div class="empty-state-actions">
+                  <button
+                    id="btn-empty-new-task"
+                    class="ghost-button"
+                    type="button"
+                  >
+                    Neue Aufgabe
+                  </button>
+                  <button
+                    id="btn-empty-open-project"
+                    class="ghost-button"
+                    type="button"
+                  >
+                    Projekt wechseln
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div id="no-project" hidden>
+              <div id="startscreen">
+                <h1 id="startscreen-title">Pi</h1>
+                <p id="startscreen-subtitle">Was möchtest du tun?</p>
+                <form id="startscreen-form">
+                  <textarea
+                    id="startscreen-input"
+                    rows="3"
+                    placeholder="Beschreibe deine Aufgabe …"
+                  ></textarea>
+                  <button id="startscreen-start" class="primary" type="submit">
+                    Start →
+                  </button>
+                </form>
+                <button
+                  id="btn-open-project"
+                  class="ghost-button"
+                  type="button"
+                >
+                  Projekt öffnen …
+                </button>
+                <section
+                  id="startscreen-recent"
+                  aria-label="Letzte Projekte"
+                  hidden
+                >
+                  <h2>Letzte Projekte</h2>
+                  <div id="startscreen-recent-list" role="list"></div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <!-- Subagent Run View -->
+          <div id="run-view" hidden>
+            <div id="run-header">
+              <div id="run-header-top">
+                <div id="run-identity">
+                  <span id="run-status-dot" class="dot idle"></span>
+                  <h2 id="run-agent-name">Investigator</h2>
+                  <span id="run-status-badge" class="pill running"
+                    >● Running</span
+                  >
+                  <span id="run-duration-label" class="run-duration">0s</span>
+                </div>
+                <div id="run-header-actions">
+                  <button
+                    id="btn-run-copy"
+                    class="ghost-button"
+                    title="Lauf-Zusammenfassung in Zwischenablage kopieren"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      class="btn-icon"
+                      aria-hidden="true"
+                    >
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path
+                        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                      />
+                    </svg>
+                    <span>Kopieren</span>
+                  </button>
+                  <button
+                    id="btn-run-stop"
+                    class="ghost-button"
+                    title="Agenten stoppen"
+                    disabled
+                  >
+                    Stopp
+                  </button>
+                  <button
+                    id="btn-run-close"
+                    class="icon-button"
+                    title="Lauf-Tab schließen"
+                    aria-label="Lauf-Tab schließen"
+                  >
+                    <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div id="run-task-display" class="run-task-display"></div>
+              <div id="run-meta-row" class="run-meta-row">
+                <span id="run-meta-model" class="run-meta-item"></span>
+                <span id="run-meta-thinking" class="run-meta-item"></span>
+                <span id="run-meta-parent" class="run-meta-item"></span>
+              </div>
+            </div>
+
+            <!-- Run Sub-Navigation Tabs -->
+            <nav id="run-nav" aria-label="Run-Unteransichten">
+              <button class="run-nav-btn active" data-subpane="output">
+                Output
+              </button>
+              <button class="run-nav-btn" data-subpane="files">
+                Dateien <span id="run-files-count" class="badge-count">0</span>
+              </button>
+              <button class="run-nav-btn" data-subpane="tools">
+                Werkzeuge
+                <span id="run-tools-count" class="badge-count">0</span>
+              </button>
+              <button class="run-nav-btn" data-subpane="info">Info</button>
+            </nav>
+
+            <!-- Run Sub-Panes -->
+            <div id="run-panes">
+              <div id="run-pane-output" class="run-pane active">
+                <div id="run-filter-bar" class="run-filter-bar">
+                  <span class="filter-label">Filter:</span>
+                  <button
+                    type="button"
+                    class="filter-btn active"
+                    data-filter="all"
+                  >
+                    Alle
+                  </button>
+                  <button type="button" class="filter-btn" data-filter="error">
+                    ⚠ Nur Fehler
+                  </button>
+                  <button type="button" class="filter-btn" data-filter="edit">
+                    ✏ Edits
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-btn"
+                    data-filter="command"
+                  >
+                    💻 Terminal
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-btn"
+                    data-filter="explore"
+                  >
+                    🔍 Suche/Read
+                  </button>
+                </div>
+                <div id="run-timeline" class="run-timeline"></div>
+                <button
+                  id="btn-run-jump-latest"
+                  class="ghost-button jump-latest-btn"
+                  hidden
+                >
+                  ↓ Neue Ausgabe
+                </button>
+              </div>
+              <div id="run-pane-files" class="run-pane" hidden>
+                <div id="run-files-list" class="run-files-list"></div>
+              </div>
+              <div id="run-pane-tools" class="run-pane" hidden>
+                <div id="run-tools-summary" class="run-tools-summary"></div>
+                <div id="run-tools-list" class="run-tools-list"></div>
+              </div>
+              <div id="run-pane-info" class="run-pane" hidden>
+                <div id="run-info-table" class="run-info-table"></div>
+              </div>
+            </div>
+
+            <div id="run-footer">
+              <span id="run-footer-stats" class="run-footer-stats"
+                >0s · 0 Tools</span
+              >
+            </div>
           </div>
         </div>
+
         <div id="banner" hidden></div>
+
         <footer id="composer">
           <textarea
             id="input"
             rows="2"
-            placeholder="Nachricht an Pi … (Enter sendet, Shift+Enter neue Zeile)"
+            placeholder="Was soll Pi tun? (Enter sendet, Shift+Enter neue Zeile)"
           ></textarea>
           <div id="composer-toolbar">
             <div id="composer-pills">
@@ -209,10 +416,10 @@
             </div>
             <div id="composer-actions">
               <button id="btn-jump-latest" class="ghost-button" hidden>
-                Neueste
+                ↓ Neueste
               </button>
               <button id="btn-stop" class="ghost-button" disabled>Stopp</button>
-              <button id="btn-send" class="primary">Senden</button>
+              <button id="btn-send" class="primary">↑ Senden</button>
             </div>
           </div>
         </footer>
@@ -225,13 +432,37 @@
         aria-label="Inspector-Breite ändern"
         tabindex="0"
       ></div>
+
       <aside id="context-area" aria-label="Inspector" tabindex="-1">
         <div id="context-overview">
-          <h2>Inspector</h2>
+          <div class="inspector-header">
+            <h2>Inspector</h2>
+            <div class="inspector-header-actions">
+              <button
+                id="btn-refresh-context"
+                class="icon-button"
+                title="Inspector aktualisieren"
+                aria-label="Inspector aktualisieren"
+              >
+                <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+                  <path
+                    d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"
+                  />
+                </svg>
+              </button>
+              <button
+                id="btn-close-inspector"
+                class="icon-button"
+                title="Inspector schließen"
+                aria-label="Inspector schließen"
+              >
+                <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
           <div id="context-rows" class="skeleton">Wird geladen …</div>
-          <button id="btn-refresh-context" title="Kontext aktualisieren">
-            Aktualisieren
-          </button>
         </div>
       </aside>
     </main>
@@ -248,6 +479,7 @@
     <script src="chat/markdown.js"></script>
     <script src="chat/code-block.js"></script>
     <script src="interaction-helpers.js"></script>
+    <script src="agent-runs.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>

@@ -1,18 +1,22 @@
 /**
- * Renderer-Logik der GUI (Phase 6: Chat als Hauptfläche, kompakte
- * Tool-Aktivität, Zustände auf Abruf). Spricht ausschließlich über die
- * preload-freigegebene window.piGui-API. Keine Geschäftslogik: Alle
- * fachlichen Entscheidungen bleiben im Pi-Prozess (R1/R2/R11).
+ * Renderer-Logik der Pi-GUI: Coding-Agenten Desktop-Frontend mit
+ * vollwertigem Subagenten-Run-System, Workspace-Tabs und sicherem Markdown.
+ *
+ * Spricht ausschließlich über die preload-freigegebene window.piGui-API.
+ * Alle fachlichen Entscheidungen bleiben im Pi-Prozess (R1/R2/R11).
  */
 "use strict";
 
 const api = window.piGui;
 const interactions = window.piGuiInteractions;
+const runsModule = window.piGuiAgentRuns;
 const isSmokeMode = new URLSearchParams(window.location.search).has("smoke");
 const initialCwdParam =
   new URLSearchParams(window.location.search).get("cwd") || "";
 
 /* ----------------------------- Zustand -------------------------------- */
+
+const runStore = new runsModule.AgentRunStore();
 
 const state = {
   connected: false,
@@ -27,41 +31,26 @@ const state = {
   currentActivity: null,
   activeView: "chat",
   followScroll: true,
+  followRunScroll: true,
   sessionId: null,
   sessionTransitioning: false,
-  /** Kernzustand aus frontend-bridge/state-Einträgen (Phase 5). */
   core: null,
-  /** Welche Inspector-Übersichtszeilen gerade inline aufgeklappt sind (§5:
-   * eine Übersicht statt Übersicht/Detail-Umschaltung). */
-  expandedRows: new Set(),
-  /** Rohdaten aus api.listSessions() (Task-Sidebar, Phase 2) — der aktuelle
-   * Task wird beim Rendern live aus state.core überlagert. */
+  expandedRows: new Set(["subagents"]),
   taskListCache: [],
-  /** Fokus vor dem Öffnen des Inspector-Drawers (Phase 4), für die Rückkehr
-   * beim Schließen. */
   contextDrawerPreviousFocus: null,
-  /** Letzter bekannter Diff je Datei (Pfad → DiffViewEntryData), Phase 6
-   * Changes Review. Gespeist aus live gestreamten "diff-view"-Custom-
-   * Einträgen und, beim Sitzungswechsel, aus api.getSessionDiffs(). Keine
-   * zweite Wahrheit (R6): dieselben Rohdaten, die der diff-viewer bereits
-   * in der Sitzungsdatei persistiert. */
   fileDiffs: new Map(),
-  /** Welche Dateien in der Changes-Ansicht gerade den Diff aufgeklappt
-   * zeigen. */
   expandedDiffFiles: new Set(),
-  /** Gerade laufende, als "verification" klassifizierte Werkzeugaufrufe
-   * (Phase 7): toolCallId → true. Reine Ableitung aus den ohnehin schon
-   * durchgereichten tool_execution_*-Ereignissen (R2/R6) — core.verification
-   * kennt nur abgeschlossene Läufe, kein Live-"läuft gerade". */
   runningVerificationCalls: new Map(),
-  /** Letzter abgeschlossene Verification-Werkzeugaufruf (Phase 7): Sprungziel
-   * für "Details ansehen", da core.verification keine Rohausgabe je Check
-   * mitschickt, die Tool-Card das aber bereits anzeigt (Decision 005: Rohdaten
-   * bleiben zugänglich). */
   lastVerificationToolCallId: null,
+  activeRunSubpane: "output",
+  runToolFilter: "all",
+  promptHistory: [],
+  historyIndex: -1,
+  tempDraft: "",
+  diffSplitModes: new Map(),
+  durationTimer: null,
 };
 
-/** Kanonisches Workflow-Modus-Set (shared/workflow-mode.ts). */
 const WORKFLOW_MODES = [
   { mode: "work", label: "Work" },
   { mode: "simple_plan", label: "Schnellplan" },
@@ -83,9 +72,8 @@ function setStatusText(text) {
   statusTextEl.textContent = text;
 }
 
-/** Meldungen stapeln sich statt sich gegenseitig zu überschreiben (§4):
- * transiente info-Meldungen verschwinden automatisch, Fehler bleiben
- * stehen bis zur expliziten Bestätigung. */
+/* ----------------------------- Banner --------------------------------- */
+
 const MAX_BANNERS = 5;
 let bannerIdCounter = 0;
 
@@ -156,12 +144,6 @@ function clearChat() {
   updateChatEmptyHint();
 }
 
-/**
- * Rendert eine Assistant-Antwort als sicheres Markdown (Phase 3, P0).
- * `renderMarkdown` baut DOM ausschließlich über `createElement`/
- * `textContent` (siehe chat/markdown.js) — kein `innerHTML` mit
- * Modelltext, daher strukturell keine Injektionsfläche.
- */
 function renderAssistantBubble(bubble, text) {
   bubble.replaceChildren();
   bubble.appendChild(
@@ -210,14 +192,6 @@ function beginAssistantBlock() {
   };
 }
 
-/**
- * Streaming rendert Markdown bei jedem Token neu (Parser + volles
- * Bubble-DOM), was bei langen Antworten mit vielen Codeblöcken spürbar
- * teuer wird. Ein Trailing-Throttle begrenzt das auf höchstens einen
- * Rebuild pro STREAM_RENDER_INTERVAL_MS, ohne Deltas zu verlieren: der
- * jeweils letzte Text gewinnt, sobald das Intervall abgelaufen ist.
- * `setAssistantText` (Abschluss/Historie) rendert weiterhin sofort.
- */
 const STREAM_RENDER_INTERVAL_MS = 80;
 
 function scheduleStreamRender(block) {
@@ -244,13 +218,11 @@ function scheduleStreamRender(block) {
   );
 }
 
-/** Live-Text-Delta: throttled statt bei jedem Token neu zu rendern. */
 function streamAssistantText(block, text) {
   block.text = text;
   scheduleStreamRender(block);
 }
 
-/** Reasoning bleibt sekundär (§12): kurze Zeile, Dauer erst beim Abschluss. */
 function setAssistantThinking(block, text) {
   block.thinking = text;
   if (!text) {
@@ -273,8 +245,6 @@ function setAssistantThinking(block, text) {
   block.thinkingView.pre.textContent = text;
 }
 
-/** Live-Turns zeigen die gemessene Dauer; historische Nachrichten (aus
- * geladenen Sitzungen) haben keine verlässliche Dauer und bleiben neutral. */
 function finalizeAssistantThinking(block, { live = false } = {}) {
   const view = block.thinkingView;
   if (!view) return;
@@ -327,7 +297,6 @@ function renderMessageHistory(messages) {
   scrollToBottom(true);
 }
 
-/** Kompakte Tool-Card (R8): eine Zeile, Details auf Abruf. */
 function toolCardElement(card) {
   const details = document.createElement("details");
   details.className = `tool-card ${card.running ? "running" : card.isError ? "done-error" : "done-ok"}`;
@@ -349,20 +318,8 @@ function setToolCardOutput(pre, result) {
   pre.textContent = output;
 }
 
-/* ------------------------ Activity Stream (Phase 3) --------------------- */
-/**
- * Ersetzt die frühere, rein technische Toolspam-Zeile durch semantische
- * Aktivitätskarten (05_Phase_3_Activity_Stream.md): aufeinanderfolgende
- * Werkzeugaufrufe derselben Phase (explore/edit/verify/agent/command)
- * bilden EINE Karte. Titel + Kernzeilen sind immer sichtbar (auch bei
- * Fehlern, §"Fehler dürfen niemals wegaggregiert werden") — nur die
- * Rohdaten je Einzelaufruf (bestehende Tool-Cards) sind hinter "Details"
- * versteckt ("Rohdaten bleiben zugänglich").
- */
-/** groupKey trennt aufeinanderfolgende Aufrufe zusätzlich zur Phase — nur
- * für "agent" genutzt (Phase 10, §12 "klare Zuordnung von Activity zu
- * Agent"): zwei verschiedene Subagenten-Rollen hintereinander dürfen nicht
- * in einer gemeinsamen, generisch betitelten Karte verschwinden. */
+/* ------------------------ Activity Stream ------------------------------ */
+
 function ensureActivityCard(kind, groupKey, cardTitle) {
   const phase = interactions.activityPhaseFor(kind);
   if (!state.currentActivity) state.currentActivity = { cards: [] };
@@ -411,8 +368,6 @@ function activityLineEl(text, kind) {
   return line;
 }
 
-/** Kernzeilen je Phase — grobe, aber immer verständliche Verdichtung statt
- * einer reinen Werkzeug-Aufzählung. */
 function activitySummaryLines(card) {
   if (card.phase === "explore") {
     const count = (kind) =>
@@ -471,18 +426,12 @@ function refreshActivityCard(card) {
   }
 }
 
-/** Menschenlesbares Ziel aus der bereits server-seitig gebauten Tool-Card-
- * Zusammenfassung ("READ pfad", "BASH befehl …") — keine zweite
- * Argument-Interpretation im Renderer nötig. */
 function activityTargetFromSummary(summary) {
   return String(summary ?? "")
     .replace(/^[A-Z_]+\s*/, "")
     .trim();
 }
 
-/** Werkzeugaufrufe verteilen sich jetzt auf mehrere Karten (eine je Phase)
- * statt auf eine einzige flache Liste — Suche über alle Karten des
- * aktuellen Turns hinweg (neueste zuerst, falls IDs kollidieren). */
 function findActivityCardByToolCallId(toolCallId) {
   const cards = state.currentActivity?.cards ?? [];
   for (let i = cards.length - 1; i >= 0; i--) {
@@ -503,12 +452,614 @@ function findRawToolCard(toolCallId) {
   return null;
 }
 
+/* ------------------- Subagent Chat Cards (Ebene 1) --------------------- */
+
+function createSubagentChatCard(run) {
+  const card = document.createElement("div");
+  card.className = "subagent-chat-card running";
+  card.dataset.runId = run.id;
+
+  const header = document.createElement("div");
+  header.className = "subagent-card-header";
+
+  const identity = document.createElement("div");
+  identity.className = "subagent-card-identity";
+  const glyph = document.createElement("span");
+  glyph.className = "subagent-card-glyph";
+  glyph.textContent = "●";
+  glyph.style.color = "var(--running)";
+
+  const name = document.createElement("strong");
+  name.className = "subagent-card-name";
+  name.textContent = run.agentName;
+
+  const statusSpan = document.createElement("span");
+  statusSpan.className = "subagent-card-status";
+  statusSpan.textContent = "arbeitet …";
+
+  identity.append(glyph, name, statusSpan);
+
+  const duration = document.createElement("span");
+  duration.className = "subagent-card-time";
+  duration.textContent = "jetzt";
+
+  header.append(identity, duration);
+
+  const taskDiv = document.createElement("div");
+  taskDiv.className = "subagent-card-task";
+  taskDiv.textContent = run.task || "Teilaufgabe wird ausgeführt";
+
+  const actions = document.createElement("div");
+  actions.className = "subagent-card-actions";
+
+  const openBtn = document.createElement("button");
+  openBtn.type = "button";
+  openBtn.className = "ghost-button btn-open-run";
+  openBtn.innerHTML = `<svg viewBox="0 0 24 24" class="btn-icon"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg> Lauf öffnen`;
+  openBtn.addEventListener("click", () => {
+    runStore.openTab(run.id);
+  });
+
+  actions.appendChild(openBtn);
+  card.append(header, taskDiv, actions);
+  chatEl.appendChild(card);
+  scrollToBottom();
+  return card;
+}
+
+function updateSubagentChatCard(run) {
+  const card = chatEl.querySelector(
+    `.subagent-chat-card[data-run-id="${run.id}"]`,
+  );
+  if (!card) return;
+
+  const timeEl = card.querySelector(".subagent-card-time");
+  if (timeEl) {
+    timeEl.textContent = runsModule.formatDuration(run.durationMs);
+  }
+
+  if (run.isFinished) {
+    card.classList.remove("running");
+    const isErr = run.state === runsModule.RUN_STATES.FAILED;
+    card.classList.add(isErr ? "done-error" : "done-ok");
+
+    const glyph = card.querySelector(".subagent-card-glyph");
+    if (glyph) {
+      glyph.textContent = isErr ? "✕" : "✓";
+      glyph.style.color = isErr ? "var(--err)" : "var(--ok)";
+    }
+
+    const statusSpan = card.querySelector(".subagent-card-status");
+    if (statusSpan) {
+      statusSpan.textContent = `· ${runsModule.formatDuration(run.durationMs)}`;
+    }
+
+    // Zusammenfassung einbauen
+    let summaryDiv = card.querySelector(".subagent-card-summary");
+    if (!summaryDiv) {
+      summaryDiv = document.createElement("div");
+      summaryDiv.className = "subagent-card-summary";
+      card.insertBefore(
+        summaryDiv,
+        card.querySelector(".subagent-card-actions"),
+      );
+    }
+
+    let summaryText = "";
+    if (typeof run.result === "string") summaryText = run.result;
+    else if (run.result?.summary) summaryText = run.result.summary;
+    else if (run.error) summaryText = `Fehler: ${run.error}`;
+    else summaryText = `${run.agentName} abgeschlossen`;
+
+    summaryDiv.textContent =
+      summaryText.length > 180 ? `${summaryText.slice(0, 177)}…` : summaryText;
+  }
+}
+
+/* ---------------------- Workspace Tabs (Ebene 3) ----------------------- */
+
+function renderWorkspaceTabs() {
+  const tabsContainer = el("tabs-list");
+  if (!tabsContainer) return;
+  tabsContainer.innerHTML = "";
+
+  for (const tabId of runStore.openTabs) {
+    const isChat = tabId === "chat";
+    const run = isChat ? null : runStore.getRun(tabId);
+    const isActive = isChat
+      ? runStore.activeRunId === null
+      : runStore.activeRunId === tabId;
+
+    const tabBtn = document.createElement("button");
+    tabBtn.className = isActive ? "workspace-tab active" : "workspace-tab";
+    tabBtn.dataset.tabId = tabId;
+    tabBtn.setAttribute("role", "tab");
+    tabBtn.setAttribute("aria-selected", String(isActive));
+
+    if (isChat) {
+      tabBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" class="tab-icon" aria-hidden="true">
+          <path d="M4 5.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H9l-4.5 4V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z" />
+        </svg>
+        <span class="tab-title">Chat</span>
+      `;
+    } else if (run) {
+      const statusCls = run.isRunning
+        ? "running"
+        : run.state === runsModule.RUN_STATES.FAILED
+          ? "failed"
+          : "completed";
+      tabBtn.innerHTML = `
+        <span class="tab-status-dot ${statusCls}"></span>
+        <span class="tab-title">${interactions.agentDisplayLabel(run.agentName)}</span>
+      `;
+
+      const closeBtn = document.createElement("span");
+      closeBtn.className = "tab-close";
+      closeBtn.textContent = "×";
+      closeBtn.title = "Tab schließen";
+      closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        runStore.closeTab(tabId);
+      });
+      tabBtn.appendChild(closeBtn);
+    }
+
+    tabBtn.addEventListener("click", () => {
+      runStore.setActiveTab(tabId);
+    });
+
+    tabsContainer.appendChild(tabBtn);
+  }
+
+  // Sichtbarkeit zwischen Chat und Run-View umschalten
+  const isChatActive = runStore.activeRunId === null;
+  const chatView = el("chat-view");
+  const runView = el("run-view");
+
+  if (chatView) chatView.hidden = !isChatActive;
+  if (runView) {
+    runView.hidden = isChatActive;
+    if (!isChatActive) {
+      const currentRun = runStore.getRun(runStore.activeRunId);
+      if (currentRun) renderRunView(currentRun);
+    }
+  }
+}
+
+/* ---------------------- Subagent Run View (Ebene 3) --------------------- */
+
+function renderRunView(run) {
+  const nameEl = el("run-agent-name");
+  const badgeEl = el("run-status-badge");
+  const dotElRun = el("run-status-dot");
+  const durationEl = el("run-duration-label");
+  const taskEl = el("run-task-display");
+  const modelEl = el("run-meta-model");
+  const thinkingEl = el("run-meta-thinking");
+  const parentEl = el("run-meta-parent");
+  const stopBtn = el("btn-run-stop");
+
+  if (nameEl) nameEl.textContent = run.agentName;
+  if (badgeEl) {
+    const statusInfo = run.getStatusBadge();
+    badgeEl.className = `pill ${statusInfo.cls}`;
+    badgeEl.textContent = `${statusInfo.marker} ${statusInfo.label}`;
+  }
+  if (dotElRun) {
+    dotElRun.className = `dot ${run.isRunning ? "busy" : run.state === runsModule.RUN_STATES.FAILED ? "error" : "ready"}`;
+  }
+  if (durationEl) {
+    durationEl.textContent = runsModule.formatDuration(run.durationMs);
+  }
+  if (taskEl) {
+    taskEl.textContent = run.task || "Keine Aufgabenbeschreibung angegeben.";
+  }
+  if (modelEl) {
+    modelEl.textContent = run.model
+      ? `Modell: ${run.model}`
+      : "Modell: Standard";
+  }
+  if (thinkingEl) {
+    thinkingEl.textContent = run.thinking ? `Denken: ${run.thinking}` : "";
+  }
+  if (parentEl) {
+    const parentRun = run.parentRunId ? runStore.getRun(run.parentRunId) : null;
+    parentEl.innerHTML = parentRun
+      ? `Parent: <button type="button" class="ghost-button" style="padding:0 4px;font-size:12px;color:var(--accent);">${parentRun.agentName}</button>`
+      : "Parent: Hauptchat";
+    const parentBtn = parentEl.querySelector("button");
+    if (parentBtn && parentRun) {
+      parentBtn.addEventListener("click", () => runStore.openTab(parentRun.id));
+    }
+  }
+  if (stopBtn) {
+    stopBtn.disabled = !run.isRunning;
+  }
+
+  // Zähler in Unteransichts-Tabs
+  const filesCountEl = el("run-files-count");
+  if (filesCountEl) filesCountEl.textContent = String(run.fileChanges.size);
+  const toolsCountEl = el("run-tools-count");
+  if (toolsCountEl) toolsCountEl.textContent = String(run.toolCalls.size);
+
+  // Footer Stats
+  const footerStatsEl = el("run-footer-stats");
+  if (footerStatsEl) {
+    footerStatsEl.textContent = `${runsModule.formatDuration(run.durationMs)} · ${run.toolCalls.size} Tools · ${run.fileChanges.size} Dateien`;
+  }
+
+  // Unteransichten rendern
+  renderRunPanes(run);
+}
+
+function renderRunPanes(run) {
+  for (const paneBtn of document.querySelectorAll(".run-nav-btn")) {
+    paneBtn.classList.toggle(
+      "active",
+      paneBtn.dataset.subpane === state.activeRunSubpane,
+    );
+  }
+
+  for (const pane of document.querySelectorAll(".run-pane")) {
+    const isTarget = pane.id === `run-pane-${state.activeRunSubpane}`;
+    pane.hidden = !isTarget;
+  }
+
+  if (state.activeRunSubpane === "output") renderRunOutputPane(run);
+  else if (state.activeRunSubpane === "files") renderRunFilesPane(run);
+  else if (state.activeRunSubpane === "tools") renderRunToolsPane(run);
+  else if (state.activeRunSubpane === "info") renderRunInfoPane(run);
+}
+
+function matchesToolFilter(event, filter) {
+  if (!filter || filter === "all") return true;
+  if (filter === "error") {
+    return (
+      event.type === "tool.failed" ||
+      event.type === "run.failed" ||
+      Boolean(event.isError)
+    );
+  }
+  if (filter === "edit") {
+    return (
+      event.type === "file.changed" ||
+      ["edit", "write"].includes(String(event.toolName))
+    );
+  }
+  if (filter === "command") {
+    return ["bash", "sh", "terminal"].includes(String(event.toolName));
+  }
+  if (filter === "explore") {
+    return ["read", "grep", "find", "search", "list_dir", "view_file"].includes(
+      String(event.toolName),
+    );
+  }
+  return true;
+}
+
+function renderRunOutputPane(run) {
+  const timelineEl = el("run-timeline");
+  if (!timelineEl) return;
+  timelineEl.innerHTML = "";
+
+  const filter = state.runToolFilter || "all";
+  for (const btn of document.querySelectorAll(".run-filter-bar .filter-btn")) {
+    btn.classList.toggle("active", btn.dataset.filter === filter);
+  }
+
+  for (const event of run.events) {
+    if (!matchesToolFilter(event, filter)) continue;
+
+    const eventCard = document.createElement("div");
+    eventCard.className = "timeline-event";
+
+    const header = document.createElement("div");
+    header.className = "timeline-event-header";
+    const timeSpan = document.createElement("span");
+    timeSpan.textContent = runsModule.formatTime(event.timestamp);
+
+    const typeSpan = document.createElement("span");
+    typeSpan.className = "pill muted";
+
+    const content = document.createElement("div");
+    content.className = "timeline-event-content";
+
+    switch (event.type) {
+      case "run.started":
+        eventCard.classList.add("start");
+        typeSpan.textContent = "Start";
+        typeSpan.className = "pill running";
+        content.textContent = `Agent gestartet: ${event.data?.task || run.task}`;
+        break;
+      case "assistant.progress":
+      case "assistant.thinking":
+        typeSpan.textContent =
+          event.type === "assistant.thinking" ? "Denken" : "Fortschritt";
+        content.textContent = event.text;
+        break;
+      case "tool.started":
+        typeSpan.textContent = `Tool: ${event.toolName}`;
+        content.textContent = event.summary || `Aufruf: ${event.toolName}`;
+        break;
+      case "tool.completed":
+      case "tool.failed": {
+        const isErr = event.type === "tool.failed";
+        typeSpan.textContent = `${event.toolName} (${event.durationMs ? runsModule.formatDuration(event.durationMs) : "fertig"})`;
+        typeSpan.className = `pill ${isErr ? "err" : "ok"}`;
+        content.textContent = event.summary || event.toolName;
+
+        if (event.result) {
+          const details = document.createElement("details");
+          details.className = "tool-card";
+          const summary = document.createElement("summary");
+          summary.textContent = isErr ? "Fehlerdetails" : "Ausgabe anzeigen";
+          const pre = document.createElement("pre");
+          pre.className = "mono";
+          setToolCardOutput(pre, event.result);
+          details.append(summary, pre);
+          content.appendChild(details);
+        }
+        break;
+      }
+      case "file.changed":
+        typeSpan.textContent = "Datei geändert";
+        typeSpan.className = "pill ok";
+        content.textContent = `Modifiziert: ${event.path}`;
+        break;
+      case "agent.child.started":
+        typeSpan.textContent = "Child Agent";
+        typeSpan.className = "pill running";
+        content.textContent = `Subagent gestartet: ${event.agentName} — ${event.task}`;
+        break;
+      case "run.completed":
+        eventCard.classList.add("complete");
+        typeSpan.textContent = "Abgeschlossen";
+        typeSpan.className = "pill ok";
+        content.textContent =
+          typeof event.result === "string"
+            ? event.result
+            : event.result?.summary || "Lauf erfolgreich abgeschlossen.";
+        break;
+      case "run.failed":
+        eventCard.classList.add("failed");
+        typeSpan.textContent = "Fehlgeschlagen";
+        typeSpan.className = "pill err";
+        content.textContent = event.error || "Lauf mit Fehler beendet.";
+        break;
+      case "run.cancelled":
+        typeSpan.textContent = "Abgebrochen";
+        typeSpan.className = "pill muted";
+        content.textContent = event.error || "Lauf wurde abgebrochen.";
+        break;
+      default:
+        typeSpan.textContent = event.type;
+        content.textContent = JSON.stringify(event);
+    }
+
+    header.append(typeSpan, timeSpan);
+    eventCard.append(header, content);
+    timelineEl.appendChild(eventCard);
+  }
+}
+
+function renderRunFilesPane(run) {
+  const container = el("run-files-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (run.fileChanges.size === 0) {
+    const empty = document.createElement("p");
+    empty.className = "task-groups-empty";
+    empty.textContent = "In diesem Lauf wurden noch keine Dateien geändert.";
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const [path, change] of run.fileChanges.entries()) {
+    const fileRow = renderChangedFileRow(path);
+    container.appendChild(fileRow);
+  }
+}
+
+function renderRunToolsPane(run) {
+  const summaryEl = el("run-tools-summary");
+  const listEl = el("run-tools-list");
+  if (!summaryEl || !listEl) return;
+
+  summaryEl.innerHTML = "";
+  listEl.innerHTML = "";
+
+  const breakdown = run.getToolBreakdown();
+  if (Object.keys(breakdown).length === 0) {
+    summaryEl.textContent = "Noch keine Tool-Aufrufe.";
+  } else {
+    for (const [name, count] of Object.entries(breakdown)) {
+      const chip = document.createElement("span");
+      chip.className = "tool-stat-chip";
+      chip.textContent = `${name}: ${count}`;
+      summaryEl.appendChild(chip);
+    }
+  }
+
+  const filter = state.runToolFilter || "all";
+  for (const tool of run.toolCalls.values()) {
+    if (!matchesToolFilter(tool, filter)) continue;
+
+    const item = document.createElement("div");
+    item.className = "timeline-event";
+    const header = document.createElement("div");
+    header.className = "timeline-event-header";
+    const title = document.createElement("strong");
+    title.textContent = tool.toolName;
+    const dur = document.createElement("span");
+    dur.textContent = tool.durationMs
+      ? runsModule.formatDuration(tool.durationMs)
+      : tool.running
+        ? "läuft …"
+        : "";
+    header.append(title, dur);
+
+    const summary = document.createElement("div");
+    summary.className = "timeline-event-content";
+    summary.textContent = tool.summary;
+
+    if (tool.result) {
+      const details = document.createElement("details");
+      details.className = "tool-card";
+      const sum = document.createElement("summary");
+      sum.textContent = "Details";
+      const pre = document.createElement("pre");
+      setToolCardOutput(pre, tool.result);
+      details.append(sum, pre);
+      summary.appendChild(details);
+    }
+
+    item.append(header, summary);
+    listEl.appendChild(item);
+  }
+}
+
+function renderHierarchyTree(currentRunId) {
+  const container = document.createElement("div");
+  container.className = "hierarchy-tree-view";
+  const title = document.createElement("h3");
+  title.textContent = "Agenten-Hierarchie";
+  container.appendChild(title);
+
+  const mainRun =
+    runStore.getRun("main") || runStore.getRun(runStore.rootRunId);
+  const rootId = mainRun ? mainRun.id : "main";
+
+  function renderNode(runId, level = 0) {
+    const isRoot = runId === "main" || runId === runStore.rootRunId;
+    const run = isRoot ? mainRun : runStore.getRun(runId);
+    if (!run && !isRoot) return;
+
+    const row = document.createElement("div");
+    row.className = runId === currentRunId ? "tree-node current" : "tree-node";
+
+    const indent = document.createElement("span");
+    indent.className = "tree-node-indent";
+    indent.style.width = `${level * 16}px`;
+
+    const glyph = document.createElement("span");
+    glyph.className = "tree-node-glyph";
+    const statusInfo = run
+      ? run.getStatusBadge()
+      : { marker: "●", label: "Root", cls: "ready" };
+    glyph.innerHTML = `<span class="pill ${statusInfo.cls}">${statusInfo.marker}</span>`;
+
+    const name = document.createElement("strong");
+    name.textContent = isRoot
+      ? "Hauptchat (Main)"
+      : interactions.agentDisplayLabel(run.agentName);
+
+    const meta = document.createElement("span");
+    meta.className = "subagent-inspector-meta";
+    meta.textContent = run ? runsModule.formatDuration(run.durationMs) : "";
+
+    row.append(indent, glyph, name, meta);
+    row.addEventListener("click", () => {
+      runStore.openTab(runId);
+    });
+    container.appendChild(row);
+
+    const children = isRoot
+      ? runStore
+          .getSubagentRuns()
+          .filter(
+            (r) =>
+              !r.parentRunId ||
+              r.parentRunId === "main" ||
+              r.parentRunId === runStore.rootRunId,
+          )
+      : runStore.getChildrenOf(runId);
+    for (const child of children) {
+      renderNode(child.id, level + 1);
+    }
+  }
+
+  renderNode(rootId, 0);
+  return container;
+}
+
+function copyRunSummary(run) {
+  if (!run) return;
+  const statusInfo = run.getStatusBadge();
+  const md = [
+    `# Agent-Lauf: ${run.agentName}`,
+    `- **Status:** ${statusInfo.label}`,
+    `- **Aufgabe:** ${run.task || "Keine Beschreibung"}`,
+    `- **Dauer:** ${runsModule.formatDuration(run.durationMs)}`,
+    `- **Werkzeuge:** ${run.toolCalls.size} Aufrufe`,
+    `- **Geänderte Dateien:** ${run.fileChanges.size}`,
+    "",
+    "## Ergebnis",
+    typeof run.result === "string"
+      ? run.result
+      : run.result?.summary ||
+        (run.error ? `Fehler: ${run.error}` : "Keine Zusammenfassung"),
+  ].join("\n");
+
+  api.copyToClipboard(md).then(() => {
+    const copyBtn = el("btn-run-copy");
+    if (copyBtn) {
+      const orig = copyBtn.innerHTML;
+      copyBtn.innerHTML = `<span>✓ Kopiert!</span>`;
+      setTimeout(() => {
+        copyBtn.innerHTML = orig;
+      }, 1600);
+    }
+  });
+}
+
+function renderRunInfoPane(run) {
+  const tableEl = el("run-info-table");
+  if (!tableEl) return;
+  tableEl.innerHTML = "";
+
+  // Hierarchie-Baum vor die Tabelle setzen
+  const treeEl = renderHierarchyTree(run.id);
+  tableEl.appendChild(treeEl);
+
+  const rows = [
+    ["Run-ID", run.id],
+    ["Agent", run.agentName],
+    ["Rolle", run.role],
+    ["Aufgabe", run.task],
+    ["Status", run.state],
+    ["Modell", run.model || "Standard"],
+    ["Denken", run.thinking || "Standard"],
+    ["Parent-Run", run.parentRunId || "Hauptchat"],
+    ["Gestartet", runsModule.formatTime(run.startedAt)],
+    ["Beendet", run.finishedAt ? runsModule.formatTime(run.finishedAt) : "—"],
+    ["Laufzeit", runsModule.formatDuration(run.durationMs)],
+    ["Werkzeuge", `${run.toolCalls.size} Aufrufe`],
+    ["Geänderte Dateien", `${run.fileChanges.size} Dateien`],
+  ];
+
+  for (const [key, val] of rows) {
+    const kEl = document.createElement("div");
+    kEl.className = "run-info-key";
+    kEl.textContent = key;
+    const vEl = document.createElement("div");
+    vEl.className = "run-info-val";
+    vEl.textContent = val;
+    tableEl.append(kEl, vEl);
+  }
+}
+
 /* ------------------------- Ereignisverarbeitung ------------------------ */
 
 function handleEvent(msg) {
   switch (msg.type) {
     case "agent_start":
       state.busy = true;
+      runStore.ensureMainRun(state.sessionId, {
+        model: state.modelLabel,
+        thinking: state.thinkingLabel,
+      });
       refreshStatusBar();
       break;
     case "message_start": {
@@ -543,7 +1094,6 @@ function handleEvent(msg) {
       break;
     }
     case "message_end": {
-      // Autoritative Nachricht ersetzt den Stream (inkl. Thinking-Inhalten).
       const message = msg.message || {};
       if (message.role !== "assistant") break;
       if (!state.currentAssistant)
@@ -557,25 +1107,58 @@ function handleEvent(msg) {
     }
     case "tool_execution_start": {
       const kind = interactions.classifyActivityKind(msg.toolName, msg.args);
+      const isSubagent = msg.toolName === "subagent";
       const agentRole =
         kind === "agent" && msg.toolName === "subagent"
           ? String(msg.args?.agent ?? "").trim() || undefined
           : undefined;
-      const card = ensureActivityCard(
-        kind,
-        agentRole,
-        agentRole ? interactions.agentDisplayLabel(agentRole) : undefined,
-      );
-      card.entries.push({
-        toolCallId: msg.toolCard.toolCallId,
-        toolName: msg.toolCard.toolName,
-        kind,
-        target: activityTargetFromSummary(msg.toolCard.summary),
-        running: true,
-        isError: false,
-      });
-      card.raw.appendChild(toolCardElement(msg.toolCard));
-      refreshActivityCard(card);
+
+      // Subagent Run im RunStore erfassen
+      if (isSubagent) {
+        const subagentRun = runStore.startSubagentRun({
+          toolCallId: msg.toolCard.toolCallId,
+          agentName: agentRole
+            ? interactions.agentDisplayLabel(agentRole)
+            : "Subagent",
+          role: agentRole || "subagent",
+          task: String(msg.args?.task ?? ""),
+          model: state.modelLabel,
+          thinking: state.thinkingLabel,
+          sessionId: state.sessionId,
+        });
+        createSubagentChatCard(subagentRun);
+        void refreshContextOverview();
+      } else {
+        const card = ensureActivityCard(
+          kind,
+          agentRole,
+          agentRole ? interactions.agentDisplayLabel(agentRole) : undefined,
+        );
+        card.entries.push({
+          toolCallId: msg.toolCard.toolCallId,
+          toolName: msg.toolCard.toolName,
+          kind,
+          target: activityTargetFromSummary(msg.toolCard.summary),
+          running: true,
+          isError: false,
+        });
+        card.raw.appendChild(toolCardElement(msg.toolCard));
+        refreshActivityCard(card);
+      }
+
+      // Tool Call im passenden Run aufzeichnen
+      const activeRun = runStore.activeRunId
+        ? runStore.getRun(runStore.activeRunId)
+        : runStore.getRun("main");
+      if (activeRun) {
+        activeRun.recordToolStart({
+          toolCallId: msg.toolCard.toolCallId,
+          toolName: msg.toolCard.toolName,
+          summary: msg.toolCard.summary,
+          args: msg.args,
+        });
+      }
+
       if (kind === "verification") {
         state.runningVerificationCalls.set(msg.toolCard.toolCallId, true);
         void refreshContextOverview();
@@ -588,6 +1171,17 @@ function handleEvent(msg) {
       if (rawCard) {
         setToolCardOutput(rawCard.querySelector("pre"), msg.partialResult);
       }
+
+      const subagentRun = runStore.getRunByToolCallId(msg.toolCallId);
+      if (subagentRun) {
+        subagentRun.recordProgress(
+          interactions.textFromContent(msg.partialResult),
+        );
+        updateSubagentChatCard(subagentRun);
+        if (runStore.activeRunId === subagentRun.id) {
+          renderRunView(subagentRun);
+        }
+      }
       break;
     }
     case "tool_execution_end": {
@@ -596,17 +1190,41 @@ function handleEvent(msg) {
         state.lastVerificationToolCallId = msg.toolCallId;
         void refreshContextOverview();
       }
-      const card = findActivityCardByToolCallId(msg.toolCallId);
-      if (card) {
-        const entry = card.entries.find(
-          (candidate) => candidate.toolCallId === msg.toolCallId,
-        );
-        if (entry) {
-          entry.running = false;
-          entry.isError = Boolean(msg.isError);
+
+      const isSubagent = msg.toolName === "subagent";
+      if (isSubagent) {
+        const subagentRun = runStore.getRunByToolCallId(msg.toolCallId);
+        if (subagentRun) {
+          let summary = "";
+          if (msg.result?.details?.results?.[0]?.finalOutput) {
+            summary = String(msg.result.details.results[0].finalOutput);
+          } else {
+            summary = interactions.textFromContent(msg.result?.content);
+          }
+          subagentRun.complete(
+            { summary, raw: msg.result },
+            { isError: Boolean(msg.isError) },
+          );
+          updateSubagentChatCard(subagentRun);
+          void refreshContextOverview();
+          if (runStore.activeRunId === subagentRun.id) {
+            renderRunView(subagentRun);
+          }
         }
-        refreshActivityCard(card);
+      } else {
+        const card = findActivityCardByToolCallId(msg.toolCallId);
+        if (card) {
+          const entry = card.entries.find(
+            (candidate) => candidate.toolCallId === msg.toolCallId,
+          );
+          if (entry) {
+            entry.running = false;
+            entry.isError = Boolean(msg.isError);
+          }
+          refreshActivityCard(card);
+        }
       }
+
       const rawCard = findRawToolCard(msg.toolCallId);
       if (rawCard) {
         rawCard.classList.remove("running");
@@ -645,18 +1263,12 @@ function toolTargetPath(args) {
   return args && typeof args === "object" ? String(args.path ?? "") : "";
 }
 
-/** Verteilt einen Custom-Entry an den passenden Übernahme-Pfad — je
- * customType gibt es genau eine zuständige Stelle, keine doppelte
- * Interpretation derselben Rohdaten (R6). */
 function applyCustomEntry(entry) {
   if (!entry) return;
   if (entry.customType === "frontend-bridge/state") applyCoreEntry(entry);
   else if (entry.customType === "diff-view") applyDiffEntry(entry);
 }
 
-/** Live-Diff-Eintrag des diff-viewer-Extensions (Phase 6 Changes Review):
- * dieselben Rohdaten, die auch in der Sitzungsdatei landen, hier nur
- * unmittelbar statt erst beim nächsten Sitzungswechsel übernommen. */
 function applyDiffEntry(entry) {
   const data = entry.data;
   if (!data || typeof data.path !== "string" || !data.stats) return;
@@ -664,7 +1276,6 @@ function applyDiffEntry(entry) {
   if (state.expandedRows.has("changes")) void refreshContextOverview();
 }
 
-/** Custom-Entry der frontend-bridge in den lokalen Kernzustand übernehmen. */
 function applyCoreEntry(entry) {
   if (!entry || entry.customType !== "frontend-bridge/state") return;
   const payload =
@@ -696,7 +1307,6 @@ function refreshCoreChips() {
   renderTaskSidebar();
 }
 
-/** Aktueller Task ist der visuelle Mittelpunkt des Headers (§Phase 1). */
 function refreshTaskTitle() {
   const titleEl = el("task-title");
   const sepEl = el("task-sep");
@@ -735,7 +1345,6 @@ function handleUiRequest(msg) {
     openInputDialog(msg);
     return;
   }
-  // Andere Dialogarten (editor) sind im RPC degradiert — sichtbar ablehnen.
   void api
     .respondUiRequest({ id: msg.id, method: msg.method, cancelled: true })
     .catch(() => {});
@@ -1025,7 +1634,7 @@ async function openSessionResume() {
   }
 }
 
-/* --------------- Navigation und Kontextbereich (Phase 6) --------------- */
+/* ---------------- Navigation und Kontextbereich ------------------------ */
 
 function setActiveNav(view) {
   for (const item of document.querySelectorAll(".nav-item")) {
@@ -1034,12 +1643,10 @@ function setActiveNav(view) {
   state.activeView = view;
 }
 
-/** Nav-Rail/Shortcuts springen zur passenden Übersichtszeile und klappen
- * sie auf, statt in einen separaten Panel-Modus zu wechseln — es gibt nur
- * noch die eine, immer sichtbare Übersicht (§5). */
 function setActiveView(view) {
   setActiveNav(view);
   if (view === "chat") {
+    runStore.setActiveTab("chat");
     closeContextDrawer();
     return;
   }
@@ -1054,8 +1661,6 @@ function syncInspectorToggleButton() {
   );
 }
 
-/** Fokus geht beim Öffnen in den Drawer und beim Schließen zurück zum
- * auslösenden Element (§Phase 4 — Fokusmanagement). */
 function openContextDrawer() {
   if (!document.body.classList.contains("context-open")) {
     state.contextDrawerPreviousFocus =
@@ -1099,7 +1704,7 @@ function toggleRow(key) {
   void refreshContextOverview();
 }
 
-/* ------------------------- Task Sidebar (Phase 2) ---------------------- */
+/* ------------------------- Task Sidebar -------------------------------- */
 
 const TASK_STATUS_GROUPS = [
   { key: "active", label: "Active", marker: "●" },
@@ -1117,11 +1722,6 @@ const TASK_STATUS_TEXT = {
 
 const TASK_SIDEBAR_COLLAPSED_KEY = "pi-gui-task-sidebar-collapsed";
 
-/** Holt die Sitzungsliste (mit zuletzt bekanntem Core-Zustand je Sitzung,
- * siehe ipc-handlers.js:readLastFrontendState) und rendert sie neu. Wird
- * nach Sitzungswechsel/-erstellung aufgerufen; laufende Statusänderungen
- * der AKTUELLEN Sitzung kommen dagegen günstig aus state.core (siehe
- * refreshCoreChips) ohne erneuten IPC-Aufruf. */
 async function refreshTaskList() {
   try {
     state.taskListCache = await api.listSessions();
@@ -1131,9 +1731,6 @@ async function refreshTaskList() {
   renderTaskSidebar();
 }
 
-/** Baut die Task-Sidebar aus dem Sitzungs-Cache + dem Live-Core-State der
- * aktuell verbundenen Sitzung (§Phase 2 — ersetzt die frühere flache
- * "Sitzungen"-Liste im Inspector durch eine statusgruppierte Ansicht). */
 function renderTaskSidebar() {
   const container = el("task-groups");
   if (!container) return;
@@ -1162,8 +1759,6 @@ function renderTaskSidebar() {
   }
 }
 
-/** Reine Ableitung, keine zweite Wahrheit (R6): Status kommt aus
- * interactions.deriveTaskStatus (Core-Signale), Titel/Meta nur formatiert. */
 function buildTaskEntries() {
   const entries = state.taskListCache.map((entry) => {
     const isCurrent = Boolean(
@@ -1171,10 +1766,6 @@ function buildTaskEntries() {
     );
     return buildTaskEntry(entry, isCurrent);
   });
-  // Eine ganz frische Sitzung hat evtl. noch keine Datei auf der Platte
-  // (erster Custom-Entry kommt erst mit der ersten Antwort) — ohne diesen
-  // Ausgleich verschwindet der gerade aktive Task komplett aus der Liste
-  // (verletzt "aktueller Task ist eindeutig erkennbar", §Phase 1/2).
   const hasCurrent = entries.some((entry) => entry.isCurrent);
   if (!hasCurrent && state.sessionId) {
     entries.unshift(
@@ -1251,7 +1842,7 @@ function toggleTaskSidebarCollapsed() {
   try {
     localStorage.setItem(TASK_SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
   } catch {
-    /* Bedienkomfort, kein hartes Erfordernis */
+    /* ignore */
   }
 }
 
@@ -1260,7 +1851,7 @@ function restoreTaskSidebarCollapsed() {
   try {
     collapsed = localStorage.getItem(TASK_SIDEBAR_COLLAPSED_KEY) === "1";
   } catch {
-    /* Default bleibt ausgeklappt */
+    /* default false */
   }
   document.body.classList.toggle("task-sidebar-collapsed", collapsed);
   el("btn-collapse-tasks")?.setAttribute(
@@ -1269,9 +1860,6 @@ function restoreTaskSidebarCollapsed() {
   );
 }
 
-/** Super+I bzw. Header-Button: Inspector-Drawer ein-/ausblenden. Der
- * Inspector ist nie mehr permanent Teil des Hauptlayouts (§Phase 1) — er
- * öffnet als Overlay-Drawer unabhängig von der Fensterbreite. */
 function toggleContextArea() {
   if (document.body.classList.contains("context-open")) {
     closeContextDrawer();
@@ -1284,21 +1872,6 @@ function esc(t) {
   return String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
-/** Kollaps-Zeile "Agenten" im Inspector (Phase 10, §12 "aktive/wartende
- * Agenten unterscheidbar" bereits ohne Aufklappen). */
-function agentsSummaryLabel(subagents) {
-  const list = Array.isArray(subagents) ? subagents : [];
-  if (list.length === 0) return "keine";
-  const attention = list.filter(
-    (entry) => entry?.status === "needs_attention",
-  ).length;
-  const rest = list.length - attention;
-  const parts = [];
-  if (rest > 0) parts.push(`${rest} aktiv`);
-  if (attention > 0) parts.push(`${attention} braucht Eingabe`);
-  return parts.join(" · ");
-}
-
 function verificationPill() {
   const core = state.core;
   const status = core?.verification?.status || state.verificationStatus;
@@ -1309,10 +1882,8 @@ function verificationPill() {
   return `<span class="pill warn">${esc(status)}</span>`;
 }
 
-/** Inline-Detailinhalt einer aufgeklappten Übersichtszeile — dieselbe
- * Kategorie-Logik wie zuvor das separate Detailpanel, jetzt direkt unter
- * der Zeile gerendert statt in einem eigenen Panel-Modus (§5). Gespeist
- * aus Core-State, nie aus Chattext. */
+/* ------------------- Inspector-Bereinigung & Zielzustand --------------- */
+
 async function renderRowBody(body, key) {
   const core = state.core;
   body.innerHTML = "";
@@ -1328,20 +1899,31 @@ async function renderRowBody(body, key) {
     return;
   }
 
-  if (key === "agents") {
-    const subagents = core?.subagents ?? [];
+  if (key === "subagents" || key === "agents") {
+    const subagents = runStore.getSubagentRuns();
     if (subagents.length === 0) {
-      line("Keine aktiven Subagenten.");
+      line("Keine Subagenten in dieser Sitzung.");
       return;
     }
-    for (const entry of subagents) {
-      const { marker, label, cls } = interactions.subagentStatusPresentation(
-        entry.status,
-      );
-      line(
-        `${esc(interactions.agentDisplayLabel(entry.role || entry.agent))} ` +
-          `<span class="pill ${cls}">${marker} ${esc(label)}</span>`,
-      );
+    for (const run of subagents) {
+      const item = document.createElement("div");
+      item.className = "subagent-inspector-item";
+      const statusInfo = run.getStatusBadge();
+
+      item.innerHTML = `
+        <div>
+          <span class="subagent-inspector-name">${esc(run.agentName)}</span>
+          <div class="subagent-inspector-meta">${esc(run.task ? (run.task.length > 40 ? run.task.slice(0, 37) + "…" : run.task) : "")}</div>
+        </div>
+        <div style="text-align:right">
+          <span class="pill ${statusInfo.cls}">${statusInfo.marker} ${statusInfo.label}</span>
+          <div class="subagent-inspector-meta">${runsModule.formatDuration(run.durationMs)}</div>
+        </div>
+      `;
+      item.addEventListener("click", () => {
+        runStore.openTab(run.id);
+      });
+      body.appendChild(item);
     }
     return;
   }
@@ -1352,14 +1934,6 @@ async function renderRowBody(body, key) {
   }
 }
 
-/* -------------------- Verification (Phase 7, §09) ----------------------- */
-
-/** Springt zur Rohausgabe des letzten Verification-Werkzeugaufrufs (Phase 7
- * "Details aufklappbar"/"Fehlerdetails erreichbar"): core.verification
- * liefert nur das reduzierte Ergebnis je Check (success/failed/unavailable),
- * keine Rohausgabe — die liegt bereits in der zugehörigen Tool-Card der
- * Activity-Stream (Decision 005: Rohdaten bleiben zugänglich). Keine neue
- * Datenquelle, nur ein Sprung zu einer bereits vorhandenen. */
 function jumpToVerificationDetails() {
   const toolCallId = state.lastVerificationToolCallId;
   if (!toolCallId) return;
@@ -1369,10 +1943,6 @@ function jumpToVerificationDetails() {
   rawCard.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-/** Verification als First-Class-State (§09): pass/fail/running/offen klar
- * unterschieden, abgebrochene/ergebnislose Checks (RequiredOutcome
- * "unavailable") NIE als bestanden gewertet — eigener Marker statt
- * Gleichsetzung mit "failed" oder "success". */
 function renderVerificationBody(body, core, line) {
   const verification = core?.verification;
   const running = state.runningVerificationCalls.size > 0;
@@ -1423,20 +1993,8 @@ function renderVerificationBody(body, core, line) {
   }
 }
 
-/* ------------------- Changes Review (Phase 6, §08) ---------------------- */
-
-/** Obergrenze gerenderter Diff-Zeilen je Datei — große Diffs bleiben so
- * performant (Abschlusskriterium), ohne den Datenumfang zu verstecken:
- * die Kürzung wird als eigene Zeile ausgewiesen (§"Fehler dürfen niemals
- * wegaggregiert werden" gilt sinngemäß auch für Datenverlust). */
 const MAX_DIFF_LINES = 600;
 
-/** Datei-Liste + Diff direkt darunter statt in einer zweiten Spalte — der
- * Inspector ist ein schmaler, in der Breite verstellbarer Drawer, kein
- * Editor-Layout (Nicht-Ziel "kein vollständiger Editor", §Cursor-Referenz:
- * Vorbild, keine 1:1-Kopie). Jede Datei ist ein eigenes <details>-Element
- * (wie die Activity-Cards, §Phase 3): Dateiname + Statistik immer sichtbar,
- * der eigentliche Diff wird erst beim Aufklappen gerendert (Performance). */
 function renderChangesBody(body, core) {
   const changes = core?.changes;
   const summary = document.createElement("div");
@@ -1452,10 +2010,6 @@ function renderChangesBody(body, core) {
   }
   body.appendChild(summary);
 
-  // Reihenfolge/Vollständigkeit kommt aus core.changes (Core-Wahrheit,
-  // R6); state.fileDiffs liefert dazu die Diff-Rohdaten, wo vorhanden.
-  // Dateien, die core.changes (noch) nicht kennt, aber lokal editiert oder
-  // schon als Diff aufgezeichnet wurden, ergänzen die Liste statt zu fehlen.
   const paths = [];
   const seen = new Set();
   for (const path of changes?.files ?? []) {
@@ -1495,37 +2049,86 @@ function renderChangedFileRow(path) {
   name.textContent = path;
   name.title = path;
   summary.appendChild(name);
+
+  const actions = document.createElement("div");
+  actions.className = "diff-file-actions";
+
   if (diff?.stats) {
     const stat = document.createElement("span");
     stat.className = "diff-file-stat";
     stat.textContent = `+${diff.stats.linesAdded}/−${diff.stats.linesRemoved}`;
-    summary.appendChild(stat);
+    actions.appendChild(stat);
   }
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "icon-button";
+  copyBtn.title = "Pfad kopieren";
+  copyBtn.innerHTML = `<svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+  copyBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    api.copyToClipboard(path).then(() => {
+      copyBtn.style.color = "var(--ok)";
+      setTimeout(() => {
+        copyBtn.style.color = "";
+      }, 1200);
+    });
+  });
+  actions.appendChild(copyBtn);
+
+  const isSplitInitial = Boolean(state.diffSplitModes?.get(path));
+  const splitToggle = document.createElement("button");
+  splitToggle.type = "button";
+  splitToggle.className = "ghost-button diff-toggle-btn";
+  splitToggle.textContent = isSplitInitial ? "Unified" : "Split";
+  splitToggle.title = "Ansicht wechseln (Split / Unified)";
+  splitToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const cur = Boolean(state.diffSplitModes?.get(path));
+    if (!state.diffSplitModes) state.diffSplitModes = new Map();
+    state.diffSplitModes.set(path, !cur);
+    splitToggle.textContent = !cur ? "Unified" : "Split";
+    renderFileDiffContent(content, diff, ext, !cur);
+  });
+  actions.appendChild(splitToggle);
+
+  summary.appendChild(actions);
   details.appendChild(summary);
 
   const content = document.createElement("div");
   content.className = "diff-file-content";
   details.appendChild(content);
 
-  // Lazy: der eigentliche Diff wird erst beim ersten Aufklappen gerendert
-  // (Abschlusskriterium "große Diffs bleiben performant").
+  const ext = path.split(".").pop() || "";
   let rendered = false;
   details.addEventListener("toggle", () => {
     if (details.open) state.expandedDiffFiles.add(path);
     else state.expandedDiffFiles.delete(path);
     if (details.open && !rendered) {
       rendered = true;
-      renderFileDiffContent(content, diff);
+      renderFileDiffContent(
+        content,
+        diff,
+        ext,
+        Boolean(state.diffSplitModes?.get(path)),
+      );
     }
   });
   if (details.open) {
     rendered = true;
-    renderFileDiffContent(content, diff);
+    renderFileDiffContent(
+      content,
+      diff,
+      ext,
+      Boolean(state.diffSplitModes?.get(path)),
+    );
   }
   return details;
 }
 
-function renderFileDiffContent(content, diff) {
+function renderFileDiffContent(content, diff, lang = "", isSplit = false) {
   content.innerHTML = "";
   if (!diff?.hunks?.length) {
     const empty = document.createElement("div");
@@ -1535,6 +2138,70 @@ function renderFileDiffContent(content, diff) {
     content.appendChild(empty);
     return;
   }
+
+  if (isSplit) {
+    const splitContainer = document.createElement("div");
+    splitContainer.className = "diff-split-container";
+    let rendered = 0;
+    outerSplit: for (const hunk of diff.hunks) {
+      const header = document.createElement("div");
+      header.className = "diff-line diff-hunk-header";
+      header.textContent =
+        `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@` +
+        (hunk.heading ? ` ${hunk.heading}` : "");
+      splitContainer.appendChild(header);
+
+      const lines = hunk.lines ?? [];
+      let i = 0;
+      while (i < lines.length) {
+        if (rendered >= MAX_DIFF_LINES) break outerSplit;
+        const line = lines[i];
+        const row = document.createElement("div");
+        row.className = "diff-split-row";
+
+        const leftCol = document.createElement("div");
+        leftCol.className = "diff-split-col diff-split-left";
+        const rightCol = document.createElement("div");
+        rightCol.className = "diff-split-col diff-split-right";
+
+        if (line.kind === "context") {
+          leftCol.appendChild(createDiffLineFragment(line, lang, "context"));
+          rightCol.appendChild(createDiffLineFragment(line, lang, "context"));
+          i++;
+        } else if (line.kind === "removed") {
+          leftCol.classList.add("diff-remove");
+          leftCol.appendChild(createDiffLineFragment(line, lang, "remove"));
+          const next = lines[i + 1];
+          if (next && next.kind === "added") {
+            rightCol.classList.add("diff-add");
+            rightCol.appendChild(createDiffLineFragment(next, lang, "add"));
+            i += 2;
+          } else {
+            i++;
+          }
+        } else if (line.kind === "added") {
+          rightCol.classList.add("diff-add");
+          rightCol.appendChild(createDiffLineFragment(line, lang, "add"));
+          i++;
+        } else {
+          i++;
+        }
+
+        row.append(leftCol, rightCol);
+        splitContainer.appendChild(row);
+        rendered++;
+      }
+    }
+    if (rendered >= MAX_DIFF_LINES) {
+      const truncated = document.createElement("div");
+      truncated.className = "diff-empty";
+      truncated.textContent = `… Diff nach ${MAX_DIFF_LINES} Zeilen gekürzt`;
+      splitContainer.appendChild(truncated);
+    }
+    content.appendChild(splitContainer);
+    return;
+  }
+
   let rendered = 0;
   outer: for (const hunk of diff.hunks) {
     const header = document.createElement("div");
@@ -1545,7 +2212,7 @@ function renderFileDiffContent(content, diff) {
     content.appendChild(header);
     for (const diffLine of hunk.lines ?? []) {
       if (rendered >= MAX_DIFF_LINES) break outer;
-      content.appendChild(renderDiffLineEl(diffLine));
+      content.appendChild(renderDiffLineEl(diffLine, lang));
       rendered++;
     }
   }
@@ -1557,7 +2224,37 @@ function renderFileDiffContent(content, diff) {
   }
 }
 
-function renderDiffLineEl(diffLine) {
+function createDiffLineFragment(diffLine, lang = "", kind = "context") {
+  const frag = document.createDocumentFragment();
+  const marker = document.createElement("span");
+  marker.className = "diff-marker";
+  marker.textContent = kind === "add" ? "+" : kind === "remove" ? "-" : " ";
+  frag.appendChild(marker);
+
+  const textSpan = document.createElement("span");
+  textSpan.className = "diff-text";
+
+  if (lang && window.piGuiCodeBlock?.highlightTokens && diffLine.text) {
+    const tokens = window.piGuiCodeBlock.highlightTokens(diffLine.text, lang);
+    for (const token of tokens) {
+      if (token.cls) {
+        const span = document.createElement("span");
+        span.className = `tok-${token.cls}`;
+        span.textContent = token.text;
+        textSpan.appendChild(span);
+      } else {
+        textSpan.appendChild(document.createTextNode(token.text));
+      }
+    }
+  } else {
+    textSpan.textContent = diffLine.text ?? "";
+  }
+
+  frag.appendChild(textSpan);
+  return frag;
+}
+
+function renderDiffLineEl(diffLine, lang = "") {
   const row = document.createElement("div");
   const kind =
     diffLine.kind === "added"
@@ -1566,55 +2263,83 @@ function renderDiffLineEl(diffLine) {
         ? "remove"
         : "context";
   row.className = `diff-line diff-${kind}`;
-  const marker = kind === "add" ? "+" : kind === "remove" ? "-" : " ";
-  row.textContent = `${marker} ${diffLine.text ?? ""}`;
+
+  const marker = document.createElement("span");
+  marker.className = "diff-marker";
+  marker.textContent = kind === "add" ? "+" : kind === "remove" ? "-" : " ";
+  row.appendChild(marker);
+
+  const textSpan = document.createElement("span");
+  textSpan.className = "diff-text";
+
+  if (lang && window.piGuiCodeBlock?.highlightTokens && diffLine.text) {
+    const tokens = window.piGuiCodeBlock.highlightTokens(diffLine.text, lang);
+    for (const token of tokens) {
+      if (token.cls) {
+        const span = document.createElement("span");
+        span.className = `tok-${token.cls}`;
+        span.textContent = token.text;
+        textSpan.appendChild(span);
+      } else {
+        textSpan.appendChild(document.createTextNode(token.text));
+      }
+    }
+  } else {
+    textSpan.textContent = diffLine.text ?? "";
+  }
+
+  row.appendChild(textSpan);
   return row;
 }
 
-/** Eine einzige, immer sichtbare Zeilenliste: Aufgabe/Kontext/Modell sind
- * reine Statuszeilen, Workflow löst eine Aktion aus (Picker), Änderungen/
- * Agenten/Verifikation klappen ihren Inhalt inline auf statt in ein
- * separates Panel zu wechseln (§5 — ersetzt die frühere Übersicht/Detail-
- * Umschaltung). Sitzungswechsel läuft seit Phase 2 über die Task-Sidebar
- * (siehe renderTaskSidebar()), nicht mehr über eine zweite, flache Liste
- * hier (§R6 — keine redundante Zustandsdarstellung). */
 async function refreshContextOverview() {
   const rows = el("context-rows");
   if (!rows) return;
   const core = state.core;
-  let contextPart = "—";
+  let contextTokens = "—";
+  let contextPercent = 0;
+
   try {
     const stats = await api.getStats();
     if (stats?.contextUsage && stats.contextUsage.percent !== null) {
-      contextPart = `${stats.contextUsage.percent}% · ${stats.contextUsage.tokens} Tokens`;
+      contextPercent = Math.min(100, Math.max(0, stats.contextUsage.percent));
+      contextTokens = `${stats.contextUsage.tokens || 0} Tokens (${contextPercent}%)`;
     }
   } catch {
-    /* nicht verbunden */
+    /* ignore */
   }
+
+  const subagentsCount = runStore.getSubagentRuns().length;
 
   const rowDefs = [
     {
-      // Der Task-Titel steht bereits prominent im Header (§Phase 1) — hier
-      // keine zweite Anzeige, nur der reine Lauf-Status (§Phase 4).
-      label: "Status",
+      label: "Session",
       value: !state.connected
         ? "Nicht verbunden"
         : state.busy
-          ? "Working"
-          : "Bereit",
+          ? "● Working"
+          : "● Bereit",
       empty: !state.connected,
     },
     {
-      label: "Workflow",
-      value: core?.workflow?.label || "Work",
-      empty: !core?.workflow,
-      action: () => openWorkflowPicker(),
+      label: "Model",
+      value: `${state.modelLabel || "Standard"} · ${state.thinkingLabel ? "Denken " + state.thinkingLabel : "Standard"}`,
+      empty: !state.modelLabel,
+      action: () => openModelPicker(),
+    },
+    {
+      key: "changes",
+      label: "Changes",
+      value: core?.changes
+        ? `${core.changes.filesCount} Dateien`
+        : `${state.editedFiles.size} Dateien`,
+      empty: !core?.changes && state.editedFiles.size === 0,
     },
     {
       key: "verify",
-      label: "Verifikation",
+      label: "Verification",
       value:
-        (state.runningVerificationCalls.size > 0 ? "⏳ läuft … · " : "") +
+        (state.runningVerificationCalls.size > 0 ? "⏳ läuft … " : "") +
         esc(core?.verification?.status || state.verificationStatus || "—") +
         verificationPill(),
       raw: true,
@@ -1624,29 +2349,33 @@ async function refreshContextOverview() {
         state.runningVerificationCalls.size === 0,
     },
     {
-      key: "changes",
-      label: "Änderungen",
-      value: core?.changes
-        ? `${core.changes.filesCount} Dateien`
-        : `${state.editedFiles.size} Dateien (Sitzung)`,
-      empty: !core?.changes && state.editedFiles.size === 0,
-    },
-    {
-      key: "agents",
-      label: "Agenten",
-      value: agentsSummaryLabel(core?.subagents),
-      empty: !(core?.subagents?.length > 0),
-    },
-    { label: "Kontext", value: contextPart, empty: contextPart === "—" },
-    {
-      label: "Modell",
-      value: `${state.modelLabel || "—"} · Denken ${state.thinkingLabel || "—"}`,
-      empty: !state.modelLabel,
+      key: "subagents",
+      label: `Subagents (${subagentsCount})`,
+      value:
+        subagentsCount > 0
+          ? `${runStore.getActiveSubagents().length} aktiv`
+          : "keine",
+      empty: subagentsCount === 0,
     },
   ];
 
   rows.className = "";
   rows.innerHTML = "";
+
+  // Kontext-Balken Rendering
+  const contextBox = document.createElement("div");
+  contextBox.className = "context-usage-box";
+  contextBox.innerHTML = `
+    <div class="context-usage-header">
+      <span>Kontext</span>
+      <span>${esc(contextTokens)}</span>
+    </div>
+    <div class="context-bar">
+      <div class="context-bar-fill" style="width: ${contextPercent}%"></div>
+    </div>
+  `;
+  rows.appendChild(contextBox);
+
   const pending = [];
   for (const def of rowDefs) {
     const wrap = document.createElement("div");
@@ -1661,7 +2390,6 @@ async function refreshContextOverview() {
     else value.textContent = def.value;
 
     if (def.action) {
-      // Eine Aktion (Picker öffnen), keine Navigation zu einem Detail.
       const button = document.createElement("button");
       button.type = "button";
       button.className = "context-row";
@@ -1676,11 +2404,14 @@ async function refreshContextOverview() {
       button.className = "context-row";
       button.dataset.expandKey = def.key;
       button.setAttribute("aria-expanded", String(expanded));
+      const left = document.createElement("div");
+      left.className = "context-row-left";
       const caret = document.createElement("span");
       caret.className = "row-caret";
       caret.setAttribute("aria-hidden", "true");
       caret.textContent = expanded ? "▾" : "▸";
-      button.append(caret, label, value);
+      left.append(caret, label);
+      button.append(left, value);
       button.addEventListener("click", () => toggleRow(def.key));
       wrap.appendChild(button);
       if (expanded) {
@@ -1690,8 +2421,6 @@ async function refreshContextOverview() {
         pending.push(renderRowBody(body, def.key));
       }
     } else {
-      // Reine Statuszeile ohne weiteren Inhalt: kein deaktivierter Button
-      // (von Screenreadern meist übersprungen), sondern ein Status-Element.
       const row = document.createElement("div");
       row.className = "context-row static";
       row.setAttribute("role", "status");
@@ -1737,8 +2466,6 @@ function applyRuntimeState(runtimeState) {
   renderTaskSidebar();
 }
 
-/** Composer ist der Agent-Control-Point (§Phase 5): Work/Modell/Denken
- * erscheinen nur hier, nicht zusätzlich im Header (keine Doppelanzeige). */
 function refreshComposerPills() {
   const workflowPill = el("pill-workflow");
   if (workflowPill) {
@@ -1782,20 +2509,17 @@ function resetSessionView() {
   state.expandedDiffFiles.clear();
   state.runningVerificationCalls.clear();
   state.lastVerificationToolCallId = null;
+  runStore.clear();
   clearChat();
   clearBanners();
 }
 
-/** Historische Diffs der Sitzung nachladen (Phase 6): Live-Events erfassen
- * nur Änderungen ab dem Zeitpunkt, an dem diese Sitzung zur aktuellen
- * wurde — frühere, bereits in der Sitzungsdatei persistierte Diffs kommen
- * nur über diesen Weg (readSessionDiffs, R2/R6: reines Nachlesen). */
 async function loadSessionDiffs(sessionPath) {
   try {
     const diffs = await api.getSessionDiffs(sessionPath);
     for (const diff of diffs) state.fileDiffs.set(diff.path, diff);
   } catch {
-    /* Änderungsliste bleibt auf Basis von core.changes nutzbar */
+    /* ignore */
   }
 }
 
@@ -1855,8 +2579,6 @@ async function resumeSession(sessionPath) {
 
 async function startFreshSession() {
   if (!state.connected && !window.__piGuiCwd) {
-    // Kein Projekt gewählt: ein Start gegen ein unbestimmtes Verzeichnis
-    // wäre genau der ursprüngliche Projektauswahl-Bug.
     await openProjectPicker();
     return;
   }
@@ -1886,10 +2608,6 @@ async function startFreshSession() {
   });
 }
 
-/** Startbildschirm (Phase 8, §10): ersetzt den vormals leeren, schwarzen
- * Startzustand. Taskstart bleibt die Primäraktion — das Eingabefeld ist
- * sofort fokussiert und nutzbar, "Letzte Projekte" ist rein sekundär
- * darunter. */
 function renderNoProjectState() {
   chatEl.hidden = true;
   el("chat-placeholder").hidden = true;
@@ -1909,10 +2627,6 @@ function clearNoProjectState() {
   el("btn-send").disabled = false;
 }
 
-/** "Letzte Projekte" (Phase 8): dieselbe Persistenz wie im Projekt-Picker
- * (api.listRecentProjects()), hier aber direkt auf dem Startbildschirm
- * sichtbar statt hinter einem Dialog verborgen — sekundär, aber ohne
- * Umweg erreichbar. */
 async function renderStartscreenRecentProjects() {
   const section = el("startscreen-recent");
   const list = el("startscreen-recent-list");
@@ -1920,7 +2634,7 @@ async function renderStartscreenRecentProjects() {
   try {
     recent = await api.listRecentProjects();
   } catch {
-    /* Persistenz ist ein Komfortfeature, kein hartes Erfordernis */
+    /* ignore */
   }
   list.innerHTML = "";
   section.hidden = recent.length === 0;
@@ -1945,10 +2659,6 @@ async function renderStartscreenRecentProjects() {
   }
 }
 
-/** Primäraktion des Startbildschirms: Projekt öffnen (Ordnerwahl nur bei
- * Bedarf, s. startProjectAndTask) und, falls beschrieben, den Task sofort
- * senden — "neuer Task sofort startbar" ohne Zwischenschritt "erst Projekt
- * wählen, dann erneut tippen". */
 async function startTaskFromStartscreen() {
   const text = el("startscreen-input").value;
   const picked = await api.pickProjectFolder();
@@ -1956,9 +2666,6 @@ async function startTaskFromStartscreen() {
   await startProjectAndTask(picked.path, text);
 }
 
-/** Startet eine Sitzung in `cwd` und sendet optional den mitgegebenen
- * Text als ersten Prompt — gemeinsamer Kern für "Start →" (neuer Ordner)
- * und einen Klick auf ein "Letzte Projekte"-Element (bestehender Ordner). */
 async function startProjectAndTask(cwd, text) {
   if (state.busy) {
     showBanner("Pi arbeitet bereits. Stopp oder Warten.", "info");
@@ -1990,20 +2697,12 @@ async function startProjectAndTask(cwd, text) {
   });
 }
 
-/** Zeigt einen ruhigen Platzhalter statt einer leeren Hauptfläche, solange
- * ein Projekt offen ist, aber noch keine Nachricht existiert (frischer
- * Task) — Abschlusskriterium "keine leere Hauptfläche" (§10). Kein zweites
- * Eingabefeld: der echte Composer steht bereits am unteren Rand. */
 function updateChatEmptyHint() {
   const placeholder = el("chat-placeholder");
   if (!placeholder) return;
   placeholder.hidden = chatEl.hidden || chatEl.childElementCount > 0;
 }
 
-/** Öffnet ein anderes Projekt (oder zum ersten Mal eins): stoppt eine
- * laufende Sitzung sauber und startet `pi --mode rpc` neu mit dem
- * gewählten Arbeitsverzeichnis (PiRpcManager bindet cwd fest beim
- * Spawnen, ein Wechsel ohne Stop-dann-Start ist nicht möglich). */
 async function switchProject(cwd) {
   if (state.busy) {
     showBanner("Pi arbeitet bereits. Stopp oder Warten.", "info");
@@ -2039,14 +2738,12 @@ async function switchProject(cwd) {
   });
 }
 
-/** Ordner-Picker + zuletzt geöffnete Projekte (§1) — auf Basis der
- * bestehenden generischen Listenauswahl `openPicker`. */
 async function openProjectPicker() {
   let recent = [];
   try {
     recent = await api.listRecentProjects();
   } catch {
-    /* Persistenz ist ein Komfortfeature, kein hartes Erfordernis */
+    /* ignore */
   }
   const rows = [
     { label: "Ordner wählen …", value: "__pick__" },
@@ -2083,10 +2780,18 @@ async function sendMessage(text, opts = {}) {
       state.pendingLocalEchoes.push(text);
       appendUserBubble(text);
     }
+
+    const trimmed = text.trim();
+    if (trimmed && !opts.skipLocalEcho) {
+      if (state.promptHistory.at(-1) !== trimmed) {
+        state.promptHistory.push(trimmed);
+      }
+      state.historyIndex = -1;
+      state.tempDraft = "";
+    }
+
     await api.prompt(text);
     accepted = true;
-    // Slash-Commands können vollständig lokal enden und erzeugen dann kein
-    // agent_settled. Der Core-State entscheidet autoritativ über das Busy-UI.
     applyRuntimeState(await api.getState());
     return true;
   } catch (err) {
@@ -2108,16 +2813,14 @@ function refreshStatusBar() {
   );
   setDot(!state.connected ? "idle" : state.busy ? "busy" : "ready");
   el("btn-stop").disabled = !state.busy;
-  // Composer als Agent-Control-Point (§Phase 5): Placeholder macht den
-  // laufenden Task sichtbar, auch wenn der Nutzer gerade nicht tippt.
   if (inputEl) {
     inputEl.placeholder = state.busy
       ? "Anweisung an laufenden Task … (erst Stopp, dann senden)"
-      : "Nachricht an Pi … (Enter sendet, Shift+Enter neue Zeile)";
+      : "Was soll Pi tun? (Enter sendet, Shift+Enter neue Zeile)";
   }
 }
 
-/* ---------------------- Shortcuts (Phase 4, R5) ------------------------ */
+/* ---------------------- Shortcuts -------------------------------------- */
 
 const actions = {
   "workflow.open": () => openWorkflowPicker(),
@@ -2156,8 +2859,6 @@ const actions = {
 
 function setupShortcuts() {
   window.addEventListener("keydown", (event) => {
-    // Escape schließt den Inspector-Drawer (§Phase 4) — tritt zurück, wenn
-    // gerade ein natives <dialog> offen ist (das behandelt Escape selbst).
     if (
       event.key === "Escape" &&
       document.body.classList.contains("context-open") &&
@@ -2167,6 +2868,57 @@ function setupShortcuts() {
       closeContextDrawer();
       return;
     }
+
+    // Tab-Navigation: Alt+1..9 schaltet direkt zu Tab N
+    if (
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      event.key >= "1" &&
+      event.key <= "9"
+    ) {
+      const index = parseInt(event.key, 10) - 1;
+      if (index >= 0 && index < runStore.openTabs.length) {
+        event.preventDefault();
+        runStore.setActiveTab(runStore.openTabs[index]);
+        return;
+      }
+    }
+
+    // Tab-Wechsel: Ctrl+Alt+Left / Ctrl+Alt+Right oder Alt+[ / Alt+]
+    if (
+      (event.ctrlKey &&
+        event.altKey &&
+        (event.key === "ArrowLeft" || event.key === "ArrowRight")) ||
+      (event.altKey && (event.key === "[" || event.key === "]"))
+    ) {
+      const direction =
+        event.key === "ArrowRight" || event.key === "]" ? 1 : -1;
+      const currentIdx =
+        runStore.activeRunId === null
+          ? 0
+          : runStore.openTabs.indexOf(runStore.activeRunId);
+      if (currentIdx >= 0 && runStore.openTabs.length > 1) {
+        event.preventDefault();
+        const nextIdx =
+          (currentIdx + direction + runStore.openTabs.length) %
+          runStore.openTabs.length;
+        runStore.setActiveTab(runStore.openTabs[nextIdx]);
+        return;
+      }
+    }
+
+    // Aktiven Subagent-Tab schließen: Ctrl+w oder Ctrl+Alt+w (nur bei Run-View)
+    if (
+      ((event.ctrlKey && event.key === "w") ||
+        (event.ctrlKey && event.altKey && event.key === "w")) &&
+      runStore.activeRunId !== null
+    ) {
+      event.preventDefault();
+      runStore.closeTab(runStore.activeRunId);
+      return;
+    }
+
     if (event.repeat) return;
     const combo = interactions.comboFromKeyboardEvent(event);
     if (!combo) return;
@@ -2184,13 +2936,6 @@ function setupShortcuts() {
   });
 }
 
-/**
- * §16-Fix: Der Header kann bei schmalen Fenstern umbrechen (mehrzeilig
- * werden). `--header-h` darf dann keine feste Pixelannahme mehr sein,
- * sonst überlappt der Inspector-Drawer den umgebrochenen Header. Statt
- * eines CSS-Breakpoint-Ratens wird die tatsächliche Headerhöhe live
- * gemessen und als CSS-Variable gespiegelt.
- */
 function observeHeaderHeight() {
   const header = el("status-bar");
   if (!header || typeof ResizeObserver === "undefined") return;
@@ -2204,7 +2949,7 @@ function observeHeaderHeight() {
   sync();
 }
 
-/* --------------------- Inspector-Resize (§3) --------------------------- */
+/* --------------------- Inspector-Resize -------------------------------- */
 
 const INSPECTOR_MIN_W = 240;
 const INSPECTOR_MAX_W = 480;
@@ -2232,7 +2977,7 @@ function persistInspectorWidth() {
       String(currentInspectorWidth()),
     );
   } catch {
-    /* Bedienkomfort, kein hartes Erfordernis */
+    /* ignore */
   }
 }
 
@@ -2241,12 +2986,10 @@ function restoreInspectorWidth() {
     const stored = Number(localStorage.getItem(INSPECTOR_W_STORAGE_KEY));
     if (Number.isFinite(stored) && stored > 0) applyInspectorWidth(stored);
   } catch {
-    /* localStorage evtl. gesperrt (privater Modus) — Default bleibt gültig */
+    /* ignore */
   }
 }
 
-/** Inspector ist immer ein Overlay-Drawer (§Phase 1) — die Breite bleibt
- * bei jeder Fensterbreite per Ziehgriff einstellbar. */
 function setupInspectorResize() {
   const handle = el("inspector-resize-handle");
   if (!handle) return;
@@ -2295,29 +3038,37 @@ async function boot() {
     showBanner(interactions.piExitMessage(info));
   });
 
+  runStore.onChange(() => {
+    renderWorkspaceTabs();
+    void refreshContextOverview();
+  });
+
   state.shortcutByKey = {};
   try {
     for (const mapping of await api.getShortcuts()) {
       state.shortcutByKey[mapping.keys] = mapping;
     }
   } catch {
-    /* Shortcuts bleiben ungebunden; Maus bleibt voll nutzbar */
+    /* ignore */
   }
   setupShortcuts();
 
   for (const item of document.querySelectorAll(".nav-item")) {
     item.addEventListener("click", () => setActiveView(item.dataset.view));
   }
-  el("btn-refresh-context").addEventListener("click", () =>
+
+  el("btn-refresh-context")?.addEventListener("click", () =>
     refreshContextOverview(),
   );
+  el("btn-close-inspector")?.addEventListener("click", () =>
+    closeContextDrawer(),
+  );
+
   chatEl.addEventListener("scroll", () => {
     setFollowScroll(interactions.isNearBottom(chatEl));
   });
-  el("btn-jump-latest").addEventListener("click", () => scrollToBottom(true));
-  // Markdown-Links (chat/markdown.js) sind echte <a>-Elemente, aber das
-  // Fenster blockt jede In-App-Navigation (main/index.js). Ohne diesen
-  // Handler sähen Links klickbar aus und würden nichts tun.
+  el("btn-jump-latest")?.addEventListener("click", () => scrollToBottom(true));
+
   chatEl.addEventListener("click", (event) => {
     const link =
       event.target instanceof Element ? event.target.closest("a[href]") : null;
@@ -2332,50 +3083,169 @@ async function boot() {
       );
   });
 
-  el("btn-send").addEventListener("click", () => {
+  el("btn-send")?.addEventListener("click", () => {
     const text = inputEl.value;
     if (!text.trim()) return;
     inputEl.value = "";
     sendMessage(text);
   });
-  inputEl.addEventListener("keydown", (event) => {
+  inputEl?.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       const text = inputEl.value;
       if (!text.trim() || state.busy) return;
       inputEl.value = "";
       sendMessage(text);
+    } else if (
+      event.key === "ArrowUp" &&
+      inputEl.selectionStart === 0 &&
+      inputEl.selectionEnd === 0
+    ) {
+      if (state.promptHistory.length > 0) {
+        if (state.historyIndex === -1) {
+          state.tempDraft = inputEl.value;
+          state.historyIndex = state.promptHistory.length - 1;
+        } else if (state.historyIndex > 0) {
+          state.historyIndex--;
+        }
+        inputEl.value = state.promptHistory[state.historyIndex] || "";
+        event.preventDefault();
+      }
+    } else if (event.key === "ArrowDown") {
+      if (state.historyIndex !== -1) {
+        if (state.historyIndex < state.promptHistory.length - 1) {
+          state.historyIndex++;
+          inputEl.value = state.promptHistory[state.historyIndex] || "";
+        } else {
+          state.historyIndex = -1;
+          inputEl.value = state.tempDraft || "";
+        }
+        event.preventDefault();
+      }
     }
   });
-  el("btn-stop").addEventListener("click", () => {
+
+  // Drag & Drop für Dateien in den Composer
+  inputEl?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  });
+
+  inputEl?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    const paths = [];
+    const cwd = window.__piGuiCwd || "";
+    for (let i = 0; i < files.length; i++) {
+      let p = files[i].path;
+      if (p) {
+        if (cwd && p.startsWith(cwd)) {
+          p = p.slice(cwd.length).replace(/^[/\\]+/, "");
+        }
+        paths.push(p);
+      }
+    }
+    if (paths.length > 0) {
+      const text = paths.join(" ");
+      const start = inputEl.selectionStart || 0;
+      const end = inputEl.selectionEnd || 0;
+      inputEl.value =
+        inputEl.value.slice(0, start) + text + inputEl.value.slice(end);
+      inputEl.selectionStart = inputEl.selectionEnd = start + text.length;
+      inputEl.focus();
+    }
+  });
+
+  el("btn-stop")?.addEventListener("click", () => {
     api.abort().catch(() => undefined);
   });
-  el("btn-new-session").addEventListener("click", () => startFreshSession());
-  el("pill-workflow").addEventListener("click", () => openWorkflowPicker());
-  el("pill-model").addEventListener("click", () => openModelPicker());
-  el("pill-thinking").addEventListener("click", () => openThinkingPicker());
-  el("btn-palette").addEventListener("click", () => openCommandPalette());
-  el("btn-toggle-inspector").addEventListener("click", () =>
+  el("btn-new-session")?.addEventListener("click", () => startFreshSession());
+  el("pill-workflow")?.addEventListener("click", () => openWorkflowPicker());
+  el("pill-model")?.addEventListener("click", () => openModelPicker());
+  el("pill-thinking")?.addEventListener("click", () => openThinkingPicker());
+  el("btn-palette")?.addEventListener("click", () => openCommandPalette());
+  el("btn-toggle-inspector")?.addEventListener("click", () =>
     toggleContextArea(),
   );
-  el("project-label").addEventListener("click", () => openProjectPicker());
-  el("btn-open-project").addEventListener("click", () =>
+  el("project-label")?.addEventListener("click", () => openProjectPicker());
+  el("btn-open-project")?.addEventListener("click", () =>
     startTaskFromStartscreen(),
   );
-  el("startscreen-form").addEventListener("submit", (event) => {
+  el("startscreen-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void startTaskFromStartscreen();
   });
-  el("startscreen-input").addEventListener("keydown", (event) => {
+  el("startscreen-input")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void startTaskFromStartscreen();
     }
   });
-  el("btn-new-task").addEventListener("click", () => startFreshSession());
-  el("btn-collapse-tasks").addEventListener("click", () =>
+  el("btn-new-task")?.addEventListener("click", () => startFreshSession());
+  el("btn-empty-new-task")?.addEventListener("click", () =>
+    startFreshSession(),
+  );
+  el("btn-empty-open-project")?.addEventListener("click", () =>
+    openProjectPicker(),
+  );
+  el("btn-collapse-tasks")?.addEventListener("click", () =>
     toggleTaskSidebarCollapsed(),
   );
+
+  // Run View Controls
+  el("btn-run-close")?.addEventListener("click", () => {
+    if (runStore.activeRunId) {
+      runStore.closeTab(runStore.activeRunId);
+    }
+  });
+
+  el("btn-run-copy")?.addEventListener("click", () => {
+    if (runStore.activeRunId) {
+      copyRunSummary(runStore.getRun(runStore.activeRunId));
+    }
+  });
+
+  for (const btn of document.querySelectorAll(".run-filter-bar .filter-btn")) {
+    btn.addEventListener("click", () => {
+      state.runToolFilter = btn.dataset.filter || "all";
+      const currentRun = runStore.getRun(runStore.activeRunId);
+      if (currentRun) renderRunPanes(currentRun);
+    });
+  }
+
+  for (const btn of document.querySelectorAll(".run-nav-btn")) {
+    btn.addEventListener("click", () => {
+      state.activeRunSubpane = btn.dataset.subpane;
+      const currentRun = runStore.getRun(runStore.activeRunId);
+      if (currentRun) renderRunPanes(currentRun);
+    });
+  }
+
+  // Dauer-Ticker für laufende Subagenten
+  state.durationTimer = setInterval(() => {
+    const activeSubagents = runStore.getActiveSubagents();
+    if (activeSubagents.length > 0) {
+      for (const run of activeSubagents) {
+        updateSubagentChatCard(run);
+      }
+      if (runStore.activeRunId) {
+        const currentRun = runStore.getRun(runStore.activeRunId);
+        if (currentRun && currentRun.isRunning) {
+          const durationEl = el("run-duration-label");
+          if (durationEl)
+            durationEl.textContent = runsModule.formatDuration(
+              currentRun.durationMs,
+            );
+          const footerStatsEl = el("run-footer-stats");
+          if (footerStatsEl) {
+            footerStatsEl.textContent = `${runsModule.formatDuration(currentRun.durationMs)} · ${currentRun.toolCalls.size} Tools · ${currentRun.fileChanges.size} Dateien`;
+          }
+        }
+      }
+    }
+  }, 1000);
+
   observeHeaderHeight();
   restoreInspectorWidth();
   setupInspectorResize();
@@ -2396,8 +3266,7 @@ async function boot() {
 boot();
 
 /**
- * Headless-Smoke-Hook (wird vom Main-Prozess über executeJavaScript auf-
- * gerufen): echte Preload-Bridge, echter Pi, echte Session.
+ * Headless-Smoke-Hook
  */
 window.__piGuiSmoke = async function __piGuiSmoke(mode, cwd) {
   try {
@@ -2418,14 +3287,13 @@ window.__piGuiSmoke = async function __piGuiSmoke(mode, cwd) {
       }
       if (msg.type === "tool_execution_end") {
         sawActivitySummary = Boolean(
-          document.querySelector(".activity-card .activity-title"),
+          document.querySelector(".activity-card .activity-title") ||
+          document.querySelector(".subagent-chat-card"),
         );
       }
     });
     applyRuntimeState(await api.startSession({ cwd, noSession: true }));
     if (mode === "dialogs") {
-      // Die nur im Dialog-Smoke geladene Fixture öffnet einen echten
-      // providerfreien RPC-Select-Dialog.
       const promptResult = api.prompt("/gui-smoke-dialog").then(
         () => ({ ok: true }),
         (error) => ({ ok: false, error }),
@@ -2437,8 +3305,6 @@ window.__piGuiSmoke = async function __piGuiSmoke(mode, cwd) {
         if (!dialog) await new Promise((resolve) => setTimeout(resolve, 50));
       }
       if (!dialog) throw new Error("Extension-Dialog wurde nicht angezeigt");
-      // Das cancel-Ereignis ist der Browser-Pfad für Escape. Der Renderer muss
-      // die Anfrage genau einmal beantworten und den Dialog entfernen.
       dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
       const closeDeadline = Date.now() + 5_000;
       while (
@@ -2458,8 +3324,6 @@ window.__piGuiSmoke = async function __piGuiSmoke(mode, cwd) {
       if (state.busy) {
         throw new Error("lokaler Slash-Command ließ die GUI im Busy-Zustand");
       }
-      // Der Renderer unterstützt keinen Mehrzeilen-Editor. Seine explizite
-      // Cancellation muss den Core dennoch wieder freigeben.
       await api.prompt("/gui-smoke-editor");
       const recovered = await api.getState();
       if (!recovered?.sessionId) {

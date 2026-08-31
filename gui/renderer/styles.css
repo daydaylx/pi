@@ -1,56 +1,42 @@
 /**
- * Design-System (Phase 1) + Layout (Phase 2) + Chat-/Composer-/Inspector-
- * Darstellung (Phase 3-5) der Pi-Desktop-GUI. UI-Schrift ist system-ui;
- * Monospace ist auf Code, Pfade, Terminalausgabe, Diffs und technische IDs
- * begrenzt (Klasse `.mono` bzw. Code-/Pre-Elemente).
+ * Design-System & Styling der Pi-Desktop-GUI (Coding-Agenten Desktop-Frontend).
+ * UI-Schrift ist system-ui; Monospace auf Code, Pfade, Terminal, Diffs und IDs begrenzt.
  */
 
 :root {
-  /* Farben: dunkle Oberfläche mit klarer Elevation statt Terminal-Flat.
-     Statussemantik (Phase 9, §11 "Farbsemantik" — verbindlich, nicht nur
-     Namenskonvention): jede Farbe steht für GENAU eine Bedeutung, keine
-     Doppelverwendung über Status-Grenzen hinweg.
-       --accent → Primary (Auswahl, Aktion, Fokus)     = Violett
-       --running → Running (Aktivität läuft gerade)    = neutral/Blau
-       --ok      → Success (bestanden, abgeschlossen)  = Grün
-       --warn    → Warning (Hinweis, kein Fehlschlag)  = Orange
-       --err     → Error (fehlgeschlagen)               = Rot
-       --muted   → Inactive (sekundär, deaktiviert)     = Grau
-     "Running" ist bewusst von "Warning" getrennt: eine laufende Prüfung ist
-     kein Warnzustand. Vor Phase 9 teilten sich beide dieselbe Farbe
-     (--warn) — siehe Entscheidung 011. */
-  /* Warme Basis statt kühlem Blaugrau (Phase 9, Entscheidung 012): Grund-
-     flächen/Text/Border liegen im warmen Espresso-/Taupe-Bereich (Hue ~30°
-     statt ~215°). Die Statusfarben bleiben wie oben spezifiziert — sie
-     müssen als Signal auffallen und dürfen nicht zur Fläche "passen". */
-  --bg: #1c1815;
-  --surface: #221d18;
-  --surface-2: #2a241d;
-  --surface-3: #332b22;
-  --text: #f0e9e1;
-  --text-dim: #c9bfb2;
-  --muted: #9c9186;
+  /* Farbsemantik & Elevation */
+  --bg: #181512;
+  --surface: #1f1a16;
+  --surface-2: #27211b;
+  --surface-3: #322a22;
+  --surface-hover: #3b3229;
+  --surface-active: #443a2f;
+
+  --text: #f3ece4;
+  --text-dim: #cfc4b7;
+  --muted: #9e9286;
+  --border: #3d3328;
+  --border-soft: #2e261e;
+  --border-focus: #a78bfa;
+
   --accent: #a78bfa;
-  --accent-ink: #1f1830;
+  --accent-ink: #1b132e;
+  --accent-hover: #b89eff;
+  --accent-subtle: color-mix(in srgb, var(--accent) 15%, transparent);
+
   --running: #6ea8fe;
   --ok: #4cc38a;
   --err: #e5484d;
   --warn: #f5a524;
-  --border: #3a3025;
-  --border-soft: #2d271f;
 
-  /* Glasmorphismus (Phase 9, Entscheidung 012): nur für Flächen, die
-     tatsächlich ÜBER anderem Inhalt schweben (Inspector-Drawer, Dialoge,
-     Kopfleiste, Composer) — nie für dichten Lesetext (Code/Diff/Rohdaten),
-     da Unschärfe unter Text die Lesbarkeit verschlechtert. Helle statt
-     dunkle Kantenlinie, wie bei Frosted Glass üblich. */
-  --glass-bg: color-mix(in srgb, var(--surface) 88%, transparent);
-  --glass-bg-strong: color-mix(in srgb, var(--surface) 93%, transparent);
+  /* Glasmorphismus */
+  --glass-bg: color-mix(in srgb, var(--surface) 90%, transparent);
+  --glass-bg-strong: color-mix(in srgb, var(--surface) 95%, transparent);
   --glass-border: color-mix(in srgb, var(--text) 10%, transparent);
   --glass-blur: blur(20px) saturate(115%);
   --glass-shadow: 0 8px 32px rgba(10, 6, 2, 0.45);
 
-  /* Typografie: UI-Schrift ist system-ui, nicht Monospace. */
+  /* Typografie */
   --font-ui:
     system-ui, -apple-system, "Segoe UI", "Inter", Roboto, "Helvetica Neue",
     Arial, sans-serif;
@@ -58,7 +44,7 @@
     "JetBrains Mono", "Cascadia Code", ui-monospace, "SFMono-Regular", Consolas,
     monospace;
 
-  /* Spacing- und Radius-Skala. */
+  /* Spacing */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -68,13 +54,11 @@
   --radius-md: 10px;
   --radius-lg: 14px;
 
-  /* Layout-Maße. --header-h wird von renderer.js per ResizeObserver
-     synchron zur tatsächlichen Headerhöhe gehalten (kein fixer Wert),
-     damit ein umbrechender Header den Inspector-Drawer nicht verdeckt. */
-  --header-h: 48px;
+  /* Maße */
+  --header-h: 44px;
   --nav-w: 232px;
   --nav-w-collapsed: 56px;
-  --inspector-w: 300px;
+  --inspector-w: 320px;
 }
 
 * {
@@ -122,15 +106,15 @@ kbd {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  min-height: 48px;
-  padding: var(--space-2) var(--space-4);
-  background: var(--glass-bg-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border-bottom: 1px solid var(--glass-border);
+  min-height: var(--header-h);
+  padding: 6px var(--space-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-soft);
   flex: none;
   flex-wrap: wrap;
+  z-index: 10;
 }
+
 #header-left,
 #header-center,
 #header-right {
@@ -139,33 +123,39 @@ kbd {
   gap: var(--space-2);
   min-width: 0;
 }
+
 #header-center {
   flex: 1;
   justify-content: center;
   min-width: 60px;
 }
+
 #brand {
-  font-weight: 700;
+  font-weight: 750;
   letter-spacing: 0.04em;
   font-size: 14px;
+  color: var(--accent);
 }
+
 #project-label {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  color: var(--muted);
+  color: var(--text-dim);
   max-width: 28ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  padding: 3px 7px;
+  padding: 3px 8px;
 }
+
 #project-label:hover {
   color: var(--text);
   background: var(--surface-2);
   border-color: var(--border);
 }
+
 .chip {
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -175,15 +165,17 @@ kbd {
   color: var(--text-dim);
   background: transparent;
 }
+
 .chip-warn {
   color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
 }
+
 .header-sep {
   color: var(--border);
   font-size: 13px;
 }
-/* Aktueller Task: visueller Mittelpunkt des Headers (§Phase 1). */
+
 .task-title {
   font-size: 13px;
   color: var(--text);
@@ -191,13 +183,15 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 40ch;
+  max-width: 36ch;
 }
+
 #status-text {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 12px;
   white-space: nowrap;
 }
+
 .dot {
   width: 8px;
   height: 8px;
@@ -205,19 +199,24 @@ kbd {
   background: var(--muted);
   flex: none;
 }
+
 .dot.idle {
   background: var(--muted);
 }
+
 .dot.ready {
   background: var(--ok);
 }
+
 .dot.busy {
   background: var(--running);
   animation: pulse 1.6s ease-in-out infinite;
 }
+
 .dot.error {
   background: var(--err);
 }
+
 @keyframes pulse {
   0%,
   100% {
@@ -242,28 +241,51 @@ button {
   transition:
     border-color 0.12s ease,
     background 0.12s ease,
-    color 0.12s ease;
+    color 0.12s ease,
+    transform 0.08s ease;
 }
+
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  background: var(--surface-3);
+  border-color: var(--border-focus);
 }
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
 button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
 button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
 button.primary {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: transparent;
   font-weight: 600;
 }
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: transparent;
+}
+
 button.ghost-button {
   background: transparent;
+  border-color: transparent;
 }
+
+button.ghost-button:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
 .icon-button {
   display: inline-flex;
   align-items: center;
@@ -273,16 +295,20 @@ button.ghost-button {
   padding: 0;
   background: transparent;
   border-color: transparent;
+  border-radius: var(--radius-sm);
 }
+
 .icon-button:hover:not(:disabled) {
   background: var(--surface-2);
   border-color: var(--border);
 }
+
 .icon-button.active {
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+  background: var(--accent-subtle);
   border-color: var(--border);
 }
+
 .icon {
   width: 16px;
   height: 16px;
@@ -295,9 +321,6 @@ button.ghost-button {
 
 /* ------------------------------- Layout -------------------------------- */
 
-/* Inspector ist nie Teil des Grids (§Phase 1) — er öffnet immer als
-   Overlay-Drawer (siehe #context-area weiter unten), unabhängig von der
-   Fensterbreite. */
 #layout {
   flex: 1;
   display: grid;
@@ -305,49 +328,50 @@ button.ghost-button {
   min-height: 0;
   transition: grid-template-columns 0.15s ease-out;
 }
-/* Eingeklappte Task-Sidebar (§Phase 2): schrumpft auf Icon-Rail-Breite,
-   Text/Liste verschwinden — kein horizontaler Platzverlust. */
+
 body.task-sidebar-collapsed #layout {
   grid-template-columns: var(--nav-w-collapsed) minmax(0, 1fr);
 }
+
 body.task-sidebar-collapsed .sidebar-text,
 body.task-sidebar-collapsed #task-groups {
   display: none;
 }
+
 body.task-sidebar-collapsed #btn-collapse-tasks .nav-icon {
   transform: rotate(180deg);
 }
+
 body.task-sidebar-collapsed #task-sidebar-header {
   flex-direction: column;
   gap: var(--space-1);
 }
+
 body.task-sidebar-collapsed #btn-new-task {
   justify-content: center;
   padding: 6px;
   width: 100%;
 }
 
-/* Task Sidebar (links, §Phase 2): task-orientierte Navigation statt reiner
-   Icon-Leiste. Eingeklappt (body.task-sidebar-collapsed) schrumpft sie auf
-   die alte Icon-Rail-Breite zurück — kein horizontaler Platzverlust. */
+/* Task Sidebar */
 #side-nav {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  padding: 0;
   background: var(--surface);
   border-right: 1px solid var(--border-soft);
   overflow: hidden;
   min-width: 0;
 }
+
 #task-sidebar-header {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-2) var(--space-2);
+  padding: var(--space-2);
   flex: none;
   border-bottom: 1px solid var(--border-soft);
 }
+
 #btn-new-task {
   flex: 1;
   display: flex;
@@ -357,28 +381,33 @@ body.task-sidebar-collapsed #btn-new-task {
   padding: 6px var(--space-2);
   white-space: nowrap;
   overflow: hidden;
+  font-size: 13px;
 }
+
 .sidebar-text {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 #task-groups {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: var(--space-2);
   min-height: 0;
 }
+
 .task-group + .task-group {
   margin-top: var(--space-3);
 }
+
 .task-group-label {
   display: block;
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--muted);
   padding: 0 var(--space-2) 4px;
 }
+
 .task-row {
   width: 100%;
   display: flex;
@@ -392,14 +421,17 @@ body.task-sidebar-collapsed #btn-new-task {
   color: var(--text);
   margin-bottom: 1px;
 }
+
 .task-row:hover {
   background: var(--surface-2);
   border-color: var(--border);
 }
+
 .task-row.current {
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: var(--accent-subtle);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
+
 .task-row-marker {
   flex: none;
   width: 14px;
@@ -407,22 +439,28 @@ body.task-sidebar-collapsed #btn-new-task {
   line-height: 1.5;
   font-size: 13px;
 }
+
 .task-row-marker.status-active {
-  color: var(--ok);
+  color: var(--running);
 }
+
 .task-row-marker.status-needs_input {
   color: var(--warn);
 }
+
 .task-row-marker.status-review {
-  color: var(--muted);
+  color: var(--text-dim);
 }
+
 .task-row-marker.status-completed {
   color: var(--muted);
 }
+
 .task-row-body {
   min-width: 0;
   flex: 1;
 }
+
 .task-row-title {
   display: block;
   font-size: 13px;
@@ -430,6 +468,7 @@ body.task-sidebar-collapsed #btn-new-task {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .task-row-meta {
   display: block;
   font-size: 11px;
@@ -438,12 +477,14 @@ body.task-sidebar-collapsed #btn-new-task {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .task-groups-empty {
   color: var(--muted);
   font-size: 12.5px;
   font-style: italic;
   padding: var(--space-2);
 }
+
 #task-sidebar-footer {
   display: flex;
   flex-direction: column;
@@ -453,6 +494,7 @@ body.task-sidebar-collapsed #btn-new-task {
   flex: none;
   border-top: 1px solid var(--border-soft);
 }
+
 .nav-item {
   display: flex;
   align-items: center;
@@ -465,14 +507,17 @@ body.task-sidebar-collapsed #btn-new-task {
   border-radius: var(--radius-md);
   color: var(--muted);
 }
+
 .nav-item:hover {
   color: var(--text);
   background: var(--surface-2);
 }
+
 .nav-item.active {
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+  background: var(--accent-subtle);
 }
+
 .nav-icon {
   width: 19px;
   height: 19px;
@@ -483,42 +528,206 @@ body.task-sidebar-collapsed #btn-new-task {
   stroke-linejoin: round;
 }
 
-/* Konversation (mittlere Spalte, Hauptfläche: ~65-80% Aufmerksamkeit). */
+/* -------------------------- Hauptarbeitsbereich ------------------------ */
+
 #conversation {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   background: var(--bg);
+  position: relative;
 }
+
+/* Workspace Tabs Bar */
+#workspace-tabs {
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-soft);
+  padding: 0 var(--space-3);
+  min-height: 38px;
+  flex: none;
+  overflow-x: auto;
+}
+
+#tabs-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 38px;
+}
+
+.workspace-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.12s ease;
+}
+
+.workspace-tab:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.workspace-tab.active {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border-soft) var(--border-soft) transparent;
+  border-bottom: 2px solid var(--accent);
+  font-weight: 600;
+}
+
+.tab-icon {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+.tab-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+.tab-status-dot.running {
+  background: var(--running);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.tab-status-dot.completed {
+  background: var(--ok);
+}
+
+.tab-status-dot.failed {
+  background: var(--err);
+}
+
+.tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-left: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.tab-close:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+#workspace-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+#chat-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 #chat {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-5) clamp(16px, 6%, 96px);
   scroll-behavior: smooth;
 }
-/* Leerzustand ohne offenes Projekt (§1) — Composer bleibt deaktiviert,
-   solange kein Projekt gewählt ist (siehe renderNoProjectState()). */
+
+/* Empty State / Startscreen */
+#chat-placeholder:not([hidden]) {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  color: var(--muted);
+}
+
+.empty-state-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 480px;
+  gap: var(--space-3);
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.icon-large {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+}
+
+.empty-state-content h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.empty-state-content p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.empty-state-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 #no-project {
   flex: 1;
-}
-#no-project:not([hidden]) {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  color: var(--muted);
-  text-align: center;
-  padding: var(--space-5);
-}
-#no-project p {
-  margin: 0;
-  font-size: 14px;
 }
 
-/* Startbildschirm (Phase 8, §10): Taskstart bleibt Primäraktion, Letzte
-   Projekte nur sekundär darunter — kein Dashboard, keine Statistikansicht. */
 #startscreen {
   display: flex;
   flex-direction: column;
@@ -526,16 +735,20 @@ body.task-sidebar-collapsed #btn-new-task {
   gap: var(--space-3);
   width: min(480px, 88vw);
 }
+
 #startscreen-title {
   margin: 0;
   font-size: 28px;
-  font-weight: 600;
-  color: var(--text);
+  font-weight: 700;
+  color: var(--accent);
 }
+
 #startscreen-subtitle {
   margin: 0 0 var(--space-2);
   font-size: 15px;
+  color: var(--text-dim);
 }
+
 #startscreen-form {
   display: flex;
   flex-direction: column;
@@ -543,9 +756,10 @@ body.task-sidebar-collapsed #btn-new-task {
   width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 10px);
+  border-radius: var(--radius-md);
   padding: var(--space-3);
 }
+
 #startscreen-input {
   width: 100%;
   resize: vertical;
@@ -555,22 +769,25 @@ body.task-sidebar-collapsed #btn-new-task {
   font: inherit;
   outline: none;
 }
+
 #startscreen-start {
   align-self: flex-end;
 }
+
 #startscreen-recent {
   width: 100%;
   margin-top: var(--space-3);
   text-align: left;
 }
+
 #startscreen-recent h2 {
   margin: 0 0 var(--space-2);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  text-transform: uppercase;
+  font-size: 12px;
   font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.04em;
 }
+
 .startscreen-recent-row {
   width: 100%;
   display: flex;
@@ -584,272 +801,477 @@ body.task-sidebar-collapsed #btn-new-task {
   color: var(--text);
   text-align: left;
 }
+
 .startscreen-recent-row:hover {
   background: var(--surface-2);
   border-color: var(--border);
 }
+
 .startscreen-recent-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .startscreen-recent-time {
   flex: none;
   color: var(--muted);
   font-size: 12px;
 }
 
-/* Leerzustand MIT offenem Projekt, aber ohne Nachrichten (frischer Task,
-   §10 "keine leere Hauptfläche") — kein zweites Eingabefeld, der echte
-   Composer steht am unteren Rand bereits bereit. */
-#chat-placeholder:not([hidden]) {
+/* ---------------------------- Subagent Run View ------------------------- */
+
+#run-view {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted);
-  font-size: 15px;
-}
-#chat-placeholder p {
-  margin: 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
 }
 
-/* Inspector: eine einzige Übersicht, deren Zeilen ihren Inhalt inline
-   aufklappen statt in ein separates Detailpanel zu wechseln (§5). Anders
-   als früher ist er nie permanenter Teil des Hauptlayouts (§Phase 1) —
-   er öffnet als Overlay-Drawer über der Konversation, ausgelöst über
-   Nav-Rail, Header-Button oder Super+I (siehe body.context-open). */
-#context-area {
-  border-left: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  padding: var(--space-4) var(--space-3);
-  overflow-y: auto;
-  font-size: 13px;
-  min-width: 0;
-  position: fixed;
-  top: var(--header-h);
-  right: 0;
-  bottom: 0;
-  width: min(var(--inspector-w), 92vw);
-  transform: translateX(100%);
-  transition: transform 0.15s ease-out;
-  z-index: 20;
-  box-shadow: var(--glass-shadow);
+#run-header {
+  padding: var(--space-3) clamp(16px, 6%, 96px);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-soft);
+  flex: none;
 }
-body.context-open #context-area {
-  transform: translateX(0);
-}
-#context-area h2 {
-  margin: var(--space-1) 0 var(--space-3);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  text-transform: uppercase;
-  font-weight: 600;
-}
-#context-rows.skeleton {
-  color: var(--muted);
-  font-style: italic;
-  padding: 8px 10px;
-}
-.context-row-wrap {
-  margin-bottom: 2px;
-}
-.context-row {
-  width: 100%;
+
+#run-header-top {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  text-align: left;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+#run-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+#run-agent-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
   color: var(--text);
 }
-.context-row:hover {
-  background: var(--surface-2);
-  border-color: var(--border);
-}
-/* Reine Statuszeilen ohne aufklappbaren Inhalt: kein deaktivierter Button
-   (von Screenreadern meist übersprungen), sondern ein role="status"-Element
-   mit voller Lesbarkeit statt Disabled-Abblendung (§2). */
-.context-row.static {
-  cursor: default;
-}
-.row-caret {
-  flex: none;
+
+.run-duration {
+  font-size: 12.5px;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.7;
-}
-.context-row .row-label {
-  display: block;
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin-bottom: 2px;
-}
-.context-row .row-value {
-  display: block;
-  word-break: break-word;
-}
-.context-row .row-value.empty {
-  color: var(--muted);
-  font-style: italic;
-}
-.pill {
-  display: inline-block;
-  border-radius: 999px;
-  padding: 0 8px;
-  font-size: 11px;
-  margin-left: 6px;
-}
-.pill.ok {
-  background: color-mix(in srgb, var(--ok) 22%, transparent);
-  color: var(--ok);
-}
-.pill.err {
-  background: color-mix(in srgb, var(--err) 22%, transparent);
-  color: var(--err);
-}
-.pill.warn {
-  background: color-mix(in srgb, var(--warn) 22%, transparent);
-  color: var(--warn);
-}
-.pill.running {
-  background: color-mix(in srgb, var(--running) 22%, transparent);
-  color: var(--running);
-}
-.pill.muted {
-  background: var(--surface-2);
-  color: var(--muted);
-}
-.context-row-body {
-  margin: 0 2px var(--space-2);
-  padding-left: 18px;
-  word-break: break-word;
-}
-.panel-line {
-  padding: 6px 2px;
-  border-bottom: 1px solid var(--border-soft);
-  font-size: 13px;
-}
-.panel-line.loading {
-  color: var(--muted);
-  font-style: italic;
-  border-bottom: none;
-}
-#btn-refresh-context {
-  margin-top: var(--space-3);
-  width: 100%;
 }
 
-/* Changes Review (Phase 6, §08): Datei-Liste mit Diff direkt darunter statt
-   einer zweiten Spalte — der Inspector ist ein schmaler, verstellbarer
-   Drawer, kein Editor-Layout. */
-.diff-file {
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  margin-bottom: 6px;
-  overflow: hidden;
-}
-.diff-file summary {
+#run-header-actions {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px;
-  cursor: pointer;
-  background: var(--surface-2);
-  font-size: 12.5px;
+  align-items: center;
+  gap: var(--space-2);
 }
-.diff-file summary:hover {
-  background: var(--surface-3, var(--surface-2));
-}
-.diff-file-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono, monospace);
-}
-.diff-file-stat {
-  flex: none;
-  color: var(--muted);
-  font-size: 11px;
-}
-.diff-file-content {
-  max-height: 420px;
-  overflow: auto;
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-}
-.diff-line {
-  padding: 0 8px;
-  white-space: pre-wrap;
-  word-break: break-word;
+
+.run-task-display {
+  margin-top: 6px;
+  font-size: 13.5px;
+  color: var(--text-dim);
   line-height: 1.5;
 }
-.diff-hunk-header {
+
+.run-meta-row {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: 6px;
+  font-size: 12px;
   color: var(--muted);
-  background: var(--surface-2);
-}
-.diff-add {
-  background: color-mix(in srgb, var(--ok) 14%, transparent);
-  color: var(--ok);
-}
-.diff-remove {
-  background: color-mix(in srgb, var(--err) 14%, transparent);
-  color: var(--err);
-}
-.diff-context {
-  color: var(--text);
-}
-.diff-empty {
-  padding: 6px 8px;
-  color: var(--muted);
-  font-style: italic;
+  flex-wrap: wrap;
 }
 
-/* Verification (Phase 7, §09): laufende Prüfung bleibt sichtbar statt nur
-   im letzten Toolcard-Status zu stecken. */
-.panel-line.verify-running {
-  color: var(--running);
+.run-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Run Sub-Navigation */
+#run-nav {
+  display: flex;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-soft);
+  padding: 0 clamp(16px, 6%, 96px);
+  gap: var(--space-1);
+  flex: none;
+}
+
+.run-nav-btn {
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.run-nav-btn:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.run-nav-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
   font-weight: 600;
 }
-.verify-details-btn {
-  margin-top: var(--space-2);
-  width: 100%;
+
+.badge-count {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  margin-left: 4px;
 }
 
-/* Ziehgriff zwischen Konversation und Inspector-Drawer (§3/§Phase 1):
-   fix positioniert direkt an der linken Kante des Drawers, nur sichtbar/
-   bedienbar, während der Drawer offen ist. */
-#inspector-resize-handle {
+#run-panes {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.run-pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) clamp(16px, 6%, 96px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.run-pane[hidden] {
   display: none;
-  width: 6px;
-  cursor: col-resize;
-  background: transparent;
-  position: fixed;
-  top: var(--header-h);
-  bottom: 0;
-  right: min(var(--inspector-w), 92vw);
-  z-index: 21;
 }
-body.context-open #inspector-resize-handle {
-  display: block;
+
+/* Run Filter Bar */
+.run-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 8px;
 }
-#inspector-resize-handle:hover,
-#inspector-resize-handle:focus-visible {
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-  outline: none;
+
+.filter-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-right: 2px;
 }
-body.resizing-inspector {
-  cursor: col-resize;
-  user-select: none;
+
+.filter-btn {
+  padding: 2px 8px;
+  font-size: 11.5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+}
+
+.filter-btn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.filter-btn.active {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Run Timeline */
+.run-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 82ch;
+}
+
+.timeline-event {
+  padding: 10px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.timeline-event.hidden {
+  display: none !important;
+}
+
+.timeline-event.start {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+.timeline-event.complete {
+  border-color: color-mix(in srgb, var(--ok) 30%, var(--border-soft));
+  background: color-mix(in srgb, var(--ok) 6%, var(--surface));
+}
+
+.timeline-event.failed {
+  border-color: color-mix(in srgb, var(--err) 40%, var(--border-soft));
+  background: color-mix(in srgb, var(--err) 8%, var(--surface));
+}
+
+.timeline-event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.timeline-event-content {
+  color: var(--text);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Run Tools & Files */
+.run-tools-summary {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.tool-stat-chip {
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+}
+
+.run-tools-list,
+.run-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Hierarchy Tree */
+.hierarchy-tree-view {
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+
+.hierarchy-tree-view h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.tree-node:hover {
+  background: var(--surface-2);
+}
+
+.tree-node.current {
+  background: var(--accent-subtle);
+  font-weight: 600;
+}
+
+.tree-node-indent {
+  display: inline-block;
+  width: 16px;
+}
+
+/* Run Info Table */
+.run-info-table {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.run-info-key {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.run-info-val {
+  color: var(--text);
+  word-break: break-word;
+}
+
+#run-footer {
+  padding: 8px clamp(16px, 6%, 96px);
+  background: var(--surface);
+  border-top: 1px solid var(--border-soft);
+  font-size: 12px;
+  color: var(--muted);
+  flex: none;
+}
+
+/* ----------------------- Subagent Chat Card (Main Chat) ----------------- */
+
+.subagent-chat-card {
+  margin: var(--space-3) 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  max-width: 78ch;
+  transition: border-color 0.12s ease;
+}
+
+.subagent-chat-card:hover {
+  border-color: var(--border-focus);
+}
+
+.subagent-chat-card.running {
+  border-color: color-mix(in srgb, var(--running) 40%, var(--border));
+  background: color-mix(in srgb, var(--running) 4%, var(--surface));
+}
+
+.subagent-chat-card.done-ok {
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--border));
+}
+
+.subagent-chat-card.done-error {
+  border-color: color-mix(in srgb, var(--err) 45%, var(--border));
+  background: color-mix(in srgb, var(--err) 6%, var(--surface));
+}
+
+.subagent-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.subagent-card-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.subagent-card-name {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.subagent-card-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.subagent-card-glyph {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.subagent-chat-card.done-ok .subagent-card-glyph {
+  color: var(--ok);
+}
+
+.subagent-chat-card.done-error .subagent-card-glyph {
+  color: var(--err);
+}
+
+.subagent-card-task {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.subagent-card-summary {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.subagent-card-actions {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.btn-open-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.btn-icon {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.subagent-card-details {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+.subagent-card-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+.subagent-card-details summary:hover {
+  color: var(--text);
+}
+
+.subagent-card-result-text {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
 }
 
 /* -------------------------------- Chat --------------------------------- */
@@ -858,126 +1280,148 @@ body.resizing-inspector {
   margin: 0 0 var(--space-5);
   max-width: 78ch;
 }
+
 .msg.user {
   margin-left: auto;
 }
+
 .msg.user .bubble {
   background: var(--surface-2);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg) var(--radius-lg) var(--space-1)
     var(--radius-lg);
 }
+
 .msg.assistant .bubble {
   border-radius: var(--space-1) var(--radius-lg) var(--radius-lg)
     var(--radius-lg);
 }
+
 .bubble {
   padding: 11px 15px;
   background: transparent;
   word-break: break-word;
 }
+
 .msg.user .bubble {
   white-space: pre-wrap;
 }
+
 .role-label {
   font-size: 11px;
   color: var(--muted);
   margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-weight: 500;
 }
 
-/* Markdown-Inhalt der Assistant-Antwort (Phase 3, P0). */
 .md {
   font-size: 14.5px;
   line-height: 1.6;
 }
+
 .md > *:first-child {
   margin-top: 0;
 }
+
 .md > *:last-child {
   margin-bottom: 0;
 }
+
 .md-heading {
   margin: var(--space-4) 0 var(--space-2);
   font-weight: 650;
   line-height: 1.3;
 }
+
 h1.md-heading {
   font-size: 1.5em;
 }
+
 h2.md-heading {
   font-size: 1.28em;
 }
+
 h3.md-heading {
   font-size: 1.14em;
 }
+
 h4.md-heading,
 h5.md-heading,
 h6.md-heading {
   font-size: 1em;
   color: var(--text-dim);
 }
+
 .md-paragraph {
   margin: var(--space-2) 0;
   white-space: pre-wrap;
 }
+
 .md-list {
   margin: var(--space-2) 0;
   padding-left: 1.4em;
 }
+
 .md-list li {
   margin: 3px 0;
 }
-.md-list .md-list {
-  margin: 2px 0;
-}
+
 .md-blockquote {
   margin: var(--space-3) 0;
   padding: var(--space-1) var(--space-3);
-  border-left: 3px solid var(--border);
+  border-left: 3px solid var(--accent);
   color: var(--text-dim);
+  background: var(--surface);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
+
 .md hr {
   margin: var(--space-4) 0;
   border: none;
   border-top: 1px solid var(--border);
 }
+
 .md a {
   color: var(--accent);
   text-decoration: none;
 }
+
 .md a:hover {
   text-decoration: underline;
 }
+
 .md-inline-code {
   background: var(--surface-3);
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 0.88em;
 }
+
 .md-table-wrap {
   overflow-x: auto;
   margin: var(--space-3) 0;
 }
+
 .md-table {
   border-collapse: collapse;
   font-size: 13.5px;
   min-width: 100%;
 }
+
 .md-table th,
 .md-table td {
   border: 1px solid var(--border);
   padding: 6px 10px;
   text-align: left;
 }
+
 .md-table th {
   background: var(--surface-2);
   color: var(--text-dim);
   font-weight: 600;
 }
 
-/* Codeblock als eigene Komponente (Phase 3, §9). */
+/* Codeblock */
 .code-block {
   margin: var(--space-3) 0;
   border: 1px solid var(--border);
@@ -985,6 +1429,7 @@ h6.md-heading {
   overflow: hidden;
   background: var(--surface-3);
 }
+
 .code-block-head {
   display: flex;
   align-items: center;
@@ -993,32 +1438,38 @@ h6.md-heading {
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
+
 .code-lang {
   font-size: 11.5px;
   color: var(--muted);
-  letter-spacing: 0.03em;
 }
+
 .code-copy {
   padding: 3px 10px;
   font-size: 11.5px;
   background: transparent;
   color: var(--muted);
 }
+
 .code-copy:hover {
   color: var(--text);
   border-color: var(--accent);
 }
+
 .code-copy.copied {
   color: var(--ok);
   border-color: var(--ok);
 }
+
 .code-copy.failed {
   color: var(--err);
   border-color: var(--err);
 }
+
 .code-block-scroll {
   overflow-x: auto;
 }
+
 .code-block-code {
   display: block;
   padding: 12px 14px;
@@ -1027,6 +1478,7 @@ h6.md-heading {
   white-space: pre;
   tab-size: 2;
 }
+
 .tok-kw {
   color: #c792ea;
 }
@@ -1041,36 +1493,34 @@ h6.md-heading {
   font-style: italic;
 }
 
-/* Activity Stream (§Phase 3): semantische Karten statt Toolspam. Titel +
-   Kernzeilen sind IMMER sichtbar (kein <details> auf Kartenebene) — nur
-   die Rohdaten je Werkzeugaufruf (.activity-raw) sind aufklappbar, damit
-   Fehler nie durch Zuklappen verschwinden können. */
+/* Activity Stream */
 .activity-card {
   margin: 4px 0 var(--space-3);
   max-width: 78ch;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   background: var(--surface);
 }
+
 .activity-header {
   display: flex;
   align-items: center;
   gap: 6px;
 }
+
 .activity-title {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-dim);
 }
+
 .activity-header::before {
   content: "●";
   font-size: 11px;
   color: var(--muted);
 }
-/* Eigenes Glyph statt eines nur umgefärbten Punkts (§11 "keine Farbe als
-   einziges Statussignal") — "laufend" unterscheidet sich auch in der Form
-   vom statischen Aufzähl-Punkt links und von ✓/✗ rechts. */
+
 .activity-card.running .activity-header::after {
   content: "⋯";
   color: var(--running);
@@ -1078,36 +1528,44 @@ h6.md-heading {
   margin-left: auto;
   animation: pulse 1.6s ease-in-out infinite;
 }
+
 .activity-card.done-ok .activity-header::after {
   content: "✓";
   color: var(--ok);
   margin-left: auto;
 }
+
 .activity-card.done-error .activity-header::after {
   content: "✗";
   color: var(--err);
   margin-left: auto;
 }
+
 .activity-card.done-error {
   border-color: color-mix(in srgb, var(--err) 45%, var(--border));
 }
+
 .activity-lines {
   margin-top: 4px;
   padding-left: 15px;
 }
+
 .activity-line {
   font-size: 12.5px;
   color: var(--muted);
   line-height: 1.6;
 }
+
 .activity-line.error {
   color: var(--err);
   font-weight: 500;
 }
+
 details.activity-raw {
   margin-top: 4px;
   padding-left: 15px;
 }
+
 details.activity-raw > summary {
   list-style: none;
   cursor: pointer;
@@ -1117,21 +1575,25 @@ details.activity-raw > summary {
   border-radius: var(--radius-sm);
   width: fit-content;
 }
+
 details.activity-raw > summary::-webkit-details-marker {
   display: none;
 }
+
 details.activity-raw > summary::before {
   content: "▸ ";
   opacity: 0.7;
 }
+
 details.activity-raw[open] > summary::before {
   content: "▾ ";
 }
+
 details.activity-raw > summary:hover {
   background: var(--surface-2);
 }
 
-/* Kompakte Tool-Cards (Rohdaten je Werkzeugaufruf, in .activity-raw). */
+/* Tool Cards */
 details.tool-card {
   margin: 4px 0 4px 14px;
   border: 1px solid var(--border-soft);
@@ -1139,6 +1601,7 @@ details.tool-card {
   background: var(--surface);
   font-size: 12.5px;
 }
+
 details.tool-card summary {
   padding: 4px 10px;
   cursor: pointer;
@@ -1147,34 +1610,41 @@ details.tool-card summary {
   font-family: var(--font-mono);
   font-size: 12px;
 }
+
 details.tool-card summary::before {
   content: "▸ ";
 }
+
 details.tool-card[open] summary::before {
   content: "▾ ";
 }
+
 details.tool-card.running summary::after {
   content: " ⋯";
   color: var(--running);
   font-weight: 700;
   animation: pulse 1.6s ease-in-out infinite;
 }
+
 details.tool-card.done-ok summary::after {
   content: " ✓";
   color: var(--ok);
 }
-/* Fehlgeschlagene Tools eskalieren sichtbar statt nur ein Suffix zu tragen. */
+
 details.tool-card.done-error {
   border-color: color-mix(in srgb, var(--err) 55%, var(--border));
   background: color-mix(in srgb, var(--err) 7%, var(--surface));
 }
+
 details.tool-card.done-error summary {
   color: var(--err);
 }
+
 details.tool-card.done-error summary::after {
   content: " ✗";
   color: var(--err);
 }
+
 details.tool-card pre {
   margin: 0;
   padding: 8px 10px;
@@ -1186,24 +1656,28 @@ details.tool-card pre {
   font-size: 12px;
 }
 
-/* Reasoning bleibt verfügbar, aber gegenüber der Antwort sekundär (§12). */
+/* Thinking Block */
 details.thinking-block {
   margin: 4px 0 var(--space-3);
   max-width: 78ch;
   color: var(--muted);
 }
+
 details.thinking-block summary {
   cursor: pointer;
   padding: 3px 4px;
   list-style: none;
   font-size: 12.5px;
 }
+
 details.thinking-block summary::before {
   content: "▸ ";
 }
+
 details.thinking-block[open] summary::before {
   content: "▾ ";
 }
+
 details.thinking-block pre {
   max-height: 220px;
   overflow: auto;
@@ -1216,18 +1690,18 @@ details.thinking-block pre {
 
 /* -------------------------------- Banner ------------------------------- */
 
-/* Meldungen stapeln sich statt sich zu überschreiben (§4): jede ist ein
-   eigenes .banner-item, #banner selbst ist nur der Container. */
 #banner {
   flex: none;
   font-size: 13px;
   max-height: 40vh;
   overflow-y: auto;
 }
+
 #banner:not([hidden]) {
   display: flex;
   flex-direction: column;
 }
+
 .banner-item {
   display: flex;
   align-items: flex-start;
@@ -1238,15 +1712,18 @@ details.thinking-block pre {
   border-top: 1px solid var(--err);
   white-space: pre-wrap;
 }
+
 .banner-item.info {
   background: var(--surface-2);
   color: var(--text);
   border-top-color: var(--border);
 }
+
 .banner-text {
   flex: 1;
   min-width: 0;
 }
+
 .banner-dismiss {
   flex: none;
   background: transparent;
@@ -1258,42 +1735,46 @@ details.thinking-block pre {
   cursor: pointer;
   opacity: 0.7;
 }
+
 .banner-dismiss:hover {
   opacity: 1;
 }
 
 /* ------------------------------- Composer ------------------------------ */
 
-/* Kein backdrop-filter hier (anders als Header/Drawer/Dialog): der
-   Composer liegt im normalen Fluss unter dem Inspector-Drawer — zwei
-   gestapelte Blur-Ebenen an derselben Stelle erzeugen einen sichtbaren
-   Kompositions-Fehler (getestet, Glow-Artefakt in der Ecke). Die getönte
-   Fläche allein reicht für die visuelle Zugehörigkeit zur Glas-Sprache. */
 #composer {
   flex: none;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3) clamp(16px, 6%, 96px);
-  background: var(--glass-bg-strong);
-  border-top: 1px solid var(--glass-border);
+  padding: var(--space-3) clamp(16px, 6%, 96px) var(--space-4);
+  background: var(--surface);
+  border-top: 1px solid var(--border-soft);
 }
+
 #input {
   resize: vertical;
-  min-height: 44px;
-  max-height: 40vh;
+  min-height: 52px;
+  max-height: 35vh;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: 10px 14px;
   font: inherit;
   font-size: 14px;
+  line-height: 1.5;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
+
 #input:focus-visible {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
 }
+
 #composer-toolbar {
   display: flex;
   align-items: center;
@@ -1301,28 +1782,425 @@ details.thinking-block pre {
   gap: var(--space-2);
   flex-wrap: wrap;
 }
+
 #composer-pills {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   min-width: 0;
 }
+
 .pill-button {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 5px 12px;
-  font-size: 12.5px;
+  padding: 4px 11px;
+  font-size: 12px;
   color: var(--text-dim);
 }
+
 .pill-button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--text);
+  background: var(--surface-2);
 }
+
 #composer-actions {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.jump-latest-btn {
+  position: absolute;
+  bottom: 16px;
+  right: clamp(16px, 6%, 96px);
+  z-index: 10;
+  background: var(--surface-3);
+  box-shadow: var(--glass-shadow);
+  border-color: var(--border);
+}
+
+/* ------------------------------ Inspector ------------------------------ */
+
+#context-area {
+  border-left: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  padding: var(--space-3);
+  overflow-y: auto;
+  font-size: 13px;
+  min-width: 0;
+  position: fixed;
+  top: var(--header-h);
+  right: 0;
+  bottom: 0;
+  width: min(var(--inspector-w), 92vw);
+  transform: translateX(100%);
+  transition: transform 0.15s ease-out;
+  z-index: 20;
+  box-shadow: var(--glass-shadow);
+}
+
+body.context-open #context-area {
+  transform: translateX(0);
+}
+
+.inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.inspector-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.inspector-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#context-rows.skeleton {
+  color: var(--muted);
+  font-style: italic;
+  padding: 8px 10px;
+}
+
+.context-row-wrap {
+  margin-bottom: 3px;
+}
+
+.context-row {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text);
+}
+
+.context-row:hover:not(.static) {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.context-row.static {
+  cursor: default;
+}
+
+.context-row-left {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.row-caret {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.context-row .row-label {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text-dim);
+}
+
+.context-row .row-value {
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: right;
+  word-break: break-word;
+}
+
+.context-row .row-value.empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Context Usage Bar */
+.context-usage-box {
+  padding: 8px 10px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  margin-bottom: 6px;
+}
+
+.context-usage-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+
+.context-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.context-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.pill.ok {
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  color: var(--ok);
+}
+
+.pill.err {
+  background: color-mix(in srgb, var(--err) 22%, transparent);
+  color: var(--err);
+}
+
+.pill.warn {
+  background: color-mix(in srgb, var(--warn) 22%, transparent);
+  color: var(--warn);
+}
+
+.pill.running {
+  background: color-mix(in srgb, var(--running) 22%, transparent);
+  color: var(--running);
+}
+
+.pill.muted {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.context-row-body {
+  margin: 0 2px var(--space-2);
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  word-break: break-word;
+}
+
+.subagent-inspector-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.subagent-inspector-item:hover {
+  background: var(--surface-2);
+}
+
+.subagent-inspector-name {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.subagent-inspector-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.panel-line {
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12.5px;
+}
+
+.panel-line:last-child {
+  border-bottom: none;
+}
+
+.diff-file {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.diff-file summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  background: var(--surface-2);
+  font-size: 12.5px;
+}
+
+.diff-file summary:hover {
+  background: var(--surface-3);
+}
+
+.diff-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.diff-file-stat {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.diff-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.diff-toggle-btn {
+  padding: 2px 6px;
+  font-size: 11px;
+  background: var(--surface-3);
+  border-radius: var(--radius-sm);
+}
+
+.diff-file-content {
+  max-height: 420px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.diff-split-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-split-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.diff-split-col {
+  padding: 1px 8px;
+  min-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  display: flex;
+  gap: 6px;
+}
+
+.diff-split-left {
+  border-right: 1px solid var(--border-soft);
+}
+
+.diff-line {
+  padding: 1px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  display: flex;
+  gap: 6px;
+}
+
+.diff-marker {
+  flex: none;
+  width: 12px;
+  user-select: none;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.diff-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+
+.diff-hunk-header {
+  color: var(--muted);
+  background: var(--surface-2);
+  padding: 3px 8px;
+}
+
+.diff-add {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+
+.diff-remove {
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  color: var(--err);
+}
+
+.diff-context {
+  color: var(--text);
+}
+
+.diff-empty {
+  padding: 6px 8px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.verify-details-btn {
+  margin-top: var(--space-2);
+  width: 100%;
+}
+
+#inspector-resize-handle {
+  display: none;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  position: fixed;
+  top: var(--header-h);
+  bottom: 0;
+  right: min(var(--inspector-w), 92vw);
+  z-index: 21;
+}
+
+body.context-open #inspector-resize-handle {
+  display: block;
+}
+
+#inspector-resize-handle:hover,
+#inspector-resize-handle:focus-visible {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  outline: none;
+}
+
+body.resizing-inspector {
+  cursor: col-resize;
+  user-select: none;
 }
 
 /* -------------------------------- Dialoge ------------------------------ */
@@ -1341,20 +2219,17 @@ dialog {
   padding: var(--space-4);
   box-shadow: var(--glass-shadow);
 }
+
 dialog::backdrop {
   background: rgba(15, 10, 6, 0.55);
   backdrop-filter: blur(3px);
 }
+
 dialog h2 {
   margin: 0 0 var(--space-3);
   font-size: 15px;
 }
 
-/* Extension-UI-Domologe (über dialogShell gerendert, dynamisch ins DOM).
-   Muss explizit gestylt werden — ohne Regel wirkt nur Browser-Default.
-   Orientiert sich am Picker-Dialog, aber flexibel für alle Typen.
-   Kein fixed max-height, damit längere Bestätigungstexte nicht abgeschnitten
-   werden (z.B. tool execution confirm mit langen Pfaden). */
 .dialog.ui-dialog {
   width: min(620px, calc(100vw - 32px));
   min-width: 0;
@@ -1375,6 +2250,7 @@ dialog h2 {
   transform: translate(-50%, -50%);
   z-index: 100;
 }
+
 #picker-filter {
   width: 100%;
   margin-bottom: var(--space-2);
@@ -1385,6 +2261,7 @@ dialog h2 {
   padding: 7px 10px;
   font: inherit;
 }
+
 #picker-list,
 .dialog-options {
   list-style: none;
@@ -1393,14 +2270,17 @@ dialog h2 {
   max-height: 320px;
   overflow-y: auto;
 }
+
 #picker-list li,
 .dialog-options li {
   border-bottom: 1px solid var(--border-soft);
 }
+
 #picker-list li:last-child,
 .dialog-options li:last-child {
   border-bottom: none;
 }
+
 .picker-option {
   display: block;
   width: 100%;
@@ -1410,28 +2290,34 @@ dialog h2 {
   background: transparent;
   text-align: left;
 }
+
 .picker-option:hover:not(:disabled),
 .picker-option:focus-visible {
   background: var(--surface-2);
 }
+
 .picker-option .desc {
   color: var(--muted);
   font-size: 12px;
   margin-top: 1px;
 }
+
 #picker-list li.disabled .picker-option {
   color: var(--muted);
   cursor: not-allowed;
 }
+
 .dialog-message {
   margin: 0 0 var(--space-3);
   color: var(--muted);
   white-space: pre-wrap;
 }
+
 .dialog-actions {
   display: flex;
   gap: var(--space-2);
 }
+
 .dialog-input {
   width: 100%;
   margin-right: var(--space-2);
@@ -1445,12 +2331,7 @@ dialog h2 {
 
 /* ------------------------------ Responsive ----------------------------- */
 
-/* Kleine Fenster: Header darf umbrechen (--header-h passt sich an),
-   Projektname weicht, Composer bleibt bedienbar. */
 @media (max-width: 760px) {
-  /* Einziger Einstiegspunkt zur Projektauswahl: schrumpfen statt
-     verschwinden — sonst gibt es auf schmalen Fenstern keine Affordanz
-     mehr, um überhaupt ein Projekt zu öffnen. */
   #project-label {
     max-width: 9ch;
   }
@@ -1476,8 +2357,6 @@ dialog h2 {
   :root {
     --nav-w-collapsed: 48px;
   }
-  /* Schmales Fenster: Task-Sidebar bleibt immer eingeklappt (§Phase 2) —
-     232px expandiert wäre auf so wenig Breite unbrauchbar. */
   #layout {
     grid-template-columns: var(--nav-w-collapsed) minmax(0, 1fr) !important;
   }
@@ -1486,6 +2365,6 @@ dialog h2 {
     display: none;
   }
   #composer-pills .pill-button {
-    padding: 5px 9px;
+    padding: 4px 8px;
   }
 }
