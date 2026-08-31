@@ -1,0 +1,13 @@
+{
+  "checkedAt": "2026-08-31T15:51:56.456Z",
+  "piBundleChunk": "/home/d/.npm-global/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/openai-codex-responses-GJVBJXLB.js",
+  "fallbackSourceLineConfirmed": true,
+  "lunaThinkingLevelMap": {
+    "xhigh": "xhigh",
+    "max": "max",
+    "minimal": "low"
+  },
+  "highLevelExplicitlyMapped": false,
+  "conclusion": "CONFIRMED: 'high' is not in openai-codex/gpt-5.6-luna's thinkingLevelMap, so the ??-fallback sends the literal string 'high' unchanged to the API. No clamping to a lower level occurs (verified separately against clampThinkingLevel/getSupportedThinkingLevels in chunk-MNAIPA3J.js: only xhigh/max require an explicit map entry).",
+  "caveat": "Static source analysis only, not a live HTTP capture of the actual request body. Cross-checked against two independent code paths (clampThinkingLevel + buildRequestBody) in the installed runtime."
+}

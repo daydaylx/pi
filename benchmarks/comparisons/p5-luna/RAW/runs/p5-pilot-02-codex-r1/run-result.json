@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "1.0.0",
+  "seriesId": "P5-LUNA-HARNESS",
+  "runId": "p5-pilot-02-codex-r1",
+  "harness": "codex",
+  "stackMode": "core-parity",
+  "reference": "dd00b33f039b4c6d291b1c241aaae9eb66ba4b85",
+  "configFingerprint": "6dc3aaf136beb34629c6f54fda0fc19cc98ef9b1ff761fa9a5ac6a8ae2895170",
+  "promptFingerprint": "afcc7666b86888b18a75e524298e3e7ba07b0d509b62139eab68d63bf9c5b127",
+  "resolvedRoles": {
+    "main": {
+      "enabled": true,
+      "invoked": true,
+      "model": "gpt-5.6-luna",
+      "thinking": "high",
+      "provider": "codex-cli"
+    }
+  },
+  "evaluator": {
+    "status": "pass",
+    "correctness": {
+      "fixtureTestExitCode": 0,
+      "assertionsPassed": 2,
+      "assertionsFailed": 0
+    },
+    "antiGaming": {
+      "outOfScopeChanges": [],
+      "fixtureTestEdited": false,
+      "note": "fixtureTestEdited=true means run-fixture-test.mjs itself was modified — see TASK.md Abbruchbedingungen (forcing a pass by editing the test itself)."
+    },
+    "summary": "Fixture test passed (both hunk-merge assertions).",
+    "evaluatorFingerprint": "p5-02-local-bug-v1",
+    "inputFingerprint": "p5-02-local-bug-fixture-v1",
+    "durationMs": 103,
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "inputFingerprint": "p5-02-local-bug-fixture-v1",
+  "automaticMetrics": {
+    "schemaVersion": "1.1.0-codex",
+    "task": "02-local-bug",
+    "collectedAt": "2026-08-31T17:01:39.602Z",
+    "automatic": {
+      "modelCalls": 5,
+      "tokens": {
+        "input": 594914,
+        "output": 2804,
+        "reasoning": 1026,
+        "cacheRead": 550400,
+        "cacheWrite": 0,
+        "providerReportedTotal": 597718
+      },
+      "failedToolCalls": 2,
+      "repeatedIdenticalFailures": null,
+      "userCorrectionTurns": null,
+      "durationMs": 119441,
+      "durationMsSource": "rollout-timestamps",
+      "subagentCalls": 0,
+      "subagentModelCalls": 0,
+      "subagentTokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "providerReportedTotal": 0
+      },
+      "subagentDurationMsTotal": 0,
+      "subagentFailures": 0,
+      "toolCallCount": 8,
+      "diff": null,
+      "verify": null
+    },
+    "manualAssessment": {
+      "solvedWithoutCorrection": null,
+      "unnecessaryLineChangesWithinScope": null,
+      "lostRequirements": null,
+      "repeatedFailuresWithoutContextChange": null,
+      "decisionPersistenceAfterCompaction": null,
+      "projectStatusCorrectness": null,
+      "hallucinationCount": null,
+      "notes": null
+    }
+  },
+  "diff": {
+    "schemaVersion": "1",
+    "head": "d2472bfc568ef66eaefeff95ca48c8fc0060205b",
+    "staged": [],
+    "unstaged": [
+      {
+        "status": "M",
+        "path": "benchmark-fixture/diff-viewer/diff-algorithm.ts"
+      }
+    ],
+    "untracked": [],
+    "renames": [],
+    "deletions": [],
+    "changedFiles": [
+      "benchmark-fixture/diff-viewer/diff-algorithm.ts"
+    ],
+    "fingerprint": "e47fd53f1862e08bd4876628ced831168e4a49ebf64b70a77ca20a04f9711c21",
+    "diffFingerprint": "e47fd53f1862e08bd4876628ced831168e4a49ebf64b70a77ca20a04f9711c21",
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "networkToolCallsObserved": 0
+}

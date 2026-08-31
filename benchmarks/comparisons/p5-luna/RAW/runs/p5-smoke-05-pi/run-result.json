@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "1.0.0",
+  "seriesId": "P5-LUNA-HARNESS",
+  "runId": "p5-smoke-05-pi",
+  "harness": "pi",
+  "stackMode": "core-parity",
+  "reference": "dd00b33f039b4c6d291b1c241aaae9eb66ba4b85",
+  "configFingerprint": "7fd6ae1643e9a46f85972d47be2509c30be6457033f25e92ce42f4e95f7dce3b",
+  "promptFingerprint": "510f0c721cb92aeadd6d5f279ccc18c252e749efca438aab3156285b141e76d9",
+  "resolvedRoles": {
+    "main": {
+      "enabled": true,
+      "invoked": true,
+      "model": "openai-codex/gpt-5.6-luna",
+      "thinking": "high",
+      "provider": "openai-codex"
+    },
+    "investigator": {
+      "enabled": true,
+      "invoked": false
+    },
+    "debugger": {
+      "enabled": true,
+      "invoked": false
+    },
+    "verifier": {
+      "enabled": false
+    }
+  },
+  "evaluator": {
+    "status": "pass",
+    "correctness": {
+      "fixtureTestExitCode": 0,
+      "assertionsPassed": 11,
+      "assertionsFailed": 0
+    },
+    "antiGaming": {
+      "note": "manual review still required (types.ts/behavioral-fidelity check outside test coverage)"
+    },
+    "summary": "Fixture test passed (11/11 assertions).",
+    "evaluatorFingerprint": "p5-05-refactor-v1",
+    "inputFingerprint": "p5-05-refactor-fixture-v1",
+    "durationMs": 77,
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "inputFingerprint": "p5-05-refactor-fixture-v1",
+  "automaticMetrics": {
+    "schemaVersion": "1.1.0",
+    "task": "05-refactor-no-behavior-change",
+    "collectedAt": "2026-08-31T14:02:48.608Z",
+    "automatic": {
+      "modelCalls": 20,
+      "tokens": {
+        "input": 65390,
+        "output": 8055,
+        "reasoning": 2992,
+        "cacheRead": 722432,
+        "cacheWrite": 0,
+        "providerReportedTotal": 795877
+      },
+      "failedToolCalls": 5,
+      "repeatedIdenticalFailures": 0,
+      "userCorrectionTurns": 0,
+      "durationMs": 613396,
+      "subagentCalls": 0,
+      "subagentModelCalls": 0,
+      "subagentTokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "providerReportedTotal": 0
+      },
+      "subagentDurationMsTotal": 0,
+      "subagentFailures": 0,
+      "diff": null,
+      "verify": null
+    },
+    "manualAssessment": {
+      "solvedWithoutCorrection": null,
+      "unnecessaryLineChangesWithinScope": null,
+      "lostRequirements": null,
+      "repeatedFailuresWithoutContextChange": null,
+      "decisionPersistenceAfterCompaction": null,
+      "projectStatusCorrectness": null,
+      "hallucinationCount": null,
+      "notes": null
+    }
+  },
+  "diff": {
+    "schemaVersion": "1",
+    "head": "9b0e67720da16446a6ae20ca1a9f67fb2809e551",
+    "staged": [],
+    "unstaged": [
+      {
+        "status": "M",
+        "path": "benchmark-fixture/diff-viewer/change-tracker.ts"
+      }
+    ],
+    "untracked": [],
+    "renames": [],
+    "deletions": [],
+    "changedFiles": [
+      "benchmark-fixture/diff-viewer/change-tracker.ts"
+    ],
+    "fingerprint": "25ac27af2d67d56af214220060260ef8ea0e2af3dd4cddbd6fa3e767f5b0f832",
+    "diffFingerprint": "25ac27af2d67d56af214220060260ef8ea0e2af3dd4cddbd6fa3e767f5b0f832",
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "networkToolCallsObserved": 0
+}

@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0.0",
+  "seriesId": "P5-LUNA-HARNESS",
+  "runId": "p5-pilot-05-codex-r2",
+  "harness": "codex",
+  "stackMode": "core-parity",
+  "reference": "dd00b33f039b4c6d291b1c241aaae9eb66ba4b85",
+  "configFingerprint": "169ddefa121b8075e8d8f39c4de5721d9d1a43a2d86f142f41cef153b9c713e2",
+  "promptFingerprint": "510f0c721cb92aeadd6d5f279ccc18c252e749efca438aab3156285b141e76d9",
+  "resolvedRoles": {
+    "main": {
+      "enabled": true,
+      "invoked": true,
+      "model": "gpt-5.6-luna",
+      "thinking": "high",
+      "provider": "codex-cli"
+    }
+  },
+  "evaluator": {
+    "status": "pass",
+    "correctness": {
+      "fixtureTestExitCode": 0,
+      "assertionsPassed": 11,
+      "assertionsFailed": 0,
+      "targetFileChanged": true
+    },
+    "antiGaming": {
+      "note": "manual review still required (types.ts/behavioral-fidelity check outside test coverage). targetFileChanged=false means the fixture's baseline passed without any real edit — not a genuine solve."
+    },
+    "summary": "Fixture test passed (11/11 assertions) and the target file was actually modified.",
+    "evaluatorFingerprint": "p5-05-refactor-v1",
+    "inputFingerprint": "p5-05-refactor-fixture-v1",
+    "durationMs": 176,
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "inputFingerprint": "p5-05-refactor-fixture-v1",
+  "automaticMetrics": {
+    "schemaVersion": "1.1.0-codex",
+    "task": "05-refactor-no-behavior-change",
+    "collectedAt": "2026-08-31T16:44:58.200Z",
+    "automatic": {
+      "modelCalls": 9,
+      "tokens": {
+        "input": 1822782,
+        "output": 6998,
+        "reasoning": 3281,
+        "cacheRead": 1740032,
+        "cacheWrite": 0,
+        "providerReportedTotal": 1829780
+      },
+      "failedToolCalls": 5,
+      "repeatedIdenticalFailures": null,
+      "userCorrectionTurns": null,
+      "durationMs": 277222,
+      "durationMsSource": "rollout-timestamps",
+      "subagentCalls": 0,
+      "subagentModelCalls": 0,
+      "subagentTokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "providerReportedTotal": 0
+      },
+      "subagentDurationMsTotal": 0,
+      "subagentFailures": 0,
+      "toolCallCount": 22,
+      "diff": null,
+      "verify": null
+    },
+    "manualAssessment": {
+      "solvedWithoutCorrection": null,
+      "unnecessaryLineChangesWithinScope": null,
+      "lostRequirements": null,
+      "repeatedFailuresWithoutContextChange": null,
+      "decisionPersistenceAfterCompaction": null,
+      "projectStatusCorrectness": null,
+      "hallucinationCount": null,
+      "notes": null
+    }
+  },
+  "diff": {
+    "schemaVersion": "1",
+    "head": "df60ace4a991ba535a6bfb12cfc6a4ffcf6ff823",
+    "staged": [],
+    "unstaged": [
+      {
+        "status": "M",
+        "path": "benchmark-fixture/diff-viewer/change-tracker.ts"
+      }
+    ],
+    "untracked": [],
+    "renames": [],
+    "deletions": [],
+    "changedFiles": [
+      "benchmark-fixture/diff-viewer/change-tracker.ts"
+    ],
+    "fingerprint": "21572cd3782fdab45438440af4e1bb7dcc6e8ad363a94de108eb2fc4fc7d42bc",
+    "diffFingerprint": "21572cd3782fdab45438440af4e1bb7dcc6e8ad363a94de108eb2fc4fc7d42bc",
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "networkToolCallsObserved": 0
+}

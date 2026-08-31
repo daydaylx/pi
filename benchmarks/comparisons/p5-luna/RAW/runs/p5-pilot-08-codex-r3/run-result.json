@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "1.0.0",
+  "seriesId": "P5-LUNA-HARNESS",
+  "runId": "p5-pilot-08-codex-r3",
+  "harness": "codex",
+  "stackMode": "core-parity",
+  "reference": "dd00b33f039b4c6d291b1c241aaae9eb66ba4b85",
+  "configFingerprint": "34e67b636ad795e9cde7f92157d56ea4938e042fa73cf645ff91e591c8aa2419",
+  "promptFingerprint": "d22cee17b09d75e9735b3ccce23cf28bc414c1a67a94c7a6cee9bab2ab24bf5c",
+  "resolvedRoles": {
+    "main": {
+      "enabled": true,
+      "invoked": true,
+      "model": "gpt-5.6-luna",
+      "thinking": "high",
+      "provider": "codex-cli"
+    }
+  },
+  "evaluator": {
+    "status": "fail",
+    "correctness": {
+      "typecheckPassed": true,
+      "testRunPassed": false,
+      "assertionsPassed": null,
+      "assertionsFailed": null,
+      "zigProfilePresent": false,
+      "zigProfileDisabledByDefault": null
+    },
+    "antiGaming": {
+      "outOfScopeChanges": [],
+      "note": "zigProfileDisabledByDefault===false would mean `enabled: true` was used — forbidden per TASK.md. The compaction/lost-requirements core metric of this task is NOT covered here (see manualAssessment)."
+    },
+    "summary": "One or more mechanical checks failed — see correctness/antiGaming. Lost-requirements assessment still requires manual review.",
+    "evaluatorFingerprint": "p5-08-long-session-compaction-v1",
+    "inputFingerprint": "p5-08-long-session-compaction-v1",
+    "durationMs": 31307,
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "inputFingerprint": "p5-08-long-session-compaction-v1",
+  "automaticMetrics": {
+    "schemaVersion": "1.1.0-codex",
+    "task": "08-long-session-compaction",
+    "collectedAt": "2026-08-31T17:22:49.012Z",
+    "automatic": {
+      "modelCalls": 1,
+      "tokens": {
+        "input": 16876,
+        "output": 138,
+        "reasoning": 108,
+        "cacheRead": 16128,
+        "cacheWrite": 0,
+        "providerReportedTotal": 17014
+      },
+      "failedToolCalls": null,
+      "repeatedIdenticalFailures": null,
+      "userCorrectionTurns": null,
+      "durationMs": 314701,
+      "durationMsSource": "rollout-timestamps",
+      "subagentCalls": 0,
+      "subagentModelCalls": 0,
+      "subagentTokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cacheRead": null,
+        "cacheWrite": null,
+        "providerReportedTotal": 0
+      },
+      "subagentDurationMsTotal": 0,
+      "subagentFailures": 0,
+      "toolCallCount": 0,
+      "diff": null,
+      "verify": null
+    },
+    "manualAssessment": {
+      "solvedWithoutCorrection": null,
+      "unnecessaryLineChangesWithinScope": null,
+      "lostRequirements": null,
+      "repeatedFailuresWithoutContextChange": null,
+      "decisionPersistenceAfterCompaction": null,
+      "projectStatusCorrectness": null,
+      "hallucinationCount": null,
+      "notes": null
+    }
+  },
+  "diff": {
+    "schemaVersion": "1",
+    "head": "d22ec5ac28db0554e4e9eb2912bb7be8bae320d6",
+    "staged": [],
+    "unstaged": [],
+    "untracked": [],
+    "renames": [],
+    "deletions": [],
+    "changedFiles": [],
+    "fingerprint": "093fecd71f1f6a09c3a6b0685e65816ce2f94f824a71e80d1ff13a68df716e04",
+    "diffFingerprint": "093fecd71f1f6a09c3a6b0685e65816ce2f94f824a71e80d1ff13a68df716e04",
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "networkToolCallsObserved": 0
+}

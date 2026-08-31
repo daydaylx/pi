@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "1.0.0",
+  "seriesId": "P6-TERRA-SUBAGENTS",
+  "runId": "p6-pilot-02-pi-r2",
+  "harness": "pi",
+  "stackMode": "subagents-allowed",
+  "reference": "dd00b33f039b4c6d291b1c241aaae9eb66ba4b85",
+  "configFingerprint": "ff9dd71ec664a4bb755ff78e8878cf062b238d418c4d742bcc43299bedae1e47",
+  "promptFingerprint": "dfa9b00e03c12b033945073fb5ef948b66600b42d13ae0b9b610d6841f0162f5",
+  "resolvedRoles": {
+    "main": {
+      "enabled": true,
+      "invoked": true,
+      "model": "openai-codex/gpt-5.6-terra",
+      "thinking": "high",
+      "provider": "openai-codex"
+    },
+    "investigator": {
+      "enabled": true,
+      "invoked": false
+    },
+    "debugger": {
+      "enabled": true,
+      "invoked": false
+    },
+    "verifier": {
+      "enabled": true,
+      "invoked": false
+    }
+  },
+  "evaluator": {
+    "status": "pass",
+    "correctness": {
+      "fixtureTestExitCode": 0,
+      "assertionsPassed": 2,
+      "assertionsFailed": 0
+    },
+    "antiGaming": {
+      "outOfScopeChanges": [],
+      "fixtureTestEdited": false,
+      "note": "fixtureTestEdited=true means run-fixture-test.mjs itself was modified — see TASK.md Abbruchbedingungen (forcing a pass by editing the test itself)."
+    },
+    "summary": "Fixture test passed (both hunk-merge assertions).",
+    "evaluatorFingerprint": "p6-02-local-bug-v1",
+    "inputFingerprint": "p6-02-local-bug-fixture-v1",
+    "durationMs": 128,
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "inputFingerprint": "p6-02-local-bug-fixture-v1",
+  "automaticMetrics": {
+    "schemaVersion": "1.1.0",
+    "task": "02-local-bug",
+    "collectedAt": "2026-08-31T18:33:27.875Z",
+    "automatic": {
+      "modelCalls": 8,
+      "tokens": {
+        "input": 28478,
+        "output": 1070,
+        "reasoning": 238,
+        "cacheRead": 139776,
+        "cacheWrite": 0,
+        "providerReportedTotal": 169324
+      },
+      "failedToolCalls": 3,
+      "repeatedIdenticalFailures": 0,
+      "userCorrectionTurns": 0,
+      "durationMs": 224008,
+      "subagentCalls": 0,
+      "subagentModelCalls": 0,
+      "subagentTokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "providerReportedTotal": 0
+      },
+      "subagentDurationMsTotal": 0,
+      "subagentFailures": 0,
+      "diff": null,
+      "verify": null
+    },
+    "manualAssessment": {
+      "solvedWithoutCorrection": null,
+      "unnecessaryLineChangesWithinScope": null,
+      "lostRequirements": null,
+      "repeatedFailuresWithoutContextChange": null,
+      "decisionPersistenceAfterCompaction": null,
+      "projectStatusCorrectness": null,
+      "hallucinationCount": null,
+      "notes": null
+    }
+  },
+  "diff": {
+    "schemaVersion": "1",
+    "head": "998edb7ff617a62177278ce9b26320e22aad5d95",
+    "staged": [],
+    "unstaged": [
+      {
+        "status": "M",
+        "path": "benchmark-fixture/diff-viewer/diff-algorithm.ts"
+      }
+    ],
+    "untracked": [],
+    "renames": [],
+    "deletions": [],
+    "changedFiles": [
+      "benchmark-fixture/diff-viewer/diff-algorithm.ts"
+    ],
+    "fingerprint": "733c1f40c42be63ffbe5227086f8645c783c50ec2554acaae83cde16aa5a766d",
+    "diffFingerprint": "733c1f40c42be63ffbe5227086f8645c783c50ec2554acaae83cde16aa5a766d",
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "networkToolCallsObserved": 0
+}

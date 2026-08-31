@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pi Benchmark P5-LUNA-HARNESS Run Result",
+  "description": "Ergebnisformat eines einzelnen P5-Laufs. Kombiniert die Identitäts-/Fingerprint-/Evaluator-Felder aus p4-run-result.schema.json mit einem harness-neutralen automaticMetrics-Objekt (Struktur identisch zu run-result.schema.json#/properties/automatic), das für Pi über collect-metrics.mjs und für Codex über harness/p5/collect-codex-metrics.mjs erzeugt wird.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "seriesId",
+    "runId",
+    "harness",
+    "stackMode",
+    "reference",
+    "configFingerprint",
+    "promptFingerprint",
+    "resolvedRoles",
+    "evaluator",
+    "inputFingerprint",
+    "automaticMetrics",
+    "diff"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "seriesId": { "const": "P5-LUNA-HARNESS" },
+    "runId": { "type": "string", "pattern": "^p5-[a-z0-9-]+$" },
+    "harness": { "enum": ["pi", "codex"] },
+    "stackMode": { "const": "core-parity" },
+    "reference": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "configFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "promptFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "resolvedRoles": {
+      "type": "object",
+      "description": "Pi: {main, investigator, debugger, verifier}. Codex: {main} — Codex kennt in Core-Parity-Modus A keine eigenen Investigator/Debugger/Verifier-Rollen."
+    },
+    "evaluator": { "type": "object" },
+    "inputFingerprint": { "type": "string" },
+    "automaticMetrics": {
+      "type": "object",
+      "description": "Struktur wie run-result.schema.json#/properties/automatic. Für Codex fehlende Kategorien (z. B. tokens.cacheRead/cacheWrite) sind explizit null, nicht geschätzt."
+    },
+    "diff": { "type": "object" },
+    "networkToolCallsObserved": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Preflight-Mitigation für die Netzwerk-Isolations-Asymmetrie (siehe METHODOLOGY.md): Anzahl beobachteter curl/wget/nc/ssh-artiger Bash-Tool-Aufrufe im Session-Trace bzw. Rollout."
+    }
+  }
+}

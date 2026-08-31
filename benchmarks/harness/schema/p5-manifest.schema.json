@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pi Benchmark P5-LUNA-HARNESS Manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "name",
+    "reference",
+    "seriesId",
+    "mode",
+    "privateEvaluator",
+    "harnesses",
+    "runs"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "name": { "const": "pi-benchmark-p5-luna" },
+    "reference": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "seriesId": { "const": "P5-LUNA-HARNESS" },
+    "mode": { "const": "core-parity" },
+    "privateEvaluator": { "const": "PI_BENCHMARK_PRIVATE_ROOT" },
+    "harnesses": {
+      "type": "object",
+      "required": ["pi", "codex"],
+      "properties": {
+        "pi": {
+          "type": "object",
+          "required": ["provider", "model", "thinking", "roles"],
+          "properties": {
+            "provider": { "const": "openai-codex" },
+            "model": { "const": "gpt-5.6-luna" },
+            "thinking": { "type": "string" },
+            "roles": { "type": "object" }
+          }
+        },
+        "codex": {
+          "type": "object",
+          "required": [
+            "cliVersion",
+            "model",
+            "reasoningEffort",
+            "sandbox",
+            "approvalPolicy",
+            "networkAccess"
+          ],
+          "properties": {
+            "cliVersion": { "type": "string" },
+            "model": { "const": "gpt-5.6-luna" },
+            "reasoningEffort": { "type": "string" },
+            "sandbox": { "const": "workspace-write" },
+            "approvalPolicy": { "const": "never" },
+            "networkAccess": { "const": false }
+          }
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "task", "harness", "stackMode"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^p5-[a-z0-9-]+$" },
+          "task": { "type": "string" },
+          "harness": { "enum": ["pi", "codex"] },
+          "stackMode": { "const": "core-parity" }
+        }
+      }
+    }
+  }
+}

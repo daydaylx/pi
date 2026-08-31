@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "1.0.0",
+  "seriesId": "P5-LUNA-HARNESS",
+  "runId": "p5-pilot-08-pi-r2",
+  "harness": "pi",
+  "stackMode": "core-parity",
+  "reference": "dd00b33f039b4c6d291b1c241aaae9eb66ba4b85",
+  "configFingerprint": "f928a96e171094c13234b6231515bff718dd4a97396cc1591628bf8cbfb3b63d",
+  "promptFingerprint": "d22cee17b09d75e9735b3ccce23cf28bc414c1a67a94c7a6cee9bab2ab24bf5c",
+  "resolvedRoles": {
+    "main": {
+      "enabled": true,
+      "invoked": true,
+      "model": "openai-codex/gpt-5.6-luna",
+      "thinking": "high",
+      "provider": "openai-codex"
+    },
+    "investigator": {
+      "enabled": true,
+      "invoked": false
+    },
+    "debugger": {
+      "enabled": true,
+      "invoked": false
+    },
+    "verifier": {
+      "enabled": false
+    }
+  },
+  "evaluator": {
+    "status": "fail",
+    "correctness": {
+      "typecheckPassed": true,
+      "testRunPassed": false,
+      "assertionsPassed": null,
+      "assertionsFailed": null,
+      "zigProfilePresent": false,
+      "zigProfileDisabledByDefault": null
+    },
+    "antiGaming": {
+      "outOfScopeChanges": [],
+      "note": "zigProfileDisabledByDefault===false would mean `enabled: true` was used — forbidden per TASK.md. The compaction/lost-requirements core metric of this task is NOT covered here (see manualAssessment)."
+    },
+    "summary": "One or more mechanical checks failed — see correctness/antiGaming. Lost-requirements assessment still requires manual review.",
+    "evaluatorFingerprint": "p5-08-long-session-compaction-v1",
+    "inputFingerprint": "p5-08-long-session-compaction-v1",
+    "durationMs": 36284,
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "inputFingerprint": "p5-08-long-session-compaction-v1",
+  "automaticMetrics": {
+    "schemaVersion": "1.1.0",
+    "task": "08-long-session-compaction",
+    "collectedAt": "2026-08-31T17:14:59.157Z",
+    "automatic": {
+      "modelCalls": 1,
+      "tokens": {
+        "input": 14440,
+        "output": 223,
+        "reasoning": 173,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "providerReportedTotal": 14663
+      },
+      "failedToolCalls": 0,
+      "repeatedIdenticalFailures": 0,
+      "userCorrectionTurns": 0,
+      "durationMs": 10528,
+      "subagentCalls": 0,
+      "subagentModelCalls": 0,
+      "subagentTokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "providerReportedTotal": 0
+      },
+      "subagentDurationMsTotal": 0,
+      "subagentFailures": 0,
+      "diff": null,
+      "verify": null
+    },
+    "manualAssessment": {
+      "solvedWithoutCorrection": null,
+      "unnecessaryLineChangesWithinScope": null,
+      "lostRequirements": null,
+      "repeatedFailuresWithoutContextChange": null,
+      "decisionPersistenceAfterCompaction": null,
+      "projectStatusCorrectness": null,
+      "hallucinationCount": null,
+      "notes": null
+    }
+  },
+  "diff": {
+    "schemaVersion": "1",
+    "head": "dac0c8d3ce468fe7ecd26feddc558636bab7e7ac",
+    "staged": [],
+    "unstaged": [],
+    "untracked": [],
+    "renames": [],
+    "deletions": [],
+    "changedFiles": [],
+    "fingerprint": "5b39779890b75250f91fe9e8e7e68deac234f03ec890637c37adda328f6fd082",
+    "diffFingerprint": "5b39779890b75250f91fe9e8e7e68deac234f03ec890637c37adda328f6fd082",
+    "visibleTestChanges": [],
+    "benchmarkChanges": []
+  },
+  "networkToolCallsObserved": 0
+}

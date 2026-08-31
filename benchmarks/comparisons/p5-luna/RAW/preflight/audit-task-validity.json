@@ -1,0 +1,54 @@
+{
+  "reference": "dd00b33f039b4c6d291b1c241aaae9eb66ba4b85",
+  "report": [
+    {
+      "taskId": "05-refactor-no-behavior-change",
+      "referencedPaths": [],
+      "missing": [],
+      "valid": true
+    },
+    {
+      "taskId": "02-local-bug",
+      "referencedPaths": [
+        "tests/run.mjs"
+      ],
+      "missing": [],
+      "valid": true
+    },
+    {
+      "taskId": "04-multi-file-change",
+      "referencedPaths": [
+        "extensions/shared/permission-menu.ts",
+        "tests/run.mjs",
+        "extensions/shared/workflow-status.ts",
+        "extensions/shared/permission-policy.ts"
+      ],
+      "missing": [
+        "extensions/shared/permission-menu.ts"
+      ],
+      "valid": false
+    },
+    {
+      "taskId": "08-long-session-compaction",
+      "referencedPaths": [
+        "extensions/lsp/server-profiles.ts",
+        "extensions/lsp/roots.ts",
+        "tests/run.mjs",
+        "docs/decisions/010-compaction-recent-context-budget.md"
+      ],
+      "missing": [],
+      "valid": true
+    },
+    {
+      "taskId": "09-hanging-tool-call",
+      "referencedPaths": [
+        "tests/fixtures/fake-lsp.py",
+        "tests/fixtures/fake-lsp.mjs",
+        "extensions/lsp/config.ts",
+        "extensions/lsp/documents.ts"
+      ],
+      "missing": [],
+      "valid": true
+    }
+  ]
+}

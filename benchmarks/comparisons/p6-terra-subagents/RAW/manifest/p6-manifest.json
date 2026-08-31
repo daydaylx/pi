@@ -1,0 +1,125 @@
+{
+  "$schema": "./schema/p6-manifest.schema.json",
+  "schemaVersion": "1.0.0",
+  "name": "pi-benchmark-p6-terra-subagents",
+  "reference": "dd00b33f039b4c6d291b1c241aaae9eb66ba4b85",
+  "seriesId": "P6-TERRA-SUBAGENTS",
+  "mode": "subagents-allowed",
+  "privateEvaluator": "PI_BENCHMARK_PRIVATE_ROOT",
+  "promptSuffix": "\n\n---\n\nHinweis zur Ausführungsumgebung: Diese Aufgabe läuft in einem nicht-interaktiven Einzelschuss-Modus. Eine Rückfrage kann nicht beantwortet werden. Falls der Auftrag an einer Stelle mehrdeutig ist, triff die plausibelste Annahme, dokumentiere sie kurz in deiner Abschlussantwort, und setze die Bearbeitung fort statt eine Rückfrage zu stellen.",
+  "harnesses": {
+    "pi": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-terra",
+      "thinking": "high",
+      "settingsOverlay": false,
+      "roles": {
+        "main": { "model": "openai-codex/gpt-5.6-terra", "thinking": "high" },
+        "investigator": {
+          "model": "openai-codex/gpt-5.6-terra",
+          "thinking": "high"
+        },
+        "debugger": {
+          "model": "openai-codex/gpt-5.6-terra",
+          "thinking": "max"
+        },
+        "verifier": { "model": "anthropic/claude-sonnet-5", "thinking": "max" }
+      }
+    },
+    "codex": {
+      "cliVersion": "0.149.1",
+      "model": "gpt-5.6-terra",
+      "reasoningEffort": "high",
+      "sandbox": "workspace-write",
+      "networkAccess": false
+    }
+  },
+  "runs": [
+    {
+      "id": "p6-smoke-05-pi",
+      "task": "05-refactor-no-behavior-change",
+      "harness": "pi",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-smoke-05-codex",
+      "task": "05-refactor-no-behavior-change",
+      "harness": "codex",
+      "stackMode": "subagents-allowed"
+    },
+
+    {
+      "id": "p6-pilot-05-pi-r1",
+      "task": "05-refactor-no-behavior-change",
+      "harness": "pi",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-05-pi-r2",
+      "task": "05-refactor-no-behavior-change",
+      "harness": "pi",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-05-pi-r3",
+      "task": "05-refactor-no-behavior-change",
+      "harness": "pi",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-05-codex-r1",
+      "task": "05-refactor-no-behavior-change",
+      "harness": "codex",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-05-codex-r2",
+      "task": "05-refactor-no-behavior-change",
+      "harness": "codex",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-05-codex-r3",
+      "task": "05-refactor-no-behavior-change",
+      "harness": "codex",
+      "stackMode": "subagents-allowed"
+    },
+
+    {
+      "id": "p6-pilot-02-pi-r1",
+      "task": "02-local-bug",
+      "harness": "pi",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-02-pi-r2",
+      "task": "02-local-bug",
+      "harness": "pi",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-02-pi-r3",
+      "task": "02-local-bug",
+      "harness": "pi",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-02-codex-r1",
+      "task": "02-local-bug",
+      "harness": "codex",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-02-codex-r2",
+      "task": "02-local-bug",
+      "harness": "codex",
+      "stackMode": "subagents-allowed"
+    },
+    {
+      "id": "p6-pilot-02-codex-r3",
+      "task": "02-local-bug",
+      "harness": "codex",
+      "stackMode": "subagents-allowed"
+    }
+  ]
+}
