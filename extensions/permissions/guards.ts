@@ -10,6 +10,7 @@ import {
   isPlanModeDiagnosticCommand,
 } from "../shared/permission-policy.ts";
 import { requestRecoveryStatus } from "../shared/recovery-capabilities.ts";
+import { requestVerificationCapabilities } from "../shared/verification-capabilities.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import type { PermissionSession } from "./session-state.ts";
 import { decideTool } from "./tool-policy.ts";
@@ -22,6 +23,7 @@ import {
 } from "./workflow-policy.ts";
 import {
   assessDebuggerDelegation,
+  assessGitCommitVerifierGate,
   assessVerifierDelegation,
 } from "./verifier-policy.ts";
 import { assessWebToolInput } from "./web-tools.ts";
@@ -101,6 +103,18 @@ export function registerPermissionGuards(
     const debuggerAssessment = assessDebuggerDelegation(event);
     if (debuggerAssessment.blocked) {
       return { block: true, reason: debuggerAssessment.reason };
+    }
+    // Gilt wie das Recovery-Gate unabhängig vom Zugriffslevel — auch YOLO
+    // hebt die Verifier-Pflicht für sicherheits-/permissionsrelevante Diffs
+    // nicht auf, weil genau dort die beobachtete Lücke entstand.
+    const verification = requestVerificationCapabilities(pi.events);
+    const commitGate = assessGitCommitVerifierGate(
+      event,
+      ctx.cwd,
+      verification,
+    );
+    if (commitGate.blocked) {
+      return { block: true, reason: commitGate.reason };
     }
     // Das Recovery-Gate prüft vor der Planmodus-Freigabe, damit auch
     // Schreibzugriffe auf die Plandatei nach einem Fehlturn nicht

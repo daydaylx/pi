@@ -11,7 +11,13 @@ import {
   extractVerifierRunRecord,
   limitSubagentToolResult,
   verifierIncompleteBanner,
+  type VerifierRunStatus,
+  type VerifierVerdict,
 } from "./subagent-output-guard.ts";
+import {
+  VERIFICATION_CAPABILITY_EVENTS,
+  type VerificationCapabilityRequest,
+} from "../shared/verification-capabilities.ts";
 import { loadVerifyProfiles, runProfile } from "./verify-profiles.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 import {
@@ -244,6 +250,18 @@ export default function setupCore(
   let lastDeclaredRequiredIds: string[] = [];
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
+  // Binds the most recent verifier verdict to the workspace fingerprint it
+  // was recorded against — same one-record invalidation principle as
+  // verification-status.ts's RequiredCheckRecord, just for a single verdict
+  // instead of several required profiles.
+  let lastVerifierRun:
+    | {
+        workspaceRoot: string;
+        workspaceFingerprint: string;
+        status: VerifierRunStatus;
+        verdict?: VerifierVerdict;
+      }
+    | undefined;
 
   function auroraVerificationSnapshot(): FrontendVerificationSummary | null {
     if (lastSettledStatus === undefined) return null;
@@ -297,7 +315,18 @@ export default function setupCore(
     // nie als unabhängige Verifikation und bekommen das sichtbar ins
     // Tool-Result geschrieben.
     const record = extractVerifierRunRecord(event.details);
-    if (record) pi.appendEntry("verifier-run", record);
+    if (record) {
+      pi.appendEntry("verifier-run", record);
+      const snapshot = workspaceSnapshot(activeCwd);
+      if (snapshot) {
+        lastVerifierRun = {
+          workspaceRoot: activeCwd,
+          workspaceFingerprint: snapshot.fingerprint,
+          status: record.status,
+          verdict: record.verdict,
+        };
+      }
+    }
     const limited = limitSubagentToolResult(event);
     if (!limited || record?.status !== "incomplete") return limited;
     const banner = verifierIncompleteBanner(record.reason);
@@ -320,9 +349,20 @@ export default function setupCore(
     passedProfileIds = new Map();
     lastSettledStatus = undefined;
     lastDeclaredRequiredIds = [];
+    lastVerifierRun = undefined;
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
     auroraEpoch = undefined;
     subscribeAuroraProvider();
+  });
+
+  pi.events.on(VERIFICATION_CAPABILITY_EVENTS.request, (value) => {
+    const request = value as Partial<VerificationCapabilityRequest>;
+    request.respond?.({
+      workspaceRoot: lastVerifierRun?.workspaceRoot,
+      workspaceFingerprint: lastVerifierRun?.workspaceFingerprint,
+      verifierStatus: lastVerifierRun?.status,
+      verifierVerdict: lastVerifierRun?.verdict,
+    });
   });
 
   pi.on("agent_settled", (_event, ctx) => {
@@ -362,6 +402,7 @@ export default function setupCore(
     passedProfileIds = new Map();
     lastSettledStatus = undefined;
     lastDeclaredRequiredIds = [];
+    lastVerifierRun = undefined;
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
     unsubscribeAurora?.();
     unsubscribeAurora = undefined;

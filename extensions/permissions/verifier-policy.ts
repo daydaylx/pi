@@ -9,6 +9,12 @@
  * die Guard-Schicht fängt jeden `subagent`-Aufruf unabhängig davon ab.
  */
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import {
+  collectWorkspaceSnapshot,
+  type WorkspaceSnapshot,
+} from "../../shared/workspace-snapshot.mjs";
+import type { VerificationCapabilitySnapshot } from "../shared/verification-capabilities.ts";
+import { matchingVerifierRequiredPaths } from "./verifier-required-paths.ts";
 import type { WorkflowAssessment } from "./workflow-policy.ts";
 
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
@@ -147,4 +153,112 @@ export function assessDebuggerDelegation(
     return { blocked: true, reason: errors.join(" ") };
   }
   return PERMITTED;
+}
+
+/**
+ * `git`'s two option forms that take a separate value argument rather than
+ * one attached with `=` — `-C <path>` and `-c <key>=<value>` — are common
+ * enough (changing directory, one-off config) that skipping past them
+ * without also skipping their value would misidentify the value as the
+ * subcommand.
+ */
+const GIT_VALUE_OPTIONS = new Set(["-C", "-c"]);
+
+function gitSubcommand(tokens: string[]): string | undefined {
+  if (tokens[0] !== "git") return undefined;
+  let index = 1;
+  while (index < tokens.length && tokens[index]?.startsWith("-")) {
+    if (GIT_VALUE_OPTIONS.has(tokens[index])) index += 1;
+    index += 1;
+  }
+  return tokens[index];
+}
+
+/**
+ * A `git commit` invocation is matched conservatively: segments split on
+ * shell connectors and newlines (a multi-line bash body chains commands
+ * exactly like `;` does) without honoring quoting, and options are skipped
+ * by a plain dash-prefix scan rather than a full git CLI parser — so
+ * `echo "git commit" | cat` can in theory over-trigger. Over-triggering
+ * costs the caller an extra verifier run; under-triggering would recreate
+ * exactly the silent gap this gate exists to close, so the asymmetry is
+ * intentional.
+ */
+export function bashTouchesGitCommit(command: string): boolean {
+  return command
+    .split(/&&|\|\||[;|]|\r?\n/)
+    .some((segment) => gitSubcommand(segment.trim().split(/\s+/)) === "commit");
+}
+
+/**
+ * Pure decision over an already-collected diff: does it hit a mandatory
+ * path, and if so, does the verification snapshot cover exactly this
+ * fingerprint with a passing verdict? Kept separate from
+ * assessGitCommitVerifierGate so it can be unit-tested without spawning
+ * real git processes — same split as verification-status.ts's pure
+ * evaluateCheckRun/verificationStatus versus setup-core's git-calling
+ * workspaceSnapshot() wrapper.
+ */
+export function assessVerifierCoverageForDiff(
+  changedFiles: readonly string[],
+  workspaceFingerprint: string,
+  cwd: string,
+  verification: VerificationCapabilitySnapshot,
+): WorkflowAssessment {
+  const hits = matchingVerifierRequiredPaths(changedFiles);
+  if (hits.length === 0) return PERMITTED;
+
+  const covered =
+    verification.workspaceRoot === cwd &&
+    verification.workspaceFingerprint === workspaceFingerprint &&
+    verification.verifierStatus === "completed" &&
+    (verification.verifierVerdict === "PASS" ||
+      verification.verifierVerdict === "PASS_WITH_WARNINGS");
+  if (covered) return PERMITTED;
+
+  const paths = [...new Set(hits.map((hit) => hit.path))].join(", ");
+  const categories = [...new Set(hits.map((hit) => hit.category))].join("; ");
+  return {
+    blocked: true,
+    reason:
+      `Verifier-Pflicht (technisch erzwungen): der aktuelle Diff berührt ` +
+      `${paths} (${categories}). Commit ist erst nach einem verifier-Lauf ` +
+      `mit Urteil PASS oder PASS_WITH_WARNINGS über exakt diesen Workspace-` +
+      `Zustand erlaubt — Delegationsvorlage siehe docs/subagents.md.`,
+  };
+}
+
+/**
+ * `git push` is deliberately not gated here: collectWorkspaceSnapshot()
+ * reports the *uncommitted* working-tree diff, which is normally empty by
+ * the time a push happens — checking it at push would just never fire.
+ * Gating the commit itself is the point where a risky diff can still be
+ * caught before it enters history at all.
+ */
+export function assessGitCommitVerifierGate(
+  event: ToolCallEvent,
+  cwd: string,
+  verification: VerificationCapabilitySnapshot,
+): WorkflowAssessment {
+  if (event.toolName !== "bash") return PERMITTED;
+  const input = isRecord(event.input) ? event.input : {};
+  const command = typeof input.command === "string" ? input.command : "";
+  if (!bashTouchesGitCommit(command)) return PERMITTED;
+
+  let snapshot: WorkspaceSnapshot | undefined;
+  try {
+    snapshot = collectWorkspaceSnapshot(cwd);
+  } catch {
+    // Same precedent as setup-core's own workspaceSnapshot() wrapper: a
+    // snapshot that cannot be collected reports as unavailable, not as a
+    // block — this gate only ever acts on evidence it actually has.
+    return PERMITTED;
+  }
+
+  return assessVerifierCoverageForDiff(
+    snapshot.changedFiles,
+    snapshot.fingerprint,
+    cwd,
+    verification,
+  );
 }

@@ -1000,6 +1000,171 @@ await test("debugger delegations keep the generous agents/debugger.md timeout", 
   );
 });
 
+await test("git commit is detected across shell connectors, other commands are not", () => {
+  if (!verifierPolicy) return;
+  const touches = (command) => verifierPolicy.bashTouchesGitCommit(command);
+  assert(touches('git commit -m "x"'), "a plain commit is detected");
+  assert(touches("git --no-pager commit"), "a leading git flag is tolerated");
+  assert(
+    touches('git add -A && git commit -m "x"'),
+    "a commit chained with && is detected",
+  );
+  assert(
+    touches('git commit -m "x" && git push'),
+    "a commit followed by push is still detected",
+  );
+  assert(!touches("git status"), "an unrelated git subcommand is not matched");
+  assert(!touches("git push"), "push alone is not treated as a commit");
+  assert(
+    !touches("git log --grep=commit"),
+    "commit appearing as an argument, not the subcommand, is not matched",
+  );
+  assert(
+    touches('npm test\ngit add -A\ngit commit -m "x"'),
+    "a commit on a later line of a multi-line bash body is detected, not just the first line",
+  );
+  assert(
+    touches("git -C /some/path commit -m x"),
+    "a single-dash option that takes a separate value (-C) does not hide the subcommand behind its argument",
+  );
+  assert(
+    touches("git -c user.email=x commit -m x"),
+    "the same holds for -c <key>=<value>",
+  );
+  assert(
+    !touches("git commit-tree deadbeef"),
+    "a distinct plumbing subcommand that merely starts with 'commit' is not matched",
+  );
+});
+
+await test("verifier coverage gate blocks mandatory paths without a matching PASS", () => {
+  if (!verifierPolicy) return;
+  const cwd = "/repo";
+  const assess = (changedFiles, fingerprint, verification) =>
+    verifierPolicy.assessVerifierCoverageForDiff(
+      changedFiles,
+      fingerprint,
+      cwd,
+      verification,
+    );
+
+  assert(
+    !assess(["gui/renderer/styles.css"], "fp-1", {}).blocked,
+    "a non-mandatory path is never blocked, regardless of verifier history",
+  );
+  assert(
+    assess(["extensions/setup-core/index.ts"], "fp-1", {}).blocked,
+    "the setup-core file that wires the verifier ledger itself is mandatory too",
+  );
+  assert(
+    assess(["extensions/shared/verification-capabilities.ts"], "fp-1", {})
+      .blocked,
+    "the capability bridge this gate depends on is covered by its own gate",
+  );
+  assert(
+    assess(["extensions/shared/recovery-capabilities.ts"], "fp-1", {}).blocked,
+    "every *-capabilities.ts bridge under extensions/shared is covered, not just verification's",
+  );
+
+  const noRecord = assess(["extensions/permissions/guards.ts"], "fp-1", {});
+  assert(noRecord.blocked, "a mandatory path with no verifier record blocks");
+  assert(
+    noRecord.reason.includes("extensions/permissions/guards.ts"),
+    "the block names the triggering path",
+  );
+
+  const passing = assess(["extensions/permissions/guards.ts"], "fp-1", {
+    workspaceRoot: cwd,
+    workspaceFingerprint: "fp-1",
+    verifierStatus: "completed",
+    verifierVerdict: "PASS",
+  });
+  assert(
+    !passing.blocked,
+    "a PASS at the exact current fingerprint clears the gate",
+  );
+
+  const warned = assess(["extensions/permissions/guards.ts"], "fp-1", {
+    workspaceRoot: cwd,
+    workspaceFingerprint: "fp-1",
+    verifierStatus: "completed",
+    verifierVerdict: "PASS_WITH_WARNINGS",
+  });
+  assert(!warned.blocked, "PASS_WITH_WARNINGS also clears the gate");
+
+  const stale = assess(["extensions/permissions/guards.ts"], "fp-2", {
+    workspaceRoot: cwd,
+    workspaceFingerprint: "fp-1",
+    verifierStatus: "completed",
+    verifierVerdict: "PASS",
+  });
+  assert(
+    stale.blocked,
+    "a PASS bound to an older fingerprint does not cover further edits",
+  );
+
+  const failed = assess(["extensions/permissions/guards.ts"], "fp-1", {
+    workspaceRoot: cwd,
+    workspaceFingerprint: "fp-1",
+    verifierStatus: "completed",
+    verifierVerdict: "FAIL",
+  });
+  assert(failed.blocked, "a FAIL verdict still blocks");
+
+  const incomplete = assess(["extensions/permissions/guards.ts"], "fp-1", {
+    workspaceRoot: cwd,
+    workspaceFingerprint: "fp-1",
+    verifierStatus: "incomplete",
+    verifierVerdict: "PASS",
+  });
+  assert(
+    incomplete.blocked,
+    "an incomplete run never counts, even if a verdict happens to be present",
+  );
+
+  const wrongRoot = assess(["extensions/permissions/guards.ts"], "fp-1", {
+    workspaceRoot: "/other-repo",
+    workspaceFingerprint: "fp-1",
+    verifierStatus: "completed",
+    verifierVerdict: "PASS",
+  });
+  assert(
+    wrongRoot.blocked,
+    "a PASS recorded for a different workspace root does not transfer",
+  );
+});
+
+await test("git commit gate routes through command detection and fails open without a workspace", () => {
+  if (!verifierPolicy) return;
+  // No .git here at all, so collectWorkspaceSnapshot() cannot produce a
+  // diff — the gate must fail open rather than block on evidence it does
+  // not have. The path-matching/fingerprint logic itself is covered above
+  // via the pure assessVerifierCoverageForDiff, without touching real git.
+  const cwd = mkdtempSync(join(tmpdir(), "pi-verifier-gate-"));
+  try {
+    const assess = (toolName, command) =>
+      verifierPolicy.assessGitCommitVerifierGate(
+        { toolName, input: { command } },
+        cwd,
+        {},
+      );
+    assert(
+      !assess("write", 'git commit -m "x"').blocked,
+      "only bash calls are in scope, regardless of what the input contains",
+    );
+    assert(
+      !assess("bash", "git status").blocked,
+      "a non-commit bash call never reaches snapshot collection",
+    );
+    assert(
+      !assess("bash", 'git commit -m "x"').blocked,
+      "a commit call with no collectible workspace snapshot fails open",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 await test("verifier runs are classified completed or INCOMPLETE", () => {
   if (!subagentGuard) return;
   const extract = (result) =>

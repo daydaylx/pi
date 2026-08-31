@@ -148,6 +148,22 @@ getesteten Änderungen sowie kleinen Konfigurationskorrekturen ohne
 Verhaltensänderung. Der bloße Umfang eines Diffs löst keine Pflichtdelegation
 aus.
 
+Für genau die Pfade, die `extensions/permissions/verifier-required-paths.ts`
+listet (Permission-/Workflow-/Plan-Mode-Logik, die Verifikations-/Completion-
+Maschinerie selbst, die konkret benannte Electron-Preload/IPC-Sicherheits-
+grenze, ausgewählte Installations-/Upgrade-Einstiegspunkte), ist die Pflicht
+seit diesem Gate nicht mehr nur Prosa: `git commit` wird technisch blockiert,
+wenn der Diff eine dieser Dateien berührt und seit exakt diesem Workspace-
+Fingerprint kein `verifier`-Lauf mit Urteil `PASS`/`PASS_WITH_WARNINGS`
+vorliegt (Anlass war eine 3-tägige Lücke ohne jeden Subagenten-Aufruf während
+des Electron-GUI-Batches Ende August 2026). Das ist eine konkrete, absichtlich
+schmale Pfadliste, keine Umsetzung der vollständigen Kategorienliste oben:
+"öffentliche API oder Schema", "Sicherheitsverhalten" über die genannte
+Electron-Grenze hinaus, "hoher Blast-Radius" und "eine ausdrückliche
+Nutzeranforderung" haben dort keine Entsprechung und bleiben, wie jede nicht
+in der Pfadliste geführte Datei, vollständig Ermessenssache des
+Hauptagenten wie zuvor.
+
 Planung, Umsetzung, Triage und finale Nutzerkommunikation bleiben beim
 Hauptagenten. Es gibt keine verschachtelte Delegation.
 

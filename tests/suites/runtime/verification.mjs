@@ -757,6 +757,153 @@ export const verificationSections = {
     });
   },
 
+  "verifier coverage capability bridge": async (context) => {
+    const { section, load, setupCore, verifierPolicy } = context;
+
+    await section("verifier coverage capability bridge", async () => {
+      if (!setupCore || !verifierPolicy) return;
+      const verificationCapabilities = await load(
+        "extensions/shared/verification-capabilities.ts",
+      );
+      if (!verificationCapabilities) return;
+
+      const workspace = mkdtempSync(
+        path.join(tmpdir(), "pi-verifier-coverage-"),
+      );
+      const git = (args) =>
+        execFileSync("git", args, { cwd: workspace, encoding: "utf8" });
+      try {
+        git(["init", "--quiet"]);
+        git(["config", "user.email", "verifier-coverage@example.test"]);
+        git(["config", "user.name", "Verifier Coverage Test"]);
+        git(["commit", "--quiet", "--allow-empty", "-m", "baseline"]);
+        mkdirSync(path.join(workspace, "extensions", "permissions"), {
+          recursive: true,
+        });
+        writeFileSync(
+          path.join(workspace, "extensions", "permissions", "guards.ts"),
+          "export {};\n",
+        );
+        git(["add", "."]);
+
+        const harness = createHarness();
+        setupCore.default(harness.api, { exec: harness.api.exec });
+        const trusted = harness.makeContext({ cwd: workspace, trusted: true });
+        await harness.runHooks("session_start", {}, trusted);
+
+        const queryCapabilities = () => {
+          let response;
+          harness.api.events.emit(
+            verificationCapabilities.VERIFICATION_CAPABILITY_EVENTS.request,
+            { respond: (value) => (response = value) },
+          );
+          return response;
+        };
+
+        eq(
+          queryCapabilities(),
+          {
+            workspaceRoot: undefined,
+            workspaceFingerprint: undefined,
+            verifierStatus: undefined,
+            verifierVerdict: undefined,
+          },
+          "no verifier run yet reports an empty snapshot",
+        );
+
+        await harness.runHooks(
+          "tool_result",
+          {
+            toolName: "subagent",
+            toolCallId: "verifier-call-1",
+            input: { agent: "verifier", task: "check" },
+            content: [{ type: "text", text: "irrelevant" }],
+            details: {
+              results: [
+                {
+                  agent: "verifier",
+                  exitCode: 0,
+                  finalOutput: "PASS\nAlles gut.",
+                },
+              ],
+            },
+          },
+          trusted,
+        );
+
+        const afterPass = queryCapabilities();
+        eq(
+          afterPass.workspaceRoot,
+          workspace,
+          "a completed verifier run is bound to the active workspace",
+        );
+        eq(
+          afterPass.verifierStatus,
+          "completed",
+          "a clean exit with no incomplete markers records as completed",
+        );
+        eq(
+          afterPass.verifierVerdict,
+          "PASS",
+          "the PASS verdict is parsed and exposed",
+        );
+
+        // Fed back through the real gate, that exact snapshot must clear a
+        // commit of the still-staged risk-path change — this is the
+        // end-to-end loop the whole feature exists for.
+        const gate = verifierPolicy.assessGitCommitVerifierGate(
+          { toolName: "bash", input: { command: 'git commit -m "x"' } },
+          workspace,
+          afterPass,
+        );
+        assert(
+          !gate.blocked,
+          "a recorded PASS at the exact current fingerprint clears the commit gate end-to-end",
+        );
+
+        // A later, incomplete run must overwrite the ledger rather than
+        // leave the earlier PASS looking current.
+        await harness.runHooks(
+          "tool_result",
+          {
+            toolName: "subagent",
+            toolCallId: "verifier-call-2",
+            input: { agent: "verifier", task: "check" },
+            content: [{ type: "text", text: "irrelevant" }],
+            details: {
+              results: [{ agent: "verifier", timedOut: true }],
+            },
+          },
+          trusted,
+        );
+        const afterIncomplete = queryCapabilities();
+        eq(
+          afterIncomplete.verifierStatus,
+          "incomplete",
+          "a timed-out run overwrites the ledger with incomplete",
+        );
+        assert(
+          afterIncomplete.verifierVerdict === undefined,
+          "an incomplete run never carries a verdict",
+        );
+
+        await harness.runHooks("session_shutdown", {}, trusted);
+        eq(
+          queryCapabilities(),
+          {
+            workspaceRoot: undefined,
+            workspaceFingerprint: undefined,
+            verifierStatus: undefined,
+            verifierVerdict: undefined,
+          },
+          "session shutdown clears the verifier ledger like every other transient session state",
+        );
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    });
+  },
+
   "project verification profiles (#105)": async (context) => {
     const { section, load } = context;
 
