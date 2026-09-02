@@ -1,0 +1,31 @@
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "pi-harness/gate-git-parity-smoke"
+version = "1.0.0"
+description = "Benchmark v3 Gate A2 smoke test: verifies git works identically inside the trial container for both the Pi adapter and Harbor's built-in Codex adapter (baseline commit exists, status/diff/add/commit all work, no 'not a git repository' error)."
+keywords = ["gate", "git"]
+[[task.authors]]
+name = "Benchmark v3 Teil A"
+
+[metadata]
+
+[verifier]
+timeout_sec = 120.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 300.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 600.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

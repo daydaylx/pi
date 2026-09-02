@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "tests": {
+      "program": "node",
+      "args": ["--test", "calc.test.mjs"],
+      "cwd": ".",
+      "timeoutMs": 60000,
+      "classification": "required"
+    }
+  }
+}

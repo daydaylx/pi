@@ -1,28 +1,46 @@
-# Benchmark v2: Pi vs. Codex auf Harbor
+# Benchmark v3: Pi vs. Codex auf Harbor
 
-Ablösung des Runners/Controllers der bisherigen `benchmarks/`-Serien (P3–P6)
-durch [Harbor](https://github.com/harbor-framework/harbor) bei
-Weiterverwendung bereits kalibrierter Fachlogik (Tokenfeld-Mapping,
-Task-Inhalte, Subagenten-Artefaktauswertung). Details, Architektur und
+Harte, kontaminationsarme Pi-vs-Codex-Benchmark-Suite auf Basis von
+[Harbor](https://github.com/harbor-framework/harbor), primär auf
+`encode/httpx` als reales Testrepository. Details, Architektur und
 gestufter Ausführungsplan: siehe
 `/home/d/.claude/plans/arbeitsauftrag-pi-vs-codex-benchmark-eager-sparkle.md`.
 
-`benchmarks/` (P3–P6) bleibt unverändert als historisches Artefakt bestehen
-und wird von diesem Verzeichnis nicht berührt.
+`benchmarks/` (P3–P6, ältere Generation) bleibt unverändert als historisches
+Artefakt bestehen und wird von diesem Verzeichnis nicht berührt.
 
-## Status: Sitzung 1 abgeschlossen (2026-08-31)
+## Status: Teil A (Infrastruktur-Reparatur) abgeschlossen (2026-09-01)
 
-Ziel war ausschließlich, die Harbor-Plumbing nachzuweisen — noch **kein**
-echter Pi-Produktivstack, keine echten Task-Migrationen, keine Pilotzahlen.
+Alle Gate-A-Bedingungen real gegen Container-Läufe verifiziert (nicht nur
+statisch geprüft) — siehe `BENCHMARK_V3_FIXES.md` für den vollständigen
+Changelog und `ENVIRONMENT_LOCK.md` / `TELEMETRY_SCHEMA.md` /
+`SCORING_V3.md` / `KNOWN_LIMITATIONS.md` für die Detaildokumente.
 
-Siehe `HARBOR_SETUP.md` für Setup-Details und das dokumentierte
-Sitzung-1-Ergebnis (inkl. eines echten, für Sitzung 2 relevanten Fundes zur
-Pi-Credential-Auflösung).
+Kurzfassung:
+
+- Agent umbenannt: `pi-product-harness` (v3.0.0), Versionsmanifest
+  (`MANIFEST.json`) im Tarball, Codex exakt auf `0.151.0` gepinnt, Node exakt
+  auf `22.23.2`.
+- Git funktioniert jetzt identisch für Pi UND Codex (war zuvor ein aktiver
+  Bug: `fatal: not a git repository`).
+- Pi läuft headless bei `project-write` + `--approve` ohne Rückfragen bei
+  Test/Build/Typecheck/Lint/`project_check`/LSP/Git; ein kleiner,
+  abgestimmter Produktcode-Patch (`extensions/permissions/tool-policy.ts`)
+  war dafür nötig.
+- Vollständiges Telemetrieschema (`postprocess/`): Laufzeitphasen,
+  Token-/Kosten-Aufschlüsselung, Toolfehler-Klassifikation,
+  Subagenten-Metadaten — für Pi live gegen echte Läufe verifiziert.
+- 0–100-Scoring-Modell mit hartem Functional-Correctness-Gate, gegen
+  bekannte Pass-/Fail-Referenzläufe verifiziert.
+
+**Ein offener Punkt, an den Nutzer geflaggt** (`KNOWN_LIMITATIONS.md` #5):
+echte Codex-`trajectory.json`-Dateien lassen sich innerhalb dieser
+interaktiven Sitzung nicht zuverlässig einlesen (sandboxseitiger,
+inhaltsbasierter Redaction-Filter beim Dateizugriff). Blockiert Gate A
+nicht, muss aber vor Teil B entschieden werden.
 
 ## Nächster Schritt
 
-Sitzung 2 (separat freizugeben, siehe Plan): echter Pi-Produktivstack im
-Docker-Image, `ask-user.ts`-RPC-Fix als eigener Produktcode-Vorschritt,
-OAuth-Credential-Mounting für `openai-codex`/`gpt-5.6-terra` nach dem in
-Sitzung 1 verifizierten Vorbild von Harbors eigenem Codex-Adapter
-(`_resolve_auth_json_path`/`CODEX_FORCE_AUTH_JSON`).
+Teil B (HTTPX-Snapshot: Repository klonen, Baseline-Commit einfrieren,
+Docker-Snapshot bauen) — braucht eine eigene, neue Freigabe laut Plan
+("harte Reihenfolge", kein automatischer Übergang).

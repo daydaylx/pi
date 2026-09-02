@@ -95,7 +95,7 @@ export function decideTool(
     // öffnen; er ist read-only und darf niemals hinter einem Dialog stehen.
     return { action: "allow", reason: "Read-only-Recovery-Check" };
   }
-  if (event.toolName === "verify") {
+  if (event.toolName === "verify" || event.toolName === "project_check") {
     return permissionLevel === "readonly"
       ? {
           action: "block",

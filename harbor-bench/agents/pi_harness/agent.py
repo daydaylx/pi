@@ -1,8 +1,11 @@
-"""Benchmark v2 Pi adapter for Harbor.
+"""Benchmark v3 Pi adapter for Harbor.
 
-Extends Harbor's built-in ``Pi`` agent (``harbor.agents.installed.pi:Pi``),
-registered under a distinct name (see "Namenskollision" in
+Registered under ``pi-product-harness`` -- a distinct name from Harbor's own
+built-in ``Pi`` agent (``harbor.agents.installed.pi:Pi``, registered as
+``"pi"``) to avoid a name collision (see "Namenskollision" in
 ``/home/d/.claude/plans/arbeitsauftrag-pi-vs-codex-benchmark-eager-sparkle.md``).
+Previously named ``pi-harness-stub``; renamed (Benchmark v3, Teil A9) because
+it has not been a stub since it started loading the real product stack.
 
 ``PiHarnessTrackA`` uses the REAL production stack: instead of Harbor's
 generic ``npm install -g @earendil-works/pi-coding-agent`` (vanilla package,
@@ -28,8 +31,10 @@ upload only a redacted subset into the container's
 ``PI_CODING_AGENT_DIR/auth.json``.
 """
 
+import importlib.metadata
 import json
 import shlex
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import override
 
@@ -39,6 +44,13 @@ from harbor.agents.model_connection import ModelConnectionSpec
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.trial.paths import EnvironmentPaths
+
+from postprocess.pi_normalizer import build_pi_telemetry
+from postprocess.schema import TELEMETRY_NAMESPACE
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 _LOCAL_PI_AUTH_JSON = Path("/home/d/.pi/agent/auth.json")
 _LOCAL_TARBALL = Path(__file__).parent.parent.parent / "environments" / "pi-product-stack.tar.gz"
@@ -54,6 +66,11 @@ _REMOTE_STACK_DIR = PurePosixPath("/opt/pi-harness")
 _REMOTE_TARBALL_PATH = PurePosixPath("/tmp/pi-product-stack.tar.gz")
 _OUTPUT_FILENAME = "pi.txt"
 
+# Own semver for this adapter file, independent of harbor==0.22.0 and of the
+# Pi package version baked into the tarball. Bump on any behavior-relevant
+# change to agent.py itself (install()/run()/populate_context_post_run()).
+_ADAPTER_VERSION = "3.0.0"
+
 
 class PiHarnessTrackA(BaseInstalledAgent):
     """Track A (autonomous, no clarification questions expected). Real
@@ -66,7 +83,7 @@ class PiHarnessTrackA(BaseInstalledAgent):
     @staticmethod
     @override
     def name() -> str:
-        return "pi-harness-stub"
+        return "pi-product-harness"
 
     @override
     def get_version_command(self) -> str | None:
@@ -84,19 +101,16 @@ class PiHarnessTrackA(BaseInstalledAgent):
                 "Build it with environments/build-tarball.sh first."
             )
 
-        # git: pi-subagents resolves its exactly-pinned fork via a runtime
-        # `git clone` into PI_CODING_AGENT_DIR/git/... (see docs/subagents.md
-        # "gepinnter daydaylx/pi-subagents-Fork") even though a resolved copy
-        # already ships inside npm/node_modules -- confirmed by a real
-        # `spawn git ENOENT` failure without this dependency.
-        await self.ensure_system_dependencies(environment, ("curl", "git"))
-        await self.exec_as_agent(
-            environment,
-            command=f"set -euo pipefail; {nvm_node_install_snippet()}",
-        )
+        # A5 phase timestamps (self-instrumented: populate_context_post_run()
+        # only receives AgentContext, not Harbor's own TrialResult phase
+        # timing -- see postprocess/schema.py RuntimeBreakdown docstring).
+        self._phase_ts: dict[str, tuple[str, str]] = {}
 
         remote_stack_dir = _REMOTE_STACK_DIR.as_posix()
         remote_tarball_path = _REMOTE_TARBALL_PATH.as_posix()
+
+        # container_setup_time: upload + extract the product-stack tarball.
+        t0 = _now_iso()
         await self.exec_as_agent(
             environment, command=f"mkdir -p {shlex.quote(remote_stack_dir)}"
         )
@@ -109,13 +123,60 @@ class PiHarnessTrackA(BaseInstalledAgent):
                 f"rm -f {shlex.quote(remote_tarball_path)}"
             ),
         )
+        self._phase_ts["container_setup_time"] = (t0, _now_iso())
 
+        # MANIFEST.json ships inside the tarball (Benchmark v3 Teil A1, written
+        # by scripts/build_version_manifest.py at build-tarball.sh time) --
+        # read it back so node gets pinned to the EXACT version the tarball's
+        # npm/package.json engines.node requires, not just nvm's major-only
+        # default, and so populate_context_post_run() can report it.
+        manifest_path = (_REMOTE_STACK_DIR / "MANIFEST.json").as_posix()
+        manifest_result = await self.exec_as_agent(
+            environment, command=f"cat {shlex.quote(manifest_path)}"
+        )
+        self._version_manifest: dict = json.loads(manifest_result.stdout)
+        node_version_pinned = self._version_manifest["node_version_pinned"]
+
+        # dependency_setup_time: system packages (git -- pi-subagents resolves
+        # its exactly-pinned fork via a runtime `git clone` into
+        # PI_CODING_AGENT_DIR/git/... even though a resolved copy already
+        # ships inside npm/node_modules, confirmed by a real `spawn git
+        # ENOENT` failure without this dependency) + node install.
+        t1 = _now_iso()
+        await self.ensure_system_dependencies(environment, ("curl", "git"))
+        await self.exec_as_agent(
+            environment,
+            command=(
+                f"set -euo pipefail; "
+                f"{nvm_node_install_snippet(node_major=node_version_pinned)}"
+            ),
+            # nvm's install.sh defaults to `git clone`ing nvm-sh/nvm whenever
+            # git is on PATH -- which it always is here, installed on the
+            # line above. Confirmed real, reproducible failure in this
+            # sandbox (not a guess): `git clone https://github.com/nvm-sh/nvm`
+            # errors `fatal: could not read Username for 'https://github.com'`
+            # on an unauthenticated public clone -- hit this identically on
+            # both agents/codex_harness/agent.py's own nvm install (same
+            # snippet, same bug, fixed there first) and here. `METHOD=script`
+            # is nvm's own documented override to force its curl/tarball
+            # path instead (verified against nvm v0.40.2's own install.sh
+            # source: `if [ -z "${METHOD}" ]; then if nvm_has git; then
+            # install_nvm_from_git ... elif [ "${METHOD}" = 'script' ] ...
+            # install_nvm_as_script`). NOT `NVM_METHOD` -- that name doesn't
+            # exist in the script.
+            env={"METHOD": "script"},
+        )
+        self._phase_ts["dependency_setup_time"] = (t1, _now_iso())
+
+        # agent_install_time: symlink the resolved pi binary + version probe.
+        t2 = _now_iso()
         pi_bin = (_REMOTE_STACK_DIR / "npm" / "node_modules" / ".bin" / "pi").as_posix()
         await self.exec_as_root(
             environment,
             command=f"ln -sf {shlex.quote(pi_bin)} /usr/local/bin/pi",
         )
         await self.exec_as_agent(environment, command=". ~/.nvm/nvm.sh; pi --version")
+        self._phase_ts["agent_install_time"] = (t2, _now_iso())
 
     @override
     async def run(
@@ -153,11 +214,14 @@ class PiHarnessTrackA(BaseInstalledAgent):
         env = {"PI_CODING_AGENT_DIR": remote_stack_dir}
         agent_dir = EnvironmentPaths.agent_dir.as_posix()
 
+        # A5: process-spawn instant, the start of agent_startup_time (ends at
+        # Pi's own "session" NDJSON event timestamp -- see pi_normalizer.py).
+        self._process_started_at = _now_iso()
         await self.exec_as_agent(
             environment,
             command=(
                 f". ~/.nvm/nvm.sh; "
-                f"pi --print --mode json "
+                f"pi --print --mode json --approve "
                 f"--session-dir {agent_dir}/pi/sessions "
                 f"--provider {provider} --model {model_id} "
                 f"{escaped_instruction} "
@@ -173,34 +237,33 @@ class PiHarnessTrackA(BaseInstalledAgent):
         if not output_file.exists():
             return
 
-        total_input_tokens = 0
-        total_output_tokens = 0
-        total_cache_read_tokens = 0
-        total_cache_write_tokens = 0
-        total_cost = 0.0
+        subagent_artifacts_dirs = list(self.logs_dir.rglob("subagent-artifacts"))
 
-        for line in output_file.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except (json.JSONDecodeError, AttributeError, TypeError):
-                continue
-            if event.get("type") != "message_end":
-                continue
-            message = event.get("message") or {}
-            if message.get("role") != "assistant":
-                continue
-            usage = message.get("usage") or {}
-            total_input_tokens += usage.get("input", 0)
-            total_output_tokens += usage.get("output", 0)
-            total_cache_read_tokens += usage.get("cacheRead", 0)
-            total_cache_write_tokens += usage.get("cacheWrite", 0)
-            cost = usage.get("cost") or {}
-            total_cost += cost.get("total", 0.0)
+        try:
+            harbor_version = importlib.metadata.version("harbor")
+        except importlib.metadata.PackageNotFoundError:
+            harbor_version = None
 
-        context.n_input_tokens = total_input_tokens + total_cache_read_tokens
-        context.n_output_tokens = total_output_tokens
-        context.n_cache_tokens = total_cache_read_tokens
-        context.cost_usd = total_cost if total_cost > 0 else None
+        telemetry = build_pi_telemetry(
+            output_file,
+            phase_timestamps=getattr(self, "_phase_ts", None),
+            process_started_at=getattr(self, "_process_started_at", None),
+            version_manifest=getattr(self, "_version_manifest", None),
+            harbor_version=harbor_version,
+            adapter_name=self.name(),
+            adapter_version=_ADAPTER_VERSION,
+            subagent_artifacts_dir=subagent_artifacts_dirs[0] if subagent_artifacts_dirs else None,
+        )
+
+        # Harbor's own core AgentContext fields, derived from the SAME
+        # computed telemetry (not a second, independently-summed pass) --
+        # n_input_tokens keeps Pi's "fresh + cache-read" semantics per
+        # Harbor's own convention (see TokenBreakdown docstring).
+        tokens = telemetry.tokens
+        context.n_input_tokens = (tokens.input_fresh or 0) + (tokens.input_cache_read or 0)
+        context.n_output_tokens = tokens.output
+        context.n_cache_tokens = tokens.input_cache_read
+        context.cost_usd = tokens.cost_usd
+
+        context.metadata = context.metadata or {}
+        context.metadata[TELEMETRY_NAMESPACE] = telemetry.model_dump(mode="json")

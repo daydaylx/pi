@@ -1,0 +1,35 @@
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "pi-harness/httpx-05-streaming-lifecycle"
+version = "1.0.0"
+description = "Benchmark v3 hard suite, HTTPX Task 5 (Streaming/Lifecycle Verification Trap): Response.close() lost its idempotency guard, so the underlying stream gets closed twice under the ordinary `with client.stream(...) as response: response.read()` pattern (auto-close-on-exhaustion, then the context manager's own close)."
+keywords = ["httpx", "hard-suite", "streaming-lifecycle"]
+[[task.authors]]
+name = "Benchmark v3 Teil C"
+
+[metadata]
+contamination_risk = "LOW"
+difficulty = "hard"
+category = "streaming_lifecycle"
+baseline_sha = "b5addb64f0161ff6bfe94c124ef76f6a1fba5254"
+
+[verifier]
+timeout_sec = 180.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 1800.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

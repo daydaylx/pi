@@ -1,0 +1,35 @@
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "pi-harness/httpx-03-redirect-state"
+version = "1.0.0"
+description = "Benchmark v3 hard suite, HTTPX Task 3 (Redirect State Bug): cross-origin redirect header cleanup (Authorization stripping, Host update) is incorrectly gated on the redirect method staying unchanged, so it is skipped exactly when a method-downgrading redirect (e.g. 303 POST->GET) also crosses origins."
+keywords = ["httpx", "hard-suite", "redirect-state"]
+[[task.authors]]
+name = "Benchmark v3 Teil C"
+
+[metadata]
+contamination_risk = "LOW"
+difficulty = "hard"
+category = "redirect_state"
+baseline_sha = "b5addb64f0161ff6bfe94c124ef76f6a1fba5254"
+
+[verifier]
+timeout_sec = 180.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 1800.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

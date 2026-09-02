@@ -1,0 +1,35 @@
+schema_version = "1.4"
+artifacts = []
+
+[task]
+name = "pi-harness/httpx-06-config-propagation"
+version = "1.0.0"
+description = "Benchmark v3 hard suite, HTTPX Task 6 (Configuration Propagation Bug): a Client's http2=True setting is accepted and applied to its default transport, but silently dropped when constructing the transport for a proxy-routed mount (both sync and async), reverting to HTTP/1.1 only for proxied requests."
+keywords = ["httpx", "hard-suite", "config-propagation"]
+[[task.authors]]
+name = "Benchmark v3 Teil C"
+
+[metadata]
+contamination_risk = "LOW"
+difficulty = "hard"
+category = "config_propagation"
+baseline_sha = "b5addb64f0161ff6bfe94c124ef76f6a1fba5254"
+
+[verifier]
+timeout_sec = 180.0
+collect = []
+
+[verifier.env]
+
+[agent]
+timeout_sec = 1800.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+mcp_servers = []
+
+[environment.env]
+
+[solution.env]

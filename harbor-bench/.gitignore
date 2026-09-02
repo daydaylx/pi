@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 .venv/
 environments/*.tar.gz
+repos/
+environments/httpx-snapshot/context/httpx-src/
