@@ -45,17 +45,25 @@
   Trust-Grenzen bleiben erhalten.
 - Planmodus: nur `work`, `simple_plan`, `detailed_plan`;
   `.agent/plans/current-plan.md` ist unverbindlicher Markdown-Kontext.
-- P4 und der allgemeine Benchmark-Collector verwenden einen gemeinsamen,
-  versionierten Workspace-Snapshot. Er erfasst `HEAD`, staged, unstaged und
-  untracked Änderungen, Renames und Deletes und speichert keine Patches,
-  Dateiinhalte oder absoluten Pfade.
+- `shared/workspace-snapshot.mjs` liefert einen versionierten Workspace-
+  Snapshot für `extensions/resilience/`, `extensions/setup-core/` und
+  `extensions/permissions/verifier-policy.ts`. Er erfasst `HEAD`, staged,
+  unstaged und untracked Änderungen, Renames und Deletes und speichert
+  keine Patches, Dateiinhalte oder absoluten Pfade. Die frühere
+  Benchmark-Harness (`benchmarks/harness/workspace-snapshot.mjs`, eigene
+  Kopie mit eigenem Test) ist mit den Legacy-Benchmarks archiviert, siehe
+  [`docs/benchmark-history.md`](benchmark-history.md); das Produktionsmodul
+  ist davon unberührt.
 - `project_check` ist der einzige Weg zur vollständigen Projektverifikation
   und der einzige, der Footer und Ledger fortschreibt. Das `verify`-Tool
   bietet nur die Teilprüfungen `typecheck`/`test` (keine Abschlussbedingung).
-- CI-`verify` benötigt vollständige Git-Historie (`fetch-depth: 0`), weil
-  `benchmarks/harness/p4-manifest.json` einen Referenz-Commit gegen die
-  lokale Historie prüft. `npm run test:runtime` ist bewusst nicht Teil der
-  `verify`-Kette, da es eine entwicklerspezifisch gepatchte Runtime prüft.
+- CI-`verify` nutzt seit der Archivierung der Legacy-Benchmarks (siehe
+  [`docs/benchmark-history.md`](benchmark-history.md)) wieder den
+  Standard-Shallow-Checkout; `fetch-depth: 0` war ausschließlich wegen des
+  inzwischen entfernten `benchmarks/harness/p4-manifest.json`-
+  Reachability-Checks gesetzt. `npm run test:runtime` ist bewusst nicht
+  Teil der `verify`-Kette, da es eine entwicklerspezifisch gepatchte
+  Runtime prüft.
 - Der Verifikationsstatus ist sitzungsgebunden, an den gemeinsamen
   Workspace-Snapshot gebunden und rein technisch. Er erscheint dedupliziert
   bei `agent_settled`, ist abschaltbar und nutzt weder `agent_end` als
@@ -113,8 +121,8 @@
 - Tokenmetriken trennen Cache-Anteile: `cacheRead`/`cacheWrite` werden
   separat summiert; `providerReportedTotal` ist das rohe `usage.totalTokens`
   und darf Cache-Buchhaltung enthalten — es ist keine Formel aus
-  input+output+reasoning (`benchmarks/SCORING.md`,
-  `harness/schema/run-result.schema.json`).
+  input+output+reasoning (Methodik dazu:
+  [`docs/benchmark-history.md`](benchmark-history.md#methodische-erkenntnisse-erhalten-nicht-neu-ausgewertet)).
 - `project_check` benennt seinen Prüfstand explizit: Das Ergebnis gilt für
   den Workspace-Snapshot (Fingerprint), niemals automatisch für den
   versionierten HEAD.

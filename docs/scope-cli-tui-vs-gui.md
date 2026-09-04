@@ -33,7 +33,6 @@ auf eine Seite beschränkten Auftrag nicht beide Bäume vollständig liest.
 | `agents/`                                                                                                                                                                                                            | Subagenten-Rollenprompts (debugger, investigator, verifier)    |
 | `docs/decisions/`, `docs/subagents.md`, `docs/verify-profiles.md`, `docs/context-management.md`, `docs/runtime-matrix.md`, `docs/lsp.md`                                                                             | Core-Referenzdokumentation                                     |
 | `tests/` (Top-Level-Suiten, `tests/openrouter-doctor` etc.)                                                                                                                                                          | Core-Testsuiten                                                |
-| `benchmarks/`                                                                                                                                                                                                        | Agenten-Benchmarks                                             |
 
 ## GUI
 

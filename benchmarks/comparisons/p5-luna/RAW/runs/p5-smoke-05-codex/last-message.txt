@@ -1,9 +1,0 @@
-Die Implementierung wurde vereinfacht in [change-tracker.ts](/tmp/pi-p4-worktree-8EMDlw/source/benchmark-fixture/diff-viewer/change-tracker.ts:12). Beide Getter verwenden jetzt eine gemeinsame private Iterationsmethode; öffentliches Verhalten bleibt unverändert.
-
-Prüfungen:
-
-- Fixture-Test: **11/11 bestanden**
-- Prettier: **bestanden**
-- Typecheck: **bestanden**
-- `git diff --check`: **bestanden**
-- `npm run verify`: **1293 bestanden, 6 sandboxbedingte EPERM-Fehler** beim Starten von `node`/`git` in bestehenden Tests.

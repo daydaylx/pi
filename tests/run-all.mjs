@@ -20,47 +20,6 @@ const suites = [
     env: { PI_TEST_SUITE: name },
   })),
   {
-    name: "p4-manifest",
-    file: "../benchmarks/harness/test/p4-manifest.test.mjs",
-    env: {},
-  },
-  {
-    name: "p4-performance-manifest",
-    file: "../benchmarks/harness/test/p4-performance-manifest.test.mjs",
-    env: {},
-  },
-  {
-    name: "p4-production-stack",
-    file: "../benchmarks/harness/test/stack-manifest.test.mjs",
-    env: {},
-  },
-  {
-    name: "p4-private-boundary",
-    file: "../benchmarks/harness/test/v2-private.test.mjs",
-    env: {},
-  },
-  {
-    name: "workspace-snapshot",
-    file: "../benchmarks/harness/test/workspace-snapshot.test.mjs",
-    env: {},
-  },
-  {
-    name: "p4-controller",
-    file: "../benchmarks/harness/test/p4-controller.test.mjs",
-    env: {},
-  },
-  { name: "p4-cli", file: "../benchmarks/harness/test/p4.test.mjs", env: {} },
-  {
-    name: "p4-run-result-schema",
-    file: "../benchmarks/harness/test/p4-run-result-schema.test.mjs",
-    env: {},
-  },
-  {
-    name: "collect-metrics",
-    file: "../benchmarks/harness/test/collect-metrics.test.mjs",
-    env: {},
-  },
-  {
     name: "relative-imports",
     file: "check-relative-imports.test.mjs",
     env: {},

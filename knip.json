@@ -23,8 +23,7 @@
     "tests/runtime-patches.mjs",
     "tests/**/*.test.mjs",
     "tests/openrouter-doctor/live/manual-live-check.mjs",
-    "scripts/*.mjs",
-    "benchmarks/harness/**/*.mjs"
+    "scripts/*.mjs"
   ],
   "project": ["extensions/**/*.ts", "tests/**/*.mjs", "scripts/**/*.mjs"],
   "ignore": ["tests/fixtures/fake-lsp.mjs"],

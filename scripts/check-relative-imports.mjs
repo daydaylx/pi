@@ -4,13 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".mjs", ".js"]);
 const RESOLUTION_EXTENSIONS = [".ts", ".mjs", ".js", ".json"];
-export const DEFAULT_SOURCE_DIRS = [
-  "extensions",
-  "scripts",
-  "shared",
-  "tests",
-  "benchmarks/harness",
-];
+export const DEFAULT_SOURCE_DIRS = ["extensions", "scripts", "shared", "tests"];
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -30,7 +24,7 @@ function collectSourceFiles(root, relativeDir, files = []) {
 
 function tokens(source) {
   const result = [];
-  for (let index = 0; index < source.length; ) {
+  for (let index = 0; index < source.length;) {
     const char = source[index];
     const next = source[index + 1];
     if (/\s/.test(char)) {
@@ -93,10 +87,17 @@ export function relativeImportSpecifiers(source) {
   const lexed = tokens(source);
   for (let index = 0; index < lexed.length; index += 1) {
     const token = lexed[index];
-    if (token.type !== "word" || (token.value !== "import" && token.value !== "export"))
+    if (
+      token.type !== "word" ||
+      (token.value !== "import" && token.value !== "export")
+    )
       continue;
     const next = lexed[index + 1];
-    if (token.value === "import" && next?.value === "(" && lexed[index + 2]?.type === "string") {
+    if (
+      token.value === "import" &&
+      next?.value === "(" &&
+      lexed[index + 2]?.type === "string"
+    ) {
       found.add(lexed[index + 2].value);
       continue;
     }
@@ -106,7 +107,10 @@ export function relativeImportSpecifiers(source) {
     }
     for (let cursor = index + 1; cursor < lexed.length; cursor += 1) {
       if (lexed[cursor].value === ";") break;
-      if (lexed[cursor].value === "from" && lexed[cursor + 1]?.type === "string") {
+      if (
+        lexed[cursor].value === "from" &&
+        lexed[cursor + 1]?.type === "string"
+      ) {
         found.add(lexed[cursor + 1].value);
         break;
       }
@@ -120,7 +124,9 @@ export function resolveRelativeImport(fromFile, specifier) {
   const candidates = [
     base,
     ...RESOLUTION_EXTENSIONS.map((extension) => `${base}${extension}`),
-    ...RESOLUTION_EXTENSIONS.map((extension) => path.join(base, `index${extension}`)),
+    ...RESOLUTION_EXTENSIONS.map((extension) =>
+      path.join(base, `index${extension}`),
+    ),
   ];
   return candidates.find((candidate) => {
     try {
@@ -132,7 +138,10 @@ export function resolveRelativeImport(fromFile, specifier) {
 }
 
 /** Returns deterministic error strings for every unresolved literal relative import. */
-export function checkRelativeImports(root = ROOT, sourceDirs = DEFAULT_SOURCE_DIRS) {
+export function checkRelativeImports(
+  root = ROOT,
+  sourceDirs = DEFAULT_SOURCE_DIRS,
+) {
   const missing = [];
   for (const sourceDir of sourceDirs) {
     for (const relativeFile of collectSourceFiles(root, sourceDir)) {
@@ -159,6 +168,9 @@ function main() {
   process.exitCode = 1;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   main();
 }
