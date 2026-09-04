@@ -153,3 +153,26 @@ der Zwischenzustand vor dem Commit, keine Regression durch die
 Archivierung selbst und kein Grund, altes Benchmarkcode wieder
 einzubinden — nach dem Commit in Phase 8 ist der Baum sauber und `npm run
 verify` muss erneut laufen, um den finalen grünen Stand zu bestätigen.
+
+## Phase 7 — finales Ergebnis (nach Commit `ea0d4d5`)
+
+Auf sauberem, committetem Baum (`git status` leer):
+
+| Schritt | Ergebnis |
+| --- | --- |
+| `format:check` | ✅ PASS |
+| `typecheck` | ✅ PASS |
+| `deadcode` (knip) | ✅ PASS |
+| `test:coverage` (alle Node-Testsuiten inkl. `relative-imports`) | ✅ PASS — 2283 Einzeltests, 0 fehlgeschlagen |
+| `test:patches` | ✅ PASS — 50 Tests |
+| `test:gui` (`gui/test/format-check.mjs`) | ❌ FAIL — **vorbestehend, unabhängig von dieser Archivierung** |
+| `audit:check` | ✅ PASS (isoliert verifiziert) |
+
+Die `test:gui`-Formatabweichung (`gui/renderer/index.html`,
+`gui/renderer/styles.css`) betrifft ausschließlich `gui/`-Dateien.
+`git diff 86dca92 ea0d4d5 --stat -- gui/` ist leer — der Archivierungs-
+Commit hat keine einzige Datei unter `gui/` verändert. Die Abweichung
+bestand bereits vor dieser Archivierung und liegt außerhalb des Auftrags
+(„keine Pi-Produktverhaltensänderung", keine GUI-Arbeit). Alle
+archivierungsrelevanten Prüfungen sind grün; die GUI-Formatabweichung
+bleibt als separates, vorbestehendes Ticket offen.
