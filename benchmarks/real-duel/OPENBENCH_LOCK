@@ -1,0 +1,32 @@
+# Real-Task Duel — OpenBench Pin
+#
+# Projekt: minghinmatthewlam/openbench (PyPI-Name: obench)
+# NICHT groq/openbench — anderes, thematisch nicht passendes Projekt
+# (klassische statische LLM-Evals wie MMLU/GPQA, kein Coding-Agent-Harness-Duell).
+#
+# Das PyPI-Paket "obench" ist veraltet (nur 0.1.0, fehlt u.a. `obench init`,
+# `obench gate`, Packs, Harbor-native `suite.toml`-Runs). NICHT `pip install
+# obench` verwenden — stattdessen Git-Checkout auf den unten gepinnten Commit.
+
+REPO_URL=https://github.com/minghinmatthewlam/openbench.git
+PINNED_SHA=ee71845c2898a98b8e3f2810cba8a1389f72c27e
+PINNED_TAG=v1.0.0
+
+# Referenz, main-HEAD zum Zeitpunkt dieser Recherche (2026-09-04) — falls
+# spaeter ein Upgrade auf neuere Fixes erwogen wird:
+KNOWN_MAIN_HEAD=db193457a3d9128cd4d01fd839c2a890c186c9ac
+
+# Installation (bewusst AUSSERHALB dieses Repos, siehe README.md):
+#
+#   mkdir -p ~/.local/share/real-duel
+#   git clone "$REPO_URL" ~/.local/share/real-duel/openbench
+#   cd ~/.local/share/real-duel/openbench
+#   git checkout "$PINNED_SHA"
+#   uv venv -q && uv pip install -q -e .
+#   ./.venv/bin/obench --version
+#
+# Ein Upgrade auf einen neueren Commit ist eine bewusste, explizite Aktion:
+# neuen SHA/Tag hier eintragen, Checkout aktualisieren, Kandidaten-Manifeste
+# und dieses Dokument gegen den neuen Code-Stand erneut pruefen (insbesondere
+# obench/candidates.py und obench/workspace.py, da real-duel deren internes
+# Verhalten direkt importiert, siehe scripts/pi-duel).

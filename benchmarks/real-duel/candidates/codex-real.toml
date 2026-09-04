@@ -1,0 +1,48 @@
+# real-duel Candidate: das tatsaechlich lokal genutzte Codex-Setup.
+#
+# Bewusst KEINE Home-Isolation (isolate_home = false): config.toml, das
+# lean-ctx-Instructions-Layer (~/.codex/instructions.md), die (aktuell
+# nachweislich fehlschlagenden) tty7-Hooks und das echte auth.json sollen
+# exakt wie im echten Alltag geladen werden. CODEX_HOME loest immer auf
+# ~/.codex auf, unabhaengig vom cwd/Workspace — genau das ist hier gewollt.
+#
+# Konsequenz: `obench gate` wird dieses Manifest ablehnen (siehe
+# pi-real.toml-Kommentar) — erwartet und akzeptiert.
+#
+# Codex-Version bewusst NICHT auf 0.151.0 aktualisiert: die tatsaechlich
+# installierte 0.149.1 zaehlt als "real genutzt".
+#
+# Bewusst NICHT gesetzt:
+# - --dangerously-bypass-approvals-and-sandbox: laut `codex exec --help`
+#   fuer Container-Isolation gedacht. Hier laeuft ein echter Host mit
+#   echten Dateien in einem echten Git-Worktree — `--approve-for-me`
+#   (impliziert bereits die workspace-write-Sandbox) ist die
+#   sicherheitsbewusste Entsprechung.
+# - -s/--sandbox explizit: `--approve-for-me` setzt die workspace-write-
+#   Sandbox bereits selbst; beide Flags zusammen sind laut CLI ein
+#   Konflikt ("cannot be used with '--approve-for-me'"), verifiziert per
+#   echtem Smoke-Lauf (exit 2) am 2026-09-04.
+# - --skip-git-repo-check: der Workspace IST ein echter Git-Worktree,
+#   dieser Flag ist nur fuer OpenBenchs eigene, nicht-Git-Tempdirs noetig.
+# - --disable apps/plugins/multi_agent: reale Config (u.a. GitHub-Connector)
+#   soll aktiv bleiben, keine kuenstliche Symmetrie mit Pi erzwingen.
+
+kind = "manifest"
+name = "codex-real"
+isolate_home = false
+
+command = [
+  "codex", "exec", "--json",
+  "--approve-for-me",
+  "-m", "gpt-5.6-terra",
+  "{prompt}",
+]
+version_command = ["codex", "--version"]
+
+policy_headless_args = ["exec"]
+policy_auto_approve_args = ["--approve-for-me"]
+
+pass_env = []
+
+[models]
+"gpt-5.6-terra" = "gpt-5.6-terra"

@@ -1,0 +1,8 @@
+# Laufdaten gehoeren nach ~/.local/state/real-duel/, nicht ins Repo.
+# Diese Eintraege sind nur ein Sicherheitsnetz falls versehentlich lokal
+# hierher geschrieben wird.
+*.jsonl
+transcripts/
+fingerprints/
+*.log
+__pycache__/

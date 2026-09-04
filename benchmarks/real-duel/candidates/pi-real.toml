@@ -1,0 +1,39 @@
+# real-duel Candidate: das tatsaechlich lokal genutzte Pi-Setup.
+#
+# Bewusst KEINE Home-Isolation (isolate_home = false): settings.json,
+# AGENTS.md, APPEND_SYSTEM.md, auth.json, aktive Extensions, Subagenten-
+# Routing und Compaction sollen exakt wie im echten Alltag geladen werden.
+# `agentDir` loest bei Pi immer auf ~/.pi/agent auf, unabhaengig vom cwd/
+# Workspace — genau das ist hier gewollt.
+#
+# Konsequenz: `obench gate` wird dieses Manifest ABLEHNEN, weil der
+# Admission-Gate isolate_home=true zwingend voraussetzt
+# (obench/candidate_gate.py). Das ist erwartet und akzeptiert — der Gate
+# beantwortet die Frage "ist dieser Candidate fuer einen isolierten,
+# zertifizierten Vergleich zugelassen", nicht "funktioniert er". real-duel
+# will explizit den nicht-isolierten, echten Zustand messen.
+#
+# Bewusst NICHT gesetzt:
+# - --thinking / --no-context-files: die realen Defaults aus settings.json
+#   (defaultThinkingLevel: high, volle AGENTS.md-Discovery) sollen wirken.
+# - auth_files: nicht noetig, da isolate_home=false die reale auth.json
+#   direkt (unkopiert) nutzbar laesst.
+
+kind = "manifest"
+name = "pi-real"
+isolate_home = false
+
+command = [
+  "pi", "--print", "--mode", "json", "--approve",
+  "--provider", "openai-codex", "--model", "gpt-5.6-terra",
+  "{prompt}",
+]
+version_command = ["pi", "--version"]
+
+policy_headless_args = ["--print"]
+policy_auto_approve_args = ["--approve"]
+
+pass_env = []
+
+[models]
+"gpt-5.6-terra" = "gpt-5.6-terra"

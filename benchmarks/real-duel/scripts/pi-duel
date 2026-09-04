@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Duenner Wrapper um OpenBench fuer den real-duel-Workflow (Modus A).
+
+Nutzt OpenBenchs eigene Bausteine direkt statt sie neu zu bauen:
+  - obench.candidates.ManifestHarness.run()   fuer die reale CLI-Invokation
+    (Env-Policy, isolate_home=false-Handling, Auth-Kopie-Logik -- unveraendert
+    von OpenBench uebernommen).
+  - obench.run.run_checker()                  fuer die Checker-Ausfuehrung
+    (TASK_DIR-Env, SCORE:-Parsing -- unveraendert uebernommen).
+  - `obench doctor` / `obench gate` / `obench report` als externe CLI-Aufrufe.
+
+Ersetzt wird NUR die Workspace-Materialisierung: obench.run erzeugt Workspaces
+immer in einem frischen, .git-losen Tempdir (git-archive-Export, siehe
+obench/workspace.py) -- das ist mit der real-duel-Anforderung nach echten
+Git-Worktrees (volle Historie, .git, git status/diff/log/blame) unvereinbar.
+Dieses Skript erzeugt daher die Worktrees selbst und uebergibt sie direkt als
+workdir an die uebernommenen OpenBench-Funktionen. Details: siehe
+REAL_DUEL_AUDIT.md.
+
+Subcommands: doctor | gate | smoke | report | cleanup <run-id>
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path("/home/d/.pi/agent")
+REAL_DUEL_DIR = REPO / "benchmarks" / "real-duel"
+OPENBENCH_HOME = Path(os.path.expanduser("~/.local/share/real-duel/openbench"))
+STATE = Path(os.path.expanduser("~/.local/state/real-duel"))
+WORKTREES_ROOT = STATE / "worktrees"
+WORKSPACE_DIR = STATE / "obench-workspace"
+RESULTS_PATH = WORKSPACE_DIR / "results.jsonl"
+TRANSCRIPTS_DIR = WORKSPACE_DIR / "transcripts"
+FINGERPRINTS_DIR = WORKSPACE_DIR / "fingerprints"
+
+CANDIDATES = {
+    "pi-real": REAL_DUEL_DIR / "candidates" / "pi-real.toml",
+    "codex-real": REAL_DUEL_DIR / "candidates" / "codex-real.toml",
+}
+MODEL = "gpt-5.6-terra"
+
+
+def _obench_bin():
+    b = OPENBENCH_HOME / ".venv" / "bin" / "obench"
+    if not b.exists():
+        sys.exit(f"OpenBench nicht gefunden unter {b} -- siehe OPENBENCH_LOCK fuer Setup.")
+    return b
+
+
+def _run_obench_cli(args):
+    return subprocess.run([str(_obench_bin())] + args, cwd=OPENBENCH_HOME).returncode
+
+
+def cmd_doctor(_args):
+    return _run_obench_cli(["doctor"])
+
+
+def cmd_gate(_args):
+    rc = 0
+    for name, path in CANDIDATES.items():
+        print(f"=== obench gate: {name} (isolate_home=false -> Ablehnung erwartet) ===")
+        r = _run_obench_cli(["gate", str(path), "--model", MODEL])
+        rc = rc or r
+    return rc
+
+
+def _fingerprint():
+    script = REAL_DUEL_DIR / "scripts" / "fingerprint.sh"
+    proc = subprocess.run(["bash", str(script)], capture_output=True, text=True)
+    sys.stderr.write(proc.stderr)
+    return json.loads(proc.stdout)
+
+
+def _make_worktree(run_id, arm, base_sha):
+    wt = WORKTREES_ROOT / run_id / arm
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "-C", str(REPO), "worktree", "add", str(wt), base_sha],
+        check=True,
+    )
+    return wt
+
+
+def _load_obench_modules():
+    sys.path.insert(0, str(OPENBENCH_HOME))
+    from obench.candidates import load_candidate  # noqa: E402
+    from obench.run import make_run_id, read_instruction, run_checker  # noqa: E402
+    return load_candidate, make_run_id, read_instruction, run_checker
+
+
+def cmd_smoke(args):
+    task_dir = REAL_DUEL_DIR / "tasks" / "smoke-01-marker-file"
+    run_id_base = "smoke-01-" + time.strftime("%Y%m%dT%H%M%S")
+
+    fp = _fingerprint()
+    FINGERPRINTS_DIR.mkdir(parents=True, exist_ok=True)
+    (FINGERPRINTS_DIR / f"{run_id_base}.json").write_text(json.dumps(fp, indent=2))
+    print(json.dumps(fp, indent=2))
+    base_sha = fp["base_sha"]
+
+    load_candidate, make_run_id, read_instruction, run_checker = _load_obench_modules()
+    instruction = read_instruction(str(task_dir))
+
+    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    arm_by_candidate = {"pi-real": "pi", "codex-real": "codex"}
+    summary = {}
+
+    for cand_name, cand_path in CANDIDATES.items():
+        arm = arm_by_candidate[cand_name]
+        print(f"\n=== {cand_name}: worktree ===")
+        workdir = _make_worktree(run_id_base, arm, base_sha)
+        print(f"worktree: {workdir}")
+
+        candidate = load_candidate(str(cand_path), None)
+        run_id = make_run_id(cand_name, "smoke-01-marker-file", MODEL, 1, candidate.identity_digest)
+
+        print(f"=== {cand_name}: invoke ({run_id}) ===")
+        t0 = time.monotonic()
+        result = candidate.run(instruction, str(workdir), MODEL, args.timeout)
+        wall_time = round(time.monotonic() - t0, 3)
+
+        checker_exit, raw_score, checker_stdout, checker_stderr = run_checker(
+            str(task_dir), str(workdir), args.checker_timeout)
+        success = checker_exit == 0
+
+        transcript_path = TRANSCRIPTS_DIR / f"{run_id_base}_{arm}.txt"
+        transcript_path.write_text(result.get("full_output") or "")
+
+        row = {
+            "run_id": run_id,
+            "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+            "harness": cand_name,
+            "model": MODEL,
+            "task": "smoke-01-marker-file",
+            "trial": 1,
+            "success": success,
+            "completed": bool(result.get("completed")),
+            "error": result.get("error"),
+            "wall_time_s": wall_time,
+            "cmd": result.get("cmd"),
+            "checker_exit": checker_exit,
+            "checker_stdout": checker_stdout,
+            "checker_stderr": checker_stderr,
+            "score": (raw_score if raw_score is not None else (1.0 if success else 0.0)),
+            "exec_mode": "local",
+            "candidate_provenance": candidate.provenance,
+            "base_sha": base_sha,
+            "workdir": str(workdir),
+            # Token-Felder bewusst None: generische obench-Manifeste parsen keine
+            # Tokens selbst (siehe REAL_DUEL_AUDIT.md). Echte Normalisierung ist
+            # Phase 2 (v3-Schema-Wiederverwendung ueber die Transkript-Datei).
+            "tokens": None,
+            "tokens_input_uncached": None,
+            "tokens_cache_read": None,
+            "tokens_cache_write": None,
+            "tokens_output": None,
+            "tokens_reasoning": None,
+            "token_basis": None,
+        }
+        RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(RESULTS_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+
+        summary[cand_name] = {
+            "success": success, "checker_exit": checker_exit,
+            "wall_time_s": wall_time, "workdir": str(workdir),
+        }
+        print(f"=== {cand_name}: checker_exit={checker_exit} success={success} "
+              f"wall_time_s={wall_time} ===")
+
+    print("\n=== Zusammenfassung ===")
+    print(json.dumps(summary, indent=2))
+    print(f"\nrun_id: {run_id_base}")
+    print(f"Aufraeumen mit: pi-duel cleanup {run_id_base}")
+    return 0 if all(s["success"] for s in summary.values()) else 1
+
+
+def cmd_report(_args):
+    if not RESULTS_PATH.exists():
+        sys.exit(f"keine results.jsonl unter {RESULTS_PATH} -- erst 'pi-duel smoke' laufen lassen")
+    return _run_obench_cli(["report", "--results-path", str(RESULTS_PATH)])
+
+
+def cmd_cleanup(args):
+    root = WORKTREES_ROOT / args.run_id
+    for arm in ("pi", "codex"):
+        wt = root / arm
+        if wt.exists():
+            subprocess.run(
+                ["git", "-C", str(REPO), "worktree", "remove", str(wt), "--force"],
+                check=False,
+            )
+    print(f"aufgeraeumt: {root}")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("doctor", help="obench doctor")
+    sub.add_parser("gate", help="obench gate fuer beide Candidates (Ablehnung erwartet)")
+
+    p_smoke = sub.add_parser("smoke", help="Fingerprint + Worktrees + Smoke-Task fuer beide Candidates")
+    p_smoke.add_argument("--timeout", type=int, default=600, help="Adapter-Timeout in Sekunden (default: 600)")
+    p_smoke.add_argument("--checker-timeout", type=int, default=120, help="Checker-Timeout in Sekunden (default: 120)")
+
+    sub.add_parser("report", help="obench report ueber die real-duel results.jsonl")
+
+    p_cleanup = sub.add_parser("cleanup", help="Worktrees eines Laufs entfernen")
+    p_cleanup.add_argument("run_id")
+
+    args = parser.parse_args()
+    dispatch = {
+        "doctor": cmd_doctor, "gate": cmd_gate, "smoke": cmd_smoke,
+        "report": cmd_report, "cleanup": cmd_cleanup,
+    }
+    sys.exit(dispatch[args.command](args))
+
+
+if __name__ == "__main__":
+    main()
