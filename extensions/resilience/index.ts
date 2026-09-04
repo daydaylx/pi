@@ -357,7 +357,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
       workspaceFingerprint: workspaceFingerprint(ctx.cwd),
-      workflowMode: requestWorkflowCapabilities(pi.events).mode,
+      workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       provider: ctx.model?.provider ?? "unknown",
       model: ctx.model?.id ?? "unknown",
       contextPercent: contextPercent(ctx),
@@ -424,7 +424,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       reason: event.reason,
       willRetry: event.willRetry,
       workspaceFingerprint: workspaceFingerprint(ctx.cwd),
-      workflowMode: requestWorkflowCapabilities(pi.events).mode,
+      workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
     pi.appendEntry("resilience.compaction-boundary", marker);
@@ -457,7 +457,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       reason: event.reason,
       willRetry: event.willRetry,
       workspaceFingerprint: workspaceFingerprint(ctx.cwd),
-      workflowMode: requestWorkflowCapabilities(pi.events).mode,
+      workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
       errorMessage: event.errorMessage,
     };
@@ -474,7 +474,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       reason: event.reason,
       willRetry: event.willRetry,
       workspaceFingerprint: workspaceFingerprint(ctx.cwd),
-      workflowMode: requestWorkflowCapabilities(pi.events).mode,
+      workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
     pi.appendEntry("resilience.compaction-boundary", marker);

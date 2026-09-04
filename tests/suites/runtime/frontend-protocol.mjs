@@ -312,6 +312,16 @@ export const frontendProtocolSections = {
       });
       const patchSequence = [
         { workflow: { phase: "detailed_plan", label: "Architekturplan" } },
+        // A plan waiting for a decision, and a mid-turn switch that is merely
+        // pending: both frontends must see the same thing, because both have to
+        // offer the same three choices and must not present a pending switch as
+        // an applied one.
+        {
+          workflow: {
+            pending: "work",
+            planReady: { hash: "abc123", mode: "detailed_plan", qualityOk: true },
+          },
+        },
         { permissions: { level: "confirm-all", label: "Bestätigen" } },
         {
           verification: {
@@ -352,6 +362,34 @@ export const frontendProtocolSections = {
         guiSide.workflow,
         "workflow state is identical across frontends",
       );
+      eq(
+        auroraSide.workflow.planReady?.hash,
+        "abc123",
+        "the plan readiness a frontend approves against survives the merge",
+      );
+      eq(
+        auroraSide.workflow.pending,
+        "work",
+        "a deferred mode switch is carried as pending, not as the active phase",
+      );
+      eq(
+        auroraSide.workflow.phase,
+        "detailed_plan",
+        "and the active phase stays the mode the running turn is under",
+      );
+
+      // 12. Die Planentscheidung braucht in jedem Frontend denselben Weg.
+      for (const id of ["plan.decide", "plan.approve"]) {
+        eq(
+          fp.COMMAND_REGISTRY[id].target.type,
+          "slash",
+          `${id} is executable through the same slash command everywhere`,
+        );
+        assert(
+          fp.REQUIRED_COMMAND_IDS.includes(id),
+          `${id} is a required command, not an Aurora-only affordance`,
+        );
+      }
       eq(
         auroraSide.permissions,
         guiSide.permissions,

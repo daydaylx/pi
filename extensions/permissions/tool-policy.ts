@@ -19,6 +19,7 @@ import {
 import type { PolicyAction as ConfiguredPolicyAction } from "../setup-core/config.ts";
 import { WEB_TOOLS, decideWebTool } from "./web-tools.ts";
 import { LOCAL_LSP_TOOLS } from "./workflow-policy.ts";
+import { PLAN_WRITE_TOOL_NAME } from "../plan-mode/plan-tool.ts";
 import { toolPath } from "./tool-event.ts";
 
 export function permissionWarning(level: PermissionLevel): string | undefined {
@@ -89,6 +90,20 @@ export function decideTool(
   }
   if (event.toolName === ASK_USER_TOOL_NAME) {
     return { action: "allow", reason: "Controlled workflow capability" };
+  }
+  if (event.toolName === PLAN_WRITE_TOOL_NAME) {
+    // Der Planschreiber besitzt sein Ziel selbst: er schreibt ausschließlich in
+    // die sitzungseigene Planablage der Runtime, nie in das Projekt. Er ist
+    // damit keine Projektmutation und steht nie hinter einem Dialog — ein
+    // Bestätigungsdialog für "Plan schreiben" wäre im Planmodus auch genau die
+    // Aktion, die der Modus vorsieht. Der Planmodus-Guard entscheidet vorher,
+    // dass überhaupt geplant wird; `readonly` sperrt weiterhin alles.
+    return permissionLevel === "readonly"
+      ? {
+          action: "block",
+          reason: "Readonly: Es wird kein Plan geschrieben.",
+        }
+      : { action: "allow", reason: "Planschreiber der Sitzungsablage" };
   }
   if (event.toolName === "recovery_check") {
     // Der Recovery-Check ist die einzige Möglichkeit, das Recovery-Gate zu

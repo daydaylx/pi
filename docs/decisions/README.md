@@ -18,6 +18,7 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [017](017-verifier-acceptance-none.md) — Verifier-Akzeptanz ohne eigenes Urteil
 - [018](018-subagent-delegation-always-allowed.md) — Subagent-Delegationen immer erlaubt
 - [019](019-dashboard-modes-and-phase-precedence.md) — Dashboard-Modi mit einer Staleness-Wahrheit für Phase und Verifikation
+- [020](020-explicit-plan-approval.md) — Ausdrückliche Planfreigabe, sitzungsbezogene Ablage, turnfester Modus
 
 ## Historische, ersetzte Entscheidungen
 

@@ -62,9 +62,27 @@ const definitions = [
   [
     "edit-plan",
     "Plan bearbeiten",
-    "current-plan.md im aktiven Planmodus bearbeiten",
+    "Den Plan dieser Sitzung im aktiven Planmodus im externen Editor bearbeiten",
     "plan",
     ["plan-edit"],
+  ],
+  [
+    "plan-decide",
+    "Über den Plan entscheiden",
+    "Nach einem fertigen Plan: ausführen, weiter planen oder ohne Ausführung nach Work",
+    "plan",
+  ],
+  [
+    "plan-approve",
+    "Plan freigeben und ausführen",
+    "Ausdrückliche, an den Planhash gebundene Freigabe; startet genau einen Work-Turn",
+    "plan",
+  ],
+  [
+    "save-plan",
+    "Plan im Workspace speichern",
+    "Kopiert den Sitzungsplan bewusst nach .agent/plans/current-plan.md",
+    "plan",
   ],
   [
     "workflow-set",

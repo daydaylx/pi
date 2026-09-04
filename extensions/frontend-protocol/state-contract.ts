@@ -14,7 +14,7 @@
  */
 import type { WorkflowMode } from "../shared/workflow-mode.ts";
 
-export const PROTOCOL_VERSION = "1.0.0";
+export const PROTOCOL_VERSION = "1.1.0";
 
 export const FRONTEND_STATE_CHANNELS = {
   request: "aurora-ui/state/request",
@@ -55,11 +55,28 @@ export interface FrontendTask {
   phaseLabel: string;
 }
 
+/**
+ * A plan that finished a planning turn and is now waiting for a decision.
+ *
+ * Every frontend needs this to offer the same three choices (execute, keep
+ * planning, switch to work without executing). `hash` is what an approval is
+ * bound to, so a frontend can tell that the plan it displayed is still the plan
+ * it is approving.
+ */
+export interface FrontendPlanReadiness {
+  hash: string;
+  mode: FrontendWorkflowPhase;
+  qualityOk: boolean;
+}
+
 export interface FrontendUiState {
   sessionEpoch: string;
   workflow: {
     phase: FrontendWorkflowPhase;
     label: string;
+    /** Selected during a running turn; in force only after it settles. */
+    pending?: FrontendWorkflowPhase;
+    planReady?: FrontendPlanReadiness | null;
   };
   permissions: {
     level?: string;

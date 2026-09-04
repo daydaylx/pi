@@ -22,11 +22,18 @@
     "tests/p1-runtime.mjs",
     "tests/runtime-patches.mjs",
     "tests/**/*.test.mjs",
+    "tests/plan-eval/run.mjs",
     "tests/openrouter-doctor/live/manual-live-check.mjs",
     "scripts/*.mjs"
   ],
-  "project": ["extensions/**/*.ts", "tests/**/*.mjs", "scripts/**/*.mjs"],
-  "ignore": ["tests/fixtures/fake-lsp.mjs"],
+  "project": [
+    "extensions/**/*.ts",
+    "tests/**/*.mjs",
+    "scripts/**/*.mjs"
+  ],
+  "ignore": [
+    "tests/fixtures/fake-lsp.mjs"
+  ],
   "ignoreDependencies": [
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-agent-core",

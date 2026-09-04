@@ -18,19 +18,33 @@ export function setAuroraEpoch(epoch: string | undefined): void {
   auroraEpoch = epoch;
 }
 
-export function workflowUiState(mode: WorkflowMode): FrontendUiState["workflow"] {
-  return { phase: mode, label: workflowModeLabel(mode) };
+export function workflowUiState(
+  mode: WorkflowMode,
+  extras: Omit<FrontendUiState["workflow"], "phase" | "label"> = {},
+): FrontendUiState["workflow"] {
+  return { phase: mode, label: workflowModeLabel(mode), ...extras };
 }
 
+/**
+ * `pending` is the mode the user selected while a turn was still running. It is
+ * shown but not yet in force — the running turn keeps the mode it started under
+ * (see `WorkflowSession.effectiveMode`), so the label has to say so rather than
+ * claim a switch that has not happened.
+ */
 export function updateWorkflowPresentation(
   ctx: ExtensionContext,
   mode: WorkflowMode,
   pi?: ExtensionAPI,
+  pending?: WorkflowMode,
+  planReady?: FrontendUiState["workflow"]["planReady"],
 ): void {
-  setTuiStatus(ctx, UI_STATUS_KEYS.workflow, workflowModeLabel(mode));
+  const label = pending
+    ? `${workflowModeLabel(mode)} → ${workflowModeLabel(pending)} vorgemerkt`
+    : workflowModeLabel(mode);
+  setTuiStatus(ctx, UI_STATUS_KEYS.workflow, label);
   if (auroraEpoch && pi) {
     publishFrontendUiPatch(pi, auroraEpoch, "plan-mode", {
-      workflow: workflowUiState(mode),
+      workflow: workflowUiState(mode, { pending, planReady }),
     });
   }
 }

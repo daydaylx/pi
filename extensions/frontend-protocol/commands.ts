@@ -79,6 +79,18 @@ export const COMMAND_REGISTRY = {
     target: { type: "slash", name: "/workflow-set" },
     notes: "Direktsetzer /workflow-set (plan-mode) seit Phase 5.",
   },
+  "plan.decide": {
+    title: "Über den fertigen Plan entscheiden",
+    target: { type: "slash", name: "/plan-decide" },
+    notes:
+      "Öffnet die Entscheidung nach einem abgeschlossenen Planning-Turn: ausführen, weiter planen oder ohne Ausführung nach Work. Speist sich aus workflow.planReady.",
+  },
+  "plan.approve": {
+    title: "Freigegebenen Plan ausführen",
+    target: { type: "slash", name: "/plan-approve" },
+    notes:
+      "Ausdrückliche, an den Planhash gebundene Freigabe. Startet genau einen Work-Turn und hebt keine Berechtigungsstufe an.",
+  },
   "model.open": {
     title: "Modellwahl öffnen",
     target: { type: "local" },
@@ -186,6 +198,8 @@ export type CommandId = keyof typeof COMMAND_REGISTRY;
 export const REQUIRED_COMMAND_IDS = [
   "workflow.open",
   "workflow.set",
+  "plan.decide",
+  "plan.approve",
   "model.open",
   "model.set",
   "thinking.open",

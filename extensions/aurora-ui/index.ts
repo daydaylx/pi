@@ -12,7 +12,7 @@ import {
   layoutForSize,
 } from "../shared/layout.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
-import { readPlan } from "../plan-mode/plan-file.ts";
+import { planLocation, readPlan } from "../plan-mode/plan-store.ts";
 import {
   loadSetupConfig,
   persistUiPreference,
@@ -1169,7 +1169,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     foregroundSubagents.clear();
     refreshSubagentDisplay();
     if (sessionCwd && state && isPlanningMode(state.workflow.phase)) {
-      currentPlanText = readPlan(sessionCwd);
+      // Plans are session-scoped now, so the display needs the session id as
+      // well as the workspace — reading "the" plan of a directory would show a
+      // concurrent session's plan.
+      currentPlanText = readPlan(
+        planLocation(sessionCwd, ctx.sessionManager.getSessionId()),
+      )?.content;
     }
     if (asyncSubagents.size > 0) {
       retainAsyncActivity(ctx);

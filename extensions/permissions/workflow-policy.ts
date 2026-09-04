@@ -3,16 +3,17 @@ import { relative, resolve, sep } from "node:path";
 import { resolveRuntimeRoot } from "../../shared/runtime-resolution.mjs";
 import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import {
-  decideFileAccess,
   isPlanModeDiagnosticCommand,
   isSensitiveReference,
   resolvePathScope,
-  type ProtectedWritePath,
 } from "../shared/permission-policy.ts";
 import type { PermissionLevel } from "../shared/workflow-status.ts";
-import type { WorkflowCapabilitySnapshot } from "../shared/workflow-capabilities.ts";
-import { isPlanningMode } from "../shared/workflow-mode.ts";
-import { isPlanFilePath, PLAN_RELATIVE_PATH } from "../plan-mode/plan-file.ts";
+import {
+  isPlanRestricted,
+  isWorkflowStateUnknown,
+  type WorkflowCapabilitySnapshot,
+} from "../shared/workflow-capabilities.ts";
+import { PLAN_WRITE_TOOL_NAME } from "../plan-mode/plan-tool.ts";
 import { toolPath } from "./tool-event.ts";
 
 /**
@@ -39,7 +40,14 @@ export const LOCAL_LSP_TOOLS = new Set([
 ]);
 
 const WRITE_TOOLS = new Set(["write", "edit"]);
+/**
+ * Tools plan mode allows. `plan_write` is the plan's only writer and owns its
+ * own destination inside the runtime's session storage, so it needs no
+ * exception in the project-file write ban — unlike the old plan file, which
+ * required exactly such a hole.
+ */
 const PLAN_MODE_READ_ONLY_TOOLS = new Set([
+  PLAN_WRITE_TOOL_NAME,
   "read",
   "grep",
   "find",
@@ -53,6 +61,20 @@ const PLAN_MODE_READ_ONLY_TOOLS = new Set([
   "fetch_content",
   ...LOCAL_LSP_TOOLS,
 ]);
+
+/** Read-only in every workflow mode, so safe even with no workflow provider. */
+const UNIVERSAL_READ_TOOLS = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "recovery_check",
+  ASK_USER_TOOL_NAME,
+  ...LOCAL_LSP_TOOLS,
+]);
+
+const UNKNOWN_WORKFLOW_REASON =
+  "Workflow-Zustand nicht verfügbar: Keine Workflow-Extension hat den aktuellen Modus gemeldet. Solange unklar ist, ob geplant oder gearbeitet wird, bleiben mutierende und nicht nachweislich lesende Tools gesperrt (fail-closed). Prüfe, ob extensions/plan-mode/index.ts geladen ist.";
 
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 
@@ -142,18 +164,6 @@ export function assessWorkflowTool(
   return PERMITTED;
 }
 
-export function automaticallyAllowedInPlanMode(
-  workflow: WorkflowCapabilitySnapshot,
-  event: ToolCallEvent,
-  cwd: string,
-): boolean {
-  return (
-    isPlanningMode(workflow.mode) &&
-    WRITE_TOOLS.has(event.toolName) &&
-    isPlanFilePath(toolPath(event), cwd)
-  );
-}
-
 /**
  * A Plan-Mode delegation is safe only when it preserves the investigator
  * profile's fresh, project-local, read-only contract. The guard normalizes
@@ -166,7 +176,9 @@ export function planModeInvestigatorSingleAllowed(
   event: ToolCallEvent,
 ): boolean {
   if (
-    !isPlanningMode(workflow.mode) ||
+    !isPlanRestricted(workflow) ||
+    // An unknown workflow state must not unlock a delegation either.
+    isWorkflowStateUnknown(workflow) ||
     permissionLevel === "readonly" ||
     event.toolName !== "subagent"
   ) {
@@ -208,7 +220,11 @@ export function planModeVerifyTypecheckAllowed(
   workflow: WorkflowCapabilitySnapshot,
   event: ToolCallEvent,
 ): boolean {
-  if (!isPlanningMode(workflow.mode) || event.toolName !== "verify") {
+  if (
+    !isPlanRestricted(workflow) ||
+    isWorkflowStateUnknown(workflow) ||
+    event.toolName !== "verify"
+  ) {
     return false;
   }
   const input = event.input;
@@ -219,13 +235,6 @@ export function planModeVerifyTypecheckAllowed(
   return params.check === "typecheck" && Object.keys(params).length === 1;
 }
 
-function planFileProtectedWritePath(): ProtectedWritePath {
-  return {
-    matches: (rawPath, cwd) => isPlanFilePath(rawPath, cwd),
-    label: PLAN_RELATIVE_PATH,
-  };
-}
-
 /**
  * Plan Mode permits only fixed read-only capabilities. It deliberately does
  * not infer safety from project-script names: `npm test` and `npm run build`
@@ -233,6 +242,9 @@ function planFileProtectedWritePath(): ProtectedWritePath {
  * Agenten-Tool-Aufrufe nicht auf — der Planmodus bleibt auch bei aktivem
  * YOLO eine harte Schreibgrenze; nur `readonly` reicht die Entscheidung an
  * die Zugriffsstufe weiter.
+ *
+ * Ein unbekannter Workflow-Zustand (kein Provider hat geantwortet) wird wie
+ * der Planmodus behandelt: fail-closed statt stillschweigend nach `work`.
  */
 export function planModeBashGuard(
   workflow: WorkflowCapabilitySnapshot,
@@ -240,15 +252,15 @@ export function planModeBashGuard(
   command: string,
   cwd: string,
 ): WorkflowAssessment {
-  if (!isPlanningMode(workflow.mode)) return PERMITTED;
+  if (!isPlanRestricted(workflow)) return PERMITTED;
   if (permissionLevel === "readonly") return PERMITTED;
-  return isPlanModeDiagnosticCommand(command, cwd)
-    ? PERMITTED
-    : {
-        blocked: true,
-        reason:
-          "Planmodus: Dieses Shell-Kommando ist während der Planung nicht erlaubt. Bash ist auf git status/diff/log, rg, find sowie eine kleine Gruppe reiner Lesewerkzeuge (pwd, ls, cat, head, tail, wc, stat, du, df, tree, sort/uniq) begrenzt — keine Verkettung, keine Redirections.",
-      };
+  if (isPlanModeDiagnosticCommand(command, cwd)) return PERMITTED;
+  return {
+    blocked: true,
+    reason: isWorkflowStateUnknown(workflow)
+      ? UNKNOWN_WORKFLOW_REASON
+      : "Planmodus: Dieses Shell-Kommando ist während der Planung nicht erlaubt. Bash ist auf git status/diff/log, rg, find sowie eine kleine Gruppe reiner Lesewerkzeuge (pwd, ls, cat, head, tail, wc, stat, du, df, tree, sort/uniq) begrenzt — keine Verkettung, keine Redirections.",
+  };
 }
 
 export function planModeMutationGuard(
@@ -257,7 +269,7 @@ export function planModeMutationGuard(
   event: ToolCallEvent,
   cwd: string,
 ): WorkflowAssessment {
-  if (!isPlanningMode(workflow.mode)) return PERMITTED;
+  if (!isPlanRestricted(workflow)) return PERMITTED;
   if (permissionLevel === "readonly") return PERMITTED;
 
   if (event.toolName === "bash") {
@@ -268,24 +280,23 @@ export function planModeMutationGuard(
       cwd,
     );
   }
-  if (PLAN_MODE_READ_ONLY_TOOLS.has(event.toolName)) return PERMITTED;
+  if (
+    !isWorkflowStateUnknown(workflow) &&
+    PLAN_MODE_READ_ONLY_TOOLS.has(event.toolName)
+  )
+    return PERMITTED;
+  // With no workflow provider, only the tools that are read-only in every mode
+  // stay available; plan-mode's own additions (plan_write, the investigator
+  // exception, verify(typecheck)) require a state someone actually vouched for.
+  if (isWorkflowStateUnknown(workflow) && UNIVERSAL_READ_TOOLS.has(event.toolName))
+    return PERMITTED;
   if (planModeVerifyTypecheckAllowed(workflow, event)) return PERMITTED;
-  if (!WRITE_TOOLS.has(event.toolName)) {
-    return {
-      blocked: true,
-      reason:
-        "Planmodus: Dieses Tool ist nicht als nachweislich lesend freigegeben.",
-    };
-  }
-
-  const path = toolPath(event) ?? "";
-  const decision = decideFileAccess("readonly", "write", path, cwd, {
-    protectedWritePath: planFileProtectedWritePath(),
-  });
-  return decision.action === "allow"
-    ? PERMITTED
-    : {
-        blocked: true,
-        reason: `Planmodus: Schreibzugriff ist auf ${PLAN_RELATIVE_PATH} beschränkt, solange geplant wird.`,
-      };
+  return {
+    blocked: true,
+    reason: isWorkflowStateUnknown(workflow)
+      ? UNKNOWN_WORKFLOW_REASON
+      : WRITE_TOOLS.has(event.toolName)
+        ? "Planmodus: Der Agent schreibt während der Planung keine Projektdateien. Der Plan selbst wird ausschließlich über plan_write gespeichert."
+        : "Planmodus: Dieses Tool ist nicht als nachweislich lesend freigegeben.",
+  };
 }

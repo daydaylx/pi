@@ -918,7 +918,14 @@ export const uiSections = {
         stripAnsi(contentRow).includes("…"),
         "the long line actually truncates at this width",
       );
-      const fgOpens = contentRow.match(/\x1b\[38;2;[0-9;]*m/g) ?? [];
+      // The theme picks its escape form from the detected colour depth, so this
+      // must count every foreground spelling (truecolor, 256-colour and the
+      // basic 30-37/90-97 range) — matching only `38;2;` passed on a truecolor
+      // machine while the 256-colour leak went unnoticed in CI.
+      const fgOpens =
+        contentRow.match(
+          /\x1b\[(?:38;2;\d+;\d+;\d+|38;5;\d+|3[0-7]|9[0-7])m/g,
+        ) ?? [];
       const fgCloses = contentRow.match(/\x1b\[39m/g) ?? [];
       eq(
         fgOpens.length,

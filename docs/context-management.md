@@ -32,7 +32,11 @@ Die Tabelle enthält keine Provider-Kosten: lokale Tests verwenden Fixture-Bytes
 
 Die anderen lokalen Tools behalten ihre bereits bestehenden Core- oder `limitTextOutput()`-Grenzen. Es gibt bewusst kein Extension-seitiges aggregiertes Turn-Budget und keine Deduplizierungsdatenbank.
 
-Plan- und Work-Instruktionen werden über `before_agent_start.systemPrompt` turn-lokal in den effektiven Systemprompt eingefügt. Sie werden nicht mehr als gleichartige Custom-Messages in der Session gespeichert. Der Plan-Handoff bleibt einmalig und wird weiterhin nur nach einem erfolgreich abgeschlossenen Planning-Turn erzeugt.
+Die Planning-Instruktion wird über `before_agent_start.systemPrompt` in den effektiven Systemprompt eingefügt und gilt für den ganzen Agent-Run (die Runtime setzt sie als `agent.state.systemPrompt` und verwirft sie beim nächsten Prompt); sie wird nicht als Custom-Message in der Session gespeichert.
+
+Der **freigegebene Plan** geht bewusst einen anderen Weg (ADR [020](decisions/020-explicit-plan-approval.md)). In den Systemprompt kommt nur ein konstanter Regeltext ohne jeden Planinhalt; der Plan selbst reist als Custom-Message, die Pis Runtime für den Provider zu `role: "user"` umwandelt und hinter die echte Nutzernachricht hängt. Damit bleibt der aktuelle Auftrag maßgeblich, und Text im Plan kann die Anweisungshierarchie nicht verschieben.
+
+Ein Plan wird nur nach einer **ausdrücklichen, an seinen Hash gebundenen Freigabe** übergeben, genau einmal, und nur an den Turn, den die Freigabe selbst startet. Ein beliebiger Work-Turn verbraucht sie nicht; ein Sitzungsneustart verwirft sie. Für den Providerkontext heißt das: der Plan erscheint höchstens einmal pro Freigabe, begrenzt auf 24 KiB mit sichtbar markierter Kürzung darüber.
 
 ## Reproduzierbare lokale Szenarien
 

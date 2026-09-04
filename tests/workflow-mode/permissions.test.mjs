@@ -267,9 +267,53 @@ await test("planModeMutationGuard blocks non-plan writes at project-write/confir
     write("confirm-all", "extensions/example.ts").blocked,
     "a non-plan write is blocked at confirm-all while planning",
   );
+  // The plan no longer lives in the project, so the old write exception is
+  // gone with it: plan mode's project-write surface is empty in every level.
   assert(
-    !write("project-write", ".agent/plans/current-plan.md").blocked,
-    "the plan file itself stays writable",
+    write("project-write", ".agent/plans/current-plan.md").blocked,
+    "the former plan path is an ordinary project file now and stays blocked",
+  );
+});
+
+await test("an unknown workflow state is treated as strictly as plan mode", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const unknown = { mode: undefined };
+  const decide = (toolName, input) =>
+    workflowPolicy.planModeMutationGuard(
+      unknown,
+      "project-write",
+      { toolName, input },
+      cwd,
+    );
+  assert(
+    decide("write", { path: "extensions/example.ts" }).blocked,
+    "no workflow provider means no project writes",
+  );
+  assert(
+    decide("write", { path: "extensions/example.ts" }).reason.includes(
+      "Workflow-Zustand nicht verfügbar",
+    ),
+    "the refusal names the missing workflow state instead of a plan-mode rule",
+  );
+  assert(
+    !decide("read", { path: "src/a.ts" }).blocked,
+    "tools that are read-only in every mode stay available",
+  );
+  for (const [toolName, input] of [
+    ["plan_write", { content: "x" }],
+    ["verify", { check: "typecheck" }],
+    ["subagent", { agent: "investigator", task: "look" }],
+  ]) {
+    assert(
+      decide(toolName, input).blocked,
+      `${toolName} needs a vouched-for workflow state and is refused without one`,
+    );
+  }
+  assert(
+    workflowPolicy.planModeBashGuard(unknown, "project-write", "npm test", cwd)
+      .blocked,
+    "bash beyond the diagnostic allowlist is refused without a workflow state",
   );
 });
 
@@ -549,12 +593,12 @@ await test("generic plan-mode guard admits only positively known read-only tools
     ["grep", { pattern: "x" }],
     ["ls", { path: "." }],
     ["ask_user", { question: "weiter?" }],
-    ["write", { path: ".agent/plans/current-plan.md" }],
+    ["plan_write", { content: "# Plan" }],
     ["verify", { check: "typecheck" }],
   ]) {
     assert(
       !decide("project-write", toolName, input),
-      `${toolName} is a read-only capability (or the plan file) and stays available while planning`,
+      `${toolName} is a read-only capability (or the plan writer) and stays available while planning`,
     );
   }
 

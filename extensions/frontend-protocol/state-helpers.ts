@@ -1,6 +1,7 @@
 import { WORKFLOW_MODES } from "../shared/workflow-mode.ts";
 import type {
   FrontendActivityKind,
+  FrontendPlanReadiness,
   FrontendUiPatchEvent,
   FrontendUiSnapshotEvent,
   FrontendUiState,
@@ -50,6 +51,17 @@ export function isFrontendUiSnapshotEvent(
   );
 }
 
+function isPlanReadiness(value: unknown): value is FrontendPlanReadiness {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<FrontendPlanReadiness>;
+  return (
+    typeof candidate.hash === "string" &&
+    candidate.hash.length > 0 &&
+    typeof candidate.mode === "string" &&
+    typeof candidate.qualityOk === "boolean"
+  );
+}
+
 /** Returns whether the presentation state actually changed. */
 export function mergeFrontendUiState(
   state: FrontendUiState,
@@ -79,6 +91,33 @@ export function mergeFrontendUiState(
     ) {
       state.workflow.label = patch.workflow.label;
       changed = true;
+    }
+    // A mode selected during a running turn is pending, never active: the
+    // running turn keeps the mode it started under, so a frontend that showed
+    // `pending` as `phase` would claim a switch that has not happened.
+    if ("pending" in patch.workflow) {
+      const pending =
+        patch.workflow.pending &&
+        workflowPhases.includes(patch.workflow.pending)
+          ? patch.workflow.pending
+          : undefined;
+      if (state.workflow.pending !== pending) {
+        state.workflow.pending = pending;
+        changed = true;
+      }
+    }
+    if ("planReady" in patch.workflow) {
+      const ready = isPlanReadiness(patch.workflow.planReady)
+        ? patch.workflow.planReady
+        : null;
+      if (
+        (state.workflow.planReady ?? null)?.hash !== (ready ?? null)?.hash ||
+        (state.workflow.planReady ?? null)?.qualityOk !==
+          (ready ?? null)?.qualityOk
+      ) {
+        state.workflow.planReady = ready;
+        changed = true;
+      }
     }
   }
   if (patch.permissions) {

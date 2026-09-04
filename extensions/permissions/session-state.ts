@@ -39,8 +39,10 @@ import {
   loadSetupConfig,
   type PolicyAction as ConfiguredPolicyAction,
 } from "../setup-core/config.ts";
-import { isPlanningMode } from "../shared/workflow-mode.ts";
-import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
+import {
+  isPlanRestricted,
+  requestWorkflowCapabilities,
+} from "../shared/workflow-capabilities.ts";
 import { permissionWarning } from "./tool-policy.ts";
 import type { ThinkingControl } from "./thinking-control.ts";
 
@@ -148,22 +150,30 @@ export function createPermissionSession(
    * YOLO ist im Planmodus gesperrt: Der Eintritt wird ohne jede
    * Zustandsänderung verweigert und auditierbar protokolliert. Der Austritt
    * aus einem bestehenden YOLO_OVERRIDE bleibt jederzeit möglich.
+   *
+   * Ein unbekannter Workflow-Zustand zählt wie der Planmodus: Wer nicht weiß,
+   * ob gerade geplant wird, darf die Sicherheitsstufe nicht aufheben.
    */
   function yoloDeniedInPlanMode(
     ctx: ExtensionContext,
     source: "command" | "shortcut" | "session",
   ): boolean {
-    const mode = requestWorkflowCapabilities(pi.events).mode;
-    if (!isPlanningMode(mode)) return false;
+    const workflow = requestWorkflowCapabilities(pi.events);
+    if (!isPlanRestricted(workflow)) return false;
+    const unknown = workflow.mode === undefined;
     pi.appendEntry("permission-transition-denied", {
       timestamp: new Date().toISOString(),
       source,
       attemptedLevel: "yolo",
-      mode,
-      reason: "YOLO ist im Planmodus gesperrt.",
+      mode: workflow.mode ?? "unknown",
+      reason: unknown
+        ? "YOLO ist gesperrt, solange kein Workflow-Zustand gemeldet wird."
+        : "YOLO ist im Planmodus gesperrt.",
     });
     ctx.ui.notify(
-      "YOLO ist im Planmodus gesperrt. Wechsle zuerst explizit nach work (Shift+Tab).",
+      unknown
+        ? "YOLO ist gesperrt: Keine Workflow-Extension meldet den aktuellen Modus."
+        : "YOLO ist im Planmodus gesperrt. Wechsle zuerst explizit nach work (Shift+Tab).",
       "warning",
     );
     return true;

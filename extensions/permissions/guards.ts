@@ -17,7 +17,6 @@ import { decideTool } from "./tool-policy.ts";
 import {
   assessBash,
   assessWorkflowTool,
-  automaticallyAllowedInPlanMode,
   planModeInvestigatorSingleAllowed,
   planModeMutationGuard,
 } from "./workflow-policy.ts";
@@ -123,7 +122,6 @@ export function registerPermissionGuards(
     if (recoveryGateBlocks(recovery.armed, event, ctx.cwd)) {
       return { block: true, reason: recoveryBlockReason(recovery.reason) };
     }
-    if (automaticallyAllowedInPlanMode(workflow, event, ctx.cwd)) return;
     if (planModeInvestigatorSingleAllowed(workflow, session.level(), event)) {
       // The package would otherwise write debug artifacts below ctx.cwd.
       (event.input as Record<string, unknown>).artifacts = false;

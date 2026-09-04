@@ -116,11 +116,21 @@ export function buildCommandCenterEntries(
     knownByCategory.set(category.id, []);
 
   for (const definition of COMMAND_DEFINITIONS) {
-    // "commands" ist der Einstiegspunkt selbst; "workflow-set" ist ein
-    // programmatischer Direktsetzer für Frontends/RPC und wird bewusst nicht
-    // als alternative Workflow-Option im Command Center angeboten (der
-    // Workflow-Wechsel läuft über das Shift+Tab-Menü).
-    if (definition.name === "commands" || definition.name === "workflow-set")
+    // "commands" ist der Einstiegspunkt selbst. Die übrigen drei ändern den
+    // Workflow-Zustand: "workflow-set" ist ein programmatischer Direktsetzer
+    // für Frontends/RPC, "plan-decide" und "plan-approve" entscheiden über
+    // einen fertigen Plan und "plan-approve" startet dabei einen Work-Turn.
+    // Sie werden bewusst nicht als alternative Workflow-Route im Command
+    // Center angeboten — der Workflow-Wechsel und die Planentscheidung laufen
+    // über das Shift+Tab-Menü (bzw. für Frontends über die dokumentierten
+    // Slash-Commands). Reine Plan-Werkzeuge ohne Zustandswechsel
+    // (`view-plan`, `edit-plan`, `save-plan`) bleiben hier verfügbar.
+    if (
+      definition.name === "commands" ||
+      definition.name === "workflow-set" ||
+      definition.name === "plan-decide" ||
+      definition.name === "plan-approve"
+    )
       continue;
     knownByCategory
       .get(definition.category)

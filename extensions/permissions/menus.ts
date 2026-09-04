@@ -5,8 +5,10 @@ import {
   PERMISSION_LEVEL_LABEL,
   type PermissionLevel,
 } from "../shared/workflow-status.ts";
-import { isPlanningMode } from "../shared/workflow-mode.ts";
-import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
+import {
+  isPlanRestricted,
+  requestWorkflowCapabilities,
+} from "../shared/workflow-capabilities.ts";
 import type { PermissionSession } from "./session-state.ts";
 
 export async function openPermissionMenu(
@@ -14,8 +16,10 @@ export async function openPermissionMenu(
   ctx: ExtensionContext,
 ): Promise<void> {
   const levels = Object.keys(PERMISSION_LEVEL_LABEL) as PermissionLevel[];
-  const planning = isPlanningMode(
-    requestWorkflowCapabilities(session.pi.events).mode,
+  // An unknown workflow state disables YOLO too: the same fail-closed rule the
+  // guards follow, so the menu never offers what the guard would refuse.
+  const planning = isPlanRestricted(
+    requestWorkflowCapabilities(session.pi.events),
   );
   const selected = await runMenu(
     ctx,

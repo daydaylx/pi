@@ -46,10 +46,12 @@ WezTerm und Ghostty ausgeführt.
 | 5   | Sitzung öffnen                   | Aurora-Fußzeile sichtbar, eine Zeile                                                                                                   |            |     |
 | 6   | Shift+Tab                        | Modusauswahl öffnet sich                                                                                                               |            |     |
 | 7   | „Schnellplan" wählen             | Modus aktiv, **kein** Turn startet, vorhandene Plandatei unverändert                                                                   |            |     |
-| 8   | Eigenen Planungsauftrag eingeben | Plan wird erstellt, `.agent/plans/current-plan.md` geschrieben                                                                         |            |     |
+| 8   | Eigenen Planungsauftrag eingeben | Plan wird über `plan_write` erstellt; im Projektverzeichnis entsteht **keine** Datei (`git status` bleibt sauber)                       |            |     |
 | 9   | Während des Laufs zusehen        | `DENKT NACH` → `ARBEITET` → `ANTWORTET`, Laufzeit zählt hoch (bei Provider-Pausen ≥4s zwischenzeitlich `WARTET AUF MODELL` — kein Bug) |            |     |
-| 10  | Shift+Tab → „Work"               | Modus wechselt, **kein** Turn startet                                                                                                  |            |     |
-| 11  | Umsetzungsauftrag eingeben       | Plan erscheint **genau einmal** als Kontext                                                                                            |            |     |
+| 10  | Shift+Tab → „Work"               | Modus wechselt, **kein** Turn startet, **keine** Freigabe entsteht                                                                     |            |     |
+| 11  | Umsetzungsauftrag eingeben       | Der Turn läuft **ohne** Plankontext — ein Wechsel nach Work führt nichts aus                                                            |            |     |
+| 11a | Shift+Tab → „Fertiger Plan · entscheiden" → „Plan ausführen" | Ein Work-Turn startet; der Plan erscheint **genau einmal** als Datenblock, die Zugriffsstufe bleibt unverändert |            |     |
+| 11b | `/view-plan`, Plan per `/edit-plan` ändern, dann erneut ausführen | Die alte Freigabe verfällt sichtbar; der geänderte Plan muss neu freigegeben werden |            |     |
 | 12  | Zweiten Work-Turn starten        | Plan wird **nicht** erneut eingebunden                                                                                                 |            |     |
 | 13  | Tool-Ausführung beobachten       | Sitzungsübersicht bleibt sichtbar; nur die Aktivitätszeile aktualisiert sich und verschwindet nach dem Tool wieder                                                                 |            |     |
 

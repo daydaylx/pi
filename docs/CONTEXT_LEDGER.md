@@ -43,8 +43,11 @@
 
 - Aurora Night bleibt die aktive UI; die normalen Permission-Level und
   Trust-Grenzen bleiben erhalten.
-- Planmodus: nur `work`, `simple_plan`, `detailed_plan`;
-  `.agent/plans/current-plan.md` ist unverbindlicher Markdown-Kontext.
+- Planmodus: nur `work`, `simple_plan`, `detailed_plan`. Der Plan ist
+  unverbindlicher Markdown-Kontext und liegt sitzungsbezogen in der
+  Runtime-Ablage (`~/.pi/agent/plans/<workspace>/<session>.md`), nicht im
+  Projekt. Umgesetzt wird er nur nach einer ausdrücklichen, hashgebundenen
+  Freigabe (`docs/decisions/020-explicit-plan-approval.md`).
 - `shared/workspace-snapshot.mjs` liefert einen versionierten Workspace-
   Snapshot für `extensions/resilience/`, `extensions/setup-core/` und
   `extensions/permissions/verifier-policy.ts`. Er erfasst `HEAD`, staged,

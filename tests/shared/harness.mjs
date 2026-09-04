@@ -327,6 +327,17 @@ export function createHarness(options = {}) {
     appendEntry(customType, data) {
       appended.push({ type: "custom", customType, data });
     },
+    sendUserMessage(content, sendOptions) {
+      // The runtime always starts a turn for this; tests assert on the exact
+      // content because a plan approval is bound to the prompt it starts.
+      lifecycleCalls.push({
+        kind: "sendUserMessage",
+        content,
+        options: sendOptions,
+      });
+      if (options.sendMessageError) throw new Error(options.sendMessageError);
+      sent.push({ message: content, options: sendOptions });
+    },
     sendMessage(message, sendOptions) {
       lifecycleCalls.push({
         kind: "sendMessage",

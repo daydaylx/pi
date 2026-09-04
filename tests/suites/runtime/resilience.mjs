@@ -11,7 +11,7 @@ import { ROOT } from "../../shared/jiti-loader.mjs";
 
 export const resilienceSections = {
   "resilience telemetry and recovery": async (context) => {
-    const { section, resilience, modePermissions } = context;
+    const { section, resilience, modePermissions, planMode } = context;
 
     await section("resilience telemetry and recovery", async () => {
       if (!resilience) return;
@@ -23,7 +23,14 @@ export const resilienceSections = {
       await harness.runHooks("before_agent_start", {}, ctx);
       const start = harness.appended.at(-1);
       eq(start?.customType, "resilience.turn-start", "turn start is persisted");
-      eq(start?.data.workflowMode, "work", "turn start records workflow mode");
+      // No workflow provider is registered in this harness, and the capability
+      // bridge is fail-closed: it reports the state as unknown rather than
+      // inventing "work". The marker records exactly what was known.
+      eq(
+        start?.data.workflowMode,
+        "unknown",
+        "turn start records an unknown workflow mode when no provider answers",
+      );
       eq(start?.data.provider, "main-provider", "turn start records provider");
       await harness.runHooks("agent_start", {}, ctx);
       await harness.runHooks("after_provider_response", { status: 503 }, ctx);
@@ -307,6 +314,10 @@ export const resilienceSections = {
 
       // --- Recovery-Gate: Schreibsperre bis zum recovery_check ---
       const gateHarness = createHarness();
+      // The permission layer is fail-closed without a workflow provider, so a
+      // recovery-gate test has to register one; otherwise every write is
+      // refused for a reason that has nothing to do with recovery.
+      planMode?.default(gateHarness.api);
       modePermissions.default(gateHarness.api);
       resilience.default(gateHarness.api);
       const gateCtx = gateHarness.makeContext({ cwd: ROOT });
@@ -522,6 +533,7 @@ export const resilienceSections = {
           },
         ],
       });
+      planMode?.default(restarted.api);
       modePermissions.default(restarted.api);
       resilience.default(restarted.api);
       const restartedCtx = restarted.makeContext({ cwd: ROOT });
@@ -654,6 +666,7 @@ export const resilienceSections = {
           "lsp_hover",
           "lsp_references",
           "lsp_workspace_symbols",
+          "plan_write",
           "project_check",
           "read",
           "recovery_check",

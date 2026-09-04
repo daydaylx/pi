@@ -24,12 +24,15 @@ Checkpoint-Ablauf im Skill `context-checkpoint`, Subagenten-Details in
   und die Blockade konkret benennen, statt stillschweigend weiter zu
   wiederholen.
 - Den aktiven Workflow- und Permission-Modus respektieren. Diese Datei
-  erzwingt keinen zusätzlichen Planmodus. Der Planmodus-Ausstieg ist eine
-  reine UI-Aktion der Nutzerin/des Nutzers (Workflow-Menü/Shift+Tab) und kein
-  Agenten-Tool — bei einem expliziten Umsetzungsauftrag während des
-  Planmodus nicht versuchen, die Sperre durch wiederholtes Schreiben der
-  Plandatei oder andere Umgehungen aufzuheben, sondern über `ask_user` um den
-  Moduswechsel bitten.
+  erzwingt keinen zusätzlichen Planmodus. Der Planmodus-Ausstieg und die
+  Planfreigabe sind reine UI-Aktionen der Nutzerin/des Nutzers
+  (Workflow-Menü/Shift+Tab, `/plan-decide`, `/plan-approve`) und keine
+  Agenten-Tools — bei einem expliziten Umsetzungsauftrag während des
+  Planmodus nicht versuchen, die Sperre durch wiederholtes Schreiben des Plans
+  oder andere Umgehungen aufzuheben, sondern über `ask_user` um den
+  Moduswechsel bitten. Der Plan selbst wird im Planmodus ausschließlich über
+  das Tool `plan_write` geschrieben; ein Wechsel nach `work` führt keinen Plan
+  aus (`docs/decisions/020-explicit-plan-approval.md`).
 
 ## Verifikation
 
