@@ -86,6 +86,34 @@ await test("writes are compare-and-swap against the expected hash", async () => 
   });
 });
 
+await test("plan files and their directory get restrictive permissions", async () => {
+  if (!store) return;
+  if (process.platform === "win32") return;
+  await withPlanHome(async () => {
+    const location = store.planLocation("/projects/one", "session-a");
+    store.writePlan(location, "# A\n", undefined);
+    const { statSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    const path = store.planPath(location);
+    const fileMode = statSync(path).mode & 0o777;
+    const dirMode = statSync(dirname(path)).mode & 0o777;
+    eq(fileMode, 0o600, "the plan file is owner-only readable and writable");
+    eq(dirMode, 0o700, "its directory is owner-only");
+
+    // A rewrite (the common case for a compare-and-swap store) must not
+    // silently keep looser permissions the file happened to have before —
+    // writeFileSync's own `mode` option only takes effect when a file is
+    // newly created, not on an overwrite.
+    const first = store.readPlan(location);
+    store.writePlan(location, "# B\n", first.hash);
+    eq(
+      statSync(path).mode & 0o777,
+      0o600,
+      "an overwrite keeps the restrictive permissions, not whatever the file had before",
+    );
+  });
+});
+
 await test("a plan above the size limit is refused, not truncated", async () => {
   if (!store) return;
   await withPlanHome(async () => {
@@ -282,6 +310,105 @@ Kompatibilität, Datenverlust bei der Migration und ein halb ausgerollter Stand.
       ),
     ).ok,
     "two named phases satisfy it",
+  );
+});
+
+await test("phases written as ### subheadings under Umsetzung are recognized", () => {
+  if (!quality) return;
+  const base = `# Architekturplan
+
+## Ziel
+Die Sitzungsverwaltung auf sitzungsbezogene Instanzen umstellen, damit parallele
+Sitzungen sich nicht mehr gegenseitig überschreiben können.
+
+## Nicht-Ziele
+Keine Änderung am Providerprotokoll und keine neue Datenbank in diesem Schritt.
+
+## Ausgangslage
+core/session.ts hält den Zustand als Modulvariable; plan-mode liest ihn über
+readState(). Beide Stellen wurden für diesen Plan tatsächlich gelesen.
+
+## Annahmen
+Angenommen wird, dass kein externer Konsument readState() importiert; belegt ist
+das nur für dieses Repository selbst. Offen bleibt das Verhalten alter Sitzungen.
+
+## Umsetzung
+### Phase 1: Adapter einführen
+Zustand in eine Instanz überführen, alte API als Adapter behalten, damit
+bestehende Aufrufer unverändert weiterlaufen.
+
+### Phase 2: Aufrufer umstellen
+Aufrufer schrittweise auf die neue Instanz umstellen und den Adapter entfernen.
+
+## Abhängigkeiten
+Die zweite Phase setzt die erste voraus; die Tests bleiben durchgehend grün.
+
+## Abschlusskriterien
+Fertig ist die erste Phase, wenn die bestehenden Tests unverändert grün sind,
+und die zweite, wenn keine Referenz auf den Adapter mehr existiert.
+
+## Verifikation
+npm test läuft grün; ein neuer Test startet zwei Sitzungen und erwartet zwei
+getrennte Zustände statt eines geteilten Zustands.
+
+## Risiken
+Kompatibilität, Datenverlust bei der Migration und ein halb ausgerollter Stand.
+`;
+  const result = quality.assessPlanQuality("detailed_plan", base);
+  assert(
+    result.ok,
+    `phases as ### subheadings satisfy the gate: ${JSON.stringify(result.issues)}`,
+  );
+
+  // The subheadings' own content must still count as the Umsetzung section's
+  // body — a plan whose subsections carry the only real prose must not be
+  // flagged as "Umsetzung has no content of its own".
+  const sections = quality.planSections(base);
+  const umsetzung = sections.find((s) => s.heading === "umsetzung");
+  assert(
+    umsetzung.body.includes("Adapter einführen") &&
+      umsetzung.body.includes("Aufrufer umstellen"),
+    "the parent section's body carries its subsections' headings and text, not just its own intro line",
+  );
+
+  // And a sibling H2 after the subsections must not be swallowed into
+  // Umsetzung — only its own descendants belong to it.
+  assert(
+    !umsetzung.body.includes("Die zweite Phase setzt die erste voraus"),
+    "a sibling H2 section's content stays out of the preceding section's body",
+  );
+});
+
+await test("required-section matching is exact, not substring", () => {
+  if (!quality) return;
+  // "Nicht-Ziele" normalizes to "nicht ziele", which *contains* "ziele" and
+  // therefore the substring "ziel" — a plan with only this section and no
+  // real "Ziel" heading must still be flagged as missing "Ziel".
+  const onlyNichtZiele = `# Plan
+
+## Nicht-Ziele
+Kein Umbau der Provider-Anbindung und keine neue Datenbank in diesem Schritt.
+
+## Vorgehen
+Die Validierung in auth/form.ts um eine Prüfung auf leere Felder ergänzen.
+
+## Betroffene Bereiche
+auth/form.ts und der zugehörige Test auth/form.test.ts.
+
+## Verifikation
+npm test -- auth/form läuft grün, der neue Fall schlägt ohne den Fix fehl.
+
+## Risiken
+Bestehende Aufrufer könnten sich auf das alte, tolerante Verhalten verlassen.
+`;
+  const result = quality.assessPlanQuality("simple_plan", onlyNichtZiele);
+  assert(
+    !result.ok,
+    "a plan with only Nicht-Ziele, and no Ziel, still fails the gate",
+  );
+  assert(
+    result.issues.some((issue) => issue.code === "section:ziel"),
+    "the missing Ziel section is the reason, not silently satisfied by Nicht-Ziele",
   );
 });
 

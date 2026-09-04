@@ -15,6 +15,7 @@ import {
   readPlan,
   restorePlan,
 } from "./plan-store.ts";
+import { assessPlanQuality } from "./plan-quality.ts";
 
 export type NotifyLevel = "info" | "warning" | "error";
 
@@ -61,6 +62,17 @@ export interface WorkflowSession {
   /** The plan hash this turn last saw; the compare-and-swap baseline. */
   expectedPlanHash(): string | undefined;
   recordPlanWrite(hash: string, quality: boolean): void;
+  /**
+   * Re-syncs readiness with the store after an out-of-band edit (the external
+   * editor, which writes outside `plan_write` and so outside any turn).
+   * Without this, readiness keeps pointing at the pre-edit hash forever and
+   * `consumeApproval`'s hash check makes the edited plan permanently
+   * unapprovable — editing would be a one-way trip out of "ready".
+   */
+  refreshReadinessAfterEdit(
+    ctx: ExtensionContext,
+    mode: Exclude<WorkflowMode, "work">,
+  ): void;
   recordAgentEnd(messages?: readonly unknown[]): void;
   settleTurn(ctx: ExtensionContext): void;
   readiness(): PlanReadiness | undefined;
@@ -145,6 +157,16 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
         writtenPlan = { hash, quality };
     },
 
+    refreshReadinessAfterEdit(ctx, mode) {
+      const stored = readPlan(session.location(ctx));
+      if (!stored) {
+        planReadiness = undefined;
+        return;
+      }
+      const quality = assessPlanQuality(mode, stored.content);
+      planReadiness = { hash: stored.hash, mode, qualityOk: quality.ok };
+    },
+
     recordAgentEnd(messages = []) {
       if (!turnMode || !isPlanningMode(turnMode)) return;
       const last = [...messages].at(-1) as
@@ -174,9 +196,26 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
             qualityOk: writtenPlan.quality && stored.hash === writtenPlan.hash,
           };
         } else {
-          // Only this session's own plan file is touched, so restoring after a
-          // failed turn can never undo another session's work.
-          restorePlan(session.location(ctx), previousPlan);
+          // A failed or aborted turn: the safe default is to restore what was
+          // there before it. But "safe default" cannot mean "unconditional" —
+          // if the stored content no longer matches the last state this turn
+          // itself is responsible for (its own write, or the pre-turn plan if
+          // it never wrote), something else changed the file during the turn.
+          // In practice that is the operator's own external-editor edit made
+          // while the turn was still running (the runtime has no idle gate on
+          // commands, so this is reachable, not hypothetical). Restoring over
+          // it would discard that edit. Only this session's own plan file is
+          // ever touched either way, so this can never undo another session's
+          // work — the question here is only ours vs. the turn's.
+          const expected = session.expectedPlanHash();
+          // A mismatch only means "keep, don't restore" when there is
+          // something to keep; a missing file has nothing to preserve.
+          if (stored && stored.hash !== expected) {
+            // Content was never checked by the gate (neither the agent's
+            // write nor this restore), so it is kept but marked not ready.
+          } else {
+            restorePlan(session.location(ctx), previousPlan);
+          }
           planReadiness = undefined;
         }
         previousPlan = undefined;

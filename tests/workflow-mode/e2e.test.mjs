@@ -422,6 +422,291 @@ await test("an edit made during the turn survives settling and voids the quality
   });
 });
 
+await test("a plan can be re-approved after /edit-plan changes it", async () => {
+  if (!planMode || !planStore) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-reapprove-"));
+    try {
+      const harness = createHarness({
+        select: () => "Schnellplan",
+        input: () => "",
+      });
+      const ctx = harness.makeContext({ cwd });
+      // Simulate the host's external editor: it overwrites the plan file with
+      // new content, exactly as a person editing it in their own editor would.
+      const editedContent = GOOD_SIMPLE_PLAN.replace(
+        "Login-Formular",
+        "Bearbeitet-Formular",
+      );
+      ctx.ui.openExternalEditor = async (path) => {
+        writeFileSync(path, editedContent, "utf8");
+      };
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      await runPlanningTurn(harness, ctx, GOOD_SIMPLE_PLAN);
+
+      // This is the regression: before the fix, readiness stayed bound to the
+      // pre-edit hash forever, so approving after an edit always failed with
+      // "der Plan hat sich geändert" — there was no way back to "ready".
+      await harness.commands.get("edit-plan")("", ctx);
+      const stored = planStore.readPlan(
+        planStore.planLocation(cwd, ctx.sessionManager.getSessionId()),
+      );
+      assert(
+        stored.content.includes("Bearbeitet-Formular"),
+        "the external editor's write landed",
+      );
+
+      await harness.commands.get("plan-approve")("", ctx);
+      assert(
+        !harness.notifications.some((entry) =>
+          entry.message.includes("hat sich seit dem letzten Planning-Turn geändert"),
+        ),
+        "approval does not reject the edited plan as stale",
+      );
+      const executionPrompt = harness.lifecycleCalls
+        .filter((call) => call.kind === "sendUserMessage")
+        .at(-1)?.content;
+      assert(
+        typeof executionPrompt === "string",
+        "the edit is actually approvable — a turn was started",
+      );
+      const handoff = await hooks(harness, "before_agent_start", ctx, {
+        prompt: executionPrompt,
+        systemPrompt: "BASE",
+      });
+      assert(
+        handoff[0]?.message?.content?.includes("Bearbeitet-Formular"),
+        "and the handoff carries the edited content, not the pre-edit plan",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("edit-plan updates readiness to the new content's own quality verdict", async () => {
+  if (!planMode || !planStore) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-reapprove-quality-"));
+    try {
+      // The workflow-mode selector ("Workflow wechseln") and the finished-plan
+      // decision ("Fertiger Plan") both go through ctx.ui.select — picking by
+      // title, not by a fixed label, is what actually drives the decision
+      // through to /plan-approve instead of returning from decidePlan() on an
+      // unmatched label (a plain `() => "Schnellplan"` mock does that silently
+      // and never exercises approvePlan at all).
+      const harness = createHarness({
+        select: (labels, title) =>
+          title === "Fertiger Plan"
+            ? labels.find((label) => label.startsWith("Plan ausführen"))
+            : "Schnellplan",
+        input: () => "",
+      });
+      const ctx = harness.makeContext({ cwd });
+      let editedContent = "";
+      ctx.ui.openExternalEditor = async (path) => {
+        writeFileSync(path, editedContent, "utf8");
+      };
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      await runPlanningTurn(harness, ctx, GOOD_SIMPLE_PLAN);
+
+      // Edit into something that still passes the gate: readiness should
+      // reflect that, not just "changed, so must be unready".
+      editedContent = GOOD_SIMPLE_PLAN.replace(
+        "Login-Formular",
+        "Anderes-Formular",
+      );
+      await harness.commands.get("edit-plan")("", ctx);
+      await harness.commands.get("plan-decide")("", ctx);
+
+      // Discriminating assertions: without refreshReadinessAfterEdit, the
+      // stale pre-edit hash would make approvePlan reject the edit as
+      // "changed since the last planning turn" and no turn would ever start.
+      assert(
+        harness.lifecycleCalls.some((call) => call.kind === "sendUserMessage"),
+        "the still-valid edit is actually approved and starts a turn — proof the readiness resync worked, not just that no warning appeared",
+      );
+      const approval = harness.appended.find(
+        (entry) => entry.customType === "plan-approval",
+      );
+      eq(
+        approval?.data.qualityOverride,
+        false,
+        "and it needed no override — the fresh quality check on the edited content passed on its own",
+      );
+      assert(
+        !harness.notifications.some((entry) =>
+          entry.message.includes("erfüllt die Mindestanforderungen"),
+        ),
+        "a still-valid edited plan is not reported as failing its gate",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("a manual edit during a failing turn is kept, not rolled back", async () => {
+  if (!planMode || !planStore) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-edit-during-fail-"));
+    try {
+      const harness = createHarness({ select: () => "Schnellplan" });
+      const ctx = harness.makeContext({ cwd });
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      await runPlanningTurn(harness, ctx, GOOD_SIMPLE_PLAN);
+
+      // A second planning turn starts (old plan A = GOOD_SIMPLE_PLAN is the
+      // rollback baseline), the agent writes B, then — while the turn is
+      // still open — the operator edits the file directly to C (simulating
+      // /edit-plan or any other out-of-band write), and only then does the
+      // turn fail. C must survive; it must not be silently replaced by A.
+      const location = planStore.planLocation(
+        cwd,
+        ctx.sessionManager.getSessionId(),
+      );
+      await hooks(harness, "before_agent_start", ctx, {
+        prompt: "Plane neu",
+        systemPrompt: "BASE",
+      });
+      await writePlanViaTool(
+        harness,
+        ctx,
+        GOOD_SIMPLE_PLAN.replace("Login-Formular", "Agent-Schreibt-B"),
+      );
+      const afterAgentWrite = planStore.readPlan(location);
+      planStore.writePlan(
+        location,
+        GOOD_SIMPLE_PLAN.replace("Login-Formular", "Operator-Schreibt-C"),
+        afterAgentWrite.hash,
+      );
+      await hooks(harness, "agent_end", ctx, {
+        messages: [{ stopReason: "error", errorMessage: "boom" }],
+      });
+      await hooks(harness, "agent_settled", ctx);
+
+      const stored = planStore.readPlan(location);
+      assert(
+        stored.content.includes("Operator-Schreibt-C"),
+        "the operator's edit survives a failed turn instead of being rolled back to the old plan",
+      );
+      assert(
+        !stored.content.includes("Login-Formular"),
+        "the pre-turn plan (A) did not silently win over the operator's edit",
+      );
+      // "Not ready" is only observable through the public command surface:
+      // /plan-decide reports "no completed plan" exactly when readiness is
+      // unset, which is what a kept-but-unreviewed plan must produce — it was
+      // never validated by any gate, agent or restore.
+      await harness.commands.get("plan-decide")("", ctx);
+      assert(
+        harness.notifications.some((entry) =>
+          entry.message.includes(
+            "kein abgeschlossener Plan dieser Sitzung",
+          ),
+        ),
+        "the kept-but-unreviewed content is not marked ready — nobody's gate ever saw it",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("the very first planning turn failing before any write leaves no plan behind", async () => {
+  if (!planMode || !planStore) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-first-turn-fail-"));
+    try {
+      // The CAS rollback's empty case: no previous plan (expectedPlanHash()
+      // is undefined) and the agent never wrote anything before the turn
+      // failed (stored is undefined too). restorePlan(location, undefined)
+      // must still behave — no plan file, no readiness, no crash.
+      const harness = createHarness({ select: () => "Schnellplan" });
+      const ctx = harness.makeContext({ cwd });
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+
+      await hooks(harness, "before_agent_start", ctx, {
+        prompt: "Plane das",
+        systemPrompt: "BASE",
+      });
+      await hooks(harness, "agent_end", ctx, {
+        messages: [{ stopReason: "error", errorMessage: "boom" }],
+      });
+      await hooks(harness, "agent_settled", ctx);
+
+      const location = planStore.planLocation(
+        cwd,
+        ctx.sessionManager.getSessionId(),
+      );
+      eq(
+        planStore.readPlan(location),
+        undefined,
+        "nothing existed before, nothing was written, so nothing exists after",
+      );
+      await harness.commands.get("plan-decide")("", ctx);
+      assert(
+        harness.notifications.some((entry) =>
+          entry.message.includes("kein abgeschlossener Plan dieser Sitzung"),
+        ),
+        "and there is correctly no readiness to decide about",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("a genuinely failed turn with no interleaved edit still rolls back", async () => {
+  if (!planMode || !planStore) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-plain-fail-"));
+    try {
+      const harness = createHarness({ select: () => "Schnellplan" });
+      const ctx = harness.makeContext({ cwd });
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      await runPlanningTurn(harness, ctx, GOOD_SIMPLE_PLAN);
+
+      await hooks(harness, "before_agent_start", ctx, {
+        prompt: "Plane neu",
+        systemPrompt: "BASE",
+      });
+      await writePlanViaTool(
+        harness,
+        ctx,
+        GOOD_SIMPLE_PLAN.replace("Login-Formular", "Halbfertig"),
+      );
+      // No interleaved edit this time — the CAS baseline still matches the
+      // agent's own last write when the turn fails, so rollback must still
+      // happen exactly as before this fix.
+      await hooks(harness, "agent_end", ctx, {
+        messages: [{ stopReason: "error", errorMessage: "boom" }],
+      });
+      await hooks(harness, "agent_settled", ctx);
+
+      const stored = planStore.readPlan(
+        planStore.planLocation(cwd, ctx.sessionManager.getSessionId()),
+      );
+      assert(
+        stored.content.includes("Login-Formular"),
+        "without an interleaved edit, the previous plan is still restored",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 await test("a settled plan ignores retry intermediates", async () => {
   if (!planMode) return;
   await withPlanHome(async () => {
@@ -900,6 +1185,249 @@ await test("approval keeps the permission level and every hard gate", async () =
             entry.data.effectiveLevel === "yolo",
         ),
         "approval never enters YOLO",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("approving a plan that failed its gate requires an explicit override, and audits it", async () => {
+  if (!planMode || !planStore) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-plan-override-decline-"));
+    try {
+      // confirm: false — the operator declines the override dialog.
+      const harness = createHarness({
+        select: () => "Schnellplan",
+        input: () => "",
+        confirm: false,
+      });
+      const ctx = harness.makeContext({ cwd });
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+
+      // Produce a kept-but-never-validated plan the same way a failed turn
+      // with an interleaved edit does: readiness ends up unset even though
+      // content exists (see the settleTurn CAS test elsewhere in this file).
+      await hooks(harness, "before_agent_start", ctx, {
+        prompt: "Plane das",
+        systemPrompt: "BASE",
+      });
+      await writePlanViaTool(harness, ctx, GOOD_SIMPLE_PLAN);
+      const location = planStore.planLocation(
+        cwd,
+        ctx.sessionManager.getSessionId(),
+      );
+      const afterWrite = planStore.readPlan(location);
+      planStore.writePlan(
+        location,
+        GOOD_SIMPLE_PLAN.replace("Login-Formular", "Unvalidiert"),
+        afterWrite.hash,
+      );
+      await hooks(harness, "agent_end", ctx, {
+        messages: [{ stopReason: "error", errorMessage: "boom" }],
+      });
+      await hooks(harness, "agent_settled", ctx);
+
+      await harness.commands.get("plan-approve")("", ctx);
+      assert(
+        harness.lifecycleCalls.some(
+          (call) =>
+            call.kind === "confirm" && call.title.includes("Ungeprüft"),
+        ),
+        "an unready plan triggers an explicit, clearly named confirm dialog",
+      );
+      assert(
+        harness.lifecycleCalls.filter((call) => call.kind === "sendUserMessage")
+          .length === 0,
+        "declining the override starts no turn",
+      );
+      assert(
+        !harness.appended.some((entry) => entry.customType === "plan-approval"),
+        "declining the override leaves no approval audit entry",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("accepting the override approves and audits it as such", async () => {
+  if (!planMode || !planStore) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-plan-override-accept-"));
+    try {
+      // Default harness confirm is true — the operator accepts the override.
+      const harness = createHarness({
+        select: () => "Schnellplan",
+        input: () => "",
+      });
+      const ctx = harness.makeContext({ cwd });
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      await hooks(harness, "before_agent_start", ctx, {
+        prompt: "Plane das",
+        systemPrompt: "BASE",
+      });
+      await writePlanViaTool(harness, ctx, GOOD_SIMPLE_PLAN);
+      const location = planStore.planLocation(
+        cwd,
+        ctx.sessionManager.getSessionId(),
+      );
+      const afterWrite = planStore.readPlan(location);
+      planStore.writePlan(
+        location,
+        GOOD_SIMPLE_PLAN.replace("Login-Formular", "Unvalidiert"),
+        afterWrite.hash,
+      );
+      await hooks(harness, "agent_end", ctx, {
+        messages: [{ stopReason: "error", errorMessage: "boom" }],
+      });
+      await hooks(harness, "agent_settled", ctx);
+
+      await harness.commands.get("plan-approve")("", ctx);
+      const approval = harness.appended.find(
+        (entry) => entry.customType === "plan-approval",
+      );
+      assert(approval, "accepting the override does approve the plan");
+      eq(
+        approval.data.qualityOverride,
+        true,
+        "the audit entry records that this was an override, not an ordinary approval",
+      );
+      assert(
+        harness.notifications.some((entry) => entry.message.includes("Override")),
+        "the operator is told this was an override, not silently treated as normal",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("approving a plan that passed its gate needs no override and is audited plainly", async () => {
+  if (!planMode) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-plan-no-override-"));
+    try {
+      const harness = createHarness({
+        select: () => "Schnellplan",
+        input: () => "",
+      });
+      const ctx = harness.makeContext({ cwd });
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      await runPlanningTurn(harness, ctx, GOOD_SIMPLE_PLAN);
+
+      await harness.commands.get("plan-approve")("", ctx);
+      assert(
+        !harness.lifecycleCalls.some((call) => call.kind === "confirm"),
+        "a plan that passed its gate is approved without an extra confirm step",
+      );
+      const approval = harness.appended.find(
+        (entry) => entry.customType === "plan-approval",
+      );
+      eq(
+        approval?.data.qualityOverride,
+        false,
+        "and the audit entry says plainly that this was not an override",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("a turn starting while the approval dialogs are open is still caught", async () => {
+  if (!planMode) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-plan-approve-toctou-"));
+    try {
+      // The confirm/input dialogs are the real TOCTOU window (they wait on
+      // the operator and can take arbitrarily long) — the first isIdle()
+      // check at the top of approvePlan cannot see a turn that starts *while*
+      // one of those dialogs is still open. This simulates exactly that: the
+      // input dialog's own callback is what starts the concurrent turn, mid-
+      // approval, and the second idle check right before sendUserMessage
+      // must still refuse.
+      const options = {
+        select: () => "Schnellplan",
+        confirm: true,
+      };
+      const harness = createHarness(options);
+      options.input = () => {
+        harness.setIdle(false);
+        return "";
+      };
+      const ctx = harness.makeContext({ cwd });
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      await runPlanningTurn(harness, ctx, GOOD_SIMPLE_PLAN);
+
+      await harness.commands.get("plan-approve")("", ctx);
+      assert(
+        harness.lifecycleCalls.filter((call) => call.kind === "sendUserMessage")
+          .length === 0,
+        "no turn starts once a concurrent one appeared during the input dialog",
+      );
+      assert(
+        !harness.appended.some((entry) => entry.customType === "plan-approval"),
+        "and no approval is granted for it either",
+      );
+      assert(
+        harness.notifications.some((entry) => entry.message.includes("läuft inzwischen")),
+        "the refusal names that the turn appeared during the dialogs, not before them",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("/plan-approve refuses while a turn is still running", async () => {
+  if (!planMode) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-plan-approve-busy-"));
+    try {
+      const harness = createHarness({
+        select: () => "Schnellplan",
+        input: () => "",
+      });
+      const ctx = harness.makeContext({ cwd });
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      await runPlanningTurn(harness, ctx, GOOD_SIMPLE_PLAN);
+
+      // The runtime dispatches commands without an idle gate, so /plan-approve
+      // can be reached while a turn — including a totally unrelated one
+      // started after this plan became ready — is still streaming.
+      harness.setIdle(false);
+      await harness.commands.get("plan-approve")("", ctx);
+      assert(
+        harness.lifecycleCalls.filter((call) => call.kind === "sendUserMessage")
+          .length === 0,
+        "no turn is started while the runtime reports itself busy",
+      );
+      assert(
+        !harness.appended.some((entry) => entry.customType === "plan-approval"),
+        "and no approval is granted either — the whole action is refused, not queued silently",
+      );
+      assert(
+        harness.notifications.some((entry) => entry.message.includes("läuft noch")),
+        "the refusal is explicit, not a silent no-op",
+      );
+
+      harness.setIdle(true);
+      await harness.commands.get("plan-approve")("", ctx);
+      assert(
+        harness.appended.some((entry) => entry.customType === "plan-approval"),
+        "once idle, the same approval goes through normally",
       );
     } finally {
       rmSync(cwd, { recursive: true, force: true });

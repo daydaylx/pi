@@ -21,6 +21,7 @@
  */
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -32,6 +33,22 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isInside } from "../shared/path-utils.ts";
+
+/**
+ * Plans can hold project-internal detail the operator would not want another
+ * local account to read. `writeFileSync`'s own `mode` option only takes effect
+ * when a file is *created* — POSIX `open()` ignores the mode argument for an
+ * existing path — so an overwrite (the common case here, given the store is
+ * compare-and-swap) would silently keep whatever permissions the file already
+ * had. An explicit `chmodSync` after every write closes that gap regardless of
+ * whether the file was new or already there.
+ */
+function writePlanFile(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  chmodSync(dirname(path), 0o700);
+  writeFileSync(path, content, "utf8");
+  chmodSync(path, 0o600);
+}
 
 /**
  * The largest plan the store accepts, in bytes of UTF-8.
@@ -135,9 +152,7 @@ export function writePlan(
   const current = readPlan(location);
   if (current?.hash !== expectedHash)
     return { ok: false, reason: "conflict", current };
-  const path = planPath(location);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content, "utf8");
+  writePlanFile(planPath(location), content);
   return { ok: true, stored: { content, hash: hashPlan(content) } };
 }
 
@@ -156,8 +171,7 @@ export function restorePlan(
     rmSync(path, { force: true });
     return;
   }
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, previous.content, "utf8");
+  writePlanFile(path, previous.content);
 }
 
 export function removePlan(location: PlanLocation): void {

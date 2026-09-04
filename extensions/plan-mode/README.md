@@ -86,7 +86,14 @@ Daraus folgt:
   Checkout haben getrennte Plandateien.
 - **Ein Rollback trifft nur die eigene Sitzung.** Endet ein Planning-Turn mit
   Fehler oder Abbruch, wird ausschließlich die eigene Datei auf den Stand vor
-  dem Turn zurückgesetzt.
+  dem Turn zurückgesetzt — und auch nur, wenn seit dem letzten bekannten
+  Zustand dieses Turns (dem eigenen Agenten-Write oder, falls der Agent nichts
+  schrieb, dem Plan vor dem Turn) sonst nichts an der Datei geändert wurde. Hat
+  die Bedienerin/der Bediener die Datei währenddessen selbst bearbeitet (z. B.
+  über `/edit-plan`, während der Turn noch lief — die Runtime verteilt
+  Commands ohne Idle-Gate), bleibt diese Bearbeitung erhalten statt vom
+  Rollback überschrieben zu werden; sie gilt dann als ungeprüft (keine
+  Bereitschaft), nicht als automatisch freigegeben.
 - **Ein fremdes Repository wird nicht verschmutzt.** Ein Planning-Turn schreibt
   nichts in den Arbeitsbaum.
 - Schreibvorgänge laufen als Compare-and-swap gegen den zuletzt gesehenen Hash.
@@ -96,7 +103,12 @@ Daraus folgt:
 `/save-plan` kopiert den Plan bewusst nach `.agent/plans/current-plan.md`, wenn
 er im Repository liegen soll. `/edit-plan` öffnet den Sitzungsplan im sicheren
 Host-Editor (`openExternalEditor`, keine Shell-Alternative) und verwirft danach
-eine bestehende Freigabe.
+eine bestehende Freigabe. Die Bereitschaft (`readiness`) wird dabei zugleich
+mit dem neuen Hash und einer frischen Qualitätsprüfung gegen den ausgewählten
+Modus aktualisiert — der bearbeitete Plan bleibt also erneut freigebbar, statt
+dauerhaft an einem veralteten Hash hängen zu bleiben. Das gilt auch, wenn die
+Bearbeitung die Mindestanforderungen des Modus verfehlt: Die Freigabe ist dann
+weiterhin möglich, aber nur als ausdrücklicher Override (siehe unten).
 
 Eine ältere `.agent/plans/current-plan.md` aus der Zeit vor der sitzungsbezogenen
 Ablage wird von `/view-plan` **angezeigt**, ausdrücklich als alt markiert, und
@@ -114,7 +126,11 @@ Abschnitt, damit der Agent im selben Turn nachbessern kann.
   Risiken — jeweils mit eigenem Inhalt. Keine Alternativen, keine Phasen.
 - **Architekturplan** verlangt zusätzlich Nicht-Ziele, Ausgangslage, Annahmen,
   Abhängigkeiten und Abschlusskriterien und gliedert „Umsetzung" in mindestens
-  zwei benannte Phasen.
+  zwei benannte Phasen — als flache Liste (`- Phase 1: …`) oder als
+  Unterüberschriften (`### Phase 1`) unterhalb von `## Umsetzung`. Der Parser
+  respektiert dabei die Überschriftentiefe: Eine `### Phase 1` unter
+  `## Umsetzung` zählt als deren Unterabschnitt, nicht als eigenständiger,
+  gleichrangiger Abschnitt, der ihr den Inhalt wegnimmt.
 
 Optional und bewusst nicht erzwungen bleiben „Optionen", „Empfehlung" und eine
 Migrations-/Rückfallstrategie: Sie gelten nur, wenn mehrere sinnvolle Wege
@@ -123,7 +139,25 @@ erzeugen, vor denen der Planning-Prompt warnt.
 
 Die Prüfung ist absichtlich flach — sie fragt „ist der Abschnitt ausgefüllt?",
 nicht „ist der Text gut?". Ob ein Plan fachlich taugt, misst die Eval-Suite
-(`docs/plan-eval.md`), nicht dieser Gate.
+(`docs/plan-eval.md`), nicht dieser Gate. Ein Pflichtabschnitt gilt nur bei
+**exakter** normalisierter Überschrift als erfüllt (nicht per Teilstring) —
+„Nicht-Ziele" darf die Pflicht für „Ziel" nicht miterfüllen, nur weil die
+normalisierte Form von „Ziele" zufällig „ziel" enthält.
+
+### Override: ein Plan, der die Prüfung nicht besteht
+
+`plan_write` verhindert nur, dass der **Agent** einen unzureichenden Plan
+speichert. Ein Mensch kann einen Plan trotzdem außerhalb dieses Wegs
+verändern — im externen Editor (`/edit-plan`), der nicht über `plan_write`
+läuft und den Gate deshalb nicht durchläuft. Ebenso bleibt ein Plan nach einem
+fehlgeschlagenen Turn mit einer zwischenzeitlichen manuellen Bearbeitung
+erhalten, aber ungeprüft (siehe unten, „Rollback"). Für diese Fälle ist die
+Freigabe kein automatischer Blocker: `/plan-approve` verlangt dann eine
+zusätzliche, ausdrücklich benannte Bestätigung („Ungeprüfter Plan … trotzdem
+als bewusster Override freigeben?") und protokolliert die Freigabe mit
+`qualityOverride: true` im `plan-approval`-Session-Eintrag. Eine Freigabe, die
+den Gate tatsächlich bestanden hat, braucht diese Nachfrage nicht und wird mit
+`qualityOverride: false` protokolliert.
 
 ## Durchsetzung
 
@@ -196,6 +230,14 @@ behandelt das fail-closed: es bleiben nur die Tools erlaubt, die in jedem Modus
 lesend sind; `plan_write`, der Investigator und `verify({check:"typecheck"})`
 brauchen einen bestätigten Zustand, und YOLO ist gesperrt. Die Blockmeldung
 benennt die fehlende Workflow-Extension, damit die Ursache sichtbar ist.
+
+Dieselbe fehlende Idle-Sperre gilt für `/plan-approve`: Der eigentliche
+Moduswechsel wird zwar vorgemerkt (siehe oben), aber die Freigabe selbst — der
+Grant und der Start des Umsetzungs-Turns per `sendUserMessage` — würde ohne
+weitere Prüfung sofort ausgeführt, auch während noch ein Turn läuft.
+`/plan-approve` prüft deshalb `ctx.isIdle()` und verweigert die Freigabe
+explizit, solange die Runtime nicht leerläuft, statt mit einem laufenden Turn
+zu wettlaufen.
 
 ## Bewusste Abweichungen von anderen Produkten
 

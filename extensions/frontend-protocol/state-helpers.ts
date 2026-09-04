@@ -51,6 +51,11 @@ export function isFrontendUiSnapshotEvent(
   );
 }
 
+/** A plan is never ready "for work" — only the two planning modes apply. */
+const PLANNING_PHASES: readonly FrontendWorkflowPhase[] = WORKFLOW_MODES.filter(
+  (mode) => mode !== "work",
+);
+
 function isPlanReadiness(value: unknown): value is FrontendPlanReadiness {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<FrontendPlanReadiness>;
@@ -58,6 +63,7 @@ function isPlanReadiness(value: unknown): value is FrontendPlanReadiness {
     typeof candidate.hash === "string" &&
     candidate.hash.length > 0 &&
     typeof candidate.mode === "string" &&
+    PLANNING_PHASES.includes(candidate.mode as FrontendWorkflowPhase) &&
     typeof candidate.qualityOk === "boolean"
   );
 }
@@ -107,16 +113,33 @@ export function mergeFrontendUiState(
       }
     }
     if ("planReady" in patch.workflow) {
-      const ready = isPlanReadiness(patch.workflow.planReady)
-        ? patch.workflow.planReady
-        : null;
-      if (
-        (state.workflow.planReady ?? null)?.hash !== (ready ?? null)?.hash ||
-        (state.workflow.planReady ?? null)?.qualityOk !==
-          (ready ?? null)?.qualityOk
-      ) {
-        state.workflow.planReady = ready;
-        changed = true;
+      const raw = patch.workflow.planReady;
+      // A malformed value (garbage, or a forged `mode: "work"`) must never
+      // reach `state` at all — accepting it as `null` would let bad data blank
+      // out a legitimate readiness that was already there. Only `null` itself
+      // (an explicit "no plan ready") or a value that actually passes the
+      // shape and mode check may be assigned; anything else is dropped,
+      // leaving whatever was already in state untouched.
+      if (raw === null || isPlanReadiness(raw)) {
+        const ready = raw;
+        const current = state.workflow.planReady ?? null;
+        // Optional chaining already makes every field read `undefined` on
+        // either side of a null/non-null transition (`null?.hash` is
+        // `undefined`, and a real object's hash is a non-empty string), so a
+        // change into or out of "no plan ready" is caught by the field
+        // comparisons themselves — no separate null-ness check is needed.
+        // `mode` matters alongside `hash`/`qualityOk`: it is what tells a
+        // frontend whether the ready plan is a Schnellplan or an
+        // Architekturplan, and comparing only the other two would miss a
+        // patch that changes mode alone.
+        if (
+          current?.hash !== ready?.hash ||
+          current?.mode !== ready?.mode ||
+          current?.qualityOk !== ready?.qualityOk
+        ) {
+          state.workflow.planReady = ready;
+          changed = true;
+        }
       }
     }
   }

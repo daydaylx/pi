@@ -68,6 +68,7 @@ export function requiredSections(mode: PlanningMode): readonly string[] {
 
 interface Section {
   heading: string;
+  level: number;
   body: string;
 }
 
@@ -80,17 +81,36 @@ function normalizeHeading(value: string): string {
     .trim();
 }
 
-/** Split a markdown document into its ATX headings and their bodies. */
+/**
+ * Split a markdown document into its ATX headings and their bodies, respecting
+ * heading depth: a deeper heading (e.g. `### Phase 1` under `## Umsetzung`) is
+ * a subsection *of* the enclosing heading, not a sibling that steals lines out
+ * of it. Every line — including a subheading's own line, so a section's body
+ * still shows how many subheadings it contains — is appended to every
+ * currently open ancestor, not just the innermost one, which is what lets
+ * `countUmsetzungSteps` see phases written as `### Phase N` headings and not
+ * just as a flat list.
+ */
 export function planSections(content: string): Section[] {
   const sections: Section[] = [];
-  let current: Section | undefined;
+  const open: Section[] = [];
   for (const line of content.split(/\r?\n/)) {
-    if (/^#{1,6}\s+\S/.test(line)) {
-      current = { heading: normalizeHeading(line), body: "" };
-      sections.push(current);
+    const match = /^(#{1,6})\s+(\S.*)$/.exec(line);
+    if (match) {
+      const level = match[1].length;
+      // A heading at this level or shallower closes every deeper or equal
+      // section still open — those are done, this line starts a sibling or a
+      // new parent, not their content.
+      while (open.length > 0 && open[open.length - 1].level >= level) {
+        open.pop();
+      }
+      for (const ancestor of open) ancestor.body += `${line}\n`;
+      const section: Section = { heading: normalizeHeading(match[2]), level, body: "" };
+      sections.push(section);
+      open.push(section);
       continue;
     }
-    if (current) current.body += `${line}\n`;
+    for (const ancestor of open) ancestor.body += `${line}\n`;
   }
   return sections;
 }
@@ -152,7 +172,13 @@ export function assessPlanQuality(
   );
   for (const required of requiredSections(mode)) {
     const key = normalizeHeading(required);
-    const present = [...filled].some((heading) => heading.includes(key));
+    // Exact match, not substring: normalizeHeading("Nicht-Ziele") produces
+    // "nicht ziele", which *contains* "ziel" — a loose `.includes(key)` check
+    // let a filled "Nicht-Ziele" section silently satisfy the "Ziel"
+    // requirement. The fixed templates in prompts.ts always emit the required
+    // heading verbatim, so exact equality costs nothing a well-formed plan
+    // would ever hit.
+    const present = filled.has(key);
     if (!present) {
       issues.push({
         code: `section:${key.replace(/\s+/g, "-")}`,
@@ -170,7 +196,9 @@ export function assessPlanQuality(
   }
 
   if (mode === "detailed_plan") {
-    const umsetzung = sections.find((s) => s.heading.includes("umsetzung"));
+    const umsetzung = sections.find(
+      (s) => s.heading === normalizeHeading("Umsetzung"),
+    );
     if (umsetzung && countUmsetzungSteps(umsetzung.body) < 2) {
       issues.push({
         code: "phases",

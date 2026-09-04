@@ -146,3 +146,54 @@ ausdrücklich **nicht** durch ein Modellurteil ersetzt werden dürfen.
   siehe `extensions/plan-mode/README.md`, Abschnitt „Prüfungen im Planmodus".
   Pi besitzt keine Worktree- oder Sandbox-Schicht; eine halbfertige Sandbox sähe
   nach einer Grenze aus, ohne eine zu sein.
+
+## Nachtrag: Fünf Korrekturen aus der Code-Review
+
+Eine unabhängige Review des Diffs vor dem Merge fand fünf reale Fehler in der
+ursprünglichen Umsetzung dieser Entscheidung, alle behoben und mit
+Regressionstests belegt:
+
+1. **`/edit-plan` machte einen Plan dauerhaft nicht mehr freigebbar.** Der
+   Editor löschte die Freigabe, aktualisierte aber nie die Bereitschaft
+   (`readiness`) auf den neuen Hash — `/plan-approve` verglich also für immer
+   gegen den Stand vor der Bearbeitung und lehnte ab. Fix: `editPlanMarkdown`
+   ruft jetzt `WorkflowSession.refreshReadinessAfterEdit` und lässt die
+   Qualitätsprüfung erneut über den neuen Inhalt laufen.
+2. **Ein Rollback nach einem fehlgeschlagenen Turn konnte eine gleichzeitige
+   manuelle Bearbeitung überschreiben.** `settleTurn`s Fehlerpfad stellte immer
+   den Stand vor dem Turn wieder her, unabhängig davon, was aktuell auf der
+   Platte lag. Fix: Der Rollback vergleicht jetzt den aktuellen Hash gegen
+   `expectedPlanHash()` (dieselbe CAS-Basis, die `plan_write` auch selbst
+   nutzt) und rollt nur zurück, wenn seit dem letzten bekannten Zustand des
+   Turns nichts anderes den Plan verändert hat; andernfalls bleibt der
+   abweichende Inhalt erhalten, aber ohne Bereitschaft.
+3. **`planSections()` ignorierte Überschriftentiefe.** Phasen als
+   `### Phase 1`/`### Phase 2` unter `## Umsetzung` wurden als eigenständige,
+   gleichrangige Abschnitte behandelt statt als deren Unterabschnitte — der
+   Umsetzung-Body verlor ihren Inhalt, und die Phasenzählung griff nie. Fix:
+   Der Parser führt jetzt die Überschriftenebene mit und hängt jede Zeile an
+   alle noch offenen Vorfahren an.
+4. **Pflichtabschnitte wurden per Teilstring statt exakt abgeglichen.**
+   `heading.includes(key)` ließ eine ausgefüllte „Nicht-Ziele"-Sektion die
+   Pflicht für „Ziel" miterfüllen, weil die normalisierte Form „nicht ziele"
+   zufällig die Zeichenfolge „ziel" enthält. Fix: exakte Gleichheit der
+   normalisierten Überschrift.
+5. **Der Qualitätsgate war nach einer externen Bearbeitung unbemerkt
+   umgehbar.** `plan_write` verhindert nur, dass der Agent einen
+   unzureichenden Plan speichert; ein von Hand editierter oder nach einem
+   Fehlturn unvalidiert erhaltener Plan (Punkt 2) konnte trotzdem
+   stillschweigend freigegeben werden. Fix: `/plan-approve` verlangt in diesem
+   Fall eine ausdrückliche, klar benannte Bestätigung und protokolliert die
+   Freigabe im `plan-approval`-Session-Eintrag mit `qualityOverride: true`.
+
+Zusätzlich, an derselben Stelle gefunden und ebenfalls behoben: `/plan-approve`
+prüfte `ctx.isIdle()` nicht, obwohl die Runtime Commands ohne Idle-Gate
+verteilt — eine Freigabe konnte so theoretisch mit einem noch laufenden Turn
+in Konflikt geraten (`sendUserMessage` läuft, anders als der Moduswechsel,
+nicht durch die Vormerklogik). Freigabe wird jetzt verweigert, solange die
+Runtime nicht leerläuft. Außerdem wurden zwei kleinere Lücken im
+Frontend-Zustandsabgleich geschlossen (`isPlanReadiness` akzeptierte jeden
+String als `mode`; der Merge verglich `planReady` nicht auf `mode`, und eine
+zweite, beim Fixen selbst gefundene Variante des Fehlers ließ eine
+Null-Transition unbemerkt durchrutschen) sowie die Dateirechte der
+Runtime-Planablage auf `0600`/`0700` verschärft.

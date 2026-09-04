@@ -123,6 +123,19 @@ export async function approvePlan(
   session: WorkflowSession,
   ctx: ExtensionContext,
 ): Promise<void> {
+  // The runtime dispatches commands and shortcuts without an idle gate (the
+  // same TOCTOU class the turn-pinned mode elsewhere in this module closes),
+  // so this can be reached while a turn — including the very planning turn
+  // that produced this plan — is still running. This first check turns away
+  // the common case immediately, before asking the operator anything.
+  if (!ctx.isIdle()) {
+    session.notify(
+      ctx,
+      "Ein Turn läuft noch. Warte, bis er abgeschlossen ist, und gib den Plan danach frei.",
+      "warning",
+    );
+    return;
+  }
   const stored = readPlan(session.location(ctx));
   if (!stored) {
     session.notify(
@@ -141,10 +154,39 @@ export async function approvePlan(
     );
     return;
   }
+  // `plan_write` blocks the agent from ever saving a plan that fails its
+  // mode's gate — that is the mechanically enforced part. What reaches here
+  // can still fail it: a human edit through the external editor never goes
+  // through plan_write at all, and readiness itself can be absent (e.g. a
+  // kept-but-unreviewed plan after a failed turn, see settleTurn). Neither
+  // case may execute silently, so anything short of a positive pass requires
+  // an explicit, separately worded confirmation and is recorded as such.
+  const qualityOverride = ready?.qualityOk !== true;
+  if (qualityOverride) {
+    const confirmed = await ctx.ui.confirm(
+      "Ungeprüfter Plan",
+      "Dieser Plan erfüllt die Mindestanforderungen seines Modus nicht oder wurde nicht durch die Planungsprüfung erzeugt (z. B. eine manuelle Bearbeitung). Trotzdem als bewusster Override freigeben?",
+    );
+    if (!confirmed) return;
+  }
   const addition = await ctx.ui.input(
     "Plan ausführen",
     "Optionaler Zusatzauftrag für diesen Turn (leer lassen für den Plan wie er ist)",
   );
+  // The two dialogs above each wait on the operator and can take arbitrarily
+  // long — that is the real TOCTOU window, not the synchronous code below.
+  // Re-checking idle here, immediately before the first mutation, is what
+  // actually closes it: nothing between this line and `sendUserMessage`
+  // awaits anything that yields back to a state a concurrent turn could
+  // change (`switchMode` below performs no I/O and no real await of its own).
+  if (!ctx.isIdle()) {
+    session.notify(
+      ctx,
+      "Ein Turn läuft inzwischen. Warte, bis er abgeschlossen ist, und gib den Plan danach frei.",
+      "warning",
+    );
+    return;
+  }
   const prompt = planExecutionPrompt(
     typeof addition === "string" ? addition : undefined,
   );
@@ -160,10 +202,13 @@ export async function approvePlan(
     timestamp: new Date().toISOString(),
     hash: stored.hash,
     bytes: Buffer.byteLength(stored.content, "utf8"),
+    qualityOverride,
   });
   session.notify(
     ctx,
-    "Plan freigegeben. Die Zugriffsstufe bleibt unverändert; alle Sicherheits- und Recovery-Gates gelten weiter.",
+    qualityOverride
+      ? "Plan als Override freigegeben (Mindestanforderungen nicht bestätigt). Die Zugriffsstufe bleibt unverändert; alle Sicherheits- und Recovery-Gates gelten weiter."
+      : "Plan freigegeben. Die Zugriffsstufe bleibt unverändert; alle Sicherheits- und Recovery-Gates gelten weiter.",
   );
   session.pi.sendUserMessage(prompt);
 }

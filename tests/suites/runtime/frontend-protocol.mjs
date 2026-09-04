@@ -378,6 +378,82 @@ export const frontendProtocolSections = {
         "and the active phase stays the mode the running turn is under",
       );
 
+      // 11a. Regression: isPlanReadiness must reject a mode that is not one of
+      // the two planning modes (e.g. "work", or garbage), and the merge must
+      // treat a mode-only change (same hash, same qualityOk) as a real change
+      // — both were previously possible to get wrong silently.
+      const rejectedModeState = baseState();
+      const rejectedModeChanged = fp.mergeFrontendUiState(rejectedModeState, {
+        workflow: { planReady: { hash: "x", mode: "work", qualityOk: true } },
+      });
+      eq(
+        rejectedModeState.workflow.planReady,
+        undefined,
+        "a planReady patch naming a non-planning mode is dropped, not stored as null",
+      );
+      assert(
+        !rejectedModeChanged,
+        "and dropping malformed data is not itself reported as a change",
+      );
+
+      // A forged/malformed planReady patch must not be able to blank out an
+      // existing legitimate one either — dropping bad data must never look
+      // like "nothing is ready anymore".
+      const clobberState = baseState();
+      fp.mergeFrontendUiState(clobberState, {
+        workflow: {
+          planReady: { hash: "real", mode: "simple_plan", qualityOk: true },
+        },
+      });
+      const clobberChanged = fp.mergeFrontendUiState(clobberState, {
+        workflow: { planReady: { hash: "x", mode: "work", qualityOk: true } },
+      });
+      assert(!clobberChanged, "the malformed patch is dropped, not applied");
+      eq(
+        clobberState.workflow.planReady?.hash,
+        "real",
+        "and the legitimate readiness survives a malformed patch untouched",
+      );
+
+      // An explicit `null` — a real "no plan ready" signal — is the one
+      // non-object value that must still go through.
+      const clearState = baseState();
+      fp.mergeFrontendUiState(clearState, {
+        workflow: {
+          planReady: { hash: "real", mode: "simple_plan", qualityOk: true },
+        },
+      });
+      const clearChanged = fp.mergeFrontendUiState(clearState, {
+        workflow: { planReady: null },
+      });
+      assert(clearChanged, "an explicit null clears an existing readiness");
+      eq(
+        clearState.workflow.planReady,
+        null,
+        "and the cleared state is stored as null, not left stale",
+      );
+
+      const modeOnlyState = baseState();
+      fp.mergeFrontendUiState(modeOnlyState, {
+        workflow: {
+          planReady: { hash: "same-hash", mode: "simple_plan", qualityOk: true },
+        },
+      });
+      const modeOnlyChanged = fp.mergeFrontendUiState(modeOnlyState, {
+        workflow: {
+          planReady: { hash: "same-hash", mode: "detailed_plan", qualityOk: true },
+        },
+      });
+      assert(
+        modeOnlyChanged,
+        "a planReady patch that changes only mode (same hash, same qualityOk) is not silently dropped",
+      );
+      eq(
+        modeOnlyState.workflow.planReady?.mode,
+        "detailed_plan",
+        "and the new mode actually lands in state",
+      );
+
       // 12. Die Planentscheidung braucht in jedem Frontend denselben Weg.
       for (const id of ["plan.decide", "plan.approve"]) {
         eq(

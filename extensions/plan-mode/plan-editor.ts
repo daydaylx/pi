@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { isPlanningMode } from "../shared/workflow-mode.ts";
 import {
   LEGACY_PLAN_RELATIVE_PATH,
   planPath,
@@ -76,9 +77,29 @@ export async function editPlanMarkdown(
   // Editing invalidates any standing approval: it was bound to the old hash,
   // and consuming it now would hand over text the user never approved.
   session.clearApproval();
+  // Readiness is bound to a hash too, and the edit just changed it. Without
+  // resyncing here, an edited plan could never be approved again: the stored
+  // hash and the stale readiness hash would disagree forever, since nothing
+  // else re-derives readiness outside a planning turn. The caller already
+  // checked isPlanningMode(session.selectedMode); this repeats it because
+  // that guarantee lives in commands.ts, not in this module's own contract.
+  if (isPlanningMode(session.selectedMode))
+    session.refreshReadinessAfterEdit(ctx, session.selectedMode);
 }
 
-/** Opt-in copy into the checkout, for a plan the user wants to keep or share. */
+/**
+ * Opt-in copy into the checkout, for a plan the user wants to keep or share.
+ *
+ * Guarded only by the trust boundary, not by the permission-level or
+ * recovery-gate machinery in extensions/permissions/guards.ts. That is
+ * deliberate, not an oversight: those guards police the agent's own
+ * `tool_call` events; a slash command is a human-initiated action running
+ * with the extension's own privileges, the same footing every other
+ * state-changing command here has (`/permission`, `/yolo`, `/edit-plan`'s
+ * external-editor write). The recovery gate specifically exists to stop an
+ * *agent* write after an unverified interruption; a person choosing to save
+ * their own already-reviewed plan text is a different action than that.
+ */
 export async function savePlanToWorkspace(
   session: WorkflowSession,
   ctx: ExtensionContext,
