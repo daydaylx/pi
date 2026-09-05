@@ -9,12 +9,16 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { catalogDescription } from "../shared/command-catalog.ts";
+import { checkAttribution } from "./checks/attribution.ts";
 import { checkAuth } from "./checks/auth.ts";
 import { checkCapabilities } from "./checks/capabilities.ts";
 import { checkCatalog } from "./checks/catalog.ts";
 import { checkInference } from "./checks/inference.ts";
 import { isolateProviders } from "./checks/provider-isolation.ts";
-import { checkStrictParameters, listProviderEndpoints } from "./checks/providers.ts";
+import {
+  checkStrictParameters,
+  listProviderEndpoints,
+} from "./checks/providers.ts";
 import { checkReasoningCompatibility } from "./checks/reasoning.ts";
 import { checkToolCalling } from "./checks/tools.ts";
 import { resolveOpenRouterAuth } from "./credentials.ts";
@@ -64,7 +68,10 @@ function normalizeArgModelId(raw: string): string {
   return raw.startsWith("openrouter/") ? raw.slice("openrouter/".length) : raw;
 }
 
-function findAuthModel(ctx: ExtensionCommandContext, orModelId: string): Model<Api> | undefined {
+function findAuthModel(
+  ctx: ExtensionCommandContext,
+  orModelId: string,
+): Model<Api> | undefined {
   const exact = ctx.modelRegistry.find("openrouter", orModelId);
   if (exact) return exact;
   const anyOpenRouter = ctx.modelRegistry
@@ -76,7 +83,9 @@ function findAuthModel(ctx: ExtensionCommandContext, orModelId: string): Model<A
 async function resolveTarget(
   ctx: ExtensionCommandContext,
   modelIdArg: string | undefined,
-): Promise<{ orModelId: string; authModel: Model<Api> | undefined } | undefined> {
+): Promise<
+  { orModelId: string; authModel: Model<Api> | undefined } | undefined
+> {
   if (modelIdArg === undefined) {
     const picked = await pickOpenRouterModel(ctx);
     if (!picked) return undefined;
@@ -122,18 +131,28 @@ async function runDiagnosis(
 ): Promise<DiagnosisReport> {
   const auth = authModel
     ? await resolveOpenRouterAuth(ctx, authModel)
-    : ({
+    : {
         ok: false as const,
         error: {
           category: "authentication" as const,
-          humanSummary: "OpenRouter ist als Provider in dieser Pi-Konfiguration nicht eingerichtet.",
-          likelyCauses: ["Kein OpenRouter-Modell in settings.json konfiguriert"],
-          recommendedAction: "Mindestens ein openrouter/-Modell konfigurieren, dann erneut prüfen.",
+          humanSummary:
+            "OpenRouter ist als Provider in dieser Pi-Konfiguration nicht eingerichtet.",
+          likelyCauses: [
+            "Kein OpenRouter-Modell in settings.json konfiguriert",
+          ],
+          recommendedAction:
+            "Mindestens ein openrouter/-Modell konfigurieren, dann erneut prüfen.",
         },
-      });
+      };
 
   const checks: CheckResult[] = [];
-  const catalogDeps = { baseUrl: auth.ok ? auth.baseUrl : "https://openrouter.ai/api/v1", headers: auth.ok ? auth.headers : {}, gate, breaker, signal };
+  const catalogDeps = {
+    baseUrl: auth.ok ? auth.baseUrl : "https://openrouter.ai/api/v1",
+    headers: auth.ok ? auth.headers : {},
+    gate,
+    breaker,
+    signal,
+  };
   const catalog = await checkCatalog(orModelId, catalogDeps);
   checks.push(catalog);
   const entry = catalog.data?.entry;
@@ -150,18 +169,42 @@ async function runDiagnosis(
           : "Authentifizierung fehlgeschlagen.",
       error: auth.error,
     });
-    checks.push({ id: "inference", label: "Inference", status: "unknown", summary: "Übersprungen (Authentifizierung fehlgeschlagen)." });
+    checks.push({
+      id: "inference",
+      label: "Inference",
+      status: "unknown",
+      summary: "Übersprungen (Authentifizierung fehlgeschlagen).",
+    });
   } else {
-    const deps: RunDeps = { baseUrl: auth.baseUrl, headers: auth.headers, gate, breaker, signal };
+    const deps: RunDeps = {
+      baseUrl: auth.baseUrl,
+      headers: auth.headers,
+      gate,
+      breaker,
+      signal,
+    };
     const authCheck = await checkAuth(deps);
     checks.push(authCheck);
     if (authCheck.status !== "ok") {
-      checks.push({ id: "inference", label: "Inference", status: "unknown", summary: "Übersprungen (Authentifizierung fehlgeschlagen)." });
+      checks.push({
+        id: "inference",
+        label: "Inference",
+        status: "unknown",
+        summary: "Übersprungen (Authentifizierung fehlgeschlagen).",
+      });
     } else {
       const inference = await checkInference(orModelId, deps);
       checks.push(inference);
+      checks.push(checkAttribution(inference, deps.headers));
       if (mode === "deep") {
-        checks.push(...(await runDeepChecks(orModelId, entry, inference.status === "ok", deps)));
+        checks.push(
+          ...(await runDeepChecks(
+            orModelId,
+            entry,
+            inference.status === "ok",
+            deps,
+          )),
+        );
       }
     }
   }
@@ -191,8 +234,14 @@ export default function openrouterDoctorExtension(pi: ExtensionAPI): void {
       if (!target) return;
 
       const controller = new AbortController();
-      ctx.ui.setStatus("openrouter-doctor", parsed.deep ? "Deep Check…" : "Quick Check…");
-      ctx.ui.notify(parsed.deep ? STRINGS.runningDeep : STRINGS.runningQuick, "info");
+      ctx.ui.setStatus(
+        "openrouter-doctor",
+        parsed.deep ? "Deep Check…" : "Quick Check…",
+      );
+      ctx.ui.notify(
+        parsed.deep ? STRINGS.runningDeep : STRINGS.runningQuick,
+        "info",
+      );
       try {
         const report = await runDiagnosis(
           ctx,
@@ -201,11 +250,19 @@ export default function openrouterDoctorExtension(pi: ExtensionAPI): void {
           parsed.deep ? "deep" : "quick",
           controller.signal,
         );
-        const level = report.status === "HEALTHY" ? "info" : report.status === "DEGRADED" ? "warning" : "error";
+        const level =
+          report.status === "HEALTHY"
+            ? "info"
+            : report.status === "DEGRADED"
+              ? "warning"
+              : "error";
         ctx.ui.notify(formatReport(report, { details: parsed.details }), level);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`OpenRouter Doctor: unerwarteter Fehler — ${message}`, "error");
+        ctx.ui.notify(
+          `OpenRouter Doctor: unerwarteter Fehler — ${message}`,
+          "error",
+        );
       } finally {
         controller.abort();
         ctx.ui.setStatus("openrouter-doctor", undefined);

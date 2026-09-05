@@ -1,0 +1,7 @@
+{
+  "status": 403,
+  "error": {
+    "code": 403,
+    "message": "thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps"
+  }
+}

@@ -12,10 +12,14 @@ const RECOMMENDATION_BY_CATEGORY: Partial<Record<ErrorCategory, string>> = {
   "model-not-found": "Modell-ID korrigieren.",
   "rate-limit": "Später erneut versuchen.",
   "invalid-request": "Nicht unterstützten optionalen Parameter deaktivieren.",
-  gateway: "Später erneut versuchen oder vorübergehend ein anderes konfiguriertes Modell wählen.",
+  gateway:
+    "Später erneut versuchen oder vorübergehend ein anderes konfiguriertes Modell wählen.",
   timeout: "Später erneut versuchen.",
   network: "Netzwerkverbindung prüfen und später erneut versuchen.",
-  "no-endpoints": "Anderen Provider manuell auswählen oder vorübergehend ein anderes Modell verwenden.",
+  "no-endpoints":
+    "Anderen Provider manuell auswählen oder vorübergehend ein anderes Modell verwenden.",
+  attribution:
+    'In ~/.pi/agent/models.json unter providers.openrouter.headers "HTTP-Referer", "X-OpenRouter-Title" und "X-OpenRouter-Categories" setzen.',
 };
 
 /** Builds a deduplicated, ordered recommendation list from failed/warned checks. */
@@ -30,13 +34,25 @@ export function buildRecommendations(checks: readonly CheckResult[]): string[] {
 
   for (const check of checks) {
     if (check.status === "ok") continue;
-    add(check.error ? RECOMMENDATION_BY_CATEGORY[check.error.category] : undefined);
+    add(
+      check.error
+        ? RECOMMENDATION_BY_CATEGORY[check.error.category]
+        : undefined,
+    );
   }
 
-  if (checks.some((check) => check.id === "strict-parameters" && check.status !== "ok")) {
-    add("Nur strikt kompatible Provider verwenden (provider.require_parameters).");
+  if (
+    checks.some(
+      (check) => check.id === "strict-parameters" && check.status !== "ok",
+    )
+  ) {
+    add(
+      "Nur strikt kompatible Provider verwenden (provider.require_parameters).",
+    );
   }
-  if (checks.some((check) => check.id === "providers" && check.status !== "ok")) {
+  if (
+    checks.some((check) => check.id === "providers" && check.status !== "ok")
+  ) {
     add("Anderen Provider manuell auswählen.");
   }
   return recommendations;

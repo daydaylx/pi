@@ -42,7 +42,12 @@ const MODEL = {
 function harnessWithModel(options = {}) {
   return createHarness({
     models: { "openrouter/openai/gpt-oss-120b": MODEL },
-    getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key", baseUrl: OPENROUTER_BASE_URL, headers: {} }),
+    getApiKeyAndHeaders: async () => ({
+      ok: true,
+      apiKey: "test-key",
+      baseUrl: OPENROUTER_BASE_URL,
+      headers: {},
+    }),
     ...options,
   });
 }
@@ -68,23 +73,49 @@ function deepFetch(url, init) {
   const body = init?.body ? JSON.parse(init.body) : undefined;
   if (target.endsWith("/models")) {
     return jsonResponse(200, {
-      data: [{ id: "openai/gpt-oss-120b", supported_parameters: ["tools", "tool_choice", "reasoning"] }],
+      data: [
+        {
+          id: "openai/gpt-oss-120b",
+          supported_parameters: ["tools", "tool_choice", "reasoning"],
+        },
+      ],
     });
   }
-  if (target.endsWith("/key")) return jsonResponse(200, { data: { label: "test" } });
+  if (target.endsWith("/key"))
+    return jsonResponse(200, { data: { label: "test" } });
   if (target.endsWith("/endpoints")) {
     return jsonResponse(200, {
-      data: { endpoints: [{ provider_name: "together" }, { provider_name: "deepinfra" }] },
+      data: {
+        endpoints: [
+          { provider_name: "together" },
+          { provider_name: "deepinfra" },
+        ],
+      },
     });
   }
   if (target.endsWith("/chat/completions")) {
     if (body?.tools) {
       return jsonResponse(200, {
-        choices: [{ message: { tool_calls: [{ function: { name: "test_tool", arguments: '{"value":"OK"}' } }] } }],
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                {
+                  function: { name: "test_tool", arguments: '{"value":"OK"}' },
+                },
+              ],
+            },
+          },
+        ],
       });
     }
     if (body?.provider?.require_parameters) {
-      return jsonResponse(404, { error: { code: "no_endpoints", message: "No endpoints found for required parameters" } });
+      return jsonResponse(404, {
+        error: {
+          code: "no_endpoints",
+          message: "No endpoints found for required parameters",
+        },
+      });
     }
     if (body?.provider?.only) {
       return body.provider.only[0] === "together"
@@ -92,18 +123,25 @@ function deepFetch(url, init) {
         : jsonResponse(529, { error: { message: "overloaded" } });
     }
     if (body?.reasoning) {
-      return jsonResponse(200, { choices: [{ message: { content: "OK", reasoning: "short" } }] });
+      return jsonResponse(200, {
+        choices: [{ message: { content: "OK", reasoning: "short" } }],
+      });
     }
     return jsonResponse(200, { choices: [{ message: { content: "OK" } }] });
   }
-  return jsonResponse(404, { error: { message: `unexpected path in test: ${target}` } });
+  return jsonResponse(404, {
+    error: { message: `unexpected path in test: ${target}` },
+  });
 }
 
 await test("registers the /openrouter-doctor command with a description", () => {
   const harness = createHarness();
   extension.default(harness.api);
   assert(harness.commands.has("openrouter-doctor"), "command is registered");
-  assert(harness.commandDescriptions.get("openrouter-doctor").length > 0, "has a non-empty description");
+  assert(
+    harness.commandDescriptions.get("openrouter-doctor").length > 0,
+    "has a non-empty description",
+  );
 });
 
 await test("rejects an unknown flag with a usage message and makes no network calls", async () => {
@@ -116,7 +154,10 @@ await test("rejects an unknown flag with a usage message and makes no network ca
     async () => {
       const harness = await runCommand(harnessWithModel(), "--nonsense");
       const last = harness.notifications.at(-1);
-      assert(last.message.includes("Unbekanntes Argument"), "reports the unknown argument");
+      assert(
+        last.message.includes("Unbekanntes Argument"),
+        "reports the unknown argument",
+      );
       eq(calls, 0, "no request was made for an invalid invocation");
     },
   );
@@ -125,7 +166,10 @@ await test("rejects an unknown flag with a usage message and makes no network ca
 await test("reports 'no configured models' and does not crash when none exist", async () => {
   const harness = await runCommand(createHarness({ models: {} }), "");
   const last = harness.notifications.at(-1);
-  assert(last.message.includes("Keine konfigurierten OpenRouter-Modelle"), "explains no models are configured");
+  assert(
+    last.message.includes("Keine konfigurierten OpenRouter-Modelle"),
+    "explains no models are configured",
+  );
 });
 
 await test("Quick Check on a healthy model reports HEALTHY and never logs the API key", async () => {
@@ -141,7 +185,10 @@ await test("rejects an untrusted endpoint without sending OpenRouter credentials
   const requests = [];
   await withFakeFetch(
     async (url, init) => {
-      requests.push({ url: String(url), authorization: new Headers(init?.headers).get("authorization") });
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization"),
+      });
       return deepFetch(url, init);
     },
     async () => {
@@ -157,47 +204,162 @@ await test("rejects an untrusted endpoint without sending OpenRouter credentials
         "openai/gpt-oss-120b",
       );
       const report = harness.notifications.at(-1).message;
-      assert(report.includes("Endpoint"), "reports the rejected endpoint configuration");
-      eq(requests.length, 1, "only the unauthenticated catalog request is made");
-      eq(requests[0].url, `${OPENROUTER_BASE_URL}/models`, "catalog stays on the official endpoint");
-      eq(requests[0].authorization, null, "never sends the API key to an untrusted endpoint");
+      assert(
+        report.includes("Endpoint"),
+        "reports the rejected endpoint configuration",
+      );
+      eq(
+        requests.length,
+        1,
+        "only the unauthenticated catalog request is made",
+      );
+      eq(
+        requests[0].url,
+        `${OPENROUTER_BASE_URL}/models`,
+        "catalog stays on the official endpoint",
+      );
+      eq(
+        requests[0].authorization,
+        null,
+        "never sends the API key to an untrusted endpoint",
+      );
     },
   );
 });
 
 await test("Quick Check on a model missing from the catalog reports BROKEN with an explanation", async () => {
   await withFakeFetch(
-    (url) => (String(url).endsWith("/models") ? jsonResponse(200, { data: [] }) : deepFetch(url)),
+    (url) =>
+      String(url).endsWith("/models")
+        ? jsonResponse(200, { data: [] })
+        : deepFetch(url),
     async () => {
-      const harness = await runCommand(harnessWithModel(), "openai/gpt-oss-120b");
+      const harness = await runCommand(
+        harnessWithModel(),
+        "openai/gpt-oss-120b",
+      );
       const report = harness.notifications.at(-1).message;
       assert(report.includes("BROKEN"), "reports BROKEN");
-      assert(report.includes("nicht gefunden") || report.includes("nicht im OpenRouter-Katalog"), "explains why");
+      assert(
+        report.includes("nicht gefunden") ||
+          report.includes("nicht im OpenRouter-Katalog"),
+        "explains why",
+      );
     },
   );
 });
 
 await test("reports authentication failure as BROKEN when no provider auth is configured at all", async () => {
   await withFakeFetch(deepFetch, async () => {
-    const harness = await runCommand(harnessWithModel({ models: {} }), "openai/gpt-oss-120b");
+    const harness = await runCommand(
+      harnessWithModel({ models: {} }),
+      "openai/gpt-oss-120b",
+    );
     const report = harness.notifications.at(-1).message;
     assert(report.includes("BROKEN"), "reports BROKEN");
-    assert(report.includes("Authentifizierung"), "explains the authentication problem");
+    assert(
+      report.includes("Authentifizierung"),
+      "explains the authentication problem",
+    );
   });
 });
 
 await test("Deep Check exercises tool calling, reasoning, strict routing and provider isolation, reporting DEGRADED", async () => {
   await withFakeFetch(deepFetch, async () => {
-    const harness = await runCommand(harnessWithModel(), "openai/gpt-oss-120b --deep --details");
+    const harness = await runCommand(
+      harnessWithModel(),
+      "openai/gpt-oss-120b --deep --details",
+    );
     const report = harness.notifications.at(-1).message;
-    assert(report.includes("DEGRADED"), "model works overall but strict routing fails");
+    assert(
+      report.includes("DEGRADED"),
+      "model works overall but strict routing fails",
+    );
     assert(report.includes("Tool Calling"), "shows the tool-calling check");
     assert(report.includes("Reasoning"), "shows the reasoning check");
-    assert(report.includes("Strict Pi compatibility"), "shows the strict-parameters check");
-    assert(report.includes("together"), "provider diagnosis lists the working provider");
-    assert(report.includes("deepinfra"), "provider diagnosis lists the failing provider");
-    assert(!report.includes("test-key"), "still never echoes the API key, even with --details");
+    assert(
+      report.includes("Strict Pi compatibility"),
+      "shows the strict-parameters check",
+    );
+    assert(
+      report.includes("together"),
+      "provider diagnosis lists the working provider",
+    );
+    assert(
+      report.includes("deepinfra"),
+      "provider diagnosis lists the failing provider",
+    );
+    assert(
+      !report.includes("test-key"),
+      "still never echoes the API key, even with --details",
+    );
   });
+});
+
+await test("Quick Check on an agentic-harness-gated free model reports BROKEN with the attribution diagnosis", async () => {
+  await withFakeFetch(
+    (url) =>
+      String(url).endsWith("/chat/completions")
+        ? jsonResponse(403, {
+            error: {
+              code: 403,
+              message:
+                "thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps",
+            },
+          })
+        : deepFetch(url),
+    async () => {
+      const harness = await runCommand(
+        harnessWithModel(),
+        "openai/gpt-oss-120b",
+      );
+      const report = harness.notifications.at(-1).message;
+      assert(report.includes("BROKEN"), "reports BROKEN");
+      assert(
+        report.includes("Attribution"),
+        "shows the dedicated attribution check",
+      );
+      assert(
+        report.includes("benötigt Agentic-Harness-Attribution"),
+        "leads with the specific attribution diagnosis, not the generic 403 text",
+      );
+      assert(
+        report.includes("models.json"),
+        "recommendation points at the config fix",
+      );
+    },
+  );
+});
+
+await test("Quick Check on a harness-gated model with attribution headers already configured does not blame attribution", async () => {
+  await withFakeFetch(
+    (url) =>
+      String(url).endsWith("/chat/completions")
+        ? jsonResponse(200, { choices: [{ message: { content: "OK" } }] })
+        : deepFetch(url),
+    async () => {
+      const harness = await runCommand(
+        harnessWithModel({
+          getApiKeyAndHeaders: async () => ({
+            ok: true,
+            apiKey: "test-key",
+            baseUrl: OPENROUTER_BASE_URL,
+            headers: {
+              "HTTP-Referer": "https://pi.dev",
+              "X-OpenRouter-Title": "pi",
+              "X-OpenRouter-Categories": "cli-agent",
+            },
+          }),
+        }),
+        "openai/gpt-oss-120b",
+      );
+      const report = harness.notifications.at(-1).message;
+      assert(
+        report.includes("HEALTHY"),
+        "attribution headers present and inference succeeds, so the model is HEALTHY",
+      );
+    },
+  );
 });
 
 const { passed, failed } = counters();

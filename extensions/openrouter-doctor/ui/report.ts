@@ -1,15 +1,24 @@
 /** Pure report formatting: DiagnosisReport → German report text for ctx.ui.notify. */
 import { limitTextOutput } from "../../shared/output-limits.ts";
 import { explainError } from "../diagnostics/explain-error.ts";
-import { CHECK_ICON, CHECK_STATUS_TEXT, STATUS_LABEL, STRINGS } from "./strings.ts";
+import {
+  CHECK_ICON,
+  CHECK_STATUS_TEXT,
+  STATUS_LABEL,
+  STRINGS,
+} from "./strings.ts";
 import type { ProviderIsolationResult } from "../checks/provider-isolation.ts";
 import type { CheckResult, DiagnosisReport } from "../types.ts";
 
 function formatCheckLine(check: CheckResult, details: boolean): string[] {
   const icon = CHECK_ICON[check.status];
-  const lines = [`${icon} ${check.label} (${CHECK_STATUS_TEXT[check.status]})`, `  ${check.summary}`];
+  const lines = [
+    `${icon} ${check.label} (${CHECK_STATUS_TEXT[check.status]})`,
+    `  ${check.summary}`,
+  ];
   if (check.error && check.status !== "ok") {
-    for (const line of explainError(check.error, { details })) lines.push(`  ${line}`);
+    for (const line of explainError(check.error, { details }))
+      lines.push(`  ${line}`);
   }
   return lines;
 }
@@ -19,7 +28,9 @@ function formatProviderDiagnosis(check: CheckResult | undefined): string[] {
   const providers = check.data as ProviderIsolationResult[];
   const lines = [STRINGS.sectionProviderDiagnosis, STRINGS.divider];
   for (const provider of providers) {
-    lines.push(`${CHECK_ICON[provider.status]} ${provider.providerName}: ${provider.summary}`);
+    lines.push(
+      `${CHECK_ICON[provider.status]} ${provider.providerName}: ${provider.summary}`,
+    );
   }
   return [...lines, ""];
 }
@@ -29,7 +40,14 @@ function diagnosisParagraph(report: DiagnosisReport): string {
     return "Alle für den gewählten Modus geprüften Punkte funktionieren.";
   }
   if (report.status === "BROKEN") {
-    const cause = report.checks.find((check) => check.status === "fail" && check.error);
+    // A specific companion diagnosis (e.g. "attribution") explains a generic
+    // failure (e.g. "inference") better than the generic one explains itself.
+    const cause =
+      report.checks.find(
+        (check) =>
+          check.id === "attribution" && check.status === "fail" && check.error,
+      ) ??
+      report.checks.find((check) => check.status === "fail" && check.error);
     return cause
       ? `Das Modell ist im aktuellen Zustand nicht nutzbar. ${cause.error!.humanSummary}`
       : "Das Modell ist im aktuellen Zustand nicht nutzbar.";
@@ -38,7 +56,10 @@ function diagnosisParagraph(report: DiagnosisReport): string {
 }
 
 /** Formats the full doctor report. Never includes raw stack traces or secrets. */
-export function formatReport(report: DiagnosisReport, options: { details?: boolean } = {}): string {
+export function formatReport(
+  report: DiagnosisReport,
+  options: { details?: boolean } = {},
+): string {
   const details = options.details ?? false;
   const providerCheck = report.checks.find((check) => check.id === "providers");
   const otherChecks = report.checks.filter((check) => check.id !== "providers");

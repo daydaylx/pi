@@ -680,6 +680,38 @@ export const targetConfigSections = {
           lockHash,
           "settings.json and package-lock.json use the identical pi-subagents commit",
         );
+
+        // Upstream Pi couples its default OpenRouter attribution headers
+        // (HTTP-Referer/X-OpenRouter-Title/X-OpenRouter-Categories) to
+        // enableInstallTelemetry: disabling install telemetry silently drops
+        // them from every OpenRouter request, and OpenRouter 403s any free
+        // endpoint gated behind "Gate Free Endpoints by Agentic Harness"
+        // (e.g. thinkingmachines/inkling:free) without them. models.json's
+        // provider-level headers override is independent of that setting, so
+        // both must hold at once: telemetry stays opted out, and attribution
+        // still reaches OpenRouter through the separate config path.
+        eq(
+          settings.enableInstallTelemetry,
+          false,
+          "install telemetry stays opted out",
+        );
+        const modelsJson = JSON.parse(
+          readFileSync(path.join(ROOT, "models.json"), "utf8"),
+        );
+        eq(
+          modelsJson.providers?.openrouter?.headers,
+          {
+            "HTTP-Referer": "https://pi.dev",
+            "X-OpenRouter-Title": "pi",
+            "X-OpenRouter-Categories": "cli-agent",
+          },
+          "openrouter provider carries agentic-harness attribution headers independent of enableInstallTelemetry",
+        );
+        eq(
+          Object.keys(modelsJson.providers ?? {}),
+          ["openrouter"],
+          "the attribution override is scoped to openrouter only, isolating every other provider from it",
+        );
         return;
       }
     });

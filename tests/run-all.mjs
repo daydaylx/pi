@@ -56,6 +56,11 @@ const suites = [
     env: {},
   },
   {
+    name: "openrouter-doctor-attribution",
+    file: "openrouter-doctor/unit/attribution.test.mjs",
+    env: {},
+  },
+  {
     name: "openrouter-doctor-runner",
     file: "openrouter-doctor/integration/runner.test.mjs",
     env: {},

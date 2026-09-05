@@ -1,8 +1,12 @@
 import { assert, counters, test } from "../../shared/assertions.mjs";
 import { importModule as load } from "../../shared/jiti-loader.mjs";
 
-const { formatReport } = await load("extensions/openrouter-doctor/ui/report.ts");
-const { normalizeError } = await load("extensions/openrouter-doctor/diagnostics/normalize-error.ts");
+const { formatReport } = await load(
+  "extensions/openrouter-doctor/ui/report.ts",
+);
+const { normalizeError } = await load(
+  "extensions/openrouter-doctor/diagnostics/normalize-error.ts",
+);
 
 function baseReport(overrides = {}) {
   return {
@@ -11,9 +15,24 @@ function baseReport(overrides = {}) {
     mode: "quick",
     status: "HEALTHY",
     checks: [
-      { id: "catalog", label: "Catalog", status: "ok", summary: "Modell im Katalog verfügbar." },
-      { id: "auth", label: "Authentication", status: "ok", summary: "Authentifizierung funktioniert." },
-      { id: "inference", label: "Inference", status: "ok", summary: "Modell antwortet auf Anfragen." },
+      {
+        id: "catalog",
+        label: "Catalog",
+        status: "ok",
+        summary: "Modell im Katalog verfügbar.",
+      },
+      {
+        id: "auth",
+        label: "Authentication",
+        status: "ok",
+        summary: "Authentifizierung funktioniert.",
+      },
+      {
+        id: "inference",
+        label: "Inference",
+        status: "ok",
+        summary: "Modell antwortet auf Anfragen.",
+      },
     ],
     recommendations: [],
     generatedAt: "2026-08-27T00:00:00.000Z",
@@ -23,9 +42,15 @@ function baseReport(overrides = {}) {
 
 await test("formatReport includes model id and status", () => {
   const text = formatReport(baseReport());
-  assert(text.includes("openrouter/openai/gpt-oss-120b"), "shows the fully-qualified model id");
+  assert(
+    text.includes("openrouter/openai/gpt-oss-120b"),
+    "shows the fully-qualified model id",
+  );
   assert(text.includes("HEALTHY"), "shows the status");
-  assert(text.includes("Es wurde keine Konfiguration geändert."), "states nothing was changed");
+  assert(
+    text.includes("Es wurde keine Konfiguration geändert."),
+    "states nothing was changed",
+  );
 });
 
 await test("formatReport never renders a raw stack trace by default", () => {
@@ -43,12 +68,19 @@ await test("formatReport never renders a raw stack trace by default", () => {
         label: "Catalog",
         status: "fail",
         summary: "Modell-ID nicht gefunden.",
-        error: normalizeError({ kind: "http", status: 404, message: thrown.stack }),
+        error: normalizeError({
+          kind: "http",
+          status: 404,
+          message: thrown.stack,
+        }),
       },
     ],
   });
   const text = formatReport(report);
-  assert(!text.includes("at Object.<anonymous>"), "no Node stack frame text leaks into the default report");
+  assert(
+    !text.includes("at Object.<anonymous>"),
+    "no Node stack frame text leaks into the default report",
+  );
 });
 
 await test("formatReport never includes Authorization headers or key material", () => {
@@ -60,7 +92,11 @@ await test("formatReport never includes Authorization headers or key material", 
         label: "Authentication",
         status: "fail",
         summary: "Authentifizierung fehlgeschlagen.",
-        error: normalizeError({ kind: "http", status: 401, message: "No auth credentials found" }),
+        error: normalizeError({
+          kind: "http",
+          status: 401,
+          message: "No auth credentials found",
+        }),
       },
     ],
   });
@@ -78,14 +114,25 @@ await test("formatReport shows technical details only when requested", () => {
         label: "Catalog",
         status: "fail",
         summary: "Modell-ID nicht gefunden.",
-        error: normalizeError({ kind: "http", status: 404, code: "model_not_found", message: "not found" }),
+        error: normalizeError({
+          kind: "http",
+          status: 404,
+          code: "model_not_found",
+          message: "not found",
+        }),
       },
     ],
   });
   const withoutDetails = formatReport(report);
   const withDetails = formatReport(report, { details: true });
-  assert(!withoutDetails.includes("Technisch:"), "no technical line by default");
-  assert(withDetails.includes("Technisch:"), "technical line present with --details");
+  assert(
+    !withoutDetails.includes("Technisch:"),
+    "no technical line by default",
+  );
+  assert(
+    withDetails.includes("Technisch:"),
+    "technical line present with --details",
+  );
 });
 
 await test("formatReport renders provider diagnosis entries when present", () => {
@@ -100,7 +147,11 @@ await test("formatReport renders provider diagnosis entries when present", () =>
         summary: "1/2 geprüfte Provider kompatibel.",
         data: [
           { providerName: "together", status: "ok", summary: "Kompatibel." },
-          { providerName: "deepinfra", status: "fail", summary: "529 – Upstream-Provider überlastet." },
+          {
+            providerName: "deepinfra",
+            status: "fail",
+            summary: "529 – Upstream-Provider überlastet.",
+          },
         ],
       },
     ],
@@ -108,14 +159,87 @@ await test("formatReport renders provider diagnosis entries when present", () =>
   const text = formatReport(report);
   assert(text.includes("together"), "lists the working provider");
   assert(text.includes("deepinfra"), "lists the failing provider");
-  assert(text.includes("Provider diagnosis"), "has a provider diagnosis section");
+  assert(
+    text.includes("Provider diagnosis"),
+    "has a provider diagnosis section",
+  );
 });
 
 await test("formatReport lists recommendations when present, otherwise says none are needed", () => {
   const healthy = formatReport(baseReport());
-  assert(healthy.includes("Keine Empfehlung nötig."), "no recommendations for a healthy report");
-  const degraded = formatReport(baseReport({ status: "DEGRADED", recommendations: ["Später erneut versuchen."] }));
-  assert(degraded.includes("- Später erneut versuchen."), "renders recommendation bullets");
+  assert(
+    healthy.includes("Keine Empfehlung nötig."),
+    "no recommendations for a healthy report",
+  );
+  const degraded = formatReport(
+    baseReport({
+      status: "DEGRADED",
+      recommendations: ["Später erneut versuchen."],
+    }),
+  );
+  assert(
+    degraded.includes("- Später erneut versuchen."),
+    "renders recommendation bullets",
+  );
+});
+
+await test("formatReport prefers the attribution diagnosis over the generic inference failure as the BROKEN cause", () => {
+  const report = baseReport({
+    status: "BROKEN",
+    checks: [
+      {
+        id: "catalog",
+        label: "Catalog",
+        status: "ok",
+        summary: "Modell im Katalog verfügbar.",
+      },
+      {
+        id: "auth",
+        label: "Authentication",
+        status: "ok",
+        summary: "Authentifizierung funktioniert.",
+      },
+      {
+        id: "inference",
+        label: "Inference",
+        status: "fail",
+        summary: "Minimaler Inference-Request fehlgeschlagen.",
+        error: normalizeError({
+          kind: "http",
+          status: 403,
+          message: "only available on agentic harnesses",
+        }),
+      },
+      {
+        id: "attribution",
+        label: "Attribution",
+        status: "fail",
+        summary:
+          "OpenRouter-Modell benötigt Agentic-Harness-Attribution, aber der aktuelle Request enthält keine erkennbare CLI-Agent-Attribution.",
+        error: {
+          category: "attribution",
+          httpStatus: 403,
+          humanSummary:
+            "OpenRouter-Modell benötigt Agentic-Harness-Attribution, aber der aktuelle Request enthält keine erkennbare CLI-Agent-Attribution.",
+          likelyCauses: ["enableInstallTelemetry ist deaktiviert"],
+          recommendedAction: "models.json anpassen.",
+        },
+      },
+    ],
+  });
+  const text = formatReport(report);
+  const diagnosisSection =
+    text.split("Diagnosis")[1]?.split("Recommended action")[0] ?? "";
+  assert(
+    diagnosisSection.includes("benötigt Agentic-Harness-Attribution"),
+    "diagnosis paragraph uses the specific attribution cause",
+  );
+  assert(
+    !diagnosisSection.includes(
+      "Die genaue Ursache ist von außen nicht eindeutig bestimmbar",
+    ),
+    "the top-level diagnosis paragraph does not fall back to the generic 403 text (the per-check line may still show it)",
+  );
 });
 
 const { passed, failed } = counters();

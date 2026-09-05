@@ -29,6 +29,7 @@ export type ErrorCategory =
   | "no-endpoints"
   | "tool-calling"
   | "reasoning"
+  | "attribution"
   | "unknown";
 
 /** A normalized, human-explainable view of a raw provider/HTTP error. Never carries secrets. */
@@ -49,7 +50,13 @@ export interface NormalizedError {
 
 /** Input to normalizeError(): what a check observed, before interpretation. */
 export type RawCheckError =
-  | { kind: "http"; status: number; code?: string; message?: string; retryAfterSeconds?: number }
+  | {
+      kind: "http";
+      status: number;
+      code?: string;
+      message?: string;
+      retryAfterSeconds?: number;
+    }
   | { kind: "network"; message?: string }
   | { kind: "timeout" }
   | { kind: "abort" }
