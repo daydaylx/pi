@@ -11,6 +11,7 @@ export const SECTION_SUITES = {
   "setup doctor required profile completeness (P1-08)": "runtime",
   "project verification profiles (#105)": "runtime",
   "project_check tool (#123)": "runtime",
+  "project_check dependency preparation": "runtime",
   "native subagent profiles": "runtime",
   "native project skills": "runtime",
   "Control Center menus": "ui",

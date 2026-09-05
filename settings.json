@@ -59,7 +59,7 @@
     "openrouter/nvidia/nemotron-3.5-lightning:free"
   ],
   "packages": [
-    "git:github.com/daydaylx/pi-subagents@11f3fcbc0e346f747df2bd8342d77cb8c9f8c962",
+    "git:github.com/daydaylx/pi-subagents@f59fc0d26bf055632363e9a4ca778ab1f09b5252",
     "npm:pi-web-access@0.24.2"
   ],
   "subagents": {

@@ -19,6 +19,10 @@ import {
   type VerificationCapabilityRequest,
 } from "../shared/verification-capabilities.ts";
 import { loadVerifyProfiles, runProfile } from "./verify-profiles.ts";
+import {
+  formatDependencyPreparationFailure,
+  prepareProjectDependencies,
+} from "./dependency-prepare.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 import {
   collectContextDiagnostics,
@@ -247,6 +251,9 @@ export default function setupCore(
   // Session-local evidence only: whether a profile passed before the current
   // snapshot. It is not a task-status or causal-regression classifier.
   let passedProfileIds: Map<string, string> = new Map();
+  // Lockfile hashes prepared in this session. This avoids repeating npm ci for
+  // multiple profiles while a lockfile change always invalidates the cache.
+  const preparedDependencyLocks = new Map<string, string>();
   let lastDeclaredRequiredIds: string[] = [];
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
@@ -495,6 +502,17 @@ export default function setupCore(
         );
       }
 
+      const dependencyPreparation = await prepareProjectDependencies({
+        projectRoot: ctx.cwd,
+        signal,
+        exec: (program, args, options) => exec(program, args, options),
+        preparedLocks: preparedDependencyLocks,
+      });
+      const dependencyFailure = formatDependencyPreparationFailure(
+        dependencyPreparation,
+      );
+      if (dependencyFailure) toolError(dependencyFailure);
+
       // Capture before execution: a later workspace change must make this
       // check stale even if the command itself succeeds.
       const checkSnapshot = workspaceSnapshot(ctx.cwd);
@@ -615,6 +633,7 @@ export default function setupCore(
           profiles: reports,
           availableProfileIds,
           diagnostics: loaded.diagnostics,
+          dependencyPreparation,
           verification: {
             declaredRequiredIds: required,
             coveredRequiredIds: coverage.covered,

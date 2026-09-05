@@ -96,8 +96,7 @@ export const targetConfigSections = {
             `${role}'s model is allowed by the subagent scope`,
           );
           const fallbacks = override?.fallbackModels;
-          const hasFallbacks =
-            Array.isArray(fallbacks) && fallbacks.length > 0;
+          const hasFallbacks = Array.isArray(fallbacks) && fallbacks.length > 0;
           assert(hasFallbacks, `${role} has fallback models`);
           if (!hasFallbacks) continue;
           assert(
@@ -350,7 +349,14 @@ export const targetConfigSections = {
             `Aurora declares ${color}`,
           );
         }
-        for (const legacyCoolColor of ["cyan", "cyanBright", "cyanAnsi", "violet", "blue", "magenta"]) {
+        for (const legacyCoolColor of [
+          "cyan",
+          "cyanBright",
+          "cyanAnsi",
+          "violet",
+          "blue",
+          "magenta",
+        ]) {
           assert(
             !Object.hasOwn(auroraTheme.vars, legacyCoolColor),
             `Aurora no longer exposes the legacy cool ${legacyCoolColor} theme variable`,
@@ -637,16 +643,23 @@ export const targetConfigSections = {
             name + " remains locked",
           );
         }
-        // pi-subagents is pinned to the same git-fork commit the live runtime
-        // loads (settings.json packages), not an npm-registry version — this
-        // closes the drift where the harness typechecked a different codebase
-        // than the one interactive sessions actually run. See
-        // docs/decisions/017-verifier-acceptance-none.md.
+        // pi-subagents is pinned to the same immutable fork commit the live
+        // runtime loads (settings.json packages), not an npm-registry version.
+        // The harness may use the public source archive because this machine's
+        // Git URL rewrite forces GitHub Git URLs through unavailable SSH.
+        const commitHashFromSource = (source) =>
+          typeof source === "string"
+            ? source.match(/(?:#|\/tar\.gz\/)([0-9a-f]{40})$/)?.[1]
+            : undefined;
+        const harnessPin = packageJson.dependencies?.["pi-subagents"];
+        const harnessHash = commitHashFromSource(harnessPin);
         assert(
-          /^github:daydaylx\/pi-subagents#[0-9a-f]{40}$/.test(
-            packageJson.dependencies?.["pi-subagents"] ?? "",
-          ),
-          "pi-subagents is pinned to an exact git-fork commit in the harness",
+          harnessHash !== undefined &&
+            (/^github:daydaylx\/pi-subagents#/.test(harnessPin) ||
+              /^https:\/\/codeload\.github\.com\/daydaylx\/pi-subagents\/tar\.gz\//.test(
+                harnessPin,
+              )),
+          "pi-subagents is pinned to an exact immutable fork commit in the harness",
         );
         const runtimePin = settings.packages.find(
           (entry) =>
@@ -654,13 +667,9 @@ export const targetConfigSections = {
             entry.startsWith("git:github.com/daydaylx/pi-subagents@"),
         );
         const runtimeHash = runtimePin?.match(/@([0-9a-f]{40})$/)?.[1];
-        const harnessHash = packageJson.dependencies?.["pi-subagents"]?.match(
-          /#([0-9a-f]{40})$/,
-        )?.[1];
-        const lockResolved = lock.packages?.["node_modules/pi-subagents"]?.resolved;
-        const lockHash = typeof lockResolved === "string"
-          ? lockResolved.match(/#([0-9a-f]{40})$/)?.[1]
-          : undefined;
+        const lockResolved =
+          lock.packages?.["node_modules/pi-subagents"]?.resolved;
+        const lockHash = commitHashFromSource(lockResolved);
         eq(
           runtimeHash,
           harnessHash,

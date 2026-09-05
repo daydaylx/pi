@@ -1517,4 +1517,304 @@ export const verificationSections = {
       rmSync(multiFailWorkspace, { recursive: true, force: true });
     });
   },
+
+  "project_check dependency preparation": async (context) => {
+    const { section, setupCore } = context;
+
+    await section("project_check dependency preparation", async () => {
+      if (!setupCore) return;
+      const workspace = mkdtempSync(
+        path.join(tmpdir(), "pi-dependency-prepare-"),
+      );
+      const writeJson = (relative, value) => {
+        const target = path.join(workspace, relative);
+        mkdirSync(path.dirname(target), { recursive: true });
+        writeFileSync(target, JSON.stringify(value));
+      };
+      const lockfile = { lockfileVersion: 3, packages: {} };
+      const manifest = {
+        name: "fixture",
+        private: true,
+        devDependencies: { typescript: "1.0.0" },
+      };
+      try {
+        writeJson(".pi/verify.json", {
+          profiles: {
+            verify: {
+              program: "verify-fixture",
+              args: [],
+              classification: "required",
+            },
+          },
+        });
+        for (const directory of ["npm", "gui"]) {
+          writeJson(`${directory}/package.json`, {
+            ...manifest,
+            name: directory,
+          });
+          writeJson(`${directory}/package-lock.json`, lockfile);
+        }
+        const harness = createHarness({
+          exec: (program, args, options) => {
+            if (program === "npm" && args[0] === "ci") {
+              mkdirSync(path.join(options.cwd, "node_modules"), {
+                recursive: true,
+              });
+            }
+            return {
+              stdout:
+                program === "npm" && args[0] === "ci"
+                  ? `prepared ${options.cwd}`
+                  : "verified",
+              stderr: "",
+              code: 0,
+              killed: false,
+            };
+          },
+        });
+        setupCore.default(harness.api, { exec: harness.api.exec });
+        const trusted = harness.makeContext({ cwd: workspace, trusted: true });
+        const tool = harness.tools.get("project_check");
+        assert(
+          Boolean(tool),
+          "project_check is available for dependency preparation",
+        );
+        if (!tool) return;
+        const first = await tool.execute(
+          "dependency-prepare-first",
+          { profile: "verify" },
+          undefined,
+          undefined,
+          trusted,
+        );
+        eq(
+          harness.execCalls.map((call) => [
+            call.command,
+            call.args,
+            path.relative(workspace, call.options.cwd),
+          ]),
+          [
+            ["npm", ["ci"], "gui"],
+            ["npm", ["ci"], "npm"],
+            ["verify-fixture", [], ""],
+          ],
+          "a fresh worktree prepares gui and npm lockfile roots before verifying",
+        );
+        eq(
+          first.details.dependencyPreparation.map((entry) => entry.state),
+          ["ready", "ready"],
+          "successful preparation is reported structurally",
+        );
+        await tool.execute(
+          "dependency-prepare-repeat",
+          { profile: "verify" },
+          undefined,
+          undefined,
+          trusted,
+        );
+        eq(
+          harness.execCalls.filter(
+            (call) => call.command === "npm" && call.args[0] === "ci",
+          ).length,
+          2,
+          "a repeated project_check uses the lockfile-hash cache instead of reinstalling",
+        );
+        rmSync(path.join(workspace, "gui", "node_modules"), {
+          recursive: true,
+          force: true,
+        });
+        rmSync(path.join(workspace, "npm", "node_modules"), {
+          recursive: true,
+          force: true,
+        });
+        await tool.execute(
+          "dependency-prepare-after-deletion",
+          { profile: "verify" },
+          undefined,
+          undefined,
+          trusted,
+        );
+        eq(
+          harness.execCalls.filter(
+            (call) => call.command === "npm" && call.args[0] === "ci",
+          ).length,
+          4,
+          "deleting node_modules invalidates a lockfile-cache hit and prepares again",
+        );
+        const warmHarness = createHarness({
+          exec: (program) => ({
+            stdout: "ok",
+            stderr: "",
+            code: 0,
+            killed: false,
+          }),
+        });
+        setupCore.default(warmHarness.api, { exec: warmHarness.api.exec });
+        const warmContext = warmHarness.makeContext({
+          cwd: workspace,
+          trusted: true,
+        });
+        const warmTool = warmHarness.tools.get("project_check");
+        if (warmTool)
+          await warmTool.execute(
+            "dependency-prepare-warm",
+            { profile: "verify" },
+            undefined,
+            undefined,
+            warmContext,
+          );
+        eq(
+          warmHarness.execCalls.some(
+            (call) => call.command === "npm" && call.args[0] === "ci",
+          ),
+          false,
+          "an already prepared worktree does not reinstall dependencies",
+        );
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+
+      const failureWorkspace = mkdtempSync(
+        path.join(tmpdir(), "pi-dependency-failure-"),
+      );
+      try {
+        const writeFailureJson = (relative, value) => {
+          const target = path.join(failureWorkspace, relative);
+          mkdirSync(path.dirname(target), { recursive: true });
+          writeFileSync(target, JSON.stringify(value));
+        };
+        writeFailureJson(".pi/verify.json", {
+          profiles: {
+            verify: {
+              program: "verify-fixture",
+              args: [],
+              classification: "required",
+            },
+          },
+        });
+        writeFailureJson("npm/package.json", manifest);
+        writeFailureJson("npm/package-lock.json", lockfile);
+        const failureHarness = createHarness({
+          exec: (program) => ({
+            stdout: "registry unavailable",
+            stderr: "",
+            code: program === "npm" ? 1 : 0,
+            killed: false,
+          }),
+        });
+        setupCore.default(failureHarness.api, {
+          exec: failureHarness.api.exec,
+        });
+        const failureTool = failureHarness.tools.get("project_check");
+        try {
+          await failureTool.execute(
+            "dependency-prepare-failure",
+            { profile: "verify" },
+            undefined,
+            undefined,
+            failureHarness.makeContext({
+              cwd: failureWorkspace,
+              trusted: true,
+            }),
+          );
+          assert(false, "a failed npm ci blocks the profile");
+        } catch (error) {
+          assert(
+            error instanceof Error &&
+              error.message.includes(
+                "Abhängigkeitsvorbereitung fehlgeschlagen",
+              ) &&
+              error.message.includes("registry unavailable"),
+            "project_check reports installation failures separately and preserves their output",
+          );
+        }
+        eq(
+          failureHarness.execCalls.some(
+            (call) => call.command === "verify-fixture",
+          ),
+          false,
+          "a failed dependency installation never silently runs the verify profile",
+        );
+
+        rmSync(path.join(failureWorkspace, "npm", "package-lock.json"));
+        const missingLockHarness = createHarness();
+        setupCore.default(missingLockHarness.api, {
+          exec: missingLockHarness.api.exec,
+        });
+        const missingLockTool = missingLockHarness.tools.get("project_check");
+        try {
+          await missingLockTool.execute(
+            "dependency-prepare-missing-lock",
+            { profile: "verify" },
+            undefined,
+            undefined,
+            missingLockHarness.makeContext({
+              cwd: failureWorkspace,
+              trusted: true,
+            }),
+          );
+          assert(
+            false,
+            "a dependency-bearing package without a lockfile blocks preparation",
+          );
+        } catch (error) {
+          assert(
+            error instanceof Error &&
+              error.message.includes("package-lock.json fehlt"),
+            "a missing lockfile is reported deterministically",
+          );
+        }
+      } finally {
+        rmSync(failureWorkspace, { recursive: true, force: true });
+      }
+
+      const overflowWorkspace = mkdtempSync(
+        path.join(tmpdir(), "pi-dependency-overflow-"),
+      );
+      try {
+        mkdirSync(path.join(overflowWorkspace, ".pi"), { recursive: true });
+        writeFileSync(
+          path.join(overflowWorkspace, ".pi", "verify.json"),
+          JSON.stringify({
+            profiles: {
+              verify: {
+                program: "verify-fixture",
+                args: [],
+                classification: "required",
+              },
+            },
+          }),
+        );
+        for (let index = 0; index < 512; index += 1) {
+          mkdirSync(path.join(overflowWorkspace, `directory-${index}`));
+        }
+        const overflowHarness = createHarness();
+        setupCore.default(overflowHarness.api, {
+          exec: overflowHarness.api.exec,
+        });
+        const overflowTool = overflowHarness.tools.get("project_check");
+        try {
+          await overflowTool.execute(
+            "dependency-prepare-overflow",
+            { profile: "verify" },
+            undefined,
+            undefined,
+            overflowHarness.makeContext({
+              cwd: overflowWorkspace,
+              trusted: true,
+            }),
+          );
+          assert(false, "an unboundedly broad dependency search is rejected");
+        } catch (error) {
+          assert(
+            error instanceof Error &&
+              error.message.includes("Limit von 512 Verzeichnissen"),
+            "a traversal limit fails clearly instead of silently skipping a dependency root",
+          );
+        }
+      } finally {
+        rmSync(overflowWorkspace, { recursive: true, force: true });
+      }
+    });
+  },
 };

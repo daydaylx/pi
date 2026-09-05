@@ -10,4 +10,6 @@ Nutze Subagenten nur bei echtem Mehrwert (unbekannter Bereich, unabhängige Prü
 
 Neben der SINGLE-Ausführung sind ausschließlich vier Management-Aktionen verfügbar: { action: "list" } listet die verfügbaren Rollen, { action: "status" }, { action: "stop" } und { action: "interrupt" } steuern einen laufenden Run. Chains, parallele Tasks, Agent-Verwaltung, Scheduling und Worktrees sind in diesem Harness nicht registriert.
 
+Für `verifier` und `debugger` keine aufrufspezifischen `timeoutMs` oder `turnBudget` setzen: Beide Rollen verwenden ausschließlich ihr großzügiges Profil-Timeout. Eigene Limits werden technisch abgelehnt, damit unabhängige Prüfung oder Fehleranalyse nicht vorzeitig mit unvollständigem Ergebnis endet.
+
 {{safetyGuidance}}
