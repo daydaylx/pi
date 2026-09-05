@@ -25,6 +25,12 @@ openrouter-free-models.json
 # und darf sich nicht ändern, sonst misst der Lauf etwas anderes als vorher.
 benchmarks/tasks/*/fixture/
 
+# real-duel-Task-Prompts werden Pi und Codex wortgleich uebergeben (siehe
+# REAL_DUEL_AUDIT.md) -- Prettier darf ihre Struktur (z.B. "==="-Trenner)
+# nicht veraendern, sonst sehen beide Kandidaten einen anderen Text als
+# urspruenglich vom Nutzer formuliert.
+benchmarks/real-duel/tasks/*/instruction.md
+
 # Archivierte Dokumente und Planartefakte bleiben so, wie sie archiviert
 # wurden — sie sind Aufzeichnung, nicht gepflegter Bestand.
 docs/archive/
