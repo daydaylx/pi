@@ -16,21 +16,21 @@ export interface TileInput {
   lines: readonly string[];
   badge?: string;
   tone?: "accent" | "muted" | "warning" | "error" | "success";
-  /** Card background. Omit it and the tile degrades to the flat panel look. */
+  /** Card background. Omit it and the tile keeps the flat, frame-only look. */
   fill?: TileFill;
+  /** Columns of blank margin between the frame and content, each side. Defaults to 1. */
+  padding?: number;
 }
-
-/** The neutral card surface every tile uses unless a status owns its fill. */
-export const NEUTRAL_TILE_FILL: TileFill = "toolPendingBg";
 
 /**
  * Maps a status tone to the card fill that carries it. Only success and error
- * have dedicated background tokens; everything else sits on the neutral card.
+ * have dedicated background tokens; every other tone stays frame-only, so a
+ * routine or pending card never paints a highlight background.
  */
-export function statusFill(tone: TileInput["tone"]): TileFill {
+export function statusFill(tone: TileInput["tone"]): TileFill | undefined {
   if (tone === "success") return "toolSuccessBg";
   if (tone === "error") return "toolErrorBg";
-  return NEUTRAL_TILE_FILL;
+  return undefined;
 }
 
 /**
@@ -64,11 +64,27 @@ export interface ShortcutItem {
   label: string;
 }
 
+/** One key cap and its description, grouped into a single filled chip. */
+function renderShortcutChip(
+  theme: Theme,
+  key: string,
+  label: string,
+  contentWidth: number,
+): string {
+  const raw = `${key} ${label}`;
+  const fillPad = " ".repeat(Math.max(0, contentWidth - raw.length));
+  return theme.bg(
+    "selectedBg",
+    ` ${theme.bold(theme.fg("accent", key))} ${theme.fg("muted", label)}${fillPad} `,
+  );
+}
+
 /**
- * Renders key hints as a responsive sequence of complete units.  A shortcut
- * never enters a row until both its key cap and its (possibly shortened)
- * description fit; this prevents the final background-painted cell of a cap
- * from being clipped at a card edge.
+ * Renders key hints as a grid of equal-width chips, each pairing a key cap
+ * with its description as one visual unit (background and all), so "which
+ * key goes with which label" never has to be guessed from adjacency alone.
+ * Every chip shares one column width — the widest pair's — so row 2's chips
+ * land under row 1's columns instead of a greedy wrap staggering them.
  */
 export function renderShortcutRows(
   theme: Theme,
@@ -76,32 +92,29 @@ export function renderShortcutRows(
   shortcuts: readonly ShortcutItem[],
 ): string[] {
   const available = Math.max(1, width);
-  const units = shortcuts.map(({ key, label }) => {
-    const cap = renderPill(theme, key, "accent");
-    const capWidth = visibleWidth(cap);
-    // A framed Aurora card is only used from 18 columns on, so every key cap
-    // has room here. Keep the cap atomic even if a caller uses this primitive
-    // in a smaller, frameless surface.
-    if (capWidth >= available) return crop(cap, available);
-    const labelWidth = Math.max(0, available - capWidth - 1);
-    const description = labelWidth > 0
-      ? crop(theme.fg("muted", label), labelWidth)
-      : "";
-    return description ? `${cap} ${description}` : cap;
-  });
+  if (shortcuts.length === 0) return [];
+
+  const contentWidth = Math.max(
+    ...shortcuts.map(({ key, label }) => `${key} ${label}`.length),
+  );
+  const chipWidth = contentWidth + 2; // one padding cell each side, inside the fill
+  const gap = 2;
+  const columns = Math.max(
+    1,
+    Math.min(
+      shortcuts.length,
+      Math.floor((available + gap) / (chipWidth + gap)),
+    ),
+  );
+
+  const chips = shortcuts.map(({ key, label }) =>
+    crop(renderShortcutChip(theme, key, label, contentWidth), available),
+  );
 
   const rows: string[] = [];
-  let row = "";
-  for (const unit of units) {
-    const candidate = row ? `${row}  ${unit}` : unit;
-    if (row && visibleWidth(candidate) > available) {
-      rows.push(row);
-      row = unit;
-    } else {
-      row = candidate;
-    }
+  for (let index = 0; index < chips.length; index += columns) {
+    rows.push(chips.slice(index, index + columns).join(" ".repeat(gap)));
   }
-  if (row) rows.push(row);
   return rows;
 }
 
@@ -155,9 +168,7 @@ function renderTileHeading(
   width: number,
 ): string {
   const available = Math.max(1, width);
-  const renderedBadge = badge
-    ? ` ${renderPill(theme, badge, badgeTone)}`
-    : "";
+  const renderedBadge = badge ? ` ${renderPill(theme, badge, badgeTone)}` : "";
   const titleWidth = Math.max(1, available - visibleWidth(renderedBadge));
   const renderedTitle = crop(
     theme.fg(titleTone, theme.bold(title)),
@@ -166,17 +177,20 @@ function renderTileHeading(
   return `${renderedTitle}${renderedBadge}`;
 }
 
-/** One empty, filled card row — used to equalise tile heights in a grid. */
+/** One empty card row — used to equalise tile heights in a grid. */
 export function tileBlankRow(
   theme: Theme,
   width: number,
   fill?: TileFill,
 ): string {
   const available = Math.max(1, width);
-  if (!fill || available < 18) return "";
+  if (available < 18) return "";
   const innerWidth = Math.max(1, available - 4);
   const border = (value: string) => theme.fg("borderMuted", value);
-  return `${border("│ ")}${padFilled(theme, "", innerWidth, fill)}${border(" │")}`;
+  const content = fill
+    ? padFilled(theme, "", innerWidth, fill)
+    : " ".repeat(innerWidth);
+  return `${border("│ ")}${content}${border(" │")}`;
 }
 
 /** Card rows: two frame rows plus one row per content line. */
@@ -185,10 +199,13 @@ export function tileHeight(input: TileInput): number {
 }
 
 /**
- * A filled card: the frame shell, but the title row and every content row are
- * padded to the full inner width and painted with `theme.bg`, so the card
- * reads as one solid surface. The < 18 column fallback drops the frame
- * entirely and preserves the content, as the old panel shell did.
+ * A card: a frame shell around the title and content lines. A `fill` paints
+ * every row's inner width with `theme.bg` so the card reads as one solid
+ * surface; without one, the card stays frame-only with a plain background.
+ * The < 18 column fallback drops the frame entirely and preserves the
+ * content, as the old panel shell did. The title sits in the top frame row
+ * itself, with one column of breathing room on each side so it never butts
+ * straight against the corner dash.
  */
 export function renderTile(
   theme: Theme,
@@ -198,13 +215,20 @@ export function renderTile(
   const available = Math.max(1, width);
   const titleTone = input.tone ?? "accent";
   const badgeTone = input.tone ?? "muted";
+  const border = (value: string) => theme.fg("borderMuted", value);
+  const cornerLeft = border("╭─");
+  const cornerRight = border("─╮");
+  const titleBudget = Math.max(
+    1,
+    available - visibleWidth(cornerLeft) - visibleWidth(cornerRight) - 2,
+  );
   const heading = renderTileHeading(
     theme,
     input.title,
     input.badge,
     titleTone,
     badgeTone,
-    Math.max(1, available - 4),
+    titleBudget,
   );
 
   if (available < 18) {
@@ -214,35 +238,37 @@ export function renderTile(
     ];
   }
 
-  const innerWidth = Math.max(1, available - 4);
-  const border = (value: string) => theme.fg("borderMuted", value);
+  const padding = Math.max(1, Math.floor(input.padding ?? 1));
+  const pad = " ".repeat(padding);
+  const innerWidth = Math.max(1, available - padding * 2 - 2);
+  const clippedHeading = crop(heading, titleBudget);
+  const dashesWidth = Math.max(0, titleBudget - visibleWidth(clippedHeading));
+  const headingRow = `${cornerLeft}${border(" ")}${clippedHeading}${border(
+    ` ${"─".repeat(dashesWidth)}`,
+  )}${cornerRight}`;
 
   if (!input.fill) {
     // Unfilled tiles keep the classic framed look without a background.
-    const clippedHeading = crop(heading, innerWidth);
-    const fillDashes = "─".repeat(
-      Math.max(0, innerWidth - visibleWidth(clippedHeading)),
-    );
     const row = (value: string) => {
       const clipped = crop(value, innerWidth);
-      return `${border("│ ")}${clipped}${" ".repeat(
+      return `${border(`│${pad}`)}${clipped}${" ".repeat(
         Math.max(0, innerWidth - visibleWidth(clipped)),
-      )}${border(" │")}`;
+      )}${border(`${pad}│`)}`;
     };
     return [
-      `${border("╭─")}${clippedHeading}${border(`${fillDashes}─╮`)}`,
+      headingRow,
       ...input.lines.map(row),
       border(`╰${"─".repeat(Math.max(1, available - 2))}╯`),
     ];
   }
 
   const fill = input.fill;
-  const filledHeading = padFilled(theme, heading, innerWidth, fill);
+  const filledHeading = padFilled(theme, ` ${heading}`, innerWidth, fill);
   const row = (value: string) =>
-    `${border("│ ")}${padFilled(theme, value, innerWidth, fill)}${border(" │")}`;
+    `${border(`│${pad}`)}${padFilled(theme, value, innerWidth, fill)}${border(`${pad}│`)}`;
 
   return [
-    `${border("╭─")}${filledHeading}${border("─╮")}`,
+    `${cornerLeft}${filledHeading}${cornerRight}`,
     ...input.lines.map(row),
     border(`╰${"─".repeat(Math.max(1, available - 2))}╯`),
   ];

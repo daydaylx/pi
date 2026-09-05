@@ -19,6 +19,9 @@ export interface StartscreenInput {
 /** The welcome window never claims the full terminal — it is a dialog. */
 const WELCOME_TILE_MAX_COLUMNS = 68;
 
+/** Extra inner margin so labels don't sit flush against the frame. */
+const PANEL_PADDING = 2;
+
 function center(value: string, width: number): string {
   const clipped = crop(value, Math.max(1, width));
   return `${" ".repeat(Math.max(0, Math.floor((width - visibleWidth(clipped)) / 2)))}${clipped}`;
@@ -28,7 +31,11 @@ function separator(theme: Theme): string {
   return theme.fg("borderMuted", " │ ");
 }
 
-function metadata(theme: Theme, input: StartscreenInput, width: number): string {
+function metadata(
+  theme: Theme,
+  input: StartscreenInput,
+  width: number,
+): string {
   const model = crop(input.model ?? "kein Modell", 28);
   const values = [
     theme.fg("accent", theme.bold(input.workflow.toUpperCase())),
@@ -40,13 +47,17 @@ function metadata(theme: Theme, input: StartscreenInput, width: number): string 
 
 /** Shortcut chips with their description, wrapped to the tile's inner width. */
 function shortcutRows(theme: Theme, innerWidth: number): string[] {
-  return renderShortcutRows(theme, innerWidth, [
-    ["Shift+Tab", "Workflow"],
-    ["Super+M", "Modell"],
-    ["Super+D", "Denken"],
-    ["Super+Q", "Befehle"],
-    ["Super+S", "Rollen"],
-  ].map(([key, label]) => ({ key, label })));
+  return renderShortcutRows(
+    theme,
+    innerWidth,
+    [
+      ["Shift+Tab", "Workflow"],
+      ["Super+M", "Modell"],
+      ["Super+D", "Denken"],
+      ["Super+Q", "Befehle"],
+      ["Super+S", "Rollen"],
+    ].map(([key, label]) => ({ key, label })),
+  );
 }
 
 /**
@@ -78,10 +89,11 @@ export function renderStartscreen(
 
   const tileWidth = Math.min(width, WELCOME_TILE_MAX_COLUMNS);
   const model = crop(input.model ?? "kein Modell", 28);
+  const innerWidth = Math.max(1, tileWidth - PANEL_PADDING * 2 - 2);
   const tile = renderTile(theme, tileWidth, {
     title: "PI · AURORA",
     tone: "accent",
-    fill: "toolPendingBg",
+    padding: PANEL_PADDING,
     lines: [
       renderField(
         theme,
@@ -90,11 +102,18 @@ export function renderStartscreen(
       ),
       renderField(theme, "Modell", theme.fg("text", model)),
       ...(input.thinking
-        ? [renderField(theme, "Denken", renderThinkingLabel(theme, input.thinking))]
+        ? [
+            renderField(
+              theme,
+              "Denken",
+              renderThinkingLabel(theme, input.thinking),
+            ),
+          ]
         : []),
       renderField(theme, "Ordner", theme.fg("muted", cwd)),
       theme.fg("borderMuted", "KURZBEFEHLE"),
-      ...shortcutRows(theme, Math.max(1, tileWidth - 4)),
+      "",
+      ...shortcutRows(theme, innerWidth),
     ],
   });
   return tile.map((row) => center(row, width));

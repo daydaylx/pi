@@ -895,7 +895,7 @@ export const uiSections = {
         title: "AUFGABE",
         badge: "ARBEITEN",
         tone: "accent",
-        fill: tile.NEUTRAL_TILE_FILL,
+        fill: "toolPendingBg",
         lines: [theme.bold("Titel der Aufgabe"), theme.fg("muted", "Ziel")],
       });
       eq(card.length, 4, "a tile is frame plus one row per content line");
@@ -920,7 +920,7 @@ export const uiSections = {
       const truncatedCard = tile.renderTile(theme, 30, {
         title: "ZIEL",
         tone: "accent",
-        fill: tile.NEUTRAL_TILE_FILL,
+        fill: "toolPendingBg",
         lines: [longLine],
       });
       const contentRow = truncatedCard[1];
@@ -972,7 +972,7 @@ export const uiSections = {
           "Eine lange Überschrift darf den aktuellen Status nicht verdrängen",
         badge: "LÄUFT",
         tone: "accent",
-        fill: tile.NEUTRAL_TILE_FILL,
+        fill: "toolPendingBg",
         lines: [],
       });
       assert(
@@ -992,8 +992,8 @@ export const uiSections = {
       );
       eq(
         tile.statusFill("accent"),
-        tile.NEUTRAL_TILE_FILL,
-        "routine tones stay on the neutral card surface",
+        undefined,
+        "routine tones stay frame-only and paint no highlight fill",
       );
 
       // 2. Pills: loud tones get a filled chip, routine tones stay flat.
@@ -1045,8 +1045,8 @@ export const uiSections = {
         "the wide dashboard pairs task and activity tiles on one row",
       );
       assert(
-        wideDashboard.some((line) => line.includes(pendingBg)),
-        "wide dashboard tiles carry the card fill",
+        !wideDashboard.some((line) => line.includes(pendingBg)),
+        "routine wide dashboard tiles stay frame-only and paint no highlight fill",
       );
       assert(
         wideDashboard.every((line) => visibleWidth(line) === 120),
@@ -1121,9 +1121,9 @@ export const uiSections = {
           `the welcome card fits ${columns}×${rows} cells`,
         );
         assert(
-          welcome.some((row) => row.includes(pendingBg)) &&
+          !welcome.some((row) => row.includes(pendingBg)) &&
             stripAnsi(welcome.join("\n")).includes("WORKFLOW"),
-          `the welcome card is filled and carries labelled fields at ${columns}×${rows}`,
+          `the welcome card stays frame-only and carries labelled fields at ${columns}×${rows}`,
         );
       }
 

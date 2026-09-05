@@ -35,7 +35,6 @@ export function renderInspectorBox(
   return renderTile(theme, Math.min(width, 76), {
     title: content.title,
     badge: content.badge,
-    fill: "toolPendingBg",
     lines,
   });
 }

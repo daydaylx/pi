@@ -1,14 +1,9 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import {
-  footerTier,
-  LAYOUT_COLUMNS,
-  type Layout,
-} from "../shared/layout.ts";
+import { footerTier, LAYOUT_COLUMNS, type Layout } from "../shared/layout.ts";
 import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
 import { crop } from "./layout.ts";
 import {
-  NEUTRAL_TILE_FILL,
   renderTile,
   renderTileGrid,
   statusFill,
@@ -519,10 +514,7 @@ export function renderActiveTools(
   const hidden = tools.slice(visible.length);
   if (hidden.length > 0)
     visible.push(
-      crop(
-        theme.fg("muted", `↳ ${toolSummary(hidden, now)}`),
-        available,
-      ),
+      crop(theme.fg("muted", `↳ ${toolSummary(hidden, now)}`), available),
     );
   return visible;
 }
@@ -926,7 +918,6 @@ export function renderDashboard(
     title: "AUFGABE",
     badge: task.phaseLabel.toUpperCase(),
     tone: "accent",
-    fill: NEUTRAL_TILE_FILL,
     lines: [
       theme.bold(task.title),
       ...(task.goal && !hasFailure ? [theme.fg("muted", task.goal)] : []),
@@ -939,7 +930,6 @@ export function renderDashboard(
     title: "AKTIVITÄT",
     badge: input.activityLines.length > 0 ? "LÄUFT" : "BEREIT",
     tone: input.activityLines.length > 0 ? "accent" : "muted",
-    fill: NEUTRAL_TILE_FILL,
     lines:
       input.activityLines.length > 0
         ? input.activityLines
@@ -958,7 +948,6 @@ export function renderDashboard(
         title: "ÄNDERUNGEN",
         badge: `${changes.filesCount} ${changes.filesCount === 1 ? "DATEI" : "DATEIEN"}`,
         tone: "accent",
-        fill: NEUTRAL_TILE_FILL,
         lines: [
           `${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`,
           theme.fg("muted", summarizeChangedFiles(changes, " · ")),
@@ -1011,10 +1000,8 @@ export function renderDashboard(
     // Stacked tiles pay sequential heights, a paired grid pays the taller
     // member only — the fallback condition mirrors each layout's real cost.
     const tooTall = grid
-      ? Math.max(
-          tileHeight(taskTile),
-          tileHeight(verificationTile),
-        ) > input.maxRows
+      ? Math.max(tileHeight(taskTile), tileHeight(verificationTile)) >
+        input.maxRows
       : tileHeight(taskTile) + tileHeight(verificationTile) > input.maxRows;
     if (tooTall) {
       groups = groups.map((group) =>
@@ -1070,7 +1057,9 @@ export function renderAutoDashboard(
 
   const problemLines: string[] = [];
   if (failed) {
-    problemLines.push(theme.fg("error", theme.bold("⚠ Prüfung fehlgeschlagen")));
+    problemLines.push(
+      theme.fg("error", theme.bold("⚠ Prüfung fehlgeschlagen")),
+    );
     const blocker = verification?.blockers?.[0];
     if (blocker) problemLines.push(theme.fg("muted", `  ${blocker}`));
   } else if (stale) {
@@ -1149,7 +1138,7 @@ export function renderAutoDashboard(
     title: "Sitzung",
     badge: task.phaseLabel.toUpperCase(),
     tone: failed ? "error" : stale ? "warning" : "accent",
-    fill: failed ? "toolErrorBg" : NEUTRAL_TILE_FILL,
+    fill: failed ? "toolErrorBg" : undefined,
     lines: content,
   });
 }
