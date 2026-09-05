@@ -1,0 +1,85 @@
+diff --git a/benchmarks/real-duel/scripts/list_tasks.py b/benchmarks/real-duel/scripts/list_tasks.py
+new file mode 100644
+index 0000000..37f4253
+--- /dev/null
++++ b/benchmarks/real-duel/scripts/list_tasks.py
+@@ -0,0 +1,79 @@
++#!/usr/bin/env python3
++"""List valid real-duel tasks and their supported workflows."""
++
++from __future__ import annotations
++
++import argparse
++import json
++import sys
++from pathlib import Path
++
++SCRIPT_DIR = Path(__file__).resolve().parent
++TASKS_DIR = SCRIPT_DIR.parent / "tasks"
++sys.path.insert(0, str(SCRIPT_DIR))
++
++from workflow_task import load  # noqa: E402
++
++
++def collect_tasks() -> list[dict[str, object]]:
++    """Return catalog entries for all valid immediate task directories."""
++    tasks = []
++    for task_dir in sorted(TASKS_DIR.iterdir(), key=lambda path: path.name):
++        if not task_dir.is_dir() or not (task_dir / "instruction.md").exists():
++            continue
++
++        config = load(task_dir)
++        tasks.append(
++            {
++                "name": task_dir.name,
++                "has_checker": (task_dir / "checker.sh").exists(),
++                "workflows": list(config.supported_workflows),
++            }
++        )
++    return tasks
++
++
++def print_table(tasks: list[dict[str, object]]) -> None:
++    headers = ("Name", "Checker", "Workflows")
++    rows = [
++        (
++            str(task["name"]),
++            "yes" if task["has_checker"] else "no",
++            ", ".join(task["workflows"]) or "-",
++        )
++        for task in tasks
++    ]
++    widths = [
++        max(len(header), *(len(row[index]) for row in rows))
++        for index, header in enumerate(headers)
++    ]
++
++    def format_row(row: tuple[str, str, str]) -> str:
++        return "  ".join(value.ljust(width) for value, width in zip(row, widths))
++
++    print(format_row(headers))
++    print(format_row(tuple("-" * width for width in widths)))
++    for row in rows:
++        print(format_row(row))
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument(
++        "--json",
++        action="store_true",
++        help="output the task catalog as a JSON array",
++    )
++    args = parser.parse_args()
++
++    tasks = collect_tasks()
++    if args.json:
++        json.dump(tasks, sys.stdout, ensure_ascii=False, indent=2)
++        print()
++    else:
++        print_table(tasks)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

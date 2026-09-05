@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""List the tasks available to real-duel."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from workflow_task import load
+
+
+TASKS_DIR = Path(__file__).resolve().parent.parent / "tasks"
+
+
+def collect_tasks() -> list[dict[str, object]]:
+    """Return metadata for every valid immediate task subdirectory."""
+    tasks = []
+    for task_dir in TASKS_DIR.iterdir():
+        if not task_dir.is_dir() or not (task_dir / "instruction.md").is_file():
+            continue
+
+        config = load(task_dir)
+        tasks.append(
+            {
+                "name": task_dir.name,
+                "has_checker": (task_dir / "checker.sh").exists(),
+                "workflows": list(config.supported_workflows),
+            }
+        )
+
+    return sorted(tasks, key=lambda task: task["name"])
+
+
+def print_table(tasks: list[dict[str, object]]) -> None:
+    """Print task metadata in a compact, human-readable table."""
+    headers = ("Name", "Checker", "Workflows")
+    rows = [
+        (
+            task["name"],
+            "yes" if task["has_checker"] else "no",
+            ", ".join(task["workflows"]),
+        )
+        for task in tasks
+    ]
+    widths = [
+        max(len(str(value)) for value in [header, *(row[index] for row in rows)])
+        for index, header in enumerate(headers)
+    ]
+
+    print(" | ".join(header.ljust(widths[index]) for index, header in enumerate(headers)))
+    print("-+-".join("-" * width for width in widths))
+    for row in rows:
+        print(" | ".join(str(value).ljust(widths[index]) for index, value in enumerate(row)))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="output task metadata as a JSON array",
+    )
+    args = parser.parse_args()
+
+    tasks = collect_tasks()
+    if args.as_json:
+        print(json.dumps(tasks, ensure_ascii=False, indent=2))
+    else:
+        print_table(tasks)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

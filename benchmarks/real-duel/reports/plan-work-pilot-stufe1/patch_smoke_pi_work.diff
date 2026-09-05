@@ -1,0 +1,7 @@
+diff --git a/SMOKE_OK.txt b/SMOKE_OK.txt
+new file mode 100644
+index 0000000..a5b5db8
+--- /dev/null
++++ b/SMOKE_OK.txt
+@@ -0,0 +1 @@
++real-duel-smoke-ok

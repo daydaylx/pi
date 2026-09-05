@@ -1,0 +1,1 @@
+{"plan_transcript_path": "/home/d/.local/state/real-duel/obench-workspace/transcripts/plan-work-pilot-01-task-catalog-20260905T132955_codex_plan_work/codex_plan_transcript.jsonl", "work_transcript_path": "/home/d/.local/state/real-duel/obench-workspace/transcripts/plan-work-pilot-01-task-catalog-20260905T132955_codex_plan_work/codex_work_transcript.jsonl"}
