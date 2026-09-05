@@ -50,12 +50,18 @@ uv venv -q && uv pip install -q -e .
 ```bash
 benchmarks/real-duel/scripts/pi-duel doctor    # Preflight (CLI/Auth/Version)
 benchmarks/real-duel/scripts/pi-duel gate      # obench gate (Ablehnung erwartet, siehe Kommentare in den TOMLs)
-benchmarks/real-duel/scripts/pi-duel smoke     # Phase-1-Plumbing-Test
+benchmarks/real-duel/scripts/pi-duel smoke     # Phase-1-Plumbing-Test, Default: beide Candidates
+benchmarks/real-duel/scripts/pi-duel smoke --candidate pi-real  # kostenbegrenzter Einzel-Smoke
 benchmarks/real-duel/scripts/pi-duel report    # Ergebnisuebersicht
 benchmarks/real-duel/scripts/pi-duel cleanup <run-id>   # Worktrees entfernen
 ```
 
-Laufdaten (Worktrees, `results.jsonl`, Transkripte, Fingerprints) liegen
+`smoke` und `run` akzeptieren optional `--candidate pi-real` oder
+`--candidate codex-real`; ohne Filter bleibt das bisherige Verhalten mit beiden
+Candidates unverändert.
+
+Laufdaten (Worktrees, `results.jsonl`, Transkripte, Fingerprints und redigierte
+Pi-Tooltraces) liegen
 bewusst **ausserhalb** des Repos unter `~/.local/state/real-duel/` — nichts
 davon wird committet.
 

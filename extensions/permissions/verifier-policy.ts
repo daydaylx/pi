@@ -50,19 +50,45 @@ function budgetOverrideErrors(
   return errors;
 }
 
-/** Pflichtabschnitte der Delegationsvorlage aus docs/subagents.md. */
+/**
+ * Pflichtabschnitte der Delegationsvorlage aus docs/subagents.md.
+ *
+ * Der Guard prüft die inhaltlichen Blöcke, nicht eine einzige Schreibweise der
+ * Überschrift. Im Plan→Work-Pilot waren zwei vollständige Übergaben allein an
+ * `## Original user request` bzw. `## Target (Original User Request)` statt
+ * des bytegenauen Markers gescheitert; die anschließenden Versuche, die Doku
+ * aus dem fremden Worktree zu lesen, erzeugten zwei weitere Toolfehler. Die
+ * Varianten bleiben absichtlich eng, zeilenbasiert und überschriftenförmig —
+ * eine beiläufige Erwähnung im Fließtext erfüllt den Contract weiterhin nicht.
+ */
 export const VERIFIER_REQUIRED_SECTIONS = [
-  { marker: "Original User Request:", label: "Ziel (Original User Request)" },
   {
-    marker: "Delegated Question:",
+    patterns: [
+      /^(?:#{1,6}\s*)?(?:target\s*\(\s*)?original user request(?:\s*\))?\s*:?\s*$/im,
+    ],
+    label: "Ziel (Original User Request)",
+  },
+  {
+    patterns: [
+      /^(?:#{1,6}\s*)?(?:scope\s*\/\s*)?delegated question\s*:?\s*$/im,
+      /^(?:#{1,6}\s*)?ziel der unabhängigen prüfung\s*:?\s*$/im,
+    ],
     label: "konkrete Teilfrage/Scope (Delegated Question)",
   },
   {
-    marker: "Implementation / Diff to verify:",
+    patterns: [
+      /^(?:#{1,6}\s*)?implementation\s*\/\s*diff to verify\s*:?\s*$/im,
+      /^(?:#{1,6}\s*)?diff\s*\(\s*implementation\s*\/\s*diff to verify\s*\)\s*:?\s*$/im,
+      /^(?:#{1,6}\s*)?zu prüfender diff(?:\s*\([^\n]*\))?\s*:?\s*$/im,
+    ],
     label: "Diff (Implementation / Diff to verify)",
   },
   {
-    marker: "Pre-existing workspace state",
+    patterns: [
+      /^(?:#{1,6}\s*)?pre-existing workspace state(?:\s*\([^\n]*\))?\s*:?\s*$/im,
+      /^(?:#{1,6}\s*)?baseline\s*\(\s*pre-existing workspace state\s*\)\s*:?\s*$/im,
+      /^(?:#{1,6}\s*)?baseline vor der ersten änderung\s*:?\s*$/im,
+    ],
     label: "Baseline (Pre-existing workspace state)",
   },
 ] as const;
@@ -99,7 +125,7 @@ export function assessVerifierDelegation(
     };
   }
   const missing: string[] = VERIFIER_REQUIRED_SECTIONS.filter(
-    (section) => !task.includes(section.marker),
+    (section) => !section.patterns.some((pattern) => pattern.test(task)),
   ).map((section) => section.label);
   if (!ACCEPTANCE_PATTERN.test(task)) {
     missing.push("Akzeptanzkriterien (Acceptance)");

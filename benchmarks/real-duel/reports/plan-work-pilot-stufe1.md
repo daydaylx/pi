@@ -84,7 +84,11 @@ dieselbe Eigenschaft mechanisch stärker (OS-Sandbox statt Prompt-Konvention).
 | --------------------------------- | --------------: | --------------: | -------------: | -----------: | -------------------------------: | --------------: |
 | Funktional erfolgreich            |            PASS |            PASS |              – |         PASS |                             PASS |               – |
 | Laufzeit (s)                      |           32,05 |          128,52 |  +96,46 (×4,0) |        23,20 |                            68,54 |   +45,35 (×3,0) |
-| Tokenverbrauch (fresh+cache_read) |          15.327 |          32.511 | +17.184 (×2,1) |       18.071 |                          131.879 | +113.808 (×7,3) |
+| Fresh Input                      |          14.697 |          28.361 |       +13.664 |       17.726 |                           21.811 |       +4.085 |
+| Cache Read                       |          73.728 |         193.280 |      +119.552 |       44.544 |                          109.056 |      +64.512 |
+| Output                           |             630 |           4.150 |        +3.520 |          345 |                            1.012 |         +667 |
+| Cache Write                      |               0 |               0 |             – |            0 |                                0 |            – |
+| Verarbeitete Tokens*             |          89.055 |         225.791 | +136.736 (×2,5) |       62.615 |                          131.879 | +69.264 (×2,1) |
 | Toolfehler                        |               0 |               0 |              – |            1 | – (Report-Lücke, s. Abschnitt 9) |               – |
 | Planqualität                      |               – |   – (kein Gate) |              – |            – |                    1/1 bestanden |               – |
 | Ungeplante Änderungen             |               – |           keine |              – |            – |                            keine |               – |
@@ -95,12 +99,22 @@ dieselbe Eigenschaft mechanisch stärker (OS-Sandbox statt Prompt-Konvention).
 | --------------------------------- | --------------: | --------------: | --------------: | -------------: | ---------------: | --------------: |
 | Funktional erfolgreich            |  PASS (Checker) |  PASS (Checker) |               – | PASS (Checker) |   PASS (Checker) |               – |
 | Laufzeit (s)                      |           99,69 |          287,71 |  +188,02 (×2,9) |         543,12 |           520,49 |          −22,63 |
-| Tokenverbrauch (fresh+cache_read) |          37.872 |          73.787 | +35.915 (×1,95) |         56.244 |          450.136 | +393.892 (×8,0) |
+| Fresh Input                      |          34.337 |          63.324 |       +28.987 |       46.758 |       65.194 |      +18.436 |
+| Cache Read                       |         211.712 |         660.736 |      +449.024 |      359.936 |      377.856 |      +17.920 |
+| Output                           |           3.535 |          10.463 |        +6.928 |        9.486 |        7.086 |       −2.400 |
+| Cache Write                      |               0 |               0 |             – |            0 |            0 |            – |
+| Verarbeitete Tokens*             |         249.584 |         734.523 | +484.939 (×2,9) |      416.180 |      450.136 | +33.956 (×1,1) |
 | Toolfehler                        |               0 |               0 |               – |              5 | – (Report-Lücke) |               – |
 | Planqualität                      |               – |   – (kein Gate) |               – |              – |    1/1 bestanden |               – |
 | Ungeplante Änderungen             |               – |           keine |               – |              – |            keine |               – |
 
 Rohzeilen: [`results_stufe1.jsonl`](plan-work-pilot-stufe1/results_stufe1.jsonl).
+\* Verarbeitete Tokens = Fresh Input + Cache Read + Cache Write + Output. Cache
+wird separat ausgewiesen, weil er nicht dieselbe Kosten- oder Kontextsemantik
+wie Fresh Input hat. Die frühere Zeile `Tokenverbrauch` mischte bei Work-only
+Fresh Input + Output mit bei Plan→Work allen vier Komponenten und war daher
+nicht vergleichbar.
+
 "Funktional erfolgreich" ist hier **mechanisch** aus dem Checker abgeleitet
 (nicht "TODO/Blind-Review" wie im generischen `report-plan-work`-Template),
 weil `plan-work-pilot-01-task-catalog` — anders als die offenen `real-01`/
@@ -159,26 +173,113 @@ committet, da Teil der Konversation); Implementierungen liegen als
 
 ## 8. Laufzeit-, Token- und Fehlervergleich
 
-Siehe Tabellen in Abschnitt 5. Zusammengefasst: Plan→Work kostet bei Codex
-durchgehend ca. 2–4× mehr Wall-Time und ca. 2× mehr Tokens (plausibel: zwei
-vollständig getrennte `codex exec`-Invocations statt einer, zweite mit
-größerem Cache-Read-Anteil). Bei Pi ist der Zeit-Overhead uneinheitlich
-(+45s beim Marker-Task, −23s bei der größeren Pilotaufgabe — kein Overhead,
-teils sogar geringfügig schneller), der Token-Overhead dagegen mit ×7,3 bzw.
-×8,0 deutlich höher als bei Codex. Toolfehler: Codex 0 in jeder Zeile; Pi
-work-only 1 bzw. 5, Plan-Work-Zeilen zeigen aktuell keinen Wert (Report-Lücke,
-Abschnitt 9).
+Siehe Tabellen in Abschnitt 5. Für die einheitlich aggregierten
+verarbeiteten Tokens (Fresh Input + Cache Read + Cache Write + Output) liegt
+Plan→Work bei Codex im Einzeltrial bei ×2,5 bzw. ×2,9 und bei Pi bei ×2,1 bzw.
+×1,1. Damit ist insbesondere die frühere Aussage eines Pi-Overheads von ×7–8
+widerlegt: Sie beruhte auf unterschiedlich aggregierten Tokenfeldern. Cache
+Read bleibt separat, weil große Cache-Mengen weder direkt mit Fresh Input noch
+mit Kosten gleichzusetzen sind. Bei Pi ist die Zeitdifferenz uneinheitlich
+(+45s beim Marker-Task, −23s bei der größeren Pilotaufgabe); Toolfehler:
+Codex 0 in jeder Zeile, Pi Work-only 1 bzw. 5. Pi-Plan→Work-Zeilen zeigen
+aktuell keinen Toolfehlerwert (Report-Lücke, s. Abschnitt 9).
+
+### 8.1 Pi-Work-only: fünf Toolfehler im Trace
+
+Der Pi-Work-only-Lauf enthält 24 Toolcalls und genau fünf fehlgeschlagene
+Calls. Weil `tool_execution_start/end` selbst keine Zeitstempel tragen, ist die
+Spanne von der Assistant-Nachricht bis zum Toolresultat **keine reine
+Toollaufzeit**: Sie enthält auch die Modellzeit zum Erzeugen des Calls. Wo ein
+Tool selbst eine Dauer meldet, wird sie separat ausgewiesen.
+
+| # | Call / sichere Argumente | Kategorie | beobachtete Call-Spanne | echte Tooldauer | beobachteter Retry / späterer Erfolg |
+| ---: | --- | --- | ---: | ---: | --- |
+| 1 | `project_check`, `profile=verify` | Verification/Baseline | 95.436 ms | 68.775 ms | kein identischer Retry; späterer Task-Checker erfolgreich |
+| 2 | `subagent`, `agent=verifier`, `context=fresh` | Contract/Schema | 34.214 ms | nicht messbar | zwei weitere Verifier-Versuche; letzter erfolgreich |
+| 3 | `read`, `/home/d/.pi/agent/docs/subagents.md`, `offset=1`, `limit=240` | Permission/Path boundary | 28.551 ms | nicht messbar | ein weiterer `read` scheitert; späterer `grep`-Workaround erfolgreich |
+| 4 | `read`, gleicher Pfad, `offset=1`, `limit=400` | Permission/Path boundary | 4.875 ms | nicht messbar | kein weiterer `read`; `grep`-Workaround erfolgreich |
+| 5 | `subagent`, `agent=verifier`, `context=fresh` | Contract/Schema | 33.215 ms | nicht messbar | ein weiterer Verifier-Versuch erfolgreich |
+
+Die fünf fehlerassoziierten Call-Spannen summieren sich auf **196.291 ms**,
+sind aber aus dem genannten Timestamp-Grund nicht als reine verlorene
+Toollaufzeit zu interpretieren. Der abschließend erfolgreiche Verifier meldete
+zusätzlich selbst **189.045 ms** Laufzeit; seine beobachtete Call-Spanne betrug
+229.207 ms. Für diese kleine Utility war kein verpflichtender Risikotrigger
+belegt.
+
+Ursachen und kleinste strukturelle Reaktion:
+
+1. `project_check` scheiterte außerhalb des Task-Scopes an bereits vorhandenem
+   Format-Drift in `renderer/index.html` und `renderer/styles.css`. Das ist ein
+   fehlender sauberer Benchmark-Baseline-/Preflight-Nachweis, kein Fehler des
+   Task-Patches.
+2. Beide Verifier-Aufträge enthielten Ziel, Scope, vollständigen Diff, Baseline
+   und Akzeptanzkriterien. Der Guard verlangte jedoch bytegenaue englische
+   Marker und verwarf semantisch gleichwertige Markdown-/deutsche
+   Überschriften. Der Contract-Guard akzeptiert nun eng begrenzte
+   zeilenbasierte Varianten, ohne einen Pflichtblock entfallen zu lassen.
+3. Die beiden Boundary-Reads waren Folgefehler: Nach der ersten
+   Contract-Ablehnung sollte die verlangte Referenzdatei außerhalb des
+   Benchmark-Worktrees gelesen werden. Wenn der erste vollständige
+   Verifier-Auftrag akzeptiert wird, ist diese Recovery-Kette nicht mehr nötig;
+   die Read-Sicherheitsgrenze bleibt unverändert.
+
+Redundanz im beobachteten Trace:
+
+- **0** byte-identische Wiederholungen,
+- **3** Wiederholungen desselben Tool-/Ziel-Paars (zweiter Doku-Read und zwei
+  weitere Verifier-Aufrufe),
+- **0** identische Verifikationswiederholungen ohne zwischenzeitliche Mutation.
+
+Der erste Write endete nach 43.272 ms. Der erste fachlich valide Patchzeitpunkt
+ist rückwirkend **nicht bestimmbar**, weil zwischen Write und Abschluss kein
+Checker an einen Workspace-Snapshot gebunden war. Er wird deshalb nicht aus
+Zwischenaufrufen geschätzt.
+
+Für künftige Pi-Work-only-Läufe erzeugt `scripts/pi-duel` einen begrenzten JSON-
+Sidecar unter `tool-traces/`. `scripts/tool_trace.py` erfasst sichere
+Argumentzusammenfassungen und Fingerprints, Fehlerkategorie, Retry-Kandidaten,
+Wiederholungen, beobachtete Phasenspannen sowie den ersten Mutationserfolg. Freie
+Prompts, Shell-Kommandos, Write-Inhalte und rohe Toolausgaben werden nicht in den
+Sidecar kopiert. `time_to_first_valid_patch_ms` bleibt `null`; separat wird erst
+ein nach Kandidatenende vom Task-Checker bestätigter Zeitpunkt gespeichert,
+wenn Kandidaten- und Checker-Dauer beide vorliegen.
+
+### 8.2 Nachinstrumentierungs-Smoke
+
+Am 2026-09-05 wurde mit
+`pi-duel smoke --candidate pi-real --workflow work-only --allow-dirty` ein
+echter Pi-Lauf gegen `gpt-5.6-luna` ausgeführt (`run_id`
+`smoke-01-20260905T220818`). Der Dirty-Override markiert ihn korrekt als
+`comparable=false`; er fließt daher nicht in die Vergleichstabellen ein.
+
+- Task-Checker: PASS, Exit 0
+- Kandidatenlauf: 25,472 s; Checker: 0,144 s
+- 4 Toolcalls, 0 Toolfehler, 0 exakte Duplikate, 0 wiederholte Ziele
+- erster erfolgreicher Write nach 10.398 ms
+- `time_to_first_valid_patch_ms`: `null`
+- abschließend checker-bestätigter Zeitpunkt: 25.616 ms
+- Sidecarpfad in `results.jsonl`: relativ
+  (`tool-traces/smoke-01-20260905T220818_pi.json`)
+
+Eine nachgelagerte Prüfung des tatsächlich geschriebenen Sidecars bestätigte,
+dass weder der Write-Inhalt `real-duel-smoke-ok` noch ein `/home/d/`-Präfix
+enthalten ist; Shell-Kommandos liegen nur als SHA-256 vor. Damit ist die zuvor
+offene reale Persistenzstrecke für Pi Work-only einmal end-to-end belegt.
 
 ## 9. Methodische Einschränkungen
 
 - **n=1 pro Zelle.** Jede Zahl in Abschnitt 5/8 ist ein Einzellauf, keine
   Verteilung. Für belastbare Aussagen ist Stufe 2 (≥3 Aufgaben × ≥3 Trials)
   erforderlich, wie im Plan vorgesehen.
-- **Reporting-Lücke bei Pi-Toolfehlern im Plan-Work-Pfad:** `report_plan_work.py`
-  liest `tool_errors` aktuell aus dem (bei Plan-Work-Zeilen `None` gesetzten)
-  `telemetry`-Feld statt aus `plan_phase_telemetry`/`work_phase_telemetry`;
-  die Rohdaten selbst fehlen nicht (in den Event-Transkripten enthalten),
-  nur die Aggregation im Report ist unvollständig.
+- **Reporting-Lücke bei Pi-Toolfehlern im Plan-Work-Pfad:** Die
+  Plan-/Work-Phasen der Pi-Ergebniszeilen enthalten noch keinen aggregierten
+  `tool_errors`-Wert. Die Rohdaten liegen in den Event-Transkripten, müssen
+  aber vor einer Summierung phasenweise normalisiert werden.
+- **Tokenaggregation korrigiert:** `report_plan_work.py` summiert für beide
+  Workflows nun je Komponente Fresh Input, Cache Read, Cache Write und Output
+  und weist Cache Read separat aus. Die früheren, gemischten
+  `Tokenverbrauch`-Zahlen werden nicht weiter interpretiert.
 - **Codex-Telemetrie-Kumulativitätsannahme widerlegt:** in 2 von 2
   Plan-Work-Läufen negative Deltas bei `output`/`reasoning`/`tool_calls` —
   `turn.completed.usage` bei `codex exec resume` zählt vermutlich nur den
@@ -229,8 +330,8 @@ Für **kleine, additive, gut spezifizierte Aufgaben** (wie diesen Piloten)
 zeigt sich in n=1: Plan→Work verhindert hier keinen Fehler (beide
 Work-only-Implementierungen waren bereits fehlerfrei und bestanden zusätzlich
 die Blind-Review-Randfallprüfung), kostet aber deutlich mehr Zeit (Codex) und
-massiv mehr Tokens (Pi: ×7–8), ohne im Blind-Review besser abzuschneiden —
-tendenziell sogar leicht schlechter. **Für diese Aufgabenklasse ist der
+mehr verarbeitete Tokens (Pi: ×2,1 bzw. ×1,1), ohne im Blind-Review besser
+abzuschneiden — tendenziell sogar leicht schlechter. **Für diese Aufgabenklasse ist der
 zusätzliche Aufwand auf Basis dieses einen Piloten nicht gerechtfertigt.**
 
 Das ist ausdrücklich **keine generelle Aussage gegen Plan→Work**: die Aufgabe

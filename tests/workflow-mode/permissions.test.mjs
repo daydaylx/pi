@@ -950,6 +950,35 @@ await test("verifier delegations require the full inspection contract", () => {
     !assess({ agent: "verifier", task: completeTask }).blocked,
     "a complete delegation passes",
   );
+  const pilotGermanHeadings = [
+    "## Original user request\nDen Task-Katalog ergänzen.",
+    "## Ziel der unabhängigen Prüfung\nPrüfe Vertrag und Scope.",
+    "## Zu prüfender Diff (vollständiger Inhalt)\n<relevanter Diff>",
+    "## Baseline vor der ersten Änderung\nclean",
+    "## Akzeptanzkriterien\nTask-Checker besteht.",
+  ].join("\n\n");
+  assert(
+    !assess({ agent: "verifier", task: pilotGermanHeadings }).blocked,
+    "the semantically complete German headings from the pilot pass",
+  );
+  const pilotWrappedHeadings = [
+    "## Target (Original User Request)\nDen Task-Katalog ergänzen.",
+    "## Scope / Delegated Question\nPrüfe Vertrag und Scope.",
+    "## Diff (Implementation / Diff to verify)\n<relevanter Diff>",
+    "## Baseline (Pre-existing workspace state)\nclean",
+    "## Acceptance Criteria\nTask checker passes.",
+  ].join("\n\n");
+  assert(
+    !assess({ agent: "verifier", task: pilotWrappedHeadings }).blocked,
+    "parenthesized Markdown headings from the pilot pass",
+  );
+  assert(
+    assess({
+      agent: "verifier",
+      task: "Im Fließtext steht Original User Request, aber es fehlen die Pflichtblöcke und Akzeptanz.",
+    }).blocked,
+    "a prose mention does not masquerade as a required section",
+  );
   const budgeted = assess({
     agent: "verifier",
     task: completeTask,
