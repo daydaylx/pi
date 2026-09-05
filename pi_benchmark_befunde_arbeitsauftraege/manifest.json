@@ -1,0 +1,22 @@
+{
+  "name": "Pi Benchmark Befunde und Arbeitsauftraege",
+  "date": "2026-09-05",
+  "source_commit": "e30c7f5335c290ec2871c8a2af186a4bb0096d98",
+  "files": [
+    "00_belege.md",
+    "01_P0_worktree_dependency_bootstrap.md",
+    "02_P0_verifier_contract_timeoutms.md",
+    "03_P0_tool_execution_update_bloat.md",
+    "04_P1_tool_call_effizienz.md",
+    "05_P1_tool_error_klassifizierung.md",
+    "06_P1_project_preflight.md",
+    "07_P2_redundante_exploration.md",
+    "08_P2_planmodus_effizienz.md",
+    "09_P2_subagenten_nutzen.md",
+    "10_P3_telemetrie_normalisieren.md",
+    "11_P3_context_wachstum.md",
+    "12_P3_performance_aufschluesselung.md",
+    "13_umsetzungsreihenfolge_und_gate.md",
+    "README.md"
+  ]
+}
