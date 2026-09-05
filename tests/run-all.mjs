@@ -29,6 +29,11 @@ const suites = [
     file: "collapse-result.test.mjs",
     env: {},
   },
+  {
+    name: "benchmark-telemetry",
+    file: "benchmark-telemetry.test.mjs",
+    env: {},
+  },
   { name: "check-npm-audit", file: "check-npm-audit.test.mjs", env: {} },
   {
     name: "check-theme-contrast",

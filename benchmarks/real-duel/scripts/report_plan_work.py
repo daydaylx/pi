@@ -56,26 +56,52 @@ def _tool_errors(row: dict) -> int | None:
     return (plan_errors or 0) + (work_errors or 0)
 
 
-def _tokens(row: dict) -> int | None:
+TOKEN_FIELDS = (
+    "input_fresh",
+    "input_cache_read",
+    "input_cache_write",
+    "output",
+)
+
+# Pi's plan/work phases predate the normalized telemetry schema and retain
+# their usage under `tokens`; work-only Pi rows and all Codex rows use the
+# normalized flat names.  Keep that compatibility at this one boundary so the
+# report always compares the same component on both sides.
+_NESTED_TOKEN_FIELDS = {
+    "input_fresh": "input",
+    "input_cache_read": "cacheRead",
+    "input_cache_write": "cacheWrite",
+    "output": "output",
+}
+
+
+def _phase_metric(phase: dict, field: str) -> int | None:
+    nested = phase.get("tokens")
+    if isinstance(nested, dict):
+        return nested.get(_NESTED_TOKEN_FIELDS[field])
+    return phase.get(field)
+
+
+def _token_metric(row: dict, field: str) -> int | None:
     if row.get("workflow") == "work-only":
-        return row.get("tokens")
-    plan_t = row.get("plan_phase_telemetry") or {}
-    work_t = row.get("work_phase_telemetry") or {}
-    # Pi: dicts mit "tokens"-Unterfeld; Codex: flache normalize()-Felder.
+        return _phase_metric(row.get("telemetry") or {}, field)
+
     total = 0
     found = False
-    for phase in (plan_t, work_t):
-        if not phase:
-            continue
-        if "tokens" in phase and isinstance(phase["tokens"], dict):
-            t = phase["tokens"].get("total")
-        else:
-            fresh, out = phase.get("input_fresh"), phase.get("output")
-            t = fresh + out if None not in (fresh, out) else None
-        if t is not None:
-            total += t
+    for phase in (
+        row.get("plan_phase_telemetry") or {},
+        row.get("work_phase_telemetry") or {},
+    ):
+        value = _phase_metric(phase, field)
+        if value is not None:
+            total += value
             found = True
     return total if found else None
+
+
+def _processed_tokens(row: dict) -> int | None:
+    values = [_token_metric(row, field) for field in TOKEN_FIELDS]
+    return sum(values) if all(value is not None for value in values) else None
 
 
 def _plan_quality_cell(rows: list[dict]) -> str:
@@ -101,8 +127,15 @@ def _unplanned_changes_cell(rows: list[dict]) -> str:
 def build_table(harness: str, work_only_rows: list[dict], plan_work_rows: list[dict]) -> str:
     wall_wo = _mean([r.get("wall_time_s") for r in work_only_rows])
     wall_pw = _mean([r.get("wall_time_s") for r in plan_work_rows])
-    tok_wo = _mean([_tokens(r) for r in work_only_rows])
-    tok_pw = _mean([_tokens(r) for r in plan_work_rows])
+    token_metrics = {
+        field: (
+            _mean([_token_metric(r, field) for r in work_only_rows]),
+            _mean([_token_metric(r, field) for r in plan_work_rows]),
+        )
+        for field in TOKEN_FIELDS
+    }
+    processed_wo = _mean([_processed_tokens(r) for r in work_only_rows])
+    processed_pw = _mean([_processed_tokens(r) for r in plan_work_rows])
     err_wo = _mean([_tool_errors(r) for r in work_only_rows])
     err_pw = _mean([_tool_errors(r) for r in plan_work_rows])
 
@@ -119,8 +152,16 @@ def build_table(harness: str, work_only_rows: list[dict], plan_work_rows: list[d
         f"| Anforderungserfüllung | {MANUAL} | {MANUAL} | {MANUAL} |",
         f"| Laufzeit (s) | {wall_wo if wall_wo is not None else NA} "
         f"| {wall_pw if wall_pw is not None else NA} | {diff(wall_wo, wall_pw)} |",
-        f"| Tokenverbrauch | {tok_wo if tok_wo is not None else NA} "
-        f"| {tok_pw if tok_pw is not None else NA} | {diff(tok_wo, tok_pw)} |",
+        f"| Fresh Input | {token_metrics['input_fresh'][0] if token_metrics['input_fresh'][0] is not None else NA} "
+        f"| {token_metrics['input_fresh'][1] if token_metrics['input_fresh'][1] is not None else NA} | {diff(*token_metrics['input_fresh'])} |",
+        f"| Cache Read | {token_metrics['input_cache_read'][0] if token_metrics['input_cache_read'][0] is not None else NA} "
+        f"| {token_metrics['input_cache_read'][1] if token_metrics['input_cache_read'][1] is not None else NA} | {diff(*token_metrics['input_cache_read'])} |",
+        f"| Cache Write | {token_metrics['input_cache_write'][0] if token_metrics['input_cache_write'][0] is not None else NA} "
+        f"| {token_metrics['input_cache_write'][1] if token_metrics['input_cache_write'][1] is not None else NA} | {diff(*token_metrics['input_cache_write'])} |",
+        f"| Output | {token_metrics['output'][0] if token_metrics['output'][0] is not None else NA} "
+        f"| {token_metrics['output'][1] if token_metrics['output'][1] is not None else NA} | {diff(*token_metrics['output'])} |",
+        f"| Verarbeitete Tokens (Summe obiger Werte) | {processed_wo if processed_wo is not None else NA} "
+        f"| {processed_pw if processed_pw is not None else NA} | {diff(processed_wo, processed_pw)} |",
         f"| Toolfehler | {err_wo if err_wo is not None else NA} "
         f"| {err_pw if err_pw is not None else NA} | {diff(err_wo, err_pw)} |",
         f"| Nutzerkorrekturen | {MANUAL} | {MANUAL} | {MANUAL} |",
