@@ -69,11 +69,10 @@ def cmd_gate(_args):
     return rc
 
 
-def _fingerprint():
-    script = REAL_DUEL_DIR / "scripts" / "fingerprint.sh"
-    proc = subprocess.run(["bash", str(script)], capture_output=True, text=True)
-    sys.stderr.write(proc.stderr)
-    return json.loads(proc.stdout)
+def _load_fingerprint_module():
+    sys.path.insert(0, str(REAL_DUEL_DIR / "scripts"))
+    import fingerprint as fingerprint_module  # noqa: E402
+    return fingerprint_module
 
 
 def _make_worktree(run_id, arm, base_sha):
@@ -97,14 +96,51 @@ def cmd_smoke(args):
     task_dir = REAL_DUEL_DIR / "tasks" / "smoke-01-marker-file"
     run_id_base = "smoke-01-" + time.strftime("%Y%m%dT%H%M%S")
 
-    fp = _fingerprint()
+    load_candidate, make_run_id, read_instruction, run_checker = _load_obench_modules()
+    instruction = read_instruction(str(task_dir))
+
+    # Candidates werden VOR dem Dirty-Gate geladen (reine Parsing-Operation,
+    # keine Subprozess-Ausfuehrung) -- ihr Provenance-Hash und die aufgeloeste
+    # Modell-ID fliessen in den Fingerprint ein.
+    candidates = {name: load_candidate(str(path), None) for name, path in CANDIDATES.items()}
+
+    fingerprint_module = _load_fingerprint_module()
+    fp = fingerprint_module.compute_fingerprint(
+        candidates=candidates, task_instruction=instruction,
+        dirty_override=args.allow_dirty, model=MODEL,
+    )
     FINGERPRINTS_DIR.mkdir(parents=True, exist_ok=True)
     (FINGERPRINTS_DIR / f"{run_id_base}.json").write_text(json.dumps(fp, indent=2))
     print(json.dumps(fp, indent=2))
-    base_sha = fp["base_sha"]
 
-    load_candidate, make_run_id, read_instruction, run_checker = _load_obench_modules()
-    instruction = read_instruction(str(task_dir))
+    if not fp["canonical_repo_clean"] and not args.allow_dirty:
+        print(
+            "\nERROR:\nrepository is dirty\n"
+            "real-duel requires a clean canonical configuration baseline\n\n"
+            f"{len(fp['dirty_files_list'])} dirty/untracked path(s) in {REPO}:",
+            file=sys.stderr,
+        )
+        for line in fp["dirty_files_list"]:
+            print(f"  {line}", file=sys.stderr)
+        print(
+            "\nPi laedt seine Agent-Konfiguration (settings.json, AGENTS.md, "
+            "APPEND_SYSTEM.md) real aus diesem Verzeichnis, unabhaengig vom "
+            "Task-Worktree -- ein unsauberer Stand macht den Vergleich nicht "
+            "reproduzierbar. Commit/stash die Aenderungen, oder erzwinge "
+            "bewusst mit --allow-dirty (Lauf wird dann als "
+            "comparable=false markiert).",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not fp["canonical_repo_clean"] and args.allow_dirty:
+        print(
+            f"\nWARN: --allow-dirty -- {len(fp['dirty_files_list'])} dirty/"
+            "untracked path(s), Lauf wird als comparable=false markiert",
+            file=sys.stderr,
+        )
+
+    base_sha = fp["base_sha"]
 
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
     TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -112,13 +148,12 @@ def cmd_smoke(args):
     arm_by_candidate = {"pi-real": "pi", "codex-real": "codex"}
     summary = {}
 
-    for cand_name, cand_path in CANDIDATES.items():
+    for cand_name, candidate in candidates.items():
         arm = arm_by_candidate[cand_name]
         print(f"\n=== {cand_name}: worktree ===")
         workdir = _make_worktree(run_id_base, arm, base_sha)
         print(f"worktree: {workdir}")
 
-        candidate = load_candidate(str(cand_path), None)
         run_id = make_run_id(cand_name, "smoke-01-marker-file", MODEL, 1, candidate.identity_digest)
 
         print(f"=== {cand_name}: invoke ({run_id}) ===")
@@ -153,6 +188,8 @@ def cmd_smoke(args):
             "candidate_provenance": candidate.provenance,
             "base_sha": base_sha,
             "workdir": str(workdir),
+            "comparable": fp["comparable"],
+            "dirty_override": fp["dirty_override"],
             # Token-Felder bewusst None: generische obench-Manifeste parsen keine
             # Tokens selbst (siehe REAL_DUEL_AUDIT.md). Echte Normalisierung ist
             # Phase 2 (v3-Schema-Wiederverwendung ueber die Transkript-Datei).
@@ -211,6 +248,9 @@ def main():
     p_smoke = sub.add_parser("smoke", help="Fingerprint + Worktrees + Smoke-Task fuer beide Candidates")
     p_smoke.add_argument("--timeout", type=int, default=600, help="Adapter-Timeout in Sekunden (default: 600)")
     p_smoke.add_argument("--checker-timeout", type=int, default=120, help="Checker-Timeout in Sekunden (default: 120)")
+    p_smoke.add_argument("--allow-dirty", action="store_true",
+                          help="Lauf trotz unsauberem canonical repo erzwingen "
+                               "(Ergebnis wird comparable=false markiert)")
 
     sub.add_parser("report", help="obench report ueber die real-duel results.jsonl")
 
