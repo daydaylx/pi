@@ -10,24 +10,30 @@ diese kleine Suite.
 
 | Datei | Inhalt |
 | --- | --- |
-| `tests/plan-eval/tasks.mjs` | Acht realistische Aufgaben mit erwarteter und verbotener Änderungssurface |
+| `tests/plan-eval/tasks.mjs` | Neun realistische Aufgaben mit erwarteter und verbotener Änderungssurface sowie optionalen aufgabenspezifischen Randfällen |
 | `tests/plan-eval/score.mjs` | Die Bewertung, getrennt in mechanische und Urteilskriterien |
 | `tests/plan-eval/quality-bridge.mjs` | Lädt denselben Qualitätsgate, den das Produkt durchsetzt |
 | `tests/plan-eval/fixtures/` | Referenzpläne, an denen der Scorer selbst geprüft wird |
 | `tests/plan-eval/run.mjs` | Der Läufer |
 | `tests/workflow-mode/plan-eval.test.mjs` | Testet den Scorer (läuft in CI mit) |
 
-Die acht Aufgaben decken die geforderten Arten ab: bekannte kleine Änderung,
+Die neun Aufgaben decken die geforderten Arten ab: bekannte kleine Änderung,
 unbekannter Bug, Multi-Datei-Feature, Architekturänderung,
-Security-/Permission-Aufgabe, Migration, eine Contract-/Frontend-Aufgabe und
-eine ungeeignete Aufgabe, bei der der Planmodus unnötig ist.
+Security-/Permission-Aufgabe, Migration, eine Contract-/Frontend-Aufgabe,
+einen konkreten Leer-Katalog-Randfall und eine ungeeignete Aufgabe, bei der der
+Planmodus unnötig ist.
 
 ## Mechanisch vs. Urteil — die Trennung ist der Punkt
 
 Mechanisch entschieden und damit wiederholbar:
 
 `structure`, `surface-hit`, `surface-creep`, `verification`, `acceptance`,
-`risks`, `non-goals`, `proportionality`.
+`risks`, `edge-cases`, `non-goals`, `proportionality`.
+
+`edge-cases` wird nur aktiv, wenn die jeweilige Aufgabe konkrete
+`requiredConsiderations` deklariert. Damit kann die Evaluation einen fachlich
+übersehenen Randfall erkennen, ohne den produktiven Struktur-Gate in
+`plan-quality.ts` zu verschärfen.
 
 Nicht mechanisch entschieden und **getrennt** ausgewiesen:
 
@@ -69,6 +75,6 @@ Pi-Sitzung im angegebenen Modus mit dem `prompt` der Aufgabe, exportiert den
 entstandenen Plan als `<task-id>.md` und ruft `run.mjs --plans` darauf.
 
 Stand dieser Änderung ist der Live-Lauf **nicht durchgeführt**: die Suite ist
-vollständig, die mechanische Bewertung ist an den Referenzplänen verifiziert
-(16/16), aber es liegen keine modellgenerierten Pläne und damit keine Zahlen zur
-realen Planqualität vor.
+vollständig, die mechanische Bewertung ist an den Referenzplänen verifiziert,
+aber es liegen keine modellgenerierten Pläne und damit keine Zahlen zur realen
+Planqualität vor.

@@ -74,6 +74,22 @@ await test("the scorer separates a good plan from an overblown one", () => {
   );
 });
 
+await test("task-specific edge cases are scored outside the product gate", () => {
+  const edgeTask = task("empty-task-catalog");
+  const good = scorePlan(edgeTask, fixture("empty-task-catalog.good.md"));
+  const bad = scorePlan(edgeTask, fixture("empty-task-catalog.bad.md"));
+
+  assert(good.results["edge-cases"].pass, "the explicit empty-catalog handling passes");
+  assert(
+    !bad.results["edge-cases"].pass,
+    "a structurally valid plan that misses the empty catalog is detected",
+  );
+  assert(
+    bad.results.structure.pass,
+    "the missing edge case does not tighten or overload the product structure gate",
+  );
+});
+
 await test("a plan that declares itself unnecessary still scores well", () => {
   const score = scorePlan(
     task("plan-mode-unnecessary"),

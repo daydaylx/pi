@@ -18,6 +18,7 @@ export const MECHANICAL_CRITERIA = [
   "verification",
   "acceptance",
   "risks",
+  "edge-cases",
   "non-goals",
   "proportionality",
 ];
@@ -130,6 +131,24 @@ export function scorePlan(task, plan) {
   results.risks = {
     pass: risks.trim().length >= 20,
     detail: risks.trim() ? "Risiken benannt" : "keine Risiken benannt",
+  };
+
+  const normalizedPlan = plan.toLowerCase();
+  const requiredConsiderations = task.requiredConsiderations ?? [];
+  const missingConsiderations = requiredConsiderations.filter(
+    (consideration) =>
+      !consideration.any.some((needle) =>
+        normalizedPlan.includes(needle.toLowerCase()),
+      ),
+  );
+  results["edge-cases"] = {
+    pass: missingConsiderations.length === 0,
+    detail:
+      requiredConsiderations.length === 0
+        ? "keine aufgabenspezifischen Randfälle deklariert"
+        : missingConsiderations.length === 0
+          ? `${requiredConsiderations.length} aufgabenspezifische Randfall-Anforderung(en) abgedeckt`
+          : `fehlende Randfälle: ${missingConsiderations.map((item) => item.label).join(", ")}`,
   };
 
   const nonGoals = sectionMatching(plan, "nicht-ziele");

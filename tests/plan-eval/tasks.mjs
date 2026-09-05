@@ -111,6 +111,24 @@ export const EVAL_TASKS = [
     notes: "Versionierung des Protokolls muss vorkommen.",
   },
   {
+    id: "empty-task-catalog",
+    kind: "Randfall einer kleinen Utility",
+    mode: "simple_plan",
+    prompt:
+      "Erstelle benchmarks/real-duel/scripts/list_tasks.py mit JSON- und Tabellen-Ausgabe. Beide Modi müssen auch bei einem leeren tasks/-Verzeichnis fehlerfrei laufen.",
+    expectedSurface: ["benchmarks/real-duel/scripts/list_tasks.py"],
+    forbiddenSurface: ["benchmarks/real-duel/scripts/workflow_task.py"],
+    expectPhases: false,
+    requiredConsiderations: [
+      {
+        label: "leeres Task-Verzeichnis",
+        any: ["leeres tasks/", "keine tasks", "rows == []", "empty tasks"],
+      },
+    ],
+    notes:
+      "Reproduziert den im Pilot übersehenen Tabellen-Randfall, ohne den Produkt-Gate zu verschärfen.",
+  },
+  {
     id: "plan-mode-unnecessary",
     kind: "ungeeignete Aufgabe",
     mode: "simple_plan",
