@@ -1306,7 +1306,11 @@ body.task-sidebar-collapsed #btn-new-task {
 }
 
 .msg.user .bubble {
-  background: linear-gradient(135deg, var(--surface-2), color-mix(in srgb, var(--accent) 8%, var(--surface-2)));
+  background: linear-gradient(
+    135deg,
+    var(--surface-2),
+    color-mix(in srgb, var(--accent) 8%, var(--surface-2))
+  );
   border: 1px solid var(--border);
   border-radius: var(--radius-lg) var(--radius-lg) var(--space-1)
     var(--radius-lg);
@@ -1348,7 +1352,8 @@ body.task-sidebar-collapsed #btn-new-task {
 }
 
 @keyframes cursorBlink {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scaleY(1);
   }
@@ -1431,7 +1436,9 @@ h6.md-heading {
   color: var(--accent);
   text-decoration: none;
   border-bottom: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .md a:hover {
@@ -1847,12 +1854,16 @@ details.thinking-block pre {
   border-radius: var(--radius-lg);
   padding: var(--space-3);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 #composer-box:focus-within {
   border-color: var(--border-focus);
-  box-shadow: 0 0 0 2px var(--accent-subtle), 0 12px 36px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    0 0 0 2px var(--accent-subtle),
+    0 12px 36px rgba(0, 0, 0, 0.45);
 }
 
 #input {
