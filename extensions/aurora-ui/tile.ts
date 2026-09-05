@@ -59,6 +59,52 @@ export function renderPill(theme: Theme, text: string, tone: Tone): string {
   }
 }
 
+export interface ShortcutItem {
+  key: string;
+  label: string;
+}
+
+/**
+ * Renders key hints as a responsive sequence of complete units.  A shortcut
+ * never enters a row until both its key cap and its (possibly shortened)
+ * description fit; this prevents the final background-painted cell of a cap
+ * from being clipped at a card edge.
+ */
+export function renderShortcutRows(
+  theme: Theme,
+  width: number,
+  shortcuts: readonly ShortcutItem[],
+): string[] {
+  const available = Math.max(1, width);
+  const units = shortcuts.map(({ key, label }) => {
+    const cap = renderPill(theme, key, "accent");
+    const capWidth = visibleWidth(cap);
+    // A framed Aurora card is only used from 18 columns on, so every key cap
+    // has room here. Keep the cap atomic even if a caller uses this primitive
+    // in a smaller, frameless surface.
+    if (capWidth >= available) return crop(cap, available);
+    const labelWidth = Math.max(0, available - capWidth - 1);
+    const description = labelWidth > 0
+      ? crop(theme.fg("muted", label), labelWidth)
+      : "";
+    return description ? `${cap} ${description}` : cap;
+  });
+
+  const rows: string[] = [];
+  let row = "";
+  for (const unit of units) {
+    const candidate = row ? `${row}  ${unit}` : unit;
+    if (row && visibleWidth(candidate) > available) {
+      rows.push(row);
+      row = unit;
+    } else {
+      row = candidate;
+    }
+  }
+  if (row) rows.push(row);
+  return rows;
+}
+
 /** Terminal cells a pill occupies: its text plus one padding cell each side. */
 export function pillExtraCells(tone: Tone): number {
   return tone === "accent" ||
@@ -95,6 +141,31 @@ function padFilled(
   return `${theme.bg(fill, clipped)}${theme.bg(fill, padding)}`;
 }
 
+/**
+ * A title row reserves its badge first.  The earlier `${title}${badge}` crop
+ * made a long title consume the entire row and leave the state badge absent,
+ * even though the badge is the more useful scan target.
+ */
+function renderTileHeading(
+  theme: Theme,
+  title: string,
+  badge: string | undefined,
+  titleTone: NonNullable<TileInput["tone"]>,
+  badgeTone: NonNullable<TileInput["tone"]>,
+  width: number,
+): string {
+  const available = Math.max(1, width);
+  const renderedBadge = badge
+    ? ` ${renderPill(theme, badge, badgeTone)}`
+    : "";
+  const titleWidth = Math.max(1, available - visibleWidth(renderedBadge));
+  const renderedTitle = crop(
+    theme.fg(titleTone, theme.bold(title)),
+    titleWidth,
+  );
+  return `${renderedTitle}${renderedBadge}`;
+}
+
 /** One empty, filled card row — used to equalise tile heights in a grid. */
 export function tileBlankRow(
   theme: Theme,
@@ -125,14 +196,20 @@ export function renderTile(
   input: TileInput,
 ): string[] {
   const available = Math.max(1, width);
-  const title = theme.fg(input.tone ?? "accent", theme.bold(input.title));
-  const badge = input.badge
-    ? ` ${renderPill(theme, input.badge, input.tone ?? "muted")}`
-    : "";
+  const titleTone = input.tone ?? "accent";
+  const badgeTone = input.tone ?? "muted";
+  const heading = renderTileHeading(
+    theme,
+    input.title,
+    input.badge,
+    titleTone,
+    badgeTone,
+    Math.max(1, available - 4),
+  );
 
   if (available < 18) {
     return [
-      crop(`${title}${badge}`, available),
+      crop(heading, available),
       ...input.lines.map((line) => crop(line, available)),
     ];
   }
@@ -142,9 +219,9 @@ export function renderTile(
 
   if (!input.fill) {
     // Unfilled tiles keep the classic framed look without a background.
-    const heading = crop(`${title}${badge}`, innerWidth);
+    const clippedHeading = crop(heading, innerWidth);
     const fillDashes = "─".repeat(
-      Math.max(0, innerWidth - visibleWidth(heading)),
+      Math.max(0, innerWidth - visibleWidth(clippedHeading)),
     );
     const row = (value: string) => {
       const clipped = crop(value, innerWidth);
@@ -153,19 +230,19 @@ export function renderTile(
       )}${border(" │")}`;
     };
     return [
-      `${border("╭─")}${heading}${border(`${fillDashes}─╮`)}`,
+      `${border("╭─")}${clippedHeading}${border(`${fillDashes}─╮`)}`,
       ...input.lines.map(row),
       border(`╰${"─".repeat(Math.max(1, available - 2))}╯`),
     ];
   }
 
   const fill = input.fill;
-  const heading = padFilled(theme, `${title}${badge}`, innerWidth, fill);
+  const filledHeading = padFilled(theme, heading, innerWidth, fill);
   const row = (value: string) =>
     `${border("│ ")}${padFilled(theme, value, innerWidth, fill)}${border(" │")}`;
 
   return [
-    `${border("╭─")}${heading}${border("─╮")}`,
+    `${border("╭─")}${filledHeading}${border("─╮")}`,
     ...input.lines.map(row),
     border(`╰${"─".repeat(Math.max(1, available - 2))}╯`),
   ];
@@ -191,7 +268,12 @@ export function renderTileGrid(
   }
 
   const lines: string[] = [];
-  const columnWidth = Math.floor((available - 1) / 2);
+  // Split the content width exactly. Using the same floored width for both
+  // sides used to leave the final cell blank whenever `available` was even,
+  // making a pair of filled cards look like their frames and backgrounds had
+  // different right boundaries.
+  const leftWidth = Math.floor((available - 1) / 2);
+  const rightWidth = available - leftWidth - 1;
   for (let index = 0; index < tiles.length; index += 2) {
     const left = tiles[index]!;
     const right = tiles[index + 1];
@@ -199,14 +281,14 @@ export function renderTileGrid(
       lines.push(...renderTile(theme, available, left));
       continue;
     }
-    const leftLines = renderTile(theme, columnWidth, left);
-    const rightLines = renderTile(theme, columnWidth, right);
+    const leftLines = renderTile(theme, leftWidth, left);
+    const rightLines = renderTile(theme, rightWidth, right);
     const height = Math.max(leftLines.length, rightLines.length);
     for (let row = 0; row < height; row += 1) {
       const leftLine =
-        leftLines[row] ?? tileBlankRow(theme, columnWidth, left.fill);
+        leftLines[row] ?? tileBlankRow(theme, leftWidth, left.fill);
       const rightLine =
-        rightLines[row] ?? tileBlankRow(theme, columnWidth, right.fill);
+        rightLines[row] ?? tileBlankRow(theme, rightWidth, right.fill);
       lines.push(`${leftLine} ${rightLine}`);
     }
   }

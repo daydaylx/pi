@@ -11,7 +11,10 @@ completion, shortcuts and the `editorPaddingX` / `autocompleteMaxVisible`
 settings all come from the runtime (see
 `docs/decisions/013-aurora-keeps-the-native-editor.md`).
 
-The theme is `themes/aurora-night.json`. Motion and the dashboard presentation
+The theme is `themes/aurora-night.json`: a warm neutral system built from
+espresso surfaces, copper/amber emphasis, cream text and restrained semantic
+success, warning and error tones. Aurora components address Pi's semantic
+theme tokens rather than palette names. Motion and the dashboard presentation
 are read from the effective central setup configuration (`ui.motion`,
 `ui.dashboard`). One shared ticker runs only while work is visible. Only real
 moving work animates: in `contextual`, active thinking and running tools cycle
@@ -87,6 +90,12 @@ of loose text. Backgrounds never use hardcoded ANSI colours — Pi's public
 accent chips: `selectedBg`, warning: inverse), so every theme including
 `light` stays correct. Under 18 columns tiles fall back to frameless rows;
 compact surfaces stay flat by design.
+
+`renderTileGrid` gives every terminal cell to exactly one column, including
+even widths, and `renderShortcutRows` packs complete key-cap/description units
+before wrapping. These primitives use Pi's cell-aware width functions and
+Aurora's ANSI-safe crop wrapper, so a resize produces either a complete row or
+a deterministic wrap rather than a clipped filled cap or a one-cell edge gap.
 
 Der Header zeigt während eines laufenden Turns `DENKT NACH` (mit Thinking-Level),
 `ARBEITET`, `ANTWORTET` oder nach vier Sekunden ohne konkretes Aurora-Ereignis

@@ -1081,9 +1081,10 @@ export function renderAutoDashboard(
 
   // Live rows exist only during real work; idle sessions get no readiness
   // claim of their own — the panel badge already names the phase.
-  const activityLines = input.hasActiveWork
-    ? input.activityLines.map((line) => theme.fg("accent", `◌ Aktivität · ${line}`))
-    : [];
+  // The caller already provides one canonical activity heading (including its
+  // state and elapsed time). Prefixing every line with a second “Aktivität”
+  // marker made active cards read like two competing status systems.
+  const activityLines = input.hasActiveWork ? input.activityLines : [];
   const changes = task.changesSummary;
   // Routine rows only ever appear when they carry state: "no changes yet" and
   // "never checked" are zero statements and stay off the dashboard.

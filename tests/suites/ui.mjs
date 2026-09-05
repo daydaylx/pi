@@ -932,6 +932,18 @@ export const uiSections = {
         fgCloses.length,
         "a truncated styled line closes its foreground colour instead of leaking past the ellipsis",
       );
+      const badgeSafeCard = tile.renderTile(theme, 40, {
+        title: "Eine lange Überschrift darf den aktuellen Status nicht verdrängen",
+        badge: "LÄUFT",
+        tone: "accent",
+        fill: tile.NEUTRAL_TILE_FILL,
+        lines: [],
+      });
+      assert(
+        badgeSafeCard.every((row) => visibleWidth(row) === 40) &&
+          stripAnsi(badgeSafeCard[0]).includes("LÄUFT"),
+        "a long tile title yields to its status badge while preserving the card geometry",
+      );
       eq(
         tile.statusFill("success"),
         "toolSuccessBg",
@@ -1002,6 +1014,10 @@ export const uiSections = {
         wideDashboard.some((line) => line.includes(pendingBg)),
         "wide dashboard tiles carry the card fill",
       );
+      assert(
+        wideDashboard.every((line) => visibleWidth(line) === 120),
+        "paired dashboard tiles consume the entire even terminal width without a right-edge gap",
+      );
 
       // 4. Below the grid threshold the same tiles stack, and the compact
       // dashboard stays frame-free.
@@ -1052,9 +1068,13 @@ export const uiSections = {
 
       // 6. The welcome window is a centered card with fields and chips.
       for (const [columns, rows] of [
+        [80, 20],
+        [100, 28],
         [52, 14],
         [90, 28],
         [120, 30],
+        [160, 40],
+        [220, 48],
       ]) {
         const welcome = startscreen.renderStartscreen(theme, {
           width: columns,
@@ -1075,6 +1095,18 @@ export const uiSections = {
           `the welcome card is filled and carries labelled fields at ${columns}×${rows}`,
         );
       }
+
+      const narrowShortcuts = tile.renderShortcutRows(theme, 22, [
+        { key: "Shift+Tab", label: "Workflow" },
+        { key: "Super+M", label: "Modell" },
+        { key: "Super+D", label: "Denken" },
+      ]);
+      assert(
+        narrowShortcuts.every((row) => visibleWidth(row) <= 22) &&
+          narrowShortcuts.join("\n").includes("Shift+Tab") &&
+          narrowShortcuts.join("\n").includes("Super+M"),
+        "shortcut key caps wrap as complete width-safe units instead of being clipped at a card edge",
+      );
 
       // 7. Overlong titles and goals never break the frame: every row stays
       // within the dashboard width, cropped instead of overflowing.

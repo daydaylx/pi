@@ -319,13 +319,13 @@ export const targetConfigSections = {
         );
         eq(
           auroraTheme.vars.bg,
-          "#0b0d16",
-          "Aurora retains its dark blue-black page background",
+          "#17110e",
+          "Aurora uses its warm neutral page background",
         );
         eq(
           auroraTheme.vars.bgDark,
-          "#090a12",
-          "Aurora retains its darker terminal background variant",
+          "#100b09",
+          "Aurora uses its darker warm terminal background variant",
         );
         assert(
           contrastRatio(auroraTheme.vars.textMuted, auroraTheme.vars.bg) >=
@@ -348,6 +348,12 @@ export const targetConfigSections = {
           assert(
             Boolean(auroraTheme.colors?.[color]),
             `Aurora declares ${color}`,
+          );
+        }
+        for (const legacyCoolColor of ["cyan", "cyanBright", "cyanAnsi", "violet", "blue", "magenta"]) {
+          assert(
+            !Object.hasOwn(auroraTheme.vars, legacyCoolColor),
+            `Aurora no longer exposes the legacy cool ${legacyCoolColor} theme variable`,
           );
         }
 

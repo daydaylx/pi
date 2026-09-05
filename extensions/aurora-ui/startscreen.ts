@@ -1,8 +1,9 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { layoutForSize } from "../shared/layout.ts";
 import { compactCwd } from "./cwd.ts";
-import { renderField, renderPill, renderTile } from "./tile.ts";
+import { crop } from "./layout.ts";
+import { renderField, renderShortcutRows, renderTile } from "./tile.ts";
 import { renderThinkingLabel } from "./thinking.ts";
 
 export interface StartscreenInput {
@@ -16,10 +17,10 @@ export interface StartscreenInput {
 }
 
 /** The welcome window never claims the full terminal — it is a dialog. */
-const WELCOME_TILE_MAX_COLUMNS = 64;
+const WELCOME_TILE_MAX_COLUMNS = 68;
 
 function center(value: string, width: number): string {
-  const clipped = truncateToWidth(value, Math.max(1, width), "…");
+  const clipped = crop(value, Math.max(1, width));
   return `${" ".repeat(Math.max(0, Math.floor((width - visibleWidth(clipped)) / 2)))}${clipped}`;
 }
 
@@ -28,7 +29,7 @@ function separator(theme: Theme): string {
 }
 
 function metadata(theme: Theme, input: StartscreenInput, width: number): string {
-  const model = truncateToWidth(input.model ?? "kein Modell", 28, "…");
+  const model = crop(input.model ?? "kein Modell", 28);
   const values = [
     theme.fg("accent", theme.bold(input.workflow.toUpperCase())),
     theme.fg("text", model),
@@ -39,30 +40,13 @@ function metadata(theme: Theme, input: StartscreenInput, width: number): string 
 
 /** Shortcut chips with their description, wrapped to the tile's inner width. */
 function shortcutRows(theme: Theme, innerWidth: number): string[] {
-  const shortcuts: Array<[key: string, label: string]> = [
+  return renderShortcutRows(theme, innerWidth, [
     ["Shift+Tab", "Workflow"],
     ["Super+M", "Modell"],
     ["Super+D", "Denken"],
     ["Super+Q", "Befehle"],
     ["Super+S", "Rollen"],
-  ];
-  const rendered = shortcuts.map(
-    ([key, label]) =>
-      `${renderPill(theme, key, "accent")} ${theme.fg("dim", label)}`,
-  );
-  const rows: string[] = [];
-  let current = "";
-  for (const chip of rendered) {
-    const candidate = current ? `${current}  ${chip}` : chip;
-    if (visibleWidth(candidate) > innerWidth && current) {
-      rows.push(current);
-      current = chip;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current) rows.push(current);
-  return rows;
+  ].map(([key, label]) => ({ key, label })));
 }
 
 /**
@@ -93,7 +77,7 @@ export function renderStartscreen(
     ];
 
   const tileWidth = Math.min(width, WELCOME_TILE_MAX_COLUMNS);
-  const model = truncateToWidth(input.model ?? "kein Modell", 28, "…");
+  const model = crop(input.model ?? "kein Modell", 28);
   const tile = renderTile(theme, tileWidth, {
     title: "PI · AURORA",
     tone: "accent",
@@ -109,7 +93,7 @@ export function renderStartscreen(
         ? [renderField(theme, "Denken", renderThinkingLabel(theme, input.thinking))]
         : []),
       renderField(theme, "Ordner", theme.fg("muted", cwd)),
-      "",
+      theme.fg("borderMuted", "KURZBEFEHLE"),
       ...shortcutRows(theme, Math.max(1, tileWidth - 4)),
     ],
   });
