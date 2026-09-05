@@ -1,8 +1,15 @@
-# Laufdaten gehoeren nach ~/.local/state/real-duel/, nicht ins Repo.
-# Diese Eintraege sind nur ein Sicherheitsnetz falls versehentlich lokal
-# hierher geschrieben wird.
+# Laufdaten gehoeren standardmaessig nach ~/.local/state/real-duel/, nicht
+# ins Repo. Diese Eintraege sind nur ein Sicherheitsnetz falls versehentlich
+# lokal hierher geschrieben wird.
 *.jsonl
 transcripts/
 fingerprints/
 *.log
 __pycache__/
+
+# Ausnahme: bewusst kuratierte Rohdaten-Archive einzelner Real-Duel-Berichte
+# (auf Nutzerwunsch vollstaendig committet, siehe reports/*/README bzw. den
+# jeweiligen *.md-Bericht).
+!reports/*/
+!reports/*/*.jsonl
+!reports/*/*.log

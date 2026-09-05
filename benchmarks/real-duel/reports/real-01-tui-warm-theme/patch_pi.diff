@@ -1,0 +1,694 @@
+diff --git a/extensions/aurora-ui/README.md b/extensions/aurora-ui/README.md
+index 569ed40..cf63ce0 100644
+--- a/extensions/aurora-ui/README.md
++++ b/extensions/aurora-ui/README.md
+@@ -28,10 +28,9 @@ MODELL` transition alone.
+ **Footer** (`footer.ts`) — the one permanent status surface, and one line.
+ It shows the workflow, model, thinking level, session folder, context share and
+ verification state, then drops whole segments from the least important end as
+-the terminal narrows. From comfortable width on, the workflow and every risk
+-segment render as filled status chips (pills); routine metadata stays flat so
+-the line never turns into a wall of colour, and narrow tiers keep the flat look
+-entirely. Whenever a visible dashboard surface owns verification reporting
++the terminal narrows. It stays flat at every width: workflow and risks use
++semantic tone and weight rather than competing background chips. Whenever a
++visible dashboard surface owns verification reporting
+ (auto/compact/expanded), the footer suppresses the routine successful state;
+ failed or stale checks remain critical footer risks at every width. The folder
+ is derived from the session CWD captured at session start and compacted purely;
+@@ -78,14 +77,15 @@ that session and is skipped for resumed conversations.
+ 
+ **Visual language** (`tile.ts`) — dashboard, welcome window and inspector
+ render as filled cards: framed tiles whose title row and body rows are padded
+-and painted through `Theme.bg`, plus labelled fields and status pills instead
+-of loose text. Backgrounds never use hardcoded ANSI colours — Pi's public
+-`Theme.bg` accepts exactly eight surfaces (`selectedBg`, `scrollbarThumb`,
++and painted through `Theme.bg`, plus quiet label/value rows and flat status
++badges. Backgrounds never use hardcoded ANSI colours — Pi's public `Theme.bg`
++accepts exactly eight surfaces (`selectedBg`, `scrollbarThumb`,
+ `searchMatchBg`, `userMessageBg`, `customMessageBg`, `toolPendingBg`,
+-`toolSuccessBg`, `toolErrorBg`), and the tile primitives map tones onto them
+-(neutral card: `toolPendingBg`, success: `toolSuccessBg`, error: `toolErrorBg`,
+-accent chips: `selectedBg`, warning: inverse), so every theme including
+-`light` stays correct. Under 18 columns tiles fall back to frameless rows;
++`toolSuccessBg`, `toolErrorBg`), and the tile primitives map card status onto
++them (neutral card: `toolPendingBg`, success: `toolSuccessBg`, error:
++`toolErrorBg`). Only physical shortcut keycaps use `selectedBg`; this keeps
++surfaces bounded and every theme including `light` correct. Under 18 columns
++tiles fall back to frameless rows;
+ compact surfaces stay flat by design.
+ 
+ Der Header zeigt während eines laufenden Turns `DENKT NACH` (mit Thinking-Level),
+diff --git a/extensions/aurora-ui/footer.ts b/extensions/aurora-ui/footer.ts
+index bb4fcb0..ea9d07c 100644
+--- a/extensions/aurora-ui/footer.ts
++++ b/extensions/aurora-ui/footer.ts
+@@ -10,7 +10,6 @@ import {
+ import { compactCwd } from "./cwd.ts";
+ import { crop } from "./layout.ts";
+ import type { AuroraUiState } from "./state.ts";
+-import { pillExtraCells, renderPill } from "./tile.ts";
+ import { thinkingLabel, thinkingTone } from "./thinking.ts";
+ 
+ /**
+@@ -281,41 +280,17 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
+  * Terminal cells, not JavaScript characters. `⚠`, `✓`, CJK and emoji all cost
+  * more cells than they do string length, and a selection that measured length
+  * would believe a line fits and then have to truncate a finished segment at
+- * the edge — the one thing this layout exists to avoid. Pills pay their two
+- * padding cells here too, so the width budget sees exactly what renders.
++ * the edge. The footer is intentionally flat: its hierarchy comes from tone
++ * and weight, not a row of competing coloured background chips.
+  */
+-function widthOf(segments: readonly Segment[], pillTier: boolean): number {
++function widthOf(segments: readonly Segment[]): number {
+   if (segments.length === 0) return 0;
+   return (
+-    segments.reduce(
+-      (total, segment) =>
+-        total + visibleWidth(segment.text) + segmentCells(segment, pillTier),
+-      0,
+-    ) + visibleWidth(STATUS_SEPARATOR) * (segments.length - 1)
++    segments.reduce((total, segment) => total + visibleWidth(segment.text), 0) +
++    visibleWidth(STATUS_SEPARATOR) * (segments.length - 1)
+   );
+ }
+ 
+-/** Whether the footer renders segments as filled pills at this tier. */
+-function isPillTier(tier: Layout): boolean {
+-  return tier === "comfortable" || tier === "wide";
+-}
+-
+-/**
+- * Whether this segment renders as a pill when the tier allows it: workflow
+- * identity and every critical risk; routine metadata never does. Shared by
+- * the width budget (`segmentCells`) and the actual render decision below, so
+- * the two can never silently drift apart.
+- */
+-function isPillSegment(segment: Segment): boolean {
+-  return segment.critical || segment.slot === Slot.workflow;
+-}
+-
+-/** The extra cells a segment pays when it renders as a filled pill. */
+-function segmentCells(segment: Segment, pillTier: boolean): number {
+-  if (!pillTier || !isPillSegment(segment)) return 0;
+-  return pillExtraCells(segment.tone);
+-}
+-
+ /**
+  * Keep what the width tier allows plus everything critical, then, while the
+  * result is still too wide, drop the least important segment that is left.
+@@ -328,12 +303,11 @@ function selectFooterSegments(
+   width: number,
+ ): Segment[] {
+   const tier = footerTier(width);
+-  const pillTier = isPillTier(tier);
+   const allowed = ROUTINE_TIERS[tier];
+   const kept = segments.filter(
+     (segment) => segment.critical || allowed.has(segment.slot),
+   );
+-  while (kept.length > 1 && widthOf(kept, pillTier) > width) {
++  while (kept.length > 1 && widthOf(kept) > width) {
+     let victim = 0;
+     for (let index = 1; index < kept.length; index += 1)
+       if (kept[index]!.priority > kept[victim]!.priority) victim = index;
+@@ -352,18 +326,12 @@ export function renderFooterLines(
+     collectSegments(input, available),
+     available,
+   );
+-  // From comfortable width on, the workflow identity and every risk read as
+-  // filled chips; routine metadata stays flat so the line never turns into a
+-  // wall of colour. Narrow tiers keep the flat look entirely.
+-  const pillTier = isPillTier(footerTier(available));
+   const line = selected
+     .map((segment) =>
+-      pillTier && isPillSegment(segment)
+-        ? renderPill(theme, segment.text, segment.tone)
+-        : renderSegment(theme, segment.text, {
+-            tone: segment.tone,
+-            bold: segment.bold,
+-          }),
++      renderSegment(theme, segment.text, {
++        tone: segment.tone,
++        bold: segment.bold,
++      }),
+     )
+     .join(statusSeparator(theme));
+   return [visibleWidth(line) > available ? crop(line, available) : line];
+diff --git a/extensions/aurora-ui/index.ts b/extensions/aurora-ui/index.ts
+index c02e4e6..ee028b5 100644
+--- a/extensions/aurora-ui/index.ts
++++ b/extensions/aurora-ui/index.ts
+@@ -406,9 +406,13 @@ function activityGlyph(
+   if (kind === "waiting") return theme.fg("muted", "·");
+   if (motion === "off") return "";
+   if (kind === "responding") return theme.fg("accent", "•");
+-  if (motion === "reduced") return theme.fg("accent", "●");
++  // Working uses the warm terracotta thinking-medium token while responses
++  // retain the brighter amber accent. This makes the live states legible even
++  // before their labels are read, without introducing a second animation.
++  const activeTone = kind === "tool" ? "thinkingMedium" : "accent";
++  if (motion === "reduced") return theme.fg(activeTone, "●");
+   const frames = ["·", "•", "●", "•"];
+-  const color = frame % frames.length === 2 ? "accent" : "muted";
++  const color = frame % frames.length === 2 ? activeTone : "muted";
+   return theme.fg(color, frames[frame % frames.length]!);
+ }
+ 
+@@ -538,12 +542,16 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
+         ticker?.frame ?? 0,
+         presentation.kind,
+       );
+-      const heading = theme.fg(
++      const headingTone =
+         presentation.kind === "thinking"
+           ? thinkingTone(state.model.thinking)
+-          : presentation.kind === "waiting"
+-            ? "muted"
+-            : "accent",
++          : presentation.kind === "tool"
++            ? "thinkingMedium"
++            : presentation.kind === "waiting"
++              ? "muted"
++              : "accent";
++      const heading = theme.fg(
++        headingTone,
+         theme.bold(
+           `${glyph ? `${glyph} ` : ""}${presentation.label}${thinking} · ${elapsed}s`,
+         ),
+diff --git a/extensions/aurora-ui/startscreen.ts b/extensions/aurora-ui/startscreen.ts
+index 03a0eb2..9b17655 100644
+--- a/extensions/aurora-ui/startscreen.ts
++++ b/extensions/aurora-ui/startscreen.ts
+@@ -1,8 +1,14 @@
+ import type { Theme } from "@earendil-works/pi-coding-agent";
+-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
++import { visibleWidth } from "@earendil-works/pi-tui";
+ import { layoutForSize } from "../shared/layout.ts";
+ import { compactCwd } from "./cwd.ts";
+-import { renderField, renderPill, renderTile } from "./tile.ts";
++import { crop } from "./layout.ts";
++import {
++  renderField,
++  renderKeycap,
++  renderSectionLabel,
++  renderTile,
++} from "./tile.ts";
+ import { renderThinkingLabel } from "./thinking.ts";
+ 
+ export interface StartscreenInput {
+@@ -15,11 +21,18 @@ export interface StartscreenInput {
+   homeDirectory?: string;
+ }
+ 
+-/** The welcome window never claims the full terminal — it is a dialog. */
+-const WELCOME_TILE_MAX_COLUMNS = 64;
++/** The welcome window is an orientation card, not a terminal-wide banner. */
++const WELCOME_TILE_MAX_COLUMNS = 72;
++
++function welcomeTileWidth(width: number): number {
++  // Keep breathing room at practical widths, but never steal the content area
++  // on compact terminals where a side margin would cause early wrapping.
++  const margin = width >= 76 ? 4 : width >= 60 ? 2 : 0;
++  return Math.max(1, Math.min(width - margin * 2, WELCOME_TILE_MAX_COLUMNS));
++}
+ 
+ function center(value: string, width: number): string {
+-  const clipped = truncateToWidth(value, Math.max(1, width), "…");
++  const clipped = crop(value, width);
+   return `${" ".repeat(Math.max(0, Math.floor((width - visibleWidth(clipped)) / 2)))}${clipped}`;
+ }
+ 
+@@ -28,7 +41,7 @@ function separator(theme: Theme): string {
+ }
+ 
+ function metadata(theme: Theme, input: StartscreenInput, width: number): string {
+-  const model = truncateToWidth(input.model ?? "kein Modell", 28, "…");
++  const model = crop(input.model ?? "kein Modell", 28);
+   const values = [
+     theme.fg("accent", theme.bold(input.workflow.toUpperCase())),
+     theme.fg("text", model),
+@@ -48,7 +61,7 @@ function shortcutRows(theme: Theme, innerWidth: number): string[] {
+   ];
+   const rendered = shortcuts.map(
+     ([key, label]) =>
+-      `${renderPill(theme, key, "accent")} ${theme.fg("dim", label)}`,
++      `${renderKeycap(theme, key)} ${theme.fg("muted", label)}`,
+   );
+   const rows: string[] = [];
+   let current = "";
+@@ -92,8 +105,8 @@ export function renderStartscreen(
+       center(theme.fg("muted", cwd), width),
+     ];
+ 
+-  const tileWidth = Math.min(width, WELCOME_TILE_MAX_COLUMNS);
+-  const model = truncateToWidth(input.model ?? "kein Modell", 28, "…");
++  const tileWidth = welcomeTileWidth(width);
++  const model = crop(input.model ?? "kein Modell", 28);
+   const tile = renderTile(theme, tileWidth, {
+     title: "PI · AURORA",
+     tone: "accent",
+@@ -109,7 +122,7 @@ export function renderStartscreen(
+         ? [renderField(theme, "Denken", renderThinkingLabel(theme, input.thinking))]
+         : []),
+       renderField(theme, "Ordner", theme.fg("muted", cwd)),
+-      "",
++      renderSectionLabel(theme, "Kurzbefehle"),
+       ...shortcutRows(theme, Math.max(1, tileWidth - 4)),
+     ],
+   });
+diff --git a/extensions/aurora-ui/tile.ts b/extensions/aurora-ui/tile.ts
+index 6117f78..e674ead 100644
+--- a/extensions/aurora-ui/tile.ts
++++ b/extensions/aurora-ui/tile.ts
+@@ -34,51 +34,45 @@ export function statusFill(tone: TileInput["tone"]): TileFill {
+ }
+ 
+ /**
+- * A status chip. Loud tones get a filled background (or inverse, since Pi has
+- * no warning background token); routine tones stay flat text so a bar of many
+- * segments does not turn into a wall of colour.
++ * Status badges deliberately stay flat. Filled status fragments were visually
++ * heavier than the card they lived in and made a row look like overlapping
++ * backgrounds. The card surface owns grouping; tone and weight own emphasis.
+  */
+ export function renderPill(theme: Theme, text: string, tone: Tone): string {
+-  switch (tone) {
+-    case "accent":
+-      return theme.bg(
+-        "selectedBg",
+-        ` ${theme.fg("accent", theme.bold(text))} `,
+-      );
+-    case "success":
+-      return theme.bg("toolSuccessBg", ` ${theme.fg("success", text)} `);
+-    case "error":
+-      return theme.bg(
+-        "toolErrorBg",
+-        ` ${theme.fg("error", theme.bold(text))} `,
+-      );
+-    case "warning":
+-      return theme.inverse(` ${theme.fg("warning", text)} `);
+-    default:
+-      return theme.fg(tone, text);
+-  }
++  return theme.fg(
++    tone,
++    tone === "accent" || tone === "error" ? theme.bold(text) : text,
++  );
++}
++
++/** A keycap is the one bounded filled token: an actual keyboard affordance. */
++export function renderKeycap(theme: Theme, key: string): string {
++  return theme.bg(
++    "selectedBg",
++    ` ${theme.fg("text", theme.bold(key))} `,
++  );
+ }
+ 
+-/** Terminal cells a pill occupies: its text plus one padding cell each side. */
+-export function pillExtraCells(tone: Tone): number {
+-  return tone === "accent" ||
+-    tone === "success" ||
+-    tone === "error" ||
+-    tone === "warning"
+-    ? 2
+-    : 0;
++/** Flat status badges consume no decorative padding in width budgets. */
++export function pillExtraCells(_tone: Tone): number {
++  return 0;
+ }
+ 
+ /**
+- * A labelled field row: muted uppercase label, then the value. Callers style
+- * the value themselves; the tile crops the finished row to its inner width.
++ * A labelled field row: the label stays quiet while the value carries the
++ * visual weight. The shared separator avoids component-specific spacing hacks.
+  */
+ export function renderField(
+   theme: Theme,
+   label: string,
+   value: string,
+ ): string {
+-  return `${theme.fg("muted", theme.bold(label.toUpperCase()))}  ${value}`;
++  return `${theme.fg("dim", label.toUpperCase())}${theme.fg("borderMuted", " · ")}${value}`;
++}
++
++/** A quiet section marker for grouped content within a single card surface. */
++export function renderSectionLabel(theme: Theme, label: string): string {
++  return theme.fg("borderMuted", `── ${label.toUpperCase()} `);
+ }
+ 
+ function padFilled(
+diff --git a/extensions/aurora-ui/tool-renderers.ts b/extensions/aurora-ui/tool-renderers.ts
+index 08158a0..9385603 100644
+--- a/extensions/aurora-ui/tool-renderers.ts
++++ b/extensions/aurora-ui/tool-renderers.ts
+@@ -1079,11 +1079,9 @@ export function renderAutoDashboard(
+     );
+   }
+ 
+-  // Live rows exist only during real work; idle sessions get no readiness
+-  // claim of their own — the panel badge already names the phase.
+-  const activityLines = input.hasActiveWork
+-    ? input.activityLines.map((line) => theme.fg("accent", `◌ Aktivität · ${line}`))
+-    : [];
++  // Live rows exist only during real work; the header already names the
++  // concrete state, so do not wrap it in a second generic activity label.
++  const activityLines = input.hasActiveWork ? input.activityLines : [];
+   const changes = task.changesSummary;
+   // Routine rows only ever appear when they carry state: "no changes yet" and
+   // "never checked" are zero statements and stay off the dashboard.
+diff --git a/extensions/shared/ui-theme.ts b/extensions/shared/ui-theme.ts
+index b5d35f2..fefe973 100644
+--- a/extensions/shared/ui-theme.ts
++++ b/extensions/shared/ui-theme.ts
+@@ -5,10 +5,11 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
+  * value here must exist in the Pi theme schema — `Theme.fg` throws on unknown
+  * keys.
+  *
+- * Backgrounds are allowed, but only through `aurora-ui/tile.ts` (tiles and
+- * pills): Pi's `Theme.bg` accepts exactly eight fixed surfaces, and the tile
+- * primitives map tones onto them, so every theme (including `light`) stays
+- * correct. Flat segments in this module never paint a background.
++ * Backgrounds are allowed only through `aurora-ui/tile.ts` (card surfaces and
++ * physical shortcut keycaps): Pi's `Theme.bg` accepts exactly eight fixed
++ * surfaces, and the tile primitives map card status onto them, so every theme
++ * (including `light`) stays correct. Flat segments in this module never paint
++ * a background.
+  */
+ export type Tone =
+   | "accent"
+@@ -30,9 +31,8 @@ export type Tone =
+ 
+ /**
+  * Renders one status segment for a TUI bar. Segments are told apart by their
+- * foreground color and by the separator their caller places between them; on
+- * wide tiers callers may upgrade individual segments to pills via
+- * `aurora-ui/tile.ts`, but the default stays a flat, background-free run.
++ * foreground color and by the separator their caller places between them. It
++ * stays a flat, background-free run at every width.
+  */
+ export function renderSegment(
+   theme: Theme,
+diff --git a/tests/suites/runtime/aurora-ui.mjs b/tests/suites/runtime/aurora-ui.mjs
+index 7d5d1e7..93edde3 100644
+--- a/tests/suites/runtime/aurora-ui.mjs
++++ b/tests/suites/runtime/aurora-ui.mjs
+@@ -222,12 +222,12 @@ export const auroraUiSections = {
+           const narrow = stripAnsi(footer.render(60)[0]);
+ 
+           // Decision 009 moved the workflow here: one permanent status surface,
+-          // and the editor frame that used to carry it is gone. From comfortable
+-          // width on the workflow renders as a chip, so one padding cell leads.
++          // and the editor frame that used to carry it is gone. The footer is
++          // flat at every width, so the workflow leads without chip padding.
+           assert(
+-            wide.startsWith(" Architekturplan") &&
++            wide.startsWith("Architekturplan") &&
+               narrow.startsWith("Architekturplan"),
+-            "the workflow label leads the footer at every width",
++            "the workflow label leads the flat footer at every width",
+           );
+ 
+           // The footer renders runtime state, never the wide risk banner the
+diff --git a/tests/suites/ui.mjs b/tests/suites/ui.mjs
+index c424b5f..67aef73 100644
+--- a/tests/suites/ui.mjs
++++ b/tests/suites/ui.mjs
+@@ -948,29 +948,25 @@ export const uiSections = {
+         "routine tones stay on the neutral card surface",
+       );
+ 
+-      // 2. Pills: loud tones get a filled chip, routine tones stay flat.
++      // 2. Status badges are flat, so a card owns its own surface. Keyboard
++      // affordances are the one exception: a bounded keycap remains filled.
+       const accentPill = tile.renderPill(theme, "ARBEITEN", "accent");
+       assert(
+-        accentPill.includes(selectedBg) &&
+-          stripAnsi(accentPill) === " ARBEITEN ",
+-        "an accent pill is a padded chip on the selection surface",
++        !accentPill.includes(selectedBg) &&
++          stripAnsi(accentPill) === "ARBEITEN",
++        "an accent status stays flat instead of adding a competing background",
+       );
+       const errorPill = tile.renderPill(theme, "⚠ YOLO", "error");
+       assert(
+-        errorPill.includes(errorBg),
+-        "an error pill is a padded chip on the error surface",
++        !errorPill.includes(errorBg) && stripAnsi(errorPill) === "⚠ YOLO",
++        "an error status stays flat until an error card owns the surface",
+       );
+-      eq(
+-        tile.renderPill(theme, "unwichtig", "muted"),
+-        theme.fg("muted", "unwichtig"),
+-        "a muted pill stays flat text",
+-      );
+-      eq(
+-        tile.pillExtraCells("warning"),
+-        2,
+-        "a warning chip pays two padding cells",
++      const keycap = tile.renderKeycap(theme, "Shift+Tab");
++      assert(
++        keycap.includes(selectedBg) && stripAnsi(keycap) === " Shift+Tab ",
++        "a keyboard affordance is the only bounded selection-surface fill",
+       );
+-      eq(tile.pillExtraCells("muted"), 0, "a flat segment pays no padding");
++      eq(tile.pillExtraCells("warning"), 0, "flat status has no padding");
+ 
+       // 3. The wide dashboard is a 2×2 card grid: paired tiles share one row.
+       const tvm = {
+@@ -1050,19 +1046,28 @@ export const uiSections = {
+         "a failed check stays visible and paints the error surface",
+       );
+ 
+-      // 6. The welcome window is a centered card with fields and chips.
++      // 6. The welcome card has one surface, wraps shortcut pairs and keeps
++      // long metadata cell-safe across the practical terminal matrix.
+       for (const [columns, rows] of [
+         [52, 14],
+-        [90, 28],
++        [80, 24],
++        [100, 28],
+         [120, 30],
++        [160, 36],
++        [220, 40],
+       ]) {
+         const welcome = startscreen.renderStartscreen(theme, {
+           width: columns,
+           rows,
+           workflow: "Work",
+-          model: "aurora-test-model",
++          model: "aurora-test-model-with-a-deliberately-long-suffix",
+           thinking: "high",
+-          cwd: path.join(homedir(), "projects", "pi"),
++          cwd: path.join(
++            homedir(),
++            "projects",
++            "sehr-langer-projektname-mit-unicode-项目",
++            "pi",
++          ),
+           homeDirectory: homedir(),
+         });
+         assert(
+@@ -1071,8 +1076,10 @@ export const uiSections = {
+         );
+         assert(
+           welcome.some((row) => row.includes(pendingBg)) &&
+-            stripAnsi(welcome.join("\n")).includes("WORKFLOW"),
+-          `the welcome card is filled and carries labelled fields at ${columns}×${rows}`,
++            stripAnsi(welcome.join("\n")).includes("KURZBEFEHLE") &&
++            stripAnsi(welcome.join("\n")).includes("Shift+Tab") &&
++            stripAnsi(welcome.join("\n")).includes("Super+S"),
++          `the welcome card groups wrapped shortcuts at ${columns}×${rows}`,
+         );
+       }
+ 
+@@ -1098,7 +1105,8 @@ export const uiSections = {
+         "overlong titles and goals are cropped inside intact frames",
+       );
+ 
+-      // 8. The footer upgrades workflow and risks to chips on wide tiers only.
++      // 8. The footer is deliberately flat at every width: workflow remains
++      // strongest through colour and weight, not a competing background chip.
+       const footerState = {
+         sessionEpoch: "tile-test",
+         workflow: { phase: "work", label: "Work" },
+@@ -1113,8 +1121,10 @@ export const uiSections = {
+         contextPercent: null,
+       })[0];
+       assert(
+-        wideFooter.includes(selectedBg) && wideFooter.includes(errorBg),
+-        "the wide footer paints the workflow chip and the YOLO risk chip",
++        !wideFooter.includes(selectedBg) &&
++          !wideFooter.includes(errorBg) &&
++          stripAnsi(wideFooter).startsWith("Work"),
++        "the wide footer is flat and starts with the primary workflow status",
+       );
+       const standardFooter = auroraFooter.renderFooterLines(theme, 70, {
+         state: footerState,
+diff --git a/themes/aurora-night.json b/themes/aurora-night.json
+index 942df30..79089c3 100644
+--- a/themes/aurora-night.json
++++ b/themes/aurora-night.json
+@@ -2,88 +2,86 @@
+   "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+   "name": "aurora-night",
+   "vars": {
+-    "bg": "#0b0d16",
+-    "bgDark": "#090a12",
+-    "surface": "#1a1530",
+-    "highlight": "#211d39",
+-    "selection": "#273b63",
+-    "text": "#e6f1ff",
+-    "textMuted": "#aab4cc",
+-    "dim": "#68718e",
+-    "gutter": "#3a3159",
+-    "cyan": "#58e6ff",
+-    "cyanBright": "#a5f3fc",
+-    "cyanAnsi": "#56d4dd",
+-    "violet": "#a78bfa",
+-    "magenta": "#f472d0",
+-    "blue": "#82aaff",
+-    "green": "#7ee787",
+-    "yellow": "#f9e2af",
+-    "orange": "#ffb86c",
+-    "red": "#ff6b8a",
+-    "successBg": "#12271d",
+-    "errorBg": "#2b1622"
++    "background": "#15110f",
++    "backgroundDark": "#100c0b",
++    "surface": "#211916",
++    "surfaceRaised": "#2b201c",
++    "selection": "#493128",
++    "textPrimary": "#f4eadb",
++    "textSecondary": "#c8b8a4",
++    "textMuted": "#8d7b6c",
++    "border": "#4b3930",
++    "borderMuted": "#342722",
++    "amber": "#d6a35d",
++    "copper": "#bd7955",
++    "terracotta": "#ad624b",
++    "burgundy": "#8b4b49",
++    "sage": "#92a978",
++    "ochre": "#c49a55",
++    "rose": "#bd6660",
++    "successSurface": "#1d281c",
++    "errorSurface": "#321d1b"
+   },
+   "colors": {
+-    "accent": "cyan",
+-    "border": "gutter",
+-    "borderAccent": "cyan",
+-    "borderMuted": "dim",
+-    "success": "green",
+-    "error": "red",
+-    "warning": "yellow",
+-    "muted": "textMuted",
+-    "dim": "dim",
+-    "text": "text",
+-    "thinkingText": "textMuted",
++    "accent": "amber",
++    "border": "border",
++    "borderAccent": "copper",
++    "borderMuted": "borderMuted",
++    "success": "sage",
++    "error": "rose",
++    "warning": "ochre",
++    "muted": "textSecondary",
++    "dim": "textMuted",
++    "text": "textPrimary",
++    "thinkingText": "textSecondary",
+     "selectedBg": "selection",
+-    "scrollbarThumb": "gutter",
++    "scrollbarThumb": "border",
+     "searchMatchBg": "selection",
+-    "searchMatchText": "text",
++    "searchMatchText": "textPrimary",
+     "userMessageBg": "surface",
+-    "userMessageText": "text",
+-    "customMessageBg": "highlight",
+-    "customMessageText": "text",
+-    "customMessageLabel": "magenta",
++    "userMessageText": "textPrimary",
++    "customMessageBg": "surfaceRaised",
++    "customMessageText": "textPrimary",
++    "customMessageLabel": "terracotta",
+     "toolPendingBg": "surface",
+-    "toolSuccessBg": "successBg",
+-    "toolErrorBg": "errorBg",
+-    "toolTitle": "cyan",
+-    "toolOutput": "textMuted",
+-    "mdHeading": "violet",
+-    "mdLink": "cyan",
+-    "mdLinkUrl": "cyanAnsi",
+-    "mdCode": "green",
+-    "mdCodeBlock": "text",
+-    "mdCodeBlockBorder": "gutter",
+-    "mdQuote": "textMuted",
+-    "mdQuoteBorder": "violet",
+-    "mdHr": "gutter",
+-    "mdListBullet": "magenta",
+-    "toolDiffAdded": "green",
+-    "toolDiffRemoved": "red",
+-    "toolDiffContext": "textMuted",
+-    "syntaxComment": "dim",
+-    "syntaxKeyword": "violet",
+-    "syntaxFunction": "cyan",
+-    "syntaxVariable": "text",
+-    "syntaxString": "green",
+-    "syntaxNumber": "magenta",
+-    "syntaxType": "yellow",
+-    "syntaxOperator": "cyan",
+-    "syntaxPunctuation": "textMuted",
+-    "thinkingOff": "dim",
+-    "thinkingMinimal": "textMuted",
+-    "thinkingLow": "cyanAnsi",
+-    "thinkingMedium": "blue",
+-    "thinkingHigh": "violet",
+-    "thinkingXhigh": "magenta",
+-    "thinkingMax": "cyanBright",
+-    "bashMode": "orange"
++    "toolSuccessBg": "successSurface",
++    "toolErrorBg": "errorSurface",
++    "toolTitle": "amber",
++    "toolOutput": "textSecondary",
++    "mdHeading": "copper",
++    "mdLink": "amber",
++    "mdLinkUrl": "terracotta",
++    "mdCode": "sage",
++    "mdCodeBlock": "textPrimary",
++    "mdCodeBlockBorder": "border",
++    "mdQuote": "textSecondary",
++    "mdQuoteBorder": "copper",
++    "mdHr": "borderMuted",
++    "mdListBullet": "terracotta",
++    "toolDiffAdded": "sage",
++    "toolDiffRemoved": "rose",
++    "toolDiffContext": "textSecondary",
++    "syntaxComment": "textMuted",
++    "syntaxKeyword": "copper",
++    "syntaxFunction": "amber",
++    "syntaxVariable": "textPrimary",
++    "syntaxString": "sage",
++    "syntaxNumber": "terracotta",
++    "syntaxType": "ochre",
++    "syntaxOperator": "copper",
++    "syntaxPunctuation": "textSecondary",
++    "thinkingOff": "textMuted",
++    "thinkingMinimal": "textSecondary",
++    "thinkingLow": "copper",
++    "thinkingMedium": "terracotta",
++    "thinkingHigh": "amber",
++    "thinkingXhigh": "burgundy",
++    "thinkingMax": "textPrimary",
++    "bashMode": "copper"
+   },
+   "export": {
+-    "pageBg": "#0b0d16",
+-    "cardBg": "#1a1530",
+-    "infoBg": "#211d39"
++    "pageBg": "#15110f",
++    "cardBg": "#211916",
++    "infoBg": "#2b201c"
+   }
+ }

@@ -1,0 +1,67 @@
+Bereite Arbeitsverzeichnis vor (losgelöster HEAD 696c61f)Bereite Arbeitsverzeichnis vor (losgelöster HEAD 696c61f)
+
+HEAD ist jetzt bei 696c61f feat(real-duel): generalize pi-duel for open-ended real tasks
+HEAD ist jetzt bei 696c61f feat(real-duel): generalize pi-duel for open-ended real tasks
+{
+  "base_sha": "696c61f00d312d4b9e8155a1605dfc38784347b4",
+  "canonical_repo_clean": true,
+  "dirty_files_list": [],
+  "dirty_override": false,
+  "comparable": true,
+  "pi_version": "0.84.4",
+  "codex_version": "codex-cli 0.149.1",
+  "pi_model": "gpt-5.6-terra",
+  "codex_model": "gpt-5.6-terra",
+  "pi_reasoning": "high",
+  "codex_reasoning": "high",
+  "openbench_sha": "ee71845c2898a98b8e3f2810cba8a1389f72c27e",
+  "openbench_tag": "v1.0.0",
+  "pi_candidate_manifest_hash": "266a976ba3d506b71a43d15b6f0467460183b5c8eab88e9200aa0690da252161",
+  "codex_candidate_manifest_hash": "8dfde2f84f100b094fffa76c4fd6887d9ec45cbe8f90c3d5531858cac2545e45",
+  "task_prompt_hash": "fe586082a97045d1d03a55408f4493715ef25ab23d3ab106043b1b8790343774",
+  "agents_md_hash": "f14d0c4745a58d07512a029397ff292b37dafdf91f667e7317659b5883917f49",
+  "settings_json_hash": "44adfeb4613ca426cb02a8214571f7a435fe39399fd1a132451624551a37e79a",
+  "append_system_md_hash": "266b5e370f13880bb16ddefddf68076d56965c1470e9ef41bf9ebabf5043c8ae",
+  "codex_config_toml_hash": "609c4bf162d5f3ca8b9adb64720c98fb607789ae868c3f11a5292d2d16b533b2",
+  "codex_instructions_md_hash": "01e58858a40f76ebfd584a335d9d13e2452b462b401aa91b1fc52ed760cb425d",
+  "captured_at": "2026-09-05T03:24:41+0200"
+}
+=== pi-real: worktree ===
+=== codex-real: worktree ===
+worktree (codex-real): /home/d/.local/state/real-duel/worktrees/real-01-tui-warm-theme-20260905T032441/codex
+=== codex-real: invoke (codex-real@9d5a44771f4e:real-01-tui-warm-theme:gpt-5.6-terra:trial1) ===
+worktree (pi-real): /home/d/.local/state/real-duel/worktrees/real-01-tui-warm-theme-20260905T032441/pi
+=== pi-real: invoke (pi-real@14bce8d9d19d:real-01-tui-warm-theme:gpt-5.6-terra:trial1) ===
+=== pi-real: checker_exit=None success=None wall_time_s=516.889 model_calls=32 input_fresh=121250 cache_read=2521088 output=19558 ===
+=== codex-real: checker_exit=None success=None wall_time_s=577.117 model_calls=1 input_fresh=139110 cache_read=3602688 output=19717 ===
+
+=== Zusammenfassung ===
+{
+  "pi-real": {
+    "success": null,
+    "checker_exit": null,
+    "wall_time_s": 516.889,
+    "workdir": "/home/d/.local/state/real-duel/worktrees/real-01-tui-warm-theme-20260905T032441/pi",
+    "model_calls": 32,
+    "input_fresh": 121250,
+    "input_cache_read": 2521088,
+    "output": 19558,
+    "tool_calls": 82,
+    "tool_errors": 5
+  },
+  "codex-real": {
+    "success": null,
+    "checker_exit": null,
+    "wall_time_s": 577.117,
+    "workdir": "/home/d/.local/state/real-duel/worktrees/real-01-tui-warm-theme-20260905T032441/codex",
+    "model_calls": 1,
+    "input_fresh": 139110,
+    "input_cache_read": 3602688,
+    "output": 19717,
+    "tool_calls": 26,
+    "tool_errors": 3
+  }
+}
+
+run_id: real-01-tui-warm-theme-20260905T032441
+Aufraeumen mit: pi-duel cleanup real-01-tui-warm-theme-20260905T032441

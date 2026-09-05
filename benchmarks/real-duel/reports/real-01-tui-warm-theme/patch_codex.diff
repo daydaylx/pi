@@ -1,0 +1,557 @@
+diff --git a/extensions/aurora-ui/README.md b/extensions/aurora-ui/README.md
+index 569ed40..268c1ee 100644
+--- a/extensions/aurora-ui/README.md
++++ b/extensions/aurora-ui/README.md
+@@ -11,7 +11,10 @@ completion, shortcuts and the `editorPaddingX` / `autocompleteMaxVisible`
+ settings all come from the runtime (see
+ `docs/decisions/013-aurora-keeps-the-native-editor.md`).
+ 
+-The theme is `themes/aurora-night.json`. Motion and the dashboard presentation
++The theme is `themes/aurora-night.json`: a warm neutral system built from
++espresso surfaces, copper/amber emphasis, cream text and restrained semantic
++success, warning and error tones. Aurora components address Pi's semantic
++theme tokens rather than palette names. Motion and the dashboard presentation
+ are read from the effective central setup configuration (`ui.motion`,
+ `ui.dashboard`). One shared ticker runs only while work is visible. Only real
+ moving work animates: in `contextual`, active thinking and running tools cycle
+@@ -88,6 +91,12 @@ accent chips: `selectedBg`, warning: inverse), so every theme including
+ `light` stays correct. Under 18 columns tiles fall back to frameless rows;
+ compact surfaces stay flat by design.
+ 
++`renderTileGrid` gives every terminal cell to exactly one column, including
++even widths, and `renderShortcutRows` packs complete key-cap/description units
++before wrapping. These primitives use Pi's cell-aware width functions and
++Aurora's ANSI-safe crop wrapper, so a resize produces either a complete row or
++a deterministic wrap rather than a clipped filled cap or a one-cell edge gap.
++
+ Der Header zeigt während eines laufenden Turns `DENKT NACH` (mit Thinking-Level),
+ `ARBEITET`, `ANTWORTET` oder nach vier Sekunden ohne konkretes Aurora-Ereignis
+ `WARTET AUF MODELL`, jeweils mit einer Laufzeit. `WARTET AUF MODELL` bedeutet,
+diff --git a/extensions/aurora-ui/startscreen.ts b/extensions/aurora-ui/startscreen.ts
+index 03a0eb2..130ba14 100644
+--- a/extensions/aurora-ui/startscreen.ts
++++ b/extensions/aurora-ui/startscreen.ts
+@@ -1,8 +1,9 @@
+ import type { Theme } from "@earendil-works/pi-coding-agent";
+-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
++import { visibleWidth } from "@earendil-works/pi-tui";
+ import { layoutForSize } from "../shared/layout.ts";
+ import { compactCwd } from "./cwd.ts";
+-import { renderField, renderPill, renderTile } from "./tile.ts";
++import { crop } from "./layout.ts";
++import { renderField, renderShortcutRows, renderTile } from "./tile.ts";
+ import { renderThinkingLabel } from "./thinking.ts";
+ 
+ export interface StartscreenInput {
+@@ -16,10 +17,10 @@ export interface StartscreenInput {
+ }
+ 
+ /** The welcome window never claims the full terminal — it is a dialog. */
+-const WELCOME_TILE_MAX_COLUMNS = 64;
++const WELCOME_TILE_MAX_COLUMNS = 68;
+ 
+ function center(value: string, width: number): string {
+-  const clipped = truncateToWidth(value, Math.max(1, width), "…");
++  const clipped = crop(value, Math.max(1, width));
+   return `${" ".repeat(Math.max(0, Math.floor((width - visibleWidth(clipped)) / 2)))}${clipped}`;
+ }
+ 
+@@ -28,7 +29,7 @@ function separator(theme: Theme): string {
+ }
+ 
+ function metadata(theme: Theme, input: StartscreenInput, width: number): string {
+-  const model = truncateToWidth(input.model ?? "kein Modell", 28, "…");
++  const model = crop(input.model ?? "kein Modell", 28);
+   const values = [
+     theme.fg("accent", theme.bold(input.workflow.toUpperCase())),
+     theme.fg("text", model),
+@@ -39,30 +40,13 @@ function metadata(theme: Theme, input: StartscreenInput, width: number): string
+ 
+ /** Shortcut chips with their description, wrapped to the tile's inner width. */
+ function shortcutRows(theme: Theme, innerWidth: number): string[] {
+-  const shortcuts: Array<[key: string, label: string]> = [
++  return renderShortcutRows(theme, innerWidth, [
+     ["Shift+Tab", "Workflow"],
+     ["Super+M", "Modell"],
+     ["Super+D", "Denken"],
+     ["Super+Q", "Befehle"],
+     ["Super+S", "Rollen"],
+-  ];
+-  const rendered = shortcuts.map(
+-    ([key, label]) =>
+-      `${renderPill(theme, key, "accent")} ${theme.fg("dim", label)}`,
+-  );
+-  const rows: string[] = [];
+-  let current = "";
+-  for (const chip of rendered) {
+-    const candidate = current ? `${current}  ${chip}` : chip;
+-    if (visibleWidth(candidate) > innerWidth && current) {
+-      rows.push(current);
+-      current = chip;
+-    } else {
+-      current = candidate;
+-    }
+-  }
+-  if (current) rows.push(current);
+-  return rows;
++  ].map(([key, label]) => ({ key, label })));
+ }
+ 
+ /**
+@@ -93,7 +77,7 @@ export function renderStartscreen(
+     ];
+ 
+   const tileWidth = Math.min(width, WELCOME_TILE_MAX_COLUMNS);
+-  const model = truncateToWidth(input.model ?? "kein Modell", 28, "…");
++  const model = crop(input.model ?? "kein Modell", 28);
+   const tile = renderTile(theme, tileWidth, {
+     title: "PI · AURORA",
+     tone: "accent",
+@@ -109,7 +93,7 @@ export function renderStartscreen(
+         ? [renderField(theme, "Denken", renderThinkingLabel(theme, input.thinking))]
+         : []),
+       renderField(theme, "Ordner", theme.fg("muted", cwd)),
+-      "",
++      theme.fg("borderMuted", "KURZBEFEHLE"),
+       ...shortcutRows(theme, Math.max(1, tileWidth - 4)),
+     ],
+   });
+diff --git a/extensions/aurora-ui/tile.ts b/extensions/aurora-ui/tile.ts
+index 6117f78..592ef4b 100644
+--- a/extensions/aurora-ui/tile.ts
++++ b/extensions/aurora-ui/tile.ts
+@@ -59,6 +59,52 @@ export function renderPill(theme: Theme, text: string, tone: Tone): string {
+   }
+ }
+ 
++export interface ShortcutItem {
++  key: string;
++  label: string;
++}
++
++/**
++ * Renders key hints as a responsive sequence of complete units.  A shortcut
++ * never enters a row until both its key cap and its (possibly shortened)
++ * description fit; this prevents the final background-painted cell of a cap
++ * from being clipped at a card edge.
++ */
++export function renderShortcutRows(
++  theme: Theme,
++  width: number,
++  shortcuts: readonly ShortcutItem[],
++): string[] {
++  const available = Math.max(1, width);
++  const units = shortcuts.map(({ key, label }) => {
++    const cap = renderPill(theme, key, "accent");
++    const capWidth = visibleWidth(cap);
++    // A framed Aurora card is only used from 18 columns on, so every key cap
++    // has room here. Keep the cap atomic even if a caller uses this primitive
++    // in a smaller, frameless surface.
++    if (capWidth >= available) return crop(cap, available);
++    const labelWidth = Math.max(0, available - capWidth - 1);
++    const description = labelWidth > 0
++      ? crop(theme.fg("muted", label), labelWidth)
++      : "";
++    return description ? `${cap} ${description}` : cap;
++  });
++
++  const rows: string[] = [];
++  let row = "";
++  for (const unit of units) {
++    const candidate = row ? `${row}  ${unit}` : unit;
++    if (row && visibleWidth(candidate) > available) {
++      rows.push(row);
++      row = unit;
++    } else {
++      row = candidate;
++    }
++  }
++  if (row) rows.push(row);
++  return rows;
++}
++
+ /** Terminal cells a pill occupies: its text plus one padding cell each side. */
+ export function pillExtraCells(tone: Tone): number {
+   return tone === "accent" ||
+@@ -95,6 +141,31 @@ function padFilled(
+   return `${theme.bg(fill, clipped)}${theme.bg(fill, padding)}`;
+ }
+ 
++/**
++ * A title row reserves its badge first.  The earlier `${title}${badge}` crop
++ * made a long title consume the entire row and leave the state badge absent,
++ * even though the badge is the more useful scan target.
++ */
++function renderTileHeading(
++  theme: Theme,
++  title: string,
++  badge: string | undefined,
++  titleTone: NonNullable<TileInput["tone"]>,
++  badgeTone: NonNullable<TileInput["tone"]>,
++  width: number,
++): string {
++  const available = Math.max(1, width);
++  const renderedBadge = badge
++    ? ` ${renderPill(theme, badge, badgeTone)}`
++    : "";
++  const titleWidth = Math.max(1, available - visibleWidth(renderedBadge));
++  const renderedTitle = crop(
++    theme.fg(titleTone, theme.bold(title)),
++    titleWidth,
++  );
++  return `${renderedTitle}${renderedBadge}`;
++}
++
+ /** One empty, filled card row — used to equalise tile heights in a grid. */
+ export function tileBlankRow(
+   theme: Theme,
+@@ -125,14 +196,20 @@ export function renderTile(
+   input: TileInput,
+ ): string[] {
+   const available = Math.max(1, width);
+-  const title = theme.fg(input.tone ?? "accent", theme.bold(input.title));
+-  const badge = input.badge
+-    ? ` ${renderPill(theme, input.badge, input.tone ?? "muted")}`
+-    : "";
++  const titleTone = input.tone ?? "accent";
++  const badgeTone = input.tone ?? "muted";
++  const heading = renderTileHeading(
++    theme,
++    input.title,
++    input.badge,
++    titleTone,
++    badgeTone,
++    Math.max(1, available - 4),
++  );
+ 
+   if (available < 18) {
+     return [
+-      crop(`${title}${badge}`, available),
++      crop(heading, available),
+       ...input.lines.map((line) => crop(line, available)),
+     ];
+   }
+@@ -142,9 +219,9 @@ export function renderTile(
+ 
+   if (!input.fill) {
+     // Unfilled tiles keep the classic framed look without a background.
+-    const heading = crop(`${title}${badge}`, innerWidth);
++    const clippedHeading = crop(heading, innerWidth);
+     const fillDashes = "─".repeat(
+-      Math.max(0, innerWidth - visibleWidth(heading)),
++      Math.max(0, innerWidth - visibleWidth(clippedHeading)),
+     );
+     const row = (value: string) => {
+       const clipped = crop(value, innerWidth);
+@@ -153,19 +230,19 @@ export function renderTile(
+       )}${border(" │")}`;
+     };
+     return [
+-      `${border("╭─")}${heading}${border(`${fillDashes}─╮`)}`,
++      `${border("╭─")}${clippedHeading}${border(`${fillDashes}─╮`)}`,
+       ...input.lines.map(row),
+       border(`╰${"─".repeat(Math.max(1, available - 2))}╯`),
+     ];
+   }
+ 
+   const fill = input.fill;
+-  const heading = padFilled(theme, `${title}${badge}`, innerWidth, fill);
++  const filledHeading = padFilled(theme, heading, innerWidth, fill);
+   const row = (value: string) =>
+     `${border("│ ")}${padFilled(theme, value, innerWidth, fill)}${border(" │")}`;
+ 
+   return [
+-    `${border("╭─")}${heading}${border("─╮")}`,
++    `${border("╭─")}${filledHeading}${border("─╮")}`,
+     ...input.lines.map(row),
+     border(`╰${"─".repeat(Math.max(1, available - 2))}╯`),
+   ];
+@@ -191,7 +268,12 @@ export function renderTileGrid(
+   }
+ 
+   const lines: string[] = [];
+-  const columnWidth = Math.floor((available - 1) / 2);
++  // Split the content width exactly. Using the same floored width for both
++  // sides used to leave the final cell blank whenever `available` was even,
++  // making a pair of filled cards look like their frames and backgrounds had
++  // different right boundaries.
++  const leftWidth = Math.floor((available - 1) / 2);
++  const rightWidth = available - leftWidth - 1;
+   for (let index = 0; index < tiles.length; index += 2) {
+     const left = tiles[index]!;
+     const right = tiles[index + 1];
+@@ -199,14 +281,14 @@ export function renderTileGrid(
+       lines.push(...renderTile(theme, available, left));
+       continue;
+     }
+-    const leftLines = renderTile(theme, columnWidth, left);
+-    const rightLines = renderTile(theme, columnWidth, right);
++    const leftLines = renderTile(theme, leftWidth, left);
++    const rightLines = renderTile(theme, rightWidth, right);
+     const height = Math.max(leftLines.length, rightLines.length);
+     for (let row = 0; row < height; row += 1) {
+       const leftLine =
+-        leftLines[row] ?? tileBlankRow(theme, columnWidth, left.fill);
++        leftLines[row] ?? tileBlankRow(theme, leftWidth, left.fill);
+       const rightLine =
+-        rightLines[row] ?? tileBlankRow(theme, columnWidth, right.fill);
++        rightLines[row] ?? tileBlankRow(theme, rightWidth, right.fill);
+       lines.push(`${leftLine} ${rightLine}`);
+     }
+   }
+diff --git a/extensions/aurora-ui/tool-renderers.ts b/extensions/aurora-ui/tool-renderers.ts
+index 08158a0..8b18366 100644
+--- a/extensions/aurora-ui/tool-renderers.ts
++++ b/extensions/aurora-ui/tool-renderers.ts
+@@ -1081,9 +1081,10 @@ export function renderAutoDashboard(
+ 
+   // Live rows exist only during real work; idle sessions get no readiness
+   // claim of their own — the panel badge already names the phase.
+-  const activityLines = input.hasActiveWork
+-    ? input.activityLines.map((line) => theme.fg("accent", `◌ Aktivität · ${line}`))
+-    : [];
++  // The caller already provides one canonical activity heading (including its
++  // state and elapsed time). Prefixing every line with a second “Aktivität”
++  // marker made active cards read like two competing status systems.
++  const activityLines = input.hasActiveWork ? input.activityLines : [];
+   const changes = task.changesSummary;
+   // Routine rows only ever appear when they carry state: "no changes yet" and
+   // "never checked" are zero statements and stay off the dashboard.
+diff --git a/tests/suites/runtime/target-config.mjs b/tests/suites/runtime/target-config.mjs
+index 09e1ee1..40374da 100644
+--- a/tests/suites/runtime/target-config.mjs
++++ b/tests/suites/runtime/target-config.mjs
+@@ -319,13 +319,13 @@ export const targetConfigSections = {
+         );
+         eq(
+           auroraTheme.vars.bg,
+-          "#0b0d16",
+-          "Aurora retains its dark blue-black page background",
++          "#17110e",
++          "Aurora uses its warm neutral page background",
+         );
+         eq(
+           auroraTheme.vars.bgDark,
+-          "#090a12",
+-          "Aurora retains its darker terminal background variant",
++          "#100b09",
++          "Aurora uses its darker warm terminal background variant",
+         );
+         assert(
+           contrastRatio(auroraTheme.vars.textMuted, auroraTheme.vars.bg) >=
+@@ -350,6 +350,12 @@ export const targetConfigSections = {
+             `Aurora declares ${color}`,
+           );
+         }
++        for (const legacyCoolColor of ["cyan", "cyanBright", "cyanAnsi", "violet", "blue", "magenta"]) {
++          assert(
++            !Object.hasOwn(auroraTheme.vars, legacyCoolColor),
++            `Aurora no longer exposes the legacy cool ${legacyCoolColor} theme variable`,
++          );
++        }
+ 
+         // Pi's theme schema sets additionalProperties:false and Theme.fg/bg throw on
+         // unknown keys. A key the schema does not know therefore does not fail
+diff --git a/tests/suites/ui.mjs b/tests/suites/ui.mjs
+index c424b5f..5177fd9 100644
+--- a/tests/suites/ui.mjs
++++ b/tests/suites/ui.mjs
+@@ -932,6 +932,18 @@ export const uiSections = {
+         fgCloses.length,
+         "a truncated styled line closes its foreground colour instead of leaking past the ellipsis",
+       );
++      const badgeSafeCard = tile.renderTile(theme, 40, {
++        title: "Eine lange Überschrift darf den aktuellen Status nicht verdrängen",
++        badge: "LÄUFT",
++        tone: "accent",
++        fill: tile.NEUTRAL_TILE_FILL,
++        lines: [],
++      });
++      assert(
++        badgeSafeCard.every((row) => visibleWidth(row) === 40) &&
++          stripAnsi(badgeSafeCard[0]).includes("LÄUFT"),
++        "a long tile title yields to its status badge while preserving the card geometry",
++      );
+       eq(
+         tile.statusFill("success"),
+         "toolSuccessBg",
+@@ -1002,6 +1014,10 @@ export const uiSections = {
+         wideDashboard.some((line) => line.includes(pendingBg)),
+         "wide dashboard tiles carry the card fill",
+       );
++      assert(
++        wideDashboard.every((line) => visibleWidth(line) === 120),
++        "paired dashboard tiles consume the entire even terminal width without a right-edge gap",
++      );
+ 
+       // 4. Below the grid threshold the same tiles stack, and the compact
+       // dashboard stays frame-free.
+@@ -1052,9 +1068,13 @@ export const uiSections = {
+ 
+       // 6. The welcome window is a centered card with fields and chips.
+       for (const [columns, rows] of [
++        [80, 20],
++        [100, 28],
+         [52, 14],
+         [90, 28],
+         [120, 30],
++        [160, 40],
++        [220, 48],
+       ]) {
+         const welcome = startscreen.renderStartscreen(theme, {
+           width: columns,
+@@ -1076,6 +1096,18 @@ export const uiSections = {
+         );
+       }
+ 
++      const narrowShortcuts = tile.renderShortcutRows(theme, 22, [
++        { key: "Shift+Tab", label: "Workflow" },
++        { key: "Super+M", label: "Modell" },
++        { key: "Super+D", label: "Denken" },
++      ]);
++      assert(
++        narrowShortcuts.every((row) => visibleWidth(row) <= 22) &&
++          narrowShortcuts.join("\n").includes("Shift+Tab") &&
++          narrowShortcuts.join("\n").includes("Super+M"),
++        "shortcut key caps wrap as complete width-safe units instead of being clipped at a card edge",
++      );
++
+       // 7. Overlong titles and goals never break the frame: every row stays
+       // within the dashboard width, cropped instead of overflowing.
+       const longTitle = renderers.renderDashboard(
+diff --git a/themes/aurora-night.json b/themes/aurora-night.json
+index 942df30..3a6c7ab 100644
+--- a/themes/aurora-night.json
++++ b/themes/aurora-night.json
+@@ -2,36 +2,33 @@
+   "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+   "name": "aurora-night",
+   "vars": {
+-    "bg": "#0b0d16",
+-    "bgDark": "#090a12",
+-    "surface": "#1a1530",
+-    "highlight": "#211d39",
+-    "selection": "#273b63",
+-    "text": "#e6f1ff",
+-    "textMuted": "#aab4cc",
+-    "dim": "#68718e",
+-    "gutter": "#3a3159",
+-    "cyan": "#58e6ff",
+-    "cyanBright": "#a5f3fc",
+-    "cyanAnsi": "#56d4dd",
+-    "violet": "#a78bfa",
+-    "magenta": "#f472d0",
+-    "blue": "#82aaff",
+-    "green": "#7ee787",
+-    "yellow": "#f9e2af",
+-    "orange": "#ffb86c",
+-    "red": "#ff6b8a",
+-    "successBg": "#12271d",
+-    "errorBg": "#2b1622"
++    "bg": "#17110e",
++    "bgDark": "#100b09",
++    "surface": "#241914",
++    "highlight": "#302019",
++    "selection": "#4a2d20",
++    "text": "#f3e7d3",
++    "textMuted": "#cbbba5",
++    "dim": "#8f7a6b",
++    "gutter": "#4d392e",
++    "copper": "#d59661",
++    "amber": "#e4b06f",
++    "terracotta": "#c8795c",
++    "burgundy": "#bf7068",
++    "sage": "#9cab76",
++    "ochre": "#d2a45d",
++    "rosewood": "#cf7770",
++    "successBg": "#202919",
++    "errorBg": "#3a1e1b"
+   },
+   "colors": {
+-    "accent": "cyan",
++    "accent": "copper",
+     "border": "gutter",
+-    "borderAccent": "cyan",
++    "borderAccent": "copper",
+     "borderMuted": "dim",
+-    "success": "green",
+-    "error": "red",
+-    "warning": "yellow",
++    "success": "sage",
++    "error": "rosewood",
++    "warning": "ochre",
+     "muted": "textMuted",
+     "dim": "dim",
+     "text": "text",
+@@ -44,46 +41,46 @@
+     "userMessageText": "text",
+     "customMessageBg": "highlight",
+     "customMessageText": "text",
+-    "customMessageLabel": "magenta",
++    "customMessageLabel": "terracotta",
+     "toolPendingBg": "surface",
+     "toolSuccessBg": "successBg",
+     "toolErrorBg": "errorBg",
+-    "toolTitle": "cyan",
++    "toolTitle": "copper",
+     "toolOutput": "textMuted",
+-    "mdHeading": "violet",
+-    "mdLink": "cyan",
+-    "mdLinkUrl": "cyanAnsi",
+-    "mdCode": "green",
++    "mdHeading": "amber",
++    "mdLink": "copper",
++    "mdLinkUrl": "terracotta",
++    "mdCode": "sage",
+     "mdCodeBlock": "text",
+     "mdCodeBlockBorder": "gutter",
+     "mdQuote": "textMuted",
+-    "mdQuoteBorder": "violet",
++    "mdQuoteBorder": "terracotta",
+     "mdHr": "gutter",
+-    "mdListBullet": "magenta",
+-    "toolDiffAdded": "green",
+-    "toolDiffRemoved": "red",
++    "mdListBullet": "terracotta",
++    "toolDiffAdded": "sage",
++    "toolDiffRemoved": "rosewood",
+     "toolDiffContext": "textMuted",
+     "syntaxComment": "dim",
+-    "syntaxKeyword": "violet",
+-    "syntaxFunction": "cyan",
++    "syntaxKeyword": "burgundy",
++    "syntaxFunction": "copper",
+     "syntaxVariable": "text",
+-    "syntaxString": "green",
+-    "syntaxNumber": "magenta",
+-    "syntaxType": "yellow",
+-    "syntaxOperator": "cyan",
++    "syntaxString": "sage",
++    "syntaxNumber": "terracotta",
++    "syntaxType": "amber",
++    "syntaxOperator": "copper",
+     "syntaxPunctuation": "textMuted",
+     "thinkingOff": "dim",
+     "thinkingMinimal": "textMuted",
+-    "thinkingLow": "cyanAnsi",
+-    "thinkingMedium": "blue",
+-    "thinkingHigh": "violet",
+-    "thinkingXhigh": "magenta",
+-    "thinkingMax": "cyanBright",
+-    "bashMode": "orange"
++    "thinkingLow": "copper",
++    "thinkingMedium": "amber",
++    "thinkingHigh": "terracotta",
++    "thinkingXhigh": "burgundy",
++    "thinkingMax": "text",
++    "bashMode": "terracotta"
+   },
+   "export": {
+-    "pageBg": "#0b0d16",
+-    "cardBg": "#1a1530",
+-    "infoBg": "#211d39"
++    "pageBg": "#17110e",
++    "cardBg": "#241914",
++    "infoBg": "#302019"
+   }
+ }

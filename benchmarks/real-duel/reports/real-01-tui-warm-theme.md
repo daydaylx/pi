@@ -124,11 +124,26 @@ Pi-Vorteil, der das Gesamturteil aber nicht kippt.
 
 ## Artefakte
 
-- Patches (lokal, nicht committet): `patch_pi.diff` / `patch_codex.diff`
-  im Session-Scratchpad — nicht Teil dieses Reports, da sie echten
-  Produktcode enthalten und vor einem eventuellen Merge separat begutachtet
-  werden sollten, nicht blind aus einem Benchmark-Lauf übernommen.
-- Rohtranskripte, Fingerprint, `results.jsonl`-Zeilen:
-  `~/.local/state/real-duel/obench-workspace/` (lokal, nicht committet).
-- Worktrees für diesen Lauf wurden nach Erstellung dieses Reports entfernt
-  (`pi-duel cleanup real-01-tui-warm-theme-20260905T032441`).
+Auf Nutzerwunsch (2026-09-05) vollständig committet unter
+[`real-01-tui-warm-theme/`](real-01-tui-warm-theme/) — abweichend vom
+Standardprinzip "Rohlogs bleiben lokal" für diesen einen, bereits
+abgeschlossenen und geprüften Lauf:
+
+- `patch_pi.diff` / `patch_codex.diff` — vollständige, unveränderte Diffs
+  beider Kandidaten gegen den Base-SHA. `patch_codex.diff` wurde zusätzlich
+  als Commit `3be41ef` auf `main` angewendet (siehe Interpretation oben).
+- `pi_transcript.txt` / `codex_transcript.txt` — vollständige, ungekürzte
+  NDJSON-Agententranskripte (Pi 5,6 MB, Codex 0,5 MB). Auf Secrets/API-Keys
+  geprüft (nur Token-Zähler-Feldnamen wie `totalTokens` gefunden, keine
+  echten Credentials).
+- `fingerprint.json` — Base-SHA, Tool-Versionen, Candidate-Manifest-Hashes,
+  Config-Hashes für diesen Lauf.
+- `results.jsonl` — die beiden `pi-real`/`codex-real`-Zeilen dieses Laufs
+  (Teilmenge der vollständigen, weiterhin lokalen
+  `~/.local/state/real-duel/obench-workspace/results.jsonl`).
+- `run.log` — stdout/stderr des `pi-duel run`-Aufrufs.
+
+Worktrees für diesen Lauf wurden nach Erstellung dieses Reports entfernt
+(`pi-duel cleanup real-01-tui-warm-theme-20260905T032441`) — der Code-Stand
+ist über die beiden Patch-Dateien und den main-Commit `3be41ef` weiterhin
+vollständig rekonstruierbar.
