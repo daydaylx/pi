@@ -31,11 +31,23 @@ Branch:
 archive/legacy-benchmarks
 ```
 
-Beide zeigen auf denselben eingefrorenen Commit und enthalten `benchmarks/`
+Beide zeigen auf denselben eingefrorenen Commit
+(`86dca927aa920020157e951786ffb7da5263620d`) und enthalten `benchmarks/`
 und `harbor-bench/` vollständig (333 Dateien, ~16 MB). Auschecken via
 `git checkout benchmark-legacy-v1-v3-2026-09-04` oder
 `git worktree add <pfad> archive/legacy-benchmarks`. Details und
 Vollständigkeitsprüfung: [`benchmark-archive-audit.md`](benchmark-archive-audit.md).
+
+**Remote-Status:** Tag und Branch wurden bei der Archivierung
+(2026-09-04) zunächst nur **lokal** angelegt, nicht zum Remote gepusht — ein
+`git clone` von `origin` konnte das Archiv bis dahin nicht erreichen. Am
+2026-09-04 nachgeholt und unabhängig verifiziert: beide Refs sind jetzt unter
+`origin` (`https://github.com/daydaylx/pi.git`) vorhanden und zeigen remote
+auf denselben Commit (`git ls-remote --tags/--heads origin`). Ein frischer
+Clone + `git fetch --tags` erreicht das Archiv; `git show
+benchmark-legacy-v1-v3-2026-09-04:harbor-bench/PILOT_REPORT.md` und
+`git worktree add <pfad> archive/legacy-benchmarks` wurden aus einem
+eigenständigen frischen Clone heraus erfolgreich getestet.
 
 Nicht im Archiv (bewusst, nie versioniert): `harbor-bench/jobs/` — 245 MB
 Rohtrajektorien der realen Pilotläufe. Das synthetisierte Ergebnis

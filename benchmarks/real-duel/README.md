@@ -14,7 +14,9 @@ siehe [`../../docs/benchmark-history.md`](../../docs/benchmark-history.md)
 fuer die Legacy-Zusammenfassung und
 [`../../docs/benchmark-archive-audit.md`](../../docs/benchmark-archive-audit.md)
 fuer das vollstaendige Archivierungsprotokoll. Dieses README dupliziert
-beide Dokumente nicht.
+beide Dokumente nicht. Remote-Verifikation (Tag/Branch auf `origin`
+erreichbar, per frischem Clone getestet): siehe
+[`REAL_DUEL_AUDIT.md`](REAL_DUEL_AUDIT.md#9-remote-archiv-verifikation-nachtrag-2026-09-04).
 
 ## Inhalt
 

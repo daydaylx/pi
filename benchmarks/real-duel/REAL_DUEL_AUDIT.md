@@ -222,3 +222,75 @@ Kein neuer Recherchebedarf jetzt — Entscheidung faellt in Phase 2.
 - **Pi-Extension-Print-Mode-Kompatibilitaet:** siehe Abschnitt 3, letzter
   Punkt — nicht vorab als Problem angenommen, aber als bekanntes
   Risikomuster zu beobachten.
+
+## 9. Remote-Archiv-Verifikation (Nachtrag 2026-09-04)
+
+Bei der ersten Umsetzung (Phase 0/1, oben) wurde faelschlich angenommen,
+Tag und Branch seien bereits vollstaendig "ueber Tag/Branch erreichbar" —
+tatsaechlich existierten beide zunaechst nur **lokal**; ein `git clone` von
+`origin` konnte das Archiv nicht erreichen (`git ls-remote --tags/--heads
+origin` lieferte nichts). Am 2026-09-04 nachgeholt:
+
+```bash
+git push origin benchmark-legacy-v1-v3-2026-09-04
+git push origin archive/legacy-benchmarks:archive/legacy-benchmarks
+```
+
+**Unabhaengig verifiziert** (frischer `git clone` in ein separates
+Scratch-Verzeichnis, nicht das bestehende Arbeitsverzeichnis):
+
+- `git fetch --tags` erreicht beide Refs.
+- `git show benchmark-legacy-v1-v3-2026-09-04:harbor-bench/PILOT_REPORT.md`
+  liefert den erwarteten Inhalt.
+- `git worktree add <pfad> archive/legacy-benchmarks` checkt `86dca927...`
+  aus, `benchmarks/README.md` und `harbor-bench/README.md` sind vorhanden.
+- `main` im selben frischen Clone enthaelt kein `harbor-bench/`, `benchmarks/`
+  nur noch `real-duel/` — Generationengrenze bestaetigt.
+- Tag und Branch zeigen remote auf denselben Commit
+  (`86dca927aa920020157e951786ffb7da5263620d`,
+  `git ls-remote --tags/--heads origin`, Tag korrekt auf Commit gepeelt
+  via `^{}`).
+
+Ab jetzt gilt "ueber Tag/Branch reproduzierbar erreichbar" als remote
+verifizierte Aussage, nicht nur als lokale Annahme.
+
+## 10. Verify-/CI-Status (Phase F, 2026-09-04)
+
+Zwei getrennte, unabhaengige bekannte Abweichungen — nicht miteinander
+verwechseln:
+
+**Lokaler bekannter Verify-Gap (dieses Arbeitsverzeichnis):**
+`npm run verify`s `test:gui`-Schritt (`gui/test/format-check.mjs && npm
+--prefix ../gui test`) bricht lokal bereits am ersten Teilbefehl ab:
+`FORMAT DRIFT: renderer/index.html, renderer/styles.css`. `git status`/`git
+diff` fuer beide Dateien sind dabei leer — der Arbeitsbaum entspricht exakt
+dem committeten Stand. Das deutet auf eine umgebungsabhaengige Formatpruef-
+Logik hin (z. B. Prettier-Plugin-Aufloesung), nicht auf echte unformatierte
+Aenderungen. Dadurch wird die eigentliche `ui suite` (mocha-Tests) in dieser
+lokalen Umgebung gar nicht erreicht.
+
+**GitHub-Actions-Baseline (Workflow "Verify"):** Dort besteht
+`format:check` UND `gui/test/format-check.mjs` — der Fehlschlag liegt
+stattdessen in der `ui suite` selbst:
+
+```text
+FAIL: [Aurora tiles and status pills] a truncated styled line closes its
+foreground colour instead of leaking past the ellipsis — expected 2, got 0
+FAIL: 123 passed, 1 failed
+```
+
+Nachweislich **vorbestehend**, unabhaengig von Archivierung und Real-Duel:
+identischer Fehlertext in CI-Runs vom 2026-08-31 (`33449889514`, vor der
+Archivierung), 2026-09-02 (`33696423111`, vor Real-Duel) und 2026-09-04
+(`33879691336`, der Real-Duel-Phase-0/1-Commit `7de55a2` selbst).
+`git diff <archiv-basis>..<real-duel-commit> --stat -- gui/` ist leer —
+weder die Archivierung noch Real-Duel haben je eine Datei unter `gui/`
+veraendert.
+
+**Konsequenz:** Keine pauschale Aussage "`npm run verify` ist vollstaendig
+gruen" treffen. Archivierungs- und real-duel-relevante Checks (Format des
+uebrigen Repos, Typecheck, Deadcode, Coverage, Patches, Audit) sind gruen;
+die GUI-Testabweichung ist ein separates, vorbestehendes Produktticket
+(zwei unterschiedliche Symptome je nach Umgebung) und wird hier bewusst
+**nicht** repariert — das waere ein eigenes Produkt-Changeset, siehe
+Auftragsabgrenzung.

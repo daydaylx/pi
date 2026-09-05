@@ -158,15 +158,15 @@ verify` muss erneut laufen, um den finalen grünen Stand zu bestätigen.
 
 Auf sauberem, committetem Baum (`git status` leer):
 
-| Schritt | Ergebnis |
-| --- | --- |
-| `format:check` | ✅ PASS |
-| `typecheck` | ✅ PASS |
-| `deadcode` (knip) | ✅ PASS |
-| `test:coverage` (alle Node-Testsuiten inkl. `relative-imports`) | ✅ PASS — 2283 Einzeltests, 0 fehlgeschlagen |
-| `test:patches` | ✅ PASS — 50 Tests |
-| `test:gui` (`gui/test/format-check.mjs`) | ❌ FAIL — **vorbestehend, unabhängig von dieser Archivierung** |
-| `audit:check` | ✅ PASS (isoliert verifiziert) |
+| Schritt                                                         | Ergebnis                                                       |
+| --------------------------------------------------------------- | -------------------------------------------------------------- |
+| `format:check`                                                  | ✅ PASS                                                        |
+| `typecheck`                                                     | ✅ PASS                                                        |
+| `deadcode` (knip)                                               | ✅ PASS                                                        |
+| `test:coverage` (alle Node-Testsuiten inkl. `relative-imports`) | ✅ PASS — 2283 Einzeltests, 0 fehlgeschlagen                   |
+| `test:patches`                                                  | ✅ PASS — 50 Tests                                             |
+| `test:gui` (`gui/test/format-check.mjs`)                        | ❌ FAIL — **vorbestehend, unabhängig von dieser Archivierung** |
+| `audit:check`                                                   | ✅ PASS (isoliert verifiziert)                                 |
 
 Die `test:gui`-Formatabweichung (`gui/renderer/index.html`,
 `gui/renderer/styles.css`) betrifft ausschließlich `gui/`-Dateien.
@@ -175,4 +175,17 @@ Commit hat keine einzige Datei unter `gui/` verändert. Die Abweichung
 bestand bereits vor dieser Archivierung und liegt außerhalb des Auftrags
 („keine Pi-Produktverhaltensänderung", keine GUI-Arbeit). Alle
 archivierungsrelevanten Prüfungen sind grün; die GUI-Formatabweichung
-bleibt als separates, vorbestehendes Ticket offen.
+bleibt als separates, vorbestehendes Ticket offen. Präzisierung inkl.
+getrennter CI-Baseline-Dokumentation (lokaler Format-Check-Abbruch vs.
+CI-seitiger "Aurora tiles"-Testfehler in der `ui suite`):
+[`benchmarks/real-duel/REAL_DUEL_AUDIT.md#10-verify-ci-status-phase-f-2026-09-04`](../benchmarks/real-duel/REAL_DUEL_AUDIT.md#10-verify-ci-status-phase-f-2026-09-04).
+
+## Nachtrag (2026-09-04): Remote-Push nachgeholt
+
+Tag und Branch wurden bei der Archivierung oben nur **lokal** angelegt,
+nicht zum Remote gepusht — ein `git clone` von `origin` konnte das Archiv
+zunächst nicht erreichen. Am selben Tag nachgeholt (`git push origin
+benchmark-legacy-v1-v3-2026-09-04`, `git push origin
+archive/legacy-benchmarks:archive/legacy-benchmarks`) und per frischem,
+unabhängigem `git clone` verifiziert. Details:
+[`benchmarks/real-duel/REAL_DUEL_AUDIT.md#9-remote-archiv-verifikation-nachtrag-2026-09-04`](../benchmarks/real-duel/REAL_DUEL_AUDIT.md#9-remote-archiv-verifikation-nachtrag-2026-09-04).
