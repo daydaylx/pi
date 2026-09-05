@@ -75,6 +75,12 @@ def _load_fingerprint_module():
     return fingerprint_module
 
 
+def _load_telemetry_module():
+    sys.path.insert(0, str(REAL_DUEL_DIR / "scripts"))
+    import telemetry as telemetry_module  # noqa: E402
+    return telemetry_module
+
+
 def _make_worktree(run_id, arm, base_sha):
     wt = WORKTREES_ROOT / run_id / arm
     wt.parent.mkdir(parents=True, exist_ok=True)
@@ -166,7 +172,11 @@ def cmd_smoke(args):
         success = checker_exit == 0
 
         transcript_path = TRANSCRIPTS_DIR / f"{run_id_base}_{arm}.txt"
-        transcript_path.write_text(result.get("full_output") or "")
+        full_output = result.get("full_output") or ""
+        transcript_path.write_text(full_output)
+
+        telemetry_module = _load_telemetry_module()
+        telemetry = telemetry_module.normalize(cand_name, full_output)
 
         row = {
             "run_id": run_id,
@@ -190,16 +200,18 @@ def cmd_smoke(args):
             "workdir": str(workdir),
             "comparable": fp["comparable"],
             "dirty_override": fp["dirty_override"],
-            # Token-Felder bewusst None: generische obench-Manifeste parsen keine
-            # Tokens selbst (siehe REAL_DUEL_AUDIT.md). Echte Normalisierung ist
-            # Phase 2 (v3-Schema-Wiederverwendung ueber die Transkript-Datei).
-            "tokens": None,
-            "tokens_input_uncached": None,
-            "tokens_cache_read": None,
-            "tokens_cache_write": None,
-            "tokens_output": None,
-            "tokens_reasoning": None,
-            "token_basis": None,
+            # Flache Legacy-Skalare, damit `obench report`s eigene tok/slv-
+            # Aggregation (obench/stats.py:effective_tokens liest row["tokens"]
+            # top-level) unveraendert weiterfunktioniert.
+            "tokens": (telemetry["input_fresh"] + telemetry["output"]
+                       if None not in (telemetry["input_fresh"], telemetry["output"])
+                       else None),
+            "turns": telemetry["model_calls"],
+            "token_basis": telemetry["token_basis"],
+            # Normalisierte Telemetrie (Phase 2), siehe scripts/telemetry.py --
+            # eine primaere Quelle pro Harness (OpenBenchs eigene, gegen die
+            # real installierten CLI-Versionen validierte Parser).
+            "telemetry": telemetry,
         }
         RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(RESULTS_PATH, "a", encoding="utf-8") as fh:
@@ -208,9 +220,18 @@ def cmd_smoke(args):
         summary[cand_name] = {
             "success": success, "checker_exit": checker_exit,
             "wall_time_s": wall_time, "workdir": str(workdir),
+            "model_calls": telemetry["model_calls"],
+            "input_fresh": telemetry["input_fresh"],
+            "input_cache_read": telemetry["input_cache_read"],
+            "output": telemetry["output"],
+            "tool_calls": telemetry["tool_calls"],
+            "tool_errors": telemetry["tool_errors"],
         }
         print(f"=== {cand_name}: checker_exit={checker_exit} success={success} "
-              f"wall_time_s={wall_time} ===")
+              f"wall_time_s={wall_time} model_calls={telemetry['model_calls']} "
+              f"input_fresh={telemetry['input_fresh']} "
+              f"cache_read={telemetry['input_cache_read']} "
+              f"output={telemetry['output']} ===")
 
     print("\n=== Zusammenfassung ===")
     print(json.dumps(summary, indent=2))
