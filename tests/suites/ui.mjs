@@ -137,16 +137,17 @@ export const uiSections = {
           return undefined;
         });
 
-        const dispatch = liveHarness.dispatchShortcut(
-          "shift+tab",
-          liveContext,
-        );
+        const dispatch = liveHarness.dispatchShortcut("shift+tab", liveContext);
         let completed = false;
         void dispatch.completion.then(() => {
           completed = true;
         });
         await Promise.resolve();
-        eq(dispatch.handled, true, "Shift+Tab is recognized by Pi's dispatcher");
+        eq(
+          dispatch.handled,
+          true,
+          "Shift+Tab is recognized by Pi's dispatcher",
+        );
         eq(selectorCalls, 1, "Shift+Tab opens exactly one native selector");
         eq(completed, false, "the native selector remains open for input");
         assert(
@@ -305,8 +306,7 @@ export const uiSections = {
       );
       const noExtendedMapMenu = thinkingMenu.buildThinkingMenu(
         "medium",
-        (level) =>
-          ["off", "minimal", "low", "medium", "high"].includes(level),
+        (level) => ["off", "minimal", "low", "medium", "high"].includes(level),
       );
       for (const level of ["xhigh", "max"]) {
         eq(
@@ -580,15 +580,14 @@ export const uiSections = {
             id: "work",
             label: "Arbeit",
             description: "Befehle für die aktuelle Aufgabe",
-            children: [
-              { id: "go", label: "Ausführen", value: "go" },
-            ],
+            children: [{ id: "go", label: "Ausführen", value: "go" }],
           },
         ],
         { headerShortcut: "Super+Q", appearance: "command-center" },
       );
       await new Promise((resolve) => setImmediate(resolve));
-      const commandCenterComponent = commandCenterHarness.customComponents.at(-1);
+      const commandCenterComponent =
+        commandCenterHarness.customComponents.at(-1);
       assert(
         Boolean(commandCenterComponent),
         "Command Center opens a custom overlay",
@@ -613,7 +612,10 @@ export const uiSections = {
           );
         }
         commandCenterComponent.handleInput("\r");
-        const submenu = commandCenterComponent.render(120).map(stripAnsi).join("\n");
+        const submenu = commandCenterComponent
+          .render(120)
+          .map(stripAnsi)
+          .join("\n");
         assert(
           submenu.includes("Command Center › Arbeit") &&
             submenu.includes("BEFEHLSZENTRALE › Arbeit"),
@@ -751,10 +753,18 @@ export const uiSections = {
       {
         const opened = await openMenu();
         opened.harness.sendTerminalInput("\r");
-        eq(await opened.result, "first", "carriage-return Enter confirms the selection");
+        eq(
+          await opened.result,
+          "first",
+          "carriage-return Enter confirms the selection",
+        );
         const opened2 = await openMenu();
         opened2.harness.sendTerminalInput("\n");
-        eq(await opened2.result, "first", "newline Enter confirms the selection");
+        eq(
+          await opened2.result,
+          "first",
+          "newline Enter confirms the selection",
+        );
       }
 
       for (const [key, label] of [
@@ -932,8 +942,34 @@ export const uiSections = {
         fgCloses.length,
         "a truncated styled line closes its foreground colour instead of leaking past the ellipsis",
       );
+
+      // 1c. The same leak, but for a *background*-painted span: a shortcut key
+      // cap is a filled pill (`renderPill` opens a background before its text).
+      // At a width too narrow for the whole cap, `renderShortcutRows` crops the
+      // cap itself instead of dropping it — crop() must close that background
+      // too, or the pill's accent fill bleeds through the padding, past the
+      // tile border, and into whatever renders next.
+      const [croppedCap] = tile.renderShortcutRows(theme, 5, [
+        { key: "Super+S", label: "Rollen" },
+      ]);
+      assert(
+        stripAnsi(croppedCap).includes("…"),
+        "the key cap actually truncates at this width",
+      );
+      const bgOpens =
+        croppedCap.match(
+          /\x1b\[(?:48;2;\d+;\d+;\d+|48;5;\d+|4[0-7]|10[0-7])m/g,
+        ) ?? [];
+      const bgCloses = croppedCap.match(/\x1b\[49m/g) ?? [];
+      eq(
+        bgOpens.length,
+        bgCloses.length,
+        "a truncated shortcut pill closes its background colour instead of leaking past the ellipsis",
+      );
+
       const badgeSafeCard = tile.renderTile(theme, 40, {
-        title: "Eine lange Überschrift darf den aktuellen Status nicht verdrängen",
+        title:
+          "Eine lange Überschrift darf den aktuellen Status nicht verdrängen",
         badge: "LÄUFT",
         tone: "accent",
         fill: tile.NEUTRAL_TILE_FILL,
@@ -992,12 +1028,10 @@ export const uiSections = {
         title: "Kacheln prüfen",
         goal: "GUI-Optik",
       };
-      const wideDashboard = renderers.renderDashboard(
-        tvm,
-        theme,
-        120,
-        { activityLines: ["ARBEITET · 3s"], maxRows: 14 },
-      );
+      const wideDashboard = renderers.renderDashboard(tvm, theme, 120, {
+        activityLines: ["ARBEITET · 3s"],
+        maxRows: 14,
+      });
       const wideText = wideDashboard.map(stripAnsi);
       assert(
         wideText.some((line) => line.includes("╭")) &&
@@ -1021,12 +1055,10 @@ export const uiSections = {
 
       // 4. Below the grid threshold the same tiles stack, and the compact
       // dashboard stays frame-free.
-      const stackedDashboard = renderers.renderDashboard(
-        tvm,
-        theme,
-        80,
-        { activityLines: ["ARBEITET · 3s"], maxRows: 14 },
-      );
+      const stackedDashboard = renderers.renderDashboard(tvm, theme, 80, {
+        activityLines: ["ARBEITET · 3s"],
+        maxRows: 14,
+      });
       const stackedText = stackedDashboard.map(stripAnsi);
       assert(
         !stackedText.some(
@@ -1034,12 +1066,11 @@ export const uiSections = {
         ),
         "below the wide threshold tiles stack instead of pairing",
       );
-      const compactDashboard = renderers.renderDashboard(
-        tvm,
-        theme,
-        45,
-        { activityLines: ["ARBEITET"], maxRows: 2, compact: true },
-      );
+      const compactDashboard = renderers.renderDashboard(tvm, theme, 45, {
+        activityLines: ["ARBEITET"],
+        maxRows: 2,
+        compact: true,
+      });
       assert(
         compactDashboard.every((line) => !stripAnsi(line).includes("╭")),
         "the compact dashboard keeps its frame-free rows",
@@ -1060,8 +1091,8 @@ export const uiSections = {
         { activityLines: ["ARBEITET"], maxRows: 5 },
       );
       assert(
-        failedDashboard.some(
-          (line) => stripAnsi(line).includes("NICHT BEREIT"),
+        failedDashboard.some((line) =>
+          stripAnsi(line).includes("NICHT BEREIT"),
         ) && failedDashboard.some((line) => line.includes(errorBg)),
         "a failed check stays visible and paints the error surface",
       );
@@ -1113,9 +1144,10 @@ export const uiSections = {
       const longTitle = renderers.renderDashboard(
         {
           ...tvm,
-          title: "Eine wirklich sehr lange Aufgabenstellung, die jeden Rahmen sprengen würde".repeat(
-            4,
-          ),
+          title:
+            "Eine wirklich sehr lange Aufgabenstellung, die jeden Rahmen sprengen würde".repeat(
+              4,
+            ),
           goal: "Ein ebenso langes Ziel, das vollständig in der Kachel bleiben muss".repeat(
             4,
           ),

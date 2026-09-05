@@ -11,11 +11,14 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
  * `truncateToWidth` wraps its injected ellipsis in full resets
  * (`\x1b[0m…\x1b[0m`) and may preserve the original closing codes after it.
  * That punches an unfilled hole into a tile row and can leave the preceding
- * `\x1b[38;...m` or `\x1b[1m` unclosed; the unclosed codes then bleed into the
- * next segment, frame, or neighbouring tile. This wrapper removes the reset
- * artifacts, keeps any suffix that still fits, and re-balances the visible
- * prefix by appending only the closes that are actually missing
- * (`\x1b[39m` for foreground, `\x1b[22m` for bold).
+ * `\x1b[38;...m`, `\x1b[48;...m` or `\x1b[1m` unclosed; the unclosed codes then
+ * bleed into the next segment, frame, or neighbouring tile — a background left
+ * open this way (e.g. a shortcut pill cut off mid-cap) paints every cell after
+ * it, including past the tile's own border, until something else happens to
+ * reset it. This wrapper removes the reset artifacts, keeps any suffix that
+ * still fits, and re-balances the visible prefix by appending only the closes
+ * that are actually missing (`\x1b[39m` foreground, `\x1b[22m` bold, `\x1b[49m`
+ * background).
  */
 
 interface StyleBalance {
@@ -23,6 +26,8 @@ interface StyleBalance {
   fgCloses: number;
   boldOpens: number;
   boldCloses: number;
+  bgOpens: number;
+  bgCloses: number;
 }
 
 /**
@@ -42,6 +47,8 @@ function styleBalance(value: string): StyleBalance {
     fgCloses: 0,
     boldOpens: 0,
     boldCloses: 0,
+    bgOpens: 0,
+    bgCloses: 0,
   };
   for (const match of value.matchAll(/\x1b\[([0-9;]*)m/g)) {
     // `\x1b[m` is the parameterless spelling of a full reset.
@@ -54,16 +61,21 @@ function styleBalance(value: string): StyleBalance {
         const form = params[index + 1];
         index += form === "5" ? 2 : form === "2" ? 4 : 1;
         if (code === 38) balance.fgOpens += 1;
+        else if (code === 48) balance.bgOpens += 1;
         continue;
       }
       if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97))
         balance.fgOpens += 1;
+      else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107))
+        balance.bgOpens += 1;
       else if (code === 39) balance.fgCloses += 1;
+      else if (code === 49) balance.bgCloses += 1;
       else if (code === 1) balance.boldOpens += 1;
       else if (code === 22) balance.boldCloses += 1;
       else if (code === 0) {
         balance.fgCloses = balance.fgOpens;
         balance.boldCloses = balance.boldOpens;
+        balance.bgCloses = balance.bgOpens;
       }
     }
   }
@@ -87,9 +99,11 @@ export function crop(value: string, width: number): string {
     .slice(ellipsisIndex + 1)
     .replace(/^(?:\x1b\[[0-9;]*[A-Za-z])+/, "");
   const prefix = `${beforeReset}…`;
-  const { fgOpens, fgCloses, boldOpens, boldCloses } = styleBalance(prefix);
+  const { fgOpens, fgCloses, boldOpens, boldCloses, bgOpens, bgCloses } =
+    styleBalance(prefix);
   const closes: string[] = [];
   if (boldOpens > boldCloses) closes.push("\x1b[22m");
   if (fgOpens > fgCloses) closes.push("\x1b[39m");
+  if (bgOpens > bgCloses) closes.push("\x1b[49m");
   return `${prefix}${closes.join("")}${afterEllipsis}`;
 }
