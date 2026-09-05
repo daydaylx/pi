@@ -31,6 +31,11 @@ const suites = [
   },
   { name: "check-npm-audit", file: "check-npm-audit.test.mjs", env: {} },
   {
+    name: "check-theme-contrast",
+    file: "check-theme-contrast.test.mjs",
+    env: {},
+  },
+  {
     name: "openrouter-doctor-normalize-error",
     file: "openrouter-doctor/unit/normalize-error.test.mjs",
     env: {},

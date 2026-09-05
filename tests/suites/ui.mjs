@@ -1053,6 +1053,24 @@ export const uiSections = {
         "paired dashboard tiles consume the entire even terminal width without a right-edge gap",
       );
 
+      // 3b. The grid threshold sits at `comfortable` (90 cols), not `wide`
+      // (120): a merely comfortable terminal already gets the 2×2 pairing.
+      const comfortableDashboard = renderers.renderDashboard(tvm, theme, 95, {
+        activityLines: ["ARBEITET · 3s"],
+        maxRows: 14,
+      });
+      const comfortableText = comfortableDashboard.map(stripAnsi);
+      assert(
+        comfortableText.some(
+          (line) => line.includes("AUFGABE") && line.includes("AKTIVITÄT"),
+        ),
+        "the comfortable-width dashboard also pairs task and activity tiles",
+      );
+      assert(
+        comfortableDashboard.every((line) => visibleWidth(line) === 95),
+        "the comfortable-width paired dashboard still fills its full terminal width",
+      );
+
       // 4. Below the grid threshold the same tiles stack, and the compact
       // dashboard stays frame-free.
       const stackedDashboard = renderers.renderDashboard(tvm, theme, 80, {
@@ -1064,7 +1082,7 @@ export const uiSections = {
         !stackedText.some(
           (line) => line.includes("AUFGABE") && line.includes("AKTIVITÄT"),
         ),
-        "below the wide threshold tiles stack instead of pairing",
+        "below the grid threshold tiles stack instead of pairing",
       );
       const compactDashboard = renderers.renderDashboard(tvm, theme, 45, {
         activityLines: ["ARBEITET"],

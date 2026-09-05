@@ -53,6 +53,14 @@ export function renderPill(theme: Theme, text: string, tone: Tone): string {
         ` ${theme.fg("error", theme.bold(text))} `,
       );
     case "warning":
+      // toolPendingBg looks like the free slot since c72c29f dropped it as the
+      // default card fill, but it isn't: Pi core paints every pending tool-call
+      // box with it (tool-execution.js), and in aurora-night it resolves to the
+      // same value as userMessageBg — a warning chip on it would read as a flat
+      // chat bubble. warning's hue (ochre) also sits only ~9° from accent's
+      // (copper), so a second fill token wouldn't reliably read as distinct
+      // from an accent chip anyway. inverse() gives a theme-independent,
+      // guaranteed fg/bg swap instead.
       return theme.inverse(` ${theme.fg("warning", text)} `);
     default:
       return theme.fg(tone, text);

@@ -869,14 +869,181 @@ function summarizeChangedFiles(
   return `${files}${more}`;
 }
 
+/** The one verdict check both dashboards gate their failure state on. */
+function verificationFailed(
+  verification: VerificationViewModel | undefined,
+): boolean {
+  return verification?.verdict === "NOT_READY";
+}
+
+/** The one verdict check both dashboards gate their "all clear" state on. */
+function verificationReady(
+  verification: VerificationViewModel | undefined,
+): boolean {
+  return verification?.verdict === "READY";
+}
+
+/** The "N file(s) · +added −removed" fragment every changes summary shares,
+ * regardless of which icon/label the caller prefixes it with. */
+function formatChangesDelta(
+  theme: Theme,
+  changes: NonNullable<TaskViewModel["changesSummary"]>,
+): string {
+  return `${changes.filesCount} ${changes.filesCount === 1 ? "Datei" : "Dateien"} · ${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`;
+}
+
+function buildTaskTile(
+  task: TaskViewModel,
+  theme: Theme,
+  available: number,
+  hasFailure: boolean,
+  showProgress: boolean,
+): TileInput {
+  return {
+    title: "AUFGABE",
+    badge: task.phaseLabel.toUpperCase(),
+    tone: "accent",
+    lines: [
+      theme.bold(task.title),
+      ...(task.goal && !hasFailure ? [theme.fg("muted", task.goal)] : []),
+      ...(showProgress
+        ? [renderProgressBar(task.phase, theme, available - 4)]
+        : []),
+    ],
+  };
+}
+
+function buildActivityTile(
+  task: TaskViewModel,
+  theme: Theme,
+  input: DashboardInput,
+): TileInput {
+  return {
+    title: "AKTIVITÄT",
+    badge: input.activityLines.length > 0 ? "LÄUFT" : "BEREIT",
+    tone: input.activityLines.length > 0 ? "accent" : "muted",
+    lines:
+      input.activityLines.length > 0
+        ? input.activityLines
+        : [
+            theme.fg(
+              "muted",
+              task.phase === "done"
+                ? "Letzte Aufgabe abgeschlossen."
+                : "Bereit für die nächste Aufgabe.",
+            ),
+          ],
+  };
+}
+
+function buildChangesTile(
+  theme: Theme,
+  changes: NonNullable<TaskViewModel["changesSummary"]>,
+): TileInput {
+  return {
+    title: "ÄNDERUNGEN",
+    badge: `${changes.filesCount} ${changes.filesCount === 1 ? "DATEI" : "DATEIEN"}`,
+    tone: "accent",
+    lines: [
+      `${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`,
+      theme.fg("muted", summarizeChangedFiles(changes, " · ")),
+    ],
+  };
+}
+
+function buildVerificationTile(
+  verification: VerificationViewModel,
+  theme: Theme,
+  available: number,
+  hasFailure: boolean,
+  verificationTone: "success" | "error" | "muted",
+): TileInput {
+  return {
+    title: "PRÜFUNGEN",
+    badge:
+      verification.verdict === "READY"
+        ? "BEREIT"
+        : verification.verdict === "NOT_READY"
+          ? "NICHT BEREIT"
+          : "OFFEN",
+    tone: verificationTone,
+    fill: statusFill(verificationTone),
+    lines: renderVerificationBlock(verification, theme, available - 4).slice(
+      1,
+      hasFailure ? 3 : 2,
+    ),
+  };
+}
+
+/**
+ * Orders the four dashboard tiles, pairs them into rows (grid) or leaves
+ * each in its own row (stacked), demotes an over-budget verification tile to
+ * its bare form, then keeps only as many leading rows as `maxRows` affords —
+ * a group already chosen is never dropped once its row is committed to.
+ */
+function layoutDashboardTiles(
+  taskTile: TileInput,
+  activityTile: TileInput,
+  changesTile: TileInput | null,
+  verificationTile: TileInput | null,
+  bareVerificationTile: TileInput,
+  hasFailure: boolean,
+  grid: boolean,
+  maxRows: number,
+): TileInput[][] {
+  const ordered = (
+    hasFailure
+      ? [taskTile, verificationTile, activityTile, changesTile]
+      : [taskTile, activityTile, changesTile, verificationTile]
+  ).filter((tile): tile is TileInput => tile !== null);
+  let groups: TileInput[][] = grid
+    ? ordered.reduce<TileInput[][]>((pairs, tile, index) => {
+        if (index % 2 === 0) pairs.push([tile]);
+        else pairs[pairs.length - 1]!.push(tile);
+        return pairs;
+      }, [])
+    : ordered.map((tile) => [tile]);
+
+  if (hasFailure && verificationTile) {
+    // Stacked tiles pay sequential heights, a paired grid pays the taller
+    // member only — the fallback condition mirrors each layout's real cost.
+    const tooTall = grid
+      ? Math.max(tileHeight(taskTile), tileHeight(verificationTile)) > maxRows
+      : tileHeight(taskTile) + tileHeight(verificationTile) > maxRows;
+    if (tooTall) {
+      groups = groups.map((group) =>
+        group.map((tile) =>
+          tile === verificationTile ? bareVerificationTile : tile,
+        ),
+      );
+    }
+  }
+
+  const groupHeight = (group: TileInput[]): number =>
+    grid
+      ? Math.max(...group.map((tile) => tileHeight(tile)))
+      : group.reduce((sum, tile) => sum + tileHeight(tile), 0);
+
+  const chosen: TileInput[][] = [];
+  let usedRows = 0;
+  for (const group of groups) {
+    const height = groupHeight(group);
+    if (chosen.length > 0 && usedRows + height > maxRows) continue;
+    chosen.push(group);
+    usedRows += height;
+  }
+  return chosen;
+}
+
 /**
  * A persistent session overview composed only from the task projection and
  * current runtime activity. The caller owns row budgeting; this renderer keeps
  * tiles intact instead of truncating a frame halfway through.
  *
- * From `wide` width on, tiles are paired side by side (task + activity,
+ * From `comfortable` width on, tiles are paired side by side (task + activity,
  * changes + verification): a pair costs the height of its taller member, not
- * the sum, so a wide terminal sees a 2×2 card grid. Below that, tiles stack.
+ * the sum, so a sufficiently wide terminal sees a 2×2 card grid. Below that,
+ * tiles stack.
  */
 export function renderDashboard(
   task: TaskViewModel,
@@ -887,7 +1054,7 @@ export function renderDashboard(
   const available = Math.max(1, width);
   const compact = input.compact ?? false;
   const verification = task.verification;
-  const hasFailure = verification?.verdict === "NOT_READY";
+  const hasFailure = verificationFailed(verification);
 
   if (compact) {
     const lines = [
@@ -908,69 +1075,31 @@ export function renderDashboard(
 
   const showProgress =
     !hasFailure && (input.activityLines.length === 0 || input.maxRows > 8);
-  const verificationTone =
-    verification?.verdict === "READY"
-      ? "success"
-      : verification?.verdict === "NOT_READY"
-        ? "error"
-        : "muted";
-  const taskTile: TileInput = {
-    title: "AUFGABE",
-    badge: task.phaseLabel.toUpperCase(),
-    tone: "accent",
-    lines: [
-      theme.bold(task.title),
-      ...(task.goal && !hasFailure ? [theme.fg("muted", task.goal)] : []),
-      ...(showProgress
-        ? [renderProgressBar(task.phase, theme, available - 4)]
-        : []),
-    ],
-  };
-  const activityTile: TileInput = {
-    title: "AKTIVITÄT",
-    badge: input.activityLines.length > 0 ? "LÄUFT" : "BEREIT",
-    tone: input.activityLines.length > 0 ? "accent" : "muted",
-    lines:
-      input.activityLines.length > 0
-        ? input.activityLines
-        : [
-            theme.fg(
-              "muted",
-              task.phase === "done"
-                ? "Letzte Aufgabe abgeschlossen."
-                : "Bereit für die nächste Aufgabe.",
-            ),
-          ],
-  };
+  const verificationTone = verificationReady(verification)
+    ? "success"
+    : hasFailure
+      ? "error"
+      : "muted";
+  const taskTile = buildTaskTile(
+    task,
+    theme,
+    available,
+    hasFailure,
+    showProgress,
+  );
+  const activityTile = buildActivityTile(task, theme, input);
   const changes = task.changesSummary;
   const changesTile: TileInput | null = changes
-    ? {
-        title: "ÄNDERUNGEN",
-        badge: `${changes.filesCount} ${changes.filesCount === 1 ? "DATEI" : "DATEIEN"}`,
-        tone: "accent",
-        lines: [
-          `${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`,
-          theme.fg("muted", summarizeChangedFiles(changes, " · ")),
-        ],
-      }
+    ? buildChangesTile(theme, changes)
     : null;
   const verificationTile: TileInput | null = verification
-    ? {
-        title: "PRÜFUNGEN",
-        badge:
-          verification.verdict === "READY"
-            ? "BEREIT"
-            : verification.verdict === "NOT_READY"
-              ? "NICHT BEREIT"
-              : "OFFEN",
-        tone: verificationTone,
-        fill: statusFill(verificationTone),
-        lines: renderVerificationBlock(
-          verification,
-          theme,
-          available - 4,
-        ).slice(1, hasFailure ? 3 : 2),
-      }
+    ? buildVerificationTile(
+        verification,
+        theme,
+        available,
+        hasFailure,
+        verificationTone,
+      )
     : null;
   // At the shortest supported heights the full failure tile no longer fits:
   // keep the verdict itself visible as a bare card instead of dropping it.
@@ -982,49 +1111,17 @@ export function renderDashboard(
     lines: [],
   };
 
-  const grid = available >= LAYOUT_COLUMNS.wide;
-  const ordered = (
-    hasFailure
-      ? [taskTile, verificationTile, activityTile, changesTile]
-      : [taskTile, activityTile, changesTile, verificationTile]
-  ).filter((tile): tile is TileInput => tile !== null);
-  let groups: TileInput[][] = grid
-    ? ordered.reduce<TileInput[][]>((pairs, tile, index) => {
-        if (index % 2 === 0) pairs.push([tile]);
-        else pairs[pairs.length - 1]!.push(tile);
-        return pairs;
-      }, [])
-    : ordered.map((tile) => [tile]);
-
-  if (hasFailure && verificationTile) {
-    // Stacked tiles pay sequential heights, a paired grid pays the taller
-    // member only — the fallback condition mirrors each layout's real cost.
-    const tooTall = grid
-      ? Math.max(tileHeight(taskTile), tileHeight(verificationTile)) >
-        input.maxRows
-      : tileHeight(taskTile) + tileHeight(verificationTile) > input.maxRows;
-    if (tooTall) {
-      groups = groups.map((group) =>
-        group.map((tile) =>
-          tile === verificationTile ? bareVerificationTile : tile,
-        ),
-      );
-    }
-  }
-
-  const groupHeight = (group: TileInput[]): number =>
-    grid
-      ? Math.max(...group.map((tile) => tileHeight(tile)))
-      : group.reduce((sum, tile) => sum + tileHeight(tile), 0);
-
-  const chosen: TileInput[][] = [];
-  let usedRows = 0;
-  for (const group of groups) {
-    const height = groupHeight(group);
-    if (chosen.length > 0 && usedRows + height > input.maxRows) continue;
-    chosen.push(group);
-    usedRows += height;
-  }
+  const grid = available >= LAYOUT_COLUMNS.comfortable;
+  const chosen = layoutDashboardTiles(
+    taskTile,
+    activityTile,
+    changesTile,
+    verificationTile,
+    bareVerificationTile,
+    hasFailure,
+    grid,
+    input.maxRows,
+  );
   if (chosen.length === 0) return renderTile(theme, available, taskTile);
   return chosen.flatMap((group) =>
     renderTileGrid(theme, available, group, grid ? 2 : 1),
@@ -1047,7 +1144,7 @@ export function renderAutoDashboard(
   const budget = AUTO_MAX_ROWS[input.layout];
   const clip = (value: string) => crop(value, available);
   const verification = task.verification;
-  const failed = verification?.verdict === "NOT_READY";
+  const failed = verificationFailed(verification);
   const stale =
     !failed &&
     task.phase !== "verify" &&
@@ -1078,18 +1175,17 @@ export function renderAutoDashboard(
   // Routine rows only ever appear when they carry state: "no changes yet" and
   // "never checked" are zero statements and stay off the dashboard.
   const changesLine = changes
-    ? `${theme.fg("accent", "◇ Änderungen")} · ${changes.filesCount} ${changes.filesCount === 1 ? "Datei" : "Dateien"} · ${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`
+    ? `${theme.fg("accent", "◇ Änderungen")} · ${formatChangesDelta(theme, changes)}`
     : undefined;
   // Only a successful, current verification is routine information. Failed
   // and stale states already have a higher-priority problem line; UNVERIFIED
   // is a zero statement and must not consume dashboard space.
-  const verdictLine =
-    verification?.verdict === "READY"
-      ? theme.fg("success", "✓ Prüfung · Bereit")
-      : undefined;
+  const verdictLine = verificationReady(verification)
+    ? theme.fg("success", "✓ Prüfung · Bereit")
+    : undefined;
   const idleSegments = [
     changes && changes.filesCount > 0
-      ? `${theme.fg("accent", "◇")} ${changes.filesCount} ${changes.filesCount === 1 ? "Datei" : "Dateien"} · ${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`
+      ? `${theme.fg("accent", "◇")} ${formatChangesDelta(theme, changes)}`
       : undefined,
     verdictLine,
   ].filter((segment) => segment !== undefined);

@@ -7,10 +7,7 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import {
-  dashboardOwnsVerification,
-  layoutForSize,
-} from "../shared/layout.ts";
+import { dashboardOwnsVerification, layoutForSize } from "../shared/layout.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { planLocation, readPlan } from "../plan-mode/plan-store.ts";
 import {
@@ -103,6 +100,9 @@ const STATUS_TICK_INTERVAL_MS = 1_000;
 const WAITING_THRESHOLD_MS = 4_000;
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
+);
+const DAY_THEME_PATH = fileURLToPath(
+  new URL("../../themes/aurora-day.json", import.meta.url),
 );
 const SUBAGENT_CONFIG_PATH = fileURLToPath(
   new URL("../subagent/config.json", import.meta.url),
@@ -407,9 +407,10 @@ function activityGlyph(
   if (motion === "off") return "";
   if (kind === "responding") return theme.fg("accent", "•");
   if (motion === "reduced") return theme.fg("accent", "●");
-  const frames = ["·", "•", "●", "•"];
-  const color = frame % frames.length === 2 ? "accent" : "muted";
-  return theme.fg(color, frames[frame % frames.length]!);
+  // Only reached for kind "thinking"/"tool" (waiting/responding return above):
+  // real moving work gets a spinning cursor instead of a pulsing dot.
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  return theme.fg("accent", frames[frame % frames.length]!);
 }
 
 export default function auroraUiExtension(pi: ExtensionAPI): void {
@@ -888,7 +889,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     selectedTheme = undefined;
   }
 
-  pi.on("resources_discover", () => ({ themePaths: [THEME_PATH] }));
+  pi.on("resources_discover", () => ({
+    themePaths: [THEME_PATH, DAY_THEME_PATH],
+  }));
 
   registerInspectorCommand(pi, {
     getState: () => state,

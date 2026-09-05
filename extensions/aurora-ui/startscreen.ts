@@ -5,6 +5,7 @@ import { compactCwd } from "./cwd.ts";
 import { crop } from "./layout.ts";
 import { renderField, renderShortcutRows, renderTile } from "./tile.ts";
 import { renderThinkingLabel } from "./thinking.ts";
+import { statusSeparator } from "../shared/ui-theme.ts";
 
 export interface StartscreenInput {
   width: number;
@@ -27,10 +28,6 @@ function center(value: string, width: number): string {
   return `${" ".repeat(Math.max(0, Math.floor((width - visibleWidth(clipped)) / 2)))}${clipped}`;
 }
 
-function separator(theme: Theme): string {
-  return theme.fg("borderMuted", " │ ");
-}
-
 function metadata(
   theme: Theme,
   input: StartscreenInput,
@@ -42,7 +39,7 @@ function metadata(
     theme.fg("text", model),
   ];
   if (input.thinking) values.push(renderThinkingLabel(theme, input.thinking));
-  return center(values.join(separator(theme)), width);
+  return center(values.join(statusSeparator(theme)), width);
 }
 
 /** Shortcut chips with their description, wrapped to the tile's inner width. */

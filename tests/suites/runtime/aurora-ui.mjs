@@ -123,7 +123,9 @@ export const auroraUiSections = {
         const autoLines = resumedLines;
         assert(
           autoLines.some((line) => stripAnsi(line).includes("Sitzung")) &&
-            !autoLines.some((line) => stripAnsi(line).includes("◌ Aktivität")) &&
+            !autoLines.some((line) =>
+              stripAnsi(line).includes("◌ Aktivität"),
+            ) &&
             !autoLines.some((line) => stripAnsi(line).includes("PI · AURORA")),
           "a resumed idle session keeps the session card without welcome or invented activity",
         );
@@ -1476,7 +1478,9 @@ export const auroraUiSections = {
             const activityLine = rendered
               .split("\n")
               .find((line) => line.includes("DENKT NACH"));
-            return activityLine?.match(/[·•●]/)?.[0] ?? "";
+            // The contextual "thinking"/"tool" glyph is a spinning Braille
+            // cursor (U+2800–U+28FF), not the old dot pulse.
+            return activityLine?.match(/[·•●⠀-⣿]/)?.[0] ?? "";
           };
           const frames = new Set([thinkingGlyph()]);
           for (let tick = 0; tick < 4; tick += 1) {
@@ -1717,7 +1721,9 @@ export const auroraUiSections = {
             footerData,
           );
           assert(
-            !stripAnsi(compactFooter?.render(40)[0] ?? "").includes("verified") &&
+            !stripAnsi(compactFooter?.render(40)[0] ?? "").includes(
+              "verified",
+            ) &&
               !stripAnsi(standardFooter?.render(100)[0] ?? "").includes(
                 "verified",
               ),
@@ -1738,7 +1744,8 @@ export const auroraUiSections = {
           await raceHarness.runHooks("session_start", {}, raceContext);
           await raceHarness.runHooks("agent_start", {}, raceContext);
           await raceHarness.runHooks("agent_settled", {}, raceContext);
-          const factory = raceHarness.widgets.get("aurora-ui/activity")?.content;
+          const factory =
+            raceHarness.widgets.get("aurora-ui/activity")?.content;
           let renderedDuringRefresh = "";
           let component;
           if (typeof factory === "function") {
@@ -1777,7 +1784,9 @@ export const auroraUiSections = {
         // snapshots, and resets load counters without losing tick-interval
         // configuration.
         {
-          const diagContract = await load("extensions/aurora-ui/dev-diagnostics.ts");
+          const diagContract = await load(
+            "extensions/aurora-ui/dev-diagnostics.ts",
+          );
           if (diagContract) {
             const expectedDefault =
               process.env.PI_AURORA_DIAG === "1" ||
@@ -1788,8 +1797,14 @@ export const auroraUiSections = {
               "singleton enablement follows PI_AURORA_DIAG exactly",
             );
 
-            const inert = diagContract.createAuroraDiagnostics({ enabled: false });
-            eq(inert.enabled, false, "explicitly disabled instance reports disabled");
+            const inert = diagContract.createAuroraDiagnostics({
+              enabled: false,
+            });
+            eq(
+              inert.enabled,
+              false,
+              "explicitly disabled instance reports disabled",
+            );
             const marker = { value: 42 };
             eq(
               inert.measure(() => marker),
@@ -1809,9 +1824,15 @@ export const auroraUiSections = {
               }),
               "disabled diagnostics never record anything",
             );
-            eq(inert.report(), undefined, "report() stays silent when disabled");
+            eq(
+              inert.report(),
+              undefined,
+              "report() stays silent when disabled",
+            );
 
-            const active = diagContract.createAuroraDiagnostics({ enabled: true });
+            const active = diagContract.createAuroraDiagnostics({
+              enabled: true,
+            });
             eq(active.enabled, true, "factory can enable an isolated instance");
             let calls = 0;
             active.measure(() => {
@@ -1846,16 +1867,29 @@ export const auroraUiSections = {
             active.reset();
             const afterReset = active.snapshot();
             eq(afterReset.renderCount, 0, "reset() clears the render count");
-            eq(afterReset.lastDashboardRows, 0, "reset() clears dashboard rows");
+            eq(
+              afterReset.lastDashboardRows,
+              0,
+              "reset() clears dashboard rows",
+            );
             eq(
               afterReset.activeTickIntervalMs,
               250,
               "reset() keeps tick-interval configuration",
             );
-            assert(typeof active.report() === "string", "report() renders a line when enabled");
+            assert(
+              typeof active.report() === "string",
+              "report() renders a line when enabled",
+            );
 
-            const isolated = diagContract.createAuroraDiagnostics({ enabled: false });
-            eq(isolated.snapshot().renderCount, 0, "instances keep isolated state");
+            const isolated = diagContract.createAuroraDiagnostics({
+              enabled: false,
+            });
+            eq(
+              isolated.snapshot().renderCount,
+              0,
+              "instances keep isolated state",
+            );
           }
         }
 
@@ -2808,70 +2842,80 @@ export const auroraUiSections = {
                 ),
               "the dashboard remains useful after a turn has settled",
             );
-            // Wide terminals pair tiles side by side: task + verification cost
-            // the taller member's height (4 rows), the activity/changes pair
-            // 3–4 more. The failure verdict stays visible at every budget;
-            // routine tiles join only once the grid actually fits the budget.
-            for (const maxRows of [5, 6, 7, 8]) {
-              const activityFits = maxRows >= 7;
-              const failedDashboard = renderDashboard(
-                {
-                  ...tvm,
-                  verification: {
-                    verdict: "NOT_READY",
-                    criteria: [{ label: "Tests", status: "failed" }],
-                    blockers: ["Pflichtprüfung fehlgeschlagen."],
+            // Tiles pair side by side once the grid threshold is met: task +
+            // verification cost the taller member's height (4 rows), the
+            // activity/changes pair 3–4 more. The failure verdict stays
+            // visible at every budget; routine tiles join only once the grid
+            // actually fits the budget. Row *counts* don't depend on column
+            // width (tiles crop text, they don't wrap it), so this must hold
+            // both at `wide` (120) and at the lower `comfortable` grid
+            // threshold (95) the narrower 44/45-column pairing now uses too.
+            const runFailedDashboardBudgetMatrix = (width) => {
+              for (const maxRows of [5, 6, 7, 8]) {
+                const activityFits = maxRows >= 7;
+                const failedDashboard = renderDashboard(
+                  {
+                    ...tvm,
+                    verification: {
+                      verdict: "NOT_READY",
+                      criteria: [{ label: "Tests", status: "failed" }],
+                      blockers: ["Pflichtprüfung fehlgeschlagen."],
+                    },
                   },
-                },
-                context.ui.theme,
-                120,
-                { activityLines: ["ARBEITET"], maxRows },
-              );
-              assert(
-                failedDashboard.some((line) => line.includes("NICHT BEREIT")) &&
-                  failedDashboard.some((line) => line.includes("AKTIVITÄT")) ===
-                    activityFits,
-                `a failed verification survives the ${maxRows}-row budget${
-                  activityFits
-                    ? " while the grid still fits routine activity"
-                    : " before routine activity"
-                }`,
-              );
-              const changesFits = maxRows >= 8;
-              const failedDashboardWithChanges = renderDashboard(
-                {
-                  ...tvm,
-                  changesSummary: {
-                    filesCount: 1,
-                    files: ["src/a.ts"],
-                    linesAdded: 1,
-                    linesRemoved: 0,
+                  context.ui.theme,
+                  width,
+                  { activityLines: ["ARBEITET"], maxRows },
+                );
+                assert(
+                  failedDashboard.some((line) =>
+                    line.includes("NICHT BEREIT"),
+                  ) &&
+                    failedDashboard.some((line) =>
+                      line.includes("AKTIVITÄT"),
+                    ) === activityFits,
+                  `at ${width} cols, a failed verification survives the ${maxRows}-row budget${
+                    activityFits
+                      ? " while the grid still fits routine activity"
+                      : " before routine activity"
+                  }`,
+                );
+                const changesFits = maxRows >= 8;
+                const failedDashboardWithChanges = renderDashboard(
+                  {
+                    ...tvm,
+                    changesSummary: {
+                      filesCount: 1,
+                      files: ["src/a.ts"],
+                      linesAdded: 1,
+                      linesRemoved: 0,
+                    },
+                    verification: {
+                      verdict: "NOT_READY",
+                      criteria: [{ label: "Tests", status: "failed" }],
+                      blockers: ["Pflichtprüfung fehlgeschlagen."],
+                    },
                   },
-                  verification: {
-                    verdict: "NOT_READY",
-                    criteria: [{ label: "Tests", status: "failed" }],
-                    blockers: ["Pflichtprüfung fehlgeschlagen."],
-                  },
-                },
-                context.ui.theme,
-                120,
-                { activityLines: [], maxRows },
-              );
-              assert(
-                failedDashboardWithChanges.some((line) =>
-                  line.includes("NICHT BEREIT"),
-                ) &&
+                  context.ui.theme,
+                  width,
+                  { activityLines: [], maxRows },
+                );
+                assert(
                   failedDashboardWithChanges.some((line) =>
-                    line.includes("ÄNDERUNGEN"),
-                  ) ===
-                    changesFits,
-                `a failed verification survives the ${maxRows}-row budget${
-                  changesFits
-                    ? " while the grid still fits the changes tile"
-                    : " before changes"
-                }`,
-              );
-            }
+                    line.includes("NICHT BEREIT"),
+                  ) &&
+                    failedDashboardWithChanges.some((line) =>
+                      line.includes("ÄNDERUNGEN"),
+                    ) === changesFits,
+                  `at ${width} cols, a failed verification survives the ${maxRows}-row budget${
+                    changesFits
+                      ? " while the grid still fits the changes tile"
+                      : " before changes"
+                  }`,
+                );
+              }
+            };
+            runFailedDashboardBudgetMatrix(120);
+            runFailedDashboardBudgetMatrix(95);
             const compactDashboard = renderDashboard(
               tvm,
               context.ui.theme,
@@ -2971,7 +3015,9 @@ export const auroraUiSections = {
                 changesAuto.some((line) =>
                   stripAnsi(line).includes("4 Dateien"),
                 ) &&
-                changesAuto.some((line) => stripAnsi(line).includes("+30 −5")) &&
+                changesAuto.some((line) =>
+                  stripAnsi(line).includes("+30 −5"),
+                ) &&
                 changesAuto.some((line) => stripAnsi(line).includes("FERTIG")),
               "idle sessions condense completed changes into one summary line under an uppercase phase badge",
             );
@@ -2991,7 +3037,9 @@ export const auroraUiSections = {
             assert(
               cleanIdleAuto.length > 0 &&
                 cleanIdleAuto.length <= 4 &&
-                cleanIdleAuto.some((line) => stripAnsi(line).includes("Sitzung")) &&
+                cleanIdleAuto.some((line) =>
+                  stripAnsi(line).includes("Sitzung"),
+                ) &&
                 !stripAnsi(cleanIdleAuto.join("\n")).includes(
                   "Noch keine Änderungen",
                 ) &&
