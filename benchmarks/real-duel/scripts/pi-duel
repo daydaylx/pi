@@ -42,7 +42,7 @@ CANDIDATES = {
     "pi-real": REAL_DUEL_DIR / "candidates" / "pi-real.toml",
     "codex-real": REAL_DUEL_DIR / "candidates" / "codex-real.toml",
 }
-MODEL = "gpt-5.6-terra"
+MODEL = "gpt-5.6-luna"
 # Muss mit candidates/pi-real.toml `command`-Liste (--provider ...) synchron
 # bleiben -- der Plan-Work-Treiber ruft `pi --mode rpc` direkt auf statt ueber
 # OpenBenchs candidate.run(), kann den Wert also nicht aus der TOML ableiten.

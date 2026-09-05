@@ -25,7 +25,7 @@ isolate_home = false
 
 command = [
   "pi", "--print", "--mode", "json", "--approve",
-  "--provider", "openai-codex", "--model", "gpt-5.6-terra",
+  "--provider", "openai-codex", "--model", "gpt-5.6-luna",
   "{prompt}",
 ]
 version_command = ["pi", "--version"]
@@ -36,4 +36,4 @@ policy_auto_approve_args = ["--approve"]
 pass_env = []
 
 [models]
-"gpt-5.6-terra" = "gpt-5.6-terra"
+"gpt-5.6-luna" = "gpt-5.6-luna"
