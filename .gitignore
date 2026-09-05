@@ -5,6 +5,11 @@ auth.json
 sessions/
 docs/archive/session-logs/
 
+# Plan-Ablage der Pi-Runtime (~/.pi/agent/plans/) -- fällt in diesem
+# Dev-Checkout mit dem Repo-Root zusammen, ist aber Laufzeitzustand des
+# Operators, nie Teil des Repos.
+plans/
+
 # Backups
 backups/
 *.bak-*

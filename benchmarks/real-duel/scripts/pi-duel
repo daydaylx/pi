@@ -43,6 +43,10 @@ CANDIDATES = {
     "codex-real": REAL_DUEL_DIR / "candidates" / "codex-real.toml",
 }
 MODEL = "gpt-5.6-terra"
+# Muss mit candidates/pi-real.toml `command`-Liste (--provider ...) synchron
+# bleiben -- der Plan-Work-Treiber ruft `pi --mode rpc` direkt auf statt ueber
+# OpenBenchs candidate.run(), kann den Wert also nicht aus der TOML ableiten.
+PI_PROVIDER = "openai-codex"
 
 
 def _obench_bin():
@@ -81,6 +85,60 @@ def _load_telemetry_module():
     return telemetry_module
 
 
+def _load_workflow_modules():
+    sys.path.insert(0, str(REAL_DUEL_DIR / "scripts"))
+    import workflow_task as workflow_task_module  # noqa: E402
+    import plan_work_gates as gates_module  # noqa: E402
+    import plan_quality_bridge as quality_bridge_module  # noqa: E402
+    import pi_rpc_driver as pi_rpc_module  # noqa: E402
+    import codex_plan_work_driver as codex_plan_work_module  # noqa: E402
+    return (
+        workflow_task_module,
+        gates_module,
+        quality_bridge_module,
+        pi_rpc_module,
+        codex_plan_work_module,
+    )
+
+
+def _changed_paths(workdir, base_sha):
+    """Alle relativ zu base_sha veraenderten Pfade in workdir, getrackt und
+    untracked -- fuer den forbidden-surface-Gate."""
+    tracked = subprocess.run(
+        ["git", "-C", str(workdir), "diff", "--name-only", base_sha],
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    untracked = subprocess.run(
+        ["git", "-C", str(workdir), "ls-files", "--others", "--exclude-standard"],
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    return [p for p in tracked + untracked if p.strip()]
+
+
+def _diff_pi_stats(before, after):
+    """get_session_stats ist kumulativ ueber die gesamte Pi-Sitzung (siehe
+    rpc.md) -- die Work-Phase-Telemetrie ist die Differenz der beiden
+    Schnappschuesse vor/nach der Freigabe."""
+    def sub(a, b):
+        return None if a is None or b is None else b - a
+
+    tokens_before = before.get("tokens") or {}
+    tokens_after = after.get("tokens") or {}
+    tokens_diff = {
+        k: sub(tokens_before.get(k), tokens_after.get(k))
+        for k in ("input", "output", "cacheRead", "cacheWrite", "total")
+    }
+    return {
+        "userMessages": sub(before.get("userMessages"), after.get("userMessages")),
+        "assistantMessages": sub(before.get("assistantMessages"), after.get("assistantMessages")),
+        "toolCalls": sub(before.get("toolCalls"), after.get("toolCalls")),
+        "toolResults": sub(before.get("toolResults"), after.get("toolResults")),
+        "totalMessages": sub(before.get("totalMessages"), after.get("totalMessages")),
+        "tokens": tokens_diff,
+        "cost": sub(before.get("cost"), after.get("cost")),
+    }
+
+
 def _make_worktree(run_id, arm, base_sha):
     wt = WORKTREES_ROOT / run_id / arm
     wt.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +163,24 @@ def _run_task(task_dir, task_name, run_prefix, args):
     Phase-3-Abschnitt)."""
     run_id_base = run_prefix + "-" + time.strftime("%Y%m%dT%H%M%S")
     has_checker = (task_dir / "checker.sh").exists()
+
+    workflow = getattr(args, "workflow", "work-only")
+    (
+        workflow_task_module,
+        gates_module,
+        quality_bridge_module,
+        pi_rpc_module,
+        codex_plan_work_module,
+    ) = _load_workflow_modules()
+    workflow_cfg = workflow_task_module.load(task_dir)
+    if workflow != "work-only" and not workflow_cfg.supports(workflow):
+        print(
+            f"ERROR: Task {task_dir} unterstuetzt Workflow {workflow!r} nicht "
+            f"(unterstuetzt: {workflow_cfg.supported_workflows}). workflow.toml "
+            "im Task-Verzeichnis ergaenzen oder --workflow work-only verwenden.",
+            file=sys.stderr,
+        )
+        return 1
 
     load_candidate, make_run_id, read_instruction, run_checker = _load_obench_modules()
     instruction = read_instruction(str(task_dir))
@@ -157,6 +233,19 @@ def _run_task(task_dir, task_name, run_prefix, args):
 
     arm_by_candidate = {"pi-real": "pi", "codex-real": "codex"}
 
+    def _maybe_run_checker(workdir):
+        """Gemeinsam fuer work-only und plan-work: fuehrt checker.sh aus, falls
+        der Task eines definiert. Fehlt im plan-work-Pfad, faellt der
+        `checkers_ran`-Gate faelschlich immer fehl, sobald ein Task (wie
+        smoke-01-marker-file) einen Checker mitbringt."""
+        if not has_checker:
+            return None, None, None, None, None
+        checker_exit, raw_score, checker_stdout, checker_stderr = run_checker(
+            str(task_dir), str(workdir), args.checker_timeout
+        )
+        success = checker_exit == 0
+        return checker_exit, raw_score, checker_stdout, checker_stderr, success
+
     def _execute_arm(cand_name, candidate):
         arm = arm_by_candidate[cand_name]
         print(f"=== {cand_name}: worktree ===")
@@ -165,22 +254,21 @@ def _run_task(task_dir, task_name, run_prefix, args):
 
         run_id = make_run_id(cand_name, task_name, MODEL, 1, candidate.identity_digest)
 
+        if workflow == "plan-work":
+            return _execute_plan_work(cand_name, candidate, workdir, run_id, arm)
+        return _execute_work_only(cand_name, candidate, workdir, run_id, arm)
+
+    def _execute_work_only(cand_name, candidate, workdir, run_id, arm):
         print(f"=== {cand_name}: invoke ({run_id}) ===")
         t0 = time.monotonic()
         result = candidate.run(instruction, str(workdir), MODEL, args.timeout)
         wall_time = round(time.monotonic() - t0, 3)
 
-        if has_checker:
-            checker_exit, raw_score, checker_stdout, checker_stderr = run_checker(
-                str(task_dir), str(workdir), args.checker_timeout)
-            success = checker_exit == 0
-        else:
-            # Offene reale Aufgabe ohne Skript-Orakel: kein automatisches
-            # pass/fail hier. Funktionale Bewertung (Tests/Typecheck/Lint/
-            # Build/Verify, Baselinefehler getrennt behandelt) erfolgt als
-            # eigener Schritt je Worktree nach Abschluss beider Arme.
-            checker_exit, raw_score, checker_stdout, checker_stderr = None, None, None, None
-            success = None
+        # Offene reale Aufgabe ohne Skript-Orakel (kein checker.sh): kein
+        # automatisches pass/fail. Funktionale Bewertung (Tests/Typecheck/
+        # Lint/Build/Verify, Baselinefehler getrennt behandelt) erfolgt dann
+        # als eigener Schritt je Worktree nach Abschluss beider Arme.
+        checker_exit, raw_score, checker_stdout, checker_stderr, success = _maybe_run_checker(workdir)
 
         transcript_path = TRANSCRIPTS_DIR / f"{run_id_base}_{arm}.txt"
         full_output = result.get("full_output") or ""
@@ -196,6 +284,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
             "model": MODEL,
             "task": task_name,
             "trial": 1,
+            "workflow": workflow,
             "success": success,
             "completed": bool(result.get("completed")),
             "error": result.get("error"),
@@ -241,6 +330,260 @@ def _run_task(task_dir, task_name, run_prefix, args):
             "tool_errors": telemetry["tool_errors"],
         }
 
+    def _execute_plan_work(cand_name, candidate, workdir, run_id, arm):
+        print(f"=== {cand_name}: invoke plan-work ({run_id}) ===")
+        t0 = time.monotonic()
+        completed = False
+        error = None
+        gates = []
+        plan_hash = None
+        plan_mode_used = workflow_cfg.plan_mode
+        plan_phase_telemetry = None
+        work_phase_telemetry = None
+        full_output_for_transcript = ""
+        pi_sess = None  # geschlossen im finally, auch wenn Freigabe/Work-Phase wirft
+        checker_exit = raw_score = checker_stdout = checker_stderr = checker_success = None
+
+        try:
+            if cand_name == "pi-real":
+                plan_result = pi_rpc_module.run_plan_phase(
+                    cwd=str(workdir),
+                    model=MODEL,
+                    provider=PI_PROVIDER,
+                    instruction=instruction,
+                    plan_mode=plan_mode_used,
+                    followups=workflow_cfg.followups,
+                    quality_check=quality_bridge_module.check_plan_quality,
+                    timeout=args.timeout,
+                    log_dir=TRANSCRIPTS_DIR,
+                )
+                pi_sess = plan_result.sess
+                plan_hash = plan_result.plan_hash
+                gates.append(gates_module.check_no_project_mutation_before_approval(workdir))
+                gates.append(gates_module.check_plan_artifact_present(plan_result.plan_path))
+                gates.append(gates_module.check_plan_hash_recorded(plan_result.plan_hash))
+                gates.append(gates_module.check_planning_turn_settled(plan_result.settled))
+                gates.append(
+                    gates_module.check_plan_quality(plan_result.quality_ok, plan_result.quality_issues)
+                )
+                gates.append(
+                    gates_module.check_allowed_followups_only(
+                        plan_result.asked_followup_questions, workflow_cfg.followups
+                    )
+                )
+
+                pre_summary = gates_module.summarize(gates)
+                if not pre_summary["all_required_passed"]:
+                    raise RuntimeError(
+                        f"Vor-Freigabe-Gate fehlgeschlagen: {pre_summary['failed_required']}"
+                    )
+
+                work_result = pi_rpc_module.approve_and_run_work(plan_result, timeout=args.timeout)
+
+                gates.append(gates_module.check_approval_used_exactly_once(work_result.approval_count))
+                # approvePlan() schaltet bei Erfolg immer auf "work"
+                # (extensions/plan-mode/commands.ts) -- kein eigenes Event dafuer
+                # abgefragt, daher aus dem Freigabeerfolg abgeleitet.
+                gates.append(
+                    gates_module.check_work_mode_used("work" if work_result.approved else "unknown")
+                )
+                gates.append(
+                    gates_module.check_approval_not_preconsumed(work_result.preconsumed)
+                )
+                gates.append(
+                    gates_module.check_plan_belongs_to_session(
+                        plan_result.session_id, work_result.session_id_after
+                    )
+                )
+
+                changed_paths = _changed_paths(workdir, base_sha)
+                gates.append(
+                    gates_module.check_forbidden_surface_untouched(
+                        changed_paths, workflow_cfg.forbidden_surface
+                    )
+                )
+                checker_exit, raw_score, checker_stdout, checker_stderr, checker_success = (
+                    _maybe_run_checker(workdir)
+                )
+                gates.append(gates_module.check_checkers_ran(has_checker, checker_exit))
+
+                plan_phase_telemetry = plan_result.stats_before_approval
+                work_phase_telemetry = _diff_pi_stats(plan_phase_telemetry, work_result.stats_after_work)
+
+                full_output_for_transcript = json.dumps(
+                    {"plan_events": plan_result.events, "work_events": work_result.events}
+                )
+                completed = True
+
+            elif cand_name == "codex-real":
+                out_dir = TRANSCRIPTS_DIR / f"{run_id_base}_{arm}_plan_work"
+                plan_result = codex_plan_work_module.run_plan_phase(
+                    cwd=str(workdir),
+                    model=MODEL,
+                    instruction=instruction,
+                    output_dir=out_dir,
+                    timeout=args.timeout,
+                )
+                # Codex hat keinen hash-gebundenen Freigabemechanismus (siehe
+                # codex_plan_work_driver.py-Docstring) -- plan_hash bleibt None,
+                # das ist eine dokumentierte Harness-Differenz, kein Datenfehler.
+                gates.append(gates_module.check_no_project_mutation_before_approval(workdir))
+                gates.append(gates_module.check_plan_artifact_present(plan_result.transcript_path))
+
+                pre_summary = gates_module.summarize(gates)
+                if not pre_summary["all_required_passed"]:
+                    raise RuntimeError(
+                        f"Vor-Freigabe-Gate fehlgeschlagen: {pre_summary['failed_required']}"
+                    )
+
+                work_result = codex_plan_work_module.run_approval_and_work(
+                    cwd=str(workdir),
+                    model=MODEL,
+                    session_id=plan_result.session_id,
+                    approval_text=workflow_cfg.approval_text,
+                    output_dir=out_dir,
+                    timeout=args.timeout,
+                )
+                # Ein `codex exec resume`-Aufruf entspricht hier genau einer
+                # Freigabe -- es gibt keinen wiederverwendbaren Freigabe-Handle,
+                # den man mehrfach einloesen koennte.
+                gates.append(gates_module.check_approval_used_exactly_once(1))
+                gates.append(
+                    gates_module.check_plan_belongs_to_session(
+                        plan_result.session_id, work_result.session_id_after
+                    )
+                )
+                # Codex kennt keinen Mechanismus, der eine Freigabe vor dem
+                # expliziten zweiten `codex exec resume`-Aufruf vorzeitig
+                # verbrauchen koennte (kein async Approval-Handle wie bei Pi) --
+                # das Gate wird informativ als bestanden gemeldet statt
+                # uebersprungen, damit der Report nachvollziehbar bleibt.
+                gates.append(
+                    gates_module.GateResult(
+                        "no_premature_approval",
+                        True,
+                        True,
+                        "Codex kennt keine interne Vorab-Freigabe",
+                    )
+                )
+
+                changed_paths = _changed_paths(workdir, base_sha)
+                gates.append(
+                    gates_module.check_forbidden_surface_untouched(
+                        changed_paths, workflow_cfg.forbidden_surface
+                    )
+                )
+                checker_exit, raw_score, checker_stdout, checker_stderr, checker_success = (
+                    _maybe_run_checker(workdir)
+                )
+                gates.append(gates_module.check_checkers_ran(has_checker, checker_exit))
+
+                telemetry_module = _load_telemetry_module()
+                split = telemetry_module.split_codex_plan_work(
+                    plan_result.transcript_path.read_text(encoding="utf-8"),
+                    work_result.transcript_path.read_text(encoding="utf-8"),
+                )
+                plan_phase_telemetry = split["plan_phase"]
+                work_phase_telemetry = (
+                    split["work_phase_delta"] if split["consistent"] else split["work_phase_cumulative"]
+                )
+                if not split["consistent"]:
+                    print(
+                        f"WARN ({cand_name}): {split['inconsistency_reason']}",
+                        file=sys.stderr,
+                    )
+
+                full_output_for_transcript = json.dumps(
+                    {
+                        "plan_transcript_path": str(plan_result.transcript_path),
+                        "work_transcript_path": str(work_result.transcript_path),
+                    }
+                )
+                completed = work_result.returncode == 0
+                if work_result.returncode != 0:
+                    error = f"codex exec resume (Work-Phase) returncode={work_result.returncode}"
+            else:
+                raise ValueError(f"kein Plan-Work-Treiber fuer {cand_name!r}")
+        except Exception as exc:  # noqa: BLE001 -- jeder Fehler hier ist ein harter Laufabbruch
+            error = str(exc)
+            completed = False
+        finally:
+            if pi_sess is not None:
+                pi_sess.close()
+
+        wall_time = round(time.monotonic() - t0, 3)
+        gate_summary = gates_module.summarize(gates)
+
+        transcript_path = TRANSCRIPTS_DIR / f"{run_id_base}_{arm}.txt"
+        transcript_path.write_text(full_output_for_transcript)
+
+        all_required_passed = gate_summary["all_required_passed"]
+        row = {
+            "run_id": run_id,
+            "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+            "harness": cand_name,
+            "model": MODEL,
+            "task": task_name,
+            "trial": 1,
+            "workflow": workflow,
+            # success bleibt None, wenn der Task keinen checker.sh definiert
+            # (offene Aufgabe, funktionale Bewertung folgt separat) -- genau
+            # wie im work-only-Pfad. Definiert der Task einen Checker, wird er
+            # hier tatsaechlich ausgefuehrt (_maybe_run_checker), nicht nur auf
+            # sein Fehlen geprueft.
+            "success": checker_success,
+            # Ein Gate-Fehler ist ein harter Ausfuehrungsfehler des Laufs,
+            # unabhaengig vom eigentlichen Prozessergebnis -- das ist die
+            # gleiche Regel, die scripts/pi-duel:_run_task fuer completed/error
+            # bereits fuer work-only-Laeufe durchsetzt.
+            "completed": bool(completed and all_required_passed),
+            "error": error
+            or (
+                f"Pflichtgates fehlgeschlagen: {gate_summary['failed_required']}"
+                if not all_required_passed
+                else None
+            ),
+            "wall_time_s": wall_time,
+            "cmd": None,
+            "checker_exit": checker_exit,
+            "checker_stdout": checker_stdout,
+            "checker_stderr": checker_stderr,
+            "score": (
+                raw_score
+                if raw_score is not None
+                else (None if checker_success is None else (1.0 if checker_success else 0.0))
+            ),
+            "exec_mode": "local",
+            "candidate_provenance": candidate.provenance,
+            "base_sha": base_sha,
+            "workdir": str(workdir),
+            "comparable": fp["comparable"],
+            "dirty_override": fp["dirty_override"],
+            "tokens": None,
+            "turns": None,
+            "token_basis": None,
+            "telemetry": None,
+            "plan_mode": plan_mode_used,
+            "plan_hash": plan_hash,
+            "plan_phase_telemetry": plan_phase_telemetry,
+            "work_phase_telemetry": work_phase_telemetry,
+            "gates": gate_summary,
+        }
+        print(
+            f"=== {cand_name}: plan-work completed={row['completed']} "
+            f"error={row['error']} wall_time_s={wall_time} "
+            f"failed_gates={gate_summary['failed_required']} ==="
+        )
+        return row, {
+            "success": row["success"],
+            "checker_exit": checker_exit,
+            "completed": row["completed"],
+            "error": row["error"],
+            "wall_time_s": wall_time,
+            "workdir": str(workdir),
+            "failed_required_gates": gate_summary["failed_required"],
+        }
+
     # Beide Arme laufen parallel (unabhaengige Worktrees, unabhaengige
     # Prozesse -- Pi schreibt nur nach ~/.pi/agent, Codex nur nach
     # ~/.codex, keine gemeinsame veraenderliche Ressource) -- spart bei
@@ -267,6 +610,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
     print(json.dumps(summary, indent=2))
     print(f"\nrun_id: {run_id_base}")
     print(f"Aufraeumen mit: pi-duel cleanup {run_id_base}")
+
     # Frueherer Fehler: success=None (kein checker.sh) fuehrte hier
     # unconditional zu return 0 -- auch wenn ein Arm gar nicht `completed` war
     # oder einen `error` gesetzt hatte. Ein technischer Absturz durfte sich so
@@ -314,6 +658,14 @@ def cmd_report(_args):
     return _run_obench_cli(["report", "--results-path", str(RESULTS_PATH)])
 
 
+def cmd_report_plan_work(args):
+    sys.path.insert(0, str(REAL_DUEL_DIR / "scripts"))
+    import report_plan_work  # noqa: E402
+
+    sys.argv = ["report_plan_work.py", "--task", args.task, "--results-path", str(RESULTS_PATH)]
+    return report_plan_work.main()
+
+
 def cmd_cleanup(args):
     root = WORKTREES_ROOT / args.run_id
     for arm in ("pi", "codex"):
@@ -340,6 +692,10 @@ def main():
     p_smoke.add_argument("--allow-dirty", action="store_true",
                           help="Lauf trotz unsauberem canonical repo erzwingen "
                                "(Ergebnis wird comparable=false markiert)")
+    p_smoke.add_argument("--workflow", choices=["work-only", "plan-work"], default="work-only",
+                          help="work-only (Default, unveraendert) oder plan-work "
+                               "(erfordert workflow.toml im Task-Verzeichnis mit "
+                               "supported=[\"plan-work\"])")
 
     p_run = sub.add_parser("run", help="Beliebige reale Aufgabe fuer beide Candidates (Phase 3)")
     p_run.add_argument("--task", required=True, help="Pfad zum Task-Verzeichnis (instruction.md, optional checker.sh)")
@@ -348,8 +704,17 @@ def main():
     p_run.add_argument("--allow-dirty", action="store_true",
                         help="Lauf trotz unsauberem canonical repo erzwingen "
                              "(Ergebnis wird comparable=false markiert)")
+    p_run.add_argument("--workflow", choices=["work-only", "plan-work"], default="work-only",
+                        help="work-only (Default, unveraendert) oder plan-work "
+                             "(erfordert workflow.toml im Task-Verzeichnis mit "
+                             "supported=[\"plan-work\"])")
 
     sub.add_parser("report", help="obench report ueber die real-duel results.jsonl")
+
+    p_report_pw = sub.add_parser(
+        "report-plan-work", help="Work-only-vs-Plan->Work-Vergleichstabelle pro Kandidat fuer einen Task"
+    )
+    p_report_pw.add_argument("--task", required=True, help="Taskname (wie in results.jsonl unter 'task')")
 
     p_cleanup = sub.add_parser("cleanup", help="Worktrees eines Laufs entfernen")
     p_cleanup.add_argument("run_id")
@@ -357,7 +722,7 @@ def main():
     args = parser.parse_args()
     dispatch = {
         "doctor": cmd_doctor, "gate": cmd_gate, "smoke": cmd_smoke, "run": cmd_run,
-        "report": cmd_report, "cleanup": cmd_cleanup,
+        "report": cmd_report, "report-plan-work": cmd_report_plan_work, "cleanup": cmd_cleanup,
     }
     sys.exit(dispatch[args.command](args))
 

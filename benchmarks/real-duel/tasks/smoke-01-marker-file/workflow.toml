@@ -1,0 +1,13 @@
+# Aktiviert den Plan->Work-Workflow fuer den bestehenden Smoke-Task, damit
+# `pi-duel smoke --workflow plan-work` als technischer Pilot (Stufe 1) dient,
+# bevor ein echter, ungeloester Task fuer die eigentliche Evaluation gewaehlt
+# wird. Der work-only-Pfad (kein --workflow oder --workflow work-only) bleibt
+# durch dieses File unveraendert.
+
+[workflow]
+supported = ["work-only", "plan-work"]
+plan_mode = "simple_plan"
+
+[workflow.surface]
+expected = ["SMOKE_OK.txt"]
+forbidden = []

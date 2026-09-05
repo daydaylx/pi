@@ -192,6 +192,61 @@ def normalize_codex(transcript_text):
     return out
 
 
+_DIFFABLE_NUMERIC_KEYS = (
+    "input_fresh", "input_cache_read", "input_cache_write",
+    "output", "reasoning", "processed_input", "model_calls",
+    "tool_calls", "tool_errors", "cost",
+)
+
+
+def split_codex_plan_work(plan_transcript_text: str, work_transcript_text: str) -> dict:
+    """Codex' `turn.completed.usage` ist laut Docstring oben eine laufende
+    Summe ueber die Session (empirisch fuer Einzel-Turns verifiziert, NICHT
+    verifiziert fuer einen `resume`-Aufruf ueber zwei getrennte Prozesse --
+    das ist Teil der Stufe-1-Pilot-Verifikation). Falls das zutrifft, ist die
+    Work-Phase-Telemetrie die Differenz zwischen dem kumulativen Stand nach
+    der Work-Phase und dem nach der Plan-Phase. Ergibt eine Differenz einen
+    negativen Wert, ist die Annahme fuer diesen Lauf widerlegt --
+    `consistent=False` macht das sichtbar, statt eine falsche Zahl zu melden.
+    """
+    plan_stats = normalize_codex(plan_transcript_text)
+    work_cumulative = normalize_codex(work_transcript_text)
+
+    if plan_stats.get("token_basis") is None or work_cumulative.get("token_basis") is None:
+        return {
+            "plan_phase": plan_stats,
+            "work_phase_cumulative": work_cumulative,
+            "work_phase_delta": _empty_neutral(),
+            "consistent": False,
+            "inconsistency_reason": "token_basis fehlt in mindestens einer Phase",
+        }
+
+    delta = dict(work_cumulative)
+    negative_keys = []
+    for key in _DIFFABLE_NUMERIC_KEYS:
+        p = plan_stats.get(key)
+        w = work_cumulative.get(key)
+        if p is None or w is None:
+            delta[key] = None
+            continue
+        diff = w - p
+        if diff < 0:
+            negative_keys.append(key)
+        delta[key] = diff
+
+    return {
+        "plan_phase": plan_stats,
+        "work_phase_cumulative": work_cumulative,
+        "work_phase_delta": delta,
+        "consistent": not negative_keys,
+        "inconsistency_reason": (
+            f"negative Delta bei: {negative_keys} -- Annahme 'kumulativ ueber "
+            "Session' fuer diesen Lauf widerlegt, work_phase_cumulative statt "
+            "work_phase_delta verwenden" if negative_keys else None
+        ),
+    }
+
+
 NORMALIZERS = {"pi-real": normalize_pi, "codex-real": normalize_codex}
 
 

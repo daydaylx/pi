@@ -1,0 +1,20 @@
+# Stufe-1-Pilotaufgabe (technischer Pilot, siehe
+# /home/d/.claude/plans/reactive-foraging-raven.md Abschnitt 6): klein genug
+# fuer einen schnellen, guenstigen Lauf, aber nicht-trivial genug, dass ein
+# Plan tatsaechlich etwas leistet (siehe empirischer Befund im Smoke-Test:
+# eine Ein-Datei-Aufgabe hat Pi im Schnellplan-Modus dazu gebracht, gar
+# keinen Plan zu schreiben und stattdessen direkt um Moduswechsel zu bitten).
+# Rein additiv (ein neues Skript), kein Netzwerk-/Installationsbedarf --
+# noetig, weil Codex' Plan->Work-Pfad ueber approval_mode=never jede
+# Sandbox-Eskalation ablehnt (siehe codex_plan_work_driver.py).
+
+[workflow]
+supported = ["work-only", "plan-work"]
+plan_mode = "simple_plan"
+
+[workflow.surface]
+expected = ["benchmarks/real-duel/scripts/list_tasks.py"]
+forbidden = [
+  "benchmarks/real-duel/scripts/workflow_task.py",
+  "benchmarks/real-duel/scripts/pi-duel",
+]
