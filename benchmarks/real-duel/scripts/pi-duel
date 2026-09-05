@@ -267,9 +267,30 @@ def _run_task(task_dir, task_name, run_prefix, args):
     print(json.dumps(summary, indent=2))
     print(f"\nrun_id: {run_id_base}")
     print(f"Aufraeumen mit: pi-duel cleanup {run_id_base}")
+    # Frueherer Fehler: success=None (kein checker.sh) fuehrte hier
+    # unconditional zu return 0 -- auch wenn ein Arm gar nicht `completed` war
+    # oder einen `error` gesetzt hatte. Ein technischer Absturz durfte sich so
+    # als "offene Aufgabe, funktionale Bewertung folgt separat" tarnen. Ein
+    # harter Ausfuehrungsfehler ist unabhaengig vom Vorhandensein eines
+    # Checkers ein Fehler des Laufs.
+    rows = [row for row, _ in results_by_name.values()]
+    hard_failures = [row["harness"] for row in rows if not row["completed"] or row["error"]]
+    if hard_failures:
+        print(
+            f"\nERROR: harter Ausfuehrungsfehler bei: {', '.join(hard_failures)} "
+            "(completed=False oder error gesetzt) -- kein automatischer Erfolg trotz "
+            "fehlendem Checker.",
+            file=sys.stderr,
+        )
+        return 1
+
     successes = [s["success"] for s in summary.values()]
     if any(s is None for s in successes):
-        return 0  # offene Aufgabe: kein Skript-Orakel, funktionale Bewertung folgt separat
+        print(
+            "\nHinweis: offene Aufgabe ohne Checker -- technisch sauber gelaufen, "
+            "funktionale Bewertung folgt separat (siehe REAL_DUEL_AUDIT.md)."
+        )
+        return 0
     return 0 if all(successes) else 1
 
 
