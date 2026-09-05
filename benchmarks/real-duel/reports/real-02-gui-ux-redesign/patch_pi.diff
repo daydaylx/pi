@@ -1,0 +1,637 @@
+diff --git a/gui/renderer/index.html b/gui/renderer/index.html
+index 23668f1..77eca70 100644
+--- a/gui/renderer/index.html
++++ b/gui/renderer/index.html
+@@ -29,7 +29,7 @@
+       </div>
+       <div id="header-right">
+         <span id="status-dot" class="dot idle"></span>
+-        <span id="status-text">Nicht verbunden</span>
++        <span id="status-text" role="status" aria-live="polite">Nicht verbunden</span>
+         <button
+           id="btn-toggle-inspector"
+           class="icon-button"
+@@ -274,14 +274,6 @@
+                     </svg>
+                     <span>Kopieren</span>
+                   </button>
+-                  <button
+-                    id="btn-run-stop"
+-                    class="ghost-button"
+-                    title="Agenten stoppen"
+-                    disabled
+-                  >
+-                    Stopp
+-                  </button>
+                   <button
+                     id="btn-run-close"
+                     class="icon-button"
+@@ -381,6 +373,26 @@
+ 
+         <div id="banner" hidden></div>
+ 
++        <section
++          id="plan-ready"
++          aria-label="Plan bereit zur Entscheidung"
++          aria-live="polite"
++          hidden
++        >
++          <div class="plan-ready-copy">
++            <strong>Plan bereit</strong>
++            <span id="plan-ready-detail"></span>
++          </div>
++          <div class="plan-ready-actions">
++            <button id="btn-view-plan" class="ghost-button" type="button">
++              Plan ansehen
++            </button>
++            <button id="btn-decide-plan" class="primary" type="button">
++              Entscheiden
++            </button>
++          </div>
++        </section>
++
+         <footer id="composer">
+           <div id="composer-box">
+             <textarea
+diff --git a/gui/renderer/interaction-helpers.js b/gui/renderer/interaction-helpers.js
+index af0cd27..3ff22f2 100644
+--- a/gui/renderer/interaction-helpers.js
++++ b/gui/renderer/interaction-helpers.js
+@@ -257,6 +257,42 @@ function verificationOutcomeMarker(outcome) {
+  * Core-Zustand). Für ruhende Sitzungen ist `coreState` der letzte
+  * persistierte frontend-bridge/state-Eintrag statt eines Live-Werts.
+  */
++/**
++ * Verdichtet den tatsächlichen Laufzustand für die dauerhaft sichtbare
++ * Kopfzeile. Die Funktion erfindet keinen Core-Zustand: Sie priorisiert nur
++ * bereits gelieferte Signale so, dass eine nötige Nutzeraktion nie hinter
++ * "arbeitet" verborgen bleibt.
++ */
++function agentActivityPresentation({
++  connected = false,
++  busy = false,
++  activityKind = "idle",
++  planReady = false,
++  needsAttention = false,
++} = {}) {
++  if (!connected) return { label: "Nicht verbunden", dot: "idle" };
++  if (needsAttention) return { label: "Eingabe erforderlich", dot: "warn" };
++  if (planReady) return { label: "Plan bereit", dot: "ready" };
++  if (!busy) return { label: "Bereit", dot: "ready" };
++
++  switch (activityKind) {
++    case "thinking":
++      return { label: "Denkt nach …", dot: "busy" };
++    case "tool":
++      return { label: "Nutzt Werkzeug …", dot: "busy" };
++    case "responding":
++      return { label: "Antwortet …", dot: "busy" };
++    default:
++      return { label: "Arbeitet …", dot: "busy" };
++  }
++}
++
++/** Nach einem Toolabschluss bleibt die Darstellung im Werkzeugzustand, bis
++ * kein weitergeleiteter Tool-Aufruf mehr offen ist. */
++function activityKindAfterToolEnd(activeToolCount) {
++  return Number(activeToolCount) > 0 ? "tool" : "thinking";
++}
++
+ function deriveTaskStatus(coreState, { isCurrent = false, busy = false } = {}) {
+   const subagents = Array.isArray(coreState?.subagents)
+     ? coreState.subagents
+@@ -312,6 +348,8 @@ function piExitMessage(info = {}) {
+ const helpers = {
+   ACTIVITY_PHASE_LABELS,
+   activityPhaseFor,
++  activityKindAfterToolEnd,
++  agentActivityPresentation,
+   agentDisplayLabel,
+   classifyActivityKind,
+   comboFromKeyboardEvent,
+@@ -332,6 +370,8 @@ if (typeof module !== "undefined" && module.exports) {
+   module.exports = {
+     ACTIVITY_PHASE_LABELS,
+     activityPhaseFor,
++    activityKindAfterToolEnd,
++    agentActivityPresentation,
+     agentDisplayLabel,
+     classifyActivityKind,
+     comboFromKeyboardEvent,
+diff --git a/gui/renderer/renderer.js b/gui/renderer/renderer.js
+index fb116bb..2ca214b 100644
+--- a/gui/renderer/renderer.js
++++ b/gui/renderer/renderer.js
+@@ -21,6 +21,8 @@ const runStore = new runsModule.AgentRunStore();
+ const state = {
+   connected: false,
+   busy: false,
++  activityKind: "idle",
++  activeToolCallIds: new Set(),
+   modelLabel: "",
+   thinkingLabel: "",
+   verificationStatus: "",
+@@ -644,7 +646,6 @@ function renderRunView(run) {
+   const modelEl = el("run-meta-model");
+   const thinkingEl = el("run-meta-thinking");
+   const parentEl = el("run-meta-parent");
+-  const stopBtn = el("btn-run-stop");
+ 
+   if (nameEl) nameEl.textContent = run.agentName;
+   if (badgeEl) {
+@@ -679,9 +680,7 @@ function renderRunView(run) {
+       parentBtn.addEventListener("click", () => runStore.openTab(parentRun.id));
+     }
+   }
+-  if (stopBtn) {
+-    stopBtn.disabled = !run.isRunning;
+-  }
++  updateRunPaneAvailability(run);
+ 
+   // Zähler in Unteransichts-Tabs
+   const filesCountEl = el("run-files-count");
+@@ -699,6 +698,25 @@ function renderRunView(run) {
+   renderRunPanes(run);
+ }
+ 
++function updateRunPaneAvailability(run) {
++  const available = {
++    output: true,
++    info: true,
++    files: run.fileChanges.size > 0,
++    tools: run.toolCalls.size > 0,
++  };
++
++  if (!available[state.activeRunSubpane]) {
++    state.activeRunSubpane = "output";
++  }
++
++  for (const button of document.querySelectorAll(".run-nav-btn")) {
++    const hasData = available[button.dataset.subpane] !== false;
++    button.hidden = !hasData;
++    button.setAttribute("aria-hidden", String(!hasData));
++  }
++}
++
+ function renderRunPanes(run) {
+   for (const paneBtn of document.querySelectorAll(".run-nav-btn")) {
+     paneBtn.classList.toggle(
+@@ -1062,6 +1080,8 @@ function handleEvent(msg) {
+   switch (msg.type) {
+     case "agent_start":
+       state.busy = true;
++      state.activityKind = "thinking";
++      state.activeToolCallIds.clear();
+       runStore.ensureMainRun(state.sessionId, {
+         model: state.modelLabel,
+         thinking: state.thinkingLabel,
+@@ -1078,7 +1098,9 @@ function handleEvent(msg) {
+           state.pendingLocalEchoes.splice(localEchoIndex, 1);
+         else appendUserBubble(text);
+       } else if (role === "assistant") {
++        state.activityKind = "responding";
+         state.currentAssistant = beginAssistantBlock();
++        refreshStatusBar();
+       }
+       break;
+     }
+@@ -1086,11 +1108,15 @@ function handleEvent(msg) {
+       const ev = msg.assistantMessageEvent || {};
+       if (!state.currentAssistant) break;
+       if (ev.type === "text_delta") {
++        state.activityKind = "responding";
++        refreshStatusBar();
+         streamAssistantText(
+           state.currentAssistant,
+           state.currentAssistant.text + String(ev.delta ?? ""),
+         );
+       } else if (ev.type === "thinking_delta") {
++        state.activityKind = "thinking";
++        refreshStatusBar();
+         setAssistantThinking(
+           state.currentAssistant,
+           state.currentAssistant.thinking + String(ev.delta ?? ""),
+@@ -1112,6 +1138,9 @@ function handleEvent(msg) {
+       break;
+     }
+     case "tool_execution_start": {
++      state.activeToolCallIds.add(String(msg.toolCard.toolCallId));
++      state.activityKind = "tool";
++      refreshStatusBar();
+       const kind = interactions.classifyActivityKind(msg.toolName, msg.args);
+       const isSubagent = msg.toolName === "subagent";
+       const agentRole =
+@@ -1152,12 +1181,12 @@ function handleEvent(msg) {
+         refreshActivityCard(card);
+       }
+ 
+-      // Tool Call im passenden Run aufzeichnen
+-      const activeRun = runStore.activeRunId
+-        ? runStore.getRun(runStore.activeRunId)
+-        : runStore.getRun("main");
+-      if (activeRun) {
+-        activeRun.recordToolStart({
++      // Innere Subagent-Events werden vom Core nicht weitergereicht. Sie
++      // dürfen deshalb nie dem gerade geöffneten Run zugeschrieben werden.
++      // Normale Tool-Aufrufe gehören belastbar zum Hauptlauf, unabhängig davon,
++      // welchen Detailtab der Nutzer gerade betrachtet.
++      if (!isSubagent) {
++        runStore.getRun("main")?.recordToolStart({
+           toolCallId: msg.toolCard.toolCallId,
+           toolName: msg.toolCard.toolName,
+           summary: msg.toolCard.summary,
+@@ -1173,6 +1202,9 @@ function handleEvent(msg) {
+       break;
+     }
+     case "tool_execution_update": {
++      runStore
++        .getRun("main")
++        ?.recordToolUpdate(msg.toolCallId, msg.partialResult);
+       const rawCard = findRawToolCard(msg.toolCallId);
+       if (rawCard) {
+         setToolCardOutput(rawCard.querySelector("pre"), msg.partialResult);
+@@ -1191,6 +1223,11 @@ function handleEvent(msg) {
+       break;
+     }
+     case "tool_execution_end": {
++      state.activeToolCallIds.delete(String(msg.toolCallId));
++      state.activityKind = interactions.activityKindAfterToolEnd(
++        state.activeToolCallIds.size,
++      );
++      refreshStatusBar();
+       if (state.runningVerificationCalls.has(msg.toolCallId)) {
+         state.runningVerificationCalls.delete(msg.toolCallId);
+         state.lastVerificationToolCallId = msg.toolCallId;
+@@ -1198,6 +1235,11 @@ function handleEvent(msg) {
+       }
+ 
+       const isSubagent = msg.toolName === "subagent";
++      if (!isSubagent) {
++        runStore
++          .getRun("main")
++          ?.recordToolEnd(msg.toolCallId, msg.result, Boolean(msg.isError));
++      }
+       if (isSubagent) {
+         const subagentRun = runStore.getRunByToolCallId(msg.toolCallId);
+         if (subagentRun) {
+@@ -1244,6 +1286,8 @@ function handleEvent(msg) {
+     }
+     case "agent_settled":
+       state.busy = false;
++      state.activityKind = "idle";
++      state.activeToolCallIds.clear();
+       closeActivityGroup();
+       refreshStatusBar();
+       refreshContextOverview();
+@@ -1309,6 +1353,7 @@ function refreshCoreChips() {
+     permissionEl.hidden = !core?.permissions?.label;
+   }
+   refreshTaskTitle();
++  refreshStatusBar();
+   refreshComposerPills();
+   renderTaskSidebar();
+ }
+@@ -2464,6 +2509,7 @@ function applyRuntimeState(runtimeState) {
+   state.connected = Boolean(state.sessionId);
+   if (typeof runtimeState?.isStreaming === "boolean") {
+     state.busy = runtimeState.isStreaming;
++    if (!state.busy) state.activityKind = "idle";
+   }
+   state.modelLabel = runtimeState?.model ? `${runtimeState.model.name}` : "";
+   state.thinkingLabel = runtimeState?.thinkingLevel ?? "";
+@@ -2472,6 +2518,20 @@ function applyRuntimeState(runtimeState) {
+   renderTaskSidebar();
+ }
+ 
++function refreshPlanReadiness() {
++  const panel = el("plan-ready");
++  const detail = el("plan-ready-detail");
++  const ready = state.core?.workflow?.planReady;
++  if (!panel || !detail) return;
++
++  panel.hidden = !ready || state.busy;
++  if (!ready || state.busy) return;
++  detail.textContent = ready.qualityOk
++    ? "Der Plan wartet auf deine Entscheidung."
++    : "Der Plan erfüllt die Mindestanforderungen noch nicht.";
++  panel.classList.toggle("needs-review", !ready.qualityOk);
++}
++
+ function refreshComposerPills() {
+   const workflowPill = el("pill-workflow");
+   if (workflowPill) {
+@@ -2510,6 +2570,7 @@ async function loadConversation() {
+ 
+ function resetSessionView() {
+   state.editedFiles.clear();
++  state.activeToolCallIds.clear();
+   state.core = null;
+   state.fileDiffs.clear();
+   state.expandedDiffFiles.clear();
+@@ -2814,10 +2875,18 @@ async function sendMessage(text, opts = {}) {
+ }
+ 
+ function refreshStatusBar() {
+-  setStatusText(
+-    !state.connected ? "Nicht verbunden" : state.busy ? "Arbeitet …" : "Bereit",
+-  );
+-  setDot(!state.connected ? "idle" : state.busy ? "busy" : "ready");
++  const presentation = interactions.agentActivityPresentation({
++    connected: state.connected,
++    busy: state.busy,
++    activityKind: state.activityKind,
++    planReady: Boolean(state.core?.workflow?.planReady),
++    needsAttention: state.core?.subagents?.some(
++      (agent) => agent?.status === "needs_attention",
++    ),
++  });
++  setStatusText(presentation.label);
++  setDot(presentation.dot);
++  refreshPlanReadiness();
+   el("btn-stop").disabled = !state.busy;
+   if (inputEl) {
+     inputEl.placeholder = state.busy
+@@ -3211,6 +3280,12 @@ async function boot() {
+       copyRunSummary(runStore.getRun(runStore.activeRunId));
+     }
+   });
++  el("btn-view-plan")?.addEventListener("click", () => {
++    void sendMessage("/view-plan", { skipLocalEcho: true });
++  });
++  el("btn-decide-plan")?.addEventListener("click", () => {
++    void sendMessage("/plan-decide", { skipLocalEcho: true });
++  });
+ 
+   for (const btn of document.querySelectorAll(".run-filter-bar .filter-btn")) {
+     btn.addEventListener("click", () => {
+diff --git a/gui/renderer/styles.css b/gui/renderer/styles.css
+index 92c8136..ad8b013 100644
+--- a/gui/renderer/styles.css
++++ b/gui/renderer/styles.css
+@@ -4,37 +4,37 @@
+  */
+ 
+ :root {
+-  /* Deep Slate / Zinc Farbsemantik & Elevation */
+-  --bg: #0c0e14;
+-  --surface: #12151f;
+-  --surface-2: #1a1e2c;
+-  --surface-3: #222738;
+-  --surface-hover: #2a3147;
+-  --surface-active: #343c56;
+-
+-  --text: #f1f5f9;
+-  --text-dim: #cbd5e1;
+-  --muted: #78859e;
+-  --border: rgba(255, 255, 255, 0.08);
+-  --border-soft: rgba(255, 255, 255, 0.04);
+-  --border-focus: #818cf8;
+-
+-  --accent: #818cf8;
+-  --accent-ink: #0b0d1b;
+-  --accent-hover: #9ca3ff;
+-  --accent-subtle: rgba(129, 140, 248, 0.15);
+-
+-  --running: #60a5fa;
+-  --ok: #34d399;
+-  --err: #f87171;
+-  --warn: #fbbf24;
+-
+-  /* Glasmorphismus & Schatten */
+-  --glass-bg: rgba(18, 21, 31, 0.85);
+-  --glass-bg-strong: rgba(26, 30, 44, 0.94);
+-  --glass-border: rgba(255, 255, 255, 0.08);
+-  --glass-blur: blur(20px) saturate(120%);
+-  --glass-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
++  /* Warme Aurora-Familie: neutrale Flächen, sparsame Semantik. */
++  --bg: #17110f;
++  --surface: #201816;
++  --surface-2: #2a201d;
++  --surface-3: #362923;
++  --surface-hover: #423229;
++  --surface-active: #503a30;
++
++  --text: #f4ece2;
++  --text-dim: #d7c6b4;
++  --muted: #9b8374;
++  --border: rgba(241, 220, 198, 0.12);
++  --border-soft: rgba(241, 220, 198, 0.06);
++  --border-focus: #cf815c;
++
++  --accent: #bd654b;
++  --accent-ink: #1e110d;
++  --accent-hover: #da8461;
++  --accent-subtle: rgba(189, 101, 75, 0.18);
++
++  --running: #c78b59;
++  --ok: #9aae78;
++  --err: #d87868;
++  --warn: #d6a04d;
++
++  /* Zurückhaltende Elevation statt sichtbarer Glaseffekte. */
++  --glass-bg: rgba(32, 24, 22, 0.97);
++  --glass-bg-strong: rgba(42, 32, 29, 0.99);
++  --glass-border: rgba(241, 220, 198, 0.12);
++  --glass-blur: none;
++  --glass-shadow: 0 10px 28px rgba(12, 6, 4, 0.38);
+ 
+   /* Typografie */
+   --font-ui:
+@@ -237,6 +237,10 @@ kbd {
+   background: var(--err);
+ }
+ 
++.dot.warn {
++  background: var(--warn);
++}
++
+ @keyframes pulse {
+   0%,
+   100% {
+@@ -1786,6 +1790,45 @@ details.thinking-block pre {
+   flex-direction: column;
+ }
+ 
++/* Planentscheidungen sind ein nächster Arbeitsschritt, kein Chat-Detail. */
++#plan-ready {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: var(--space-3);
++  margin: 0 clamp(16px, 6%, 96px) var(--space-2);
++  padding: var(--space-2) var(--space-3);
++  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
++  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
++  border-radius: var(--radius-md);
++}
++
++#plan-ready.needs-review {
++  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
++  border-color: color-mix(in srgb, var(--warn) 48%, var(--border));
++}
++
++.plan-ready-copy {
++  display: flex;
++  flex-direction: column;
++  min-width: 0;
++}
++
++.plan-ready-copy strong {
++  font-size: 13px;
++}
++
++#plan-ready-detail {
++  color: var(--text-dim);
++  font-size: 12px;
++}
++
++.plan-ready-actions {
++  display: flex;
++  flex: none;
++  gap: var(--space-2);
++}
++
+ .banner-item {
+   display: flex;
+   align-items: flex-start;
+@@ -2470,6 +2513,17 @@ dialog h2 {
+ 
+ /* ------------------------------ Responsive ----------------------------- */
+ 
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation-duration: 0.01ms !important;
++    animation-iteration-count: 1 !important;
++    scroll-behavior: auto !important;
++    transition-duration: 0.01ms !important;
++  }
++}
++
+ @media (max-width: 760px) {
+   #project-label {
+     max-width: 9ch;
+@@ -2486,6 +2540,10 @@ dialog h2 {
+     padding-left: var(--space-3);
+     padding-right: var(--space-3);
+   }
++  #plan-ready {
++    margin-left: var(--space-3);
++    margin-right: var(--space-3);
++  }
+   #chat {
+     padding-left: var(--space-3);
+     padding-right: var(--space-3);
+@@ -2506,4 +2564,14 @@ dialog h2 {
+   #composer-pills .pill-button {
+     padding: 4px 8px;
+   }
++  #plan-ready {
++    align-items: flex-start;
++    flex-direction: column;
++  }
++  .plan-ready-actions {
++    width: 100%;
++  }
++  .plan-ready-actions button {
++    flex: 1;
++  }
+ }
+diff --git a/gui/test/renderer-contract.mjs b/gui/test/renderer-contract.mjs
+index 86156ee..4438684 100644
+--- a/gui/test/renderer-contract.mjs
++++ b/gui/test/renderer-contract.mjs
+@@ -9,6 +9,7 @@ const guiDir = path.resolve(here, "..");
+ const read = (relative) => readFileSync(path.join(guiDir, relative), "utf8");
+ 
+ const renderer = read("renderer/renderer.js");
++const html = read("renderer/index.html");
+ const styles = read("renderer/styles.css");
+ const preload = read("main/preload.cjs");
+ const main = read("main/index.js");
+@@ -76,6 +77,31 @@ test("Streaming erhält Thinking und Tool-Updates, ohne Leseposition zu erzwinge
+   assert.match(renderer, /!force && !state\.followScroll/);
+ });
+ 
++test("Lifecycle-Events speisen den sichtbaren Agentenstatus ohne Bridge-Raten", () => {
++  assert.match(renderer, /state\.activityKind = "thinking";/);
++  assert.match(renderer, /state\.activityKind = "tool";/);
++  assert.match(renderer, /state\.activityKind = "responding";/);
++  assert.match(renderer, /activeToolCallIds: new Set\(\)/);
++  assert.match(renderer, /state\.activeToolCallIds\.add\(String\(msg\.toolCard\.toolCallId\)\)/);
++  assert.match(renderer, /state\.activeToolCallIds\.delete\(String\(msg\.toolCallId\)\)/);
++  assert.match(renderer, /activityKind: state\.activityKind/);
++  assert.match(html, /id="status-text" role="status" aria-live="polite"/);
++});
++
++test("Planbereitschaft ist sichtbar und nutzt die bestehende Core-Entscheidung", () => {
++  assert.match(html, /id="plan-ready"/);
++  assert.match(html, /id="btn-decide-plan"/);
++  assert.match(renderer, /function refreshPlanReadiness/);
++  assert.match(renderer, /sendMessage\("\/plan-decide", \{ skipLocalEcho: true \}\)/);
++  assert.match(renderer, /sendMessage\("\/view-plan", \{ skipLocalEcho: true \}\)/);
++});
++
++test("Subagent-Details bieten keinen wirkungslosen Stopp und attribuieren keine Main-Tools", () => {
++  assert.doesNotMatch(html, /id="btn-run-stop"/);
++  assert.match(renderer, /function updateRunPaneAvailability/);
++  assert.match(renderer, /if \(!isSubagent\) \{\n        runStore\.getRun\("main"\)\?\.recordToolStart/);
++});
++
+ test("Schmale Dialoge und Inspector-Drawer-Toggle haben CSS-Regeln", () => {
+   assert.match(styles, /width: min\(620px, calc\(100vw - 32px\)\)/);
+   assert.match(styles, /body\.context-open #context-area/);
+diff --git a/gui/test/renderer-helpers.mjs b/gui/test/renderer-helpers.mjs
+index a7b7471..6552e6d 100644
+--- a/gui/test/renderer-helpers.mjs
++++ b/gui/test/renderer-helpers.mjs
+@@ -2,6 +2,8 @@ import test from "node:test";
+ import assert from "node:assert/strict";
+ import {
+   activityPhaseFor,
++  activityKindAfterToolEnd,
++  agentActivityPresentation,
+   agentDisplayLabel,
+   classifyActivityKind,
+   comboFromKeyboardEvent,
+@@ -143,6 +145,39 @@ test("Activity-Klassifizierung: Subagent/Wait sind agent, Unbekanntes ist other"
+   assert.equal(activityPhaseFor("other"), "other");
+ });
+ 
++test("Toolstatus bleibt bei parallelen Tool-Aufrufen bis zum letzten Abschluss aktiv", () => {
++  assert.equal(activityKindAfterToolEnd(2), "tool");
++  assert.equal(activityKindAfterToolEnd(1), "tool");
++  assert.equal(activityKindAfterToolEnd(0), "thinking");
++});
++
++test("Kopfstatus priorisiert Nutzeraktionen und benennt aktive Agentenphasen", () => {
++  assert.deepEqual(agentActivityPresentation(), {
++    label: "Nicht verbunden",
++    dot: "idle",
++  });
++  assert.deepEqual(
++    agentActivityPresentation({ connected: true, busy: true, activityKind: "thinking" }),
++    { label: "Denkt nach …", dot: "busy" },
++  );
++  assert.deepEqual(
++    agentActivityPresentation({ connected: true, busy: true, activityKind: "tool" }),
++    { label: "Nutzt Werkzeug …", dot: "busy" },
++  );
++  assert.deepEqual(
++    agentActivityPresentation({ connected: true, busy: true, activityKind: "responding" }),
++    { label: "Antwortet …", dot: "busy" },
++  );
++  assert.deepEqual(
++    agentActivityPresentation({ connected: true, needsAttention: true, busy: true }),
++    { label: "Eingabe erforderlich", dot: "warn" },
++  );
++  assert.deepEqual(
++    agentActivityPresentation({ connected: true, planReady: true }),
++    { label: "Plan bereit", dot: "ready" },
++  );
++});
++
+ test("Task-Status: laufende aktuelle Sitzung ist immer ACTIVE", () => {
+   assert.equal(
+     deriveTaskStatus(
