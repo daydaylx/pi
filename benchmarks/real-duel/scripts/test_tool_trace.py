@@ -174,5 +174,136 @@ class ToolTraceTest(unittest.TestCase):
         })
 
 
+class ToolTraceEventsTest(unittest.TestCase):
+    """P1: analyze_pi_events ueber disjunkte Plan-/Work-Event-Listen."""
+
+    @staticmethod
+    def _plan_events() -> list[dict]:
+        # Planphase: ein erfolgreicher write-Call + ein fehlerhafter read-Call
+        # (Retry-Kandidat, spaeter in der Workphase erfolgreich).
+        return [
+            {"type": "message_end", "message": {"role": "user", "timestamp": 1_000, "content": []}},
+            {"type": "message_end", "message": {"role": "assistant", "timestamp": 1_100, "content": [
+                {"type": "toolCall", "id": "plan-write", "name": "write"},
+            ]}},
+            {"type": "tool_execution_start", "toolCallId": "plan-write", "toolName": "write", "args": {
+                "path": "plan.md", "content": "should-not-leak",
+            }},
+            {"type": "tool_execution_end", "toolCallId": "plan-write", "toolName": "write", "result": {
+                "content": [{"type": "text", "text": "ok"}],
+            }, "isError": False},
+            {"type": "message_end", "message": {"role": "toolResult", "timestamp": 1_200,
+                "toolCallId": "plan-write", "toolName": "write", "isError": False}},
+            {"type": "message_end", "message": {"role": "assistant", "timestamp": 1_300, "content": [
+                {"type": "toolCall", "id": "plan-read", "name": "read"},
+            ]}},
+            {"type": "tool_execution_start", "toolCallId": "plan-read", "toolName": "read", "args": {
+                "path": "/home/d/secret/plan.txt", "limit": 10,
+            }},
+            {"type": "tool_execution_end", "toolCallId": "plan-read", "toolName": "read", "result": {
+                "content": [{"type": "text", "text": "Harte Projekt-, Symlink- oder Secret-Grenze"}],
+            }, "isError": True},
+            {"type": "message_end", "message": {"role": "toolResult", "timestamp": 1_400,
+                "toolCallId": "plan-read", "toolName": "read", "isError": True}},
+        ]
+
+    @staticmethod
+    def _work_events() -> list[dict]:
+        # Workphase: eigener erfolgreicher read-Call desselben Ziels (Retry-
+        # Erfolg fuer den Plan-Read) + ein eigener project_check-Fehler.
+        return [
+            {"type": "message_end", "message": {"role": "assistant", "timestamp": 2_000, "content": [
+                {"type": "toolCall", "id": "work-read", "name": "read"},
+            ]}},
+            {"type": "tool_execution_start", "toolCallId": "work-read", "toolName": "read", "args": {
+                "path": "/home/d/secret/plan.txt", "limit": 20,
+            }},
+            {"type": "tool_execution_end", "toolCallId": "work-read", "toolName": "read", "result": {
+                "content": [{"type": "text", "text": "plan content"}],
+            }, "isError": False},
+            {"type": "message_end", "message": {"role": "toolResult", "timestamp": 2_100,
+                "toolCallId": "work-read", "toolName": "read", "isError": False}},
+            {"type": "message_end", "message": {"role": "assistant", "timestamp": 2_200, "content": [
+                {"type": "toolCall", "id": "work-verify", "name": "project_check"},
+            ]}},
+            {"type": "tool_execution_start", "toolCallId": "work-verify", "toolName": "project_check", "args": {
+                "profile": "verify",
+            }},
+            {"type": "tool_execution_end", "toolCallId": "work-verify", "toolName": "project_check", "result": {
+                "content": [{"type": "text", "text": "verify [required]: failed (Exit-Code 1, 12.000 ms)\nFORMAT DRIFT: gui.css"}],
+            }, "isError": True},
+            {"type": "message_end", "message": {"role": "toolResult", "timestamp": 2_400,
+                "toolCallId": "work-verify", "toolName": "project_check", "isError": True}},
+        ]
+
+    def test_phase_separation_no_double_count(self) -> None:
+        plan = self._plan_events()
+        work = self._work_events()
+        plan_trace = trace.analyze_pi_events(plan, wall_time_s=1.0)
+        work_trace = trace.analyze_pi_events(work, wall_time_s=1.0)
+        total = trace.analyze_pi_events(plan + work, wall_time_s=2.0)
+
+        # Planphase: 2 Calls (write + read), 1 Fehler (read).
+        self.assertEqual(plan_trace["summary"]["tool_calls"], 2)
+        self.assertEqual(plan_trace["summary"]["tool_errors"], 1)
+        # Workphase: 2 Calls (read + verify), 1 Fehler (verify).
+        self.assertEqual(work_trace["summary"]["tool_calls"], 2)
+        self.assertEqual(work_trace["summary"]["tool_errors"], 1)
+        # Gesamt = Summe, keine Doppelzaehlung (disjunkte call_ids).
+        self.assertEqual(total["summary"]["tool_calls"], 4)
+        self.assertEqual(total["summary"]["tool_errors"], 2)
+        self.assertEqual(
+            total["summary"]["tool_calls"],
+            plan_trace["summary"]["tool_calls"] + work_trace["summary"]["tool_calls"],
+        )
+        self.assertEqual(
+            total["summary"]["tool_errors"],
+            plan_trace["summary"]["tool_errors"] + work_trace["summary"]["tool_errors"],
+        )
+        # Retry ueber die Phasengrenze nur im Gesamt-Trace sichtbar: der
+        # fehlerhafte Plan-Read wird spaeter im Work-Trace erfolgreich
+        # wiederholt.
+        plan_read_error = next(
+            e for e in plan_trace["errors"] if e["tool"] == "read"
+        )
+        self.assertFalse(plan_read_error["retry"]["eventual_success"])
+        total_read_error = next(
+            e for e in total["errors"] if e["tool"] == "read" and e["index"] == 2
+        )
+        self.assertTrue(total_read_error["retry"]["eventual_success"])
+        self.assertEqual(total_read_error["retry"]["success_call_index"], 3)
+
+    def test_analyze_pi_events_privacy_redaction(self) -> None:
+        total = trace.analyze_pi_events(self._plan_events() + self._work_events())
+        serialized = json.dumps(total, ensure_ascii=False)
+        # Keine freien Texte, Write-Inhalte, Shell-Befehle oder absoluten
+        # /home/d/-Praefixe duerfen in den Sidecar gelangen (gleicher strenger
+        # Datenschutz wie Work-only).
+        for raw in ("should-not-leak", "plan content", "gui.css", "/home/d/"):
+            self.assertNotIn(raw, serialized)
+        # Absoluter Pfad nur als redigiertes <absolute>/suffix.
+        read_call = next(c for c in total["calls"] if c["tool"] == "read")
+        self.assertEqual(read_call["arguments"]["path"], "<absolute>/secret/plan.txt")
+
+    def test_baseline_classification_refines_verification(self) -> None:
+        # P2: ein project_check-Fehler gegen eine Baseline, die denselben Check
+        # schon vor dem Kandidaten enthielt, wird zu verification/baseline.
+        baseline = {"format:check": "deadbeef"}
+        total = trace.analyze_pi_events(
+            self._plan_events() + self._work_events(),
+            baseline_failures=baseline,
+        )
+        verify_error = next(
+            e for e in total["errors"] if e["tool"] == "project_check"
+        )
+        self.assertEqual(verify_error["error_category"], "verification/baseline")
+        # Ohne Baseline-Kontext bleibt es eine plain regression / verification.
+        no_baseline = trace.analyze_pi_events(self._plan_events() + self._work_events())
+        verify_error2 = next(
+            e for e in no_baseline["errors"] if e["tool"] == "project_check"
+        )
+        self.assertEqual(verify_error2["error_category"], "verification")
+
+
 if __name__ == "__main__":
     unittest.main()

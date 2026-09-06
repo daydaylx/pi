@@ -164,6 +164,37 @@ def _target_key(tool: str, args: dict[str, Any]) -> str:
     return _fingerprint([tool, target])
 
 
+def _refine_verification_category(
+    category: str | None,
+    tool: str,
+    error_text: str,
+    baseline_failures: dict[str, str] | None,
+) -> str | None:
+    """Refine a plain ``verification`` category using baseline knowledge (P2).
+
+    A verification error whose baseline already failed the same check is
+    ``verification/baseline`` (pre-existing, not the candidate's regression).
+    A verification error arising against a clean baseline is
+    ``verification/regression``. Without baseline context the category stays
+    ``verification``. Matching is by check-name substring in the error text --
+    a heuristic, never authoritative; the raw error stays recorded.
+    """
+    if category != "verification" or not baseline_failures:
+        return category
+    lower = error_text.lower()
+    for check in baseline_failures:
+        if not check:
+            continue
+        # Vollstaendiger Check-Name (z.B. "typecheck", "verify") oder das
+        # Praefix vor dem Doppelpunkt ("format" aus "format:check"); der
+        # Agent-Verify-Output nennt "FORMAT DRIFT", nicht "format:check",
+        # darum stimmt das Praefix hier ueberein.
+        keyword = check.split(":", 1)[0]
+        if check.lower() in lower or keyword.lower() in lower:
+            return "verification/baseline"
+    return "verification/regression"
+
+
 def _phase(tool: str, args: dict[str, Any]) -> str:
     if tool in _MUTATING_TOOLS:
         return "edit"
@@ -196,13 +227,27 @@ def _union_ms(intervals: list[tuple[int, int]]) -> int:
     return sum(end - start for start, end in merged)
 
 
-def analyze_pi_trace(
-    transcript_text: str,
+def analyze_pi_events(
+    events: Iterable[dict[str, Any]],
     *,
     wall_time_s: float | None = None,
     checker_success: bool | None = None,
     checker_wall_time_s: float | None = None,
+    baseline_failures: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    """Core tool-trace analysis over an iterable of already-parsed RPC events.
+
+    Shared by Work-only (text transcript parsed by ``analyze_pi_trace``) and
+    Plan->Work (disjoint Plan-/Work-phase event lists). Uses one and the same
+    error classification, fingerprinting and privacy redaction -- there is no
+    second trace implementation for Plan->Work.
+
+    ``baseline_failures`` (P2) maps a failing baseline check name to its
+    fingerprint; a verification error attributable to one of these checks is
+    classified as ``verification/baseline`` (pre-existing) instead of a plain
+    candidate regression. The raw error remains recorded; only the evaluation
+    gets the additional class.
+    """
     starts: dict[str, dict[str, Any]] = {}
     ends: dict[str, dict[str, Any]] = {}
     start_times: dict[str, int] = {}
@@ -210,7 +255,7 @@ def analyze_pi_trace(
     batch_sizes: dict[str, int] = {}
     transcript_start_ms: int | None = None
 
-    for event in _iter_events(transcript_text):
+    for event in events:
         if event.get("type") == "tool_execution_start":
             call_id = event.get("toolCallId")
             if isinstance(call_id, str):
@@ -259,6 +304,9 @@ def analyze_pi_trace(
         duration_ms = end_ms - start_ms if start_ms is not None and end_ms is not None else None
         error_text = _result_text(end_event.get("result")) if success is False else ""
         error_category = classify_error(tool, error_text) if success is False else None
+        error_category = _refine_verification_category(
+            error_category, tool, error_text, baseline_failures
+        )
         repeated_verification = (
             phase == "verification"
             and signature in verification_generation
@@ -372,19 +420,52 @@ def analyze_pi_trace(
     }
 
 
+def analyze_pi_trace(
+    transcript_text: str,
+    *,
+    wall_time_s: float | None = None,
+    checker_success: bool | None = None,
+    checker_wall_time_s: float | None = None,
+    baseline_failures: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Analyse a Work-only ``pi --print`` JSONL transcript (text -> events).
+
+    Thin wrapper around :func:`analyze_pi_events` so the text transcript and
+    the Plan->Work event lists share one and the same core. Behaviour for
+    Work-only is unchanged.
+    """
+    return analyze_pi_events(
+        list(_iter_events(transcript_text)),
+        wall_time_s=wall_time_s,
+        checker_success=checker_success,
+        checker_wall_time_s=checker_wall_time_s,
+        baseline_failures=baseline_failures,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("transcript", type=Path)
     parser.add_argument("--wall-time-s", type=float)
     parser.add_argument("--checker-success", choices=("true", "false", "unknown"), default="unknown")
     parser.add_argument("--checker-wall-time-s", type=float)
+    parser.add_argument(
+        "--baseline-failure-check",
+        action="append",
+        default=[],
+        help="Name eines bereits fehlgeschlagenen Baseline-Checks (wiederholbar); "
+        "Verifikationsfehler, die denselben Check treffen, werden als "
+        "verification/baseline statt als Regression klassifiziert.",
+    )
     args = parser.parse_args()
     checker_success = {"true": True, "false": False, "unknown": None}[args.checker_success]
+    baseline_failures = {check: "" for check in args.baseline_failure_check} or None
     result = analyze_pi_trace(
         args.transcript.read_text(encoding="utf-8"),
         wall_time_s=args.wall_time_s,
         checker_success=checker_success,
         checker_wall_time_s=args.checker_wall_time_s,
+        baseline_failures=baseline_failures,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

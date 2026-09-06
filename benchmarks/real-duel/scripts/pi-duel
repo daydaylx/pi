@@ -98,6 +98,12 @@ def _load_tool_trace_module():
     return tool_trace_module
 
 
+def _load_baseline_preflight_module():
+    sys.path.insert(0, str(REAL_DUEL_DIR / "scripts"))
+    import baseline_preflight as baseline_preflight_module  # noqa: E402
+    return baseline_preflight_module
+
+
 def _load_workflow_modules():
     sys.path.insert(0, str(REAL_DUEL_DIR / "scripts"))
     import workflow_task as workflow_task_module  # noqa: E402
@@ -251,6 +257,24 @@ def _run_task(task_dir, task_name, run_prefix, args):
 
     arm_by_candidate = {"pi-real": "pi", "codex-real": "codex"}
 
+    def _run_baseline_preflight(workdir, workflow_cfg, allow_dirty):
+        """P2: Klart vor dem Kandidatenlauf, ob die saubere Projektbaseline
+        (base_sha) bereits Fehler enthaelt. ``--allow-dirty`` ueberspringt
+        den Preflight (dirty-Lauf ohnehin comparable=false)."""
+        if allow_dirty:
+            return {"status": "skipped", "reason": "dirty_override", "failures": [], "checks": []}
+        baseline_preflight_module = _load_baseline_preflight_module()
+        checks = workflow_cfg.baseline_checks
+        try:
+            return baseline_preflight_module.run_preflight(workdir, checks)
+        except Exception as exc:  # noqa: BLE001 -- Preflight-Fehler darf nie den Lauf blockieren
+            return {
+                "status": "unknown",
+                "reason": f"preflight_error: {exc}",
+                "failures": [],
+                "checks": [],
+            }
+
     def _maybe_run_checker(workdir):
         """Gemeinsam fuer work-only und plan-work: fuehrt checker.sh aus, falls
         der Task eines definiert. Fehlt im plan-work-Pfad, faellt der
@@ -278,6 +302,13 @@ def _run_task(task_dir, task_name, run_prefix, args):
 
     def _execute_work_only(cand_name, candidate, workdir, run_id, arm):
         print(f"=== {cand_name}: invoke ({run_id}) ===")
+        # P2: Baseline-Preflight gegen den sauberen Worktree (base_sha), BEVOR
+        # der Kandidat mutiert. Liefert baseline_status clean/failing/skipped
+        # und die Check-Fingerprints fuer die spaetere Klassifikation.
+        baseline_preflight = _run_baseline_preflight(workdir, workflow_cfg, args.allow_dirty)
+        baseline_preflight_module = _load_baseline_preflight_module()
+        baseline_failures_map = baseline_preflight_module.baseline_failure_map(baseline_preflight)
+        print(f"=== {cand_name}: baseline_status={baseline_preflight.get('status')} ===")
         t0 = time.monotonic()
         result = candidate.run(instruction, str(workdir), MODEL, args.timeout)
         wall_time = round(time.monotonic() - t0, 3)
@@ -306,6 +337,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
                 wall_time_s=wall_time,
                 checker_success=success,
                 checker_wall_time_s=checker_wall_time,
+                baseline_failures=baseline_failures_map,
             )
             tool_trace_path = TOOL_TRACES_DIR / f"{run_id_base}_{arm}.json"
             tool_trace_path.write_text(
@@ -363,7 +395,28 @@ def _run_task(task_dir, task_name, run_prefix, args):
             ),
             "tool_trace_summary": tool_trace_summary,
             "tool_error_details": tool_error_details,
+            # P2: Baseline-Preflight + abgeleitete Klassifikation. Die rohen
+            # Toolfehler bleiben unveraendert protokolliert; nur die
+            # Auswertung bekommt die zusaetzliche Baselinebezug-Klasse.
+            "baseline_preflight": baseline_preflight,
+            "baseline_classification": (
+                baseline_preflight_module.classify_candidate_errors(
+                    tool_error_details, baseline_preflight
+                )
+            ),
+            "comparable_reason": None,  # weiter unten gesetzt
         }
+        comparable, comparable_reason = baseline_preflight_module.decide_comparable(
+            baseline_preflight=baseline_preflight,
+            dirty_override=fp["dirty_override"],
+            candidate_tool_errors=tool_error_details,
+            candidate_regressions=[
+                err for err in (tool_error_details or [])
+                if err.get("error_category") == "verification/regression"
+            ],
+        )
+        row["comparable"] = comparable
+        row["comparable_reason"] = comparable_reason
         print(f"=== {cand_name}: checker_exit={checker_exit} success={success} "
               f"wall_time_s={wall_time} model_calls={telemetry['model_calls']} "
               f"input_fresh={telemetry['input_fresh']} "
@@ -393,9 +446,22 @@ def _run_task(task_dir, task_name, run_prefix, args):
         full_output_for_transcript = ""
         pi_sess = None  # geschlossen im finally, auch wenn Freigabe/Work-Phase wirft
         checker_exit = raw_score = checker_stdout = checker_stderr = checker_success = None
+        # P1/P2: Plan-/Work-Tooltrace + Baseline-Preflight.
+        plan_phase_tool_trace = None
+        work_phase_tool_trace = None
+        tool_trace_summary = None
+        tool_trace_path = None
+        tool_error_details = None
+        plan_phase_wall_time_s = None
+        work_phase_wall_time_s = None
+        baseline_preflight = _run_baseline_preflight(workdir, workflow_cfg, args.allow_dirty)
+        baseline_preflight_module = _load_baseline_preflight_module()
+        baseline_failures_map = baseline_preflight_module.baseline_failure_map(baseline_preflight)
+        print(f"=== {cand_name}: baseline_status={baseline_preflight.get('status')} ===")
 
         try:
             if cand_name == "pi-real":
+                plan_t0 = time.monotonic()
                 plan_result = pi_rpc_module.run_plan_phase(
                     cwd=str(workdir),
                     model=MODEL,
@@ -407,6 +473,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
                     timeout=args.timeout,
                     log_dir=TRANSCRIPTS_DIR,
                 )
+                plan_phase_wall_time_s = round(time.monotonic() - plan_t0, 3)
                 pi_sess = plan_result.sess
                 plan_hash = plan_result.plan_hash
                 gates.append(gates_module.check_no_project_mutation_before_approval(workdir))
@@ -428,7 +495,9 @@ def _run_task(task_dir, task_name, run_prefix, args):
                         f"Vor-Freigabe-Gate fehlgeschlagen: {pre_summary['failed_required']}"
                     )
 
+                work_t0 = time.monotonic()
                 work_result = pi_rpc_module.approve_and_run_work(plan_result, timeout=args.timeout)
+                work_phase_wall_time_s = round(time.monotonic() - work_t0, 3)
 
                 gates.append(gates_module.check_approval_used_exactly_once(work_result.approval_count))
                 # approvePlan() schaltet bei Erfolg immer auf "work"
@@ -459,6 +528,49 @@ def _run_task(task_dir, task_name, run_prefix, args):
 
                 plan_phase_telemetry = plan_result.stats_before_approval
                 work_phase_telemetry = _diff_pi_stats(plan_phase_telemetry, work_result.stats_after_work)
+
+                # P1: getrennter Tooltrace fuer Plan-/Work-Phase + Aggregat
+                # ueber die disjunkten Event-Listen (keine Doppelzaehlung).
+                # Dasselbe analyze_pi_events wie Work-only, keine zweite
+                # Klassifikation. Privacy-Redaktion identisch.
+                tool_trace_module = _load_tool_trace_module()
+                plan_events = list(plan_result.events)
+                work_events = list(work_result.events)
+                plan_trace = tool_trace_module.analyze_pi_events(
+                    plan_events,
+                    wall_time_s=plan_phase_wall_time_s,
+                    baseline_failures=baseline_failures_map,
+                )
+                work_trace = tool_trace_module.analyze_pi_events(
+                    work_events,
+                    wall_time_s=work_phase_wall_time_s,
+                    checker_success=checker_success,
+                    baseline_failures=baseline_failures_map,
+                )
+                total_trace = tool_trace_module.analyze_pi_events(
+                    plan_events + work_events,
+                    wall_time_s=None,
+                    checker_success=checker_success,
+                    checker_wall_time_s=None,
+                    baseline_failures=baseline_failures_map,
+                )
+                plan_phase_tool_trace = plan_trace["summary"]
+                work_phase_tool_trace = work_trace["summary"]
+                tool_trace_summary = total_trace["summary"]
+                tool_error_details = total_trace["errors"]
+                tool_trace_path = TOOL_TRACES_DIR / f"{run_id_base}_{arm}_total.json"
+                (TOOL_TRACES_DIR / f"{run_id_base}_{arm}_plan.json").write_text(
+                    json.dumps(plan_trace, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                (TOOL_TRACES_DIR / f"{run_id_base}_{arm}_work.json").write_text(
+                    json.dumps(work_trace, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                (TOOL_TRACES_DIR / f"{run_id_base}_{arm}_total.json").write_text(
+                    json.dumps(total_trace, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
 
                 full_output_for_transcript = json.dumps(
                     {"plan_events": plan_result.events, "work_events": work_result.events}
@@ -617,8 +729,42 @@ def _run_task(task_dir, task_name, run_prefix, args):
             "plan_hash": plan_hash,
             "plan_phase_telemetry": plan_phase_telemetry,
             "work_phase_telemetry": work_phase_telemetry,
+            # P1: getrennter Plan-/Work-Tooltrace + Aggregat (nur Pi; Codex
+            # hat bereits phasenweise tool_errors via telemetry). Die vollen
+            # Sidecars liegen unter tool-traces/; die Ergebniszeile trägt nur
+            # die Zusammenfassungen + Fehlerdetails. Privacy wie Work-only.
+            "plan_phase_tool_trace": plan_phase_tool_trace,
+            "work_phase_tool_trace": work_phase_tool_trace,
+            "tool_trace_summary": tool_trace_summary,
+            "tool_trace_path": (
+                str(tool_trace_path.relative_to(WORKSPACE_DIR))
+                if tool_trace_path
+                else None
+            ),
+            "tool_error_details": tool_error_details,
+            # P2: Baseline-Preflight + abgeleitete Klassifikation.
+            "baseline_preflight": baseline_preflight,
+            "baseline_classification": (
+                baseline_preflight_module.classify_candidate_errors(
+                    tool_error_details, baseline_preflight
+                )
+            ),
+            "plan_phase_wall_time_s": plan_phase_wall_time_s,
+            "work_phase_wall_time_s": work_phase_wall_time_s,
+            "comparable_reason": None,  # weiter unten gesetzt
             "gates": gate_summary,
         }
+        comparable, comparable_reason = baseline_preflight_module.decide_comparable(
+            baseline_preflight=baseline_preflight,
+            dirty_override=fp["dirty_override"],
+            candidate_tool_errors=tool_error_details,
+            candidate_regressions=[
+                err for err in (tool_error_details or [])
+                if err.get("error_category") == "verification/regression"
+            ],
+        )
+        row["comparable"] = comparable
+        row["comparable_reason"] = comparable_reason
         print(
             f"=== {cand_name}: plan-work completed={row['completed']} "
             f"error={row['error']} wall_time_s={wall_time} "

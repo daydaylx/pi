@@ -379,6 +379,8 @@ class WorkPhaseResult:
     stats_after_work: dict
     entries: list[dict]
     events: list[dict]
+    plan_phase_event_count: int
+    work_phase_event_count: int
 
 
 def approve_and_run_work(
@@ -394,6 +396,14 @@ def approve_and_run_work(
     approval_count = 0
     approved = False
     preconsumed = _has_plan_approval_entry(plan_phase.entries_before_approval)
+
+    # Robuste Phasengrenze (P1): Anzahl der bis hierhin vom Reader in
+    # sess.all_events gespiegelten stdout-Zeilen. Plan-/Work-Tooltrace
+    # erhalten ohnehin disjunkte In-Memory-Event-Listen; dieser Marker ist
+    # die Rueckversicherung, falls spaeter einmal aus der Transkriptdatei
+    # geschnitten werden muss (kein Zaehlen desselben Calls in beiden
+    # Phasen).
+    plan_phase_event_count = len(sess.all_events)
 
     sess.send({"type": "prompt", "message": "/plan-approve"})
 
@@ -441,6 +451,7 @@ def approve_and_run_work(
     stats = get_session_stats(sess)
     entries = get_entries(sess)
     state_after = get_state(sess)
+    work_phase_event_count = len(sess.all_events) - plan_phase_event_count
     return WorkPhaseResult(
         approved=approved,
         approval_count=approval_count,
@@ -449,4 +460,6 @@ def approve_and_run_work(
         stats_after_work=stats,
         entries=entries,
         events=all_events,
+        plan_phase_event_count=plan_phase_event_count,
+        work_phase_event_count=work_phase_event_count,
     )

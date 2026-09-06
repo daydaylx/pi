@@ -83,7 +83,7 @@ dieselbe Eigenschaft mechanisch stärker (OS-Sandbox statt Prompt-Konvention).
 | Kennzahl                          | Codex Work-only | Codex Plan→Work |              Δ | Pi Work-only |                     Pi Plan→Work |               Δ |
 | --------------------------------- | --------------: | --------------: | -------------: | -----------: | -------------------------------: | --------------: |
 | Funktional erfolgreich            |            PASS |            PASS |              – |         PASS |                             PASS |               – |
-| Laufzeit (s)                      |           32,05 |          128,52 |  +96,46 (×4,0) |        23,20 |                            68,54 |   +45,35 (×3,0) |
+| Laufzeit (s)                      |           70,27 |          128,52 |  +58,25 (×1,8) |        31,28 |                            68,54 |   +37,26 (×2,2) |
 | Fresh Input                      |          14.697 |          28.361 |       +13.664 |       17.726 |                           21.811 |       +4.085 |
 | Cache Read                       |          73.728 |         193.280 |      +119.552 |       44.544 |                          109.056 |      +64.512 |
 | Output                           |             630 |           4.150 |        +3.520 |          345 |                            1.012 |         +667 |
@@ -180,7 +180,7 @@ Plan→Work bei Codex im Einzeltrial bei ×2,5 bzw. ×2,9 und bei Pi bei ×2,1 b
 widerlegt: Sie beruhte auf unterschiedlich aggregierten Tokenfeldern. Cache
 Read bleibt separat, weil große Cache-Mengen weder direkt mit Fresh Input noch
 mit Kosten gleichzusetzen sind. Bei Pi ist die Zeitdifferenz uneinheitlich
-(+45s beim Marker-Task, −23s bei der größeren Pilotaufgabe); Toolfehler:
+(+37s beim Marker-Task, −23s bei der größeren Pilotaufgabe); Toolfehler:
 Codex 0 in jeder Zeile, Pi Work-only 1 bzw. 5. Pi-Plan→Work-Zeilen zeigen
 aktuell keinen Toolfehlerwert (Report-Lücke, s. Abschnitt 9).
 
@@ -272,10 +272,29 @@ offene reale Persistenzstrecke für Pi Work-only einmal end-to-end belegt.
 - **n=1 pro Zelle.** Jede Zahl in Abschnitt 5/8 ist ein Einzellauf, keine
   Verteilung. Für belastbare Aussagen ist Stufe 2 (≥3 Aufgaben × ≥3 Trials)
   erforderlich, wie im Plan vorgesehen.
-- **Reporting-Lücke bei Pi-Toolfehlern im Plan-Work-Pfad:** Die
-  Plan-/Work-Phasen der Pi-Ergebniszeilen enthalten noch keinen aggregierten
-  `tool_errors`-Wert. Die Rohdaten liegen in den Event-Transkripten, müssen
-  aber vor einer Summierung phasenweise normalisiert werden.
+- **Smoke-Work-only-Laufzeiten korrigiert (dieser Bericht):** Die ursprüngliche
+  Section-5-Tabelle enthielt für `smoke-01-marker-file` Work-only die Werte
+  Codex `32,05 s` / Pi `23,20 s`. Diese stammten **nicht** aus der archivierten
+  [`results_stufe1.jsonl`](plan-work-pilot-stufe1/results_stufe1.jsonl) — dort
+  stehen korrekt Codex `70,269 s` / Pi `31,284 s` (gleiche `run_id`, `base_sha`
+  `f886b95…`, Modell `gpt-5.6-luna`, Trial 1). Die Section-5-Tabelle war manuell
+  gepflegt, kein Output von `report_plan_work.py`; dabei wurden nur die
+  Plan→Work-Werte korrekt aus der jsonl übernommen, die Work-only-Spalte nicht.
+  Korrigiert auf Codex `70,27 s` / Pi `31,28 s`; damit Δ Codex `+58,25 s
+  (×1,8)` und Δ Pi `+37,26 s (×2,2)` (zuvor fehlerhaft `+96,46/×4,0` bzw.
+  `+45,35/×3,0`). Abschnitt 8 (Pi-Zeitdifferenz „+37s“ statt „+45s“) ebenfalls
+  angepasst. `report_plan_work.py --combined` erzeugt diese Tabelle nun
+  reproduzierbar direkt aus der jsonl, sodass eine solche manuelle
+  Laufzeit-Verwechslung künftig sofort als Abweichung auffällt. Die archivierten
+  Rohdaten wurden nicht verändert.
+- **Reporting-Lücke bei Pi-Toolfehlern im Plan-Work-Pfad (für neue Läufe
+  geschlossen):** Pi-Ergebniszeilen enthielten bisher keinen aggregierten
+  `tool_errors`-Wert pro Phase. `pi_rpc_driver` liefert bereits disjunkte
+  Plan-/Work-Event-Listen; `tool_trace.analyze_pi_events` wertet diese nun
+  getrennt sowie aggregiert aus (gleiche Klassifikation/Privacy wie Work-only).
+  `report_plan_work.py` zeigt Plan-/Work-/Gesamt-Toolfehler. Die archivierte
+  Stufe-1-Zeile hat die neuen Felder nicht (historische Rohdaten bleiben
+  unverändert) und zeigt deshalb weiterhin `–`; neue Läufe füllen sie.
 - **Tokenaggregation korrigiert:** `report_plan_work.py` summiert für beide
   Workflows nun je Komponente Fresh Input, Cache Read, Cache Write und Output
   und weist Cache Read separat aus. Die früheren, gemischten

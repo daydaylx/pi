@@ -28,6 +28,15 @@ Format (alle Felder optional, Defaults siehe WorkflowTaskConfig):
 
     [workflow.acceptance]
     criteria = ["...", "..."]
+
+    [workflow.baseline]
+    # npm-Scriptnamen, die vor dem Kandidatenlauf als Baseline-Preflight gegen
+    # den sauberen Worktree (base_sha) laufen. Default, wenn die Sektion fehlt:
+    # ("format:check", "typecheck"). Aufgaben mit Verify-Bedarf koennen
+    # checks = ["verify"] setzen, um volle Treffergleichheit mit dem vom
+    # Agenten typischerweise aufgerufenen project_check(profile=verify) zu
+    # erreichen (kostet allerdings einen kompletten Verify-Lauf pro Arm).
+    checks = ["format:check", "typecheck"]
 """
 
 from __future__ import annotations
@@ -53,6 +62,9 @@ SUPPORTED_WORKFLOWS = ("work-only", "plan-work")
 PLAN_MODES = ("simple_plan", "detailed_plan")
 
 
+DEFAULT_BASELINE_CHECKS = ("format:check", "typecheck")
+
+
 @dataclass(frozen=True)
 class WorkflowTaskConfig:
     supported_workflows: tuple[str, ...] = ("work-only",)
@@ -62,6 +74,7 @@ class WorkflowTaskConfig:
     expected_surface: tuple[str, ...] = ()
     forbidden_surface: tuple[str, ...] = ()
     acceptance_criteria: tuple[str, ...] = ()
+    baseline_checks: tuple[str, ...] = DEFAULT_BASELINE_CHECKS
     has_explicit_config: bool = False
 
     def supports(self, workflow: str) -> bool:
@@ -112,6 +125,17 @@ def load(task_dir: Path) -> WorkflowTaskConfig:
     acceptance = wf.get("acceptance", {})
     acceptance_criteria = _as_str_tuple(acceptance.get("criteria"), "acceptance.criteria")
 
+    baseline = wf.get("baseline", {})
+    if not isinstance(baseline, dict):
+        raise ValueError(f"{path}: [workflow.baseline] muss eine Tabelle sein.")
+    baseline_checks_raw = baseline.get("checks", list(DEFAULT_BASELINE_CHECKS))
+    baseline_checks = _as_str_tuple(baseline_checks_raw, "baseline.checks")
+    if not baseline_checks:
+        raise ValueError(
+            f"{path}: baseline.checks darf nicht leer sein "
+            f"(Default ist {list(DEFAULT_BASELINE_CHECKS)!r})."
+        )
+
     return WorkflowTaskConfig(
         supported_workflows=supported,
         plan_mode=plan_mode,
@@ -120,6 +144,7 @@ def load(task_dir: Path) -> WorkflowTaskConfig:
         expected_surface=expected_surface,
         forbidden_surface=forbidden_surface,
         acceptance_criteria=acceptance_criteria,
+        baseline_checks=baseline_checks,
         has_explicit_config=True,
     )
 
