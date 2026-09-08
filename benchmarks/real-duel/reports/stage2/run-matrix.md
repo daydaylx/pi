@@ -28,9 +28,9 @@ Kandidaten gleichzeitig, sofern `--candidate` nicht gesetzt ist).
 | real-03-lsp-ruby-profile               | A      | 1     | WO→PW                | abgeschlossen | true/true  |                |
 | real-03-lsp-ruby-profile               | A      | 2     | PW→WO                | abgeschlossen | true/true  |                |
 | real-03-lsp-ruby-profile               | A      | 3     | WO→PW                | abgeschlossen | true/true  |                |
-| real-04-session-health-provider-filter | B      | 1     | WO→PW                | offen         |            |                |
-| real-04-session-health-provider-filter | B      | 2     | PW→WO                | offen         |            |                |
-| real-04-session-health-provider-filter | B      | 3     | WO→PW                | offen         |            |                |
+| real-04-session-health-provider-filter | B      | 1     | WO→PW                | abgeschlossen | true/true  |                |
+| real-04-session-health-provider-filter | B      | 2     | PW→WO                | abgeschlossen | true/true  |                |
+| real-04-session-health-provider-filter | B      | 3     | WO→PW                | abgeschlossen | true/true  |                |
 | real-05-lsp-rename-tool                | C      | 1     | WO→PW                | offen         |            |                |
 | real-05-lsp-rename-tool                | C      | 2     | PW→WO                | offen         |            |                |
 | real-05-lsp-rename-tool                | C      | 3     | WO→PW                | offen         |            |                |
