@@ -207,6 +207,21 @@ class DedupByRunIdTest(unittest.TestCase):
         rows = [{"run_id": "a"}, {"run_id": "b"}, {"run_id": "c"}]
         self.assertEqual(report._dedup_by_run_id(rows), rows)
 
+    def test_same_run_id_different_workflow_both_kept(self) -> None:
+        # Bestaetigter Bug (entdeckt waehrend der echten Stufe-2-Serie):
+        # make_run_id() (OpenBench) kodiert nur harness:task:model:trial,
+        # NICHT den Workflow -- Work-only und Plan->Work desselben Trials
+        # teilen sich denselben run_id. Ein Dedup nur nach run_id hat eine
+        # der beiden Zeilen still verworfen.
+        rows = [
+            {"run_id": "pi-real:task:model:trial1", "workflow": "work-only", "wall_time_s": 100.0},
+            {"run_id": "pi-real:task:model:trial1", "workflow": "plan-work", "wall_time_s": 200.0},
+        ]
+        deduped = report._dedup_by_run_id(rows)
+        self.assertEqual(len(deduped), 2)
+        workflows = {r["workflow"] for r in deduped}
+        self.assertEqual(workflows, {"work-only", "plan-work"})
+
 
 class MultiTrialAggregationTest(unittest.TestCase):
     def test_three_trial_rows_render_n_and_median_but_single_row_stays_legacy(self) -> None:

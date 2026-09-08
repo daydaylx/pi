@@ -38,14 +38,23 @@ def _load_rows(results_path: Path, task: str) -> list[dict]:
 
 
 def _dedup_by_run_id(rows: list[dict]) -> list[dict]:
-    """Deduplizierung nach run_id (letzter Eintrag gewinnt, entspricht der
-    natuerlichen Append-Reihenfolge in results.jsonl). Ohne dies fliesst ein
-    versehentlich zweimal geschriebener Lauf (gleiche run_id) unbemerkt
-    doppelt gewichtet in die Aggregation ein (P2, Mehrfach-Trial-Support)."""
-    by_run_id: dict[object, dict] = {}
+    """Deduplizierung nach (run_id, workflow) (letzter Eintrag gewinnt,
+    entspricht der natuerlichen Append-Reihenfolge in results.jsonl). Ohne
+    dies fliesst ein versehentlich zweimal geschriebener Lauf (gleiche
+    run_id) unbemerkt doppelt gewichtet in die Aggregation ein (P2,
+    Mehrfach-Trial-Support).
+
+    WICHTIG: ``run_id`` (aus OpenBenchs ``make_run_id``) kodiert nur
+    harness:task:model:trial -- NICHT den Workflow. Work-only und Plan->Work
+    desselben Trials teilen sich denselben run_id. Ein Dedup nur nach
+    run_id wuerde daher bei jedem Trial, das in beiden Workflows lief, eine
+    der beiden Zeilen still verwerfen (bestaetigter Bug, siehe
+    test_report_plan_work.py::DedupByRunIdTest::test_same_run_id_different_workflow_both_kept)."""
+    by_key: dict[tuple, dict] = {}
     for row in rows:
-        by_run_id[row.get("run_id") or id(row)] = row
-    return list(by_run_id.values())
+        key = (row.get("run_id") or id(row), row.get("workflow", "work-only"))
+        by_key[key] = row
+    return list(by_key.values())
 
 
 def _stats(values: list[float | None]) -> dict:
