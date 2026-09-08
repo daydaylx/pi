@@ -80,9 +80,11 @@ def _openbench_ref():
 
 
 def compute_fingerprint(candidates=None, task_instruction=None, dirty_override=False,
-                         model=None):
+                         model=None, trial=None):
     """candidates: dict[name -> obench.candidates.ManifestHarness] (optional).
     task_instruction: raw instruction.md text of the task about to run (optional).
+    trial: Trial-Nummer des Laufs (optional; None erhaelt Standalone-CLI-
+    Aufrufbarkeit ohne --trial-Kontext).
     Returns a fully-populated fingerprint dict. Never raises on missing optional
     pieces -- fields degrade to null rather than aborting the fingerprint itself.
     """
@@ -100,6 +102,7 @@ def compute_fingerprint(candidates=None, task_instruction=None, dirty_override=F
         "dirty_files_list": dirty_lines,
         "dirty_override": bool(dirty_override),
         "comparable": canonical_repo_clean,
+        "trial": trial,
 
         "pi_version": pi_version,
         "codex_version": codex_version,

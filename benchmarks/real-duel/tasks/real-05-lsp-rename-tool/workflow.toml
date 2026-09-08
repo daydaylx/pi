@@ -1,0 +1,27 @@
+[workflow]
+supported = ["work-only", "plan-work"]
+plan_mode = "detailed_plan"
+
+[workflow.surface]
+expected = [
+  "extensions/lsp/tools.ts",
+  "extensions/lsp/index.ts",
+  "extensions/permissions/tool-policy.ts",
+  "extensions/permissions/workflow-policy.ts",
+  "docs/lsp.md",
+  "tests/suites/lsp.mjs",
+  "tests/workflow-mode/permissions.test.mjs",
+]
+forbidden = ["extensions/lsp/client.ts", "extensions/lsp/process.ts", "extensions/lsp/registry.ts", "benchmarks/real-duel/"]
+
+[workflow.acceptance]
+criteria = [
+  "lsp_rename wendet ein Single-File-WorkspaceEdit an",
+  "lsp_rename lehnt ein Multi-File-WorkspaceEdit vollstaendig ab (keine Teilmutation)",
+  "lsp_rename ist in readonly geblockt wie write/edit, nicht pauschal erlaubt wie die uebrigen lsp_*-Tools",
+  "lsp_rename respektiert die Projekt-Pfadgrenze wie write/edit",
+  "npm run verify ist gruen",
+]
+
+[workflow.baseline]
+checks = ["verify"]

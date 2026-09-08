@@ -15,6 +15,12 @@ trace = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(trace)
 
+BP_SCRIPT = Path(__file__).with_name("baseline_preflight.py")
+bp_spec = importlib.util.spec_from_file_location("baseline_preflight", BP_SCRIPT)
+bp = importlib.util.module_from_spec(bp_spec)
+assert bp_spec.loader is not None
+bp_spec.loader.exec_module(bp)
+
 
 def _events() -> str:
     events = [
@@ -285,24 +291,68 @@ class ToolTraceEventsTest(unittest.TestCase):
         read_call = next(c for c in total["calls"] if c["tool"] == "read")
         self.assertEqual(read_call["arguments"]["path"], "<absolute>/secret/plan.txt")
 
-    def test_baseline_classification_refines_verification(self) -> None:
+    def test_failing_baseline_same_check_stays_baseline_class(self) -> None:
         # P2: ein project_check-Fehler gegen eine Baseline, die denselben Check
         # schon vor dem Kandidaten enthielt, wird zu verification/baseline.
-        baseline = {"format:check": "deadbeef"}
+        baseline = bp.baseline_context({
+            "status": "failing",
+            "failures": [{"check": "format:check", "exit_code": 1, "fingerprint": "deadbeef"}],
+        })
         total = trace.analyze_pi_events(
             self._plan_events() + self._work_events(),
-            baseline_failures=baseline,
+            baseline=baseline,
         )
         verify_error = next(
             e for e in total["errors"] if e["tool"] == "project_check"
         )
         self.assertEqual(verify_error["error_category"], "verification/baseline")
-        # Ohne Baseline-Kontext bleibt es eine plain regression / verification.
-        no_baseline = trace.analyze_pi_events(self._plan_events() + self._work_events())
-        verify_error2 = next(
-            e for e in no_baseline["errors"] if e["tool"] == "project_check"
+
+    def test_clean_baseline_promotes_new_verification_error_to_regression(self) -> None:
+        # P2-Fix: vorher blieb ein Verifikationsfehler gegen eine SAUBERE
+        # Baseline faelschlich "verification" statt "verification/regression",
+        # weil baseline_failure_map(status=clean) == None war -- ununterscheidbar
+        # von unknown/skipped. Dieser Test schlaegt mit dem alten Code fehl.
+        baseline = bp.baseline_context({"status": "clean", "failures": []})
+        total = trace.analyze_pi_events(
+            self._plan_events() + self._work_events(),
+            baseline=baseline,
         )
-        self.assertEqual(verify_error2["error_category"], "verification")
+        verify_error = next(
+            e for e in total["errors"] if e["tool"] == "project_check"
+        )
+        self.assertEqual(verify_error["error_category"], "verification/regression")
+
+    def test_unknown_or_skipped_baseline_leaves_category_unchanged(self) -> None:
+        for status in ("unknown", "skipped"):
+            baseline = bp.baseline_context({"status": status, "failures": []})
+            total = trace.analyze_pi_events(
+                self._plan_events() + self._work_events(),
+                baseline=baseline,
+            )
+            verify_error = next(
+                e for e in total["errors"] if e["tool"] == "project_check"
+            )
+            self.assertEqual(verify_error["error_category"], "verification", f"status={status}")
+
+    def test_no_baseline_context_leaves_category_unchanged(self) -> None:
+        total = trace.analyze_pi_events(self._plan_events() + self._work_events())
+        verify_error = next(
+            e for e in total["errors"] if e["tool"] == "project_check"
+        )
+        self.assertEqual(verify_error["error_category"], "verification")
+
+    def test_clean_baseline_does_not_affect_non_verification_errors(self) -> None:
+        # Eine saubere Baseline darf Nicht-Verifikationsfehler (hier:
+        # permission) nicht umklassifizieren.
+        baseline = bp.baseline_context({"status": "clean", "failures": []})
+        total = trace.analyze_pi_events(
+            self._plan_events() + self._work_events(),
+            baseline=baseline,
+        )
+        permission_error = next(
+            e for e in total["errors"] if e["tool"] == "read"
+        )
+        self.assertEqual(permission_error["error_category"], "permission")
 
 
 if __name__ == "__main__":

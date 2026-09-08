@@ -50,6 +50,28 @@ MODEL = "gpt-5.6-luna"
 PI_PROVIDER = "openai-codex"
 
 
+def _positive_int(value):
+    """argparse type=-Callback: ganzzahlig und > 0, sonst
+    argparse.ArgumentTypeError (argparse wandelt das automatisch in einen
+    sauberen CLI-Fehler mit exit-code 2 um). Fuer --trial: Stufe-2 braucht
+    echte, eindeutig unterscheidbare Trial-Nummern statt der frueheren
+    hartkodierten Konstante 1."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} ist keine ganze Zahl") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"{value!r} muss > 0 sein")
+    return parsed
+
+
+def _build_run_id_base(run_prefix, trial):
+    """Dateipraefix fuer Fingerprint/Transcript/Tool-Trace/Worktree. Enthaelt
+    die Trial-Nummer, damit mehrere Trials derselben Task/desselben Workflows
+    nie kollidieren, unabhaengig vom Sekunden-Zeitstempel."""
+    return f"{run_prefix}-trial{trial}-{time.strftime('%Y%m%dT%H%M%S')}"
+
+
 def _selected_candidate_paths(candidate_name):
     if candidate_name is None:
         return CANDIDATES
@@ -158,6 +180,32 @@ def _diff_pi_stats(before, after):
     }
 
 
+_NODE_MODULES_DIRS = ("npm/node_modules", "gui/node_modules", "pi-subagents/node_modules")
+
+
+def _link_node_modules(wt):
+    """Ein frischer `git worktree add` enthaelt nur getrackte Dateien --
+    node_modules ist ueberall gitignored, also fehlt es. Ohne node_modules
+    schlagen format:check/typecheck (die Default-Baseline-Preflight-Checks,
+    siehe baseline_preflight.py) in JEDEM frischen Worktree mit "command not
+    found" fehl, was baseline_status faelschlich immer "failing" statt
+    "clean" macht -- das wuerde die P2-Regression-Klassifikation (Fall A:
+    clean-Baseline) in der Praxis nie greifen lassen. `cp -al` (Hardlink-
+    Kopie) uebernimmt die bereits im sauberen canonical Repo installierten
+    Pakete fast verzugsfrei, ohne sie zwischen parallelen Armen zu teilen
+    (ein `npm install`-Aufruf im Worktree ersetzt Dateien statt sie in-place
+    zu ueberschreiben, daher bleibt das canonical node_modules unberuehrt)."""
+    for rel in _NODE_MODULES_DIRS:
+        src = REPO / rel
+        if not src.is_dir():
+            continue
+        dst = wt / rel
+        if dst.exists():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["cp", "-al", str(src), str(dst)], check=False)
+
+
 def _make_worktree(run_id, arm, base_sha):
     wt = WORKTREES_ROOT / run_id / arm
     wt.parent.mkdir(parents=True, exist_ok=True)
@@ -165,6 +213,7 @@ def _make_worktree(run_id, arm, base_sha):
         ["git", "-C", str(REPO), "worktree", "add", str(wt), base_sha],
         check=True,
     )
+    _link_node_modules(wt)
     return wt
 
 
@@ -180,7 +229,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
     (offene reale Aufgabe, meist ohne checker.sh -- funktionale Bewertung
     erfolgt separat ueber die Projekt-Verify-Kommandos, siehe REAL_DUEL_AUDIT.md
     Phase-3-Abschnitt)."""
-    run_id_base = run_prefix + "-" + time.strftime("%Y%m%dT%H%M%S")
+    run_id_base = _build_run_id_base(run_prefix, args.trial)
     has_checker = (task_dir / "checker.sh").exists()
 
     workflow = getattr(args, "workflow", "work-only")
@@ -217,6 +266,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
     fp = fingerprint_module.compute_fingerprint(
         candidates=candidates, task_instruction=instruction,
         dirty_override=args.allow_dirty, model=MODEL,
+        trial=args.trial,
     )
     FINGERPRINTS_DIR.mkdir(parents=True, exist_ok=True)
     (FINGERPRINTS_DIR / f"{run_id_base}.json").write_text(json.dumps(fp, indent=2))
@@ -294,7 +344,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
         workdir = _make_worktree(run_id_base, arm, base_sha)
         print(f"worktree ({cand_name}): {workdir}")
 
-        run_id = make_run_id(cand_name, task_name, MODEL, 1, candidate.identity_digest)
+        run_id = make_run_id(cand_name, task_name, MODEL, args.trial, candidate.identity_digest)
 
         if workflow == "plan-work":
             return _execute_plan_work(cand_name, candidate, workdir, run_id, arm)
@@ -307,7 +357,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
         # und die Check-Fingerprints fuer die spaetere Klassifikation.
         baseline_preflight = _run_baseline_preflight(workdir, workflow_cfg, args.allow_dirty)
         baseline_preflight_module = _load_baseline_preflight_module()
-        baseline_failures_map = baseline_preflight_module.baseline_failure_map(baseline_preflight)
+        baseline_ctx = baseline_preflight_module.baseline_context(baseline_preflight)
         print(f"=== {cand_name}: baseline_status={baseline_preflight.get('status')} ===")
         t0 = time.monotonic()
         result = candidate.run(instruction, str(workdir), MODEL, args.timeout)
@@ -337,7 +387,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
                 wall_time_s=wall_time,
                 checker_success=success,
                 checker_wall_time_s=checker_wall_time,
-                baseline_failures=baseline_failures_map,
+                baseline=baseline_ctx,
             )
             tool_trace_path = TOOL_TRACES_DIR / f"{run_id_base}_{arm}.json"
             tool_trace_path.write_text(
@@ -353,7 +403,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
             "harness": cand_name,
             "model": MODEL,
             "task": task_name,
-            "trial": 1,
+            "trial": args.trial,
             "workflow": workflow,
             "success": success,
             "completed": bool(result.get("completed")),
@@ -456,7 +506,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
         work_phase_wall_time_s = None
         baseline_preflight = _run_baseline_preflight(workdir, workflow_cfg, args.allow_dirty)
         baseline_preflight_module = _load_baseline_preflight_module()
-        baseline_failures_map = baseline_preflight_module.baseline_failure_map(baseline_preflight)
+        baseline_ctx = baseline_preflight_module.baseline_context(baseline_preflight)
         print(f"=== {cand_name}: baseline_status={baseline_preflight.get('status')} ===")
 
         try:
@@ -539,20 +589,20 @@ def _run_task(task_dir, task_name, run_prefix, args):
                 plan_trace = tool_trace_module.analyze_pi_events(
                     plan_events,
                     wall_time_s=plan_phase_wall_time_s,
-                    baseline_failures=baseline_failures_map,
+                    baseline=baseline_ctx,
                 )
                 work_trace = tool_trace_module.analyze_pi_events(
                     work_events,
                     wall_time_s=work_phase_wall_time_s,
                     checker_success=checker_success,
-                    baseline_failures=baseline_failures_map,
+                    baseline=baseline_ctx,
                 )
                 total_trace = tool_trace_module.analyze_pi_events(
                     plan_events + work_events,
                     wall_time_s=None,
                     checker_success=checker_success,
                     checker_wall_time_s=None,
-                    baseline_failures=baseline_failures_map,
+                    baseline=baseline_ctx,
                 )
                 plan_phase_tool_trace = plan_trace["summary"]
                 work_phase_tool_trace = work_trace["summary"]
@@ -686,7 +736,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
             "harness": cand_name,
             "model": MODEL,
             "task": task_name,
-            "trial": 1,
+            "trial": args.trial,
             "workflow": workflow,
             # success bleibt None, wenn der Task keinen checker.sh definiert
             # (offene Aufgabe, funktionale Bewertung folgt separat) -- genau
@@ -874,7 +924,7 @@ def cmd_cleanup(args):
     return 0
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -893,6 +943,8 @@ def main():
                           help="work-only (Default, unveraendert) oder plan-work "
                                "(erfordert workflow.toml im Task-Verzeichnis mit "
                                "supported=[\"plan-work\"])")
+    p_smoke.add_argument("--trial", type=_positive_int, default=1,
+                          help="Trial-Nummer fuer Mehrfachlaeufe (default: 1, muss > 0 sein)")
 
     p_run = sub.add_parser("run", help="Beliebige reale Aufgabe fuer beide Candidates (Phase 3)")
     p_run.add_argument("--task", required=True, help="Pfad zum Task-Verzeichnis (instruction.md, optional checker.sh)")
@@ -907,6 +959,8 @@ def main():
                         help="work-only (Default, unveraendert) oder plan-work "
                              "(erfordert workflow.toml im Task-Verzeichnis mit "
                              "supported=[\"plan-work\"])")
+    p_run.add_argument("--trial", type=_positive_int, default=1,
+                        help="Trial-Nummer fuer Mehrfachlaeufe (default: 1, muss > 0 sein)")
 
     sub.add_parser("report", help="obench report ueber die real-duel results.jsonl")
 
@@ -918,6 +972,11 @@ def main():
     p_cleanup = sub.add_parser("cleanup", help="Worktrees eines Laufs entfernen")
     p_cleanup.add_argument("run_id")
 
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     dispatch = {
         "doctor": cmd_doctor, "gate": cmd_gate, "smoke": cmd_smoke, "run": cmd_run,

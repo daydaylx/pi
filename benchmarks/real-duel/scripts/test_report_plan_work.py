@@ -155,5 +155,97 @@ class TokenMetricTest(unittest.TestCase):
         self.assertNotIn("31.284 | 70.269", table)
 
 
+class StatsTest(unittest.TestCase):
+    def test_empty_returns_zero_n_and_none_fields(self) -> None:
+        s = report._stats([])
+        self.assertEqual(s, {"n": 0, "mean": None, "median": None, "min": None, "max": None})
+
+    def test_single_value_all_fields_equal(self) -> None:
+        s = report._stats([12.0])
+        self.assertEqual(s["n"], 1)
+        self.assertEqual(s["mean"], s["median"])
+        self.assertEqual(s["min"], s["max"])
+        self.assertEqual(s["mean"], 12.0)
+
+    def test_three_values_computes_all(self) -> None:
+        s = report._stats([10.0, 12.0, 14.0])
+        self.assertEqual(s, {"n": 3, "mean": 12.0, "median": 12.0, "min": 10.0, "max": 14.0})
+
+    def test_none_values_are_ignored(self) -> None:
+        s = report._stats([10.0, None, 14.0])
+        self.assertEqual(s["n"], 2)
+        self.assertEqual(s["mean"], 12.0)
+
+
+class FormatStatCellTest(unittest.TestCase):
+    def test_n0_is_na(self) -> None:
+        self.assertEqual(report._format_stat_cell(report._stats([])), report.NA)
+
+    def test_n1_matches_legacy_bare_number(self) -> None:
+        self.assertEqual(report._format_stat_cell(report._stats([12.0])), "12.0")
+
+    def test_n3_includes_n_and_median(self) -> None:
+        cell = report._format_stat_cell(report._stats([10.0, 12.0, 14.0]))
+        self.assertIn("n=3", cell)
+        self.assertIn("Median 12.0", cell)
+        self.assertIn("10.0", cell)
+        self.assertIn("14.0", cell)
+
+
+class DedupByRunIdTest(unittest.TestCase):
+    def test_duplicate_run_id_keeps_last(self) -> None:
+        rows = [
+            {"run_id": "x", "wall_time_s": 1.0},
+            {"run_id": "x", "wall_time_s": 999.0},  # z.B. versehentlicher Re-Run
+            {"run_id": "y", "wall_time_s": 2.0},
+        ]
+        deduped = report._dedup_by_run_id(rows)
+        self.assertEqual(len(deduped), 2)
+        self.assertEqual(next(r for r in deduped if r["run_id"] == "x")["wall_time_s"], 999.0)
+
+    def test_no_duplicates_keeps_all_rows_in_order(self) -> None:
+        rows = [{"run_id": "a"}, {"run_id": "b"}, {"run_id": "c"}]
+        self.assertEqual(report._dedup_by_run_id(rows), rows)
+
+
+class MultiTrialAggregationTest(unittest.TestCase):
+    def test_three_trial_rows_render_n_and_median_but_single_row_stays_legacy(self) -> None:
+        # Bestehende n=1-Faelle (siehe test_report_keeps_cache_separate_from_processed_total)
+        # muessen unveraendert bleiben; erst n>1 loest die erweiterte Darstellung aus.
+        work_only_three_trials = [
+            {"workflow": "work-only", "telemetry": {"tool_errors": 0}, "wall_time_s": w}
+            for w in (10.0, 12.0, 14.0)
+        ]
+        plan_work_single = [{
+            "workflow": "plan-work",
+            "plan_phase_telemetry": {},
+            "work_phase_telemetry": {},
+            "wall_time_s": 2,
+        }]
+        table = report.build_table("test", work_only_three_trials, plan_work_single)
+        self.assertIn("n=3", table)
+        self.assertIn("Median 12.0", table)
+        # Die Plan-Work-Seite (n=1) bleibt ein blosser Zahlenwert ohne "n=1".
+        self.assertNotIn("n=1", table)
+
+
+class ParseAllTasksSpecTest(unittest.TestCase):
+    def test_parses_task_class_pairs_in_order(self) -> None:
+        parsed = report._parse_all_tasks_spec([
+            "real-03-lsp-ruby-profile:A",
+            "real-04-session-health-provider-filter:B",
+            "real-05-lsp-rename-tool:C",
+        ])
+        self.assertEqual(parsed, [
+            ("real-03-lsp-ruby-profile", "A"),
+            ("real-04-session-health-provider-filter", "B"),
+            ("real-05-lsp-rename-tool", "C"),
+        ])
+
+    def test_missing_colon_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            report._parse_all_tasks_spec(["real-03-lsp-ruby-profile"])
+
+
 if __name__ == "__main__":
     unittest.main()

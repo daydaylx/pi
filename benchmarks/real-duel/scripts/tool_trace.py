@@ -14,7 +14,10 @@ import json
 import re
 from collections import Counter
 from pathlib import Path, PurePath
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
+
+if TYPE_CHECKING:
+    from baseline_preflight import BaselineContext
 
 SCHEMA_VERSION = 1
 _MUTATING_TOOLS = {"edit", "write"}
@@ -168,21 +171,30 @@ def _refine_verification_category(
     category: str | None,
     tool: str,
     error_text: str,
-    baseline_failures: dict[str, str] | None,
+    baseline: "BaselineContext | None",
 ) -> str | None:
     """Refine a plain ``verification`` category using baseline knowledge (P2).
 
-    A verification error whose baseline already failed the same check is
-    ``verification/baseline`` (pre-existing, not the candidate's regression).
-    A verification error arising against a clean baseline is
-    ``verification/regression``. Without baseline context the category stays
-    ``verification``. Matching is by check-name substring in the error text --
-    a heuristic, never authoritative; the raw error stays recorded.
+    ``baseline.status``:
+      - ``"clean"``: the baseline preflight had no failures at all -- any
+        verification error the candidate produces is necessarily new, so it
+        is a regression (``verification/regression``).
+      - ``"failing"``: matched by check-name substring against
+        ``baseline.failures`` (a heuristic, never authoritative; the raw
+        error stays recorded). A match is pre-existing
+        (``verification/baseline``); no match is still a new failure
+        (``verification/regression``).
+      - ``None`` / ``"unknown"`` / ``"skipped"``: no reliable signal --
+        category stays ``verification`` (no speculation).
     """
-    if category != "verification" or not baseline_failures:
+    if category != "verification":
         return category
+    if baseline is None or baseline.status not in ("clean", "failing"):
+        return category
+    if baseline.status == "clean":
+        return "verification/regression"
     lower = error_text.lower()
-    for check in baseline_failures:
+    for check in baseline.failures:
         if not check:
             continue
         # Vollstaendiger Check-Name (z.B. "typecheck", "verify") oder das
@@ -233,7 +245,7 @@ def analyze_pi_events(
     wall_time_s: float | None = None,
     checker_success: bool | None = None,
     checker_wall_time_s: float | None = None,
-    baseline_failures: dict[str, str] | None = None,
+    baseline: "BaselineContext | None" = None,
 ) -> dict[str, Any]:
     """Core tool-trace analysis over an iterable of already-parsed RPC events.
 
@@ -242,11 +254,15 @@ def analyze_pi_events(
     error classification, fingerprinting and privacy redaction -- there is no
     second trace implementation for Plan->Work.
 
-    ``baseline_failures`` (P2) maps a failing baseline check name to its
-    fingerprint; a verification error attributable to one of these checks is
-    classified as ``verification/baseline`` (pre-existing) instead of a plain
-    candidate regression. The raw error remains recorded; only the evaluation
-    gets the additional class.
+    ``baseline`` (P2, ``baseline_preflight.BaselineContext``) carries the
+    baseline preflight status plus, when it was ``"failing"``, the map of
+    failing check names to their fingerprints. A verification error is
+    reclassified as ``verification/regression`` when the baseline was
+    ``"clean"``, as ``verification/baseline`` when it matches a known
+    ``"failing"`` check, and left as plain ``verification`` when the baseline
+    is ``None``/``"unknown"``/``"skipped"`` (no speculation). The raw error
+    remains recorded either way; only the evaluation gets the additional
+    class.
     """
     starts: dict[str, dict[str, Any]] = {}
     ends: dict[str, dict[str, Any]] = {}
@@ -305,7 +321,7 @@ def analyze_pi_events(
         error_text = _result_text(end_event.get("result")) if success is False else ""
         error_category = classify_error(tool, error_text) if success is False else None
         error_category = _refine_verification_category(
-            error_category, tool, error_text, baseline_failures
+            error_category, tool, error_text, baseline
         )
         repeated_verification = (
             phase == "verification"
@@ -426,7 +442,7 @@ def analyze_pi_trace(
     wall_time_s: float | None = None,
     checker_success: bool | None = None,
     checker_wall_time_s: float | None = None,
-    baseline_failures: dict[str, str] | None = None,
+    baseline: "BaselineContext | None" = None,
 ) -> dict[str, Any]:
     """Analyse a Work-only ``pi --print`` JSONL transcript (text -> events).
 
@@ -439,7 +455,7 @@ def analyze_pi_trace(
         wall_time_s=wall_time_s,
         checker_success=checker_success,
         checker_wall_time_s=checker_wall_time_s,
-        baseline_failures=baseline_failures,
+        baseline=baseline,
     )
 
 
@@ -459,13 +475,20 @@ def main() -> int:
     )
     args = parser.parse_args()
     checker_success = {"true": True, "false": False, "unknown": None}[args.checker_success]
-    baseline_failures = {check: "" for check in args.baseline_failure_check} or None
+    baseline = None
+    if args.baseline_failure_check:
+        from baseline_preflight import BaselineContext as _BaselineContext
+
+        baseline = _BaselineContext(
+            status="failing",
+            failures={check: "" for check in args.baseline_failure_check},
+        )
     result = analyze_pi_trace(
         args.transcript.read_text(encoding="utf-8"),
         wall_time_s=args.wall_time_s,
         checker_success=checker_success,
         checker_wall_time_s=args.checker_wall_time_s,
-        baseline_failures=baseline_failures,
+        baseline=baseline,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

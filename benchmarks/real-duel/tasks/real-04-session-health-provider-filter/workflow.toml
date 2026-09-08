@@ -1,0 +1,20 @@
+[workflow]
+supported = ["work-only", "plan-work"]
+plan_mode = "detailed_plan"
+
+[workflow.surface]
+expected = ["extensions/session-health/analyze.ts", "extensions/session-health/index.ts", "tests/workflow-mode/session-health.test.mjs"]
+forbidden = ["extensions/resilience/", "extensions/permissions/", "benchmarks/real-duel/"]
+
+[workflow.acceptance]
+criteria = [
+  "/session-health --provider X filtert failures.total/byClass/byPhase auf Provider X",
+  "turns/recovery/permissions/verifier bleiben bei --provider unveraendert (Gesamtkontext)",
+  "unbekannter Provider liefert leeren, gueltigen Report statt Fehler",
+  "leerer --provider-Wert ist ein Argumentfehler wie bei --days 0",
+  "JSON-Payload macht den aktiven Filter sichtbar",
+  "npm run verify ist gruen",
+]
+
+[workflow.baseline]
+checks = ["format:check", "typecheck"]

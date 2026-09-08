@@ -64,16 +64,38 @@ class RunPreflightTest(unittest.TestCase):
         self.assertNotIn("src/a.ts", failure["fingerprint"])
         self.assertNotIn("format error", failure["fingerprint"])
 
-    def test_baseline_failure_map_none_when_clean(self) -> None:
-        self.assertIsNone(bp.baseline_failure_map({"status": "clean", "failures": []}))
-        self.assertIsNone(bp.baseline_failure_map(None))
+class BaselineContextTest(unittest.TestCase):
+    def test_clean_status_has_empty_failures(self) -> None:
+        ctx = bp.baseline_context({"status": "clean", "failures": []})
+        self.assertEqual(ctx.status, "clean")
+        self.assertEqual(ctx.failures, {})
 
-    def test_baseline_failure_map_when_failing(self) -> None:
-        mapping = bp.baseline_failure_map({
+    def test_failing_status_maps_check_to_fingerprint(self) -> None:
+        ctx = bp.baseline_context({
             "status": "failing",
             "failures": [{"check": "format:check", "exit_code": 1, "fingerprint": "abc"}],
         })
-        self.assertEqual(mapping, {"format:check": "abc"})
+        self.assertEqual(ctx.status, "failing")
+        self.assertEqual(ctx.failures, {"format:check": "abc"})
+
+    def test_unknown_status_preserved_not_collapsed_to_none(self) -> None:
+        # Vor dem P2-Fix ergab status="unknown" denselben Rueckgabewert
+        # (None) wie status="clean" -- ununterscheidbar, siehe
+        # _refine_verification_category in tool_trace.py.
+        ctx = bp.baseline_context({"status": "unknown", "failures": [], "checks": []})
+        self.assertIsNotNone(ctx)
+        self.assertEqual(ctx.status, "unknown")
+
+    def test_skipped_status_preserved_not_collapsed_to_none(self) -> None:
+        ctx = bp.baseline_context({"status": "skipped", "failures": [], "checks": []})
+        self.assertIsNotNone(ctx)
+        self.assertEqual(ctx.status, "skipped")
+
+    def test_none_preflight_returns_none(self) -> None:
+        self.assertIsNone(bp.baseline_context(None))
+
+    def test_unrecognized_status_returns_none(self) -> None:
+        self.assertIsNone(bp.baseline_context({"status": "weird", "failures": []}))
 
 
 class ComparablePolicyTest(unittest.TestCase):

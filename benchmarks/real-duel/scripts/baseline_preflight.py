@@ -126,16 +126,43 @@ def run_preflight(workdir: str | Path, checks: tuple[str, ...] | list[str]) -> d
     }
 
 
-def baseline_failure_map(preflight: dict | None) -> dict[str, str] | None:
-    """``{check_name: fingerprint}`` fuer tool_trace.analyze_pi_events, oder
-    ``None`` wenn der Preflight nicht lief / clean war. Ein ``None``-Rueck-
-    gabwert bewirkt, dass tool_trace die Verifikationskategorie unveraendert
-    als ``verification`` laesst (keine Spekulation)."""
+_KNOWN_BASELINE_STATUSES = ("clean", "failing", "unknown", "skipped")
+
+
+@dataclass(frozen=True)
+class BaselineContext:
+    """Voller Baseline-Status fuer tool_trace.analyze_pi_events (P2-Fix).
+
+    Ersetzt die vormalige verlustbehaftete ``dict[str, str] | None``-
+    Uebergabe (``baseline_failure_map``): dort waren ``clean``, ``unknown``
+    und ``skipped`` nicht unterscheidbar (alle drei ergaben ``None``),
+    wodurch ein neuer Verifikationsfehler gegen eine SAUBERE Baseline nie
+    als ``verification/regression`` erkannt wurde -- er blieb faelschlich
+    fuer immer ``verification``. Mit explizitem ``status`` kann tool_trace
+    alle drei Faelle (clean -> regression, failing+match -> baseline,
+    unknown/skipped -> keine Spekulation) korrekt unterscheiden.
+    """
+
+    status: str  # "clean" | "failing" | "unknown" | "skipped"
+    failures: dict[str, str]  # check -> fingerprint; leer ausser bei "failing"
+
+
+def baseline_context(preflight: dict | None) -> BaselineContext | None:
+    """Baut den vollen Baseline-Kontext aus dem Preflight-Ergebnis, oder
+    ``None`` bei fehlendem/unbekanntem Status. ``None`` bewirkt in
+    tool_trace weiterhin: keine Spekulation, Kategorie bleibt unveraendert."""
     if not preflight:
         return None
+    status = preflight.get("status")
+    if status not in _KNOWN_BASELINE_STATUSES:
+        return None
     failures = preflight.get("failures") or []
-    mapping = {f["check"]: f.get("fingerprint", "") for f in failures}
-    return mapping or None
+    mapping = (
+        {f["check"]: f.get("fingerprint", "") for f in failures}
+        if status == "failing"
+        else {}
+    )
+    return BaselineContext(status=status, failures=mapping)
 
 
 def _verify_blocked_by_baseline(candidate_tool_errors: list[dict] | None) -> set[str]:

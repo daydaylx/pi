@@ -37,9 +37,52 @@ def _load_rows(results_path: Path, task: str) -> list[dict]:
     return rows
 
 
-def _mean(values: list[float | None]) -> float | None:
+def _dedup_by_run_id(rows: list[dict]) -> list[dict]:
+    """Deduplizierung nach run_id (letzter Eintrag gewinnt, entspricht der
+    natuerlichen Append-Reihenfolge in results.jsonl). Ohne dies fliesst ein
+    versehentlich zweimal geschriebener Lauf (gleiche run_id) unbemerkt
+    doppelt gewichtet in die Aggregation ein (P2, Mehrfach-Trial-Support)."""
+    by_run_id: dict[object, dict] = {}
+    for row in rows:
+        by_run_id[row.get("run_id") or id(row)] = row
+    return list(by_run_id.values())
+
+
+def _stats(values: list[float | None]) -> dict:
+    """n/mean/median/min/max ueber die nicht-None-Werte (P2, Mehrfach-Trial-
+    Aggregation). n=0: alle Felder None. n=1: min=max=mean=median=
+    Einzelwert. Reine Zahlen, keine Interpretation -- "signifikant" o.ae.
+    bleibt Text (siehe build_table), nie eine errechnete Zahl."""
     vals = [v for v in values if v is not None]
-    return round(statistics.mean(vals), 3) if vals else None
+    if not vals:
+        return {"n": 0, "mean": None, "median": None, "min": None, "max": None}
+    return {
+        "n": len(vals),
+        "mean": round(statistics.mean(vals), 3),
+        "median": round(statistics.median(vals), 3),
+        "min": round(min(vals), 3),
+        "max": round(max(vals), 3),
+    }
+
+
+def _format_stat_cell(stats: dict) -> str:
+    """Bei n<=1 byte-identisch zum bisherigen Ein-Zahl-Format (Abwaerts-
+    kompatibilitaet mit bestehenden Stufe-1-Fixtures/Tests). Bei n>1 zeigt
+    die Zelle zusaetzlich n, Median und Min-Max-Spanne."""
+    if stats["n"] == 0:
+        return NA
+    if stats["n"] == 1:
+        return str(stats["mean"])
+    return f"{stats['mean']} (n={stats['n']}, Median {stats['median']}, {stats['min']}–{stats['max']})"
+
+
+def _metric_cell(rows: list[dict], extractor) -> tuple[dict, str]:
+    stats = _stats([extractor(r) for r in rows])
+    return stats, _format_stat_cell(stats)
+
+
+def _mean(values: list[float | None]) -> float | None:
+    return _stats(values)["mean"]
 
 
 def _phase_tool_errors(row: dict, phase: str) -> int | None:
@@ -149,26 +192,27 @@ def _unplanned_changes_cell(rows: list[dict]) -> str:
 
 
 def build_table(harness: str, work_only_rows: list[dict], plan_work_rows: list[dict]) -> str:
-    wall_wo = _mean([r.get("wall_time_s") for r in work_only_rows])
-    wall_pw = _mean([r.get("wall_time_s") for r in plan_work_rows])
-    token_metrics = {
+    wall_wo_stats, wall_wo_cell = _metric_cell(work_only_rows, lambda r: r.get("wall_time_s"))
+    wall_pw_stats, wall_pw_cell = _metric_cell(plan_work_rows, lambda r: r.get("wall_time_s"))
+    token_cells = {
         field: (
-            _mean([_token_metric(r, field) for r in work_only_rows]),
-            _mean([_token_metric(r, field) for r in plan_work_rows]),
+            _metric_cell(work_only_rows, lambda r, f=field: _token_metric(r, f)),
+            _metric_cell(plan_work_rows, lambda r, f=field: _token_metric(r, f)),
         )
         for field in TOKEN_FIELDS
     }
-    processed_wo = _mean([_processed_tokens(r) for r in work_only_rows])
-    processed_pw = _mean([_processed_tokens(r) for r in plan_work_rows])
-    err_wo = _mean([_tool_errors(r) for r in work_only_rows])
-    err_pw = _mean([_tool_errors(r) for r in plan_work_rows])
+    processed_wo_stats, processed_wo_cell = _metric_cell(work_only_rows, _processed_tokens)
+    processed_pw_stats, processed_pw_cell = _metric_cell(plan_work_rows, _processed_tokens)
+    err_wo_stats, err_wo_cell = _metric_cell(work_only_rows, _tool_errors)
+    err_pw_stats, err_pw_cell = _metric_cell(plan_work_rows, _tool_errors)
     # P1: getrennte Plan-/Work-Toolfehler (nur Plan->Work hat Phasen).
-    plan_err_wo = _mean([_phase_tool_errors(r, "plan") for r in work_only_rows])
-    plan_err_pw = _mean([_phase_tool_errors(r, "plan") for r in plan_work_rows])
-    work_err_wo = _mean([_phase_tool_errors(r, "work") for r in work_only_rows])
-    work_err_pw = _mean([_phase_tool_errors(r, "work") for r in plan_work_rows])
+    plan_err_wo_stats, plan_err_wo_cell = _metric_cell(work_only_rows, lambda r: _phase_tool_errors(r, "plan"))
+    plan_err_pw_stats, plan_err_pw_cell = _metric_cell(plan_work_rows, lambda r: _phase_tool_errors(r, "plan"))
+    work_err_wo_stats, work_err_wo_cell = _metric_cell(work_only_rows, lambda r: _phase_tool_errors(r, "work"))
+    work_err_pw_stats, work_err_pw_cell = _metric_cell(plan_work_rows, lambda r: _phase_tool_errors(r, "work"))
 
-    def diff(a, b):
+    def diff(a_stats, b_stats):
+        a, b = a_stats["mean"], b_stats["mean"]
         return round(b - a, 3) if a is not None and b is not None else NA
 
     lines = [
@@ -179,27 +223,27 @@ def build_table(harness: str, work_only_rows: list[dict], plan_work_rows: list[d
         f"| Funktional erfolgreich | {MANUAL} | {MANUAL} | {MANUAL} |",
         f"| Regressionen | {MANUAL} | {MANUAL} | {MANUAL} |",
         f"| Anforderungserfüllung | {MANUAL} | {MANUAL} | {MANUAL} |",
-        f"| Laufzeit (s) | {wall_wo if wall_wo is not None else NA} "
-        f"| {wall_pw if wall_pw is not None else NA} | {diff(wall_wo, wall_pw)} |",
-        f"| Fresh Input | {token_metrics['input_fresh'][0] if token_metrics['input_fresh'][0] is not None else NA} "
-        f"| {token_metrics['input_fresh'][1] if token_metrics['input_fresh'][1] is not None else NA} | {diff(*token_metrics['input_fresh'])} |",
-        f"| Cache Read | {token_metrics['input_cache_read'][0] if token_metrics['input_cache_read'][0] is not None else NA} "
-        f"| {token_metrics['input_cache_read'][1] if token_metrics['input_cache_read'][1] is not None else NA} | {diff(*token_metrics['input_cache_read'])} |",
-        f"| Cache Write | {token_metrics['input_cache_write'][0] if token_metrics['input_cache_write'][0] is not None else NA} "
-        f"| {token_metrics['input_cache_write'][1] if token_metrics['input_cache_write'][1] is not None else NA} | {diff(*token_metrics['input_cache_write'])} |",
-        f"| Output | {token_metrics['output'][0] if token_metrics['output'][0] is not None else NA} "
-        f"| {token_metrics['output'][1] if token_metrics['output'][1] is not None else NA} | {diff(*token_metrics['output'])} |",
-        f"| Verarbeitete Tokens (Summe obiger Werte) | {processed_wo if processed_wo is not None else NA} "
-        f"| {processed_pw if processed_pw is not None else NA} | {diff(processed_wo, processed_pw)} |",
-        f"| Toolfehler (gesamt) | {err_wo if err_wo is not None else NA} "
-        f"| {err_pw if err_pw is not None else NA} | {diff(err_wo, err_pw)} |",
-        f"| Toolfehler Planphase | {plan_err_wo if plan_err_wo is not None else NA} "
-        f"| {plan_err_pw if plan_err_pw is not None else NA} | {diff(plan_err_wo, plan_err_pw)} |",
-        f"| Toolfehler Workphase | {work_err_wo if work_err_wo is not None else NA} "
-        f"| {work_err_pw if work_err_pw is not None else NA} | {diff(work_err_wo, work_err_pw)} |",
+        f"| Laufzeit (s) | {wall_wo_cell} | {wall_pw_cell} | {diff(wall_wo_stats, wall_pw_stats)} |",
+        f"| Fresh Input | {token_cells['input_fresh'][0][1]} "
+        f"| {token_cells['input_fresh'][1][1]} | {diff(token_cells['input_fresh'][0][0], token_cells['input_fresh'][1][0])} |",
+        f"| Cache Read | {token_cells['input_cache_read'][0][1]} "
+        f"| {token_cells['input_cache_read'][1][1]} | {diff(token_cells['input_cache_read'][0][0], token_cells['input_cache_read'][1][0])} |",
+        f"| Cache Write | {token_cells['input_cache_write'][0][1]} "
+        f"| {token_cells['input_cache_write'][1][1]} | {diff(token_cells['input_cache_write'][0][0], token_cells['input_cache_write'][1][0])} |",
+        f"| Output | {token_cells['output'][0][1]} "
+        f"| {token_cells['output'][1][1]} | {diff(token_cells['output'][0][0], token_cells['output'][1][0])} |",
+        f"| Verarbeitete Tokens (Summe obiger Werte) | {processed_wo_cell} "
+        f"| {processed_pw_cell} | {diff(processed_wo_stats, processed_pw_stats)} |",
+        f"| Toolfehler (gesamt) | {err_wo_cell} "
+        f"| {err_pw_cell} | {diff(err_wo_stats, err_pw_stats)} |",
+        f"| Toolfehler Planphase | {plan_err_wo_cell} "
+        f"| {plan_err_pw_cell} | {diff(plan_err_wo_stats, plan_err_pw_stats)} |",
+        f"| Toolfehler Workphase | {work_err_wo_cell} "
+        f"| {work_err_pw_cell} | {diff(work_err_wo_stats, work_err_pw_stats)} |",
         f"| Nutzerkorrekturen | {MANUAL} | {MANUAL} | {MANUAL} |",
         f"| Planqualität | {NA} | {_plan_quality_cell(plan_work_rows)} | {NA} |",
         f"| Ungeplante Änderungen | {NA} | {_unplanned_changes_cell(plan_work_rows)} | {NA} |",
+        f"| Streuung/Muster (n>1, qualitativ) | {MANUAL} | {MANUAL} | {MANUAL} |",
     ]
     return "\n".join(lines)
 
@@ -281,31 +325,16 @@ def build_combined_table(work_only_rows_by_harness: dict, plan_work_rows_by_harn
     return "\n".join(lines)
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--task", required=True)
-    ap.add_argument("--results-path", type=Path, default=DEFAULT_RESULTS)
-    ap.add_argument("--combined", action="store_true",
-                   help="Zusaetzlich eine kombinierte Vier-Spalten-Tabelle "
-                        "(Codex WO | Codex PW | Pi WO | Pi PW) direkt aus "
-                        "results.jsonl ausgeben (reproduzierbar, kein manuelles "
-                        "Pflegen der Smoke-Werte).")
-    args = ap.parse_args()
-
-    if not args.results_path.exists():
-        print(f"keine results.jsonl unter {args.results_path}")
-        return 2
-
-    rows = _load_rows(args.results_path, args.task)
+def _render_task_report(task: str, rows: list[dict], combined: bool) -> int:
     if not rows:
-        print(f"keine Zeilen fuer Task {args.task!r} in {args.results_path}")
+        print(f"keine Zeilen fuer Task {task!r}")
         return 1
 
     by_harness = defaultdict(lambda: {"work-only": [], "plan-work": []})
     for row in rows:
         by_harness[row["harness"]][row.get("workflow", "work-only")].append(row)
 
-    print(f"# Work-only vs. Plan→Work: {args.task}\n")
+    print(f"# Work-only vs. Plan→Work: {task}\n")
     for harness in sorted(by_harness):
         wo = by_harness[harness]["work-only"]
         pw = by_harness[harness]["plan-work"]
@@ -320,11 +349,82 @@ def main() -> int:
         "Arbeitsauftrag keine mechanischen Kriterien und muessen durch "
         "Blind-Review/menschliches Urteil ausgefuellt werden."
     )
-    if args.combined:
-        wo_by = {h: rows["work-only"] for h, rows in by_harness.items()}
-        pw_by = {h: rows["plan-work"] for h, rows in by_harness.items()}
+    if combined:
+        wo_by = {h: r["work-only"] for h, r in by_harness.items()}
+        pw_by = {h: r["plan-work"] for h, r in by_harness.items()}
         print(build_combined_table(wo_by, pw_by))
     return 0
+
+
+def _parse_all_tasks_spec(specs: list[str]) -> list[tuple[str, str]]:
+    """``["task:klasse", ...]`` -> ``[(task, klasse), ...]``. Reihenfolge wie
+    angegeben bleibt erhalten (Task-Reihenfolge im Bericht ist nicht
+    alphabetisch, sondern folgt der vom Aufrufer gewaehlten Klassenordnung
+    A/B/C)."""
+    parsed = []
+    for spec in specs:
+        if ":" not in spec:
+            raise ValueError(f"--all-tasks erwartet 'task:klasse', erhalten: {spec!r}")
+        task, klasse = spec.split(":", 1)
+        parsed.append((task, klasse))
+    return parsed
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--task", help="Einzelner Task-Bericht (wie bisher).")
+    ap.add_argument(
+        "--all-tasks", nargs="+", metavar="TASK:KLASSE",
+        help="Mehrere Tasks mit Komplexitaetsklasse fuer einen Gesamtbericht, "
+             "z.B. --all-tasks real-03-lsp-ruby-profile:A "
+             "real-04-session-health-provider-filter:B "
+             "real-05-lsp-rename-tool:C. Druckt pro Task die normale Tabelle "
+             "UND am Ende eine nach Klasse getrennte Uebersicht -- Klassen "
+             "werden NICHT gemeinsam gemittelt (ein komplexer Task soll "
+             "nicht durch zwei kleine Tasks mathematisch unsichtbar werden).",
+    )
+    ap.add_argument("--results-path", type=Path, default=DEFAULT_RESULTS)
+    ap.add_argument("--combined", action="store_true",
+                   help="Zusaetzlich eine kombinierte Vier-Spalten-Tabelle "
+                        "(Codex WO | Codex PW | Pi WO | Pi PW) direkt aus "
+                        "results.jsonl ausgeben (reproduzierbar, kein manuelles "
+                        "Pflegen der Smoke-Werte).")
+    args = ap.parse_args()
+
+    if bool(args.task) == bool(args.all_tasks):
+        print("genau eines von --task oder --all-tasks angeben")
+        return 2
+
+    if not args.results_path.exists():
+        print(f"keine results.jsonl unter {args.results_path}")
+        return 2
+
+    if args.task:
+        rows = _dedup_by_run_id(_load_rows(args.results_path, args.task))
+        return _render_task_report(args.task, rows, args.combined)
+
+    try:
+        task_classes = _parse_all_tasks_spec(args.all_tasks)
+    except ValueError as exc:
+        print(str(exc))
+        return 2
+
+    exit_code = 0
+    by_class: dict[str, list[str]] = defaultdict(list)
+    for task, klasse in task_classes:
+        rows = _dedup_by_run_id(_load_rows(args.results_path, task))
+        exit_code = _render_task_report(task, rows, args.combined) or exit_code
+        by_class[klasse].append(task)
+        print()
+
+    print("# Gesamtuebersicht nach Komplexitaetsklasse\n")
+    print(
+        "Klassen werden getrennt ausgewiesen, nicht gemeinsam gemittelt -- "
+        "siehe Einzeltabellen oben fuer Zahlen je Task/Harness/Workflow."
+    )
+    for klasse in sorted(by_class):
+        print(f"- Klasse {klasse}: {', '.join(by_class[klasse])}")
+    return exit_code
 
 
 if __name__ == "__main__":

@@ -1,0 +1,19 @@
+[workflow]
+supported = ["work-only", "plan-work"]
+plan_mode = "simple_plan"
+
+[workflow.surface]
+expected = ["extensions/lsp/server-profiles.ts", "docs/lsp.md", "tests/suites/lsp.mjs"]
+forbidden = ["extensions/lsp/client.ts", "extensions/lsp/process.ts", "extensions/lsp/registry.ts", "benchmarks/real-duel/"]
+
+[workflow.acceptance]
+criteria = [
+  "PROFILES.ruby existiert mit id/label/enabled=false/command=solargraph/args=[stdio]/rootMarkers enthaelt Gemfile",
+  "EXTENSION_LANGUAGE_MAP bildet .rb und .rake auf profileId=ruby ab",
+  "docs/lsp.md Server-Matrix enthaelt eine Ruby-Zeile",
+  "tests/suites/lsp.mjs deckt neuen Default-Zustand und Mapping ab",
+  "npm run verify ist gruen",
+]
+
+[workflow.baseline]
+checks = ["format:check", "typecheck"]
