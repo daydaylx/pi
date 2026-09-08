@@ -23,17 +23,17 @@ Kandidaten gleichzeitig, sofern `--candidate` nicht gesetzt ist).
 
 ## Matrix (auszufüllen während der Serie)
 
-| Task                                   | Klasse | Trial | Workflow-Reihenfolge | Status | comparable | Ersetzt Trial? |
-| -------------------------------------- | ------ | ----- | -------------------- | ------ | ---------- | -------------- |
-| real-03-lsp-ruby-profile               | A      | 1     | WO→PW                | offen  |            |                |
-| real-03-lsp-ruby-profile               | A      | 2     | PW→WO                | offen  |            |                |
-| real-03-lsp-ruby-profile               | A      | 3     | WO→PW                | offen  |            |                |
-| real-04-session-health-provider-filter | B      | 1     | WO→PW                | offen  |            |                |
-| real-04-session-health-provider-filter | B      | 2     | PW→WO                | offen  |            |                |
-| real-04-session-health-provider-filter | B      | 3     | WO→PW                | offen  |            |                |
-| real-05-lsp-rename-tool                | C      | 1     | WO→PW                | offen  |            |                |
-| real-05-lsp-rename-tool                | C      | 2     | PW→WO                | offen  |            |                |
-| real-05-lsp-rename-tool                | C      | 3     | WO→PW                | offen  |            |                |
+| Task                                   | Klasse | Trial | Workflow-Reihenfolge | Status        | comparable | Ersetzt Trial? |
+| -------------------------------------- | ------ | ----- | -------------------- | ------------- | ---------- | -------------- |
+| real-03-lsp-ruby-profile               | A      | 1     | WO→PW                | abgeschlossen | true/true  |                |
+| real-03-lsp-ruby-profile               | A      | 2     | PW→WO                | abgeschlossen | true/true  |                |
+| real-03-lsp-ruby-profile               | A      | 3     | WO→PW                | abgeschlossen | true/true  |                |
+| real-04-session-health-provider-filter | B      | 1     | WO→PW                | offen         |            |                |
+| real-04-session-health-provider-filter | B      | 2     | PW→WO                | offen         |            |                |
+| real-04-session-health-provider-filter | B      | 3     | WO→PW                | offen         |            |                |
+| real-05-lsp-rename-tool                | C      | 1     | WO→PW                | offen         |            |                |
+| real-05-lsp-rename-tool                | C      | 2     | PW→WO                | offen         |            |                |
+| real-05-lsp-rename-tool                | C      | 3     | WO→PW                | offen         |            |                |
 
 Jede Zeile deckt beide Kandidaten (Pi + Codex, parallel) und beide
 Workflows ab (2 Aufrufe pro Zeile: der jeweils erste und zweite Workflow der
