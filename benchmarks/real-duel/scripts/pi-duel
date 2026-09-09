@@ -38,6 +38,7 @@ RESULTS_PATH = WORKSPACE_DIR / "results.jsonl"
 TRANSCRIPTS_DIR = WORKSPACE_DIR / "transcripts"
 TOOL_TRACES_DIR = WORKSPACE_DIR / "tool-traces"
 FINGERPRINTS_DIR = WORKSPACE_DIR / "fingerprints"
+PATCHES_DIR = WORKSPACE_DIR / "patches"
 
 CANDIDATES = {
     "pi-real": REAL_DUEL_DIR / "candidates" / "pi-real.toml",
@@ -156,6 +157,45 @@ def _changed_paths(workdir, base_sha):
     return [p for p in tracked + untracked if p.strip()]
 
 
+def _save_patch(workdir, base_sha, run_id_base, arm, changed_paths=None):
+    """P0-Fix: sichert den vollstaendigen Diff eines Kandidatenlaufs (inkl.
+    neuer, bisher untracked Dateien) VOR jedem moeglichen Cleanup. Muss am
+    Ende jeder Kandidatenausfuehrung laufen, nicht erst bei `cleanup` --
+    genau dieser fehlende Schritt hat die Patches aller 24 Task-A/B-Laeufe
+    unwiederbringlich verloren gehen lassen (git worktree remove loescht sie
+    sonst ersatzlos). `git add -N` nimmt untracked Dateien inhaltlich in den
+    Diff auf, ohne den Worktree-Zustand dauerhaft zu veraendern (`git reset`
+    am Ende macht den Index-Eintrag rueckgaengig). `check=True`, weil ein
+    stillschweigend fehlgeschlagenes `add -N` den nachfolgenden `diff` neue/
+    untracked Dateien lautlos auslassen liesse -- genau die Datenverlust-
+    Klasse, die diese Funktion verhindern soll, waere sonst hier selbst
+    wieder moeglich, nur unbemerkt statt mit Fehlermeldung.
+    changed_paths: optional bereits berechnete _changed_paths()-Liste des
+    Aufrufers (spart den doppelten git-Aufruf); None berechnet sie hier neu,
+    z.B. wenn der Aufrufer vor der eigenen Berechnung eine Exception hatte."""
+    import hashlib
+
+    PATCHES_DIR.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(workdir), "add", "-N", "."], check=True)
+    diff_proc = subprocess.run(
+        ["git", "-C", str(workdir), "diff", base_sha],
+        capture_output=True, text=True, check=True,
+    )
+    subprocess.run(["git", "-C", str(workdir), "reset"], check=False, capture_output=True)
+
+    patch_path = PATCHES_DIR / f"{run_id_base}_{arm}.patch"
+    patch_path.write_text(diff_proc.stdout, encoding="utf-8")
+    if changed_paths is None:
+        changed_paths = _changed_paths(workdir, base_sha)
+    status_path = PATCHES_DIR / f"{run_id_base}_{arm}.status"
+    status_path.write_text(
+        "\n".join(changed_paths) + "\n", encoding="utf-8",
+    )
+    digest = hashlib.sha256(diff_proc.stdout.encode("utf-8")).hexdigest()
+    (PATCHES_DIR / f"{run_id_base}_{arm}.patch.sha256").write_text(f"{digest}\n", encoding="utf-8")
+    return str(patch_path.relative_to(WORKSPACE_DIR)), digest
+
+
 def _diff_pi_stats(before, after):
     """get_session_stats ist kumulativ ueber die gesamte Pi-Sitzung (siehe
     rpc.md) -- die Work-Phase-Telemetrie ist die Differenz der beiden
@@ -207,10 +247,39 @@ def _link_node_modules(wt):
 
 
 def _make_worktree(run_id, arm, base_sha):
+    """Blendet benchmarks/real-duel/ (Task-Instructions, checker.sh, Reports,
+    fruehere Ergebnisse) aus dem materialisierten Arbeitsverzeichnis des
+    Kandidaten aus -- sonst koennte er z.B. per `rg`/`find` den eigenen
+    Checker sehen. checker.sh wird ohnehin nie aus dem Worktree gelesen
+    (_maybe_run_checker uebergibt den kanonischen task_dir-Pfad, nicht
+    workdir), das sparse-checkout ist also ausschliesslich Lese-Isolation
+    fuer den Dateibaum, keine Funktionsaenderung fuer den Checker-Lauf
+    selbst.
+
+    BEKANNTE LUECKE: sparse-checkout filtert nur den Checkout, nicht den
+    geteilten Objekt-Store. Ein `git worktree add` teilt sich die volle
+    Historie mit REPO; ein Kandidat mit Shell-/Git-Zugriff kann den
+    versteckten Inhalt trotzdem ueber `git show <sha>:benchmarks/real-duel/
+    ...` oder `git log -p -- benchmarks/real-duel` lesen -- weder Pis noch
+    Codex' Tool-Policy blockt reine Git-Lesebefehle. Diese Funktion ist also
+    keine harte Sicherheitsgrenze gegen einen Kandidaten, der gezielt danach
+    sucht, nur eine Huerde gegen zufaelliges Auffinden per Dateisystem-Tools."""
     wt = WORKTREES_ROOT / run_id / arm
     wt.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        ["git", "-C", str(REPO), "worktree", "add", str(wt), base_sha],
+        ["git", "-C", str(REPO), "worktree", "add", "--no-checkout", str(wt), base_sha],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(wt), "sparse-checkout", "init", "--no-cone"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(wt), "sparse-checkout", "set", "/*", "!/benchmarks/real-duel/"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(wt), "checkout", base_sha],
         check=True,
     )
     _link_node_modules(wt)
@@ -262,12 +331,32 @@ def _run_task(task_dir, task_name, run_prefix, args):
         for name, path in candidate_paths.items()
     }
 
+    frozen_base_sha = os.environ.get("STAGE2_BASE_SHA") or None
+    if not frozen_base_sha:
+        print(
+            "WARN: STAGE2_BASE_SHA ist nicht gesetzt -- Lauf verwendet das "
+            "aktuelle HEAD als base_sha. Waehrend einer eingefrorenen Serie "
+            "muss STAGE2_BASE_SHA vor dem Aufruf exportiert werden (siehe "
+            "reports/stage2/base-sha-freeze.md), sonst driftet der Vergleich "
+            "stillschweigend.",
+            file=sys.stderr,
+        )
+
     fingerprint_module = _load_fingerprint_module()
     fp = fingerprint_module.compute_fingerprint(
         candidates=candidates, task_instruction=instruction,
         dirty_override=args.allow_dirty, model=MODEL,
-        trial=args.trial,
+        trial=args.trial, frozen_base_sha=frozen_base_sha,
     )
+    if frozen_base_sha and not fp["base_sha_matches_freeze"]:
+        print(
+            f"HINWEIS: kanonisches Repo-HEAD ({fp['head_sha']}) ist von der "
+            f"eingefrorenen STAGE2_BASE_SHA ({frozen_base_sha}) abgewichen -- "
+            "das ist erwartet (z.B. Reporting-Commits waehrend der Serie) und "
+            "unschaedlich, da der Worktree weiterhin von der eingefrorenen SHA "
+            "erzeugt wird.",
+            file=sys.stderr,
+        )
     FINGERPRINTS_DIR.mkdir(parents=True, exist_ok=True)
     (FINGERPRINTS_DIR / f"{run_id_base}.json").write_text(json.dumps(fp, indent=2))
     print(json.dumps(fp, indent=2))
@@ -360,7 +449,9 @@ def _run_task(task_dir, task_name, run_prefix, args):
         baseline_ctx = baseline_preflight_module.baseline_context(baseline_preflight)
         print(f"=== {cand_name}: baseline_status={baseline_preflight.get('status')} ===")
         t0 = time.monotonic()
+        run_epoch_start = time.time()
         result = candidate.run(instruction, str(workdir), MODEL, args.timeout)
+        run_epoch_end = time.time()
         wall_time = round(time.monotonic() - t0, 3)
 
         # Offene reale Aufgabe ohne Skript-Orakel (kein checker.sh): kein
@@ -370,6 +461,20 @@ def _run_task(task_dir, task_name, run_prefix, args):
         checker_t0 = time.monotonic()
         checker_exit, raw_score, checker_stdout, checker_stderr, success = _maybe_run_checker(workdir)
         checker_wall_time = round(time.monotonic() - checker_t0, 3) if has_checker else None
+
+        # P0-Fix: Forbidden-Surface-Gate lief bisher nur im plan-work-Pfad --
+        # im (Default-)work-only-Workflow konnte ein Kandidat verbotene Pfade
+        # (z.B. benchmarks/real-duel/) veraendern, ohne dass das je geprueft
+        # wurde. Gleiche Gate-Funktion wie plan-work.
+        changed_paths = _changed_paths(workdir, base_sha)
+        gate_summary = gates_module.summarize([
+            gates_module.check_forbidden_surface_untouched(changed_paths, workflow_cfg.forbidden_surface),
+        ])
+
+        # P0-Fix: Patch verpflichtend VOR jedem moeglichen Cleanup sichern.
+        patch_path, patch_sha256 = _save_patch(
+            workdir, base_sha, run_id_base, arm, changed_paths=changed_paths,
+        )
 
         transcript_path = TRANSCRIPTS_DIR / f"{run_id_base}_{arm}.txt"
         full_output = result.get("full_output") or ""
@@ -381,6 +486,15 @@ def _run_task(task_dir, task_name, run_prefix, args):
         tool_trace_summary = None
         tool_error_details = None
         if cand_name == "pi-real":
+            # P0-Fix (Phase 3): Subagenten-/Verifier-Telemetrie war bisher
+            # strukturell immer null. Nur pi-real nutzt pi-subagents (Codex
+            # kennt dieses Konzept nicht) -- run-history.jsonl liegt global
+            # unter ~/.pi/agent, daher Filterung ueber workdir + Zeitfenster.
+            telemetry.update(
+                telemetry_module.subagent_stats_from_run_history(
+                    workdir, run_epoch_start, run_epoch_end
+                )
+            )
             tool_trace_module = _load_tool_trace_module()
             trace = tool_trace_module.analyze_pi_trace(
                 full_output,
@@ -406,8 +520,18 @@ def _run_task(task_dir, task_name, run_prefix, args):
             "trial": args.trial,
             "workflow": workflow,
             "success": success,
-            "completed": bool(result.get("completed")),
-            "error": result.get("error"),
+            # P0-Fix: ein Treffer im Forbidden-Surface-Gate ist ein harter
+            # Lauffehler, unabhaengig vom Kandidatenergebnis -- gleiche Regel
+            # wie im plan-work-Pfad (siehe check_run_completed_without_error).
+            "completed": bool(result.get("completed")) and gate_summary["all_required_passed"],
+            "error": result.get("error") or (
+                f"Pflichtgates fehlgeschlagen: {gate_summary['failed_required']}"
+                if not gate_summary["all_required_passed"]
+                else None
+            ),
+            "gates": gate_summary,
+            "patch_path": patch_path,
+            "patch_sha256": patch_sha256,
             "wall_time_s": wall_time,
             "checker_wall_time_s": checker_wall_time,
             "cmd": result.get("cmd"),
@@ -486,6 +610,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
     def _execute_plan_work(cand_name, candidate, workdir, run_id, arm):
         print(f"=== {cand_name}: invoke plan-work ({run_id}) ===")
         t0 = time.monotonic()
+        run_epoch_start = time.time()
         completed = False
         error = None
         gates = []
@@ -496,6 +621,10 @@ def _run_task(task_dir, task_name, run_prefix, args):
         full_output_for_transcript = ""
         pi_sess = None  # geschlossen im finally, auch wenn Freigabe/Work-Phase wirft
         checker_exit = raw_score = checker_stdout = checker_stderr = checker_success = None
+        # None, falls eine Exception vor der eigentlichen Zuweisung unten
+        # eintritt -- _save_patch() berechnet dann selbst neu, statt mit
+        # einer veralteten/leeren Liste weiterzuarbeiten.
+        changed_paths = None
         # P1/P2: Plan-/Work-Tooltrace + Baseline-Preflight.
         plan_phase_tool_trace = None
         work_phase_tool_trace = None
@@ -723,8 +852,25 @@ def _run_task(task_dir, task_name, run_prefix, args):
             if pi_sess is not None:
                 pi_sess.close()
 
+        run_epoch_end = time.time()
         wall_time = round(time.monotonic() - t0, 3)
         gate_summary = gates_module.summarize(gates)
+
+        # P0-Fix (Phase 3): analog zu work-only -- nur pi-real nutzt
+        # pi-subagents (Verifier ist ein Pi-Konzept, Codex kennt es nicht).
+        subagent_telemetry = None
+        if cand_name == "pi-real":
+            telemetry_module = _load_telemetry_module()
+            subagent_telemetry = telemetry_module.subagent_stats_from_run_history(
+                workdir, run_epoch_start, run_epoch_end
+            )
+
+        # P0-Fix: Patch verpflichtend VOR jedem moeglichen Cleanup sichern --
+        # unabhaengig davon, ob der Lauf/die Gates erfolgreich waren (auch ein
+        # gescheiterter Lauf kann forensisch relevante Mutationen enthalten).
+        patch_path, patch_sha256 = _save_patch(
+            workdir, base_sha, run_id_base, arm, changed_paths=changed_paths,
+        )
 
         transcript_path = TRANSCRIPTS_DIR / f"{run_id_base}_{arm}.txt"
         transcript_path.write_text(full_output_for_transcript)
@@ -771,10 +917,13 @@ def _run_task(task_dir, task_name, run_prefix, args):
             "workdir": str(workdir),
             "comparable": fp["comparable"],
             "dirty_override": fp["dirty_override"],
+            "patch_path": patch_path,
+            "patch_sha256": patch_sha256,
             "tokens": None,
             "turns": None,
             "token_basis": None,
             "telemetry": None,
+            "subagent_telemetry": subagent_telemetry,
             "plan_mode": plan_mode_used,
             "plan_hash": plan_hash,
             "plan_phase_telemetry": plan_phase_telemetry,
@@ -913,6 +1062,25 @@ def cmd_report_plan_work(args):
 
 def cmd_cleanup(args):
     root = WORKTREES_ROOT / args.run_id
+    missing_patches = []
+    for arm in ("pi", "codex"):
+        wt = root / arm
+        if not wt.exists():
+            continue
+        patch_path = PATCHES_DIR / f"{args.run_id}_{arm}.patch"
+        if not patch_path.exists() and not args.force:
+            missing_patches.append(arm)
+    if missing_patches and not args.force:
+        print(
+            f"ERROR: keine gesicherte Patch-Datei fuer Arm(e) {missing_patches} unter "
+            f"{PATCHES_DIR} -- Cleanup abgebrochen, um Datenverlust wie bei den "
+            "Task-A/B-Laeufen zu vermeiden. Sollte bei einem regulaer beendeten Lauf "
+            "nicht vorkommen (_save_patch laeuft automatisch am Ende jeder "
+            "Kandidatenausfuehrung). Falls absichtlich (z.B. abgebrochener Lauf ohne "
+            "brauchbaren Worktree-Zustand): 'pi-duel cleanup <run-id> --force'.",
+            file=sys.stderr,
+        )
+        return 1
     for arm in ("pi", "codex"):
         wt = root / arm
         if wt.exists():
@@ -971,6 +1139,8 @@ def build_parser():
 
     p_cleanup = sub.add_parser("cleanup", help="Worktrees eines Laufs entfernen")
     p_cleanup.add_argument("run_id")
+    p_cleanup.add_argument("--force", action="store_true",
+                            help="Cleanup trotz fehlender gesicherter Patch-Datei erzwingen")
 
     return parser
 

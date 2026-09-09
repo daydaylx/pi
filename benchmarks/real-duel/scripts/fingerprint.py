@@ -80,17 +80,24 @@ def _openbench_ref():
 
 
 def compute_fingerprint(candidates=None, task_instruction=None, dirty_override=False,
-                         model=None, trial=None):
+                         model=None, trial=None, frozen_base_sha=None):
     """candidates: dict[name -> obench.candidates.ManifestHarness] (optional).
     task_instruction: raw instruction.md text of the task about to run (optional).
     trial: Trial-Nummer des Laufs (optional; None erhaelt Standalone-CLI-
     Aufrufbarkeit ohne --trial-Kontext).
+    frozen_base_sha: wenn gesetzt (aus STAGE2_BASE_SHA), wird DIESER SHA als
+    base_sha verwendet -- nicht das aktuelle HEAD. Das kanonische Repo kann
+    waehrend einer eingefrorenen Serie durch Reporting-/Doku-Commits
+    weiterwandern; der Worktree fuer den Kandidatenlauf muss trotzdem immer
+    vom eingefrorenen Stand ausgehen. head_sha/base_sha_matches_freeze machen
+    die Drift sichtbar, auch wenn der Freeze greift.
     Returns a fully-populated fingerprint dict. Never raises on missing optional
     pieces -- fields degrade to null rather than aborting the fingerprint itself.
     """
     dirty_lines = _git_status_porcelain(REPO)
     canonical_repo_clean = len(dirty_lines) == 0
-    base_sha = _run(["git", "rev-parse", "HEAD"], cwd=REPO)
+    head_sha = _run(["git", "rev-parse", "HEAD"], cwd=REPO)
+    base_sha = frozen_base_sha or head_sha
 
     pi_version = _run(["pi", "--version"])
     codex_version = _run(["codex", "--version"])
@@ -98,6 +105,9 @@ def compute_fingerprint(candidates=None, task_instruction=None, dirty_override=F
 
     fp = {
         "base_sha": base_sha,
+        "head_sha": head_sha,
+        "base_sha_frozen": bool(frozen_base_sha),
+        "base_sha_matches_freeze": (frozen_base_sha is None) or (frozen_base_sha == head_sha),
         "canonical_repo_clean": canonical_repo_clean,
         "dirty_files_list": dirty_lines,
         "dirty_override": bool(dirty_override),
@@ -145,7 +155,8 @@ def compute_fingerprint(candidates=None, task_instruction=None, dirty_override=F
 
 def main():
     dirty_override = "--allow-dirty" in sys.argv[1:]
-    fp = compute_fingerprint(dirty_override=dirty_override)
+    frozen_base_sha = os.environ.get("STAGE2_BASE_SHA") or None
+    fp = compute_fingerprint(dirty_override=dirty_override, frozen_base_sha=frozen_base_sha)
     print(json.dumps(fp, indent=2))
     if not fp["canonical_repo_clean"] and not dirty_override:
         print(

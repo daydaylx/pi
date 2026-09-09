@@ -43,3 +43,15 @@ geändert:
 
 Trial 1 einer Serie wird nie mit Trial 3 einer anderen Harness-Version
 verglichen.
+
+## Operative Randbedingung: keine parallele interaktive Pi-Nutzung
+
+`run-history.jsonl` (Quelle der Subagenten-/Verifier-Telemetrie, siehe
+`scripts/telemetry.py::subagent_stats_from_run_history`) liegt global unter
+`~/.pi/agent/` -- unabhaengig vom jeweiligen Worktree, weil
+`candidates/pi-real.toml` bewusst `isolate_home=false` setzt. Waehrend ein
+Benchmark-Trial laeuft, darf auf derselben Maschine keine andere interaktive
+Pi-Sitzung laufen, sonst vermischt sich deren Subagenten-/Verifier-Historie
+mit der Messung (cwd-Filterung schuetzt gegen andere Worktrees, aber nicht
+gegen eine Sitzung, die zufaellig im selben Zeitfenster im selben Worktree
+oder mit unklarer cwd laeuft).

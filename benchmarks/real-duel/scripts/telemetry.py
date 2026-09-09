@@ -45,6 +45,13 @@ import sys
 
 OPENBENCH_HOME = os.path.expanduser("~/.local/share/real-duel/openbench")
 
+# candidates/pi-real.toml setzt bewusst isolate_home=false -- Pis agentDir
+# (und damit run-history.jsonl) loest deshalb immer auf ~/.pi/agent auf,
+# unabhaengig vom jeweiligen Worktree. Die Datei ist also GLOBAL ueber alle
+# Pi-Sitzungen auf der Maschine geteilt, nicht pro Lauf isoliert -- deshalb
+# ist die cwd-/Zeitfenster-Filterung unten zwingend, nicht optional.
+RUN_HISTORY_PATH = os.path.expanduser("~/.pi/agent/run-history.jsonl")
+
 NEUTRAL_SCHEMA_KEYS = (
     "input_fresh", "input_cache_read", "input_cache_write",
     "output", "reasoning", "processed_input",
@@ -106,6 +113,85 @@ def _codex_tool_stats(transcript_text):
         if exit_code not in (0, None):
             errors += 1
     return calls, errors
+
+
+def _iter_run_history_entries():
+    """Liest run-history.jsonl zeilenweise (JSONL, kann waehrend des Laufs
+    weiterwachsen -- fehlerhafte/unvollstaendige letzte Zeilen werden
+    uebersprungen statt den ganzen Lauf abzubrechen)."""
+    if not os.path.isfile(RUN_HISTORY_PATH):
+        return
+    with open(RUN_HISTORY_PATH, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+
+def subagent_stats_from_run_history(workdir, start_ts, end_ts):
+    """Phase 3: aggregiert Subagenten-/Verifier-Telemetrie fuer einen
+    Kandidatenlauf aus run-history.jsonl (siehe pi-subagents/src/runs/shared/
+    run-history.ts -- recordRun() schreibt dort inzwischen cwd/tokens/cost).
+    Nur Eintraege, deren cwd unterhalb von workdir liegt UND deren ts
+    (Unix-Sekunden) innerhalb [start_ts, end_ts] liegt, gehoeren zu diesem
+    Lauf -- die Datei ist global, s. Kommentar bei RUN_HISTORY_PATH oben.
+    Gibt ein Dict mit subagent_calls/subagent_tokens/subagent_cost und
+    verifier_calls/verifier_tokens/verifier_cost zurueck (0 statt None, wenn
+    keine passenden Eintraege gefunden wurden -- ein Lauf ohne Subagenten ist
+    ein gueltiges, gemessenes Ergebnis, kein fehlender Wert)."""
+    workdir_prefix = os.path.normpath(str(workdir)) + os.sep
+    total_calls = total_tokens = 0
+    total_cost = 0.0
+    total_cost_found = False
+    verifier_calls = verifier_tokens = 0
+    verifier_cost = 0.0
+    verifier_cost_found = False
+
+    for entry in _iter_run_history_entries():
+        cwd = entry.get("cwd")
+        ts = entry.get("ts")
+        if not cwd or ts is None:
+            continue
+        cwd_norm = os.path.normpath(cwd)
+        if not (cwd_norm == os.path.normpath(str(workdir)) or (cwd_norm + os.sep).startswith(workdir_prefix)):
+            continue
+        if not (start_ts <= ts <= end_ts):
+            continue
+
+        tokens = entry.get("tokens") or {}
+        entry_tokens = sum(
+            v for v in (
+                tokens.get("input"), tokens.get("output"),
+                tokens.get("cacheRead"), tokens.get("cacheWrite"),
+            ) if isinstance(v, (int, float))
+        )
+        entry_cost = entry.get("cost")
+
+        total_calls += 1
+        total_tokens += entry_tokens
+        if isinstance(entry_cost, (int, float)):
+            total_cost += entry_cost
+            total_cost_found = True
+
+        if entry.get("agent") == "verifier":
+            verifier_calls += 1
+            verifier_tokens += entry_tokens
+            if isinstance(entry_cost, (int, float)):
+                verifier_cost += entry_cost
+                verifier_cost_found = True
+
+    return {
+        "subagent_calls": total_calls,
+        "subagent_tokens": total_tokens,
+        "subagent_cost": total_cost if total_cost_found else None,
+        "verifier_calls": verifier_calls,
+        "verifier_tokens": verifier_tokens,
+        "verifier_cost": verifier_cost if verifier_cost_found else None,
+    }
 
 
 def normalize_pi(transcript_text):
