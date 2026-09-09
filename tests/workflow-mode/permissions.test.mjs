@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -9,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, eq, test } from "../shared/assertions.mjs";
 import { importModule as load } from "../shared/jiti-loader.mjs";
+import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 
 const workflowPolicy = await load("extensions/permissions/workflow-policy.ts");
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
@@ -929,8 +931,13 @@ await test("verifier delegations require the full inspection contract", () => {
     "Pre-existing dirty-path fingerprints:\nkeine",
     "Acceptance criteria: project_check verify besteht.",
   ].join("\n\n");
-  const assess = (input) =>
-    verifierPolicy.assessVerifierDelegation({ toolName: "subagent", input });
+  const cwd = "/repo";
+  const assess = (input, verification = {}) =>
+    verifierPolicy.assessVerifierDelegation(
+      { toolName: "subagent", input },
+      cwd,
+      verification,
+    );
   assert(
     !assess({ agent: "investigator", task: "anything" }).blocked,
     "other roles are not restricted by the verifier contract",
@@ -1034,6 +1041,95 @@ await test("verifier delegations require the full inspection contract", () => {
     "reviewed",
     "the acceptance override only applies to verifier delegations",
   );
+});
+
+await test("verifier delegation is blocked on an unchanged, already-judged fingerprint", () => {
+  if (!verifierPolicy) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-verifier-dedup-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd });
+    execFileSync("git", ["config", "user.email", "test@example.test"], {
+      cwd,
+    });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd });
+    writeFileSync(join(cwd, "a.txt"), "initial\n");
+    execFileSync("git", ["add", "a.txt"], { cwd });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd });
+    const cleanFingerprint = collectWorkspaceSnapshot(cwd).fingerprint;
+
+    const completeTask = [
+      "Original User Request:\nDen Auftrag umsetzen.",
+      "Constraints / Non-Goals:\nKeine.",
+      "Delegated Question:\nErfüllt der Diff den Auftrag?",
+      "Implementation / Diff to verify:\n<relevanter Diff>",
+      "Pre-existing workspace state (vor der ersten Änderung dieses Tasks erfasst):\nclean",
+      "Pre-existing dirty-path fingerprints:\nkeine",
+      "Acceptance criteria: project_check verify besteht.",
+    ].join("\n\n");
+    const assess = (verification, task = completeTask) =>
+      verifierPolicy.assessVerifierDelegation(
+        { toolName: "subagent", input: { agent: "verifier", task } },
+        cwd,
+        verification,
+      );
+
+    assert(
+      !assess({}).blocked,
+      "no prior verifier record at all is never blocked by dedup",
+    );
+
+    const passedHere = {
+      workspaceRoot: cwd,
+      workspaceFingerprint: cleanFingerprint,
+      verifierStatus: "completed",
+      verifierVerdict: "PASS",
+    };
+    const blocked = assess(passedHere);
+    assert(
+      blocked.blocked,
+      "an identical, already-PASSed fingerprint is refused",
+    );
+    assert(
+      blocked.reason.includes("PASS"),
+      "the refusal names the cached verdict",
+    );
+
+    const failedHere = { ...passedHere, verifierVerdict: "FAIL" };
+    assert(
+      assess(failedHere).blocked,
+      "a completed FAIL at the same fingerprint is refused too — repeating a failed run without a code change is still redundant",
+    );
+
+    const incompleteHere = { ...passedHere, verifierStatus: "incomplete" };
+    assert(
+      !assess(incompleteHere).blocked,
+      "an incomplete prior run never counts as a prior judgment — retry stays allowed",
+    );
+
+    writeFileSync(join(cwd, "a.txt"), "changed\n");
+    assert(
+      !assess(passedHere).blocked,
+      "an actually changed workspace clears the dedup gate even against a stale cached fingerprint",
+    );
+    writeFileSync(join(cwd, "a.txt"), "initial\n");
+
+    const justified = [
+      completeTask,
+      "Grund für erneute Prüfung:\nAndere Teilfrage als beim letzten Lauf.",
+    ].join("\n\n");
+    assert(
+      !assess(passedHere, justified).blocked,
+      "an explicit re-verification justification overrides the dedup block even on an unchanged fingerprint",
+    );
+
+    const otherRoot = { ...passedHere, workspaceRoot: "/other-repo" };
+    assert(
+      !assess(otherRoot).blocked,
+      "a cached verdict for a different workspace root does not transfer",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 await test("debugger delegations keep the generous agents/debugger.md timeout", () => {

@@ -19,6 +19,7 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [018](018-subagent-delegation-always-allowed.md) — Subagent-Delegationen immer erlaubt
 - [019](019-dashboard-modes-and-phase-precedence.md) — Dashboard-Modi mit einer Staleness-Wahrheit für Phase und Verifikation
 - [020](020-explicit-plan-approval.md) — Ausdrückliche Planfreigabe, sitzungsbezogene Ablage, turnfester Modus
+- [021](021-verifier-dedup-gate.md) — Verifier-Delegationen werden auf unverändertem Fingerprint dedupliziert
 
 ## Historische, ersetzte Entscheidungen
 

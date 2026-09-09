@@ -95,7 +95,18 @@ export function registerPermissionGuards(
     if (webAssessment.blocked) {
       return { block: true, reason: webAssessment.reason };
     }
-    const verifierAssessment = assessVerifierDelegation(event);
+    // Gilt wie das Recovery-Gate unabhängig vom Zugriffslevel — auch YOLO
+    // hebt die Verifier-Pflicht für sicherheits-/permissionsrelevante Diffs
+    // nicht auf, weil genau dort die beobachtete Lücke entstand. Vor die
+    // Delegationsprüfung gezogen, damit assessVerifierDelegation denselben
+    // Snapshot auch für den Dedup-Check gegen einen bereits abgeschlossenen
+    // Verifier-Lauf nutzen kann.
+    const verification = requestVerificationCapabilities(pi.events);
+    const verifierAssessment = assessVerifierDelegation(
+      event,
+      ctx.cwd,
+      verification,
+    );
     if (verifierAssessment.blocked) {
       return { block: true, reason: verifierAssessment.reason };
     }
@@ -103,10 +114,6 @@ export function registerPermissionGuards(
     if (debuggerAssessment.blocked) {
       return { block: true, reason: debuggerAssessment.reason };
     }
-    // Gilt wie das Recovery-Gate unabhängig vom Zugriffslevel — auch YOLO
-    // hebt die Verifier-Pflicht für sicherheits-/permissionsrelevante Diffs
-    // nicht auf, weil genau dort die beobachtete Lücke entstand.
-    const verification = requestVerificationCapabilities(pi.events);
     const commitGate = assessGitCommitVerifierGate(
       event,
       ctx.cwd,

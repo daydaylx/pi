@@ -116,6 +116,15 @@ Acceptance / Akzeptanzkriterien:
 <woran die Verifikation die Umsetzung misst>
 ```
 
+Nur nötig, wenn der aktuelle Diff bereits einen abgeschlossenen Verifier-Lauf
+hat (siehe „Verifier-Zuverlässigkeit" unten, Dedup-Gate) und trotzdem eine
+erneute Prüfung erforderlich ist:
+
+```text
+Grund für erneute Prüfung:
+<was diese Delegation von der vorherigen auf demselben Diff unterscheidet>
+```
+
 `git status --short` allein ist keine Inhaltsbaseline: Es zeigt nicht, ob der
 Task eine bereits vorher veränderte Datei zusätzlich geändert hat. Vor der
 ersten Task-Änderung deshalb reproduzierbare Content-Fingerprints (Hash des
@@ -144,6 +153,13 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
   zählt nie als unabhängige Verifikation.
 - Ein fachliches `FAIL` bei erfolgreichem Lauf bleibt `completed` mit
   `verdict: "FAIL"` — es wird nicht durch Wiederholung oder Fallback ersetzt.
+- Ein zweiter `verifier`-Aufruf auf demselben Workspace-Fingerprint wie der
+  letzte abgeschlossene Lauf wird ohne den Abschnitt „Grund für erneute
+  Prüfung" vor dem Start geblockt, mit dem gecachten Urteil in der
+  Fehlermeldung — Wiederholung ohne neue Erkenntnis oder Codeänderung prüft
+  nichts Neues. Ein `incomplete`-Lauf zählt dabei nie als Vorlauf, ein Retry
+  bleibt uneingeschränkt erlaubt. Siehe
+  `docs/decisions/021-verifier-dedup-gate.md`.
 - Fallback-Modelle greifen nur bei Provider-/Netzwerk-/Auth-Fehlern
   (`isRetryableModelFailure` im Paket), nie bei Timeout, Turn-Budget oder
   einem `FAIL`-Urteil; Tests in `tests/workflow-mode/permissions.test.mjs`

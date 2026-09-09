@@ -95,8 +95,62 @@ export const VERIFIER_REQUIRED_SECTIONS = [
 
 const ACCEPTANCE_PATTERN = /acceptance|akzeptanz/i;
 
+/**
+ * Optionaler Abschnitt, der nur geprüft wird, wenn der aktuelle Diff schon
+ * einen abgeschlossenen Verifier-Lauf hat (siehe assessVerifierDedup). Für
+ * jede Erstverifikation ist er irrelevant — daher kein Eintrag in
+ * VERIFIER_REQUIRED_SECTIONS, sondern eine eigene, bedingte Prüfung.
+ */
+const REVERIFICATION_JUSTIFICATION_PATTERN =
+  /^(?:#{1,6}\s*)?(?:re-verification justification|grund für erneute prüfung)\s*:?\s*$/im;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Ein zweiter `verifier`-Lauf auf einem Diff, der seit dem letzten
+ * abgeschlossenen Urteil unverändert ist, prüft nichts Neues — er
+ * wiederholt nur die vorherige Arbeit. `lastVerifierRun`
+ * (extensions/setup-core/index.ts) bindet Urteil und Fingerprint bereits
+ * zusammen; dieselbe Bindung, die bislang nur für das Commit-Gate genutzt
+ * wird (assessVerifierCoverageForDiff: blockiere, wenn NICHT verifiziert),
+ * greift hier in die andere Richtung: blockiere, wenn SCHON verifiziert und
+ * seither nichts geändert wurde. Ein `"incomplete"`-Lauf (Timeout,
+ * Turn-Budget, Provider-Fehler) zählt nie als Vorlauf — ein Retry bleibt
+ * uneingeschränkt erlaubt, exakt wie beim Commit-Gate.
+ */
+export function assessVerifierDedup(
+  task: string,
+  cwd: string,
+  verification: VerificationCapabilitySnapshot,
+): WorkflowAssessment {
+  if (verification.verifierStatus !== "completed") return PERMITTED;
+  if (verification.workspaceRoot !== cwd) return PERMITTED;
+
+  let snapshot: WorkspaceSnapshot | undefined;
+  try {
+    snapshot = collectWorkspaceSnapshot(cwd);
+  } catch {
+    // Gleiches Vorbild wie assessGitCommitVerifierGate: ohne Fingerprint
+    // keine Evidenz für "unverändert", also nicht blockieren.
+    return PERMITTED;
+  }
+  if (verification.workspaceFingerprint !== snapshot.fingerprint) {
+    return PERMITTED;
+  }
+  if (REVERIFICATION_JUSTIFICATION_PATTERN.test(task)) return PERMITTED;
+
+  return {
+    blocked: true,
+    reason:
+      `Verifier-Delegation abgelehnt: Diff ist seit dem letzten abgeschlossenen ` +
+      `Verifier-Lauf unverändert (Urteil: ${verification.verifierVerdict}). ` +
+      `Kein neuer Lauf nötig — nutze das bestehende Urteil. Falls eine ` +
+      `erneute Prüfung trotzdem nötig ist (z. B. andere Teilfrage, neue ` +
+      `Erkenntnisse), ergänze im Prüfauftrag einen Abschnitt "Grund für ` +
+      `erneute Prüfung" mit der Begründung.`,
+  };
 }
 
 /**
@@ -105,6 +159,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function assessVerifierDelegation(
   event: ToolCallEvent,
+  cwd: string,
+  verification: VerificationCapabilitySnapshot,
 ): WorkflowAssessment {
   if (event.toolName !== "subagent") return PERMITTED;
   const input = isRecord(event.input) ? event.input : {};
@@ -141,6 +197,8 @@ export function assessVerifierDelegation(
   if (errors.length > 0) {
     return { blocked: true, reason: errors.join(" ") };
   }
+  const dedup = assessVerifierDedup(task, cwd, verification);
+  if (dedup.blocked) return dedup;
   // Das installierte pi-subagents-Paket eskaliert je nach Task-Wortlaut
   // (explizit oder implizit über inferLevel()) auf Acceptance-Level wie
   // "reviewed" (verlangt einen "reviewer"-Agenten, den Aurora bewusst nicht
