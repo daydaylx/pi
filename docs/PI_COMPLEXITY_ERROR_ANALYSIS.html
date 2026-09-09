@@ -1,0 +1,852 @@
+<title>Pi Komplexitätsaudit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+<style>
+  :root {
+    --ground: #f7f7f5;
+    --surface: #ffffff;
+    --surface-sunk: #eeeeeb;
+    --ink: #1b1d21;
+    --ink-soft: #4c5058;
+    --ink-faint: #7c818b;
+    --rule: #dcdcd6;
+    --rule-strong: #c2c2ba;
+    --accent: #3f5b8c;
+    --accent-soft: #e6ebf4;
+    --p0: #a32020;
+    --p0-soft: #f7e6e4;
+    --p1: #9a5b00;
+    --p1-soft: #f8eddc;
+    --p2: #3f5b8c;
+    --p2-soft: #e6ebf4;
+    --p3: #566b5a;
+    --p3-soft: #e8eee8;
+    --ok: #2f6b46;
+    --shadow: 0 1px 2px rgba(27, 29, 33, .05);
+  }
+  :root:not([data-theme="light"]) {
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14161a;
+      --surface: #1a1d22;
+      --surface-sunk: #101216;
+      --ink: #e6e7ea;
+      --ink-soft: #b0b4bc;
+      --ink-faint: #838994;
+      --rule: #2b2f36;
+      --rule-strong: #3d434c;
+      --accent: #94b0e0;
+      --accent-soft: #1e2634;
+      --p0: #f08b83;
+      --p0-soft: #2c1a1a;
+      --p1: #e0ac5c;
+      --p1-soft: #2a2015;
+      --p2: #94b0e0;
+      --p2-soft: #1e2634;
+      --p3: #9dbaa4;
+      --p3-soft: #1a231c;
+      --ok: #7fc39b;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground: #14161a;
+    --surface: #1a1d22;
+    --surface-sunk: #101216;
+    --ink: #e6e7ea;
+    --ink-soft: #b0b4bc;
+    --ink-faint: #838994;
+    --rule: #2b2f36;
+    --rule-strong: #3d434c;
+    --accent: #94b0e0;
+    --accent-soft: #1e2634;
+    --p0: #f08b83;
+    --p0-soft: #2c1a1a;
+    --p1: #e0ac5c;
+    --p1-soft: #2a2015;
+    --p2: #94b0e0;
+    --p2-soft: #1e2634;
+    --p3: #9dbaa4;
+    --p3-soft: #1a231c;
+    --ok: #7fc39b;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3.25rem;
+  }
+  .prose { max-width: 44rem; }
+
+  h1, h2, h3 {
+    font-family: "IBM Plex Serif", ui-serif, Georgia, serif;
+    font-weight: 600;
+    text-wrap: balance;
+    line-height: 1.25;
+    margin: 0;
+  }
+  h1 { font-size: 2.35rem; letter-spacing: -.015em; }
+  h2 { font-size: 1.5rem; letter-spacing: -.01em; }
+  h3 { font-size: 1.075rem; }
+  p { margin: 0; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .72rem;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+    font-size: .875em;
+  }
+  code {
+    background: var(--surface-sunk);
+    border-radius: 3px;
+    padding: .1em .35em;
+    color: var(--ink);
+  }
+
+  header.masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding-bottom: 2rem;
+    border-bottom: 2px solid var(--rule-strong);
+  }
+  .masthead p.lede {
+    font-size: 1.125rem;
+    color: var(--ink-soft);
+    max-width: 44rem;
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: .25rem 2rem;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .8rem;
+    margin-top: .5rem;
+  }
+  .facts div { display: flex; gap: .6rem; padding: .3rem 0; border-top: 1px solid var(--rule); }
+  .facts dt, .facts .k { color: var(--ink-faint); min-width: 7.5rem; }
+  .facts .v { color: var(--ink); word-break: break-all; }
+
+  section { display: flex; flex-direction: column; gap: 1.25rem; }
+  .sec-head { display: flex; flex-direction: column; gap: .4rem; }
+
+  /* severity */
+  .sev {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .7rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    padding: .15rem .45rem;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .sev-P0 { color: var(--p0); background: var(--p0-soft); }
+  .sev-P1 { color: var(--p1); background: var(--p1-soft); }
+  .sev-P2 { color: var(--p2); background: var(--p2-soft); }
+  .sev-P3 { color: var(--p3); background: var(--p3-soft); }
+
+  .conf {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .7rem;
+    letter-spacing: .05em;
+    color: var(--ink-faint);
+    border: 1px solid var(--rule-strong);
+    border-radius: 3px;
+    padding: .12rem .4rem;
+    white-space: nowrap;
+  }
+  .conf-hoch { color: var(--ok); border-color: currentColor; }
+
+  /* finding blocks */
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--rule-strong);
+    box-shadow: var(--shadow);
+    padding: 1.35rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: .85rem;
+  }
+  .finding.p0 { border-left-color: var(--p0); }
+  .finding.p1 { border-left-color: var(--p1); }
+  .f-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem; }
+  .f-id {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .8rem;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+  .f-head h3 { flex: 1 1 22rem; }
+  .f-meta {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .74rem;
+    color: var(--ink-faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem 1.1rem;
+    padding-bottom: .2rem;
+  }
+  dl.f-body { display: grid; grid-template-columns: 9.5rem 1fr; gap: .55rem 1.25rem; margin: 0; }
+  dl.f-body dt {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .74rem;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding-top: .18rem;
+  }
+  dl.f-body dd { margin: 0; color: var(--ink-soft); }
+  dl.f-body dd strong { color: var(--ink); font-weight: 600; }
+  @media (max-width: 46rem) {
+    dl.f-body { grid-template-columns: 1fr; gap: .15rem; }
+    dl.f-body dt { padding-top: .5rem; }
+  }
+
+  pre.evidence {
+    background: var(--surface-sunk);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: .8rem 1rem;
+    overflow-x: auto;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .78rem;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    margin: 0;
+    white-space: pre;
+  }
+  pre.evidence b { color: var(--ink); font-weight: 600; }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+  th, td { text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  thead th {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .7rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    background: var(--surface-sunk);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.id { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 600; white-space: nowrap; color: var(--ink); }
+  td.mono-cell { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .78rem; color: var(--ink-soft); }
+  td.tight { white-space: nowrap; }
+
+  ul.plain, ol.plain { margin: 0; padding-left: 1.15rem; display: flex; flex-direction: column; gap: .45rem; color: var(--ink-soft); }
+  ul.plain li strong, ol.plain li strong { color: var(--ink); font-weight: 600; }
+
+  .pathmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  .pathmap article { background: var(--surface); padding: 1rem 1.15rem; display: flex; flex-direction: column; gap: .4rem; }
+  .pathmap h3 { font-size: .95rem; font-family: "IBM Plex Sans", sans-serif; font-weight: 600; }
+  .pathmap .chain { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .74rem; color: var(--ink-soft); line-height: 1.5; word-break: break-word; }
+  .pathmap .risk { font-size: .8rem; color: var(--ink-soft); }
+  .pathmap .risk b { color: var(--p1); font-weight: 600; }
+  .pathmap .risk.clean b { color: var(--ok); }
+
+  .package {
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    padding: 1.4rem 1.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: .9rem;
+  }
+  .package .step {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .72rem;
+    letter-spacing: .12em;
+    color: var(--accent);
+  }
+  .package h3 { font-size: 1.15rem; }
+
+  .callout {
+    border: 1px solid var(--rule-strong);
+    border-top: 3px solid var(--accent);
+    background: var(--surface);
+    padding: 1.4rem 1.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: .8rem;
+  }
+  .callout ol { margin: 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: .6rem; }
+  .callout ol li strong { font-weight: 600; }
+
+  .keep { border-left: 3px solid var(--ok); padding-left: 1rem; display: flex; flex-direction: column; gap: .5rem; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; font-size: .8rem; color: var(--ink-soft); }
+
+  hr.div { border: none; border-top: 1px solid var(--rule); margin: 0; }
+
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Komplexitäts-, Fehler- und Schwachstellenanalyse</p>
+    <h1>Pi — Auditbericht zum Stand 4563fad</h1>
+    <p class="lede">Evidenzbasierte Prüfung des Repositories <code>daydaylx/pi</code>: reale Kontrollpfade, Sicherheitsgrenzen, Zustandsquellen und Prüfabdeckung. Kein Produktivcode verändert, kein Commit, kein Push.</p>
+    <div class="facts">
+      <div><span class="k">Branch</span><span class="v">claude/pi-complexity-error-analysis-oezq8s</span></div>
+      <div><span class="k">HEAD</span><span class="v">4563fad1937ed838a4824777d6c6a25298349f27</span></div>
+      <div><span class="k">Analysedatum</span><span class="v">2026-09-09 (UTC)</span></div>
+      <div><span class="k">git status</span><span class="v">leer — Arbeitsbaum sauber</span></div>
+      <div><span class="k">Node (Laufzeit)</span><span class="v">v22.22.2 · npm 10.9.7</span></div>
+      <div><span class="k">Node (gepinnt)</span><span class="v">22.23.2 (.nvmrc, engines)</span></div>
+      <div><span class="k">Pi-Runtime</span><span class="v">@earendil-works/pi-coding-agent 0.84.3</span></div>
+      <div><span class="k">Codeumfang</span><span class="v">extensions 25.9k · tests 22.4k · gui 11.2k Zeilen</span></div>
+    </div>
+  </header>
+
+  <!-- 1. EXECUTIVE SUMMARY -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">1 — Executive Summary</p>
+      <h2>Die Architektur trägt. Die Gates darunter nicht.</h2>
+    </div>
+    <div class="prose" style="display:flex;flex-direction:column;gap:1rem;">
+      <p>Pi ist kein aufgeblähtes Projekt. Die Schichtung — harte Grenzen (<code>workflow-policy</code>) vor Stufenlogik (<code>tool-policy</code>) vor Dialog — ist sauber begründet, die LSP-Prozessverwaltung, die Electron-Trust-Grenze und die Plan-Handoff-Sanitisierung sind gute, <em>notwendige</em> Komplexität. Der überwiegende Teil des Codes verdient „Behalten".</p>
+      <p>Das Problem liegt eine Ebene tiefer: <strong>alle vier neuen Sicherheits- und Qualitätsgates hängen an einer einzigen Funktion, <code>collectWorkspaceSnapshot()</code>, und diese Funktion bricht reproduzierbar ab, sobald der Diff 1 MiB überschreitet</strong> — bei ~350 KB geänderten Textes. Die vier Aufrufer behandeln diesen Abbruch <em>unterschiedlich</em>: das Verifier-Commit-Gate öffnet stillschweigend, das Recovery-Gate schließt für immer, setup-core protokolliert gar nichts. Damit ist genau die Lücke, die AGENTS.md als „technisch erzwungen" beschreibt, durch einen großen Diff umgehbar — und ein großer Diff ist genau der Fall, für den das Gate gebaut wurde.</p>
+      <p>Daneben stehen zwei weitere bestätigte Fehlfunktionen desselben Musters: ein Verifier-Lauf ohne erkennbares Urteil <em>blockiert</em> die Wiederholung, während das Commit-Gate ihn korrekt ablehnt (Sackgasse), und der Verifikationsstatus erreicht die GUI nie, weil <code>agent_settled</code> vor der Zustandsaktualisierung an <code>!ctx.hasUI</code> abbricht.</p>
+      <p>Die Prüfinfrastruktur hat eine strukturelle Blindstelle: <code>verify</code> — das kanonische Pflichtprofil <em>und</em> der einzige CI-Schritt — führt <code>npm test</code> nicht aus. Der 1230-zeilige Frontend-Server und der Wire-Protocol-Contract laufen in keinem Gate. <code>knip</code> ist mit <code>"exports": "off"</code> konfiguriert und kann tote Exporte prinzipiell nicht sehen.</p>
+      <p><strong>Empfehlung:</strong> keine Architekturumbauten. Drei chirurgische Korrekturen an der Snapshot-Schicht und am Verify-Profil beheben die gesamte P0/P1-Klasse.</p>
+    </div>
+  </section>
+
+  <!-- 2. GEPRÜFTER STAND -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">2 — Geprüfter Stand und Prüfumfang</p>
+      <h2>Was tatsächlich ausgeführt werden konnte</h2>
+    </div>
+    <div class="prose"><p><code>npm/node_modules</code>, <code>gui/node_modules</code> und <code>npm/packages/frontend-protocol/dist</code> fehlen im Checkout. Der Auftrag verbietet Installationen, daher konnten Typecheck, knip, Prettier und die jiti-basierten Suiten <strong>nicht</strong> laufen. Ausgeführt wurde alles, was ohne Abhängigkeiten läuft, plus eine gezielte Reproduktion im Scratchpad.</p></div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Prüfung</th><th>Status</th><th>Ergebnis</th></tr></thead>
+        <tbody>
+          <tr><td class="mono-cell">tests/check-relative-imports.test.mjs</td><td class="tight" style="color:var(--ok)">ausgeführt</td><td>PASS — 5 passed, 0 failed</td></tr>
+          <tr><td class="mono-cell">tests/check-npm-audit.test.mjs</td><td class="tight" style="color:var(--ok)">ausgeführt</td><td>PASS — 3 passed, 0 failed</td></tr>
+          <tr><td class="mono-cell">tests/benchmark-telemetry.test.mjs</td><td class="tight" style="color:var(--ok)">ausgeführt</td><td>OK — 59 Python-Tests</td></tr>
+          <tr><td class="mono-cell">ENOBUFS-Reproduktion (Scratchpad-Repo)</td><td class="tight" style="color:var(--ok)">ausgeführt</td><td><strong>Fehler reproduziert</strong>, siehe F-01</td></tr>
+          <tr><td class="mono-cell">tsc --noEmit / knip / prettier</td><td class="tight" style="color:var(--ink-faint)">nicht prüfbar</td><td>node_modules fehlt; Installation untersagt</td></tr>
+          <tr><td class="mono-cell">tests/run-all.mjs, coverage, collapse-result</td><td class="tight" style="color:var(--ink-faint)">nicht prüfbar</td><td>MODULE_NOT_FOUND: jiti</td></tr>
+          <tr><td class="mono-cell">project_check profile=verify</td><td class="tight" style="color:var(--ink-faint)">nicht prüfbar</td><td>gleiche Ursache</td></tr>
+          <tr><td class="mono-cell">Benchmark-Serie / Modellaufrufe</td><td class="tight" style="color:var(--ink-faint)">bewusst unterlassen</td><td>laut Auftrag ausgeschlossen</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:.85rem;color:var(--ink-faint);max-width:44rem;">Konsequenz für die Bewertung: kein Befund unten stützt sich auf ein Werkzeugurteil allein. Jeder P0/P1-Befund ist entweder reproduziert oder aus dem Quelltext lückenlos belegt; automatische Hinweise (knip-Ersatzscan) wurden einzeln gegengeprüft — zwei Verdachtsfälle sind dabei <em>widerlegt</em> worden und stehen unter Abschnitt 8.</p>
+  </section>
+
+  <!-- 3. ARCHITEKTURKARTE -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">3 — Architektur- und Nutzungskarte</p>
+      <h2>Zehn reale Hauptpfade</h2>
+    </div>
+    <div class="pathmap">
+      <article>
+        <h3>1 · Installation und Start</h3>
+        <p class="chain">scripts/install-user.mjs → ~/.pi/agent → npm ci → bin/pi (bash-Shim) → echtes pi-Binary via PATH</p>
+        <p class="risk"><b>Seiteneffekt:</b> Shim leitet nur <code>gui</code> um; findet er kein zweites <code>pi</code> auf PATH, exit 127. Zustandsquelle: <code>PI_GUI_REAL_PI</code> oder PATH-Scan.</p>
+      </article>
+      <article>
+        <h3>2 · Normale CLI/TUI-Sitzung</h3>
+        <p class="chain">settings.json → 13 Extensions → aurora-ui (TUI-Besitzer) ← EventBus ← plan-mode / setup-core / permissions / lsp</p>
+        <p class="risk clean"><b>Sauber:</b> genau ein UI-Besitzer (Entscheidung 007); Aurora ist Konsument, nie Datenquelle.</p>
+      </article>
+      <article>
+        <h3>3 · Planmodus → Work</h3>
+        <p class="chain">Shift+Tab → session.requestMode() → beginTurn() pinnt turnMode → plan_write → settleTurn() → readiness → /plan-approve → consumeApproval(hash+prompt) → buildPlanContextMessage()</p>
+        <p class="risk"><b>Asymmetrie:</b> Hash-Mismatch benachrichtigt die Nutzerin, Session-Mismatch verbraucht die Freigabe stumm (F-27).</p>
+      </article>
+      <article>
+        <h3>4 · Berechtigung und Tool-Ausführung</h3>
+        <p class="chain">tool_call → Trust-Gate → assessWorkflowTool (hart) → Web-Gate → Verifier-Gate → Debugger-Gate → Commit-Gate → Recovery-Gate → planModeMutationGuard → decideTool → Dialog</p>
+        <p class="risk"><b>Neun Schichten in fester Reihenfolge.</b> Zwei davon rufen synchron git auf (F-10); die harte Schicht macht Teile von <code>decideFileAccess</code> unerreichbar (F-09).</p>
+      </article>
+      <article>
+        <h3>5 · Subagent und Verifier</h3>
+        <p class="chain">subagent(agent:"verifier") → Vorlagenprüfung → Budget-Prüfung → Dedup gegen Fingerprint → input.acceptance erzwungen → tool_result → extractVerifierRunRecord → lastVerifierRun</p>
+        <p class="risk"><b>Zustandsquelle nur im Speicher:</b> <code>lastVerifierRun</code> überlebt keinen Sitzungsneustart. Urteilslose Läufe erzeugen die Sackgasse F-04.</p>
+      </article>
+      <article>
+        <h3>6 · Session, Recovery, Kompaktierung</h3>
+        <p class="chain">before_agent_start → Fingerprint → JSONL-Marker (turn-start / failure / turn-settled / recovery-required / recovery-checked) → latestRecoveryGate()</p>
+        <p class="risk"><b>Doppelte Ableitung:</b> <code>recoverySnapshot()</code> in index.ts und der tote Export <code>gateBlocked()</code> implementieren dieselbe Entscheidung (F-11).</p>
+      </article>
+      <article>
+        <h3>7 · LSP</h3>
+        <p class="chain">lsp/config (Binary an Builtin oder node_modules/.bin gebunden) → registry (single-flight) → process (SIGTERM→SIGKILL) → transport (eine settle()-Senke)</p>
+        <p class="risk clean"><b>Vorbildlich:</b> Timeout, Backoff, Cleanup und Prozessgruppen-Kill sind vollständig. Keine Befunde.</p>
+      </article>
+      <article>
+        <h3>8 · GUI-Aufruf <code>pi gui</code></h3>
+        <p class="chain">bin/pi → bin/pi-gui → electron gui/ → BrowserWindow(sandbox, contextIsolation, nodeIntegration:false) → preload.cjs (21 Kanäle) → ipc-handlers (Pfad- und Protokollvalidierung)</p>
+        <p class="risk clean"><b>Gehärtet:</b> <code>SAFE_EXTERNAL_PROTOCOLS</code>, <code>realpathSync</code>-Basisprüfung für Session-Pfade, window-open und Navigation verweigert.</p>
+      </article>
+      <article>
+        <h3>9 · GUI ↔ Bridge ↔ Kern</h3>
+        <p class="chain">frontend-server (JSONL, spawn pi --mode rpc) ⇄ pi-rpc-manager ⇄ frontend-bridge (PI_FRONTEND_RPC=1) ⇄ EventBus-Kanäle aurora-ui/state/*</p>
+        <p class="risk"><b>Leere Telemetrie:</b> das Feld <code>verification</code> bleibt in diesem Pfad dauerhaft <code>null</code> (F-05). Vier separate Definitionen von <code>WorkflowMode</code> auf der Strecke (F-14).</p>
+      </article>
+      <article>
+        <h3>10 · Verifikation und Benchmark</h3>
+        <p class="chain">project_check(profile:"verify") → .pi/verify.json → npm --prefix npm run verify → format:check · typecheck · deadcode · test:coverage · test:patches · test:gui · audit:check</p>
+        <p class="risk"><b>Lücke:</b> <code>npm test</code> ist kein Teil davon — Protokollpaket und Frontend-Server laufen weder in verify noch in CI (F-07).</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- 4. TOP 10 -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">4 — Die zehn wichtigsten Befunde</p>
+      <h2>Bestätigte Fehler zuerst</h2>
+      <p class="legend"><span class="sev sev-P0">P0</span> Datenverlust · Grenze umgehbar · Kernfunktion unzuverlässig &nbsp;<span class="sev sev-P1">P1</span> falsches Verhalten oder Wartungsgefahr &nbsp;<span class="sev sev-P2">P2</span> unnötige Komplexität &nbsp;<span class="sev sev-P3">P3</span> Ordnung und Doku</p>
+    </div>
+
+    <div class="finding p0">
+      <div class="f-head"><span class="f-id">F-01</span><h3>Das Verifier-Commit-Gate öffnet stillschweigend, sobald der Diff 1 MiB überschreitet</h3><span class="sev sev-P0">P0</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: Sicherheitsgrenze umgehbar · Fail-open</span><span>Aufwand: klein</span><span>Änderungsrisiko: niedrig</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>shared/workspace-snapshot.mjs:9</code> (<code>git()</code>, <code>execFileSync</code> ohne <code>maxBuffer</code>) · <code>extensions/permissions/verifier-policy.ts</code> (<code>assessGitCommitVerifierGate</code>, catch → PERMITTED)</dd>
+        <dt>Beobachtet</dt><dd><code>collectWorkspaceSnapshot()</code> wirft <code>ENOBUFS</code>. Der Aufrufer fängt jede Ausnahme ab und gibt <code>PERMITTED</code> zurück. <code>git commit</code> läuft durch, ohne dass ein Verifier-Lauf existiert — ohne Meldung, ohne Log, ohne Session-Eintrag.</dd>
+        <dt>Erwartet</dt><dd>AGENTS.md: „<em>git commit wird technisch blockiert, wenn der Diff eine dieser Dateien berührt und kein verifier-Lauf mit Urteil PASS vorliegt.</em>" Ein Gate, das seine Evidenz nicht erheben kann, darf nicht schweigend zur Erlaubnis werden.</dd>
+        <dt>Ursache</dt><dd>Node setzt für <code>execFileSync</code> ein <code>maxBuffer</code> von 1 MiB. <code>git diff --binary</code> überschreitet das bei etwa 350 KB geändertem Text (eine Vollersetzung erzeugt alte + neue Zeilen) oder bei jeder binären Änderung über ~700 KB.</dd>
+        <dt>Auswirkung</dt><dd><strong>Genau der große, riskante Diff, für den das Gate 2026-08 eingeführt wurde, umgeht es.</strong> In diesem Repository ist die Schwelle trivial erreichbar: <code>benchmarks/real-duel/reports/real-01-tui-warm-theme/pi_transcript.txt</code> ist allein 5,4 MB.</dd>
+        <dt>Nachweis</dt><dd><strong>Reproduziert</strong> in einem Wegwerf-Repo im Scratchpad:</dd>
+      </dl>
+      <pre class="evidence">$ git init repro &amp;&amp; ...          # Datei mit 400 KB, dann vollständig ersetzt
+$ git diff --no-ext-diff --binary -M | wc -c
+<b>1228907</b>
+$ node -e "collectWorkspaceSnapshot('repro')"
+<b>THROWS: ENOBUFS  spawnSync git ENOBUFS</b>
+
+# 900 KB -&gt; 2764907 Bytes -&gt; ENOBUFS
+# 1100 KB -&gt; 3379307 Bytes -&gt; ENOBUFS</pre>
+      <dl class="f-body">
+        <dt>Maßnahme</dt><dd>Ein <code>maxBuffer</code> setzen (z. B. 64 MiB) <em>und</em> — wichtiger — den Diff-Hash streamen statt zu puffern. Unabhängig davon: der catch-Zweig darf nicht <code>PERMITTED</code> liefern, sondern muss ein sichtbares „Gate nicht auswertbar" erzeugen (blockieren mit nennbarem Grund, wie <code>recovery_check</code> es bereits tut).</dd>
+        <dt>Betroffene Tests</dt><dd><code>tests/suites/runtime/verification.mjs</code> („verifier coverage capability bridge"), <code>tests/suites/runtime/resilience.mjs</code>. Neu nötig: ein Negativtest mit einem Diff &gt; 1 MiB.</dd>
+      </dl>
+    </div>
+
+    <div class="finding p0">
+      <div class="f-head"><span class="f-id">F-02</span><h3>Derselbe Fehler sperrt den Agenten dauerhaft aus dem Recovery-Gate aus</h3><span class="sev sev-P0">P0</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: Kernfunktion unzuverlässig · Deadlock</span><span>Aufwand: klein</span><span>Änderungsrisiko: niedrig</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>extensions/resilience/index.ts</code> (<code>workspaceFingerprint()</code> → <code>"unavailable"</code>; <code>recovery_check.execute()</code> wirft) · <code>extensions/permissions/guards.ts</code> (<code>recoveryGateBlocks</code>)</dd>
+        <dt>Beobachtet</dt><dd>Nach einem fehlgeschlagenen Turn mit großem Diff: <code>workspaceFingerprint()</code> liefert <code>"unavailable"</code>, <code>workspaceChanged()</code> ist damit dauerhaft <code>true</code>, das Gate bleibt scharf. <code>recovery_check</code> — die einzige Entsperrung — wirft ebenfalls und meldet „<em>Die Schreibsperre bleibt bestehen</em>".</dd>
+        <dt>Erwartet</dt><dd>Das Gate ist entsperrbar, sobald der Workspace geprüft wurde.</dd>
+        <dt>Ursache</dt><dd>Gleiche ENOBUFS-Wurzel wie F-01, hier aber fail-<em>closed</em>. Das Gate blockiert <code>write</code>, <code>edit</code> und jedes nicht-diagnostische <code>bash</code> — also auch <code>git stash</code>, <code>git checkout</code> und alles, womit der Diff verkleinert werden könnte.</dd>
+        <dt>Auswirkung</dt><dd>Der Agent ist schreibunfähig und kann die Ursache nicht selbst beseitigen. Ausweg existiert nur für den Menschen: ein selbst getipptes <code>!git stash</code> läuft am Recovery-Gate vorbei, weil der <code>user_bash</code>-Pfad es nicht auswertet. Die UI zeigt lediglich „⚠ Recovery-Check offen" und nennt die eigentliche Ursache nie.</dd>
+        <dt>Nachweis</dt><dd>Wurzelursache reproduziert (F-01); die Fortpflanzung ist im Quelltext lückenlos: <code>catch { return "unavailable" }</code> → <code>workspaceChanged()</code> → <code>recoverySnapshot().armed = true</code> → <code>recoveryGateBlocks()</code> → <code>{ block: true }</code>.</dd>
+        <dt>Maßnahme</dt><dd>Wie F-01 an der Wurzel. Zusätzlich: der Fehlertext von <code>recovery_check</code> muss die Snapshot-Ursache und den Menschen-Ausweg nennen, statt nur „bleibt bestehen".</dd>
+        <dt>Betroffene Tests</dt><dd><code>tests/suites/runtime/resilience.mjs</code>; kein bestehender Test deckt einen Snapshot-Fehler ab.</dd>
+      </dl>
+    </div>
+
+    <div class="finding p1">
+      <div class="f-head"><span class="f-id">F-03</span><h3>Dieselbe Snapshot-Störung wird in drei Modulen dreifach verschieden behandelt</h3><span class="sev sev-P1">P1</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: widersprüchliche Verantwortlichkeit</span><span>Aufwand: klein</span><span>Änderungsrisiko: mittel</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>extensions/permissions/verifier-policy.ts</code> · <code>extensions/resilience/index.ts</code> · <code>extensions/setup-core/index.ts:303</code></dd>
+        <dt>Beobachtet</dt><dd>Drei Konventionen für ein und denselben Ausnahmefall:</dd>
+      </dl>
+      <pre class="evidence">verifier-policy.ts   catch { return PERMITTED }        -&gt; <b>fail-open</b>   (Gate aus)
+resilience/index.ts  catch { return "unavailable" }    -&gt; <b>fail-closed</b> (Gate an, für immer)
+setup-core/index.ts  catch { return undefined }        -&gt; <b>stumm</b>       (lastVerifierRun nie gesetzt)</pre>
+      <dl class="f-body">
+        <dt>Erwartet</dt><dd>Eine Konvention, an einer Stelle festgelegt — ein <code>{ ok, snapshot, reason }</code>-Ergebnis statt drei Interpretationen einer geworfenen Ausnahme.</dd>
+        <dt>Auswirkung</dt><dd>Bei großem Diff ist ein bestandener Verifier-Lauf <em>nicht</em> aufgezeichnet (setup-core stumm), das Commit-Gate <em>gleichzeitig</em> abgeschaltet (fail-open) und das Recovery-Gate <em>gleichzeitig</em> unlösbar (fail-closed). Drei Gates, drei Richtungen, ein Auslöser — und keine einzige Meldung.</dd>
+        <dt>Maßnahme</dt><dd><code>collectWorkspaceSnapshot</code> um eine explizite Ergebnisform erweitern; jeder Aufrufer entscheidet dann sichtbar und begründet. Reine Vereinfachung mit Verhaltenskorrektur, keine neue Abstraktion.</dd>
+        <dt>Betroffene Tests</dt><dd>verification.mjs, resilience.mjs, setup-core.mjs</dd>
+      </dl>
+    </div>
+
+    <div class="finding p1">
+      <div class="f-head"><span class="f-id">F-04</span><h3>Ein Verifier-Lauf ohne erkennbares Urteil blockiert seine eigene Wiederholung</h3><span class="sev sev-P1">P1</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: Zustandssackgasse · leere Telemetrie</span><span>Aufwand: klein</span><span>Änderungsrisiko: niedrig</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>extensions/setup-core/subagent-output-guard.ts</code> (<code>extractVerifierRunRecord</code>) · <code>extensions/permissions/verifier-policy.ts</code> (<code>assessVerifierDedup</code> vs. <code>assessVerifierCoverageForDiff</code>)</dd>
+        <dt>Beobachtet</dt><dd>Endet ein Verifier-Lauf sauber (exit 0), enthält seine Ausgabe aber keinen führenden <code>PASS</code>/<code>FAIL</code>/<code>UNVERIFIABLE</code>-Token, entsteht der Datensatz <code>{ status: "completed", verdict: undefined }</code>. Die beiden Konsumenten lesen ihn gegensätzlich:</dd>
+      </dl>
+      <pre class="evidence">assessVerifierCoverageForDiff:  verdict === "PASS" || "PASS_WITH_WARNINGS"  -&gt; <b>nicht gedeckt, Commit bleibt gesperrt</b>  ✔ richtig
+assessVerifierDedup:            verifierStatus !== "completed" ? PERMITTED  -&gt; <b>blockiert den zweiten Lauf</b>            ✘ falsch
+
+Blocktext: "Diff ist seit dem letzten abgeschlossenen Verifier-Lauf
+            unverändert (Urteil: <b>undefined</b>)."</pre>
+      <dl class="f-body">
+        <dt>Erwartet</dt><dd>Ein Lauf ohne Urteil ist genau das, was AGENTS.md „ein ergebnisloser <code>verifier</code>-Lauf" nennt — er zählt nirgends als Verifikation und darf die Wiederholung nicht sperren.</dd>
+        <dt>Ursache</dt><dd><code>assessVerifierDedup</code> prüft nur <code>status</code>, <code>assessVerifierCoverageForDiff</code> prüft <code>status</code> <em>und</em> <code>verdict</code>. Die Deduplizierungslogik wurde in 388f39f nachgerüstet, ohne die Urteilsbedingung mitzunehmen.</dd>
+        <dt>Auswirkung</dt><dd>Sackgasse: nicht committierbar (kein PASS) und nicht erneut prüfbar (Dedup). Ausweg nur, wenn der Agent den Abschnitt „Grund für erneute Prüfung" errät — der Blocktext nennt ihn zwar, aber der Zustand ist kein Grund, sondern ein Fehler. Der interpolierte Text <code>Urteil: undefined</code> ist das sichtbare Symptom.</dd>
+        <dt>Nachweis</dt><dd>Statisch eindeutig belegt: <code>verifier-policy.ts</code> Zeile „<code>if (verification.verifierStatus !== "completed") return PERMITTED;</code>" gegen <code>subagent-output-guard.ts</code> „<code>if (verdict) record.verdict = verdict;</code>" — <code>verdict</code> bleibt bei <code>status: "completed"</code> optional.</dd>
+        <dt>Maßnahme</dt><dd>In <code>assessVerifierDedup</code> zusätzlich auf ein vorhandenes Urteil prüfen. Zwei Zeilen.</dd>
+        <dt>Betroffene Tests</dt><dd><code>tests/suites/runtime/verification.mjs</code> — der Fall „completed ohne Urteil" fehlt vollständig.</dd>
+      </dl>
+    </div>
+
+    <div class="finding p1">
+      <div class="f-head"><span class="f-id">F-05</span><h3>Der Verifikationsstatus erreicht die GUI nie</h3><span class="sev sev-P1">P1</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: asymmetrischer Kontrollpfad · leere Telemetrie</span><span>Aufwand: klein</span><span>Änderungsrisiko: niedrig</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>extensions/setup-core/index.ts:396</code> im <code>agent_settled</code>-Handler</dd>
+        <dt>Beobachtet</dt><dd>Der aktivierte Zweig bricht bei <code>!ctx.hasUI</code> ab, <em>bevor</em> <code>lastSettledStatus</code> gesetzt und <code>publishAuroraVerification()</code> aufgerufen wird. Der deaktivierte Zweig darüber publiziert in derselben Lage sehr wohl.</dd>
+      </dl>
+      <pre class="evidence">if (!statusEnabled) {
+  ...
+  publishAuroraVerification();      // <b>publiziert auch ohne UI</b>
+  return;
+}
+const status = verificationStatus(workspaceSnapshot(ctx.cwd), ...);   // teuer: 7 git-Prozesse
+<b>if (!ctx.hasUI) return;</b>                                                // <b>und dann verworfen</b>
+lastSettledStatus = status;
+publishAuroraVerification();</pre>
+      <dl class="f-body">
+        <dt>Erwartet</dt><dd>Der Zustandsvertrag ist laut <code>state-contract.ts</code> präsentationsneutral: „<em>Aurora ist Konsument wie jedes andere Frontend</em>". Ein Frontend ohne TUI muss dieselben Felder bekommen.</dd>
+        <dt>Ursache</dt><dd>Die <code>hasUI</code>-Prüfung schützt <code>ctx.ui.setStatus</code>, steht aber vor der Zustands- <em>und</em> Bus-Aktualisierung statt nur vor dem TUI-Aufruf.</dd>
+        <dt>Auswirkung</dt><dd>Im GUI-Pfad (<code>PI_FRONTEND_RPC=1</code>, kein TUI) bleibt <code>state.verification</code> dauerhaft <code>null</code>: die Desktop-Oberfläche zeigt nie einen Verifikationsstatus. <code>auroraVerificationSnapshot()</code> gibt wegen <code>lastSettledStatus === undefined</code> für immer <code>null</code> zurück. Zusätzlich wird bei jedem <code>agent_settled</code> ein vollständiger Snapshot (7 synchrone git-Aufrufe) erhoben und weggeworfen.</dd>
+        <dt>Nachweis</dt><dd>Statisch eindeutig. <code>frontend-bridge/index.ts</code> aktiviert sich nur bei <code>PI_FRONTEND_RPC === "1"</code>; in diesem Modus existiert kein TUI-Kontext. Die einzigen beiden <code>publishAuroraVerification()</code>-Aufrufe liegen in diesem Handler.</dd>
+        <dt>Maßnahme</dt><dd><code>if (!ctx.hasUI) return;</code> entfernen und stattdessen nur den <code>ctx.ui.setStatus</code>-Aufruf mit <code>ctx.hasUI</code> bewachen — wie es der deaktivierte Zweig bereits tut.</dd>
+        <dt>Betroffene Tests</dt><dd><code>tests/suites/runtime/frontend-bridge.mjs</code>, <code>setup-core.mjs</code> — beide prüfen den Handler bisher nur mit UI.</dd>
+      </dl>
+    </div>
+
+    <div class="finding p1">
+      <div class="f-head"><span class="f-id">F-06</span><h3><code>project-write</code> erlaubt beliebige Schreibzugriffe außerhalb des Projekts über Interpreter — YOLO nicht</h3><span class="sev sev-P1">P1</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: asymmetrische Stufenlogik · Projektgrenze</span><span>Aufwand: mittel</span><span>Änderungsrisiko: mittel</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>extensions/shared/permission-policy.ts</code> — <code>decideBash()</code>, <code>likelyExternalWrite()</code>, <code>isWriteCapableCommand()</code>, <code>opaqueInterpreter()</code></dd>
+        <dt>Beobachtet</dt><dd>Auf der Standardstufe <code>project-write</code> (Default <code>bash: "allow"</code>, bestätigt in <code>setup-core/config.ts:55</code>) fällt ein Kommando wie <code>node -e "require('fs').writeFileSync('/home/user/.bashrc', x)"</code> durch alle Muster hindurch auf <code>ALLOW</code>. Auf <code>yolo</code> wird derselbe Aufruf durch <code>opaqueInterpreter()</code> hart geblockt.</dd>
+        <dt>Erwartet</dt><dd>Die Stufenordnung sollte monoton sein. Eine Stufe namens <code>project-write</code> darf nicht mehr außerhalb des Projekts schreiben dürfen als die als „temporärer Bypass" bezeichnete Stufe darüber.</dd>
+        <dt>Ursache</dt><dd><code>likelyExternalWrite()</code> setzt <code>isWriteCapableCommand()</code> voraus, und dessen Regex kennt nur Shell-Werkzeuge (<code>rm|cp|mv|tee|dd|ln|sed -i</code>, Redirections). Ein Interpreter, der über sein eigenes API schreibt, erfüllt keines dieser Muster. <code>referencesSystemPath()</code> greift nur für <code>/etc /usr /bin /sbin /boot /var</code> — das Home-Verzeichnis der Nutzerin ist nicht darunter.</dd>
+        <dt>Auswirkung</dt><dd>Die Zusage „Änderungen bleiben im Projekt" gilt auf der meistgenutzten Stufe nicht. Kein Angriffsszenario nötig: ein Skript, das versehentlich nach <code>~</code> schreibt, läuft ohne Rückfrage durch. Der Effekt ist zugleich verwirrend, weil ein Wechsel auf YOLO die Fähigkeit <em>entzieht</em>.</dd>
+        <dt>Nachweis</dt><dd>Statisch eindeutig: <code>decideBash</code> durchläuft für <code>project-write</code> nacheinander <code>isSensitiveReference</code> (nein), <code>CRITICAL_BASH_PATTERNS</code> (nein), <code>referencesSystemPath</code> (nein), <code>SENSITIVE_ASK_PATTERNS</code>/<code>ROUTINE_ASK_PATTERNS</code> (nein), <code>containsUnquotedVariableExpansion</code> (nein), <code>likelyExternalWrite</code> (nein) und endet auf <code>return ALLOW</code>.</dd>
+        <dt>Maßnahme</dt><dd>Entscheidung erforderlich, nicht nur ein Patch: entweder <code>opaqueInterpreter()</code> auch auf <code>project-write</code> als <code>ask</code> auswerten (kostet Bedienkomfort bei <code>node script.js</code>), oder die Zusage in der Dokumentation auf das reduzieren, was durchgesetzt wird. <strong>Nicht ohne Freigabe umsetzen.</strong></dd>
+        <dt>Betroffene Tests</dt><dd><code>tests/workflow-mode/permissions.test.mjs</code> — enthält keinen Negativtest für Interpreter-Schreibzugriffe auf irgendeiner Stufe.</dd>
+      </dl>
+    </div>
+
+    <div class="finding p1">
+      <div class="f-head"><span class="f-id">F-07</span><h3>Das Pflichtprofil <code>verify</code> und die CI führen <code>npm test</code> nicht aus</h3><span class="sev sev-P1">P1</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: Prüflücke</span><span>Aufwand: klein</span><span>Änderungsrisiko: niedrig</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>npm/package.json</code> (<code>verify</code>) · <code>.github/workflows/verify.yml</code> · <code>.pi/verify.json</code></dd>
+        <dt>Beobachtet</dt><dd><code>verify</code> = <code>format:check → typecheck → deadcode → test:coverage → test:patches → test:gui → audit:check</code>. Das Skript <code>test</code> mit seinen ersten beiden Gliedern <code>test:protocol-package</code> und <code>test:frontend-server</code> ist nicht darin enthalten, und <code>verify.yml</code> ruft ausschließlich <code>npm --prefix npm run verify</code> auf.</dd>
+        <dt>Erwartet</dt><dd>README: „<em>Nur ein <code>project_check</code>-Aufruf des deklarierten Pflichtprofils aktualisiert den Verifikations-Footer</em>" — der Footer soll den vollständigen Prüfstand bezeichnen.</dd>
+        <dt>Ursache</dt><dd><code>test:coverage</code> ruft <code>tests/run-all.mjs</code> auf und deckt damit die Kern-Suiten ab; die beiden vorgelagerten Testschritte aus <code>test</code> laufen nirgendwo sonst.</dd>
+        <dt>Auswirkung</dt><dd><code>frontend-server/index.mjs</code> (1230 Zeilen — Prozess-Spawn, JSONL-Rahmung, Protokollhandshake, Timeouts) und <code>npm/packages/frontend-protocol/test/contract.test.mjs</code> laufen in keinem Gate. Ein grüner <code>project_check</code> und eine grüne CI sind mit einem gebrochenen GUI-Transport vereinbar. Zusätzlich baut <code>verify</code> das Protokollpaket nicht, obwohl <code>bin/pi-frontend</code> <code>dist/index.js</code> voraussetzt (im aktuellen Checkout fehlt es).</dd>
+        <dt>Nachweis</dt><dd>Statisch eindeutig: <code>grep -c "test:protocol-package" .github/workflows/*.yml .pi/verify.json</code> → 0.</dd>
+        <dt>Maßnahme</dt><dd><code>npm run test:protocol-package</code> und <code>npm run test:frontend-server</code> in <code>verify</code> aufnehmen (beide bauen bzw. brauchen den Build, was zugleich die fehlende <code>dist</code> löst).</dd>
+        <dt>Betroffene Tests</dt><dd>Die genannten selbst — sie sind das Ziel, nicht das Risiko.</dd>
+      </dl>
+    </div>
+
+    <div class="finding p1">
+      <div class="f-head"><span class="f-id">F-08</span><h3>Das Commit-Gate erkennt <code>git commit</code> nur unter genau diesem Namen</h3><span class="sev sev-P1">P1</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: Checker mit unvollständiger Abdeckung</span><span>Aufwand: klein</span><span>Änderungsrisiko: niedrig</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>extensions/permissions/verifier-policy.ts</code> — <code>gitSubcommand()</code>: <code>if (tokens[0] !== "git") return undefined;</code></dd>
+        <dt>Beobachtet</dt><dd>Der Gate-Trigger vergleicht das erste Token wörtlich mit <code>"git"</code>. Nicht erkannt werden unter anderem <code>/usr/bin/git commit</code>, <code>env git commit</code>, <code>GIT_AUTHOR_NAME=x git commit</code> und <code>sh -c "git commit"</code>.</dd>
+        <dt>Erwartet</dt><dd>Der Kommentar über <code>bashTouchesGitCommit</code> begründet ausdrücklich eine konservative Übererkennung: „<em>Under-triggering would recreate exactly the silent gap this gate exists to close.</em>" Genau das passiert hier.</dd>
+        <dt>Ursache</dt><dd><code>executableToken()</code> in <code>permission-policy.ts</code> normalisiert bereits Env-Zuweisungen, <code>env</code>-Präfixe und Pfadanteile — <code>gitSubcommand()</code> nutzt diese vorhandene Funktion nicht.</dd>
+        <dt>Auswirkung</dt><dd>Die als „technisch erzwungen" dokumentierte Verifier-Pflicht ist mit einer Pfadangabe umgehbar. Wahrscheinlicher als Missbrauch ist der Zufall: ein Skript oder eine Gewohnheit mit absolutem Pfad hebelt das Gate stumm aus. <em>(Ein bewusst vom Menschen getipptes <code>!git commit</code> läuft ebenfalls vorbei — das ist begründet, aber in AGENTS.md nicht vermerkt.)</em></dd>
+        <dt>Nachweis</dt><dd>Statisch eindeutig.</dd>
+        <dt>Maßnahme</dt><dd><code>gitSubcommand()</code> auf <code>executableToken()</code> umstellen.</dd>
+        <dt>Betroffene Tests</dt><dd><code>tests/suites/runtime/verification.mjs</code> — die Varianten fehlen.</dd>
+      </dl>
+    </div>
+
+    <div class="finding p1">
+      <div class="f-head"><span class="f-id">F-09</span><h3>Die harte Grenze macht die Hälfte von <code>decideFileAccess</code> unerreichbar — und hebt ihre eigene Ausnahme wieder auf</h3><span class="sev sev-P1">P1</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: widersprüchliche Verantwortlichkeit · toter Zweig</span><span>Aufwand: mittel</span><span>Änderungsrisiko: mittel</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>extensions/permissions/workflow-policy.ts</code> (<code>assessWorkflowTool</code>) · <code>extensions/shared/permission-policy.ts</code> (<code>decideFileAccess</code>) · <code>extensions/permissions/guards.ts</code></dd>
+        <dt>Beobachtet</dt><dd><code>assessWorkflowTool</code> blockiert für <em>jedes</em> Tool mit <code>path</code> und auf <em>jeder</em> Stufe alles außerhalb des Projekts sowie jeden Symlink-Ausbruch. Es läuft in <code>guards.ts</code> als zweite Prüfung, lange vor <code>decideTool</code>. Damit sind in <code>decideFileAccess</code> vier Zweige unerreichbar: Lesen außerhalb des Projekts, Symlink-Schreibzugriff, Systempfad-Schreibzugriff und externer Schreibzugriff — rund 40 Zeilen mit differenzierter <code>ask</code>/<code>deny</code>-Logik pro Stufe.</dd>
+        <dt>Erwartet</dt><dd>Entweder die Feinlogik greift, oder sie steht nicht da. Beides gleichzeitig zu pflegen erzeugt Regeln, die nur Regeln anderer Regeln kompensieren.</dd>
+        <dt>Ursache</dt><dd>Die harte Schicht wurde nachträglich vor die Stufenschicht gezogen, ohne die dort verbliebene Duplikatlogik zu entfernen.</dd>
+        <dt>Auswirkung</dt><dd>Zwei Effekte. Erstens Wartungsgefahr: <code>tests/workflow-mode/permissions.test.mjs:73</code> prüft <code>decideFileAccess</code> direkt und erzeugt Vertrauen in einen Pfad, den die Produktion nie nimmt — genau die Fehlerklasse „Tests auf Implementierungsdetails". Zweitens ein echter Widerspruch: die Ausnahme <code>isDocumentedRuntimeDocsRead</code> erlaubt das Lesen der Pi-Runtime-Dokumentation außerhalb des Projekts, doch <code>decideFileAccess</code> verlangt dafür anschließend eine Rückfrage (<code>project-write</code>, <code>confirm-all</code>) bzw. blockiert (<code>yolo</code>, <code>readonly</code>). Die Ausnahme funktioniert auf keiner Stufe geräuschlos.</dd>
+        <dt>Nachweis</dt><dd>Statisch eindeutig: <code>decideFileAccess</code> hat außerhalb von <code>tool-policy.ts</code> und einem Test keine Aufrufer; die Reihenfolge in <code>guards.ts</code> ist unbedingt.</dd>
+        <dt>Maßnahme</dt><dd>Die unerreichbaren Zweige entfernen und die Runtime-Docs-Ausnahme in <code>decideFileAccess</code> spiegeln — oder die Ausnahme streichen, falls sie nicht mehr gebraucht wird.</dd>
+        <dt>Betroffene Tests</dt><dd><code>tests/workflow-mode/permissions.test.mjs</code> muss von <code>decideFileAccess</code> auf den vollständigen Guard-Durchlauf umgestellt werden.</dd>
+      </dl>
+    </div>
+
+    <div class="finding p1">
+      <div class="f-head"><span class="f-id">F-10</span><h3>Synchrone git-Snapshots auf dem heißen Pfad jedes Tool-Aufrufs</h3><span class="sev sev-P1">P1</span><span class="conf conf-hoch">Confidence hoch</span></div>
+      <div class="f-meta"><span>Kategorie: Zuverlässigkeit · Performance</span><span>Aufwand: mittel</span><span>Änderungsrisiko: mittel</span></div>
+      <dl class="f-body">
+        <dt>Dateien</dt><dd><code>shared/workspace-snapshot.mjs</code> · <code>extensions/permissions/guards.ts</code> · <code>extensions/resilience/index.ts</code> · <code>extensions/setup-core/index.ts</code></dd>
+        <dt>Beobachtet</dt><dd>Ein <code>collectWorkspaceSnapshot()</code> startet sieben <code>execFileSync</code>-git-Prozesse und liest zusätzlich <em>jede</em> untracked Datei vollständig in den Speicher. Ausgelöst wird das: bei jedem Turn (<code>before_agent_start</code>), bei jedem <code>agent_settled</code>, bei jeder Verifier-Delegation, bei jedem bash-Kommando mit einem <code>commit</code>-Segment — und, sobald ein Recovery-Gate einmal geprüft wurde, bei <strong>jedem einzelnen Tool-Aufruf</strong> über die Capability-Bridge.</dd>
+        <dt>Erwartet</dt><dd>Ein Fingerprint auf dem Guard-Pfad muss gecacht oder inkrementell sein; die TUI-Ereignisschleife darf nicht blockieren.</dd>
+        <dt>Auswirkung</dt><dd>Spürbare Verzögerung genau im Fehlerfall (nach einem abgebrochenen Turn), also dann, wenn die Bedienung ohnehin angespannt ist. Zugleich vervielfacht es die Trefferwahrscheinlichkeit von F-01/F-02.</dd>
+        <dt>Nachweis</dt><dd>Statisch: <code>guards.ts</code> ruft <code>requestRecoveryStatus(pi.events)</code> unbedingt pro <code>tool_call</code>; der Handler in <code>resilience/index.ts</code> antwortet mit <code>recoverySnapshot()</code>, das bei gesetztem <code>gate.checked</code> <code>workspaceChanged()</code> aufruft.</dd>
+        <dt>Maßnahme</dt><dd>Fingerprint pro Turn einmal berechnen und im Snapshot-Modul memoisieren; Invalidierung an <code>tool_execution_end</code> mutierender Tools hängen.</dd>
+        <dt>Betroffene Tests</dt><dd>resilience.mjs, verification.mjs</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- 5. VOLLSTÄNDIGE FUNDTABELLE -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">5 — Vollständige Fundtabelle</p>
+      <h2>Alle 28 Befunde</h2>
+      <p style="font-size:.9rem;color:var(--ink-soft);max-width:44rem;">F-01 bis F-10 sind oben ausführlich belegt. Ab F-11 folgen Komplexitäts-, Ordnungs- und Dokumentationsbefunde in Kurzform; jeder nennt seine Datei und seinen Nachweis.</p>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Prio</th><th>Kategorie</th><th>Ort und Nachweis</th><th>Beobachtet → Erwartet</th><th>Maßnahme</th><th>Conf.</th><th>Aufw.</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="id">F-01</td><td><span class="sev sev-P0">P0</span></td><td>Fail-open Sicherheitsgate</td><td class="mono-cell">shared/workspace-snapshot.mjs:9<br>verifier-policy.ts</td><td>ENOBUFS &gt;1 MiB → Commit-Gate stumm offen → Gate muss auswertbar bleiben oder sichtbar blockieren</td><td>maxBuffer + Streaming; catch nicht auf PERMITTED</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-02</td><td><span class="sev sev-P0">P0</span></td><td>Deadlock</td><td class="mono-cell">resilience/index.ts<br>guards.ts</td><td>Recovery-Gate unlösbar bei großem Diff → recovery_check muss entsperren können</td><td>wie F-01; Fehlertext mit Ursache</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-03</td><td><span class="sev sev-P1">P1</span></td><td>Widersprüchliche Konvention</td><td class="mono-cell">3 Module, 3 catch-Zweige</td><td>fail-open / fail-closed / stumm → eine Konvention</td><td>explizite Ergebnisform statt Ausnahme</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-04</td><td><span class="sev sev-P1">P1</span></td><td>Zustandssackgasse</td><td class="mono-cell">verifier-policy.ts<br>subagent-output-guard.ts</td><td>urteilsloser Lauf blockiert Retry → zählt nirgends als Verifikation</td><td>Dedup zusätzlich auf verdict prüfen</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-05</td><td><span class="sev sev-P1">P1</span></td><td>Leere Telemetrie</td><td class="mono-cell">setup-core/index.ts:396</td><td>verification bleibt in der GUI null → Frontends sind gleichberechtigt</td><td>hasUI-Guard nur um setStatus legen</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-06</td><td><span class="sev sev-P1">P1</span></td><td>Asymmetrische Stufenlogik</td><td class="mono-cell">permission-policy.ts decideBash</td><td>project-write schreibt extern via node -e, yolo nicht → Monotonie der Stufen</td><td>Entscheidung nötig — siehe Paket 3</td><td>hoch</td><td>mittel</td></tr>
+          <tr><td class="id">F-07</td><td><span class="sev sev-P1">P1</span></td><td>Prüflücke</td><td class="mono-cell">npm/package.json<br>.github/workflows/verify.yml</td><td>1230 Zeilen frontend-server ungetestet in CI → Pflichtprofil deckt den Transport</td><td>beide Testskripte in verify aufnehmen</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-08</td><td><span class="sev sev-P1">P1</span></td><td>Unvollständiger Checker</td><td class="mono-cell">verifier-policy.ts gitSubcommand</td><td>/usr/bin/git commit umgeht das Gate → konservative Übererkennung</td><td>executableToken() wiederverwenden</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-09</td><td><span class="sev sev-P1">P1</span></td><td>Unerreichbare Regeln</td><td class="mono-cell">permission-policy.ts<br>workflow-policy.ts</td><td>4 Zweige tot, Runtime-Docs-Ausnahme aufgehoben → eine Schicht entscheidet</td><td>tote Zweige entfernen, Ausnahme spiegeln</td><td>hoch</td><td>mittel</td></tr>
+          <tr><td class="id">F-10</td><td><span class="sev sev-P1">P1</span></td><td>Blockierende Ressourcen</td><td class="mono-cell">workspace-snapshot.mjs<br>guards.ts</td><td>7 sync-git-Prozesse pro Tool-Aufruf → Fingerprint pro Turn</td><td>Memoisierung mit Invalidierung</td><td>hoch</td><td>mittel</td></tr>
+          <tr><td class="id">F-11</td><td><span class="sev sev-P2">P2</span></td><td>Blinder Dead-Code-Check</td><td class="mono-cell">knip.json "exports":"off"<br>recovery-state.ts:114</td><td><code>gateBlocked()</code> ist dokumentiert, exportiert und hat null Aufrufer — auch keinen Test; knip kann das prinzipiell nicht sehen → Gate erkennt tote Exporte</td><td>exports-Regel aktivieren, Treffer einzeln triagieren</td><td>hoch</td><td>mittel</td></tr>
+          <tr><td class="id">F-12</td><td><span class="sev sev-P2">P2</span></td><td>Duplizierte Verantwortung</td><td class="mono-cell">shared/{workflow,recovery,verification}-capabilities.ts</td><td>drei nahezu identische Bridges (~200 Zeilen Boilerplate) → eine generische Bridge</td><td>createCapabilityBridge&lt;T&gt;(channel, guard, default)</td><td>hoch</td><td>mittel</td></tr>
+          <tr><td class="id">F-13</td><td><span class="sev sev-P2">P2</span></td><td>Ableitbarer Zustand</td><td class="mono-cell">permissions/session-state.ts</td><td>4 Variablen für 2 Freiheitsgrade; <code>persist()</code> schreibt jedes Feld doppelt (Legacy) → Level + yoloAktiv</td><td>auf zwei Werte reduzieren, Legacy-Felder beim Lesen tolerieren</td><td>hoch</td><td>mittel</td></tr>
+          <tr><td class="id">F-14</td><td><span class="sev sev-P2">P2</span></td><td>Mehrfache Wahrheitsquelle</td><td class="mono-cell">shared/workflow-mode.ts · frontend-protocol/src/state.ts · frontend-server/index.mjs:29 · gui/renderer/renderer.js:54</td><td><code>WorkflowMode</code> viermal, <code>PermissionLevel</code> dreimal definiert; Drift über die TS/JS-Grenze für den Typecheck unsichtbar → eine Quelle</td><td>aus dem Protokollpaket importieren; Paritätstest wie bei Shortcuts</td><td>hoch</td><td>mittel</td></tr>
+          <tr><td class="id">F-15</td><td><span class="sev sev-P2">P2</span></td><td>Namenskollision</td><td class="mono-cell">extensions/frontend-protocol/<br>npm/packages/frontend-protocol/</td><td>zwei Module gleichen Namens mit je einem <code>PROTOCOL_VERSION</code> — hier String "1.1.0" (EventBus-Vertrag), dort Zahl 1 (JSONL-Wire) → unterscheidbare Namen</td><td>eines umbenennen (z. B. <code>state-contract</code> vs. <code>wire-protocol</code>)</td><td>hoch</td><td>mittel</td></tr>
+          <tr><td class="id">F-16</td><td><span class="sev sev-P2">P2</span></td><td>Teilgesicherte Duplikation</td><td class="mono-cell">keybindings.json · shortcut-mapping.ts · gui/shared/shortcuts.json</td><td>Shortcuts an drei Orten in zwei ID-Namensräumen; <code>shortcut-parity.mjs</code> prüft nur 2↔3, <code>target-config.mjs:305</code> nur 1 von 4 Keybindings → alle Nähte geprüft</td><td>Paritätstest auf keybindings.json ausdehnen</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-17</td><td><span class="sev sev-P2">P2</span></td><td>Verschluckte Fehler</td><td class="mono-cell">66 <code>} catch {</code>-Blöcke ohne Diagnose in extensions/, shared/, gui/main/</td><td>ein Gate kann sich selbst abschalten, ohne dass irgendwo etwas steht → jede Gate-Deaktivierung erzeugt einen Session-Eintrag</td><td>Telemetrie in den sicherheitsrelevanten catch-Zweigen; Rest unverändert lassen</td><td>hoch</td><td>mittel</td></tr>
+          <tr><td class="id">F-18</td><td><span class="sev sev-P2">P2</span></td><td>Versteckte Seiteneffekte</td><td class="mono-cell">verifier-policy.ts (input.acceptance)<br>guards.ts (input.artifacts)</td><td>als „assess"/„allowed" benannte Funktionen mutieren <code>event.input</code> → Prüfung und Normalisierung trennen</td><td>eigene <code>normalize…Input()</code>-Schritte vor der Prüfung</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-19</td><td><span class="sev sev-P2">P2</span></td><td>Gemischte Pfadbasis</td><td class="mono-cell">shared/workspace-snapshot.mjs</td><td><code>git diff --name-status</code> liefert repo-root-relativ, <code>git ls-files --others</code> cwd-relativ; <code>changedFiles</code> mischt beides → einheitliche Basis</td><td><code>--relative</code> bzw. Normalisierung auf den Repo-Root</td><td>mittel</td><td>klein</td></tr>
+          <tr><td class="id">F-20</td><td><span class="sev sev-P3">P3</span></td><td>Doku ≠ Implementierung</td><td class="mono-cell">README.md „Berechtigungen"<br>workflow-policy.ts</td><td>README nennt für den Planmodus nur <code>git status/diff/log</code> und <code>rg</code>; erlaubt sind zusätzlich <code>find</code> und 12 Lesewerkzeuge sowie <code>web_search</code>, <code>fetch_content</code> und <code>verify({check:"typecheck"})</code> → Doku nennt den echten Umfang</td><td>README an <code>PLAN_MODE_READ_ONLY_TOOLS</code> und den Guard-Text angleichen</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-21</td><td><span class="sev sev-P3">P3</span></td><td>Veralteter Arbeitsstand</td><td class="mono-cell">docs/PROJECT_STATE.md</td><td>„Aktuelle Arbeit" ist das abgeschlossene GUI-Auftragspaket; die real-duel-Stufe-2-Arbeit der letzten ~15 Commits kommt null mal vor → flüchtiger Stand ist aktuell</td><td>Checkpoint über den Skill <code>context-checkpoint</code></td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-22</td><td><span class="sev sev-P3">P3</span></td><td>Irreführender Kommentar</td><td class="mono-cell">resilience/index.ts</td><td>Kommentar schreibt <code>session_compact_failed</code> einem Runtime-Patch zu, der in 0.84.3 zurückgezogen wurde (Upstream emittiert nativ) → Kommentar nennt die reale Quelle</td><td>Kommentar auf <code>_emitSessionCompactFailed</code> umschreiben</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-23</td><td><span class="sev sev-P3">P3</span></td><td>Versions-Drift</td><td class="mono-cell">settings.json <code>lastChangelogVersion: 0.84.4</code> vs. <code>EXPECTED_RUNTIME_VERSION 0.84.3</code></td><td>Patch-Skript erwartet eine ältere Runtime als die zuletzt gesehene → ein gemeinsamer Pin</td><td>klären, ob 0.84.4 die Patch-Anker verschiebt</td><td>mittel</td><td>klein</td></tr>
+          <tr><td class="id">F-24</td><td><span class="sev sev-P3">P3</span></td><td>Repository-Organisation</td><td class="mono-cell">benchmarks/real-duel/reports (7,1 MB) · 3 Arbeitsauftragspakete auf Top-Level (1,2 MB)</td><td>32 % des Repos sind Laufartefakte und Historie; eine Transkriptdatei allein 5,4 MB → aktive und historische Inhalte unterscheidbar</td><td>bewusst behalten oder in ein Archiv-Repo — nur mit ausdrücklicher Freigabe</td><td>hoch</td><td>groß</td></tr>
+          <tr><td class="id">F-25</td><td><span class="sev sev-P3">P3</span></td><td>Nicht ausgeführte Prüfungen</td><td class="mono-cell">gui/test/e2e-rpc.mjs · gui/test/dialog-smoke.mjs · tests/plan-eval/run.mjs · check:versioned-tree · check:imports</td><td>drei Testdateien in keinem Skript; <code>check:imports</code> ist ein zweiter Einstiegspunkt für einen Test, der ohnehin in run-all läuft → jede Prüfung hat genau einen Ort</td><td>als „manuell" kennzeichnen oder einhängen; <code>check:imports</code> streichen</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-26</td><td><span class="sev sev-P3">P3</span></td><td>Irreführende Assertion</td><td class="mono-cell">tests/suites/runtime/target-config.mjs:299</td><td>Beschreibung „unknown tools and free bash fail to confirmation" bei geprüftem Wert <code>bash: "allow"</code> → Beschreibung nennt das geprüfte Verhalten</td><td>Text korrigieren (der Wert ist beabsichtigt)</td><td>hoch</td><td>klein</td></tr>
+          <tr><td class="id">F-27</td><td><span class="sev sev-P3">P3</span></td><td>Stumme Zustandsänderung</td><td class="mono-cell">plan-mode/session.ts consumeApproval</td><td>Session-Mismatch verbraucht die Freigabe ohne Meldung, Hash-Mismatch meldet → gleiche Sichtbarkeit für beide Verfallsgründe</td><td>Hinweis auch im Session-Zweig (Erreichbarkeit vorher klären, siehe Abschnitt 8)</td><td>mittel</td><td>klein</td></tr>
+          <tr><td class="id">F-28</td><td><span class="sev sev-P3">P3</span></td><td>Doppelter CI-Schritt</td><td class="mono-cell">.github/workflows/verify.yml</td><td><code>check-npm-audit</code> läuft als eigener Schritt und erneut in <code>verify</code> → einmal</td><td>den separaten Schritt entfernen (README erklärt die Gleichwertigkeit bereits)</td><td>hoch</td><td>klein</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 6. VEREINFACHUNGSMATRIX -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">6 — Vereinfachungsmatrix</p>
+      <h2>Was bleibt, was schrumpft, was zusammenkommt</h2>
+      <p style="font-size:.9rem;color:var(--ink-soft);max-width:44rem;">Bewertet wird jede Komponente getrennt nach Produktcode, Testinfrastruktur und Historie. Notwendige Sicherheitskomplexität steht ausdrücklich unter „Behalten".</p>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Komponente</th><th>Einstufung</th><th>Was entfällt / was bleibt</th><th>Neue Verantwortlichkeit</th><th>Risiko und Gleichwertigkeitsnachweis</th></tr></thead>
+        <tbody>
+          <tr><td class="mono-cell">extensions/lsp/</td><td style="color:var(--ok);font-weight:600">Behalten</td><td>Nichts. Prozess-Lebenszyklus, Backoff, eine <code>settle()</code>-Senke, Binary-Bindung an Builtin oder node_modules/.bin sind alle einzeln begründet.</td><td>unverändert</td><td>—</td></tr>
+          <tr><td class="mono-cell">gui/main/ (preload, ipc-handlers)</td><td style="color:var(--ok);font-weight:600">Behalten</td><td>Nichts. Sandbox, contextIsolation, Kanal-Allowlist, <code>SAFE_EXTERNAL_PROTOCOLS</code>, realpath-Basisprüfung — die Elektron-Trust-Grenze ist die teuerste und richtigste Komplexität im Repo.</td><td>unverändert</td><td>—</td></tr>
+          <tr><td class="mono-cell">plan-mode/plan-context.ts</td><td style="color:var(--ok);font-weight:600">Behalten</td><td>Nichts. Trennung von fixem Regeltext und sanitisiertem Datenblock schließt eine reale Prompt-Injection-Grenze.</td><td>unverändert</td><td>—</td></tr>
+          <tr><td class="mono-cell">plan-mode/session.ts</td><td style="color:var(--ok);font-weight:600">Behalten</td><td>Sieben Zustände wirken viel, sind aber je einzeln durch die Compare-and-Swap-Freigabe und den Turn-Pin begründet.</td><td>unverändert</td><td>—</td></tr>
+          <tr><td class="mono-cell">shared/workspace-snapshot.mjs</td><td style="font-weight:600">Intern vereinfachen</td><td><em>Entfällt:</em> das Puffern voller Patches im Speicher. <em>Bleibt:</em> Fingerprint-Semantik und Ausgabeform unverändert.</td><td>Das Modul besitzt Fehlerform und Memoisierung selbst; Aufrufer interpretieren keine Ausnahmen mehr.</td><td>Risiko niedrig. Nachweis: identische Fingerprints für dieselben Bäume vor/nach dem Umbau, plus ein neuer Testfall &gt; 1 MiB.</td></tr>
+          <tr><td class="mono-cell">shared/*-capabilities.ts (3×)</td><td style="font-weight:600">Zusammenführen</td><td><em>Entfällt:</em> ~200 Zeilen dreifacher Boilerplate. <em>Bleibt:</em> je Kanal ein eigener Typ-Guard und ein eigener Default.</td><td>Eine generische <code>createCapabilityBridge</code>; die fachlichen Defaults (insbesondere fail-closed bei unbekanntem Workflow) bleiben pro Kanal deklariert.</td><td>Risiko mittel — der fail-closed-Default ist sicherheitsrelevant. Nachweis: bestehende Bridge-Tests unverändert grün.</td></tr>
+          <tr><td class="mono-cell">permission-policy.ts <code>decideFileAccess</code></td><td style="font-weight:600">Zusammenführen</td><td><em>Entfällt:</em> vier unerreichbare Zweige. <em>Bleibt:</em> Secret-Grenze, readonly-Logik, confirm-all-Rückfrage, geschützte Ausführungspfade.</td><td><code>assessWorkflowTool</code> ist alleiniger Besitzer der Projekt- und Symlink-Grenze; die Stufenschicht entscheidet nur noch innerhalb des Projekts.</td><td>Risiko mittel. Nachweis: Tests auf den vollständigen Guard-Durchlauf umstellen — die Ergebnisse pro Stufe müssen identisch bleiben.</td></tr>
+          <tr><td class="mono-cell">permissions/session-state.ts</td><td style="font-weight:600">Intern vereinfachen</td><td><em>Entfällt:</em> zwei ableitbare Variablen und die doppelt geschriebenen Legacy-Felder beim Persistieren. <em>Bleibt:</em> Epoch-Schutz, YOLO-Planmodus-Sperre, Audit-Einträge.</td><td>Ein <code>selectedLevel</code> plus <code>yoloAktiv</code>; <code>PermissionState</code> wird berechnet.</td><td>Risiko niedrig. Nachweis: Alt-Sessions mit Legacy-Feldern müssen weiterhin korrekt restaurieren — dafür ein Fixture-Test.</td></tr>
+          <tr><td class="mono-cell">frontend-protocol (beide)</td><td style="font-weight:600">Zusammenführen</td><td><em>Entfällt:</em> die Doppelbelegung des Namens und der Konstante <code>PROTOCOL_VERSION</code>. <em>Bleibt:</em> beide Verträge — sie lösen wirklich verschiedene Probleme.</td><td>Enum-Typen (<code>WorkflowMode</code>, <code>PermissionLevel</code>) leben genau einmal, im Wire-Paket; alles andere importiert.</td><td>Risiko mittel (Buildreihenfolge). Nachweis: Contract-Tests plus ein Paritätstest gegen frontend-server und renderer.</td></tr>
+          <tr><td class="mono-cell">frontend-server/index.mjs</td><td style="font-weight:600">Isolieren</td><td>Nichts entfernen. 1230 Zeilen sind für einen Protokoll-Server angemessen — sie sind nur ungeprüft.</td><td>Der Server wird ein Prüfling erster Klasse: Testskript in <code>verify</code>.</td><td>Risiko niedrig. Nachweis: die bestehenden Handshake- und Server-Tests laufen im Gate.</td></tr>
+          <tr><td class="mono-cell">resilience/recovery-state.ts <code>gateBlocked</code></td><td style="color:var(--p0);font-weight:600">Entfernungskandidat</td><td>Vollständig tot: kein Aufrufer, kein Test, von knip strukturell nicht auffindbar. Die Entscheidung lebt doppelt in <code>recoverySnapshot()</code>.</td><td>Entweder <code>recoverySnapshot()</code> nutzt <code>gateBlocked()</code>, oder der Export fällt weg. Eines von beidem.</td><td>Risiko niedrig. Nachweis: knip mit aktivierter <code>exports</code>-Regel meldet ihn nicht mehr.</td></tr>
+          <tr><td class="mono-cell">npm-Skripte <code>check:imports</code>, <code>check:versioned-tree</code></td><td style="font-weight:600">Isolieren</td><td><code>check:imports</code> ist ein zweiter Einstieg für einen Test, der in <code>run-all</code> ohnehin läuft. <code>check:versioned-tree</code> ist bewusst manuell (dokumentiert in <code>manual-smoke-checklist.md</code>).</td><td>Ein Ort pro Prüfung; manuelle Schritte ausschließlich in der Smoke-Checkliste.</td><td>Risiko niedrig.</td></tr>
+          <tr><td class="mono-cell">pi_gui_arbeitsauftrag/, pi_gui_cursor_redesign/, pi_benchmark_befunde_arbeitsauftraege/</td><td style="font-weight:600">Archivieren</td><td>Historisch nützlich, nicht mehr aktiv (Phasen 0–8 laut PROJECT_STATE abgeschlossen). Wirken auf Top-Level wie gültige Spezifikationen.</td><td>Ein <code>docs/archive/</code>-Unterbaum mit einer Zeile pro Paket zum Abschlussdatum.</td><td>Risiko niedrig, aber Pflegeaufwand vs. Nutzen abwägen — <code>docs/scope-cli-tui-vs-gui.md</code> verweist auf die Pfade und müsste mit.</td></tr>
+          <tr><td class="mono-cell">benchmarks/real-duel/reports/ (7,1 MB)</td><td style="font-weight:600">Unklar</td><td>Die <code>.gitignore</code> nennt die Rohdaten-Archive ausdrücklich „auf Nutzerwunsch vollständig committet". Das ist eine getroffene Entscheidung, kein Versehen.</td><td>—</td><td>Entscheidung liegt beim Betreiber. Falls die Nachvollziehbarkeit einzelner Läufe zählt: behalten. Falls nicht: ein 5,4-MB-Transkript ist ein Viertel des Repos.</td></tr>
+          <tr><td class="mono-cell">extensions/subagent/</td><td style="font-weight:600">Unklar</td><td>Enthält nur <code>config.json</code>, ist in <code>settings.json</code> nicht als Extension geführt, wird in <code>docs/scope-cli-tui-vs-gui.md</code> aber als Core-Extension gelistet.</td><td>Klären, ob es Paketkonfiguration (dann zu <code>schemas/</code> oder Wurzel) oder Extension ist.</td><td>Risiko niedrig; reine Einordnungsfrage.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 7 + 8 -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">7 &amp; 8 — Beweislage</p>
+      <h2>Bestätigt, belegt, vermutet — und was sich nicht bestätigt hat</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));gap:1.5rem;">
+      <div class="keep">
+        <p class="eyebrow" style="color:var(--ok)">Bestätigt reproduziert</p>
+        <ul class="plain">
+          <li><strong>F-01</strong> — ENOBUFS ab 1 MiB Diff, dreimal in Folge in einem Wegwerf-Repo im Scratchpad; Byte-Grenze und Fehlercode oben protokolliert.</li>
+        </ul>
+      </div>
+      <div class="keep">
+        <p class="eyebrow" style="color:var(--accent)">Statisch eindeutig belegt</p>
+        <ul class="plain">
+          <li><strong>F-02 bis F-05, F-07 bis F-18, F-20 bis F-22, F-25, F-26, F-28</strong> — jeweils eine unbedingte Codestelle oder ein zählbarer <code>grep</code>-Nachweis; die Aufruferketten sind vollständig verfolgt.</li>
+          <li><strong>F-06</strong> — jede Regel in <code>decideBash</code> einzeln gegen das Beispielkommando geprüft; der Default <code>bash: "allow"</code> ist in <code>config.ts:55</code> und im Test <code>target-config.mjs:299</code> festgeschrieben.</li>
+        </ul>
+      </div>
+      <div class="keep" style="border-left-color:var(--p1)">
+        <p class="eyebrow" style="color:var(--p1)">Plausibler Verdacht — Nachweis offen</p>
+        <ul class="plain">
+          <li><strong>F-19</strong> — die gemischte Pfadbasis ist aus den git-Konventionen abgeleitet, aber nicht in einem Unterverzeichnis-Lauf gemessen. Nachweis: pi aus einem Unterordner starten, eine neue Datei unter <code>extensions/permissions/</code> anlegen, prüfen ob das Commit-Gate greift.</li>
+          <li><strong>F-23</strong> — ob 0.84.4 die Patch-Anker verschiebt, ist ohne installierte Runtime nicht feststellbar.</li>
+          <li><strong>F-27</strong> — <code>resetForSession()</code> löscht die Freigabe beim Sitzungswechsel; der Session-Mismatch-Zweig ist möglicherweise unerreichbar. Vor einer Änderung Erreichbarkeit klären.</li>
+        </ul>
+      </div>
+      <div class="keep" style="border-left-color:var(--rule-strong)">
+        <p class="eyebrow">Geprüft und widerlegt</p>
+        <ul class="plain">
+          <li><strong>Symlink-Lesegrenze:</strong> <code>decideFileAccess</code> prüft Symlink-Ausbrüche tatsächlich nur beim Schreiben — der naheliegende Schluss auf eine Leselücke ist aber <em>falsch</em>: <code>assessWorkflowTool</code> blockiert vorher auf jeder Stufe. Der Befund reduziert sich auf die tote Redundanz F-09.</li>
+          <li><strong>Nicht-reguläre untracked Dateien:</strong> Hypothese war, dass eine FIFO <code>untrackedContentFingerprints()</code> zum Werfen bringt. Im Reproduktionsrepo geprüft: <code>git ls-files --others</code> listet FIFOs nicht auf, der Snapshot lief durch. Kein Befund.</li>
+          <li><strong>Toter <code>session_compact_failed</code>-Handler:</strong> Der Kommentar verweist auf einen zurückgezogenen Patch, aber der Handler ist <em>live</em> — Pi 0.84.3 emittiert das Ereignis nativ (<code>_emitSessionCompactFailed</code>, geprüft in <code>tests/p1-runtime.mjs:85</code>). Bleibt nur der falsche Kommentar (F-22).</li>
+          <li><strong>Fehlender Build in <code>verify</code>:</strong> Vermutet wurde ein CI-Bruch, weil <code>dist/</code> ignoriert ist. Die GUI-Tests lesen die betroffenen Dateien jedoch als Text und importieren <code>dist</code> nicht. Kein CI-Bruch — die Auswirkung beschränkt sich auf <code>bin/pi-frontend</code> (F-07).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. TESTLÜCKEN -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">9 — Test- und Prüflücken</p>
+      <h2>Wo die Suite grün ist, ohne etwas zu belegen</h2>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Lücke</th><th>Belegt durch</th><th>Konsequenz</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Kein Negativtest für ausgefallene Snapshots</strong> — weder Verifier-Gate, Recovery-Gate noch setup-core werden je mit einem werfenden <code>collectWorkspaceSnapshot</code> getestet</td><td class="mono-cell">F-01, F-02, F-03</td><td>Drei Gates verhalten sich im Ausnahmefall gegensätzlich, ohne dass es auffällt</td></tr>
+          <tr><td><strong>Frontend-Server und Wire-Protocol laufen in keinem Gate</strong></td><td class="mono-cell">F-07</td><td>1230 Zeilen Transport ungeprüft in CI und im Pflichtprofil</td></tr>
+          <tr><td><strong>Test prüft eine Funktion, die die Produktion nicht mehr aufruft</strong> — <code>permissions.test.mjs:73</code> testet <code>decideFileAccess</code> direkt an unerreichbaren Zweigen</td><td class="mono-cell">F-09</td><td>Grüne Assertions über einen toten Pfad; die reale Entscheidung fällt in <code>assessWorkflowTool</code></td></tr>
+          <tr><td><strong><code>knip</code> kann tote Exporte prinzipiell nicht melden</strong> (<code>"exports": "off"</code>, ebenso <code>types</code>, <code>nsExports</code>, <code>nsTypes</code>, <code>enumMembers</code>)</td><td class="mono-cell">F-11</td><td>Der Dead-Code-Check in <code>verify</code> findet nur unbenutzte Dateien und Pakete. Beleg: <code>gateBlocked()</code></td></tr>
+          <tr><td><strong>Kein Test für „completed ohne Urteil"</strong> im Verifier-Datensatz</td><td class="mono-cell">F-04</td><td>Die Sackgasse wäre bei ihrer Einführung in 388f39f sofort aufgefallen</td></tr>
+          <tr><td><strong>Kein Test für <code>agent_settled</code> ohne UI</strong></td><td class="mono-cell">F-05</td><td>Der GUI-Pfad des Verifikationsstatus ist unbelegt</td></tr>
+          <tr><td><strong>Kein Interpreter-Negativtest</strong> in <code>permissions.test.mjs</code> auf irgendeiner Stufe</td><td class="mono-cell">F-06</td><td>Die Stufenordnung ist nirgends als Invariante geprüft</td></tr>
+          <tr><td><strong>Paritätstests decken nur einen Teil der Naht</strong> — Shortcuts 2 von 3 Orten, Keybindings 1 von 4 Einträgen, <code>WorkflowMode</code> gar nicht</td><td class="mono-cell">F-14, F-16</td><td>Drift zwischen TS und JS bleibt unentdeckt</td></tr>
+          <tr><td><strong>Drei Testdateien in keinem Skript</strong> — <code>gui/test/e2e-rpc.mjs</code>, <code>gui/test/dialog-smoke.mjs</code>, <code>tests/plan-eval/run.mjs</code></td><td class="mono-cell">F-25</td><td>Nicht ausgeführte Tests altern still</td></tr>
+          <tr><td><strong>Coverage-Boden mit eingebautem Alterungswarner, aber ohne Zwang</strong> — <code>STALE_MARGIN_POINTS</code> warnt nur</td><td class="mono-cell">tests/coverage.mjs</td><td>Bewusster Kompromiss, kein Fehler. Verdient aber eine Notiz in der Prioritätenliste, weil eine Regression unter einem veralteten Boden verschwinden kann</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 10. ZIELSTRUKTUR -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">10 — Vorgeschlagene Zielstruktur</p>
+      <h2>Kleine Verschiebungen, keine Umbauten</h2>
+    </div>
+    <div class="prose" style="display:flex;flex-direction:column;gap:1rem;">
+      <p>Die bestehende Ordnung ist tragfähig. Vier Präzisierungen genügen:</p>
+      <ol class="plain" style="padding-left:1.3rem;">
+        <li><strong>Eine Snapshot-Schicht mit expliziter Fehlerform.</strong> <code>shared/workspace-snapshot.mjs</code> bleibt, wo es ist, gibt aber <code>{ ok: true, snapshot } | { ok: false, reason }</code> zurück und memoisiert pro Turn. Alle vier Aufrufer entscheiden danach sichtbar. Das ist die Wurzel von F-01 bis F-03, F-10 und F-19.</li>
+        <li><strong>Eine Besitzerin je Grenze.</strong> Projekt- und Symlink-Grenze gehören <code>assessWorkflowTool</code>; <code>decideFileAccess</code> entscheidet nur noch innerhalb des Projekts. Damit fallen die toten Zweige und der Widerspruch um die Runtime-Docs-Ausnahme weg (F-09).</li>
+        <li><strong>Eine Quelle je Aufzählung.</strong> <code>WorkflowMode</code>, <code>PermissionLevel</code> und die Shortcut-Tabelle leben genau einmal im Wire-Protokollpaket; <code>extensions/</code>, <code>frontend-server/</code> und <code>gui/renderer/</code> importieren oder werden gegen sie geprüft (F-14, F-16). Der Name <code>frontend-protocol</code> wird für genau eines der beiden Module frei (F-15).</li>
+        <li><strong>Ein Pflichtprofil, das den ganzen Prüfstand nennt.</strong> <code>verify</code> nimmt <code>test:protocol-package</code> und <code>test:frontend-server</code> auf; <code>knip</code> aktiviert die <code>exports</code>-Regel (F-07, F-11).</li>
+      </ol>
+      <p>Ausdrücklich <em>nicht</em> vorgeschlagen: eine Zusammenlegung von CLI/TUI und GUI, ein Umbau der Guard-Reihenfolge, eine Reduktion der Berechtigungsstufen oder eine Auslagerung der Benchmarks. Für keines davon liefert diese Analyse einen Grund.</p>
+    </div>
+  </section>
+
+  <!-- 11. FOLGEPLAN -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">11 — Priorisierter Folgeplan</p>
+      <h2>Drei Pakete, in dieser Reihenfolge</h2>
+      <p style="font-size:.9rem;color:var(--ink-soft);max-width:44rem;">Die Nummerierung ist eine echte Abfolge: Paket B baut auf der in Paket A bereinigten Snapshot-Schicht auf, Paket C braucht vorher eine Freigabe.</p>
+    </div>
+
+    <div class="package">
+      <p class="step">PAKET A — SOFORTIGE P0/P1-KORREKTUREN</p>
+      <h3>Die Snapshot-Wurzel und die vier Gates darauf</h3>
+      <ul class="plain">
+        <li><strong>F-01 + F-02 + F-03</strong> — <code>collectWorkspaceSnapshot</code> mit <code>maxBuffer</code> und gestreamtem Patch-Hash; explizite Ergebnisform; alle vier Aufrufer auf eine einheitliche, sichtbare Behandlung umstellen. Ein ausgefallener Snapshot blockiert das Commit-Gate mit nennbarem Grund, statt es zu öffnen.</li>
+        <li><strong>F-04</strong> — <code>assessVerifierDedup</code> prüft zusätzlich auf ein vorhandenes Urteil.</li>
+        <li><strong>F-05</strong> — <code>hasUI</code>-Guard in <code>agent_settled</code> auf den <code>setStatus</code>-Aufruf beschränken.</li>
+        <li><strong>F-08</strong> — <code>gitSubcommand()</code> auf <code>executableToken()</code> umstellen.</li>
+        <li><strong>F-07</strong> — beide fehlenden Testskripte in <code>verify</code> aufnehmen.</li>
+      </ul>
+      <hr class="div">
+      <p style="font-size:.9rem;color:var(--ink-soft)"><strong>Abschlusskriterien:</strong> Ein Diff &gt; 1 MiB, der eine <code>verifier-required-path</code>-Datei berührt, blockiert <code>git commit</code> mit sichtbarem Grund. <code>recovery_check</code> entsperrt dasselbe Repository. Ein urteilsloser Verifier-Lauf lässt sich wiederholen. Die GUI zeigt einen Verifikationsstatus. <code>/usr/bin/git commit</code> löst das Gate aus. <code>project_check({profile:"verify"})</code> läuft grün <em>und</em> enthält Protokollpaket sowie Frontend-Server.</p>
+      <p style="font-size:.9rem;color:var(--ink-soft)"><strong>Regressionstests:</strong> neuer Snapshot-Negativtest (&gt;1 MiB) in <code>verification.mjs</code> und <code>resilience.mjs</code>; „completed ohne Urteil" in <code>verification.mjs</code>; <code>agent_settled</code> ohne UI in <code>frontend-bridge.mjs</code>; Kommandovarianten für <code>bashTouchesGitCommit</code>. Dieses Paket berührt <code>extensions/permissions/**</code> und <code>extensions/setup-core/index.ts</code> — beide stehen in <code>verifier-required-paths.ts</code>, eine Verifier-Delegation ist also Pflicht.</p>
+    </div>
+
+    <div class="package">
+      <p class="step">PAKET B — RISIKOARME VEREINFACHUNGEN</p>
+      <h3>Duplikate zusammenführen, Totes entfernen, Doku angleichen</h3>
+      <ul class="plain">
+        <li><strong>F-09</strong> — unerreichbare Zweige in <code>decideFileAccess</code> entfernen, Runtime-Docs-Ausnahme spiegeln, Tests auf den Guard-Durchlauf umstellen.</li>
+        <li><strong>F-10</strong> — Fingerprint pro Turn memoisieren (setzt Paket A voraus).</li>
+        <li><strong>F-11</strong> — knip-Regel <code>exports</code> aktivieren, die ~50 Treffer meiner Vorabprüfung einzeln triagieren, <code>gateBlocked</code> entweder nutzen oder streichen.</li>
+        <li><strong>F-12, F-13, F-18</strong> — Capability-Bridges vereinheitlichen, Permission-Zustand auf zwei Werte reduzieren, Mutation aus den <code>assess…</code>-Funktionen herauslösen.</li>
+        <li><strong>F-16, F-19, F-20 bis F-22, F-25, F-26, F-28</strong> — Paritätstest ausdehnen, Pfadbasis vereinheitlichen, README/PROJECT_STATE/Kommentare angleichen, verwaiste Skripte und den doppelten CI-Schritt bereinigen.</li>
+      </ul>
+      <hr class="div">
+      <p style="font-size:.9rem;color:var(--ink-soft)"><strong>Abschlusskriterien:</strong> knip mit aktiver <code>exports</code>-Regel läuft grün. Kein Modul interpretiert mehr eine geworfene Snapshot-Ausnahme selbst. README beschreibt den tatsächlichen Planmodus-Umfang. <code>docs/PROJECT_STATE.md</code> nennt die real-duel-Arbeit.</p>
+      <p style="font-size:.9rem;color:var(--ink-soft)"><strong>Regressionstests:</strong> die bestehenden Suiten müssen ohne Anpassung ihrer Erwartungswerte grün bleiben — das ist der Gleichwertigkeitsnachweis. Zusätzlich ein Fixture-Test für die Restauration alter Permission-Sessions und ein <code>WorkflowMode</code>-Paritätstest über TS und JS.</p>
+    </div>
+
+    <div class="package">
+      <p class="step">PAKET C — ENTSCHEIDUNGEN VOR DER UMSETZUNG</p>
+      <h3>Was ohne Freigabe nicht angefasst werden sollte</h3>
+      <ul class="plain">
+        <li><strong>F-06 — Die Stufenordnung.</strong> Soll <code>project-write</code> Interpreter-Aufrufe künftig bestätigen lassen (sicherer, aber <code>node script.js</code> fragt jedes Mal), oder wird die Projektgrenze für diese Stufe ausdrücklich als „nicht durchgesetzt" dokumentiert? Beides ist vertretbar; stillschweigend bleiben darf es nicht. Eine dritte Option: <code>SYSTEM_PATHS</code> um das Home-Verzeichnis erweitern und <code>opaqueInterpreter</code> nur dort greifen lassen.</li>
+        <li><strong>F-15 — Umbenennung eines <code>frontend-protocol</code>-Moduls.</strong> Trifft Importpfade in beiden Bäumen und alle Scope-Dokumente. Rein mechanisch, aber breit.</li>
+        <li><strong>F-24 — Repository-Organisation.</strong> 7,1 MB Benchmark-Rohdaten sind laut <code>.gitignore</code> eine bewusste Entscheidung. Drei Arbeitsauftragspakete auf Top-Level sind es womöglich nicht. Eine Auslagerung lohnt nur, wenn die Nachvollziehbarkeit einzelner Läufe künftig nicht mehr gebraucht wird — und sie erzeugt Synchronisationslast mit <code>docs/scope-cli-tui-vs-gui.md</code>.</li>
+        <li><strong>F-23 — Runtime-Pin.</strong> Ob auf 0.84.4 gehoben wird, hängt an den Patch-Ankern und ist ohne installierte Runtime nicht entscheidbar.</li>
+      </ul>
+      <hr class="div">
+      <p style="font-size:.9rem;color:var(--ink-soft)"><strong>Abschlusskriterium:</strong> für jeden Punkt eine Entscheidung in <code>docs/decisions/</code> — auch, und gerade, wenn sie „bleibt wie es ist" lautet.</p>
+    </div>
+  </section>
+
+  <!-- ABSCHLUSSEMPFEHLUNG -->
+  <section>
+    <div class="callout">
+      <p class="eyebrow" style="color:var(--accent)">Abschließende Empfehlung</p>
+      <h2 style="font-size:1.35rem;">Drei Maßnahmen zuerst</h2>
+      <ol>
+        <li><strong>Die Snapshot-Schicht reparieren (F-01, F-02, F-03).</strong> Ein Fehler, drei gegensätzliche Folgen, alle drei unsichtbar. <code>maxBuffer</code>, gestreamter Hash, eine explizite Fehlerform — und der catch-Zweig des Commit-Gates blockiert künftig, statt zu öffnen. Das ist der einzige P0-Komplex im Repo.</li>
+        <li><strong>Die zwei Zweizeiler nachziehen (F-04, F-05).</strong> Die Verifier-Sackgasse und der stumme GUI-Verifikationsstatus sind zwei kleine, isolierte Korrekturen mit unmittelbar spürbarer Wirkung im Alltag.</li>
+        <li><strong>Das Pflichtprofil vervollständigen (F-07).</strong> Solange <code>verify</code> den Frontend-Server nicht ausführt, bedeutet ein grüner Footer weniger, als er verspricht — und die Wirksamkeit jeder Korrektur aus Punkt 1 und 2 wäre nur teilweise belegt.</li>
+      </ol>
+      <hr class="div">
+      <p><strong>Bewusst unverändert lassen:</strong> die LSP-Schicht, die Electron-Trust-Grenze, den Plan-Handoff und die Zustandsmaschine in <code>plan-mode/session.ts</code>. Das sind die vier Stellen, an denen die Komplexität nachweislich Sicherheit und Zuverlässigkeit kauft. Ebenso außen vor bleiben sollten die Guard-Reihenfolge, die Trennung von CLI/TUI und GUI und die Benchmark-Ablage — für einen Eingriff dort liefert diese Analyse keinen Anlass, und jede Umstellung würde die gerade laufende Stufe-2-Messreihe entwerten.</p>
+    </div>
+  </section>
+
+  <footer style="border-top:1px solid var(--rule);padding-top:1.5rem;color:var(--ink-faint);font-size:.82rem;display:flex;flex-direction:column;gap:.4rem;">
+    <p>Analyse gegen HEAD <span class="mono">4563fad1937ed838a4824777d6c6a25298349f27</span>, Arbeitsbaum sauber, 2026-09-09 UTC.</p>
+    <p>Kein Produktivcode geändert, keine Datei entfernt oder verschoben, keine Abhängigkeit installiert, kein Commit, kein Push. Reproduktionen liefen ausschließlich in Wegwerf-Repositories außerhalb des Projekts.</p>
+  </footer>
+
+</div>
