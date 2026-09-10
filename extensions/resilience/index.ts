@@ -11,9 +11,12 @@ import type {
   ExtensionContext,
   MessageUpdateEvent,
 } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
 import { Type } from "typebox";
-import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
+import {
+  collectWorkspaceSnapshot,
+  gitEnv,
+} from "../../shared/workspace-snapshot.mjs";
+import { trackedExec } from "../shared/tracked-exec.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import {
   RECOVERY_CAPABILITY_EVENTS,
@@ -117,12 +120,37 @@ function truncateErrorMessage(message: string | undefined): string | undefined {
     : message;
 }
 
-function gitText(cwd: string, args: string[]): string {
-  return execFileSync("git", args, {
+const GIT_TEXT_TIMEOUT_MS = 15_000;
+
+/**
+ * `git status --short`/`git diff --stat` output for recovery_check's report.
+ * Same ENOBUFS risk class as F-01/F-02's root cause — execFileSync's default
+ * 1 MiB pipe limit — reachable here via file *count* (many thousands of
+ * changed paths) rather than diff size. trackedExec's spawn-based accumulator
+ * drains both streams while retaining only bounded display text.
+ */
+async function gitText(
+  cwd: string,
+  args: string[],
+  signal?: AbortSignal,
+): Promise<string> {
+  const result = await trackedExec("git", args, {
     cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
+    timeout: GIT_TEXT_TIMEOUT_MS,
+    env: gitEnv(),
+    signal,
+    maxOutputBytes: 256 * 1024,
   });
+  if (result.code !== 0 || result.killed) {
+    throw new Error(
+      result.stderr.trim() ||
+        `git ${args.join(" ")} schlug fehl (exit=${result.code === null ? "unbekannt" : result.code}${result.killed ? ", killed" : ""}).`,
+    );
+  }
+  return (
+    limitTextOutput(result.stdout).text +
+    (result.stdoutTruncated ? "\n[Git-Ausgabe nach 256 KiB gekürzt.]" : "")
+  );
 }
 
 function phaseFromMessage(event: MessageUpdateEvent): TurnPhase | undefined {
@@ -201,26 +229,49 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   let pendingRecovery:
     | { workspaceWasChanged: boolean; toolMayHaveMutatedWorkspace: boolean }
     | undefined;
+  // Bumped by session_start/session_shutdown. agent_settled now awaits a
+  // real snapshot collection before writing gate/openTurn — captured once
+  // per call so a session restart landing mid-await is detectable and the
+  // stale write is dropped instead of clobbering the new session's state.
+  let sessionGeneration = 0;
+  let turnGeneration = 0;
 
   /**
    * Der Recovery-Status für Guard und UI. Ein geprüftes Gate bleibt nur
    * offen, solange der Workspace-Fingerprint dem Prüfzeitpunkt entspricht.
    */
   async function recoverySnapshot(): Promise<RecoveryStatusSnapshot> {
-    if (!gate || !gateRequiresInspection(gate.required)) {
+    // Captured once, up front: gate is shared module state, and this
+    // function now awaits a real snapshot collection. It is called from the
+    // permission guard's tool_call hot path with no try/catch around it —
+    // reading `gate` again after the await (instead of this captured
+    // reference) would throw if a concurrent agent_settled/session_shutdown
+    // reassigns or clears it mid-await, taking the guard down with it.
+    const currentGate = gate;
+    const generation = sessionGeneration;
+    const cwd = sessionCwd;
+    if (!currentGate || !gateRequiresInspection(currentGate.required)) {
       return { armed: false };
     }
-    if (!gate.checked) {
+    if (!currentGate.checked) {
       return {
         armed: true,
-        turnStartedAt: gate.required.turnStartedAt,
-        reason: gate.required.reason,
+        turnStartedAt: currentGate.required.turnStartedAt,
+        reason: currentGate.required.reason,
       };
     }
-    if (await workspaceChanged(gate.checked.workspaceFingerprint, sessionCwd)) {
+    const changed = await workspaceChanged(
+      currentGate.checked.workspaceFingerprint,
+      cwd,
+    );
+    if (generation !== sessionGeneration || gate !== currentGate) {
+      // An answer for an obsolete gate must never authorize a write.
+      return { armed: true };
+    }
+    if (changed) {
       return {
         armed: true,
-        turnStartedAt: gate.required.turnStartedAt,
+        turnStartedAt: currentGate.required.turnStartedAt,
         reason: "workspace-changed",
       };
     }
@@ -228,10 +279,13 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   }
 
   async function updateRecoveryStatus(): Promise<void> {
-    if (!activeContext) return;
+    const ctx = activeContext;
+    const generation = sessionGeneration;
+    if (!ctx) return;
     const snapshot = await recoverySnapshot();
+    if (generation !== sessionGeneration || ctx !== activeContext) return;
     setTuiStatus(
-      activeContext,
+      ctx,
       UI_STATUS_KEYS.recovery,
       snapshot.armed ? "⚠ Recovery-Check offen" : undefined,
     );
@@ -241,13 +295,26 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     ctx: ExtensionContext,
     errorMessage: string | undefined,
   ): Promise<void> {
-    if (!openTurn) return;
-    const classification = classifyFailure(errorMessage, openTurn.phase);
+    // Captured once, up front: openTurn is shared module state, and this
+    // function now awaits a real snapshot collection. Re-reading openTurn
+    // after that await instead of using this captured reference would risk
+    // a concurrent agent_settled/before_agent_start clearing or replacing it
+    // mid-await, throwing on the writes below or corrupting an unrelated turn.
+    const turn = openTurn;
+    if (!turn) return;
+    const generation = sessionGeneration;
+    const turnId = turnGeneration;
+    const cwd = ctx.cwd;
+    // Record the failure before yielding, so a concurrently settling turn
+    // cannot be mistaken for a success while diagnostics collect their hash.
+    turn.observedFailureCount += 1;
+    turn.currentAttemptFailed = true;
+    const classification = classifyFailure(errorMessage, turn.phase);
     const diagnostic: FailureDiagnostic = {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
-      provider: openTurn.marker.provider,
-      model: openTurn.marker.model,
+      provider: turn.marker.provider,
+      model: turn.marker.model,
       contextPercent: contextPercent(ctx),
       errorClass: classification.errorClass,
       ...(classification.errorCode
@@ -256,54 +323,54 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       ...(truncateErrorMessage(errorMessage)
         ? { errorMessage: truncateErrorMessage(errorMessage) }
         : {}),
-      phase: openTurn.phase,
+      phase: turn.phase,
       workspaceChangedSinceTurnStart: await workspaceChanged(
-        openTurn.marker.workspaceFingerprint,
-        sessionCwd,
+        turn.marker.workspaceFingerprint,
+        cwd,
       ),
-      toolMayHaveMutatedWorkspace: openTurn.toolMayHaveMutatedWorkspace,
-      activeSubagents: openTurn.activeSubagents,
+      toolMayHaveMutatedWorkspace: turn.toolMayHaveMutatedWorkspace,
+      activeSubagents: turn.activeSubagents,
       settled: false,
     };
-    openTurn.observedFailureCount += 1;
-    openTurn.currentAttemptFailed = true;
+    if (
+      generation !== sessionGeneration ||
+      turnId !== turnGeneration ||
+      openTurn !== turn
+    )
+      return;
     pi.appendEntry("resilience.failure", diagnostic);
   }
 
-  async function armRecovery(
-    marker: TurnStartMarker,
-    toolMayHaveMutatedWorkspace: boolean,
-  ): Promise<NonNullable<typeof pendingRecovery>> {
-    const recovery = {
-      workspaceWasChanged: await workspaceChanged(
-        marker.workspaceFingerprint,
-        sessionCwd,
-      ),
-      toolMayHaveMutatedWorkspace,
-    };
-    pendingRecovery = recovery;
-    return recovery;
-  }
-
-  async function appendRecoveryRequired(
+  async function collectRecoveryRequired(
     reason: RecoveryRequiredMarker["reason"],
     marker: TurnStartMarker,
     toolMayHaveMutatedWorkspace: boolean,
+    cwd: string,
   ): Promise<RecoveryRequiredMarker> {
-    const recovery = await armRecovery(marker, toolMayHaveMutatedWorkspace);
-    const record: RecoveryRequiredMarker = {
+    return {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
       turnStartedAt: marker.timestamp,
       reason,
-      workspaceChangedSinceTurnStart: recovery.workspaceWasChanged,
+      workspaceChangedSinceTurnStart: await workspaceChanged(
+        marker.workspaceFingerprint,
+        cwd,
+      ),
       toolMayHaveMutatedWorkspace,
     };
-    pi.appendEntry("resilience.recovery-required", record);
-    return record;
+  }
+
+  function rememberRecovery(record: RecoveryRequiredMarker): void {
+    pendingRecovery = {
+      workspaceWasChanged: record.workspaceChangedSinceTurnStart,
+      toolMayHaveMutatedWorkspace: record.toolMayHaveMutatedWorkspace,
+    };
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    sessionGeneration += 1;
+    turnGeneration += 1;
+    const generation = sessionGeneration;
     sessionCwd = ctx.cwd;
     activeContext = ctx;
     openTurn = undefined;
@@ -313,60 +380,53 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     // behält seinen checked-Zustand über die Sitzung hinaus.
     gate = latestRecoveryGate(entries);
     const prior = latestRecoveryState(entries);
-    if (prior.openTurn) {
-      const existing = prior.requiredByTurn.get(prior.openTurn.timestamp);
-      if (existing) {
-        await armRecovery(prior.openTurn, existing.toolMayHaveMutatedWorkspace);
-      } else {
-        gate = {
-          required: await appendRecoveryRequired(
-            "interrupted",
-            prior.openTurn,
-            false,
-          ),
-        };
-      }
-    } else if (prior.finalFailure) {
-      const start = entries
-        .map((entry) =>
-          customData<TurnStartMarker>(entry, "resilience.turn-start"),
-        )
-        .find(
-          (marker) => marker?.timestamp === prior.finalFailure?.turnStartedAt,
-        );
-      if (start) {
-        const existing = prior.requiredByTurn.get(
-          prior.finalFailure.turnStartedAt,
-        );
-        if (existing) {
-          await armRecovery(start, existing.toolMayHaveMutatedWorkspace);
-        } else {
-          gate = {
-            required: await appendRecoveryRequired(
-              "final_failure",
-              start,
-              false,
-            ),
-          };
-        }
+    const start =
+      prior.openTurn ??
+      (prior.finalFailure
+        ? entries
+            .map((entry) =>
+              customData<TurnStartMarker>(entry, "resilience.turn-start"),
+            )
+            .find(
+              (marker) =>
+                marker?.timestamp === prior.finalFailure?.turnStartedAt,
+            )
+        : undefined);
+    if (start) {
+      const existing = prior.requiredByTurn.get(start.timestamp);
+      const required = await collectRecoveryRequired(
+        prior.openTurn ? "interrupted" : "final_failure",
+        start,
+        existing?.toolMayHaveMutatedWorkspace ?? false,
+        ctx.cwd,
+      );
+      if (generation !== sessionGeneration) return;
+      rememberRecovery(required);
+      if (!existing) {
+        pi.appendEntry("resilience.recovery-required", required);
+        gate = { required };
       }
     }
     await updateRecoveryStatus();
   });
 
   pi.on("before_agent_start", async (_event, ctx) => {
-    sessionCwd = ctx.cwd;
+    const generation = sessionGeneration;
+    const turnId = ++turnGeneration;
+    const cwd = ctx.cwd;
     const recovery = pendingRecovery;
     pendingRecovery = undefined;
     const marker: TurnStartMarker = {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
-      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await workspaceFingerprint(cwd),
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       provider: ctx.model?.provider ?? "unknown",
       model: ctx.model?.id ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
+    if (generation !== sessionGeneration || turnId !== turnGeneration) return;
+    sessionCwd = cwd;
     openTurn = {
       marker,
       phase: "before_first_token",
@@ -421,6 +481,8 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_before_compact", async (event, ctx) => {
+    const generation = sessionGeneration;
+    const turnId = turnGeneration;
     if (openTurn) openTurn.phase = "compaction";
     const marker: CompactionBoundaryMarker = {
       schemaVersion: SCHEMA_VERSION,
@@ -432,7 +494,8 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
-    pi.appendEntry("resilience.compaction-boundary", marker);
+    if (generation === sessionGeneration && turnId === turnGeneration)
+      pi.appendEntry("resilience.compaction-boundary", marker);
   });
 
   // The runtime patch "agent-session-compaction-failure-*" (see
@@ -454,6 +517,8 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       ) => void | Promise<void>,
     ) => void
   )("session_compact_failed", async (event, ctx) => {
+    const generation = sessionGeneration;
+    const turnId = turnGeneration;
     if (openTurn) openTurn.phase = "compaction";
     const marker: CompactionBoundaryMarker = {
       schemaVersion: SCHEMA_VERSION,
@@ -466,11 +531,14 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       contextPercent: contextPercent(ctx),
       errorMessage: event.errorMessage,
     };
+    if (generation !== sessionGeneration || turnId !== turnGeneration) return;
     pi.appendEntry("resilience.compaction-boundary", marker);
     await appendFailure(ctx, event.errorMessage);
   });
 
   pi.on("session_compact", async (event, ctx) => {
+    const generation = sessionGeneration;
+    const turnId = turnGeneration;
     if (openTurn) openTurn.phase = "post_tool";
     const marker: CompactionBoundaryMarker = {
       schemaVersion: SCHEMA_VERSION,
@@ -482,6 +550,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
+    if (generation !== sessionGeneration || turnId !== turnGeneration) return;
     pi.appendEntry("resilience.compaction-boundary", marker);
   });
 
@@ -492,38 +561,62 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    if (!openTurn) return;
-    const failed = openTurn.currentAttemptFailed;
+    // Captured once, up front — same reasoning as appendFailure/
+    // recoverySnapshot above: this handler now awaits real snapshot
+    // collection, and both openTurn and sessionGeneration are shared module
+    // state a concurrent session_start could replace mid-await. Re-reading
+    // openTurn afterward could clear a brand-new turn instead of this one;
+    // the generation check below stops this handler from writing gate/
+    // appending entries for a session that has since restarted.
+    const turn = openTurn;
+    if (!turn) return;
+    const generation = sessionGeneration;
+    const failed = turn.currentAttemptFailed;
+    const turnId = turnGeneration;
     const outcome: TurnSettledMarker["outcome"] = failed
       ? "failed"
-      : openTurn.observedFailureCount > 0
+      : turn.observedFailureCount > 0
         ? "completed_after_failure"
         : "completed";
     const settled: TurnSettledMarker = {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
-      turnStartedAt: openTurn.marker.timestamp,
+      turnStartedAt: turn.marker.timestamp,
       workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
       outcome,
-      observedFailureCount: openTurn.observedFailureCount,
+      observedFailureCount: turn.observedFailureCount,
       ...(failed ? { recoveryPending: true } : {}),
     };
+    const required = failed
+      ? await collectRecoveryRequired(
+          "final_failure",
+          turn.marker,
+          turn.toolMayHaveMutatedWorkspace,
+          ctx.cwd,
+        )
+      : undefined;
+    if (
+      generation !== sessionGeneration ||
+      turnId !== turnGeneration ||
+      openTurn !== turn
+    )
+      return;
     pi.appendEntry("resilience.turn-settled", settled);
-    if (failed) {
-      const required = await appendRecoveryRequired(
-        "final_failure",
-        openTurn.marker,
-        openTurn.toolMayHaveMutatedWorkspace,
-      );
+    if (required) {
+      rememberRecovery(required);
+      pi.appendEntry("resilience.recovery-required", required);
       // Das Gate sperrt nur bei möglicher Mutation; ein Fehlturn ohne jede
       // Workspace-Spur verlangt eine Fortsetzungs-Anweisung, keinen Check.
       gate = gateRequiresInspection(required) ? { required } : undefined;
-      await updateRecoveryStatus();
     }
     openTurn = undefined;
+    if (required) await updateRecoveryStatus();
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
+    sessionGeneration += 1;
+    turnGeneration += 1;
+    openTurn = undefined;
     activeContext = undefined;
     gate = undefined;
     pendingRecovery = undefined;
@@ -544,31 +637,55 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       "Inspect the workspace after an interrupted or failed turn and release the recovery write gate.",
     parameters: Type.Object({}),
     executionMode: "sequential",
-    async execute(_id, _params, _signal, _onUpdate, ctx) {
-      const result = await collectWorkspaceSnapshot(ctx.cwd);
+    async execute(_id, _params, signal, _onUpdate, ctx) {
+      const generation = sessionGeneration;
+      const checkedGate = gate;
+      const result = await collectWorkspaceSnapshot(ctx.cwd, { signal });
       if (!result.ok) {
         throw new Error(
-          `Recovery-Check fehlgeschlagen: kein Workspace-Snapshot (${result.error.message}). Die Schreibsperre bleibt bestehen.`,
+          `Recovery-Check fehlgeschlagen: Workspace-Snapshot nicht erfassbar ` +
+            `(${result.error.code}: ${result.error.message}). Die ` +
+            `Schreibsperre bleibt bestehen, bis der Zustand geklärt ist. ` +
+            `Nicht-destruktiver Ausweg: prüfe manuell \`git status --short\` ` +
+            `und \`git log -1\` in ${ctx.cwd}; behebe die genannte Ursache ` +
+            `(z. B. fehlendes Git-Binary, beschädigtes Repository, ` +
+            `Berechtigungsproblem) und rufe recovery_check danach erneut auf. ` +
+            `Führe keine pauschale Bereinigung (\`git reset --hard\`, ` +
+            `\`git clean -fd\`) aus — das kann nicht wiederherstellbare ` +
+            `Arbeit löschen.`,
         );
       }
       const snapshot = result.snapshot;
       let gitStatus: string;
       try {
-        gitStatus = gitText(ctx.cwd, ["status", "--short"]);
+        gitStatus = await gitText(ctx.cwd, ["status", "--short"], signal);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(
-          `Recovery-Check fehlgeschlagen: git status nicht lesbar (${message}). Die Schreibsperre bleibt bestehen.`,
+          `Recovery-Check fehlgeschlagen: git status nicht lesbar (${message}). ` +
+            `Die Schreibsperre bleibt bestehen, bis der Zustand geklärt ist. ` +
+            `Nicht-destruktiver Ausweg: prüfe manuell \`git status --short\` ` +
+            `in ${ctx.cwd} und behebe die genannte Ursache, statt den ` +
+            `Workspace pauschal zurückzusetzen.`,
         );
       }
       let diffStat = "";
       try {
-        diffStat = gitText(ctx.cwd, ["diff", "--stat"]);
+        diffStat = await gitText(ctx.cwd, ["diff", "--stat"], signal);
       } catch {
         diffStat = "(Diff-Zusammenfassung nicht verfügbar)";
       }
 
-      const openRequired = gate?.required;
+      if (
+        signal?.aborted ||
+        generation !== sessionGeneration ||
+        gate !== checkedGate
+      ) {
+        throw new Error(
+          "Recovery-Check abgebrochen: Sitzung oder Recovery-Gate hat sich während der Prüfung geändert. Erneut prüfen.",
+        );
+      }
+      const openRequired = checkedGate?.required;
       if (openRequired) {
         const record: RecoveryCheckedMarker = {
           schemaVersion: SCHEMA_VERSION,

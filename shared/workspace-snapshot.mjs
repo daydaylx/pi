@@ -26,7 +26,7 @@ const UNTRACKED_CHUNK_BYTES = 64 * 1024;
 // A function, not a cached object: process.env (notably PATH) can change
 // after this module is first imported, and every call must see the current
 // value rather than a snapshot frozen at import time.
-function gitEnv() {
+export function gitEnv() {
   return { ...process.env, LC_ALL: "C", LANG: "C" };
 }
 
@@ -113,21 +113,21 @@ function hash(value) {
 }
 
 /**
- * mtime+size per changed path, as a plain sorted string — not a Git call at
+ * File metadata per changed path, as a plain sorted string — not a Git call at
  * all. `--name-status` alone cannot see a same-status content edit (a file
  * already modified getting modified again mid-capture is still just "M"),
  * and even `--numstat`/`--raw` miss same-line-count edits (numstat) or never
  * carry a real blob hash for the *working-tree* side of an unstaged diff
  * (raw reports it as `0000000`, confirmed empirically). A filesystem write
- * bumps mtime essentially always, on any real edit, staged or unstaged —
- * and stat() is cheap and proportional to the number of changed paths, not
- * diff size, same as the other cheap calls here.
+ * changes ctime even when an editor restores mtime. Include inode and mode
+ * to detect atomic replacements and permission changes as well. Index-only
+ * edits are covered separately by the index hash in collectCheapState().
  */
 function contentStamp(worktree, paths) {
   const entries = paths.map((path) => {
     try {
-      const stat = lstatSync(resolve(worktree, path));
-      return `${path}:${stat.mtimeMs}:${stat.size}`;
+      const stat = lstatSync(resolve(worktree, path), { bigint: true });
+      return `${path}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.size}:${stat.ino}:${stat.mode}`;
     } catch {
       return `${path}:missing`;
     }
@@ -143,7 +143,35 @@ function contentStamp(worktree, paths) {
  * sameGeneration).
  */
 function collectCheapState(worktree, timeoutMs) {
-  const head = runGitSync(worktree, ["rev-parse", "HEAD"], timeoutMs);
+  let head = runGitSync(worktree, ["rev-parse", "HEAD"], timeoutMs);
+  if (!head.ok && head.error.code === "git_command_failed") {
+    const symbolic = runGitSync(
+      worktree,
+      ["symbolic-ref", "--quiet", "HEAD"],
+      timeoutMs,
+    );
+    if (symbolic.ok) {
+      // An absent branch ref is a valid unborn HEAD. A corrupt ref, a
+      // missing commit object or any operational error must stay an error.
+      try {
+        execFileSync(
+          "git",
+          ["show-ref", "--verify", "--quiet", symbolic.value.trim()],
+          {
+            cwd: worktree,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: timeoutMs,
+            env: gitEnv(),
+          },
+        );
+      } catch (error) {
+        if (error.status === 1 && !error.stderr?.trim()) {
+          head = { ok: true, value: `unborn:${symbolic.value.trim()}` };
+        }
+      }
+    }
+  }
   if (!head.ok) return head;
   const stagedRaw = runGitSync(
     worktree,
@@ -163,6 +191,19 @@ function collectCheapState(worktree, timeoutMs) {
     timeoutMs,
   );
   if (!untrackedRaw.ok) return untrackedRaw;
+  const indexPath = runGitSync(
+    worktree,
+    ["rev-parse", "--git-path", "index"],
+    timeoutMs,
+  );
+  if (!indexPath.ok) return indexPath;
+  let indexHash;
+  try {
+    indexHash = hashFileSync(resolve(worktree, indexPath.value.trim()));
+  } catch (error) {
+    if (error.code === "ENOENT") indexHash = "missing";
+    else return snapshotError("read_failed", "Git-Index ist nicht lesbar.");
+  }
 
   let stagedStatus;
   let unstagedStatus;
@@ -195,6 +236,7 @@ function collectCheapState(worktree, timeoutMs) {
       unstagedRaw: unstagedRaw.value,
       untrackedRaw: untrackedRaw.value,
       contentStamp: contentStamp(worktree, changedPaths),
+      indexHash,
       stagedStatus,
       unstagedStatus,
       untracked,
@@ -208,7 +250,8 @@ function sameGeneration(before, after) {
     before.stagedRaw === after.stagedRaw &&
     before.unstagedRaw === after.unstagedRaw &&
     before.untrackedRaw === after.untrackedRaw &&
-    before.contentStamp === after.contentStamp
+    before.contentStamp === after.contentStamp &&
+    before.indexHash === after.indexHash
   );
 }
 
@@ -326,6 +369,16 @@ function hashGitOutput(worktree, args, { timeoutMs, signal } = {}) {
               stderrText ||
               `git ${args.join(" ")} schlug fehl (exit=${exitCode}, signal=${exitSignal ?? "-"}).`
             ).trim(),
+          ),
+        );
+        return;
+      }
+      if (!stdoutEnded || !stderrEnded) {
+        killGroup("SIGKILL");
+        resolvePromise(
+          snapshotError(
+            "git_command_failed",
+            "Git-Ausgabe wurde nicht vollständig geschlossen; kein gültiger Patch-Hash.",
           ),
         );
         return;
@@ -557,7 +610,7 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
   // (non-transient) collectCheapState failure — e.g. genuinely no
   // repository — still reports that specific, nameable cause instead of
   // masking it behind a generic unstable_workspace.
-  let lastCheapStateError;
+  let lastError;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     if (signal?.aborted) {
@@ -572,7 +625,7 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
       // Not necessarily permanent — e.g. a concurrent git process briefly
       // holding index.lock — so retry within budget rather than failing the
       // whole snapshot on what may be a transient collision.
-      lastCheapStateError = before;
+      lastError = before;
       continue;
     }
     // Test seam for mutation-during-capture testing (1.4): production
@@ -592,15 +645,22 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
         signal,
       }),
     ]);
-    if (!stagedPatch.ok) return stagedPatch;
-    if (!unstagedPatch.ok) return unstagedPatch;
+    if (!stagedPatch.ok || !unstagedPatch.ok) {
+      lastError = !stagedPatch.ok ? stagedPatch : unstagedPatch;
+      if (signal?.aborted || lastError.error.code === "git_unavailable")
+        return lastError;
+      continue;
+    }
 
     const untrackedResult = readUntrackedContent(
       worktree,
       before.value.untracked,
     );
     if (!untrackedResult.ok) {
-      if (untrackedResult.transient) continue;
+      if (untrackedResult.transient) {
+        lastError = undefined;
+        continue;
+      }
       return snapshotError(
         untrackedResult.error.code,
         untrackedResult.error.message,
@@ -609,10 +669,13 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
 
     const after = collectCheapState(worktree, timeoutMs);
     if (!after.ok) {
-      lastCheapStateError = after;
+      lastError = after;
       continue;
     }
-    if (!sameGeneration(before.value, after.value)) continue;
+    if (!sameGeneration(before.value, after.value)) {
+      lastError = undefined;
+      continue;
+    }
 
     return {
       ok: true,
@@ -626,7 +689,7 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
   }
 
   return (
-    lastCheapStateError ??
+    lastError ??
     snapshotError(
       "unstable_workspace",
       `Workspace änderte sich während der Snapshot-Erfassung (${maxAttempts} Versuche ausgeschöpft).`,

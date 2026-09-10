@@ -887,6 +887,42 @@ export const verificationSections = {
           "an incomplete run never carries a verdict",
         );
 
+        // F-03: a verdict whose workspace snapshot cannot be collected must
+        // not leave a *stale* prior binding looking current — an orphaned
+        // old verdict is more dangerous than none. Break the workspace's
+        // .git after two real runs already exist in the ledger, then feed a
+        // third, otherwise-passing run through.
+        rmSync(path.join(workspace, ".git"), { recursive: true, force: true });
+        await harness.runHooks(
+          "tool_result",
+          {
+            toolName: "subagent",
+            toolCallId: "verifier-call-3",
+            input: { agent: "verifier", task: "check" },
+            content: [{ type: "text", text: "irrelevant" }],
+            details: {
+              results: [
+                {
+                  agent: "verifier",
+                  exitCode: 0,
+                  finalOutput: "PASS\nAlles gut.",
+                },
+              ],
+            },
+          },
+          trusted,
+        );
+        eq(
+          queryCapabilities(),
+          {
+            workspaceRoot: undefined,
+            workspaceFingerprint: undefined,
+            verifierStatus: undefined,
+            verifierVerdict: undefined,
+          },
+          "F-03: a verdict whose workspace snapshot cannot be collected is discarded, not left bound to a stale prior fingerprint",
+        );
+
         await harness.runHooks("session_shutdown", {}, trusted);
         eq(
           queryCapabilities(),

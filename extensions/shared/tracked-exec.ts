@@ -13,8 +13,10 @@ export interface TrackedExecOptions {
   /** Hard timeout in milliseconds. */
   timeout?: number;
   /** Full environment for the child. Omit to inherit `process.env`. */
-  env?: Record<string, string>;
+  env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
+  /** Optional retained bytes per stream. Excess output is still drained. */
+  maxOutputBytes?: number;
   /** Test seam; production callers use the default. */
   killGraceMs?: number;
 }
@@ -24,6 +26,8 @@ export interface TrackedExecResult {
   stderr: string;
   code: number | null;
   killed: boolean;
+  stdoutTruncated?: true;
+  stderrTruncated?: true;
   /** Which channel triggered the kill, if any. */
   killReason?: "timeout" | "abort-signal";
 }
@@ -47,6 +51,10 @@ export function trackedExec(
 
     let stdout = "";
     let stderr = "";
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
     let killed = false;
     let killReason: TrackedExecResult["killReason"];
     let exited = false;
@@ -118,6 +126,8 @@ export function trackedExec(
         stderr,
         code: exitCode,
         killed,
+        ...(stdoutTruncated ? { stdoutTruncated: true as const } : {}),
+        ...(stderrTruncated ? { stderrTruncated: true as const } : {}),
         ...(killReason ? { killReason } : {}),
       });
     };
@@ -135,11 +145,23 @@ export function trackedExec(
     };
 
     const onStdoutData = (data: Buffer) => {
-      stdout += data.toString();
+      const remaining = Math.max(
+        0,
+        (options.maxOutputBytes ?? Infinity) - stdoutBytes,
+      );
+      stdout += data.subarray(0, remaining).toString();
+      stdoutBytes += Math.min(data.length, remaining);
+      stdoutTruncated ||= data.length > remaining;
       armPostExitTimer();
     };
     const onStderrData = (data: Buffer) => {
-      stderr += data.toString();
+      const remaining = Math.max(
+        0,
+        (options.maxOutputBytes ?? Infinity) - stderrBytes,
+      );
+      stderr += data.subarray(0, remaining).toString();
+      stderrBytes += Math.min(data.length, remaining);
+      stderrTruncated ||= data.length > remaining;
       armPostExitTimer();
     };
     const onStdoutEnd = () => {

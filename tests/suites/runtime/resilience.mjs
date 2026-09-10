@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { assert, eq } from "../../shared/assertions.mjs";
@@ -737,5 +738,160 @@ export const resilienceSections = {
         );
       }
     });
+  },
+
+  "resilience recovery gate under a large diff (F-02)": async (context) => {
+    const { section, resilience, modePermissions, planMode } = context;
+
+    await section(
+      "resilience recovery gate under a large diff (F-02)",
+      async () => {
+        if (!resilience) return;
+
+        function gitFixture(prefix) {
+          const cwd = mkdtempSync(path.join(tmpdir(), prefix));
+          const git = (args) =>
+            execFileSync("git", args, { cwd, encoding: "utf8" });
+          git(["init", "--quiet"]);
+          git(["config", "user.email", "resilience-fixture@example.test"]);
+          git(["config", "user.name", "Resilience Fixture"]);
+          return { cwd, git };
+        }
+
+        async function armGate(harness, ctx) {
+          await harness.runHooks("session_start", {}, ctx);
+          await harness.runHooks("before_agent_start", {}, ctx);
+          await harness.runHooks("agent_start", {}, ctx);
+          await harness.runHooks(
+            "message_update",
+            { assistantMessageEvent: { type: "text_start" } },
+            ctx,
+          );
+          await harness.runHooks(
+            "message_update",
+            {
+              assistantMessageEvent: {
+                type: "error",
+                error: { errorMessage: "" },
+              },
+            },
+            ctx,
+          );
+          await harness.runHooks(
+            "tool_execution_start",
+            { toolName: "edit", toolCallId: "gate-edit", args: {} },
+            ctx,
+          );
+          await harness.runHooks("agent_settled", {}, ctx);
+        }
+
+        // A large but valid diff must not leave the gate permanently
+        // unlockable (F-02's root cause): the streaming snapshot handles it,
+        // and recovery_check succeeds.
+        const { cwd: largeDiffRepo, git } = gitFixture(
+          "pi-resilience-largediff-",
+        );
+        try {
+          const lines = [];
+          for (let i = 0; i < 15000; i += 1)
+            lines.push(`line ${i} ${"x".repeat(30)}`);
+          writeFileSync(
+            path.join(largeDiffRepo, "big.txt"),
+            `${lines.join("\n")}\n`,
+          );
+          git(["add", "-A"]);
+          git(["commit", "-q", "-m", "base"]);
+          const changed = [];
+          for (let i = 0; i < 15000; i += 1)
+            changed.push(`line ${i} CHANGED ${"y".repeat(30)}`);
+          writeFileSync(
+            path.join(largeDiffRepo, "big.txt"),
+            `${changed.join("\n")}\n`,
+          );
+
+          const largeDiffHarness = createHarness();
+          planMode?.default(largeDiffHarness.api);
+          modePermissions.default(largeDiffHarness.api);
+          resilience.default(largeDiffHarness.api);
+          const largeDiffCtx = largeDiffHarness.makeContext({
+            cwd: largeDiffRepo,
+          });
+          await armGate(largeDiffHarness, largeDiffCtx);
+          eq(
+            latestStatus(largeDiffHarness, "recovery"),
+            "⚠ Recovery-Check offen",
+            "the gate arms even with a large diff present",
+          );
+
+          const recoveryTool = largeDiffHarness.tools.get("recovery_check");
+          const result = await recoveryTool.execute(
+            "check-1",
+            {},
+            undefined,
+            undefined,
+            largeDiffCtx,
+          );
+          assert(
+            result.content[0]?.text.includes("Recovery-Check abgeschlossen"),
+            "a large valid diff no longer permanently locks the recovery gate (F-02)",
+          );
+          eq(
+            latestStatus(largeDiffHarness, "recovery"),
+            undefined,
+            "the gate releases after a successful check even with a large diff",
+          );
+        } finally {
+          rmSync(largeDiffRepo, { recursive: true, force: true });
+        }
+
+        // A real snapshot defect (no .git) stays fail-closed, but with a
+        // cause and a non-destructive way out — never a reset/clean
+        // recommendation.
+        const brokenRepo = mkdtempSync(
+          path.join(tmpdir(), "pi-resilience-broken-"),
+        );
+        try {
+          const brokenHarness = createHarness();
+          planMode?.default(brokenHarness.api);
+          modePermissions.default(brokenHarness.api);
+          resilience.default(brokenHarness.api);
+          const brokenCtx = brokenHarness.makeContext({ cwd: brokenRepo });
+          await armGate(brokenHarness, brokenCtx);
+
+          const recoveryTool = brokenHarness.tools.get("recovery_check");
+          let thrown;
+          try {
+            await recoveryTool.execute(
+              "check-1",
+              {},
+              undefined,
+              undefined,
+              brokenCtx,
+            );
+          } catch (error) {
+            thrown = error;
+          }
+          assert(
+            thrown instanceof Error,
+            "recovery_check throws on a genuine snapshot defect (fail-closed, F-02)",
+          );
+          assert(
+            thrown.message.includes("no_repository"),
+            "the failure names the specific snapshot error category",
+          );
+          assert(
+            thrown.message.includes("keine pauschale Bereinigung"),
+            "the failure explicitly steers away from a destructive reset/clean, not just names the cause",
+          );
+          eq(
+            latestStatus(brokenHarness, "recovery"),
+            "⚠ Recovery-Check offen",
+            "the gate stays armed after a failed check — a real defect must not release the lock",
+          );
+        } finally {
+          rmSync(brokenRepo, { recursive: true, force: true });
+        }
+      },
+    );
   },
 };

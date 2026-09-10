@@ -328,10 +328,24 @@ export async function assessGitCommitVerifierGate(
 
   const result = await collectWorkspaceSnapshot(cwd);
   if (!result.ok) {
-    // Same precedent as setup-core's own workspaceSnapshot() wrapper: a
-    // snapshot that cannot be collected reports as unavailable, not as a
-    // block — this gate only ever acts on evidence it actually has.
-    return PERMITTED;
+    // F-01: a snapshot that cannot be collected must block visibly, not
+    // report PERMITTED. Without a snapshot this gate cannot know whether
+    // the diff touches a mandatory verifier path, and "cannot tell" is not
+    // evidence of safety — exactly the large-diff case the gate exists for
+    // (a diff big enough to ENOBUFS the old implementation was also big
+    // enough to plausibly touch a mandatory path). Every git commit blocks
+    // here while the snapshot is uncollectible, not only ones later proven
+    // to touch a mandatory path, because that determination itself requires
+    // the snapshot this branch doesn't have.
+    return {
+      blocked: true,
+      reason:
+        `Verifier-Pflicht kann nicht geprüft werden: Workspace-Snapshot nicht ` +
+        `erfassbar (${result.error.code}: ${result.error.message}). Ein ` +
+        `git commit ist erst nach Behebung möglich — eine Verifier-Pflicht ` +
+        `darf nie stillschweigend umgangen werden, nur weil sie nicht ` +
+        `geprüft werden konnte.`,
+    };
   }
 
   return assessVerifierCoverageForDiff(

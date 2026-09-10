@@ -1,5 +1,5 @@
 /**
- * Synchronous capability bridge for the resilience recovery gate.
+ * Promise-aware capability bridge for the resilience recovery gate.
  *
  * Same pattern as workflow-capabilities.ts: the permission layer asks, the
  * resilience extension answers during event dispatch. Die Guard-Schicht hält
@@ -35,16 +35,22 @@ const DEFAULT_SNAPSHOT: RecoveryStatusSnapshot = { armed: false };
 export async function requestRecoveryStatus(
   events: RecoveryEventBus,
 ): Promise<RecoveryStatusSnapshot> {
-  let pending:
-    RecoveryStatusSnapshot | Promise<RecoveryStatusSnapshot> | undefined;
+  const pending: Promise<unknown>[] = [];
   events.emit(RECOVERY_CAPABILITY_EVENTS.request, {
     respond(value: RecoveryStatusSnapshot | Promise<RecoveryStatusSnapshot>) {
-      if (pending === undefined) pending = value;
+      // Attach rejection handlers immediately, including to later replies
+      // that may settle while an earlier provider is still being awaited.
+      pending.push(Promise.resolve(value).catch(() => undefined));
     },
   } satisfies RecoveryStatusRequest);
-  if (pending === undefined) return DEFAULT_SNAPSHOT;
-  const resolved = await pending;
-  return isRecoveryStatusSnapshot(resolved) ? resolved : DEFAULT_SNAPSHOT;
+  if (pending.length === 0) return DEFAULT_SNAPSHOT;
+  for (const response of pending) {
+    const resolved = await response;
+    if (isRecoveryStatusSnapshot(resolved)) return resolved;
+  }
+  // A registered provider that cannot report its state is not evidence
+  // that writes are safe. Only an absent recovery extension defaults open.
+  return { armed: true };
 }
 
 export function isRecoveryStatusSnapshot(

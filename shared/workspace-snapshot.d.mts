@@ -60,3 +60,11 @@ export function collectWorkspaceSnapshot(
   worktree: string,
   options?: CollectWorkspaceSnapshotOptions,
 ): Promise<WorkspaceSnapshotResult>;
+
+/**
+ * `{ ...process.env, LC_ALL: "C", LANG: "C" }` — forces English git error
+ * text so callers that classify or match against it (this module's own
+ * classifyGitError, or a caller running its own git subprocess for related
+ * diagnostics) don't silently break on a localized host.
+ */
+export function gitEnv(): NodeJS.ProcessEnv;

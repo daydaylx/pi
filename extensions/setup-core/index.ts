@@ -269,6 +269,21 @@ export default function setupCore(
         verdict?: VerifierVerdict;
       }
     | undefined;
+  // Bumped by session_start/session_shutdown. The tool_result handler below
+  // now awaits a real snapshot collection (up to ~45s across retries) before
+  // writing lastVerifierRun — captured once per call so a session restart
+  // that lands mid-await is detectable and the stale write is dropped
+  // instead of silently repopulating state for a session it never ran in.
+  let sessionGeneration = 0;
+  // Verifier subagent calls are not sequential (unlike recovery_check, the
+  // subagent tool has no executionMode: "sequential"), so two tool_result
+  // events for two overlapping verifier delegations can have their async
+  // snapshot work interleave. Chaining every ledger update through this
+  // queue makes them apply in dispatch order instead of resolve order —
+  // otherwise whichever collectWorkspaceSnapshot() happens to settle last
+  // wins the shared lastVerifierRun slot, regardless of which tool call
+  // actually finished last.
+  let verifierLedgerQueue: Promise<void> = Promise.resolve();
 
   function auroraVerificationSnapshot(): FrontendVerificationSummary | null {
     if (lastSettledStatus === undefined) return null;
@@ -321,21 +336,49 @@ export default function setupCore(
     const record = extractVerifierRunRecord(event.details);
     if (record) {
       pi.appendEntry("verifier-run", record);
-      // Captured once, before the await: activeCwd is a shared mutable
-      // module variable that a concurrent session_start or another
-      // in-flight tool_result could reassign while this snapshot is being
-      // collected — the recorded root and the fingerprint it is paired with
-      // must come from the same point in time.
+      // Captured once, before any await: activeCwd/sessionGeneration are
+      // shared mutable module variables that a concurrent session_start or
+      // another in-flight tool_result could reassign while this snapshot is
+      // being collected — the recorded root and the fingerprint it is
+      // paired with must come from the same point in time, and a write
+      // belonging to an already-ended session must never land in the next
+      // one just because it happened to resolve late.
       const cwd = activeCwd;
-      const snapshot = await workspaceSnapshot(cwd);
-      if (snapshot) {
-        lastVerifierRun = {
-          workspaceRoot: cwd,
-          workspaceFingerprint: snapshot.fingerprint,
-          status: record.status,
-          verdict: record.verdict,
-        };
-      }
+      const generation = sessionGeneration;
+      const applyUpdate = async (): Promise<void> => {
+        if (generation !== sessionGeneration) return;
+        const snapshotResult = await collectWorkspaceSnapshot(cwd);
+        if (generation !== sessionGeneration) return;
+        if (snapshotResult.ok) {
+          lastVerifierRun = {
+            workspaceRoot: cwd,
+            workspaceFingerprint: snapshotResult.snapshot.fingerprint,
+            status: record.status,
+            verdict: record.verdict,
+          };
+        } else if (record.status === "completed") {
+          // F-03: a *verdict* whose workspace binding cannot be established
+          // must never leave a stale prior binding looking current for a
+          // workspace state nobody actually checked — an orphaned old PASS
+          // is more dangerous than no PASS at all, and the loss must be
+          // visible rather than silent. An incomplete run was never going
+          // to bind a verdict anyway (assessVerifierDedup already treats
+          // "incomplete" as no prior judgment), so it must not discard an
+          // unrelated, still-valid prior PASS just because its own
+          // post-run snapshot happened to fail.
+          lastVerifierRun = undefined;
+          pi.appendEntry("verifier-run-snapshot-unavailable", {
+            schemaVersion: 1,
+            timestamp: new Date().toISOString(),
+            verifierStatus: record.status,
+            errorCode: snapshotResult.error.code,
+          });
+        }
+      };
+      // Chained (not awaited-in-place first) so a failure in an earlier
+      // queued update can never break the chain for this or later ones.
+      verifierLedgerQueue = verifierLedgerQueue.then(applyUpdate, applyUpdate);
+      await verifierLedgerQueue;
     }
     const limited = limitSubagentToolResult(event);
     if (!limited || record?.status !== "incomplete") return limited;
@@ -353,6 +396,8 @@ export default function setupCore(
   });
 
   pi.on("session_start", (_event, ctx) => {
+    sessionGeneration += 1;
+    verifierLedgerQueue = Promise.resolve();
     activeCwd = ctx.cwd;
     trusted = ctx.isProjectTrusted();
     verificationLedger = {};
@@ -376,6 +421,7 @@ export default function setupCore(
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
+    const generation = sessionGeneration;
     const statusEnabled = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted())
       .config.verificationStatus.enabled;
     if (!statusEnabled) {
@@ -396,7 +442,7 @@ export default function setupCore(
         workspaceRoot: ctx.cwd,
       },
     );
-    if (!ctx.hasUI) return;
+    if (generation !== sessionGeneration || !ctx.hasUI) return;
     const statusChanged = status !== lastSettledStatus;
     lastSettledStatus = status;
     lastDeclaredRequiredIds = declaredIds;
@@ -408,6 +454,8 @@ export default function setupCore(
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
+    sessionGeneration += 1;
+    verifierLedgerQueue = Promise.resolve();
     verificationLedger = {};
     passedProfileIds = new Map();
     lastSettledStatus = undefined;
@@ -477,6 +525,13 @@ export default function setupCore(
     parameters: ProjectCheckParams,
     executionMode: "sequential",
     async execute(_id, params, signal, _onUpdate, ctx) {
+      const generation = sessionGeneration;
+      const assertCurrentSession = () => {
+        if (generation !== sessionGeneration)
+          toolError(
+            "Projektprüfung abgebrochen: Die Sitzung hat sich während der Prüfung geändert. Erneut prüfen.",
+          );
+      };
       const requested = requestedProfileIds(params as ProjectCheckParamsValue);
       if ("error" in requested) {
         toolError(requested.error);
@@ -514,11 +569,13 @@ export default function setupCore(
       const dependencyFailure = formatDependencyPreparationFailure(
         dependencyPreparation,
       );
+      assertCurrentSession();
       if (dependencyFailure) toolError(dependencyFailure);
 
       // Capture before execution: a later workspace change must make this
       // check stale even if the command itself succeeds.
       const checkSnapshot = await workspaceSnapshot(ctx.cwd);
+      assertCurrentSession();
       const reports: ProfileReport[] = [];
       for (const profileId of requested.ids) {
         const profile = loaded.profiles[profileId]!;
@@ -530,6 +587,7 @@ export default function setupCore(
           exec: (program, args, options) => exec(program, args, options),
         });
         const finishedAt = new Date().toISOString();
+        assertCurrentSession();
         if (result.ok)
           passedProfileIds.set(profileId, checkSnapshot?.fingerprint ?? "");
         reports.push({

@@ -1145,6 +1145,49 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
   }
 });
 
+await test("verifier dedup gate stays fail-open on a snapshot defect, unlike the commit gate", async () => {
+  if (!verifierPolicy) return;
+  // No .git here, so collectWorkspaceSnapshot() cannot produce a
+  // fingerprint. Unlike assessGitCommitVerifierGate (F-01, inverted above),
+  // the dedup gate must stay PERMITTED here: a snapshot it cannot collect is
+  // not evidence the diff is unchanged, so the safe reaction is to allow a
+  // fresh verifier run, never to block one. This is a deliberate asymmetry,
+  // not an oversight — see assessVerifierDedup's doc comment.
+  const cwd = mkdtempSync(join(tmpdir(), "pi-verifier-dedup-nosnapshot-"));
+  try {
+    const result = await verifierPolicy.assessVerifierDelegation(
+      {
+        toolName: "subagent",
+        input: {
+          agent: "verifier",
+          task: [
+            "Original User Request:\nDen Auftrag umsetzen.",
+            "Constraints / Non-Goals:\nKeine.",
+            "Delegated Question:\nErfüllt der Diff den Auftrag?",
+            "Implementation / Diff to verify:\n<relevanter Diff>",
+            "Pre-existing workspace state (vor der ersten Änderung dieses Tasks erfasst):\nclean",
+            "Pre-existing dirty-path fingerprints:\nkeine",
+            "Acceptance criteria: project_check verify besteht.",
+          ].join("\n\n"),
+        },
+      },
+      cwd,
+      {
+        workspaceRoot: cwd,
+        workspaceFingerprint: "fp-stale",
+        verifierStatus: "completed",
+        verifierVerdict: "PASS",
+      },
+    );
+    assert(
+      !result.blocked,
+      "an uncollectible snapshot never blocks a fresh verifier delegation, even against a cached PASS",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 await test("debugger delegations keep the generous agents/debugger.md timeout", () => {
   if (!verifierPolicy) return;
   const assess = (input) =>
@@ -1316,12 +1359,13 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
   );
 });
 
-await test("git commit gate routes through command detection and fails open without a workspace", async () => {
+await test("git commit gate routes through command detection and blocks visibly without a workspace (F-01)", async () => {
   if (!verifierPolicy) return;
   // No .git here at all, so collectWorkspaceSnapshot() cannot produce a
-  // diff — the gate must fail open rather than block on evidence it does
-  // not have. The path-matching/fingerprint logic itself is covered above
-  // via the pure assessVerifierCoverageForDiff, without touching real git.
+  // diff — the gate must block visibly rather than silently permit a commit
+  // it cannot evaluate. The path-matching/fingerprint logic itself is
+  // covered above via the pure assessVerifierCoverageForDiff, without
+  // touching real git.
   const cwd = mkdtempSync(join(tmpdir(), "pi-verifier-gate-"));
   try {
     const assess = (toolName, command) =>
@@ -1338,9 +1382,63 @@ await test("git commit gate routes through command detection and fails open with
       !(await assess("bash", "git status")).blocked,
       "a non-commit bash call never reaches snapshot collection",
     );
+    const blocked = await assess("bash", 'git commit -m "x"');
     assert(
-      !(await assess("bash", 'git commit -m "x"')).blocked,
-      "a commit call with no collectible workspace snapshot fails open",
+      blocked.blocked,
+      "a commit call with no collectible workspace snapshot blocks visibly — F-01, a snapshot failure must never silently permit a commit it cannot evaluate",
+    );
+    assert(
+      blocked.reason.includes("no_repository"),
+      "the block names the specific snapshot error category, not just a generic refusal",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("git commit gate blocks a large diff in a mandatory verifier path without a matching PASS (F-01/1.6)", async () => {
+  if (!verifierPolicy) return;
+  // Regression for the actual production defect (F-01): before the fix, a
+  // diff this large made collectWorkspaceSnapshot() throw ENOBUFS, which
+  // the old catch-and-PERMIT gate turned into a silent bypass of exactly
+  // this mandatory-path check. It must now block instead.
+  const cwd = mkdtempSync(join(tmpdir(), "pi-verifier-gate-largediff-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd });
+    execFileSync("git", ["config", "user.email", "test@example.test"], {
+      cwd,
+    });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd });
+    mkdirSync(join(cwd, "extensions", "permissions"), { recursive: true });
+    const lines = [];
+    for (let i = 0; i < 15000; i += 1)
+      lines.push(`// line ${i} ${"x".repeat(30)}`);
+    writeFileSync(
+      join(cwd, "extensions", "permissions", "seed.ts"),
+      `export const seed = 1;\n${lines.join("\n")}\n`,
+    );
+    execFileSync("git", ["add", "-A"], { cwd });
+    execFileSync("git", ["commit", "-q", "-m", "base"], { cwd });
+    const changed = [];
+    for (let i = 0; i < 15000; i += 1)
+      changed.push(`// line ${i} CHANGED ${"y".repeat(30)}`);
+    writeFileSync(
+      join(cwd, "extensions", "permissions", "seed.ts"),
+      `export const seed = 2;\n${changed.join("\n")}\n`,
+    );
+
+    const gate = await verifierPolicy.assessGitCommitVerifierGate(
+      { toolName: "bash", input: { command: 'git commit -m "x"' } },
+      cwd,
+      {},
+    );
+    assert(
+      gate.blocked,
+      "a large diff touching extensions/permissions/ without a matching PASS blocks the commit",
+    );
+    assert(
+      gate.reason.includes("extensions/permissions/seed.ts"),
+      "the block names the mandatory path the diff touches",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

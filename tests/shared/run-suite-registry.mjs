@@ -27,6 +27,7 @@ export const SECTION_SUITES = {
   "Aurora Inspector command": "runtime",
   "global shortcut regressions": "runtime",
   "resilience telemetry and recovery": "runtime",
+  "resilience recovery gate under a large diff (F-02)": "runtime",
   "web tool capability and boundaries": "runtime",
   "combined production extension stack": "runtime",
   "LSP transport, process and lifecycle (#93)": "lsp",
@@ -39,6 +40,7 @@ export const SECTION_SUITES = {
   "workspace snapshot fingerprint stability": "runtime",
   "workspace snapshot error categories": "runtime",
   "workspace snapshot mutation during capture": "runtime",
+  "snapshot gate asynchronous regressions": "runtime",
 };
 
 export const RUN_MJS_SUITES = [...new Set(Object.values(SECTION_SUITES))];
