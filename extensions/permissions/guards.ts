@@ -102,7 +102,7 @@ export function registerPermissionGuards(
     // Snapshot auch für den Dedup-Check gegen einen bereits abgeschlossenen
     // Verifier-Lauf nutzen kann.
     const verification = requestVerificationCapabilities(pi.events);
-    const verifierAssessment = assessVerifierDelegation(
+    const verifierAssessment = await assessVerifierDelegation(
       event,
       ctx.cwd,
       verification,
@@ -114,7 +114,7 @@ export function registerPermissionGuards(
     if (debuggerAssessment.blocked) {
       return { block: true, reason: debuggerAssessment.reason };
     }
-    const commitGate = assessGitCommitVerifierGate(
+    const commitGate = await assessGitCommitVerifierGate(
       event,
       ctx.cwd,
       verification,
@@ -125,7 +125,7 @@ export function registerPermissionGuards(
     // Das Recovery-Gate prüft vor der Planmodus-Freigabe, damit auch
     // Schreibzugriffe auf die Plandatei nach einem Fehlturn nicht
     // stillschweigend durchlaufen.
-    const recovery = requestRecoveryStatus(pi.events);
+    const recovery = await requestRecoveryStatus(pi.events);
     if (recoveryGateBlocks(recovery.armed, event, ctx.cwd)) {
       return { block: true, reason: recoveryBlockReason(recovery.reason) };
     }

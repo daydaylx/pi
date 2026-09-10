@@ -851,7 +851,7 @@ export const verificationSections = {
         // Fed back through the real gate, that exact snapshot must clear a
         // commit of the still-staged risk-path change — this is the
         // end-to-end loop the whole feature exists for.
-        const gate = verifierPolicy.assessGitCommitVerifierGate(
+        const gate = await verifierPolicy.assessGitCommitVerifierGate(
           { toolName: "bash", input: { command: 'git commit -m "x"' } },
           workspace,
           afterPass,

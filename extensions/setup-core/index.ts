@@ -300,12 +300,9 @@ export default function setupCore(
     });
   }
 
-  function workspaceSnapshot(cwd: string) {
-    try {
-      return collectWorkspaceSnapshot(cwd);
-    } catch {
-      return undefined;
-    }
+  async function workspaceSnapshot(cwd: string) {
+    const result = await collectWorkspaceSnapshot(cwd);
+    return result.ok ? result.snapshot : undefined;
   }
 
   // `subagent` is a package-defined custom tool, so the shipped overload set
@@ -315,19 +312,25 @@ export default function setupCore(
       event: "tool_result",
       handler: (
         event: Parameters<typeof limitSubagentToolResult>[0],
-      ) => unknown,
+      ) => unknown | Promise<unknown>,
     ) => void
-  )("tool_result", (event) => {
+  )("tool_result", async (event) => {
     // Verifier-Läufe werden strukturiert erfasst: incomplete-Läufe zählen
     // nie als unabhängige Verifikation und bekommen das sichtbar ins
     // Tool-Result geschrieben.
     const record = extractVerifierRunRecord(event.details);
     if (record) {
       pi.appendEntry("verifier-run", record);
-      const snapshot = workspaceSnapshot(activeCwd);
+      // Captured once, before the await: activeCwd is a shared mutable
+      // module variable that a concurrent session_start or another
+      // in-flight tool_result could reassign while this snapshot is being
+      // collected — the recorded root and the fingerprint it is paired with
+      // must come from the same point in time.
+      const cwd = activeCwd;
+      const snapshot = await workspaceSnapshot(cwd);
       if (snapshot) {
         lastVerifierRun = {
-          workspaceRoot: activeCwd,
+          workspaceRoot: cwd,
           workspaceFingerprint: snapshot.fingerprint,
           status: record.status,
           verdict: record.verdict,
@@ -372,7 +375,7 @@ export default function setupCore(
     });
   });
 
-  pi.on("agent_settled", (_event, ctx) => {
+  pi.on("agent_settled", async (_event, ctx) => {
     const statusEnabled = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted())
       .config.verificationStatus.enabled;
     if (!statusEnabled) {
@@ -386,7 +389,7 @@ export default function setupCore(
     const profiles = loadVerifyProfiles(ctx.cwd, ctx.isProjectTrusted());
     const declaredIds = declaredRequiredIds(profiles, ctx.isProjectTrusted());
     const status = verificationStatus(
-      workspaceSnapshot(ctx.cwd),
+      await workspaceSnapshot(ctx.cwd),
       verificationLedger,
       {
         declaredRequiredIds: declaredIds,
@@ -515,7 +518,7 @@ export default function setupCore(
 
       // Capture before execution: a later workspace change must make this
       // check stale even if the command itself succeeds.
-      const checkSnapshot = workspaceSnapshot(ctx.cwd);
+      const checkSnapshot = await workspaceSnapshot(ctx.cwd);
       const reports: ProfileReport[] = [];
       for (const profileId of requested.ids) {
         const profile = loaded.profiles[profileId]!;

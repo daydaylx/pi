@@ -13,6 +13,7 @@ import { webAccessSections } from "./runtime/web-access.mjs";
 import { shortcutsSections } from "./runtime/shortcuts.mjs";
 import { frontendProtocolSections } from "./runtime/frontend-protocol.mjs";
 import { frontendBridgeSections } from "./runtime/frontend-bridge.mjs";
+import { workspaceSnapshotSections } from "./runtime/workspace-snapshot.mjs";
 
 export const runtimeSections = {
   ...targetConfigSections,
@@ -29,4 +30,5 @@ export const runtimeSections = {
   ...shortcutsSections,
   ...frontendProtocolSections,
   ...frontendBridgeSections,
+  ...workspaceSnapshotSections,
 };

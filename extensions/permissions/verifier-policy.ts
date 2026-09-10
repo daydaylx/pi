@@ -9,10 +9,7 @@
  * die Guard-Schicht fängt jeden `subagent`-Aufruf unabhängig davon ab.
  */
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
-import {
-  collectWorkspaceSnapshot,
-  type WorkspaceSnapshot,
-} from "../../shared/workspace-snapshot.mjs";
+import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import type { VerificationCapabilitySnapshot } from "../shared/verification-capabilities.ts";
 import { matchingVerifierRequiredPaths } from "./verifier-required-paths.ts";
 import type { WorkflowAssessment } from "./workflow-policy.ts";
@@ -120,23 +117,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Turn-Budget, Provider-Fehler) zählt nie als Vorlauf — ein Retry bleibt
  * uneingeschränkt erlaubt, exakt wie beim Commit-Gate.
  */
-export function assessVerifierDedup(
+export async function assessVerifierDedup(
   task: string,
   cwd: string,
   verification: VerificationCapabilitySnapshot,
-): WorkflowAssessment {
+): Promise<WorkflowAssessment> {
   if (verification.verifierStatus !== "completed") return PERMITTED;
   if (verification.workspaceRoot !== cwd) return PERMITTED;
 
-  let snapshot: WorkspaceSnapshot | undefined;
-  try {
-    snapshot = collectWorkspaceSnapshot(cwd);
-  } catch {
-    // Gleiches Vorbild wie assessGitCommitVerifierGate: ohne Fingerprint
-    // keine Evidenz für "unverändert", also nicht blockieren.
+  const result = await collectWorkspaceSnapshot(cwd);
+  if (!result.ok) {
+    // A snapshot that cannot be collected is no evidence the diff is
+    // unchanged, so it must not block a fresh verifier run — the safe
+    // reaction to "don't know" here is to allow re-checking, never to
+    // prevent it.
     return PERMITTED;
   }
-  if (verification.workspaceFingerprint !== snapshot.fingerprint) {
+  if (verification.workspaceFingerprint !== result.snapshot.fingerprint) {
     return PERMITTED;
   }
   if (REVERIFICATION_JUSTIFICATION_PATTERN.test(task)) return PERMITTED;
@@ -157,11 +154,11 @@ export function assessVerifierDedup(
  * Prüft einen einzelnen `subagent`-Tool-Call. Management-Aktionen und alle
  * anderen Rollen laufen unverändert durch.
  */
-export function assessVerifierDelegation(
+export async function assessVerifierDelegation(
   event: ToolCallEvent,
   cwd: string,
   verification: VerificationCapabilitySnapshot,
-): WorkflowAssessment {
+): Promise<WorkflowAssessment> {
   if (event.toolName !== "subagent") return PERMITTED;
   const input = isRecord(event.input) ? event.input : {};
   if (typeof input.action === "string") return PERMITTED;
@@ -197,7 +194,7 @@ export function assessVerifierDelegation(
   if (errors.length > 0) {
     return { blocked: true, reason: errors.join(" ") };
   }
-  const dedup = assessVerifierDedup(task, cwd, verification);
+  const dedup = await assessVerifierDedup(task, cwd, verification);
   if (dedup.blocked) return dedup;
   // Das installierte pi-subagents-Paket eskaliert je nach Task-Wortlaut
   // (explizit oder implizit über inferLevel()) auf Acceptance-Level wie
@@ -319,20 +316,18 @@ export function assessVerifierCoverageForDiff(
  * Gating the commit itself is the point where a risky diff can still be
  * caught before it enters history at all.
  */
-export function assessGitCommitVerifierGate(
+export async function assessGitCommitVerifierGate(
   event: ToolCallEvent,
   cwd: string,
   verification: VerificationCapabilitySnapshot,
-): WorkflowAssessment {
+): Promise<WorkflowAssessment> {
   if (event.toolName !== "bash") return PERMITTED;
   const input = isRecord(event.input) ? event.input : {};
   const command = typeof input.command === "string" ? input.command : "";
   if (!bashTouchesGitCommit(command)) return PERMITTED;
 
-  let snapshot: WorkspaceSnapshot | undefined;
-  try {
-    snapshot = collectWorkspaceSnapshot(cwd);
-  } catch {
+  const result = await collectWorkspaceSnapshot(cwd);
+  if (!result.ok) {
     // Same precedent as setup-core's own workspaceSnapshot() wrapper: a
     // snapshot that cannot be collected reports as unavailable, not as a
     // block — this gate only ever acts on evidence it actually has.
@@ -340,8 +335,8 @@ export function assessGitCommitVerifierGate(
   }
 
   return assessVerifierCoverageForDiff(
-    snapshot.changedFiles,
-    snapshot.fingerprint,
+    result.snapshot.changedFiles,
+    result.snapshot.fingerprint,
     cwd,
     verification,
   );

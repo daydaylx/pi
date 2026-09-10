@@ -920,7 +920,7 @@ await test("recovery_check is a read-only plan-mode capability", () => {
   );
 });
 
-await test("verifier delegations require the full inspection contract", () => {
+await test("verifier delegations require the full inspection contract", async () => {
   if (!verifierPolicy) return;
   const completeTask = [
     "Original User Request:\nDen Recovery-Gate-Auftrag umsetzen.",
@@ -939,22 +939,28 @@ await test("verifier delegations require the full inspection contract", () => {
       verification,
     );
   assert(
-    !assess({ agent: "investigator", task: "anything" }).blocked,
+    !(await assess({ agent: "investigator", task: "anything" })).blocked,
     "other roles are not restricted by the verifier contract",
   );
   assert(
-    !assess({ action: "list" }).blocked,
+    !(await assess({ action: "list" })).blocked,
     "management actions bypass the verifier contract",
   );
-  assert(assess({ agent: "verifier" }).blocked, "a missing task is refused");
-  const incomplete = assess({ agent: "verifier", task: "Prüfe das kurz." });
+  assert(
+    (await assess({ agent: "verifier" })).blocked,
+    "a missing task is refused",
+  );
+  const incomplete = await assess({
+    agent: "verifier",
+    task: "Prüfe das kurz.",
+  });
   assert(incomplete.blocked, "a task without the contract sections is refused");
   assert(
     incomplete.reason.includes("Original User Request"),
     "the refusal names the missing sections",
   );
   assert(
-    !assess({ agent: "verifier", task: completeTask }).blocked,
+    !(await assess({ agent: "verifier", task: completeTask })).blocked,
     "a complete delegation passes",
   );
   const pilotGermanHeadings = [
@@ -965,7 +971,7 @@ await test("verifier delegations require the full inspection contract", () => {
     "## Akzeptanzkriterien\nTask-Checker besteht.",
   ].join("\n\n");
   assert(
-    !assess({ agent: "verifier", task: pilotGermanHeadings }).blocked,
+    !(await assess({ agent: "verifier", task: pilotGermanHeadings })).blocked,
     "the semantically complete German headings from the pilot pass",
   );
   const pilotWrappedHeadings = [
@@ -976,17 +982,19 @@ await test("verifier delegations require the full inspection contract", () => {
     "## Acceptance Criteria\nTask checker passes.",
   ].join("\n\n");
   assert(
-    !assess({ agent: "verifier", task: pilotWrappedHeadings }).blocked,
+    !(await assess({ agent: "verifier", task: pilotWrappedHeadings })).blocked,
     "parenthesized Markdown headings from the pilot pass",
   );
   assert(
-    assess({
-      agent: "verifier",
-      task: "Im Fließtext steht Original User Request, aber es fehlen die Pflichtblöcke und Akzeptanz.",
-    }).blocked,
+    (
+      await assess({
+        agent: "verifier",
+        task: "Im Fließtext steht Original User Request, aber es fehlen die Pflichtblöcke und Akzeptanz.",
+      })
+    ).blocked,
     "a prose mention does not masquerade as a required section",
   );
-  const budgeted = assess({
+  const budgeted = await assess({
     agent: "verifier",
     task: completeTask,
     turnBudget: { maxTurns: 5 },
@@ -995,7 +1003,7 @@ await test("verifier delegations require the full inspection contract", () => {
     budgeted.blocked && budgeted.reason.includes("turnBudget"),
     "a per-run turnBudget is refused for verifier delegations",
   );
-  const timedOut = assess({
+  const timedOut = await assess({
     agent: "verifier",
     task: completeTask,
     timeoutMs: 60_000,
@@ -1010,7 +1018,7 @@ await test("verifier delegations require the full inspection contract", () => {
     acceptance: "reviewed",
   };
   assert(
-    !assess(overridden).blocked,
+    !(await assess(overridden)).blocked,
     "an explicit acceptance:'reviewed' is normalized, not blocked",
   );
   eq(
@@ -1024,7 +1032,7 @@ await test("verifier delegations require the full inspection contract", () => {
     "the acceptance override carries a non-empty reason (required to disable the package's level check)",
   );
   const noAcceptance = { agent: "verifier", task: completeTask };
-  assess(noAcceptance);
+  await assess(noAcceptance);
   eq(
     noAcceptance.acceptance.level,
     "none",
@@ -1035,7 +1043,7 @@ await test("verifier delegations require the full inspection contract", () => {
     task: "anything",
     acceptance: "reviewed",
   };
-  assess(otherRole);
+  await assess(otherRole);
   eq(
     otherRole.acceptance,
     "reviewed",
@@ -1043,7 +1051,7 @@ await test("verifier delegations require the full inspection contract", () => {
   );
 });
 
-await test("verifier delegation is blocked on an unchanged, already-judged fingerprint", () => {
+await test("verifier delegation is blocked on an unchanged, already-judged fingerprint", async () => {
   if (!verifierPolicy) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-verifier-dedup-"));
   try {
@@ -1055,7 +1063,12 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
     writeFileSync(join(cwd, "a.txt"), "initial\n");
     execFileSync("git", ["add", "a.txt"], { cwd });
     execFileSync("git", ["commit", "-q", "-m", "init"], { cwd });
-    const cleanFingerprint = collectWorkspaceSnapshot(cwd).fingerprint;
+    const cleanSnapshot = await collectWorkspaceSnapshot(cwd);
+    assert(
+      cleanSnapshot.ok,
+      "the freshly initialized fixture repo produces a snapshot",
+    );
+    const cleanFingerprint = cleanSnapshot.snapshot.fingerprint;
 
     const completeTask = [
       "Original User Request:\nDen Auftrag umsetzen.",
@@ -1074,7 +1087,7 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
       );
 
     assert(
-      !assess({}).blocked,
+      !(await assess({})).blocked,
       "no prior verifier record at all is never blocked by dedup",
     );
 
@@ -1084,7 +1097,7 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
       verifierStatus: "completed",
       verifierVerdict: "PASS",
     };
-    const blocked = assess(passedHere);
+    const blocked = await assess(passedHere);
     assert(
       blocked.blocked,
       "an identical, already-PASSed fingerprint is refused",
@@ -1096,19 +1109,19 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
 
     const failedHere = { ...passedHere, verifierVerdict: "FAIL" };
     assert(
-      assess(failedHere).blocked,
+      (await assess(failedHere)).blocked,
       "a completed FAIL at the same fingerprint is refused too — repeating a failed run without a code change is still redundant",
     );
 
     const incompleteHere = { ...passedHere, verifierStatus: "incomplete" };
     assert(
-      !assess(incompleteHere).blocked,
+      !(await assess(incompleteHere)).blocked,
       "an incomplete prior run never counts as a prior judgment — retry stays allowed",
     );
 
     writeFileSync(join(cwd, "a.txt"), "changed\n");
     assert(
-      !assess(passedHere).blocked,
+      !(await assess(passedHere)).blocked,
       "an actually changed workspace clears the dedup gate even against a stale cached fingerprint",
     );
     writeFileSync(join(cwd, "a.txt"), "initial\n");
@@ -1118,13 +1131,13 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
       "Grund für erneute Prüfung:\nAndere Teilfrage als beim letzten Lauf.",
     ].join("\n\n");
     assert(
-      !assess(passedHere, justified).blocked,
+      !(await assess(passedHere, justified)).blocked,
       "an explicit re-verification justification overrides the dedup block even on an unchanged fingerprint",
     );
 
     const otherRoot = { ...passedHere, workspaceRoot: "/other-repo" };
     assert(
-      !assess(otherRoot).blocked,
+      !(await assess(otherRoot)).blocked,
       "a cached verdict for a different workspace root does not transfer",
     );
   } finally {
@@ -1303,7 +1316,7 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
   );
 });
 
-await test("git commit gate routes through command detection and fails open without a workspace", () => {
+await test("git commit gate routes through command detection and fails open without a workspace", async () => {
   if (!verifierPolicy) return;
   // No .git here at all, so collectWorkspaceSnapshot() cannot produce a
   // diff — the gate must fail open rather than block on evidence it does
@@ -1318,15 +1331,15 @@ await test("git commit gate routes through command detection and fails open with
         {},
       );
     assert(
-      !assess("write", 'git commit -m "x"').blocked,
+      !(await assess("write", 'git commit -m "x"')).blocked,
       "only bash calls are in scope, regardless of what the input contains",
     );
     assert(
-      !assess("bash", "git status").blocked,
+      !(await assess("bash", "git status")).blocked,
       "a non-commit bash call never reaches snapshot collection",
     );
     assert(
-      !assess("bash", 'git commit -m "x"').blocked,
+      !(await assess("bash", 'git commit -m "x"')).blocked,
       "a commit call with no collectible workspace snapshot fails open",
     );
   } finally {

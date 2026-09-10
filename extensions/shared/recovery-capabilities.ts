@@ -21,7 +21,9 @@ export interface RecoveryStatusSnapshot {
 }
 
 export interface RecoveryStatusRequest {
-  respond(snapshot: RecoveryStatusSnapshot): void;
+  respond(
+    snapshot: RecoveryStatusSnapshot | Promise<RecoveryStatusSnapshot>,
+  ): void;
 }
 
 export interface RecoveryEventBus {
@@ -30,16 +32,19 @@ export interface RecoveryEventBus {
 
 const DEFAULT_SNAPSHOT: RecoveryStatusSnapshot = { armed: false };
 
-export function requestRecoveryStatus(
+export async function requestRecoveryStatus(
   events: RecoveryEventBus,
-): RecoveryStatusSnapshot {
-  let snapshot: RecoveryStatusSnapshot | undefined;
+): Promise<RecoveryStatusSnapshot> {
+  let pending:
+    RecoveryStatusSnapshot | Promise<RecoveryStatusSnapshot> | undefined;
   events.emit(RECOVERY_CAPABILITY_EVENTS.request, {
-    respond(value: RecoveryStatusSnapshot) {
-      if (!snapshot && isRecoveryStatusSnapshot(value)) snapshot = value;
+    respond(value: RecoveryStatusSnapshot | Promise<RecoveryStatusSnapshot>) {
+      if (pending === undefined) pending = value;
     },
   } satisfies RecoveryStatusRequest);
-  return snapshot ?? DEFAULT_SNAPSHOT;
+  if (pending === undefined) return DEFAULT_SNAPSHOT;
+  const resolved = await pending;
+  return isRecoveryStatusSnapshot(resolved) ? resolved : DEFAULT_SNAPSHOT;
 }
 
 export function isRecoveryStatusSnapshot(

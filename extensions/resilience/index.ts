@@ -20,10 +20,7 @@ import {
   type RecoveryStatusRequest,
   type RecoveryStatusSnapshot,
 } from "../shared/recovery-capabilities.ts";
-import {
-  UI_STATUS_KEYS,
-  setTuiStatus,
-} from "../shared/workflow-status.ts";
+import { UI_STATUS_KEYS, setTuiStatus } from "../shared/workflow-status.ts";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import {
   customData,
@@ -50,20 +47,20 @@ function contextPercent(ctx: ExtensionContext): number | null {
   return ctx.getContextUsage()?.percent ?? null;
 }
 
-function workspaceFingerprint(cwd: string): string {
-  try {
-    return collectWorkspaceSnapshot(cwd).fingerprint;
-  } catch {
-    // A recovery decision must fail closed when Git/snapshot collection is not
-    // available: callers treat the unavailable value as changed/unsafe.
-    return "unavailable";
-  }
+async function workspaceFingerprint(cwd: string): Promise<string> {
+  const result = await collectWorkspaceSnapshot(cwd);
+  // A recovery decision must fail closed when Git/snapshot collection is not
+  // available: callers treat the unavailable value as changed/unsafe.
+  return result.ok ? result.snapshot.fingerprint : "unavailable";
 }
 
-function workspaceChanged(startFingerprint: string, cwd: string): boolean {
+async function workspaceChanged(
+  startFingerprint: string,
+  cwd: string,
+): Promise<boolean> {
   return (
     startFingerprint === "unavailable" ||
-    workspaceFingerprint(cwd) !== startFingerprint
+    (await workspaceFingerprint(cwd)) !== startFingerprint
   );
 }
 
@@ -209,7 +206,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
    * Der Recovery-Status für Guard und UI. Ein geprüftes Gate bleibt nur
    * offen, solange der Workspace-Fingerprint dem Prüfzeitpunkt entspricht.
    */
-  function recoverySnapshot(): RecoveryStatusSnapshot {
+  async function recoverySnapshot(): Promise<RecoveryStatusSnapshot> {
     if (!gate || !gateRequiresInspection(gate.required)) {
       return { armed: false };
     }
@@ -220,7 +217,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
         reason: gate.required.reason,
       };
     }
-    if (workspaceChanged(gate.checked.workspaceFingerprint, sessionCwd)) {
+    if (await workspaceChanged(gate.checked.workspaceFingerprint, sessionCwd)) {
       return {
         armed: true,
         turnStartedAt: gate.required.turnStartedAt,
@@ -230,9 +227,9 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     return { armed: false };
   }
 
-  function updateRecoveryStatus(): void {
+  async function updateRecoveryStatus(): Promise<void> {
     if (!activeContext) return;
-    const snapshot = recoverySnapshot();
+    const snapshot = await recoverySnapshot();
     setTuiStatus(
       activeContext,
       UI_STATUS_KEYS.recovery,
@@ -240,10 +237,10 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     );
   }
 
-  function appendFailure(
+  async function appendFailure(
     ctx: ExtensionContext,
     errorMessage: string | undefined,
-  ): void {
+  ): Promise<void> {
     if (!openTurn) return;
     const classification = classifyFailure(errorMessage, openTurn.phase);
     const diagnostic: FailureDiagnostic = {
@@ -260,7 +257,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
         ? { errorMessage: truncateErrorMessage(errorMessage) }
         : {}),
       phase: openTurn.phase,
-      workspaceChangedSinceTurnStart: workspaceChanged(
+      workspaceChangedSinceTurnStart: await workspaceChanged(
         openTurn.marker.workspaceFingerprint,
         sessionCwd,
       ),
@@ -273,12 +270,12 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     pi.appendEntry("resilience.failure", diagnostic);
   }
 
-  function armRecovery(
+  async function armRecovery(
     marker: TurnStartMarker,
     toolMayHaveMutatedWorkspace: boolean,
-  ): NonNullable<typeof pendingRecovery> {
+  ): Promise<NonNullable<typeof pendingRecovery>> {
     const recovery = {
-      workspaceWasChanged: workspaceChanged(
+      workspaceWasChanged: await workspaceChanged(
         marker.workspaceFingerprint,
         sessionCwd,
       ),
@@ -288,12 +285,12 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     return recovery;
   }
 
-  function appendRecoveryRequired(
+  async function appendRecoveryRequired(
     reason: RecoveryRequiredMarker["reason"],
     marker: TurnStartMarker,
     toolMayHaveMutatedWorkspace: boolean,
-  ): RecoveryRequiredMarker {
-    const recovery = armRecovery(marker, toolMayHaveMutatedWorkspace);
+  ): Promise<RecoveryRequiredMarker> {
+    const recovery = await armRecovery(marker, toolMayHaveMutatedWorkspace);
     const record: RecoveryRequiredMarker = {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
@@ -306,7 +303,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     return record;
   }
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     sessionCwd = ctx.cwd;
     activeContext = ctx;
     openTurn = undefined;
@@ -319,10 +316,14 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     if (prior.openTurn) {
       const existing = prior.requiredByTurn.get(prior.openTurn.timestamp);
       if (existing) {
-        armRecovery(prior.openTurn, existing.toolMayHaveMutatedWorkspace);
+        await armRecovery(prior.openTurn, existing.toolMayHaveMutatedWorkspace);
       } else {
         gate = {
-          required: appendRecoveryRequired("interrupted", prior.openTurn, false),
+          required: await appendRecoveryRequired(
+            "interrupted",
+            prior.openTurn,
+            false,
+          ),
         };
       }
     } else if (prior.finalFailure) {
@@ -338,25 +339,29 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
           prior.finalFailure.turnStartedAt,
         );
         if (existing) {
-          armRecovery(start, existing.toolMayHaveMutatedWorkspace);
+          await armRecovery(start, existing.toolMayHaveMutatedWorkspace);
         } else {
           gate = {
-            required: appendRecoveryRequired("final_failure", start, false),
+            required: await appendRecoveryRequired(
+              "final_failure",
+              start,
+              false,
+            ),
           };
         }
       }
     }
-    updateRecoveryStatus();
+    await updateRecoveryStatus();
   });
 
-  pi.on("before_agent_start", (_event, ctx) => {
+  pi.on("before_agent_start", async (_event, ctx) => {
     sessionCwd = ctx.cwd;
     const recovery = pendingRecovery;
     pendingRecovery = undefined;
     const marker: TurnStartMarker = {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
-      workspaceFingerprint: workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       provider: ctx.model?.provider ?? "unknown",
       model: ctx.model?.id ?? "unknown",
@@ -391,16 +396,16 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     openTurn.currentAttemptFailed = false;
   });
 
-  pi.on("after_provider_response", (event, ctx) => {
-    if (event.status >= 400) appendFailure(ctx, String(event.status));
+  pi.on("after_provider_response", async (event, ctx) => {
+    if (event.status >= 400) await appendFailure(ctx, String(event.status));
   });
 
-  pi.on("message_update", (event, ctx) => {
+  pi.on("message_update", async (event, ctx) => {
     if (!openTurn) return;
     const phase = phaseFromMessage(event);
     if (phase) openTurn.phase = phase;
     if (event.assistantMessageEvent.type === "error") {
-      appendFailure(ctx, event.assistantMessageEvent.error.errorMessage);
+      await appendFailure(ctx, event.assistantMessageEvent.error.errorMessage);
     }
   });
 
@@ -415,7 +420,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     if (openTurn) openTurn.phase = "post_tool";
   });
 
-  pi.on("session_before_compact", (event, ctx) => {
+  pi.on("session_before_compact", async (event, ctx) => {
     if (openTurn) openTurn.phase = "compaction";
     const marker: CompactionBoundaryMarker = {
       schemaVersion: SCHEMA_VERSION,
@@ -423,7 +428,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       boundary: "started",
       reason: event.reason,
       willRetry: event.willRetry,
-      workspaceFingerprint: workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
@@ -446,9 +451,9 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       handler: (
         event: SessionCompactFailedEvent,
         ctx: ExtensionContext,
-      ) => void,
+      ) => void | Promise<void>,
     ) => void
-  )("session_compact_failed", (event, ctx) => {
+  )("session_compact_failed", async (event, ctx) => {
     if (openTurn) openTurn.phase = "compaction";
     const marker: CompactionBoundaryMarker = {
       schemaVersion: SCHEMA_VERSION,
@@ -456,16 +461,16 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       boundary: "failed",
       reason: event.reason,
       willRetry: event.willRetry,
-      workspaceFingerprint: workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
       errorMessage: event.errorMessage,
     };
     pi.appendEntry("resilience.compaction-boundary", marker);
-    appendFailure(ctx, event.errorMessage);
+    await appendFailure(ctx, event.errorMessage);
   });
 
-  pi.on("session_compact", (event, ctx) => {
+  pi.on("session_compact", async (event, ctx) => {
     if (openTurn) openTurn.phase = "post_tool";
     const marker: CompactionBoundaryMarker = {
       schemaVersion: SCHEMA_VERSION,
@@ -473,19 +478,20 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       boundary: "completed",
       reason: event.reason,
       willRetry: event.willRetry,
-      workspaceFingerprint: workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
     pi.appendEntry("resilience.compaction-boundary", marker);
   });
 
-  pi.on("agent_end", (event, ctx) => {
+  pi.on("agent_end", async (event, ctx) => {
     const error = lastAssistantError(event);
-    if (error && !openTurn?.currentAttemptFailed) appendFailure(ctx, error);
+    if (error && !openTurn?.currentAttemptFailed)
+      await appendFailure(ctx, error);
   });
 
-  pi.on("agent_settled", (_event, ctx) => {
+  pi.on("agent_settled", async (_event, ctx) => {
     if (!openTurn) return;
     const failed = openTurn.currentAttemptFailed;
     const outcome: TurnSettledMarker["outcome"] = failed
@@ -497,14 +503,14 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
       turnStartedAt: openTurn.marker.timestamp,
-      workspaceFingerprint: workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
       outcome,
       observedFailureCount: openTurn.observedFailureCount,
       ...(failed ? { recoveryPending: true } : {}),
     };
     pi.appendEntry("resilience.turn-settled", settled);
     if (failed) {
-      const required = appendRecoveryRequired(
+      const required = await appendRecoveryRequired(
         "final_failure",
         openTurn.marker,
         openTurn.toolMayHaveMutatedWorkspace,
@@ -512,7 +518,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       // Das Gate sperrt nur bei möglicher Mutation; ein Fehlturn ohne jede
       // Workspace-Spur verlangt eine Fortsetzungs-Anweisung, keinen Check.
       gate = gateRequiresInspection(required) ? { required } : undefined;
-      updateRecoveryStatus();
+      await updateRecoveryStatus();
     }
     openTurn = undefined;
   });
@@ -539,22 +545,18 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({}),
     executionMode: "sequential",
     async execute(_id, _params, _signal, _onUpdate, ctx) {
-      let snapshot;
-      try {
-        snapshot = collectWorkspaceSnapshot(ctx.cwd);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : String(error);
+      const result = await collectWorkspaceSnapshot(ctx.cwd);
+      if (!result.ok) {
         throw new Error(
-          `Recovery-Check fehlgeschlagen: kein Workspace-Snapshot (${message}). Die Schreibsperre bleibt bestehen.`,
+          `Recovery-Check fehlgeschlagen: kein Workspace-Snapshot (${result.error.message}). Die Schreibsperre bleibt bestehen.`,
         );
       }
+      const snapshot = result.snapshot;
       let gitStatus: string;
       try {
         gitStatus = gitText(ctx.cwd, ["status", "--short"]);
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         throw new Error(
           `Recovery-Check fehlgeschlagen: git status nicht lesbar (${message}). Die Schreibsperre bleibt bestehen.`,
         );
@@ -577,7 +579,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
         pi.appendEntry("resilience.recovery-checked", record);
         gate = { required: openRequired, checked: record };
       }
-      updateRecoveryStatus();
+      await updateRecoveryStatus();
 
       const statusText = gitStatus.trim() || "(keine Änderungen)";
       const lines = [

@@ -36,6 +36,9 @@ export const SECTION_SUITES = {
   "LSP navigation and symbol tools (#96)": "lsp",
   "LSP command, status and trust (#97)": "lsp",
   "diff viewer regressions": "diff",
+  "workspace snapshot fingerprint stability": "runtime",
+  "workspace snapshot error categories": "runtime",
+  "workspace snapshot mutation during capture": "runtime",
 };
 
 export const RUN_MJS_SUITES = [...new Set(Object.values(SECTION_SUITES))];
