@@ -32,17 +32,6 @@
   Lücken sind seit Phase 5 weitgehend geschlossen (offen: verification.run).
   Baseline für Phase 2: Shortcuts→Commands in `shortcuts.ts` +
   `command-catalog.ts`; Event-Bus `aurora-ui/state/*`.
-- Aurora-Dashboard-Präsentation hat einen Besitzer: `ui.dashboard`
-  (`auto|compact|expanded|hidden`, Default `auto`) im zentralen Setup-Schema;
-  Umschaltung nur über `/dashboard` (Super+Q-Command-Center), kein neuer
-  Shortcut (`docs/decisions/019`). Phase und Verifikationsurteil werden getrennt
-  hergeleitet, teilen aber genau eine Staleness-Definition; `done` erfordert
-  idle plus aktuellen `READY`-Check. Routine-`verified` gehört dem Dashboard,
-  nicht dem Footer; failed/stale bleiben kritische Footer-Risiken.
-  Renderentscheidungen folgen Messwerten (~1 ms pro Widget-Frame).
-
-- Aurora Night bleibt die aktive UI; die normalen Permission-Level und
-  Trust-Grenzen bleiben erhalten.
 - Planmodus: nur `work`, `simple_plan`, `detailed_plan`. Der Plan ist
   unverbindlicher Markdown-Kontext und liegt sitzungsbezogen in der
   Runtime-Ablage (`~/.pi/agent/plans/<workspace>/<session>.md`), nicht im
@@ -50,9 +39,11 @@
   Freigabe (`docs/decisions/020-explicit-plan-approval.md`).
 - `shared/workspace-snapshot.mjs` liefert einen versionierten Workspace-
   Snapshot für `extensions/resilience/`, `extensions/setup-core/` und
-  `extensions/permissions/verifier-policy.ts`. Er erfasst `HEAD`, staged,
-  unstaged und untracked Änderungen, Renames und Deletes und speichert
-  keine Patches, Dateiinhalte oder absoluten Pfade. Die frühere
+  `extensions/permissions/verifier-policy.ts`. Es streamt Patch-Hashes,
+  erkennt Workspace-Mutationen mit begrenztem Retry und gibt typisierte
+  Fehler zurück; Commit- und Recovery-Gates bleiben bei Fehlern geschlossen.
+  Es erfasst `HEAD`, staged, unstaged und untracked Änderungen, Renames und
+  Deletes und speichert keine Patches, Dateiinhalte oder absoluten Pfade. Die frühere
   Benchmark-Harness (`benchmarks/harness/workspace-snapshot.mjs`, eigene
   Kopie mit eigenem Test) ist mit den Legacy-Benchmarks archiviert, siehe
   [`docs/benchmark-history.md`](benchmark-history.md); das Produktionsmodul
@@ -84,9 +75,6 @@
   Kacheln, Felder, Status-Pills und ab `wide` ein zweispaltiges Grid.
   Füllungen nur über die acht `Theme.bg`-Flächen; Warnton nutzt `inverse`.
   Unter 18 Spalten fallen Kacheln auf rahmenlose Zeilen zurück.
-- Größenklassen für Menüs und Fußzeile stehen gemeinsam in
-  `extensions/shared/layout.ts` (52×14 / 90×28 / 120×30) und werden nirgends
-  als Literal wiederholt.
 - Es gibt genau drei aktive Subagentenrollen — `investigator`, `debugger`,
   `verifier` (`docs/decisions/011`). Die `verifier`-Delegation ist
   risikobasiert: verpflichtend nur bei Sicherheits-, Permission-/Plan-Mode-,

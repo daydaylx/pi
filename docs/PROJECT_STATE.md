@@ -2,13 +2,12 @@
 
 ## Aktuelle Arbeit
 
-Pi Desktop-GUI nach Auftragspaket `pi_gui_arbeitsauftrag/` (Plan:
-`.agent/plans/current-plan.md`). **Phasen 0–8 abgeschlossen — das
-Auftragspaket ist vollständig abgearbeitet.** Phase 8 wurde durch die
-ausdrückliche Nutzerentscheidung beendet: **Option B — `pi gui` wird
-bevorzugte Oberfläche, `pi` (Aurora-TUI) bleibt Fallback**
-(`docs/gui-baseline/phase-8-report.md`). Keine automatische TUI-Reduktion;
-beide Oberflächen laufen gegen denselben Core.
+Audit-Remediation aus `pi-audit-remediation-improved-e8196d6/`: Phase 1 für
+F-01–F-03 abgeschlossen, Commit `a15ebb8` aufbauend auf `243820c`. Große
+Workspace-Diffs werden gestreamt erfasst; Commit-, Recovery- und
+Verifier-Gates handeln Snapshotdefekte konsistent fail-closed. Das
+unversionierte Audit-Paket war schon vor dieser Phase im Arbeitsbaum und
+bleibt außerhalb des Commits.
 
 ## Umgesetzt (dieser Auftrag)
 
@@ -81,21 +80,18 @@ beide Oberflächen laufen gegen denselben Core.
 
 ## Letzte Verifikation
 
-`project_check({ profile: "verify" })`: Exit 0, Pflichtabdeckung 1/1
-(Snapshot 58db4a2152ee). Runtime-Suite 1331/1331, UI-Suite 124,
-workflow-mode 381, LSP 182, diff 22, Patches 50, Audit sauber;
-Prettier/Typecheck/Knip/Coverage grün (frontend-bridge 19/19).
-Vollsuite 1656/1656. GUI-eigene Gates: Unit 8, Shortcut-Parität 5,
-Security 8, Stabilität 5, Bridge-E2E PASS, xvfb-Smokes plain+tools PASS
-(auch aus dem Linux-Paket). Live-TTY-Smoke weiterhin unbelegt (#137);
-Reports/Evidenz in docs/gui-baseline/.
+`npm --prefix npm run verify`: Exit 0 (Prettier, Typecheck, Knip, Coverage,
+Patches, GUI/RPC und Audit). Runtime 1481/1481, Workflow 599/599; fokussierte
+Phase-1-Regressionen 136 Assertions; unabhängiger Verifier PASS. Das in diesem
+Host nicht exponierte `project_check({ profile: "verify" })` konnte den
+Footer-/Ledger-Nachweis nicht schreiben.
 
 ## Nächste Schritte
 
-1. Beobachtungspunkte aus Entscheidung B im Alltag verfolgen: reale
-   Nutzungshäufigkeit, RAM/Startzeit, Langzeit-Session-Stabilität; bei
-   Widerlegung ist der Wechsel zu A verlustfrei möglich.
-2. Manuelle Sichtprüfung an einem realen Desktop + Issue-Triage der
-   Kandidaten nachholen (weiter offen).
-3. Kein Commits ohne Auftrag; `settings.json` enthält eine fremde
-   Änderung (Subagent-Modelle), die vor einem Commit zu trennen ist.
+1. Phase 2 des Audit-Pakets für F-04–F-10 vor einer Umsetzung erneut gegen
+   den aktuellen Produktstand validieren.
+2. Den kanonischen `project_check({ profile: "verify" })` in einer Sitzung
+   mit diesem Tool ausführen, damit Footer und Ledger den Stand `a15ebb8`
+   abbilden.
+3. GUI-Nutzungsbeobachtung und der offene TUI-Live-Smoke bleiben getrennte
+   Folgearbeiten.
