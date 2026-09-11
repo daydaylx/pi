@@ -1,11 +1,11 @@
 # Stufe-2-Medium Base-SHA-Freeze
 
-`STAGE2_BASE_SHA=702095b`
+`STAGE2_BASE_SHA=702095b76aed2840783de88364a59d3010bca03d`
 
 Commit: `fix(audit): close Phase 4 remediation gaps, freeze medium-series prep`
 (2026-09-11).
 
-Git-Tag gesetzt: `real-duel-stage2-medium-base` → `702095b`.
+Git-Tag gesetzt: `real-duel-stage2-medium-base` → `702095b76aed2840783de88364a59d3010bca03d`.
 
 ## Freigegeben nach
 
