@@ -404,6 +404,9 @@ export const resilienceSections = {
         ),
         "potentially mutating shell calls are blocked while armed",
       );
+      const recoveryRequestsBeforeRead = gateHarness.emitted.filter(
+        (entry) => entry.name === "recovery-status:request",
+      ).length;
       const freeRead = await gateHarness.runHooks(
         "tool_call",
         { toolName: "read", input: { path: "README.md" } },
@@ -413,6 +416,13 @@ export const resilienceSections = {
         freeRead.every((result) => !result?.block),
         "read-only tools stay available while armed",
       );
+      eq(
+        gateHarness.emitted.filter(
+          (entry) => entry.name === "recovery-status:request",
+        ).length,
+        recoveryRequestsBeforeRead,
+        "read-only tools do not trigger a redundant recovery snapshot",
+      );
       const freeDiagnosticBash = await gateHarness.runHooks(
         "tool_call",
         { toolName: "bash", input: { command: "git status --short" } },
@@ -421,6 +431,13 @@ export const resilienceSections = {
       assert(
         freeDiagnosticBash.every((result) => !result?.block),
         "diagnostic shell commands stay available while armed",
+      );
+      eq(
+        gateHarness.emitted.filter(
+          (entry) => entry.name === "recovery-status:request",
+        ).length,
+        recoveryRequestsBeforeRead,
+        "diagnostic shell commands do not trigger a redundant recovery snapshot",
       );
       const freeRecoveryCall = await gateHarness.runHooks(
         "tool_call",

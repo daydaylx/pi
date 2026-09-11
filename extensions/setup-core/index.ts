@@ -349,23 +349,47 @@ export default function setupCore(
         if (generation !== sessionGeneration) return;
         const snapshotResult = await collectWorkspaceSnapshot(cwd);
         if (generation !== sessionGeneration) return;
-        if (snapshotResult.ok) {
+        // F-04: A normal exit without a recognized verdict is a completed
+        // process but not evaluable evidence. Bind that fact to the current
+        // fingerprint so retry is allowed and no commit can borrow an older
+        // PASS. Other incomplete runs (timeout, provider error, ...) do not
+        // replace a still-valid evaluable binding when the snapshot is stable.
+        const hasEvaluableVerdict =
+          record.status === "completed" && record.verdict !== undefined;
+        if (snapshotResult.ok && hasEvaluableVerdict) {
           lastVerifierRun = {
             workspaceRoot: cwd,
             workspaceFingerprint: snapshotResult.snapshot.fingerprint,
             status: record.status,
             verdict: record.verdict,
           };
-        } else if (record.status === "completed") {
-          // F-03: a *verdict* whose workspace binding cannot be established
+        } else if (
+          snapshotResult.ok &&
+          record.status === "incomplete" &&
+          record.reason === "no-verdict"
+        ) {
+          lastVerifierRun = {
+            workspaceRoot: cwd,
+            workspaceFingerprint: snapshotResult.snapshot.fingerprint,
+            status: record.status,
+          };
+          pi.appendEntry("verifier-run-no-verdict", {
+            schemaVersion: 1,
+            timestamp: new Date().toISOString(),
+            verifierStatus: record.status,
+            note: "Completed verifier process without a recognized verdict; no prior verdict is retained as current evidence.",
+          });
+        } else if (
+          !snapshotResult.ok &&
+          (record.status === "completed" || record.reason === "no-verdict")
+        ) {
+          // F-03: a verdict whose workspace binding cannot be established
           // must never leave a stale prior binding looking current for a
           // workspace state nobody actually checked — an orphaned old PASS
           // is more dangerous than no PASS at all, and the loss must be
-          // visible rather than silent. An incomplete run was never going
-          // to bind a verdict anyway (assessVerifierDedup already treats
-          // "incomplete" as no prior judgment), so it must not discard an
-          // unrelated, still-valid prior PASS just because its own
-          // post-run snapshot happened to fail.
+          // visible rather than silent. A no-verdict run is likewise not
+          // allowed to retain an older PASS when its own workspace cannot be
+          // bound.
           lastVerifierRun = undefined;
           pi.appendEntry("verifier-run-snapshot-unavailable", {
             schemaVersion: 1,
@@ -374,6 +398,10 @@ export default function setupCore(
             errorCode: snapshotResult.error.code,
           });
         }
+        // For incomplete runs other than no-verdict with an ok snapshot, do
+        // not replace the previous evaluable binding. A missing snapshot
+        // clears the binding below for completed verdicts; no-verdict is
+        // handled explicitly above and never supplies commit coverage.
       };
       // Chained (not awaited-in-place first) so a failure in an earlier
       // queued update can never break the chain for this or later ones.
@@ -425,6 +453,7 @@ export default function setupCore(
     const statusEnabled = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted())
       .config.verificationStatus.enabled;
     if (!statusEnabled) {
+      if (generation !== sessionGeneration) return;
       if (lastSettledStatus !== undefined && ctx.hasUI)
         ctx.ui.setStatus("verification", undefined);
       lastSettledStatus = undefined;
@@ -442,13 +471,13 @@ export default function setupCore(
         workspaceRoot: ctx.cwd,
       },
     );
-    if (generation !== sessionGeneration || !ctx.hasUI) return;
+    if (generation !== sessionGeneration) return;
     const statusChanged = status !== lastSettledStatus;
     lastSettledStatus = status;
     lastDeclaredRequiredIds = declaredIds;
     // Keep the persistent footer quiet when its label is unchanged, but still
     // publish the current evidence so Aurora can clear a stale local edit flag.
-    if (statusChanged)
+    if (ctx.hasUI && statusChanged)
       ctx.ui.setStatus("verification", formatVerificationStatus(status));
     publishAuroraVerification();
   });
@@ -630,6 +659,9 @@ export default function setupCore(
           ctx.cwd,
           checkSnapshot.fingerprint,
         );
+        // F-05: Publish verification status to frontend/RPC immediately after
+        // ledger update, not just on agent_settled.
+        publishAuroraVerification();
       }
       // Report accumulated coverage, not just this call's: the agent needs to
       // know what is still open. Nothing here runs a check on its own.

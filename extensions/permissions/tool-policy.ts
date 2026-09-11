@@ -40,6 +40,7 @@ export function decideTool(
     unknownTools: ConfiguredPolicyAction;
     bash: ConfiguredPolicyAction;
   },
+  options: { allowOutsideProjectRead?: boolean } = {},
 ): PolicyDecision {
   if (event.toolName === "bash") {
     if (permissionLevel === "project-write") {
@@ -75,6 +76,7 @@ export function decideTool(
       "read",
       toolPath(event) ?? ".",
       cwd,
+      { allowOutsideProjectRead: options.allowOutsideProjectRead },
     );
   }
 

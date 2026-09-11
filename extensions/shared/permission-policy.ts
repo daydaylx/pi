@@ -189,10 +189,12 @@ function ask(reason: string, hard = false): PolicyDecision {
  * behaviour here) treated every ordinary `node_modules/.bin/<tool>`
  * invocation as an escape, since npm always links `.bin/*` — ubiquitous and
  * project-internal, not an escape. This walks the path segment by segment,
- * following each symlink to its real target so only a target that actually
- * leaves the project counts. A component that does not exist yet (a file
- * about to be created) is appended literally. A broken symlink cannot be
- * verified as staying inside the project, so it fails closed (escape).
+ * following each symlink to its real target so only a symlink target that
+ * actually leaves the base counts. A plain path outside the base is not
+ * itself a symlink escape; the caller handles the ordinary project boundary
+ * separately. A component that does not exist yet (a file about to be
+ * created) is appended literally. A broken symlink cannot be verified as
+ * staying inside the base, so it fails closed (escape).
  */
 function hasSymlinkComponent(basePath: string, candidatePath: string): boolean {
   const rel = relative(basePath, candidatePath);
@@ -221,11 +223,12 @@ function hasSymlinkComponent(basePath: string, candidatePath: string): boolean {
       } catch {
         return true;
       }
+      if (!isInside(realBase, current)) return true;
       continue;
     }
     current = next;
   }
-  return !isInside(realBase, current);
+  return false;
 }
 
 export function resolvePathScope(
@@ -238,7 +241,7 @@ export function resolvePathScope(
   return {
     absolutePath,
     insideProject,
-    symlinkEscape: insideProject && hasSymlinkComponent(root, absolutePath),
+    symlinkEscape: hasSymlinkComponent(root, absolutePath),
   };
 }
 
@@ -295,12 +298,6 @@ export function containsUnquotedVariableExpansion(command: string): boolean {
   return false;
 }
 
-function isSystemPath(path: string): boolean {
-  return SYSTEM_PATHS.some(
-    (root) => path === root || path.startsWith(`${root}/`),
-  );
-}
-
 /** True for a path inside the project that later executes what is written. */
 function isProtectedProjectPath(absolutePath: string, cwd: string): boolean {
   const rel = relative(resolve(cwd), absolutePath).split(sep).join("/");
@@ -322,6 +319,8 @@ export interface ProtectedWritePath {
 
 export interface DecideFileAccessOptions {
   protectedWritePath?: ProtectedWritePath;
+  /** Set only when workflow-policy has approved a documented external read. */
+  allowOutsideProjectRead?: boolean;
 }
 
 export function decideFileAccess(
@@ -331,7 +330,7 @@ export function decideFileAccess(
   cwd: string,
   options: DecideFileAccessOptions = {},
 ): PolicyDecision {
-  const { protectedWritePath } = options;
+  const { protectedWritePath, allowOutsideProjectRead = false } = options;
   const scope = resolvePathScope(rawPath, cwd);
   const isReadRestricted = permissionLevel === "readonly";
 
@@ -354,7 +353,10 @@ export function decideFileAccess(
             `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${protectedWritePath?.label ?? "keine Datei"}.`,
           );
     }
-    if (!scope.insideProject || scope.symlinkEscape) {
+    if (
+      (!scope.insideProject || scope.symlinkEscape) &&
+      !allowOutsideProjectRead
+    ) {
       return deny(
         "Diese Zugriffsstufe blockiert Lesezugriff außerhalb des Projekts.",
       );
@@ -362,29 +364,9 @@ export function decideFileAccess(
     return ALLOW;
   }
 
-  if (!scope.insideProject && operation === "read") {
-    return permissionLevel === "yolo"
-      ? deny("Harte Projektgrenze: externer Lesezugriff ist in YOLO blockiert.")
-      : ask(`Lesezugriff außerhalb des Projekts: ${scope.absolutePath}`);
-  }
-  if (operation === "write" && scope.symlinkEscape) {
-    return permissionLevel === "yolo"
-      ? deny("Harte Symlink-Grenze: Schreibzugriff wurde blockiert.")
-      : ask(
-          "Schreibzugriff über einen Symlink außerhalb der Projektgrenze",
-          true,
-        );
-  }
-  if (operation === "write" && isSystemPath(scope.absolutePath)) {
-    return permissionLevel === "yolo"
-      ? deny("Harte Systemgrenze: Änderung am Systempfad wurde blockiert.")
-      : ask(`Änderung am Systempfad ${scope.absolutePath}`, true);
-  }
-  if (operation === "write" && !scope.insideProject) {
-    return permissionLevel === "yolo"
-      ? deny("Harte Projektgrenze: externe Änderung wurde blockiert.")
-      : ask(`Änderung außerhalb des Projekts: ${scope.absolutePath}`);
-  }
+  // Project, system and symlink boundaries are owned by workflow-policy and
+  // have already been checked by guards.ts. This layer handles only the
+  // permission level once that hard boundary has passed.
   if (
     operation === "write" &&
     isProtectedProjectPath(scope.absolutePath, cwd)
@@ -1132,19 +1114,141 @@ function executableToken(tokens: string[]): {
   };
 }
 
-function opaqueInterpreter(command: string): string | undefined {
+function opaqueInterpreterInvocations(
+  command: string,
+): Array<{ executable: string; args: string[] }> {
   const parsed = parseReadOnlyShell(command);
-  if (parsed.error) return undefined;
-  for (const tokens of parsed.segments) {
+  if (parsed.error) return [];
+  return parsed.segments.flatMap((tokens) => {
     const { executable, args } = executableToken(tokens);
     if (
-      OPAQUE_INTERPRETERS.has(executable) &&
-      !(args.length === 1 && ["-v", "-V", "--version"].includes(args[0]))
+      !OPAQUE_INTERPRETERS.has(executable) ||
+      (args.length === 1 && ["-v", "-V", "--version"].includes(args[0]))
+    ) {
+      return [];
+    }
+    return [{ executable, args }];
+  });
+}
+
+function opaqueInterpreter(command: string): string | undefined {
+  return opaqueInterpreterInvocations(command)[0]?.executable;
+}
+
+/**
+ * F-06 chooses the targeted project-write policy: inline/stdin code and
+ * explicitly external interpreter scripts need confirmation, while a literal
+ * project-internal script path remains ordinary project work. This is
+ * deliberately only a command-shape check. It does not inspect or sandbox the
+ * script body; a confirmed or project-internal script can still perform any
+ * operation available to the process.
+ */
+const INLINE_INTERPRETER_FLAGS = new Set([
+  "-c",
+  "--command",
+  "-e",
+  "--eval",
+  "-p",
+  "--print",
+  "-r",
+]);
+const INTERPRETER_PATH_OPTIONS = new Set([
+  "-I",
+  "-f",
+  "--file",
+  "--import",
+  "--include",
+  "--loader",
+  "--preload",
+  "--require",
+]);
+const SHELL_INTERPRETERS = new Set([
+  "bash",
+  "dash",
+  "ksh",
+  "sh",
+  "zsh",
+]);
+const REDIRECTED_STDIN_INTERPRETER =
+  /(?:^|[|;&\n])\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)(?:env\s+)?(?:\S+\/)?(bash|dash|deno|ksh|lua|node|perl|php|python|python3|ruby|sh|zsh)\b[^|;&\n]*<(?!=)/i;
+
+function isInlineInterpreter(executable: string, args: string[]): boolean {
+  if (executable === "deno" && args[0]?.toLowerCase() === "eval") return true;
+  return args.some(
+    (arg) =>
+      INLINE_INTERPRETER_FLAGS.has(arg) ||
+      /^(?:--(?:command|eval|print)=)/i.test(arg) ||
+      (SHELL_INTERPRETERS.has(executable) && /^-[^-]*c/i.test(arg)),
+  );
+}
+
+function isStdinInterpreter(args: string[]): boolean {
+  return (
+    args.length === 0 ||
+    args.includes("-") ||
+    args.every((arg) => arg.startsWith("-"))
+  );
+}
+
+function interpreterPathArguments(args: string[]): string[] {
+  const paths: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "-") continue;
+    if (arg === "--") {
+      paths.push(...args.slice(index + 1).filter((value) => value !== "-"));
+      break;
+    }
+    if (!arg.startsWith("-")) {
+      paths.push(arg);
+      continue;
+    }
+    const equals = arg.indexOf("=");
+    const option = equals > 0 ? arg.slice(0, equals) : arg;
+    if (equals > 0 && INTERPRETER_PATH_OPTIONS.has(option)) {
+      paths.push(arg.slice(equals + 1));
+    } else if (
+      INTERPRETER_PATH_OPTIONS.has(option) &&
+      args[index + 1] !== undefined
+    ) {
+      paths.push(args[index + 1]);
+      index += 1;
+    }
+  }
+  return paths;
+}
+
+function isProjectInternalInterpreterPath(value: string, cwd: string): boolean {
+  if (
+    value === "-" ||
+    value === "~" ||
+    value.startsWith("~/") ||
+    value.includes("://")
+  ) {
+    return value === "-";
+  }
+  const scope = resolvePathScope(value, cwd);
+  return scope.insideProject && !scope.symlinkEscape;
+}
+
+function projectWriteInterpreter(command: string, cwd: string): string | undefined {
+  const invocations = opaqueInterpreterInvocations(command);
+  for (const { executable, args } of invocations) {
+    if (isInlineInterpreter(executable, args) || isStdinInterpreter(args)) {
+      return executable;
+    }
+    if (
+      interpreterPathArguments(args).some(
+        (value) => !isProjectInternalInterpreterPath(value, cwd),
+      )
     ) {
       return executable;
     }
   }
-  return undefined;
+  // parseReadOnlyShell intentionally rejects redirections. Still identify the
+  // common `python < script.py`/heredoc shape as stdin code instead of letting
+  // it fall through to project-write's unconditional allow.
+  return REDIRECTED_STDIN_INTERPRETER.exec(command)?.[1]?.toLowerCase();
 }
 
 export function decideBash(
@@ -1215,7 +1319,11 @@ export function decideBash(
     ) {
       return deny("Harte Systemgrenze: System-Paketoperation wurde blockiert.");
     }
-    const interpreter = opaqueInterpreter(trimmed);
+    // The structural shell parser intentionally rejects redirections. Reuse
+    // the targeted fallback so YOLO cannot bypass the opaque-interpreter hard
+    // boundary with `python3 < script.py` or a heredoc-shaped invocation.
+    const interpreter =
+      opaqueInterpreter(trimmed) ?? projectWriteInterpreter(trimmed, cwd);
     if (interpreter) {
       return deny(
         `Harte System-/Secret-Grenze: opaker Interpreteraufruf (${interpreter}) wurde blockiert.`,
@@ -1249,6 +1357,13 @@ export function decideBash(
   }
   if (likelyExternalWrite(trimmed, cwd)) {
     return ask("Bash-Änderung außerhalb des aktuellen Projekts");
+  }
+  const interpreter = projectWriteInterpreter(trimmed, cwd);
+  if (interpreter) {
+    return ask(
+      `Opaker Interpreteraufruf (${interpreter}) benötigt Bestätigung: ` +
+        `Inline-/stdin-Code oder ein externes Skript wird nicht still ausgeführt.`,
+    );
   }
   return ALLOW;
 }

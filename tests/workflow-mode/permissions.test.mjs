@@ -12,7 +12,17 @@ import { assert, eq, test } from "../shared/assertions.mjs";
 import { importModule as load } from "../shared/jiti-loader.mjs";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 
+const originalRuntimeRoot = process.env.PI_RUNTIME_ROOT;
+const runtimeFixtureRoot = mkdtempSync(join(tmpdir(), "pi-runtime-policy-"));
+writeFileSync(
+  join(runtimeFixtureRoot, "package.json"),
+  JSON.stringify({ name: "@earendil-works/pi-coding-agent" }),
+);
+writeFileSync(join(runtimeFixtureRoot, "README.md"), "runtime docs\n");
+process.env.PI_RUNTIME_ROOT = runtimeFixtureRoot;
 const workflowPolicy = await load("extensions/permissions/workflow-policy.ts");
+if (originalRuntimeRoot === undefined) delete process.env.PI_RUNTIME_ROOT;
+else process.env.PI_RUNTIME_ROOT = originalRuntimeRoot;
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
 const toolPolicy = await load("extensions/permissions/tool-policy.ts");
 const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
@@ -63,6 +73,63 @@ await test("hard path boundaries block secrets and anything outside the project"
   assert(
     !assess("write", "extensions/example.ts").blocked,
     "a project write passes through to the level policy",
+  );
+});
+
+await test("the complete guarded file path owns external boundaries and honors runtime docs", () => {
+  if (!workflowPolicy || !toolPolicy) return;
+  const cwd = process.cwd();
+  const configured = { unknownTools: "ask", bash: "allow" };
+  const levels = ["readonly", "project-write", "confirm-all", "yolo"];
+  const guardedDecision = (level, toolName, path) => {
+    const event = { toolName, input: { path } };
+    const assessment = workflowPolicy.assessWorkflowTool(event, cwd);
+    if (assessment.blocked) {
+      return { action: "block", reason: assessment.reason };
+    }
+    return toolPolicy.decideTool(level, event, cwd, configured, {
+      allowOutsideProjectRead: assessment.allowOutsideProjectRead,
+    });
+  };
+
+  for (const level of levels) {
+    eq(
+      guardedDecision(level, "read", "../outside.txt").action,
+      "block",
+      `${level} blocks an external read in the complete guard path`,
+    );
+    eq(
+      guardedDecision(level, "write", "../outside.txt").action,
+      "block",
+      `${level} blocks an external write in the complete guard path`,
+    );
+  }
+
+  const runtimeDocs = join(runtimeFixtureRoot, "README.md");
+  const runtimeEscapeTarget = mkdtempSync(join(tmpdir(), "pi-runtime-target-"));
+  const runtimeSymlink = join(runtimeFixtureRoot, "linked-outside");
+  symlinkSync(runtimeEscapeTarget, runtimeSymlink);
+  for (const level of levels) {
+    eq(
+      guardedDecision(level, "read", runtimeDocs).action,
+      "allow",
+      `${level} allows the documented runtime README exception end-to-end`,
+    );
+    eq(
+      guardedDecision(level, "read", join(runtimeSymlink, "secret.txt")).action,
+      "block",
+      `${level} blocks a symlink escape even below the runtime documentation root`,
+    );
+  }
+  rmSync(runtimeSymlink, { force: true });
+  rmSync(runtimeEscapeTarget, { recursive: true, force: true });
+
+  const internalRead = guardedDecision("readonly", "read", "README.md");
+  eq(internalRead.action, "allow", "project reads still reach the level policy");
+  eq(
+    guardedDecision("confirm-all", "write", "extensions/example.ts").action,
+    "ask",
+    "in-project mutations still reach confirm-all",
   );
 });
 
@@ -833,6 +900,74 @@ await test("shell structure decides consistently across all permission levels", 
   );
 });
 
+await test("project-write asks for opaque code and external scripts without becoming a script sandbox", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  const outsideScript = join(tmpdir(), "pi-policy-external-script.mjs");
+  const outsideOutput = join(tmpdir(), "pi-policy-external-output.txt");
+  const cases = [
+    {
+      label: "node inline code",
+      command:
+        'node -e "require(\\"fs\\").writeFileSync(\\"/tmp/x\\", \\"x\\")"',
+      projectWrite: "ask",
+    },
+    {
+      label: "python inline code",
+      command:
+        'python3 -c "open(\\"/tmp/x\\", \\"w\\").write(\\"x\\")"',
+      projectWrite: "ask",
+    },
+    {
+      label: "stdin code",
+      command: "printf 'print(1)' | python3 -",
+      projectWrite: "ask",
+    },
+    {
+      label: "redirected stdin code",
+      command: "python3 < scripts/check.mjs",
+      projectWrite: "ask",
+    },
+    {
+      label: "project-internal script",
+      command: "node scripts/check.mjs",
+      projectWrite: "allow",
+    },
+    {
+      label: "external script",
+      command: `node ${outsideScript}`,
+      projectWrite: "ask",
+    },
+    {
+      label: "direct external write",
+      command: `touch ${outsideOutput}`,
+      projectWrite: "ask",
+    },
+  ];
+  for (const entry of cases) {
+    eq(
+      permissionPolicy.decideBash("readonly", entry.command, cwd).action,
+      "block",
+      `readonly blocks ${entry.label}`,
+    );
+    eq(
+      permissionPolicy.decideBash("project-write", entry.command, cwd).action,
+      entry.projectWrite,
+      `project-write decision for ${entry.label}`,
+    );
+    eq(
+      permissionPolicy.decideBash("confirm-all", entry.command, cwd).action,
+      "ask",
+      `confirm-all asks for ${entry.label}`,
+    );
+    eq(
+      permissionPolicy.decideBash("yolo", entry.command, cwd).action,
+      "block",
+      `yolo blocks ${entry.label} at its hard boundary`,
+    );
+  }
+});
+
 await test("subagent delegations are allowed without confirmation outside readonly", () => {
   if (!toolPolicy) return;
   const cwd = process.cwd();
@@ -1119,6 +1254,12 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
       "an incomplete prior run never counts as a prior judgment — retry stays allowed",
     );
 
+    const noVerdictHere = { ...passedHere, verifierVerdict: undefined };
+    assert(
+      !(await assess(noVerdictHere)).blocked,
+      "a completed process without a recognized verdict is not evaluable evidence and stays retryable",
+    );
+
     writeFileSync(join(cwd, "a.txt"), "changed\n");
     assert(
       !(await assess(passedHere)).blocked,
@@ -1256,6 +1397,32 @@ await test("git commit is detected across shell connectors, other commands are n
     touches("git -c user.email=x commit -m x"),
     "the same holds for -c <key>=<value>",
   );
+  for (const command of [
+    "/usr/bin/git commit -m x",
+    "env git commit -m x",
+    "env NAME=value git commit -m x",
+    "NAME=value git commit -m x",
+    "git --git-dir=/tmp/repo/.git commit -m x",
+    "git --work-tree=/tmp/repo --no-pager commit -m x",
+    "git -C /repo -c user.name=test --no-pager commit -m x",
+  ]) {
+    assert(
+      touches(command),
+      `supported git commit form is recognized: ${command}`,
+    );
+  }
+  for (const command of [
+    'echo "git commit"',
+    "printf '%s' 'git commit'",
+    "# git commit",
+    "command git commit -m x",
+    "sh -c 'git commit -m x'",
+  ]) {
+    assert(
+      !touches(command),
+      `non-normalized shell form is not treated as a git commit: ${command}`,
+    );
+  }
   assert(
     !touches("git commit-tree deadbeef"),
     "a distinct plumbing subcommand that merely starts with 'commit' is not matched",
@@ -1273,10 +1440,52 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
       verification,
     );
 
+  for (const path of [
+    "README.md",
+    "docs/verifier-policy.md",
+    "gui/renderer/styles.css",
+    "gui/renderer/strings.js",
+    "gui/main/pi-rpc-manager.js",
+    "extensions/permissions/menus.ts",
+    "extensions/permissions/thinking-control.ts",
+    "extensions/plan-mode/presentation.ts",
+    "package.json",
+    "npm/package.json",
+    "gui/package.json",
+  ]) {
+    assert(
+      !assess([path], "fp-1", {}).blocked,
+      `a normal or non-boundary path stays verifier-optional: ${path}`,
+    );
+  }
   assert(
-    !assess(["gui/renderer/styles.css"], "fp-1", {}).blocked,
-    "a non-mandatory path is never blocked, regardless of verifier history",
+    !assess(
+      ["README.md", "package.json", "gui/main/pi-rpc-manager.js"],
+      "fp-large",
+      {},
+    ).blocked,
+    "multiple optional paths do not become mandatory because of file count",
   );
+
+  for (const path of [
+    "extensions/permissions/guards.ts",
+    "extensions/permissions/workflow-policy.ts",
+    "extensions/shared/verification-capabilities.ts",
+    "extensions/plan-mode/commands.ts",
+    "extensions/plan-mode/session.ts",
+    "extensions/resilience/recovery-state.ts",
+    "extensions/setup-core/subagent-output-guard.ts",
+    "extensions/permissions/verifier-policy.ts",
+    "gui/main/preload.cjs",
+    "gui/main/ipc-handlers.js",
+    "extensions/frontend-protocol/state-contract.ts",
+    "scripts/install-user.mjs",
+  ]) {
+    assert(
+      assess([path], "fp-1", {}).blocked,
+      `a hard-risk path requires verifier coverage: ${path}`,
+    );
+  }
   assert(
     assess(["extensions/setup-core/index.ts"], "fp-1", {}).blocked,
     "the setup-core file that wires the verifier ledger itself is mandatory too",
@@ -1347,6 +1556,16 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "an incomplete run never counts, even if a verdict happens to be present",
   );
 
+  const noVerdict = assess(["extensions/permissions/guards.ts"], "fp-1", {
+    workspaceRoot: cwd,
+    workspaceFingerprint: "fp-1",
+    verifierStatus: "completed",
+  });
+  assert(
+    noVerdict.blocked,
+    "a completed process without a recognized verdict never covers a mandatory diff",
+  );
+
   const wrongRoot = assess(["extensions/permissions/guards.ts"], "fp-1", {
     workspaceRoot: "/other-repo",
     workspaceFingerprint: "fp-1",
@@ -1414,7 +1633,7 @@ await test("git commit gate blocks a large diff in a mandatory verifier path wit
     for (let i = 0; i < 15000; i += 1)
       lines.push(`// line ${i} ${"x".repeat(30)}`);
     writeFileSync(
-      join(cwd, "extensions", "permissions", "seed.ts"),
+      join(cwd, "extensions", "permissions", "guards.ts"),
       `export const seed = 1;\n${lines.join("\n")}\n`,
     );
     execFileSync("git", ["add", "-A"], { cwd });
@@ -1423,7 +1642,7 @@ await test("git commit gate blocks a large diff in a mandatory verifier path wit
     for (let i = 0; i < 15000; i += 1)
       changed.push(`// line ${i} CHANGED ${"y".repeat(30)}`);
     writeFileSync(
-      join(cwd, "extensions", "permissions", "seed.ts"),
+      join(cwd, "extensions", "permissions", "guards.ts"),
       `export const seed = 2;\n${changed.join("\n")}\n`,
     );
 
@@ -1434,10 +1653,10 @@ await test("git commit gate blocks a large diff in a mandatory verifier path wit
     );
     assert(
       gate.blocked,
-      "a large diff touching extensions/permissions/ without a matching PASS blocks the commit",
+      "a large diff touching the critical permissions guard without a matching PASS blocks the commit",
     );
     assert(
-      gate.reason.includes("extensions/permissions/seed.ts"),
+      gate.reason.includes("extensions/permissions/guards.ts"),
       "the block names the mandatory path the diff touches",
     );
   } finally {
@@ -1473,6 +1692,21 @@ await test("verifier runs are classified completed or INCOMPLETE", () => {
     "a substantive FAIL verdict is a completed run, never INCOMPLETE",
   );
   eq(judgedFail.verdict, "FAIL", "the FAIL verdict is preserved");
+  const noVerdict = extract({
+    agent: "verifier",
+    exitCode: 0,
+    finalOutput: "## Ergebnis\n\nKeine strukturierte Bewertung.",
+  });
+  eq(
+    noVerdict.status,
+    "incomplete",
+    "a normal exit without a recognized verdict is not evaluable verification evidence",
+  );
+  eq(
+    noVerdict.reason,
+    "no-verdict",
+    "the unknown output is named, not invented",
+  );
   for (const [result, reason] of [
     [{ agent: "verifier", exitCode: 1, timedOut: true }, "timeout"],
     [
@@ -1500,6 +1734,8 @@ await test("verifier runs are classified completed or INCOMPLETE", () => {
     "the banner makes the invalid verification visible",
   );
 });
+
+rmSync(runtimeFixtureRoot, { recursive: true, force: true });
 
 await test("subagent fallback triggers only on provider-class failures", () => {
   if (!modelFallback) return;

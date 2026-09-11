@@ -1,5 +1,6 @@
 import type { ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { limitSubagentOutput } from "../shared/output-limits.ts";
+import { hasEvaluableVerifierResult } from "../shared/verification-capabilities.ts";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -10,16 +11,13 @@ function isRecord(value: unknown): value is UnknownRecord {
 export type VerifierRunStatus = "completed" | "incomplete";
 
 export type VerifierVerdict =
-  | "PASS"
-  | "PASS_WITH_WARNINGS"
-  | "FAIL"
-  | "UNVERIFIABLE";
+  "PASS" | "PASS_WITH_WARNINGS" | "FAIL" | "UNVERIFIABLE";
 
 export interface VerifierRunRecord {
   timestamp: string;
   agent: "verifier";
   status: VerifierRunStatus;
-  /** timeout | turn-budget | interrupted | detached | provider-error | exit-<n> */
+  /** timeout | turn-budget | interrupted | detached | provider-error | no-verdict | exit-<n> */
   reason?: string;
   /** Nur bei erfolgreichen Läufen, falls das Urteil erkennbar ist. */
   verdict?: VerifierVerdict;
@@ -37,7 +35,9 @@ const PROVIDER_ERROR_PATTERN =
 export function parseVerifierVerdict(
   text: string,
 ): VerifierVerdict | undefined {
-  const match = text.match(/^\s*(PASS_WITH_WARNINGS|PASS|FAIL|UNVERIFIABLE)\b/m);
+  const match = text.match(
+    /^\s*(PASS_WITH_WARNINGS|PASS|FAIL|UNVERIFIABLE)\b/m,
+  );
   return match?.[1] as VerifierVerdict | undefined;
 }
 
@@ -90,9 +90,19 @@ export function extractVerifierRunRecord(
       : `exit-${result.exitCode}`;
     return record;
   }
-  const output = typeof result.finalOutput === "string" ? result.finalOutput : "";
+  const output =
+    typeof result.finalOutput === "string" ? result.finalOutput : "";
   const verdict = parseVerifierVerdict(output);
   if (verdict) record.verdict = verdict;
+  if (
+    !hasEvaluableVerifierResult({
+      verifierStatus: record.status,
+      verifierVerdict: record.verdict,
+    })
+  ) {
+    record.status = "incomplete";
+    record.reason = "no-verdict";
+  }
   return record;
 }
 
@@ -108,7 +118,9 @@ export function verifierIncompleteBanner(reason: string | undefined): string {
             ? "vor Abschluss abgelöst"
             : reason === "provider-error"
               ? "durch einen Provider-/Netzwerkfehler beendet"
-              : `mit Fehler beendet (${reason ?? "unbekannt"})`;
+              : reason === "no-verdict"
+                ? "ohne ein auswertbares Urteil beendet"
+                : `mit Fehler beendet (${reason ?? "unbekannt"})`;
   return `⚠ INCOMPLETE — Dieser Verifier-Lauf wurde ${cause} und zählt nicht als unabhängige Verifikation. Er ersetzt keine bestandene Prüfung und darf nicht als Verifikationsnachweis übernommen werden.\n\n`;
 }
 

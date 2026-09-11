@@ -29,6 +29,8 @@ import { toolPath } from "./tool-event.ts";
 export interface WorkflowAssessment {
   blocked: boolean;
   reason: string;
+  /** The hard layer explicitly approved a read outside the project. */
+  allowOutsideProjectRead?: boolean;
 }
 
 export const LOCAL_LSP_TOOLS = new Set([
@@ -77,6 +79,11 @@ const UNKNOWN_WORKFLOW_REASON =
   "Workflow-Zustand nicht verfügbar: Keine Workflow-Extension hat den aktuellen Modus gemeldet. Solange unklar ist, ob geplant oder gearbeitet wird, bleiben mutierende und nicht nachweislich lesende Tools gesperrt (fail-closed). Prüfe, ob extensions/plan-mode/index.ts geladen ist.";
 
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
+const PERMITTED_RUNTIME_DOCS_READ: WorkflowAssessment = {
+  blocked: false,
+  reason: "",
+  allowOutsideProjectRead: true,
+};
 
 // Resolve the pi runtime installation root dynamically so the readable-docs
 // boundary works on any machine. Falls back to a derived default when the env
@@ -151,10 +158,10 @@ export function assessWorkflowTool(
       };
     }
     const outsideProject = !inside(resolve(cwd), scope.absolutePath);
-    if (
-      outsideProject &&
-      !isDocumentedRuntimeDocsRead(event.toolName, scope.absolutePath)
-    ) {
+    if (outsideProject) {
+      if (isDocumentedRuntimeDocsRead(event.toolName, scope.absolutePath)) {
+        return PERMITTED_RUNTIME_DOCS_READ;
+      }
       return {
         blocked: true,
         reason: "Harte Projekt-, Symlink- oder Secret-Grenze",

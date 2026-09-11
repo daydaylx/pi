@@ -10,7 +10,8 @@
     "build": "npm exec tsc -- -p packages/frontend-protocol/tsconfig.json",
     "test:protocol-package": "npm run build && node --test packages/frontend-protocol/test/*.test.mjs",
     "test:frontend-server": "npm run build && node --test ../frontend-server/test/*.test.mjs",
-    "test": "npm run test:protocol-package && npm run test:frontend-server && node ../tests/run-all.mjs",
+    "test:frontend-contracts": "npm run build && node --test packages/frontend-protocol/test/*.test.mjs && node --test ../frontend-server/test/*.test.mjs",
+    "test": "npm run test:frontend-contracts && node ../tests/run-all.mjs",
     "test:coverage": "node ../tests/coverage.mjs",
     "test:coverage:baseline": "node ../tests/coverage.mjs --write-baseline",
     "test:runtime": "node ../tests/p1-runtime.mjs",
@@ -24,7 +25,7 @@
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
     "check:imports": "node ../scripts/check-relative-imports.mjs",
     "check:versioned-tree": "node ../scripts/check-versioned-tree.mjs",
-    "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:gui && npm run audit:check"
+    "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:frontend-contracts && npm run test:gui && npm run audit:check"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",

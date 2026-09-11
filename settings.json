@@ -49,14 +49,18 @@
     "openrouter/openai/gpt-oss-120b",
     "zai/glm-5.3",
     "zai-coding-cn/glm-5.3",
-    "openrouter/stealth/ox-alpha",
-    "openrouter/dots-studio/dots-3-note-preview:free",
     "openrouter/z-ai/glm-5.2:free",
     "openrouter/minimax/minimax-m3:free",
     "openrouter/poolside/laguna-s-2.1:free",
     "openrouter/thinkingmachines/inkling:free",
-    "openrouter/inclusionai/ling-3.0-flash-fin:free",
-    "openrouter/nvidia/nemotron-3.5-lightning:free"
+    "openrouter/nvidia/nemotron-3.5-lightning:free",
+    "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+    "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
+    "openrouter/nex-agi/nex-n2.5-pro:free",
+    "openrouter/thinkingmachines/inkling-small:free",
+    "openrouter/dots-studio/dots-3-note-preview:free",
+    "openrouter/inclusionai/ling-3.0-flash-sante:free",
+    "openrouter/liquid/lfm-2.5-2.6b:free"
   ],
   "packages": [
     "git:github.com/daydaylx/pi-subagents@f59fc0d26bf055632363e9a4ca778ab1f09b5252",
@@ -66,21 +70,22 @@
     "disableBuiltins": true,
     "agentOverrides": {
       "investigator": {
-        "model": "openai-codex/gpt-5.6-terra",
+        "model": "openai-codex/gpt-5.6-luna",
+        "thinking": "high",
         "fallbackModels": [
           "qwen-token-plan-individual/qwen3.8-max"
         ]
       },
       "debugger": {
-        "model": "openai-codex/gpt-5.6-terra",
-        "thinking": "max",
+        "model": "openai-codex/gpt-5.6-luna",
+        "thinking": "high",
         "fallbackModels": [
           "qwen-token-plan-individual/qwen3.8-max"
         ]
       },
       "verifier": {
         "model": "anthropic/claude-sonnet-5",
-        "thinking": "max",
+        "thinking": "high",
         "fallbackModels": [
           "openai-codex/gpt-5.6-terra"
         ]
@@ -91,6 +96,7 @@
       "allow": [
         "qwen-token-plan-individual/*",
         "anthropic/claude-sonnet-5",
+        "openai-codex/gpt-5.6-luna",
         "openai-codex/gpt-5.6-terra"
       ]
     }

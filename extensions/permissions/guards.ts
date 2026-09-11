@@ -51,6 +51,20 @@ function recoveryGateBlocks(
   return !isPlanModeDiagnosticCommand(command, cwd);
 }
 
+/**
+ * Only these calls can be blocked by the recovery gate. Read-only and other
+ * capability calls therefore do not ask resilience to re-snapshot the
+ * workspace on every tool invocation while a gate is armed.
+ */
+function recoveryStatusNeeded(event: ToolCallEvent, cwd: string): boolean {
+  if (event.toolName === "write" || event.toolName === "edit") return true;
+  if (event.toolName !== "bash") return false;
+  const command = String(
+    (event.input as Record<string, unknown>).command ?? "",
+  );
+  return !isPlanModeDiagnosticCommand(command, cwd);
+}
+
 function recoveryBlockReason(reason: string | undefined): string {
   const cause =
     reason === "workspace-changed"
@@ -125,7 +139,9 @@ export function registerPermissionGuards(
     // Das Recovery-Gate prüft vor der Planmodus-Freigabe, damit auch
     // Schreibzugriffe auf die Plandatei nach einem Fehlturn nicht
     // stillschweigend durchlaufen.
-    const recovery = await requestRecoveryStatus(pi.events);
+    const recovery = recoveryStatusNeeded(event, ctx.cwd)
+      ? await requestRecoveryStatus(pi.events)
+      : { armed: false as const };
     if (recoveryGateBlocks(recovery.armed, event, ctx.cwd)) {
       return { block: true, reason: recoveryBlockReason(recovery.reason) };
     }
@@ -150,6 +166,7 @@ export function registerPermissionGuards(
       event,
       ctx.cwd,
       session.configured(),
+      { allowOutsideProjectRead: assessment.allowOutsideProjectRead },
     );
     if (decision.action === "allow") return;
     if (decision.action === "block") {

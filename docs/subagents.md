@@ -21,10 +21,11 @@ Hauptagent ebenfalls selbst.
 Änderungssurface gestartet; `debugger` nur bei unbekannten, intermittierenden
 oder gescheiterten Bugs. Im Simple oder Detailed Plan ist ausschließlich eine
 synchrone, artefaktfreie Investigator-SINGLE-Delegation zulässig; Debugger,
-Verifier, andere Rollen und Management-Aktionen bleiben dort blockiert. Wann
-der `verifier` verpflichtend und wann er optional ist, steht in `AGENTS.md`:
-maßgeblich ist der Risikofaktor der Änderung, nicht die Zahl der berührten
-Dateien. Es gibt keine verschachtelte Delegation.
+Verifier, andere Rollen und Management-Aktionen bleiben dort blockiert. Für
+den `verifier` unterscheidet `AGENTS.md` zwischen
+`HARD_VERIFIER_REQUIRED` und `VERIFIER_OPTIONAL`: maßgeblich ist das reale
+Risiko, nicht die Zahl der berührten Dateien. Es gibt keine verschachtelte
+Delegation.
 
 Alle lokalen Profile starten laut Profil-Tools mit frischem Child-Kontext,
 übernehmen die statischen Projektregeln und nicht automatisch den
@@ -34,10 +35,12 @@ besitzt `edit` oder `write`. `debugger` und `verifier` dürfen technisch Shell
 ausführen, ihre Profile verbieten aber ausdrücklich Projektänderungen; der
 Hauptagent bleibt alleiniger regulärer Patch-Eigentümer.
 
-`agents/verifier.md` läuft auf `anthropic/claude-sonnet-5` mit
-`openai-codex/gpt-5.6-terra` als `fallbackModels`. Beide Modell-IDs stehen in
-`settings.enabledModels`, und der Fork wertet `fallbackModels` aus; sonst wäre
-der Fallback eine Angabe ohne Wirkung.
+`investigator` und `debugger` laufen auf `openai-codex/gpt-5.6-luna` mit
+Thinking-Stufe `high`. `agents/verifier.md` läuft auf
+`anthropic/claude-sonnet-5` ebenfalls mit `high` und
+`openai-codex/gpt-5.6-terra` als `fallbackModels`. Die Modell-IDs stehen in
+`settings.enabledModels` und `settings.subagents.modelScope.allow`; der Fork
+wertet `fallbackModels` aus, sonst wäre der Fallback eine Angabe ohne Wirkung.
 
 ## Reduzierte Tool-Surface
 

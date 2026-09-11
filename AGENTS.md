@@ -132,40 +132,33 @@ Triviale Teilaufgaben bleiben beim Hauptagenten.
   Reproduktion und Hypothesentests.
 - **Unabhängige Prüfung nach einer riskanten Umsetzung:** `verifier`.
 
-Der `verifier` ist verpflichtend, wenn die Änderung mindestens einen dieser
-Risikofaktoren berührt:
+Der Verifier folgt zwei Risikokategorien:
 
-- Sicherheitsverhalten,
-- Permission- oder Plan-Mode-Logik,
-- Workflow- oder Activity-State-Logik,
-- öffentliche API oder Schema,
-- Installations- oder Upgrade-Verhalten,
-- Verifikations- oder Completion-Logik,
-- hoher Blast-Radius (geteilter oder kritischer Code, breite Regressionsfläche),
-- eine ausdrückliche Nutzeranforderung.
+- **HARD_VERIFIER_REQUIRED:** Sicherheits-/Permission-Grenzen, kritischer
+  Plan→Work- und Recovery-State, die Verifier-/Completion-Maschinerie,
+  tatsächlich betroffene öffentliche Protokoll-/IPC-Verträge sowie
+  Installations-/Upgrade-Einstiegspunkte. Eine ausdrückliche Nutzeranforderung
+  macht den Lauf ebenfalls hart verpflichtend.
 
-Der `verifier` ist optional — nach eigener Einschätzung — bei mehreren
-betroffenen Dateien ohne einen dieser Risikofaktoren, reinen
-Dokumentationsänderungen, lokalen UI-Texten oder Farben, mechanischen und eng
-getesteten Änderungen sowie kleinen Konfigurationskorrekturen ohne
-Verhaltensänderung. Der bloße Umfang eines Diffs löst keine Pflichtdelegation
-aus.
+- **VERIFIER_OPTIONAL:** normale Bugfixes mit Regressionstest, begrenzte
+  Refactorings, GUI-/Electron-Lifecycle ohne Trust Boundary, UI/CSS/Text,
+  Dokumentation, mechanische Änderungen und harmlose Tooling-/Script-
+  Anpassungen. Dateianzahl oder Diffgröße allein sind kein Risikoindikator.
 
-Für genau die Pfade, die `extensions/permissions/verifier-required-paths.ts`
-listet (Permission-/Workflow-/Plan-Mode-Logik, die Verifikations-/Completion-
-Maschinerie selbst, die konkret benannte Electron-Preload/IPC-Sicherheits-
-grenze, ausgewählte Installations-/Upgrade-Einstiegspunkte), ist die Pflicht
-seit diesem Gate nicht mehr nur Prosa: `git commit` wird technisch blockiert,
-wenn der Diff eine dieser Dateien berührt und seit exakt diesem Workspace-
-Fingerprint kein `verifier`-Lauf mit Urteil `PASS`/`PASS_WITH_WARNINGS`
-vorliegt (Anlass war eine 3-tägige Lücke ohne jeden Subagenten-Aufruf während
-des Electron-GUI-Batches Ende August 2026). Das ist eine konkrete, absichtlich
-schmale Pfadliste, keine Umsetzung der vollständigen Kategorienliste oben:
-"öffentliche API oder Schema", "Sicherheitsverhalten" über die genannte
-Electron-Grenze hinaus, "hoher Blast-Radius" und "eine ausdrückliche
-Nutzeranforderung" haben dort keine Entsprechung und bleiben, wie jede nicht
-in der Pfadliste geführte Datei, vollständig Ermessenssache des
-Hauptagenten wie zuvor.
+`extensions/permissions/verifier-required-paths.ts` enthält dafür nur einen
+kleinen, expliziten Katalog der automatisch erkennbaren
+`HARD_VERIFIER_REQUIRED`-Pfade. Ein nicht gelisteter Pfad ist dadurch nicht
+automatisch harmlos: Der Hauptagent muss Grenzfälle wie eine Runtime-
+Dependency-, Packaging- oder öffentliche API-Änderung weiterhin nach dem
+tatsächlichen Diff bewerten. Umgekehrt werden `package.json`,
+`npm/package.json`, `gui/package.json` und `gui/main/pi-rpc-manager.js` nicht
+mehr pauschal gegated; harmlose Scripts, Metadaten oder interne RPC-Lifecycle-
+Änderungen dürfen lokal deterministisch geprüft werden.
+
+Für einen gelisteten Hard-Pfad blockiert das Commit-Gate technisch, wenn seit
+dem exakt passenden Workspace-Fingerprint kein `verifier`-Lauf mit Urteil
+`PASS`/`PASS_WITH_WARNINGS` vorliegt. Diese technische Prüfung ergänzt die
+Risikobewertung des Hauptagenten und ersetzt sie nicht.
 
 Planung, Umsetzung, Triage und finale Nutzerkommunikation bleiben beim
 Hauptagenten. Es gibt keine verschachtelte Delegation.

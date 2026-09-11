@@ -33,6 +33,27 @@ export interface VerificationCapabilitySnapshot {
   verifierVerdict?: VerifierVerdictSnapshot;
 }
 
+/**
+ * A verifier result is evidence only when the run reached a substantive,
+ * recognized verdict. A process that exited normally but produced no verdict
+ * is not interchangeable with PASS, FAIL, or UNVERIFIABLE: callers must allow
+ * it to be retried and it must never satisfy a coverage gate.
+ */
+export function hasEvaluableVerifierResult(
+  snapshot: Pick<
+    VerificationCapabilitySnapshot,
+    "verifierStatus" | "verifierVerdict"
+  >,
+): snapshot is VerificationCapabilitySnapshot & {
+  verifierStatus: "completed";
+  verifierVerdict: VerifierVerdictSnapshot;
+} {
+  return (
+    snapshot.verifierStatus === "completed" &&
+    snapshot.verifierVerdict !== undefined
+  );
+}
+
 export interface VerificationCapabilityRequest {
   respond(snapshot: VerificationCapabilitySnapshot): void;
 }

@@ -731,6 +731,68 @@ export const verificationSections = {
           "Verify: changed_unverified",
           "the status becomes stale after a later workspace change",
         );
+
+        // The frontend bus is also used by the GUI/RPC path, where no TUI is
+        // present. Its domain state must not depend on ctx.hasUI; only the
+        // terminal footer is UI-specific.
+        const headlessHarness = createHarness({
+          exec: harness.api.exec,
+        });
+        setupCore.default(headlessHarness.api, {
+          exec: headlessHarness.api.exec,
+        });
+        const headless = headlessHarness.makeContext({
+          cwd: workspace,
+          trusted: true,
+          hasUI: false,
+          mode: "rpc",
+        });
+        await headlessHarness.runHooks("session_start", {}, headless);
+        if (auroraStateMod) {
+          headlessHarness.api.events.emit(
+            auroraStateMod.AURORA_UI_CHANNELS.request,
+            {
+              type: "request",
+              requestId: "aurora-headless-req-1",
+              sessionEpoch: "aurora-headless-epoch-1",
+              requester: "frontend-rpc",
+            },
+          );
+        }
+        await headlessHarness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          headless,
+        );
+        eq(
+          headlessHarness.statusCalls.length,
+          0,
+          "headless verification never invokes the TUI footer",
+        );
+        if (auroraStateMod) {
+          const headlessPatches = () =>
+            headlessHarness.emitted.filter(
+              (entry) =>
+                entry.name === auroraStateMod.AURORA_UI_CHANNELS.patch &&
+                entry.event.source === "setup-core",
+            );
+          eq(
+            headlessPatches().at(-1).event.patch.verification.status,
+            "changed_unverified",
+            "headless/RPC receives the same verification domain status",
+          );
+          const priorPatchCount = headlessPatches().length;
+          await headlessHarness.runHooks(
+            "agent_settled",
+            { type: "agent_settled" },
+            headless,
+          );
+          eq(
+            headlessPatches().length,
+            priorPatchCount + 1,
+            "an identical headless settle publishes one fresh patch without a feedback loop",
+          );
+        }
         writeFileSync(
           path.join(workspace, ".pi", "setup.json"),
           JSON.stringify({ verificationStatus: { enabled: false } }),
@@ -745,6 +807,26 @@ export const verificationSections = {
           undefined,
           "the configured status layer can be disabled without running a check",
         );
+        await headlessHarness.runHooks(
+          "agent_settled",
+          { type: "agent_settled" },
+          headless,
+        );
+        if (auroraStateMod) {
+          const headlessClear = [...headlessHarness.emitted]
+            .reverse()
+            .find(
+              (entry) =>
+                entry.name === auroraStateMod.AURORA_UI_CHANNELS.patch &&
+                entry.event.source === "setup-core",
+            );
+          eq(
+            headlessClear.event.patch.verification,
+            null,
+            "headless/RPC receives a status clear when verification is disabled",
+          );
+        }
+        await headlessHarness.runHooks("session_shutdown", {}, headless);
         await harness.runHooks("session_shutdown", {}, trusted);
         eq(
           latestStatus(harness, "verification"),
@@ -861,8 +943,11 @@ export const verificationSections = {
           "a recorded PASS at the exact current fingerprint clears the commit gate end-to-end",
         );
 
-        // A later, incomplete run must overwrite the ledger rather than
-        // leave the earlier PASS looking current.
+        // F-04: A later, incomplete run must NOT overwrite the ledger.
+        // The previous evaluable PASS remains valid for both the dedup gate
+        // (which blocks redundant re-verification) and the commit gate
+        // (which requires an evaluable PASS). An explicit re-verification
+        // justification in the task overrides the dedup block.
         await harness.runHooks(
           "tool_result",
           {
@@ -879,12 +964,162 @@ export const verificationSections = {
         const afterIncomplete = queryCapabilities();
         eq(
           afterIncomplete.verifierStatus,
-          "incomplete",
-          "a timed-out run overwrites the ledger with incomplete",
+          "completed",
+          "F-04: an incomplete run does not overwrite the prior evaluable PASS",
+        );
+        eq(
+          afterIncomplete.verifierVerdict,
+          "PASS",
+          "F-04: the prior PASS verdict is preserved",
+        );
+
+        // The dedup gate now blocks a redundant re-verification on the same
+        // fingerprint (the prior PASS is still bound).
+        const dedupBlocked = await verifierPolicy.assessVerifierDelegation(
+          {
+            toolName: "subagent",
+            input: {
+              agent: "verifier",
+              task: [
+                "## Original User Request",
+                "check",
+                "",
+                "## Constraints / Non-Goals",
+                "none",
+                "",
+                "## Delegated Question",
+                "verify",
+                "",
+                "## Implementation / Diff to verify",
+                "<diff>",
+                "",
+                "## Baseline (Pre-existing workspace state)",
+                "clean",
+                "",
+                "## Pre-existing dirty-path fingerprints",
+                "none",
+                "",
+                "## Acceptance criteria",
+                "pass",
+              ].join("\n"),
+            },
+          },
+          workspace,
+          afterIncomplete,
         );
         assert(
-          afterIncomplete.verifierVerdict === undefined,
-          "an incomplete run never carries a verdict",
+          dedupBlocked.blocked,
+          "F-04: dedup gate blocks redundant re-verification on unchanged fingerprint",
+        );
+        assert(
+          dedupBlocked.reason.includes("PASS"),
+          "dedup block names the cached verdict",
+        );
+
+        // But an explicit re-verification justification overrides the dedup block.
+        const justifiedTask = [
+          "## Original User Request",
+          "check",
+          "",
+          "## Constraints / Non-Goals",
+          "none",
+          "",
+          "## Delegated Question",
+          "verify",
+          "",
+          "## Implementation / Diff to verify",
+          "<diff>",
+          "",
+          "## Baseline (Pre-existing workspace state)",
+          "clean",
+          "",
+          "## Pre-existing dirty-path fingerprints",
+          "none",
+          "",
+          "## Acceptance criteria",
+          "pass",
+          "",
+          "## Grund für erneute Prüfung",
+          "Andere Teilfrage als beim letzten Lauf.",
+        ].join("\n");
+        const dedupAllowed = await verifierPolicy.assessVerifierDelegation(
+          {
+            toolName: "subagent",
+            input: { agent: "verifier", task: justifiedTask },
+          },
+          workspace,
+          afterIncomplete,
+        );
+        assert(
+          !dedupAllowed.blocked,
+          "F-04: explicit re-verification justification overrides dedup block",
+        );
+
+        // The commit gate still allows commit because the PASS is preserved.
+        const gateAfterIncomplete = await verifierPolicy.assessGitCommitVerifierGate(
+          { toolName: "bash", input: { command: 'git commit -m "x"' } },
+          workspace,
+          afterIncomplete,
+        );
+        assert(
+          !gateAfterIncomplete.blocked,
+          "F-04: commit gate still clears with preserved PASS after incomplete run",
+        );
+
+        // A normal verifier exit without a recognized verdict is different
+        // from a timeout: it becomes the current, non-evaluable record. Retry
+        // must remain possible, and the old PASS must not satisfy coverage.
+        await harness.runHooks(
+          "tool_result",
+          {
+            toolName: "subagent",
+            toolCallId: "verifier-call-no-verdict",
+            input: { agent: "verifier", task: "check" },
+            content: [{ type: "text", text: "irrelevant" }],
+            details: {
+              results: [
+                {
+                  agent: "verifier",
+                  exitCode: 0,
+                  finalOutput: "## Ergebnis\n\nKeine strukturierte Bewertung.",
+                },
+              ],
+            },
+          },
+          trusted,
+        );
+        const afterNoVerdict = queryCapabilities();
+        eq(
+          afterNoVerdict.verifierStatus,
+          "incomplete",
+          "F-04: a normal exit without a verdict is recorded as non-evaluable",
+        );
+        eq(
+          afterNoVerdict.verifierVerdict,
+          undefined,
+          "F-04: unknown verifier output never invents a verdict",
+        );
+        const retryAfterNoVerdict = await verifierPolicy.assessVerifierDelegation(
+          {
+            toolName: "subagent",
+            input: { agent: "verifier", task: justifiedTask },
+          },
+          workspace,
+          afterNoVerdict,
+        );
+        assert(
+          !retryAfterNoVerdict.blocked,
+          "F-04: no-verdict record leaves verifier retry permitted",
+        );
+        const gateAfterNoVerdict =
+          await verifierPolicy.assessGitCommitVerifierGate(
+            { toolName: "bash", input: { command: 'git commit -m "x"' } },
+            workspace,
+            afterNoVerdict,
+          );
+        assert(
+          gateAfterNoVerdict.blocked,
+          "F-04: no-verdict record cannot satisfy the commit coverage gate",
         );
 
         // F-03: a verdict whose workspace snapshot cannot be collected must

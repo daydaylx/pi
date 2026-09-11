@@ -110,14 +110,19 @@ export const targetConfigSections = {
           );
         }
         eq(
+          subagentSettings?.agentOverrides?.investigator?.thinking,
+          "high",
+          "investigator uses the configured high thinking level",
+        );
+        eq(
           subagentSettings?.agentOverrides?.debugger?.thinking,
-          "max",
-          "debugger retains the required maximum thinking level",
+          "high",
+          "debugger uses the configured high thinking level",
         );
         eq(
           subagentSettings?.agentOverrides?.verifier?.thinking,
-          "max",
-          "verifier retains the required maximum thinking level",
+          "high",
+          "verifier uses the configured high thinking level",
         );
 
         // Compaction budget, measured rather than guessed (docs/decisions/010).

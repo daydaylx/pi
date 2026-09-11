@@ -10,7 +10,10 @@
  */
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
-import type { VerificationCapabilitySnapshot } from "../shared/verification-capabilities.ts";
+import {
+  hasEvaluableVerifierResult,
+  type VerificationCapabilitySnapshot,
+} from "../shared/verification-capabilities.ts";
 import { matchingVerifierRequiredPaths } from "./verifier-required-paths.ts";
 import type { WorkflowAssessment } from "./workflow-policy.ts";
 
@@ -122,7 +125,7 @@ export async function assessVerifierDedup(
   cwd: string,
   verification: VerificationCapabilitySnapshot,
 ): Promise<WorkflowAssessment> {
-  if (verification.verifierStatus !== "completed") return PERMITTED;
+  if (!hasEvaluableVerifierResult(verification)) return PERMITTED;
   if (verification.workspaceRoot !== cwd) return PERMITTED;
 
   const result = await collectWorkspaceSnapshot(cwd);
@@ -243,11 +246,37 @@ export function assessDebuggerDelegation(
  * without also skipping their value would misidentify the value as the
  * subcommand.
  */
-const GIT_VALUE_OPTIONS = new Set(["-C", "-c"]);
+const GIT_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree"]);
+
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
+
+function isGitExecutable(token: string | undefined): boolean {
+  return token === "git" || token === "/usr/bin/git";
+}
+
+function skipLeadingEnvironment(tokens: string[]): number {
+  let index = 0;
+  while (ENV_ASSIGNMENT.test(tokens[index] ?? "")) index += 1;
+  if (tokens[index] !== "env") return index;
+
+  index += 1;
+  // `env git commit` and `env NAME=value git commit` are intentionally
+  // supported. Its option grammar is deliberately kept narrow here: the
+  // commit gate is not a shell parser.
+  while (
+    index < tokens.length &&
+    (ENV_ASSIGNMENT.test(tokens[index] ?? "") ||
+      ["-i", "--ignore-environment"].includes(tokens[index] ?? ""))
+  ) {
+    index += 1;
+  }
+  return index;
+}
 
 function gitSubcommand(tokens: string[]): string | undefined {
-  if (tokens[0] !== "git") return undefined;
-  let index = 1;
+  let index = skipLeadingEnvironment(tokens);
+  if (!isGitExecutable(tokens[index])) return undefined;
+  index += 1;
   while (index < tokens.length && tokens[index]?.startsWith("-")) {
     if (GIT_VALUE_OPTIONS.has(tokens[index])) index += 1;
     index += 1;
@@ -292,7 +321,7 @@ export function assessVerifierCoverageForDiff(
   const covered =
     verification.workspaceRoot === cwd &&
     verification.workspaceFingerprint === workspaceFingerprint &&
-    verification.verifierStatus === "completed" &&
+    hasEvaluableVerifierResult(verification) &&
     (verification.verifierVerdict === "PASS" ||
       verification.verifierVerdict === "PASS_WITH_WARNINGS");
   if (covered) return PERMITTED;
