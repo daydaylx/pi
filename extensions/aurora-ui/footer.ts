@@ -29,9 +29,9 @@ export interface FooterInput {
   /** Captured from ExtensionContext at session start; never read from render I/O. */
   cwd?: string;
   homeDirectory?: string;
-  /** True while a dashboard surface (auto/compact/expanded) is active: it owns
-   * routine verification reporting, so the footer stops duplicating a plain
-   * "verified". Failed/stale checks stay critical footer risks regardless. */
+  /** True while a Session panel surface (auto/compact/expanded) is active: it
+   * owns workflow identity and routine verification reporting, so the footer
+   * stops duplicating them. Failed/stale checks stay critical footer risks. */
   dashboardVisible?: boolean;
 }
 
@@ -157,23 +157,24 @@ function lspNeedsAttention(state: string): boolean {
 
 function collectSegments(input: FooterInput, width: number): Segment[] {
   const tier = footerTier(width);
-  const segments: Segment[] = [
-    {
+  const segments: Segment[] = [];
+  if (input.dashboardVisible !== true) {
+    segments.push({
       slot: Slot.workflow,
       priority: Priority.workflow,
       text: input.state.workflow.label,
       tone: "accent",
       bold: true,
-    },
-    {
+    });
+  }
+  segments.push({
       slot: Slot.model,
       priority: Priority.model,
       // The real runtime model id. Prettifying it into a marketing name would
       // mean inventing a mapping the runtime never gave us.
       text: crop(input.state.model.id ?? "kein Modell", MODEL_MAX_COLUMNS),
       tone: "text",
-    },
-  ];
+    });
 
   if (input.state.model.thinking) {
     segments.push({

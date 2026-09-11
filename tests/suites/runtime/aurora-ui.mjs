@@ -130,19 +130,21 @@ export const auroraUiSections = {
           "a resumed idle session keeps the workspace free of zero-state cards",
         );
         await resumedContext.ui.submitSlashCommand("/dashboard expanded");
-        const expandedLines =
-          typeof resumedWidget === "function"
-            ? resumedWidget(
+        const expandedHeader =
+          typeof resumedHarness.headerFactory === "function"
+            ? resumedHarness.headerFactory(
                 { terminal: { columns: 120, rows: 30 }, requestRender() {} },
                 resumedContext.ui.theme,
-              ).render(120)
-            : [];
+              )
+                .render(120)
+                .map(stripAnsi)
+                .join("\n")
+            : "";
         assert(
-          expandedLines.some((line) => stripAnsi(line).includes("AUFGABE")) &&
-            !expandedLines.some((line) =>
-              stripAnsi(line).includes("PI · AURORA"),
-            ),
-          "a resumed conversation skips the welcome but shows the expanded dashboard",
+          expandedHeader.includes("Sitzung") &&
+            expandedHeader.includes("WORK") &&
+            !expandedHeader.includes("PI · AURORA"),
+          "a resumed conversation skips the welcome but shows the fixed session panel",
         );
         await resumedHarness.runHooks("session_shutdown", {}, resumedContext);
 
@@ -223,13 +225,14 @@ export const auroraUiSections = {
           const wide = stripAnsi(footer.render(140)[0]);
           const narrow = stripAnsi(footer.render(60)[0]);
 
-          // Decision 009 moved the workflow here: one permanent status surface,
-          // and the editor frame that used to carry it is gone. From comfortable
-          // width on the workflow renders as a chip, so one padding cell leads.
+          // The fixed Session panel owns workflow identity. The one-line footer
+          // keeps its own status-bar role and therefore starts with model data.
           assert(
-            wide.startsWith(" Architekturplan") &&
-              narrow.startsWith("Architekturplan"),
-            "the workflow label leads the footer at every width",
+            wide.includes("main-model") &&
+              narrow.includes("main-model") &&
+              !wide.includes("Architekturplan") &&
+              !narrow.includes("Architekturplan"),
+            "the footer keeps status-bar metadata without duplicating the session mode",
           );
 
           // The footer renders runtime state, never the wide risk banner the
@@ -613,38 +616,198 @@ export const auroraUiSections = {
             );
           }
           const header = await load("extensions/aurora-ui/header.ts");
+          const { visibleWidth: headerCellWidth } = await import(
+            pathToFileURL(
+              path.join(
+                ROOT,
+                "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.js",
+              ),
+            ).href
+          );
           const headerState = {
             workflow: { phase: "work", label: "Work" },
             model: { thinking: "high" },
             activity: { kind: "idle" },
           };
-          for (const [columns, expected] of [
-            [80, "RUNNING"],
-            [100, "RUNNING"],
-            [120, "RUNNING"],
-            [160, "RUNNING"],
-          ]) {
-            const line = header.renderHeaderLines(context.ui.theme, columns, {
+          const sessionTask = {
+            title: "very-long-aurora-task-name",
+            goal: "Keep the current task visible.",
+            phase: "work",
+            currentWork: undefined,
+            subagents: [],
+            verification: undefined,
+            changesSummary: undefined,
+          };
+          for (const columns of [80, 100, 120, 160]) {
+            const lines = header.renderHeaderLines(context.ui.theme, columns, {
               state: headerState,
-              cwd: path.join(homedir(), "projects", "very-long-aurora-project"),
-              homeDirectory: homedir(),
+              task: sessionTask,
               activity: "running",
-            })[0];
+              elapsedSeconds: 2,
+              rows: 30,
+            });
             assert(
-              stripAnsi(line).includes(expected) &&
-                stripAnsi(line).length <= columns,
-              `header keeps its state and fits ${columns} columns`,
+              lines.some((line) => stripAnsi(line).includes("Sitzung")) &&
+                lines.join("\n").includes("WORK") &&
+                lines.join("\n").includes("ARBEITET") &&
+                lines.every((line) => headerCellWidth(stripAnsi(line)) <= columns),
+              `session panel keeps its state and fits ${columns} columns`,
             );
           }
+          const narrowPanel = header.renderHeaderLines(context.ui.theme, 40, {
+            state: headerState,
+            task: sessionTask,
+            activity: "thinking",
+            elapsedSeconds: 0,
+            rows: 24,
+          });
           assert(
-            stripAnsi(
-              header.renderHeaderLines(context.ui.theme, 40, {
+            narrowPanel.join("\n").includes("Sitzung") &&
+              narrowPanel.join("\n").includes("WORK") &&
+              narrowPanel.join("\n").includes("DENKT NACH") &&
+              narrowPanel.every((line) => headerCellWidth(stripAnsi(line)) <= 40),
+            "the narrow session panel keeps mode, status and safe borders",
+          );
+
+          const detailedTask = {
+            title: "Refactor verifier lifecycle",
+            goal: "Keep the workflow state visible.",
+            phase: "work",
+            currentWork: { summary: "Integrate the fixed session panel." },
+            subagents: [
+              { agent: "verifier", status: "queued" },
+              { agent: "investigator", status: "running" },
+            ],
+            verification: {
+              verdict: "READY",
+              testsPassed: 38,
+              testsTotal: 41,
+              blockers: [],
+            },
+            changesSummary: {
+              filesCount: 2,
+              linesAdded: 14,
+              linesRemoved: 3,
+            },
+          };
+          const normalPanel = header.renderHeaderLines(context.ui.theme, 120, {
+            state: headerState,
+            task: detailedTask,
+            activity: "responding",
+            elapsedSeconds: 2,
+            mode: "auto",
+            rows: 30,
+          });
+          const expandedPanel = header.renderHeaderLines(
+            context.ui.theme,
+            120,
+            {
+              state: headerState,
+              task: detailedTask,
+              activity: "done",
+              elapsedSeconds: 84,
+              mode: "expanded",
+              rows: 30,
+            },
+          );
+          assert(
+            normalPanel.join("\n").includes("Refactor verifier lifecycle") &&
+              normalPanel.join("\n").includes("ANTWORTET") &&
+              normalPanel.join("\n").includes("2s"),
+            "the session panel shows task, run state and elapsed time",
+          );
+          assert(
+            expandedPanel.join("\n").includes("VERIFIZIERT") &&
+              expandedPanel.join("\n").includes("38/41") &&
+              expandedPanel.join("\n").includes("VERIFIER") &&
+              expandedPanel.length > normalPanel.length,
+            "expanded mode grows only for available verification and subagent details",
+          );
+          const compactPanel = header.renderHeaderLines(
+            context.ui.theme,
+            120,
+            {
+              state: headerState,
+              task: detailedTask,
+              activity: "running",
+              elapsedSeconds: 22,
+              mode: "compact",
+              rows: 30,
+            },
+          );
+          assert(
+            compactPanel.length === 2 &&
+              compactPanel.join("\n").includes("ARBEITET") &&
+              !compactPanel.join("\n").includes("Refactor verifier lifecycle"),
+            "collapse keeps only the session identity and live status",
+          );
+          const tinyPanel = header.renderHeaderLines(context.ui.theme, 100, {
+            state: headerState,
+            task: detailedTask,
+            activity: "waiting",
+            elapsedSeconds: 22,
+            rows: 10,
+          });
+          const completedPanel = header.renderHeaderLines(
+            context.ui.theme,
+            100,
+            {
+              state: headerState,
+              task: { ...detailedTask, verification: undefined },
+              activity: "done",
+              elapsedSeconds: 84,
+              rows: 30,
+            },
+          );
+          assert(
+            tinyPanel.length === 2 &&
+              tinyPanel.join("\n").includes("WARTET") &&
+              completedPanel.join("\n").includes("ABGESCHLOSSEN"),
+            "small terminals collapse the panel while waiting and completion retain meaningful status",
+          );
+
+          const liveWorkflow = {
+            ...headerState,
+            workflow: { phase: "simple_plan", label: "Schnellplan" },
+          };
+          const planPanel = header.renderHeaderLines(context.ui.theme, 100, {
+            state: liveWorkflow,
+            task: detailedTask,
+            activity: "responding",
+            elapsedSeconds: 2,
+            rows: 30,
+          });
+          liveWorkflow.workflow = { phase: "work", label: "Work" };
+          const workPanel = header.renderHeaderLines(context.ui.theme, 100, {
+            state: liveWorkflow,
+            task: detailedTask,
+            activity: "responding",
+            elapsedSeconds: 2,
+            rows: 30,
+          });
+          assert(
+            planPanel.join("\n").includes("SCHNELLPLAN") &&
+              workPanel.join("\n").includes("WORK") &&
+              !workPanel.join("\n").includes("SCHNELLPLAN"),
+            "the panel reads the active workflow mode immediately after PLAN to WORK",
+          );
+          assert(
+            header.sessionStatus({
+              state: headerState,
+              task: { ...detailedTask, verification: { verdict: "NOT_READY", blockers: ["failed"] } },
+              activity: "idle",
+            }) === "error" &&
+              header.sessionStatus({
                 state: headerState,
-                cwd: "/tmp/very-long-path",
-                activity: "thinking",
-              })[0],
-            ) === "PI ─ WORK",
-            "the narrow header keeps only PI and mode",
+                task: { ...detailedTask, verification: { verdict: "NOT_READY", blockers: ["failed"] } },
+                activity: "running",
+              }) === "working" &&
+              header.sessionStatus({
+                state: headerState,
+                task: detailedTask,
+                activity: "done",
+              }) === "verified",
+            "error and verified statuses come from existing verification signals",
           );
 
           const genericTool = auroraTools
@@ -1091,7 +1254,7 @@ export const auroraUiSections = {
           assert(
             historyRendered.includes("history-44.ts") &&
               !historyRendered.includes("history-0.ts"),
-            "completed tool history keeps the newest bounded event rows",
+            `completed tool history keeps the newest bounded event rows: ${historyRendered}`,
           );
           await overflowHarness.runHooks("session_shutdown", {}, overflowCtx);
         }
@@ -1116,6 +1279,19 @@ export const auroraUiSections = {
           await subagentHarness.runHooks("agent_start", {}, subagentContext);
           const activity =
             subagentHarness.widgets.get("aurora-ui/activity")?.content;
+          const renderSession = () =>
+            typeof subagentHarness.headerFactory === "function"
+              ? subagentHarness.headerFactory(
+                  {
+                    terminal: { columns: 140, rows: 30 },
+                    requestRender() {},
+                  },
+                  subagentContext.ui.theme,
+                )
+                  .render(140)
+                  .map(stripAnsi)
+                  .join("\n")
+              : "";
           const render = () =>
             typeof activity === "function"
               ? activity(
@@ -1169,8 +1345,9 @@ export const auroraUiSections = {
           );
           await subagentHarness.runHooks("agent_settled", {}, subagentContext);
           assert(
-            render().includes("AUFGABE") && !render().includes("async-worker"),
-            "the parent completion clears live activity while the dashboard remains",
+            renderSession().includes("Sitzung") &&
+              !render().includes("async-worker"),
+            "the parent completion clears live activity while the session panel remains",
           );
           await subagentHarness.runHooks("agent_start", {}, subagentContext);
 
@@ -1214,8 +1391,8 @@ export const auroraUiSections = {
           assert(
             !render().includes("async-worker") &&
               !render().includes("reviewer") &&
-              render().includes("AUFGABE"),
-            "an async completion removes the subagent while keeping the session dashboard",
+              renderSession().includes("Sitzung"),
+            "an async completion removes the subagent while keeping the session panel",
           );
           eq(rpcRequests, 0, "Aurora never initiates a subagent status RPC");
           await subagentHarness.runHooks(
@@ -1315,8 +1492,8 @@ export const auroraUiSections = {
           },
           context,
         );
-        // Panel grouping is the expanded presentation; auto renders the same
-        // information unframed and is covered by dedicated auto-mode tests.
+        // The fixed session panel owns task identity; the widget remains the
+        // compact event stream even when the session panel is expanded.
         await context.ui.submitSlashCommand("/dashboard expanded");
         const railRendered =
           typeof widget === "function"
@@ -1328,13 +1505,27 @@ export const auroraUiSections = {
                 .map(stripAnsi)
                 .join("\n")
             : "";
+        const sessionRendered =
+          typeof harness.headerFactory === "function"
+            ? harness.headerFactory(
+                {
+                  terminal: { columns: 140, rows: 30 },
+                  requestRender() {},
+                },
+                context.ui.theme,
+              )
+                .render(140)
+                .map(stripAnsi)
+                .join("\n")
+            : "";
         assert(
-          railRendered.includes("╭─") &&
-            railRendered.includes("AUFGABE") &&
-            railRendered.includes("AKTIVITÄT") &&
+          sessionRendered.includes("Sitzung") &&
+            sessionRendered.includes("ARCHITEKTURPLAN") &&
+            !railRendered.includes("Sitzung") &&
+            railRendered.includes("ARBEITET") &&
             railRendered.includes("READ") &&
             railRendered.includes("TEST"),
-          "wide dashboard groups typed running tools beneath the current task",
+          "the fixed session panel groups task identity while the workspace keeps typed tool rows",
         );
 
         const auroraEpoch = harness.emitted.find(
@@ -1736,8 +1927,12 @@ export const auroraUiSections = {
           const compactMode = renderMode();
           assert(
             compactMode.length <= 2 &&
-              compactMode.some((line) => line.includes("ARBEITEN")),
+              compactMode.some((line) => line.includes("ARBEITET")),
             "compact mode shows at most two dashboard rows during active work",
+          );
+          assert(
+            renderMode(140, 40).length <= 2,
+            "compact mode keeps its two-row workspace budget even on a wide terminal",
           );
 
           await modeContext.ui.submitSlashCommand("/dashboard auto");
@@ -2044,6 +2239,21 @@ export const auroraUiSections = {
                   .join("\\n")
               : "";
           };
+          const renderSession = () => {
+            const factory = lifecycleHarness.headerFactory;
+            return typeof factory === "function"
+              ? factory(
+                  {
+                    terminal: { columns: 140, rows: 30 },
+                    requestRender() {},
+                  },
+                  lifecycleContext.ui.theme,
+                )
+                  .render(140)
+                  .map(stripAnsi)
+                  .join("\n")
+              : "";
+          };
           try {
             await lifecycleHarness.runHooks(
               "session_start",
@@ -2083,9 +2293,9 @@ export const auroraUiSections = {
               lifecycleContext,
             );
             assert(
-              renderActivity().includes("AUFGABE") &&
+              renderSession().includes("Sitzung") &&
                 !renderActivity().includes("DENKT NACH"),
-              "agent_settled clears normal live activity while preserving the dashboard",
+              "agent_settled clears normal live activity while preserving the session panel",
             );
 
             // A transient provider failure produces agent_end before Pi waits and
@@ -2117,7 +2327,7 @@ export const auroraUiSections = {
               lifecycleContext,
             );
             assert(
-              renderActivity().includes("AUFGABE") &&
+              renderSession().includes("Sitzung") &&
                 !renderActivity().includes("DENKT NACH"),
               "the retried turn clears live activity only after settling",
             );
@@ -2166,7 +2376,7 @@ export const auroraUiSections = {
               lifecycleContext,
             );
             assert(
-              renderActivity().includes("AUFGABE") &&
+              renderSession().includes("Sitzung") &&
                 !renderActivity().includes("DENKT NACH"),
               "the post-compaction turn clears live activity only after settling",
             );
@@ -2199,8 +2409,8 @@ export const auroraUiSections = {
             );
             assert(
               !renderActivity().includes("foreground-subagent") &&
-                renderActivity().includes("AUFGABE"),
-              "agent_settled clears foreground subagent activity but keeps the dashboard",
+                renderSession().includes("Sitzung"),
+              "agent_settled clears foreground subagent activity but keeps the session panel",
             );
 
             // Final provider errors and a user abort follow the same terminal
@@ -2228,7 +2438,7 @@ export const auroraUiSections = {
                 lifecycleContext,
               );
               assert(
-                renderActivity().includes("AUFGABE") &&
+                renderSession().includes("Sitzung") &&
                   !renderActivity().includes("DENKT NACH"),
                 `${outcome} clears live activity only at agent_settled`,
               );
@@ -2279,7 +2489,7 @@ export const auroraUiSections = {
             assert(
               renderActivity().includes("✓ TOOL") ||
                 renderActivity().includes("✓ READ"),
-              "agent_settled keeps the session dashboard visible after live activity ends",
+              "agent_settled keeps completed tool events visible in the workspace",
             );
           } finally {
             Date.now = originalNow;
@@ -3002,11 +3212,12 @@ export const auroraUiSections = {
             );
             assert(
               compactDashboard.length <= 2 &&
-                compactDashboard.some((line) => line.includes("ARBEITEN")),
+                compactDashboard.some((line) => line.includes("ARBEITET")),
               "the compact dashboard preserves the current phase in two rows",
             );
 
-            // 8c. Responsive permanent auto-dashboard matrix.
+            // 8c. Responsive event-stream workspace matrix. Session identity,
+            // verification and changes belong to the fixed panel now.
             const failedAuto = renderAutoDashboard(
               {
                 ...tvm,
@@ -3020,6 +3231,7 @@ export const auroraUiSections = {
               100,
               {
                 activityLines: ["ARBEITET · 9s"],
+                eventLines: ["✓ READ README.md"],
                 layout: "standard",
                 hasActiveWork: true,
                 verificationStale: false,
@@ -3028,15 +3240,11 @@ export const auroraUiSections = {
             );
             const failedAutoText = failedAuto.map(stripAnsi).join("\n");
             assert(
-              failedAutoText.indexOf("Prüfung fehlgeschlagen") !== -1 &&
-                failedAutoText.indexOf("Prüfung fehlgeschlagen") <
-                  failedAutoText.indexOf("ARBEITET"),
-              "auto mode shows the failure verdict before routine activity",
-            );
-            assert(
-              failedAuto.some((line) => line.includes("ist fehlgeschlagen")) &&
-                !failedAutoText.includes("Prüfung · Nicht bereit"),
-              "auto mode names the most relevant blocker without duplicating its verdict",
+              failedAutoText.includes("ARBEITET") &&
+                failedAutoText.includes("✓ READ") &&
+                !failedAutoText.includes("Prüfung fehlgeschlagen") &&
+                !failedAutoText.includes("Sitzung"),
+              "the workspace keeps active and completed tool rows without duplicating panel verdicts",
             );
 
             const staleAuto = renderAutoDashboard(
@@ -3052,14 +3260,8 @@ export const auroraUiSections = {
               },
             );
             assert(
-              staleAuto.some((line) =>
-                stripAnsi(line).includes("Prüfung offen"),
-              ) &&
-                !staleAuto.some((line) =>
-                  stripAnsi(line).includes("Prüfung · Offen"),
-                ) &&
-                !staleAuto.some((line) => stripAnsi(line).includes("Fertig")),
-              "a stale check is reported as open once, never as finished",
+              staleAuto.length === 0,
+              "a stale check consumes no workspace row because it belongs to the session panel",
             );
 
             const changesAuto = renderAutoDashboard(
@@ -3085,17 +3287,8 @@ export const auroraUiSections = {
               },
             );
             assert(
-              changesAuto.length <= 7 &&
-                changesAuto.some((line) =>
-                  stripAnsi(line).includes("4 Dateien"),
-                ) &&
-                changesAuto.some((line) =>
-                  stripAnsi(line).includes("+30 −5"),
-                ) &&
-                !changesAuto.some((line) =>
-                  stripAnsi(line).includes("Sitzung"),
-                ),
-              "idle sessions condense completed changes into one summary line under an uppercase phase badge",
+              changesAuto.length === 0,
+              "completed changes consume no workspace row because they belong to the session panel",
             );
 
             const cleanIdleAuto = renderAutoDashboard(
@@ -3193,10 +3386,9 @@ export const auroraUiSections = {
             );
             const narrowSettledText = stripAnsi(narrowSettledAuto.join("\n"));
             assert(
-              narrowSettledAuto.length === 1 &&
-                narrowSettledText.includes("+7") &&
-                narrowSettledText.includes("Prüfung · Bereit"),
-              "with real state present, the second compact row condenses changes plus verdict into one line",
+              narrowSettledAuto.length === 0 &&
+                narrowSettledText === "",
+              "a settled workspace stays empty while the fixed panel carries changes and verdict",
             );
 
             // 8b. changesSummary flows into currentWork.changingFiles as the

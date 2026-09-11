@@ -34,7 +34,6 @@ import {
   hiddenActivitySummary,
   renderActiveTools,
   renderAutoDashboard,
-  renderDashboard,
   renderToolEventRows,
   renderSubagentBranches,
   type ActiveToolView,
@@ -457,9 +456,79 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   // state or lifecycle source.
   let turnSettledWhileAsync = false;
 
+  function currentAgentViews(): SubagentInfo[] {
+    if (fleetDockOwnsSubagents) return [];
+    return [...subagentsCache].sort(
+      (a, b) =>
+        Number(b.status === "needs_attention") -
+        Number(a.status === "needs_attention"),
+    );
+  }
+
+  /** The single task projection shared by the fixed panel and the workspace. */
+  function projectCurrentTask(now: number): TaskViewModel | undefined {
+    if (!state) return undefined;
+    const task = projectTaskViewModel({
+      state,
+      activeTools,
+      subagents: currentAgentViews(),
+      receiptAggregator,
+      now,
+      verificationStatus:
+        lastVerificationStatus ?? state.verification?.status ?? null,
+      workspaceChangedSinceVerification,
+      currentPlan: currentPlanText,
+      userPrompt: currentUserPrompt,
+      contextPercent: activeContext?.getContextUsage()?.percent ?? null,
+    });
+    lastTask = task;
+    return task;
+  }
+
+  function currentHeaderActivity(now: number): {
+    activity: HeaderActivity;
+    elapsedSeconds?: number;
+  } {
+    if (!state) return { activity: "idle" };
+    if (headerActivityOverride === "error") return { activity: "error" };
+    if (
+      headerActivityOverride === "done" &&
+      state.activity.kind === "idle" &&
+      activeTools.size === 0 &&
+      asyncSubagents.size === 0
+    ) {
+      return { activity: "done" };
+    }
+    if (state.activity.kind === "idle") return { activity: "idle" };
+
+    const presentation = activityPresentation(
+      state,
+      activeTools.size,
+      asyncSubagents.size,
+      now,
+      activityStartedAt,
+      lastRelevantActivityAt,
+    );
+    const activity: HeaderActivity =
+      presentation.kind === "thinking"
+        ? "thinking"
+        : presentation.kind === "tool"
+          ? "running"
+          : presentation.kind === "responding"
+            ? "responding"
+            : "waiting";
+    return {
+      activity,
+      elapsedSeconds: Math.max(
+        0,
+        Math.floor((now - presentation.startedAt) / 1000),
+      ),
+    };
+  }
+
   /**
-   * The surface above the editor is a fresh-session welcome followed by a
-   * persistent dashboard. It consumes cached runtime values only: rendering
+   * The surface above the editor is a fresh-session welcome followed by the
+   * fixed Session panel and compact workspace. It consumes cached runtime values only: rendering
    * never changes workflow state or asks another system for information.
    */
   function renderActivityWidget(
@@ -492,29 +561,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     }
 
     const layout = layoutForSize(width, rows);
-    const compact = layout === "compact";
+    const compact = layout === "compact" || dashboardMode === "compact";
+    const workspaceLayout = dashboardMode === "compact" ? "compact" : layout;
     const now = Date.now();
     const toolViews = [...activeTools.values()];
-    const agentViews = fleetDockOwnsSubagents
-      ? []
-      : [...subagentsCache].sort(
-          (a, b) =>
-            Number(b.status === "needs_attention") -
-            Number(a.status === "needs_attention"),
-        );
-    const task = projectTaskViewModel({
-      state,
-      activeTools,
-      subagents: agentViews,
-      receiptAggregator,
-      now,
-      verificationStatus: lastVerificationStatus,
-      workspaceChangedSinceVerification,
-      currentPlan: currentPlanText,
-      userPrompt: currentUserPrompt,
-      contextPercent: activeContext?.getContextUsage()?.percent ?? null,
-    });
-    lastTask = task;
+    const agentViews = currentAgentViews();
+    const task = projectCurrentTask(now);
+    if (!task) return [];
 
     const activityLines: string[] = [];
     if (
@@ -556,10 +609,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       );
       const detailLimit =
         dashboardMode === "auto"
-          ? layout === "compact"
+          ? workspaceLayout === "compact"
             ? 0
             : 3
-          : layout === "wide"
+          : workspaceLayout === "wide"
             ? 3
             : compact
               ? 0
@@ -583,7 +636,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           now,
           {
             compact,
-            wide: layout === "wide",
+            wide: workspaceLayout === "wide",
             limit: visibleToolCount,
             suppressRunningStatus: singleRunningTool,
           },
@@ -608,52 +661,27 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       }
     }
 
-    if (dashboardMode === "auto") {
-      const hasActiveWork =
-        state.activity.kind !== "idle" ||
-        activeTools.size > 0 ||
-        agentViews.length > 0;
-      const autoLines = renderAutoDashboard(task, theme, width, {
-        activityLines,
-        layout,
-        hasActiveWork,
-        verificationStale: verificationIsStale(
-          activeTools,
-          workspaceChangedSinceVerification,
-        ),
-        verificationKnown: lastVerificationStatus !== null,
-        eventLines: renderToolEventRows(
-          completedToolEvents,
-          theme,
-          Math.max(1, width - 4),
-        ),
-      });
-      auroraDiagnostics.recordDashboardRows(autoLines);
-      return autoLines;
-    }
-
-    const maxRows =
-      dashboardMode === "compact"
-        ? 2
-        : Math.min(
-            layout === "wide"
-              ? 14
-              : layout === "comfortable"
-                ? 11
-                : Math.max(5, Math.min(8, rows - 10)),
-            // Expanded keeps its richer panels but never eats the chat:
-            // at most ~40% of terminal rows, always a few rows minimum.
-            Math.max(4, Math.floor(rows * 0.4)),
-          );
-    const lines = renderDashboard(task, theme, width, {
+    const hasActiveWork =
+      state.activity.kind !== "idle" ||
+      activeTools.size > 0 ||
+      agentViews.length > 0;
+    // The header owns the session overview in every visible mode. This widget
+    // remains the compact event-stream workspace, so it can scroll/trim
+    // independently without recreating task or workflow state.
+    const lines = renderAutoDashboard(task, theme, width, {
       activityLines,
+      layout: workspaceLayout,
+      hasActiveWork,
+      verificationStale: verificationIsStale(
+        activeTools,
+        workspaceChangedSinceVerification,
+      ),
+      verificationKnown: lastVerificationStatus !== null,
       eventLines: renderToolEventRows(
         completedToolEvents,
         theme,
         Math.max(1, width - 4),
       ),
-      maxRows,
-      compact: dashboardMode === "compact" || layout === "compact",
     });
     auroraDiagnostics.recordDashboardRows(lines);
     return lines;
@@ -996,25 +1024,25 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     ticker = new AnimationTicker(loaded.config.ui.motion, () => {});
 
     const sessionCtx = ctx;
-    ctx.ui.setHeader((_tui, theme) => ({
+    ctx.ui.setHeader((headerTui, theme) => ({
       invalidate() {},
       dispose() {},
       render(width: number): string[] {
-        if (!state) return [];
-        const activity: HeaderActivity =
-          headerActivityOverride ??
-          (activeTools.size > 0 || state.activity.kind === "tool"
-            ? "running"
-            : state.activity.kind === "thinking"
-              ? "thinking"
-              : state.activity.kind === "responding"
-                ? "waiting"
-                : "idle");
+        if (
+          !state ||
+          dashboardMode === "hidden" ||
+          (state.activity.kind === "idle" && showStartscreen)
+        )
+          return [];
+        const now = Date.now();
+        const current = currentHeaderActivity(now);
         return renderHeaderLines(theme, width, {
           state,
-          cwd: sessionCwd,
-          homeDirectory: sessionHome,
-          activity,
+          task: projectCurrentTask(now),
+          activity: current.activity,
+          elapsedSeconds: current.elapsedSeconds,
+          mode: dashboardMode,
+          rows: headerTui.terminal?.rows ?? 24,
         });
       },
     }));
@@ -1142,6 +1170,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     if (partial?.isError !== true) return;
     if (!tool || tool.tone === "error") return;
     tool.tone = "error";
+    headerActivityOverride = "error";
     noteRelevantActivity();
   });
 

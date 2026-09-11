@@ -947,15 +947,6 @@ function verificationReady(
   return verification?.verdict === "READY";
 }
 
-/** The "N file(s) · +added −removed" fragment every changes summary shares,
- * regardless of which icon/label the caller prefixes it with. */
-function formatChangesDelta(
-  theme: Theme,
-  changes: NonNullable<TaskViewModel["changesSummary"]>,
-): string {
-  return `${changes.filesCount} ${changes.filesCount === 1 ? "Datei" : "Dateien"} · ${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`;
-}
-
 function buildTaskTile(
   task: TaskViewModel,
   theme: Theme,
@@ -1193,10 +1184,9 @@ export function renderDashboard(
 }
 
 /**
- * Aurora's responsive default presentation. Unlike the old state-dependent
- * auto mode, it remains useful after a turn settles: one small session card
- * gives task, activity, changes and verification stable places. Only the
- * compact width tier falls back to two unframed rows.
+ * The new TUI's scrollable workspace. Session identity and lifecycle state
+ * belong to the fixed header panel; this surface only carries live and recent
+ * event rows, so it cannot disagree with the panel by re-deriving a status.
  */
 export function renderAutoDashboard(
   task: TaskViewModel,
@@ -1206,95 +1196,17 @@ export function renderAutoDashboard(
 ): string[] {
   const available = Math.max(1, width);
   const budget = AUTO_MAX_ROWS[input.layout];
-  const clip = (value: string) => crop(value, available);
-  const verification = task.verification;
-  const failed = verificationFailed(verification);
-  const stale =
-    !failed &&
-    task.phase !== "verify" &&
-    input.verificationStale &&
-    (verification?.verdict !== undefined || input.verificationKnown);
-  const problemLines: string[] = [];
-  if (failed) {
-    problemLines.push(
-      theme.fg("error", theme.bold("⚠ Prüfung fehlgeschlagen")),
-    );
-    const blocker = verification?.blockers?.[0];
-    if (blocker) problemLines.push(theme.fg("muted", `  ${blocker}`));
-  } else if (stale) {
-    problemLines.push(
-      theme.fg("warning", "○ Prüfung offen · Änderungen seit dem letzten Lauf"),
-    );
-  }
-
-  // Live rows exist only during real work; idle sessions get no readiness
-  // claim of their own — the panel badge already names the phase.
-  // The caller already provides one canonical activity heading (including its
-  // state and elapsed time). Prefixing every line with a second “Aktivität”
-  // marker made active cards read like two competing status systems.
+  void theme;
   const activityLines = input.hasActiveWork ? input.activityLines : [];
   const eventLines = input.eventLines ?? [];
-  const changes = task.changesSummary;
-  // Routine rows only ever appear when they carry state: "no changes yet" and
-  // "never checked" are zero statements and stay off the dashboard.
-  const changesLine = changes
-    ? `${theme.fg("accent", "◇ Änderungen")} · ${formatChangesDelta(theme, changes)}`
-    : undefined;
-  // Only a successful, current verification is routine information. Failed
-  // and stale states already have a higher-priority problem line; UNVERIFIED
-  // is a zero statement and must not consume dashboard space.
-  const verdictLine = verificationReady(verification)
-    ? theme.fg("success", "✓ Prüfung · Bereit")
-    : undefined;
-  const idleSegments = [
-    changes && changes.filesCount > 0
-      ? `${theme.fg("accent", "◇")} ${formatChangesDelta(theme, changes)}`
-      : undefined,
-    verdictLine,
-  ].filter((segment) => segment !== undefined);
-  const idleSummary =
-    idleSegments.length > 0 ? idleSegments.join(" · ") : undefined;
-
-  if (input.layout === "compact") {
-    // The workspace is an event stream: never spend the compact viewport on a
-    // persistent session card. The header owns the mode/run state.
-    const lines = [
-      ...problemLines,
-      ...(input.hasActiveWork ? activityLines : []),
-      ...eventLines,
-      ...(!input.hasActiveWork && idleSummary ? [idleSummary] : []),
-    ];
-    return lines.slice(0, budget).map(clip);
-  }
-
-  // Auto mode deliberately stays flat. Header and footer are the fixed chrome;
-  // this surface contains only current events and actionable warnings.
-  const contentBudget = Math.max(1, budget);
-  // A failure or stale line already owns the verification meaning. Do not
-  // repeat it as a second generic verification row; spend that row on the
-  // active work or change summary instead. Idle collapses routine metadata
-  // into one condensed line — or none, when nothing has a state to report.
-  const routineLines = (
-    problemLines.length > 0
-      ? [changesLine]
-      : input.hasActiveWork
-        ? [changesLine, verdictLine]
-        : [idleSummary]
-  ).filter((line) => line !== undefined);
-  const activityBudget = Math.max(
-    1,
-    contentBudget - problemLines.length - routineLines.length,
-  );
-  const content = [
-    ...problemLines,
-    ...activityLines.slice(0, activityBudget),
-    ...eventLines.slice(
-      0,
-      Math.max(0, contentBudget - problemLines.length - activityLines.length),
-    ),
-    ...routineLines,
-  ]
-    .slice(0, contentBudget)
-    .map(clip);
-  return content;
+  // `task` remains part of the signature for callers that construct the
+  // workspace from the shared projection; the workspace deliberately does not
+  // render it because the fixed Session panel already owns that identity.
+  void task;
+  const visibleActivity = activityLines.slice(0, budget);
+  const eventBudget = Math.max(0, budget - visibleActivity.length);
+  return [
+    ...visibleActivity,
+    ...eventLines.slice(-eventBudget),
+  ].map((line) => crop(line, available));
 }

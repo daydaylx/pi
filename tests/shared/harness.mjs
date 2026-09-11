@@ -127,6 +127,7 @@ export function createHarness(options = {}) {
   const lifecycleCalls = [];
   let customCallIndex = 0;
   let footerFactory;
+  let headerFactory;
   let editorFactory;
   let thinkingLevel = options.thinkingLevel ?? "high";
   let entries = options.entries ?? [];
@@ -181,8 +182,9 @@ export function createHarness(options = {}) {
         widgets.delete(key);
       }
     },
-    setHeader() {
-      chrome.header += 1;
+    setHeader(factory) {
+      headerFactory = factory;
+      if (factory) chrome.header += 1;
     },
     setWorkingMessage(message) {
       workingMessages.push(message);
@@ -474,6 +476,9 @@ export function createHarness(options = {}) {
     },
     get footerFactory() {
       return footerFactory;
+    },
+    get headerFactory() {
+      return headerFactory;
     },
     get branchReads() {
       return branchReads;

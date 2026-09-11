@@ -3,8 +3,8 @@
 > **Scope:** reines Terminal-UI (CLI/TUI), nicht die Electron-GUI unter
 > `gui/` — siehe `docs/scope-cli-tui-vs-gui.md`.
 
-Aurora UI owns Pi's footer, its persistent session dashboard and the working
-indicator while the extension is active. It uses only public extension UI and
+Aurora UI owns Pi's footer, its fixed Session panel, compact event-stream
+workspace and working indicator while the extension is active. It uses only public extension UI and
 lifecycle hooks. Core tools are not replaced or wrapped, and the editor stays
 Pi's own component: Aurora installs no editor of its own, so editing, history,
 completion, shortcuts and the `editorPaddingX` / `autocompleteMaxVisible`
@@ -29,17 +29,19 @@ MODELL` transition alone.
 ## The permanent surfaces
 
 **Footer** (`footer.ts`) — the one permanent status surface, and one line.
-It shows the workflow, model, thinking level, session folder, context share and
-verification state, then drops whole segments from the least important end as
-the terminal narrows. From comfortable width on, the workflow and every risk
-segment render as filled status chips (pills); routine metadata stays flat so
-the line never turns into a wall of colour, and narrow tiers keep the flat look
-entirely. Whenever a visible dashboard surface owns verification reporting
-(auto/compact/expanded), the footer suppresses the routine successful state;
-failed or stale checks remain critical footer risks at every width. The folder
-is derived from the session CWD captured at session start and compacted purely;
-it never probes the filesystem. Risk segments — YOLO, a failed verification, a
-broken language server — ignore the width tier and are the last thing dropped.
+When the Session panel is hidden it also carries the workflow mode; while the
+panel is visible it keeps its status-bar role focused on model, thinking level,
+session folder, context share and verification risks. It drops whole segments
+from the least important end as the terminal narrows. From comfortable width
+on, the workflow (when present) and every risk segment render as filled status
+chips (pills); routine metadata stays flat so the line never turns into a wall
+of colour, and narrow tiers keep the flat look entirely. Whenever a visible
+panel owns verification reporting, the footer suppresses the routine successful
+state; failed or stale checks remain critical footer risks at every width. The
+folder is derived from the session CWD captured at session start and compacted
+purely; it never probes the filesystem. Risk segments — YOLO, a failed
+verification, a broken language server — ignore the width tier and are the last
+thing dropped.
 Size classes come from `shared/layout.ts`, shared with the menu shell.
 
 `renderFooterLines` is pure. Everything it prints was already in runtime state:
@@ -47,37 +49,42 @@ it starts no process, probes neither git nor the LSP, asks no provider and reads
 no file. It is called on every frame, so anything else would be paid for
 continuously.
 
-**Session dashboard** (`tool-renderers.ts`) — permanent, above the editor, with
-four presentation modes owned by the single setting `ui.dashboard` in setup.json
-(`auto|compact|expanded|hidden`, default `auto`), switched through `/dashboard`
-which surfaces in the Super+Q command center — no new shortcut:
+**Session panel and workspace** (`header.ts`, `tool-renderers.ts`) — the fixed
+panel is rendered above the editor through Pi's existing header slot. Its task,
+mode, status, elapsed time and optional details come from one
+`TaskViewModel`/`AuroraUiState` projection. The widget below it is deliberately
+only a compact event stream, so its rows can be trimmed independently while
+the panel remains fixed. Completed events retain the newest rows when the
+workspace budget is tight.
 
-- **`auto`** is the responsive permanent default (`renderAutoDashboard`): after
-  the fresh-session welcome it keeps a compact session card with task,
-  activity, changes and verification visible, including during idle — a filled
-  tile that takes the error surface when verification fails. Failed or stale
-  verification appears before routine information; narrow terminals fall back
-  to at most two unframed rows while keeping risks visible.
-- **`compact`** caps the dashboard at two hard rows.
-- **`expanded`** keeps the richer multi-tile view (Aufgabe/Aktivität/
-  Änderungen/Prüfungen) within a tested height budget of roughly 40 % of
-  terminal rows. From `wide` width on the tiles form a two-column card grid
-  (Aufgabe + Aktivität, Änderungen + Prüfungen); a pair costs the height of
-  its taller member, so the failure verdict still outranks routine tiles.
-- **`hidden`** emits no dashboard at all while workflow state, footer risks and
-  the inspector stay fully alive.
+The single setting `ui.dashboard` in setup.json
+(`auto|compact|expanded|hidden`, default `auto`) still controls the existing
+`/dashboard` command and command-center entry — no new shortcut is introduced:
+
+- **`auto`** is the responsive panel/workspace default. The panel expands only
+  for available details; the workspace shows live activity and recent tools.
+- **`compact`** collapses the panel to its identity/status frame and caps the
+  workspace at two rows.
+- **`expanded`** permits the panel's optional goal, current-work, verifier,
+  subagent, test and change fields within the terminal row budget.
+- **`hidden`** hides both fixed surfaces while workflow state, footer risks and
+  the inspector stay alive.
 
 Phase and verification verdict are derived separately but share one staleness
 definition (`verificationIsStale()`): `done` requires idle plus a current
 `READY` check, only a real running verification tool shows `Prüfen`, and active
 work stays `Arbeiten` even after an earlier failed check — see
 [decision 019](../../docs/decisions/019-dashboard-modes-and-phase-precedence.md).
-The status labels, tone mapping and tile rendering live in `tool-renderers.ts`
-and `tile.ts`; `index.ts` only derives the existing runtime view model and
-applies the terminal row budget. Finished tools still leave the live activity
-list immediately; their real change and verification results remain visible
-through the relevant session tiles. The welcome is never shown again within
-that session and is skipped for resumed conversations.
+The fixed panel's status labels and mode badge live in `header.ts`; tile/frame
+primitives remain in `tile.ts`; `index.ts` derives the task and activity
+projection from the existing runtime state. The welcome is never shown again
+within that session and is skipped for resumed conversations.
+
+This is an intentional historical merge: `bd427d2` introduced the dashboard
+surface, `62b52f8` restored the framed `Sitzung` identity, and `68da993`
+converted the workspace to the current compact event stream. The current
+implementation keeps the new stream and restores the old identity in the
+header slot instead of reinstating the old multi-tile layout.
 
 **Visual language** (`tile.ts`) — dashboard, welcome window and inspector
 render as filled cards: framed tiles whose title row and body rows are padded
@@ -97,13 +104,12 @@ before wrapping. These primitives use Pi's cell-aware width functions and
 Aurora's ANSI-safe crop wrapper, so a resize produces either a complete row or
 a deterministic wrap rather than a clipped filled cap or a one-cell edge gap.
 
-Der Header zeigt während eines laufenden Turns `DENKT NACH` (mit Thinking-Level),
-`ARBEITET`, `ANTWORTET` oder nach vier Sekunden ohne konkretes Aurora-Ereignis
-`WARTET AUF MODELL`, jeweils mit einer Laufzeit. `WARTET AUF MODELL` bedeutet,
-dass weder ein Tool noch ein asynchroner Subagent läuft und der Turn nur auf
-die nächste Rückmeldung vom Modell/Provider wartet: Die Animation bleibt ein
-Lebenszeichen, keine Hänger- oder Fehlerdiagnose, macht aber jetzt explizit,
-_worauf_ gewartet wird. `idle` wird nur beim tatsächlichen Turnabschluss
+Das Session-Panel zeigt während eines laufenden Turns `DENKT NACH` (mit
+Thinking-Level im Workspace), `ARBEITET`, `ANTWORTET` oder nach vier Sekunden
+ohne konkretes Aurora-Ereignis `WARTET`, jeweils mit einer Laufzeit. `WARTET`
+bedeutet, dass weder ein Tool noch ein asynchroner Subagent läuft und der Turn
+auf die nächste Rückmeldung vom Modell/Provider wartet. `idle` wird nur beim
+tatsächlichen Turnabschluss
 (`agent_settled`) gesetzt, sofern keine asynchronen Subagenten weiterarbeiten.
 `agent_end` beendet nur einen einzelnen Agentenlauf; Pi kann danach noch
 automatisch retryen, kompaktieren oder einen weiteren Lauf starten.
