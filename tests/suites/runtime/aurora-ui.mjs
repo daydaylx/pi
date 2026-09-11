@@ -72,7 +72,7 @@ export const auroraUiSections = {
         // from the runtime settings rather than from a decorative subclass.
         eq(
           harness.chrome,
-          { footer: 1, editor: 0, widget: 1, header: 0 },
+          { footer: 1, editor: 0, widget: 1, header: 1 },
           "Aurora is the single custom chrome owner and leaves the editor alone",
         );
         assert(
@@ -122,12 +122,12 @@ export const auroraUiSections = {
         // the welcome but keep task, activity and verification orientation.
         const autoLines = resumedLines;
         assert(
-          autoLines.some((line) => stripAnsi(line).includes("Sitzung")) &&
+          autoLines.length === 0 &&
             !autoLines.some((line) =>
               stripAnsi(line).includes("◌ Aktivität"),
             ) &&
             !autoLines.some((line) => stripAnsi(line).includes("PI · AURORA")),
-          "a resumed idle session keeps the session card without welcome or invented activity",
+          "a resumed idle session keeps the workspace free of zero-state cards",
         );
         await resumedContext.ui.submitSlashCommand("/dashboard expanded");
         const expandedLines =
@@ -598,13 +598,13 @@ export const auroraUiSections = {
             "extensions/aurora-ui/tool-renderers.ts",
           );
           for (const [name, label] of [
-            ["read", "Lesen"],
-            ["grep", "Suchen"],
-            ["edit", "Bearbeiten"],
-            ["bash", "Shell"],
-            ["verify", "Prüfen"],
-            ["subagent", "Subagent"],
-            ["unknown_tool", "Werkzeug · unknown_tool"],
+            ["read", "READ"],
+            ["grep", "GREP"],
+            ["edit", "EDIT"],
+            ["bash", "EXEC"],
+            ["verify", "VERIFY"],
+            ["subagent", "AGENT"],
+            ["unknown_tool", "TOOL · unknown_tool"],
           ]) {
             eq(
               auroraTools.toolPresentation(name).label,
@@ -612,6 +612,41 @@ export const auroraUiSections = {
               `${name} uses its German Aurora presentation label`,
             );
           }
+          const header = await load("extensions/aurora-ui/header.ts");
+          const headerState = {
+            workflow: { phase: "work", label: "Work" },
+            model: { thinking: "high" },
+            activity: { kind: "idle" },
+          };
+          for (const [columns, expected] of [
+            [80, "RUNNING"],
+            [100, "RUNNING"],
+            [120, "RUNNING"],
+            [160, "RUNNING"],
+          ]) {
+            const line = header.renderHeaderLines(context.ui.theme, columns, {
+              state: headerState,
+              cwd: path.join(homedir(), "projects", "very-long-aurora-project"),
+              homeDirectory: homedir(),
+              activity: "running",
+            })[0];
+            assert(
+              stripAnsi(line).includes(expected) &&
+                stripAnsi(line).length <= columns,
+              `header keeps its state and fits ${columns} columns`,
+            );
+          }
+          assert(
+            stripAnsi(
+              header.renderHeaderLines(context.ui.theme, 40, {
+                state: headerState,
+                cwd: "/tmp/very-long-path",
+                activity: "thinking",
+              })[0],
+            ) === "PI ─ WORK",
+            "the narrow header keeps only PI and mode",
+          );
+
           const genericTool = auroraTools
             .renderActiveTools(
               [
@@ -629,7 +664,7 @@ export const auroraUiSections = {
             .map(stripAnsi)
             .join("\n");
           assert(
-            genericTool.includes("Werkzeug · ask_user"),
+            genericTool.includes("TOOL · ask_user"),
             "generic activity rows preserve the real runtime tool name",
           );
           const activeTools = ["read", "grep", "bash", "edit"].map(
@@ -1019,6 +1054,45 @@ export const auroraUiSections = {
             rendered.includes("↳ +") && rendered.includes("Tool"),
             "hiddenActivitySummary compacts the overflow into a single summary line",
           );
+
+          // Completed events are bounded and retain the newest history rows.
+          for (let i = 0; i < 45; i++) {
+            await overflowHarness.runHooks(
+              "tool_execution_start",
+              {
+                toolCallId: `history-tool-${i}`,
+                toolName: "read",
+                args: { path: `history-${i}.ts` },
+              },
+              overflowCtx,
+            );
+            await overflowHarness.runHooks(
+              "tool_execution_end",
+              { toolCallId: `history-tool-${i}`, toolName: "read" },
+              overflowCtx,
+            );
+          }
+          const historyWidget =
+            overflowHarness.widgets.get("aurora-ui/activity");
+          const historyRendered =
+            typeof historyWidget?.content === "function"
+              ? historyWidget
+                  .content(
+                    {
+                      terminal: { columns: 140, rows: 24 },
+                      requestRender() {},
+                    },
+                    overflowCtx.ui.theme,
+                  )
+                  .render(140)
+                  .map(stripAnsi)
+                  .join("\n")
+              : "";
+          assert(
+            historyRendered.includes("history-44.ts") &&
+              !historyRendered.includes("history-0.ts"),
+            "completed tool history keeps the newest bounded event rows",
+          );
           await overflowHarness.runHooks("session_shutdown", {}, overflowCtx);
         }
 
@@ -1228,7 +1302,7 @@ export const auroraUiSections = {
                 .join("\n")
             : "";
         assert(
-          erroredRead.includes(context.ui.theme.fg("error", "◌")),
+          erroredRead.includes(context.ui.theme.fg("error", "✕")),
           "a real error partial styles the still-running Activity glyph as an error",
         );
 
@@ -1258,8 +1332,8 @@ export const auroraUiSections = {
           railRendered.includes("╭─") &&
             railRendered.includes("AUFGABE") &&
             railRendered.includes("AKTIVITÄT") &&
-            railRendered.includes("◌ Lesen") &&
-            railRendered.includes("▹ Testen"),
+            railRendered.includes("READ") &&
+            railRendered.includes("TEST"),
           "wide dashboard groups typed running tools beneath the current task",
         );
 
@@ -1355,7 +1429,7 @@ export const auroraUiSections = {
                 .join("\n")
             : "";
         assert(
-          verifyRendered.includes("◌ Prüfen") &&
+          verifyRendered.includes("◌ VERIFY") &&
             verifyRendered.includes("verify"),
           "the running verification tool has a distinct, argument-backed Activity row without a false success mark",
         );
@@ -1671,10 +1745,10 @@ export const auroraUiSections = {
           assert(
             autoMode.length > 0 &&
               autoMode.length <= 7 &&
-              autoMode.some((line) => line.includes("Sitzung")) &&
+              !autoMode.some((line) => line.includes("Sitzung")) &&
               autoMode.some((line) => line.includes("ARBEITET")) &&
-              autoMode.some((line) => line.includes("Testen")),
-            "auto mode keeps the framed session overview and typed tool rows within budget",
+              autoMode.some((line) => line.includes("TEST")),
+            "auto mode keeps flat typed tool rows within budget",
           );
           const lowestStandardAuto = renderMode(52, 14);
           assert(
@@ -1773,7 +1847,7 @@ export const auroraUiSections = {
           }
           assert(
             renderedDuringRefresh.includes("ARBEITET") &&
-              renderedDuringRefresh.includes("Subagent"),
+              renderedDuringRefresh.includes("AGENT"),
             "a synchronous subagent refresh keeps an active tool visible before the agent state updates",
           );
           await raceHarness.runHooks("session_shutdown", {}, raceContext);
@@ -2203,8 +2277,8 @@ export const auroraUiSections = {
               lifecycleContext,
             );
             assert(
-              renderActivity().includes("AUFGABE") &&
-                renderActivity().includes("Bereit für die nächste Aufgabe."),
+              renderActivity().includes("✓ TOOL") ||
+                renderActivity().includes("✓ READ"),
               "agent_settled keeps the session dashboard visible after live activity ends",
             );
           } finally {
@@ -3018,7 +3092,9 @@ export const auroraUiSections = {
                 changesAuto.some((line) =>
                   stripAnsi(line).includes("+30 −5"),
                 ) &&
-                changesAuto.some((line) => stripAnsi(line).includes("FERTIG")),
+                !changesAuto.some((line) =>
+                  stripAnsi(line).includes("Sitzung"),
+                ),
               "idle sessions condense completed changes into one summary line under an uppercase phase badge",
             );
 
@@ -3035,11 +3111,7 @@ export const auroraUiSections = {
               },
             );
             assert(
-              cleanIdleAuto.length > 0 &&
-                cleanIdleAuto.length <= 4 &&
-                cleanIdleAuto.some((line) =>
-                  stripAnsi(line).includes("Sitzung"),
-                ) &&
+              cleanIdleAuto.length === 0 &&
                 !stripAnsi(cleanIdleAuto.join("\n")).includes(
                   "Noch keine Änderungen",
                 ) &&
@@ -3049,7 +3121,7 @@ export const auroraUiSections = {
                 !stripAnsi(cleanIdleAuto.join("\n")).includes(
                   "Bereit für die nächste Aufgabe",
                 ),
-              "an idle session without state keeps only the card frame plus its task row — no zero statements",
+              "an idle session without state keeps the workspace free of zero statements",
             );
 
             const narrowAuto = renderAutoDashboard(tvm, context.ui.theme, 40, {
@@ -3087,15 +3159,15 @@ export const auroraUiSections = {
               },
             );
             assert(
-              stripAnsi(narrowIdleAuto.join("\n")).includes("ARBEITEN") &&
+              narrowIdleAuto.length === 0 &&
+                !stripAnsi(narrowIdleAuto.join("\n")).includes("ARBEITEN") &&
                 !stripAnsi(narrowIdleAuto.join("\n")).includes(
                   "Noch nicht ausgeführt",
                 ) &&
                 !stripAnsi(narrowIdleAuto.join("\n")).includes(
                   "Noch nicht bereit",
-                ) &&
-                narrowIdleAuto.length === 1,
-              "a small idle terminal never spends its second auto row on an unrun-check statement",
+                ),
+              "a small idle terminal keeps the workspace free of zero-state rows",
             );
 
             const narrowSettledAuto = renderAutoDashboard(
@@ -3121,7 +3193,7 @@ export const auroraUiSections = {
             );
             const narrowSettledText = stripAnsi(narrowSettledAuto.join("\n"));
             assert(
-              narrowSettledAuto.length === 2 &&
+              narrowSettledAuto.length === 1 &&
                 narrowSettledText.includes("+7") &&
                 narrowSettledText.includes("Prüfung · Bereit"),
               "with real state present, the second compact row condenses changes plus verdict into one line",

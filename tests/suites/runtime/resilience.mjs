@@ -663,7 +663,7 @@ export const resilienceSections = {
       await harness.runHooks("session_start", {}, context);
       eq(
         harness.chrome,
-        { footer: 1, editor: 0, widget: 1, header: 0 },
+        { footer: 1, editor: 0, widget: 1, header: 1 },
         "combined stack gives Aurora exclusive ownership of custom chrome",
       );
       eq(

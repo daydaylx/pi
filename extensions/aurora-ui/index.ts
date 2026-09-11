@@ -35,13 +35,16 @@ import {
   renderActiveTools,
   renderAutoDashboard,
   renderDashboard,
+  renderToolEventRows,
   renderSubagentBranches,
   type ActiveToolView,
   type SubagentInfo,
+  type ToolEventView,
 } from "./tool-renderers.ts";
 import { renderFooterLines } from "./footer.ts";
 import { renderStartscreen } from "./startscreen.ts";
 import { thinkingLabel, thinkingTone } from "./thinking.ts";
+import { renderHeaderLines, type HeaderActivity } from "./header.ts";
 import { ReceiptAggregator } from "./receipts.ts";
 import { auroraDiagnostics } from "./dev-diagnostics.ts";
 import {
@@ -442,6 +445,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let dashboardMode: DashboardMode = "auto";
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
+  const completedToolEvents: ToolEventView[] = [];
+  let headerActivityOverride: HeaderActivity | undefined;
   const receiptAggregator = new ReceiptAggregator();
   // Presentation-only timestamps: neither is published nor part of Aurora's
   // activity-state contract.
@@ -617,6 +622,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           workspaceChangedSinceVerification,
         ),
         verificationKnown: lastVerificationStatus !== null,
+        eventLines: renderToolEventRows(
+          completedToolEvents,
+          theme,
+          Math.max(1, width - 4),
+        ),
       });
       auroraDiagnostics.recordDashboardRows(autoLines);
       return autoLines;
@@ -637,6 +647,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           );
     const lines = renderDashboard(task, theme, width, {
       activityLines,
+      eventLines: renderToolEventRows(
+        completedToolEvents,
+        theme,
+        Math.max(1, width - 4),
+      ),
       maxRows,
       compact: dashboardMode === "compact" || layout === "compact",
     });
@@ -849,6 +864,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     for (const unsubscribe of busUnsubscribers.splice(0)) unsubscribe();
     pendingRequestId = undefined;
     activeTools.clear();
+    completedToolEvents.length = 0;
+    headerActivityOverride = undefined;
     foregroundSubagents.clear();
     asyncSubagents.clear();
     subagentsCache = [];
@@ -865,6 +882,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
     const uiContext = ctx ?? activeContext;
     if (uiContext?.mode === "tui" && uiContext.hasUI) {
+      uiContext.ui.setHeader(undefined);
       uiContext.ui.setFooter(undefined);
       uiContext.ui.setWidget(ACTIVITY_WIDGET, undefined);
       uiContext.ui.setWorkingVisible(false);
@@ -971,13 +989,35 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       );
     }
 
-    // Aurora owns the footer and the activity widget. The editor stays Pi's
-    // own component: subclassing it only to draw rails meant duplicating
-    // editor settings and depending on core editor internals for decoration.
+    // Aurora owns fixed orientation/status chrome and the workspace widget. The
+    // editor remains Pi's own component, preserving its input, scroll and
+    // shortcut behaviour.
 
     ticker = new AnimationTicker(loaded.config.ui.motion, () => {});
 
     const sessionCtx = ctx;
+    ctx.ui.setHeader((_tui, theme) => ({
+      invalidate() {},
+      dispose() {},
+      render(width: number): string[] {
+        if (!state) return [];
+        const activity: HeaderActivity =
+          headerActivityOverride ??
+          (activeTools.size > 0 || state.activity.kind === "tool"
+            ? "running"
+            : state.activity.kind === "thinking"
+              ? "thinking"
+              : state.activity.kind === "responding"
+                ? "waiting"
+                : "idle");
+        return renderHeaderLines(theme, width, {
+          state,
+          cwd: sessionCwd,
+          homeDirectory: sessionHome,
+          activity,
+        });
+      },
+    }));
     ctx.ui.setFooter((tui, theme, footerData) => {
       const detachTicker = ticker!.attach(tui);
       // The footer reports the context share, which moves as the branch grows.
@@ -1057,6 +1097,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   pi.on("agent_start", (_event, ctx) => {
     showStartscreen = false;
     turnSettledWhileAsync = false;
+    headerActivityOverride = undefined;
     activeTools.clear();
     foregroundSubagents.clear();
     refreshSubagentDisplay();
@@ -1105,6 +1146,18 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_execution_end", (event, ctx) => {
+    const tool = activeTools.get(event.toolCallId);
+    if (tool) {
+      completedToolEvents.push({
+        id: tool.id,
+        name: tool.name,
+        kind: tool.kind,
+        target: tool.target,
+        status: event.isError || tool.tone === "error" ? "failed" : "completed",
+      });
+      if (completedToolEvents.length > 40) completedToolEvents.shift();
+    }
+    if (event.isError) headerActivityOverride = "error";
     activeTools.delete(event.toolCallId);
     receiptAggregator.recordEnd(
       event.toolCallId,
@@ -1168,6 +1221,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   // agent_settled is the sole terminal lifecycle event for Aurora.
   pi.on("agent_settled", (_event, ctx) => {
     turnSettledWhileAsync = true;
+    if (headerActivityOverride !== "error") headerActivityOverride = "done";
     activeTools.clear();
     foregroundSubagents.clear();
     refreshSubagentDisplay();

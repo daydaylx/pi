@@ -77,17 +77,17 @@ interface ToolPresentation {
 }
 
 const PRESENTATIONS: Record<ActivityToolKind, ToolPresentation> = {
-  read: { glyph: "◌", label: "Lesen" },
-  search: { glyph: "⌕", label: "Suchen" },
-  edit: { glyph: "✎", label: "Bearbeiten" },
-  bash: { glyph: "›", label: "Shell" },
+  read: { glyph: "◌", label: "READ" },
+  search: { glyph: "⌕", label: "GREP" },
+  edit: { glyph: "✎", label: "EDIT" },
+  bash: { glyph: "›", label: "EXEC" },
   lsp: { glyph: "◇", label: "LSP" },
-  test: { glyph: "▹", label: "Testen" },
-  verification: { glyph: "✓", label: "Prüfen" },
-  subagent: { glyph: "◉", label: "Subagent" },
-  wait: { glyph: "⋯", label: "Warten" },
-  web: { glyph: "◎", label: "Web" },
-  generic: { glyph: RUNNING_GLYPH, label: "Werkzeug" },
+  test: { glyph: "▹", label: "TEST" },
+  verification: { glyph: "✓", label: "VERIFY" },
+  subagent: { glyph: "◉", label: "AGENT" },
+  wait: { glyph: "⋯", label: "WAIT" },
+  web: { glyph: "◎", label: "WEB" },
+  generic: { glyph: "◌", label: "TOOL" },
 };
 
 const LSP_TOOLS = new Set([
@@ -454,6 +454,63 @@ function padToWidth(value: string, width: number): string {
  * wrap tools, so argument validation, execution, cancellation, updates and
  * results continue to be handled exactly by Pi's core tool definitions.
  */
+export type ToolEventStatus = "queued" | "running" | "completed" | "failed";
+
+export interface ToolEventView {
+  id: string;
+  name: string;
+  kind?: ActivityToolKind;
+  target?: string;
+  status: ToolEventStatus;
+}
+
+function eventStatusGlyph(status: ToolEventStatus): string {
+  switch (status) {
+    case "queued":
+      return "○";
+    case "running":
+      return "●";
+    case "failed":
+      return "✕";
+    case "completed":
+      return "✓";
+  }
+}
+
+function eventStatusTone(
+  status: ToolEventStatus,
+): "muted" | "accent" | "error" | "success" {
+  switch (status) {
+    case "queued":
+      return "muted";
+    case "running":
+      return "accent";
+    case "failed":
+      return "error";
+    case "completed":
+      return "success";
+  }
+}
+
+/** Compact persistent rows; full payloads remain available through existing details. */
+export function renderToolEventRows(
+  events: readonly ToolEventView[],
+  theme: Theme,
+  width: number,
+  limit = 6,
+): string[] {
+  const available = Math.max(1, width);
+  return events.slice(-limit).map((event) => {
+    const kind = event.kind ?? classifyTool(event.name, undefined);
+    const label = PRESENTATIONS[kind].label;
+    const target = event.target ? ` ${event.target}` : "";
+    return crop(
+      `${theme.fg(eventStatusTone(event.status), eventStatusGlyph(event.status))} ${theme.bold(label)}${theme.fg("muted", target)}`,
+      available,
+    );
+  });
+}
+
 export function renderActiveTools(
   tools: readonly ActiveToolView[],
   theme: Theme,
@@ -481,10 +538,15 @@ export function renderActiveTools(
     // A checkmark would falsely claim success while the verification is still
     // running. Completed tools disappear from this transient surface, so only
     // Pi's real result renderer may show the success glyph.
-    const glyph =
-      tool.kind === "verification" ? RUNNING_GLYPH : presentation.glyph;
     const status = toolStatus(tool, now);
-    const marker = theme.fg(status.tone, glyph);
+    const marker = theme.fg(
+      status.tone,
+      status.tone === "error"
+        ? "✕"
+        : tool.kind === "verification"
+          ? RUNNING_GLYPH
+          : presentation.glyph,
+    );
     const label = compact
       ? theme.bold(presentation.label)
       : padToWidth(theme.bold(presentation.label), 12);
@@ -831,6 +893,7 @@ export function renderTaskWorkspace(
 
 export interface DashboardInput {
   activityLines: readonly string[];
+  eventLines?: readonly string[];
   maxRows: number;
   compact?: boolean;
 }
@@ -838,6 +901,7 @@ export interface DashboardInput {
 /** The runtime signals auto mode needs beyond the task view model itself. */
 export interface AutoDashboardInput {
   activityLines: readonly string[];
+  eventLines?: readonly string[];
   layout: Layout;
   /** At least one tool or subagent is running right now. */
   hasActiveWork: boolean;
@@ -923,8 +987,8 @@ function buildActivityTile(
     badge: input.activityLines.length > 0 ? "LÄUFT" : "BEREIT",
     tone: input.activityLines.length > 0 ? "accent" : "muted",
     lines:
-      input.activityLines.length > 0
-        ? input.activityLines
+      input.activityLines.length > 0 || (input.eventLines?.length ?? 0) > 0
+        ? [...input.activityLines, ...(input.eventLines ?? [])]
         : [
             theme.fg(
               "muted",
@@ -1150,8 +1214,6 @@ export function renderAutoDashboard(
     task.phase !== "verify" &&
     input.verificationStale &&
     (verification?.verdict !== undefined || input.verificationKnown);
-  const taskLine = theme.bold(task.title);
-
   const problemLines: string[] = [];
   if (failed) {
     problemLines.push(
@@ -1171,6 +1233,7 @@ export function renderAutoDashboard(
   // state and elapsed time). Prefixing every line with a second “Aktivität”
   // marker made active cards read like two competing status systems.
   const activityLines = input.hasActiveWork ? input.activityLines : [];
+  const eventLines = input.eventLines ?? [];
   const changes = task.changesSummary;
   // Routine rows only ever appear when they carry state: "no changes yet" and
   // "never checked" are zero statements and stay off the dashboard.
@@ -1193,20 +1256,20 @@ export function renderAutoDashboard(
     idleSegments.length > 0 ? idleSegments.join(" · ") : undefined;
 
   if (input.layout === "compact") {
-    // Two unframed rows are the whole budget here: the phase line plus at most
-    // one information-bearing row. An unrun check stays silent rather than
-    // spending half the dashboard on a zero statement.
-    const secondRow = problemLines[0] ?? activityLines[0] ?? idleSummary;
-    return [
-      clip(`${task.phaseLabel.toUpperCase()} · ${theme.bold(task.title)}`),
-      ...(secondRow !== undefined ? [clip(secondRow)] : []),
-    ].slice(0, budget);
+    // The workspace is an event stream: never spend the compact viewport on a
+    // persistent session card. The header owns the mode/run state.
+    const lines = [
+      ...problemLines,
+      ...(input.hasActiveWork ? activityLines : []),
+      ...eventLines,
+      ...(!input.hasActiveWork && idleSummary ? [idleSummary] : []),
+    ];
+    return lines.slice(0, budget).map(clip);
   }
 
-  // A frame costs two rows. Select full sections before framing so a terminal
-  // never receives a cropped box and failures retain precedence over routine
-  // activity and metadata.
-  const contentBudget = Math.max(1, budget - 2);
+  // Auto mode deliberately stays flat. Header and footer are the fixed chrome;
+  // this surface contains only current events and actionable warnings.
+  const contentBudget = Math.max(1, budget);
   // A failure or stale line already owns the verification meaning. Do not
   // repeat it as a second generic verification row; spend that row on the
   // active work or change summary instead. Idle collapses routine metadata
@@ -1220,21 +1283,18 @@ export function renderAutoDashboard(
   ).filter((line) => line !== undefined);
   const activityBudget = Math.max(
     1,
-    contentBudget - 1 - problemLines.length - routineLines.length,
+    contentBudget - problemLines.length - routineLines.length,
   );
   const content = [
-    taskLine,
     ...problemLines,
     ...activityLines.slice(0, activityBudget),
+    ...eventLines.slice(
+      0,
+      Math.max(0, contentBudget - problemLines.length - activityLines.length),
+    ),
     ...routineLines,
   ]
     .slice(0, contentBudget)
     .map(clip);
-  return renderTile(theme, available, {
-    title: "Sitzung",
-    badge: task.phaseLabel.toUpperCase(),
-    tone: failed ? "error" : stale ? "warning" : "accent",
-    fill: failed ? "toolErrorBg" : undefined,
-    lines: content,
-  });
+  return content;
 }
