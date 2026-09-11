@@ -105,21 +105,3 @@ export function gateRequiresInspection(
     required.workspaceChangedSinceTurnStart
   );
 }
-
-/**
- * Blockentscheidung für einen Workspace-Fingerprint. `undefined` oder
- * `"unavailable"` gilt fail-closed als geändert: Ein Gate darf nur mit einem
- * belastbaren, unveränderten Snapshot geöffnet werden.
- */
-export function gateBlocked(
-  gate: RecoveryGateState | undefined,
-  currentFingerprint: string | undefined,
-): boolean {
-  if (!gate || !gateRequiresInspection(gate.required)) return false;
-  if (!gate.checked) return true;
-  return (
-    currentFingerprint === undefined ||
-    currentFingerprint === "unavailable" ||
-    currentFingerprint !== gate.checked.workspaceFingerprint
-  );
-}

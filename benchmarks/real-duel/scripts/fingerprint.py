@@ -80,7 +80,7 @@ def _openbench_ref():
 
 
 def compute_fingerprint(candidates=None, task_instruction=None, dirty_override=False,
-                         model=None, trial=None, frozen_base_sha=None):
+                         model=None, reasoning=None, trial=None, frozen_base_sha=None):
     """candidates: dict[name -> obench.candidates.ManifestHarness] (optional).
     task_instruction: raw instruction.md text of the task about to run (optional).
     trial: Trial-Nummer des Laufs (optional; None erhaelt Standalone-CLI-
@@ -119,8 +119,11 @@ def compute_fingerprint(candidates=None, task_instruction=None, dirty_override=F
 
         "pi_model": None,
         "codex_model": None,
-        "pi_reasoning": _pi_reasoning(),
-        "codex_reasoning": _codex_reasoning(),
+        "reasoning_override": reasoning,
+        "pi_reasoning": reasoning or _pi_reasoning(),
+        "codex_reasoning": reasoning or _codex_reasoning(),
+        "pi_reasoning_global": _pi_reasoning(),
+        "codex_reasoning_global": _codex_reasoning(),
 
         "openbench_sha": openbench_sha,
         "openbench_tag": openbench_tag,

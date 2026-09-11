@@ -130,22 +130,24 @@ export const auroraUiSections = {
           "a resumed idle session keeps the workspace free of zero-state cards",
         );
         await resumedContext.ui.submitSlashCommand("/dashboard expanded");
-        const expandedHeader =
+        const expandedHeaderComponent =
           typeof resumedHarness.headerFactory === "function"
             ? resumedHarness.headerFactory(
                 { terminal: { columns: 120, rows: 30 }, requestRender() {} },
                 resumedContext.ui.theme,
               )
-                .render(120)
-                .map(stripAnsi)
-                .join("\n")
-            : "";
+            : undefined;
+        const expandedHeader = expandedHeaderComponent
+          ? expandedHeaderComponent.render(120).map(stripAnsi).join("\n")
+          : "";
         assert(
           expandedHeader.includes("Sitzung") &&
             expandedHeader.includes("WORK") &&
             !expandedHeader.includes("PI · AURORA"),
           "a resumed conversation skips the welcome but shows the fixed session panel",
         );
+        expandedHeaderComponent?.invalidate?.();
+        expandedHeaderComponent?.dispose?.();
         await resumedHarness.runHooks("session_shutdown", {}, resumedContext);
 
         // A second consumer asks for the current state. Aurora answers on the

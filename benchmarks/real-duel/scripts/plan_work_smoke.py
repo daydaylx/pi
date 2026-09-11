@@ -101,6 +101,7 @@ def run_pi_smoke(check: SmokeCheck, *, model: str, provider: str, timeout: float
                 cwd=str(scratch),
                 model=model,
                 provider=provider,
+                reasoning="high",
                 instruction=instruction,
                 plan_mode="simple_plan",
                 followups={},
@@ -182,7 +183,7 @@ def run_codex_smoke(check: SmokeCheck, *, model: str, timeout: float) -> None:
     t0 = time.monotonic()
     try:
         plan_result = codex_pw.run_plan_phase(
-            cwd=str(scratch), model=model, instruction=plan_instruction,
+            cwd=str(scratch), model=model, reasoning="high", instruction=plan_instruction,
             output_dir=out_dir, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
@@ -209,6 +210,7 @@ def run_codex_smoke(check: SmokeCheck, *, model: str, timeout: float) -> None:
         work_result = codex_pw.run_approval_and_work(
             cwd=str(scratch),
             model=model,
+            reasoning="high",
             session_id=plan_result.session_id,
             approval_text=APPROVAL_TEXT,
             output_dir=out_dir,

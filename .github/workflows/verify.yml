@@ -21,5 +21,4 @@ jobs:
           cache: npm
           cache-dependency-path: npm/package-lock.json
       - run: npm ci --prefix npm --engine-strict
-      - run: node scripts/check-npm-audit.mjs
       - run: npm --prefix npm run verify

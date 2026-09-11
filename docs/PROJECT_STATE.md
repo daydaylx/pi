@@ -2,96 +2,45 @@
 
 ## Aktuelle Arbeit
 
-Audit-Remediation aus `pi-audit-remediation-improved-e8196d6/`: Phase 1 für
-F-01–F-03 abgeschlossen, Commit `a15ebb8` aufbauend auf `243820c`. Große
-Workspace-Diffs werden gestreamt erfasst; Commit-, Recovery- und
-Verifier-Gates handeln Snapshotdefekte konsistent fail-closed. Das
-unversionierte Audit-Paket war schon vor dieser Phase im Arbeitsbaum und
-bleibt außerhalb des Commits.
+Audit-Remediation und Benchmark-Vorbereitung: Die Vorabnahme von Meilenstein B
+bestätigt alle F-01–F-28-Endstatus. Phase 3/4 bleibt uncommittete, verifizierte
+Vorarbeit. Phase 5 bereitet eine separate Pi-vs-Codex-Real-Duel-Serie mit
+`gpt-5.6-luna` und Reasoning `medium` vor; reale Trials starten erst auf einer
+sauberen, ausdrücklich freigegebenen Baseline. Kein Push.
 
-## Umgesetzt (dieser Auftrag)
+## Umgesetzt
 
-- Schritt 0 (beauftragte Commits): `351da66` Aurora-Kachel-Paket,
-  `459733b` Alt-GUI-Plan entfernt + Auftragspaket + `.gitignore`.
-- Phase 0: Baseline-Artefakte in `docs/gui-baseline/` (Architektur inkl.
-  praktischem RPC-Test von `pi --mode rpc`, Shortcuts, Menü-/Command-
-  Katalog, State-Owner, Tests-Inventar) plus `phase-0-report.md` (PASS).
-- Phase 1: Kandidaten-Klone unter `git/github.com/`, Audit + Pflicht-
-  Prototyp (`phase-1-gui-candidate-audit.md`, RPC end-to-end grün;
-  stale-ctx-Fehler bei hartem Shutdown im aktiven Turn = Phase-3-Fix).
-  `phase-1-report.md` (PASS).
-- Phase 2: Neues Protokollmodul `extensions/frontend-protocol/` (v1.0.0):
-  Command-Registry (23 Einträge inkl. aller Pflicht-IDs, Targets
-  rpc/slash/local/bridge/tui mit dokumentierten Lücken), State-Schema
-  (12 Pflichtfelder mit Core-Besitzern), Event-Mapping (9 Pflicht-
-  ereignisse), Shortcut→Command-Mapping, Compatibility-Adapter. Kanäle/
-  Schemata aus `aurora-ui/state.ts` in den neutralen Vertrag verschoben,
-  Aurora behält Legacy-Aliase; alle sechs Publisher unverändert.
-  Neue Contract-Section (runtime) mit ~196 Assertions. `phase-2-report.md`
-  (PASS).
-- Phase 3: `gui/` Minimal-GUI — main (index/pi-rpc-manager/ipc-handlers/
-  preload.cjs), renderer (Chat, Streaming, kompakte Tool-Cards, Cancel,
-  Banner, Statusleiste, Inspector-Panel), Session-Resume via Verzeichnis-
-  liste + switch_session, Extension-UI-Dialoge (select/confirm/input)
-  nativ gerendert; Security: contextIsolation+sandbox+IPC-Whitelist+CSP.
-  `bin/pi-gui` Launcher + `bin/pi` Shim für wörtliches `pi gui`
-  (`phase-3-report.md`, PASS).
-- Phase 4: Shortcut-/Menü-Parität — Aktionstabelle mit Klick+Tasten-
-  Triggern aus shortcuts.json (Spiegel des Protokolls); Picker für
-  Modell/Denken, Command-Palette über get_commands, Slash-Flows für
-  Permission/Rollenmodelle; Paritätssuite 4 PASS. workflow.open/set als
-  sichtbare Bridge-Lücke dokumentiert (R13; Empfehlung: plan-mode ergänzt
-  `/workflow-set` als Extension-Command in Phase 5) (`phase-4-report.md`,
-  PASS).
-- Phase 5: Kernzustände aus dem Core — neue Bridge-Extension
-  `extensions/frontend-bridge/` (merged Bus-Zustände + Subagent-Events +
-  letzte Nutzereingabe, throttled Custom-Entries `frontend-bridge/state`
-  über `pi.appendEntry`, Epoch-Fallback für den RPC-Modus).
-  Pflichtfix Testmatrix D: Graceful-Stop in `PiRpcManager.stop()`
-  (Abort+Drain vor stdin-Ende) statt Runtime-Eingriff.
-  `/workflow-set <mode>` als plan-mode-Extension-Command (Katalogeintrag,
-  im Command Center bewusst ausgeblendet); Protokoll-Targets
-  workflow.open→local, workflow.set→/workflow-set, permissions.set→
-  /permission. Zustandsschema um task/subagents erweitert; Inspector +
-  Status-Chips zeigen Workflow/Aufgabe/Verification/Changes/Subagents/
-  Permissions/LSP aus Core-State. Neue Runtime-Section (Bridge-Transport,
-  Coverage 100 %) + Divergenztest im Contract; E2E mit Bridge-Assertion
-  PASS; xvfb-Smokes PASS (`phase-5-report.md`, PASS).
-- Phase 6: UX bewusst neu gestaltet — 3-Spalten-Layout (Navigation |
-  Conversation | Kontext), Chat als Hauptfläche, kompakte
-  Aktivitätszeilen statt Tool-Card-Wand (reines Modul
-  `gui/renderer/activity-summary.js`, unit-getestet), Zustände als
-  klickbare Kontext-Zeilen mit Detail-Panels auf Abruf, responsive
-  (Drawer ≤ 1080px, Initialen-Nav ≤ 760px). Alle Shortcuts unverändert
-  (Parität grün). Smoke prüft jetzt zusätzlich die Aktivitätszeile.
-  Unit 13/13, Parität 4/4, E2E PASS, xvfb-Smokes PASS
-  (`phase-6-report.md`, PASS).
-- Phase 7: Hardening — statisches Sicherheits-Gate `gui/test/security.mjs`
-  (8 Assertions), Crash-Suite `gui/test/stability.mjs` (5 Assertions),
-  globaler web-contents-created-Guard, Linux-Packaging via
-  `scripts/package-gui.mjs` (selbsttragendes Verzeichnis + tar.gz,
-  Smokes aus dem Paket PASS), Rollback-Doku. GUI-Tests gesamt 26/26
-  (`phase-7-report.md`, PASS).
-- Phase 8: Nutzungsentscheidung — Evaluationsbericht mit Evidenz
-  (Bewertungsfragen-Tabelle, Optionen A–D); ausdrückliche
-  Nutzerentscheidung für **Option B** (GUI bevorzugt, TUI Fallback).
-  Kein Code-Umbau: Aurora bleibt vollständig erhalten und getestet
-  (`phase-8-report.md`, ABGESCHLOSSEN).
+- **Audit Phase 4:** F-11 entfernt den toten Recovery-Export; F-18 trennt
+  reine Verifier-Bewertung von erlaubter Executor-Normalisierung; F-19 macht
+  Snapshotpfade Git-root-relativ mit Retry und Unterordnerregression.
+- **Finalisierung:** Die Aurora-Header-Lifecycle-Regression ergänzt nur zwei
+  Aufrufe im bestehenden Test. Der Coverage-Lauf misst nun
+  `extensions/aurora-ui/index.ts` mit 46/46 Funktionen (100 %), ohne
+  Produktverhalten oder Baseline zu ändern.
+- **Medium-Serie:** Separate `pi-real-medium`-/`codex-real-medium`-Manifeste,
+  `pi-duel --reasoning high|medium`, Reasoning-Übergabe für Work-only und
+  Plan→Work sowie getrennte globale/effektive Fingerprint-Felder sind
+  vorbereitet. Die 36-Lauf-Matrix liegt in
+  `benchmarks/real-duel/reports/stage2-medium/`.
 
 ## Letzte Verifikation
 
-`npm --prefix npm run verify`: Exit 0 (Prettier, Typecheck, Knip, Coverage,
-Patches, GUI/RPC und Audit). Runtime 1481/1481, Workflow 599/599; fokussierte
-Phase-1-Regressionen 136 Assertions; unabhängiger Verifier PASS. Das in diesem
-Host nicht exponierte `project_check({ profile: "verify" })` konnte den
-Footer-/Ledger-Nachweis nicht schreiben.
+- `verify({ check: "test" })` erfolgreich: Frontend-Contracts 21, Runtime
+  1523, UI 139, Workflow 687, LSP 182 und die übrigen registrierten Suiten.
+  Die gekapselten Benchmark-Unit-Regressionen liefen 62/62 grün.
+- `npm --prefix npm run test:coverage` erfolgreich: Aurora 46/46 Funktionen
+  (100 %); Runtime 1523, UI 139, Workflow 687 und LSP 182 grün.
+- Direkte Interpreteraufrufe für die Benchmark-Unit-Suite sind durch die
+  Schutzgrenze blockiert; die identische Suite lief über den vertrauenswürdigen
+  Test-Entry-Point.
+- Die zwei Verifier-Berichte zu Phase 4 sind inhaltlich positiv, aber ihre
+  Harness-Abschlussartefakte technisch `INCOMPLETE` und nicht anrechenbar.
 
 ## Nächste Schritte
 
-1. Phase 2 des Audit-Pakets für F-04–F-10 vor einer Umsetzung erneut gegen
-   den aktuellen Produktstand validieren.
-2. Den kanonischen `project_check({ profile: "verify" })` in einer Sitzung
-   mit diesem Tool ausführen, damit Footer und Ledger den Stand `a15ebb8`
-   abbilden.
-3. GUI-Nutzungsbeobachtung und der offene TUI-Live-Smoke bleiben getrennte
-   Folgearbeiten.
+1. Das kanonische `project_check({ profile: "verify" })` auf dem vollständigen
+   Audit- und Medium-Vorbereitungsstand ausführen.
+2. Den abgegrenzten Audit- und Benchmark-Diff prüfen und eine explizite
+   Commit-Freigabe für die saubere Medium-Baseline einholen.
+3. Nach dem Commit `STAGE2_BASE_SHA` dokumentieren, die parallele Pi-Nutzung
+   beenden und erst dann Dual-Smoke sowie die 36 Medium-Läufe starten.

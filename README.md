@@ -38,28 +38,25 @@ Externe Frontends starten `bin/pi-frontend` und verwenden ausschließlich die in
 
 ## Planmodus
 
-Der Workflow kennt nur drei flüchtige Modi:
+Der Workflow kennt nur drei flüchtige Modi: `work`, `simple_plan` und
+`detailed_plan`. Shift+Tab ist die einzige normale Workflow-Steuerung: Die
+Auswahl Work, Schnellplan oder Architekturplan setzt nur den Modus und wartet
+auf die nächste echte Nutzereingabe. Sie startet keinen Agent-Turn und ändert
+keine Plan-Datei.
 
-- `work` – normale Projektarbeit; ein vorhandener Plan ist unverbindlicher Kontext.
-- `simple_plan` – schreibt ausschließlich `.agent/plans/current-plan.md`.
-- `detailed_plan` – schreibt dieselbe Datei mit einem Architekturplan.
+Ein Planning-Turn schreibt ausschließlich über `plan_write` in die
+sitzungsbezogene Runtime-Ablage
+`~/.pi/agent/plans/<workspace-key>/<session-id>.md` (bzw. unter
+`PI_CODING_AGENT_DIR`), nie in den Arbeitsbaum. Nach einem fertigen Plan gibt
+es drei explizite Wege: ausführen, weiter planen oder ohne Ausführung nach Work
+wechseln. Nur „Plan ausführen“ bzw. `/plan-approve` startet einen Work-Turn
+mit dem unveränderten, hashgebundenen Plan; ein bloßer Wechsel nach Work führt
+nichts aus.
 
-Shift+Tab ist die einzige normale Workflow-Steuerung. Es öffnet die Auswahl
-Work, Schnellplan oder Architekturplan, setzt ausschließlich den Modus und
-wartet dann auf die nächste echte Nutzereingabe. Die Auswahl startet keinen
-Agent-Turn, erzeugt keinen synthetischen Prompt und verändert keinen
-vorhandenen Plan.
-
-Erst der nächste User-Auftrag startet den Turn im gewählten Modus. Ein
-Planning-Turn ersetzt den vorhandenen Plan nur, wenn der neue Plan erfolgreich
-geschrieben wurde und der Turn erfolgreich endet. Bei Fehlern oder fehlendem
-Ersatz bleibt der bisherige Plan erhalten. Nach einem Wechsel von Plan zu Work
-kann ein gerade in derselben Sitzung erzeugter Plan beim nächsten Work-Turn
-einmalig als hilfreicher, abweichbarer Kontext erscheinen. Alte Plandateien,
-fortgesetzte Sitzungen und spätere Work-Turns übernehmen ihn nie automatisch.
-
-Der Plan ist normaler Markdown. Es gibt keine Metadaten, Step-IDs, Sidecars,
-Completion, Recovery, Migration oder Planpflicht.
+Der Plan bleibt unverbindlicher Markdown-Kontext und ersetzt weder
+Berechtigungsstufen noch die harten Trust-, Recovery- oder Verifier-Grenzen.
+Details zu Ablage, Freigabe, Editieren und der Qualitätsprüfung stehen in
+[`extensions/plan-mode/README.md`](extensions/plan-mode/README.md).
 
 ## Subagenten
 
@@ -86,29 +83,30 @@ verschachtelter Delegation sind Eigenschaften der drei Profil-Tools.
 Berechtigungen sind eine reine Stufenwahl über `/permission`: `readonly`,
 `project-write`, `confirm-all` und temporäres `yolo`. Gespeicherte
 Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe selbst
-nicht. Die Plandatei ist auf jeder Stufe automatisch erlaubtes Schreibziel.
-Subagenten-Delegationen (`subagent`) sind auf `project-write`, `confirm-all`
-und `yolo` ohne Bestätigung erlaubt (Entscheidung 018); `readonly` bleibt
-vollständig gesperrt. Planmodus-Guard, Verifier-Vertragsprüfung und die
-harten Grenzen gelten unverändert weiter.
-Zusätzlich gilt bei `project-write` und `confirm-all` während `simple_plan`
-oder `detailed_plan` ein technischer Mutationsschutz für den Agenten:
-Schreibzugriffe außerhalb der Plandatei werden verweigert. Als Bash bleiben
-nur `git status`, `git diff`, `git log` und `rg` zulässig; Projekt-Skripte
-wie `npm test` oder `npm run build` sind nicht automatisch vertrauenswürdig.
-`project_check` bleibt blockiert. Ausschließlich eine synchrone,
-artefaktfreie Investigator-SINGLE-Delegation (`subagent({ agent:
-"investigator", task: ... })`) darf passieren, wenn Repository-Bereich,
-Kontrollfluss oder Änderungssurface noch unbekannt sind; Debugger, Verifier,
-unbekannte Rollen, Management-Aktionen, Hintergrundläufe und `output` bleiben
-blockiert. `rm`/`cp`/`mv`/`sed -i`, Redirection, Projekt-Skripte,
-`npm install`/`update`/`publish`, `eslint --fix` und mutierende
-`git`-Kommandos bleiben blockiert. `readonly` selbst ist unverändert
-vollständig gesperrt; `yolo` hebt die Plan-Mode-Grenzen für Agenten-Tool-Aufrufe
-nicht auf. Ein
-vom Menschen selbst per `!`/`!!` eingegebener Bash-Befehl durchläuft diesen
-Guard nicht — er schränkt nur den Agenten ein, nicht den Menschen an der
-eigenen Tastatur. Details: `docs/decisions/012-plan-mode-mutation-guard.md`.
+nicht. Subagenten-Delegationen (`subagent`) sind auf `project-write`,
+`confirm-all` und `yolo` ohne Bestätigung erlaubt (Entscheidung 018);
+`readonly` bleibt vollständig gesperrt. Planmodus-Guard,
+Verifier-Vertragsprüfung und die harten Grenzen gelten unverändert weiter.
+
+Während `simple_plan` oder `detailed_plan` verweigert der technische
+Mutationsschutz für Agenten auf `project-write`, `confirm-all` und `yolo`
+jeden Schreibzugriff in den Arbeitsbaum; nur `plan_write` darf den
+sitzungsbezogenen Plan speichern. Positiv bekannte Plan-Fähigkeiten sind
+`read`, `grep`, `find`, `ls`, `recovery_check`, `ask_user`, lokale LSP-Tools,
+vertrauensgebundene read-only-Webtools, `plan_write` sowie
+`verify({ check: "typecheck" })`. `project_check` und Tests bleiben blockiert.
+
+Für Bash sind nur `git status`/`diff`/`log`, `rg`, `find` ohne mutierende
+Optionen und die reinen Lesewerkzeuge `pwd`, `ls`, `cat`, `head`, `tail`, `wc`,
+`stat`, `du`, `df`, `tree`, `sort` und `uniq` zulässig. Projekt-Skripte,
+Redirections, Shell-Verkettungen und mutierende Git-Kommandos bleiben
+blockiert. Eine artefaktfreie Investigator-SINGLE-Delegation ist nur bei
+unbekanntem Repository-Bereich, Kontrollfluss oder Änderungssurface erlaubt;
+Debugger, Verifier, Management-Aktionen, Hintergrundläufe und Ausgabe-Dateien
+bleiben im Planmodus gesperrt. `readonly` selbst bleibt vollständig gesperrt;
+`yolo` hebt die Plan-Mode-Grenzen für Agenten-Tool-Aufrufe nicht auf. Ein vom
+Menschen selbst per `!`/`!!` eingegebener Bash-Befehl durchläuft diesen Guard
+nicht. Details: `docs/decisions/012-plan-mode-mutation-guard.md`.
 
 Harte Trust-, Secret-, Symlink-, Projekt- und Systemgrenzen bleiben auf jeder
 Stufe blockiert, YOLO eingeschlossen. Dazu zählen auch Ausführungspfade

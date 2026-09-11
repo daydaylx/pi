@@ -1154,24 +1154,49 @@ await test("verifier delegations require the full inspection contract", async ()
   };
   assert(
     !(await assess(overridden)).blocked,
-    "an explicit acceptance:'reviewed' is normalized, not blocked",
+    "an explicit acceptance:'reviewed' is permitted",
   );
   eq(
-    overridden.acceptance.level,
+    overridden.acceptance,
+    "reviewed",
+    "the verifier assessment leaves caller input unchanged",
+  );
+  const normalizedOverride = verifierPolicy.normalizeVerifierDelegationInput({
+    toolName: "subagent",
+    input: overridden,
+  });
+  eq(
+    normalizedOverride?.acceptance?.level,
     "none",
     "the package acceptance system is disabled for verifier delegations",
   );
   assert(
-    typeof overridden.acceptance.reason === "string" &&
-      overridden.acceptance.reason.trim().length > 0,
+    typeof normalizedOverride?.acceptance?.reason === "string" &&
+      normalizedOverride.acceptance.reason.trim().length > 0,
     "the acceptance override carries a non-empty reason (required to disable the package's level check)",
+  );
+  eq(
+    verifierPolicy.normalizeVerifierDelegationInput({
+      toolName: "subagent",
+      input: normalizedOverride,
+    }),
+    normalizedOverride,
+    "verifier acceptance normalization is idempotent",
   );
   const noAcceptance = { agent: "verifier", task: completeTask };
   await assess(noAcceptance);
   eq(
-    noAcceptance.acceptance.level,
+    noAcceptance.acceptance,
+    undefined,
+    "the verifier assessment does not add an omitted acceptance field",
+  );
+  eq(
+    verifierPolicy.normalizeVerifierDelegationInput({
+      toolName: "subagent",
+      input: noAcceptance,
+    })?.acceptance?.level,
     "none",
-    "acceptance is normalized even when the caller omits it, closing the implicit inferLevel() escalation",
+    "normalization closes the implicit inferLevel() escalation",
   );
   const otherRole = {
     agent: "investigator",
@@ -1180,8 +1205,11 @@ await test("verifier delegations require the full inspection contract", async ()
   };
   await assess(otherRole);
   eq(
-    otherRole.acceptance,
-    "reviewed",
+    verifierPolicy.normalizeVerifierDelegationInput({
+      toolName: "subagent",
+      input: otherRole,
+    }),
+    undefined,
     "the acceptance override only applies to verifier delegations",
   );
 });

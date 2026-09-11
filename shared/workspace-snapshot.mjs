@@ -82,6 +82,26 @@ function nullSeparated(output) {
   return output.split("\0").filter(Boolean);
 }
 
+function resolveRepositoryRoot(worktree, timeoutMs, maxAttempts) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = runGitSync(
+      worktree,
+      ["rev-parse", "--show-toplevel"],
+      timeoutMs,
+    );
+    if (result.ok) return { ok: true, value: resolve(result.value.trim()) };
+    lastError = result;
+  }
+  return (
+    lastError ??
+    snapshotError(
+      "unstable_workspace",
+      `Repository-Root konnte nach ${maxAttempts} Versuchen nicht bestimmt werden.`,
+    )
+  );
+}
+
 function parseNameStatus(output) {
   const fields = nullSeparated(output);
   const changes = [];
@@ -187,7 +207,7 @@ function collectCheapState(worktree, timeoutMs) {
   if (!unstagedRaw.ok) return unstagedRaw;
   const untrackedRaw = runGitSync(
     worktree,
-    ["ls-files", "--others", "--exclude-standard", "-z"],
+    ["ls-files", "--others", "--exclude-standard", "--full-name", "-z"],
     timeoutMs,
   );
   if (!untrackedRaw.ok) return untrackedRaw;
@@ -606,6 +626,12 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const signal = options.signal;
+  const repositoryRoot = resolveRepositoryRoot(
+    worktree,
+    timeoutMs,
+    maxAttempts,
+  );
+  if (!repositoryRoot.ok) return repositoryRoot;
   // Retained across attempts so that exhausting the budget on a persistent
   // (non-transient) collectCheapState failure — e.g. genuinely no
   // repository — still reports that specific, nameable cause instead of
@@ -620,7 +646,7 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
       );
     }
 
-    const before = collectCheapState(worktree, timeoutMs);
+    const before = collectCheapState(repositoryRoot.value, timeoutMs);
     if (!before.ok) {
       // Not necessarily permanent — e.g. a concurrent git process briefly
       // holding index.lock — so retry within budget rather than failing the
@@ -636,11 +662,11 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
 
     const [stagedPatch, unstagedPatch] = await Promise.all([
       hashGitOutput(
-        worktree,
+        repositoryRoot.value,
         ["diff", "--cached", "--no-ext-diff", "--binary", "-M"],
         { timeoutMs, signal },
       ),
-      hashGitOutput(worktree, ["diff", "--no-ext-diff", "--binary", "-M"], {
+      hashGitOutput(repositoryRoot.value, ["diff", "--no-ext-diff", "--binary", "-M"], {
         timeoutMs,
         signal,
       }),
@@ -653,7 +679,7 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
     }
 
     const untrackedResult = readUntrackedContent(
-      worktree,
+      repositoryRoot.value,
       before.value.untracked,
     );
     if (!untrackedResult.ok) {
@@ -667,7 +693,7 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
       );
     }
 
-    const after = collectCheapState(worktree, timeoutMs);
+    const after = collectCheapState(repositoryRoot.value, timeoutMs);
     if (!after.ok) {
       lastError = after;
       continue;

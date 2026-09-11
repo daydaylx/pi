@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,6 +21,7 @@ export const snapshotGateSections = {
     resilience,
     setupCore,
     verifierPolicy,
+    modePermissions,
     trackedExec,
   }) => {
     await section("snapshot gate asynchronous regressions", async () => {
@@ -86,6 +88,48 @@ export const snapshotGateSections = {
           "-m",
           "initial",
         ]);
+
+        // F-19: Git's diff paths are root-relative, but ls-files is otherwise
+        // relative to its cwd. A protected untracked file must remain visible
+        // to the commit gate when Pi starts inside that directory.
+        const nestedPermissions = path.join(
+          workspace,
+          "extensions",
+          "permissions",
+        );
+        const untrackedProtected = path.join(
+          nestedPermissions,
+          "verifier-policy.ts",
+        );
+        writeFileSync(untrackedProtected, "export {};\n");
+        const rootSnapshot = await collectWorkspaceSnapshot(workspace);
+        const nestedSnapshot = await collectWorkspaceSnapshot(nestedPermissions);
+        assert(
+          rootSnapshot.ok && nestedSnapshot.ok,
+          "root and nested snapshot collection both succeed for an untracked protected file",
+        );
+        if (rootSnapshot.ok && nestedSnapshot.ok) {
+          eq(
+            nestedSnapshot.snapshot.untracked,
+            ["extensions/permissions/verifier-policy.ts"],
+            "a nested snapshot reports untracked paths relative to the repository root",
+          );
+          eq(
+            nestedSnapshot.snapshot.fingerprint,
+            rootSnapshot.snapshot.fingerprint,
+            "root and nested snapshot calls produce the same fingerprint",
+          );
+        }
+        const nestedGate = await verifierPolicy.assessGitCommitVerifierGate(
+          { toolName: "bash", input: { command: 'git commit -m "nested"' } },
+          nestedPermissions,
+          {},
+        );
+        assert(
+          nestedGate.blocked,
+          "an untracked protected file from a nested cwd still requires a verifier",
+        );
+        unlinkSync(untrackedProtected);
 
         // A staged content change can keep both name-status lists and all
         // worktree metadata identical. The index itself must be checked.
@@ -155,6 +199,65 @@ export const snapshotGateSections = {
           { armed: true },
           "only broken providers leave the recovery boundary closed",
         );
+
+        // F-18: exercise the real tool_call pipeline, not just the pure
+        // verifier policy. A permitted verifier reaches the executor with the
+        // normalized input; a rejected one leaves its caller input untouched.
+        const guardHarness = createHarness();
+        guardHarness.api.events.on("workflow-capabilities:request", (value) =>
+          value.respond({ mode: "work" }),
+        );
+        modePermissions.default(guardHarness.api);
+        const guardCtx = guardHarness.makeContext({ cwd: workspace });
+        await guardHarness.runHooks("session_start", {}, guardCtx);
+        const verifierTask = [
+          "## Original User Request\nReview the verifier boundary.",
+          "## Delegated Question\nDoes the input reach the executor safely?",
+          "## Implementation / Diff to verify\n<diff>",
+          "## Baseline (Pre-existing workspace state)\nclean",
+          "## Acceptance Criteria\nThe verifier contract holds.",
+        ].join("\n\n");
+        const allowedVerifier = {
+          toolName: "subagent",
+          input: {
+            agent: "verifier",
+            task: verifierTask,
+            acceptance: "reviewed",
+          },
+        };
+        const allowedResults = await guardHarness.runHooks(
+          "tool_call",
+          allowedVerifier,
+          guardCtx,
+        );
+        assert(
+          allowedResults.every((result) => !result?.block),
+          "the real guard permits a complete verifier delegation",
+        );
+        eq(
+          allowedVerifier.input.acceptance.level,
+          "none",
+          "the real guard normalizes a permitted verifier before execution",
+        );
+        const rejectedVerifier = {
+          toolName: "subagent",
+          input: { agent: "verifier", task: "too short", acceptance: "reviewed" },
+        };
+        const rejectedResults = await guardHarness.runHooks(
+          "tool_call",
+          rejectedVerifier,
+          guardCtx,
+        );
+        assert(
+          rejectedResults.some((result) => result?.block),
+          "the real guard blocks an incomplete verifier delegation",
+        );
+        eq(
+          rejectedVerifier.input.acceptance,
+          "reviewed",
+          "the real guard never normalizes a rejected verifier input",
+        );
+        await guardHarness.runHooks("session_shutdown", {}, guardCtx);
 
         const bounded = await trackedExec.trackedExec(
           process.execPath,
@@ -410,14 +513,15 @@ export const snapshotGateSections = {
           const wrapperDir = path.join(workspace, ".git", "probe-bin");
           mkdirSync(wrapperDir);
           const attemptsFile = path.join(workspace, ".git", "probe-attempts");
-          const installWrapper = (always) => {
+          const installWrapper = (always, failRoot = false) => {
             writeFileSync(attemptsFile, "");
             writeFileSync(
               path.join(wrapperDir, "git"),
               `#!${process.execPath}\n` +
                 `const fs = require("node:fs"); const cp = require("node:child_process");\n` +
                 `const args = process.argv.slice(2); const marker = ${JSON.stringify(attemptsFile)};\n` +
-                `if (args.includes("--cached") && args.includes("--binary")) {\n` +
+                `const probe = ${failRoot} ? args.includes("--show-toplevel") : args.includes("--cached") && args.includes("--binary");\n` +
+                `if (probe) {\n` +
                 `const count = fs.readFileSync(marker, "utf8").length; fs.appendFileSync(marker, "x");\n` +
                 `if (${always} || count === 0) { process.stderr.write("transient fixture Git failure"); process.exit(128); } }\n` +
                 `const r = cp.spawnSync(${JSON.stringify(realGit)}, args, {stdio:"inherit"}); process.exit(r.status ?? 1);\n`,
@@ -426,6 +530,32 @@ export const snapshotGateSections = {
           };
           const expected = await collectWorkspaceSnapshot(workspace);
           process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath}`;
+          installWrapper(false, true);
+          const rootRetried = await collectWorkspaceSnapshot(workspace);
+          eq(
+            rootRetried.snapshot?.fingerprint,
+            expected.snapshot.fingerprint,
+            "a transient repository-root failure retries without changing the fingerprint",
+          );
+          eq(
+            readFileSync(attemptsFile, "utf8").length,
+            2,
+            "a transient repository-root failure uses the shared retry budget",
+          );
+          installWrapper(true, true);
+          const exhaustedRoot = await collectWorkspaceSnapshot(workspace, {
+            maxAttempts: 2,
+          });
+          eq(
+            exhaustedRoot.error?.code,
+            "git_command_failed",
+            "persistent repository-root failure retains its typed cause",
+          );
+          eq(
+            readFileSync(attemptsFile, "utf8").length,
+            2,
+            "persistent repository-root failures respect the finite retry budget",
+          );
           installWrapper(false);
           const retried = await collectWorkspaceSnapshot(workspace);
           eq(

@@ -17,6 +17,9 @@ const mappingSource = readFileSync(
 const shortcutsJson = JSON.parse(
   readFileSync(path.join(repo, "gui/shared/shortcuts.json"), "utf8"),
 );
+const keybindings = JSON.parse(
+  readFileSync(path.join(repo, "keybindings.json"), "utf8"),
+);
 const rendererSource = readFileSync(
   path.join(repo, "gui/renderer/renderer.js"),
   "utf8",
@@ -46,6 +49,32 @@ function parseMappingEntries(source) {
   }
   return entries;
 }
+
+const KEYBINDING_COMMANDS = {
+  "tui.editor.yank": "editor.yank",
+  "app.thinking.cycle": "thinking.cycle",
+  "app.model.cycleForward": "model.cycle",
+  "app.session.resume": "session.resume",
+};
+
+test("TUI-Keybindings bleiben mit dem Frontend-Protokoll semantisch verknüpft", () => {
+  assert.deepEqual(
+    Object.keys(keybindings).sort(),
+    Object.keys(KEYBINDING_COMMANDS).sort(),
+    "jede konfigurierte TUI-Keybinding-ID besitzt eine dokumentierte Protocol-Zuordnung",
+  );
+  const protocolEntries = parseMappingEntries(mappingSource);
+  for (const [keybindingId, command] of Object.entries(KEYBINDING_COMMANDS)) {
+    const keys = keybindings[keybindingId];
+    const entry = protocolEntries.get(keys);
+    assert.ok(entry, `${keybindingId}: ${keys} existiert im Protokoll`);
+    assert.equal(
+      entry.command,
+      command,
+      `${keybindingId}: ${keys} zielt auf das semantisch gleiche Command`,
+    );
+  }
+});
 
 test("Jede GUI-Zeile trägt dasselbe Ziel-Command wie das Protokoll", () => {
   const protocolEntries = parseMappingEntries(mappingSource);

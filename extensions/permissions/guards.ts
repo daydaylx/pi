@@ -24,6 +24,7 @@ import {
   assessDebuggerDelegation,
   assessGitCommitVerifierGate,
   assessVerifierDelegation,
+  normalizeVerifierDelegationInput,
 } from "./verifier-policy.ts";
 import { assessWebToolInput } from "./web-tools.ts";
 import { toolPath } from "./tool-event.ts";
@@ -123,6 +124,13 @@ export function registerPermissionGuards(
     );
     if (verifierAssessment.blocked) {
       return { block: true, reason: verifierAssessment.reason };
+    }
+    const normalizedVerifierInput = normalizeVerifierDelegationInput(event);
+    if (normalizedVerifierInput) {
+      Object.assign(
+        event.input as Record<string, unknown>,
+        normalizedVerifierInput,
+      );
     }
     const debuggerAssessment = assessDebuggerDelegation(event);
     if (debuggerAssessment.blocked) {

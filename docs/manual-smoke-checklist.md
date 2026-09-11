@@ -8,19 +8,34 @@ explizit offen.
 Pro Schritt eintragen: **beobachtet** und **bestanden / fehlgeschlagen**. Weicht
 etwas ab, den Schritt notieren und `#137` offen lassen.
 
+## Rollen nicht automatisierter Prüfungen
+
+- `gui/test/e2e-rpc.mjs` ist ein manueller E2E-Smoke mit Netzwerk- und
+  Modellzugriff; er gehört nicht in CI.
+- `npm --prefix gui run smoke:dialogs` ist ein manueller Desktop-Smoke und
+  benötigt Electron sowie `xvfb-run`; er gehört nicht in die headless
+  Hauptsuite.
+- `node tests/plan-eval/run.mjs` ist eine manuelle, offline ausführbare
+  Auswertung der Referenzpläne; echte Modellpläne werden nur bewusst mit
+  `--plans <verzeichnis>` bewertet.
+- `npm --prefix npm run check:versioned-tree` ist eine optionale lokale
+  Release-/HEAD-Prüfung und sinnvoll erst nach einem Commit.
+- Der relative-Import-Check läuft genau einmal als `relative-imports`-Suite
+  über `tests/run-all.mjs`; es gibt dafür keinen zweiten npm-Einstieg.
+
 ## Vorbereitung
 
 ```bash
 cd /home/d/.pi/agent
 git status --short                    # Arbeitsbaum dokumentieren
 git rev-parse HEAD                    # geprüften Commit-SHA dokumentieren
-npm --prefix npm run verify           # Arbeitsbaum prüfen
-npm --prefix npm run check:imports    # relative Source-Imports im Arbeitsbaum
+npm --prefix npm run verify           # Arbeitsbaum prüfen (inkl. relative-imports-Suite)
 npm --prefix npm run check:versioned-tree  # nur nach Commit: exportierten HEAD prüfen
 ```
 
-`verify` prüft den aktuellen Arbeitsbaum. `check:versioned-tree` exportiert
-`HEAD` und belegt damit den versionierten Baum ohne unversionierte Hilfsdateien.
+`verify` prüft den aktuellen Arbeitsbaum und enthält den relativen
+Import-Check genau einmal. `check:versioned-tree` exportiert `HEAD` und belegt
+damit den versionierten Baum ohne unversionierte Hilfsdateien.
 Der GitHub-Workflow „Verify“ ist ein dritter, separater Nachweis und muss den
 exakten veröffentlichten SHA nennen. „Verifiziert“ darf nur mit dieser Ebene
 und dem geprüften SHA verwendet werden; jede spätere relevante Dateiänderung

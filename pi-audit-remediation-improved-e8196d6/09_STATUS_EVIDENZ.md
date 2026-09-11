@@ -6,10 +6,10 @@
 ## Metadaten
 
 - Repository: `daydaylx/pi` (lokal `/home/d/.pi/agent`)
-- Branch: `main` (Arbeitsbranch `phase0/baseline-2026-09-10` angelegt, HEAD nicht gewechselt)
+- Branch: `main`
 - Base-SHA: `4563fad1937ed838a4824777d6c6a25298349f27`
-- aktueller HEAD: `4563fad1937ed838a4824777d6c6a25298349f27` (unverändert seit Phase-0-Beginn)
-- Datum: 2026-09-10
+- aktueller Phase-3-Ausgangs-HEAD: `68da993` (Arbeitsbaum vor der Änderung sauber)
+- Phase-0-Baseline-Datum: 2026-09-10
 - Node: v22.23.2 (passend zu `.nvmrc`, `package.json`/`npm/package.json` `engines.node`, `npm/package-lock.json` `packages[""].engines.node`)
 - npm: 10.9.8 (passend zu `engines.npm` an allen drei Stellen)
 - Runtime: `@earendil-works/pi-coding-agent@0.84.4` global installiert (`npm ls -g`); `npm/package.json` devDependency-Pin `0.84.3` — siehe Evidenzblock F-23
@@ -194,13 +194,17 @@ explizit vorschreibt. Das ist der Faktenkern von F-07 (Phase 2).
   erkannt, unabhängig vom Aufrufort. Eine neue, noch nicht `git add`ete Datei
   in einem geschützten Verzeichnis kann das Verifier-Pflicht-Gate umgehen,
   wenn der Agent aus einem Unterordner heraus läuft.
-- **Entscheidung/Änderung:** n/a — Fix erst in Phase 2/4 (laut Matrix
-  Phase 0/4).
-- **geänderte Dateien:** keine.
-- **Commit/ADR:** n/a.
-- **Rest-Risiko:** mittel — Voraussetzung (Start aus Unterordner) ist nicht
-  der Normalfall, aber nicht ausgeschlossen und nicht dokumentiert verboten.
-- **Rückweg/Wiederaufnahme-Trigger:** n/a.
+- **Phase-4-Korrektur:** `collectWorkspaceSnapshot()` löst den Git-Root einmal
+  vor der Retry-Schleife auf. `git ls-files` nutzt `--full-name`; Status,
+  Patch-Hashes, Metadaten und untracked-Dateiinhalte laufen anschließend gegen
+  dieselbe Root-Basis.
+- **Regression:** `snapshot-gates.mjs` erzeugt eine untracked
+  `extensions/permissions/verifier-policy.ts`, ruft den Collector aus dem
+  Unterordner auf und belegt root-relativen Pfad, denselben Fingerprint wie der
+  Root-Aufruf sowie ein blockierendes echtes Commit-Gate ohne PASS.
+- **Rest-Risiko:** Git-Sonderfälle bleiben durch die bestehende staged,
+  unstaged, Rename-, Delete- und Mutation-Retry-Matrix abgedeckt; der
+  Unterordnerverlust für untracked Pfade ist behoben.
 
 ### F-23 – Runtime-Metadaten
 
@@ -234,16 +238,12 @@ nachziehen, oder bewusst mit --allow-version-drift fortfahren.` — außer
   „widerlegt", wie eine oberflächliche Lesart von `lastChangelogVersion`
   allein nahelegen würde. Der Zustand ist aber bereits sicher (fail-closed)
   abgefangen, kein stiller Defekt.
-- **Entscheidung/Änderung:** n/a — ob Runtime auf `0.84.4` gehoben und
-  Patches nachgezogen werden, oder bewusst bei `0.84.3` geblieben wird, ist
-  eine Entscheidung für eine spätere Phase (laut Master-Arbeitsauftrag
-  „Paket C — Entscheidungen vor der Umsetzung").
-  Kein Upgrade-Experiment, kein `--allow-version-drift`-Lauf in Phase 0.
-- **geänderte Dateien:** keine.
-- **Commit/ADR:** n/a.
-- **Rest-Risiko:** niedrig (fail-closed abgesichert), aber
-  Handlungsbedarf zur Klärung besteht.
-- **Rückweg/Wiederaufnahme-Trigger:** n/a.
+- **Phase-4-Entscheidung:** kein Upgrade und kein `--allow-version-drift`.
+  Der Changelog-Cursor ist kein Soll-Pin, der Patch-Anker bleibt ein separater
+  fail-closed Vertrag.
+- **Rest-Risiko/Wiederaufnahme-Trigger:** niedrig; bei einem ausdrücklich
+  beauftragten Runtime-Upgrade oder dem erneuten Anwenden der Patches müssen
+  Kompatibilität und `EXPECTED_RUNTIME_VERSION` erneut geprüft werden.
 
 ### F-27 – Session-Mismatch
 
@@ -398,7 +398,11 @@ nachziehen, oder bewusst mit --allow-version-drift fortfahren.` — außer
   Fork für externe Stabilität oder unbeabsichtigt divergiert? Umbenennung
   eines der beiden Module ist laut Master-Arbeitsauftrag „Paket C" eine
   Vor-Freigabe-Entscheidung.
-- **Entscheidung/Änderung:** n/a — Entscheidung erst in Phase 4.
+- **Phase-4-Entscheidung:** Die Namen bleiben erhalten. Der interne
+  EventBus-Vertrag und das öffentliche JSONL-Wire-Paket haben abweichende
+  Versionsformen, Konsumenten und Buildgrenzen; eine Umbenennung wäre ohne
+  bestätigte atomare Konsolidierung rein kosmetisch. Wiederaufnahme nur bei
+  einer solchen Konsolidierung mit vollständiger Import-/Buildmigration.
 
 ### F-24 – Große Lauf-/Historienartefakte im Repo (nur Fakten, keine Entscheidung)
 
@@ -425,8 +429,32 @@ nachziehen, oder bewusst mit --allow-version-drift fortfahren.` — außer
   (Reproduzierbarkeit einzelner Real-Duel-Läufe) und der drei Pakete
   (historisch, Phasen laut `PROJECT_STATE.md` abgeschlossen); definierter
   Rotations-/Housekeeping-Trigger nicht vorhanden.
-- **Entscheidung/Änderung:** n/a — Entscheidung („bewusst behalten" vs.
-  „deferred" vs. Archivierung mit Freigabe) erst in Phase 4.
+- **Phase-4-Entscheidung:** Keine Artefaktmutation. Die Aufbewahrung bleibt
+  bis zu einem separaten, ausdrücklich freigegebenen Housekeeping-Auftrag nach
+  formaler Stage-2-Archivierung deferred.
+
+## Phase-4-Evidenz
+
+Die vollständige Statusbuchhaltung steht in der Traceability-Matrix. Die
+Triage belegte für F-11 eine Knip-Exportdiagnose mit 70 überwiegend dynamisch
+per Jiti geladenen oder öffentlichen APIs; `gateBlocked()` war der einzige
+belegte tote Export und wurde entfernt. Eine globale dauerhafte Warnregel oder
+70 fragile Einzel-Ausnahmen hätte keinen Netto-Gewinn gebracht.
+
+Die drei Capability-Bridges besitzen absichtlich unterschiedliche synchrone
+bzw. asynchrone Antwort- und Fehlerdefaults. Der Permission-Sessionzustand
+enthält zwar Legacy-Aliasfelder, aber auch den unabhängigen, nicht persistierten
+YOLO-Override; eine Migration bleibt ohne Schema-Version, Alt-/Neu-/
+inkonsistent-Fixtures und Sunset-Kriterium deferred. `WorkflowMode` wird nur
+an der JSONL-Wire-Grenze wiederholt, während `PermissionLevel` im Core bleibt;
+ein Wire-Import in CLI/TUI würde die Buildgrenze verschlechtern.
+
+Für F-18 ist die Verifier-Assessment nun rein. Der Guard übernimmt erst nach
+erfolgreicher Bewertung die kopierende, idempotente Executor-Normalisierung.
+Die vollständige Testteilprüfung ist anschließend auf dem gemeinsamen
+Arbeitsbaum grün: Runtime 1523, UI 139, Workflow 687 und LSP 182 Assertions
+sowie alle weiteren registrierten Suiten. Der Typecheck auf dem aktuellen
+Arbeitsbaum ist ebenfalls grün.
 
 ## F-10 Performance
 
@@ -527,3 +555,69 @@ Einzelhash-Baseline wurde nicht rückwirkend umgedeutet; eine neue Baseline ab
 dem aktuellen Stand ist in `10_PROVENANCE_BASELINE.md` dokumentiert. Kein
 Commit, Push, Merge, Benchmark-/Modelllauf oder Audit-Paket-Tracking wurde
 ausgeführt.
+
+## Phase-3-Evidenz – Low-Risk-Remediation
+
+Die Phase-3-Änderungen berühren weder Shortcut-Belegung noch Benchmark-,
+Modell-, GUI- oder Permission-Semantik. F-16 ergänzt den Paritätstest für
+`keybindings.json`, Protokoll und GUI-Spiegel (6/6 grün). F-17 bleibt nach
+begrenztem Catch-Inventar bewusst erhalten: Kontrollpfade melden oder blockieren
+bereits, verbleibende Catches sind sichere Fallbacks bzw. optionale Diagnose.
+
+README und Ledger beschreiben die reale Planmodus-Allowlist und Runtime-Ablage;
+der native Compaction-Emitter sowie die Konfigurations-Assertion sind korrigiert.
+Manuelle E2E-, Desktop-, Plan-Eval- und Versioned-Tree-Rollen sind dokumentiert;
+`check:imports` läuft nur noch über `tests/run-all.mjs`. CI führt `audit:check`
+über das kanonische `verify` genau einmal aus, abgesichert im Runtime-Test.
+F-27 ist für die Produktions-Erreichbarkeit widerlegt; eine künftig geteilte
+Extension-Instanz ist der Wiederaufnahme-Trigger.
+
+Vor dem unabhängigen Aurora-Commit `68da993` waren `npm --prefix npm test`
+(Protocol 8/8, Frontend 13/13, Runtime 1499, Workflow 684) und die Formatprüfung
+grün. Die vollständige Prüfung auf dem aktuellen Diff folgt.
+
+## Vorabnahme Meilenstein B
+
+- **Traceability:** F-01–F-28 besitzen je genau einen zulässigen Endstatus;
+  kein Eintrag ist `offen` oder `blockiert`. P0/P1 sind ausschließlich
+  `behoben`, P2/P3 begründet `behoben`, `widerlegt`, `bewusst behalten` oder
+  `deferred`.
+- **Scope:** Der Phase-4-Arbeitsbaumdiff berührt keine Benchmarks/Stage 2,
+  Modellläufe, Shortcuts, LSP-Lebenszyklus, Electron-Trust-/IPC-Grenzen oder
+  Plan-Handoff. `git diff --check` ist grün. Der seit der früheren Basis
+  committete Aurora-Panel-Commit `f778c1e` bleibt fremder Scope.
+- **Technische Evidenz:** Die vollständige Testsuite ist grün (Runtime 1523,
+  UI 139, Workflow 687, LSP 182; übrige registrierte Suiten ebenfalls grün).
+  Die zwei Verifier-Berichte bewerten F-11/F-18/F-19 inhaltlich als PASS, ihre
+  Harness-Abschlussartefakte sind jedoch technisch `INCOMPLETE` und zählen
+  nicht als formaler Verifier-Nachweis.
+- **Formale Blocker:** Das kanonische `project_check({ profile: "verify" })`
+  scheitert ausschließlich an `extensions/aurora-ui/index.ts` mit 95,7 % statt
+  100 % Coverage aus dem fremden Commit `f778c1e`. Außerdem verlangt die
+  finale Abnahme einen sauberen Arbeitsbaum, während der Auftrag keinen Commit
+  oder Push erlaubt und vorbestehende Phase-3-Arbeit enthält.
+- **Nutzerentscheidung:** Vorabnahme dokumentieren; Aurora bleibt außerhalb
+  des Auftrags. Kein Coverage-Fix, kein Commit und keine Lockerung von
+  Baselines werden durchgeführt.
+
+**Vorabnahmeurteil:** Matrix- und Scope-Abnahme bestanden; formale finale
+Abnahme ist blockiert, bis Aurora-Coverage, sauberer Arbeitsbaum und ein
+formal anrechenbarer Verifier-Nachweis vorliegen.
+
+## Phase-5-Follow-up – Aurora-Coverage und Medium-Serie
+
+Der Aurora-Blocker der Vorabnahme ist durch eine reine Testergänzung geschlossen:
+Der bestehende Header-Test ruft die beiden leeren Lifecycle-Methoden
+`invalidate()` und `dispose()` auf. `npm --prefix npm run test:coverage` misst
+anschließend `extensions/aurora-ui/index.ts` mit 46/46 Funktionen (100 %);
+die Coverage-Baseline wurde nicht geändert.
+
+Für die ausdrücklich freigegebene Real-Duel-Serie sind getrennte Medium-
+Manifeste vorbereitet. Pi verwendet pro Prozess `--thinking medium`, Codex
+`model_reasoning_effort=medium`; Work-only und Plan→Work erhalten denselben
+Wert. Der Fingerprint speichert effektiven Override und globale Ausgangswerte
+getrennt. Die Matrix definiert 36 Kandidatenläufe und die Eintrittsgates unter
+`benchmarks/real-duel/reports/stage2-medium/run-matrix.md`. Es wurde noch kein
+Live-Modelllauf gestartet: vor dem Dual-Smoke sind ein sauberer, explizit
+freigegebener Baseline-Commit, ein dokumentierter Freeze-SHA und das Ende
+paralleler Pi-Nutzung erforderlich.

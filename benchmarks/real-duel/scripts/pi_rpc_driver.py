@@ -280,6 +280,7 @@ def run_plan_phase(
     cwd: str,
     model: str,
     provider: str,
+    reasoning: str,
     instruction: str,
     plan_mode: str,
     followups: dict[str, str],
@@ -293,7 +294,13 @@ def run_plan_phase(
     injizierbar, damit dieses Modul nicht selbst `node` aufrufen muss (siehe
     plan_quality_bridge.py fuer die Standardimplementierung)."""
     log_path = log_dir / "pi_rpc_transcript.jsonl" if log_dir else None
-    sess = RpcSession(cwd=cwd, model=model, provider=provider, log_path=log_path)
+    sess = RpcSession(
+        cwd=cwd,
+        model=model,
+        provider=provider,
+        extra_args=("--thinking", reasoning),
+        log_path=log_path,
+    )
 
     all_events: list[dict] = []
     asked_followups: list[str] = []

@@ -14,6 +14,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).with_name("pi-duel")
 MODULE = runpy.run_path(str(SCRIPT))
 CANDIDATES = MODULE["CANDIDATES"]
+CANDIDATE_PROFILES = MODULE["CANDIDATE_PROFILES"]
 SELECT = MODULE["_selected_candidate_paths"]
 POSITIVE_INT = MODULE["_positive_int"]
 BUILD_PARSER = MODULE["build_parser"]
@@ -29,6 +30,19 @@ class CandidateSelectionTest(unittest.TestCase):
         selected = SELECT("pi-real")
         self.assertEqual(list(selected), ["pi-real"])
         self.assertEqual(selected["pi-real"], CANDIDATES["pi-real"])
+
+    def test_medium_profile_selects_the_separate_manifests(self) -> None:
+        selected = SELECT(None, "medium")
+        self.assertEqual(selected, CANDIDATE_PROFILES["medium"])
+        self.assertNotEqual(selected["pi-real"], CANDIDATES["pi-real"])
+        self.assertNotEqual(selected["codex-real"], CANDIDATES["codex-real"])
+
+    def test_medium_manifests_pin_the_same_reasoning_level(self) -> None:
+        self.assertIn('"--thinking", "medium"', CANDIDATE_PROFILES["medium"]["pi-real"].read_text())
+        self.assertIn(
+            '"model_reasoning_effort=medium"',
+            CANDIDATE_PROFILES["medium"]["codex-real"].read_text(),
+        )
 
 
 class PositiveIntTest(unittest.TestCase):
@@ -54,6 +68,13 @@ class TrialCliTest(unittest.TestCase):
     def test_smoke_trial_override(self) -> None:
         args = BUILD_PARSER().parse_args(["smoke", "--trial", "2"])
         self.assertEqual(args.trial, 2)
+
+    def test_reasoning_defaults_to_high_and_accepts_medium(self) -> None:
+        self.assertEqual(BUILD_PARSER().parse_args(["smoke"]).reasoning, "high")
+        self.assertEqual(
+            BUILD_PARSER().parse_args(["run", "--task", "x", "--reasoning", "medium"]).reasoning,
+            "medium",
+        )
 
     def test_run_trial_same_semantics_as_smoke(self) -> None:
         args = BUILD_PARSER().parse_args(["run", "--task", "x", "--trial", "2"])

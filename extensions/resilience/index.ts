@@ -498,10 +498,10 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       pi.appendEntry("resilience.compaction-boundary", marker);
   });
 
-  // The runtime patch "agent-session-compaction-failure-*" (see
-  // scripts/apply-runtime-patches.mjs) forwards this event from the core
-  // compaction paths. It is not part of the shipped ExtensionAPI .d.ts, so
-  // only this registration is cast; every other hook stays fully typed.
+  // The installed Pi runtime emits this event natively from its core compaction
+  // paths (`_emitSessionCompactFailed`). It is not part of the shipped
+  // ExtensionAPI .d.ts, so only this registration is cast; every other hook
+  // stays fully typed.
   type SessionCompactFailedEvent = {
     type: "session_compact_failed";
     reason: "manual" | "threshold" | "overflow";

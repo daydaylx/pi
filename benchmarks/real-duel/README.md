@@ -52,13 +52,22 @@ benchmarks/real-duel/scripts/pi-duel doctor    # Preflight (CLI/Auth/Version)
 benchmarks/real-duel/scripts/pi-duel gate      # obench gate (Ablehnung erwartet, siehe Kommentare in den TOMLs)
 benchmarks/real-duel/scripts/pi-duel smoke     # Phase-1-Plumbing-Test, Default: beide Candidates
 benchmarks/real-duel/scripts/pi-duel smoke --candidate pi-real  # kostenbegrenzter Einzel-Smoke
+benchmarks/real-duel/scripts/pi-duel smoke --reasoning medium  # beide Candidates mit identischem Medium-Override
 benchmarks/real-duel/scripts/pi-duel report    # Ergebnisuebersicht
 benchmarks/real-duel/scripts/pi-duel cleanup <run-id>   # Worktrees entfernen
 ```
 
 `smoke` und `run` akzeptieren optional `--candidate pi-real` oder
 `--candidate codex-real`; ohne Filter bleibt das bisherige Verhalten mit beiden
-Candidates unverändert.
+Candidates unverändert. `--reasoning high|medium` wählt ein separates,
+pro-Prozess wirksames Kandidatenprofil; der Default `high` erhält die bestehende
+Serie unverändert. Der Fingerprint speichert den effektiven Override und die
+jeweiligen globalen Ausgangswerte getrennt.
+
+Eine neue Medium-Serie braucht vor dem ersten Trial einen sauberen, committeten
+Baseline-SHA und eine eigene Freeze-/Matrix-Dokumentation. `--allow-dirty`
+markiert Ergebnisse als nicht vergleichbar und ist dafür nicht zulässig. Während
+eines Trials darf keine parallele interaktive Pi-Sitzung laufen.
 
 Laufdaten (Worktrees, `results.jsonl`, Transkripte, Fingerprints und redigierte
 Pi-Tooltraces) liegen

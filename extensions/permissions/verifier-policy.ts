@@ -109,6 +109,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Produces the verifier-only input normalization without changing the
+ * assessment input. The guard applies the returned copy only after this
+ * module has permitted the delegation, keeping validation pure and the
+ * executor-facing normalization explicit and idempotent.
+ */
+export function normalizeVerifierDelegationInput(
+  event: ToolCallEvent,
+): Record<string, unknown> | undefined {
+  if (event.toolName !== "subagent") return undefined;
+  const input = isRecord(event.input) ? event.input : undefined;
+  if (
+    !input ||
+    typeof input.action === "string" ||
+    input.agent !== VERIFIER_AGENT
+  ) {
+    return undefined;
+  }
+  return {
+    ...input,
+    // The installed pi-subagents package infers stricter acceptance levels
+    // from task wording, but Aurora already enforces verifier completeness and
+    // a substantive verdict. Package acceptance is intentionally disabled for
+    // this one executor-facing input.
+    acceptance: {
+      level: "none",
+      reason:
+        "Aurora erzwingt Verifier-Vollständigkeit und -Urteil bereits über verifier-policy.ts und subagent-output-guard.ts; das Paket-Acceptance-System ist für den Verifier redundant und darf einen sonst erfolgreichen Lauf nicht per Report-Format oder Evidenzanforderung zu Fall bringen.",
+    },
+  };
+}
+
+/**
  * Ein zweiter `verifier`-Lauf auf einem Diff, der seit dem letzten
  * abgeschlossenen Urteil unverändert ist, prüft nichts Neues — er
  * wiederholt nur die vorherige Arbeit. `lastVerifierRun`
@@ -199,21 +231,6 @@ export async function assessVerifierDelegation(
   }
   const dedup = await assessVerifierDedup(task, cwd, verification);
   if (dedup.blocked) return dedup;
-  // Das installierte pi-subagents-Paket eskaliert je nach Task-Wortlaut
-  // (explizit oder implizit über inferLevel()) auf Acceptance-Level wie
-  // "reviewed" (verlangt einen "reviewer"-Agenten, den Aurora bewusst nicht
-  // hat) oder "checked" (verlangt Evidenz wie "tests-added", die ein
-  // read-only Verifier nie liefern kann). Beides führt zu einem
-  // garantierten exit:1 nach dem vollen Timeout, ohne dass der Verifier
-  // selbst je ein Urteil bilden konnte. Aurora erzwingt Vollständigkeit und
-  // Urteil bereits über diese Policy und subagent-output-guard.ts — das
-  // Paket-Acceptance-System ist für den Verifier redundant und wird daher
-  // unabhängig vom Aufrufer-Input auf "none" normalisiert.
-  input.acceptance = {
-    level: "none",
-    reason:
-      "Aurora erzwingt Verifier-Vollständigkeit und -Urteil bereits über verifier-policy.ts und subagent-output-guard.ts; das Paket-Acceptance-System ist für den Verifier redundant und darf einen sonst erfolgreichen Lauf nicht per Report-Format oder Evidenzanforderung zu Fall bringen.",
-  };
   return PERMITTED;
 }
 

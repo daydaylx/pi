@@ -23,7 +23,6 @@
     "format:check": "prettier --check ..",
     "deadcode": "knip --directory ..",
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
-    "check:imports": "node ../scripts/check-relative-imports.mjs",
     "check:versioned-tree": "node ../scripts/check-versioned-tree.mjs",
     "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:frontend-contracts && npm run test:gui && npm run audit:check"
   },

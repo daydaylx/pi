@@ -1,0 +1,24 @@
+# Separate, reproducible Medium profile for real-duel.
+# It preserves the real local Codex setup but overrides only the explicit
+# per-process reasoning effort; global ~/.codex/config.toml remains unchanged.
+
+kind = "manifest"
+name = "codex-real"
+isolate_home = false
+
+command = [
+  "codex", "exec", "--json",
+  "--approve-for-me",
+  "-c", "model_reasoning_effort=medium",
+  "-m", "gpt-5.6-luna",
+  "{prompt}",
+]
+version_command = ["codex", "--version"]
+
+policy_headless_args = ["exec"]
+policy_auto_approve_args = ["--approve-for-me"]
+
+pass_env = []
+
+[models]
+"gpt-5.6-luna" = "gpt-5.6-luna"

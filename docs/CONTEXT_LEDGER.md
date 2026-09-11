@@ -9,6 +9,11 @@
 - GUI-Nutzungsentscheidung (Phase 8): Option B — `pi gui` ist bevorzugte
   Oberfläche, `pi` (Aurora) bleibt Fallback; keine automatische
   TUI-Reduktion.
+- Real-Duel Phase 5: Der Nutzer wählte eine neue, vollständige 36-Lauf-Serie
+  (3 Tasks × 3 Trials × Work-only/Plan→Work × Pi/Codex) mit
+  `gpt-5.6-luna` und Reasoning `medium`. Reale API-Läufe starten erst nach
+  einem sauberen, ausdrücklich freigegebenen Baseline-Commit; kein
+  `--allow-dirty`, kein Push und keine parallele interaktive Pi-Sitzung.
 
 ## Architekturentscheidungen
 
@@ -48,6 +53,20 @@
   Kopie mit eigenem Test) ist mit den Legacy-Benchmarks archiviert, siehe
   [`docs/benchmark-history.md`](benchmark-history.md); das Produktionsmodul
   ist davon unberührt.
+- Audit-Remediation Checkpoint A (F-01–F-10) ist auf `b21552e` abgeschlossen:
+  Workspace-Snapshots werden gestreamt und typisiert erfasst, Commit- und
+  Recovery-Gates bleiben bei Snapshotdefekten geschlossen, urteilslose
+  Verifier-Läufe bleiben retrybar und decken keinen Commit, und
+  Protocol-/Frontend-Contracts laufen im kanonischen `verify`. ADR 022
+  begrenzt `project-write` bei Interpretern auf projektinterne literale
+  Skripte; Inline-, stdin- und externe Skriptformen fragen nach.
+- Audit-Remediation Phase 4: F-11 entfernt nur den belegten toten Recovery-
+  Export. F-18 trennt die reine Verifier-Bewertung von der erst nach Erlaubnis
+  erfolgenden, idempotenten Executor-Normalisierung. F-19 erfasst Snapshots
+  unabhängig vom Aufruf-CWD ab Git-Root; Root-Auflösung erhält das bestehende
+  Retry-Budget. Eigenständige Capability-/Protocol-Grenzen (F-12–F-15) bleiben
+  ohne belastbaren Nettogewinn erhalten; F-23 benötigt kein Runtime-Upgrade
+  und F-24 bleibt ohne separaten Artefaktauftrag deferred.
 - `project_check` ist der einzige Weg zur vollständigen Projektverifikation
   und der einzige, der Footer und Ledger fortschreibt. Das `verify`-Tool
   bietet nur die Teilprüfungen `typecheck`/`test` (keine Abschlussbedingung).
@@ -97,9 +116,12 @@
   automatisch eingebunden. Dieselbe Änderung führte die Delegationsvorlage
   (Original User Request / Constraints / Delegated Question) in `AGENTS.md`
   ein.
-- Plan Mode erlaubt neben der Plandatei nur nachweislich lesende Git- und
-  Ripgrep-Aufrufe; Projekt-Skripte, `project_check` und `subagent` sind
-  gesperrt. `yolo` bleibt die ausdrückliche Ausnahme
+- Plan Mode schreibt ausschließlich über `plan_write` in die sitzungsbezogene
+  Runtime-Ablage und blockiert Arbeitsbaum-Mutationen auch unter `yolo`. Die
+  feste Allowlist umfasst Lese-/LSP-/Recovery-/Web-Fähigkeiten,
+  `verify({check:"typecheck"})`, begrenzte Diagnose-Bash und bei unbekannter
+  Änderungssurface eine artefaktfreie Investigator-SINGLE-Delegation;
+  Projekt-Skripte und `project_check` bleiben gesperrt
   (`docs/decisions/012`).
 - Ausgelieferte Erweiterungen müssen ohne Arbeitsbaum-Kontext laden:
   Literal-Importcheck (`scripts/check-relative-imports.mjs`) und Versioned-
@@ -180,6 +202,15 @@ _Keine offenen Fragen._
 
 ## Aktuelle Prioritäten
 
+- Audit-Remediation: Die Vorabnahme von Meilenstein B bestätigt alle 28
+  Endstatus und den begrenzten Scope. Die Aurora-Coverage ist mit einer
+  test-only Lifecycle-Regression wieder bei 100 %; offen bleiben der bewusst
+  uncommittete Arbeitsbaum und zwei technisch `INCOMPLETE` Verifier-Abschlüsse
+  trotz inhaltlich positiver Berichte. Runtime-Upgrades bleiben außerhalb des
+  Auftrags.
+- Real-Duel: Medium-Profile, Fingerprint-Provenienz und die 36-Lauf-Matrix
+  sind vorbereitet. Vor dem Dual-Smoke zuerst den kanonischen Audit-/Medium-
+  Stand prüfen und die explizite Commit-Freigabe einholen.
 - GUI-Projekt: Auftragspaket Phasen 0–8 abgeschlossen (Entscheidung B).
   Offen: reale Nutzungsbeobachtung (RAM/Startzeit, Langzeit-Sessions),
   Issue-Triage der Kandidaten, manuelle Sichtprüfung an einem Desktop.

@@ -44,6 +44,14 @@ CANDIDATES = {
     "pi-real": REAL_DUEL_DIR / "candidates" / "pi-real.toml",
     "codex-real": REAL_DUEL_DIR / "candidates" / "codex-real.toml",
 }
+CANDIDATE_PROFILES = {
+    "high": CANDIDATES,
+    "medium": {
+        "pi-real": REAL_DUEL_DIR / "candidates" / "pi-real-medium.toml",
+        "codex-real": REAL_DUEL_DIR / "candidates" / "codex-real-medium.toml",
+    },
+}
+REASONING_LEVELS = tuple(CANDIDATE_PROFILES)
 MODEL = "gpt-5.6-luna"
 # Muss mit candidates/pi-real.toml `command`-Liste (--provider ...) synchron
 # bleiben -- der Plan-Work-Treiber ruft `pi --mode rpc` direkt auf statt ueber
@@ -73,10 +81,11 @@ def _build_run_id_base(run_prefix, trial):
     return f"{run_prefix}-trial{trial}-{time.strftime('%Y%m%dT%H%M%S')}"
 
 
-def _selected_candidate_paths(candidate_name):
+def _selected_candidate_paths(candidate_name, reasoning="high"):
+    candidates = CANDIDATE_PROFILES[reasoning]
     if candidate_name is None:
-        return CANDIDATES
-    return {candidate_name: CANDIDATES[candidate_name]}
+        return candidates
+    return {candidate_name: candidates[candidate_name]}
 
 
 def _obench_bin():
@@ -94,9 +103,9 @@ def cmd_doctor(_args):
     return _run_obench_cli(["doctor"])
 
 
-def cmd_gate(_args):
+def cmd_gate(args):
     rc = 0
-    for name, path in CANDIDATES.items():
+    for name, path in _selected_candidate_paths(None, args.reasoning).items():
         print(f"=== obench gate: {name} (isolate_home=false -> Ablehnung erwartet) ===")
         r = _run_obench_cli(["gate", str(path), "--model", MODEL])
         rc = rc or r
@@ -325,7 +334,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
     # Candidates werden VOR dem Dirty-Gate geladen (reine Parsing-Operation,
     # keine Subprozess-Ausfuehrung) -- ihr Provenance-Hash und die aufgeloeste
     # Modell-ID fliessen in den Fingerprint ein.
-    candidate_paths = _selected_candidate_paths(args.candidate)
+    candidate_paths = _selected_candidate_paths(args.candidate, args.reasoning)
     candidates = {
         name: load_candidate(str(path), None)
         for name, path in candidate_paths.items()
@@ -345,7 +354,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
     fingerprint_module = _load_fingerprint_module()
     fp = fingerprint_module.compute_fingerprint(
         candidates=candidates, task_instruction=instruction,
-        dirty_override=args.allow_dirty, model=MODEL,
+        dirty_override=args.allow_dirty, model=MODEL, reasoning=args.reasoning,
         trial=args.trial, frozen_base_sha=frozen_base_sha,
     )
     if frozen_base_sha and not fp["base_sha_matches_freeze"]:
@@ -645,6 +654,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
                     cwd=str(workdir),
                     model=MODEL,
                     provider=PI_PROVIDER,
+                    reasoning=args.reasoning,
                     instruction=instruction,
                     plan_mode=plan_mode_used,
                     followups=workflow_cfg.followups,
@@ -761,6 +771,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
                 plan_result = codex_plan_work_module.run_plan_phase(
                     cwd=str(workdir),
                     model=MODEL,
+                    reasoning=args.reasoning,
                     instruction=instruction,
                     output_dir=out_dir,
                     timeout=args.timeout,
@@ -780,6 +791,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
                 work_result = codex_plan_work_module.run_approval_and_work(
                     cwd=str(workdir),
                     model=MODEL,
+                    reasoning=args.reasoning,
                     session_id=plan_result.session_id,
                     approval_text=workflow_cfg.approval_text,
                     output_dir=out_dir,
@@ -1097,13 +1109,17 @@ def build_parser():
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("doctor", help="obench doctor")
-    sub.add_parser("gate", help="obench gate fuer beide Candidates (Ablehnung erwartet)")
+    p_gate = sub.add_parser("gate", help="obench gate fuer beide Candidates (Ablehnung erwartet)")
+    p_gate.add_argument("--reasoning", choices=REASONING_LEVELS, default="high",
+                        help="explizites Reasoning-Profil (default: high)")
 
     p_smoke = sub.add_parser("smoke", help="Fingerprint + Worktrees + Smoke-Task fuer beide Candidates")
     p_smoke.add_argument("--timeout", type=int, default=600, help="Adapter-Timeout in Sekunden (default: 600)")
     p_smoke.add_argument("--checker-timeout", type=int, default=120, help="Checker-Timeout in Sekunden (default: 120)")
     p_smoke.add_argument("--candidate", choices=sorted(CANDIDATES),
                          help="optional genau einen Candidate ausfuehren; Default: beide")
+    p_smoke.add_argument("--reasoning", choices=REASONING_LEVELS, default="high",
+                         help="explizites Reasoning-Profil (default: high)")
     p_smoke.add_argument("--allow-dirty", action="store_true",
                           help="Lauf trotz unsauberem canonical repo erzwingen "
                                "(Ergebnis wird comparable=false markiert)")
@@ -1120,6 +1136,8 @@ def build_parser():
     p_run.add_argument("--checker-timeout", type=int, default=300, help="Checker-Timeout in Sekunden (default: 300)")
     p_run.add_argument("--candidate", choices=sorted(CANDIDATES),
                        help="optional genau einen Candidate ausfuehren; Default: beide")
+    p_run.add_argument("--reasoning", choices=REASONING_LEVELS, default="high",
+                       help="explizites Reasoning-Profil (default: high)")
     p_run.add_argument("--allow-dirty", action="store_true",
                         help="Lauf trotz unsauberem canonical repo erzwingen "
                              "(Ergebnis wird comparable=false markiert)")

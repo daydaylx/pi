@@ -304,7 +304,7 @@ export const targetConfigSections = {
         eq(
           setup.permissions,
           { unknownTools: "ask", bash: "allow" },
-          "unknown tools and free bash fail to confirmation",
+          "unknown tools ask while free bash is explicitly allowed",
         );
         eq(
           keybindings["tui.editor.yank"],
@@ -629,6 +629,22 @@ export const targetConfigSections = {
             !/uses:\s*actions\/(?:checkout|setup-node)@v\d/.test(source),
             `${workflow} has no mutable checkout/setup-node tag`,
           );
+          if (workflow === "verify.yml") {
+            assert(
+              /npm --prefix npm run verify/.test(source),
+              "Verify CI invokes the canonical npm verify profile",
+            );
+            assert(
+              !/node scripts\/check-npm-audit\.mjs/.test(source),
+              "Verify CI does not run npm audit outside the canonical profile",
+            );
+            const verifyScript = packageJson.scripts?.verify;
+            assert(
+              typeof verifyScript === "string" &&
+                (verifyScript.match(/npm run audit:check/g) ?? []).length === 1,
+              "the canonical verify profile runs npm audit exactly once",
+            );
+          }
         }
 
         // Exact harness pins remain installed for deterministic typechecking even
