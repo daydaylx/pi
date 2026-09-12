@@ -742,7 +742,7 @@ export const resilienceSections = {
       for (const mode of ["json", "print", "rpc"]) {
         const nonTui = createHarness();
         for (const factory of factories) factory(nonTui.api);
-        const contextForMode = nonTui.makeContext({ mode, hasUI: false });
+        const contextForMode = nonTui.makeContext({ mode, hasUI: false, cwd });
         await nonTui.runHooks("session_start", {}, contextForMode);
         eq(
           nonTui.statusCalls,
@@ -752,6 +752,55 @@ export const resilienceSections = {
         assertNoGlobalChrome(
           nonTui,
           "combined stack installs no chrome in " + mode + " mode",
+        );
+        const blockedAsk = await nonTui.runHooks(
+          "tool_call",
+          { toolName: "ask_user", input: { question: "continue?" } },
+          contextForMode,
+        );
+        assert(
+          blockedAsk.some(
+            (result) =>
+              result?.block &&
+              result?.terminate === true &&
+              /nicht verfügbar/.test(result.reason),
+          ),
+          "ask_user is capability-blocked before execution in " + mode + " mode",
+        );
+        await nonTui.commands.get("workflow-set")("detailed_plan", contextForMode);
+        const blockedBuilds = [];
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          blockedBuilds.push(
+            ...(await nonTui.runHooks(
+              "tool_call",
+              { toolName: "bash", input: { command: "npm run build" } },
+              contextForMode,
+            )),
+          );
+        }
+        const blockedBuildDecisions = blockedBuilds.filter(
+          (result) => result?.block,
+        );
+        assert(
+          blockedBuildDecisions.length === 2 &&
+            blockedBuildDecisions.every(
+              (result) => result?.block && result?.terminate === true,
+            ),
+          "two blocked builds end their non-interactive batches in " + mode + " mode",
+        );
+        const blockedProfile = await nonTui.runHooks(
+          "tool_call",
+          { toolName: "project_check", input: { profile: "verify" } },
+          contextForMode,
+        );
+        assert(
+          blockedProfile.some(
+            (result) =>
+              result?.block &&
+              result?.terminate === true &&
+              /Kein Projekt-Prüfprofil definiert/.test(result.reason),
+          ),
+          "missing project profiles are reported before execution in " + mode + " mode",
         );
       }
     });

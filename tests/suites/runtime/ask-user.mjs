@@ -152,6 +152,11 @@ export const askUserSections = {
           ),
           "ask_user returns a structured error in " + mode + " mode",
         );
+        eq(
+          resultForMode.terminate,
+          true,
+          "ask_user terminates the non-interactive batch instead of inviting a retry",
+        );
       }
       eq(
         nonTui.customComponents.length,

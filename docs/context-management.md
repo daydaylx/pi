@@ -32,6 +32,22 @@ Die Tabelle enthält keine Provider-Kosten: lokale Tests verwenden Fixture-Bytes
 
 Die anderen lokalen Tools behalten ihre bereits bestehenden Core- oder `limitTextOutput()`-Grenzen. Es gibt bewusst kein Extension-seitiges aggregiertes Turn-Budget und keine Deduplizierungsdatenbank.
 
+Routinemäßige `read`-, `grep`-, `find`- und `ls`-Resultate erhalten zusätzlich
+zur Core-Begrenzung ein modellseitiges Head/Tail-Limit von 16 KiB bzw. 200
+Zeilen, bevor sie in den Provider-Kontext gelangen. Der Marker nennt
+Originalgröße und Aufbewahrungsstrategie; Core-Details wie `fullOutputPath`
+bleiben erhalten. Fehler, Teilresultate, Nicht-Text-Inhalte sowie
+`verify`/`project_check` werden nicht durch diesen Backstop gekürzt. Bei Bedarf
+kann der Agent den zugänglichen vollständigen Pfad gezielt nachlesen.
+
+Der Real-Duel-Tool-Trace führt die Messbasen getrennt: modellseitige Zeit wird
+nur aus gepaarten Assistant-`message_start`/`message_end`-Zeitstempeln gebildet,
+Tool-Zeit nur aus vom Tool selbst gemeldeten Dauern, und der vorhandene
+Assistant-zu-Tool-Result-Spanne bleibt als beobachtete Mischzeit erhalten.
+Checker-Zeit kommt separat vom agentenunabhängigen Checker; blockierte
+Permission-/Contract-Aktionen werden nur als beobachtete Spanne ausgewiesen.
+Fehlende Zeitstempel bleiben unbekannt und werden nicht geschätzt.
+
 Die Planning-Instruktion wird über `before_agent_start.systemPrompt` in den effektiven Systemprompt eingefügt und gilt für den ganzen Agent-Run (die Runtime setzt sie als `agent.state.systemPrompt` und verwirft sie beim nächsten Prompt); sie wird nicht als Custom-Message in der Session gespeichert.
 
 Der **freigegebene Plan** geht bewusst einen anderen Weg (ADR [020](decisions/020-explicit-plan-approval.md)). In den Systemprompt kommt nur ein konstanter Regeltext ohne jeden Planinhalt; der Plan selbst reist als Custom-Message, die Pis Runtime für den Provider zu `role: "user"` umwandelt und hinter die echte Nutzernachricht hängt. Damit bleibt der aktuelle Auftrag maßgeblich, und Text im Plan kann die Anweisungshierarchie nicht verschieben.

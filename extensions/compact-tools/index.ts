@@ -1,8 +1,9 @@
 /**
  * Registers compacted variants of the built-in bash/read/grep/find/ls/write
- * tools: identical execute/renderCall, but `renderShell: "self"` so
- * ToolExecutionComponent skips its Spacer(1) + Box(1, 1) padding around them
- * (the same trick the core `edit` tool already uses).
+ * tools with `renderShell: "self"` so ToolExecutionComponent skips its
+ * Spacer(1) + Box(1, 1) padding around them (the same trick the core `edit`
+ * tool already uses). Routine read/search/list tools also get a bounded
+ * model-facing result; their TUI receipt remains a separate renderer concern.
  *
  * Every local basis tool gets `collapseResult()`: collapsed, successful,
  * finished results show one informative receipt plus the Ctrl+O hint instead
@@ -22,6 +23,7 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
   createBashToolDefinition,
@@ -32,23 +34,52 @@ import {
   createWriteToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { collapseResult } from "./collapse-result.ts";
+import { limitModelFacingToolResult } from "../shared/output-limits.ts";
+
+function limitRoutineModelResult(
+  tool: ToolDefinition<any, any, any>,
+): ToolDefinition<any, any, any> {
+  const execute = tool.execute;
+  return {
+    ...tool,
+    async execute(
+      toolCallId: string,
+      params: any,
+      signal: AbortSignal | undefined,
+      onUpdate: any,
+      ctx: ExtensionContext,
+    ) {
+      return limitModelFacingToolResult(
+        await execute(toolCallId, params, signal, onUpdate, ctx),
+      );
+    },
+  };
+}
 
 export default function compactToolsExtension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx: ExtensionContext) => {
     pi.registerTool({
-      ...collapseResult(createReadToolDefinition(ctx.cwd)),
+      ...limitRoutineModelResult(
+        collapseResult(createReadToolDefinition(ctx.cwd)),
+      ),
       renderShell: "self",
     });
     pi.registerTool({
-      ...collapseResult(createGrepToolDefinition(ctx.cwd)),
+      ...limitRoutineModelResult(
+        collapseResult(createGrepToolDefinition(ctx.cwd)),
+      ),
       renderShell: "self",
     });
     pi.registerTool({
-      ...collapseResult(createFindToolDefinition(ctx.cwd)),
+      ...limitRoutineModelResult(
+        collapseResult(createFindToolDefinition(ctx.cwd)),
+      ),
       renderShell: "self",
     });
     pi.registerTool({
-      ...collapseResult(createLsToolDefinition(ctx.cwd)),
+      ...limitRoutineModelResult(
+        collapseResult(createLsToolDefinition(ctx.cwd)),
+      ),
       renderShell: "self",
     });
     pi.registerTool({

@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -78,6 +80,10 @@ function recoveryBlockReason(reason: string | undefined): string {
 // leeres Subject und der Mensch würde blind bestätigen.
 const MAX_INPUT_PREVIEW = 300;
 
+function stopNonInteractive(ctx: ExtensionContext): { terminate?: true } {
+  return ctx.mode === "tui" ? {} : { terminate: true };
+}
+
 function toolSubject(event: ToolCallEvent): string {
   if (event.toolName === "bash") {
     return String((event.input as Record<string, unknown>).command ?? "");
@@ -96,19 +102,46 @@ export function registerPermissionGuards(
     if (!ctx.isProjectTrusted() && !READ_ONLY_TOOLS.includes(event.toolName)) {
       return {
         block: true,
+        ...stopNonInteractive(ctx),
         reason:
           "Harte Trust-Grenze: mutierende oder externe Tools sind im nicht vertrauenswürdigen Projekt blockiert.",
+      };
+    }
+    // Capability preflight: RPC/JSON/print have no channel for the native
+    // ask_user dialog. Block before execution and terminate this tool batch so
+    // the model cannot spend turns repeating an impossible question.
+    if (event.toolName === ASK_USER_TOOL_NAME && ctx.mode !== "tui") {
+      return {
+        block: true,
+        terminate: true,
+        reason:
+          `ask_user ist im Modus "${ctx.mode}" nicht verfügbar; im TUI-Modus steht die interaktive Entscheidungskarte zur Verfügung. Keine Rückfrage starten oder wiederholen.`,
+      };
+    }
+    // Profile preflight: a missing declaration has no safe command fallback.
+    // This keeps the result visible and fail-closed without entering project
+    // dependency preparation or falsely changing the verification ledger.
+    if (
+      event.toolName === "project_check" &&
+      ctx.isProjectTrusted() &&
+      !existsSync(join(ctx.cwd, ".pi", "verify.json"))
+    ) {
+      return {
+        block: true,
+        terminate: true,
+        reason:
+          "Kein Projekt-Prüfprofil definiert: .pi/verify.json fehlt. Es wird kein freies Prüfkommando geraten; zulässiger Prüfpfad: .pi/verify.json mit benanntem Profil anlegen und project_check erneut ausführen.",
       };
     }
     const workflow = requestWorkflowCapabilities(pi.events);
     const assessment = assessWorkflowTool(event, ctx.cwd);
     if (assessment.blocked) {
-      return { block: true, reason: assessment.reason };
+      return { block: true, ...stopNonInteractive(ctx), reason: assessment.reason };
     }
     // Harte Web-Eingabegrenze: fetch_content nur http(s), kein auth.
     const webAssessment = assessWebToolInput(event);
     if (webAssessment.blocked) {
-      return { block: true, reason: webAssessment.reason };
+      return { block: true, ...stopNonInteractive(ctx), reason: webAssessment.reason };
     }
     // Gilt wie das Recovery-Gate unabhängig vom Zugriffslevel — auch YOLO
     // hebt die Verifier-Pflicht für sicherheits-/permissionsrelevante Diffs
@@ -123,7 +156,7 @@ export function registerPermissionGuards(
       verification,
     );
     if (verifierAssessment.blocked) {
-      return { block: true, reason: verifierAssessment.reason };
+      return { block: true, ...stopNonInteractive(ctx), reason: verifierAssessment.reason };
     }
     const normalizedVerifierInput = normalizeVerifierDelegationInput(event);
     if (normalizedVerifierInput) {
@@ -134,7 +167,7 @@ export function registerPermissionGuards(
     }
     const debuggerAssessment = assessDebuggerDelegation(event);
     if (debuggerAssessment.blocked) {
-      return { block: true, reason: debuggerAssessment.reason };
+      return { block: true, ...stopNonInteractive(ctx), reason: debuggerAssessment.reason };
     }
     const commitGate = await assessGitCommitVerifierGate(
       event,
@@ -142,7 +175,7 @@ export function registerPermissionGuards(
       verification,
     );
     if (commitGate.blocked) {
-      return { block: true, reason: commitGate.reason };
+      return { block: true, ...stopNonInteractive(ctx), reason: commitGate.reason };
     }
     // Das Recovery-Gate prüft vor der Planmodus-Freigabe, damit auch
     // Schreibzugriffe auf die Plandatei nach einem Fehlturn nicht
@@ -151,7 +184,11 @@ export function registerPermissionGuards(
       ? await requestRecoveryStatus(pi.events)
       : { armed: false as const };
     if (recoveryGateBlocks(recovery.armed, event, ctx.cwd)) {
-      return { block: true, reason: recoveryBlockReason(recovery.reason) };
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: recoveryBlockReason(recovery.reason),
+      };
     }
     if (planModeInvestigatorSingleAllowed(workflow, session.level(), event)) {
       // The package would otherwise write debug artifacts below ctx.cwd.
@@ -166,7 +203,7 @@ export function registerPermissionGuards(
       ctx.cwd,
     );
     if (planGuard.blocked) {
-      return { block: true, reason: planGuard.reason };
+      return { block: true, ...stopNonInteractive(ctx), reason: planGuard.reason };
     }
 
     const decision = decideTool(
@@ -178,7 +215,7 @@ export function registerPermissionGuards(
     );
     if (decision.action === "allow") return;
     if (decision.action === "block") {
-      return { block: true, reason: decision.reason };
+      return { block: true, ...stopNonInteractive(ctx), reason: decision.reason };
     }
     const subject = toolSubject(event);
     const confirmed = await confirmAction(

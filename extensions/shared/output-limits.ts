@@ -11,6 +11,15 @@ export { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES };
 export const SUBAGENT_MAX_BYTES = 12 * 1024;
 export const SUBAGENT_MAX_LINES = 240;
 
+/**
+ * Routine search/list results should not consume the whole provider context
+ * just because the core 50 KiB/2000-line backstop was not reached.  This is a
+ * model-facing budget; the TUI receipt and the core's full-output path remain
+ * separate concerns.
+ */
+export const ROUTINE_RESULT_MAX_BYTES = 16 * 1024;
+export const ROUTINE_RESULT_MAX_LINES = 200;
+
 export interface OutputTruncationDetails {
   truncated: true;
   strategy: "balanced-head-tail";
@@ -26,6 +35,10 @@ export interface OutputTruncationDetails {
 export interface LimitedTextOutput {
   text: string;
   truncation?: OutputTruncationDetails;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function utf8Prefix(text: string, maxBytes: number): string {
@@ -113,4 +126,41 @@ export function limitSubagentOutput(text: string): LimitedTextOutput {
     maxBytes: SUBAGENT_MAX_BYTES,
     maxLines: SUBAGENT_MAX_LINES,
   });
+}
+
+/**
+ * Bound only successful, text-bearing routine tool results before they are
+ * persisted in the provider conversation. Non-text parts (for example an
+ * image) and arbitrary tool details remain available. Callers must not use
+ * this for verification evidence or an error result.
+ */
+export function limitModelFacingToolResult<
+  TResult extends {
+    content: Array<{ type: string; text?: string }>;
+    details: unknown;
+  },
+>(result: TResult): TResult {
+  const candidate = result as TResult & { isError?: boolean };
+  if (candidate.isError === true) return result;
+
+  const textParts = result.content.filter((part) => part.type === "text");
+  if (textParts.length === 0) return result;
+  const originalText = textParts.map((part) => part.text ?? "").join("\n");
+  const limited = limitTextOutput(originalText, {
+    maxBytes: ROUTINE_RESULT_MAX_BYTES,
+    maxLines: ROUTINE_RESULT_MAX_LINES,
+  });
+  if (!limited.truncation) return result;
+
+  let inserted = false;
+  const content = result.content.flatMap((part) => {
+    if (part.type !== "text") return [part];
+    if (inserted) return [];
+    inserted = true;
+    return [{ ...part, text: limited.text }];
+  });
+  const details = isRecord(result.details)
+    ? { ...result.details, modelFacingTruncation: limited.truncation }
+    : { modelFacingTruncation: limited.truncation };
+  return { ...result, content, details } as TResult;
 }

@@ -200,6 +200,12 @@ def normalize_pi(transcript_text):
     _, turns, _tail, token_usage = pi_adapter._parse_json_with_usage(transcript_text)
 
     out = _empty_neutral()
+    # Request/tool counts are observable even when a provider failed before
+    # returning usage. Keep those counts, but leave every token field unset.
+    calls, errors = _pi_tool_stats(transcript_text)
+    out["model_calls"] = turns
+    out["tool_calls"] = calls
+    out["tool_errors"] = errors
     if token_usage.get("token_basis") is None:
         out["cost_source"] = "unavailable"
         return out
@@ -233,9 +239,6 @@ def normalize_pi(transcript_text):
         "token_basis": token_usage.get("token_basis"),
         "usage_raw": token_usage.get("usage_raw"),
     })
-    calls, errors = _pi_tool_stats(transcript_text)
-    out["tool_calls"] = calls
-    out["tool_errors"] = errors
     return out
 
 
@@ -245,6 +248,10 @@ def normalize_codex(transcript_text):
     _, turns, _tail, token_usage = codex_adapter._parse_json_with_usage(transcript_text)
 
     out = _empty_neutral()
+    calls, errors = _codex_tool_stats(transcript_text)
+    out["model_calls"] = turns
+    out["tool_calls"] = calls
+    out["tool_errors"] = errors
     if token_usage.get("token_basis") is None:
         out["cost_source"] = "unavailable"
         return out
@@ -272,9 +279,6 @@ def normalize_codex(transcript_text):
         "token_basis": token_usage.get("token_basis"),
         "usage_raw": token_usage.get("usage_raw"),
     })
-    calls, errors = _codex_tool_stats(transcript_text)
-    out["tool_calls"] = calls
-    out["tool_errors"] = errors
     return out
 
 

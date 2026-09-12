@@ -249,6 +249,35 @@ def get_entries(sess: RpcSession, timeout: float = 15) -> list[dict]:
     return ev["data"]["entries"]
 
 
+def wait_for_agent_settled(
+    sess: RpcSession,
+    handle_batch: Callable[[list[dict[str, Any]]], None],
+    timeout: float,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Wait for settlement while servicing UI requests as they arrive.
+
+    RPC has no native TUI, but extensions can still emit UI requests. Waiting
+    for ``agent_settled`` before answering one creates a deadlock: the agent
+    cannot settle until the request is answered. The caller decides how to
+    answer/cancel each request; this helper only fixes the event ordering.
+    """
+    deadline = time.monotonic() + timeout
+    all_events: list[dict[str, Any]] = []
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RpcError("Timeout beim Warten auf Abschluss des Agent-Turns.")
+        settled, batch = sess.wait_for(
+            lambda event: event.get("type")
+            in ("extension_ui_request", "agent_settled"),
+            remaining,
+        )
+        all_events.extend(batch)
+        handle_batch(batch)
+        if settled.get("type") == "agent_settled":
+            return settled, all_events
+
+
 def _has_plan_approval_entry(entries: list[dict]) -> bool:
     """Prueft, ob bereits ein plan-approval-Audit-Eintrag existiert (siehe
     Modul-Docstring zur unklaren RPC-Serialisierung von "custom"-Eintraegen --
@@ -336,9 +365,9 @@ def run_plan_phase(
         send_command_and_confirm(sess, f"/workflow-set {plan_mode}")
 
         sess.send({"type": "prompt", "message": instruction})
-        settle_ev, batch = sess.wait_for(lambda e: e.get("type") == "agent_settled", timeout)
-        all_events += batch
-        handle_ui_requests(batch)
+        settle_ev, all_events = wait_for_agent_settled(
+            sess, handle_ui_requests, timeout
+        )
         settled = settle_ev.get("type") == "agent_settled"
 
         state = get_state(sess)

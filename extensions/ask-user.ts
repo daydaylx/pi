@@ -146,6 +146,7 @@ export default function askUser(pi: ExtensionAPI) {
             options: params.options.map((o) => o.label),
             answer: null,
           } as QuestionDetails,
+          terminate: true,
         };
       }
 

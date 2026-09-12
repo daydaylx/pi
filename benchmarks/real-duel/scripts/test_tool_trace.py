@@ -25,6 +25,7 @@ bp_spec.loader.exec_module(bp)
 def _events() -> str:
     events = [
         {"type": "message_end", "message": {"role": "user", "timestamp": 1_000, "content": []}},
+        {"type": "message_start", "message": {"role": "assistant", "timestamp": 1_050}},
         {"type": "message_end", "message": {"role": "assistant", "timestamp": 1_100, "content": [
             {"type": "toolCall", "id": "write-1", "name": "write"},
         ]}},
@@ -138,6 +139,11 @@ class ToolTraceTest(unittest.TestCase):
             result["calls"][3]["error_summary"],
             "Verifikationslauf meldete Format-Drift.",
         )
+        self.assertEqual(result["calls"][0]["output_bytes"], 2)
+        self.assertEqual(result["calls"][0]["output_lines"], 1)
+        self.assertEqual(result["summary"]["tool_outputs_with_sizes"], 7)
+        self.assertGreater(result["summary"]["tool_output_bytes"], 0)
+        self.assertGreater(result["summary"]["tool_output_lines"], 0)
         serialized = json.dumps(result, ensure_ascii=False)
         for raw_text in (
             "secret-free fixture",
@@ -166,6 +172,9 @@ class ToolTraceTest(unittest.TestCase):
         self.assertIsNone(summary["time_to_first_valid_patch_ms"])
         self.assertEqual(summary["first_confirmed_valid_patch_ms"], 2_250)
         self.assertEqual(result["errors"][2]["tool_reported_duration_ms"], 68_775)
+        self.assertEqual(summary["model_time_ms"], 50)
+        self.assertEqual(summary["model_responses"], 7)
+        self.assertEqual(summary["tool_reported_time_ms"], 68_775)
         without_checker_timing = trace.analyze_pi_trace(
             _events(), wall_time_s=2.0, checker_success=True
         )

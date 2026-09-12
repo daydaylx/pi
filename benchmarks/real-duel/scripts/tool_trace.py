@@ -2,8 +2,8 @@
 """Bounded Pi tool-call trace analysis for real-duel transcripts.
 
 The raw transcript remains the source of truth. This module emits safe argument
-summaries, fingerprints and aggregate timings; it never copies prompts, shell
-commands or tool output into benchmark results.
+summaries, fingerprints, aggregate timings and text-result sizes; it never
+copies prompts, shell commands or tool output into benchmark results.
 """
 
 from __future__ import annotations
@@ -12,14 +12,14 @@ import argparse
 import hashlib
 import json
 import re
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, Iterable
 
 if TYPE_CHECKING:
     from baseline_preflight import BaselineContext
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _MUTATING_TOOLS = {"edit", "write"}
 _SEARCH_TOOLS = {"read", "grep", "find", "ls", "lsp_definition", "lsp_references", "lsp_hover", "lsp_workspace_symbols"}
 _VERIFY_TOOLS = {"verify", "project_check"}
@@ -266,9 +266,14 @@ def analyze_pi_events(
     """
     starts: dict[str, dict[str, Any]] = {}
     ends: dict[str, dict[str, Any]] = {}
+    tool_results: dict[str, dict[str, Any]] = {}
     start_times: dict[str, int] = {}
     end_times: dict[str, int] = {}
     batch_sizes: dict[str, int] = {}
+    model_starts: deque[int] = deque()
+    model_intervals: list[tuple[int, int]] = []
+    model_responses = 0
+    model_error_requests = 0
     transcript_start_ms: int | None = None
 
     for event in events:
@@ -286,6 +291,9 @@ def analyze_pi_events(
             if isinstance(timestamp, int):
                 transcript_start_ms = timestamp if transcript_start_ms is None else min(transcript_start_ms, timestamp)
             if message.get("role") == "assistant" and isinstance(timestamp, int):
+                model_responses += 1
+                if model_starts:
+                    model_intervals.append((model_starts.popleft(), timestamp))
                 tool_calls = [
                     item for item in (message.get("content") or [])
                     if isinstance(item, dict) and item.get("type") == "toolCall" and isinstance(item.get("id"), str)
@@ -297,6 +305,16 @@ def analyze_pi_events(
                 call_id = message.get("toolCallId")
                 if isinstance(call_id, str):
                     end_times[call_id] = timestamp
+                    tool_results[call_id] = message
+        elif event.get("type") == "message_start":
+            message = event.get("message") or {}
+            timestamp = message.get("timestamp")
+            if message.get("role") == "assistant" and isinstance(timestamp, int):
+                model_starts.append(timestamp)
+        elif event.get("type") == "message_update":
+            assistant_event = event.get("assistantMessageEvent") or {}
+            if assistant_event.get("type") == "error":
+                model_error_requests += 1
 
     if transcript_start_ms is None:
         transcript_start_ms = min(start_times.values(), default=0)
@@ -312,13 +330,27 @@ def analyze_pi_events(
         args = start_event.get("args") if isinstance(start_event.get("args"), dict) else {}
         end_event = ends.get(call_id, {})
         success = None if not end_event else not bool(end_event.get("isError"))
+        if "result" in end_event:
+            result = end_event.get("result")
+        else:
+            result = tool_results.get(call_id)
+        output_text = _result_text(result)
+        output_details = result.get("details") if isinstance(result, dict) else None
+        output_truncated = bool(
+            isinstance(output_details, dict)
+            and any(
+                isinstance(output_details.get(key), dict)
+                and output_details[key].get("truncated") is True
+                for key in ("truncation", "modelFacingTruncation")
+            )
+        ) or "[Ausgabe gekürzt:" in output_text
         signature = _fingerprint([tool, args])
         target = _target_key(tool, args)
         phase = _phase(tool, args)
         start_ms = start_times.get(call_id)
         end_ms = end_times.get(call_id)
         duration_ms = end_ms - start_ms if start_ms is not None and end_ms is not None else None
-        error_text = _result_text(end_event.get("result")) if success is False else ""
+        error_text = output_text if success is False else ""
         error_category = classify_error(tool, error_text) if success is False else None
         error_category = _refine_verification_category(
             error_category, tool, error_text, baseline
@@ -346,7 +378,12 @@ def analyze_pi_events(
                 else "parallel-assistant-message-to-results" if duration_ms is not None
                 else "unavailable"
             ),
-            "tool_reported_duration_ms": _tool_reported_duration_ms(error_text),
+            "tool_reported_duration_ms": _tool_reported_duration_ms(output_text),
+            # Only aggregate UTF-8 text content is retained. Missing result
+            # events remain unknown rather than being reported as zero.
+            "output_bytes": len(output_text.encode("utf-8")) if result is not None else None,
+            "output_lines": len(output_text.splitlines()) if result is not None else None,
+            "output_truncated": output_truncated if result is not None else None,
             "success": success,
             "error_category": error_category,
             "error_summary": _error_summary(error_category, error_text) if error_category else None,
@@ -402,6 +439,15 @@ def analyze_pi_events(
     first_mutation = next((call for call in calls if call["tool"] in _MUTATING_TOOLS and call["success"] is True), None)
     first_successful_verification = next((call for call in calls if call["phase"] == "verification" and call["success"] is True), None)
     observed_tool_ms = _union_ms(all_intervals)
+    sized_calls = [call for call in calls if call["output_bytes"] is not None]
+    reported_tool_calls = [
+        call for call in calls if call["tool_reported_duration_ms"] is not None
+    ]
+    blocked_calls = [
+        call
+        for call in calls
+        if call["error_category"] in {"permission", "contract/schema"}
+    ]
     wall_time_ms = round(wall_time_s * 1000) if wall_time_s is not None else None
     checker_wall_time_ms = round(checker_wall_time_s * 1000) if checker_wall_time_s is not None else None
 
@@ -416,6 +462,25 @@ def analyze_pi_events(
             "repeated_verifications_without_mutation": sum(call["repeated_verification_without_mutation"] for call in calls),
             "phase_observed_span_ms": {phase: _union_ms(intervals) for phase, intervals in sorted(phase_intervals.items())},
             "observed_call_span_ms": observed_tool_ms,
+            # Exact only when the transcript contains assistant
+            # message_start/end timestamps. Tool execution events themselves
+            # have no timestamps; their reported duration is kept separate.
+            "model_time_ms": _union_ms(model_intervals),
+            "model_requests": model_responses + len(model_starts),
+            "model_responses": model_responses,
+            "model_error_requests": model_error_requests,
+            "tool_reported_time_ms": sum(
+                call["tool_reported_duration_ms"] for call in reported_tool_calls
+            ),
+            "blocked_action_observed_span_ms": sum(
+                call["observed_span_ms"] or 0 for call in blocked_calls
+            ),
+            "tool_output_bytes": sum(call["output_bytes"] for call in sized_calls),
+            "tool_output_lines": sum(call["output_lines"] for call in sized_calls),
+            "tool_outputs_with_sizes": len(sized_calls),
+            "truncated_tool_outputs": sum(
+                call["output_truncated"] is True for call in sized_calls
+            ),
             "wall_time_ms": wall_time_ms,
             "unattributed_wall_time_ms": max(0, wall_time_ms - observed_tool_ms) if wall_time_ms is not None else None,
             "time_to_first_mutation_ms": first_mutation["end_offset_ms"] if first_mutation else None,
