@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { footerTier, LAYOUT_COLUMNS, type Layout } from "../shared/layout.ts";
+import { footerTier, LAYOUT_COLUMNS } from "../shared/layout.ts";
 import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
 import { crop } from "./layout.ts";
 import {
@@ -449,68 +449,6 @@ function padToWidth(value: string, width: number): string {
   return `${value}${" ".repeat(Math.max(0, width - visibleWidth(value)))}`;
 }
 
-/**
- * Renders lifecycle metadata only. Aurora deliberately does not re-register or
- * wrap tools, so argument validation, execution, cancellation, updates and
- * results continue to be handled exactly by Pi's core tool definitions.
- */
-export type ToolEventStatus = "queued" | "running" | "completed" | "failed";
-
-export interface ToolEventView {
-  id: string;
-  name: string;
-  kind?: ActivityToolKind;
-  target?: string;
-  status: ToolEventStatus;
-}
-
-function eventStatusGlyph(status: ToolEventStatus): string {
-  switch (status) {
-    case "queued":
-      return "○";
-    case "running":
-      return "●";
-    case "failed":
-      return "✕";
-    case "completed":
-      return "✓";
-  }
-}
-
-function eventStatusTone(
-  status: ToolEventStatus,
-): "muted" | "accent" | "error" | "success" {
-  switch (status) {
-    case "queued":
-      return "muted";
-    case "running":
-      return "accent";
-    case "failed":
-      return "error";
-    case "completed":
-      return "success";
-  }
-}
-
-/** Compact persistent rows; full payloads remain available through existing details. */
-export function renderToolEventRows(
-  events: readonly ToolEventView[],
-  theme: Theme,
-  width: number,
-  limit = 6,
-): string[] {
-  const available = Math.max(1, width);
-  return events.slice(-limit).map((event) => {
-    const kind = event.kind ?? classifyTool(event.name, undefined);
-    const label = PRESENTATIONS[kind].label;
-    const target = event.target ? ` ${event.target}` : "";
-    return crop(
-      `${theme.fg(eventStatusTone(event.status), eventStatusGlyph(event.status))} ${theme.bold(label)}${theme.fg("muted", target)}`,
-      available,
-    );
-  });
-}
-
 export function renderActiveTools(
   tools: readonly ActiveToolView[],
   theme: Theme,
@@ -893,33 +831,9 @@ export function renderTaskWorkspace(
 
 export interface DashboardInput {
   activityLines: readonly string[];
-  eventLines?: readonly string[];
   maxRows: number;
   compact?: boolean;
 }
-
-/** The runtime signals auto mode needs beyond the task view model itself. */
-export interface AutoDashboardInput {
-  activityLines: readonly string[];
-  eventLines?: readonly string[];
-  layout: Layout;
-  /** At least one tool or subagent is running right now. */
-  hasActiveWork: boolean;
-  /** A completed check no longer describes the workspace (mutation since). */
-  verificationStale: boolean;
-  /** Any verification status is known for this session (a check ran). */
-  verificationKnown: boolean;
-}
-
-/** Row budget for the responsive default dashboard. The regular presentation
- * stays short enough to leave the editor dominant; compact terminals keep the
- * one-line summary plus the most important state. */
-const AUTO_MAX_ROWS: Record<Layout, number> = {
-  compact: 2,
-  standard: 7,
-  comfortable: 7,
-  wide: 7,
-};
 
 /** The one "first 3 files, then a +N indicator" rule, shared by every
  * changed-files preview so the auto and expanded dashboards never disagree
@@ -978,8 +892,8 @@ function buildActivityTile(
     badge: input.activityLines.length > 0 ? "LÄUFT" : "BEREIT",
     tone: input.activityLines.length > 0 ? "accent" : "muted",
     lines:
-      input.activityLines.length > 0 || (input.eventLines?.length ?? 0) > 0
-        ? [...input.activityLines, ...(input.eventLines ?? [])]
+      input.activityLines.length > 0
+        ? [...input.activityLines]
         : [
             theme.fg(
               "muted",
@@ -1044,13 +958,18 @@ function layoutDashboardTiles(
   bareVerificationTile: TileInput,
   hasFailure: boolean,
   grid: boolean,
+  prioritizeActivity: boolean,
   maxRows: number,
 ): TileInput[][] {
-  const ordered = (
-    hasFailure
-      ? [taskTile, verificationTile, activityTile, changesTile]
-      : [taskTile, activityTile, changesTile, verificationTile]
-  ).filter((tile): tile is TileInput => tile !== null);
+  const normalOrder = prioritizeActivity
+    ? [activityTile, taskTile, changesTile, verificationTile]
+    : [taskTile, activityTile, changesTile, verificationTile];
+  const failureOrder = prioritizeActivity
+    ? [verificationTile, activityTile, taskTile, changesTile]
+    : [taskTile, verificationTile, activityTile, changesTile];
+  const ordered = (hasFailure ? failureOrder : normalOrder).filter(
+    (tile): tile is TileInput => tile !== null,
+  );
   let groups: TileInput[][] = grid
     ? ordered.reduce<TileInput[][]>((pairs, tile, index) => {
         if (index % 2 === 0) pairs.push([tile]);
@@ -1175,53 +1094,11 @@ export function renderDashboard(
     bareVerificationTile,
     hasFailure,
     grid,
+    input.activityLines.length > 0,
     input.maxRows,
   );
   if (chosen.length === 0) return renderTile(theme, available, taskTile);
   return chosen.flatMap((group) =>
     renderTileGrid(theme, available, group, grid ? 2 : 1),
   );
-}
-
-/**
- * The new TUI's workspace. Session identity and lifecycle state belong to the
- * fixed header panel; this surface only carries live and recent event rows, so
- * it cannot disagree with the panel by re-deriving a status. A framed stream
- * restores the lost visual grouping without duplicating the session card.
- */
-export function renderAutoDashboard(
-  task: TaskViewModel,
-  theme: Theme,
-  width: number,
-  input: AutoDashboardInput,
-): string[] {
-  const available = Math.max(1, width);
-  const budget = AUTO_MAX_ROWS[input.layout];
-  const activityLines = input.hasActiveWork ? input.activityLines : [];
-  const eventLines = input.eventLines ?? [];
-  // `task` remains part of the signature for callers that construct the
-  // workspace from the shared projection; the workspace deliberately does not
-  // render it because the fixed Session panel already owns that identity.
-  void task;
-  const contentBudget =
-    input.layout === "compact" ? budget : Math.max(1, budget - 2);
-  const visibleActivity = activityLines.slice(0, contentBudget);
-  const eventBudget = Math.max(0, contentBudget - visibleActivity.length);
-  const content = [...visibleActivity, ...eventLines.slice(-eventBudget)].map(
-    (line) => crop(line, available),
-  );
-
-  // Compact terminals cannot afford the two frame rows. Standard and larger
-  // terminals get a single activity surface: the header owns the task and
-  // lifecycle, while this frame makes live work and recent tools read as one
-  // intentional visual unit again.
-  if (input.layout === "compact") return content;
-
-  if (content.length === 0) return [];
-  return renderTile(theme, available, {
-    title: "AKTIVITÄT",
-    badge: input.hasActiveWork ? "LIVE" : "VERLAUF",
-    tone: input.hasActiveWork ? "accent" : "muted",
-    lines: content,
-  });
 }

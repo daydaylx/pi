@@ -37,21 +37,21 @@ schreibt die Wahl in die globale setup.json zurück und meldet Fehler statt sie
 stillschweigend zu verwerfen.
 
 **Auto ist die responsive permanente Standardansicht**
-(`renderAutoDashboard()`): Eine frische Sitzung zeigt zunächst den Startscreen;
-danach bleibt eine kompakte Sitzungsübersicht mit Aufgabe, Aktivität,
-Änderungen und Prüfung auch im Leerlauf sichtbar. Fehlgeschlagene bzw.
-veraltete Prüfungen stehen vor Routinedaten. Kleine Terminals bekommen
-höchstens zwei ungerahmte Zeilen mit sichtbarem Risiko. `compact` bleibt hart
-≤2 Zeilen, `hidden` gibt den Platz komplett zurück, ohne Runtime-State zu
-deaktivieren; `expanded` behält die Paneldarstellung innerhalb eines getesteten
-Höhenbudgets (~40 % der Terminalzeilen).
+(`renderDashboard()`): Eine frische Sitzung zeigt zunächst den Startscreen;
+danach bleibt die frühere gerahmte Vier-Kachel-Übersicht mit Aufgabe,
+Aktivität, Änderungen und Prüfung auch im Leerlauf sichtbar. Fehlgeschlagene
+bzw. veraltete Prüfungen stehen vor Routinedaten, laufende Tools stehen in der
+Aktivitätskachel. Kleine Terminals bekommen höchstens zwei ungerahmte Zeilen;
+`compact` bleibt hart ≤2 Zeilen, `hidden` gibt den Platz komplett zurück, ohne
+Runtime-State zu deaktivieren; `auto` und `expanded` nutzen ein adaptives
+Höhenbudget bis etwa 40 % der Terminalzeilen.
 
-**Informationsbesitz:** Routine-`verified` gehört jeder sichtbaren
-Dashboardansicht, die eine Prüfzeile ausgibt — der Footer unterdrückt es dort
-(`dashboardVisible`), failed/stale bleiben kritische Footer-Risiken. Im
-zweizeiligen Auto-Fallback mit laufender Arbeit beansprucht Aktivität diese
-Zeile; der Footer zeigt den Routineerfolg dann weiterhin. Der Fortschrittsbalken
-existiert nur noch im Expanded-Modus.
+**Informationsbesitz:** Der Footer zeigt den aktiven Workflow-Modus immer;
+`dashboardVisible` steuert nur noch, ob die sichtbare Dashboardansicht einen
+Routine-`verified`-Status doppelt melden würde. Failed/stale bleiben kritische
+Footer-Risiken. Laufende Tools gehören ausschließlich in die Aktivitätskachel;
+abgeschlossene Tools verschwinden dort nach ihrem Ende. Der
+Fortschrittsbalken bleibt bei ausreichender Höhe sichtbar.
 Bei genau einem laufenden Tool unterdrückt die Toolzeile den reinen
 `LÄUFT · Xs`-Suffix, den das Heading bereits trägt. Stille Tools melden sich
 neutral (`STILL AKTIV`, danach `Xs ohne neue Ausgabe`) ohne Warnton; nur echte
@@ -76,8 +76,8 @@ ungebaut — eine Optimierung wäre hier unbelegte Komplexität.
 - Kein generiertes View-Model kann `done` mit `UNVERIFIED`/`NOT_READY`
   kombinieren; Regressionstests decken die komplette Zustandsmatrix samt
   Invariante ab (`tests/suites/runtime/aurora-ui.mjs`).
-- Normalsitzungen verbrauchen im Auto-Modus dauerhaft höchstens sieben
-  Dashboard-Zeilen; schmale Terminals fallen auf zwei ungerahmte Zeilen zurück,
+- Normalsitzungen nutzen im Auto-Modus ein adaptives Dashboard-Budget bis 40 %
+  der Terminalhöhe; schmale Terminals fallen auf zwei ungerahmte Zeilen zurück,
   statt die Sitzungsorientierung vollständig auszublenden.
 - Die `/dashboard`-Umschaltung schreibt die globale setup.json — Tests
   redirectieren `PI_CODING_AGENT_DIR` auf ein Wegwerfverzeichnis und pinnen

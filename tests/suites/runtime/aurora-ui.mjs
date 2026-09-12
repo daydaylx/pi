@@ -119,15 +119,14 @@ export const auroraUiSections = {
               ).render(120)
             : [];
         // Auto mode is the responsive default dashboard: resumed sessions skip
-        // the welcome but keep task, activity and verification orientation.
+        // the welcome but keep the restored task/activity tile orientation.
         const autoLines = resumedLines;
         assert(
-          autoLines.length === 0 &&
-            !autoLines.some((line) =>
-              stripAnsi(line).includes("◌ Aktivität"),
-            ) &&
+          autoLines.length > 0 &&
+            autoLines.some((line) => stripAnsi(line).includes("AUFGABE")) &&
+            autoLines.some((line) => stripAnsi(line).includes("AKTIVITÄT")) &&
             !autoLines.some((line) => stripAnsi(line).includes("PI · AURORA")),
-          "a resumed idle session keeps the workspace free of zero-state cards",
+          "a resumed idle session restores the task and activity cards without the welcome",
         );
         await resumedContext.ui.submitSlashCommand("/dashboard expanded");
         const expandedHeaderComponent =
@@ -227,14 +226,14 @@ export const auroraUiSections = {
           const wide = stripAnsi(footer.render(140)[0]);
           const narrow = stripAnsi(footer.render(60)[0]);
 
-          // The fixed Session panel owns workflow identity. The one-line footer
-          // keeps its own status-bar role and therefore starts with model data.
+          // The fixed Session panel and the footer intentionally share the
+          // workflow identity: the footer remains the permanent status anchor.
           assert(
             wide.includes("main-model") &&
               narrow.includes("main-model") &&
-              !wide.includes("Architekturplan") &&
-              !narrow.includes("Architekturplan"),
-            "the footer keeps status-bar metadata without duplicating the session mode",
+              wide.includes("Architekturplan") &&
+              narrow.includes("Architekturplan"),
+            "the footer keeps status-bar metadata and the active session mode",
           );
 
           // The footer renders runtime state, never the wide risk banner the
@@ -411,6 +410,10 @@ export const auroraUiSections = {
           assert(
             compact.includes("Work") && compact.includes("pi"),
             "the compact footer keeps the workflow and final folder name",
+          );
+          assert(
+            line(100, { dashboardVisible: true }).includes("Work"),
+            "the footer keeps workflow identity visible beside the Session panel",
           );
 
           // Risk outranks the tier: these claim space at any width.
@@ -1220,7 +1223,8 @@ export const auroraUiSections = {
             "hiddenActivitySummary compacts the overflow into a single summary line",
           );
 
-          // Completed events are bounded and retain the newest history rows.
+          // Completed tools leave the transient dashboard; the result renderer
+          // remains the source of truth for their final status.
           for (let i = 0; i < 45; i++) {
             await overflowHarness.runHooks(
               "tool_execution_start",
@@ -1254,9 +1258,9 @@ export const auroraUiSections = {
                   .join("\n")
               : "";
           assert(
-            historyRendered.includes("history-44.ts") &&
+            !historyRendered.includes("history-44.ts") &&
               !historyRendered.includes("history-0.ts"),
-            `completed tool history keeps the newest bounded event rows: ${historyRendered}`,
+            `completed tool history is not retained in the live dashboard: ${historyRendered}`,
           );
           await overflowHarness.runHooks("session_shutdown", {}, overflowCtx);
         }
@@ -1941,16 +1945,18 @@ export const auroraUiSections = {
           const autoMode = renderMode();
           assert(
             autoMode.length > 0 &&
-              autoMode.length <= 7 &&
+              autoMode.length <= 11 &&
               !autoMode.some((line) => line.includes("Sitzung")) &&
+              autoMode.some((line) => line.includes("AUFGABE")) &&
+              autoMode.some((line) => line.includes("AKTIVITÄT")) &&
               autoMode.some((line) => line.includes("ARBEITET")) &&
               autoMode.some((line) => line.includes("TEST")),
-            "auto mode keeps flat typed tool rows within budget",
+            "auto mode restores the framed task/activity tile overview within its adaptive budget",
           );
           const lowestStandardAuto = renderMode(52, 14);
           assert(
-            lowestStandardAuto.length <= 7,
-            "auto mode preserves at least half of the smallest standard terminal for editor and footer",
+            lowestStandardAuto.length <= 5,
+            "auto mode adapts the restored tile overview to the smallest standard terminal",
           );
 
           await modeHarness.runHooks("session_shutdown", {}, modeContext);
@@ -2489,9 +2495,9 @@ export const auroraUiSections = {
               lifecycleContext,
             );
             assert(
-              renderActivity().includes("✓ TOOL") ||
-                renderActivity().includes("✓ READ"),
-              "agent_settled keeps completed tool events visible in the workspace",
+              !renderActivity().includes("✓ TOOL") &&
+                !renderActivity().includes("✓ READ"),
+              "agent_settled removes completed tool events from the live workspace",
             );
           } finally {
             Date.now = originalNow;
@@ -2531,7 +2537,6 @@ export const auroraUiSections = {
               renderTaskHeader,
               renderChangingFiles,
               renderDashboard,
-              renderAutoDashboard,
             } = renderersMod;
             const { renderInspectorBox } = inspectorMod;
 
@@ -3138,7 +3143,10 @@ export const auroraUiSections = {
             // threshold (95) the narrower 44/45-column pairing now uses too.
             const runFailedDashboardBudgetMatrix = (width) => {
               for (const maxRows of [5, 6, 7, 8]) {
-                const activityFits = maxRows >= 7;
+                // Live activity is ordered ahead of routine task details in a
+                // tight grid, so the activity tile joins the failed verdict
+                // as soon as their paired row fits.
+                const activityFits = true;
                 const failedDashboard = renderDashboard(
                   {
                     ...tvm,
@@ -3218,9 +3226,9 @@ export const auroraUiSections = {
               "the compact dashboard preserves the current phase in two rows",
             );
 
-            // 8c. Responsive event-stream workspace matrix. Session identity,
-            // verification and changes belong to the fixed panel now.
-            const failedAuto = renderAutoDashboard(
+            // 8c. Responsive restored tile-workspace matrix. The fixed panel
+            // and footer still provide the persistent session identity.
+            const failedAuto = renderDashboard(
               {
                 ...tvm,
                 verification: {
@@ -3232,41 +3240,37 @@ export const auroraUiSections = {
               context.ui.theme,
               100,
               {
-                activityLines: ["ARBEITET · 9s"],
-                eventLines: ["✓ READ README.md"],
-                layout: "standard",
-                hasActiveWork: true,
-                verificationStale: false,
-                verificationKnown: true,
+                activityLines: ["ARBEITET · 9s", "› EXEC · 1s"],
+                maxRows: 11,
               },
             );
             const failedAutoText = failedAuto.map(stripAnsi).join("\n");
             assert(
               failedAutoText.includes("ARBEITET") &&
-                failedAutoText.includes("✓ READ") &&
-                !failedAutoText.includes("Prüfung fehlgeschlagen") &&
+                failedAutoText.includes("AKTIVITÄT") &&
+                failedAutoText.includes("PRÜFUNGEN") &&
+                !failedAutoText.includes("✓ READ") &&
                 !failedAutoText.includes("Sitzung"),
-              "the workspace keeps active and completed tool rows without duplicating panel verdicts",
+              "the workspace keeps live activity inside the restored tile overview",
             );
 
-            const staleAuto = renderAutoDashboard(
+            const staleAuto = renderDashboard(
               { ...tvm, phase: "work", phaseLabel: "Bereit" },
               context.ui.theme,
               100,
               {
                 activityLines: [],
-                layout: "standard",
-                hasActiveWork: false,
-                verificationStale: true,
-                verificationKnown: true,
+                maxRows: 11,
               },
             );
             assert(
-              staleAuto.length === 0,
-              "a stale check consumes no workspace row because it belongs to the session panel",
+              staleAuto.length > 0 &&
+                stripAnsi(staleAuto.join("\n")).includes("AUFGABE") &&
+                stripAnsi(staleAuto.join("\n")).includes("AKTIVITÄT"),
+              "the restored workspace keeps its task and activity tiles when no tool is live",
             );
 
-            const changesAuto = renderAutoDashboard(
+            const changesAuto = renderDashboard(
               {
                 ...tvm,
                 phase: "done",
@@ -3282,49 +3286,37 @@ export const auroraUiSections = {
               100,
               {
                 activityLines: [],
-                layout: "standard",
-                hasActiveWork: false,
-                verificationStale: false,
-                verificationKnown: false,
+                maxRows: 11,
               },
             );
             assert(
-              changesAuto.length === 0,
-              "completed changes consume no workspace row because they belong to the session panel",
+              stripAnsi(changesAuto.join("\n")).includes("ÄNDERUNGEN") &&
+                stripAnsi(changesAuto.join("\n")).includes("src/a.ts"),
+              "the restored workspace keeps the changed-files tile",
             );
 
-            const cleanIdleAuto = renderAutoDashboard(
+            const cleanIdleAuto = renderDashboard(
               { ...tvm, phase: "work", phaseLabel: "Bereit" },
               context.ui.theme,
               100,
               {
                 activityLines: [],
-                layout: "standard",
-                hasActiveWork: false,
-                verificationStale: false,
-                verificationKnown: false,
+                maxRows: 11,
               },
             );
             assert(
-              cleanIdleAuto.length === 0 &&
-                !stripAnsi(cleanIdleAuto.join("\n")).includes(
-                  "Noch keine Änderungen",
-                ) &&
-                !stripAnsi(cleanIdleAuto.join("\n")).includes(
-                  "Noch nicht ausgeführt",
-                ) &&
-                !stripAnsi(cleanIdleAuto.join("\n")).includes(
+              stripAnsi(cleanIdleAuto.join("\n")).includes("AUFGABE") &&
+                stripAnsi(cleanIdleAuto.join("\n")).includes("AKTIVITÄT") &&
+                stripAnsi(cleanIdleAuto.join("\n")).includes(
                   "Bereit für die nächste Aufgabe",
                 ),
-              "an idle session without state keeps the workspace free of zero statements",
+              "an idle session restores the former task and activity tiles",
             );
 
-            const narrowAuto = renderAutoDashboard(tvm, context.ui.theme, 40, {
+            const narrowAuto = renderDashboard(tvm, context.ui.theme, 40, {
               activityLines: ["ARBEITET · 4s", "◌ Lesen README.md"],
-              layout: "compact",
-              hasActiveWork: true,
-              verificationStale: false,
-              verificationKnown: false,
+              maxRows: 2,
+              compact: true,
             });
             const { visibleWidth: cellWidth } = await import(
               pathToFileURL(
@@ -3341,31 +3333,23 @@ export const auroraUiSections = {
             );
 
             // 8d. The two-row fallback never spends a row on a zero statement.
-            const narrowIdleAuto = renderAutoDashboard(
+            const narrowIdleAuto = renderDashboard(
               tvm,
               context.ui.theme,
               40,
               {
                 activityLines: [],
-                layout: "compact",
-                hasActiveWork: false,
-                verificationStale: false,
-                verificationKnown: false,
+                maxRows: 2,
+                compact: true,
               },
             );
             assert(
-              narrowIdleAuto.length === 0 &&
-                !stripAnsi(narrowIdleAuto.join("\n")).includes("ARBEITEN") &&
-                !stripAnsi(narrowIdleAuto.join("\n")).includes(
-                  "Noch nicht ausgeführt",
-                ) &&
-                !stripAnsi(narrowIdleAuto.join("\n")).includes(
-                  "Noch nicht bereit",
-                ),
-              "a small idle terminal keeps the workspace free of zero-state rows",
+              narrowIdleAuto.length === 1 &&
+                stripAnsi(narrowIdleAuto.join("\n")).includes(" · "),
+              "a small idle terminal keeps the former compact task summary",
             );
 
-            const narrowSettledAuto = renderAutoDashboard(
+            const narrowSettledAuto = renderDashboard(
               {
                 ...tvm,
                 verification: { verdict: "READY" },
@@ -3380,17 +3364,15 @@ export const auroraUiSections = {
               40,
               {
                 activityLines: [],
-                layout: "compact",
-                hasActiveWork: false,
-                verificationStale: false,
-                verificationKnown: true,
+                maxRows: 2,
+                compact: true,
               },
             );
             const narrowSettledText = stripAnsi(narrowSettledAuto.join("\n"));
             assert(
-              narrowSettledAuto.length === 0 &&
-                narrowSettledText === "",
-              "a settled workspace stays empty while the fixed panel carries changes and verdict",
+              narrowSettledAuto.length === 1 &&
+                !narrowSettledText.includes("✓"),
+              "a settled workspace keeps the compact phase summary without completed tool history",
             );
 
             // 8b. changesSummary flows into currentWork.changingFiles as the

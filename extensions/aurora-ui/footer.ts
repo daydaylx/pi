@@ -29,9 +29,9 @@ export interface FooterInput {
   /** Captured from ExtensionContext at session start; never read from render I/O. */
   cwd?: string;
   homeDirectory?: string;
-  /** True while a Session panel surface (auto/compact/expanded) is active: it
-   * owns workflow identity and routine verification reporting, so the footer
-   * stops duplicating them. Failed/stale checks stay critical footer risks. */
+  /** True while a Session panel surface (auto/compact/expanded) is active. It
+   * owns routine verification reporting; workflow identity remains visible in
+   * the footer as the permanent status-bar anchor. */
   dashboardVisible?: boolean;
 }
 
@@ -158,23 +158,21 @@ function lspNeedsAttention(state: string): boolean {
 function collectSegments(input: FooterInput, width: number): Segment[] {
   const tier = footerTier(width);
   const segments: Segment[] = [];
-  if (input.dashboardVisible !== true) {
-    segments.push({
-      slot: Slot.workflow,
-      priority: Priority.workflow,
-      text: input.state.workflow.label,
-      tone: "accent",
-      bold: true,
-    });
-  }
   segments.push({
-      slot: Slot.model,
-      priority: Priority.model,
-      // The real runtime model id. Prettifying it into a marketing name would
-      // mean inventing a mapping the runtime never gave us.
-      text: crop(input.state.model.id ?? "kein Modell", MODEL_MAX_COLUMNS),
-      tone: "text",
-    });
+    slot: Slot.workflow,
+    priority: Priority.workflow,
+    text: input.state.workflow.label,
+    tone: "accent",
+    bold: true,
+  });
+  segments.push({
+    slot: Slot.model,
+    priority: Priority.model,
+    // The real runtime model id. Prettifying it into a marketing name would
+    // mean inventing a mapping the runtime never gave us.
+    text: crop(input.state.model.id ?? "kein Modell", MODEL_MAX_COLUMNS),
+    tone: "text",
+  });
 
   if (input.state.model.thinking) {
     segments.push({
@@ -228,7 +226,9 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     if (!ownedByDashboard) {
       segments.push({
         slot: Slot.verification,
-        priority: attention ? Priority.failedVerification : Priority.verification,
+        priority: attention
+          ? Priority.failedVerification
+          : Priority.verification,
         text: `${verification === "verified" ? "✓" : attention ? "⚠" : ""} ${verification}`.trim(),
         tone: verificationTone(verification),
         // Without a dashboard surface owning the verdict, the routine success
@@ -292,7 +292,8 @@ function widthOf(segments: readonly Segment[], pillTier: boolean): number {
       (total, segment) =>
         total + visibleWidth(segment.text) + segmentCells(segment, pillTier),
       0,
-    ) + visibleWidth(STATUS_SEPARATOR) * (segments.length - 1)
+    ) +
+    visibleWidth(STATUS_SEPARATOR) * (segments.length - 1)
   );
 }
 

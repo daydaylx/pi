@@ -3,8 +3,8 @@
 > **Scope:** reines Terminal-UI (CLI/TUI), nicht die Electron-GUI unter
 > `gui/` — siehe `docs/scope-cli-tui-vs-gui.md`.
 
-Aurora UI owns Pi's footer, its fixed Session panel, compact event-stream
-workspace and working indicator while the extension is active. It uses only public extension UI and
+Aurora UI owns Pi's footer, its fixed Session panel, framed task dashboard and
+working indicator while the extension is active. It uses only public extension UI and
 lifecycle hooks. Core tools are not replaced or wrapped, and the editor stays
 Pi's own component: Aurora installs no editor of its own, so editing, history,
 completion, shortcuts and the `editorPaddingX` / `autocompleteMaxVisible`
@@ -28,10 +28,10 @@ MODELL` transition alone.
 
 ## The permanent surfaces
 
-**Footer** (`footer.ts`) — the one permanent status surface, and one line.
-When the Session panel is hidden it also carries the workflow mode; while the
-panel is visible it keeps its status-bar role focused on model, thinking level,
-session folder, context share and verification risks. It drops whole segments
+**Footer** (`footer.ts`) — the one permanent status surface, and one line. It
+always carries the active workflow mode, including beside the Session panel,
+and also reports model, thinking level, session folder, context share and
+verification risks. It drops whole segments
 from the least important end as the terminal narrows. From comfortable width
 on, the workflow (when present) and every risk segment render as filled status
 chips (pills); routine metadata stays flat so the line never turns into a wall
@@ -52,17 +52,20 @@ continuously.
 **Session panel and workspace** (`header.ts`, `tool-renderers.ts`) — the fixed
 panel is rendered above the editor through Pi's existing header slot. Its task,
 mode, status, elapsed time and optional details come from one
-`TaskViewModel`/`AuroraUiState` projection. The widget below it is deliberately
-only a compact event stream, so its rows can be trimmed independently while
-the panel remains fixed. Completed events retain the newest rows when the
-workspace budget is tight.
+`TaskViewModel`/`AuroraUiState` projection. Auto and Expanded restore the former
+framed four-tile overview (`Aufgabe`, `Aktivität`, `Änderungen`, `Prüfungen`)
+with an adaptive height budget; Compact keeps the two-row fallback. The
+activity tile receives only currently running tools and subagents. Completed
+tools disappear from this transient surface and remain available through Pi's
+normal result output.
 
 The single setting `ui.dashboard` in setup.json
 (`auto|compact|expanded|hidden`, default `auto`) still controls the existing
 `/dashboard` command and command-center entry — no new shortcut is introduced:
 
 - **`auto`** is the responsive panel/workspace default. The panel expands only
-  for available details; the workspace shows live activity and recent tools.
+  for available details; the workspace restores the framed tile overview and
+  shows live activity in its activity tile.
 - **`compact`** collapses the panel to its identity/status frame and caps the
   workspace at two rows.
 - **`expanded`** permits the panel's optional goal, current-work, verifier,
@@ -82,9 +85,9 @@ within that session and is skipped for resumed conversations.
 
 This is an intentional historical merge: `bd427d2` introduced the dashboard
 surface, `62b52f8` restored the framed `Sitzung` identity, and `68da993`
-converted the workspace to the current compact event stream. The current
-implementation keeps the new stream and restores the old identity in the
-header slot instead of reinstating the old multi-tile layout.
+temporarily converted the workspace to a compact event stream. The current
+implementation keeps the fixed Session identity and restores the former
+multi-tile workspace around it.
 
 **Visual language** (`tile.ts`) — dashboard, welcome window and inspector
 render as filled cards: framed tiles whose title row and body rows are padded

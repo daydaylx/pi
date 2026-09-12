@@ -33,12 +33,10 @@ import {
   describeToolActivity,
   hiddenActivitySummary,
   renderActiveTools,
-  renderAutoDashboard,
-  renderToolEventRows,
+  renderDashboard,
   renderSubagentBranches,
   type ActiveToolView,
   type SubagentInfo,
-  type ToolEventView,
 } from "./tool-renderers.ts";
 import { renderFooterLines } from "./footer.ts";
 import { renderStartscreen } from "./startscreen.ts";
@@ -46,10 +44,7 @@ import { thinkingLabel, thinkingTone } from "./thinking.ts";
 import { renderHeaderLines, type HeaderActivity } from "./header.ts";
 import { ReceiptAggregator } from "./receipts.ts";
 import { auroraDiagnostics } from "./dev-diagnostics.ts";
-import {
-  projectTaskViewModel,
-  verificationIsStale,
-} from "./task-projection.ts";
+import { projectTaskViewModel } from "./task-projection.ts";
 import type { TaskViewModel } from "./task-view-model.ts";
 import { registerInspectorCommand } from "./inspector-command.ts";
 export {
@@ -444,7 +439,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let dashboardMode: DashboardMode = "auto";
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
-  const completedToolEvents: ToolEventView[] = [];
   let headerActivityOverride: HeaderActivity | undefined;
   const receiptAggregator = new ReceiptAggregator();
   // Presentation-only timestamps: neither is published nor part of Aurora's
@@ -528,7 +522,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   /**
    * The surface above the editor is a fresh-session welcome followed by the
-   * fixed Session panel and compact workspace. It consumes cached runtime values only: rendering
+   * fixed Session panel and adaptive tile workspace. It consumes cached runtime values only: rendering
    * never changes workflow state or asks another system for information.
    */
   function renderActivityWidget(
@@ -562,7 +556,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
     const layout = layoutForSize(width, rows);
     const compact = layout === "compact" || dashboardMode === "compact";
-    const workspaceLayout = dashboardMode === "compact" ? "compact" : layout;
     const now = Date.now();
     const toolViews = [...activeTools.values()];
     const agentViews = currentAgentViews();
@@ -609,10 +602,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       );
       const detailLimit =
         dashboardMode === "auto"
-          ? workspaceLayout === "compact"
+          ? layout === "compact"
             ? 0
             : 3
-          : workspaceLayout === "wide"
+          : layout === "wide"
             ? 3
             : compact
               ? 0
@@ -636,7 +629,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           now,
           {
             compact,
-            wide: workspaceLayout === "wide",
+            wide: layout === "wide",
             limit: visibleToolCount,
             suppressRunningStatus: singleRunningTool,
           },
@@ -661,27 +654,23 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       }
     }
 
-    const hasActiveWork =
-      state.activity.kind !== "idle" ||
-      activeTools.size > 0 ||
-      agentViews.length > 0;
-    // The header owns the session overview in every visible mode. This widget
-    // remains the compact event-stream workspace, so it can scroll/trim
-    // independently without recreating task or workflow state.
-    const lines = renderAutoDashboard(task, theme, width, {
+    const maxRows =
+      dashboardMode === "compact"
+        ? 2
+        : Math.min(
+            layout === "wide"
+              ? 14
+              : layout === "comfortable"
+                ? 11
+                : Math.max(5, Math.min(8, rows - 10)),
+            Math.max(4, Math.floor(rows * 0.4)),
+          );
+    // Auto and expanded share the former framed tile overview. Compact keeps
+    // its two-row fallback, while the activity tile only receives live tools.
+    const lines = renderDashboard(task, theme, width, {
       activityLines,
-      layout: workspaceLayout,
-      hasActiveWork,
-      verificationStale: verificationIsStale(
-        activeTools,
-        workspaceChangedSinceVerification,
-      ),
-      verificationKnown: lastVerificationStatus !== null,
-      eventLines: renderToolEventRows(
-        completedToolEvents,
-        theme,
-        Math.max(1, width - 4),
-      ),
+      maxRows,
+      compact: dashboardMode === "compact" || layout === "compact",
     });
     auroraDiagnostics.recordDashboardRows(lines);
     return lines;
@@ -892,7 +881,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     for (const unsubscribe of busUnsubscribers.splice(0)) unsubscribe();
     pendingRequestId = undefined;
     activeTools.clear();
-    completedToolEvents.length = 0;
     headerActivityOverride = undefined;
     foregroundSubagents.clear();
     asyncSubagents.clear();
@@ -1175,17 +1163,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_execution_end", (event, ctx) => {
-    const tool = activeTools.get(event.toolCallId);
-    if (tool) {
-      completedToolEvents.push({
-        id: tool.id,
-        name: tool.name,
-        kind: tool.kind,
-        target: tool.target,
-        status: event.isError || tool.tone === "error" ? "failed" : "completed",
-      });
-      if (completedToolEvents.length > 40) completedToolEvents.shift();
-    }
     if (event.isError) headerActivityOverride = "error";
     activeTools.delete(event.toolCallId);
     receiptAggregator.recordEnd(

@@ -1102,20 +1102,18 @@ export const uiSections = {
         "paired dashboard tiles consume the entire even terminal width without a right-edge gap",
       );
 
-      const framedWorkspace = renderers.renderAutoDashboard(tvm, theme, 100, {
+      const framedWorkspace = renderers.renderDashboard(tvm, theme, 100, {
         activityLines: ["● ARBEITET · 3s", "› EXEC · 1s"],
-        eventLines: ["✓ READ README.md"],
-        layout: "standard",
-        hasActiveWork: true,
-        verificationStale: false,
-        verificationKnown: false,
+        maxRows: 11,
       });
       assert(
         framedWorkspace.some((line) => stripAnsi(line).includes("╭")) &&
           stripAnsi(framedWorkspace.join("\n")).includes("AKTIVITÄT") &&
-          stripAnsi(framedWorkspace.join("\n")).includes("LIVE") &&
+          stripAnsi(framedWorkspace.join("\n")).includes("AUFGABE") &&
+          stripAnsi(framedWorkspace.join("\n")).includes("ARBEITET") &&
+          !stripAnsi(framedWorkspace.join("\n")).includes("✓ READ") &&
           framedWorkspace.every((line) => visibleWidth(line) === 100),
-        "the standard workspace restores a full-width framed activity stream",
+        "the standard workspace restores the full-width framed tile overview with live activity",
       );
 
       // 3b. The grid threshold sits at `comfortable` (90 cols), not `wide`
