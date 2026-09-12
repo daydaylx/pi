@@ -1184,9 +1184,10 @@ export function renderDashboard(
 }
 
 /**
- * The new TUI's scrollable workspace. Session identity and lifecycle state
- * belong to the fixed header panel; this surface only carries live and recent
- * event rows, so it cannot disagree with the panel by re-deriving a status.
+ * The new TUI's workspace. Session identity and lifecycle state belong to the
+ * fixed header panel; this surface only carries live and recent event rows, so
+ * it cannot disagree with the panel by re-deriving a status. A framed stream
+ * restores the lost visual grouping without duplicating the session card.
  */
 export function renderAutoDashboard(
   task: TaskViewModel,
@@ -1196,17 +1197,31 @@ export function renderAutoDashboard(
 ): string[] {
   const available = Math.max(1, width);
   const budget = AUTO_MAX_ROWS[input.layout];
-  void theme;
   const activityLines = input.hasActiveWork ? input.activityLines : [];
   const eventLines = input.eventLines ?? [];
   // `task` remains part of the signature for callers that construct the
   // workspace from the shared projection; the workspace deliberately does not
   // render it because the fixed Session panel already owns that identity.
   void task;
-  const visibleActivity = activityLines.slice(0, budget);
-  const eventBudget = Math.max(0, budget - visibleActivity.length);
-  return [
-    ...visibleActivity,
-    ...eventLines.slice(-eventBudget),
-  ].map((line) => crop(line, available));
+  const contentBudget =
+    input.layout === "compact" ? budget : Math.max(1, budget - 2);
+  const visibleActivity = activityLines.slice(0, contentBudget);
+  const eventBudget = Math.max(0, contentBudget - visibleActivity.length);
+  const content = [...visibleActivity, ...eventLines.slice(-eventBudget)].map(
+    (line) => crop(line, available),
+  );
+
+  // Compact terminals cannot afford the two frame rows. Standard and larger
+  // terminals get a single activity surface: the header owns the task and
+  // lifecycle, while this frame makes live work and recent tools read as one
+  // intentional visual unit again.
+  if (input.layout === "compact") return content;
+
+  if (content.length === 0) return [];
+  return renderTile(theme, available, {
+    title: "AKTIVITÄT",
+    badge: input.hasActiveWork ? "LIVE" : "VERLAUF",
+    tone: input.hasActiveWork ? "accent" : "muted",
+    lines: content,
+  });
 }

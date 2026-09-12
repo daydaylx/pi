@@ -2,18 +2,12 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { crop } from "./layout.ts";
 import type { AuroraUiState } from "./state.ts";
-import { renderField, renderTile } from "./tile.ts";
+import { renderField, renderPill, renderTile, statusFill } from "./tile.ts";
 import type { TaskViewModel } from "./task-view-model.ts";
 
 /** Presentation input derived from the real runtime activity state. */
 export type HeaderActivity =
-  | "idle"
-  | "thinking"
-  | "running"
-  | "responding"
-  | "waiting"
-  | "done"
-  | "error";
+  "idle" | "thinking" | "running" | "responding" | "waiting" | "done" | "error";
 
 export type SessionPanelMode = "auto" | "compact" | "expanded" | "hidden";
 
@@ -58,12 +52,9 @@ function workflowLabel(state: AuroraUiState): string {
 /** The status is a projection, never a second persisted workflow state. */
 export function sessionStatus(input: SessionPanelInput): SessionStatus {
   if (input.activity === "error") return "error";
-  const activeTurn = [
-    "thinking",
-    "responding",
-    "running",
-    "waiting",
-  ].includes(input.activity);
+  const activeTurn = ["thinking", "responding", "running", "waiting"].includes(
+    input.activity,
+  );
   // A previous failed check is a session risk, but it must not hide current
   // work. The task projection uses the same precedence: active work remains
   // active until the turn is actually idle or settled.
@@ -145,9 +136,10 @@ function renderStatusLine(
     elapsedSeconds !== undefined && status !== "idle"
       ? ` · ${formatElapsed(elapsedSeconds)}`
       : "";
-  return theme.fg(
-    statusTone(status),
+  return renderPill(
+    theme,
     `${statusGlyph(status)} ${statusLabel(status)}${elapsed}`,
+    statusTone(status),
   );
 }
 
@@ -177,8 +169,12 @@ function sessionDetails(
   const lines: string[] = [];
   const subagents = task.subagents ?? [];
   if (subagents.length > 0) {
-    const running = subagents.filter((entry) => entry.status === "running").length;
-    const waiting = subagents.filter((entry) => entry.status === "queued").length;
+    const running = subagents.filter(
+      (entry) => entry.status === "running",
+    ).length;
+    const waiting = subagents.filter(
+      (entry) => entry.status === "queued",
+    ).length;
     const attention = subagents.filter(
       (entry) => entry.status === "needs_attention",
     ).length;
@@ -261,6 +257,7 @@ export function renderHeaderLines(
   const available = Math.max(1, width);
   const mode = input.mode ?? "auto";
   const status = sessionStatus(input);
+  const panelTone = statusTone(status);
   const statusLine = renderStatusLine(theme, status, input.elapsedSeconds);
   const taskTitle =
     input.task?.title ?? input.state.task?.title ?? "Aktuelle Aufgabe";
@@ -275,7 +272,8 @@ export function renderHeaderLines(
           ? ` · ${formatElapsed(input.elapsedSeconds)}`
           : ""
       }`,
-      tone: statusTone(status),
+      tone: panelTone,
+      fill: statusFill(panelTone),
       lines: [],
     });
   }
@@ -302,7 +300,8 @@ export function renderHeaderLines(
   return renderTile(theme, available, {
     title: "Sitzung",
     badge: workflowLabel(input.state),
-    tone: "accent",
+    tone: panelTone,
+    fill: statusFill(panelTone),
     lines: body,
   });
 }

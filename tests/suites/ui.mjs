@@ -878,16 +878,65 @@ export const uiSections = {
         ).href
       );
       const tile = await load("extensions/aurora-ui/tile.ts");
+      const header = await load("extensions/aurora-ui/header.ts");
       const renderers = await load("extensions/aurora-ui/tool-renderers.ts");
       const startscreen = await load("extensions/aurora-ui/startscreen.ts");
       const auroraFooter = await load("extensions/aurora-ui/footer.ts");
-      if (!theme || !tile || !renderers || !startscreen || !auroraFooter)
+      if (
+        !theme ||
+        !tile ||
+        !header ||
+        !renderers ||
+        !startscreen ||
+        !auroraFooter
+      )
         return;
 
       const pendingBg = theme.getBgAnsi("toolPendingBg");
       const successBg = theme.getBgAnsi("toolSuccessBg");
       const errorBg = theme.getBgAnsi("toolErrorBg");
       const selectedBg = theme.getBgAnsi("selectedBg");
+
+      const panelState = {
+        sessionEpoch: "visual-panel-test",
+        workflow: { phase: "work", label: "Work" },
+        permissions: {},
+        lsp: {},
+        model: { id: "aurora-test-model", thinking: "high" },
+        activity: { kind: "tool" },
+        changes: null,
+        verification: null,
+        task: { title: "Visuelles Panel" },
+        subagents: [],
+      };
+      const activePanel = header.renderHeaderLines(theme, 100, {
+        state: panelState,
+        activity: "running",
+        elapsedSeconds: 4,
+        rows: 30,
+      });
+      const verifiedPanel = header.renderHeaderLines(theme, 100, {
+        state: panelState,
+        task: {
+          title: "Visuelles Panel",
+          phase: "done",
+          subagents: [],
+          verification: { verdict: "READY", blockers: [] },
+        },
+        activity: "done",
+        elapsedSeconds: 42,
+        rows: 30,
+      });
+      assert(
+        activePanel.some((line) => line.includes(selectedBg)) &&
+          stripAnsi(activePanel.join("\n")).includes("● ARBEITET · 4s"),
+        "the active session panel uses a filled status chip",
+      );
+      assert(
+        verifiedPanel.some((line) => line.includes(successBg)) &&
+          stripAnsi(verifiedPanel.join("\n")).includes("✓ VERIFIZIERT · 42s"),
+        "the completed session panel uses its semantic success surface",
+      );
 
       // 1. A filled tile is one solid surface: every row has exactly the tile
       // width in cells, and title plus body rows carry the fill background.
@@ -1051,6 +1100,22 @@ export const uiSections = {
       assert(
         wideDashboard.every((line) => visibleWidth(line) === 120),
         "paired dashboard tiles consume the entire even terminal width without a right-edge gap",
+      );
+
+      const framedWorkspace = renderers.renderAutoDashboard(tvm, theme, 100, {
+        activityLines: ["● ARBEITET · 3s", "› EXEC · 1s"],
+        eventLines: ["✓ READ README.md"],
+        layout: "standard",
+        hasActiveWork: true,
+        verificationStale: false,
+        verificationKnown: false,
+      });
+      assert(
+        framedWorkspace.some((line) => stripAnsi(line).includes("╭")) &&
+          stripAnsi(framedWorkspace.join("\n")).includes("AKTIVITÄT") &&
+          stripAnsi(framedWorkspace.join("\n")).includes("LIVE") &&
+          framedWorkspace.every((line) => visibleWidth(line) === 100),
+        "the standard workspace restores a full-width framed activity stream",
       );
 
       // 3b. The grid threshold sits at `comfortable` (90 cols), not `wide`
