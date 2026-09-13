@@ -1849,6 +1849,10 @@ await test("decideBash (headless) allows project-local build/test/lint/typecheck
       "npx vitest run src/foo.test.ts",
       "npx tsc --noEmit",
       "npm exec eslint .",
+      // `--` separates npm's own flags from the executed command's - a
+      // documented npm idiom, and the exact shape observed to slip past
+      // this check in a real headless trial (disa-hard-05).
+      "npm exec -- tsx -e 'console.log(1)'",
     ]) {
       eq(
         permissionPolicy.decideBash("headless", cmd, cwd).action,

@@ -158,9 +158,14 @@ const SHELL_CHAIN_PATTERN = /[;&|`]|\$\(/;
 
 function isHeadlessTrustedNpxInvocation(command: string): boolean {
   if (SHELL_CHAIN_PATTERN.test(command)) return false;
+  // `npm exec -- <bin>` (the `--` separates npm's own flags from the
+  // executed command's, a common and documented npm idiom) was observed to
+  // fall through this check entirely in a real headless trial (disa-hard-05,
+  // `npm exec -- tsx -e '...'`): the bare npm-exec pattern captured "--"
+  // itself as the "binary" name instead of skipping past it to "tsx".
   const match =
     /^\s*npx\s+([\w@/.-]+)/i.exec(command) ??
-    /^\s*npm\s+exec\s+([\w@/.-]+)/i.exec(command);
+    /^\s*npm\s+exec\s+(?:--\s+)?([\w@/.-]+)/i.exec(command);
   const binary = match?.[1];
   return binary !== undefined && HEADLESS_TRUSTED_DEV_BINARIES.has(binary);
 }
