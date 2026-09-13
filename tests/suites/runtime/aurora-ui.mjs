@@ -389,6 +389,29 @@ export const auroraUiSections = {
 
           // The information priority from the UX brief, tier by tier.
           const quiet = { contextPercent: 38 };
+          const changes = {
+            state: {
+              changes: {
+                filesCount: 2,
+                files: ["src/a.ts", "src/b.ts"],
+                linesAdded: 14,
+                linesRemoved: 3,
+              },
+            },
+          };
+          assert(
+            !line(140, quiet).includes("Änderungen"),
+            "the footer stays quiet when no changes are present",
+          );
+          assert(
+            line(140, changes).includes("Änderungen 2") &&
+              line(140, changes).includes("+14/−3"),
+            "the wide footer shows a compact changes summary",
+          );
+          assert(
+            !line(45, changes).includes("Änderungen"),
+            "the compact footer drops routine changes metadata first",
+          );
           assert(
             line(140, quiet).includes("Kontext 38%") &&
               line(140, quiet).includes("HOCH") &&
@@ -3144,14 +3167,7 @@ export const auroraUiSections = {
                 ),
               "the dashboard remains useful after a turn has settled",
             );
-            // Once the task/activity tile merged into one (ADR: task and
-            // activity share a tile), only two tiles remain. From the grid
-            // threshold on they always pair into a single row — a pair costs
-            // its taller member's height, and the first row is never dropped
-            // — so changes always joins there regardless of `maxRows`. Budget
-            // pressure only bites below the grid threshold, where tiles stack
-            // and heights sum.
-            const gridDashboardWithChanges = renderDashboard(
+            const dashboardWithChanges = renderDashboard(
               {
                 ...tvm,
                 changesSummary: {
@@ -3163,43 +3179,14 @@ export const auroraUiSections = {
               },
               context.ui.theme,
               95,
-              { activityLines: [], maxRows: 4 },
+              { activityLines: [], maxRows: 8 },
             );
             assert(
-              gridDashboardWithChanges.some((line) =>
+              !dashboardWithChanges.some((line) =>
                 line.includes("Änderungen"),
               ),
-              "the changes tile joins even a tight budget once tiles pair side by side",
+              "the dashboard no longer renders a separate changes tile",
             );
-            const runStackedChangesDashboardBudgetMatrix = (width) => {
-              for (const maxRows of [5, 6, 7, 8]) {
-                const changesFits = maxRows >= 8;
-                const dashboardWithChanges = renderDashboard(
-                  {
-                    ...tvm,
-                    changesSummary: {
-                      filesCount: 1,
-                      files: ["src/a.ts"],
-                      linesAdded: 1,
-                      linesRemoved: 0,
-                    },
-                  },
-                  context.ui.theme,
-                  width,
-                  { activityLines: [], maxRows },
-                );
-                assert(
-                  dashboardWithChanges.some((line) =>
-                    line.includes("Änderungen"),
-                  ) === changesFits,
-                  `at ${width} stacked cols, the changes tile joins${
-                    changesFits ? "" : " only once"
-                  } the ${maxRows}-row budget${changesFits ? " fits it" : ""}`,
-                );
-              }
-            };
-            runStackedChangesDashboardBudgetMatrix(70);
-            runStackedChangesDashboardBudgetMatrix(60);
             const compactDashboard = renderDashboard(
               tvm,
               context.ui.theme,
@@ -3277,9 +3264,9 @@ export const auroraUiSections = {
               },
             );
             assert(
-              stripAnsi(changesAuto.join("\n")).includes("Änderungen") &&
-                stripAnsi(changesAuto.join("\n")).includes("src/a.ts"),
-              "the restored workspace keeps the changed-files tile",
+              !stripAnsi(changesAuto.join("\n")).includes("Änderungen") &&
+                !stripAnsi(changesAuto.join("\n")).includes("src/a.ts"),
+              "the restored workspace keeps file changes out of the dashboard tile",
             );
 
             const cleanIdleAuto = renderDashboard(

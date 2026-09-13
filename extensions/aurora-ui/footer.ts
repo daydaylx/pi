@@ -57,9 +57,10 @@ const Slot = {
   model: 1,
   thinking: 2,
   folder: 3,
-  context: 4,
-  verification: 5,
-  risk: 6,
+  changes: 4,
+  context: 5,
+  verification: 6,
+  risk: 7,
 } as const;
 
 type Slot = (typeof Slot)[keyof typeof Slot];
@@ -78,10 +79,11 @@ const Priority = {
   exhaustedContext: 4,
   lsp: 5,
   folder: 6,
+  changes: 8,
   model: 7,
-  verification: 8,
-  thinking: 9,
-  context: 10,
+  verification: 9,
+  thinking: 10,
+  context: 11,
 } as const;
 
 type Priority = (typeof Priority)[keyof typeof Priority];
@@ -107,6 +109,7 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.model,
     Slot.thinking,
     Slot.folder,
+    Slot.changes,
     Slot.context,
     Slot.verification,
   ]),
@@ -115,6 +118,7 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.model,
     Slot.thinking,
     Slot.folder,
+    Slot.changes,
     Slot.context,
     Slot.verification,
   ]),
@@ -193,6 +197,15 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
         FOLDER_MAX_COLUMNS[tier],
         input.homeDirectory,
       ),
+      tone: "muted",
+    });
+  }
+
+  if (input.state.changes) {
+    segments.push({
+      slot: Slot.changes,
+      priority: Priority.changes,
+      text: `Änderungen ${input.state.changes.filesCount} · +${input.state.changes.linesAdded}/−${input.state.changes.linesRemoved}`,
       tone: "muted",
     });
   }

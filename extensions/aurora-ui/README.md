@@ -39,8 +39,8 @@ before returning to its normal look, driven by a short-lived timer in
 
 **Footer** (`footer.ts`) — the one permanent status surface, and one line. It
 always carries the active workflow mode, including beside the Session panel,
-and also reports model, thinking level, session folder, context share and
-verification risks. It drops whole segments
+and also reports model, thinking level, session folder, a compact changes
+summary, context share and verification risks. It drops whole segments
 from the least important end as the terminal narrows. From comfortable width
 on, the workflow (when present) and every risk segment render as filled status
 chips (pills); routine metadata stays flat so the line never turns into a wall
@@ -59,9 +59,8 @@ no file. It is called on every frame, so anything else would be paid for
 continuously.
 
 **Dashboard workspace** (`tool-renderers.ts`) — a single framed overview
-rendered above the editor through Pi's widget slot. Auto and Expanded show up
-to two tiles with an adaptive height budget; Compact keeps the two-row
-fallback:
+rendered above the editor through Pi's widget slot. Auto and Expanded show a
+single task/activity tile; Compact keeps the two-row fallback:
 
 - **`Aufgabe`** — task title, optional goal, and live activity in one tile
   (`buildTaskActivityTile()`; task and activity were merged into one card —
@@ -76,7 +75,10 @@ fallback:
   Content lines receive only currently running tools and subagents;
   completed tools disappear from this transient surface and remain available
   through Pi's normal result output.
-- **`Änderungen`** — only shown once `changesSummary` has data.
+- Änderungsdetails werden nicht mehr als eigene Dashboard-Kachel gezeigt;
+  bei vorhandenen Änderungen erscheint stattdessen eine kompakte
+  `Änderungen <Dateien> · +<hinzugefügt>/−<entfernt>`-Zusammenfassung im
+  Footer. Die vollständige Liste bleibt über `/inspect` verfügbar.
 
 There is no dedicated verification tile and no phase-chain progress bar — see
 [decision 024](../../docs/decisions/024-remove-verification-tile-and-phase-chain.md).
@@ -181,8 +183,8 @@ groups feed the task-centric view (`task-projection.ts`) and the inspector:
 
 - `changes` — published by `extensions/diff-viewer/index.ts` after every
   recorded edit/write, aggregated straight from its `ChangeTracker` (real
-  per-file diff stats, never estimated). Drives the Änderungen tile and the
-  Inspector's Changes section.
+  per-file diff stats, never estimated). Drives the compact footer summary and
+  the Inspector's Changes section.
 - `verification` — published by `extensions/setup-core/index.ts` alongside
   its existing `ctx.ui.setStatus("verification", …)` calls. Carries the
   structured per-profile outcome (`declaredRequiredIds`, `requiredOutcomes`,

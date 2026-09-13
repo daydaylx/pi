@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { footerTier, LAYOUT_COLUMNS } from "../shared/layout.ts";
+import { footerTier } from "../shared/layout.ts";
 import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
 import {
   sessionStatus,
@@ -9,12 +9,7 @@ import {
   type HeaderActivity,
 } from "./header.ts";
 import { crop } from "./layout.ts";
-import {
-  renderTile,
-  renderTileGrid,
-  tileHeight,
-  type TileInput,
-} from "./tile.ts";
+import { renderTileGrid, type TileInput } from "./tile.ts";
 import type {
   CurrentWorkViewModel,
   SubagentBranchInfo,
@@ -825,18 +820,6 @@ export interface DashboardInput {
   highlightBadge?: boolean;
 }
 
-/** The one "first 3 files, then a +N indicator" rule, shared by every
- * changed-files preview so the auto and expanded dashboards never disagree
- * on how much detail they show. */
-function summarizeChangedFiles(
-  changes: NonNullable<TaskViewModel["changesSummary"]>,
-  separator: string,
-): string {
-  const files = changes.files.slice(0, 3).join(separator);
-  const more = changes.filesCount > 3 ? `, … +${changes.filesCount - 3}` : "";
-  return `${files}${more}`;
-}
-
 /**
  * The task and its live activity share one tile: the task title/goal barely
  * fills a card on its own, and the two were already reporting the same run
@@ -879,100 +862,18 @@ function buildTaskActivityTile(
   };
 }
 
-function buildChangesTile(
-  theme: Theme,
-  changes: NonNullable<TaskViewModel["changesSummary"]>,
-): TileInput {
-  return {
-    title: "Änderungen",
-    badge: `${changes.filesCount} ${changes.filesCount === 1 ? "DATEI" : "DATEIEN"}`,
-    tone: "accent",
-    lines: [
-      `${theme.fg("success", `+${changes.linesAdded}`)} ${theme.fg("error", `−${changes.linesRemoved}`)}`,
-      theme.fg("muted", summarizeChangedFiles(changes, " · ")),
-    ],
-  };
-}
-
-/** Pairs tiles front-to-back; an odd tile out ends up alone in the last row. */
-function pairFromFront(tiles: readonly TileInput[]): TileInput[][] {
-  return tiles.reduce<TileInput[][]>((pairs, tile, index) => {
-    if (index % 2 === 0) pairs.push([tile]);
-    else pairs[pairs.length - 1]!.push(tile);
-    return pairs;
-  }, []);
-}
-
-/**
- * Pairs tiles into 2-column rows, putting an odd tile out first as its own
- * full-width row instead of last. Leaving the *last* (lowest-priority) tile
- * alone beneath an already-paired row — e.g. PRÜFUNGEN by itself once
- * ÄNDERUNGEN is missing, before anything has been edited yet — made the grid
- * look bottom-heavy; leading with the highest-priority tile full-width reads
- * as a hero row instead.
- */
-function pairForGrid(tiles: readonly TileInput[]): TileInput[][] {
-  if (tiles.length % 2 === 0) return pairFromFront(tiles);
-  return [[tiles[0]!], ...pairFromFront(tiles.slice(1))];
-}
-
-function layoutDashboardTiles(
-  taskActivityTile: TileInput,
-  changesTile: TileInput | null,
-  grid: boolean,
-  maxRows: number,
-): TileInput[][] {
-  const ordered = [taskActivityTile, changesTile].filter(
-    (tile): tile is TileInput => tile !== null,
-  );
-  const groups: TileInput[][] = grid
-    ? pairForGrid(ordered)
-    : ordered.map((tile) => [tile]);
-
-  const groupHeight = (group: TileInput[]): number =>
-    grid
-      ? Math.max(...group.map((tile) => tileHeight(tile)))
-      : group.reduce((sum, tile) => sum + tileHeight(tile), 0);
-
-  const chosen: TileInput[][] = [];
-  let usedRows = 0;
-  for (const group of groups) {
-    const height = groupHeight(group);
-    if (chosen.length > 0 && usedRows + height > maxRows) continue;
-    chosen.push(group);
-    usedRows += height;
-  }
-  return chosen;
-}
-
-/** Whether the dashboard pairs tiles into a 2-column grid at this width. */
-export function dashboardUsesGrid(width: number): boolean {
-  return Math.max(1, width) >= LAYOUT_COLUMNS.comfortable;
-}
-
-/**
- * The real content width a single dashboard tile gets: half the terminal
- * (minus the grid's one gap column) once tiles pair side by side, the full
- * width otherwise. Tile content is built against this width up front instead
- * of the full terminal width, which used to get cropped a second time once
- * `renderTileGrid` split it in half — the first crop then picked the wrong
- * detail (e.g. how much of a path to show) for the space actually available.
- */
+/** The dashboard now has one full-width task/activity tile. */
 export function dashboardTileWidth(width: number): number {
-  const available = Math.max(1, width);
-  return dashboardUsesGrid(available)
-    ? Math.floor((available - 1) / 2)
-    : available;
+  return Math.max(1, width);
 }
 
 /**
  * A persistent session overview composed only from the task projection and
- * current runtime activity. The caller owns row budgeting; this renderer keeps
- * tiles intact instead of truncating a frame halfway through.
+ * current runtime activity. The renderer keeps the task/activity tile intact
+ * instead of truncating a frame halfway through.
  *
- * From `comfortable` width on, tiles are paired side by side (task/activity,
- * changes): a pair costs the height of its taller member, not the sum, so a
- * sufficiently wide terminal sees a two-card row. Below that, tiles stack.
+ * The dashboard contains only the task/activity tile. Changes are reported
+ * compactly in the permanent footer and remain available through inspection.
  */
 export function renderDashboard(
   task: TaskViewModel,
@@ -997,21 +898,5 @@ export function renderDashboard(
   }
 
   const taskActivityTile = buildTaskActivityTile(task, theme, input);
-  const changes = task.changesSummary;
-  const changesTile: TileInput | null = changes
-    ? buildChangesTile(theme, changes)
-    : null;
-
-  const grid = dashboardUsesGrid(available);
-  const chosen = layoutDashboardTiles(
-    taskActivityTile,
-    changesTile,
-    grid,
-    input.maxRows,
-  );
-  if (chosen.length === 0)
-    return renderTile(theme, available, taskActivityTile);
-  return chosen.flatMap((group) =>
-    renderTileGrid(theme, available, group, grid ? 2 : 1),
-  );
+  return renderTileGrid(theme, available, [taskActivityTile]);
 }
