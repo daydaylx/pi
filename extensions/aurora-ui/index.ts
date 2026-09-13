@@ -7,7 +7,7 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import { dashboardOwnsVerification, layoutForSize } from "../shared/layout.ts";
+import { layoutForSize } from "../shared/layout.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { planLocation, readPlan } from "../plan-mode/plan-store.ts";
 import {
@@ -30,6 +30,7 @@ import {
   type AuroraUiSnapshotEvent,
 } from "./state.ts";
 import {
+  dashboardTileWidth,
   describeToolActivity,
   hiddenActivitySummary,
   renderActiveTools,
@@ -41,7 +42,11 @@ import {
 import { renderFooterLines } from "./footer.ts";
 import { renderStartscreen } from "./startscreen.ts";
 import { thinkingLabel, thinkingTone } from "./thinking.ts";
-import { renderHeaderLines, type HeaderActivity } from "./header.ts";
+import {
+  sessionStatus,
+  type HeaderActivity,
+  type SessionStatus,
+} from "./header.ts";
 import { ReceiptAggregator } from "./receipts.ts";
 import { auroraDiagnostics } from "./dev-diagnostics.ts";
 import { projectTaskViewModel } from "./task-projection.ts";
@@ -86,7 +91,6 @@ export {
   renderSubagentBranches,
   renderTaskHeader,
   renderTaskWorkspace,
-  renderVerificationBlock,
 } from "./tool-renderers.ts";
 
 const OWNER = "aurora-ui";
@@ -449,6 +453,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   // an async child remains visible; it does not introduce another activity
   // state or lifecycle source.
   let turnSettledWhileAsync = false;
+  // Flashes the activity tile's badge once when it settles into a new
+  // terminal status, since the ticker stops driving repaints once nothing
+  // is live and would otherwise never clear the highlight on its own.
+  const BADGE_HIGHLIGHT_MS = 1500;
+  let lastSettledStatus: SessionStatus | undefined;
+  let badgeHighlightUntil = 0;
+  let badgeHighlightTimer: ReturnType<typeof setTimeout> | undefined;
 
   function currentAgentViews(): SubagentInfo[] {
     if (fleetDockOwnsSubagents) return [];
@@ -590,6 +601,15 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         ticker?.frame ?? 0,
         presentation.kind,
       );
+      // A running subagent is background tool work — it shares the heading's
+      // spinning cursor kind ("tool") instead of a static dot, so several
+      // parallel agents don't read as frozen while only the heading moves.
+      const subagentGlyph = activityGlyph(
+        theme,
+        ticker?.motion ?? "off",
+        ticker?.frame ?? 0,
+        "tool",
+      );
       const heading = theme.fg(
         presentation.kind === "thinking"
           ? thinkingTone(state.model.thinking)
@@ -625,7 +645,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         ...renderActiveTools(
           toolViews.slice(0, visibleToolCount),
           theme,
-          width - 4,
+          dashboardTileWidth(width) - 4,
           now,
           {
             compact,
@@ -637,8 +657,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         ...renderSubagentBranches(
           task.subagents.slice(0, visibleAgentCount),
           theme,
-          width - 4,
+          dashboardTileWidth(width) - 4,
           visibleAgentCount,
+          subagentGlyph,
         ),
       );
       const hiddenSummary = hiddenActivitySummary(
@@ -667,11 +688,42 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           );
     // Auto and expanded share the former framed tile overview. Compact keeps
     // its two-row fallback, while the activity tile only receives live tools.
-    const lines = renderDashboard(task, theme, width, {
+    // The overall run state — formerly the separate fixed Session panel —
+    // now lives in the activity tile's own badge once nothing is live; while
+    // something is running, the heading line already inside activityLines
+    // carries the detailed status and its elapsed time.
+    const headerActivity = currentHeaderActivity(now);
+    const settledStatus =
+      activityLines.length === 0 && headerActivity.activity
+        ? sessionStatus({ activity: headerActivity.activity, task })
+        : undefined;
+    if (
+      settledStatus &&
+      settledStatus !== "idle" &&
+      settledStatus !== lastSettledStatus
+    ) {
+      badgeHighlightUntil = now + BADGE_HIGHLIGHT_MS;
+      clearTimeout(badgeHighlightTimer);
+      badgeHighlightTimer = setTimeout(
+        () => ticker?.requestRender(),
+        BADGE_HIGHLIGHT_MS,
+      );
+    }
+    lastSettledStatus = settledStatus;
+    const dashboardLines = renderDashboard(task, theme, width, {
       activityLines,
       maxRows,
-      compact: dashboardMode === "compact" || layout === "compact",
+      compact,
+      activity: headerActivity.activity,
+      highlightBadge: now < badgeHighlightUntil,
     });
+    // A leading blank row separates the persistent dashboard from the
+    // scrolling transcript above it; compact mode stays a hard two-row
+    // fallback, so it keeps every row for content instead.
+    const lines =
+      compact || dashboardLines.length === 0
+        ? dashboardLines
+        : ["", ...dashboardLines];
     auroraDiagnostics.recordDashboardRows(lines);
     return lines;
   }
@@ -893,6 +945,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     currentPlanText = undefined;
     lastVerificationStatus = null;
     workspaceChangedSinceVerification = false;
+    clearTimeout(badgeHighlightTimer);
+    badgeHighlightTimer = undefined;
+    lastSettledStatus = undefined;
+    badgeHighlightUntil = 0;
     ticker?.dispose();
     ticker = undefined;
 
@@ -1012,28 +1068,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     ticker = new AnimationTicker(loaded.config.ui.motion, () => {});
 
     const sessionCtx = ctx;
-    ctx.ui.setHeader((headerTui, theme) => ({
-      invalidate() {},
-      dispose() {},
-      render(width: number): string[] {
-        if (
-          !state ||
-          dashboardMode === "hidden" ||
-          (state.activity.kind === "idle" && showStartscreen)
-        )
-          return [];
-        const now = Date.now();
-        const current = currentHeaderActivity(now);
-        return renderHeaderLines(theme, width, {
-          state,
-          task: projectCurrentTask(now),
-          activity: current.activity,
-          elapsedSeconds: current.elapsedSeconds,
-          mode: dashboardMode,
-          rows: headerTui.terminal?.rows ?? 24,
-        });
-      },
-    }));
     ctx.ui.setFooter((tui, theme, footerData) => {
       const detachTicker = ticker!.attach(tui);
       // The footer reports the context share, which moves as the branch grows.
@@ -1059,15 +1093,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
             cwd: sessionCwd,
             homeDirectory: sessionHome,
-            // One shared rule decides whether a visible dashboard surface owns
-            // the routine verification report; the footer stays the escalation
-            // surface for risks either way.
-            dashboardVisible: dashboardOwnsVerification(
-              dashboardMode,
-              width,
-              tui.terminal?.rows ?? 24,
-              state.activity.kind !== "idle" || activeTools.size > 0,
-            ),
+            // No dashboard tile shows verification any more (removed along
+            // with PRÜFUNGEN); the footer is now the sole permanent surface
+            // for routine and failed verification status alike.
           });
         },
       };

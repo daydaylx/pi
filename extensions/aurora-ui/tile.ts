@@ -4,6 +4,16 @@ import type { Tone } from "../shared/ui-theme.ts";
 import { crop } from "./layout.ts";
 
 /**
+ * Below this width a single tile drops its frame entirely and prints
+ * frameless rows instead, as the old panel shell did. `FRAMED_PAIR_MIN_WIDTH`
+ * is derived from it (two tiles plus one gap column) so the two thresholds
+ * can't drift apart the way they once did against the dashboard's own grid
+ * threshold (`LAYOUT_COLUMNS.comfortable` in `tool-renderers.ts`).
+ */
+const FRAMED_MIN_WIDTH = 18;
+const FRAMED_PAIR_MIN_WIDTH = FRAMED_MIN_WIDTH * 2 + 1;
+
+/**
  * The only background fills Aurora ever paints. Pi's public `Theme.bg` accepts
  * exactly these eight tokens, so tiles and pills stay correct in every theme
  * (including `light`) instead of hardcoding ANSI colours. The type is derived
@@ -20,6 +30,8 @@ export interface TileInput {
   fill?: TileFill;
   /** Columns of blank margin between the frame and content, each side. Defaults to 1. */
   padding?: number;
+  /** Briefly flash the badge in reverse video — a status just settled. */
+  emphasizeBadge?: boolean;
 }
 
 /**
@@ -37,34 +49,48 @@ export function statusFill(tone: TileInput["tone"]): TileFill | undefined {
  * A status chip. Loud tones get a filled background (or inverse, since Pi has
  * no warning background token); routine tones stay flat text so a bar of many
  * segments does not turn into a wall of colour.
+ *
+ * `emphasize` briefly reverse-videos the whole chip — the same swap the
+ * `warning` tone already relies on for guaranteed contrast — so a status
+ * that just settled flashes once instead of silently sitting there.
  */
-export function renderPill(theme: Theme, text: string, tone: Tone): string {
-  switch (tone) {
-    case "accent":
-      return theme.bg(
-        "selectedBg",
-        ` ${theme.fg("accent", theme.bold(text))} `,
-      );
-    case "success":
-      return theme.bg("toolSuccessBg", ` ${theme.fg("success", text)} `);
-    case "error":
-      return theme.bg(
-        "toolErrorBg",
-        ` ${theme.fg("error", theme.bold(text))} `,
-      );
-    case "warning":
-      // toolPendingBg looks like the free slot since c72c29f dropped it as the
-      // default card fill, but it isn't: Pi core paints every pending tool-call
-      // box with it (tool-execution.js), and in aurora-night it resolves to the
-      // same value as userMessageBg — a warning chip on it would read as a flat
-      // chat bubble. warning's hue (ochre) also sits only ~9° from accent's
-      // (copper), so a second fill token wouldn't reliably read as distinct
-      // from an accent chip anyway. inverse() gives a theme-independent,
-      // guaranteed fg/bg swap instead.
-      return theme.inverse(` ${theme.fg("warning", text)} `);
-    default:
-      return theme.fg(tone, text);
+export function renderPill(
+  theme: Theme,
+  text: string,
+  tone: Tone,
+  emphasize?: boolean,
+): string {
+  if (tone === "warning") {
+    // toolPendingBg looks like the free slot since c72c29f dropped it as the
+    // default card fill, but it isn't: Pi core paints every pending tool-call
+    // box with it (tool-execution.js), and in aurora-night it resolves to the
+    // same value as userMessageBg — a warning chip on it would read as a flat
+    // chat bubble. warning's hue (ochre) also sits only ~9° from accent's
+    // (copper), so a second fill token wouldn't reliably read as distinct
+    // from an accent chip anyway. inverse() gives a theme-independent,
+    // guaranteed fg/bg swap instead — already the emphasized look, so a
+    // second inversion would just cancel it back out.
+    return theme.inverse(` ${theme.fg("warning", text)} `);
   }
+  const rendered = (() => {
+    switch (tone) {
+      case "accent":
+        return theme.bg(
+          "selectedBg",
+          ` ${theme.fg("accent", theme.bold(text))} `,
+        );
+      case "success":
+        return theme.bg("toolSuccessBg", ` ${theme.fg("success", text)} `);
+      case "error":
+        return theme.bg(
+          "toolErrorBg",
+          ` ${theme.fg("error", theme.bold(text))} `,
+        );
+      default:
+        return theme.fg(tone, text);
+    }
+  })();
+  return emphasize ? theme.inverse(rendered) : rendered;
 }
 
 export interface ShortcutItem {
@@ -174,9 +200,12 @@ function renderTileHeading(
   titleTone: NonNullable<TileInput["tone"]>,
   badgeTone: NonNullable<TileInput["tone"]>,
   width: number,
+  emphasizeBadge?: boolean,
 ): string {
   const available = Math.max(1, width);
-  const renderedBadge = badge ? ` ${renderPill(theme, badge, badgeTone)}` : "";
+  const renderedBadge = badge
+    ? ` ${renderPill(theme, badge, badgeTone, emphasizeBadge)}`
+    : "";
   const titleWidth = Math.max(1, available - visibleWidth(renderedBadge));
   const renderedTitle = crop(
     theme.fg(titleTone, theme.bold(title)),
@@ -192,7 +221,7 @@ export function tileBlankRow(
   fill?: TileFill,
 ): string {
   const available = Math.max(1, width);
-  if (available < 18) return "";
+  if (available < FRAMED_MIN_WIDTH) return "";
   const innerWidth = Math.max(1, available - 4);
   const border = (value: string) => theme.fg("borderMuted", value);
   const content = fill
@@ -237,9 +266,10 @@ export function renderTile(
     titleTone,
     badgeTone,
     titleBudget,
+    input.emphasizeBadge,
   );
 
-  if (available < 18) {
+  if (available < FRAMED_MIN_WIDTH) {
     return [
       crop(heading, available),
       ...input.lines.map((line) => crop(line, available)),
@@ -295,8 +325,7 @@ export function renderTileGrid(
   columns: 1 | 2 = 1,
 ): string[] {
   const available = Math.max(1, width);
-  // Two framed tiles side by side need 2 × 18 columns plus one gap column.
-  const framedPairFits = available >= 37;
+  const framedPairFits = available >= FRAMED_PAIR_MIN_WIDTH;
   if (columns !== 2 || !framedPairFits) {
     return tiles.flatMap((tile) => renderTile(theme, available, tile));
   }

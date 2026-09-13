@@ -20,7 +20,16 @@ are read from the effective central setup configuration (`ui.motion`,
 moving work animates: in `contextual`, active thinking and running tools cycle
 their glyph every 100 ms, while `ANTWORTET` and `WARTET AUF MODELL` keep a fixed
 glyph and repaint once per second for the elapsed time and the `WARTET AUF
-MODELL` transition alone.
+MODELL` transition alone. A running subagent's branch row shares that same
+spinning cursor (`renderSubagentBranches()`'s `runningGlyph` parameter in
+`tool-renderers.ts`) instead of a static dot, so several parallel agents
+don't read as frozen while only the heading moves — see
+[decision 026](../../docs/decisions/026-more-animation-subagents-and-badge-flash.md).
+The same decision adds a one-shot flash: once the activity tile's badge
+settles into a new terminal status (`VERIFIZIERT`/`ABGESCHLOSSEN`/`FEHLER`),
+it briefly renders in reverse video (`TileInput.emphasizeBadge` in `tile.ts`)
+before returning to its normal look, driven by a short-lived timer in
+`index.ts` since the ticker itself stops once nothing is live.
 
 - `contextual`: animated activity indicator.
 - `reduced`: static activity indicator.
@@ -49,45 +58,63 @@ it starts no process, probes neither git nor the LSP, asks no provider and reads
 no file. It is called on every frame, so anything else would be paid for
 continuously.
 
-**Session panel and workspace** (`header.ts`, `tool-renderers.ts`) — the fixed
-panel is rendered above the editor through Pi's existing header slot. Its task,
-mode, status, elapsed time and optional details come from one
-`TaskViewModel`/`AuroraUiState` projection. Auto and Expanded restore the former
-framed four-tile overview (`Aufgabe`, `Aktivität`, `Änderungen`, `Prüfungen`)
-with an adaptive height budget; Compact keeps the two-row fallback. The
-activity tile receives only currently running tools and subagents. Completed
-tools disappear from this transient surface and remain available through Pi's
-normal result output.
+**Dashboard workspace** (`tool-renderers.ts`) — a single framed overview
+rendered above the editor through Pi's widget slot. Auto and Expanded show up
+to two tiles with an adaptive height budget; Compact keeps the two-row
+fallback:
+
+- **`Aufgabe`** — task title, optional goal, and live activity in one tile
+  (`buildTaskActivityTile()`; task and activity were merged into one card —
+  see [decision 025](../../docs/decisions/025-merge-task-and-activity-tile.md) —
+  since the task alone rarely fills a card). While a turn is live, the
+  tile's own heading line already carries the detailed status and its
+  elapsed time, so its badge stays the plain `LÄUFT` marker; once nothing is
+  live, the badge instead shows the settled run state (`VERIFIZIERT`/
+  `ABGESCHLOSSEN`/`FEHLER`/`BEREIT`, from `header.ts`'s pure
+  `sessionStatus`/`statusLabel` projections) instead of a generic `BEREIT` —
+  see [decision 023](../../docs/decisions/023-single-dashboard-surface.md).
+  Content lines receive only currently running tools and subagents;
+  completed tools disappear from this transient surface and remain available
+  through Pi's normal result output.
+- **`Änderungen`** — only shown once `changesSummary` has data.
+
+There is no dedicated verification tile and no phase-chain progress bar — see
+[decision 024](../../docs/decisions/024-remove-verification-tile-and-phase-chain.md).
+Routine and failed verification status live in the footer and in
+`/inspect`'s Verification Evidence section instead.
 
 The single setting `ui.dashboard` in setup.json
 (`auto|compact|expanded|hidden`, default `auto`) still controls the existing
 `/dashboard` command and command-center entry — no new shortcut is introduced:
 
-- **`auto`** is the responsive panel/workspace default. The panel expands only
-  for available details; the workspace restores the framed tile overview and
-  shows live activity in its activity tile.
-- **`compact`** collapses the panel to its identity/status frame and caps the
-  workspace at two rows.
-- **`expanded`** permits the panel's optional goal, current-work, verifier,
-  subagent, test and change fields within the terminal row budget.
-- **`hidden`** hides both fixed surfaces while workflow state, footer risks and
-  the inspector stay alive.
+- **`auto`** is the responsive workspace default: the tile overview shows
+  live activity in its badge and content, with an adaptive height budget.
+- **`compact`** caps the workspace at two rows.
+- **`expanded`** permits the task tile's optional goal within the terminal row
+  budget.
+- **`hidden`** hides the workspace entirely while workflow state, footer risks
+  and the inspector stay alive.
 
 Phase and verification verdict are derived separately but share one staleness
 definition (`verificationIsStale()`): `done` requires idle plus a current
 `READY` check, only a real running verification tool shows `Prüfen`, and active
 work stays `Arbeiten` even after an earlier failed check — see
 [decision 019](../../docs/decisions/019-dashboard-modes-and-phase-precedence.md).
-The fixed panel's status labels and mode badge live in `header.ts`; tile/frame
-primitives remain in `tile.ts`; `index.ts` derives the task and activity
-projection from the existing runtime state. The welcome is never shown again
-within that session and is skipped for resumed conversations.
+The pure run-state projections (`sessionStatus`, `statusLabel`) live in
+`header.ts`; tile/frame primitives remain in `tile.ts`; `index.ts`
+derives the task and activity projection from the existing runtime state. The
+welcome is never shown again within that session and is skipped for resumed
+conversations.
 
-This is an intentional historical merge: `bd427d2` introduced the dashboard
-surface, `62b52f8` restored the framed `Sitzung` identity, and `68da993`
-temporarily converted the workspace to a compact event stream. The current
-implementation keeps the fixed Session identity and restores the former
-multi-tile workspace around it.
+This workspace went through a brief detour: `bd427d2` introduced the dashboard
+surface, `62b52f8` added a second, permanently fixed `Sitzung` panel above it,
+and `68da993` temporarily converted the workspace itself into a compact event
+stream. [Decision 023](../../docs/decisions/023-single-dashboard-surface.md)
+returned to a single dashboard surface — matching decision 019 — folding the
+fixed panel's run-state badge into the (then still separate) activity tile
+instead of keeping two framed surfaces stacked, which cost small terminals
+the most space. [Decision 025](../../docs/decisions/025-merge-task-and-activity-tile.md)
+later merged that activity tile into the task tile.
 
 **Visual language** (`tile.ts`) — dashboard, welcome window and inspector
 render as filled cards: framed tiles whose title row and body rows are padded

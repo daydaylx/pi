@@ -21,6 +21,10 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [020](020-explicit-plan-approval.md) — Ausdrückliche Planfreigabe, sitzungsbezogene Ablage, turnfester Modus
 - [021](021-verifier-dedup-gate.md) — Verifier-Delegationen werden auf unverändertem Fingerprint dedupliziert
 - [022](022-project-write-interpreter-boundary.md) — Project-write fragt bei opakem Code gezielt nach
+- [023](023-single-dashboard-surface.md) — Eine Dashboard-Fläche statt fixem Panel plus Kachel-Grid (bekräftigt 019)
+- [024](024-remove-verification-tile-and-phase-chain.md) — PRÜFUNGEN-Kachel und Phasenkette aus dem Dashboard entfernt
+- [025](025-merge-task-and-activity-tile.md) — Aufgabe- und Aktivität-Kachel zu einer Kachel verschmolzen, Kachel-Titel in normaler Schreibweise
+- [026](026-more-animation-subagents-and-badge-flash.md) — Animierte Subagenten-Zeilen und Badge-Flash bei Statuswechsel
 
 ## Historische, ersetzte Entscheidungen
 

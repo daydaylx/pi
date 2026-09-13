@@ -44,10 +44,7 @@ export function layoutForSize(columns: number, rows: number): Layout {
   if (columns < LAYOUT_COLUMNS.standard || rows < LAYOUT_ROWS.standard)
     return "compact";
   if (columns >= LAYOUT_COLUMNS.wide && rows >= LAYOUT_ROWS.wide) return "wide";
-  if (
-    columns >= LAYOUT_COLUMNS.comfortable &&
-    rows >= LAYOUT_ROWS.comfortable
-  )
+  if (columns >= LAYOUT_COLUMNS.comfortable && rows >= LAYOUT_ROWS.comfortable)
     return "comfortable";
   return "standard";
 }
@@ -66,21 +63,4 @@ export function footerTier(columns: number): Layout {
 /** The outer gap an overlay leaves on every side of the terminal. */
 export function overlayMargin(columns: number, rows: number): 1 | 2 {
   return columns < TIGHT_MARGIN_COLUMNS || rows < LAYOUT_ROWS.standard ? 1 : 2;
-}
-
-/**
- * Whether a visible dashboard surface currently owns the routine verification
- * report, so the footer can stand down for it. `auto` spends its second row on
- * live work on small terminals; in that narrow active state no dashboard row
- * carries the verdict and the footer keeps reporting routine success.
- */
-export function dashboardOwnsVerification(
-  mode: "auto" | "compact" | "expanded" | "hidden",
-  columns: number,
-  rows: number,
-  busy: boolean,
-): boolean {
-  if (mode === "hidden") return false;
-  if (mode === "compact" || mode === "expanded") return true;
-  return !(layoutForSize(columns, rows) === "compact" && busy);
 }

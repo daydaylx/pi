@@ -2,11 +2,16 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { footerTier, LAYOUT_COLUMNS } from "../shared/layout.ts";
 import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
+import {
+  sessionStatus,
+  statusLabel,
+  statusTone,
+  type HeaderActivity,
+} from "./header.ts";
 import { crop } from "./layout.ts";
 import {
   renderTile,
   renderTileGrid,
-  statusFill,
   tileHeight,
   type TileInput,
 } from "./tile.ts";
@@ -15,7 +20,6 @@ import type {
   SubagentBranchInfo,
   TaskPhase,
   TaskViewModel,
-  VerificationViewModel,
 } from "./task-view-model.ts";
 
 /** The compact running marker shared by tool rows. */
@@ -642,7 +646,20 @@ export function renderProgressBar(
     return `${theme.fg("muted", "○")} ${theme.fg("dim", phase.label)}`;
   });
   const separator = theme.fg("borderMuted", " ─ ");
-  return crop(segments.join(separator), width);
+  const full = segments.join(separator);
+  if (visibleWidth(full) <= width) return full;
+
+  // The full label chain doesn't fit: show the glyphs plus only the current
+  // phase's label instead of cutting a label in half mid-word.
+  const glyphs = PHASES.map((_phase, index) =>
+    index < currentIndex
+      ? theme.fg("success", "●")
+      : index === currentIndex
+        ? theme.fg("accent", "●")
+        : theme.fg("muted", "○"),
+  ).join(" ");
+  const current = theme.bold(PHASES[currentIndex]!.label);
+  return crop(`${glyphs}  ${current}`, width);
 }
 
 function branchTone(
@@ -705,6 +722,11 @@ export function renderSubagentBranches(
   theme: Theme,
   width: number,
   limit = 3,
+  /** A pre-coloured, already-animated glyph for "running" rows — the same
+   * spinning cursor the activity heading uses. Falls back to the static
+   * `branchGlyph()` dot when omitted or empty (reduced/off motion, or a
+   * caller that doesn't drive the ticker). */
+  runningGlyph?: string,
 ): string[] {
   if (branches.length === 0) return [];
   const lines: string[] = [];
@@ -715,7 +737,10 @@ export function renderSubagentBranches(
     const isLast = i === visible.length - 1;
     const rail = isLast ? "└─ " : "├─ ";
     const tone = branchTone(branch.status);
-    const glyph = theme.fg(tone, branchGlyph(branch.status));
+    const glyph =
+      branch.status === "running" && runningGlyph
+        ? runningGlyph
+        : theme.fg(tone, branchGlyph(branch.status));
     const label = theme.fg(tone, branchStatusLabel(branch.status));
 
     const header = `${theme.fg("borderMuted", rail)}${theme.bold(branch.agent)} ${glyph} ${label}`;
@@ -731,48 +756,6 @@ export function renderSubagentBranches(
         ),
       );
     }
-  }
-
-  return lines;
-}
-
-export function renderVerificationBlock(
-  verification: VerificationViewModel,
-  theme: Theme,
-  width: number,
-): string[] {
-  const lines: string[] = [];
-  const isReady = verification.verdict === "READY";
-  const isFailed = verification.verdict === "NOT_READY";
-
-  const verdictText = isReady
-    ? `${theme.fg("success", "✓ BEREIT")}`
-    : isFailed
-      ? `${theme.fg("error", "⚠ NICHT BEREIT")}`
-      : `${theme.fg("muted", "○ UNGEPRÜFT")}`;
-
-  lines.push(crop(`${theme.bold("PRÜFUNGEN")} · ${verdictText}`, width));
-
-  for (const criterion of verification.criteria) {
-    const glyph =
-      criterion.status === "passed"
-        ? theme.fg("success", "✓")
-        : criterion.status === "failed"
-          ? theme.fg("error", "✗")
-          : theme.fg("muted", "○");
-    lines.push(crop(` ${glyph} ${criterion.label}`, width));
-  }
-
-  const visibleBlockers = (verification.blockers ?? []).slice(0, 3);
-  for (const blocker of visibleBlockers) {
-    lines.push(crop(` ${theme.fg("error", "Blockiert:")} ${blocker}`, width));
-  }
-  const hiddenBlockerCount =
-    (verification.blockers?.length ?? 0) - visibleBlockers.length;
-  if (hiddenBlockerCount > 0) {
-    lines.push(
-      crop(theme.fg("muted", ` +${hiddenBlockerCount} weitere`), width),
-    );
   }
 
   return lines;
@@ -833,6 +816,13 @@ export interface DashboardInput {
   activityLines: readonly string[];
   maxRows: number;
   compact?: boolean;
+  /** The turn's overall run state, shown as the activity tile's badge only
+   * once nothing is live — folded in from the former separate Session panel
+   * (see ADR 023). */
+  activity?: HeaderActivity;
+  /** True for a short window right after the settled badge changed, so the
+   * caller can flash it once instead of leaving the transition silent. */
+  highlightBadge?: boolean;
 }
 
 /** The one "first 3 files, then a +N indicator" rule, shared by every
@@ -847,52 +837,35 @@ function summarizeChangedFiles(
   return `${files}${more}`;
 }
 
-/** The one verdict check both dashboards gate their failure state on. */
-function verificationFailed(
-  verification: VerificationViewModel | undefined,
-): boolean {
-  return verification?.verdict === "NOT_READY";
-}
-
-/** The one verdict check both dashboards gate their "all clear" state on. */
-function verificationReady(
-  verification: VerificationViewModel | undefined,
-): boolean {
-  return verification?.verdict === "READY";
-}
-
-function buildTaskTile(
-  task: TaskViewModel,
-  theme: Theme,
-  available: number,
-  hasFailure: boolean,
-  showProgress: boolean,
-): TileInput {
-  return {
-    title: "AUFGABE",
-    badge: task.phaseLabel.toUpperCase(),
-    tone: "accent",
-    lines: [
-      theme.bold(task.title),
-      ...(task.goal && !hasFailure ? [theme.fg("muted", task.goal)] : []),
-      ...(showProgress
-        ? [renderProgressBar(task.phase, theme, available - 4)]
-        : []),
-    ],
-  };
-}
-
-function buildActivityTile(
+/**
+ * The task and its live activity share one tile: the task title/goal barely
+ * fills a card on its own, and the two were already reporting the same run
+ * state in adjacent rows before ADR 023 folded that status into a badge.
+ * While something is live, the heading line already pushed into
+ * `activityLines` carries the detailed status and its elapsed time — an
+ * extra status badge here would just repeat it. The badge only takes over
+ * once nothing is live: distinguishing BEREIT from a settled
+ * VERIFIZIERT/ABGESCHLOSSEN/FEHLER, which a generic BEREIT fallback could not.
+ */
+function buildTaskActivityTile(
   task: TaskViewModel,
   theme: Theme,
   input: DashboardInput,
 ): TileInput {
+  const running = input.activityLines.length > 0;
+  const status =
+    !running && input.activity
+      ? sessionStatus({ activity: input.activity, task })
+      : undefined;
   return {
-    title: "AKTIVITÄT",
-    badge: input.activityLines.length > 0 ? "LÄUFT" : "BEREIT",
-    tone: input.activityLines.length > 0 ? "accent" : "muted",
-    lines:
-      input.activityLines.length > 0
+    title: "Aufgabe",
+    badge: status ? statusLabel(status) : running ? "LÄUFT" : "BEREIT",
+    tone: status ? statusTone(status) : running ? "accent" : "muted",
+    emphasizeBadge: !running && input.highlightBadge,
+    lines: [
+      theme.bold(task.title),
+      ...(task.goal ? [theme.fg("muted", task.goal)] : []),
+      ...(running
         ? [...input.activityLines]
         : [
             theme.fg(
@@ -901,7 +874,8 @@ function buildActivityTile(
                 ? "Letzte Aufgabe abgeschlossen."
                 : "Bereit für die nächste Aufgabe.",
             ),
-          ],
+          ]),
+    ],
   };
 }
 
@@ -910,7 +884,7 @@ function buildChangesTile(
   changes: NonNullable<TaskViewModel["changesSummary"]>,
 ): TileInput {
   return {
-    title: "ÄNDERUNGEN",
+    title: "Änderungen",
     badge: `${changes.filesCount} ${changes.filesCount === 1 ? "DATEI" : "DATEIEN"}`,
     tone: "accent",
     lines: [
@@ -920,78 +894,40 @@ function buildChangesTile(
   };
 }
 
-function buildVerificationTile(
-  verification: VerificationViewModel,
-  theme: Theme,
-  available: number,
-  hasFailure: boolean,
-  verificationTone: "success" | "error" | "muted",
-): TileInput {
-  return {
-    title: "PRÜFUNGEN",
-    badge:
-      verification.verdict === "READY"
-        ? "BEREIT"
-        : verification.verdict === "NOT_READY"
-          ? "NICHT BEREIT"
-          : "OFFEN",
-    tone: verificationTone,
-    fill: statusFill(verificationTone),
-    lines: renderVerificationBlock(verification, theme, available - 4).slice(
-      1,
-      hasFailure ? 3 : 2,
-    ),
-  };
+/** Pairs tiles front-to-back; an odd tile out ends up alone in the last row. */
+function pairFromFront(tiles: readonly TileInput[]): TileInput[][] {
+  return tiles.reduce<TileInput[][]>((pairs, tile, index) => {
+    if (index % 2 === 0) pairs.push([tile]);
+    else pairs[pairs.length - 1]!.push(tile);
+    return pairs;
+  }, []);
 }
 
 /**
- * Orders the four dashboard tiles, pairs them into rows (grid) or leaves
- * each in its own row (stacked), demotes an over-budget verification tile to
- * its bare form, then keeps only as many leading rows as `maxRows` affords —
- * a group already chosen is never dropped once its row is committed to.
+ * Pairs tiles into 2-column rows, putting an odd tile out first as its own
+ * full-width row instead of last. Leaving the *last* (lowest-priority) tile
+ * alone beneath an already-paired row — e.g. PRÜFUNGEN by itself once
+ * ÄNDERUNGEN is missing, before anything has been edited yet — made the grid
+ * look bottom-heavy; leading with the highest-priority tile full-width reads
+ * as a hero row instead.
  */
+function pairForGrid(tiles: readonly TileInput[]): TileInput[][] {
+  if (tiles.length % 2 === 0) return pairFromFront(tiles);
+  return [[tiles[0]!], ...pairFromFront(tiles.slice(1))];
+}
+
 function layoutDashboardTiles(
-  taskTile: TileInput,
-  activityTile: TileInput,
+  taskActivityTile: TileInput,
   changesTile: TileInput | null,
-  verificationTile: TileInput | null,
-  bareVerificationTile: TileInput,
-  hasFailure: boolean,
   grid: boolean,
-  prioritizeActivity: boolean,
   maxRows: number,
 ): TileInput[][] {
-  const normalOrder = prioritizeActivity
-    ? [activityTile, taskTile, changesTile, verificationTile]
-    : [taskTile, activityTile, changesTile, verificationTile];
-  const failureOrder = prioritizeActivity
-    ? [verificationTile, activityTile, taskTile, changesTile]
-    : [taskTile, verificationTile, activityTile, changesTile];
-  const ordered = (hasFailure ? failureOrder : normalOrder).filter(
+  const ordered = [taskActivityTile, changesTile].filter(
     (tile): tile is TileInput => tile !== null,
   );
-  let groups: TileInput[][] = grid
-    ? ordered.reduce<TileInput[][]>((pairs, tile, index) => {
-        if (index % 2 === 0) pairs.push([tile]);
-        else pairs[pairs.length - 1]!.push(tile);
-        return pairs;
-      }, [])
+  const groups: TileInput[][] = grid
+    ? pairForGrid(ordered)
     : ordered.map((tile) => [tile]);
-
-  if (hasFailure && verificationTile) {
-    // Stacked tiles pay sequential heights, a paired grid pays the taller
-    // member only — the fallback condition mirrors each layout's real cost.
-    const tooTall = grid
-      ? Math.max(tileHeight(taskTile), tileHeight(verificationTile)) > maxRows
-      : tileHeight(taskTile) + tileHeight(verificationTile) > maxRows;
-    if (tooTall) {
-      groups = groups.map((group) =>
-        group.map((tile) =>
-          tile === verificationTile ? bareVerificationTile : tile,
-        ),
-      );
-    }
-  }
 
   const groupHeight = (group: TileInput[]): number =>
     grid
@@ -1009,15 +945,34 @@ function layoutDashboardTiles(
   return chosen;
 }
 
+/** Whether the dashboard pairs tiles into a 2-column grid at this width. */
+export function dashboardUsesGrid(width: number): boolean {
+  return Math.max(1, width) >= LAYOUT_COLUMNS.comfortable;
+}
+
+/**
+ * The real content width a single dashboard tile gets: half the terminal
+ * (minus the grid's one gap column) once tiles pair side by side, the full
+ * width otherwise. Tile content is built against this width up front instead
+ * of the full terminal width, which used to get cropped a second time once
+ * `renderTileGrid` split it in half — the first crop then picked the wrong
+ * detail (e.g. how much of a path to show) for the space actually available.
+ */
+export function dashboardTileWidth(width: number): number {
+  const available = Math.max(1, width);
+  return dashboardUsesGrid(available)
+    ? Math.floor((available - 1) / 2)
+    : available;
+}
+
 /**
  * A persistent session overview composed only from the task projection and
  * current runtime activity. The caller owns row budgeting; this renderer keeps
  * tiles intact instead of truncating a frame halfway through.
  *
- * From `comfortable` width on, tiles are paired side by side (task + activity,
- * changes + verification): a pair costs the height of its taller member, not
- * the sum, so a sufficiently wide terminal sees a 2×2 card grid. Below that,
- * tiles stack.
+ * From `comfortable` width on, tiles are paired side by side (task/activity,
+ * changes): a pair costs the height of its taller member, not the sum, so a
+ * sufficiently wide terminal sees a two-card row. Below that, tiles stack.
  */
 export function renderDashboard(
   task: TaskViewModel,
@@ -1027,8 +982,6 @@ export function renderDashboard(
 ): string[] {
   const available = Math.max(1, width);
   const compact = input.compact ?? false;
-  const verification = task.verification;
-  const hasFailure = verificationFailed(verification);
 
   if (compact) {
     const lines = [
@@ -1037,67 +990,27 @@ export function renderDashboard(
         available,
       ),
     ];
-    if (hasFailure) {
-      lines.push(
-        crop(theme.fg("error", "⚠ Prüfung fehlgeschlagen"), available),
-      );
-    } else if (input.activityLines[0]) {
+    if (input.activityLines[0]) {
       lines.push(crop(input.activityLines[0], available));
     }
     return lines.slice(0, Math.max(1, input.maxRows));
   }
 
-  const showProgress =
-    !hasFailure && (input.activityLines.length === 0 || input.maxRows > 8);
-  const verificationTone = verificationReady(verification)
-    ? "success"
-    : hasFailure
-      ? "error"
-      : "muted";
-  const taskTile = buildTaskTile(
-    task,
-    theme,
-    available,
-    hasFailure,
-    showProgress,
-  );
-  const activityTile = buildActivityTile(task, theme, input);
+  const taskActivityTile = buildTaskActivityTile(task, theme, input);
   const changes = task.changesSummary;
   const changesTile: TileInput | null = changes
     ? buildChangesTile(theme, changes)
     : null;
-  const verificationTile: TileInput | null = verification
-    ? buildVerificationTile(
-        verification,
-        theme,
-        available,
-        hasFailure,
-        verificationTone,
-      )
-    : null;
-  // At the shortest supported heights the full failure tile no longer fits:
-  // keep the verdict itself visible as a bare card instead of dropping it.
-  const bareVerificationTile: TileInput = {
-    title: "PRÜFUNGEN",
-    badge: "NICHT BEREIT",
-    tone: "error",
-    fill: "toolErrorBg",
-    lines: [],
-  };
 
-  const grid = available >= LAYOUT_COLUMNS.comfortable;
+  const grid = dashboardUsesGrid(available);
   const chosen = layoutDashboardTiles(
-    taskTile,
-    activityTile,
+    taskActivityTile,
     changesTile,
-    verificationTile,
-    bareVerificationTile,
-    hasFailure,
     grid,
-    input.activityLines.length > 0,
     input.maxRows,
   );
-  if (chosen.length === 0) return renderTile(theme, available, taskTile);
+  if (chosen.length === 0)
+    return renderTile(theme, available, taskActivityTile);
   return chosen.flatMap((group) =>
     renderTileGrid(theme, available, group, grid ? 2 : 1),
   );

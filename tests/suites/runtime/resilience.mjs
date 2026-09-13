@@ -663,7 +663,7 @@ export const resilienceSections = {
       await harness.runHooks("session_start", {}, context);
       eq(
         harness.chrome,
-        { footer: 1, editor: 0, widget: 1, header: 1 },
+        { footer: 1, editor: 0, widget: 1, header: 0 },
         "combined stack gives Aurora exclusive ownership of custom chrome",
       );
       eq(
@@ -765,9 +765,14 @@ export const resilienceSections = {
               result?.terminate === true &&
               /nicht verfügbar/.test(result.reason),
           ),
-          "ask_user is capability-blocked before execution in " + mode + " mode",
+          "ask_user is capability-blocked before execution in " +
+            mode +
+            " mode",
         );
-        await nonTui.commands.get("workflow-set")("detailed_plan", contextForMode);
+        await nonTui.commands.get("workflow-set")(
+          "detailed_plan",
+          contextForMode,
+        );
         const blockedBuilds = [];
         for (let attempt = 0; attempt < 2; attempt += 1) {
           blockedBuilds.push(
@@ -786,7 +791,9 @@ export const resilienceSections = {
             blockedBuildDecisions.every(
               (result) => result?.block && result?.terminate === true,
             ),
-          "two blocked builds end their non-interactive batches in " + mode + " mode",
+          "two blocked builds end their non-interactive batches in " +
+            mode +
+            " mode",
         );
         const blockedProfile = await nonTui.runHooks(
           "tool_call",
@@ -800,7 +807,9 @@ export const resilienceSections = {
               result?.terminate === true &&
               /Kein Projekt-Prüfprofil definiert/.test(result.reason),
           ),
-          "missing project profiles are reported before execution in " + mode + " mode",
+          "missing project profiles are reported before execution in " +
+            mode +
+            " mode",
         );
       }
     });
