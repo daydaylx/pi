@@ -6,6 +6,7 @@
  */
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { toWorkspaceRelative } from "../shared/paths.ts";
 
 function extractText(result: {
   content: Array<{ type: string; text?: string }>;
@@ -35,9 +36,20 @@ function plural(count: number, singular: string, pluralForm: string): string {
   return `${count} ${count === 1 ? singular : pluralForm}`;
 }
 
-function summarize(tool: ToolDefinition<any, any, any>, args: unknown, text: string): string {
+function summarize(
+  tool: ToolDefinition<any, any, any>,
+  args: unknown,
+  text: string,
+  cwd?: string,
+): string {
   const lines = outputLines(text);
-  const path = valueAt(args, "path");
+  const rawPath = valueAt(args, "path") ?? valueAt(args, "file_path");
+  const path =
+    typeof rawPath === "string" && rawPath
+      ? cwd
+        ? toWorkspaceRelative(cwd, rawPath)
+        : rawPath
+      : undefined;
   switch (tool.name) {
     case "read": {
       const offset = valueAt(args, "offset");
@@ -53,7 +65,7 @@ function summarize(tool: ToolDefinition<any, any, any>, args: unknown, text: str
           .filter((file): file is string => file !== undefined),
       );
       const scope = path ? ` in ${path}` : "";
-      const pattern = valueAt(args, "pattern");
+      const pattern = valueAt(args, "pattern") ?? valueAt(args, "query");
       const patternLabel = typeof pattern === "string" ? ` „${oneLine(pattern, 32)}"` : "";
       const fileLabel = files.size > 0 ? ` · ${plural(files.size, "Datei", "Dateien")}` : "";
       return `${plural(lines.length, "Treffer", "Treffer")}${fileLabel}${scope}${patternLabel}`;
@@ -92,8 +104,76 @@ function isReusableTextComponent(
   );
 }
 
+function formatCallTarget(toolName: string, args: unknown, cwd?: string): string {
+  const rawPath = valueAt(args, "path") ?? valueAt(args, "file_path");
+  const pathStr =
+    typeof rawPath === "string" && rawPath
+      ? cwd
+        ? toWorkspaceRelative(cwd, rawPath)
+        : rawPath
+      : undefined;
+  switch (toolName) {
+    case "read": {
+      const offset = valueAt(args, "offset");
+      const limit = valueAt(args, "limit");
+      const range =
+        typeof offset === "number"
+          ? `:${offset}${typeof limit === "number" ? `-${offset + limit - 1}` : ""}`
+          : "";
+      return `${pathStr ?? "Datei"}${range}`;
+    }
+    case "write":
+    case "edit":
+      return pathStr ?? "Datei";
+    case "grep": {
+      const pattern = valueAt(args, "pattern") ?? valueAt(args, "query");
+      const patStr = typeof pattern === "string" ? `„${oneLine(pattern, 32)}"` : "";
+      return [patStr, pathStr ? `in ${pathStr}` : ""].filter(Boolean).join(" ");
+    }
+    case "find": {
+      const pattern = valueAt(args, "pattern");
+      return [
+        typeof pattern === "string" ? `„${pattern}"` : "",
+        pathStr ? `in ${pathStr}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
+    case "ls":
+      return pathStr ?? ".";
+    case "bash": {
+      const cmd = valueAt(args, "command");
+      return typeof cmd === "string" ? oneLine(cmd, 60) : "";
+    }
+    default:
+      return pathStr ?? "";
+  }
+}
+
+export function collapseCall(
+  tool: ToolDefinition<any, any, any>,
+  boundCwd?: string,
+): ToolDefinition<any, any, any> {
+  return {
+    ...tool,
+    renderCall(args, theme, context) {
+      const component = isReusableTextComponent(context.lastComponent)
+        ? context.lastComponent
+        : new Text("", 0, 0);
+      const cwd = boundCwd ?? context.cwd;
+      const target = formatCallTarget(tool.name, args, cwd);
+      const targetText = target ? ` ${theme.fg("muted", target)}` : "";
+      component.setText(
+        `${theme.fg("dim", "›")} ${theme.fg("accent", tool.name)}${targetText}`,
+      );
+      return component;
+    },
+  };
+}
+
 export function collapseResult(
   tool: ToolDefinition<any, any, any>,
+  boundCwd?: string,
 ): ToolDefinition<any, any, any> {
   const original = tool.renderResult;
   if (!original) return tool;
@@ -108,16 +188,15 @@ export function collapseResult(
         ? context.lastComponent
         : new Text("", 0, 0);
       const text = extractText(result);
+      const cwd = boundCwd ?? context.cwd;
       const receipt = text
-        ? summarize(tool, context.args, text)
+        ? summarize(tool, context.args, text, cwd)
         : `${tool.label ?? tool.name} · keine Ausgabe`;
       component.setText(
-        theme.fg(
-          "muted",
-          `  ${receipt} · Ctrl+O Details`, 
-        ),
+        `  ${theme.fg("muted", receipt)} ${theme.fg("dim", "· Ctrl+O Details")}`,
       );
       return component;
     },
   };
 }
+

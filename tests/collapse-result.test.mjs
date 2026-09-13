@@ -5,7 +5,7 @@ import { assert, eq, test, counters as summary } from "./shared/assertions.mjs";
 import { createHarness, stripAnsi } from "./shared/harness.mjs";
 import { importModule } from "./shared/jiti-loader.mjs";
 
-const { collapseResult } = await importModule(
+const { collapseCall, collapseResult } = await importModule(
   "extensions/compact-tools/collapse-result.ts",
 );
 const {
@@ -18,6 +18,15 @@ const theme = createHarness().makeContext().ui.theme;
 
 function result(text) {
   return { content: text === undefined ? [] : [{ type: "text", text }] };
+}
+
+function renderCall(name, args, cwd) {
+  const wrapped = collapseCall({ name, label: name.toUpperCase() }, cwd);
+  const component = wrapped.renderCall(args, theme, {
+    lastComponent: undefined,
+    cwd,
+  });
+  return stripAnsi(component.render(200).join("\n"));
 }
 
 function renderReceipt(name, args, text) {
@@ -43,6 +52,58 @@ function renderReceipt(name, args, text) {
     wrapped,
   };
 }
+
+await test("collapsed local tools show a one-line call target", () => {
+  const read = renderCall("read", {
+    path: "src/main.ts",
+    offset: 5,
+    limit: 10,
+  });
+  assert(
+    read.includes("read") && read.includes("src/main.ts:5-14"),
+    "read shows tool name and the requested line range",
+  );
+
+  const grep = renderCall("grep", { pattern: "render", path: "extensions" });
+  assert(
+    grep.includes("render") && grep.includes("extensions"),
+    "grep shows pattern and scope",
+  );
+
+  const find = renderCall("find", { pattern: "*.ts", path: "src" });
+  assert(
+    find.includes("*.ts") && find.includes("src"),
+    "find shows pattern and scope",
+  );
+
+  const ls = renderCall("ls", { path: "docs" });
+  assert(ls.includes("ls") && ls.includes("docs"), "ls shows its scope");
+
+  const write = renderCall("write", { path: "docs/out.md" });
+  assert(
+    write.includes("write") && write.includes("docs/out.md"),
+    "write shows its target file",
+  );
+
+  const longCommand = "a".repeat(40) + " " + "b".repeat(40);
+  const bash = renderCall("bash", { command: longCommand });
+  assert(
+    bash.includes("bash") && bash.includes("…") && !bash.includes(longCommand),
+    "a long bash command is shortened to one line",
+  );
+
+  const cwd = "/workspace/project";
+  const relative = renderCall(
+    "read",
+    { path: "/workspace/project/src/main.ts" },
+    cwd,
+  );
+  assert(
+    relative.includes("src/main.ts") &&
+      !relative.includes("/workspace/project/src/main.ts"),
+    "an absolute path under cwd is shown relative to it",
+  );
+});
 
 await test("collapsed local tools show informative one-line receipts", () => {
   const read = renderReceipt(

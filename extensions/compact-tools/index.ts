@@ -33,7 +33,7 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { collapseResult } from "./collapse-result.ts";
+import { collapseCall, collapseResult } from "./collapse-result.ts";
 import { limitModelFacingToolResult } from "../shared/output-limits.ts";
 
 function limitRoutineModelResult(
@@ -60,35 +60,36 @@ export default function compactToolsExtension(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx: ExtensionContext) => {
     pi.registerTool({
       ...limitRoutineModelResult(
-        collapseResult(createReadToolDefinition(ctx.cwd)),
+        collapseResult(collapseCall(createReadToolDefinition(ctx.cwd), ctx.cwd), ctx.cwd),
       ),
       renderShell: "self",
     });
     pi.registerTool({
       ...limitRoutineModelResult(
-        collapseResult(createGrepToolDefinition(ctx.cwd)),
+        collapseResult(collapseCall(createGrepToolDefinition(ctx.cwd), ctx.cwd), ctx.cwd),
       ),
       renderShell: "self",
     });
     pi.registerTool({
       ...limitRoutineModelResult(
-        collapseResult(createFindToolDefinition(ctx.cwd)),
+        collapseResult(collapseCall(createFindToolDefinition(ctx.cwd), ctx.cwd), ctx.cwd),
       ),
       renderShell: "self",
     });
     pi.registerTool({
       ...limitRoutineModelResult(
-        collapseResult(createLsToolDefinition(ctx.cwd)),
+        collapseResult(collapseCall(createLsToolDefinition(ctx.cwd), ctx.cwd), ctx.cwd),
       ),
       renderShell: "self",
     });
     pi.registerTool({
-      ...collapseResult(createWriteToolDefinition(ctx.cwd)),
+      ...collapseResult(collapseCall(createWriteToolDefinition(ctx.cwd), ctx.cwd), ctx.cwd),
       renderShell: "self",
     });
     pi.registerTool({
-      ...collapseResult(createBashToolDefinition(ctx.cwd)),
+      ...collapseResult(collapseCall(createBashToolDefinition(ctx.cwd), ctx.cwd), ctx.cwd),
       renderShell: "self",
     });
   });
 }
+
