@@ -4,7 +4,7 @@ export type { WorkflowMode } from "./workflow-mode.ts";
 // Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
 // Prompting und Workflow; ausschließlich diese Stufe steuert Tool-Zugriffe.
 export type PermissionLevel =
-  "readonly" | "project-write" | "confirm-all" | "yolo";
+  "readonly" | "project-write" | "confirm-all" | "yolo" | "headless";
 
 export type PermissionState = "DEFAULT" | "MANUAL" | "YOLO_OVERRIDE";
 
@@ -13,6 +13,7 @@ export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
   "project-write": "Projekt schreiben",
   "confirm-all": "Alles bestätigen",
   yolo: "YOLO",
+  headless: "Headless",
 };
 
 export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
@@ -21,7 +22,9 @@ export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
   "project-write":
     "Gewöhnliche Projektänderungen; riskante, destruktive und externe Aktionen bestätigen",
   "confirm-all": "Jede Mutation und jede externe Aktion einzeln bestätigen",
-  yolo: "Temporärer sichtbarer Bypass; harte Secret-, System-, Symlink- und Trust-Grenzen bleiben aktiv",
+  yolo: "Temporärer sichtbarer Bypass; harte Secret-, Symlink- und Trust-Grenzen sowie der Plan-Mode-Schreibschutz bleiben aktiv",
+  headless:
+    "Ohne Bestätigungsdialog (kein TUI-Kanal vorhanden): projektlokale Builds/Tests/Lint/Typecheck erlaubt, jede sonst bestätigungspflichtige Aktion bricht strukturiert ab statt zu fragen",
 };
 
 /**
@@ -53,9 +56,11 @@ export type PermissionRiskStatusValue =
   | "🛡 DEFAULT · READONLY"
   | "🛡 DEFAULT · PROJECT WRITE"
   | "🛡 DEFAULT · CONFIRM ALL"
+  | "🛡 DEFAULT · HEADLESS"
   | "🛡 MANUELL · READONLY"
   | "🛡 MANUELL · PROJECT WRITE"
   | "🛡 MANUELL · CONFIRM ALL"
+  | "🛡 MANUELL · HEADLESS"
   | "⚠ YOLO · TEMPORÄR";
 
 export function permissionRiskStatusValue(
@@ -70,6 +75,8 @@ export function permissionRiskStatusValue(
       return `${prefix} · PROJECT WRITE` as PermissionRiskStatusValue;
     case "confirm-all":
       return `${prefix} · CONFIRM ALL` as PermissionRiskStatusValue;
+    case "headless":
+      return `${prefix} · HEADLESS` as PermissionRiskStatusValue;
     case "yolo":
       return "⚠ YOLO · TEMPORÄR";
   }

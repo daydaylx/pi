@@ -27,7 +27,10 @@ export function permissionWarning(level: PermissionLevel): string | undefined {
     return "CONFIRM ALL aktiv: Jede Mutation und externe Aktion benötigt eine Bestätigung.";
   }
   if (level === "yolo") {
-    return "YOLO temporär aktiv: Rückfragen entfallen; harte Secret-, System-, Symlink- und Trust-Grenzen bleiben aktiv.";
+    return "YOLO temporär aktiv: Rückfragen, Recovery-Gate und Commit-Verifier-Pflicht entfallen, harte System-Bash-Grenzen (sudo, Paketmanager, curl|sh, rm -rf /) sind gelockert; harte Secret-, Symlink-, Trust-Grenzen und der Plan-Mode-Schreibschutz bleiben aktiv.";
+  }
+  if (level === "headless") {
+    return "Headless aktiv: kein Bestätigungsdialog verfügbar. Projektlokale Builds/Tests/Lint/Typecheck sind erlaubt; jede sonst bestätigungspflichtige Aktion bricht strukturiert ab statt zu fragen.";
   }
   return undefined;
 }
@@ -43,7 +46,7 @@ export function decideTool(
   options: { allowOutsideProjectRead?: boolean } = {},
 ): PolicyDecision {
   if (event.toolName === "bash") {
-    if (permissionLevel === "project-write") {
+    if (permissionLevel === "project-write" || permissionLevel === "headless") {
       if (configured.bash === "block") {
         return {
           action: "block",
@@ -51,11 +54,17 @@ export function decideTool(
         };
       }
       if (configured.bash === "ask") {
-        return {
-          action: "ask",
-          reason:
-            "Freier Shell-Zugriff benötigt Bestätigung; nutze für Standardprüfungen das verify-Tool.",
-        };
+        return permissionLevel === "headless"
+          ? {
+              action: "block",
+              reason:
+                "Freier Shell-Zugriff benötigt eine Bestätigung, die im Headless-Modus nicht verfügbar ist; nutze für Standardprüfungen das verify-Tool.",
+            }
+          : {
+              action: "ask",
+              reason:
+                "Freier Shell-Zugriff benötigt Bestätigung; nutze für Standardprüfungen das verify-Tool.",
+            };
       }
     }
     return decideBash(

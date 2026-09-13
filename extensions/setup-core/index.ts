@@ -511,15 +511,24 @@ export default function setupCore(
       // script runner. Keeping the cwd at the agent directory prevents an
       // active repository from replacing npm/package.json or lifecycle hooks.
       try {
+        const agentDir = getAgentDir();
         const result = await exec(spec.command, spec.args, {
-          cwd: getAgentDir(),
+          cwd: agentDir,
           timeout: spec.timeoutMs,
           signal,
         });
         const combined = [result.stdout, result.stderr]
           .filter(Boolean)
           .join("\n");
-        const limited = limitTextOutput(combined || "(keine Ausgabe)");
+        // Phase 2.1: state this unambiguously in every result, success or
+        // failure. This tool by design never runs against the active
+        // project (see the comment above) - a caller must never have to
+        // infer that from context, since mistaking this for a project
+        // check is exactly the confusion project_check exists to prevent.
+        const rootLine = `Geprüfte Wurzel: ${agentDir} (Pi-Setup, NICHT das aktive Projekt ${ctx.cwd}). Für Projektverifikation: project_check.`;
+        const limited = limitTextOutput(
+          `${combined || "(keine Ausgabe)"}\n\n${rootLine}`,
+        );
         if (result.code !== 0 || result.killed) {
           toolError(
             `${limited.text}\n\n(Exit-Code ${result.code === null ? "unbekannt" : result.code}${result.killed ? ", killed" : ""})`,
@@ -529,6 +538,8 @@ export default function setupCore(
           content: [{ type: "text" as const, text: limited.text }],
           details: {
             check: params.check,
+            checkedRoot: agentDir,
+            projectRoot: ctx.cwd,
             exitCode: result.code,
             killed: result.killed,
             ...(limited.truncation ? { truncation: limited.truncation } : {}),
@@ -714,8 +725,14 @@ export default function setupCore(
       const verificationTarget = checkSnapshot
         ? `Prüfstand: Workspace-Snapshot ${checkSnapshot.fingerprint.slice(0, 12)} (versionierter HEAD nicht geprüft)`
         : "Prüfstand: Workspace-Snapshot nicht verfügbar (versionierter HEAD nicht geprüft)";
+      // Phase 2.1: name the actually-used project root explicitly, every
+      // time - never only the profile's own relative `cwd`. A caller cannot
+      // otherwise distinguish "this ran against the intended project" from
+      // "this silently ran somewhere else" without re-deriving ctx.cwd
+      // itself, and this is the one tool guaranteed to always bind to it.
+      const projectRootLine = `Projektwurzel: ${ctx.cwd} (Quelle: ${loaded.source ?? "unbekannt"})`;
       const limited = limitTextOutput(
-        `${text}\n\n${coverageLine(coverage.covered.length, coverage.total, coverage.missing)}\n${verificationTarget}`,
+        `${text}\n\n${coverageLine(coverage.covered.length, coverage.total, coverage.missing)}\n${verificationTarget}\n${projectRootLine}`,
       );
       if (evaluation.blocking) {
         toolError(limited.text);
@@ -723,6 +740,8 @@ export default function setupCore(
       return {
         content: [{ type: "text" as const, text: limited.text }],
         details: {
+          projectRoot: ctx.cwd,
+          configSource: loaded.source ?? null,
           profiles: reports,
           availableProfileIds,
           diagnostics: loaded.diagnostics,

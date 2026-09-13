@@ -123,7 +123,7 @@ export const auroraUiSections = {
         const autoLines = resumedLines;
         assert(
           autoLines.length > 0 &&
-            autoLines.some((line) => stripAnsi(line).includes("Aufgabe")) &&
+            autoLines.some((line) => stripAnsi(line).includes("Aktivität")) &&
             !autoLines.some((line) => stripAnsi(line).includes("PI · AURORA")),
           "a resumed idle session restores the task and activity card without the welcome",
         );
@@ -146,7 +146,7 @@ export const auroraUiSections = {
                 .join("\n")
             : "";
         assert(
-          expandedWorkspace.includes("Aufgabe") &&
+          expandedWorkspace.includes("Aktivität") &&
             !expandedWorkspace.includes("PI · AURORA"),
           "a resumed conversation skips the welcome but shows the restored workspace",
         );
@@ -1314,7 +1314,7 @@ export const auroraUiSections = {
           );
           await subagentHarness.runHooks("agent_settled", {}, subagentContext);
           assert(
-            render().includes("Aufgabe") && !render().includes("async-worker"),
+            render().includes("Aktivität") && !render().includes("async-worker"),
             "the parent completion clears live activity while the task orientation remains",
           );
           await subagentHarness.runHooks("agent_start", {}, subagentContext);
@@ -1359,8 +1359,8 @@ export const auroraUiSections = {
           assert(
             !render().includes("async-worker") &&
               !render().includes("reviewer") &&
-              render().includes("Aufgabe"),
-            "an async completion removes the subagent while keeping the task orientation",
+              render().includes("Aktivität"),
+            "an async completion removes the subagent while keeping the activity orientation",
           );
           eq(rpcRequests, 0, "Aurora never initiates a subagent status RPC");
           await subagentHarness.runHooks(
@@ -1962,7 +1962,7 @@ export const auroraUiSections = {
             autoMode.length > 0 &&
               autoMode.length <= 11 &&
               !autoMode.some((line) => line.includes("Sitzung")) &&
-              autoMode.some((line) => line.includes("Aufgabe")) &&
+              autoMode.some((line) => line.includes("Aktivität")) &&
               autoMode.some((line) => line.includes("ARBEITET")) &&
               autoMode.some((line) => line.includes("TEST")),
             "auto mode restores the framed task/activity tile overview within its adaptive budget",
@@ -3138,7 +3138,7 @@ export const auroraUiSections = {
               { activityLines: [], maxRows: 8 },
             );
             assert(
-              idleDashboard.some((line) => line.includes("Aufgabe")) &&
+              idleDashboard.some((line) => line.includes("Aktivität")) &&
                 idleDashboard.some((line) =>
                   line.includes("Letzte Aufgabe abgeschlossen."),
                 ),
@@ -3236,7 +3236,7 @@ export const auroraUiSections = {
             const failedAutoText = failedAuto.map(stripAnsi).join("\n");
             assert(
               failedAutoText.includes("ARBEITET") &&
-                failedAutoText.includes("Aufgabe") &&
+                failedAutoText.includes("Aktivität") &&
                 !failedAutoText.includes("✓ READ") &&
                 !failedAutoText.includes("Sitzung"),
               "the workspace keeps live activity inside the restored tile overview",
@@ -3253,7 +3253,7 @@ export const auroraUiSections = {
             );
             assert(
               staleAuto.length > 0 &&
-                stripAnsi(staleAuto.join("\n")).includes("Aufgabe"),
+                stripAnsi(staleAuto.join("\n")).includes("Aktivität"),
               "the restored workspace keeps its task and activity tile when no tool is live",
             );
 
@@ -3292,7 +3292,7 @@ export const auroraUiSections = {
               },
             );
             assert(
-              stripAnsi(cleanIdleAuto.join("\n")).includes("Aufgabe") &&
+              stripAnsi(cleanIdleAuto.join("\n")).includes("Aktivität") &&
                 stripAnsi(cleanIdleAuto.join("\n")).includes(
                   "Bereit für die nächste Aufgabe",
                 ),

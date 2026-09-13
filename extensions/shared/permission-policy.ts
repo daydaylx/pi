@@ -91,6 +91,11 @@ const SENSITIVE_ASK_PATTERNS: Array<[RegExp, string]> = [
   ],
 ];
 
+// Named separately (not just inlined in ROUTINE_ASK_PATTERNS) so the
+// headless branch of decideBash can carve out a narrow, positively-listed
+// exception for it without touching every other routine-ask pattern.
+const NPX_LIKE_PATTERN = /\bnpm\s+exec\b|\bnpx\b/i;
+
 // Routinemutationen fragen in project-write nach. confirm-all fragt bereits
 // allgemein; YOLO wird vor dieser Auswertung innerhalb harter Grenzen erlaubt.
 const ROUTINE_ASK_PATTERNS: Array<[RegExp, string]> = [
@@ -108,7 +113,7 @@ const ROUTINE_ASK_PATTERNS: Array<[RegExp, string]> = [
     /\bnpm\s+(?:install|uninstall|update|ci|link|publish)\b/i,
     "npm-Paketoperation",
   ],
-  [/\bnpm\s+exec\b|\bnpx\b/i, "npm-Paketausführung mit möglichem Download"],
+  [NPX_LIKE_PATTERN, "npm-Paketausführung mit möglichem Download"],
   [/\byarn\s+(?:add|remove|install|upgrade|publish)\b/i, "Yarn-Paketoperation"],
   [/\byarn\s+dlx\b/i, "Yarn-Paketausführung mit Download"],
   [/\bpnpm\s+(?:add|remove|install|update|publish)\b/i, "pnpm-Paketoperation"],
@@ -120,6 +125,45 @@ const ROUTINE_ASK_PATTERNS: Array<[RegExp, string]> = [
     "System-Paketoperation",
   ],
 ];
+
+// Phase 2.3 (headless permissions): well-known local dev-tooling binaries.
+// `npx <binary>` / `npm exec <binary>` normally needs confirmation (it CAN
+// silently fetch and run an arbitrary, not-yet-installed package), but a
+// headless benchmark/CI run routinely self-verifies via exactly
+// `npx vitest run <file>` or `npx tsc --noEmit` with no confirm channel
+// available. Narrow, explicit allowlist rather than trusting any binary name.
+const HEADLESS_TRUSTED_DEV_BINARIES = new Set([
+  "vitest",
+  "jest",
+  "tsc",
+  "eslint",
+  "prettier",
+  "playwright",
+  "vite",
+  "biome",
+  "stylelint",
+  "tsx",
+  "ts-node",
+  "mocha",
+  "ava",
+  "knip",
+]);
+
+// A single simple command only - no chaining, substitution or piping. The
+// npx carve-out below must never approve more than the one recognized
+// invocation; a chained tail (`npx vitest && rm important-file`) still has
+// to run the full ROUTINE_ASK_PATTERNS/SENSITIVE_ASK_PATTERNS scan over the
+// whole string, which only happens for commands this rejects here.
+const SHELL_CHAIN_PATTERN = /[;&|`]|\$\(/;
+
+function isHeadlessTrustedNpxInvocation(command: string): boolean {
+  if (SHELL_CHAIN_PATTERN.test(command)) return false;
+  const match =
+    /^\s*npx\s+([\w@/.-]+)/i.exec(command) ??
+    /^\s*npm\s+exec\s+([\w@/.-]+)/i.exec(command);
+  const binary = match?.[1];
+  return binary !== undefined && HEADLESS_TRUSTED_DEV_BINARIES.has(binary);
+}
 
 const WRITE_CAPABLE_PATTERN =
   /\b(?:rm|rmdir|unlink|trash|cp|mv|mkdir|touch|tee|truncate|dd|chmod|chown|chgrp|ln|rsync|install)\b|\bgio\s+trash\b|\bsed\b[^;&|]*\s-i(?:\s|$)|(?:^|[^<])>(?!>)|>>/i;
@@ -338,7 +382,9 @@ export function decideFileAccess(
     isSensitiveReference(rawPath) ||
     isSensitiveReference(scope.absolutePath)
   ) {
-    return isReadRestricted || permissionLevel === "yolo"
+    return isReadRestricted ||
+      permissionLevel === "yolo" ||
+      permissionLevel === "headless"
       ? deny(
           "Harte Grenze: Secrets und SSH-/Credential-Dateien sind blockiert.",
         )
@@ -371,9 +417,11 @@ export function decideFileAccess(
     operation === "write" &&
     isProtectedProjectPath(scope.absolutePath, cwd)
   ) {
-    return permissionLevel === "yolo"
+    return permissionLevel === "yolo" || permissionLevel === "headless"
       ? deny(
-          "Harte Grenze: Ausführungspfad im Projekt wurde in YOLO blockiert.",
+          permissionLevel === "headless"
+            ? `Änderung an einem Ausführungspfad im Projekt benötigt eine Bestätigung, die im Headless-Modus nicht verfügbar ist: ${scope.absolutePath}`
+            : "Harte Grenze: Ausführungspfad im Projekt wurde in YOLO blockiert.",
         )
       : ask(
           `Änderung an einem Ausführungspfad im Projekt: ${scope.absolutePath}`,
@@ -1162,13 +1210,7 @@ const INTERPRETER_PATH_OPTIONS = new Set([
   "--preload",
   "--require",
 ]);
-const SHELL_INTERPRETERS = new Set([
-  "bash",
-  "dash",
-  "ksh",
-  "sh",
-  "zsh",
-]);
+const SHELL_INTERPRETERS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 const REDIRECTED_STDIN_INTERPRETER =
   /(?:^|[|;&\n])\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)(?:env\s+)?(?:\S+\/)?(bash|dash|deno|ksh|lua|node|perl|php|python|python3|ruby|sh|zsh)\b[^|;&\n]*<(?!=)/i;
 
@@ -1231,7 +1273,10 @@ function isProjectInternalInterpreterPath(value: string, cwd: string): boolean {
   return scope.insideProject && !scope.symlinkEscape;
 }
 
-function projectWriteInterpreter(command: string, cwd: string): string | undefined {
+function projectWriteInterpreter(
+  command: string,
+  cwd: string,
+): string | undefined {
   const invocations = opaqueInterpreterInvocations(command);
   for (const { executable, args } of invocations) {
     if (isInlineInterpreter(executable, args) || isStdinInterpreter(args)) {
@@ -1267,15 +1312,21 @@ export function decideBash(
         );
   }
 
+  // headless has no confirm channel at all, so it hard-denies exactly where
+  // yolo does (same branch condition) instead of asking - the class of risk
+  // is identical, only the reachable outcomes differ (bypass vs. no dialog).
+  const noConfirmChannel =
+    permissionLevel === "yolo" || permissionLevel === "headless";
+
   if (isSensitiveReference(trimmed)) {
-    return permissionLevel === "yolo"
+    return noConfirmChannel
       ? deny("Harte Secret-Grenze: Shell-Zugriff wurde blockiert.")
       : ask("Zugriff auf Secrets, Tokens, Credentials oder SSH-Keys", true);
   }
 
   for (const [pattern, reason] of CRITICAL_BASH_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return permissionLevel === "yolo"
+      return noConfirmChannel
         ? deny(`Harte Systemgrenze: ${reason}`)
         : ask(reason, true);
     }
@@ -1288,7 +1339,7 @@ export function decideBash(
       /(?:^|[^<])>(?!>)/.test(trimmed) ||
       />>/.test(trimmed))
   ) {
-    return permissionLevel === "yolo"
+    return noConfirmChannel
       ? deny("Harte Systemgrenze: Änderung am Systempfad wurde blockiert.")
       : ask("Änderung an einem Systempfad", true);
   }
@@ -1338,6 +1389,53 @@ export function decideBash(
       action: "allow",
       reason: "Temporärer YOLO-Bypass innerhalb harter Grenzen",
     };
+  }
+
+  if (permissionLevel === "headless") {
+    // No confirm channel exists at all - every case that would otherwise
+    // `ask()` under project-write resolves to a structured `deny()` instead
+    // (Phase 2.3: "Aktionen, die weiterhin Freigabe benötigen, müssen mit
+    // einem strukturierten Fehler abbrechen"), except the one narrow,
+    // positively-listed carve-out for a project-local dev-tooling `npx`/
+    // `npm exec` invocation. Plain `npm run <script>` needs no carve-out: it
+    // already reaches the unconditional ALLOW at the end of this function,
+    // the same as it does under project-write.
+    const noConfirmReason = (base: string) =>
+      `${base}: benötigt eine Bestätigung, die im Headless-Modus nicht verfügbar ist.`;
+    for (const [pattern, reason] of SENSITIVE_ASK_PATTERNS) {
+      if (pattern.test(trimmed)) return deny(noConfirmReason(reason));
+    }
+    for (const [pattern, reason] of ROUTINE_ASK_PATTERNS) {
+      if (!pattern.test(trimmed)) continue;
+      if (
+        pattern === NPX_LIKE_PATTERN &&
+        isHeadlessTrustedNpxInvocation(trimmed)
+      ) {
+        continue;
+      }
+      return deny(noConfirmReason(reason));
+    }
+    if (containsUnquotedVariableExpansion(trimmed)) {
+      return deny(
+        noConfirmReason(
+          "Eine unquotierte Shell-Variable kann außerhalb des Projekts auflösen",
+        ),
+      );
+    }
+    if (likelyExternalWrite(trimmed, cwd)) {
+      return deny(
+        noConfirmReason("Bash-Änderung außerhalb des aktuellen Projekts"),
+      );
+    }
+    const interpreter = projectWriteInterpreter(trimmed, cwd);
+    if (interpreter) {
+      return deny(
+        noConfirmReason(
+          `Opaker Interpreteraufruf (${interpreter}) - Inline-/stdin-Code oder ein externes Skript`,
+        ),
+      );
+    }
+    return ALLOW;
   }
 
   for (const [pattern, reason] of SENSITIVE_ASK_PATTERNS) {

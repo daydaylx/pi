@@ -17,7 +17,7 @@ import { PLAN_WRITE_TOOL_NAME } from "../plan-mode/plan-tool.ts";
 import { toolPath } from "./tool-event.ts";
 
 /**
- * The hard boundaries that hold at every permission level, YOLO included.
+ * The hard boundaries that hold at every permission level.
  *
  * This module answers one question: must the action be refused outright? How
  * a permitted action is then handled — allowed, confirmed or blocked — belongs
@@ -25,6 +25,14 @@ import { toolPath } from "./tool-event.ts";
  * shared/permission-policy.ts. The finer classification this file used to
  * compute fed the permission-grant dialog and has had no reader since that
  * dialog was removed.
+ *
+ * Secret/credential references and the project/symlink escape boundary hold
+ * even under YOLO — those protect against irreversible data exposure, not
+ * against a confirmation dialog. The system-level shell boundaries (elevated
+ * rights, system package operations, download-to-shell, root wipe) are
+ * YOLO's actual bypass surface: a deliberate, narrower risk than Claude
+ * Code's own bypass-permissions mode takes for granted, so YOLO here mirrors
+ * that model instead of re-litigating each command by hand.
  */
 export interface WorkflowAssessment {
   blocked: boolean;
@@ -78,6 +86,19 @@ const UNIVERSAL_READ_TOOLS = new Set([
 const UNKNOWN_WORKFLOW_REASON =
   "Workflow-Zustand nicht verfügbar: Keine Workflow-Extension hat den aktuellen Modus gemeldet. Solange unklar ist, ob geplant oder gearbeitet wird, bleiben mutierende und nicht nachweislich lesende Tools gesperrt (fail-closed). Prüfe, ob extensions/plan-mode/index.ts geladen ist.";
 
+/**
+ * Appended to every hard-boundary block reason. A single denied read (a
+ * skill file outside the project, a runtime doc, a symlink escape) is
+ * recoverable — the agent should keep working without that one resource,
+ * not treat it as a reason to abandon the whole task. Observed regression:
+ * disa-hard-06 trial 1 ended the entire run after exactly one blocked read
+ * of an out-of-project SKILL.md, even though the tool returned a normal,
+ * structured error. This hint cannot force model behavior, only reduce the
+ * chance of it recurring.
+ */
+const HARD_BOUNDARY_RECOVERY_HINT =
+  " Dies ist kein Abbruchgrund - arbeite ohne diese Ressource weiter oder wähle einen projektinternen Pfad.";
+
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 const PERMITTED_RUNTIME_DOCS_READ: WorkflowAssessment = {
   blocked: false,
@@ -114,9 +135,11 @@ function isDocumentedRuntimeDocsRead(
   );
 }
 
-function hardBash(command: string): string | undefined {
-  if (isSensitiveReference(command))
-    return "Harte Secret- oder Credential-Grenze";
+/**
+ * System-level boundaries only — not the secret/credential check, which
+ * `assessBash` applies unconditionally regardless of permission level.
+ */
+function hardSystemBash(command: string): string | undefined {
   if (/\b(?:sudo|su)\b/i.test(command)) return "Harte Grenze: erhöhte Rechte";
   if (
     /\b(?:apt|apt-get|dnf|yum|pacman|zypper|brew)\s+(?:install|remove|purge|update|upgrade)\b/i.test(
@@ -135,18 +158,31 @@ function hardBash(command: string): string | undefined {
   return undefined;
 }
 
-export function assessBash(command: string): WorkflowAssessment {
-  const hard = hardBash(command);
+/**
+ * `permissionLevel` is optional so call sites that only ever run outside
+ * YOLO (or don't care) can omit it; omitting it never widens what is
+ * blocked, only `"yolo"` explicitly does.
+ */
+export function assessBash(
+  command: string,
+  permissionLevel?: PermissionLevel,
+): WorkflowAssessment {
+  if (isSensitiveReference(command))
+    return { blocked: true, reason: "Harte Secret- oder Credential-Grenze" };
+  if (permissionLevel === "yolo") return PERMITTED;
+  const hard = hardSystemBash(command);
   return hard ? { blocked: true, reason: hard } : PERMITTED;
 }
 
 export function assessWorkflowTool(
   event: ToolCallEvent,
   cwd: string,
+  permissionLevel?: PermissionLevel,
 ): WorkflowAssessment {
   if (event.toolName === "bash")
     return assessBash(
       String((event.input as Record<string, unknown>).command ?? ""),
+      permissionLevel,
     );
   const path = toolPath(event);
   if (path) {
@@ -154,7 +190,9 @@ export function assessWorkflowTool(
     if (isSensitiveReference(path) || scope.symlinkEscape) {
       return {
         blocked: true,
-        reason: "Harte Projekt-, Symlink- oder Secret-Grenze",
+        reason:
+          "Harte Projekt-, Symlink- oder Secret-Grenze." +
+          HARD_BOUNDARY_RECOVERY_HINT,
       };
     }
     const outsideProject = !inside(resolve(cwd), scope.absolutePath);
@@ -164,7 +202,9 @@ export function assessWorkflowTool(
       }
       return {
         blocked: true,
-        reason: "Harte Projekt-, Symlink- oder Secret-Grenze",
+        reason:
+          "Harte Projekt-, Symlink- oder Secret-Grenze." +
+          HARD_BOUNDARY_RECOVERY_HINT,
       };
     }
   }
@@ -295,7 +335,10 @@ export function planModeMutationGuard(
   // With no workflow provider, only the tools that are read-only in every mode
   // stay available; plan-mode's own additions (plan_write, the investigator
   // exception, verify(typecheck)) require a state someone actually vouched for.
-  if (isWorkflowStateUnknown(workflow) && UNIVERSAL_READ_TOOLS.has(event.toolName))
+  if (
+    isWorkflowStateUnknown(workflow) &&
+    UNIVERSAL_READ_TOOLS.has(event.toolName)
+  )
     return PERMITTED;
   if (planModeVerifyTypecheckAllowed(workflow, event)) return PERMITTED;
   return {

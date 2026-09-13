@@ -32,6 +32,7 @@ export interface ThinkingControl {
 
 export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
   let manualThinkingLevel: SelectableThinkingLevel = "medium";
+  let pendingRestoreLevel: SelectableThinkingLevel | undefined;
 
   const control: ThinkingControl = {
     onPersist: () => {},
@@ -53,14 +54,17 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
           ? runtimeCurrent
           : "medium";
       }
+      pendingRestoreLevel = manualThinkingLevel;
       pi.setThinkingLevel(manualThinkingLevel);
+      if (pi.getThinkingLevel() === manualThinkingLevel) {
+        pendingRestoreLevel = undefined;
+      }
     },
 
     applySelection(level, ctx, isCurrentEpoch) {
       if (!isCurrentEpoch()) return;
       manualThinkingLevel = level;
       pi.setThinkingLevel(level);
-      control.onPersist();
       ctx.ui.notify(`Thinking: ${thinkingLabel(level)}.`, "info");
     },
 
@@ -87,5 +91,20 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
         control.applySelection(selectedLevel, ctx, isCurrentEpoch);
     },
   };
+
+  // Pi owns the built-in /thinking command. Mirror its effective selection so
+  // the extension's permission/thinking record remains persistent without
+  // registering a conflicting duplicate command.
+  pi.on("thinking_level_select", (event) => {
+    if (!isSelectableThinkingLevel(event.level)) return;
+    manualThinkingLevel = event.level;
+    if (pendingRestoreLevel === event.level) {
+      pendingRestoreLevel = undefined;
+      return;
+    }
+    pendingRestoreLevel = undefined;
+    control.onPersist();
+  });
+
   return control;
 }

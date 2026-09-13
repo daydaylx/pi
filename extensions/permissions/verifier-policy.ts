@@ -14,6 +14,7 @@ import {
   hasEvaluableVerifierResult,
   type VerificationCapabilitySnapshot,
 } from "../shared/verification-capabilities.ts";
+import type { PermissionLevel } from "../shared/workflow-status.ts";
 import { matchingVerifierRequiredPaths } from "./verifier-required-paths.ts";
 import type { WorkflowAssessment } from "./workflow-policy.ts";
 
@@ -361,13 +362,20 @@ export function assessVerifierCoverageForDiff(
  * the time a push happens — checking it at push would just never fire.
  * Gating the commit itself is the point where a risky diff can still be
  * caught before it enters history at all.
+ *
+ * YOLO bypasses this gate outright (bewusste Lockerung, analog zu Claude
+ * Codes bypassPermissions-Modus) — the delegation-completeness and dedup
+ * checks in `assessVerifierDelegation` are unaffected and still apply to
+ * any verifier run the agent chooses to start on its own.
  */
 export async function assessGitCommitVerifierGate(
   event: ToolCallEvent,
   cwd: string,
   verification: VerificationCapabilitySnapshot,
+  permissionLevel?: PermissionLevel,
 ): Promise<WorkflowAssessment> {
   if (event.toolName !== "bash") return PERMITTED;
+  if (permissionLevel === "yolo") return PERMITTED;
   const input = isRecord(event.input) ? event.input : {};
   const command = typeof input.command === "string" ? input.command : "";
   if (!bashTouchesGitCommit(command)) return PERMITTED;

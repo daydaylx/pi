@@ -584,6 +584,77 @@ export const resilienceSections = {
         restartedUnblocked.every((result) => !result?.block),
         "recovery_check unlocks a restored gate after restart",
       );
+
+      // YOLO bypasses the recovery gate outright (bewusste Lockerung, analog
+      // zu Claude Codes bypassPermissions-Modus) — no recovery_check needed.
+      const yoloArmed = createHarness({
+        entries: [
+          {
+            type: "custom",
+            customType: "resilience.turn-start",
+            data: {
+              schemaVersion: 2,
+              timestamp: "2026-08-19T00:00:00.000Z",
+              workspaceFingerprint: "unavailable",
+              workflowMode: "work",
+              provider: "provider",
+              model: "model",
+              contextPercent: 10,
+            },
+          },
+          {
+            type: "custom",
+            customType: "resilience.turn-settled",
+            data: {
+              schemaVersion: 2,
+              timestamp: "2026-08-19T00:00:01.000Z",
+              turnStartedAt: "2026-08-19T00:00:00.000Z",
+              workspaceFingerprint: "unavailable",
+              outcome: "failed",
+              observedFailureCount: 1,
+              recoveryPending: true,
+            },
+          },
+          {
+            type: "custom",
+            customType: "resilience.recovery-required",
+            data: {
+              schemaVersion: 2,
+              timestamp: "2026-08-19T00:00:02.000Z",
+              turnStartedAt: "2026-08-19T00:00:00.000Z",
+              reason: "final_failure",
+              workspaceChangedSinceTurnStart: false,
+              toolMayHaveMutatedWorkspace: true,
+            },
+          },
+        ],
+      });
+      planMode?.default(yoloArmed.api);
+      modePermissions.default(yoloArmed.api);
+      resilience.default(yoloArmed.api);
+      const yoloArmedCtx = yoloArmed.makeContext({ cwd: ROOT });
+      await yoloArmed.runHooks("session_start", {}, yoloArmedCtx);
+      const stillBlocked = await yoloArmed.runHooks(
+        "tool_call",
+        { toolName: "write", input: { path: "example.txt", content: "x" } },
+        yoloArmedCtx,
+      );
+      assert(
+        stillBlocked.some(
+          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+        ),
+        "the gate still blocks before YOLO is activated",
+      );
+      await yoloArmed.commands.get("yolo")("", yoloArmedCtx);
+      const yoloUnblocked = await yoloArmed.runHooks(
+        "tool_call",
+        { toolName: "write", input: { path: "example.txt", content: "x" } },
+        yoloArmedCtx,
+      );
+      assert(
+        yoloUnblocked.every((result) => !result?.block),
+        "YOLO lifts the recovery gate without running recovery_check",
+      );
     });
   },
 

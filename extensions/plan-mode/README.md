@@ -228,8 +228,11 @@ Antwortet **keine** Workflow-Extension auf die Capability-Anfrage, meldet die
 Brücke `mode: undefined` statt wie früher `work`. Die Permission-Schicht
 behandelt das fail-closed: es bleiben nur die Tools erlaubt, die in jedem Modus
 lesend sind; `plan_write`, der Investigator und `verify({check:"typecheck"})`
-brauchen einen bestätigten Zustand, und YOLO ist gesperrt. Die Blockmeldung
-benennt die fehlende Workflow-Extension, damit die Ursache sichtbar ist.
+brauchen einen bestätigten Zustand, und YOLO ist für diesen unbekannten
+Zustand gesperrt (anders als für eine aktive, tatsächlich bestätigte Planung —
+dort lässt sich YOLO aktivieren, hebt aber `planModeMutationGuard`/
+`planModeBashGuard` selbst nicht auf). Die Blockmeldung benennt die fehlende
+Workflow-Extension, damit die Ursache sichtbar ist.
 
 Dieselbe fehlende Idle-Sperre gilt für `/plan-approve`: Der eigentliche
 Moduswechsel wird zwar vorgemerkt (siehe oben), aber die Freigabe selbst — der
@@ -244,15 +247,15 @@ zu wettlaufen.
 Verglichen mit Claude Code (Plan Mode / Permission Modes), Cursor Plan Mode und
 Codex; übernommen wurde nur, was hier trägt.
 
-| Thema | Anderswo | Pi | Warum |
-| --- | --- | --- | --- |
-| Freigabe | Claude Code fragt nach dem Plan mit drei Optionen, Cursor hat „Click to build" | dieselben drei Optionen | Übernommen: der Dreiweg ist die richtige Form. |
-| Freigabe ↔ Rechte | Claude Code schaltet mit der Freigabe die Permission-Mode um („Yes, and use auto mode") | Freigabe lässt die Zugriffsstufe unangetastet | Abweichung. Workflowmodus und Permission-Level sind hier getrennte Konzepte; eine Planfreigabe ist eine Aussage über *was*, nicht über *wie viel darf*. |
-| Ablageort | Cursor speichert Pläne standardmäßig im Home-Verzeichnis, mit „Save to workspace" | genauso: Runtime-Ablage plus `/save-plan` | Übernommen; unabhängig zur selben Lösung gekommen. |
-| Externer Editor | Claude Code: Ctrl+G öffnet den Plan im Editor | `/edit-plan` über den Host-Editor | Gleichwertig; kein Shell-Fallback, damit die Planmodus-Policy nicht umgehbar ist. |
-| Shell im Planmodus | Claude Code lässt Kommandos per Klassifikator oder Nachfrage zu | feste Allowlist, keine Nachfrage | Abweichung. Ein Klassifikator wäre ein zweites Modell im Sicherheitspfad; die Allowlist ist direkt prüfbar. Siehe „Prüfungen im Planmodus". |
-| Plan als Vertrag | Codex-ExecPlans führen `Progress`, `Decision Log`, `Outcomes` im Plan mit | Plan ist bewusst kein Statusdokument | Abweichung. Das alte `/go`-System hier war genau das und ist archiviert; Statusführung im Plan erzeugt Pflegeaufwand ohne Nutzen für einen Turn. |
-| Plan-Werkzeug | Codex hat ein `update_plan`-Tool | `plan_write` | Übernommen: ein eigenes Tool ist der saubere Weg, ohne Loch in der Schreibgrenze. |
+| Thema              | Anderswo                                                                                | Pi                                            | Warum                                                                                                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Freigabe           | Claude Code fragt nach dem Plan mit drei Optionen, Cursor hat „Click to build"          | dieselben drei Optionen                       | Übernommen: der Dreiweg ist die richtige Form.                                                                                                          |
+| Freigabe ↔ Rechte  | Claude Code schaltet mit der Freigabe die Permission-Mode um („Yes, and use auto mode") | Freigabe lässt die Zugriffsstufe unangetastet | Abweichung. Workflowmodus und Permission-Level sind hier getrennte Konzepte; eine Planfreigabe ist eine Aussage über _was_, nicht über _wie viel darf_. |
+| Ablageort          | Cursor speichert Pläne standardmäßig im Home-Verzeichnis, mit „Save to workspace"       | genauso: Runtime-Ablage plus `/save-plan`     | Übernommen; unabhängig zur selben Lösung gekommen.                                                                                                      |
+| Externer Editor    | Claude Code: Ctrl+G öffnet den Plan im Editor                                           | `/edit-plan` über den Host-Editor             | Gleichwertig; kein Shell-Fallback, damit die Planmodus-Policy nicht umgehbar ist.                                                                       |
+| Shell im Planmodus | Claude Code lässt Kommandos per Klassifikator oder Nachfrage zu                         | feste Allowlist, keine Nachfrage              | Abweichung. Ein Klassifikator wäre ein zweites Modell im Sicherheitspfad; die Allowlist ist direkt prüfbar. Siehe „Prüfungen im Planmodus".             |
+| Plan als Vertrag   | Codex-ExecPlans führen `Progress`, `Decision Log`, `Outcomes` im Plan mit               | Plan ist bewusst kein Statusdokument          | Abweichung. Das alte `/go`-System hier war genau das und ist archiviert; Statusführung im Plan erzeugt Pflegeaufwand ohne Nutzen für einen Turn.        |
+| Plan-Werkzeug      | Codex hat ein `update_plan`-Tool                                                        | `plan_write`                                  | Übernommen: ein eigenes Tool ist der saubere Weg, ohne Loch in der Schreibgrenze.                                                                       |
 
 ## Prüfungen im Planmodus (bewusste Grenze)
 

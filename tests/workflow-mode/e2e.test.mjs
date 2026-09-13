@@ -104,7 +104,9 @@ async function runPlanningTurn(harness, ctx, content) {
     systemPrompt: "BASE",
   });
   await writePlanViaTool(harness, ctx, content);
-  await hooks(harness, "agent_end", ctx, { messages: [{ stopReason: "stop" }] });
+  await hooks(harness, "agent_end", ctx, {
+    messages: [{ stopReason: "stop" }],
+  });
   await hooks(harness, "agent_settled", ctx);
 }
 
@@ -461,7 +463,9 @@ await test("a plan can be re-approved after /edit-plan changes it", async () => 
       await harness.commands.get("plan-approve")("", ctx);
       assert(
         !harness.notifications.some((entry) =>
-          entry.message.includes("hat sich seit dem letzten Planning-Turn geändert"),
+          entry.message.includes(
+            "hat sich seit dem letzten Planning-Turn geändert",
+          ),
         ),
         "approval does not reject the edited plan as stale",
       );
@@ -607,9 +611,7 @@ await test("a manual edit during a failing turn is kept, not rolled back", async
       await harness.commands.get("plan-decide")("", ctx);
       assert(
         harness.notifications.some((entry) =>
-          entry.message.includes(
-            "kein abgeschlossener Plan dieser Sitzung",
-          ),
+          entry.message.includes("kein abgeschlossener Plan dieser Sitzung"),
         ),
         "the kept-but-unreviewed content is not marked ready — nobody's gate ever saw it",
       );
@@ -850,11 +852,7 @@ await test("a resumed session never executes a plan from an earlier session", as
         prompt: executionPrompt,
         systemPrompt: "BASE",
       });
-      eq(
-        handoff[0],
-        undefined,
-        "an approval from before the restart is gone",
-      );
+      eq(handoff[0], undefined, "an approval from before the restart is gone");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -921,7 +919,9 @@ await test("two sessions in one checkout keep separate plans", async () => {
         results.push(sessionId);
       }
       for (const sessionId of results) {
-        const stored = planStore.readPlan(planStore.planLocation(cwd, sessionId));
+        const stored = planStore.readPlan(
+          planStore.planLocation(cwd, sessionId),
+        );
         assert(
           stored.content.includes(`${sessionId}-Formular`),
           `${sessionId} still has its own plan after the other session ran`,
@@ -1052,7 +1052,11 @@ await test("Plan Mode blocks every project write, including the old plan path", 
       // The plan no longer lives in the project, so the write hole it used to
       // need is gone: plan mode's project-write surface is empty.
       for (const path of [".agent/plans/current-plan.md", "src/example.ts"]) {
-        const result = await harness.runHooks("tool_call", writeEvent(path), ctx);
+        const result = await harness.runHooks(
+          "tool_call",
+          writeEvent(path),
+          ctx,
+        );
         assert(
           result.some((entry) => entry?.block),
           `${path} is not writable while planning`,
@@ -1116,13 +1120,13 @@ await test("Plan Mode blocks every project write, including the old plan path", 
         (entry) => entry.customType === "permission-transition-denied",
       );
       assert(
-        denied.length >= 1,
-        "a YOLO attempt in plan mode is audited as denied",
+        denied.length === 0,
+        "YOLO is now activatable during an active (known) Plan Mode",
       );
       eq(
-        denied.at(-1)?.data.attemptedLevel,
-        "yolo",
-        "the denied entry names the attempted level",
+        latestStatus(harness, "permissions"),
+        "⚠ YOLO · TEMPORÄR",
+        "YOLO activates even while planning",
       );
       result = await harness.runHooks(
         "tool_call",
@@ -1131,12 +1135,7 @@ await test("Plan Mode blocks every project write, including the old plan path", 
       );
       assert(
         result.some((entry) => entry?.block),
-        "the denied YOLO attempt does not lift the planning guard",
-      );
-      eq(
-        latestStatus(harness, "permissions"),
-        "🛡 MANUELL · CONFIRM ALL",
-        "a denied YOLO attempt leaves the permission level unchanged",
+        "YOLO does not lift planModeMutationGuard's write ban",
       );
 
       await harness.commands.get("permission")("readonly", ctx);
@@ -1234,8 +1233,7 @@ await test("approving a plan that failed its gate requires an explicit override,
       await harness.commands.get("plan-approve")("", ctx);
       assert(
         harness.lifecycleCalls.some(
-          (call) =>
-            call.kind === "confirm" && call.title.includes("Ungeprüft"),
+          (call) => call.kind === "confirm" && call.title.includes("Ungeprüft"),
         ),
         "an unready plan triggers an explicit, clearly named confirm dialog",
       );
@@ -1299,7 +1297,9 @@ await test("accepting the override approves and audits it as such", async () => 
         "the audit entry records that this was an override, not an ordinary approval",
       );
       assert(
-        harness.notifications.some((entry) => entry.message.includes("Override")),
+        harness.notifications.some((entry) =>
+          entry.message.includes("Override"),
+        ),
         "the operator is told this was an override, not silently treated as normal",
       );
     } finally {
@@ -1380,7 +1380,9 @@ await test("a turn starting while the approval dialogs are open is still caught"
         "and no approval is granted for it either",
       );
       assert(
-        harness.notifications.some((entry) => entry.message.includes("läuft inzwischen")),
+        harness.notifications.some((entry) =>
+          entry.message.includes("läuft inzwischen"),
+        ),
         "the refusal names that the turn appeared during the dialogs, not before them",
       );
     } finally {
@@ -1419,7 +1421,9 @@ await test("/plan-approve refuses while a turn is still running", async () => {
         "and no approval is granted either — the whole action is refused, not queued silently",
       );
       assert(
-        harness.notifications.some((entry) => entry.message.includes("läuft noch")),
+        harness.notifications.some((entry) =>
+          entry.message.includes("läuft noch"),
+        ),
         "the refusal is explicit, not a silent no-op",
       );
 

@@ -320,6 +320,12 @@ export const uiSections = {
       try {
         let choice = "Sehr hoch";
         const harness = createHarness({
+          builtinThinking: () =>
+            choice === "Sehr hoch"
+              ? "xhigh"
+              : choice === "Mittel"
+                ? "medium"
+                : undefined,
           select: (labels) => {
             if (choice === "__permissions__")
               return labels.find((label) =>
@@ -357,6 +363,15 @@ export const uiSections = {
           throw new Error("use deterministic select fallback");
         };
         await harness.runHooks("session_start", {}, context);
+        choice = "__permissions__";
+        await harness.dispatchEvent("control-center:open-permissions", { ctx: context });
+        choice = "Sehr hoch";
+        await harness.dispatchEvent("control-center:open-thinking", { ctx: context });
+        eq(
+          harness.api.getThinkingLevel(),
+          "xhigh",
+          "the Control Center still opens the extension-owned thinking menu",
+        );
         assert(
           !harness.shortcuts.has("ctrl+shift+x"),
           "Ctrl+Shift+X registers no local shortcut",
@@ -366,10 +381,19 @@ export const uiSections = {
           "legacy permission shortcut is retired",
         );
         assert(harness.shortcuts.has("super+d"), "Super+D opens Thinking");
+        assert(
+          !harness.commands.has("thinking"),
+          "the extension leaves Pi's built-in /thinking command unshadowed",
+        );
         assert(harness.shortcuts.has("super+m"), "Super+M opens models");
 
         choice = "Sehr hoch";
         await harness.shortcuts.get("super+d")(context);
+        eq(
+          harness.submittedCommands.at(-1),
+          "/thinking",
+          "Super+D delegates thinking selection to Pi's canonical /thinking command",
+        );
         eq(
           harness.api.getThinkingLevel(),
           "xhigh",
@@ -472,6 +496,29 @@ export const uiSections = {
           busy.submittedCommands,
           ["/model"],
           "the shortcut keeps using Pi's canonical model command while busy",
+        );
+
+        // Exercise the extension-owned command and lifecycle handlers directly;
+        // /thinking itself belongs to Pi's built-in interactive dispatcher.
+        const coverageHarness = createHarness({ select: (labels) => labels[0] });
+        modePermissions.default(coverageHarness.api);
+        const coverageContext = coverageHarness.makeContext({ cwd });
+        await coverageHarness.runHooks("session_start", {}, coverageContext);
+        await coverageHarness.commands.get("yolo")("", coverageContext);
+        await coverageHarness.commands.get("permission")(
+          "readonly",
+          coverageContext,
+        );
+        await coverageHarness.dispatchEvent("control-center:open-permissions", {
+          ctx: coverageContext,
+        });
+        await coverageHarness.dispatchEvent("control-center:open-thinking", {
+          ctx: coverageContext,
+        });
+        await coverageHarness.runHooks(
+          "session_shutdown",
+          {},
+          coverageContext,
         );
       } finally {
         rmSync(cwd, { recursive: true, force: true });

@@ -262,8 +262,26 @@ export function createHarness(options = {}) {
         await options.onSubmitSlashCommand(commandLine);
       const match = commandLine.match(/^\/([^\s]+)(?:\s+(.*))?$/);
       const handler = match ? commands.get(match[1]) : undefined;
-      if (handler && activeContext)
+      if (handler && activeContext) {
         await handler(match[2] ?? "", activeContext);
+        return;
+      }
+      if (
+        match?.[1] === "thinking" &&
+        activeContext &&
+        typeof options.builtinThinking === "function"
+      ) {
+        const level = await options.builtinThinking(
+          match[2] ?? "",
+          activeContext,
+        );
+        if (level) {
+          const previousLevel = thinkingLevel;
+          thinkingLevel = level;
+          for (const listener of eventHandlers.get("thinking_level_select") ?? [])
+            await listener({ level, previousLevel });
+        }
+      }
     },
   };
 

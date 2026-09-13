@@ -23,6 +23,11 @@ Checkpoint-Ablauf im Skill `context-checkpoint`, Subagenten-Details in
   einsetzen (im Planmodus wie in jedem anderen Modus jederzeit verfügbar)
   und die Blockade konkret benennen, statt stillschweigend weiter zu
   wiederholen.
+- Eine einzelne blockierte Ressource (z. B. eine Skill-Datei oder ein
+  Dokument außerhalb des Projekts) ist kein Abbruchgrund für die gesamte
+  Aufgabe. Ohne die Ressource weiterarbeiten oder eine projektlokale
+  Alternative wählen; nur bei echter Sackgasse `ask_user` einsetzen statt
+  den Turn oder die Sitzung zu beenden.
 - Den aktiven Workflow- und Permission-Modus respektieren. Diese Datei
   erzwingt keinen zusätzlichen Planmodus. Der Planmodus-Ausstieg und die
   Planfreigabe sind reine UI-Aktionen der Nutzerin/des Nutzers

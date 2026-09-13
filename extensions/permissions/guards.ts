@@ -114,8 +114,7 @@ export function registerPermissionGuards(
       return {
         block: true,
         terminate: true,
-        reason:
-          `ask_user ist im Modus "${ctx.mode}" nicht verfügbar; im TUI-Modus steht die interaktive Entscheidungskarte zur Verfügung. Keine Rückfrage starten oder wiederholen.`,
+        reason: `ask_user ist im Modus "${ctx.mode}" nicht verfügbar; im TUI-Modus steht die interaktive Entscheidungskarte zur Verfügung. Keine Rückfrage starten oder wiederholen.`,
       };
     }
     // Profile preflight: a missing declaration has no safe command fallback.
@@ -134,18 +133,26 @@ export function registerPermissionGuards(
       };
     }
     const workflow = requestWorkflowCapabilities(pi.events);
-    const assessment = assessWorkflowTool(event, ctx.cwd);
+    const assessment = assessWorkflowTool(event, ctx.cwd, session.level());
     if (assessment.blocked) {
-      return { block: true, ...stopNonInteractive(ctx), reason: assessment.reason };
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: assessment.reason,
+      };
     }
     // Harte Web-Eingabegrenze: fetch_content nur http(s), kein auth.
     const webAssessment = assessWebToolInput(event);
     if (webAssessment.blocked) {
-      return { block: true, ...stopNonInteractive(ctx), reason: webAssessment.reason };
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: webAssessment.reason,
+      };
     }
-    // Gilt wie das Recovery-Gate unabhängig vom Zugriffslevel — auch YOLO
-    // hebt die Verifier-Pflicht für sicherheits-/permissionsrelevante Diffs
-    // nicht auf, weil genau dort die beobachtete Lücke entstand. Vor die
+    // Die Vollständigkeits- und Dedup-Prüfung einer Verifier-Delegation
+    // selbst gilt unabhängig vom Zugriffslevel — auch YOLO befreit einen
+    // Prüfauftrag nicht von Ziel/Scope/Diff/Baseline. Vor die
     // Delegationsprüfung gezogen, damit assessVerifierDelegation denselben
     // Snapshot auch für den Dedup-Check gegen einen bereits abgeschlossenen
     // Verifier-Lauf nutzen kann.
@@ -156,7 +163,11 @@ export function registerPermissionGuards(
       verification,
     );
     if (verifierAssessment.blocked) {
-      return { block: true, ...stopNonInteractive(ctx), reason: verifierAssessment.reason };
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: verifierAssessment.reason,
+      };
     }
     const normalizedVerifierInput = normalizeVerifierDelegationInput(event);
     if (normalizedVerifierInput) {
@@ -167,22 +178,38 @@ export function registerPermissionGuards(
     }
     const debuggerAssessment = assessDebuggerDelegation(event);
     if (debuggerAssessment.blocked) {
-      return { block: true, ...stopNonInteractive(ctx), reason: debuggerAssessment.reason };
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: debuggerAssessment.reason,
+      };
     }
+    // YOLO hebt die technische Commit-Gate-Pflicht (ADR 021) auf — bewusste
+    // Lockerung, analog zu Claude Codes bypassPermissions-Modus. Die
+    // Vollständigkeits-/Dedup-Prüfung der Delegation selbst (oben) bleibt
+    // davon unberührt.
     const commitGate = await assessGitCommitVerifierGate(
       event,
       ctx.cwd,
       verification,
+      session.level(),
     );
     if (commitGate.blocked) {
-      return { block: true, ...stopNonInteractive(ctx), reason: commitGate.reason };
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: commitGate.reason,
+      };
     }
     // Das Recovery-Gate prüft vor der Planmodus-Freigabe, damit auch
     // Schreibzugriffe auf die Plandatei nach einem Fehlturn nicht
-    // stillschweigend durchlaufen.
-    const recovery = recoveryStatusNeeded(event, ctx.cwd)
-      ? await requestRecoveryStatus(pi.events)
-      : { armed: false as const };
+    // stillschweigend durchlaufen. YOLO überspringt die Prüfung ganz
+    // (bewusste Lockerung) statt sie nur zu übergehen, damit auch keine
+    // unnötige Recovery-Status-Anfrage läuft.
+    const recovery =
+      session.level() !== "yolo" && recoveryStatusNeeded(event, ctx.cwd)
+        ? await requestRecoveryStatus(pi.events)
+        : { armed: false as const };
     if (recoveryGateBlocks(recovery.armed, event, ctx.cwd)) {
       return {
         block: true,
@@ -203,7 +230,11 @@ export function registerPermissionGuards(
       ctx.cwd,
     );
     if (planGuard.blocked) {
-      return { block: true, ...stopNonInteractive(ctx), reason: planGuard.reason };
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: planGuard.reason,
+      };
     }
 
     const decision = decideTool(
@@ -215,7 +246,26 @@ export function registerPermissionGuards(
     );
     if (decision.action === "allow") return;
     if (decision.action === "block") {
-      return { block: true, ...stopNonInteractive(ctx), reason: decision.reason };
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: decision.reason,
+      };
+    }
+    // "ask" needs an interactive confirm dialog. Outside the TUI there is no
+    // channel to show one on: confirmAction would fall through to
+    // ctx.ui.confirm with an unspecified non-interactive answer instead of a
+    // clear, structured outcome. Fail closed with a distinct, actionable
+    // reason instead - this applies regardless of which permission level
+    // produced the "ask" (the dedicated "headless" level converts most of
+    // its own asks to block()/allow() already; this is the general net for
+    // every level and every "ask" path, present and future).
+    if (ctx.mode !== "tui") {
+      return {
+        block: true,
+        terminate: true,
+        reason: `Freigabe benötigt, aber im Modus "${ctx.mode}" nicht erfüllbar (kein Bestätigungsdialog verfügbar): ${decision.reason}`,
+      };
     }
     const subject = toolSubject(event);
     const confirmed = await confirmAction(
@@ -250,7 +300,7 @@ export function registerPermissionGuards(
         },
       };
     }
-    const assessment = assessBash(event.command);
+    const assessment = assessBash(event.command, session.level());
     if (assessment.blocked) {
       return {
         result: {

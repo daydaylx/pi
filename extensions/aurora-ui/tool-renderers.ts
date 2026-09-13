@@ -858,7 +858,7 @@ function buildTaskActivityTile(
       ? sessionStatus({ activity: input.activity, task })
       : undefined;
   return {
-    title: "Aufgabe",
+    title: "Aktivität",
     badge: status ? statusLabel(status) : running ? "LÄUFT" : "BEREIT",
     tone: status ? statusTone(status) : running ? "accent" : "muted",
     emphasizeBadge: !running && input.highlightBadge,

@@ -21,7 +21,6 @@ import {
   CONTROL_CENTER_EVENTS,
   type OpenControlCenterMenuEvent,
 } from "./shared/control-center-events.ts";
-import { isSelectableThinkingLevel } from "./shared/thinking-menu.ts";
 import {
   PERMISSION_LEVEL_LABEL,
   normalizePermissionLevel,
@@ -63,28 +62,6 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
         return;
       }
       await session.applyPermissionLevel(level, ctx);
-    },
-  });
-
-  pi.registerCommand("thinking", {
-    description: `${catalogDescription("thinking")}: off | minimal | low | medium | high | xhigh | max`,
-    handler: async (args, ctx) => {
-      const epoch = session.epoch();
-      const value = args.trim().toLowerCase();
-      if (!value) {
-        await thinking.openMenu(ctx, () => session.isCurrentEpoch(epoch));
-        return;
-      }
-      if (isSelectableThinkingLevel(value)) {
-        thinking.applySelection(value, ctx, () =>
-          session.isCurrentEpoch(epoch),
-        );
-        return;
-      }
-      ctx.ui.notify(
-        "Nutzung: /thinking off|minimal|low|medium|high|xhigh|max",
-        "info",
-      );
     },
   });
 
