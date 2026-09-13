@@ -364,9 +364,13 @@ export const uiSections = {
         };
         await harness.runHooks("session_start", {}, context);
         choice = "__permissions__";
-        await harness.dispatchEvent("control-center:open-permissions", { ctx: context });
+        await harness.dispatchEvent("control-center:open-permissions", {
+          ctx: context,
+        });
         choice = "Sehr hoch";
-        await harness.dispatchEvent("control-center:open-thinking", { ctx: context });
+        await harness.dispatchEvent("control-center:open-thinking", {
+          ctx: context,
+        });
         eq(
           harness.api.getThinkingLevel(),
           "xhigh",
@@ -500,9 +504,18 @@ export const uiSections = {
 
         // Exercise the extension-owned command and lifecycle handlers directly;
         // /thinking itself belongs to Pi's built-in interactive dispatcher.
-        const coverageHarness = createHarness({ select: (labels) => labels[0] });
+        const coverageHarness = createHarness({
+          select: (labels) => labels[0],
+        });
         modePermissions.default(coverageHarness.api);
         const coverageContext = coverageHarness.makeContext({ cwd });
+        // Without this, ctx.ui.custom()'s default mock never resolves (see
+        // harness.mjs) and the dispatchEvent calls below hang this suite
+        // forever - the same deterministic-fallback override the harness
+        // above already uses.
+        coverageContext.ui.custom = async () => {
+          throw new Error("use deterministic select fallback");
+        };
         await coverageHarness.runHooks("session_start", {}, coverageContext);
         await coverageHarness.commands.get("yolo")("", coverageContext);
         await coverageHarness.commands.get("permission")(
@@ -515,11 +528,7 @@ export const uiSections = {
         await coverageHarness.dispatchEvent("control-center:open-thinking", {
           ctx: coverageContext,
         });
-        await coverageHarness.runHooks(
-          "session_shutdown",
-          {},
-          coverageContext,
-        );
+        await coverageHarness.runHooks("session_shutdown", {}, coverageContext);
       } finally {
         rmSync(cwd, { recursive: true, force: true });
       }

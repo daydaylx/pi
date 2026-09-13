@@ -3,7 +3,11 @@
 Diese Datei trägt nur Regeln, die in fast jeder Sitzung gelten. Seltene
 Ablaufregeln stehen in der jeweils zuständigen Datei: Sitzungs- und
 Checkpoint-Ablauf im Skill `context-checkpoint`, Subagenten-Details in
-`docs/subagents.md`, Verifikationsprofile in `docs/verify-profiles.md`.
+`docs/subagents.md`, Verifikationsprofile in `docs/verify-profiles.md`. Diese
+und alle weiteren in dieser Datei genannten relativen Pfade (z. B. auch unter
+`extensions/`, `agents/`) gehören zum Pi-Setup selbst, nicht zum aktiven,
+bearbeiteten Projekt, und sind dort entsprechend nicht auffindbar — ein
+Leseversuch dort ist kein Bug, sondern erwartungsgemäß erfolglos.
 
 ## Schutzregeln
 

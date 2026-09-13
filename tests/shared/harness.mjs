@@ -223,6 +223,15 @@ export function createHarness(options = {}) {
         ? options.confirm(title, message)
         : (options.confirm ?? true);
     },
+    // Resolves only if the harness was configured with `customResults`
+    // (array, indexed per call) or `customResult`, or if the test drives the
+    // returned component itself (sendTerminalInput/focusStack) until it
+    // calls its own captured `done`. Neither configured and the component
+    // left undriven means this Promise is intentionally pending forever -
+    // set `ctx.ui.custom` to a throwing stub first if the caller should take
+    // the deterministic-fallback path instead (see tests/suites/ui.mjs for
+    // the established pattern). A hang here surfaces as "unsettled top-level
+    // await" at the suite runner's own await, not as a local test failure.
     custom(factory) {
       return new Promise((resolve) => {
         let component;
@@ -278,7 +287,8 @@ export function createHarness(options = {}) {
         if (level) {
           const previousLevel = thinkingLevel;
           thinkingLevel = level;
-          for (const listener of eventHandlers.get("thinking_level_select") ?? [])
+          for (const listener of eventHandlers.get("thinking_level_select") ??
+            [])
             await listener({ level, previousLevel });
         }
       }
