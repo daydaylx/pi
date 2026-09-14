@@ -91,16 +91,20 @@ def harvest(run_id_base, trial):
 
         workdir = Path(row["workdir"])
         if workdir.exists():
-            proc = subprocess.run(
-                ["find", str(workdir), "-type", "f", "-not", "-path", "*/.git/*"],
-                capture_output=True, text=True, check=True,
-            )
-            files = sorted(proc.stdout.splitlines())
+            # `sha256sum <alle Dateien>` als einzelner Argumentvektor sprengt
+            # ARG_MAX bei einem echten GUI-Trial (voller node_modules-Baum +
+            # Kandidaten-Output, zehntausende Dateien) -- find -exec batcht
+            # automatisch innerhalb der OS-Grenze.
             hash_proc = subprocess.run(
-                ["sha256sum", *files], capture_output=True, text=True, check=False,
+                [
+                    "find", str(workdir), "-type", "f", "-not", "-path", "*/.git/*",
+                    "-exec", "sha256sum", "{}", "+",
+                ],
+                capture_output=True, text=True, check=False,
             )
+            lines = sorted(hash_proc.stdout.splitlines())
             (dest / "final-tree.sha256").write_text(
-                hash_proc.stdout.replace(str(workdir) + "/", "")
+                "\n".join(lines).replace(str(workdir) + "/", "") + "\n"
             )
             status_proc = subprocess.run(
                 ["git", "-C", str(workdir), "status", "--porcelain"],
