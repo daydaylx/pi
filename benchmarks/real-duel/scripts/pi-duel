@@ -52,11 +52,25 @@ CANDIDATES = {
     "pi-real": REAL_DUEL_DIR / "candidates" / "pi-real.toml",
     "codex-real": REAL_DUEL_DIR / "candidates" / "codex-real.toml",
 }
+# Ausserhalb REPO: Paket 2 (02_PI_VS_CODEX_GUI_HARNESS_BENCHMARK) ist bewusst
+# kein Teil von daydaylx/pi, s. 01_PI_GUI_GREENFIELD_VORBEREITUNG Abschnitt 5.
+_GUI_MANIFEST_DIR = Path(
+    "/home/d/desk/02_PI_VS_CODEX_GUI_HARNESS_BENCHMARK/02_RUNNER_PRIVATE/manifest"
+)
 CANDIDATE_PROFILES = {
     "high": CANDIDATES,
     "medium": {
         "pi-real": REAL_DUEL_DIR / "candidates" / "pi-real-medium.toml",
         "codex-real": REAL_DUEL_DIR / "candidates" / "codex-real-medium.toml",
+    },
+    # Isolierte GUI-Greenfield-Candidates (isolate_home=true, gpt-5.6-luna
+    # High, s. 09_FREEZE_MANIFEST.json). Bewusst dieselben Candidate-Namen
+    # wie oben ("pi-real"/"codex-real"), damit bestehende, namensbasierte
+    # Sonderbehandlung (z.B. Pi-Subagent-Telemetrie in _execute_work_only)
+    # unveraendert greift -- nur die Manifest-DATEIEN unterscheiden sich.
+    "gui": {
+        "pi-real": _GUI_MANIFEST_DIR / "pi.toml",
+        "codex-real": _GUI_MANIFEST_DIR / "codex.toml",
     },
 }
 REASONING_LEVELS = tuple(CANDIDATE_PROFILES)
@@ -340,11 +354,51 @@ def _make_worktree(run_id, arm, base_sha):
     return wt
 
 
+SANDBOX_ALLOW_HOSTS_ENV = "PI_DUEL_SANDBOX_ALLOW_HOSTS"
+_SANDBOX_EXEC = REAL_DUEL_DIR / "scripts" / "sandbox_exec.py"
+
+
+def _install_sandbox_patch(candidates_module):
+    """Leitet OpenBenchs _run_process() (der einzige Ort, an dem
+    candidate.run() den Kandidatenprozess tatsaechlich startet) durch
+    sandbox_exec.py um, wenn SANDBOX_ALLOW_HOSTS_ENV gesetzt ist -- Tier 1
+    (Dateisystem, immer) + Tier 2 (Netzwerk-Allowlist aus der Env-Var,
+    kommagetrennt). Idempotent: patcht nur einmal, auch bei mehrfachem
+    Aufruf. Betrifft ausschliesslich Candidates mit isolate_home=true (die
+    isolierten GUI-Greenfield-Candidates) -- deren env["HOME"] ist bereits
+    das synthetische, per-Trial-Home, das sandbox_exec.py als --home
+    braucht. Nicht-isolierte Candidates (pi-real/codex-real ohne dieses
+    Profil) sind von dieser Env-Var unberuehrt, wenn sie nicht gesetzt ist."""
+    allow_hosts_raw = os.environ.get(SANDBOX_ALLOW_HOSTS_ENV)
+    if not allow_hosts_raw or getattr(candidates_module, "_pi_duel_sandboxed", False):
+        return
+    allow_hosts = [h.strip() for h in allow_hosts_raw.split(",") if h.strip()]
+    original_run_process = candidates_module._run_process
+
+    def _sandboxed_run_process(cmd, *, cwd, timeout, env):
+        home = env.get("HOME", os.path.expanduser("~"))
+        network_log_dir = WORKSPACE_DIR / "network-logs"
+        network_log_dir.mkdir(parents=True, exist_ok=True)
+        network_log = network_log_dir / f"{os.path.basename(cmd[0])}-{int(time.time())}.log"
+        sandboxed_cmd = [
+            sys.executable, str(_SANDBOX_EXEC),
+            "--workspace", cwd, "--home", home,
+            *[f"--allow-host={h}" for h in allow_hosts],
+            "--network-log", str(network_log),
+            "--", *cmd,
+        ]
+        return original_run_process(sandboxed_cmd, cwd=cwd, timeout=timeout, env=env)
+
+    candidates_module._run_process = _sandboxed_run_process
+    candidates_module._pi_duel_sandboxed = True
+
+
 def _load_obench_modules():
     sys.path.insert(0, str(OPENBENCH_HOME))
-    from obench.candidates import load_candidate  # noqa: E402
+    from obench import candidates as candidates_module  # noqa: E402
     from obench.run import make_run_id, read_instruction, run_checker  # noqa: E402
-    return load_candidate, make_run_id, read_instruction, run_checker
+    _install_sandbox_patch(candidates_module)
+    return candidates_module.load_candidate, make_run_id, read_instruction, run_checker
 
 
 def _run_task(task_dir, task_name, run_prefix, args):
