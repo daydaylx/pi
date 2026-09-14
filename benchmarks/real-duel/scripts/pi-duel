@@ -295,21 +295,35 @@ def _clean_room_baseline_ref(source_dir):
 def _materialize_clean_room(run_id, arm, source_dir):
     """Clean-Room-Pendant zu _make_worktree fuer CLEAN_ROOM_SRC_ENV: kopiert
     den vorbereiteten Export (Single-Commit-.git + bereits installierte
-    node_modules, s. Vorbereitung Abschnitt 3/6) per Hardlink (`cp -al`) in
-    einen neuen Trial-Workspace. Kein `git worktree add` gegen REPO, kein
-    geteilter Objekt-Store mit REPOs kontaminierter Historie -- source_dir
-    hat ohnehin nur den einen Baseline-Commit. `cp -al` haengt jede Datei
-    (inkl. `.git/*`, `node_modules/*`) initial per Hardlink ein; Git schreibt
-    `.git/index`/`HEAD`/Refs ueber Lockfile+Rename, wodurch jeder Trial ab
-    seinem ersten eigenen Git-Aufruf automatisch divergiert, ohne dass
-    Aenderungen in andere Trials oder die Quelle durchschlagen.
+    node_modules, s. Vorbereitung Abschnitt 3/6) als ECHTE, unabhaengige
+    Kopie (`cp -a`, KEIN `-l`/Hardlink) in einen neuen Trial-Workspace. Kein
+    `git worktree add` gegen REPO, kein geteilter Objekt-Store mit REPOs
+    kontaminierter Historie -- source_dir hat ohnehin nur den einen
+    Baseline-Commit.
+
+    P0-Fix (gefunden waehrend eines echten 4-Trial-Laufs, 2026-09-14): eine
+    fruehere Fassung nutzte `cp -al` (Hardlinks). Die Annahme war, dass
+    Schreibzugriffe wie Gits eigene .git/index/HEAD/Refs ueber Lockfile+
+    Rename laufen und den Hardlink so automatisch aufbrechen. Das gilt aber
+    NICHT fuer beliebige Kandidaten-Werkzeuge -- ein In-Place-Schreiben
+    (open+truncate+write, z.B. durch npm oder einen Editor-Tool-Aufruf) trifft
+    denselben Inode und schlaegt damit gleichzeitig in ALLEN Trials UND im
+    gemeinsamen source_dir durch. Genau das geschah real: gui/package.json,
+    frontend-server/index.mjs und zwei npm/packages/frontend-protocol/src/
+    Dateien wurden in der Quelle veraendert und tauchten identisch in allen
+    vier laufenden Trials auf, bevor der Lauf abgebrochen und source_dir aus
+    der Git-Historie wiederhergestellt wurde. `cp -a` dupliziert Inhalte
+    wirklich (source_dir bleibt in jedem Fall unberuehrt); bei 376M Export
+    kostet das ca. 2s -- vernachlaessigbar gegen eine 120-Minuten-Aufgabe,
+    also kein Grund, wieder auf Hardlinks zurueckzugehen.
+
     Operator-/Metadaten-Verzeichnisse (`_benchmark-meta/`) werden danach aus
     der Kopie entfernt -- kein Fairness-/Kontaminationsrisiko (beide Arme
     erhalten identisch nichts davon), aber unnoetiger Ballast im
     Kandidaten-Workspace."""
     wt = WORKTREES_ROOT / run_id / arm
     wt.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["cp", "-al", str(source_dir), str(wt)], check=True)
+    subprocess.run(["cp", "-a", str(source_dir), str(wt)], check=True)
     for name in _CLEAN_ROOM_EXCLUDE:
         shutil.rmtree(wt / name, ignore_errors=True)
     return wt

@@ -177,7 +177,7 @@ class CleanRoomMaterializationTest(unittest.TestCase):
         (source / "_benchmark-meta" / "freeze-manifest.json").write_text("{}")
         return source
 
-    def test_materializes_hardlinked_copy_and_strips_operator_metadata(self) -> None:
+    def test_materializes_independent_copy_and_strips_operator_metadata(self) -> None:
         globals_ = MATERIALIZE_CLEAN_ROOM.__globals__
         with tempfile.TemporaryDirectory() as tmp:
             source = self._make_fake_source(tmp)
@@ -194,10 +194,27 @@ class CleanRoomMaterializationTest(unittest.TestCase):
                 (wt / "_benchmark-meta").exists(),
                 "operator metadata must not reach the trial workspace",
             )
-            self.assertEqual(
+            # P0-Regressionsschutz: cp -al (Hardlink) liess ein In-Place-
+            # Schreiben eines Kandidaten-Tools (z.B. npm, ein Editor-Tool)
+            # gleichzeitig in JEDEM Trial UND im gemeinsamen source_dir
+            # durchschlagen -- real beobachtet an gui/package.json waehrend
+            # eines echten 4-Trial-Laufs, s. _materialize_clean_room-
+            # Docstring. cp -a (ohne -l) muss unabhaengige Inodes anlegen.
+            self.assertNotEqual(
                 (wt / "gui" / "package.json").stat().st_ino,
                 (source / "gui" / "package.json").stat().st_ino,
-                "cp -al must hardlink, not copy, the content",
+                "cp -a must copy content into a new, independent inode, "
+                "never share one with source_dir (hardlinks let an "
+                "in-place write from ANY trial corrupt every other trial "
+                "and the shared source simultaneously)",
+            )
+            # In-Place-Schreiben in eine Kopie simulieren: Divergenz ist nur
+            # dann echt, wenn die Quelle davon unberuehrt bleibt.
+            (wt / "gui" / "package.json").write_text('{"mutated": true}')
+            self.assertNotEqual(
+                (source / "gui" / "package.json").read_text(),
+                '{"mutated": true}',
+                "writing into the materialized copy must never mutate source_dir",
             )
 
     def test_make_worktree_prefers_clean_room_source_when_env_set(self) -> None:
@@ -256,8 +273,8 @@ class CleanRoomCleanupTest(unittest.TestCase):
             run_id = "run-1"
             for arm in ("pi", "codex"):
                 wt = worktrees_root / run_id / arm
-                # Verzeichnis (nicht Datei) = Clean-Room-Hardlink-Kopie, kein
-                # bei REPO registrierter Worktree-Pointer.
+                # Verzeichnis (nicht Datei) = eigenstaendige Clean-Room-Kopie,
+                # kein bei REPO registrierter Worktree-Pointer.
                 (wt / ".git").mkdir(parents=True)
                 (wt / "marker.txt").write_text(arm)
             original_root = globals_["WORKTREES_ROOT"]
