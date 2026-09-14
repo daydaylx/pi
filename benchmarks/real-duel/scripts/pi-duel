@@ -23,6 +23,7 @@ Subcommands: doctor | gate | smoke | run --task <dir> | report | cleanup <run-id
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -33,6 +34,13 @@ REAL_DUEL_DIR = REPO / "benchmarks" / "real-duel"
 OPENBENCH_HOME = Path(os.path.expanduser("~/.local/share/real-duel/openbench"))
 STATE = Path(os.path.expanduser("~/.local/state/real-duel"))
 WORKTREES_ROOT = STATE / "worktrees"
+# Wenn gesetzt: Workspace-Materialisierung nutzt _materialize_clean_room()
+# (Hardlink-Kopie eines vorbereiteten .git-losen^H^H^H Single-Commit-Exports,
+# siehe 01_PI_GUI_GREENFIELD_VORBEREITUNG Abschnitt 3/7) statt `git worktree
+# add` gegen REPO. Zweck: Aufgaben, deren Task-Repo NICHT REPOs eigene
+# (kontaminierte) Historie teilen darf -- ein regulaerer Worktree teilt sich
+# immer den vollen Objekt-Store mit REPO (s. _make_worktree-Docstring).
+CLEAN_ROOM_SRC_ENV = "PI_DUEL_CLEAN_ROOM_SRC"
 WORKSPACE_DIR = STATE / "obench-workspace"
 RESULTS_PATH = WORKSPACE_DIR / "results.jsonl"
 TRANSCRIPTS_DIR = WORKSPACE_DIR / "transcripts"
@@ -255,6 +263,32 @@ def _link_node_modules(wt):
         subprocess.run(["cp", "-al", str(src), str(dst)], check=False)
 
 
+_CLEAN_ROOM_EXCLUDE = ("_benchmark-meta",)
+
+
+def _materialize_clean_room(run_id, arm, source_dir):
+    """Clean-Room-Pendant zu _make_worktree fuer CLEAN_ROOM_SRC_ENV: kopiert
+    den vorbereiteten Export (Single-Commit-.git + bereits installierte
+    node_modules, s. Vorbereitung Abschnitt 3/6) per Hardlink (`cp -al`) in
+    einen neuen Trial-Workspace. Kein `git worktree add` gegen REPO, kein
+    geteilter Objekt-Store mit REPOs kontaminierter Historie -- source_dir
+    hat ohnehin nur den einen Baseline-Commit. `cp -al` haengt jede Datei
+    (inkl. `.git/*`, `node_modules/*`) initial per Hardlink ein; Git schreibt
+    `.git/index`/`HEAD`/Refs ueber Lockfile+Rename, wodurch jeder Trial ab
+    seinem ersten eigenen Git-Aufruf automatisch divergiert, ohne dass
+    Aenderungen in andere Trials oder die Quelle durchschlagen.
+    Operator-/Metadaten-Verzeichnisse (`_benchmark-meta/`) werden danach aus
+    der Kopie entfernt -- kein Fairness-/Kontaminationsrisiko (beide Arme
+    erhalten identisch nichts davon), aber unnoetiger Ballast im
+    Kandidaten-Workspace."""
+    wt = WORKTREES_ROOT / run_id / arm
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["cp", "-al", str(source_dir), str(wt)], check=True)
+    for name in _CLEAN_ROOM_EXCLUDE:
+        shutil.rmtree(wt / name, ignore_errors=True)
+    return wt
+
+
 def _make_worktree(run_id, arm, base_sha):
     """Blendet benchmarks/real-duel/ (Task-Instructions, checker.sh, Reports,
     fruehere Ergebnisse) aus dem materialisierten Arbeitsverzeichnis des
@@ -272,7 +306,18 @@ def _make_worktree(run_id, arm, base_sha):
     ...` oder `git log -p -- benchmarks/real-duel` lesen -- weder Pis noch
     Codex' Tool-Policy blockt reine Git-Lesebefehle. Diese Funktion ist also
     keine harte Sicherheitsgrenze gegen einen Kandidaten, der gezielt danach
-    sucht, nur eine Huerde gegen zufaelliges Auffinden per Dateisystem-Tools."""
+    sucht, nur eine Huerde gegen zufaelliges Auffinden per Dateisystem-Tools.
+
+    Ist CLEAN_ROOM_SRC_ENV gesetzt, wird stattdessen ausschliesslich
+    _materialize_clean_room() verwendet (kein `git worktree add` gegen REPO
+    ueberhaupt) -- fuer Aufgaben, die REPOs eigene Historie grundsaetzlich
+    nicht teilen duerfen. `base_sha` wird in diesem Modus ignoriert; die
+    materialisierte Quelle traegt ihren eigenen, bereits eingefrorenen
+    Single-Commit."""
+    clean_room_src = os.environ.get(CLEAN_ROOM_SRC_ENV)
+    if clean_room_src:
+        return _materialize_clean_room(run_id, arm, Path(clean_room_src))
+
     wt = WORKTREES_ROOT / run_id / arm
     wt.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
@@ -1095,7 +1140,17 @@ def cmd_cleanup(args):
         return 1
     for arm in ("pi", "codex"):
         wt = root / arm
-        if wt.exists():
+        if not wt.exists():
+            continue
+        # Clean-Room-Trials (_materialize_clean_room) haben ein eigenstaendiges
+        # `.git`-Verzeichnis (Hardlink-Kopie), keinen bei REPO registrierten
+        # Worktree -- `.git` als Datei (Worktree-Pointer `gitdir: ...`) zeigt
+        # den regulaeren `git worktree add`-Modus an. Diese Erkennung haengt
+        # bewusst nicht von CLEAN_ROOM_SRC_ENV zur Cleanup-Zeit ab, da cleanup
+        # typischerweise als spaetere, separate Invokation laeuft.
+        if (wt / ".git").is_dir():
+            shutil.rmtree(wt, ignore_errors=True)
+        else:
             subprocess.run(
                 ["git", "-C", str(REPO), "worktree", "remove", str(wt), "--force"],
                 check=False,

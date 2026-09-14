@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import runpy
 import tempfile
@@ -20,6 +21,10 @@ POSITIVE_INT = MODULE["_positive_int"]
 BUILD_PARSER = MODULE["build_parser"]
 BUILD_RUN_ID_BASE = MODULE["_build_run_id_base"]
 LINK_NODE_MODULES = MODULE["_link_node_modules"]
+MATERIALIZE_CLEAN_ROOM = MODULE["_materialize_clean_room"]
+MAKE_WORKTREE = MODULE["_make_worktree"]
+CMD_CLEANUP = MODULE["cmd_cleanup"]
+CLEAN_ROOM_SRC_ENV = MODULE["CLEAN_ROOM_SRC_ENV"]
 
 
 class CandidateSelectionTest(unittest.TestCase):
@@ -155,6 +160,115 @@ class TrialHardcodingRegressionTest(unittest.TestCase):
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertNotIn('"trial": 1,', source)
         self.assertEqual(len(re.findall(r'"trial": args\.trial,', source)), 2)
+
+
+class CleanRoomMaterializationTest(unittest.TestCase):
+    """_materialize_clean_room()/_make_worktree() im CLEAN_ROOM_SRC_ENV-Modus:
+    Aufgaben, deren Task-Repo REPOs eigene (potenziell kontaminierte) Git-
+    Historie grundsaetzlich nicht teilen darf, s.
+    01_PI_GUI_GREENFIELD_VORBEREITUNG Abschnitt 3/7."""
+
+    def _make_fake_source(self, tmp: str) -> Path:
+        source = Path(tmp) / "clean-room-src"
+        (source / "gui").mkdir(parents=True)
+        (source / "gui" / "package.json").write_text("{}")
+        (source / ".git").mkdir()
+        (source / "_benchmark-meta").mkdir()
+        (source / "_benchmark-meta" / "freeze-manifest.json").write_text("{}")
+        return source
+
+    def test_materializes_hardlinked_copy_and_strips_operator_metadata(self) -> None:
+        globals_ = MATERIALIZE_CLEAN_ROOM.__globals__
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self._make_fake_source(tmp)
+            original_root = globals_["WORKTREES_ROOT"]
+            globals_["WORKTREES_ROOT"] = Path(tmp) / "worktrees"
+            try:
+                wt = MATERIALIZE_CLEAN_ROOM("run-1", "pi", source)
+            finally:
+                globals_["WORKTREES_ROOT"] = original_root
+
+            self.assertTrue((wt / "gui" / "package.json").exists())
+            self.assertTrue((wt / ".git").is_dir())
+            self.assertFalse(
+                (wt / "_benchmark-meta").exists(),
+                "operator metadata must not reach the trial workspace",
+            )
+            self.assertEqual(
+                (wt / "gui" / "package.json").stat().st_ino,
+                (source / "gui" / "package.json").stat().st_ino,
+                "cp -al must hardlink, not copy, the content",
+            )
+
+    def test_make_worktree_prefers_clean_room_source_when_env_set(self) -> None:
+        globals_ = MAKE_WORKTREE.__globals__
+        calls = []
+        original_materialize = globals_["_materialize_clean_room"]
+        globals_["_materialize_clean_room"] = (
+            lambda run_id, arm, source: calls.append((run_id, arm, source))
+            or Path("/fake")
+        )
+        original_env = os.environ.get(CLEAN_ROOM_SRC_ENV)
+        os.environ[CLEAN_ROOM_SRC_ENV] = "/some/prepared/clean-room"
+        try:
+            result = MAKE_WORKTREE("run-2", "codex", "irrelevant-sha")
+        finally:
+            globals_["_materialize_clean_room"] = original_materialize
+            if original_env is None:
+                del os.environ[CLEAN_ROOM_SRC_ENV]
+            else:
+                os.environ[CLEAN_ROOM_SRC_ENV] = original_env
+        self.assertEqual(
+            calls, [("run-2", "codex", Path("/some/prepared/clean-room"))]
+        )
+        self.assertEqual(result, Path("/fake"))
+
+    def test_make_worktree_ignores_unset_clean_room_env(self) -> None:
+        globals_ = MAKE_WORKTREE.__globals__
+        calls = []
+        original_materialize = globals_["_materialize_clean_room"]
+        globals_["_materialize_clean_room"] = lambda *a: calls.append(a)
+        original_env = os.environ.pop(CLEAN_ROOM_SRC_ENV, None)
+        try:
+            # Ohne CLEAN_ROOM_SRC_ENV faellt _make_worktree auf den echten
+            # git-worktree-Zweig zurueck, der mit dieser Fantasie-SHA gegen
+            # das echte REPO fehlschlaegt -- das ist hier erwuenscht und
+            # beweist zusammen mit `calls == []` unten, dass die Weiche
+            # tatsaechlich den Clean-Room-Pfad uebersprungen hat.
+            try:
+                MAKE_WORKTREE("run-3", "pi", "irrelevant-sha")
+            except Exception:
+                pass
+        finally:
+            globals_["_materialize_clean_room"] = original_materialize
+            if original_env is not None:
+                os.environ[CLEAN_ROOM_SRC_ENV] = original_env
+        self.assertEqual(calls, [])
+
+
+class CleanRoomCleanupTest(unittest.TestCase):
+    def test_cleanup_removes_clean_room_trial_without_git_worktree_remove(
+        self,
+    ) -> None:
+        globals_ = CMD_CLEANUP.__globals__
+        with tempfile.TemporaryDirectory() as tmp:
+            worktrees_root = Path(tmp) / "worktrees"
+            run_id = "run-1"
+            for arm in ("pi", "codex"):
+                wt = worktrees_root / run_id / arm
+                # Verzeichnis (nicht Datei) = Clean-Room-Hardlink-Kopie, kein
+                # bei REPO registrierter Worktree-Pointer.
+                (wt / ".git").mkdir(parents=True)
+                (wt / "marker.txt").write_text(arm)
+            original_root = globals_["WORKTREES_ROOT"]
+            globals_["WORKTREES_ROOT"] = worktrees_root
+            try:
+                rc = CMD_CLEANUP(argparse.Namespace(run_id=run_id, force=True))
+            finally:
+                globals_["WORKTREES_ROOT"] = original_root
+            self.assertEqual(rc, 0)
+            self.assertFalse((worktrees_root / run_id / "pi").exists())
+            self.assertFalse((worktrees_root / run_id / "codex").exists())
 
 
 if __name__ == "__main__":
