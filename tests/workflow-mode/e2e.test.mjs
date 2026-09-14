@@ -1036,6 +1036,40 @@ await test("a mode switch during a running turn cannot loosen that turn's guards
   });
 });
 
+await test("selecting a new thinking level persists it in the mode-permissions record", async () => {
+  if (!modePermissions) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-thinking-persist-"));
+  try {
+    const harness = createHarness();
+    modePermissions.default(harness.api);
+    const ctx = harness.makeContext({ cwd });
+    await hooks(harness, "session_start", ctx);
+
+    // session_start's own restore flow already persists once with the
+    // harness's default thinking level ("high"); only a change away from
+    // that proves the live thinking_level_select -> onPersist path fired,
+    // not the restore echo (which onPersist deliberately skips).
+    await harness.runHooks(
+      "thinking_level_select",
+      { level: "medium", previousLevel: "high" },
+      ctx,
+    );
+
+    const persisted = harness.appended
+      .filter(
+        (entry) =>
+          entry.type === "custom" && entry.customType === "mode-permissions",
+      )
+      .at(-1);
+    assert(
+      persisted?.data.manualThinkingLevel === "medium",
+      "a live thinking-level change is persisted in the shared mode-permissions record",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 await test("Plan Mode blocks every project write, including the old plan path", async () => {
   if (!planMode || !modePermissions) return;
   await withPlanHome(async () => {
