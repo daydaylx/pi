@@ -934,18 +934,10 @@ export const uiSections = {
         ).href
       );
       const tile = await load("extensions/aurora-ui/tile.ts");
-      const header = await load("extensions/aurora-ui/header.ts");
       const renderers = await load("extensions/aurora-ui/tool-renderers.ts");
       const startscreen = await load("extensions/aurora-ui/startscreen.ts");
       const auroraFooter = await load("extensions/aurora-ui/footer.ts");
-      if (
-        !theme ||
-        !tile ||
-        !header ||
-        !renderers ||
-        !startscreen ||
-        !auroraFooter
-      )
+      if (!theme || !tile || !renderers || !startscreen || !auroraFooter)
         return;
 
       const pendingBg = theme.getBgAnsi("toolPendingBg");
@@ -953,45 +945,40 @@ export const uiSections = {
       const errorBg = theme.getBgAnsi("toolErrorBg");
       const selectedBg = theme.getBgAnsi("selectedBg");
 
-      const panelState = {
+      // The former fixed Session panel was folded into the activity tile's
+      // own badge (ADR 023); it only shows once nothing is live
+      // (activityLines empty), so these renderDashboard calls are the
+      // current equivalent of the old renderHeaderLines panel checks below.
+      const panelTask = {
         sessionEpoch: "visual-panel-test",
-        workflow: { phase: "work", label: "Work" },
-        permissions: {},
-        lsp: {},
-        model: { id: "aurora-test-model", thinking: "high" },
-        activity: { kind: "tool" },
-        changes: null,
-        verification: null,
-        task: { title: "Visuelles Panel" },
-        subagents: [],
+        phase: "work",
+        phaseLabel: "Arbeiten",
+        title: "Visuelles Panel",
       };
-      const activePanel = header.renderHeaderLines(theme, 100, {
-        state: panelState,
+      const activeDashboard = renderers.renderDashboard(panelTask, theme, 100, {
+        activityLines: [],
+        maxRows: 11,
         activity: "running",
-        elapsedSeconds: 4,
-        rows: 30,
       });
-      const verifiedPanel = header.renderHeaderLines(theme, 100, {
-        state: panelState,
-        task: {
-          title: "Visuelles Panel",
+      const verifiedDashboard = renderers.renderDashboard(
+        {
+          ...panelTask,
           phase: "done",
-          subagents: [],
           verification: { verdict: "READY", blockers: [] },
         },
-        activity: "done",
-        elapsedSeconds: 42,
-        rows: 30,
-      });
-      assert(
-        activePanel.some((line) => line.includes(selectedBg)) &&
-          stripAnsi(activePanel.join("\n")).includes("● ARBEITET · 4s"),
-        "the active session panel uses a filled status chip",
+        theme,
+        100,
+        { activityLines: [], maxRows: 11, activity: "done" },
       );
       assert(
-        verifiedPanel.some((line) => line.includes(successBg)) &&
-          stripAnsi(verifiedPanel.join("\n")).includes("✓ VERIFIZIERT · 42s"),
-        "the completed session panel uses its semantic success surface",
+        activeDashboard.some((line) => line.includes(selectedBg)) &&
+          stripAnsi(activeDashboard.join("\n")).includes("ARBEITET"),
+        "the settled activity badge uses a filled status chip for a working run",
+      );
+      assert(
+        verifiedDashboard.some((line) => line.includes(successBg)) &&
+          stripAnsi(verifiedDashboard.join("\n")).includes("VERIFIZIERT"),
+        "the completed activity badge uses its semantic success surface",
       );
 
       // 1. A filled tile is one solid surface: every row has exactly the tile
@@ -1125,7 +1112,12 @@ export const uiSections = {
       );
       eq(tile.pillExtraCells("muted"), 0, "a flat segment pays no padding");
 
-      // 3. The wide dashboard is a 2×2 card grid: paired tiles share one row.
+      // 3. ADR 023 merged the former separate task/activity tiles into one
+      // "Aktivität" card (sentence-case title, see buildTaskActivityTile);
+      // renderTileGrid now always receives a single tile, so there is no
+      // more width-based 2-tile pairing to test here — this instead pins the
+      // merged tile's exact-width framing across representative terminal
+      // sizes.
       const tvm = {
         sessionEpoch: "tile-test",
         phase: "work",
@@ -1144,10 +1136,9 @@ export const uiSections = {
         "the wide dashboard keeps card frames",
       );
       assert(
-        wideText.some(
-          (line) => line.includes("AUFGABE") && line.includes("AKTIVITÄT"),
-        ),
-        "the wide dashboard pairs task and activity tiles on one row",
+        wideText.join("\n").includes("Aktivität") &&
+          wideText.join("\n").includes("ARBEITET"),
+        "the wide dashboard shows the merged activity tile with its live status",
       );
       assert(
         !wideDashboard.some((line) => line.includes(pendingBg)),
@@ -1155,7 +1146,7 @@ export const uiSections = {
       );
       assert(
         wideDashboard.every((line) => visibleWidth(line) === 120),
-        "paired dashboard tiles consume the entire even terminal width without a right-edge gap",
+        "the merged tile consumes the entire even terminal width without a right-edge gap",
       );
 
       const framedWorkspace = renderers.renderDashboard(tvm, theme, 100, {
@@ -1164,45 +1155,30 @@ export const uiSections = {
       });
       assert(
         framedWorkspace.some((line) => stripAnsi(line).includes("╭")) &&
-          stripAnsi(framedWorkspace.join("\n")).includes("AKTIVITÄT") &&
-          stripAnsi(framedWorkspace.join("\n")).includes("AUFGABE") &&
+          stripAnsi(framedWorkspace.join("\n")).includes("Aktivität") &&
           stripAnsi(framedWorkspace.join("\n")).includes("ARBEITET") &&
           !stripAnsi(framedWorkspace.join("\n")).includes("✓ READ") &&
           framedWorkspace.every((line) => visibleWidth(line) === 100),
         "the standard workspace restores the full-width framed tile overview with live activity",
       );
 
-      // 3b. The grid threshold sits at `comfortable` (90 cols), not `wide`
-      // (120): a merely comfortable terminal already gets the 2×2 pairing.
       const comfortableDashboard = renderers.renderDashboard(tvm, theme, 95, {
         activityLines: ["ARBEITET · 3s"],
         maxRows: 14,
       });
       const comfortableText = comfortableDashboard.map(stripAnsi);
       assert(
-        comfortableText.some(
-          (line) => line.includes("AUFGABE") && line.includes("AKTIVITÄT"),
-        ),
-        "the comfortable-width dashboard also pairs task and activity tiles",
+        comfortableText.join("\n").includes("Aktivität") &&
+          comfortableText.join("\n").includes("ARBEITET"),
+        "the comfortable-width dashboard also frames the merged activity tile",
       );
       assert(
         comfortableDashboard.every((line) => visibleWidth(line) === 95),
-        "the comfortable-width paired dashboard still fills its full terminal width",
+        "the comfortable-width merged tile still fills its full terminal width",
       );
 
-      // 4. Below the grid threshold the same tiles stack, and the compact
-      // dashboard stays frame-free.
-      const stackedDashboard = renderers.renderDashboard(tvm, theme, 80, {
-        activityLines: ["ARBEITET · 3s"],
-        maxRows: 14,
-      });
-      const stackedText = stackedDashboard.map(stripAnsi);
-      assert(
-        !stackedText.some(
-          (line) => line.includes("AUFGABE") && line.includes("AKTIVITÄT"),
-        ),
-        "below the grid threshold tiles stack instead of pairing",
-      );
+      // 4. The compact dashboard stays frame-free at any width — it returns
+      // early inside renderDashboard, before the tile grid is built at all.
       const compactDashboard = renderers.renderDashboard(tvm, theme, 45, {
         activityLines: ["ARBEITET"],
         maxRows: 2,
@@ -1213,26 +1189,10 @@ export const uiSections = {
         "the compact dashboard keeps its frame-free rows",
       );
 
-      // 5. A failed check owns the error surface and never disappears.
-      const failedDashboard = renderers.renderDashboard(
-        {
-          ...tvm,
-          verification: {
-            verdict: "NOT_READY",
-            criteria: [{ label: "Tests", status: "failed" }],
-            blockers: ["Pflichtprüfung fehlgeschlagen."],
-          },
-        },
-        theme,
-        120,
-        { activityLines: ["ARBEITET"], maxRows: 5 },
-      );
-      assert(
-        failedDashboard.some((line) =>
-          stripAnsi(line).includes("NICHT BEREIT"),
-        ) && failedDashboard.some((line) => line.includes(errorBg)),
-        "a failed check stays visible and paints the error surface",
-      );
+      // Verification/failed-check display moved out of the dashboard tile
+      // into the permanent footer (ADR 024 removed the PRÜFUNGEN tile);
+      // that surface is covered by the footer "checks_failed" cases in
+      // tests/suites/runtime/aurora-ui.mjs and tests/suites/runtime/verification.mjs.
 
       // 6. The welcome window is a centered card with fields and chips.
       for (const [columns, rows] of [
