@@ -280,6 +280,18 @@ def _link_node_modules(wt):
 _CLEAN_ROOM_EXCLUDE = ("_benchmark-meta",)
 
 
+def _clean_room_baseline_ref(source_dir):
+    """HEAD-SHA des Single-Commit-Git-Repos im vorbereiteten Clean-Room-Export
+    -- der Ref, gegen den `git diff`/`git add -N` INNERHALB eines per
+    `_materialize_clean_room` erzeugten Workdirs tatsaechlich laufen muss
+    (dessen `.git` ist eine Hardlink-Kopie genau dieser Historie, nicht
+    REPOs)."""
+    return subprocess.run(
+        ["git", "-C", str(source_dir), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
 def _materialize_clean_room(run_id, arm, source_dir):
     """Clean-Room-Pendant zu _make_worktree fuer CLEAN_ROOM_SRC_ENV: kopiert
     den vorbereiteten Export (Single-Commit-.git + bereits installierte
@@ -497,6 +509,17 @@ def _run_task(task_dir, task_name, run_prefix, args):
         )
 
     base_sha = fp["base_sha"]
+    # Clean-Room-Workdirs (_materialize_clean_room) haben ihre EIGENE,
+    # unabhaengige Git-Historie -- base_sha (REPOs HEAD) existiert darin gar
+    # nicht, `git diff <base_sha>` im Workdir schlaegt sonst mit "unknown
+    # revision" fehl. workdir_base_ref ist der Ref, den git-Operationen
+    # INNERHALB eines Workdirs tatsaechlich brauchen; base_sha bleibt fuer
+    # Fingerprint/Freeze-Konsistenz und die Ergebniszeile unveraendert.
+    workdir_base_ref = (
+        _clean_room_baseline_ref(os.environ[CLEAN_ROOM_SRC_ENV])
+        if os.environ.get(CLEAN_ROOM_SRC_ENV)
+        else base_sha
+    )
 
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
     TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -574,14 +597,14 @@ def _run_task(task_dir, task_name, run_prefix, args):
         # im (Default-)work-only-Workflow konnte ein Kandidat verbotene Pfade
         # (z.B. benchmarks/real-duel/) veraendern, ohne dass das je geprueft
         # wurde. Gleiche Gate-Funktion wie plan-work.
-        changed_paths = _changed_paths(workdir, base_sha)
+        changed_paths = _changed_paths(workdir, workdir_base_ref)
         gate_summary = gates_module.summarize([
             gates_module.check_forbidden_surface_untouched(changed_paths, workflow_cfg.forbidden_surface),
         ])
 
         # P0-Fix: Patch verpflichtend VOR jedem moeglichen Cleanup sichern.
         patch_path, patch_sha256 = _save_patch(
-            workdir, base_sha, run_id_base, arm, changed_paths=changed_paths,
+            workdir, workdir_base_ref, run_id_base, arm, changed_paths=changed_paths,
         )
 
         transcript_path = TRANSCRIPTS_DIR / f"{run_id_base}_{arm}.txt"
@@ -803,7 +826,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
                     )
                 )
 
-                changed_paths = _changed_paths(workdir, base_sha)
+                changed_paths = _changed_paths(workdir, workdir_base_ref)
                 gates.append(
                     gates_module.check_forbidden_surface_untouched(
                         changed_paths, workflow_cfg.forbidden_surface
@@ -919,7 +942,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
                     )
                 )
 
-                changed_paths = _changed_paths(workdir, base_sha)
+                changed_paths = _changed_paths(workdir, workdir_base_ref)
                 gates.append(
                     gates_module.check_forbidden_surface_untouched(
                         changed_paths, workflow_cfg.forbidden_surface
@@ -980,7 +1003,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
         # unabhaengig davon, ob der Lauf/die Gates erfolgreich waren (auch ein
         # gescheiterter Lauf kann forensisch relevante Mutationen enthalten).
         patch_path, patch_sha256 = _save_patch(
-            workdir, base_sha, run_id_base, arm, changed_paths=changed_paths,
+            workdir, workdir_base_ref, run_id_base, arm, changed_paths=changed_paths,
         )
 
         transcript_path = TRANSCRIPTS_DIR / f"{run_id_base}_{arm}.txt"
