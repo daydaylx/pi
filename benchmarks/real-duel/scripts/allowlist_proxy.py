@@ -27,7 +27,9 @@ import sys
 import threading
 
 
-def _host_allowed(host: str, allowlist: list[str]) -> bool:
+def _host_allowed(host: str, allowlist: list[str], observe_only: bool) -> bool:
+    if observe_only:
+        return True
     host = host.lower().rstrip(".")
     for allowed in allowlist:
         allowed = allowed.lower().rstrip(".")
@@ -56,7 +58,7 @@ def _relay(a: socket.socket, b: socket.socket) -> None:
                 pass
 
 
-def _handle(client: socket.socket, allowlist: list[str], log) -> None:
+def _handle(client: socket.socket, allowlist: list[str], observe_only: bool, log) -> None:
     try:
         buf = b""
         while b"\r\n\r\n" not in buf and len(buf) < 8192:
@@ -73,12 +75,12 @@ def _handle(client: socket.socket, allowlist: list[str], log) -> None:
             return
         host = match.group(1).decode("ascii", "replace")
         port = int(match.group(2))
-        if not _host_allowed(host, allowlist):
+        if not _host_allowed(host, allowlist, observe_only):
             log(f"DENY {host}:{port}")
             client.sendall(b"HTTP/1.1 403 Forbidden\r\n\r\n")
             client.close()
             return
-        log(f"ALLOW {host}:{port}")
+        log(f"{'OBSERVE' if observe_only else 'ALLOW'} {host}:{port}")
         try:
             upstream = socket.create_connection((host, port), timeout=15)
         except OSError as exc:
@@ -105,10 +107,18 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--ready-file", help="Datei, in die die tatsaechliche Portnummer geschrieben wird")
     parser.add_argument("--log-file", help="Datei fuer ALLOW/DENY-Log (Standard: stderr)")
+    parser.add_argument(
+        "--observe-only",
+        action="store_true",
+        help="Alles durchlassen, aber jeden Host loggen -- fuer die einmalige Kalibrierung "
+             "einer Allowlist aus echten Verbindungen statt geratenen Domains. NICHT fuer "
+             "echte Kandidatenlaeufe verwenden.",
+    )
     args = parser.parse_args(argv)
 
-    if not args.allow:
-        parser.error("mindestens ein --allow HOST ist Pflicht (default-deny sonst sinnlos)")
+    if not args.allow and not args.observe_only:
+        parser.error("mindestens ein --allow HOST ist Pflicht (default-deny sonst sinnlos), "
+                      "oder --observe-only fuer eine Kalibrierungsrunde")
 
     log_fh = open(args.log_file, "a", buffering=1) if args.log_file else sys.stderr
 
@@ -124,13 +134,16 @@ def main(argv: list[str]) -> int:
     if args.ready_file:
         with open(args.ready_file, "w") as f:
             f.write(str(actual_port))
-    log(f"listening on {args.bind}:{actual_port}, allowlist={args.allow}")
+    mode = "OBSERVE-ONLY (alles erlaubt+geloggt)" if args.observe_only else f"allowlist={args.allow}"
+    log(f"listening on {args.bind}:{actual_port}, {mode}")
 
     try:
         while True:
             client, _addr = server.accept()
             threading.Thread(
-                target=_handle, args=(client, args.allow, log), daemon=True
+                target=_handle,
+                args=(client, args.allow, args.observe_only, log),
+                daemon=True,
             ).start()
     except KeyboardInterrupt:
         return 0

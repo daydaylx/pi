@@ -89,7 +89,9 @@ def build_bwrap_args(workspace: str, home: str, extra_ro_binds: list[str]) -> li
     return args
 
 
-def _start_allowlist_proxy(allowed_hosts: list[str], log_path: str | None):
+def _start_allowlist_proxy(
+    allowed_hosts: list[str], log_path: str | None, observe_only: bool = False
+):
     """Startet allowlist_proxy.py als Hintergrundprozess auf dem HOST
     (ausserhalb jeder Sandbox) und wartet, bis er tatsaechlich lauscht."""
     ready_fd, ready_file = tempfile.mkstemp(prefix="allowlist-proxy-port-")
@@ -101,6 +103,8 @@ def _start_allowlist_proxy(allowed_hosts: list[str], log_path: str | None):
         "--bind", "127.0.0.1", "--port", "0",
         "--ready-file", ready_file,
     ]
+    if observe_only:
+        cmd += ["--observe-only"]
     if log_path:
         cmd += ["--log-file", log_path]
     proc = subprocess.Popen(cmd)
@@ -128,11 +132,12 @@ def _wait_fd_ready(read_fd: int, timeout: float) -> None:
 def run_network_sandboxed(
     workspace: str, home: str, extra_ro_binds: list[str],
     allowed_hosts: list[str], network_log: str | None, command: list[str],
+    observe_only: bool = False,
 ) -> int:
     """Tier 1 + Tier 2: eigenes Netzwerk-Namespace mit NAT via slirp4netns,
     Zugriff ausschliesslich ueber den Allowlist-Proxy am festen Gateway
     10.0.2.2. Siehe Moduldocstring fuer den vollen Ablauf."""
-    proxy_proc, proxy_port = _start_allowlist_proxy(allowed_hosts, network_log)
+    proxy_proc, proxy_port = _start_allowlist_proxy(allowed_hosts, network_log, observe_only)
     placeholder = None
     slirp_proc = None
     try:
@@ -209,6 +214,13 @@ def main(argv: list[str]) -> int:
         metavar="PATH",
         help="Datei fuer das ALLOW/DENY-Log des Allowlist-Proxys (nur mit --allow-host)",
     )
+    parser.add_argument(
+        "--observe-network-only",
+        action="store_true",
+        help="Tier 2 im Kalibrierungsmodus: alles durchlassen, aber jeden Host loggen. "
+             "Nur fuer einmalige Allowlist-Ermittlung aus echten Verbindungen, NICHT fuer "
+             "echte Kandidatenlaeufe. Impliziert --allow-host ist nicht mehr Pflicht.",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
 
@@ -221,9 +233,10 @@ def main(argv: list[str]) -> int:
     workspace = os.path.abspath(args.workspace)
     home = os.path.abspath(args.home)
 
-    if args.allow_host:
+    if args.allow_host or args.observe_network_only:
         return run_network_sandboxed(
-            workspace, home, args.ro_bind, args.allow_host, args.network_log, command
+            workspace, home, args.ro_bind, args.allow_host, args.network_log, command,
+            observe_only=args.observe_network_only,
         )
 
     bwrap_args = build_bwrap_args(workspace, home, args.ro_bind)
