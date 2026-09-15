@@ -15,6 +15,7 @@ import { frontendProtocolSections } from "./runtime/frontend-protocol.mjs";
 import { frontendBridgeSections } from "./runtime/frontend-bridge.mjs";
 import { workspaceSnapshotSections } from "./runtime/workspace-snapshot.mjs";
 import { snapshotGateSections } from "./runtime/snapshot-gates.mjs";
+import { secondOpinionSections } from "./runtime/second-opinion.mjs";
 
 export const runtimeSections = {
   ...targetConfigSections,
@@ -33,4 +34,5 @@ export const runtimeSections = {
   ...frontendBridgeSections,
   ...workspaceSnapshotSections,
   ...snapshotGateSections,
+  ...secondOpinionSections,
 };

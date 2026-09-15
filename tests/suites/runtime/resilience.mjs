@@ -674,8 +674,12 @@ export const resilienceSections = {
       resilience,
       sessionHealth,
       openrouterDoctor,
+      secondOpinion,
     } = context;
     const frontendBridge = await load("extensions/frontend-bridge/index.ts");
+    const secondOpinionExtension = await load(
+      "extensions/second-opinion/index.ts",
+    );
 
     await section("combined production extension stack", async () => {
       if (
@@ -690,7 +694,9 @@ export const resilienceSections = {
         !auroraUi ||
         !resilience ||
         !sessionHealth ||
-        !openrouterDoctor
+        !openrouterDoctor ||
+        !secondOpinion ||
+        !secondOpinionExtension
       )
         return;
       const factoryByExtension = {
@@ -707,6 +713,7 @@ export const resilienceSections = {
         "+extensions/session-health/index.ts": sessionHealth.default,
         "+extensions/frontend-bridge/index.ts": frontendBridge.default,
         "+extensions/openrouter-doctor/index.ts": openrouterDoctor.default,
+        "+extensions/second-opinion/index.ts": secondOpinionExtension.default,
       };
       const settings = JSON.parse(
         readFileSync(path.join(ROOT, "settings.json"), "utf8"),
@@ -759,6 +766,7 @@ export const resilienceSections = {
           "project_check",
           "read",
           "recovery_check",
+          "second_opinion",
           "verify",
           "write",
         ],

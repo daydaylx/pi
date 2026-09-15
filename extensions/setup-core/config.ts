@@ -18,6 +18,21 @@ export interface VerificationCommand {
   timeoutMs: number;
 }
 
+export interface SecondOpinionConfig {
+  enabled: boolean;
+  providerId: string;
+  modelId: string;
+  mainModelFamily: string;
+  opinionModelFamily: string;
+  requireDifferentFamily: true;
+  preferDifferentBackend: boolean;
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  timeoutMs: number;
+  maxCallsPerDecision: 1;
+  allowContextFollowup: false;
+}
+
 export interface SetupConfig {
   ui: { theme: "aurora-night"; motion: MotionMode; dashboard: DashboardMode };
   permissions: {
@@ -32,6 +47,7 @@ export interface SetupConfig {
   };
   verificationStatus: { enabled: boolean };
   verification: Record<VerificationName, VerificationCommand>;
+  secondOpinion: SecondOpinionConfig;
 }
 
 export interface ConfigDiagnostic {
@@ -72,6 +88,20 @@ const DEFAULT_CONFIG: SetupConfig = {
       args: ["--prefix", "npm", "run", "test"],
       timeoutMs: 300_000,
     },
+  },
+  secondOpinion: {
+    enabled: false,
+    providerId: "anthropic",
+    modelId: "claude-sonnet-5",
+    mainModelFamily: "openai-codex",
+    opinionModelFamily: "anthropic",
+    requireDifferentFamily: true,
+    preferDifferentBackend: true,
+    maxInputTokens: 8_000,
+    maxOutputTokens: 700,
+    timeoutMs: 45_000,
+    maxCallsPerDecision: 1,
+    allowContextFollowup: false,
   },
 };
 
@@ -152,6 +182,41 @@ function boundedInt(
   return fallback;
 }
 
+function boundedString(
+  value: unknown,
+  fallback: string,
+  source: string,
+  key: string,
+  diagnostics: ConfigDiagnostic[],
+): string {
+  if (value === undefined) return fallback;
+  if (typeof value === "string" && value.trim() && value.length <= 200)
+    return value.trim();
+  diagnostics.push({
+    level: "error",
+    source,
+    message: `${key} must be a non-empty string of at most 200 characters`,
+  });
+  return fallback;
+}
+
+function booleanValue(
+  value: unknown,
+  fallback: boolean,
+  source: string,
+  key: string,
+  diagnostics: ConfigDiagnostic[],
+): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value === "boolean") return value;
+  diagnostics.push({
+    level: "error",
+    source,
+    message: `${key} must be boolean`,
+  });
+  return fallback;
+}
+
 function applyUserLayer(
   base: SetupConfig,
   raw: Record<string, unknown>,
@@ -168,6 +233,7 @@ function applyUserLayer(
       "lsp",
       "verificationStatus",
       "verification",
+      "secondOpinion",
     ],
     source,
     "",
@@ -181,6 +247,9 @@ function applyUserLayer(
     : undefined;
   const verification = isObject(raw.verification)
     ? raw.verification
+    : undefined;
+  const secondOpinion = isObject(raw.secondOpinion)
+    ? raw.secondOpinion
     : undefined;
 
   if (ui)
@@ -221,6 +290,27 @@ function applyUserLayer(
       ["typecheck", "test"],
       source,
       "verification.",
+      diagnostics,
+    );
+  if (secondOpinion)
+    reportUnknownKeys(
+      secondOpinion,
+      [
+        "enabled",
+        "providerId",
+        "modelId",
+        "mainModelFamily",
+        "opinionModelFamily",
+        "requireDifferentFamily",
+        "preferDifferentBackend",
+        "maxInputTokens",
+        "maxOutputTokens",
+        "timeoutMs",
+        "maxCallsPerDecision",
+        "allowContextFollowup",
+      ],
+      source,
+      "secondOpinion.",
       diagnostics,
     );
 
@@ -300,6 +390,114 @@ function applyUserLayer(
       message: "verificationStatus.enabled muss boolean sein",
     });
   }
+  if (secondOpinion) {
+    next.secondOpinion.enabled = booleanValue(
+      secondOpinion.enabled,
+      next.secondOpinion.enabled,
+      source,
+      "secondOpinion.enabled",
+      diagnostics,
+    );
+    next.secondOpinion.providerId = boundedString(
+      secondOpinion.providerId,
+      next.secondOpinion.providerId,
+      source,
+      "secondOpinion.providerId",
+      diagnostics,
+    );
+    next.secondOpinion.modelId = boundedString(
+      secondOpinion.modelId,
+      next.secondOpinion.modelId,
+      source,
+      "secondOpinion.modelId",
+      diagnostics,
+    );
+    next.secondOpinion.mainModelFamily = boundedString(
+      secondOpinion.mainModelFamily,
+      next.secondOpinion.mainModelFamily,
+      source,
+      "secondOpinion.mainModelFamily",
+      diagnostics,
+    );
+    next.secondOpinion.opinionModelFamily = boundedString(
+      secondOpinion.opinionModelFamily,
+      next.secondOpinion.opinionModelFamily,
+      source,
+      "secondOpinion.opinionModelFamily",
+      diagnostics,
+    );
+    if (
+      secondOpinion.requireDifferentFamily !== undefined &&
+      secondOpinion.requireDifferentFamily !== true
+    ) {
+      diagnostics.push({
+        level: "error",
+        source,
+        message: "secondOpinion.requireDifferentFamily muss true sein",
+      });
+    }
+    next.secondOpinion.requireDifferentFamily = true;
+    next.secondOpinion.preferDifferentBackend = booleanValue(
+      secondOpinion.preferDifferentBackend,
+      next.secondOpinion.preferDifferentBackend,
+      source,
+      "secondOpinion.preferDifferentBackend",
+      diagnostics,
+    );
+    next.secondOpinion.maxInputTokens = boundedInt(
+      secondOpinion.maxInputTokens,
+      next.secondOpinion.maxInputTokens,
+      256,
+      8_000,
+      source,
+      "secondOpinion.maxInputTokens",
+      diagnostics,
+    );
+    next.secondOpinion.maxOutputTokens = boundedInt(
+      secondOpinion.maxOutputTokens,
+      next.secondOpinion.maxOutputTokens,
+      64,
+      700,
+      source,
+      "secondOpinion.maxOutputTokens",
+      diagnostics,
+    );
+    next.secondOpinion.timeoutMs = boundedInt(
+      secondOpinion.timeoutMs,
+      next.secondOpinion.timeoutMs,
+      1_000,
+      45_000,
+      source,
+      "secondOpinion.timeoutMs",
+      diagnostics,
+    );
+    next.secondOpinion.maxCallsPerDecision = boundedInt(
+      secondOpinion.maxCallsPerDecision,
+      next.secondOpinion.maxCallsPerDecision,
+      1,
+      1,
+      source,
+      "secondOpinion.maxCallsPerDecision",
+      diagnostics,
+    ) as 1;
+    next.secondOpinion.allowContextFollowup = booleanValue(
+      secondOpinion.allowContextFollowup,
+      next.secondOpinion.allowContextFollowup,
+      source,
+      "secondOpinion.allowContextFollowup",
+      diagnostics,
+    ) as false;
+    if (next.secondOpinion.allowContextFollowup) {
+      diagnostics.push({
+        level: "error",
+        source,
+        message:
+          "secondOpinion.allowContextFollowup must remain false in the MVP",
+      });
+      next.secondOpinion.allowContextFollowup = false;
+    }
+  }
+
   for (const name of ["typecheck", "test"] as const) {
     const rawCheck = verification?.[name];
     if (!isObject(rawCheck)) continue;

@@ -450,6 +450,7 @@ export const targetConfigSections = {
             "+extensions/session-health/index.ts",
             "+extensions/frontend-bridge/index.ts",
             "+extensions/openrouter-doctor/index.ts",
+            "+extensions/second-opinion/index.ts",
           ],
           "settings declare the dependency-safe local extension order",
         );
@@ -461,6 +462,7 @@ export const targetConfigSections = {
           "+extensions/lsp/index.ts",
           "+extensions/aurora-ui/index.ts",
           "+extensions/resilience/index.ts",
+          "+extensions/second-opinion/index.ts",
         ]) {
           assert(
             activeExtensions.includes(extension),

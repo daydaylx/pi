@@ -70,6 +70,36 @@
         "typecheck": { "$ref": "#/$defs/check" },
         "test": { "$ref": "#/$defs/check" }
       }
+    },
+    "secondOpinion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "providerId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "modelId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "mainModelFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "opinionModelFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "requireDifferentFamily": { "const": true },
+        "preferDifferentBackend": { "type": "boolean", "default": true },
+        "maxInputTokens": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 8000
+        },
+        "maxOutputTokens": { "type": "integer", "minimum": 64, "maximum": 700 },
+        "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 45000 },
+        "maxCallsPerDecision": { "const": 1 },
+        "allowContextFollowup": { "const": false }
+      }
     }
   },
   "$defs": {

@@ -116,7 +116,8 @@
     "+extensions/resilience/index.ts",
     "+extensions/session-health/index.ts",
     "+extensions/frontend-bridge/index.ts",
-    "+extensions/openrouter-doctor/index.ts"
+    "+extensions/openrouter-doctor/index.ts",
+    "+extensions/second-opinion/index.ts"
   ],
   "doubleEscapeAction": "tree",
   "treeFilterMode": "all",
