@@ -42,7 +42,10 @@ export const SECTION_SUITES = {
   "workspace snapshot fingerprint stability": "runtime",
   "workspace snapshot error categories": "runtime",
   "workspace snapshot mutation during capture": "runtime",
+  "workspace snapshot content identity (textconv/ext-diff independence)":
+    "runtime",
   "snapshot gate asynchronous regressions": "runtime",
+  "snapshot gate textconv content-identity regressions": "runtime",
 };
 
 export const RUN_MJS_SUITES = [...new Set(Object.values(SECTION_SUITES))];

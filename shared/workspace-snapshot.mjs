@@ -9,7 +9,13 @@ import {
 } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 
-export const WORKSPACE_SNAPSHOT_SCHEMA_VERSION = "1";
+// Bumped by SNAP-001: the raw patch hashes below now force --no-textconv,
+// which changes stagedPatchSha256/unstagedPatchSha256 (and therefore every
+// fingerprint) for any workspace with a configured textconv driver. Bumping
+// the version guarantees every stored fingerprint is invalidated on upgrade,
+// rather than leaving it ambiguous whether a given repo was actually
+// affected by the fix.
+export const WORKSPACE_SNAPSHOT_SCHEMA_VERSION = "2";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -615,12 +621,37 @@ function buildSnapshot(state, stagedPatch, unstagedPatch, untrackedContent) {
  * workspace. It contains paths and hashes only; patches and file contents are
  * intentionally never returned to benchmark results.
  *
+ * Content identity (SNAP-001): two workspace states are the same workspace
+ * iff `head`, the sorted `staged`/`unstaged`/`untracked`/`renames`/
+ * `deletions` lists, `stagedPatchSha256`, `unstagedPatchSha256` and
+ * `untrackedContent` are all equal. `stagedPatchSha256`/`unstagedPatchSha256`
+ * are SHA-256 digests of the raw byte stream of `git diff [--cached]
+ * --no-ext-diff --no-textconv --binary -M` — both anti-conversion flags are
+ * mandatory, not stylistic: without them a `.gitattributes` `textconv`/
+ * `diff.external` driver can map two different blobs onto the same diff
+ * text (or arbitrary driver-controlled output), letting the fingerprint
+ * certify content equality that does not exist. Mode changes (chmod without
+ * a content change) are covered by this same raw patch — `git diff` without
+ * `--name-status` includes `old mode`/`new mode` lines — so no separate mode
+ * field exists or is needed. Explicitly NOT part of identity: timestamps,
+ * inode/mtime/ctime (used only by `contentStamp()` as a mutation-during-
+ * capture signal, never hashed into the fingerprint) and absolute paths.
+ * Determinism: `buildSnapshot()` JSON-serializes a fixed key order
+ * (`schemaVersion, head, staged, unstaged, untracked, renames, deletions,
+ * changedFiles, stagedPatchSha256, unstagedPatchSha256, untrackedContent`)
+ * over arrays that are always sorted first (`staged`/`unstaged`/`deletions`
+ * by `path`, `renames` by `` `${from}\0${to}` `` — `\0` is a safe separator
+ * since git's `-z` output NUL-terminates paths, so a path can never contain
+ * one). No code path may fall back to a bare status or filename hash without
+ * the patch/content hashes above (that would silently widen what counts as
+ * "unchanged").
+ *
  * Never throws — every failure mode (no repository, git unavailable, a
  * failed/aborted git command, an unreadable path, a workspace that kept
  * changing across the retry budget, or a parser contradiction) comes back as
  * `{ ok: false, error: { code, message } }` so every caller can react
  * explicitly instead of a bare exception forcing an implicit, inconsistent
- * fallback per call site.
+ * fallback per call site. See `docs/decisions/027-workspace-snapshot-content-identity.md`.
  */
 export async function collectWorkspaceSnapshot(worktree, options = {}) {
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
@@ -660,16 +691,32 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
     // workspace exactly where a real race would land.
     await options.onAttemptState?.(attempt, before.value);
 
+    // --no-ext-diff and --no-textconv are both required (SNAP-001): either
+    // one alone still lets a .gitattributes-configured diff driver replace
+    // the byte stream this hash is computed over, decoupling the fingerprint
+    // from the actual blob content. See the content-identity note on
+    // collectWorkspaceSnapshot above.
     const [stagedPatch, unstagedPatch] = await Promise.all([
       hashGitOutput(
         repositoryRoot.value,
-        ["diff", "--cached", "--no-ext-diff", "--binary", "-M"],
+        [
+          "diff",
+          "--cached",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--binary",
+          "-M",
+        ],
         { timeoutMs, signal },
       ),
-      hashGitOutput(repositoryRoot.value, ["diff", "--no-ext-diff", "--binary", "-M"], {
-        timeoutMs,
-        signal,
-      }),
+      hashGitOutput(
+        repositoryRoot.value,
+        ["diff", "--no-ext-diff", "--no-textconv", "--binary", "-M"],
+        {
+          timeoutMs,
+          signal,
+        },
+      ),
     ]);
     if (!stagedPatch.ok || !unstagedPatch.ok) {
       lastError = !stagedPatch.ok ? stagedPatch : unstagedPatch;

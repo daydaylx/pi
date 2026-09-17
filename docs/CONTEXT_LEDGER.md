@@ -67,6 +67,14 @@
   Retry-Budget. Eigenständige Capability-/Protocol-Grenzen (F-12–F-15) bleiben
   ohne belastbaren Nettogewinn erhalten; F-23 benötigt kein Runtime-Upgrade
   und F-24 bleibt ohne separaten Artefaktauftrag deferred.
+- SNAP-001 (Deep-Review-Behebungsauftrag, abgeschlossen): Die beiden
+  inhaltssensitiven Git-Aufrufe in `shared/workspace-snapshot.mjs` erzwingen
+  jetzt zusätzlich `--no-textconv` (nicht nur `--no-ext-diff`), sonst hätte
+  ein per `.gitattributes` konfigurierter Textconv-Treiber zwei
+  unterschiedliche Rohinhalte auf identischen Fingerprint abbilden können.
+  `WORKSPACE_SNAPSHOT_SCHEMA_VERSION` sprang `"1"` → `"2"` und invalidiert
+  damit bewusst jeden zuvor gespeicherten Fingerprint. Siehe
+  [`docs/decisions/027-workspace-snapshot-content-identity.md`](decisions/027-workspace-snapshot-content-identity.md).
 - `project_check` ist der einzige Weg zur vollständigen Projektverifikation
   und der einzige, der Footer und Ledger fortschreibt. Das `verify`-Tool
   bietet nur die Teilprüfungen `typecheck`/`test` (keine Abschlussbedingung).

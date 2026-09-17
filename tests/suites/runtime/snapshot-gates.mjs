@@ -103,7 +103,8 @@ export const snapshotGateSections = {
         );
         writeFileSync(untrackedProtected, "export {};\n");
         const rootSnapshot = await collectWorkspaceSnapshot(workspace);
-        const nestedSnapshot = await collectWorkspaceSnapshot(nestedPermissions);
+        const nestedSnapshot =
+          await collectWorkspaceSnapshot(nestedPermissions);
         assert(
           rootSnapshot.ok && nestedSnapshot.ok,
           "root and nested snapshot collection both succeed for an untracked protected file",
@@ -241,7 +242,11 @@ export const snapshotGateSections = {
         );
         const rejectedVerifier = {
           toolName: "subagent",
-          input: { agent: "verifier", task: "too short", acceptance: "reviewed" },
+          input: {
+            agent: "verifier",
+            task: "too short",
+            acceptance: "reviewed",
+          },
         };
         const rejectedResults = await guardHarness.runHooks(
           "tool_call",
@@ -603,5 +608,197 @@ export const snapshotGateSections = {
         rmSync(workspace, { recursive: true, force: true });
       }
     });
+  },
+
+  // SNAP-001: Recovery-Gate has no textconv-specific logic of its own — its
+  // workspaceFingerprint()/workspaceChanged() (extensions/resilience/index.ts)
+  // call collectWorkspaceSnapshot() and compare the opaque fingerprint,
+  // exactly like the two gates below. The content-identity regressions in
+  // tests/suites/runtime/workspace-snapshot.mjs already prove that shared
+  // fingerprint is now textconv/ext-diff independent, so Recovery-Gate's
+  // correctness follows from that plus these two policy-level consumers —
+  // no separate Recovery-specific textconv fixture is needed.
+  "snapshot gate textconv content-identity regressions": async ({
+    section,
+    verifierPolicy,
+  }) => {
+    await section(
+      "snapshot gate textconv content-identity regressions",
+      async () => {
+        // A verifier PASS recorded against a protected-path change must not
+        // cover a *different* later change to the same file merely because a
+        // configured textconv driver maps both onto identical diff output.
+        // Before SNAP-001, the commit gate's fingerprint comparison would
+        // have been fooled by exactly this, silently letting an unverified
+        // security-relevant edit through.
+        const commitGateWs = mkdtempSync(
+          path.join(tmpdir(), "pi-snapshot-gates-textconv-commit-"),
+        );
+        const commitGateGit = (args) =>
+          execFileSync("git", args, { cwd: commitGateWs, encoding: "utf8" });
+        try {
+          commitGateGit(["init", "--quiet", "--initial-branch=main"]);
+          mkdirSync(path.join(commitGateWs, "extensions", "permissions"), {
+            recursive: true,
+          });
+          writeFileSync(
+            path.join(commitGateWs, ".gitattributes"),
+            "extensions/permissions/guards.ts diff=redact\n",
+          );
+          const guardsPath = path.join(
+            commitGateWs,
+            "extensions",
+            "permissions",
+            "guards.ts",
+          );
+          writeFileSync(guardsPath, "export const version = 1;\n");
+          commitGateGit(["add", "-A"]);
+          commitGateGit([
+            "-c",
+            "user.name=Snapshot Fixture",
+            "-c",
+            "user.email=snapshot@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "base",
+          ]);
+          const driverPath = path.join(commitGateWs, "textconv-redact.js");
+          writeFileSync(
+            driverPath,
+            "#!/usr/bin/env node\nprocess.stdout.write('CONSTANT\\n');\n",
+          );
+          execFileSync(
+            "git",
+            [
+              "config",
+              "diff.redact.textconv",
+              `${process.execPath} ${driverPath}`,
+            ],
+            { cwd: commitGateWs },
+          );
+
+          writeFileSync(guardsPath, "export const version = 2; // allow-all\n");
+          const covered = await collectWorkspaceSnapshot(commitGateWs);
+          assert(covered.ok, "initial protected-path change is snapshotable");
+          const verification = {
+            workspaceRoot: commitGateWs,
+            workspaceFingerprint: covered.ok
+              ? covered.snapshot.fingerprint
+              : "",
+            verifierStatus: "completed",
+            verifierVerdict: "PASS",
+          };
+          const assessCommit = () =>
+            verifierPolicy.assessGitCommitVerifierGate(
+              {
+                toolName: "bash",
+                input: { command: 'git commit -m "guards"' },
+              },
+              commitGateWs,
+              verification,
+            );
+          assert(
+            !(await assessCommit()).blocked,
+            "a matching verifier PASS covers the exact protected-path content it judged",
+          );
+
+          commitGateGit(["checkout", "--", "extensions/permissions/guards.ts"]);
+          writeFileSync(
+            guardsPath,
+            "export const version = 2; // disable-all-checks\n",
+          );
+          assert(
+            (await assessCommit()).blocked,
+            "a second, different edit to the same protected file is never covered by a stale PASS recorded against different content, even when both edits share a textconv-masked diff output",
+          );
+        } finally {
+          rmSync(commitGateWs, { recursive: true, force: true });
+        }
+
+        // The same fingerprint comparison, exercised directly through
+        // assessVerifierDedup: a textconv-masked real content change must
+        // always be treated as a new, unverified state (PERMITTED to
+        // re-verify), never deduplicated against the stale PASS.
+        const dedupWs = mkdtempSync(
+          path.join(tmpdir(), "pi-snapshot-gates-textconv-dedup-"),
+        );
+        const dedupGit = (args) =>
+          execFileSync("git", args, { cwd: dedupWs, encoding: "utf8" });
+        try {
+          dedupGit(["init", "--quiet", "--initial-branch=main"]);
+          writeFileSync(
+            path.join(dedupWs, ".gitattributes"),
+            "*.secret diff=redact\n",
+          );
+          writeFileSync(path.join(dedupWs, "file.secret"), "base\n");
+          dedupGit(["add", "-A"]);
+          dedupGit([
+            "-c",
+            "user.name=Snapshot Fixture",
+            "-c",
+            "user.email=snapshot@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "base",
+          ]);
+          const driverPath = path.join(dedupWs, "textconv-redact.js");
+          writeFileSync(
+            driverPath,
+            "#!/usr/bin/env node\nprocess.stdout.write('CONSTANT\\n');\n",
+          );
+          execFileSync(
+            "git",
+            [
+              "config",
+              "diff.redact.textconv",
+              `${process.execPath} ${driverPath}`,
+            ],
+            { cwd: dedupWs },
+          );
+
+          writeFileSync(path.join(dedupWs, "file.secret"), "content-one\n");
+          const first = await collectWorkspaceSnapshot(dedupWs);
+          assert(first.ok, "initial textconv-driven snapshot succeeds");
+          const verification = {
+            workspaceRoot: dedupWs,
+            workspaceFingerprint: first.ok ? first.snapshot.fingerprint : "",
+            verifierStatus: "completed",
+            verifierVerdict: "PASS",
+          };
+          const task = [
+            "## Original User Request\nReview the secret handling change.",
+            "## Delegated Question\nDoes the redaction still behave correctly?",
+            "## Implementation / Diff to verify\n<diff>",
+            "## Baseline (Pre-existing workspace state)\nclean",
+            "## Acceptance Criteria\nThe verifier contract holds.",
+          ].join("\n\n");
+
+          dedupGit(["checkout", "--", "file.secret"]);
+          writeFileSync(
+            path.join(dedupWs, "file.secret"),
+            "content-two-different\n",
+          );
+          const second = await collectWorkspaceSnapshot(dedupWs);
+          assert(
+            second.ok &&
+              second.snapshot.fingerprint !== verification.workspaceFingerprint,
+            "a textconv-masked real content change is never treated as fingerprint-identical to the previously judged state",
+          );
+          const dedup = await verifierPolicy.assessVerifierDedup(
+            task,
+            dedupWs,
+            verification,
+          );
+          assert(
+            !dedup.blocked,
+            "a textconv-masked real content change is never deduplicated against a stale PASS — a fresh verifier run is required",
+          );
+        } finally {
+          rmSync(dedupWs, { recursive: true, force: true });
+        }
+      },
+    );
   },
 };
