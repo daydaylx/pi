@@ -89,6 +89,16 @@
   `WORKSPACE_SNAPSHOT_SCHEMA_VERSION` sprang `"1"` → `"2"` und invalidiert
   damit bewusst jeden zuvor gespeicherten Fingerprint. Siehe
   [`docs/decisions/027-workspace-snapshot-content-identity.md`](decisions/027-workspace-snapshot-content-identity.md).
+- REC-002 (Deep-Review-Behebungsauftrag, abgeschlossen): `latestRecoveryGate`
+  in `extensions/resilience/recovery-state.ts` behielt bei mehreren
+  `recovery-checked`-Markern für denselben `recovery-required`-Turn nur den
+  ersten (`!gate.checked`-Guard) statt den chronologisch neuesten — ein
+  Restart nach zwei echten `recovery_check`-Läufen stellte fälschlich den
+  ersten, veralteten Check wieder her. Der Guard ist entfernt; die neue
+  gemeinsame Reducer-Funktion `foldCheckedMarker` (plus `foldRequiredMarker`)
+  wird jetzt sowohl vom Live-Update im `recovery_check`-Tool als auch vom
+  History-Replay verwendet, sodass beide Pfade nicht mehr auseinanderlaufen
+  können.
 - `project_check` ist der einzige Weg zur vollständigen Projektverifikation
   und der einzige, der Footer und Ledger fortschreibt. Das `verify`-Tool
   bietet nur die Teilprüfungen `typecheck`/`test` (keine Abschlussbedingung).

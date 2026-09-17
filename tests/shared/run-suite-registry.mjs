@@ -27,6 +27,7 @@ export const SECTION_SUITES = {
   "Aurora Inspector command": "runtime",
   "global shortcut regressions": "runtime",
   "resilience telemetry and recovery": "runtime",
+  "recovery gate reducer (REC-002)": "runtime",
   "resilience recovery gate under a large diff (F-02)": "runtime",
   "web tool capability and boundaries": "runtime",
   "combined production extension stack": "runtime",

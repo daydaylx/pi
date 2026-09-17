@@ -27,6 +27,8 @@ import { UI_STATUS_KEYS, setTuiStatus } from "../shared/workflow-status.ts";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import {
   customData,
+  foldCheckedMarker,
+  foldRequiredMarker,
   gateRequiresInspection,
   latestRecoveryGate,
   type RecoveryGateState,
@@ -404,7 +406,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       rememberRecovery(required);
       if (!existing) {
         pi.appendEntry("resilience.recovery-required", required);
-        gate = { required };
+        gate = foldRequiredMarker(required);
       }
     }
     await updateRecoveryStatus();
@@ -607,7 +609,9 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       pi.appendEntry("resilience.recovery-required", required);
       // Das Gate sperrt nur bei möglicher Mutation; ein Fehlturn ohne jede
       // Workspace-Spur verlangt eine Fortsetzungs-Anweisung, keinen Check.
-      gate = gateRequiresInspection(required) ? { required } : undefined;
+      gate = gateRequiresInspection(required)
+        ? foldRequiredMarker(required)
+        : undefined;
     }
     openTurn = undefined;
     if (required) await updateRecoveryStatus();
@@ -694,7 +698,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
           workspaceFingerprint: snapshot.fingerprint,
         };
         pi.appendEntry("resilience.recovery-checked", record);
-        gate = { required: openRequired, checked: record };
+        gate = foldCheckedMarker(checkedGate, record);
       }
       await updateRecoveryStatus();
 

@@ -624,6 +624,111 @@ export const resilienceSections = {
         "recovery_check unlocks a restored gate after restart",
       );
 
+      // REC-002: two real recovery_check calls on the same required turn —
+      // over a real content change, not a synthetic fingerprint — must
+      // leave a restart trusting the second (newest) check, not the first.
+      const twoCheckWs = mkdtempSync(path.join(tmpdir(), "pi-rec002-"));
+      try {
+        execFileSync("git", ["init", "--quiet"], { cwd: twoCheckWs });
+        writeFileSync(path.join(twoCheckWs, "base.txt"), "base\n");
+        execFileSync("git", ["add", "-A"], { cwd: twoCheckWs });
+        execFileSync(
+          "git",
+          [
+            "-c",
+            "user.name=Recovery Fixture",
+            "-c",
+            "user.email=recovery@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "base",
+          ],
+          { cwd: twoCheckWs },
+        );
+        const twoCheckRequired = {
+          type: "custom",
+          customType: "resilience.recovery-required",
+          data: {
+            schemaVersion: 2,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            turnStartedAt: "2026-01-01T00:00:00.000Z",
+            reason: "final_failure",
+            workspaceChangedSinceTurnStart: false,
+            toolMayHaveMutatedWorkspace: true,
+          },
+        };
+        const twoCheckHarness = createHarness({
+          entries: [twoCheckRequired],
+        });
+        planMode?.default(twoCheckHarness.api);
+        modePermissions.default(twoCheckHarness.api);
+        resilience.default(twoCheckHarness.api);
+        const twoCheckCtx = twoCheckHarness.makeContext({ cwd: twoCheckWs });
+        await twoCheckHarness.runHooks("session_start", {}, twoCheckCtx);
+        const twoCheckTool = twoCheckHarness.tools.get("recovery_check");
+
+        await twoCheckTool.execute(
+          "check-A",
+          {},
+          undefined,
+          undefined,
+          twoCheckCtx,
+        );
+        const checkedA = twoCheckHarness.appended
+          .filter((entry) => entry.customType === "resilience.recovery-checked")
+          .at(-1);
+
+        writeFileSync(path.join(twoCheckWs, "base.txt"), "changed\n");
+        await twoCheckTool.execute(
+          "check-B",
+          {},
+          undefined,
+          undefined,
+          twoCheckCtx,
+        );
+        const checkedB = twoCheckHarness.appended
+          .filter((entry) => entry.customType === "resilience.recovery-checked")
+          .at(-1);
+        assert(
+          checkedA &&
+            checkedB &&
+            checkedA.data.workspaceFingerprint !==
+              checkedB.data.workspaceFingerprint,
+          "two recovery_check calls after a real content change produce two different fingerprints",
+        );
+
+        const restartedTwoCheck = createHarness({
+          entries: [twoCheckRequired, checkedA, checkedB],
+        });
+        planMode?.default(restartedTwoCheck.api);
+        modePermissions.default(restartedTwoCheck.api);
+        resilience.default(restartedTwoCheck.api);
+        const restartedTwoCheckCtx = restartedTwoCheck.makeContext({
+          cwd: twoCheckWs,
+        });
+        await restartedTwoCheck.runHooks(
+          "session_start",
+          {},
+          restartedTwoCheckCtx,
+        );
+        // The workspace is still at B's fingerprint (unchanged since check
+        // B). A restart that trusts B unlocks writes immediately; a restart
+        // that (like the pre-fix bug) replayed A instead would see the
+        // workspace as changed since A and keep the gate armed.
+        const afterRestartWrite = await restartedTwoCheck.runHooks(
+          "tool_call",
+          { toolName: "write", input: { path: "example.txt", content: "x" } },
+          restartedTwoCheckCtx,
+        );
+        assert(
+          afterRestartWrite.every((result) => !result?.block),
+          "a restart trusts the newest recovery check (B), unlocking writes without a redundant recovery_check",
+        );
+      } finally {
+        rmSync(twoCheckWs, { recursive: true, force: true });
+      }
+
       // YOLO bypasses the recovery gate outright (bewusste Lockerung, analog
       // zu Claude Codes bypassPermissions-Modus) — no recovery_check needed.
       const yoloArmed = createHarness({

@@ -7,10 +7,7 @@
  * `recovery-checked`); diese Funktionen entscheiden ohne jeden Zusatzzustand,
  * damit Guard, Tool und Tests dieselbe Quelle auswerten.
  */
-import type {
-  RecoveryCheckedMarker,
-  RecoveryRequiredMarker,
-} from "./types.ts";
+import type { RecoveryCheckedMarker, RecoveryRequiredMarker } from "./types.ts";
 
 export interface RecoveryGateState {
   required: RecoveryRequiredMarker;
@@ -53,11 +50,42 @@ function isRecoveryCheckedMarker(
 }
 
 /**
+ * Apply an already-parsed required marker: always replaces the gate,
+ * discarding any earlier checked state — a new required window means any
+ * prior check no longer proves anything about it.
+ */
+export function foldRequiredMarker(
+  required: RecoveryRequiredMarker,
+): RecoveryGateState {
+  return { required };
+}
+
+/**
+ * Apply an already-parsed checked marker to the current gate — always the
+ * newest one wins, never only the first. Live updates (recovery_check's
+ * tool execution in index.ts) and history replay (latestRecoveryGate below)
+ * call this exact function, so a restart can never reconstruct a different,
+ * older check than what the live session actually held: REC-002 was
+ * `!gate.checked` here keeping only the first checked marker per required
+ * turn, so a restart after a second, more recent check replayed the stale
+ * first one instead.
+ */
+export function foldCheckedMarker(
+  gate: RecoveryGateState | undefined,
+  checked: RecoveryCheckedMarker,
+): RecoveryGateState | undefined {
+  if (!gate || checked.turnStartedAt !== gate.required.turnStartedAt) {
+    return gate;
+  }
+  return { ...gate, checked };
+}
+
+/**
  * Das letzte Recovery-Gate der Session-Historie: der jüngste
- * `recovery-required`-Eintrag und ein `recovery-checked` desselben Turns,
- * sofern er nach dem Required-Eintrag geschrieben wurde. Ein älteres,
- * bereits geprüftes Gate bleibt geschlossen, sobald ein neues Required
- * erscheint.
+ * `recovery-required`-Eintrag und der chronologisch neueste
+ * `recovery-checked` desselben Turns, sofern er nach dem Required-Eintrag
+ * geschrieben wurde. Ein älteres, bereits geprüftes Gate bleibt geschlossen,
+ * sobald ein neues Required erscheint.
  */
 export function latestRecoveryGate(
   entries: readonly unknown[],
@@ -69,21 +97,15 @@ export function latestRecoveryGate(
       "resilience.recovery-required",
     );
     if (required && isRecoveryRequiredMarker(required)) {
-      gate = { required };
+      gate = foldRequiredMarker(required);
       continue;
     }
     const checked = customData<RecoveryCheckedMarker>(
       entry,
       "resilience.recovery-checked",
     );
-    if (
-      checked &&
-      isRecoveryCheckedMarker(checked) &&
-      gate &&
-      !gate.checked &&
-      checked.turnStartedAt === gate.required.turnStartedAt
-    ) {
-      gate = { ...gate, checked };
+    if (checked && isRecoveryCheckedMarker(checked)) {
+      gate = foldCheckedMarker(gate, checked);
     }
   }
   return gate;
