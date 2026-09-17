@@ -33,6 +33,7 @@ export const SECTION_SUITES = {
   "combined production extension stack": "runtime",
   "second opinion core": "runtime",
   "second opinion safety gates": "runtime",
+  "second opinion abort handling (OPINION-002)": "runtime",
   "LSP transport, process and lifecycle (#93)": "lsp",
   "LSP config, root detection, registry and profiles (#94)": "lsp",
   "LSP documents and diagnostics (#95)": "lsp",

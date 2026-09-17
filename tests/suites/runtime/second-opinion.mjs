@@ -317,4 +317,142 @@ export const secondOpinionSections = {
       }
     });
   },
+
+  "second opinion abort handling (OPINION-002)": async ({
+    section,
+    secondOpinion,
+  }) => {
+    await section("second opinion abort handling (OPINION-002)", async () => {
+      if (!secondOpinion) return;
+      const root = mkdtempSync(path.join(tmpdir(), "pi-second-opinion-abort-"));
+      mkdirSync(path.join(root, "src"));
+      writeFileSync(
+        path.join(root, "src/example.ts"),
+        "export const answer = 1;\nexport const other = 2;\n",
+      );
+      try {
+        // 1. Signal already aborted before executeApproved is even called
+        // (the caller's approval dialog can await arbitrarily long, and the
+        // caller's signal may fire during that wait). No provider call, and
+        // the approval is NOT burned — a caller that retries the exact same
+        // still-valid approval afterward can still succeed.
+        const calls = [];
+        const service = new secondOpinion.SecondOpinionService(config());
+        const preAbortRequest = request();
+        const prepared = await service.prepare(
+          preAbortRequest,
+          deps(root, calls),
+        );
+        assert(prepared.ok, "valid request builds an approval snapshot");
+        const abortedController = new AbortController();
+        abortedController.abort();
+        const cancelled = await service.executeApproved(
+          prepared.prepared,
+          {
+            approved: true,
+            approvalId: prepared.prepared.snapshot.approvalId,
+          },
+          { ...deps(root, calls), signal: abortedController.signal },
+        );
+        eq(
+          cancelled.status,
+          "cancelled",
+          "an already-aborted signal is reported as cancelled",
+        );
+        eq(
+          calls.length,
+          0,
+          "an already-aborted signal never reaches the provider",
+        );
+
+        const retried = await service.executeApproved(
+          prepared.prepared,
+          {
+            approved: true,
+            approvalId: prepared.prepared.snapshot.approvalId,
+          },
+          deps(root, calls),
+        );
+        eq(
+          retried.status,
+          "completed",
+          "the same approval can still be spent after a cancelled attempt — it was never consumed",
+        );
+        eq(
+          calls.length,
+          1,
+          "the retried, non-aborted attempt makes exactly one provider call",
+        );
+
+        // 2. Abort during the dialog: prepare() succeeds with a live signal,
+        // the signal fires while the (simulated) approval dialog is
+        // pending, and only then is executeApproved called — mirroring the
+        // real caller flow in index.ts (`await ctx.ui.confirm(...)` sits
+        // between prepare() and executeApproved()).
+        const dialogController = new AbortController();
+        const dialogRequest = {
+          ...request(),
+          requestId: "request-dialog-abort",
+          decisionId: "decision-dialog-abort",
+        };
+        const dialogPrepared = await service.prepare(dialogRequest, {
+          ...deps(root, calls),
+          signal: dialogController.signal,
+        });
+        assert(dialogPrepared.ok, "dialog-abort test starts prepared");
+        dialogController.abort(); // the dialog is cancelled here
+        const dialogResult = await service.executeApproved(
+          dialogPrepared.prepared,
+          {
+            approved: true,
+            approvalId: dialogPrepared.prepared.snapshot.approvalId,
+          },
+          { ...deps(root, calls), signal: dialogController.signal },
+        );
+        eq(
+          dialogResult.status,
+          "cancelled",
+          "an abort that fires during the approval dialog is cancelled",
+        );
+        eq(
+          calls.length,
+          1,
+          "an abort during the dialog never reaches the provider (call count unchanged from step 1)",
+        );
+
+        // 3. A normal, never-aborted request still makes exactly one call —
+        // the abort guard must not affect the happy path.
+        const cleanRequest = {
+          ...request(),
+          requestId: "request-clean",
+          decisionId: "decision-clean",
+        };
+        const cleanPrepared = await service.prepare(
+          cleanRequest,
+          deps(root, calls),
+        );
+        assert(cleanPrepared.ok, "clean request starts prepared");
+        const cleanResult = await service.executeApproved(
+          cleanPrepared.prepared,
+          {
+            approved: true,
+            approvalId: cleanPrepared.prepared.snapshot.approvalId,
+          },
+          deps(root, calls),
+        );
+        eq(
+          cleanResult.status,
+          "completed",
+          "a normal, non-aborted request still completes",
+        );
+        eq(
+          calls.length,
+          2,
+          "a normal request makes exactly one additional provider call",
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  },
 };

@@ -99,6 +99,19 @@
   wird jetzt sowohl vom Live-Update im `recovery_check`-Tool als auch vom
   History-Replay verwendet, sodass beide Pfade nicht mehr auseinanderlaufen
   können.
+- OPINION-002 (Deep-Review-Behebungsauftrag, abgeschlossen):
+  `SecondOpinionService.executeApproved` in
+  `extensions/second-opinion/service.ts` prüfte das Abort-Signal des
+  Aufrufers nie erneut, nachdem die (potenziell lange wartende)
+  Freigabe-Dialog-Phase des Aufrufers (`ctx.ui.confirm` in
+  `extensions/second-opinion/index.ts`) beendet war — ein während des
+  Dialogs abgebrochenes Signal hätte trotzdem einen echten, kostenpflichtigen
+  Modellcall ausgelöst, u. a. weil `AbortSignal.addEventListener("abort", …)`
+  auf einem bereits abgebrochenen Signal nie feuert. Zwei neue Prüfungen
+  (vor dem Verbrauch der Freigabe und unmittelbar vor dem Modellcall)
+  schließen die Lücke; ein früh erkannter Abbruch verbraucht die Freigabe
+  nicht, sodass ein Aufrufer denselben, weiterhin gültigen Snapshot erneut
+  versuchen kann.
 - `project_check` ist der einzige Weg zur vollständigen Projektverifikation
   und der einzige, der Footer und Ledger fortschreibt. Das `verify`-Tool
   bietet nur die Teilprüfungen `typecheck`/`test` (keine Abschlussbedingung).

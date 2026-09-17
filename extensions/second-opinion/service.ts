@@ -419,6 +419,16 @@ export class SecondOpinionService {
     }
     if (this.decisions.get(request.decisionId) !== "prepared")
       return this.result(request, "denied", "Request wurde bereits verwendet");
+    // OPINION-002: the approval dialog awaited by the caller between
+    // prepare() and this call can take arbitrary real time, during which
+    // the caller's signal may already have fired. Checked before the
+    // decision slot is marked consumed, so an abort here never burns an
+    // approval that was never actually spent on a provider call — a
+    // caller that legitimately retries executeApproved with the same
+    // still-"prepared" snapshot can still succeed.
+    if (deps.signal?.aborted) {
+      return this.result(request, "cancelled", "Anfrage wurde abgebrochen");
+    }
     if (!manifestStillCurrent(deps.cwd, prepared.snapshot.manifest)) {
       this.decisions.set(request.decisionId, "consumed");
       return this.result(
@@ -436,33 +446,49 @@ export class SecondOpinionService {
       controller.abort();
     }, this.config.timeoutMs);
     const onAbort = () => controller.abort();
-    deps.signal?.addEventListener("abort", onAbort, { once: true });
+    // addEventListener on an already-aborted signal never fires its
+    // listener, so a signal that turned abort between the check above and
+    // here would otherwise silently fail to arm `controller` — adopt the
+    // already-set state explicitly instead of relying on the listener alone.
+    if (deps.signal?.aborted) controller.abort();
+    else deps.signal?.addEventListener("abort", onAbort, { once: true });
     const started = Date.now();
     let result: OpinionResult;
     try {
-      const message = await deps.modelRegistry.complete(
-        prepared.model,
-        prepared.context,
-        {
-          signal: controller.signal,
-          maxTokens: this.config.maxOutputTokens,
-          maxRetries: 0,
-          timeoutMs: this.config.timeoutMs,
-        },
-      );
-      const parsed = parseResponse(message);
-      if (parsed.ok) {
-        result = {
-          status: "completed",
-          requestId: request.requestId,
-          decisionId: request.decisionId,
-          result: parsed.value,
-          inputTokens: message.usage?.input,
-          outputTokens: message.usage?.output,
-          latencyMs: Date.now() - started,
-        };
+      // Last guard immediately before the provider call itself — the
+      // structurally latest point a caught abort can still stop a real,
+      // billable call from starting.
+      if (controller.signal.aborted) {
+        result = this.result(
+          request,
+          "cancelled",
+          "Opinion-Call vor Providerstart abgebrochen",
+        );
       } else {
-        result = this.result(request, parsed.status, parsed.message);
+        const message = await deps.modelRegistry.complete(
+          prepared.model,
+          prepared.context,
+          {
+            signal: controller.signal,
+            maxTokens: this.config.maxOutputTokens,
+            maxRetries: 0,
+            timeoutMs: this.config.timeoutMs,
+          },
+        );
+        const parsed = parseResponse(message);
+        if (parsed.ok) {
+          result = {
+            status: "completed",
+            requestId: request.requestId,
+            decisionId: request.decisionId,
+            result: parsed.value,
+            inputTokens: message.usage?.input,
+            outputTokens: message.usage?.output,
+            latencyMs: Date.now() - started,
+          };
+        } else {
+          result = this.result(request, parsed.status, parsed.message);
+        }
       }
     } catch {
       result = this.result(
