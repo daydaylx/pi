@@ -67,6 +67,20 @@
   Retry-Budget. Eigenständige Capability-/Protocol-Grenzen (F-12–F-15) bleiben
   ohne belastbaren Nettogewinn erhalten; F-23 benötigt kein Runtime-Upgrade
   und F-24 bleibt ohne separaten Artefaktauftrag deferred.
+- SEC-001 (Deep-Review-Behebungsauftrag, abgeschlossen): Plan-, Readonly- und
+  Recovery-Gate klassifizieren Bash-Diagnosen jetzt über ein gemeinsames,
+  normalisiertes Modell (`extensions/shared/permission-policy.ts`):
+  Executables werden ausschließlich über `trustedExecutableName` aufgelöst
+  (`./git`/`./rg`/projektlokale Ersatzprogramme werden nicht mehr als
+  Systemdiagnose behandelt), `git status`/`diff`/`log` nur mit expliziter,
+  konservativer Options-Allowlist (u. a. `--no-ext-diff`/`--no-textconv`
+  für `diff` erzwungen), und `parseReadOnlyShell` lässt keine Pipelines mehr
+  zu (zuvor pro Segment separat geprüft, was Umgehungen über gemischte
+  Segmente erlaubte). Recovery-Gate erbt die Klassifikation strukturell über
+  denselben Aufruf (`extensions/permissions/guards.ts` →
+  `isPlanModeDiagnosticCommand`), keine eigene Kopie. Die Klassifikation
+  bleibt ausdrücklich eine Allowlist vor dem Executor, keine OS-Sandbox
+  (siehe [`docs/decisions/012-plan-mode-mutation-guard.md`](decisions/012-plan-mode-mutation-guard.md)).
 - SNAP-001 (Deep-Review-Behebungsauftrag, abgeschlossen): Die beiden
   inhaltssensitiven Git-Aufrufe in `shared/workspace-snapshot.mjs` erzwingen
   jetzt zusätzlich `--no-textconv` (nicht nur `--no-ext-diff`), sonst hätte

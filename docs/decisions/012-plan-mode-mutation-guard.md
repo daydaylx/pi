@@ -3,8 +3,16 @@
 ## Entscheidung
 
 Während `simple_plan` oder `detailed_plan` aktiv ist, schreibt der Agent keine
-Projektdatei. Als Bash sind ausschließlich `git status`, `git diff`, `git log`
-und `rg` freigegeben. Lokale Lese- und LSP-Tools bleiben nutzbar.
+Projektdatei. Als Bash sind ausschließlich eng klassifizierte
+Diagnosebefehle freigegeben: `git status`/`diff`/`log` nur mit sicheren,
+expliziten Optionen (beispielsweise `git status --short`,
+`git --no-pager diff --no-ext-diff --no-textconv --stat` und
+`git --no-pager log -n 1`), dazu `rg`, `find` ohne mutierende Optionen und die
+kleine Gruppe reiner Lesewerkzeuge. Die ausführbare Datei muss auf ein
+vertrauenswürdiges System-/Runtime-Binary auflösen; `./git` und projektlokale
+PATH-Ersatzdateien werden abgewiesen. Optionen für Ausgabedateien, externe
+Diff-Treiber, Textconv, Hooks und `-C` bleiben gesperrt. Lokale Lese- und
+LSP-Tools bleiben nutzbar.
 
 > **Korrektur (ADR [020](020-explicit-plan-approval.md)).** Dieser Abschnitt
 > lautete ursprünglich, der Agent dürfe `.agent/plans/current-plan.md` mit
@@ -37,7 +45,9 @@ auf.
 Ein Skriptname beweist keine Lesefähigkeit; auch Test-, Build- und
 Verifikationsskripte dürfen Dateien oder externe Zustände ändern. Die enge
 Allowlist ist direkt prüfbar und benötigt weder einen neuen Workflow noch eine
-Permission-State-Machine.
+Permission-State-Machine. `parseReadOnlyShell` akzeptiert deshalb ebenfalls
+keine Pipelines, Verkettungen oder Redirections. Die Parserprüfung ist nur ein
+zusätzlicher Guard vor dem Executor und keine OS-Sandbox.
 
 ## Konsequenzen
 

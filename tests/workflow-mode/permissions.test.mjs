@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -7,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { assert, eq, test } from "../shared/assertions.mjs";
 import { importModule as load } from "../shared/jiti-loader.mjs";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
@@ -485,8 +487,8 @@ await test("planModeBashGuard allows only explicit read-only shell tools during 
     workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
   for (const command of [
     "git status",
-    "git diff",
-    "git log",
+    "git --no-pager diff --no-ext-diff --no-textconv",
+    "git --no-pager log -n 1",
     "rg plan extensions",
   ]) {
     assert(
@@ -517,7 +519,6 @@ await test("planModeBashGuard allows the widened read-only system tool set durin
     "sort package.json",
     "uniq package.json",
     "find . -maxdepth 2 -type f",
-    "cat package.json | head -5",
   ]) {
     assert(
       !bash(command).blocked,
@@ -558,6 +559,14 @@ await test("planModeBashGuard rejects project scripts and shell composition duri
     "npm run build",
     "npm run verify",
     "git status; git diff",
+    "git status | head -20",
+    "git diff --output=plan-write.txt",
+    "git --no-pager diff --ext-diff",
+    "git --no-pager diff --textconv",
+    "git -C . status",
+    "sh -c 'git status'",
+    "./git status",
+    "cat package.json | head -5",
     "rg plan extensions 2>/dev/null",
   ]) {
     assert(
@@ -585,6 +594,121 @@ await test("planModeBashGuard rejects npm run <arbitrary script> and non-diagnos
       bash(command).blocked,
       `${command} invokes an arbitrary or mutating project script and must stay blocked — an unrecognized npm run <script> is not provably diagnostic just because it isn't a known package-manager mutation`,
     );
+  }
+});
+
+await test("Plan, readonly and executable resolution share the hardened diagnostic classification", () => {
+  if (!permissionPolicy || !workflowPolicy) return;
+  const cwd = process.cwd();
+  const allowed = [
+    "git status",
+    "git status --short",
+    "git --no-pager diff --no-ext-diff --no-textconv --stat",
+    "git --no-pager log -n 1",
+    "rg plan extensions",
+  ];
+  const blocked = [
+    "git diff --output=plan-write.txt",
+    "git --no-pager diff --ext-diff",
+    "git --no-pager diff --textconv",
+    "git -C . status",
+    "git status | head -20",
+    "sh -c 'git status'",
+    "./git status",
+  ];
+  for (const command of allowed) {
+    assert(
+      permissionPolicy.isPlanSafeCommand(command, cwd),
+      `readonly accepts the safe diagnostic: ${command}`,
+    );
+    assert(
+      permissionPolicy.isPlanModeDiagnosticCommand(command, cwd),
+      `Plan Mode accepts the safe diagnostic: ${command}`,
+    );
+    assert(
+      !workflowPolicy.planModeBashGuard(
+        { mode: "detailed_plan" },
+        "project-write",
+        command,
+        cwd,
+      ).blocked,
+      `the Plan Mode guard accepts the safe diagnostic: ${command}`,
+    );
+  }
+  for (const command of blocked) {
+    assert(
+      !permissionPolicy.isPlanSafeCommand(command, cwd),
+      `readonly rejects the unsafe diagnostic: ${command}`,
+    );
+    assert(
+      !permissionPolicy.isPlanModeDiagnosticCommand(command, cwd),
+      `Plan Mode rejects the unsafe diagnostic: ${command}`,
+    );
+    assert(
+      workflowPolicy.planModeBashGuard(
+        { mode: "detailed_plan" },
+        "project-write",
+        command,
+        cwd,
+      ).blocked,
+      `the Plan Mode guard rejects the unsafe diagnostic: ${command}`,
+    );
+  }
+});
+
+await test("project-local diagnostic replacements are blocked before they can create a file", () => {
+  if (!permissionPolicy || !workflowPolicy) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-plan-git-replacement-"));
+  const marker = join(cwd, "plan-policy-breach.txt");
+  const originalPath = process.env.PATH;
+  try {
+    const replacements = [
+      ["git", ["status"]],
+      ["rg", ["plan", "extensions"]],
+    ];
+    for (const [name, args] of replacements) {
+      const replacement = join(cwd, name);
+      writeFileSync(
+        replacement,
+        `#!/bin/sh\nprintf breach > ${JSON.stringify(marker)}\n`,
+      );
+      chmodSync(replacement, 0o755);
+
+      // Prove that the fixture would have a visible process/filesystem effect
+      // if the policy allowed it, then remove that controlled setup artifact.
+      execFileSync(replacement, args, { cwd });
+      assert(existsSync(marker), `${name} replacement creates its marker`);
+      rmSync(marker, { force: true });
+    }
+    process.env.PATH = `${cwd}${delimiter}${originalPath ?? ""}`;
+    for (const [name, args] of replacements) {
+      for (const command of [
+        `./${name} ${args.join(" ")}`,
+        `${name} ${args.join(" ")}`,
+      ]) {
+        assert(
+          !permissionPolicy.isPlanModeDiagnosticCommand(command, cwd),
+          `${command} is not a trusted diagnostic executable`,
+        );
+        assert(
+          workflowPolicy.planModeBashGuard(
+            { mode: "detailed_plan" },
+            "project-write",
+            command,
+            cwd,
+          ).blocked,
+          `${command} is blocked before process execution`,
+        );
+        if (permissionPolicy.isPlanModeDiagnosticCommand(command, cwd)) {
+          execFileSync("sh", ["-c", command], { cwd });
+        }
+        assert(!existsSync(marker), `${command} did not create a marker`);
+      }
+    }
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
 
@@ -894,7 +1018,7 @@ await test("shell structure decides consistently across all permission levels", 
   ]) {
     eq(decide("readonly", command), "block", `readonly blocks: ${command}`);
   }
-  for (const command of ["git status", "git status | head -20"]) {
+  for (const command of ["git status", "git --no-pager log -n 1"]) {
     eq(decide("readonly", command), "allow", `readonly allows: ${command}`);
   }
 

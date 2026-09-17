@@ -189,19 +189,26 @@ read-only-Webtools (`web_search`, `fetch_content`, nur trusted wirksam),
 > falsch.
 
 Für Bash gilt eine eng gehaltene Klassifikation
-(`isPlanModeDiagnosticCommand`): `git status`/`diff`/`log`, `rg`, `find` (ohne
-`-exec`/`-delete`/…) sowie eine kleine Gruppe reiner Lesewerkzeuge ohne
-Skriptcharakter (`pwd`, `ls`, `cat`, `head`, `tail`, `wc`, `stat`, `du`, `df`,
-`tree`, `sort`/`uniq` ohne `-o`). Kein Test, kein Lint, kein Build, kein
-`git show` über Bash. Projekteigene Skripte (`npm`/`pnpm`/`yarn
-run`/`test`/bare Skript-Aliase) werden nie allein am Namen als sicher
-eingestuft, weil sie beliebigen Lifecycle-Code ausführen können.
+(`isPlanModeDiagnosticCommand`): sichere Git-Inspektion mit expliziten Optionen
+(`git status --short`, `git --no-pager diff --no-ext-diff --no-textconv --stat`,
+`git --no-pager log -n 1`), `rg`, `find` (ohne `-exec`/`-delete`/…) sowie eine
+kleine Gruppe reiner Lesewerkzeuge ohne Skriptcharakter (`pwd`, `ls`, `cat`,
+`head`, `tail`, `wc`, `stat`, `du`, `df`, `tree`, `sort`/`uniq` ohne `-o`).
+Git-Optionen für Ausgabedateien, externe Diff-Treiber, Textconv, Hooks,
+`-C`/lokale Ersetzungen und ähnliche Ausführungswege bleiben gesperrt. Die
+ausführbare Datei muss auf ein vertrauenswürdiges System-/Runtime-Binary
+auflösen; `./git` und projektlokale PATH-Ersatzdateien werden nicht akzeptiert.
+Kein Test, kein Lint, kein Build, kein `git show` über Bash. Projekteigene
+Skripte (`npm`/`pnpm`/`yarn run`/`test`/bare Skript-Aliase) werden nie allein
+am Namen als sicher eingestuft, weil sie beliebigen Lifecycle-Code ausführen
+können.
 
 Der zugrunde liegende Parser (`parseReadOnlyShell`, gemeinsam mit dem
 `readonly`-Pfad genutzt) lässt keine Shell-Verkettung zu: weder `;` noch
-`&&`/`||`/ein alleinstehendes `&` noch Redirections (`<`/`>`, auch nicht
-`2>/dev/null`) — nur eine einzelne Pipeline aus `|`-verbundenen Segmenten,
-jedes Segment einzeln geprüft.
+`&&`/`||`/ein alleinstehendes `&`, Pipelines (`|`) noch Redirections (`<`/`>`,
+auch nicht `2>/dev/null`). Die Klassifikation ist eine vorgelagerte
+Allowlist, keine OS-Sandbox; sie wird deshalb in Plan, Readonly und Recovery
+gemeinsam verwendet und ersetzt keine Prozess-/Dateisystemisolation.
 
 `yolo` hebt diese Grenzen nicht auf; nur `readonly` reicht die Entscheidung an
 die Zugriffsstufe weiter (dort ist ohnehin schon alles gesperrt). Der Guard

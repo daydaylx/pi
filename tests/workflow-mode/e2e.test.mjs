@@ -1123,8 +1123,8 @@ await test("Plan Mode blocks every project write, including the old plan path", 
       }
       for (const command of [
         "git status",
-        "git diff",
-        "git log",
+        "git --no-pager diff --no-ext-diff --no-textconv",
+        "git --no-pager log -n 1",
         "rg plan extensions",
       ]) {
         const result = await harness.runHooks(

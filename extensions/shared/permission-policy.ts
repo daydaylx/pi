@@ -223,6 +223,31 @@ const TRUSTED_EXECUTABLE_ROOTS = [
     return [];
   }
 });
+// `rg` is bundled by the host in some supported installations rather than
+// living below a system bin directory. Keep the exact runtime-resolved path
+// captured at module load as an explicit exception; a later PATH replacement
+// (including an external wrapper) is not accepted. No other diagnostic name
+// receives this external-runtime exception.
+const TRUSTED_EXTERNAL_DIAGNOSTIC_NAMES = new Set(["rg"]);
+const TRUSTED_EXTERNAL_DIAGNOSTIC_PATHS = new Set<string>();
+
+for (const name of TRUSTED_EXTERNAL_DIAGNOSTIC_NAMES) {
+  for (const rawEntry of (process.env.PATH ?? "").split(delimiter)) {
+    const entry = rawEntry ? resolve(rawEntry) : resolve(process.cwd());
+    const candidate = resolve(entry, name);
+    try {
+      const canonical = realpathSync(candidate);
+      if (!statSync(canonical).isFile()) continue;
+      accessSync(canonical, constants.X_OK);
+      if (!isInside(resolve(process.cwd()), canonical)) {
+        TRUSTED_EXTERNAL_DIAGNOSTIC_PATHS.add(canonical);
+        break;
+      }
+    } catch {
+      // Continue to the next PATH entry.
+    }
+  }
+}
 
 function deny(reason: string): PolicyDecision {
   return { action: "block", reason };
@@ -445,8 +470,11 @@ interface ParsedShell {
 }
 
 /**
- * Conservative parser for Plan Mode. It accepts plain commands and pipelines,
- * but rejects shell constructs whose effects cannot be proven read-only.
+ * Conservative parser for Plan Mode and readonly permissions. It accepts one
+ * plain command only and rejects shell constructs whose effects cannot be
+ * proven read-only. In particular, pipelines are not a safe composition
+ * primitive: every command in a pipeline would need an independent process
+ * and argument proof, so callers must issue separate diagnostic commands.
  */
 export function parseReadOnlyShell(command: string): ParsedShell {
   const segments: string[] = [];
@@ -500,18 +528,7 @@ export function parseReadOnlyShell(command: string): ParsedShell {
       return { segments: [], error: "Shell-Redirections sind nicht erlaubt." };
     }
     if (char === "|") {
-      if (next === "|") {
-        return {
-          segments: [],
-          error: "Bedingte Shell-Verkettungen sind nicht erlaubt.",
-        };
-      }
-      if (!current.trim()) {
-        return { segments: [], error: "Leeres Pipeline-Segment." };
-      }
-      segments.push(current.trim());
-      current = "";
-      continue;
+      return { segments: [], error: "Shell-Pipelines sind nicht erlaubt." };
     }
     current += char;
   }
@@ -642,52 +659,141 @@ function trustedExecutableName(
     const canonical = realpathSync(candidate);
     if (!statSync(canonical).isFile()) return undefined;
     accessSync(canonical, constants.X_OK);
-    if (!TRUSTED_EXECUTABLE_ROOTS.some((root) => isInside(root, canonical))) {
+    const inTrustedRoot = TRUSTED_EXECUTABLE_ROOTS.some((root) =>
+      isInside(root, canonical),
+    );
+    const name = canonical.split(sep).pop()?.toLowerCase();
+    const runtimeDiagnostic =
+      !rawExecutable.includes("/") &&
+      !rawExecutable.includes("\\") &&
+      name !== undefined &&
+      TRUSTED_EXTERNAL_DIAGNOSTIC_NAMES.has(name) &&
+      TRUSTED_EXTERNAL_DIAGNOSTIC_PATHS.has(canonical) &&
+      !isInside(resolve(cwd), canonical);
+    if (!inTrustedRoot && !runtimeDiagnostic) {
       return undefined;
     }
-    return canonical.split(sep).pop()?.toLowerCase();
+    return name;
   } catch {
     return undefined;
   }
 }
 
-/**
- * Executable-name extraction for Plan Mode's bash guard — deliberately not
- * a filesystem/PATH trust check like trustedExecutableName. An earlier
- * version tried resolving through PATH and requiring the real binary to
- * live outside the project (mirroring trustedExecutableName's "outside a
- * trusted root" check, just with a wider trusted area) — that broke on
- * every ordinary setup: real npm/tsc/eslint commonly resolve through
- * node_modules/.bin (legitimately inside the project — the standard way a
- * project's own pinned devDependency versions run) or through a symlink to
- * an internal implementation file (`npm` to `npm-cli.js`), so the check
- * either rejected the exact in-project tool invocation the brief asks for
- * or silently returned the wrong name to classify by.
- *
- * trustedExecutableName's PATH-hijack paranoia is the right call for
- * `readonly`, a hard sandbox a user deliberately opts into, and stays
- * completely unchanged there. Plan Mode's guard is a different thing: an
- * accident-prevention layer on top of `project-write`/`confirm-all`, levels
- * that already run arbitrary bash freely with no executable-trust
- * verification at all outside this guard. Adding filesystem paranoia here
- * raises the bar above the rest of that permission level for no real
- * security gain (a renamed malicious binary placed early in PATH is an
- * existing, accepted risk of running any bash command under project-write,
- * on every permission level, in or out of Plan Mode) while breaking the
- * exact commands this guard exists to allow. So: just classify by the
- * literal token text, like the rest of this module's regex-based checks
- * (PLAN_SIMPLE_COMMANDS, isWriteCapableCommand) already do — an executable
- * name that doesn't match any recognized diagnostic tool still falls
- * through to `false` (blocked) in isPlanModeDiagnosticSegment below.
- */
-function diagnosticExecutableName(rawExecutable: string): string | undefined {
-  const name = rawExecutable.split(/[/\\]/).pop()?.toLowerCase();
-  return name || undefined;
+function hasForbiddenGitOption(tokens: string[]): boolean {
+  return tokens
+    .slice(1)
+    .some(
+      (token) =>
+        token === "-C" ||
+        token.startsWith("-C") ||
+        token === "-c" ||
+        token.startsWith("-c") ||
+        token === "-o" ||
+        token.startsWith("-o") ||
+        /^--(?:output|ext-diff|textconv|pager|paginate|config(?:-env)?|git-dir|work-tree|exec-path|namespace|super-prefix|show-signature)(?:=|$)/i.test(
+          token,
+        ),
+    );
 }
 
-function isSafeGit(tokens: string[], stdoutIsPiped: boolean): boolean {
+function isSafeGitStatusArgs(args: string[]): boolean {
+  const safeFlags = new Set([
+    "-b",
+    "-s",
+    "--branch",
+    "--porcelain",
+    "--porcelain=v1",
+    "--porcelain=v2",
+    "--short",
+    "--untracked-files",
+    "-u",
+    "-uno",
+    "-unormal",
+    "-uall",
+  ]);
+  const safeValues = /^(?:--untracked-files=(?:no|normal|all))$/i;
+  let pathspecs = false;
+  for (const arg of args) {
+    if (arg === "--") {
+      pathspecs = true;
+      continue;
+    }
+    if (pathspecs) continue;
+    if (safeFlags.has(arg) || safeValues.test(arg)) continue;
+    return false;
+  }
+  return true;
+}
+
+function isSafeGitDiffArgs(args: string[], pagerDisabled: boolean): boolean {
+  if (!pagerDisabled) return false;
+  const safeFlags = new Set([
+    "--cached",
+    "--color=never",
+    "--name-only",
+    "--name-status",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--numstat",
+    "--shortstat",
+    "--staged",
+    "--stat",
+    "--summary",
+  ]);
+  let pathspecs = false;
+  let hasNoExtDiff = false;
+  let hasNoTextconv = false;
+  for (const arg of args) {
+    if (arg === "--") {
+      pathspecs = true;
+      continue;
+    }
+    if (pathspecs) continue;
+    if (arg === "--no-ext-diff") hasNoExtDiff = true;
+    if (arg === "--no-textconv") hasNoTextconv = true;
+    if (safeFlags.has(arg)) continue;
+    return false;
+  }
+  return hasNoExtDiff && hasNoTextconv;
+}
+
+function isSafeGitLogArgs(args: string[], pagerDisabled: boolean): boolean {
+  if (!pagerDisabled) return false;
+  const safeFlags = new Set([
+    "--all",
+    "--color=never",
+    "--decorate",
+    "--no-color",
+    "--no-decorate",
+    "--oneline",
+  ]);
+  let pathspecs = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") {
+      pathspecs = true;
+      continue;
+    }
+    if (pathspecs) continue;
+    if (/^-\d+$/.test(arg)) continue;
+    if (arg === "-n") {
+      const count = args[index + 1];
+      if (!/^\d+$/.test(count ?? "")) return false;
+      index += 1;
+      continue;
+    }
+    if (/^--max-count=\d+$/i.test(arg)) continue;
+    if (/^--decorate=(?:auto|short|full|no)$/i.test(arg)) continue;
+    if (safeFlags.has(arg)) continue;
+    return false;
+  }
+  return true;
+}
+
+function isSafeGit(tokens: string[]): boolean {
   let subcommandIndex = 1;
-  let pagerDisabled = stdoutIsPiped;
+  let pagerDisabled = false;
   if (tokens[subcommandIndex] === "--no-pager") {
     pagerDisabled = true;
     subcommandIndex += 1;
@@ -696,33 +802,17 @@ function isSafeGit(tokens: string[], stdoutIsPiped: boolean): boolean {
   const subcommand = tokens[subcommandIndex]?.toLowerCase();
   if (!subcommand) return false;
   const args = tokens.slice(subcommandIndex + 1);
-  if (
-    hasAnyOption(tokens, [
-      /^--out/i,
-      /^--ext-d/i,
-      /^--textc/i,
-      /^--pagin/i,
-      /^--config(?:-env)?(?:=|$)/i,
-      /^-c$/i,
-      /^--show-sign/i,
-    ])
-  ) {
+  if (hasForbiddenGitOption(tokens)) return false;
+  if (tokens.slice(1, subcommandIndex).some((arg) => arg !== "--no-pager"))
     return false;
-  }
 
   switch (subcommand) {
     case "status":
-      return true;
+      return isSafeGitStatusArgs(args);
     case "log":
-      return (
-        pagerDisabled &&
-        !args.some((arg) =>
-          /^(?:-p|--patch|--stat|--numstat|--shortstat|--dirstat(?:=|$)|--summary)$/i.test(
-            arg,
-          ),
-        )
-      );
+      return isSafeGitLogArgs(args, tokens[1] === "--no-pager");
     case "diff":
+      return isSafeGitDiffArgs(args, tokens[1] === "--no-pager");
     case "show":
       return pagerDisabled && args.includes("--no-textconv");
     case "branch":
@@ -850,12 +940,10 @@ function isSafeSed(tokens: string[]): boolean {
 }
 
 /**
- * Per-tool classification shared by isSafePlanSegment (readonly, executable
- * resolved via the strict system-root-only trustedExecutableName) and
- * isPlanModeDiagnosticSegment's fallthrough (Plan Mode, executable taken
- * from the literal command text via diagnosticExecutableName) — takes the
- * already-resolved executable name so both callers share one body instead
- * of two copies of the same tool-by-tool rules.
+ * Per-tool classification shared by the readonly and Plan/Recovery paths.
+ * Both callers resolve the executable through trustedExecutableName before
+ * reaching this function, so a local replacement cannot become a diagnostic
+ * merely by sharing a basename with a system tool.
  */
 function classifyToolSegment(executable: string, tokens: string[]): boolean {
   if (PLAN_SIMPLE_COMMANDS.has(executable)) {
@@ -979,17 +1067,13 @@ function classifyToolSegment(executable: string, tokens: string[]): boolean {
   return false;
 }
 
-function isSafePlanSegment(
-  tokens: string[],
-  cwd: string,
-  stdoutIsPiped: boolean,
-): boolean {
+function isSafePlanSegment(tokens: string[], cwd: string): boolean {
   const executable = trustedExecutableName(tokens[0], cwd);
   if (!executable) return false;
   if (tokens.some((token) => isSensitiveReference(token))) return false;
   if (containsExternalPath(tokens, cwd)) return false;
   if (executable === "sed") return isSafeSed(tokens);
-  if (executable === "git") return isSafeGit(tokens, stdoutIsPiped);
+  if (executable === "git") return isSafeGit(tokens);
   if (["npm", "pnpm", "yarn"].includes(executable)) {
     if (tokens.length === 2 && ["-v", "--version"].includes(tokens[1])) {
       return true;
@@ -1010,9 +1094,7 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
   const parsed = parseReadOnlyShell(command);
   return (
     !parsed.error &&
-    parsed.segments.every((tokens, index) =>
-      isSafePlanSegment(tokens, cwd, index < parsed.segments.length - 1),
-    )
+    parsed.segments.every((tokens) => isSafePlanSegment(tokens, cwd))
   );
 }
 
@@ -1020,11 +1102,11 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
 // only inspect repository state and never run a project-defined script.
 const PLAN_MODE_SAFE_GIT_SUBCOMMANDS = new Set(["status", "diff", "log"]);
 
-// Read-only system tools already vetted as flag-safe by classifyToolSegment
-// (via PLAN_SIMPLE_COMMANDS or find's dedicated branch). Unlike npm/pnpm/yarn
+// Read-only tools already vetted as flag-safe by classifyToolSegment (via
+// PLAN_SIMPLE_COMMANDS or find's dedicated branch). Unlike npm/pnpm/yarn
 // scripts, none of these depend on project content to decide whether they
-// mutate anything, so trusting the literal executable name carries no more
-// risk here than it already does for `git`/`rg`.
+// mutate anything; the executable itself is still resolved through the shared
+// trust check before this list is consulted.
 const PLAN_MODE_DIAGNOSTIC_TOOLS = new Set([
   "pwd",
   "ls",
@@ -1041,10 +1123,10 @@ const PLAN_MODE_DIAGNOSTIC_TOOLS = new Set([
 ]);
 
 function isPlanModeSafeGitCommand(tokens: string[]): boolean {
-  const subcommand = tokens[1]?.toLowerCase();
+  const subcommandIndex = tokens[1] === "--no-pager" ? 2 : 1;
+  const subcommand = tokens[subcommandIndex]?.toLowerCase();
   if (!subcommand) return false;
-  if (PLAN_MODE_SAFE_GIT_SUBCOMMANDS.has(subcommand)) return true;
-  return false;
+  return PLAN_MODE_SAFE_GIT_SUBCOMMANDS.has(subcommand) && isSafeGit(tokens);
 }
 
 /**
@@ -1052,17 +1134,13 @@ function isPlanModeSafeGitCommand(tokens: string[]): boolean {
  * command because its name sounds diagnostic: project scripts can mutate.
  */
 function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
-  const executable = diagnosticExecutableName(tokens[0]);
+  const executable = trustedExecutableName(tokens[0], cwd);
   if (!executable) return false;
   if (tokens.some((token) => isSensitiveReference(token))) return false;
   if (containsExternalPath(tokens, cwd)) return false;
 
   if (executable === "git") {
-    const subcommand = tokens[1]?.toLowerCase();
-    return (
-      ["status", "diff", "log"].includes(subcommand ?? "") &&
-      isPlanModeSafeGitCommand(tokens)
-    );
+    return isPlanModeSafeGitCommand(tokens);
   }
   if (executable === "rg" || executable === "find") {
     return classifyToolSegment(executable, tokens);
@@ -1076,8 +1154,9 @@ function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
 /**
  * Is this bash command safe to run while Plan Mode is active? Only the
  * explicit Git inspection commands, ripgrep, and a small set of read-only,
- * non-script system tools (PLAN_MODE_DIAGNOSTIC_TOOLS, `find`) pass; project
- * scripts are never trusted merely because they sound like checks.
+ * non-script system tools (PLAN_MODE_DIAGNOSTIC_TOOLS, `find`) pass. The
+ * executable must resolve to a trusted system binary; project scripts and
+ * local replacements are never trusted merely because they sound like checks.
  */
 export function isPlanModeDiagnosticCommand(
   command: string,
@@ -1218,6 +1297,8 @@ const INTERPRETER_PATH_OPTIONS = new Set([
 const SHELL_INTERPRETERS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
 const REDIRECTED_STDIN_INTERPRETER =
   /(?:^|[|;&\n])\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)(?:env\s+)?(?:\S+\/)?(bash|dash|deno|ksh|lua|node|perl|php|python|python3|ruby|sh|zsh)\b[^|;&\n]*<(?!=)/i;
+const PIPE_INTERPRETER =
+  /(?:^|[|;&\n])\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)(?:env\s+)?(?:\S+\/)?(bash|dash|deno|ksh|lua|node|perl|php|python|python3|ruby|sh|zsh)\b(?=\s|$)/i;
 
 function isInlineInterpreter(executable: string, args: string[]): boolean {
   if (executable === "deno" && args[0]?.toLowerCase() === "eval") return true;
@@ -1295,10 +1376,14 @@ function projectWriteInterpreter(
       return executable;
     }
   }
+  if (!parseReadOnlyShell(command).error) return undefined;
   // parseReadOnlyShell intentionally rejects redirections. Still identify the
   // common `python < script.py`/heredoc shape as stdin code instead of letting
   // it fall through to project-write's unconditional allow.
-  return REDIRECTED_STDIN_INTERPRETER.exec(command)?.[1]?.toLowerCase();
+  return (
+    REDIRECTED_STDIN_INTERPRETER.exec(command)?.[1]?.toLowerCase() ??
+    PIPE_INTERPRETER.exec(command)?.[1]?.toLowerCase()
+  );
 }
 
 export function decideBash(

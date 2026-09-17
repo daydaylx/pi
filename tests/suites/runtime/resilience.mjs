@@ -423,21 +423,60 @@ export const resilienceSections = {
         recoveryRequestsBeforeRead,
         "read-only tools do not trigger a redundant recovery snapshot",
       );
-      const freeDiagnosticBash = await gateHarness.runHooks(
-        "tool_call",
-        { toolName: "bash", input: { command: "git status --short" } },
-        gateCtx,
+      const allowedDiagnosticCommands = [
+        "git status --short",
+        "git --no-pager diff --no-ext-diff --no-textconv --stat",
+        "git --no-pager log -n 1",
+      ];
+      for (const command of allowedDiagnosticCommands) {
+        const freeDiagnosticBash = await gateHarness.runHooks(
+          "tool_call",
+          { toolName: "bash", input: { command } },
+          gateCtx,
+        );
+        assert(
+          freeDiagnosticBash.every((result) => !result?.block),
+          `${command} stays available while the recovery gate is armed`,
+        );
+      }
+      const recoveryRequestsBeforeBlockedDiagnostics =
+        gateHarness.emitted.filter(
+          (entry) => entry.name === "recovery-status:request",
+        ).length;
+      eq(
+        recoveryRequestsBeforeBlockedDiagnostics,
+        recoveryRequestsBeforeRead,
+        "allowed diagnostic shell commands do not trigger a redundant recovery snapshot",
       );
-      assert(
-        freeDiagnosticBash.every((result) => !result?.block),
-        "diagnostic shell commands stay available while armed",
-      );
+      const blockedDiagnosticCommands = [
+        "git diff --output=plan-write.txt",
+        "git --no-pager diff --ext-diff",
+        "git --no-pager diff --textconv",
+        "git -C . status",
+        "git status | head -20",
+        "sh -c 'git status'",
+        "./git status",
+      ];
+      for (const command of blockedDiagnosticCommands) {
+        const blockedDiagnosticBash = await gateHarness.runHooks(
+          "tool_call",
+          { toolName: "bash", input: { command } },
+          gateCtx,
+        );
+        assert(
+          blockedDiagnosticBash.some(
+            (result) => result?.block && /Recovery-Gate/.test(result.reason),
+          ),
+          `${command} remains blocked while the recovery gate is armed`,
+        );
+      }
       eq(
         gateHarness.emitted.filter(
           (entry) => entry.name === "recovery-status:request",
         ).length,
-        recoveryRequestsBeforeRead,
-        "diagnostic shell commands do not trigger a redundant recovery snapshot",
+        recoveryRequestsBeforeBlockedDiagnostics +
+          blockedDiagnosticCommands.length,
+        "blocked diagnostic shell commands request a fresh recovery status",
       );
       const freeRecoveryCall = await gateHarness.runHooks(
         "tool_call",

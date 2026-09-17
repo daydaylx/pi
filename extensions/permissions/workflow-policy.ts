@@ -306,7 +306,7 @@ export function planModeBashGuard(
     blocked: true,
     reason: isWorkflowStateUnknown(workflow)
       ? UNKNOWN_WORKFLOW_REASON
-      : "Planmodus: Dieses Shell-Kommando ist während der Planung nicht erlaubt. Bash ist auf git status/diff/log, rg, find sowie eine kleine Gruppe reiner Lesewerkzeuge (pwd, ls, cat, head, tail, wc, stat, du, df, tree, sort/uniq) begrenzt — keine Verkettung, keine Redirections.",
+      : "Planmodus: Dieses Shell-Kommando ist während der Planung nicht erlaubt. Bash ist auf sicher klassifizierte git status/diff/log-Aufrufe, rg, find sowie eine kleine Gruppe reiner Lesewerkzeuge (pwd, ls, cat, head, tail, wc, stat, du, df, tree, sort/uniq) begrenzt — keine Pipelines, Verkettungen oder Redirections.",
   };
 }
 
