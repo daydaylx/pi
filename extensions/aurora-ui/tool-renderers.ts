@@ -80,7 +80,7 @@ const PRESENTATIONS: Record<ActivityToolKind, ToolPresentation> = {
   read: { glyph: "◌", label: "READ" },
   search: { glyph: "⌕", label: "GREP" },
   edit: { glyph: "✎", label: "EDIT" },
-  bash: { glyph: "›", label: "EXEC" },
+  bash: { glyph: "›", label: "BEFEHL" },
   lsp: { glyph: "◇", label: "LSP" },
   test: { glyph: "▹", label: "TEST" },
   verification: { glyph: "✓", label: "VERIFY" },
@@ -461,6 +461,8 @@ export function renderActiveTools(
     /** Omit the per-row LÄUFT/elapsed suffix when the activity heading above
      * already says exactly that — one fact, one row. */
     suppressRunningStatus?: boolean;
+    /** Render retained history rows as completed instead of live tools. */
+    completed?: boolean;
   } = {},
 ): string[] {
   const available = Math.max(1, width);
@@ -474,24 +476,29 @@ export function renderActiveTools(
         ? toolPresentation(tool.name)
         : PRESENTATIONS[tool.kind];
     // A checkmark would falsely claim success while the verification is still
-    // running. Completed tools disappear from this transient surface, so only
-    // Pi's real result renderer may show the success glyph.
-    const status = toolStatus(tool, now);
+    // running. Retained history is the deliberate exception: it is already
+    // complete and therefore gets a muted checkmark.
+    const status = options.completed
+      ? { tone: "muted" as const, label: "ERLEDIGT" }
+      : toolStatus(tool, now);
     const marker = theme.fg(
       status.tone,
-      status.tone === "error"
-        ? "✕"
-        : tool.kind === "verification"
-          ? RUNNING_GLYPH
-          : presentation.glyph,
+      options.completed
+        ? "✓"
+        : status.tone === "error"
+          ? "✕"
+          : tool.kind === "verification"
+            ? RUNNING_GLYPH
+            : presentation.glyph,
     );
     const label = compact
       ? theme.bold(presentation.label)
       : padToWidth(theme.bold(presentation.label), 12);
     const statusIsPlainRunning =
       status.tone === "accent" && status.label === "LÄUFT";
-    const suffix =
-      options.suppressRunningStatus && statusIsPlainRunning
+    const suffix = options.completed
+      ? ` · ${theme.fg(status.tone, status.label)}`
+      : options.suppressRunningStatus && statusIsPlainRunning
         ? ""
         : ` · ${theme.fg(status.tone, status.label)} · ${theme.fg("dim", `${elapsed}s`)}`;
     if (!tool.target) {
@@ -517,6 +524,21 @@ export function renderActiveTools(
       crop(theme.fg("muted", `↳ ${toolSummary(hidden, now)}`), available),
     );
   return visible;
+}
+
+/** Render the retained five-entry READ/BEFEHL history as completed rows. */
+export function renderRecentTools(
+  tools: readonly ActiveToolView[],
+  theme: Theme,
+  width: number,
+  now: number,
+  options: { compact?: boolean; wide?: boolean } = {},
+): string[] {
+  return renderActiveTools(tools.slice(-5), theme, width, now, {
+    ...options,
+    completed: true,
+    limit: 5,
+  });
 }
 
 function subagentTone(
@@ -812,6 +834,8 @@ export interface DashboardInput {
   activityLines: readonly string[];
   maxRows: number;
   compact?: boolean;
+  /** True when the turn still has live work; history rows alone are not live. */
+  liveActivity?: boolean;
   /** The turn's overall run state, shown as the activity tile's badge only
    * once nothing is live — folded in from the former separate Session panel
    * (see ADR 023). */
@@ -840,7 +864,7 @@ function buildTaskActivityTile(
   theme: Theme,
   input: DashboardInput,
 ): TileInput {
-  const running = input.activityLines.length > 0;
+  const running = input.liveActivity ?? input.activityLines.length > 0;
   const status =
     !running && input.activity
       ? sessionStatus({ activity: input.activity, task })
@@ -853,12 +877,13 @@ function buildTaskActivityTile(
   );
   // Rows are selected against the real budget *before* rendering, so the
   // tile below never gets built taller than input.maxRows allows and then
-  // sliced — the mandatory title/live-status lines always survive, and a
-  // goal or extra tool/subagent row gives way first when space is tight.
+  // sliced — the live-status/history first line always survives, and an
+  // extra tool/subagent row gives way first when space is tight.
   const { lines } = selectDashboardContent({
-    title: theme.bold(task.title),
-    goal: task.goal ? theme.fg("muted", task.goal) : undefined,
-    bodyLines: running ? input.activityLines : [fallbackLine],
+    bodyLines:
+      running || input.activityLines.length > 0
+        ? input.activityLines
+        : [fallbackLine],
     maxRows: input.maxRows,
     overflowNote: input.overflowNote
       ? theme.fg("warning", input.overflowNote)
@@ -896,11 +921,13 @@ export function renderDashboard(
   const compact = input.compact ?? false;
 
   if (compact) {
+    const compactStatus = input.activity
+      ? statusLabel(sessionStatus({ activity: input.activity, task }))
+      : input.liveActivity
+        ? "LÄUFT"
+        : "BEREIT";
     const lines = [
-      crop(
-        `${theme.bold(task.phaseLabel.toUpperCase())} · ${task.title}`,
-        available,
-      ),
+      crop(theme.bold(`AKTIVITÄT · ${compactStatus}`), available),
     ];
     if (input.activityLines[0]) {
       lines.push(crop(input.activityLines[0], available));

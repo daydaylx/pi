@@ -34,6 +34,7 @@ import {
   describeToolActivity,
   hiddenActivitySummary,
   renderActiveTools,
+  renderRecentTools,
   renderDashboard,
   renderSubagentBranches,
   type ActiveToolView,
@@ -453,6 +454,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let dashboardMode: DashboardMode = "auto";
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
+  const recentActivityTools: ActiveToolView[] = [];
+  const RECENT_ACTIVITY_LIMIT = 5;
   let turnLifecycle: TurnLifecycleState = initialTurnLifecycle();
   // The last real width a widget/footer frame was asked to render at. The
   // /inspect command handler gets no width of its own from Pi's UI context,
@@ -474,6 +477,17 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let lastSettledStatus: SessionStatus | undefined;
   let badgeHighlightUntil = 0;
   let badgeHighlightTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function rememberCompletedActivity(tool: ActiveToolView): void {
+    if (tool.kind !== "read" && tool.kind !== "bash") return;
+    recentActivityTools.push({ ...tool });
+    if (recentActivityTools.length > RECENT_ACTIVITY_LIMIT) {
+      recentActivityTools.splice(
+        0,
+        recentActivityTools.length - RECENT_ACTIVITY_LIMIT,
+      );
+    }
+  }
 
   function currentAgentViews(): SubagentInfo[] {
     if (fleetDockOwnsSubagents) return [];
@@ -610,11 +624,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
     const activityLines: string[] = [];
     let dashboardOverflowNote: string | undefined;
-    if (
+    const hasLiveActivity =
       state.activity.kind !== "idle" ||
       toolViews.length > 0 ||
-      agentViews.length > 0
-    ) {
+      agentViews.length > 0;
+    if (hasLiveActivity) {
       const presentation = activityPresentation(
         state,
         activeTools.size,
@@ -707,8 +721,19 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       if (attentionSubagent) {
         dashboardOverflowNote = `⚠ ${attentionSubagent.agent} benötigt Aufmerksamkeit`;
       }
+      const recentLines =
+        recentActivityTools.length > 0
+          ? renderRecentTools(
+              recentActivityTools,
+              theme,
+              dashboardTileWidth(width) - 4,
+              now,
+              { compact, wide: layout === "wide" },
+            )
+          : [];
       activityLines.push(
         heading,
+        ...recentLines,
         ...(attentionPending
           ? [...subagentLines, ...toolLines]
           : [...toolLines, ...subagentLines]),
@@ -722,8 +747,19 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         activityLines.push(theme.fg("muted", hiddenSummary));
       }
     }
+    if (!hasLiveActivity && recentActivityTools.length > 0) {
+      activityLines.push(
+        ...renderRecentTools(
+          recentActivityTools,
+          theme,
+          dashboardTileWidth(width) - 4,
+          now,
+          { compact: dashboardMode === "compact", wide: layout === "wide" },
+        ),
+      );
+    }
 
-    const maxRows =
+    const baseMaxRows =
       dashboardMode === "compact"
         ? 2
         : Math.min(
@@ -734,15 +770,22 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
                 : Math.max(5, Math.min(8, rows - 10)),
             Math.max(4, Math.floor(rows * 0.4)),
           );
-    // Auto and expanded share the former framed tile overview. Compact keeps
-    // its two-row fallback, while the activity tile only receives live tools.
+    // Retained READ/BEFEHL rows are intentional history, not disposable live
+    // details. Reserve enough rows for all five plus the live heading and one
+    // possible overflow note, even in compact mode.
+    const historyRows = recentActivityTools.length;
+    const historyReserve =
+      historyRows > 0 ? historyRows + 1 + (hasLiveActivity ? 1 : 0) : 0;
+    const maxRows = Math.max(2 + historyReserve, baseMaxRows);
+    // Auto and expanded share the framed tile overview. Compact uses the flat
+    // fallback, but retained history is allowed to use its reserved rows.
     // The overall run state — formerly the separate fixed Session panel —
     // now lives in the activity tile's own badge once nothing is live; while
     // something is running, the heading line already inside activityLines
     // carries the detailed status and its elapsed time.
     const headerActivity = currentHeaderActivity(now);
     const settledStatus =
-      activityLines.length === 0 && headerActivity.activity
+      !hasLiveActivity && headerActivity.activity
         ? sessionStatus({ activity: headerActivity.activity, task })
         : undefined;
     if (
@@ -762,6 +805,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       activityLines,
       maxRows,
       compact,
+      liveActivity: hasLiveActivity,
       activity: headerActivity.activity,
       highlightBadge: now < badgeHighlightUntil,
       overflowNote: dashboardOverflowNote,
@@ -989,6 +1033,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     for (const unsubscribe of busUnsubscribers.splice(0)) unsubscribe();
     pendingRequestId = undefined;
     activeTools.clear();
+    recentActivityTools.length = 0;
     turnLifecycle = initialTurnLifecycle();
     foregroundSubagents.clear();
     asyncSubagents.clear();
@@ -1286,6 +1331,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_execution_end", (event, ctx) => {
+    const completedTool = activeTools.get(event.toolCallId);
+    if (completedTool) rememberCompletedActivity(completedTool);
     activeTools.delete(event.toolCallId);
     receiptAggregator.recordEnd(
       event.toolCallId,

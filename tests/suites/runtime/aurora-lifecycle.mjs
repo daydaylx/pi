@@ -221,7 +221,7 @@ export const auroraLifecycleSections = {
               layout.rows,
             );
             const autoCount = autoLines.filter((l) =>
-              l.includes("EXEC"),
+              l.includes("BEFEHL"),
             ).length;
 
             await ctx.ui.submitSlashCommand("/dashboard expanded");
@@ -232,7 +232,7 @@ export const auroraLifecycleSections = {
               layout.rows,
             );
             const expandedCount = expandedLines.filter((l) =>
-              l.includes("EXEC"),
+              l.includes("BEFEHL"),
             ).length;
 
             assert(
@@ -432,10 +432,10 @@ export const auroraLifecycleSections = {
 
               const lines = renderWidget(harness, ctx, 120, 30);
               assert(
-                lines.some((line) =>
+                !lines.some((line) =>
                   line.includes("Behebe den Login-Bug in auth.ts"),
                 ),
-                "a new, unrelated prompt outside planning mode becomes the task title",
+                "the activity dashboard omits the redundant task title",
               );
               assert(
                 !lines.some((line) => line.includes("Plan A: Altes Vorhaben")),

@@ -94,7 +94,9 @@ export function selectActivitySlots(
 }
 
 export interface DashboardContentInput {
-  title: string;
+  /** Optional content title. The activity tile keeps its title in the frame
+   * heading and therefore leaves this unset to save a row. */
+  title?: string;
   goal?: string;
   /** The task/activity tile's body lines in the caller's own priority order:
    * the live-status heading (or idle fallback) first, then tool/subagent
@@ -139,7 +141,7 @@ export function selectDashboardContent(
 ): DashboardContentResult {
   const budget = Math.max(1, input.maxRows - FRAME_ROWS);
   const mandatory = [
-    input.title,
+    ...(input.title ? [input.title] : []),
     ...(input.bodyLines.length > 0 ? [input.bodyLines[0]!] : []),
   ];
   const optional: string[] = [

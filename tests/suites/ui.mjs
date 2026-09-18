@@ -1150,7 +1150,7 @@ export const uiSections = {
       );
 
       const framedWorkspace = renderers.renderDashboard(tvm, theme, 100, {
-        activityLines: ["● ARBEITET · 3s", "› EXEC · 1s"],
+        activityLines: ["● ARBEITET · 3s", "› BEFEHL · 1s"],
         maxRows: 11,
       });
       assert(

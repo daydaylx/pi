@@ -635,7 +635,7 @@ export const auroraUiSections = {
             ["read", "READ"],
             ["grep", "GREP"],
             ["edit", "EDIT"],
-            ["bash", "EXEC"],
+            ["bash", "BEFEHL"],
             ["verify", "VERIFY"],
             ["subagent", "AGENT"],
             ["unknown_tool", "TOOL · unknown_tool"],
@@ -807,11 +807,11 @@ export const auroraUiSections = {
             { activityLines: [], maxRows: 11, activity: "done" },
           );
           assert(
-            stripAnsi(verifiedDashboard.join("\n")).includes(
+            !stripAnsi(verifiedDashboard.join("\n")).includes(
               "Refactor verifier lifecycle",
             ) &&
               stripAnsi(verifiedDashboard.join("\n")).includes("VERIFIZIERT"),
-            "the dashboard shows the task title alongside a verified run state",
+            "the activity dashboard omits the redundant task title while keeping the verified run state",
           );
 
           const genericTool = auroraTools
@@ -856,6 +856,30 @@ export const auroraUiSections = {
             normalTools.length === 4 &&
               normalTools.at(-1)?.includes("+1 weitere Tools"),
             "the normal activity surface discloses its remaining parallel tool",
+          );
+
+          const retainedTools = auroraTools
+            .renderRecentTools(
+              Array.from({ length: 6 }, (_, index) => ({
+                id: `history-${index}`,
+                name: index % 2 === 0 ? "read" : "bash",
+                kind: index % 2 === 0 ? "read" : "bash",
+                target: `history-${index}.txt`,
+                startedAt: 0,
+              })),
+              context.ui.theme,
+              100,
+              5_000,
+            )
+            .map(stripAnsi)
+            .join("\n");
+          assert(
+            !retainedTools.includes("history-0.txt") &&
+              retainedTools.includes("history-1.txt") &&
+              retainedTools.includes("history-5.txt") &&
+              (retainedTools.match(/ERLEDIGT/g) ?? []).length === 5 &&
+              retainedTools.includes("BEFEHL"),
+            "the activity history keeps the latest five READ/BEFEHL rows as completed entries",
           );
 
           // A tool that is still producing output (e.g. bash streaming stdout)
@@ -1222,8 +1246,8 @@ export const auroraUiSections = {
             "hiddenActivitySummary compacts the overflow into a single summary line",
           );
 
-          // Completed tools leave the transient dashboard; the result renderer
-          // remains the source of truth for their final status.
+          // READ history keeps only the latest five completed entries; the
+          // result renderer remains the source of truth for their full output.
           for (let i = 0; i < 45; i++) {
             await overflowHarness.runHooks(
               "tool_execution_start",
@@ -1257,9 +1281,11 @@ export const auroraUiSections = {
                   .join("\n")
               : "";
           assert(
-            !historyRendered.includes("history-44.ts") &&
+            historyRendered.includes("history-40.ts") &&
+              historyRendered.includes("history-44.ts") &&
+              !historyRendered.includes("history-39.ts") &&
               !historyRendered.includes("history-0.ts"),
-            `completed tool history is not retained in the live dashboard: ${historyRendered}`,
+            `the live dashboard retains only the latest five READ entries: ${historyRendered}`,
           );
           await overflowHarness.runHooks("session_shutdown", {}, overflowCtx);
         }
@@ -2517,8 +2543,8 @@ export const auroraUiSections = {
             );
             assert(
               !renderActivity().includes("✓ TOOL") &&
-                !renderActivity().includes("✓ READ"),
-              "agent_settled removes completed tool events from the live workspace",
+                renderActivity().includes("✓ READ"),
+              "agent_settled keeps completed READ history but not unrelated completed tools",
             );
           } finally {
             Date.now = originalNow;
@@ -3215,7 +3241,7 @@ export const auroraUiSections = {
               context.ui.theme,
               100,
               {
-                activityLines: ["ARBEITET · 9s", "› EXEC · 1s"],
+                activityLines: ["ARBEITET · 9s", "› BEFEHL · 1s"],
                 maxRows: 11,
               },
             );

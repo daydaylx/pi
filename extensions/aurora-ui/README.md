@@ -60,21 +60,18 @@ continuously.
 
 **Dashboard workspace** (`tool-renderers.ts`) — a single framed overview
 rendered above the editor through Pi's widget slot. Auto and Expanded show a
-single task/activity tile; Compact keeps the two-row fallback:
+single task/activity tile; Compact uses the flat fallback and preserves retained history rows:
 
-- **`Aufgabe`** — task title, optional goal, and live activity in one tile
-  (`buildTaskActivityTile()`; task and activity were merged into one card —
-  see [decision 025](../../docs/decisions/025-merge-task-and-activity-tile.md) —
-  since the task alone rarely fills a card). While a turn is live, the
-  tile's own heading line already carries the detailed status and its
-  elapsed time, so its badge stays the plain `LÄUFT` marker; once nothing is
-  live, the badge instead shows the settled run state (`VERIFIZIERT`/
-  `ABGESCHLOSSEN`/`FEHLER`/`BEREIT`, from `header.ts`'s pure
-  `sessionStatus`/`statusLabel` projections) instead of a generic `BEREIT` —
-  see [decision 023](../../docs/decisions/023-single-dashboard-surface.md).
-  Content lines receive only currently running tools and subagents;
-  completed tools disappear from this transient surface and remain available
-  through Pi's normal result output.
+- **`Aktivität`** — live activity in one tile (`buildTaskActivityTile()`). The
+  redundant task title/goal row is intentionally omitted to preserve vertical
+  space. While a turn is live, the tile's own heading line carries the
+  detailed status and elapsed time, so its badge stays the plain `LÄUFT`
+  marker; once nothing is live, the badge instead shows the settled run state
+  (`VERIFIZIERT`/`ABGESCHLOSSEN`/`FEHLER`/`BEREIT`, from `header.ts`'s pure
+  `sessionStatus`/`statusLabel` projections). The five most recent `READ` and
+  `BEFEHL` rows remain as completed history; other completed tools disappear
+  from this transient surface and remain available through Pi's normal result
+  output.
 - Änderungsdetails werden nicht mehr als eigene Dashboard-Kachel gezeigt;
   bei vorhandenen Änderungen erscheint stattdessen eine kompakte
   `Änderungen <Dateien> · +<hinzugefügt>/−<entfernt>`-Zusammenfassung im
