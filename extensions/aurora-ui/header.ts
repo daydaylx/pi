@@ -2,7 +2,14 @@ import type { TaskViewModel } from "./task-view-model.ts";
 
 /** Presentation input derived from the real runtime activity state. */
 export type HeaderActivity =
-  "idle" | "thinking" | "running" | "responding" | "waiting" | "done" | "error";
+  | "idle"
+  | "thinking"
+  | "running"
+  | "responding"
+  | "waiting"
+  | "done"
+  | "error"
+  | "cancelled";
 
 export type SessionStatus =
   | "idle"
@@ -12,7 +19,8 @@ export type SessionStatus =
   | "waiting"
   | "verified"
   | "completed"
-  | "error";
+  | "error"
+  | "cancelled";
 
 export type SessionTask = Pick<TaskViewModel, "phase" | "verification">;
 
@@ -24,6 +32,9 @@ export interface SessionStatusInput {
 /** The status is a projection, never a second persisted workflow state. */
 export function sessionStatus(input: SessionStatusInput): SessionStatus {
   if (input.activity === "error") return "error";
+  // A user abort is its own outcome — a stale failed verification from
+  // before the abort must not repaint it as a plain "error" below.
+  if (input.activity === "cancelled") return "cancelled";
   const activeTurn = ["thinking", "responding", "running", "waiting"].includes(
     input.activity,
   );
@@ -70,8 +81,10 @@ export function statusLabel(status: SessionStatus): string {
       return "ABGESCHLOSSEN";
     case "error":
       return "FEHLER";
+    case "cancelled":
+      return "ABGEBROCHEN";
     default:
-      return "IDLE";
+      return "BEREIT";
   }
 }
 
@@ -80,6 +93,7 @@ export function statusTone(
 ): "muted" | "accent" | "success" | "error" {
   if (status === "error") return "error";
   if (status === "verified" || status === "completed") return "success";
-  if (status === "idle" || status === "waiting") return "muted";
+  if (status === "idle" || status === "waiting" || status === "cancelled")
+    return "muted";
   return "accent";
 }

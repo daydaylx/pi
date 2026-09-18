@@ -169,9 +169,9 @@ export class ReceiptAggregator {
         id: "receipt-investigation",
         kind: "investigation",
         status: "completed",
-        title: "Investigation",
+        title: "Untersuchung",
         summary: `${count} ${count === 1 ? "Datei" : "Dateien"} untersucht`,
-        metrics: [`${count} files inspected`],
+        metrics: [`${count} ${count === 1 ? "Datei" : "Dateien"} untersucht`],
         evidenceRefs: [...this.inspectedFiles].slice(0, 5),
         detailRef: this.lastRecordId.investigation,
       });
@@ -186,7 +186,7 @@ export class ReceiptAggregator {
         status: "completed",
         title: "Suche",
         summary: `${count} ${count === 1 ? "Suchabfrage" : "Suchabfragen"} ausgeführt`,
-        metrics: [`${count} patterns queried`],
+        metrics: [`${count} Muster durchsucht`],
         evidenceRefs: [...this.searchQueries].slice(0, 5),
         detailRef: this.lastRecordId.search,
       });
@@ -203,7 +203,7 @@ export class ReceiptAggregator {
         // Diff statistics belong to diff-viewer, which is the only component
         // with the actual before/after snapshots. A receipt must not guess.
         summary: `${count} ${count === 1 ? "Datei geändert" : "Dateien geändert"}`,
-        metrics: [`${count} files`],
+        metrics: [`${count} ${count === 1 ? "Datei" : "Dateien"}`],
         evidenceRefs: [...this.editedFiles].slice(0, 5),
         detailRef: this.lastRecordId.edit,
       });

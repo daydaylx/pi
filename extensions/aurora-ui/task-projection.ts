@@ -1,6 +1,7 @@
 import type { WorkflowMode } from "../shared/workflow-mode.ts";
 import { isPlanningMode, workflowModeLabel } from "../shared/workflow-mode.ts";
 import type { AuroraUiState, AuroraVerificationSummary } from "./state.ts";
+import { normalizeVerificationLabel } from "./verification-normalize.ts";
 import {
   toolPresentation,
   type ActiveToolView,
@@ -80,10 +81,15 @@ export function determineTaskPhase({
   }
 
   if (activityKind === "idle") {
-    if (verificationStatus === "verified" && verificationIsCurrent) {
+    // Defensive normalization: callers are expected to already pass the raw
+    // enum, but a UI-formatted "Verify: <status>" string must never silently
+    // fall through to the default "work" phase just because a caller forgot.
+    const normalizedVerification =
+      normalizeVerificationLabel(verificationStatus);
+    if (normalizedVerification === "verified" && verificationIsCurrent) {
       return { phase: "done", label: "Abgeschlossen" };
     }
-    if (verificationStatus === "checks_failed") {
+    if (normalizedVerification === "checks_failed") {
       return { phase: "verify", label: "Prüfen" };
     }
     return { phase: "work", label: "Bereit" };
@@ -231,7 +237,7 @@ function projectVerificationFallback(
 ): VerificationViewModel | undefined {
   if (!status && !isStale) return undefined;
 
-  const normalized = status ? status.replace(/^Verify:\s*/, "") : null;
+  const normalized = normalizeVerificationLabel(status);
   const isVerified = normalized === "verified";
   const isFailed = normalized === "checks_failed";
   const verdict = isStale

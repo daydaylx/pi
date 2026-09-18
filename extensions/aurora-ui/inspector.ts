@@ -1,5 +1,14 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { LAYOUT_COLUMNS } from "../shared/layout.ts";
 import { renderTile } from "./tile.ts";
+
+/**
+ * An upper bound, not a fixed width: the inspector otherwise grows to fill
+ * arbitrarily wide terminals, which reads worse than a bounded card even
+ * when the space exists. Real narrow terminals still get their real width
+ * (see the `Math.min` below) — this only ever caps the wide end.
+ */
+const MAX_INSPECTOR_COLUMNS = LAYOUT_COLUMNS.wide;
 
 export interface InspectorSection {
   title: string;
@@ -32,7 +41,7 @@ export function renderInspectorBox(
       .join("   ");
     lines.push(theme.fg("muted", actionText));
   }
-  return renderTile(theme, Math.min(width, 76), {
+  return renderTile(theme, Math.min(width, MAX_INSPECTOR_COLUMNS), {
     title: content.title,
     badge: content.badge,
     lines,

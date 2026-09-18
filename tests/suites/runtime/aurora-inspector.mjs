@@ -82,9 +82,9 @@ export const auroraInspectorSections = {
 
       const cases = [
         {
-          label: "Changes",
+          label: "Änderungen",
           expect: (text) =>
-            text.includes("CHANGES") &&
+            text.includes("ÄNDERUNGEN") &&
             text.includes("src/a.ts") &&
             text.includes("+12") &&
             text.includes("−4"),
@@ -100,9 +100,9 @@ export const auroraInspectorSections = {
           name: "Kontext section never fabricates a per-category token breakdown",
         },
         {
-          label: "Verification Evidence",
+          label: "Prüfnachweise",
           expect: (text) =>
-            text.includes("VERIFICATION EVIDENCE") &&
+            text.includes("PRÜFNACHWEISE") &&
             text.includes("tests") &&
             text.includes("security-scan"),
           name: "Verification Evidence section shows real checks and the blocking recommended id",
@@ -114,14 +114,14 @@ export const auroraInspectorSections = {
           name: "Modelle section shows the active model id",
         },
         {
-          label: "Reasoning",
-          expect: (text) => text.includes("REASONING") && text.includes("HOCH"),
+          label: "Denken",
+          expect: (text) => text.includes("DENKEN") && text.includes("HOCH"),
           name: "Reasoning section shows the current thinking level",
         },
         {
-          label: "Diagnostics",
+          label: "Diagnose",
           expect: (text) =>
-            text.includes("DIAGNOSTICS") && text.includes("2 Servers"),
+            text.includes("DIAGNOSE") && text.includes("2 Servers"),
           name: "Diagnostics section shows LSP status",
         },
       ];

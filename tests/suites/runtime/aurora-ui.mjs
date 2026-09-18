@@ -453,40 +453,40 @@ export const auroraUiSections = {
           assert(
             line(45, {
               statuses: new Map([["verification", "Verify: checks_failed"]]),
-            }).includes("checks_failed"),
+            }).includes("Prüfung fehlgeschlagen"),
             "a failing verification claims space even in the compact footer",
           );
           assert(
             !line(45, {
               statuses: new Map([["verification", "Verify: unchanged"]]),
-            }).includes("unchanged"),
+            }).includes("unverändert"),
             "an unchanged workspace does not spend compact footer space",
           );
           assert(
             line(100, {
               statuses: new Map([["verification", "Verify: verified"]]),
-            }).includes("verified"),
+            }).includes("verifiziert"),
             "the footer reports a proven workspace when no dashboard owns it",
           );
           assert(
             !line(100, {
               statuses: new Map([["verification", "Verify: verified"]]),
               dashboardVisible: true,
-            }).includes("verified"),
+            }).includes("verifiziert"),
             "a dashboard-owned routine verification is not duplicated in the footer",
           );
           assert(
             line(100, {
               statuses: new Map([["verification", "Verify: verified"]]),
               dashboardVisible: false,
-            }).includes("verified"),
+            }).includes("verifiziert"),
             "the footer retains routine verification when a two-row dashboard uses its status row for live work",
           );
           assert(
             !line(45, {
               statuses: new Map([["verification", "Verify: verified"]]),
               dashboardVisible: false,
-            }).includes("verified"),
+            }).includes("verifiziert"),
             "routine verification without a dashboard owner is metadata again — it yields to width tiers",
           );
           assert(
@@ -1337,7 +1337,8 @@ export const auroraUiSections = {
           );
           await subagentHarness.runHooks("agent_settled", {}, subagentContext);
           assert(
-            render().includes("Aktivität") && !render().includes("async-worker"),
+            render().includes("Aktivität") &&
+              !render().includes("async-worker"),
             "the parent completion clears live activity while the task orientation remains",
           );
           await subagentHarness.runHooks("agent_start", {}, subagentContext);
@@ -2039,10 +2040,10 @@ export const auroraUiSections = {
           );
           assert(
             !stripAnsi(compactFooter?.render(40)[0] ?? "").includes(
-              "verified",
+              "verifiziert",
             ) &&
               stripAnsi(standardFooter?.render(100)[0] ?? "").includes(
-                "verified",
+                "verifiziert",
               ),
             "the footer reports routine verification once width allows it, now that no dashboard tile shows it",
           );
@@ -2596,7 +2597,7 @@ export const auroraUiSections = {
                   r.kind === "edit" &&
                   r.summary === "1 Datei geändert" &&
                   !r.summary.includes("+") &&
-                  r.metrics?.join(" ") === "1 files",
+                  r.metrics?.join(" ") === "1 Datei",
               ),
               "edit receipt reports only the file count supplied by its real event",
             );
@@ -3182,9 +3183,7 @@ export const auroraUiSections = {
               { activityLines: [], maxRows: 8 },
             );
             assert(
-              !dashboardWithChanges.some((line) =>
-                line.includes("Änderungen"),
-              ),
+              !dashboardWithChanges.some((line) => line.includes("Änderungen")),
               "the dashboard no longer renders a separate changes tile",
             );
             const compactDashboard = renderDashboard(

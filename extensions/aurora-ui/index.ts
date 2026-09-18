@@ -7,7 +7,7 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import { layoutForSize } from "../shared/layout.ts";
+import { LAYOUT_COLUMNS, layoutForSize } from "../shared/layout.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { planLocation, readPlan } from "../plan-mode/plan-store.ts";
 import {
@@ -52,6 +52,16 @@ import { auroraDiagnostics } from "./dev-diagnostics.ts";
 import { projectTaskViewModel } from "./task-projection.ts";
 import type { TaskViewModel } from "./task-view-model.ts";
 import { registerInspectorCommand } from "./inspector-command.ts";
+import { detailLimitFor, selectActivitySlots } from "./dashboard-budget.ts";
+import { normalizeVerificationLabel } from "./verification-normalize.ts";
+import {
+  initialTurnLifecycle,
+  lastAssistantStop,
+  turnLifecycleOnAgentEnd,
+  turnLifecycleOnAgentStart,
+  turnLifecycleOnSettled,
+  type TurnLifecycleState,
+} from "./turn-lifecycle.ts";
 export {
   renderInspectorBox,
   type InspectorContent,
@@ -443,7 +453,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let dashboardMode: DashboardMode = "auto";
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
-  let headerActivityOverride: HeaderActivity | undefined;
+  let turnLifecycle: TurnLifecycleState = initialTurnLifecycle();
+  // The last real width a widget/footer frame was asked to render at. The
+  // /inspect command handler gets no width of its own from Pi's UI context,
+  // unlike the per-frame surfaces, so it reuses this instead of a fixed 76.
+  let lastKnownWidth: number = LAYOUT_COLUMNS.standard;
   const receiptAggregator = new ReceiptAggregator();
   // Presentation-only timestamps: neither is published nor part of Aurora's
   // activity-state contract.
@@ -470,9 +484,19 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     );
   }
 
-  /** The single task projection shared by the fixed panel and the workspace. */
+  /**
+   * The single task projection shared by the fixed panel, the workspace and
+   * the inspector. Called eagerly from every event that changes state it
+   * depends on (not just from rendering), so `lastTask` never goes stale
+   * while dashboardMode is "hidden" or before the widget has ever painted.
+   */
   function projectCurrentTask(now: number): TaskViewModel | undefined {
     if (!state) return undefined;
+    // Prefer the structured summary's own raw status; it is published
+    // "alongside" the footer's formatted string by the same call site, so by
+    // the time either exists the structured one should too. The formatted
+    // string is only a fallback for the window before any structured summary
+    // has arrived, and even then it must be normalized back to the raw enum.
     const task = projectTaskViewModel({
       state,
       activeTools,
@@ -480,7 +504,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       receiptAggregator,
       now,
       verificationStatus:
-        lastVerificationStatus ?? state.verification?.status ?? null,
+        state.verification?.status ??
+        normalizeVerificationLabel(lastVerificationStatus),
       workspaceChangedSinceVerification,
       currentPlan: currentPlanText,
       userPrompt: currentUserPrompt,
@@ -495,9 +520,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     elapsedSeconds?: number;
   } {
     if (!state) return { activity: "idle" };
-    if (headerActivityOverride === "error") return { activity: "error" };
+    // The turn's own outcome (from real agent_end/stopReason signals) drives
+    // the terminal states; a tool failure alone never reaches turnLifecycle,
+    // so it cannot make a turn that ended cleanly show as failed.
+    if (turnLifecycle.status === "failed") return { activity: "error" };
+    if (turnLifecycle.status === "cancelled") return { activity: "cancelled" };
     if (
-      headerActivityOverride === "done" &&
+      turnLifecycle.status === "succeeded" &&
       state.activity.kind === "idle" &&
       activeTools.size === 0 &&
       asyncSubagents.size === 0
@@ -551,6 +580,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     width: number,
     rows: number,
   ): string[] {
+    lastKnownWidth = width;
     if (!state) return [];
     if (dashboardMode === "hidden") return [];
     if (state.activity.kind === "idle" && showStartscreen && sessionCwd) {
@@ -570,10 +600,16 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const now = Date.now();
     const toolViews = [...activeTools.values()];
     const agentViews = currentAgentViews();
-    const task = projectCurrentTask(now);
+    // A pure read, not a computation: every event that can change the task
+    // projection already refreshes lastTask itself (see projectCurrentTask's
+    // call sites above), so rendering never has to derive it — and never
+    // risks the inspector seeing a different, independently re-derived task
+    // than the one the dashboard just painted.
+    const task = lastTask;
     if (!task) return [];
 
     const activityLines: string[] = [];
+    let dashboardOverflowNote: string | undefined;
     if (
       state.activity.kind !== "idle" ||
       toolViews.length > 0 ||
@@ -620,57 +656,69 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           `${glyph ? `${glyph} ` : ""}${presentation.label}${thinking} · ${elapsed}s`,
         ),
       );
-      const detailLimit =
-        dashboardMode === "auto"
-          ? layout === "compact"
-            ? 0
-            : 3
-          : layout === "wide"
-            ? 3
-            : compact
-              ? 0
-              : 1;
-      const visibleToolCount = Math.min(toolViews.length, detailLimit);
-      const visibleAgentCount = Math.min(
-        agentViews.length,
-        Math.max(0, detailLimit - visibleToolCount),
+      // One shared priority order for tools and subagents — a
+      // needs_attention subagent or a genuinely erroring/stalled tool always
+      // gets a slot before a routine running tool, instead of tools always
+      // claiming every slot first and subagents only getting the leftovers.
+      const detailLimit = detailLimitFor(dashboardMode, layout);
+      const slots = selectActivitySlots(toolViews, agentViews, detailLimit);
+      // task.subagents (SubagentBranchInfo[]) is the same length and order as
+      // agentViews (SubagentInfo[]) — both derive from the same
+      // currentAgentViews() snapshot — so identity lookup maps a selected
+      // SubagentInfo back to its rendered branch without re-deriving it.
+      const visibleAgentSet = new Set(slots.visibleSubagents);
+      const visibleBranches = task.subagents.filter((_branch, i) =>
+        visibleAgentSet.has(agentViews[i]!),
       );
       // With exactly one running tool the heading already carries ARBEITET ·
       // Xs; repeating LÄUFT · Xs one row below is duplication, so the plain
       // running suffix is dropped (a stalled/error status still shows).
       const singleRunningTool =
         toolViews.length === 1 && state.activity.kind === "tool";
+      const toolLines = renderActiveTools(
+        slots.visibleTools,
+        theme,
+        dashboardTileWidth(width) - 4,
+        now,
+        {
+          compact,
+          wide: layout === "wide",
+          limit: slots.visibleTools.length,
+          suppressRunningStatus: singleRunningTool,
+        },
+      );
+      const subagentLines = renderSubagentBranches(
+        visibleBranches,
+        theme,
+        dashboardTileWidth(width) - 4,
+        visibleBranches.length,
+        subagentGlyph,
+      );
+      // Row-budget trimming (selectDashboardContent) cuts from the end of
+      // this list, so whichever block renders first survives longest. A
+      // subagent asking for attention must outrank routine tool rows there
+      // too, not only in which of them got a slot above — otherwise a tight
+      // terminal could still cut the one thing the user actually needs to
+      // see while ordinary tool rows survive.
+      const attentionSubagent = slots.visibleSubagents.find(
+        (subagent) => subagent.status === "needs_attention",
+      );
+      const attentionPending = attentionSubagent !== undefined;
+      if (attentionSubagent) {
+        dashboardOverflowNote = `⚠ ${attentionSubagent.agent} benötigt Aufmerksamkeit`;
+      }
       activityLines.push(
         heading,
-        ...renderActiveTools(
-          toolViews.slice(0, visibleToolCount),
-          theme,
-          dashboardTileWidth(width) - 4,
-          now,
-          {
-            compact,
-            wide: layout === "wide",
-            limit: visibleToolCount,
-            suppressRunningStatus: singleRunningTool,
-          },
-        ),
-        ...renderSubagentBranches(
-          task.subagents.slice(0, visibleAgentCount),
-          theme,
-          dashboardTileWidth(width) - 4,
-          visibleAgentCount,
-          subagentGlyph,
-        ),
+        ...(attentionPending
+          ? [...subagentLines, ...toolLines]
+          : [...toolLines, ...subagentLines]),
       );
       const hiddenSummary = hiddenActivitySummary(
-        toolViews.slice(visibleToolCount),
-        agentViews.slice(visibleAgentCount),
+        slots.hiddenTools,
+        slots.hiddenSubagents,
         now,
       );
-      if (
-        visibleToolCount < toolViews.length ||
-        visibleAgentCount < agentViews.length
-      ) {
+      if (slots.hiddenTools.length > 0 || slots.hiddenSubagents.length > 0) {
         activityLines.push(theme.fg("muted", hiddenSummary));
       }
     }
@@ -716,6 +764,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       compact,
       activity: headerActivity.activity,
       highlightBadge: now < badgeHighlightUntil,
+      overflowNote: dashboardOverflowNote,
     });
     // A leading blank row separates the persistent dashboard from the
     // scrolling transcript above it; compact mode stays a hard two-row
@@ -766,10 +815,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       state.activity.kind === "thinking" || state.activity.kind === "tool",
     );
 
-    // Aurora's activity widget is the single live-work surface. Keeping Pi's
-    // native indicator visible as well creates a second moving signal next to
-    // the editor; motion is rendered by the widget itself when enabled.
-    ctx.ui.setWorkingVisible(false);
+    // Aurora's activity widget is the single live-work surface, so the
+    // native indicator normally stays hidden to avoid a second moving signal
+    // next to the editor. dashboardMode "hidden" removes that surface
+    // entirely though, and must not also remove the only remaining sign that
+    // work is still happening — it falls back to Pi's own indicator then.
+    ctx.ui.setWorkingVisible(dashboardMode === "hidden" && active);
   }
 
   function updateState(
@@ -865,6 +916,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         if ("verification" in value.patch)
           workspaceChangedSinceVerification = false;
         updateState(ctx, value.patch);
+        projectCurrentTask(Date.now());
       }),
       pi.events.on(AURORA_UI_CHANNELS.snapshot, (value) => {
         if (
@@ -878,6 +930,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         if ("verification" in value.state)
           workspaceChangedSinceVerification = false;
         updateState(ctx, value.state);
+        projectCurrentTask(Date.now());
       }),
       pi.events.on("subagent:async-started", (value) => {
         if (disposed) return;
@@ -886,6 +939,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         asyncSubagents.set(started.runId, started.entries);
         refreshSubagentDisplay();
         retainAsyncActivity(ctx);
+        projectCurrentTask(Date.now());
       }),
       pi.events.on("subagent:async-complete", (value) => {
         if (disposed) return;
@@ -901,6 +955,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             kind: turnSettledWhileAsync ? "idle" : "responding",
           });
         }
+        projectCurrentTask(Date.now());
       }),
       pi.events.on("subagent:control-event", (value) => {
         if (disposed) return;
@@ -915,6 +970,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         );
         asyncSubagents.set(attention.runId, updated);
         refreshSubagentDisplay();
+        projectCurrentTask(Date.now());
       }),
     ];
 
@@ -933,7 +989,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     for (const unsubscribe of busUnsubscribers.splice(0)) unsubscribe();
     pendingRequestId = undefined;
     activeTools.clear();
-    headerActivityOverride = undefined;
+    turnLifecycle = initialTurnLifecycle();
     foregroundSubagents.clear();
     asyncSubagents.clear();
     subagentsCache = [];
@@ -945,6 +1001,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     currentPlanText = undefined;
     lastVerificationStatus = null;
     workspaceChangedSinceVerification = false;
+    // A session boundary must not leak the previous session's task/
+    // verification projection into the next one's inspector.
+    lastTask = undefined;
     clearTimeout(badgeHighlightTimer);
     badgeHighlightTimer = undefined;
     lastSettledStatus = undefined;
@@ -986,6 +1045,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   registerInspectorCommand(pi, {
     getState: () => state,
     getTask: () => lastTask,
+    getWidth: () => lastKnownWidth,
   });
 
   // Dashboard mode lives in exactly one place (ui.dashboard in setup.json,
@@ -1084,9 +1144,19 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           detachTicker();
         },
         render(width: number): string[] {
+          lastKnownWidth = width;
           if (!state) return [];
           const statuses = footerData.getExtensionStatuses();
+          const previousVerificationStatus = lastVerificationStatus;
           lastVerificationStatus = statuses.get("verification") ?? null;
+          // getExtensionStatuses() is only reachable from this render
+          // callback (Pi has no separate event for it), so this is the one
+          // place a render legitimately triggers a projection refresh — only
+          // when the footer's own status actually changed, not on every
+          // frame.
+          if (lastVerificationStatus !== previousVerificationStatus) {
+            projectCurrentTask(Date.now());
+          }
           return renderFooterLines(theme, width, {
             state,
             statuses,
@@ -1130,24 +1200,45 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           },
     );
     installBus(ctx);
+    // Seed the projection immediately, so the inspector has a real task view
+    // even before anything renders or any further event arrives.
+    projectCurrentTask(Date.now());
   });
 
   pi.on("before_agent_start", (event) => {
     currentUserPrompt = event.prompt;
+    // A plan is only a valid task-title source for the turn it belongs to.
+    // A brand-new prompt that starts outside planning mode is a new,
+    // independent task and must not keep showing a previous plan's title —
+    // the plan itself stays on disk, only its use as the current title ends.
+    if (!state || !isPlanningMode(state.workflow.phase)) {
+      currentPlanText = undefined;
+    }
     showStartscreen = false;
+    projectCurrentTask(Date.now());
     ticker?.requestRender();
   });
 
   pi.on("agent_start", (_event, ctx) => {
     showStartscreen = false;
     turnSettledWhileAsync = false;
-    headerActivityOverride = undefined;
+    turnLifecycle = turnLifecycleOnAgentStart();
     activeTools.clear();
     foregroundSubagents.clear();
     refreshSubagentDisplay();
+    projectCurrentTask(Date.now());
     updateActivity(ctx, {
       kind: "thinking",
     });
+  });
+
+  // agent_end can fire more than once per turn (retry, compaction, a queued
+  // continuation each start another agent_start/agent_end pair); only the
+  // *last* one before agent_settled describes the turn's real outcome, which
+  // is exactly what turnLifecycleOnAgentEnd's overwrite-on-each-call does.
+  pi.on("agent_end", (event) => {
+    const { stopReason } = lastAssistantStop(event.messages);
+    turnLifecycle = turnLifecycleOnAgentEnd(turnLifecycle, stopReason);
   });
 
   pi.on("tool_execution_start", (event, ctx) => {
@@ -1174,6 +1265,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         foregroundSubagents.set(event.toolCallId, subagents);
       refreshSubagentDisplay();
     }
+    projectCurrentTask(Date.now());
     updateActivity(ctx, {
       kind: "tool",
     });
@@ -1185,13 +1277,15 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const partial = record(event.partialResult);
     if (partial?.isError !== true) return;
     if (!tool || tool.tone === "error") return;
+    // A tool failure is a live-activity signal (the row's own error tone,
+    // still visible in the Inspector/receipts) — it must never by itself
+    // decide the turn's final outcome; only a real agent_end stopReason does.
     tool.tone = "error";
-    headerActivityOverride = "error";
+    projectCurrentTask(Date.now());
     noteRelevantActivity();
   });
 
   pi.on("tool_execution_end", (event, ctx) => {
-    if (event.isError) headerActivityOverride = "error";
     activeTools.delete(event.toolCallId);
     receiptAggregator.recordEnd(
       event.toolCallId,
@@ -1209,6 +1303,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       foregroundSubagents.delete(event.toolCallId);
       refreshSubagentDisplay();
     }
+    projectCurrentTask(Date.now());
     updateActivity(
       ctx,
       activeTools.size > 0
@@ -1243,19 +1338,23 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
 
   pi.on("model_select", (event, ctx) => {
     updateState(ctx, { model: { id: event.model.id } });
+    projectCurrentTask(Date.now());
   });
 
   pi.on("thinking_level_select", (event, ctx) => {
     updateState(ctx, { model: { thinking: String(event.level) } });
+    projectCurrentTask(Date.now());
     noteRelevantActivity();
   });
 
   // Pi 0.84.1 emits agent_end after each individual agent loop. Retry,
   // compaction, and queued continuations can all start another loop after it;
-  // agent_settled is the sole terminal lifecycle event for Aurora.
+  // agent_settled is the sole terminal lifecycle event for Aurora, but the
+  // turn's actual outcome was already decided by the *last* agent_end before
+  // it — settling only finalizes whatever turnLifecycle already holds.
   pi.on("agent_settled", (_event, ctx) => {
     turnSettledWhileAsync = true;
-    if (headerActivityOverride !== "error") headerActivityOverride = "done";
+    turnLifecycle = turnLifecycleOnSettled(turnLifecycle);
     activeTools.clear();
     foregroundSubagents.clear();
     refreshSubagentDisplay();
@@ -1267,6 +1366,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         planLocation(sessionCwd, ctx.sessionManager.getSessionId()),
       )?.content;
     }
+    projectCurrentTask(Date.now());
     if (asyncSubagents.size > 0) {
       retainAsyncActivity(ctx);
       return;

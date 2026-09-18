@@ -12,6 +12,10 @@ import { crop } from "./layout.ts";
 import type { AuroraUiState } from "./state.ts";
 import { pillExtraCells, renderPill } from "./tile.ts";
 import { thinkingLabel, thinkingTone } from "./thinking.ts";
+import {
+  normalizeVerificationLabel,
+  verificationDisplayLabel,
+} from "./verification-normalize.ts";
 
 /**
  * The footer is the one permanent status surface, and it is one line.
@@ -88,18 +92,27 @@ const Priority = {
 
 type Priority = (typeof Priority)[keyof typeof Priority];
 
+/**
+ * Three classes, in survival order:
+ * - `orientation` (workflow, folder): the permanent anchors. Never removed,
+ *   only cropped — losing the current workflow or working directory is worse
+ *   than losing any amount of metadata.
+ * - `risk` (YOLO, recovery, failed verification, degraded LSP, exhausted
+ *   context): ignores the width tier. Several at once aggregate into one
+ *   visible count rather than being dropped one by one until only the
+ *   luckiest-priority risk survives.
+ * - `metadata` (model, thinking, changes, routine context/verification):
+ *   routine information, dropped first and individually when space is tight.
+ */
+type SegmentClass = "orientation" | "risk" | "metadata";
+
 interface Segment {
   slot: Slot;
   priority: Priority;
   text: string;
   tone: Tone;
   bold?: boolean;
-  /**
-   * A segment that reports a risk or a failure. It ignores the width tier,
-   * because a footer that hides YOLO or a failed verification to save four
-   * columns is worse than one that has to drop something else.
-   */
-  critical?: boolean;
+  class: SegmentClass;
 }
 
 /** Which routine segments each width tier may show at all. */
@@ -127,8 +140,7 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
 };
 
 function verificationState(input: FooterInput): string | null {
-  const value = input.statuses.get("verification");
-  return value ? value.replace(/^Verify:\s*/, "") : null;
+  return normalizeVerificationLabel(input.statuses.get("verification"));
 }
 
 function verificationTone(state: string): Tone {
@@ -168,6 +180,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     text: input.state.workflow.label,
     tone: "accent",
     bold: true,
+    class: "orientation",
   });
   segments.push({
     slot: Slot.model,
@@ -176,6 +189,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     // mean inventing a mapping the runtime never gave us.
     text: crop(input.state.model.id ?? "kein Modell", MODEL_MAX_COLUMNS),
     tone: "text",
+    class: "metadata",
   });
 
   if (input.state.model.thinking) {
@@ -185,6 +199,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
       text: `Denken ${thinkingLabel(input.state.model.thinking)}`,
       tone: thinkingTone(input.state.model.thinking),
       bold: true,
+      class: "metadata",
     });
   }
 
@@ -198,6 +213,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
         input.homeDirectory,
       ),
       tone: "muted",
+      class: "orientation",
     });
   }
 
@@ -207,6 +223,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
       priority: Priority.changes,
       text: `Änderungen ${input.state.changes.filesCount} · +${input.state.changes.linesAdded}/−${input.state.changes.linesRemoved}`,
       tone: "muted",
+      class: "metadata",
     });
   }
 
@@ -225,7 +242,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
         : input.contextPercent >= CONTEXT_WARNING_PERCENT
           ? "warning"
           : "muted",
-      critical: exhausted,
+      class: exhausted ? "risk" : "metadata",
     });
   }
 
@@ -242,12 +259,12 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
         priority: attention
           ? Priority.failedVerification
           : Priority.verification,
-        text: `${verification === "verified" ? "✓" : attention ? "⚠" : ""} ${verification}`.trim(),
+        text: `${verification === "verified" ? "✓" : attention ? "⚠" : ""} ${verificationDisplayLabel(verification)}`.trim(),
         tone: verificationTone(verification),
         // Without a dashboard surface owning the verdict, the routine success
         // stays visible in the footer — but it is not a risk: it keeps normal
         // priority and yields to real risks on narrow lines like any metadata.
-        critical: attention,
+        class: attention ? "risk" : "metadata",
       });
     }
   }
@@ -259,7 +276,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
       priority: Priority.lsp,
       text: `⚠ LSP ${lsp}`,
       tone: "error",
-      critical: true,
+      class: "risk",
     });
   }
 
@@ -270,7 +287,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
       text: "⚠ YOLO",
       tone: "error",
       bold: true,
-      critical: true,
+      class: "risk",
     });
   }
 
@@ -284,7 +301,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
       text: recovery,
       tone: "error",
       bold: true,
-      critical: true,
+      class: "risk",
     });
   }
 
@@ -322,7 +339,7 @@ function isPillTier(tier: Layout): boolean {
  * the two can never silently drift apart.
  */
 function isPillSegment(segment: Segment): boolean {
-  return segment.critical || segment.slot === Slot.workflow;
+  return segment.class === "risk" || segment.slot === Slot.workflow;
 }
 
 /** The extra cells a segment pays when it renders as a filled pill. */
@@ -332,11 +349,16 @@ function segmentCells(segment: Segment, pillTier: boolean): number {
 }
 
 /**
- * Keep what the width tier allows plus everything critical, then, while the
- * result is still too wide, drop the least important segment that is left.
- * Segments give up their place entirely rather than being shaved at the edge,
- * so whatever remains stays readable — and the survivors are then put back
- * into reading order, which is not the order they were dropped in.
+ * Orientation and risk segments are never subject to the width tier at all;
+ * only metadata is. While the line is still too wide, metadata gives way
+ * first, one segment at a time by priority — exactly as before. If orientation
+ * plus every individual risk still doesn't fit once metadata is gone, the
+ * risks collapse into one aggregated count instead of being dropped one by
+ * one until only the luckiest-priority risk survives (which used to make
+ * `critical` a lie: it only protected a segment from the tier filter, not
+ * from this very loop). Segments give up their place entirely rather than
+ * being shaved at the edge, and survivors are put back into reading order,
+ * which is not the order they were selected in.
  */
 function selectFooterSegments(
   segments: readonly Segment[],
@@ -346,14 +368,43 @@ function selectFooterSegments(
   const pillTier = isPillTier(tier);
   const allowed = ROUTINE_TIERS[tier];
   const kept = segments.filter(
-    (segment) => segment.critical || allowed.has(segment.slot),
+    (segment) => segment.class !== "metadata" || allowed.has(segment.slot),
   );
-  while (kept.length > 1 && widthOf(kept, pillTier) > width) {
-    let victim = 0;
-    for (let index = 1; index < kept.length; index += 1)
-      if (kept[index]!.priority > kept[victim]!.priority) victim = index;
+
+  while (
+    kept.length > 1 &&
+    widthOf(kept, pillTier) > width &&
+    kept.some((segment) => segment.class === "metadata")
+  ) {
+    let victim = -1;
+    for (let index = 0; index < kept.length; index += 1) {
+      if (kept[index]!.class !== "metadata") continue;
+      if (victim === -1 || kept[index]!.priority > kept[victim]!.priority)
+        victim = index;
+    }
+    if (victim === -1) break;
     kept.splice(victim, 1);
   }
+
+  if (widthOf(kept, pillTier) > width) {
+    const risks = kept.filter((segment) => segment.class === "risk");
+    if (risks.length > 1) {
+      const rest = kept.filter((segment) => segment.class !== "risk");
+      const worstPriority = Math.min(
+        ...risks.map((r) => r.priority),
+      ) as Priority;
+      rest.push({
+        slot: Slot.risk,
+        priority: worstPriority,
+        text: `⚠ ${risks.length}`,
+        tone: "error",
+        bold: true,
+        class: "risk",
+      });
+      return rest.sort((a, b) => a.slot - b.slot);
+    }
+  }
+
   return kept.sort((a, b) => a.slot - b.slot);
 }
 

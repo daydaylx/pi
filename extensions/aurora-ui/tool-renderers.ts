@@ -10,6 +10,7 @@ import {
 } from "./header.ts";
 import { crop } from "./layout.ts";
 import { renderTileGrid, type TileInput } from "./tile.ts";
+import { selectDashboardContent } from "./dashboard-budget.ts";
 import type {
   CurrentWorkViewModel,
   SubagentBranchInfo,
@@ -818,6 +819,10 @@ export interface DashboardInput {
   /** True for a short window right after the settled badge changed, so the
    * caller can flash it once instead of leaving the transition silent. */
   highlightBadge?: boolean;
+  /** A more specific row-budget overflow note than the generic default —
+   * set when something the user actually needs to see (e.g. a subagent
+   * asking for attention) is itself at risk of being the line that gets cut. */
+  overflowNote?: string;
 }
 
 /**
@@ -840,25 +845,31 @@ function buildTaskActivityTile(
     !running && input.activity
       ? sessionStatus({ activity: input.activity, task })
       : undefined;
+  const fallbackLine = theme.fg(
+    "muted",
+    task.phase === "done"
+      ? "Letzte Aufgabe abgeschlossen."
+      : "Bereit für die nächste Aufgabe.",
+  );
+  // Rows are selected against the real budget *before* rendering, so the
+  // tile below never gets built taller than input.maxRows allows and then
+  // sliced — the mandatory title/live-status lines always survive, and a
+  // goal or extra tool/subagent row gives way first when space is tight.
+  const { lines } = selectDashboardContent({
+    title: theme.bold(task.title),
+    goal: task.goal ? theme.fg("muted", task.goal) : undefined,
+    bodyLines: running ? input.activityLines : [fallbackLine],
+    maxRows: input.maxRows,
+    overflowNote: input.overflowNote
+      ? theme.fg("warning", input.overflowNote)
+      : undefined,
+  });
   return {
     title: "Aktivität",
     badge: status ? statusLabel(status) : running ? "LÄUFT" : "BEREIT",
     tone: status ? statusTone(status) : running ? "accent" : "muted",
     emphasizeBadge: !running && input.highlightBadge,
-    lines: [
-      theme.bold(task.title),
-      ...(task.goal ? [theme.fg("muted", task.goal)] : []),
-      ...(running
-        ? [...input.activityLines]
-        : [
-            theme.fg(
-              "muted",
-              task.phase === "done"
-                ? "Letzte Aufgabe abgeschlossen."
-                : "Bereit für die nächste Aufgabe.",
-            ),
-          ]),
-    ],
+    lines,
   };
 }
 

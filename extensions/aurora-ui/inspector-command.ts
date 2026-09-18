@@ -15,6 +15,11 @@ import type {
 export interface InspectorDeps {
   getState: () => AuroraUiState | undefined;
   getTask: () => TaskViewModel | undefined;
+  /** The real terminal width, from the last widget/footer frame. The
+   * `/inspect` command handler itself gets no width from Pi's UI context
+   * (unlike the per-frame dashboard/footer widgets), so it has to reuse
+   * whatever the caller last observed. */
+  getWidth: () => number;
 }
 
 interface InspectorEntry {
@@ -31,18 +36,18 @@ interface InspectorEntry {
 // Same priority order the UI rework concept package gives for unifying
 // secondary surfaces behind one inspector shell.
 const ENTRIES: readonly InspectorEntry[] = [
-  { id: "changes", label: "Changes" },
+  { id: "changes", label: "Änderungen" },
   { id: "context", label: "Kontext" },
-  { id: "verification", label: "Verification Evidence" },
+  { id: "verification", label: "Prüfnachweise" },
   { id: "models", label: "Modelle" },
-  { id: "reasoning", label: "Reasoning" },
-  { id: "diagnostics", label: "Diagnostics" },
+  { id: "reasoning", label: "Denken" },
+  { id: "diagnostics", label: "Diagnose" },
 ];
 
 function changesContent(state: AuroraUiState): InspectorContent {
   const changes = state.changes;
   return {
-    title: "CHANGES",
+    title: "ÄNDERUNGEN",
     badge: changes
       ? `${changes.filesCount} ${changes.filesCount === 1 ? "Datei" : "Dateien"}`
       : undefined,
@@ -98,14 +103,14 @@ function contextContent(
         ],
       },
       {
-        title: "Compaction",
+        title: "Komprimierung",
         lines: [
           `Anzahl: ${diagnostics.compactionTimestamps.length}`,
           `Zuletzt: ${diagnostics.compactionTimestamps.at(-1) ?? "keine"}`,
         ],
       },
       {
-        title: "Lifetime Usage (kumulativ, kein aktueller Anteil)",
+        title: "Lebenszeit-Nutzung (kumulativ, kein aktueller Anteil)",
         lines: diagnostics.lifetimeUsage
           ? [
               `input=${diagnostics.lifetimeUsage.input}, output=${diagnostics.lifetimeUsage.output}`,
@@ -135,19 +140,19 @@ function verificationContent(
 ): InspectorContent {
   if (!verification) {
     return {
-      title: "VERIFICATION EVIDENCE",
+      title: "PRÜFNACHWEISE",
       sections: [
         { title: "", lines: ["Keine Verification-Daten für diese Session."] },
       ],
     };
   }
   return {
-    title: "VERIFICATION EVIDENCE",
+    title: "PRÜFNACHWEISE",
     badge: verification.verdict,
     sections: [
-      { title: "Checks", lines: verificationChecksLines(verification) },
+      { title: "Prüfungen", lines: verificationChecksLines(verification) },
       {
-        title: "Evidence",
+        title: "Nachweise",
         lines:
           verification.evidence && verification.evidence.length > 0
             ? verification.evidence
@@ -167,9 +172,9 @@ function modelsContent(state: AuroraUiState): InspectorContent {
 
 function reasoningContent(state: AuroraUiState): InspectorContent {
   return {
-    title: "REASONING",
+    title: "DENKEN",
     sections: [
-      { title: "Thinking", lines: [thinkingLabel(state.model.thinking)] },
+      { title: "Denken", lines: [thinkingLabel(state.model.thinking)] },
     ],
     actions: [{ label: "/thinking", key: "Super+D" }],
   };
@@ -180,7 +185,7 @@ function diagnosticsContent(
   diagnostics: ReturnType<typeof collectContextDiagnostics>,
 ): InspectorContent {
   return {
-    title: "DIAGNOSTICS",
+    title: "DIAGNOSE",
     sections: [
       {
         title: "Tool-Truncations",
@@ -225,7 +230,7 @@ export function registerInspectorCommand(
       if (!entry) return;
 
       const content = buildContent(pi, ctx, state, deps.getTask(), entry.id);
-      const lines = renderInspectorBox(content, ctx.ui.theme, 76);
+      const lines = renderInspectorBox(content, ctx.ui.theme, deps.getWidth());
       ctx.ui.notify(lines.join("\n"), "info");
     },
   });
