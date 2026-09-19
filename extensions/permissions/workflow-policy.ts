@@ -27,12 +27,17 @@ import { toolPath } from "./tool-event.ts";
  * dialog was removed.
  *
  * Secret/credential references and the project/symlink escape boundary hold
- * even under YOLO — those protect against irreversible data exposure, not
+ * even under YOLO 1 — those protect against irreversible data exposure, not
  * against a confirmation dialog. The system-level shell boundaries (elevated
  * rights, system package operations, download-to-shell, root wipe) are
- * YOLO's actual bypass surface: a deliberate, narrower risk than Claude
+ * YOLO 1's actual bypass surface: a deliberate, narrower risk than Claude
  * Code's own bypass-permissions mode takes for granted, so YOLO here mirrors
  * that model instead of re-litigating each command by hand.
+ *
+ * YOLO 2 ("yolo-ask") and YOLO 3 ("yolo-full") pass every one of these
+ * boundaries on to the decision layer, which asks (2) or allows (3). What
+ * they never lift lives elsewhere: the trust boundary and the Plan Mode
+ * write ban (guards.ts, planModeMutationGuard).
  */
 export interface WorkflowAssessment {
   blocked: boolean;
@@ -167,6 +172,10 @@ export function assessBash(
   command: string,
   permissionLevel?: PermissionLevel,
 ): WorkflowAssessment {
+  // YOLO 2/3 lift the secret boundary as well: decideBash then asks (2) or
+  // allows (3). YOLO 1 keeps it as a hard block.
+  if (permissionLevel === "yolo-ask" || permissionLevel === "yolo-full")
+    return PERMITTED;
   if (isSensitiveReference(command))
     return { blocked: true, reason: "Harte Secret- oder Credential-Grenze" };
   if (permissionLevel === "yolo") return PERMITTED;
@@ -185,7 +194,13 @@ export function assessWorkflowTool(
       permissionLevel,
     );
   const path = toolPath(event);
-  if (path) {
+  // YOLO 2/3: file targets outside the project or on secrets are decided by
+  // decideFileAccess (ask / allow) instead of being blocked here.
+  if (
+    path &&
+    permissionLevel !== "yolo-ask" &&
+    permissionLevel !== "yolo-full"
+  ) {
     const scope = resolvePathScope(path, cwd);
     if (isSensitiveReference(path) || scope.symlinkEscape) {
       return {

@@ -171,7 +171,7 @@ const definitions = [
   [
     "yolo",
     "YOLO umschalten",
-    "Temporären YOLO-Modus ein- oder ausschalten",
+    "Temporären YOLO-Modus ein- oder ausschalten (/yolo 1|2|3 wählt die Stufe)",
     "access",
     undefined,
     "Super+Y",

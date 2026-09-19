@@ -9,11 +9,12 @@
  * level and is queried live from plan-mode via requestWorkflowCapabilities
  * exactly where it matters for a decision (permissions/guards.ts). YOLO
  * exists in the effective pair alone. It is a temporary bypass, never a
- * preference: it is never persisted. The hard secret/symlink/trust
- * boundaries and the Plan Mode write ban stay active throughout — the
- * system-level shell boundaries and the recovery/commit gates are YOLO's
- * deliberate bypass surface (see workflow-policy.ts, verifier-policy.ts,
- * guards.ts).
+ * preference: it is never persisted. It comes in three stufen (yolo,
+ * yolo-ask, yolo-full; see workflow-status.ts). The trust boundary and the
+ * Plan Mode write ban stay active on all of them. YOLO 1 additionally keeps
+ * the hard secret/symlink boundaries; the system-level shell boundaries and
+ * the recovery/commit gates are the deliberate bypass surface of every stufe
+ * (see workflow-policy.ts, verifier-policy.ts, guards.ts).
  *
  * The session epoch guards against a menu that resolves after the session it
  * belonged to has ended.
@@ -31,11 +32,13 @@ import {
 import {
   PERMISSION_LEVEL_LABEL,
   UI_STATUS_KEYS,
+  isYoloLevel,
   normalizePermissionLevel,
   permissionRiskStatusValue,
   setTuiStatus,
   type PermissionLevel,
   type PermissionState,
+  type YoloLevel,
 } from "../shared/workflow-status.ts";
 import {
   defaultSetupConfig,
@@ -81,10 +84,16 @@ export interface PermissionSession {
     ctx: ExtensionContext,
     epoch?: number,
   ): Promise<void>;
+  /**
+   * Without `level`: toggles YOLO 1 (off when any YOLO stufe is active).
+   * With `level`: switches to that stufe, or turns YOLO off when it is
+   * already the active one.
+   */
   toggleYolo(
     ctx: ExtensionContext,
     source: "command" | "shortcut",
     epoch?: number,
+    level?: YoloLevel,
   ): Promise<void>;
   /** True when the event belongs to the session that is currently active. */
   ownsSession(sessionId: string, cwd: string): boolean;
@@ -202,22 +211,23 @@ export function createPermissionSession(
       });
     },
 
-    async toggleYolo(ctx, source, epoch = sessionEpoch) {
+    async toggleYolo(ctx, source, epoch = sessionEpoch, level) {
       if (epoch !== sessionEpoch) return;
       // YOLO ist jetzt auch im Plan Mode aktivierbar (bewusste Lockerung,
       // analog zu Claude Codes bypassPermissions-Modus). Das hebt
       // planModeMutationGuard nicht auf: Der Plan Mode bleibt unabhängig vom
       // Zugriffslevel eine harte Schreibgrenze (workflow-policy.ts). Ein
       // komplett unbekannter Workflow-Zustand bleibt weiterhin gesperrt.
-      if (permissionState !== "YOLO_OVERRIDE") {
-        if (yoloDeniedOnUnknownWorkflowState(ctx, source)) return;
-      }
-      if (permissionState === "YOLO_OVERRIDE") {
+      const active = permissionState === "YOLO_OVERRIDE";
+      const turnOff =
+        active && (level === undefined || level === permissionLevel);
+      if (!turnOff && yoloDeniedOnUnknownWorkflowState(ctx, source)) return;
+      if (turnOff) {
         permissionState = selectedPermissionState;
         permissionLevel = selectedPermissionLevel;
       } else {
         permissionState = "YOLO_OVERRIDE";
-        permissionLevel = "yolo";
+        permissionLevel = level ?? "yolo";
       }
       publishStatus(ctx);
       if (permissionState !== "YOLO_OVERRIDE") session.persist();
@@ -231,8 +241,8 @@ export function createPermissionSession(
 
     async applyPermissionLevel(level, ctx, epoch = sessionEpoch) {
       if (epoch !== sessionEpoch) return;
-      if (level === "yolo") {
-        await session.toggleYolo(ctx, "command", epoch);
+      if (isYoloLevel(level)) {
+        await session.toggleYolo(ctx, "command", epoch, level);
         return;
       }
       const nextState: Exclude<PermissionState, "YOLO_OVERRIDE"> =
@@ -281,10 +291,9 @@ export function createPermissionSession(
         latestState?.data?.selectedPermissionLevel ??
         latestState?.data?.permissionLevel;
       const normalizedPersistedLevel = normalizePermissionLevel(persistedRaw);
-      const restoredLevel =
-        normalizedPersistedLevel === "yolo"
-          ? "project-write"
-          : normalizedPersistedLevel;
+      const restoredLevel = isYoloLevel(normalizedPersistedLevel)
+        ? "project-write"
+        : normalizedPersistedLevel;
       // Phase 2.3: a fresh session (no prior persisted choice in this
       // project) outside the TUI has no confirm dialog available at all.
       // Defaulting it to "project-write" - as every session got before -

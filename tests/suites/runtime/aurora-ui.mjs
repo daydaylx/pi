@@ -450,6 +450,18 @@ export const auroraUiSections = {
               `YOLO displaces routine information at ${width} columns`,
             );
           }
+          for (const [level, badge] of [
+            ["yolo-ask", "⚠ YOLO 2"],
+            ["yolo-full", "⚠ YOLO 3"],
+          ]) {
+            const state = { state: { permissions: { level } } };
+            for (const width of [45, 70, 100, 140]) {
+              assert(
+                line(width, state).includes(badge),
+                `the ${level} badge stays visible at ${width} columns`,
+              );
+            }
+          }
           assert(
             line(45, {
               statuses: new Map([["verification", "Verify: checks_failed"]]),

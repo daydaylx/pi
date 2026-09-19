@@ -14,7 +14,10 @@ import {
   hasEvaluableVerifierResult,
   type VerificationCapabilitySnapshot,
 } from "../shared/verification-capabilities.ts";
-import type { PermissionLevel } from "../shared/workflow-status.ts";
+import {
+  isYoloLevel,
+  type PermissionLevel,
+} from "../shared/workflow-status.ts";
 import { matchingVerifierRequiredPaths } from "./verifier-required-paths.ts";
 import type { WorkflowAssessment } from "./workflow-policy.ts";
 
@@ -375,7 +378,7 @@ export async function assessGitCommitVerifierGate(
   permissionLevel?: PermissionLevel,
 ): Promise<WorkflowAssessment> {
   if (event.toolName !== "bash") return PERMITTED;
-  if (permissionLevel === "yolo") return PERMITTED;
+  if (isYoloLevel(permissionLevel)) return PERMITTED;
   const input = isRecord(event.input) ? event.input : {};
   const command = typeof input.command === "string" ? input.command : "";
   if (!bashTouchesGitCommit(command)) return PERMITTED;

@@ -3,6 +3,7 @@ import { runMenu } from "../shared/menu-ui.ts";
 import {
   PERMISSION_LEVEL_DESCRIPTION,
   PERMISSION_LEVEL_LABEL,
+  isYoloLevel,
   type PermissionLevel,
 } from "../shared/workflow-status.ts";
 import type { PermissionSession } from "./session-state.ts";
@@ -25,8 +26,8 @@ export async function openPermissionMenu(
       label: PERMISSION_LEVEL_LABEL[level],
       description: PERMISSION_LEVEL_DESCRIPTION[level],
       current: session.level() === level,
-      dangerous: level === "yolo",
-      tone: level === "yolo" ? "danger" : undefined,
+      dangerous: isYoloLevel(level),
+      tone: isYoloLevel(level) ? "danger" : undefined,
       value: level,
     })),
     { nonInteractiveHint: "Die Berechtigungen benötigen den TUI-Modus." },

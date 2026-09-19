@@ -1671,3 +1671,151 @@ await test("the execution prompt is a stable, bindable string", () => {
     "an added instruction extends the prompt rather than replacing it",
   );
 });
+
+await test("/yolo selects between three stufen, never persists them and keeps plan mode locked", async () => {
+  if (!planMode || !modePermissions) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-yolo-stufen-e2e-"));
+    try {
+      const harness = createHarness({ select: () => "Architekturplan" });
+      planMode.default(harness.api);
+      modePermissions.default(harness.api);
+      const ctx = harness.makeContext({ cwd });
+      await hooks(harness, "session_start", ctx);
+      const yolo = (args) => harness.commands.get("yolo")(args, ctx);
+      const status = () => latestStatus(harness, "permissions");
+      const write = async () =>
+        harness.runHooks(
+          "tool_call",
+          { toolName: "write", input: { path: "src/example.ts" } },
+          ctx,
+        );
+
+      await yolo("2");
+      eq(status(), "⚠ YOLO 2 · MIT RÜCKFRAGE", "/yolo 2 enters stufe 2");
+      await yolo("3");
+      eq(status(), "⚠ YOLO 3 · VOLLZUGRIFF", "/yolo 3 switches to stufe 3");
+      await yolo("1");
+      eq(status(), "⚠ YOLO · TEMPORÄR", "/yolo 1 switches back to stufe 1");
+      await yolo("3");
+      await yolo("3");
+      eq(
+        status(),
+        "🛡 DEFAULT · PROJECT WRITE",
+        "the active stufe again turns YOLO off",
+      );
+      await yolo("full");
+      await yolo("off");
+      eq(status(), "🛡 DEFAULT · PROJECT WRITE", "/yolo off leaves YOLO");
+      await yolo("");
+      eq(status(), "⚠ YOLO · TEMPORÄR", "bare /yolo still toggles stufe 1");
+      await yolo("");
+      await yolo("off");
+      assert(
+        harness.notifications.some((entry) =>
+          entry.message.includes("nicht aktiv"),
+        ),
+        "/yolo off without an active YOLO says so instead of enabling it",
+      );
+      eq(status(), "🛡 DEFAULT · PROJECT WRITE", "/yolo off stays off");
+      await yolo("7");
+      eq(
+        status(),
+        "🛡 DEFAULT · PROJECT WRITE",
+        "an unknown stufe changes nothing",
+      );
+
+      await harness.commands.get("permission")("yolo-full", ctx);
+      eq(status(), "⚠ YOLO 3 · VOLLZUGRIFF", "/permission yolo-full works too");
+
+      const persisted = harness.appended
+        .filter((entry) => entry.customType === "mode-permissions")
+        .map((entry) => entry.data.selectedPermissionLevel);
+      assert(
+        persisted.every((level) => level === "project-write"),
+        "a YOLO stufe is never persisted as the selected level",
+      );
+
+      let result = await write();
+      assert(
+        !result.some((entry) => entry?.block),
+        "YOLO 3 writes without a dialog in work mode",
+      );
+      await chooseWorkflow(harness, ctx);
+      result = await write();
+      assert(
+        result.some((entry) => entry?.block),
+        "YOLO 3 does not unlock writes in plan mode",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("YOLO 2 shows the confirm dialog at a boundary and a rejection blocks; YOLO 3 skips it", async () => {
+  if (!modePermissions || !planMode) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-yolo-dialog-"));
+    try {
+      const run = async (level, approve, toolName, input) => {
+        const harness = createHarness({ confirm: approve });
+        // plan-mode is the workflow provider; without it YOLO stays locked.
+        planMode.default(harness.api);
+        modePermissions.default(harness.api);
+        const ctx = harness.makeContext({ cwd });
+        // Deterministic confirm fallback instead of the custom overlay.
+        ctx.ui.custom = async () => {
+          throw new Error("use deterministic confirm fallback");
+        };
+        await hooks(harness, "session_start", ctx);
+        await harness.commands.get("yolo")(level, ctx);
+        const result = await harness.runHooks(
+          "tool_call",
+          { toolName, input },
+          ctx,
+        );
+        const asked = harness.lifecycleCalls.filter(
+          (call) => call.kind === "confirm",
+        ).length;
+        return { blocked: result.some((entry) => entry?.block), asked };
+      };
+      const cases = [
+        ["bash", { command: "sudo id" }],
+        ["bash", { command: "cat ~/.ssh/id_rsa" }],
+        ["read", { path: "/etc/hostname" }],
+        ["write", { path: "/etc/pi-yolo-dialog-test" }],
+      ];
+      for (const [toolName, input] of cases) {
+        const label = `${toolName} ${JSON.stringify(input)}`;
+        const approved = await run("2", true, toolName, input);
+        assert(
+          !approved.blocked && approved.asked >= 1,
+          `YOLO 2 asks and runs after approval: ${label}`,
+        );
+        const rejected = await run("2", false, toolName, input);
+        assert(
+          rejected.blocked && rejected.asked >= 1,
+          `YOLO 2 blocks after a rejected dialog: ${label}`,
+        );
+        const full = await run("3", false, toolName, input);
+        assert(
+          !full.blocked && !full.asked,
+          `YOLO 3 runs without any dialog: ${label}`,
+        );
+        const one = await run("1", true, toolName, input);
+        assert(
+          one.blocked && !one.asked,
+          `YOLO 1 still blocks silently: ${label}`,
+        );
+      }
+      const routine = await run("2", false, "bash", { command: "git status" });
+      assert(
+        !routine.blocked && !routine.asked,
+        "YOLO 2 stays dialog-free for routine commands",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});

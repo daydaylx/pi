@@ -29,6 +29,7 @@ import {
   normalizeVerifierDelegationInput,
 } from "./verifier-policy.ts";
 import { assessWebToolInput } from "./web-tools.ts";
+import { isYoloLevel } from "../shared/workflow-status.ts";
 import { toolPath } from "./tool-event.ts";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", ASK_USER_TOOL_NAME];
@@ -207,7 +208,7 @@ export function registerPermissionGuards(
     // (bewusste Lockerung) statt sie nur zu übergehen, damit auch keine
     // unnötige Recovery-Status-Anfrage läuft.
     const recovery =
-      session.level() !== "yolo" && recoveryStatusNeeded(event, ctx.cwd)
+      !isYoloLevel(session.level()) && recoveryStatusNeeded(event, ctx.cwd)
         ? await requestRecoveryStatus(pi.events)
         : { armed: false as const };
     if (recoveryGateBlocks(recovery.armed, event, ctx.cwd)) {

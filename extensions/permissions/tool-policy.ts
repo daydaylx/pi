@@ -14,6 +14,7 @@ import {
 } from "../shared/permission-policy.ts";
 import {
   PERMISSION_LEVEL_LABEL,
+  isYoloLevel,
   type PermissionLevel,
 } from "../shared/workflow-status.ts";
 import type { PolicyAction as ConfiguredPolicyAction } from "../setup-core/config.ts";
@@ -28,6 +29,12 @@ export function permissionWarning(level: PermissionLevel): string | undefined {
   }
   if (level === "yolo") {
     return "YOLO temporär aktiv: Rückfragen, Recovery-Gate und Commit-Verifier-Pflicht entfallen, harte System-Bash-Grenzen (sudo, Paketmanager, curl|sh, rm -rf /) sind gelockert; harte Secret-, Symlink-, Trust-Grenzen und der Plan-Mode-Schreibschutz bleiben aktiv.";
+  }
+  if (level === "yolo-ask") {
+    return "YOLO 2 temporär aktiv: wie YOLO 1 ohne Routine-Rückfragen, aber sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach. Recovery-Gate und Commit-Verifier-Pflicht entfallen; Trust-Grenze und Plan-Mode-Schreibschutz bleiben aktiv.";
+  }
+  if (level === "yolo-full") {
+    return "YOLO 3 temporär aktiv: VOLLZUGRIFF ohne Rückfragen, auch sudo, Systempfade, Secrets und Pfade außerhalb des Projekts. Nur Trust-Grenze, Plan-Mode-Schreibschutz und die Bestätigung für das Löschen des Root-Dateisystems bleiben aktiv. sudo-Passwörter gibst du im interaktiven Shell-Pfad selbst ein.";
   }
   if (level === "headless") {
     return "Headless aktiv: kein Bestätigungsdialog verfügbar. Projektlokale Builds/Tests/Lint/Typecheck sind erlaubt; jede sonst bestätigungspflichtige Aktion bricht strukturiert ab statt zu fragen.";
@@ -147,7 +154,7 @@ export function decideTool(
     return decideFileAccess(permissionLevel, "write", filePath, cwd);
   }
 
-  if (permissionLevel === "yolo") {
+  if (isYoloLevel(permissionLevel)) {
     return {
       action: "allow",
       reason: "Temporärer YOLO-Bypass innerhalb harter Grenzen",

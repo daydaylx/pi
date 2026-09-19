@@ -20,6 +20,10 @@ export interface PolicyDecision {
 }
 
 const ALLOW: PolicyDecision = { action: "allow", reason: "Erlaubt" };
+const YOLO_FULL_ALLOW: PolicyDecision = {
+  action: "allow",
+  reason: "YOLO 3: Vollzugriff ohne Rückfrage",
+};
 
 // Namenssegmente wie auth/credentials/secrets/tokens gelten nur als Secret,
 // wenn sie ohne Endung (auch als Dotfile) oder mit einer Daten-/Key-Endung
@@ -47,11 +51,10 @@ const SYSTEM_PATHS = ["/etc", "/usr", "/bin", "/sbin", "/boot", "/var"];
  */
 const PROTECTED_PROJECT_PATHS = [".git", ".pi/lsp.json", ".pi/verify.json"];
 
+const ROOT_WIPE_REASON = "Löschen des Root-Dateisystems";
+
 const CRITICAL_BASH_PATTERNS: Array<[RegExp, string]> = [
-  [
-    /\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i,
-    "Löschen des Root-Dateisystems",
-  ],
+  [/\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i, ROOT_WIPE_REASON],
   [
     /\brm\b[^;&|]*(?:\{[^}]*\}|`|\$(?:\(|\{[^}]*\}|['"]|[A-Za-z_][A-Za-z0-9_]*|[0-9?*#@!_-]))/,
     "Löschen über eine dynamisch expandierte Pfadangabe",
@@ -408,6 +411,11 @@ export function decideFileAccess(
   const scope = resolvePathScope(rawPath, cwd);
   const isReadRestricted = permissionLevel === "readonly";
 
+  // YOLO 3 hebt die Pfadgrenzen vollständig auf (Secrets, außerhalb des
+  // Projekts, Symlink-Escape, Ausführungspfade). Trust-Grenze und Plan-Mode
+  // entscheiden vorher in guards.ts/workflow-policy.ts.
+  if (permissionLevel === "yolo-full") return YOLO_FULL_ALLOW;
+
   if (
     isSensitiveReference(rawPath) ||
     isSensitiveReference(scope.absolutePath)
@@ -438,6 +446,18 @@ export function decideFileAccess(
       );
     }
     return ALLOW;
+  }
+
+  // YOLO 2: workflow-policy lets files outside the project or behind a
+  // symlink escape through, so this layer asks instead of the hard block.
+  if (
+    permissionLevel === "yolo-ask" &&
+    (!scope.insideProject || scope.symlinkEscape)
+  ) {
+    return ask(
+      `Dateizugriff außerhalb des Projekts oder über einen Symlink: ${scope.absolutePath}`,
+      true,
+    );
   }
 
   // Project, system and symlink boundaries are owned by workflow-policy and
@@ -1386,6 +1406,81 @@ function projectWriteInterpreter(
   );
 }
 
+/**
+ * The first hard shell boundary a command touches, in the same order YOLO 1
+ * checks them. YOLO 1 denies each of these outright; YOLO 2 asks instead
+ * (YOLO 3 lifts them, see decideExtendedYoloBash).
+ */
+function extendedYoloBoundary(
+  command: string,
+  cwd: string,
+): string | undefined {
+  if (isSensitiveReference(command)) {
+    return "Zugriff auf Secrets, Tokens, Credentials oder SSH-Keys";
+  }
+  for (const [pattern, reason] of CRITICAL_BASH_PATTERNS) {
+    if (pattern.test(command)) return reason;
+  }
+  if (
+    referencesSystemPath(command) &&
+    (/\b(?:rm|mv|cp|mkdir|touch|tee|truncate|dd|chmod|chown|chgrp|ln|sed)\b/i.test(
+      command,
+    ) ||
+      /(?:^|[^<])>(?!>)/.test(command) ||
+      />>/.test(command))
+  ) {
+    return "Änderung an einem Systempfad";
+  }
+  if (containsUnquotedVariableExpansion(command)) {
+    return "Eine unquotierte Shell-Variable kann außerhalb des Projekts auflösen";
+  }
+  if (/\b(?:sudo|su)\b/i.test(command)) {
+    return "Ausführung mit erhöhten Rechten";
+  }
+  if (
+    /\b(?:apt|apt-get|dnf|yum|pacman|zypper|brew)\s+(?:install|remove|purge|update|upgrade)\b/i.test(
+      command,
+    )
+  ) {
+    return "System-Paketoperation";
+  }
+  const interpreter =
+    opaqueInterpreter(command) ?? projectWriteInterpreter(command, cwd);
+  if (interpreter) {
+    return `Opaker Interpreteraufruf (${interpreter}) - Inline-/stdin-Code oder ein externes Skript`;
+  }
+  if (likelyExternalWrite(command, cwd)) {
+    return "Bash-Änderung außerhalb des aktuellen Projekts";
+  }
+  return undefined;
+}
+
+/**
+ * YOLO 2 and 3 share YOLO 1's "no routine confirmations" behaviour and differ
+ * only in what happens at a hard boundary: YOLO 2 asks (dangerous styling),
+ * YOLO 3 allows. The single exception is wiping the root filesystem, which
+ * even YOLO 3 confirms — no legitimate workflow is lost by that one dialog.
+ */
+function decideExtendedYoloBash(
+  permissionLevel: "yolo-ask" | "yolo-full",
+  command: string,
+  cwd: string,
+): PolicyDecision {
+  // Checked independently of the first boundary hit, so a root wipe cannot
+  // hide behind an earlier match such as `cat ~/.ssh/id_rsa; rm -rf /`.
+  if (CRITICAL_BASH_PATTERNS[0][0].test(command)) {
+    return ask(ROOT_WIPE_REASON, true);
+  }
+  if (permissionLevel === "yolo-full") return YOLO_FULL_ALLOW;
+  const boundary = extendedYoloBoundary(command, cwd);
+  return boundary
+    ? ask(boundary, true)
+    : {
+        action: "allow",
+        reason: "Temporärer YOLO-Bypass innerhalb der Grenzen",
+      };
+}
+
 export function decideBash(
   permissionLevel: PermissionLevel,
   command: string,
@@ -1400,6 +1495,10 @@ export function decideBash(
       : deny(
           "Readonly: Das Kommando ist nicht nachweislich rein inspizierend.",
         );
+  }
+
+  if (permissionLevel === "yolo-ask" || permissionLevel === "yolo-full") {
+    return decideExtendedYoloBash(permissionLevel, trimmed, cwd);
   }
 
   // headless has no confirm channel at all, so it hard-denies exactly where

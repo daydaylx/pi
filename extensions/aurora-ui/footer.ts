@@ -280,11 +280,17 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     });
   }
 
-  if (input.state.permissions.level === "yolo") {
+  const yoloLevel = input.state.permissions.level;
+  if (yoloLevel === "yolo" || yoloLevel === "yolo-ask" || yoloLevel === "yolo-full") {
     segments.push({
       slot: Slot.risk,
       priority: Priority.yolo,
-      text: "⚠ YOLO",
+      text:
+        yoloLevel === "yolo-ask"
+          ? "⚠ YOLO 2"
+          : yoloLevel === "yolo-full"
+            ? "⚠ YOLO 3"
+            : "⚠ YOLO",
       tone: "error",
       bold: true,
       class: "risk",

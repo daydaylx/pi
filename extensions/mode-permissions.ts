@@ -23,7 +23,9 @@ import {
 } from "./shared/control-center-events.ts";
 import {
   PERMISSION_LEVEL_LABEL,
+  isYoloLevel,
   normalizePermissionLevel,
+  parseYoloLevel,
   type PermissionLevel,
 } from "./shared/workflow-status.ts";
 import { registerPermissionGuards } from "./permissions/guards.ts";
@@ -40,11 +42,29 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("yolo", {
     description: catalogDescription("yolo"),
-    handler: async (_args, ctx) => session.toggleYolo(ctx, "command"),
+    handler: async (args, ctx) => {
+      const raw = args.trim().toLowerCase();
+      if (!raw) return session.toggleYolo(ctx, "command");
+      if (raw === "off" || raw === "aus" || raw === "0") {
+        if (isYoloLevel(session.level())) return session.toggleYolo(ctx, "command");
+        ctx.ui.notify("YOLO ist nicht aktiv.", "info");
+        return;
+      }
+      const level = parseYoloLevel(raw);
+      if (!level) {
+        ctx.ui.notify(
+          "Nutzung: /yolo [1|2|3|off] — 1 Projekt, 2 mit Rückfrage, 3 Vollzugriff",
+          "info",
+        );
+        return;
+      }
+      // Explizite Stufe wechselt dorthin; dieselbe Stufe erneut schaltet YOLO aus.
+      return session.toggleYolo(ctx, "command", undefined, level);
+    },
   });
 
   pi.registerCommand("permission", {
-    description: `${catalogDescription("permission")}: readonly | project-write | confirm-all | yolo`,
+    description: `${catalogDescription("permission")}: readonly | project-write | confirm-all | yolo | yolo-ask | yolo-full`,
     handler: async (args, ctx) => {
       const raw = args.trim();
       if (!raw) {
@@ -56,7 +76,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
         : normalizePermissionLevel(raw);
       if (!level) {
         ctx.ui.notify(
-          "Nutzung: /permission readonly|project-write|confirm-all|yolo",
+          "Nutzung: /permission readonly|project-write|confirm-all|yolo|yolo-ask|yolo-full",
           "info",
         );
         return;

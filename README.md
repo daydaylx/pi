@@ -81,7 +81,8 @@ verschachtelter Delegation sind Eigenschaften der drei Profil-Tools.
 ## Berechtigungen und Freigaben
 
 Berechtigungen sind eine reine Stufenwahl über `/permission`: `readonly`,
-`project-write`, `confirm-all` und temporäres `yolo`. Gespeicherte
+`project-write`, `confirm-all` und temporäres `yolo` in drei Stufen
+(`yolo`, `yolo-ask`, `yolo-full`, kurz `/yolo 1|2|3`; Entscheidung 029). Gespeicherte
 Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe selbst
 nicht. Subagenten-Delegationen (`subagent`) sind auf `project-write`,
 `confirm-all` und `yolo` ohne Bestätigung erlaubt (Entscheidung 018);
@@ -109,10 +110,13 @@ Menschen selbst per `!`/`!!` eingegebener Bash-Befehl durchläuft diesen Guard
 nicht. Details: `docs/decisions/012-plan-mode-mutation-guard.md`.
 
 Harte Trust-, Secret-, Symlink-, Projekt- und Systemgrenzen bleiben auf jeder
-Stufe blockiert, YOLO eingeschlossen. Dazu zählen auch Ausführungspfade
+Stufe blockiert, YOLO 1 eingeschlossen. Dazu zählen auch Ausführungspfade
 innerhalb des Projekts: Schreibzugriffe auf `.git/`, `.pi/lsp.json` und
 `.pi/verify.json` müssen bestätigt werden, weil dort Geschriebenes später
-ausgeführt wird.
+ausgeführt wird. YOLO 2 (`yolo-ask`) fragt an diesen Grenzen mit Gefahr-Dialog
+nach (sudo, Systempfade, Secrets, Pfade außerhalb des Projekts, opake
+Interpreter); YOLO 3 (`yolo-full`) erlaubt sie, auch sudo. Auf jeder YOLO-Stufe
+bleiben Trust-Grenze und Plan-Mode-Schreibschutz aktiv.
 
 ## Verifikation
 
