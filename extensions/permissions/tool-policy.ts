@@ -22,6 +22,10 @@ import { WEB_TOOLS, decideWebTool } from "./web-tools.ts";
 import { LOCAL_LSP_TOOLS } from "./workflow-policy.ts";
 import { PLAN_WRITE_TOOL_NAME } from "../plan-mode/plan-tool.ts";
 import { toolPath } from "./tool-event.ts";
+import {
+  INTERACTIVE_SHELL_TOOL_NAME,
+  interactiveShellCommand,
+} from "../shared/interactive-shell-policy.ts";
 
 export function permissionWarning(level: PermissionLevel): string | undefined {
   if (level === "confirm-all") {
@@ -52,7 +56,10 @@ export function decideTool(
   },
   options: { allowOutsideProjectRead?: boolean } = {},
 ): PolicyDecision {
-  if (event.toolName === "bash") {
+  if (
+    event.toolName === "bash" ||
+    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+  ) {
     if (permissionLevel === "project-write" || permissionLevel === "headless") {
       if (configured.bash === "block") {
         return {
@@ -76,7 +83,9 @@ export function decideTool(
     }
     return decideBash(
       permissionLevel,
-      String((event.input as Record<string, unknown>).command ?? ""),
+      event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+        ? interactiveShellCommand(event)
+        : String((event.input as Record<string, unknown>).command ?? ""),
       cwd,
     );
   }

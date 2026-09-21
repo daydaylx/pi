@@ -29,7 +29,8 @@
       ],
       "typebox": [
         "./npm/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox"
-      ]
+      ],
+      "node-pty": ["./npm/node_modules/node-pty"]
     }
   },
   "include": ["extensions/**/*.ts", "npm/packages/**/*.ts", "types/**/*.d.ts"]

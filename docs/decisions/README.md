@@ -25,6 +25,7 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [024](024-remove-verification-tile-and-phase-chain.md) — PRÜFUNGEN-Kachel und Phasenkette aus dem Dashboard entfernt
 - [025](025-merge-task-and-activity-tile.md) — Aufgabe- und Aktivität-Kachel zu einer Kachel verschmolzen, Kachel-Titel in normaler Schreibweise
 - [026](026-more-animation-subagents-and-badge-flash.md) — Animierte Subagenten-Zeilen und Badge-Flash bei Statuswechsel
+- [028](028-aurora-forge-visual-state-and-motion.md) — Semantische Visual States und gemeinsame Motion für Aurora Forge
 - [029](029-yolo-three-stufen.md) — YOLO in drei Stufen: Projekt, mit Rückfrage, Vollzugriff
 
 ## Historische, ersetzte Entscheidungen

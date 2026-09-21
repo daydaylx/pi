@@ -4,9 +4,11 @@
     "extensions/setup-core/index.ts",
     "extensions/plan-mode/index.ts",
     "extensions/mode-permissions.ts",
+    "extensions/interactive-pty/index.ts",
     "extensions/lsp/index.ts",
     "extensions/ask-user.ts",
     "extensions/diff-viewer/index.ts",
+    "extensions/diff-learning/index.ts",
     "extensions/control-plane.ts",
     "extensions/compact-tools/index.ts",
     "extensions/aurora-ui/index.ts",
@@ -15,6 +17,7 @@
     "extensions/frontend-protocol/index.ts",
     "extensions/frontend-bridge/index.ts",
     "extensions/openrouter-doctor/index.ts",
+    "extensions/second-opinion/index.ts",
     "tests/run-all.mjs",
     "tests/run.mjs",
     "tests/workflow-mode.mjs",
@@ -26,21 +29,16 @@
     "tests/openrouter-doctor/live/manual-live-check.mjs",
     "scripts/*.mjs"
   ],
-  "project": [
-    "extensions/**/*.ts",
-    "tests/**/*.mjs",
-    "scripts/**/*.mjs"
-  ],
-  "ignore": [
-    "tests/fixtures/fake-lsp.mjs"
-  ],
+  "project": ["extensions/**/*.ts", "tests/**/*.mjs", "scripts/**/*.mjs"],
+  "ignore": ["tests/fixtures/fake-lsp.mjs"],
   "ignoreDependencies": [
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
     "typebox",
-    "jiti"
+    "jiti",
+    "node-pty"
   ],
   "rules": {
     "exports": "off",

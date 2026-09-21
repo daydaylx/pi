@@ -42,6 +42,11 @@ const ALLOWLIST = [
   "shared",
   "skills",
   "tests",
+  // Benchmark infrastructure tests import these sources and the pinned
+  // test dependency; reports and real run artifacts are not deployed.
+  "benchmarks/real-duel/scripts",
+  "benchmarks/real-duel/candidates",
+  "benchmarks/real-duel/OPENBENCH_LOCK",
   "themes",
 ];
 const NEVER_COPY = new Set([

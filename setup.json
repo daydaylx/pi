@@ -1,7 +1,7 @@
 {
   "$schema": "./schemas/setup.schema.json",
   "ui": {
-    "theme": "aurora-night",
+    "theme": "aurora-forge",
     "motion": "contextual"
   },
   "permissions": {

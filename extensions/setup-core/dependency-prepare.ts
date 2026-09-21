@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import type { ExecFn } from "./verify-profiles.ts";
 
@@ -38,6 +38,8 @@ export interface DependencyPrepareOptions {
   exec: ExecFn;
   signal?: AbortSignal;
   preparedLocks: Map<string, string>;
+  /** Runtime-owned root supplied by the host, never by project configuration. */
+  agentDir?: string;
 }
 
 function hasDependencies(manifest: Record<string, unknown>): boolean {
@@ -77,6 +79,7 @@ function readManifest(directory: string): Record<string, unknown> | undefined {
  */
 export function discoverDependencyTargets(
   projectRoot: string,
+  agentDir?: string,
 ): DependencyTarget[] {
   const targets: DependencyTarget[] = [];
   let visitedDirectories = 0;
@@ -115,6 +118,15 @@ export function discoverDependencyTargets(
       left.name.localeCompare(right.name),
     )) {
       if (!entry.isDirectory() || SKIPPED_DIRECTORIES.has(entry.name)) continue;
+      // Only the host's own top-level sessions directory is runtime state.
+      // A project (or nested package) named sessions must still be inspected.
+      if (
+        depth === 0 &&
+        entry.name === "sessions" &&
+        agentDir !== undefined &&
+        resolve(projectRoot) === resolve(agentDir)
+      )
+        continue;
       visit(join(directory, entry.name), depth + 1);
     }
   };
@@ -149,7 +161,7 @@ export async function prepareProjectDependencies(
   const preparations: DependencyPreparation[] = [];
   let targets: DependencyTarget[];
   try {
-    targets = discoverDependencyTargets(options.projectRoot);
+    targets = discoverDependencyTargets(options.projectRoot, options.agentDir);
   } catch (error) {
     return [
       {

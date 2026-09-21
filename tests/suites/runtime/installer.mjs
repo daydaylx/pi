@@ -52,7 +52,12 @@ export const installerSections = {
         deployedSet.has("APPEND_SYSTEM.md"),
         "greenfield includes the active communication rules",
       );
-      for (const prompt of ["analyse.md", "docs-check.md", "review.md", "ui-review.md"]) {
+      for (const prompt of [
+        "analyse.md",
+        "docs-check.md",
+        "review.md",
+        "ui-review.md",
+      ]) {
         assert(
           deployedSet.has(`prompts/${prompt}`),
           `greenfield includes prompt template prompts/${prompt}`,
@@ -134,6 +139,23 @@ export const installerSections = {
           ],
           { stdio: "pipe", timeout: 30_000 },
         );
+
+        // The benchmark test suite and its local OpenBench dependency pin
+        // must travel with the tests they support (TEST-001: no shipped test
+        // without the sources it invokes).
+        const benchmarkTelemetryRunner = deployedSet.has(
+          "tests/benchmark-telemetry.test.mjs",
+        );
+        if (benchmarkTelemetryRunner) {
+          assert(
+            deployedSet.has("benchmarks/real-duel/scripts/telemetry.py"),
+            "greenfield ships telemetry.py alongside its test entry",
+          );
+          assert(
+            deployedSet.has("benchmarks/real-duel/OPENBENCH_LOCK"),
+            "greenfield ships the OpenBench pin document",
+          );
+        }
 
         // shared/ must exist and be importable.
         const snapshotPath = path.join(

@@ -206,6 +206,12 @@ const definitions = [
     "code",
   ],
   [
+    "learn-diff",
+    "Diff Learning",
+    "Diff-Lernmodus umschalten oder verwalten: on | off | stats | weak | review",
+    "code",
+  ],
+  [
     "lsp",
     "LSP-Steuerung",
     "Status, Server und Dateidiagnose verwalten",

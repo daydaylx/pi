@@ -5,6 +5,7 @@ export type HeaderActivity =
   | "idle"
   | "thinking"
   | "running"
+  | "verifying"
   | "responding"
   | "waiting"
   | "done"
@@ -16,6 +17,7 @@ export type SessionStatus =
   | "thinking"
   | "responding"
   | "working"
+  | "verifying"
   | "waiting"
   | "verified"
   | "completed"
@@ -35,7 +37,13 @@ export function sessionStatus(input: SessionStatusInput): SessionStatus {
   // A user abort is its own outcome — a stale failed verification from
   // before the abort must not repaint it as a plain "error" below.
   if (input.activity === "cancelled") return "cancelled";
-  const activeTurn = ["thinking", "responding", "running", "waiting"].includes(
+  const activeTurn = [
+    "thinking",
+    "responding",
+    "running",
+    "verifying",
+    "waiting",
+  ].includes(
     input.activity,
   );
   // A previous failed check is a session risk, but it must not hide current
@@ -52,6 +60,8 @@ export function sessionStatus(input: SessionStatusInput): SessionStatus {
       return "responding";
     case "running":
       return "working";
+    case "verifying":
+      return "verifying";
     case "waiting":
       return "waiting";
     case "done":
@@ -71,6 +81,8 @@ export function statusLabel(status: SessionStatus): string {
       return "DENKT NACH";
     case "responding":
       return "ANTWORTET";
+    case "verifying":
+      return "PRÜFT";
     case "working":
       return "ARBEITET";
     case "waiting":
@@ -90,10 +102,13 @@ export function statusLabel(status: SessionStatus): string {
 
 export function statusTone(
   status: SessionStatus,
-): "muted" | "accent" | "success" | "error" {
+): "muted" | "accent" | "success" | "error" | "thinkingHigh" | "thinkingMax" | "thinkingXhigh" {
   if (status === "error") return "error";
   if (status === "verified" || status === "completed") return "success";
   if (status === "idle" || status === "waiting" || status === "cancelled")
     return "muted";
+  if (status === "thinking") return "thinkingHigh";
+  if (status === "responding") return "thinkingMax";
+  if (status === "verifying") return "thinkingXhigh";
   return "accent";
 }

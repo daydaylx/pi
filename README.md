@@ -116,7 +116,8 @@ innerhalb des Projekts: Schreibzugriffe auf `.git/`, `.pi/lsp.json` und
 ausgeführt wird. YOLO 2 (`yolo-ask`) fragt an diesen Grenzen mit Gefahr-Dialog
 nach (sudo, Systempfade, Secrets, Pfade außerhalb des Projekts, opake
 Interpreter); YOLO 3 (`yolo-full`) erlaubt sie, auch sudo. Auf jeder YOLO-Stufe
-bleiben Trust-Grenze und Plan-Mode-Schreibschutz aktiv.
+bleiben Trust-Grenze, Plan-Mode-Schreibschutz und der Credential-Pfad des
+interaktiven Shell-Tools aktiv.
 
 ## Verifikation
 

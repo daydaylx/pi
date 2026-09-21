@@ -29,8 +29,20 @@ export const targetConfigSections = {
         readFileSync(path.join(ROOT, "npm", "package-lock.json"), "utf8"),
       );
 
+      const knip = JSON.parse(
+        readFileSync(path.join(ROOT, "knip.json"), "utf8"),
+      );
+      for (const entry of settings.extensions ?? []) {
+        if (typeof entry !== "string" || !entry.startsWith("+extensions/"))
+          continue;
+        assert(
+          knip.entry.includes(entry.slice(1)),
+          "every active local extension is a Knip entry: " + entry.slice(1),
+        );
+      }
+
       // Aurora is the only supported runtime chrome in this test suite.
-      if (settings.theme === "aurora-night") {
+      if (settings.theme === "aurora-forge") {
         const setup = JSON.parse(
           readFileSync(path.join(ROOT, "setup.json"), "utf8"),
         );
@@ -38,7 +50,7 @@ export const targetConfigSections = {
           readFileSync(path.join(ROOT, "schemas", "setup.schema.json"), "utf8"),
         );
         const auroraTheme = JSON.parse(
-          readFileSync(path.join(ROOT, "themes", "aurora-night.json"), "utf8"),
+          readFileSync(path.join(ROOT, "themes", "aurora-forge.json"), "utf8"),
         );
         const packageSources = settings.packages.map((entry) =>
           typeof entry === "string" ? entry : entry?.source,
@@ -298,7 +310,7 @@ export const targetConfigSections = {
         );
         eq(
           setup.ui,
-          { theme: "aurora-night", motion: "contextual" },
+          { theme: "aurora-forge", motion: "contextual" },
           "central UI defaults",
         );
         eq(
@@ -318,17 +330,17 @@ export const targetConfigSections = {
         );
         eq(
           auroraTheme.name,
-          "aurora-night",
-          "Aurora theme has its stable runtime name",
+          "aurora-forge",
+          "Aurora Forge theme has its stable runtime name",
         );
         eq(
           auroraTheme.vars.bg,
-          "#17110e",
+          "#12100F",
           "Aurora uses its warm neutral page background",
         );
         eq(
           auroraTheme.vars.bgDark,
-          "#100b09",
+          "#0D0B0A",
           "Aurora uses its darker warm terminal background variant",
         );
         assert(
@@ -440,9 +452,11 @@ export const targetConfigSections = {
             "+extensions/setup-core/index.ts",
             "+extensions/plan-mode/index.ts",
             "+extensions/mode-permissions.ts",
+            "+extensions/interactive-pty/index.ts",
             "+extensions/lsp/index.ts",
             "+extensions/ask-user.ts",
             "+extensions/diff-viewer/index.ts",
+            "+extensions/diff-learning/index.ts",
             "+extensions/control-plane.ts",
             "+extensions/compact-tools/index.ts",
             "+extensions/aurora-ui/index.ts",

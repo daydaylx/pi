@@ -5,30 +5,36 @@
     "extensions/setup-core/index.ts",
     "extensions/plan-mode/index.ts",
     "extensions/mode-permissions.ts",
+    "extensions/interactive-pty/index.ts",
     "extensions/lsp/index.ts",
     "extensions/ask-user.ts",
     "extensions/diff-viewer/index.ts",
+    "extensions/diff-learning/index.ts",
     "extensions/control-plane.ts",
     "extensions/compact-tools/index.ts",
     "extensions/aurora-ui/index.ts",
     "extensions/resilience/index.ts",
     "extensions/session-health/index.ts",
     "extensions/frontend-bridge/index.ts",
-    "extensions/openrouter-doctor/index.ts"
+    "extensions/openrouter-doctor/index.ts",
+    "extensions/second-opinion/index.ts"
   ],
   "minimumFunctionCoverage": {
     "extensions/setup-core/index.ts": 100,
     "extensions/plan-mode/index.ts": 100,
     "extensions/mode-permissions.ts": 100,
+    "extensions/interactive-pty/index.ts": 62,
     "extensions/lsp/index.ts": 50,
     "extensions/ask-user.ts": 45,
     "extensions/diff-viewer/index.ts": 75,
+    "extensions/diff-learning/index.ts": 83,
     "extensions/control-plane.ts": 100,
     "extensions/compact-tools/index.ts": 100,
     "extensions/aurora-ui/index.ts": 100,
     "extensions/resilience/index.ts": 100,
     "extensions/session-health/index.ts": 100,
     "extensions/frontend-bridge/index.ts": 100,
-    "extensions/openrouter-doctor/index.ts": 100
+    "extensions/openrouter-doctor/index.ts": 100,
+    "extensions/second-opinion/index.ts": 16
   }
 }

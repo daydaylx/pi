@@ -2,18 +2,23 @@
 
 ## Aktuelle Arbeit
 
-Pi-Harness- und Disa_Ai-Benchmark-Korrekturen aus der Desktop.zip-Auswertung.
-Phase 2 (Pi-Infrastruktur: verify/project_check-Diagnose, Skill-Blockade-
-Resilienz, headless-Berechtigungsstufe) ist in diesem Repo umgesetzt und
-getestet. Phase 3 (Checker-Härtung für disa-hard-01/02/04/06/08) ist
-**separat** im neuen, unabhängigen lokalen Repo
-`/home/d/Projekte/aktiv/disa-benchmark-harness` umgesetzt (dort eigene
-Commits, eigene Tests) — bewusst nicht hier, um nicht mit der Disa-Hard-
-Checker-Infrastruktur unter `/home/d/.local/state/disa-duel/tasks` zu
-kollidieren. Phase 4 (Metrikparser), Phase 5 (Ergebnispaket-Reproduzierbarkeit)
-und Phase 6 (Dokumentation) sind noch offen. Disa_Ai bleibt unverändert
-außerhalb des Produkt-Scope. Keine Modellläufe. Commit/Push dieser Sitzung
-erfolgten auf ausdrückliche Nutzeranweisung.
+Aurora Forge: Weiterentwicklung der CLI/TUI-Theme- und Motion-Darstellung.
+Die Ausgangsarchitektur ist analysiert; der gespeicherte Plan wurde ausdrücklich
+freigegeben. Als nächstes werden Theme-/Setup-Grundlagen, die zentrale
+Visual-State-Zuordnung und danach die Renderer umgesetzt. GUI, Agentenlogik,
+Workflow-/Permission-Semantik und der native Editor bleiben außerhalb des
+Scopes.
+
+## In dieser Sitzung umgesetzt
+
+- `themes/aurora-forge.json` eingeführt; `aurora-night` bleibt vorhanden und
+  `setup.json`/`settings.json` verwenden Forge als aktives Standardtheme.
+- `expressive` als Motion-Modus ergänzt; gemeinsamer Aurora-Ticker bleibt die
+  einzige Clock.
+- `extensions/aurora-ui/visual-state.ts` eingeführt und Activity-, Tool-,
+  Subagent-, Verification- und Badge-Darstellung semantisch angebunden.
+- Setup-Schema, Kontrast-/Statusabstandsprüfung, Runtime-/UI-Tests, README und
+  ADR 028 aktualisiert.
 
 ## Umgesetzt (Phase 2)
 
@@ -89,36 +94,18 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 
 ## Letzte Verifikation
 
-- `npm run typecheck` (`tsc --noEmit`): sauber.
-- `PI_TEST_SUITE=runtime`: 1532/1532 grün (inkl. `setup-core.mjs`,
-  `verification.mjs`).
-- `PI_TEST_SUITE=lsp`: 182/182 grün. `PI_TEST_SUITE=diff`: 22/22 grün.
-- `tests/workflow-mode/permissions.test.mjs` (inkl. neuer `headless`-Tests:
-  Build/Test/Lint/Typecheck-Allow, `npx`-Dev-Tool-Carve-out,
-  Chaining-Schutz gegen den Carve-out, strukturiertes Deny statt Ask für
-  Secrets/System/destruktive Befehle, Datei-Schreibzugriffe,
-  Setup-Policy-`ask`→Block) und `tests/workflow-mode/e2e.test.mjs`: grün.
-- **Bekannter, nicht von dieser Sitzung verursachter Bug:** `PI_TEST_SUITE=ui`
-  hängt (unsettled top-level await, `tests/run.mjs:146`). Isoliert bestätigt:
-  Der Hang bleibt bestehen, auch wenn ALLE Berechtigungs-Dateien (diese
-  Sitzung und die vorherige YOLO-Sitzung) vollständig auf HEAD zurückgesetzt
-  werden — die Ursache liegt in den unabhängigen `/thinking`-Verlagerungs-
-  Änderungen (`tests/suites/ui.mjs`, `tests/shared/harness.mjs`,
-  `extensions/permissions/thinking-control.ts`, `extensions/mode-permissions.ts`,
-  `extensions/aurora-ui/tool-renderers.ts`,
-  `tests/suites/runtime/aurora-ui.mjs`). Auf einem sauberen HEAD-Checkout
-  (ohne jede uncommittete Änderung) hängt die UI-Suite nicht, schlägt aber
-  mit einem anderen, ebenfalls vorbestehenden Fehler fehl
-  (`header.renderHeaderLines is not a function`, Aurora-Tiles-Test). Beides
-  ungelöst, keinem der beiden Sitzungsthemen dieses Dokuments zuzuordnen.
+- `project_check({ profile: "verify" })`: PASS; Formatcheck, Typecheck,
+  Knip, Coverage, Runtime-/UI-/Workflow-/LSP-/Diff-Suiten, Frontend- und
+  GUI-Tests sowie Audit erfolgreich.
+- Aurora-Runtime: 1740 Tests grün; UI: 143; Workflow: 834; LSP: 182; Diff: 22;
+  Theme-Kontrast/Statusabstand: 62 Tests grün.
+- Renderdiagnostik im Verify-Lauf: 400 Frames, durchschnittlich ca. 1,23 ms
+  pro Frame; keine zusätzlichen Timer pro Tool oder Subagent eingeführt.
+- Der Verify-Stand gilt für den Workspace-Snapshot; der Workspace enthält
+  weiterhin zahlreiche vorbestehende, nicht zu Aurora gehörende Änderungen.
 
 ## Nächste Schritte
 
-1. Phase 4 (Metrikparser: Pi-Modellaufrufe nur `message_end`+`assistant`,
-   Codex-Turn ≠ Modellaufruf, `null` statt `0`) und Phase 5
-   (Ergebnispaket-Manifest/Smoketest) — beide im Kontext von
-   `disa-benchmark-harness`, nicht in diesem Repo.
-2. Phase 6 (Dokumentation) nach Abschluss von 4/5.
-3. Den vorbestehenden UI-Suite-Hang und den Aurora-Tiles-Fehler getrennt
-   untersuchen (gehören zur `/thinking`-Verlagerung, nicht zu diesem
-   Arbeitsauftrag).
+1. Geänderten Aurora-Diff gegen vorbestehende Nutzeränderungen prüfen.
+2. Optionalen manuellen TUI-Smoke-Test in echten Terminals durchführen.
+3. Nach Nutzerfreigabe entscheiden, ob Forge dauerhaft Standard bleiben soll.

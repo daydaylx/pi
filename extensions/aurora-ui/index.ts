@@ -42,7 +42,12 @@ import {
 } from "./tool-renderers.ts";
 import { renderFooterLines } from "./footer.ts";
 import { renderStartscreen } from "./startscreen.ts";
-import { thinkingLabel, thinkingTone } from "./thinking.ts";
+import { thinkingLabel } from "./thinking.ts";
+import {
+  renderVisualGlyph,
+  visualStateForActivity,
+  visualTone,
+} from "./visual-state.ts";
 import {
   sessionStatus,
   type HeaderActivity,
@@ -110,6 +115,9 @@ const TICK_INTERVAL_MS = 100;
 const STATUS_TICK_INTERVAL_MS = 1_000;
 /** A running turn without a concrete Aurora event is presented as WARTET AUF MODELL. */
 const WAITING_THRESHOLD_MS = 4_000;
+const FORGE_THEME_PATH = fileURLToPath(
+  new URL("../../themes/aurora-forge.json", import.meta.url),
+);
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
 );
@@ -324,7 +332,8 @@ class AnimationTicker {
 
   setActivity(active: boolean, animate: boolean): void {
     const intervalMs = active
-      ? this.motion === "contextual" && animate
+      ? (this.motion === "expressive" ||
+          (this.motion === "contextual" && animate))
         ? TICK_INTERVAL_MS
         : STATUS_TICK_INTERVAL_MS
       : undefined;
@@ -353,12 +362,18 @@ class AnimationTicker {
   }
 }
 
-type DisplayActivityKind = "thinking" | "tool" | "responding" | "waiting";
+type DisplayActivityKind =
+  | "thinking"
+  | "tool"
+  | "responding"
+  | "waiting"
+  | "verifying";
 
 function activityPresentation(
   state: AuroraUiState,
   activeTools: number,
   activeAsyncRuns: number,
+  activeVerification: boolean,
   now: number,
   activityStartedAt: number,
   lastRelevantActivityAt: number,
@@ -378,8 +393,11 @@ function activityPresentation(
   // Tool events are Aurora's factual activity source. A tool can reach the
   // dashboard one frame before the coarser agent state changes, so never hide
   // concrete work behind an inherited idle state.
-  if (activeTools > 0)
-    return { kind: "tool", startedAt: activityStartedAt, label: "ARBEITET" };
+  if (activeTools > 0) {
+    return activeVerification
+      ? { kind: "verifying", startedAt: activityStartedAt, label: "PRÜFT" }
+      : { kind: "tool", startedAt: activityStartedAt, label: "ARBEITET" };
+  }
   switch (state.activity.kind) {
     case "thinking":
       return {
@@ -405,9 +423,10 @@ function activityPresentation(
 }
 
 /**
- * Only thinking and running tools are actual moving work, so only they animate.
- * Responding and waiting keep a fixed glyph: their widget line is still
- * repainted once a second, but for the elapsed time, not for a new frame.
+ * Forge assigns movement by meaning: fast work, a slower waiting pulse,
+ * a quiet response stream and a separate verification cadence. The shared
+ * ticker remains the only clock; reduced/off collapse these profiles to static
+ * or text-only output.
  */
 function activityGlyph(
   theme: Theme,
@@ -415,14 +434,12 @@ function activityGlyph(
   frame: number,
   kind: DisplayActivityKind,
 ): string {
-  if (kind === "waiting") return theme.fg("muted", "·");
-  if (motion === "off") return "";
-  if (kind === "responding") return theme.fg("accent", "•");
-  if (motion === "reduced") return theme.fg("accent", "●");
-  // Only reached for kind "thinking"/"tool" (waiting/responding return above):
-  // real moving work gets a spinning cursor instead of a pulsing dot.
-  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-  return theme.fg("accent", frames[frame % frames.length]!);
+  return renderVisualGlyph(
+    theme,
+    visualStateForActivity(kind),
+    motion,
+    frame,
+  );
 }
 
 export default function auroraUiExtension(pi: ExtensionAPI): void {
@@ -454,8 +471,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let dashboardMode: DashboardMode = "auto";
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
-  const recentActivityTools: ActiveToolView[] = [];
-  const RECENT_ACTIVITY_LIMIT = 5;
+  type RecentActivityTool = ActiveToolView & { completedAt: number };
+  const recentActivityTools: RecentActivityTool[] = [];
+  const RECENT_ACTIVITY_LIMIT = 3;
+  const RECENT_ACTIVITY_TTL_MS = 20_000;
+  let recentActivityExpiryTimer: ReturnType<typeof setTimeout> | undefined;
   let turnLifecycle: TurnLifecycleState = initialTurnLifecycle();
   // The last real width a widget/footer frame was asked to render at. The
   // /inspect command handler gets no width of its own from Pi's UI context,
@@ -473,20 +493,50 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   // Flashes the activity tile's badge once when it settles into a new
   // terminal status, since the ticker stops driving repaints once nothing
   // is live and would otherwise never clear the highlight on its own.
-  const BADGE_HIGHLIGHT_MS = 1500;
+  const BADGE_HIGHLIGHT_MS = 600;
   let lastSettledStatus: SessionStatus | undefined;
   let badgeHighlightUntil = 0;
   let badgeHighlightTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function rememberCompletedActivity(tool: ActiveToolView): void {
+  function scheduleRecentActivityExpiry(): void {
+    clearTimeout(recentActivityExpiryTimer);
+    recentActivityExpiryTimer = undefined;
+    if (recentActivityTools.length === 0) return;
+    const expiresAt = Math.min(
+      ...recentActivityTools.map(
+        (tool) => tool.completedAt + RECENT_ACTIVITY_TTL_MS,
+      ),
+    );
+    recentActivityExpiryTimer = setTimeout(() => {
+      recentActivityExpiryTimer = undefined;
+      pruneRecentActivity(Date.now());
+      ticker?.requestRender();
+    }, Math.max(0, expiresAt - Date.now()));
+  }
+
+  function pruneRecentActivity(now: number): void {
+    const firstLive = recentActivityTools.findIndex(
+      (tool) => now - tool.completedAt < RECENT_ACTIVITY_TTL_MS,
+    );
+    if (firstLive < 0) recentActivityTools.length = 0;
+    else if (firstLive > 0) recentActivityTools.splice(0, firstLive);
+    scheduleRecentActivityExpiry();
+  }
+
+  function rememberCompletedActivity(
+    tool: ActiveToolView,
+    completedAt = Date.now(),
+  ): void {
     if (tool.kind !== "read" && tool.kind !== "bash") return;
-    recentActivityTools.push({ ...tool });
+    pruneRecentActivity(completedAt);
+    recentActivityTools.push({ ...tool, completedAt });
     if (recentActivityTools.length > RECENT_ACTIVITY_LIMIT) {
       recentActivityTools.splice(
         0,
         recentActivityTools.length - RECENT_ACTIVITY_LIMIT,
       );
     }
+    scheduleRecentActivityExpiry();
   }
 
   function currentAgentViews(): SubagentInfo[] {
@@ -553,6 +603,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       state,
       activeTools.size,
       asyncSubagents.size,
+      [...activeTools.values()].some((tool) => tool.kind === "verification"),
       now,
       activityStartedAt,
       lastRelevantActivityAt,
@@ -562,9 +613,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         ? "thinking"
         : presentation.kind === "tool"
           ? "running"
-          : presentation.kind === "responding"
-            ? "responding"
-            : "waiting";
+          : presentation.kind === "verifying"
+            ? "verifying"
+            : presentation.kind === "responding"
+              ? "responding"
+              : "waiting";
     return {
       activity,
       elapsedSeconds: Math.max(
@@ -612,6 +665,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const layout = layoutForSize(width, rows);
     const compact = layout === "compact" || dashboardMode === "compact";
     const now = Date.now();
+    pruneRecentActivity(now);
     const toolViews = [...activeTools.values()];
     const agentViews = currentAgentViews();
     // A pure read, not a computation: every event that can change the task
@@ -633,6 +687,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         state,
         activeTools.size,
         asyncSubagents.size,
+        [...activeTools.values()].some((tool) => tool.kind === "verification"),
         now,
         activityStartedAt,
         lastRelevantActivityAt,
@@ -654,18 +709,20 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       // A running subagent is background tool work — it shares the heading's
       // spinning cursor kind ("tool") instead of a static dot, so several
       // parallel agents don't read as frozen while only the heading moves.
-      const subagentGlyph = activityGlyph(
+      const workingGlyph = activityGlyph(
         theme,
         ticker?.motion ?? "off",
         ticker?.frame ?? 0,
         "tool",
       );
+      const verificationGlyph = activityGlyph(
+        theme,
+        ticker?.motion ?? "off",
+        ticker?.frame ?? 0,
+        "verifying",
+      );
       const heading = theme.fg(
-        presentation.kind === "thinking"
-          ? thinkingTone(state.model.thinking)
-          : presentation.kind === "waiting"
-            ? "muted"
-            : "accent",
+        visualTone(visualStateForActivity(presentation.kind)),
         theme.bold(
           `${glyph ? `${glyph} ` : ""}${presentation.label}${thinking} · ${elapsed}s`,
         ),
@@ -699,6 +756,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           wide: layout === "wide",
           limit: slots.visibleTools.length,
           suppressRunningStatus: singleRunningTool,
+          activityGlyph: workingGlyph,
+          verificationGlyph,
         },
       );
       const subagentLines = renderSubagentBranches(
@@ -706,7 +765,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         theme,
         dashboardTileWidth(width) - 4,
         visibleBranches.length,
-        subagentGlyph,
+        workingGlyph,
       );
       // Row-budget trimming (selectDashboardContent) cuts from the end of
       // this list, so whichever block renders first survives longest. A
@@ -771,7 +830,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             Math.max(4, Math.floor(rows * 0.4)),
           );
     // Retained READ/BEFEHL rows are intentional history, not disposable live
-    // details. Reserve enough rows for all five plus the live heading and one
+    // details. Reserve enough rows for all three plus the live heading and one
     // possible overflow note, even in compact mode.
     const historyRows = recentActivityTools.length;
     const historyReserve =
@@ -1034,6 +1093,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     pendingRequestId = undefined;
     activeTools.clear();
     recentActivityTools.length = 0;
+    clearTimeout(recentActivityExpiryTimer);
+    recentActivityExpiryTimer = undefined;
     turnLifecycle = initialTurnLifecycle();
     foregroundSubagents.clear();
     asyncSubagents.clear();
@@ -1084,7 +1145,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   }
 
   pi.on("resources_discover", () => ({
-    themePaths: [THEME_PATH, DAY_THEME_PATH],
+    themePaths: [FORGE_THEME_PATH, THEME_PATH, DAY_THEME_PATH],
   }));
 
   registerInspectorCommand(pi, {
@@ -1271,10 +1332,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     activeTools.clear();
     foregroundSubagents.clear();
     refreshSubagentDisplay();
-    projectCurrentTask(Date.now());
+    // Projects only after the activity kind has actually switched to
+    // "thinking" below — projecting first would still read the pre-turn
+    // "idle" kind and freeze the task phase one step behind.
     updateActivity(ctx, {
       kind: "thinking",
     });
+    projectCurrentTask(Date.now());
   });
 
   // agent_end can fire more than once per turn (retry, compaction, a queued
@@ -1310,10 +1374,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         foregroundSubagents.set(event.toolCallId, subagents);
       refreshSubagentDisplay();
     }
-    projectCurrentTask(Date.now());
+    // See agent_start: project after the activity kind actually flips to
+    // "tool", not before.
     updateActivity(ctx, {
       kind: "tool",
     });
+    projectCurrentTask(Date.now());
   });
 
   pi.on("tool_execution_update", (event) => {
@@ -1350,7 +1416,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       foregroundSubagents.delete(event.toolCallId);
       refreshSubagentDisplay();
     }
-    projectCurrentTask(Date.now());
+    // See agent_start: project after updateActivity below has settled the
+    // real next activity kind, not before.
     updateActivity(
       ctx,
       activeTools.size > 0
@@ -1365,6 +1432,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
               kind: "responding",
             },
     );
+    projectCurrentTask(Date.now());
   });
 
   pi.on("message_update", (event, ctx) => {
@@ -1374,6 +1442,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     refreshSubagentDisplay();
     if (asyncSubagents.size > 0) {
       retainAsyncActivity(ctx);
+      projectCurrentTask(Date.now());
       return;
     }
     // Text is still part of the active turn. Only agent_settled may clear this
@@ -1381,6 +1450,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     updateActivity(ctx, {
       kind: "responding",
     });
+    projectCurrentTask(Date.now());
   });
 
   pi.on("model_select", (event, ctx) => {
@@ -1413,12 +1483,17 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         planLocation(sessionCwd, ctx.sessionManager.getSessionId()),
       )?.content;
     }
-    projectCurrentTask(Date.now());
+    // See agent_start: project after the activity kind has settled to its
+    // post-turn value (idle, or "tool" again if an async child retains it),
+    // not before — otherwise the projection still reflects the turn's last
+    // live activity kind instead of its actual settled outcome.
     if (asyncSubagents.size > 0) {
       retainAsyncActivity(ctx);
+      projectCurrentTask(Date.now());
       return;
     }
     updateActivity(ctx, { kind: "idle" });
+    projectCurrentTask(Date.now());
   });
   pi.on("session_shutdown", (_event, ctx) => disposeSession(ctx));
 }

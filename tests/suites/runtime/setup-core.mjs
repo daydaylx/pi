@@ -23,7 +23,7 @@ export const setupCoreSections = {
         const defaults = setupConfig.defaultSetupConfig();
         eq(
           defaults.ui,
-          { theme: "aurora-night", motion: "contextual", dashboard: "auto" },
+          { theme: "aurora-forge", motion: "contextual", dashboard: "auto" },
           "Aurora is the central UI default",
         );
         eq(
@@ -46,16 +46,16 @@ export const setupCoreSections = {
         writeFileSync(
           path.join(project, ".pi", "setup.json"),
           JSON.stringify({
-            ui: { motion: "reduced" },
+            ui: { theme: "aurora-forge", motion: "expressive" },
             permissions: { unknownTools: "allow", bash: "allow" },
             lsp: { requestTimeoutMs: 5000 },
           }),
         );
         const trusted = setupConfig.loadSetupConfig(project, true);
         eq(
-          trusted.config.ui.motion,
-          "reduced",
-          "trusted project may reduce motion",
+          trusted.config.ui,
+          { theme: "aurora-forge", motion: "expressive", dashboard: "auto" },
+          "trusted project may select Forge and expressive motion",
         );
         eq(
           trusted.config.lsp.requestTimeoutMs,

@@ -811,6 +811,7 @@ export const resilienceSections = {
       controlPlane,
       compactTools,
       diffViewer,
+      diffLearning,
       askUser,
       lspExtensionMod,
       setupCore,
@@ -819,6 +820,7 @@ export const resilienceSections = {
       sessionHealth,
       openrouterDoctor,
       secondOpinion,
+      interactivePty,
     } = context;
     const frontendBridge = await load("extensions/frontend-bridge/index.ts");
     const secondOpinionExtension = await load(
@@ -835,21 +837,25 @@ export const resilienceSections = {
         !diffViewer ||
         !controlPlane ||
         !compactTools ||
+        !diffLearning ||
         !auroraUi ||
         !resilience ||
         !sessionHealth ||
         !openrouterDoctor ||
         !secondOpinion ||
-        !secondOpinionExtension
+        !secondOpinionExtension ||
+        !interactivePty
       )
         return;
       const factoryByExtension = {
         "+extensions/setup-core/index.ts": setupCore.default,
         "+extensions/plan-mode/index.ts": planMode.default,
         "+extensions/mode-permissions.ts": modePermissions.default,
+        "+extensions/interactive-pty/index.ts": interactivePty.default,
         "+extensions/lsp/index.ts": lspExtensionMod.default,
         "+extensions/ask-user.ts": askUser.default,
         "+extensions/diff-viewer/index.ts": diffViewer.default,
+        "+extensions/diff-learning/index.ts": diffLearning.default,
         "+extensions/control-plane.ts": controlPlane.default,
         "+extensions/compact-tools/index.ts": compactTools.default,
         "+extensions/aurora-ui/index.ts": auroraUi.default,
@@ -900,6 +906,7 @@ export const resilienceSections = {
           "bash",
           "find",
           "grep",
+          "interactive_shell",
           "ls",
           "lsp_definition",
           "lsp_diagnostics",

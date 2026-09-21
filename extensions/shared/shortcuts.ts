@@ -43,6 +43,12 @@ export const SHORTCUTS = {
     description: `${catalogLabel("yolo")} · /yolo`,
     command: "/yolo",
   },
+  diffLearningToggle: {
+    keys: "super+l",
+    label: "Super+L",
+    description: `${catalogLabel("learn-diff")} · /learn-diff`,
+    command: "/learn-diff",
+  },
   rolesModelMenu: {
     keys: "super+s",
     label: "Super+S",

@@ -20,6 +20,11 @@ const suites = [
     env: { PI_TEST_SUITE: name },
   })),
   {
+    name: "dependency-discovery",
+    file: "dependency-discovery.test.mjs",
+    env: {},
+  },
+  {
     name: "relative-imports",
     file: "check-relative-imports.test.mjs",
     env: {},

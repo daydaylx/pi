@@ -17,6 +17,16 @@ export const shortcutsSections = {
       if (controlPlane) {
         const shortcutsMod = await load("extensions/shared/shortcuts.ts");
         if (shortcutsMod) {
+          eq(
+            shortcutsMod.SHORTCUTS.diffLearningToggle,
+            {
+              keys: "super+l",
+              label: "Super+L",
+              description: "Diff Learning · /learn-diff",
+              command: "/learn-diff",
+            },
+            "Diff Learning uses Super+L for its canonical toggle",
+          );
           for (const [name, binding] of Object.entries(
             shortcutsMod.SHORTCUTS,
           )) {

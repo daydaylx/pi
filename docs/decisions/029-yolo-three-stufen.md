@@ -39,8 +39,11 @@ und `/yolo 3` wechseln direkt in die Stufe, dieselbe Stufe erneut oder
   und externe Tools blockiert.
 - **Plan-Mode-Schreibschutz (ADR 012/016):** Der Planmodus bleibt auf jeder
   Stufe eine harte Schreibgrenze für Agenten-Tool-Aufrufe.
-- **sudo im `bash`-Tool:** läuft nur mit passwortlosem sudo (NOPASSWD) oder
-  gültigem Ticket; Passwörter laufen nie über eine Kommandozeile des Modells.
+- **Credential-Pfad im interaktiven Shell-Tool:** Passwörter laufen nie durch
+  die vom Modell gelieferte Kommandozeile (`sudo -S`, Pipelines, `sshpass`,
+  `--password`). `sudo id` im `interactive_shell`-Tool funktioniert; das
+  Passwort tippt der Mensch ins Terminal. Im nicht-interaktiven `bash`-Tool
+  läuft sudo nur mit passwortlosem sudo (NOPASSWD) oder gültigem Ticket.
 - **Web-Eingabegrenze:** `fetch_content` nur `http(s)` ohne Zugangsdaten in
   der URL.
 - **Root-Wipe:** `rm -rf /` verlangt auch in Stufe 3 eine Bestätigung — die

@@ -13,6 +13,7 @@
     "test:frontend-contracts": "npm run build && node --test packages/frontend-protocol/test/*.test.mjs && node --test ../frontend-server/test/*.test.mjs",
     "test": "npm run test:frontend-contracts && node ../tests/run-all.mjs",
     "test:coverage": "node ../tests/coverage.mjs",
+    "test:benchmark": "node ../tests/benchmark-telemetry.test.mjs",
     "test:coverage:baseline": "node ../tests/coverage.mjs --write-baseline",
     "test:runtime": "node ../tests/p1-runtime.mjs",
     "test:patches": "node ../tests/runtime-patches.mjs",
@@ -29,6 +30,7 @@
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
     "jiti": "2.7.0",
+    "node-pty": "1.1.0",
     "pi-subagents": "https://codeload.github.com/daydaylx/pi-subagents/tar.gz/f59fc0d26bf055632363e9a4ca778ab1f09b5252",
     "pi-web-access": "0.24.2",
     "pi-zentui": "0.3.0",

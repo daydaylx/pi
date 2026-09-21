@@ -78,11 +78,14 @@ const diffAlgorithm = await load("extensions/diff-viewer/diff-algorithm.ts");
 const diffFallback = await load("extensions/diff-viewer/git-diff.ts");
 const diffTracker = await load("extensions/diff-viewer/change-tracker.ts");
 const diffViewer = await load("extensions/diff-viewer/index.ts");
+const diffLearning = await load("extensions/diff-learning/index.ts");
 const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const lspExtensionMod = await load("extensions/lsp/index.ts");
 const outputLimits = await load("extensions/shared/output-limits.ts");
 const trackedExec = await load("extensions/shared/tracked-exec.ts");
+const interactiveRunner = await load("extensions/interactive-pty/runner.ts");
+const interactivePty = await load("extensions/interactive-pty/index.ts");
 const contextDiagnostics = await load(
   "extensions/setup-core/context-diagnostics.ts",
 );
@@ -120,11 +123,14 @@ const context = {
   diffFallback,
   diffTracker,
   diffViewer,
+  diffLearning,
   askUser,
   askUserPolicy,
   lspExtensionMod,
   outputLimits,
   trackedExec,
+  interactiveRunner,
+  interactivePty,
   contextDiagnostics,
   setupConfig,
   setupCore,
