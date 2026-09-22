@@ -15,6 +15,10 @@ import {
 import { requestRecoveryStatus } from "../shared/recovery-capabilities.ts";
 import { requestVerificationCapabilities } from "../shared/verification-capabilities.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
+import {
+  INTERACTIVE_SHELL_TOOL_NAME,
+  interactiveShellCommand,
+} from "../shared/interactive-shell-policy.ts";
 import type { PermissionSession } from "./session-state.ts";
 import { decideTool } from "./tool-policy.ts";
 import {
@@ -49,10 +53,16 @@ function recoveryGateBlocks(
 ): boolean {
   if (!armed) return false;
   if (event.toolName === "write" || event.toolName === "edit") return true;
-  if (event.toolName !== "bash") return false;
-  const command = String(
-    (event.input as Record<string, unknown>).command ?? "",
-  );
+  if (
+    event.toolName !== "bash" &&
+    event.toolName !== INTERACTIVE_SHELL_TOOL_NAME
+  ) {
+    return false;
+  }
+  const command =
+    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+      ? interactiveShellCommand(event)
+      : String((event.input as Record<string, unknown>).command ?? "");
   return !isPlanModeDiagnosticCommand(command, cwd);
 }
 
@@ -63,10 +73,16 @@ function recoveryGateBlocks(
  */
 function recoveryStatusNeeded(event: ToolCallEvent, cwd: string): boolean {
   if (event.toolName === "write" || event.toolName === "edit") return true;
-  if (event.toolName !== "bash") return false;
-  const command = String(
-    (event.input as Record<string, unknown>).command ?? "",
-  );
+  if (
+    event.toolName !== "bash" &&
+    event.toolName !== INTERACTIVE_SHELL_TOOL_NAME
+  ) {
+    return false;
+  }
+  const command =
+    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+      ? interactiveShellCommand(event)
+      : String((event.input as Record<string, unknown>).command ?? "");
   return !isPlanModeDiagnosticCommand(command, cwd);
 }
 
@@ -87,8 +103,13 @@ function stopNonInteractive(ctx: ExtensionContext): { terminate?: true } {
 }
 
 function toolSubject(event: ToolCallEvent): string {
-  if (event.toolName === "bash") {
-    return String((event.input as Record<string, unknown>).command ?? "");
+  if (
+    event.toolName === "bash" ||
+    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+  ) {
+    return event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+      ? interactiveShellCommand(event)
+      : String((event.input as Record<string, unknown>).command ?? "");
   }
   const path = toolPath(event);
   if (path !== undefined) return `${event.toolName}: ${path}`;

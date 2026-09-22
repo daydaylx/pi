@@ -820,6 +820,7 @@ export default function setupCore(
 
       const dependencyPreparation = await prepareProjectDependencies({
         projectRoot: ctx.cwd,
+        agentDir: getAgentDir(),
         signal,
         exec: (program, args, options) => exec(program, args, options),
         preparedLocks: preparedDependencyLocks,

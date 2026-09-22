@@ -31,7 +31,7 @@
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
     "jiti": "2.7.0",
     "node-pty": "1.1.0",
-    "pi-subagents": "https://codeload.github.com/daydaylx/pi-subagents/tar.gz/f59fc0d26bf055632363e9a4ca778ab1f09b5252",
+    "pi-subagents": "https://codeload.github.com/daydaylx/pi-subagents/tar.gz/55df16caef5c970a592c01e9adf798967545e47d",
     "pi-web-access": "0.24.2",
     "pi-zentui": "0.3.0",
     "typebox": "1.3.7"

@@ -36,6 +36,7 @@ export const SECTION_SUITES = {
   "second opinion core": "runtime",
   "second opinion safety gates": "runtime",
   "second opinion abort handling (OPINION-002)": "runtime",
+  "interactive PTY runner": "runtime",
   "LSP transport, process and lifecycle (#93)": "lsp",
   "LSP config, root detection, registry and profiles (#94)": "lsp",
   "LSP documents and diagnostics (#95)": "lsp",
