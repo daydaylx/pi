@@ -1,11 +1,13 @@
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
-import { relative, resolve, sep } from "node:path";
+import { relative, sep } from "node:path";
 import { resolveRuntimeRoot } from "../../shared/runtime-resolution.mjs";
 import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import {
   isPlanModeDiagnosticCommand,
+  isSensitivePathIdentity,
   isSensitiveReference,
   resolvePathScope,
+  type PathIdentity,
 } from "../shared/permission-policy.ts";
 import type { PermissionLevel } from "../shared/workflow-status.ts";
 import {
@@ -132,11 +134,14 @@ function inside(root: string, candidate: string): boolean {
 
 function isDocumentedRuntimeDocsRead(
   toolName: string,
-  absolutePath: string,
+  identity: PathIdentity,
 ): boolean {
+  const targetPath = identity.canonicalPath ?? identity.lexicalPath;
   return (
     toolName === "read" &&
-    EXTRA_READABLE_ROOTS.some((root) => inside(root, absolutePath))
+    identity.scope === "external" &&
+    !identity.symlinkEscape &&
+    EXTRA_READABLE_ROOTS.some((root) => inside(root, targetPath))
   );
 }
 
@@ -201,8 +206,13 @@ export function assessWorkflowTool(
     permissionLevel !== "yolo-ask" &&
     permissionLevel !== "yolo-full"
   ) {
-    const scope = resolvePathScope(path, cwd);
-    if (isSensitiveReference(path) || scope.symlinkEscape) {
+    const identity = resolvePathScope(path, cwd);
+    if (
+      isSensitivePathIdentity(path, identity) ||
+      identity.symlinkEscape ||
+      identity.scope === "unresolved" ||
+      identity.targetKind === "other"
+    ) {
       return {
         blocked: true,
         reason:
@@ -210,9 +220,8 @@ export function assessWorkflowTool(
           HARD_BOUNDARY_RECOVERY_HINT,
       };
     }
-    const outsideProject = !inside(resolve(cwd), scope.absolutePath);
-    if (outsideProject) {
-      if (isDocumentedRuntimeDocsRead(event.toolName, scope.absolutePath)) {
+    if (identity.scope !== "project") {
+      if (isDocumentedRuntimeDocsRead(event.toolName, identity)) {
         return PERMITTED_RUNTIME_DOCS_READ;
       }
       return {

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { extname } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { SessionManager } from "../npm/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
 import {
@@ -37,6 +39,25 @@ function frontendError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
+/**
+ * The normal Pi path is an executable or launcher script. Test and embedded
+ * integrations may deliberately point at a JavaScript entry point instead;
+ * invoke an existing JS file through the current Node binary so its shebang
+ * handling cannot change the argument vector or swallow `--version`.
+ * Missing paths are left untouched so spawn still reports ENOENT and callers
+ * can expose the more useful PI_NOT_FOUND error.
+ */
+function commandForPi(piPath, args) {
+  const extension = extname(piPath).toLowerCase();
+  if (
+    existsSync(piPath) &&
+    (extension === ".js" || extension === ".mjs" || extension === ".cjs")
+  ) {
+    return { command: process.execPath, args: [piPath, ...args] };
+  }
+  return { command: piPath, args };
+}
+
 export function attachJsonlReader(stream, onValue, onParseError) {
   let buffer = "";
   stream.setEncoding("utf8");
@@ -66,7 +87,8 @@ function parseLine(line, onValue, onParseError) {
 
 export function readPiVersion(piPath, env = process.env) {
   return new Promise((resolve, reject) => {
-    const child = spawn(piPath, ["--version"], {
+    const invocation = commandForPi(piPath, ["--version"]);
+    const child = spawn(invocation.command, invocation.args, {
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -90,7 +112,12 @@ export function readPiVersion(piPath, env = process.env) {
       stdout = `${stdout}${chunk}`.slice(0, 200);
     });
     child.once("error", (error) => finish(error));
-    child.once("exit", (code) => {
+    // `exit` only means that the process has exited. Its stdio streams may
+    // still have buffered data, so reading `stdout` here races the final
+    // `data` event and can turn a valid version into an empty string. `close`
+    // is emitted after the stdio streams have closed and is the correct
+    // lifecycle point for evaluating the captured output.
+    child.once("close", (code) => {
       const version = stdout.trim();
       if (code !== 0 || !version) {
         finish(
@@ -564,7 +591,8 @@ class RuntimeRpc {
 
   start() {
     return new Promise((resolve, reject) => {
-      const child = spawn(this.piPath, ["--mode", "rpc"], {
+      const invocation = commandForPi(this.piPath, ["--mode", "rpc"]);
+      const child = spawn(invocation.command, invocation.args, {
         cwd: this.cwd,
         env: { ...this.env, PI_FRONTEND_RPC: "1" },
         stdio: ["pipe", "pipe", "pipe"],

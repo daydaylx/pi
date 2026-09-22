@@ -6,7 +6,15 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { delimiter, isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { isInside } from "./path-utils.ts";
 import type { PermissionLevel } from "./workflow-status.ts";
 
@@ -308,18 +316,150 @@ function hasSymlinkComponent(basePath: string, candidatePath: string): boolean {
   return false;
 }
 
-export function resolvePathScope(
-  rawPath: string,
-  cwd: string,
-): { absolutePath: string; insideProject: boolean; symlinkEscape: boolean } {
+export type PathScope = "project" | "external" | "unresolved";
+export type PathTargetKind =
+  "file" | "directory" | "missing" | "dangling-symlink" | "other";
+
+export interface PathIdentity {
+  /** Absolute path after lexical resolution against cwd. */
+  lexicalPath: string;
+  /** Real target, or a real-parent-derived path for a missing leaf. */
+  canonicalPath?: string;
+  /** Canonical scope, while insideProject remains the lexical compatibility flag. */
+  scope: PathScope;
+  targetKind: PathTargetKind;
+  /** Retained for callers that used the pre-SEC-002 lexical check. */
+  insideProject: boolean;
+  /** True when a symlink component escapes the project or cannot be resolved. */
+  symlinkEscape: boolean;
+  /** Backward-compatible alias for lexicalPath. */
+  absolutePath: string;
+}
+
+function targetKindFromStat(stat: {
+  isFile: () => boolean;
+  isDirectory: () => boolean;
+}): PathTargetKind {
+  if (stat.isFile()) return "file";
+  if (stat.isDirectory()) return "directory";
+  return "other";
+}
+
+function canonicalizeMissingPath(lexicalPath: string): {
+  canonicalPath?: string;
+  unresolvedSymlink: boolean;
+} {
+  const suffix: string[] = [];
+  let probe = lexicalPath;
+  let unresolvedSymlink = false;
+
+  while (true) {
+    try {
+      const canonicalBase = realpathSync(probe);
+      return {
+        canonicalPath: unresolvedSymlink
+          ? undefined
+          : resolve(canonicalBase, ...suffix),
+        unresolvedSymlink,
+      };
+    } catch {
+      try {
+        if (lstatSync(probe).isSymbolicLink()) unresolvedSymlink = true;
+      } catch {
+        // The missing path component is expected to fail lstat.
+      }
+      suffix.unshift(basename(probe));
+      const parent = dirname(probe);
+      if (parent === probe) {
+        return { canonicalPath: undefined, unresolvedSymlink };
+      }
+      probe = parent;
+    }
+  }
+}
+
+/**
+ * Resolve both path identities before a native file operation is authorized.
+ * This is still an observation: a caller that checks and opens separately has
+ * a residual TOCTOU window, so this policy is not an OS-level no-follow or
+ * atomic-open guarantee.
+ */
+export function resolvePathScope(rawPath: string, cwd: string): PathIdentity {
   const root = resolve(cwd);
-  const absolutePath = resolve(root, rawPath);
-  const insideProject = isInside(root, absolutePath);
+  let canonicalRoot = root;
+  try {
+    canonicalRoot = realpathSync(root);
+  } catch {
+    // The caller's cwd should exist; the lexical root remains the safe fallback.
+  }
+  const lexicalPath = resolve(root, rawPath);
+  const insideProject = isInside(root, lexicalPath);
+  const symlinkComponent = hasSymlinkComponent(root, lexicalPath);
+  let canonicalPath: string | undefined;
+  let targetKind: PathTargetKind;
+
+  try {
+    const lexicalStat = lstatSync(lexicalPath);
+    if (lexicalStat.isSymbolicLink()) {
+      canonicalPath = realpathSync(lexicalPath);
+      targetKind = targetKindFromStat(statSync(canonicalPath));
+    } else {
+      canonicalPath = realpathSync(lexicalPath);
+      targetKind = targetKindFromStat(statSync(canonicalPath));
+    }
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? (error as { code?: string }).code
+        : undefined;
+    if (code !== undefined && code !== "ENOENT" && code !== "ENOTDIR") {
+      targetKind = "other";
+    } else {
+      const missing = canonicalizeMissingPath(lexicalPath);
+      canonicalPath = missing.canonicalPath;
+      targetKind = missing.unresolvedSymlink ? "dangling-symlink" : "missing";
+    }
+  }
+
+  const canonicalInsideProject =
+    canonicalPath !== undefined && isInside(canonicalRoot, canonicalPath);
+  const scope: PathScope =
+    canonicalPath === undefined
+      ? "unresolved"
+      : !insideProject || !canonicalInsideProject
+        ? "external"
+        : "project";
+
   return {
-    absolutePath,
+    lexicalPath,
+    canonicalPath,
+    scope,
+    targetKind,
     insideProject,
-    symlinkEscape: hasSymlinkComponent(root, absolutePath),
+    symlinkEscape:
+      symlinkComponent || (insideProject && !canonicalInsideProject),
+    absolutePath: lexicalPath,
   };
+}
+
+export function isSensitivePathIdentity(
+  rawPath: string,
+  identity: PathIdentity,
+): boolean {
+  return (
+    isSensitiveReference(rawPath) ||
+    isSensitiveReference(identity.lexicalPath) ||
+    (identity.canonicalPath !== undefined &&
+      isSensitiveReference(identity.canonicalPath))
+  );
+}
+
+function isProtectedPathIdentity(identity: PathIdentity, cwd: string): boolean {
+  return (
+    isProtectedProjectPath(identity.lexicalPath, cwd) ||
+    (identity.canonicalPath !== undefined &&
+      isProtectedProjectPath(identity.canonicalPath, cwd))
+  );
 }
 
 export function isSensitiveReference(value: string): boolean {
@@ -377,11 +517,19 @@ export function containsUnquotedVariableExpansion(command: string): boolean {
 
 /** True for a path inside the project that later executes what is written. */
 function isProtectedProjectPath(absolutePath: string, cwd: string): boolean {
-  const rel = relative(resolve(cwd), absolutePath).split(sep).join("/");
-  if (!rel || rel.startsWith("../")) return false;
-  return PROTECTED_PROJECT_PATHS.some(
-    (entry) => rel === entry || rel.startsWith(`${entry}/`),
-  );
+  const roots = [resolve(cwd)];
+  try {
+    roots.push(realpathSync(roots[0]));
+  } catch {
+    // Keep the lexical root when the project root cannot be canonicalized.
+  }
+  return roots.some((root) => {
+    const rel = relative(root, absolutePath).split(sep).join("/");
+    if (!rel || rel.startsWith("../")) return false;
+    return PROTECTED_PROJECT_PATHS.some(
+      (entry) => rel === entry || rel.startsWith(`${entry}/`),
+    );
+  });
 }
 
 /**
@@ -408,7 +556,7 @@ export function decideFileAccess(
   options: DecideFileAccessOptions = {},
 ): PolicyDecision {
   const { protectedWritePath, allowOutsideProjectRead = false } = options;
-  const scope = resolvePathScope(rawPath, cwd);
+  const identity = resolvePathScope(rawPath, cwd);
   const isReadRestricted = permissionLevel === "readonly";
 
   // YOLO 3 hebt die Pfadgrenzen vollständig auf (Secrets, außerhalb des
@@ -416,10 +564,7 @@ export function decideFileAccess(
   // entscheiden vorher in guards.ts/workflow-policy.ts.
   if (permissionLevel === "yolo-full") return YOLO_FULL_ALLOW;
 
-  if (
-    isSensitiveReference(rawPath) ||
-    isSensitiveReference(scope.absolutePath)
-  ) {
+  if (isSensitivePathIdentity(rawPath, identity)) {
     return isReadRestricted ||
       permissionLevel === "yolo" ||
       permissionLevel === "headless"
@@ -427,6 +572,25 @@ export function decideFileAccess(
           "Harte Grenze: Secrets und SSH-/Credential-Dateien sind blockiert.",
         )
       : ask("Zugriff auf Secrets, Tokens, Credentials oder SSH-Keys", true);
+  }
+
+  const externalOrUnresolved =
+    identity.scope !== "project" ||
+    identity.symlinkEscape ||
+    identity.targetKind === "other";
+  const approvedExternalRead =
+    operation === "read" &&
+    allowOutsideProjectRead &&
+    identity.scope === "external" &&
+    !identity.symlinkEscape;
+  if (
+    permissionLevel !== "yolo-ask" &&
+    externalOrUnresolved &&
+    !approvedExternalRead
+  ) {
+    return deny(
+      "Harte Projekt-, Symlink- oder Zielauflösungsgrenze: Das Dateiziel ist nicht sicher innerhalb des Projekts aufgelöst.",
+    );
   }
 
   if (isReadRestricted) {
@@ -437,14 +601,6 @@ export function decideFileAccess(
             `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${protectedWritePath?.label ?? "keine Datei"}.`,
           );
     }
-    if (
-      (!scope.insideProject || scope.symlinkEscape) &&
-      !allowOutsideProjectRead
-    ) {
-      return deny(
-        "Diese Zugriffsstufe blockiert Lesezugriff außerhalb des Projekts.",
-      );
-    }
     return ALLOW;
   }
 
@@ -452,34 +608,31 @@ export function decideFileAccess(
   // symlink escape through, so this layer asks instead of the hard block.
   if (
     permissionLevel === "yolo-ask" &&
-    (!scope.insideProject || scope.symlinkEscape)
+    (identity.scope !== "project" || identity.symlinkEscape)
   ) {
     return ask(
-      `Dateizugriff außerhalb des Projekts oder über einen Symlink: ${scope.absolutePath}`,
+      `Dateizugriff außerhalb des Projekts oder über einen Symlink: ${identity.lexicalPath}`,
       true,
     );
   }
 
-  // Project, system and symlink boundaries are owned by workflow-policy and
-  // have already been checked by guards.ts. This layer handles only the
-  // permission level once that hard boundary has passed.
-  if (
-    operation === "write" &&
-    isProtectedProjectPath(scope.absolutePath, cwd)
-  ) {
+  // Re-check the canonical boundary here as defense in depth. guards.ts runs
+  // this same identity through workflow-policy first, but direct callers must
+  // not be able to bypass the path decision layer.
+  if (operation === "write" && isProtectedPathIdentity(identity, cwd)) {
     return permissionLevel === "yolo" || permissionLevel === "headless"
       ? deny(
           permissionLevel === "headless"
-            ? `Änderung an einem Ausführungspfad im Projekt benötigt eine Bestätigung, die im Headless-Modus nicht verfügbar ist: ${scope.absolutePath}`
+            ? `Änderung an einem Ausführungspfad im Projekt benötigt eine Bestätigung, die im Headless-Modus nicht verfügbar ist: ${identity.lexicalPath}`
             : "Harte Grenze: Ausführungspfad im Projekt wurde in YOLO blockiert.",
         )
       : ask(
-          `Änderung an einem Ausführungspfad im Projekt: ${scope.absolutePath}`,
+          `Änderung an einem Ausführungspfad im Projekt: ${identity.lexicalPath}`,
           true,
         );
   }
   if (operation === "write" && permissionLevel === "confirm-all") {
-    return ask(`Mutation im Projekt: ${scope.absolutePath}`);
+    return ask(`Mutation im Projekt: ${identity.lexicalPath}`);
   }
   return ALLOW;
 }
@@ -601,6 +754,12 @@ function tokenizeSegment(segment: string): string[] {
   return tokens;
 }
 
+function isExternalPathReference(value: string, cwd: string): boolean {
+  if (value === "~" || value.startsWith("~/")) return true;
+  const identity = resolvePathScope(value, cwd);
+  return identity.scope !== "project" || identity.symlinkEscape;
+}
+
 function containsExternalPath(tokens: string[], cwd: string): boolean {
   return tokens.slice(1).some((token) => {
     // Options that contain file paths: --option=value or --option value
@@ -611,27 +770,21 @@ function containsExternalPath(tokens: string[], cwd: string): boolean {
         const value = token.slice(eqIdx + 1);
         // Empty values like --from-file= are not paths
         if (!value) return false;
-        // Check if the value is an absolute external path or a symlink escape
-        if (isAbsolute(value)) return !isInside(resolve(cwd), resolve(value));
-        if (value === "~" || value.startsWith("~/")) return true;
-        // Relative paths in options: resolve from cwd
-        if (value === ".." || value.startsWith("../")) {
-          return !isInside(resolve(cwd), resolve(cwd, value));
-        }
-        const scope = resolvePathScope(value, cwd);
-        return !scope.insideProject || scope.symlinkEscape;
+        return isExternalPathReference(value, cwd);
       }
       // Bare options like -o are not paths
       return false;
     }
-    if (token === "~" || token.startsWith("~/")) return true;
-    if (isAbsolute(token)) return !isInside(resolve(cwd), resolve(token));
-    if (token === ".." || token.startsWith("../")) {
-      return !isInside(resolve(cwd), resolve(cwd, token));
-    }
-    const scope = resolvePathScope(token, cwd);
-    return !scope.insideProject || scope.symlinkEscape;
+    return isExternalPathReference(token, cwd);
   });
+}
+
+function containsSensitivePath(tokens: string[], cwd: string): boolean {
+  return tokens
+    .slice(1)
+    .some((token) =>
+      isSensitivePathIdentity(token, resolvePathScope(token, cwd)),
+    );
 }
 
 function hasAnyOption(tokens: string[], patterns: RegExp[]): boolean {
@@ -1090,7 +1243,7 @@ function classifyToolSegment(executable: string, tokens: string[]): boolean {
 function isSafePlanSegment(tokens: string[], cwd: string): boolean {
   const executable = trustedExecutableName(tokens[0], cwd);
   if (!executable) return false;
-  if (tokens.some((token) => isSensitiveReference(token))) return false;
+  if (containsSensitivePath(tokens, cwd)) return false;
   if (containsExternalPath(tokens, cwd)) return false;
   if (executable === "sed") return isSafeSed(tokens);
   if (executable === "git") return isSafeGit(tokens);
@@ -1156,7 +1309,7 @@ function isPlanModeSafeGitCommand(tokens: string[]): boolean {
 function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
   const executable = trustedExecutableName(tokens[0], cwd);
   if (!executable) return false;
-  if (tokens.some((token) => isSensitiveReference(token))) return false;
+  if (containsSensitivePath(tokens, cwd)) return false;
   if (containsExternalPath(tokens, cwd)) return false;
 
   if (executable === "git") {
@@ -1375,8 +1528,8 @@ function isProjectInternalInterpreterPath(value: string, cwd: string): boolean {
   ) {
     return value === "-";
   }
-  const scope = resolvePathScope(value, cwd);
-  return scope.insideProject && !scope.symlinkEscape;
+  const identity = resolvePathScope(value, cwd);
+  return identity.scope === "project" && !identity.symlinkEscape;
 }
 
 function projectWriteInterpreter(

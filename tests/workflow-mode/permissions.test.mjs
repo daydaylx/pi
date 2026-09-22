@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { assert, eq, test } from "../shared/assertions.mjs";
+import { createHarness } from "../shared/harness.mjs";
 import { importModule as load } from "../shared/jiti-loader.mjs";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 
@@ -27,6 +28,8 @@ if (originalRuntimeRoot === undefined) delete process.env.PI_RUNTIME_ROOT;
 else process.env.PI_RUNTIME_ROOT = originalRuntimeRoot;
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
 const toolPolicy = await load("extensions/permissions/tool-policy.ts");
+const modePermissions = await load("extensions/mode-permissions.ts");
+const planMode = await load("extensions/plan-mode/index.ts");
 const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
 const subagentGuard = await load(
   "extensions/setup-core/subagent-output-guard.ts",
@@ -261,6 +264,247 @@ await test("resolvePathScope flags a symlink only when its real target escapes t
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+await test("canonical path identity protects sensitive symlink aliases through the native guard", async () => {
+  if (!permissionPolicy || !workflowPolicy || !toolPolicy || !modePermissions) {
+    return;
+  }
+  const cwd = mkdtempSync(join(tmpdir(), "pi-canonical-path-"));
+  const outside = mkdtempSync(join(tmpdir(), "pi-canonical-outside-"));
+  const cwdAliasParent = mkdtempSync(join(tmpdir(), "pi-canonical-cwd-"));
+  const cwdAlias = join(cwdAliasParent, "project-link");
+  try {
+    mkdirSync(join(cwd, ".pi"), { recursive: true });
+    mkdirSync(join(cwd, "src"), { recursive: true });
+    writeFileSync(join(cwd, ".env"), "TOKEN=secret\n");
+    writeFileSync(join(cwd, ".pi", "verify.json"), "{}\n");
+    writeFileSync(join(cwd, "src", "ordinary.txt"), "ordinary\n");
+    writeFileSync(join(outside, "outside.txt"), "outside\n");
+    symlinkSync(".env", join(cwd, "env-alias"));
+    symlinkSync(".pi/verify.json", join(cwd, "verify-alias.json"));
+    symlinkSync("src/ordinary.txt", join(cwd, "ordinary-alias.txt"));
+    symlinkSync(outside, join(cwd, "outside-alias"));
+    symlinkSync(
+      join(tmpdir(), "pi-canonical-missing-target"),
+      join(cwd, "dangling-alias"),
+    );
+    symlinkSync("src", join(cwd, "internal-dir"));
+    symlinkSync(cwd, cwdAlias);
+
+    const envIdentity = permissionPolicy.resolvePathScope("env-alias", cwd);
+    eq(envIdentity.lexicalPath, join(cwd, "env-alias"), "keeps lexical alias");
+    eq(envIdentity.canonicalPath, join(cwd, ".env"), "resolves .env target");
+    eq(envIdentity.scope, "project", "an internal alias stays project-scoped");
+    eq(envIdentity.targetKind, "file", "resolves the target kind");
+    assert(
+      !envIdentity.symlinkEscape,
+      "an internal sensitive alias is no escape",
+    );
+    const symlinkedCwdIdentity = permissionPolicy.resolvePathScope(
+      ".pi/verify.json",
+      cwdAlias,
+    );
+    eq(
+      symlinkedCwdIdentity.scope,
+      "project",
+      "a symlinked project cwd remains project-scoped",
+    );
+    eq(
+      symlinkedCwdIdentity.canonicalPath,
+      join(cwd, ".pi", "verify.json"),
+      "a symlinked project cwd resolves to the real project target",
+    );
+
+    const newInternal = permissionPolicy.resolvePathScope(
+      "internal-dir/new.txt",
+      cwd,
+    );
+    eq(
+      newInternal.canonicalPath,
+      join(cwd, "src", "new.txt"),
+      "canonicalizes a new file through an internal symlink parent",
+    );
+    eq(newInternal.targetKind, "missing", "classifies the new leaf");
+    eq(
+      newInternal.scope,
+      "project",
+      "new internal target stays project-scoped",
+    );
+    assert(
+      !newInternal.symlinkEscape,
+      "internal symlink parent remains allowed",
+    );
+
+    const outsideIdentity = permissionPolicy.resolvePathScope(
+      "outside-alias/outside.txt",
+      cwd,
+    );
+    eq(
+      outsideIdentity.canonicalPath,
+      join(outside, "outside.txt"),
+      "resolves an external symlink target",
+    );
+    eq(outsideIdentity.scope, "external", "external target is outside scope");
+    assert(outsideIdentity.symlinkEscape, "external symlink is an escape");
+
+    const newOutside = permissionPolicy.resolvePathScope(
+      "outside-alias/new.txt",
+      cwd,
+    );
+    eq(newOutside.scope, "external", "new external target is outside scope");
+    assert(
+      newOutside.symlinkEscape,
+      "new file under external link is an escape",
+    );
+
+    const danglingIdentity = permissionPolicy.resolvePathScope(
+      "dangling-alias",
+      cwd,
+    );
+    eq(
+      danglingIdentity.targetKind,
+      "dangling-symlink",
+      "dangling symlink is not treated as a missing ordinary file",
+    );
+    eq(danglingIdentity.scope, "unresolved", "dangling target is unresolved");
+    assert(danglingIdentity.symlinkEscape, "dangling target fails closed");
+
+    for (const [toolName, operation] of [
+      ["read", "read"],
+      ["write", "write"],
+    ]) {
+      assert(
+        workflowPolicy.assessWorkflowTool(
+          { toolName, input: { path: "env-alias" } },
+          cwd,
+        ).blocked,
+        "workflow blocks sensitive alias " + operation,
+      );
+    }
+    eq(
+      permissionPolicy.decideFileAccess(
+        "project-write",
+        "write",
+        "env-alias",
+        cwd,
+      ).action,
+      "ask",
+      "direct permission policy still requires confirmation for sensitive aliases",
+    );
+    eq(
+      permissionPolicy.decideFileAccess(
+        "yolo",
+        "write",
+        "verify-alias.json",
+        cwd,
+      ).action,
+      "block",
+      "canonical execution paths stay blocked under YOLO",
+    );
+    eq(
+      permissionPolicy.decideFileAccess(
+        "project-write",
+        "write",
+        "ordinary-alias.txt",
+        cwd,
+      ).action,
+      "allow",
+      "ordinary internal aliases remain usable",
+    );
+    assert(
+      !permissionPolicy.isPlanModeDiagnosticCommand("cat env-alias", cwd),
+      "Plan diagnostics cannot read a sensitive file through an alias",
+    );
+    eq(
+      permissionPolicy.decideBash("readonly", "cat env-alias", cwd).action,
+      "block",
+      "readonly shell access cannot read a sensitive alias",
+    );
+    const externalAbsolute = join(cwd, "outside-alias", "outside.txt");
+    assert(
+      !permissionPolicy.isPlanModeDiagnosticCommand(
+        "cat " + externalAbsolute,
+        cwd,
+      ),
+      "Plan diagnostics reject an absolute path through an external symlink",
+    );
+    eq(
+      permissionPolicy.decideBash("readonly", "cat " + externalAbsolute, cwd)
+        .action,
+      "block",
+      "readonly shell access rejects an absolute external symlink target",
+    );
+    eq(
+      permissionPolicy.decideBash("yolo", "touch " + externalAbsolute, cwd)
+        .action,
+      "block",
+      "YOLO cannot write through an absolute external symlink target",
+    );
+
+    const harness = createHarness({ confirm: false, customResult: false });
+    planMode?.default(harness.api);
+    modePermissions.default(harness.api);
+    const context = harness.makeContext({ cwd });
+    await harness.runHooks("session_start", {}, context);
+    const guardCall = async (toolName, input) =>
+      harness.runHooks("tool_call", { toolName, input }, context);
+    assert(
+      (await guardCall("read", { path: "env-alias" })).some(
+        (result) => result?.block,
+      ),
+      "native read guard blocks a sensitive alias",
+    );
+    assert(
+      (await guardCall("write", { path: "outside-alias/outside.txt" })).some(
+        (result) => result?.block,
+      ),
+      "native write guard blocks an external symlink",
+    );
+    assert(
+      (await guardCall("edit", { filePath: "verify-alias.json" })).some(
+        (result) => result?.block,
+      ),
+      "native edit guard cannot bypass the protected canonical target",
+    );
+    const ordinaryRead = { path: "ordinary-alias.txt" };
+    assert(
+      (await guardCall("read", ordinaryRead)).every((result) => !result?.block),
+      "native read guard preserves ordinary internal aliases",
+    );
+    eq(
+      ordinaryRead.path,
+      join(cwd, "src", "ordinary.txt"),
+      "native read uses the canonical target after the policy check",
+    );
+    const ordinaryWrite = { path: "ordinary-alias.txt" };
+    assert(
+      (await guardCall("write", ordinaryWrite)).every(
+        (result) => !result?.block,
+      ),
+      "native write guard preserves ordinary internal aliases",
+    );
+    eq(
+      ordinaryWrite.path,
+      join(cwd, "src", "ordinary.txt"),
+      "native write uses the canonical target after the policy check",
+    );
+    const ordinaryEdit = { filePath: "ordinary-alias.txt" };
+    assert(
+      (await guardCall("edit", ordinaryEdit)).every((result) => !result?.block),
+      "native edit guard preserves ordinary internal aliases",
+    );
+    eq(
+      ordinaryEdit.filePath,
+      join(cwd, "src", "ordinary.txt"),
+      "native edit uses the canonical target after the policy check",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+    rmSync(cwdAliasParent, { recursive: true, force: true });
   }
 });
 
@@ -1253,6 +1497,19 @@ await test("verifier delegations require the full inspection contract", async ()
     !(await assess({ agent: "verifier", task: completeTask })).blocked,
     "a complete delegation passes",
   );
+  const dynamicChain = await assess({
+    chain: [
+      {
+        expand: { from: { output: "items", path: "/items" } },
+        parallel: { agent: "verifier", task: "{item}" },
+        collect: { as: "results" },
+      },
+    ],
+  });
+  assert(
+    dynamicChain.blocked && dynamicChain.reason.includes("Single-Run"),
+    "a dynamic chain fan-out with a verifier is refused before execution",
+  );
   const pilotGermanHeadings = [
     "## Original user request\nDen Task-Katalog ergänzen.",
     "## Ziel der unabhängigen Prüfung\nPrüfe Vertrag und Scope.",
@@ -1301,6 +1558,15 @@ await test("verifier delegations require the full inspection contract", async ()
   assert(
     timedOut.blocked && timedOut.reason.includes("timeoutMs"),
     "a caller-supplied timeoutMs override is refused for verifier delegations too, not just turnBudget",
+  );
+  const cwdOverride = await assess({
+    agent: "verifier",
+    task: completeTask,
+    cwd: "/other-repo",
+  });
+  assert(
+    cwdOverride.blocked && cwdOverride.reason.includes("cwd"),
+    "a verifier cwd override is refused before a foreign workspace can be used",
   );
   const overridden = {
     agent: "verifier",
@@ -1414,6 +1680,24 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
       workspaceFingerprint: cleanFingerprint,
       verifierStatus: "completed",
       verifierVerdict: "PASS",
+      ticket: {
+        schemaVersion: 1,
+        runId: "dedup-tool-call",
+        canonicalRoot: cwd,
+        scope: {
+          kind: "workspace",
+          canonicalRoot: cwd,
+          changedFiles: [],
+        },
+        startFingerprint: cleanFingerprint,
+        sessionId: "dedup-session",
+        generation: 1,
+        profile: "verifier",
+        effectiveModel: "test-model",
+      },
+      childRunId: "dedup-child",
+      resultModel: "test-model",
+      endFingerprint: cleanFingerprint,
     };
     const blocked = await assess(passedHere);
     assert(
@@ -1423,6 +1707,23 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
     assert(
       blocked.reason.includes("PASS"),
       "the refusal names the cached verdict",
+    );
+
+    const mismatchedStart = {
+      ...passedHere,
+      ticket: { ...passedHere.ticket, startFingerprint: "other-start" },
+    };
+    assert(
+      !(await assess(mismatchedStart)).blocked,
+      "a PASS with a ticket start fingerprint from another workspace state stays retryable",
+    );
+    const mismatchedEnd = {
+      ...passedHere,
+      endFingerprint: "other-end",
+    };
+    assert(
+      !(await assess(mismatchedEnd)).blocked,
+      "a PASS with a mismatched recorded end fingerprint stays retryable",
     );
 
     const failedHere = { ...passedHere, verifierVerdict: "FAIL" };
@@ -1615,6 +1916,17 @@ await test("git commit is detected across shell connectors, other commands are n
 await test("verifier coverage gate blocks mandatory paths without a matching PASS", () => {
   if (!verifierPolicy) return;
   const cwd = "/repo";
+  const ticket = (changedFiles) => ({
+    schemaVersion: 1,
+    runId: "tool-call-1",
+    canonicalRoot: cwd,
+    scope: { kind: "workspace", canonicalRoot: cwd, changedFiles },
+    startFingerprint: "fp-1",
+    sessionId: "session-1",
+    generation: 1,
+    profile: "verifier",
+    effectiveModel: "test-model",
+  });
   const assess = (changedFiles, fingerprint, verification) =>
     verifierPolicy.assessVerifierCoverageForDiff(
       changedFiles,
@@ -1622,6 +1934,11 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
       cwd,
       verification,
     );
+  const boundEvidence = (changedFiles) => ({
+    childRunId: "child-test",
+    resultModel: "test-model",
+    ticket: ticket(changedFiles),
+  });
 
   for (const path of [
     "README.md",
@@ -1695,6 +2012,8 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     workspaceFingerprint: "fp-1",
     verifierStatus: "completed",
     verifierVerdict: "PASS",
+    ...boundEvidence(["extensions/permissions/guards.ts"]),
+    endFingerprint: "fp-1",
   });
   assert(
     !passing.blocked,
@@ -1706,6 +2025,8 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     workspaceFingerprint: "fp-1",
     verifierStatus: "completed",
     verifierVerdict: "PASS_WITH_WARNINGS",
+    ...boundEvidence(["extensions/permissions/guards.ts"]),
+    endFingerprint: "fp-1",
   });
   assert(!warned.blocked, "PASS_WITH_WARNINGS also clears the gate");
 
@@ -1714,6 +2035,8 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     workspaceFingerprint: "fp-1",
     verifierStatus: "completed",
     verifierVerdict: "PASS",
+    ...boundEvidence(["extensions/permissions/guards.ts"]),
+    endFingerprint: "fp-1",
   });
   assert(
     stale.blocked,
@@ -1725,6 +2048,8 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     workspaceFingerprint: "fp-1",
     verifierStatus: "completed",
     verifierVerdict: "FAIL",
+    ...boundEvidence(["extensions/permissions/guards.ts"]),
+    endFingerprint: "fp-1",
   });
   assert(failed.blocked, "a FAIL verdict still blocks");
 
@@ -1733,6 +2058,8 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     workspaceFingerprint: "fp-1",
     verifierStatus: "incomplete",
     verifierVerdict: "PASS",
+    ...boundEvidence(["extensions/permissions/guards.ts"]),
+    endFingerprint: "fp-1",
   });
   assert(
     incomplete.blocked,
@@ -1754,6 +2081,8 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     workspaceFingerprint: "fp-1",
     verifierStatus: "completed",
     verifierVerdict: "PASS",
+    ...boundEvidence(["extensions/permissions/guards.ts"]),
+    endFingerprint: "fp-1",
   });
   assert(
     wrongRoot.blocked,

@@ -10,6 +10,7 @@ import { confirmAction } from "../shared/permission-dialog.ts";
 import {
   decideBash,
   isPlanModeDiagnosticCommand,
+  resolvePathScope,
 } from "../shared/permission-policy.ts";
 import { requestRecoveryStatus } from "../shared/recovery-capabilities.ts";
 import { requestVerificationCapabilities } from "../shared/verification-capabilities.ts";
@@ -93,6 +94,37 @@ function toolSubject(event: ToolCallEvent): string {
   if (path !== undefined) return `${event.toolName}: ${path}`;
   const preview = JSON.stringify(event.input ?? {}).slice(0, MAX_INPUT_PREVIEW);
   return `${event.toolName}: ${preview}`;
+}
+
+/**
+ * Keep the native file operation on the identity that the policy inspected.
+ * For an allowed in-project symlink (including a missing leaf below one),
+ * passing the canonical target avoids reopening the alias after the check.
+ * Hard-boundary failures return before this normalisation. This narrows, but
+ * cannot eliminate, the residual TOCTOU window documented by the resolver.
+ */
+function normalizeNativeFileTarget(event: ToolCallEvent, cwd: string): void {
+  if (
+    event.toolName !== "read" &&
+    event.toolName !== "write" &&
+    event.toolName !== "edit"
+  ) {
+    return;
+  }
+  const input = event.input as Record<string, unknown>;
+  const field = typeof input.path === "string" ? "path" : "filePath";
+  const rawPath = input[field];
+  if (typeof rawPath !== "string") return;
+
+  const identity = resolvePathScope(rawPath, cwd);
+  if (
+    identity.scope !== "project" ||
+    identity.canonicalPath === undefined ||
+    identity.canonicalPath === identity.lexicalPath
+  ) {
+    return;
+  }
+  input[field] = identity.canonicalPath;
 }
 
 export function registerPermissionGuards(
@@ -245,7 +277,10 @@ export function registerPermissionGuards(
       session.configured(),
       { allowOutsideProjectRead: assessment.allowOutsideProjectRead },
     );
-    if (decision.action === "allow") return;
+    if (decision.action === "allow") {
+      normalizeNativeFileTarget(event, ctx.cwd);
+      return;
+    }
     if (decision.action === "block") {
       return {
         block: true,
@@ -278,6 +313,7 @@ export function registerPermissionGuards(
     if (!confirmed) {
       return { block: true, reason: "Aktion vom Benutzer abgelehnt." };
     }
+    normalizeNativeFileTarget(event, ctx.cwd);
   });
 
   // user_bash fires only for a `!`/`!!`-prefixed command the human types
