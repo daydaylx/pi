@@ -14,6 +14,23 @@ import { collectWorkspaceSnapshot } from "../../../shared/workspace-snapshot.mjs
 import { assert, eq } from "../../shared/assertions.mjs";
 import { createHarness, latestStatus } from "../../shared/harness.mjs";
 
+const verifierTicket = (
+  canonicalRoot,
+  startFingerprint,
+  runId = "test-run",
+  changedFiles = [],
+) => ({
+  schemaVersion: 1,
+  runId,
+  canonicalRoot,
+  scope: { kind: "workspace", canonicalRoot, changedFiles: [...changedFiles] },
+  startFingerprint,
+  sessionId: "snapshot-gate-session",
+  generation: 1,
+  profile: "verifier",
+  effectiveModel: "anthropic/claude-sonnet-5:high",
+});
+
 export const snapshotGateSections = {
   "snapshot gate asynchronous regressions": async ({
     section,
@@ -74,6 +91,15 @@ export const snapshotGateSections = {
               workspaceFingerprint: initial.snapshot.fingerprint,
               verifierStatus: "completed",
               verifierVerdict: "PASS",
+              childRunId: "child-initial",
+              resultModel: "anthropic/claude-sonnet-5:high",
+              ticket: verifierTicket(
+                workspace,
+                initial.snapshot.fingerprint,
+                "initial",
+                initial.snapshot.changedFiles,
+              ),
+              endFingerprint: initial.snapshot.fingerprint,
             })
           ).blocked,
           "a matching verifier PASS can authorize a protected first commit",
@@ -422,7 +448,21 @@ export const snapshotGateSections = {
           capabilities.requestVerificationCapabilities(
             verifierHarness.api.events,
           );
-        const runVerifier = (verdict) =>
+        const startVerifier = (toolCallId) =>
+          verifierHarness.runHooks(
+            "tool_call",
+            {
+              toolName: "subagent",
+              toolCallId,
+              input: {
+                agent: "verifier",
+                model: "anthropic/claude-sonnet-5:high",
+                task: "check",
+              },
+            },
+            verifierCtx,
+          );
+        const verifierResult = (verdict) =>
           verifierHarness.runHooks(
             "tool_result",
             {
@@ -431,13 +471,23 @@ export const snapshotGateSections = {
               input: { agent: "verifier", task: "check" },
               content: [{ type: "text", text: verdict }],
               details: {
+                runId: `child-${verdict}`,
                 results: [
-                  { agent: "verifier", exitCode: 0, finalOutput: verdict },
+                  {
+                    agent: "verifier",
+                    exitCode: 0,
+                    model: "anthropic/claude-sonnet-5:high",
+                    finalOutput: verdict,
+                  },
                 ],
               },
             },
             verifierCtx,
           );
+        const runVerifier = async (verdict) => {
+          await startVerifier(verdict);
+          return verifierResult(verdict);
+        };
         await verifierHarness.runHooks("session_start", {}, verifierCtx);
         await Promise.all([runVerifier("PASS"), runVerifier("FAIL")]);
         eq(
@@ -445,8 +495,8 @@ export const snapshotGateSections = {
           "FAIL",
           "overlapping verifier results retain dispatch order",
         );
-        const old = runVerifier("PASS");
-        await Promise.resolve();
+        await startVerifier("old");
+        const old = verifierResult("old");
         await verifierHarness.runHooks("session_shutdown", {}, verifierCtx);
         await verifierHarness.runHooks("session_start", {}, verifierCtx);
         await Promise.all([old, runVerifier("FAIL")]);
@@ -688,6 +738,15 @@ export const snapshotGateSections = {
               : "",
             verifierStatus: "completed",
             verifierVerdict: "PASS",
+            childRunId: "child-covered",
+            resultModel: "anthropic/claude-sonnet-5:high",
+            ticket: verifierTicket(
+              commitGateWs,
+              covered.ok ? covered.snapshot.fingerprint : "",
+              "covered",
+              covered.ok ? covered.snapshot.changedFiles : [],
+            ),
+            endFingerprint: covered.ok ? covered.snapshot.fingerprint : "",
           };
           const assessCommit = () =>
             verifierPolicy.assessGitCommitVerifierGate(
@@ -766,6 +825,15 @@ export const snapshotGateSections = {
             workspaceFingerprint: first.ok ? first.snapshot.fingerprint : "",
             verifierStatus: "completed",
             verifierVerdict: "PASS",
+            childRunId: "child-dedup",
+            resultModel: "anthropic/claude-sonnet-5:high",
+            ticket: verifierTicket(
+              dedupWs,
+              first.ok ? first.snapshot.fingerprint : "",
+              "dedup",
+              first.ok ? first.snapshot.changedFiles : [],
+            ),
+            endFingerprint: first.ok ? first.snapshot.fingerprint : "",
           };
           const task = [
             "## Original User Request\nReview the secret handling change.",

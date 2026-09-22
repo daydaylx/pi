@@ -9,9 +9,11 @@
  * die Guard-Schicht fängt jeden `subagent`-Aufruf unabhängig davon ab.
  */
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { realpathSync } from "node:fs";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
 import {
   hasEvaluableVerifierResult,
+  hasBoundVerifierResult,
   type VerificationCapabilitySnapshot,
 } from "../shared/verification-capabilities.ts";
 import {
@@ -25,6 +27,26 @@ const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 
 const VERIFIER_AGENT = "verifier";
 const DEBUGGER_AGENT = "debugger";
+
+function samePathScope(
+  expected: readonly string[],
+  actual: readonly string[],
+): boolean {
+  const normalize = (paths: readonly string[]) =>
+    [...new Set(paths)].sort().join("\0");
+  return normalize(expected) === normalize(actual);
+}
+
+function canonicalRoot(cwd: string): string | undefined {
+  try {
+    return realpathSync(cwd);
+  } catch {
+    // Pure coverage callers may provide a symbolic fixture path without an
+    // on-disk workspace. Runtime commit/dedup paths still collect a snapshot
+    // first, so a real root is required before any evidence can be booked.
+    return cwd;
+  }
+}
 
 /**
  * Both `verifier` and `debugger` ship a generous `timeoutMs` in their own
@@ -112,6 +134,54 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function containsVerifierTask(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.some((entry) => {
+      if (!isRecord(entry)) return false;
+      if (entry.agent === VERIFIER_AGENT) return true;
+      if (Array.isArray(entry.parallel)) {
+        return entry.parallel.some(
+          (nested) => isRecord(nested) && nested.agent === VERIFIER_AGENT,
+        );
+      }
+      return (
+        isRecord(entry.parallel) && entry.parallel.agent === VERIFIER_AGENT
+      );
+    })
+  );
+}
+
+function isVerifierExecutionInput(input: Record<string, unknown>): boolean {
+  const action =
+    typeof input.action === "string" ? input.action.toLowerCase() : undefined;
+  const direct = input.agent === VERIFIER_AGENT;
+  const taskVerifier = containsVerifierTask(input.tasks);
+  const chainVerifier = containsVerifierTask(input.chain);
+  const executionRequest =
+    action === undefined ||
+    (action === "single" && direct) ||
+    ((action === "parallel" || action === "tasks") && taskVerifier);
+  return executionRequest && (direct || taskVerifier || chainVerifier);
+}
+
+function verifierExecutionModeIssue(
+  input: Record<string, unknown>,
+): string | undefined {
+  if (!isVerifierExecutionInput(input)) return undefined;
+  const action =
+    typeof input.action === "string" ? input.action.toLowerCase() : undefined;
+  if (
+    action === "parallel" ||
+    action === "tasks" ||
+    (Array.isArray(input.tasks) && input.tasks.length > 0) ||
+    (Array.isArray(input.chain) && input.chain.length > 0)
+  ) {
+    return "Verifier-Delegation abgelehnt: Der Ticket-Vertrag unterstützt nur genau einen Single-Run; tasks/chain müssen separat geprüft werden.";
+  }
+  return undefined;
+}
+
 /**
  * Produces the verifier-only input normalization without changing the
  * assessment input. The guard applies the returned copy only after this
@@ -123,13 +193,10 @@ export function normalizeVerifierDelegationInput(
 ): Record<string, unknown> | undefined {
   if (event.toolName !== "subagent") return undefined;
   const input = isRecord(event.input) ? event.input : undefined;
-  if (
-    !input ||
-    typeof input.action === "string" ||
-    input.agent !== VERIFIER_AGENT
-  ) {
+  if (!input || !isVerifierExecutionInput(input)) {
     return undefined;
   }
+  if (verifierExecutionModeIssue(input)) return undefined;
   return {
     ...input,
     // The installed pi-subagents package infers stricter acceptance levels
@@ -162,7 +229,10 @@ export async function assessVerifierDedup(
   verification: VerificationCapabilitySnapshot,
 ): Promise<WorkflowAssessment> {
   if (!hasEvaluableVerifierResult(verification)) return PERMITTED;
-  if (verification.workspaceRoot !== cwd) return PERMITTED;
+  if (!hasBoundVerifierResult(verification)) return PERMITTED;
+  const root = canonicalRoot(cwd);
+  if (!root || verification.ticket.canonicalRoot !== root) return PERMITTED;
+  if (verification.workspaceRoot !== root) return PERMITTED;
 
   const result = await collectWorkspaceSnapshot(cwd);
   if (!result.ok) {
@@ -173,6 +243,20 @@ export async function assessVerifierDedup(
     return PERMITTED;
   }
   if (verification.workspaceFingerprint !== result.snapshot.fingerprint) {
+    return PERMITTED;
+  }
+  if (
+    verification.ticket.startFingerprint !== result.snapshot.fingerprint ||
+    verification.endFingerprint !== result.snapshot.fingerprint
+  ) {
+    return PERMITTED;
+  }
+  if (
+    !samePathScope(
+      verification.ticket.scope.changedFiles,
+      result.snapshot.changedFiles,
+    )
+  ) {
     return PERMITTED;
   }
   if (REVERIFICATION_JUSTIFICATION_PATTERN.test(task)) return PERMITTED;
@@ -200,8 +284,9 @@ export async function assessVerifierDelegation(
 ): Promise<WorkflowAssessment> {
   if (event.toolName !== "subagent") return PERMITTED;
   const input = isRecord(event.input) ? event.input : {};
-  if (typeof input.action === "string") return PERMITTED;
-  if (input.agent !== VERIFIER_AGENT) return PERMITTED;
+  if (!isVerifierExecutionInput(input)) return PERMITTED;
+  const modeIssue = verifierExecutionModeIssue(input);
+  if (modeIssue) return { blocked: true, reason: modeIssue };
 
   const errors: string[] = budgetOverrideErrors(
     input,
@@ -229,6 +314,14 @@ export async function assessVerifierDelegation(
         "; ",
       )}. Pflicht ist die vollständige Vorlage aus docs/subagents.md (Ziel, Scope, Diff, Baseline, Akzeptanzkriterien).`,
     };
+  }
+  if (errors.length > 0) {
+    return { blocked: true, reason: errors.join(" ") };
+  }
+  if (input.cwd !== undefined) {
+    errors.push(
+      "cwd ist für Verifier-Delegationen verboten: Der Verifier muss gegen die kanonische Workspace-Wurzel der gestarteten Sitzung laufen.",
+    );
   }
   if (errors.length > 0) {
     return { blocked: true, reason: errors.join(" ") };
@@ -339,9 +432,16 @@ export function assessVerifierCoverageForDiff(
   const hits = matchingVerifierRequiredPaths(changedFiles);
   if (hits.length === 0) return PERMITTED;
 
+  const root = canonicalRoot(cwd);
   const covered =
-    verification.workspaceRoot === cwd &&
+    root !== undefined &&
+    verification.workspaceRoot === root &&
+    hasBoundVerifierResult(verification) &&
+    verification.ticket.canonicalRoot === root &&
+    verification.ticket.startFingerprint === workspaceFingerprint &&
+    verification.endFingerprint === workspaceFingerprint &&
     verification.workspaceFingerprint === workspaceFingerprint &&
+    samePathScope(verification.ticket.scope.changedFiles, changedFiles) &&
     hasEvaluableVerifierResult(verification) &&
     (verification.verifierVerdict === "PASS" ||
       verification.verifierVerdict === "PASS_WITH_WARNINGS");

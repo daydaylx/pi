@@ -454,8 +454,11 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let dashboardMode: DashboardMode = "auto";
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
-  const recentActivityTools: ActiveToolView[] = [];
-  const RECENT_ACTIVITY_LIMIT = 5;
+  const recentActivityTools: Array<ActiveToolView & { completedAt: number }> =
+    [];
+  const RECENT_ACTIVITY_LIMIT = 3;
+  const RECENT_ACTIVITY_TTL_MS = 20_000;
+  let recentActivityExpiryTimer: ReturnType<typeof setTimeout> | undefined;
   let turnLifecycle: TurnLifecycleState = initialTurnLifecycle();
   // The last real width a widget/footer frame was asked to render at. The
   // /inspect command handler gets no width of its own from Pi's UI context,
@@ -478,15 +481,49 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let badgeHighlightUntil = 0;
   let badgeHighlightTimer: ReturnType<typeof setTimeout> | undefined;
 
+  function pruneRecentActivity(now: number): boolean {
+    const firstLiveIndex = recentActivityTools.findIndex(
+      (tool) => now - tool.completedAt < RECENT_ACTIVITY_TTL_MS,
+    );
+    if (firstLiveIndex === -1) {
+      const changed = recentActivityTools.length > 0;
+      recentActivityTools.length = 0;
+      return changed;
+    }
+    if (firstLiveIndex === 0) return false;
+    recentActivityTools.splice(0, firstLiveIndex);
+    return true;
+  }
+
+  function scheduleRecentActivityExpiry(): void {
+    clearTimeout(recentActivityExpiryTimer);
+    recentActivityExpiryTimer = undefined;
+    const first = recentActivityTools[0];
+    if (!first) return;
+    const delay = Math.max(
+      0,
+      first.completedAt + RECENT_ACTIVITY_TTL_MS - Date.now(),
+    );
+    recentActivityExpiryTimer = setTimeout(() => {
+      recentActivityExpiryTimer = undefined;
+      const changed = pruneRecentActivity(Date.now());
+      if (changed) ticker?.requestRender();
+      scheduleRecentActivityExpiry();
+    }, delay);
+  }
+
   function rememberCompletedActivity(tool: ActiveToolView): void {
     if (tool.kind !== "read" && tool.kind !== "bash") return;
-    recentActivityTools.push({ ...tool });
+    const completedAt = Date.now();
+    pruneRecentActivity(completedAt);
+    recentActivityTools.push({ ...tool, completedAt });
     if (recentActivityTools.length > RECENT_ACTIVITY_LIMIT) {
       recentActivityTools.splice(
         0,
         recentActivityTools.length - RECENT_ACTIVITY_LIMIT,
       );
     }
+    scheduleRecentActivityExpiry();
   }
 
   function currentAgentViews(): SubagentInfo[] {
@@ -612,6 +649,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     const layout = layoutForSize(width, rows);
     const compact = layout === "compact" || dashboardMode === "compact";
     const now = Date.now();
+    pruneRecentActivity(now);
     const toolViews = [...activeTools.values()];
     const agentViews = currentAgentViews();
     // A pure read, not a computation: every event that can change the task
@@ -770,9 +808,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
                 : Math.max(5, Math.min(8, rows - 10)),
             Math.max(4, Math.floor(rows * 0.4)),
           );
-    // Retained READ/BEFEHL rows are intentional history, not disposable live
-    // details. Reserve enough rows for all five plus the live heading and one
-    // possible overflow note, even in compact mode.
+    // Retained READ/BEFEHL rows are intentional short-lived history, not
+    // disposable live details. Reserve enough rows for all three plus the live
+    // heading and one possible overflow note, even in compact mode.
     const historyRows = recentActivityTools.length;
     const historyReserve =
       historyRows > 0 ? historyRows + 1 + (hasLiveActivity ? 1 : 0) : 0;
@@ -1034,6 +1072,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     pendingRequestId = undefined;
     activeTools.clear();
     recentActivityTools.length = 0;
+    clearTimeout(recentActivityExpiryTimer);
+    recentActivityExpiryTimer = undefined;
     turnLifecycle = initialTurnLifecycle();
     foregroundSubagents.clear();
     asyncSubagents.clear();

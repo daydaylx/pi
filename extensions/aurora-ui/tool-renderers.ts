@@ -526,7 +526,7 @@ export function renderActiveTools(
   return visible;
 }
 
-/** Render the retained five-entry READ/BEFEHL history as completed rows. */
+/** Render the retained three-entry READ/BEFEHL history as completed rows. */
 export function renderRecentTools(
   tools: readonly ActiveToolView[],
   theme: Theme,
@@ -534,10 +534,10 @@ export function renderRecentTools(
   now: number,
   options: { compact?: boolean; wide?: boolean } = {},
 ): string[] {
-  return renderActiveTools(tools.slice(-5), theme, width, now, {
+  return renderActiveTools(tools.slice(-3), theme, width, now, {
     ...options,
     completed: true,
-    limit: 5,
+    limit: 3,
   });
 }
 

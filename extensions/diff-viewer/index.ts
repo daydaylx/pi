@@ -9,6 +9,7 @@ import type {
 import type { TUI } from "@earendil-works/pi-tui";
 import { Text } from "@earendil-works/pi-tui";
 import { catalogDescription } from "../shared/command-catalog.ts";
+import { DIFF_VIEWER_CHANGE_EVENT } from "../shared/diff-events.ts";
 import { toWorkspaceRelative } from "../shared/paths.ts";
 import {
   FRONTEND_UI_CHANNELS,
@@ -292,6 +293,13 @@ export default function diffViewerExtension(pi: ExtensionAPI): void {
           data.hunks,
           data.timestamp,
         );
+        pi.events.emit(DIFF_VIEWER_CHANGE_EVENT, {
+          path: data.path,
+          toolName: event.toolName,
+          timestamp: data.timestamp,
+          stats: data.stats,
+          hunks: data.hunks,
+        });
         publishChanges();
       }
     } finally {

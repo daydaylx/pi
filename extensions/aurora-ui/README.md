@@ -68,10 +68,10 @@ single task/activity tile; Compact uses the flat fallback and preserves retained
   detailed status and elapsed time, so its badge stays the plain `LÄUFT`
   marker; once nothing is live, the badge instead shows the settled run state
   (`VERIFIZIERT`/`ABGESCHLOSSEN`/`FEHLER`/`BEREIT`, from `header.ts`'s pure
-  `sessionStatus`/`statusLabel` projections). The five most recent `READ` and
-  `BEFEHL` rows remain as completed history; other completed tools disappear
-  from this transient surface and remain available through Pi's normal result
-  output.
+  `sessionStatus`/`statusLabel` projections). The three most recent `READ` and
+  `BEFEHL` rows remain as completed history for about 20 seconds; other
+  completed tools disappear from this transient surface and remain available
+  through Pi's normal result output.
 - Änderungsdetails werden nicht mehr als eigene Dashboard-Kachel gezeigt;
   bei vorhandenen Änderungen erscheint stattdessen eine kompakte
   `Änderungen <Dateien> · +<hinzugefügt>/−<entfernt>`-Zusammenfassung im

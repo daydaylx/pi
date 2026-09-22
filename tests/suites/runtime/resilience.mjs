@@ -811,6 +811,8 @@ export const resilienceSections = {
       controlPlane,
       compactTools,
       diffViewer,
+      diffLearning,
+      interactivePty,
       askUser,
       lspExtensionMod,
       setupCore,
@@ -835,6 +837,8 @@ export const resilienceSections = {
         !diffViewer ||
         !controlPlane ||
         !compactTools ||
+        !diffLearning ||
+        !interactivePty ||
         !auroraUi ||
         !resilience ||
         !sessionHealth ||
@@ -847,9 +851,11 @@ export const resilienceSections = {
         "+extensions/setup-core/index.ts": setupCore.default,
         "+extensions/plan-mode/index.ts": planMode.default,
         "+extensions/mode-permissions.ts": modePermissions.default,
+        "+extensions/interactive-pty/index.ts": interactivePty.default,
         "+extensions/lsp/index.ts": lspExtensionMod.default,
         "+extensions/ask-user.ts": askUser.default,
         "+extensions/diff-viewer/index.ts": diffViewer.default,
+        "+extensions/diff-learning/index.ts": diffLearning.default,
         "+extensions/control-plane.ts": controlPlane.default,
         "+extensions/compact-tools/index.ts": compactTools.default,
         "+extensions/aurora-ui/index.ts": auroraUi.default,
@@ -900,6 +906,7 @@ export const resilienceSections = {
           "bash",
           "find",
           "grep",
+          "interactive_shell",
           "ls",
           "lsp_definition",
           "lsp_diagnostics",

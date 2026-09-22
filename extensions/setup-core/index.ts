@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ToolCallEvent,
+} from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { catalogDescription } from "../shared/command-catalog.ts";
 import { trackedExec } from "../shared/tracked-exec.ts";
@@ -14,6 +18,14 @@ import {
   type VerifierRunStatus,
   type VerifierVerdict,
 } from "./subagent-output-guard.ts";
+import {
+  canonicalWorkspaceRoot,
+  createVerifierTicket,
+  isVerifierSingleCall,
+  ticketSnapshot,
+  verifierSingleCallIssue,
+  type VerifierTicket,
+} from "./verifier-ticket.ts";
 import {
   VERIFICATION_CAPABILITY_EVENTS,
   type VerificationCapabilityRequest,
@@ -267,6 +279,11 @@ export default function setupCore(
         workspaceFingerprint: string;
         status: VerifierRunStatus;
         verdict?: VerifierVerdict;
+        ticket: VerifierTicket;
+        childRunId: string;
+        resultModel?: string;
+        endFingerprint?: string;
+        reason?: string;
       }
     | undefined;
   // Bumped by session_start/session_shutdown. The tool_result handler below
@@ -275,6 +292,11 @@ export default function setupCore(
   // that lands mid-await is detectable and the stale write is dropped
   // instead of silently repopulating state for a session it never ran in.
   let sessionGeneration = 0;
+  let activeSessionId: string | undefined;
+  // A ticket is created by the pre-execution hook, before the pinned package
+  // starts. The map key is the stable parent toolCallId; the package creates
+  // a separate child runId and returns it in Details.runId.
+  const verifierTickets = new Map<string, VerifierTicket>();
   // Verifier subagent calls are not sequential (unlike recovery_check, the
   // subagent tool has no executionMode: "sequential"), so two tool_result
   // events for two overlapping verifier delegations can have their async
@@ -320,97 +342,279 @@ export default function setupCore(
     return result.ok ? result.snapshot : undefined;
   }
 
+  // Create the verifier contract before the package executor starts. The
+  // pinned package deliberately generates its own child run id after this
+  // hook, so `toolCallId` is the only launch identity available at preflight;
+  // the returned Details.runId is bound to it when the result arrives.
+  (
+    pi.on as unknown as (
+      event: "tool_call",
+      handler: (
+        event: ToolCallEvent,
+        ctx: ExtensionContext,
+      ) => unknown | Promise<unknown>,
+    ) => void
+  )("tool_call", async (event, ctx) => {
+    if (!isVerifierSingleCall(event)) return;
+    const modeIssue = verifierSingleCallIssue(event);
+    if (modeIssue) return { block: true, reason: modeIssue };
+    const input = event.input as Record<string, unknown>;
+    if (input.cwd !== undefined) {
+      return {
+        block: true,
+        reason:
+          "Verifier-Delegation abgelehnt: cwd-Overrides sind verboten; der Lauf muss gegen die kanonische Workspace-Wurzel der gestarteten Sitzung gebunden werden.",
+      };
+    }
+    if (verifierTickets.has(event.toolCallId)) {
+      return {
+        block: true,
+        reason:
+          "Verifier-Delegation abgelehnt: für diese toolCallId existiert bereits ein unverbrauchtes Ticket.",
+      };
+    }
+    const root = canonicalWorkspaceRoot(ctx.cwd);
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (!root || typeof sessionId !== "string" || !sessionId.trim()) {
+      return {
+        block: true,
+        reason:
+          "Verifier-Delegation abgelehnt: kanonische Workspace-Wurzel oder Session-ID ist vor dem Start nicht belegbar.",
+      };
+    }
+    const generation = sessionGeneration;
+    const snapshotResult = await collectWorkspaceSnapshot(ctx.cwd);
+    if (generation !== sessionGeneration || activeSessionId !== sessionId) {
+      return {
+        block: true,
+        reason:
+          "Verifier-Delegation abgelehnt: Die Sitzung wechselte während der Ticket-Erstellung.",
+      };
+    }
+    if (!snapshotResult.ok) {
+      return {
+        block: true,
+        reason: `Verifier-Delegation abgelehnt: Start-Fingerprint nicht belegbar (${snapshotResult.error.code}).`,
+      };
+    }
+    const ticket = createVerifierTicket(
+      event,
+      ctx,
+      snapshotResult.snapshot,
+      generation,
+      pi.getThinkingLevel(),
+    );
+    if (!ticket) {
+      return {
+        block: true,
+        reason:
+          "Verifier-Delegation abgelehnt: effektives Modell ist vor dem Start nicht belegbar.",
+      };
+    }
+    verifierTickets.set(event.toolCallId, ticket);
+  });
+
   // `subagent` is a package-defined custom tool, so the shipped overload set
   // does not name it even though ToolResultEvent supports custom tool names.
   (
     pi.on as unknown as (
       event: "tool_result",
       handler: (
-        event: Parameters<typeof limitSubagentToolResult>[0],
+        event: Parameters<typeof limitSubagentToolResult>[0] & {
+          toolCallId: string;
+          input: Record<string, unknown>;
+        },
       ) => unknown | Promise<unknown>,
     ) => void
   )("tool_result", async (event) => {
-    // Verifier-Läufe werden strukturiert erfasst: incomplete-Läufe zählen
-    // nie als unabhängige Verifikation und bekommen das sichtbar ins
-    // Tool-Result geschrieben.
     const record = extractVerifierRunRecord(event.details);
+    let presentationRecord = record;
     if (record) {
-      pi.appendEntry("verifier-run", record);
-      // Captured once, before any await: activeCwd/sessionGeneration are
-      // shared mutable module variables that a concurrent session_start or
-      // another in-flight tool_result could reassign while this snapshot is
-      // being collected — the recorded root and the fingerprint it is
-      // paired with must come from the same point in time, and a write
-      // belonging to an already-ended session must never land in the next
-      // one just because it happened to resolve late.
-      const cwd = activeCwd;
-      const generation = sessionGeneration;
-      const applyUpdate = async (): Promise<void> => {
-        if (generation !== sessionGeneration) return;
-        const snapshotResult = await collectWorkspaceSnapshot(cwd);
-        if (generation !== sessionGeneration) return;
-        // F-04: A normal exit without a recognized verdict is a completed
-        // process but not evaluable evidence. Bind that fact to the current
-        // fingerprint so retry is allowed and no commit can borrow an older
-        // PASS. Other incomplete runs (timeout, provider error, ...) do not
-        // replace a still-valid evaluable binding when the snapshot is stable.
-        const hasEvaluableVerdict =
-          record.status === "completed" && record.verdict !== undefined;
-        if (snapshotResult.ok && hasEvaluableVerdict) {
-          lastVerifierRun = {
-            workspaceRoot: cwd,
-            workspaceFingerprint: snapshotResult.snapshot.fingerprint,
-            status: record.status,
-            verdict: record.verdict,
-          };
-        } else if (
-          snapshotResult.ok &&
-          record.status === "incomplete" &&
-          record.reason === "no-verdict"
-        ) {
-          lastVerifierRun = {
-            workspaceRoot: cwd,
-            workspaceFingerprint: snapshotResult.snapshot.fingerprint,
-            status: record.status,
-          };
-          pi.appendEntry("verifier-run-no-verdict", {
-            schemaVersion: 1,
-            timestamp: new Date().toISOString(),
-            verifierStatus: record.status,
-            note: "Completed verifier process without a recognized verdict; no prior verdict is retained as current evidence.",
-          });
-        } else if (
-          !snapshotResult.ok &&
-          (record.status === "completed" || record.reason === "no-verdict")
-        ) {
-          // F-03: a verdict whose workspace binding cannot be established
-          // must never leave a stale prior binding looking current for a
-          // workspace state nobody actually checked — an orphaned old PASS
-          // is more dangerous than no PASS at all, and the loss must be
-          // visible rather than silent. A no-verdict run is likewise not
-          // allowed to retain an older PASS when its own workspace cannot be
-          // bound.
-          lastVerifierRun = undefined;
-          pi.appendEntry("verifier-run-snapshot-unavailable", {
-            schemaVersion: 1,
-            timestamp: new Date().toISOString(),
-            verifierStatus: record.status,
-            errorCode: snapshotResult.error.code,
-          });
-        }
-        // For incomplete runs other than no-verdict with an ok snapshot, do
-        // not replace the previous evaluable binding. A missing snapshot
-        // clears the binding below for completed verdicts; no-verdict is
-        // handled explicitly above and never supplies commit coverage.
+      const ticket = verifierTickets.get(event.toolCallId);
+      verifierTickets.delete(event.toolCallId);
+      const discard = (reason: string): void => {
+        presentationRecord = {
+          ...record,
+          status: "incomplete",
+          verdict: undefined,
+          reason,
+        };
+        pi.appendEntry("verifier-run-discarded", {
+          schemaVersion: 1,
+          timestamp: new Date().toISOString(),
+          toolCallId: event.toolCallId,
+          childRunId: record.runId,
+          reason,
+        });
       };
-      // Chained (not awaited-in-place first) so a failure in an earlier
-      // queued update can never break the chain for this or later ones.
-      verifierLedgerQueue = verifierLedgerQueue.then(applyUpdate, applyUpdate);
-      await verifierLedgerQueue;
+      if (!ticket) {
+        discard("unbound-ticket");
+      } else if (!record.runId) {
+        discard("missing-run-id");
+      } else {
+        const childRunId = record.runId;
+        const generation = ticket.generation;
+        const sessionId = ticket.sessionId;
+        const applyUpdate = async (): Promise<void> => {
+          if (
+            generation !== sessionGeneration ||
+            activeSessionId !== sessionId
+          ) {
+            discard("late-session-result");
+            return;
+          }
+          const snapshotResult = await collectWorkspaceSnapshot(
+            ticket.canonicalRoot,
+          );
+          if (
+            generation !== sessionGeneration ||
+            activeSessionId !== sessionId
+          ) {
+            discard("late-session-result");
+            return;
+          }
+
+          const summary = ticketSnapshot(ticket);
+          const baseRecord = {
+            ...record,
+            ticket: summary,
+            childRunId,
+            ...(snapshotResult.ok
+              ? { endFingerprint: snapshotResult.snapshot.fingerprint }
+              : {}),
+          };
+          const hasEvaluableVerdict =
+            record.status === "completed" && record.verdict !== undefined;
+
+          // A PASS is only usable when the package reports the same model
+          // that was pinned in the immutable launch ticket. A fallback model
+          // (or a fabricated/missing model field) must never become evidence
+          // for the original delegation.
+          if (hasEvaluableVerdict) {
+            const modelReason =
+              record.model === undefined
+                ? "missing-model"
+                : record.model !== ticket.effectiveModel
+                  ? "model-mismatch"
+                  : undefined;
+            if (modelReason) {
+              presentationRecord = {
+                ...record,
+                status: "incomplete",
+                verdict: undefined,
+                reason: modelReason,
+              };
+              pi.appendEntry("verifier-run-discarded", {
+                schemaVersion: 1,
+                timestamp: new Date().toISOString(),
+                toolCallId: event.toolCallId,
+                childRunId,
+                ticket: summary,
+                resultModel: record.model,
+                reason: modelReason,
+              });
+              return;
+            }
+          }
+
+          if (!snapshotResult.ok) {
+            if (hasEvaluableVerdict || record.reason === "no-verdict") {
+              presentationRecord = {
+                ...record,
+                status: "incomplete",
+                verdict: undefined,
+                reason: "snapshot-unavailable",
+              };
+              lastVerifierRun = undefined;
+              pi.appendEntry("verifier-run", {
+                ...baseRecord,
+                status: "incomplete",
+                verdict: undefined,
+                reason: "snapshot-unavailable",
+              });
+              pi.appendEntry("verifier-run-snapshot-unavailable", {
+                schemaVersion: 1,
+                timestamp: new Date().toISOString(),
+                verifierStatus: record.status,
+                errorCode: snapshotResult.error.code,
+              });
+            } else {
+              pi.appendEntry("verifier-run", baseRecord);
+            }
+            return;
+          }
+
+          const endFingerprint = snapshotResult.snapshot.fingerprint;
+          if (endFingerprint !== ticket.startFingerprint) {
+            presentationRecord = {
+              ...record,
+              status: "stale",
+              verdict: undefined,
+              reason: "workspace-mutated",
+            };
+            lastVerifierRun = {
+              workspaceRoot: ticket.canonicalRoot,
+              workspaceFingerprint: endFingerprint,
+              status: "stale",
+              ticket,
+              childRunId,
+              endFingerprint,
+              reason: "workspace-mutated",
+            };
+            pi.appendEntry("verifier-run", {
+              ...baseRecord,
+              status: "stale",
+              verdict: undefined,
+              reason: "workspace-mutated",
+            });
+            return;
+          }
+
+          if (hasEvaluableVerdict) {
+            lastVerifierRun = {
+              workspaceRoot: ticket.canonicalRoot,
+              workspaceFingerprint: endFingerprint,
+              status: record.status,
+              verdict: record.verdict,
+              ticket,
+              childRunId,
+              resultModel: record.model,
+              endFingerprint,
+            };
+            pi.appendEntry("verifier-run", baseRecord);
+          } else if (record.reason === "no-verdict") {
+            lastVerifierRun = {
+              workspaceRoot: ticket.canonicalRoot,
+              workspaceFingerprint: endFingerprint,
+              status: record.status,
+              ticket,
+              childRunId,
+              endFingerprint,
+              reason: "no-verdict",
+            };
+            pi.appendEntry("verifier-run", baseRecord);
+            pi.appendEntry("verifier-run-no-verdict", {
+              schemaVersion: 1,
+              timestamp: new Date().toISOString(),
+              verifierStatus: record.status,
+              ticket: summary,
+              note: "Completed verifier process without a recognized verdict; no prior verdict is retained as current evidence.",
+            });
+          } else {
+            pi.appendEntry("verifier-run", baseRecord);
+          }
+        };
+        verifierLedgerQueue = verifierLedgerQueue.then(
+          applyUpdate,
+          applyUpdate,
+        );
+        await verifierLedgerQueue;
+      }
     }
     const limited = limitSubagentToolResult(event);
-    if (!limited || record?.status !== "incomplete") return limited;
-    const banner = verifierIncompleteBanner(record.reason);
+    if (!limited || !presentationRecord) return limited;
+    if (presentationRecord.status === "completed") return limited;
+    const banner = verifierIncompleteBanner(presentationRecord.reason);
     let inserted = false;
     const content = limited.content.map((block) => {
       if (block.type !== "text" || inserted) return block;
@@ -426,7 +630,9 @@ export default function setupCore(
   pi.on("session_start", (_event, ctx) => {
     sessionGeneration += 1;
     verifierLedgerQueue = Promise.resolve();
+    verifierTickets.clear();
     activeCwd = ctx.cwd;
+    activeSessionId = ctx.sessionManager.getSessionId() ?? undefined;
     trusted = ctx.isProjectTrusted();
     verificationLedger = {};
     passedProfileIds = new Map();
@@ -440,12 +646,22 @@ export default function setupCore(
 
   pi.events.on(VERIFICATION_CAPABILITY_EVENTS.request, (value) => {
     const request = value as Partial<VerificationCapabilityRequest>;
-    request.respond?.({
+    const snapshot = {
       workspaceRoot: lastVerifierRun?.workspaceRoot,
       workspaceFingerprint: lastVerifierRun?.workspaceFingerprint,
       verifierStatus: lastVerifierRun?.status,
       verifierVerdict: lastVerifierRun?.verdict,
-    });
+    };
+    if (lastVerifierRun) {
+      Object.assign(snapshot, {
+        ticket: ticketSnapshot(lastVerifierRun.ticket),
+        childRunId: lastVerifierRun.childRunId,
+        resultModel: lastVerifierRun.resultModel,
+        endFingerprint: lastVerifierRun.endFingerprint,
+        reason: lastVerifierRun.reason,
+      });
+    }
+    request.respond?.(snapshot);
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
@@ -485,6 +701,8 @@ export default function setupCore(
   pi.on("session_shutdown", (_event, ctx) => {
     sessionGeneration += 1;
     verifierLedgerQueue = Promise.resolve();
+    verifierTickets.clear();
+    activeSessionId = undefined;
     verificationLedger = {};
     passedProfileIds = new Map();
     lastSettledStatus = undefined;

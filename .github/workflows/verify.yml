@@ -10,7 +10,22 @@ permissions:
 
 jobs:
   verify:
+    name: Clean checkout / ${{ matrix.gate }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gate:
+          - verify
+          - format:check
+          - typecheck
+          - deadcode
+          - test:coverage
+          - test:patches
+          - test:frontend-contracts
+          - test:gui
+          - audit:check
+          - test:benchmark
     steps:
       # v4.2.2
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -20,5 +35,17 @@ jobs:
           node-version-file: ".nvmrc"
           cache: npm
           cache-dependency-path: npm/package-lock.json
+      - name: Assert pinned Node and npm
+        run: |
+          test "$(node --version)" = "v22.23.2"
+          test "$(npm --version)" = "10.9.8"
       - run: npm ci --prefix npm --engine-strict
-      - run: npm --prefix npm run verify
+      - name: Prepare pinned benchmark test source (no model calls)
+        if: matrix.gate == 'verify' || matrix.gate == 'test:coverage' || matrix.gate == 'test:benchmark'
+        run: node scripts/setup-benchmark-tests.mjs
+      - name: Canonical verification chain
+        if: matrix.gate == 'verify'
+        run: npm --prefix npm run verify
+      - name: Run gate (failure is not suppressed)
+        if: matrix.gate != 'verify'
+        run: npm --prefix npm run '${{ matrix.gate }}'

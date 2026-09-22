@@ -29,9 +29,19 @@ import sys
 import time
 from pathlib import Path
 
-REPO = Path("/home/d/.pi/agent")
+REPO = Path(
+    os.environ.get(
+        "PI_DUEL_REPO",
+        Path(__file__).resolve().parents[3],
+    )
+).resolve()
 REAL_DUEL_DIR = REPO / "benchmarks" / "real-duel"
-OPENBENCH_HOME = Path(os.path.expanduser("~/.local/share/real-duel/openbench"))
+OPENBENCH_HOME = Path(
+    os.environ.get(
+        "PI_OPENBENCH_HOME",
+        os.path.expanduser("~/.local/share/real-duel/openbench"),
+    )
+).resolve()
 STATE = Path(os.path.expanduser("~/.local/state/real-duel"))
 WORKTREES_ROOT = STATE / "worktrees"
 # Wenn gesetzt: Workspace-Materialisierung nutzt _materialize_clean_room()

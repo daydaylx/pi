@@ -8,7 +8,7 @@ function isRecord(value: unknown): value is UnknownRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-export type VerifierRunStatus = "completed" | "incomplete";
+export type VerifierRunStatus = "completed" | "incomplete" | "stale";
 
 export type VerifierVerdict =
   "PASS" | "PASS_WITH_WARNINGS" | "FAIL" | "UNVERIFIABLE";
@@ -17,6 +17,9 @@ export interface VerifierRunRecord {
   timestamp: string;
   agent: "verifier";
   status: VerifierRunStatus;
+  /** The pinned package's child run id, if the result supplied one. */
+  runId?: string;
+  model?: string;
   /** timeout | turn-budget | interrupted | detached | provider-error | no-verdict | exit-<n> */
   reason?: string;
   /** Nur bei erfolgreichen Läufen, falls das Urteil erkennbar ist. */
@@ -61,6 +64,12 @@ export function extractVerifierRunRecord(
     agent: "verifier",
     status: "completed",
   };
+  if (typeof details.runId === "string" && details.runId.length > 0) {
+    record.runId = details.runId;
+  }
+  if (typeof result.model === "string" && result.model.length > 0) {
+    record.model = result.model;
+  }
   if (Array.isArray(result.attemptedModels)) {
     const models = result.attemptedModels.filter(
       (model): model is string => typeof model === "string",
@@ -120,7 +129,19 @@ export function verifierIncompleteBanner(reason: string | undefined): string {
               ? "durch einen Provider-/Netzwerkfehler beendet"
               : reason === "no-verdict"
                 ? "ohne ein auswertbares Urteil beendet"
-                : `mit Fehler beendet (${reason ?? "unbekannt"})`;
+                : reason === "workspace-mutated"
+                  ? "nach einer Mutation des geprüften Workspace beendet"
+                  : reason === "missing-run-id"
+                    ? "ohne die erforderliche Child-Run-ID beendet"
+                    : reason === "missing-model"
+                      ? "ohne das erforderliche effektive Modell beendet"
+                      : reason === "model-mismatch"
+                        ? "mit einem anderen Modell als im Start-Ticket beendet"
+                        : reason === "unbound-ticket"
+                          ? "ohne passendes unveränderliches Verifier-Ticket beendet"
+                          : reason === "snapshot-unavailable"
+                            ? "ohne belegbare Workspace-Bindung beendet"
+                            : `mit Fehler beendet (${reason ?? "unbekannt"})`;
   return `⚠ INCOMPLETE — Dieser Verifier-Lauf wurde ${cause} und zählt nicht als unabhängige Verifikation. Er ersetzt keine bestandene Prüfung und darf nicht als Verifikationsnachweis übernommen werden.\n\n`;
 }
 

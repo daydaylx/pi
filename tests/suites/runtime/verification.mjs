@@ -882,6 +882,26 @@ export const verificationSections = {
           return response;
         };
 
+        const startVerifier = async (toolCallId) => {
+          const results = await harness.runHooks(
+            "tool_call",
+            {
+              toolName: "subagent",
+              toolCallId,
+              input: {
+                agent: "verifier",
+                model: "anthropic/claude-sonnet-5:high",
+                task: "check",
+              },
+            },
+            trusted,
+          );
+          assert(
+            !results.some((result) => result?.block),
+            `verifier ticket is created before ${toolCallId} starts`,
+          );
+        };
+
         eq(
           queryCapabilities(),
           {
@@ -893,6 +913,7 @@ export const verificationSections = {
           "no verifier run yet reports an empty snapshot",
         );
 
+        await startVerifier("verifier-call-1");
         await harness.runHooks(
           "tool_result",
           {
@@ -901,10 +922,12 @@ export const verificationSections = {
             input: { agent: "verifier", task: "check" },
             content: [{ type: "text", text: "irrelevant" }],
             details: {
+              runId: "child-verifier-run-1",
               results: [
                 {
                   agent: "verifier",
                   exitCode: 0,
+                  model: "anthropic/claude-sonnet-5:high",
                   finalOutput: "PASS\nAlles gut.",
                 },
               ],
@@ -948,6 +971,7 @@ export const verificationSections = {
         // (which blocks redundant re-verification) and the commit gate
         // (which requires an evaluable PASS). An explicit re-verification
         // justification in the task overrides the dedup block.
+        await startVerifier("verifier-call-2");
         await harness.runHooks(
           "tool_result",
           {
@@ -956,6 +980,7 @@ export const verificationSections = {
             input: { agent: "verifier", task: "check" },
             content: [{ type: "text", text: "irrelevant" }],
             details: {
+              runId: "child-verifier-run-2",
               results: [{ agent: "verifier", timedOut: true }],
             },
           },
@@ -1056,11 +1081,12 @@ export const verificationSections = {
         );
 
         // The commit gate still allows commit because the PASS is preserved.
-        const gateAfterIncomplete = await verifierPolicy.assessGitCommitVerifierGate(
-          { toolName: "bash", input: { command: 'git commit -m "x"' } },
-          workspace,
-          afterIncomplete,
-        );
+        const gateAfterIncomplete =
+          await verifierPolicy.assessGitCommitVerifierGate(
+            { toolName: "bash", input: { command: 'git commit -m "x"' } },
+            workspace,
+            afterIncomplete,
+          );
         assert(
           !gateAfterIncomplete.blocked,
           "F-04: commit gate still clears with preserved PASS after incomplete run",
@@ -1069,6 +1095,7 @@ export const verificationSections = {
         // A normal verifier exit without a recognized verdict is different
         // from a timeout: it becomes the current, non-evaluable record. Retry
         // must remain possible, and the old PASS must not satisfy coverage.
+        await startVerifier("verifier-call-no-verdict");
         await harness.runHooks(
           "tool_result",
           {
@@ -1077,6 +1104,7 @@ export const verificationSections = {
             input: { agent: "verifier", task: "check" },
             content: [{ type: "text", text: "irrelevant" }],
             details: {
+              runId: "child-verifier-run-no-verdict",
               results: [
                 {
                   agent: "verifier",
@@ -1099,14 +1127,15 @@ export const verificationSections = {
           undefined,
           "F-04: unknown verifier output never invents a verdict",
         );
-        const retryAfterNoVerdict = await verifierPolicy.assessVerifierDelegation(
-          {
-            toolName: "subagent",
-            input: { agent: "verifier", task: justifiedTask },
-          },
-          workspace,
-          afterNoVerdict,
-        );
+        const retryAfterNoVerdict =
+          await verifierPolicy.assessVerifierDelegation(
+            {
+              toolName: "subagent",
+              input: { agent: "verifier", task: justifiedTask },
+            },
+            workspace,
+            afterNoVerdict,
+          );
         assert(
           !retryAfterNoVerdict.blocked,
           "F-04: no-verdict record leaves verifier retry permitted",
@@ -1127,6 +1156,7 @@ export const verificationSections = {
         // old verdict is more dangerous than none. Break the workspace's
         // .git after two real runs already exist in the ledger, then feed a
         // third, otherwise-passing run through.
+        await startVerifier("verifier-call-3");
         rmSync(path.join(workspace, ".git"), { recursive: true, force: true });
         await harness.runHooks(
           "tool_result",
@@ -1136,10 +1166,12 @@ export const verificationSections = {
             input: { agent: "verifier", task: "check" },
             content: [{ type: "text", text: "irrelevant" }],
             details: {
+              runId: "child-verifier-run-3",
               results: [
                 {
                   agent: "verifier",
                   exitCode: 0,
+                  model: "anthropic/claude-sonnet-5:high",
                   finalOutput: "PASS\nAlles gut.",
                 },
               ],
@@ -1171,6 +1203,394 @@ export const verificationSections = {
         );
       } finally {
         rmSync(workspace, { recursive: true, force: true });
+      }
+    });
+  },
+
+  "verifier ticket contract": async (context) => {
+    const { section, setupCore, verifierPolicy } = context;
+
+    await section("verifier ticket contract", async () => {
+      if (!setupCore || !verifierPolicy) return;
+      const workspace = mkdtempSync(path.join(tmpdir(), "pi-verifier-ticket-"));
+      const artifactDir = mkdtempSync(
+        path.join(tmpdir(), "pi-verifier-artifact-"),
+      );
+      const artifactPath = path.join(artifactDir, "report.md");
+      const git = (args) =>
+        execFileSync("git", args, { cwd: workspace, encoding: "utf8" });
+      try {
+        git(["init", "--quiet"]);
+        git(["config", "user.email", "ticket@example.test"]);
+        git(["config", "user.name", "Verifier Ticket"]);
+        mkdirSync(path.join(workspace, "extensions", "permissions"), {
+          recursive: true,
+        });
+        const guardedPath = path.join(
+          workspace,
+          "extensions",
+          "permissions",
+          "guards.ts",
+        );
+        writeFileSync(guardedPath, "export const ticketFixture = 1;\n");
+        git(["add", "."]);
+        git(["commit", "--quiet", "-m", "baseline"]);
+        writeFileSync(
+          guardedPath,
+          "export const ticketFixture = 1; // change\n",
+        );
+
+        const harness = createHarness();
+        setupCore.default(harness.api, { exec: harness.api.exec });
+        const session = harness.makeContext({
+          cwd: workspace,
+          sessionId: "ticket-session-1",
+          trusted: true,
+        });
+        await harness.runHooks("session_start", {}, session);
+
+        const capabilities = await context.load(
+          "extensions/shared/verification-capabilities.ts",
+        );
+        const query = () =>
+          capabilities.requestVerificationCapabilities(harness.api.events);
+        const start = async (toolCallId, input = {}, hookContext = session) => {
+          const results = await harness.runHooks(
+            "tool_call",
+            {
+              toolName: "subagent",
+              toolCallId,
+              input: { agent: "verifier", task: "check", ...input },
+            },
+            hookContext,
+          );
+          assert(
+            !results.some((result) => result?.block),
+            `ticket preflight allows ${toolCallId}`,
+          );
+        };
+        const result = async (
+          toolCallId,
+          childRunId,
+          verdict = "PASS",
+          extras = {},
+        ) =>
+          harness.runHooks(
+            "tool_result",
+            {
+              toolName: "subagent",
+              toolCallId,
+              input: { agent: "verifier", task: "check" },
+              content: [{ type: "text", text: verdict }],
+              details: {
+                ...(childRunId ? { runId: childRunId } : {}),
+                results: [
+                  {
+                    agent: "verifier",
+                    exitCode: 0,
+                    model: "anthropic/claude-sonnet-5:high",
+                    finalOutput: verdict,
+                    ...extras,
+                  },
+                ],
+              },
+            },
+            session,
+          );
+
+        await start("ticket-inherit", { model: "inherit" });
+        await result("ticket-inherit", "child-ticket-inherit", "PASS", {
+          model: "main-provider/main-model:high",
+        });
+        eq(
+          query().ticket?.effectiveModel,
+          "main-provider/main-model:high",
+          "explicit model=inherit binds to the parent model and agent thinking level",
+        );
+
+        await start("ticket-single-alias", {
+          action: "single",
+          model: "anthropic/claude-sonnet-5:high",
+        });
+        await result("ticket-single-alias", "child-single-alias", "PASS", {
+          model: "anthropic/claude-sonnet-5:high",
+        });
+        eq(
+          query().ticket?.effectiveModel,
+          "anthropic/claude-sonnet-5:high",
+          "action=single is normalized to the same verifier ticket contract",
+        );
+
+        const multiRun = await harness.runHooks(
+          "tool_call",
+          {
+            toolName: "subagent",
+            toolCallId: "ticket-multi",
+            input: {
+              agent: "verifier",
+              task: [
+                "## Original User Request",
+                "check",
+                "",
+                "## Delegated Question",
+                "single-run contract",
+                "",
+                "## Implementation / Diff to verify",
+                "<diff>",
+                "",
+                "## Baseline (Pre-existing workspace state)",
+                "clean",
+                "",
+                "## Acceptance criteria",
+                "PASS",
+              ].join("\n"),
+              tasks: [{ agent: "verifier", task: "nested" }],
+            },
+          },
+          session,
+        );
+        assert(
+          multiRun.some(
+            (entry) =>
+              entry?.block && String(entry.reason).includes("Single-Run"),
+          ),
+          "parallel verifier requests are blocked before a single-run ticket is created",
+        );
+
+        const parallelAlias = await harness.runHooks(
+          "tool_call",
+          {
+            toolName: "subagent",
+            toolCallId: "ticket-parallel-alias",
+            input: {
+              action: "parallel",
+              tasks: [{ agent: "verifier", task: "nested" }],
+            },
+          },
+          session,
+        );
+        assert(
+          parallelAlias.some((entry) => entry?.block),
+          "action=parallel cannot bypass the single-run verifier ticket gate",
+        );
+
+        const dynamicChain = await harness.runHooks(
+          "tool_call",
+          {
+            toolName: "subagent",
+            toolCallId: "ticket-dynamic-chain",
+            input: {
+              chain: [
+                {
+                  expand: { from: { output: "items", path: "/items" } },
+                  parallel: { agent: "verifier", task: "{item}" },
+                  collect: { as: "results" },
+                },
+              ],
+            },
+          },
+          session,
+        );
+        assert(
+          dynamicChain.some((entry) => entry?.block),
+          "dynamic chain fan-out cannot bypass the single-run verifier ticket gate",
+        );
+
+        await start("ticket-pass", {
+          model: "anthropic/claude-sonnet-5:high",
+        });
+        writeFileSync(artifactPath, "independent verifier report\n");
+        await result("ticket-pass", "child-ticket-pass", "PASS", {
+          model: "anthropic/claude-sonnet-5:high",
+          artifactPaths: { outputPath: artifactPath },
+        });
+        const passed = query();
+        assert(
+          passed.ticket?.runId === "ticket-pass" &&
+            passed.childRunId === "child-ticket-pass" &&
+            passed.ticket?.canonicalRoot === workspace &&
+            passed.ticket?.startFingerprint === passed.endFingerprint &&
+            passed.ticket?.profile === "verifier" &&
+            typeof passed.ticket?.effectiveModel === "string",
+          "a PASS exposes the immutable launch ticket and the package child run id",
+        );
+        eq(
+          passed.ticket?.effectiveModel,
+          "anthropic/claude-sonnet-5:high",
+          "the ticket uses the active verifier model override and thinking suffix",
+        );
+        assert(
+          !(
+            await verifierPolicy.assessVerifierCoverageForDiff(
+              ["extensions/permissions/guards.ts"],
+              passed.workspaceFingerprint,
+              workspace,
+              passed,
+            )
+          ).blocked,
+          "the exact ticket-bound PASS covers the unchanged protected path",
+        );
+
+        // A fallback model and an omitted model field are both non-evidence;
+        // neither may replace the result whose model was pinned at launch.
+        await start("ticket-fallback-model");
+        await result("ticket-fallback-model", "child-fallback-model", "PASS", {
+          model: "fallback-provider/fallback-model",
+        });
+        eq(
+          query().childRunId,
+          "child-ticket-pass",
+          "a fallback model cannot replace the model-bound PASS",
+        );
+        await start("ticket-missing-model");
+        await result("ticket-missing-model", "child-missing-model", "PASS", {
+          model: undefined,
+        });
+        eq(
+          query().childRunId,
+          "child-ticket-pass",
+          "a PASS without a reported model remains non-evaluable",
+        );
+
+        // A result from a foreign toolCallId/run cannot overwrite the bound
+        // PASS, even when its payload contains a valid-looking verdict.
+        await result("foreign-tool-call", "foreign-child-run", "PASS");
+        eq(
+          query().childRunId,
+          "child-ticket-pass",
+          "a foreign run id is discarded and cannot replace the booked result",
+        );
+
+        // The child id is mandatory evidence: a normal-looking result without
+        // Details.runId is visible as incomplete but never books a new PASS.
+        await start("missing-child-run");
+        await result("missing-child-run", undefined, "PASS");
+        eq(
+          query().childRunId,
+          "child-ticket-pass",
+          "a result without a matching child run id leaves the prior evidence untouched",
+        );
+
+        // A source mutation after launch invalidates the result, even though
+        // the child reports PASS. External report artifacts are harmless when
+        // they do not alter the workspace snapshot.
+        await start("ticket-mutated", {
+          model: "anthropic/claude-sonnet-5:high",
+        });
+        writeFileSync(guardedPath, "export const ticketFixture = 2;\n");
+        await result("ticket-mutated", "child-ticket-mutated", "PASS", {
+          model: "anthropic/claude-sonnet-5:high",
+        });
+        const stale = query();
+        assert(
+          stale.verifierStatus === "stale" &&
+            stale.verifierVerdict === undefined &&
+            stale.reason === "workspace-mutated" &&
+            stale.ticket?.startFingerprint !== stale.endFingerprint,
+          "a workspace mutation turns the apparent PASS into stale evidence",
+        );
+        assert(
+          (
+            await verifierPolicy.assessVerifierCoverageForDiff(
+              ["extensions/permissions/guards.ts"],
+              stale.workspaceFingerprint,
+              workspace,
+              stale,
+            )
+          ).blocked,
+          "stale evidence cannot satisfy the protected-path commit gate",
+        );
+
+        // Prepare a ticket, then replace the session before its result. The
+        // old result has no ticket in the new generation and is discarded.
+        writeFileSync(guardedPath, "export const ticketFixture = 1;\n");
+        await start("late-session-result");
+        await harness.runHooks("session_shutdown", {}, session);
+        const nextSession = harness.makeContext({
+          cwd: workspace,
+          sessionId: "ticket-session-2",
+          trusted: true,
+        });
+        await harness.runHooks("session_start", {}, nextSession);
+        await result("late-session-result", "child-late", "PASS");
+        eq(
+          query(),
+          {
+            workspaceRoot: undefined,
+            workspaceFingerprint: undefined,
+            verifierStatus: undefined,
+            verifierVerdict: undefined,
+          },
+          "a result from an old session/generation cannot repopulate the new ledger",
+        );
+
+        const cwdOverride = await harness.runHooks(
+          "tool_call",
+          {
+            toolName: "subagent",
+            toolCallId: "cwd-override",
+            input: {
+              agent: "verifier",
+              task: "check",
+              cwd: path.dirname(workspace),
+            },
+          },
+          nextSession,
+        );
+        assert(
+          cwdOverride.some((entry) => entry?.block),
+          "a verifier cwd override is blocked before a ticket can be created",
+        );
+
+        mkdirSync(path.join(workspace, ".pi", "agents"), { recursive: true });
+        writeFileSync(
+          path.join(workspace, ".pi", "agents", "verifier.md"),
+          "---\nname: verifier\ndescription: project verifier\n---\nProject verifier.\n",
+        );
+        writeFileSync(
+          path.join(workspace, ".pi", "settings.json"),
+          JSON.stringify({
+            subagents: { defaultModel: "openai-codex/gpt-5.6-terra" },
+          }),
+        );
+        await start(
+          "ticket-project-scope",
+          { agentScope: "project" },
+          nextSession,
+        );
+        await result("ticket-project-scope", "child-project-scope", "PASS", {
+          model: "openai-codex/gpt-5.6-terra",
+        });
+        eq(
+          query().ticket?.effectiveModel,
+          "openai-codex/gpt-5.6-terra",
+          "project agent scope resolves the project agent and project default model",
+        );
+
+        rmSync(path.join(workspace, ".pi", "agents", "verifier.md"));
+        mkdirSync(path.join(workspace, ".pi", "agents", "nested"), {
+          recursive: true,
+        });
+        writeFileSync(
+          path.join(workspace, ".pi", "agents", "nested", "custom.md"),
+          '---\nname: "verifier"\ndescription: "quoted project verifier"\nmodel: "openai-codex/gpt-5.6-terra"\nthinking: "low"\n---\nQuoted project verifier.\n',
+        );
+        await start(
+          "ticket-project-quoted",
+          { agentScope: "project" },
+          nextSession,
+        );
+        await result("ticket-project-quoted", "child-project-quoted", "PASS", {
+          model: "openai-codex/gpt-5.6-terra:low",
+        });
+        eq(
+          query().ticket?.effectiveModel,
+          "openai-codex/gpt-5.6-terra:low",
+          "recursive project agent discovery strips quoted frontmatter values",
+        );
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+        rmSync(artifactDir, { recursive: true, force: true });
       }
     });
   },

@@ -444,7 +444,7 @@
         <dt>Beobachtet</dt><dd><code>collectWorkspaceSnapshot()</code> wirft <code>ENOBUFS</code>. Der Aufrufer fängt jede Ausnahme ab und gibt <code>PERMITTED</code> zurück. <code>git commit</code> läuft durch, ohne dass ein Verifier-Lauf existiert — ohne Meldung, ohne Log, ohne Session-Eintrag.</dd>
         <dt>Erwartet</dt><dd>AGENTS.md: „<em>git commit wird technisch blockiert, wenn der Diff eine dieser Dateien berührt und kein verifier-Lauf mit Urteil PASS vorliegt.</em>" Ein Gate, das seine Evidenz nicht erheben kann, darf nicht schweigend zur Erlaubnis werden.</dd>
         <dt>Ursache</dt><dd>Node setzt für <code>execFileSync</code> ein <code>maxBuffer</code> von 1 MiB. <code>git diff --binary</code> überschreitet das bei etwa 350 KB geändertem Text (eine Vollersetzung erzeugt alte + neue Zeilen) oder bei jeder binären Änderung über ~700 KB.</dd>
-        <dt>Auswirkung</dt><dd><strong>Genau der große, riskante Diff, für den das Gate 2026-08 eingeführt wurde, umgeht es.</strong> In diesem Repository ist die Schwelle trivial erreichbar: <code>benchmarks/real-duel/reports/real-01-tui-warm-theme/pi_transcript.txt</code> ist allein 5,4 MB.</dd>
+        <dt>Auswirkung</dt><dd><strong>Genau der große, riskante Diff, für den das Gate 2026-08 eingeführt wurde, umgeht es.</strong> In diesem Repository ist die Schwelle trivial erreichbar, etwa durch ein mehrmegabytegroßes Benchmark-Transkript.</dd>
         <dt>Nachweis</dt><dd><strong>Reproduziert</strong> in einem Wegwerf-Repo im Scratchpad:</dd>
       </dl>
       <pre class="evidence">$ git init repro &amp;&amp; ...          # Datei mit 400 KB, dann vollständig ersetzt

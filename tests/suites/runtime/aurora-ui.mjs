@@ -887,11 +887,12 @@ export const auroraUiSections = {
             .join("\n");
           assert(
             !retainedTools.includes("history-0.txt") &&
-              retainedTools.includes("history-1.txt") &&
+              !retainedTools.includes("history-2.txt") &&
+              retainedTools.includes("history-3.txt") &&
               retainedTools.includes("history-5.txt") &&
-              (retainedTools.match(/ERLEDIGT/g) ?? []).length === 5 &&
+              (retainedTools.match(/ERLEDIGT/g) ?? []).length === 3 &&
               retainedTools.includes("BEFEHL"),
-            "the activity history keeps the latest five READ/BEFEHL rows as completed entries",
+            "the activity history keeps the latest three READ/BEFEHL rows as completed entries",
           );
 
           // A tool that is still producing output (e.g. bash streaming stdout)
@@ -1258,7 +1259,7 @@ export const auroraUiSections = {
             "hiddenActivitySummary compacts the overflow into a single summary line",
           );
 
-          // READ history keeps only the latest five completed entries; the
+          // READ history keeps only the latest three completed entries; the
           // result renderer remains the source of truth for their full output.
           for (let i = 0; i < 45; i++) {
             await overflowHarness.runHooks(
@@ -1293,11 +1294,11 @@ export const auroraUiSections = {
                   .join("\n")
               : "";
           assert(
-            historyRendered.includes("history-40.ts") &&
+            historyRendered.includes("history-42.ts") &&
               historyRendered.includes("history-44.ts") &&
-              !historyRendered.includes("history-39.ts") &&
+              !historyRendered.includes("history-41.ts") &&
               !historyRendered.includes("history-0.ts"),
-            `the live dashboard retains only the latest five READ entries: ${historyRendered}`,
+            `the live dashboard retains only the latest three READ entries: ${historyRendered}`,
           );
           await overflowHarness.runHooks("session_shutdown", {}, overflowCtx);
         }
@@ -2557,6 +2558,11 @@ export const auroraUiSections = {
               !renderActivity().includes("✓ TOOL") &&
                 renderActivity().includes("✓ READ"),
               "agent_settled keeps completed READ history but not unrelated completed tools",
+            );
+            clock += 20_001;
+            assert(
+              !renderActivity().includes("✓ READ"),
+              "completed READ history expires from the activity surface after about 20 seconds",
             );
           } finally {
             Date.now = originalNow;
