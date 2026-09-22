@@ -128,7 +128,15 @@ npm --prefix npm run verify
 ```
 
 `verify` schließt seit dem Audit-Gate `npm run audit:check` ein — ein lokal
-grüner Lauf deckt damit dieselben Abhängigkeitsbefunde ab wie CI.
+grüner Lauf deckt damit dieselben Abhängigkeitsbefunde ab wie CI. Seit dem
+Lint-Gate ist auch `npm run lint` (ESLint + eslint-plugin-security) Teil von
+`verify`. `.ts`-Dateien sind darin vorerst ausgenommen: typescript-eslint
+verweigert aktuell den Start gegen die hier gepinnte TypeScript-7-Version
+(siehe `npm/eslint.config.mjs`); sie bleiben bis dahin allein durch
+`tsc --noEmit` (strict) abgedeckt. Zusätzlich läuft in CI ein
+advisorischer, nicht blockierender Semgrep-Scan (`p/ci` + `p/security-audit`);
+lokal ist Semgrep nicht installiert — bei Bedarf manuell mit
+`semgrep scan --config p/ci --config p/security-audit .` ausführen.
 
 Nur ein `project_check`-Aufruf des deklarierten Pflichtprofils (`verify`,
 siehe `.pi/verify.json`) aktualisiert den Verifikations-Footer, und

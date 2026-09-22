@@ -21,10 +21,11 @@
     "audit:check": "node ../scripts/check-npm-audit.mjs",
     "format": "prettier --write ..",
     "format:check": "prettier --check ..",
+    "lint": "cd .. && eslint --config npm/eslint.config.mjs . --suppressions-location npm/.eslint-suppressions.json",
     "deadcode": "knip --directory ..",
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
     "check:versioned-tree": "node ../scripts/check-versioned-tree.mjs",
-    "verify": "npm run format:check && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:frontend-contracts && npm run test:gui && npm run audit:check"
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:frontend-contracts && npm run test:gui && npm run audit:check"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
@@ -37,7 +38,11 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.84.3",
+    "@eslint/js": "10.0.1",
     "@types/node": "24.12.4",
+    "eslint": "10.11.0",
+    "eslint-plugin-security": "4.0.1",
+    "globals": "17.12.0",
     "knip": "6.31.0",
     "prettier": "3.9.6",
     "typescript": "7.0.2"

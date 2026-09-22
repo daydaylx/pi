@@ -1,0 +1,117 @@
+{
+  "benchmarks/real-duel/scripts/plan-quality-cli.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    }
+  },
+  "gui/renderer/renderer.js": {
+    "no-unused-vars": {
+      "count": 1
+    },
+    "no-useless-assignment": {
+      "count": 2
+    }
+  },
+  "gui/test/agent-runs.mjs": {
+    "no-unused-vars": {
+      "count": 4
+    }
+  },
+  "tests/e2e.test.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    }
+  },
+  "tests/lsp-smoke.mjs": {
+    "no-unsafe-finally": {
+      "count": 1
+    },
+    "no-unused-vars": {
+      "count": 1
+    },
+    "preserve-caught-error": {
+      "count": 2
+    }
+  },
+  "tests/openrouter-doctor/unit/normalize-error.test.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    }
+  },
+  "tests/plan-store.test.mjs": {
+    "no-control-regex": {
+      "count": 1
+    }
+  },
+  "tests/shared/harness.mjs": {
+    "no-control-regex": {
+      "count": 1
+    }
+  },
+  "tests/suites/diff.mjs": {
+    "no-unused-vars": {
+      "count": 8
+    }
+  },
+  "tests/suites/lsp.mjs": {
+    "no-unused-vars": {
+      "count": 9
+    }
+  },
+  "tests/suites/runtime/ask-user.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    }
+  },
+  "tests/suites/runtime/aurora-inspector.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    }
+  },
+  "tests/suites/runtime/aurora-ui.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    },
+    "no-useless-escape": {
+      "count": 2
+    }
+  },
+  "tests/suites/runtime/control-plane.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    }
+  },
+  "tests/suites/runtime/recovery-state.mjs": {
+    "no-useless-assignment": {
+      "count": 1
+    }
+  },
+  "tests/suites/runtime/verification.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    }
+  },
+  "tests/suites/ui.mjs": {
+    "no-control-regex": {
+      "count": 4
+    },
+    "no-unused-vars": {
+      "count": 7
+    }
+  },
+  "tests/unit/normalize-error.test.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    }
+  },
+  "tests/workflow-mode/e2e.test.mjs": {
+    "no-unused-vars": {
+      "count": 1
+    }
+  },
+  "tests/workflow-mode/plan-store.test.mjs": {
+    "no-control-regex": {
+      "count": 1
+    }
+  }
+}
