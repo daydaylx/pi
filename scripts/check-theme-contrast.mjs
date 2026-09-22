@@ -44,6 +44,18 @@ const WARM_ACCENT_NAMES = [
 const HUE_DISTANCE_THRESHOLD = 15;
 const SIMILARITY_THRESHOLD = 20; // saturation/lightness points
 
+/** Fixed Pi color slots used as Aurora's runtime-state adapters. */
+const STATUS_SLOTS = {
+  thinking: "thinkingHigh",
+  working: "accent",
+  responding: "thinkingMax",
+  waiting: "muted",
+  verification: "thinkingXhigh",
+  success: "success",
+  warning: "warning",
+  error: "error",
+};
+
 export function loadTheme(themePath) {
   return JSON.parse(readFileSync(themePath, "utf8"));
 }
@@ -89,6 +101,46 @@ function hexToHsl(hex) {
 function hueDistance(a, b) {
   const diff = Math.abs(a - b) % 360;
   return diff > 180 ? 360 - diff : diff;
+}
+
+function resolveColor(theme, value) {
+  let current = value;
+  const seen = new Set();
+  while (typeof current === "string" && !current.startsWith("#")) {
+    if (seen.has(current)) return undefined;
+    seen.add(current);
+    current = theme.vars?.[current] ?? theme.colors?.[current];
+  }
+  return typeof current === "string" && /^#[0-9a-f]{6}$/i.test(current)
+    ? current
+    : undefined;
+}
+
+/** Runtime slots should not collapse into indistinguishable warm accents. */
+export function checkStatusDistinctness(theme) {
+  const entries = Object.entries(STATUS_SLOTS)
+    .map(([state, slot]) => [state, resolveColor(theme, theme.colors?.[slot])] )
+    .filter((entry) => entry[1]);
+  const hsl = Object.fromEntries(
+    entries.map(([state, color]) => [state, hexToHsl(color)]),
+  );
+  const warnings = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    for (let j = i + 1; j < entries.length; j += 1) {
+      const [a] = entries[i];
+      const [b] = entries[j];
+      const first = hsl[a];
+      const second = hsl[b];
+      if (
+        hueDistance(first.h, second.h) < 12 &&
+        Math.abs(first.s - second.s) < 15 &&
+        Math.abs(first.l - second.l) < 15
+      ) {
+        warnings.push({ a, b, hueDistance: hueDistance(first.h, second.h) });
+      }
+    }
+  }
+  return warnings;
 }
 
 /** Warm-accent pairs whose hue sits too close together to read as distinct
@@ -139,6 +191,7 @@ function main() {
   }
 
   const hueWarnings = checkHueProximity(theme);
+  const statusWarnings = checkStatusDistinctness(theme);
   console.log("\nHue proximity (warm accents):");
   if (hueWarnings.length === 0) {
     console.log(
@@ -152,9 +205,20 @@ function main() {
     }
   }
 
+  console.log("\nRuntime status distinctness:");
+  if (statusWarnings.length === 0) {
+    console.log("  no runtime status pair collapses into the same tone.");
+  } else {
+    for (const warning of statusWarnings) {
+      console.log(
+        `  ⚠ ${warning.a} / ${warning.b} are only ${warning.hueDistance.toFixed(1)}° apart — may read as the same status.`,
+      );
+    }
+  }
+
   if (
     process.argv.includes("--exit-code") &&
-    (anyBelowText || hueWarnings.length > 0)
+    (anyBelowText || hueWarnings.length > 0 || statusWarnings.length > 0)
   ) {
     process.exitCode = 1;
   }
