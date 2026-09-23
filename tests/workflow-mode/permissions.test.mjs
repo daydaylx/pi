@@ -2510,6 +2510,11 @@ await test("YOLO stufen: file access outside the project is denied, asked or all
     ["read", "/etc/hostname"],
   ];
   for (const [operation, path] of targets) {
+    eq(
+      permissionPolicy.decideFileAccess("yolo", operation, path, cwd).action,
+      "block",
+      `YOLO 1 denies ${operation} ${path}`,
+    );
     const asked = permissionPolicy.decideFileAccess(
       "yolo-ask",
       operation,
@@ -2564,7 +2569,7 @@ await test("YOLO stufen: file access outside the project is denied, asked or all
   );
 });
 
-await test("YOLO 2/3 keep plan mode and share the loosened gates", async () => {
+await test("YOLO 2/3 keep plan mode, the interactive credential guard and the loosened gates", async () => {
   if (!workflowPolicy || !toolPolicy || !verifierPolicy) return;
   const cwd = process.cwd();
   const planning = { mode: "simple_plan" };
@@ -2586,6 +2591,22 @@ await test("YOLO 2/3 keep plan mode and share the loosened gates", async () => {
         cwd,
       ).blocked,
       `${level} does not unlock a mutating shell while planning`,
+    );
+    assert(
+      workflowPolicy.assessWorkflowTool(
+        { toolName: "interactive_shell", input: { command: "sudo id | tee x" } },
+        cwd,
+        level,
+      ).blocked,
+      `${level} keeps the interactive credential-path guard`,
+    );
+    assert(
+      !workflowPolicy.assessWorkflowTool(
+        { toolName: "interactive_shell", input: { command: "sudo id" } },
+        cwd,
+        level,
+      ).blocked,
+      `${level} lets a plain interactive sudo through (password is typed by the human)`,
     );
     eq(
       toolPolicy.decideTool(

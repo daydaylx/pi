@@ -17,6 +17,11 @@ import {
 } from "../shared/workflow-capabilities.ts";
 import { PLAN_WRITE_TOOL_NAME } from "../plan-mode/plan-tool.ts";
 import { toolPath } from "./tool-event.ts";
+import {
+  forbiddenInteractiveCredentialPath,
+  INTERACTIVE_SHELL_TOOL_NAME,
+  interactiveShellCommand,
+} from "../shared/interactive-shell-policy.ts";
 
 /**
  * The hard boundaries that hold at every permission level.
@@ -39,7 +44,8 @@ import { toolPath } from "./tool-event.ts";
  * YOLO 2 ("yolo-ask") and YOLO 3 ("yolo-full") pass every one of these
  * boundaries on to the decision layer, which asks (2) or allows (3). What
  * they never lift lives elsewhere: the trust boundary and the Plan Mode
- * write ban (guards.ts, planModeMutationGuard).
+ * write ban (guards.ts, planModeMutationGuard) and the interactive
+ * credential-path guard below.
  */
 export interface WorkflowAssessment {
   blocked: boolean;
@@ -188,11 +194,45 @@ export function assessBash(
   return hard ? { blocked: true, reason: hard } : PERMITTED;
 }
 
+function assessInteractiveShell(
+  command: string,
+  permissionLevel?: PermissionLevel,
+): WorkflowAssessment {
+  const forbidden = forbiddenInteractiveCredentialPath(command);
+  // The credential-path guard holds on every level, YOLO 3 included: the
+  // password of a sudo/ssh/su call is typed by the human into the terminal,
+  // never passed through the model-provided command string.
+  if (forbidden) return { blocked: true, reason: forbidden };
+  if (permissionLevel === "yolo-ask" || permissionLevel === "yolo-full")
+    return PERMITTED;
+  if (isSensitiveReference(command)) {
+    return { blocked: true, reason: "Harte Secret- oder Credential-Grenze" };
+  }
+  if (permissionLevel === "yolo") return PERMITTED;
+  const hard = hardSystemBash(command);
+  if (!hard) return PERMITTED;
+  // Elevated rights are intentionally allowed to reach decideBash(), where
+  // project-write/confirm-all asks and headless/YOLO deny. Other hard system
+  // boundaries remain blocked before execution.
+  if (
+    hard === "Harte Grenze: erhöhte Rechte" &&
+    /\b(?:sudo|su)\b/i.test(command)
+  ) {
+    return PERMITTED;
+  }
+  return { blocked: true, reason: hard };
+}
+
 export function assessWorkflowTool(
   event: ToolCallEvent,
   cwd: string,
   permissionLevel?: PermissionLevel,
 ): WorkflowAssessment {
+  if (event.toolName === INTERACTIVE_SHELL_TOOL_NAME)
+    return assessInteractiveShell(
+      interactiveShellCommand(event),
+      permissionLevel,
+    );
   if (event.toolName === "bash")
     return assessBash(
       String((event.input as Record<string, unknown>).command ?? ""),
@@ -343,11 +383,16 @@ export function planModeMutationGuard(
   if (!isPlanRestricted(workflow)) return PERMITTED;
   if (permissionLevel === "readonly") return PERMITTED;
 
-  if (event.toolName === "bash") {
+  if (
+    event.toolName === "bash" ||
+    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+  ) {
     return planModeBashGuard(
       workflow,
       permissionLevel,
-      String((event.input as Record<string, unknown>).command ?? ""),
+      event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+        ? interactiveShellCommand(event)
+        : String((event.input as Record<string, unknown>).command ?? ""),
       cwd,
     );
   }

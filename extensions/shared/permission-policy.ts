@@ -583,11 +583,14 @@ export function decideFileAccess(
     allowOutsideProjectRead &&
     identity.scope === "external" &&
     !identity.symlinkEscape;
-  if (
-    permissionLevel !== "yolo-ask" &&
-    externalOrUnresolved &&
-    !approvedExternalRead
-  ) {
+  if (externalOrUnresolved && !approvedExternalRead) {
+    // YOLO 2: mehr Zugriff mit Erlaubnis statt harter Sperre.
+    if (permissionLevel === "yolo-ask") {
+      return ask(
+        `Dateizugriff außerhalb des Projekts oder über einen Symlink: ${identity.lexicalPath}`,
+        true,
+      );
+    }
     return deny(
       "Harte Projekt-, Symlink- oder Zielauflösungsgrenze: Das Dateiziel ist nicht sicher innerhalb des Projekts aufgelöst.",
     );
@@ -602,18 +605,6 @@ export function decideFileAccess(
           );
     }
     return ALLOW;
-  }
-
-  // YOLO 2: workflow-policy lets files outside the project or behind a
-  // symlink escape through, so this layer asks instead of the hard block.
-  if (
-    permissionLevel === "yolo-ask" &&
-    (identity.scope !== "project" || identity.symlinkEscape)
-  ) {
-    return ask(
-      `Dateizugriff außerhalb des Projekts oder über einen Symlink: ${identity.lexicalPath}`,
-      true,
-    );
   }
 
   // Re-check the canonical boundary here as defense in depth. guards.ts runs
