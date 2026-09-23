@@ -27,6 +27,7 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [026](026-more-animation-subagents-and-badge-flash.md) — Animierte Subagenten-Zeilen und Badge-Flash bei Statuswechsel
 - [028](028-aurora-forge-visual-state-and-motion.md) — Semantische Visual States und gemeinsame Motion für Aurora Forge
 - [029](029-yolo-three-stufen.md) — YOLO in drei Stufen: Projekt, mit Rückfrage, Vollzugriff
+- [030](030-rabbitmode-read-only-status-contract.md) — RabbitMode liest Permission/Workflow-State über einen dokumentierten Contract, kein Package-Export
 
 ## Historische, ersetzte Entscheidungen
 
