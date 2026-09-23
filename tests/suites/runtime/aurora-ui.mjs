@@ -54,17 +54,21 @@ export const auroraUiSections = {
           context,
         );
         assert(
-          discovered.some((entry) =>
-            entry?.themePaths?.some((value) =>
-              value.endsWith("aurora-night.json"),
-            ),
+          discovered.some(
+            (entry) =>
+              entry?.themePaths?.some((value) =>
+                value.endsWith("aurora-night.json"),
+              ) &&
+              entry?.themePaths?.some((value) =>
+                value.endsWith("aurora-forge.json"),
+              ),
           ),
-          "Aurora exposes its theme through resource discovery",
+          "Aurora exposes both legacy and Forge themes through resource discovery",
         );
         await harness.runHooks("session_start", {}, context);
         eq(
           context.ui.theme.name,
-          "aurora-night",
+          "aurora-forge",
           "Aurora activates its central theme",
         );
         // Aurora owns the footer and the activity widget only. The editor stays
@@ -643,6 +647,51 @@ export const auroraUiSections = {
           const auroraTools = await load(
             "extensions/aurora-ui/tool-renderers.ts",
           );
+          const visualState = await load(
+            "extensions/aurora-ui/visual-state.ts",
+          );
+          if (visualState) {
+            for (const state of [
+              "idle",
+              "thinking",
+              "working",
+              "responding",
+              "waiting",
+              "verifying",
+              "success",
+              "warning",
+              "error",
+              "attention",
+            ]) {
+              const visual = visualState.visualForState(state);
+              assert(
+                visual.tone && visual.glyph && visual.staticGlyph,
+                `visual state ${state} has deterministic tone and glyph data`,
+              );
+            }
+            const expressive = visualState.renderVisualGlyph(
+              context.ui.theme,
+              "responding",
+              "expressive",
+              4,
+            );
+            const reduced = visualState.renderVisualGlyph(
+              context.ui.theme,
+              "responding",
+              "reduced",
+              0,
+            );
+            const off = visualState.renderVisualGlyph(
+              context.ui.theme,
+              "responding",
+              "off",
+              0,
+            );
+            assert(
+              expressive !== reduced && reduced !== off && off === "",
+              "expressive, reduced and off resolve responding motion differently",
+            );
+          }
           for (const [name, label] of [
             ["read", "READ"],
             ["grep", "GREP"],
@@ -712,6 +761,8 @@ export const auroraUiSections = {
                 },
                 activity: "running",
               }) === "working" &&
+              header.sessionStatus({ activity: "verifying" }) === "verifying" &&
+              header.statusLabel("verifying") === "PRÜFT" &&
               header.sessionStatus({
                 task: { phase: "done", verification: { verdict: "READY" } },
                 activity: "done",
@@ -722,7 +773,7 @@ export const auroraUiSections = {
           // Once nothing is live, the activity badge differentiates settled
           // states — the former fixed Session panel's only real job (a live
           // turn already carries its status in the heading line, see below).
-          for (const columns of [80, 100, 120, 160]) {
+          for (const columns of [60, 80, 100, 120, 160, 200]) {
             const lines = auroraTools.renderDashboard(
               detailedTask,
               context.ui.theme,
@@ -1300,6 +1351,31 @@ export const auroraUiSections = {
               !historyRendered.includes("history-0.ts"),
             `the live dashboard retains only the latest three READ entries: ${historyRendered}`,
           );
+          const originalNow = Date.now;
+          let expiredRendered = "";
+          try {
+            Date.now = () => originalNow() + 20_001;
+            expiredRendered =
+              typeof historyWidget?.content === "function"
+                ? historyWidget
+                    .content(
+                      {
+                        terminal: { columns: 140, rows: 24 },
+                        requestRender() {},
+                      },
+                      overflowCtx.ui.theme,
+                    )
+                    .render(140)
+                    .map(stripAnsi)
+                    .join("\n")
+                : "";
+          } finally {
+            Date.now = originalNow;
+          }
+          assert(
+            !expiredRendered.includes("history-44.ts"),
+            "completed READ history expires after twenty seconds",
+          );
           await overflowHarness.runHooks("session_shutdown", {}, overflowCtx);
         }
 
@@ -1646,8 +1722,9 @@ export const auroraUiSections = {
                 .join("\n")
             : "";
         assert(
-          verifyRendered.includes("◌ VERIFY") &&
-            verifyRendered.includes("verify"),
+          verifyRendered.includes("VERIFY") &&
+            verifyRendered.includes("verify") &&
+            !verifyRendered.includes("✓ VERIFY"),
           "the running verification tool has a distinct, argument-backed Activity row without a false success mark",
         );
         await harness.runHooks(
@@ -1728,7 +1805,7 @@ export const auroraUiSections = {
             const activityLine = rendered
               .split("\n")
               .find((line) => line.includes("ANTWORTET"));
-            return activityLine?.match(/[·•●]/)?.[0] ?? "";
+            return activityLine?.match(/[·•●▸]/)?.[0] ?? "";
           };
           const samples = [headGlyph()];
           for (let tick = 0; tick < 3; tick += 1) {
@@ -1749,7 +1826,7 @@ export const auroraUiSections = {
             "ANTWORTET keeps one static glyph while the status ticker runs",
           );
           assert(
-            samples[0] !== "·",
+            samples[0] !== "·" && samples[0] !== "",
             "the static responding glyph stays distinguishable from WARTET AUF MODELL",
           );
         }
@@ -1846,7 +1923,7 @@ export const auroraUiSections = {
           });
         }
 
-        for (const motion of ["reduced", "off"]) {
+        for (const motion of ["expressive", "reduced", "off"]) {
           const workspace = mkdtempSync(path.join(tmpdir(), "aurora-motion-"));
           try {
             mkdirSync(path.join(workspace, ".pi"));

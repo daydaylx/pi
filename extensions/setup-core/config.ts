@@ -3,7 +3,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
-export type MotionMode = "contextual" | "reduced" | "off";
+export type MotionMode =
+  | "expressive"
+  | "contextual"
+  | "reduced"
+  | "off";
 export type DashboardMode = "auto" | "compact" | "expanded" | "hidden";
 export type PolicyAction = "block" | "ask" | "allow";
 export type LspMode = "off" | "auto" | "force";
@@ -33,8 +37,10 @@ export interface SecondOpinionConfig {
   allowContextFollowup: false;
 }
 
+export type AuroraTheme = "aurora-night" | "aurora-forge";
+
 export interface SetupConfig {
-  ui: { theme: "aurora-night"; motion: MotionMode; dashboard: DashboardMode };
+  ui: { theme: AuroraTheme; motion: MotionMode; dashboard: DashboardMode };
   permissions: {
     unknownTools: PolicyAction;
     bash: PolicyAction;
@@ -65,7 +71,7 @@ export interface LoadedSetupConfig {
 const DEFAULT_CONFIG: SetupConfig = {
   // `auto` is Aurora's responsive, permanent dashboard; `compact` and
   // `hidden` remain explicit space-saving preferences.
-  ui: { theme: "aurora-night", motion: "contextual", dashboard: "auto" },
+  ui: { theme: "aurora-forge", motion: "contextual", dashboard: "auto" },
   permissions: {
     unknownTools: "ask",
     bash: "allow",
@@ -314,17 +320,18 @@ function applyUserLayer(
       diagnostics,
     );
 
-  if (ui?.theme !== undefined && ui.theme !== "aurora-night") {
-    diagnostics.push({
-      level: "error",
-      source,
-      message: "ui.theme muss aurora-night sein",
-    });
-  }
+  next.ui.theme = enumValue(
+    ui?.theme,
+    ["aurora-night", "aurora-forge"],
+    next.ui.theme,
+    source,
+    "ui.theme",
+    diagnostics,
+  );
 
   next.ui.motion = enumValue(
     ui?.motion,
-    ["contextual", "reduced", "off"],
+    ["expressive", "contextual", "reduced", "off"],
     next.ui.motion,
     source,
     "ui.motion",

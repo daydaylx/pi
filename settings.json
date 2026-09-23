@@ -1,7 +1,7 @@
 {
   "tuiMode": "fullscreen",
   "lastChangelogVersion": "0.84.4",
-  "theme": "aurora-night",
+  "theme": "aurora-forge",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.6-luna",
   "hideThinkingBlock": true,

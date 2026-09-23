@@ -594,6 +594,61 @@ export const auroraLifecycleSections = {
           );
           await harness.runHooks("session_shutdown", {}, ctxB);
         }
+
+        // --- T13: projectCurrentTask must run after the activity kind has
+        // actually changed, not before, so the task phase never freezes one
+        // step behind agent_start/agent_settled (Regression from the
+        // reliability rework itself) ---
+        await withIsolatedAgentDir(async () => {
+          // Compact mode's first line is the activity tile status; the task
+          // title is intentionally omitted from this live surface.
+          const harness = createHarness();
+          auroraUi.default(harness.api);
+          const ctx = harness.makeContext({ sessionId: "aurora-t13" });
+          await harness.runHooks("session_start", {}, ctx);
+          await ctx.ui.submitSlashCommand("/dashboard compact");
+
+          await harness.runHooks("agent_start", {}, ctx);
+          const afterStart = renderWidget(harness, ctx, 100, 24);
+          assert(
+            afterStart[0]?.includes("DENKT NACH"),
+            "the compact activity status reflects the new 'thinking' activity right after agent_start",
+          );
+
+          await harness.runHooks(
+            "message_update",
+            { assistantMessageEvent: { type: "text_delta" } },
+            ctx,
+          );
+          const afterMessage = renderWidget(harness, ctx, 100, 24);
+          assert(
+            afterMessage[0]?.includes("ANTWORTET"),
+            "the compact activity status reflects the new 'responding' activity after message_update",
+          );
+
+          await harness.runHooks(
+            "tool_execution_start",
+            {
+              toolCallId: "t13-tool",
+              toolName: "read",
+              args: { path: "a.ts" },
+            },
+            ctx,
+          );
+          await harness.runHooks(
+            "tool_execution_end",
+            { toolCallId: "t13-tool", toolName: "read", isError: false },
+            ctx,
+          );
+          await harness.runHooks("agent_settled", {}, ctx);
+          const afterSettled = renderWidget(harness, ctx, 100, 24);
+          assert(
+            afterSettled[0]?.includes("AKTIVITÄT") &&
+              !afterSettled[0]?.includes("ARBEITEN"),
+            "the compact activity status reflects the settled idle activity right after agent_settled",
+          );
+          await harness.runHooks("session_shutdown", {}, ctx);
+        });
       }
     });
   },

@@ -25,7 +25,7 @@ export interface TileInput {
   title: string;
   lines: readonly string[];
   badge?: string;
-  tone?: "accent" | "muted" | "warning" | "error" | "success";
+  tone?: Tone;
   /** Card background. Omit it and the tile keeps the flat, frame-only look. */
   fill?: TileFill;
   /** Columns of blank margin between the frame and content, each side. Defaults to 1. */
@@ -228,11 +228,6 @@ export function tileBlankRow(
     ? padFilled(theme, "", innerWidth, fill)
     : " ".repeat(innerWidth);
   return `${border("│ ")}${content}${border(" │")}`;
-}
-
-/** Card rows: two frame rows plus one row per content line. */
-export function tileHeight(input: TileInput): number {
-  return input.lines.length + 2;
 }
 
 /**

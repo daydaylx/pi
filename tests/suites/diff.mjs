@@ -29,6 +29,7 @@ export const diffSections = {
       diffFallback,
       diffTracker,
       diffViewer,
+      diffLearning,
       auroraState,
     } = context;
 
@@ -253,6 +254,65 @@ export const diffSections = {
             { path: "sample.txt", linesAdded: 1, linesRemoved: 1, hunks: 1 },
             "diff viewer persists the expected successful write diff",
           );
+          const changeEvents = harness.emitted.filter(
+            (entry) => entry.name === "diff-viewer.change",
+          );
+          eq(changeEvents.length, 1, "successful write publishes one change event");
+          eq(
+            changeEvents[0]?.event?.stats,
+            { path: "sample.txt", linesAdded: 1, linesRemoved: 1, hunks: 1 },
+            "change event carries the validated structured diff",
+          );
+
+          await harness.runHooks(
+            "tool_call",
+            {
+              toolCallId: "unchanged-content",
+              toolName: "write",
+              input: { path: "sample.txt", content: "after\n" },
+            },
+            context,
+          );
+          await harness.runHooks(
+            "tool_result",
+            {
+              toolCallId: "unchanged-content",
+              toolName: "write",
+              input: { path: "sample.txt" },
+              isError: false,
+            },
+            context,
+          );
+          eq(
+            harness.emitted.filter((entry) => entry.name === "diff-viewer.change").length,
+            1,
+            "unchanged write publishes no additional change event",
+          );
+
+          await harness.runHooks(
+            "tool_call",
+            {
+              toolCallId: "failed-content",
+              toolName: "write",
+              input: { path: "sample.txt", content: "failed\n" },
+            },
+            context,
+          );
+          await harness.runHooks(
+            "tool_result",
+            {
+              toolCallId: "failed-content",
+              toolName: "write",
+              input: { path: "sample.txt" },
+              isError: true,
+            },
+            context,
+          );
+          eq(
+            harness.emitted.filter((entry) => entry.name === "diff-viewer.change").length,
+            1,
+            "failed write publishes no change event",
+          );
 
           await harness.runHooks(
             "tool_call",
@@ -327,6 +387,304 @@ export const diffSections = {
         ["a.txt", "b.txt"],
         "tracker sorts by persisted timestamp",
       );
+    });
+  },
+  "diff learning": async (context) => {
+    const {
+      section,
+      diffLearning,
+      diffViewer,
+    } = context;
+
+    await section("diff learning", async () => {
+      const classifier = await context.load(
+        "extensions/diff-learning/classifier.ts",
+      );
+      const questionBank = await context.load(
+        "extensions/diff-learning/question-bank.ts",
+      );
+      const scoring = await context.load("extensions/diff-learning/scoring.ts");
+      const selector = await context.load("extensions/diff-learning/selector.ts");
+      const progressStore = await context.load(
+        "extensions/diff-learning/progress-store.ts",
+      );
+      const quiz = await context.load("extensions/diff-learning/quiz.ts");
+
+      assert(
+        typeof classifier?.classifyHunk === "function" &&
+          typeof classifier?.classifyChange === "function",
+        "diff-learning classifier loads",
+      );
+      assert(
+        typeof questionBank?.buildQuestion === "function",
+        "diff-learning question bank loads",
+      );
+      assert(
+        typeof scoring?.scoreDelta === "function",
+        "diff-learning scoring loads",
+      );
+      assert(
+        typeof selector?.selectCandidate === "function",
+        "diff-learning selector loads",
+      );
+      assert(
+        typeof progressStore?.ProgressStore === "function",
+        "diff-learning progress store loads",
+      );
+      assert(
+        typeof quiz?.runLearningQuiz === "function",
+        "diff-learning quiz loads",
+      );
+
+      const hunk = (removed, added, path = "src/feature.ts") => ({
+        oldStart: 1,
+        oldCount: removed.length,
+        newStart: 1,
+        newCount: added.length,
+        lines: [
+          ...removed.map((text) => ({ kind: "removed", text })),
+          ...added.map((text) => ({ kind: "added", text })),
+        ],
+      });
+      const classify = (removed, added, path = "src/feature.ts") =>
+        classifier.classifyHunk(path, hunk(removed, added, path));
+
+      const changedGuard = classify(
+        ["if (admin) return false;"],
+        ["if (admin && active) return false;"],
+      );
+      assert(
+        changedGuard?.concepts.includes("condition-and") &&
+          !changedGuard.concepts.includes("guard-removal"),
+        "classifier distinguishes a changed guard from guard removal",
+      );
+      assert(
+        classify(
+          ["if (admin) return false;", "continueWork();"],
+          ["continueWork();"],
+        )?.concepts.includes("guard-removal"),
+        "classifier recognizes a removed guard",
+      );
+      assert(
+        classify(["import oldValue from './old.js';"], ["import newValue from './new.js';"]) ===
+          undefined,
+        "classifier ignores import-only changes",
+      );
+      assert(
+        classify(["// old explanation"], ["// new explanation"]) === undefined,
+        "classifier ignores comment-only changes",
+      );
+      assert(
+        classify(["  return value;"], ["return value;"]) === undefined,
+        "classifier ignores whitespace-only changes",
+      );
+      assert(
+        classify(["const oldName = value;"], ["const newName = value;"]) === undefined,
+        "classifier ignores pure identifier renames",
+      );
+      assert(
+        classify(["expect(result).toBe('blocked');"], ["expect(result).toBe('allowed');"], "tests/access.test.ts")
+          ?.concepts.includes("test-expectation"),
+        "classifier recognizes test expectation changes",
+      );
+      assert(
+        classify(["if (!active) return;"], ["return;"])?.concepts.includes("negation"),
+        "classifier recognizes negation",
+      );
+      assert(
+        classify(["return false;"], ["throw new Error('blocked');"])?.concepts.includes("throw"),
+        "classifier recognizes throw versus return",
+      );
+      assert(
+        classify(["return value;"], ["return value ?? fallback;"])?.concepts.includes("fallback"),
+        "classifier recognizes nullish fallback",
+      );
+
+      const supportedConcepts = [
+        "diff-basics",
+        "condition-if",
+        "condition-and",
+        "condition-or",
+        "negation",
+        "return",
+        "throw",
+        "try-catch",
+        "fallback",
+        "permission-change",
+        "guard-removal",
+        "test-expectation",
+        "validation",
+      ];
+      for (const concept of supportedConcepts) {
+        const candidate = {
+          id: `candidate-${concept}`,
+          path: "src/feature.ts",
+          toolName: "edit",
+          timestamp: 1,
+          hunk: hunk(["if (old) return false;"], ["if (new) return true;"]),
+          concepts: [concept],
+          learningValue: 5,
+        };
+        const question = questionBank.buildQuestion(candidate);
+        assert(question, `question exists for ${concept}`);
+        eq(
+          question.options.filter((option) => option.correct).length,
+          1,
+          `${concept} has one correct option`,
+        );
+        assert(
+          question.options.length >= 3,
+          `${concept} has at least three options`,
+        );
+      }
+
+      const expectedDeltas = [0, 1, 2, 3, -1, -2, -3, -4];
+      const combinations = [
+        [true, 0],
+        [true, 1],
+        [true, 2],
+        [true, 3],
+        [false, 0],
+        [false, 1],
+        [false, 2],
+        [false, 3],
+      ];
+      eq(
+        combinations.map(([correct, confidence]) =>
+          scoring.scoreDelta(correct, confidence),
+        ),
+        expectedDeltas,
+        "scoring covers correct/wrong x confidence 0..3",
+      );
+
+      const profile = progressStore.emptyProgress();
+      const weakCandidate = {
+        id: "weak",
+        path: "src/weak.ts",
+        toolName: "edit",
+        timestamp: 2,
+        hunk: hunk(["return false;"], ["return true;"]),
+        concepts: ["return"],
+        learningValue: 4,
+      };
+      const strongCandidate = {
+        ...weakCandidate,
+        id: "strong",
+        path: "src/strong.ts",
+        concepts: ["condition-and"],
+        learningValue: 10,
+      };
+      let weakened = progressStore.applyAttempt(profile, {
+        concept: "return",
+        questionId: "return-v1",
+        timestamp: 3,
+        outcome: "answered",
+        correct: false,
+        confidence: 3,
+      });
+      eq(
+        selector.selectCandidate([strongCandidate, weakCandidate], weakened)?.id,
+        "weak",
+        "selector prioritizes a strong misconception",
+      );
+      assert(
+        selector.selectCandidate([weakCandidate], weakened, new Set(["weak"])) ===
+          undefined,
+        "selector excludes immediately repeated hunks",
+      );
+
+      const storeDir = mkdtempSync(path.join(tmpdir(), "pi-diff-learning-store-"));
+      try {
+        const file = path.join(storeDir, "diff-learning", "progress.json");
+        const store = new progressStore.ProgressStore(file);
+        const initial = store.initialize();
+        assert(initial.created && existsSync(file), "progress store creates a profile");
+        const saved = store.record({
+          concept: "condition-and",
+          questionId: "condition-and-v1",
+          timestamp: 4,
+          outcome: "answered",
+          correct: true,
+          confidence: 2,
+        });
+        eq(saved.profile.concepts["condition-and"]?.score, 2, "progress score persists");
+        const reloaded = new progressStore.ProgressStore(file).initialize();
+        eq(
+          reloaded.profile.concepts["condition-and"]?.attempts,
+          1,
+          "progress survives reload",
+        );
+        writeFileSync(file, '{"version":99}', "utf8");
+        const corruptedStore = new progressStore.ProgressStore(file);
+        const corrupted = corruptedStore.initialize();
+        assert(corrupted.warning && !corrupted.created, "unknown schema is warned and not overwritten");
+        corruptedStore.record({
+          concept: "condition-and",
+          questionId: "condition-and-v1",
+          timestamp: 5,
+          outcome: "answered",
+          correct: true,
+          confidence: 3,
+        });
+        eq(readFileSync(file, "utf8"), '{"version":99}', "corrupt profile remains intact after later attempts");
+      } finally {
+        rmSync(storeDir, { recursive: true, force: true });
+      }
+
+      if (diffLearning?.default && diffViewer?.default) {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-diff-learning-integration-"));
+        const agentDir = mkdtempSync(path.join(tmpdir(), "pi-diff-learning-agent-"));
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = agentDir;
+        try {
+          const file = path.join(cwd, "feature.ts");
+          writeFileSync(file, "if (admin) return false;\n", "utf8");
+          const harness = createHarness({ select: async (labels) => labels[0] });
+          diffViewer.default(harness.api);
+          diffLearning.default(harness.api);
+          const context = harness.makeContext({ cwd });
+          await harness.runHooks("session_start", {}, context);
+          await harness.commands.get("learn-diff")("on", context);
+          await harness.runHooks("agent_start", {}, context);
+          await harness.runHooks(
+            "tool_call",
+            {
+              toolCallId: "learning-write",
+              toolName: "write",
+              input: {
+                path: "feature.ts",
+                content: "if (admin && active) return false;\n",
+              },
+            },
+            context,
+          );
+          writeFileSync(file, "if (admin && active) return false;\n", "utf8");
+          await harness.runHooks(
+            "tool_result",
+            {
+              toolCallId: "learning-write",
+              toolName: "write",
+              input: { path: "feature.ts" },
+              isError: false,
+            },
+            context,
+          );
+          await harness.runHooks("agent_settled", {}, context);
+          assert(
+            harness.notifications.some((entry) => entry.message.includes("Richtig")),
+            "integration completes answer and explanation after agent settle",
+          );
+          const profilePath = path.join(agentDir, "diff-learning", "progress.json");
+          const stored = JSON.parse(readFileSync(profilePath, "utf8"));
+          eq(stored.attempts.length, 1, "integration persists one learning attempt");
+          await harness.runHooks("session_shutdown", {}, context);
+        } finally {
+          if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+          else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+          rmSync(cwd, { recursive: true, force: true });
+          rmSync(agentDir, { recursive: true, force: true });
+        }
+      }
     });
   },
 };

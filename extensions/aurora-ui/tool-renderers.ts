@@ -2,6 +2,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { footerTier } from "../shared/layout.ts";
 import { ellipsizeMiddle, toWorkspaceRelative } from "../shared/paths.ts";
+import type { Tone } from "../shared/ui-theme.ts";
 import {
   sessionStatus,
   statusLabel,
@@ -83,7 +84,7 @@ const PRESENTATIONS: Record<ActivityToolKind, ToolPresentation> = {
   bash: { glyph: "›", label: "BEFEHL" },
   lsp: { glyph: "◇", label: "LSP" },
   test: { glyph: "▹", label: "TEST" },
-  verification: { glyph: "✓", label: "VERIFY" },
+  verification: { glyph: "▹", label: "VERIFY" },
   subagent: { glyph: "◉", label: "AGENT" },
   wait: { glyph: "⋯", label: "WAIT" },
   web: { glyph: "◎", label: "WEB" },
@@ -371,7 +372,7 @@ function toolStatus(
   tool: ActiveToolView,
   now: number,
 ): {
-  tone: "accent" | "warning" | "error" | "muted";
+  tone: Tone;
   label: string;
 } {
   if (tool.tone === "error") return { tone: "error", label: "FEHLER" };
@@ -389,7 +390,10 @@ function toolStatus(
   if (sinceUpdate >= QUIET_STILL_THRESHOLD_MS) {
     return { tone: "muted", label: "STILL AKTIV" };
   }
-  return { tone: "accent", label: "LÄUFT" };
+  return {
+    tone: tool.kind === "verification" ? "thinkingXhigh" : "accent",
+    label: "LÄUFT",
+  };
 }
 
 /**
@@ -463,6 +467,10 @@ export function renderActiveTools(
     suppressRunningStatus?: boolean;
     /** Render retained history rows as completed instead of live tools. */
     completed?: boolean;
+    /** One pre-coloured shared-ticker marker for live work. */
+    activityGlyph?: string;
+    /** Verification's marker keeps its own semantic tone. */
+    verificationGlyph?: string;
   } = {},
 ): string[] {
   const available = Math.max(1, width);
@@ -481,16 +489,26 @@ export function renderActiveTools(
     const status = options.completed
       ? { tone: "muted" as const, label: "ERLEDIGT" }
       : toolStatus(tool, now);
-    const marker = theme.fg(
-      status.tone,
-      options.completed
-        ? "✓"
-        : status.tone === "error"
-          ? "✕"
-          : tool.kind === "verification"
-            ? RUNNING_GLYPH
-            : presentation.glyph,
-    );
+    const animated =
+      options.activityGlyph !== undefined ||
+      options.verificationGlyph !== undefined;
+    const markerGlyph = options.completed
+      ? "✓"
+      : status.tone === "error"
+        ? "✕"
+        : tool.kind === "verification"
+          ? (options.verificationGlyph ?? RUNNING_GLYPH)
+          : (options.activityGlyph ?? presentation.glyph);
+    const markerContent = options.completed
+      ? "✓"
+      : status.tone === "error"
+        ? "✕"
+        : animated
+          ? markerGlyph
+            ? `${markerGlyph} ${presentation.glyph}`
+            : presentation.glyph
+          : markerGlyph;
+    const marker = theme.fg(status.tone, markerContent);
     const label = compact
       ? theme.bold(presentation.label)
       : padToWidth(theme.bold(presentation.label), 12);

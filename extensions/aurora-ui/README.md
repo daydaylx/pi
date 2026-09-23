@@ -3,42 +3,39 @@
 > **Scope:** reines Terminal-UI (CLI/TUI), nicht die Electron-GUI unter
 > `gui/` — siehe `docs/scope-cli-tui-vs-gui.md`.
 
-Aurora UI owns Pi's footer, its fixed Session panel, framed task dashboard and
-working indicator while the extension is active. It uses only public extension UI and
-lifecycle hooks. Core tools are not replaced or wrapped, and the editor stays
-Pi's own component: Aurora installs no editor of its own, so editing, history,
-completion, shortcuts and the `editorPaddingX` / `autocompleteMaxVisible`
-settings all come from the runtime (see
+Aurora UI owns Pi's footer, the single framed task/activity dashboard and the
+working indicator while the extension is active. It uses only public extension
+UI and lifecycle hooks. Core tools are not replaced or wrapped, and the editor
+stays Pi's own component: Aurora installs no editor of its own, so editing,
+history, completion, shortcuts and the `editorPaddingX` /
+`autocompleteMaxVisible` settings all come from the runtime (see
 `docs/decisions/013-aurora-keeps-the-native-editor.md`).
 
-The theme is `themes/aurora-night.json`: a warm neutral system built from
-espresso surfaces, copper/amber emphasis, cream text and restrained semantic
-success, warning and error tones. Aurora components address Pi's semantic
-theme tokens rather than palette names. Motion and the dashboard presentation
-are read from the effective central setup configuration (`ui.motion`,
-`ui.dashboard`). One shared ticker runs only while work is visible. Only real
-moving work animates: in `contextual`, active thinking and running tools cycle
-their glyph every 100 ms, while `ANTWORTET` and `WARTET AUF MODELL` keep a fixed
-glyph and repaint once per second for the elapsed time and the `WARTET AUF
-MODELL` transition alone. A running subagent's branch row shares that same
-spinning cursor (`renderSubagentBranches()`'s `runningGlyph` parameter in
-`tool-renderers.ts`) instead of a static dot, so several parallel agents
-don't read as frozen while only the heading moves — see
-[decision 026](../../docs/decisions/026-more-animation-subagents-and-badge-flash.md).
-The same decision adds a one-shot flash: once the activity tile's badge
-settles into a new terminal status (`VERIFIZIERT`/`ABGESCHLOSSEN`/`FEHLER`),
-it briefly renders in reverse video (`TileInput.emphasizeBadge` in `tile.ts`)
-before returning to its normal look, driven by a short-lived timer in
-`index.ts` since the ticker itself stops once nothing is live.
+`themes/aurora-forge.json` is the active warm system; `aurora-night` remains
+available as the compatibility theme. Forge separates quiet UI/brand surfaces
+from runtime tones. The small `visual-state.ts` mapping is the single source
+for Thinking, Working, Responding, Waiting, Verification, Success, Warning,
+Error and Attention tones, glyphs and motion profiles. Renderers consume that
+projection instead of selecting arbitrary colours or spinners locally.
 
-- `contextual`: animated activity indicator.
-- `reduced`: static activity indicator.
-- `off`: no animated indicator; activity text remains available.
+Motion and dashboard presentation come from the central setup configuration
+(`ui.motion`, `ui.dashboard`). One shared ticker runs only while live work is
+visible; no tool or subagent gets its own timer. `expressive` adds fast work,
+a slower Waiting pulse, a quiet Responding stream and a distinct Verification
+marker. `contextual` keeps only active work animated, `reduced` uses static
+or reduced markers, and `off` removes time-based motion while retaining text,
+glyph and colour semantics. The existing one-shot badge transition remains a
+short reverse-video highlight and is disposed with the session.
+
+- `expressive`: complete Forge motion language.
+- `contextual`: restrained active-work animation.
+- `reduced`: static or reduced activity markers.
+- `off`: no time-based animation; activity text and glyphs remain available.
 
 ## The permanent surfaces
 
 **Footer** (`footer.ts`) — the one permanent status surface, and one line. It
-always carries the active workflow mode, including beside the Session panel,
+always carries the active workflow mode, including beside the dashboard,
 and also reports model, thinking level, session folder, a compact changes
 summary, context share and verification risks. It drops whole segments
 from the least important end as the terminal narrows. From comfortable width
@@ -116,16 +113,16 @@ the most space. [Decision 025](../../docs/decisions/025-merge-task-and-activity-
 later merged that activity tile into the task tile.
 
 **Visual language** (`tile.ts`) — dashboard, welcome window and inspector
-render as filled cards: framed tiles whose title row and body rows are padded
-and painted through `Theme.bg`, plus labelled fields and status pills instead
-of loose text. Backgrounds never use hardcoded ANSI colours — Pi's public
-`Theme.bg` accepts exactly eight surfaces (`selectedBg`, `scrollbarThumb`,
-`searchMatchBg`, `userMessageBg`, `customMessageBg`, `toolPendingBg`,
-`toolSuccessBg`, `toolErrorBg`), and the tile primitives map tones onto them
-(neutral card: `toolPendingBg`, success: `toolSuccessBg`, error: `toolErrorBg`,
-accent chips: `selectedBg`, warning: inverse), so every theme including
-`light` stays correct. Under 18 columns tiles fall back to frameless rows;
-compact surfaces stay flat by design.
+render as framed cards: title rows and body rows are padded and framed, with
+explicit fills used only where a surface intentionally calls for one. Labelled
+fields and status pills replace loose text. Backgrounds never use hardcoded
+ANSI colours — Pi's public `Theme.bg` accepts exactly eight surfaces
+(`selectedBg`, `scrollbarThumb`, `searchMatchBg`, `userMessageBg`,
+`customMessageBg`, `toolPendingBg`, `toolSuccessBg`, `toolErrorBg`), and the
+tile primitives map explicit tones onto them (success: `toolSuccessBg`, error:
+`toolErrorBg`, accent chips: `selectedBg`, warning: inverse), so every theme
+including `light` stays correct. Under 18 columns tiles fall back to frameless
+rows; compact surfaces stay flat by design.
 
 `renderTileGrid` gives every terminal cell to exactly one column, including
 even widths, and `renderShortcutRows` packs complete key-cap/description units
@@ -210,8 +207,8 @@ built (decision 019).
 
 `/inspect` (`inspector-command.ts`, catalogued under the `code` category, so
 it surfaces through the existing Super+Q command center — no new shortcut, no
-command palette) opens Pi's native selector with six entries: Changes,
-Kontext, Verification Evidence, Modelle, Reasoning, Diagnostics. Picking one
+command palette) opens Pi's native selector with six entries: Änderungen, Kontext,
+Prüfnachweise, Modelle, Denken, Diagnose. Picking one
 renders `renderInspectorBox` (`inspector.ts`) — the one shared box shell for
 secondary information — and shows it via `ctx.ui.notify`, the same
 integration style `/setup-doctor context` already uses.
