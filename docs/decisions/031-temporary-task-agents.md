@@ -3,7 +3,7 @@
 ## Status
 
 In Umsetzung. Stufe 1–4 (Spec, Policy-Schnitt, Limits, Budgets) liegen im Fork
-`pi-subagents` (Branch `feat/temporary-agent-spec`), Stufe 2 und 5 (Guard, Verify-Übersetzung) im Repo `pi`. Second-Opinion-, Rabbit- und TUI-Migration folgen (siehe Plan). Konzept:
+`pi-subagents` (Branch `feat/temporary-agent-spec`), Stufe 2 und 5 (Guard, Verify-Übersetzung) im Repo `pi`. Second Opinion ist als konform dokumentiert (kein Umbau). Rabbit- und TUI-Migration folgen (siehe Plan). Konzept:
 `pi-temporary-subagents-konzept.md`.
 
 ## Kontext
@@ -97,6 +97,31 @@ Der Main sieht nur die Spec-API; die Prüfkette bleibt unverändert.
 und `context: fork` sind für Verify verboten. `agents/verifier.md` bleibt als
 technische Profildefinition bestehen; der Alias `agent: "verifier"` gilt
 während der Übergangsphase weiter und entfällt in Stufe 8.
+
+### Second Opinion
+
+`second_opinion` (`extensions/second-opinion`) ist bewusst kein Subagent und
+keine Rolle, sondern ein einzelner Provider-Aufruf ohne Kindprozess. Es
+erfüllt die Regeln bereits ohne Umbau:
+
+| Regel                    | Umsetzung in `second_opinion`                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| 1 stateless              | Ein Aufruf, keine Identität, kein Memory, kein Kontext aus früheren Läufen           |
+| 2 minimaler Kontext      | Nur `contextRefs` (Codebereiche, Diff, Testzusammenfassung) im Kontext-Manifest      |
+| 3 Modellwahl             | Runtime wählt das Modell und bevorzugt ein anderes Backend; Main nennt keins         |
+| 4 Budgets                | Kontext-Budget (`context_budget_exceeded`), Timeout (`timeout`)                      |
+| 5 Status                 | `completed`, `cancelled`, `timeout`, `denied`, `unavailable`, `provider_error`, …    |
+| 6/7 Evidenz, Provenienz  | `strongestCounterargument`, `missingEvidence`, Referenzen auf das Manifest           |
+| 8 Sichtbarkeit           | Approval-Snapshot mit Frage, Grund, Modell und Kontext; Telemetrie `second_opinion`  |
+| 9 keine Kommunikation    | Kein Tool-Zugriff, kein Nachrichtenkanal zu anderen Agenten                          |
+| 11 Autorität             | Rein beratend; der Main entscheidet                                                  |
+
+Bewusst unverändert: das Feld `confidence` bleibt eine grobe Stufe
+(`low | medium | high`), keine Prozentangabe, und steht neben Gegenargument und
+fehlender Evidenz. Es ist kein primärer Bewertungsgrund. Offen: Second Opinion
+schreibt noch nicht in die gemeinsame Subagent-Telemetrie (`run-history`). Das
+wird zusammen mit Stufe 7/8 angeglichen, sobald die Telemetriefelder
+feststehen.
 
 ### Limits (vorläufig)
 
