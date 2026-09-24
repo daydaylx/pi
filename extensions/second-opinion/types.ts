@@ -63,15 +63,29 @@ export interface ContextManifest {
   snapshotHash: string;
 }
 
+export interface ModelIdentitySnapshot {
+  provider?: string;
+  id?: string;
+  effectiveId?: string;
+  family?: string;
+}
+
 export interface ApprovalSnapshot {
   approvalId: string;
   request: OpinionRequest;
   manifest: ContextManifest;
   model: Pick<Model<any>, "provider" | "id" | "api">;
+  modelIdentity: ModelIdentitySnapshot;
   modelDisplayId: string;
+  mainModel?: ModelIdentitySnapshot;
   mainModelProvider?: string;
   backendRelation:
     "different_backend_preferred" | "same_backend_allowed" | "unknown";
+  modelRelation: "exact_same_model" | "different_model" | "unknown";
+  familyRelation: "same_family" | "different_family" | "unknown";
+  sessionId: string;
+  sessionGeneration: number;
+  cwd: string;
   estimatedInputTokens: number;
   createdAt: number;
 }

@@ -24,6 +24,8 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  lstatSync,
+  realpathSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -205,16 +207,29 @@ export function readLegacyWorkspacePlan(cwd: string): string | undefined {
 
 /** Absolute path of the opt-in workspace copy, refusing to leave the project. */
 export function workspacePlanPath(cwd: string): string {
-  const root = resolve(cwd);
+  const root = realpathSync(resolve(cwd));
   const target = resolve(root, WORKSPACE_PLAN_RELATIVE_PATH);
   if (!isInside(root, target))
     throw new Error("Planpfad verlässt das Projekt.");
+  let current = root;
+  for (const segment of WORKSPACE_PLAN_RELATIVE_PATH.split(/[\\/]/)) {
+    current = resolve(current, segment);
+    try {
+      if (lstatSync(current).isSymbolicLink())
+        throw new Error("Symlink im Projekt-Planpfad nicht erlaubt.");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
   return target;
 }
 
 export function writeWorkspacePlan(cwd: string, content: string): string {
   const path = workspacePlanPath(cwd);
   mkdirSync(dirname(path), { recursive: true });
+  // Recheck after creating missing parents so an existing symlink at any
+  // component cannot redirect the explicit save outside the workspace.
+  workspacePlanPath(cwd);
   writeFileSync(path, content, "utf8");
   return path;
 }

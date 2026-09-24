@@ -47,7 +47,7 @@ import { resolveRuntimeRoot } from "../shared/runtime-resolution.mjs";
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The runtime version these patches were written and verified against. */
-export const EXPECTED_RUNTIME_VERSION = "0.84.3";
+export const EXPECTED_RUNTIME_VERSION = "0.87.1";
 
 /**
  * One edit. `detect` proves the patch is already in place, `anchor` is the
@@ -401,6 +401,7 @@ export function findBundleChunkFile(runtime, patch) {
   const matches = [];
   for (const name of candidates) {
     const absolute = path.join(chunksDir, name);
+    assertNoSymlinkComponents(absolute);
     const content = readFileSync(absolute, "utf8");
     if (content.includes(patch.anchor) || content.includes(patch.detect)) {
       matches.push(path.join(BUNDLE_CHUNKS_DIR, name));
@@ -476,7 +477,7 @@ function parseArgs(argv) {
   return { apply, runtime, allowVersionDrift };
 }
 
-function assertNoSymlinkComponents(candidate) {
+export function assertNoSymlinkComponents(candidate) {
   const absolute = path.resolve(candidate);
   const parsed = path.parse(absolute);
   let current = parsed.root;
@@ -485,14 +486,19 @@ function assertNoSymlinkComponents(candidate) {
     .split(path.sep)
     .filter(Boolean)) {
     current = path.join(current, segment);
-    if (existsSync(current) && lstatSync(current).isSymbolicLink()) {
-      throw new Error(`Symlink im Runtime-Pfad nicht erlaubt: ${current}`);
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        throw new Error(`Symlink im Runtime-Pfad nicht erlaubt: ${current}`);
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
     }
   }
 }
 
 function readRuntimeVersion(runtime) {
   const manifest = path.join(runtime, "package.json");
+  assertNoSymlinkComponents(manifest);
   if (!existsSync(manifest)) {
     throw new Error(`Keine Pi-Runtime unter ${runtime} (package.json fehlt).`);
   }
@@ -542,6 +548,7 @@ function main(argv) {
   const results = [];
   for (const patch of allPatches) {
     const absolute = path.join(runtime, patch.file);
+    assertNoSymlinkComponents(absolute);
     if (!existsSync(absolute)) {
       throw new Error(`Runtime-Datei fehlt: ${absolute}`);
     }
@@ -581,12 +588,20 @@ function main(argv) {
   const changedFiles = [...byFile.entries()].filter(
     ([, entry]) => entry.content !== entry.original,
   );
+  assertNoSymlinkComponents(backupDir);
   mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  assertNoSymlinkComponents(backupDir);
   for (const [file, entry] of changedFiles) {
+    const runtimePath = path.join(runtime, file);
+    assertNoSymlinkComponents(runtimePath);
     const backupPath = path.join(backupDir, file);
+    assertNoSymlinkComponents(backupPath);
     mkdirSync(path.dirname(backupPath), { recursive: true, mode: 0o700 });
-    copyFileSync(path.join(runtime, file), backupPath);
-    writeFileSync(path.join(runtime, file), entry.content, "utf8");
+    assertNoSymlinkComponents(backupPath);
+    assertNoSymlinkComponents(runtimePath);
+    copyFileSync(runtimePath, backupPath);
+    assertNoSymlinkComponents(runtimePath);
+    writeFileSync(runtimePath, entry.content, "utf8");
   }
   console.log(
     `\n${pending.length} Patch(es) auf ${changedFiles.length} Datei(en) angewendet.`,

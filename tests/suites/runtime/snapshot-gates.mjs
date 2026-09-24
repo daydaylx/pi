@@ -200,8 +200,8 @@ export const snapshotGateSections = {
           });
         eq(
           await query([]),
-          { armed: false },
-          "an absent recovery extension does not lock writes",
+          { armed: true, reason: "unavailable" },
+          "an absent recovery extension is unavailable and cannot authorize writes",
         );
         eq(
           await query([{}, Promise.resolve({ armed: true })]),
@@ -223,14 +223,76 @@ export const snapshotGateSections = {
         );
         eq(
           await query([{}, Promise.reject(new Error("provider failed"))]),
-          { armed: true },
-          "only broken providers leave the recovery boundary closed",
+          { armed: true, reason: "unavailable" },
+          "broken providers explicitly leave the recovery boundary unavailable",
+        );
+
+        // Recovery unavailability is not a blanket read lock, but it must
+        // fail closed for writes in the real permission pipeline.
+        const unavailableHarness = createHarness();
+        unavailableHarness.api.events.on("workflow-capabilities:request", (value) =>
+          value.respond({ mode: "work" }),
+        );
+        modePermissions.default(unavailableHarness.api);
+        const unavailableCtx = unavailableHarness.makeContext({ cwd: workspace });
+        await unavailableHarness.runHooks("session_start", {}, unavailableCtx);
+        const unavailableRead = await unavailableHarness.runHooks(
+          "tool_call",
+          { toolName: "read", input: { path: "initial.txt" } },
+          unavailableCtx,
+        );
+        assert(
+          unavailableRead.every((result) => !result?.block),
+          "a missing recovery consumer leaves read-only diagnostics available",
+        );
+        const unavailableWrite = await unavailableHarness.runHooks(
+          "tool_call",
+          { toolName: "write", input: { path: "next.txt", content: "x" } },
+          unavailableCtx,
+        );
+        assert(
+          unavailableWrite.some((result) => result?.block && /nicht verfügbar/.test(result.reason)),
+          "a missing recovery consumer blocks writes with an explicit unavailable reason",
+        );
+
+        // A clear-looking response from an obsolete session cannot authorize
+        // a write in the replacement session.
+        const staleHarness = createHarness();
+        staleHarness.api.events.on("workflow-capabilities:request", (value) =>
+          value.respond({ mode: "work" }),
+        );
+        let resolveStaleStatus;
+        staleHarness.api.events.on("recovery-status:request", (request) =>
+          request.respond(new Promise((resolve) => { resolveStaleStatus = resolve; })),
+        );
+        modePermissions.default(staleHarness.api);
+        const staleCtx = staleHarness.makeContext({ cwd: workspace });
+        await staleHarness.runHooks("session_start", {}, staleCtx);
+        const staleAttempt = staleHarness.runHooks(
+          "tool_call",
+          { toolName: "write", input: { path: "stale.txt", content: "x" } },
+          staleCtx,
+        );
+        await staleHarness.runHooks("session_shutdown", {}, staleCtx);
+        const replacementCtx = staleHarness.makeContext({
+          cwd: workspace,
+          sessionId: "replacement-recovery-session",
+        });
+        await staleHarness.runHooks("session_start", {}, replacementCtx);
+        resolveStaleStatus({ armed: false });
+        const staleResult = await staleAttempt;
+        assert(
+          staleResult.some((result) => result?.block && /Sitzung.*gewechselt/.test(result.reason)),
+          "a stale clear response is ignored after a session switch",
         );
 
         // F-18: exercise the real tool_call pipeline, not just the pure
         // verifier policy. A permitted verifier reaches the executor with the
         // normalized input; a rejected one leaves its caller input untouched.
         const guardHarness = createHarness();
+        guardHarness.api.events.on("recovery-status:request", (request) =>
+          request.respond({ armed: false }),
+        );
         guardHarness.api.events.on("workflow-capabilities:request", (value) =>
           value.respond({ mode: "work" }),
         );

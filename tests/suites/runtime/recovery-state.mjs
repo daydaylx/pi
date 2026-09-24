@@ -1,34 +1,39 @@
-// Pure reducer regressions for extensions/resilience/recovery-state.ts
-// (REC-002). latestRecoveryGate() replays session entries into the same
-// gate a live session would hold; foldRequiredMarker/foldCheckedMarker are
-// the exact reducer steps both the live recovery_check tool (index.ts) and
-// this replay use, so the two paths cannot silently diverge again.
+// Pure reducer regressions for extensions/resilience/recovery-state.ts.
+// Live folding and history replay must validate markers identically.
 import { assert, eq } from "../../shared/assertions.mjs";
 
-function required(turnStartedAt, timestamp) {
+function turnTimestamp(value) {
+  if (value === "T1") return "2026-01-01T00:00:00.000Z";
+  if (value === "T2") return "2026-01-01T00:00:02.000Z";
+  return value;
+}
+
+function required(turnStartedAt, timestamp, overrides = {}) {
   return {
     type: "custom",
     customType: "resilience.recovery-required",
     data: {
       schemaVersion: 2,
       timestamp,
-      turnStartedAt,
+      turnStartedAt: turnTimestamp(turnStartedAt),
       reason: "final_failure",
       workspaceChangedSinceTurnStart: false,
       toolMayHaveMutatedWorkspace: true,
+      ...overrides,
     },
   };
 }
 
-function checked(turnStartedAt, timestamp, workspaceFingerprint) {
+function checked(turnStartedAt, timestamp, workspaceFingerprint, overrides = {}) {
   return {
     type: "custom",
     customType: "resilience.recovery-checked",
     data: {
       schemaVersion: 2,
       timestamp,
-      turnStartedAt,
+      turnStartedAt: turnTimestamp(turnStartedAt),
       workspaceFingerprint,
+      ...overrides,
     },
   };
 }
@@ -38,12 +43,12 @@ export const recoveryStateSections = {
     const { section, recoveryState } = context;
     await section("recovery gate reducer (REC-002)", async () => {
       if (!recoveryState) return;
-      const { foldCheckedMarker, foldRequiredMarker, latestRecoveryGate } =
-        recoveryState;
-      // required(turn1) -> checked(A) -> checked(B) -> restart yields B, not
-      // the first check seen. This is the exact bug: a stale `!gate.checked`
-      // guard in the old replay loop kept only the first checked marker per
-      // required turn.
+      const {
+        foldCheckedMarker,
+        foldRequiredMarker,
+        gateRequiresInspection,
+        latestRecoveryGate,
+      } = recoveryState;
       const twoChecks = latestRecoveryGate([
         required("T1", "2026-01-01T00:00:00.000Z"),
         checked("T1", "2026-01-01T00:00:01.000Z", "fp-A"),
@@ -55,9 +60,6 @@ export const recoveryStateSections = {
         "replay reconstructs the newest check (B), not the first (A)",
       );
 
-      // required(turn1) -> checked(A) -> required(turn2) discards A: a new
-      // required window always drops any earlier checked state, even one
-      // that hasn't been superseded by another check.
       const newRequiredDiscards = latestRecoveryGate([
         required("T1", "2026-01-01T00:00:00.000Z"),
         checked("T1", "2026-01-01T00:00:01.000Z", "fp-A"),
@@ -69,13 +71,10 @@ export const recoveryStateSections = {
       );
       eq(
         newRequiredDiscards?.required.turnStartedAt,
-        "T2",
+        turnTimestamp("T2"),
         "the gate now anchors on the newer required turn",
       );
 
-      // A checked marker for an old, already-superseded required turn can
-      // never open the current gate, even if it appears after the newer
-      // required marker in the log (out-of-order writes, replayed history).
       const staleCheckIgnored = latestRecoveryGate([
         required("T1", "2026-01-01T00:00:00.000Z"),
         required("T2", "2026-01-01T00:00:01.000Z"),
@@ -86,51 +85,103 @@ export const recoveryStateSections = {
         "a check referencing a superseded required turn never opens the current gate",
       );
 
-      // No required marker at all: no gate.
       eq(
         latestRecoveryGate([checked("T1", "2026-01-01T00:00:00.000Z", "fp")]),
         undefined,
         "a checked marker with no preceding required marker produces no gate",
       );
 
-      // Live and replay must use the identical reducer step. Applying
-      // foldRequiredMarker/foldCheckedMarker directly, one call at a time,
-      // must produce the same result as replaying the equivalent entries
-      // through latestRecoveryGate in one pass.
-      let live = undefined;
-      live = foldRequiredMarker({
-        schemaVersion: 2,
-        timestamp: "2026-01-01T00:00:00.000Z",
-        turnStartedAt: "T1",
-        reason: "final_failure",
-        workspaceChangedSinceTurnStart: false,
-        toolMayHaveMutatedWorkspace: true,
-      });
+      const validRequired = required("T1", "2026-01-01T00:00:00.000Z");
+      assert(
+        latestRecoveryGate([validRequired]),
+        "a complete supported marker is accepted",
+      );
+      const malformedMarkers = [
+        { ...validRequired.data, toolMayHaveMutatedWorkspace: undefined },
+        { ...validRequired.data, workspaceChangedSinceTurnStart: undefined },
+        { ...validRequired.data, toolMayHaveMutatedWorkspace: "false" },
+        {
+          ...validRequired.data,
+          timestamp: "not-a-timestamp",
+          workspaceChangedSinceTurnStart: false,
+          toolMayHaveMutatedWorkspace: false,
+        },
+        {
+          ...validRequired.data,
+          schemaVersion: 99,
+          workspaceChangedSinceTurnStart: false,
+          toolMayHaveMutatedWorkspace: false,
+        },
+        {
+          ...validRequired.data,
+          schemaVersion: 1,
+          toolMayHaveMutatedWorkspace: undefined,
+        },
+      ];
+      for (const [index, data] of malformedMarkers.entries()) {
+        const replayed = latestRecoveryGate([
+          {
+            type: "custom",
+            customType: "resilience.recovery-required",
+            data,
+          },
+        ]);
+        assert(
+          replayed && gateRequiresInspection(replayed.required),
+          `malformed or old marker ${index} is unknown and requires inspection`,
+        );
+        let live = foldRequiredMarker(replayed.required);
+        live = foldCheckedMarker(live, {
+          schemaVersion: 2,
+          timestamp: "2026-01-01T00:00:03.000Z",
+          turnStartedAt: replayed.required.turnStartedAt,
+          workspaceFingerprint: "fp-live",
+        });
+        const replayAfterCheck = latestRecoveryGate([
+          { type: "custom", customType: "resilience.recovery-required", data },
+          checked(replayed.required.turnStartedAt, "2026-01-01T00:00:03.000Z", "fp-live"),
+        ]);
+        eq(
+          live?.checked?.workspaceFingerprint,
+          replayAfterCheck?.checked?.workspaceFingerprint,
+          `live and replay agree for malformed marker ${index}`,
+        );
+      }
+
+      const newRequiredAfterChecked = latestRecoveryGate([
+        required("T1", "2026-01-01T00:00:00.000Z"),
+        checked("T1", "2026-01-01T00:00:01.000Z", "fp-A"),
+        required("T2", "2026-01-01T00:00:02.000Z"),
+      ]);
+      assert(
+        !newRequiredAfterChecked?.checked &&
+          gateRequiresInspection(newRequiredAfterChecked.required),
+        "a new required marker after a checked marker re-arms recovery",
+      );
+
+      let live = foldRequiredMarker(validRequired.data);
       live = foldCheckedMarker(live, {
         schemaVersion: 2,
         timestamp: "2026-01-01T00:00:01.000Z",
-        turnStartedAt: "T1",
+        turnStartedAt: turnTimestamp("T1"),
         workspaceFingerprint: "fp-A",
       });
       live = foldCheckedMarker(live, {
         schemaVersion: 2,
         timestamp: "2026-01-01T00:00:02.000Z",
-        turnStartedAt: "T1",
+        turnStartedAt: turnTimestamp("T1"),
         workspaceFingerprint: "fp-B",
       });
       eq(
         live?.checked?.workspaceFingerprint,
         twoChecks?.checked?.workspaceFingerprint,
-        "applying the reducer steps one at a time (as the live recovery_check tool does) matches replaying the same entries in one pass",
+        "live folding matches replaying the same valid entries",
       );
-
-      // A checked marker whose turnStartedAt doesn't match any open
-      // required window is a no-op, not a crash or a silently opened gate.
       eq(
         foldCheckedMarker(undefined, {
           schemaVersion: 2,
           timestamp: "2026-01-01T00:00:00.000Z",
-          turnStartedAt: "T1",
+          turnStartedAt: turnTimestamp("T1"),
           workspaceFingerprint: "fp",
         }),
         undefined,

@@ -60,7 +60,6 @@ import { projectTaskViewModel } from "./task-projection.ts";
 import type { TaskViewModel } from "./task-view-model.ts";
 import { registerInspectorCommand } from "./inspector-command.ts";
 import { detailLimitFor, selectActivitySlots } from "./dashboard-budget.ts";
-import { normalizeVerificationLabel } from "./verification-normalize.ts";
 import {
   initialTurnLifecycle,
   lastAssistantStop,
@@ -566,20 +565,15 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
    */
   function projectCurrentTask(now: number): TaskViewModel | undefined {
     if (!state) return undefined;
-    // Prefer the structured summary's own raw status; it is published
-    // "alongside" the footer's formatted string by the same call site, so by
-    // the time either exists the structured one should too. The formatted
-    // string is only a fallback for the window before any structured summary
-    // has arrived, and even then it must be normalized back to the raw enum.
+    // Task phase depends only on the structured frontend state. The formatted
+    // footer label is presentation-only and may not have rendered at all.
     const task = projectTaskViewModel({
       state,
       activeTools,
       subagents: currentAgentViews(),
       receiptAggregator,
       now,
-      verificationStatus:
-        state.verification?.status ??
-        normalizeVerificationLabel(lastVerificationStatus),
+      verificationStatus: state.verification?.status,
       workspaceChangedSinceVerification,
       currentPlan: currentPlanText,
       userPrompt: currentUserPrompt,
@@ -802,10 +796,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
           : [];
       activityLines.push(
         heading,
-        ...recentLines,
         ...(attentionPending
           ? [...subagentLines, ...toolLines]
           : [...toolLines, ...subagentLines]),
+        ...recentLines,
       );
       const hiddenSummary = hiddenActivitySummary(
         slots.hiddenTools,
@@ -839,13 +833,10 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
                 : Math.max(5, Math.min(8, rows - 10)),
             Math.max(4, Math.floor(rows * 0.4)),
           );
-    // Retained READ/BEFEHL rows are intentional short-lived history, not
-    // disposable live details. Reserve enough rows for all three plus the live
-    // heading and one possible overflow note, even in compact mode.
-    const historyRows = recentActivityTools.length;
-    const historyReserve =
-      historyRows > 0 ? historyRows + 1 + (hasLiveActivity ? 1 : 0) : 0;
-    const maxRows = Math.max(2 + historyReserve, baseMaxRows);
+    // Recent READ/BEFEHL history is optional context and must never enlarge
+    // the hard terminal row budget. Live status and attention rows are ordered
+    // ahead of this history before the renderer trims to maxRows.
+    const maxRows = baseMaxRows;
     // Auto and expanded share the framed tile overview. Compact uses the flat
     // fallback, but retained history is allowed to use its reserved rows.
     // The overall run state — formerly the separate fixed Session panel —

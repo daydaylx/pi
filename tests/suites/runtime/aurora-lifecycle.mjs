@@ -7,7 +7,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { assert } from "../../shared/assertions.mjs";
+import { assert, eq } from "../../shared/assertions.mjs";
 import { createHarness, stripAnsi } from "../../shared/harness.mjs";
 
 function outgoingEpoch(harness, auroraState) {
@@ -152,34 +152,32 @@ export const auroraLifecycleSections = {
           await harness.runHooks("session_shutdown", {}, ctx);
         });
 
-        // --- T3: an unnormalized "Verify: verified" footer string must not
-        // block the idle "done" phase (Problem 3) ---
+        // --- T3: the structured verification patch alone drives the idle
+        // "done" phase; no footer factory or render is involved (Problem 3) ---
         {
           const harness = createHarness();
           auroraUi.default(harness.api);
           const ctx = harness.makeContext({ sessionId: "aurora-t3" });
           await harness.runHooks("session_start", {}, ctx);
+          const sessionEpoch = outgoingEpoch(harness, auroraState);
+          assert(sessionEpoch, "Aurora opens a state epoch for verification patches");
+          emitPatch(harness, auroraState, sessionEpoch, {
+            verification: {
+              status: "verified",
+              declaredRequiredIds: ["typecheck"],
+              requiredOutcomes: { typecheck: "success" },
+              blockingRecommendedIds: [],
+            },
+          });
           await harness.runHooks("agent_start", {}, ctx);
           await harness.runHooks("agent_settled", {}, ctx);
-
-          const footerData = {
-            getExtensionStatuses: () =>
-              new Map([["verification", "Verify: verified"]]),
-            onBranchChange: () => () => {},
-          };
-          const footer = harness.footerFactory?.(
-            { terminal: { rows: 24 }, requestRender() {} },
-            ctx.ui.theme,
-            footerData,
-          );
-          footer?.render(100);
 
           const lines = renderWidget(harness, ctx, 120, 30);
           assert(
             lines.some((line) =>
               line.includes("Letzte Aufgabe abgeschlossen."),
             ),
-            "an idle turn with a real 'verified' status reaches the done phase even through the footer's prefixed string",
+            "a structured verified state reaches the idle done phase without rendering the footer",
           );
           await harness.runHooks("session_shutdown", {}, ctx);
         }
@@ -511,6 +509,27 @@ export const auroraLifecycleSections = {
           const ctx = harness.makeContext({ sessionId: "aurora-t11" });
           await harness.runHooks("session_start", {}, ctx);
           await harness.runHooks("agent_start", {}, ctx);
+          for (let i = 0; i < 3; i += 1) {
+            await harness.runHooks(
+              "tool_execution_start",
+              {
+                toolCallId: `t11-history-${i}`,
+                toolName: "read",
+                args: { path: `old-history-${i}.ts` },
+              },
+              ctx,
+            );
+            await harness.runHooks(
+              "tool_execution_end",
+              {
+                toolCallId: `t11-history-${i}`,
+                toolName: "read",
+                isError: false,
+                result: "old read completed",
+              },
+              ctx,
+            );
+          }
           await harness.runHooks(
             "tool_execution_start",
             {
@@ -545,6 +564,54 @@ export const auroraLifecycleSections = {
           );
           await harness.runHooks("session_shutdown", {}, ctx);
         }
+
+        // --- T11b: recent history cannot enlarge compact mode's hard row
+        // budget or displace the current live activity (Problem 11) ---
+        await withIsolatedAgentDir(async () => {
+          const harness = createHarness();
+          auroraUi.default(harness.api);
+          const ctx = harness.makeContext({ sessionId: "aurora-t14" });
+          await harness.runHooks("session_start", {}, ctx);
+          await harness.runHooks("agent_start", {}, ctx);
+          for (let i = 0; i < 3; i += 1) {
+            await harness.runHooks(
+              "tool_execution_start",
+              {
+                toolCallId: `t14-history-${i}`,
+                toolName: "read",
+                args: { path: `old-history-${i}.ts` },
+              },
+              ctx,
+            );
+            await harness.runHooks(
+              "tool_execution_end",
+              {
+                toolCallId: `t14-history-${i}`,
+                toolName: "read",
+                isError: false,
+                result: "old read completed",
+              },
+              ctx,
+            );
+          }
+          await ctx.ui.submitSlashCommand("/dashboard compact");
+          await harness.runHooks(
+            "tool_execution_start",
+            {
+              toolCallId: "t14-live",
+              toolName: "bash",
+              args: { command: "npm run test" },
+            },
+            ctx,
+          );
+          const lines = renderWidget(harness, ctx, 120, 30);
+          eq(lines.length, 2, "recent activity keeps the compact dashboard at its fixed two-row budget");
+          assert(
+            !lines.some((line) => line.includes("old-history-")),
+            "routine history cannot displace the current live activity rows",
+          );
+          await harness.runHooks("session_shutdown", {}, ctx);
+        });
 
         // --- T12: switching sessions must not leak session A's task/
         // verification projection into session B's inspector ---

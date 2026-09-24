@@ -97,6 +97,21 @@ function configKey(config: SecondOpinionConfig): string {
 export default function secondOpinion(pi: ExtensionAPI): void {
   let service: SecondOpinionService | undefined;
   let serviceConfigKey: string | undefined;
+  let serviceSessionId: string | undefined;
+  let sessionGeneration = 0;
+
+  pi.on("session_start", (_event, ctx) => {
+    sessionGeneration += 1;
+    service = undefined;
+    serviceConfigKey = undefined;
+    serviceSessionId = ctx.sessionManager.getSessionId() ?? "unknown";
+  });
+  pi.on("session_shutdown", () => {
+    sessionGeneration += 1;
+    service = undefined;
+    serviceConfigKey = undefined;
+    serviceSessionId = undefined;
+  });
 
   pi.registerTool({
     name: "second_opinion",
@@ -119,15 +134,26 @@ export default function secondOpinion(pi: ExtensionAPI): void {
         };
       }
 
+      const currentSessionId = ctx.sessionManager.getSessionId() ?? "unknown";
+      if (serviceSessionId !== currentSessionId) {
+        sessionGeneration += 1;
+        service = undefined;
+        serviceConfigKey = undefined;
+        serviceSessionId = currentSessionId;
+      }
       const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
       const currentKey = configKey(loaded.config.secondOpinion);
       if (!service || serviceConfigKey !== currentKey) {
         service = new SecondOpinionService(loaded.config.secondOpinion);
         serviceConfigKey = currentKey;
       }
-      const prepared = await service.prepare(request, {
+      const activeService = service;
+      const preparedGeneration = sessionGeneration;
+      const prepared = await activeService.prepare(request, {
         modelRegistry: ctx.modelRegistry,
         currentModel: ctx.model,
+        sessionId: currentSessionId,
+        sessionGeneration: preparedGeneration,
         cwd: ctx.cwd,
         signal,
         recordTelemetry: (telemetry) => {
@@ -148,12 +174,14 @@ export default function secondOpinion(pi: ExtensionAPI): void {
         "Zweitmeinung anfordern?",
         approvalMessage(prepared.prepared),
       );
-      const result = await service.executeApproved(
+      const result = await activeService.executeApproved(
         prepared.prepared,
         { approved, approvalId: prepared.prepared.snapshot.approvalId },
         {
           modelRegistry: ctx.modelRegistry,
           currentModel: ctx.model,
+          sessionId: ctx.sessionManager.getSessionId() ?? "unknown",
+          sessionGeneration,
           cwd: ctx.cwd,
           signal,
           recordTelemetry: (telemetry) => {

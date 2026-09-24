@@ -11,7 +11,13 @@
  * the two cannot drift into disagreeing about what "patched" means.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -19,6 +25,7 @@ import {
   BUNDLE_PATCHES,
   EXPECTED_RUNTIME_VERSION,
   PATCHES,
+  assertNoSymlinkComponents,
   findBundleChunkFile,
   planPatch,
 } from "../scripts/apply-runtime-patches.mjs";
@@ -58,6 +65,46 @@ check(
     }
   },
 );
+
+check("runtime patch targets reject a symlinked nested destination", () => {
+  const root = path.join(tmpdir(), `pi-runtime-symlink-${process.pid}`);
+  const runtime = path.join(root, "runtime");
+  const outside = path.join(root, "outside.js");
+  const target = path.join(runtime, "dist", "core", "agent-session.js");
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(outside, "user-owned sentinel");
+  try {
+    symlinkSync(outside, target, "file");
+    assert.throws(
+      () => assertNoSymlinkComponents(target),
+      /Symlink im Runtime-Pfad nicht erlaubt/,
+    );
+    assert.equal(readFileSync(outside, "utf8"), "user-owned sentinel");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+check("bundle chunk discovery rejects a symlink before reading it", () => {
+  const root = path.join(tmpdir(), `pi-runtime-chunk-link-${process.pid}`);
+  const runtime = path.join(root, "runtime");
+  const chunks = path.join(runtime, BUNDLE_CHUNKS_DIR);
+  const outside = path.join(root, "outside.js");
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(chunks, { recursive: true });
+  writeFileSync(outside, "user-owned sentinel");
+  try {
+    symlinkSync(outside, path.join(chunks, "chunk.js"), "file");
+    assert.throws(
+      () => findBundleChunkFile(runtime, BUNDLE_PATCHES[0]),
+      /Symlink im Runtime-Pfad nicht erlaubt/,
+    );
+    assert.equal(readFileSync(outside, "utf8"), "user-owned sentinel");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 check("every patch is uniquely identified", () => {
   const ids = [...PATCHES, ...BUNDLE_PATCHES].map((patch) => patch.id);

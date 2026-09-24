@@ -355,7 +355,11 @@ export const resilienceSections = {
       );
       await gateHarness.runHooks(
         "tool_execution_start",
-        { toolName: "edit", toolCallId: "gate-edit", args: {} },
+        {
+          toolName: "project_check",
+          toolCallId: "gate-project-check",
+          args: { profile: "verify" },
+        },
         gateCtx,
       );
       await gateHarness.runHooks("agent_settled", {}, gateCtx);
@@ -393,6 +397,37 @@ export const resilienceSections = {
         ),
         "writes are blocked while the recovery gate is armed",
       );
+      await gateHarness.commands.get("permission")("yolo", gateCtx);
+      const yoloWrite = await gateHarness.runHooks(
+        "tool_call",
+        { toolName: "write", input: { path: "yolo.txt", content: "x" } },
+        gateCtx,
+      );
+      assert(
+        yoloWrite.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
+        "armed recovery blocks write even under YOLO",
+      );
+      await gateHarness.commands.get("permission")("yolo-ask", gateCtx);
+      const yoloAskEdit = await gateHarness.runHooks(
+        "tool_call",
+        { toolName: "edit", input: { path: "yolo-ask.txt", edits: [] } },
+        gateCtx,
+      );
+      assert(
+        yoloAskEdit.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
+        "armed recovery blocks edit under yolo-ask",
+      );
+      await gateHarness.commands.get("permission")("yolo-full", gateCtx);
+      const yoloFullBash = await gateHarness.runHooks(
+        "tool_call",
+        { toolName: "bash", input: { command: "npm run build" } },
+        gateCtx,
+      );
+      assert(
+        yoloFullBash.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
+        "armed recovery blocks process mutation under yolo-full",
+      );
+      await gateHarness.commands.get("permission")("project-write", gateCtx);
       const blockedBash = await gateHarness.runHooks(
         "tool_call",
         { toolName: "bash", input: { command: "npm test" } },
@@ -404,6 +439,18 @@ export const resilienceSections = {
         ),
         "potentially mutating shell calls are blocked while armed",
       );
+      for (const event of [
+        { toolName: "verify", input: { check: "typecheck" } },
+        { toolName: "project_check", input: { profile: "verify" } },
+        { toolName: "subagent", input: { agent: "investigator", task: "Diagnose the failed run" } },
+        { toolName: "custom_mutator", input: { action: "change" } },
+      ]) {
+        const gated = await gateHarness.runHooks("tool_call", event, gateCtx);
+        assert(
+          gated.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
+          `armed recovery blocks ${event.toolName} as a process, delegation or unknown capability`,
+        );
+      }
       const recoveryRequestsBeforeRead = gateHarness.emitted.filter(
         (entry) => entry.name === "recovery-status:request",
       ).length;
@@ -729,8 +776,8 @@ export const resilienceSections = {
         rmSync(twoCheckWs, { recursive: true, force: true });
       }
 
-      // YOLO bypasses the recovery gate outright (bewusste Lockerung, analog
-      // zu Claude Codes bypassPermissions-Modus) — no recovery_check needed.
+      // Recovery is an integrity gate, not a permission confirmation: all
+      // YOLO levels must keep the same armed-state block.
       const yoloArmed = createHarness({
         entries: [
           {
@@ -789,15 +836,26 @@ export const resilienceSections = {
         ),
         "the gate still blocks before YOLO is activated",
       );
-      await yoloArmed.commands.get("yolo")("", yoloArmedCtx);
-      const yoloUnblocked = await yoloArmed.runHooks(
+      for (const [level, event] of [
+        ["yolo", { toolName: "write", input: { path: "example.txt", content: "x" } }],
+        ["yolo-ask", { toolName: "edit", input: { path: "example.txt", edits: [] } }],
+        ["yolo-full", { toolName: "bash", input: { command: "npm run build" } }],
+      ]) {
+        await yoloArmed.commands.get("permission")(level, yoloArmedCtx);
+        const stillGated = await yoloArmed.runHooks("tool_call", event, yoloArmedCtx);
+        assert(
+          stillGated.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
+          `armed recovery stays enforced under ${level}`,
+        );
+      }
+      const yoloFreeRead = await yoloArmed.runHooks(
         "tool_call",
-        { toolName: "write", input: { path: "example.txt", content: "x" } },
+        { toolName: "read", input: { path: "README.md" } },
         yoloArmedCtx,
       );
       assert(
-        yoloUnblocked.every((result) => !result?.block),
-        "YOLO lifts the recovery gate without running recovery_check",
+        yoloFreeRead.every((result) => !result?.block),
+        "read-only diagnostics remain free under armed recovery",
       );
     });
   },

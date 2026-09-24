@@ -1,13 +1,10 @@
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
-import { relative, sep } from "node:path";
-import { resolveRuntimeRoot } from "../../shared/runtime-resolution.mjs";
 import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import {
   isPlanModeDiagnosticCommand,
   isSensitivePathIdentity,
   isSensitiveReference,
   resolvePathScope,
-  type PathIdentity,
 } from "../shared/permission-policy.ts";
 import type { PermissionLevel } from "../shared/workflow-status.ts";
 import {
@@ -63,6 +60,7 @@ export const LOCAL_LSP_TOOLS = new Set([
 ]);
 
 const WRITE_TOOLS = new Set(["write", "edit"]);
+const READ_ONLY_FILE_TOOLS = new Set(["read", "grep", "find", "ls"]);
 /**
  * Tools plan mode allows. `plan_write` is the plan's only writer and owns its
  * own destination inside the runtime's session storage, so it needs no
@@ -113,43 +111,11 @@ const HARD_BOUNDARY_RECOVERY_HINT =
   " Dies ist kein Abbruchgrund - arbeite ohne diese Ressource weiter oder wähle einen projektinternen Pfad.";
 
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
-const PERMITTED_RUNTIME_DOCS_READ: WorkflowAssessment = {
+const PERMITTED_EXTERNAL_READ: WorkflowAssessment = {
   blocked: false,
   reason: "",
   allowOutsideProjectRead: true,
 };
-
-// Resolve the pi runtime installation root dynamically so the readable-docs
-// boundary works on any machine. Falls back to a derived default when the env
-// variable is not set, which is the common case.
-function resolvePiRuntimeRoot(): string | undefined {
-  try {
-    return resolveRuntimeRoot().root;
-  } catch {
-    return undefined;
-  }
-}
-
-const runtimeRoot = resolvePiRuntimeRoot();
-const EXTRA_READABLE_ROOTS = runtimeRoot ? [runtimeRoot] : [];
-
-function inside(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`));
-}
-
-function isDocumentedRuntimeDocsRead(
-  toolName: string,
-  identity: PathIdentity,
-): boolean {
-  const targetPath = identity.canonicalPath ?? identity.lexicalPath;
-  return (
-    toolName === "read" &&
-    identity.scope === "external" &&
-    !identity.symlinkEscape &&
-    EXTRA_READABLE_ROOTS.some((root) => inside(root, targetPath))
-  );
-}
 
 /**
  * System-level boundaries only — not the secret/credential check, which
@@ -247,9 +213,10 @@ export function assessWorkflowTool(
     permissionLevel !== "yolo-full"
   ) {
     const identity = resolvePathScope(path, cwd);
+    const isReadFileTool = READ_ONLY_FILE_TOOLS.has(event.toolName);
+
     if (
       isSensitivePathIdentity(path, identity) ||
-      identity.symlinkEscape ||
       identity.scope === "unresolved" ||
       identity.targetKind === "other"
     ) {
@@ -260,10 +227,20 @@ export function assessWorkflowTool(
           HARD_BOUNDARY_RECOVERY_HINT,
       };
     }
-    if (identity.scope !== "project") {
-      if (isDocumentedRuntimeDocsRead(event.toolName, identity)) {
-        return PERMITTED_RUNTIME_DOCS_READ;
+
+    if (isReadFileTool) {
+      // Normales Lesen ist global: externe Pfade und Symlinks auf externe
+      // harmlose Dateien sind auf allen regulären Stufen lesbar (solange
+      // nicht sensitiv / Secret).
+      if (identity.scope === "external" || identity.symlinkEscape) {
+        return PERMITTED_EXTERNAL_READ;
       }
+      return PERMITTED;
+    }
+
+    // Für mutierende Tools (write, edit) oder unbekannte Pfad-Tools bleibt
+    // die Projektgrenze und die Symlink-Escape-Grenze eine harte Barriere.
+    if (identity.symlinkEscape || identity.scope !== "project") {
       return {
         blocked: true,
         reason:

@@ -10,6 +10,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   MessageUpdateEvent,
+  ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -20,6 +21,7 @@ import { trackedExec } from "../shared/tracked-exec.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import {
   RECOVERY_CAPABILITY_EVENTS,
+  recoveryEffect,
   type RecoveryStatusRequest,
   type RecoveryStatusSnapshot,
 } from "../shared/recovery-capabilities.ts";
@@ -27,6 +29,7 @@ import { UI_STATUS_KEYS, setTuiStatus } from "../shared/workflow-status.ts";
 import { limitTextOutput } from "../shared/output-limits.ts";
 import {
   customData,
+  isRecoveryRequiredMarker,
   foldCheckedMarker,
   foldRequiredMarker,
   gateRequiresInspection,
@@ -176,17 +179,25 @@ function lastAssistantError(event: AgentEndEvent): string | undefined {
   return undefined;
 }
 
-function isMutatingTool(toolName: string): boolean {
-  return toolName === "edit" || toolName === "write" || toolName === "bash";
+function isMutatingTool(
+  toolName: string,
+  args: ToolCallEvent["input"],
+  cwd: string,
+): boolean {
+  return (
+    recoveryEffect({ toolName, input: args }, cwd) === "potentially_mutating"
+  );
 }
 
 function latestRecoveryState(entries: readonly unknown[]): {
   openTurn?: TurnStartMarker;
   finalFailure?: TurnSettledMarker;
   requiredByTurn: Map<string, RecoveryRequiredMarker>;
+  hasUnknownRequiredMarker: boolean;
 } {
   let openTurn: TurnStartMarker | undefined;
   let finalFailure: TurnSettledMarker | undefined;
+  let hasUnknownRequiredMarker = false;
   const requiredByTurn = new Map<string, RecoveryRequiredMarker>();
   for (const entry of entries) {
     const start = customData<TurnStartMarker>(entry, "resilience.turn-start");
@@ -204,13 +215,27 @@ function latestRecoveryState(entries: readonly unknown[]): {
       if (settled.outcome === "failed") finalFailure = settled;
       continue;
     }
-    const required = customData<RecoveryRequiredMarker>(
-      entry,
-      "resilience.recovery-required",
-    );
-    if (required) requiredByTurn.set(required.turnStartedAt, required);
+    if (
+      entry &&
+      typeof entry === "object" &&
+      (entry as Record<string, unknown>).type === "custom" &&
+      (entry as Record<string, unknown>).customType ===
+        "resilience.recovery-required"
+    ) {
+      const value = (entry as Record<string, unknown>).data;
+      if (isRecoveryRequiredMarker(value)) {
+        requiredByTurn.set(value.turnStartedAt, value);
+      } else {
+        hasUnknownRequiredMarker = true;
+      }
+    }
   }
-  return { openTurn, finalFailure, requiredByTurn };
+  return {
+    openTurn,
+    finalFailure,
+    requiredByTurn,
+    hasUnknownRequiredMarker,
+  };
 }
 
 function recoveryInstruction(
@@ -399,7 +424,8 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       const required = await collectRecoveryRequired(
         prior.openTurn ? "interrupted" : "final_failure",
         start,
-        existing?.toolMayHaveMutatedWorkspace ?? false,
+        existing?.toolMayHaveMutatedWorkspace ??
+          prior.hasUnknownRequiredMarker,
         ctx.cwd,
       );
       if (generation !== sessionGeneration) return;
@@ -474,7 +500,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   pi.on("tool_execution_start", (event) => {
     if (!openTurn) return;
     openTurn.phase = "tool_running";
-    if (isMutatingTool(event.toolName))
+    if (isMutatingTool(event.toolName, event.args, sessionCwd))
       openTurn.toolMayHaveMutatedWorkspace = true;
   });
 

@@ -9,10 +9,12 @@ import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import { confirmAction } from "../shared/permission-dialog.ts";
 import {
   decideBash,
-  isPlanModeDiagnosticCommand,
   resolvePathScope,
 } from "../shared/permission-policy.ts";
-import { requestRecoveryStatus } from "../shared/recovery-capabilities.ts";
+import {
+  recoveryEffect,
+  requestRecoveryStatus,
+} from "../shared/recovery-capabilities.ts";
 import { requestVerificationCapabilities } from "../shared/verification-capabilities.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import {
@@ -39,7 +41,6 @@ import {
   normalizeVerifierDelegationInput,
 } from "./verifier-policy.ts";
 import { assessWebToolInput } from "./web-tools.ts";
-import { isYoloLevel } from "../shared/workflow-status.ts";
 import { toolPath } from "./tool-event.ts";
 
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", ASK_USER_TOOL_NAME];
@@ -56,46 +57,16 @@ function recoveryGateBlocks(
   event: ToolCallEvent,
   cwd: string,
 ): boolean {
-  if (!armed) return false;
-  if (event.toolName === "write" || event.toolName === "edit") return true;
-  if (
-    event.toolName !== "bash" &&
-    event.toolName !== INTERACTIVE_SHELL_TOOL_NAME
-  ) {
-    return false;
-  }
-  const command =
-    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
-      ? interactiveShellCommand(event)
-      : String((event.input as Record<string, unknown>).command ?? "");
-  return !isPlanModeDiagnosticCommand(command, cwd);
-}
-
-/**
- * Only these calls can be blocked by the recovery gate. Read-only and other
- * capability calls therefore do not ask resilience to re-snapshot the
- * workspace on every tool invocation while a gate is armed.
- */
-function recoveryStatusNeeded(event: ToolCallEvent, cwd: string): boolean {
-  if (event.toolName === "write" || event.toolName === "edit") return true;
-  if (
-    event.toolName !== "bash" &&
-    event.toolName !== INTERACTIVE_SHELL_TOOL_NAME
-  ) {
-    return false;
-  }
-  const command =
-    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
-      ? interactiveShellCommand(event)
-      : String((event.input as Record<string, unknown>).command ?? "");
-  return !isPlanModeDiagnosticCommand(command, cwd);
+  return armed && recoveryEffect(event, cwd) === "potentially_mutating";
 }
 
 function recoveryBlockReason(reason: string | undefined): string {
   const cause =
     reason === "workspace-changed"
       ? "Der Workspace hat sich seit dem letzten Recovery-Check verändert."
-      : "Der vorherige Turn wurde unterbrochen oder endete mit einem Fehler.";
+      : reason === "unavailable"
+        ? "Der Recovery-Status ist nicht verfügbar."
+        : "Der vorherige Turn wurde unterbrochen oder endete mit einem Fehler.";
   return `Recovery-Gate aktiv: ${cause} Schreibzugriffe sind gesperrt, bis recovery_check den Workspace geprüft hat. Lesen und recovery_check bleiben erlaubt.`;
 }
 
@@ -144,10 +115,12 @@ function normalizeNativeFileTarget(event: ToolCallEvent, cwd: string): void {
 
   const identity = resolvePathScope(rawPath, cwd);
   if (
-    identity.scope !== "project" ||
     identity.canonicalPath === undefined ||
     identity.canonicalPath === identity.lexicalPath
   ) {
+    return;
+  }
+  if (event.toolName !== "read" && identity.scope !== "project") {
     return;
   }
   input[field] = identity.canonicalPath;
@@ -158,13 +131,27 @@ export function registerPermissionGuards(
   session: PermissionSession,
 ): void {
   pi.on("tool_call", async (event: ToolCallEvent, ctx) => {
-    if (!ctx.isProjectTrusted() && !READ_ONLY_TOOLS.includes(event.toolName)) {
-      return {
-        block: true,
-        ...stopNonInteractive(ctx),
-        reason:
-          "Harte Trust-Grenze: mutierende oder externe Tools sind im nicht vertrauenswürdigen Projekt blockiert.",
-      };
+    if (!ctx.isProjectTrusted()) {
+      if (!READ_ONLY_TOOLS.includes(event.toolName)) {
+        return {
+          block: true,
+          ...stopNonInteractive(ctx),
+          reason:
+            "Harte Trust-Grenze: mutierende oder externe Tools sind im nicht vertrauenswürdigen Projekt blockiert.",
+        };
+      }
+      const path = toolPath(event);
+      if (path) {
+        const identity = resolvePathScope(path, ctx.cwd);
+        if (identity.scope !== "project" || identity.symlinkEscape) {
+          return {
+            block: true,
+            ...stopNonInteractive(ctx),
+            reason:
+              "Harte Trust-Grenze: Dateizugriff außerhalb des Projekts ist im nicht vertrauenswürdigen Projekt blockiert.",
+          };
+        }
+      }
     }
     // Capability preflight: RPC/JSON/print have no channel for the native
     // ask_user dialog. Block before execution and terminate this tool batch so
@@ -283,15 +270,25 @@ export function registerPermissionGuards(
         reason: commitGate.reason,
       };
     }
-    // Das Recovery-Gate prüft vor der Planmodus-Freigabe, damit auch
-    // Schreibzugriffe auf die Plandatei nach einem Fehlturn nicht
-    // stillschweigend durchlaufen. YOLO überspringt die Prüfung ganz
-    // (bewusste Lockerung) statt sie nur zu übergehen, damit auch keine
-    // unnötige Recovery-Status-Anfrage läuft.
+    // Recovery ist eine Workspace-Integritätsgrenze, keine Permission-Rückfrage:
+    // auch YOLO darf unbekannten Zustand nicht als sicher freigeben.
+    const effect = recoveryEffect(event, ctx.cwd);
+    const recoveryEpoch = session.epoch();
     const recovery =
-      !isYoloLevel(session.level()) && recoveryStatusNeeded(event, ctx.cwd)
+      effect === "potentially_mutating"
         ? await requestRecoveryStatus(pi.events)
         : { armed: false as const };
+    if (
+      effect === "potentially_mutating" &&
+      recoveryEpoch !== session.epoch()
+    ) {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason:
+          "Recovery-Gate: Die Sitzung hat während der Zustandsabfrage gewechselt. Der veraltete Status wurde verworfen; den Aufruf in der aktuellen Sitzung erneut starten.",
+      };
+    }
     if (recoveryGateBlocks(recovery.armed, event, ctx.cwd)) {
       return {
         block: true,

@@ -3,7 +3,13 @@
  * plan is stored, whether it is good enough to act on, and how it is allowed to
  * reach the model.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, eq, test } from "./shared/assertions.mjs";
@@ -52,7 +58,9 @@ await test("a hostile session id cannot escape the plan directory", async () => 
   if (!store) return;
   await withPlanHome(async () => {
     for (const sessionId of ["../../etc/passwd", "..", ".", "", "a/b"]) {
-      const path = store.planPath(store.planLocation("/projects/one", sessionId));
+      const path = store.planPath(
+        store.planLocation("/projects/one", sessionId),
+      );
       assert(
         path.startsWith(store.planRoot()),
         `session id ${JSON.stringify(sessionId)} stays inside the plan root`,
@@ -69,7 +77,10 @@ await test("writes are compare-and-swap against the expected hash", async () => 
     assert(first.ok, "the first write expects no prior plan");
 
     const stale = store.writePlan(location, "# B\n", undefined);
-    assert(!stale.ok && stale.reason === "conflict", "a stale expectation loses");
+    assert(
+      !stale.ok && stale.reason === "conflict",
+      "a stale expectation loses",
+    );
     eq(
       store.readPlan(location).content,
       "# A\n",
@@ -181,6 +192,35 @@ await test("nothing is written into the workspace unless asked", async () => {
   });
 });
 
+await test("workspace plan save refuses a symlinked destination", async () => {
+  if (!store || process.platform === "win32") return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-store-ws-link-"));
+  const outside = mkdtempSync(join(tmpdir(), "pi-store-outside-"));
+  const outsideFile = join(outside, "sentinel.md");
+  const target = join(cwd, ".agent", "plans", "current-plan.md");
+  try {
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(join(cwd, ".agent", "plans"), { recursive: true });
+    writeFileSync(outsideFile, "user-owned sentinel");
+    symlinkSync(outsideFile, target);
+    let rejected = false;
+    try {
+      store.writeWorkspacePlan(cwd, "# redirected\n");
+    } catch (error) {
+      rejected = /Symlink/.test(String(error));
+    }
+    assert(rejected, "save refuses a symlink at current-plan.md");
+    eq(
+      readFileSync(outsideFile, "utf8"),
+      "user-owned sentinel",
+      "the external file is unchanged",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 const SIMPLE = `# Plan
 
 ## Ziel
@@ -201,7 +241,10 @@ Bestehende Aufrufer könnten sich auf das alte, tolerante Verhalten verlassen.
 
 await test("the quick plan requires filled sections, not just headings", () => {
   if (!quality) return;
-  assert(quality.assessPlanQuality("simple_plan", SIMPLE).ok, "a real plan passes");
+  assert(
+    quality.assessPlanQuality("simple_plan", SIMPLE).ok,
+    "a real plan passes",
+  );
   assert(
     !quality.assessPlanQuality("simple_plan", "").ok,
     "an empty plan is refused",
@@ -489,8 +532,7 @@ await test("an oversized plan is truncated visibly rather than silently", () => 
     "and stated inside the block, so the model knows it saw a fragment",
   );
   assert(
-    Buffer.byteLength(message.content, "utf8") <
-      Buffer.byteLength(big, "utf8"),
+    Buffer.byteLength(message.content, "utf8") < Buffer.byteLength(big, "utf8"),
     "the injected text really is smaller than the plan",
   );
   eq(

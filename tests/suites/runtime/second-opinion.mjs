@@ -8,11 +8,13 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { assert, eq } from "../../shared/assertions.mjs";
+import { createHarness } from "../../shared/harness.mjs";
 
-function model() {
+function model(overrides = {}) {
   return {
     provider: "opinion-provider",
     id: "opinion-model-v1",
+    family: "opinion-family",
     api: "openai-completions",
     name: "Opinion model",
     baseUrl: "https://example.invalid",
@@ -21,6 +23,7 @@ function model() {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 32_000,
     maxTokens: 700,
+    ...overrides,
   };
 }
 
@@ -67,14 +70,20 @@ function config() {
   };
 }
 
-function deps(root, calls) {
-  const selected = model();
+function deps(root, calls, options = {}) {
+  const selected = model(options.opinionModel);
   return {
     cwd: root,
-    currentModel: { provider: "main-provider", id: "main-model" },
+    currentModel: Object.hasOwn(options, "currentModel")
+      ? options.currentModel
+      : { provider: "main-provider", id: "main-model", family: "main-family" },
+    sessionId: options.sessionId ?? "session-1",
+    sessionGeneration: options.sessionGeneration ?? 1,
     modelRegistry: {
       find: () => selected,
-      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "fake-key" }),
+      getApiKeyAndHeaders:
+        options.getApiKeyAndHeaders ??
+        (async () => ({ ok: true, apiKey: "fake-key" })),
       complete: async (_selected, context, options) => {
         calls.push({ context, options });
         return {
@@ -192,27 +201,94 @@ const sectionsUnderTest = {
         );
         eq(duplicateRequest.ok, false, "request_id cannot be prepared twice");
         eq(calls.length, 1, "duplicate request_id cannot call the provider");
-        const sameFamilyService = new secondOpinion.SecondOpinionService({
-          ...config(),
-          mainModelFamily: "opinion-family",
-        });
-        const sameFamily = await sameFamilyService.prepare(
+        const sameModel = await new secondOpinion.SecondOpinionService(
+          config(),
+        ).prepare(
+          {
+            ...request(),
+            requestId: "request-same-model",
+            decisionId: "decision-same-model",
+          },
+          deps(root, calls, {
+            currentModel: {
+              provider: "opinion-provider",
+              id: "opinion-model-v1",
+            },
+          }),
+        );
+        eq(
+          sameModel.ok,
+          false,
+          "effective identical provider/model is rejected despite different config labels",
+        );
+        eq(calls.length, 1, "same effective model never reaches the provider");
+
+        const sameBackendDifferentModel =
+          await new secondOpinion.SecondOpinionService(config()).prepare(
+            {
+              ...request(),
+              requestId: "request-same-backend",
+              decisionId: "decision-same-backend",
+            },
+            deps(root, calls, {
+              currentModel: {
+                provider: "opinion-provider",
+                id: "main-other-model",
+              },
+            }),
+          );
+        eq(
+          sameBackendDifferentModel.ok,
+          false,
+          "unknown family is rejected when independent family is required",
+        );
+
+        const sameFamily = await new secondOpinion.SecondOpinionService(
+          config(),
+        ).prepare(
           {
             ...request(),
             requestId: "request-same-family",
             decisionId: "decision-same-family",
           },
-          deps(root, calls),
+          deps(root, calls, {
+            currentModel: {
+              provider: "main-provider",
+              id: "main-model",
+              family: "family-a",
+            },
+            opinionModel: { family: "family-a" },
+          }),
         );
-        eq(sameFamily.ok, false, "same model families are rejected");
+        eq(
+          sameFamily.ok,
+          false,
+          "explicitly matching effective families are rejected",
+        );
         eq(calls.length, 1, "same-family route cannot call the provider");
+
+        const unknownIdentity = await new secondOpinion.SecondOpinionService(
+          config(),
+        ).prepare(
+          {
+            ...request(),
+            requestId: "request-unknown-identity",
+            decisionId: "decision-unknown-identity",
+          },
+          deps(root, calls, { currentModel: undefined }),
+        );
+        eq(
+          unknownIdentity.ok,
+          false,
+          "unknown main identity fails closed when family separation cannot be proven",
+        );
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
     });
   },
 
-  "second opinion safety gates": async ({ section, secondOpinion }) => {
+  "second opinion safety gates": async ({ section, secondOpinion, load }) => {
     await section("second opinion safety gates", async () => {
       if (!secondOpinion) return;
       const root = mkdtempSync(path.join(tmpdir(), "pi-second-opinion-safe-"));
@@ -291,12 +367,125 @@ const sectionsUnderTest = {
           "changed context invalidates approval",
         );
         eq(calls.length, 0, "stale approval never reaches the provider");
+
+        const changedModelRequest = {
+          ...request(),
+          requestId: "request-model-swap",
+          decisionId: "decision-model-swap",
+        };
+        const changedModelPreview = await service.prepare(
+          changedModelRequest,
+          deps(root, calls),
+        );
+        assert(
+          changedModelPreview.ok,
+          "model-swap test reaches approval preview",
+        );
+        const changedModelResult = await service.executeApproved(
+          changedModelPreview.prepared,
+          {
+            approved: true,
+            approvalId: changedModelPreview.prepared.snapshot.approvalId,
+          },
+          deps(root, calls, {
+            currentModel: { provider: "other-provider", id: "other-model" },
+          }),
+        );
+        eq(
+          changedModelResult.status,
+          "stale_context",
+          "main model change after preview invalidates approval",
+        );
+        eq(calls.length, 0, "changed main model never reaches the provider");
+
+        const changedSessionRequest = {
+          ...request(),
+          requestId: "request-session-swap",
+          decisionId: "decision-session-swap",
+        };
+        const changedSessionPreview = await service.prepare(
+          changedSessionRequest,
+          deps(root, calls),
+        );
+        assert(
+          changedSessionPreview.ok,
+          "session-swap test reaches approval preview",
+        );
+        const changedSessionResult = await service.executeApproved(
+          changedSessionPreview.prepared,
+          {
+            approved: true,
+            approvalId: changedSessionPreview.prepared.snapshot.approvalId,
+          },
+          deps(root, calls, { sessionId: "session-2", sessionGeneration: 2 }),
+        );
+        eq(
+          changedSessionResult.status,
+          "stale_context",
+          "session change after preview invalidates approval",
+        );
+        eq(calls.length, 0, "changed session never reaches the provider");
+
         const staleReplay = await service.prepare(
           { ...stale, requestId: "request-stale-replay" },
           deps(root, calls),
         );
         eq(staleReplay.ok, false, "stale decision_id remains consumed");
         eq(calls.length, 0, "stale replay cannot call the provider");
+
+        const concurrentService = new secondOpinion.SecondOpinionService(
+          config(),
+        );
+        let resolveAuth;
+        const authPending = new Promise((resolve) => {
+          resolveAuth = resolve;
+        });
+        const concurrentRequest = {
+          ...request(),
+          requestId: "request-concurrent-1",
+          decisionId: "decision-concurrent",
+        };
+        const firstPrepare = concurrentService.prepare(
+          concurrentRequest,
+          deps(root, calls, { getApiKeyAndHeaders: () => authPending }),
+        );
+        const secondPrepare = await concurrentService.prepare(
+          { ...concurrentRequest, requestId: "request-concurrent-2" },
+          deps(root, calls),
+        );
+        eq(
+          secondPrepare.ok,
+          false,
+          "a parallel prepare sees the synchronous decision reservation",
+        );
+        resolveAuth({ ok: true, apiKey: "fake-key" });
+        const firstPrepared = await firstPrepare;
+        assert(
+          firstPrepared.ok,
+          "exactly one concurrent request reaches prepared state",
+        );
+
+        const retryService = new secondOpinion.SecondOpinionService(config());
+        const retryRequest = {
+          ...request(),
+          requestId: "request-retry-auth",
+          decisionId: "decision-retry-auth",
+        };
+        const authFailed = await retryService.prepare(
+          retryRequest,
+          deps(root, calls, {
+            getApiKeyAndHeaders: async () => ({ ok: false }),
+          }),
+        );
+        eq(authFailed.ok, false, "failed preparation returns before approval");
+        const authRetry = await retryService.prepare(
+          retryRequest,
+          deps(root, calls),
+        );
+        assert(
+          authRetry.ok,
+          "failed preparation releases the reservation for a fresh attempt",
+        );
 
         writeFileSync(
           path.join(root, "src/conversation.json"),
@@ -312,6 +501,192 @@ const sectionsUnderTest = {
         );
         eq(dumpBlocked.ok, false, "conversation dumps are blocked");
         eq(calls.length, 0, "conversation dumps never reach the provider");
+
+        const secondOpinionExtension = await load(
+          "extensions/second-opinion/index.ts",
+        );
+        assert(
+          secondOpinionExtension,
+          "second-opinion tool extension loads for lifecycle coverage",
+        );
+        if (secondOpinionExtension) {
+          const lifecycleRoot = mkdtempSync(
+            path.join(tmpdir(), "pi-second-opinion-session-"),
+          );
+          mkdirSync(path.join(lifecycleRoot, ".pi"), { recursive: true });
+          mkdirSync(path.join(lifecycleRoot, "src"));
+          writeFileSync(
+            path.join(lifecycleRoot, "src/example.ts"),
+            "export const sessionEvidence = true;\n",
+          );
+          writeFileSync(
+            path.join(lifecycleRoot, ".pi/setup.json"),
+            JSON.stringify({
+              secondOpinion: {
+                enabled: true,
+                providerId: "opinion-provider",
+                modelId: "opinion-model-v1",
+              },
+            }),
+          );
+          try {
+            const selectedModel = model();
+            let currentCtx;
+            let switchDuringApproval = false;
+            let providerCalls = 0;
+            const attachProvider = (ctx) => {
+              ctx.modelRegistry.complete = async () => {
+                providerCalls += 1;
+                return {
+                  role: "assistant",
+                  api: selectedModel.api,
+                  provider: selectedModel.provider,
+                  model: selectedModel.id,
+                  content: [
+                    {
+                      type: "text",
+                      text: JSON.stringify({
+                        status: "completed",
+                        assessment: "session-bound response",
+                        main_reason: "mocked",
+                        main_risk: "mocked",
+                        strongest_counterargument: "mocked",
+                        missing_evidence: [],
+                        confidence: "medium",
+                      }),
+                    },
+                  ],
+                  stopReason: "stop",
+                };
+              };
+            };
+            const lifecycleHarness = createHarness({
+              modelRegistryFind: () => selectedModel,
+              confirm: async () => {
+                if (switchDuringApproval) {
+                  switchDuringApproval = false;
+                  await lifecycleHarness.runHooks(
+                    "session_shutdown",
+                    {},
+                    currentCtx,
+                  );
+                  currentCtx = lifecycleHarness.makeContext({
+                    cwd: lifecycleRoot,
+                    sessionId: "session-c",
+                    model: {
+                      provider: "main-provider",
+                      id: "main-model",
+                      family: "main-family",
+                    },
+                  });
+                  attachProvider(currentCtx);
+                  await lifecycleHarness.runHooks(
+                    "session_start",
+                    {},
+                    currentCtx,
+                  );
+                }
+                return true;
+              },
+            });
+            secondOpinionExtension.default(lifecycleHarness.api);
+            currentCtx = lifecycleHarness.makeContext({
+              cwd: lifecycleRoot,
+              sessionId: "session-a",
+              model: {
+                provider: "main-provider",
+                id: "main-model",
+                family: "main-family",
+              },
+            });
+            attachProvider(currentCtx);
+            const params = {
+              request_id: "reused-request",
+              decision_id: "reused-decision",
+              question: "Welche lokale Variante ist stabiler?",
+              reason: "Die Zustandsgrenzen unterscheiden sich wesentlich.",
+              expected_benefit: "Ein verstecktes Lifecycle-Risiko finden.",
+              reason_category: "ARCHITECTURE_FORK",
+              constraints: ["Keine Live-Änderungen"],
+              context_refs: [
+                {
+                  kind: "code_range",
+                  path: "src/example.ts",
+                  start_line: 1,
+                  end_line: 1,
+                  label: "Session-Testbeleg",
+                },
+              ],
+            };
+            const executeTool = () =>
+              lifecycleHarness.tools
+                .get("second_opinion")
+                .execute(
+                  "session-test",
+                  params,
+                  undefined,
+                  undefined,
+                  currentCtx,
+                );
+            const sessionA = await executeTool();
+            eq(
+              sessionA.details.status,
+              "completed",
+              "session A can use its decision once",
+            );
+            await lifecycleHarness.runHooks("session_shutdown", {}, currentCtx);
+            currentCtx = lifecycleHarness.makeContext({
+              cwd: lifecycleRoot,
+              sessionId: "session-b",
+              model: {
+                provider: "main-provider",
+                id: "main-model",
+                family: "main-family",
+              },
+            });
+            attachProvider(currentCtx);
+            await lifecycleHarness.runHooks("session_start", {}, currentCtx);
+            const sessionB = await executeTool();
+            eq(
+              sessionB.details.status,
+              "completed",
+              "session B may reuse the same decision id",
+            );
+            eq(
+              providerCalls,
+              2,
+              "both independent sessions reach only the mocked provider",
+            );
+
+            switchDuringApproval = true;
+            const staleApproval = await lifecycleHarness.tools
+              .get("second_opinion")
+              .execute(
+                "session-switch-test",
+                {
+                  ...params,
+                  request_id: "approval-request",
+                  decision_id: "approval-decision",
+                },
+                undefined,
+                undefined,
+                currentCtx,
+              );
+            eq(
+              staleApproval.details.status,
+              "stale_context",
+              "session change inside approval dialog invalidates the prepared request",
+            );
+            eq(
+              providerCalls,
+              2,
+              "session change after approval preview starts no provider call",
+            );
+            await lifecycleHarness.runHooks("session_shutdown", {}, currentCtx);
+          } finally {
+            rmSync(lifecycleRoot, { recursive: true, force: true });
+          }
+        }
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

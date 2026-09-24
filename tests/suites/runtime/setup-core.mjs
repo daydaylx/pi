@@ -195,6 +195,54 @@ export const setupCoreSections = {
             harness.notifications.at(-1)?.level === "error",
           "setup doctor makes CLI/dev version drift visible",
         );
+
+        const rangedAgentDir = mkdtempSync(
+          path.join(tmpdir(), "pi-setup-doctor-version-range-"),
+        );
+        const rangedNpmDir = path.join(rangedAgentDir, "npm");
+        const rangedPackageDir = path.join(
+          rangedNpmDir,
+          "node_modules",
+          "@earendil-works",
+          "pi-coding-agent",
+        );
+        mkdirSync(rangedPackageDir, { recursive: true });
+        writeFileSync(
+          path.join(rangedNpmDir, "package.json"),
+          JSON.stringify({
+            devDependencies: { "@earendil-works/pi-coding-agent": "^0.87.1" },
+          }),
+        );
+        writeFileSync(
+          path.join(rangedPackageDir, "package.json"),
+          JSON.stringify({ version: "0.87.1" }),
+        );
+        const rangeHarness = createHarness({ piVersion: "0.87.1" });
+        setupCore.default(rangeHarness.api, { exec: rangeHarness.api.exec });
+        const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+        process.env.PI_CODING_AGENT_DIR = rangedAgentDir;
+        try {
+          const rangeContext = rangeHarness.makeContext({
+            cwd: ROOT,
+            trusted: true,
+          });
+          await rangeHarness.commands.get("setup-doctor")?.("", rangeContext);
+          const rangeReport = rangeHarness.notifications.at(-1)?.message ?? "";
+          assert(
+            rangeReport.includes("Pi CLI/dev package: 0.87.1/^0.87.1") &&
+              rangeReport.includes("installed dev package: 0.87.1") &&
+              !rangeReport.includes(
+                "Pi CLI, Manifest und installiertes Dev-Paket sind nicht angeglichen.",
+              ),
+            "setup doctor accepts an installed version covered by a caret manifest range",
+          );
+        } finally {
+          if (previousAgentDir === undefined)
+            delete process.env.PI_CODING_AGENT_DIR;
+          else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+          rmSync(rangedAgentDir, { recursive: true, force: true });
+        }
+
         // This repo declares its own required profile in .pi/verify.json, so a
         // trusted session at ROOT must load it rather than report none.
         assert(

@@ -106,6 +106,7 @@ const THINKING_LEVELS = new Set([
   "medium",
   "high",
   "xhigh",
+  "max",
 ]);
 
 interface AvailableModel {

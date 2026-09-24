@@ -128,8 +128,8 @@ await test("the complete guarded file path owns external boundaries and honors r
   for (const level of levels) {
     eq(
       guardedDecision(level, "read", "../outside.txt").action,
-      "block",
-      `${level} blocks an external read in the complete guard path`,
+      "allow",
+      `${level} allows an external read in the complete guard path`,
     );
     eq(
       guardedDecision(level, "write", "../outside.txt").action,
@@ -146,12 +146,24 @@ await test("the complete guarded file path owns external boundaries and honors r
     eq(
       guardedDecision(level, "read", runtimeDocs).action,
       "allow",
-      `${level} allows the documented runtime README exception end-to-end`,
+      `${level} allows the runtime README exception end-to-end`,
     );
     eq(
-      guardedDecision(level, "read", join(runtimeSymlink, "secret.txt")).action,
+      guardedDecision(level, "read", join(runtimeSymlink, "ordinary.txt"))
+        .action,
+      "allow",
+      `${level} allows an ordinary symlink escape read`,
+    );
+    eq(
+      guardedDecision(level, "read", join(runtimeSymlink, "secret.json"))
+        .action,
       "block",
-      `${level} blocks a symlink escape even below the runtime documentation root`,
+      `${level} blocks a secret even below a symlink escape`,
+    );
+    eq(
+      guardedDecision(level, "write", join(runtimeSymlink, "file.txt")).action,
+      "block",
+      `${level} blocks a symlink escape write`,
     );
   }
   rmSync(runtimeSymlink, { force: true });
@@ -424,17 +436,17 @@ await test("canonical path identity protects sensitive symlink aliases through t
     );
     const externalAbsolute = join(cwd, "outside-alias", "outside.txt");
     assert(
-      !permissionPolicy.isPlanModeDiagnosticCommand(
+      permissionPolicy.isPlanModeDiagnosticCommand(
         "cat " + externalAbsolute,
         cwd,
       ),
-      "Plan diagnostics reject an absolute path through an external symlink",
+      "Plan diagnostics accept an absolute path through an external symlink",
     );
     eq(
       permissionPolicy.decideBash("readonly", "cat " + externalAbsolute, cwd)
         .action,
-      "block",
-      "readonly shell access rejects an absolute external symlink target",
+      "allow",
+      "readonly shell access allows an absolute external symlink target read",
     );
     eq(
       permissionPolicy.decideBash("yolo", "touch " + externalAbsolute, cwd)
@@ -444,9 +456,12 @@ await test("canonical path identity protects sensitive symlink aliases through t
     );
 
     const harness = createHarness({ confirm: false, customResult: false });
+    harness.api.events.on("recovery-status:request", (request) =>
+      request.respond({ armed: false }),
+    );
     planMode?.default(harness.api);
     modePermissions.default(harness.api);
-    const context = harness.makeContext({ cwd });
+    const context = harness.makeContext({ cwd, mode: "tui" });
     await harness.runHooks("session_start", {}, context);
     const guardCall = async (toolName, input) =>
       harness.runHooks("tool_call", { toolName, input }, context);
@@ -2507,7 +2522,6 @@ await test("YOLO stufen: file access outside the project is denied, asked or all
   const targets = [
     ["write", "/etc/pi-yolo-test"],
     ["read", "~/.ssh/id_rsa"],
-    ["read", "/etc/hostname"],
   ];
   for (const [operation, path] of targets) {
     eq(
@@ -2548,6 +2562,22 @@ await test("YOLO stufen: file access outside the project is denied, asked or all
         `${level} hands ${path} to decideFileAccess`,
       );
     }
+  }
+  for (const level of ["yolo", "yolo-ask", "yolo-full"]) {
+    eq(
+      permissionPolicy.decideFileAccess(level, "read", "/etc/hostname", cwd)
+        .action,
+      "allow",
+      `${level} allows ordinary external read /etc/hostname`,
+    );
+    assert(
+      !workflowPolicy.assessWorkflowTool(
+        { toolName: "read", input: { path: "/etc/hostname" } },
+        cwd,
+        level,
+      ).blocked,
+      `the hard layer permits ordinary external read under ${level}`,
+    );
   }
   eq(
     permissionPolicy.decideFileAccess("yolo-ask", "write", "src/x.ts", cwd)
@@ -2594,7 +2624,10 @@ await test("YOLO 2/3 keep plan mode, the interactive credential guard and the lo
     );
     assert(
       workflowPolicy.assessWorkflowTool(
-        { toolName: "interactive_shell", input: { command: "sudo id | tee x" } },
+        {
+          toolName: "interactive_shell",
+          input: { command: "sudo id | tee x" },
+        },
         cwd,
         level,
       ).blocked,
@@ -2664,4 +2697,17 @@ await test("YOLO stufen have their own labels, status values and are never resto
   eq(parseYoloLevel("2"), "yolo-ask", "2 → yolo-ask");
   eq(parseYoloLevel("FULL"), "yolo-full", "full → yolo-full");
   eq(parseYoloLevel("4"), undefined, "unknown argument");
+});
+
+await test("YOLO warning keeps the recovery gate visible at every level", () => {
+  if (!toolPolicy) return;
+  for (const level of ["yolo", "yolo-ask", "yolo-full"]) {
+    assert(
+      toolPolicy.permissionWarning(level)?.includes("Recovery-Gate") &&
+        !toolPolicy
+          .permissionWarning(level)
+          ?.includes("Recovery-Gate entfallen"),
+      `${level} warning accurately says recovery remains enforced`,
+    );
+  }
 });

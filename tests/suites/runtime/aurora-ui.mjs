@@ -1310,6 +1310,22 @@ export const auroraUiSections = {
             "hiddenActivitySummary compacts the overflow into a single summary line",
           );
 
+          // Finish the overflow workload first: live tool rows outrank
+          // routine history, so retention is measured only after active tools
+          // no longer occupy the dashboard slots.
+          for (let i = 0; i < 9; i++) {
+            await overflowHarness.runHooks(
+              "tool_execution_end",
+              {
+                toolCallId: `overflow-tool-${i}`,
+                toolName: "read",
+                isError: false,
+                result: "overflow read completed",
+              },
+              overflowCtx,
+            );
+          }
+
           // READ history keeps only the latest three completed entries; the
           // result renderer remains the source of truth for their full output.
           for (let i = 0; i < 45; i++) {

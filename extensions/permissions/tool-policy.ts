@@ -32,13 +32,13 @@ export function permissionWarning(level: PermissionLevel): string | undefined {
     return "CONFIRM ALL aktiv: Jede Mutation und externe Aktion benötigt eine Bestätigung.";
   }
   if (level === "yolo") {
-    return "YOLO temporär aktiv: Rückfragen, Recovery-Gate und Commit-Verifier-Pflicht entfallen, harte System-Bash-Grenzen (sudo, Paketmanager, curl|sh, rm -rf /) sind gelockert; harte Secret-, Symlink-, Trust-Grenzen und der Plan-Mode-Schreibschutz bleiben aktiv.";
+    return "YOLO temporär aktiv: Routine-Rückfragen und Commit-Verifier-Pflicht entfallen, harte System-Bash-Grenzen (sudo, Paketmanager, curl|sh, rm -rf /) sind gelockert; Recovery-Gate, Secret-, Symlink- und Trust-Grenzen sowie Plan-Mode-Schreibschutz bleiben aktiv.";
   }
   if (level === "yolo-ask") {
-    return "YOLO 2 temporär aktiv: wie YOLO 1 ohne Routine-Rückfragen, aber sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach. Recovery-Gate und Commit-Verifier-Pflicht entfallen; Trust-Grenze und Plan-Mode-Schreibschutz bleiben aktiv.";
+    return "YOLO 2 temporär aktiv: wie YOLO 1 ohne Routine-Rückfragen, aber sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach. Das Recovery-Gate bleibt aktiv; die Commit-Verifier-Pflicht entfällt. Trust-Grenze und Plan-Mode-Schreibschutz bleiben aktiv.";
   }
   if (level === "yolo-full") {
-    return "YOLO 3 temporär aktiv: VOLLZUGRIFF ohne Rückfragen, auch sudo, Systempfade, Secrets und Pfade außerhalb des Projekts. Nur Trust-Grenze, Plan-Mode-Schreibschutz und die Bestätigung für das Löschen des Root-Dateisystems bleiben aktiv. sudo-Passwörter gibst du im interaktiven Shell-Pfad selbst ein.";
+    return "YOLO 3 temporär aktiv: VOLLZUGRIFF ohne Rückfragen, auch sudo, Systempfade, Secrets und Pfade außerhalb des Projekts. Recovery-Gate, Trust-Grenze, Plan-Mode-Schreibschutz und die Bestätigung für das Löschen des Root-Dateisystems bleiben aktiv. sudo-Passwörter gibst du im interaktiven Shell-Pfad selbst ein.";
   }
   if (level === "headless") {
     return "Headless aktiv: kein Bestätigungsdialog verfügbar. Projektlokale Builds/Tests/Lint/Typecheck sind erlaubt; jede sonst bestätigungspflichtige Aktion bricht strukturiert ab statt zu fragen.";

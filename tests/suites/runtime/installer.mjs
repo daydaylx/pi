@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   symlinkSync,
@@ -52,7 +53,12 @@ export const installerSections = {
         deployedSet.has("APPEND_SYSTEM.md"),
         "greenfield includes the active communication rules",
       );
-      for (const prompt of ["analyse.md", "docs-check.md", "review.md", "ui-review.md"]) {
+      for (const prompt of [
+        "analyse.md",
+        "docs-check.md",
+        "review.md",
+        "ui-review.md",
+      ]) {
         assert(
           deployedSet.has(`prompts/${prompt}`),
           `greenfield includes prompt template prompts/${prompt}`,
@@ -299,6 +305,41 @@ export const installerSections = {
           );
         } finally {
           rmSync(symDir, { recursive: true, force: true });
+        }
+
+        // A symlink in a legacy file's parent directory must not redirect
+        // cleanup outside the installation target.
+        const outside = mkdtempSync(path.join(tmpdir(), "pi-install-outside-"));
+        const outsideLegacy = path.join(
+          outside,
+          "subagent-tool-description.md",
+        );
+        writeFileSync(outsideLegacy, "user-owned sentinel");
+        symlinkSync(outside, path.join(target, ".pi"), "dir");
+        try {
+          let rejected = false;
+          try {
+            execFileSync(
+              process.execPath,
+              [
+                path.join(ROOT, "scripts", "install-user.mjs"),
+                "--apply",
+                "--target",
+                target,
+              ],
+              { stdio: "pipe", timeout: 30_000 },
+            );
+          } catch (error) {
+            rejected = error.code !== 0;
+          }
+          assert(rejected, "installer rejects a symlinked legacy parent");
+          eq(
+            readFileSync(outsideLegacy, "utf8"),
+            "user-owned sentinel",
+            "installer leaves the file outside its target untouched",
+          );
+        } finally {
+          rmSync(outside, { recursive: true, force: true });
         }
 
         // Sensitive files must not appear in deployed target.

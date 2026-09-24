@@ -1,4 +1,4 @@
-// P1 regression test for the locally patched Pi 0.84.3 runtime.
+// P1 regression test for the locally patched Pi 0.87.1 runtime.
 // It intentionally targets the executable runtime, not npm/node_modules,
 // because that is the Pi instance users actually start.
 import assert from "node:assert/strict";
@@ -92,7 +92,7 @@ assert.match(
 );
 assert.match(
   sessionSource,
-  /_runAutoCompaction\(reason, willRetry\) \{[\s\S]{0,4000}await this\._emitSessionCompactFailed\(/,
+  /_runAutoCompaction\(reason, willRetry\) \{[\s\S]{0,12000}await this\._emitSessionCompactFailed\(/,
   "a failed auto-compaction is reported to extensions",
 );
 assert.match(

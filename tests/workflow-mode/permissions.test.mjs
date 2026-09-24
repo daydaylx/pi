@@ -24,6 +24,9 @@ writeFileSync(
 writeFileSync(join(runtimeFixtureRoot, "README.md"), "runtime docs\n");
 process.env.PI_RUNTIME_ROOT = runtimeFixtureRoot;
 const workflowPolicy = await load("extensions/permissions/workflow-policy.ts");
+const recoveryCapabilities = await load(
+  "extensions/shared/recovery-capabilities.ts",
+);
 if (originalRuntimeRoot === undefined) delete process.env.PI_RUNTIME_ROOT;
 else process.env.PI_RUNTIME_ROOT = originalRuntimeRoot;
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
@@ -37,6 +40,67 @@ const subagentGuard = await load(
 const modelFallback = await load(
   "npm/node_modules/pi-subagents/src/runs/shared/model-fallback.ts",
 );
+
+await test("recovery capability effects fail closed outside known read-only tools", () => {
+  if (!recoveryCapabilities) return;
+  const effect = (toolName, input = {}) =>
+    recoveryCapabilities.recoveryEffect({ toolName, input }, process.cwd());
+  for (const toolName of ["read", "grep", "find", "ls", "lsp_diagnostics"]) {
+    eq(effect(toolName), "read_only", `${toolName} is explicitly read-only`);
+  }
+  eq(effect("recovery_check"), "recovery_control", "recovery control stays free");
+  for (const toolName of [
+    "write",
+    "edit",
+    "verify",
+    "project_check",
+    "subagent",
+    "custom_mutator",
+  ]) {
+    eq(
+      effect(toolName),
+      "potentially_mutating",
+      `${toolName} is gated as process/delegation/write/unknown capability`,
+    );
+  }
+  eq(
+    effect("bash", { command: "git status --short" }),
+    "read_only",
+    "recognized diagnostic bash remains read-only",
+  );
+  eq(
+    effect("bash", { command: "npm run verify" }),
+    "potentially_mutating",
+    "process execution is gated even when described as verification",
+  );
+});
+
+await test("recovery status distinguishes unavailable, clear and broken providers", async () => {
+  if (!recoveryCapabilities) return;
+  const request = recoveryCapabilities.requestRecoveryStatus;
+  const unavailable = await request({ emit() {} });
+  eq(unavailable.armed, true, "missing consumer does not imply a clear workspace");
+  eq(unavailable.reason, "unavailable", "missing consumer is explicit");
+  const clear = await request({
+    emit(_channel, payload) {
+      payload.respond({ armed: false });
+    },
+  });
+  eq(clear, { armed: false }, "an available, clear consumer remains clear");
+  const invalid = await request({
+    emit(_channel, payload) {
+      payload.respond({ armed: "false" });
+    },
+  });
+  eq(invalid.armed, true, "invalid provider data fails closed");
+  eq(invalid.reason, "unavailable", "invalid provider data is unavailable");
+  const rejected = await request({
+    emit(_channel, payload) {
+      payload.respond(Promise.reject(new Error("provider failed")));
+    },
+  });
+  eq(rejected.armed, true, "rejected provider data fails closed");
+});
 
 await test("hard shell boundaries hold outside YOLO", () => {
   if (!workflowPolicy) return;
@@ -128,8 +192,8 @@ await test("the complete guarded file path owns external boundaries and honors r
   for (const level of levels) {
     eq(
       guardedDecision(level, "read", "../outside.txt").action,
-      "block",
-      `${level} blocks an external read in the complete guard path`,
+      "allow",
+      `${level} allows an external read in the complete guard path`,
     );
     eq(
       guardedDecision(level, "write", "../outside.txt").action,
@@ -146,12 +210,22 @@ await test("the complete guarded file path owns external boundaries and honors r
     eq(
       guardedDecision(level, "read", runtimeDocs).action,
       "allow",
-      `${level} allows the documented runtime README exception end-to-end`,
+      `${level} allows the runtime README exception end-to-end`,
     );
     eq(
-      guardedDecision(level, "read", join(runtimeSymlink, "secret.txt")).action,
+      guardedDecision(level, "read", join(runtimeSymlink, "ordinary.txt")).action,
+      "allow",
+      `${level} allows an ordinary symlink escape read`,
+    );
+    eq(
+      guardedDecision(level, "read", join(runtimeSymlink, "secret.json")).action,
       "block",
-      `${level} blocks a symlink escape even below the runtime documentation root`,
+      `${level} blocks a secret even below a symlink escape`,
+    );
+    eq(
+      guardedDecision(level, "write", join(runtimeSymlink, "file.txt")).action,
+      "block",
+      `${level} blocks a symlink escape write`,
     );
   }
   rmSync(runtimeSymlink, { force: true });
@@ -424,17 +498,17 @@ await test("canonical path identity protects sensitive symlink aliases through t
     );
     const externalAbsolute = join(cwd, "outside-alias", "outside.txt");
     assert(
-      !permissionPolicy.isPlanModeDiagnosticCommand(
+      permissionPolicy.isPlanModeDiagnosticCommand(
         "cat " + externalAbsolute,
         cwd,
       ),
-      "Plan diagnostics reject an absolute path through an external symlink",
+      "Plan diagnostics accept an absolute path through an external symlink",
     );
     eq(
       permissionPolicy.decideBash("readonly", "cat " + externalAbsolute, cwd)
         .action,
-      "block",
-      "readonly shell access rejects an absolute external symlink target",
+      "allow",
+      "readonly shell access allows an absolute external symlink target read",
     );
     eq(
       permissionPolicy.decideBash("yolo", "touch " + externalAbsolute, cwd)
@@ -444,6 +518,9 @@ await test("canonical path identity protects sensitive symlink aliases through t
     );
 
     const harness = createHarness({ confirm: false, customResult: false });
+    harness.api.events.on("recovery-status:request", (request) =>
+      request.respond({ armed: false }),
+    );
     planMode?.default(harness.api);
     modePermissions.default(harness.api);
     const context = harness.makeContext({ cwd });
@@ -2507,7 +2584,6 @@ await test("YOLO stufen: file access outside the project is denied, asked or all
   const targets = [
     ["write", "/etc/pi-yolo-test"],
     ["read", "~/.ssh/id_rsa"],
-    ["read", "/etc/hostname"],
   ];
   for (const [operation, path] of targets) {
     eq(
@@ -2548,6 +2624,22 @@ await test("YOLO stufen: file access outside the project is denied, asked or all
         `${level} hands ${path} to decideFileAccess`,
       );
     }
+  }
+  for (const level of ["yolo", "yolo-ask", "yolo-full"]) {
+    eq(
+      permissionPolicy.decideFileAccess(level, "read", "/etc/hostname", cwd)
+        .action,
+      "allow",
+      `${level} allows ordinary external read /etc/hostname`,
+    );
+    assert(
+      !workflowPolicy.assessWorkflowTool(
+        { toolName: "read", input: { path: "/etc/hostname" } },
+        cwd,
+        level,
+      ).blocked,
+      `the hard layer permits ordinary external read under ${level}`,
+    );
   }
   eq(
     permissionPolicy.decideFileAccess("yolo-ask", "write", "src/x.ts", cwd)
@@ -2665,3 +2757,112 @@ await test("YOLO stufen have their own labels, status values and are never resto
   eq(parseYoloLevel("FULL"), "yolo-full", "full → yolo-full");
   eq(parseYoloLevel("4"), undefined, "unknown argument");
 });
+
+await test("untrusted projects block external reads and symlink escapes at the trust boundary", async () => {
+  if (!modePermissions || !workflowPolicy) return;
+  const cwd = process.cwd();
+  const harness = createHarness({ confirm: false, customResult: false });
+  harness.api.events.on("recovery-status:request", (request) =>
+    request.respond({ armed: false }),
+  );
+  modePermissions.default(harness.api);
+
+  const trustedContext = harness.makeContext({ cwd, trusted: true, mode: "tui" });
+  await harness.runHooks("session_start", {}, trustedContext);
+
+  const untrustedContext = harness.makeContext({
+    cwd,
+    trusted: false,
+    mode: "tui",
+  });
+
+  const check = (toolName, input, ctx) =>
+    harness.runHooks("tool_call", { toolName, input }, ctx);
+
+  // In trusted project: reading an ordinary external file is allowed
+  const trustedRead = await check("read", { path: "/etc/hostname" }, trustedContext);
+  assert(
+    trustedRead.every((r) => !r?.block),
+    "trusted project allows reading ordinary external files",
+  );
+
+  // In untrusted project: reading an external file is blocked by the hard trust boundary
+  const untrustedExternalRead = await check(
+    "read",
+    { path: "/etc/hostname" },
+    untrustedContext,
+  );
+  assert(
+    untrustedExternalRead.some((r) => r?.block && r.reason.includes("Harte Trust-Grenze")),
+    "untrusted project blocks reading external files",
+  );
+
+  // In untrusted project: grep/find on external path is also blocked by the hard trust boundary
+  const untrustedExternalGrep = await check(
+    "grep",
+    { path: "/etc" },
+    untrustedContext,
+  );
+  assert(
+    untrustedExternalGrep.some((r) => r?.block && r.reason.includes("Harte Trust-Grenze")),
+    "untrusted project blocks grep on external paths",
+  );
+
+  // In untrusted project: internal read is allowed
+  const untrustedInternalRead = await check(
+    "read",
+    { path: "README.md" },
+    untrustedContext,
+  );
+  assert(
+    untrustedInternalRead.every((r) => !r?.block),
+    "untrusted project allows reading internal files",
+  );
+});
+
+await test("Plan Mode and readonly shell permit inspection of external files while blocking secrets and mutations", () => {
+  if (!permissionPolicy || !workflowPolicy) return;
+  const cwd = process.cwd();
+
+  // Pure observation on external paths is plan safe and readonly safe
+  assert(
+    permissionPolicy.isPlanModeDiagnosticCommand("cat /etc/hostname", cwd),
+    "Plan mode permits cat on /etc/hostname",
+  );
+  assert(
+    permissionPolicy.isPlanModeDiagnosticCommand("head -n 5 /etc/hostname", cwd),
+    "Plan mode permits head on /etc/hostname",
+  );
+  assert(
+    permissionPolicy.isPlanModeDiagnosticCommand("ls /tmp", cwd),
+    "Plan mode permits ls on /tmp",
+  );
+  eq(
+    permissionPolicy.decideBash("readonly", "cat /etc/hostname", cwd).action,
+    "allow",
+    "readonly level permits cat on /etc/hostname",
+  );
+
+  // But external mutations remain blocked
+  assert(
+    !permissionPolicy.isPlanModeDiagnosticCommand("touch /tmp/test-file", cwd),
+    "Plan mode blocks touch /tmp/test-file",
+  );
+  eq(
+    permissionPolicy.decideBash("readonly", "touch /tmp/test-file", cwd).action,
+    "block",
+    "readonly level blocks touch /tmp/test-file",
+  );
+
+  // And reading secrets on external paths remains blocked
+  assert(
+    !permissionPolicy.isPlanModeDiagnosticCommand("cat ~/.ssh/id_rsa", cwd),
+    "Plan mode blocks reading ~/.ssh/id_rsa",
+  );
+  eq(
+    permissionPolicy.decideBash("readonly", "cat ~/.ssh/id_rsa", cwd).action,
+    "block",
+    "readonly level blocks reading ~/.ssh/id_rsa",
+  );
+});
+

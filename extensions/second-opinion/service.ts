@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { SecondOpinionConfig } from "../setup-core/config.ts";
@@ -15,6 +16,7 @@ import type {
   OpinionResult,
   OpinionTelemetry,
   ContextManifest,
+  ModelIdentitySnapshot,
 } from "./types.ts";
 import { REASON_CATEGORIES } from "./types.ts";
 
@@ -44,6 +46,8 @@ export interface SecondOpinionDependencies {
     "find" | "complete" | "getApiKeyAndHeaders"
   >;
   currentModel?: Model<any>;
+  sessionId?: string;
+  sessionGeneration?: number;
   cwd: string;
   signal?: AbortSignal;
   recordTelemetry?: (telemetry: OpinionTelemetry) => void;
@@ -60,7 +64,7 @@ export interface ApprovalResult {
   approvalId: string;
 }
 
-type DecisionState = "prepared" | "consumed";
+type DecisionState = "preparing" | "prepared" | "consumed";
 
 function text(value: unknown, max = MAX_INPUT_STRING): value is string {
   return (
@@ -109,6 +113,73 @@ function validateRequest(request: OpinionRequest): string | undefined {
 
 function displayModel(model: Model<any>): string {
   return `${model.provider}/${model.id}`;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value
+    : undefined;
+}
+
+function modelIdentity(
+  model: Model<any> | undefined,
+): ModelIdentitySnapshot | undefined {
+  if (!model) return undefined;
+  const extended = model as Model<any> & {
+    canonicalId?: unknown;
+    effectiveId?: unknown;
+    family?: unknown;
+  };
+  return {
+    provider: optionalString(model.provider),
+    id: optionalString(model.id),
+    effectiveId:
+      optionalString(extended.effectiveId) ??
+      optionalString(extended.canonicalId),
+    family: optionalString(extended.family),
+  };
+}
+
+function sameIdentity(
+  left: ModelIdentitySnapshot | undefined,
+  right: ModelIdentitySnapshot | undefined,
+): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function exactSameModel(
+  left: ModelIdentitySnapshot | undefined,
+  right: ModelIdentitySnapshot | undefined,
+): boolean {
+  if (!left || !right) return false;
+  if (left.effectiveId && right.effectiveId)
+    return left.effectiveId === right.effectiveId;
+  return Boolean(
+    left.provider &&
+    right.provider &&
+    left.id &&
+    right.id &&
+    left.provider === right.provider &&
+    left.id === right.id,
+  );
+}
+
+function modelRelation(
+  main: ModelIdentitySnapshot | undefined,
+  opinion: ModelIdentitySnapshot,
+): ApprovalSnapshot["modelRelation"] {
+  if (exactSameModel(main, opinion)) return "exact_same_model";
+  if (main?.provider && main.id && opinion.provider && opinion.id)
+    return "different_model";
+  return "unknown";
+}
+
+function familyRelation(
+  main: ModelIdentitySnapshot | undefined,
+  opinion: ModelIdentitySnapshot,
+): ApprovalSnapshot["familyRelation"] {
+  if (!main?.family || !opinion.family) return "unknown";
+  return main.family === opinion.family ? "same_family" : "different_family";
 }
 
 function approvalId(): string {
@@ -288,12 +359,21 @@ export class SecondOpinionService {
         ),
       };
 
+    // Reserve both IDs synchronously before the first asynchronous lookup.
+    this.decisions.set(request.decisionId, "preparing");
+    this.requestIds.add(request.requestId);
+    const releaseReservation = () => {
+      if (this.decisions.get(request.decisionId) === "preparing") {
+        this.decisions.delete(request.decisionId);
+        this.requestIds.delete(request.requestId);
+      }
+    };
     const model = deps.modelRegistry.find(
       this.config.providerId,
       this.config.modelId,
     );
-    this.requestIds.add(request.requestId);
-    if (!model)
+    if (!model) {
+      releaseReservation();
       return {
         ok: false,
         result: this.result(
@@ -302,22 +382,34 @@ export class SecondOpinionService {
           "Konfiguriertes Opinion-Modell ist nicht verfügbar",
         ),
       };
+    }
+    const mainIdentity = modelIdentity(deps.currentModel);
+    const opinionIdentity = modelIdentity(model)!;
+    const relation = modelRelation(mainIdentity, opinionIdentity);
+    const family = familyRelation(mainIdentity, opinionIdentity);
     if (
-      this.config.requireDifferentFamily &&
-      this.config.mainModelFamily === this.config.opinionModelFamily
-    )
+      relation === "exact_same_model" ||
+      (this.config.requireDifferentFamily && family !== "different_family")
+    ) {
+      releaseReservation();
       return {
         ok: false,
         result: this.result(
           request,
           "unavailable",
-          "Opinion-Modell muss einer anderen Modellfamilie angehören",
+          relation === "exact_same_model"
+            ? "Opinion-Modell entspricht dem effektiv laufenden Hauptmodell"
+            : family === "same_family"
+              ? "Opinion-Modell gehört nach effektiver Modellidentität zur selben Familie"
+              : "Modellfamilien sind nicht zuverlässig bekannt; unabhängige Second Opinion wird fail-closed abgelehnt",
         ),
       };
+    }
 
     try {
       const auth = await deps.modelRegistry.getApiKeyAndHeaders(model);
-      if (!auth.ok)
+      if (!auth.ok) {
+        releaseReservation();
         return {
           ok: false,
           result: this.result(
@@ -326,7 +418,9 @@ export class SecondOpinionService {
             "Opinion-Provider ist nicht authentifiziert",
           ),
         };
+      }
     } catch {
+      releaseReservation();
       return {
         ok: false,
         result: this.result(
@@ -338,7 +432,8 @@ export class SecondOpinionService {
     }
 
     const manifestResult = buildContextManifest(deps.cwd, request.contextRefs);
-    if (!manifestResult.ok)
+    if (!manifestResult.ok) {
+      releaseReservation();
       return {
         ok: false,
         result: this.result(
@@ -349,6 +444,7 @@ export class SecondOpinionService {
           manifestResult.error.message,
         ),
       };
+    }
     const prompt = requestPrompt(request, manifestResult.manifest);
     const context: Context = {
       systemPrompt: OPINION_SYSTEM_PROMPT,
@@ -364,7 +460,8 @@ export class SecondOpinionService {
       estimateTextTokens(OPINION_SYSTEM_PROMPT) +
       estimateTextTokens(prompt) +
       16;
-    if (estimatedInputTokens > this.config.maxInputTokens)
+    if (estimatedInputTokens > this.config.maxInputTokens) {
+      releaseReservation();
       return {
         ok: false,
         result: this.result(
@@ -373,6 +470,7 @@ export class SecondOpinionService {
           `Geschätzte Eingabe: ${estimatedInputTokens} Tokens`,
         ),
       };
+    }
 
     const sameBackend = deps.currentModel?.provider === model.provider;
     const snapshot: ApprovalSnapshot = {
@@ -380,14 +478,21 @@ export class SecondOpinionService {
       request,
       manifest: manifestResult.manifest,
       model: { provider: model.provider, id: model.id, api: model.api },
+      modelIdentity: opinionIdentity,
       modelDisplayId: displayModel(model),
-      mainModelProvider: deps.currentModel?.provider,
+      mainModel: mainIdentity,
+      mainModelProvider: mainIdentity?.provider,
       backendRelation:
         deps.currentModel === undefined
           ? "unknown"
           : sameBackend
             ? "same_backend_allowed"
             : "different_backend_preferred",
+      modelRelation: relation,
+      familyRelation: family,
+      sessionId: deps.sessionId ?? "unknown",
+      sessionGeneration: deps.sessionGeneration ?? 0,
+      cwd: resolve(deps.cwd),
       estimatedInputTokens,
       createdAt: Date.now(),
     };
@@ -429,12 +534,30 @@ export class SecondOpinionService {
     if (deps.signal?.aborted) {
       return this.result(request, "cancelled", "Anfrage wurde abgebrochen");
     }
-    if (!manifestStillCurrent(deps.cwd, prepared.snapshot.manifest)) {
+    const currentOpinionModel = deps.modelRegistry.find(
+      this.config.providerId,
+      this.config.modelId,
+    );
+    if (
+      (deps.sessionId ?? "unknown") !== prepared.snapshot.sessionId ||
+      (deps.sessionGeneration ?? 0) !== prepared.snapshot.sessionGeneration ||
+      resolve(deps.cwd) !== prepared.snapshot.cwd ||
+      !sameIdentity(
+        modelIdentity(deps.currentModel),
+        prepared.snapshot.mainModel,
+      ) ||
+      !currentOpinionModel ||
+      !sameIdentity(
+        modelIdentity(currentOpinionModel),
+        prepared.snapshot.modelIdentity,
+      ) ||
+      !manifestStillCurrent(deps.cwd, prepared.snapshot.manifest)
+    ) {
       this.decisions.set(request.decisionId, "consumed");
       return this.result(
         request,
         "stale_context",
-        "Kontext hat sich seit der Vorschau geändert",
+        "Session, Modell oder Kontext hat sich seit der Freigabevorschau geändert",
       );
     }
 
@@ -514,7 +637,7 @@ export class SecondOpinionService {
       decisionId: request.decisionId,
       triggerSource: "main_agent",
       reasonCategory: request.reasonCategory,
-      mainModelFamily: this.config.mainModelFamily,
+      mainModelFamily: prepared.snapshot.mainModel?.family ?? "unknown",
       opinionModelId: prepared.snapshot.modelDisplayId,
       gatewayId: prepared.snapshot.model.provider,
       status: result.status,
@@ -552,7 +675,8 @@ export function approvalMessage(prepared: PreparedOpinion): string {
     `Erwarteter Nutzen: ${snapshot.request.expectedBenefit}`,
     `Modell: ${snapshot.modelDisplayId}`,
     `Backend/Gateway: ${snapshot.model.provider} (${snapshot.backendRelation})`,
-    `Hauptmodell-Provider: ${snapshot.mainModelProvider ?? "unbekannt"}`,
+    `Hauptmodell: ${snapshot.mainModel?.provider && snapshot.mainModel?.id ? `${snapshot.mainModel.provider}/${snapshot.mainModel.id}` : "unbekannt"}`,
+    `Modellrelation: ${snapshot.modelRelation}; Familie: ${snapshot.familyRelation}`,
     `Übertragung: ${sources}`,
     `Umfang: ${snapshot.manifest.bytes} Bytes, ca. ${snapshot.estimatedInputTokens} Tokens`,
     "Hinweis: Der angezeigte Inhalt wird extern verarbeitet.",

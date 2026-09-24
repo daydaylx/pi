@@ -163,6 +163,9 @@ function runInstall(argv) {
     let removedCount = 0;
     for (const legacy of LEGACY_MANAGED) {
       const legacyPath = path.join(target, legacy);
+      // The leaf may itself be a symlink (handled below), but no parent may
+      // redirect cleanup outside the installation target.
+      assertNoSymlinkComponents(path.dirname(legacyPath));
       if (existsSync(legacyPath)) {
         // Guard: only regular files and directories directly named, never follow
         // symlinks.

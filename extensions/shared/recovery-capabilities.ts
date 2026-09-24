@@ -7,6 +7,48 @@
  * die Wahrheit bleibt bei den Session-Einträgen der Resilience-Extension.
  */
 
+import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { ASK_USER_TOOL_NAME } from "./ask-user-policy.ts";
+import { isPlanModeDiagnosticCommand } from "./permission-policy.ts";
+import {
+  INTERACTIVE_SHELL_TOOL_NAME,
+  interactiveShellCommand,
+} from "./interactive-shell-policy.ts";
+
+export type RecoveryEffect =
+  | "read_only"
+  | "potentially_mutating"
+  | "recovery_control";
+
+const READ_ONLY_TOOLS = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  ASK_USER_TOOL_NAME,
+  "lsp_diagnostics",
+  "lsp_definition",
+  "lsp_references",
+  "lsp_hover",
+  "lsp_workspace_symbols",
+]);
+
+/** Known read-only tools stay available; every unclassified capability fails closed. */
+export function recoveryEffect(
+  event: Pick<ToolCallEvent, "toolName" | "input">,
+  cwd: string,
+): RecoveryEffect {
+  if (event.toolName === "recovery_check") return "recovery_control";
+  if (READ_ONLY_TOOLS.has(event.toolName)) return "read_only";
+  if (event.toolName === "bash" || event.toolName === INTERACTIVE_SHELL_TOOL_NAME) {
+    const command = event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+      ? interactiveShellCommand(event as ToolCallEvent)
+      : String((event.input as Record<string, unknown> | undefined)?.command ?? "");
+    return isPlanModeDiagnosticCommand(command, cwd) ? "read_only" : "potentially_mutating";
+  }
+  return "potentially_mutating";
+}
+
 export const RECOVERY_CAPABILITY_EVENTS = {
   request: "recovery-status:request",
 } as const;
@@ -17,7 +59,7 @@ export interface RecoveryStatusSnapshot {
   /** Der Turn, dessen Recovery noch offen ist — für Blocktexte und Status. */
   turnStartedAt?: string;
   /** Warum das Gate scharf ist. */
-  reason?: "interrupted" | "final_failure" | "workspace-changed";
+  reason?: "interrupted" | "final_failure" | "workspace-changed" | "unavailable";
 }
 
 export interface RecoveryStatusRequest {
@@ -30,27 +72,28 @@ export interface RecoveryEventBus {
   emit(channel: string, value: unknown): void;
 }
 
-const DEFAULT_SNAPSHOT: RecoveryStatusSnapshot = { armed: false };
-
 export async function requestRecoveryStatus(
   events: RecoveryEventBus,
 ): Promise<RecoveryStatusSnapshot> {
   const pending: Promise<unknown>[] = [];
-  events.emit(RECOVERY_CAPABILITY_EVENTS.request, {
-    respond(value: RecoveryStatusSnapshot | Promise<RecoveryStatusSnapshot>) {
-      // Attach rejection handlers immediately, including to later replies
-      // that may settle while an earlier provider is still being awaited.
-      pending.push(Promise.resolve(value).catch(() => undefined));
-    },
-  } satisfies RecoveryStatusRequest);
-  if (pending.length === 0) return DEFAULT_SNAPSHOT;
+  try {
+    events.emit(RECOVERY_CAPABILITY_EVENTS.request, {
+      respond(value: RecoveryStatusSnapshot | Promise<RecoveryStatusSnapshot>) {
+        // Attach rejection handlers immediately, including to later replies
+        // that may settle while an earlier provider is still being awaited.
+        pending.push(Promise.resolve(value).catch(() => undefined));
+      },
+    } satisfies RecoveryStatusRequest);
+  } catch {
+    return { armed: true, reason: "unavailable" };
+  }
+  if (pending.length === 0) return { armed: true, reason: "unavailable" };
   for (const response of pending) {
     const resolved = await response;
     if (isRecoveryStatusSnapshot(resolved)) return resolved;
   }
-  // A registered provider that cannot report its state is not evidence
-  // that writes are safe. Only an absent recovery extension defaults open.
-  return { armed: true };
+  // A provider that cannot report its state is not evidence that writes are safe.
+  return { armed: true, reason: "unavailable" };
 }
 
 export function isRecoveryStatusSnapshot(

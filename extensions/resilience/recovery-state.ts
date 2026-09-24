@@ -29,24 +29,58 @@ export function customData<T>(
     : undefined;
 }
 
-function isRecoveryRequiredMarker(
+function validTimestamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+export function isRecoveryRequiredMarker(
   value: unknown,
 ): value is RecoveryRequiredMarker {
   if (!isRecord(value)) return false;
   return (
-    typeof value.turnStartedAt === "string" &&
-    (value.reason === "interrupted" || value.reason === "final_failure")
+    (value.schemaVersion === 1 || value.schemaVersion === 2) &&
+    validTimestamp(value.timestamp) &&
+    validTimestamp(value.turnStartedAt) &&
+    (value.reason === "interrupted" || value.reason === "final_failure") &&
+    typeof value.workspaceChangedSinceTurnStart === "boolean" &&
+    typeof value.toolMayHaveMutatedWorkspace === "boolean"
   );
 }
 
-function isRecoveryCheckedMarker(
+export function isRecoveryCheckedMarker(
   value: unknown,
 ): value is RecoveryCheckedMarker {
   if (!isRecord(value)) return false;
   return (
-    typeof value.turnStartedAt === "string" &&
-    typeof value.workspaceFingerprint === "string"
+    (value.schemaVersion === 1 || value.schemaVersion === 2) &&
+    validTimestamp(value.timestamp) &&
+    validTimestamp(value.turnStartedAt) &&
+    typeof value.workspaceFingerprint === "string" &&
+    value.workspaceFingerprint.length > 0
   );
+}
+
+function unknownRequiredMarker(value: unknown, index: number): RecoveryRequiredMarker {
+  const candidate = isRecord(value) ? value : {};
+  const turnStartedAt = validTimestamp(candidate.turnStartedAt)
+    ? candidate.turnStartedAt
+    : `unknown-recovery-required-${index}`;
+  return {
+    schemaVersion: 2,
+    timestamp: validTimestamp(candidate.timestamp)
+      ? candidate.timestamp
+      : "1970-01-01T00:00:00.000Z",
+    turnStartedAt,
+    reason: candidate.reason === "final_failure" ? "final_failure" : "interrupted",
+    // Any invalid/unsupported marker has unknown mutation semantics. Never
+    // preserve apparently safe false flags from a partially trusted record.
+    workspaceChangedSinceTurnStart: true,
+    toolMayHaveMutatedWorkspace: true,
+  };
 }
 
 /**
@@ -91,13 +125,19 @@ export function latestRecoveryGate(
   entries: readonly unknown[],
 ): RecoveryGateState | undefined {
   let gate: RecoveryGateState | undefined;
-  for (const entry of entries) {
-    const required = customData<RecoveryRequiredMarker>(
-      entry,
-      "resilience.recovery-required",
-    );
-    if (required && isRecoveryRequiredMarker(required)) {
-      gate = foldRequiredMarker(required);
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (
+      isRecord(entry) &&
+      entry.type === "custom" &&
+      entry.customType === "resilience.recovery-required"
+    ) {
+      const required = entry.data;
+      gate = foldRequiredMarker(
+        isRecoveryRequiredMarker(required)
+          ? required
+          : unknownRequiredMarker(required, index),
+      );
       continue;
     }
     const checked = customData<RecoveryCheckedMarker>(

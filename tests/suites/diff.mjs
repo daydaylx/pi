@@ -1,24 +1,15 @@
 import {
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assert, eq } from "../shared/assertions.mjs";
-import {
-  assertNoGlobalChrome,
-  contrastRatio,
-  createHarness,
-  latestStatus,
-  stripAnsi,
-} from "../shared/harness.mjs";
+import { createHarness, stripAnsi } from "../shared/harness.mjs";
 import { ROOT, npmModuleEntry } from "../shared/jiti-loader.mjs";
 
 export const diffSections = {
@@ -29,7 +20,6 @@ export const diffSections = {
       diffFallback,
       diffTracker,
       diffViewer,
-      diffLearning,
       auroraState,
     } = context;
 
@@ -436,7 +426,7 @@ export const diffSections = {
         "diff-learning quiz loads",
       );
 
-      const hunk = (removed, added, path = "src/feature.ts") => ({
+      const hunk = (removed, added) => ({
         oldStart: 1,
         oldCount: removed.length,
         newStart: 1,
@@ -447,7 +437,7 @@ export const diffSections = {
         ],
       });
       const classify = (removed, added, path = "src/feature.ts") =>
-        classifier.classifyHunk(path, hunk(removed, added, path));
+        classifier.classifyHunk(path, hunk(removed, added));
 
       const changedGuard = classify(
         ["if (admin) return false;"],

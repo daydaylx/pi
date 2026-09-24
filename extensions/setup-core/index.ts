@@ -218,6 +218,30 @@ function packageVersion(path: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function versionSpecIncludes(spec: unknown, version: string | undefined): boolean {
+  if (typeof spec !== "string" || !version) return false;
+  const match = /^(\^|~)?(\d+)\.(\d+)\.(\d+)$/.exec(spec.trim());
+  const actual = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!match || !actual) return spec === version;
+
+  const [, operator = "", majorText, minorText, patchText] = match;
+  const required = [majorText, minorText, patchText].map(Number);
+  const installed = actual.slice(1).map(Number);
+  const compare = (left: number[], right: number[]) =>
+    left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+  if (!operator) return compare(required, installed) === 0;
+
+  const upper =
+    operator === "~"
+      ? [required[0], required[1] + 1, 0]
+      : required[0] > 0
+        ? [required[0] + 1, 0, 0]
+        : required[1] > 0
+          ? [0, required[1] + 1, 0]
+          : [0, 0, required[2] + 1];
+  return compare(installed, required) >= 0 && compare(installed, upper) < 0;
+}
+
 function readCompactionSettings(
   agentDir: string,
   cwd: string,
@@ -1039,9 +1063,8 @@ export default function setupCore(
           : ".pi/verify.json ignoriert (untrusted)"
         : "keine .pi/verify.json";
       const hasVersionDrift =
-        String(declaredVersion ?? "") !== String(devVersion ?? "") ||
-        (runtimeVersion !== undefined &&
-          runtimeVersion !== String(declaredVersion ?? ""));
+        !versionSpecIncludes(declaredVersion, devVersion) ||
+        (runtimeVersion !== undefined && runtimeVersion !== devVersion);
       const consistencyErrors: string[] = [];
       const hasCommandRuntime =
         typeof (

@@ -555,7 +555,7 @@ export function decideFileAccess(
   cwd: string,
   options: DecideFileAccessOptions = {},
 ): PolicyDecision {
-  const { protectedWritePath, allowOutsideProjectRead = false } = options;
+  const { protectedWritePath } = options;
   const identity = resolvePathScope(rawPath, cwd);
   const isReadRestricted = permissionLevel === "readonly";
 
@@ -574,16 +574,28 @@ export function decideFileAccess(
       : ask("Zugriff auf Secrets, Tokens, Credentials oder SSH-Keys", true);
   }
 
+  if (identity.targetKind === "other") {
+    return deny(
+      "Harte Grenze: Dateizugriff auf Spezialgeräte oder Sockets ist blockiert.",
+    );
+  }
+
+  if (identity.scope === "unresolved") {
+    return deny(
+      "Harte Projekt-, Symlink- oder Zielauflösungsgrenze: Das Dateiziel ist nicht sicher aufgelöst.",
+    );
+  }
+
+  if (operation === "read") {
+    // Normales Lesen ist global: externe Pfade und Symlinks auf nicht-sensitive
+    // Ziele sind auf allen Stufen erlaubt (auch readonly, project-write, confirm-all, yolo).
+    return ALLOW;
+  }
+
+  // Ab hier: operation === "write"
   const externalOrUnresolved =
-    identity.scope !== "project" ||
-    identity.symlinkEscape ||
-    identity.targetKind === "other";
-  const approvedExternalRead =
-    operation === "read" &&
-    allowOutsideProjectRead &&
-    identity.scope === "external" &&
-    !identity.symlinkEscape;
-  if (externalOrUnresolved && !approvedExternalRead) {
+    identity.scope !== "project" || identity.symlinkEscape;
+  if (externalOrUnresolved) {
     // YOLO 2: mehr Zugriff mit Erlaubnis statt harter Sperre.
     if (permissionLevel === "yolo-ask") {
       return ask(
@@ -597,14 +609,11 @@ export function decideFileAccess(
   }
 
   if (isReadRestricted) {
-    if (operation === "write") {
-      return protectedWritePath?.matches(rawPath, cwd)
-        ? ALLOW
-        : deny(
-            `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${protectedWritePath?.label ?? "keine Datei"}.`,
-          );
-    }
-    return ALLOW;
+    return protectedWritePath?.matches(rawPath, cwd)
+      ? ALLOW
+      : deny(
+          `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${protectedWritePath?.label ?? "keine Datei"}.`,
+        );
   }
 
   // Re-check the canonical boundary here as defense in depth. guards.ts runs
@@ -1235,7 +1244,6 @@ function isSafePlanSegment(tokens: string[], cwd: string): boolean {
   const executable = trustedExecutableName(tokens[0], cwd);
   if (!executable) return false;
   if (containsSensitivePath(tokens, cwd)) return false;
-  if (containsExternalPath(tokens, cwd)) return false;
   if (executable === "sed") return isSafeSed(tokens);
   if (executable === "git") return isSafeGit(tokens);
   if (["npm", "pnpm", "yarn"].includes(executable)) {
@@ -1301,7 +1309,6 @@ function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
   const executable = trustedExecutableName(tokens[0], cwd);
   if (!executable) return false;
   if (containsSensitivePath(tokens, cwd)) return false;
-  if (containsExternalPath(tokens, cwd)) return false;
 
   if (executable === "git") {
     return isPlanModeSafeGitCommand(tokens);

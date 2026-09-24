@@ -48,11 +48,6 @@
       "count": 1
     }
   },
-  "tests/suites/diff.mjs": {
-    "no-unused-vars": {
-      "count": 8
-    }
-  },
   "tests/suites/lsp.mjs": {
     "no-unused-vars": {
       "count": 9
@@ -78,11 +73,6 @@
   },
   "tests/suites/runtime/control-plane.mjs": {
     "no-unused-vars": {
-      "count": 1
-    }
-  },
-  "tests/suites/runtime/recovery-state.mjs": {
-    "no-useless-assignment": {
       "count": 1
     }
   },

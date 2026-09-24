@@ -1779,7 +1779,7 @@ await test("YOLO 2 shows the confirm dialog at a boundary and a rejection blocks
     const cases = [
       ["bash", { command: "sudo id" }],
       ["bash", { command: "cat ~/.ssh/id_rsa" }],
-      ["read", { path: "/etc/hostname" }],
+      ["read", { path: "~/.ssh/id_rsa" }],
       ["write", { path: "/etc/pi-yolo-dialog-test" }],
     ];
     for (const [toolName, input] of cases) {
@@ -1806,6 +1806,13 @@ await test("YOLO 2 shows the confirm dialog at a boundary and a rejection blocks
     assert(
       !routine.blocked && !routine.asked,
       "YOLO 2 stays dialog-free for routine commands",
+    );
+    const ordinaryRead = await run("2", false, "read", {
+      path: "/etc/hostname",
+    });
+    assert(
+      !ordinaryRead.blocked && !ordinaryRead.asked,
+      "YOLO 2 allows ordinary external reads without dialog",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });

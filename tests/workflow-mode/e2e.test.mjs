@@ -15,6 +15,12 @@ async function hooks(harness, name, ctx, event = {}) {
   return harness.runHooks(name, event, ctx);
 }
 
+function answerRecoveryClear(harness) {
+  harness.api.events.on("recovery-status:request", (request) =>
+    request.respond({ armed: false }),
+  );
+}
+
 /**
  * Plans live in the runtime's own state directory, so every case has to point
  * `PI_CODING_AGENT_DIR` at a scratch directory of its own. Two cases sharing
@@ -986,6 +992,7 @@ await test("a mode switch during a running turn cannot loosen that turn's guards
     try {
       let choice = "Architekturplan";
       const harness = createHarness({ select: () => choice });
+      answerRecoveryClear(harness);
       planMode.default(harness.api);
       modePermissions.default(harness.api);
       const ctx = harness.makeContext({ cwd });
@@ -1076,6 +1083,7 @@ await test("Plan Mode blocks every project write, including the old plan path", 
     const cwd = mkdtempSync(join(tmpdir(), "pi-plan-mode-guard-"));
     try {
       const harness = createHarness({ select: () => "Architekturplan" });
+      answerRecoveryClear(harness);
       planMode.default(harness.api);
       modePermissions.default(harness.api);
       const ctx = harness.makeContext({ cwd });
@@ -1507,6 +1515,7 @@ await test("both plan modes admit only the normalized Investigator SINGLE call",
       const cwd = mkdtempSync(join(tmpdir(), "pi-plan-investigator-"));
       try {
         const harness = createHarness({ select: () => label });
+        answerRecoveryClear(harness);
         planMode.default(harness.api);
         modePermissions.default(harness.api);
         const ctx = harness.makeContext({ cwd });
@@ -1576,6 +1585,7 @@ await test("YOLO stays available in work mode but never unlocks plan mode", asyn
     const cwd = mkdtempSync(join(tmpdir(), "pi-yolo-lock-"));
     try {
       const harness = createHarness({ select: () => "Architekturplan" });
+      answerRecoveryClear(harness);
       planMode.default(harness.api);
       modePermissions.default(harness.api);
       const ctx = harness.makeContext({ cwd });
@@ -1678,6 +1688,7 @@ await test("/yolo selects between three stufen, never persists them and keeps pl
     const cwd = mkdtempSync(join(tmpdir(), "pi-yolo-stufen-e2e-"));
     try {
       const harness = createHarness({ select: () => "Architekturplan" });
+      answerRecoveryClear(harness);
       planMode.default(harness.api);
       modePermissions.default(harness.api);
       const ctx = harness.makeContext({ cwd });
@@ -1760,6 +1771,7 @@ await test("YOLO 2 shows the confirm dialog at a boundary and a rejection blocks
     try {
       const run = async (level, approve, toolName, input) => {
         const harness = createHarness({ confirm: approve });
+        answerRecoveryClear(harness);
         // plan-mode is the workflow provider; without it YOLO stays locked.
         planMode.default(harness.api);
         modePermissions.default(harness.api);
@@ -1783,7 +1795,7 @@ await test("YOLO 2 shows the confirm dialog at a boundary and a rejection blocks
       const cases = [
         ["bash", { command: "sudo id" }],
         ["bash", { command: "cat ~/.ssh/id_rsa" }],
-        ["read", { path: "/etc/hostname" }],
+        ["read", { path: "~/.ssh/id_rsa" }],
         ["write", { path: "/etc/pi-yolo-dialog-test" }],
       ];
       for (const [toolName, input] of cases) {
@@ -1813,6 +1825,13 @@ await test("YOLO 2 shows the confirm dialog at a boundary and a rejection blocks
       assert(
         !routine.blocked && !routine.asked,
         "YOLO 2 stays dialog-free for routine commands",
+      );
+      const ordinaryRead = await run("2", false, "read", {
+        path: "/etc/hostname",
+      });
+      assert(
+        !ordinaryRead.blocked && !ordinaryRead.asked,
+        "YOLO 2 allows ordinary external reads without dialog",
       );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
