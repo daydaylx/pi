@@ -3,7 +3,7 @@
   "lastChangelogVersion": "0.84.4",
   "theme": "aurora-forge",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-luna",
+  "defaultModel": "gpt-6-luna",
   "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "thinkingBudgets": {
@@ -32,6 +32,7 @@
     "openai-codex/gpt-5.6-terra",
     "openai-codex/gpt-5.6-luna",
     "openai-codex/gpt-5.6-sol",
+    "openai-codex/gpt-6-luna",
     "anthropic/claude-sonnet-5",
     "openrouter/thinkingmachines/inkling:free",
     "openrouter/nvidia/nemotron-3.5-lightning:free",
@@ -52,23 +53,26 @@
     "disableBuiltins": true,
     "agentOverrides": {
       "investigator": {
-        "model": "openai-codex/gpt-5.6-luna",
+        "model": "openai-codex/gpt-6-luna",
         "thinking": "high",
         "fallbackModels": [
+          "openai-codex/gpt-5.6-luna",
           "qwen-token-plan-individual/qwen3.8-max"
         ]
       },
       "debugger": {
-        "model": "openai-codex/gpt-5.6-luna",
+        "model": "openai-codex/gpt-6-luna",
         "thinking": "high",
         "fallbackModels": [
+          "openai-codex/gpt-5.6-luna",
           "qwen-token-plan-individual/qwen3.8-max"
         ]
       },
       "verifier": {
-        "model": "openai-codex/gpt-5.6-luna",
+        "model": "openai-codex/gpt-6-luna",
         "thinking": "high",
         "fallbackModels": [
+          "openai-codex/gpt-5.6-luna",
           "openai-codex/gpt-5.6-terra"
         ]
       }
@@ -79,7 +83,8 @@
         "qwen-token-plan-individual/*",
         "anthropic/claude-sonnet-5",
         "openai-codex/gpt-5.6-luna",
-        "openai-codex/gpt-5.6-terra"
+        "openai-codex/gpt-5.6-terra",
+        "openai-codex/gpt-6-luna"
       ]
     }
   },

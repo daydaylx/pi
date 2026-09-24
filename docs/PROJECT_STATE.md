@@ -23,12 +23,17 @@ erfolgten auf ausdrückliche Nutzeranweisung.
   UND die aktive Projektwurzel, mit dem Hinweis, dass `verify` absichtlich
   nie das Projekt prüft (siehe bestehender Kommentar in `setup-core/index.ts`
   — architekturbewusst nicht verändert, nur die Ausgabe geschärft).
-- **2.2 Skill-Blockade-Resilienz:** `workflow-policy.ts`s harte
-  Projekt-/Symlink-/Secret-Grenze trägt jetzt einen Recovery-Hinweis
-  ("kein Abbruchgrund"); `AGENTS.md` verbietet Aufgabenabbruch nach einer
-  einzelnen blockierten Ressource. Kein Code-Bug gefunden — der ursprüngliche
-  hard-06-Abbruch war Modellverhalten nach einem bereits korrekt
-  strukturierten Toolfehler, kein Absturz.
+- **2.2 Entkopplung Lese- vs. Mutationsgrenze (Permission-Architektur):**
+  Die Projektgrenze wurde architektonisch sauber als reine Mutationsgrenze
+  definiert. Normales Lesen (`read`, `grep`, `find`, `ls` sowie reine Bash-
+  Diagnosekommandos im Planmodus) ist global freigegeben, sofern keine
+  Secrets berührt werden und das Projekt vertrauenswürdig ist. Externe Symlinks
+  sind beim Lesen über das kanonische Ziel zulässig; bei Mutationen (`write`,
+  `edit`, mutierende Shell-Befehle) bleibt die Projekt- und Symlink-Grenze
+  eine harte Barriere. In untrusted Projekten werden externe Lesezugriffe
+  durch das Trust-Gate in `guards.ts` blockiert. Die frühere enge Ausnahme
+  `isDocumentedRuntimeDocsRead` entfällt. Damit sind Skill-Dateien,
+  Konfigurationen und externe Repositories lesbar.
 - **2.3 headless-Berechtigungsstufe:** neue `PermissionLevel` `"headless"`
   (`shared/workflow-status.ts`, `shared/permission-policy.ts`,
   `permissions/tool-policy.ts`, `permissions/session-state.ts`,

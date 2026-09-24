@@ -5,7 +5,28 @@ Die Orchestrierung stammt aus dem exakt gepinnten
 `subagents.disableBuiltins: true` vollständig deaktiviert, damit keine
 überlappenden Rollen im Agent-Katalog erscheinen.
 
-## Aktive Rollen
+## Temporäre Task-Agenten (Standardweg)
+
+Statt einer festen Rolle übergibt der Hauptagent `spec` an das
+`subagent`-Tool. Der Agent existiert nur für diese Aufgabe: zustandslos, mit
+frischem Kontext, ohne Memory, ohne Delegation und ohne Schreibzugriff.
+Begründung und Regeln: `docs/decisions/031-temporary-task-agents.md`.
+
+| Profil     | Tools der Runtime          | Verwendung                                             |
+| ---------- | -------------------------- | ------------------------------------------------------ |
+| `analyse`  | read, grep, find, ls       | unbekannten Bereich oder Kontrollfluss belegt eingrenzen |
+| `research` | read, grep, find, ls       | unabhängige Recherche im Projekt                       |
+| `verify`   | über die Verifier-Kette    | unabhängige Prüfung; braucht `spec.verification`       |
+
+Der Hauptagent nennt nur Ziel, Kontext, Scope, erwartetes Ergebnis und
+gewünschte Fähigkeiten. Die Runtime bestimmt effektive Tools, Modell, Budgets
+(Laufzeit, Tool-Calls, Turns), Limit pro Lauf und Tiefe. Ergebnisse trennen
+Beobachtung, Schlussfolgerung, offene Annahme und Unsicherheit mit Quelle.
+Bei widersprüchlichen Ergebnissen entscheidet die Evidenz, nicht Agentenzahl,
+Reihenfolge oder Modellname. Subagenten liefern Arbeitsergebnisse, der
+Hauptagent entscheidet.
+
+## Aktive Rollen (Übergang)
 
 | Rolle          | Tools                      | Verantwortung                                                                    |
 | -------------- | -------------------------- | -------------------------------------------------------------------------------- |
@@ -35,12 +56,23 @@ besitzt `edit` oder `write`. `debugger` und `verifier` dürfen technisch Shell
 ausführen, ihre Profile verbieten aber ausdrücklich Projektänderungen; der
 Hauptagent bleibt alleiniger regulärer Patch-Eigentümer.
 
-`investigator` und `debugger` laufen auf `openai-codex/gpt-5.6-luna` mit
-Thinking-Stufe `high`. `agents/verifier.md` läuft auf
-`anthropic/claude-sonnet-5` ebenfalls mit `high` und
-`openai-codex/gpt-5.6-terra` als `fallbackModels`. Die Modell-IDs stehen in
-`settings.enabledModels` und `settings.subagents.modelScope.allow`; der Fork
-wertet `fallbackModels` aus, sonst wäre der Fallback eine Angabe ohne Wirkung.
+`investigator`, `debugger` und `verifier` laufen alle auf
+`openai-codex/gpt-6-luna` mit Thinking-Stufe `high` (mechanische Prüfung).
+`openai-codex/gpt-5.6-luna` ist bei allen dreien der erste `fallbackModels`-
+Eintrag (Vergleichspfad/Fallback während der GPT-6-Luna-Übergangsphase);
+`verifier` behält zusätzlich `openai-codex/gpt-5.6-terra` als zweiten
+Fallback. Die Modell-IDs stehen in `settings.enabledModels` und
+`settings.subagents.modelScope.allow`; der Fork wertet `fallbackModels` aus,
+sonst wäre der Fallback eine Angabe ohne Wirkung.
+
+Eine vom Hauptpfad unabhängige fachliche Second Opinion außerhalb der
+Luna-Modelllinie liefert nicht der `verifier`-Subagent, sondern die separate,
+opt-in Architektur unter `extensions/second-opinion/`: Sie nutzt standardmäßig
+`anthropic/claude-sonnet-5` und prüft die tatsächlich aufgelöste
+Modellidentität statt Konfigurationslabels. Identische Modelle werden gesperrt;
+wenn eine andere Modellfamilie gefordert ist, werden gleiche oder unbekannte
+Familien fail-closed abgelehnt. Modell-, Session-,
+Projekt- oder Manifestwechsel nach der Freigabe machen den Snapshot ungültig.
 
 ## Reduzierte Tool-Surface
 

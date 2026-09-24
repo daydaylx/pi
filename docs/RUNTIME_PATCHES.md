@@ -66,6 +66,12 @@ angewendet — siehe **Bundle-Patches** unten. `tests/p1-runtime.mjs` prüfte bi
 dahin ausschließlich die unbebündelten Dateien und wäre diese Lücke nie
 aufgefallen; es prüft jetzt zusätzlich den Bundle-Chunk.
 
+Beim Upgrade der aktiven Runtime auf Pi `0.87.1` trafen alle elf versionierten
+Patch-Anker weiterhin eindeutig. Die Patch- und Testversion wurden auf `0.87.1`
+aktualisiert; Runtime- und Bundle-Änderungen werden weiterhin gemeinsam geprüft.
+Die lokale Pi-Dev-Abhängigkeit bleibt vorerst auf `0.84.3`, daher meldet
+`/setup-doctor` diese Versionsabweichung weiterhin.
+
 ## Wiederherstellen
 
 Die Patches liegen in `node_modules` und überleben kein `npm update` der

@@ -19,7 +19,7 @@
 2. `writes`, `executesProjectCode`, `delegates` und externe Seiteneffekte gelten als mutierend oder potenziell mutierend.
 3. `project_check` wird nach Profil klassifiziert; nur ausdrücklich rein lesende Profile dürfen separat freigegeben werden.
 4. Fehlender, unbekannter oder nicht scharfer Recovery-Status darf nicht als pauschale Freigabe für mutierende Pfade dienen.
-5. Der bewusst dokumentierte YOLO-Bypass bleibt eine separate, explizite Produktentscheidung.
+5. YOLO-Stufen umgehen das Recovery-Integritätsgate nicht; der Gate gilt unabhängig von der Permission-Stufe (ADR 016 und ADR 029).
 
 ## Todos
 
@@ -60,3 +60,14 @@
 ## Erforderlicher Abschlussnachweis
 
 PR mit Capability-Matrix, Guard-Tests für alle genannten Tools und einem echten Prozess-Effekt-Test.
+
+## Umsetzungsstand
+
+Die Recovery-Wirkung wird über eine gemeinsame Capability-Klassifikation bestimmt:
+
+- bekannte Nur-Lese-Tools und `recovery_check` bleiben frei;
+- Prozessaufrufe, Delegation und unbekannte Tools gelten konservativ als potenziell mutierend;
+- fehlender oder ungültiger Recovery-Status sperrt potenziell mutierende Fähigkeiten;
+- der Gate läuft unabhängig von der YOLO-Stufe und verwirft Antworten aus einer inzwischen gewechselten Session.
+
+Regressionen decken Prozess-/Delegationspfade, Custom-Tools, YOLO-Stufen, Provider-Ausfall und fehlerhafte Marker ab. `PI_TEST_SUITE=runtime node tests/run.mjs` ist zuletzt mit 1.807 Assertions erfolgreich gelaufen.

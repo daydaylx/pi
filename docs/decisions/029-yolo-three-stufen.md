@@ -21,17 +21,24 @@ sind über `/permission` oder `/yolo` wählbar.
 | 2     | `yolo-ask`            | `2`     | Rückfrage mit Gefahr-Dialog      |
 | 3     | `yolo-full`           | `3`     | erlaubt, auch sudo und Secrets   |
 
-„Harte Grenze" meint: Secrets/Credentials, Pfade außerhalb des Projekts und
-Symlink-Escapes, Systempfad-Schreibzugriffe, sudo/su, System-Paketmanager,
-Download-to-shell, opake Interpreter, externe Shell-Schreibzugriffe,
-unquotierte Shell-Variablen sowie Schreibzugriffe auf Ausführungspfade
-(`.git/`, `.pi/lsp.json`, `.pi/verify.json`).
+„Harte Grenze" meint: Secrets/Credentials, Schreibzugriffe außerhalb des
+Projekts und Symlink-Escapes bei Mutationen, Systempfad-Schreibzugriffe, sudo/su,
+System-Paketmanager, Download-to-shell, opake Interpreter, externe Shell-
+Schreibzugriffe, unquotierte Shell-Variablen sowie Schreibzugriffe auf
+Ausführungspfade (`.git/`, `.pi/lsp.json`, `.pi/verify.json`). Normales Lesen
+ist dagegen global zulässig, solange kein Secret berührt wird und das Projekt
+als vertrauenswürdig gilt.
 
-Ohne Grenzberührung verhalten sich alle drei Stufen gleich: keine
-Rückfragen, kein Recovery-Gate, keine Commit-Verifier-Pflicht, unbekannte
-Tools erlaubt. `/yolo` ohne Argument schaltet wie bisher Stufe 1 um; `/yolo 2`
-und `/yolo 3` wechseln direkt in die Stufe, dieselbe Stufe erneut oder
-`/yolo off` schaltet YOLO aus. `Super+Y` bleibt bei Stufe 1.
+Ohne Grenzberührung verhalten sich alle drei Stufen bei der Permission-Policy
+gleich: keine Rückfragen, keine Commit-Verifier-Pflicht, unbekannte Tools
+werden nach der bestehenden YOLO-Policy behandelt. Das Recovery-Gate ist
+keine Permission-Rückfrage, sondern eine Workspace-Integritätsgrenze: Bei
+armed oder unbekanntem Recovery-Zustand blockiert es mutierende,
+ausführende und delegierende Fähigkeiten unabhängig von jeder YOLO-Stufe;
+bekannte read-only Tools und `recovery_check` bleiben verfügbar. `/yolo` ohne
+Argument schaltet wie bisher Stufe 1 um; `/yolo 2` und `/yolo 3` wechseln
+direkt in die Stufe, dieselbe Stufe erneut oder `/yolo off` schaltet YOLO aus.
+`Super+Y` bleibt bei Stufe 1.
 
 ## Was auch Stufe 3 nicht aufhebt
 
@@ -39,6 +46,9 @@ und `/yolo 3` wechseln direkt in die Stufe, dieselbe Stufe erneut oder
   und externe Tools blockiert.
 - **Plan-Mode-Schreibschutz (ADR 012/016):** Der Planmodus bleibt auf jeder
   Stufe eine harte Schreibgrenze für Agenten-Tool-Aufrufe.
+- **Recovery-Integrität (ADR 016):** Ein unbekannter oder scharf gestellter
+  Recovery-Zustand bleibt auf jeder Stufe eine harte Grenze. Nur bekannte
+  read-only Fähigkeiten und `recovery_check` bleiben frei.
 - **Credential-Pfad im interaktiven Shell-Tool:** Passwörter laufen nie durch
   die vom Modell gelieferte Kommandozeile (`sudo -S`, Pipelines, `sshpass`,
   `--password`). `sudo id` im `interactive_shell`-Tool funktioniert; das

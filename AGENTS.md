@@ -3,11 +3,11 @@
 Diese Datei trägt nur Regeln, die in fast jeder Sitzung gelten. Seltene
 Ablaufregeln stehen in der jeweils zuständigen Datei: Sitzungs- und
 Checkpoint-Ablauf im Skill `context-checkpoint`, Subagenten-Details in
-`docs/subagents.md`, Verifikationsprofile in `docs/verify-profiles.md`. Diese
-und alle weiteren in dieser Datei genannten relativen Pfade (z. B. auch unter
-`extensions/`, `agents/`) gehören zum Pi-Setup selbst, nicht zum aktiven,
-bearbeiteten Projekt, und sind dort entsprechend nicht auffindbar — ein
-Leseversuch dort ist kein Bug, sondern erwartungsgemäß erfolglos.
+`docs/subagents.md`, Verifikationsprofile in `docs/verify-profiles.md`. In dieser Datei genannte relative Pfade unter `extensions/`, `agents/`
+gehören zum Pi-Setup selbst. Lesezugriffe auf Setup-Dateien, Skills und
+externe Ressourcen außerhalb des Projekts sind in vertrauenswürdigen Projekten
+zulässig, solange keine Secrets berührt werden; Schreibzugriffe bleiben strikt
+projektgebunden.
 
 ## Schutzregeln
 
@@ -129,6 +129,44 @@ Ein Subagent wird nur verwendet, wenn mindestens eine Bedingung erfüllt ist:
 5. Die Entscheidung besitzt hohe Folgekosten.
 
 Triviale Teilaufgaben bleiben beim Hauptagenten.
+
+### Temporäre Task-Agenten (Standardweg)
+
+Delegiere bevorzugt über einen temporären Task-Agenten: `subagent` mit
+`spec` statt `agent` (`docs/decisions/031-temporary-task-agents.md`). Der
+Hauptagent definiert die Arbeit, die Runtime die Grenzen, Evidenz entscheidet
+über das Ergebnis.
+
+- `spec`: `objective`, `profile` (`analyse`, `research`, `verify`),
+  `delegationReason`, optional `context`, `scope`, `expectedOutput`,
+  `requestedCapabilities`, `modelPreference`, `constraints`. Fähigkeiten sind
+  Wünsche, keine Rechte; Schreiben, Netzwerk und Delegation werden nie
+  vergeben. Das Modell wählt die Runtime.
+- Temporäre Agenten sind zustandslos und sehen nur den übergebenen Kontext:
+  so wenig wie möglich, so viel wie für eine verlässliche Ausführung nötig.
+  Nicht mitgeben: den ganzen Chat, das ganze Repository, Kontext anderer
+  Subagenten.
+- Budgets (Laufzeit, Tool-Calls, Turns) und das Limit pro Lauf setzt die
+  Runtime. Ein `aborted`, `timed_out` oder `policy_blocked` Lauf ist kein
+  Erfolg. Laufende Agenten lassen sich mit `stop` beenden, sobald sie nicht
+  mehr gebraucht werden.
+- Ergebnisse trennen belegte Beobachtung, Schlussfolgerung, offene Annahme
+  und verbleibende Unsicherheit und nennen die Quelle (Datei und Stelle oder
+  Kommando). Keine Prozentwerte als Bewertungsgrundlage.
+- Subagenten haben keine eigene Entscheidungsautorität über den Hauptlauf. Sie
+  liefern begrenzte Arbeitsergebnisse; Verantwortung, Integration und
+  endgültige Entscheidungen bleiben beim Hauptagenten. Sie sprechen nicht
+  miteinander, alle Ergebnisse laufen über den Hauptagenten.
+- Widersprechen sich Ergebnisse, entscheidet weder Mehrheit noch die zuerst
+  fertige Antwort noch das stärkere Modell: Aussagen und Evidenz vergleichen,
+  bei Bedarf selbst nachprüfen oder gezielt verifizieren lassen, verbleibende
+  Unsicherheit offen nennen.
+- `profile: "verify"` läuft über die Verifier-Kette (Ticket, Dedup,
+  Commit-Gate) und braucht `spec.verification` (`originalRequest`,
+  `delegatedQuestion`, `diff`, `baseline`, `acceptance`).
+
+Die Rollen unten (`investigator`, `debugger`, `verifier`) gelten für die
+Übergangszeit weiter und werden durch `spec` abgelöst.
 
 ### Delegationsmuster
 

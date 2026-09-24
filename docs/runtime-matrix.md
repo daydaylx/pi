@@ -2,7 +2,7 @@
 
 | Komponente          | Gepinnte Version / Wert               | Verifikation                                                         |
 | ------------------- | ------------------------------------- | -------------------------------------------------------------------- |
-| Pi-Runtime          | `0.84.3`                              | installiertes globales Paket und `pi --version`                      |
+| Pi-Runtime          | `0.87.1`                              | installiertes globales Paket und `pi --version`                      |
 | Pi-Dev-Abhängigkeit | `0.84.3`                              | exaktes lokales Manifest/Lock; `/setup-doctor` meldet die Abweichung |
 | Node.js             | `22.23.2`                             | `node --version`                                                     |
 | npm                 | `10.9.8`                              | `npm --version`                                                      |
@@ -16,12 +16,11 @@
 
 ## Release-Gate
 
-`npm run verify` muss ohne bekannte Fehlschläge bestehen. Die installierte Pi-Runtime und
-die gepinnte Entwicklungsabhängigkeit stehen beide auf `0.84.3`. Weicht eine der beiden
-künftig wieder ab, laufen Typen und Tests gegen eine andere API als die produktiv
-ausgeführte — Abweichungen im Laufzeitverhalten sind dann möglich. `/setup-doctor` hält
-eine solche Abweichung sichtbar; siehe `docs/RUNTIME_PATCHES.md` für das Vorgehen bei
-einem Runtime-Upgrade.
+`npm run verify` muss ohne bekannte Fehlschläge bestehen. Die installierte Pi-Runtime
+steht auf `0.87.1`, die gepinnte Entwicklungsabhängigkeit weiterhin auf `0.84.3`.
+Diese Abweichung ist bewusst sichtbar: Typen und Tests laufen gegen eine ältere API als
+die produktiv ausgeführte Runtime. `/setup-doctor` meldet sie; siehe
+`docs/RUNTIME_PATCHES.md` für das Runtime-Upgrade und die Patch-Verifikation.
 
 **Pin-Bump bei `git:`-Packages (z. B. `pi-subagents`) reicht allein nicht.** Pi löst
 `git:`-Einträge aus `settings.json`s `packages` gegen ein eigenes Cache-Verzeichnis auf
