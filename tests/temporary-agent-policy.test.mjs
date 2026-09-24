@@ -2,6 +2,7 @@ import { assert, eq, test, counters as summary } from "./shared/assertions.mjs";
 import { importModule as load } from "./shared/jiti-loader.mjs";
 
 const policy = await load("extensions/permissions/temporary-agent-policy.ts");
+const renderers = await load("extensions/aurora-ui/tool-renderers.ts");
 
 const spec = {
   objective: "Find the cause",
@@ -166,6 +167,26 @@ await test("plan mode admits only read-only, artifact-free foreground specs", ()
     );
   }
   eq(planAllowed("work", "project-write", { spec }), false, "work mode is not plan-restricted");
+});
+
+await test("TUI shows temporary agents by objective and write right, not by role", () => {
+  const shown = renderers.temporaryAgentDisplay(spec);
+  eq(shown.agent, "TEMP AGENT", "generic label");
+  eq(shown.label, "Find the cause · read-only", "objective and read-only");
+  const long = renderers.temporaryAgentDisplay({ ...spec, objective: "x".repeat(200) });
+  assert(long.label.length < 80, "long objectives are clipped");
+  assert(long.label.includes("…"), "clipped objectives are marked");
+  eq(
+    renderers.temporaryAgentDisplay({ ...spec, objective: "a\n b" }).label,
+    "a b · read-only",
+    "whitespace collapsed",
+  );
+  eq(renderers.temporaryAgentDisplay(undefined), undefined, "no spec");
+  eq(renderers.temporaryAgentDisplay([]), undefined, "array is no spec");
+  assert(
+    renderers.temporaryAgentDisplay({}).label.startsWith("ohne Objective"),
+    "missing objective is visible, not hidden",
+  );
 });
 
 const { passed, failed } = summary();

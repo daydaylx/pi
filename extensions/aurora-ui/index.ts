@@ -37,6 +37,7 @@ import {
   renderRecentTools,
   renderDashboard,
   renderSubagentBranches,
+  temporaryAgentDisplay,
   type ActiveToolView,
   type SubagentInfo,
 } from "./tool-renderers.ts";
@@ -154,6 +155,7 @@ type SubagentToolArgs = {
   action?: unknown;
   async?: unknown;
   agent?: unknown;
+  spec?: unknown;
   tasks?: unknown;
   chain?: unknown;
 };
@@ -181,6 +183,10 @@ function foregroundSubagentsFromArgs(
 ): SubagentInfo[] {
   const input = args as SubagentToolArgs | undefined;
   if (!input || input.action !== undefined || input.async === true) return [];
+  const temporary = temporaryAgentDisplay(input.spec);
+  if (temporary) {
+    return [{ ...temporary, runId, status: "running" }];
+  }
   const agents = [
     ...(typeof input.agent === "string" ? [input.agent] : []),
     ...agentNamesFromTaskList(input.tasks),

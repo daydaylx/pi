@@ -12,4 +12,8 @@ Neben der SINGLE-Ausführung sind ausschließlich vier Management-Aktionen verf�
 
 Für `verifier` und `debugger` keine aufrufspezifischen `timeoutMs` oder `turnBudget` setzen: Beide Rollen verwenden ausschließlich ihr großzügiges Profil-Timeout. Eigene Limits werden technisch abgelehnt, damit unabhängige Prüfung oder Fehleranalyse nicht vorzeitig mit unvollständigem Ergebnis endet.
 
+Temporäre Task-Agenten: statt `agent` einen Vertrag `spec` übergeben (SINGLE: { spec: { objective, profile, delegationReason, context?, scope?, expectedOutput?, requestedCapabilities?, modelPreference?, constraints? } }). Profile: `analyse` und `research` (nur lesen und suchen), `verify` (nur mit `spec.verification`: originalRequest, delegatedQuestion, diff, baseline, acceptance). `modelPreference` ist `fast`, `cheap`, `strong`, `independent` oder `provider/model`; die Runtime entscheidet. `requestedCapabilities` sind Wünsche, keine Rechte: Schreiben, Netzwerk und Delegation werden nie vergeben. Temporäre Agenten sind stateless, erhalten nur den übergebenen Kontext und liefern Befunde mit Quelle (Datei/Stelle oder Kommando), getrennt nach Beobachtung, Schlussfolgerung, offener Annahme und Unsicherheit — keine Prozentwerte. Nutze `spec` nicht zusammen mit `agent`, `task`, `model`, `cwd` oder `output`.
+
+Sie liefern begrenzte Arbeitsergebnisse; Entscheidung und Integration bleiben beim Hauptagenten. Widersprechen sich Ergebnisse, weder Mehrheit noch die zuerst fertige Antwort noch das stärkere Modell entscheiden: Aussagen und Evidenz gegenüberstellen, bei Bedarf selbst nachprüfen oder gezielt verifizieren lassen und verbleibende Unsicherheit offen benennen. Evidenz entscheidet, nicht Agentenzahl oder Modellname.
+
 {{safetyGuidance}}

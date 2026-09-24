@@ -72,6 +72,32 @@ export interface SubagentInfo {
   status: "running" | "paused" | "needs_attention" | "queued";
 }
 
+const TEMP_AGENT_LABEL = "TEMP AGENT";
+const TEMP_AGENT_OBJECTIVE_MAX = 60;
+
+/**
+ * Visible delegation for temporary task agents (ADR 031): no role name, but the
+ * objective and the write right. Temporary agents never write; the model is
+ * chosen by the runtime and therefore not known from the call arguments.
+ */
+export function temporaryAgentDisplay(
+  spec: unknown,
+): { agent: string; label: string } | undefined {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+    return undefined;
+  }
+  const raw = (spec as Record<string, unknown>).objective;
+  const objective = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+  const shown =
+    objective.length > TEMP_AGENT_OBJECTIVE_MAX
+      ? `${objective.slice(0, TEMP_AGENT_OBJECTIVE_MAX - 1)}…`
+      : objective;
+  return {
+    agent: TEMP_AGENT_LABEL,
+    label: `${shown || "ohne Objective"} · read-only`,
+  };
+}
+
 interface ToolPresentation {
   glyph: string;
   label: string;
