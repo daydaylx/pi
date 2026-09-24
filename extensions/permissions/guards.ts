@@ -23,6 +23,7 @@ import type { PermissionSession } from "./session-state.ts";
 import {
   assessTemporaryAgentSpec,
   planModeTemporarySpecAllowed,
+  rewriteVerifySpecToVerifier,
 } from "./temporary-agent-policy.ts";
 import { decideTool } from "./tool-policy.ts";
 import {
@@ -214,6 +215,21 @@ export function registerPermissionGuards(
     // Delegationsprüfung gezogen, damit assessVerifierDelegation denselben
     // Snapshot auch für den Dedup-Check gegen einen bereits abgeschlossenen
     // Verifier-Lauf nutzen kann.
+    // Ein verify-Spec wird vor der Verifier-Prüfung in den geprüften
+    // Verifier-Aufruf übersetzt, damit Ticket, Dedup und Commit-Gate greifen.
+    const verifyRewrite = rewriteVerifySpecToVerifier(event);
+    if (verifyRewrite.kind === "blocked") {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: verifyRewrite.reason,
+      };
+    }
+    if (verifyRewrite.kind === "rewritten") {
+      const target = event.input as Record<string, unknown>;
+      delete target.spec;
+      Object.assign(target, verifyRewrite.input);
+    }
     const verification = requestVerificationCapabilities(pi.events);
     const verifierAssessment = await assessVerifierDelegation(
       event,

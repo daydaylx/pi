@@ -9,6 +9,7 @@ const spec = {
   delegationReason: "independent analysis",
 };
 const call = (input) => ({ toolName: "subagent", input });
+const analyseOnly = () => spec;
 const assess = (input) => policy.assessTemporaryAgentSpec(call(input));
 
 await test("spec guard ignores non-spec subagent calls and other tools", () => {
@@ -53,10 +54,68 @@ await test("spec guard refuses malformed spec and unknown profile", () => {
   assert(assess({ spec: { objective: "x" } }).blocked, "missing profile");
 });
 
-await test("profile verify cannot bypass the verifier ledger", () => {
+const verification = {
+  originalRequest: "Fix the bug",
+  delegatedQuestion: "Is the fix correct?",
+  diff: "src/a.ts changed",
+  baseline: "clean",
+  acceptance: "tests pass",
+};
+const verifySpec = { ...spec, profile: "verify", verification };
+const rewrite = (input) => policy.rewriteVerifySpecToVerifier(call(input));
+
+await test("bare verify spec is never passed through unchecked", () => {
   const result = assess({ spec: { ...spec, profile: "verify" } });
-  assert(result.blocked, "verify spec blocked");
-  assert(/verifier/.test(result.reason), "points to the verifier agent");
+  assert(result.blocked, "verify spec blocked by the generic guard");
+  assert(/verifier/i.test(result.reason), "points to the verifier chain");
+});
+
+await test("verify spec is rewritten into the checked verifier call", async () => {
+  const result = rewrite({ spec: verifySpec });
+  eq(result.kind, "rewritten", "rewritten");
+  eq(result.input.agent, "verifier", "agent");
+  assert(!("spec" in result.input), "spec removed");
+  const task = result.input.task;
+  const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
+  for (const section of verifierPolicy.VERIFIER_REQUIRED_SECTIONS) {
+    assert(
+      section.patterns.some((p) => p.test(task)),
+      `renders required section: ${section.label}`,
+    );
+  }
+  assert(/acceptance/i.test(task), "renders acceptance criteria");
+  const complete = await verifierPolicy.assessVerifierDelegation(
+    call(result.input),
+    "/nonexistent-root",
+    { verifierVerdict: undefined },
+  );
+  assert(!complete.blocked, "rewritten call passes the verifier completeness check");
+});
+
+await test("verify rewrite refuses incomplete, widened or model-picking specs", () => {
+  eq(rewrite({ spec: analyseOnly() }).kind, "none", "non-verify untouched");
+  for (const key of Object.keys(verification)) {
+    const partial = { ...verification, [key]: " " };
+    eq(rewrite({ spec: { ...verifySpec, verification: partial } }).kind, "blocked", `missing ${key}`);
+  }
+  eq(rewrite({ spec: { ...spec, profile: "verify" } }).kind, "blocked", "no verification block");
+  eq(rewrite({ spec: { ...verifySpec, modelPreference: "strong" } }).kind, "blocked", "model");
+  eq(rewrite({ spec: { ...verifySpec, requestedCapabilities: ["write"] } }).kind, "blocked", "capabilities");
+  for (const extra of [{ model: "p/m" }, { cwd: "/tmp" }, { output: "o" }, { context: "fork" }, { task: "x" }, { agent: "y" }]) {
+    eq(rewrite({ spec: verifySpec, ...extra }).kind, "blocked", `extra ${Object.keys(extra)[0]}`);
+  }
+  eq(
+    rewrite({ spec: { ...verifySpec, verification: { ...verification, reverificationJustification: "" } } }).kind,
+    "blocked",
+    "empty justification",
+  );
+});
+
+await test("re-verification justification is carried into the task", () => {
+  const result = rewrite({
+    spec: { ...verifySpec, verification: { ...verification, reverificationJustification: "new evidence" } },
+  });
+  assert(/Re-verification justification\nnew evidence/.test(result.input.task), "justification heading");
 });
 
 await test("capability requests are not grants: the guard leaves narrowing to the runtime", () => {
@@ -102,7 +161,7 @@ await test("plan mode admits only read-only, artifact-free foreground specs", ()
       `${mode} implement`,
     );
     assert(
-      !planAllowed(mode, "project-write", { spec: { ...spec, profile: "verify" } }),
+      !planAllowed(mode, "project-write", { spec: verifySpec }),
       `${mode} verify`,
     );
   }

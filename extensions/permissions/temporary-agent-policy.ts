@@ -88,11 +88,10 @@ export function assessTemporaryAgentSpec(
     return block(`Profil muss eines von ${KNOWN_PROFILES.join(", ")} sein.`);
   }
   if (profile === "verify") {
-    // Dedup, Ticket und Commit-Gate des Verifiers hängen am Agentennamen
-    // `verifier`. Bis sie an das Profil gebunden sind (Migrationsstufe 5),
-    // würde ein spec-Aufruf sie umgehen.
+    // Normalerweise schon von rewriteVerifySpecToVerifier umgeschrieben. Bleibt
+    // ein verify-Spec bis hierher übrig, wurde der Rewrite nicht ausgeführt.
     return block(
-      "Profil `verify` ist noch nicht freigegeben. Prüfaufträge weiter über den Agenten `verifier` delegieren.",
+      "Profil `verify` läuft nur über die Verifier-Übersetzung (Ticket, Dedup, Commit-Gate).",
     );
   }
   return PERMITTED;
@@ -133,4 +132,120 @@ export function planModeTemporarySpecAllowed(
     (input.async === undefined || input.async === false) &&
     (input.artifacts === undefined || input.artifacts === false)
   );
+}
+
+/**
+ * Pflichtfelder eines `verify`-Specs. Sie entsprechen der Delegationsvorlage
+ * aus docs/subagents.md und werden 1:1 in die Überschriften gerendert, die
+ * assessVerifierDelegation verlangt.
+ */
+const VERIFY_FIELDS = [
+  ["originalRequest", "Original user request"],
+  ["delegatedQuestion", "Delegated question"],
+  ["diff", "Implementation / diff to verify"],
+  ["baseline", "Pre-existing workspace state"],
+  ["acceptance", "Acceptance criteria"],
+] as const;
+const VERIFY_FIELD_MAX = 12_000;
+
+export type VerifyRewrite =
+  | { kind: "none" }
+  | { kind: "blocked"; reason: string }
+  | { kind: "rewritten"; input: Record<string, unknown> };
+
+/**
+ * Übersetzt `spec.profile === "verify"` in den geprüften Verifier-Aufruf
+ * (`agent: "verifier"` + Vorlagen-Task). Das Verifier-Ticket bindet die
+ * Agenten-Definition (Modell, Prompt), Dedup und Commit-Gate an den Namen
+ * `verifier`; ein synthetischer Agent würde diese Bindung umgehen. Der Main
+ * sieht nur die Spec-API, die Prüfkette bleibt unverändert.
+ *
+ * Erwartet `spec.verification` mit den Feldern aus VERIFY_FIELDS und optional
+ * `reverificationJustification`. `modelPreference` ist für Verify verboten:
+ * das Verifier-Modell kommt ausschließlich aus der Runtime-Konfiguration.
+ */
+export function rewriteVerifySpecToVerifier(
+  event: ToolCallEvent,
+): VerifyRewrite {
+  if (!isTemporarySpecCall(event)) return { kind: "none" };
+  const input = event.input as Record<string, unknown>;
+  const spec = input.spec;
+  if (!isRecord(spec) || spec.profile !== "verify") return { kind: "none" };
+
+  const block = (reason: string): VerifyRewrite => ({
+    kind: "blocked",
+    reason: `Temporärer Agent (ADR 031, verify): ${reason}`,
+  });
+  // Dieselben Verbote wie für jeden spec-Aufruf; zuerst prüfen, damit ein
+  // umgeschriebener Aufruf nie mehr Rechte hat als der Spec-Aufruf.
+  const generic = assessTemporaryAgentSpec({
+    toolName: "subagent",
+    input: { ...input, spec: { ...spec, profile: "analyse" } },
+  } as unknown as ToolCallEvent);
+  if (generic.blocked) return { kind: "blocked", reason: generic.reason };
+
+  if (spec.modelPreference !== undefined) {
+    return block(
+      "`modelPreference` ist für Verify verboten; das Modell bestimmt die Runtime.",
+    );
+  }
+  if (spec.requestedCapabilities !== undefined) {
+    return block(
+      "`requestedCapabilities` ist für Verify nicht änderbar (read, search, readonly_shell).",
+    );
+  }
+  const verification = spec.verification;
+  if (!isRecord(verification)) {
+    return block(
+      `\`spec.verification\` fehlt. Pflichtfelder: ${VERIFY_FIELDS.map(([k]) => k).join(", ")}.`,
+    );
+  }
+  const missing: string[] = [];
+  const sections: string[] = [];
+  for (const [key, heading] of VERIFY_FIELDS) {
+    const value = verification[key];
+    if (typeof value !== "string" || value.trim() === "") missing.push(key);
+    else if (value.length > VERIFY_FIELD_MAX) {
+      return block(
+        `\`verification.${key}\` überschreitet ${VERIFY_FIELD_MAX} Zeichen.`,
+      );
+    } else sections.push(`## ${heading}\n${value.trim()}`);
+  }
+  if (missing.length > 0) {
+    return block(
+      `unvollständiger Prüfauftrag, es fehlt: ${missing.join(", ")}.`,
+    );
+  }
+  const justification = verification.reverificationJustification;
+  if (justification !== undefined) {
+    if (typeof justification !== "string" || justification.trim() === "") {
+      return block(
+        "`verification.reverificationJustification` muss ein nicht leerer String sein.",
+      );
+    }
+    sections.push(`## Re-verification justification\n${justification.trim()}`);
+  }
+  const objective =
+    typeof spec.objective === "string" ? spec.objective.trim() : "";
+  const reason =
+    typeof spec.delegationReason === "string"
+      ? spec.delegationReason.trim()
+      : "";
+  if (!objective || !reason) {
+    return block("`objective` und `delegationReason` sind Pflicht.");
+  }
+
+  const { spec: _spec, ...rest } = input;
+  return {
+    kind: "rewritten",
+    input: {
+      ...rest,
+      agent: "verifier",
+      task: [
+        `Objective: ${objective}`,
+        `Delegation reason: ${reason}`,
+        ...sections,
+      ].join("\n\n"),
+    },
+  };
 }

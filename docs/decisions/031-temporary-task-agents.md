@@ -2,9 +2,8 @@
 
 ## Status
 
-In Umsetzung. Stufe 1–4 (Spec, Policy-Schnitt, Limits, Budgets) sind im Fork
-`pi-subagents` (Branch `feat/temporary-agent-spec`) umgesetzt. Verifier-,
-Second-Opinion-, Rabbit- und TUI-Migration folgen (siehe Plan). Konzept:
+In Umsetzung. Stufe 1–4 (Spec, Policy-Schnitt, Limits, Budgets) liegen im Fork
+`pi-subagents` (Branch `feat/temporary-agent-spec`), Stufe 2 und 5 (Guard, Verify-Übersetzung) im Repo `pi`. Second-Opinion-, Rabbit- und TUI-Migration folgen (siehe Plan). Konzept:
 `pi-temporary-subagents-konzept.md`.
 
 ## Kontext
@@ -82,6 +81,22 @@ werden nicht vergeben; `implement` liefert derzeit keine Tools und wird als
 `policy_blocked` abgelehnt (nur der Main schreibt). `readonly_shell` (`bash`)
 gibt es nur im Profil `verify`. Verweigerte Fähigkeiten stehen in
 `denied` und im Task-Text des Kindes.
+
+### Verify-Profil
+
+Das Verifier-Ticket bindet Agenten-Definition (Modell, Prompt), Dedup und
+Commit-Gate (ADR 017, 021) an den Namen `verifier`. Ein synthetischer Agent
+würde diese Bindung umgehen. Deshalb übersetzt die Guard-Schicht einen Spec mit
+`profile: "verify"` deterministisch in den geprüften Verifier-Aufruf
+(`agent: "verifier"` + Vorlagen-Task), bevor `assessVerifierDelegation` läuft.
+Der Main sieht nur die Spec-API; die Prüfkette bleibt unverändert.
+
+`spec.verification` ist Pflicht (`originalRequest`, `delegatedQuestion`,
+`diff`, `baseline`, `acceptance`, optional `reverificationJustification`).
+`modelPreference`, `requestedCapabilities`, `model`, `cwd`, `output`, Budgets
+und `context: fork` sind für Verify verboten. `agents/verifier.md` bleibt als
+technische Profildefinition bestehen; der Alias `agent: "verifier"` gilt
+während der Übergangsphase weiter und entfällt in Stufe 8.
 
 ### Limits (vorläufig)
 
