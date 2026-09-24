@@ -2,18 +2,25 @@
 
 ## Status
 
-Umgesetzt für den Normalmodus (live geprüft: `analyse`-Spec und Guard-Ablehnungen;
-nur per Test belegt: Token-Budget, Limits, Verify-Übersetzung): Spec-Vertrag, Rechteschnitt,
-Limits, Budgets (inklusive erzwungenem Token-Budget) und Telemetrie im Fork
-`pi-subagents` (Branch `feat/temporary-agent-spec`); Guards, Verify-Übersetzung
-und TUI-Anzeige im Repo `pi`. Second Opinion ist konform und schreibt in die
-gemeinsame Run-History. Rabbit nutzt den Spec-Pfad (`pi-rabbitmode`), mit
+Umgesetzt für den Normalmodus. Live geprüft (Pi 0.87.1, Fork `7a38125`):
+`analyse`-Spec mit vollständigem Evidenzformat, Metadaten (Budgets,
+`tokenBudgetEnforced: true`, Status `completed`) und Ablehnungen der Guards
+(`write`, `verify` ohne Vertrag, `model` am Spec). Nur per Test belegt:
+Limit pro Lauf, Gesamtbudget, Verify-Übersetzung, Abbruch (`aborted`).
+
+Fork `pi-subagents` (Branch `feat/temporary-agent-spec`): Spec-Vertrag,
+Rechteschnitt, Limits, Budgets inklusive erzwungenem Token-Budget, Telemetrie,
+Evidenzprüfung. Repo `pi`: Guards, Verify-Übersetzung, TUI-Anzeige, Second
+Opinion (konform, schreibt in die gemeinsame Run-History), `AGENTS.md` und
+`docs/subagents.md`. Rabbit (`pi-rabbitmode`) nutzt den Spec-Pfad mit
 konfigurierbaren Limits über `PI_RABBIT_MAX_*`.
 
-Noch offen: interaktiver Live-Test der Rabbit-Kette, danach Entfernen der
-alten Rollenpfade (`agents/{investigator,debugger,verifier}.md`, `rabbit-*`,
-`BASELINE_ROLES`, `dynamic-role.ts`, `/rabbit define`) und Anpassung von
-`AGENTS.md`. Konzept: `pi-temporary-subagents-konzept.md`.
+Noch offen: interaktiver Live-Test der Rabbit-Kette (`/rabbit spawn {spec}`,
+DAG mit `role: "temporary"`). Erst danach dürfen die Rollen `investigator` und
+`debugger`, die Rabbit-Rollenbibliothek (`rabbit-*`, `BASELINE_ROLES`),
+`dynamic-role.ts` und `/rabbit define` entfallen. `agents/verifier.md` bleibt
+als technisches Profil der Verifier-Kette bestehen. Konzept:
+`pi-temporary-subagents-konzept.md`.
 
 ## Kontext
 
@@ -157,8 +164,12 @@ deterministische Runtime-Regeln genügen.
 - Rabbit: `PI_RABBIT_MAX_STEPS`, `PI_RABBIT_MAX_PARALLEL`,
   `PI_RABBIT_MAX_DEPTH` konfigurieren die Orchestrierungsgrenzen (mit harten
   Obergrenzen, Defaults 12/3/2).
-- Offen: Ergebnis-Validierung für das Evidenzformat (heute nur im Task-Text
-  gefordert, nicht geprüft), Turn-genaue Lauf-Zählung, das Entfernen der festen
-  Rollen `investigator` und `debugger` samt Plan-Mode-Ausnahme und Rabbit-
-  Rollenbibliothek. Der `verifier` bleibt als technisches Profil der
+- Evidenzformat: `checkEvidenceFormat` im Fork prüft abgeschlossene
+  Vordergrundläufe deterministisch (vier Abschnitte, keine Confidence-
+  Prozentwerte), meldet nur und hängt bei Lücken einen Hinweis an. Asynchrone
+  Läufe (RPC, Rabbit) werden nicht geprüft; ob jede Quelle stimmt, prüft der
+  Hauptagent.
+- Offen: Turn-genaue Lauf-Zählung (das Limit gilt je Sitzung), das Entfernen
+  der festen Rollen `investigator` und `debugger` samt Plan-Mode-Ausnahme und
+  Rabbit-Rollenbibliothek. Der `verifier` bleibt als technisches Profil der
   Verifier-Kette bestehen.
