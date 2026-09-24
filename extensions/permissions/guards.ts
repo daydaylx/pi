@@ -20,6 +20,10 @@ import {
   interactiveShellCommand,
 } from "../shared/interactive-shell-policy.ts";
 import type { PermissionSession } from "./session-state.ts";
+import {
+  assessTemporaryAgentSpec,
+  planModeTemporarySpecAllowed,
+} from "./temporary-agent-policy.ts";
 import { decideTool } from "./tool-policy.ts";
 import {
   assessBash,
@@ -230,6 +234,14 @@ export function registerPermissionGuards(
         normalizedVerifierInput,
       );
     }
+    const temporarySpecAssessment = assessTemporaryAgentSpec(event);
+    if (temporarySpecAssessment.blocked) {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: temporarySpecAssessment.reason,
+      };
+    }
     const debuggerAssessment = assessDebuggerDelegation(event);
     if (debuggerAssessment.blocked) {
       return {
@@ -271,7 +283,10 @@ export function registerPermissionGuards(
         reason: recoveryBlockReason(recovery.reason),
       };
     }
-    if (planModeInvestigatorSingleAllowed(workflow, session.level(), event)) {
+    if (
+      planModeInvestigatorSingleAllowed(workflow, session.level(), event) ||
+      planModeTemporarySpecAllowed(workflow, session.level(), event)
+    ) {
       // The package would otherwise write debug artifacts below ctx.cwd.
       (event.input as Record<string, unknown>).artifacts = false;
       return;

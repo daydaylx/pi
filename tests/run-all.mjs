@@ -30,6 +30,11 @@ const suites = [
     env: {},
   },
   {
+    name: "temporary-agent-policy",
+    file: "temporary-agent-policy.test.mjs",
+    env: {},
+  },
+  {
     name: "benchmark-telemetry",
     file: "benchmark-telemetry.test.mjs",
     env: {},
