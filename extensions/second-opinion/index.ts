@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { recordSecondOpinionRun } from "./run-history.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
@@ -131,6 +132,7 @@ export default function secondOpinion(pi: ExtensionAPI): void {
         signal,
         recordTelemetry: (telemetry) => {
           pi.appendEntry("second-opinion.telemetry", telemetry);
+          recordSecondOpinionRun(telemetry, ctx.cwd);
         },
       });
       if (!prepared.ok) {
@@ -156,6 +158,7 @@ export default function secondOpinion(pi: ExtensionAPI): void {
           signal,
           recordTelemetry: (telemetry) => {
             pi.appendEntry("second-opinion.telemetry", telemetry);
+            recordSecondOpinionRun(telemetry, ctx.cwd);
           },
         },
       );

@@ -35,6 +35,11 @@ const suites = [
     env: {},
   },
   {
+    name: "second-opinion-run-history",
+    file: "second-opinion-run-history.test.mjs",
+    env: {},
+  },
+  {
     name: "benchmark-telemetry",
     file: "benchmark-telemetry.test.mjs",
     env: {},

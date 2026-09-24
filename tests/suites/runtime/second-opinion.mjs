@@ -106,7 +106,7 @@ function deps(root, calls) {
   };
 }
 
-export const secondOpinionSections = {
+const sectionsUnderTest = {
   "second opinion core": async ({ section, secondOpinion }) => {
     await section("second opinion core", async () => {
       if (!secondOpinion) return;
@@ -456,3 +456,23 @@ export const secondOpinionSections = {
     });
   },
 };
+
+// The tool records each request in the shared run history. Point it at a
+// throwaway agent dir so the suite never appends to the user's real history.
+export const secondOpinionSections = Object.fromEntries(
+  Object.entries(sectionsUnderTest).map(([name, run]) => [
+    name,
+    async (context) => {
+      const previous = process.env.PI_CODING_AGENT_DIR;
+      const isolated = mkdtempSync(path.join(tmpdir(), "pi-so-history-"));
+      process.env.PI_CODING_AGENT_DIR = isolated;
+      try {
+        return await run(context);
+      } finally {
+        if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previous;
+        rmSync(isolated, { recursive: true, force: true });
+      }
+    },
+  ]),
+);
