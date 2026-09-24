@@ -183,7 +183,7 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
 - **Live-Pin-Status:** `pi list` lädt ausschließlich den in `settings.json`
   (`packages`) gepinnten Git-Fork unter
   `~/.pi/agent/git/github.com/daydaylx/pi-subagents`; dessen Checkout steht
-  auf `c433b8de16f6e23c82f51b37de7f6e2a27932a82`. `npm/node_modules/
+  auf `8191a24c83bcf42bfcff1a9bc4d7b2111109b0ac`. `npm/node_modules/
 pi-subagents` (npm-Registry) ist davon unabhängig und dient nur Auroras
   Testbaum (`npm --prefix npm run test`/`verify`), nicht einer echten
   Pi-Sitzung. Die Verifier-Erzwingung bleibt bewusst in Auroras Guard-Schicht
