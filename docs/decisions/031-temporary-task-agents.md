@@ -43,9 +43,11 @@ false`, immer `context: "fresh"` (`fork` wird abgelehnt). Übergeben wird nur
    Laufzeit je Sitzung. Nach dem harten Tool-Limit werden alle Tools
    gesperrt, der Agent kann nur noch abschließen. Alle Werte sind über
    `config.temporaryAgents` konfigurierbar. Der Main kann eine Laufzeit nur
-   verkürzen. **Token-Budget:** wird deklariert und berichtet
-   (`tokenBudgetEnforced: false`), ist aber noch **nicht erzwungen**, weil die
-   Runtime kein hartes Token-Limit kennt.
+   verkürzen. **Token-Budget:** kumulierte Assistant-Tokens
+   (Input + Output über alle Turns). Erreicht der Agent das Limit, sperrt der
+   Kindprozess alle Tools und weist den Agenten einmal an abzuschließen; die
+   Durchsetzung läuft im Kind und gilt daher für Vorder- und Hintergrundläufe.
+   Default 500 000, konfigurierbar über `config.temporaryAgents`.
 5. **Abbruch und Status.** `running | completed | failed | aborted |
 timed_out | policy_blocked`. Ein abgebrochener oder abgelaufener Lauf gilt
    nie als `completed`. Abbruch nutzt die bestehenden Aktionen `stop` und
@@ -118,10 +120,11 @@ erfüllt die Regeln bereits ohne Umbau:
 
 Bewusst unverändert: das Feld `confidence` bleibt eine grobe Stufe
 (`low | medium | high`), keine Prozentangabe, und steht neben Gegenargument und
-fehlender Evidenz. Es ist kein primärer Bewertungsgrund. Offen: Second Opinion
-schreibt noch nicht in die gemeinsame Subagent-Telemetrie (`run-history`). Das
-wird zusammen mit Stufe 7/8 angeglichen, sobald die Telemetriefelder
-feststehen.
+fehlender Evidenz. Es ist kein primärer Bewertungsgrund. Jeder Aufruf schreibt
+außerdem einen Eintrag in die gemeinsame `run-history.jsonl` (Agent
+`second_opinion`, Kategorie und Decision-Id, Ergebnis, Latenz, Tokens; nie
+Frage, Kontext oder Antwort). Alles außer `completed` steht als Nicht-Erfolg
+darin.
 
 ### Limits (vorläufig)
 
@@ -142,6 +145,11 @@ deterministische Runtime-Regeln genügen.
   Second Opinion und Rabbit migriert und getestet sind.
 - Tests: `test/unit/temporary-spec.test.ts`,
   `test/integration/temporary-spec-executor.test.ts` im Fork.
-- Offen: Token-Budget erzwingen, Ergebnis-Validierung für das Evidenzformat,
-  TUI-Anzeige, Turn-genaue Lauf-Zählung, Konfliktregel (10) in
-  `subagent-tool-description.md` und `AGENTS.md` aufnehmen.
+- Rabbit: `PI_RABBIT_MAX_STEPS`, `PI_RABBIT_MAX_PARALLEL`,
+  `PI_RABBIT_MAX_DEPTH` konfigurieren die Orchestrierungsgrenzen (mit harten
+  Obergrenzen, Defaults 12/3/2).
+- Offen: Ergebnis-Validierung für das Evidenzformat (heute nur im Task-Text
+  gefordert, nicht geprüft), Turn-genaue Lauf-Zählung, das Entfernen der festen
+  Rollen `investigator` und `debugger` samt Plan-Mode-Ausnahme und Rabbit-
+  Rollenbibliothek. Der `verifier` bleibt als technisches Profil der
+  Verifier-Kette bestehen.
