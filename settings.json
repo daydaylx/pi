@@ -46,7 +46,7 @@
     "openrouter/stealth/union-alpha"
   ],
   "packages": [
-    "git:github.com/daydaylx/pi-subagents@8191a24c83bcf42bfcff1a9bc4d7b2111109b0ac",
+    "git:github.com/daydaylx/pi-subagents@7a38125b3e3141f66148836127343f02366c38cf",
     "npm:pi-web-access@0.24.2"
   ],
   "subagents": {
