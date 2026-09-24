@@ -43,7 +43,12 @@ import json
 import os
 import sys
 
-OPENBENCH_HOME = os.path.expanduser("~/.local/share/real-duel/openbench")
+OPENBENCH_HOME = os.path.expanduser(
+    os.environ.get(
+        "PI_OPENBENCH_HOME",
+        "~/.local/share/real-duel/openbench",
+    )
+)
 
 # candidates/pi-real.toml setzt bewusst isolate_home=false -- Pis agentDir
 # (und damit run-history.jsonl) loest deshalb immer auf ~/.pi/agent auf,

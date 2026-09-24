@@ -17,7 +17,11 @@ const result = spawnSync(
   {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+    env: {
+      ...process.env,
+      PI_OPENBENCH_HOME: path.join(root, ".agent", "test-deps", "openbench"),
+      PYTHONDONTWRITEBYTECODE: "1",
+    },
   },
 );
 
