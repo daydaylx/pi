@@ -2,9 +2,18 @@
 
 ## Status
 
-In Umsetzung. Stufe 1–4 (Spec, Policy-Schnitt, Limits, Budgets) liegen im Fork
-`pi-subagents` (Branch `feat/temporary-agent-spec`), Stufe 2 und 5 (Guard, Verify-Übersetzung) im Repo `pi`. Second Opinion ist als konform dokumentiert (kein Umbau). Rabbit- und TUI-Migration folgen (siehe Plan). Konzept:
-`pi-temporary-subagents-konzept.md`.
+Umgesetzt für den Normalmodus (live geprüft: `analyse`-Spec und Guard-Ablehnungen;
+nur per Test belegt: Token-Budget, Limits, Verify-Übersetzung): Spec-Vertrag, Rechteschnitt,
+Limits, Budgets (inklusive erzwungenem Token-Budget) und Telemetrie im Fork
+`pi-subagents` (Branch `feat/temporary-agent-spec`); Guards, Verify-Übersetzung
+und TUI-Anzeige im Repo `pi`. Second Opinion ist konform und schreibt in die
+gemeinsame Run-History. Rabbit nutzt den Spec-Pfad (`pi-rabbitmode`), mit
+konfigurierbaren Limits über `PI_RABBIT_MAX_*`.
+
+Noch offen: interaktiver Live-Test der Rabbit-Kette, danach Entfernen der
+alten Rollenpfade (`agents/{investigator,debugger,verifier}.md`, `rabbit-*`,
+`BASELINE_ROLES`, `dynamic-role.ts`, `/rabbit define`) und Anpassung von
+`AGENTS.md`. Konzept: `pi-temporary-subagents-konzept.md`.
 
 ## Kontext
 
