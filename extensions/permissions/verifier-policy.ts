@@ -26,7 +26,6 @@ import type { WorkflowAssessment } from "./workflow-policy.ts";
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 
 const VERIFIER_AGENT = "verifier";
-const DEBUGGER_AGENT = "debugger";
 
 function samePathScope(
   expected: readonly string[],
@@ -49,13 +48,11 @@ function canonicalRoot(cwd: string): string | undefined {
 }
 
 /**
- * Both `verifier` and `debugger` ship a generous `timeoutMs` in their own
- * agent frontmatter (agents/verifier.md, agents/debugger.md) specifically so
- * an independent check or a hypothesis-testing run is never cut off mid-way.
- * A caller-supplied `turnBudget` or `timeoutMs` would silently shrink that
- * back down — observed in practice for `debugger` (a 120000ms override timed
- * out with only partial output) — so both keys are rejected outright for
- * these two roles rather than merely discouraged in prose.
+ * The `verifier` profile ships a generous `timeoutMs` in its own agent
+ * frontmatter (agents/verifier.md) specifically so an independent check is
+ * never cut off mid-way. A caller-supplied `turnBudget` or `timeoutMs` would
+ * silently shrink that back down, so both keys are rejected outright rather
+ * than merely discouraged in prose.
  */
 function budgetOverrideErrors(
   input: Record<string, unknown>,
@@ -328,28 +325,6 @@ export async function assessVerifierDelegation(
   }
   const dedup = await assessVerifierDedup(task, cwd, verification);
   if (dedup.blocked) return dedup;
-  return PERMITTED;
-}
-
-/**
- * Prüft einen einzelnen `subagent`-Tool-Call für die Debugger-Rolle.
- * Anders als beim Verifier gibt es keine Pflichtvorlage — `agents/debugger.md`
- * markiert fehlende Angaben selbst als Annahme —, aber dieselbe
- * Budget-Grenze wie beim Verifier gilt: Der Hauptagent darf das großzügige
- * `timeoutMs` aus der Agent-Definition nicht per Aufrufparameter verkürzen.
- */
-export function assessDebuggerDelegation(
-  event: ToolCallEvent,
-): WorkflowAssessment {
-  if (event.toolName !== "subagent") return PERMITTED;
-  const input = isRecord(event.input) ? event.input : {};
-  if (typeof input.action === "string") return PERMITTED;
-  if (input.agent !== DEBUGGER_AGENT) return PERMITTED;
-
-  const errors = budgetOverrideErrors(input, "Debugger", "agents/debugger.md");
-  if (errors.length > 0) {
-    return { blocked: true, reason: errors.join(" ") };
-  }
   return PERMITTED;
 }
 

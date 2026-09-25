@@ -98,7 +98,7 @@ Agentenlauf die Anzeige zurück.
 
 | #   | Schritt                                          | Erwartet                      | Beobachtet | ✓/✗ |
 | --- | ------------------------------------------------ | ----------------------------- | ---------- | --- |
-| 20  | Read-only `investigator` starten                 | Läuft, liefert Befunde inline |            |     |
+| 20  | Read-only `analyse`-Spec starten               | Läuft, liefert Befunde inline |            |     |
 | 21  | Im Planmodus `npm test` versuchen                | Blockiert                     |            |     |
 | 22  | Im Planmodus Datei außerhalb des Plans schreiben | Blockiert                     |            |     |
 | 23  | Im Planmodus Plandatei schreiben                 | Erlaubt                       |            |     |

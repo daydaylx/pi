@@ -98,6 +98,55 @@ export function assessTemporaryAgentSpec(
 }
 
 /**
+ * Obergrenze gestarteter Subagenten pro Parent-Lauf (ein Nutzer-Turn). Das ist
+ * eine Obergrenze, kein Zielwert: einfache Aufgaben bleiben beim Hauptagenten.
+ * Die Sitzungsgrenze (`maxSubagentSpawnsPerSession`) bleibt davon getrennt.
+ */
+export const MAX_AGENTS_PER_PARENT_RUN = 3;
+
+/**
+ * Anzahl der Subagenten, die ein `subagent`-Ausführungsaufruf starten würde.
+ * Aktionen (`list`, `status`, `stop`, `interrupt`) starten nichts.
+ */
+export function subagentLaunchCount(event: ToolCallEvent): number {
+  if (event.toolName !== "subagent" || !isRecord(event.input)) return 0;
+  const input = event.input;
+  if (typeof input.action === "string") return 0;
+  if (Array.isArray(input.tasks)) return input.tasks.length;
+  if (Array.isArray(input.chain)) return input.chain.length;
+  return 1;
+}
+
+export interface ParentRunAgentCounter {
+  /** Blockgrund, falls `requested` weitere Agenten das Limit überschreiten. */
+  check(requested: number): string | undefined;
+  /** Zählt erfolgreich freigegebene Starts. */
+  commit(requested: number): void;
+  /** Neuer Parent-Lauf (Nutzer-Turn) oder neue Sitzung. */
+  reset(): void;
+  used(): number;
+}
+
+export function createParentRunAgentCounter(
+  max: number = MAX_AGENTS_PER_PARENT_RUN,
+): ParentRunAgentCounter {
+  let count = 0;
+  return {
+    check(requested) {
+      if (requested <= 0 || count + requested <= max) return undefined;
+      return `Temporärer Agent (ADR 031): Limit von ${max} Subagenten pro Lauf erreicht (${count} gestartet, ${requested} angefordert). Die Arbeit direkt erledigen oder im nächsten Turn delegieren.`;
+    },
+    commit(requested) {
+      if (requested > 0) count += requested;
+    },
+    reset() {
+      count = 0;
+    },
+    used: () => count,
+  };
+}
+
+/**
  * Plan Mode admits a spec call only when it is provably read-only and
  * artifact-free: profile analyse/research, no capability beyond read/search,
  * foreground, no output. The guard normalizes `artifacts` to false.

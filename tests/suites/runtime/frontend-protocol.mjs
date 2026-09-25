@@ -344,7 +344,7 @@ export const frontendProtocolSections = {
           subagents: [
             {
               agent: "investigator",
-              role: "investigator",
+              label: "investigator",
               runId: "r1",
               status: "queued",
             },

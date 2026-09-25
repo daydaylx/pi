@@ -348,7 +348,7 @@ export function projectSubagentBranches(
 ): SubagentBranchInfo[] {
   return subagents.map((info) => ({
     agent: info.agent,
-    role: info.label ?? info.agent,
+    label: info.label ?? info.agent,
     runId: info.runId,
     status: branchStatusFromSubagentInfo(info.status),
     focus: info.phase,

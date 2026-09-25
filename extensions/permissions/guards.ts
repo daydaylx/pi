@@ -7,10 +7,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import { confirmAction } from "../shared/permission-dialog.ts";
-import {
-  decideBash,
-  resolvePathScope,
-} from "../shared/permission-policy.ts";
+import { decideBash, resolvePathScope } from "../shared/permission-policy.ts";
 import {
   recoveryEffect,
   requestRecoveryStatus,
@@ -24,6 +21,8 @@ import {
 import type { PermissionSession } from "./session-state.ts";
 import {
   assessTemporaryAgentSpec,
+  createParentRunAgentCounter,
+  subagentLaunchCount,
   planModeTemporarySpecAllowed,
   rewriteVerifySpecToVerifier,
 } from "./temporary-agent-policy.ts";
@@ -31,11 +30,9 @@ import { decideTool } from "./tool-policy.ts";
 import {
   assessBash,
   assessWorkflowTool,
-  planModeInvestigatorSingleAllowed,
   planModeMutationGuard,
 } from "./workflow-policy.ts";
 import {
-  assessDebuggerDelegation,
   assessGitCommitVerifierGate,
   assessVerifierDelegation,
   normalizeVerifierDelegationInput,
@@ -130,7 +127,24 @@ export function registerPermissionGuards(
   pi: ExtensionAPI,
   session: PermissionSession,
 ): void {
+  // Limit pro Parent-Lauf: der Zähler wird mit jedem neuen Nutzer-Turn und
+  // jeder neuen Sitzung zurückgesetzt und zählt nur freigegebene Starts.
+  const parentRunAgents = createParentRunAgentCounter();
+  pi.on("agent_start", () => parentRunAgents.reset());
+  pi.on("session_start", () => parentRunAgents.reset());
+
   pi.on("tool_call", async (event: ToolCallEvent, ctx) => {
+    const launches = subagentLaunchCount(event);
+    const limitReason = parentRunAgents.check(launches);
+    if (limitReason) {
+      return { block: true, ...stopNonInteractive(ctx), reason: limitReason };
+    }
+    const outcome = await guardToolCall(event, ctx);
+    if (!outcome?.block) parentRunAgents.commit(launches);
+    return outcome;
+  });
+
+  const guardToolCall = async (event: ToolCallEvent, ctx: ExtensionContext) => {
     if (!ctx.isProjectTrusted()) {
       if (!READ_ONLY_TOOLS.includes(event.toolName)) {
         return {
@@ -245,14 +259,6 @@ export function registerPermissionGuards(
         reason: temporarySpecAssessment.reason,
       };
     }
-    const debuggerAssessment = assessDebuggerDelegation(event);
-    if (debuggerAssessment.blocked) {
-      return {
-        block: true,
-        ...stopNonInteractive(ctx),
-        reason: debuggerAssessment.reason,
-      };
-    }
     // YOLO hebt die technische Commit-Gate-Pflicht (ADR 021) auf — bewusste
     // Lockerung, analog zu Claude Codes bypassPermissions-Modus. Die
     // Vollständigkeits-/Dedup-Prüfung der Delegation selbst (oben) bleibt
@@ -297,7 +303,6 @@ export function registerPermissionGuards(
       };
     }
     if (
-      planModeInvestigatorSingleAllowed(workflow, session.level(), event) ||
       planModeTemporarySpecAllowed(workflow, session.level(), event)
     ) {
       // The package would otherwise write debug artifacts below ctx.cwd.
@@ -363,7 +368,7 @@ export function registerPermissionGuards(
       return { block: true, reason: "Aktion vom Benutzer abgelehnt." };
     }
     normalizeNativeFileTarget(event, ctx.cwd);
-  });
+  };
 
   // user_bash fires only for a `!`/`!!`-prefixed command the human types
   // directly (see @earendil-works/pi-coding-agent's UserBashEvent doc

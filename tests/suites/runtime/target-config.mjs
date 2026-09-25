@@ -93,7 +93,7 @@ export const targetConfigSections = {
               ? model.startsWith(pattern.slice(0, -1))
               : model === pattern,
           );
-        for (const role of ["investigator", "debugger", "verifier"]) {
+        for (const role of ["verifier"]) {
           const override = subagentSettings?.agentOverrides?.[role];
           const model = override?.model;
           const hasModel = typeof model === "string" && model.length > 0;
@@ -121,15 +121,10 @@ export const targetConfigSections = {
             `${role}'s fallback models are enabled and in scope`,
           );
         }
-        eq(
-          subagentSettings?.agentOverrides?.investigator?.thinking,
-          "high",
-          "investigator uses the configured high thinking level",
-        );
-        eq(
-          subagentSettings?.agentOverrides?.debugger?.thinking,
-          "high",
-          "debugger uses the configured high thinking level",
+        assert(
+          !("investigator" in (subagentSettings?.agentOverrides ?? {})) &&
+            !("debugger" in (subagentSettings?.agentOverrides ?? {})),
+          "retired investigator/debugger roles carry no model override",
         );
         eq(
           subagentSettings?.agentOverrides?.verifier?.thinking,

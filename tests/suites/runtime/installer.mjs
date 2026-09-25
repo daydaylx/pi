@@ -65,14 +65,14 @@ export const installerSections = {
         );
       }
 
-      // Exactly three agent profiles.
+      // Exactly one agent profile: the verifier chain's technical profile.
       const agentFiles = deployed.filter((f) => f.startsWith("agents/"));
       eq(
         agentFiles.length,
-        3,
-        "greenfield installs exactly three agent profiles",
+        1,
+        "greenfield installs exactly one agent profile",
       );
-      for (const role of ["investigator.md", "debugger.md", "verifier.md"]) {
+      for (const role of ["verifier.md"]) {
         assert(
           deployedSet.has(`agents/${role}`),
           `greenfield includes agents/${role}`,
@@ -80,7 +80,13 @@ export const installerSections = {
       }
 
       // No legacy agent profiles.
-      for (const legacy of ["planner.md", "worker.md", "reviewer.md"]) {
+      for (const legacy of [
+        "planner.md",
+        "worker.md",
+        "reviewer.md",
+        "investigator.md",
+        "debugger.md",
+      ]) {
         assert(
           !deployedSet.has(`agents/${legacy}`),
           `greenfield does not include legacy agents/${legacy}`,
@@ -162,14 +168,14 @@ export const installerSections = {
           "deployed target has no retired agent-shipped .pi description",
         );
 
-        // Exactly three agents.
+        // Exactly one agent profile (verifier).
         const deployedAgents = readdirSync(path.join(target, "agents")).filter(
           (f) => f.endsWith(".md"),
         );
         eq(
           deployedAgents.length,
-          3,
-          "deployed target has exactly three agent profiles",
+          1,
+          "deployed target has exactly one agent profile",
         );
 
         // No archive session logs.
@@ -263,7 +269,7 @@ export const installerSections = {
         );
 
         // Current agents are installed.
-        for (const role of ["investigator.md", "debugger.md", "verifier.md"]) {
+        for (const role of ["verifier.md"]) {
           assert(
             existsSync(path.join(target, "agents", role)),
             `upgrade installs agents/${role}`,

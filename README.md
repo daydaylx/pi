@@ -60,10 +60,10 @@ Details zu Ablage, Freigabe, Editieren und der Qualitätsprüfung stehen in
 
 ## Subagenten
 
-Es gibt ausschließlich drei lokale Rollen: `investigator` für die belegte
-Analyse unbekannter Bereiche, `debugger` für Reproduktion und Diagnose
-unbekannter Bugs sowie `verifier` für die unabhängige Prüfung riskanter
-Umsetzungen. Planung, Implementierung und finale Kommunikation bleiben beim
+Es gibt keine festen Subagenten-Rollen. Der Hauptagent beschreibt
+aufgabenspezifische, temporäre Task-Agenten als `spec` (Profile `analyse`,
+`research`, `verify`; ADR 031); höchstens 3 pro Parent-Lauf. Die Verifier-
+Kette behält `agents/verifier.md` als technisches Profil. Planung, Implementierung und finale Kommunikation bleiben beim
 Hauptagenten; Delegation ist nie eine automatische Pflichtkette. Der
 `verifier` ist nur bei den in `AGENTS.md` aufgezählten Risikofaktoren
 verpflichtend — der Umfang eines Diffs allein löst keine Delegation aus.
@@ -76,7 +76,7 @@ reduziert die akzeptierten Parameter auf SINGLE-Ausführung sowie `list`,
 den sichtbaren Beschreibungstext; `maxSubagentSpawnsPerSession: 5` begrenzt die
 Starts pro Sitzung. Es gibt keine Parallelitätskonfiguration — das Harness
 führt keine parallelen Subagenten aus. Frischer Kontext und das Verbot
-verschachtelter Delegation sind Eigenschaften der drei Profil-Tools.
+verschachtelter Delegation sind Eigenschaften des Verifier-Profils und der temporären Spec-Agenten.
 
 ## Berechtigungen und Freigaben
 
@@ -101,9 +101,9 @@ Für Bash sind nur `git status`/`diff`/`log`, `rg`, `find` ohne mutierende
 Optionen und die reinen Lesewerkzeuge `pwd`, `ls`, `cat`, `head`, `tail`, `wc`,
 `stat`, `du`, `df`, `tree`, `sort` und `uniq` zulässig. Projekt-Skripte,
 Redirections, Shell-Verkettungen und mutierende Git-Kommandos bleiben
-blockiert. Eine artefaktfreie Investigator-SINGLE-Delegation ist nur bei
+blockiert. Eine artefaktfreie read-only Spec-Delegation (`analyse`/`research`) ist nur bei
 unbekanntem Repository-Bereich, Kontrollfluss oder Änderungssurface erlaubt;
-Debugger, Verifier, Management-Aktionen, Hintergrundläufe und Ausgabe-Dateien
+`verify`, Management-Aktionen, Hintergrundläufe und Ausgabe-Dateien
 bleiben im Planmodus gesperrt. `readonly` selbst bleibt vollständig gesperrt;
 `yolo` hebt die Plan-Mode-Grenzen für Agenten-Tool-Aufrufe nicht auf. Ein vom
 Menschen selbst per `!`/`!!` eingegebener Bash-Befehl durchläuft diesen Guard

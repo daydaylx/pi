@@ -234,7 +234,7 @@ aufgehoben, während sein Systemprompt weiterhin „implementiere nichts" sagte.
 Antwortet **keine** Workflow-Extension auf die Capability-Anfrage, meldet die
 Brücke `mode: undefined` statt wie früher `work`. Die Permission-Schicht
 behandelt das fail-closed: es bleiben nur die Tools erlaubt, die in jedem Modus
-lesend sind; `plan_write`, der Investigator und `verify({check:"typecheck"})`
+lesend sind; `plan_write`, die read-only Spec-Delegation und `verify({check:"typecheck"})`
 brauchen einen bestätigten Zustand, und YOLO ist für diesen unbekannten
 Zustand gesperrt (anders als für eine aktive, tatsächlich bestätigte Planung —
 dort lässt sich YOLO aktivieren, hebt aber `planModeMutationGuard`/

@@ -6,7 +6,7 @@ Umgesetzt für den Normalmodus. Live geprüft (Pi 0.87.1, Fork `7a38125`):
 `analyse`-Spec mit vollständigem Evidenzformat, Metadaten (Budgets,
 `tokenBudgetEnforced: true`, Status `completed`) und Ablehnungen der Guards
 (`write`, `verify` ohne Vertrag, `model` am Spec). Nur per Test belegt:
-Limit pro Lauf, Gesamtbudget, Verify-Übersetzung, Abbruch (`aborted`).
+Limit pro Parent-Lauf (3), Gesamtbudget, Verify-Übersetzung, Abbruch (`aborted`).
 
 Fork `pi-subagents` (Branch `feat/temporary-agent-spec`): Spec-Vertrag,
 Rechteschnitt, Limits, Budgets inklusive erzwungenem Token-Budget, Telemetrie,
@@ -15,9 +15,11 @@ Opinion (konform, schreibt in die gemeinsame Run-History), `AGENTS.md` und
 `docs/subagents.md`. Rabbit (`pi-rabbitmode`) nutzt den Spec-Pfad mit
 konfigurierbaren Limits über `PI_RABBIT_MAX_*`.
 
-Noch offen: interaktiver Live-Test der Rabbit-Kette (`/rabbit spawn {spec}`,
-DAG mit `role: "temporary"`). Erst danach dürfen die Rollen `investigator` und
-`debugger`, die Rabbit-Rollenbibliothek (`rabbit-*`, `BASELINE_ROLES`),
+Entfernt: die Rollen `investigator` und `debugger` (Rollendateien, Modell-
+Overrides, Plan-Mode-Ausnahme, `assessDebuggerDelegation`, Command-Katalog).
+Frontend-Vertrag: `subagents[].role` wurde durch `label` (plus optional
+`objective`, `profile`) ersetzt. Noch offen: interaktiver Live-Test der Rabbit-Kette (`/rabbit spawn {spec}`,
+DAG mit `role: "temporary"`). Erst danach darf die Rabbit-Rollenbibliothek (`rabbit-*`, `BASELINE_ROLES`),
 `dynamic-role.ts` und `/rabbit define` entfallen. `agents/verifier.md` bleibt
 als technisches Profil der Verifier-Kette bestehen. Konzept:
 `pi-temporary-subagents-konzept.md`.
@@ -142,12 +144,19 @@ außerdem einen Eintrag in die gemeinsame `run-history.jsonl` (Agent
 Frage, Kontext oder Antwort). Alles außer `completed` steht als Nicht-Erfolg
 darin.
 
-### Limits (vorläufig)
+### Limits
 
-5 temporäre Agenten pro Lauf und 5 Spawns pro Sitzung (`maxPerRun`,
-`maxSubagentSpawnsPerSession`). Der Zähler „pro Lauf“ wird derzeit je Sitzung
-geführt und beim Sitzungsstart zurückgesetzt; eine echte Turn-Grenze folgt.
-Das Konzept nennt 3 als Zielwert; der Wert bleibt konfigurierbar.
+3 Subagenten pro Parent-Lauf (ein Nutzer-Turn), Tiefe 1; 3 ist eine
+Obergrenze, kein Zielwert. Die Grenze wird parent-seitig in
+`extensions/permissions/guards.ts` durchgesetzt
+(`createParentRunAgentCounter`, `MAX_AGENTS_PER_PARENT_RUN` in
+`temporary-agent-policy.ts`): Der Zähler zählt nur freigegebene
+`subagent`-Starts (Spec-, Verify- und Legacy-Aufrufe, bei `tasks`/`chain` je
+Eintrag), Aktionen wie `status` oder `stop` nicht, und wird bei `agent_start`
+und `session_start` zurückgesetzt. Das Session-Limit
+`maxSubagentSpawnsPerSession` bleibt unverändert bei 5 als eigene, weitere
+Schutzgrenze. `maxPerRun` im Fork bleibt ein sitzungsweiter Zähler und ist
+nicht die Parent-Lauf-Grenze.
 
 ## Bewusst nicht eingeführt
 
@@ -169,7 +178,7 @@ deterministische Runtime-Regeln genügen.
   Prozentwerte), meldet nur und hängt bei Lücken einen Hinweis an. Asynchrone
   Läufe (RPC, Rabbit) werden nicht geprüft; ob jede Quelle stimmt, prüft der
   Hauptagent.
-- Offen: Turn-genaue Lauf-Zählung (das Limit gilt je Sitzung), das Entfernen
+- Offen: das Entfernen
   der festen Rollen `investigator` und `debugger` samt Plan-Mode-Ausnahme und
   Rabbit-Rollenbibliothek. Der `verifier` bleibt als technisches Profil der
   Verifier-Kette bestehen.

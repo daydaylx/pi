@@ -114,7 +114,7 @@ Pfadzuordnung: `docs/scope-cli-tui-vs-gui.md`. Achtung:
 - `web_search` nur bei echtem Aktualitätsbedarf: aktuelle Library-/Framework-Versionen, externe API-Doku, unbekannte aktuelle Fehlermeldungen, Provider-/Tool-Verhalten, das lokal nicht prüfbar ist — und nur wenn lokale Repository-Evidenz nicht reicht. Nie „vorsichtshalber“; was im Repo steht oder per `grep`/`find`/`read`/LSP/Investigator beantwortbar ist, bleibt lokal.
 - Standardablauf: erst `web_search`, dann gezielt die relevanten Quellen mit `fetch_content` öffnen; `includeContent` standardmäßig nicht setzen, nur bei konkretem begründetem Bedarf; keine breitflächigen Fetch-Ketten.
 - `fetch_content` nur mit konkreter, relevanter http(s)-URL (Doku-Seiten, PDFs, GitHub-Webseiten als normale HTTP-Quellen) — nie für lokale Pfade, nie mit `auth`, kein Repo-Clone über die Extension (GitHub-Cloning ist deaktiviert); Repos bleiben beim bestehenden Git-/Investigator-Workflow.
-- Investigator/Subagenten arbeiten rein lokal; keine automatische Kopplung an Websuche.
+- Subagenten arbeiten rein lokal; keine automatische Kopplung an Websuche.
 
 ## Subagenten
 
@@ -165,19 +165,24 @@ Hauptagent definiert die Arbeit, die Runtime die Grenzen, Evidenz entscheidet
   Commit-Gate) und braucht `spec.verification` (`originalRequest`,
   `delegatedQuestion`, `diff`, `baseline`, `acceptance`).
 
-Die Rollen unten (`investigator`, `debugger`, `verifier`) gelten für die
-Übergangszeit weiter und werden durch `spec` abgelöst.
+Es gibt keine festen Rollen mehr: `investigator` und `debugger` sind
+entfallen, `agents/verifier.md` bleibt nur als technisches Profil der
+Verifier-Kette (`profile: "verify"`). Pro Parent-Lauf (ein Nutzer-Turn) sind
+höchstens 3 Subagenten zulässig, Tiefe 1; das ist eine Obergrenze, kein
+Zielwert. Die Sitzungsgrenze bleibt bei 5.
 
 ### Delegationsmuster
 
 - **Triviale, klar lokalisierte Aufgabe:** Hauptagent direkt.
 - **Unbekannter Repository-Bereich oder unklare Änderungssurface:**
-  `investigator` für eine belegte, reine Analyse. Im Simple oder Detailed
-  Plan ist nur diese synchrone read-only SINGLE-Delegation zulässig; bei
-  bekanntem lokalen Pfad bleibt der Hauptagent zuständig.
-- **Unbekannter, intermittierender oder gescheiterter Bug:** `debugger` für
-  Reproduktion und Hypothesentests.
-- **Unabhängige Prüfung nach einer riskanten Umsetzung:** `verifier`.
+  `spec` mit `profile: "analyse"` für eine belegte, reine Analyse. Im Simple
+  oder Detailed Plan ist nur diese synchrone read-only Spec-Delegation
+  zulässig; bei bekanntem lokalen Pfad bleibt der Hauptagent zuständig.
+- **Unbekannter, intermittierender oder gescheiterter Bug:** `spec` mit
+  `profile: "analyse"` oder `"research"` und einem Reproduktionsauftrag im
+  `objective`.
+- **Unabhängige Prüfung nach einer riskanten Umsetzung:** `spec` mit
+  `profile: "verify"`.
 
 Der Verifier folgt zwei Risikokategorien:
 

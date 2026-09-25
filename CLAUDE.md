@@ -34,7 +34,7 @@ Core-Runtime + extensions/ ──> neutraler Frontend-State-Bus ──> Aurora T
 - `extensions/permissions/` – Tool-/Workflow-Policy, Trust-Grenzen, Verifier-Gate (`verifier-required-paths.ts` = Katalog der automatisch erkannten Hard-Verifier-Pfade).
 - `extensions/plan-mode/` – Modi `work`/`simple_plan`/`detailed_plan`; Pläne nur über `plan_write` in die Runtime-Ablage (`~/.pi/agent/plans/…`), Ausführung nur per expliziter Freigabe (ADR 020).
 - `npm/packages/frontend-protocol/` – öffentliches, separat packbares Protokoll-Paket (`@daydaylx/pi-frontend-protocol`); `frontend-server/` adaptiert den Upstream-RPC darauf. Änderungen hier berühren einen öffentlichen Vertrag (`docs/frontend-api.md`).
-- `agents/` – Rollenprompts (investigator, debugger, verifier); temporäre Task-Agenten via `subagent` mit `spec` sind der Standardweg (ADR 031, `docs/subagents.md`).
+- `agents/` – nur `verifier.md` als technisches Profil der Verifier-Kette; Delegation läuft über temporäre Task-Agenten (`subagent` mit `spec`, max. 3 pro Parent-Lauf, ADR 031, `docs/subagents.md`).
 - Projektlokale Prüfprofile: `.pi/verify.json` (nur in vertrauten Projekten, `docs/verify-profiles.md`).
 - `settings.json`, `setup.json`, `models.json`, `schemas/`, `prompts/`, `skills/`, `APPEND_SYSTEM.md` sind die synchronisierte aktive Konfiguration.
 

@@ -38,7 +38,9 @@ export interface TaskReceipt {
 
 export interface SubagentBranchInfo {
   agent: string;
-  role?: string;
+  label?: string;
+  objective?: string;
+  profile?: string;
   runId?: string;
   status:
     | "running"

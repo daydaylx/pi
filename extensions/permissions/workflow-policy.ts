@@ -253,48 +253,6 @@ export function assessWorkflowTool(
 }
 
 /**
- * A Plan-Mode delegation is safe only when it preserves the investigator
- * profile's fresh, project-local, read-only contract. The guard normalizes
- * its omitted `artifacts` flag to false before the executor starts, because
- * the package default otherwise writes debug artifacts below the project.
- */
-export function planModeInvestigatorSingleAllowed(
-  workflow: WorkflowCapabilitySnapshot,
-  permissionLevel: PermissionLevel,
-  event: ToolCallEvent,
-): boolean {
-  if (
-    !isPlanRestricted(workflow) ||
-    // An unknown workflow state must not unlock a delegation either.
-    isWorkflowStateUnknown(workflow) ||
-    permissionLevel === "readonly" ||
-    event.toolName !== "subagent"
-  ) {
-    return false;
-  }
-  const input = event.input;
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return false;
-  }
-  const params = input as Record<string, unknown>;
-  return (
-    params.action === undefined &&
-    params.chain === undefined &&
-    params.tasks === undefined &&
-    params.config === undefined &&
-    params.agent === "investigator" &&
-    typeof params.task === "string" &&
-    params.task.trim().length > 0 &&
-    (params.async === undefined || params.async === false) &&
-    params.output === undefined &&
-    (params.artifacts === undefined || params.artifacts === false) &&
-    params.context === undefined &&
-    params.cwd === undefined &&
-    params.skill === undefined
-  );
-}
-
-/**
  * `verify({ check: "typecheck" })` never writes: extensions/setup-core runs
  * it with the setup's fixed typecheck command (--noEmit semantics), and
  * Plan Mode is only reachable in a trusted project (see
@@ -379,7 +337,7 @@ export function planModeMutationGuard(
   )
     return PERMITTED;
   // With no workflow provider, only the tools that are read-only in every mode
-  // stay available; plan-mode's own additions (plan_write, the investigator
+  // stay available; plan-mode's own additions (plan_write, the temporary-spec
   // exception, verify(typecheck)) require a state someone actually vouched for.
   if (
     isWorkflowStateUnknown(workflow) &&

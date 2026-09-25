@@ -189,6 +189,39 @@ await test("TUI shows temporary agents by objective and write right, not by role
   );
 });
 
+await test("parent-run limit: 3 agents allowed, the 4th is blocked", () => {
+  eq(policy.MAX_AGENTS_PER_PARENT_RUN, 3, "limit is 3");
+  const counter = policy.createParentRunAgentCounter();
+  for (let i = 0; i < 3; i++) {
+    eq(counter.check(1), undefined, `agent ${i + 1} allowed`);
+    counter.commit(1);
+  }
+  assert(counter.check(1)?.includes("3 Subagenten"), "4th agent blocked");
+  eq(counter.used(), 3, "blocked launch is not counted");
+});
+
+await test("parent-run limit: reset per turn, batches counted, no launch no count", () => {
+  const counter = policy.createParentRunAgentCounter();
+  assert(counter.check(4) !== undefined, "batch of 4 exceeds the limit");
+  eq(counter.check(3), undefined, "batch of 3 fits");
+  counter.commit(3);
+  counter.reset();
+  eq(counter.check(1), undefined, "new parent run starts at zero");
+  counter.commit(0);
+  eq(counter.used(), 0, "zero launches are not counted");
+});
+
+await test("subagentLaunchCount counts launches, not actions", () => {
+  const n = (input, toolName = "subagent") =>
+    policy.subagentLaunchCount({ toolName, input });
+  eq(n({ spec }), 1, "spec call");
+  eq(n({ agent: "verifier", task: "x" }), 1, "legacy agent call");
+  eq(n({ tasks: [{}, {}] }), 2, "parallel tasks");
+  eq(n({ action: "status" }), 0, "status action");
+  eq(n({ action: "stop" }), 0, "stop action");
+  eq(n({ spec }, "read"), 0, "other tool");
+});
+
 const { passed, failed } = summary();
 if (failed > 0) {
   console.error(`\nFAIL: ${passed} passed, ${failed} failed`);

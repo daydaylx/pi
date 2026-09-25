@@ -152,7 +152,7 @@ function subagentStartEvent(value: unknown): SubagentRun | undefined {
     runId,
     entries: (unique.length > 0 ? unique : ["async"]).map((agent) => ({
       agent,
-      role: agent,
+      label: agent,
       runId,
       status: "queued" as const,
     })),

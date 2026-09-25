@@ -43,7 +43,10 @@ export interface FrontendVerificationSummary {
 
 export interface FrontendSubagentBranch {
   agent: string;
-  role: string;
+  /** Display label (task objective or agent id); never a permanent role. */
+  label: string;
+  objective?: string;
+  profile?: string;
   runId: string;
   status: "running" | "paused" | "needs_attention" | "queued";
   focus?: string;

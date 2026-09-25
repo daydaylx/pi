@@ -92,28 +92,6 @@ const definitions = [
   ],
 
   [
-    "investigator",
-    "Investigator",
-    "Repository untersuchen / Änderungssurface finden",
-    "subagents",
-    undefined,
-    undefined,
-    "starts-turn",
-    undefined,
-    "run-agent",
-  ],
-  [
-    "debugger",
-    "Debugger",
-    "Fehler reproduzieren / Ursache eingrenzen",
-    "subagents",
-    undefined,
-    undefined,
-    "starts-turn",
-    undefined,
-    "run-agent",
-  ],
-  [
     "verifier",
     "Verifier",
     "Umsetzung unabhängig prüfen",

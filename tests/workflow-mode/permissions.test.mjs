@@ -1120,8 +1120,8 @@ await test("isPlanSafeCommand (readonly permission level) stays strict: no `;`-c
 });
 
 // The generic plan-mode guard remains fail-closed for tools it cannot prove
-// read-only. The specialized Investigator-SINGLE exception is checked below
-// and runs before this guard in registerPermissionGuards.
+// read-only. The temporary-spec exception runs before this guard in
+// registerPermissionGuards.
 await test("generic plan-mode guard admits only positively known read-only tools", () => {
   if (!workflowPolicy) return;
   const cwd = process.cwd();
@@ -1189,101 +1189,6 @@ await test("generic plan-mode guard admits only positively known read-only tools
     !decide("yolo", "verify", { check: "typecheck" }),
     "verify(typecheck) stays non-mutating regardless of permission level",
   );
-});
-
-await test("plan mode permits only the artifact-free Investigator SINGLE exception", () => {
-  if (!workflowPolicy) return;
-  const allowed = (mode, level, input) =>
-    workflowPolicy.planModeInvestigatorSingleAllowed({ mode }, level, {
-      toolName: "subagent",
-      input,
-    });
-  const valid = { agent: "investigator", task: "Locate the owner" };
-
-  for (const mode of ["simple_plan", "detailed_plan"]) {
-    for (const level of ["project-write", "confirm-all", "yolo"]) {
-      assert(
-        allowed(mode, level, valid),
-        `${mode}/${level} permits the standard Investigator SINGLE call`,
-      );
-    }
-    assert(
-      !allowed(mode, "readonly", valid),
-      `${mode}/readonly remains blocked by its complete tool boundary`,
-    );
-  }
-  assert(
-    !allowed("work", "project-write", valid),
-    "work mode does not take the plan-mode exception",
-  );
-
-  for (const [input, why] of [
-    [{ agent: "debugger", task: "Locate the owner" }, "debugger role"],
-    [{ agent: "verifier", task: "Locate the owner" }, "verifier role"],
-    [{ agent: "unknown", task: "Locate the owner" }, "unknown role"],
-    [
-      {
-        agent: "investigator",
-        task: "Locate the owner",
-        chain: ["untrusted-chain"],
-      },
-      "chain override",
-    ],
-    [
-      {
-        agent: "investigator",
-        task: "Locate the owner",
-        tasks: [{ agent: "investigator", task: "nested" }],
-      },
-      "tasks override",
-    ],
-    [
-      {
-        agent: "investigator",
-        task: "Locate the owner",
-        config: { mode: "chain" },
-      },
-      "config override",
-    ],
-    [
-      { agent: "investigator", task: "Locate the owner", action: "list" },
-      "management action",
-    ],
-    [
-      { agent: "investigator", task: "Locate the owner", async: true },
-      "background execution",
-    ],
-    [
-      { agent: "investigator", task: "Locate the owner", output: "report.md" },
-      "output file",
-    ],
-    [
-      { agent: "investigator", task: "Locate the owner", artifacts: true },
-      "debug artifacts",
-    ],
-    [
-      { agent: "investigator", task: "Locate the owner", context: "fork" },
-      "context override",
-    ],
-    [
-      { agent: "investigator", task: "Locate the owner", cwd: "/tmp" },
-      "cwd override",
-    ],
-    [
-      { agent: "investigator", task: "Locate the owner", skill: "extra" },
-      "skill override",
-    ],
-    [{ agent: "investigator", task: "  " }, "empty task"],
-  ]) {
-    assert(
-      !allowed("simple_plan", "project-write", input),
-      `simple_plan blocks Investigator delegation with ${why}`,
-    );
-    assert(
-      !allowed("detailed_plan", "project-write", input),
-      `detailed_plan blocks Investigator delegation with ${why}`,
-    );
-  }
 });
 
 await test("plan mode permits only verify(check: typecheck), never test or other tools", () => {
@@ -1888,43 +1793,6 @@ await test("verifier dedup gate stays fail-open on a snapshot defect, unlike the
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
-});
-
-await test("debugger delegations keep the generous agents/debugger.md timeout", () => {
-  if (!verifierPolicy) return;
-  const assess = (input) =>
-    verifierPolicy.assessDebuggerDelegation({ toolName: "subagent", input });
-
-  assert(
-    !assess({ agent: "verifier", task: "anything" }).blocked,
-    "other roles are not restricted by the debugger budget contract",
-  );
-  assert(
-    !assess({ action: "list" }).blocked,
-    "management actions bypass the debugger budget contract",
-  );
-  assert(
-    !assess({ agent: "debugger", task: "Reproduziere den Absturz." }).blocked,
-    "a plain debugger delegation without any budget override passes",
-  );
-  const budgeted = assess({
-    agent: "debugger",
-    task: "Reproduziere den Absturz.",
-    turnBudget: { maxTurns: 5 },
-  });
-  assert(
-    budgeted.blocked && budgeted.reason.includes("turnBudget"),
-    "a per-run turnBudget is refused for debugger delegations",
-  );
-  const timedOut = assess({
-    agent: "debugger",
-    task: "Reproduziere den Absturz.",
-    timeoutMs: 120_000,
-  });
-  assert(
-    timedOut.blocked && timedOut.reason.includes("timeoutMs"),
-    "a shortened timeoutMs override is refused, closing the gap that let a real debugger run time out early",
-  );
 });
 
 await test("git commit is detected across shell connectors, other commands are not", () => {

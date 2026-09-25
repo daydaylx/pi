@@ -8,11 +8,7 @@ export const subagentsSkillsSections = {
     const { section } = context;
 
     await section("native subagent profiles", async () => {
-      const expectedProfiles = [
-        "debugger.md",
-        "investigator.md",
-        "verifier.md",
-      ];
+      const expectedProfiles = ["verifier.md"];
       const agentsRoot = path.join(ROOT, "agents");
       eq(
         readdirSync(agentsRoot, { withFileTypes: true })
@@ -20,7 +16,7 @@ export const subagentsSkillsSections = {
           .map((entry) => entry.name)
           .sort(),
         expectedProfiles,
-        "investigator, debugger and verifier are the complete local role set",
+        "verifier is the only local technical profile (ADR 031)",
       );
       const profileSources = Object.fromEntries(
         expectedProfiles.map((name) => [
@@ -29,8 +25,6 @@ export const subagentsSkillsSections = {
         ]),
       );
       const expectedTools = {
-        "investigator.md": "read, grep, find, ls",
-        "debugger.md": "read, grep, find, ls, bash",
         "verifier.md": "read, grep, find, ls, bash",
       };
       for (const [name, source] of Object.entries(profileSources)) {
@@ -63,7 +57,7 @@ export const subagentsSkillsSections = {
           `${name} carries no model or thinking fields; settings.json agentOverrides are the single model source`,
         );
       }
-      for (const name of ["investigator.md", "verifier.md"]) {
+      for (const name of ["verifier.md"]) {
         const source = profileSources[name];
         assert(
           source.includes("## Acceptance Contract") &&
@@ -72,11 +66,7 @@ export const subagentsSkillsSections = {
           `${name} treats a required acceptance report as part of its fixed output format`,
         );
       }
-      assert(
-        !/^tools:.*\bbash\b/m.test(profileSources["investigator.md"]),
-        "investigator has no shell access",
-      );
-      for (const name of ["debugger.md", "verifier.md"]) {
+      for (const name of ["verifier.md"]) {
         assert(
           /^tools:.*\bbash\b/m.test(profileSources[name]),
           `${name} may run diagnostic shell commands`,
@@ -85,7 +75,7 @@ export const subagentsSkillsSections = {
       const archivedRoot = path.join(ROOT, "docs", "archive", "subagents-v1");
       assert(
         !existsSync(archivedRoot),
-        "retired v1 subagent profiles have been cleaned up; only the active 3-role model remains",
+        "retired v1 subagent profiles have been cleaned up; only the verifier profile remains",
       );
       for (const activeDoc of ["AGENTS.md", "README.md", "docs/subagents.md"]) {
         const source = readFileSync(path.join(ROOT, activeDoc), "utf8");

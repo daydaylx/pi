@@ -1508,11 +1508,11 @@ await test("an untrusted project refuses plan mode entirely", async () => {
   });
 });
 
-await test("both plan modes admit only the normalized Investigator SINGLE call", async () => {
+await test("both plan modes admit only the read-only temporary-spec call", async () => {
   if (!planMode || !modePermissions) return;
   await withPlanHome(async () => {
     for (const label of ["Schnellplan", "Architekturplan"]) {
-      const cwd = mkdtempSync(join(tmpdir(), "pi-plan-investigator-"));
+      const cwd = mkdtempSync(join(tmpdir(), "pi-plan-temp-spec-"));
       try {
         const harness = createHarness({ select: () => label });
         answerRecoveryClear(harness);
@@ -1522,36 +1522,44 @@ await test("both plan modes admit only the normalized Investigator SINGLE call",
         await hooks(harness, "session_start", ctx);
         await chooseWorkflow(harness, ctx);
 
-        const investigatorInput = {
-          agent: "investigator",
-          task: "Locate the relevant implementation",
+        const spec = {
+          objective: "Locate the relevant implementation",
+          profile: "analyse",
+          delegationReason: "unknown repository area",
         };
+        const specInput = { spec: { ...spec } };
         let result = await harness.runHooks(
           "tool_call",
-          { toolName: "subagent", input: investigatorInput },
+          { toolName: "subagent", input: specInput },
           ctx,
         );
         assert(
           !result.some((entry) => entry?.block),
-          `${label} permits Investigator SINGLE`,
+          `${label} permits a read-only analyse spec`,
         );
         eq(
-          investigatorInput.artifacts,
+          specInput.artifacts,
           false,
           `${label} disables package debug artifacts before execution`,
         );
 
         for (const [input, labelSuffix] of [
-          [{ agent: "debugger", task: "x" }, "debugger"],
+          [{ agent: "investigator", task: "x" }, "retired investigator role"],
+          [{ agent: "debugger", task: "x" }, "retired debugger role"],
           [{ agent: "verifier", task: "x" }, "verifier"],
           [{ agent: "unknown", task: "x" }, "unknown role"],
-          [{ agent: "investigator", task: "x", action: "list" }, "action"],
-          [{ agent: "investigator", task: "x", async: true }, "async"],
-          [{ agent: "investigator", task: "x", output: "report.md" }, "output"],
-          [{ agent: "investigator", task: "x", artifacts: true }, "artifacts"],
-          [{ agent: "investigator", task: "x", context: "fork" }, "context"],
-          [{ agent: "investigator", task: "x", cwd: "/tmp" }, "cwd"],
-          [{ agent: "investigator", task: "x", skill: "extra" }, "skill"],
+          [{ spec: { ...spec, profile: "implement" } }, "implement profile"],
+          [
+            { spec: { ...spec, requestedCapabilities: ["read", "write"] } },
+            "write capability",
+          ],
+          [{ spec, action: "list" }, "action"],
+          [{ spec, async: true }, "async"],
+          [{ spec, output: "report.md" }, "output"],
+          [{ spec, artifacts: true }, "artifacts"],
+          [{ spec, context: "fork" }, "context"],
+          [{ spec, cwd: "/tmp" }, "cwd"],
+          [{ spec, skill: "extra" }, "skill"],
         ]) {
           result = await harness.runHooks(
             "tool_call",
@@ -1575,6 +1583,55 @@ await test("both plan modes admit only the normalized Investigator SINGLE call",
       } finally {
         rmSync(cwd, { recursive: true, force: true });
       }
+    }
+  });
+});
+
+await test("guard limits subagent launches to 3 per parent run and resets per turn", async () => {
+  if (!planMode || !modePermissions) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-parent-run-limit-"));
+    try {
+      const harness = createHarness({ select: () => "Schnellplan" });
+      answerRecoveryClear(harness);
+      planMode.default(harness.api);
+      modePermissions.default(harness.api);
+      const ctx = harness.makeContext({ cwd });
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      const launch = () =>
+        harness.runHooks(
+          "tool_call",
+          {
+            toolName: "subagent",
+            input: {
+              spec: {
+                objective: "Analyse one area",
+                profile: "analyse",
+                delegationReason: "independent analysis",
+              },
+            },
+          },
+          ctx,
+        );
+      for (let i = 1; i <= 3; i++) {
+        assert(
+          !(await launch()).some((entry) => entry?.block),
+          `agent ${i} of the parent run is admitted`,
+        );
+      }
+      const fourth = await launch();
+      assert(
+        fourth.some((entry) => entry?.block && /3 Subagenten/.test(entry.reason)),
+        "the 4th agent of the same parent run is blocked",
+      );
+      await hooks(harness, "agent_start", ctx);
+      assert(
+        !(await launch()).some((entry) => entry?.block),
+        "a new parent run (agent_start) starts with a fresh count",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
     }
   });
 });

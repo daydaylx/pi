@@ -113,7 +113,9 @@ export const StateSnapshotV1Schema = Type.Object(
         {
           runId: Type.String(),
           agent: Type.String(),
-          role: Type.String(),
+          label: Type.String(),
+          objective: Type.Optional(Type.String()),
+          profile: Type.Optional(Type.String()),
           status: Type.Union([
             Type.Literal("running"),
             Type.Literal("paused"),

@@ -45,7 +45,9 @@ export interface StateSnapshotV1 {
   subagents: Array<{
     runId: string;
     agent: string;
-    role: string;
+    label: string;
+    objective?: string;
+    profile?: string;
     status: "running" | "paused" | "needs_attention" | "queued";
   }>;
   configuration: Record<string, string | number | boolean | null>;

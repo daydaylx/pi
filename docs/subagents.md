@@ -26,23 +26,33 @@ Bei widersprüchlichen Ergebnissen entscheidet die Evidenz, nicht Agentenzahl,
 Reihenfolge oder Modellname. Subagenten liefern Arbeitsergebnisse, der
 Hauptagent entscheidet.
 
-## Aktive Rollen (Übergang)
+## Profile
 
-| Rolle          | Tools                      | Verantwortung                                                                    |
-| -------------- | -------------------------- | -------------------------------------------------------------------------------- |
-| `investigator` | read, grep, find, ls       | unbekannte Änderungssurface oder Kontrollfluss belegt eingrenzen                 |
-| `debugger`     | read, grep, find, ls, bash | unbekannte, intermittierende oder gescheiterte Bugs reproduzieren und eingrenzen |
-| `verifier`     | read, grep, find, ls, bash | riskante Umsetzung unabhängig gegen Auftrag, Diff und Checks prüfen              |
+Es gibt keine festen Rollen mehr. Die Arbeit steht im `spec`, die Runtime
+schneidet die Rechte (`effective = requested ∩ Profil`).
+
+| Profil     | Tools                      | Verantwortung                                                       |
+| ---------- | -------------------------- | ------------------------------------------------------------------- |
+| `analyse`  | read, grep, find, ls       | unbekannte Änderungssurface, Kontrollfluss oder Bugs belegt eingrenzen |
+| `research` | read, grep, find, ls       | lokale Recherche mit Quellenangabe                                  |
+| `verify`   | read, grep, find, ls, bash | riskante Umsetzung unabhängig gegen Auftrag, Diff und Checks prüfen |
+
+`verify` läuft über die Verifier-Kette; `agents/verifier.md` ist deren
+technisches Profil und keine Rollenidentität. `investigator` und `debugger`
+sind entfallen (ADR 031).
 
 Der Hauptagent plant, implementiert, triagiert und kommuniziert das finale
 Ergebnis. Kleine, klar lokalisierte Änderungen bleiben beim Hauptagenten.
 Normale Änderungen mit bekannter Änderungssurface plant und implementiert der
 Hauptagent ebenfalls selbst.
-`investigator` wird nur bei unbekanntem Bereich oder unklarer
-Änderungssurface gestartet; `debugger` nur bei unbekannten, intermittierenden
-oder gescheiterten Bugs. Im Simple oder Detailed Plan ist ausschließlich eine
-synchrone, artefaktfreie Investigator-SINGLE-Delegation zulässig; Debugger,
-Verifier, andere Rollen und Management-Aktionen bleiben dort blockiert. Für
+Ein `analyse`-Spec wird nur bei unbekanntem Bereich, unklarer
+Änderungssurface oder unbekannten, intermittierenden oder gescheiterten Bugs
+gestartet. Pro Parent-Lauf (ein Nutzer-Turn) sind höchstens 3 Subagenten
+zulässig; das ist eine Obergrenze, kein Zielwert, die Sitzungsgrenze bleibt
+bei 5. Im Simple oder Detailed Plan ist ausschließlich eine synchrone,
+artefaktfreie read-only Spec-Delegation (`analyse`/`research`, nur
+`read`/`search`) zulässig; `verify`, `implement`, Management-Aktionen und
+Legacy-Agentenaufrufe bleiben dort blockiert. Für
 den `verifier` unterscheidet `AGENTS.md` zwischen
 `HARD_VERIFIER_REQUIRED` und `VERIFIER_OPTIONAL`: maßgeblich ist das reale
 Risiko, nicht die Zahl der berührten Dateien. Es gibt keine verschachtelte
@@ -51,17 +61,16 @@ Delegation.
 Alle lokalen Profile starten laut Profil-Tools mit frischem Child-Kontext,
 übernehmen die statischen Projektregeln und nicht automatisch den
 Parent-Skill-Katalog. Ihre Toolliste erlaubt keine verschachtelte Delegation.
-Sie ist zugleich die technische Capability-Grenze: Keines der drei Profile
-besitzt `edit` oder `write`. `debugger` und `verifier` dürfen technisch Shell
-ausführen, ihre Profile verbieten aber ausdrücklich Projektänderungen; der
-Hauptagent bleibt alleiniger regulärer Patch-Eigentümer.
+Sie ist zugleich die technische Capability-Grenze: Kein Profil besitzt
+`edit` oder `write`. `verify` darf technisch Shell ausführen, das Profil
+verbietet aber ausdrücklich Projektänderungen; der Hauptagent bleibt
+alleiniger regulärer Patch-Eigentümer.
 
-`investigator`, `debugger` und `verifier` laufen alle auf
-`openai-codex/gpt-6-luna` mit Thinking-Stufe `high` (mechanische Prüfung).
-`openai-codex/gpt-5.6-luna` ist bei allen dreien der erste `fallbackModels`-
-Eintrag (Vergleichspfad/Fallback während der GPT-6-Luna-Übergangsphase);
-`verifier` behält zusätzlich `openai-codex/gpt-5.6-terra` als zweiten
-Fallback. Die Modell-IDs stehen in `settings.enabledModels` und
+Der `verifier` läuft auf `openai-codex/gpt-6-luna` mit Thinking-Stufe
+`high` (mechanische Prüfung). `openai-codex/gpt-5.6-luna` ist der erste,
+`openai-codex/gpt-5.6-terra` der zweite `fallbackModels`-Eintrag. Temporäre
+Agenten haben keine festen Modell-Overrides: die Runtime wählt über
+`modelPreference` und `config.temporaryAgents.modelClasses`. Die Modell-IDs stehen in `settings.enabledModels` und
 `settings.subagents.modelScope.allow`; der Fork wertet `fallbackModels` aus,
 sonst wäre der Fallback eine Angabe ohne Wirkung.
 
@@ -87,8 +96,8 @@ Projekt- oder Manifestwechsel nach der Freigabe machen den Snapshot ungültig.
   Argumentvalidierung, bevor der Executor läuft.
 - `toolDescriptionMode: "custom"` bestimmt ausschließlich den sichtbaren
   Beschreibungstext. Die agentweite `subagent-tool-description.md` reduziert
-  die für das Modell sichtbare Tool-Beschreibung auf die drei aktiven Rollen
-  und wann sie sich lohnen; eine `.pi/subagent-tool-description.md` des
+  die für das Modell sichtbare Tool-Beschreibung auf das `spec`-Format der temporären
+  Task-Agenten und wann sie sich lohnen; eine `.pi/subagent-tool-description.md` des
   geöffneten Projekts darf diese Standardbeschreibung gezielt übersteuern. Die
   zwingende Sicherheits-Guidance des Pakets bleibt über `{{safetyGuidance}}`
   automatisch Teil der gerenderten Beschreibung.
@@ -111,9 +120,9 @@ registrierte zugleich das reduzierte Schema. Siehe
   Parallelitäts- oder Concurrency-Konfiguration mehr — das aktive Harness
   führt keine parallelen Subagenten aus, und `/setup-doctor` meldet eine
   wieder auftauchende Parallelitätskonfiguration als Fehler.
-- Die Frontmatter der drei Profile: `defaultContext: fresh`,
-  `inheritProjectContext: true`, `inheritSkills: false` und ihre jeweilige
-  Toolliste. Keines der Profile hat ein Delegations-Tool.
+- Die Frontmatter des Verifier-Profils: `defaultContext: fresh`,
+  `inheritProjectContext: true`, `inheritSkills: false` und seine
+  Toolliste. Das Profil hat kein Delegations-Tool.
 
 ## Delegationsvorlage
 
@@ -224,7 +233,7 @@ pi-subagents` (npm-Registry) ist davon unabhängig und dient nur Auroras
 ## Ergebnisbudget und Artefakte
 
 Die reduzierte API nimmt keine Ausgabepfade, Kontext-, Skill-, Arbeitsverzeichnis-
-oder Modellparameter entgegen. Da `investigator`, `debugger` und `verifier`
+oder Modellparameter entgegen. Da die Profile
 schreibgeschützt bleiben (kein `edit`/`write`), landen ihre Befunde inline im
 Abschlussbericht statt in einer Datei, die ein Kind-Prozess schreiben müsste:
 Aufrufer geben ihnen keinen

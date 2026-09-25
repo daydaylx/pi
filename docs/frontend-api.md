@@ -33,6 +33,12 @@ V1 defines `sessions`, `messages`, `streaming`, `tool-calls`, `workflow`,
 `thinking`, `notifications`, `configuration` and `extension-ui`. A frontend must
 disable or hide a feature when its capability is absent.
 
+State entries of `subagents` carry `runId`, `agent` (agent id), `label`,
+`status` and the optional `objective` and `profile`. The former `role` field
+was removed: subagents no longer have a permanent role identity (ADR 031).
+Frontends must render `label` (and `objective`/`profile` when present) instead
+of a role name.
+
 Capabilities describe readable state/events as well as commands. A capability
 may therefore be present even when a particular optional command returns
 `UNSUPPORTED_CAPABILITY` on an older Pi runtime.
