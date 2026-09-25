@@ -9,7 +9,7 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [008](008-context-ledger-is-documentation.md) — Das Context Ledger ist Dokumentation, keine Laufzeitkomponente
 - [009](009-aurora-owns-the-footer.md) — Aurora besitzt auch die Fußzeile
 - [010](010-compaction-recent-context-budget.md) — Recent-Context-Budget nutzt den Upstream-Default von 20.000 Tokens
-- [011](011-investigator-debugger-verifier.md) — Investigator, Debugger, Verifier ersetzen Planner, Worker, Reviewer
+- [011](011-investigator-debugger-verifier.md) — Investigator, Debugger, Verifier ersetzen Planner, Worker, Reviewer (Investigator/Debugger durch 031 abgelöst)
 - [012](012-plan-mode-mutation-guard.md) — Plan Mode bekommt einen technischen Mutationsschutz
 - [013](013-aurora-keeps-the-native-editor.md) — Aurora behält Pis nativen Editor (ersetzt den Editor-Teil von 009)
 - [014](014-reduced-subagent-tool-surface.md) — Die reduzierte Subagent-Tool-Surface ist ein eigener Schalter

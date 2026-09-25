@@ -1,5 +1,11 @@
 # 018 — Subagenten-Delegationen sind ohne Bestätigung erlaubt
 
+## Status
+
+Gilt weiter. Seit [031](031-temporary-task-agents.md) delegiert der
+Hauptagent über `spec` (höchstens 3 Subagenten pro Parent-Lauf); die Rollen
+`investigator` und `debugger` aus Entscheidung 011 sind entfallen.
+
 ## Kontext
 
 Das `subagent`-Tool fiel in `decideTool()`

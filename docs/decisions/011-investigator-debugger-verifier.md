@@ -1,5 +1,12 @@
 # 011 — Investigator, Debugger, Verifier ersetzen Planner, Worker, Reviewer
 
+## Status
+
+Teilweise abgelöst durch [031](031-temporary-task-agents.md): `investigator` und
+`debugger` sind entfallen, es gibt keine festen Rollen mehr. Nur `verifier`
+bleibt als technisches Profil der Verifier-Kette bestehen. Dieser Text bleibt
+als Historie erhalten.
+
 ## Kontext
 
 [005](005-three-agent-model.md) legte drei aktive Rollen unter `agents/` fest:
