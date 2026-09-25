@@ -18,10 +18,14 @@ konfigurierbaren Limits über `PI_RABBIT_MAX_*`.
 Entfernt: die Rollen `investigator` und `debugger` (Rollendateien, Modell-
 Overrides, Plan-Mode-Ausnahme, `assessDebuggerDelegation`, Command-Katalog).
 Frontend-Vertrag: `subagents[].role` wurde durch `label` (plus optional
-`objective`, `profile`) ersetzt. Noch offen: interaktiver Live-Test der Rabbit-Kette (`/rabbit spawn {spec}`,
-DAG mit `role: "temporary"`). Erst danach darf die Rabbit-Rollenbibliothek (`rabbit-*`, `BASELINE_ROLES`),
-`dynamic-role.ts` und `/rabbit define` entfallen. `agents/verifier.md` bleibt
-als technisches Profil der Verifier-Kette bestehen. Konzept:
+`objective`, `profile`) ersetzt. Rabbit (`pi-rabbitmode`, Commit `3029edc`):
+die Rollenbibliothek (`rabbit-*`/Audit-Rollen, `dynamic-role.ts`,
+`/rabbit define`, `rabbit_define_role`, `/rabbit save-agent`) ist entfernt;
+`BASELINE_ROLES` enthält nur noch `verifier`. Noch offen: der interaktive
+Live-Test der Rabbit-Kette (`/rabbit spawn {spec}`, DAG mit
+`role: "temporary"`), der vor dem Entfernen vorgesehen war und nachzuholen
+ist. `agents/verifier.md` bleibt als technisches Profil der Verifier-Kette
+bestehen. Konzept:
 `pi-temporary-subagents-konzept.md`.
 
 ## Kontext
@@ -178,7 +182,7 @@ deterministische Runtime-Regeln genügen.
   Prozentwerte), meldet nur und hängt bei Lücken einen Hinweis an. Asynchrone
   Läufe (RPC, Rabbit) werden nicht geprüft; ob jede Quelle stimmt, prüft der
   Hauptagent.
-- Offen: das Entfernen
-  der festen Rollen `investigator` und `debugger` samt Plan-Mode-Ausnahme und
-  Rabbit-Rollenbibliothek. Der `verifier` bleibt als technisches Profil der
-  Verifier-Kette bestehen.
+- Entfernt: die festen Rollen `investigator` und `debugger` samt
+  Plan-Mode-Ausnahme sowie die Rabbit-Rollenbibliothek. Der `verifier` bleibt
+  als technisches Profil der Verifier-Kette bestehen. Offen bleibt der
+  Live-Test der Rabbit-Spec-Kette.
