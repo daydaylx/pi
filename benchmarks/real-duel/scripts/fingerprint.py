@@ -19,7 +19,13 @@ import subprocess
 import sys
 import time
 
-REPO = "/home/d/.pi/agent"
+# Quell-Repo (Git: base_sha, Sauberkeit) und installierte Pi-Konfiguration
+# (~/.pi/agent, wird von `pi` real gelesen) sind getrennte Verzeichnisse; sie
+# werden per `npm run install:user -- --apply` synchronisiert.
+REPO = os.environ.get(
+    "PI_DUEL_REPO", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+)
+AGENT_DIR = os.environ.get("PI_AGENT_DIR", os.path.expanduser("~/.pi/agent"))
 CODEX_HOME = os.path.expanduser("~/.codex")
 OPENBENCH_HOME = os.path.expanduser("~/.local/share/real-duel/openbench")
 
@@ -53,7 +59,7 @@ def _git_status_porcelain(repo):
 
 
 def _pi_reasoning():
-    settings_path = os.path.join(REPO, "settings.json")
+    settings_path = os.path.join(AGENT_DIR, "settings.json")
     try:
         with open(settings_path, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -132,9 +138,13 @@ def compute_fingerprint(candidates=None, task_instruction=None, dirty_override=F
         "codex_candidate_manifest_hash": None,
         "task_prompt_hash": _sha256_text(task_instruction) if task_instruction else None,
 
-        "agents_md_hash": _sha256_file(os.path.join(REPO, "AGENTS.md")),
-        "settings_json_hash": _sha256_file(os.path.join(REPO, "settings.json")),
-        "append_system_md_hash": _sha256_file(os.path.join(REPO, "APPEND_SYSTEM.md")),
+        "agents_md_hash": _sha256_file(os.path.join(AGENT_DIR, "AGENTS.md")),
+        "installed_in_sync_with_repo": all(
+            _sha256_file(os.path.join(REPO, f)) == _sha256_file(os.path.join(AGENT_DIR, f))
+            for f in ("AGENTS.md", "settings.json", "APPEND_SYSTEM.md")
+        ),
+        "settings_json_hash": _sha256_file(os.path.join(AGENT_DIR, "settings.json")),
+        "append_system_md_hash": _sha256_file(os.path.join(AGENT_DIR, "APPEND_SYSTEM.md")),
         "codex_config_toml_hash": _sha256_file(os.path.join(CODEX_HOME, "config.toml")),
         "codex_instructions_md_hash": _sha256_file(os.path.join(CODEX_HOME, "instructions.md")),
 
