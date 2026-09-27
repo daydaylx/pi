@@ -16,4 +16,11 @@ criteria = [
 ]
 
 [workflow.baseline]
-checks = ["format:check", "typecheck"]
+# "test" ergaenzt (real-03..05-Analyse, P1): der Checker fuehrt
+# PI_TEST_SUITE=lsp node tests/run.mjs aus (in "test" als Teilmenge
+# enthalten) -- ohne diesen Check waere unbekannt, ob dieselbe Testsuite auf
+# der unveraenderten Baseline ueberhaupt schon lief/bestand. Bewusst NICHT
+# "verify" (wie real-05): das zoege test:gui/audit:check mit ein, die mit
+# der eigentlichen Vergleichbarkeitsfrage (Baseline vs. Kandidat bei genau
+# den vom Checker gepruefeten Tests) nichts zu tun haben.
+checks = ["format:check", "typecheck", "test"]

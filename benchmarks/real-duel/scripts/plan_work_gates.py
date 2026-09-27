@@ -156,6 +156,37 @@ def check_run_completed_without_error(completed: bool, error: str | None) -> Gat
     return GateResult("run_completed_without_error", True, ok, detail)
 
 
+def check_required_tests_passed(has_checker: bool, checker_exit: int | None) -> GateResult:
+    """Explizit benanntes Pflichtgate fuer den funktionalen Nachweis (real-03..
+    05-Analyse, P0): macht das bisher nur implizite Checker-Ergebnis als
+    eigene, im Report sichtbare Kategorie kenntlich -- ``check_checkers_ran``
+    prueft nur, DASS der Checker lief, nicht, DASS er bestanden hat."""
+    if not has_checker:
+        return GateResult("required_tests_passed", False, True, "kein Checker fuer diesen Task definiert")
+    ok = checker_exit == 0
+    detail = "" if ok else f"Checker-Exit-Code={checker_exit!r}"
+    return GateResult("required_tests_passed", True, ok, detail)
+
+
+def check_permission_policy_passed(tool_error_categories: list[str | None] | None) -> GateResult:
+    """Schlaegt fehl, wenn im Lauf ein Toolfehler als Kategorie ``permission``
+    erfasst wurde (Verstoss gegen die Permission-Policy). ``None`` bedeutet:
+    fuer diesen Harness liegt keine Fehlerkategorisierung pro Tool-Call vor
+    (z.B. Codex im Plan-Work-Pfad) -- dann ist das Gate informativ, nicht
+    Pflicht, denn ein fehlender Datenpunkt ist kein Policy-Verstoss."""
+    if tool_error_categories is None:
+        return GateResult(
+            "permission_policy_passed",
+            False,
+            True,
+            "keine Tool-Fehler-Kategorisierung fuer diesen Harness verfuegbar",
+        )
+    hits = [c for c in tool_error_categories if c == "permission"]
+    ok = not hits
+    detail = "" if ok else f"{len(hits)} Toolfehler mit Kategorie 'permission'"
+    return GateResult("permission_policy_passed", True, ok, detail)
+
+
 def summarize(gates: list[GateResult]) -> dict:
     required_failed = [g for g in gates if g.required and not g.ok]
     return {

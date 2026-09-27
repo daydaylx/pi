@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Iterable
 if TYPE_CHECKING:
     from baseline_preflight import BaselineContext
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _MUTATING_TOOLS = {"edit", "write"}
 _SEARCH_TOOLS = {"read", "grep", "find", "ls", "lsp_definition", "lsp_references", "lsp_hover", "lsp_workspace_symbols"}
 _VERIFY_TOOLS = {"verify", "project_check"}
@@ -63,6 +63,18 @@ def classify_error(tool: str, text: str) -> str:
         return "permission"
     if "verifier-delegation abgelehnt" in lower or "schema" in lower or "ungültig" in lower:
         return "contract/schema"
+    # Vor "dependency" geprueft: ein ModuleNotFoundError/ImportError im
+    # Harness-eigenen Tooling (z.B. beim Ausfuehren eines project_check-
+    # Profils) ist kein fehlendes Paket im Kandidaten-Workspace, sondern ein
+    # kaputtes Benchmark-/Verifier-Setup -- die Unterscheidung verhindert,
+    # dass ein Infrastrukturfehler faelschlich als Kandidaten-Regression
+    # weiterverarbeitet wird (siehe _refine_verification_category).
+    if (
+        "traceback (most recent call last)" in lower
+        or "cannot import name" in lower
+        or "modulenotfounderror" in lower
+    ):
+        return "infrastructure"
     if "no module named" in lower or "cannot find module" in lower or "fehlende dependenc" in lower:
         return "dependency"
     if "no such file or directory" in lower or "nicht gefunden" in lower:
@@ -98,6 +110,11 @@ def _error_summary(category: str, text: str) -> str:
         return "Toolaufruf verletzte den geforderten Aufruf-/Übergabe-Contract."
     if category == "dependency":
         return "Erforderliche Laufzeitabhängigkeit fehlte."
+    if category == "infrastructure":
+        return (
+            "Der Benchmark-Harness/das Verifikations-Tooling selbst ist "
+            "gescheitert (Import-/Laufzeitfehler), nicht der Kandidatencode."
+        )
     if category == "path":
         return "Ein angeforderter Pfad war nicht verfügbar."
     if category == "verification":
@@ -186,6 +203,11 @@ def _refine_verification_category(
         (``verification/regression``).
       - ``None`` / ``"unknown"`` / ``"skipped"``: no reliable signal --
         category stays ``verification`` (no speculation).
+
+    Errors already classified as ``infrastructure`` by :func:`classify_error`
+    never reach this refinement (only ``verification`` is refined) -- a
+    harness/tooling failure must never be promoted to
+    ``verification/regression`` just because the baseline was clean.
     """
     if category != "verification":
         return category
@@ -451,6 +473,29 @@ def analyze_pi_events(
     wall_time_ms = round(wall_time_s * 1000) if wall_time_s is not None else None
     checker_wall_time_ms = round(checker_wall_time_s * 1000) if checker_wall_time_s is not None else None
 
+    # P1 (real-03..05-Analyse): Grundlage fuer eine spaetere adaptive
+    # Arbeitsstrategie -- nur Messung, keine Entscheidungslogik. Distinct
+    # Dateipfade statt Call-Zaehlung, weil mehrfaches Lesen/Schreiben derselben
+    # Datei nicht als mehrere "inspizierte"/"veraenderte" Dateien zaehlen soll.
+    # Nur erfolgreiche Calls: ein gescheiterter read/edit hat die Datei nicht
+    # tatsaechlich inspiziert bzw. veraendert.
+    inspected_paths = {
+        call["arguments"].get("path")
+        for call in calls
+        if call["tool"] == "read" and call["success"] is True and call["arguments"].get("path")
+    }
+    modified_paths = {
+        call["arguments"].get("path")
+        for call in calls
+        if call["tool"] in _MUTATING_TOOLS and call["success"] is True and call["arguments"].get("path")
+    }
+    duplicate_reads = sum(
+        call["exact_duplicate"] for call in calls if call["tool"] in _SEARCH_TOOLS
+    )
+    failed_attempts_total = sum(
+        call["retry"]["attempts"] for call in calls if call["retry"] is not None
+    )
+
     return {
         "schema_version": SCHEMA_VERSION,
         "summary": {
@@ -458,6 +503,10 @@ def analyze_pi_events(
             "tool_errors": len(errors),
             "errors_by_category": dict(sorted(Counter(error["error_category"] for error in errors).items())),
             "exact_duplicate_calls": sum(call["exact_duplicate"] for call in calls),
+            "duplicate_reads": duplicate_reads,
+            "failed_attempts_total": failed_attempts_total,
+            "files_inspected": len(inspected_paths),
+            "files_modified": len(modified_paths),
             "repeated_target_calls": sum(call["repeated_target"] for call in calls),
             "repeated_verifications_without_mutation": sum(call["repeated_verification_without_mutation"] for call in calls),
             "phase_observed_span_ms": {phase: _union_ms(intervals) for phase, intervals in sorted(phase_intervals.items())},

@@ -62,6 +62,16 @@ SUPPORTED_WORKFLOWS = ("work-only", "plan-work")
 PLAN_MODES = ("simple_plan", "detailed_plan")
 
 
+# [workflow.baseline].checks sollte je Task ungefaehr denselben statischen/
+# funktionalen Nachweis abdecken, den checker.sh gegen den Kandidaten fuehrt
+# (z.B. "test", wenn der Checker eine Testsuite ausfuehrt, die auch auf der
+# unveraenderten Baseline schon liefe) -- sonst ist "Baseline war clean"
+# schwaecher als die Kandidatenbewertung und eine baseline_clean_candidate_
+# regression-Diagnose unzuverlaessig (real-03..05-Analyse, P1). Abweichungen
+# (z.B. weil checker.sh vom Task erst zu erstellende Dateien voraussetzt und
+# deshalb auf der Baseline zwangsläufig scheitern MUSS) gehoeren als
+# Kommentar direkt neben checks = [...] in die jeweilige workflow.toml, nicht
+# stillschweigend als Luecke.
 DEFAULT_BASELINE_CHECKS = ("format:check", "typecheck")
 
 

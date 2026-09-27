@@ -25,6 +25,7 @@ MATERIALIZE_CLEAN_ROOM = MODULE["_materialize_clean_room"]
 MAKE_WORKTREE = MODULE["_make_worktree"]
 CMD_CLEANUP = MODULE["cmd_cleanup"]
 CLEAN_ROOM_SRC_ENV = MODULE["CLEAN_ROOM_SRC_ENV"]
+PATCH_LINE_COUNTS = MODULE["_patch_line_counts"]
 
 
 class CandidateSelectionTest(unittest.TestCase):
@@ -286,6 +287,36 @@ class CleanRoomCleanupTest(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertFalse((worktrees_root / run_id / "pi").exists())
             self.assertFalse((worktrees_root / run_id / "codex").exists())
+
+
+class PatchLineCountsTest(unittest.TestCase):
+    """P1 (real-03..05-Analyse): patch_lines-Telemetrie aus dem bereits
+    eingelesenen Unified-Diff-Text, ohne zusaetzlichen git-Prozess."""
+
+    def test_counts_added_and_removed_lines(self) -> None:
+        diff = (
+            "diff --git a/foo.ts b/foo.ts\n"
+            "index abc..def 100644\n"
+            "--- a/foo.ts\n"
+            "+++ b/foo.ts\n"
+            "@@ -1,2 +1,3 @@\n"
+            " unchanged line\n"
+            "-removed line\n"
+            "+added line one\n"
+            "+added line two\n"
+        )
+        self.assertEqual(PATCH_LINE_COUNTS(diff), {"added": 2, "removed": 1})
+
+    def test_empty_diff_counts_zero(self) -> None:
+        self.assertEqual(PATCH_LINE_COUNTS(""), {"added": 0, "removed": 0})
+
+    def test_file_header_lines_are_not_counted(self) -> None:
+        diff = (
+            "--- a/foo.ts\n"
+            "+++ b/foo.ts\n"
+            "+added line\n"
+        )
+        self.assertEqual(PATCH_LINE_COUNTS(diff), {"added": 1, "removed": 0})
 
 
 if __name__ == "__main__":

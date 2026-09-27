@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import unittest
 from pathlib import Path
 
@@ -13,12 +14,18 @@ SCRIPT = Path(__file__).with_name("tool_trace.py")
 spec = importlib.util.spec_from_file_location("tool_trace", SCRIPT)
 trace = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
+# Modul VOR exec_module registrieren: baseline_preflight.py definiert ein
+# frozen dataclass, dessen Typaufloesung (dataclasses._is_type) unter
+# Python 3.14 cls.__module__ in sys.modules nachschlaegt -- ohne Eintrag
+# schlaegt der Import mit AttributeError auf None.__dict__ fehl.
+sys.modules["tool_trace"] = trace
 spec.loader.exec_module(trace)
 
 BP_SCRIPT = Path(__file__).with_name("baseline_preflight.py")
 bp_spec = importlib.util.spec_from_file_location("baseline_preflight", BP_SCRIPT)
 bp = importlib.util.module_from_spec(bp_spec)
 assert bp_spec.loader is not None
+sys.modules["baseline_preflight"] = bp
 bp_spec.loader.exec_module(bp)
 
 
@@ -123,6 +130,52 @@ class ToolTraceTest(unittest.TestCase):
         verifier_errors = [error for error in result["errors"] if error["tool"] == "subagent"]
         self.assertTrue(verifier_errors[0]["retry"]["eventual_success"])
         self.assertEqual(verifier_errors[0]["retry"]["success_call_index"], 7)
+
+    def test_new_telemetry_fields_p1_analysis(self) -> None:
+        # real-03..05-Analyse (P1): Grundlage fuer eine spaetere adaptive
+        # Strategie -- reine Messung. _events() hat 1 erfolgreiches write
+        # (files_modified=1), 2 fehlgeschlagene reads auf denselben Pfad mit
+        # unterschiedlichen Argumenten (kein exact_duplicate, daher
+        # files_inspected=0 -- nur ERFOLGREICHE reads zaehlen als
+        # inspiziert -- und duplicate_reads=0) sowie insgesamt 4 fehlgeschlagene
+        # Versuche vor einem etwaigen Erfolg (read: 1, subagent: 2+1).
+        result = trace.analyze_pi_trace(_events(), wall_time_s=2.0)
+        summary = result["summary"]
+        self.assertEqual(summary["files_inspected"], 0)
+        self.assertEqual(summary["files_modified"], 1)
+        self.assertEqual(summary["duplicate_reads"], 0)
+        self.assertEqual(summary["failed_attempts_total"], 4)
+
+    def test_successful_read_counts_as_inspected_and_exact_duplicate_as_duplicate_read(self) -> None:
+        events = [
+            {"type": "message_end", "message": {"role": "assistant", "timestamp": 1_000, "content": [
+                {"type": "toolCall", "id": "read-a", "name": "read"},
+            ]}},
+            {"type": "tool_execution_start", "toolCallId": "read-a", "toolName": "read", "args": {
+                "path": "README.md",
+            }},
+            {"type": "tool_execution_end", "toolCallId": "read-a", "toolName": "read", "result": {
+                "content": [{"type": "text", "text": "content"}],
+            }, "isError": False},
+            {"type": "message_end", "message": {"role": "toolResult", "timestamp": 1_100,
+                "toolCallId": "read-a", "toolName": "read", "isError": False}},
+            {"type": "message_end", "message": {"role": "assistant", "timestamp": 1_200, "content": [
+                {"type": "toolCall", "id": "read-b", "name": "read"},
+            ]}},
+            {"type": "tool_execution_start", "toolCallId": "read-b", "toolName": "read", "args": {
+                "path": "README.md",
+            }},
+            {"type": "tool_execution_end", "toolCallId": "read-b", "toolName": "read", "result": {
+                "content": [{"type": "text", "text": "content"}],
+            }, "isError": False},
+            {"type": "message_end", "message": {"role": "toolResult", "timestamp": 1_300,
+                "toolCallId": "read-b", "toolName": "read", "isError": False}},
+        ]
+        result = trace.analyze_pi_events(events)
+        summary = result["summary"]
+        self.assertEqual(summary["files_inspected"], 1)
+        self.assertEqual(summary["duplicate_reads"], 1)
+        self.assertEqual(summary["files_modified"], 0)
 
     def test_trace_marks_repeated_targets_without_copying_free_text(self) -> None:
         result = trace.analyze_pi_trace(_events())
@@ -362,6 +415,48 @@ class ToolTraceEventsTest(unittest.TestCase):
             e for e in total["errors"] if e["tool"] == "read"
         )
         self.assertEqual(permission_error["error_category"], "permission")
+
+    def test_harness_import_error_is_infrastructure_not_verification(self) -> None:
+        # real-03..05-Analyse (P0): ein ModuleNotFoundError/Traceback aus dem
+        # Benchmark-eigenen Tooling (nicht dem Kandidatencode) darf nicht als
+        # "verification" durchgehen -- classify_error() muss ihn vor dem
+        # generischen verification-Zweig als "infrastructure" abfangen.
+        text = (
+            "Traceback (most recent call last):\n"
+            '  File "telemetry.py", line 81, in <module>\n'
+            "ModuleNotFoundError: No module named 'obench_missing_dep'"
+        )
+        category = trace.classify_error("project_check", text)
+        self.assertEqual(category, "infrastructure")
+
+    def test_infrastructure_error_never_promoted_to_regression(self) -> None:
+        # Selbst gegen eine SAUBERE Baseline darf ein Infrastrukturfehler
+        # NICHT zur Regression hochgestuft werden (das war exakt die in der
+        # Analyse beschriebene Fehldiagnose "benchmark telemetry import
+        # error" -> "baseline_clean_candidate_regression").
+        events = self._plan_events() + [
+            {"type": "message_end", "message": {"role": "assistant", "timestamp": 2_200, "content": [
+                {"type": "toolCall", "id": "work-verify", "name": "project_check"},
+            ]}},
+            {"type": "tool_execution_start", "toolCallId": "work-verify", "toolName": "project_check", "args": {
+                "profile": "verify",
+            }},
+            {"type": "tool_execution_end", "toolCallId": "work-verify", "toolName": "project_check", "result": {
+                "content": [{"type": "text", "text": (
+                    "verify [required]: failed (Exit-Code 1, 12.000 ms)\n"
+                    "Traceback (most recent call last):\n"
+                    "ModuleNotFoundError: No module named 'obench_missing_dep'"
+                )}],
+            }, "isError": True},
+            {"type": "message_end", "message": {"role": "toolResult", "timestamp": 2_400,
+                "toolCallId": "work-verify", "toolName": "project_check", "isError": True}},
+        ]
+        baseline = bp.baseline_context({"status": "clean", "failures": []})
+        total = trace.analyze_pi_events(events, baseline=baseline)
+        verify_error = next(
+            e for e in total["errors"] if e["tool"] == "project_check"
+        )
+        self.assertEqual(verify_error["error_category"], "infrastructure")
 
 
 if __name__ == "__main__":

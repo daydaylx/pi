@@ -17,4 +17,10 @@ criteria = [
 ]
 
 [workflow.baseline]
-checks = ["format:check", "typecheck"]
+# "test" ergaenzt (real-03..05-Analyse, P1): der Checker fuehrt
+# node tests/workflow-mode/session-health.test.mjs aus (in "test" als
+# Teilmenge enthalten) -- ohne diesen Check waere unbekannt, ob dieselbe
+# Testsuite auf der unveraenderten Baseline ueberhaupt schon lief/bestand.
+# Bewusst NICHT "verify" (wie real-05): siehe Begruendung in real-03s
+# workflow.toml.
+checks = ["format:check", "typecheck", "test"]

@@ -37,6 +37,11 @@ Scoring:
   * Baseline ``clean`` und der Kandidat erzeugt einen neuen Fehler ->
     ``comparable=true``; die Fehlerklasse ``regression`` macht ihn sichtbar,
     statt den Lauf zu verwerfen.
+  * Baseline ``clean`` und der Kandidat erzeugt NUR ``infrastructure``-Fehler
+    (Harness/Tooling selbst kaputt, siehe ``tool_trace.classify_error``) ->
+    ``comparable=true``, Reason ``baseline_clean_candidate_infrastructure_error``
+    -- getrennt von einer echten Regression, damit ein Harness-Ausfall nicht
+    als Kandidatenfehler fehldiagnostiziert wird.
   * Kandidat behebt einen Baselinefehler -> zusaetzliche Markierung
     ``baseline_fixed``; ``comparable`` richtet sich nach den restlichen
     Fehlern.
@@ -205,6 +210,15 @@ def decide_comparable(
             # bleibt vergleichbar; die Regression bleibt markiert, statt den
             # Lauf zu verwerfen.
             return True, "baseline_clean_candidate_regression"
+        if any(
+            (err.get("error_category") == "infrastructure")
+            for err in (candidate_tool_errors or [])
+        ):
+            # Ein Harness-/Tooling-Fehler ist keine Kandidaten-Regression --
+            # eigener Reason, damit er weder als "alles war clean"
+            # verschwindet noch faelschlich dem Kandidaten angelastet wird
+            # (real-03..05-Analyse, P0).
+            return True, "baseline_clean_candidate_infrastructure_error"
         return True, "baseline_clean"
 
     if baseline_status == "failing":

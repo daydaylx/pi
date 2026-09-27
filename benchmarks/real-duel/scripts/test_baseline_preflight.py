@@ -143,6 +143,25 @@ class ComparablePolicyTest(unittest.TestCase):
         self.assertTrue(comparable)
         self.assertEqual(reason, "baseline_clean_candidate_regression")
 
+    def test_case3c_baseline_clean_candidate_infrastructure_error_not_regression(self) -> None:
+        # real-03..05-Analyse (P0): ein Harness-/Tooling-Fehler (Kategorie
+        # "infrastructure", von tool_trace.classify_error VOR "verification"
+        # abgefangen) darf nicht wie eine Kandidaten-Regression behandelt
+        # werden, auch wenn candidate_regressions (bewusst) leer bleibt, weil
+        # die Kategorie nie "verification/regression" wird.
+        candidate_errors = [
+            {"tool": "project_check", "error_category": "infrastructure",
+             "error_summary": "Der Benchmark-Harness/das Verifikations-Tooling selbst ist gescheitert."},
+        ]
+        comparable, reason = bp.decide_comparable(
+            baseline_preflight={"status": "clean", "failures": []},
+            dirty_override=False,
+            candidate_tool_errors=candidate_errors,
+            candidate_regressions=[],
+        )
+        self.assertTrue(comparable)
+        self.assertEqual(reason, "baseline_clean_candidate_infrastructure_error")
+
     def test_case3b_baseline_failing_candidate_verifier_blocked(self) -> None:
         # Fall 3: der Kandidat scheitert mit seinem eigenen Verifier genau an
         # dem dokumentierten Baselinefehler -> taskfremder Fehler blockiert den

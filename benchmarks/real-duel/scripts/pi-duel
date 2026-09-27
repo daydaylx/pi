@@ -198,6 +198,21 @@ def _changed_paths(workdir, base_sha):
     return [p for p in tracked + untracked if p.strip()]
 
 
+def _patch_line_counts(diff_text):
+    """P1 (real-03..05-Analyse): added/removed direkt aus dem bereits
+    eingelesenen Unified-Diff-Text -- kein zusaetzlicher `git diff --numstat`-
+    Prozess. Datei-Header-Zeilen (+++/---) zaehlen bewusst nicht mit."""
+    added = removed = 0
+    for line in diff_text.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            removed += 1
+    return {"added": added, "removed": removed}
+
+
 def _save_patch(workdir, base_sha, run_id_base, arm, changed_paths=None):
     """P0-Fix: sichert den vollstaendigen Diff eines Kandidatenlaufs (inkl.
     neuer, bisher untracked Dateien) VOR jedem moeglichen Cleanup. Muss am
@@ -234,7 +249,7 @@ def _save_patch(workdir, base_sha, run_id_base, arm, changed_paths=None):
     )
     digest = hashlib.sha256(diff_proc.stdout.encode("utf-8")).hexdigest()
     (PATCHES_DIR / f"{run_id_base}_{arm}.patch.sha256").write_text(f"{digest}\n", encoding="utf-8")
-    return str(patch_path.relative_to(WORKSPACE_DIR)), digest
+    return str(patch_path.relative_to(WORKSPACE_DIR)), digest, _patch_line_counts(diff_proc.stdout)
 
 
 def _diff_pi_stats(before, after):
@@ -622,12 +637,9 @@ def _run_task(task_dir, task_name, run_prefix, args):
         # (z.B. benchmarks/real-duel/) veraendern, ohne dass das je geprueft
         # wurde. Gleiche Gate-Funktion wie plan-work.
         changed_paths = _changed_paths(workdir, workdir_base_ref)
-        gate_summary = gates_module.summarize([
-            gates_module.check_forbidden_surface_untouched(changed_paths, workflow_cfg.forbidden_surface),
-        ])
 
         # P0-Fix: Patch verpflichtend VOR jedem moeglichen Cleanup sichern.
-        patch_path, patch_sha256 = _save_patch(
+        patch_path, patch_sha256, patch_lines = _save_patch(
             workdir, workdir_base_ref, run_id_base, arm, changed_paths=changed_paths,
         )
 
@@ -638,6 +650,15 @@ def _run_task(task_dir, task_name, run_prefix, args):
         telemetry_module = _load_telemetry_module()
         telemetry = telemetry_module.normalize(cand_name, full_output)
         tool_trace_path = None
+        # P1 (real-03..05-Analyse): bleibt fuer codex-real bewusst None, nicht
+        # aus Nachlaessigkeit. tool_trace.analyze_pi_events() erwartet Pis
+        # Event-Vokabular (tool_execution_start/end, message_end mit
+        # role=toolResult); Codex' Transkript nutzt ein strukturell anderes
+        # Vokabular (item.completed/command_execution, siehe
+        # telemetry._codex_tool_stats). Ein aequivalenter Codex-Tool-Trace-
+        # Analyzer waere ein eigenstaendiges zweites Modul, kein Ein-Zeiler --
+        # dafuer reicht Codex' vorhandene phasenweise Telemetrie (telemetry.py)
+        # bereits fuer den aktuellen Vergleichszweck.
         tool_trace_summary = None
         tool_error_details = None
         if cand_name == "pi-real":
@@ -666,6 +687,19 @@ def _run_task(task_dir, task_name, run_prefix, args):
             tool_trace_summary = trace["summary"]
             tool_error_details = trace["errors"]
 
+        # Gate-Zusammenfassung erst hier, nachdem checker_exit
+        # (required_tests_passed) und -- nur fuer pi-real -- tool_error_details
+        # (permission_policy_passed) bekannt sind (real-03..05-Analyse, P0).
+        gate_summary = gates_module.summarize([
+            gates_module.check_forbidden_surface_untouched(changed_paths, workflow_cfg.forbidden_surface),
+            gates_module.check_required_tests_passed(has_checker, checker_exit),
+            gates_module.check_permission_policy_passed(
+                [err.get("error_category") for err in tool_error_details]
+                if tool_error_details is not None
+                else None
+            ),
+        ])
+
         row = {
             "run_id": run_id,
             "ts_iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
@@ -687,6 +721,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
             "gates": gate_summary,
             "patch_path": patch_path,
             "patch_sha256": patch_sha256,
+            "patch_lines": patch_lines,
             "wall_time_s": wall_time,
             "checker_wall_time_s": checker_wall_time,
             "cmd": result.get("cmd"),
@@ -780,7 +815,10 @@ def _run_task(task_dir, task_name, run_prefix, args):
         # eintritt -- _save_patch() berechnet dann selbst neu, statt mit
         # einer veralteten/leeren Liste weiterzuarbeiten.
         changed_paths = None
-        # P1/P2: Plan-/Work-Tooltrace + Baseline-Preflight.
+        # P1/P2: Plan-/Work-Tooltrace + Baseline-Preflight. Bleibt fuer
+        # codex-real bewusst None -- siehe Begruendung bei der aequivalenten
+        # Initialisierung in _execute_work_only oben (anderes Event-Vokabular,
+        # kein Ein-Zeiler-Aufwand).
         plan_phase_tool_trace = None
         work_phase_tool_trace = None
         tool_trace_summary = None
@@ -860,6 +898,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
                     _maybe_run_checker(workdir)
                 )
                 gates.append(gates_module.check_checkers_ran(has_checker, checker_exit))
+                gates.append(gates_module.check_required_tests_passed(has_checker, checker_exit))
 
                 plan_phase_telemetry = plan_result.stats_before_approval
                 work_phase_telemetry = _diff_pi_stats(plan_phase_telemetry, work_result.stats_after_work)
@@ -893,6 +932,11 @@ def _run_task(task_dir, task_name, run_prefix, args):
                 work_phase_tool_trace = work_trace["summary"]
                 tool_trace_summary = total_trace["summary"]
                 tool_error_details = total_trace["errors"]
+                gates.append(
+                    gates_module.check_permission_policy_passed(
+                        [err.get("error_category") for err in tool_error_details]
+                    )
+                )
                 tool_trace_path = TOOL_TRACES_DIR / f"{run_id_base}_{arm}_total.json"
                 (TOOL_TRACES_DIR / f"{run_id_base}_{arm}_plan.json").write_text(
                     json.dumps(plan_trace, ensure_ascii=False, indent=2) + "\n",
@@ -976,6 +1020,12 @@ def _run_task(task_dir, task_name, run_prefix, args):
                     _maybe_run_checker(workdir)
                 )
                 gates.append(gates_module.check_checkers_ran(has_checker, checker_exit))
+                gates.append(gates_module.check_required_tests_passed(has_checker, checker_exit))
+                # Codex hat im Plan-Work-Pfad keine Fehlerkategorisierung pro
+                # Tool-Call (nur phasenweise Telemetrie) -- Gate bleibt
+                # informativ statt eine nicht vorhandene Kategorisierung zu
+                # simulieren (siehe check_permission_policy_passed-Docstring).
+                gates.append(gates_module.check_permission_policy_passed(None))
 
                 telemetry_module = _load_telemetry_module()
                 split = telemetry_module.split_codex_plan_work(
@@ -1026,7 +1076,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
         # P0-Fix: Patch verpflichtend VOR jedem moeglichen Cleanup sichern --
         # unabhaengig davon, ob der Lauf/die Gates erfolgreich waren (auch ein
         # gescheiterter Lauf kann forensisch relevante Mutationen enthalten).
-        patch_path, patch_sha256 = _save_patch(
+        patch_path, patch_sha256, patch_lines = _save_patch(
             workdir, workdir_base_ref, run_id_base, arm, changed_paths=changed_paths,
         )
 
@@ -1077,6 +1127,7 @@ def _run_task(task_dir, task_name, run_prefix, args):
             "dirty_override": fp["dirty_override"],
             "patch_path": patch_path,
             "patch_sha256": patch_sha256,
+            "patch_lines": patch_lines,
             "tokens": None,
             "turns": None,
             "token_basis": None,
