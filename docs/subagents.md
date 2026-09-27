@@ -12,11 +12,11 @@ Statt einer festen Rolle übergibt der Hauptagent `spec` an das
 frischem Kontext, ohne Memory, ohne Delegation und ohne Schreibzugriff.
 Begründung und Regeln: `docs/decisions/031-temporary-task-agents.md`.
 
-| Profil     | Tools der Runtime          | Verwendung                                             |
-| ---------- | -------------------------- | ------------------------------------------------------ |
-| `analyse`  | read, grep, find, ls       | unbekannten Bereich oder Kontrollfluss belegt eingrenzen |
-| `research` | read, grep, find, ls       | unabhängige Recherche im Projekt                       |
-| `verify`   | über die Verifier-Kette    | unabhängige Prüfung; braucht `spec.verification`       |
+| Profil     | Tools der Runtime       | Verwendung                                               |
+| ---------- | ----------------------- | -------------------------------------------------------- |
+| `analyse`  | read, grep, find, ls    | unbekannten Bereich oder Kontrollfluss belegt eingrenzen |
+| `research` | read, grep, find, ls    | unabhängige Recherche im Projekt                         |
+| `verify`   | über die Verifier-Kette | unabhängige Prüfung; braucht `spec.verification`         |
 
 Der Hauptagent nennt nur Ziel, Kontext, Scope, erwartetes Ergebnis und
 gewünschte Fähigkeiten. Die Runtime bestimmt effektive Tools, Modell, Budgets
@@ -31,11 +31,11 @@ Hauptagent entscheidet.
 Es gibt keine festen Rollen mehr. Die Arbeit steht im `spec`, die Runtime
 schneidet die Rechte (`effective = requested ∩ Profil`).
 
-| Profil     | Tools                      | Verantwortung                                                       |
-| ---------- | -------------------------- | ------------------------------------------------------------------- |
+| Profil     | Tools                      | Verantwortung                                                          |
+| ---------- | -------------------------- | ---------------------------------------------------------------------- |
 | `analyse`  | read, grep, find, ls       | unbekannte Änderungssurface, Kontrollfluss oder Bugs belegt eingrenzen |
-| `research` | read, grep, find, ls       | lokale Recherche mit Quellenangabe                                  |
-| `verify`   | read, grep, find, ls, bash | riskante Umsetzung unabhängig gegen Auftrag, Diff und Checks prüfen |
+| `research` | read, grep, find, ls       | lokale Recherche mit Quellenangabe                                     |
+| `verify`   | read, grep, find, ls, bash | riskante Umsetzung unabhängig gegen Auftrag, Diff und Checks prüfen    |
 
 `verify` läuft über die Verifier-Kette; `agents/verifier.md` ist deren
 technisches Profil und keine Rollenidentität. `investigator` und `debugger`
@@ -221,6 +221,22 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
   und Urteil bereits über diese Policy und `subagent-output-guard.ts`; das
   Paket-Acceptance-System ist für den Verifier redundant.
   Siehe `docs/decisions/017-verifier-acceptance-none.md`.
+- **Kein Erfolg ohne bestätigtes Pflicht-Gate:** ein `git commit`, dessen Diff
+  einen verifier-pflichtigen Pfad berührt (`extensions/permissions/verifier-
+required-paths.ts`), wird von `assessGitCommitVerifierGate` technisch
+  geblockt, solange kein passender Verifier-Lauf mit Urteil `PASS`/
+  `PASS_WITH_WARNINGS` über exakt diesen Workspace-Zustand vorliegt — inkl.
+  Fail-Closed, wenn der Workspace-Snapshot selbst nicht erfassbar ist
+  (`extensions/permissions/verifier-policy.ts`, `assessGitCommitVerifierGate`).
+  Das deckt bereits den Grundsatz „ein Erfolg wird nicht behauptet, wenn ein
+  Pflicht-Gate nicht bestätigt werden konnte" ab: die Runtime kennt keine
+  Stelle, die eine freitextliche Erfolgsmeldung des Modells programmatisch
+  verarbeitet — Enforcement ist hier durchgängig tool-call-basiert (der
+  Commit selbst), nicht text-claim-basiert. Ein Vorschlag aus einer
+  Benchmark-Analyse (real-03..05, September 2026), dafür ein zusätzliches
+  Freitext-Abschluss-Gate zu bauen, wurde deshalb nicht umgesetzt: es gibt
+  keinen Hook, der eine solche Aussage überhaupt abfangen könnte, und keinen
+  belegten Umgehungsfall für das bestehende Commit-Gate.
 - **Live-Pin-Status:** `pi list` lädt ausschließlich den in `settings.json`
   (`packages`) gepinnten Git-Fork unter
   `~/.pi/agent/git/github.com/daydaylx/pi-subagents`; dessen Checkout steht
