@@ -27,6 +27,43 @@ CLIENT_SUPPORTS_DIAGNOSTICS = False
 WRITE_LOCK = threading.Lock()
 
 
+def range_of(text, needle, occurrence=1):
+    """Berechnet einen LSP-``{start, end}``-Range aus der tatsaechlichen
+    Position von ``needle`` im uebergebenen Fixture-Text, statt Zeichen-
+    positionen von Hand zu zaehlen. ``occurrence`` waehlt das n-te
+    (1-basiert) Auftreten, falls ``needle`` mehrfach vorkommt.
+
+    Die vier bestehenden hart codierten Ranges unten (definition/references/
+    workspace-symbol/diagnostics) bleiben bewusst unveraendert: ihr Ergebnis
+    dient nur als Anzeige/Label, das nie auf echten Dateiinhalt angewendet
+    wird -- ein falscher Range ist dort harmlos.
+
+    Fuer einen KUENFTIGEN Handler, dessen Ergebnis-Range hingegen als
+    Text-MUTATION angewendet wird (z.B. textDocument/rename), MUSS der Range
+    exakt zur echten Zeichenposition passen -- dafuer ist diese Funktion da.
+    Ohne sie fuehrte ein hart codierter, positionsunabhaengiger Range in
+    einer frueheren real-05-lsp-rename-tool-Benchmarkrunde zu einem
+    verstuemmelten Dateiinhalt: der canned Range traf " const" statt
+    "target", weil "target" in "export const target = 1;\n" bei Zeichen 13
+    beginnt, nicht bei 6 (dem hart gezaehlten, falschen Wert).
+    """
+    lines = text.split("\n")
+    seen = 0
+    for line_no, line in enumerate(lines):
+        col = -1
+        while True:
+            col = line.find(needle, col + 1)
+            if col == -1:
+                break
+            seen += 1
+            if seen == occurrence:
+                return {
+                    "start": {"line": line_no, "character": col},
+                    "end": {"line": line_no, "character": col + len(needle)},
+                }
+    raise ValueError(f"{needle!r} (Vorkommen {occurrence}) nicht in Fixture-Text gefunden")
+
+
 def write(message):
     body = json.dumps(message, separators=(",", ":")).encode("utf-8")
     header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
