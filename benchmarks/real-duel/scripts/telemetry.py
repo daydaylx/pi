@@ -151,19 +151,16 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
     wall_time (Summe von RunEntry.duration, ms) fuer nested (alle Eintraege)
     und verifier (nur agent == "verifier") getrennt.
 
-    NICHT verfuegbar aus dieser Datenquelle, daher bewusst nicht befuellt statt
-    geschaetzt (RunEntry hat kein model/reasoning/tool-call-Feld, s.
-    pi-subagents/src/runs/shared/run-history.ts):
-    verifier_model, verifier_reasoning, verifier_internal_tool_calls,
-    nested_models, mixed_model_run. Eine Erweiterung braeuchte zusaetzliche
-    Felder in RecordRunExtras des gepinnten pi-subagents-Forks -- ausserhalb
-    des Scopes dieses Repos.
-
-    NICHT verfuegbar, weil nirgends persistiert: verifier_decision,
-    verifier_trigger, verifier_skip_reason (die Need-Gate-Entscheidung aus
-    extensions/permissions/verifier-risk.ts lebt nur im laufenden Prozess/
-    Ticket, nicht in run-history.jsonl oder einer anderen von diesem
-    Benchmark-Harness lesbaren Datei).
+    Optionale Felder werden additiv konsumiert: model (String) und
+    internalToolCalls (nichtnegative Ganzzahl) schreibt recordRun() seit
+    pi-subagents@ced7922 tatsaechlich (RunEntry.model/internalToolCalls,
+    aus SingleResult.model/progress.toolCount, alle 4 recordRun()-Aufrufstellen).
+    reasoningTokens, verifierDecision/verifierTrigger/verifierSkipReason
+    bleiben weiterhin unpersistiert: Erstere fehlt im Usage-Typ des Forks
+    komplett (separate, groessere Aenderung); Letztere entsteht in Pis
+    eigener Need-Gate-Entscheidung (extensions/permissions/verifier-risk.ts),
+    die der Fork-Executor gar nicht sieht. Alte Zeilen ohne diese Felder
+    bleiben kompatibel; fehlende oder ungueltige Werte werden nicht geschaetzt.
 
     0 statt None fuer Zaehlfelder, wenn keine passenden Eintraege gefunden
     wurden -- ein Lauf ohne Subagenten ist ein gueltiges, gemessenes Ergebnis,
@@ -175,6 +172,9 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
     total_cost = 0.0
     total_cost_found = False
     total_wall_time = 0
+    nested_models = []
+    nested_models_complete = True
+    verifier_entries = []
     verifier_calls = 0
     verifier_fresh = verifier_cache_read = verifier_output = 0
     verifier_cost = 0.0
@@ -208,7 +208,15 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
             total_cost += entry_cost
             total_cost_found = True
 
+        model = entry.get("model")
+        if isinstance(model, str) and model:
+            if model not in nested_models:
+                nested_models.append(model)
+        else:
+            nested_models_complete = False
+
         if entry.get("agent") == "verifier":
+            verifier_entries.append(entry)
             verifier_calls += 1
             verifier_fresh += entry_fresh
             verifier_cache_read += entry_cache_read
@@ -220,6 +228,35 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
 
     total_tokens = total_fresh + total_cache_read + total_output
     verifier_tokens = verifier_fresh + verifier_cache_read + verifier_output
+
+    def sum_optional_numeric(entries, field):
+        values = [entry.get(field) for entry in entries]
+        if not values or any(
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            for value in values
+        ):
+            return None
+        return sum(values)
+
+    def common_optional_string(entries, field):
+        values = [entry.get(field) for entry in entries]
+        if not values or any(not isinstance(value, str) for value in values):
+            return None
+        return values[0] if all(value == values[0] for value in values) else None
+
+    verifier_models = [entry.get("model") for entry in verifier_entries]
+    verifier_model = (
+        verifier_models[0]
+        if verifier_models
+        and all(isinstance(model, str) and model for model in verifier_models)
+        and all(model == verifier_models[0] for model in verifier_models)
+        else None
+    )
+    mixed_model_run = (
+        len(nested_models) > 1 if nested_models_complete and total_calls else None
+    )
 
     return {
         # Legacy-Namen, unveraendert (kein bekannter Caller aktuell, aber
@@ -241,15 +278,15 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
         "verifier_cache_read": verifier_cache_read,
         "verifier_output": verifier_output,
         "verifier_wall_time": verifier_wall_time,
-        # Bewusst unpopuliert -- siehe Docstring.
-        "verifier_model": None,
-        "verifier_reasoning": None,
-        "verifier_internal_tool_calls": None,
-        "verifier_decision": None,
-        "verifier_trigger": None,
-        "verifier_skip_reason": None,
-        "nested_models": [],
-        "mixed_model_run": None,
+        # Optionale Fork-Metadaten. Fehlende/inkonsistente Werte bleiben None.
+        "verifier_model": verifier_model,
+        "verifier_reasoning": sum_optional_numeric(verifier_entries, "reasoningTokens"),
+        "verifier_internal_tool_calls": sum_optional_numeric(verifier_entries, "internalToolCalls"),
+        "verifier_decision": common_optional_string(verifier_entries, "verifierDecision"),
+        "verifier_trigger": common_optional_string(verifier_entries, "verifierTrigger"),
+        "verifier_skip_reason": common_optional_string(verifier_entries, "verifierSkipReason"),
+        "nested_models": nested_models,
+        "mixed_model_run": mixed_model_run,
     }
 
 

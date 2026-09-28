@@ -134,9 +134,73 @@ class NestedStatsTest(unittest.TestCase):
         self.assertAlmostEqual(stats["verifier_cost"], 0.02)
         self.assertEqual(stats["nested_wall_time"], 3000)
         self.assertEqual(stats["verifier_wall_time"], 2000)
-        # The unavailable fields stay explicitly unpopulated, not guessed.
+        # Old history rows remain readable; unavailable fields are not guessed.
         self.assertIsNone(stats["verifier_model"])
+        self.assertIsNone(stats["verifier_reasoning"])
+        self.assertIsNone(stats["verifier_internal_tool_calls"])
+        self.assertIsNone(stats["verifier_decision"])
+        self.assertEqual(stats["nested_models"], [])
         self.assertIsNone(stats["mixed_model_run"])
+
+    def test_optional_fork_metadata_is_aggregated_without_losing_unknowns(self) -> None:
+        self._write_entries([
+            {
+                "agent": "worker", "cwd": self.workdir, "ts": 100,
+                "duration": 500, "model": "provider/model-a",
+            },
+            {
+                "agent": "verifier", "cwd": self.workdir, "ts": 101,
+                "duration": 800, "model": "provider/model-b",
+                "reasoningTokens": 24, "internalToolCalls": 3,
+                "verifierDecision": "required", "verifierTrigger": "user_requested",
+                "verifierSkipReason": "",
+            },
+        ])
+        stats = telemetry.subagent_stats_from_run_history(self.workdir, 0, 200)
+
+        self.assertEqual(stats["nested_models"], ["provider/model-a", "provider/model-b"])
+        self.assertTrue(stats["mixed_model_run"])
+        self.assertEqual(stats["verifier_model"], "provider/model-b")
+        self.assertEqual(stats["verifier_reasoning"], 24)
+        self.assertEqual(stats["verifier_internal_tool_calls"], 3)
+        self.assertEqual(stats["verifier_decision"], "required")
+        self.assertEqual(stats["verifier_trigger"], "user_requested")
+        self.assertEqual(stats["verifier_skip_reason"], "")
+
+    def test_metadata_from_unrelated_or_out_of_window_entries_is_excluded(self) -> None:
+        self._write_entries([
+            {
+                "agent": "verifier", "cwd": "/unrelated/other-repo", "ts": 100,
+                "duration": 1, "model": "leak/model", "reasoningTokens": 999,
+            },
+            {
+                "agent": "verifier", "cwd": self.workdir, "ts": 5000,
+                "duration": 1, "model": "late/model", "internalToolCalls": 999,
+            },
+        ])
+        stats = telemetry.subagent_stats_from_run_history(self.workdir, 0, 200)
+        self.assertEqual(stats["nested_models"], [])
+        self.assertIsNone(stats["verifier_reasoning"])
+        self.assertIsNone(stats["verifier_internal_tool_calls"])
+        self.assertIsNone(stats["mixed_model_run"])
+
+    def test_incomplete_metadata_is_not_interpreted_as_zero_or_complete(self) -> None:
+        self._write_entries([
+            {
+                "agent": "verifier", "cwd": self.workdir, "ts": 100,
+                "duration": 1, "model": "provider/model-a",
+                "reasoningTokens": 10,
+            },
+            {
+                "agent": "worker", "cwd": self.workdir, "ts": 101,
+                "duration": 1,
+            },
+        ])
+        stats = telemetry.subagent_stats_from_run_history(self.workdir, 0, 200)
+        self.assertEqual(stats["nested_models"], ["provider/model-a"])
+        self.assertIsNone(stats["mixed_model_run"])
+        self.assertEqual(stats["verifier_reasoning"], 10)
+        self.assertIsNone(stats["verifier_internal_tool_calls"])
 
     def test_entries_outside_workdir_or_time_window_are_excluded(self) -> None:
         self._write_entries([
