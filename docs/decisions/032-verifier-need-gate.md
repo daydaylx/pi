@@ -14,7 +14,7 @@ Trigger-Vertrag in `rewriteVerifySpecToVerifier`
 (`agents/verifier.md`) unverändert — die geforderte "targeted evidence
 first"-Regel stand dort bereits (Schritt 5).
 
-Nachtrag (`pi-subagents`-Pin `ced79226d964e4b71063f386429b5f229909ba43`,
+Nachtrag 1 (`pi-subagents`-Pin `ced79226d964e4b71063f386429b5f229909ba43`,
 Branch `feat/temporary-agent-spec`): `RunEntry`/`RecordRunExtras` im Fork um
 `model`/`internalToolCalls` erweitert (alle 4 `recordRun()`-Aufrufstellen),
 dadurch sind `verifier_model`, `nested_models`, `mixed_model_run` und
@@ -23,12 +23,32 @@ befüllt statt geschätzt. `createVerifierTicket` hat jetzt außerdem einen
 direkten Unit-Test (`tests/verifier-ticket.test.mjs`), vorher nur indirekt
 über die Runtime-Suite abgedeckt.
 
-Weiterhin bewusst nicht umgesetzt (siehe „Bewusst nicht eingeführt“ unten):
-`verifier_reasoning` (Datenquelle liefert es nicht — der Fork trackt keine
-Reasoning-Token-Zahl), `verifier_decision`/`verifier_trigger`/
-`verifier_skip_reason` (nirgends persistiert, da die Need-Gate-Entscheidung
-im Fork-Executor nicht sichtbar ist), Nachmessung/Tier-Wechsel (Phase 8 —
-braucht zuerst 20–50 echte Läufe).
+Nachtrag 2 (`pi-subagents`-Pin `1014632bf843e87f3f953a9a29b56a7831e7943a`,
+Branch `feat/temporary-agent-spec`): Die verbleibenden beiden dokumentierten
+Lücken sind jetzt ebenfalls geschlossen, in dem Umfang, in dem sie technisch
+schließbar sind.
+
+- `verifier_reasoning`: der Fork-eigene `Usage`-Typ
+  (`src/shared/types/basic.ts`) hat jetzt ein optionales `reasoning`-Feld,
+  gespeist über die eine reale Turn-Akkumulierung
+  (`src/runs/foreground/execution.ts`) statt geschätzt — undefiniert bleibt
+  es nur, wenn kein einziger Turn eine Reasoning-Aufschlüsselung meldet.
+- `verifier_decision`/`verifier_trigger`: Pis Guard hängt die bereits
+  getroffene Need-Gate-Entscheidung nach `assessVerifierDelegation` als
+  `verifierRisk: {decision, trigger}` an den `subagent`-Aufruf an
+  (`normalizeVerifierDelegationInput`, analog zum bestehenden
+  `acceptance`-Override) — derselbe Mechanismus, über den das Paket
+  Acceptance-Level bereits heute überschreibt, jetzt für ein zweites Feld
+  wiederverwendet, keine neue Übergabeart. Der Fork liest `verifierRisk`
+  zurück und reicht es an `recordRun()` durch, ohne selbst zu wissen, was
+  ein Need-Gate ist.
+- `verifier_skip_reason` bleibt bewusst **nicht** umgesetzt (siehe „Bewusst
+  nicht eingeführt“ unten) — ein `not_needed`-Lauf wird komplett blockiert,
+  bevor der Fork-Executor den Aufruf überhaupt sieht; es gibt keinen
+  `recordRun()`-Aufruf, an den sich dieses Feld anhängen ließe.
+
+Weiterhin offen: Nachmessung/Tier-Wechsel (Phase 8 — braucht zuerst 20–50
+echte Läufe).
 
 ## Kontext
 
@@ -115,23 +135,23 @@ informative Ergänzung.
   safe than sorry“ als unzureichend erkennen) — das wäre exakt die
   semantische Diff-Klassifikation, die dieses Repo bewusst vermeidet.
   Nicht-leer ist die einzige technisch geprüfte Eigenschaft.
-- `verifier_reasoning` in der Benchmark-Telemetrie: `pi-subagents`' `Usage`-
-  Typ (gepinnter Fork, separates Repository, `src/shared/types/basic.ts`)
-  trackt gar keine Reasoning-Token-Zahl, an keiner Stelle im Paket. Das zu
-  ergänzen hieße, die Usage-Akkumulierung überall im Fork anzufassen, nicht
-  nur eine Aufrufstelle — eine deutlich größere, separate Änderung.
-  `verifier_model`, `verifier_internal_tool_calls`, `nested_models` und
-  `mixed_model_run` sind dagegen seit Pin `ced79226d964e4b71063f386429b5f229909ba43`
-  real befüllt (siehe Nachtrag oben).
-- `verifier_decision`/`verifier_trigger`/`verifier_skip_reason` in der
-  Benchmark-Telemetrie: Die Need-Gate-Entscheidung entsteht in Pis eigener
-  Permission-Guard-Schicht, bevor der `pi-subagents`-Executor den Tool-Call
-  überhaupt sieht — der Fork hat dafür schlicht keine Sicht auf diese
-  Information, unabhängig davon, welche Felder `RunEntry` trägt. Das würde
-  einen neuen Übergabeweg vom Guard in den Tool-Input hinein brauchen (analog
-  zu `normalizeVerifierDelegationInput`s `acceptance`-Override), den der
-  Fork-Executor zusätzlich explizit einlesen und durchreichen müsste —
-  außerhalb des Scopes dieser Änderung.
+- `verifier_skip_reason` in der Benchmark-Telemetrie: Ein `not_needed`-Lauf
+  wird von Pis Guard vollständig blockiert (`assessVerifierDelegation`),
+  bevor der `subagent`-Tool-Call den `pi-subagents`-Executor überhaupt
+  erreicht — es gibt für einen blockierten Versuch keinen `recordRun()`-
+  Aufruf, egal welche Felder `RunEntry` trägt. Das bräuchte einen völlig
+  anderen Mechanismus als `verifier_decision`/`verifier_trigger` (die für
+  tatsächlich gestartete Läufe über `verifierRisk` durchgereicht werden,
+  siehe Nachtrag 2): Pis eigener Guard müsste selbst einen Log-Eintrag
+  schreiben, wenn er blockiert — ein neuer Seiteneffekt in einer bislang
+  reinen Entscheidungsschicht (`extensions/permissions/verifier-policy.ts`),
+  der eine eigene, bewusste Architekturentscheidung verdient statt einer
+  beiläufigen Ergänzung.
+  `verifier_model`, `verifier_reasoning`, `verifier_internal_tool_calls`,
+  `nested_models`, `mixed_model_run`, `verifier_decision` und
+  `verifier_trigger` sind dagegen seit Pin
+  `1014632bf843e87f3f953a9a29b56a7831e7943a` real befüllt (siehe Nachtrag 2
+  oben).
 
 ## Folgen
 

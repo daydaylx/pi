@@ -151,16 +151,25 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
     wall_time (Summe von RunEntry.duration, ms) fuer nested (alle Eintraege)
     und verifier (nur agent == "verifier") getrennt.
 
-    Optionale Felder werden additiv konsumiert: model (String) und
-    internalToolCalls (nichtnegative Ganzzahl) schreibt recordRun() seit
-    pi-subagents@ced7922 tatsaechlich (RunEntry.model/internalToolCalls,
-    aus SingleResult.model/progress.toolCount, alle 4 recordRun()-Aufrufstellen).
-    reasoningTokens, verifierDecision/verifierTrigger/verifierSkipReason
-    bleiben weiterhin unpersistiert: Erstere fehlt im Usage-Typ des Forks
-    komplett (separate, groessere Aenderung); Letztere entsteht in Pis
-    eigener Need-Gate-Entscheidung (extensions/permissions/verifier-risk.ts),
-    die der Fork-Executor gar nicht sieht. Alte Zeilen ohne diese Felder
-    bleiben kompatibel; fehlende oder ungueltige Werte werden nicht geschaetzt.
+    Optionale Felder werden additiv konsumiert und schreibt recordRun() seit
+    pi-subagents@1014632 tatsaechlich: model/internalToolCalls (alle 4
+    recordRun()-Aufrufstellen, aus SingleResult.model/progress.toolCount),
+    reasoningTokens (aus dem seither um `reasoning` erweiterten internen
+    Usage-Typ, ueber die Fork-eigene Turn-Akkumulierung), und -- nur fuer
+    den `verifier`-Agent -- verifierDecision/verifierTrigger. Letztere
+    zwei kommen aus Pis eigener Need-Gate-Entscheidung
+    (extensions/permissions/verifier-risk.ts): Pis Guard haengt sie nach
+    dem eigenen Need-Gate-Check als `verifierRisk: {decision, trigger}`
+    an den `subagent`-Tool-Call an (normalizeVerifierDelegationInput,
+    analog zum bestehenden `acceptance`-Override), der Fork-Executor liest
+    das zurueck und reicht es an recordRun() durch -- der Fork selbst hat
+    dabei keine Kenntnis, was ein Need-Gate ist, nur ein generisches
+    Provenienzfeld. verifierSkipReason bleibt weiterhin unpersistiert: ein
+    `not_needed`-Lauf wird von Pis Guard komplett blockiert, bevor der
+    Fork-Executor den Tool-Call ueberhaupt sieht -- es gibt dafuer keinen
+    `recordRun()`-Aufruf, den ein Feld tragen koennte. Alte Zeilen ohne
+    diese Felder bleiben kompatibel; fehlende oder ungueltige Werte werden
+    nicht geschaetzt.
 
     0 statt None fuer Zaehlfelder, wenn keine passenden Eintraege gefunden
     wurden -- ein Lauf ohne Subagenten ist ein gueltiges, gemessenes Ergebnis,
