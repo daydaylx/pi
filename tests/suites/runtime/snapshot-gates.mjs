@@ -230,11 +230,14 @@ export const snapshotGateSections = {
         // Recovery unavailability is not a blanket read lock, but it must
         // fail closed for writes in the real permission pipeline.
         const unavailableHarness = createHarness();
-        unavailableHarness.api.events.on("workflow-capabilities:request", (value) =>
-          value.respond({ mode: "work" }),
+        unavailableHarness.api.events.on(
+          "workflow-capabilities:request",
+          (value) => value.respond({ mode: "work" }),
         );
         modePermissions.default(unavailableHarness.api);
-        const unavailableCtx = unavailableHarness.makeContext({ cwd: workspace });
+        const unavailableCtx = unavailableHarness.makeContext({
+          cwd: workspace,
+        });
         await unavailableHarness.runHooks("session_start", {}, unavailableCtx);
         const unavailableRead = await unavailableHarness.runHooks(
           "tool_call",
@@ -251,7 +254,9 @@ export const snapshotGateSections = {
           unavailableCtx,
         );
         assert(
-          unavailableWrite.some((result) => result?.block && /nicht verfügbar/.test(result.reason)),
+          unavailableWrite.some(
+            (result) => result?.block && /nicht verfügbar/.test(result.reason),
+          ),
           "a missing recovery consumer blocks writes with an explicit unavailable reason",
         );
 
@@ -263,7 +268,11 @@ export const snapshotGateSections = {
         );
         let resolveStaleStatus;
         staleHarness.api.events.on("recovery-status:request", (request) =>
-          request.respond(new Promise((resolve) => { resolveStaleStatus = resolve; })),
+          request.respond(
+            new Promise((resolve) => {
+              resolveStaleStatus = resolve;
+            }),
+          ),
         );
         modePermissions.default(staleHarness.api);
         const staleCtx = staleHarness.makeContext({ cwd: workspace });
@@ -282,7 +291,10 @@ export const snapshotGateSections = {
         resolveStaleStatus({ armed: false });
         const staleResult = await staleAttempt;
         assert(
-          staleResult.some((result) => result?.block && /Sitzung.*gewechselt/.test(result.reason)),
+          staleResult.some(
+            (result) =>
+              result?.block && /Sitzung.*gewechselt/.test(result.reason),
+          ),
           "a stale clear response is ignored after a session switch",
         );
 
@@ -305,6 +317,7 @@ export const snapshotGateSections = {
           "## Implementation / Diff to verify\n<diff>",
           "## Baseline (Pre-existing workspace state)\nclean",
           "## Acceptance Criteria\nThe verifier contract holds.",
+          "## Optional verifier trigger\ntrigger: environment_uncertainty\nevidence: Fixture ohne echten Diff; dieser Test prüft gezielt die Executor-Guard-Pipeline, nicht die Need-Entscheidung.",
         ].join("\n\n");
         const allowedVerifier = {
           toolName: "subagent",

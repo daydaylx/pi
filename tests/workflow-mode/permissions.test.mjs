@@ -48,7 +48,11 @@ await test("recovery capability effects fail closed outside known read-only tool
   for (const toolName of ["read", "grep", "find", "ls", "lsp_diagnostics"]) {
     eq(effect(toolName), "read_only", `${toolName} is explicitly read-only`);
   }
-  eq(effect("recovery_check"), "recovery_control", "recovery control stays free");
+  eq(
+    effect("recovery_check"),
+    "recovery_control",
+    "recovery control stays free",
+  );
   for (const toolName of [
     "write",
     "edit",
@@ -79,7 +83,11 @@ await test("recovery status distinguishes unavailable, clear and broken provider
   if (!recoveryCapabilities) return;
   const request = recoveryCapabilities.requestRecoveryStatus;
   const unavailable = await request({ emit() {} });
-  eq(unavailable.armed, true, "missing consumer does not imply a clear workspace");
+  eq(
+    unavailable.armed,
+    true,
+    "missing consumer does not imply a clear workspace",
+  );
   eq(unavailable.reason, "unavailable", "missing consumer is explicit");
   const clear = await request({
     emit(_channel, payload) {
@@ -213,12 +221,14 @@ await test("the complete guarded file path owns external boundaries and honors r
       `${level} allows the runtime README exception end-to-end`,
     );
     eq(
-      guardedDecision(level, "read", join(runtimeSymlink, "ordinary.txt")).action,
+      guardedDecision(level, "read", join(runtimeSymlink, "ordinary.txt"))
+        .action,
       "allow",
       `${level} allows an ordinary symlink escape read`,
     );
     eq(
-      guardedDecision(level, "read", join(runtimeSymlink, "secret.json")).action,
+      guardedDecision(level, "read", join(runtimeSymlink, "secret.json"))
+        .action,
       "block",
       `${level} blocks a secret even below a symlink escape`,
     );
@@ -589,7 +599,9 @@ await test("decideBash (yolo) allows project-local node_modules/.bin symlinks", 
   if (!permissionPolicy) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-symlink-bash-"));
   try {
-    mkdirSync(join(cwd, "tooling", "node_modules", ".bin"), { recursive: true });
+    mkdirSync(join(cwd, "tooling", "node_modules", ".bin"), {
+      recursive: true,
+    });
     mkdirSync(join(cwd, "tooling", "node_modules", "runner"), {
       recursive: true,
     });
@@ -1644,6 +1656,7 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
       "Pre-existing workspace state (vor der ersten Änderung dieses Tasks erfasst):\nclean",
       "Pre-existing dirty-path fingerprints:\nkeine",
       "Acceptance criteria: project_check verify besteht.",
+      "## Optional verifier trigger\ntrigger: environment_uncertainty\nevidence: Isolierte Fixture ohne echte Diff-Historie; dieser Test prüft gezielt das Dedup-Verhalten.",
     ].join("\n\n");
     const assess = (verification, task = completeTask) =>
       verifierPolicy.assessVerifierDelegation(
@@ -2548,7 +2561,10 @@ await test("YOLO 2/3 keep plan mode, the interactive credential guard and the lo
     );
     assert(
       workflowPolicy.assessWorkflowTool(
-        { toolName: "interactive_shell", input: { command: "sudo id | tee x" } },
+        {
+          toolName: "interactive_shell",
+          input: { command: "sudo id | tee x" },
+        },
         cwd,
         level,
       ).blocked,
@@ -2629,7 +2645,11 @@ await test("untrusted projects block external reads and symlink escapes at the t
   );
   modePermissions.default(harness.api);
 
-  const trustedContext = harness.makeContext({ cwd, trusted: true, mode: "tui" });
+  const trustedContext = harness.makeContext({
+    cwd,
+    trusted: true,
+    mode: "tui",
+  });
   await harness.runHooks("session_start", {}, trustedContext);
 
   const untrustedContext = harness.makeContext({
@@ -2642,7 +2662,11 @@ await test("untrusted projects block external reads and symlink escapes at the t
     harness.runHooks("tool_call", { toolName, input }, ctx);
 
   // In trusted project: reading an ordinary external file is allowed
-  const trustedRead = await check("read", { path: "/etc/hostname" }, trustedContext);
+  const trustedRead = await check(
+    "read",
+    { path: "/etc/hostname" },
+    trustedContext,
+  );
   assert(
     trustedRead.every((r) => !r?.block),
     "trusted project allows reading ordinary external files",
@@ -2655,7 +2679,9 @@ await test("untrusted projects block external reads and symlink escapes at the t
     untrustedContext,
   );
   assert(
-    untrustedExternalRead.some((r) => r?.block && r.reason.includes("Harte Trust-Grenze")),
+    untrustedExternalRead.some(
+      (r) => r?.block && r.reason.includes("Harte Trust-Grenze"),
+    ),
     "untrusted project blocks reading external files",
   );
 
@@ -2666,7 +2692,9 @@ await test("untrusted projects block external reads and symlink escapes at the t
     untrustedContext,
   );
   assert(
-    untrustedExternalGrep.some((r) => r?.block && r.reason.includes("Harte Trust-Grenze")),
+    untrustedExternalGrep.some(
+      (r) => r?.block && r.reason.includes("Harte Trust-Grenze"),
+    ),
     "untrusted project blocks grep on external paths",
   );
 
@@ -2692,7 +2720,10 @@ await test("Plan Mode and readonly shell permit inspection of external files whi
     "Plan mode permits cat on /etc/hostname",
   );
   assert(
-    permissionPolicy.isPlanModeDiagnosticCommand("head -n 5 /etc/hostname", cwd),
+    permissionPolicy.isPlanModeDiagnosticCommand(
+      "head -n 5 /etc/hostname",
+      cwd,
+    ),
     "Plan mode permits head on /etc/hostname",
   );
   assert(
@@ -2727,4 +2758,3 @@ await test("Plan Mode and readonly shell permit inspection of external files whi
     "readonly level blocks reading ~/.ssh/id_rsa",
   );
 });
-

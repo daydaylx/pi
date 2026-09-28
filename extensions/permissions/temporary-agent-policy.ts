@@ -15,6 +15,11 @@ import {
   type WorkflowCapabilitySnapshot,
 } from "../shared/workflow-capabilities.ts";
 import type { PermissionLevel } from "../shared/workflow-status.ts";
+import {
+  isVerifierOptionalTrigger,
+  renderOptionalTriggerSection,
+  VERIFIER_OPTIONAL_TRIGGERS,
+} from "./verifier-risk.ts";
 import type { WorkflowAssessment } from "./workflow-policy.ts";
 
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
@@ -273,6 +278,23 @@ export function rewriteVerifySpecToVerifier(
       );
     }
     sections.push(`## Re-verification justification\n${justification.trim()}`);
+  }
+  const trigger = verification.trigger;
+  const triggerEvidence = verification.triggerEvidence;
+  if (trigger !== undefined || triggerEvidence !== undefined) {
+    if (!isVerifierOptionalTrigger(trigger)) {
+      return block(
+        `\`verification.trigger\` muss eines von ${VERIFIER_OPTIONAL_TRIGGERS.join(", ")} sein.`,
+      );
+    }
+    if (typeof triggerEvidence !== "string" || triggerEvidence.trim() === "") {
+      return block(
+        "`verification.triggerEvidence` ist Pflicht, sobald `verification.trigger` gesetzt ist, und darf nicht leer sein.",
+      );
+    }
+    sections.push(
+      renderOptionalTriggerSection({ trigger, evidence: triggerEvidence }),
+    );
   }
   const objective =
     typeof spec.objective === "string" ? spec.objective.trim() : "";

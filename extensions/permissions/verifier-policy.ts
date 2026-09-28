@@ -21,6 +21,11 @@ import {
   type PermissionLevel,
 } from "../shared/workflow-status.ts";
 import { matchingVerifierRequiredPaths } from "./verifier-required-paths.ts";
+import {
+  assessVerifierNeed,
+  extractOptionalTriggerClaim,
+  type VerifierNeedAssessment,
+} from "./verifier-risk.ts";
 import type { WorkflowAssessment } from "./workflow-policy.ts";
 
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
@@ -271,6 +276,43 @@ export async function assessVerifierDedup(
 }
 
 /**
+ * The Need-Gate: before any verifier run is allowed to start, determine
+ * whether it is required, justified or unnecessary for the current diff.
+ * Both the legacy `agent: "verifier"` path and the `spec.profile: "verify"`
+ * rewrite (temporary-agent-policy.ts) converge on the same rendered `task`
+ * text and reach this same check — Arbeitsvertrag §8 (Rückwärtskompatibilität):
+ * kein Pfad darf die Policy umgehen.
+ *
+ * A snapshot that cannot be collected is treated the same way
+ * assessVerifierDedup treats it above: "don't know" is never evidence that a
+ * run is safe to block, so an uncollectible snapshot permits the run rather
+ * than blocking it — undefined here means "no need assessment possible",
+ * and the caller must not treat that as not_needed. The commit gate
+ * (assessGitCommitVerifierGate) is the place a hard-required check is
+ * actually enforced fail-closed; this gate only decides whether an
+ * optional run may start.
+ */
+export async function assessVerifierNeedForTask(
+  task: string,
+  cwd: string,
+): Promise<VerifierNeedAssessment | undefined> {
+  const result = await collectWorkspaceSnapshot(cwd);
+  if (!result.ok) return undefined;
+  return assessVerifierNeed({
+    changedFiles: result.snapshot.changedFiles,
+    // No technical signal in this runtime currently distinguishes "the
+    // user's own message explicitly asked for this" from "the main agent
+    // decided to ask" — inventing one would be exactly the kind of semantic
+    // classifier verifier-required-paths.ts already avoids. The
+    // `user_requested` optional trigger covers the practical case; per the
+    // Sicherheitsregel, Main may never assert `required` itself, so it can
+    // only ever justify a run, never require one.
+    userRequestedVerification: false,
+    optionalTrigger: extractOptionalTriggerClaim(task),
+  });
+}
+
+/**
  * Prüft einen einzelnen `subagent`-Tool-Call. Management-Aktionen und alle
  * anderen Rollen laufen unverändert durch.
  */
@@ -322,6 +364,16 @@ export async function assessVerifierDelegation(
   }
   if (errors.length > 0) {
     return { blocked: true, reason: errors.join(" ") };
+  }
+  const needAssessment = await assessVerifierNeedForTask(task, cwd);
+  if (needAssessment?.need === "not_needed") {
+    return {
+      blocked: true,
+      reason:
+        `Verifier-Delegation abgelehnt (${needAssessment.reasonCode}): ${needAssessment.reason} ` +
+        `Ein freiwilliger Verifier-Lauf ohne belegten Bedarf ist technisch gesperrt — ` +
+        `siehe extensions/permissions/verifier-risk.ts.`,
+    };
   }
   const dedup = await assessVerifierDedup(task, cwd, verification);
   if (dedup.blocked) return dedup;

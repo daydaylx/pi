@@ -527,7 +527,9 @@ await test("decideBash (yolo) allows project-local node_modules/.bin symlinks", 
   if (!permissionPolicy) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-symlink-bash-"));
   try {
-    mkdirSync(join(cwd, "tooling", "node_modules", ".bin"), { recursive: true });
+    mkdirSync(join(cwd, "tooling", "node_modules", ".bin"), {
+      recursive: true,
+    });
     mkdirSync(join(cwd, "tooling", "node_modules", "runner"), {
       recursive: true,
     });
@@ -1677,6 +1679,7 @@ await test("verifier delegation is blocked on an unchanged, already-judged finge
       "Pre-existing workspace state (vor der ersten Änderung dieses Tasks erfasst):\nclean",
       "Pre-existing dirty-path fingerprints:\nkeine",
       "Acceptance criteria: project_check verify besteht.",
+      "## Optional verifier trigger\ntrigger: environment_uncertainty\nevidence: Isolierte Fixture ohne echte Diff-Historie; dieser Test prüft gezielt das Dedup-Verhalten.",
     ].join("\n\n");
     const assess = (verification, task = completeTask) =>
       verifierPolicy.assessVerifierDelegation(

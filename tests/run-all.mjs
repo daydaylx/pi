@@ -35,6 +35,16 @@ const suites = [
     env: {},
   },
   {
+    name: "verifier-risk",
+    file: "verifier-risk.test.mjs",
+    env: {},
+  },
+  {
+    name: "verifier-need-gate",
+    file: "verifier-need-gate.test.mjs",
+    env: {},
+  },
+  {
     name: "second-opinion-run-history",
     file: "second-opinion-run-history.test.mjs",
     env: {},
