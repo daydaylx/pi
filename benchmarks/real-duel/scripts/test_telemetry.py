@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -90,6 +91,93 @@ class PiTelemetryTest(unittest.TestCase):
         self.assertIsNone(normalized["output"])
         self.assertEqual(normalized["tool_calls"], 0)
         self.assertEqual(normalized["tool_errors"], 1)
+
+
+class NestedStatsTest(unittest.TestCase):
+    """Verifier-Risk-Router-Telemetrie (05_TELEMETRIE_SPEZIFIKATION.md):
+    nested/verifier-Breakdown ohne Doppelzaehlung, all_in als main + nested."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.history_path = Path(self._tmp.name) / "run-history.jsonl"
+        self._original_path = telemetry.RUN_HISTORY_PATH
+        telemetry.RUN_HISTORY_PATH = str(self.history_path)
+        self.addCleanup(setattr, telemetry, "RUN_HISTORY_PATH", self._original_path)
+        self.workdir = str(Path(self._tmp.name) / "trial-workdir")
+
+    def _write_entries(self, entries) -> None:
+        with open(self.history_path, "w", encoding="utf-8") as fh:
+            for entry in entries:
+                fh.write(json.dumps(entry) + "\n")
+
+    def test_verifier_is_a_subset_of_nested_not_an_addend(self) -> None:
+        self._write_entries([
+            {
+                "agent": "investigator", "cwd": self.workdir, "ts": 100,
+                "duration": 1000, "tokens": {"input": 100, "output": 10, "cacheRead": 0},
+                "cost": 0.01,
+            },
+            {
+                "agent": "verifier", "cwd": self.workdir, "ts": 101,
+                "duration": 2000, "tokens": {"input": 200, "output": 20, "cacheRead": 50},
+                "cost": 0.02,
+            },
+        ])
+        stats = telemetry.subagent_stats_from_run_history(self.workdir, 0, 200)
+
+        self.assertEqual(stats["nested_calls"], 2, "both entries count toward nested")
+        self.assertEqual(stats["verifier_calls"], 1, "only the verifier entry counts toward verifier")
+        self.assertEqual(stats["nested_fresh_input"], 300, "nested sums both entries' input")
+        self.assertEqual(stats["verifier_fresh_input"], 200, "verifier sums only its own entry")
+        self.assertAlmostEqual(stats["nested_cost"], 0.03)
+        self.assertAlmostEqual(stats["verifier_cost"], 0.02)
+        self.assertEqual(stats["nested_wall_time"], 3000)
+        self.assertEqual(stats["verifier_wall_time"], 2000)
+        # The unavailable fields stay explicitly unpopulated, not guessed.
+        self.assertIsNone(stats["verifier_model"])
+        self.assertIsNone(stats["mixed_model_run"])
+
+    def test_entries_outside_workdir_or_time_window_are_excluded(self) -> None:
+        self._write_entries([
+            {
+                "agent": "verifier", "cwd": "/unrelated/other-repo", "ts": 100,
+                "duration": 500, "tokens": {"input": 999}, "cost": 9.0,
+            },
+            {
+                "agent": "verifier", "cwd": self.workdir, "ts": 5000,
+                "duration": 500, "tokens": {"input": 999}, "cost": 9.0,
+            },
+        ])
+        stats = telemetry.subagent_stats_from_run_history(self.workdir, 0, 200)
+        self.assertEqual(stats["nested_calls"], 0, "neither entry belongs to this trial")
+        self.assertEqual(stats["verifier_calls"], 0)
+
+    def test_no_entries_is_a_measured_zero_not_a_missing_value(self) -> None:
+        self._write_entries([])
+        stats = telemetry.subagent_stats_from_run_history(self.workdir, 0, 200)
+        self.assertEqual(stats["nested_calls"], 0)
+        self.assertIsNone(stats["nested_cost"], "no cost observations means None, not 0")
+
+
+class AllInViewTest(unittest.TestCase):
+    def test_all_in_is_main_plus_nested_never_plus_verifier_again(self) -> None:
+        main_stats = {
+            "input_fresh": 1000, "input_cache_read": 200, "output": 50, "cost": 0.10,
+        }
+        nested_stats = {
+            "nested_fresh_input": 300, "nested_cache_read": 50, "nested_output": 20,
+            "nested_cost": 0.03,
+        }
+        combined = telemetry.all_in_view(main_stats, nested_stats)
+        self.assertEqual(combined["all_in_fresh_input"], 1300)
+        self.assertEqual(combined["all_in_cache_read"], 250)
+        self.assertEqual(combined["all_in_output"], 70)
+        self.assertAlmostEqual(combined["all_in_cost"], 0.13)
+
+    def test_missing_value_propagates_as_none_not_zero(self) -> None:
+        combined = telemetry.all_in_view({"input_fresh": None}, {"nested_fresh_input": 10})
+        self.assertIsNone(combined["all_in_fresh_input"])
 
 
 if __name__ == "__main__":

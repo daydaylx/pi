@@ -144,17 +144,42 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
     Nur Eintraege, deren cwd unterhalb von workdir liegt UND deren ts
     (Unix-Sekunden) innerhalb [start_ts, end_ts] liegt, gehoeren zu diesem
     Lauf -- die Datei ist global, s. Kommentar bei RUN_HISTORY_PATH oben.
-    Gibt ein Dict mit subagent_calls/subagent_tokens/subagent_cost und
-    verifier_calls/verifier_tokens/verifier_cost zurueck (0 statt None, wenn
-    keine passenden Eintraege gefunden wurden -- ein Lauf ohne Subagenten ist
-    ein gueltiges, gemessenes Ergebnis, kein fehlender Wert)."""
+
+    Gibt subagent_calls/subagent_tokens/subagent_cost (Legacy-Namen, unveraendert)
+    sowie die aequivalenten nested_*-Namen aus dem Verifier-Risk-Router-Telemetrie-
+    Schema zurueck, dazu je einen fresh_input/cache_read/output-Breakdown und
+    wall_time (Summe von RunEntry.duration, ms) fuer nested (alle Eintraege)
+    und verifier (nur agent == "verifier") getrennt.
+
+    NICHT verfuegbar aus dieser Datenquelle, daher bewusst nicht befuellt statt
+    geschaetzt (RunEntry hat kein model/reasoning/tool-call-Feld, s.
+    pi-subagents/src/runs/shared/run-history.ts):
+    verifier_model, verifier_reasoning, verifier_internal_tool_calls,
+    nested_models, mixed_model_run. Eine Erweiterung braeuchte zusaetzliche
+    Felder in RecordRunExtras des gepinnten pi-subagents-Forks -- ausserhalb
+    des Scopes dieses Repos.
+
+    NICHT verfuegbar, weil nirgends persistiert: verifier_decision,
+    verifier_trigger, verifier_skip_reason (die Need-Gate-Entscheidung aus
+    extensions/permissions/verifier-risk.ts lebt nur im laufenden Prozess/
+    Ticket, nicht in run-history.jsonl oder einer anderen von diesem
+    Benchmark-Harness lesbaren Datei).
+
+    0 statt None fuer Zaehlfelder, wenn keine passenden Eintraege gefunden
+    wurden -- ein Lauf ohne Subagenten ist ein gueltiges, gemessenes Ergebnis,
+    kein fehlender Wert. Token-/Kosten-Summen bleiben None, wenn keine
+    Einzelwerte dafuer vorlagen (siehe total_cost_found-Muster)."""
     workdir_prefix = os.path.normpath(str(workdir)) + os.sep
-    total_calls = total_tokens = 0
+    total_calls = 0
+    total_fresh = total_cache_read = total_output = 0
     total_cost = 0.0
     total_cost_found = False
-    verifier_calls = verifier_tokens = 0
+    total_wall_time = 0
+    verifier_calls = 0
+    verifier_fresh = verifier_cache_read = verifier_output = 0
     verifier_cost = 0.0
     verifier_cost_found = False
+    verifier_wall_time = 0
 
     for entry in _iter_run_history_entries():
         cwd = entry.get("cwd")
@@ -168,34 +193,91 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
             continue
 
         tokens = entry.get("tokens") or {}
-        entry_tokens = sum(
-            v for v in (
-                tokens.get("input"), tokens.get("output"),
-                tokens.get("cacheRead"), tokens.get("cacheWrite"),
-            ) if isinstance(v, (int, float))
-        )
+        entry_fresh = tokens.get("input") if isinstance(tokens.get("input"), (int, float)) else 0
+        entry_cache_read = tokens.get("cacheRead") if isinstance(tokens.get("cacheRead"), (int, float)) else 0
+        entry_output = tokens.get("output") if isinstance(tokens.get("output"), (int, float)) else 0
         entry_cost = entry.get("cost")
+        entry_duration = entry.get("duration") if isinstance(entry.get("duration"), (int, float)) else 0
 
         total_calls += 1
-        total_tokens += entry_tokens
+        total_fresh += entry_fresh
+        total_cache_read += entry_cache_read
+        total_output += entry_output
+        total_wall_time += entry_duration
         if isinstance(entry_cost, (int, float)):
             total_cost += entry_cost
             total_cost_found = True
 
         if entry.get("agent") == "verifier":
             verifier_calls += 1
-            verifier_tokens += entry_tokens
+            verifier_fresh += entry_fresh
+            verifier_cache_read += entry_cache_read
+            verifier_output += entry_output
+            verifier_wall_time += entry_duration
             if isinstance(entry_cost, (int, float)):
                 verifier_cost += entry_cost
                 verifier_cost_found = True
 
+    total_tokens = total_fresh + total_cache_read + total_output
+    verifier_tokens = verifier_fresh + verifier_cache_read + verifier_output
+
     return {
+        # Legacy-Namen, unveraendert (kein bekannter Caller aktuell, aber
+        # additiv gehalten statt umbenannt).
         "subagent_calls": total_calls,
         "subagent_tokens": total_tokens,
         "subagent_cost": total_cost if total_cost_found else None,
         "verifier_calls": verifier_calls,
         "verifier_tokens": verifier_tokens,
         "verifier_cost": verifier_cost if verifier_cost_found else None,
+        # Verifier-Risk-Router-Telemetrie-Schema (05_TELEMETRIE_SPEZIFIKATION.md).
+        "nested_calls": total_calls,
+        "nested_fresh_input": total_fresh,
+        "nested_cache_read": total_cache_read,
+        "nested_output": total_output,
+        "nested_cost": total_cost if total_cost_found else None,
+        "nested_wall_time": total_wall_time,
+        "verifier_fresh_input": verifier_fresh,
+        "verifier_cache_read": verifier_cache_read,
+        "verifier_output": verifier_output,
+        "verifier_wall_time": verifier_wall_time,
+        # Bewusst unpopuliert -- siehe Docstring.
+        "verifier_model": None,
+        "verifier_reasoning": None,
+        "verifier_internal_tool_calls": None,
+        "verifier_decision": None,
+        "verifier_trigger": None,
+        "verifier_skip_reason": None,
+        "nested_models": [],
+        "mixed_model_run": None,
+    }
+
+
+def all_in_view(main_stats, nested_stats):
+    """Kombiniert main-only-Telemetrie (normalize_pi/normalize_codex-Output)
+    mit nested_stats_from_run_history()-Output zu den all_in_*-Feldern.
+
+    verifier ist eine Teilmenge von nested (nested enthaelt bereits jeden
+    Verifier-Lauf als einen seiner Eintraege) -- all_in ist deshalb
+    main + nested, NIEMALS main + nested + verifier (sonst waere der
+    Verifier-Anteil doppelt gezaehlt, s. 05_TELEMETRIE_SPEZIFIKATION.md
+    "Kritische Zaehlregel").
+
+    Fehlt main oder nested ein Wert (None), bleibt auch die Summe None statt
+    eine Luecke stillschweigend als 0 zu behandeln."""
+    def add(a, b):
+        return None if a is None or b is None else a + b
+
+    return {
+        "all_in_fresh_input": add(main_stats.get("input_fresh"), nested_stats.get("nested_fresh_input")),
+        "all_in_cache_read": add(main_stats.get("input_cache_read"), nested_stats.get("nested_cache_read")),
+        "all_in_output": add(main_stats.get("output"), nested_stats.get("nested_output")),
+        "all_in_cost": add(main_stats.get("cost"), nested_stats.get("nested_cost")),
+        # Wall time wird bewusst nicht addiert, wenn Nested Runs parallel
+        # laufen koennten -- die reale End-to-End-Walltime des Parent-Laufs
+        # ist Sache des Callers (Start-/Endzeitstempel des Trials), nicht
+        # dieser Funktion.
+        "all_in_wall_time": None,
     }
 
 
