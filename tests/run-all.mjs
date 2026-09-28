@@ -45,6 +45,11 @@ const suites = [
     env: {},
   },
   {
+    name: "verifier-ticket",
+    file: "verifier-ticket.test.mjs",
+    env: {},
+  },
+  {
     name: "second-opinion-run-history",
     file: "second-opinion-run-history.test.mjs",
     env: {},
