@@ -12,6 +12,10 @@ import type {
   ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import {
+  assessVerifierNeed,
+  extractOptionalTriggerClaim,
+} from "../permissions/verifier-risk.ts";
 import type { WorkspaceSnapshot } from "../../shared/workspace-snapshot.d.mts";
 import type { VerificationTicketSnapshot } from "../shared/verification-capabilities.ts";
 
@@ -543,6 +547,18 @@ export function createVerifierTicket(
     canonicalRoot,
     changedFiles: Object.freeze([...snapshot.changedFiles]),
   });
+  // Re-derives the same Need-Gate decision the guard already permitted this
+  // run on (extensions/permissions/verifier-policy.ts,
+  // assessVerifierNeedForTask) rather than threading it through as a
+  // parameter — createVerifierTicket already has everything assessVerifierNeed
+  // needs, and re-deriving from the single pure function keeps this a
+  // provenance record, not a second decision authority.
+  const task = typeof input.task === "string" ? input.task : "";
+  const needAssessment = assessVerifierNeed({
+    changedFiles: snapshot.changedFiles,
+    userRequestedVerification: false,
+    optionalTrigger: extractOptionalTriggerClaim(task),
+  });
   const ticket = {
     schemaVersion: 1 as const,
     runId: event.toolCallId,
@@ -554,6 +570,16 @@ export function createVerifierTicket(
     profile: "verifier" as const,
     effectiveModel,
     requestCwd: ctx.cwd,
+    riskClass: needAssessment.need,
+    trigger: needAssessment.reasonCode,
+    triggerEvidence:
+      needAssessment.need === "justified"
+        ? extractOptionalTriggerClaim(task)?.evidence
+        : undefined,
+    requiredPathHits: needAssessment.requiredPathHits.map((hit) => ({
+      path: hit.path,
+      category: hit.category,
+    })),
   };
   return Object.freeze(ticket) as VerifierTicket;
 }
@@ -575,5 +601,11 @@ export function ticketSnapshot(
     generation: ticket.generation,
     profile: ticket.profile,
     effectiveModel: ticket.effectiveModel,
+    riskClass: ticket.riskClass,
+    trigger: ticket.trigger,
+    triggerEvidence: ticket.triggerEvidence,
+    requiredPathHits: ticket.requiredPathHits
+      ? [...ticket.requiredPathHits]
+      : undefined,
   };
 }

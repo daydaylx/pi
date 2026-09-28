@@ -24,6 +24,20 @@ const VERIFIER_VERDICTS = [
 export type VerifierVerdictSnapshot = (typeof VERIFIER_VERDICTS)[number];
 
 /**
+ * Need-Gate provenance (permissions/verifier-risk.ts). Duplicated here as a
+ * literal tuple rather than imported — this module is upstream of
+ * permissions/verifier-policy.ts, and importing back from permissions would
+ * invert that dependency.
+ */
+const VERIFIER_RISK_CLASSES = ["required", "justified", "not_needed"] as const;
+export type VerifierRiskClassSnapshot = (typeof VERIFIER_RISK_CLASSES)[number];
+
+export interface VerifierRequiredPathHitSnapshot {
+  path: string;
+  category: string;
+}
+
+/**
  * Immutable launch identity for one verifier delegation. The parent tool
  * call's `runId` is the correlation key Aurora can know before the pinned
  * package creates its own child run id. `childRunId` is added only after the
@@ -43,6 +57,11 @@ export interface VerificationTicketSnapshot {
   generation: number;
   profile: "verifier";
   effectiveModel: string;
+  /** Why the Need-Gate allowed this run to start; absent on pre-Phase-4 tickets. */
+  riskClass?: VerifierRiskClassSnapshot;
+  trigger?: string;
+  triggerEvidence?: string;
+  requiredPathHits?: VerifierRequiredPathHitSnapshot[];
 }
 
 export interface VerificationCapabilitySnapshot {
