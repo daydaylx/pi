@@ -14,13 +14,21 @@ Trigger-Vertrag in `rewriteVerifySpecToVerifier`
 (`agents/verifier.md`) unverändert — die geforderte "targeted evidence
 first"-Regel stand dort bereits (Schritt 5).
 
-Bewusst nicht umgesetzt in diesem Schritt (siehe „Bewusst nicht
-eingeführt“ unten): `verifier_model`/`verifier_reasoning`/
-`verifier_internal_tool_calls`/`mixed_model_run` in der Benchmark-
-Telemetrie (Datenquelle liefert sie nicht), `verifier_decision`/
-`verifier_trigger`/`verifier_skip_reason` dort ebenfalls (nirgends
-persistiert), Nachmessung/Tier-Wechsel (Phase 8 — braucht zuerst 20–50
-echte Läufe).
+Nachtrag (`pi-subagents`-Pin `ced79226d964e4b71063f386429b5f229909ba43`,
+Branch `feat/temporary-agent-spec`): `RunEntry`/`RecordRunExtras` im Fork um
+`model`/`internalToolCalls` erweitert (alle 4 `recordRun()`-Aufrufstellen),
+dadurch sind `verifier_model`, `nested_models`, `mixed_model_run` und
+`verifier_internal_tool_calls` in der Benchmark-Telemetrie jetzt real
+befüllt statt geschätzt. `createVerifierTicket` hat jetzt außerdem einen
+direkten Unit-Test (`tests/verifier-ticket.test.mjs`), vorher nur indirekt
+über die Runtime-Suite abgedeckt.
+
+Weiterhin bewusst nicht umgesetzt (siehe „Bewusst nicht eingeführt“ unten):
+`verifier_reasoning` (Datenquelle liefert es nicht — der Fork trackt keine
+Reasoning-Token-Zahl), `verifier_decision`/`verifier_trigger`/
+`verifier_skip_reason` (nirgends persistiert, da die Need-Gate-Entscheidung
+im Fork-Executor nicht sichtbar ist), Nachmessung/Tier-Wechsel (Phase 8 —
+braucht zuerst 20–50 echte Läufe).
 
 ## Kontext
 
@@ -107,16 +115,23 @@ informative Ergänzung.
   safe than sorry“ als unzureichend erkennen) — das wäre exakt die
   semantische Diff-Klassifikation, die dieses Repo bewusst vermeidet.
   Nicht-leer ist die einzige technisch geprüfte Eigenschaft.
-- Volle Benchmark-Telemetrie (`verifier_model`, `verifier_reasoning`,
-  `verifier_internal_tool_calls`, `mixed_model_run`): `pi-subagents`'
-  `RunEntry` (gepinnter Fork, separates Repository) zeichnet aktuell weder
-  Modell noch Reasoning-Token-Aufschlüsselung noch Tool-Call-Zahl pro Lauf
-  auf. Eine Erweiterung bräuchte zusätzliche Felder in dessen
-  `RecordRunExtras` — außerhalb des Scopes dieser Änderung.
+- `verifier_reasoning` in der Benchmark-Telemetrie: `pi-subagents`' `Usage`-
+  Typ (gepinnter Fork, separates Repository, `src/shared/types/basic.ts`)
+  trackt gar keine Reasoning-Token-Zahl, an keiner Stelle im Paket. Das zu
+  ergänzen hieße, die Usage-Akkumulierung überall im Fork anzufassen, nicht
+  nur eine Aufrufstelle — eine deutlich größere, separate Änderung.
+  `verifier_model`, `verifier_internal_tool_calls`, `nested_models` und
+  `mixed_model_run` sind dagegen seit Pin `ced79226d964e4b71063f386429b5f229909ba43`
+  real befüllt (siehe Nachtrag oben).
 - `verifier_decision`/`verifier_trigger`/`verifier_skip_reason` in der
-  Benchmark-Telemetrie: Die Need-Gate-Entscheidung wird aktuell nirgends
-  persistiert, wo der Python-Benchmark-Harness sie nachträglich lesen
-  könnte.
+  Benchmark-Telemetrie: Die Need-Gate-Entscheidung entsteht in Pis eigener
+  Permission-Guard-Schicht, bevor der `pi-subagents`-Executor den Tool-Call
+  überhaupt sieht — der Fork hat dafür schlicht keine Sicht auf diese
+  Information, unabhängig davon, welche Felder `RunEntry` trägt. Das würde
+  einen neuen Übergabeweg vom Guard in den Tool-Input hinein brauchen (analog
+  zu `normalizeVerifierDelegationInput`s `acceptance`-Override), den der
+  Fork-Executor zusätzlich explizit einlesen und durchreichen müsste —
+  außerhalb des Scopes dieser Änderung.
 
 ## Folgen
 
