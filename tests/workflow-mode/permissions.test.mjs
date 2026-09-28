@@ -1576,10 +1576,11 @@ await test("verifier delegations require the full inspection contract", async ()
     "reviewed",
     "the verifier assessment leaves caller input unchanged",
   );
-  const normalizedOverride = verifierPolicy.normalizeVerifierDelegationInput({
-    toolName: "subagent",
-    input: overridden,
-  });
+  const normalizedOverride =
+    await verifierPolicy.normalizeVerifierDelegationInput(
+      { toolName: "subagent", input: overridden },
+      cwd,
+    );
   eq(
     normalizedOverride?.acceptance?.level,
     "none",
@@ -1591,10 +1592,10 @@ await test("verifier delegations require the full inspection contract", async ()
     "the acceptance override carries a non-empty reason (required to disable the package's level check)",
   );
   eq(
-    verifierPolicy.normalizeVerifierDelegationInput({
-      toolName: "subagent",
-      input: normalizedOverride,
-    }),
+    await verifierPolicy.normalizeVerifierDelegationInput(
+      { toolName: "subagent", input: normalizedOverride },
+      cwd,
+    ),
     normalizedOverride,
     "verifier acceptance normalization is idempotent",
   );
@@ -1606,10 +1607,12 @@ await test("verifier delegations require the full inspection contract", async ()
     "the verifier assessment does not add an omitted acceptance field",
   );
   eq(
-    verifierPolicy.normalizeVerifierDelegationInput({
-      toolName: "subagent",
-      input: noAcceptance,
-    })?.acceptance?.level,
+    (
+      await verifierPolicy.normalizeVerifierDelegationInput(
+        { toolName: "subagent", input: noAcceptance },
+        cwd,
+      )
+    )?.acceptance?.level,
     "none",
     "normalization closes the implicit inferLevel() escalation",
   );
@@ -1620,10 +1623,10 @@ await test("verifier delegations require the full inspection contract", async ()
   };
   await assess(otherRole);
   eq(
-    verifierPolicy.normalizeVerifierDelegationInput({
-      toolName: "subagent",
-      input: otherRole,
-    }),
+    await verifierPolicy.normalizeVerifierDelegationInput(
+      { toolName: "subagent", input: otherRole },
+      cwd,
+    ),
     undefined,
     "the acceptance override only applies to verifier delegations",
   );

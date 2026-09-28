@@ -190,15 +190,25 @@ function verifierExecutionModeIssue(
  * module has permitted the delegation, keeping validation pure and the
  * executor-facing normalization explicit and idempotent.
  */
-export function normalizeVerifierDelegationInput(
+export async function normalizeVerifierDelegationInput(
   event: ToolCallEvent,
-): Record<string, unknown> | undefined {
+  cwd: string,
+): Promise<Record<string, unknown> | undefined> {
   if (event.toolName !== "subagent") return undefined;
   const input = isRecord(event.input) ? event.input : undefined;
   if (!input || !isVerifierExecutionInput(input)) {
     return undefined;
   }
   if (verifierExecutionModeIssue(input)) return undefined;
+  const task = typeof input.task === "string" ? input.task : "";
+  // Recomputed rather than threaded through from the guard's own
+  // assessVerifierDelegation call, same tradeoff as createVerifierTicket's
+  // provenance fields: one extra workspace snapshot, but a single pure
+  // source of truth instead of a second decision path to keep in sync.
+  // By this point the guard has already permitted the call, so `need` here
+  // is expected to be required/justified, never not_needed — the guard
+  // below is defensive, not a second enforcement point.
+  const needAssessment = await assessVerifierNeedForTask(task, cwd);
   return {
     ...input,
     // The installed pi-subagents package infers stricter acceptance levels
@@ -210,6 +220,19 @@ export function normalizeVerifierDelegationInput(
       reason:
         "Aurora erzwingt Verifier-Vollständigkeit und -Urteil bereits über verifier-policy.ts und subagent-output-guard.ts; das Paket-Acceptance-System ist für den Verifier redundant und darf einen sonst erfolgreichen Lauf nicht per Report-Format oder Evidenzanforderung zu Fall bringen.",
     },
+    // Provenance only, never a grant of rights: pi-subagents (>= pin
+    // ced7922) reads this back into run-history.jsonl's verifierDecision/
+    // verifierTrigger fields for benchmark telemetry. The main agent cannot
+    // set this itself — it is only ever attached here, after the Need-Gate
+    // has already run.
+    ...(needAssessment && needAssessment.need !== "not_needed"
+      ? {
+          verifierRisk: {
+            decision: needAssessment.need,
+            trigger: needAssessment.reasonCode,
+          },
+        }
+      : {}),
   };
 }
 

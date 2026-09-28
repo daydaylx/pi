@@ -250,6 +250,77 @@ await test("Main cannot escalate an optional trigger into required", () => {
   );
 });
 
+await test("normalizeVerifierDelegationInput attaches verifierRisk provenance for a hard-path run", async () => {
+  const cwd = initFixtureRepo();
+  try {
+    execFileSync("mkdir", ["-p", join(cwd, "extensions/permissions")]);
+    writeFileSync(
+      join(cwd, "extensions/permissions/guards.ts"),
+      "// changed\n",
+    );
+    const normalized = await verifierPolicy.normalizeVerifierDelegationInput(
+      {
+        toolName: "subagent",
+        input: { agent: "verifier", task: LOW_RISK_TASK },
+      },
+      cwd,
+    );
+    eq(normalized?.verifierRisk?.decision, "required", "hard path is required");
+    eq(
+      normalized?.verifierRisk?.trigger,
+      "hard_path",
+      "reason code names the hard path",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("normalizeVerifierDelegationInput attaches verifierRisk provenance for a justified run", async () => {
+  const cwd = initFixtureRepo();
+  try {
+    const task = [
+      LOW_RISK_TASK,
+      "## Optional verifier trigger\ntrigger: uncovered_behavior\nevidence: LSP range math has no multi-byte offset test.",
+    ].join("\n\n");
+    const normalized = await verifierPolicy.normalizeVerifierDelegationInput(
+      { toolName: "subagent", input: { agent: "verifier", task } },
+      cwd,
+    );
+    eq(
+      normalized?.verifierRisk?.decision,
+      "justified",
+      "a valid trigger is justified, not required",
+    );
+    eq(
+      normalized?.verifierRisk?.trigger,
+      "uncovered_behavior",
+      "reason code is the trigger id",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("normalizeVerifierDelegationInput never attaches verifierRisk when the snapshot cannot be collected", async () => {
+  // No .git here, so assessVerifierNeedForTask cannot produce an
+  // assessment. The acceptance override must still apply; verifierRisk
+  // must simply be absent, never a guessed value.
+  const normalized = await verifierPolicy.normalizeVerifierDelegationInput(
+    { toolName: "subagent", input: { agent: "verifier", task: LOW_RISK_TASK } },
+    "/nonexistent-path-for-this-test",
+  );
+  eq(
+    normalized?.acceptance?.level,
+    "none",
+    "acceptance override still applies",
+  );
+  assert(
+    !("verifierRisk" in (normalized ?? {})),
+    "no verifierRisk field is fabricated without a real assessment",
+  );
+});
+
 const { passed, failed } = summary();
 if (failed > 0) {
   console.error(`\nFAIL: ${passed} passed, ${failed} failed`);

@@ -244,7 +244,10 @@ export function registerPermissionGuards(
         reason: verifierAssessment.reason,
       };
     }
-    const normalizedVerifierInput = normalizeVerifierDelegationInput(event);
+    const normalizedVerifierInput = await normalizeVerifierDelegationInput(
+      event,
+      ctx.cwd,
+    );
     if (normalizedVerifierInput) {
       Object.assign(
         event.input as Record<string, unknown>,
@@ -302,9 +305,7 @@ export function registerPermissionGuards(
         reason: recoveryBlockReason(recovery.reason),
       };
     }
-    if (
-      planModeTemporarySpecAllowed(workflow, session.level(), event)
-    ) {
+    if (planModeTemporarySpecAllowed(workflow, session.level(), event)) {
       // The package would otherwise write debug artifacts below ctx.cwd.
       (event.input as Record<string, unknown>).artifacts = false;
       return;
