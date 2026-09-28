@@ -22,7 +22,7 @@ export const EVAL_TASKS = [
     prompt:
       "Der Statusbalken zeigt den Workflow-Modus ohne den vorgemerkten Moduswechsel an. Ergänze ihn.",
     expectedSurface: ["extensions/plan-mode/presentation.ts"],
-    forbiddenSurface: ["extensions/permissions/", "gui/"],
+    forbiddenSurface: ["extensions/permissions/", "extensions/frontend-protocol/"],
     /** A quick plan for a one-file change must not grow phases. */
     expectPhases: false,
     notes:
@@ -80,7 +80,7 @@ export const EVAL_TASKS = [
       "extensions/shared/workflow-capabilities.ts",
       "extensions/permissions/guards.ts",
     ],
-    forbiddenSurface: ["gui/renderer/"],
+    forbiddenSurface: ["extensions/frontend-protocol/commands.ts"],
     expectPhases: true,
     notes:
       "Muss die Regressionsgefahr benennen: fail-closed kann legitime Arbeit blockieren.",
@@ -101,7 +101,7 @@ export const EVAL_TASKS = [
     kind: "Contract-/Frontend-Aufgabe",
     mode: "detailed_plan",
     prompt:
-      "TUI und GUI müssen dieselbe Planentscheidung anbieten. Plane die Vertragsänderung.",
+      "TUI und externe Frontends müssen dieselbe Planentscheidung anbieten. Plane die Vertragsänderung.",
     expectedSurface: [
       "extensions/frontend-protocol/state-contract.ts",
       "extensions/frontend-protocol/commands.ts",

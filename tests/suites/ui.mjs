@@ -1123,7 +1123,7 @@ export const uiSections = {
         phase: "work",
         phaseLabel: "Arbeiten",
         title: "Kacheln prüfen",
-        goal: "GUI-Optik",
+        goal: "Oberflächenoptik",
       };
       const wideDashboard = renderers.renderDashboard(tvm, theme, 120, {
         activityLines: ["ARBEITET · 3s"],

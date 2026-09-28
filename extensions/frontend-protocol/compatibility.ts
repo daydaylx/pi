@@ -2,7 +2,7 @@
  * Compatibility Layer: Adapter zwischen dem heutigen Zustandsbus (dessen
  * Kanäle die fachlichen Extensions bereits bedienen) und dem
  * versionierten Protokollereignisformat. Aurora wird dadurch nicht zur
- * Datenquelle der GUI — beide Frontends konsumieren denselben
+ * Datenquelle externer Clients — alle Frontends konsumieren denselben
  * Core-seitigen Bus; dieses Modul besitzt nur die Formtransformation.
  */
 import type {

@@ -10,9 +10,9 @@
  *           und müssen vom Frontend beantwortet werden.
  * - local:  Das Frontend rendert die Oberfläche selbst aus Core-Daten;
  *           menuDataOps liefert die speisenden RPC-Abfragen.
- * - bridge: noch nicht ausführbar; dokumentierte Brückenpflicht für die
- *           Desktop-GUI-Bridge (Phase 3). Kein stiller Fallback (R13).
- * - tui:    TUI-editornativ; bewusst ohne GUI-Entsprechung.
+ * - bridge: noch nicht ausführbar; explizite Implementierung einer
+ *           Brückenoperation ist erforderlich. Kein stiller Fallback (R13).
+ * - tui:    TUI-editornativ; bewusst ohne generische Frontend-Entsprechung.
  */
 export type CommandTargetKind = "rpc" | "slash" | "bridge" | "local" | "tui";
 
@@ -72,7 +72,7 @@ export const COMMAND_REGISTRY = {
     target: { type: "local" },
     menuDataOps: ["get_commands"],
     notes:
-      "GUI rendert die Auswahl aus dem statischen Workflow-Modus-Set; Aurora behält den nativen Shift+Tab-Selector.",
+      "Externe Clients rendern die Auswahl aus dem statischen Workflow-Modus-Set; Aurora behält den nativen Shift+Tab-Selector.",
   },
   "workflow.set": {
     title: "Workflow setzen",
@@ -171,13 +171,13 @@ export const COMMAND_REGISTRY = {
   "changes.view": {
     title: "Änderungen anzeigen",
     target: { type: "local" },
-    notes: "GUI-Diff konsumiert das changes-Feld; TUI-Parität: /changes.",
+    notes: "Externe Clients konsumieren das changes-Feld; TUI-Parität: /changes.",
   },
   "app.commandCenter": {
     title: "Command Center / Palette",
     target: { type: "local" },
     menuDataOps: ["get_commands"],
-    notes: "GUI-Palette über get_commands; TUI-Parität: /commands (Super+Q).",
+    notes: "Externe Command-Paletten nutzen get_commands; TUI-Parität: /commands (Super+Q).",
   },
   "subagents.rolesModel": {
     title: "Subagent-Rollenmodelle wählen",
@@ -187,7 +187,7 @@ export const COMMAND_REGISTRY = {
     title: "Editor-Yank (TUI)",
     target: {
       type: "tui",
-      note: "Editornative Bindung; bewusst keine GUI-Entsprechung.",
+      note: "Editornative Bindung; bewusst keine generische Frontend-Entsprechung.",
     },
   },
 } as const satisfies Record<string, ProtocolCommandDef>;

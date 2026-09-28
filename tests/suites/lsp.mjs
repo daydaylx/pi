@@ -2144,6 +2144,108 @@ export const lspSections = {
         }
       }
 
+      // --- lsp_* tool calls and /lsp diagnostics through the extension's
+      // OWN deps/session wiring (index.ts), not the hand-built `deps` the
+      // #95/#96 tests above use directly against tools.ts. Covers
+      // deps.getConfig/deps.getRegistry, captureControlCenterSession,
+      // isCurrentControlCenterSession, captureControlCenterDeps and the
+      // getStatus closure passed into the Control Center. ---
+      {
+        const cwd = mkdtempSync(path.join(tmpdir(), "pi-lsp97-real-deps-"));
+        writeFileSync(path.join(cwd, "tsconfig.json"), "{}");
+        writeFileSync(path.join(cwd, "ok.ts"), "export const target = 1;\n");
+        mkdirSync(path.join(cwd, ".pi"), { recursive: true });
+        writeFileSync(
+          path.join(cwd, ".pi", "lsp.json"),
+          JSON.stringify({
+            languages: {
+              typescript: {
+                id: "typescript",
+                label: "Fake TypeScript",
+                enabled: true,
+                command: FAKE_LSP_COMMAND,
+                args: [fakeServer],
+                rootMarkers: ["tsconfig.json"],
+              },
+            },
+          }),
+        );
+
+        const harness = createHarness({
+          select: (labels) => {
+            if (labels.includes("Datei prüfen")) return "Datei prüfen";
+            return labels.includes("ok.ts") ? "ok.ts" : undefined;
+          },
+        });
+        lspExtensionMod.default(harness.api);
+        const context = harness.makeContext({ cwd, trusted: true });
+        context.ui.custom = async () => {
+          throw new Error("use deterministic select fallback");
+        };
+        await harness.runHooks("session_start", {}, context);
+
+        const definitionTool = harness.tools.get("lsp_definition");
+        assert(Boolean(definitionTool), "lsp_definition is registered");
+        const definitionResult = await definitionTool.execute(
+          "lsp97-real-deps",
+          { path: "ok.ts", line: 0, character: 0 },
+          undefined,
+          undefined,
+          context,
+        );
+        assert(
+          !definitionResult.isError,
+          "lsp_definition succeeds through the extension's own deps wiring, not hand-built test deps",
+        );
+
+        await harness.commands.get("lsp")("diagnostics", context);
+        const diagnosticsText = harness.notifications.at(-1)?.message ?? "";
+        assert(
+          diagnosticsText.length > 0,
+          "/lsp diagnostics runs end to end through the real Control Center wiring (got: " +
+            diagnosticsText +
+            ")",
+        );
+
+        await harness.runHooks("session_shutdown", {}, context);
+        try {
+          rmSync(cwd, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // --- createLspClient/createLspRegistry were only checked for
+      // existence above (`typeof ... === "function"`), never actually
+      // called. Both are lazy by construction (no process spawned in the
+      // constructor, see the doc comment on createLspClient in index.ts),
+      // so calling them here has no side effects to clean up. ---
+      {
+        const client = lspExtensionMod.createLspClient({
+          serverId: "typescript",
+          workspaceRoot: "/tmp",
+          command: "true",
+          args: [],
+        });
+        eq(
+          client.serverId,
+          "typescript",
+          "createLspClient builds a ready-to-start client without spawning a process",
+        );
+
+        const registry = lspExtensionMod.createLspRegistry({
+          config: {
+            enabled: true,
+            mode: "auto",
+            requestTimeoutMs: 2000,
+            idleShutdownMs: 100000,
+            workspaceSymbolLimit: 50,
+            languages: {},
+          },
+        });
+        eq(registry.size, 0, "createLspRegistry builds an empty registry");
+      }
+
       // --- resolveLspInteractiveCommand is the one resolver behind bare /lsp
       // and the Command Center guide, so a chosen action can no longer differ
       // depending on which entry point picked it ---

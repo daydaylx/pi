@@ -75,14 +75,6 @@ const RULES: RequiredPathRule[] = [
     ),
   },
   {
-    category: "Sicherheitsverhalten (Electron-Trust-Grenze)",
-    test: oneOf(
-      "gui/main/index.js",
-      "gui/main/ipc-handlers.js",
-      "gui/main/preload.cjs",
-    ),
-  },
-  {
     category: "Öffentlicher API-/Protokollvertrag",
     test: oneOf(
       "extensions/frontend-protocol/commands.ts",
@@ -96,12 +88,9 @@ const RULES: RequiredPathRule[] = [
   {
     category: "Installations- oder Upgrade-Verhalten",
     test: oneOf(
-      "bin/pi",
-      "bin/pi-gui",
       "extensions/setup-core/dependency-prepare.ts",
       "scripts/apply-runtime-patches.mjs",
       "scripts/install-user.mjs",
-      "scripts/package-gui.mjs",
     ),
   },
 ];

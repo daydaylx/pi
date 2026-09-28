@@ -1,4 +1,4 @@
-// Contract-Tests für das Frontend-Protokoll (GUI-Arbeitsauftrag Phase 2):
+// Contract-Tests für das gemeinsame Frontend-Protokoll:
 // Versionierung, Command-Registry, Pflicht-State-Felder mit Core-Besitzern,
 // Ereignisquellen, Shortcut-Mapping auf semantische Commands und der
 // Compatibility-Layer zwischen dem Aurora-Zustandsbus und dem
@@ -295,7 +295,7 @@ export const frontendProtocolSections = {
         "permissions.set is executable via /permission <level>",
       );
 
-      // 11. Divergenztest (Phase 5): Aurora und GUI-Bridge konsumieren
+      // 11. Divergenztest: Aurora und externe Frontend-Bridge konsumieren
       //    denselben Merge-Pfad. Dieselbe Patch-Sequenz muss in beiden
       //    Konsumenten fachlich identische Felder erzeugen.
       const baseState = () => ({

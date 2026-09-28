@@ -7,7 +7,7 @@
 - `assessVerifierCoverageForDiff` blocks commit when no evaluable result
 - **Gap**: Need to ensure "no-verdict" run doesn't silently overwrite a valid PASS in `lastVerifierRun`
 
-## F-05: GUI/RPC erhält Verifikationsstatus nicht
+## F-05: Frontend/RPC erhält Verifikationsstatus nicht
 **Status**: Partial - frontend only gets status on request, not on change
 - `publishAuroraVerification` only called in `agent_settled` and on frontend request
 - After `project_check` updates ledger, frontend not notified

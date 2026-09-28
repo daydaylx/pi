@@ -6,9 +6,10 @@
   Verifikationsstatus, Trace-Diagnostik, Tool-/Kontextqualität.
 - Independent Verifier, Modellrouting, Compaction und Planmodus-Anomalien
   bleiben datengetriebene Experimente und sind keine Standardautomatik.
-- GUI-Nutzungsentscheidung (Phase 8): Option B — `pi gui` ist bevorzugte
-  Oberfläche, `pi` (Aurora) bleibt Fallback; keine automatische
-  TUI-Reduktion.
+- Aktualisierte Nutzerentscheidung: Die lokale Electron-GUI wurde ohne
+  Auslagerungs-/Backup-Kopie aus diesem Repository entfernt. Aurora bleibt
+  erhalten; die von Core/Aurora und externen Clients genutzte Bridge und
+  Frontend-Protokolle bleiben bestehen.
 - Real-Duel Phase 5: Der Nutzer wählte eine neue, vollständige 36-Lauf-Serie
   (3 Tasks × 3 Trials × Work-only/Plan→Work × Pi/Codex) mit
   `gpt-5.6-luna` und Reasoning `medium`. Reale API-Läufe starten erst nach
@@ -17,20 +18,11 @@
 
 ## Architekturentscheidungen
 
-- Pi-Desktop-GUI folgt `pi_gui_arbeitsauftrag/` (Phase 0–8, STOP-Gates).
-  Eigenbau-Minimal-Shell `gui/` (Electron 44, vanilla Renderer; Entscheidung
-  gegen den pi-desktop-Fork, dieser bleibt Referenz; unser mode-permissions/
-  ask-user-Stack bleibt Wahrheit; Security: contextIsolation+sandbox+
-  IPC-Whitelist+CSP; `pi gui` via bin/pi Shim). Phase 5: Kernzustände liefert
-  `extensions/frontend-bridge/` (throttled `frontend-bridge/state`-Entries
-  via pi.appendEntry, Epoch-Fallback für RPC); GUI-Stopp macht Abort+Drain
-  vor stdin-Ende (Testmatrix D). `/workflow-set` ist der kanonische
-  Direktsetzer (im Command Center ausgeblendet); `verification.run` bleibt
-  Lücke. Phase 6: 3-Spalten-UX (Navigation | Chat | Kontext), kompakte
-  Aktivitätszeilen, Details auf Abruf, responsive. Phase 7: statisches
-  Security- und Crash-Gate (reproduzierbar ohne Electron), Linux-Paket via
-  `scripts/package-gui.mjs`; Rollback ist additiv und TUI-verlustfrei.
-  Phase 8: Nutzerentscheidung B — GUI bevorzugt, Aurora bleibt Fallback.
+- Die lokale Electron-App, ihre Launcher, ihr Packaging und ihre GUI-spezifische
+  Arbeits-/Designhistorie wurden auf ausdrücklichen Nutzerwunsch ersatzlos
+  entfernt. `extensions/frontend-protocol/` und `extensions/frontend-bridge/`
+  bleiben erhalten: Core-Extensions und Aurora nutzen den internen State-Bus;
+  `frontend-server/` stellt externen Clients die öffentliche JSONL-API bereit.
 - Phase-2-Vertrag (`extensions/frontend-protocol/`, v1.0.0): Kanäle und
   Schemata gehören dem neutralen Modul, aurora-ui/state.ts nur noch
   Legacy-Aliase. Command-Registry (rpc/slash/local/bridge/tui); Bridge-
@@ -135,7 +127,7 @@
   wechseln in `contextual` ihren Glyph, `ANTWORTET` und `WARTET AUF MODELL`
   bleiben statisch. Statuslabels und Overflow-Zusammenfassung liegen
   ausschließlich in `extensions/aurora-ui/tool-renderers.ts`.
-- Auroras GUI-Optik kommt aus `extensions/aurora-ui/tile.ts`: gefüllte
+- Auroras visuelle Gestaltung kommt aus `extensions/aurora-ui/tile.ts`: gefüllte
   Kacheln, Felder, Status-Pills und ab `wide` ein zweispaltiges Grid.
   Füllungen nur über die acht `Theme.bg`-Flächen; Warnton nutzt `inverse`.
   Unter 18 Spalten fallen Kacheln auf rahmenlose Zeilen zurück.
@@ -215,8 +207,8 @@
 - Der Live-Smoke ist ohne authentifizierte TTY nicht durchführbar; Aurora-
   Sichtbarkeit, Shift+Tab, Plan→Work-Handoff und Subagent-Aufruf bleiben
   unbelegt (`docs/manual-smoke-checklist.md`).
-- GUI-Kandidaten-Audit: GitHub-Issue-Triage beider Projekte fehlt; vor weiterer
-  Übernahme aus den Referenz-Forks nachholen (Klone shallow unter `git/github.com/`).
+- Die frühere Desktop-GUI wird nicht mehr in diesem Repository gepflegt; ihre
+  lokale Implementierung und Arbeitsunterlagen wurden entfernt.
 
 ## Offene Risiken
 
@@ -256,9 +248,8 @@ _Keine offenen Fragen._
 - Real-Duel: Medium-Profile, Fingerprint-Provenienz und die 36-Lauf-Matrix
   sind vorbereitet. Vor dem Dual-Smoke zuerst den kanonischen Audit-/Medium-
   Stand prüfen und die explizite Commit-Freigabe einholen.
-- GUI-Projekt: Auftragspaket Phasen 0–8 abgeschlossen (Entscheidung B).
-  Offen: reale Nutzungsbeobachtung (RAM/Startzeit, Langzeit-Sessions),
-  Issue-Triage der Kandidaten, manuelle Sichtprüfung an einem Desktop.
+- Die lokale Desktop-GUI wurde entfernt; der generische Frontend-Server und
+  die gemeinsame Core-/TUI-State-Schnittstelle bleiben aktiv.
 - Der Live-Smoke (#137) bleibt offener P0 für die TUI-Seite.
 - Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA, der
   den alten Pin enthält — `main` ist nicht automatisch der neueste Stand.

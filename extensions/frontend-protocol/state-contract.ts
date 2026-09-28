@@ -1,6 +1,6 @@
 /**
  * Versionierter Zustandsvertrag zwischen dem Pi-Core (Runtime und fachliche
- * Extensions) und beliebigen Frontends (Aurora-TUI heute, Desktop-GUI später).
+ * Extensions) und beliebigen Frontends (Aurora-TUI und externe Clients).
  *
  * Dieses Modul gehört zu keiner Präsentationsschicht: Aurora ist Konsument
  * wie jedes andere Frontend und keine Datenquelle. Die fachlichen Extensions
@@ -153,8 +153,8 @@ export type StateFieldOwner = (typeof STATE_FIELD_OWNERS)[number];
 export type StateTransport = "rpc" | "bus" | "bus-events";
 
 /**
- * Das Pflichtfeldschema aus dem GUI-Arbeitsauftrag (Phase 2): zwölf
- * Kernfelder mit ihrem Core-Besitzer und ihrem Transport. "task" und
+ * Das Frontend-State-Schema: zwölf Kernfelder mit ihrem Core-Besitzer und
+ * ihrem Transport. "task" und
  * "activity" sind Projektionen aus echten Core-Signalen (Tool-Ereignisse,
  * Verification-Urteile, letzte Nutzereingabe) — sie dürfen nie aus UI-Text
  * erraten werden.

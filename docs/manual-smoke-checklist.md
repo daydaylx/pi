@@ -10,11 +10,6 @@ etwas ab, den Schritt notieren und `#137` offen lassen.
 
 ## Rollen nicht automatisierter Prüfungen
 
-- `gui/test/e2e-rpc.mjs` ist ein manueller E2E-Smoke mit Netzwerk- und
-  Modellzugriff; er gehört nicht in CI.
-- `npm --prefix gui run smoke:dialogs` ist ein manueller Desktop-Smoke und
-  benötigt Electron sowie `xvfb-run`; er gehört nicht in die headless
-  Hauptsuite.
 - `node tests/plan-eval/run.mjs` ist eine manuelle, offline ausführbare
   Auswertung der Referenzpläne; echte Modellpläne werden nur bewusst mit
   `--plans <verzeichnis>` bewertet.

@@ -10,13 +10,12 @@ Core runtime and extensions
           |
           +--> neutral frontend state bus --> Aurora TUI
           |
-          +--> frontend bridge/server --> JSONL Frontend API v1
-                                           |
-                                           +--> external Pi GUI
+          +--> frontend bridge/server --> versioned JSONL Frontend API v1
 ```
 
-`extensions/aurora-ui/` is terminal UI and remains in Pi. Desktop Electron code
-belongs only to `daydaylx/pi-gui`.
+`extensions/aurora-ui/` is the in-repository terminal UI. Desktop and other
+external frontends are not included here. They may communicate with Pi through
+`bin/pi-frontend` and its public versioned API.
 
 The public frontend package lives below `npm/packages/frontend-protocol/` so it
 resolves dependencies through the established nested `npm/` installation

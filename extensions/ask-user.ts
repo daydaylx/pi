@@ -176,6 +176,9 @@ export default function askUser(pi: ExtensionAPI) {
         { label: "Freitext eingeben.", isOther: true },
       ];
 
+      // This initial value is always overwritten below before `terminal()`
+      // is ever called (overlayOptions only runs after the factory below),
+      // so it's unreachable in practice — a typed default, not dead-code oversight.
       let terminal = () => ({
         columns: process.stdout.columns ?? 80,
         rows: process.stdout.rows ?? 24,
@@ -201,6 +204,10 @@ export default function askUser(pi: ExtensionAPI) {
 
           const editorTheme: EditorTheme = {
             borderColor: (s) => theme.fg("accent", s),
+            // selectList styles only render when the Editor's autocomplete UI
+            // is active, which requires setAutocompleteProvider() — never
+            // called here, so these stay unreached until this tool wires up
+            // autocomplete (e.g. option-label suggestions).
             selectList: {
               selectedPrefix: (t) => theme.fg("accent", t),
               selectedText: (t) => theme.fg("accent", t),

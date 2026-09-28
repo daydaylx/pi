@@ -523,27 +523,27 @@ await test("canonical path identity protects sensitive symlink aliases through t
   }
 });
 
-await test("decideBash (yolo) allows node_modules/.bin invocations instead of misreading npm's own symlinks as an external write", () => {
+await test("decideBash (yolo) allows project-local node_modules/.bin symlinks", () => {
   if (!permissionPolicy) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-symlink-bash-"));
   try {
-    mkdirSync(join(cwd, "gui", "node_modules", ".bin"), { recursive: true });
-    mkdirSync(join(cwd, "gui", "node_modules", "electron"), {
+    mkdirSync(join(cwd, "tooling", "node_modules", ".bin"), { recursive: true });
+    mkdirSync(join(cwd, "tooling", "node_modules", "runner"), {
       recursive: true,
     });
-    writeFileSync(join(cwd, "gui", "node_modules", "electron", "cli.js"), "");
+    writeFileSync(join(cwd, "tooling", "node_modules", "runner", "cli.js"), "");
     symlinkSync(
-      join("..", "electron", "cli.js"),
-      join(cwd, "gui", "node_modules", ".bin", "electron"),
+      join("..", "runner", "cli.js"),
+      join(cwd, "tooling", "node_modules", ".bin", "runner"),
     );
     for (const cmd of [
-      "du -sh gui/node_modules 2>/dev/null && ls gui/node_modules/.bin/ | head && readlink gui/node_modules/.bin/electron",
-      "command -v xvfb-run && xvfb-run -a gui/node_modules/.bin/electron gui --smoke 2>&1 | tail -3",
+      "du -sh tooling/node_modules 2>/dev/null && ls tooling/node_modules/.bin/ | head && readlink tooling/node_modules/.bin/runner",
+      "tooling/node_modules/.bin/runner tooling --smoke",
     ]) {
       eq(
         permissionPolicy.decideBash("yolo", cmd, cwd).action,
         "allow",
-        `an in-project .bin/electron reference must not trip the external-write hard boundary: ${cmd}`,
+        `an in-project .bin/runner reference must not trip the external-write hard boundary: ${cmd}`,
       );
     }
   } finally {
@@ -1958,15 +1958,11 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
   for (const path of [
     "README.md",
     "docs/verifier-policy.md",
-    "gui/renderer/styles.css",
-    "gui/renderer/strings.js",
-    "gui/main/pi-rpc-manager.js",
     "extensions/permissions/menus.ts",
     "extensions/permissions/thinking-control.ts",
     "extensions/plan-mode/presentation.ts",
     "package.json",
     "npm/package.json",
-    "gui/package.json",
   ]) {
     assert(
       !assess([path], "fp-1", {}).blocked,
@@ -1975,7 +1971,7 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
   }
   assert(
     !assess(
-      ["README.md", "package.json", "gui/main/pi-rpc-manager.js"],
+      ["README.md", "package.json", "frontend-server/index.mjs"],
       "fp-large",
       {},
     ).blocked,
@@ -1991,8 +1987,6 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "extensions/resilience/recovery-state.ts",
     "extensions/setup-core/subagent-output-guard.ts",
     "extensions/permissions/verifier-policy.ts",
-    "gui/main/preload.cjs",
-    "gui/main/ipc-handlers.js",
     "extensions/frontend-protocol/state-contract.ts",
     "scripts/install-user.mjs",
   ]) {

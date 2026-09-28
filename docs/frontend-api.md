@@ -11,7 +11,7 @@ The transport is UTF-8 JSON Lines over stdin/stdout. The first client frame is:
 ```json
 {
   "kind": "hello",
-  "client": { "name": "pi-gui", "version": "0.1.0" },
+  "client": { "name": "example-frontend", "version": "0.1.0" },
   "supportedProtocolVersions": [1]
 }
 ```

@@ -1,7 +1,7 @@
 /**
  * Frontend-Protokoll (Version 1.0.0): die stabile Grenze zwischen Pi-Core
- * und Frontends. Aurora und die Desktop-GUI sind gleichberechtigte
- * Konsumenten; keines von beiden ist Datenquelle oder Wahrheit.
+ * und Frontends. Aurora und externe Clients sind gleichberechtigte
+ * Konsumenten; keines davon ist Datenquelle oder Wahrheit.
  */
 export {
   PROTOCOL_VERSION,

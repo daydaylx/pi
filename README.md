@@ -2,8 +2,8 @@
 
 Pi is the core CLI/TUI agent runtime setup. Dieses Repository enthält die lokale
 Pi-Konfiguration für Aurora, Berechtigungen, LSP, Verification und Plan Mode.
-Die separate Desktop-Anwendung `daydaylx/pi-gui` ist ausschließlich ein
-Frontend für denselben Pi-Core.
+Externe Frontends können den Pi-Core über die versionierte Schnittstelle
+`bin/pi-frontend` verwenden.
 
 ## Installation oder Aktualisierung
 

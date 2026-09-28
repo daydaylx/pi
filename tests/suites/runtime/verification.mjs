@@ -732,7 +732,7 @@ export const verificationSections = {
           "the status becomes stale after a later workspace change",
         );
 
-        // The frontend bus is also used by the GUI/RPC path, where no TUI is
+        // The frontend bus is also used by external RPC clients, where no TUI is
         // present. Its domain state must not depend on ctx.hasUI; only the
         // terminal footer is UI-specific.
         const headlessHarness = createHarness({

@@ -4,19 +4,6 @@
       "count": 1
     }
   },
-  "gui/renderer/renderer.js": {
-    "no-unused-vars": {
-      "count": 1
-    },
-    "no-useless-assignment": {
-      "count": 2
-    }
-  },
-  "gui/test/agent-runs.mjs": {
-    "no-unused-vars": {
-      "count": 4
-    }
-  },
   "tests/e2e.test.mjs": {
     "no-unused-vars": {
       "count": 1

@@ -14,12 +14,11 @@ Node 22.23.2 / npm 10.9.8 sind fest gepinnt (`.nvmrc`, `engines`). Abhängigkeit
 
 Aus dem Repo-Root (delegiert an `npm --prefix npm`) oder direkt in `npm/`:
 
-- `npm run verify` – Gesamtprofil (format:check, lint, typecheck, deadcode/knip, test:coverage, test:patches, test:frontend-contracts, test:gui, audit:check). Für den kanonischen Nachweis im Agent-Ablauf stattdessen das Tool `project_check({ profile: "verify" })` nutzen (siehe `AGENTS.md`).
+- `npm run verify` – Gesamtprofil (format:check, lint, typecheck, deadcode/knip, test:coverage, test:patches, test:frontend-contracts, audit:check). Für den kanonischen Nachweis im Agent-Ablauf stattdessen das Tool `project_check({ profile: "verify" })` nutzen (siehe `AGENTS.md`).
 - `npm run typecheck`, `npm run lint`, `npm run format:check` (`format` schreibt), `npm run deadcode`
 - `npm test` – Frontend-Contracts + `tests/run-all.mjs` (Suiten aus `tests/shared/run-suite-registry.mjs`)
 - Einzelne Suite: `PI_TEST_SUITE=<runtime|ui|lsp|diff|…> node tests/run.mjs` (Namen: `RUN_MJS_SUITES` in der Registry); einzelne Testdatei: `node tests/<datei>.test.mjs` bzw. `node --test <datei>`
 - `npm --prefix npm run test:frontend-contracts`, `test:patches`, `test:benchmark`, `test:runtime`
-- GUI (Electron): `npm --prefix npm run test:gui`; in `gui/`: `npm start`, `npm run smoke`, einzelne Tests z. B. `node test/security.mjs`
 
 Neue Testabschnitte in `tests/run.mjs` müssen in `SECTION_SUITES` der Registry einer Domäne zugeordnet werden, sonst laufen sie nicht korrekt in `npm test`.
 
@@ -27,7 +26,7 @@ Neue Testabschnitte in `tests/run.mjs` müssen in `SECTION_SUITES` der Registry 
 
 ```
 Core-Runtime + extensions/ ──> neutraler Frontend-State-Bus ──> Aurora TUI (extensions/aurora-ui)
-                          └──> extensions/frontend-bridge + frontend-server/ ──> JSONL Frontend API v1 ──> gui/ (Electron)
+                          └──> extensions/frontend-bridge + frontend-server/ ──> JSONL Frontend API v1
 ```
 
 - `extensions/` – ein Verzeichnis/Datei je Fähigkeit (permissions, plan-mode, subagent, lsp, resilience, session-health, setup-core, verification …). Der Core-Zustand ist maßgeblich; Frontends halten nur flüchtigen Anzeigezustand und implementieren keine Permission-, Workflow-, Routing-, Verifikations- oder Session-Logik.
@@ -38,7 +37,7 @@ Core-Runtime + extensions/ ──> neutraler Frontend-State-Bus ──> Aurora T
 - Projektlokale Prüfprofile: `.pi/verify.json` (nur in vertrauten Projekten, `docs/verify-profiles.md`).
 - `settings.json`, `setup.json`, `models.json`, `schemas/`, `prompts/`, `skills/`, `APPEND_SYSTEM.md` sind die synchronisierte aktive Konfiguration.
 
-**Achtung Scope:** `extensions/aurora-ui/` ist die Terminal-UI (CLI/TUI), nicht die Electron-GUI. Bei auf CLI/TUI oder GUI beschränkten Aufträgen nur die jeweilige Seite lesen – Pfadzuordnung in `docs/scope-cli-tui-vs-gui.md`.
+**Achtung Scope:** `extensions/aurora-ui/` ist die Terminal-UI (CLI/TUI). Externe Frontends sind nicht Teil dieses Repositories; ihre Kern-Integration liegt in `frontend-server/` und der versionierten Frontend-API.
 
 ## Dokumentation
 

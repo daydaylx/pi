@@ -358,6 +358,229 @@ export const askUserSections = {
           "Ctrl+C still cancels the dialog after scrolling",
         );
       }
+
+      {
+        // The free-text editor's actual submit path: type real text and
+        // press Enter, instead of only leaving the editor via Escape (the
+        // navigation test above never exercises editor.onSubmit itself).
+        const { pending, dialog } = await openDialog(
+          "ask-user-freetext-submit",
+        );
+        dialog.handleInput(KEYS.end);
+        dialog.handleInput(KEYS.enter);
+        dialog.handleInput("h");
+        dialog.handleInput("i");
+        dialog.handleInput(KEYS.enter);
+        const result = await pending;
+        eq(
+          result.details.wasCustom,
+          true,
+          "typed free text is submitted as a custom answer",
+        );
+        eq(result.details.answer, "hi", "the typed text is returned verbatim");
+      }
+
+      {
+        // Submitting the free-text editor with no text (or only whitespace)
+        // must return to the options view, not close the dialog.
+        const { pending, dialog } = await openDialog("ask-user-freetext-empty");
+        dialog.handleInput(KEYS.end);
+        dialog.handleInput(KEYS.enter);
+        const editingEmpty = stripAnsi(dialog.render(80).join("\n"));
+        dialog.handleInput(KEYS.enter);
+        const afterEmptySubmit = stripAnsi(dialog.render(80).join("\n"));
+        assert(
+          afterEmptySubmit !== editingEmpty,
+          "submitting empty free text leaves the editor instead of closing the dialog",
+        );
+        dialog.handleInput(KEYS.home);
+        dialog.handleInput(KEYS.enter);
+        const result = await pending;
+        eq(
+          result.details.answer,
+          "Lesen",
+          "the dialog is still usable after an empty free-text submit",
+        );
+      }
+
+      {
+        // An extremely narrow render width (narrower than the option
+        // indent/prefix itself) must fall back to un-indented wrapping
+        // instead of throwing.
+        const { dialog } = await openDialog("ask-user-tiny-width");
+        const tinyLines = dialog.render(1);
+        assert(
+          Array.isArray(tinyLines) && tinyLines.length > 0,
+          "rendering at width 1 falls back gracefully instead of throwing",
+        );
+        dialog.invalidate();
+        const afterInvalidate = dialog.render(80);
+        assert(
+          Array.isArray(afterInvalidate) && afterInvalidate.length > 0,
+          "invalidate() clears the line cache without breaking the next render",
+        );
+      }
+
+      {
+        // renderCall/renderResult are only exercised by the message renderer
+        // in real usage, never by tool.execute() directly above.
+        const theme = createHarness().makeContext().ui.theme;
+
+        const callText = stripAnsi(
+          tool.renderCall(params, theme, {}).render(200).join("\n"),
+        );
+        assert(
+          callText.includes(params.question),
+          "renderCall shows the question",
+        );
+        assert(
+          callText.includes("2. Planen") && callText.includes("EMPFOHLEN"),
+          "renderCall marks the recommended option",
+        );
+
+        const emptyOptionsCall = tool
+          .renderCall({ question: "Ohne Optionen?", options: [] }, theme, {})
+          .render(200)
+          .join("\n")
+          .trim();
+        eq(
+          stripAnsi(emptyOptionsCall),
+          "ask_user Ohne Optionen?",
+          "renderCall without options omits the options line",
+        );
+
+        const selectedText = stripAnsi(
+          tool
+            .renderResult(
+              {
+                content: [{ type: "text", text: "Ausgewählt: 2. Planen" }],
+                details: {
+                  question: params.question,
+                  options: params.options.map((o) => o.label),
+                  answer: "Planen",
+                  wasCustom: false,
+                  selectedIndex: 2,
+                },
+              },
+              { expanded: false, isPartial: false },
+              theme,
+              { args: params },
+            )
+            .render(200)
+            .join("\n"),
+        );
+        assert(
+          selectedText.includes("2. Planen"),
+          "renderResult shows the selected option",
+        );
+        assert(
+          selectedText.includes("Einen strukturierten Plan"),
+          "renderResult attaches the chosen option's description",
+        );
+
+        const customText = stripAnsi(
+          tool
+            .renderResult(
+              {
+                content: [{ type: "text", text: "Eigene Eingabe: irgendwas" }],
+                details: {
+                  question: params.question,
+                  options: params.options.map((o) => o.label),
+                  answer: "irgendwas",
+                  wasCustom: true,
+                },
+              },
+              { expanded: false, isPartial: false },
+              theme,
+              { args: params },
+            )
+            .render(200)
+            .join("\n"),
+        );
+        assert(
+          customText.includes("(eigene Eingabe)") &&
+            customText.includes("irgendwas"),
+          "renderResult marks a free-text answer",
+        );
+
+        const cancelledText = stripAnsi(
+          tool
+            .renderResult(
+              {
+                content: [{ type: "text", text: "Auswahl abgebrochen" }],
+                details: {
+                  question: params.question,
+                  options: [],
+                  answer: null,
+                },
+              },
+              { expanded: false, isPartial: false },
+              theme,
+              { args: params },
+            )
+            .render(200)
+            .join("\n"),
+        );
+        assert(
+          /abgebrochen/i.test(cancelledText),
+          "renderResult marks a cancelled dialog",
+        );
+
+        const noDetailsText = stripAnsi(
+          tool
+            .renderResult(
+              { content: [{ type: "text", text: "raw text" }] },
+              { expanded: false, isPartial: false },
+              theme,
+              { args: params },
+            )
+            .render(200)
+            .join("\n"),
+        ).trim();
+        eq(
+          noDetailsText,
+          "raw text",
+          "renderResult falls back to the raw content text when details are missing",
+        );
+      }
+
+      {
+        // The shared harness's ui.custom() mock does not forward the
+        // {overlayOptions} config object ask_user passes for dialog
+        // placement, so normal dialog-opening tests never run it. Capture
+        // and invoke it directly instead.
+        const overlayHarness = createHarness({ columns: 80 });
+        askUser.default(overlayHarness.api);
+        const overlayContext = overlayHarness.makeContext();
+        let capturedOverlayOptions;
+        const originalCustom = overlayContext.ui.custom;
+        overlayContext.ui.custom = (factory, options) => {
+          capturedOverlayOptions = options?.overlayOptions;
+          return originalCustom(factory);
+        };
+        const overlayPending = overlayHarness.tools
+          .get("ask_user")
+          .execute(
+            "ask-user-overlay-options",
+            params,
+            undefined,
+            undefined,
+            overlayContext,
+          );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        assert(
+          typeof capturedOverlayOptions === "function",
+          "ask_user passes an overlayOptions callback for dialog placement",
+        );
+        const geometry = capturedOverlayOptions();
+        assert(
+          geometry.anchor === "center" &&
+            typeof geometry.maxHeight === "number",
+          "overlayOptions computes dialog placement from the terminal size",
+        );
+        overlayHarness.customComponents.at(-1).handleInput(KEYS.ctrlC);
+        await overlayPending;
+      }
     });
   },
 };

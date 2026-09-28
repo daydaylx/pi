@@ -1,13 +1,13 @@
 /**
  * Frontend-Bridge: Bringt Pi-spezifische Core-Zustände (Workflow, Task,
  * Verification, Changes, Subagenten, Permissions, LSP) über die RPC-Grenze,
- * ohne Geschäftslogik im Frontend zu duplizieren (R1/R2/R11).
+ * ohne Geschäftslogik in externen Clients zu duplizieren (R1/R2/R11).
  *
  * Die Bridge sitzt als gewöhnliche Extension im Pi-Prozess, abonniert die
  * bestehenden EventBus-Kanäle der fachlichen Extensions und persistiert
  * throttele Snapshot-Einträge mit dem Custom-Type "frontend-bridge/state".
- * Diese Einträge streamen im RPC-Modus als entry_appended-Ereignisse in die
- * GUI und überleben gleichzeitig Session-Neustarts.
+ * Diese Einträge streamen im RPC-Modus als entry_appended-Ereignisse zu
+ * externen Clients und überleben gleichzeitig Session-Neustarts.
  *
  * Phase-5-Scope:
  *   - Bus-Felder: workflow, permissions, lsp, changes, verification

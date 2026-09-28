@@ -13,7 +13,7 @@ Verification).
 `daydaylx/pi`s `package.json` (Root und `npm/package.json`) sind `private`
 und haben kein `exports`-Feld. Es existiert zwar ein publiziertes
 Sub-Package (`@daydaylx/pi-frontend-protocol`), aber das beschreibt das
-externe JSONL-RPC-Protokoll für Out-of-Process-Frontends (Desktop-GUI) —
+externe JSONL-RPC-Protokoll für Out-of-Process-Frontends —
 ein anderer Namensraum als der In-Process-`EventBus`, über den
 In-Process-Extensions wie `diff-learning` oder `mode-permissions`
 kommunizieren und den auch `pi-rabbitmode` nutzt.

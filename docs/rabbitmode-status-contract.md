@@ -10,8 +10,8 @@ bauen und ohne den bestehenden Zustand zu verändern.
 
 `docs/frontend-api.md` / `@daydaylx/pi-frontend-protocol` beschreiben ein
 anderes, ebenfalls existierendes Protokoll: das externe JSONL-RPC-Protokoll
-für **Out-of-Process**-Frontends (z. B. die Desktop-GUI), mit eigenem
-Namensraum (`state.snapshot`/`state.patch` über RPC-Methoden).
+für **Out-of-Process**-Frontends mit eigenem Namensraum
+(`state.snapshot`/`state.patch` über RPC-Methoden).
 
 Dieser Contract hier beschreibt dagegen den **In-Process**-`EventBus`
 (`pi.events` am `ExtensionAPI`, siehe
@@ -19,7 +19,7 @@ Dieser Contract hier beschreibt dagegen den **In-Process**-`EventBus`
 den jede im selben Prozess geladene Extension ohne Kanal-Allowlist
 abonnieren kann — das ist der relevante Mechanismus für eine Extension wie
 `pi-rabbitmode`, die (wie `diff-learning` oder `mode-permissions`) als
-normale Pi-Extension im selben Prozess läuft, kein separates GUI-Frontend.
+normale Pi-Extension im selben Prozess läuft, kein separates Frontend.
 
 ## Source of Truth
 

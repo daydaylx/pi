@@ -62,7 +62,7 @@ await test("the scorer separates a good plan from an overblown one", () => {
   );
   assert(
     !bad.results["surface-creep"].pass,
-    "and caught dragging in permissions and the GUI",
+    "and caught dragging in permissions and the LSP layer",
   );
   assert(
     !bad.results.proportionality.pass,
