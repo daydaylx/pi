@@ -260,7 +260,10 @@ export const auroraUiSections = {
           // Segments give up their place whole rather than being shaved off at
           // the edge, so what remains stays readable.
           assert(
-            wide.includes("Denken HOCH") && narrow.includes("Denken HOCH"),
+            wide.includes("High") &&
+              narrow.includes("High") &&
+              !wide.includes("Denken") &&
+              !narrow.includes("Denken"),
             "Aurora retains the explicit thinking segment while the line has room",
           );
 
@@ -404,27 +407,27 @@ export const auroraUiSections = {
             },
           };
           assert(
-            !line(140, quiet).includes("Änderungen"),
+            !line(140, quiet).includes("Δ"),
             "the footer stays quiet when no changes are present",
           );
           assert(
-            line(140, changes).includes("Änderungen 2") &&
+            line(140, changes).includes("Δ 2") &&
               line(140, changes).includes("+14/−3"),
             "the wide footer shows a compact changes summary",
           );
           assert(
-            !line(45, changes).includes("Änderungen"),
+            !line(45, changes).includes("Δ"),
             "the compact footer drops routine changes metadata first",
           );
           assert(
-            line(140, quiet).includes("Kontext 38%") &&
-              line(140, quiet).includes("HOCH") &&
+            line(140, quiet).includes("Ctx 38%") &&
+              line(140, quiet).includes("High") &&
               line(140, quiet).includes("~/…/pi"),
             "the wide footer shows thinking, folder and context",
           );
           assert(
-            line(100, quiet).includes("Kontext 38%") &&
-              line(100, quiet).includes("HOCH") &&
+            line(100, quiet).includes("Ctx 38%") &&
+              line(100, quiet).includes("High") &&
               line(100, quiet).includes("~/…/pi"),
             "the comfortable footer drops context before thinking and compacts the folder",
           );
@@ -433,7 +436,7 @@ export const auroraUiSections = {
             standard.includes("Work") &&
               standard.includes("aurora-test-model") &&
               standard.includes("~/…/pi") &&
-              standard.includes("Denken HOCH"),
+              standard.includes("High") && !standard.includes("Denken"),
             "the standard footer keeps workflow, model, thinking and folder",
           );
           const compact = line(45, quiet);
@@ -524,14 +527,14 @@ export const auroraUiSections = {
           // a narrow line the way a genuine emergency may.
           for (const columns of [45, 70]) {
             assert(
-              !line(columns, { contextPercent: 75 }).includes("Kontext 75%"),
+              !line(columns, { contextPercent: 75 }).includes("Ctx 75%"),
               `a 75% context does not claim space at ${columns} columns`,
             );
           }
           for (const columns of [100, 140]) {
             const filling = line(columns, { contextPercent: 75 });
             assert(
-              filling.includes("Kontext 75%"),
+              filling.includes("Ctx 75%"),
               `a 75% context follows the normal tier at ${columns} columns`,
             );
           }
@@ -546,7 +549,7 @@ export const auroraUiSections = {
               },
             )[0];
             assert(
-              warned.includes(context.ui.theme.fg("warning", "Kontext 75%")),
+              warned.includes(context.ui.theme.fg("warning", "Ctx 75%")),
               "a 75% context is coloured as a warning where it is shown",
             );
           }
@@ -564,7 +567,7 @@ export const auroraUiSections = {
             );
             eq(critical.length, 1, `one line at ${columns} columns`);
             assert(
-              stripAnsi(critical[0]).includes("Kontext 95%"),
+              stripAnsi(critical[0]).includes("Ctx 95%"),
               `an exhausted context survives the tier at ${columns} columns`,
             );
             assert(
@@ -3320,7 +3323,7 @@ export const auroraUiSections = {
               { activityLines: [], maxRows: 8 },
             );
             assert(
-              !dashboardWithChanges.some((line) => line.includes("Änderungen")),
+              !dashboardWithChanges.some((line) => line.includes("Δ")),
               "the dashboard no longer renders a separate changes tile",
             );
             const compactDashboard = renderDashboard(
@@ -3400,7 +3403,7 @@ export const auroraUiSections = {
               },
             );
             assert(
-              !stripAnsi(changesAuto.join("\n")).includes("Änderungen") &&
+              !stripAnsi(changesAuto.join("\n")).includes("Δ") &&
                 !stripAnsi(changesAuto.join("\n")).includes("src/a.ts"),
               "the restored workspace keeps file changes out of the dashboard tile",
             );

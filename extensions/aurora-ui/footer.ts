@@ -11,7 +11,7 @@ import { compactCwd } from "./cwd.ts";
 import { crop } from "./layout.ts";
 import type { AuroraUiState } from "./state.ts";
 import { pillExtraCells, renderPill } from "./tile.ts";
-import { thinkingLabel, thinkingTone } from "./thinking.ts";
+import { thinkingTone } from "./thinking.ts";
 import {
   normalizeVerificationLabel,
   verificationDisplayLabel,
@@ -196,7 +196,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     segments.push({
       slot: Slot.thinking,
       priority: Priority.thinking,
-      text: `Denken ${thinkingLabel(input.state.model.thinking)}`,
+      text: input.state.model.thinking.replace(/^./, (letter) => letter.toUpperCase()),
       tone: thinkingTone(input.state.model.thinking),
       bold: true,
       class: "metadata",
@@ -221,7 +221,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     segments.push({
       slot: Slot.changes,
       priority: Priority.changes,
-      text: `Änderungen ${input.state.changes.filesCount} · +${input.state.changes.linesAdded}/−${input.state.changes.linesRemoved}`,
+      text: `Δ ${input.state.changes.filesCount} +${input.state.changes.linesAdded}/−${input.state.changes.linesRemoved}`,
       tone: "muted",
       class: "metadata",
     });
@@ -236,7 +236,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     segments.push({
       slot: Slot.context,
       priority: exhausted ? Priority.exhaustedContext : Priority.context,
-      text: `Kontext ${Math.round(input.contextPercent)}%`,
+      text: `Ctx ${Math.round(input.contextPercent)}%`,
       tone: exhausted
         ? "error"
         : input.contextPercent >= CONTEXT_WARNING_PERCENT
