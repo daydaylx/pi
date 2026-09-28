@@ -184,18 +184,31 @@ Zielwert. Die Sitzungsgrenze bleibt bei 5.
 - **Unabhängige Prüfung nach einer riskanten Umsetzung:** `spec` mit
   `profile: "verify"`.
 
-Der Verifier folgt zwei Risikokategorien:
+Der Verifier folgt drei Risikokategorien (Need-Gate,
+`extensions/permissions/verifier-risk.ts`):
 
-- **HARD_VERIFIER_REQUIRED:** Sicherheits-/Permission-Grenzen, kritischer
-  Plan→Work- und Recovery-State, die Verifier-/Completion-Maschinerie,
-  tatsächlich betroffene öffentliche Protokoll-/IPC-Verträge sowie
-  Installations-/Upgrade-Einstiegspunkte. Eine ausdrückliche Nutzeranforderung
-  macht den Lauf ebenfalls hart verpflichtend.
+- **`required`:** Sicherheits-/Permission-Grenzen, kritischer Plan→Work- und
+  Recovery-State, die Verifier-/Completion-Maschinerie, tatsächlich betroffene
+  öffentliche Protokoll-/IPC-Verträge sowie Installations-/Upgrade-
+  Einstiegspunkte (Hard-Pfad-Katalog, s. u.). Eine ausdrückliche
+  Nutzeranforderung macht den Lauf ebenfalls hart verpflichtend.
 
-- **VERIFIER_OPTIONAL:** normale Bugfixes mit Regressionstest, begrenzte
-  Refactorings, GUI-/Electron-Lifecycle ohne Trust Boundary, UI/CSS/Text,
-  Dokumentation, mechanische Änderungen und harmlose Tooling-/Script-
-  Anpassungen. Dateianzahl oder Diffgröße allein sind kein Risikoindikator.
+- **`justified`:** kein Hard-Pfad, aber ein strukturierter, belegter Trigger
+  aus `spec.verification.trigger`/`triggerEvidence` (`user_requested`,
+  `semantic_contract_risk`, `uncovered_behavior`, `failed_check_after_fix`,
+  `cross_boundary_change`, `environment_uncertainty`) — z. B. schwer
+  testbares Verhalten, LSP-Range-/WorkspaceEdit-Logik oder komplexe
+  Cross-File-Semantik. Ein unbekannter Trigger oder leere Evidenz wird
+  fail-closed abgelehnt, bevor der Aufruf den Verifier überhaupt erreicht.
+  Für den Legacy-Pfad (`agent: "verifier"`) trägt derselbe Vertrag als
+  `## Optional verifier trigger`-Abschnitt im `task`-Text.
+
+- **`not_needed`:** normale Bugfixes mit Regressionstest, begrenzte
+  Refactorings, UI/CSS/Text, Dokumentation, mechanische Änderungen und
+  harmlose Tooling-/Script-Anpassungen ohne Trigger. Der Verifier wird hier
+  technisch blockiert, nicht nur unempfohlen — Main kann `required` dabei
+  nicht selbst behaupten, nur einen optionalen Trigger anmelden. Dateianzahl
+  oder Diffgröße allein sind niemals ein Risikoindikator.
 
 `extensions/permissions/verifier-required-paths.ts` enthält dafür nur einen
 kleinen, expliziten Katalog der automatisch erkennbaren

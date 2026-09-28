@@ -169,6 +169,27 @@ Grund für erneute Prüfung:
 <was diese Delegation von der vorherigen auf demselben Diff unterscheidet>
 ```
 
+Nur nötig, wenn kein Hard-Pfad (`extensions/permissions/verifier-required-paths.ts`)
+und keine explizite Nutzeranforderung vorliegen, aber ein belegtes
+semantisches Restrisiko den Lauf trotzdem rechtfertigt (Need-Gate,
+`extensions/permissions/verifier-risk.ts`) — sonst wird der Aufruf als
+`not_needed` technisch blockiert:
+
+```text
+## Optional verifier trigger
+trigger: <user_requested|semantic_contract_risk|uncovered_behavior|
+          failed_check_after_fix|cross_boundary_change|environment_uncertainty>
+evidence: <konkreter, nicht triviale Beleg — kein Freitext wie „sicher ist
+sicher“>
+```
+
+Über `spec.profile: "verify"` sind das die Felder `verification.trigger` und
+`verification.triggerEvidence`; ein unbekannter Trigger oder leere Evidenz
+wird dort bereits vor der Übersetzung in den `verifier`-Aufruf fail-closed
+abgelehnt. Der Hauptagent kann über diesen Weg nur einen optionalen Trigger
+anmelden, niemals selbst `required` behaupten — das bleibt ausschließlich dem
+Hard-Pfad-Katalog und einer expliziten Nutzeranforderung vorbehalten.
+
 `git status --short` allein ist keine Inhaltsbaseline: Es zeigt nicht, ob der
 Task eine bereits vorher veränderte Datei zusätzlich geändert hat. Vor der
 ersten Task-Änderung deshalb reproduzierbare Content-Fingerprints (Hash des
@@ -191,6 +212,11 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
 
 - Ein `verifier`-Aufruf ohne die Pflichtabschnitte oben oder mit einem
   per Run gesetzten `turnBudget` wird vor dem Start geblockt.
+- Ein `verifier`-Aufruf ohne Hard-Pfad-Treffer, ohne explizite
+  Nutzeranforderung und ohne gültigen `## Optional verifier trigger` (bzw.
+  `verification.trigger`/`triggerEvidence`) wird als `not_needed` vor dem
+  Start geblockt — unabhängig davon, ob er über `agent: "verifier"` oder
+  `spec.profile: "verify"` läuft.
 - Ein abgebrochener, zeitüberschrittener oder providerfehlerhafter Lauf
   schreibt einen `verifier-run`-Session-Eintrag mit `status: "incomplete"`
   und einen sichtbaren INCOMPLETE-Vorsatz im Tool-Result. Ein solcher Lauf
