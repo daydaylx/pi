@@ -20,6 +20,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //  - undici's fix requires downgrading @earendil-works/pi-coding-agent to
 //    0.75.3, a breaking change to the runtime this project runs on.
 // Revisit when upstream publishes a fix; do not silently widen this list.
+//
+// Verified 2026-09-29: the ten undici advisories added last (GHSA-2gqq… to
+// GHSA-2jfj…) come from the undici 8.9.0 sealed inside
+// pi-coding-agent@0.84.3's npm-shrinkwrap.json.
+// The root override `undici: 8.11.2` fixes every other copy (pi-web-access)
+// but cannot reach that subtree. The only real fix is upgrading
+// pi-coding-agent to a release that ships undici >= 8.10.2 (npm audit
+// suggests 0.99.1, a breaking runtime change; handle as its own task).
 export const ACCEPTED_ADVISORIES = new Set([
   "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
   "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
@@ -28,6 +36,16 @@ export const ACCEPTED_ADVISORIES = new Set([
   "https://github.com/advisories/GHSA-m8rv-5g2x-5cg5",
   "https://github.com/advisories/GHSA-jr45-8vmc-qm54",
   "https://github.com/advisories/GHSA-v3r7-h72x-cjcm",
+  "https://github.com/advisories/GHSA-2gqq-gqf2-x968",
+  "https://github.com/advisories/GHSA-w293-vg96-wgc3",
+  "https://github.com/advisories/GHSA-8436-99hf-9mmv",
+  "https://github.com/advisories/GHSA-rx4f-c7p8-82vq",
+  "https://github.com/advisories/GHSA-3wwx-pv8p-q78v",
+  "https://github.com/advisories/GHSA-pmjh-fq2x-6v4x",
+  "https://github.com/advisories/GHSA-r53p-7pc4-xj5r",
+  "https://github.com/advisories/GHSA-rfgv-xxqx-mfg5",
+  "https://github.com/advisories/GHSA-3xpg-4rpp-hhhm",
+  "https://github.com/advisories/GHSA-2jfj-6hjv-fm6j",
 ]);
 
 /** Pure so it can be unit tested without shelling out to npm. */
