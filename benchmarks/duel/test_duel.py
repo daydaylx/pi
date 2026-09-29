@@ -26,6 +26,10 @@ FAKE_PI = r"""#!/usr/bin/env python3
 import json, os, sys, time
 if sys.argv[1:] == ["--version"]:
     print("fake 1.0"); sys.exit(0)
+if "FERTIG" in sys.argv[-1]:
+    open(os.environ["FAKE_RECORD"] + ".pi.reply", "w").write(str("--continue" in sys.argv))
+    print(json.dumps({"type": "turn_end", "message": {"role": "assistant", "content": [{"type": "text", "text": "FERTIG"}]}}))
+    sys.exit(0)
 open("marker.txt", "a").write("pi\n")           # tracked-Datei aendern
 open("pi_only_untracked.txt", "w").write("x")     # untracked
 open(os.environ["FAKE_RECORD"] + ".pi", "w").write(os.getcwd() + "\n" + sys.argv[-1])
@@ -41,9 +45,14 @@ FAKE_CODEX = r"""#!/usr/bin/env python3
 import json, os, sys
 if sys.argv[1:] == ["--version"]:
     print("fake 1.0"); sys.exit(0)
+if "resume" in sys.argv:
+    open(os.environ["FAKE_RECORD"] + ".codex.reply", "w").write(" ".join(sys.argv[2:]))
+    print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "FERTIG"}}))
+    sys.exit(0)
 leak = os.path.exists("pi_only_untracked.txt") or "pi" in open("marker.txt").read()
 open(os.environ["FAKE_RECORD"] + ".codex", "w").write(os.getcwd() + "\n" + sys.argv[-1] + "\nleak=" + str(leak))
 open("marker.txt", "a").write("codex\n")
+print(json.dumps({"type": "thread.started", "thread_id": "T-1"}))
 print(json.dumps({"type": "item.completed", "item": {"type": "command_execution", "exit_code": 0}}))
 print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "codex fertig"}}))
 print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 400, "cached_input_tokens": 300, "output_tokens": 60, "reasoning_output_tokens": 20}}))
@@ -155,6 +164,17 @@ class DuelTest(unittest.TestCase):
         self.assertEqual(total["verifier_tokens"], 20)
         self.assertEqual(total["total_tokens"], 180 + 40)  # Verifier nicht doppelt gezaehlt
         self.assertAlmostEqual(total["cost"], 0.8)
+
+    def test_auto_reply_continues_same_session(self):
+        d = self.start()
+        self.assertTrue(Path(self.record + ".pi.reply").read_text() == "True")  # --continue
+        self.assertIn("T-1", Path(self.record + ".codex.reply").read_text())    # resume <thread id>
+        for arm in ("pi", "codex"):
+            u = json.loads((d / arm / "usage.json").read_text())
+            self.assertEqual(u["auto_replies"], 1)
+            self.assertTrue((d / arm / "logs" / "round2.jsonl").is_file())
+        # Usage ueber alle Runden: Pi summiert, Codex nimmt die kumulative letzte Summe
+        self.assertEqual(json.loads((d / "pi" / "usage.json").read_text())["main"]["total_tokens"], 180)
 
     def test_failure_of_one_arm_keeps_other_arm(self):  # 10
         os.environ["FAKE_PI_FAIL"] = "1"

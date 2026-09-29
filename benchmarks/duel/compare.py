@@ -92,6 +92,7 @@ def render(duel_dir: Path) -> str:
     ]
     if ptot.get("verifier_share") is not None:
         facts.append(f"Verifier-Anteil am Pi-Gesamtverbrauch: {ptot['verifier_share']:.0%}")
+    facts.append(f"Automatische Antworten (Rückfragen): Pi {pu.get('auto_replies', 0)}, Codex {cu.get('auto_replies', 0)}")
     facts.append(f"Pi-Subagenten (ohne Verifier): {ptot.get('subagent_calls', 0)}, Verifier-Läufe: {ptot.get('verifier_calls', 0)}")
 
     def arm_files(label, stats):

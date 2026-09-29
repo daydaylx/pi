@@ -31,6 +31,12 @@ Pi-Sitzung im selben Worktree nutzen.
 5. `comparison.md` mit Fakten; qualitative Abschnitte werden nach dem Lauf
    gemeinsam ausgefüllt.
 
+Stoppt ein Agent (z. B. mit einer Rückfrage), sendet `duel` beiden Seiten
+dieselbe Standardantwort („Entscheide selbst und arbeite weiter … sonst FERTIG“)
+in dieselbe Sitzung (`pi --continue`, `codex exec resume`), bis der Agent mit
+FERTIG antwortet, nichts mehr tut oder 8 Runden erreicht sind. Der Prompt selbst
+bleibt unverändert; die Anzahl automatischer Antworten steht im Report.
+
 Ein Fehler in einem Arm (`error.json`) zerstört die Daten des anderen nicht.
 
 ## Ablage

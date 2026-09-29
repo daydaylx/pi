@@ -103,18 +103,47 @@ def remove_worktree(repo: Path, path: Path) -> None:
     git(repo, "worktree", "prune", check=False)
 
 
-def build_command(arm: str, prompt: str, args) -> list[str]:
+AUTO_REPLY = (
+    "Entscheide alle offenen Fragen selbst und arbeite weiter. "
+    "Wenn der Auftrag vollstaendig erledigt ist, antworte nur mit: FERTIG"
+)
+MAX_ROUNDS = 8
+
+
+def build_command(arm: str, prompt: str, args, session_id: str | None = None) -> list[str]:
+    """Erste Runde: voller Prompt. Folgerunden: Auto-Antwort in dieselbe Sitzung."""
     if arm == "pi":
         cmd = ["pi", "--print", "--mode", "json", "--approve"]
+        if session_id:  # Folgerunde: letzte Sitzung im Worktree fortsetzen
+            cmd.append("--continue")
         if args.pi_provider:
             cmd += ["--provider", args.pi_provider]
         if args.pi_model:
             cmd += ["--model", args.pi_model]
         return cmd + [prompt]
+    if session_id:
+        cmd = ["codex", "exec", "resume", "--json"]
+        if args.codex_model:
+            cmd += ["-m", args.codex_model]
+        return cmd + [session_id, prompt]
     cmd = ["codex", "exec", "--json", "--approve-for-me"]
     if args.codex_model:
         cmd += ["-m", args.codex_model]
     return cmd + [prompt]
+
+
+def codex_thread_id(stdout: str) -> str | None:
+    for ev in usage._events(stdout):
+        if ev.get("type") == "thread.started" and ev.get("thread_id"):
+            return ev["thread_id"]
+    return None
+
+
+def is_done(arm: str, stdout: str) -> bool:
+    """Folgerunde beendet den Lauf, wenn die Antwort FERTIG ist oder nichts mehr getan wurde."""
+    text = (usage.final_text(arm, stdout) or "").strip()
+    stats = usage.parse_pi(stdout) if arm == "pi" else usage.parse_codex(stdout)
+    return ("FERTIG" in text.upper() and len(text) < 200) or stats["tool_calls"] == 0
 
 
 def save_result(arm: str, arm_dir: Path, worktree: Path, sha: str, stdout: str, meta: dict) -> dict:
@@ -141,24 +170,38 @@ def run_arm(arm: str, repo: Path, sha: str, duel_dir: Path, prompt: str, args) -
     worktree = None
     try:
         worktree = make_worktree(repo, sha, f"{duel_dir.name}-{arm}")
-        cmd = build_command(arm, prompt, args)
-        exe = shutil.which(cmd[0])
-        if not exe:
-            raise RuntimeError(f"`{cmd[0]}` nicht im PATH")
+        if not shutil.which(arm):
+            raise RuntimeError(f"`{arm}` nicht im PATH")
         start_ts = time.time()
-        proc = subprocess.run([exe, *cmd[1:]], cwd=worktree, capture_output=True, text=True, errors="replace",
-                              stdin=subprocess.DEVNULL)
+        outputs, rounds, session_id, proc = [], [], None, None
+        for n in range(1, MAX_ROUNDS + 1):
+            text = prompt if n == 1 else AUTO_REPLY
+            cmd = build_command(arm, text, args, session_id if n > 1 else None)
+            proc = subprocess.run(cmd, cwd=worktree, capture_output=True, text=True, errors="replace",
+                                  stdin=subprocess.DEVNULL)
+            outputs.append(proc.stdout)
+            (arm_dir / "logs" / f"round{n}.jsonl").write_text(proc.stdout, encoding="utf-8")
+            (arm_dir / "logs" / f"round{n}.stderr.log").write_text(proc.stderr, encoding="utf-8")
+            rounds.append({"round": n, "auto_reply": n > 1, "exit_code": proc.returncode})
+            if n == 1 and arm == "codex":
+                session_id = codex_thread_id(proc.stdout)
+                if not session_id:
+                    break
+            elif n == 1:
+                session_id = "continue"
+            if proc.returncode != 0 or (n > 1 and is_done(arm, proc.stdout)):
+                break
         end_ts = time.time()
-        (arm_dir / "logs" / "stdout.jsonl").write_text(proc.stdout, encoding="utf-8")
-        (arm_dir / "logs" / "stderr.log").write_text(proc.stderr, encoding="utf-8")
+        stdout = "".join(o if o.endswith("\n") or not o else o + "\n" for o in outputs)
+        (arm_dir / "logs" / "stdout.jsonl").write_text(stdout, encoding="utf-8")
         cfg = real_config(arm)
         meta = {"arm": arm, "start": datetime.fromtimestamp(start_ts, timezone.utc).isoformat(timespec="seconds"),
                 "end": datetime.fromtimestamp(end_ts, timezone.utc).isoformat(timespec="seconds"),
                 "start_ts": start_ts, "end_ts": end_ts, "duration_s": round(end_ts - start_ts, 1),
-                "exit_code": proc.returncode, "version": tool_version(arm),
+                "exit_code": proc.returncode, "rounds": rounds, "auto_replies": len(rounds) - 1, "version": tool_version(arm),
                 "model": (args.pi_model if arm == "pi" else args.codex_model) or cfg.get("model"),
                 "thinking": cfg.get("thinking"), "final_head": git(worktree, "rev-parse", "HEAD").strip()}
-        save_result(arm, arm_dir, worktree, sha, proc.stdout, meta)
+        save_result(arm, arm_dir, worktree, sha, stdout, meta)
     except Exception as exc:  # ein Fehler darf den anderen Arm nicht zerstoeren
         (arm_dir / "error.json").write_text(json.dumps({"arm": arm, "error": f"{type(exc).__name__}: {exc}"}, indent=2), encoding="utf-8")
         print(f"[{arm}] FEHLER: {exc}", file=sys.stderr)
