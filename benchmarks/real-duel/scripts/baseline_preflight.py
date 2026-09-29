@@ -27,6 +27,10 @@ Scoring:
 
   * ``dirty_override`` -> ``comparable=false`` (unveraendert, dirty-Laeufe
     sind ohnehin nicht vergleichbar).
+  * ``unfrozen_override`` (``--allow-unfrozen``) -> ``comparable=false``.
+  * Provider-Abbruch mit ungueltigem Kandidaten
+    (``infrastructure_interrupted_with_invalid_candidate``) ->
+    ``comparable=false``.
   * Baseline ``clean`` und keine Kandidaten-Regression -> ``comparable=true``.
   * Baseline ``failing`` und der Kandidat veraendert den fehlerhaften Bereich
     nicht -> ``comparable=true`` (pre_existing, nicht dem Kandidaten
@@ -188,6 +192,8 @@ def decide_comparable(
     dirty_override: bool,
     candidate_tool_errors: list[dict] | None = None,
     candidate_regressions: list[dict] | None = None,
+    unfrozen_override: bool = False,
+    failure_reason: str | None = None,
 ) -> tuple[bool, str]:
     """Kleine, nachvollziehbare ``comparable``-Policy (P2). Gibt
     ``(comparable: bool, reason: str)`` zurueck.
@@ -200,6 +206,12 @@ def decide_comparable(
     """
     if dirty_override:
         return False, "dirty_override"
+    if unfrozen_override:
+        return False, "unfrozen_override"
+    if failure_reason == "infrastructure_interrupted_with_invalid_candidate":
+        # Provider-Abbruch mit ungueltigem Kandidaten: Lauf ist wiederholen,
+        # nicht werten.
+        return False, failure_reason
 
     baseline_status = (baseline_preflight or {}).get("status")
     regressions = list(candidate_regressions or [])
@@ -227,7 +239,7 @@ def decide_comparable(
         # blockiert/verfaelscht den Harness-Vergleich.
         blocked = _verify_blocked_by_baseline(candidate_tool_errors)
         if blocked:
-            return False, "baseline_failing_candidate_verifier_blocked"
+            return False, "baseline_failing_verification_gate_blocked"
         # Baselinefehler, aber der Kandidat beruehrt diesen Bereich nicht ->
         # pre_existing, nicht dem Kandidaten angelastet.
         return True, "baseline_failing_pre_existing"

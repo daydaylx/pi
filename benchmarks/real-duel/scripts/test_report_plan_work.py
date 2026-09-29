@@ -262,5 +262,47 @@ class ParseAllTasksSpecTest(unittest.TestCase):
             report._parse_all_tasks_spec(["real-03-lsp-ruby-profile"])
 
 
+class ExcludedRunsTest(unittest.TestCase):
+    def test_provider_interruption_is_excluded_from_aggregation(self) -> None:
+        good = {"run_id": "a", "workflow": "work-only", "wall_time_s": 10}
+        bad = {"run_id": "b", "workflow": "work-only", "wall_time_s": 500,
+               "failure_reason": "infrastructure_interrupted_with_invalid_candidate"}
+        valid, excluded = report._split_excluded([good, bad])
+        self.assertEqual(valid, [good])
+        self.assertEqual(excluded, [bad])
+
+    def test_render_reports_excluded_runs_separately(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        rows = [
+            {"run_id": "ok", "harness": "pi-real", "workflow": "work-only", "wall_time_s": 10},
+            {"run_id": "bad", "harness": "pi-real", "workflow": "work-only", "wall_time_s": 999,
+             "failure_reason": "infrastructure_interrupted_with_invalid_candidate"},
+        ]
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            report._render_task_report("t", rows, False)
+        output = buffer.getvalue()
+        self.assertIn("Ausgeschlossen (1", output)
+        self.assertIn("bad", output)
+        self.assertIn("| Laufzeit (s) | 10", output)
+        self.assertNotIn("999", output.split("Ausgeschlossen")[0])
+
+    def test_legacy_rows_get_new_field_names_on_load(self) -> None:
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "results.jsonl"
+            path.write_text(json.dumps({
+                "task": "t", "run_id": "r", "checker_exit": 0,
+                "comparable_reason": "baseline_failing_candidate_verifier_blocked",
+            }) + "\n")
+            (row,) = report._load_rows(path, "t")
+        self.assertEqual(row["benchmark_checker_exit"], 0)
+        self.assertEqual(row["comparable_reason"], "baseline_failing_verification_gate_blocked")
+
+
 if __name__ == "__main__":
     unittest.main()

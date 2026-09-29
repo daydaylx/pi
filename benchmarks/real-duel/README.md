@@ -66,7 +66,13 @@ jeweiligen globalen Ausgangswerte getrennt.
 
 Eine neue Medium-Serie braucht vor dem ersten Trial einen sauberen, committeten
 Baseline-SHA und eine eigene Freeze-/Matrix-Dokumentation. `--allow-dirty`
-markiert Ergebnisse als nicht vergleichbar und ist dafür nicht zulässig. Während
+markiert Ergebnisse als nicht vergleichbar und ist dafür nicht zulässig.
+Der Preflight bricht vor jedem Trial hart ab, wenn `STAGE2_BASE_SHA` fehlt, kein
+Vorfahre von HEAD ist oder `installed_in_sync_with_repo=false` gilt; nur
+`--allow-unfrozen` erzwingt den Lauf (dann `comparable=false`). Provider-Abbrüche
+mit ungültigem Kandidaten werden als `PROVIDER_FAILURE`
+(`infrastructure_interrupted_with_invalid_candidate`, `comparable=false`)
+klassifiziert und aus Erfolgsraten/Mittelwerten des Reports ausgeschlossen. Während
 eines Trials darf keine parallele interaktive Pi-Sitzung laufen.
 
 Laufdaten (Worktrees, `results.jsonl`, Transkripte, Fingerprints und redigierte

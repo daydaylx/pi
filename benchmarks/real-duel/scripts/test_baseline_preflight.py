@@ -162,7 +162,7 @@ class ComparablePolicyTest(unittest.TestCase):
         self.assertTrue(comparable)
         self.assertEqual(reason, "baseline_clean_candidate_infrastructure_error")
 
-    def test_case3b_baseline_failing_candidate_verifier_blocked(self) -> None:
+    def test_case3b_baseline_failing_verification_gate_blocked(self) -> None:
         # Fall 3: der Kandidat scheitert mit seinem eigenen Verifier genau an
         # dem dokumentierten Baselinefehler -> taskfremder Fehler blockiert den
         # Harness-Vergleich -> comparable=false.
@@ -180,7 +180,7 @@ class ComparablePolicyTest(unittest.TestCase):
             candidate_regressions=[],
         )
         self.assertFalse(comparable)
-        self.assertEqual(reason, "baseline_failing_candidate_verifier_blocked")
+        self.assertEqual(reason, "baseline_failing_verification_gate_blocked")
 
     def test_dirty_override_always_not_comparable(self) -> None:
         comparable, reason = bp.decide_comparable(
@@ -207,6 +207,35 @@ class ClassifyCandidateErrorsTest(unittest.TestCase):
         # baseline_fixed bleibt konservativ leer (tool_trace zeichnet keine
         # Erfolge auf; dokumentierte Luecke).
         self.assertEqual(out["baseline_fixed"], [])
+
+
+class OverrideAndProviderReasonTest(unittest.TestCase):
+    def test_unfrozen_override_is_not_comparable(self) -> None:
+        comparable, reason = bp.decide_comparable(
+            baseline_preflight={"status": "clean", "failures": []},
+            dirty_override=False,
+            unfrozen_override=True,
+        )
+        self.assertFalse(comparable)
+        self.assertEqual(reason, "unfrozen_override")
+
+    def test_provider_interruption_is_not_comparable(self) -> None:
+        comparable, reason = bp.decide_comparable(
+            baseline_preflight={"status": "clean", "failures": []},
+            dirty_override=False,
+            failure_reason="infrastructure_interrupted_with_invalid_candidate",
+        )
+        self.assertFalse(comparable)
+        self.assertEqual(reason, "infrastructure_interrupted_with_invalid_candidate")
+
+    def test_other_failure_reasons_do_not_change_comparability(self) -> None:
+        comparable, reason = bp.decide_comparable(
+            baseline_preflight={"status": "clean", "failures": []},
+            dirty_override=False,
+            failure_reason="checker_or_tests_failed",
+        )
+        self.assertTrue(comparable)
+        self.assertEqual(reason, "baseline_clean")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ siehe `scripts/baseline_preflight.py`). Dieses Dokument beschreibt nur den
 
 - `dirty_override` — Lauf mit `--allow-dirty` erzwungen (canonical repo war
   unsauber).
-- `baseline_failing_candidate_verifier_blocked` — Baseline hatte bereits
+- `baseline_failing_verification_gate_blocked` — Baseline hatte bereits
   einen Fehler in einem Check, und der Kandidat scheitert mit seinem eigenen
   Verifier genau an diesem bereits bekannten Fehler (Fall 3, siehe
   `baseline_preflight.py`-Docstring).

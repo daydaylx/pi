@@ -13,6 +13,7 @@ usage: report_plan_work.py --task <task-name> [--results-path <pfad>]
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import statistics
 from collections import defaultdict
@@ -24,6 +25,31 @@ MANUAL = "TODO (manuell/Blind-Review)"
 NA = "–"  # –
 
 
+def _field_names():
+    path = Path(__file__).with_name("field_names.py")
+    spec = importlib.util.spec_from_file_location("real_duel_field_names", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+EXCLUDED_FAILURE_REASON = "infrastructure_interrupted_with_invalid_candidate"
+
+
+def _split_excluded(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Trennt Laeufe mit Provider-/Infrastrukturabbruch bei ungueltigem
+    Kandidaten ab: sie fliessen weder in Erfolgsraten noch in Mittelwerte
+    ein und werden separat gezaehlt."""
+    valid, excluded = [], []
+    for row in rows:
+        if row.get("failure_reason") == EXCLUDED_FAILURE_REASON:
+            excluded.append(row)
+        else:
+            valid.append(row)
+    return valid, excluded
+
+
 def _load_rows(results_path: Path, task: str) -> list[dict]:
     rows = []
     with open(results_path, encoding="utf-8") as fh:
@@ -33,7 +59,7 @@ def _load_rows(results_path: Path, task: str) -> list[dict]:
                 continue
             row = json.loads(line)
             if row.get("task") == task:
-                rows.append(row)
+                rows.append(_field_names().with_new_field_names(row))
     return rows
 
 
@@ -339,6 +365,7 @@ def _render_task_report(task: str, rows: list[dict], combined: bool) -> int:
         print(f"keine Zeilen fuer Task {task!r}")
         return 1
 
+    rows, excluded = _split_excluded(rows)
     by_harness = defaultdict(lambda: {"work-only": [], "plan-work": []})
     for row in rows:
         by_harness[row["harness"]][row.get("workflow", "work-only")].append(row)
@@ -352,6 +379,14 @@ def _render_task_report(task: str, rows: list[dict], combined: bool) -> int:
         print(build_table(harness, wo, pw))
         print()
 
+    if excluded:
+        print(
+            f"Ausgeschlossen ({len(excluded)}, Provider-/Infrastrukturabbruch mit "
+            "ungueltigem Kandidaten, nicht in Erfolgsraten/Mittelwerten, "
+            "Wiederholung noetig): "
+            + ", ".join(f"{r.get('run_id')} [{r.get('workflow', 'work-only')}]" for r in excluded)
+            + "\n"
+        )
     print(
         "Hinweis: 'Funktional erfolgreich', 'Regressionen', "
         "'Anforderungserfüllung' und 'Nutzerkorrekturen' sind laut "

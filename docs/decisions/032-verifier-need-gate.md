@@ -153,6 +153,18 @@ informative Ergänzung.
   `1014632bf843e87f3f953a9a29b56a7831e7943a` real befüllt (siehe Nachtrag 2
   oben).
 
+## Nachtrag: Feldnamen in Benchmark-Ergebniszeilen
+
+Die real-duel-Ergebniszeilen trennen drei Konzepte, die zuvor unter „verifier"
+zusammenliefen: `verification_gate_*` (harte Sperre/`project_check`,
+Toolfehler `verification/*`), `model_verifier_*` (Verifier-Subagent, bisher
+`verifier_*`) und `benchmark_checker_*` (`checker.sh`, bisher `checker_*`). Die
+alten Namen bleiben additiv erhalten; die run-history-Quellfelder
+(`verifierDecision`, `verifierTrigger`, `verifierSkipReason`) sind unverändert.
+Der Reason `baseline_failing_candidate_verifier_blocked` heißt jetzt
+`baseline_failing_verification_gate_blocked`
+(`benchmarks/real-duel/scripts/field_names.py` mappt alte Zeilen beim Lesen).
+
 ## Folgen
 
 - Ein Aufruf ohne Hard-Pfad-Treffer, ohne explizite Nutzeranforderung und

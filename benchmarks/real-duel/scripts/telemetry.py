@@ -43,6 +43,8 @@ import json
 import os
 import sys
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 OPENBENCH_HOME = os.path.expanduser(
     os.environ.get(
         "PI_OPENBENCH_HOME",
@@ -135,6 +137,13 @@ def _iter_run_history_entries():
                 yield json.loads(line)
             except json.JSONDecodeError:
                 continue
+
+
+def _with_model_verifier_aliases(stats):
+    if SCRIPT_DIR not in sys.path:
+        sys.path.insert(0, SCRIPT_DIR)
+    import field_names  # noqa: E402
+    return field_names.add_model_verifier_aliases(stats)
 
 
 def subagent_stats_from_run_history(workdir, start_ts, end_ts):
@@ -267,7 +276,7 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
         len(nested_models) > 1 if nested_models_complete and total_calls else None
     )
 
-    return {
+    return _with_model_verifier_aliases({
         # Legacy-Namen, unveraendert (kein bekannter Caller aktuell, aber
         # additiv gehalten statt umbenannt).
         "subagent_calls": total_calls,
@@ -296,7 +305,7 @@ def subagent_stats_from_run_history(workdir, start_ts, end_ts):
         "verifier_skip_reason": common_optional_string(verifier_entries, "verifierSkipReason"),
         "nested_models": nested_models,
         "mixed_model_run": mixed_model_run,
-    }
+    })
 
 
 def all_in_view(main_stats, nested_stats):
@@ -415,6 +424,12 @@ def normalize_codex(transcript_text):
     return out
 
 
+_TOKEN_KEYS = (
+    "input_fresh", "input_cache_read", "input_cache_write",
+    "output", "reasoning", "processed_input",
+)
+_COUNT_KEYS = ("model_calls", "tool_calls", "tool_errors")
+
 _DIFFABLE_NUMERIC_KEYS = (
     "input_fresh", "input_cache_read", "input_cache_write",
     "output", "reasoning", "processed_input", "model_calls",
@@ -440,13 +455,14 @@ def split_codex_plan_work(plan_transcript_text: str, work_transcript_text: str) 
             "plan_phase": plan_stats,
             "work_phase_cumulative": work_cumulative,
             "work_phase_delta": _empty_neutral(),
+            "total": sum_neutral(plan_stats, work_cumulative),
             "consistent": False,
             "inconsistency_reason": "token_basis fehlt in mindestens einer Phase",
         }
 
     delta = dict(work_cumulative)
     negative_keys = []
-    for key in _DIFFABLE_NUMERIC_KEYS:
+    for key in _TOKEN_KEYS:
         p = plan_stats.get(key)
         w = work_cumulative.get(key)
         if p is None or w is None:
@@ -456,17 +472,78 @@ def split_codex_plan_work(plan_transcript_text: str, work_transcript_text: str) 
         if diff < 0:
             negative_keys.append(key)
         delta[key] = diff
+    # model_calls/tool_calls/tool_errors zaehlt jedes Transkript nur fuer die
+    # eigenen Events -- sie sind nicht kumulativ und werden nicht differenziert.
+    consistent = not negative_keys
+    if consistent:
+        total = dict(work_cumulative)
+        for key in _COUNT_KEYS:
+            total[key] = _add_optional(plan_stats.get(key), work_cumulative.get(key))
+        total["cost"] = None
+    else:
+        total = sum_neutral(plan_stats, work_cumulative)
 
     return {
         "plan_phase": plan_stats,
         "work_phase_cumulative": work_cumulative,
         "work_phase_delta": delta,
-        "consistent": not negative_keys,
+        "total": total,
+        "consistent": consistent,
         "inconsistency_reason": (
             f"negative Delta bei: {negative_keys} -- Annahme 'kumulativ ueber "
             "Session' fuer diesen Lauf widerlegt, work_phase_cumulative statt "
             "work_phase_delta verwenden" if negative_keys else None
         ),
+    }
+
+
+def _add_optional(a, b):
+    return None if a is None or b is None else a + b
+
+
+def sum_neutral(a: dict, b: dict) -> dict:
+    """Summe zweier normalisierter Phasen (Plan + Work). Fehlt in einer Phase ein
+    Wert, bleibt die Summe None -- nichts wird geschaetzt oder als 0 gezaehlt."""
+    out = _empty_neutral()
+    for key in _DIFFABLE_NUMERIC_KEYS:
+        out[key] = _add_optional(a.get(key), b.get(key))
+    basis_a, basis_b = a.get("token_basis"), b.get("token_basis")
+    out["token_basis"] = basis_a if basis_a == basis_b else None
+    src_a, src_b = a.get("cost_source"), b.get("cost_source")
+    out["cost_source"] = src_a if src_a == src_b else "mixed"
+    raw_a, raw_b = a.get("usage_raw"), b.get("usage_raw")
+    out["usage_raw"] = (
+        list(raw_a) + list(raw_b) if isinstance(raw_a, list) and isinstance(raw_b, list) else None
+    )
+    return out
+
+
+def normalize_pi_events(events) -> dict:
+    """Normalisierte Telemetrie aus einer Pi-RPC-Eventliste (eine Phase)."""
+    return normalize_pi("\n".join(json.dumps(e) for e in events))
+
+
+def pi_plan_work_telemetry(plan_events, work_events) -> dict:
+    """Pi-plan-work: getrennte Phasen (disjunkte Event-Listen) plus Gesamtsumme."""
+    plan = normalize_pi_events(plan_events)
+    work = normalize_pi_events(work_events)
+    return {"plan": plan, "work": work, "total": sum_neutral(plan, work)}
+
+
+def codex_plan_work_telemetry(split: dict) -> dict:
+    work = split["work_phase_delta"] if split["consistent"] else split["work_phase_cumulative"]
+    total = split["total"]
+    gap = split["inconsistency_reason"] if total.get("token_basis") is None else None
+    return {"plan": split["plan_phase"], "work": work, "total": total, "telemetry_gap_reason": gap}
+
+
+def legacy_scalars(total: dict) -> dict:
+    """Flache Legacy-Skalare (tokens/turns/token_basis) aus einer Summe."""
+    fresh, output = total.get("input_fresh"), total.get("output")
+    return {
+        "tokens": fresh + output if None not in (fresh, output) else None,
+        "turns": total.get("model_calls"),
+        "token_basis": total.get("token_basis"),
     }
 
 

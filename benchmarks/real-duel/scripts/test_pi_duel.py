@@ -26,6 +26,7 @@ MAKE_WORKTREE = MODULE["_make_worktree"]
 CMD_CLEANUP = MODULE["cmd_cleanup"]
 CLEAN_ROOM_SRC_ENV = MODULE["CLEAN_ROOM_SRC_ENV"]
 PATCH_LINE_COUNTS = MODULE["_patch_line_counts"]
+FREEZE_PROBLEMS = MODULE["_freeze_and_sync_problems"]
 
 
 class CandidateSelectionTest(unittest.TestCase):
@@ -317,6 +318,42 @@ class PatchLineCountsTest(unittest.TestCase):
             "+added line\n"
         )
         self.assertEqual(PATCH_LINE_COUNTS(diff), {"added": 1, "removed": 0})
+
+
+class FreezeAndSyncGateTest(unittest.TestCase):
+    FP = {"head_sha": "h" * 40, "installed_in_sync_with_repo": True}
+
+    def test_ok_when_frozen_ancestor_and_in_sync(self) -> None:
+        self.assertEqual(FREEZE_PROBLEMS(self.FP, "a" * 40, lambda sha: (True, True)), [])
+
+    def test_head_ahead_of_frozen_is_allowed(self) -> None:
+        fp = dict(self.FP, head_sha="b" * 40)
+        self.assertEqual(FREEZE_PROBLEMS(fp, "a" * 40, lambda sha: (True, True)), [])
+
+    def test_missing_freeze_is_a_problem(self) -> None:
+        problems = FREEZE_PROBLEMS(self.FP, None, lambda sha: (True, True))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("STAGE2_BASE_SHA", problems[0])
+
+    def test_unknown_or_non_ancestor_freeze_is_a_problem(self) -> None:
+        self.assertIn("kein Commit", FREEZE_PROBLEMS(self.FP, "x", lambda sha: (False, False))[0])
+        self.assertIn("kein Vorfahre", FREEZE_PROBLEMS(self.FP, "x", lambda sha: (True, False))[0])
+
+    def test_out_of_sync_install_is_a_problem(self) -> None:
+        fp = dict(self.FP, installed_in_sync_with_repo=False)
+        problems = FREEZE_PROBLEMS(fp, "a" * 40, lambda sha: (True, True))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("install:user", problems[0])
+
+    def test_problems_accumulate(self) -> None:
+        fp = dict(self.FP, installed_in_sync_with_repo=False)
+        self.assertEqual(len(FREEZE_PROBLEMS(fp, None, lambda sha: (True, True))), 2)
+
+    def test_parsers_accept_allow_unfrozen(self) -> None:
+        parser = BUILD_PARSER()
+        self.assertTrue(parser.parse_args(["smoke", "--allow-unfrozen"]).allow_unfrozen)
+        self.assertFalse(parser.parse_args(["smoke"]).allow_unfrozen)
+        self.assertTrue(parser.parse_args(["run", "--task", "t", "--allow-unfrozen"]).allow_unfrozen)
 
 
 if __name__ == "__main__":

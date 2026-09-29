@@ -244,5 +244,109 @@ class AllInViewTest(unittest.TestCase):
         self.assertIsNone(combined["all_in_fresh_input"])
 
 
+def _pi_event(usage) -> list:
+    message = {"role": "assistant", "usage": usage}
+    return [{"type": "message_end", "message": message},
+            {"type": "turn_end", "message": message}]
+
+
+def _codex_transcript(usage, commands=0, errors=0) -> str:
+    events = [{"type": "thread.started"}]
+    for i in range(commands):
+        events.append({"type": "item.completed", "item": {
+            "type": "command_execution", "exit_code": 1 if i < errors else 0,
+        }})
+    events.append({"type": "turn.completed", "usage": usage})
+    return "\n".join(json.dumps(e) for e in events)
+
+
+def _codex_usage(inp, cached, out, reasoning) -> dict:
+    return {"input_tokens": inp, "cached_input_tokens": cached,
+            "cache_write_input_tokens": 0, "output_tokens": out,
+            "reasoning_output_tokens": reasoning}
+
+
+class PlanWorkTelemetryTest(unittest.TestCase):
+    def test_sum_neutral_adds_and_propagates_none(self) -> None:
+        a = telemetry._empty_neutral()
+        b = telemetry._empty_neutral()
+        a.update({"input_fresh": 10, "output": 5, "tool_calls": 2, "cost": None,
+                  "token_basis": "vendor_split", "cost_source": "unavailable"})
+        b.update({"input_fresh": 20, "output": None, "tool_calls": 3, "cost": 0.5,
+                  "token_basis": "vendor_split", "cost_source": "unavailable"})
+        total = telemetry.sum_neutral(a, b)
+        self.assertEqual(total["input_fresh"], 30)
+        self.assertEqual(total["tool_calls"], 5)
+        self.assertIsNone(total["output"])
+        self.assertIsNone(total["cost"])
+        self.assertEqual(total["token_basis"], "vendor_split")
+
+    def test_pi_plan_work_has_phases_and_total_including_reasoning(self) -> None:
+        plan = _pi_event({"input": 100, "cacheRead": 1000, "cacheWrite": 0, "output": 10,
+                           "reasoning": 4, "totalTokens": 1114, "cost": {"total": 0.01}})
+        work = _pi_event({"input": 200, "cacheRead": 3000, "cacheWrite": 0, "output": 30,
+                           "reasoning": 6, "totalTokens": 3236, "cost": {"total": 0.02}})
+        result = telemetry.pi_plan_work_telemetry(plan, work)
+        self.assertEqual(result["plan"]["input_fresh"], 100)
+        self.assertEqual(result["work"]["input_cache_read"], 3000)
+        total = result["total"]
+        self.assertEqual(total["input_fresh"], 300)
+        self.assertEqual(total["input_cache_read"], 4000)
+        self.assertEqual(total["output"], 40)
+        self.assertEqual(total["reasoning"], 10)
+        self.assertAlmostEqual(total["cost"], 0.03)
+        self.assertEqual(total["model_calls"], 2)
+        scalars = telemetry.legacy_scalars(total)
+        self.assertEqual(scalars["tokens"], 340)
+        self.assertEqual(scalars["turns"], 2)
+
+    def test_pi_phase_without_usage_keeps_total_tokens_unset(self) -> None:
+        result = telemetry.pi_plan_work_telemetry(
+            [{"type": "message_end", "message": {"role": "assistant", "usage": {"input": 0, "output": 0}}}],
+            _pi_event({"input": 5, "cacheRead": 0, "cacheWrite": 0, "output": 1, "totalTokens": 6}),
+        )
+        self.assertIsNone(result["total"]["input_fresh"])
+        self.assertIsNone(telemetry.legacy_scalars(result["total"])["tokens"])
+
+    def test_codex_counts_are_per_transcript_tokens_are_cumulative(self) -> None:
+        plan = _codex_transcript(_codex_usage(1000, 800, 50, 20), commands=3, errors=0)
+        work = _codex_transcript(_codex_usage(5000, 4200, 300, 120), commands=4, errors=2)
+        split = telemetry.split_codex_plan_work(plan, work)
+        self.assertTrue(split["consistent"])
+        self.assertEqual(split["work_phase_delta"]["input_fresh"], 600)
+        self.assertEqual(split["work_phase_delta"]["tool_calls"], 4)
+        self.assertEqual(split["work_phase_delta"]["tool_errors"], 2)
+        total = split["total"]
+        self.assertEqual(total["input_fresh"], 800)
+        self.assertEqual(total["output"], 300)
+        self.assertEqual(total["reasoning"], 120)
+        self.assertEqual(total["tool_calls"], 7)
+        self.assertEqual(total["model_calls"], 2)
+        self.assertIsNone(total["cost"])
+        merged = telemetry.codex_plan_work_telemetry(split)
+        self.assertIsNone(merged["telemetry_gap_reason"])
+
+    def test_codex_inconsistent_usage_sums_both_phases(self) -> None:
+        plan = _codex_transcript(_codex_usage(1000, 800, 50, 20), commands=1)
+        work = _codex_transcript(_codex_usage(300, 100, 10, 5), commands=1)
+        split = telemetry.split_codex_plan_work(plan, work)
+        self.assertFalse(split["consistent"])
+        self.assertEqual(split["total"]["output"], 60)
+        self.assertEqual(split["total"]["tool_calls"], 2)
+
+    def test_codex_missing_usage_gives_reason_and_null_tokens(self) -> None:
+        plan = "\n".join([json.dumps({"type": "thread.started"})])
+        work = _codex_transcript(_codex_usage(5000, 4200, 300, 120), commands=2)
+        split = telemetry.split_codex_plan_work(plan, work)
+        merged = telemetry.codex_plan_work_telemetry(split)
+        self.assertIsNone(merged["total"]["input_fresh"])
+        self.assertIn("token_basis", merged["telemetry_gap_reason"])
+
+    def test_subagent_stats_carry_model_verifier_aliases(self) -> None:
+        stats = telemetry.subagent_stats_from_run_history("/nonexistent/workdir", 0, 1)
+        self.assertEqual(stats["verifier_calls"], 0)
+        self.assertEqual(stats["model_verifier_calls"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
