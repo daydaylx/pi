@@ -2206,6 +2206,133 @@ export const verificationSections = {
         }
       }
       rmSync(multiFailWorkspace, { recursive: true, force: true });
+
+      // Verification budget: after a failed run, an unchanged workspace must
+      // not repeat the full check; an import/discovery failure is classified
+      // as infrastructure, and changing a file re-enables the run.
+      const budgetWorkspace = mkdtempSync(
+        path.join(tmpdir(), "pi-project-check-budget-"),
+      );
+      mkdirSync(path.join(budgetWorkspace, ".pi"), { recursive: true });
+      writeFileSync(
+        path.join(budgetWorkspace, ".pi", "verify.json"),
+        JSON.stringify({
+          profiles: {
+            verify: {
+              program: "npm",
+              args: ["run", "verify"],
+              classification: "required",
+            },
+          },
+        }),
+      );
+      writeFileSync(path.join(budgetWorkspace, "a.txt"), "one\n");
+      for (const args of [
+        ["init", "-q"],
+        ["add", "-A"],
+        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"],
+      ]) {
+        execFileSync("git", args, { cwd: budgetWorkspace, encoding: "utf8" });
+      }
+      let budgetRuns = 0;
+      const budgetHarness = createHarness({
+        exec: () => {
+          budgetRuns += 1;
+          return {
+            stdout: "",
+            stderr:
+              "Traceback (most recent call last):\nImportError: Start directory is not importable: 'benchmarks/real-duel/scripts'",
+            code: 1,
+            killed: false,
+          };
+        },
+      });
+      setupCore.default(budgetHarness.api, { exec: budgetHarness.api.exec });
+      const budgetCtx = budgetHarness.makeContext({
+        cwd: budgetWorkspace,
+        trusted: true,
+      });
+      await budgetHarness.runHooks("session_start", {}, budgetCtx);
+      const budgetTool = budgetHarness.tools.get("project_check");
+      if (budgetTool) {
+        let firstMessage = "";
+        try {
+          await budgetTool.execute(
+            "budget-1",
+            { profile: "verify" },
+            undefined,
+            undefined,
+            budgetCtx,
+          );
+        } catch (error) {
+          firstMessage = error instanceof Error ? error.message : String(error);
+        }
+        eq(budgetRuns, 1, "the first failing run executes the profile once");
+        assert(
+          firstMessage.includes("infrastructure") ||
+            firstMessage.includes("ImportError"),
+          "the import failure surfaces in the first result",
+        );
+        // One retry stays allowed: the environment may have been repaired.
+        try {
+          await budgetTool.execute(
+            "budget-2",
+            { profile: "verify" },
+            undefined,
+            undefined,
+            budgetCtx,
+          );
+        } catch {
+          // still failing identically
+        }
+        eq(
+          budgetRuns,
+          2,
+          "the first retry at an unchanged workspace still runs",
+        );
+        const runsBeforeRepeat = budgetRuns;
+        let repeatMessage = "";
+        try {
+          await budgetTool.execute(
+            "budget-3",
+            { profile: "verify" },
+            undefined,
+            undefined,
+            budgetCtx,
+          );
+        } catch (error) {
+          repeatMessage =
+            error instanceof Error ? error.message : String(error);
+        }
+        eq(
+          budgetRuns,
+          runsBeforeRepeat,
+          "a second identical infrastructure failure blocks the full check",
+        );
+        assert(
+          repeatMessage.includes("Prüfung nicht wiederholt") &&
+            repeatMessage.includes("infrastructure"),
+          "the skipped repeat names the infrastructure failure and asks for a change",
+        );
+        writeFileSync(path.join(budgetWorkspace, "a.txt"), "two\n");
+        try {
+          await budgetTool.execute(
+            "budget-3",
+            { profile: "verify" },
+            undefined,
+            undefined,
+            budgetCtx,
+          );
+        } catch {
+          // expected: the harness still fails, but the run must happen
+        }
+        eq(
+          budgetRuns,
+          runsBeforeRepeat + 1,
+          "a changed workspace re-enables the check",
+        );
+      }
+      rmSync(budgetWorkspace, { recursive: true, force: true });
     });
   },
 

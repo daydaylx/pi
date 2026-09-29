@@ -536,6 +536,29 @@ export const setupCoreSections = {
             "verify runs the setup's fixed command from the agent directory",
           );
         }
+        if (verify) {
+          const execsBefore = harness.execCalls.length;
+          try {
+            await verify.execute(
+              "verify-project-cwd",
+              { check: "typecheck" },
+              undefined,
+              undefined,
+              harness.makeContext({ cwd: tmpdir() }),
+            );
+            assert(false, "verify refuses to run outside the agent directory");
+          } catch (error) {
+            assert(
+              error instanceof Error && error.message.includes("project_check"),
+              "verify outside the agent directory points to project_check",
+            );
+          }
+          eq(
+            harness.execCalls.length,
+            execsBefore,
+            "verify outside the agent directory executes nothing",
+          );
+        }
         const rejectedHarness = createHarness();
         setupCore.default(rejectedHarness.api, {
           exec: async () => {
@@ -715,23 +738,21 @@ export const setupCoreSections = {
             // A workspace fingerprint only exists for a Git workspace; without
             // it the snapshot helper yields nothing and the snapshot line
             // degrades to the "unavailable" variant.
-            execFileSync("git", ["init", "--quiet"], { cwd: verifiedWorkspace });
+            execFileSync("git", ["init", "--quiet"], {
+              cwd: verifiedWorkspace,
+            });
             execFileSync(
               "git",
               ["config", "user.email", "setup-core@example.test"],
               { cwd: verifiedWorkspace },
             );
-            execFileSync(
-              "git",
-              ["config", "user.name", "Setup Core Test"],
-              { cwd: verifiedWorkspace },
-            );
+            execFileSync("git", ["config", "user.name", "Setup Core Test"], {
+              cwd: verifiedWorkspace,
+            });
             execFileSync("git", ["add", "-A"], { cwd: verifiedWorkspace });
-            execFileSync(
-              "git",
-              ["commit", "--quiet", "-m", "fixture"],
-              { cwd: verifiedWorkspace },
-            );
+            execFileSync("git", ["commit", "--quiet", "-m", "fixture"], {
+              cwd: verifiedWorkspace,
+            });
             const result = await projectCheck.execute(
               "project-check-snapshot",
               { profile: "pass" },

@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { join, relative, isAbsolute } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -218,7 +218,10 @@ function packageVersion(path: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function versionSpecIncludes(spec: unknown, version: string | undefined): boolean {
+function versionSpecIncludes(
+  spec: unknown,
+  version: string | undefined,
+): boolean {
   if (typeof spec !== "string" || !version) return false;
   const match = /^(\^|~)?(\d+)\.(\d+)\.(\d+)$/.exec(spec.trim());
   const actual = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
@@ -287,6 +290,14 @@ export default function setupCore(
   // Session-local evidence only: whether a profile passed before the current
   // snapshot. It is not a task-status or causal-regression classifier.
   let passedProfileIds: Map<string, string> = new Map();
+  // Verification budget: consecutive infrastructure failures (check could not
+  // run at all) per profile at one workspace fingerprint. One retry stays
+  // allowed since the environment may have been repaired; a second identical
+  // failure at an unchanged workspace blocks further full runs.
+  let failedProfileRuns: Map<
+    string,
+    { fingerprint: string; message: string; count: number }
+  > = new Map();
   // Lockfile hashes prepared in this session. This avoids repeating npm ci for
   // multiple profiles while a lockfile change always invalidates the cache.
   const preparedDependencyLocks = new Map<string, string>();
@@ -359,6 +370,18 @@ export default function setupCore(
         verification: auroraVerificationSnapshot(),
       });
     });
+  }
+
+  function isWithinAgentDir(cwd: string, agentDir: string): boolean {
+    const real = (p: string) => {
+      try {
+        return realpathSync(p);
+      } catch {
+        return p;
+      }
+    };
+    const rel = relative(real(agentDir), real(cwd));
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
   }
 
   async function workspaceSnapshot(cwd: string) {
@@ -660,6 +683,7 @@ export default function setupCore(
     trusted = ctx.isProjectTrusted();
     verificationLedger = {};
     passedProfileIds = new Map();
+    failedProfileRuns = new Map();
     lastSettledStatus = undefined;
     lastDeclaredRequiredIds = [];
     lastVerifierRun = undefined;
@@ -729,6 +753,7 @@ export default function setupCore(
     activeSessionId = undefined;
     verificationLedger = {};
     passedProfileIds = new Map();
+    failedProfileRuns = new Map();
     lastSettledStatus = undefined;
     lastDeclaredRequiredIds = [];
     lastVerifierRun = undefined;
@@ -742,11 +767,17 @@ export default function setupCore(
     name: "verify",
     label: "Verifizieren",
     description:
-      'Führt einen schnellen Teilcheck dieses Setups aus (Typecheck oder Tests). Akzeptiert keine freien Shell-Kommandos und aktualisiert weder Verifikations-Footer noch Ledger. Die vollständige Projektverifikation läuft ausschließlich über project_check({ profile: "verify" }).',
-    promptSnippet: "Run a configured typecheck or test run safely.",
+      'Nur für das Pi-Setup selbst (~/.pi/agent): schneller Teilcheck (Typecheck oder Tests) der installierten Konfiguration, NIE für Projektänderungen. Läuft außerhalb des Agent-Verzeichnisses nicht. Akzeptiert keine freien Shell-Kommandos und aktualisiert weder Verifikations-Footer noch Ledger. Projektverifikation ausschließlich über project_check({ profile: "verify" }).',
+    promptSnippet:
+      "Pi-Setup-only typecheck/test of ~/.pi/agent (never for project code; use project_check for project verification).",
     parameters: CheckParams,
     executionMode: "sequential",
     async execute(_id, params, signal, _onUpdate, ctx) {
+      if (!isWithinAgentDir(ctx.cwd, getAgentDir())) {
+        toolError(
+          `verify prüft ausschließlich das Pi-Setup unter ${getAgentDir()}, nicht das aktive Projekt ${ctx.cwd}. Für Projektverifikation project_check({ profile: "verify" }) verwenden.`,
+        );
+      }
       const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
       const spec = loaded.config.verification[params.check as VerificationName];
       // Verification is a capability of this setup, not a generic project
@@ -769,7 +800,7 @@ export default function setupCore(
         // check is exactly the confusion project_check exists to prevent.
         const rootLine = `Geprüfte Wurzel: ${agentDir} (Pi-Setup, NICHT das aktive Projekt ${ctx.cwd}). Für Projektverifikation: project_check.`;
         const limited = limitTextOutput(
-          `${combined || "(keine Ausgabe)"}\n\n${rootLine}`,
+          `${rootLine}\n\n${combined || "(keine Ausgabe)"}`,
         );
         if (result.code !== 0 || result.killed) {
           toolError(
@@ -859,6 +890,23 @@ export default function setupCore(
       // check stale even if the command itself succeeds.
       const checkSnapshot = await workspaceSnapshot(ctx.cwd);
       assertCurrentSession();
+      if (checkSnapshot) {
+        const repeated = requested.ids.flatMap((id) => {
+          const previous = failedProfileRuns.get(id);
+          return previous &&
+            previous.fingerprint === checkSnapshot.fingerprint &&
+            previous.count >= 2
+            ? [
+                `${id} (infrastructure, ${previous.count}x: ${previous.message})`,
+              ]
+            : [];
+        });
+        if (repeated.length > 0) {
+          toolError(
+            `Prüfung nicht wiederholt: Prüfumgebung schlug bei unverändertem Workspace mehrfach identisch fehl (Snapshot ${checkSnapshot.fingerprint.slice(0, 12)}): ${repeated.join("; ")}. Erst Ursache beheben oder Dateien ändern, dann erneut prüfen.`,
+          );
+        }
+      }
       const reports: ProfileReport[] = [];
       for (const profileId of requested.ids) {
         const profile = loaded.profiles[profileId]!;
@@ -871,8 +919,22 @@ export default function setupCore(
         });
         const finishedAt = new Date().toISOString();
         assertCurrentSession();
-        if (result.ok)
+        if (result.ok) {
           passedProfileIds.set(profileId, checkSnapshot?.fingerprint ?? "");
+          failedProfileRuns.delete(profileId);
+        } else if (checkSnapshot && result.error?.kind === "infrastructure") {
+          const previous = failedProfileRuns.get(profileId);
+          failedProfileRuns.set(profileId, {
+            fingerprint: checkSnapshot.fingerprint,
+            message: result.error.message,
+            count:
+              previous?.fingerprint === checkSnapshot.fingerprint
+                ? previous.count + 1
+                : 1,
+          });
+        } else {
+          failedProfileRuns.delete(profileId);
+        }
         reports.push({
           profileId,
           command: {

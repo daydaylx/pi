@@ -53,7 +53,8 @@ projektgebunden.
   `npm run verify` bleibt zum Debuggen einzelner Schritte möglich, zählt aber
   nicht als durchgeführte Verifikation (`docs/verify-profiles.md`). Rohe
   Interpreteraufrufe (`node`, `python`) über `bash` können je nach
-  Berechtigungsstufe blockiert werden.
+  Berechtigungsstufe blockiert werden. Das Tool `verify` prüft nur das
+  Pi-Setup (`~/.pi/agent`), nie Projektcode.
 - Einen Teilauftrag erst als umgesetzt bezeichnen, wenn der zugehörige
   Testlauf beendet und sein Ergebnis dokumentiert ist. Vor dem finalen
   Abschluss zusätzlich `project_check({ profile: "verify" })` ausführen.

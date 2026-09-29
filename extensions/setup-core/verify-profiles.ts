@@ -105,7 +105,13 @@ export interface RunProfileResult {
   durationMs: number;
   output: string;
   error?: {
-    kind: "missing_binary" | "timeout" | "aborted" | "spawn_failed" | "failed";
+    kind:
+      | "missing_binary"
+      | "timeout"
+      | "aborted"
+      | "spawn_failed"
+      | "failed"
+      | "infrastructure";
     message: string;
   };
   truncation?: ReturnType<typeof limitTextOutput>["truncation"];
@@ -402,6 +408,18 @@ export function loadVerifyProfiles(
   return { profiles, diagnostics, source: configPath };
 }
 
+const INFRASTRUCTURE_FAILURE_PATTERN =
+  /modulenotfounderror|importerror|cannot import name|start directory is not importable|command not found/i;
+
+/**
+ * A non-zero exit whose output shows the check could not run at all (missing
+ * interpreter module, undiscoverable test directory) says nothing about the
+ * code under test and repeats identically until the environment changes.
+ */
+export function isInfrastructureFailure(output: string): boolean {
+  return INFRASTRUCTURE_FAILURE_PATTERN.test(output);
+}
+
 /**
  * Execute a single profile. Uses the injected `exec` (spawn-like, no shell).
  * Captures exit code, timeout, duration and limited output deterministically.
@@ -478,7 +496,12 @@ export async function runProfile(
     : result.code === null
       ? { kind: "failed", message: "Prozess durch Signal beendet" }
       : result.code !== 0
-        ? { kind: "failed", message: `Exit-Code ${result.code}` }
+        ? isInfrastructureFailure(combined)
+          ? {
+              kind: "infrastructure",
+              message: `Exit-Code ${result.code}: Prüfumgebung nicht lauffähig (Import-/Discovery-Fehler), kein Befund zum Code`,
+            }
+          : { kind: "failed", message: `Exit-Code ${result.code}` }
         : undefined;
   return {
     ok,

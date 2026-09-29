@@ -41,7 +41,7 @@ export interface VerificationLedger {
 export interface CheckReport {
   profileId: string;
   classification: "required" | "recommended" | "advisory";
-  /** success | failed | missing_binary | timeout | spawn_failed */
+  /** success | failed | infrastructure | missing_binary | timeout | spawn_failed */
   status: string;
   exitCode: number | null;
   killed: boolean;

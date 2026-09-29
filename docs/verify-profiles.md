@@ -19,7 +19,10 @@ Die Setup-Verifikation (`verify`-Tool, `verification` in `setup.json`) ist eine
 **unverletzliche Setup-Fähigkeit**: sie läuft immer im Agent-Verzeichnis und kann
 von **keinem** Projekt geändert werden. Projekt-Verifikationsprofile sind eine
 **separate, zusätzliche** Schicht – sie ersetzen die Setup-Verifikation nicht und
-lockern keine globalen Grenzen.
+lockern keine globalen Grenzen. Das `verify`-Tool prüft ausschließlich
+`~/.pi/agent` und verweigert den Lauf, wenn das Arbeitsverzeichnis außerhalb des
+Agent-Verzeichnisses liegt; Projektänderungen werden nur mit
+`project_check({ profile: "verify" })` verifiziert.
 
 ## Trust-Gate
 
@@ -68,6 +71,15 @@ dieser Sitzung zuvor erfolgreich war und der aktuelle Workspace-Fingerprint
 hiervon abweicht. Das Feld beeinflusst keinen Task- oder
 Verifikationsstatus und macht keine Aussage über Kausalität oder
 „vorbestehende“ Fehler.
+
+Zeigt die Ausgabe eines fehlgeschlagenen Profils, dass die Prüfumgebung selbst
+nicht lauffähig ist (Python-`ImportError`/`ModuleNotFoundError`, „Start directory
+is not importable“, „command not found“), trägt der Fehler `error.kind:
+"infrastructure"`. Nach dem zweiten identischen Infrastrukturfehler desselben
+Profils bei unverändertem Workspace-Fingerprint führt `project_check` den
+Vollcheck nicht erneut aus und nennt stattdessen die Ursache; eine
+Workspace-Änderung hebt die Sperre auf. Echte Testfehler (`failed`) bleiben
+wiederholbar.
 
 ## Was `verified` bedeutet
 
