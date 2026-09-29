@@ -31,6 +31,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import compare  # noqa: E402
+import pi_rpc  # noqa: E402
 import usage  # noqa: E402
 
 DUELS_DIR = Path(os.environ.get("DUEL_DIR", HERE.parents[1] / "duels"))
@@ -174,7 +175,20 @@ def run_arm(arm: str, repo: Path, sha: str, duel_dir: Path, prompt: str, args) -
             raise RuntimeError(f"`{arm}` nicht im PATH")
         start_ts = time.time()
         outputs, rounds, session_id, proc = [], [], None, None
-        for n in range(1, MAX_ROUNDS + 1):
+        ui_answers = []
+        if arm == "pi" and args.pi_rpc:
+            cmd = ["pi", "--mode", "rpc", "--approve"]
+            if args.pi_provider:
+                cmd += ["--provider", args.pi_provider]
+            if args.pi_model:
+                cmd += ["--model", args.pi_model]
+            out, rounds, ui_answers, rc, err = pi_rpc.run_rpc(
+                cmd, worktree, prompt, AUTO_REPLY, lambda text, n: is_done("pi", text) if n > 1 else False, MAX_ROUNDS)
+            (arm_dir / "logs" / "stderr.log").write_text(err, encoding="utf-8")
+            (arm_dir / "ui_answers.json").write_text(json.dumps(ui_answers, indent=2, ensure_ascii=False), encoding="utf-8")
+            outputs = [out]
+            proc = type("P", (), {"returncode": rc})()
+        for n in range(1, 1 if (arm == "pi" and args.pi_rpc) else MAX_ROUNDS + 1):
             text = prompt if n == 1 else AUTO_REPLY
             cmd = build_command(arm, text, args, session_id if n > 1 else None)
             proc = subprocess.run(cmd, cwd=worktree, capture_output=True, text=True, errors="replace",
@@ -198,7 +212,7 @@ def run_arm(arm: str, repo: Path, sha: str, duel_dir: Path, prompt: str, args) -
         meta = {"arm": arm, "start": datetime.fromtimestamp(start_ts, timezone.utc).isoformat(timespec="seconds"),
                 "end": datetime.fromtimestamp(end_ts, timezone.utc).isoformat(timespec="seconds"),
                 "start_ts": start_ts, "end_ts": end_ts, "duration_s": round(end_ts - start_ts, 1),
-                "exit_code": proc.returncode, "rounds": rounds, "auto_replies": len(rounds) - 1, "version": tool_version(arm),
+                "exit_code": proc.returncode, "rounds": rounds, "auto_replies": len(rounds) - 1, "ui_dialogs_answered": len(ui_answers), "pi_mode": "rpc" if (arm == "pi" and args.pi_rpc) else "print", "version": tool_version(arm),
                 "model": (args.pi_model if arm == "pi" else args.codex_model) or cfg.get("model"),
                 "thinking": cfg.get("thinking"), "final_head": git(worktree, "rev-parse", "HEAD").strip()}
         save_result(arm, arm_dir, worktree, sha, stdout, meta)
@@ -246,6 +260,21 @@ def find_duel(ident: str) -> Path:
     return matches[0]
 
 
+def cmd_rerun(args) -> int:
+    """Einen Arm eines bestehenden Duells neu laufen lassen (gleicher Commit/Prompt)."""
+    duel_dir = find_duel(args.id)
+    meta = json.loads((duel_dir / "metadata.json").read_text(encoding="utf-8"))
+    prompt = (duel_dir / "prompt.md").read_bytes().decode("utf-8")
+    arm_dir = duel_dir / args.arm
+    if arm_dir.exists():
+        backup = duel_dir / f"{args.arm}-vorher-{int(time.time())}"
+        arm_dir.rename(backup)
+        print(f"Alter Lauf gesichert: {backup.name}")
+    run_arm(args.arm, Path(meta["repo"]), meta["base_sha"], duel_dir, prompt, args)
+    print(compare.write(duel_dir))
+    return 0
+
+
 def cmd_report(args) -> int:
     print(compare.write(find_duel(args.id)))
     return 0
@@ -268,7 +297,16 @@ def main(argv=None) -> int:
     start.add_argument("--pi-provider", help="optional; sonst reale Pi-Defaults")
     start.add_argument("--pi-model", help="optional; sonst reale Pi-Defaults")
     start.add_argument("--codex-model", help="optional; sonst reale Codex-Defaults")
+    start.add_argument("--pi-rpc", action="store_true", help="Pi ueber RPC treiben; Bestaetigungsdialoge werden freigegeben")
     start.set_defaults(func=cmd_start)
+    rerun = sub.add_parser("rerun", help="einen Arm eines bestehenden Duells neu laufen lassen")
+    rerun.add_argument("id")
+    rerun.add_argument("arm", choices=ARMS)
+    rerun.add_argument("--pi-provider")
+    rerun.add_argument("--pi-model")
+    rerun.add_argument("--codex-model")
+    rerun.add_argument("--pi-rpc", action="store_true")
+    rerun.set_defaults(func=cmd_rerun)
     report = sub.add_parser("report", help="comparison.md neu erzeugen")
     report.add_argument("id")
     report.set_defaults(func=cmd_report)
