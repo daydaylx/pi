@@ -1,9 +1,4 @@
 {
-  "benchmarks/real-duel/scripts/plan-quality-cli.mjs": {
-    "no-unused-vars": {
-      "count": 1
-    }
-  },
   "tests/e2e.test.mjs": {
     "no-unused-vars": {
       "count": 1

@@ -55,8 +55,8 @@ const suites = [
     env: {},
   },
   {
-    name: "benchmark-telemetry",
-    file: "benchmark-telemetry.test.mjs",
+    name: "benchmark-duel",
+    file: "benchmark-duel.test.mjs",
     env: {},
   },
   { name: "check-npm-audit", file: "check-npm-audit.test.mjs", env: {} },

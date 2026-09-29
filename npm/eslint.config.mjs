@@ -16,7 +16,6 @@ export default [
       "docs/archive/",
       ".agent/",
       "benchmarks/tasks/*/fixture/",
-      "benchmarks/real-duel/tasks/*/instruction.md",
       "pi-audit-remediation-improved-e8196d6/",
       "pi_benchmark_befunde_arbeitsauftraege/",
       "pi-second-opinion-agent/",
@@ -35,13 +34,12 @@ export default [
   security.configs.recommended,
   {
     // scripts/**, frontend-server/**, tests/**, shared/**,
-    // benchmarks/real-duel/scripts/** — reines Node-.mjs/.js/.cjs.
+    // — reines Node-.mjs/.js/.cjs.
     files: [
       "scripts/**/*.mjs",
       "frontend-server/**/*.mjs",
       "tests/**/*.mjs",
       "shared/**/*.mjs",
-      "benchmarks/real-duel/scripts/**/*.mjs",
     ],
     languageOptions: { globals: globals.node },
   },

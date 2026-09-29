@@ -4,13 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const scriptsDir = path.join(root, "benchmarks", "real-duel", "scripts");
-// Kandidaten-Worktrees schliessen benchmarks/real-duel/ per sparse-checkout aus
-// (pi-duel). Ohne das Verzeichnis gibt es nichts zu testen: kein Infrastrukturfehler.
-if (!existsSync(scriptsDir)) {
-  console.log(
-    "benchmark-telemetry: uebersprungen (benchmarks/real-duel/scripts fehlt, z. B. sparse-checkout im Kandidaten-Worktree)",
-  );
+const duelDir = path.join(root, "benchmarks", "duel");
+if (!existsSync(duelDir)) {
+  console.log("benchmark-duel: uebersprungen (benchmarks/duel fehlt)");
   process.exit(0);
 }
 
@@ -21,7 +17,7 @@ const result = spawnSync(
     "unittest",
     "discover",
     "-s",
-    "benchmarks/real-duel/scripts",
+    "benchmarks/duel",
     "-p",
     "test_*.py",
   ],
@@ -31,7 +27,6 @@ const result = spawnSync(
     timeout: 120_000,
     env: {
       ...process.env,
-      PI_OPENBENCH_HOME: path.join(root, ".agent", "test-deps", "openbench"),
       PYTHONDONTWRITEBYTECODE: "1",
     },
   },
@@ -41,7 +36,7 @@ if (result.stdout) process.stdout.write(result.stdout);
 if (result.stderr) process.stderr.write(result.stderr);
 if (result.error) {
   console.error(
-    `benchmark-telemetry: INFRASTRUKTUR (${result.error.code ?? result.error.message}): python3-Lauf nicht abgeschlossen`,
+    `benchmark-duel: INFRASTRUKTUR (${result.error.code ?? result.error.message}): python3-Lauf nicht abgeschlossen`,
   );
   throw result.error;
 }

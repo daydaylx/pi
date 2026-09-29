@@ -85,3 +85,13 @@ darf nicht automatisch als Fail gelten, wenn der sichtbare Auftrag
 
 **Statistik:** Ein Pilot mit `k=1` pro Aufgabe ist kein belastbares
 Ranking.
+
+## Vereinfachtes Duell (seit 2026-09-30)
+
+Das OpenBench-basierte real-duel-System (`pi-duel`, Preflight, Stage2-Gates,
+Plan/Work-Treiber) wurde durch `benchmarks/duel/` ersetzt: gleicher Prompt und
+gleicher Ausgangscommit, Pi und Codex je mit realer Konfiguration, frischer
+Worktree je Lauf, Sicherung von Logs, Diff und Usage (Pi inkl.
+Subagenten/Verifier aus `run-history.jsonl`) und ein `comparison.md` ohne
+Scoring. Die historischen Berichte bleiben unter
+`benchmarks/real-duel/reports/`. Siehe `benchmarks/duel/README.md`.

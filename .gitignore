@@ -45,3 +45,6 @@ dist/
 # Extern generierte Hooks (z. B. tty7 agent-hook bridge) — maschinenlokale
 # Integration einer Drittanbieter-App, nie Teil des Repos
 extensions/tty7/
+
+# Pi-vs-Codex-Duelle: lokale Laufdaten (Rohlogs), siehe benchmarks/duel/README.md
+/duels/

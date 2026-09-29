@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Pi-vs-Codex Live-Duell: dieselbe echte Aufgabe, derselbe Ausgangscommit.
+
+    benchmarks/duel/duel start --repo <pfad> --prompt task.md [--slug name]
+    benchmarks/duel/duel report <id>      # comparison.md neu erzeugen
+    benchmarks/duel/duel list
+
+Ablauf: Ausgangszustand erfassen -> Pi (frischer Worktree) -> sichern ->
+Codex (neuer Worktree vom selben Commit) -> sichern -> comparison.md.
+Beide Tools laufen mit ihrer realen Konfiguration; es wird nichts angeglichen,
+deaktiviert oder begrenzt. Ergebnisse: duels/NNN-slug/ (nicht versioniert).
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+from datetime import datetime, timezone
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import compare  # noqa: E402
+import usage  # noqa: E402
+
+DUELS_DIR = Path(os.environ.get("DUEL_DIR", HERE.parents[1] / "duels"))
+WORKTREES_DIR = Path(os.environ.get("DUEL_WORKTREES", Path(tempfile.gettempdir()) / "pi-duel-worktrees"))
+ARMS = ("pi", "codex")
+
+
+def git(cwd, *args, check=True) -> str:
+    proc = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, errors="replace")
+    if check and proc.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)} fehlgeschlagen: {proc.stderr.strip()}")
+    return proc.stdout
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def tool_version(cmd: str) -> str | None:
+    try:
+        proc = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=20)
+        return (proc.stdout or proc.stderr).strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def real_config(arm: str) -> dict:
+    """Nur dokumentieren, was die reale Konfiguration vorgibt (keine Secrets)."""
+    try:
+        if arm == "pi":
+            data = json.loads((Path.home() / ".pi/agent/settings.json").read_text(encoding="utf-8"))
+            return {"model": data.get("defaultModel"), "provider": data.get("defaultProvider"),
+                    "thinking": data.get("defaultThinkingLevel")}
+        data = tomllib.loads((Path.home() / ".codex/config.toml").read_text(encoding="utf-8"))
+        return {"model": data.get("model"), "thinking": data.get("model_reasoning_effort")}
+    except (OSError, ValueError):
+        return {}
+
+
+def next_duel_dir(slug: str) -> Path:
+    DUELS_DIR.mkdir(parents=True, exist_ok=True)
+    numbers = [int(m.group(1)) for p in DUELS_DIR.iterdir() if (m := re.match(r"(\d+)-", p.name))]
+    number = max(numbers, default=0) + 1
+    path = DUELS_DIR / f"{number:03d}-{slug}"
+    path.mkdir()
+    return path
+
+
+def make_worktree(repo: Path, sha: str, name: str) -> Path:
+    path = WORKTREES_DIR / name
+    if path.exists():
+        raise RuntimeError(f"Worktree existiert bereits: {path}")
+    WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
+    git(repo, "worktree", "add", "--detach", str(path), sha)
+    assert_pristine(path, sha)
+    return path
+
+
+def assert_pristine(path: Path, sha: str) -> None:
+    head = git(path, "rev-parse", "HEAD").strip()
+    if head != sha:
+        raise RuntimeError(f"Worktree HEAD {head} != Ausgangscommit {sha}")
+    if git(path, "status", "--porcelain", "--untracked-files=all").strip():
+        raise RuntimeError("Worktree ist nicht sauber")
+
+
+def remove_worktree(repo: Path, path: Path) -> None:
+    git(repo, "worktree", "remove", "--force", str(path), check=False)
+    shutil.rmtree(path, ignore_errors=True)
+    git(repo, "worktree", "prune", check=False)
+
+
+def build_command(arm: str, prompt: str, args) -> list[str]:
+    if arm == "pi":
+        cmd = ["pi", "--print", "--mode", "json", "--approve"]
+        if args.pi_provider:
+            cmd += ["--provider", args.pi_provider]
+        if args.pi_model:
+            cmd += ["--model", args.pi_model]
+        return cmd + [prompt]
+    cmd = ["codex", "exec", "--json", "--approve-for-me"]
+    if args.codex_model:
+        cmd += ["-m", args.codex_model]
+    return cmd + [prompt]
+
+
+def save_result(arm: str, arm_dir: Path, worktree: Path, sha: str, stdout: str, meta: dict) -> dict:
+    """Diff, Status, Commits, Usage und result.md sichern (vor dem Entfernen des Worktrees)."""
+    git(worktree, "add", "-N", ".", check=False)  # neue Dateien in den Diff aufnehmen
+    (arm_dir / "diff.patch").write_text(git(worktree, "diff", "--binary", sha), encoding="utf-8")
+    (arm_dir / "status.txt").write_text(git(worktree, "status", "--porcelain=v1", "--untracked-files=all"), encoding="utf-8")
+    (arm_dir / "commits.txt").write_text(git(worktree, "log", "--format=%H %s", f"{sha}..HEAD", check=False), encoding="utf-8")
+    (arm_dir / "files.txt").write_text(git(worktree, "diff", "--name-status", sha), encoding="utf-8")
+
+    main = usage.parse_pi(stdout) if arm == "pi" else usage.parse_codex(stdout)
+    data = {**meta, "main": main}
+    if arm == "pi":
+        hist = usage.run_history_usage(worktree, meta["start_ts"] - 1, meta["end_ts"] + 1)
+        data.update(hist=hist, total=usage.pi_total(main, hist))
+    (arm_dir / "usage.json").write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    (arm_dir / "result.md").write_text(usage.final_text(arm, stdout) or "_kein Abschlusstext im Log_\n", encoding="utf-8")
+    return data
+
+
+def run_arm(arm: str, repo: Path, sha: str, duel_dir: Path, prompt: str, args) -> None:
+    arm_dir = duel_dir / arm
+    (arm_dir / "logs").mkdir(parents=True, exist_ok=True)
+    worktree = None
+    try:
+        worktree = make_worktree(repo, sha, f"{duel_dir.name}-{arm}")
+        cmd = build_command(arm, prompt, args)
+        exe = shutil.which(cmd[0])
+        if not exe:
+            raise RuntimeError(f"`{cmd[0]}` nicht im PATH")
+        start_ts = time.time()
+        proc = subprocess.run([exe, *cmd[1:]], cwd=worktree, capture_output=True, text=True, errors="replace",
+                              stdin=subprocess.DEVNULL)
+        end_ts = time.time()
+        (arm_dir / "logs" / "stdout.jsonl").write_text(proc.stdout, encoding="utf-8")
+        (arm_dir / "logs" / "stderr.log").write_text(proc.stderr, encoding="utf-8")
+        cfg = real_config(arm)
+        meta = {"arm": arm, "start": datetime.fromtimestamp(start_ts, timezone.utc).isoformat(timespec="seconds"),
+                "end": datetime.fromtimestamp(end_ts, timezone.utc).isoformat(timespec="seconds"),
+                "start_ts": start_ts, "end_ts": end_ts, "duration_s": round(end_ts - start_ts, 1),
+                "exit_code": proc.returncode, "version": tool_version(arm),
+                "model": (args.pi_model if arm == "pi" else args.codex_model) or cfg.get("model"),
+                "thinking": cfg.get("thinking"), "final_head": git(worktree, "rev-parse", "HEAD").strip()}
+        save_result(arm, arm_dir, worktree, sha, proc.stdout, meta)
+    except Exception as exc:  # ein Fehler darf den anderen Arm nicht zerstoeren
+        (arm_dir / "error.json").write_text(json.dumps({"arm": arm, "error": f"{type(exc).__name__}: {exc}"}, indent=2), encoding="utf-8")
+        print(f"[{arm}] FEHLER: {exc}", file=sys.stderr)
+    finally:
+        if worktree is not None:
+            remove_worktree(repo, worktree)
+
+
+def cmd_start(args) -> int:
+    repo = Path(args.repo).resolve()
+    prompt_bytes = Path(args.prompt).read_bytes()
+    prompt = prompt_bytes.decode("utf-8")
+    if prompt.startswith("-"):
+        print("Prompt darf nicht mit '-' beginnen (wuerde als CLI-Flag gelesen).", file=sys.stderr)
+        return 2
+    porcelain = git(repo, "status", "--porcelain", "--untracked-files=all").strip()
+    if porcelain:
+        print("Quell-Repo hat uncommittete Aenderungen; die Worktrees wuerden sie nicht enthalten. Erst committen/stashen.", file=sys.stderr)
+        return 2
+    sha = git(repo, "rev-parse", "HEAD").strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", (args.slug or Path(args.prompt).stem).lower()).strip("-") or "duel"
+    duel_dir = next_duel_dir(slug)
+    (duel_dir / "prompt.md").write_bytes(prompt_bytes)
+    metadata = {"id": duel_dir.name.split("-")[0], "name": duel_dir.name, "repo": str(repo),
+                "branch": git(repo, "rev-parse", "--abbrev-ref", "HEAD").strip(), "base_sha": sha,
+                "worktree_status": "clean", "created_at": now_iso(),
+                "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest(), "prompt_file": str(Path(args.prompt).resolve())}
+    (duel_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Duell {duel_dir.name} @ {sha[:12]}")
+    for arm in ARMS:
+        print(f"-> {arm} ...", flush=True)
+        run_arm(arm, repo, sha, duel_dir, prompt, args)
+    out = compare.write(duel_dir)
+    print(f"Fertig: {out}")
+    return 0
+
+
+def find_duel(ident: str) -> Path:
+    matches = sorted(p for p in DUELS_DIR.glob("*") if p.name == ident or p.name.startswith(f"{ident}-"))
+    if not matches:
+        raise SystemExit(f"Duell {ident} nicht gefunden in {DUELS_DIR}")
+    return matches[0]
+
+
+def cmd_report(args) -> int:
+    print(compare.write(find_duel(args.id)))
+    return 0
+
+
+def cmd_list(_args) -> int:
+    for path in sorted(DUELS_DIR.glob("*-*")) if DUELS_DIR.is_dir() else []:
+        meta = json.loads((path / "metadata.json").read_text(encoding="utf-8")) if (path / "metadata.json").is_file() else {}
+        print(f"{path.name}  {meta.get('created_at', '?')}  {str(meta.get('base_sha', ''))[:12]}")
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+    start = sub.add_parser("start", help="Duell starten (Pi, Reset, Codex, comparison.md)")
+    start.add_argument("--repo", required=True)
+    start.add_argument("--prompt", required=True, help="Datei mit dem unveraenderten Prompt")
+    start.add_argument("--slug")
+    start.add_argument("--pi-provider", help="optional; sonst reale Pi-Defaults")
+    start.add_argument("--pi-model", help="optional; sonst reale Pi-Defaults")
+    start.add_argument("--codex-model", help="optional; sonst reale Codex-Defaults")
+    start.set_defaults(func=cmd_start)
+    report = sub.add_parser("report", help="comparison.md neu erzeugen")
+    report.add_argument("id")
+    report.set_defaults(func=cmd_report)
+    sub.add_parser("list", help="Duelle auflisten").set_defaults(func=cmd_list)
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
