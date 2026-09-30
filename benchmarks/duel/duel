@@ -87,7 +87,17 @@ def make_worktree(repo: Path, sha: str, name: str) -> Path:
     WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
     git(repo, "worktree", "add", "--detach", str(path), sha)
     assert_pristine(path, sha)
+    link_dependencies(repo, path)
     return path
+
+
+def link_dependencies(repo: Path, worktree: Path) -> None:
+    """Installierte Abhaengigkeiten (gitignoriert) per Symlink bereitstellen, damit
+    beide Seiten Tests laufen lassen koennen. Aendert weder Diff noch Git-Status."""
+    source = repo / "npm" / "node_modules"
+    target = worktree / "npm" / "node_modules"
+    if source.is_dir() and target.parent.is_dir() and not target.exists():
+        target.symlink_to(source)
 
 
 def assert_pristine(path: Path, sha: str) -> None:

@@ -37,6 +37,9 @@ in dieselbe Sitzung (`pi --continue`, `codex exec resume`), bis der Agent mit
 FERTIG antwortet, nichts mehr tut oder 8 Runden erreicht sind. Der Prompt selbst
 bleibt unverändert; die Anzahl automatischer Antworten steht im Report.
 
+Ist im Quell-Repo `npm/node_modules` installiert, wird es per Symlink in beide Worktrees
+verlinkt (gitignoriert, ändert Diff und Status nicht), damit beide Seiten Tests laufen lassen können.
+
 Ein Fehler in einem Arm (`error.json`) zerstört die Daten des anderen nicht.
 
 ## Ablage
