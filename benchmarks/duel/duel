@@ -255,7 +255,7 @@ def cmd_start(args) -> int:
                 "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest(), "prompt_file": str(Path(args.prompt).resolve())}
     (duel_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Duell {duel_dir.name} @ {sha[:12]}")
-    for arm in ARMS:
+    for arm in args.arms.split(","):
         print(f"-> {arm} ...", flush=True)
         run_arm(arm, repo, sha, duel_dir, prompt, args)
     out = compare.write(duel_dir)
@@ -307,6 +307,7 @@ def main(argv=None) -> int:
     start.add_argument("--pi-provider", help="optional; sonst reale Pi-Defaults")
     start.add_argument("--pi-model", help="optional; sonst reale Pi-Defaults")
     start.add_argument("--codex-model", help="optional; sonst reale Codex-Defaults")
+    start.add_argument("--arms", default="pi,codex", help="kommagetrennt, z. B. nur 'pi'")
     start.add_argument("--pi-rpc", action="store_true", help="Pi ueber RPC treiben; Bestaetigungsdialoge werden freigegeben")
     start.set_defaults(func=cmd_start)
     rerun = sub.add_parser("rerun", help="einen Arm eines bestehenden Duells neu laufen lassen")
