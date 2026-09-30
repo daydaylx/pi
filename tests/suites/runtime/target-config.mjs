@@ -460,6 +460,7 @@ export const targetConfigSections = {
             "+extensions/frontend-bridge/index.ts",
             "+extensions/openrouter-doctor/index.ts",
             "+extensions/second-opinion/index.ts",
+            "+extensions/task-tier/index.ts",
           ],
           "settings declare the dependency-safe local extension order",
         );

@@ -884,6 +884,7 @@ export const resilienceSections = {
     const secondOpinionExtension = await load(
       "extensions/second-opinion/index.ts",
     );
+    const taskTierExtension = await load("extensions/task-tier/index.ts");
 
     await section("combined production extension stack", async () => {
       if (
@@ -922,6 +923,7 @@ export const resilienceSections = {
         "+extensions/frontend-bridge/index.ts": frontendBridge.default,
         "+extensions/openrouter-doctor/index.ts": openrouterDoctor.default,
         "+extensions/second-opinion/index.ts": secondOpinionExtension.default,
+        "+extensions/task-tier/index.ts": taskTierExtension.default,
       };
       const settings = JSON.parse(
         readFileSync(path.join(ROOT, "settings.json"), "utf8"),

@@ -6,6 +6,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { consumeAutoThinking } from "../shared/auto-thinking.ts";
 import { runMenu } from "../shared/menu-ui.ts";
 import {
   buildThinkingMenu,
@@ -97,6 +98,8 @@ export function createThinkingControl(pi: ExtensionAPI): ThinkingControl {
   // registering a conflicting duplicate command.
   pi.on("thinking_level_select", (event) => {
     if (!isSelectableThinkingLevel(event.level)) return;
+    // Automatische Änderung durch task-tier: keine manuelle Nutzerwahl.
+    if (consumeAutoThinking(event.level)) return;
     manualThinkingLevel = event.level;
     if (pendingRestoreLevel === event.level) {
       pendingRestoreLevel = undefined;

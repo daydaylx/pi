@@ -57,11 +57,34 @@ projektgebunden.
   Pi-Setup (`~/.pi/agent`), nie Projektcode.
 - Einen Teilauftrag erst als umgesetzt bezeichnen, wenn der zugehörige
   Testlauf beendet und sein Ergebnis dokumentiert ist. Vor dem finalen
-  Abschluss zusätzlich `project_check({ profile: "verify" })` ausführen.
+  Abschluss zusätzlich `project_check({ profile: "verify" })` ausführen —
+  außer bei einer FAST-Aufgabe (s. „Aufgabenklassen“): dort genügen der
+  direkt zugehörige Test und die relevante Syntax-/Typprüfung.
 - Ein `FAIL`- oder `UNVERIFIABLE`-Urteil sowie ein ergebnisloser
   `verifier`-Lauf vor Commit oder Push nicht unkommentiert lassen: entweder
   beheben und erneut prüfen, oder den offenen Punkt dem Nutzer ausdrücklich
   nennen.
+
+## Aufgabenklassen
+
+Die Extension `extensions/task-tier/` erkennt pro Turn automatisch FAST,
+NORMAL oder DEEP (`docs/decisions/033-task-tiers.md`); NORMAL ist der Default
+und bedeutet den bisherigen Ablauf.
+
+- **FAST** (lokal, ≤ 3 Dateien, kein Security-/Permission-/Architektur-/
+  Dependency-/API-Bezug): `inspect → edit → gezielter Check → fertig`. Richtwert
+  vor dem ersten Edit ≤ 2 Suchen und 3–5 Reads; eine Datei einmal in einem
+  ausreichend großen Bereich lesen, unveränderte Dateien nicht erneut. Keine
+  Subagenten, kein Verifier, kein globales `verify` ohne Anlass. Echte
+  Komplexität stuft automatisch auf NORMAL/DEEP hoch.
+- **NORMAL:** relevante Suite plus betroffene Subsystem-Checks; Subagenten nur
+  bei erkennbarem Mehrwert.
+- **DEEP** (Architektur, Security, Permissions, Plan Mode, große Refactorings):
+  ausführliche Exploration, Subagenten, Verifier und breitere Tests.
+- **Stop-Regel (alle Klassen):** Sind Akzeptanzkriterien erfüllt, der gezielte
+  Test erfolgreich und keine Unsicherheit offen, endet die Aufgabe — keine
+  erneuten Reads, Zusatz-Refactorings, weiteren Tests oder Doku-Änderungen ohne
+  Anlass. Ausdrückliche Nutzerwünsche haben Vorrang.
 
 ## Commit und Push
 
