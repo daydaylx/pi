@@ -34,6 +34,12 @@ Wirkung:
 | normal | keiner                    | unverändert                                   | wie bisher          | ja                   |
 | deep   | DEEP-Hinweis + Stop-Regel | hebt auf mindestens `high`                    | wie bisher          | nein                 |
 
+**Release-Aktionen und Fortsetzungen** (Nachtrag 2026-10-01): Prompts mit
+commit/push/merge/publish/release/deploy/PR sind nie `fast` (mindestens
+`normal`), weil AGENTS.md vor Commit/Push einen Verifier verlangt, FAST ihn
+aber sperrt. Kurze Fortsetzungs-Prompts („weiter“, „ja“) erben die höhere
+Klasse des Vorgänger-Turns (inkl. Eskalation).
+
 **Eskalation** (nur aufwärts, mit einmaliger Steering-Nachricht): FAST → NORMAL
 bei > 2 Suchen oder > 6 Reads vor dem ersten Edit bzw. > 3 geänderten Dateien;
 → DEEP beim Edit eines Hard-Verifier-Pfads. Die Sperre für Subagenten/Verifier

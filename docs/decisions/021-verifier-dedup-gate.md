@@ -44,9 +44,11 @@ wiederholen — als den am klarsten belegten Effizienzverlust benennt.
    (Entscheidung 015) bereits festgelegt.
 4. Ein abweichender `workspaceRoot` oder ein Fingerprint-Unterschied (also
    ein tatsächlich veränderter Diff) lässt den Aufruf unverändert passieren.
-5. Kann der aktuelle Fingerprint nicht ermittelt werden (kein Git-Repo
-   o. Ä.), gilt dasselbe Fail-open-Prinzip wie beim Commit-Gate — ohne
-   Evidenz wird nicht blockiert.
+5. Kann der aktuelle Diff nicht verlässlich bestimmt werden (z. B. weil kein
+   Git-Repository vorhanden ist), gilt dasselbe Fail-open-Prinzip wie beim
+   Commit-Gate — ohne Evidenz wird ein optionaler Verifier-Lauf nicht blockiert.
+   Der Filesystem-Fingerprint dient Recovery, nicht als Behauptung eines
+   Git-Diffs.
 
 `extensions/permissions/guards.ts` zieht dafür den bestehenden
 `requestVerificationCapabilities()`-Aufruf vor die Delegationsprüfung, statt

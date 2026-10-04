@@ -2105,13 +2105,9 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
   );
 });
 
-await test("git commit gate routes through command detection and blocks visibly without a workspace (F-01)", async () => {
+await test("git commit gate blocks outside Git while filesystem snapshots remain available", async () => {
   if (!verifierPolicy) return;
-  // No .git here at all, so collectWorkspaceSnapshot() cannot produce a
-  // diff — the gate must block visibly rather than silently permit a commit
-  // it cannot evaluate. The path-matching/fingerprint logic itself is
-  // covered above via the pure assessVerifierCoverageForDiff, without
-  // touching real git.
+  // Plain directories use filesystem snapshots but cannot provide a Git diff for commit verification.
   const cwd = mkdtempSync(join(tmpdir(), "pi-verifier-gate-"));
   try {
     const assess = (toolName, command) =>
@@ -2134,8 +2130,8 @@ await test("git commit gate routes through command detection and blocks visibly 
       "a commit call with no collectible workspace snapshot blocks visibly — F-01, a snapshot failure must never silently permit a commit it cannot evaluate",
     );
     assert(
-      blocked.reason.includes("no_repository"),
-      "the block names the specific snapshot error category, not just a generic refusal",
+      blocked.reason.includes("VCS: none"),
+      "the block explains that Git-specific commit checks are unavailable outside a repository",
     );
     assert(
       !(
@@ -2699,9 +2695,9 @@ await test("YOLO stufen have their own labels, status values and are never resto
   eq(parseYoloLevel("4"), undefined, "unknown argument");
 });
 
-await test("YOLO warning keeps the recovery gate visible at every level", () => {
+await test("YOLO 1/2 warn about recovery while YOLO 3 lifts that gate", () => {
   if (!toolPolicy) return;
-  for (const level of ["yolo", "yolo-ask", "yolo-full"]) {
+  for (const level of ["yolo", "yolo-ask"]) {
     assert(
       toolPolicy.permissionWarning(level)?.includes("Recovery-Gate") &&
         !toolPolicy
@@ -2710,4 +2706,9 @@ await test("YOLO warning keeps the recovery gate visible at every level", () => 
       `${level} warning accurately says recovery remains enforced`,
     );
   }
+  assert(
+    toolPolicy.permissionWarning("yolo-full")?.includes("Recovery-Gate") &&
+      toolPolicy.permissionWarning("yolo-full")?.includes("freigegeben"),
+    "YOLO 3 warning says recovery is bypassed",
+  );
 });

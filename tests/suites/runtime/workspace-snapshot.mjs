@@ -11,13 +11,8 @@
 // scenarios could never be captured from the old implementation — it threw
 // ENOBUFS on both — which is exactly the defect this phase closes.
 //
-// SNAP-001 re-froze every value below: WORKSPACE_SNAPSHOT_SCHEMA_VERSION
-// moved "1" -> "2" (part of the hashed fingerprint input by design), which
-// alone invalidates every prior fingerprint regardless of whether a given
-// fixture configures a textconv/external-diff driver. None of these 11
-// fixtures does, so the --no-textconv addition itself changed none of their
-// raw diff bytes — confirmed by diffing old vs. new values against a run on
-// unmodified `main` before applying the SNAP-001 code change.
+// The Git fingerprint contract remains stable; filesystem snapshots are
+// explicitly tagged with `vcs: "none"` without changing Git fingerprints.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -269,18 +264,22 @@ export const workspaceSnapshotSections = {
   "workspace snapshot error categories": async (context) => {
     const { section } = context;
     await section("workspace snapshot error categories", async () => {
-      // no_repository: no .git at all.
+      // No Git: use a bounded filesystem inventory and stable fingerprint.
       const noRepo = mkdtempSync(
         path.join(tmpdir(), "pi-workspace-snapshot-norepo-"),
       );
       try {
-        const result = await collectWorkspaceSnapshot(noRepo);
-        assert(!result.ok, "a directory with no .git is never ok:true");
-        eq(
-          result.ok ? undefined : result.error.code,
-          "no_repository",
-          "a missing repository is classified as no_repository, not a generic failure",
-        );
+        writeFileSync(path.join(noRepo, "notes.txt"), "before\n");
+        const first = await collectWorkspaceSnapshot(noRepo);
+        const repeated = await collectWorkspaceSnapshot(noRepo);
+        assert(first.ok && repeated.ok, "a plain directory yields a snapshot");
+        if (first.ok && repeated.ok) {
+          eq(first.snapshot.vcs, "none", "VCS is explicitly none");
+          eq(first.snapshot.fingerprint, repeated.snapshot.fingerprint, "filesystem fingerprint is stable");
+          writeFileSync(path.join(noRepo, "notes.txt"), "after with changed size\n");
+          const changed = await collectWorkspaceSnapshot(noRepo);
+          assert(changed.ok && changed.snapshot.fingerprint !== first.snapshot.fingerprint, "filesystem mutations change the fingerprint");
+        }
       } finally {
         rmSync(noRepo, { recursive: true, force: true });
       }
@@ -302,12 +301,8 @@ export const workspaceSnapshotSections = {
       try {
         process.env.PATH = emptyPathDir;
         const result = await collectWorkspaceSnapshot(gitUnavailableRepo);
-        assert(!result.ok, "an unresolvable git binary is never ok:true");
-        eq(
-          result.ok ? undefined : result.error.code,
-          "git_unavailable",
-          "a git binary that cannot be spawned is classified as git_unavailable",
-        );
+        assert(result.ok, "an unavailable git binary falls back to filesystem snapshot");
+        if (result.ok) eq(result.snapshot.vcs, "none", "missing Git degrades to VCS none");
       } finally {
         process.env.PATH = originalPath;
         rmSync(gitUnavailableRepo, { recursive: true, force: true });

@@ -662,7 +662,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     name: "recovery_check",
     label: "Recovery prüfen",
     description:
-      "Read-only-Recovery-Check nach einem unterbrochenen oder fehlgeschlagenen Turn: erfasst Workspace-Snapshot, git status --short und eine begrenzte Diff-Zusammenfassung und hebt die Recovery-Schreibsperre auf, solange der Workspace-Fingerprint danach unverändert bleibt. Führt selbst keine Schreiboperationen aus und wiederholt nichts.",
+      "Read-only-Recovery-Check nach einem unterbrochenen oder fehlgeschlagenen Turn: erfasst einen Git- oder Filesystem-Workspace-Snapshot und hebt die Recovery-Schreibsperre auf, solange der Workspace-Fingerprint danach unverändert bleibt. Führt selbst keine Schreiboperationen aus und wiederholt nichts.",
     promptSnippet:
       "Inspect the workspace after an interrupted or failed turn and release the recovery write gate.",
     parameters: Type.Object({}),
@@ -686,24 +686,26 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
         );
       }
       const snapshot = result.snapshot;
-      let gitStatus: string;
-      try {
-        gitStatus = await gitText(ctx.cwd, ["status", "--short"], signal);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `Recovery-Check fehlgeschlagen: git status nicht lesbar (${message}). ` +
-            `Die Schreibsperre bleibt bestehen, bis der Zustand geklärt ist. ` +
-            `Nicht-destruktiver Ausweg: prüfe manuell \`git status --short\` ` +
-            `in ${ctx.cwd} und behebe die genannte Ursache, statt den ` +
-            `Workspace pauschal zurückzusetzen.`,
-        );
-      }
+      let gitStatus = "";
       let diffStat = "";
-      try {
-        diffStat = await gitText(ctx.cwd, ["diff", "--stat"], signal);
-      } catch {
-        diffStat = "(Diff-Zusammenfassung nicht verfügbar)";
+      if (snapshot.vcs !== "none") {
+        try {
+          gitStatus = await gitText(ctx.cwd, ["status", "--short"], signal);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `Recovery-Check fehlgeschlagen: git status nicht lesbar (${message}). ` +
+              `Die Schreibsperre bleibt bestehen, bis der Zustand geklärt ist. ` +
+              `Nicht-destruktiver Ausweg: prüfe manuell \`git status --short\` ` +
+              `in ${ctx.cwd} und behebe die genannte Ursache, statt den ` +
+              `Workspace pauschal zurückzusetzen.`,
+          );
+        }
+        try {
+          diffStat = await gitText(ctx.cwd, ["diff", "--stat"], signal);
+        } catch {
+          diffStat = "(Diff-Zusammenfassung nicht verfügbar)";
+        }
       }
 
       if (
@@ -734,9 +736,10 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
           ? "Recovery-Check abgeschlossen: Die Schreibsperre ist aufgehoben, solange der Workspace-Fingerprint unverändert bleibt."
           : "Kein offenes Recovery-Gate gefunden; der Workspace wurde trotzdem geprüft.",
         `Workspace-Fingerprint: ${snapshot.fingerprint}`,
-        "",
-        "git status --short:",
-        statusText,
+        `VCS: ${snapshot.vcs ?? "git"}`,
+        ...(snapshot.vcs === "none"
+          ? [`Filesystem-Einträge geprüft: ${snapshot.filesystemEntries}`]
+          : ["", "git status --short:", statusText]),
       ];
       if (diffStat.trim()) {
         lines.push("", "git diff --stat:", diffStat.trim());

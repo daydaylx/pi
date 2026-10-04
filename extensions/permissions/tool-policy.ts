@@ -38,7 +38,7 @@ export function permissionWarning(level: PermissionLevel): string | undefined {
     return "YOLO 2 temporär aktiv: wie YOLO 1 ohne Routine-Rückfragen, aber sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach. Das Recovery-Gate bleibt aktiv; die Commit-Verifier-Pflicht entfällt. Trust-Grenze und Plan-Mode-Schreibschutz bleiben aktiv.";
   }
   if (level === "yolo-full") {
-    return "YOLO 3 temporär aktiv: VOLLZUGRIFF ohne Rückfragen, auch sudo, Systempfade, Secrets und Pfade außerhalb des Projekts. Recovery-Gate, Trust-Grenze, Plan-Mode-Schreibschutz und die Bestätigung für das Löschen des Root-Dateisystems bleiben aktiv. sudo-Passwörter gibst du im interaktiven Shell-Pfad selbst ein.";
+    return "YOLO 3 temporär aktiv: VOLLZUGRIFF ohne Rückfragen, auch sudo, Partitionen, Systempfade, Secrets und Pfade außerhalb des Projekts. Trust-, Recovery- und Planmodus-Sperren sowie Root-Dateisystem-Löschung sind freigegeben. Tatsächliche Root-Rechte hängen von den OS-Rechten des Pi-Prozesses und sudo ab.";
   }
   if (level === "headless") {
     return "Headless aktiv: kein Bestätigungsdialog verfügbar. Projektlokale Builds/Tests/Lint/Typecheck sind erlaubt; jede sonst bestätigungspflichtige Aktion bricht strukturiert ab statt zu fragen.";

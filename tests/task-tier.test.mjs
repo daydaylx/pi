@@ -256,3 +256,27 @@ await test("task-tier: NORMAL lässt Prompt und Thinking unverändert", async ()
     eq(harness.api.getThinkingLevel(), "high", "Thinking unverändert");
   });
 });
+
+await test("task-tier: Commit/Push nie FAST, Fortsetzung erbt Klasse", async () => {
+  for (const prompt of [
+    "commit und push",
+    "Bitte pushen",
+    "merge den Branch",
+    "mach den PR",
+  ]) {
+    assert(
+      classify.classifyPrompt(prompt, opts) !== "fast",
+      `release nicht fast: ${prompt}`,
+    );
+  }
+  assert(classify.isContinuationPrompt("weiter"), "weiter");
+  assert(classify.isContinuationPrompt("ja, mach das"), "ja");
+  assert(
+    !classify.isContinuationPrompt(
+      "Setze in settings.json editorPaddingX auf 2",
+    ),
+    "kein Fortsetzungs-Prompt",
+  );
+  eq(classify.maxTier("fast", "deep"), "deep", "maxTier");
+  eq(classify.maxTier("normal", "fast"), "normal", "maxTier2");
+});

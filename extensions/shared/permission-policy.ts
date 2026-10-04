@@ -20,6 +20,7 @@ import type { PermissionLevel } from "./workflow-status.ts";
 
 export type PolicyAction = "allow" | "ask" | "block";
 export type FileOperation = "read" | "write";
+export type OperationEffect = "SAFE" | "MUTATING" | "RISKY" | "FORBIDDEN";
 
 export interface PolicyDecision {
   action: PolicyAction;
@@ -33,15 +34,14 @@ const YOLO_FULL_ALLOW: PolicyDecision = {
   reason: "YOLO 3: Vollzugriff ohne Rückfrage",
 };
 
-// Namenssegmente wie auth/credentials/secrets/tokens gelten nur als Secret,
-// wenn sie ohne Endung (auch als Dotfile) oder mit einer Daten-/Key-Endung
-// auftreten. Quellcode-Module wie src/auth.ts oder tokenizer.ts lösen keine
-// harte Warnung mehr aus — Fehlalarme entwerten die verbliebenen Warnungen.
+// Secret-Dateinamen werden anhand typischer Dotfiles bzw. Daten-/Key-Dateien
+// erkannt. Bloße Suchbegriffe wie `token` oder Quellcode-Module wie auth.ts und
+// tokenizer.ts lösen keine Credential-Grenze aus.
 const SECRET_DATA_EXTENSIONS = "json|ya?ml|toml|ini|env|pem|key|p12|pfx";
 const SECRET_PATH_PATTERN = new RegExp(
   "(^|[\\s/\\\\])(?:\\.env(?:\\.[^\\s/\\\\]+)?|\\.ssh|\\.gnupg|\\.aws|\\.npmrc|\\.pypirc|\\.netrc|" +
-    `\\.?(?:auth|credentials?|secrets?|tokens?)(?:\\.(?:${SECRET_DATA_EXTENSIONS}))?` +
-    "|id_rsa|id_ed25519|[^\\s/\\\\]+\\.pem)(?:[\\s/\\\\]|$)",
+    `\\.(?:auth|credentials?|secrets?|tokens?)|(?:auth|credentials?|secrets?|tokens?)\\.(?:${SECRET_DATA_EXTENSIONS})|(?:credentials?|secrets?|tokens?)\\.[^\\s/\\\\]+` +
+    "|id_rsa|id_ed25519|[^\\s/\\\\]+\\.(?:pem|key|p12|pfx))(?:[\\s/\\\\]|$)",
   "i",
 );
 const ENV_EXAMPLE_PATTERN = /(^|[\s/\\])\.env\.example(?=[\s/\\]|$)/gi;
@@ -222,43 +222,143 @@ const PLAN_SIMPLE_COMMANDS = new Set([
 ]);
 
 const SAFE_SHELL_BUILTINS = new Set(["echo", "printf", "pwd", "type"]);
-const TRUSTED_EXECUTABLE_ROOTS = [
-  "/usr/bin",
-  "/bin",
-  "/usr/sbin",
-  "/sbin",
-].flatMap((path) => {
-  try {
-    return [realpathSync(path)];
-  } catch {
-    return [];
-  }
-});
-// `rg` is bundled by the host in some supported installations rather than
-// living below a system bin directory. Keep the exact runtime-resolved path
-// captured at module load as an explicit exception; a later PATH replacement
-// (including an external wrapper) is not accepted. No other diagnostic name
-// receives this external-runtime exception.
-const TRUSTED_EXTERNAL_DIAGNOSTIC_NAMES = new Set(["rg"]);
-const TRUSTED_EXTERNAL_DIAGNOSTIC_PATHS = new Set<string>();
 
-for (const name of TRUSTED_EXTERNAL_DIAGNOSTIC_NAMES) {
-  for (const rawEntry of (process.env.PATH ?? "").split(delimiter)) {
-    const entry = rawEntry ? resolve(rawEntry) : resolve(process.cwd());
-    const candidate = resolve(entry, name);
-    try {
-      const canonical = realpathSync(candidate);
-      if (!statSync(canonical).isFile()) continue;
-      accessSync(canonical, constants.X_OK);
-      if (!isInside(resolve(process.cwd()), canonical)) {
-        TRUSTED_EXTERNAL_DIAGNOSTIC_PATHS.add(canonical);
-        break;
-      }
-    } catch {
-      // Continue to the next PATH entry.
+/**
+ * Executable trust has three independent steps (see
+ * extensions/plan-mode/README.md, "Executable-Vertrauen"):
+ *
+ *   1. Discovery  - which file would the shell run? The first PATH hit wins;
+ *      a later, trusted hit is never used as a fallback.
+ *   2. Source     - was it found through a system location?
+ *      - classic system dirs (/usr/bin, /bin, ...): the canonical target must
+ *        stay inside those dirs.
+ *      - system profile dirs (NixOS /run/current-system/sw/bin, multi-user
+ *        /nix/var/nix/profiles/default/bin): the entry was found through the
+ *        profile AND the profile dir and the target both resolve into the Nix
+ *        store. A store path alone proves nothing (the store is group-writable
+ *        by the build users and holds user-profile and project closures too),
+ *        so an entry reached through ~/.nix-profile, a project dir or a direct
+ *        /nix/store/... path stays untrusted.
+ *   3. Target     - regular, executable file after realpath.
+ *
+ * The policy is a value so tests can model a NixOS layout in a temp dir.
+ */
+export interface ExecutableTrustPolicy {
+  /** Canonical (realpath) roots a classic system executable must stay in. */
+  readonly classicRoots: readonly string[];
+  /** Lexical discovery dirs of system profiles (symlink farms into a store). */
+  readonly systemProfileBinDirs: readonly string[];
+  /** Canonical roots a system profile dir and its entries must resolve into. */
+  readonly systemProfileTargetRoots: readonly string[];
+  /** Exact canonical paths of host-bundled diagnostic tools, by basename. */
+  readonly runtimeDiagnosticNames: ReadonlySet<string>;
+  readonly runtimeDiagnosticPaths: ReadonlySet<string>;
+}
+
+export type ExecutableTrustSource =
+  "shell-builtin" | "classic-system" | "system-profile" | "runtime-diagnostic";
+
+export type ExecutableTrustFailure =
+  /** Bare name without any (executable) PATH hit. */
+  | "not-found"
+  /** `./ls`, `bin/ls`, ...: relative path-qualified executables. */
+  | "relative-path"
+  /** Found, but not via a system location (project dir, user profile, bare store path). */
+  | "untrusted-source"
+  /** Found via a system location, but the target is not a regular executable file. */
+  | "invalid-target";
+
+export type ExecutableTrust =
+  | {
+      trusted: true;
+      /** Tool name used for classification (see resolveExecutableTrust). */
+      name: string;
+      source: ExecutableTrustSource;
     }
+  | {
+      trusted: false;
+      reason: ExecutableTrustFailure;
+      executable: string;
+      /** First PATH hit / absolute path, when one was found. */
+      path?: string;
+    };
+
+function canonicalOrUndefined(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
   }
 }
+
+export function createExecutableTrustPolicy(options: {
+  classicBinDirs: readonly string[];
+  systemProfileBinDirs: readonly string[];
+  systemProfileTargetRoots: readonly string[];
+  runtimeDiagnosticNames?: readonly string[];
+  /** Binaries of the host process itself (process.execPath): already running our code. */
+  hostRuntimePaths?: readonly string[];
+  /** PATH used to capture the host-bundled diagnostic tools (default: process.env.PATH). */
+  path?: string;
+  cwd?: string;
+}): ExecutableTrustPolicy {
+  const canonicalRoots = (paths: readonly string[]) =>
+    paths.flatMap((path) => {
+      const canonical = canonicalOrUndefined(path);
+      return canonical ? [canonical] : [];
+    });
+  const runtimeDiagnosticNames = new Set(options.runtimeDiagnosticNames ?? []);
+  const runtimeDiagnosticPaths = new Set<string>();
+  const cwd = resolve(options.cwd ?? process.cwd());
+  for (const name of runtimeDiagnosticNames) {
+    for (const rawEntry of (options.path ?? process.env.PATH ?? "").split(
+      delimiter,
+    )) {
+      const entry = resolve(cwd, rawEntry);
+      try {
+        const canonical = realpathSync(resolve(entry, name));
+        if (!statSync(canonical).isFile()) continue;
+        accessSync(canonical, constants.X_OK);
+        if (!isInside(cwd, canonical)) {
+          runtimeDiagnosticPaths.add(canonical);
+          break;
+        }
+      } catch {
+        // Continue to the next PATH entry.
+      }
+    }
+  }
+  for (const canonical of canonicalRoots(options.hostRuntimePaths ?? [])) {
+    runtimeDiagnosticNames.add(basename(canonical).toLowerCase());
+    runtimeDiagnosticPaths.add(canonical);
+  }
+  return {
+    classicRoots: canonicalRoots(options.classicBinDirs),
+    systemProfileBinDirs: options.systemProfileBinDirs.map((dir) =>
+      resolve(dir),
+    ),
+    systemProfileTargetRoots: canonicalRoots(options.systemProfileTargetRoots),
+    runtimeDiagnosticNames,
+    runtimeDiagnosticPaths,
+  };
+}
+
+// `rg` is bundled by the host in some supported installations rather than
+// living below a system bin directory. The exact runtime-resolved path is
+// captured at module load as an explicit exception; a later PATH replacement
+// (including an external wrapper) is not accepted. The same holds for the
+// Node runtime hosting this process, so `node --version` works when Node is
+// installed in a user directory. No other name receives this exception.
+const DEFAULT_EXECUTABLE_TRUST_POLICY = createExecutableTrustPolicy({
+  classicBinDirs: ["/usr/bin", "/bin", "/usr/sbin", "/sbin"],
+  systemProfileBinDirs: [
+    "/run/current-system/sw/bin",
+    "/nix/var/nix/profiles/default/bin",
+  ],
+  systemProfileTargetRoots: ["/nix/store"],
+  runtimeDiagnosticNames: ["rg"],
+  hostRuntimePaths: [process.execPath],
+});
 
 function deny(reason: string): PolicyDecision {
   return { action: "block", reason };
@@ -466,10 +566,13 @@ export function isSensitiveReference(value: string): boolean {
   const withoutEnvExample = value.replace(ENV_EXAMPLE_PATTERN, "$1");
   return (
     SECRET_PATH_PATTERN.test(withoutEnvExample) ||
-    /(?:^|\s)(?:env|printenv)(?:\s|$)/i.test(withoutEnvExample) ||
+    /(?:^|[\s|;&])(?:env|printenv)(?:\s*$|\s+[^;&\n]*(?:TOKEN|SECRET|API_KEY|PASSWORD|CREDENTIAL))/i.test(
+      withoutEnvExample,
+    ) ||
     /\$(?:\{)?[A-Z0-9_]*(?:TOKEN|SECRET|API_KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*(?:\})?/i.test(
       withoutEnvExample,
-    )
+    ) ||
+    /(?:^|[\s/])\/proc\/[^\s/]+\/environ(?:[\s/]|$)/i.test(withoutEnvExample)
   );
 }
 
@@ -794,31 +897,54 @@ function hasAnyOption(tokens: string[], patterns: RegExp[]): boolean {
 }
 
 /**
- * Resolves the executable exactly as a shell PATH lookup would encounter it.
- * A first hit outside a root-owned system bin directory is rejected instead
- * of falling through to a later, trusted executable with the same basename.
+ * Resolves the executable exactly as a shell PATH lookup would encounter it
+ * and decides whether it is a trusted system program (see
+ * ExecutableTrustPolicy for the model).
+ *
+ * The first PATH hit decides. A hit outside a system location is rejected
+ * instead of falling through to a later, trusted executable with the same
+ * basename.
+ *
+ * `name` is the tool name used for classification. For classic system dirs it
+ * is the canonical basename (unchanged behaviour). For system-profile hits it
+ * is the invoked name: Nix packages such as coreutils are multicall binaries
+ * (`ls -> .../bin/coreutils`) that dispatch on argv[0], so the canonical
+ * basename would identify every one of them as "coreutils". That is safe
+ * because the profile directory and the target are both verified system
+ * locations, not attacker-controlled links.
  */
-function trustedExecutableName(
+export function resolveExecutableTrust(
   rawExecutable: string,
   cwd: string,
-): string | undefined {
-  if (
-    SAFE_SHELL_BUILTINS.has(rawExecutable) &&
-    !rawExecutable.includes("/") &&
-    !rawExecutable.includes("\\")
-  ) {
-    return rawExecutable;
+  policy: ExecutableTrustPolicy = DEFAULT_EXECUTABLE_TRUST_POLICY,
+  pathEnv: string = process.env.PATH ?? "",
+): ExecutableTrust {
+  const pathQualified =
+    rawExecutable.includes("/") || rawExecutable.includes("\\");
+  if (SAFE_SHELL_BUILTINS.has(rawExecutable) && !pathQualified) {
+    return { trusted: true, name: rawExecutable, source: "shell-builtin" };
   }
+  const fail = (
+    reason: ExecutableTrustFailure,
+    path?: string,
+  ): ExecutableTrust => ({
+    trusted: false,
+    reason,
+    executable: rawExecutable,
+    path,
+  });
 
+  // 1. Discovery.
   let candidate: string | undefined;
-  if (rawExecutable.includes("/") || rawExecutable.includes("\\")) {
+  if (pathQualified) {
     // Relative executables remain attacker-controlled even when they happen
     // to resolve through `..` to a system directory.
-    if (!isAbsolute(rawExecutable)) return undefined;
+    if (!isAbsolute(rawExecutable)) return fail("relative-path");
     candidate = resolve(rawExecutable);
   } else {
-    for (const rawEntry of (process.env.PATH ?? "").split(delimiter)) {
-      const entry = rawEntry ? resolve(rawEntry) : resolve(cwd);
+    for (const rawEntry of pathEnv.split(delimiter)) {
+      // The shell runs in `cwd`, so relative and empty entries point there.
+      const entry = resolve(cwd, rawEntry);
       const pathCandidate = resolve(entry, rawExecutable);
       if (existsSync(pathCandidate)) {
         candidate = pathCandidate;
@@ -826,30 +952,57 @@ function trustedExecutableName(
       }
     }
   }
-  if (!candidate) return undefined;
+  if (!candidate) return fail("not-found");
 
+  // 3. Target (checked before the source so every verdict is about a real,
+  // runnable file).
+  let canonical: string;
   try {
-    const canonical = realpathSync(candidate);
-    if (!statSync(canonical).isFile()) return undefined;
+    canonical = realpathSync(candidate);
+    if (!statSync(canonical).isFile()) return fail("invalid-target", candidate);
     accessSync(canonical, constants.X_OK);
-    const inTrustedRoot = TRUSTED_EXECUTABLE_ROOTS.some((root) =>
-      isInside(root, canonical),
-    );
-    const name = canonical.split(sep).pop()?.toLowerCase();
-    const runtimeDiagnostic =
-      !rawExecutable.includes("/") &&
-      !rawExecutable.includes("\\") &&
-      name !== undefined &&
-      TRUSTED_EXTERNAL_DIAGNOSTIC_NAMES.has(name) &&
-      TRUSTED_EXTERNAL_DIAGNOSTIC_PATHS.has(canonical) &&
-      !isInside(resolve(cwd), canonical);
-    if (!inTrustedRoot && !runtimeDiagnostic) {
-      return undefined;
-    }
-    return name;
   } catch {
-    return undefined;
+    return fail("invalid-target", candidate);
   }
+
+  // 2. Source.
+  const discoveryDir = dirname(candidate);
+  if (policy.systemProfileBinDirs.includes(discoveryDir)) {
+    const canonicalDir = canonicalOrUndefined(discoveryDir);
+    const inStore = (path: string) =>
+      policy.systemProfileTargetRoots.some((root) => isInside(root, path));
+    return canonicalDir !== undefined &&
+      inStore(canonicalDir) &&
+      inStore(canonical)
+      ? {
+          trusted: true,
+          name: basename(candidate).toLowerCase(),
+          source: "system-profile",
+        }
+      : fail("invalid-target", candidate);
+  }
+  const name = canonical.split(sep).pop()?.toLowerCase();
+  if (name === undefined) return fail("invalid-target", candidate);
+  if (policy.classicRoots.some((root) => isInside(root, canonical))) {
+    return { trusted: true, name, source: "classic-system" };
+  }
+  if (
+    !pathQualified &&
+    policy.runtimeDiagnosticNames.has(name) &&
+    policy.runtimeDiagnosticPaths.has(canonical) &&
+    !isInside(resolve(cwd), canonical)
+  ) {
+    return { trusted: true, name, source: "runtime-diagnostic" };
+  }
+  return fail("untrusted-source", candidate);
+}
+
+function trustedExecutableName(
+  rawExecutable: string,
+  cwd: string,
+): string | undefined {
+  const trust = resolveExecutableTrust(rawExecutable, cwd);
+  return trust.trusted ? trust.name : undefined;
 }
 
 function hasForbiddenGitOption(tokens: string[]): boolean {
@@ -1270,75 +1423,475 @@ export function isPlanSafeCommand(command: string, cwd: string): boolean {
   );
 }
 
-// Plan Mode deliberately has a small, direct git allowlist. These commands
-// only inspect repository state and never run a project-defined script.
-const PLAN_MODE_SAFE_GIT_SUBCOMMANDS = new Set(["status", "diff", "log"]);
-
-// Read-only tools already vetted as flag-safe by classifyToolSegment (via
-// PLAN_SIMPLE_COMMANDS or find's dedicated branch). Unlike npm/pnpm/yarn
-// scripts, none of these depend on project content to decide whether they
-// mutate anything; the executable itself is still resolved through the shared
-// trust check before this list is consulted.
-const PLAN_MODE_DIAGNOSTIC_TOOLS = new Set([
-  "pwd",
+const MUTATING_COMMANDS = new Set([
+  "rm",
+  "rmdir",
+  "unlink",
+  "trash",
+  "touch",
+  "mkdir",
+  "mktemp",
+  "mv",
+  "cp",
+  "install",
+  "tee",
+  "truncate",
+  "dd",
+  "chmod",
+  "chown",
+  "chgrp",
+  "ln",
+  "patch",
+  "git-apply",
+  "xargs",
+]);
+const PACKAGE_MANAGERS = new Set([
+  "npm",
+  "npx",
+  "pnpm",
+  "yarn",
+  "bun",
+  "pip",
+  "pip3",
+  "uv",
+  "cargo",
+  "gem",
+  "make",
+]);
+const COMMAND_EXECUTORS = new Set([
+  "eval",
+  "source",
+  ".",
+  "trap",
+  "function",
+  "select",
+  "coproc",
+  "if",
+  "then",
+  "elif",
+  "else",
+  "fi",
+  "while",
+  "until",
+  "for",
+  "in",
+  "do",
+  "done",
+  "case",
+  "esac",
+]);
+const UNCERTAIN_COMMAND_WRAPPERS = new Set([
+  "busybox",
+  "nice",
+  "timeout",
+  "stdbuf",
+]);
+const TEST_RUNNERS = new Set(["pytest", "jest", "vitest", "mocha", "go"]);
+const NON_MUTATING_PACKAGE_COMMANDS = new Set([
+  "list",
   "ls",
-  "cat",
-  "head",
-  "tail",
-  "wc",
-  "stat",
-  "du",
-  "df",
-  "tree",
-  "sort",
-  "uniq",
+  "view",
+  "info",
+  "search",
+  "outdated",
+  "show",
+  "version",
+  "--version",
+  "-v",
+]);
+const GIT_MUTATIONS = new Set([
+  "add",
+  "am",
+  "apply",
+  "checkout",
+  "cherry-pick",
+  "clean",
+  "clone",
+  "commit",
+  "fetch",
+  "merge",
+  "mv",
+  "pull",
+  "push",
+  "rebase",
+  "reset",
+  "restore",
+  "rm",
+  "stash",
+  "switch",
+  "worktree",
+]);
+const GIT_READS = new Set([
+  "status",
+  "diff",
+  "log",
+  "show",
+  "branch",
+  "remote",
+  "config",
+  "ls-files",
+  "ls-tree",
+  "rev-parse",
+  "blame",
+  "grep",
+  "describe",
+  "tag",
 ]);
 
-function isPlanModeSafeGitCommand(tokens: string[]): boolean {
-  const subcommandIndex = tokens[1] === "--no-pager" ? 2 : 1;
-  const subcommand = tokens[subcommandIndex]?.toLowerCase();
-  if (!subcommand) return false;
-  return PLAN_MODE_SAFE_GIT_SUBCOMMANDS.has(subcommand) && isSafeGit(tokens);
+function gitAction(args: string[]): { action?: string; position: number } {
+  const valueOptions = new Set(["-C", "-c", "--git-dir", "--work-tree"]);
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (valueOptions.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) continue;
+    return { action: arg.toLowerCase(), position: index };
+  }
+  return { position: args.length };
 }
 
 /**
- * Per-segment classification for Plan Mode's bash guard. Do not trust a
- * command because its name sounds diagnostic: project scripts can mutate.
+ * Executable-level facts `classifyOperationEffect` reports to a caller that
+ * wants to verify them (Plan Mode, see diagnosePlanModeCommand): every program
+ * the shell would start, and every environment override that changes how
+ * programs are found or loaded.
  */
-function isPlanModeDiagnosticSegment(tokens: string[], cwd: string): boolean {
-  const executable = trustedExecutableName(tokens[0], cwd);
-  if (!executable) return false;
-  if (containsSensitivePath(tokens, cwd)) return false;
+type ExecutableCheck =
+  { kind: "executable"; raw: string } | { kind: "env-override"; name: string };
 
-  if (executable === "git") {
-    return isPlanModeSafeGitCommand(tokens);
+/** Classifies shell intent without requiring every harmless executable to be allowlisted. */
+export function classifyOperationEffect(
+  command: string,
+  cwd: string,
+  onExecutable?: (check: ExecutableCheck) => void,
+): OperationEffect {
+  if (isSensitiveReference(command)) return "FORBIDDEN";
+  if (/\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i.test(command))
+    return "FORBIDDEN";
+  if (!command.trim()) return "SAFE";
+  if (/[`]|\$\(/.test(command)) return "RISKY";
+
+  const parts: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+  let redirect = false;
+  for (let i = 0; i < command.length; i += 1) {
+    const char = command[i];
+    const next = command[i + 1];
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      current += char;
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      current += char;
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === ">") {
+      if (next === "(") return "RISKY";
+      const descriptorRedirect = next === "&";
+      const target = command
+        .slice(i + (descriptorRedirect ? 2 : 1))
+        .trimStart()
+        .split(/[\\s|;&]/, 1)[0];
+      if (!descriptorRedirect && target !== "/dev/null") redirect = true;
+      if (descriptorRedirect) i += 1;
+      continue;
+    }
+    if (char === "<") {
+      if (next === "(" || next === "<") return "RISKY";
+      continue;
+    }
+    if (char.charCodeAt(0) === 10 || char.charCodeAt(0) === 13) {
+      if (current.trim()) parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    if (char === "|" || char === ";" || char === "&") {
+      if (char === "&" && next !== "&") return "RISKY";
+      if ((char === "|" && next === "|") || (char === "&" && next === "&"))
+        i += 1;
+      if (current.trim()) parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
   }
-  if (executable === "rg" || executable === "find") {
-    return classifyToolSegment(executable, tokens);
+  if (quote || escaped) return "RISKY";
+  if (current.trim()) parts.push(current.trim());
+  if (redirect) return "MUTATING";
+  if (parts.length === 0) return "RISKY";
+
+  for (const part of parts) {
+    const tokens = tokenizeSegment(part);
+    if (tokens.length === 0) return "RISKY";
+    if (containsSensitivePath(tokens, cwd)) return "FORBIDDEN";
+    let operationTokens = tokens;
+    while (
+      ["command", "builtin", "exec", "nohup", "time"].includes(
+        operationTokens[0],
+      )
+    ) {
+      if (operationTokens[0] === "nohup")
+        onExecutable?.({ kind: "executable", raw: "nohup" });
+      operationTokens = operationTokens.slice(1);
+      while (operationTokens[0]?.startsWith("-") && operationTokens[0] !== "--")
+        operationTokens = operationTokens.slice(1);
+      if (operationTokens[0] === "--")
+        operationTokens = operationTokens.slice(1);
+    }
+    const { executable, args, raw, viaEnv, assignedNames } =
+      executableToken(operationTokens);
+    if (!executable) return "RISKY";
+    if (onExecutable) {
+      for (const name of assignedNames)
+        onExecutable({ kind: "env-override", name });
+      if (viaEnv) onExecutable({ kind: "executable", raw: "env" });
+      onExecutable({ kind: "executable", raw });
+    }
+    if (
+      COMMAND_EXECUTORS.has(executable) ||
+      UNCERTAIN_COMMAND_WRAPPERS.has(executable)
+    )
+      return "RISKY";
+    if (executable.startsWith("(") || executable === "{") return "RISKY";
+    if (
+      /^(sudo|su|service|mount|umount|reboot|shutdown|poweroff|useradd|usermod|passwd)$/.test(
+        executable,
+      )
+    )
+      return "RISKY";
+    if (
+      executable === "systemctl" &&
+      !["status", "show", "list-units", "is-active"].includes(args[0])
+    )
+      return "RISKY";
+    if (MUTATING_COMMANDS.has(executable)) return "MUTATING";
+    if (
+      executable === "find" &&
+      args.some((arg) =>
+        ["-delete", "-exec", "-execdir", "-ok", "-okdir"].includes(arg),
+      )
+    )
+      return "MUTATING";
+    if (
+      ["awk", "gawk", "mawk"].includes(executable) &&
+      args.some((arg) => /\bsystem\s*\(|\b(?:print|printf)\b[^;]*>/.test(arg))
+    )
+      return "RISKY";
+    if (
+      (executable === "eslint" ||
+        executable === "prettier" ||
+        executable === "biome") &&
+      args.some(
+        (arg) => ["--fix", "--write"].includes(arg) || arg.startsWith("--fix-"),
+      )
+    )
+      return "MUTATING";
+    if (
+      TEST_RUNNERS.has(executable) &&
+      !(executable === "go" && args[0] === "version")
+    )
+      return "RISKY";
+    if (executable === "tsc" && !args.includes("--noEmit")) return "RISKY";
+    if (executable === "sed" && args.some((arg) => /^-.*i/.test(arg)))
+      return "MUTATING";
+    if (
+      (executable === "sort" || executable === "tree") &&
+      args.some((arg) => arg === "-o" || arg === "--output")
+    )
+      return "MUTATING";
+    if (
+      executable === "git" &&
+      args.some((arg) => /^--output(?:=|$)/.test(arg))
+    )
+      return "MUTATING";
+    if (
+      (executable === "curl" &&
+        args.some((arg) =>
+          [
+            "-o",
+            "--output",
+            "-O",
+            "--remote-name",
+            "-d",
+            "--data",
+            "-X",
+            "--request",
+          ].includes(arg),
+        )) ||
+      executable === "wget"
+    )
+      return "MUTATING";
+    if (PACKAGE_MANAGERS.has(executable)) {
+      const action = args.find((arg) => !arg.startsWith("-"))?.toLowerCase();
+      if (action && NON_MUTATING_PACKAGE_COMMANDS.has(action)) continue;
+      if (executable === "npm" && args[0] === "exec" && args.includes("--"))
+        return "RISKY";
+      return "RISKY";
+    }
+    if (executable === "git") {
+      if (args.some((arg) => ["--ext-diff", "--textconv"].includes(arg)))
+        return "RISKY";
+      const { action, position } = gitAction(args);
+      if (action && GIT_MUTATIONS.has(action)) return "MUTATING";
+      if (
+        action === "config" &&
+        !args
+          .slice(position + 1)
+          .some((arg) =>
+            ["--get", "--get-all", "--get-regexp", "--list", "-l"].includes(
+              arg,
+            ),
+          )
+      )
+        return "MUTATING";
+      if (
+        ["remote", "branch", "tag"].includes(action ?? "") &&
+        args.slice(position + 1).some((arg) => !arg.startsWith("-"))
+      )
+        return "MUTATING";
+      if (args.some((arg) => arg === "--global" || arg === "--system"))
+        return "RISKY";
+      if (!action || !GIT_READS.has(action)) return "RISKY";
+      continue;
+    }
+    if (
+      [
+        "node",
+        "nodejs",
+        "python",
+        "python3",
+        "ruby",
+        "perl",
+        "php",
+        "bash",
+        "dash",
+        "ksh",
+        "sh",
+        "zsh",
+        "deno",
+        "lua",
+      ].includes(executable)
+    ) {
+      if (args.some((arg) => /^(--version|-V|-v)$/.test(arg))) continue;
+      return "RISKY";
+    }
   }
-  if (PLAN_MODE_DIAGNOSTIC_TOOLS.has(executable)) {
-    return classifyToolSegment(executable, tokens);
-  }
-  return false;
+  return "SAFE";
 }
 
 /**
- * Is this bash command safe to run while Plan Mode is active? Only the
- * explicit Git inspection commands, ripgrep, and a small set of read-only,
- * non-script system tools (PLAN_MODE_DIAGNOSTIC_TOOLS, `find`) pass. The
- * executable must resolve to a trusted system binary; project scripts and
- * local replacements are never trusted merely because they sound like checks.
+ * Environment overrides that change which program the shell starts or how it
+ * is loaded. The executable gate resolves programs against the process PATH,
+ * so a command that rewrites any of these cannot be verified.
  */
+const EXECUTION_ENV_OVERRIDE =
+  /^(?:PATH|LD_[A-Z_]+|DYLD_[A-Z_]+|BASH_ENV|ENV)$/;
+
+export type PlanModeCommandDiagnosis =
+  | { safe: true }
+  /** Classified as mutating, risky or forbidden by `classifyOperationEffect`. */
+  | { safe: false; cause: "command-not-allowed"; effect: OperationEffect }
+  /**
+   * The effect is harmless, but the program the shell would start could not be
+   * verified as a trusted system program (fake binary, user/project PATH hit,
+   * path-qualified executable, PATH/loader override).
+   */
+  | {
+      safe: false;
+      cause: "executable-untrusted";
+      executable: string;
+      reason: "project-controlled" | "relative-path" | "env-override";
+      path?: string;
+    };
+
+/**
+ * Plan Mode decision for one shell command:
+ * effect classification -> executable discovery -> trust of source and target.
+ *
+ * Plan Mode must be able to read and explore, so the gate is deliberately
+ * open: a program passes whatever its source (system profile, user profile,
+ * dev-shell store path, user bin dir) as long as its effect is harmless. Only
+ * what a project could plant is refused: the first PATH hit or an absolute
+ * path inside the project (`bin/ls`, `node_modules/.bin`, a relative or empty
+ * PATH entry), relative path-qualified executables (`./ls`), and PATH/loader
+ * overrides in front of the command. Trust (resolveExecutableTrust) stays
+ * available for callers that need to know whether a program is a system one.
+ */
+export function diagnosePlanModeCommand(
+  command: string,
+  cwd: string,
+  /** Injectable for tests that model a different system layout. */
+  trust?: { policy?: ExecutableTrustPolicy; pathEnv?: string },
+): PlanModeCommandDiagnosis {
+  let untrusted:
+    | Extract<PlanModeCommandDiagnosis, { cause: "executable-untrusted" }>
+    | undefined;
+  const effect = classifyOperationEffect(command, cwd, (check) => {
+    if (untrusted) return;
+    if (check.kind === "env-override") {
+      if (EXECUTION_ENV_OVERRIDE.test(check.name)) {
+        untrusted = {
+          safe: false,
+          cause: "executable-untrusted",
+          executable: `${check.name}=`,
+          reason: "env-override",
+        };
+      }
+      return;
+    }
+    const resolved = resolveExecutableTrust(
+      check.raw,
+      cwd,
+      trust?.policy,
+      trust?.pathEnv,
+    );
+    if (resolved.trusted) return;
+    const projectRoot = resolve(cwd);
+    const hit = resolved.path;
+    const reason =
+      resolved.reason === "relative-path"
+        ? "relative-path"
+        : hit !== undefined &&
+            (isInside(projectRoot, hit) ||
+              isInside(projectRoot, canonicalOrUndefined(hit) ?? hit))
+          ? "project-controlled"
+          : undefined;
+    if (!reason) return;
+    untrusted = {
+      safe: false,
+      cause: "executable-untrusted",
+      executable: check.raw,
+      reason,
+      path: hit,
+    };
+  });
+  if (effect !== "SAFE") {
+    return { safe: false, cause: "command-not-allowed", effect };
+  }
+  return untrusted ?? { safe: true };
+}
+
 export function isPlanModeDiagnosticCommand(
   command: string,
   cwd: string,
 ): boolean {
-  if (containsUnquotedVariableExpansion(command)) return false;
-  const parsed = parseReadOnlyShell(command);
-  return (
-    !parsed.error &&
-    parsed.segments.every((tokens) => isPlanModeDiagnosticSegment(tokens, cwd))
-  );
+  return diagnosePlanModeCommand(command, cwd).safe;
 }
 
 function referencesSystemPath(command: string): boolean {
@@ -1393,27 +1946,36 @@ const OPAQUE_INTERPRETERS = new Set([
 function executableToken(tokens: string[]): {
   executable: string;
   args: string[];
+  /** The command word as written (path included), before basename folding. */
+  raw: string;
+  /** True when an `env` prefix was skipped to reach the command word. */
+  viaEnv: boolean;
+  /** Names of `NAME=value` assignments skipped before the command word. */
+  assignedNames: string[];
 } {
   let index = 0;
-  while (
-    index < tokens.length &&
-    /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[index])
-  ) {
-    index += 1;
-  }
-  if (tokens[index] === "env") {
-    index += 1;
-    while (
-      index < tokens.length &&
-      (tokens[index].startsWith("-") ||
-        /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[index]))
-    ) {
+  let viaEnv = false;
+  const assignedNames: string[] = [];
+  const skipAssignments = (allowOptions: boolean) => {
+    while (index < tokens.length) {
+      const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=.*/.exec(tokens[index]);
+      if (assignment) assignedNames.push(assignment[1]);
+      else if (!(allowOptions && tokens[index].startsWith("-"))) break;
       index += 1;
     }
+  };
+  skipAssignments(false);
+  if (tokens[index] === "env") {
+    viaEnv = true;
+    index += 1;
+    skipAssignments(true);
   }
   return {
     executable: tokens[index]?.split("/").pop()?.toLowerCase() ?? "",
     args: tokens.slice(index + 1),
+    raw: tokens[index] ?? "",
+    viaEnv,
+    assignedNames,
   };
 }
 
@@ -1609,20 +2171,19 @@ function extendedYoloBoundary(
 /**
  * YOLO 2 and 3 share YOLO 1's "no routine confirmations" behaviour and differ
  * only in what happens at a hard boundary: YOLO 2 asks (dangerous styling),
- * YOLO 3 allows. The single exception is wiping the root filesystem, which
- * even YOLO 3 confirms — no legitimate workflow is lost by that one dialog.
+ * YOLO 3 allows without a special root-filesystem exception.
  */
 function decideExtendedYoloBash(
   permissionLevel: "yolo-ask" | "yolo-full",
   command: string,
   cwd: string,
 ): PolicyDecision {
-  // Checked independently of the first boundary hit, so a root wipe cannot
-  // hide behind an earlier match such as `cat ~/.ssh/id_rsa; rm -rf /`.
+  if (permissionLevel === "yolo-full") return YOLO_FULL_ALLOW;
+  // Check independently of the first boundary hit, so a root wipe cannot
+  // hide behind another hard boundary in YOLO 2.
   if (CRITICAL_BASH_PATTERNS[0][0].test(command)) {
     return ask(ROOT_WIPE_REASON, true);
   }
-  if (permissionLevel === "yolo-full") return YOLO_FULL_ALLOW;
   const boundary = extendedYoloBoundary(command, cwd);
   return boundary
     ? ask(boundary, true)

@@ -7,14 +7,11 @@ import { WORKFLOW_MODES, type WorkflowMode } from "./workflow-mode.ts";
  * WORKFLOW_CAPABILITY_EVENTS.request and invoking respond during the event
  * dispatch.
  *
- * When nobody answers, the mode is `undefined` — deliberately not `work`.
- * Defaulting to `work` meant that a workflow provider which failed to load, was
- * disabled, or threw during registration silently downgraded the permission
- * layer to its most permissive workflow state: the guards would happily allow
- * project-wide writes because, as far as they could tell, no plan was running.
- * A missing answer is now treated as strictly as the strictest known state
- * (`isPlanRestricted` below), so the failure mode is a visible refusal instead
- * of an invisible loosening.
+ * When nobody answers, the mode remains `undefined` — it is not silently
+ * rewritten to `work`. Permission consumers distinguish uncertainty by
+ * operation: inspection remains available, while mutations are handled by
+ * their active permission level. Only an affirmative plan-mode report enables
+ * the plan-specific write ban.
  */
 
 export const WORKFLOW_CAPABILITY_EVENTS = {
@@ -38,7 +35,7 @@ export interface WorkflowEventBus {
   emit(channel: string, value: unknown): void;
 }
 
-/** No provider answered. Every consumer must treat this as fail-closed. */
+/** No provider answered; consumers apply operation-specific fallback policy. */
 export const UNKNOWN_WORKFLOW: WorkflowCapabilitySnapshot = { mode: undefined };
 
 export function requestWorkflowCapabilities(
@@ -71,15 +68,13 @@ export function isWorkflowStateUnknown(
 }
 
 /**
- * The single question the permission layer asks: must plan-mode restrictions
- * apply? An unknown state answers yes, so a broken or absent provider cannot
- * be the reason a write goes through.
+ * Plan restrictions apply only when a provider affirmatively reports a plan
+ * mode. Missing workflow state is not itself evidence that a turn is planning.
  */
 export function isPlanRestricted(
   snapshot: WorkflowCapabilitySnapshot,
 ): boolean {
   return (
-    snapshot.mode === undefined ||
     snapshot.mode === "simple_plan" ||
     snapshot.mode === "detailed_plan"
   );

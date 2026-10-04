@@ -1134,6 +1134,9 @@ await test("Plan Mode blocks every project write, including the old plan path", 
         "git --no-pager diff --no-ext-diff --no-textconv",
         "git --no-pager log -n 1",
         "rg plan extensions",
+        "cat /etc/os-release",
+        "node --version",
+        "find . -type f | grep ts | head -50",
       ]) {
         const result = await harness.runHooks(
           "tool_call",
@@ -1144,6 +1147,22 @@ await test("Plan Mode blocks every project write, including the old plan path", 
           !result.some((entry) => entry?.block),
           `${command} remains read-only in Plan Mode`,
         );
+      }
+
+      for (const command of [
+        "touch new-file.txt",
+        "echo x > new-file.txt",
+        "rm new-file.txt",
+        "npm install",
+        "sudo id",
+        "git reset --hard",
+      ]) {
+        const mutation = await harness.runHooks(
+          "tool_call",
+          { toolName: "bash", input: { command } },
+          ctx,
+        );
+        assert(mutation.some((entry) => entry?.block), `${command} remains blocked while planning`);
       }
 
       await harness.commands.get("permission")("confirm-all", ctx);
@@ -1739,7 +1758,7 @@ await test("the execution prompt is a stable, bindable string", () => {
   );
 });
 
-await test("/yolo selects between three stufen, never persists them and keeps plan mode locked", async () => {
+await test("/yolo selects between three stufen, never persists them and YOLO 3 unlocks plan mode", async () => {
   if (!planMode || !modePermissions) return;
   await withPlanHome(async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-yolo-stufen-e2e-"));
@@ -1812,8 +1831,8 @@ await test("/yolo selects between three stufen, never persists them and keeps pl
       await chooseWorkflow(harness, ctx);
       result = await write();
       assert(
-        result.some((entry) => entry?.block),
-        "YOLO 3 does not unlock writes in plan mode",
+        !result.some((entry) => entry?.block),
+        "YOLO 3 unlocks writes in plan mode",
       );
     } finally {
       rmSync(cwd, { recursive: true, force: true });

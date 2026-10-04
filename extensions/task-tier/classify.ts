@@ -55,6 +55,17 @@ const DEEP_PATTERN = new RegExp(
 const BROAD_PATTERN =
   /\b(alle[nrms]?|überall|komplett\w*|gesamte\w*|repo-?weit|projektweit|across|everywhere|all files|whole|entire)\b/i;
 
+/**
+ * Veröffentlichende Aktionen brauchen laut AGENTS.md einen Verifier-Lauf vor
+ * Commit/Push; FAST sperrt Verifier technisch, daher nie FAST.
+ */
+const RELEASE_PATTERN =
+  /\b(commit\w*|push\w*|merge\w*|publish\w*|release\w*|deploy\w*|veröffentlich\w*|pull[- ]?request|pr)\b/i;
+
+/** Kurze Fortsetzungs-Prompts ("weiter", "ja", "go"): Klasse erbt vom Vorgänger. */
+const CONTINUATION_PATTERN =
+  /^\s*(weiter|mach weiter|fortsetzen|ja|ok(?:ay)?|go|los|jo|passt|bitte|dann|continue|proceed|yes)\b[\s\w,.!?äöüß-]{0,40}$/i;
+
 const PATH_PATTERN =
   /(?:[\w.-]+\/)+[\w.-]+\.\w+|\b[\w-]+\.(?:ts|tsx|js|mjs|cjs|json|md|css|py|sh|ya?ml)\b/g;
 
@@ -76,12 +87,27 @@ export function classifyPrompt(
   const paths = mentionedPaths(text);
   if (DEEP_PATTERN.test(text)) return "deep";
   if (matchingVerifierRequiredPaths(paths).length > 0) return "deep";
+  if (RELEASE_PATTERN.test(text)) return "normal";
   if (text.length > FAST_MAX_CHARS) return "normal";
   if (paths.length > FAST_MAX_PATHS) return "normal";
   if (BROAD_PATTERN.test(text)) return "normal";
   const listItems = text.match(/^\s*(?:[-*]|\d+[.)])\s+/gm)?.length ?? 0;
   if (listItems > FAST_MAX_LIST_ITEMS) return "normal";
   return "fast";
+}
+
+export function isContinuationPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  return (
+    text.length > 0 && text.length <= 48 && CONTINUATION_PATTERN.test(text)
+  );
+}
+
+const TIER_RANK: Record<TaskTier, number> = { fast: 0, normal: 1, deep: 2 };
+
+/** Höhere der beiden Klassen. */
+export function maxTier(a: TaskTier, b: TaskTier): TaskTier {
+  return TIER_RANK[a] >= TIER_RANK[b] ? a : b;
 }
 
 export type ThinkingTarget = "low" | "medium" | "high" | undefined;

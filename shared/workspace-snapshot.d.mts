@@ -12,6 +12,9 @@ export interface WorkspaceRename {
 
 export interface WorkspaceSnapshot {
   schemaVersion: string;
+  vcs?: "git" | "none";
+  workspaceRoot?: string;
+  filesystemEntries?: number;
   head: string;
   staged: WorkspacePathChange[];
   unstaged: WorkspacePathChange[];

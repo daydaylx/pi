@@ -6,6 +6,8 @@ import {
   openSync,
   readSync,
   readlinkSync,
+  readdirSync,
+  realpathSync,
 } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 
@@ -582,6 +584,64 @@ function readUntrackedContent(worktree, paths) {
   return { ok: true, value: results };
 }
 
+function collectFilesystemSnapshot(worktree, options = {}) {
+  const root = resolve(worktree);
+  const maxEntries = options.maxFilesystemEntries ?? 100_000;
+  const entries = [];
+  const pending = [""];
+  try {
+    while (pending.length > 0) {
+      if (options.signal?.aborted) {
+        return snapshotError("git_command_failed", "Snapshot-Erfassung wurde abgebrochen (AbortSignal).");
+      }
+      const directory = pending.pop();
+      const absolute = resolve(root, directory);
+      const names = readdirSync(absolute).sort();
+      for (const name of names) {
+        if (directory === "" && name === ".git") continue;
+        if (name === "node_modules") continue;
+        const path = directory ? `${directory}/${name}` : name;
+        const fullPath = resolve(root, path);
+        const stat = lstatSync(fullPath, { bigint: true });
+        const kind = stat.isSymbolicLink() ? "symlink" : stat.isDirectory() ? "directory" : stat.isFile() ? "file" : "other";
+        const linkTarget = kind === "symlink" ? readlinkSync(fullPath) : "";
+        entries.push(`${path}\\0${kind}\\0${stat.size}\\0${stat.mtimeNs}\\0${stat.ctimeNs}\\0${stat.mode}\\0${stat.ino}\\0${linkTarget}`);
+        if (kind === "directory") pending.push(path);
+        if (entries.length > maxEntries) {
+          return snapshotError("read_failed", `Filesystem-Snapshot überschreitet das Limit von ${maxEntries} Einträgen.`);
+        }
+      }
+    }
+    entries.sort();
+    const workspaceRoot = realpathSync(root);
+    const fingerprint = hash(JSON.stringify({
+      schemaVersion: WORKSPACE_SNAPSHOT_SCHEMA_VERSION,
+      vcs: "none",
+      workspaceRoot,
+      entries,
+    }));
+    return {
+      ok: true,
+      snapshot: {
+        schemaVersion: WORKSPACE_SNAPSHOT_SCHEMA_VERSION,
+        vcs: "none",
+        workspaceRoot,
+        head: "",
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        renames: [],
+        deletions: [],
+        changedFiles: [],
+        filesystemEntries: entries.length,
+        fingerprint,
+      },
+    };
+  } catch (error) {
+    return snapshotError("read_failed", `Filesystem-Snapshot nicht lesbar: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function buildSnapshot(state, stagedPatch, unstagedPatch, untrackedContent) {
   const { stagedStatus, unstagedStatus, untracked, head } = state;
   const changedFiles = [
@@ -646,12 +706,11 @@ function buildSnapshot(state, stagedPatch, unstagedPatch, untrackedContent) {
  * the patch/content hashes above (that would silently widen what counts as
  * "unchanged").
  *
- * Never throws — every failure mode (no repository, git unavailable, a
- * failed/aborted git command, an unreadable path, a workspace that kept
- * changing across the retry budget, or a parser contradiction) comes back as
- * `{ ok: false, error: { code, message } }` so every caller can react
- * explicitly instead of a bare exception forcing an implicit, inconsistent
- * fallback per call site. See `docs/decisions/027-workspace-snapshot-content-identity.md`.
+ * Never throws. Git workspaces use the content-sensitive Git snapshot above;
+ * a missing repository or Git executable falls back to a bounded filesystem
+ * inventory (excluding .git and node_modules). Genuine read, race, aborted
+ * command and parser failures return `{ ok: false, error: { code, message } }`.
+ * See `docs/decisions/027-workspace-snapshot-content-identity.md`.
  */
 export async function collectWorkspaceSnapshot(worktree, options = {}) {
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
@@ -662,11 +721,14 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
     timeoutMs,
     maxAttempts,
   );
-  if (!repositoryRoot.ok) return repositoryRoot;
-  // Retained across attempts so that exhausting the budget on a persistent
-  // (non-transient) collectCheapState failure — e.g. genuinely no
-  // repository — still reports that specific, nameable cause instead of
-  // masking it behind a generic unstable_workspace.
+  if (!repositoryRoot.ok) {
+    if (["no_repository", "git_unavailable"].includes(repositoryRoot.error.code)) {
+      return collectFilesystemSnapshot(worktree, options);
+    }
+    return repositoryRoot;
+  }
+  // Retained across attempts so a persistent Git-side collection failure is
+  // returned with its concrete category instead of a generic unstable result.
   let lastError;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {

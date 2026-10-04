@@ -188,27 +188,91 @@ read-only-Webtools (`web_search`, `fetch_content`, nur trusted wirksam),
 > und von ADR 012 behaupteten, `verify` sei vollständig gesperrt — das war
 > falsch.
 
-Für Bash gilt eine eng gehaltene Klassifikation
-(`isPlanModeDiagnosticCommand`): sichere Git-Inspektion mit expliziten Optionen
-(`git status --short`, `git --no-pager diff --no-ext-diff --no-textconv --stat`,
-`git --no-pager log -n 1`), `rg`, `find` (ohne `-exec`/`-delete`/…) sowie eine
-kleine Gruppe reiner Lesewerkzeuge ohne Skriptcharakter (`pwd`, `ls`, `cat`,
-`head`, `tail`, `wc`, `stat`, `du`, `df`, `tree`, `sort`/`uniq` ohne `-o`).
-Git-Optionen für Ausgabedateien, externe Diff-Treiber, Textconv, Hooks,
-`-C`/lokale Ersetzungen und ähnliche Ausführungswege bleiben gesperrt. Die
-ausführbare Datei muss auf ein vertrauenswürdiges System-/Runtime-Binary
-auflösen; `./git` und projektlokale PATH-Ersatzdateien werden nicht akzeptiert.
-Kein Test, kein Lint, kein Build, kein `git show` über Bash. Projekteigene
-Skripte (`npm`/`pnpm`/`yarn run`/`test`/bare Skript-Aliase) werden nie allein
-am Namen als sicher eingestuft, weil sie beliebigen Lifecycle-Code ausführen
-können.
+Für Bash entscheidet `diagnosePlanModeCommand` (Wrapper:
+`isPlanModeDiagnosticCommand`) in zwei Stufen:
 
-Der zugrunde liegende Parser (`parseReadOnlyShell`, gemeinsam mit dem
-`readonly`-Pfad genutzt) lässt keine Shell-Verkettung zu: weder `;` noch
-`&&`/`||`/ein alleinstehendes `&`, Pipelines (`|`) noch Redirections (`<`/`>`,
-auch nicht `2>/dev/null`). Die Klassifikation ist eine vorgelagerte
-Allowlist, keine OS-Sandbox; sie wird deshalb in Plan, Readonly und Recovery
-gemeinsam verwendet und ersetzt keine Prozess-/Dateisystemisolation.
+1. **Wirkung** (`classifyOperationEffect`): Shell-Befehle werden nach ihrer
+   Wirkung klassifiziert, nicht anhand einer Namensliste. Read-only-Kommandos
+   und Pipelines daraus sind zulässig (`ls`, `find . -maxdepth 2 -type f`,
+   `git status --short`, `rg`, `cat`, `du`, `df` …). Gesperrt bleiben
+   Redirect-Writes, Datei-/Git-/Paketmutationen (`find -delete/-exec/-execdir/
+-ok`, `git reset`, `npm install`), `sudo`/Systemoperationen,
+   Interpreter-/Skriptausführung (`npm test`, `sh -c`, `eval`, `source`) und
+   Secret-Pfade (`.env*`, `credentials.json`, `auth.json`, `id_rsa`,
+   `id_ed25519`, `*.pem` …).
+2. **Executable-Einstieg** (nächster Abschnitt): Der Planmodus soll lesen und
+   erkunden können, deshalb ist dieses Gate bewusst offen. Abgelehnt wird nur,
+   was ein Projekt einschleusen könnte (projektlokale Binaries, PATH-/Loader-
+   Overrides); Systemprogramme und eigene Installationen laufen.
+
+Eine Ablehnung nennt ihre Ursache. `WorkflowAssessment.planModeCause` ist
+`"command-not-allowed"` (Stufe 1) oder `"executable-untrusted"` (Stufe 2); die
+Blockmeldung der zweiten Stufe nennt Programm, Grund und ersten PATH-Treffer.
+Der strikte Parser `parseReadOnlyShell` (keine Verkettung, Pipeline oder
+Redirection) gilt weiterhin für die Zugriffsstufe `readonly`
+(`isPlanSafeCommand`). Die Klassifikation ist ein Guard vor dem Executor, keine
+OS-Sandbox.
+
+### Executable-Vertrauen
+
+Zwei getrennte Fragen (`extensions/shared/permission-policy.ts`):
+
+- `resolveExecutableTrust`: **Ist das ein vertrauenswürdiges Systemprogramm?**
+  Discovery → Quelle → Ziel. Dient der Klassifikation und der Diagnose.
+- `diagnosePlanModeCommand`: **Darf der Planmodus es starten?** Offen, außer
+  bei projektkontrollierten Treffern.
+
+**Discovery:** Der erste ausführbare PATH-Treffer gilt; ein späterer Treffer
+gleichen Namens ist nie ein Fallback. Relative und leere PATH-Einträge zeigen
+auf das Arbeitsverzeichnis des Befehls.
+
+**Systemquellen** (`resolveExecutableTrust` meldet `trusted`):
+
+| Quelle             | Pfade                                                                        | Bedingung                                                                |
+| ------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Klassische Distro  | `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`                                     | Realpath des Ziels bleibt in diesen Verzeichnissen                       |
+| NixOS-Systemprofil | `/run/current-system/sw/bin`, `/nix/var/nix/profiles/default/bin`            | Gefunden **über** das Profil; Profilverzeichnis und Ziel liegen im Store |
+| Host-Laufzeit      | der beim Modulstart gefundene `rg`, das laufende `node` (`process.execPath`) | Exakter Realpath, außerhalb des Projekts                                 |
+| Shell-Builtins     | `echo`, `printf`, `pwd`, `type`                                              | Nur ohne Pfad                                                            |
+
+Bei Systemprofil-Treffern ist der Werkzeugname der **aufgerufene Name**, nicht
+der Realpath: Nix-Pakete wie coreutils sind Multicall-Binaries
+(`ls -> …/bin/coreutils`), die über `argv[0]` verzweigen. `/nix/store` allein ist
+kein Systembeweis (gruppenschreibbar, enthält auch Benutzer- und
+Projekt-Closures); `~/.nix-profile`, `~/.local/bin` und ein Store-`bin` im PATH
+sind keine Systemquelle.
+
+**Planmodus-Entscheidung:** Ein Programm, das keine Systemquelle ist (Benutzer-
+profil, `nix develop`-Pfad, `~/.local/bin`, absoluter Pfad außerhalb des
+Projekts), darf im Planmodus trotzdem starten, wenn seine Wirkung harmlos ist.
+Das ist bewusst offener als ein Systempfad-Zwang, weil sonst gewöhnliche
+Erkundung (`rg`, `python3 --version`, `npm ls` aus einer Benutzerinstallation)
+scheitern würde. Abgelehnt (`executable-untrusted`) werden nur:
+
+- projektkontrollierte Treffer: erster PATH-Treffer oder absoluter Pfad im
+  Projekt (`bin/ls`, `node_modules/.bin/ls`, relativer/leerer PATH-Eintrag,
+  Symlink ins Projekt). `PATH=/projekt/fake-bin:/run/current-system/sw/bin` mit
+  `/projekt/fake-bin/ls` wird abgelehnt, ohne Rückfall auf das System-`ls`;
+- relative pfadbehaftete Aufrufe (`./ls`, `./git status`, `../x/ls`);
+- PATH-/Loader-Overrides vor dem Befehl (siehe unten).
+
+**Prefix-Umgehungen:** `env`, `nohup` und Zuweisungen vor dem Befehl werden
+mitgeprüft. `PATH=…`, `LD_*`, `DYLD_*`, `BASH_ENV` und `ENV` vor einem Befehl
+machen ihn unverifizierbar, weil die Shell dann einen anderen Suchpfad nutzt als
+die Prüfung.
+
+**Bewusste Randfälle und Grenzen:**
+
+- Ein Programm aus einem Benutzer- oder Store-Pfad wird nicht auf Echtheit
+  geprüft: ein bösartiges Binary in `~/.local/bin` würde im Planmodus laufen,
+  sofern sein Name harmlos klassifiziert ist. Das ist ein bewusst akzeptiertes
+  Risiko; der Schutz gilt dem, was ein Projekt einschleusen kann.
+- Ein Aufruf ohne PATH-Treffer oder mit nicht vorhandenem absolutem Pfad
+  außerhalb des Projekts startet nichts und wird nicht abgelehnt.
+- Die Prüfung ist eine Momentaufnahme vor der Ausführung (TOCTOU).
+- Skriptinhalte und Wrapper werden nicht inspiziert.
+- `LD_PRELOAD` & Co. werden nur als Präfix des Befehls erkannt, nicht, wenn sie
+  bereits in der Umgebung des Agentenprozesses gesetzt sind.
 
 `yolo` hebt diese Grenzen nicht auf; nur `readonly` reicht die Entscheidung an
 die Zugriffsstufe weiter (dort ist ohnehin schon alles gesperrt). Der Guard

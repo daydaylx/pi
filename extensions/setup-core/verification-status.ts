@@ -199,7 +199,7 @@ export function verificationStatus(
   ledger: VerificationLedger,
   options: VerificationStatusOptions,
 ): VerificationStatus {
-  if (!snapshot) return "checks_unavailable";
+  if (!snapshot || snapshot.vcs === "none") return "checks_unavailable";
   // Nothing has changed since HEAD. That is a statement about the workspace,
   // not about verification: no check has necessarily ever run here. It must
   // never read as a passed check, hence "unchanged" rather than "clean".

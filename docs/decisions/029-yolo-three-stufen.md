@@ -15,49 +15,37 @@ YOLO bekommt drei Stufen. Alle sind temporär, werden nie persistiert (ein
 gespeichertes YOLO fällt beim Sitzungsstart auf `project-write` zurück) und
 sind über `/permission` oder `/yolo` wählbar.
 
-| Stufe | Level (`/permission`) | `/yolo` | Verhalten an einer harten Grenze |
-| ----- | --------------------- | ------- | -------------------------------- |
-| 1     | `yolo`                | `1`     | blockiert (unverändert)          |
-| 2     | `yolo-ask`            | `2`     | Rückfrage mit Gefahr-Dialog      |
-| 3     | `yolo-full`           | `3`     | erlaubt, auch sudo und Secrets   |
+| Stufe | Level (`/permission`) | `/yolo` | Verhalten an einer harten Grenze                                  |
+| ----- | --------------------- | ------- | ----------------------------------------------------------------- |
+| 1     | `yolo`                | `1`     | blockiert (unverändert)                                           |
+| 2     | `yolo-ask`            | `2`     | Rückfrage mit Gefahr-Dialog                                       |
+| 3     | `yolo-full`           | `3`     | erlaubt, auch sudo, Secrets, Partitionen und destruktive Aktionen |
 
 „Harte Grenze" meint: Secrets/Credentials, Schreibzugriffe außerhalb des
 Projekts und Symlink-Escapes bei Mutationen, Systempfad-Schreibzugriffe, sudo/su,
 System-Paketmanager, Download-to-shell, opake Interpreter, externe Shell-
 Schreibzugriffe, unquotierte Shell-Variablen sowie Schreibzugriffe auf
-Ausführungspfade (`.git/`, `.pi/lsp.json`, `.pi/verify.json`). Normales Lesen
-ist dagegen global zulässig, solange kein Secret berührt wird und das Projekt
-als vertrauenswürdig gilt.
+Ausführungspfade (`.git/`, `.pi/lsp.json`, `.pi/verify.json`). YOLO 3 gibt
+alle diese Aktionen ohne Rückfrage frei.
 
 Ohne Grenzberührung verhalten sich alle drei Stufen bei der Permission-Policy
 gleich: keine Rückfragen, keine Commit-Verifier-Pflicht, unbekannte Tools
-werden nach der bestehenden YOLO-Policy behandelt. Das Recovery-Gate ist
-keine Permission-Rückfrage, sondern eine Workspace-Integritätsgrenze: Bei
-armed oder unbekanntem Recovery-Zustand blockiert es mutierende,
-ausführende und delegierende Fähigkeiten unabhängig von jeder YOLO-Stufe;
-bekannte read-only Tools und `recovery_check` bleiben verfügbar. `/yolo` ohne
+werden nach der bestehenden YOLO-Policy behandelt. YOLO 3 übergeht zusätzlich
+Trust-, Recovery- und Planmodus-Sperren. `/yolo` ohne
 Argument schaltet wie bisher Stufe 1 um; `/yolo 2` und `/yolo 3` wechseln
 direkt in die Stufe, dieselbe Stufe erneut oder `/yolo off` schaltet YOLO aus.
 `Super+Y` bleibt bei Stufe 1.
 
-## Was auch Stufe 3 nicht aufhebt
+## Grenzen außerhalb der Permission-Policy
 
-- **Trust-Grenze:** In nicht vertrauenswürdigen Projekten bleiben mutierende
-  und externe Tools blockiert.
-- **Plan-Mode-Schreibschutz (ADR 012/016):** Der Planmodus bleibt auf jeder
-  Stufe eine harte Schreibgrenze für Agenten-Tool-Aufrufe.
-- **Recovery-Integrität (ADR 016):** Ein unbekannter oder scharf gestellter
-  Recovery-Zustand bleibt auf jeder Stufe eine harte Grenze. Nur bekannte
-  read-only Fähigkeiten und `recovery_check` bleiben frei.
-- **Credential-Pfad im interaktiven Shell-Tool:** Passwörter laufen nie durch
-  die vom Modell gelieferte Kommandozeile (`sudo -S`, Pipelines, `sshpass`,
-  `--password`). `sudo id` im `interactive_shell`-Tool funktioniert; das
-  Passwort tippt der Mensch ins Terminal. Im nicht-interaktiven `bash`-Tool
-  läuft sudo nur mit passwortlosem sudo (NOPASSWD) oder gültigem Ticket.
+- **OS-Rechte:** YOLO 3 hebt Pi-interne Permission-Sperren auf, kann dem
+  Prozess aber keine Betriebssystemrechte verleihen. `sudo` benötigt eine
+  passende sudo-Konfiguration oder ein gültiges Ticket; ohne Root-Rechte kann
+  der Prozess Partitionen und geschützte Systempfade weiterhin nicht ändern.
 - **Web-Eingabegrenze:** `fetch_content` nur `http(s)` ohne Zugangsdaten in
   der URL.
-- **Root-Wipe:** `rm -rf /` verlangt auch in Stufe 3 eine Bestätigung — die
-  einzige Ausnahme, weil dort kein legitimer Workflow verloren geht.
+- **Tool-Verträge:** Spezifische Prüf- und Web-Tools behalten ihre eigenen
+  Eingabe- und Vertragsprüfungen.
 
 ## Begründung
 
@@ -66,8 +54,9 @@ harten Grenze" (blockieren, fragen, erlauben) und keine drei getrennten
 Regelwerke. Dadurch teilen sich alle drei Stufen den Pfad der Routine-Fälle,
 und ein Fehler in einer Grenze wirkt nicht stufenweise unterschiedlich.
 Stufe 3 ist bewusst ein Vollzugriff auf Wunsch des Nutzers; die Restrisiken
-(Secrets landen im Modellkontext, sudo ohne Rückfrage) sind akzeptiert und
-über den Statusbadge `⚠ YOLO 3 · VOLLZUGRIFF` jederzeit sichtbar.
+(Secrets landen im Modellkontext, destruktive System- und Partitionsänderungen
+laufen ohne Rückfrage) sind akzeptiert und über den Statusbadge
+`⚠ YOLO 3 · VOLLZUGRIFF` jederzeit sichtbar.
 
 ## Konsequenzen
 

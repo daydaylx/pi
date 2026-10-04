@@ -45,9 +45,9 @@ const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", ASK_USER_TOOL_NAME];
 /**
  * Das Recovery-Gate sperrt nach einem fehlgeschlagenen oder unterbrochenen
  * Turn mit möglicher Mutation genau die Werkzeuge, die den Workspace weiter
- * verändern könnten. `recovery_check` bleibt als Entsperre frei. Die
- * Entscheidung gilt unabhängig von der Zugriffsstufe — auch YOLO hebt sie
- * nicht auf.
+ * verändern könnten. `recovery_check` bleibt als Entsperre frei. YOLO 3
+ * übergeht dieses Gate ausdrücklich; alle anderen Stufen müssen den Zustand
+ * zuerst prüfen.
  */
 function recoveryGateBlocks(
   armed: boolean,
@@ -145,7 +145,7 @@ export function registerPermissionGuards(
   });
 
   const guardToolCall = async (event: ToolCallEvent, ctx: ExtensionContext) => {
-    if (!ctx.isProjectTrusted()) {
+    if (!ctx.isProjectTrusted() && session.level() !== "yolo-full") {
       if (!READ_ONLY_TOOLS.includes(event.toolName)) {
         return {
           block: true,
@@ -279,16 +279,17 @@ export function registerPermissionGuards(
         reason: commitGate.reason,
       };
     }
-    // Recovery ist eine Workspace-Integritätsgrenze, keine Permission-Rückfrage:
-    // auch YOLO darf unbekannten Zustand nicht als sicher freigeben.
+    // Recovery ist eine Workspace-Integritätsgrenze, keine Permission-Rückfrage.
+    // YOLO 3 übergeht sie ausdrücklich als Vollzugriffsstufe.
     const effect = recoveryEffect(event, ctx.cwd);
     const recoveryEpoch = session.epoch();
     const recovery =
-      effect === "potentially_mutating"
+      effect === "potentially_mutating" && session.level() !== "yolo-full"
         ? await requestRecoveryStatus(pi.events)
         : { armed: false as const };
     if (
       effect === "potentially_mutating" &&
+      session.level() !== "yolo-full" &&
       recoveryEpoch !== session.epoch()
     ) {
       return {
@@ -298,7 +299,10 @@ export function registerPermissionGuards(
           "Recovery-Gate: Die Sitzung hat während der Zustandsabfrage gewechselt. Der veraltete Status wurde verworfen; den Aufruf in der aktuellen Sitzung erneut starten.",
       };
     }
-    if (recoveryGateBlocks(recovery.armed, event, ctx.cwd)) {
+    if (
+      session.level() !== "yolo-full" &&
+      recoveryGateBlocks(recovery.armed, event, ctx.cwd)
+    ) {
       return {
         block: true,
         ...stopNonInteractive(ctx),
@@ -381,7 +385,7 @@ export function registerPermissionGuards(
   // during a planning turn, not to restrict what the operator types at
   // their own keyboard.
   pi.on("user_bash", async (event, ctx: ExtensionContext) => {
-    if (!ctx.isProjectTrusted()) {
+    if (!ctx.isProjectTrusted() && session.level() !== "yolo-full") {
       return {
         result: {
           output:

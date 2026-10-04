@@ -90,6 +90,10 @@ und bedeutet den bisherigen Ablauf.
 
 - Commits, Pushes und Branch-Veröffentlichungen nur auf ausdrücklichen
   Auftrag ausführen.
+- Vor Commit/Push mit verifier-pflichtigem Diff den Verifier laufen lassen.
+  „commit und push“ und kurze Fortsetzungen („weiter“) werden nie als FAST
+  klassifiziert; sperrt dennoch eine Aufgabenklasse den Verifier, den Nutzer
+  um einen neuen Turn bitten statt den Commit zu umgehen.
 - Commit und Push als getrennte Schritte ausführen. Nach einem Push-Fehler den
   lokalen Commit- und Upstream-Status berichten und höchstens einen gezielten
   Retry durchführen.
@@ -101,6 +105,18 @@ und bedeutet den bisherigen Ablauf.
   statt `bash rg`/`git grep`/`find` — sie sind vom Plan-Modus-Gate nicht
   betroffen (das greift nur bei `bash`/`write`/`edit`) und liefern
   strukturierte Treffer statt geratener Pfade.
+- Im Planmodus nur einzelne, einfache Lese-Kommandos per `bash` absetzen — keine
+  Verkettungen (`&&`, `;`, `|`), Redirections oder Prozesssubstitution; mehrere
+  Abfragen als getrennte parallele Aufrufe senden. `read` nie auf ein
+  Verzeichnis richten (`ls`/`find` verwenden) und Pfade zuvor per `find`
+  bestätigen.
+- Vor jedem `edit` den Zielbereich frisch lesen (nie aus dem Gedächtnis oder
+  einem älteren Read patchen); nach „Could not find …“ sofort neu lesen statt
+  den Patch zu variieren.
+- Tests dort starten, wo die CI sie startet (Paketverzeichnis laut
+  Projekt-`AGENTS.md`/CI-Workflow), nicht auf Monorepo-Root-Ebene.
+- Meldet das Recovery-Gate gesperrte Schreibzugriffe, zuerst genau einmal
+  `recovery_check` ausführen und erst danach schreiben.
 - Vor der ersten Änderung Arbeitsauftrag, betroffene Implementierung und
   zugehörige Tests gezielt lokalisieren; keine Pfade oder Patch-Kontexte
   raten. Nach zwei fehlgeschlagenen Lese-, Pfad- oder Editversuchen den
@@ -185,6 +201,9 @@ Hauptagent definiert die Arbeit, die Runtime die Grenzen, Evidenz entscheidet
   fertige Antwort noch das stärkere Modell: Aussagen und Evidenz vergleichen,
   bei Bedarf selbst nachprüfen oder gezielt verifizieren lassen, verbleibende
   Unsicherheit offen nennen.
+- Bei jedem `spec`-Aufruf nur die Felder von `spec` (plus `context: "fresh"`)
+  übergeben; `agent`, `task`, `chain`, `tasks`, `config`, `model`, `cwd`,
+  `output`, `skill` und `action` sind daneben verboten und werden geblockt.
 - `profile: "verify"` läuft über die Verifier-Kette (Ticket, Dedup,
   Commit-Gate) und braucht `spec.verification` (`originalRequest`,
   `delegatedQuestion`, `diff`, `baseline`, `acceptance`).

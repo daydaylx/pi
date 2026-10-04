@@ -474,6 +474,9 @@ export const resilienceSections = {
         "git status --short",
         "git --no-pager diff --no-ext-diff --no-textconv --stat",
         "git --no-pager log -n 1",
+        "git -C . status",
+        "git status | head -20",
+        "./git status",
       ];
       for (const command of allowedDiagnosticCommands) {
         const freeDiagnosticBash = await gateHarness.runHooks(
@@ -499,10 +502,7 @@ export const resilienceSections = {
         "git diff --output=plan-write.txt",
         "git --no-pager diff --ext-diff",
         "git --no-pager diff --textconv",
-        "git -C . status",
-        "git status | head -20",
         "sh -c 'git status'",
-        "./git status",
       ];
       for (const command of blockedDiagnosticCommands) {
         const blockedDiagnosticBash = await gateHarness.runHooks(
@@ -523,7 +523,7 @@ export const resilienceSections = {
         ).length,
         recoveryRequestsBeforeBlockedDiagnostics +
           blockedDiagnosticCommands.length,
-        "blocked diagnostic shell commands request a fresh recovery status",
+        "risky shell commands request a fresh recovery status",
       );
       const freeRecoveryCall = await gateHarness.runHooks(
         "tool_call",
@@ -1209,52 +1209,26 @@ export const resilienceSections = {
           rmSync(largeDiffRepo, { recursive: true, force: true });
         }
 
-        // A real snapshot defect (no .git) stays fail-closed, but with a
-        // cause and a non-destructive way out — never a reset/clean
-        // recommendation.
-        const brokenRepo = mkdtempSync(
-          path.join(tmpdir(), "pi-resilience-broken-"),
+        // A plain directory without Git uses the filesystem fingerprint and
+        // can complete recovery without entering a Git-only error state.
+        const noGitWorkspace = mkdtempSync(
+          path.join(tmpdir(), "pi-resilience-no-git-"),
         );
         try {
-          const brokenHarness = createHarness();
-          planMode?.default(brokenHarness.api);
-          modePermissions.default(brokenHarness.api);
-          resilience.default(brokenHarness.api);
-          const brokenCtx = brokenHarness.makeContext({ cwd: brokenRepo });
-          await armGate(brokenHarness, brokenCtx);
+          writeFileSync(path.join(noGitWorkspace, "work.txt"), "content\n");
+          const noGitHarness = createHarness();
+          planMode?.default(noGitHarness.api);
+          modePermissions.default(noGitHarness.api);
+          resilience.default(noGitHarness.api);
+          const noGitCtx = noGitHarness.makeContext({ cwd: noGitWorkspace });
+          await armGate(noGitHarness, noGitCtx);
 
-          const recoveryTool = brokenHarness.tools.get("recovery_check");
-          let thrown;
-          try {
-            await recoveryTool.execute(
-              "check-1",
-              {},
-              undefined,
-              undefined,
-              brokenCtx,
-            );
-          } catch (error) {
-            thrown = error;
-          }
-          assert(
-            thrown instanceof Error,
-            "recovery_check throws on a genuine snapshot defect (fail-closed, F-02)",
-          );
-          assert(
-            thrown.message.includes("no_repository"),
-            "the failure names the specific snapshot error category",
-          );
-          assert(
-            thrown.message.includes("keine pauschale Bereinigung"),
-            "the failure explicitly steers away from a destructive reset/clean, not just names the cause",
-          );
-          eq(
-            latestStatus(brokenHarness, "recovery"),
-            "⚠ Recovery-Check offen",
-            "the gate stays armed after a failed check — a real defect must not release the lock",
-          );
+          const recoveryTool = noGitHarness.tools.get("recovery_check");
+          const result = await recoveryTool.execute("check-1", {}, undefined, undefined, noGitCtx);
+          assert(result.content[0]?.text.includes("VCS: none"), "recovery reports that Git is unavailable without failing");
+          eq(latestStatus(noGitHarness, "recovery"), undefined, "filesystem recovery releases the gate");
         } finally {
-          rmSync(brokenRepo, { recursive: true, force: true });
+          rmSync(noGitWorkspace, { recursive: true, force: true });
         }
       },
     );

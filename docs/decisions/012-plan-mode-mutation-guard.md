@@ -2,17 +2,19 @@
 
 ## Entscheidung
 
-Während `simple_plan` oder `detailed_plan` aktiv ist, schreibt der Agent keine
-Projektdatei. Als Bash sind ausschließlich eng klassifizierte
-Diagnosebefehle freigegeben: `git status`/`diff`/`log` nur mit sicheren,
-expliziten Optionen (beispielsweise `git status --short`,
-`git --no-pager diff --no-ext-diff --no-textconv --stat` und
-`git --no-pager log -n 1`), dazu `rg`, `find` ohne mutierende Optionen und die
-kleine Gruppe reiner Lesewerkzeuge. Die ausführbare Datei muss auf ein
-vertrauenswürdiges System-/Runtime-Binary auflösen; `./git` und projektlokale
-PATH-Ersatzdateien werden abgewiesen. Optionen für Ausgabedateien, externe
-Diff-Treiber, Textconv, Hooks und `-C` bleiben gesperrt. Lokale Lese- und
-LSP-Tools bleiben nutzbar.
+Während `simple_plan` oder `detailed_plan` aktiv ist, verändert der Agent
+keinen Projekt- oder Systemzustand. Reads sind nicht auf Projektpfade oder eine
+feste Tool-Allowlist beschränkt: harmlose externe/systemische Dateien,
+Symlinks nach außen, Statusabfragen, Dokumentation und unbekannte
+Inspektionswerkzeuge sind zulässig, Secrets/Credentials bleiben gesperrt.
+
+Shell-Befehle werden nach Wirkung klassifiziert statt nach einer positiven
+Liste von Executable-Namen. Read-only-Kommandos und Pipelines daraus sind
+zulässig; erkannte Redirect-Writes, Datei-/Git-/Paketmutationen,
+Systemänderungen, Interpreterausführung und sensible Aktionen werden im
+Planmodus geblockt. Unbekannte Tool-Capabilities werden an das aktive
+Permission-Level delegiert, statt allein wegen ihres Namens abgelehnt zu
+werden. Die Klassifikation ist ein Guard vor dem Executor, keine OS-Sandbox.
 
 > **Korrektur (ADR [020](020-explicit-plan-approval.md)).** Dieser Abschnitt
 > lautete ursprünglich, der Agent dürfe `.agent/plans/current-plan.md` mit
@@ -27,27 +29,34 @@ LSP-Tools bleiben nutzbar.
 >   `tests/workflow-mode/permissions.test.mjs`). Gesperrt bleiben
 >   `check: "test"`, jede andere `verify`-Form und `project_check`.
 
-Projekt-Skripte werden nicht anhand ihres Namens als sicher eingestuft:
-`npm test`, `npm run build` und `project_check` bleiben gesperrt.
-`subagent` bleibt ebenfalls gesperrt, mit genau einer positiv geprüften
-Ausnahme: eine normale SINGLE-Ausführung des `investigator` mit nichtleerem
-Task. Sie besitzt keinen `action`-, `async`-, `output`-, Context-, CWD- oder
-Skill-Override; der Guard setzt fehlende Debug-Artefakte vor dem Executor auf
-`false`, ein explizites `artifacts: true` bleibt blockiert. Debugger, Verifier,
-unbekannte Rollen und alle Management-Aktionen können die Dateigrenze daher
-nicht indirekt umgehen. Die frühere Ausnahme „`yolo` bleibt die ausdrückliche
-Ausnahme“ ist durch [016](016-plan-mode-yolo-lock-and-recovery-gate.md)
-ersetzt: YOLO hebt die Planmodus-Grenzen für Agenten-Tool-Aufrufe nicht mehr
-auf.
+Projekt-Skripte wie `npm test` und `npm run build` gelten als riskante
+Ausführung und bleiben im Planmodus gesperrt. Andere unbekannte
+Tool-Capabilities richten sich nach ihrer eigenen Permission- und
+Ausführungsrichtlinie. `project_check` und `verify`-Varianten außer dem gezielten Typecheck sind im
+Planmodus gesperrt. Subagenten sind nur über die geprüfte temporäre
+`analyse`-/`research`-Spec ohne zusätzliche Schreibfähigkeit und Artefakte
+erlaubt; Verifier- und Management-Aufrufe bleiben gesperrt. YOLO hebt die
+Planmodus-Grenzen für Agenten-Tool-Aufrufe nicht auf.
+
+**Executable-Einstieg.** Der Planmodus soll lesen und erkunden können; das Gate
+für Programme ist deshalb bewusst offen. Programme aus Systempfaden
+(klassisch `/usr/bin`, …; NixOS-Systemprofil `/run/current-system/sw/bin` und
+`/nix/var/nix/profiles/default/bin`), Benutzerprofilen und dem Nix Store
+dürfen laufen, wenn ihre Wirkung harmlos ist. Abgelehnt werden nur
+projektkontrollierte Treffer (erster PATH-Treffer oder Pfad im Projekt,
+`./ls`) und PATH-/Loader-Overrides vor dem Befehl; es gibt keinen Rückfall auf
+einen späteren Treffer. Akzeptiertes Risiko: ein bösartiges Binary in einem
+Benutzerpfad läuft. Eine Ablehnung unterscheidet `command-not-allowed`
+(Wirkung) von `executable-untrusted` (Einstieg); Details in
+`extensions/plan-mode/README.md`, „Executable-Vertrauen“.
 
 ## Begründung
 
-Ein Skriptname beweist keine Lesefähigkeit; auch Test-, Build- und
-Verifikationsskripte dürfen Dateien oder externe Zustände ändern. Die enge
-Allowlist ist direkt prüfbar und benötigt weder einen neuen Workflow noch eine
-Permission-State-Machine. `parseReadOnlyShell` akzeptiert deshalb ebenfalls
-keine Pipelines, Verkettungen oder Redirections. Die Parserprüfung ist nur ein
-zusätzlicher Guard vor dem Executor und keine OS-Sandbox.
+Die Projektgrenze bleibt für Mutationen bestehen, nicht für harmlose Reads.
+Shell-Wirkung wird gemeinsam für Plan- und Recovery-Gates klassifiziert.
+Unbekannte Kommandonamen sind nicht automatisch riskant; bekannte Mutation,
+Redirection, Systemoperationen und unklare Skriptausführung bleiben gebremst.
+Die Klassifikation ist kein vollständiger Shell-Sandbox-Ersatz.
 
 ## Konsequenzen
 
@@ -55,8 +64,7 @@ zusätzlicher Guard vor dem Executor und keine OS-Sandbox.
   erhalten; nur ein erfolgreich geschriebener, erfolgreich beendeter Turn
   ersetzt ihn. Seit 020 wird dabei ausschließlich die Plandatei der eigenen
   Sitzung zurückgesetzt.
-- Tests prüfen End-to-End: Projekt-Skripte blockiert, Git-Lesen erlaubt,
-  nur die artefaktfreie Investigator-SINGLE-Ausnahme erlaubt und jede andere
-  Subagent-Variante blockiert. Die frühere YOLO-Ausnahme ist durch 016
-  abgelöst: YOLO bleibt im Planmodus für Agenten-Tool-Aufrufe gesperrt.
+- Tests prüfen End-to-End: normale externe Reads und Analyse-Pipelines
+  erlaubt, Mutationen und Secrets blockiert, Plan-Tool weiterhin erlaubt;
+  Projekt-Skripte und nicht geprüfte Subagent-Aufrufe bleiben gesperrt.
 - Shift+Tab bleibt die einzige Workflow-Steuerung.

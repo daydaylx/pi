@@ -9,7 +9,7 @@
 
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { ASK_USER_TOOL_NAME } from "./ask-user-policy.ts";
-import { isPlanModeDiagnosticCommand } from "./permission-policy.ts";
+import { classifyOperationEffect } from "./permission-policy.ts";
 import {
   INTERACTIVE_SHELL_TOOL_NAME,
   interactiveShellCommand,
@@ -33,7 +33,7 @@ const READ_ONLY_TOOLS = new Set([
   "lsp_workspace_symbols",
 ]);
 
-/** Known read-only tools stay available; every unclassified capability fails closed. */
+/** Native inspection tools and shell effects classified as SAFE stay available. */
 export function recoveryEffect(
   event: Pick<ToolCallEvent, "toolName" | "input">,
   cwd: string,
@@ -44,7 +44,7 @@ export function recoveryEffect(
     const command = event.toolName === INTERACTIVE_SHELL_TOOL_NAME
       ? interactiveShellCommand(event as ToolCallEvent)
       : String((event.input as Record<string, unknown> | undefined)?.command ?? "");
-    return isPlanModeDiagnosticCommand(command, cwd) ? "read_only" : "potentially_mutating";
+    return classifyOperationEffect(command, cwd) === "SAFE" ? "read_only" : "potentially_mutating";
   }
   return "potentially_mutating";
 }

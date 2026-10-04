@@ -2,11 +2,12 @@
 
 ## Kontext
 
-`shared/workspace-snapshot.mjs` liefert den einen Fingerprint, an den
+`shared/workspace-snapshot.mjs` liefert den Workspace-Fingerprint, an den
 Recovery-Gate (`extensions/resilience/`) und Verifier-Gate
 (`extensions/permissions/verifier-policy.ts`, `extensions/setup-core/`) ihre
-Sicherheitsentscheidungen binden: unverändert = derselbe Fingerprint,
-geändert = ein anderer. Die beiden inhaltssensitiven Bestandteile
+Sicherheitsentscheidungen binden. In Git-Workspaces wird er aus dem Git-Diff
+gebildet; ohne Git nutzt Recovery eine begrenzte Filesystem-Inventur. Die
+beiden inhaltssensitiven Bestandteile
 (`stagedPatchSha256`/`unstagedPatchSha256`) wurden aus `git diff --no-ext-diff
 --binary -M` gehasht — ohne `--no-textconv`.
 
@@ -42,9 +43,16 @@ bzw. eine erneute Prüfung fälschlich blockiert.
    einmalig als `changed` behandelt und verlangen einen erneuten
    `recovery_check` — das ist das bestehende Fail-closed-Verhalten bei jedem
    Fingerprint-Mismatch, kein Sonderfall.
-4. Die kanonische Definition von Inhaltsidentität steht im JSDoc-Block über
-   `collectWorkspaceSnapshot` in `shared/workspace-snapshot.mjs` — dieser ADR
-   verweist nur darauf, statt sie zu duplizieren.
+4. Die kanonische Definition der Git-Inhaltsidentität steht im JSDoc-Block
+   über `collectWorkspaceSnapshot` in `shared/workspace-snapshot.mjs` — dieser
+   ADR verweist nur darauf, statt sie zu duplizieren.
+5. Ohne Repository oder Git-Binary wird ein `vcs: "none"`-Snapshot gebildet:
+   sortierte Pfade samt Typ, Größe, Zeiten, Modus, Inode und Symlink-Ziel.
+   Die Inventur ist auf das Workspace-Root begrenzt, folgt keinen Symlinks,
+   überspringt `.git` und `node_modules` und bricht bei mehr als 100.000
+   Einträgen sichtbar ab. Das ist ausreichend für Recovery-Fingerprint-Checks,
+   aber kein Ersatz für einen Git-Diff; Git-spezifische Verifier-Commitchecks
+   bleiben außerhalb eines Repositories deaktiviert/blockiert.
 
 ## Konsequenzen
 
@@ -54,6 +62,9 @@ bzw. eine erneute Prüfung fälschlich blockiert.
 - Jeder vor diesem Fix gespeicherte Fingerprint ist bewusst ungültig; ein
   offenes Recovery-Gate über die Deploy-Grenze hinweg verlangt einmalig einen
   erneuten `recovery_check`.
+- Plain-Verzeichnisse können Recovery verwenden, ohne `no_repository` als
+  Workspace-Fehler zu behandeln. Der Filesystem-Fingerprint behauptet keinen
+  Git-Diff und wird nicht für Commit-Verifier-Coverage verwendet.
 - Kein Konsument (`extensions/resilience/index.ts`,
   `extensions/permissions/verifier-policy.ts`,
   `extensions/setup-core/index.ts`) musste geändert werden — alle vergleichen

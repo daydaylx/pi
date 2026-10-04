@@ -21,8 +21,10 @@ import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import {
   classifyPrompt,
+  isContinuationPrompt,
   isHigherThan,
   isLowerThan,
+  maxTier,
   thinkingForTier,
   type TaskTier,
 } from "./classify.ts";
@@ -121,6 +123,7 @@ export default function taskTier(pi: ExtensionAPI): void {
   const tracker = createReadTracker();
   let turn: TurnState | undefined;
   let editedFirst = false;
+  let previousTier: TaskTier | undefined;
 
   const setAutoThinking = (level: string) => {
     if (!turn || pi.getThinkingLevel() === level) return;
@@ -134,6 +137,7 @@ export default function taskTier(pi: ExtensionAPI): void {
     if (to === "fast") return;
     turn.escalations.push(`${turn.tier}->${to}: ${reason}`);
     turn.tier = to;
+    previousTier = to;
     const started = turn.startedThinking;
     if (to === "deep") {
       if (isHigherThan("high", pi.getThinkingLevel())) setAutoThinking("high");
@@ -153,6 +157,7 @@ export default function taskTier(pi: ExtensionAPI): void {
   pi.on("session_start", () => {
     tracker.reset();
     turn = undefined;
+    previousTier = undefined;
     editedFirst = false;
     clearAutoThinking();
   });
@@ -162,8 +167,13 @@ export default function taskTier(pi: ExtensionAPI): void {
     const planning = isPlanningMode(
       requestWorkflowCapabilities(pi.events).mode ?? "work",
     );
-    const tier = classifyPrompt(event.prompt, { planning });
+    let tier = classifyPrompt(event.prompt, { planning });
+    // "weiter"/"ja" setzt die vorige Aufgabe fort: Klasse (inkl. Eskalation) erben.
+    if (previousTier && isContinuationPrompt(event.prompt)) {
+      tier = maxTier(tier, previousTier);
+    }
     turn = newTurn(tier);
+    previousTier = tier;
     editedFirst = false;
     clearAutoThinking();
     turn.startedThinking = pi.getThinkingLevel();

@@ -58,7 +58,12 @@ export const verificationSections = {
       eq(
         statusOf(cleanSnapshot, {}, ["typecheck"]),
         "unchanged",
-        "an unmodified workspace reports unchanged, never a passed check",
+        "an unmodified Git workspace reports unchanged, never a passed check",
+      );
+      eq(
+        statusOf({ ...cleanSnapshot, vcs: "none" }, {}, ["typecheck"]),
+        "checks_unavailable",
+        "a filesystem-only snapshot does not claim there is no Git diff",
       );
       eq(
         statusOf(changedSnapshot, {}, ["typecheck"]),
@@ -1151,11 +1156,8 @@ export const verificationSections = {
           "F-04: no-verdict record cannot satisfy the commit coverage gate",
         );
 
-        // F-03: a verdict whose workspace snapshot cannot be collected must
-        // not leave a *stale* prior binding looking current — an orphaned
-        // old verdict is more dangerous than none. Break the workspace's
-        // .git after two real runs already exist in the ledger, then feed a
-        // third, otherwise-passing run through.
+        // F-03: removing Git must fall back to a filesystem fingerprint.
+        // The newly observed state cannot reuse the prior passing verdict.
         await startVerifier("verifier-call-3");
         rmSync(path.join(workspace, ".git"), { recursive: true, force: true });
         await harness.runHooks(
@@ -1179,16 +1181,10 @@ export const verificationSections = {
           },
           trusted,
         );
-        eq(
-          queryCapabilities(),
-          {
-            workspaceRoot: undefined,
-            workspaceFingerprint: undefined,
-            verifierStatus: undefined,
-            verifierVerdict: undefined,
-          },
-          "F-03: a verdict whose workspace snapshot cannot be collected is discarded, not left bound to a stale prior fingerprint",
-        );
+        const afterNoGit = queryCapabilities();
+        assert(typeof afterNoGit.workspaceFingerprint === "string", "F-03: filesystem fallback provides a current fingerprint");
+        eq(afterNoGit.verifierStatus, "stale", "F-03: the prior Git-bound verdict is stale under the new filesystem fingerprint");
+        eq(afterNoGit.verifierVerdict, undefined, "F-03: stale verifier verdict is not reused");
 
         await harness.runHooks("session_shutdown", {}, trusted);
         eq(

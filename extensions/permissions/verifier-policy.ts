@@ -306,10 +306,10 @@ export async function assessVerifierDedup(
  * text and reach this same check — Arbeitsvertrag §8 (Rückwärtskompatibilität):
  * kein Pfad darf die Policy umgehen.
  *
- * A snapshot that cannot be collected is treated the same way
- * assessVerifierDedup treats it above: "don't know" is never evidence that a
- * run is safe to block, so an uncollectible snapshot permits the run rather
- * than blocking it — undefined here means "no need assessment possible",
+ * A missing Git diff or uncollectible snapshot is not treated as an empty
+ * change set: "don't know" is never evidence that a run is safe to block, so
+ * an unassessable workspace permits the run rather than blocking it —
+ * undefined here means "no need assessment possible",
  * and the caller must not treat that as not_needed. The commit gate
  * (assessGitCommitVerifierGate) is the place a hard-required check is
  * actually enforced fail-closed; this gate only decides whether an
@@ -320,7 +320,7 @@ export async function assessVerifierNeedForTask(
   cwd: string,
 ): Promise<VerifierNeedAssessment | undefined> {
   const result = await collectWorkspaceSnapshot(cwd);
-  if (!result.ok) return undefined;
+  if (!result.ok || result.snapshot.vcs === "none") return undefined;
   return assessVerifierNeed({
     changedFiles: result.snapshot.changedFiles,
     // No technical signal in this runtime currently distinguishes "the
@@ -552,6 +552,13 @@ export async function assessGitCommitVerifierGate(
         `git commit ist erst nach Behebung möglich — eine Verifier-Pflicht ` +
         `darf nie stillschweigend umgangen werden, nur weil sie nicht ` +
         `geprüft werden konnte.`,
+    };
+  }
+
+  if (result.snapshot.vcs === "none") {
+    return {
+      blocked: true,
+      reason: "Verifier-Pflicht kann nicht geprüft werden: VCS: none; ein Git-Commit ist außerhalb eines Git-Repositories nicht zulässig.",
     };
   }
 

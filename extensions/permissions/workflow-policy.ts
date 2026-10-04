@@ -1,7 +1,8 @@
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import {
-  isPlanModeDiagnosticCommand,
+  diagnosePlanModeCommand,
+  type PlanModeCommandDiagnosis,
   isSensitivePathIdentity,
   isSensitiveReference,
   resolvePathScope,
@@ -9,7 +10,6 @@ import {
 import type { PermissionLevel } from "../shared/workflow-status.ts";
 import {
   isPlanRestricted,
-  isWorkflowStateUnknown,
   type WorkflowCapabilitySnapshot,
 } from "../shared/workflow-capabilities.ts";
 import { PLAN_WRITE_TOOL_NAME } from "../plan-mode/plan-tool.ts";
@@ -39,16 +39,21 @@ import {
  * that model instead of re-litigating each command by hand.
  *
  * YOLO 2 ("yolo-ask") and YOLO 3 ("yolo-full") pass every one of these
- * boundaries on to the decision layer, which asks (2) or allows (3). What
- * they never lift lives elsewhere: the trust boundary and the Plan Mode
- * write ban (guards.ts, planModeMutationGuard) and the interactive
- * credential-path guard below.
+ * boundaries on to the decision layer, which asks (2) or allows (3). YOLO 3
+ * also lifts the trust, recovery, Plan Mode and interactive credential-path
+ * gates. Those remain in place for every other permission level.
  */
 export interface WorkflowAssessment {
   blocked: boolean;
   reason: string;
   /** The hard layer explicitly approved a read outside the project. */
   allowOutsideProjectRead?: boolean;
+  /**
+   * Why Plan Mode refused a shell command, for tests and debugging: the
+   * command's effect is not allowed, or its program could not be verified as a
+   * trusted system program.
+   */
+  planModeCause?: "command-not-allowed" | "executable-untrusted";
 }
 
 export const LOCAL_LSP_TOOLS = new Set([
@@ -59,7 +64,7 @@ export const LOCAL_LSP_TOOLS = new Set([
   "lsp_workspace_symbols",
 ]);
 
-const WRITE_TOOLS = new Set(["write", "edit"]);
+const WRITE_TOOLS = new Set(["write", "edit", "project_check", "subagent"]);
 const READ_ONLY_FILE_TOOLS = new Set(["read", "grep", "find", "ls"]);
 /**
  * Tools plan mode allows. `plan_write` is the plan's only writer and owns its
@@ -82,20 +87,6 @@ const PLAN_MODE_READ_ONLY_TOOLS = new Set([
   "fetch_content",
   ...LOCAL_LSP_TOOLS,
 ]);
-
-/** Read-only in every workflow mode, so safe even with no workflow provider. */
-const UNIVERSAL_READ_TOOLS = new Set([
-  "read",
-  "grep",
-  "find",
-  "ls",
-  "recovery_check",
-  ASK_USER_TOOL_NAME,
-  ...LOCAL_LSP_TOOLS,
-]);
-
-const UNKNOWN_WORKFLOW_REASON =
-  "Workflow-Zustand nicht verfügbar: Keine Workflow-Extension hat den aktuellen Modus gemeldet. Solange unklar ist, ob geplant oder gearbeitet wird, bleiben mutierende und nicht nachweislich lesende Tools gesperrt (fail-closed). Prüfe, ob extensions/plan-mode/index.ts geladen ist.";
 
 /**
  * Appended to every hard-boundary block reason. A single denied read (a
@@ -143,7 +134,7 @@ function hardSystemBash(command: string): string | undefined {
 /**
  * `permissionLevel` is optional so call sites that only ever run outside
  * YOLO (or don't care) can omit it; omitting it never widens what is
- * blocked, only `"yolo"` explicitly does.
+ * blocked, only an explicitly selected YOLO level changes the decision.
  */
 export function assessBash(
   command: string,
@@ -165,10 +156,9 @@ function assessInteractiveShell(
   permissionLevel?: PermissionLevel,
 ): WorkflowAssessment {
   const forbidden = forbiddenInteractiveCredentialPath(command);
-  // The credential-path guard holds on every level, YOLO 3 included: the
-  // password of a sudo/ssh/su call is typed by the human into the terminal,
-  // never passed through the model-provided command string.
-  if (forbidden) return { blocked: true, reason: forbidden };
+  // YOLO 3 is an explicit bypass of all command-level permission checks.
+  if (forbidden && permissionLevel !== "yolo-full")
+    return { blocked: true, reason: forbidden };
   if (permissionLevel === "yolo-ask" || permissionLevel === "yolo-full")
     return PERMITTED;
   if (isSensitiveReference(command)) {
@@ -266,11 +256,7 @@ export function planModeVerifyTypecheckAllowed(
   workflow: WorkflowCapabilitySnapshot,
   event: ToolCallEvent,
 ): boolean {
-  if (
-    !isPlanRestricted(workflow) ||
-    isWorkflowStateUnknown(workflow) ||
-    event.toolName !== "verify"
-  ) {
+  if (!isPlanRestricted(workflow) || event.toolName !== "verify") {
     return false;
   }
   const input = event.input;
@@ -282,15 +268,10 @@ export function planModeVerifyTypecheckAllowed(
 }
 
 /**
- * Plan Mode permits only fixed read-only capabilities. It deliberately does
- * not infer safety from project-script names: `npm test` and `npm run build`
- * can run arbitrary lifecycle code. YOLO hebt diese Grenzen für
- * Agenten-Tool-Aufrufe nicht auf — der Planmodus bleibt auch bei aktivem
- * YOLO eine harte Schreibgrenze; nur `readonly` reicht die Entscheidung an
- * die Zugriffsstufe weiter.
- *
- * Ein unbekannter Workflow-Zustand (kein Provider hat geantwortet) wird wie
- * der Planmodus behandelt: fail-closed statt stillschweigend nach `work`.
+ * Plan Mode blocks effects classified as mutating/risky/forbidden. Shell
+ * commands are classified by their effects, not by a fixed executable
+ * allowlist; unknown tool capabilities are delegated to the active permission
+ * level rather than being blocked solely because they are new.
  */
 export function planModeBashGuard(
   workflow: WorkflowCapabilitySnapshot,
@@ -300,14 +281,35 @@ export function planModeBashGuard(
 ): WorkflowAssessment {
   if (!isPlanRestricted(workflow)) return PERMITTED;
   if (permissionLevel === "readonly") return PERMITTED;
-  if (isPlanModeDiagnosticCommand(command, cwd)) return PERMITTED;
+  const diagnosis = diagnosePlanModeCommand(command, cwd);
+  if (diagnosis.safe) return PERMITTED;
+  if (diagnosis.cause === "executable-untrusted") {
+    const where = diagnosis.path ? `: ${diagnosis.path}` : "";
+    return {
+      blocked: true,
+      planModeCause: diagnosis.cause,
+      reason: `Planmodus: Das Programm „${diagnosis.executable}“ wird im Planmodus nicht gestartet (${EXECUTABLE_UNTRUSTED_DETAIL[diagnosis.reason]}${where}). Projektlokale Programme gelten nicht als vertrauenswürdig; Systemprogramme und eigene Installationen sind erlaubt.`,
+    };
+  }
   return {
     blocked: true,
-    reason: isWorkflowStateUnknown(workflow)
-      ? UNKNOWN_WORKFLOW_REASON
-      : "Planmodus: Dieses Shell-Kommando ist während der Planung nicht erlaubt. Bash ist auf sicher klassifizierte git status/diff/log-Aufrufe, rg, find sowie eine kleine Gruppe reiner Lesewerkzeuge (pwd, ls, cat, head, tail, wc, stat, du, df, tree, sort/uniq) begrenzt — keine Pipelines, Verkettungen oder Redirections.",
+    planModeCause: diagnosis.cause,
+    reason:
+      "Planmodus: Dieses Shell-Kommando kann mutieren oder ist als riskant klassifiziert; Shell-Schreibzugriffe und sensible Aktionen sind während der Planung gesperrt.",
   };
 }
+
+const EXECUTABLE_UNTRUSTED_DETAIL: Record<
+  Extract<
+    PlanModeCommandDiagnosis,
+    { cause: "executable-untrusted" }
+  >["reason"],
+  string
+> = {
+  "project-controlled": "erster PATH-Treffer liegt im Projekt",
+  "relative-path": "relativer Programmpfad",
+  "env-override": "Umgebungsvariable verändert die Programmsuche",
+};
 
 export function planModeMutationGuard(
   workflow: WorkflowCapabilitySnapshot,
@@ -316,6 +318,7 @@ export function planModeMutationGuard(
   cwd: string,
 ): WorkflowAssessment {
   if (!isPlanRestricted(workflow)) return PERMITTED;
+  if (permissionLevel === "yolo-full") return PERMITTED;
   if (permissionLevel === "readonly") return PERMITTED;
 
   if (
@@ -331,26 +334,17 @@ export function planModeMutationGuard(
       cwd,
     );
   }
-  if (
-    !isWorkflowStateUnknown(workflow) &&
-    PLAN_MODE_READ_ONLY_TOOLS.has(event.toolName)
-  )
-    return PERMITTED;
-  // With no workflow provider, only the tools that are read-only in every mode
-  // stay available; plan-mode's own additions (plan_write, the temporary-spec
-  // exception, verify(typecheck)) require a state someone actually vouched for.
-  if (
-    isWorkflowStateUnknown(workflow) &&
-    UNIVERSAL_READ_TOOLS.has(event.toolName)
-  )
-    return PERMITTED;
+  if (PLAN_MODE_READ_ONLY_TOOLS.has(event.toolName)) return PERMITTED;
   if (planModeVerifyTypecheckAllowed(workflow, event)) return PERMITTED;
-  return {
-    blocked: true,
-    reason: isWorkflowStateUnknown(workflow)
-      ? UNKNOWN_WORKFLOW_REASON
-      : WRITE_TOOLS.has(event.toolName)
-        ? "Planmodus: Der Agent schreibt während der Planung keine Projektdateien. Der Plan selbst wird ausschließlich über plan_write gespeichert."
-        : "Planmodus: Dieses Tool ist nicht als nachweislich lesend freigegeben.",
-  };
+  if (WRITE_TOOLS.has(event.toolName) || event.toolName === "verify") {
+    return {
+      blocked: true,
+      reason:
+        "Planmodus: Dieses Tool kann Projektzustand verändern oder Code ausführen. Der Plan selbst wird ausschließlich über plan_write gespeichert.",
+    };
+  }
+  // Capability is not inferred from a tool's name. Let the configured
+  // permission level handle newly introduced tools instead of denying them
+  // merely because this module has not learned their contract yet.
+  return PERMITTED;
 }
