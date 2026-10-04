@@ -1406,6 +1406,27 @@ await test("subagent delegations are allowed without confirmation outside readon
   );
 });
 
+await test("plan mode write guard: YOLO 2 keeps it, YOLO 3 bypasses it (ADR 029)", () => {
+  if (!workflowPolicy) return;
+  const cwd = process.cwd();
+  const planning = { mode: "simple_plan" };
+  const writeEvent = { toolName: "write", input: { path: "src/x.ts" } };
+  assert(
+    workflowPolicy.planModeMutationGuard(planning, "yolo-ask", writeEvent, cwd)
+      .blocked,
+    "a write outside the plan file stays blocked under YOLO 2",
+  );
+  assert(
+    !workflowPolicy.planModeMutationGuard(
+      planning,
+      "yolo-full",
+      writeEvent,
+      cwd,
+    ).blocked,
+    "YOLO 3 bypasses the plan mode write guard",
+  );
+});
+
 await test("plan mode guards hold even under an active YOLO level", () => {
   if (!workflowPolicy) return;
   const cwd = process.cwd();
@@ -2786,6 +2807,48 @@ await test("untrusted projects block external reads and symlink escapes at the t
     recoveryRequests,
     0,
     "YOLO 3 bypasses the armed recovery gate without querying it",
+  );
+
+  // The operator's own `!` shell follows the same trust boundary: blocked in
+  // an untrusted project below YOLO 3, open under YOLO 3.
+  const userBash = (ctx) =>
+    harness.runHooks(
+      "user_bash",
+      { command: "echo hi", cwd, excludeFromContext: false },
+      ctx,
+    );
+  const fullUserBash = await userBash(untrustedContext);
+  assert(
+    fullUserBash.every(
+      (r) => !r?.result?.output?.includes("Harte Trust-Grenze"),
+    ),
+    "YOLO 3 lets user_bash run in an untrusted project",
+  );
+
+  // YOLO 2 keeps the trust boundary and the recovery gate.
+  await harness.commands.get("yolo")("2", trustedContext);
+  const askUserBash = await userBash(untrustedContext);
+  assert(
+    askUserBash.some((r) => r?.result?.output?.includes("Harte Trust-Grenze")),
+    "YOLO 2 keeps user_bash blocked in an untrusted project",
+  );
+  const askWrite = await check(
+    "write",
+    { path: "x.txt", content: "x" },
+    untrustedContext,
+  );
+  assert(
+    askWrite.some((r) => r?.block && r.reason.includes("Harte Trust-Grenze")),
+    "YOLO 2 keeps the trust boundary for mutating tools",
+  );
+  const askRecovery = await check(
+    "write",
+    { path: "x.txt", content: "x" },
+    trustedContext,
+  );
+  assert(
+    askRecovery.some((r) => r?.block && /Recovery-Gate/.test(r.reason)),
+    "YOLO 2 keeps the armed recovery gate",
   );
 });
 

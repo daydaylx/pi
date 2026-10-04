@@ -34,6 +34,12 @@ const suites = [
     file: "temporary-agent-policy.test.mjs",
     env: {},
   },
+  { name: "task-tier", file: "task-tier.test.mjs", env: {} },
+  {
+    name: "dependency-discovery",
+    file: "dependency-discovery.test.mjs",
+    env: {},
+  },
   {
     name: "verifier-risk",
     file: "verifier-risk.test.mjs",

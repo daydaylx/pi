@@ -584,6 +584,22 @@ function readUntrackedContent(worktree, paths) {
   return { ok: true, value: results };
 }
 
+/** Whether `.git` exists in the worktree or any parent directory. */
+function findGitMarker(worktree) {
+  let directory = resolve(worktree);
+  for (;;) {
+    try {
+      lstatSync(resolve(directory, ".git"));
+      return true;
+    } catch {
+      // Absent or unreadable: keep walking towards the filesystem root.
+    }
+    const parent = resolve(directory, "..");
+    if (parent === directory) return false;
+    directory = parent;
+  }
+}
+
 function collectFilesystemSnapshot(worktree, options = {}) {
   const root = resolve(worktree);
   const maxEntries = options.maxFilesystemEntries ?? 100_000;
@@ -592,7 +608,10 @@ function collectFilesystemSnapshot(worktree, options = {}) {
   try {
     while (pending.length > 0) {
       if (options.signal?.aborted) {
-        return snapshotError("git_command_failed", "Snapshot-Erfassung wurde abgebrochen (AbortSignal).");
+        return snapshotError(
+          "git_command_failed",
+          "Snapshot-Erfassung wurde abgebrochen (AbortSignal).",
+        );
       }
       const directory = pending.pop();
       const absolute = resolve(root, directory);
@@ -603,23 +622,36 @@ function collectFilesystemSnapshot(worktree, options = {}) {
         const path = directory ? `${directory}/${name}` : name;
         const fullPath = resolve(root, path);
         const stat = lstatSync(fullPath, { bigint: true });
-        const kind = stat.isSymbolicLink() ? "symlink" : stat.isDirectory() ? "directory" : stat.isFile() ? "file" : "other";
+        const kind = stat.isSymbolicLink()
+          ? "symlink"
+          : stat.isDirectory()
+            ? "directory"
+            : stat.isFile()
+              ? "file"
+              : "other";
         const linkTarget = kind === "symlink" ? readlinkSync(fullPath) : "";
-        entries.push(`${path}\\0${kind}\\0${stat.size}\\0${stat.mtimeNs}\\0${stat.ctimeNs}\\0${stat.mode}\\0${stat.ino}\\0${linkTarget}`);
+        entries.push(
+          `${path}\\0${kind}\\0${stat.size}\\0${stat.mtimeNs}\\0${stat.ctimeNs}\\0${stat.mode}\\0${stat.ino}\\0${linkTarget}`,
+        );
         if (kind === "directory") pending.push(path);
         if (entries.length > maxEntries) {
-          return snapshotError("read_failed", `Filesystem-Snapshot überschreitet das Limit von ${maxEntries} Einträgen.`);
+          return snapshotError(
+            "read_failed",
+            `Filesystem-Snapshot überschreitet das Limit von ${maxEntries} Einträgen.`,
+          );
         }
       }
     }
     entries.sort();
     const workspaceRoot = realpathSync(root);
-    const fingerprint = hash(JSON.stringify({
-      schemaVersion: WORKSPACE_SNAPSHOT_SCHEMA_VERSION,
-      vcs: "none",
-      workspaceRoot,
-      entries,
-    }));
+    const fingerprint = hash(
+      JSON.stringify({
+        schemaVersion: WORKSPACE_SNAPSHOT_SCHEMA_VERSION,
+        vcs: "none",
+        workspaceRoot,
+        entries,
+      }),
+    );
     return {
       ok: true,
       snapshot: {
@@ -638,7 +670,10 @@ function collectFilesystemSnapshot(worktree, options = {}) {
       },
     };
   } catch (error) {
-    return snapshotError("read_failed", `Filesystem-Snapshot nicht lesbar: ${error instanceof Error ? error.message : String(error)}`);
+    return snapshotError(
+      "read_failed",
+      `Filesystem-Snapshot nicht lesbar: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -708,8 +743,9 @@ function buildSnapshot(state, stagedPatch, unstagedPatch, untrackedContent) {
  *
  * Never throws. Git workspaces use the content-sensitive Git snapshot above;
  * a missing repository or Git executable falls back to a bounded filesystem
- * inventory (excluding .git and node_modules). Genuine read, race, aborted
- * command and parser failures return `{ ok: false, error: { code, message } }`.
+ * inventory (excluding .git and node_modules) — unless a `.git` entry exists
+ * that Git cannot read, which is reported as an error. Genuine read, race,
+ * aborted command and parser failures return `{ ok: false, error: { code, message } }`.
  * See `docs/decisions/027-workspace-snapshot-content-identity.md`.
  */
 export async function collectWorkspaceSnapshot(worktree, options = {}) {
@@ -722,7 +758,21 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
     maxAttempts,
   );
   if (!repositoryRoot.ok) {
-    if (["no_repository", "git_unavailable"].includes(repositoryRoot.error.code)) {
+    if (
+      repositoryRoot.error.code === "no_repository" &&
+      findGitMarker(worktree)
+    ) {
+      // `.git` exists but Git sees no repository, so it is damaged. The
+      // filesystem inventory skips `.git`, so falling back would silently stop
+      // observing repository state instead of reporting the problem.
+      return snapshotError(
+        "git_command_failed",
+        "Ein .git-Eintrag ist vorhanden, aber Git erkennt kein gültiges Repository (beschädigt?).",
+      );
+    }
+    if (
+      ["no_repository", "git_unavailable"].includes(repositoryRoot.error.code)
+    ) {
       return collectFilesystemSnapshot(worktree, options);
     }
     return repositoryRoot;

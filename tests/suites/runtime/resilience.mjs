@@ -404,7 +404,9 @@ export const resilienceSections = {
         gateCtx,
       );
       assert(
-        yoloWrite.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
+        yoloWrite.some(
+          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+        ),
         "armed recovery blocks write even under YOLO",
       );
       await gateHarness.commands.get("permission")("yolo-ask", gateCtx);
@@ -414,7 +416,9 @@ export const resilienceSections = {
         gateCtx,
       );
       assert(
-        yoloAskEdit.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
+        yoloAskEdit.some(
+          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+        ),
         "armed recovery blocks edit under yolo-ask",
       );
       await gateHarness.commands.get("permission")("yolo-full", gateCtx);
@@ -424,8 +428,10 @@ export const resilienceSections = {
         gateCtx,
       );
       assert(
-        yoloFullBash.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
-        "armed recovery blocks process mutation under yolo-full",
+        !yoloFullBash.some(
+          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+        ),
+        "YOLO 3 bypasses the recovery gate for process mutation (ADR 029)",
       );
       await gateHarness.commands.get("permission")("project-write", gateCtx);
       const blockedBash = await gateHarness.runHooks(
@@ -442,12 +448,17 @@ export const resilienceSections = {
       for (const event of [
         { toolName: "verify", input: { check: "typecheck" } },
         { toolName: "project_check", input: { profile: "verify" } },
-        { toolName: "subagent", input: { agent: "investigator", task: "Diagnose the failed run" } },
+        {
+          toolName: "subagent",
+          input: { agent: "investigator", task: "Diagnose the failed run" },
+        },
         { toolName: "custom_mutator", input: { action: "change" } },
       ]) {
         const gated = await gateHarness.runHooks("tool_call", event, gateCtx);
         assert(
-          gated.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
+          gated.some(
+            (result) => result?.block && /Recovery-Gate/.test(result.reason),
+          ),
           `armed recovery blocks ${event.toolName} as a process, delegation or unknown capability`,
         );
       }
@@ -837,17 +848,42 @@ export const resilienceSections = {
         "the gate still blocks before YOLO is activated",
       );
       for (const [level, event] of [
-        ["yolo", { toolName: "write", input: { path: "example.txt", content: "x" } }],
-        ["yolo-ask", { toolName: "edit", input: { path: "example.txt", edits: [] } }],
-        ["yolo-full", { toolName: "bash", input: { command: "npm run build" } }],
+        [
+          "yolo",
+          { toolName: "write", input: { path: "example.txt", content: "x" } },
+        ],
+        [
+          "yolo-ask",
+          { toolName: "edit", input: { path: "example.txt", edits: [] } },
+        ],
       ]) {
         await yoloArmed.commands.get("permission")(level, yoloArmedCtx);
-        const stillGated = await yoloArmed.runHooks("tool_call", event, yoloArmedCtx);
+        const stillGated = await yoloArmed.runHooks(
+          "tool_call",
+          event,
+          yoloArmedCtx,
+        );
         assert(
-          stillGated.some((result) => result?.block && /Recovery-Gate/.test(result.reason)),
+          stillGated.some(
+            (result) => result?.block && /Recovery-Gate/.test(result.reason),
+          ),
           `armed recovery stays enforced under ${level}`,
         );
       }
+      // YOLO 3 is the documented full-access level (ADR 029) and bypasses the
+      // recovery gate; YOLO 1 and 2 above must keep enforcing it.
+      await yoloArmed.commands.get("permission")("yolo-full", yoloArmedCtx);
+      const yoloFullGated = await yoloArmed.runHooks(
+        "tool_call",
+        { toolName: "bash", input: { command: "npm run build" } },
+        yoloArmedCtx,
+      );
+      assert(
+        !yoloFullGated.some(
+          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+        ),
+        "armed recovery is bypassed under yolo-full (ADR 029)",
+      );
       const yoloFreeRead = await yoloArmed.runHooks(
         "tool_call",
         { toolName: "read", input: { path: "README.md" } },
@@ -1224,9 +1260,22 @@ export const resilienceSections = {
           await armGate(noGitHarness, noGitCtx);
 
           const recoveryTool = noGitHarness.tools.get("recovery_check");
-          const result = await recoveryTool.execute("check-1", {}, undefined, undefined, noGitCtx);
-          assert(result.content[0]?.text.includes("VCS: none"), "recovery reports that Git is unavailable without failing");
-          eq(latestStatus(noGitHarness, "recovery"), undefined, "filesystem recovery releases the gate");
+          const result = await recoveryTool.execute(
+            "check-1",
+            {},
+            undefined,
+            undefined,
+            noGitCtx,
+          );
+          assert(
+            result.content[0]?.text.includes("VCS: none"),
+            "recovery reports that Git is unavailable without failing",
+          );
+          eq(
+            latestStatus(noGitHarness, "recovery"),
+            undefined,
+            "filesystem recovery releases the gate",
+          );
         } finally {
           rmSync(noGitWorkspace, { recursive: true, force: true });
         }

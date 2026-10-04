@@ -1,5 +1,9 @@
 # 016 — YOLO-Sperre im Planmodus und Recovery-Gate vor Schreibzugriffen
 
+> **Nachtrag:** Seit ADR 029 gelten die Aussagen „auch unter YOLO" nur noch
+> für YOLO 1 und YOLO 2. YOLO 3 (`yolo-full`) übergeht Recovery-Gate,
+> Trust-Grenze und Planmodus-Schreibschutz ausdrücklich.
+
 ## Kontext
 
 Zwei Schwächen erlaubten es, harte Grenzen stillschweigend zu umgehen:

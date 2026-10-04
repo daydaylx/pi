@@ -16,6 +16,7 @@ import {
   restorePlan,
 } from "./plan-store.ts";
 import { assessPlanQuality } from "./plan-quality.ts";
+import { PLAN_WRITE_TOOL_NAME } from "./plan-tool.ts";
 
 export type NotifyLevel = "info" | "warning" | "error";
 
@@ -57,7 +58,10 @@ export interface WorkflowSession {
   notify(ctx: ExtensionContext, message: string, level?: NotifyLevel): void;
   setMode(ctx: ExtensionContext, mode: WorkflowMode): void;
   /** Records a mode switch, deferring it when a turn is in flight. */
-  requestMode(ctx: ExtensionContext, mode: WorkflowMode): "applied" | "deferred";
+  requestMode(
+    ctx: ExtensionContext,
+    mode: WorkflowMode,
+  ): "applied" | "deferred";
   beginTurn(ctx: ExtensionContext): WorkflowMode;
   /** The plan hash this turn last saw; the compare-and-swap baseline. */
   expectedPlanHash(): string | undefined;
@@ -80,11 +84,51 @@ export interface WorkflowSession {
   approval(): PlanApproval | undefined;
   approve(approval: PlanApproval): void;
   /** Consumes the grant iff it belongs to this prompt and the plan is unchanged. */
-  consumeApproval(ctx: ExtensionContext, prompt: string): StoredPlan | undefined;
+  consumeApproval(
+    ctx: ExtensionContext,
+    prompt: string,
+  ): StoredPlan | undefined;
   clearApproval(): void;
   /** A planning mode was active in this session, so history may carry its restrictions. */
   planningSeen(): boolean;
+  /** Re-derives `planningSeen` from a resumed session's history. */
+  restorePlanningSeen(entries: readonly unknown[]): void;
   resetForSession(): void;
+}
+
+function entryText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) =>
+      part && typeof part === "object" && "text" in part
+        ? String((part as { text: unknown }).text)
+        : "",
+    )
+    .join(" ");
+}
+
+/**
+ * Whether a resumed session's history carries traces of plan mode: a
+ * `plan_write` result, a plan-mode refusal or a recorded plan decision. The
+ * in-memory flag does not survive a restart, but the refusals in the history
+ * do, so the work-mode notice has to be derivable from the entries.
+ */
+export function historyShowsPlanning(entries: readonly unknown[]): boolean {
+  return entries.some((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    const { type, customType, message } = entry as {
+      type?: unknown;
+      customType?: unknown;
+      message?: { role?: unknown; toolName?: unknown; content?: unknown };
+    };
+    if (type === "custom") return customType === "plan-approval";
+    if (type !== "message" || message?.role !== "toolResult") return false;
+    return (
+      message.toolName === PLAN_WRITE_TOOL_NAME ||
+      entryText(message.content).startsWith("Planmodus")
+    );
+  });
 }
 
 export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
@@ -158,8 +202,7 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
     expectedPlanHash: () => writtenPlan?.hash ?? previousPlan?.hash,
 
     recordPlanWrite(hash, quality) {
-      if (turnMode && isPlanningMode(turnMode))
-        writtenPlan = { hash, quality };
+      if (turnMode && isPlanningMode(turnMode)) writtenPlan = { hash, quality };
     },
 
     refreshReadinessAfterEdit(ctx, mode) {
@@ -175,8 +218,7 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
     recordAgentEnd(messages = []) {
       if (!turnMode || !isPlanningMode(turnMode)) return;
       const last = [...messages].at(-1) as
-        | { errorMessage?: unknown; stopReason?: unknown }
-        | undefined;
+        { errorMessage?: unknown; stopReason?: unknown } | undefined;
       finalRunSucceeded =
         last?.errorMessage === undefined &&
         last?.stopReason !== "error" &&
@@ -262,7 +304,8 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
       // not quietly spend it.
       if (grant.prompt !== prompt) return undefined;
       planApproval = undefined;
-      if (grant.sessionId !== ctx.sessionManager.getSessionId()) return undefined;
+      if (grant.sessionId !== ctx.sessionManager.getSessionId())
+        return undefined;
       const stored = readPlan(session.location(ctx));
       if (!stored || stored.hash !== grant.hash) {
         session.notify(
@@ -278,6 +321,9 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
       planApproval = undefined;
     },
     planningSeen: () => sawPlanning,
+    restorePlanningSeen(entries) {
+      if (historyShowsPlanning(entries)) sawPlanning = true;
+    },
 
     resetForSession() {
       sawPlanning = false;

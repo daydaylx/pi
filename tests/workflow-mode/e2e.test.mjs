@@ -250,6 +250,73 @@ await test("a work turn without an approval carries no plan at all", async () =>
   });
 });
 
+await test("a resumed session derives the work-mode notice from plan-mode traces in its history", async () => {
+  if (!planMode) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-resume-"));
+    try {
+      const refusal = {
+        type: "message",
+        id: "e1",
+        message: {
+          role: "toolResult",
+          toolName: "write",
+          isError: true,
+          content: [
+            { type: "text", text: "Planmodus: Dieses Tool kann Projektzustand verändern." },
+          ],
+        },
+      };
+      const unrelated = {
+        type: "message",
+        id: "e2",
+        message: {
+          role: "toolResult",
+          toolName: "read",
+          content: [{ type: "text", text: "Dateiinhalt" }],
+        },
+      };
+      const noticeFor = async (entries) => {
+        const harness = createHarness({ entries });
+        const ctx = harness.makeContext({ cwd });
+        planMode.default(harness.api);
+        await hooks(harness, "session_start", ctx);
+        const prompt = await hooks(harness, "before_agent_start", ctx, {
+          prompt: "Weiter",
+          systemPrompt: "BASE",
+        });
+        return prompt[0]?.systemPrompt?.includes("[PI WORKMODUS]") ?? false;
+      };
+      assert(
+        await noticeFor([refusal]),
+        "a plan-mode refusal in the resumed history triggers the work-mode notice",
+      );
+      assert(
+        await noticeFor([
+          {
+            type: "message",
+            id: "e3",
+            message: { role: "toolResult", toolName: "plan_write", content: [] },
+          },
+        ]),
+        "a plan_write result in the resumed history triggers the work-mode notice",
+      );
+      assert(
+        await noticeFor([
+          { type: "custom", id: "e4", customType: "plan-approval", data: {} },
+        ]),
+        "a recorded plan decision triggers the work-mode notice",
+      );
+      assert(
+        !(await noticeFor([unrelated])) && !(await noticeFor([])),
+        "a history without plan-mode traces gets no notice",
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 await test("an explicit approval hands the plan over exactly once, as data", async () => {
   if (!planMode) return;
   await withPlanHome(async () => {

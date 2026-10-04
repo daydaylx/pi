@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { assert, eq, test } from "./shared/assertions.mjs";
+import { assert, eq, test, counters as summary } from "./shared/assertions.mjs";
 import { withHarness } from "./shared/harness.mjs";
 import { importModule as load } from "./shared/jiti-loader.mjs";
 
@@ -280,3 +280,10 @@ await test("task-tier: Commit/Push nie FAST, Fortsetzung erbt Klasse", async () 
   eq(classify.maxTier("fast", "deep"), "deep", "maxTier");
   eq(classify.maxTier("normal", "fast"), "normal", "maxTier2");
 });
+
+const { passed, failed } = summary();
+if (failed > 0) {
+  console.error(`\nFAIL: ${passed} passed, ${failed} failed`);
+  process.exit(1);
+}
+console.log(`\nPASS: ${passed} passed, 0 failed`);

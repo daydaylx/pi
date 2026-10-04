@@ -45,7 +45,9 @@ export function registerPlanEvents(
   pi.on("before_agent_start", async (event, ctx) => {
     const mode = session.beginTurn(ctx);
     if (isPlanningMode(mode)) {
-      return { systemPrompt: `${event.systemPrompt}\n\n${planningPrompt(mode)}` };
+      return {
+        systemPrompt: `${event.systemPrompt}\n\n${planningPrompt(mode)}`,
+      };
     }
     const approved = session.consumeApproval(ctx, event.prompt);
     const notice = session.planningSeen() ? WORK_MODE_NOTICE : undefined;
@@ -95,6 +97,9 @@ export function registerPlanEvents(
   pi.on("session_start", async (_event, ctx) => {
     session.resetForSession();
     session.setMode(ctx, "work");
+    // A resumed session still shows plan-mode refusals in its history; the
+    // in-memory flag is gone, so derive it from the entries again.
+    session.restorePlanningSeen(ctx.sessionManager.getBranch());
   });
   pi.on("session_shutdown", async (_event, ctx) => {
     clearWorkflowPresentation(ctx);

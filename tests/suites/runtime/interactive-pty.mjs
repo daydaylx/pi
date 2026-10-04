@@ -255,6 +255,9 @@ export const interactivePtySections = {
       );
       modePermissions.default(policyHarness.api);
       const policyContext = policyHarness.makeContext();
+      policyContext.ui.custom = async () => {
+        throw new Error("use deterministic confirm fallback");
+      };
       await policyHarness.runHooks("session_start", {}, policyContext);
       const rejected = await policyHarness.runHooks(
         "tool_call",
