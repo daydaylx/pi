@@ -235,10 +235,14 @@ await test("a work turn without an approval carries no plan at all", async () =>
         prompt: "Was hältst du davon?",
         systemPrompt: "BASE",
       });
-      eq(
-        prompt[0],
-        undefined,
-        "an ordinary work turn adds nothing to the request at all",
+      // No plan travels with the turn, but the model is told the plan-mode
+      // restrictions still visible in its history no longer apply.
+      eq(prompt[0]?.message, undefined, "an ordinary work turn carries no plan");
+      assert(
+        prompt[0]?.systemPrompt?.startsWith("BASE") &&
+          prompt[0].systemPrompt.includes("[PI WORKMODUS]") &&
+          !prompt[0].systemPrompt.includes("[PI PLANMODUS]"),
+        "a work turn after planning states that plan mode has ended",
       );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -274,7 +278,7 @@ await test("an explicit approval hands the plan over exactly once, as data", asy
         systemPrompt: "BASE",
       });
       eq(
-        unrelated[0],
+        unrelated[0]?.message,
         undefined,
         "an intervening question turn does not consume the approval",
       );
@@ -301,7 +305,7 @@ await test("an explicit approval hands the plan over exactly once, as data", asy
         systemPrompt: "BASE",
       });
       eq(
-        again[0],
+        again[0]?.message,
         undefined,
         "one approval cannot power a second execution turn",
       );
@@ -348,7 +352,7 @@ await test("an approval does not survive a change to the plan it was bound to", 
         systemPrompt: "BASE",
       });
       eq(
-        handoff[0],
+        handoff[0]?.message,
         undefined,
         "a changed plan voids the approval instead of handing over unapproved text",
       );
@@ -673,7 +677,36 @@ await test("the very first planning turn failing before any write leaves no plan
   });
 });
 
-await test("a genuinely failed turn with no interleaved edit still rolls back", async () => {
+await test("a failed turn that never wrote leaves the previous plan untouched", async () => {
+  if (!planMode || !planStore) return;
+  await withPlanHome(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-nowrite-fail-"));
+    try {
+      const harness = createHarness({ select: () => "Schnellplan" });
+      const ctx = harness.makeContext({ cwd });
+      planMode.default(harness.api);
+      await hooks(harness, "session_start", ctx);
+      await chooseWorkflow(harness, ctx);
+      await runPlanningTurn(harness, ctx, GOOD_SIMPLE_PLAN);
+      await hooks(harness, "before_agent_start", ctx, {
+        prompt: "Plane neu",
+        systemPrompt: "BASE",
+      });
+      await hooks(harness, "agent_end", ctx, {
+        messages: [{ stopReason: "aborted" }],
+      });
+      await hooks(harness, "agent_settled", ctx);
+      const stored = planStore.readPlan(
+        planStore.planLocation(cwd, ctx.sessionManager.getSessionId()),
+      );
+      eq(stored?.content, GOOD_SIMPLE_PLAN, "the earlier plan is still there");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("a plan_write that finished survives a turn that fails afterwards", async () => {
   if (!planMode || !planStore) return;
   await withPlanHome(async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-plain-fail-"));
@@ -694,9 +727,8 @@ await test("a genuinely failed turn with no interleaved edit still rolls back", 
         ctx,
         GOOD_SIMPLE_PLAN.replace("Login-Formular", "Halbfertig"),
       );
-      // No interleaved edit this time — the CAS baseline still matches the
-      // agent's own last write when the turn fails, so rollback must still
-      // happen exactly as before this fix.
+      // plan_write already stored the plan atomically behind its quality gate;
+      // the turn dying afterwards must not throw that finished plan away.
       await hooks(harness, "agent_end", ctx, {
         messages: [{ stopReason: "error", errorMessage: "boom" }],
       });
@@ -706,8 +738,14 @@ await test("a genuinely failed turn with no interleaved edit still rolls back", 
         planStore.planLocation(cwd, ctx.sessionManager.getSessionId()),
       );
       assert(
-        stored.content.includes("Login-Formular"),
-        "without an interleaved edit, the previous plan is still restored",
+        stored.content.includes("Halbfertig"),
+        "the plan the tool saved is kept instead of rolled back",
+      );
+      assert(
+        harness.notifications.some((entry) =>
+          entry.message.includes("Plan fertig"),
+        ),
+        "the kept plan is offered for the explicit decision",
       );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -774,7 +812,7 @@ for (const [name, endMessages] of [
   ["a provider error", [{ stopReason: "error", errorMessage: "boom" }]],
   ["a user abort", [{ stopReason: "aborted" }]],
 ]) {
-  await test(`${name} restores the previous plan and offers nothing`, async () => {
+  await test(`${name} after plan_write keeps the finished plan and offers it`, async () => {
     if (!planMode || !planStore) return;
     await withPlanHome(async () => {
       const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-fail-"));
@@ -805,12 +843,12 @@ for (const [name, endMessages] of [
           planStore.planLocation(cwd, ctx.sessionManager.getSessionId()),
         );
         assert(
-          stored.content.includes("Login-Formular"),
-          `${name} restores the plan that was there before the run`,
+          stored.content.includes("Halbfertig-Formular"),
+          `${name} keeps the plan the tool saved before the run ended`,
         );
         await harness.commands.get("plan-approve")("", ctx);
-        // The restored plan is a real plan, so approving it is legitimate —
-        // what must not happen is the failed run's half-written text winning.
+        // The plan passed plan_write's gate, so approving it needs no quality
+        // override; the approval stays bound to its hash and an explicit step.
         const executionPrompt = harness.lifecycleCalls
           .filter((call) => call.kind === "sendUserMessage")
           .at(-1).content;
@@ -819,8 +857,8 @@ for (const [name, endMessages] of [
           systemPrompt: "BASE",
         });
         assert(
-          !handoff[0]?.message?.content?.includes("Halbfertig-Formular"),
-          `${name} never hands over the interrupted run's text`,
+          handoff[0]?.message?.content?.includes("Halbfertig-Formular"),
+          `${name} hands over exactly the plan that was approved`,
         );
       } finally {
         rmSync(cwd, { recursive: true, force: true });
@@ -939,7 +977,7 @@ await test("two sessions in one checkout keep separate plans", async () => {
   });
 });
 
-await test("a failed turn's rollback cannot undo another session's plan", async () => {
+await test("a failed turn cannot undo another session's plan", async () => {
   if (!planMode || !planStore) return;
   await withPlanHome(async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-workflow-rollback-"));
@@ -974,10 +1012,11 @@ await test("a failed turn's rollback cannot undo another session's plan", async 
         other?.content === GOOD_SIMPLE_PLAN,
         "the other session's plan is untouched by our rollback",
       );
-      eq(
-        planStore.readPlan(planStore.planLocation(cwd, "session-mine")),
-        undefined,
-        "our own aborted run leaves no plan behind",
+      assert(
+        planStore
+          .readPlan(planStore.planLocation(cwd, "session-mine"))
+          ?.content.includes("Mein-Formular"),
+        "our own plan, saved before the abort, stays in our session",
       );
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -1528,12 +1567,17 @@ await test("an untrusted project refuses plan mode entirely", async () => {
 });
 
 await test("both plan modes admit only the read-only temporary-spec call", async () => {
+  // customResult: false declines the permission overlay; without it the
+  // harness leaves that dialog pending forever and the suite hangs.
   if (!planMode || !modePermissions) return;
   await withPlanHome(async () => {
     for (const label of ["Schnellplan", "Architekturplan"]) {
       const cwd = mkdtempSync(join(tmpdir(), "pi-plan-temp-spec-"));
       try {
-        const harness = createHarness({ select: () => label });
+        const harness = createHarness({
+          select: () => label,
+          customResult: false,
+        });
         answerRecoveryClear(harness);
         planMode.default(harness.api);
         modePermissions.default(harness.api);
@@ -1595,9 +1639,18 @@ await test("both plan modes admit only the read-only temporary-spec call", async
           { toolName: "frobnicate", input: {} },
           ctx,
         );
+        // ADR 012: the plan guard does not reject a tool just for being
+        // unknown; the permission level decides, and by default it asks. The
+        // declined dialog proves the call reached that question rather than
+        // being refused by the plan guard.
+        const unknownBlock = result.find((entry) => entry?.block);
         assert(
-          result.some((entry) => entry?.block),
-          `${label} keeps unknown custom tools blocked`,
+          unknownBlock?.reason?.includes("abgelehnt"),
+          `${label} leaves unknown custom tools to the permission level's confirmation`,
+        );
+        assert(
+          !unknownBlock?.reason?.includes("Planmodus"),
+          `${label} does not refuse unknown custom tools by plan guard`,
         );
       } finally {
         rmSync(cwd, { recursive: true, force: true });

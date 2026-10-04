@@ -73,3 +73,16 @@ ${SHARED_RULES}
 
 ${expectations}`;
 }
+
+/**
+ * Nach einem Planmodus-Turn steht der Verlauf voller Planmodus-Sperren und
+ * -Hinweise. Der Planmodus-Prompt gilt nur für Planungs-Turns, daher erfährt
+ * das Modell im Work-Turn sonst nirgends, dass die Sperren aufgehoben sind, und
+ * bittet per ask_user um einen Moduswechsel, der längst erfolgt ist.
+ */
+export const WORK_MODE_NOTICE = `[PI WORKMODUS]
+Der aktive Modus ist Work. Der Planmodus ist beendet: Planmodus-Sperren und
+-Fehlermeldungen aus dem bisherigen Verlauf gelten nicht mehr. Bitte nicht um
+einen Moduswechsel, sondern führe den Auftrag aus und nutze die Werkzeuge
+(innerhalb der aktiven Zugriffsstufe). Wird ein Aufruf tatsächlich mit einer
+Planmodus-Meldung abgelehnt, ist der Modus doch Plan; dann erst ask_user.`;

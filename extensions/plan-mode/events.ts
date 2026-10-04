@@ -9,7 +9,7 @@ import {
   type WorkflowCapabilityRequest,
 } from "../shared/workflow-capabilities.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
-import { planningPrompt } from "./prompts.ts";
+import { WORK_MODE_NOTICE, planningPrompt } from "./prompts.ts";
 import { buildPlanContextMessage, PLAN_HANDOFF_RULES } from "./plan-context.ts";
 import {
   clearWorkflowPresentation,
@@ -48,14 +48,20 @@ export function registerPlanEvents(
       return { systemPrompt: `${event.systemPrompt}\n\n${planningPrompt(mode)}` };
     }
     const approved = session.consumeApproval(ctx, event.prompt);
-    if (!approved) return;
-    const message = buildPlanContextMessage(approved.content, approved.hash);
-    if (!message) return;
+    const notice = session.planningSeen() ? WORK_MODE_NOTICE : undefined;
+    const message = approved
+      ? buildPlanContextMessage(approved.content, approved.hash)
+      : undefined;
+    if (!approved || !message) {
+      return notice
+        ? { systemPrompt: `${event.systemPrompt}\n\n${notice}` }
+        : undefined;
+    }
     // Two separate channels on purpose: only the fixed rules may be a system
     // instruction, while the plan itself travels as a custom message that Pi
     // hands to the provider with the user role, after the real user message.
     return {
-      systemPrompt: `${event.systemPrompt}\n\n${PLAN_HANDOFF_RULES}`,
+      systemPrompt: `${event.systemPrompt}\n\n${notice ? `${notice}\n\n` : ""}${PLAN_HANDOFF_RULES}`,
       message,
     };
   });

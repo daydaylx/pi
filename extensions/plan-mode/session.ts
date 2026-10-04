@@ -82,6 +82,8 @@ export interface WorkflowSession {
   /** Consumes the grant iff it belongs to this prompt and the plan is unchanged. */
   consumeApproval(ctx: ExtensionContext, prompt: string): StoredPlan | undefined;
   clearApproval(): void;
+  /** A planning mode was active in this session, so history may carry its restrictions. */
+  planningSeen(): boolean;
   resetForSession(): void;
 }
 
@@ -93,6 +95,7 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
   let finalRunSucceeded = true;
   let planReadiness: PlanReadiness | undefined;
   let planApproval: PlanApproval | undefined;
+  let sawPlanning = false;
 
   const session: WorkflowSession = {
     pi,
@@ -116,6 +119,7 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
 
     setMode(ctx, mode) {
       session.selectedMode = mode;
+      if (isPlanningMode(mode)) sawPlanning = true;
       deferredMode = undefined;
       updateWorkflowPresentation(ctx, mode, pi);
       session.notify(ctx, `${workflowModeLabel(mode)} aktiv.`);
@@ -141,6 +145,7 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
       finalRunSucceeded = true;
       writtenPlan = undefined;
       if (isPlanningMode(turnMode)) {
+        sawPlanning = true;
         previousPlan = readPlan(session.location(ctx));
         // A new planning turn invalidates whatever was ready or approved
         // before it: the plan is about to be replaced.
@@ -183,7 +188,18 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
       turnMode = undefined;
       if (settledMode && isPlanningMode(settledMode)) {
         const stored = readPlan(session.location(ctx));
-        if (finalRunSucceeded && writtenPlan && stored) {
+        // `plan_write` stores atomically and only after the mode's quality gate,
+        // so a plan it saved is complete even when the turn dies afterwards
+        // (provider error, abort while the closing message was written).
+        // Rolling it back would only throw away a finished planning turn. It
+        // is kept only while the stored text is still exactly what the tool
+        // wrote; anything else falls through to the cases below.
+        const keepFinishedWrite =
+          !finalRunSucceeded &&
+          writtenPlan !== undefined &&
+          stored !== undefined &&
+          stored.hash === writtenPlan.hash;
+        if ((finalRunSucceeded || keepFinishedWrite) && writtenPlan && stored) {
           // Whatever is stored now is the newest deliberate state: the agent's
           // write, or an edit the operator made afterwards in the external
           // editor. Rolling back on a hash mismatch would throw that edit away,
@@ -261,8 +277,10 @@ export function createWorkflowSession(pi: ExtensionAPI): WorkflowSession {
     clearApproval() {
       planApproval = undefined;
     },
+    planningSeen: () => sawPlanning,
 
     resetForSession() {
+      sawPlanning = false;
       turnMode = undefined;
       deferredMode = undefined;
       previousPlan = undefined;
