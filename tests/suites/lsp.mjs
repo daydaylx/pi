@@ -25,8 +25,19 @@ import { ROOT } from "../shared/jiti-loader.mjs";
 // LSP transport, process and lifecycle (#93). Deterministic: uses the local
 // fake-lsp fixture only, never a real language server or the network.
 // ---------------------------------------------------------------------------
-const FAKE_LSP_COMMAND = "python3";
-const FAKE_LSP_FIXTURE = path.join(ROOT, "tests", "fixtures", "fake-lsp.py");
+// The Python fixture is preferred (a Node child sees EOF on stdin in some
+// isolated CI sandboxes). Hosts without python3, such as NixOS, use the Node
+// fixture, which speaks the same protocol and flags.
+const HAS_PYTHON3 = (process.env.PATH ?? "")
+  .split(path.delimiter)
+  .some((dir) => dir && existsSync(path.join(dir, "python3")));
+const FAKE_LSP_COMMAND = HAS_PYTHON3 ? "python3" : process.execPath;
+const FAKE_LSP_FIXTURE = path.join(
+  ROOT,
+  "tests",
+  "fixtures",
+  HAS_PYTHON3 ? "fake-lsp.py" : "fake-lsp.mjs",
+);
 
 export const lspSections = {
   "LSP Control Center file picker": async (context) => {

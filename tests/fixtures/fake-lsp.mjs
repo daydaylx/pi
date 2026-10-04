@@ -22,6 +22,8 @@
  *   --no-diagnostics          never publish diagnostics (timeout probe for #95)
  *   --definition-links        textDocument/definition replies with LocationLink[] instead of Location
  *   --no-definition-provider  initialize result omits definitionProvider (capability-gating probe)
+ *   --require-diagnostics-capability  publish diagnostics only if initialize advertised
+ *                             textDocument.publishDiagnostics (capability negotiation probe)
  *
  * No real language server is required; this keeps the regular CI deterministic.
  */
@@ -33,6 +35,10 @@ const CRASH_AFTER_INIT = argv.has("--crash-after-init");
 const NO_DIAGNOSTICS = argv.has("--no-diagnostics");
 const DEFINITION_LINKS = argv.has("--definition-links");
 const NO_DEFINITION_PROVIDER = argv.has("--no-definition-provider");
+const REQUIRE_DIAGNOSTICS_CAPABILITY = argv.has(
+  "--require-diagnostics-capability",
+);
+let clientSupportsDiagnostics = false;
 
 // Some constrained CI/sandbox runtimes do not keep a child alive solely for
 // a piped stdin listener. A referenced, idle timer makes the fixture lifecycle
@@ -55,6 +61,7 @@ function notify(method, params) {
 
 function publishDiagnostics(uri, version) {
   if (NO_DIAGNOSTICS) return;
+  if (REQUIRE_DIAGNOSTICS_CAPABILITY && !clientSupportsDiagnostics) return;
   // Deterministic content: one fixed "Error" diagnostic per version, so
   // tests can assert that a new version replaces (not appends to) the last
   // one. Delayed slightly so open/change and diagnostics are genuinely
@@ -121,6 +128,9 @@ function handleNotification(note) {
 function handleRequest(req) {
   switch (req.method) {
     case "initialize": {
+      clientSupportsDiagnostics = Boolean(
+        req.params?.capabilities?.textDocument?.publishDiagnostics,
+      );
       const capabilities = {
         textDocumentSync: 1,
         hoverProvider: true,
