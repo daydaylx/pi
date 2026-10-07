@@ -18,6 +18,8 @@ Diese Regeln gelten für Pi-Sitzungen und werden von anderen Coding-Agenten sinn
 - Zuerst relevante Projektanweisungen, Implementierung und Prüfungen gezielt lokalisieren. Änderungen klein halten und nach jedem Teilpaket den engsten passenden Check ausführen.
 - Fehler, nicht ausführbare Prüfungen und offene Unsicherheit ausdrücklich nennen. Eine Änderung erst als umgesetzt bezeichnen, wenn ihr relevanter Testlauf beendet ist.
 - `extensions/task-tier/` stuft Aufgaben automatisch ein; NORMAL ist der Default. FAST bleibt auf kleine, risikoarme Aufgaben beschränkt und wird bei echter Komplexität hochgestuft. Die Kriterien stehen in [docs/decisions/033-task-tiers.md](docs/decisions/033-task-tiers.md).
+- Reibung vermeiden: Braucht die Aufgabe eine Toolchain (Build, Test, SDK), zuerst per `command -v`/`test -x` prüfen und Fehlendes sofort melden, statt vorher Statusdateien zu lesen. Status- und Handoff-Dateien (`TASKS.md`, `CURRENT_STATUS.md` u. ä.) nur für Implementierungsaufgaben lesen, nicht für reine Git-Aufgaben. Prüfkommandos nicht blind starten, wenn Abhängigkeiten fehlen (`node_modules`, SDK).
+- `ask_user` nur für echte Entscheidungen. Optionen vorher gegen die eigene Schreib- und Rechtegrenze prüfen und nichts anbieten, was der aktive Modus verbietet oder das nicht existiert.
 - Sind Akzeptanzkriterien erfüllt, der passende Check erfolgreich und keine Unsicherheit offen, endet die Aufgabe. Weitere Reads, Tests oder Refactorings brauchen einen Anlass; ausdrückliche Nutzerwünsche haben Vorrang.
 - Dauerhafte Projektregeln gehören hierher, ausführliche Referenzen in `docs/`. `docs/PROJECT_STATE.md` und `docs/CONTEXT_LEDGER.md` werden ausschließlich über den Skill `context-checkpoint` gepflegt.
 

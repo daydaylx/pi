@@ -7,6 +7,7 @@ description: "Prüfe Git-Status, Branches, Remotes, offene Änderungen sowie –
 
 Prüfe den Git-Zustand ohne ihn zu verändern. Respektiere `AGENTS.md` und die aktive Permission-Policy.
 
+- Erfasse den Zustand mit einem kombinierten Aufruf, z. B. `git status --short --branch && git diff --stat && git diff --cached --stat && git log -5 --oneline`, statt jeden Befehl einzeln auszuführen.
 - Ermittle aktuellen Branch, Upstream sowie Ahead/Behind-Status.
 - Trenne uncommittete, gestagte und unbekannte Änderungen sauber von bereits vorhandener Arbeit.
 - Prüfe die jüngsten Commits und erkennbare Konflikt- oder Integrationsrisiken.
