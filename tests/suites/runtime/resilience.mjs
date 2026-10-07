@@ -1140,6 +1140,27 @@ export const resilienceSections = {
             mode +
             " mode",
         );
+        const tuiContext = nonTui.makeContext({
+          mode: "tui",
+          hasUI: true,
+          cwd,
+        });
+        const tuiProfile = await nonTui.runHooks(
+          "tool_call",
+          { toolName: "project_check", input: { profile: "verify" } },
+          tuiContext,
+        );
+        assert(
+          tuiProfile.some(
+            (result) =>
+              result?.block &&
+              result?.terminate === undefined &&
+              /nicht über project_check verifiziert/.test(result.reason),
+          ),
+          "missing project profile blocks only the call in tui mode (" +
+            mode +
+            " run)",
+        );
       }
     });
   },

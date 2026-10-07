@@ -185,11 +185,14 @@ export function registerPermissionGuards(
       ctx.isProjectTrusted() &&
       !existsSync(join(ctx.cwd, ".pi", "verify.json"))
     ) {
+      // Interaktiv (TUI) endet nur dieser Aufruf: der Agent arbeitet mit gezielten
+      // Checks weiter und meldet die fehlende Verifikation. Nicht interaktiv
+      // endet der Batch wie bei den anderen Sperren.
       return {
         block: true,
-        terminate: true,
+        ...stopNonInteractive(ctx),
         reason:
-          "Kein Projekt-Prüfprofil definiert: .pi/verify.json fehlt. Es wird kein freies Prüfkommando geraten; zulässiger Prüfpfad: .pi/verify.json mit benanntem Profil anlegen und project_check erneut ausführen.",
+          'Kein Projekt-Prüfprofil definiert: .pi/verify.json fehlt. Es wird kein freies Prüfkommando geraten; zulässiger Prüfpfad: .pi/verify.json mit benanntem Profil anlegen und project_check erneut ausführen. Ohne Profil nicht erneut project_check aufrufen: mit gezielten Checks (direkt zugehöriger Test, Syntax-/Typecheck) weiterarbeiten und im Abschluss ausdrücklich "nicht über project_check verifiziert (kein Profil)" melden.',
       };
     }
     const workflow = requestWorkflowCapabilities(pi.events);
