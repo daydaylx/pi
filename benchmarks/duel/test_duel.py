@@ -6,6 +6,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -183,7 +184,13 @@ class DuelTest(unittest.TestCase):
         self.assertTrue((d / "codex" / "diff.patch").is_file())
         # Harter Fehler im ersten Arm (Tool fehlt): zweiter Arm laeuft trotzdem
         (self.bin / "pi").unlink()
-        os.environ["PATH"] = str(self.bin) + os.pathsep + "/usr/bin" + os.pathsep + "/bin"
+        support_bins = [str(self.bin)]
+        for command in ("git", "python3"):
+            resolved = shutil.which(command, path=self._env.get("PATH"))
+            if resolved:
+                support_bins.append(str(Path(resolved).parent))
+        support_bins.extend(("/usr/bin", "/bin"))
+        os.environ["PATH"] = os.pathsep.join(dict.fromkeys(support_bins))
         d2 = self.start_second()
         self.assertTrue((d2 / "pi" / "error.json").is_file())
         self.assertTrue((d2 / "codex" / "usage.json").is_file())

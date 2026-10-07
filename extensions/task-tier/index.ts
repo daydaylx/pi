@@ -74,9 +74,16 @@ interface TurnState {
   subagentCalls: number;
   verifierCalls: number;
   escalations: string[];
+  initialTier: TaskTier;
+  observedRiskSignals: Set<string>;
+  changedSubsystems: Set<string>;
+  softRiskPrompt: boolean;
 }
 
-function newTurn(tier: TaskTier): TurnState {
+const SOFT_RISK_PROMPT =
+  /security|sicherheit|permission|berechtigung|trust|secret|credential|auth|sandbox|architektur|architecture|migrat|refactor|umbau|rewrite|protokoll|protocol|frontend[- ]api|\bipc\b|dependenc|abhängigkeit|verifier|subagent|race condition|intermittier|root cause|ursache.*unklar/i;
+
+function newTurn(tier: TaskTier, softRiskPrompt: boolean): TurnState {
   return {
     tier,
     startedAt: Date.now(),
@@ -91,7 +98,20 @@ function newTurn(tier: TaskTier): TurnState {
     subagentCalls: 0,
     verifierCalls: 0,
     escalations: [],
+    initialTier: tier,
+    observedRiskSignals: new Set(),
+    changedSubsystems: new Set(),
+    softRiskPrompt,
   };
+}
+
+function subsystemOf(path: string): string {
+  const parts = path.split("/");
+  return parts.length > 1 ? parts.slice(0, 2).join("/") : "(root)";
+}
+
+function isSensitivePath(path: string): boolean {
+  return /(^|\/)(permissions?|security|auth|cryptography)(\/|[-.])/i.test(path);
 }
 
 function inputPath(input: unknown): string | undefined {
@@ -172,7 +192,15 @@ export default function taskTier(pi: ExtensionAPI): void {
     if (previousTier && isContinuationPrompt(event.prompt)) {
       tier = maxTier(tier, previousTier);
     }
-    turn = newTurn(tier);
+    turn = newTurn(tier, SOFT_RISK_PROMPT.test(event.prompt));
+    if (planning) turn.observedRiskSignals.add("planning_mode");
+    if (
+      /\b(deep(?:[- ]dive)?|gründlich|tiefen(?:audit|prüfung)|ausführlich.*(?:audit|analyse|prüfung))\b/i.test(
+        event.prompt,
+      )
+    ) {
+      turn.observedRiskSignals.add("explicit_deep_audit");
+    }
     previousTier = tier;
     editedFirst = false;
     clearAutoThinking();
@@ -237,12 +265,31 @@ export default function taskTier(pi: ExtensionAPI): void {
     if (!turn) return;
     const name = event.toolName;
     if (SEARCH_TOOLS.has(name)) turn.searches += 1;
-    else if (COMMAND_TOOLS.has(name)) turn.commands += 1;
-    else if (name === "read") {
+    else if (COMMAND_TOOLS.has(name)) {
+      turn.commands += 1;
+      if (event.isError) {
+        turn.observedRiskSignals.add("test_build_failure");
+        if (turn.tier === "fast")
+          escalate("normal", "Test-/Build-Befehl fehlgeschlagen");
+      }
+    } else if (name === "read") {
       turn.reads += 1;
       const path = inputPath(event.input);
       if (path && !event.isError) {
         const absolute = resolve(ctx.cwd, path);
+        const rel = relative(ctx.cwd, absolute);
+        const inside = !rel.startsWith("..") && !isAbsolute(rel);
+        if (inside) {
+          const hardPath = matchingVerifierRequiredPaths([rel]).length > 0;
+          if (hardPath) {
+            turn.observedRiskSignals.add("hard_verifier_path");
+            escalate("deep", `Hard-Verifier-Pfad gelesen: ${rel}`);
+          }
+          if (isSensitivePath(rel)) {
+            turn.observedRiskSignals.add("permission_security_path");
+            escalate("deep", `Security-/Permission-Pfad gelesen: ${rel}`);
+          }
+        }
         const stamp = stampOf(absolute);
         const input = event.input as { offset?: number; limit?: number };
         const details = (event as { details?: { truncation?: unknown } })
@@ -268,9 +315,23 @@ export default function taskTier(pi: ExtensionAPI): void {
         const rel = relative(ctx.cwd, absolute);
         const inside = !rel.startsWith("..") && !isAbsolute(rel);
         turn.editedFiles.add(rel);
-        if (inside && matchingVerifierRequiredPaths([rel]).length > 0) {
-          escalate("deep", `Hard-Verifier-Pfad geändert: ${rel}`);
-        } else if (turn.editedFiles.size > MAX_FAST_EDITED_FILES) {
+        if (inside) {
+          const hardPath = matchingVerifierRequiredPaths([rel]).length > 0;
+          if (hardPath) turn.observedRiskSignals.add("hard_verifier_path");
+          if (isSensitivePath(rel))
+            turn.observedRiskSignals.add("permission_security_path");
+          turn.changedSubsystems.add(subsystemOf(rel));
+          if (turn.changedSubsystems.size > 1) {
+            turn.observedRiskSignals.add("multiple_subsystems");
+            escalate("deep", "Änderungen in mehreren Subsystemen");
+          }
+          if (isSensitivePath(rel))
+            escalate("deep", `Security-/Permission-Pfad geändert: ${rel}`);
+          else if (hardPath)
+            escalate("deep", `Hard-Verifier-Pfad geändert: ${rel}`);
+        }
+        if (turn.editedFiles.size > MAX_FAST_EDITED_FILES) {
+          turn.observedRiskSignals.add("scope_growth");
           escalate("normal", `mehr als ${MAX_FAST_EDITED_FILES} Dateien`);
         }
       }
@@ -317,6 +378,15 @@ export default function taskTier(pi: ExtensionAPI): void {
       verifierCalls: state.verifierCalls,
       thinking: state.autoThinking ?? state.startedThinking ?? null,
       durationMs: Date.now() - state.startedAt,
+      initialTier: state.initialTier,
+      finalTier: state.tier,
+      escalationReason: state.escalations,
+      observedRiskSignals: [...state.observedRiskSignals],
+      falsePositiveCandidate:
+        state.initialTier === "normal" &&
+        state.softRiskPrompt &&
+        state.escalations.length === 0 &&
+        state.observedRiskSignals.size === 0,
     });
   });
 }

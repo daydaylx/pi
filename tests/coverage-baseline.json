@@ -14,10 +14,12 @@
     "extensions/compact-tools/index.ts",
     "extensions/aurora-ui/index.ts",
     "extensions/resilience/index.ts",
+    "extensions/context-capsule/index.ts",
     "extensions/session-health/index.ts",
     "extensions/frontend-bridge/index.ts",
     "extensions/openrouter-doctor/index.ts",
-    "extensions/second-opinion/index.ts"
+    "extensions/second-opinion/index.ts",
+    "extensions/task-tier/index.ts"
   ],
   "minimumFunctionCoverage": {
     "extensions/setup-core/index.ts": 100,
@@ -32,9 +34,11 @@
     "extensions/compact-tools/index.ts": 100,
     "extensions/aurora-ui/index.ts": 100,
     "extensions/resilience/index.ts": 100,
+    "extensions/context-capsule/index.ts": 100,
     "extensions/session-health/index.ts": 100,
     "extensions/frontend-bridge/index.ts": 100,
     "extensions/openrouter-doctor/index.ts": 100,
-    "extensions/second-opinion/index.ts": 62
+    "extensions/second-opinion/index.ts": 62,
+    "extensions/task-tier/index.ts": 100
   }
 }

@@ -37,6 +37,18 @@ function verifierEvent(task, toolCallId = "call-1") {
 
 const LOW_RISK_TASK = "Original User Request: irrelevant für diesen Test.";
 const HARD_PATH_FILE = "extensions/permissions/guards.ts";
+const VERIFY_SPEC = {
+  objective: "Verify the permission boundary change.",
+  delegationReason: "The requested change touches a required verifier path.",
+  profile: "verify",
+  verification: {
+    originalRequest: "Change the permission boundary safely.",
+    delegatedQuestion: "Check the implementation against the request.",
+    diff: "The permission guard was changed.",
+    baseline: "The workspace was clean before the task.",
+    acceptance: "The hard-path diff has a bound verifier result.",
+  },
+};
 
 await test("a low-risk diff produces a not_needed ticket with no path hits", () => {
   const ticket = verifierTicket.createVerifierTicket(
@@ -57,6 +69,23 @@ await test("a low-risk diff produces a not_needed ticket with no path hits", () 
     ticket.triggerEvidence,
     undefined,
     "no evidence without a justified trigger",
+  );
+});
+
+await test("a temporary verify spec is recognized before policy rewriting", () => {
+  const event = {
+    toolCallId: "spec-call-1",
+    toolName: "subagent",
+    input: { spec: VERIFY_SPEC },
+  };
+  assert(
+    verifierTicket.isVerifierSingleCall(event),
+    "setup-core must prebind a ticket while the tool input is still spec.profile=verify",
+  );
+  eq(
+    verifierTicket.verifierSingleCallIssue(event),
+    undefined,
+    "a valid single verify spec is not rejected by the legacy shape check",
   );
 });
 

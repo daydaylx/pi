@@ -191,7 +191,7 @@ export const setupCoreSections = {
         assert(
           harness.notifications
             .at(-1)
-            ?.message?.includes("Pi CLI/dev package: 0.80.7/0.84.3") &&
+            ?.message?.includes("Pi CLI/dev package: 0.80.7/1.0.4") &&
             harness.notifications.at(-1)?.level === "error",
           "setup doctor makes CLI/dev version drift visible",
         );
@@ -210,14 +210,14 @@ export const setupCoreSections = {
         writeFileSync(
           path.join(rangedNpmDir, "package.json"),
           JSON.stringify({
-            devDependencies: { "@earendil-works/pi-coding-agent": "^0.87.1" },
+            devDependencies: { "@earendil-works/pi-coding-agent": "^1.0.4" },
           }),
         );
         writeFileSync(
           path.join(rangedPackageDir, "package.json"),
-          JSON.stringify({ version: "0.87.1" }),
+          JSON.stringify({ version: "1.0.4" }),
         );
-        const rangeHarness = createHarness({ piVersion: "0.87.1" });
+        const rangeHarness = createHarness({ piVersion: "1.0.4" });
         setupCore.default(rangeHarness.api, { exec: rangeHarness.api.exec });
         const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
         process.env.PI_CODING_AGENT_DIR = rangedAgentDir;
@@ -229,8 +229,8 @@ export const setupCoreSections = {
           await rangeHarness.commands.get("setup-doctor")?.("", rangeContext);
           const rangeReport = rangeHarness.notifications.at(-1)?.message ?? "";
           assert(
-            rangeReport.includes("Pi CLI/dev package: 0.87.1/^0.87.1") &&
-              rangeReport.includes("installed dev package: 0.87.1") &&
+            rangeReport.includes("Pi CLI/dev package: 1.0.4/^1.0.4") &&
+              rangeReport.includes("installed dev package: 1.0.4") &&
               !rangeReport.includes(
                 "Pi CLI, Manifest und installiertes Dev-Paket sind nicht angeglichen.",
               ),

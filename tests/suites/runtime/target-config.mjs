@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assert, eq } from "../../shared/assertions.mjs";
 import { contrastRatio } from "../../shared/harness.mjs";
-import { ROOT } from "../../shared/jiti-loader.mjs";
+import { npmModuleFile, ROOT } from "../../shared/jiti-loader.mjs";
 
 export const targetConfigSections = {
   "target runtime configuration": async (context) => {
@@ -222,9 +222,9 @@ export const targetConfigSections = {
         // Kimi, no MiniMax, no external token plans.
         const individualCatalog = JSON.parse(
           readFileSync(
-            path.join(
-              ROOT,
-              "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/providers/data/qwen-token-plan-individual.json",
+            npmModuleFile(
+              "@earendil-works/pi-ai",
+              "dist/providers/data/qwen-token-plan-individual.json",
             ),
             "utf8",
           ),
@@ -242,6 +242,7 @@ export const targetConfigSections = {
             "qwen3.6-flash",
             "qwen3.7-max",
             "qwen3.7-plus",
+            "qwen3.8-flash",
             "qwen3.8-max",
           ],
           "the Individual Plan catalog matches the expected model set",
@@ -282,10 +283,7 @@ export const targetConfigSections = {
         }
         const { clampThinkingLevel } = await import(
           pathToFileURL(
-            path.join(
-              ROOT,
-              "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/models.js",
-            ),
+            npmModuleFile("@earendil-works/pi-ai", "dist/models.js"),
           ).href
         );
         eq(
@@ -456,6 +454,7 @@ export const targetConfigSections = {
             "+extensions/compact-tools/index.ts",
             "+extensions/aurora-ui/index.ts",
             "+extensions/resilience/index.ts",
+            "+extensions/context-capsule/index.ts",
             "+extensions/session-health/index.ts",
             "+extensions/frontend-bridge/index.ts",
             "+extensions/openrouter-doctor/index.ts",

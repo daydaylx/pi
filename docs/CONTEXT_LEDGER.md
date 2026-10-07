@@ -239,18 +239,21 @@ _Keine offenen Fragen._
 
 ## Aktuelle Prioritäten
 
-- Audit-Remediation: Die Vorabnahme von Meilenstein B bestätigt alle 28
-  Endstatus und den begrenzten Scope. Die Aurora-Coverage ist mit einer
-  test-only Lifecycle-Regression wieder bei 100 %; offen bleiben der bewusst
-  uncommittete Arbeitsbaum und zwei technisch `INCOMPLETE` Verifier-Abschlüsse
-  trotz inhaltlich positiver Berichte. Runtime-Upgrades bleiben außerhalb des
-  Auftrags.
+- Audit-Remediation: Die letzten Sitzungslogs zeigen, dass temporäre
+  `spec.profile: "verify"`-Aufträge vor der Policy-Umschreibung keinen
+  Verifier-Ticket-Eintrag erhielten (`unbound-ticket`). Setup-Core normalisiert
+  diese Form jetzt vor dem Ticket-Start; Runtime- und Regressionstests decken
+  die Bindung ab. Der dokumentierte Pi-Runtime-Pin und die Dev-Abhängigkeit
+  sind beide `1.0.4`. Der `brace-expansion`-Audit-Befund ist durch den Pi-Pin
+  und Root-Override `5.0.12` behoben; nach `npm ci` wurde `audit:check` erneut
+  erfolgreich ausgeführt.
 - Real-Duel: Medium-Profile, Fingerprint-Provenienz und die 36-Lauf-Matrix
   sind vorbereitet. Vor dem Dual-Smoke zuerst den kanonischen Audit-/Medium-
   Stand prüfen und die explizite Commit-Freigabe einholen.
 - Die lokale Desktop-GUI wurde entfernt; der generische Frontend-Server und
   die gemeinsame Core-/TUI-State-Schnittstelle bleiben aktiv.
-- Der Live-Smoke (#137) bleibt offener P0 für die TUI-Seite.
+- Der Live-Smoke (#137) bleibt offen: Offline-Start/Shift+Tab ist geprüft,
+  Provider- und Plan/Work-Schritte sind noch nicht gelaufen.
 - Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA, der
   den alten Pin enthält — `main` ist nicht automatisch der neueste Stand.
   Vor jeder Pin-Änderung Erreichbarkeit prüfen; die lokale Suite bleibt

@@ -913,6 +913,7 @@ export const resilienceSections = {
       auroraUi,
       resilience,
       sessionHealth,
+      contextCapsule,
       openrouterDoctor,
       secondOpinion,
     } = context;
@@ -937,6 +938,7 @@ export const resilienceSections = {
         !auroraUi ||
         !resilience ||
         !sessionHealth ||
+        !contextCapsule ||
         !openrouterDoctor ||
         !secondOpinion ||
         !secondOpinionExtension
@@ -955,6 +957,7 @@ export const resilienceSections = {
         "+extensions/compact-tools/index.ts": compactTools.default,
         "+extensions/aurora-ui/index.ts": auroraUi.default,
         "+extensions/resilience/index.ts": resilience.default,
+        "+extensions/context-capsule/index.ts": contextCapsule.default,
         "+extensions/session-health/index.ts": sessionHealth.default,
         "+extensions/frontend-bridge/index.ts": frontendBridge.default,
         "+extensions/openrouter-doctor/index.ts": openrouterDoctor.default,

@@ -47,7 +47,7 @@ import { resolveRuntimeRoot } from "../shared/runtime-resolution.mjs";
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The runtime version these patches were written and verified against. */
-export const EXPECTED_RUNTIME_VERSION = "0.87.1";
+export const EXPECTED_RUNTIME_VERSION = "1.0.4";
 
 /**
  * One edit. `detect` proves the patch is already in place, `anchor` is the
@@ -59,8 +59,8 @@ export const PATCHES = [
     file: "dist/core/agent-session.js",
     summary: "Built-in Slash-Commands für das Extension-Inventar importieren",
     detect: 'import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.js";',
-    anchor: `import { createSyntheticSourceInfo } from "./source-info.js";`,
-    replacement: `import { createSyntheticSourceInfo } from "./source-info.js";
+    anchor: `import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath } from "./source-info.js";`,
+    replacement: `import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath } from "./source-info.js";
 import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.js";`,
   },
   {
@@ -368,15 +368,15 @@ export const BUNDLE_PATCHES = [
     detect:
       "let globalSettings=this.settingsManager.getGlobalSettings(),extensionOverrides=",
     anchor:
-      "toResolvedPaths(accumulator){let mapToResolved=entries=>{let resolved=Array.from(entries.entries()).map(([path14,{metadata,enabled}])=>({path:path14,enabled,metadata}));" +
-      "resolved.sort((a,b2)=>resourcePrecedenceRank(a.metadata)-resourcePrecedenceRank(b2.metadata));" +
+      "toResolvedPaths(accumulator){let mapToResolved=entries=>{let resolved=Array.from(entries.entries()).map(([path10,{metadata,enabled}])=>({path:path10,enabled,metadata}));" +
+      "resolved.sort((a,b)=>resourcePrecedenceRank(a.metadata)-resourcePrecedenceRank(b.metadata));" +
       "let seen=new Set;" +
       "return resolved.filter(entry=>{let canonicalPath=canonicalizePath(entry.path);return seen.has(canonicalPath)?!1:(seen.add(canonicalPath),!0)})};" +
       "return{extensions:mapToResolved(accumulator.extensions),skills:mapToResolved(accumulator.skills),prompts:mapToResolved(accumulator.prompts),themes:mapToResolved(accumulator.themes)}}",
     replacement:
-      "toResolvedPaths(accumulator){let mapToResolved=(entries,extensionOverrides)=>{let resolved=Array.from(entries.entries()).map(([path14,{metadata,enabled}])=>({path:path14,enabled,metadata}));" +
+      "toResolvedPaths(accumulator){let mapToResolved=(entries,extensionOverrides)=>{let resolved=Array.from(entries.entries()).map(([path10,{metadata,enabled}])=>({path:path10,enabled,metadata}));" +
       "if(extensionOverrides)resolved=applyConfiguredExtensionOrder(resolved,extensionOverrides,this.agentDir);" +
-      "else resolved.sort((a,b2)=>resourcePrecedenceRank(a.metadata)-resourcePrecedenceRank(b2.metadata));" +
+      "else resolved.sort((a,b)=>resourcePrecedenceRank(a.metadata)-resourcePrecedenceRank(b.metadata));" +
       "let seen=new Set;" +
       "return resolved.filter(entry=>{let canonicalPath=canonicalizePath(entry.path);return seen.has(canonicalPath)?!1:(seen.add(canonicalPath),!0)})};" +
       "let globalSettings=this.settingsManager.getGlobalSettings(),extensionOverrides=[...(globalSettings.extensions??[])];" +

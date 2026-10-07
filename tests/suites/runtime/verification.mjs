@@ -1182,9 +1182,20 @@ export const verificationSections = {
           trusted,
         );
         const afterNoGit = queryCapabilities();
-        assert(typeof afterNoGit.workspaceFingerprint === "string", "F-03: filesystem fallback provides a current fingerprint");
-        eq(afterNoGit.verifierStatus, "stale", "F-03: the prior Git-bound verdict is stale under the new filesystem fingerprint");
-        eq(afterNoGit.verifierVerdict, undefined, "F-03: stale verifier verdict is not reused");
+        assert(
+          typeof afterNoGit.workspaceFingerprint === "string",
+          "F-03: filesystem fallback provides a current fingerprint",
+        );
+        eq(
+          afterNoGit.verifierStatus,
+          "stale",
+          "F-03: the prior Git-bound verdict is stale under the new filesystem fingerprint",
+        );
+        eq(
+          afterNoGit.verifierVerdict,
+          undefined,
+          "F-03: stale verifier verdict is not reused",
+        );
 
         await harness.runHooks("session_shutdown", {}, trusted);
         eq(
@@ -1427,6 +1438,46 @@ export const verificationSections = {
           "the exact ticket-bound PASS covers the unchanged protected path",
         );
 
+        const verifySpecCall = {
+          toolName: "subagent",
+          toolCallId: "ticket-verify-spec",
+          input: {
+            spec: {
+              objective: "Verify the permission boundary change.",
+              delegationReason: "The diff touches a hard verifier path.",
+              profile: "verify",
+              verification: {
+                originalRequest: "Change the permission boundary safely.",
+                delegatedQuestion:
+                  "Check the implementation against the request.",
+                diff: "The permission guard was changed.",
+                baseline: "The workspace was clean before the task.",
+                acceptance: "The hard-path diff has a bound verifier result.",
+              },
+            },
+          },
+        };
+        const specStart = await harness.runHooks(
+          "tool_call",
+          verifySpecCall,
+          session,
+        );
+        assert(
+          !specStart.some((entry) => entry?.block),
+          "a valid public verify Spec passes ticket preflight before policy rewriting",
+        );
+        await result("ticket-verify-spec", "child-verify-spec", "PASS", {
+          model: "openai-codex/gpt-6-luna:high",
+        });
+        const specPassed = query();
+        assert(
+          specPassed.ticket?.runId === "ticket-verify-spec" &&
+            specPassed.childRunId === "child-verify-spec" &&
+            specPassed.verifierStatus === "completed" &&
+            specPassed.ticket?.riskClass === "required",
+          "a verify Spec result is bound to its preflight ticket instead of INCOMPLETE/unbound-ticket",
+        );
+
         // A fallback model and an omitted model field are both non-evidence;
         // neither may replace the result whose model was pinned at launch.
         await start("ticket-fallback-model");
@@ -1435,7 +1486,7 @@ export const verificationSections = {
         });
         eq(
           query().childRunId,
-          "child-ticket-pass",
+          "child-verify-spec",
           "a fallback model cannot replace the model-bound PASS",
         );
         await start("ticket-missing-model");
@@ -1444,7 +1495,7 @@ export const verificationSections = {
         });
         eq(
           query().childRunId,
-          "child-ticket-pass",
+          "child-verify-spec",
           "a PASS without a reported model remains non-evaluable",
         );
 
@@ -1453,7 +1504,7 @@ export const verificationSections = {
         await result("foreign-tool-call", "foreign-child-run", "PASS");
         eq(
           query().childRunId,
-          "child-ticket-pass",
+          "child-verify-spec",
           "a foreign run id is discarded and cannot replace the booked result",
         );
 
@@ -1463,7 +1514,7 @@ export const verificationSections = {
         await result("missing-child-run", undefined, "PASS");
         eq(
           query().childRunId,
-          "child-ticket-pass",
+          "child-verify-spec",
           "a result without a matching child run id leaves the prior evidence untouched",
         );
 

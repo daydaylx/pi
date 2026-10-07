@@ -19,6 +19,7 @@ import { workspaceSnapshotSections } from "./runtime/workspace-snapshot.mjs";
 import { snapshotGateSections } from "./runtime/snapshot-gates.mjs";
 import { secondOpinionSections } from "./runtime/second-opinion.mjs";
 import { interactivePtySections } from "./runtime/interactive-pty.mjs";
+import { contextCapsuleSections } from "./runtime/context-capsule.mjs";
 
 export const runtimeSections = {
   ...targetConfigSections,
@@ -41,4 +42,5 @@ export const runtimeSections = {
   ...snapshotGateSections,
   ...secondOpinionSections,
   ...interactivePtySections,
+  ...contextCapsuleSections,
 };

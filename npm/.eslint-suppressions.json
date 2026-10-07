@@ -32,7 +32,7 @@
   },
   "tests/suites/lsp.mjs": {
     "no-unused-vars": {
-      "count": 9
+      "count": 8
     }
   },
   "tests/suites/runtime/ask-user.mjs": {

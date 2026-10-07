@@ -29,6 +29,11 @@ export function isVerifierSingleCall(event: ToolCallEvent): boolean {
   const input = event.input as Record<string, unknown>;
   const action =
     typeof input.action === "string" ? input.action.toLowerCase() : undefined;
+  const specVerifier =
+    typeof input.spec === "object" &&
+    input.spec !== null &&
+    !Array.isArray(input.spec) &&
+    (input.spec as Record<string, unknown>).profile === "verify";
   const directVerifier = input.agent === "verifier";
   const taskVerifier = Array.isArray(input.tasks)
     ? input.tasks.some(
@@ -47,10 +52,14 @@ export function isVerifierSingleCall(event: ToolCallEvent): boolean {
       )
     : false;
   const executionRequest =
+    specVerifier ||
     action === undefined ||
     (action === "single" && directVerifier) ||
     ((action === "parallel" || action === "tasks") && taskVerifier);
-  return executionRequest && (directVerifier || taskVerifier || chainVerifier);
+  return (
+    executionRequest &&
+    (specVerifier || directVerifier || taskVerifier || chainVerifier)
+  );
 }
 
 function hasVerifierChainStep(step: Record<string, unknown>): boolean {

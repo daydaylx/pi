@@ -1,305 +1,34 @@
 # Globale Agent-Regeln
 
-Diese Datei trägt nur Regeln, die in fast jeder Sitzung gelten. Seltene
-Ablaufregeln stehen in der jeweils zuständigen Datei: Sitzungs- und
-Checkpoint-Ablauf im Skill `context-checkpoint`, Subagenten-Details in
-`docs/subagents.md`, Verifikationsprofile in `docs/verify-profiles.md`. In dieser Datei genannte relative Pfade unter `extensions/`, `agents/`
-gehören zum Pi-Setup selbst. Lesezugriffe auf Setup-Dateien, Skills und
-externe Ressourcen außerhalb des Projekts sind in vertrauenswürdigen Projekten
-zulässig, solange keine Secrets berührt werden; Schreibzugriffe bleiben strikt
-projektgebunden.
+Diese Regeln gelten für Pi-Sitzungen und werden von anderen Coding-Agenten sinngemäß befolgt; Verweise auf Pi-eigene Tools (`ask_user`, `plan_write`, `project_check`, `recovery_check`, `subagent`, `verify`) gelten für sie nicht. Seltene Arbeitsabläufe stehen in [docs/agent-workflow.md](docs/agent-workflow.md), Session-Checkpoints im Skill `context-checkpoint`, Subagenten- und Verifier-Verträge in [docs/subagents.md](docs/subagents.md), Prüfprofile in [docs/verify-profiles.md](docs/verify-profiles.md) und CLI/TUI-Scope in [docs/scope-cli-tui-vs-gui.md](docs/scope-cli-tui-vs-gui.md). Relative Pfade unter `extensions/` und `agents/` bezeichnen das Pi-Setup.
 
-## Schutzregeln
+## Schutz und Umfang
 
-- Änderungen auf den konkreten Auftrag begrenzen; keine breiten Refactorings,
-  Umbenennungen oder Formatierungen ohne Auftrag.
-- Bestehende, nicht zum Auftrag gehörende Nutzeränderungen erhalten.
-- Secrets, Zugangsdaten, Auth-Dateien, Umgebungsvariablen und SSH-Schlüssel
-  weder offenlegen noch in Reports oder Versionskontrolle übernehmen.
-- Projektabhängigkeiten oder Systempakete nur nach vorheriger Zustimmung
-  hinzufügen oder installieren.
-- Vor einem Shell-Aufruf prüfen, ob er außerhalb des Projektpfads schreibt,
-  unquotierte Variablen verwendet oder Secret-/Credential-Grenzen berührt.
-  Nach einer Schutzgrenzen-Blockierung nicht dieselbe Strategie variieren,
-  sondern die Ursache bestimmen und eine zulässige projektlokale Alternative
-  wählen. Blockt derselbe Aufruf trotz variierter Strategie ein zweites Mal
-  identisch, nicht ein drittes Mal versuchen — stattdessen `ask_user`
-  einsetzen (im Planmodus wie in jedem anderen Modus jederzeit verfügbar)
-  und die Blockade konkret benennen, statt stillschweigend weiter zu
-  wiederholen.
-- Eine einzelne blockierte Ressource (z. B. eine Skill-Datei oder ein
-  Dokument außerhalb des Projekts) ist kein Abbruchgrund für die gesamte
-  Aufgabe. Ohne die Ressource weiterarbeiten oder eine projektlokale
-  Alternative wählen; nur bei echter Sackgasse `ask_user` einsetzen statt
-  den Turn oder die Sitzung zu beenden.
-- Den aktiven Workflow- und Permission-Modus respektieren. Diese Datei
-  erzwingt keinen zusätzlichen Planmodus. Der Planmodus-Ausstieg und die
-  Planfreigabe sind reine UI-Aktionen der Nutzerin/des Nutzers
-  (Workflow-Menü/Shift+Tab, `/plan-decide`, `/plan-approve`) und keine
-  Agenten-Tools — bei einem expliziten Umsetzungsauftrag während des
-  Planmodus nicht versuchen, die Sperre durch wiederholtes Schreiben des Plans
-  oder andere Umgehungen aufzuheben, sondern über `ask_user` um den
-  Moduswechsel bitten. Der Plan selbst wird im Planmodus ausschließlich über
-  das Tool `plan_write` geschrieben; ein Wechsel nach `work` führt keinen Plan
-  aus (`docs/decisions/020-explicit-plan-approval.md`).
+- Nur den konkreten Auftrag umsetzen. Bestehende, nicht dazugehörige Nutzeränderungen erhalten; keine breiten Refactorings oder Formatierungen ohne Anlass.
+- Secrets, Zugangsdaten, Auth-Dateien, Umgebungsvariablen und SSH-Schlüssel weder offenlegen noch in Reports oder Versionskontrolle übernehmen.
+- Projektabhängigkeiten und Systempakete nur nach ausdrücklicher Zustimmung installieren oder hinzufügen.
+- Schreibzugriffe bleiben auf das Projekt beschränkt. Setup-, Skill- und externe Ressourcen dürfen in vertrauenswürdigen Projekten nur lesend und ohne Secrets eingesehen werden.
+- Vor Shell-Aktionen Schreibziel, Variablenquotierung und Credential-Grenzen prüfen. Eine Schutzblockade nicht mit einer Variantenstrategie umgehen: Ursache bestimmen und zulässige lokale Alternative nutzen. Wiederholt sich dieselbe Blockade, nicht weiterprobieren; Pi nutzt `ask_user` für die konkrete Blockade.
+- Eine einzelne blockierte Datei oder Ressource beendet nicht die ganze Aufgabe. Ohne sie weiterarbeiten, sofern keine echte Sackgasse besteht.
+- Den aktiven Permission- und Workflow-Modus respektieren. Planfreigabe und Moduswechsel sind UI-Aktionen; eine Sperre nie über alternative Schreibwege umgehen.
+- Keine Commits, Pushes, Merges, Veröffentlichungen oder Deployments ohne ausdrücklichen Auftrag.
+
+## Arbeitsweise und Qualität
+
+- Zuerst relevante Projektanweisungen, Implementierung und Prüfungen gezielt lokalisieren. Änderungen klein halten und nach jedem Teilpaket den engsten passenden Check ausführen.
+- Fehler, nicht ausführbare Prüfungen und offene Unsicherheit ausdrücklich nennen. Eine Änderung erst als umgesetzt bezeichnen, wenn ihr relevanter Testlauf beendet ist.
+- `extensions/task-tier/` stuft Aufgaben automatisch ein; NORMAL ist der Default. FAST bleibt auf kleine, risikoarme Aufgaben beschränkt und wird bei echter Komplexität hochgestuft. Die Kriterien stehen in [docs/decisions/033-task-tiers.md](docs/decisions/033-task-tiers.md).
+- Sind Akzeptanzkriterien erfüllt, der passende Check erfolgreich und keine Unsicherheit offen, endet die Aufgabe. Weitere Reads, Tests oder Refactorings brauchen einen Anlass; ausdrückliche Nutzerwünsche haben Vorrang.
+- Dauerhafte Projektregeln gehören hierher, ausführliche Referenzen in `docs/`. `docs/PROJECT_STATE.md` und `docs/CONTEXT_LEDGER.md` werden ausschließlich über den Skill `context-checkpoint` gepflegt.
 
 ## Verifikation
 
-- Änderungen mit den relevanten Tests und statischen Prüfungen verifizieren;
-  Fehler und nicht ausführbare Prüfungen ausdrücklich nennen.
-- `project_check({ profile: "verify" })` ist der kanonische Weg für das
-  deklarierte Pflichtprofil — nur dieser Tool-Aufruf aktualisiert
-  Verifikations-Footer und -Ledger. Ein direkter `bash`-Lauf von
-  `npm run verify` bleibt zum Debuggen einzelner Schritte möglich, zählt aber
-  nicht als durchgeführte Verifikation (`docs/verify-profiles.md`). Rohe
-  Interpreteraufrufe (`node`, `python`) über `bash` können je nach
-  Berechtigungsstufe blockiert werden. Das Tool `verify` prüft nur das
-  Pi-Setup (`~/.pi/agent`), nie Projektcode.
-- Einen Teilauftrag erst als umgesetzt bezeichnen, wenn der zugehörige
-  Testlauf beendet und sein Ergebnis dokumentiert ist. Vor dem finalen
-  Abschluss zusätzlich `project_check({ profile: "verify" })` ausführen —
-  außer bei einer FAST-Aufgabe (s. „Aufgabenklassen“): dort genügen der
-  direkt zugehörige Test und die relevante Syntax-/Typprüfung.
-- Ein `FAIL`- oder `UNVERIFIABLE`-Urteil sowie ein ergebnisloser
-  `verifier`-Lauf vor Commit oder Push nicht unkommentiert lassen: entweder
-  beheben und erneut prüfen, oder den offenen Punkt dem Nutzer ausdrücklich
-  nennen.
+- Relevante Tests und statische Prüfungen gehören zum Abschluss; Ergebnisse knapp dokumentieren.
+- Pi: Für das deklarierte Pflichtprofil ist `project_check({ profile: "verify" })` der kanonische Nachweis. Die ausführliche Verifikationsregel steht in [docs/agent-workflow.md](docs/agent-workflow.md). Das Tool `verify` prüft nur das Pi-Setup unter `~/.pi/agent`.
+- Sicherheits-/Permission-Grenzen, kritische Plan-/Recovery-Zustände, öffentliche Verträge und gelistete Hard-Pfade folgen dem technischen Verifier-Need-Gate. Eine explizite Nutzeranforderung ist ebenfalls verbindlich. Keine Risiken durch Umgehung oder Selbsteinstufung herabsetzen; Details stehen in [docs/subagents.md](docs/subagents.md).
 
-## Aufgabenklassen
+## Delegation und Scope
 
-Die Extension `extensions/task-tier/` erkennt pro Turn automatisch FAST,
-NORMAL oder DEEP (`docs/decisions/033-task-tiers.md`); NORMAL ist der Default
-und bedeutet den bisherigen Ablauf.
-
-- **FAST** (lokal, ≤ 3 Dateien, kein Security-/Permission-/Architektur-/
-  Dependency-/API-Bezug): `inspect → edit → gezielter Check → fertig`. Richtwert
-  vor dem ersten Edit ≤ 2 Suchen und 3–5 Reads; eine Datei einmal in einem
-  ausreichend großen Bereich lesen, unveränderte Dateien nicht erneut. Keine
-  Subagenten, kein Verifier, kein globales `verify` ohne Anlass. Echte
-  Komplexität stuft automatisch auf NORMAL/DEEP hoch.
-- **NORMAL:** relevante Suite plus betroffene Subsystem-Checks; Subagenten nur
-  bei erkennbarem Mehrwert.
-- **DEEP** (Architektur, Security, Permissions, Plan Mode, große Refactorings):
-  ausführliche Exploration, Subagenten, Verifier und breitere Tests.
-- **Stop-Regel (alle Klassen):** Sind Akzeptanzkriterien erfüllt, der gezielte
-  Test erfolgreich und keine Unsicherheit offen, endet die Aufgabe — keine
-  erneuten Reads, Zusatz-Refactorings, weiteren Tests oder Doku-Änderungen ohne
-  Anlass. Ausdrückliche Nutzerwünsche haben Vorrang.
-
-## Commit und Push
-
-- Commits, Pushes und Branch-Veröffentlichungen nur auf ausdrücklichen
-  Auftrag ausführen.
-- Vor Commit/Push mit verifier-pflichtigem Diff den Verifier laufen lassen.
-  „commit und push“ und kurze Fortsetzungen („weiter“) werden nie als FAST
-  klassifiziert; sperrt dennoch eine Aufgabenklasse den Verifier, den Nutzer
-  um einen neuen Turn bitten statt den Commit zu umgehen.
-- Commit und Push als getrennte Schritte ausführen. Nach einem Push-Fehler den
-  lokalen Commit- und Upstream-Status berichten und höchstens einen gezielten
-  Retry durchführen.
-
-## Kontextdisziplin
-
-- Zuerst gezielt suchen und nur relevante Dateien oder Ausschnitte lesen. Für
-  Code- und Dateisuche die eigenständigen `grep`- und `find`-Tools verwenden
-  statt `bash rg`/`git grep`/`find` — sie sind vom Plan-Modus-Gate nicht
-  betroffen (das greift nur bei `bash`/`write`/`edit`) und liefern
-  strukturierte Treffer statt geratener Pfade.
-- Im Planmodus nur einzelne, einfache Lese-Kommandos per `bash` absetzen — keine
-  Verkettungen (`&&`, `;`, `|`), Redirections oder Prozesssubstitution; mehrere
-  Abfragen als getrennte parallele Aufrufe senden. `read` nie auf ein
-  Verzeichnis richten (`ls`/`find` verwenden) und Pfade zuvor per `find`
-  bestätigen.
-- Vor jedem `edit` den Zielbereich frisch lesen (nie aus dem Gedächtnis oder
-  einem älteren Read patchen); nach „Could not find …“ sofort neu lesen statt
-  den Patch zu variieren.
-- Tests dort starten, wo die CI sie startet (Paketverzeichnis laut
-  Projekt-`AGENTS.md`/CI-Workflow), nicht auf Monorepo-Root-Ebene.
-- Meldet das Recovery-Gate gesperrte Schreibzugriffe, zuerst genau einmal
-  `recovery_check` ausführen und erst danach schreiben.
-- Vor der ersten Änderung Arbeitsauftrag, betroffene Implementierung und
-  zugehörige Tests gezielt lokalisieren; keine Pfade oder Patch-Kontexte
-  raten. Nach zwei fehlgeschlagenen Lese-, Pfad- oder Editversuchen den
-  tatsächlichen Kontext erneut lesen.
-- Änderungen in kleinen, testbaren Schritten vornehmen und nach jedem
-  Teilpaket zuerst den engsten betroffenen Test ausführen. Vorbestehende
-  Fehler nur mit einer belegten Ausgangsbaseline als solche ausweisen.
-- Große Logs mit Filtern, `head`, `tail` oder Suchmustern begrenzen; große
-  JSON-Daten vor dem Lesen filtern. Vor vollständigen Diffs
-  `git diff --stat` verwenden und Diffs anschließend dateibezogen lesen.
-  Testergebnisse auf Zusammenfassung und relevante Fehlerstellen beschränken.
-- Einen vollständigen Testlauf nicht ohne Änderung des geprüften Stands
-  wiederholen. Nach einem gezielten Test stattdessen nur den noch fehlenden
-  kanonischen `project_check`-Nachweis ausführen.
-- Gekürzte Ausgaben sichtbar kennzeichnen. `!!command` nur verwenden, wenn der
-  Nutzer die Ausgabe sehen soll, das Modell sie aber nicht weiter benötigt.
-- Dauerregeln in `AGENTS.md`, ausführliche Referenz in `docs/`, dauerhaftes
-  Projektgedächtnis in `docs/CONTEXT_LEDGER.md` und flüchtigen Arbeitsstand in
-  `docs/PROJECT_STATE.md` trennen; dauerhafte Fakten nicht duplizieren. Beide
-  Dateien werden ausschließlich über den Skill `context-checkpoint` gepflegt;
-  dort stehen auch die Regeln für Checkpoints, Providerfehler und
-  Sitzungswechsel.
-
-## Scope: CLI/TUI vs. GUI
-
-Zwei unabhängige Oberflächen: CLI/TUI (Aurora-Terminal-UI) und GUI
-(Electron-Desktop „pi gui"). Nennt der Auftrag eindeutig die eine Seite, nur
-deren Pfade lesen; die andere Seite bleibt außen vor, außer der Auftrag
-nennt ausdrücklich die Bridge/den Contract oder beide Seiten. Vollständige
-Pfadzuordnung: `docs/scope-cli-tui-vs-gui.md`. Achtung:
-`extensions/aurora-ui/` gehört trotz des Namens zur CLI/TUI, nicht zur GUI.
-
-## Webtools (`web_search` / `fetch_content`)
-
-- `web_search` nur bei echtem Aktualitätsbedarf: aktuelle Library-/Framework-Versionen, externe API-Doku, unbekannte aktuelle Fehlermeldungen, Provider-/Tool-Verhalten, das lokal nicht prüfbar ist — und nur wenn lokale Repository-Evidenz nicht reicht. Nie „vorsichtshalber“; was im Repo steht oder per `grep`/`find`/`read`/LSP/Investigator beantwortbar ist, bleibt lokal.
-- Standardablauf: erst `web_search`, dann gezielt die relevanten Quellen mit `fetch_content` öffnen; `includeContent` standardmäßig nicht setzen, nur bei konkretem begründetem Bedarf; keine breitflächigen Fetch-Ketten.
-- `fetch_content` nur mit konkreter, relevanter http(s)-URL (Doku-Seiten, PDFs, GitHub-Webseiten als normale HTTP-Quellen) — nie für lokale Pfade, nie mit `auth`, kein Repo-Clone über die Extension (GitHub-Cloning ist deaktiviert); Repos bleiben beim bestehenden Git-/Investigator-Workflow.
-- Subagenten arbeiten rein lokal; keine automatische Kopplung an Websuche.
-
-## Subagenten
-
-### Harte Kriterien
-
-Ein Subagent wird nur verwendet, wenn mindestens eine Bedingung erfüllt ist:
-
-1. Die Teilaufgabe ist klar unabhängig.
-2. Ein anderes Toolset oder Berechtigungsprofil wird benötigt.
-3. Eine unabhängige Prüfung erzeugt echten Mehrwert.
-4. Der relevante Repository-Bereich ist noch unbekannt.
-5. Die Entscheidung besitzt hohe Folgekosten.
-
-Triviale Teilaufgaben bleiben beim Hauptagenten.
-
-### Temporäre Task-Agenten (Standardweg)
-
-Delegiere bevorzugt über einen temporären Task-Agenten: `subagent` mit
-`spec` statt `agent` (`docs/decisions/031-temporary-task-agents.md`). Der
-Hauptagent definiert die Arbeit, die Runtime die Grenzen, Evidenz entscheidet
-über das Ergebnis.
-
-- `spec`: `objective`, `profile` (`analyse`, `research`, `verify`),
-  `delegationReason`, optional `context`, `scope`, `expectedOutput`,
-  `requestedCapabilities`, `modelPreference`, `constraints`. Fähigkeiten sind
-  Wünsche, keine Rechte; Schreiben, Netzwerk und Delegation werden nie
-  vergeben. Das Modell wählt die Runtime.
-- Temporäre Agenten sind zustandslos und sehen nur den übergebenen Kontext:
-  so wenig wie möglich, so viel wie für eine verlässliche Ausführung nötig.
-  Nicht mitgeben: den ganzen Chat, das ganze Repository, Kontext anderer
-  Subagenten.
-- Budgets (Laufzeit, Tool-Calls, Turns) und das Limit pro Lauf setzt die
-  Runtime. Ein `aborted`, `timed_out` oder `policy_blocked` Lauf ist kein
-  Erfolg. Laufende Agenten lassen sich mit `stop` beenden, sobald sie nicht
-  mehr gebraucht werden.
-- Ergebnisse trennen belegte Beobachtung, Schlussfolgerung, offene Annahme
-  und verbleibende Unsicherheit und nennen die Quelle (Datei und Stelle oder
-  Kommando). Keine Prozentwerte als Bewertungsgrundlage.
-- Subagenten haben keine eigene Entscheidungsautorität über den Hauptlauf. Sie
-  liefern begrenzte Arbeitsergebnisse; Verantwortung, Integration und
-  endgültige Entscheidungen bleiben beim Hauptagenten. Sie sprechen nicht
-  miteinander, alle Ergebnisse laufen über den Hauptagenten.
-- Widersprechen sich Ergebnisse, entscheidet weder Mehrheit noch die zuerst
-  fertige Antwort noch das stärkere Modell: Aussagen und Evidenz vergleichen,
-  bei Bedarf selbst nachprüfen oder gezielt verifizieren lassen, verbleibende
-  Unsicherheit offen nennen.
-- Bei jedem `spec`-Aufruf nur die Felder von `spec` (plus `context: "fresh"`)
-  übergeben; `agent`, `task`, `chain`, `tasks`, `config`, `model`, `cwd`,
-  `output`, `skill` und `action` sind daneben verboten und werden geblockt.
-- `profile: "verify"` läuft über die Verifier-Kette (Ticket, Dedup,
-  Commit-Gate) und braucht `spec.verification` (`originalRequest`,
-  `delegatedQuestion`, `diff`, `baseline`, `acceptance`).
-
-Es gibt keine festen Rollen mehr: `investigator` und `debugger` sind
-entfallen, `agents/verifier.md` bleibt nur als technisches Profil der
-Verifier-Kette (`profile: "verify"`). Pro Parent-Lauf (ein Nutzer-Turn) sind
-höchstens 3 Subagenten zulässig, Tiefe 1; das ist eine Obergrenze, kein
-Zielwert. Die Sitzungsgrenze bleibt bei 5.
-
-### Delegationsmuster
-
-- **Triviale, klar lokalisierte Aufgabe:** Hauptagent direkt.
-- **Unbekannter Repository-Bereich oder unklare Änderungssurface:**
-  `spec` mit `profile: "analyse"` für eine belegte, reine Analyse. Im Simple
-  oder Detailed Plan ist nur diese synchrone read-only Spec-Delegation
-  zulässig; bei bekanntem lokalen Pfad bleibt der Hauptagent zuständig.
-- **Unbekannter, intermittierender oder gescheiterter Bug:** `spec` mit
-  `profile: "analyse"` oder `"research"` und einem Reproduktionsauftrag im
-  `objective`.
-- **Unabhängige Prüfung nach einer riskanten Umsetzung:** `spec` mit
-  `profile: "verify"`.
-
-Der Verifier folgt drei Risikokategorien (Need-Gate,
-`extensions/permissions/verifier-risk.ts`):
-
-- **`required`:** Sicherheits-/Permission-Grenzen, kritischer Plan→Work- und
-  Recovery-State, die Verifier-/Completion-Maschinerie, tatsächlich betroffene
-  öffentliche Protokoll-/IPC-Verträge sowie Installations-/Upgrade-
-  Einstiegspunkte (Hard-Pfad-Katalog, s. u.). Eine ausdrückliche
-  Nutzeranforderung macht den Lauf ebenfalls hart verpflichtend.
-
-- **`justified`:** kein Hard-Pfad, aber ein strukturierter, belegter Trigger
-  aus `spec.verification.trigger`/`triggerEvidence` (`user_requested`,
-  `semantic_contract_risk`, `uncovered_behavior`, `failed_check_after_fix`,
-  `cross_boundary_change`, `environment_uncertainty`) — z. B. schwer
-  testbares Verhalten, LSP-Range-/WorkspaceEdit-Logik oder komplexe
-  Cross-File-Semantik. Ein unbekannter Trigger oder leere Evidenz wird
-  fail-closed abgelehnt, bevor der Aufruf den Verifier überhaupt erreicht.
-  Für den Legacy-Pfad (`agent: "verifier"`) trägt derselbe Vertrag als
-  `## Optional verifier trigger`-Abschnitt im `task`-Text.
-
-- **`not_needed`:** normale Bugfixes mit Regressionstest, begrenzte
-  Refactorings, UI/CSS/Text, Dokumentation, mechanische Änderungen und
-  harmlose Tooling-/Script-Anpassungen ohne Trigger. Der Verifier wird hier
-  technisch blockiert, nicht nur unempfohlen — Main kann `required` dabei
-  nicht selbst behaupten, nur einen optionalen Trigger anmelden. Dateianzahl
-  oder Diffgröße allein sind niemals ein Risikoindikator.
-
-`extensions/permissions/verifier-required-paths.ts` enthält dafür nur einen
-kleinen, expliziten Katalog der automatisch erkennbaren
-`HARD_VERIFIER_REQUIRED`-Pfade. Ein nicht gelisteter Pfad ist dadurch nicht
-automatisch harmlos: Der Hauptagent muss Grenzfälle wie eine Runtime-
-Dependency-, Packaging- oder öffentliche API-Änderung weiterhin nach dem
-tatsächlichen Diff bewerten. Umgekehrt werden `package.json`,
-`npm/package.json`, `gui/package.json` und `gui/main/pi-rpc-manager.js` nicht
-mehr pauschal gegated; harmlose Scripts, Metadaten oder interne RPC-Lifecycle-
-Änderungen dürfen lokal deterministisch geprüft werden.
-
-Für einen gelisteten Hard-Pfad blockiert das Commit-Gate technisch, wenn seit
-dem exakt passenden Workspace-Fingerprint kein `verifier`-Lauf mit Urteil
-`PASS`/`PASS_WITH_WARNINGS` vorliegt. Diese technische Prüfung ergänzt die
-Risikobewertung des Hauptagenten und ersetzt sie nicht.
-
-Planung, Umsetzung, Triage und finale Nutzerkommunikation bleiben beim
-Hauptagenten. Es gibt keine verschachtelte Delegation.
-
-### Übergabe
-
-Fresh-Context-Subagenten sehen den Parent-Dialog nicht. Das `task`-Feld trägt
-deshalb den ursprünglichen Nutzerauftrag wortgetreu, dazu Nicht-Ziele und die
-konkrete Teilfrage.
-
-Für den `verifier` wird die vollständige Übergabe technisch erzwungen, nicht
-nur empfohlen: Ein Aufruf ohne Ziel, Scope, Diff, Baseline und
-Akzeptanzkriterien oder mit einem per Run gesetzten `turnBudget` wird vor dem
-Start geblockt. Pflicht sind deshalb die Abschnitte der Vorlage aus
-`docs/subagents.md` — insbesondere der zu prüfende Diff-Text selbst (nicht nur
-eine Dateiliste) und die vor der ersten Änderung erfasste Workspace-Baseline
-samt Content-Fingerprints vorbestehend schmutziger Pfade. Maßgebliches
-Zeitlimit ist ausschließlich das großzügige `timeoutMs` aus
-`agents/verifier.md`; ein eng geschätztes `turnBudget` ist verboten und wird
-abgelehnt.
-
-Ein abgebrochener, zeitüberschrittener oder providerfehlerhafter
-`verifier`-Lauf wird als `INCOMPLETE` erfasst und zählt niemals als
-unabhängige Verifikation. Ein fachliches `FAIL` ist ein Befund und wird nicht
-durch Wiederholung oder Fallback „geheilt“. Fallback-Modelle greifen nur bei
-Provider-/Netzwerk-/Auth-Fehlern, nie bei einem `FAIL`-Urteil oder
-Turn-Budget-Überschreitung.
-
-Zwei technische Stolpersteine bleiben bestehen: `toolBudget.block` sperrt
-Werkzeuge erst nach Überschreiten von `hard`, nicht ab dem ersten Aufruf — für
-ein hartes Bash-Verbot taugt es allein nicht; und `block` ist immer ein Array,
-auch bei genau einem Tool.
-
-Ergebnisse kompakt synthetisieren und Belege, betroffene Dateien, Risiken,
-offene Fragen und Empfehlung nennen; keine vollständigen Unterhaltungen
-zurückkopieren.
+- Keine festen Agentenrollen oder permanenten Teams. Triviale Arbeit selbst erledigen; temporäre Delegation nur nach den Kriterien und Grenzen in [docs/subagents.md](docs/subagents.md).
+- Dieses Repository umfasst Pi-Core-Konfiguration und Aurora-TUI. Externe Frontends liegen außerhalb; bei einem reinen TUI-Auftrag bleibt die Bridge außen vor, sofern sie nicht ausdrücklich genannt ist. Zuordnung: [docs/scope-cli-tui-vs-gui.md](docs/scope-cli-tui-vs-gui.md).
+- Webrecherche nur bei echtem Aktualitätsbedarf oder wenn lokale Belege nicht reichen. Den sicheren Such- und Fetch-Ablauf beschreibt [docs/agent-workflow.md](docs/agent-workflow.md).

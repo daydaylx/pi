@@ -13,7 +13,8 @@ export interface ClassifyOptions {
   planning: boolean;
 }
 
-const DEEP_PATTERN = new RegExp(
+/** Risikowörter allein verlangen konservativ NORMAL, aber keine DEEP-Prüfung. */
+const NORMAL_RISK_PATTERN = new RegExp(
   [
     "security",
     "sicherheit",
@@ -37,9 +38,7 @@ const DEEP_PATTERN = new RegExp(
     "\\bipc\\b",
     "dependenc",
     "abhängigkeit",
-    "plan[- ]?mode",
-    "planmodus",
-    "\\bplan\\b",
+    "plan[- ]?mod(?:e|us)",
     "verifier",
     "subagent",
     "race condition",
@@ -50,6 +49,9 @@ const DEEP_PATTERN = new RegExp(
   ].join("|"),
   "i",
 );
+
+const EXPLICIT_DEEP_PATTERN =
+  /\b(deep(?:[- ]dive)?|gründlich(?:e|er|es)?(?:\s+(?:audit|analyse|prüfung))?|tiefen(?:audit|prüfung)|ausführlich(?:e|er|es)?\s+(?:audit|analyse|prüfung)|root cause|nicht reproduzierbar|intermittierend(?:e|er|es)?)\b/i;
 
 /** Hinweise auf breiten Umfang: nicht FAST. */
 const BROAD_PATTERN =
@@ -85,8 +87,11 @@ export function classifyPrompt(
   const text = prompt.trim();
   if (!text) return "normal";
   const paths = mentionedPaths(text);
-  if (DEEP_PATTERN.test(text)) return "deep";
+  if (EXPLICIT_DEEP_PATTERN.test(text)) return "deep";
   if (matchingVerifierRequiredPaths(paths).length > 0) return "deep";
+  if (NORMAL_RISK_PATTERN.test(text)) return "normal";
+  if (/\b(compare|vergleiche|vergleich|gegenüberstell)\w*\b/i.test(text))
+    return "normal";
   if (RELEASE_PATTERN.test(text)) return "normal";
   if (text.length > FAST_MAX_CHARS) return "normal";
   if (paths.length > FAST_MAX_PATHS) return "normal";

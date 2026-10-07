@@ -66,11 +66,17 @@ angewendet — siehe **Bundle-Patches** unten. `tests/p1-runtime.mjs` prüfte bi
 dahin ausschließlich die unbebündelten Dateien und wäre diese Lücke nie
 aufgefallen; es prüft jetzt zusätzlich den Bundle-Chunk.
 
-Beim Upgrade der aktiven Runtime auf Pi `0.87.1` trafen alle elf versionierten
-Patch-Anker weiterhin eindeutig. Die Patch- und Testversion wurden auf `0.87.1`
-aktualisiert; Runtime- und Bundle-Änderungen werden weiterhin gemeinsam geprüft.
-Die lokale Pi-Dev-Abhängigkeit bleibt vorerst auf `0.84.3`, daher meldet
-`/setup-doctor` diese Versionsabweichung weiterhin.
+Beim damaligen Upgrade der aktiven Runtime auf Pi `0.87.1` trafen alle elf
+versionierten Patch-Anker weiterhin eindeutig. Runtime- und Bundle-Änderungen
+werden gemeinsam geprüft.
+
+Am 2026-10-07 wurden Runtime und Dev-Abhängigkeit auf `1.0.4` angeglichen. Alle
+elf Patch-Anker wurden auf die neue Runtime portiert und `tests/p1-runtime.mjs`
+bestand. Der Paketmanager-Chunk änderte dabei nur minifizierte lokale Namen;
+der Patch bleibt an den vollständigen Methodenkörper gebunden. Pi `1.0.4`
+entfernt das interne `npm-shrinkwrap` und pinnt `brace-expansion@5.0.12`
+direkt. Der Root-Override ist ebenfalls auf `5.0.12` gesetzt, damit der
+Audit-Fix nach einer sauberen `npm ci`-Installation greift.
 
 ## Wiederherstellen
 

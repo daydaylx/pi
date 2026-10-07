@@ -1,6 +1,6 @@
 ---
 name: context-checkpoint
-description: Erstellt oder aktualisiert einen kompakten, persistenten Projekt-Arbeitsstand-Checkpoint und kuratiert den dauerhaften Context Ledger. Nutze dies nach einer Analyse, vor einer längeren Umsetzung, nach einer abgeschlossenen Phase, vor einem Modellwechsel, vor manueller Kompaktierung oder vor dem Wechsel in eine neue Sitzung.
+description: Erstellt oder aktualisiert einen kompakten, persistenten Checkpoint und kuratiert den Context Ledger. Nutze den Skill bei langen oder unterbrochenen Aufgaben, wenn Arbeitsstand eine Compaction oder einen Sitzungswechsel überdauern muss.
 ---
 
 # Context Checkpoint

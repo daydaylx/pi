@@ -19,7 +19,7 @@ import {
   latestStatus,
   stripAnsi,
 } from "../shared/harness.mjs";
-import { ROOT } from "../shared/jiti-loader.mjs";
+import { npmModuleFile, ROOT } from "../shared/jiti-loader.mjs";
 
 export const uiSections = {
   "Control Center menus": async (context) => {
@@ -927,10 +927,7 @@ export const uiSections = {
       const theme = themeModule.getThemeByName("dark");
       const { visibleWidth } = await import(
         pathToFileURL(
-          path.join(
-            ROOT,
-            "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.js",
-          ),
+          npmModuleFile("@earendil-works/pi-tui", "dist/index.js"),
         ).href
       );
       const tile = await load("extensions/aurora-ui/tile.ts");

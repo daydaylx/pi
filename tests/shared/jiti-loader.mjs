@@ -57,6 +57,23 @@ export function npmModuleEntry(packageName) {
   return path.join(ROOT, "npm", "node_modules", packageName);
 }
 
+/** Resolve a file shipped inside a Pi dependency, whether npm nested or hoisted it. */
+export function npmModuleFile(packageName, relativePath) {
+  for (const root of PACKAGE_ROOTS) {
+    const pkgDir = path.join(root, ...packageName.split("/"));
+    if (existsSync(path.join(pkgDir, "package.json"))) {
+      return path.join(pkgDir, relativePath);
+    }
+  }
+  return path.join(
+    ROOT,
+    "npm",
+    "node_modules",
+    ...packageName.split("/"),
+    relativePath,
+  );
+}
+
 const jiti = createJiti(path.join(ROOT, "npm", "package.json"), {
   alias: {
     "@earendil-works/pi-coding-agent": npmModuleEntry(

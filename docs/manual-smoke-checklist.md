@@ -38,12 +38,12 @@ macht die Aussage über den Arbeitsbaum veraltet.
 
 ## Frische Installation
 
-| #   | Schritt                                          | Erwartet                                                             | Beobachtet | ✓/✗ |
-| --- | ------------------------------------------------ | -------------------------------------------------------------------- | ---------- | --- |
+| #   | Schritt                                          | Erwartet                                                                                                       | Beobachtet | ✓/✗ |
+| --- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ---------- | --- |
 | 1   | `npm run install:user -- --apply --target <tmp>` | Installation läuft durch; `APPEND_SYSTEM.md` und `prompts/` sind vorhanden, `docs/archive/session-logs/` fehlt |            |     |
-| 2   | `npm ci --prefix <tmp>/npm`                      | `@earendil-works/pi-coding-agent@0.84.3` installiert                 |            |     |
-| 3   | Pi im Zielverzeichnis starten                    | Neue Session, Extensions laden, keine unerwarteten Startfehler       |            |     |
-| 4   | Fork-Pin prüfen                                  | Installierter Pi-Subagents-Fork entspricht exakt `settings.json` → `packages` |            |     |
+| 2   | `npm ci --prefix <tmp>/npm`                      | `@earendil-works/pi-coding-agent@1.0.4` installiert                                                           |            |     |
+| 3   | Pi im Zielverzeichnis starten                    | Neue Session, Extensions laden, keine unerwarteten Startfehler                                                 |            |     |
+| 4   | Fork-Pin prüfen                                  | Installierter Pi-Subagents-Fork entspricht exakt `settings.json` → `packages`                                  |            |     |
 
 ## Aurora und Workflow
 
@@ -51,19 +51,19 @@ Für jeden manuellen Lauf vorab Terminal, Terminalversion, Terminalgröße und
 Commit-SHA in **Beobachtet** eintragen. Die Matrix wird mindestens in Kitty,
 WezTerm und Ghostty ausgeführt.
 
-| #   | Schritt                          | Erwartet                                                                                                                               | Beobachtet | ✓/✗ |
-| --- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------- | --- |
-| 5   | Sitzung öffnen                   | Aurora-Fußzeile sichtbar, eine Zeile                                                                                                   |            |     |
-| 6   | Shift+Tab                        | Modusauswahl öffnet sich                                                                                                               |            |     |
-| 7   | „Schnellplan" wählen             | Modus aktiv, **kein** Turn startet, vorhandene Plandatei unverändert                                                                   |            |     |
-| 8   | Eigenen Planungsauftrag eingeben | Plan wird über `plan_write` erstellt; im Projektverzeichnis entsteht **keine** Datei (`git status` bleibt sauber)                       |            |     |
-| 9   | Während des Laufs zusehen        | `DENKT NACH` → `ARBEITET` → `ANTWORTET`, Laufzeit zählt hoch (bei Provider-Pausen ≥4s zwischenzeitlich `WARTET AUF MODELL` — kein Bug) |            |     |
-| 10  | Shift+Tab → „Work"               | Modus wechselt, **kein** Turn startet, **keine** Freigabe entsteht                                                                     |            |     |
-| 11  | Umsetzungsauftrag eingeben       | Der Turn läuft **ohne** Plankontext — ein Wechsel nach Work führt nichts aus                                                            |            |     |
-| 11a | Shift+Tab → „Fertiger Plan · entscheiden" → „Plan ausführen" | Ein Work-Turn startet; der Plan erscheint **genau einmal** als Datenblock, die Zugriffsstufe bleibt unverändert |            |     |
-| 11b | `/view-plan`, Plan per `/edit-plan` ändern, dann erneut ausführen | Die alte Freigabe verfällt sichtbar; der geänderte Plan muss neu freigegeben werden |            |     |
-| 12  | Zweiten Work-Turn starten        | Plan wird **nicht** erneut eingebunden                                                                                                 |            |     |
-| 13  | Tool-Ausführung beobachten       | Sitzungsübersicht bleibt sichtbar; nur die Aktivitätszeile aktualisiert sich und verschwindet nach dem Tool wieder                                                                 |            |     |
+| #   | Schritt                                                           | Erwartet                                                                                                                               | Beobachtet | ✓/✗ |
+| --- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------- | --- |
+| 5   | Sitzung öffnen                                                    | Aurora-Fußzeile sichtbar, eine Zeile                                                                                                   |            |     |
+| 6   | Shift+Tab                                                         | Modusauswahl öffnet sich                                                                                                               |            |     |
+| 7   | „Schnellplan" wählen                                              | Modus aktiv, **kein** Turn startet, vorhandene Plandatei unverändert                                                                   |            |     |
+| 8   | Eigenen Planungsauftrag eingeben                                  | Plan wird über `plan_write` erstellt; im Projektverzeichnis entsteht **keine** Datei (`git status` bleibt sauber)                      |            |     |
+| 9   | Während des Laufs zusehen                                         | `DENKT NACH` → `ARBEITET` → `ANTWORTET`, Laufzeit zählt hoch (bei Provider-Pausen ≥4s zwischenzeitlich `WARTET AUF MODELL` — kein Bug) |            |     |
+| 10  | Shift+Tab → „Work"                                                | Modus wechselt, **kein** Turn startet, **keine** Freigabe entsteht                                                                     |            |     |
+| 11  | Umsetzungsauftrag eingeben                                        | Der Turn läuft **ohne** Plankontext — ein Wechsel nach Work führt nichts aus                                                           |            |     |
+| 11a | Shift+Tab → „Fertiger Plan · entscheiden" → „Plan ausführen"      | Ein Work-Turn startet; der Plan erscheint **genau einmal** als Datenblock, die Zugriffsstufe bleibt unverändert                        |            |     |
+| 11b | `/view-plan`, Plan per `/edit-plan` ändern, dann erneut ausführen | Die alte Freigabe verfällt sichtbar; der geänderte Plan muss neu freigegeben werden                                                    |            |     |
+| 12  | Zweiten Work-Turn starten                                         | Plan wird **nicht** erneut eingebunden                                                                                                 |            |     |
+| 13  | Tool-Ausführung beobachten                                        | Sitzungsübersicht bleibt sichtbar; nur die Aktivitätszeile aktualisiert sich und verschwindet nach dem Tool wieder                     |            |     |
 
 ### 14 · Der eigentliche Aurora-Fix
 
@@ -81,19 +81,19 @@ Agentenlauf die Anzeige zurück.
 
 ## Verifikation
 
-| #   | Schritt                                | Erwartet                                                                                                   | Beobachtet | ✓/✗ |
-| --- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------- | --- |
-| 15  | `project_check({ profile: "verify" })` | Lauf startet, Ergebnis sichtbar                                                                            |            |     |
+| #   | Schritt                                | Erwartet                                                                                                      | Beobachtet | ✓/✗ |
+| --- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------- | --- |
+| 15  | `project_check({ profile: "verify" })` | Lauf startet, Ergebnis sichtbar                                                                               |            |     |
 | 16  | Sitzungsübersicht danach               | `Prüfung · Bereit` bei grünem Lauf und unveränderter Dateilage; der Footer wiederholt den Routineerfolg nicht |            |     |
-| 17  | Datei ändern, Footer prüfen            | Wechsel auf `changed_unverified`                                                                           |            |     |
-| 18  | Alles zurücksetzen, Footer prüfen      | `unchanged` — **nicht** `clean`, und es liest sich nicht wie ein Prüfergebnis                              |            |     |
-| 19  | Tool-Liste ansehen                     | `verify` bietet nur `typecheck` und `test`; die vollständige Verifikation gibt es nur über `project_check` |            |     |
+| 17  | Datei ändern, Footer prüfen            | Wechsel auf `changed_unverified`                                                                              |            |     |
+| 18  | Alles zurücksetzen, Footer prüfen      | `unchanged` — **nicht** `clean`, und es liest sich nicht wie ein Prüfergebnis                                 |            |     |
+| 19  | Tool-Liste ansehen                     | `verify` bietet nur `typecheck` und `test`; die vollständige Verifikation gibt es nur über `project_check`    |            |     |
 
 ## Subagent und Berechtigungen
 
 | #   | Schritt                                          | Erwartet                      | Beobachtet | ✓/✗ |
 | --- | ------------------------------------------------ | ----------------------------- | ---------- | --- |
-| 20  | Read-only `analyse`-Spec starten               | Läuft, liefert Befunde inline |            |     |
+| 20  | Read-only `analyse`-Spec starten                 | Läuft, liefert Befunde inline |            |     |
 | 21  | Im Planmodus `npm test` versuchen                | Blockiert                     |            |     |
 | 22  | Im Planmodus Datei außerhalb des Plans schreiben | Blockiert                     |            |     |
 | 23  | Im Planmodus Plandatei schreiben                 | Erlaubt                       |            |     |

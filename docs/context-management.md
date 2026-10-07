@@ -77,3 +77,26 @@ Die folgenden Probleme gehören zu `@earendil-works/pi-coding-agent`, nicht zu e
 | `src/core/agent-session.ts`, `_runAutoCompaction()`/Overflow-Pfad                                                         | Strukturierte Outcomes/Events für disabled, not-needed, estimate, preparation/migration/no-range, auth/provider/abort failure, success und exhausted overflow retry bereitstellen.                                                                                 | jeder Outcome sichtbar, ein fehlgeschlagener Retry, keine Wiederholung erfolgreicher Assistant-Ausgabe.                                                   | Die lokale Resilience-Erweiterung kann nur bereits vorhandene Boundary-Events darstellen. |
 
 Die Source-Maps des gepinnten Pakets verweisen auf diese `src/`-Pfade. Es wird kein `node_modules`-Patch gebaut und kein Upgrade vorgenommen. Ein künftiger Pin-Wechsel ist erst vertretbar, wenn der veröffentlichte Core-Patch exakt gepinnt ist und die genannten Runtime-Tests grün sind.
+
+## Flüchtige Context Capsule
+
+`extensions/context-capsule/` hält während eines aktiven Turns eine kleine
+Zusammenfassung des aktuellen Nutzerauftrags im Speicher. Vor einer
+Kompaktierung wird sie redigiert, auf höchstens 3 KiB Zielgröße (6 KiB harte
+Grenze) begrenzt und nur als Metadaten über `context-capsule.telemetry`
+protokolliert. Nach erfolgreicher Kompaktierung wird sie höchstens einmal als
+Steer-Nachricht eingespeist. Bei fehlgeschlagener Kompaktierung, Turn-Ende,
+Session-Wechsel oder Shutdown wird ein ausstehender Snapshot verworfen.
+
+Die Extension speichert keine Projektdatei und führt keine Tools erneut aus.
+Die Telemetrie enthält weder Capsule-Text noch Tool-Ausgaben. Sie ergänzt
+`context-checkpoint` nicht als dauerhafte Fortsetzung; Workflow-, Permission-,
+Recovery- und Workspace-Zustand bleiben maßgeblich. Die Runtime-Tests messen
+Größe, Redaktion, Lifecycle und Restore-Overhead providerfrei; einen echten
+Long-Session-Nutzen muss eine separate Sitzung mit wiederholten
+Kompaktierungen belegen.
+
+Die Redaktion erkennt benannte Zugangsdatenfelder, Bearer-Werte sowie gängige
+OpenAI-/GitHub-Token- und AWS-Secret-Formate. Sie ist eine Heuristik und kann
+unmarkierte oder unbekannte Geheimnisse nicht zuverlässig erkennen; die
+Capsule darf deshalb keine allgemeine Secret-Erkennung versprechen.

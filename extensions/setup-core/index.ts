@@ -26,6 +26,7 @@ import {
   verifierSingleCallIssue,
   type VerifierTicket,
 } from "./verifier-ticket.ts";
+import { rewriteVerifySpecToVerifier } from "../permissions/temporary-agent-policy.ts";
 import {
   VERIFICATION_CAPABILITY_EVENTS,
   type VerificationCapabilityRequest,
@@ -405,7 +406,20 @@ export default function setupCore(
     if (!isVerifierSingleCall(event)) return;
     const modeIssue = verifierSingleCallIssue(event);
     if (modeIssue) return { block: true, reason: modeIssue };
-    const input = event.input as Record<string, unknown>;
+    // setup-core is registered before mode-permissions in settings.json, so
+    // its preflight can see the public verify Spec before the central guard
+    // rewrites it to the legacy `agent: verifier` input. Derive the identical
+    // normalized input here so the ticket binds to the exact run the package
+    // will execute instead of leaving its result `unbound-ticket`.
+    const verifyRewrite = rewriteVerifySpecToVerifier(event);
+    if (verifyRewrite.kind === "blocked") {
+      return { block: true, reason: verifyRewrite.reason };
+    }
+    const ticketEvent =
+      verifyRewrite.kind === "rewritten"
+        ? { ...event, input: verifyRewrite.input }
+        : event;
+    const input = ticketEvent.input as Record<string, unknown>;
     if (input.cwd !== undefined) {
       return {
         block: true,
@@ -445,7 +459,7 @@ export default function setupCore(
       };
     }
     const ticket = createVerifierTicket(
-      event,
+      ticketEvent,
       ctx,
       snapshotResult.snapshot,
       generation,

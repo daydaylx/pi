@@ -29,6 +29,7 @@ export const SECTION_SUITES = {
   "Aurora UI lifecycle regression coverage": "runtime",
   "global shortcut regressions": "runtime",
   "resilience telemetry and recovery": "runtime",
+  "context capsule compaction lifecycle": "runtime",
   "recovery gate reducer (REC-002)": "runtime",
   "resilience recovery gate under a large diff (F-02)": "runtime",
   "web tool capability and boundaries": "runtime",

@@ -19,16 +19,16 @@
         "./npm/node_modules/@earendil-works/pi-coding-agent"
       ],
       "@earendil-works/pi-agent-core": [
-        "./npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-agent-core"
+        "./npm/node_modules/@earendil-works/pi-agent-core"
       ],
       "@earendil-works/pi-ai": [
-        "./npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai"
+        "./npm/node_modules/@earendil-works/pi-ai"
       ],
       "@earendil-works/pi-tui": [
-        "./npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui"
+        "./npm/node_modules/@earendil-works/pi-tui"
       ],
       "typebox": [
-        "./npm/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox"
+        "./npm/node_modules/typebox"
       ],
       "node-pty": ["./npm/node_modules/node-pty"]
     }

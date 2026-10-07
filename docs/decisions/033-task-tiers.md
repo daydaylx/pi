@@ -18,9 +18,10 @@ Task-Routing (`/route` war bereits entfernt, der Menüeintrag in
 Eine kleine, rückbaubare Extension klassifiziert jeden Turn per Heuristik
 (`classify.ts`, reine Funktion) in `fast`, `normal` oder `deep`:
 
-- **deep:** Plan Mode aktiv, Schlüsselwörter (Security, Permission,
-  Architektur, Migration, Refactoring, Protokoll, Dependency, Verifier …) oder
-  ein genannter Hard-Verifier-Pfad (`verifier-required-paths.ts`).
+- **deep:** Plan Mode aktiv, explizit angeforderte Tiefenprüfung, konkrete
+  Root-Cause-/Nicht-Reproduzierbarkeitsanalyse oder ein genannter
+  Hard-Verifier-Pfad (`verifier-required-paths.ts`). Risikowörter wie Security,
+  Permission, Architektur, Verifier oder Plan führen allein zu NORMAL.
 - **fast:** kurzer Auftrag, ≤ 3 genannte Pfade, ≤ 2 Listenpunkte, keine
   breiten Signale.
 - **normal:** alles andere und Default bei Unsicherheit — bisheriger Ablauf,
@@ -42,8 +43,10 @@ Klasse des Vorgänger-Turns (inkl. Eskalation).
 
 **Eskalation** (nur aufwärts, mit einmaliger Steering-Nachricht): FAST → NORMAL
 bei > 2 Suchen oder > 6 Reads vor dem ersten Edit bzw. > 3 geänderten Dateien;
-→ DEEP beim Edit eines Hard-Verifier-Pfads. Die Sperre für Subagenten/Verifier
-entfällt damit.
+→ DEEP beim Lesen oder Ändern eines Hard-Verifier- oder Security-/Permission-
+Pfads sowie bei Änderungen in mehreren Subsystemen. Ein fehlgeschlagener
+Test-/Build-Befehl hebt FAST auf NORMAL. Eine Hochstufung wird nie rückgängig
+gemacht.
 
 **Duplicate-Read-Guard:** ein `read`, dessen Zeilenbereich bereits von einer
 früheren, nicht gekürzten Ausgabe derselben unveränderten Datei (mtime/Größe)
@@ -55,10 +58,21 @@ markiert, damit `permissions/thinking-control.ts` sie nicht als manuelle Wahl
 persistiert; am Turn-Ende wird das ursprüngliche Level wiederhergestellt,
 sofern der Nutzer es zwischenzeitlich nicht selbst geändert hat.
 
-**Telemetrie:** pro Turn ein Session-Eintrag `task-tier.turn` (Klasse,
-Eskalationen, Searches, Reads, blockierte Duplicate-Reads, Edits, Commands,
-Subagent-/Verifier-Aufrufe, Thinking, Dauer). Tokenverbrauch kommt weiter aus
+**Telemetrie:** pro Turn ein Session-Eintrag `task-tier.turn` mit `initialTier`,
+`finalTier`, `escalationReason`, `observedRiskSignals` und
+`falsePositiveCandidate` sowie Searches, Reads, blockierten Duplicate-Reads,
+Edits, Commands, Subagent-/Verifier-Aufrufen, Thinking und Dauer.
+`falsePositiveCandidate` markiert einen NORMAL-Turn mit Risikowort im Prompt,
+bei dem keine Laufzeit-Risiken oder Eskalationen beobachtet wurden. Das ist ein
+Prüfkandidat, keine automatische Herabstufung. Tokenverbrauch kommt weiter aus
 `benchmarks/duel/usage.py`.
+
+**Korpusvergleich (P3):** `tests/task-tier.test.mjs` enthält 30 repräsentative
+Aufgaben aus kleinen Repo-Arbeiten und den lokalen Behebungsaufträgen, je zehn
+mit erwarteter FAST-, NORMAL- und DEEP-Klasse. Die alte Keyword-Heuristik lag
+bei 9 Fehlklassifikationen (7 unnötige DEEP-Einstufungen und 2 zu niedrige
+Einstufungen); die neue Heuristik lag bei 0. Die Beispiele und der im Test
+nachgebildete Alt-Klassifizierer machen diesen Vergleich reproduzierbar.
 
 ## Nicht geändert
 

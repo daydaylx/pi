@@ -23,6 +23,7 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -47,7 +48,7 @@ function limitRoutineModelResult(
       params: any,
       signal: AbortSignal | undefined,
       onUpdate: any,
-      ctx: ExtensionContext,
+      ctx: ExtensionToolContext,
     ) {
       return limitModelFacingToolResult(
         await execute(toolCallId, params, signal, onUpdate, ctx),
@@ -92,4 +93,3 @@ export default function compactToolsExtension(pi: ExtensionAPI): void {
     });
   });
 }
-

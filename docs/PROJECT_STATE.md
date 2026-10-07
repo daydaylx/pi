@@ -2,18 +2,31 @@
 
 ## Aktuelle Arbeit
 
-Pi-Harness- und Disa_Ai-Benchmark-Korrekturen aus der Desktop.zip-Auswertung.
-Phase 2 (Pi-Infrastruktur: verify/project_check-Diagnose, Skill-Blockade-
-Resilienz, headless-Berechtigungsstufe) ist in diesem Repo umgesetzt und
-getestet. Phase 3 (Checker-Härtung für disa-hard-01/02/04/06/08) ist
-**separat** im neuen, unabhängigen lokalen Repo
-`/home/d/Projekte/aktiv/disa-benchmark-harness` umgesetzt (dort eigene
-Commits, eigene Tests) — bewusst nicht hier, um nicht mit der Disa-Hard-
-Checker-Infrastruktur unter `/home/d/.local/state/disa-duel/tasks` zu
-kollidieren. Phase 4 (Metrikparser), Phase 5 (Ergebnispaket-Reproduzierbarkeit)
-und Phase 6 (Dokumentation) sind noch offen. Disa_Ai bleibt unverändert
-außerhalb des Produkt-Scope. Keine Modellläufe. Commit/Push dieser Sitzung
-erfolgten auf ausdrückliche Nutzeranweisung.
+Review und Remediation der letzten fünf Sitzungslogs. Behoben: Verify-Specs
+erhielten wegen der Hook-Reihenfolge kein gebundenes Ticket; der lokale Pi-Pin
+ist auf Pi `1.0.4` angeglichen. Die Runtime-Patches wurden portiert; der
+`brace-expansion`-Audit-Befund ist durch `5.0.12` behoben. Der frühere
+UI-Suite-Hang reproduzierte sich nicht. Das kanonische Pflichtprofil
+`project_check({ profile: "verify" })` besteht; offen sind der unabhängige
+Verifier und der providerbasierte Live-Smoke (#137).
+`npm ci --ignore-scripts` war nötig, weil `node-pty` hier keine nativen
+Buildskripte ausführen konnte. Änderungen sind noch nicht committet oder
+gepusht.
+
+Zusätzlicher Auftrag „Pi Harness Update Paket“: P1 Context Capsule, P2
+Instruction Audit und P3 Task-Tier-Nachschärfung sind umgesetzt. P3 lässt
+Risikowörter allein höchstens NORMAL auslösen, sammelt Laufzeit-Risiken und
+ergänzt Anfangs-/Endklasse, Eskalationsgründe und False-Positive-Kandidaten in
+der Telemetrie. Der 30-Aufgaben-Vergleich in `tests/task-tier.test.mjs` ergibt
+9 Fehlklassifikationen mit der alten und 0 mit der neuen Heuristik. P4 ist als
+isolierter, skill-only Agent-Plugin-PoC für `doc-diff` abgeschlossen:
+`experiments/agent-plugin-poc/`. Der Skill ist byte-identisch kopiert, das
+Manifest lokal geprüft; der Plugin-Host wurde nicht installiert oder gestartet.
+P5 ist als No-Go abgeschlossen: Die Baseline erfasst 12 Verifier-Aufrufe über
+9 Tasks. Aus Sitzungsprotokollen sind sieben fachliche Verdicts und konkrete
+Findings rekonstruierbar; False-Positive-Raten bleiben mangels Adjudikation
+offen. Daher wurde kein Observer-Code erstellt; Wiederaufnahme-Kriterien
+stehen in `docs/experiments/p5-observer-baseline.md`.
 
 ## Umgesetzt (Phase 2)
 
@@ -94,36 +107,57 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 
 ## Letzte Verifikation
 
-- `npm run typecheck` (`tsc --noEmit`): sauber.
-- `PI_TEST_SUITE=runtime`: 1532/1532 grün (inkl. `setup-core.mjs`,
-  `verification.mjs`).
-- `PI_TEST_SUITE=lsp`: 182/182 grün. `PI_TEST_SUITE=diff`: 22/22 grün.
-- `tests/workflow-mode/permissions.test.mjs` (inkl. neuer `headless`-Tests:
-  Build/Test/Lint/Typecheck-Allow, `npx`-Dev-Tool-Carve-out,
-  Chaining-Schutz gegen den Carve-out, strukturiertes Deny statt Ask für
-  Secrets/System/destruktive Befehle, Datei-Schreibzugriffe,
-  Setup-Policy-`ask`→Block) und `tests/workflow-mode/e2e.test.mjs`: grün.
-- **Bekannter, nicht von dieser Sitzung verursachter Bug:** `PI_TEST_SUITE=ui`
-  hängt (unsettled top-level await, `tests/run.mjs:146`). Isoliert bestätigt:
-  Der Hang bleibt bestehen, auch wenn ALLE Berechtigungs-Dateien (diese
-  Sitzung und die vorherige YOLO-Sitzung) vollständig auf HEAD zurückgesetzt
-  werden — die Ursache liegt in den unabhängigen `/thinking`-Verlagerungs-
-  Änderungen (`tests/suites/ui.mjs`, `tests/shared/harness.mjs`,
-  `extensions/permissions/thinking-control.ts`, `extensions/mode-permissions.ts`,
-  `extensions/aurora-ui/tool-renderers.ts`,
-  `tests/suites/runtime/aurora-ui.mjs`). Auf einem sauberen HEAD-Checkout
-  (ohne jede uncommittete Änderung) hängt die UI-Suite nicht, schlägt aber
-  mit einem anderen, ebenfalls vorbestehenden Fehler fehl
-  (`header.renderHeaderLines is not a function`, Aurora-Tiles-Test). Beides
-  ungelöst, keinem der beiden Sitzungsthemen dieses Dokuments zuzuordnen.
+- `npm --prefix npm run typecheck`: bestanden.
+- `PI_TEST_SUITE=runtime`: 1810/1810 bestanden gegen Pi `1.0.4`.
+- `PI_TEST_SUITE=ui`: 143/143 bestanden; der frühere Hang und
+  `header.renderHeaderLines`-Befund sind veraltet.
+- `npm --prefix npm run test:patches` (52), `test:runtime` und
+  `test:frontend-contracts` (21): bestanden; P1-Regressionslauf gegen Pi
+  `1.0.4` ebenfalls bestanden.
+- `npm --prefix npm run audit:check`: bestanden nach sauberer Installation
+  mit `brace-expansion@5.0.12`.
+- Der gezielte Benchmark-Duel-Test bestand mit dem NixOS-kompatiblen PATH.
+- Kanonischer `project_check({ profile: "verify" })`: PASS, alle deklarierten
+  Prüfschritte bestanden; Lint meldete 561 Warnungen und keine Fehler.
+- Offline-TUI-Start mit Pi `0.87.1` gelang; Shift+Tab zeigte den Aurora-
+  Workflow-Bereich. Ein no-tools Provider-Print-Smoke antwortete erfolgreich;
+  ein interaktiver Plan/Work-Rundlauf ist noch offen.
+- Unabhängiger Projekt-Verifier ist für den aktuellen Arbeitsbaum noch
+  auszuführen.
+- Nach P1/P2: `PI_TEST_SUITE=runtime` bestanden (1837/1837),
+  `npm run typecheck`, `npm run deadcode`, ESLint (0 Fehler, 561 Warnungen),
+  Prettier-Check und `git diff --check` bestanden. Die Skill-Validierung über
+  `quick_validate.py` war mangels `python3` nicht ausführbar; die Runtime-Suite
+  prüfte Skill-Frontmatter und Beschreibung.
+- Nach P3: `node tests/task-tier.test.mjs` bestanden (67/67),
+  `npm run typecheck`, `npm run lint` (0 Fehler, 561 Warnungen), gezielter
+  Prettier-Check und `git diff --check` bestanden.
+- Nach P4: Manifest-JSON und Pflichtfelder geprüft, Skill-Kopie byte-identisch,
+  kein unnötiges `mcp.json`, Prettier-Check und `git diff --check` bestanden.
+  Ein Plugin-Host-Lauf wurde bewusst nicht durchgeführt.
+- Nach P5: Run-History aggregiert (12 Calls, 4.307.790 Tokens, 1.986.317 ms),
+  sieben fachliche Verdicts und deren Findings in Sitzungsprotokollen
+  rekonstruiert; False-Positive-Raten mangels Adjudikation weiterhin offen.
+  Baseline-Bericht formatiert; Verify-Profil und `git diff --check` bestanden.
+- Nach Review-Findings: P5-Bericht enthält sieben anonymisierte, lokal
+  rückverfolgbare Verdict-Zeilen; Capsule-Redaktion deckt benannte Felder,
+  Bearer- und gängige AWS/OpenAI/GitHub-Tokenmuster ab. Die Heuristikgrenzen
+  sind dokumentiert.
+- Abschließender kanonischer `project_check({ profile: "verify" })` via lokale
+  Pi-CLI mit Nix-PATH: PASS, Exit 0. Coverage umfasst `context-capsule` mit
+  5/5 und `task-tier` mit 9/9 Funktionen; Lint meldete 561 Warnungen und keine
+  Fehler. Die Runtime-Suite bestand nach den letzten Änderungen mit 1841/1841.
+- Der unabhängige Verifier meldete zuvor FAIL wegen einer nicht begründeten
+  Modellfreischaltung und zwei Dokumentations-/Abdeckungswarnungen. Die
+  Modellfreischaltung bleibt gemäß ausdrücklicher Nutzeranweisung „alles
+  committen“ enthalten; P5-Belegzuordnung und Capsule-Redaktion wurden danach
+  ergänzt, aber noch nicht unabhängig erneut bewertet. Deshalb sind Commit,
+  Push und Live-Duell offen.
 
 ## Nächste Schritte
 
-1. Phase 4 (Metrikparser: Pi-Modellaufrufe nur `message_end`+`assistant`,
-   Codex-Turn ≠ Modellaufruf, `null` statt `0`) und Phase 5
-   (Ergebnispaket-Manifest/Smoketest) — beide im Kontext von
-   `disa-benchmark-harness`, nicht in diesem Repo.
-2. Phase 6 (Dokumentation) nach Abschluss von 4/5.
-3. Den vorbestehenden UI-Suite-Hang und den Aurora-Tiles-Fehler getrennt
-   untersuchen (gehören zur `/thinking`-Verlagerung, nicht zu diesem
-   Arbeitsauftrag).
+1. Unabhängigen Verifier-PASS für den exakten aktualisierten Arbeitsbaum
+   nachholen.
+2. Den ausdrücklich autorisierten Commit und Push getrennt ausführen.
+3. Codex-vs-Pi-Live-Duell auf dem gepushten Stand mit der vorhandenen
+   `SEC-001`-Aufgabe starten und vergleichen.

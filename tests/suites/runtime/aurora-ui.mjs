@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assert, eq } from "../../shared/assertions.mjs";
 import { createHarness, stripAnsi } from "../../shared/harness.mjs";
-import { ROOT } from "../../shared/jiti-loader.mjs";
+import { npmModuleFile } from "../../shared/jiti-loader.mjs";
 
 export const auroraUiSections = {
   "Aurora UI lifecycle and responsive surfaces": async (context) => {
@@ -303,10 +303,7 @@ export const auroraUiSections = {
           // width function the footer itself does.
           const { visibleWidth } = await import(
             pathToFileURL(
-              path.join(
-                ROOT,
-                "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.js",
-              ),
+              npmModuleFile("@earendil-works/pi-tui", "dist/index.js"),
             ).href
           );
           const { LAYOUT_COLUMNS } = await load("extensions/shared/layout.ts");
@@ -717,10 +714,7 @@ export const auroraUiSections = {
           const header = await load("extensions/aurora-ui/header.ts");
           const { visibleWidth: headerCellWidth } = await import(
             pathToFileURL(
-              path.join(
-                ROOT,
-                "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.js",
-              ),
+              npmModuleFile("@earendil-works/pi-tui", "dist/index.js"),
             ).href
           );
           const detailedTask = {
@@ -3432,10 +3426,7 @@ export const auroraUiSections = {
             });
             const { visibleWidth: cellWidth } = await import(
               pathToFileURL(
-                path.join(
-                  ROOT,
-                  "npm/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.js",
-                ),
+                npmModuleFile("@earendil-works/pi-tui", "dist/index.js"),
               ).href
             );
             assert(
