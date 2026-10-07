@@ -41,6 +41,13 @@ const SEARCH_TOOLS = new Set(["grep", "find", "ls"]);
 const EDIT_TOOLS = new Set(["edit", "write"]);
 const COMMAND_TOOLS = new Set(["bash", "project_check"]);
 
+/**
+ * Tools, die FAST ohnehin technisch sperrt (Subagenten). Sie werden für FAST-Turns
+ * aus der aktiven Tool-Liste genommen, damit ihr Schema nicht bei jedem Request
+ * im Prompt steht; bei Eskalation und Turn-Ende kommen sie zurück.
+ */
+export const FAST_HIDDEN_TOOLS: readonly string[] = ["subagent", "wait"];
+
 const STOP_RULE =
   "Stop-Regel: Sind die Akzeptanzkriterien erfüllt, der gezielte Test erfolgreich und keine Unsicherheit offen, beende die Aufgabe. Danach keine erneuten Reads, Zusatz-Refactorings, weiteren Tests oder Doku-Änderungen ohne Anlass; ausdrückliche Nutzerwünsche haben Vorrang.";
 
@@ -78,6 +85,15 @@ interface TurnState {
   observedRiskSignals: Set<string>;
   changedSubsystems: Set<string>;
   softRiskPrompt: boolean;
+  environmentFailures: number;
+  requests: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  cacheMisses: number;
+  slowestRequestMs: number;
+  lastMessageEndAt: number;
+  lastCacheRead: number;
 }
 
 const SOFT_RISK_PROMPT =
@@ -102,12 +118,36 @@ function newTurn(tier: TaskTier, softRiskPrompt: boolean): TurnState {
     observedRiskSignals: new Set(),
     changedSubsystems: new Set(),
     softRiskPrompt,
+    environmentFailures: 0,
+    requests: 0,
+    inputTokens: 0,
+    cacheReadTokens: 0,
+    outputTokens: 0,
+    cacheMisses: 0,
+    slowestRequestMs: 0,
+    lastMessageEndAt: Date.now(),
+    lastCacheRead: 0,
   };
 }
+
+/** Ein Cache-Verlust: der Cache-Anteil fällt auf unter die Hälfte des vorherigen Requests. */
+export const CACHE_MISS_RATIO = 0.5;
 
 function subsystemOf(path: string): string {
   const parts = path.split("/");
   return parts.length > 1 ? parts.slice(0, 2).join("/") : "(root)";
+}
+
+/**
+ * Tests und Doku begleiten eine Änderung, sie sind kein eigenes Subsystem:
+ * "Fix in src/ plus Test in test/" bleibt eine kleine Aufgabe.
+ */
+export function isAccompanyingFile(path: string): boolean {
+  return (
+    /(^|\/)(tests?|__tests__|spec|docs?)(\/|$)/i.test(path) ||
+    /\.(test|spec)\.[cm]?[jt]sx?$/i.test(path) ||
+    /\.(md|mdx|txt)$/i.test(path)
+  );
 }
 
 function isSensitivePath(path: string): boolean {
@@ -130,6 +170,27 @@ function isVerifierCall(input: unknown): boolean {
   return record.agent === "verifier" || record.spec?.profile === "verify";
 }
 
+/**
+ * Fehlgeschlagene Befehle, die nur die Umgebung betreffen (fehlendes Programm,
+ * fehlende Abhängigkeit), sagen nichts über die Komplexität der Aufgabe und
+ * stufen FAST deshalb nicht hoch.
+ */
+export function isEnvironmentalFailure(content: unknown): boolean {
+  if (!Array.isArray(content)) return false;
+  const text = content
+    .map((part) =>
+      part &&
+      typeof part === "object" &&
+      typeof (part as { text?: unknown }).text === "string"
+        ? (part as { text: string }).text
+        : "",
+    )
+    .join("\n");
+  return /Command exited with code (126|127)\b|command not found|Kommando nicht gefunden|Cannot find module|ERR_MODULE_NOT_FOUND/i.test(
+    text,
+  );
+}
+
 function stampOf(absolute: string) {
   try {
     const stat = statSync(absolute);
@@ -144,6 +205,24 @@ export default function taskTier(pi: ExtensionAPI): void {
   let turn: TurnState | undefined;
   let editedFirst = false;
   let previousTier: TaskTier | undefined;
+  /** Von task-tier selbst ausgeblendete Tools; nur diese werden wiederhergestellt. */
+  let hiddenTools: string[] = [];
+
+  const hideFastTools = () => {
+    const active = pi.getActiveTools();
+    const hide = active.filter((name) => FAST_HIDDEN_TOOLS.includes(name));
+    if (hide.length === 0) return;
+    pi.setActiveTools(active.filter((name) => !hide.includes(name)));
+    hiddenTools = hide;
+  };
+
+  const restoreHiddenTools = () => {
+    if (hiddenTools.length === 0) return;
+    const active = pi.getActiveTools();
+    const missing = hiddenTools.filter((name) => !active.includes(name));
+    hiddenTools = [];
+    if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+  };
 
   const setAutoThinking = (level: string) => {
     if (!turn || pi.getThinkingLevel() === level) return;
@@ -157,6 +236,7 @@ export default function taskTier(pi: ExtensionAPI): void {
     if (to === "fast") return;
     turn.escalations.push(`${turn.tier}->${to}: ${reason}`);
     turn.tier = to;
+    restoreHiddenTools();
     previousTier = to;
     const started = turn.startedThinking;
     if (to === "deep") {
@@ -178,6 +258,7 @@ export default function taskTier(pi: ExtensionAPI): void {
     tracker.reset();
     turn = undefined;
     previousTier = undefined;
+    restoreHiddenTools();
     editedFirst = false;
     clearAutoThinking();
   });
@@ -192,6 +273,7 @@ export default function taskTier(pi: ExtensionAPI): void {
     if (previousTier && isContinuationPrompt(event.prompt)) {
       tier = maxTier(tier, previousTier);
     }
+    restoreHiddenTools();
     turn = newTurn(tier, SOFT_RISK_PROMPT.test(event.prompt));
     if (planning) turn.observedRiskSignals.add("planning_mode");
     if (
@@ -214,6 +296,7 @@ export default function taskTier(pi: ExtensionAPI): void {
           : isHigherThan(target, current);
       if (apply) setAutoThinking(target);
     }
+    if (tier === "fast") hideFastTools();
     if (tier === "normal") return;
     return {
       systemPrompt: `${event.systemPrompt}\n\n${tier === "fast" ? FAST_PROMPT : DEEP_PROMPT}`,
@@ -268,9 +351,13 @@ export default function taskTier(pi: ExtensionAPI): void {
     else if (COMMAND_TOOLS.has(name)) {
       turn.commands += 1;
       if (event.isError) {
-        turn.observedRiskSignals.add("test_build_failure");
-        if (turn.tier === "fast")
-          escalate("normal", "Test-/Build-Befehl fehlgeschlagen");
+        if (isEnvironmentalFailure(event.content)) {
+          turn.environmentFailures += 1;
+        } else {
+          turn.observedRiskSignals.add("test_build_failure");
+          if (turn.tier === "fast")
+            escalate("normal", "Test-/Build-Befehl fehlgeschlagen");
+        }
       }
     } else if (name === "read") {
       turn.reads += 1;
@@ -320,7 +407,8 @@ export default function taskTier(pi: ExtensionAPI): void {
           if (hardPath) turn.observedRiskSignals.add("hard_verifier_path");
           if (isSensitivePath(rel))
             turn.observedRiskSignals.add("permission_security_path");
-          turn.changedSubsystems.add(subsystemOf(rel));
+          if (!isAccompanyingFile(rel))
+            turn.changedSubsystems.add(subsystemOf(rel));
           if (turn.changedSubsystems.size > 1) {
             turn.observedRiskSignals.add("multiple_subsystems");
             escalate("deep", "Änderungen in mehreren Subsystemen");
@@ -345,7 +433,39 @@ export default function taskTier(pi: ExtensionAPI): void {
     }
   });
 
+  // Nur beobachten: Tokens, Cache-Verluste und langsamste Antwort je Turn, damit sich
+  // die Wirkung der Klassen später messen lässt (Telemetrie, kein Eingriff).
+  pi.on("message_end", (event) => {
+    if (!turn) return;
+    const message = (
+      event as { message?: { role?: string; usage?: Record<string, unknown> } }
+    ).message;
+    const now = Date.now();
+    if (message?.role === "assistant") {
+      const usage = message.usage ?? {};
+      const num = (value: unknown) =>
+        typeof value === "number" && Number.isFinite(value) ? value : 0;
+      const cacheRead = num(usage.cacheRead);
+      turn.requests += 1;
+      turn.inputTokens += num(usage.input);
+      turn.cacheReadTokens += cacheRead;
+      turn.outputTokens += num(usage.output);
+      if (
+        turn.lastCacheRead > 0 &&
+        cacheRead < turn.lastCacheRead * CACHE_MISS_RATIO
+      )
+        turn.cacheMisses += 1;
+      turn.lastCacheRead = cacheRead;
+      turn.slowestRequestMs = Math.max(
+        turn.slowestRequestMs,
+        now - turn.lastMessageEndAt,
+      );
+    }
+    turn.lastMessageEndAt = now;
+  });
+
   pi.on("agent_end", () => {
+    restoreHiddenTools();
     const state = turn;
     if (!state) return;
     turn = undefined;
@@ -378,6 +498,13 @@ export default function taskTier(pi: ExtensionAPI): void {
       verifierCalls: state.verifierCalls,
       thinking: state.autoThinking ?? state.startedThinking ?? null,
       durationMs: Date.now() - state.startedAt,
+      requests: state.requests,
+      inputTokens: state.inputTokens,
+      cacheReadTokens: state.cacheReadTokens,
+      outputTokens: state.outputTokens,
+      cacheMisses: state.cacheMisses,
+      slowestRequestMs: state.slowestRequestMs,
+      environmentFailures: state.environmentFailures,
       initialTier: state.initialTier,
       finalTier: state.tier,
       escalationReason: state.escalations,

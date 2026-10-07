@@ -134,6 +134,7 @@ export function createHarness(options = {}) {
   let idle = options.idle ?? true;
   let branchReads = 0;
   const branchListeners = new Set();
+  let activeToolsOverride;
   const setModelCalls = [];
   const submittedCommands = [];
   let editorText = options.editorText ?? "";
@@ -404,9 +405,13 @@ export function createHarness(options = {}) {
       }));
     },
     getActiveTools() {
+      if (activeToolsOverride) return [...activeToolsOverride];
       return Array.isArray(options.activeTools)
         ? options.activeTools
         : [...tools.keys()];
+    },
+    setActiveTools(names) {
+      activeToolsOverride = [...names];
     },
     getAllTools() {
       if (Array.isArray(options.registeredTools))

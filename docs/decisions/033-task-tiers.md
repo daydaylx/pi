@@ -74,6 +74,30 @@ bei 9 Fehlklassifikationen (7 unnötige DEEP-Einstufungen und 2 zu niedrige
 Einstufungen); die neue Heuristik lag bei 0. Die Beispiele und der im Test
 nachgebildete Alt-Klassifizierer machen diesen Vergleich reproduzierbar.
 
+**Nachtrag 2026-10-07 (Prompt-Overhead und Messbarkeit):**
+
+- **Subagent-Tools in FAST ausgeblendet.** FAST sperrt Subagenten ohnehin; ihre
+  Tool-Schemas (`subagent`, `wait`) kosteten trotzdem rund 2 k Prompt-Tokens je
+  Request. `task-tier` nimmt sie für FAST-Turns per `setActiveTools` aus der
+  aktiven Liste und stellt sie bei Eskalation, Turn-Ende und Sitzungsstart wieder
+  her. Wiederhergestellt werden nur die selbst ausgeblendeten Tools. Der
+  `tool_call`-Block bleibt als zweite Absicherung bestehen.
+- **Umgebungsfehler eskalieren nicht.** Ein fehlgeschlagener Befehl stuft FAST nur
+  hoch, wenn er auf einen echten Test-/Build-Fehler hindeutet. Exit 126/127,
+  „command not found“/„Kommando nicht gefunden“ und fehlende Module sind
+  Umgebungsprobleme und werden nur als `environmentFailures` gezählt.
+- **Tests und Doku zählen nicht als eigenes Subsystem.** Ein Fix in `src/` plus
+  Test in `test/` oder README stufte FAST bisher als „mehrere Subsysteme“ auf
+  DEEP hoch (Messung: einfacher RegExp-Fix mit Regressionstest). Begleitdateien
+  (`test/`, `tests/`, `spec`, `docs/`, `*.test.*`, `*.md`) werden bei der
+  Subsystem-Zählung ignoriert; zwei echte Code-Subsysteme eskalieren weiter auf
+  DEEP. Rückbau: `isAccompanyingFile` in `index.ts` entfernen.
+- **Telemetrie erweitert** (additiv, `schemaVersion` bleibt 1): `requests`,
+  `inputTokens`, `cacheReadTokens`, `outputTokens`, `cacheMisses` (Cache-Anteil
+  fällt auf unter die Hälfte des vorigen Requests), `slowestRequestMs`,
+  `environmentFailures`. Damit lässt sich der Nutzen der Klassen später
+  quantitativ prüfen. Die Klassifikation selbst ist unverändert.
+
 ## Nicht geändert
 
 Plan Mode, Permission-Kern, Verifier-Katalog und Need-Gate, Commit-Gate,
