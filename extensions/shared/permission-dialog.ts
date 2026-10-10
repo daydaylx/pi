@@ -37,6 +37,49 @@ export function preview(value: string): string {
     : `${oneLine.slice(0, MAX_PREVIEW - 1)}…`;
 }
 
+// --- QuickPanel-Anbindung (optional) -------------------------------------------------------------------------
+// Eine geladene Extension (`quickpanel-agent`) kann diese – vom Guard bereits als `ask` entschiedene – Anfrage zusätzlich
+// extern beantworten lassen. Die erste gültige Antwort gewinnt (TUI-Taste oder extern). Ohne registrierten Hook, bei
+// Fehlern oder bei harten Warnungen bleibt alles exakt wie zuvor. Der Guard behält die Policy; `once` entspricht [a],
+// `deny` entspricht [d].
+type ExternalOutcome = "executed" | "denied" | "unknown";
+interface ExternalApprovalHook {
+  begin(
+    info: { ctx: unknown; decision: unknown; subject: string; toolName?: string },
+    answer: (choice: "once" | "deny") => void,
+  ): { cancel(outcome: ExternalOutcome): void } | null;
+}
+
+function withExternalAnswer(
+  ctx: ExtensionContext,
+  decision: PolicyDecision,
+  subject: string,
+  toolName: string | undefined,
+  rawDone: (value: boolean) => void,
+): (value: boolean) => void {
+  let settled = false;
+  let external: { cancel(outcome: ExternalOutcome): void } | null = null;
+  try {
+    const hook = (globalThis as Record<symbol, unknown>)[
+      Symbol.for("quickpanel.agent.approval-hook")
+    ] as ExternalApprovalHook | undefined;
+    external =
+      hook?.begin({ ctx, decision, subject, toolName }, (choice) => {
+        if (settled) return;
+        settled = true;
+        rawDone(choice === "once");
+      }) ?? null;
+  } catch {
+    external = null;
+  }
+  return (value: boolean): void => {
+    if (settled) return;
+    settled = true;
+    external?.cancel(value ? "unknown" : "denied");
+    rawDone(value);
+  };
+}
+
 async function confirmWithCustomUi(
   ctx: ExtensionContext,
   decision: PolicyDecision,
@@ -53,7 +96,9 @@ async function confirmWithCustomUi(
   const risk = decisionRisk(decision);
   const tone = risk === "high" ? "error" : "warning";
   return ctx.ui.custom<boolean>(
-    (_tui, theme, _keybindings, done) => ({
+    (_tui, theme, _keybindings, rawDone) => {
+      const done = withExternalAnswer(ctx, decision, subject, toolName, rawDone);
+      return {
       render(width: number): string[] {
         const innerWidth = Math.max(1, width - 2);
         const contentWidth = Math.max(1, innerWidth - 2);
@@ -119,7 +164,8 @@ async function confirmWithCustomUi(
         )
           done(false);
       },
-    }),
+      };
+    },
     {
       overlay: true,
       overlayOptions: {

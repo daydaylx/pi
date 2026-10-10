@@ -20,6 +20,7 @@
     "extensions/openrouter-doctor/index.ts",
     "extensions/second-opinion/index.ts",
     "extensions/task-tier/index.ts",
+    "extensions/quickpanel-agent/index.ts",
     "tests/run-all.mjs",
     "tests/run.mjs",
     "tests/workflow-mode.mjs",
