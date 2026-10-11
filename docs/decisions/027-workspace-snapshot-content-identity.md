@@ -41,18 +41,31 @@ bzw. eine erneute Prüfung fälschlich blockiert.
    erzwingen. Alte, persistierte Nachweise (offene Recovery-Gate-Marker in
    einer über die Deploy-Grenze hinweg fortgesetzten Session) werden dadurch
    einmalig als `changed` behandelt und verlangen einen erneuten
-   `recovery_check` — das ist das bestehende Fail-closed-Verhalten bei jedem
-   Fingerprint-Mismatch, kein Sonderfall.
+   `recovery_check`, solange das Gate noch ungeprüft ist. Ein erfolgreich
+   persistierter Check schließt das Gate für diesen Fehlturn; spätere
+   Fingerprint-Änderungen lösen keinen zusätzlichen Check aus.
 4. Die kanonische Definition der Git-Inhaltsidentität steht im JSDoc-Block
    über `collectWorkspaceSnapshot` in `shared/workspace-snapshot.mjs` — dieser
    ADR verweist nur darauf, statt sie zu duplizieren.
 5. Ohne Repository oder Git-Binary wird ein `vcs: "none"`-Snapshot gebildet:
    sortierte Pfade samt Typ, Größe, Zeiten, Modus, Inode und Symlink-Ziel.
-   Die Inventur ist auf das Workspace-Root begrenzt, folgt keinen Symlinks,
-   überspringt `.git` und `node_modules` und bricht bei mehr als 100.000
-   Einträgen sichtbar ab. Das ist ausreichend für Recovery-Fingerprint-Checks,
-   aber kein Ersatz für einen Git-Diff; Git-spezifische Verifier-Commitchecks
-   bleiben außerhalb eines Repositories deaktiviert/blockiert.
+   Die Inventur ist auf das Workspace-Root begrenzt, folgt keinen Symlinks
+   und überspringt `.git` sowie `node_modules` auf jeder Ebene. Sie erfasst
+   auch die Arbeitsdateien verschachtelter Repositories und Worktrees, ohne
+   deren Git-Verwaltungsdaten zu inventarisieren. Bis 100.000 Einträge wird
+   die Inventur im Speicher sortiert; darüber wechselt sie zu einem
+   vollständigen, deterministischen Streaming-Fingerprint und zählt weiter
+   alle Einträge. Der Fingerprint bleibt kein Ersatz für einen Git-Diff;
+   Git-spezifische Verifier-Commitchecks bleiben außerhalb eines Repositories
+   deaktiviert/blockiert.
+6. Ein untracked verschachteltes Repository in einem Git-Workspace wird als
+   einzelner Pfad mit dem Fingerprint seiner Arbeitsdatei-Inventur erfasst.
+   Dadurch ändern Arbeitsdatei-Edits den Eltern-Fingerprint. Ein `git status`
+   im Kind-Repository ändert den Eltern-Fingerprint wegen der ausgelassenen
+   `.git`-Daten dagegen nicht.
+   Das Filesystem-Fingerprint-Schema ist separat auf Version `5`, das
+   Git-Fingerprint-Schema auf Version `3`
+   angehoben; beide Änderungen invalidieren zuvor gespeicherte Fingerprints.
 
 ## Konsequenzen
 

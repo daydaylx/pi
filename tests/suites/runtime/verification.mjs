@@ -335,6 +335,34 @@ export const verificationSections = {
         "tests",
         "a different workspace root discards previously accumulated coverage",
       );
+      const bothRoots = status.mergeCheckRun(
+        secondRun,
+        status.evaluateCheckRun(
+          [report("tests", "required", "success")],
+          ["tests", "typecheck"],
+        ),
+        ROOT_B,
+        "changed",
+      );
+      eq(
+        Object.keys(
+          status.requiredCheckForRoot(bothRoots, ROOT_A).requiredOutcomes,
+        )
+          .sort()
+          .join(","),
+        "tests,typecheck",
+        "recording project B preserves project A's accumulated coverage",
+      );
+      eq(
+        statusOf(changedSnapshot, bothRoots, ["tests", "typecheck"], ROOT_A),
+        "verified",
+        "project A remains verified after a check is recorded for project B",
+      );
+      eq(
+        statusOf(changedSnapshot, bothRoots, ["tests", "typecheck"], ROOT_B),
+        "changed_unverified",
+        "project B has its own independent required-profile coverage",
+      );
       const blocked = status.mergeCheckRun(
         secondRun,
         status.evaluateCheckRun(
@@ -857,13 +885,22 @@ export const verificationSections = {
       const workspace = mkdtempSync(
         path.join(tmpdir(), "pi-verifier-coverage-"),
       );
+      const workspaceB = mkdtempSync(
+        path.join(tmpdir(), "pi-verifier-coverage-b-"),
+      );
       const git = (args) =>
         execFileSync("git", args, { cwd: workspace, encoding: "utf8" });
+      const gitB = (args) =>
+        execFileSync("git", args, { cwd: workspaceB, encoding: "utf8" });
       try {
         git(["init", "--quiet"]);
         git(["config", "user.email", "verifier-coverage@example.test"]);
         git(["config", "user.name", "Verifier Coverage Test"]);
         git(["commit", "--quiet", "--allow-empty", "-m", "baseline"]);
+        gitB(["init", "--quiet"]);
+        gitB(["config", "user.email", "verifier-coverage@example.test"]);
+        gitB(["config", "user.name", "Verifier Coverage Test"]);
+        gitB(["commit", "--quiet", "--allow-empty", "-m", "baseline"]);
         mkdirSync(path.join(workspace, "extensions", "permissions"), {
           recursive: true,
         });
@@ -876,18 +913,22 @@ export const verificationSections = {
         const harness = createHarness();
         setupCore.default(harness.api, { exec: harness.api.exec });
         const trusted = harness.makeContext({ cwd: workspace, trusted: true });
+        const trustedB = harness.makeContext({
+          cwd: workspaceB,
+          trusted: true,
+        });
         await harness.runHooks("session_start", {}, trusted);
 
-        const queryCapabilities = () => {
+        const queryCapabilities = (workspaceRoot = workspace) => {
           let response;
           harness.api.events.emit(
             verificationCapabilities.VERIFICATION_CAPABILITY_EVENTS.request,
-            { respond: (value) => (response = value) },
+            { workspaceRoot, respond: (value) => (response = value) },
           );
           return response;
         };
 
-        const startVerifier = async (toolCallId) => {
+        const startVerifier = async (toolCallId, context = trusted) => {
           const results = await harness.runHooks(
             "tool_call",
             {
@@ -899,7 +940,7 @@ export const verificationSections = {
                 task: "check",
               },
             },
-            trusted,
+            context,
           );
           assert(
             !results.some((result) => result?.block),
@@ -908,7 +949,7 @@ export const verificationSections = {
         };
 
         eq(
-          queryCapabilities(),
+          queryCapabilities(workspace),
           {
             workspaceRoot: undefined,
             workspaceFingerprint: undefined,
@@ -941,7 +982,7 @@ export const verificationSections = {
           trusted,
         );
 
-        const afterPass = queryCapabilities();
+        const afterPass = queryCapabilities(workspace);
         eq(
           afterPass.workspaceRoot,
           workspace,
@@ -956,6 +997,41 @@ export const verificationSections = {
           afterPass.verifierVerdict,
           "PASS",
           "the PASS verdict is parsed and exposed",
+        );
+
+        // A second project has an independent verifier slot. It can record
+        // its own result without evicting the first project's commit evidence.
+        await startVerifier("verifier-call-b", trustedB);
+        await harness.runHooks(
+          "tool_result",
+          {
+            toolName: "subagent",
+            toolCallId: "verifier-call-b",
+            input: { agent: "verifier", task: "check" },
+            content: [{ type: "text", text: "irrelevant" }],
+            details: {
+              runId: "child-verifier-run-b",
+              results: [
+                {
+                  agent: "verifier",
+                  exitCode: 0,
+                  model: "anthropic/claude-sonnet-5:high",
+                  finalOutput: "PASS\nB geprüft.",
+                },
+              ],
+            },
+          },
+          trustedB,
+        );
+        eq(
+          queryCapabilities(workspaceB).verifierVerdict,
+          "PASS",
+          "project B receives its own verifier result",
+        );
+        eq(
+          queryCapabilities(workspace).verifierVerdict,
+          "PASS",
+          "recording project B's result preserves project A's verifier result",
         );
 
         // Fed back through the real gate, that exact snapshot must clear a
@@ -1210,6 +1286,7 @@ export const verificationSections = {
         );
       } finally {
         rmSync(workspace, { recursive: true, force: true });
+        rmSync(workspaceB, { recursive: true, force: true });
       }
     });
   },
@@ -2099,6 +2176,70 @@ export const verificationSections = {
         }
       }
       rmSync(workspace, { recursive: true, force: true });
+
+      const additionalWorkspace = mkdtempSync(
+        path.join(tmpdir(), "pi-project-check-additional-root-"),
+      );
+      mkdirSync(path.join(additionalWorkspace, ".pi"), { recursive: true });
+      writeFileSync(
+        path.join(additionalWorkspace, ".pi", "verify.json"),
+        JSON.stringify({
+          profiles: {
+            verify: {
+              program: "npm",
+              args: ["run", "verify"],
+              classification: "required",
+            },
+          },
+        }),
+      );
+      const additionalHarness = createHarness({
+        sessionId: "additional-root-session",
+      });
+      additionalHarness.api.events.on("workspace-scope:request", (request) => {
+        request.respond({
+          sessionId: "additional-root-session",
+          additionalRoots: [additionalWorkspace],
+        });
+      });
+      setupCore.default(additionalHarness.api, {
+        exec: additionalHarness.api.exec,
+      });
+      const primaryWorkspace = mkdtempSync(
+        path.join(tmpdir(), "pi-project-check-primary-root-"),
+      );
+      const additionalContext = additionalHarness.makeContext({
+        cwd: primaryWorkspace,
+        trusted: true,
+        sessionId: "additional-root-session",
+      });
+      try {
+        await additionalHarness.runHooks(
+          "session_start",
+          {},
+          additionalContext,
+        );
+        const additionalTool = additionalHarness.tools.get("project_check");
+        const additionalResult = await additionalTool.execute(
+          "project-check-additional-root",
+          { profile: "verify", workspaceRoot: additionalWorkspace },
+          undefined,
+          undefined,
+          additionalContext,
+        );
+        eq(
+          additionalHarness.execCalls.at(-1)?.options?.cwd,
+          additionalWorkspace,
+          "project_check runs in the UI-approved additional root",
+        );
+        assert(
+          !additionalResult.isError,
+          "the approved root's trusted verification profile can run",
+        );
+      } finally {
+        rmSync(primaryWorkspace, { recursive: true, force: true });
+        rmSync(additionalWorkspace, { recursive: true, force: true });
+      }
 
       // A large *passing* profile's output must never push a smaller
       // *failing* profile's diagnostics out of the truncated aggregate text

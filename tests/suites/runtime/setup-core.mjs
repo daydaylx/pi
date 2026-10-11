@@ -22,6 +22,11 @@ export const setupCoreSections = {
         if (!setupConfig || !auroraState) return;
         const defaults = setupConfig.defaultSetupConfig();
         eq(
+          defaults.recovery.skipWithoutGit,
+          false,
+          "recovery uses a filesystem snapshot by default without Git",
+        );
+        eq(
           defaults.ui,
           { theme: "aurora-forge", motion: "contextual", dashboard: "auto" },
           "Aurora is the central UI default",

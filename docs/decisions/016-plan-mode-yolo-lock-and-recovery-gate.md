@@ -38,10 +38,21 @@ unterbrochenen Turn mit möglicher Mutation blockieren die Permission-Guards
 `write`, `edit` und potenziell schreibende Bash-Aufrufe. Ein neues
 read-only Tool `recovery_check` erfasst Workspace-Snapshot, `git status
 --short` und eine Diff-Zusammenfassung und schreibt einen
-`resilience.recovery-checked`-Eintrag. Nach erfolgreichem Check wird
-Schreiben nur freigegeben, solange der Workspace-Fingerprint unverändert
-bleibt; jede Änderung aktiviert die Sperre erneut. Das Gate übersteht einen
-Neustart, weil es allein aus Session-Einträgen abgeleitet wird.
+`resilience.recovery-checked`-Eintrag. Dieser Marker schließt das Gate für den
+zugehörigen Fehlturn dauerhaft; nachfolgende eigene Änderungen lösen keine
+zusätzlichen Checks aus. Ein neuer Fehlturn oder ein neuer unterbrochener Turn
+legt ein neues Gate an. Das Gate übersteht einen Neustart, weil es allein aus
+Session-Einträgen abgeleitet wird.
+
+Die Recovery-Guard bewertet die Tool-Fähigkeit vor dem Aufruf. Bekannte
+Lese-Tools und `analyse`-/`research`-Delegationen bleiben verfügbar; unbekannte
+Tools, `verify`-Delegationen mit Shellzugriff und nicht freigegebene
+Bash-Kommandos gelten als potenziell mutierend.
+
+Kann der Snapshot dreimal nicht erfasst werden, fragt eine interaktive Sitzung
+den Nutzer, ob Recovery bis zum Ende dieser Sitzung deaktiviert werden soll.
+Ohne Bestätigung bleibt das Gate geschlossen. Ohne UI-Kanal bleibt der Fehler
+sichtbar und muss durch Beheben der Snapshot-Ursache aufgelöst werden.
 
 Das Gate ist eine harte Grenze: Es wirkt unabhängig von der
 Berechtigungsstufe (auch unter YOLO) und prüft vor der

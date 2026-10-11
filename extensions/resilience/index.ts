@@ -12,16 +12,25 @@ import type {
   MessageUpdateEvent,
   ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
+import { resolve } from "node:path";
 import { Type } from "typebox";
 import {
   collectWorkspaceSnapshot,
   gitEnv,
+  probeGitRepository,
+  type WorkspaceSnapshot,
 } from "../../shared/workspace-snapshot.mjs";
+import { loadSetupConfig } from "../setup-core/config.ts";
+import {
+  canonicalWorkspaceRoot,
+  requestWorkspaceScope,
+} from "../shared/workspace-scope.ts";
 import { trackedExec } from "../shared/tracked-exec.ts";
 import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import {
   RECOVERY_CAPABILITY_EVENTS,
   recoveryEffect,
+  type RecoveryMutationApproval,
   type RecoveryStatusRequest,
   type RecoveryStatusSnapshot,
 } from "../shared/recovery-capabilities.ts";
@@ -30,8 +39,6 @@ import { limitTextOutput } from "../shared/output-limits.ts";
 import {
   customData,
   isRecoveryRequiredMarker,
-  foldCheckedMarker,
-  foldRequiredMarker,
   gateRequiresInspection,
   latestRecoveryGate,
   type RecoveryGateState,
@@ -70,6 +77,10 @@ async function workspaceChanged(
     startFingerprint === "unavailable" ||
     (await workspaceFingerprint(cwd)) !== startFingerprint
   );
+}
+
+function primaryWorkspaceRoot(cwd: string): string {
+  return canonicalWorkspaceRoot(cwd) ?? resolve(cwd);
 }
 
 function classifyFailure(
@@ -172,11 +183,18 @@ function lastAssistantError(event: AgentEndEvent): string | undefined {
   for (let index = event.messages.length - 1; index >= 0; index -= 1) {
     const message = event.messages[index];
     if (message.role !== "assistant") continue;
-    return message.stopReason === "error" || message.stopReason === "aborted"
-      ? message.errorMessage
-      : undefined;
+    return message.stopReason === "error" ? message.errorMessage : undefined;
   }
   return undefined;
+}
+
+function agentEndWasAborted(event: AgentEndEvent): boolean {
+  for (let index = event.messages.length - 1; index >= 0; index -= 1) {
+    const message = event.messages[index];
+    if (message.role !== "assistant") continue;
+    return message.stopReason === "aborted";
+  }
+  return false;
 }
 
 function isMutatingTool(
@@ -241,10 +259,11 @@ function latestRecoveryState(entries: readonly unknown[]): {
 function recoveryInstruction(
   workspaceWasChanged: boolean,
   toolMayHaveMutatedWorkspace: boolean,
+  workspaceRoots: string[] = [],
 ): string {
   const inspectionRequired = workspaceWasChanged || toolMayHaveMutatedWorkspace;
   return inspectionRequired
-    ? "Die vorherige Ausführung wurde unterbrochen oder endete mit einem Fehler. Prüfe zuerst git status --short, den relevanten Diff/Workspace-Snapshot und die letzten validen Tool-Ergebnisse. Behandle vorhandene Änderungen als möglicherweise bereits ausgeführt. Wiederhole keine mutierende Aktion, bevor geklärt ist, ob sie bereits lief. Setze danach den Nutzerauftrag fort."
+    ? `Die vorherige Ausführung wurde unterbrochen oder endete mit einem Fehler. Rufe zuerst recovery_check auf${workspaceRoots.length ? ` und prüfe die betroffenen Wurzeln: ${workspaceRoots.join(", ")}` : ""}. Prüfe dessen Workspace-Bericht sowie die letzten validen Tool-Ergebnisse. Behandle vorhandene Änderungen als möglicherweise bereits ausgeführt. Wiederhole keine mutierende Aktion, bevor geklärt ist, ob sie bereits lief. Setze danach den Nutzerauftrag fort.`
     : "Die vorherige Ausführung wurde unterbrochen oder endete mit einem Fehler, ohne erkennbare Workspace-Mutation. Setze den Nutzerauftrag vom letzten validen Sessionpunkt aus fort; replaye keinen partiellen Tool-Call blind.";
 }
 
@@ -253,9 +272,23 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   let sessionCwd = "";
   let activeContext: ExtensionContext | undefined;
   let gate: RecoveryGateState | undefined;
+  // Keep markers written during the current runtime visible even when a
+  // SessionManager implementation publishes the updated branch on a later
+  // turn. Pi's native manager updates synchronously; this also makes the
+  // provider robust to adapters with delayed branch snapshots.
+  const workspaceGates = new Map<string, RecoveryGateState>();
   let pendingRecovery:
-    | { workspaceWasChanged: boolean; toolMayHaveMutatedWorkspace: boolean }
+    | {
+        workspaceWasChanged: boolean;
+        toolMayHaveMutatedWorkspace: boolean;
+        workspaceRoots?: string[];
+      }
     | undefined;
+  const recoverySnapshotFailures = new Map<string, number>();
+  const recoveryDisabledRoots = new Set<string>();
+  const recoveryDisablePromptedRoots = new Set<string>();
+  const recoverySkippedRoots = new Set<string>();
+  let skipRecoveryWithoutGit = false;
   // Bumped by session_start/session_shutdown. agent_settled now awaits a
   // real snapshot collection before writing gate/openTurn — captured once
   // per call so a session restart landing mid-await is detectable and the
@@ -263,46 +296,206 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   let sessionGeneration = 0;
   let turnGeneration = 0;
 
-  /**
-   * Der Recovery-Status für Guard und UI. Ein geprüftes Gate bleibt nur
-   * offen, solange der Workspace-Fingerprint dem Prüfzeitpunkt entspricht.
-   */
-  async function recoverySnapshot(): Promise<RecoveryStatusSnapshot> {
+  function workspaceRootsForContext(ctx: ExtensionContext): string[] {
+    const sessionId = ctx.sessionManager.getSessionId() ?? undefined;
+    const additional = requestWorkspaceScope(
+      pi.events,
+      ctx.cwd,
+      sessionId,
+    ).additionalRoots;
+    return [...new Set([primaryWorkspaceRoot(ctx.cwd), ...additional])];
+  }
+
+  function recoveryRootsForContext(ctx: ExtensionContext): string[] {
+    return workspaceRootsForContext(ctx).filter(
+      (root) =>
+        !recoverySkippedRoots.has(root) && !recoveryDisabledRoots.has(root),
+    );
+  }
+
+  function gateForRoot(root: string): RecoveryGateState | undefined {
+    const entries = activeContext?.sessionManager.getBranch();
+    const historyGate = entries ? latestRecoveryGate(entries, root) : undefined;
+    const localGate =
+      workspaceGates.get(root) ??
+      (root === primaryWorkspaceRoot(sessionCwd) ? gate : undefined);
+    if (!historyGate) return localGate;
+    if (!localGate) return historyGate;
+    const historyTimestamp =
+      historyGate.checked?.timestamp ?? historyGate.required.timestamp;
+    const localTimestamp =
+      localGate.checked?.timestamp ?? localGate.required.timestamp;
+    return Date.parse(localTimestamp) > Date.parse(historyTimestamp)
+      ? localGate
+      : historyGate;
+  }
+
+  function rememberRequiredMarker(
+    required: RecoveryRequiredMarker,
+    entries: readonly unknown[],
+  ): void {
+    const markerEntry = {
+      type: "custom",
+      customType: "resilience.recovery-required",
+      data: required,
+    };
+    const roots = required.affectedRoots?.map((root) => root.workspaceRoot) ?? [
+      required.workspaceRoot ?? primaryWorkspaceRoot(sessionCwd),
+    ];
+    for (const root of roots) {
+      const next = latestRecoveryGate([...entries, markerEntry], root);
+      if (next) workspaceGates.set(root, next);
+    }
+    gate = workspaceGates.get(primaryWorkspaceRoot(sessionCwd)) ?? gate;
+  }
+
+  function rememberCheckedMarker(
+    root: string,
+    required: RecoveryRequiredMarker,
+    checked: RecoveryCheckedMarker,
+    entries: readonly unknown[],
+  ): void {
+    const next = latestRecoveryGate(
+      [
+        ...entries,
+        {
+          type: "custom",
+          customType: "resilience.recovery-required",
+          data: required,
+        },
+        {
+          type: "custom",
+          customType: "resilience.recovery-checked",
+          data: checked,
+        },
+      ],
+      root,
+    );
+    if (next) workspaceGates.set(root, next);
+    if (root === primaryWorkspaceRoot(sessionCwd)) gate = next;
+  }
+
+  function sameGate(
+    left: RecoveryGateState | undefined,
+    right: RecoveryGateState | undefined,
+  ): boolean {
+    return (
+      left?.required.turnStartedAt === right?.required.turnStartedAt &&
+      left?.required.workspaceRoot === right?.required.workspaceRoot &&
+      left?.checked?.timestamp === right?.checked?.timestamp
+    );
+  }
+
+  async function currentWorkspaceFingerprint(cwd: string): Promise<string> {
+    return recoverySkippedRoots.has(primaryWorkspaceRoot(cwd))
+      ? "recovery-skipped-without-git"
+      : workspaceFingerprint(cwd);
+  }
+
+  async function currentWorkspaceChanged(
+    startFingerprint: string,
+    cwd: string,
+  ): Promise<boolean> {
+    return recoverySkippedRoots.has(primaryWorkspaceRoot(cwd))
+      ? true
+      : workspaceChanged(startFingerprint, cwd);
+  }
+
+  /** Ein persistierter Check schließt das zugehörige Gate dauerhaft. */
+  async function recoverySnapshot(
+    requestedRoot?: string,
+  ): Promise<RecoveryStatusSnapshot> {
     // Captured once, up front: gate is shared module state, and this
     // function now awaits a real snapshot collection. It is called from the
     // permission guard's tool_call hot path with no try/catch around it —
     // reading `gate` again after the await (instead of this captured
     // reference) would throw if a concurrent agent_settled/session_shutdown
     // reassigns or clears it mid-await, taking the guard down with it.
-    const currentGate = gate;
-    const generation = sessionGeneration;
-    const cwd = sessionCwd;
-    if (!currentGate || !gateRequiresInspection(currentGate.required)) {
-      return { armed: false };
+    const ctx = activeContext;
+    if (
+      (requestedRoot !== undefined &&
+        (recoverySkippedRoots.has(requestedRoot) ||
+          recoveryDisabledRoots.has(requestedRoot))) ||
+      (requestedRoot === undefined &&
+        ctx !== undefined &&
+        recoveryRootsForContext(ctx).length === 0)
+    )
+      return { armed: false, workspaceRoot: requestedRoot };
+    const roots = requestedRoot
+      ? [requestedRoot]
+      : ctx
+        ? recoveryRootsForContext(ctx)
+        : [primaryWorkspaceRoot(sessionCwd)].filter(
+            (root) =>
+              !recoverySkippedRoots.has(root) &&
+              !recoveryDisabledRoots.has(root),
+          );
+    const open = roots
+      .map((root) => ({ root, currentGate: gateForRoot(root) }))
+      .find(
+        ({ currentGate }) =>
+          currentGate &&
+          gateRequiresInspection(currentGate.required) &&
+          !currentGate.checked,
+      );
+    if (!open?.currentGate) {
+      return { armed: false, workspaceRoot: requestedRoot };
     }
+    const { root, currentGate } = open;
     if (!currentGate.checked) {
       return {
         armed: true,
         turnStartedAt: currentGate.required.turnStartedAt,
         reason: currentGate.required.reason,
+        workspaceRoot: root,
       };
     }
-    const changed = await workspaceChanged(
-      currentGate.checked.workspaceFingerprint,
-      cwd,
+    // The marker is durable and scoped to one required turn. Workspace edits
+    // after this explicit inspection are expected work; only a new failure or
+    // interrupted turn may create a new required marker.
+    return { armed: false, workspaceRoot: root };
+  }
+
+  async function offerSessionRecoveryDisable(
+    ctx: ExtensionContext,
+    generation: number,
+    checkedGate: RecoveryGateState | undefined,
+    workspaceRoot: string,
+  ): Promise<boolean> {
+    if (
+      generation !== sessionGeneration ||
+      !sameGate(gateForRoot(workspaceRoot), checkedGate)
+    ) {
+      throw new Error(
+        "Recovery-Check abgebrochen: Sitzung oder Recovery-Gate hat sich während der Prüfung geändert. Erneut prüfen.",
+      );
+    }
+    const failureCount = (recoverySnapshotFailures.get(workspaceRoot) ?? 0) + 1;
+    recoverySnapshotFailures.set(workspaceRoot, failureCount);
+    if (
+      failureCount < 3 ||
+      recoveryDisablePromptedRoots.has(workspaceRoot) ||
+      !ctx.hasUI
+    ) {
+      return false;
+    }
+    recoveryDisablePromptedRoots.add(workspaceRoot);
+    const confirmed = await ctx.ui.confirm(
+      "Recovery-Snapshot deaktivieren?",
+      `Der Workspace-Snapshot für ${workspaceRoot} ist in dieser Sitzung dreimal fehlgeschlagen. Soll die Recovery-Schreibsperre nur für diese Projektwurzel bis zum Ende der Sitzung deaktiviert werden? Andere freigegebene Projektwurzeln behalten ihre eigene Recovery-Prüfung.`,
     );
-    if (generation !== sessionGeneration || gate !== currentGate) {
-      // An answer for an obsolete gate must never authorize a write.
-      return { armed: true };
+    if (
+      generation !== sessionGeneration ||
+      !sameGate(gateForRoot(workspaceRoot), checkedGate)
+    ) {
+      throw new Error(
+        "Recovery-Check abgebrochen: Sitzung oder Recovery-Gate hat sich während der Bestätigung geändert. Erneut prüfen.",
+      );
     }
-    if (changed) {
-      return {
-        armed: true,
-        turnStartedAt: currentGate.required.turnStartedAt,
-        reason: "workspace-changed",
-      };
-    }
-    return { armed: false };
+    if (!confirmed) return false;
+    recoveryDisabledRoots.add(workspaceRoot);
+    await updateRecoveryStatus();
+    return true;
   }
 
   async function updateRecoveryStatus(): Promise<void> {
@@ -311,10 +504,24 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     if (!ctx) return;
     const snapshot = await recoverySnapshot();
     if (generation !== sessionGeneration || ctx !== activeContext) return;
+    const roots = workspaceRootsForContext(ctx);
+    const allSkippedWithoutGit =
+      roots.length > 0 && roots.every((root) => recoverySkippedRoots.has(root));
+    const disabledRoots = roots.filter((root) =>
+      recoveryDisabledRoots.has(root),
+    );
     setTuiStatus(
       ctx,
       UI_STATUS_KEYS.recovery,
-      snapshot.armed ? "⚠ Recovery-Check offen" : undefined,
+      allSkippedWithoutGit
+        ? "Recovery-Check ohne Git übersprungen"
+        : snapshot.armed
+          ? disabledRoots.length > 0
+            ? `⚠ Recovery-Check offen · ${disabledRoots.length} ${disabledRoots.length === 1 ? "Projektwurzel" : "Projektwurzeln"} deaktiviert`
+            : "⚠ Recovery-Check offen"
+          : disabledRoots.length > 0
+            ? `⚠ Recovery für ${disabledRoots.length} ${disabledRoots.length === 1 ? "Projektwurzel" : "Projektwurzeln"} deaktiviert`
+            : undefined,
     );
   }
 
@@ -351,7 +558,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
         ? { errorMessage: truncateErrorMessage(errorMessage) }
         : {}),
       phase: turn.phase,
-      workspaceChangedSinceTurnStart: await workspaceChanged(
+      workspaceChangedSinceTurnStart: await currentWorkspaceChanged(
         turn.marker.workspaceFingerprint,
         cwd,
       ),
@@ -371,19 +578,62 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   async function collectRecoveryRequired(
     reason: RecoveryRequiredMarker["reason"],
     marker: TurnStartMarker,
-    toolMayHaveMutatedWorkspace: boolean,
+    mutatedRoots: readonly string[],
     cwd: string,
   ): Promise<RecoveryRequiredMarker> {
+    const primaryRoot = primaryWorkspaceRoot(cwd);
+    const roots = [
+      ...new Set([
+        ...Object.keys(marker.workspaceFingerprintsByRoot ?? {}),
+        marker.workspaceRoot ?? primaryRoot,
+        ...mutatedRoots,
+      ]),
+    ].filter(
+      (workspaceRoot) =>
+        !recoverySkippedRoots.has(workspaceRoot) &&
+        !recoveryDisabledRoots.has(workspaceRoot),
+    );
+    const affectedRoots = (
+      await Promise.all(
+        roots.map(async (workspaceRoot) => {
+          const startFingerprint =
+            marker.workspaceFingerprintsByRoot?.[workspaceRoot] ??
+            (workspaceRoot === (marker.workspaceRoot ?? primaryRoot)
+              ? marker.workspaceFingerprint
+              : undefined);
+          const currentFingerprint =
+            await currentWorkspaceFingerprint(workspaceRoot);
+          const workspaceChangedSinceTurnStart =
+            startFingerprint === undefined ||
+            startFingerprint === "unavailable" ||
+            currentFingerprint !== startFingerprint;
+          const toolMayHaveMutatedWorkspace =
+            mutatedRoots.includes(workspaceRoot);
+          return {
+            workspaceRoot,
+            workspaceChangedSinceTurnStart,
+            toolMayHaveMutatedWorkspace,
+          };
+        }),
+      )
+    ).filter(
+      (root) =>
+        root.workspaceChangedSinceTurnStart || root.toolMayHaveMutatedWorkspace,
+    );
+    const workspaceChangedSinceTurnStart = affectedRoots.some(
+      (root) => root.workspaceChangedSinceTurnStart,
+    );
+    const toolMayHaveMutatedWorkspace = affectedRoots.some(
+      (root) => root.toolMayHaveMutatedWorkspace,
+    );
     return {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
       turnStartedAt: marker.timestamp,
       reason,
-      workspaceChangedSinceTurnStart: await workspaceChanged(
-        marker.workspaceFingerprint,
-        cwd,
-      ),
+      workspaceChangedSinceTurnStart,
       toolMayHaveMutatedWorkspace,
+      affectedRoots,
     };
   }
 
@@ -391,6 +641,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     pendingRecovery = {
       workspaceWasChanged: record.workspaceChangedSinceTurnStart,
       toolMayHaveMutatedWorkspace: record.toolMayHaveMutatedWorkspace,
+      workspaceRoots: record.affectedRoots?.map((root) => root.workspaceRoot),
     };
   }
 
@@ -400,12 +651,34 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     const generation = sessionGeneration;
     sessionCwd = ctx.cwd;
     activeContext = ctx;
+    recoverySnapshotFailures.clear();
+    recoveryDisabledRoots.clear();
+    recoveryDisablePromptedRoots.clear();
+    recoverySkippedRoots.clear();
+    const setup = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config;
+    skipRecoveryWithoutGit = setup.recovery.skipWithoutGit;
+    if (skipRecoveryWithoutGit) {
+      for (const root of workspaceRootsForContext(ctx)) {
+        const repository = probeGitRepository(root, {
+          timeoutMs: 3_000,
+          maxAttempts: 1,
+        });
+        if (repository.ok && !repository.hasRepository)
+          recoverySkippedRoots.add(root);
+      }
+    }
     openTurn = undefined;
     pendingRecovery = undefined;
     const entries = ctx.sessionManager.getBranch();
+    workspaceGates.clear();
+    for (const root of workspaceRootsForContext(ctx)) {
+      const rootGate = latestRecoveryGate(entries, root);
+      if (rootGate) workspaceGates.set(root, rootGate);
+    }
     // Neustart-Wahrheit zuerst aus den Einträgen: Ein bereits geprüftes Gate
     // behält seinen checked-Zustand über die Sitzung hinaus.
-    gate = latestRecoveryGate(entries);
+    const currentRoot = primaryWorkspaceRoot(ctx.cwd);
+    gate = workspaceGates.get(currentRoot);
     const prior = latestRecoveryState(entries);
     const start =
       prior.openTurn ??
@@ -421,18 +694,39 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
         : undefined);
     if (start) {
       const existing = prior.requiredByTurn.get(start.timestamp);
-      const required = await collectRecoveryRequired(
-        prior.openTurn ? "interrupted" : "final_failure",
-        start,
-        existing?.toolMayHaveMutatedWorkspace ??
-          prior.hasUnknownRequiredMarker,
-        ctx.cwd,
-      );
-      if (generation !== sessionGeneration) return;
-      rememberRecovery(required);
-      if (!existing) {
+      if (existing) {
+        const roots = existing.affectedRoots?.map(
+          (root) => root.workspaceRoot,
+        ) ?? [existing.workspaceRoot ?? currentRoot];
+        const stillOpen = roots.some((root) => {
+          const rootGate = latestRecoveryGate(entries, root);
+          return Boolean(
+            rootGate &&
+            gateRequiresInspection(rootGate.required) &&
+            !rootGate.checked,
+          );
+        });
+        if (
+          stillOpen &&
+          roots.some(
+            (root) =>
+              !recoverySkippedRoots.has(root) &&
+              !recoveryDisabledRoots.has(root),
+          )
+        ) {
+          rememberRecovery(existing);
+        }
+      } else {
+        const required = await collectRecoveryRequired(
+          prior.openTurn ? "interrupted" : "final_failure",
+          start,
+          prior.hasUnknownRequiredMarker ? [currentRoot] : [],
+          ctx.cwd,
+        );
+        if (generation !== sessionGeneration) return;
         pi.appendEntry("resilience.recovery-required", required);
-        gate = foldRequiredMarker(required);
+        rememberRequiredMarker(required, entries);
+        rememberRecovery(required);
       }
     }
     await updateRecoveryStatus();
@@ -444,10 +738,24 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     const cwd = ctx.cwd;
     const recovery = pendingRecovery;
     pendingRecovery = undefined;
+    const roots = workspaceRootsForContext(ctx);
+    const workspaceFingerprintsByRoot = Object.fromEntries(
+      await Promise.all(
+        roots.map(
+          async (root) =>
+            [root, await currentWorkspaceFingerprint(root)] as const,
+        ),
+      ),
+    );
+    const root = primaryWorkspaceRoot(cwd);
     const marker: TurnStartMarker = {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
-      workspaceFingerprint: await workspaceFingerprint(cwd),
+      workspaceFingerprint:
+        workspaceFingerprintsByRoot[root] ??
+        (await currentWorkspaceFingerprint(cwd)),
+      workspaceRoot: root,
+      workspaceFingerprintsByRoot,
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       provider: ctx.model?.provider ?? "unknown",
       model: ctx.model?.id ?? "unknown",
@@ -460,8 +768,12 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       phase: "before_first_token",
       activeSubagents: 0,
       toolMayHaveMutatedWorkspace: false,
+      mutatingWorkspaceRoots: new Set(),
       observedFailureCount: 0,
       currentAttemptFailed: false,
+      currentAttemptAborted: false,
+      currentAttemptAbortNeedsRecovery: false,
+      activeMutatingToolCalls: new Set(),
     };
     pi.appendEntry("resilience.turn-start", marker);
     if (!recovery) return;
@@ -471,6 +783,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
         content: recoveryInstruction(
           recovery.workspaceWasChanged,
           recovery.toolMayHaveMutatedWorkspace,
+          recovery.workspaceRoots,
         ),
         display: false,
       },
@@ -482,6 +795,8 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     // A second agent_start before settled is Pi's native retry. This extension
     // observes it but never performs or configures retries itself.
     openTurn.currentAttemptFailed = false;
+    openTurn.currentAttemptAborted = false;
+    openTurn.currentAttemptAbortNeedsRecovery = false;
   });
 
   pi.on("after_provider_response", async (event, ctx) => {
@@ -497,15 +812,37 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("tool_execution_start", (event) => {
+  pi.on("tool_execution_start", () => {
     if (!openTurn) return;
     openTurn.phase = "tool_running";
-    if (isMutatingTool(event.toolName, event.args, sessionCwd))
-      openTurn.toolMayHaveMutatedWorkspace = true;
   });
 
-  pi.on("tool_execution_end", () => {
-    if (openTurn) openTurn.phase = "post_tool";
+  pi.events.on(RECOVERY_CAPABILITY_EVENTS.mutationApproved, (value) => {
+    if (!openTurn || !value || typeof value !== "object") return;
+    const approval = value as Partial<RecoveryMutationApproval>;
+    if (
+      typeof approval.toolName === "string" &&
+      approval.input !== undefined &&
+      isMutatingTool(approval.toolName, approval.input, sessionCwd)
+    ) {
+      openTurn.toolMayHaveMutatedWorkspace = true;
+      const workspaceRoot =
+        typeof approval.workspaceRoot === "string"
+          ? approval.workspaceRoot
+          : primaryWorkspaceRoot(sessionCwd);
+      openTurn.mutatingWorkspaceRoots.add(workspaceRoot);
+      const callKey = approval.toolCallId ?? approval.toolName;
+      openTurn.activeMutatingToolCalls.add(callKey);
+    }
+  });
+
+  pi.on("tool_execution_end", (event) => {
+    if (!openTurn) return;
+    openTurn.phase = "post_tool";
+    const callKey =
+      typeof event.toolCallId === "string" ? event.toolCallId : event.toolName;
+    if (typeof callKey === "string")
+      openTurn.activeMutatingToolCalls.delete(callKey);
   });
 
   pi.on("session_before_compact", async (event, ctx) => {
@@ -518,7 +855,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       boundary: "started",
       reason: event.reason,
       willRetry: event.willRetry,
-      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await currentWorkspaceFingerprint(ctx.cwd),
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
@@ -554,7 +891,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       boundary: "failed",
       reason: event.reason,
       willRetry: event.willRetry,
-      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await currentWorkspaceFingerprint(ctx.cwd),
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
       errorMessage: event.errorMessage,
@@ -574,7 +911,7 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       boundary: "completed",
       reason: event.reason,
       willRetry: event.willRetry,
-      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await currentWorkspaceFingerprint(ctx.cwd),
       workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
@@ -583,6 +920,13 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_end", async (event, ctx) => {
+    if (agentEndWasAborted(event) && openTurn) {
+      openTurn.currentAttemptAborted = true;
+      if (openTurn.activeMutatingToolCalls.size > 0) {
+        openTurn.currentAttemptAbortNeedsRecovery = true;
+      }
+      return;
+    }
     const error = lastAssistantError(event);
     if (error && !openTurn?.currentAttemptFailed)
       await appendFailure(ctx, error);
@@ -603,26 +947,31 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     const turnId = turnGeneration;
     const outcome: TurnSettledMarker["outcome"] = failed
       ? "failed"
-      : turn.observedFailureCount > 0
-        ? "completed_after_failure"
-        : "completed";
+      : turn.currentAttemptAborted
+        ? "aborted"
+        : turn.observedFailureCount > 0
+          ? "completed_after_failure"
+          : "completed";
     const settled: TurnSettledMarker = {
       schemaVersion: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
       turnStartedAt: turn.marker.timestamp,
-      workspaceFingerprint: await workspaceFingerprint(ctx.cwd),
+      workspaceFingerprint: await currentWorkspaceFingerprint(ctx.cwd),
       outcome,
       observedFailureCount: turn.observedFailureCount,
-      ...(failed ? { recoveryPending: true } : {}),
+      ...(failed || turn.currentAttemptAbortNeedsRecovery
+        ? { recoveryPending: true }
+        : {}),
     };
-    const required = failed
-      ? await collectRecoveryRequired(
-          "final_failure",
-          turn.marker,
-          turn.toolMayHaveMutatedWorkspace,
-          ctx.cwd,
-        )
-      : undefined;
+    const required =
+      failed || turn.currentAttemptAbortNeedsRecovery
+        ? await collectRecoveryRequired(
+            failed ? "final_failure" : "interrupted",
+            turn.marker,
+            [...turn.mutatingWorkspaceRoots],
+            ctx.cwd,
+          )
+        : undefined;
     if (
       generation !== sessionGeneration ||
       turnId !== turnGeneration ||
@@ -633,11 +982,9 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     if (required) {
       rememberRecovery(required);
       pi.appendEntry("resilience.recovery-required", required);
+      rememberRequiredMarker(required, ctx.sessionManager.getBranch());
       // Das Gate sperrt nur bei möglicher Mutation; ein Fehlturn ohne jede
       // Workspace-Spur verlangt eine Fortsetzungs-Anweisung, keinen Check.
-      gate = gateRequiresInspection(required)
-        ? foldRequiredMarker(required)
-        : undefined;
     }
     openTurn = undefined;
     if (required) await updateRecoveryStatus();
@@ -649,107 +996,249 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     openTurn = undefined;
     activeContext = undefined;
     gate = undefined;
+    workspaceGates.clear();
     pendingRecovery = undefined;
+    recoverySnapshotFailures.clear();
+    recoveryDisabledRoots.clear();
+    recoveryDisablePromptedRoots.clear();
+    recoverySkippedRoots.clear();
+    skipRecoveryWithoutGit = false;
     setTuiStatus(ctx, UI_STATUS_KEYS.recovery, undefined);
   });
 
   pi.events.on(RECOVERY_CAPABILITY_EVENTS.request, (value) => {
     const request = value as Partial<RecoveryStatusRequest>;
-    request.respond?.(recoverySnapshot());
+    request.respond?.(recoverySnapshot(request.workspaceRoot));
   });
 
   pi.registerTool({
     name: "recovery_check",
     label: "Recovery prüfen",
     description:
-      "Read-only-Recovery-Check nach einem unterbrochenen oder fehlgeschlagenen Turn: erfasst einen Git- oder Filesystem-Workspace-Snapshot und hebt die Recovery-Schreibsperre auf, solange der Workspace-Fingerprint danach unverändert bleibt. Führt selbst keine Schreiboperationen aus und wiederholt nichts.",
+      "Read-only-Recovery-Check nach einem unterbrochenen oder fehlgeschlagenen Turn. Ohne workspaceRoot prüft er alle betroffenen freigegebenen Projektwurzeln; mit workspaceRoot nur diese Wurzel. Ein erfolgreicher Check schließt das Gate nur für die geprüfte Wurzel. Ein neuer Fehlturn oder eine neue Unterbrechung öffnet ein neues Gate. Wenn recovery.skipWithoutGit global aktiviert ist, wird der Check für jede Wurzel ohne Git-Repository übersprungen. Nach drei Snapshot-Fehlern derselben Wurzel kann der Nutzer die Recovery-Prüfung für diese Wurzel bis zum Sitzungsende deaktivieren. Führt selbst keine Schreiboperationen aus und wiederholt nichts.",
     promptSnippet:
       "Inspect the workspace after an interrupted or failed turn and release the recovery write gate.",
-    parameters: Type.Object({}),
+    parameters: Type.Object({
+      workspaceRoot: Type.Optional(Type.String({ minLength: 1 })),
+    }),
     executionMode: "sequential",
-    async execute(_id, _params, signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       const generation = sessionGeneration;
-      const checkedGate = gate;
-      const result = await collectWorkspaceSnapshot(ctx.cwd, { signal });
-      if (!result.ok) {
-        throw new Error(
-          `Recovery-Check fehlgeschlagen: Workspace-Snapshot nicht erfassbar ` +
-            `(${result.error.code}: ${result.error.message}). Die ` +
-            `Schreibsperre bleibt bestehen, bis der Zustand geklärt ist. ` +
-            `Nicht-destruktiver Ausweg: prüfe manuell \`git status --short\` ` +
-            `und \`git log -1\` in ${ctx.cwd}; behebe die genannte Ursache ` +
-            `(z. B. fehlendes Git-Binary, beschädigtes Repository, ` +
-            `Berechtigungsproblem) und rufe recovery_check danach erneut auf. ` +
-            `Führe keine pauschale Bereinigung (\`git reset --hard\`, ` +
-            `\`git clean -fd\`) aus — das kann nicht wiederherstellbare ` +
-            `Arbeit löschen.`,
+      const input = params as { workspaceRoot?: string };
+      const roots = workspaceRootsForContext(ctx);
+      let selectedRoots: string[];
+      if (input.workspaceRoot !== undefined) {
+        const requestedRoot = canonicalWorkspaceRoot(
+          resolve(ctx.cwd, input.workspaceRoot),
         );
-      }
-      const snapshot = result.snapshot;
-      let gitStatus = "";
-      let diffStat = "";
-      if (snapshot.vcs !== "none") {
-        try {
-          gitStatus = await gitText(ctx.cwd, ["status", "--short"], signal);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+        if (!requestedRoot || !roots.includes(requestedRoot)) {
           throw new Error(
-            `Recovery-Check fehlgeschlagen: git status nicht lesbar (${message}). ` +
-              `Die Schreibsperre bleibt bestehen, bis der Zustand geklärt ist. ` +
-              `Nicht-destruktiver Ausweg: prüfe manuell \`git status --short\` ` +
-              `in ${ctx.cwd} und behebe die genannte Ursache, statt den ` +
-              `Workspace pauschal zurückzusetzen.`,
+            "Recovery-Check abgelehnt: Die Projektwurzel ist in dieser Sitzung nicht freigegeben.",
           );
         }
-        try {
-          diffStat = await gitText(ctx.cwd, ["diff", "--stat"], signal);
-        } catch {
-          diffStat = "(Diff-Zusammenfassung nicht verfügbar)";
+        if (recoverySkippedRoots.has(requestedRoot)) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Recovery-Check für ${requestedRoot} wird übersprungen: recovery.skipWithoutGit ist aktiviert und diese Wurzel enthält kein Git-Repository.`,
+              },
+            ],
+          };
+        }
+        if (recoveryDisabledRoots.has(requestedRoot)) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Recovery-Snapshot ist für diese Sitzung deaktiviert (Projektwurzel: ${requestedRoot}). Beim nächsten Sitzungsstart ist die Prüfung wieder aktiv.`,
+              },
+            ],
+          };
+        }
+        selectedRoots = [requestedRoot];
+      } else {
+        const availableRoots = roots.filter(
+          (root) =>
+            !recoverySkippedRoots.has(root) && !recoveryDisabledRoots.has(root),
+        );
+        if (availableRoots.length === 0) {
+          const allSkipped =
+            roots.length > 0 &&
+            roots.every((root) => recoverySkippedRoots.has(root));
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: allSkipped
+                  ? "Recovery-Check wird übersprungen: recovery.skipWithoutGit ist aktiviert und keine freigegebene Wurzel enthält ein Git-Repository."
+                  : "Recovery-Snapshot ist für diese Sitzung deaktiviert (alle freigegebenen Wurzeln). Beim nächsten Sitzungsstart ist die Prüfung wieder aktiv.",
+              },
+            ],
+          };
+        }
+        selectedRoots = availableRoots.filter((root) => {
+          const rootGate = gateForRoot(root);
+          return Boolean(
+            rootGate &&
+            gateRequiresInspection(rootGate.required) &&
+            !rootGate.checked,
+          );
+        });
+        if (selectedRoots.length === 0) {
+          const primaryRoot = primaryWorkspaceRoot(ctx.cwd);
+          selectedRoots = [
+            availableRoots.includes(primaryRoot)
+              ? primaryRoot
+              : availableRoots[0],
+          ];
         }
       }
 
-      if (
-        signal?.aborted ||
-        generation !== sessionGeneration ||
-        gate !== checkedGate
-      ) {
+      const inspections: Array<{
+        root: string;
+        gate?: RecoveryGateState;
+        snapshot: WorkspaceSnapshot;
+        gitStatus: string;
+        diffStat: string;
+      }> = [];
+      for (const root of selectedRoots) {
+        const checkedGate = gateForRoot(root);
+        const result = await collectWorkspaceSnapshot(root, { signal });
+        if (!result.ok) {
+          if (
+            await offerSessionRecoveryDisable(
+              ctx,
+              generation,
+              checkedGate,
+              root,
+            )
+          ) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: "Recovery-Snapshot und Recovery-Schreibsperre sind für diese Sitzung deaktiviert. Beim nächsten Sitzungsstart ist die Prüfung wieder aktiv.",
+                },
+              ],
+            };
+          }
+          throw new Error(
+            `Recovery-Check fehlgeschlagen: Workspace-Snapshot nicht erfassbar in ${root} (${result.error.code}: ${result.error.message}). Die Schreibsperre für diese Wurzel bleibt bestehen. Behebe die Ursache und rufe recovery_check erneut auf. Führe keine pauschale Bereinigung (\`git reset --hard\`, \`git clean -fd\`) aus.`,
+          );
+        }
+        let gitStatus = "";
+        let diffStat = "";
+        if (result.snapshot.vcs !== "none") {
+          try {
+            gitStatus = await gitText(root, ["status", "--short"], signal);
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            if (
+              await offerSessionRecoveryDisable(
+                ctx,
+                generation,
+                checkedGate,
+                root,
+              )
+            ) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: "Recovery-Snapshot und Recovery-Schreibsperre sind für diese Sitzung deaktiviert. Beim nächsten Sitzungsstart ist die Prüfung wieder aktiv.",
+                  },
+                ],
+              };
+            }
+            throw new Error(
+              `Recovery-Check fehlgeschlagen: git status nicht lesbar in ${root} (${message}). Die Schreibsperre für diese Wurzel bleibt bestehen. Behebe die Ursache, statt den Workspace pauschal zurückzusetzen.`,
+            );
+          }
+          try {
+            diffStat = await gitText(root, ["diff", "--stat"], signal);
+          } catch {
+            diffStat = "(Diff-Zusammenfassung nicht verfügbar)";
+          }
+        }
+        inspections.push({
+          root,
+          gate: checkedGate,
+          snapshot: result.snapshot,
+          gitStatus,
+          diffStat,
+        });
+      }
+
+      if (signal?.aborted || generation !== sessionGeneration) {
         throw new Error(
-          "Recovery-Check abgebrochen: Sitzung oder Recovery-Gate hat sich während der Prüfung geändert. Erneut prüfen.",
+          "Recovery-Check abgebrochen: Die Sitzung hat sich während der Prüfung geändert. Erneut prüfen.",
         );
       }
-      const openRequired = checkedGate?.required;
-      if (openRequired) {
-        const record: RecoveryCheckedMarker = {
-          schemaVersion: SCHEMA_VERSION,
-          timestamp: new Date().toISOString(),
-          turnStartedAt: openRequired.turnStartedAt,
-          workspaceFingerprint: snapshot.fingerprint,
-        };
-        pi.appendEntry("resilience.recovery-checked", record);
-        gate = foldCheckedMarker(checkedGate, record);
+      for (const inspection of inspections) {
+        if (!sameGate(gateForRoot(inspection.root), inspection.gate)) {
+          throw new Error(
+            `Recovery-Check abgebrochen: Das Gate für ${inspection.root} hat sich während der Prüfung geändert. Erneut prüfen.`,
+          );
+        }
       }
+      for (const inspection of inspections) {
+        const openRequired = inspection.gate?.required;
+        if (openRequired && gateRequiresInspection(openRequired)) {
+          const record: RecoveryCheckedMarker = {
+            schemaVersion: SCHEMA_VERSION,
+            timestamp: new Date().toISOString(),
+            turnStartedAt: openRequired.turnStartedAt,
+            workspaceFingerprint: inspection.snapshot.fingerprint,
+            workspaceRoot: inspection.root,
+          };
+          pi.appendEntry("resilience.recovery-checked", record);
+          rememberCheckedMarker(
+            inspection.root,
+            openRequired,
+            record,
+            ctx.sessionManager.getBranch(),
+          );
+        }
+      }
+      gate = gateForRoot(primaryWorkspaceRoot(ctx.cwd));
       await updateRecoveryStatus();
 
-      const statusText = gitStatus.trim() || "(keine Änderungen)";
-      const lines = [
-        openRequired
-          ? "Recovery-Check abgeschlossen: Die Schreibsperre ist aufgehoben, solange der Workspace-Fingerprint unverändert bleibt."
-          : "Kein offenes Recovery-Gate gefunden; der Workspace wurde trotzdem geprüft.",
-        `Workspace-Fingerprint: ${snapshot.fingerprint}`,
-        `VCS: ${snapshot.vcs ?? "git"}`,
-        ...(snapshot.vcs === "none"
-          ? [`Filesystem-Einträge geprüft: ${snapshot.filesystemEntries}`]
-          : ["", "git status --short:", statusText]),
-      ];
-      if (diffStat.trim()) {
-        lines.push("", "git diff --stat:", diffStat.trim());
-      }
+      const lines = inspections.flatMap((inspection) => {
+        const openRequired = inspection.gate?.required;
+        const statusText = inspection.gitStatus.trim() || "(keine Änderungen)";
+        return [
+          `Projektwurzel: ${inspection.root}`,
+          openRequired && gateRequiresInspection(openRequired)
+            ? "Recovery-Check abgeschlossen: Die Schreibsperre für diese Wurzel ist aufgehoben."
+            : "Kein offenes Recovery-Gate für diese Wurzel; der Workspace wurde geprüft.",
+          `Workspace-Fingerprint: ${inspection.snapshot.fingerprint}`,
+          `VCS: ${inspection.snapshot.vcs ?? "git"}`,
+          ...(inspection.snapshot.vcs === "none"
+            ? [
+                `Filesystem-Einträge geprüft: ${inspection.snapshot.filesystemEntries}`,
+              ]
+            : ["git status --short:", statusText]),
+          ...(inspection.diffStat.trim()
+            ? ["git diff --stat:", inspection.diffStat.trim()]
+            : []),
+          "",
+        ];
+      });
       const limited = limitTextOutput(lines.join("\n"));
+      for (const root of inspections.map((inspection) => inspection.root)) {
+        recoverySnapshotFailures.delete(root);
+        recoveryDisablePromptedRoots.delete(root);
+      }
       return {
         content: [{ type: "text" as const, text: limited.text }],
         details: {
-          turnStartedAt: openRequired?.turnStartedAt,
-          changedFiles: snapshot.changedFiles,
+          checkedRoots: inspections.map((inspection) => ({
+            workspaceRoot: inspection.root,
+            turnStartedAt: inspection.gate?.required.turnStartedAt,
+            changedFiles: inspection.snapshot.changedFiles,
+          })),
           ...(limited.truncation ? { truncation: limited.truncation } : {}),
         },
       };

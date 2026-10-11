@@ -35,6 +35,9 @@ export interface RequiredCheckRecord {
 }
 
 export interface VerificationLedger {
+  /** Latest required-check record per canonical workspace root. */
+  requiredChecksByRoot?: Record<string, RequiredCheckRecord>;
+  /** Latest record overall, retained for result details and old callers. */
   lastRequiredCheck?: RequiredCheckRecord;
 }
 
@@ -135,9 +138,9 @@ export function evaluateCheckRun(
 }
 
 /**
- * Fold a run into the ledger. Exactly one record is kept, bound to one
- * workspace root and one fingerprint; any change to either starts over, so
- * coverage can only ever accumulate across runs of a byte-identical workspace.
+ * Fold a run into the ledger under its workspace root. Each root has one
+ * current fingerprint, so coverage can only accumulate across runs of a
+ * byte-identical workspace without displacing another root's evidence.
  */
 export function mergeCheckRun(
   ledger: VerificationLedger,
@@ -145,7 +148,7 @@ export function mergeCheckRun(
   workspaceRoot: string,
   workspaceFingerprint: string,
 ): VerificationLedger {
-  const previous = ledger.lastRequiredCheck;
+  const previous = requiredCheckForRoot(ledger, workspaceRoot);
   const carry =
     previous &&
     previous.workspaceRoot === workspaceRoot &&
@@ -161,18 +164,39 @@ export function mergeCheckRun(
     ]),
   ].sort();
 
-  return {
-    lastRequiredCheck: {
-      workspaceRoot,
-      workspaceFingerprint,
-      requiredOutcomes: {
-        ...(carry?.requiredOutcomes ?? {}),
-        ...evaluation.requiredOutcomes,
-      },
-      blockingRecommendedIds,
-      completedAt: new Date().toISOString(),
+  const lastRequiredCheck: RequiredCheckRecord = {
+    workspaceRoot,
+    workspaceFingerprint,
+    requiredOutcomes: {
+      ...(carry?.requiredOutcomes ?? {}),
+      ...evaluation.requiredOutcomes,
     },
+    blockingRecommendedIds,
+    completedAt: new Date().toISOString(),
   };
+  return {
+    requiredChecksByRoot: {
+      ...(ledger.requiredChecksByRoot ?? {}),
+      ...(ledger.lastRequiredCheck
+        ? { [ledger.lastRequiredCheck.workspaceRoot]: ledger.lastRequiredCheck }
+        : {}),
+      [workspaceRoot]: lastRequiredCheck,
+    },
+    lastRequiredCheck,
+  };
+}
+
+/** Look up accumulated evidence without letting another root displace it. */
+export function requiredCheckForRoot(
+  ledger: VerificationLedger,
+  workspaceRoot: string,
+): RequiredCheckRecord | undefined {
+  return (
+    ledger.requiredChecksByRoot?.[workspaceRoot] ??
+    (ledger.lastRequiredCheck?.workspaceRoot === workspaceRoot
+      ? ledger.lastRequiredCheck
+      : undefined)
+  );
 }
 
 /** Accumulated required coverage of a record, for reporting back to the agent. */
@@ -205,7 +229,7 @@ export function verificationStatus(
   // never read as a passed check, hence "unchanged" rather than "clean".
   if (snapshot.changedFiles.length === 0) return "unchanged";
 
-  const last = ledger.lastRequiredCheck;
+  const last = requiredCheckForRoot(ledger, options.workspaceRoot);
   const current =
     last &&
     last.workspaceRoot === options.workspaceRoot &&

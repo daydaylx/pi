@@ -12,7 +12,8 @@
  * preference: it is never persisted. It comes in three stufen (yolo,
  * yolo-ask, yolo-full; see workflow-status.ts). The trust boundary and the
  * Plan Mode write ban and Recovery workspace-integrity gate stay active on
- * all of them. YOLO 1 additionally keeps the hard secret/symlink boundaries;
+ * YOLO 1 and 2; YOLO 3 explicitly bypasses the Recovery gate. YOLO 1
+ * additionally keeps the hard secret/symlink boundaries;
  * the system-level shell boundaries and commit-verifier gate are the
  * deliberate bypass surface (see workflow-policy.ts, verifier-policy.ts,
  * guards.ts).
@@ -24,6 +25,13 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { resolve } from "node:path";
+import { isInside } from "../shared/path-utils.ts";
+import {
+  WORKSPACE_SCOPE_EVENTS,
+  canonicalWorkspaceRoot,
+  type WorkspaceScopeRequest,
+} from "../shared/workspace-scope.ts";
 import {
   FRONTEND_UI_CHANNELS,
   isFrontendUiStateRequest,
@@ -54,6 +62,7 @@ import { permissionWarning } from "./tool-policy.ts";
 import type { ThinkingControl } from "./thinking-control.ts";
 
 export const PERSISTED_STATE_KEY = "mode-permissions";
+export const WORKSPACE_ROOT_APPROVED_KEY = "workspace-root-approved";
 
 /** The single session record shared by permission and thinking state. */
 interface PersistedPermissionState {
@@ -67,6 +76,11 @@ interface PersistedPermissionState {
   manualThinkingLevel?: unknown;
 }
 
+interface PersistedWorkspaceRootApproval {
+  sessionId?: unknown;
+  root?: unknown;
+}
+
 export interface ConfiguredToolPolicy {
   unknownTools: ConfiguredPolicyAction;
   bash: ConfiguredPolicyAction;
@@ -76,6 +90,13 @@ export interface PermissionSession {
   readonly pi: ExtensionAPI;
   level(): PermissionLevel;
   configured(): ConfiguredToolPolicy;
+  additionalWorkspaceRoots(): string[];
+  isAdditionalWorkspaceRoot(root: string): boolean;
+  authorizeWorkspaceRoot(
+    path: string,
+    ctx: ExtensionContext,
+    epoch?: number,
+  ): Promise<{ approved: boolean; root?: string; reason?: string }>;
   context(): ExtensionContext | undefined;
   isCurrentEpoch(epoch: number): boolean;
   epoch(): number;
@@ -117,6 +138,30 @@ export function createPermissionSession(
   let activeContext: ExtensionContext | undefined;
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
+  let additionalRoots = new Set<string>();
+
+  function trustedWriteScopeRoot(
+    ctx: ExtensionContext,
+    input: string,
+  ): string | undefined {
+    const root = canonicalWorkspaceRoot(resolve(ctx.cwd, input));
+    if (!root || root === "/") return undefined;
+    const hardSystemRoots = [
+      "/etc",
+      "/usr",
+      "/bin",
+      "/sbin",
+      "/boot",
+      "/var",
+      "/proc",
+      "/sys",
+      "/dev",
+    ];
+    if (hardSystemRoots.some((systemRoot) => isInside(systemRoot, root))) {
+      return undefined;
+    }
+    return root;
+  }
 
   function publishStatus(ctx: ExtensionContext): void {
     setTuiStatus(
@@ -190,6 +235,8 @@ export function createPermissionSession(
     pi,
     level: () => permissionLevel,
     configured: () => configuredPolicy,
+    additionalWorkspaceRoots: () => [...additionalRoots],
+    isAdditionalWorkspaceRoot: (root) => additionalRoots.has(root),
     context: () => activeContext,
     epoch: () => sessionEpoch,
     isCurrentEpoch: (epoch) => epoch === sessionEpoch,
@@ -210,6 +257,53 @@ export function createPermissionSession(
         permissionState: selectedPermissionState,
         ...thinking.fields(),
       });
+    },
+
+    async authorizeWorkspaceRoot(path, ctx, epoch = sessionEpoch) {
+      if (epoch !== sessionEpoch || ctx !== activeContext) {
+        return { approved: false, reason: "Die Sitzung hat sich geändert." };
+      }
+      if (!ctx.hasUI) {
+        return {
+          approved: false,
+          reason:
+            "Zusätzliche Projektwurzeln benötigen eine UI-Freigabe; dieser Modus hat keinen Bestätigungsdialog.",
+        };
+      }
+      const root = trustedWriteScopeRoot(ctx, path);
+      if (!root) {
+        return {
+          approved: false,
+          reason:
+            "Der Projektpfad ist kein erreichbares Verzeichnis oder liegt in einem geschützten Systembereich.",
+        };
+      }
+      if (additionalRoots.has(root)) return { approved: true, root };
+
+      const currentRoot = canonicalWorkspaceRoot(ctx.cwd) ?? resolve(ctx.cwd);
+      const confirmed = await ctx.ui.confirm(
+        "Zusätzliche Projektwurzel für diese Sitzung freigeben?",
+        `Pi erhält Zugriff auf ${root} als zusätzliches Projekt. Die aktuelle Berechtigungsstufe und Planmodus-Regeln gelten dort weiter. Projektkonfiguration und Prüfprofile dieser Wurzel gelten nach der Freigabe als vertrauenswürdig. Die Freigabe endet mit dieser Sitzung.`,
+      );
+      if (
+        !confirmed ||
+        epoch !== sessionEpoch ||
+        ctx !== activeContext ||
+        currentRoot !== (canonicalWorkspaceRoot(ctx.cwd) ?? resolve(ctx.cwd))
+      ) {
+        return {
+          approved: false,
+          root,
+          reason: "Freigabe abgelehnt oder Sitzung gewechselt.",
+        };
+      }
+      additionalRoots.add(root);
+      pi.appendEntry(WORKSPACE_ROOT_APPROVED_KEY, {
+        sessionId: activeSessionId,
+        root,
+        approvedAt: new Date().toISOString(),
+      });
+      return { approved: true, root };
     },
 
     async toggleYolo(ctx, source, epoch = sessionEpoch, level) {
@@ -275,6 +369,25 @@ export function createPermissionSession(
       sessionEpoch += 1;
       activeSessionId = ctx.sessionManager.getSessionId();
       activeContext = ctx;
+      additionalRoots = new Set();
+      const approvalEntries = ctx.sessionManager
+        .getEntries()
+        .filter(
+          (entry: { type: string; customType?: string; data?: unknown }) =>
+            entry.type === "custom" &&
+            entry.customType === WORKSPACE_ROOT_APPROVED_KEY,
+        ) as Array<{ data?: PersistedWorkspaceRootApproval }>;
+      for (const entry of approvalEntries) {
+        const approval = entry.data;
+        if (
+          approval?.sessionId !== activeSessionId ||
+          typeof approval.root !== "string"
+        ) {
+          continue;
+        }
+        const root = canonicalWorkspaceRoot(approval.root);
+        if (root === approval.root && root !== "/") additionalRoots.add(root);
+      }
       auroraEpoch = undefined;
       subscribeAuroraProvider();
       configuredPolicy = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config
@@ -324,8 +437,29 @@ export function createPermissionSession(
       auroraEpoch = undefined;
       activeSessionId = undefined;
       activeContext = undefined;
+      additionalRoots.clear();
       setTuiStatus(ctx, UI_STATUS_KEYS.permissions, undefined);
     },
   };
+
+  pi.events.on(WORKSPACE_SCOPE_EVENTS.request, (value) => {
+    const request = value as Partial<WorkspaceScopeRequest>;
+    if (!activeContext || !request.respond) return;
+    if (
+      request.sessionId !== undefined &&
+      request.sessionId !== activeSessionId
+    ) {
+      request.respond({ additionalRoots: [] });
+      return;
+    }
+    if (request.cwd !== undefined && request.cwd !== activeContext.cwd) {
+      request.respond({ additionalRoots: [] });
+      return;
+    }
+    request.respond({
+      sessionId: activeSessionId,
+      additionalRoots: [...additionalRoots],
+    });
+  });
   return session;
 }

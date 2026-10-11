@@ -1,23 +1,20 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import {
-  closeSync,
-  lstatSync,
-  openSync,
-  readSync,
-  readlinkSync,
-  readdirSync,
-  realpathSync,
-} from "node:fs";
+  lstat as lstatAsync,
+  readlink as readlinkAsync,
+  readdir as readdirAsync,
+  realpath as realpathAsync,
+} from "node:fs/promises";
+import { createReadStream, lstatSync, readlinkSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 
-// Bumped by SNAP-001: the raw patch hashes below now force --no-textconv,
-// which changes stagedPatchSha256/unstagedPatchSha256 (and therefore every
-// fingerprint) for any workspace with a configured textconv driver. Bumping
-// the version guarantees every stored fingerprint is invalidated on upgrade,
-// rather than leaving it ambiguous whether a given repo was actually
-// affected by the fix.
-export const WORKSPACE_SNAPSHOT_SCHEMA_VERSION = "2";
+// Version 2 hardened Git patch hashes; version 3 includes nested worktree
+// state in untracked-directory fingerprints.
+export const WORKSPACE_SNAPSHOT_SCHEMA_VERSION = "3";
+// Filesystem inventories now include nested-repository working trees while
+// excluding their `.git` metadata at every depth.
+const FILESYSTEM_SNAPSHOT_SCHEMA_VERSION = "5";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -164,13 +161,11 @@ function contentStamp(worktree, paths) {
 }
 
 /**
- * The cheap, name-only Git calls a snapshot needs. Never observed to
- * approach the 1 MiB pipe limit (unlike the two full-patch calls below), so
- * these stay on execFileSync. Their raw text, plus a contentStamp() of every
- * changed path, doubles as a generation stamp for mutation detection (see
- * sameGeneration).
+ * The small, name-only Git calls a snapshot needs. Their output plus a
+ * contentStamp() of every changed path and a streamed index hash doubles as
+ * a generation stamp for mutation detection (see sameGeneration).
  */
-function collectCheapState(worktree, timeoutMs) {
+async function collectCheapState(worktree, timeoutMs, signal) {
   let head = runGitSync(worktree, ["rev-parse", "HEAD"], timeoutMs);
   if (!head.ok && head.error.code === "git_command_failed") {
     const symbolic = runGitSync(
@@ -227,8 +222,17 @@ function collectCheapState(worktree, timeoutMs) {
   if (!indexPath.ok) return indexPath;
   let indexHash;
   try {
-    indexHash = hashFileSync(resolve(worktree, indexPath.value.trim()));
+    indexHash = await hashFile(
+      resolve(worktree, indexPath.value.trim()),
+      signal,
+    );
   } catch (error) {
+    if (signal?.aborted) {
+      return snapshotError(
+        "git_command_failed",
+        "Snapshot-Erfassung wurde abgebrochen (AbortSignal).",
+      );
+    }
     if (error.code === "ENOENT") indexHash = "missing";
     else return snapshotError("read_failed", "Git-Index ist nicht lesbar.");
   }
@@ -505,24 +509,6 @@ function hashGitOutput(worktree, args, { timeoutMs, signal } = {}) {
   });
 }
 
-function hashFileSync(absolute) {
-  const fd = openSync(absolute, "r");
-  try {
-    const digest = createHash("sha256");
-    const buffer = Buffer.alloc(UNTRACKED_CHUNK_BYTES);
-    let bytesRead;
-    // eslint-disable-next-line no-cond-assign
-    while ((bytesRead = readSync(fd, buffer, 0, buffer.length, null)) > 0) {
-      digest.update(
-        bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead),
-      );
-    }
-    return digest.digest("hex");
-  } finally {
-    closeSync(fd);
-  }
-}
-
 /**
  * Reads and hashes every untracked path. Never touches `execFileSync`, so it
  * cannot ENOBUFS — but a file that disappears mid-scan (a real race with an
@@ -530,7 +516,8 @@ function hashFileSync(absolute) {
  * retries the whole snapshot instead of treating it as a permanent read
  * failure.
  */
-function readUntrackedContent(worktree, paths) {
+async function readUntrackedContent(worktree, paths, options = {}) {
+  const signal = options.signal;
   const results = [];
   for (const path of paths) {
     const absolute = resolve(worktree, path);
@@ -549,7 +536,37 @@ function readUntrackedContent(worktree, paths) {
       if (stat.isSymbolicLink()) {
         results.push({ path, sha256: hash(readlinkSync(absolute)) });
       } else if (stat.isFile()) {
-        results.push({ path, sha256: hashFileSync(absolute) });
+        results.push({ path, sha256: await hashFile(absolute, signal) });
+      } else if (stat.isDirectory()) {
+        const gitMarker = resolve(absolute, ".git");
+        let isNestedRepository = false;
+        try {
+          lstatSync(gitMarker);
+          isNestedRepository = true;
+        } catch {
+          // A directory without its own `.git` marker is not a Git worktree.
+        }
+        if (isNestedRepository) {
+          // Treat the nested worktree as one entry in the parent Git
+          // fingerprint, but make that entry sensitive to changes anywhere
+          // in its working tree. The filesystem inventory ignores `.git`
+          // metadata, so `git status` inside the child cannot churn the
+          // parent's identity through the child's index.
+          const nested = await collectFilesystemSnapshot(absolute, options);
+          if (!nested.ok) return nested;
+          results.push({
+            path,
+            nestedWorkspaceFingerprint: nested.snapshot.fingerprint,
+          });
+          continue;
+        }
+        return {
+          ok: false,
+          error: {
+            code: "read_failed",
+            message: `Untracked-Verzeichnis kann nicht als Repository oder reguläres Verzeichnis inventarisiert werden: ${path}`,
+          },
+        };
       } else {
         return {
           ok: false,
@@ -560,6 +577,15 @@ function readUntrackedContent(worktree, paths) {
         };
       }
     } catch (error) {
+      if (signal?.aborted) {
+        return {
+          ok: false,
+          error: {
+            code: "git_command_failed",
+            message: "Snapshot-Erfassung wurde abgebrochen (AbortSignal).",
+          },
+        };
+      }
       if (error && error.code === "ENOENT") {
         return {
           ok: false,
@@ -584,6 +610,30 @@ function readUntrackedContent(worktree, paths) {
   return { ok: true, value: results };
 }
 
+function hashFile(absolute, signal) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const digest = createHash("sha256");
+    const stream = createReadStream(absolute, {
+      highWaterMark: UNTRACKED_CHUNK_BYTES,
+    });
+    const onAbort = () => stream.destroy(new Error("Snapshot-Abbruch"));
+    if (signal?.aborted) {
+      onAbort();
+    } else {
+      signal?.addEventListener("abort", onAbort, { once: true });
+    }
+    stream.on("data", (chunk) => digest.update(chunk));
+    stream.once("error", (error) => {
+      signal?.removeEventListener("abort", onAbort);
+      rejectPromise(error);
+    });
+    stream.once("end", () => {
+      signal?.removeEventListener("abort", onAbort);
+      resolvePromise(digest.digest("hex"));
+    });
+  });
+}
+
 /** Whether `.git` exists in the worktree or any parent directory. */
 function findGitMarker(worktree) {
   let directory = resolve(worktree);
@@ -591,8 +641,9 @@ function findGitMarker(worktree) {
     try {
       lstatSync(resolve(directory, ".git"));
       return true;
-    } catch {
-      // Absent or unreadable: keep walking towards the filesystem root.
+    } catch (error) {
+      if (error?.code !== "ENOENT") return true;
+      // Only a confirmed absence lets the probe continue towards the root.
     }
     const parent = resolve(directory, "..");
     if (parent === directory) return false;
@@ -600,12 +651,65 @@ function findGitMarker(worktree) {
   }
 }
 
-function collectFilesystemSnapshot(worktree, options = {}) {
+/**
+ * Probe whether `worktree` belongs to a readable Git repository without
+ * falling back to a potentially large filesystem inventory. A broken `.git`
+ * marker and operational Git errors remain errors; only a genuine
+ * non-repository is reported as `hasRepository: false`.
+ */
+export function probeGitRepository(worktree, options = {}) {
+  const repositoryRoot = resolveRepositoryRoot(
+    worktree,
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
+  );
+  if (repositoryRoot.ok) {
+    return {
+      ok: true,
+      hasRepository: true,
+      root: repositoryRoot.value,
+    };
+  }
+  if (
+    repositoryRoot.error.code === "no_repository" &&
+    !findGitMarker(worktree)
+  ) {
+    return { ok: true, hasRepository: false };
+  }
+  return repositoryRoot;
+}
+
+async function collectFilesystemSnapshot(worktree, options = {}) {
   const root = resolve(worktree);
-  const maxEntries = options.maxFilesystemEntries ?? 100_000;
   const entries = [];
   const pending = [""];
   try {
+    const workspaceRoot = await realpathAsync(root);
+    const streamedHash = createHash("sha256");
+    streamedHash.update(
+      JSON.stringify({
+        schemaVersion: FILESYSTEM_SNAPSHOT_SCHEMA_VERSION,
+        vcs: "none",
+        workspaceRoot,
+        inventoryMode: "streamed",
+      }),
+    );
+    let filesystemEntries = 0;
+    let streaming = false;
+    const configuredThreshold = options.filesystemStreamingThreshold;
+    const softLimit =
+      Number.isSafeInteger(configuredThreshold) && configuredThreshold >= 0
+        ? configuredThreshold
+        : 100_000;
+
+    const encodeEntry = (entry) => JSON.stringify(entry);
+    const hashEntry = (entry) => {
+      // JSON escaping prevents literal newlines, so the newline is an
+      // unambiguous record separator even when filenames contain punctuation.
+      streamedHash.update(encodeEntry(entry));
+      streamedHash.update("\n");
+    };
+
     while (pending.length > 0) {
       if (options.signal?.aborted) {
         return snapshotError(
@@ -615,13 +719,13 @@ function collectFilesystemSnapshot(worktree, options = {}) {
       }
       const directory = pending.pop();
       const absolute = resolve(root, directory);
-      const names = readdirSync(absolute).sort();
+      const names = (await readdirAsync(absolute)).sort();
       for (const name of names) {
-        if (directory === "" && name === ".git") continue;
+        if (name === ".git") continue;
         if (name === "node_modules") continue;
         const path = directory ? `${directory}/${name}` : name;
         const fullPath = resolve(root, path);
-        const stat = lstatSync(fullPath, { bigint: true });
+        const stat = await lstatAsync(fullPath, { bigint: true });
         const kind = stat.isSymbolicLink()
           ? "symlink"
           : stat.isDirectory()
@@ -629,33 +733,66 @@ function collectFilesystemSnapshot(worktree, options = {}) {
             : stat.isFile()
               ? "file"
               : "other";
-        const linkTarget = kind === "symlink" ? readlinkSync(fullPath) : "";
-        entries.push(
-          `${path}\\0${kind}\\0${stat.size}\\0${stat.mtimeNs}\\0${stat.ctimeNs}\\0${stat.mode}\\0${stat.ino}\\0${linkTarget}`,
-        );
-        if (kind === "directory") pending.push(path);
-        if (entries.length > maxEntries) {
-          return snapshotError(
-            "read_failed",
-            `Filesystem-Snapshot überschreitet das Limit von ${maxEntries} Einträgen.`,
-          );
+        const linkTarget =
+          kind === "symlink" ? await readlinkAsync(fullPath) : "";
+        const entry = [
+          path,
+          kind,
+          stat.size.toString(),
+          stat.mtimeNs.toString(),
+          stat.ctimeNs.toString(),
+          stat.mode.toString(),
+          stat.ino.toString(),
+          linkTarget,
+          "",
+        ];
+        filesystemEntries += 1;
+        if (!streaming && filesystemEntries <= softLimit) {
+          entries.push(entry);
+        } else {
+          if (!streaming) {
+            streaming = true;
+            // Crossing the soft limit switches to a deterministic streaming
+            // digest. The inventory is still complete; only the temporary
+            // per-entry array is discarded to keep memory bounded.
+            for (const previous of entries) hashEntry(previous);
+            entries.length = 0;
+          }
+          hashEntry(entry);
         }
+        if (kind === "directory") pending.push(path);
       }
     }
-    entries.sort();
-    const workspaceRoot = realpathSync(root);
-    const fingerprint = hash(
-      JSON.stringify({
-        schemaVersion: WORKSPACE_SNAPSHOT_SCHEMA_VERSION,
-        vcs: "none",
-        workspaceRoot,
-        entries,
-      }),
-    );
+    let fingerprint;
+    if (streaming) {
+      fingerprint = hash(
+        JSON.stringify({
+          schemaVersion: FILESYSTEM_SNAPSHOT_SCHEMA_VERSION,
+          vcs: "none",
+          workspaceRoot,
+          inventoryMode: "streamed",
+          filesystemEntries,
+          inventorySha256: streamedHash.digest("hex"),
+        }),
+      );
+    } else {
+      entries.sort((left, right) =>
+        left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0,
+      );
+      fingerprint = hash(
+        JSON.stringify({
+          schemaVersion: FILESYSTEM_SNAPSHOT_SCHEMA_VERSION,
+          vcs: "none",
+          workspaceRoot,
+          inventoryMode: "in-memory",
+          entries,
+        }),
+      );
+    }
     return {
       ok: true,
       snapshot: {
-        schemaVersion: WORKSPACE_SNAPSHOT_SCHEMA_VERSION,
+        schemaVersion: FILESYSTEM_SNAPSHOT_SCHEMA_VERSION,
         vcs: "none",
         workspaceRoot,
         head: "",
@@ -665,7 +802,8 @@ function collectFilesystemSnapshot(worktree, options = {}) {
         renames: [],
         deletions: [],
         changedFiles: [],
-        filesystemEntries: entries.length,
+        filesystemEntries,
+        filesystemInventoryMode: streaming ? "streamed" : "in-memory",
         fingerprint,
       },
     };
@@ -742,9 +880,10 @@ function buildSnapshot(state, stagedPatch, unstagedPatch, untrackedContent) {
  * "unchanged").
  *
  * Never throws. Git workspaces use the content-sensitive Git snapshot above;
- * a missing repository or Git executable falls back to a bounded filesystem
- * inventory (excluding .git and node_modules) — unless a `.git` entry exists
- * that Git cannot read, which is reported as an error. Genuine read, race,
+ * a missing repository or Git executable falls back to a filesystem inventory
+ * with bounded temporary memory (excluding `.git` and `node_modules` at
+ * every depth, including nested worktrees) — unless a top-level `.git` entry
+ * exists that Git cannot read, which is reported as an error. Genuine read, race,
  * aborted command and parser failures return `{ ok: false, error: { code, message } }`.
  * See `docs/decisions/027-workspace-snapshot-content-identity.md`.
  */
@@ -789,7 +928,11 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
       );
     }
 
-    const before = collectCheapState(repositoryRoot.value, timeoutMs);
+    const before = await collectCheapState(
+      repositoryRoot.value,
+      timeoutMs,
+      signal,
+    );
     if (!before.ok) {
       // Not necessarily permanent — e.g. a concurrent git process briefly
       // holding index.lock — so retry within budget rather than failing the
@@ -837,9 +980,10 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
       continue;
     }
 
-    const untrackedResult = readUntrackedContent(
+    const untrackedResult = await readUntrackedContent(
       repositoryRoot.value,
       before.value.untracked,
+      options,
     );
     if (!untrackedResult.ok) {
       if (untrackedResult.transient) {
@@ -852,7 +996,11 @@ export async function collectWorkspaceSnapshot(worktree, options = {}) {
       );
     }
 
-    const after = collectCheapState(repositoryRoot.value, timeoutMs);
+    const after = await collectCheapState(
+      repositoryRoot.value,
+      timeoutMs,
+      signal,
+    );
     if (!after.ok) {
       lastError = after;
       continue;

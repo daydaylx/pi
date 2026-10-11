@@ -14,10 +14,16 @@ import {
   SECTION_SUITES,
   RUN_MJS_SUITES,
 } from "./shared/run-suite-registry.mjs";
-import { runtimeSections } from "./suites/runtime.mjs";
-import { uiSections } from "./suites/ui.mjs";
-import { lspSections } from "./suites/lsp.mjs";
-import { diffSections } from "./suites/diff.mjs";
+
+// Test commits and fingerprints must not depend on a user's global or system
+// Git configuration (for example commit.gpgsign=true).
+process.env.GIT_CONFIG_GLOBAL = process.platform === "win32" ? "NUL" : "/dev/null";
+process.env.GIT_CONFIG_NOSYSTEM = "1";
+
+const { runtimeSections } = await import("./suites/runtime.mjs");
+const { uiSections } = await import("./suites/ui.mjs");
+const { lspSections } = await import("./suites/lsp.mjs");
+const { diffSections } = await import("./suites/diff.mjs");
 
 const requestedSuite = process.env.PI_TEST_SUITE;
 if (requestedSuite && !RUN_MJS_SUITES.includes(requestedSuite)) {

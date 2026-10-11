@@ -15,6 +15,7 @@ export interface WorkspaceSnapshot {
   vcs?: "git" | "none";
   workspaceRoot?: string;
   filesystemEntries?: number;
+  filesystemInventoryMode?: "in-memory" | "streamed";
   head: string;
   staged: WorkspacePathChange[];
   unstaged: WorkspacePathChange[];
@@ -50,6 +51,11 @@ export interface CollectWorkspaceSnapshotOptions {
   /** Retry budget for mutation-during-capture detection. */
   maxAttempts?: number;
   /**
+   * Soft entry threshold for switching no-Git inventories to a streaming
+   * fingerprint. Every entry is still included; this bounds temporary memory.
+   */
+  filesystemStreamingThreshold?: number;
+  /**
    * Test seam: runs after each attempt's cheap generation stamp is taken,
    * before patch/untracked collection. Production callers omit this.
    */
@@ -59,10 +65,21 @@ export interface CollectWorkspaceSnapshotOptions {
   ) => void | Promise<void>;
 }
 
+export type GitRepositoryProbeResult =
+  | { ok: true; hasRepository: true; root: string }
+  | { ok: true; hasRepository: false }
+  | { ok: false; error: WorkspaceSnapshotError };
+
 export function collectWorkspaceSnapshot(
   worktree: string,
   options?: CollectWorkspaceSnapshotOptions,
 ): Promise<WorkspaceSnapshotResult>;
+
+/** Checks Git availability without scanning the workspace filesystem. */
+export function probeGitRepository(
+  worktree: string,
+  options?: Pick<CollectWorkspaceSnapshotOptions, "timeoutMs" | "maxAttempts">,
+): GitRepositoryProbeResult;
 
 /**
  * `{ ...process.env, LC_ALL: "C", LANG: "C" }` — forces English git error

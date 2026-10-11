@@ -7,6 +7,7 @@ if (process.argv.includes("--version")) {
 }
 
 const lines = readline.createInterface({ input: process.stdin });
+let pendingPromptId;
 lines.on("line", (line) => {
   const request = JSON.parse(line);
   let data = {};
@@ -41,6 +42,37 @@ lines.on("line", (line) => {
         { role: "assistant", content: [{ type: "text", text: "ok" }] },
       ],
     };
+  }
+  if (
+    request.type === "prompt" &&
+    process.env.FAKE_PI_UI_CONFIRM === "1"
+  ) {
+    pendingPromptId = request.id;
+    process.stdout.write(
+      `${JSON.stringify({
+        type: "extension_ui_request",
+        id: "dialog-1",
+        method: "confirm",
+        title: "Freigabe benötigt",
+        message: "Soll die Aktion ausgeführt werden?",
+      })}\n`,
+    );
+    return;
+  }
+  if (request.type === "extension_ui_response") {
+    if (pendingPromptId) {
+      process.stdout.write(
+        `${JSON.stringify({
+          id: pendingPromptId,
+          type: "response",
+          command: "prompt",
+          success: true,
+          data: { disposition: "completed" },
+        })}\n`,
+      );
+      pendingPromptId = undefined;
+    }
+    return;
   }
   if (request.type === "abort" && process.env.FAKE_PI_HANG_ABORT === "1")
     return;

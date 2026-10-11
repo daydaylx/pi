@@ -564,7 +564,12 @@ export const snapshotGateSections = {
           return verifierResult(verdict);
         };
         await verifierHarness.runHooks("session_start", {}, verifierCtx);
-        await Promise.all([runVerifier("PASS"), runVerifier("FAIL")]);
+        // Tool-result dispatch order is the evidence ordering under test.
+        // Awaiting the launches sequentially avoids their snapshot probes
+        // racing and silently reversing which result reaches the queue first.
+        await startVerifier("PASS");
+        await startVerifier("FAIL");
+        await Promise.all([verifierResult("PASS"), verifierResult("FAIL")]);
         eq(
           coverage().verifierVerdict,
           "FAIL",

@@ -36,6 +36,24 @@ const HEALTHY_SESSION = [
   {
     type: "custom",
     customType: "resilience.turn-start",
+    timestamp: "2026-08-18T10:05:00.000Z",
+    data: { schemaVersion: 2, timestamp: "2026-08-18T10:05:00.000Z" },
+  },
+  {
+    type: "custom",
+    customType: "resilience.turn-settled",
+    timestamp: "2026-08-18T10:05:01.000Z",
+    data: {
+      schemaVersion: 2,
+      timestamp: "2026-08-18T10:05:01.000Z",
+      turnStartedAt: "2026-08-18T10:05:00.000Z",
+      outcome: "aborted",
+      observedFailureCount: 0,
+    },
+  },
+  {
+    type: "custom",
+    customType: "resilience.turn-start",
     timestamp: "2026-08-18T10:01:00.000Z",
     data: { schemaVersion: 2, timestamp: "2026-08-18T10:01:00.000Z" },
   },
@@ -214,8 +232,9 @@ await test("session health separates interactive errors from raw history", () =>
 
     eq(report.files, 2, "both session files are read");
     eq(report.parseErrors, 1, "an unparseable line is counted, not fatal");
-    eq(report.turns.total, 3, "every turn start is counted");
+    eq(report.turns.total, 4, "every turn start is counted");
     eq(report.turns.completed, 1, "a clean turn is completed");
+    eq(report.turns.aborted, 1, "aborted turns have a separate counter");
     eq(report.turns.failed, 2, "failed turns include schemaVersion-1 legacy");
     eq(report.turns.open, 0, "no turn is left open in the fixtures");
     eq(report.recovery.required, 2, "recovery requests are counted");
@@ -369,5 +388,5 @@ await test("the time window keeps recent entries and drops older ones", () => {
   );
   const all = analyze.emptySessionHealthReport();
   analyze.aggregateSessionEntries(HEALTHY_SESSION, all);
-  eq(all.turns.total, 2, "without a window every entry counts");
+  eq(all.turns.total, 3, "without a window every turn start counts");
 });

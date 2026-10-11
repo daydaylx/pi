@@ -54,7 +54,10 @@ export function decideTool(
     unknownTools: ConfiguredPolicyAction;
     bash: ConfiguredPolicyAction;
   },
-  options: { allowOutsideProjectRead?: boolean } = {},
+  options: {
+    allowOutsideProjectRead?: boolean;
+    additionalRoots?: readonly string[];
+  } = {},
 ): PolicyDecision {
   if (
     event.toolName === "bash" ||
@@ -101,7 +104,10 @@ export function decideTool(
       "read",
       toolPath(event) ?? ".",
       cwd,
-      { allowOutsideProjectRead: options.allowOutsideProjectRead },
+      {
+        allowOutsideProjectRead: options.allowOutsideProjectRead,
+        additionalRoots: options.additionalRoots,
+      },
     );
   }
 
@@ -137,6 +143,9 @@ export function decideTool(
     // öffnen; er ist read-only und darf niemals hinter einem Dialog stehen.
     return { action: "allow", reason: "Read-only-Recovery-Check" };
   }
+  if (event.toolName === "workspace_add") {
+    return { action: "allow", reason: "Nutzerbestätigte Workspace-Freigabe" };
+  }
   if (event.toolName === "verify" || event.toolName === "project_check") {
     return permissionLevel === "readonly"
       ? {
@@ -160,7 +169,9 @@ export function decideTool(
 
   if (event.toolName === "write" || event.toolName === "edit") {
     const filePath = toolPath(event) ?? "";
-    return decideFileAccess(permissionLevel, "write", filePath, cwd);
+    return decideFileAccess(permissionLevel, "write", filePath, cwd, {
+      additionalRoots: options.additionalRoots,
+    });
   }
 
   if (isYoloLevel(permissionLevel)) {

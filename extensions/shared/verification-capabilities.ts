@@ -137,6 +137,8 @@ export function hasEvaluableVerifierResult(
 }
 
 export interface VerificationCapabilityRequest {
+  /** Optional active root for root-scoped evidence lookup. */
+  workspaceRoot?: string;
   respond(snapshot: VerificationCapabilitySnapshot): void;
 }
 
@@ -148,9 +150,11 @@ const DEFAULT_SNAPSHOT: VerificationCapabilitySnapshot = {};
 
 export function requestVerificationCapabilities(
   events: VerificationEventBus,
+  workspaceRoot?: string,
 ): VerificationCapabilitySnapshot {
   let snapshot: VerificationCapabilitySnapshot | undefined;
   events.emit(VERIFICATION_CAPABILITY_EVENTS.request, {
+    workspaceRoot,
     respond(value: VerificationCapabilitySnapshot) {
       if (!snapshot && isVerificationCapabilitySnapshot(value)) {
         snapshot = value;

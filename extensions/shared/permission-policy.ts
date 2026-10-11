@@ -221,6 +221,16 @@ const PLAN_SIMPLE_COMMANDS = new Set([
   "uptime",
 ]);
 
+// Recovery has a stricter job than Plan Mode: only commands whose executable
+// is known to be diagnostic may pass. classifyOperationEffect intentionally
+// treats unfamiliar programs as SAFE for Plan Mode; that default would let
+// deployment and infrastructure tools run through a recovery gate.
+const RECOVERY_DIAGNOSTIC_COMMANDS = new Set([
+  ...PLAN_SIMPLE_COMMANDS,
+  "find",
+  "git",
+]);
+
 const SAFE_SHELL_BUILTINS = new Set(["echo", "printf", "pwd", "type"]);
 
 /**
@@ -425,6 +435,8 @@ export interface PathIdentity {
   lexicalPath: string;
   /** Real target, or a real-parent-derived path for a missing leaf. */
   canonicalPath?: string;
+  /** Approved root containing both the lexical and canonical path. */
+  workspaceRoot?: string;
   /** Canonical scope, while insideProject remains the lexical compatibility flag. */
   scope: PathScope;
   targetKind: PathTargetKind;
@@ -484,17 +496,34 @@ function canonicalizeMissingPath(lexicalPath: string): {
  * a residual TOCTOU window, so this policy is not an OS-level no-follow or
  * atomic-open guarantee.
  */
-export function resolvePathScope(rawPath: string, cwd: string): PathIdentity {
+export function resolvePathScope(
+  rawPath: string,
+  cwd: string,
+  additionalRoots: readonly string[] = [],
+): PathIdentity {
   const root = resolve(cwd);
-  let canonicalRoot = root;
-  try {
-    canonicalRoot = realpathSync(root);
-  } catch {
-    // The caller's cwd should exist; the lexical root remains the safe fallback.
-  }
+  const roots = [
+    ...new Set([root, ...additionalRoots.map((item) => resolve(item))]),
+  ]
+    .map((lexicalRoot) => {
+      let canonicalRoot = lexicalRoot;
+      try {
+        canonicalRoot = realpathSync(lexicalRoot);
+      } catch {
+        // The caller's cwd should exist; unresolved added roots do not widen scope.
+      }
+      return { lexicalRoot, canonicalRoot };
+    })
+    .sort((left, right) => right.lexicalRoot.length - left.lexicalRoot.length);
   const lexicalPath = resolve(root, rawPath);
-  const insideProject = isInside(root, lexicalPath);
-  const symlinkComponent = hasSymlinkComponent(root, lexicalPath);
+  const lexicalRoot = roots.find((candidate) =>
+    isInside(candidate.lexicalRoot, lexicalPath),
+  );
+  const insideProject = lexicalRoot !== undefined;
+  const symlinkComponent = hasSymlinkComponent(
+    lexicalRoot?.lexicalRoot ?? root,
+    lexicalPath,
+  );
   let canonicalPath: string | undefined;
   let targetKind: PathTargetKind;
 
@@ -521,23 +550,35 @@ export function resolvePathScope(rawPath: string, cwd: string): PathIdentity {
     }
   }
 
-  const canonicalInsideProject =
-    canonicalPath !== undefined && isInside(canonicalRoot, canonicalPath);
+  const canonicalRoot =
+    canonicalPath === undefined
+      ? undefined
+      : roots.find((candidate) =>
+          isInside(candidate.canonicalRoot, canonicalPath),
+        );
+  const sameWorkspaceRoot =
+    lexicalRoot !== undefined &&
+    canonicalRoot !== undefined &&
+    lexicalRoot.lexicalRoot === canonicalRoot.lexicalRoot;
   const scope: PathScope =
     canonicalPath === undefined
       ? "unresolved"
-      : !insideProject || !canonicalInsideProject
+      : !sameWorkspaceRoot
         ? "external"
         : "project";
 
   return {
     lexicalPath,
     canonicalPath,
+    ...(sameWorkspaceRoot ? { workspaceRoot: lexicalRoot.lexicalRoot } : {}),
     scope,
     targetKind,
     insideProject,
     symlinkEscape:
-      symlinkComponent || (insideProject && !canonicalInsideProject),
+      symlinkComponent ||
+      (insideProject &&
+        canonicalRoot !== undefined &&
+        lexicalRoot?.lexicalRoot !== canonicalRoot.lexicalRoot),
     absolutePath: lexicalPath,
   };
 }
@@ -555,10 +596,11 @@ export function isSensitivePathIdentity(
 }
 
 function isProtectedPathIdentity(identity: PathIdentity, cwd: string): boolean {
+  const root = identity.workspaceRoot ?? cwd;
   return (
-    isProtectedProjectPath(identity.lexicalPath, cwd) ||
+    isProtectedProjectPath(identity.lexicalPath, root) ||
     (identity.canonicalPath !== undefined &&
-      isProtectedProjectPath(identity.canonicalPath, cwd))
+      isProtectedProjectPath(identity.canonicalPath, root))
   );
 }
 
@@ -649,6 +691,8 @@ export interface DecideFileAccessOptions {
   protectedWritePath?: ProtectedWritePath;
   /** Set only when workflow-policy has approved a documented external read. */
   allowOutsideProjectRead?: boolean;
+  /** Additional roots explicitly approved for the current session. */
+  additionalRoots?: readonly string[];
 }
 
 export function decideFileAccess(
@@ -659,7 +703,7 @@ export function decideFileAccess(
   options: DecideFileAccessOptions = {},
 ): PolicyDecision {
   const { protectedWritePath } = options;
-  const identity = resolvePathScope(rawPath, cwd);
+  const identity = resolvePathScope(rawPath, cwd, options.additionalRoots);
   const isReadRestricted = permissionLevel === "readonly";
 
   // YOLO 3 hebt die Pfadgrenzen vollständig auf (Secrets, außerhalb des
@@ -1892,6 +1936,31 @@ export function isPlanModeDiagnosticCommand(
   cwd: string,
 ): boolean {
   return diagnosePlanModeCommand(command, cwd).safe;
+}
+
+/**
+ * Recovery shell capability: a single parsed command, from a known
+ * diagnostic executable, that also passes the Plan Mode safety checks.
+ * Unknown executables and wrappers fail closed even when the general effect
+ * classifier cannot prove that they mutate state.
+ */
+export function isRecoveryReadOnlyCommand(
+  command: string,
+  cwd: string,
+): boolean {
+  const parsed = parseReadOnlyShell(command);
+  if (parsed.error || parsed.segments.length !== 1) return false;
+  const tokens = parsed.segments[0];
+  const check = executableToken(tokens);
+  if (
+    !check.raw ||
+    check.viaEnv ||
+    check.assignedNames.length > 0 ||
+    !RECOVERY_DIAGNOSTIC_COMMANDS.has(check.executable)
+  ) {
+    return false;
+  }
+  return isPlanModeDiagnosticCommand(command, cwd);
 }
 
 function referencesSystemPath(command: string): boolean {

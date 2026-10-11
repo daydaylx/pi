@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { join, relative, isAbsolute } from "node:path";
+import { join, relative, isAbsolute, resolve } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -37,6 +37,7 @@ import {
   prepareProjectDependencies,
 } from "./dependency-prepare.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
+import { requestWorkspaceScope } from "../shared/workspace-scope.ts";
 import {
   collectContextDiagnostics,
   formatContextDiagnostics,
@@ -52,6 +53,7 @@ import {
   evaluateCheckRun,
   formatVerificationStatus,
   mergeCheckRun,
+  requiredCheckForRoot,
   requiredCoverage,
   verificationStatus,
   type VerificationLedger,
@@ -80,6 +82,18 @@ interface ProfileReport {
   changed_since_pass?: boolean;
 }
 
+interface VerifierRunRecord {
+  workspaceRoot: string;
+  workspaceFingerprint: string;
+  status: VerifierRunStatus;
+  verdict?: VerifierVerdict;
+  ticket: VerifierTicket;
+  childRunId: string;
+  resultModel?: string;
+  endFingerprint?: string;
+  reason?: string;
+}
+
 const CheckParams = Type.Object({
   check: Type.Union([Type.Literal("typecheck"), Type.Literal("test")]),
 });
@@ -101,11 +115,19 @@ const ProjectCheckParams = Type.Object({
         "Kleine, geordnete Liste von Projekt-Prüfprofilen (maximal 8).",
     }),
   ),
+  workspaceRoot: Type.Optional(
+    Type.String({
+      minLength: 1,
+      description:
+        "Zusätzliche freigegebene Projektwurzel. Die UI-Freigabe muss für diese Sitzung bereits vorliegen.",
+    }),
+  ),
 });
 
 interface ProjectCheckParamsValue {
   profile?: string;
   profiles?: string[];
+  workspaceRoot?: string;
 }
 
 function redactArgument(args: string[], index: number): string {
@@ -285,9 +307,13 @@ export default function setupCore(
   // inject a deterministic fake here instead of spawning real processes.
   const exec = deps.exec ?? trackedExec;
   let activeCwd = process.cwd();
+  let activeWorkspaceRoot = activeCwd;
   let trusted = false;
   let verificationLedger: VerificationLedger = {};
-  let lastSettledStatus: VerificationStatus | undefined;
+  let settledStatusByRoot = new Map<
+    string,
+    { status: VerificationStatus; declaredRequiredIds: string[] }
+  >();
   // Session-local evidence only: whether a profile passed before the current
   // snapshot. It is not a task-status or causal-regression classifier.
   let passedProfileIds: Map<string, string> = new Map();
@@ -302,29 +328,14 @@ export default function setupCore(
   // Lockfile hashes prepared in this session. This avoids repeating npm ci for
   // multiple profiles while a lockfile change always invalidates the cache.
   const preparedDependencyLocks = new Map<string, string>();
-  let lastDeclaredRequiredIds: string[] = [];
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
-  // Binds the most recent verifier verdict to the workspace fingerprint it
-  // was recorded against — same one-record invalidation principle as
-  // verification-status.ts's RequiredCheckRecord, just for a single verdict
-  // instead of several required profiles.
-  let lastVerifierRun:
-    | {
-        workspaceRoot: string;
-        workspaceFingerprint: string;
-        status: VerifierRunStatus;
-        verdict?: VerifierVerdict;
-        ticket: VerifierTicket;
-        childRunId: string;
-        resultModel?: string;
-        endFingerprint?: string;
-        reason?: string;
-      }
-    | undefined;
+  // Keep verifier evidence per canonical workspace root. A result in one
+  // project must not evict the evidence needed by another project's gate.
+  let verifierRunsByRoot = new Map<string, VerifierRunRecord>();
   // Bumped by session_start/session_shutdown. The tool_result handler below
   // now awaits a real snapshot collection (up to ~45s across retries) before
-  // writing lastVerifierRun — captured once per call so a session restart
+  // writing verifierRunsByRoot — captured once per call so a session restart
   // that lands mid-await is detectable and the stale write is dropped
   // instead of silently repopulating state for a session it never ran in.
   let sessionGeneration = 0;
@@ -339,19 +350,19 @@ export default function setupCore(
   // snapshot work interleave. Chaining every ledger update through this
   // queue makes them apply in dispatch order instead of resolve order —
   // otherwise whichever collectWorkspaceSnapshot() happens to settle last
-  // wins the shared lastVerifierRun slot, regardless of which tool call
+  // cannot replace another root's evidence, regardless of which tool call
   // actually finished last.
   let verifierLedgerQueue: Promise<void> = Promise.resolve();
 
   function auroraVerificationSnapshot(): FrontendVerificationSummary | null {
-    if (lastSettledStatus === undefined) return null;
+    const settled = settledStatusByRoot.get(activeWorkspaceRoot);
+    if (!settled) return null;
+    const check = requiredCheckForRoot(verificationLedger, activeWorkspaceRoot);
     return {
-      status: lastSettledStatus,
-      declaredRequiredIds: lastDeclaredRequiredIds,
-      requiredOutcomes:
-        verificationLedger.lastRequiredCheck?.requiredOutcomes ?? {},
-      blockingRecommendedIds:
-        verificationLedger.lastRequiredCheck?.blockingRecommendedIds ?? [],
+      status: settled.status,
+      declaredRequiredIds: settled.declaredRequiredIds,
+      requiredOutcomes: check?.requiredOutcomes ?? {},
+      blockingRecommendedIds: check?.blockingRecommendedIds ?? [],
     };
   }
 
@@ -403,6 +414,8 @@ export default function setupCore(
       ) => unknown | Promise<unknown>,
     ) => void
   )("tool_call", async (event, ctx) => {
+    activeCwd = ctx.cwd;
+    activeWorkspaceRoot = canonicalWorkspaceRoot(ctx.cwd) ?? ctx.cwd;
     if (!isVerifierSingleCall(event)) return;
     const modeIssue = verifierSingleCallIssue(event);
     if (modeIssue) return { block: true, reason: modeIssue };
@@ -586,7 +599,7 @@ export default function setupCore(
                 verdict: undefined,
                 reason: "snapshot-unavailable",
               };
-              lastVerifierRun = undefined;
+              verifierRunsByRoot.delete(ticket.canonicalRoot);
               pi.appendEntry("verifier-run", {
                 ...baseRecord,
                 status: "incomplete",
@@ -613,7 +626,7 @@ export default function setupCore(
               verdict: undefined,
               reason: "workspace-mutated",
             };
-            lastVerifierRun = {
+            verifierRunsByRoot.set(ticket.canonicalRoot, {
               workspaceRoot: ticket.canonicalRoot,
               workspaceFingerprint: endFingerprint,
               status: "stale",
@@ -621,7 +634,7 @@ export default function setupCore(
               childRunId,
               endFingerprint,
               reason: "workspace-mutated",
-            };
+            });
             pi.appendEntry("verifier-run", {
               ...baseRecord,
               status: "stale",
@@ -632,7 +645,7 @@ export default function setupCore(
           }
 
           if (hasEvaluableVerdict) {
-            lastVerifierRun = {
+            verifierRunsByRoot.set(ticket.canonicalRoot, {
               workspaceRoot: ticket.canonicalRoot,
               workspaceFingerprint: endFingerprint,
               status: record.status,
@@ -641,10 +654,10 @@ export default function setupCore(
               childRunId,
               resultModel: record.model,
               endFingerprint,
-            };
+            });
             pi.appendEntry("verifier-run", baseRecord);
           } else if (record.reason === "no-verdict") {
-            lastVerifierRun = {
+            verifierRunsByRoot.set(ticket.canonicalRoot, {
               workspaceRoot: ticket.canonicalRoot,
               workspaceFingerprint: endFingerprint,
               status: record.status,
@@ -652,7 +665,7 @@ export default function setupCore(
               childRunId,
               endFingerprint,
               reason: "no-verdict",
-            };
+            });
             pi.appendEntry("verifier-run", baseRecord);
             pi.appendEntry("verifier-run-no-verdict", {
               schemaVersion: 1,
@@ -693,14 +706,14 @@ export default function setupCore(
     verifierLedgerQueue = Promise.resolve();
     verifierTickets.clear();
     activeCwd = ctx.cwd;
+    activeWorkspaceRoot = canonicalWorkspaceRoot(ctx.cwd) ?? ctx.cwd;
     activeSessionId = ctx.sessionManager.getSessionId() ?? undefined;
     trusted = ctx.isProjectTrusted();
     verificationLedger = {};
     passedProfileIds = new Map();
     failedProfileRuns = new Map();
-    lastSettledStatus = undefined;
-    lastDeclaredRequiredIds = [];
-    lastVerifierRun = undefined;
+    settledStatusByRoot.clear();
+    verifierRunsByRoot.clear();
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
     auroraEpoch = undefined;
     subscribeAuroraProvider();
@@ -708,19 +721,25 @@ export default function setupCore(
 
   pi.events.on(VERIFICATION_CAPABILITY_EVENTS.request, (value) => {
     const request = value as Partial<VerificationCapabilityRequest>;
+    const requestedRoot =
+      typeof request.workspaceRoot === "string"
+        ? (canonicalWorkspaceRoot(request.workspaceRoot) ??
+          request.workspaceRoot)
+        : activeWorkspaceRoot;
+    const verifierRun = verifierRunsByRoot.get(requestedRoot);
     const snapshot = {
-      workspaceRoot: lastVerifierRun?.workspaceRoot,
-      workspaceFingerprint: lastVerifierRun?.workspaceFingerprint,
-      verifierStatus: lastVerifierRun?.status,
-      verifierVerdict: lastVerifierRun?.verdict,
+      workspaceRoot: verifierRun?.workspaceRoot,
+      workspaceFingerprint: verifierRun?.workspaceFingerprint,
+      verifierStatus: verifierRun?.status,
+      verifierVerdict: verifierRun?.verdict,
     };
-    if (lastVerifierRun) {
+    if (verifierRun) {
       Object.assign(snapshot, {
-        ticket: ticketSnapshot(lastVerifierRun.ticket),
-        childRunId: lastVerifierRun.childRunId,
-        resultModel: lastVerifierRun.resultModel,
-        endFingerprint: lastVerifierRun.endFingerprint,
-        reason: lastVerifierRun.reason,
+        ticket: ticketSnapshot(verifierRun.ticket),
+        childRunId: verifierRun.childRunId,
+        resultModel: verifierRun.resultModel,
+        endFingerprint: verifierRun.endFingerprint,
+        reason: verifierRun.reason,
       });
     }
     request.respond?.(snapshot);
@@ -728,31 +747,33 @@ export default function setupCore(
 
   pi.on("agent_settled", async (_event, ctx) => {
     const generation = sessionGeneration;
+    const workspaceRoot = canonicalWorkspaceRoot(ctx.cwd) ?? ctx.cwd;
+    activeCwd = ctx.cwd;
+    activeWorkspaceRoot = workspaceRoot;
     const statusEnabled = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted())
       .config.verificationStatus.enabled;
     if (!statusEnabled) {
       if (generation !== sessionGeneration) return;
-      if (lastSettledStatus !== undefined && ctx.hasUI)
+      if (settledStatusByRoot.has(workspaceRoot) && ctx.hasUI)
         ctx.ui.setStatus("verification", undefined);
-      lastSettledStatus = undefined;
-      lastDeclaredRequiredIds = [];
+      settledStatusByRoot.delete(workspaceRoot);
       publishAuroraVerification();
       return;
     }
     const profiles = loadVerifyProfiles(ctx.cwd, ctx.isProjectTrusted());
     const declaredIds = declaredRequiredIds(profiles, ctx.isProjectTrusted());
-    const status = verificationStatus(
-      await workspaceSnapshot(ctx.cwd),
-      verificationLedger,
-      {
-        declaredRequiredIds: declaredIds,
-        workspaceRoot: ctx.cwd,
-      },
-    );
+    const snapshot = await workspaceSnapshot(ctx.cwd);
+    const status = verificationStatus(snapshot, verificationLedger, {
+      declaredRequiredIds: declaredIds,
+      workspaceRoot,
+    });
     if (generation !== sessionGeneration) return;
-    const statusChanged = status !== lastSettledStatus;
-    lastSettledStatus = status;
-    lastDeclaredRequiredIds = declaredIds;
+    const previousStatus = settledStatusByRoot.get(workspaceRoot)?.status;
+    const statusChanged = status !== previousStatus;
+    settledStatusByRoot.set(workspaceRoot, {
+      status,
+      declaredRequiredIds: declaredIds,
+    });
     // Keep the persistent footer quiet when its label is unchanged, but still
     // publish the current evidence so Aurora can clear a stale local edit flag.
     if (ctx.hasUI && statusChanged)
@@ -766,11 +787,11 @@ export default function setupCore(
     verifierTickets.clear();
     activeSessionId = undefined;
     verificationLedger = {};
+    settledStatusByRoot.clear();
     passedProfileIds = new Map();
     failedProfileRuns = new Map();
-    lastSettledStatus = undefined;
-    lastDeclaredRequiredIds = [];
-    lastVerifierRun = undefined;
+    verifierRunsByRoot.clear();
+    activeWorkspaceRoot = ctx.cwd;
     if (ctx.hasUI) ctx.ui.setStatus("verification", undefined);
     unsubscribeAurora?.();
     unsubscribeAurora = undefined;
@@ -864,9 +885,38 @@ export default function setupCore(
         toolError(requested.error);
       }
 
-      const loaded = loadVerifyProfiles(ctx.cwd, ctx.isProjectTrusted());
+      const projectParams = params as ProjectCheckParamsValue;
+      const projectRoot = projectParams.workspaceRoot
+        ? canonicalWorkspaceRoot(resolve(ctx.cwd, projectParams.workspaceRoot))
+        : ctx.cwd;
+      if (!projectRoot) {
+        toolError("Projektprüfung benötigt eine erreichbare Workspace-Wurzel.");
+      }
+      const canonicalProjectRoot =
+        canonicalWorkspaceRoot(projectRoot) ?? projectRoot;
+      const primaryRoot = canonicalWorkspaceRoot(ctx.cwd) ?? ctx.cwd;
+      const activeSession = ctx.sessionManager.getSessionId() ?? undefined;
+      const authorizedRoots = requestWorkspaceScope(
+        pi.events,
+        ctx.cwd,
+        activeSession,
+      ).additionalRoots;
+      const projectTrusted =
+        (ctx.isProjectTrusted() && canonicalProjectRoot === primaryRoot) ||
+        authorizedRoots.includes(canonicalProjectRoot);
+      if (
+        projectParams.workspaceRoot &&
+        canonicalProjectRoot !== primaryRoot &&
+        !authorizedRoots.includes(canonicalProjectRoot)
+      ) {
+        toolError(
+          `Projektprüfung für ${canonicalProjectRoot} abgelehnt: Diese Projektwurzel ist in der aktuellen Sitzung nicht freigegeben. Zuerst workspace_add aufrufen.`,
+        );
+      }
+
+      const loaded = loadVerifyProfiles(projectRoot, projectTrusted);
       const availableProfileIds = Object.keys(loaded.profiles).sort();
-      if (!ctx.isProjectTrusted()) {
+      if (!projectTrusted) {
         toolError(
           ".pi/verify.json wird nur in vertrauten Projekten ausgeführt.",
           loaded.diagnostics,
@@ -888,7 +938,7 @@ export default function setupCore(
       }
 
       const dependencyPreparation = await prepareProjectDependencies({
-        projectRoot: ctx.cwd,
+        projectRoot,
         agentDir: getAgentDir(),
         signal,
         exec: (program, args, options) => exec(program, args, options),
@@ -902,11 +952,15 @@ export default function setupCore(
 
       // Capture before execution: a later workspace change must make this
       // check stale even if the command itself succeeds.
-      const checkSnapshot = await workspaceSnapshot(ctx.cwd);
+      const checkSnapshot = await workspaceSnapshot(projectRoot);
       assertCurrentSession();
+      const checkWorkspaceRoot = canonicalProjectRoot;
+      activeWorkspaceRoot = checkWorkspaceRoot;
+      activeCwd = projectRoot;
       if (checkSnapshot) {
         const repeated = requested.ids.flatMap((id) => {
-          const previous = failedProfileRuns.get(id);
+          const runKey = `${checkWorkspaceRoot}\0${id}`;
+          const previous = failedProfileRuns.get(runKey);
           return previous &&
             previous.fingerprint === checkSnapshot.fingerprint &&
             previous.count >= 2
@@ -924,21 +978,22 @@ export default function setupCore(
       const reports: ProfileReport[] = [];
       for (const profileId of requested.ids) {
         const profile = loaded.profiles[profileId]!;
-        const previousPassFingerprint = passedProfileIds.get(profileId);
+        const runKey = `${checkWorkspaceRoot}\0${profileId}`;
+        const previousPassFingerprint = passedProfileIds.get(runKey);
         const startedAt = new Date().toISOString();
         const result = await runProfile(profile, {
-          projectRoot: ctx.cwd,
+          projectRoot,
           signal,
           exec: (program, args, options) => exec(program, args, options),
         });
         const finishedAt = new Date().toISOString();
         assertCurrentSession();
         if (result.ok) {
-          passedProfileIds.set(profileId, checkSnapshot?.fingerprint ?? "");
-          failedProfileRuns.delete(profileId);
+          passedProfileIds.set(runKey, checkSnapshot?.fingerprint ?? "");
+          failedProfileRuns.delete(runKey);
         } else if (checkSnapshot && result.error?.kind === "infrastructure") {
-          const previous = failedProfileRuns.get(profileId);
-          failedProfileRuns.set(profileId, {
+          const previous = failedProfileRuns.get(runKey);
+          failedProfileRuns.set(runKey, {
             fingerprint: checkSnapshot.fingerprint,
             message: result.error.message,
             count:
@@ -947,7 +1002,7 @@ export default function setupCore(
                 : 1,
           });
         } else {
-          failedProfileRuns.delete(profileId);
+          failedProfileRuns.delete(runKey);
         }
         reports.push({
           profileId,
@@ -980,13 +1035,13 @@ export default function setupCore(
         });
       }
 
-      const required = declaredRequiredIds(loaded, ctx.isProjectTrusted());
+      const required = declaredRequiredIds(loaded, projectTrusted);
       const evaluation = evaluateCheckRun(reports, required);
       if (checkSnapshot) {
         verificationLedger = mergeCheckRun(
           verificationLedger,
           evaluation,
-          ctx.cwd,
+          checkWorkspaceRoot,
           checkSnapshot.fingerprint,
         );
         // F-05: Publish verification status to frontend/RPC immediately after
@@ -996,7 +1051,9 @@ export default function setupCore(
       // Report accumulated coverage, not just this call's: the agent needs to
       // know what is still open. Nothing here runs a check on its own.
       const coverage = requiredCoverage(
-        checkSnapshot ? verificationLedger.lastRequiredCheck : undefined,
+        checkSnapshot
+          ? requiredCheckForRoot(verificationLedger, checkWorkspaceRoot)
+          : undefined,
         required,
       );
 
@@ -1049,7 +1106,7 @@ export default function setupCore(
       // otherwise distinguish "this ran against the intended project" from
       // "this silently ran somewhere else" without re-deriving ctx.cwd
       // itself, and this is the one tool guaranteed to always bind to it.
-      const projectRootLine = `Projektwurzel: ${ctx.cwd} (Quelle: ${loaded.source ?? "unbekannt"})`;
+      const projectRootLine = `Projektwurzel: ${projectRoot} (Quelle: ${loaded.source ?? "unbekannt"})`;
       const limited = limitTextOutput(
         `${text}\n\n${coverageLine(coverage.covered.length, coverage.total, coverage.missing)}\n${verificationTarget}\n${projectRootLine}`,
       );
@@ -1059,7 +1116,7 @@ export default function setupCore(
       return {
         content: [{ type: "text" as const, text: limited.text }],
         details: {
-          projectRoot: ctx.cwd,
+          projectRoot,
           configSource: loaded.source ?? null,
           profiles: reports,
           availableProfileIds,

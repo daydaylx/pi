@@ -40,7 +40,13 @@ Liste (maximal acht), aber niemals ein freies Shell-Kommando:
 ```text
 project_check({ "profile": "typecheck" })
 project_check({ "profiles": ["typecheck", "tests"] })
+project_check({ "profile": "typecheck", "workspaceRoot": "/path/to/other-project" })
 ```
+
+`workspaceRoot` ist optional. Eine zusätzliche Projektwurzel muss zuvor in der
+aktuellen Sitzung mit `workspace_add({ path })` über den UI-Dialog freigegeben
+werden. Das Profil wird aus `<workspaceRoot>/.pi/verify.json` geladen und nur
+in dieser Wurzel ausgeführt; ohne Freigabe wird der Aufruf abgelehnt.
 
 Bei `agent_settled` zeigt die Footer-Statuszeile den rein technischen
 Verifikationsstatus des aktuellen Workspace: `unchanged`, `changed_unverified`,
@@ -115,19 +121,19 @@ Datenbank. Nach dem Sitzungsende ist jede Abdeckung wieder offen.
 
 ### Status-Matrix
 
-| Lauf gegen den aktuellen Snapshot           | Tool-Ergebnis | Status                |
-| ------------------------------------------- | ------------- | --------------------- |
-| alle `required` erfolgreich, Abdeckung voll  | ok            | `verified`            |
-| `required` erfolgreich, Abdeckung unvollständig | ok         | `changed_unverified`  |
-| ein `required` schlägt fehl                  | **Fehler**    | `checks_failed`       |
-| ein `required` läuft nicht (Timeout, Binary) | **Fehler**    | `checks_unavailable`  |
-| `recommended` schlägt bestätigt fehl         | **Fehler**    | `checks_failed`       |
-| `recommended`: Binary fehlt                  | ok            | unverändert (Restrisiko) |
-| `advisory` schlägt fehl                      | ok            | unverändert           |
-| Workspace nach dem Lauf geändert             | –             | `changed_unverified`  |
-| kein `required` deklariert, aber bestätigter Fehlschlag | –  | `checks_failed`       |
-| kein `required`-Profil deklariert / untrusted | –            | `checks_unavailable`  |
-| keine Änderungen im Workspace                | –             | `unchanged`               |
+| Lauf gegen den aktuellen Snapshot                       | Tool-Ergebnis | Status                   |
+| ------------------------------------------------------- | ------------- | ------------------------ |
+| alle `required` erfolgreich, Abdeckung voll             | ok            | `verified`               |
+| `required` erfolgreich, Abdeckung unvollständig         | ok            | `changed_unverified`     |
+| ein `required` schlägt fehl                             | **Fehler**    | `checks_failed`          |
+| ein `required` läuft nicht (Timeout, Binary)            | **Fehler**    | `checks_unavailable`     |
+| `recommended` schlägt bestätigt fehl                    | **Fehler**    | `checks_failed`          |
+| `recommended`: Binary fehlt                             | ok            | unverändert (Restrisiko) |
+| `advisory` schlägt fehl                                 | ok            | unverändert              |
+| Workspace nach dem Lauf geändert                        | –             | `changed_unverified`     |
+| kein `required` deklariert, aber bestätigter Fehlschlag | –             | `checks_failed`          |
+| kein `required`-Profil deklariert / untrusted           | –             | `checks_unavailable`     |
+| keine Änderungen im Workspace                           | –             | `unchanged`              |
 
 Ein echter `required`-Fehlschlag hat Vorrang vor einem gleichzeitigen Lauf ohne
 Verdikt: `checks_failed` verdrängt `checks_unavailable`.
@@ -157,21 +163,21 @@ ausschließlich „nichts geändert", nicht „alles in Ordnung".
 
 ### Felder
 
-| Feld             | Typ             | Default     | Hinweis                                                                               |
-| ---------------- | --------------- | ----------- | ------------------------------------------------------------------------------------- |
-| `program`        | string          | – (Pflicht) | Programmname, via PATH aufgelöst. Kein Shell-String, keine Pipes.                     |
-| `args`           | string[]        | – (Pflicht) | Argumente, verbatim und getrennt. Leeres Array erlaubt, max. 64 Einträge.             |
-| `cwd`            | string          | `"."`       | Muss relativ sein und unter dem Projekt-Root bleiben. Absolut/`..` → Profil ungültig. |
-| `timeoutMs`      | int             | `120000`    | Bereich 1000..900000.                                                                 |
-| `classification` | string          | `required`  | `required`, `recommended` oder `advisory`.                                            |
-| `required`       | bool            | `true`      | Legacy-Projektion; darf einer expliziten Klassifikation nicht widersprechen.          |
+| Feld             | Typ      | Default     | Hinweis                                                                               |
+| ---------------- | -------- | ----------- | ------------------------------------------------------------------------------------- |
+| `program`        | string   | – (Pflicht) | Programmname, via PATH aufgelöst. Kein Shell-String, keine Pipes.                     |
+| `args`           | string[] | – (Pflicht) | Argumente, verbatim und getrennt. Leeres Array erlaubt, max. 64 Einträge.             |
+| `cwd`            | string   | `"."`       | Muss relativ sein und unter dem Projekt-Root bleiben. Absolut/`..` → Profil ungültig. |
+| `timeoutMs`      | int      | `120000`    | Bereich 1000..900000.                                                                 |
+| `classification` | string   | `required`  | `required`, `recommended` oder `advisory`.                                            |
+| `required`       | bool     | `true`      | Legacy-Projektion; darf einer expliziten Klassifikation nicht widersprechen.          |
 
 `required: false` bildet auf `advisory` ab, **nicht** auf `recommended` — die
 Legacy-Form kann `recommended` nicht ausdrücken. Wer einen blockierenden, aber
 nicht abdeckungsrelevanten Check will, muss `classification: "recommended"`
 ausdrücklich setzen.
-| `env`            | {string:string} | `{}`        | Zusätzliche/übersteuernde Env-Variablen.                                              |
-| `trustRequired`  | bool            | `true`      | Explizite Vertrauensanforderung (Redundanz zum Trust-Gate, aber auditierbar).         |
+| `env` | {string:string} | `{}` | Zusätzliche/übersteuernde Env-Variablen. |
+| `trustRequired` | bool | `true` | Explizite Vertrauensanforderung (Redundanz zum Trust-Gate, aber auditierbar). |
 
 ### Fail-closed-Validierung
 

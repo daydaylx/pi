@@ -33,6 +33,8 @@ import { collectWorkspaceSnapshot } from "../../../shared/workspace-snapshot.mjs
 // fixture below different on every run and every machine.
 const FIXTURE_GIT_ENV = {
   ...process.env,
+  GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
   GIT_AUTHOR_NAME: "Workspace Snapshot Test",
   GIT_AUTHOR_EMAIL: "workspace-snapshot@example.test",
   GIT_AUTHOR_DATE: "2024-01-01T00:00:00Z",
@@ -94,7 +96,7 @@ const FINGERPRINT_FIXTURES = [
       git(ws, ["commit", "-q", "-m", "base"]);
     },
     fingerprint:
-      "e284ae4e4f09a610b08df4bc32f8b92fc05f05208b5af92cc3e1b54b6edfb5d3",
+      "c0c61da07b3d6c6b423150b29569ab88aacd8e4486760b18f455718710989d00",
   },
   {
     name: "staged",
@@ -106,7 +108,7 @@ const FINGERPRINT_FIXTURES = [
       git(ws, ["add", "base.txt"]);
     },
     fingerprint:
-      "06b2296e461aa602997656d815f5925a2a89946a12318bf2214f5e8f96dfa5d9",
+      "f3da178a7329b5590c45a665928c615c7d228d32164b2575b77698795cbd6986",
   },
   {
     name: "unstaged",
@@ -117,7 +119,7 @@ const FINGERPRINT_FIXTURES = [
       writeFileSync(path.join(ws, "base.txt"), "changed\n");
     },
     fingerprint:
-      "7d661583ec0dd3ae413e741c300569bf8e635f8e16d3b07f12124d90a7a553ac",
+      "9c5e87c8d4255c4bdbbcb7aab2e1818d83f18e9924de2c0f301eab1fc844725b",
   },
   {
     name: "staged+unstaged",
@@ -131,7 +133,7 @@ const FINGERPRINT_FIXTURES = [
       writeFileSync(path.join(ws, "b.txt"), "b-changed\n");
     },
     fingerprint:
-      "c85e2d7a1d9289c201efa464af1a23e3fa5cbc75c869d3dd18721f1108006dd3",
+      "4d349ef0d044784dc77b29a7b8a66f1d9d96558456a6598cba31d9c466fc51ff",
   },
   {
     name: "rename",
@@ -145,7 +147,7 @@ const FINGERPRINT_FIXTURES = [
       git(ws, ["mv", "old.txt", "new.txt"]);
     },
     fingerprint:
-      "38b4ee529e858ead37c18c9cc44bb2f42c82268f95b27c5d71c29598b5dba63e",
+      "94ed90f5b517ed653d27abb410112adf70025c347999b3fff821108ffbe12b4f",
   },
   {
     name: "delete",
@@ -156,7 +158,7 @@ const FINGERPRINT_FIXTURES = [
       git(ws, ["rm", "-q", "gone.txt"]);
     },
     fingerprint:
-      "15b5219295965b9a304fe1d5cb05b9bacc6a3d3de891b78e4c1fffe85c06ab5d",
+      "f767d93188856ff36525dc9be55dff39286dba8dd229a40fe448ff189b6e605d",
   },
   {
     name: "untracked text file",
@@ -167,7 +169,7 @@ const FINGERPRINT_FIXTURES = [
       writeFileSync(path.join(ws, "loose.txt"), "untracked content\n");
     },
     fingerprint:
-      "df56029010962d5ca07c408a063fa5920bf632bb6525d0cc2d8740f2ee4c4e20",
+      "07ab0826cd4f61e7267c0a96f8aedc7c2ef1a5e26115b1ff461927e5716c6d50",
   },
   {
     name: "symlink",
@@ -178,7 +180,7 @@ const FINGERPRINT_FIXTURES = [
       symlinkSync("base.txt", path.join(ws, "link.txt"));
     },
     fingerprint:
-      "87f43e6e5ffebeec9636d829cc93f1d763dbad9f3013eff2c00d95f641e720b6",
+      "6b6fac3602a1be47c4d8005ea8ee48cec254488b401795fa1f495b65c1128be6",
   },
   {
     name: "small binary diff (Base85 patch bytegleichheit)",
@@ -195,7 +197,7 @@ const FINGERPRINT_FIXTURES = [
       );
     },
     fingerprint:
-      "2bb599c9beb92bfec840a2bd2c86c594d3d00ee981eca7ecdde2383dbe4c04df",
+      "c954da4c6cf6e2443dcac698382b36b635386c52e254cb89800c5b4cd0a03608",
   },
   {
     // >350 KB changed text: the old execFileSync implementation threw
@@ -216,7 +218,7 @@ const FINGERPRINT_FIXTURES = [
       writeFileSync(path.join(ws, "big.txt"), `${changed.join("\n")}\n`);
     },
     fingerprint:
-      "17d6b118e2b7eabd01f51392a05f8d0a2a05039c6ed350390def49af553c353b",
+      "e627a04ee8113fb0d1b127a792c3e4900b0a92582c2c2a7a7256a36a15bffb2b",
   },
   {
     // ~900 KB binary diff: same previously-ENOBUFS'd class as above, via the
@@ -229,7 +231,7 @@ const FINGERPRINT_FIXTURES = [
       writeFileSync(path.join(ws, "blob.bin"), Buffer.alloc(900_000, 2));
     },
     fingerprint:
-      "a489277070b30f7ebedf6074c5099b415459fbd165f2ebc88c1a026191a893e0",
+      "ee605c70097b00e910ce2af3ab0bf3810bffdfa4a5a40851af42f58354606002",
   },
 ];
 
@@ -275,10 +277,21 @@ export const workspaceSnapshotSections = {
         assert(first.ok && repeated.ok, "a plain directory yields a snapshot");
         if (first.ok && repeated.ok) {
           eq(first.snapshot.vcs, "none", "VCS is explicitly none");
-          eq(first.snapshot.fingerprint, repeated.snapshot.fingerprint, "filesystem fingerprint is stable");
-          writeFileSync(path.join(noRepo, "notes.txt"), "after with changed size\n");
+          eq(
+            first.snapshot.fingerprint,
+            repeated.snapshot.fingerprint,
+            "filesystem fingerprint is stable",
+          );
+          writeFileSync(
+            path.join(noRepo, "notes.txt"),
+            "after with changed size\n",
+          );
           const changed = await collectWorkspaceSnapshot(noRepo);
-          assert(changed.ok && changed.snapshot.fingerprint !== first.snapshot.fingerprint, "filesystem mutations change the fingerprint");
+          assert(
+            changed.ok &&
+              changed.snapshot.fingerprint !== first.snapshot.fingerprint,
+            "filesystem mutations change the fingerprint",
+          );
         }
       } finally {
         rmSync(noRepo, { recursive: true, force: true });
@@ -301,8 +314,12 @@ export const workspaceSnapshotSections = {
       try {
         process.env.PATH = emptyPathDir;
         const result = await collectWorkspaceSnapshot(gitUnavailableRepo);
-        assert(result.ok, "an unavailable git binary falls back to filesystem snapshot");
-        if (result.ok) eq(result.snapshot.vcs, "none", "missing Git degrades to VCS none");
+        assert(
+          result.ok,
+          "an unavailable git binary falls back to filesystem snapshot",
+        );
+        if (result.ok)
+          eq(result.snapshot.vcs, "none", "missing Git degrades to VCS none");
       } finally {
         process.env.PATH = originalPath;
         rmSync(gitUnavailableRepo, { recursive: true, force: true });

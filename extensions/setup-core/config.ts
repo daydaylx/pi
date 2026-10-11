@@ -53,6 +53,7 @@ export interface SetupConfig {
   };
   verificationStatus: { enabled: boolean };
   verification: Record<VerificationName, VerificationCommand>;
+  recovery: { skipWithoutGit: boolean };
   secondOpinion: SecondOpinionConfig;
 }
 
@@ -83,6 +84,7 @@ const DEFAULT_CONFIG: SetupConfig = {
     idleShutdownMs: 600_000,
   },
   verificationStatus: { enabled: true },
+  recovery: { skipWithoutGit: false },
   verification: {
     typecheck: {
       command: "npm",
@@ -239,6 +241,7 @@ function applyUserLayer(
       "lsp",
       "verificationStatus",
       "verification",
+      "recovery",
       "secondOpinion",
     ],
     source,
@@ -254,6 +257,7 @@ function applyUserLayer(
   const verification = isObject(raw.verification)
     ? raw.verification
     : undefined;
+  const recovery = isObject(raw.recovery) ? raw.recovery : undefined;
   const secondOpinion = isObject(raw.secondOpinion)
     ? raw.secondOpinion
     : undefined;
@@ -296,6 +300,14 @@ function applyUserLayer(
       ["typecheck", "test"],
       source,
       "verification.",
+      diagnostics,
+    );
+  if (recovery)
+    reportUnknownKeys(
+      recovery,
+      ["skipWithoutGit"],
+      source,
+      "recovery.",
       diagnostics,
     );
   if (secondOpinion)
@@ -397,6 +409,13 @@ function applyUserLayer(
       message: "verificationStatus.enabled muss boolean sein",
     });
   }
+  next.recovery.skipWithoutGit = booleanValue(
+    recovery?.skipWithoutGit,
+    next.recovery.skipWithoutGit,
+    source,
+    "recovery.skipWithoutGit",
+    diagnostics,
+  );
   if (secondOpinion) {
     next.secondOpinion.enabled = booleanValue(
       secondOpinion.enabled,
@@ -565,6 +584,7 @@ function applyTrustedProjectLayer(
   const projectPermissions = isObject(raw.permissions)
     ? raw.permissions
     : undefined;
+  const projectRecovery = isObject(raw.recovery) ? raw.recovery : undefined;
   for (const key of ["unknownTools", "bash"] as const) {
     if (
       projectPermissions?.[key] !== undefined &&
@@ -579,6 +599,15 @@ function applyTrustedProjectLayer(
       candidate.permissions[key] = base.permissions[key];
     }
   }
+  if (projectRecovery?.skipWithoutGit !== undefined) {
+    diagnostics.push({
+      level: "warning",
+      source,
+      message:
+        "Projektkonfiguration darf recovery.skipWithoutGit nicht setzen; globaler Wert beibehalten",
+    });
+  }
+  candidate.recovery = structuredClone(base.recovery);
   // A repository must never choose commands that execute on the host.
   candidate.verification = structuredClone(base.verification);
   return candidate;

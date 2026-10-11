@@ -13,6 +13,9 @@ export interface TurnStartMarker {
   schemaVersion: 1 | 2;
   timestamp: string;
   workspaceFingerprint: string;
+  workspaceRoot?: string;
+  /** Start fingerprint for every approved project root at turn start. */
+  workspaceFingerprintsByRoot?: Record<string, string>;
   workflowMode: string;
   provider: string;
   model: string;
@@ -23,15 +26,16 @@ export interface TurnStartMarker {
  * `completed_after_failure` ist ein Turn, der nach mindestens einem
  * beobachteten Fehler durch Pis natives Retry doch noch erfolgreich
  * siedelte. `recoveryPending` markiert Turns, unmittelbar nach denen ein
- * `resilience.recovery-required`-Eintrag geschrieben wurde. Beide Felder
- * sind additiv; Leser müssen schemaVersion 1 (ohne sie) akzeptieren.
+ * `resilience.recovery-required`-Eintrag geschrieben wurde, auch wenn ein
+ * Abbruch einen freigegebenen mutierenden Aufruf unterbrochen hat. Beide
+ * Felder sind additiv; Leser müssen schemaVersion 1 (ohne sie) akzeptieren.
  */
 export interface TurnSettledMarker {
   schemaVersion: 1 | 2;
   timestamp: string;
   turnStartedAt: string;
   workspaceFingerprint: string;
-  outcome: "completed" | "completed_after_failure" | "failed";
+  outcome: "completed" | "completed_after_failure" | "failed" | "aborted";
   observedFailureCount: number;
   recoveryPending?: boolean;
 }
@@ -72,18 +76,29 @@ export interface RecoveryRequiredMarker {
   reason: "interrupted" | "final_failure";
   workspaceChangedSinceTurnStart: boolean;
   toolMayHaveMutatedWorkspace: boolean;
+  /** Canonical workspace affected by this marker; absent on legacy global markers. */
+  workspaceRoot?: string;
+  /** Root-specific evidence for one failed turn. */
+  affectedRoots?: Array<{
+    workspaceRoot: string;
+    workspaceChangedSinceTurnStart: boolean;
+    toolMayHaveMutatedWorkspace: boolean;
+  }>;
 }
 
 /**
  * Abschluss des Recovery-Gates: Der Workspace wurde nach einem
- * `recovery-required` geprüft. Der Fingerprint zum Prüfzeitpunkt ist die
- * Freigabebasis — jede spätere Workspace-Änderung macht den Check ungültig.
+ * `recovery-required` geprüft. Ein erfolgreicher Marker schließt genau dieses
+ * Gate dauerhaft; ein neuer Fehlturn oder eine neue Unterbrechung erzeugt ein
+ * neues `recovery-required`-Gate.
  */
 export interface RecoveryCheckedMarker {
   schemaVersion: 1 | 2;
   timestamp: string;
   turnStartedAt: string;
   workspaceFingerprint: string;
+  /** Root inspected by this check; absent on legacy global checks. */
+  workspaceRoot?: string;
 }
 
 /** Maximale Länge des gespeicherten Fehlertexts in FailureDiagnostic. */
@@ -94,6 +109,10 @@ export interface OpenTurn {
   phase: TurnPhase;
   activeSubagents: number;
   toolMayHaveMutatedWorkspace: boolean;
+  mutatingWorkspaceRoots: Set<string>;
   observedFailureCount: number;
   currentAttemptFailed: boolean;
+  currentAttemptAborted: boolean;
+  currentAttemptAbortNeedsRecovery: boolean;
+  activeMutatingToolCalls: Set<string>;
 }

@@ -24,7 +24,12 @@ function required(turnStartedAt, timestamp, overrides = {}) {
   };
 }
 
-function checked(turnStartedAt, timestamp, workspaceFingerprint, overrides = {}) {
+function checked(
+  turnStartedAt,
+  timestamp,
+  workspaceFingerprint,
+  overrides = {},
+) {
   return {
     type: "custom",
     customType: "resilience.recovery-checked",
@@ -139,7 +144,11 @@ export const recoveryStateSections = {
         });
         const replayAfterCheck = latestRecoveryGate([
           { type: "custom", customType: "resilience.recovery-required", data },
-          checked(replayed.required.turnStartedAt, "2026-01-01T00:00:03.000Z", "fp-live"),
+          checked(
+            replayed.required.turnStartedAt,
+            "2026-01-01T00:00:03.000Z",
+            "fp-live",
+          ),
         ]);
         eq(
           live?.checked?.workspaceFingerprint,
@@ -157,6 +166,63 @@ export const recoveryStateSections = {
         !newRequiredAfterChecked?.checked &&
           gateRequiresInspection(newRequiredAfterChecked.required),
         "a new required marker after a checked marker re-arms recovery",
+      );
+
+      const interruptedReadOnly = required("T1", "2026-01-01T00:00:00.000Z", {
+        reason: "interrupted",
+        workspaceChangedSinceTurnStart: false,
+        toolMayHaveMutatedWorkspace: false,
+      });
+      assert(
+        !gateRequiresInspection(interruptedReadOnly.data),
+        "an interrupted read-only turn with an unchanged workspace does not require a gate",
+      );
+      const interruptedChanged = required("T1", "2026-01-01T00:00:00.000Z", {
+        reason: "interrupted",
+        workspaceChangedSinceTurnStart: true,
+        toolMayHaveMutatedWorkspace: false,
+      });
+      assert(
+        gateRequiresInspection(interruptedChanged.data),
+        "an interrupted turn with a changed workspace still requires inspection",
+      );
+
+      const rootA = "/tmp/pi-recovery-root-a";
+      const rootB = "/tmp/pi-recovery-root-b";
+      const multiRootRequired = required("T1", "2026-01-01T00:00:00.000Z", {
+        workspaceChangedSinceTurnStart: false,
+        toolMayHaveMutatedWorkspace: true,
+        affectedRoots: [
+          {
+            workspaceRoot: rootA,
+            workspaceChangedSinceTurnStart: false,
+            toolMayHaveMutatedWorkspace: true,
+          },
+          {
+            workspaceRoot: rootB,
+            workspaceChangedSinceTurnStart: false,
+            toolMayHaveMutatedWorkspace: true,
+          },
+        ],
+      });
+      const checkedRootA = checked("T1", "2026-01-01T00:00:01.000Z", "fp-A", {
+        workspaceRoot: rootA,
+      });
+      const rootAGate = latestRecoveryGate(
+        [multiRootRequired, checkedRootA],
+        rootA,
+      );
+      const rootBGate = latestRecoveryGate(
+        [multiRootRequired, checkedRootA],
+        rootB,
+      );
+      assert(
+        rootAGate?.checked && !rootBGate?.checked,
+        "checking root A leaves root B's independent Recovery gate open",
+      );
+      assert(
+        gateRequiresInspection(rootBGate.required),
+        "root B remains blocked until its own snapshot is checked",
       );
 
       let live = foldRequiredMarker(validRequired.data);

@@ -18,6 +18,7 @@ export interface SessionHealthTurns {
   completed: number;
   completedAfterFailure: number;
   failed: number;
+  aborted: number;
   /** Turn-Starts ohne passendes Settled — abgebrochen oder noch offen. */
   open: number;
 }
@@ -72,6 +73,7 @@ export function emptySessionHealthReport(): SessionHealthReport {
       completed: 0,
       completedAfterFailure: 0,
       failed: 0,
+      aborted: 0,
       open: 0,
     },
     recovery: { required: 0, checked: 0, uncheckedGates: 0 },
@@ -165,6 +167,7 @@ export function aggregateSessionEntries(
     if (settled && typeof settled.turnStartedAt === "string") {
       openTurns.delete(settled.turnStartedAt);
       if (settled.outcome === "failed") report.turns.failed += 1;
+      else if (settled.outcome === "aborted") report.turns.aborted += 1;
       else if (settled.outcome === "completed_after_failure")
         report.turns.completedAfterFailure += 1;
       else report.turns.completed += 1;
@@ -298,7 +301,7 @@ export function formatSessionHealth(report: SessionHealthReport): string {
   const lines = [
     "Session-Health",
     `  Dateien: ${report.files} · Einträge: ${report.entries} · Parsefehler: ${report.parseErrors}`,
-    `  Turns: ${report.turns.total} gesamt · ${report.turns.completed} abgeschlossen · ${report.turns.completedAfterFailure} nach Fehler fortgesetzt · ${report.turns.failed} fehlgeschlagen · ${report.turns.open} offen/unbesiedelt`,
+    `  Turns: ${report.turns.total} gesamt · ${report.turns.completed} abgeschlossen · ${report.turns.completedAfterFailure} nach Fehler fortgesetzt · ${report.turns.failed} fehlgeschlagen · ${report.turns.aborted} abgebrochen · ${report.turns.open} offen/unbesiedelt`,
     `  Recovery: ${report.recovery.required} erforderlich · ${report.recovery.checked} geprüft · ${report.recovery.uncheckedGates} offene Gates`,
     `  Fehler: ${report.failures.total} gesamt`,
     `    nach Klasse: ${formatCounts(report.failures.byClass)}`,

@@ -151,6 +151,50 @@ test("rejects injected UI response fields and unknown session ids", async () => 
   await once(server.child, "exit");
 });
 
+test("forwards RPC extension confirmation requests and delivers the response", async () => {
+  const server = startServer({ FAKE_PI_UI_CONFIRM: "1" });
+  try {
+    server.send({
+      kind: "hello",
+      client: { name: "test", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await server.next();
+    await server.next();
+
+    server.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "prompt-ui-1",
+      method: "agent.prompt",
+      params: { message: "test" },
+    });
+    const dialog = await server.next();
+    assert.equal(dialog.kind, "event");
+    assert.equal(dialog.event, "extension-ui.requested");
+    assert.equal(dialog.data.id, "dialog-1");
+    assert.equal(dialog.data.method, "confirm");
+    assert.equal(dialog.data.title, "Freigabe benötigt");
+
+    server.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "confirm-ui-1",
+      method: "ui.respond",
+      params: { id: "dialog-1", method: "confirm", confirmed: true },
+    });
+    const results = [await server.next(), await server.next()];
+    const response = results.find((item) => item.id === "confirm-ui-1");
+    const prompt = results.find((item) => item.id === "prompt-ui-1");
+    assert.equal(response?.ok, true);
+    assert.deepEqual(response?.result, { delivered: true });
+    assert.equal(prompt?.ok, true);
+  } finally {
+    server.child.kill("SIGTERM");
+    await once(server.child, "exit");
+  }
+});
+
 test("projects session stats without leaking session paths", async () => {
   const server = startServer();
   server.send({

@@ -16,6 +16,7 @@
  *   guards.ts           the tool_call / user_bash interceptors
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { catalogDescription } from "./shared/command-catalog.ts";
 import {
   CONTROL_CENTER_EVENTS,
@@ -40,13 +41,44 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
   // has to write the whole record rather than a partial one.
   thinking.onPersist = () => session.persist();
 
+  pi.registerTool({
+    name: "workspace_add",
+    label: "Projektwurzel freigeben",
+    description:
+      "Bittet den Nutzer um UI-Freigabe, ein zusätzliches Projekt bis zum Ende dieser Sitzung in den Workspace-Scope aufzunehmen. Die Freigabe erweitert nur die Projektwurzel; die aktuelle Berechtigungsstufe, Secret-Grenzen und Planmodus-Regeln gelten weiter.",
+    promptSnippet:
+      "Request the user's session-only UI approval before working in an additional project root.",
+    parameters: Type.Object({ path: Type.String() }),
+    executionMode: "sequential",
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const approved = await session.authorizeWorkspaceRoot(
+        (params as { path: string }).path,
+        ctx,
+      );
+      if (!approved.approved) {
+        throw new Error(
+          `Zusätzliche Projektwurzel nicht freigegeben: ${approved.reason ?? "Nutzer hat abgelehnt."}`,
+        );
+      }
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Projektwurzel für diese Sitzung freigegeben: ${approved.root}`,
+          },
+        ],
+      };
+    },
+  });
+
   pi.registerCommand("yolo", {
     description: catalogDescription("yolo"),
     handler: async (args, ctx) => {
       const raw = args.trim().toLowerCase();
       if (!raw) return session.toggleYolo(ctx, "command");
       if (raw === "off" || raw === "aus" || raw === "0") {
-        if (isYoloLevel(session.level())) return session.toggleYolo(ctx, "command");
+        if (isYoloLevel(session.level()))
+          return session.toggleYolo(ctx, "command");
         ctx.ui.notify("YOLO ist nicht aktiv.", "info");
         return;
       }

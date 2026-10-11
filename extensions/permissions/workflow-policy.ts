@@ -74,6 +74,7 @@ const READ_ONLY_FILE_TOOLS = new Set(["read", "grep", "find", "ls"]);
  */
 const PLAN_MODE_READ_ONLY_TOOLS = new Set([
   PLAN_WRITE_TOOL_NAME,
+  "workspace_add",
   "read",
   "grep",
   "find",
@@ -183,6 +184,7 @@ export function assessWorkflowTool(
   event: ToolCallEvent,
   cwd: string,
   permissionLevel?: PermissionLevel,
+  additionalRoots: readonly string[] = [],
 ): WorkflowAssessment {
   if (event.toolName === INTERACTIVE_SHELL_TOOL_NAME)
     return assessInteractiveShell(
@@ -194,6 +196,10 @@ export function assessWorkflowTool(
       String((event.input as Record<string, unknown>).command ?? ""),
       permissionLevel,
     );
+  // `workspace_add.path` is the directory the user is being asked to approve,
+  // not a file target that the current WorkspaceScope should already allow.
+  // The permission session canonicalizes it and requests explicit UI approval.
+  if (event.toolName === "workspace_add") return PERMITTED;
   const path = toolPath(event);
   // YOLO 2/3: file targets outside the project or on secrets are decided by
   // decideFileAccess (ask / allow) instead of being blocked here.
@@ -202,7 +208,7 @@ export function assessWorkflowTool(
     permissionLevel !== "yolo-ask" &&
     permissionLevel !== "yolo-full"
   ) {
-    const identity = resolvePathScope(path, cwd);
+    const identity = resolvePathScope(path, cwd, additionalRoots);
     const isReadFileTool = READ_ONLY_FILE_TOOLS.has(event.toolName);
 
     if (

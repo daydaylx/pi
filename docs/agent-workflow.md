@@ -21,7 +21,19 @@ Extensions und Policies bleiben maßgeblich.
 - Pi: `!!command` nur verwenden, wenn die Nutzerin oder der Nutzer die Ausgabe
   sehen soll, der Agent sie aber nicht weiter auswerten muss.
 - Nach einer Recovery-Sperre einmal den vorgesehenen Recovery-Check ausführen;
-  eine Sperre nicht mit einem anderen Schreibweg umgehen.
+  eine Sperre nicht mit einem anderen Schreibweg umgehen. Wird derselbe
+  Tool-Aufruf dreimal hintereinander mit identischen Argumenten und demselben Blockgrund
+  abgelehnt, beendet der Guard den wiederholten Tool-Lauf; behebe den
+  Blockgrund oder führe den genannten Recovery-Schritt aus.
+- Die globale Setup-Option `recovery.skipWithoutGit` kann Recovery-Snapshots
+  und deren Schreibsperre für jede freigegebene Wurzel ohne Git überspringen.
+  Andere freigegebene Git-Wurzeln behalten ihr Recovery-Gate. Der Standard
+  dieses Setups ist `false`; ohne Git nutzt Recovery eine vollständige
+  Filesystem-Inventur mit begrenztem temporärem Speicher. Die Inventur erfasst
+  auch Arbeitsdateien in verschachtelten Repositories und Worktrees; deren
+  `.git`-Metadaten werden auf jeder Tiefe ausgelassen. Diese sicherheitsrelevante
+  Option wird nur aus der globalen `setup.json` übernommen, nicht aus
+  Projektkonfigurationen.
 - Im Planmodus nur die für diesen Modus freigegebenen Leseaktionen ausführen.
   Bash-Aufrufe dort einzeln und einfach halten; keine Verkettungen,
   Umleitungen oder Prozesssubstitutionen. Die durchsetzbare Policy ist
@@ -46,6 +58,26 @@ Extensions und Policies bleiben maßgeblich.
 - Profile, Trust-Gates und Statusbedeutungen stehen in
   `docs/verify-profiles.md`; Verifier-Need-Gate und Übergabevertrag in
   `docs/subagents.md`.
+
+## Zusätzliche Projektwurzeln in einer Sitzung
+
+Für ein weiteres Projekt `workspace_add({ path })` aufrufen. Pi zeigt den
+aufzulösenden Projektpfad in einem UI-Bestätigungsdialog; die Freigabe gilt bis
+zum Ende dieser Sitzung und wird bei einem Resume derselben Session aus der
+Session-Historie wiederhergestellt. In Modi ohne interaktive UI wird der
+Aufruf abgelehnt. Bei einem Git-Projekt gilt dessen Git-Toplevel, bei einem
+Verzeichnis ohne Git die ausdrücklich angegebene Verzeichniswurzel.
+
+Die freigegebene Wurzel erweitert den Datei-Scope und kann für
+`project_check({ profile, workspaceRoot })` verwendet werden. Die vorhandene
+Berechtigungsstufe, Secret- und Symlink-Grenzen sowie der Planmodus gelten
+weiter. Die Shell behält ihre bestehende Bash-Klassifikation und ihr
+Ausführungs-`cwd`; für dateibezogene Arbeit in zusätzlichen Wurzeln die
+Datei-Tools oder `project_check` mit `workspaceRoot` verwenden.
+
+Recovery-Gates und Prüfstände sind pro freigegebener Wurzel getrennt.
+`recovery_check()` prüft alle Wurzeln mit offenem Gate; mit
+`workspaceRoot` prüft es nur die angegebene freigegebene Wurzel.
 
 ## Planmodus
 
@@ -83,28 +115,28 @@ Die folgenden typischen Aufgaben wurden regelweise gegen die vorherige
 globale Fassung verglichen. „Ergebnis“ nennt die erwartete Verhaltensparität,
 nicht einen automatisierten Modell-Eval.
 
-| Typische Aufgabe | Vorher | Jetzt | Ergebnis |
-| --- | --- | --- | --- |
-| Tippfehler in einer Dokumentation | FAST-Grenzen und Stop-Regel direkt in `AGENTS.md` | Task-Tier bleibt global beschrieben; Kriterien in ADR 033 | FAST und gezielter Check bleiben erhalten |
-| Kleine TUI-Textänderung | TUI/Bridge-Ausschluss direkt in `AGENTS.md` | Globaler Scope-Hinweis mit Verweis auf `docs/scope-cli-tui-vs-gui.md` | Bridge bleibt bei TUI-Auftrag außen vor |
-| Lokaler Bugfix mit Regressionstest | kleine Schritte und Baseline-Regel in `AGENTS.md` | dieselben Regeln in `docs/agent-workflow.md` | zuerst engster Test; keine unbelegte Baseline |
-| Permission- oder Recovery-Änderung | Hard-Pfade und Verifier-Gate ausführlich global | globale Schutzregel plus `docs/subagents.md` und technische Policy | kein Risiko durch Dokumentenverschiebung freigegeben |
-| Öffentliche API-/IPC-Änderung | Need-Gate/Verifier-Trigger global erklärt | globaler Boundary-Hinweis plus `docs/subagents.md` | Hard-Pfad und Need-Gate bleiben maßgeblich |
-| Plan während Planmodus umsetzen | UI-Wechsel und Planfreigabe ausführlich global | kurzer globaler Modusschutz, Detail in Workflow-Referenz und ADR 020 | keine Umgehung der Modussperre |
-| Commit und Push | expliziter Auftrag und Verifier-Regeln global | expliziter Auftrag global, Ablauf in Workflow-Referenz | kein Commit ohne Auftrag; Schritte getrennt |
-| Aktuelle externe Provider- oder API-Frage | Bedingung, Such-/Fetch-Reihenfolge global | kurze globale Bedingung, Ablauf in Workflow-Referenz | lokale Fragen bleiben lokal; externe Quellen gezielt |
-| Lange Sitzung oder Compaction | Checkpoint-Regel global, Skillbeschreibung nannte auch jede Analyse | seltene Auslöser im Skill; globaler Verweis | kein Routine-Checkpoint und kein automatisches Ledger |
-| Unbekannter Bug mit möglicher unabhängiger Analyse | Delegationskriterien und Limits global | globaler Nicht-Rollen-Hinweis plus `docs/subagents.md` | temporäre Delegation nach Nutzen und Grenzen |
+| Typische Aufgabe                                   | Vorher                                                              | Jetzt                                                                 | Ergebnis                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
+| Tippfehler in einer Dokumentation                  | FAST-Grenzen und Stop-Regel direkt in `AGENTS.md`                   | Task-Tier bleibt global beschrieben; Kriterien in ADR 033             | FAST und gezielter Check bleiben erhalten             |
+| Kleine TUI-Textänderung                            | TUI/Bridge-Ausschluss direkt in `AGENTS.md`                         | Globaler Scope-Hinweis mit Verweis auf `docs/scope-cli-tui-vs-gui.md` | Bridge bleibt bei TUI-Auftrag außen vor               |
+| Lokaler Bugfix mit Regressionstest                 | kleine Schritte und Baseline-Regel in `AGENTS.md`                   | dieselben Regeln in `docs/agent-workflow.md`                          | zuerst engster Test; keine unbelegte Baseline         |
+| Permission- oder Recovery-Änderung                 | Hard-Pfade und Verifier-Gate ausführlich global                     | globale Schutzregel plus `docs/subagents.md` und technische Policy    | kein Risiko durch Dokumentenverschiebung freigegeben  |
+| Öffentliche API-/IPC-Änderung                      | Need-Gate/Verifier-Trigger global erklärt                           | globaler Boundary-Hinweis plus `docs/subagents.md`                    | Hard-Pfad und Need-Gate bleiben maßgeblich            |
+| Plan während Planmodus umsetzen                    | UI-Wechsel und Planfreigabe ausführlich global                      | kurzer globaler Modusschutz, Detail in Workflow-Referenz und ADR 020  | keine Umgehung der Modussperre                        |
+| Commit und Push                                    | expliziter Auftrag und Verifier-Regeln global                       | expliziter Auftrag global, Ablauf in Workflow-Referenz                | kein Commit ohne Auftrag; Schritte getrennt           |
+| Aktuelle externe Provider- oder API-Frage          | Bedingung, Such-/Fetch-Reihenfolge global                           | kurze globale Bedingung, Ablauf in Workflow-Referenz                  | lokale Fragen bleiben lokal; externe Quellen gezielt  |
+| Lange Sitzung oder Compaction                      | Checkpoint-Regel global, Skillbeschreibung nannte auch jede Analyse | seltene Auslöser im Skill; globaler Verweis                           | kein Routine-Checkpoint und kein automatisches Ledger |
+| Unbekannter Bug mit möglicher unabhängiger Analyse | Delegationskriterien und Limits global                              | globaler Nicht-Rollen-Hinweis plus `docs/subagents.md`                | temporäre Delegation nach Nutzen und Grenzen          |
 
 Diese Matrix ist eine Verhaltensprüfung, kein zusätzlicher Workflow und keine
 Ausnahme von Nutzeranweisungen.
 
 ### Umfangsmessung
 
-| Text | Vorher | Nachher |
-| --- | ---: | ---: |
-| `AGENTS.md` | 265 Zeilen, 16.103 UTF-8-Bytes, 1.826 Wörter | 34 Zeilen, 4.533 UTF-8-Bytes, 481 Wörter |
-| Beschreibung von `context-checkpoint` | 340 UTF-8-Bytes | 251 UTF-8-Bytes |
+| Text                                  |                                       Vorher |                                  Nachher |
+| ------------------------------------- | -------------------------------------------: | ---------------------------------------: |
+| `AGENTS.md`                           | 265 Zeilen, 16.103 UTF-8-Bytes, 1.826 Wörter | 34 Zeilen, 4.533 UTF-8-Bytes, 481 Wörter |
+| Beschreibung von `context-checkpoint` |                              340 UTF-8-Bytes |                          251 UTF-8-Bytes |
 
 Damit sinkt `AGENTS.md` um 71,9 % Bytes und 73,7 % Wörter; die Skill-
 Beschreibung um 26,2 % Bytes. Als reproduzierbare Token-Näherung gilt

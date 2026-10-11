@@ -30,6 +30,7 @@ const recoveryCapabilities = await load(
 if (originalRuntimeRoot === undefined) delete process.env.PI_RUNTIME_ROOT;
 else process.env.PI_RUNTIME_ROOT = originalRuntimeRoot;
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
+const workspaceScope = await load("extensions/shared/workspace-scope.ts");
 const toolPolicy = await load("extensions/permissions/tool-policy.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
@@ -45,7 +46,17 @@ await test("recovery capability effects fail closed outside known read-only tool
   if (!recoveryCapabilities) return;
   const effect = (toolName, input = {}) =>
     recoveryCapabilities.recoveryEffect({ toolName, input }, process.cwd());
-  for (const toolName of ["read", "grep", "find", "ls", "lsp_diagnostics"]) {
+  for (const toolName of [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "lsp_diagnostics",
+    "web_search",
+    "fetch_content",
+    "get_search_content",
+    "plan_write",
+  ]) {
     eq(effect(toolName), "read_only", `${toolName} is explicitly read-only`);
   }
   eq(
@@ -53,18 +64,43 @@ await test("recovery capability effects fail closed outside known read-only tool
     "recovery_control",
     "recovery control stays free",
   );
+  eq(
+    effect("workspace_add"),
+    "recovery_control",
+    "user-approved workspace-scope control stays available",
+  );
   for (const toolName of [
     "write",
     "edit",
     "verify",
     "project_check",
-    "subagent",
     "custom_mutator",
+    "subagent",
   ]) {
     eq(
       effect(toolName),
       "potentially_mutating",
       `${toolName} is gated as process/delegation/write/unknown capability`,
+    );
+  }
+  for (const input of [
+    { spec: { profile: "analyse" } },
+    { spec: { profile: "research" } },
+  ]) {
+    eq(
+      effect("subagent", input),
+      "read_only",
+      "read-only investigation profiles stay available",
+    );
+  }
+  for (const input of [
+    { agent: "verifier" },
+    { spec: { profile: "verify" } },
+  ]) {
+    eq(
+      effect("subagent", input),
+      "potentially_mutating",
+      "a delegated profile with bash access remains gated",
     );
   }
   eq(
@@ -75,8 +111,26 @@ await test("recovery capability effects fail closed outside known read-only tool
   eq(
     effect("bash", { command: "npm run verify" }),
     "potentially_mutating",
-    "process execution is gated even when described as verification",
+    "test and build programs remain gated because they can write files",
   );
+  for (const command of [
+    "./deploy.sh",
+    "terraform apply",
+    "docker compose up",
+    "npm test",
+    "node --check index.mjs",
+    "python3 -c 'print(1)'",
+    "make",
+    "echo $(date)",
+    "git fetch",
+    "git stash list",
+  ]) {
+    eq(
+      effect("bash", { command }),
+      "potentially_mutating",
+      `unknown or operational command is not assumed safe: ${command}`,
+    );
+  }
 });
 
 await test("recovery status distinguishes unavailable, clear and broken providers", async () => {
@@ -252,6 +306,62 @@ await test("the complete guarded file path owns external boundaries and honors r
     "ask",
     "in-project mutations still reach confirm-all",
   );
+});
+
+await test("session-approved roots extend path scope without changing the default boundary", () => {
+  if (!permissionPolicy) return;
+  const primary = mkdtempSync(join(tmpdir(), "pi-primary-scope-"));
+  const additional = mkdtempSync(join(tmpdir(), "pi-additional-scope-"));
+  try {
+    const target = join(additional, "src", "file.ts");
+    mkdirSync(join(additional, "src"), { recursive: true });
+    writeFileSync(target, "content\n");
+
+    eq(
+      permissionPolicy.resolvePathScope(target, primary).scope,
+      "external",
+      "an unapproved root remains outside the default scope",
+    );
+    const approvedIdentity = permissionPolicy.resolvePathScope(
+      target,
+      primary,
+      [additional],
+    );
+    eq(
+      approvedIdentity.scope,
+      "project",
+      "an explicitly supplied additional root is inside the effective scope",
+    );
+    eq(
+      approvedIdentity.workspaceRoot,
+      additional,
+      "the identity reports the root that contains the target",
+    );
+    eq(
+      permissionPolicy.decideFileAccess(
+        "project-write",
+        "write",
+        target,
+        primary,
+        { additionalRoots: [additional] },
+      ).action,
+      "allow",
+      "regular files in the approved root follow the selected permission level",
+    );
+    eq(
+      permissionPolicy.decideFileAccess(
+        "project-write",
+        "write",
+        target,
+        primary,
+      ).action,
+      "block",
+      "the same write stays blocked when the extra root is absent",
+    );
+  } finally {
+    rmSync(primary, { recursive: true, force: true });
+    rmSync(additional, { recursive: true, force: true });
+  }
 });
 
 await test("writes to in-project execution paths need confirmation, YOLO refuses them", () => {
@@ -2849,6 +2959,191 @@ await test("untrusted projects block external reads and symlink escapes at the t
   assert(
     askRecovery.some((r) => r?.block && /Recovery-Gate/.test(r.reason)),
     "YOLO 2 keeps the armed recovery gate",
+  );
+  const repeatedRecoveryBlock = await check(
+    "write",
+    { path: "x.txt", content: "x" },
+    trustedContext,
+  );
+  assert(
+    repeatedRecoveryBlock.some((r) => r?.block && r?.terminate !== true),
+    "the first repeated block gives the agent a chance to use recovery_check",
+  );
+  const blockedLoop = await check(
+    "write",
+    { path: "x.txt", content: "x" },
+    trustedContext,
+  );
+  assert(
+    blockedLoop.some(
+      (r) =>
+        r?.block &&
+        r?.terminate === true &&
+        r.reason.includes("3 Mal identisch blockiert"),
+    ),
+    "three identical blocked actions terminate a repeated tool loop with an actionable reason",
+  );
+});
+
+await test("workspace_add requires UI approval and keeps the root within one session", async () => {
+  if (!modePermissions || !workspaceScope) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-workspace-primary-"));
+  const additional = mkdtempSync(join(tmpdir(), "pi-workspace-extra-"));
+  try {
+    const harness = createHarness({
+      confirm: true,
+      sessionId: "workspace-session-a",
+    });
+    harness.api.events.on("recovery-status:request", (request) =>
+      request.respond({ armed: false }),
+    );
+    modePermissions.default(harness.api);
+    const context = harness.makeContext({
+      cwd,
+      mode: "tui",
+      trusted: true,
+      sessionId: "workspace-session-a",
+    });
+    await harness.runHooks("session_start", {}, context);
+
+    const tool = harness.tools.get("workspace_add");
+    assert(Boolean(tool), "workspace_add is registered");
+    const preflight = await harness.runHooks(
+      "tool_call",
+      { toolName: "workspace_add", input: { path: additional } },
+      context,
+    );
+    assert(
+      preflight.every((result) => !result?.block),
+      `the root request passes the tool guard and reaches its explicit UI step: ${JSON.stringify(preflight)}`,
+    );
+    const result = await tool.execute(
+      "workspace-add-a",
+      { path: additional },
+      undefined,
+      undefined,
+      context,
+    );
+    assert(
+      result.content[0]?.text.includes(additional),
+      "the approved canonical root is returned to the agent",
+    );
+    eq(
+      harness.lifecycleCalls.filter((call) => call.kind === "confirm").length,
+      1,
+      "one visible confirmation is requested for the additional root",
+    );
+    const scope = workspaceScope.requestWorkspaceScope(
+      harness.api.events,
+      cwd,
+      "workspace-session-a",
+    );
+    eq(
+      scope.additionalRoots,
+      [additional],
+      "the approved root is present in the active session scope",
+    );
+
+    const write = await harness.runHooks(
+      "tool_call",
+      {
+        toolName: "write",
+        input: { path: join(additional, "new-file.txt"), content: "x" },
+      },
+      context,
+    );
+    assert(
+      write.every((entry) => !entry?.block),
+      "the current permission level applies to writes in the approved root",
+    );
+
+    const approvalEntry = harness.appended.find(
+      (entry) => entry.customType === "workspace-root-approved",
+    );
+    assert(approvalEntry, "the approval is persisted in the current session");
+    const resumed = createHarness({ entries: [approvalEntry] });
+    modePermissions.default(resumed.api);
+    const resumedContext = resumed.makeContext({
+      cwd,
+      trusted: true,
+      sessionId: "workspace-session-a",
+    });
+    await resumed.runHooks("session_start", {}, resumedContext);
+    eq(
+      workspaceScope.requestWorkspaceScope(
+        resumed.api.events,
+        cwd,
+        "workspace-session-a",
+      ).additionalRoots,
+      [additional],
+      "a restart of the same session restores its UI-approved roots",
+    );
+
+    const fresh = createHarness({ entries: [approvalEntry] });
+    modePermissions.default(fresh.api);
+    const freshContext = fresh.makeContext({
+      cwd,
+      trusted: true,
+      sessionId: "workspace-session-b",
+    });
+    await fresh.runHooks("session_start", {}, freshContext);
+    eq(
+      workspaceScope.requestWorkspaceScope(
+        fresh.api.events,
+        cwd,
+        "workspace-session-b",
+      ).additionalRoots,
+      [],
+      "a new session does not inherit prior root approvals",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(additional, { recursive: true, force: true });
+  }
+});
+
+await test("RPC contexts with dialog support can confirm guarded writes", async () => {
+  if (!modePermissions || !planMode) return;
+  let confirmations = 0;
+  const harness = createHarness({
+    confirm: () => {
+      confirmations += 1;
+      return true;
+    },
+  });
+  harness.api.events.on("recovery-status:request", (request) =>
+    request.respond({ armed: false }),
+  );
+  planMode.default(harness.api);
+  modePermissions.default(harness.api);
+  const context = harness.makeContext({
+    cwd: process.cwd(),
+    mode: "rpc",
+    hasUI: true,
+  });
+  // Pi RPC intentionally has no custom terminal component, so the real
+  // runtime throws here and confirmAction falls back to ui.confirm().
+  context.ui.custom = () => {
+    throw new Error("custom overlays are unavailable in RPC");
+  };
+  await harness.runHooks("session_start", {}, context);
+  await harness.commands.get("permission")("confirm-all", context);
+  const result = await harness.runHooks(
+    "tool_call",
+    {
+      toolName: "write",
+      input: { path: "rpc-confirmation-test.txt", content: "ok" },
+    },
+    context,
+  );
+  assert(
+    result.every((entry) => !entry?.block),
+    "a confirmed RPC write passes through the permission guard",
+  );
+  eq(
+    confirmations,
+    1,
+    "the RPC dialog-capable context receives exactly one confirm request",
   );
 });
 
