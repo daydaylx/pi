@@ -131,13 +131,43 @@ export function readPiVersion(piPath, env = process.env) {
   });
 }
 
-export function assertCompatiblePiVersion(version) {
-  if (!/^0\.84\.\d+(?:-|$)/.test(version)) {
-    throw frontendError(
+/**
+ * Runtime lines whose RPC contract is verified against frontend protocol v1.
+ * This stays an explicit allowlist: adding a line is a deliberate, test-backed
+ * decision, never a wildcard.
+ */
+const SUPPORTED_PI_LINES = Object.freeze([
+  { major: 0, minor: 84 },
+  { major: 1, minor: 0 },
+]);
+
+export function assertCompatiblePiVersion(rawVersion) {
+  const version = typeof rawVersion === "string" ? rawVersion : "";
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-|$)/.exec(version);
+  const supported =
+    match !== null &&
+    SUPPORTED_PI_LINES.some(
+      (line) =>
+        line.major === Number(match[1]) && line.minor === Number(match[2]),
+    );
+  if (supported) return;
+  // `version` is raw executable output: echo it only when it looks like one.
+  const shown =
+    version.length <= 60 && /^\d+\.\d+\.\d+[0-9A-Za-z.+-]*$/.test(version)
+      ? version
+      : "unknown";
+  const lines = SUPPORTED_PI_LINES.map(
+    (line) => `${line.major}.${line.minor}.x`,
+  ).join(", ");
+  throw Object.assign(
+    frontendError(
       "PI_START_FAILED",
       "Installed Pi version is incompatible with frontend protocol v1",
-    );
-  }
+    ),
+    {
+      publicMessage: `Installed Pi ${shown} is not supported by frontend protocol v1 (supported: ${lines})`,
+    },
+  );
 }
 
 function normalizeModel(raw) {
@@ -843,14 +873,20 @@ export class FrontendServer {
     } catch (error) {
       const missing =
         error?.code === "ENOENT" || error?.code === "PI_NOT_FOUND";
+      // A version incompatibility is permanent: say so and do not invite retries.
+      const incompatible = typeof error?.publicMessage === "string";
       writeJsonLine(this.output, {
         kind: "hello",
         accepted: false,
         error: protocolError(
           missing ? "PI_NOT_FOUND" : "PI_START_FAILED",
-          missing ? "Pi executable not found" : "Pi could not be started",
+          missing
+            ? "Pi executable not found"
+            : incompatible
+              ? error.publicMessage.slice(0, 200)
+              : "Pi could not be started",
           randomUUID(),
-          { retryable: true },
+          { retryable: !incompatible },
         ),
       });
       return;

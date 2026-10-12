@@ -191,6 +191,88 @@ export function isEnvironmentalFailure(content: unknown): boolean {
   );
 }
 
+/**
+ * Eine Sperre durch Policy, Plan Mode oder Recovery-Gate ist kein Test-/
+ * Build-Fehler: der Befehl lief gar nicht. Sie darf FAST nicht hochstufen.
+ */
+export function isPolicyBlock(content: unknown): boolean {
+  if (!Array.isArray(content)) return false;
+  const text = content
+    .map((part) =>
+      part &&
+      typeof part === "object" &&
+      typeof (part as { text?: unknown }).text === "string"
+        ? (part as { text: string }).text
+        : "",
+    )
+    .join("\n");
+  return /^(?:Harte [^\n]*[Gg]renze|Planmodus:|Recovery-Gate aktiv|FAST-Aufgabe:)/m.test(
+    text,
+  );
+}
+
+/** Suchen, Lesen und Status-Abfragen: ein Exit 1 (z. B. kein Treffer) ist kein Testfehler. */
+const INSPECTION_EXECUTABLES = new Set([
+  "rg",
+  "grep",
+  "egrep",
+  "fgrep",
+  "find",
+  "fd",
+  "ls",
+  "cat",
+  "head",
+  "tail",
+  "sed",
+  "awk",
+  "wc",
+  "sort",
+  "uniq",
+  "diff",
+  "stat",
+  "file",
+  "readlink",
+  "realpath",
+  "git",
+  "test",
+  "[",
+  "command",
+  "type",
+  "which",
+  "printf",
+  "echo",
+  "jq",
+  "tree",
+  "du",
+  "df",
+  "ps",
+  "pgrep",
+  "systemctl",
+  "journalctl",
+  "hyprctl",
+]);
+
+const TEST_OR_BUILD_PATTERN =
+  /(?<![a-z])(?:tests?|spec|pytest|unittest|jest|vitest|mocha|playwright|tsc|typecheck|lint|eslint|prettier|ruff|mypy|pyright|build|make|cmake|gradle|mvn|clippy|check|verify|smoke|nixos-agent-build|nixos-agent-apply|nixos-rebuild)(?![a-z])/i;
+
+/**
+ * Beschreibt der Shell-Befehl einen Test-, Build- oder Prüflauf? Nur dann
+ * zählt ein Fehlerausgang als `test_build_failure`. Ketten (`&&`, `;`, `|`)
+ * werden je Segment bewertet; Such- und Statusbefehle zählen nie.
+ */
+export function isTestOrBuildCommand(command: unknown): boolean {
+  if (typeof command !== "string") return false;
+  return command.split(/&&|\|\||;|\|/).some((segment) => {
+    const tokens = segment.trim().split(/\s+/);
+    let index = 0;
+    while (index < tokens.length && /^[A-Za-z_]\w*=/.test(tokens[index]))
+      index += 1;
+    const executable = (tokens[index] ?? "").split("/").pop() ?? "";
+    if (!executable || INSPECTION_EXECUTABLES.has(executable)) return false;
+    return TEST_OR_BUILD_PATTERN.test(tokens.slice(index).join(" "));
+  });
+}
+
 function stampOf(absolute: string) {
   try {
     const stat = statSync(absolute);
@@ -351,9 +433,13 @@ export default function taskTier(pi: ExtensionAPI): void {
     else if (COMMAND_TOOLS.has(name)) {
       turn.commands += 1;
       if (event.isError) {
+        const command = (event.input as { command?: unknown } | undefined)
+          ?.command;
         if (isEnvironmentalFailure(event.content)) {
           turn.environmentFailures += 1;
-        } else {
+        } else if (isPolicyBlock(event.content)) {
+          // Befehl wurde nicht ausgeführt: weder Umgebungs- noch Testfehler.
+        } else if (name === "project_check" || isTestOrBuildCommand(command)) {
           turn.observedRiskSignals.add("test_build_failure");
           if (turn.tier === "fast")
             escalate("normal", "Test-/Build-Befehl fehlgeschlagen");

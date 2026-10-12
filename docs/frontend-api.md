@@ -89,9 +89,11 @@ payloads.
 ## Compatibility
 
 - Wire major 1 is required for this contract generation.
-- The bundled server accepts the pinned Pi 0.84.x runtime line. Another runtime
-  is rejected during the handshake instead of being reported under the pinned
-  version.
+- The bundled server accepts an explicit allowlist of Pi runtime lines: 0.84.x
+  and 1.0.x. Another runtime is rejected during the handshake with
+  `PI_START_FAILED`, a message naming the detected version and the supported
+  lines, and `retryable: false`, instead of being reported under a supported
+  version. Adding a line requires a verified RPC contract and tests.
 - Minor package releases may add optional capabilities, methods or events.
 - Existing schemas and meanings cannot change incompatibly within wire major 1.
 - Consumers validate every inbound envelope and must show a concrete mismatch

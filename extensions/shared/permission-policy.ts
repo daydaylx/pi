@@ -1502,6 +1502,21 @@ const PACKAGE_MANAGERS = new Set([
   "gem",
   "make",
 ]);
+/**
+ * True for the builtin's lookup form: `command -v NAME`, `command -V NAME`
+ * (optionally combined with `-p`). Any other option or a plain
+ * `command NAME ...` runs the named program and stays classified by NAME.
+ */
+function isCommandLookup(tokens: string[]): boolean {
+  let lookup = false;
+  for (const arg of tokens.slice(1)) {
+    if (arg === "--" || !arg.startsWith("-")) break;
+    if (!/^-[pvV]+$/.test(arg)) return false;
+    if (/[vV]/.test(arg)) lookup = true;
+  }
+  return lookup;
+}
+
 const COMMAND_EXECUTORS = new Set([
   "eval",
   "source",
@@ -1685,6 +1700,12 @@ export function classifyOperationEffect(
     if (tokens.length === 0) return "RISKY";
     if (containsSensitivePath(tokens, cwd)) return "FORBIDDEN";
     let operationTokens = tokens;
+    // `command -v NAME` / `command -V NAME` only look a name up and start
+    // nothing. Stripping the wrapper below would reduce it to a bare `NAME`
+    // (an interpreter REPL for `node`) and classify the lookup as RISKY.
+    if (operationTokens[0] === "command" && isCommandLookup(operationTokens)) {
+      continue;
+    }
     while (
       ["command", "builtin", "exec", "nohup", "time"].includes(
         operationTokens[0],
@@ -2065,10 +2086,6 @@ function opaqueInterpreterInvocations(
   });
 }
 
-function opaqueInterpreter(command: string): string | undefined {
-  return opaqueInterpreterInvocations(command)[0]?.executable;
-}
-
 /**
  * F-06 chooses the targeted project-write policy: inline/stdin code and
  * explicitly external interpreter scripts need confirmation, while a literal
@@ -2226,10 +2243,12 @@ function extendedYoloBoundary(
   ) {
     return "System-Paketoperation";
   }
-  const interpreter =
-    opaqueInterpreter(command) ?? projectWriteInterpreter(command, cwd);
+  // ADR 022 (Nachtrag 2026-10-12): the YOLO boundary is the same targeted rule
+  // as in project-write. Inline/stdin code and scripts outside the project are
+  // opaque; a literal project-internal script path is ordinary project work.
+  const interpreter = projectWriteInterpreter(command, cwd);
   if (interpreter) {
-    return `Opaker Interpreteraufruf (${interpreter}) - Inline-/stdin-Code oder ein externes Skript`;
+    return `Opaker Interpreteraufruf (${interpreter}) - Inline-/stdin-Code oder ein Skript außerhalb des Projekts`;
   }
   if (likelyExternalWrite(command, cwd)) {
     return "Bash-Änderung außerhalb des aktuellen Projekts";
@@ -2340,14 +2359,16 @@ export function decideBash(
     ) {
       return deny("Harte Systemgrenze: System-Paketoperation wurde blockiert.");
     }
-    // The structural shell parser intentionally rejects redirections. Reuse
-    // the targeted fallback so YOLO cannot bypass the opaque-interpreter hard
-    // boundary with `python3 < script.py` or a heredoc-shaped invocation.
-    const interpreter =
-      opaqueInterpreter(trimmed) ?? projectWriteInterpreter(trimmed, cwd);
+    // The structural shell parser intentionally rejects redirections. The
+    // targeted rule also covers the `python3 < script.py` / heredoc shapes, so
+    // YOLO cannot bypass the opaque-interpreter boundary with them. A literal
+    // project-internal script path stays allowed (ADR 022, Nachtrag).
+    const interpreter = projectWriteInterpreter(trimmed, cwd);
     if (interpreter) {
       return deny(
-        `Harte System-/Secret-Grenze: opaker Interpreteraufruf (${interpreter}) wurde blockiert.`,
+        `Harte System-/Secret-Grenze: opaker Interpreteraufruf (${interpreter}) wurde blockiert: ` +
+          "Inline-/stdin-Code oder ein Skript außerhalb des Projekts. " +
+          "Ein Skript mit literalem Pfad im Projekt ist erlaubt.",
       );
     }
     if (likelyExternalWrite(trimmed, cwd)) {

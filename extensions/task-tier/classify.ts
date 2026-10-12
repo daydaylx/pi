@@ -68,6 +68,16 @@ const RELEASE_PATTERN =
 const CONTINUATION_PATTERN =
   /^\s*(weiter|mach weiter|fortsetzen|ja|ok(?:ay)?|go|los|jo|passt|bitte|dann|continue|proceed|yes)\b[\s\w,.!?äöüß-]{0,40}$/i;
 
+/**
+ * Prompt, mit dem plan-mode die Umsetzung eines freigegebenen Plans startet
+ * (extensions/plan-mode/commands.ts, PLAN_EXECUTION_PROMPT). Der Prompt ist
+ * kurz, der eigentliche Auftrag steht im plan-handoff. Eine freigegebene
+ * Umsetzung ist nie FAST: sonst sänke das Thinking auf low und das spätere
+ * Hochstufen setzte es zurück, was den Prompt-Cache des gesamten Kontexts
+ * entwertet.
+ */
+const PLAN_EXECUTION_PATTERN = /^\s*Setze den freigegebenen Plan um\b/i;
+
 const PATH_PATTERN =
   /(?:[\w.-]+\/)+[\w.-]+\.\w+|\b[\w-]+\.(?:ts|tsx|js|mjs|cjs|json|md|css|py|sh|ya?ml)\b/g;
 
@@ -98,6 +108,7 @@ export function classifyPrompt(
   if (BROAD_PATTERN.test(text)) return "normal";
   const listItems = text.match(/^\s*(?:[-*]|\d+[.)])\s+/gm)?.length ?? 0;
   if (listItems > FAST_MAX_LIST_ITEMS) return "normal";
+  if (PLAN_EXECUTION_PATTERN.test(text)) return "normal";
   return "fast";
 }
 

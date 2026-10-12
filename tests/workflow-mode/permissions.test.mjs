@@ -1480,10 +1480,122 @@ await test("project-write asks for opaque code and external scripts without beco
       "ask",
       `confirm-all asks for ${entry.label}`,
     );
+    // ADR 022 (Nachtrag): YOLO uses the same targeted rule as project-write.
+    // A literal project-internal script path is ordinary project work; every
+    // opaque or external form stays a hard block.
+    const yoloExpected =
+      entry.label === "project-internal script" ? "allow" : "block";
     eq(
       permissionPolicy.decideBash("yolo", entry.command, cwd).action,
+      yoloExpected,
+      `yolo decision for ${entry.label}`,
+    );
+    if (yoloExpected === "allow") {
+      eq(
+        permissionPolicy.decideBash("yolo-ask", entry.command, cwd).action,
+        "allow",
+        `yolo-ask does not ask for ${entry.label}`,
+      );
+    } else {
+      eq(
+        permissionPolicy.decideBash("yolo-ask", entry.command, cwd).action,
+        "ask",
+        `yolo-ask asks for ${entry.label}`,
+      );
+    }
+  }
+});
+
+await test("yolo keeps interpreter hard boundaries beyond the project-write matrix", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  for (const command of [
+    "node -r ./evil.js scripts/check.mjs",
+    "bash -c 'rm -rf build'",
+    "echo x > y.sh && bash y.sh",
+    "cat a.js | node",
+    "node scripts/check.mjs | bash",
+    "node ../outside.mjs",
+    "node ~/x.mjs",
+    "node",
+  ]) {
+    eq(
+      permissionPolicy.decideBash("yolo", command, cwd).action,
       "block",
-      `yolo blocks ${entry.label} at its hard boundary`,
+      `yolo blocks: ${command}`,
+    );
+  }
+  for (const command of [
+    "node scripts/check.mjs",
+    "python3 -I scripts/check.py",
+    "bash scripts/check.sh",
+    "env FOO=1 node scripts/check.mjs",
+  ]) {
+    eq(
+      permissionPolicy.decideBash("yolo", command, cwd).action,
+      "allow",
+      `yolo allows a literal project-internal script: ${command}`,
+    );
+  }
+  const reason = permissionPolicy.decideBash("yolo", "node -e 1", cwd).reason;
+  assert(
+    /Inline-\/stdin-Code oder ein Skript außerhalb des Projekts/.test(reason),
+    "the block reason names the actual boundary and the way out",
+  );
+});
+
+await test("plan mode: command lookups and subagent list/status stay available", () => {
+  if (!permissionPolicy || !workflowPolicy) return;
+  const cwd = process.cwd();
+  for (const command of [
+    "command -v node",
+    "command -V node",
+    "command -pv node",
+    "command -v node; command -v python3",
+  ]) {
+    assert(
+      permissionPolicy.diagnosePlanModeCommand(command, cwd).safe,
+      `plan mode allows lookup: ${command}`,
+    );
+  }
+  for (const command of [
+    "command node",
+    "command -p node",
+    "command rm -rf build",
+    "command -v $(rm -rf build)",
+    "command -v node && rm -rf build",
+    "command -v node > out.txt",
+  ]) {
+    assert(
+      !permissionPolicy.diagnosePlanModeCommand(command, cwd).safe,
+      `plan mode still blocks: ${command}`,
+    );
+  }
+  const planning = { mode: "simple_plan" };
+  const guard = (input) =>
+    workflowPolicy.planModeMutationGuard(
+      planning,
+      "project-write",
+      { toolName: "subagent", input },
+      cwd,
+    );
+  for (const action of ["list", "status"]) {
+    assert(
+      !guard({ action }).blocked,
+      `plan mode allows subagent action=${action}`,
+    );
+  }
+  for (const input of [
+    { action: "stop" },
+    { action: "interrupt" },
+    { agent: "verifier", task: "x" },
+    { action: "list", agent: "verifier", task: "x" },
+    { action: "list", spec: { profile: "verify" } },
+    {},
+  ]) {
+    assert(
+      guard(input).blocked,
+      `plan mode still gates subagent ${JSON.stringify(input)}`,
     );
   }
 });

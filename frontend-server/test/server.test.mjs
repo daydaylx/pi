@@ -7,11 +7,43 @@ import {
   stableSessionId,
 } from "../index.mjs";
 
-test("accepts only the Pi line supported by protocol v1", () => {
-  assert.doesNotThrow(() => assertCompatiblePiVersion("0.84.99-test"));
+test("accepts only the Pi lines supported by protocol v1", () => {
+  for (const version of ["0.84.3", "0.84.99-test", "1.0.4", "1.0.10"]) {
+    assert.doesNotThrow(() => assertCompatiblePiVersion(version), version);
+  }
+  for (const version of [
+    "0.83.9",
+    "0.85.0",
+    "1.1.0",
+    "2.0.0",
+    "1.0",
+    "10.0.4",
+    "",
+    "garbage",
+  ]) {
+    assert.throws(
+      () => assertCompatiblePiVersion(version),
+      (error) => error.code === "PI_START_FAILED",
+      version,
+    );
+  }
+  assert.throws(
+    () => assertCompatiblePiVersion(undefined),
+    (error) => error.code === "PI_START_FAILED",
+  );
+});
+
+test("reports the detected version without echoing arbitrary output", () => {
   assert.throws(
     () => assertCompatiblePiVersion("0.85.0"),
-    (error) => error.code === "PI_START_FAILED",
+    (error) =>
+      error.publicMessage ===
+      "Installed Pi 0.85.0 is not supported by frontend protocol v1 (supported: 0.84.x, 1.0.x)",
+  );
+  assert.throws(
+    () => assertCompatiblePiVersion("not a version; rm -rf /"),
+    (error) =>
+      error.publicMessage.startsWith("Installed Pi unknown is not supported"),
   );
 });
 

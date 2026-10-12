@@ -54,3 +54,36 @@ Code, stdin-Code, ein internes Skript, ein externes Skript und einen direkten
 externen Schreibpfad alle vier Permission-Level. Die Matrix bestätigt dabei
 insbesondere `project-write = allow` nur für den internen Skriptpfad und
 `project-write = ask` für die drei opaken/externalen Risikoklassen.
+
+## Nachtrag 2026-10-12 — YOLO 1/2 folgen derselben gezielten Regel
+
+**Anlass:** Ausgewertete Sitzungen vom 11./12.10. zeigten, dass YOLO 1
+projektinterne Prüfskripte (`node quickpanel/tests/x.test.js`,
+`python3 -I quickpanel/tests/shell_smoke.py`) hart blockierte, während
+`project-write` sie ohne Rückfrage ausführt. Wer YOLO einschaltete, um weniger
+unterbrochen zu werden, konnte dadurch seine Tests nicht mehr starten; die
+Meldung („System-/Secret-Grenze") nannte die eigentliche Grenze nicht.
+
+**Entscheidung:** Die Regel „Inline-/stdin-Code und Skripte außerhalb des
+Projekts sind opak, ein literaler projektinterner Skriptpfad ist normale
+Projektarbeit" (`projectWriteInterpreter`) gilt auch für `yolo` und `yolo-ask`.
+YOLO 1 blockiert weiterhin hart, YOLO 2 fragt weiterhin, YOLO 3 lässt zu —
+aber nur für die opaken Formen, nicht mehr für projektinterne Skripte.
+
+- Unverändert hart: `node -e`, `python -c`, `bash -c`, stdin/Pipe/Heredoc,
+  `-r ./x.js`-Preloads, Skripte außerhalb des Projekts oder über Symlink-
+  Ausbrüche, `echo … > x.sh && bash x.sh` (Redirect + Interpreter), bare
+  `node`/`python3` ohne Skriptargument.
+- Die Blockmeldung nennt jetzt die Grenze und den zulässigen Weg.
+
+**Rest-Risiko:** Ein projektinternes Skript läuft mit den Rechten des
+Pi-Prozesses; sein Inhalt wird nicht analysiert (gilt seit ADR 022 auch für
+`project-write`). YOLO ist damit für projektinterne Skripte nicht strenger als
+der Standard, behält aber alle übrigen harten Grenzen (Secrets, Systempfade,
+sudo, Paketmanager, externe Schreibzugriffe, unquotierte Variablen).
+
+**Plan Mode (ebenfalls 2026-10-12):** `command -v|-V NAME` (nur die
+Nachschlageform, auch mit `-p`) gilt als rein lesend; `subagent` mit
+`action=list|status` ohne Arbeitsbeschreibung ist im Planmodus erlaubt.
+`stop`/`interrupt`, Delegationen und jede andere `command`-Form bleiben
+gesperrt.

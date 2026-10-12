@@ -23,7 +23,8 @@ sind über `/permission` oder `/yolo` wählbar.
 
 „Harte Grenze" meint: Secrets/Credentials, Schreibzugriffe außerhalb des
 Projekts und Symlink-Escapes bei Mutationen, Systempfad-Schreibzugriffe, sudo/su,
-System-Paketmanager, Download-to-shell, opake Interpreter, externe Shell-
+System-Paketmanager, Download-to-shell, opake Interpreter (Inline-/stdin-Code
+und Skripte außerhalb des Projekts, ADR 022 Nachtrag), externe Shell-
 Schreibzugriffe, unquotierte Shell-Variablen sowie Schreibzugriffe auf
 Ausführungspfade (`.git/`, `.pi/lsp.json`, `.pi/verify.json`). YOLO 3 gibt
 alle diese Aktionen ohne Rückfrage frei.

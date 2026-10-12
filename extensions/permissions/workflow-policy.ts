@@ -65,6 +65,24 @@ export const LOCAL_LSP_TOOLS = new Set([
 ]);
 
 const WRITE_TOOLS = new Set(["write", "edit", "project_check", "subagent"]);
+
+/**
+ * `subagent` with a management `action` never starts a run (see
+ * subagentLaunchCount). Listing the available agents or a run's status reads
+ * state only, so Plan Mode lets it through; `stop`/`interrupt` stay gated.
+ */
+const SUBAGENT_LOOKUP_ACTIONS = new Set(["list", "status"]);
+
+function isSubagentLookup(event: ToolCallEvent): boolean {
+  if (event.toolName !== "subagent") return false;
+  const input = event.input as Record<string, unknown> | undefined;
+  if (typeof input?.action !== "string") return false;
+  if (!SUBAGENT_LOOKUP_ACTIONS.has(input.action)) return false;
+  // Defensive: a lookup carries no work description.
+  return !["agent", "task", "tasks", "chain", "spec"].some(
+    (field) => input[field] !== undefined,
+  );
+}
 const READ_ONLY_FILE_TOOLS = new Set(["read", "grep", "find", "ls"]);
 /**
  * Tools plan mode allows. `plan_write` is the plan's only writer and owns its
@@ -341,6 +359,7 @@ export function planModeMutationGuard(
     );
   }
   if (PLAN_MODE_READ_ONLY_TOOLS.has(event.toolName)) return PERMITTED;
+  if (isSubagentLookup(event)) return PERMITTED;
   if (planModeVerifyTypecheckAllowed(workflow, event)) return PERMITTED;
   if (WRITE_TOOLS.has(event.toolName) || event.toolName === "verify") {
     return {

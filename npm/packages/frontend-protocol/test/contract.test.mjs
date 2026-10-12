@@ -94,6 +94,14 @@ test("exposes stable capabilities and structured errors", () => {
       correlationId: "corr-1",
     },
   );
+  assert.equal(
+    protocolError(
+      "SESSION_BUSY",
+      "Session already has an active turn",
+      "corr-2",
+    ).code,
+    "SESSION_BUSY",
+  );
 });
 
 test("validates the complete nested state snapshot", async () => {

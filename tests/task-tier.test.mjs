@@ -685,6 +685,136 @@ await test("task-tier: Umgebungsfehler eskalieren nicht, echte Testfehler schon"
   });
 });
 
+await test("task-tier: nur Test-/Build-Läufe zählen als Prüffehler", async () => {
+  const text = (t) => [{ type: "text", text: t }];
+  assert(tier.isTestOrBuildCommand("npm test"), "npm test");
+  assert(
+    tier.isTestOrBuildCommand("node quickpanel/tests/hermes.test.js"),
+    "node *.test.js",
+  );
+  assert(
+    tier.isTestOrBuildCommand("python3 -I quickpanel/tests/shell_smoke.py"),
+    "Smoke-Skript",
+  );
+  assert(tier.isTestOrBuildCommand("nixos-agent-build"), "Nix-Build");
+  assert(
+    tier.isTestOrBuildCommand("cd app && FOO=1 npx vitest run"),
+    "Kette mit Env und npx",
+  );
+  assert(!tier.isTestOrBuildCommand("rg -n voice quickpanel"), "rg");
+  assert(
+    !tier.isTestOrBuildCommand("rg -n x quickpanel/tests/hermes.test.js"),
+    "rg auf Testdatei",
+  );
+  assert(!tier.isTestOrBuildCommand("git diff --check"), "git");
+  assert(!tier.isTestOrBuildCommand("test -f .pi/verify.json"), "test -f");
+  assert(!tier.isTestOrBuildCommand("command -v node"), "command -v");
+  assert(!tier.isTestOrBuildCommand(undefined), "kein Befehl");
+
+  assert(
+    tier.isPolicyBlock(
+      text(
+        "Harte System-/Secret-Grenze: opaker Interpreteraufruf (node) wurde blockiert.",
+      ),
+    ),
+    "YOLO-Interpreter-Sperre",
+  );
+  assert(
+    tier.isPolicyBlock(text("Recovery-Gate aktiv: Der Workspace …")),
+    "Recovery-Gate",
+  );
+  assert(
+    tier.isPolicyBlock(text("Planmodus: Dieses Shell-Kommando …")),
+    "Plan Mode",
+  );
+  assert(
+    !tier.isPolicyBlock(text("1 failing\n\nCommand exited with code 1")),
+    "echter Testfehler",
+  );
+
+  const small = "Setze editorPaddingX in settings.json";
+  const run = async (command, content, toolName = "bash") => {
+    let result;
+    await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
+      await harness.runHooks(
+        "before_agent_start",
+        { prompt: small, systemPrompt: "SYS" },
+        context,
+      );
+      await harness.runHooks(
+        "tool_result",
+        tr(toolName, { command }, { isError: true, content: text(content) }),
+        context,
+      );
+      await harness.runHooks("agent_end", { messages: [] }, context);
+      result = harness.appended.find(
+        (e) => e.customType === "task-tier.turn",
+      ).data;
+    });
+    return result;
+  };
+
+  const noMatch = await run(
+    "rg -n voice quickpanel",
+    "\n\nCommand exited with code 1",
+  );
+  eq(noMatch.finalTier, "fast", "rg ohne Treffer stuft nicht hoch");
+  assert(
+    !noMatch.observedRiskSignals.includes("test_build_failure"),
+    "kein Prüffehler-Signal bei rg",
+  );
+
+  const blocked = await run(
+    "node quickpanel/tests/hermes.test.js",
+    "Harte System-/Secret-Grenze: opaker Interpreteraufruf (node) wurde blockiert.",
+  );
+  eq(blocked.finalTier, "fast", "Policy-Sperre stuft nicht hoch");
+  eq(blocked.environmentFailures, 0, "Policy-Sperre ist kein Umgebungsfehler");
+
+  const failing = await run(
+    "node quickpanel/tests/hermes.test.js",
+    "AssertionError\n\nCommand exited with code 1",
+  );
+  eq(failing.finalTier, "normal", "echter Testfehler stuft hoch");
+});
+
+await test("task-tier: Plan-Umsetzung ist nie FAST", async () => {
+  const opts = { planning: false };
+  eq(
+    classify.classifyPrompt("Setze den freigegebenen Plan um.", opts),
+    "normal",
+    "Plan-Ausführungsprompt",
+  );
+  eq(
+    classify.classifyPrompt(
+      "Setze den freigegebenen Plan um. Beginne mit Phase 1.",
+      opts,
+    ),
+    "normal",
+    "Plan-Ausführungsprompt mit Zusatz",
+  );
+  eq(
+    classify.classifyPrompt("Setze editorPaddingX in settings.json", opts),
+    "fast",
+    "gewöhnliche kleine Aufgabe bleibt FAST",
+  );
+  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
+    const before = harness.api.getThinkingLevel();
+    await harness.runHooks(
+      "before_agent_start",
+      { prompt: "Setze den freigegebenen Plan um.", systemPrompt: "SYS" },
+      context,
+    );
+    eq(harness.api.getThinkingLevel(), before, "Thinking wird nicht verändert");
+    await harness.runHooks("agent_end", { messages: [] }, context);
+    const entry = harness.appended.find(
+      (e) => e.customType === "task-tier.turn",
+    );
+    eq(entry.data.initialTier, "normal", "Plan-Umsetzung startet als NORMAL");
+    eq(entry.data.escalations.length, 0, "keine Eskalation nötig");
+  });
+});
+
 await test("task-tier: Telemetrie zählt Requests, Tokens und Cache-Verluste", async () => {
   await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
     await harness.runHooks(
