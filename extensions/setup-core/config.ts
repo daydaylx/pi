@@ -1,13 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getPiLaunchProfile } from "../shared/profile.ts";
 
-export type MotionMode =
-  | "expressive"
-  | "contextual"
-  | "reduced"
-  | "off";
+export type MotionMode = "expressive" | "contextual" | "reduced" | "off";
 export type DashboardMode = "auto" | "compact" | "expanded" | "hidden";
 export type PolicyAction = "block" | "ask" | "allow";
 export type LspMode = "off" | "auto" | "force";
@@ -37,7 +34,7 @@ export interface SecondOpinionConfig {
   allowContextFollowup: false;
 }
 
-export type AuroraTheme = "aurora-night" | "aurora-forge";
+export type AuroraTheme = "aurora-night" | "aurora-forge" | "aurora-system";
 
 export interface SetupConfig {
   ui: { theme: AuroraTheme; motion: MotionMode; dashboard: DashboardMode };
@@ -334,7 +331,7 @@ function applyUserLayer(
 
   next.ui.theme = enumValue(
     ui?.theme,
-    ["aurora-night", "aurora-forge"],
+    ["aurora-night", "aurora-forge", "aurora-system"],
     next.ui.theme,
     source,
     "ui.theme",
@@ -619,9 +616,13 @@ export function loadSetupConfig(
 ): LoadedSetupConfig {
   const diagnostics: ConfigDiagnostic[] = [];
   const sources: string[] = [];
-  const globalPath = join(getAgentDir(), "setup.json");
+  const systemProfile = getPiLaunchProfile() === "system";
+  const agentDir = getAgentDir();
+  const globalPath = systemProfile
+    ? join(agentDir, "profile-state", "system", "setup.json")
+    : join(agentDir, "setup.json");
   const global = readObject(globalPath, diagnostics);
-  let config = structuredClone(DEFAULT_CONFIG);
+  let config = defaultSetupConfig(systemProfile ? "system" : "project");
   if (global) {
     sources.push(globalPath);
     config = applyUserLayer(config, global, globalPath, diagnostics);
@@ -630,7 +631,7 @@ export function loadSetupConfig(
   const projectPath = existsSync(join(cwd, ".pi", "setup.json"))
     ? join(cwd, ".pi", "setup.json")
     : join(cwd, "setup.json");
-  if (trusted) {
+  if (trusted && !systemProfile) {
     const project = readObject(projectPath, diagnostics);
     if (project) {
       sources.push(projectPath);
@@ -641,7 +642,7 @@ export function loadSetupConfig(
         diagnostics,
       );
     }
-  } else if (existsSync(projectPath)) {
+  } else if (!systemProfile && existsSync(projectPath)) {
     diagnostics.push({
       level: "warning",
       source: projectPath,
@@ -651,20 +652,27 @@ export function loadSetupConfig(
   return { config, diagnostics, sources };
 }
 
-export function defaultSetupConfig(): SetupConfig {
-  return structuredClone(DEFAULT_CONFIG);
+export function defaultSetupConfig(
+  profile: "project" | "system" = getPiLaunchProfile(),
+): SetupConfig {
+  const config = structuredClone(DEFAULT_CONFIG);
+  if (profile === "system") config.ui.theme = "aurora-system";
+  return config;
 }
 
 /**
- * Persists one UI preference in the global setup.json — the single documented
- * home for `ui.*` settings. Reads, patches and rewrites only that file;
- * anything unparseable or unwritable is reported to the caller instead of
- * being silently dropped.
+ * Persists one UI preference in the active profile's setup.json. Reads,
+ * patches and rewrites only that file; anything unparseable or unwritable is
+ * reported to the caller instead of being silently dropped.
  */
 export async function persistUiPreference(patch: {
   dashboard?: DashboardMode;
 }): Promise<void> {
-  const globalPath = join(getAgentDir(), "setup.json");
+  const globalPath =
+    getPiLaunchProfile() === "system"
+      ? join(getAgentDir(), "profile-state", "system", "setup.json")
+      : join(getAgentDir(), "setup.json");
+  await mkdir(dirname(globalPath), { recursive: true, mode: 0o700 });
   let raw: Record<string, unknown> = {};
   if (existsSync(globalPath)) {
     const parsed: unknown = JSON.parse(await readFile(globalPath, "utf8"));

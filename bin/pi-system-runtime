@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() {
+  printf 'pi-system-runtime: %s\n' "$1" >&2
+  exit "${2:-64}"
+}
+
+agent_dir="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}"
+[[ "$agent_dir" == /* ]] || fail "PI_CODING_AGENT_DIR muss ein absoluter Pfad sein"
+if [[ -n "${PI_RUNTIME_ROOT:-}" ]]; then
+  runtime_bin="${PI_RUNTIME_ROOT}/dist/bundle/cli.js"
+else
+  runtime_bin="${agent_dir}/npm/node_modules/.bin/pi"
+fi
+[[ -x "$runtime_bin" ]] || fail "Pi-Runtime nicht ausführbar: $runtime_bin" 127
+
+profile_state_root="${agent_dir}/profile-state"
+state_dir="${profile_state_root}/system"
+workspace="${state_dir}/workspace"
+cli_sessions="${state_dir}/sessions"
+host_sessions="${state_dir}/host-sessions"
+sessions="${PI_SYSTEM_SESSION_DIR:-$cli_sessions}"
+case "$sessions" in
+  "$cli_sessions"|"$host_sessions") ;;
+  *) fail "PI_SYSTEM_SESSION_DIR muss in einem verwalteten Pi-System-Profil liegen" 73 ;;
+esac
+for directory in "$profile_state_root" "$state_dir" "$workspace" "$sessions"; do
+  [[ ! -L "$directory" ]] || fail "Profilpfad darf kein Symlink sein: $directory" 73
+done
+
+umask 077
+mkdir -p -- "$workspace" "$sessions"
+for directory in "$profile_state_root" "$state_dir" "$workspace" "$sessions"; do
+  [[ ! -L "$directory" ]] || fail "Profilpfad darf kein Symlink sein: $directory" 73
+done
+chmod 700 -- "$profile_state_root" "$state_dir" "$workspace" "$sessions"
+workspace="$(realpath -e -- "$workspace")"
+sessions="$(realpath -e -- "$sessions")"
+
+after_separator=0
+for argument in "$@"; do
+  if ((after_separator)); then continue; fi
+  if [[ "$argument" == "--" ]]; then
+    after_separator=1
+    continue
+  fi
+  case "$argument" in
+    --approve|--approve=*|-a|--session-dir|--session-dir=*|--session|--session=*|--fork|--fork=*)
+      fail "System-Runtime verwaltet Approval und Sitzungsverzeichnis selbst: $argument"
+      ;;
+  esac
+done
+
+export PI_LAUNCH_PROFILE=system
+export PI_SYSTEM_WORKSPACE="$workspace"
+export PI_SYSTEM_SESSION_DIR="$sessions"
+export PI_CODING_AGENT_SESSION_DIR="$sessions"
+cd -- "$workspace"
+exec "$runtime_bin" \
+  --no-approve \
+  --no-context-files \
+  --session-dir "$sessions" \
+  "$@"

@@ -18,7 +18,7 @@
       "additionalProperties": false,
       "required": ["theme", "motion"],
       "properties": {
-        "theme": { "const": "aurora-night" },
+        "theme": { "enum": ["aurora-night", "aurora-forge", "aurora-system"] },
         "motion": { "enum": ["contextual", "reduced", "off"] },
         "dashboard": {
           "enum": ["auto", "compact", "expanded", "hidden"],

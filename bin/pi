@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() {
+  printf 'pi: %s\n' "$1" >&2
+  exit "${2:-64}"
+}
+
+agent_dir="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}"
+[[ "$agent_dir" == /* ]] || fail "PI_CODING_AGENT_DIR muss ein absoluter Pfad sein"
+if [[ -n "${PI_RUNTIME_ROOT:-}" ]]; then
+  runtime_bin="${PI_RUNTIME_ROOT}/dist/bundle/cli.js"
+else
+  runtime_bin="${agent_dir}/npm/node_modules/.bin/pi"
+fi
+
+[[ -x "$runtime_bin" ]] || fail "Pi-Runtime nicht ausführbar: $runtime_bin" 127
+launcher_path="$(realpath -e -- "${BASH_SOURCE[0]}")"
+runtime_path="$(realpath -e -- "$runtime_bin")"
+[[ "$runtime_path" != "$launcher_path" ]] || fail "Pi-Runtime zeigt auf den Launcher selbst" 127
+
+if [[ "${1:-}" != "system" ]]; then
+  if [[ "${PI_LAUNCH_PROFILE:-}" == "system" ]]; then
+    unset PI_CODING_AGENT_SESSION_DIR
+  fi
+  unset PI_LAUNCH_PROFILE PI_SYSTEM_WORKSPACE PI_SYSTEM_SESSION_DIR
+  exec "$runtime_path" "$@"
+fi
+shift
+
+profile_state_root="${agent_dir}/profile-state"
+state_dir="${profile_state_root}/system"
+workspace="${state_dir}/workspace"
+sessions="${state_dir}/sessions"
+
+# Never follow a link into a different profile or user-selected directory.
+for directory in "$profile_state_root" "$state_dir" "$workspace" "$sessions"; do
+  [[ ! -L "$directory" ]] || fail "Profilpfad darf kein Symlink sein: $directory" 73
+done
+
+umask 077
+mkdir -p -- "$workspace" "$sessions"
+for directory in "$profile_state_root" "$state_dir" "$workspace" "$sessions"; do
+  [[ ! -L "$directory" ]] || fail "Profilpfad darf kein Symlink sein: $directory" 73
+done
+chmod 700 -- "$profile_state_root" "$state_dir" "$workspace" "$sessions"
+workspace="$(realpath -e -- "$workspace")"
+sessions="$(realpath -e -- "$sessions")"
+cd -- "$workspace"
+
+assert_system_session_reference() {
+  local reference="$1"
+  local resolved
+
+  # Plain IDs are resolved by Pi inside the forced system session directory.
+  # Paths, including symlinks and files in the neutral workspace, must resolve
+  # to a file under the system profile's session directory.
+  if [[ "$reference" == */* || "$reference" == '~/'* || -e "$reference" ]]; then
+    [[ -e "$reference" ]] || fail "System-Sitzungspfad existiert nicht: $reference"
+    resolved="$(realpath -e -- "$reference")"
+    case "$resolved" in
+      "$sessions"/*) ;;
+      *) fail "Pi System darf keine Sitzung außerhalb seines Profils öffnen: $reference" ;;
+    esac
+  fi
+}
+
+system_args=()
+while (($#)); do
+  case "$1" in
+    --)
+      system_args+=("$@")
+      break
+      ;;
+    --approve|-a)
+      fail "--approve ist in pi system gesperrt; Projektdateien bleiben deaktiviert"
+      ;;
+    --session-dir|--session-dir=*)
+      fail "pi system verwaltet sein eigenes Sitzungsverzeichnis"
+      ;;
+    --session|--fork)
+      [[ $# -ge 2 ]] || fail "$1 benötigt einen Wert"
+      assert_system_session_reference "$2"
+      system_args+=("$1" "$2")
+      shift 2
+      continue
+      ;;
+    --session=*|--fork=*)
+      assert_system_session_reference "${1#*=}"
+      system_args+=("$1")
+      ;;
+    *)
+      system_args+=("$1")
+      ;;
+  esac
+  shift
+done
+
+export PI_LAUNCH_PROFILE=system
+export PI_SYSTEM_WORKSPACE="$workspace"
+export PI_SYSTEM_SESSION_DIR="$sessions"
+export PI_CODING_AGENT_SESSION_DIR="$sessions"
+
+# Keep project resources out of the system profile. The launcher identity is
+# descriptive; privileged capabilities must be authorized independently.
+exec "$runtime_path" \
+  --session-dir "$sessions" \
+  --no-approve \
+  --no-context-files \
+  "${system_args[@]}"

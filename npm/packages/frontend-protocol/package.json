@@ -1,6 +1,6 @@
 {
   "name": "@daydaylx/pi-frontend-protocol",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Versioned frontend contract for Pi CLI/TUI and external desktop frontends",
   "type": "module",
   "main": "./dist/index.js",

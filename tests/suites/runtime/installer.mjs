@@ -5,6 +5,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -67,11 +68,7 @@ export const installerSections = {
 
       // Exactly one agent profile: the verifier chain's technical profile.
       const agentFiles = deployed.filter((f) => f.startsWith("agents/"));
-      eq(
-        agentFiles.length,
-        1,
-        "greenfield installs exactly one agent profile",
-      );
+      eq(agentFiles.length, 1, "greenfield installs exactly one agent profile");
       for (const role of ["verifier.md"]) {
         assert(
           deployedSet.has(`agents/${role}`),
@@ -163,6 +160,25 @@ export const installerSections = {
           existsSync(path.join(target, "subagent-tool-description.md")),
           "deployed target contains the agent-level custom subagent description",
         );
+        for (const launcher of [
+          "bin/pi",
+          "bin/pi-frontend",
+          "bin/pi-system-host",
+          "bin/pi-system-runtime",
+        ]) {
+          const mode = statSync(path.join(target, launcher)).mode & 0o777;
+          eq(mode, 0o755, `deployed ${launcher} is executable`);
+        }
+        for (const directory of [
+          "profile-state",
+          "profile-state/system",
+          "profile-state/system/workspace",
+          "profile-state/system/sessions",
+          "profile-state/system/host-sessions",
+        ]) {
+          const mode = statSync(path.join(target, directory)).mode & 0o777;
+          eq(mode, 0o700, `deployed ${directory} is private`);
+        }
         assert(
           !existsSync(path.join(target, ".pi", "subagent-tool-description.md")),
           "deployed target has no retired agent-shipped .pi description",

@@ -1352,6 +1352,9 @@ export const resilienceSections = {
       "extensions/second-opinion/index.ts",
     );
     const taskTierExtension = await load("extensions/task-tier/index.ts");
+    const systemContextExtension = await load(
+      "extensions/system-context/index.ts",
+    );
 
     await section("combined production extension stack", async () => {
       if (
@@ -1369,6 +1372,7 @@ export const resilienceSections = {
         !resilience ||
         !sessionHealth ||
         !contextCapsule ||
+        !systemContextExtension ||
         !openrouterDoctor ||
         !secondOpinion ||
         !secondOpinionExtension
@@ -1388,6 +1392,7 @@ export const resilienceSections = {
         "+extensions/aurora-ui/index.ts": auroraUi.default,
         "+extensions/resilience/index.ts": resilience.default,
         "+extensions/context-capsule/index.ts": contextCapsule.default,
+        "+extensions/system-context/index.ts": systemContextExtension.default,
         "+extensions/session-health/index.ts": sessionHealth.default,
         "+extensions/frontend-bridge/index.ts": frontendBridge.default,
         "+extensions/openrouter-doctor/index.ts": openrouterDoctor.default,

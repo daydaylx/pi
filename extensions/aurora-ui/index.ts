@@ -9,6 +9,7 @@ import type {
 import type { TUI } from "@earendil-works/pi-tui";
 import { LAYOUT_COLUMNS, layoutForSize } from "../shared/layout.ts";
 import { isPlanningMode } from "../shared/workflow-mode.ts";
+import { getPiLaunchProfile, type PiLaunchProfile } from "../shared/profile.ts";
 import { planLocation, readPlan } from "../plan-mode/plan-store.ts";
 import {
   loadSetupConfig,
@@ -117,6 +118,9 @@ const STATUS_TICK_INTERVAL_MS = 1_000;
 const WAITING_THRESHOLD_MS = 4_000;
 const FORGE_THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-forge.json", import.meta.url),
+);
+const SYSTEM_THEME_PATH = fileURLToPath(
+  new URL("../../themes/aurora-system.json", import.meta.url),
 );
 const THEME_PATH = fileURLToPath(
   new URL("../../themes/aurora-night.json", import.meta.url),
@@ -337,8 +341,8 @@ class AnimationTicker {
 
   setActivity(active: boolean, animate: boolean): void {
     const intervalMs = active
-      ? (this.motion === "expressive" ||
-          (this.motion === "contextual" && animate))
+      ? this.motion === "expressive" ||
+        (this.motion === "contextual" && animate)
         ? TICK_INTERVAL_MS
         : STATUS_TICK_INTERVAL_MS
       : undefined;
@@ -368,11 +372,7 @@ class AnimationTicker {
 }
 
 type DisplayActivityKind =
-  | "thinking"
-  | "tool"
-  | "responding"
-  | "waiting"
-  | "verifying";
+  "thinking" | "tool" | "responding" | "waiting" | "verifying";
 
 function activityPresentation(
   state: AuroraUiState,
@@ -439,12 +439,7 @@ function activityGlyph(
   frame: number,
   kind: DisplayActivityKind,
 ): string {
-  return renderVisualGlyph(
-    theme,
-    visualStateForActivity(kind),
-    motion,
-    frame,
-  );
+  return renderVisualGlyph(theme, visualStateForActivity(kind), motion, frame);
 }
 
 export default function auroraUiExtension(pi: ExtensionAPI): void {
@@ -454,8 +449,8 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   // inspector command so it never re-derives verification independently.
   let lastTask: TaskViewModel | undefined;
   let ticker: AnimationTicker | undefined;
-  let previousTheme: string | undefined;
-  let selectedTheme: string | undefined;
+  let previousTheme: string | Theme | undefined;
+  let selectedTheme: string | Theme | undefined;
   let activeContext: ExtensionContext | undefined;
   let activeSessionId: string | undefined;
   let disposed = true;
@@ -467,12 +462,13 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let fleetDockOwnsSubagents = false;
   let sessionCwd: string | undefined;
   let sessionHome: string | undefined;
+  let sessionProfile: PiLaunchProfile | undefined;
   let currentUserPrompt: string | undefined;
   let currentPlanText: string | undefined;
   let lastVerificationStatus: string | null = null;
   let workspaceChangedSinceVerification = false;
-  // One owner: ui.dashboard from setup.json, switched via /dashboard
-  // (Super+Q Command Center entry), read per frame by the widget.
+  // One owner: ui.dashboard from the active profile's setup.json, switched via
+  // /dashboard (Super+Q Command Center entry), read per frame by the widget.
   let dashboardMode: DashboardMode = "auto";
   let showStartscreen = false;
   const activeTools = new Map<string, ActiveToolView>();
@@ -663,6 +659,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
         thinking: state.model.thinking,
         cwd: sessionCwd,
         homeDirectory: sessionHome,
+        profile: sessionProfile === "system" ? "system" : undefined,
       });
     }
 
@@ -1126,11 +1123,15 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       uiContext.ui.setWorkingVisible(false);
       uiContext.ui.setWorkingMessage();
       uiContext.ui.setWorkingIndicator();
+      const previousThemeName =
+        typeof previousTheme === "string" ? previousTheme : previousTheme?.name;
+      const selectedThemeName =
+        typeof selectedTheme === "string" ? selectedTheme : selectedTheme?.name;
       if (
         previousTheme &&
-        selectedTheme &&
-        uiContext.ui.theme.name === selectedTheme &&
-        previousTheme !== selectedTheme
+        selectedThemeName &&
+        uiContext.ui.theme.name === selectedThemeName &&
+        previousThemeName !== selectedThemeName
       ) {
         uiContext.ui.setTheme(previousTheme);
       }
@@ -1138,6 +1139,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     state = undefined;
     sessionCwd = undefined;
     sessionHome = undefined;
+    sessionProfile = undefined;
     showStartscreen = false;
     activeContext = undefined;
     activeSessionId = undefined;
@@ -1146,7 +1148,12 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   }
 
   pi.on("resources_discover", () => ({
-    themePaths: [FORGE_THEME_PATH, THEME_PATH, DAY_THEME_PATH],
+    themePaths: [
+      FORGE_THEME_PATH,
+      SYSTEM_THEME_PATH,
+      THEME_PATH,
+      DAY_THEME_PATH,
+    ],
   }));
 
   registerInspectorCommand(pi, {
@@ -1199,6 +1206,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
 
     const loaded = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted());
+    sessionProfile = getPiLaunchProfile();
     dashboardMode = loaded.config.ui.dashboard;
     fleetDockOwnsSubagents = fleetDockOwnsSubagentDisplay();
     sessionCwd = ctx.cwd;
@@ -1218,9 +1226,18 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     activeSessionId = ctx.sessionManager.getSessionId();
     disposed = false;
 
-    previousTheme = ctx.ui.theme.name;
-    selectedTheme = loaded.config.ui.theme;
-    const themeResult = ctx.ui.setTheme(selectedTheme);
+    previousTheme =
+      sessionProfile === "system" ? ctx.ui.theme : ctx.ui.theme.name;
+    selectedTheme =
+      sessionProfile === "system"
+        ? ctx.ui.getTheme(loaded.config.ui.theme)
+        : loaded.config.ui.theme;
+    const themeResult = selectedTheme
+      ? ctx.ui.setTheme(selectedTheme)
+      : {
+          success: false,
+          error: `Theme ${loaded.config.ui.theme} wurde nicht gefunden`,
+        };
     if (!themeResult.success) {
       ctx.ui.notify(
         `Aurora theme: ${themeResult.error ?? "nicht verfügbar"}`,
@@ -1270,6 +1287,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
             contextPercent: sessionCtx.getContextUsage()?.percent ?? null,
             cwd: sessionCwd,
             homeDirectory: sessionHome,
+            profile: sessionProfile === "system" ? "system" : undefined,
             // No dashboard tile shows verification any more (removed along
             // with PRÜFUNGEN); the footer is now the sole permanent surface
             // for routine and failed verification status alike.

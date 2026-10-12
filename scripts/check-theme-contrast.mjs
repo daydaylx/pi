@@ -32,14 +32,16 @@ const SURFACE_BACKGROUNDS = ["bg", "surface", "highlight"];
 const TEXT_THRESHOLD = 4.5;
 const UI_THRESHOLD = 3.0;
 
-/** Warm brand accents worth checking pairwise for hue proximity. */
-const WARM_ACCENT_NAMES = [
+/** Brand accents worth checking pairwise for hue proximity. */
+const BRAND_ACCENT_NAMES = [
   "copper",
   "amber",
   "terracotta",
   "burgundy",
   "ochre",
   "rosewood",
+  "turquoise",
+  "iceBlue",
 ];
 const HUE_DISTANCE_THRESHOLD = 15;
 const SIMILARITY_THRESHOLD = 20; // saturation/lightness points
@@ -116,10 +118,10 @@ function resolveColor(theme, value) {
     : undefined;
 }
 
-/** Runtime slots should not collapse into indistinguishable warm accents. */
+/** Runtime slots should not collapse into indistinguishable accent colors. */
 export function checkStatusDistinctness(theme) {
   const entries = Object.entries(STATUS_SLOTS)
-    .map(([state, slot]) => [state, resolveColor(theme, theme.colors?.[slot])] )
+    .map(([state, slot]) => [state, resolveColor(theme, theme.colors?.[slot])])
     .filter((entry) => entry[1]);
   const hsl = Object.fromEntries(
     entries.map(([state, color]) => [state, hexToHsl(color)]),
@@ -143,11 +145,10 @@ export function checkStatusDistinctness(theme) {
   return warnings;
 }
 
-/** Warm-accent pairs whose hue sits too close together to read as distinct
- * status colours, even though each may individually pass its own contrast
- * check against the background. */
+/** Accent pairs whose hue sits too close together to read as distinct, even
+ * though each may individually pass its own contrast check against the background. */
 export function checkHueProximity(theme) {
-  const names = WARM_ACCENT_NAMES.filter((name) => theme.vars[name]);
+  const names = BRAND_ACCENT_NAMES.filter((name) => theme.vars[name]);
   const hsl = Object.fromEntries(
     names.map((name) => [name, hexToHsl(theme.vars[name])]),
   );
@@ -192,7 +193,7 @@ function main() {
 
   const hueWarnings = checkHueProximity(theme);
   const statusWarnings = checkStatusDistinctness(theme);
-  console.log("\nHue proximity (warm accents):");
+  console.log("\nHue proximity (brand accents):");
   if (hueWarnings.length === 0) {
     console.log(
       "  no pairs closer than 15° with similar saturation/lightness.",

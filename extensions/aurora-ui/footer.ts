@@ -33,6 +33,7 @@ export interface FooterInput {
   /** Captured from ExtensionContext at session start; never read from render I/O. */
   cwd?: string;
   homeDirectory?: string;
+  profile?: "system";
   /** True while a Session panel surface (auto/compact/expanded) is active. It
    * owns routine verification reporting; workflow identity remains visible in
    * the footer as the permanent status-bar anchor. */
@@ -177,7 +178,10 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
   segments.push({
     slot: Slot.workflow,
     priority: Priority.workflow,
-    text: input.state.workflow.label,
+    text:
+      input.profile === "system"
+        ? `${input.state.workflow.label} · SYSTEM`
+        : input.state.workflow.label,
     tone: "accent",
     bold: true,
     class: "orientation",
@@ -196,7 +200,9 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
     segments.push({
       slot: Slot.thinking,
       priority: Priority.thinking,
-      text: input.state.model.thinking.replace(/^./, (letter) => letter.toUpperCase()),
+      text: input.state.model.thinking.replace(/^./, (letter) =>
+        letter.toUpperCase(),
+      ),
       tone: thinkingTone(input.state.model.thinking),
       bold: true,
       class: "metadata",
@@ -281,7 +287,11 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
   }
 
   const yoloLevel = input.state.permissions.level;
-  if (yoloLevel === "yolo" || yoloLevel === "yolo-ask" || yoloLevel === "yolo-full") {
+  if (
+    yoloLevel === "yolo" ||
+    yoloLevel === "yolo-ask" ||
+    yoloLevel === "yolo-full"
+  ) {
     segments.push({
       slot: Slot.risk,
       priority: Priority.yolo,

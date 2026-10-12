@@ -1,0 +1,30 @@
+[Unit]
+Description=Pi System shared-session host
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.pi/agent/bin/pi-system-host
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=8s
+RuntimeDirectory=pi-system-host
+RuntimeDirectoryMode=0700
+Environment=PI_CODING_AGENT_DIR=%h/.pi/agent
+Environment=PI_SYSTEM_HOST_RUNTIME_DIR=%t
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=%h/.pi/agent/profile-state/system
+MemoryMax=1G
+CPUQuota=200%
+TasksMax=128
+
+[Install]
+WantedBy=default.target

@@ -71,6 +71,63 @@ export const auroraUiSections = {
           "aurora-forge",
           "Aurora activates its central theme",
         );
+
+        const previousLaunchProfile = process.env.PI_LAUNCH_PROFILE;
+        process.env.PI_LAUNCH_PROFILE = "system";
+        try {
+          const systemTheme = { ...context.ui.theme, name: "aurora-system" };
+          const systemHarness = createHarness({
+            themes: { "aurora-system": systemTheme },
+          });
+          auroraUi.default(systemHarness.api);
+          const discoveredThemes = await systemHarness.runHooks(
+            "resources_discover",
+            {},
+            systemHarness.makeContext(),
+          );
+          assert(
+            discoveredThemes.some((entry) =>
+              entry?.themePaths?.some((value) =>
+                value.endsWith("aurora-system.json"),
+              ),
+            ),
+            "Aurora exposes the System theme through resource discovery",
+          );
+          const systemContext = systemHarness.makeContext({
+            cwd: path.join(tmpdir(), "pi-system-no-git"),
+          });
+          await systemHarness.runHooks("session_start", {}, systemContext);
+          assert(
+            systemContext.ui.theme === systemTheme,
+            "the System profile selects a theme instance without persisting its name",
+          );
+          const systemWelcome =
+            systemHarness.widgets.get("aurora-ui/activity")?.content;
+          const systemWelcomeText =
+            typeof systemWelcome === "function"
+              ? systemWelcome(
+                  { terminal: { columns: 120, rows: 30 }, requestRender() {} },
+                  systemContext.ui.theme,
+                )
+                  .render(120)
+                  .map(stripAnsi)
+                  .join("\n")
+              : "";
+          assert(
+            systemWelcomeText.includes("PI · SYSTEM") &&
+              systemWelcomeText.includes("NixOS · Hyprland"),
+            "the System welcome identifies its profile and desktop",
+          );
+          await systemHarness.runHooks("session_shutdown", {}, systemContext);
+          assert(
+            systemContext.ui.theme.name === "test-theme",
+            "session shutdown restores the previous theme instance",
+          );
+        } finally {
+          if (previousLaunchProfile === undefined)
+            delete process.env.PI_LAUNCH_PROFILE;
+          else process.env.PI_LAUNCH_PROFILE = previousLaunchProfile;
+        }
         // Aurora owns the footer and the activity widget only. The editor stays
         // Pi's own component, so its padding, autocomplete and shortcuts come
         // from the runtime settings rather than from a decorative subclass.
@@ -393,6 +450,11 @@ export const auroraUiSections = {
 
           // The information priority from the UX brief, tier by tier.
           const quiet = { contextPercent: 38 };
+          assert(
+            line(140, { ...quiet, profile: "system" }).includes("SYSTEM") &&
+              !line(140, quiet).includes("SYSTEM"),
+            "the footer identifies Pi System without changing the project profile",
+          );
           const changes = {
             state: {
               changes: {
@@ -433,7 +495,8 @@ export const auroraUiSections = {
             standard.includes("Work") &&
               standard.includes("aurora-test-model") &&
               standard.includes("~/…/pi") &&
-              standard.includes("High") && !standard.includes("Denken"),
+              standard.includes("High") &&
+              !standard.includes("Denken"),
             "the standard footer keeps workflow, model, thinking and folder",
           );
           const compact = line(45, quiet);

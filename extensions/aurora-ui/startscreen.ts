@@ -15,6 +15,7 @@ export interface StartscreenInput {
   thinking?: string;
   cwd: string;
   homeDirectory?: string;
+  profile?: "system";
 }
 
 /** The welcome window never claims the full terminal — it is a dialog. */
@@ -79,7 +80,15 @@ export function renderStartscreen(
 
   if (layout === "compact")
     return [
-      center(theme.fg("accent", theme.bold("PI · AURORA")), width),
+      center(
+        theme.fg(
+          "accent",
+          theme.bold(
+            input.profile === "system" ? "PI · SYSTEM" : "PI · AURORA",
+          ),
+        ),
+        width,
+      ),
       metadata(theme, input, width),
       center(theme.fg("muted", cwd), width),
     ];
@@ -88,10 +97,13 @@ export function renderStartscreen(
   const model = crop(input.model ?? "kein Modell", 28);
   const innerWidth = Math.max(1, tileWidth - PANEL_PADDING * 2 - 2);
   const tile = renderTile(theme, tileWidth, {
-    title: "PI · AURORA",
+    title: input.profile === "system" ? "PI · SYSTEM" : "PI · AURORA",
     tone: "accent",
     padding: PANEL_PADDING,
     lines: [
+      ...(input.profile === "system"
+        ? [theme.fg("muted", "NixOS · Hyprland")]
+        : []),
       renderField(
         theme,
         "Workflow",

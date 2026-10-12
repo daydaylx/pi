@@ -15,6 +15,9 @@ const auroraNight = loadTheme(
 const auroraForge = loadTheme(
   path.join(__dirname, "..", "themes", "aurora-forge.json"),
 );
+const auroraSystem = loadTheme(
+  path.join(__dirname, "..", "themes", "aurora-system.json"),
+);
 
 await test("checkContrast covers every non-background var against every surface", () => {
   const rows = checkContrast(auroraNight);
@@ -66,6 +69,35 @@ await test("Aurora Forge keeps runtime status tones distinct", () => {
   assert(
     checkStatusDistinctness(auroraForge).length === 0,
     "Forge runtime status slots do not collapse into indistinguishable tones",
+  );
+});
+
+await test("Aurora System has a cool palette with readable status colors", () => {
+  for (const color of Object.keys(auroraNight.colors)) {
+    assert(
+      Object.hasOwn(auroraSystem.colors, color),
+      `Aurora System defines the required Pi color slot ${color}`,
+    );
+  }
+  const rows = checkContrast(auroraSystem);
+  assert(
+    rows.every((row) => !row.belowText),
+    "all Aurora System foreground colors clear 4.5:1 on every surface",
+  );
+  assert(
+    checkHueProximity(auroraSystem).length === 0,
+    "turquoise and ice blue remain distinct brand accents",
+  );
+  assert(
+    checkStatusDistinctness(auroraSystem).length === 0,
+    "Aurora System runtime status tones remain distinct",
+  );
+  assert(
+    auroraSystem.name === "aurora-system" &&
+      auroraSystem.vars.bg === "#111C2B" &&
+      auroraSystem.vars.turquoise === "#65D5E5" &&
+      auroraSystem.vars.iceBlue === "#87B8E8",
+    "System profile uses graphite blue, turquoise and ice blue",
   );
 });
 

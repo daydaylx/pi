@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_path="$(realpath -e -- "${BASH_SOURCE[0]}")"
+repo="$(dirname "$(dirname "$script_path")")"
+host="$repo/frontend-server/host.mjs"
+[[ -f "$host" ]] || {
+  printf 'pi-system-host: Host-Modul fehlt: %s\n' "$host" >&2
+  exit 78
+}
+exec node "$host" "$@"

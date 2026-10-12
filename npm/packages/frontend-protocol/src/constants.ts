@@ -1,5 +1,5 @@
 export const PROTOCOL_VERSION = 1 as const;
-export const PROTOCOL_PACKAGE_VERSION = "1.0.0" as const;
+export const PROTOCOL_PACKAGE_VERSION = "1.1.0" as const;
 
 export const CAPABILITIES = [
   "sessions",
@@ -97,6 +97,7 @@ export const ERROR_CODES = [
   "SESSION_INVALID",
   "TOOL_FAILED",
   "PERMISSION_DENIED",
+  "SESSION_BUSY",
   "PROVIDER_ERROR",
   "INTERNAL_ERROR",
 ] as const;

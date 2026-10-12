@@ -140,7 +140,7 @@ export function createHarness(options = {}) {
   let editorText = options.editorText ?? "";
   let activeContext;
 
-  const theme = {
+  let theme = {
     name: "test-theme",
     fg: (_color, text) => String(text),
     bg: (_color, text) => String(text),
@@ -155,7 +155,12 @@ export function createHarness(options = {}) {
     requestRender() {},
   };
   const ui = {
-    theme,
+    get theme() {
+      return theme;
+    },
+    getTheme(name) {
+      return options.themes?.[name];
+    },
     setStatus(key, value) {
       statusCalls.push({ key, value });
       if (value === undefined) statuses.delete(key);
@@ -199,8 +204,8 @@ export function createHarness(options = {}) {
     setHiddenThinkingLabel(label) {
       hiddenThinkingLabels.push(label);
     },
-    setTheme(name) {
-      theme.name = name;
+    setTheme(value) {
+      theme = typeof value === "string" ? { ...theme, name: value } : value;
       return { success: true };
     },
     notify(message, level) {

@@ -1,10 +1,16 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -25,6 +31,8 @@ const ALLOWLIST = [
   "subagent-tool-description.md",
   "bin/pi",
   "bin/pi-frontend",
+  "bin/pi-system-host",
+  "bin/pi-system-runtime",
   "frontend-server",
   "agents",
   "docs",
@@ -33,6 +41,7 @@ const ALLOWLIST = [
   "npm/package.json",
   "npm/package-lock.json",
   "npm/packages/frontend-protocol",
+  "systemd/pi-system-host.service",
   "schemas",
   // The runtime-patch script has to travel with the setup: the patches live in
   // node_modules and every runtime update removes them, so an installed agent
@@ -79,12 +88,14 @@ const LEGACY_MANAGED = [
 
 function parseArgs(argv) {
   let apply = false;
+  let linkCli = false;
   let target =
     process.env.PI_CODING_AGENT_DIR || path.join(homedir(), ".pi", "agent");
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--apply") apply = true;
     else if (arg === "--dry-run") apply = false;
+    else if (arg === "--link-cli") linkCli = true;
     else if (arg === "--target") {
       const value = argv[index + 1];
       if (!value) throw new Error("--target benötigt einen Pfad");
@@ -94,7 +105,7 @@ function parseArgs(argv) {
       throw new Error(`Unbekanntes Argument: ${arg}`);
     }
   }
-  return { apply, target: path.resolve(target) };
+  return { apply, linkCli, target: path.resolve(target) };
 }
 
 function collect(source, relative = "") {
@@ -132,8 +143,122 @@ function assertNoSymlinkComponents(candidate) {
   }
 }
 
+function lstatOrUndefined(candidate) {
+  try {
+    return lstatSync(candidate);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT")
+      return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Plan the optional ~/.local/bin/pi switch without following or replacing an
+ * unrelated user command. The only replaceable link is the current Pi runtime
+ * installed under the selected agent directory.
+ */
+export function planUserCliLink(target, home = homedir()) {
+  target = path.resolve(target);
+  home = path.resolve(home);
+  const commandPath = path.join(home, ".local", "bin", "pi");
+  const launcherPath = path.join(target, "bin", "pi");
+  const runtimeLinkPath = path.join(
+    target,
+    "npm",
+    "node_modules",
+    ".bin",
+    "pi",
+  );
+
+  assertNoSymlinkComponents(path.dirname(commandPath));
+  const current = lstatOrUndefined(commandPath);
+  if (!current)
+    return { status: "create", commandPath, launcherPath, target, home };
+  if (!current.isSymbolicLink()) {
+    throw new Error(
+      `Pi-Befehl ist keine verwaltete Symlink-Datei: ${commandPath}`,
+    );
+  }
+
+  const currentTarget = path.resolve(
+    path.dirname(commandPath),
+    readlinkSync(commandPath),
+  );
+  const launcherTargets = new Set([launcherPath]);
+  const runtimeTargets = new Set([runtimeLinkPath]);
+  for (const [candidate, allowed] of [
+    [launcherPath, launcherTargets],
+    [runtimeLinkPath, runtimeTargets],
+  ]) {
+    if (existsSync(candidate)) allowed.add(realpathSync(candidate));
+  }
+
+  if (launcherTargets.has(currentTarget))
+    return { status: "keep", commandPath, launcherPath, target, home };
+  if (runtimeTargets.has(currentTarget))
+    return { status: "replace", commandPath, launcherPath, target, home };
+
+  try {
+    const currentRealPath = realpathSync(commandPath);
+    if (launcherTargets.has(currentRealPath))
+      return { status: "keep", commandPath, launcherPath, target, home };
+    if (runtimeTargets.has(currentRealPath))
+      return { status: "replace", commandPath, launcherPath, target, home };
+  } catch {
+    // A broken, user-selected symlink is not ours to repair.
+  }
+
+  throw new Error(
+    `Pi-Befehl zeigt auf ein nicht verwaltetes Ziel und bleibt unangetastet: ${commandPath}`,
+  );
+}
+
+/** Replace only the link approved by planUserCliLink; never unlink a file. */
+export function applyUserCliLink(plan) {
+  if (plan.status === "keep") return plan;
+  assertNoSymlinkComponents(path.dirname(plan.commandPath));
+  if (!existsSync(plan.launcherPath))
+    throw new Error(
+      `Pi-Launcher fehlt im Installationsziel: ${plan.launcherPath}`,
+    );
+
+  // Recheck immediately before the atomic rename in case another installer or
+  // user changed ~/.local/bin/pi after the preview.
+  const currentPlan = planUserCliLink(plan.target, plan.home);
+  if (
+    currentPlan.status !== plan.status ||
+    currentPlan.commandPath !== plan.commandPath ||
+    currentPlan.launcherPath !== plan.launcherPath
+  ) {
+    throw new Error(
+      "Pi-Befehl wurde seit der Vorschau geändert; Link nicht ersetzt.",
+    );
+  }
+
+  const temporaryLink = path.join(
+    path.dirname(plan.commandPath),
+    `.pi-launcher-${process.pid}`,
+  );
+  if (lstatOrUndefined(temporaryLink))
+    throw new Error(`Temporärer Pi-Link existiert bereits: ${temporaryLink}`);
+
+  let created = false;
+  try {
+    mkdirSync(path.dirname(plan.commandPath), { recursive: true, mode: 0o700 });
+    assertNoSymlinkComponents(path.dirname(plan.commandPath));
+    symlinkSync(plan.launcherPath, temporaryLink);
+    created = true;
+    renameSync(temporaryLink, plan.commandPath);
+  } catch (error) {
+    if (created) unlinkSync(temporaryLink);
+    throw error;
+  }
+  return { ...plan, status: "linked" };
+}
+
 function runInstall(argv) {
-  const { apply, target } = parseArgs(argv);
+  const { apply, linkCli, target } = parseArgs(argv);
   if (target === SOURCE) {
     console.log(
       "Quelle und Ziel sind identisch; keine Dateien zu synchronisieren.",
@@ -142,6 +267,7 @@ function runInstall(argv) {
   }
 
   assertNoSymlinkComponents(target);
+  const cliLinkPlan = linkCli ? planUserCliLink(target) : undefined;
 
   const files = ALLOWLIST.flatMap((entry) => {
     const absolute = path.join(SOURCE, entry);
@@ -156,6 +282,39 @@ function runInstall(argv) {
     assertNoSymlinkComponents(to);
     mkdirSync(path.dirname(to), { recursive: true });
     copyFileSync(from, to);
+    if (
+      relative === "bin/pi" ||
+      relative === "bin/pi-frontend" ||
+      relative === "bin/pi-system-host" ||
+      relative === "bin/pi-system-runtime"
+    ) {
+      chmodSync(to, 0o755);
+    }
+  }
+
+  // The user service is sandboxed to this pre-created profile subtree. Create
+  // it during apply so systemd can establish ReadWritePaths before the host
+  // starts; dry-run remains read-only.
+  if (apply && files.includes("systemd/pi-system-host.service")) {
+    for (const relative of [
+      "profile-state",
+      "profile-state/system",
+      "profile-state/system/workspace",
+      "profile-state/system/sessions",
+      "profile-state/system/host-sessions",
+    ]) {
+      const directory = path.join(target, relative);
+      assertNoSymlinkComponents(directory);
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      chmodSync(directory, 0o700);
+    }
+  }
+
+  if (cliLinkPlan) {
+    console.log(
+      `${apply ? "LINK" : "DRY "} ${cliLinkPlan.commandPath} -> ${cliLinkPlan.launcherPath}`,
+    );
+    if (apply) applyUserCliLink(planUserCliLink(target));
   }
 
   // Remove known legacy files that were previously managed by this installer.

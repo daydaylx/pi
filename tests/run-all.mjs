@@ -72,6 +72,16 @@ const suites = [
     env: {},
   },
   {
+    name: "pi-system-profile",
+    file: "pi-system-profile.test.mjs",
+    env: {},
+  },
+  {
+    name: "system-context",
+    file: "system-context.test.mjs",
+    env: {},
+  },
+  {
     name: "openrouter-doctor-normalize-error",
     file: "openrouter-doctor/unit/normalize-error.test.mjs",
     env: {},

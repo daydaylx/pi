@@ -455,6 +455,7 @@ export const targetConfigSections = {
             "+extensions/aurora-ui/index.ts",
             "+extensions/resilience/index.ts",
             "+extensions/context-capsule/index.ts",
+            "+extensions/system-context/index.ts",
             "+extensions/session-health/index.ts",
             "+extensions/frontend-bridge/index.ts",
             "+extensions/openrouter-doctor/index.ts",
