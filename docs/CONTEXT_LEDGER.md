@@ -10,6 +10,14 @@
   Auslagerungs-/Backup-Kopie aus diesem Repository entfernt. Aurora bleibt
   erhalten; die von Core/Aurora und externen Clients genutzte Bridge und
   Frontend-Protokolle bleiben bestehen.
+- Audit 2026-10-13: Entfernt wurden `second-opinion`, `diff-viewer`,
+  `diff-learning`, die LSP-Navigationstools und die Alias-Befehle
+  `/show-plan`/`/plan-edit` (unnötige Komplexität). Bewusst behalten:
+  `interactive-pty` (63 Aufrufe in 13 Sessions), `detailed_plan`, die externe
+  Frontend-Schicht (`pi-gui` nutzt `@daydaylx/pi-frontend-protocol`). YOLO 3
+  erlaubt gemäß ADR 029 auch `rm -rf /`; Tests, die das Gegenteil erwarten,
+  sind veraltet. Commits, Pushes und Deployments nur auf ausdrücklichen
+  Auftrag (`AGENTS.md`).
 - Real-Duel Phase 5: Der Nutzer wählte eine neue, vollständige 36-Lauf-Serie
   (3 Tasks × 3 Trials × Work-only/Plan→Work × Pi/Codex) mit
   `gpt-5.6-luna` und Reasoning `medium`. Reale API-Läufe starten erst nach
@@ -197,10 +205,16 @@
 ## Bekannte Einschränkungen
 
 - Kontrollierte Baseline- und Holdout-Läufe für die neue Snapshotlogik stehen noch aus.
-- Der Fork `daydaylx/pi-subagents` ist im Typecheck vorbestehend rot
-  (Testdateien und Altbestände in `src/`). Er ist deshalb nicht Teil einer
-  Pflichtprüfung des Hauptrepos; seine Unit-, Integrations- und E2E-Suiten
-  sind grün.
+- Der Fork `daydaylx/pi-subagents` ist am Pin `0364aaa` typecheck-grün,
+  seine Unit-, Integrations- und E2E-Suiten bestehen; er ist trotzdem nicht
+  Teil einer Pflichtprüfung des Hauptrepos.
+- Pi 1.0.4 warnt beim Start, dass `typebox` in `pi-subagents` (und
+  `pi-web-access`) unter `dependencies` statt `peerDependencies` steht. Beim
+  Fork bewusst nicht geändert: Pi installiert Git-Pakete mit `--omit=peer`, der
+  asynchrone Runner läuft außerhalb des Extension-Loaders und braucht
+  `typebox` aus dem eigenen `node_modules`.
+- `install:user --apply` sichert nichts und überschreibt auch `setup.json`,
+  `models.json`, `keybindings.json` und `web-search.json` im Agent-Verzeichnis.
 - Für P2 fehlen priorisierte Befunde zu Restkomplexität, Dokumentation und
   Knip-Regeln; belegt ist bislang nur `tests/suites/runtime.mjs` — die
   Aufteilung kann die `SECTION_SUITES`-Registry als Schnittkante nutzen.
@@ -222,12 +236,23 @@
 
 ## Offene Fragen
 
-_Keine offenen Fragen._
+- Qwen: `enabledModels` und `subagents.modelScope.allow` nennen
+  `qwen-token-plan-individual`; die lokale `auth.json` führt nur
+  `qwen-token-plan`. Ohne Anpassung sind diese Modelle nicht wählbar
+  (Startwarnungen "No models match"); `target-config` testet bewusst den
+  Individual-Plan.
+- Recovery-Rate nach den Fixes aus dem Audit vom 2026-10-13 ist nicht
+  gemessen (keine neuen Sitzungen).
+- Dev-Klon `/home/g/Projekte/pi-subagents` ist gegenüber dem Remote
+  divergiert und wurde nicht angefasst.
 
 ## Wichtige Projektregeln
 
 - Schutzregeln zu Nutzeränderungen, Auftragsscope, Commits/Pushes: siehe
   `AGENTS.md`.
+- Vor `npm run install:user -- --apply` ein Backup von `~/.pi/agent` anlegen;
+  danach `npm install --ignore-scripts` in `~/.pi/agent/npm` (nie `npm ci`,
+  `node-pty` bleibt gebaut) und `node scripts/apply-runtime-patches.mjs --apply`.
 - Nach relevanten Änderungen läuft `npm --prefix npm run verify`. Nur ein
   `project_check`-Aufruf des Pflichtprofils `verify` aktualisiert den
   Footer/Ledger — ein reiner `bash`-Lauf desselben Befehls oder ein Lauf aus
@@ -256,8 +281,9 @@ _Keine offenen Fragen._
   Provider- und Plan/Work-Schritte sind noch nicht gelaufen.
 - Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA, der
   den alten Pin enthält — `main` ist nicht automatisch der neueste Stand.
-  Vor jeder Pin-Änderung Erreichbarkeit prüfen; die lokale Suite bleibt
-  bewusst offline.
+  Aktueller Pin: `0364aaa` (Branch `feat/temporary-agent-spec`). Vor jeder
+  Pin-Änderung Erreichbarkeit prüfen und die Integrity im Lockfile neu
+  berechnen; die lokale Suite bleibt bewusst offline.
 
 ## Verworfene Optionen
 

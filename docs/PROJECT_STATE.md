@@ -2,16 +2,17 @@
 
 ## Aktuelle Arbeit
 
-Review und Remediation der letzten fünf Sitzungslogs. Behoben: Verify-Specs
-erhielten wegen der Hook-Reihenfolge kein gebundenes Ticket; der lokale Pi-Pin
-ist auf Pi `1.0.4` angeglichen. Die Runtime-Patches wurden portiert; der
-`brace-expansion`-Audit-Befund ist durch `5.0.12` behoben. Der frühere
-UI-Suite-Hang reproduzierte sich nicht. Das kanonische Pflichtprofil
-`project_check({ profile: "verify" })` besteht; offen sind der unabhängige
-Verifier und der providerbasierte Live-Smoke (#137).
-`npm ci --ignore-scripts` war nötig, weil `node-pty` hier keine nativen
-Buildskripte ausführen konnte. Änderungen sind noch nicht committet oder
-gepusht.
+Audit-Umsetzung vom 2026-10-13 abgeschlossen, committet und gepusht (`main`
+bis `e9a2302`, Fork `feat/temporary-agent-spec` auf `0364aaa`). Entfernt:
+`second-opinion`, `diff-viewer`, `diff-learning`, LSP-Navigationstools,
+Skill `lsp-navigation`, Alias-Befehle `/show-plan` und `/plan-edit`.
+Gehärtet: Permission-Grenzen (inkl. Geräteziele unter `/dev/`), Verifier-Kette,
+Repo-Gesundheit, Kindprozess-Umgebung und Run-History im Fork. Die zwölf
+verwaisten Testdateien sind triagiert (Zwillinge bestehen, Duplikate gelöscht),
+`tests/permissions.test.mjs` ist gegatet. Der Installer behält lokale
+`+extensions/…`-Einträge der installierten `settings.json`. Die
+Installation `~/.pi/agent` läuft auf Pi `1.0.4` mit allen 11 Runtime-Patches;
+Rückfall-Backup unter `~/.pi/backups/agent-20261013-vor-runtime-update`.
 
 Zusätzlicher Auftrag „Pi Harness Update Paket“: P1 Context Capsule, P2
 Instruction Audit und P3 Task-Tier-Nachschärfung sind umgesetzt. P3 lässt
@@ -76,7 +77,7 @@ stehen in `docs/experiments/p5-observer-baseline.md`.
 
 ## Phase-1-Bestand
 
-- Pi: Node `v22.23.2`, npm `10.9.8`, installierter Pi `0.84.4`.
+- Pi: Node `v22.23.2`, npm `10.9.8`, installierter Pi `1.0.4` (seit 2026-10-13).
 - Pi-`verify`-Profil: `.pi/verify.json`; setup-core liegt unter
   `extensions/setup-core/` mit `verify-profiles.ts`, `dependency-prepare.ts`
   und `index.ts`.
@@ -107,57 +108,22 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 
 ## Letzte Verifikation
 
-- `npm --prefix npm run typecheck`: bestanden.
-- `PI_TEST_SUITE=runtime`: 1810/1810 bestanden gegen Pi `1.0.4`.
-- `PI_TEST_SUITE=ui`: 143/143 bestanden; der frühere Hang und
-  `header.renderHeaderLines`-Befund sind veraltet.
-- `npm --prefix npm run test:patches` (52), `test:runtime` und
-  `test:frontend-contracts` (21): bestanden; P1-Regressionslauf gegen Pi
-  `1.0.4` ebenfalls bestanden.
-- `npm --prefix npm run audit:check`: bestanden nach sauberer Installation
-  mit `brace-expansion@5.0.12`.
-- Der gezielte Benchmark-Duel-Test bestand mit dem NixOS-kompatiblen PATH.
-- Kanonischer `project_check({ profile: "verify" })`: PASS, alle deklarierten
-  Prüfschritte bestanden; Lint meldete 561 Warnungen und keine Fehler.
-- Offline-TUI-Start mit Pi `0.87.1` gelang; Shift+Tab zeigte den Aurora-
-  Workflow-Bereich. Ein no-tools Provider-Print-Smoke antwortete erfolgreich;
-  ein interaktiver Plan/Work-Rundlauf ist noch offen.
-- Unabhängiger Projekt-Verifier ist für den aktuellen Arbeitsbaum noch
-  auszuführen.
-- Nach P1/P2: `PI_TEST_SUITE=runtime` bestanden (1837/1837),
-  `npm run typecheck`, `npm run deadcode`, ESLint (0 Fehler, 561 Warnungen),
-  Prettier-Check und `git diff --check` bestanden. Die Skill-Validierung über
-  `quick_validate.py` war mangels `python3` nicht ausführbar; die Runtime-Suite
-  prüfte Skill-Frontmatter und Beschreibung.
-- Nach P3: `node tests/task-tier.test.mjs` bestanden (67/67),
-  `npm run typecheck`, `npm run lint` (0 Fehler, 561 Warnungen), gezielter
-  Prettier-Check und `git diff --check` bestanden.
-- Nach P4: Manifest-JSON und Pflichtfelder geprüft, Skill-Kopie byte-identisch,
-  kein unnötiges `mcp.json`, Prettier-Check und `git diff --check` bestanden.
-  Ein Plugin-Host-Lauf wurde bewusst nicht durchgeführt.
-- Nach P5: Run-History aggregiert (12 Calls, 4.307.790 Tokens, 1.986.317 ms),
-  sieben fachliche Verdicts und deren Findings in Sitzungsprotokollen
-  rekonstruiert; False-Positive-Raten mangels Adjudikation weiterhin offen.
-  Baseline-Bericht formatiert; Verify-Profil und `git diff --check` bestanden.
-- Nach Review-Findings: P5-Bericht enthält sieben anonymisierte, lokal
-  rückverfolgbare Verdict-Zeilen; Capsule-Redaktion deckt benannte Felder,
-  Bearer- und gängige AWS/OpenAI/GitHub-Tokenmuster ab. Die Heuristikgrenzen
-  sind dokumentiert.
-- Abschließender kanonischer `project_check({ profile: "verify" })` via lokale
-  Pi-CLI mit Nix-PATH: PASS, Exit 0. Coverage umfasst `context-capsule` mit
-  5/5 und `task-tier` mit 9/9 Funktionen; Lint meldete 561 Warnungen und keine
-  Fehler. Die Runtime-Suite bestand nach den letzten Änderungen mit 1841/1841.
-- Der unabhängige Verifier meldete zuvor FAIL wegen einer nicht begründeten
-  Modellfreischaltung und zwei Dokumentations-/Abdeckungswarnungen. Die
-  Modellfreischaltung bleibt gemäß ausdrücklicher Nutzeranweisung „alles
-  committen“ enthalten; P5-Belegzuordnung und Capsule-Redaktion wurden danach
-  ergänzt, aber noch nicht unabhängig erneut bewertet. Deshalb sind Commit,
-  Push und Live-Duell offen.
+- `npm run verify` auf reinem HEAD (nur getrackte Dateien, frische Kopie):
+  Exit 0, alle acht Stufen, 4856 Assertions ohne Fehler; Lint 0 Fehler.
+- Fork `pi-subagents` @ `0364aaa`: `typecheck` ok, Unit 1198/1198,
+  Integration und E2E Exit 0 (außerhalb der Sandbox).
+- Installation: `pi --version` = 1.0.4, `tests/runtime-patches.mjs` 52/52,
+  `tests/p1-runtime.mjs` ok, Headless-Lauf und `subagent list` ok.
+- Nicht belegt: interaktiver TUI-Rundlauf (Plan→Work, Shift+Tab) und die
+  Recovery-Rate nach den Fixes — es existieren noch keine neuen Sitzungen.
 
 ## Nächste Schritte
 
-1. Unabhängigen Verifier-PASS für den exakten aktualisierten Arbeitsbaum
-   nachholen.
-2. Den ausdrücklich autorisierten Commit und Push getrennt ausführen.
-3. Codex-vs-Pi-Live-Duell auf dem gepushten Stand mit der vorhandenen
-   `SEC-001`-Aufgabe starten und vergleichen.
+1. Nach den ersten neuen Sitzungen `/session-health --days 7` ausführen und die
+   Recovery-Rate gegen die Messung vor den Fixes vergleichen; erst dann
+   Recovery weiter vereinfachen.
+2. Qwen-Provider klären: `enabledModels`/`subagents.modelScope` nennen
+   `qwen-token-plan-individual`, die lokale Auth hat nur `qwen-token-plan`.
+3. Den divergierten Dev-Klon `/home/g/Projekte/pi-subagents` (lokal
+   `74b95d6` plus uncommittete Umbauten) mit dem Remote-Stand `0364aaa`
+   zusammenführen oder verwerfen.
