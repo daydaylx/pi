@@ -29,173 +29,91 @@
 
 ## Architekturentscheidungen
 
-- Die lokale Electron-App, ihre Launcher, ihr Packaging und ihre GUI-spezifische
-  Arbeits-/Designhistorie wurden auf ausdrücklichen Nutzerwunsch ersatzlos
-  entfernt. `extensions/frontend-protocol/` und `extensions/frontend-bridge/`
-  bleiben erhalten: Core-Extensions und Aurora nutzen den internen State-Bus;
-  `frontend-server/` stellt externen Clients die öffentliche JSONL-API bereit.
-- Phase-2-Vertrag (`extensions/frontend-protocol/`, v1.0.0): Kanäle und
-  Schemata gehören dem neutralen Modul, aurora-ui/state.ts nur noch
-  Legacy-Aliase. Command-Registry (rpc/slash/local/bridge/tui); Bridge-
-  Lücken sind seit Phase 5 weitgehend geschlossen (offen: verification.run).
-  Baseline für Phase 2: Shortcuts→Commands in `shortcuts.ts` +
-  `command-catalog.ts`; Event-Bus `aurora-ui/state/*`.
-- Planmodus: nur `work`, `simple_plan`, `detailed_plan`. Der Plan ist
-  unverbindlicher Markdown-Kontext und liegt sitzungsbezogen in der
-  Runtime-Ablage (`~/.pi/agent/plans/<workspace>/<session>.md`), nicht im
-  Projekt. Umgesetzt wird er nur nach einer ausdrücklichen, hashgebundenen
-  Freigabe (`docs/decisions/020-explicit-plan-approval.md`).
-- `shared/workspace-snapshot.mjs` liefert einen versionierten Workspace-
-  Snapshot für `extensions/resilience/`, `extensions/setup-core/` und
-  `extensions/permissions/verifier-policy.ts`. Es streamt Patch-Hashes,
-  erkennt Workspace-Mutationen mit begrenztem Retry und gibt typisierte
-  Fehler zurück; Commit- und Recovery-Gates bleiben bei Fehlern geschlossen.
-  Es erfasst `HEAD`, staged, unstaged und untracked Änderungen, Renames und
-  Deletes und speichert keine Patches, Dateiinhalte oder absoluten Pfade. Die frühere
-  Benchmark-Harness (`benchmarks/harness/workspace-snapshot.mjs`, eigene
-  Kopie mit eigenem Test) ist mit den Legacy-Benchmarks archiviert, siehe
-  [`docs/benchmark-history.md`](benchmark-history.md); das Produktionsmodul
-  ist davon unberührt.
-- Audit-Remediation Checkpoint A (F-01–F-10) ist auf `b21552e` abgeschlossen:
-  Workspace-Snapshots werden gestreamt und typisiert erfasst, Commit- und
-  Recovery-Gates bleiben bei Snapshotdefekten geschlossen, urteilslose
-  Verifier-Läufe bleiben retrybar und decken keinen Commit, und
-  Protocol-/Frontend-Contracts laufen im kanonischen `verify`. ADR 022
-  begrenzt `project-write` bei Interpretern auf projektinterne literale
-  Skripte; Inline-, stdin- und externe Skriptformen fragen nach.
-- Audit-Remediation Phase 4: F-11 entfernt nur den belegten toten Recovery-
-  Export. F-18 trennt die reine Verifier-Bewertung von der erst nach Erlaubnis
-  erfolgenden, idempotenten Executor-Normalisierung. F-19 erfasst Snapshots
-  unabhängig vom Aufruf-CWD ab Git-Root; Root-Auflösung erhält das bestehende
-  Retry-Budget. Eigenständige Capability-/Protocol-Grenzen (F-12–F-15) bleiben
-  ohne belastbaren Nettogewinn erhalten; F-23 benötigt kein Runtime-Upgrade
-  und F-24 bleibt ohne separaten Artefaktauftrag deferred.
-- SEC-001 (Deep-Review-Behebungsauftrag, abgeschlossen): Plan-, Readonly- und
-  Recovery-Gate klassifizieren Bash-Diagnosen jetzt über ein gemeinsames,
-  normalisiertes Modell (`extensions/shared/permission-policy.ts`):
-  Executables werden ausschließlich über `trustedExecutableName` aufgelöst
-  (`./git`/`./rg`/projektlokale Ersatzprogramme werden nicht mehr als
-  Systemdiagnose behandelt), `git status`/`diff`/`log` nur mit expliziter,
-  konservativer Options-Allowlist (u. a. `--no-ext-diff`/`--no-textconv`
-  für `diff` erzwungen), und `parseReadOnlyShell` lässt keine Pipelines mehr
-  zu (zuvor pro Segment separat geprüft, was Umgehungen über gemischte
-  Segmente erlaubte). Recovery-Gate erbt die Klassifikation strukturell über
-  denselben Aufruf (`extensions/permissions/guards.ts` →
-  `isPlanModeDiagnosticCommand`), keine eigene Kopie. Die Klassifikation
-  bleibt ausdrücklich eine Allowlist vor dem Executor, keine OS-Sandbox
-  (siehe [`docs/decisions/012-plan-mode-mutation-guard.md`](decisions/012-plan-mode-mutation-guard.md)).
-- SNAP-001 (Deep-Review-Behebungsauftrag, abgeschlossen): Die beiden
-  inhaltssensitiven Git-Aufrufe in `shared/workspace-snapshot.mjs` erzwingen
-  jetzt zusätzlich `--no-textconv` (nicht nur `--no-ext-diff`), sonst hätte
-  ein per `.gitattributes` konfigurierter Textconv-Treiber zwei
-  unterschiedliche Rohinhalte auf identischen Fingerprint abbilden können.
-  `WORKSPACE_SNAPSHOT_SCHEMA_VERSION` sprang `"1"` → `"2"` und invalidiert
-  damit bewusst jeden zuvor gespeicherten Fingerprint. Siehe
-  [`docs/decisions/027-workspace-snapshot-content-identity.md`](decisions/027-workspace-snapshot-content-identity.md).
-- REC-002 (Deep-Review-Behebungsauftrag, abgeschlossen): `latestRecoveryGate`
-  in `extensions/resilience/recovery-state.ts` behielt bei mehreren
-  `recovery-checked`-Markern für denselben `recovery-required`-Turn nur den
-  ersten (`!gate.checked`-Guard) statt den chronologisch neuesten — ein
-  Restart nach zwei echten `recovery_check`-Läufen stellte fälschlich den
-  ersten, veralteten Check wieder her. Der Guard ist entfernt; die neue
-  gemeinsame Reducer-Funktion `foldCheckedMarker` (plus `foldRequiredMarker`)
-  wird jetzt sowohl vom Live-Update im `recovery_check`-Tool als auch vom
-  History-Replay verwendet, sodass beide Pfade nicht mehr auseinanderlaufen
-  können.
-- OPINION-002 (Deep-Review-Behebungsauftrag, abgeschlossen):
-  `SecondOpinionService.executeApproved` in
-  `extensions/second-opinion/service.ts` prüfte das Abort-Signal des
-  Aufrufers nie erneut, nachdem die (potenziell lange wartende)
-  Freigabe-Dialog-Phase des Aufrufers (`ctx.ui.confirm` in
-  `extensions/second-opinion/index.ts`) beendet war — ein während des
-  Dialogs abgebrochenes Signal hätte trotzdem einen echten, kostenpflichtigen
-  Modellcall ausgelöst, u. a. weil `AbortSignal.addEventListener("abort", …)`
-  auf einem bereits abgebrochenen Signal nie feuert. Zwei neue Prüfungen
-  (vor dem Verbrauch der Freigabe und unmittelbar vor dem Modellcall)
-  schließen die Lücke; ein früh erkannter Abbruch verbraucht die Freigabe
-  nicht, sodass ein Aufrufer denselben, weiterhin gültigen Snapshot erneut
-  versuchen kann.
-- `project_check` ist der einzige Weg zur vollständigen Projektverifikation
-  und der einzige, der Footer und Ledger fortschreibt. Das `verify`-Tool
-  bietet nur die Teilprüfungen `typecheck`/`test` (keine Abschlussbedingung).
-- CI-`verify` nutzt seit der Archivierung der Legacy-Benchmarks (siehe
-  [`docs/benchmark-history.md`](benchmark-history.md)) wieder den
-  Standard-Shallow-Checkout; `fetch-depth: 0` war ausschließlich wegen des
-  inzwischen entfernten `benchmarks/harness/p4-manifest.json`-
-  Reachability-Checks gesetzt. `npm run test:runtime` ist bewusst nicht
-  Teil der `verify`-Kette, da es eine entwicklerspezifisch gepatchte
-  Runtime prüft.
-- Der Verifikationsstatus ist sitzungsgebunden, an den gemeinsamen
-  Workspace-Snapshot gebunden und rein technisch. Er erscheint dedupliziert
-  bei `agent_settled`, ist abschaltbar und nutzt weder `agent_end` als
-  Erledigung noch Heuristiken als `blocked`.
-- Aurora besitzt Fußzeile und transientes Activity-Widget
-  (`docs/decisions/007`, `009`). Die Fußzeile ist eine Zeile und die einzige
-  permanente Statusfläche. Das Eingabefeld ist Pis eigener Editor
-  (`docs/decisions/013`). Subagenten stehen im Activity-Widget, nicht in der
-  Fußzeile.
-- Aurora animiert nur echte laufende Arbeit: `DENKT NACH` und `ARBEITET`
-  wechseln in `contextual` ihren Glyph, `ANTWORTET` und `WARTET AUF MODELL`
-  bleiben statisch. Statuslabels und Overflow-Zusammenfassung liegen
-  ausschließlich in `extensions/aurora-ui/tool-renderers.ts`.
-- Auroras visuelle Gestaltung kommt aus `extensions/aurora-ui/tile.ts`: gefüllte
-  Kacheln, Felder, Status-Pills und ab `wide` ein zweispaltiges Grid.
-  Füllungen nur über die acht `Theme.bg`-Flächen; Warnton nutzt `inverse`.
-  Unter 18 Spalten fallen Kacheln auf rahmenlose Zeilen zurück.
-- Es gibt genau drei aktive Subagentenrollen — `investigator`, `debugger`,
-  `verifier` (`docs/decisions/011`). Die `verifier`-Delegation ist
-  risikobasiert: verpflichtend nur bei Sicherheits-, Permission-/Plan-Mode-,
-  Workflow-/Activity-State-, API-/Schema-, Installations-/Upgrade- oder
-  Verifikationslogik, hohem Blast-Radius oder auf ausdrückliche
-  Nutzeranforderung. Mehrere betroffene Dateien allein lösen keine Pflicht aus.
-- Die Subagent-Tool-Surface wird durch `toolSchemaMode: "harness"` reduziert,
-  nicht mehr als Nebenwirkung von `toolDescriptionMode: "custom"`
-  (`docs/decisions/014`). `action` ist ein geschlossenes Enum aus `list`,
-  `status`, `stop`, `interrupt`; zusätzliche Eigenschaften werden abgelehnt.
-  Es gibt keine Subagent-Parallelitätskonfiguration mehr — sie hatte keinen
-  Laufzeitverbraucher.
-- Shift+Tab ist die einzige normale Workflow-Steuerung: Die Auswahl Work,
-  Schnellplan oder Architekturplan wartet danach auf die nächste echte
-  Nutzereingabe, startet keinen Turn und verändert keine vorhandene
-  Plandatei. `/plan`, `/work`, `/go` und ihr `Super+P`-Shortcut sind keine
-  öffentlichen Workflow-Wege mehr. Ein Plan aus einem tatsächlich beendeten
-  Planning-Turn kann beim anschließenden Work-Turn einmalig als flüchtiger
-  Kontext dienen; alte Dateien und fortgesetzte Sitzungen werden nie
-  automatisch eingebunden. Dieselbe Änderung führte die Delegationsvorlage
-  (Original User Request / Constraints / Delegated Question) in `AGENTS.md`
-  ein.
-- Plan Mode schreibt ausschließlich über `plan_write` in die sitzungsbezogene
-  Runtime-Ablage und blockiert Arbeitsbaum-Mutationen auch unter `yolo`. Die
-  feste Allowlist umfasst Lese-/LSP-/Recovery-/Web-Fähigkeiten,
-  `verify({check:"typecheck"})`, begrenzte Diagnose-Bash und bei unbekannter
-  Änderungssurface eine artefaktfreie Investigator-SINGLE-Delegation;
-  Projekt-Skripte und `project_check` bleiben gesperrt
-  (`docs/decisions/012`).
-- Ausgelieferte Erweiterungen müssen ohne Arbeitsbaum-Kontext laden:
-  Literal-Importcheck (`scripts/check-relative-imports.mjs`) und Versioned-
-  Tree-Check (`scripts/check-versioned-tree.mjs`, `git archive HEAD` +
-  Importcheck + Laden der aktiven Extensions) sichern, dass kein `index.ts`
-  eine unversionierte Datei importiert. Gilt nur für HEAD, ersetzt keine CI.
-- Tool-Receipts im Collapsed-Zustand sind informative Einzeilen
-  (`collapse-result.ts`): Fehler, Partial Output, Truncation und leere
-  Ergebnisse bleiben immer sichtbar beim nativen Renderer.
-- Tokenmetriken trennen Cache-Anteile: `cacheRead`/`cacheWrite` werden
-  separat summiert; `providerReportedTotal` ist das rohe `usage.totalTokens`
-  und darf Cache-Buchhaltung enthalten — es ist keine Formel aus
-  input+output+reasoning (Methodik dazu:
-  [`docs/benchmark-history.md`](benchmark-history.md#methodische-erkenntnisse-erhalten-nicht-neu-ausgewertet)).
-- `project_check` benennt seinen Prüfstand explizit: Das Ergebnis gilt für
-  den Workspace-Snapshot (Fingerprint), niemals automatisch für den
-  versionierten HEAD.
-- Der Nutzer-Installer liefert `APPEND_SYSTEM.md` und `prompts/` mit; die
-  Allowlist in `scripts/install-user.mjs` ist die einzige Quelle dafür.
-- `APPEND_SYSTEM.md` beschreibt phasenbasierte Narration, keine
-  Tool-für-Tool-Kommentierung.
-- Das Compaction-Budget ist gemessen (`docs/decisions/010`): Reserve 49152,
-  Recent 20000, Auslösung bei 81,9 % des Fensters. `reserveTokens` steuert
-  Schwelle und Summary-Budget (`0,8 × reserve`) zugleich; ein Überlauf ist nur
-  einmal wiederherstellbar. Die Werte sind im Runtime-Test gegen stillen
-  Rückbau festgenagelt (Upstream-Default: 20.000 Tokens).
+Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Kern.
+
+- **Frontend-Schicht:** Die lokale Electron-App ist ersatzlos entfernt. Aurora
+  und die Core-Extensions sprechen über den internen State-Bus
+  (`extensions/frontend-protocol/`, `extensions/frontend-bridge/`);
+  `frontend-server/` stellt externen Clients die öffentliche JSONL-API bereit
+  (`docs/frontend-api.md`, Paket `@daydaylx/pi-frontend-protocol`);
+  `verification.run` ist darüber nicht direkt aufrufbar.
+- **Planmodus** (ADR 012, 016, 020): nur `work`, `simple_plan`,
+  `detailed_plan`. Shift+Tab ist die einzige normale Steuerung; die Auswahl
+  wartet auf die nächste Nutzereingabe und startet keinen Turn. Pläne werden
+  ausschließlich über `plan_write` in die sitzungsbezogene Ablage
+  (`~/.pi/agent/plans/<workspace>/<session>.md`) geschrieben, sind
+  unverbindlicher Kontext und werden nur nach ausdrücklicher, hashgebundener
+  Freigabe umgesetzt. Arbeitsbaum-Mutationen sind unter YOLO 1 und 2 gesperrt,
+  nur YOLO 3 übergeht sie (ADR 029). Die feste Allowlist umfasst
+  Lese-/Diagnose-/Recovery-/Web-Fähigkeiten, `verify({check:"typecheck"})`,
+  begrenzte Diagnose-Bash und eine artefaktfreie temporäre Analyse-Spec;
+  Projekt-Skripte und `project_check` bleiben gesperrt.
+- **Bash-Klassifikation** (ADR 012, 022): Plan-, Readonly- und Recovery-Gate
+  teilen ein normalisiertes Modell in `extensions/shared/permission-policy.ts`.
+  Executables werden nur über `trustedExecutableName` aufgelöst,
+  `git status/diff/log` nur mit konservativer Options-Allowlist,
+  `parseReadOnlyShell` lässt keine Pipelines zu. Das ist eine Allowlist vor
+  dem Executor, keine OS-Sandbox. `project-write` erlaubt Interpreter nur für
+  projektinterne literale Skripte; Inline-, stdin- und externe Skripte fragen
+  nach.
+- **YOLO** (ADR 029): drei Stufen — 1 blockiert, 2 fragt, 3 erlaubt an harten
+  Grenzen; nie persistiert.
+- **Workspace-Snapshot** (ADR 027): `shared/workspace-snapshot.mjs` liefert
+  einen versionierten Snapshot (HEAD, staged, unstaged, untracked, Renames,
+  Deletes; keine Patches, Inhalte oder absoluten Pfade) für
+  `extensions/resilience/`, `extensions/setup-core/` und
+  `extensions/permissions/verifier-policy.ts`. Erfassung ab Git-Root,
+  gestreamte Patch-Hashes, begrenztes Retry, typisierte Fehler: Commit- und
+  Recovery-Gates bleiben bei Snapshotdefekten geschlossen. Inhaltssensitive
+  Git-Aufrufe erzwingen `--no-ext-diff` und `--no-textconv`; die
+  Schema-Version ist `"2"`. Die frühere Benchmark-Kopie ist archiviert
+  ([`docs/benchmark-history.md`](benchmark-history.md)).
+- **Verifikation** (ADR 015, 021, 032): `project_check` ist der einzige Weg
+  zur vollständigen Projektverifikation und der einzige, der Footer und Ledger
+  fortschreibt; das Ergebnis gilt für den Workspace-Snapshot, nie automatisch
+  für HEAD. Das `verify`-Tool bietet nur `typecheck`/`test`. Der
+  Verifikationsstatus ist sitzungs- und snapshotgebunden, rein technisch und
+  erscheint dedupliziert bei `agent_settled`. Verifier-Kette: Need-Gate,
+  Dedup-Gate, Ticket, Commit-Gate (Pfadkatalog:
+  `extensions/permissions/verifier-required-paths.ts`); urteilslose
+  Verifier-Läufe bleiben retrybar und decken keinen Commit.
+- **Recovery** (ADR 016): `latestRecoveryGate`
+  (`extensions/resilience/recovery-state.ts`) behält den chronologisch
+  neuesten `recovery-checked`-Marker; Live-Update im `recovery_check`-Tool
+  und History-Replay nutzen denselben Reducer (`foldCheckedMarker`,
+  `foldRequiredMarker`).
+- **Subagenten** (ADR 031, 014, 018): keine festen Rollen mehr;
+  `agents/verifier.md` ist das einzige technische Profil. Delegation läuft
+  über temporäre Task-Agenten (`subagent` mit `spec`, höchstens 3 pro
+  Parent-Lauf). `toolSchemaMode: "harness"` reduziert die Tool-Surface;
+  `action` ist ein geschlossenes Enum (`list`, `status`, `stop`,
+  `interrupt`). Es gibt keine Subagent-Parallelitätskonfiguration.
+- **Aurora** (ADR 007, 009, 013): Aurora besitzt die einzeilige Fußzeile (die
+  einzige permanente Statusfläche) und das transiente Activity-Widget; das
+  Eingabefeld ist Pis eigener Editor; Subagenten stehen im Activity-Widget.
+  Animiert wird nur echte Arbeit (`DENKT NACH`, `ARBEITET` in
+  `contextual`; `ANTWORTET`, `WARTET AUF MODELL` statisch). Gestaltung aus
+  `extensions/aurora-ui/tile.ts` (gefüllte Kacheln über die acht
+  `Theme.bg`-Flächen, ab `wide` zweispaltig, unter 18 Spalten rahmenlos);
+  Statuslabels und Overflow in `tool-renderers.ts`. Eingeklappte
+  Tool-Receipts sind Einzeilen (`collapse-result.ts`); Fehler, Partial
+  Output, Truncation und leere Ergebnisse bleiben sichtbar.
+- **Auslieferung:** Extensions müssen ohne Arbeitsbaum-Kontext laden
+  (`scripts/check-relative-imports.mjs`, `scripts/check-versioned-tree.mjs`
+  mit `git archive HEAD`; gilt nur für HEAD, ersetzt keine CI). CI-`verify`
+  nutzt den Standard-Shallow-Checkout. Die Allowlist in
+  `scripts/install-user.mjs` ist die einzige Quelle für Installiertes
+  (inkl. `APPEND_SYSTEM.md` und `prompts/`); lokale `+extensions/…`-Einträge
+  der installierten `settings.json` bleiben erhalten.
+- **Messung und Budgets:** Tokenmetriken trennen `cacheRead`/`cacheWrite`;
+  `providerReportedTotal` ist das rohe `usage.totalTokens` und kann
+  Cache-Buchhaltung enthalten (Methodik in `docs/benchmark-history.md`).
+  Compaction (ADR 010): Reserve 49152, Recent 20000, Auslösung bei 81,9 % des
+  Fensters; `reserveTokens` steuert Schwelle und Summary-Budget
+  (`0,8 × reserve`); ein Überlauf ist nur einmal wiederherstellbar; die Werte
+  sind im Runtime-Test festgenagelt (Upstream-Default 20.000).
+- **Kommunikation:** `APPEND_SYSTEM.md` verlangt phasenbasierte Narration,
+  keine Tool-für-Tool-Kommentierung; die Delegationsvorlage steht in `AGENTS.md`.
 
 ## Nicht-Ziele
 
@@ -207,25 +125,22 @@
 
 ## Bekannte Einschränkungen
 
-- Kontrollierte Baseline- und Holdout-Läufe für die neue Snapshotlogik stehen noch aus.
-- Der Fork `daydaylx/pi-subagents` ist am Pin `0364aaa` typecheck-grün,
-  seine Unit-, Integrations- und E2E-Suiten bestehen; er ist trotzdem nicht
-  Teil einer Pflichtprüfung des Hauptrepos.
-- Pi 1.0.4 warnt beim Start, dass `typebox` in `pi-subagents` (und
-  `pi-web-access`) unter `dependencies` statt `peerDependencies` steht. Beim
-  Fork bewusst nicht geändert: Pi installiert Git-Pakete mit `--omit=peer`, der
-  asynchrone Runner läuft außerhalb des Extension-Loaders und braucht
-  `typebox` aus dem eigenen `node_modules`.
+- Kontrollierte Baseline- und Holdout-Läufe für die Snapshotlogik stehen aus.
+- Der Fork `daydaylx/pi-subagents` ist am Pin typecheck-grün, seine Unit-,
+  Integrations- und E2E-Suiten bestehen; er ist nicht Teil einer
+  Pflichtprüfung des Hauptrepos.
+- Pi 1.0.4 warnt beim Start, dass `typebox` in `pi-subagents` und
+  `pi-web-access` unter `dependencies` statt `peerDependencies` steht. Beim
+  Fork bewusst nicht geändert: Pi installiert Git-Pakete mit `--omit=peer`, und
+  der asynchrone Runner läuft außerhalb des Extension-Loaders.
 - `install:user --apply` sichert nichts und überschreibt auch `setup.json`,
-  `models.json`, `keybindings.json` und `web-search.json` im Agent-Verzeichnis.
-- Für P2 fehlen priorisierte Befunde zu Restkomplexität, Dokumentation und
-  Knip-Regeln; belegt ist bislang nur `tests/suites/runtime.mjs` — die
-  Aufteilung kann die `SECTION_SUITES`-Registry als Schnittkante nutzen.
+  `models.json`, `keybindings.json` und `web-search.json` im
+  Agent-Verzeichnis.
 - Der Live-Smoke ist ohne authentifizierte TTY nicht durchführbar; Aurora-
   Sichtbarkeit, Shift+Tab, Plan→Work-Handoff und Subagent-Aufruf bleiben
   unbelegt (`docs/manual-smoke-checklist.md`).
-- Die frühere Desktop-GUI wird nicht mehr in diesem Repository gepflegt; ihre
-  lokale Implementierung und Arbeitsunterlagen wurden entfernt.
+- P2: belegt ist nur die Aufteilung von `tests/suites/runtime.mjs`
+  (Schnittkante: `SECTION_SUITES`-Registry).
 
 ## Offene Risiken
 
@@ -233,9 +148,6 @@
   bei allen unterstützten Git-Versionen gleich behandelt werden.
 - Zusätzliche Metriken oder Statushinweise können Schemakompatibilität,
   Tokenverbrauch und Warnungsdichte beeinträchtigen.
-- `extensions/aurora-ui/dev-diagnostics.ts` ist unversioniert, wird aber von
-  `index.ts` importiert: Bis zum Commit bleibt `check:versioned-tree` rot
-  und ein Ausliefern von HEAD reproduziert den CI-Verify-Failure #156.
 
 ## Offene Fragen
 
@@ -262,26 +174,18 @@
 
 ## Aktuelle Prioritäten
 
-- Audit-Remediation: Die letzten Sitzungslogs zeigen, dass temporäre
-  `spec.profile: "verify"`-Aufträge vor der Policy-Umschreibung keinen
-  Verifier-Ticket-Eintrag erhielten (`unbound-ticket`). Setup-Core normalisiert
-  diese Form jetzt vor dem Ticket-Start; Runtime- und Regressionstests decken
-  die Bindung ab. Der dokumentierte Pi-Runtime-Pin und die Dev-Abhängigkeit
-  sind beide `1.0.4`. Der `brace-expansion`-Audit-Befund ist durch den Pi-Pin
-  und Root-Override `5.0.12` behoben; nach `npm ci` wurde `audit:check` erneut
-  erfolgreich ausgeführt.
+- Audit-Umsetzung vom 2026-10-13 ist abgeschlossen (Stand:
+  `docs/PROJECT_STATE.md`); Pi-Runtime-Pin und Dev-Abhängigkeit sind `1.0.4`.
 - Real-Duel: Medium-Profile, Fingerprint-Provenienz und die 36-Lauf-Matrix
   sind vorbereitet. Vor dem Dual-Smoke zuerst den kanonischen Audit-/Medium-
   Stand prüfen und die explizite Commit-Freigabe einholen.
-- Die lokale Desktop-GUI wurde entfernt; der generische Frontend-Server und
-  die gemeinsame Core-/TUI-State-Schnittstelle bleiben aktiv.
 - Der Live-Smoke (#137) bleibt offen: Offline-Start/Shift+Tab ist geprüft,
   Provider- und Plan/Work-Schritte sind noch nicht gelaufen.
-- Der Fork-Pin bleibt ein vollständiger, bei GitHub erreichbarer SHA, der
-  den alten Pin enthält — `main` ist nicht automatisch der neueste Stand.
-  Aktueller Pin: `0364aaa` (Branch `feat/temporary-agent-spec`). Vor jeder
-  Pin-Änderung Erreichbarkeit prüfen und die Integrity im Lockfile neu
-  berechnen; die lokale Suite bleibt bewusst offline.
+- Der Fork-Pin ist ein vollständiger, bei GitHub erreichbarer SHA, der den
+  alten Pin enthält (aktuell `0364aaa`, Branch
+  `feat/temporary-agent-spec`); `main` ist nicht automatisch der neueste
+  Stand. Vor jeder Pin-Änderung Erreichbarkeit prüfen und die Integrity im
+  Lockfile neu berechnen; die lokale Suite bleibt bewusst offline.
 
 ## Verworfene Optionen
 
