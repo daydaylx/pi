@@ -38,10 +38,22 @@ const PROVIDER_ERROR_PATTERN =
 export function parseVerifierVerdict(
   text: string,
 ): VerifierVerdict | undefined {
-  const match = text.match(
-    /^\s*(PASS_WITH_WARNINGS|PASS|FAIL|UNVERIFIABLE)\b/m,
+  const headingMatch = text.match(/^#{1,6}\s+urteil\b(?:\s*:)?/im);
+  if (headingMatch) {
+    const afterHeading = text.slice(
+      headingMatch.index! + headingMatch[0].length,
+    );
+    const match = afterHeading.match(
+      /\b(PASS_WITH_WARNINGS|PASS|FAIL|UNVERIFIABLE)(?:\*\*|__|`)*(?![A-Za-z0-9_])/,
+    );
+    if (match) {
+      return match[1] as VerifierVerdict;
+    }
+  }
+  const fallbackMatch = text.match(
+    /^\s*(?:(?:>|-)\s+)?(?:\*\*|__|\`)*(?:(?:[uU]rteil|[vV]erdict)\s*:\s*)?(?:\*\*|__|\`)*(PASS_WITH_WARNINGS|PASS|FAIL|UNVERIFIABLE)(?:\*\*|__|\`)*(?![A-Za-z0-9_])/m,
   );
-  return match?.[1] as VerifierVerdict | undefined;
+  return fallbackMatch?.[1] as VerifierVerdict | undefined;
 }
 
 /**

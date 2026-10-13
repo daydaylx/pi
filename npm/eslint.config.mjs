@@ -40,6 +40,7 @@ export default [
       "frontend-server/**/*.mjs",
       "tests/**/*.mjs",
       "shared/**/*.mjs",
+      "extensions/**/*.mjs",
     ],
     languageOptions: { globals: globals.node },
   },

@@ -92,7 +92,7 @@ function recoveryBlockReason(
 const MAX_INPUT_PREVIEW = 300;
 
 function stopNonInteractive(ctx: ExtensionContext): { terminate?: true } {
-  return ctx.mode === "tui" ? {} : { terminate: true };
+  return ctx.mode !== "tui" && !ctx.hasUI ? { terminate: true } : {};
 }
 
 function stopRecoveryNonInteractive(

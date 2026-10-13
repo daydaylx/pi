@@ -1738,6 +1738,22 @@ export const verificationSections = {
         typeof profilesMod?.resolveProfileCwd === "function",
         "verify-profiles exports resolveProfileCwd",
       );
+      assert(
+        profilesMod.isInfrastructureFailure(
+          "ImportError: cannot import name 'x' from 'mod'",
+        ),
+        "an ImportError traceback is infrastructure failure",
+      );
+      assert(
+        profilesMod.isInfrastructureFailure("sh: foo: command not found"),
+        "a shell command-not-found diagnostic is infrastructure failure",
+      );
+      assert(
+        !profilesMod.isInfrastructureFailure(
+          "AssertionError: expected ImportError to be raised",
+        ),
+        "a test assertion mentioning ImportError is not infrastructure failure",
+      );
 
       const workspace = mkdtempSync(path.join(tmpdir(), "pi-verify-profiles-"));
       const cfgDir = path.join(workspace, ".pi");

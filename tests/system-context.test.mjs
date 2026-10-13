@@ -87,6 +87,43 @@ test("system facts use allowlisted os-release fields and report missing sources"
   }
 });
 
+test("collector strips C0 control characters while preserving valid text", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-context-"));
+  try {
+    const osReleasePath = path.join(temp, "os-release");
+    writeFileSync(
+      osReleasePath,
+      'ID=nixos\nNAME="Nix\u0000\u0007OS\u001F\u007F-24.11"\nVERSION="24.11\tStable"\n',
+    );
+    const value = collector.collectSystemContext(["system"], {
+      home: temp,
+      cwd: temp,
+      etcNixos: path.join(temp, "missing"),
+      osReleasePath,
+      currentSystemPath: path.join(temp, "missing-current"),
+      profileSystemPath: path.join(temp, "missing-profile"),
+      commandRunner(command) {
+        if (command === "nixos-version") {
+          return {
+            available: true,
+            exitCode: 0,
+            stdout: "24.11pre\u0001\u0008\u001F\u007F (Vicuna)\t[ok]\n",
+          };
+        }
+        return { available: false, reason: "unavailable" };
+      },
+      now: () => "2026-10-12T00:00:00.000Z",
+    });
+    // Befund-Test: C0-Steuerzeichen wurden gefiltert
+    assert.equal(value.system.os.NAME, "NixOS-24.11");
+    assert.equal(value.system.nixosVersion, "24.11pre (Vicuna)\t[ok]");
+    // Gegenprobe: Legitime Tabs bleiben erhalten
+    assert.equal(value.system.os.VERSION, "24.11\tStable");
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
 test("collector child environments omit credentials and retain required session values", () => {
   const previous = process.env.SYSTEM_CONTEXT_TEST_SECRET;
   process.env.SYSTEM_CONTEXT_TEST_SECRET = "must-not-be-forwarded";

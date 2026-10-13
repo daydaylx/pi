@@ -45,6 +45,7 @@ export function commandEnvironment(overrides = {}) {
 function safeText(value, limit = 240) {
   if (typeof value !== "string") return undefined;
   const result = value
+    // eslint-disable-next-line no-control-regex -- C0-Steuerzeichen außer \t, \n, \r sowie DEL (\u007F) gezielt filtern
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
     .trim()
     .slice(0, limit);
@@ -52,9 +53,12 @@ function safeText(value, limit = 240) {
 }
 
 function boundedCommandText(value) {
-  return String(value ?? "")
-    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
-    .slice(0, MAX_COMMAND_OUTPUT);
+  return (
+    String(value ?? "")
+      // eslint-disable-next-line no-control-regex -- C0-Steuerzeichen außer \0, \t, \n, \r sowie DEL (\u007F) gezielt filtern
+      .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+      .slice(0, MAX_COMMAND_OUTPUT)
+  );
 }
 
 function defaultCommandRunner(command, args, options = {}) {
@@ -85,7 +89,10 @@ function commandOutput(commandRunner, command, args, options) {
     return { available: false, reason: result?.reason ?? "unavailable" };
   if (result.exitCode !== 0)
     return { available: false, reason: `exit ${result.exitCode}` };
-  return { available: true, value: boundedCommandText(result.stdout) };
+  return {
+    available: true,
+    value: boundedCommandText(result.stdout).trimEnd(),
+  };
 }
 
 function parseOsRelease(raw) {
@@ -494,6 +501,7 @@ export function systemSkillContext(categories = []) {
     if (![...Object.values(SYSTEM_SKILL_FILES)].flat().includes(name)) continue;
     try {
       const body = readFileSync(path.join(root, name), "utf8")
+        // eslint-disable-next-line no-control-regex -- C0-Steuerzeichen außer \t, \n, \r sowie DEL (\u007F) gezielt filtern
         .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
         .trim()
         .slice(0, remaining);

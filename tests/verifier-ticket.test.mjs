@@ -10,6 +10,9 @@ import { createHarness } from "./shared/harness.mjs";
 import { ROOT } from "./shared/jiti-loader.mjs";
 
 const verifierTicket = await load("extensions/setup-core/verifier-ticket.ts");
+const subagentGuard = await load(
+  "extensions/setup-core/subagent-output-guard.ts",
+);
 
 function makeCtx(overrides = {}) {
   const harness = createHarness({
@@ -143,6 +146,60 @@ await test("ticketSnapshot() carries every Need-Gate field through unchanged", (
     projected.requiredPathHits !== ticket.requiredPathHits,
     "the projection copies the array rather than sharing the frozen ticket's reference",
   );
+});
+
+await test("parseVerifierVerdict recognizes structured headings, decorations, prefixes and fallbacks", () => {
+  const parse = subagentGuard.parseVerifierVerdict;
+
+  // Heading-prioritized cases
+  eq(
+    parse("## Urteil\n\nPASS\n\nAlles belegt."),
+    "PASS",
+    "standard ## Urteil heading",
+  );
+  eq(parse("## Urteil: PASS\n\nBegründung"), "PASS", "inline ## Urteil: PASS");
+  eq(
+    parse("### urteil\n\n**FAIL**\n\nKernanforderung fehlt."),
+    "FAIL",
+    "case-insensitive ### urteil with decorated FAIL",
+  );
+  eq(
+    parse("# Urteil\n\n`PASS_WITH_WARNINGS`\n\nRestrisiko dokumentiert."),
+    "PASS_WITH_WARNINGS",
+    "# Urteil with backticks",
+  );
+  eq(
+    parse("PASS (Unit-Tests)\n\n## Urteil\n\nFAIL (Regression)"),
+    "FAIL",
+    "verdict after ## Urteil outranks earlier line-start verdict",
+  );
+
+  // Line-start fallback with decorations / prefixes
+  eq(parse("PASS\n\nBegründung"), "PASS", "bare line-start PASS");
+  eq(
+    parse("FAIL\n\nPASS wäre falsch"),
+    "FAIL",
+    "first line-start FAIL wins over later text",
+  );
+  eq(parse("`PASS`\n\nBegründung"), "PASS", "backtick-decorated line-start");
+  eq(parse("**FAIL**\n\nBegründung"), "FAIL", "bold-decorated line-start");
+  eq(
+    parse("__UNVERIFIABLE__\n\nBegründung"),
+    "UNVERIFIABLE",
+    "underscore-decorated line-start",
+  );
+  eq(parse("Urteil: PASS"), "PASS", "Urteil: prefix");
+  eq(parse("Verdict: FAIL"), "FAIL", "Verdict: prefix");
+  eq(parse("> Verdict: PASS"), "PASS", "blockquote prefix");
+  eq(parse("- **PASS**"), "PASS", "list item prefix");
+
+  // Counter-probes
+  eq(
+    parse("Text ganz ohne Urteil"),
+    undefined,
+    "text without verdict is undefined",
+  );
+  eq(parse(""), undefined, "empty text is undefined");
 });
 
 const { passed, failed } = summary();

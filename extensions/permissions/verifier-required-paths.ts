@@ -59,6 +59,8 @@ const RULES: RequiredPathRule[] = [
       "extensions/resilience/index.ts",
       "extensions/resilience/recovery-state.ts",
       "extensions/resilience/types.ts",
+      "shared/workspace-snapshot.mjs",
+      "shared/workspace-snapshot.d.mts",
     ),
   },
   {
@@ -66,11 +68,14 @@ const RULES: RequiredPathRule[] = [
     test: oneOf(
       "extensions/permissions/verifier-policy.ts",
       "extensions/permissions/verifier-required-paths.ts",
+      "extensions/permissions/verifier-risk.ts",
+      "extensions/permissions/temporary-agent-policy.ts",
       "extensions/setup-core/config.ts",
       "extensions/setup-core/index.ts",
       "extensions/setup-core/verification-status.ts",
       "extensions/setup-core/subagent-output-guard.ts",
       "extensions/setup-core/verify-profiles.ts",
+      "extensions/setup-core/verifier-ticket.ts",
       ".pi/verify.json",
     ),
   },

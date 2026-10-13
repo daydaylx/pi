@@ -54,6 +54,14 @@ export const installerSections = {
         deployedSet.has("APPEND_SYSTEM.md"),
         "greenfield includes the active communication rules",
       );
+      assert(
+        deployedSet.has("models.json"),
+        "greenfield includes root-level models.json",
+      );
+      assert(
+        deployedSet.has("web-search.json"),
+        "greenfield includes root-level web-search.json",
+      );
       for (const prompt of [
         "analyse.md",
         "docs-check.md",
@@ -159,6 +167,14 @@ export const installerSections = {
         assert(
           existsSync(path.join(target, "subagent-tool-description.md")),
           "deployed target contains the agent-level custom subagent description",
+        );
+        assert(
+          existsSync(path.join(target, "models.json")),
+          "deployed target contains models.json",
+        );
+        assert(
+          existsSync(path.join(target, "web-search.json")),
+          "deployed target contains web-search.json",
         );
         for (const launcher of [
           "bin/pi",

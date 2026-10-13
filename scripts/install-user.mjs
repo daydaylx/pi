@@ -25,6 +25,8 @@ const ALLOWLIST = [
   "README.md",
   "package.json",
   "settings.json",
+  "models.json",
+  "web-search.json",
   "setup.json",
   "tsconfig.json",
   "keybindings.json",

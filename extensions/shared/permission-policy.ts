@@ -6,11 +6,13 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import {
   basename,
   delimiter,
   dirname,
   isAbsolute,
+  join,
   relative,
   resolve,
   sep,
@@ -40,6 +42,7 @@ const YOLO_FULL_ALLOW: PolicyDecision = {
 const SECRET_DATA_EXTENSIONS = "json|ya?ml|toml|ini|env|pem|key|p12|pfx";
 const SECRET_PATH_PATTERN = new RegExp(
   "(^|[\\s/\\\\])(?:\\.env(?:\\.[^\\s/\\\\]+)?|\\.ssh|\\.gnupg|\\.aws|\\.npmrc|\\.pypirc|\\.netrc|" +
+    "\\.git-credentials|\\.kube[/\\\\]config|\\.docker[/\\\\]config\\.json|\\.config[/\\\\]gh[/\\\\]hosts\\.ya?ml|" +
     `\\.(?:auth|credentials?|secrets?|tokens?)|(?:auth|credentials?|secrets?|tokens?)\\.(?:${SECRET_DATA_EXTENSIONS})|(?:credentials?|secrets?|tokens?)\\.[^\\s/\\\\]+` +
     "|id_rsa|id_ed25519|[^\\s/\\\\]+\\.(?:pem|key|p12|pfx))(?:[\\s/\\\\]|$)",
   "i",
@@ -182,7 +185,7 @@ function isHeadlessTrustedNpxInvocation(command: string): boolean {
 }
 
 const WRITE_CAPABLE_PATTERN =
-  /\b(?:rm|rmdir|unlink|trash|cp|mv|mkdir|touch|tee|truncate|dd|chmod|chown|chgrp|ln|rsync|install)\b|\bgio\s+trash\b|\bsed\b[^;&|]*\s-i(?:\s|$)|(?:^|[^<])>(?!>)|>>/i;
+  /\b(?:rm|rmdir|unlink|trash|cp|mv|mkdir|touch|tee|truncate|dd|chmod|chown|chgrp|ln|rsync|install|wget)\b|\bgio\s+trash\b|\bsed\b[^;&|]*\s-i(?:\s|$)|(?:^|[^<])>(?!>)|>>|\bcurl\b[^;&|]*\s(?:-[a-zA-Z0-9]*[oO]|--output(?:=|\s|$))/i;
 
 function isWriteCapableCommand(command: string): boolean {
   return WRITE_CAPABLE_PATTERN.test(command);
@@ -490,6 +493,20 @@ function canonicalizeMissingPath(lexicalPath: string): {
   }
 }
 
+function normalizeRawPath(rawPath: string): string {
+  let normalized = rawPath.startsWith("@") ? rawPath.slice(1) : rawPath;
+  if (normalized === "~") {
+    return homedir();
+  }
+  if (
+    normalized.startsWith("~/") ||
+    (process.platform === "win32" && normalized.startsWith("~\\"))
+  ) {
+    return join(homedir(), normalized.slice(2));
+  }
+  return normalized;
+}
+
 /**
  * Resolve both path identities before a native file operation is authorized.
  * This is still an observation: a caller that checks and opens separately has
@@ -515,7 +532,7 @@ export function resolvePathScope(
       return { lexicalRoot, canonicalRoot };
     })
     .sort((left, right) => right.lexicalRoot.length - left.lexicalRoot.length);
-  const lexicalPath = resolve(root, rawPath);
+  const lexicalPath = resolve(root, normalizeRawPath(rawPath));
   const lexicalRoot = roots.find((candidate) =>
     isInside(candidate.lexicalRoot, lexicalPath),
   );
@@ -902,7 +919,14 @@ function tokenizeSegment(segment: string): string[] {
 }
 
 function isExternalPathReference(value: string, cwd: string): boolean {
-  if (value === "~" || value.startsWith("~/")) return true;
+  if (
+    value === "~" ||
+    value.startsWith("~/") ||
+    value === "@~" ||
+    value.startsWith("@~/")
+  ) {
+    return true;
+  }
   const identity = resolvePathScope(value, cwd);
   return identity.scope !== "project" || identity.symlinkEscape;
 }
@@ -1813,6 +1837,17 @@ export function classifyOperationEffect(
       if (args.some((arg) => ["--ext-diff", "--textconv"].includes(arg)))
         return "RISKY";
       const { action, position } = gitAction(args);
+      const preArgs = args.slice(0, position);
+      if (
+        preArgs.some(
+          (arg) =>
+            arg === "-c" ||
+            /^-c.+/.test(arg) ||
+            /^--(?:config-env|exec-path)(?:=|$)/.test(arg),
+        )
+      ) {
+        return "RISKY";
+      }
       if (action && GIT_MUTATIONS.has(action)) return "MUTATING";
       if (
         action === "config" &&
@@ -2017,6 +2052,90 @@ function likelyExternalWrite(command: string, cwd: string): boolean {
   return isWriteCapableCommand(command) && containsExternalPath(tokens, cwd);
 }
 
+function likelyProtectedPathWrite(command: string, cwd: string): boolean {
+  if (!isWriteCapableCommand(command)) return false;
+  const targets: string[] = [];
+  const redirects = /\d*>>?\s*("[^"]*"|'[^']*'|[^\s|;&]+)/g;
+  for (const match of command.matchAll(redirects)) {
+    const target = match[1].replace(/^["']|["']$/g, "");
+    if (!target.startsWith("&")) targets.push(target);
+  }
+
+  const parse = parseReadOnlyShell(command);
+  const segments = parse.error
+    ? command.split(/[|;&]+/)
+    : parse.segments.map((tokens) => tokens.join(" "));
+  const operandWriters = new Set([
+    "chmod",
+    "chgrp",
+    "chown",
+    "mkdir",
+    "rm",
+    "rmdir",
+    "touch",
+    "truncate",
+    "unlink",
+    "trash",
+  ]);
+  for (const segment of segments) {
+    const tokens = tokenizeSegment(segment);
+    const executable = tokens[0]?.split(/[\\/]/).at(-1)?.toLowerCase();
+    if (!executable) continue;
+    const operands = tokens.slice(1).filter((token) => !token.startsWith("-"));
+    if (operandWriters.has(executable) || executable === "tee") {
+      targets.push(...operands);
+    } else if (["cp", "install", "ln", "mv", "rsync"].includes(executable)) {
+      if (operands.length > 0) targets.push(operands.at(-1)!);
+    } else if (executable === "dd") {
+      targets.push(
+        ...tokens
+          .slice(1)
+          .flatMap((token) =>
+            token.startsWith("of=") ? [token.slice(3)] : [],
+          ),
+      );
+    } else if (executable === "curl" || executable === "wget") {
+      for (let index = 1; index < tokens.length; index += 1) {
+        const token = tokens[index];
+        const outputFlag =
+          executable === "curl"
+            ? token === "-o" || token === "--output"
+            : token === "-O" || token === "-o" || token === "--output-document";
+        if (outputFlag && tokens[index + 1]) targets.push(tokens[index + 1]);
+        const outputValue = token.match(
+          executable === "curl"
+            ? /^--output=(.+)$/
+            : /^--output-document=(.+)$/,
+        );
+        if (outputValue) targets.push(outputValue[1]);
+      }
+    } else if (
+      executable === "sed" &&
+      tokens.some((token) => /^-.*i/.test(token))
+    ) {
+      if (operands.length > 0) targets.push(operands.at(-1)!);
+    } else if (executable === "gio" && tokens[1] === "trash") {
+      targets.push(
+        ...tokens.slice(2).filter((token) => !token.startsWith("-")),
+      );
+    }
+  }
+
+  for (const rawTarget of targets) {
+    const target = rawTarget.replace(/^["']|["']$/g, "");
+    if (!target || target.startsWith("-")) continue;
+    try {
+      const identity = resolvePathScope(target, cwd);
+      if (isProtectedPathIdentity(identity, cwd)) {
+        return true;
+      }
+    } catch {
+      // Ignore resolution errors
+    }
+  }
+  return false;
+}
+
 const OPAQUE_INTERPRETERS = new Set([
   "bash",
   "dash",
@@ -2103,6 +2222,19 @@ const INLINE_INTERPRETER_FLAGS = new Set([
   "--print",
   "-r",
 ]);
+const SAFE_PYTHON_MODULES = new Set([
+  "pytest",
+  "unittest",
+  "json.tool",
+  "py_compile",
+  "compileall",
+  "black",
+  "ruff",
+  "mypy",
+  "flake8",
+  "coverage",
+  "venv",
+]);
 const INTERPRETER_PATH_OPTIONS = new Set([
   "-I",
   "-f",
@@ -2121,6 +2253,15 @@ const PIPE_INTERPRETER =
 
 function isInlineInterpreter(executable: string, args: string[]): boolean {
   if (executable === "deno" && args[0]?.toLowerCase() === "eval") return true;
+  if (executable === "python" || executable === "python3") {
+    const moduleIndex = args.indexOf("-m");
+    if (
+      moduleIndex >= 0 &&
+      !SAFE_PYTHON_MODULES.has(args[moduleIndex + 1]?.toLowerCase() ?? "")
+    ) {
+      return true;
+    }
+  }
   return args.some(
     (arg) =>
       INLINE_INTERPRETER_FLAGS.has(arg) ||
@@ -2253,6 +2394,9 @@ function extendedYoloBoundary(
   if (likelyExternalWrite(command, cwd)) {
     return "Bash-Änderung außerhalb des aktuellen Projekts";
   }
+  if (likelyProtectedPathWrite(command, cwd)) {
+    return "Änderung an einem Ausführungspfad im Projekt";
+  }
   return undefined;
 }
 
@@ -2376,6 +2520,11 @@ export function decideBash(
         "Harte Projektgrenze: externe Shell-Änderung wurde blockiert.",
       );
     }
+    if (likelyProtectedPathWrite(trimmed, cwd)) {
+      return deny(
+        "Harte Projektgrenze: Änderung an einem Ausführungspfad wurde blockiert.",
+      );
+    }
     return {
       action: "allow",
       reason: "Temporärer YOLO-Bypass innerhalb harter Grenzen",
@@ -2418,6 +2567,11 @@ export function decideBash(
         noConfirmReason("Bash-Änderung außerhalb des aktuellen Projekts"),
       );
     }
+    if (likelyProtectedPathWrite(trimmed, cwd)) {
+      return deny(
+        noConfirmReason("Änderung an einem Ausführungspfad im Projekt"),
+      );
+    }
     const interpreter = projectWriteInterpreter(trimmed, cwd);
     if (interpreter) {
       return deny(
@@ -2446,6 +2600,9 @@ export function decideBash(
   }
   if (likelyExternalWrite(trimmed, cwd)) {
     return ask("Bash-Änderung außerhalb des aktuellen Projekts");
+  }
+  if (likelyProtectedPathWrite(trimmed, cwd)) {
+    return ask("Änderung an einem Ausführungspfad im Projekt", true);
   }
   const interpreter = projectWriteInterpreter(trimmed, cwd);
   if (interpreter) {

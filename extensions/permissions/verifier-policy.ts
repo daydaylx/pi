@@ -10,7 +10,12 @@
  */
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { realpathSync } from "node:fs";
+import { basename } from "node:path";
 import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
+import {
+  INTERACTIVE_SHELL_TOOL_NAME,
+  interactiveShellCommand,
+} from "../shared/interactive-shell-policy.ts";
 import {
   hasEvaluableVerifierResult,
   hasBoundVerifierResult,
@@ -410,58 +415,224 @@ export async function assessVerifierDelegation(
  * without also skipping their value would misidentify the value as the
  * subcommand.
  */
-const GIT_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree"]);
+const GIT_VALUE_OPTIONS = new Set([
+  "-C",
+  "-c",
+  "--config-env",
+  "--exec-path",
+  "--git-dir",
+  "--namespace",
+  "--super-prefix",
+  "--work-tree",
+]);
 
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=.*/;
 
 function isGitExecutable(token: string | undefined): boolean {
-  return token === "git" || token === "/usr/bin/git";
+  if (!token) return false;
+  return basename(token) === "git";
 }
 
-function skipLeadingEnvironment(tokens: string[]): number {
+function skipPrefixes(tokens: string[]): number {
   let index = 0;
-  while (ENV_ASSIGNMENT.test(tokens[index] ?? "")) index += 1;
-  if (tokens[index] !== "env") return index;
-
-  index += 1;
-  // `env git commit` and `env NAME=value git commit` are intentionally
-  // supported. Its option grammar is deliberately kept narrow here: the
-  // commit gate is not a shell parser.
-  while (
-    index < tokens.length &&
-    (ENV_ASSIGNMENT.test(tokens[index] ?? "") ||
-      ["-i", "--ignore-environment"].includes(tokens[index] ?? ""))
-  ) {
-    index += 1;
+  while (index < tokens.length) {
+    const token = tokens[index] ?? "";
+    if (ENV_ASSIGNMENT.test(token)) {
+      index += 1;
+      continue;
+    }
+    if (token === "command" || token === "exec") {
+      index += 1;
+      while (index < tokens.length && tokens[index]?.startsWith("-")) {
+        index += 1;
+      }
+      continue;
+    }
+    if (token === "sudo") {
+      index += 1;
+      while (index < tokens.length && tokens[index]?.startsWith("-")) {
+        if (["-u", "-g", "-p", "-h", "-r", "-t"].includes(tokens[index]!)) {
+          index += 1;
+        }
+        index += 1;
+      }
+      continue;
+    }
+    if (token === "env") {
+      index += 1;
+      while (
+        index < tokens.length &&
+        (ENV_ASSIGNMENT.test(tokens[index] ?? "") ||
+          ["-i", "--ignore-environment", "-u", "--unset"].includes(
+            tokens[index] ?? "",
+          ))
+      ) {
+        if (["-u", "--unset"].includes(tokens[index] ?? "")) {
+          index += 1;
+        }
+        index += 1;
+      }
+      continue;
+    }
+    break;
   }
   return index;
 }
 
 function gitSubcommand(tokens: string[]): string | undefined {
-  let index = skipLeadingEnvironment(tokens);
+  let index = skipPrefixes(tokens);
   if (!isGitExecutable(tokens[index])) return undefined;
   index += 1;
   while (index < tokens.length && tokens[index]?.startsWith("-")) {
-    if (GIT_VALUE_OPTIONS.has(tokens[index])) index += 1;
+    if (GIT_VALUE_OPTIONS.has(tokens[index]!)) index += 1;
     index += 1;
   }
   return tokens[index];
 }
 
+function splitCommandSegments(command: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let escaped = false;
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i]!;
+
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\" && !inSingleQuote) {
+      escaped = true;
+      current += char;
+      continue;
+    }
+
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      current += char;
+      continue;
+    }
+
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      current += char;
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote) {
+      if (char === "\n" || char === ";") {
+        segments.push(current);
+        current = "";
+        continue;
+      }
+      if (char === "\r") {
+        if (command[i + 1] === "\n") {
+          i += 1;
+        }
+        segments.push(current);
+        current = "";
+        continue;
+      }
+      if (char === "&" && command[i + 1] === "&") {
+        segments.push(current);
+        current = "";
+        i += 1;
+        continue;
+      }
+      if (char === "|" && command[i + 1] === "|") {
+        segments.push(current);
+        current = "";
+        i += 1;
+        continue;
+      }
+      if (char === "|") {
+        segments.push(current);
+        current = "";
+        continue;
+      }
+    }
+
+    current += char;
+  }
+
+  if (current.length > 0) {
+    segments.push(current);
+  }
+
+  return segments;
+}
+
+function tokenizeSegment(segment: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let hasToken = false;
+  let escaped = false;
+
+  for (let i = 0; i < segment.length; i++) {
+    const char = segment[i]!;
+
+    if (escaped) {
+      current += char;
+      hasToken = true;
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\" && !inSingleQuote) {
+      escaped = true;
+      continue;
+    }
+
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      hasToken = true;
+      continue;
+    }
+
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      hasToken = true;
+      continue;
+    }
+
+    if (/\s/.test(char) && !inSingleQuote && !inDoubleQuote) {
+      if (hasToken) {
+        tokens.push(current);
+        current = "";
+        hasToken = false;
+      }
+      continue;
+    }
+
+    current += char;
+    hasToken = true;
+  }
+
+  if (hasToken) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
 /**
- * A `git commit` invocation is matched conservatively: segments split on
- * shell connectors and newlines (a multi-line bash body chains commands
- * exactly like `;` does) without honoring quoting, and options are skipped
- * by a plain dash-prefix scan rather than a full git CLI parser — so
- * `echo "git commit" | cat` can in theory over-trigger. Over-triggering
- * costs the caller an extra verifier run; under-triggering would recreate
- * exactly the silent gap this gate exists to close, so the asymmetry is
- * intentional.
+ * A `git commit` invocation is matched quote-aware across segments split on
+ * shell connectors and newlines, with options and launcher prefixes skipped
+ * cleanly.
  */
 export function bashTouchesGitCommit(command: string): boolean {
-  return command
-    .split(/&&|\|\||[;|]|\r?\n/)
-    .some((segment) => gitSubcommand(segment.trim().split(/\s+/)) === "commit");
+  return splitCommandSegments(command).some((segment) => {
+    const trimmed = segment.trim();
+    if (!trimmed) return false;
+    return gitSubcommand(tokenizeSegment(trimmed)) === "commit";
+  });
 }
 
 /**
@@ -527,10 +698,19 @@ export async function assessGitCommitVerifierGate(
   verification: VerificationCapabilitySnapshot,
   permissionLevel?: PermissionLevel,
 ): Promise<WorkflowAssessment> {
-  if (event.toolName !== "bash") return PERMITTED;
+  if (
+    event.toolName !== "bash" &&
+    event.toolName !== INTERACTIVE_SHELL_TOOL_NAME
+  ) {
+    return PERMITTED;
+  }
   if (isYoloLevel(permissionLevel)) return PERMITTED;
-  const input = isRecord(event.input) ? event.input : {};
-  const command = typeof input.command === "string" ? input.command : "";
+  const command =
+    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+      ? interactiveShellCommand(event)
+      : isRecord(event.input) && typeof event.input.command === "string"
+        ? event.input.command
+        : "";
   if (!bashTouchesGitCommit(command)) return PERMITTED;
 
   const result = await collectWorkspaceSnapshot(cwd);
@@ -558,7 +738,8 @@ export async function assessGitCommitVerifierGate(
   if (result.snapshot.vcs === "none") {
     return {
       blocked: true,
-      reason: "Verifier-Pflicht kann nicht geprüft werden: VCS: none; ein Git-Commit ist außerhalb eines Git-Repositories nicht zulässig.",
+      reason:
+        "Verifier-Pflicht kann nicht geprüft werden: VCS: none; ein Git-Commit ist außerhalb eines Git-Repositories nicht zulässig.",
     };
   }
 

@@ -14,6 +14,27 @@ const hardPaths = await load(
 
 const opts = { planning: false };
 
+await test("verifier hard paths include gate dependencies", () => {
+  for (const path of [
+    "extensions/permissions/verifier-risk.ts",
+    "extensions/permissions/temporary-agent-policy.ts",
+    "extensions/setup-core/verifier-ticket.ts",
+    "shared/workspace-snapshot.mjs",
+    "shared/workspace-snapshot.d.mts",
+  ]) {
+    assert(
+      hardPaths.matchingVerifierRequiredPaths([path]).length > 0,
+      `${path} requires verification`,
+    );
+  }
+  eq(
+    hardPaths.matchingVerifierRequiredPaths(["extensions/aurora-ui/tile.ts"])
+      .length,
+    0,
+    "unrelated UI module remains optional",
+  );
+});
+
 await test("task-tier: Klassifikation (Tests A–F)", async () => {
   // A trivialer Config-Fix, C lokale UI-Änderung, B kleiner Bug
   eq(

@@ -1177,6 +1177,16 @@ export default function setupCore(
         npmManifest?.devDependencies as Record<string, unknown> | undefined
       )?.["@earendil-works/pi-coding-agent"];
       const settings = readJson(join(agentDir, "settings.json"));
+      const configuredExtensions = Array.isArray(settings?.extensions)
+        ? settings.extensions.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [];
+      const missingExtensionPaths = configuredExtensions.filter(
+        (value) =>
+          value.startsWith("+extensions/") &&
+          !existsSync(join(agentDir, value.slice(1))),
+      );
       const subagentSettings = readJson(
         join(agentDir, "extensions", "subagent", "config.json"),
       );
@@ -1243,7 +1253,7 @@ export default function setupCore(
         `  scoped models: ${enabledModels.length || 0} Pattern(s) in settings.enabledModels`,
         `  Pi CLI/dev package: ${runtimeVersion ?? "unknown"}/${String(declaredVersion ?? "?")}`,
         `  installed dev package: ${devVersion ?? "missing"}`,
-        `  configured extensions: ${Array.isArray(settings?.extensions) ? settings.extensions.length : "?"}`,
+        `  configured extensions: ${configuredExtensions.length ? configuredExtensions.join(", ") : "none"}`,
         `  command runtime: ${hasCommandRuntime ? "available" : "missing"}`,
         `  project verification profiles: ${profileHint}`,
       ];
@@ -1279,7 +1289,12 @@ export default function setupCore(
         lines.push(`  ERROR: ${message}`);
       if (hasVersionDrift) {
         lines.push(
-          "  ERROR: Pi CLI, Manifest und installiertes Dev-Paket sind nicht angeglichen.",
+          "  WARNING: Pi CLI, Manifest und installiertes Dev-Paket sind nicht angeglichen.",
+        );
+      }
+      for (const extensionPath of missingExtensionPaths) {
+        lines.push(
+          `  WARNING: Konfigurierte Extension fehlt: ${extensionPath}`,
         );
       }
       ctx.ui.notify(

@@ -575,6 +575,8 @@ export const targetConfigSections = {
           "agents",
           "scripts",
           "tests",
+          "models.json",
+          "web-search.json",
         ];
         for (const entry of requiredAllowlist) {
           assert(

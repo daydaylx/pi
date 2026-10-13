@@ -76,6 +76,51 @@ export const setupCoreSections = {
           trusted.diagnostics.some((entry) => entry.level === "warning"),
           "security relaxation produces a visible warning",
         );
+        writeFileSync(
+          path.join(project, ".pi", "setup.json"),
+          JSON.stringify({
+            ui: { motion: "expressive" },
+          }),
+        );
+        const trustedExpressive = setupConfig.loadSetupConfig(project, true);
+        eq(
+          trustedExpressive.config.ui.motion,
+          "expressive",
+          "trusted project may configure expressive motion",
+        );
+        assert(
+          !trustedExpressive.diagnostics.some((entry) =>
+            entry.message.includes("ui.motion"),
+          ),
+          "expressive motion generates no diagnostics",
+        );
+        // Gegenprobe: Ungueltiger Motion-Wert wird abgewiesen
+        writeFileSync(
+          path.join(project, ".pi", "setup.json"),
+          JSON.stringify({
+            ui: { motion: "unlimited" },
+          }),
+        );
+        const trustedInvalid = setupConfig.loadSetupConfig(project, true);
+        eq(
+          trustedInvalid.config.ui.motion,
+          defaults.ui.motion,
+          "invalid motion falls back to default",
+        );
+        assert(
+          trustedInvalid.diagnostics.some((entry) =>
+            entry.message.includes("ui.motion"),
+          ),
+          "invalid motion produces a diagnostic error",
+        );
+        const setupSchema = JSON.parse(
+          readFileSync(path.join(ROOT, "schemas", "setup.schema.json"), "utf8"),
+        );
+        eq(
+          setupSchema.properties.ui.properties.motion.enum,
+          ["expressive", "contextual", "reduced", "off"],
+          "setup schema motion enum matches MotionMode ordering",
+        );
         rmSync(project, { recursive: true, force: true });
 
         const state = {
@@ -197,8 +242,14 @@ export const setupCoreSections = {
           harness.notifications
             .at(-1)
             ?.message?.includes("Pi CLI/dev package: 0.80.7/1.0.4") &&
+            harness.notifications
+              .at(-1)
+              ?.message?.includes("WARNING: Pi CLI, Manifest") &&
+            harness.notifications
+              .at(-1)
+              ?.message?.includes("+extensions/setup-core/index.ts") &&
             harness.notifications.at(-1)?.level === "error",
-          "setup doctor makes CLI/dev version drift visible",
+          "setup doctor lists configured extensions and warns about CLI/dev version drift",
         );
 
         const rangedAgentDir = mkdtempSync(
@@ -212,6 +263,22 @@ export const setupCoreSections = {
           "pi-coding-agent",
         );
         mkdirSync(rangedPackageDir, { recursive: true });
+        mkdirSync(path.join(rangedAgentDir, "extensions", "present"), {
+          recursive: true,
+        });
+        writeFileSync(
+          path.join(rangedAgentDir, "extensions", "present", "index.ts"),
+          "export {};\n",
+        );
+        writeFileSync(
+          path.join(rangedAgentDir, "settings.json"),
+          JSON.stringify({
+            extensions: [
+              "+extensions/present/index.ts",
+              "+extensions/missing/index.ts",
+            ],
+          }),
+        );
         writeFileSync(
           path.join(rangedNpmDir, "package.json"),
           JSON.stringify({
@@ -235,6 +302,15 @@ export const setupCoreSections = {
           const rangeReport = rangeHarness.notifications.at(-1)?.message ?? "";
           assert(
             rangeReport.includes("Pi CLI/dev package: 1.0.4/^1.0.4") &&
+              rangeReport.includes(
+                "configured extensions: +extensions/present/index.ts, +extensions/missing/index.ts",
+              ) &&
+              rangeReport.includes(
+                "WARNING: Konfigurierte Extension fehlt: +extensions/missing/index.ts",
+              ) &&
+              !rangeReport.includes(
+                "Konfigurierte Extension fehlt: +extensions/present/index.ts",
+              ) &&
               rangeReport.includes("installed dev package: 1.0.4") &&
               !rangeReport.includes(
                 "Pi CLI, Manifest und installiertes Dev-Paket sind nicht angeglichen.",
