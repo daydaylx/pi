@@ -16,7 +16,6 @@ export default [
       "docs/archive/",
       ".agent/",
       "benchmarks/tasks/*/fixture/",
-      "pi-audit-remediation-improved-e8196d6/",
       "pi_benchmark_befunde_arbeitsauftraege/",
       "work/",
       "coverage/",
