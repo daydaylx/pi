@@ -18,7 +18,6 @@ export default [
       "benchmarks/tasks/*/fixture/",
       "pi-audit-remediation-improved-e8196d6/",
       "pi_benchmark_befunde_arbeitsauftraege/",
-      "pi-second-opinion-agent/",
       "work/",
       "coverage/",
       // typescript-eslint verweigert den Start gegen die hier gepinnte
