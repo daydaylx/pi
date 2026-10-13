@@ -27,8 +27,6 @@
     "qwen-token-plan-individual/deepseek-v4-pro",
     "qwen-token-plan-individual/deepseek-v4-pro-0813",
     "qwen-token-plan-individual/deepseek-v4-flash-0731",
-    "openai-codex/gpt-5.4-mini",
-    "openai-codex/gpt-5.4",
     "openai-codex/gpt-5.5",
     "openai-codex/gpt-5.6-terra",
     "openai-codex/gpt-5.6-luna",
@@ -39,12 +37,10 @@
     "openrouter/nvidia/nemotron-3.5-lightning:free",
     "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
     "openrouter/nvidia/nemotron-3-ultra-550b-a55b",
-    "openrouter/nex-agi/nex-n2.5-pro:free",
     "openrouter/thinkingmachines/inkling-small:free",
     "openrouter/dots-studio/dots-3-note-preview:free",
     "openrouter/inclusionai/ling-3.0-flash-sante:free",
-    "openrouter/liquid/lfm-2.5-2.6b:free",
-    "openrouter/stealth/union-alpha"
+    "openrouter/liquid/lfm-2.5-2.6b:free"
   ],
   "packages": [
     "git:github.com/daydaylx/pi-subagents@0364aaa5851507f2e2d1e4e566e2b14c88b2f9b6",
