@@ -64,8 +64,8 @@ const HEALTHY_SESSION = [
     data: {
       schemaVersion: 2,
       timestamp: "2026-08-18T10:01:01.000Z",
-      provider: "qwen-token-plan-individual",
-      model: "qwen3.8-max",
+      provider: "openrouter",
+      model: "deepseek/deepseek-v4-pro",
       errorClass: "stream",
       errorCode: "STREAM_PHASE",
       phase: "streaming_text",
@@ -247,7 +247,7 @@ await test("session health separates interactive errors from raw history", () =>
     eq(report.failures.total, 1, "failures come from resilience entries");
     eq(report.failures.byClass.stream, 1, "the stream class is reported");
     eq(
-      report.failures.byProvider["qwen-token-plan-individual"],
+      report.failures.byProvider.openrouter,
       1,
       "the provider is reported",
     );

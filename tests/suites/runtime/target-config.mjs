@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assert, eq } from "../../shared/assertions.mjs";
 import { contrastRatio } from "../../shared/harness.mjs";
-import { npmModuleFile, ROOT } from "../../shared/jiti-loader.mjs";
+import { ROOT } from "../../shared/jiti-loader.mjs";
 
 export const targetConfigSections = {
   "target runtime configuration": async (context) => {
@@ -217,89 +217,6 @@ export const targetConfigSections = {
         assert(
           settings.enabledModels.includes(defaultModelId),
           `the active default model (${defaultModelId}) is contained in Pi's scoped models`,
-        );
-        // The Individual Plan catalog, exactly as the runtime ships it: no
-        // Kimi, no MiniMax, no external token plans.
-        const individualCatalog = JSON.parse(
-          readFileSync(
-            npmModuleFile(
-              "@earendil-works/pi-ai",
-              "dist/providers/data/qwen-token-plan-individual.json",
-            ),
-            "utf8",
-          ),
-        );
-        const individualModels = Object.values(
-          individualCatalog["openai-completions"],
-        );
-        eq(
-          individualModels.map((model) => model.id).sort(),
-          [
-            "deepseek-v4-flash-0731",
-            "deepseek-v4-pro",
-            "deepseek-v4-pro-0813",
-            "glm-5.2",
-            "qwen3.6-flash",
-            "qwen3.7-max",
-            "qwen3.7-plus",
-            "qwen3.8-flash",
-            "qwen3.8-max",
-          ],
-          "the Individual Plan catalog matches the expected model set",
-        );
-        for (const model of individualModels) {
-          assert(
-            settings.enabledModels.includes(
-              `qwen-token-plan-individual/${model.id}`,
-            ),
-            `the Individual Plan model ${model.id} stays selectable for the main agent`,
-          );
-        }
-        assert(
-          settings.enabledModels.every(
-            (entry) =>
-              !entry.startsWith("qwen-token-plan/") &&
-              !entry.startsWith("qwen-token-plan-cn/"),
-          ),
-          "retired token plan variants leave no scoped models behind",
-        );
-        // xhigh and max are separate real levels; which one a model reaches is
-        // declared by the catalog and enforced by the runtime clamp, not by
-        // any local mapping.
-        const modelById = (id) =>
-          individualModels.find((model) => model.id === id);
-        eq(
-          modelById("qwen3.8-max").thinkingLevelMap.xhigh,
-          "xhigh",
-          "Qwen3.8-Max reaches xhigh",
-        );
-        eq(
-          modelById("qwen3.8-max").thinkingLevelMap.max,
-          null,
-          "Qwen3.8-Max does not support max",
-        );
-        for (const id of ["glm-5.2", "deepseek-v4-pro"]) {
-          eq(modelById(id).thinkingLevelMap.max, "max", `${id} supports max`);
-        }
-        const { clampThinkingLevel } = await import(
-          pathToFileURL(
-            npmModuleFile("@earendil-works/pi-ai", "dist/models.js"),
-          ).href
-        );
-        eq(
-          clampThinkingLevel(modelById("qwen3.8-max"), "max"),
-          "xhigh",
-          "the runtime clamps Qwen3.8-Max from max down to xhigh",
-        );
-        eq(
-          clampThinkingLevel(modelById("glm-5.2"), "max"),
-          "max",
-          "the runtime keeps max for GLM-5.2",
-        );
-        eq(
-          clampThinkingLevel(modelById("deepseek-v4-pro"), "max"),
-          "max",
-          "the runtime keeps max for DeepSeek-V4-Pro",
         );
         eq(
           setup.ui,

@@ -122,8 +122,9 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 1. Nach den ersten neuen Sitzungen `/session-health --days 7` ausführen und die
    Recovery-Rate gegen die Messung vor den Fixes vergleichen; erst dann
    Recovery weiter vereinfachen.
-2. Qwen-Provider klären: `enabledModels`/`subagents.modelScope` nennen
-   `qwen-token-plan-individual`, die lokale Auth hat nur `qwen-token-plan`.
-3. Den divergierten Dev-Klon `/home/g/Projekte/pi-subagents` (lokal
-   `74b95d6` plus uncommittete Umbauten) mit dem Remote-Stand `0364aaa`
-   zusammenführen oder verwerfen.
+2. Den divergierten Dev-Klon `/home/g/Projekte/pi-subagents` (lokal
+   `74b95d6` plus uncommittete Umbauten, −38 000 Zeilen) mit dem Remote-Stand
+   `0364aaa` zusammenführen oder verwerfen; erst danach `typebox` im Fork auf
+   `peerDependencies` umstellen.
+3. Restbestände der entfernten Extensions archivieren und den Ledger
+   (Architekturentscheidungen) auf ADR-Verweise verdichten.

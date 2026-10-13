@@ -280,9 +280,9 @@ export const uiSections = {
         "high",
         "Thinking menu marks the active level",
       );
-      // Qwen3.8-Max declares xhigh but not max; the menu shows the gap as a
+      // A model can declare xhigh but not max; the menu shows the gap as a
       // disabled entry instead of renumbering the scale.
-      const qwenMaxMap = {
+      const xhighOnlyMap = {
         minimal: null,
         low: "low",
         medium: "medium",
@@ -292,7 +292,7 @@ export const uiSections = {
       };
       const clampedMenu = thinkingMenu.buildThinkingMenu(
         "xhigh",
-        (level) => qwenMaxMap[level] !== null,
+        (level) => xhighOnlyMap[level] !== null,
       );
       eq(
         clampedMenu.find((entry) => entry.value === "max")?.disabled,

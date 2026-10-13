@@ -14,7 +14,10 @@
   `diff-learning`, die LSP-Navigationstools und die Alias-Befehle
   `/show-plan`/`/plan-edit` (unnötige Komplexität). Bewusst behalten:
   `interactive-pty` (63 Aufrufe in 13 Sessions), `detailed_plan`, die externe
-  Frontend-Schicht (`pi-gui` nutzt `@daydaylx/pi-frontend-protocol`). YOLO 3
+  Frontend-Schicht (`pi-gui` nutzt `@daydaylx/pi-frontend-protocol`). Die
+  Qwen-Token-Plan-Modelle sind aus `enabledModels` und
+  `subagents.modelScope.allow` entfernt (kein Qwen-Zugang mehr gewünscht;
+  der `qwen-token-plan`-Eintrag in `auth.json` bleibt unangetastet). YOLO 3
   erlaubt gemäß ADR 029 auch `rm -rf /`; Tests, die das Gegenteil erwarten,
   sind veraltet. Commits, Pushes und Deployments nur auf ausdrücklichen
   Auftrag (`AGENTS.md`).
@@ -236,11 +239,6 @@
 
 ## Offene Fragen
 
-- Qwen: `enabledModels` und `subagents.modelScope.allow` nennen
-  `qwen-token-plan-individual`; die lokale `auth.json` führt nur
-  `qwen-token-plan`. Ohne Anpassung sind diese Modelle nicht wählbar
-  (Startwarnungen "No models match"); `target-config` testet bewusst den
-  Individual-Plan.
 - Recovery-Rate nach den Fixes aus dem Audit vom 2026-10-13 ist nicht
   gemessen (keine neuen Sitzungen).
 - Dev-Klon `/home/g/Projekte/pi-subagents` ist gegenüber dem Remote
