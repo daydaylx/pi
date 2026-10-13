@@ -330,6 +330,104 @@ export const installerSections = {
     });
   },
 
+  "installer local extensions": async (context) => {
+    const { section } = context;
+    await section("installer local extensions", async () => {
+      const { localExtensionEntries } = await import(
+        pathToFileURL(path.join(ROOT, "scripts", "install-user.mjs")).href
+      );
+      const target = mkdtempSync(path.join(tmpdir(), "pi-install-local-ext-"));
+      try {
+        const localExtension = path.join(
+          target,
+          "extensions",
+          "local-bridge",
+          "index.ts",
+        );
+        mkdirSync(path.dirname(localExtension), { recursive: true });
+        writeFileSync(localExtension, "// user-owned extension");
+        const legacy = path.join(
+          target,
+          "extensions",
+          "second-opinion",
+          "index.ts",
+        );
+        mkdirSync(path.dirname(legacy), { recursive: true });
+        writeFileSync(legacy, "// legacy extension");
+        writeFileSync(
+          path.join(target, "settings.json"),
+          JSON.stringify({
+            extensions: [
+              "!extensions/**",
+              "+extensions/local-bridge/index.ts",
+              "+extensions/second-opinion/index.ts",
+              "+extensions/missing/index.ts",
+              "+extensions/../../outside.ts",
+              "+extensions/setup-core/index.ts",
+            ],
+          }),
+        );
+
+        execFileSync(
+          process.execPath,
+          [
+            path.join(ROOT, "scripts", "install-user.mjs"),
+            "--apply",
+            "--target",
+            target,
+          ],
+          { stdio: "pipe", timeout: 30_000 },
+        );
+
+        const installed = JSON.parse(
+          readFileSync(path.join(target, "settings.json"), "utf8"),
+        );
+        const repoSettings = JSON.parse(
+          readFileSync(path.join(ROOT, "settings.json"), "utf8"),
+        );
+        assert(
+          installed.extensions.includes("+extensions/local-bridge/index.ts"),
+          "upgrade keeps the entry of a local extension that still exists",
+        );
+        for (const dropped of [
+          "+extensions/second-opinion/index.ts",
+          "+extensions/missing/index.ts",
+          "+extensions/../../outside.ts",
+        ]) {
+          assert(
+            !installed.extensions.includes(dropped),
+            `upgrade does not carry over ${dropped}`,
+          );
+        }
+        eq(
+          installed.extensions.filter(
+            (entry) => entry === "+extensions/setup-core/index.ts",
+          ).length,
+          1,
+          "managed entries are not duplicated",
+        );
+        eq(
+          installed.extensions.slice(0, repoSettings.extensions.length),
+          repoSettings.extensions,
+          "the repository's extension list stays authoritative and in order",
+        );
+        eq(
+          { ...installed, extensions: [] },
+          { ...repoSettings, extensions: [] },
+          "all other settings come from the repository",
+        );
+
+        eq(
+          localExtensionEntries("not json", "{}", target),
+          [],
+          "unparseable settings keep nothing",
+        );
+      } finally {
+        rmSync(target, { recursive: true, force: true });
+      }
+    });
+  },
+
   "installer security boundaries": async (context) => {
     const { section } = context;
     await section("installer security boundaries", async () => {

@@ -3,6 +3,7 @@ export const SECTION_SUITES = {
   "target runtime configuration": "runtime",
   "installer greenfield deployment": "runtime",
   "installer upgrade deployment": "runtime",
+  "installer local extensions": "runtime",
   "installer security boundaries": "runtime",
   "greenfield setup config and Aurora state contract": "runtime",
   "setup core lifecycle": "runtime",

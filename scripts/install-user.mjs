@@ -4,6 +4,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   readlinkSync,
   realpathSync,
@@ -11,6 +12,7 @@ import {
   rmSync,
   symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -264,6 +266,44 @@ export function applyUserCliLink(plan) {
   return { ...plan, status: "linked" };
 }
 
+/**
+ * Extension entries a user added to the installed settings.json for
+ * extensions that exist only in the agent directory (for example a local
+ * bridge). The installer owns settings.json, so without this every apply
+ * would silently switch them off.
+ *
+ * Only `+extensions/…` entries whose file still exists below the target's
+ * `extensions/` directory are kept; entries of removed (legacy) extensions
+ * disappear with their files.
+ */
+export function localExtensionEntries(previousText, nextText, target) {
+  let previous;
+  let next;
+  try {
+    previous = JSON.parse(previousText);
+    next = JSON.parse(nextText);
+  } catch {
+    return [];
+  }
+  const known = new Set(Array.isArray(next?.extensions) ? next.extensions : []);
+  const extensionsRoot = path.join(target, "extensions");
+  const list = Array.isArray(previous?.extensions) ? previous.extensions : [];
+  return list.filter((entry) => {
+    if (typeof entry !== "string" || !entry.startsWith("+extensions/"))
+      return false;
+    if (known.has(entry)) return false;
+    const file = path.resolve(target, entry.slice(1));
+    const inside = path.relative(extensionsRoot, file);
+    if (!inside || inside.startsWith("..") || path.isAbsolute(inside))
+      return false;
+    try {
+      return lstatSync(file).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
 function runInstall(argv) {
   const { apply, linkCli, target } = parseArgs(argv);
   if (target === SOURCE) {
@@ -280,6 +320,12 @@ function runInstall(argv) {
     const absolute = path.join(SOURCE, entry);
     return existsSync(absolute) ? collect(SOURCE, entry) : [];
   }).sort();
+
+  const settingsPath = path.join(target, "settings.json");
+  const previousSettings =
+    apply && existsSync(settingsPath)
+      ? readFileSync(settingsPath, "utf8")
+      : undefined;
 
   for (const relative of files) {
     const from = path.join(SOURCE, relative);
@@ -349,6 +395,23 @@ function runInstall(argv) {
     }
     if (removedCount > 0) {
       console.log(`${removedCount} bekannte Legacy-Pfade bereinigt.`);
+    }
+
+    if (previousSettings !== undefined && files.includes("settings.json")) {
+      const installedText = readFileSync(settingsPath, "utf8");
+      const kept = localExtensionEntries(
+        previousSettings,
+        installedText,
+        target,
+      );
+      if (kept.length > 0) {
+        const merged = JSON.parse(installedText);
+        merged.extensions = [...merged.extensions, ...kept];
+        writeFileSync(settingsPath, `${JSON.stringify(merged, null, 2)}\n`);
+        for (const entry of kept) {
+          console.log(`KEEP settings.json: ${entry} (lokale Erweiterung)`);
+        }
+      }
     }
   }
 
