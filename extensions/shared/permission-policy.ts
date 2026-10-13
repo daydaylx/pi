@@ -1651,6 +1651,7 @@ export function classifyOperationEffect(
   onExecutable?: (check: ExecutableCheck) => void,
 ): OperationEffect {
   if (isSensitiveReference(command)) return "FORBIDDEN";
+  if (hasDeviceWriteTarget(command)) return "RISKY";
   if (/\brm\b[^;&|]*(?:^|\s)["']?\/(?:[/.])*["']?(?=\s|$)/i.test(command))
     return "FORBIDDEN";
   if (!command.trim()) return "SAFE";
@@ -2027,6 +2028,96 @@ function referencesSystemPath(command: string): boolean {
   );
 }
 
+const DEVICE_TARGET_COMMANDS = new Set([
+  "mke2fs",
+  "mkswap",
+  "wipefs",
+  "parted",
+  "fdisk",
+  "sfdisk",
+  "gdisk",
+  "sgdisk",
+  "cfdisk",
+  "blkdiscard",
+  "shred",
+  "badblocks",
+  "hdparm",
+  "cryptsetup",
+]);
+
+function isDevicePath(value: string): boolean {
+  const path = value.replace(/^['"]|['"]$/g, "");
+  if (!path.startsWith("/dev/") || path === "/dev/") return false;
+  return !(
+    /^\/dev\/(?:null|zero|urandom|random|stdin|stdout|stderr|fd|shm)(?:\/|$)/.test(
+      path,
+    ) || /^\/dev\/tty[^/]*(?:\/|$)/.test(path)
+  );
+}
+
+/** Device writes share the protected-system-path decision across all levels. */
+function hasDeviceWriteTarget(command: string): boolean {
+  const parsed = parseReadOnlyShell(command);
+  const segments = parsed.error
+    ? command.split(/[|;&]+/).map(tokenizeSegment)
+    : parsed.segments;
+  for (const segment of segments) {
+    let { executable, args } = executableToken(segment);
+    while (executable === "sudo" || executable === "command") {
+      const tokens = [...args];
+      while (tokens[0]?.startsWith("-") && tokens[0] !== "--") {
+        tokens.shift();
+      }
+      if (tokens[0] === "--") tokens.shift();
+      ({ executable, args } = executableToken(tokens));
+    }
+    if (!executable) continue;
+    const deviceArgs = args.filter(isDevicePath);
+    if (executable === "dd") {
+      if (
+        args.some((arg) => arg.startsWith("of=") && isDevicePath(arg.slice(3)))
+      ) {
+        return true;
+      }
+      continue;
+    }
+    if (executable === "wipefs") {
+      if (
+        deviceArgs.length > 0 &&
+        args.some((arg) => ["-a", "--all", "-o"].includes(arg))
+      ) {
+        return true;
+      }
+      continue;
+    }
+    if (executable === "fdisk" || executable === "parted") {
+      if (args.some((arg) => ["-l", "--list"].includes(arg))) continue;
+    }
+    if (executable === "cryptsetup") {
+      if (
+        ![
+          "luksFormat",
+          "erase",
+          "reencrypt",
+          "resize",
+          "close",
+          "remove",
+        ].includes(args[0])
+      ) {
+        continue;
+      }
+    }
+    if (
+      (DEVICE_TARGET_COMMANDS.has(executable) ||
+        /^mkfs(?:\..+)?$/.test(executable)) &&
+      deviceArgs.length > 0
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * `;`/`2>`-etc. make `parseReadOnlyShell` reject the command outright (see
  * its strict default), so this fallback re-tokenizes the raw text instead of
@@ -2053,6 +2144,7 @@ function likelyExternalWrite(command: string, cwd: string): boolean {
 }
 
 function likelyProtectedPathWrite(command: string, cwd: string): boolean {
+  if (hasDeviceWriteTarget(command)) return true;
   if (!isWriteCapableCommand(command)) return false;
   const targets: string[] = [];
   const redirects = /\d*>>?\s*("[^"]*"|'[^']*'|[^\s|;&]+)/g;

@@ -2968,6 +2968,108 @@ await test("YOLO stufen: 1 denies, 2 asks, 3 allows at the shell boundaries", ()
   }
 });
 
+await test("device writes use the protected system-path decision at every level", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  const writes = [
+    "dd if=/dev/zero of=/dev/sda bs=1M",
+    'dd if=/dev/zero of="/dev/sda" bs=1M',
+    "mkfs.ext4 /dev/sda1",
+    "mke2fs /dev/sda1",
+    "mkswap /dev/sda1",
+    "wipefs -a /dev/sda",
+    "parted /dev/sda mklabel gpt",
+    "fdisk /dev/sda",
+    "sfdisk /dev/sda",
+    "gdisk /dev/sda",
+    "sgdisk /dev/sda",
+    "cfdisk /dev/sda",
+    "blkdiscard /dev/nvme0n1",
+    "shred -n1 /dev/sdb",
+    "badblocks -w /dev/sda",
+    "hdparm -W0 /dev/sda",
+    "cryptsetup luksFormat /dev/sda2",
+    "cryptsetup erase /dev/sda2",
+    "cryptsetup reencrypt /dev/sda2",
+    "cryptsetup resize /dev/sda2",
+    "cryptsetup close /dev/mapper/cryptroot",
+    "cryptsetup remove /dev/mapper/cryptroot",
+    "sudo mkfs.ext4 /dev/sda1",
+    "env mkfs.ext4 /dev/sda1",
+    "command mkfs.ext4 /dev/sda1",
+    "env command mkfs.ext4 /dev/sda1",
+  ];
+  const levels = [
+    ["readonly", "block"],
+    ["project-write", "ask"],
+    ["confirm-all", "ask"],
+    ["headless", "block"],
+    ["yolo", "block"],
+    ["yolo-ask", "ask"],
+    ["yolo-full", "allow"],
+  ];
+  for (const command of writes) {
+    for (const [level, expected] of levels) {
+      const decision = permissionPolicy.decideBash(level, command, cwd);
+      eq(decision.action, expected, `${level}: ${command}`);
+      if (level === "yolo-ask") {
+        assert(
+          decision.hard,
+          `YOLO 2 marks device writes dangerous: ${command}`,
+        );
+      }
+    }
+    const effect = permissionPolicy.classifyOperationEffect(command, cwd);
+    assert(effect !== "SAFE", `${command} is risky to plan inspection`);
+    assert(
+      !permissionPolicy.diagnosePlanModeCommand(command, cwd).safe,
+      `${command} is rejected by Plan Mode diagnosis`,
+    );
+  }
+
+  const unaffected = [
+    "dd if=/dev/zero of=out.img bs=1M count=1",
+    "mkfs.ext4 disk.img",
+    "shred -u notes.txt",
+    "cat /dev/null",
+    "echo x > /dev/null",
+    "cat /dev/zero",
+    "cat /dev/urandom",
+    "cat /dev/random",
+    "cat /dev/stdin",
+    "cat /dev/stdout",
+    "cat /dev/stderr",
+    "cat /dev/tty",
+    "cat /dev/fd/0",
+    "cat /dev/shm/example",
+    "mkfs.ext4 /dev/null",
+    "mkfs.ext4 /dev/zero",
+    "wipefs -a /dev/urandom",
+    "shred /dev/tty0",
+    "mkfs.ext4 /dev/fd/0",
+    "mkfs.ext4 /dev/shm/example",
+    "lsblk",
+    "fdisk -l",
+    "parted -l",
+    "cryptsetup status x",
+    "cryptsetup isLuks /dev/sda",
+    "cryptsetup luksDump /dev/sda",
+    "cryptsetup open /dev/sda cryptroot",
+    "wipefs /dev/sda",
+  ];
+  for (const command of unaffected) {
+    eq(
+      permissionPolicy.decideBash("yolo", command, cwd).action,
+      "allow",
+      `${command} remains outside the device-write boundary`,
+    );
+    assert(
+      permissionPolicy.classifyOperationEffect(command, cwd) !== "RISKY",
+      `${command} is not classified as a device write`,
+    );
+  }
+});
+
 await test("YOLO 2 confirms root wipe and YOLO 3 allows it, even behind another boundary", () => {
   if (!permissionPolicy) return;
   const cwd = process.cwd();
