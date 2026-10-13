@@ -257,7 +257,7 @@ required-paths.ts`), wird von `assessGitCommitVerifierGate` technisch
 - **Live-Pin-Status:** `pi list` lädt ausschließlich den in `settings.json`
   (`packages`) gepinnten Git-Fork unter
   `~/.pi/agent/git/github.com/daydaylx/pi-subagents`; dessen Checkout steht
-  auf `7a38125b3e3141f66148836127343f02366c38cf`. `npm/node_modules/
+  auf `0364aaa5851507f2e2d1e4e566e2b14c88b2f9b6`. `npm/node_modules/
 pi-subagents` (npm-Registry) ist davon unabhängig und dient nur Auroras
   Testbaum (`npm --prefix npm run test`/`verify`), nicht einer echten
   Pi-Sitzung. Die Verifier-Erzwingung bleibt bewusst in Auroras Guard-Schicht
@@ -278,6 +278,15 @@ Worktree- oder Delegations-API.
 
 - Keine automatische Installation oder Aktualisierung des Pakets.
 - Keine Secrets, Auth-Dateien oder Umgebungsdumps in Tasks oder Reports.
+- Kindprozesse erben keine Credential-artigen Umgebungsvariablen (`*_TOKEN`,
+  `*_SECRET`, `*_PASSWORD`, `*_PASSPHRASE`, `*_CREDENTIAL`, `*_PRIVATE_KEY`,
+  Agent-Sockets wie `SSH_AUTH_SOCK`). Provider-API-Keys, die von Pi gelesenen
+  Provider-Tokens, `PI_*` und explizit vom Harness gesetzte Werte bleiben.
+  `childEnv.allow` und `childEnv.deny` in `extensions/subagent/config.json`
+  überschreiben das je Variablennamen.
+- Asynchrone Einzelläufe prüfen das Modell gegen `subagents.modelScope`
+  wie der Vordergrundpfad; `run-history.jsonl` wird beim Schreiben ab 256 KiB
+  atomar auf die letzten 1 000 Einträge gekürzt.
 - Asynchrone Runs werden über die Paket-Artefakte bzw. `status` beobachtet,
   nicht über Terminal-Scraping.
 - Delegation folgt den harten Kriterien in `AGENTS.md`.
