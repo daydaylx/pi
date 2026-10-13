@@ -5,7 +5,7 @@
 
 ## Metadaten
 
-- Repository: `daydaylx/pi` (lokal `/home/d/.pi/agent`)
+- Repository: `daydaylx/pi` (lokal `[redacted local path]`)
 - Branch: `main`
 - Base-SHA: `4563fad1937ed838a4824777d6c6a25298349f27`
 - aktueller Phase-3-Ausgangs-HEAD: `68da993` (Arbeitsbaum vor der Änderung sauber)
@@ -13,7 +13,7 @@
 - Node: v22.23.2 (passend zu `.nvmrc`, `package.json`/`npm/package.json` `engines.node`, `npm/package-lock.json` `packages[""].engines.node`)
 - npm: 10.9.8 (passend zu `engines.npm` an allen drei Stellen)
 - Runtime: `@earendil-works/pi-coding-agent@0.84.4` global installiert (`npm ls -g`); `npm/package.json` devDependency-Pin `0.84.3` — siehe Evidenzblock F-23
-- Bearbeiter/Agent: Claude Sonnet 5, Phase-0-Ausführung dieser Session (Nutzer: daydayfay05@gmail.com)
+- Bearbeiter/Agent: Claude Sonnet 5, Phase-0-Ausführung dieser Session (Nutzer: [redacted email])
 
 ## Scope-Abweichungen seit Auditstand
 
@@ -312,7 +312,7 @@ nachziehen, oder bewusst mit --allow-version-drift fortfahren.` — außer
   readonly ließ sie nur bei nachweislich rein lesenden Befehlen zu.
 - **Entscheidung:** Die gezielte Option 2 aus `03_PHASE_2_RESTLICHE_P1.md`
   ist umgesetzt (ADR
-  [`022`](../docs/decisions/022-project-write-interpreter-boundary.md)):
+  [`022`](../../decisions/022-project-write-interpreter-boundary.md)):
   Inline-Code, stdin-Code und explizit externe Interpreter-Skripte fragen in
   `project-write` nach; ein literal angegebener, projektinterner Skriptpfad
   bleibt erlaubt. Die bestehende readonly-Sperre und YOLO-Hard-Blockade bleiben
