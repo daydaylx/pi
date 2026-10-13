@@ -263,10 +263,6 @@ export function registerPlanCommands(
     description: catalogDescription("view-plan"),
     handler: async (_args, ctx) => viewPlanMarkdown(session, ctx),
   });
-  pi.registerCommand("show-plan", {
-    description: "Alias für /view-plan",
-    handler: async (_args, ctx) => viewPlanMarkdown(session, ctx),
-  });
 
   const editPlan = async (ctx: ExtensionContext, name: string) => {
     if (!isPlanningMode(session.selectedMode)) {
@@ -278,10 +274,6 @@ export function registerPlanCommands(
   pi.registerCommand("edit-plan", {
     description: catalogDescription("edit-plan"),
     handler: async (_args, ctx) => editPlan(ctx, "edit-plan"),
-  });
-  pi.registerCommand("plan-edit", {
-    description: "Alias für /edit-plan",
-    handler: async (_args, ctx) => editPlan(ctx, "plan-edit"),
   });
 
   pi.registerCommand("plan-decide", {

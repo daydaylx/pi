@@ -56,14 +56,11 @@ await test("workflow exposes no public slash commands or legacy shortcut", () =>
   for (const command of ["plan", "work", "go", "workflow"]) {
     assert(!harness.commands.has(command), `/${command} is not registered`);
   }
-  for (const command of [
-    "view-plan",
-    "show-plan",
-    "edit-plan",
-    "plan-edit",
-    "commands",
-  ]) {
+  for (const command of ["view-plan", "edit-plan", "commands"]) {
     assert(harness.commands.has(command), `/${command} remains registered`);
+  }
+  for (const alias of ["show-plan", "plan-edit"]) {
+    assert(!harness.commands.has(alias), `/${alias} alias is retired`);
   }
   assert(
     harness.shortcuts.has("shift+tab"),

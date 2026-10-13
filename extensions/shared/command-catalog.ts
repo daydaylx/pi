@@ -57,14 +57,12 @@ const definitions = [
     "Plan anzeigen",
     "Vollständigen Markdown-Plan im Terminal anzeigen",
     "plan",
-    ["show-plan"],
   ],
   [
     "edit-plan",
     "Plan bearbeiten",
     "Den Plan dieser Sitzung im aktiven Planmodus im externen Editor bearbeiten",
     "plan",
-    ["plan-edit"],
   ],
   [
     "plan-decide",
