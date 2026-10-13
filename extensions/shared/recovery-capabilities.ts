@@ -29,10 +29,9 @@ const READ_ONLY_TOOLS = new Set([
   "get_search_content",
   "plan_write",
   "lsp_diagnostics",
-  "lsp_definition",
-  "lsp_references",
-  "lsp_hover",
-  "lsp_workspace_symbols",
+  // Checks may create artifacts; workspace fingerprinting detects changes.
+  "project_check",
+  "verify",
 ]);
 
 /** Only known inspection capabilities stay available while recovery is armed. */

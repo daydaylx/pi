@@ -56,13 +56,7 @@ export interface WorkflowAssessment {
   planModeCause?: "command-not-allowed" | "executable-untrusted";
 }
 
-export const LOCAL_LSP_TOOLS = new Set([
-  "lsp_diagnostics",
-  "lsp_definition",
-  "lsp_references",
-  "lsp_hover",
-  "lsp_workspace_symbols",
-]);
+export const LOCAL_LSP_TOOLS = new Set(["lsp_diagnostics"]);
 
 const WRITE_TOOLS = new Set(["write", "edit", "project_check", "subagent"]);
 

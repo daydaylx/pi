@@ -90,6 +90,7 @@ const LEGACY_MANAGED = [
   // Aurora no longer installs an editor component; a copy left behind by an
   // older install would be an orphan the tree no longer imports.
   "extensions/aurora-ui/editor.ts",
+  "skills/lsp-navigation/SKILL.md",
 ];
 
 function parseArgs(argv) {

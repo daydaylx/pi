@@ -72,55 +72,45 @@ function levelMarker(level: Level): string {
 const OptionSchema = Type.Object({
   label: Type.String({
     minLength: 1,
-    description: "Kurzer Titel der Option, in einfacher Sprache",
+    description: "Kurzer Optionstitel",
   }),
   description: Type.String({
     minLength: 1,
-    description:
-      "Kurzbeschreibung in einfacher, allgemeinverständlicher Sprache ohne Fachjargon: was diese Option konkret bedeutet und welche Konsequenz sie hat",
+    description: "Was die Option bedeutet und bewirkt",
   }),
   effort: StringEnum(LEVELS, {
-    description: "Geschätzter Umsetzungsaufwand dieser Option",
+    description: "Aufwand",
   }),
   risk: StringEnum(LEVELS, {
-    description: "Geschätztes Risiko dieser Option",
+    description: "Risiko",
   }),
-  pro: Type.Optional(
-    Type.String({ description: "Wichtigster Vorteil dieser Option" }),
-  ),
-  contra: Type.Optional(
-    Type.String({ description: "Wichtigster Nachteil dieser Option" }),
-  ),
+  pro: Type.Optional(Type.String({ description: "Wichtigster Vorteil" })),
+  contra: Type.Optional(Type.String({ description: "Wichtigster Nachteil" })),
 });
 
 const QuestionParams = Type.Object({
   question: Type.String({
     minLength: 1,
-    description:
-      "Die konkrete Entscheidungsfrage, in einfacher Sprache formuliert",
+    description: "Konkrete Entscheidungsfrage",
   }),
   why: Type.Optional(
     Type.String({
-      description:
-        "1–2 kurze Sätze: warum diese Entscheidung jetzt wichtig ist",
+      description: "Warum die Entscheidung jetzt wichtig ist",
     }),
   ),
   options: Type.Array(OptionSchema, {
-    description:
-      "2–4 Optionen zur Auswahl. Genau eine davon ist über recommendedIndex als Empfehlung markiert.",
+    description: "2–4 Optionen zur Auswahl.",
     minItems: MIN_QUESTION_OPTIONS,
     maxItems: MAX_QUESTION_OPTIONS,
   }),
   recommendedIndex: Type.Integer({
     minimum: 1,
     maximum: MAX_QUESTION_OPTIONS,
-    description:
-      "1-basierter Index (Position in `options`, gezählt ab 1) der empfohlenen Option.",
+    description: "1-basierter Index der empfohlenen Option.",
   }),
   recommendationReason: Type.String({
     minLength: 1,
-    description:
-      "Kurze, in einfacher Sprache gehaltene Begründung, warum die durch recommendedIndex markierte Option empfohlen wird. Pflichtfeld — jede Frage braucht eine erkennbare Empfehlung, keine reine Optionsliste.",
+    description: "Warum diese Option empfohlen wird.",
   }),
 });
 
@@ -129,7 +119,7 @@ export default function askUser(pi: ExtensionAPI) {
     name: ASK_USER_TOOL_NAME,
     label: "Nutzer fragen",
     description:
-      "Stellt dem Nutzer eine fokussierte Entscheidungsfrage mit 2–4 Optionen. Jede Option braucht Titel, eine in einfacher, allgemeinverständlicher Sprache gehaltene Kurzbeschreibung ohne Fachjargon, Aufwand und Risiko; genau eine Option wird über recommendedIndex als klare Empfehlung markiert und über recommendationReason nachvollziehbar begründet — eine Empfehlung ist Pflicht, keine optionale Ergänzung. Nutzen (nicht nur erwägen), wenn eine echte Nutzerentscheidung nötig ist, um fortzufahren.",
+      "Stellt eine Entscheidungsfrage mit 2–4 Optionen und einer begründeten Empfehlung. Nur nutzen, wenn eine Nutzerentscheidung nötig ist.",
     parameters: QuestionParams,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

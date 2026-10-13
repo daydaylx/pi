@@ -109,7 +109,6 @@ export const subagentsSkillsSections = {
         "context-checkpoint",
         "doc-diff",
         "git-check",
-        "lsp-navigation",
         "prompt-compiler",
         "release-changelog",
         "repo-analyse",

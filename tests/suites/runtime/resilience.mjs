@@ -12,10 +12,13 @@ import { ROOT } from "../../shared/jiti-loader.mjs";
 
 export const resilienceSections = {
   "resilience telemetry and recovery": async (context) => {
-    const { section, resilience, modePermissions, planMode } = context;
+    const { section, load, resilience, modePermissions, planMode } = context;
 
     await section("resilience telemetry and recovery", async () => {
       if (!resilience) return;
+      const { recoveryEffect } = await load(
+        "extensions/shared/recovery-capabilities.ts",
+      );
       const harness = createHarness();
       resilience.default(harness.api);
       const ctx = harness.makeContext({ cwd: ROOT });
@@ -354,16 +357,16 @@ export const resilienceSections = {
       await gateHarness.runHooks(
         "tool_execution_start",
         {
-          toolName: "project_check",
-          toolCallId: "gate-project-check",
-          args: { profile: "verify" },
+          toolName: "bash",
+          toolCallId: "gate-bash-test",
+          args: { command: "npm test" },
         },
         gateCtx,
       );
       await gateHarness.dispatchEvent("recovery-mutation:approved", {
-        toolName: "project_check",
-        input: { profile: "verify" },
-        toolCallId: "gate-project-check",
+        toolName: "bash",
+        input: { command: "npm test" },
+        toolCallId: "gate-bash-test",
       });
       await gateHarness.runHooks("agent_settled", {}, gateCtx);
       const gateSettled = gateHarness.appended
@@ -449,8 +452,6 @@ export const resilienceSections = {
         "potentially mutating shell calls are blocked while armed",
       );
       for (const event of [
-        { toolName: "verify", input: { check: "typecheck" } },
-        { toolName: "project_check", input: { profile: "verify" } },
         {
           toolName: "subagent",
           input: { agent: "investigator", task: "Diagnose the failed run" },
@@ -476,6 +477,21 @@ export const resilienceSections = {
       assert(
         freeRead.every((result) => !result?.block),
         "read-only tools stay available while armed",
+      );
+      for (const toolName of ["project_check", "verify"]) {
+        eq(
+          recoveryEffect({ toolName, input: {} }, gateCtx.cwd),
+          "read_only",
+          `${toolName} remains available as a read-only check while recovery is armed`,
+        );
+      }
+      eq(
+        recoveryEffect(
+          { toolName: "bash", input: { command: "npm test" } },
+          gateCtx.cwd,
+        ),
+        "potentially_mutating",
+        "bash npm test remains potentially mutating",
       );
       eq(
         gateHarness.emitted.filter(
@@ -1429,11 +1445,7 @@ export const resilienceSections = {
           "grep",
           "interactive_shell",
           "ls",
-          "lsp_definition",
           "lsp_diagnostics",
-          "lsp_hover",
-          "lsp_references",
-          "lsp_workspace_symbols",
           "plan_write",
           "project_check",
           "read",

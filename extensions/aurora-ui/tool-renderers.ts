@@ -87,7 +87,8 @@ export function temporaryAgentDisplay(
     return undefined;
   }
   const raw = (spec as Record<string, unknown>).objective;
-  const objective = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+  const objective =
+    typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
   const shown =
     objective.length > TEMP_AGENT_OBJECTIVE_MAX
       ? `${objective.slice(0, TEMP_AGENT_OBJECTIVE_MAX - 1)}…`
@@ -117,13 +118,7 @@ const PRESENTATIONS: Record<ActivityToolKind, ToolPresentation> = {
   generic: { glyph: "◌", label: "TOOL" },
 };
 
-const LSP_TOOLS = new Set([
-  "lsp_diagnostics",
-  "lsp_definition",
-  "lsp_references",
-  "lsp_hover",
-  "lsp_workspace_symbols",
-]);
+const LSP_TOOLS = new Set(["lsp_diagnostics"]);
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -142,13 +137,6 @@ function firstString(
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return undefined;
-}
-
-function numberValue(args: unknown, key: string): number | undefined {
-  const value = record(args)?.[key];
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
 }
 
 function quote(value: string): string {
@@ -232,16 +220,6 @@ export function classifyTool(
   }
 }
 
-function pathWithPosition(cwd: string, args: unknown): string | undefined {
-  const path = firstString(args, ["path"]);
-  if (!path) return undefined;
-  const relPath = toWorkspaceRelative(cwd, path);
-  const line = numberValue(args, "line");
-  const character = numberValue(args, "character");
-  if (line === undefined || character === undefined) return relPath;
-  return `${relPath}:${line + 1}:${character + 1}`;
-}
-
 function lspTarget(
   cwd: string,
   toolName: string,
@@ -251,18 +229,6 @@ function lspTarget(
     case "lsp_diagnostics": {
       const path = firstString(args, ["path"]);
       return `Diagnosen · ${path ? toWorkspaceRelative(cwd, path) : ""}`.trim();
-    }
-    case "lsp_definition":
-      return `Definition · ${pathWithPosition(cwd, args) ?? ""}`.trim();
-    case "lsp_references":
-      return `Referenzen · ${pathWithPosition(cwd, args) ?? ""}`.trim();
-    case "lsp_hover":
-      return `Info · ${pathWithPosition(cwd, args) ?? ""}`.trim();
-    case "lsp_workspace_symbols": {
-      const query = firstString(args, ["query"]);
-      return query
-        ? `Workspace-Symbole · ${quote(query)}`
-        : "Workspace-Symbole";
     }
     default:
       return undefined;
@@ -970,9 +936,7 @@ export function renderDashboard(
       : input.liveActivity
         ? "LÄUFT"
         : "BEREIT";
-    const lines = [
-      crop(theme.bold(`AKTIVITÄT · ${compactStatus}`), available),
-    ];
+    const lines = [crop(theme.bold(`AKTIVITÄT · ${compactStatus}`), available)];
     if (input.activityLines[0]) {
       lines.push(crop(input.activityLines[0], available));
     }

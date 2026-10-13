@@ -1107,16 +1107,10 @@ export const auroraUiSections = {
             ["subagent", { agent: "reviewer" }, "subagent", "reviewer"],
             ["wait", { all: true }, "wait", "alle Subagenten"],
             [
-              "lsp_references",
-              { path: "index.ts", line: 4, character: 2 },
+              "lsp_diagnostics",
+              { path: "index.ts" },
               "lsp",
-              "Referenzen · index.ts:5:3",
-            ],
-            [
-              "lsp_workspace_symbols",
-              { query: "Aurora" },
-              "lsp",
-              'Workspace-Symbole · "Aurora"',
+              "Diagnosen · index.ts",
             ],
             ["ask_user", { question: "continue?" }, "generic", undefined],
           ];
@@ -1192,10 +1186,10 @@ export const auroraUiSections = {
               [
                 {
                   id: "lsp",
-                  name: "lsp_references",
+                  name: "lsp_diagnostics",
                   ...auroraTools.describeToolActivity(
-                    "lsp_references",
-                    { path: "index.ts", line: 4, character: 2 },
+                    "lsp_diagnostics",
+                    { path: "index.ts" },
                     testCwd,
                   ),
                   startedAt: 0,
@@ -1209,7 +1203,7 @@ export const auroraUiSections = {
             .join("\n");
           assert(
             lspActivity.includes("◇ LSP") &&
-              lspActivity.includes("Referenzen · index.ts:5:3"),
+              lspActivity.includes("Diagnosen · index.ts"),
             "LSP activity names the real operation and position without inventing a symbol",
           );
           for (const columns of [40, 52, 90, 120, 160]) {
@@ -1736,11 +1730,9 @@ export const auroraUiSections = {
           "tool_execution_start",
           {
             toolCallId: "tool-aurora-lsp",
-            toolName: "lsp_references",
+            toolName: "lsp_diagnostics",
             args: {
               path: "extensions/aurora-ui/index.ts",
-              line: 1,
-              character: 0,
             },
           },
           context,
@@ -1756,12 +1748,13 @@ export const auroraUiSections = {
                 .join("\n")
             : "";
         assert(
-          lspRendered.includes("◇ LSP") && lspRendered.includes("index.ts:2:1"),
-          "a real LSP tool call appears in Activity with its actual position",
+          lspRendered.includes("◇ LSP") &&
+            lspRendered.includes("Diagnosen · extensions/aurora-ui/index.ts"),
+          "a real LSP diagnostics call appears in Activity with its file",
         );
         await harness.runHooks(
           "tool_execution_end",
-          { toolCallId: "tool-aurora-lsp", toolName: "lsp_references" },
+          { toolCallId: "tool-aurora-lsp", toolName: "lsp_diagnostics" },
           context,
         );
         const settledLspRendered =

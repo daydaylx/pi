@@ -45,8 +45,8 @@ async function load(relativePath) {
 }
 
 // --- Smoke targets -----------------------------------------------------------
-// Each entry describes a real server profile plus a probe position for a
-// deterministic symbol in the fixture. The profile id must match a built-in
+// Each entry describes a real server profile and a diagnostics fixture. The
+// profile id must match a built-in
 // profile in extensions/lsp/server-profiles.ts.
 const TARGETS = [
   {
@@ -55,9 +55,6 @@ const TARGETS = [
     targetFile: "probe.ts",
     languageId: "typescript",
     rootMarker: "tsconfig.json",
-    // `answer` usage at `const value = answer();`
-    probeLine: 8,
-    probeCharacter: 16,
   },
   {
     profileId: "python",
@@ -65,9 +62,6 @@ const TARGETS = [
     targetFile: "probe.py",
     languageId: "python",
     rootMarker: "pyrightconfig.json",
-    // `add` usage at `total = add(1, 2)`
-    probeLine: 10,
-    probeCharacter: 9,
   },
 ];
 
@@ -96,8 +90,6 @@ async function probeServer({
   targetFile,
   languageId,
   rootMarker,
-  probeLine,
-  probeCharacter,
 }) {
   const { LspClient } = await load("extensions/lsp/client.ts");
   const { getDocumentSync } = await load("extensions/lsp/documents.ts");
@@ -172,45 +164,10 @@ async function probeServer({
       throw new Error("server did not publish diagnostics within 10 seconds");
     }
 
-    // Definition probe: a well-formed request must get a well-formed response
-    // (Location, LocationLink[], or null). A thrown/errored response is a fail.
-    let definitionShape = "none";
-    try {
-      const def = await client.request("textDocument/definition", {
-        textDocument: { uri },
-        position: { line: probeLine, character: probeCharacter },
-      });
-      if (def == null) definitionShape = "null";
-      else if (Array.isArray(def)) definitionShape = `array[${def.length}]`;
-      else definitionShape = "single";
-    } catch (error) {
-      throw new Error(
-        `definition request failed: ${error?.message ?? String(error)}`,
-      );
-    }
-
-    // Hover probe (same tolerance).
-    let hoverShape = "none";
-    try {
-      const hover = await client.request("textDocument/hover", {
-        textDocument: { uri },
-        position: { line: probeLine, character: probeCharacter },
-      });
-      hoverShape = hover?.contents
-        ? "contents"
-        : hover == null
-          ? "null"
-          : "other";
-    } catch (error) {
-      throw new Error(
-        `hover request failed: ${error?.message ?? String(error)}`,
-      );
-    }
-
     const diagCount = diagnostics.length;
     return {
       status: "ok",
-      detail: `started; definition=${definitionShape}; hover=${hoverShape}; diagnostics=${diagCount}`,
+      detail: `started; diagnostics=${diagCount}`,
     };
   } finally {
     if (client) {

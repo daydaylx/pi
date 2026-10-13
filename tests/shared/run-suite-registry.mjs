@@ -39,7 +39,6 @@ export const SECTION_SUITES = {
   "LSP config, root detection, registry and profiles (#94)": "lsp",
   "LSP documents and diagnostics (#95)": "lsp",
   "LSP security and registry single-flight (P0.2, P1.1)": "lsp",
-  "LSP navigation and symbol tools (#96)": "lsp",
   "LSP command, status and trust (#97)": "lsp",
   "workspace snapshot fingerprint stability": "runtime",
   "workspace snapshot error categories": "runtime",

@@ -52,6 +52,8 @@ await test("recovery capability effects fail closed outside known read-only tool
     "find",
     "ls",
     "lsp_diagnostics",
+    "project_check",
+    "verify",
     "web_search",
     "fetch_content",
     "get_search_content",
@@ -69,14 +71,7 @@ await test("recovery capability effects fail closed outside known read-only tool
     "recovery_control",
     "user-approved workspace-scope control stays available",
   );
-  for (const toolName of [
-    "write",
-    "edit",
-    "verify",
-    "project_check",
-    "custom_mutator",
-    "subagent",
-  ]) {
+  for (const toolName of ["write", "edit", "custom_mutator", "subagent"]) {
     eq(
       effect(toolName),
       "potentially_mutating",
@@ -109,9 +104,9 @@ await test("recovery capability effects fail closed outside known read-only tool
     "recognized diagnostic bash remains read-only",
   );
   eq(
-    effect("bash", { command: "npm run verify" }),
+    effect("bash", { command: "npm test" }),
     "potentially_mutating",
-    "test and build programs remain gated because they can write files",
+    "npm test remains potentially mutating",
   );
   for (const command of [
     "./deploy.sh",

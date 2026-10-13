@@ -1,7 +1,6 @@
 // LSP smoke fixture for the TypeScript / JavaScript language server.
 //
-// Deterministic symbols so `lsp_definition` / `lsp_hover` have stable targets,
-// plus one real type error so the server publishes a diagnostic.
+// One real type error so the server publishes a diagnostic.
 
 export function answer(): number {
   return 42;

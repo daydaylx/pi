@@ -4,9 +4,8 @@
 > Epic: [#92](https://github.com/daydaylx/pi/issues/92).
 > Architektur- und Implementierungshintergrund: [`archive/LSP_INTEGRATION_PLAN.md`](archive/LSP_INTEGRATION_PLAN.md) (historisch, umgesetzt).
 
-Pi kann über das Language Server Protocol semantische Codeinformationen
-einholen: Diagnosen, Definitionen, Referenzen, Hover-Informationen und
-Workspace-Symbole. Die Integration ist **standardmäßig aktiv, startet aber
+Pi kann über das Language Server Protocol Compiler-/Linter-Diagnosen
+einholen. Die Integration ist **standardmäßig aktiv, startet aber
 keinen Server**, bevor nicht ein `lsp_*`-Werkzeug tatsächlich aufgerufen wird
 (Lazy-Start, Modus `auto`).
 
@@ -32,10 +31,6 @@ vollständig in `/lsp status`.
 ## Werkzeuge (read-only)
 
 - `lsp_diagnostics` – Compiler-/Linter-Diagnosen für eine Datei.
-- `lsp_definition` – Sprung zur Definition.
-- `lsp_references` – Referenzen auf ein Symbol.
-- `lsp_hover` – Typ-/Dokumentationsinformation.
-- `lsp_workspace_symbols` – Symbolsuche im Workspace.
 
 Schreibende Operationen (Rename, Code Actions, Formatierung, Completion) sind
 in dieser Version bewusst **nicht** enthalten.

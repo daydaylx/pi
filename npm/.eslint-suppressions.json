@@ -10,9 +10,6 @@
     },
     "no-unused-vars": {
       "count": 1
-    },
-    "preserve-caught-error": {
-      "count": 2
     }
   },
   "tests/openrouter-doctor/unit/normalize-error.test.mjs": {

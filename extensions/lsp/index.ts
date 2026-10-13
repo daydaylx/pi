@@ -69,10 +69,7 @@ import type { RegistryOptions } from "./registry.ts";
 import { resolveConfig, parseMode } from "./config.ts";
 import { PROFILES } from "./server-profiles.ts";
 import type { LspConfig, LspLogLevel } from "./types.ts";
-import {
-  registerLspDiagnosticsTool,
-  registerLspNavigationTools,
-} from "./tools.ts";
+import { registerLspDiagnosticsTool } from "./tools.ts";
 import {
   registerLspControlCenter,
   resolveLspInteractiveCommand,
@@ -103,7 +100,6 @@ export type {
 } from "./documents.ts";
 export {
   registerLspDiagnosticsTool,
-  registerLspNavigationTools,
   formatLspError,
   relativeToWorkspace,
   runLspDiagnostics,
@@ -310,7 +306,6 @@ export default function lspExtension(pi: ExtensionAPI): void {
   });
 
   registerLspDiagnosticsTool(pi, deps);
-  registerLspNavigationTools(pi, deps);
   const openLspDiagnostics = registerLspControlCenter(pi, {
     getStatus: () =>
       registry ? computeLspStatus(config, registry.list()) : "aus",
