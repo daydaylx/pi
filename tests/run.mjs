@@ -17,13 +17,13 @@ import {
 
 // Test commits and fingerprints must not depend on a user's global or system
 // Git configuration (for example commit.gpgsign=true).
-process.env.GIT_CONFIG_GLOBAL = process.platform === "win32" ? "NUL" : "/dev/null";
+process.env.GIT_CONFIG_GLOBAL =
+  process.platform === "win32" ? "NUL" : "/dev/null";
 process.env.GIT_CONFIG_NOSYSTEM = "1";
 
 const { runtimeSections } = await import("./suites/runtime.mjs");
 const { uiSections } = await import("./suites/ui.mjs");
 const { lspSections } = await import("./suites/lsp.mjs");
-const { diffSections } = await import("./suites/diff.mjs");
 
 const requestedSuite = process.env.PI_TEST_SUITE;
 if (requestedSuite && !RUN_MJS_SUITES.includes(requestedSuite)) {
@@ -80,11 +80,6 @@ const modePermissions = await load("extensions/mode-permissions.ts");
 const planMode = await load("extensions/plan-mode/index.ts");
 const controlPlane = await load("extensions/control-plane.ts");
 const compactTools = await load("extensions/compact-tools/index.ts");
-const diffAlgorithm = await load("extensions/diff-viewer/diff-algorithm.ts");
-const diffFallback = await load("extensions/diff-viewer/git-diff.ts");
-const diffTracker = await load("extensions/diff-viewer/change-tracker.ts");
-const diffViewer = await load("extensions/diff-viewer/index.ts");
-const diffLearning = await load("extensions/diff-learning/index.ts");
 const askUser = await load("extensions/ask-user.ts");
 const askUserPolicy = await load("extensions/shared/ask-user-policy.ts");
 const lspExtensionMod = await load("extensions/lsp/index.ts");
@@ -107,13 +102,11 @@ const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
 const sessionHealthAnalyze = await load("extensions/session-health/analyze.ts");
 const sessionHealth = await load("extensions/session-health/index.ts");
 const openrouterDoctor = await load("extensions/openrouter-doctor/index.ts");
-const secondOpinion = await load("extensions/second-opinion/service.ts");
 
 const sections = {
   ...runtimeSections,
   ...uiSections,
   ...lspSections,
-  ...diffSections,
 };
 const context = {
   section,
@@ -126,11 +119,6 @@ const context = {
   planMode,
   controlPlane,
   compactTools,
-  diffAlgorithm,
-  diffFallback,
-  diffTracker,
-  diffViewer,
-  diffLearning,
   askUser,
   askUserPolicy,
   lspExtensionMod,
@@ -151,7 +139,6 @@ const context = {
   sessionHealthAnalyze,
   sessionHealth,
   openrouterDoctor,
-  secondOpinion,
 };
 
 for (const name of Object.keys(SECTION_SUITES)) {

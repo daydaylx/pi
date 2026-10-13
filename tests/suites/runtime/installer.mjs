@@ -242,6 +242,23 @@ export const installerSections = {
         );
         mkdirSync(path.dirname(legacyDescription), { recursive: true });
         writeFileSync(legacyDescription, "# legacy installer description");
+        for (const legacyExtension of [
+          "extensions/second-opinion",
+          "extensions/diff-viewer",
+          "extensions/diff-learning",
+        ]) {
+          const legacyEntry = path.join(target, legacyExtension);
+          mkdirSync(legacyEntry, { recursive: true });
+          writeFileSync(path.join(legacyEntry, "index.ts"), "// legacy");
+        }
+        const legacyDiffEvents = path.join(
+          target,
+          "extensions",
+          "shared",
+          "diff-events.ts",
+        );
+        mkdirSync(path.dirname(legacyDiffEvents), { recursive: true });
+        writeFileSync(legacyDiffEvents, "// legacy diff events");
         // Aurora dropped its editor component; an older install still carries
         // the file, and the upgrade has to remove it rather than orphan it.
         const legacyEditor = path.join(
@@ -266,7 +283,7 @@ export const installerSections = {
           { stdio: "pipe", timeout: 30_000 },
         );
 
-        // Legacy managed files must be gone.
+        // Legacy managed paths must be gone.
         for (const legacy of LEGACY_MANAGED) {
           assert(
             !existsSync(path.join(target, legacy)),

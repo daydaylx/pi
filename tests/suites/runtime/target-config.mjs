@@ -448,8 +448,6 @@ export const targetConfigSections = {
             "+extensions/interactive-pty/index.ts",
             "+extensions/lsp/index.ts",
             "+extensions/ask-user.ts",
-            "+extensions/diff-viewer/index.ts",
-            "+extensions/diff-learning/index.ts",
             "+extensions/control-plane.ts",
             "+extensions/compact-tools/index.ts",
             "+extensions/aurora-ui/index.ts",
@@ -459,7 +457,6 @@ export const targetConfigSections = {
             "+extensions/session-health/index.ts",
             "+extensions/frontend-bridge/index.ts",
             "+extensions/openrouter-doctor/index.ts",
-            "+extensions/second-opinion/index.ts",
             "+extensions/task-tier/index.ts",
           ],
           "settings declare the dependency-safe local extension order",
@@ -472,7 +469,6 @@ export const targetConfigSections = {
           "+extensions/lsp/index.ts",
           "+extensions/aurora-ui/index.ts",
           "+extensions/resilience/index.ts",
-          "+extensions/second-opinion/index.ts",
         ]) {
           assert(
             activeExtensions.includes(extension),
@@ -513,25 +509,7 @@ export const targetConfigSections = {
               "Aurora owns one shared activity ticker",
             );
           } else {
-            const isTemporaryDiffPreview =
-              extension === "+extensions/diff-viewer/index.ts";
-            if (isTemporaryDiffPreview) {
-              assert(
-                !/\.(?:setFooter|setEditorComponent|setHeader)\s*\(/.test(
-                  source,
-                ),
-                extension + " owns no permanent TUI chrome",
-              );
-              assert(
-                source.includes("setWidget(LIVE_PREVIEW_WIDGET, undefined)"),
-                extension + " clears its temporary live-preview widget",
-              );
-            } else {
-              assert(
-                !ownsChrome,
-                extension + " does not compete for TUI chrome",
-              );
-            }
+            assert(!ownsChrome, extension + " does not compete for TUI chrome");
             assert(
               !/\bsetInterval\s*\(/.test(source),
               extension + " has no UI ticker",

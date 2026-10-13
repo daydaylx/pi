@@ -18,7 +18,7 @@ Dieser Contract hier beschreibt dagegen den **In-Process**-`EventBus`
 `npm/node_modules/@earendil-works/pi-coding-agent/dist/core/event-bus.d.ts`),
 den jede im selben Prozess geladene Extension ohne Kanal-Allowlist
 abonnieren kann — das ist der relevante Mechanismus für eine Extension wie
-`pi-rabbitmode`, die (wie `diff-learning` oder `mode-permissions`) als
+`pi-rabbitmode`, die (wie `mode-permissions`) als
 normale Pi-Extension im selben Prozess läuft, kein separates Frontend.
 
 ## Source of Truth
@@ -84,8 +84,8 @@ Rabbit-Owner — `pi-rabbitmode` schreibt hier nie, es liest nur.
 Es gibt keinen npm-Package-Export für diese Kanäle/Typen (`daydaylx/pi`s
 `package.json` ist `private`, ohne `exports`-Feld). Konsumenten hardcoden
 die dokumentierten Kanalstrings und validieren das empfangene Payload
-defensiv per Type-Guard — genau wie es Extensions innerhalb dieses Repos
-selbst tun (Muster: `extensions/shared/diff-events.ts`).
+defensiv per Type-Guard — wie es Extensions innerhalb dieses Repos ebenfalls
+umsetzen.
 
 ## Spätere Härtung (nicht Teil der aktuellen Änderung)
 

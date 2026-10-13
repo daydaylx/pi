@@ -175,10 +175,6 @@ publisher helpers.
 Besides `workflow`, `permissions`, `lsp`, `model` and `activity`, two owner
 groups feed the task-centric view (`task-projection.ts`) and the inspector:
 
-- `changes` — published by `extensions/diff-viewer/index.ts` after every
-  recorded edit/write, aggregated straight from its `ChangeTracker` (real
-  per-file diff stats, never estimated). Drives the compact footer summary and
-  the Inspector's Changes section.
 - `verification` — published by `extensions/setup-core/index.ts` alongside
   its existing `ctx.ui.setStatus("verification", …)` calls. Carries the
   structured per-profile outcome (`declaredRequiredIds`, `requiredOutcomes`,

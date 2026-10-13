@@ -200,8 +200,6 @@ export class ReceiptAggregator {
         kind: "edit",
         status: "completed",
         title: "Änderungen",
-        // Diff statistics belong to diff-viewer, which is the only component
-        // with the actual before/after snapshots. A receipt must not guess.
         summary: `${count} ${count === 1 ? "Datei geändert" : "Dateien geändert"}`,
         metrics: [`${count} ${count === 1 ? "Datei" : "Dateien"}`],
         evidenceRefs: [...this.editedFiles].slice(0, 5),

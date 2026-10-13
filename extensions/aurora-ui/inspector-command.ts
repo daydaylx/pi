@@ -23,51 +23,19 @@ export interface InspectorDeps {
 }
 
 interface InspectorEntry {
-  id:
-    | "changes"
-    | "context"
-    | "verification"
-    | "models"
-    | "reasoning"
-    | "diagnostics";
+  id: "context" | "verification" | "models" | "reasoning" | "diagnostics";
   label: string;
 }
 
 // Same priority order the UI rework concept package gives for unifying
 // secondary surfaces behind one inspector shell.
 const ENTRIES: readonly InspectorEntry[] = [
-  { id: "changes", label: "Änderungen" },
   { id: "context", label: "Kontext" },
   { id: "verification", label: "Prüfnachweise" },
   { id: "models", label: "Modelle" },
   { id: "reasoning", label: "Denken" },
   { id: "diagnostics", label: "Diagnose" },
 ];
-
-function changesContent(state: AuroraUiState): InspectorContent {
-  const changes = state.changes;
-  return {
-    title: "ÄNDERUNGEN",
-    badge: changes
-      ? `${changes.filesCount} ${changes.filesCount === 1 ? "Datei" : "Dateien"}`
-      : undefined,
-    sections: changes
-      ? [
-          {
-            title: "Diff",
-            lines: [`+${changes.linesAdded} −${changes.linesRemoved}`],
-          },
-          { title: "Dateien", lines: changes.files.slice(0, 10) },
-        ]
-      : [
-          {
-            title: "",
-            lines: ["Keine Edit-/Write-Operationen in dieser Session."],
-          },
-        ],
-    actions: [{ label: "Details/Diff", key: "/changes" }],
-  };
-}
 
 /**
  * Deliberately does NOT break the active context down by category
@@ -244,8 +212,6 @@ function buildContent(
   id: InspectorEntry["id"],
 ): InspectorContent {
   switch (id) {
-    case "changes":
-      return changesContent(state);
     case "context":
       return contextContent(collectDiagnostics(pi, ctx));
     case "verification":

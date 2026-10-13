@@ -1,5 +1,5 @@
 // Regression coverage for the /inspect command (extensions/aurora-ui/inspector-command.ts):
-// the single, on-demand inspector shell unifying Changes/Kontext/Verification
+// the single, on-demand inspector shell unifying Kontext/Verification
 // Evidence/Modelle/Reasoning/Diagnostics behind one consistent pattern instead
 // of a separate UI per secondary surface.
 import { assert, eq } from "../../shared/assertions.mjs";
@@ -22,7 +22,7 @@ export const auroraInspectorSections = {
 
       // Aurora asks providers for a fresh snapshot right on session_start —
       // discover the sessionEpoch from that outgoing request the same way a
-      // real provider (diff-viewer, setup-core, lsp) would.
+      // real provider (setup-core, lsp) would.
       const outgoingRequest = harness.emitted.find(
         (e) =>
           e.name === auroraState.AURORA_UI_CHANNELS.request &&
@@ -43,12 +43,6 @@ export const auroraInspectorSections = {
         patch: {
           model: { id: "claude-test", thinking: "high" },
           lsp: { state: "aktiv", detail: "2 Servers" },
-          changes: {
-            filesCount: 2,
-            files: ["src/a.ts", "src/b.ts"],
-            linesAdded: 12,
-            linesRemoved: 4,
-          },
           verification: {
             status: "checks_failed",
             declaredRequiredIds: ["typecheck", "tests"],
@@ -81,15 +75,6 @@ export const auroraInspectorSections = {
       widget({ requestRender() {} }, ctx.ui.theme).render(120);
 
       const cases = [
-        {
-          label: "Änderungen",
-          expect: (text) =>
-            text.includes("ÄNDERUNGEN") &&
-            text.includes("src/a.ts") &&
-            text.includes("+12") &&
-            text.includes("−4"),
-          name: "Changes section renders the real aggregated diff stats",
-        },
         {
           label: "Kontext",
           expect: (text) =>

@@ -17,7 +17,6 @@ import { frontendProtocolSections } from "./runtime/frontend-protocol.mjs";
 import { frontendBridgeSections } from "./runtime/frontend-bridge.mjs";
 import { workspaceSnapshotSections } from "./runtime/workspace-snapshot.mjs";
 import { snapshotGateSections } from "./runtime/snapshot-gates.mjs";
-import { secondOpinionSections } from "./runtime/second-opinion.mjs";
 import { interactivePtySections } from "./runtime/interactive-pty.mjs";
 import { contextCapsuleSections } from "./runtime/context-capsule.mjs";
 
@@ -40,7 +39,6 @@ export const runtimeSections = {
   ...frontendBridgeSections,
   ...workspaceSnapshotSections,
   ...snapshotGateSections,
-  ...secondOpinionSections,
   ...interactivePtySections,
   ...contextCapsuleSections,
 };

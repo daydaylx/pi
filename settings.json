@@ -81,8 +81,6 @@
     "+extensions/interactive-pty/index.ts",
     "+extensions/lsp/index.ts",
     "+extensions/ask-user.ts",
-    "+extensions/diff-viewer/index.ts",
-    "+extensions/diff-learning/index.ts",
     "+extensions/control-plane.ts",
     "+extensions/compact-tools/index.ts",
     "+extensions/aurora-ui/index.ts",
@@ -92,7 +90,6 @@
     "+extensions/session-health/index.ts",
     "+extensions/frontend-bridge/index.ts",
     "+extensions/openrouter-doctor/index.ts",
-    "+extensions/second-opinion/index.ts",
     "+extensions/task-tier/index.ts"
   ],
   "doubleEscapeAction": "tree",

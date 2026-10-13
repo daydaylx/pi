@@ -1334,8 +1334,6 @@ export const resilienceSections = {
       planMode,
       controlPlane,
       compactTools,
-      diffViewer,
-      diffLearning,
       interactivePty,
       askUser,
       lspExtensionMod,
@@ -1345,12 +1343,8 @@ export const resilienceSections = {
       sessionHealth,
       contextCapsule,
       openrouterDoctor,
-      secondOpinion,
     } = context;
     const frontendBridge = await load("extensions/frontend-bridge/index.ts");
-    const secondOpinionExtension = await load(
-      "extensions/second-opinion/index.ts",
-    );
     const taskTierExtension = await load("extensions/task-tier/index.ts");
     const systemContextExtension = await load(
       "extensions/system-context/index.ts",
@@ -1363,19 +1357,15 @@ export const resilienceSections = {
         !setupCore ||
         !askUser ||
         !lspExtensionMod ||
-        !diffViewer ||
         !controlPlane ||
         !compactTools ||
-        !diffLearning ||
         !interactivePty ||
         !auroraUi ||
         !resilience ||
         !sessionHealth ||
         !contextCapsule ||
         !systemContextExtension ||
-        !openrouterDoctor ||
-        !secondOpinion ||
-        !secondOpinionExtension
+        !openrouterDoctor
       )
         return;
       const factoryByExtension = {
@@ -1385,8 +1375,6 @@ export const resilienceSections = {
         "+extensions/interactive-pty/index.ts": interactivePty.default,
         "+extensions/lsp/index.ts": lspExtensionMod.default,
         "+extensions/ask-user.ts": askUser.default,
-        "+extensions/diff-viewer/index.ts": diffViewer.default,
-        "+extensions/diff-learning/index.ts": diffLearning.default,
         "+extensions/control-plane.ts": controlPlane.default,
         "+extensions/compact-tools/index.ts": compactTools.default,
         "+extensions/aurora-ui/index.ts": auroraUi.default,
@@ -1396,7 +1384,6 @@ export const resilienceSections = {
         "+extensions/session-health/index.ts": sessionHealth.default,
         "+extensions/frontend-bridge/index.ts": frontendBridge.default,
         "+extensions/openrouter-doctor/index.ts": openrouterDoctor.default,
-        "+extensions/second-opinion/index.ts": secondOpinionExtension.default,
         "+extensions/task-tier/index.ts": taskTierExtension.default,
       };
       const settings = JSON.parse(
@@ -1451,7 +1438,6 @@ export const resilienceSections = {
           "project_check",
           "read",
           "recovery_check",
-          "second_opinion",
           "verify",
           "workspace_add",
           "write",

@@ -74,15 +74,6 @@ Agenten haben keine festen Modell-Overrides: die Runtime wählt über
 `settings.subagents.modelScope.allow`; der Fork wertet `fallbackModels` aus,
 sonst wäre der Fallback eine Angabe ohne Wirkung.
 
-Eine vom Hauptpfad unabhängige fachliche Second Opinion außerhalb der
-Luna-Modelllinie liefert nicht der `verifier`-Subagent, sondern die separate,
-opt-in Architektur unter `extensions/second-opinion/`: Sie nutzt standardmäßig
-`anthropic/claude-sonnet-5` und prüft die tatsächlich aufgelöste
-Modellidentität statt Konfigurationslabels. Identische Modelle werden gesperrt;
-wenn eine andere Modellfamilie gefordert ist, werden gleiche oder unbekannte
-Familien fail-closed abgelehnt. Modell-, Session-,
-Projekt- oder Manifestwechsel nach der Freigabe machen den Snapshot ungültig.
-
 ## Reduzierte Tool-Surface
 
 `extensions/subagent/config.json` setzt zwei getrennte Schalter:

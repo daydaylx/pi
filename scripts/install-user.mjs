@@ -81,6 +81,10 @@ const LEGACY_MANAGED = [
   "agents/planner.md",
   "agents/worker.md",
   "agents/reviewer.md",
+  "extensions/second-opinion",
+  "extensions/diff-viewer",
+  "extensions/diff-learning",
+  "extensions/shared/diff-events.ts",
   // Aurora no longer installs an editor component; a copy left behind by an
   // older install would be an orphan the tree no longer imports.
   "extensions/aurora-ui/editor.ts",
@@ -317,7 +321,7 @@ function runInstall(argv) {
     if (apply) applyUserCliLink(planUserCliLink(target));
   }
 
-  // Remove known legacy files that were previously managed by this installer.
+  // Remove known legacy paths that were previously managed by this installer.
   if (apply) {
     let removedCount = 0;
     for (const legacy of LEGACY_MANAGED) {
@@ -341,7 +345,7 @@ function runInstall(argv) {
       }
     }
     if (removedCount > 0) {
-      console.log(`${removedCount} bekannte Legacy-Dateien bereinigt.`);
+      console.log(`${removedCount} bekannte Legacy-Pfade bereinigt.`);
     }
   }
 

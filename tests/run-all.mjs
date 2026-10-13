@@ -56,11 +56,6 @@ const suites = [
     env: {},
   },
   {
-    name: "second-opinion-run-history",
-    file: "second-opinion-run-history.test.mjs",
-    env: {},
-  },
-  {
     name: "benchmark-duel",
     file: "benchmark-duel.test.mjs",
     env: {},
