@@ -153,11 +153,6 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 
 - Recovery-Rate nach den Fixes aus dem Audit vom 2026-10-13 ist nicht
   gemessen (keine neuen Sitzungen).
-- Fork-Richtung offen: Der Strip-down im Dev-Klon (Branch
-  `wip/strip-down-2026-10-13`) ist unfertig (82 Typfehler, v. a. im
-  `subagent-executor.ts`); `74b95d6` besteht die Unit-Suite, entfernt aber
-  `profile` aus dem Spec-Vertrag, auf den `temporary-agent-policy.ts` und
-  ADR 031 bauen. Nichts davon ist gepinnt.
 
 ## Wichtige Projektregeln
 
@@ -197,3 +192,8 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
   ihren Nutzen belegen.
 - Eine zweite vollständige Verify-Pipeline ist verworfen; stattdessen gibt es
   den schlanken Versioned-Tree-Check plus den `git archive HEAD`-Weg.
+- Fork-Strip-down (2026-10-13 verworfen): Async-Runner, Chains, Intercom und
+  Worktrees zu entfernen (−38 000 Zeilen) brächte nur Wartbarkeit;
+  `toolSchemaMode: "harness"` sperrt diese Pfade schon auf Schema-Ebene. Der
+  Stand ist unfertig (82 Typfehler) und liegt nur lokal im Dev-Klon
+  (`wip/strip-down-2026-10-13`); `74b95d6` ist ebenfalls nicht übernommen.

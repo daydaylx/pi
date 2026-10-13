@@ -122,10 +122,7 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 1. Nach den ersten neuen Sitzungen `/session-health --days 7` ausführen und die
    Recovery-Rate gegen die Messung vor den Fixes vergleichen; erst dann
    Recovery weiter vereinfachen.
-2. Fork-Richtung entscheiden: (a) WIP verwerfen, Pin `0364aaa` bleibt;
-   (b) Strip-down fertigstellen (Executor auf den Einzelpfad reduzieren, 82
-   Typfehler, Semantik von `status/stop/interrupt` ohne Async-Runner klären);
-   (c) nur `74b95d6` übernehmen und `temporary-agent-policy.ts`, ADR 031 und
-   Docs auf den Spec-Vertrag ohne `profile` umstellen.
-3. Die `typebox`-Startwarnung des Forks erst nach (b) beheben; vorher bleibt
-   sie bewusst bestehen.
+2. Keine weiteren offenen Entscheidungen aus dem Audit: Fork-Strip-down ist
+   verworfen (Pin `0364aaa`), die `typebox`-Startwarnung bleibt bewusst.
+3. Optional: lokalen Branch `wip/strip-down-2026-10-13` im Dev-Klon
+   `/home/g/Projekte/pi-subagents` löschen, sobald er nicht mehr gebraucht wird.
