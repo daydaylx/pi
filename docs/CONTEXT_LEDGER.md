@@ -153,8 +153,11 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 
 - Recovery-Rate nach den Fixes aus dem Audit vom 2026-10-13 ist nicht
   gemessen (keine neuen Sitzungen).
-- Dev-Klon `/home/g/Projekte/pi-subagents` ist gegenüber dem Remote
-  divergiert und wurde nicht angefasst.
+- Fork-Richtung offen: Der Strip-down im Dev-Klon (Branch
+  `wip/strip-down-2026-10-13`) ist unfertig (82 Typfehler, v. a. im
+  `subagent-executor.ts`); `74b95d6` besteht die Unit-Suite, entfernt aber
+  `profile` aus dem Spec-Vertrag, auf den `temporary-agent-policy.ts` und
+  ADR 031 bauen. Nichts davon ist gepinnt.
 
 ## Wichtige Projektregeln
 

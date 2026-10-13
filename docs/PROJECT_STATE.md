@@ -122,9 +122,10 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 1. Nach den ersten neuen Sitzungen `/session-health --days 7` ausführen und die
    Recovery-Rate gegen die Messung vor den Fixes vergleichen; erst dann
    Recovery weiter vereinfachen.
-2. Den divergierten Dev-Klon `/home/g/Projekte/pi-subagents` (lokal
-   `74b95d6` plus uncommittete Umbauten, −38 000 Zeilen) mit dem Remote-Stand
-   `0364aaa` zusammenführen oder verwerfen; erst danach `typebox` im Fork auf
-   `peerDependencies` umstellen.
-3. Restbestände der entfernten Extensions archivieren und den Ledger
-   (Architekturentscheidungen) auf ADR-Verweise verdichten.
+2. Fork-Richtung entscheiden: (a) WIP verwerfen, Pin `0364aaa` bleibt;
+   (b) Strip-down fertigstellen (Executor auf den Einzelpfad reduzieren, 82
+   Typfehler, Semantik von `status/stop/interrupt` ohne Async-Runner klären);
+   (c) nur `74b95d6` übernehmen und `temporary-agent-policy.ts`, ADR 031 und
+   Docs auf den Spec-Vertrag ohne `profile` umstellen.
+3. Die `typebox`-Startwarnung des Forks erst nach (b) beheben; vorher bleibt
+   sie bewusst bestehen.
