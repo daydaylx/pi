@@ -46,6 +46,11 @@ const suites = [
     env: {},
   },
   {
+    name: "permissions",
+    file: "permissions.test.mjs",
+    env: {},
+  },
+  {
     name: "verifier-need-gate",
     file: "verifier-need-gate.test.mjs",
     env: {},
@@ -74,6 +79,11 @@ const suites = [
   {
     name: "system-context",
     file: "system-context.test.mjs",
+    env: {},
+  },
+  {
+    name: "workspace-snapshot",
+    file: "workspace-snapshot.test.mjs",
     env: {},
   },
   {

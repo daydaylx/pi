@@ -3,7 +3,14 @@
  * plan is stored, whether it is good enough to act on, and how it is allowed to
  * reach the model.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, eq, test } from "../shared/assertions.mjs";
@@ -179,6 +186,34 @@ await test("nothing is written into the workspace unless asked", async () => {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
+});
+
+await test("workspace plan save refuses a symlinked destination", async () => {
+  if (!store || process.platform === "win32") return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-store-ws-link-"));
+  const outside = mkdtempSync(join(tmpdir(), "pi-store-outside-"));
+  const outsideFile = join(outside, "sentinel.md");
+  const target = join(cwd, ".agent", "plans", "current-plan.md");
+  try {
+    mkdirSync(join(cwd, ".agent", "plans"), { recursive: true });
+    writeFileSync(outsideFile, "user-owned sentinel");
+    symlinkSync(outsideFile, target);
+    let rejected = false;
+    try {
+      store.writeWorkspacePlan(cwd, "# redirected\n");
+    } catch (error) {
+      rejected = /Symlink/.test(String(error));
+    }
+    assert(rejected, "save refuses a symlink at current-plan.md");
+    eq(
+      readFileSync(outsideFile, "utf8"),
+      "user-owned sentinel",
+      "the external file is unchanged",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 const SIMPLE = `# Plan

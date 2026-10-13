@@ -1,9 +1,4 @@
 {
-  "tests/e2e.test.mjs": {
-    "no-unused-vars": {
-      "count": 1
-    }
-  },
   "tests/lsp-smoke.mjs": {
     "no-unsafe-finally": {
       "count": 1
@@ -14,11 +9,6 @@
   },
   "tests/openrouter-doctor/unit/normalize-error.test.mjs": {
     "no-unused-vars": {
-      "count": 1
-    }
-  },
-  "tests/plan-store.test.mjs": {
-    "no-control-regex": {
       "count": 1
     }
   },
@@ -66,11 +56,6 @@
     },
     "no-unused-vars": {
       "count": 7
-    }
-  },
-  "tests/unit/normalize-error.test.mjs": {
-    "no-unused-vars": {
-      "count": 1
     }
   },
   "tests/workflow-mode/e2e.test.mjs": {
