@@ -26,7 +26,7 @@ aktive Konfiguration verwenden. Nach der Synchronisation die Abhängigkeiten im
 Zielverzeichnis installieren:
 
 ```bash
-npm ci --prefix ~/.pi/agent/npm
+npm install --ignore-scripts --prefix ~/.pi/agent/npm
 npm --prefix ~/.pi/agent run build
 ```
 

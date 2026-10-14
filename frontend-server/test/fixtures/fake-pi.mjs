@@ -37,16 +37,31 @@ lines.on("line", (line) => {
       cost: 0.01,
     };
   } else if (request.type === "get_messages") {
+    const count = Number(process.env.FAKE_PI_MESSAGES_COUNT ?? 0);
     data = {
-      messages: [
-        { role: "assistant", content: [{ type: "text", text: "ok" }] },
-      ],
+      messages:
+        count > 0
+          ? Array.from({ length: count }, (_, index) => ({
+              role: "assistant",
+              content: [{ type: "text", text: `message-${index}` }],
+            }))
+          : [
+              {
+                role: "assistant",
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      "x".repeat(
+                        Number(process.env.FAKE_PI_BIG_MESSAGES ?? 0),
+                      ) || "ok",
+                  },
+                ],
+              },
+            ],
     };
   }
-  if (
-    request.type === "prompt" &&
-    process.env.FAKE_PI_UI_CONFIRM === "1"
-  ) {
+  if (request.type === "prompt" && process.env.FAKE_PI_UI_CONFIRM === "1") {
     pendingPromptId = request.id;
     process.stdout.write(
       `${JSON.stringify({

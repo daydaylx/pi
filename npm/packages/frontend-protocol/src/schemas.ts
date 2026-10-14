@@ -67,6 +67,7 @@ export const AcceptedServerHelloSchema = Type.Object(
     serverVersion: NonEmptyString,
     piVersion: NonEmptyString,
     capabilities: Type.Array(NonEmptyString, { uniqueItems: true }),
+    hostEpoch: Type.Optional(NonEmptyString),
   },
   Strict,
 );

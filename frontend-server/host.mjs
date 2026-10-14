@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -25,6 +25,7 @@ const MAX_CLIENTS = 8;
 const MAX_INFLIGHT_PER_CLIENT = 32;
 const MAX_INFLIGHT_TOTAL = 128;
 const MAX_FRAME_CHARS = 256 * 1024;
+const MAX_BACKEND_FRAME_CHARS = 8 * 1024 * 1024;
 const MAX_CLIENT_BUFFERED_CHARS = 512 * 1024;
 const MAX_CLIENT_WRITE_BUFFER = 1024 * 1024;
 const PROMPT_START_GRACE_MS = 5_000;
@@ -45,23 +46,38 @@ function line(stream, frame) {
   stream.write(`${JSON.stringify(frame)}\n`);
 }
 
-function attachLines(stream, onFrame, onInvalid, maxChars = MAX_FRAME_CHARS) {
+function attachLines(
+  stream,
+  onFrame,
+  onInvalid,
+  maxChars = MAX_FRAME_CHARS,
+  onTooLarge = onInvalid,
+) {
   stream.setEncoding("utf8");
   let buffer = "";
+  let discarding = false;
   stream.on("data", (chunk) => {
-    buffer += chunk;
-    if (buffer.length > maxChars && !buffer.includes("\n")) {
-      buffer = "";
-      onInvalid("frame too large");
-      return;
+    if (discarding) {
+      const newline = chunk.indexOf("\n");
+      if (newline < 0) return;
+      chunk = chunk.slice(newline + 1);
+      discarding = false;
     }
+    buffer += chunk;
     while (true) {
       const newline = buffer.indexOf("\n");
-      if (newline < 0) break;
+      if (newline < 0) {
+        if (buffer.length > maxChars) {
+          buffer = "";
+          discarding = true;
+          onTooLarge("frame too large");
+        }
+        break;
+      }
       const raw = buffer.slice(0, newline).replace(/\r$/, "");
       buffer = buffer.slice(newline + 1);
       if (raw.length > maxChars) {
-        onInvalid("frame too large");
+        onTooLarge("frame too large");
         continue;
       }
       if (!raw.trim()) continue;
@@ -73,6 +89,7 @@ function attachLines(stream, onFrame, onInvalid, maxChars = MAX_FRAME_CHARS) {
     }
   });
   stream.on("end", () => {
+    if (discarding) return;
     if (!buffer.trim()) return;
     if (buffer.length > maxChars) onInvalid("frame too large");
     else {
@@ -196,6 +213,8 @@ export class PiSystemHost {
     runtimePath = DEFAULT_RUNTIME,
     promptStartGraceMs = PROMPT_START_GRACE_MS,
     startupTimeoutMs = 10_000,
+    approvalTtlMs,
+    maxBackendFrameChars = MAX_BACKEND_FRAME_CHARS,
   } = {}) {
     if (!runtimeDir || !path.isAbsolute(runtimeDir)) {
       throw new Error("XDG_RUNTIME_DIR must be an absolute path");
@@ -233,6 +252,14 @@ export class PiSystemHost {
     this.frontendPath = frontendPath;
     this.promptStartGraceMs = promptStartGraceMs;
     this.startupTimeoutMs = startupTimeoutMs;
+    this.maxBackendFrameChars = maxBackendFrameChars;
+    const configuredTtl = Number(
+      approvalTtlMs ?? env.PI_SYSTEM_APPROVAL_TTL_MS ?? 120_000,
+    );
+    this.approvalTtlMs = Math.min(
+      600_000,
+      Math.max(5_000, Number.isFinite(configuredTtl) ? configuredTtl : 120_000),
+    );
     this.server = undefined;
     this.socketIdentity = undefined;
     this.backend = undefined;
@@ -245,6 +272,7 @@ export class PiSystemHost {
     this.clients = new Map();
     this.pending = new Map();
     this.pendingUi = new Map();
+    this.hostEpoch = undefined;
     this.state = undefined;
     this.activeRun = false;
     this.uncertainRun = false;
@@ -254,6 +282,7 @@ export class PiSystemHost {
   }
 
   async start() {
+    this.hostEpoch = randomUUID();
     await removeStaleSocket(this.socketPath);
     this.ready = new Promise((resolve, reject) => {
       this.readyResolve = resolve;
@@ -283,6 +312,8 @@ export class PiSystemHost {
           void this.stop(1);
         }
       },
+      this.maxBackendFrameChars,
+      () => this.handleBackendFrameTooLarge(),
     );
     line(this.backend.stdin, {
       kind: "hello",
@@ -326,6 +357,33 @@ export class PiSystemHost {
     return this;
   }
 
+  handleBackendFrameTooLarge() {
+    const error = makeError(
+      "RESULT_TOO_LARGE",
+      "Pi frontend response exceeded the 8 MiB backend frame limit",
+    );
+    for (const request of this.pending.values()) {
+      if (request.internalUi) {
+        this.emitUiResolved(request.uiId, request.outcome);
+        continue;
+      }
+      request.client.inflight.delete(request.clientId);
+      if (!request.client.socket.destroyed) {
+        line(request.client.socket, {
+          protocolVersion: PROTOCOL_VERSION,
+          kind: "response",
+          id: request.clientId,
+          ok: false,
+          error,
+        });
+      }
+    }
+    this.pending.clear();
+    for (const client of this.clients.values()) {
+      if (client.ready) this.sendClientEvent(client, "error", { error });
+    }
+  }
+
   handleBackendFrame(frame) {
     if (frame?.kind === "hello") {
       if (!frame.accepted) {
@@ -342,6 +400,10 @@ export class PiSystemHost {
       const request = this.pending.get(frame.id);
       if (!request) return;
       this.pending.delete(frame.id);
+      if (request.internalUi) {
+        this.emitUiResolved(request.uiId, request.outcome);
+        return;
+      }
       request.client.inflight.delete(request.clientId);
       const startsTurn =
         request.method === "agent.prompt" ||
@@ -369,7 +431,10 @@ export class PiSystemHost {
         }
       }
       if (request.method === "ui.respond" && frame.ok) {
-        this.pendingUi.delete(request.uiId);
+        this.finishUi(request.uiId, "answered", false);
+      } else if (request.method === "ui.respond") {
+        const pendingUi = this.pendingUi.get(request.uiId);
+        if (pendingUi) pendingUi.responding = false;
       }
       if (!request.client.socket.destroyed) {
         const response = {
@@ -386,21 +451,110 @@ export class PiSystemHost {
       return;
     }
     if (frame?.kind !== "event") return;
+    let eventData = frame.data;
     if (frame.event === "state.snapshot") {
+      const previousSessionId = this.state?.session?.id;
       this.state = frame.data;
+      if (
+        this.pendingUi.size > 0 &&
+        previousSessionId !== this.state?.session?.id
+      ) {
+        this.cancelPendingUi();
+      }
       this.updateRunState();
       this.resolveReadyIfComplete();
     } else if (frame.event === "state.patch") {
+      const previousSessionId = this.state?.session?.id;
       this.state = mergePatch(this.state ?? {}, frame.data);
+      if (
+        this.pendingUi.size > 0 &&
+        previousSessionId !== this.state?.session?.id
+      ) {
+        this.cancelPendingUi();
+      }
       this.updateRunState();
+    } else if (frame.event === "session.changed") {
+      this.cancelPendingUi();
     } else if (frame.event === "extension-ui.requested") {
       const id = frame.data?.id;
-      if (typeof id === "string") this.pendingUi.set(id, frame.data);
+      if (typeof id === "string")
+        eventData = this.trackUiRequest(id, frame.data);
     }
     for (const client of this.clients.values()) {
       if (!client.ready) continue;
-      this.sendClientEvent(client, frame.event, frame.data);
+      this.sendClientEvent(client, frame.event, eventData, frame.sessionId);
     }
+  }
+
+  trackUiRequest(id, data) {
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt.getTime() + this.approvalTtlMs);
+    const digest = createHash("sha256")
+      .update(
+        JSON.stringify([
+          data.method,
+          data.title ?? "",
+          data.message ?? "",
+          data.options ?? [],
+        ]),
+      )
+      .digest("hex");
+    const enriched = {
+      ...data,
+      approval: {
+        digest,
+        sessionId: String(this.state?.session?.id ?? ""),
+        createdAt: createdAt.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+      },
+    };
+    const timer = setTimeout(() => {
+      if (!this.pendingUi.has(id)) return;
+      this.finishUi(id, "expired", true);
+    }, this.approvalTtlMs);
+    timer.unref?.();
+    this.pendingUi.set(id, { data: enriched, timer, responding: false });
+    this.updateRunState();
+    return enriched;
+  }
+
+  finishUi(id, outcome, notifyBackend) {
+    const pending = this.pendingUi.get(id);
+    if (!pending) return false;
+    clearTimeout(pending.timer);
+    this.pendingUi.delete(id);
+    if (notifyBackend && this.backend?.stdin?.writable) {
+      const backendId = `host-${randomUUID()}`;
+      this.pending.set(backendId, {
+        internalUi: true,
+        uiId: id,
+        outcome,
+      });
+      line(this.backend.stdin, {
+        protocolVersion: PROTOCOL_VERSION,
+        kind: "request",
+        id: backendId,
+        method: "ui.respond",
+        params: { id, cancelled: true },
+      });
+    } else {
+      this.emitUiResolved(id, outcome);
+    }
+    this.updateRunState();
+    return true;
+  }
+
+  emitUiResolved(id, outcome) {
+    for (const client of this.clients.values()) {
+      if (client.ready) {
+        this.sendClientEvent(client, "extension-ui.resolved", { id, outcome });
+      }
+    }
+  }
+
+  cancelPendingUi() {
+    for (const id of this.pendingUi.keys())
+      this.finishUi(id, "cancelled", true);
   }
 
   resolveReadyIfComplete() {
@@ -543,10 +697,11 @@ export class PiSystemHost {
       serverVersion: PROTOCOL_PACKAGE_VERSION,
       piVersion: this.backendHello.piVersion,
       capabilities: [...CAPABILITIES, "shared-session-owner"],
+      hostEpoch: this.hostEpoch,
     });
     this.sendClientEvent(client, "state.snapshot", this.state);
     for (const pending of this.pendingUi.values()) {
-      this.sendClientEvent(client, "extension-ui.requested", pending);
+      this.sendClientEvent(client, "extension-ui.requested", pending.data);
     }
   }
 
@@ -620,7 +775,8 @@ export class PiSystemHost {
     let uiId;
     if (frame.method === "ui.respond") {
       uiId = frame.params.id;
-      if (!this.pendingUi.has(uiId)) {
+      const pendingUi = this.pendingUi.get(uiId);
+      if (!pendingUi || pendingUi.responding) {
         this.sendClientError(
           client,
           frame.id,
@@ -629,6 +785,7 @@ export class PiSystemHost {
         );
         return;
       }
+      pendingUi.responding = true;
     }
     if (
       frame.method === "agent.prompt" ||
@@ -655,6 +812,10 @@ export class PiSystemHost {
     } catch {
       this.pending.delete(backendId);
       client.inflight.delete(frame.id);
+      if (uiId) {
+        const pendingUi = this.pendingUi.get(uiId);
+        if (pendingUi) pendingUi.responding = false;
+      }
       if (
         frame.method === "agent.prompt" ||
         frame.method === "agent.followUp"
@@ -695,7 +856,7 @@ export class PiSystemHost {
     });
   }
 
-  sendClientEvent(client, event, data) {
+  sendClientEvent(client, event, data, sessionId) {
     if (!isValidEventData(event, data)) return;
     if (client.socket.destroyed) return;
     if (client.socket.writableLength > MAX_CLIENT_WRITE_BUFFER) {
@@ -707,6 +868,9 @@ export class PiSystemHost {
       kind: "event",
       sequence: ++client.sequence,
       event,
+      ...(typeof (sessionId ?? this.state?.session?.id) === "string"
+        ? { sessionId: sessionId ?? this.state.session.id }
+        : {}),
       data,
     });
   }
@@ -715,6 +879,8 @@ export class PiSystemHost {
     if (this.stopping) return;
     this.stopping = true;
     this.clearPromptReservation();
+    for (const pending of this.pendingUi.values()) clearTimeout(pending.timer);
+    this.pendingUi.clear();
     for (const client of this.clients.values()) client.socket.destroy();
     this.clients.clear();
     if (this.server) {

@@ -104,6 +104,80 @@ test("exposes stable capabilities and structured errors", () => {
   );
 });
 
+test("accepts additive host capabilities and structured oversized-result errors", () => {
+  assert.ok(CAPABILITIES.includes("host-epoch"));
+  assert.ok(CAPABILITIES.includes("approval-envelope"));
+  assert.ok(CAPABILITIES.includes("paged-messages"));
+  assert.equal(
+    protocolError("RESULT_TOO_LARGE", "Result too large", "corr-large")
+      .retryable,
+    false,
+  );
+});
+
+test("validates paged message parameters and results strictly", () => {
+  assert.equal(isValidRequestParams("session.messages", {}), true);
+  assert.equal(
+    isValidRequestParams("session.messages", { limit: 500, before: "o:25" }),
+    true,
+  );
+  assert.equal(isValidRequestParams("session.messages", { limit: 0 }), false);
+  assert.equal(
+    isValidRequestParams("session.messages", { before: "x".repeat(129) }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.messages", { unknown: true }),
+    false,
+  );
+  assert.equal(
+    isValidRequestResult("session.messages", {
+      messages: [],
+      nextCursor: "o:0",
+    }),
+    true,
+  );
+});
+
+test("validates approval metadata and resolution outcomes", () => {
+  const approval = {
+    digest: "a".repeat(64),
+    sessionId: "session-1",
+    createdAt: "2026-10-14T10:00:00.000Z",
+    expiresAt: "2026-10-14T10:02:00.000Z",
+  };
+  assert.equal(
+    isValidEventData("extension-ui.requested", {
+      id: "approval-1",
+      method: "confirm",
+      approval,
+    }),
+    true,
+  );
+  assert.equal(
+    isValidEventData("extension-ui.requested", {
+      id: "approval-1",
+      method: "confirm",
+      approval: { ...approval, digest: "bad" },
+    }),
+    false,
+  );
+  assert.equal(
+    isValidEventData("extension-ui.resolved", {
+      id: "approval-1",
+      outcome: "expired",
+    }),
+    true,
+  );
+  assert.equal(
+    isValidEventData("extension-ui.resolved", {
+      id: "approval-1",
+      outcome: "unknown",
+    }),
+    false,
+  );
+});
+
 test("validates the complete nested state snapshot", async () => {
   const fixture = JSON.parse(
     await readFile(

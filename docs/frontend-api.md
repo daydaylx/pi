@@ -17,7 +17,7 @@ The transport is UTF-8 JSON Lines over stdin/stdout. The first client frame is:
 ```
 
 Pi responds with an accepted frame containing `protocolVersion`, Pi/server
-versions and the capabilities available on this connection. If no version
+versions, the optional per-process `hostEpoch`, and the capabilities available on this connection. If no version
 overlaps, Pi responds with `PROTOCOL_MISMATCH`; no requests are processed before
 a successful handshake.
 
@@ -30,7 +30,8 @@ per connection. Runtime schemas and fixtures are exported by
 
 V1 defines `sessions`, `messages`, `streaming`, `tool-calls`, `workflow`,
 `tasks`, `subagents`, `permissions`, `verification`, `changes`, `lsp`, `models`,
-`thinking`, `notifications`, `configuration` and `extension-ui`. A frontend must
+`thinking`, `notifications`, `configuration`, `extension-ui`, `host-epoch`,
+`approval-envelope` and `paged-messages`. A frontend must
 disable or hide a feature when its capability is absent.
 
 State entries of `subagents` carry `runId`, `agent` (agent id), `label`,
@@ -60,12 +61,26 @@ may therefore be present even when a particular optional command returns
 Session IDs are opaque. `session.list` never returns a session filename, and
 `session.open` accepts only an ID previously issued by the server.
 
+`session.messages` accepts optional `id`, `limit` (1–500, default 100) and
+`before` (opaque cursor, at most 128 characters). It returns the newest page
+before the cursor, oldest first, with `nextCursor` when older messages remain.
+Each page is limited to 100,000 serialized characters; a single oversized
+message has its text blocks shortened with `…[gekürzt]`. Calls without
+parameters therefore return the newest page, not the full history.
+
 ## Events
 
 V1 events are `state.snapshot`, `state.patch`, the message/thinking lifecycle,
 the tool lifecycle, `session.changed`, `subagent.changed`,
 `verification.changed`, `permission.requested`, `extension-ui.requested`, `notification`,
-`core.disconnected`, `core.reconnected` and `error`.
+`core.disconnected`, `core.reconnected`, `extension-ui.resolved` and `error`.
+
+`extension-ui.requested` includes an `approval` envelope with a SHA-256 digest
+of the displayed method/title/message/options, the current `sessionId` when
+available, and ISO-8601 creation and expiry times. Requests expire after two
+minutes by default. `extension-ui.resolved` reports `answered`, `expired` or
+`cancelled`. The upstream RPC supplies only title/message/options, so the
+digest binds the displayed action and does not bind a tool or tool call.
 
 The protocol package exports method-specific parameter/result validators and
 event-specific payload validators. Implementations validate at both ends; the
@@ -80,7 +95,10 @@ silently.
 Errors contain a stable `code`, user-facing `message`, `retryable` flag and
 `correlationId`. V1 codes cover missing/start-failed/crashed Pi, disconnected
 RPC, incompatible protocol, unsupported capabilities, invalid/unknown requests,
-timeouts, sessions, tools, permissions, providers and internal failures.
+timeouts, sessions, tools, permissions, providers, oversized backend results
+(`RESULT_TOO_LARGE`) and internal failures. The host rejects backend frames
+larger than 8 MiB while remaining available; client frames remain limited to
+256 KiB.
 
 Logs record correlation, method, duration and error code only by default. Prompt
 content, tool inputs/results, credentials and raw stderr are not frontend log
@@ -94,6 +112,8 @@ payloads.
   `PI_START_FAILED`, a message naming the detected version and the supported
   lines, and `retryable: false`, instead of being reported under a supported
   version. Adding a line requires a verified RPC contract and tests.
+- Protocol package version 1.2.0 adds optional capabilities, paged message
+  parameters, approval metadata/events and `RESULT_TOO_LARGE`.
 - Minor package releases may add optional capabilities, methods or events.
 - Existing schemas and meanings cannot change incompatibly within wire major 1.
 - Consumers validate every inbound envelope and must show a concrete mismatch

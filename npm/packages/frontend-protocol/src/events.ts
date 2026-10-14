@@ -22,6 +22,15 @@ const ToolEndData = Type.Object(
   Strict,
 );
 const ErrorData = Type.Object({ error: ProtocolErrorSchema }, Strict);
+const Approval = Type.Object(
+  {
+    digest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+    sessionId: Type.String(),
+    createdAt: Type.String({ format: "date-time" }),
+    expiresAt: Type.String({ format: "date-time" }),
+  },
+  Strict,
+);
 
 export const EVENT_DATA_SCHEMAS = {
   "state.snapshot": StateSnapshotV1Schema,
@@ -62,6 +71,18 @@ export const EVENT_DATA_SCHEMAS = {
       title: Type.Optional(Type.String()),
       message: Type.Optional(Type.String()),
       options: Type.Optional(Type.Array(Type.String())),
+      approval: Type.Optional(Approval),
+    },
+    Strict,
+  ),
+  "extension-ui.resolved": Type.Object(
+    {
+      id: NonEmptyString,
+      outcome: Type.Union([
+        Type.Literal("answered"),
+        Type.Literal("expired"),
+        Type.Literal("cancelled"),
+      ]),
     },
     Strict,
   ),

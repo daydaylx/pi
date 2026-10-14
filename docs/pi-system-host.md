@@ -11,6 +11,15 @@ erhalten jeweils einen aktuellen Zustands-Snapshot und anschließend denselben
 Ereignisstrom. Der Host serialisiert neue Prompts und weist parallele Starts mit
 `SESSION_BUSY` zurück.
 
+Der Host begrenzt Client-Frames auf 256 KiB und Backend-Frames auf 8 MiB.
+Überschreitet eine Backend-Zeile das Limit, verwirft er sie bis zum nächsten
+Zeilenumbruch, beantwortet laufende Anfragen mit `RESULT_TOO_LARGE` und bleibt
+verfügbar. Nachrichten werden seitenweise mit höchstens 100 Einträgen und
+100.000 serialisierten Zeichen geladen. Freigaben laufen nach 120 Sekunden ab;
+`PI_SYSTEM_APPROVAL_TTL_MS` konfiguriert den Wert im Bereich von 5 bis 600
+Sekunden. Jede Host-Instanz meldet eine zufällige `hostEpoch` für die Dauer
+ihres Prozesses. Sie ermöglicht Resync-Erkennung, speichert aber keine Events.
+
 ## Quellcode prüfen
 
 ```bash
@@ -33,7 +42,7 @@ sein:
 ```bash
 npm run install:user -- --dry-run
 npm run install:user -- --apply
-npm ci --prefix ~/.pi/agent/npm
+npm install --ignore-scripts --prefix ~/.pi/agent/npm
 npm --prefix ~/.pi/agent run build
 ```
 
@@ -59,7 +68,8 @@ und Extensions bleiben die vorhandene Installation.
   verpasste Stream-Events. Ein Client muss Nachrichten bei Bedarf über
   `session.messages` nachladen.
 - Pi-Sitzungen sind persistent; ein separates dauerhaftes Run-/Job-Manifest,
-  Host-Epoch, Crash-Recovery und Statusabgleich gestarteter externer Jobs fehlen.
+  Crash-Recovery und Statusabgleich gestarteter externer Jobs fehlen. Die
+  Host-Epoch gilt nur für den jeweiligen Prozess und bietet keinen Replay-Puffer.
 - `pi system` als interaktive TUI und der RPC-Host nutzen getrennte
   Session-Verzeichnisse. Eine Attach-/Handoff-Funktion existiert nicht; Verlauf
   und Sessionauswahl werden nicht automatisch zwischen den beiden Profilen

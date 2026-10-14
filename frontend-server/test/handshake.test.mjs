@@ -169,6 +169,88 @@ test("rejects injected UI response fields and unknown session ids", async () => 
   await once(server.child, "exit");
 });
 
+test("paginates the newest messages without gaps and bounds a large message", async () => {
+  const server = startServer({ FAKE_PI_MESSAGES_COUNT: "550" });
+  try {
+    server.send({
+      kind: "hello",
+      client: { name: "pagination-test", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await server.next();
+    await server.next();
+    const requestPage = (id, params) => {
+      server.send({
+        protocolVersion: 1,
+        kind: "request",
+        id,
+        method: "session.messages",
+        params,
+      });
+      return server.next();
+    };
+    const allTexts = [];
+    let before;
+    let pageNumber = 0;
+    do {
+      const response = await requestPage(
+        `messages-${pageNumber}`,
+        before === undefined ? {} : { before },
+      );
+      assert.equal(response.ok, true);
+      allTexts.push(
+        ...response.result.messages.map((message) => message.blocks[0].text),
+      );
+      before = response.result.nextCursor;
+      pageNumber += 1;
+    } while (before);
+    assert.equal(allTexts.length, 550);
+    assert.equal(new Set(allTexts).size, 550);
+    const orderedTexts = [...allTexts].sort(
+      (left, right) =>
+        Number(left.slice("message-".length)) -
+        Number(right.slice("message-".length)),
+    );
+    assert.equal(orderedTexts[0], "message-0");
+    assert.equal(orderedTexts.at(-1), "message-549");
+
+    const invalidCursor = await requestPage("messages-invalid", {
+      before: "not-a-cursor",
+    });
+    assert.equal(invalidCursor.error.code, "INVALID_REQUEST");
+  } finally {
+    server.child.kill("SIGTERM");
+    await once(server.child, "exit");
+  }
+
+  const large = startServer({ FAKE_PI_BIG_MESSAGES: "150000" });
+  try {
+    large.send({
+      kind: "hello",
+      client: { name: "message-budget-test", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await large.next();
+    await large.next();
+    large.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "messages-large",
+      method: "session.messages",
+      params: {},
+    });
+    const response = await large.next();
+    assert.equal(response.ok, true);
+    assert.ok(JSON.stringify(response.result.messages).length <= 100_000);
+    assert.ok(
+      response.result.messages[0].blocks[0].text.endsWith("…[gekürzt]"),
+    );
+  } finally {
+    large.child.kill("SIGTERM");
+    await once(large.child, "exit");
+  }
+});
+
 test("forwards RPC extension confirmation requests and delivers the response", async () => {
   const server = startServer({ FAKE_PI_UI_CONFIRM: "1" });
   try {

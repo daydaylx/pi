@@ -1,5 +1,5 @@
 export const PROTOCOL_VERSION = 1 as const;
-export const PROTOCOL_PACKAGE_VERSION = "1.1.0" as const;
+export const PROTOCOL_PACKAGE_VERSION = "1.2.0" as const;
 
 export const CAPABILITIES = [
   "sessions",
@@ -18,6 +18,9 @@ export const CAPABILITIES = [
   "notifications",
   "configuration",
   "extension-ui",
+  "host-epoch",
+  "approval-envelope",
+  "paged-messages",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 export const isKnownCapability = (value: string): value is Capability =>
@@ -74,6 +77,7 @@ export const EVENT_NAMES = [
   "verification.changed",
   "permission.requested",
   "extension-ui.requested",
+  "extension-ui.resolved",
   "notification",
   "core.disconnected",
   "core.reconnected",
@@ -98,6 +102,7 @@ export const ERROR_CODES = [
   "TOOL_FAILED",
   "PERMISSION_DENIED",
   "SESSION_BUSY",
+  "RESULT_TOO_LARGE",
   "PROVIDER_ERROR",
   "INTERNAL_ERROR",
 ] as const;

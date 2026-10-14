@@ -13,7 +13,14 @@ export const REQUEST_PARAM_SCHEMAS = {
   "session.create": Empty,
   "session.open": Type.Object({ id: Id }, Strict),
   "session.current": Empty,
-  "session.messages": Type.Object({ id: Type.Optional(Id) }, Strict),
+  "session.messages": Type.Object(
+    {
+      id: Type.Optional(Id),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
+      before: Type.Optional(Type.String({ maxLength: 128 })),
+    },
+    Strict,
+  ),
   "session.stats": Empty,
   "agent.prompt": Type.Object({ message: Message }, Strict),
   "agent.steer": Type.Object({ message: Message }, Strict),

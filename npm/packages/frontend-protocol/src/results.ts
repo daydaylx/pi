@@ -124,7 +124,10 @@ export const REQUEST_RESULT_SCHEMAS = {
   "session.open": CurrentSession,
   "session.current": CurrentSession,
   "session.messages": Type.Object(
-    { messages: Type.Array(PublicMessageSchema) },
+    {
+      messages: Type.Array(PublicMessageSchema),
+      nextCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    },
     Strict,
   ),
   "session.stats": SessionStats,

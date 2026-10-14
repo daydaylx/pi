@@ -283,6 +283,55 @@ function normalizeMessagesResult(raw) {
   return { messages: messages.map((message) => normalizeMessage(message)) };
 }
 
+const MESSAGE_PAGE_BUDGET = 100_000;
+
+function truncateMessageToBudget(message) {
+  const truncated = structuredClone(message);
+  while (JSON.stringify([truncated]).length > MESSAGE_PAGE_BUDGET) {
+    const textBlocks = truncated.blocks.filter(
+      (block) => typeof block.text === "string" && block.text.length > 0,
+    );
+    if (textBlocks.length === 0) break;
+    textBlocks.sort((left, right) => right.text.length - left.text.length);
+    const block = textBlocks[0];
+    const marker = "…[gekürzt]";
+    if (block.text.length <= marker.length) block.text = "";
+    else {
+      const keep = Math.max(
+        0,
+        Math.floor((block.text.length - marker.length) / 2),
+      );
+      block.text = `${block.text.slice(0, keep)}${marker}`;
+    }
+  }
+  return truncated;
+}
+
+function paginateMessages(messages, params) {
+  const limit = params.limit ?? 100;
+  let end = messages.length;
+  if (params.before !== undefined) {
+    const match = /^o:(0|[1-9]\d*)$/.exec(params.before);
+    if (!match || Number(match[1]) > messages.length) {
+      throw frontendError("INVALID_REQUEST", "Invalid message cursor");
+    }
+    end = Number(match[1]);
+  }
+  let start = Math.max(0, end - limit);
+  let page = messages.slice(start, end);
+  while (page.length > 1 && JSON.stringify(page).length > MESSAGE_PAGE_BUDGET) {
+    page = page.slice(1);
+    start += 1;
+  }
+  if (page.length === 1 && JSON.stringify(page).length > MESSAGE_PAGE_BUDGET) {
+    page[0] = truncateMessageToBudget(page[0]);
+  }
+  return {
+    messages: page,
+    ...(start > 0 ? { nextCursor: `o:${start}` } : {}),
+  };
+}
+
 function normalizeStats(stats) {
   return {
     sessionId: String(stats?.sessionId ?? ""),
@@ -898,7 +947,10 @@ export class FrontendServer {
       protocolVersion: negotiated,
       serverVersion: PROTOCOL_PACKAGE_VERSION,
       piVersion: this.piVersion,
-      capabilities: CAPABILITIES,
+      capabilities: CAPABILITIES.filter(
+        (capability) =>
+          capability !== "host-epoch" && capability !== "approval-envelope",
+      ),
     });
     await this.emitInitialSnapshot();
   }
@@ -1079,19 +1131,20 @@ export class FrontendServer {
           await runtime.request({ type: "get_state" }),
         );
       case "session.messages": {
+        let messages;
         if (params.id !== undefined) {
           const sessionPath = this.sessionPaths.get(params.id);
           if (!sessionPath)
             throw frontendError("SESSION_NOT_FOUND", "Session not found");
-          return {
-            messages: normalizeMessageEntries(
-              SessionManager.open(sessionPath).getEntries(),
-            ),
-          };
+          messages = normalizeMessageEntries(
+            SessionManager.open(sessionPath).getEntries(),
+          );
+        } else {
+          messages = normalizeMessagesResult(
+            await runtime.request({ type: "get_messages" }),
+          ).messages;
         }
-        return normalizeMessagesResult(
-          await runtime.request({ type: "get_messages" }),
-        );
+        return paginateMessages(messages, params);
       }
       case "session.stats":
         return normalizeStats(

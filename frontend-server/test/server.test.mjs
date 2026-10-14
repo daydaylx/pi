@@ -14,7 +14,7 @@ test("accepts only the Pi lines supported by protocol v1", () => {
   for (const version of [
     "0.83.9",
     "0.85.0",
-    "1.1.0",
+    "1.2.0",
     "2.0.0",
     "1.0",
     "10.0.4",

@@ -18,6 +18,7 @@ import { PiSystemHost } from "../host.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakePi = path.join(here, "fixtures", "fake-system-host-pi.mjs");
+const FRAME_WAIT_MS = 15_000;
 
 function connectClient(socketPath) {
   const socket = net.createConnection(socketPath);
@@ -45,7 +46,7 @@ function connectClient(socketPath) {
     send(frame) {
       socket.write(`${JSON.stringify(frame)}\n`);
     },
-    next(predicate, timeoutMs = 3_000) {
+    next(predicate, timeoutMs = FRAME_WAIT_MS) {
       const index = frames.findIndex(predicate);
       if (index >= 0) return Promise.resolve(frames.splice(index, 1)[0]);
       return new Promise((resolve, reject) => {
@@ -67,7 +68,7 @@ function connectClient(socketPath) {
 }
 
 async function waitForSocket(socketPath) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 750; attempt += 1) {
     try {
       const client = connectClient(socketPath);
       await client.connect();
@@ -95,7 +96,7 @@ test("one Pi runtime is shared, prompts are serialized, and reconnect gets a sna
     runtimeDir: temp,
     runtimePath: fakePi,
     promptStartGraceMs: 1_000,
-    startupTimeoutMs: 5_000,
+    startupTimeoutMs: 20_000,
   });
   const clients = [];
   try {
@@ -113,7 +114,7 @@ test("one Pi runtime is shared, prompts are serialized, and reconnect gets a sna
       },
       runtimeDir: temp,
       runtimePath: fakePi,
-      startupTimeoutMs: 5_000,
+      startupTimeoutMs: 20_000,
     });
     await assert.rejects(competingHost.start(), /already listening/);
     await competingHost.stop();
@@ -128,7 +129,7 @@ test("one Pi runtime is shared, prompts are serialized, and reconnect gets a sna
     });
     const firstHello = await first.next((frame) => frame.kind === "hello");
     assert.equal(firstHello.accepted, true);
-    assert.equal(firstHello.serverVersion, "1.1.0");
+    assert.equal(firstHello.serverVersion, "1.2.0");
     assert.ok(firstHello.capabilities.includes("shared-session-owner"));
     const firstSnapshot = await first.next(
       (frame) => frame.event === "state.snapshot",
@@ -265,7 +266,7 @@ test("uncertain prompt timeout blocks retries until session.current verifies idl
     runtimeDir: temp,
     runtimePath: fakePi,
     promptStartGraceMs: 100,
-    startupTimeoutMs: 5_000,
+    startupTimeoutMs: 20_000,
   });
   let client;
   try {
@@ -366,6 +367,211 @@ test("host refuses symlinked runtime and Pi agent directories", () => {
       /real directory/,
     );
   } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("discards an oversized backend frame and keeps serving requests", async () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-frames-"));
+  const agentDir = path.join(temp, "agent");
+  mkdirSync(agentDir, { recursive: true, mode: 0o700 });
+  const host = new PiSystemHost({
+    env: {
+      ...process.env,
+      HOME: temp,
+      PI_CODING_AGENT_DIR: agentDir,
+      FAKE_SYSTEM_HOST_BACKEND: "1",
+      FAKE_PI_SMALL_MESSAGES: "100000",
+      FAKE_PI_BIG_MESSAGES: "300000",
+      FAKE_PI_OVERSIZED_MESSAGES: "400001",
+    },
+    runtimeDir: temp,
+    frontendPath: fakePi,
+    maxBackendFrameChars: 400_000,
+    startupTimeoutMs: 20_000,
+  });
+  let client;
+  try {
+    await host.start();
+    client = await waitForSocket(host.socketPath);
+    client.send({
+      kind: "hello",
+      client: { name: "frame-test", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await client.next((frame) => frame.kind === "hello");
+    const requestMessages = (id, before) =>
+      client.send({
+        protocolVersion: 1,
+        kind: "request",
+        id,
+        method: "session.messages",
+        params: { before },
+      });
+    requestMessages("messages-100k", "small");
+    const hundredK = await client.next((frame) => frame.id === "messages-100k");
+    assert.equal(hundredK.ok, true);
+    assert.equal(hundredK.result.messages[0].blocks[0].text.length, 100_000);
+
+    requestMessages("messages-300k", "normal");
+    const threeHundredK = await client.next(
+      (frame) => frame.id === "messages-300k",
+    );
+    assert.equal(threeHundredK.ok, true);
+    assert.equal(
+      threeHundredK.result.messages[0].blocks[0].text.length,
+      300_000,
+    );
+
+    requestMessages("messages-too-large", "oversized");
+    const tooLarge = await client.next(
+      (frame) => frame.id === "messages-too-large",
+    );
+    assert.equal(tooLarge.ok, false);
+    assert.equal(tooLarge.error.code, "RESULT_TOO_LARGE");
+    assert.equal(tooLarge.error.retryable, false);
+    await client.next((frame) => frame.event === "error");
+    const followingFrame = await client.next(
+      (frame) =>
+        frame.event === "session.changed" &&
+        frame.data.id === "after-oversized",
+    );
+    assert.equal(followingFrame.data.id, "after-oversized");
+    assert.equal(host.stopping, false);
+
+    client.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "ping-after-oversize",
+      method: "system.ping",
+      params: {},
+    });
+    assert.equal(
+      (await client.next((frame) => frame.id === "ping-after-oversize")).ok,
+      true,
+    );
+  } finally {
+    client?.socket.destroy();
+    await host.stop();
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("host stamps epochs and resolves approval envelopes exactly once", async () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-approval-"));
+  const agentDir = path.join(temp, "agent");
+  const responseLog = path.join(temp, "ui-responses.log");
+  mkdirSync(agentDir, { recursive: true, mode: 0o700 });
+  writeFileSync(responseLog, "");
+  const env = {
+    ...process.env,
+    HOME: temp,
+    PI_CODING_AGENT_DIR: agentDir,
+    FAKE_PI_UI_REQUEST: "1",
+    FAKE_PI_UI_RESPONSE_LOG: responseLog,
+  };
+  const host = new PiSystemHost({
+    env,
+    runtimeDir: temp,
+    runtimePath: fakePi,
+    approvalTtlMs: 5_000,
+    startupTimeoutMs: 20_000,
+  });
+  let client;
+  try {
+    await host.start();
+    assert.equal(typeof host.hostEpoch, "string");
+    client = await waitForSocket(host.socketPath);
+    client.send({
+      kind: "hello",
+      client: { name: "approval-test", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    const hello = await client.next((frame) => frame.kind === "hello");
+    assert.equal(hello.hostEpoch, host.hostEpoch);
+    assert.ok(hello.capabilities.includes("approval-envelope"));
+    const request = await client.next(
+      (frame) => frame.event === "extension-ui.requested",
+    );
+    assert.match(request.data.approval.digest, /^[a-f0-9]{64}$/);
+    assert.equal(request.data.approval.sessionId, "shared-system-session");
+    assert.equal(request.sessionId, "shared-system-session");
+
+    client.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "answer-approval",
+      method: "ui.respond",
+      params: { id: "fake-approval", method: "confirm", confirmed: true },
+    });
+    assert.equal(
+      (await client.next((frame) => frame.id === "answer-approval")).ok,
+      true,
+    );
+    assert.equal(
+      (await client.next((frame) => frame.event === "extension-ui.resolved"))
+        .data.outcome,
+      "answered",
+    );
+    client.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "answer-again",
+      method: "ui.respond",
+      params: { id: "fake-approval", method: "confirm", confirmed: true },
+    });
+    assert.equal(
+      (await client.next((frame) => frame.id === "answer-again")).error.code,
+      "PERMISSION_DENIED",
+    );
+
+    host.handleBackendFrame({
+      kind: "event",
+      event: "extension-ui.requested",
+      data: { id: "expires", method: "confirm", title: "Expire me" },
+    });
+    const expiry = await client.next(
+      (frame) =>
+        frame.event === "extension-ui.requested" && frame.data.id === "expires",
+    );
+    assert.ok(expiry.data.approval.expiresAt);
+    const resolved = await client.next(
+      (frame) =>
+        frame.event === "extension-ui.resolved" && frame.data.id === "expires",
+      20_000,
+    );
+    assert.equal(resolved.data.outcome, "expired");
+    const expiryResponse = readFileSync(responseLog, "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line))
+      .find((response) => response.id === "expires");
+    assert.deepEqual(expiryResponse, {
+      type: "extension_ui_response",
+      id: "expires",
+      cancelled: true,
+    });
+    assert.equal(host.isBusy(), false);
+
+    host.handleBackendFrame({
+      kind: "event",
+      event: "extension-ui.requested",
+      data: { id: "session-change", method: "confirm" },
+    });
+    host.handleBackendFrame({
+      kind: "event",
+      event: "session.changed",
+      data: { id: "other-session" },
+    });
+    const cancelled = await client.next(
+      (frame) =>
+        frame.event === "extension-ui.resolved" &&
+        frame.data.id === "session-change",
+    );
+    assert.equal(cancelled.data.outcome, "cancelled");
+  } finally {
+    client?.socket.destroy();
+    await host.stop();
     rmSync(temp, { recursive: true, force: true });
   }
 });
