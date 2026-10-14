@@ -37,6 +37,18 @@ export function preview(value: string): string {
     : `${oneLine.slice(0, MAX_PREVIEW - 1)}…`;
 }
 
+// Fernfreigabe: Steuerzeichen (außer \n und \t) sichtbar machen, damit ANSI-/Steuersequenzen die Anzeige nicht verfälschen.
+function sanitizeRemoteSubject(subject: string): string {
+  return subject.replace(
+    /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,
+    (character) =>
+      `\\x${character.charCodeAt(0).toString(16).padStart(2, "0")}`,
+  );
+}
+
+// Längere Aktionen werden fern nicht freigegeben: Ein gekürzter Befehl wäre keine informierte Entscheidung.
+const MAX_REMOTE_SUBJECT = 2_000;
+
 // --- QuickPanel-Anbindung (optional) -------------------------------------------------------------------------
 // Eine geladene Extension (`quickpanel-agent`) kann diese – vom Guard bereits als `ask` entschiedene – Anfrage zusätzlich
 // extern beantworten lassen. Die erste gültige Antwort gewinnt (TUI-Taste oder extern). Ohne registrierten Hook, bei
@@ -186,7 +198,9 @@ export async function confirmAction(
 ): Promise<boolean> {
   if (typeof ctx.ui.custom === "function") {
     try {
-      return await confirmWithCustomUi(ctx, decision, subject, toolName);
+      const result = await confirmWithCustomUi(ctx, decision, subject, toolName);
+      // Der RPC-Modus stellt `custom` nur als Stub bereit (liefert `undefined`): kein boolean = nicht beantwortet.
+      if (typeof result === "boolean") return result;
     } catch {
       // Fall through to the established confirm fallback.
     }
@@ -194,5 +208,22 @@ export async function confirmAction(
   const title = decision.hard
     ? "HARTE WARNUNG — Aktion bestätigen?"
     : "Riskante Aktion bestätigen?";
+  if (ctx.mode !== "tui") {
+    if (subject.length > MAX_REMOTE_SUBJECT) {
+      try {
+        ctx.ui.notify?.(
+          "Aktion zu lang für eine Fernfreigabe (maximal 2.000 Zeichen).",
+          "warning",
+        );
+      } catch {
+        // Benachrichtigung ist best effort.
+      }
+      return false;
+    }
+    return ctx.ui.confirm(
+      title,
+      `${decision.reason}\n\nAktion (${toolName ?? "bash"}):\n${sanitizeRemoteSubject(subject)}`,
+    );
+  }
   return ctx.ui.confirm(title, `${decision.reason}\n\n${preview(subject)}`);
 }
