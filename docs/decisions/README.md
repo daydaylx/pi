@@ -31,6 +31,7 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [031](031-temporary-task-agents.md) — Temporäre Task-Agenten (stateless, Runtime-Limits, Evidenz) statt fester Subagenten-Rollen
 - [032](032-verifier-need-gate.md) — Verifier Need-Gate: technisch erzwungene required/justified/not_needed-Entscheidung für optionale Verifier-Läufe
 - [033](033-task-tiers.md) — Task-Klassen FAST/NORMAL/DEEP: Routing, FAST-Subagenten-/Verifier-Sperre, Duplicate-Read-Guard, dynamisches Thinking
+- [034](034-system-control.md) — Typed System-Control-Werkzeuge ohne Root-Daemon
 
 ## Historische, ersetzte Entscheidungen
 

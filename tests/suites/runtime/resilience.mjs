@@ -1365,6 +1365,9 @@ export const resilienceSections = {
     const systemContextExtension = await load(
       "extensions/system-context/index.ts",
     );
+    const systemControlExtension = await load(
+      "extensions/system-control/index.ts",
+    );
 
     await section("combined production extension stack", async () => {
       if (
@@ -1381,6 +1384,7 @@ export const resilienceSections = {
         !sessionHealth ||
         !contextCapsule ||
         !systemContextExtension ||
+        !systemControlExtension ||
         !openrouterDoctor
       )
         return;
@@ -1397,6 +1401,7 @@ export const resilienceSections = {
         "+extensions/resilience/index.ts": resilience.default,
         "+extensions/context-capsule/index.ts": contextCapsule.default,
         "+extensions/system-context/index.ts": systemContextExtension.default,
+        "+extensions/system-control/index.ts": systemControlExtension.default,
         "+extensions/session-health/index.ts": sessionHealth.default,
         "+extensions/frontend-bridge/index.ts": frontendBridge.default,
         "+extensions/openrouter-doctor/index.ts": openrouterDoctor.default,

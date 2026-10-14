@@ -22,6 +22,14 @@ import { WEB_TOOLS, decideWebTool } from "./web-tools.ts";
 import { LOCAL_LSP_TOOLS } from "./workflow-policy.ts";
 import { PLAN_WRITE_TOOL_NAME } from "../plan-mode/plan-tool.ts";
 import { toolPath } from "./tool-event.ts";
+import { getPiLaunchProfile } from "../shared/profile.ts";
+import { systemBashNeedsApproval } from "../system-control/policy.ts";
+import {
+  SYSTEM_CONTROL_JOB_TOOLS,
+  SYSTEM_CONTROL_PRIVILEGED_TOOLS,
+  SYSTEM_CONTROL_READ_TOOLS,
+  SYSTEM_CONTROL_USER_MUTATION_TOOLS,
+} from "../system-control/tool-names.ts";
 import {
   INTERACTIVE_SHELL_TOOL_NAME,
   interactiveShellCommand,
@@ -46,7 +54,7 @@ export function permissionWarning(level: PermissionLevel): string | undefined {
   return undefined;
 }
 
-export function decideTool(
+function decideToolBase(
   permissionLevel: PermissionLevel,
   event: ToolCallEvent,
   cwd: string,
@@ -59,6 +67,47 @@ export function decideTool(
     additionalRoots?: readonly string[];
   } = {},
 ): PolicyDecision {
+  if (getPiLaunchProfile() === "system") {
+    if (SYSTEM_CONTROL_JOB_TOOLS.has(event.toolName)) {
+      const action = (event.input as Record<string, unknown>).action;
+      if (action === "status" || action === "output")
+        return {
+          action: "allow",
+          reason: "Systemprofil: read-only Systemwerkzeug",
+        };
+      if (action !== "stop")
+        return { action: "block", reason: "Unbekannte Systemauftrag-Aktion." };
+    }
+    if (SYSTEM_CONTROL_READ_TOOLS.has(event.toolName))
+      return {
+        action: "allow",
+        reason: "Systemprofil: read-only Systemwerkzeug",
+      };
+    if (
+      SYSTEM_CONTROL_USER_MUTATION_TOOLS.has(event.toolName) ||
+      SYSTEM_CONTROL_JOB_TOOLS.has(event.toolName)
+    )
+      return permissionLevel === "readonly" || permissionLevel === "headless"
+        ? {
+            action: "block",
+            reason: "Systemwerkzeug benötigt eine interaktive Freigabe.",
+          }
+        : {
+            action: "ask",
+            reason: "Systemwerkzeug verändert den Benutzerzustand.",
+          };
+    if (SYSTEM_CONTROL_PRIVILEGED_TOOLS.has(event.toolName))
+      return permissionLevel === "readonly" || permissionLevel === "headless"
+        ? {
+            action: "block",
+            reason:
+              "Privilegiertes Systemwerkzeug ist in diesem Modus gesperrt.",
+          }
+        : {
+            action: "ask",
+            reason: "Privilegierte NixOS-Aktion benötigt eine Freigabe.",
+          };
+  }
   if (
     event.toolName === "bash" ||
     event.toolName === INTERACTIVE_SHELL_TOOL_NAME
@@ -212,4 +261,43 @@ export function decideTool(
         reason: `Unbekanntes Tool "${event.toolName}" wird trotz Setup-Allow einzeln bestätigt.`,
       };
   }
+}
+
+export function decideTool(
+  permissionLevel: PermissionLevel,
+  event: ToolCallEvent,
+  cwd: string,
+  configured: {
+    unknownTools: ConfiguredPolicyAction;
+    bash: ConfiguredPolicyAction;
+  },
+  options: {
+    allowOutsideProjectRead?: boolean;
+    additionalRoots?: readonly string[];
+  } = {},
+): PolicyDecision {
+  const decision = decideToolBase(
+    permissionLevel,
+    event,
+    cwd,
+    configured,
+    options,
+  );
+  if (
+    decision.action !== "allow" ||
+    getPiLaunchProfile() !== "system" ||
+    (event.toolName !== "bash" &&
+      event.toolName !== INTERACTIVE_SHELL_TOOL_NAME)
+  )
+    return decision;
+
+  const command =
+    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+      ? interactiveShellCommand(event)
+      : String((event.input as Record<string, unknown>).command ?? "");
+  if (!systemBashNeedsApproval(command)) return decision;
+  return {
+    action: "ask",
+    reason: "Geschütztes Systemkommando benötigt eine ausdrückliche Freigabe.",
+  };
 }

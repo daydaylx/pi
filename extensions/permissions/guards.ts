@@ -15,7 +15,10 @@ import {
   requestRecoveryStatus,
 } from "../shared/recovery-capabilities.ts";
 import { requestVerificationCapabilities } from "../shared/verification-capabilities.ts";
-import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
+import {
+  isPlanRestricted,
+  requestWorkflowCapabilities,
+} from "../shared/workflow-capabilities.ts";
 import {
   INTERACTIVE_SHELL_TOOL_NAME,
   interactiveShellCommand,
@@ -41,6 +44,13 @@ import {
 } from "./verifier-policy.ts";
 import { assessWebToolInput } from "./web-tools.ts";
 import { toolPath } from "./tool-event.ts";
+import { getPiLaunchProfile } from "../shared/profile.ts";
+import { systemBashNeedsApproval } from "../system-control/policy.ts";
+import { auditSystemDenial } from "../system-control/audit.ts";
+import {
+  SYSTEM_CONTROL_READ_TOOLS,
+  SYSTEM_CONTROL_TOOL_NAME_SET,
+} from "../system-control/tool-names.ts";
 import {
   canonicalWorkspaceRoot,
   gitWorkspaceRootForPath,
@@ -55,6 +65,52 @@ const READ_ONLY_TOOLS = [
   "workspace_add",
   "recovery_check",
 ];
+function guardedRecoveryEffect(event: ToolCallEvent, cwd: string) {
+  if (
+    getPiLaunchProfile() === "system" &&
+    (SYSTEM_CONTROL_READ_TOOLS.has(event.toolName) ||
+      (event.toolName === "system_job" &&
+        ["status", "output"].includes(
+          String((event.input as Record<string, unknown>).action),
+        )))
+  ) {
+    return "read_only" as const;
+  }
+  return recoveryEffect(event, cwd);
+}
+
+export function systemControlPlanModeBlocks(
+  workflow: Parameters<typeof isPlanRestricted>[0],
+  event: ToolCallEvent,
+): boolean {
+  if (getPiLaunchProfile() !== "system" || !isPlanRestricted(workflow))
+    return false;
+  if (
+    event.toolName === "bash" ||
+    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+  ) {
+    const command =
+      event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+        ? interactiveShellCommand(event)
+        : String((event.input as Record<string, unknown>).command ?? "");
+    return systemBashNeedsApproval(command);
+  }
+  return (
+    [
+      "desktop_switch_workspace",
+      "desktop_focus_window",
+      "audio_set_volume",
+      "notify",
+      "user_service",
+      "nixos_build",
+      "nixos_apply",
+    ].includes(event.toolName) ||
+    (event.toolName === "system_job" &&
+      !["status", "output"].includes(
+        String((event.input as Record<string, unknown>).action),
+      ))
+  );
+}
 
 /**
  * Das Recovery-Gate sperrt nach einem fehlgeschlagenen oder unterbrochenen
@@ -68,7 +124,7 @@ function recoveryGateBlocks(
   event: ToolCallEvent,
   cwd: string,
 ): boolean {
-  return armed && recoveryEffect(event, cwd) === "potentially_mutating";
+  return armed && guardedRecoveryEffect(event, cwd) === "potentially_mutating";
 }
 
 function recoveryBlockReason(
@@ -197,6 +253,18 @@ export function registerPermissionGuards(
       return { block: true, ...stopNonInteractive(ctx), reason: limitReason };
     }
     let outcome = await guardToolCall(event, ctx);
+    if (
+      outcome?.block &&
+      getPiLaunchProfile() === "system" &&
+      SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)
+    ) {
+      const auditError = await auditSystemDenial(event.toolName, event.input);
+      if (auditError)
+        outcome = {
+          ...outcome,
+          reason: `${outcome.reason ?? "Aktion abgelehnt."} ${auditError}`,
+        };
+    }
     if (outcome?.block) {
       let inputIdentity: string;
       try {
@@ -342,6 +410,10 @@ export function registerPermissionGuards(
         session.isAdditionalWorkspaceRoot(scopedProjectRoot));
     if (
       !ctx.isProjectTrusted() &&
+      !(
+        getPiLaunchProfile() === "system" &&
+        SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)
+      ) &&
       session.level() !== "yolo-full" &&
       event.toolName !== "workspace_add" &&
       !targetRootTrusted &&
@@ -409,6 +481,14 @@ export function registerPermissionGuards(
       };
     }
     const workflow = requestWorkflowCapabilities(pi.events);
+    if (systemControlPlanModeBlocks(workflow, event)) {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason:
+          "Planmodus: Systemmutationen und geschützte System-Shell-Befehle sind gesperrt.",
+      };
+    }
     const assessment = assessWorkflowTool(
       event,
       ctx.cwd,
@@ -505,7 +585,7 @@ export function registerPermissionGuards(
     }
     // Recovery ist eine Workspace-Integritätsgrenze, keine Permission-Rückfrage.
     // YOLO 3 übergeht sie ausdrücklich als Vollzugriffsstufe.
-    const effect = recoveryEffect(event, ctx.cwd);
+    const effect = guardedRecoveryEffect(event, ctx.cwd);
     const recoveryEpoch = session.epoch();
     const recovery =
       effect === "potentially_mutating" &&
@@ -648,7 +728,6 @@ export function registerPermissionGuards(
       };
     }
     const decision = decideBash(session.level(), event.command, event.cwd);
-    if (decision.action === "allow") return;
     if (decision.action === "block") {
       return {
         result: {
@@ -659,6 +738,53 @@ export function registerPermissionGuards(
         },
       };
     }
+    if (
+      getPiLaunchProfile() === "system" &&
+      systemBashNeedsApproval(event.command)
+    ) {
+      if (session.level() === "readonly" || session.level() === "headless") {
+        return {
+          result: {
+            output: "Geschütztes Systemkommando ist in diesem Modus gesperrt.",
+            exitCode: 126,
+            cancelled: true,
+            truncated: false,
+          },
+        };
+      }
+      if (!ctx.hasUI) {
+        return {
+          result: {
+            output:
+              "Geschütztes Systemkommando benötigt eine interaktive Freigabe.",
+            exitCode: 126,
+            cancelled: true,
+            truncated: false,
+          },
+        };
+      }
+      const approval = await confirmAction(
+        ctx,
+        {
+          action: "ask",
+          reason:
+            "Geschütztes Systemkommando benötigt eine ausdrückliche Freigabe.",
+        },
+        event.command,
+        "bash",
+      );
+      if (!approval)
+        return {
+          result: {
+            output: "Aktion vom Benutzer abgelehnt.",
+            exitCode: 126,
+            cancelled: true,
+            truncated: false,
+          },
+        };
+      return;
+    }
+    if (decision.action === "allow") return;
     const confirmed = await confirmAction(ctx, decision, event.command, "bash");
     if (!confirmed) {
       return {
