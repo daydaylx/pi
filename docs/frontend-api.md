@@ -167,6 +167,8 @@ payloads.
   comes from `tool_execution_*`, the authoritative text from `message.completed`.
   Other update shapes produce no event. Fire-and-forget extension UI methods
   (`setStatus`, `setWidget`, `setTitle`, `set_editor_text`) are not forwarded.
+- Protocol package version 1.3.0 adds session-management (session.rename/archive/delete), permission.list entries and agent.settled; wire major stays 1.
+- Nach dem Freeze nur noch versionierte, additive Änderungen durch den Contract-Owner.
 - Protocol package version 1.2.0 adds optional capabilities, paged message
   parameters, approval metadata/events and `RESULT_TOO_LARGE`.
 - Minor package releases may add optional capabilities, methods or events.

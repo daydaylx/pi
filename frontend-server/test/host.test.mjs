@@ -192,7 +192,7 @@ test(
     });
     const firstHello = await first.next((frame) => frame.kind === "hello");
     assert.equal(firstHello.accepted, true);
-    assert.equal(firstHello.serverVersion, "1.2.0");
+    assert.equal(firstHello.serverVersion, "1.3.0");
     assert.ok(firstHello.capabilities.includes("shared-session-owner"));
     const firstSnapshot = await first.next(
       (frame) => frame.event === "state.snapshot",
