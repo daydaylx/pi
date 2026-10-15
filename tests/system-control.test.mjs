@@ -9,7 +9,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { importModule } from "./shared/jiti-loader.mjs";
+import { pathToFileURL } from "node:url";
+import { importModule, npmModuleFile } from "./shared/jiti-loader.mjs";
 
 const extension = await importModule("extensions/system-control/index.ts");
 const audit = await importModule("extensions/system-control/audit.ts");
@@ -17,8 +18,9 @@ const policy = await importModule("extensions/system-control/policy.ts");
 const toolPolicy = await importModule("extensions/permissions/tool-policy.ts");
 const bashPolicy = await importModule("extensions/shared/permission-policy.ts");
 const guards = await importModule("extensions/permissions/guards.ts");
-const { Value } =
-  await import("../npm/node_modules/typebox/build/value/index.mjs");
+const { Value } = await import(
+  pathToFileURL(npmModuleFile("typebox", "build/value/index.mjs")).href
+);
 
 function register(profile, exec = async () => ({ stdout: "ok", stderr: "" })) {
   const tools = new Map();
