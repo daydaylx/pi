@@ -695,18 +695,7 @@ function isProtectedProjectPath(absolutePath: string, cwd: string): boolean {
   });
 }
 
-/**
- * Identifies a caller-defined write exception (e.g. the workflow extension's
- * plan file) that stays writable even under restrictive permission levels.
- * Keeps this module independent from any specific workflow mode.
- */
-export interface ProtectedWritePath {
-  matches: (rawPath: string, cwd: string) => boolean;
-  label: string;
-}
-
 export interface DecideFileAccessOptions {
-  protectedWritePath?: ProtectedWritePath;
   /** Set only when workflow-policy has approved a documented external read. */
   allowOutsideProjectRead?: boolean;
   /** Additional roots explicitly approved for the current session. */
@@ -722,7 +711,6 @@ export function decideFileAccess(
   cwd: string,
   options: DecideFileAccessOptions = {},
 ): PolicyDecision {
-  const { protectedWritePath } = options;
   const identity = resolvePathScope(rawPath, cwd, [
     ...(options.additionalRoots ?? []),
     ...(options.systemFileRoots ?? []),
@@ -779,11 +767,7 @@ export function decideFileAccess(
   }
 
   if (isReadRestricted) {
-    return protectedWritePath?.matches(rawPath, cwd)
-      ? ALLOW
-      : deny(
-          `Diese Zugriffsstufe erlaubt Schreibzugriff ausschließlich auf ${protectedWritePath?.label ?? "keine Datei"}.`,
-        );
+    return deny("Diese Zugriffsstufe erlaubt keinen Schreibzugriff.");
   }
 
   // Re-check the canonical boundary here as defense in depth. guards.ts runs

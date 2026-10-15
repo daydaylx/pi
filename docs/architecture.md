@@ -2,7 +2,7 @@
 
 Pi is the core CLI/TUI agent runtime setup. The externally pinned
 `@earendil-works/pi-coding-agent` supplies the runtime; this repository owns its
-configuration, extensions, permission/workflow policy, verification, resilience,
+configuration, extensions, permission policy, verification, resilience,
 LSP, subagent harness and Aurora terminal frontend.
 
 ```text
@@ -25,5 +25,5 @@ RPC to that stable contract and uses public `SessionManager` APIs for session
 discovery and history.
 
 Core state is authoritative. Frontends may keep transient visual state but do
-not implement permission, workflow, model routing, verification, subagent or
+not implement permission, model routing, verification, subagent or
 session storage logic.

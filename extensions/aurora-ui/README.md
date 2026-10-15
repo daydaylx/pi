@@ -35,12 +35,11 @@ short reverse-video highlight and is disposed with the session.
 ## The permanent surfaces
 
 **Footer** (`footer.ts`) — the one permanent status surface, and one line. It
-always carries the active workflow mode, including beside the dashboard,
-and also reports model, thinking level, session folder, a compact changes
+always reports model, thinking level, session folder, a compact changes
 summary, context share and verification risks. It drops whole segments
 from the least important end as the terminal narrows. From comfortable width
-on, the workflow (when present) and every risk segment render as filled status
-chips (pills); routine metadata stays flat so the line never turns into a wall
+on, the launch profile (`pi system` only) and every risk segment render as
+filled status chips (pills); routine metadata stays flat so the line never turns into a wall
 of colour, and narrow tiers keep the flat look entirely. Whenever a visible
 panel owns verification reporting, the footer suppresses the routine successful
 state; failed or stale checks remain critical footer risks at every width. The
@@ -88,7 +87,7 @@ The single setting `ui.dashboard` in setup.json
 - **`compact`** caps the workspace at two rows.
 - **`expanded`** permits the task tile's optional goal within the terminal row
   budget.
-- **`hidden`** hides the workspace entirely while workflow state, footer risks
+- **`hidden`** hides the workspace entirely while footer risks
   and the inspector stay alive.
 
 Phase and verification verdict are derived separately but share one staleness
@@ -172,7 +171,7 @@ answer on `aurora-ui/state/snapshot`, then publish later changes on
 epochs. `publishAuroraUiPatch` and `publishAuroraUiSnapshot` are the typed
 publisher helpers.
 
-Besides `workflow`, `permissions`, `lsp`, `model` and `activity`, two owner
+Besides `permissions`, `lsp`, `model` and `activity`, two owner
 groups feed the task-centric view (`task-projection.ts`) and the inspector:
 
 - `verification` — published by `extensions/setup-core/index.ts` alongside

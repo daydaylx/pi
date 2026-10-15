@@ -2,9 +2,8 @@
  * Compact footer status for the LSP extension (issue #97).
  *
  * The status key is defined locally, not added to the shared
- * `UI_STATUS_KEYS` in `shared/workflow-status.ts` — an existing test
- * there pins that object to exactly `{permissions, workflow}`, and LSP has
- * no reason to share that registry.
+ * `UI_STATUS_KEYS` in `shared/workflow-status.ts` — LSP has no reason to
+ * share that registry.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";

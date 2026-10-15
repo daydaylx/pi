@@ -2,13 +2,13 @@
  * Central permission decision layer.
  *
  * This is intentionally the only extension that intercepts tool_call and
- * user_bash. Workflow extensions do not make access decisions themselves.
+ * user_bash. Other extensions do not make access decisions themselves.
  *
  * The file stays the registered entry point (settings.json, coverage baseline,
  * installer); the logic lives in extensions/permissions/:
  *
  *   tool-event.ts       reading the path out of a tool call
- *   workflow-policy.ts  workflow-scoped decisions   [pure]
+ *   workflow-policy.ts  hard boundaries per tool    [pure]
  *   tool-policy.ts      permission-level decisions  [pure]
  *   session-state.ts    mode, YOLO, persistence, audit
  *   thinking-control.ts thinking depth and its menu
