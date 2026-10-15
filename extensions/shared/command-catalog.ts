@@ -120,6 +120,14 @@ const definitions = [
     "access",
   ],
   [
+    "skill",
+    "Skill vormerken",
+    "Skill für die nächste Nachricht aus der durchsuchbaren Liste wählen (/skill <name> direkt, /skill --clear entfernt)",
+    "resources",
+    undefined,
+    "Shift+Tab",
+  ],
+  [
     "login",
     "Provider anmelden",
     "Provider-Authentifizierung konfigurieren",

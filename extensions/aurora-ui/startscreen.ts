@@ -49,6 +49,7 @@ function shortcutRows(theme: Theme, innerWidth: number): string[] {
       ["Super+D", "Denken"],
       ["Super+Q", "Befehle"],
       ["Super+S", "Rollen"],
+      ["Shift+Tab", "Skills"],
     ].map(([key, label]) => ({ key, label })),
   );
 }

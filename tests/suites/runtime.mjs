@@ -13,6 +13,7 @@ import { resilienceSections } from "./runtime/resilience.mjs";
 import { recoveryStateSections } from "./runtime/recovery-state.mjs";
 import { webAccessSections } from "./runtime/web-access.mjs";
 import { shortcutsSections } from "./runtime/shortcuts.mjs";
+import { skillSelectSections } from "./runtime/skill-select.mjs";
 import { frontendProtocolSections } from "./runtime/frontend-protocol.mjs";
 import { frontendBridgeSections } from "./runtime/frontend-bridge.mjs";
 import { workspaceSnapshotSections } from "./runtime/workspace-snapshot.mjs";
@@ -35,6 +36,7 @@ export const runtimeSections = {
   ...recoveryStateSections,
   ...webAccessSections,
   ...shortcutsSections,
+  ...skillSelectSections,
   ...frontendProtocolSections,
   ...frontendBridgeSections,
   ...workspaceSnapshotSections,

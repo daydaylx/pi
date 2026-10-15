@@ -1346,6 +1346,7 @@ export const resilienceSections = {
     const systemControlExtension = await load(
       "extensions/system-control/index.ts",
     );
+    const skillSelect = await load("extensions/skill-select/index.ts");
 
     await section("combined production extension stack", async () => {
       if (
@@ -1372,6 +1373,7 @@ export const resilienceSections = {
         "+extensions/lsp/index.ts": lspExtensionMod.default,
         "+extensions/ask-user.ts": askUser.default,
         "+extensions/control-plane.ts": controlPlane.default,
+        "+extensions/skill-select/index.ts": skillSelect?.default,
         "+extensions/compact-tools/index.ts": compactTools.default,
         "+extensions/aurora-ui/index.ts": auroraUi.default,
         "+extensions/resilience/index.ts": resilience.default,

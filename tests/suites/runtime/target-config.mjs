@@ -365,6 +365,7 @@ export const targetConfigSections = {
             "+extensions/lsp/index.ts",
             "+extensions/ask-user.ts",
             "+extensions/control-plane.ts",
+            "+extensions/skill-select/index.ts",
             "+extensions/compact-tools/index.ts",
             "+extensions/aurora-ui/index.ts",
             "+extensions/resilience/index.ts",

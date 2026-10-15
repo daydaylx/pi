@@ -29,6 +29,8 @@ export const SECTION_SUITES = {
   "Aurora Inspector command": "runtime",
   "Aurora UI lifecycle regression coverage": "runtime",
   "global shortcut regressions": "runtime",
+  "skill picker queues a native skill command": "runtime",
+  "skill picker footer chip": "runtime",
   "resilience telemetry and recovery": "runtime",
   "context capsule compaction lifecycle": "runtime",
   "recovery gate reducer (REC-002)": "runtime",

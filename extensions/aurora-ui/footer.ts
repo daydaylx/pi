@@ -42,6 +42,7 @@ export interface FooterInput {
 const CONTEXT_WARNING_PERCENT = 70;
 const CONTEXT_CRITICAL_PERCENT = 90;
 const MODEL_MAX_COLUMNS = 32;
+const SKILL_MAX_COLUMNS = 28;
 const FOLDER_MAX_COLUMNS: Record<Layout, number> = {
   wide: 34,
   comfortable: 24,
@@ -64,7 +65,8 @@ const Slot = {
   changes: 4,
   context: 5,
   verification: 6,
-  risk: 7,
+  skill: 7,
+  risk: 8,
 } as const;
 
 type Slot = (typeof Slot)[keyof typeof Slot];
@@ -83,11 +85,12 @@ const Priority = {
   exhaustedContext: 4,
   lsp: 5,
   folder: 6,
-  changes: 8,
-  model: 7,
-  verification: 9,
-  thinking: 10,
-  context: 11,
+  skill: 7,
+  model: 8,
+  changes: 9,
+  verification: 10,
+  thinking: 11,
+  context: 12,
 } as const;
 
 type Priority = (typeof Priority)[keyof typeof Priority];
@@ -125,6 +128,7 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.changes,
     Slot.context,
     Slot.verification,
+    Slot.skill,
   ]),
   comfortable: new Set([
     Slot.profile,
@@ -134,9 +138,16 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.changes,
     Slot.context,
     Slot.verification,
+    Slot.skill,
   ]),
-  standard: new Set([Slot.profile, Slot.model, Slot.thinking, Slot.folder]),
-  compact: new Set([Slot.profile, Slot.model, Slot.folder]),
+  standard: new Set([
+    Slot.profile,
+    Slot.model,
+    Slot.thinking,
+    Slot.folder,
+    Slot.skill,
+  ]),
+  compact: new Set([Slot.profile, Slot.model, Slot.folder, Slot.skill]),
 };
 
 function verificationState(input: FooterInput): string | null {
@@ -218,6 +229,19 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
       ),
       tone: "muted",
       class: "orientation",
+    });
+  }
+
+  // Eine Vormerkung ändert die nächste Nachricht; sie bleibt deshalb auch in
+  // schmalen Zeilen sichtbar und weicht nur Orientierung und Risiken.
+  const skill = input.statuses.get("skill");
+  if (skill) {
+    segments.push({
+      slot: Slot.skill,
+      priority: Priority.skill,
+      text: crop(skill, SKILL_MAX_COLUMNS),
+      tone: "accent",
+      class: "metadata",
     });
   }
 

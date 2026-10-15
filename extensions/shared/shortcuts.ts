@@ -43,6 +43,12 @@ export const SHORTCUTS = {
     description: `${catalogLabel("yolo")} · /yolo`,
     command: "/yolo",
   },
+  skillMenu: {
+    keys: "shift+tab",
+    label: "Shift+Tab",
+    description: `${catalogLabel("skill")} · /skill`,
+    command: "/skill",
+  },
   rolesModelMenu: {
     keys: "super+s",
     label: "Super+S",

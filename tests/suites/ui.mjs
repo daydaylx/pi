@@ -17,8 +17,9 @@ export const uiSections = {
     await section("Control Center menus", async () => {
       if (!thinkingMenu || !modePermissions || !controlPlane) return;
 
-      // Shift+Tab is unbound (reserved for a later skill launcher). Super+Q is
-      // the Command Center and offers no workflow route, since none exists.
+      // Shift+Tab opens the skill picker through the canonical /skill command.
+      // Super+Q is the Command Center and offers no workflow route, since none
+      // exists.
       {
         const seen = [];
         const shared = createHarness({
@@ -37,9 +38,16 @@ export const uiSections = {
         await shared.runHooks("session_start", {}, sharedContext);
         eq(
           shared.shortcuts.has("shift+tab"),
-          false,
-          "no extension binds Shift+Tab",
+          true,
+          "the control plane binds Shift+Tab",
         );
+        await shared.shortcuts.get("shift+tab")(sharedContext);
+        eq(
+          shared.submittedCommands,
+          ["/skill"],
+          "Shift+Tab submits the canonical /skill command",
+        );
+        shared.submittedCommands.length = 0;
         await shared.shortcuts.get("super+q")(sharedContext);
         // Super+Q routes through a command; the bus dispatches without awaiting
         // the async listener, so let the microtask queue drain before asserting.
@@ -116,16 +124,19 @@ export const uiSections = {
           return undefined;
         });
 
-        const unboundDispatch = liveHarness.dispatchShortcut(
+        // Without the skill-select extension loaded in this harness, /skill
+        // has no handler: the shortcut is recognized but opens no selector.
+        const skillDispatch = liveHarness.dispatchShortcut(
           "shift+tab",
           liveContext,
         );
         eq(
-          unboundDispatch.handled,
-          false,
-          "Shift+Tab is not recognized by Pi's dispatcher: no extension binds it",
+          skillDispatch.handled,
+          true,
+          "Shift+Tab is recognized by Pi's dispatcher",
         );
-        eq(selectorCalls, 0, "an unbound Shift+Tab opens no selector");
+        await skillDispatch.completion;
+        eq(selectorCalls, 0, "Shift+Tab opens no Command Center selector");
 
         const dispatch = liveHarness.dispatchShortcut("super+q", liveContext);
         let completed = false;
@@ -809,6 +820,48 @@ export const uiSections = {
           await opened.result,
           "last",
           "a fuzzy filter narrows to the matching entry and Enter selects it",
+        );
+      }
+
+      // Search-first menus: j/k start the filter instead of navigating, and
+      // prefix matches rank above substring and loose subsequence matches.
+      {
+        const searchEntries = [
+          { id: "a", label: "release-changelog", value: "release-changelog" },
+          { id: "b", label: "kubernetes", value: "kubernetes" },
+          { id: "c", label: "doc-security", value: "doc-security" },
+          { id: "d", label: "security-audit", value: "security-audit" },
+        ];
+        const searchHarness = createHarness();
+        const result = menuUi.runMenu(
+          searchHarness.makeContext(),
+          "Suche",
+          searchEntries,
+          { typeToSearch: true },
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        for (const key of "sec") searchHarness.sendTerminalInput(key);
+        searchHarness.sendTerminalInput("\r");
+        eq(
+          await result,
+          "security-audit",
+          "typeToSearch ranks a label prefix above substring and subsequence",
+        );
+
+        const kHarness = createHarness();
+        const kResult = menuUi.runMenu(
+          kHarness.makeContext(),
+          "Suche",
+          searchEntries,
+          { typeToSearch: true },
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        kHarness.sendTerminalInput("k");
+        kHarness.sendTerminalInput("\r");
+        eq(
+          await kResult,
+          "kubernetes",
+          "typeToSearch lets k start the filter instead of moving the cursor",
         );
       }
 

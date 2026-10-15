@@ -45,9 +45,9 @@ export const shortcutsSections = {
         }
       }
 
-      // 2. Shift+Tab is free. Pi's runtime binds it to `app.thinking.cycle` by
-      // default; keybindings.json moves that action away, and no extension
-      // registers the key. It is reserved for a later skill launcher.
+      // 2. Shift+Tab belongs to the skill picker alone. Pi's runtime binds it
+      // to `app.thinking.cycle` by default; keybindings.json moves that action
+      // to Super+T, so the key is free and exactly one registration owns it.
       {
         const settings = JSON.parse(
           readFileSync(path.join(ROOT, "settings.json"), "utf8"),
@@ -62,8 +62,27 @@ export const shortcutsSections = {
         }
         eq(
           harness.shortcuts.has("shift+tab"),
-          false,
-          "no active extension registers Shift+Tab",
+          true,
+          "the active extensions register Shift+Tab (skill picker)",
+        );
+        const registrations = [];
+        const original = harness.api.registerShortcut;
+        void original;
+        for (const entry of settings.extensions.filter((value) =>
+          value.startsWith("+"),
+        )) {
+          const probe = createHarness();
+          const base = probe.api.registerShortcut;
+          probe.api.registerShortcut = (key, options) => {
+            if (key === "shift+tab") registrations.push(entry);
+            base(key, options);
+          };
+          (await load(entry.slice(1))).default(probe.api);
+        }
+        eq(
+          registrations,
+          ["+extensions/control-plane.ts"],
+          "Shift+Tab is registered once, by the control plane",
         );
         const keybindings = JSON.parse(
           readFileSync(path.join(ROOT, "keybindings.json"), "utf8"),

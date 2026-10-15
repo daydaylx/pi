@@ -224,6 +224,7 @@ async function selectWithCustomUi<T>(
   entries: readonly MenuEntry<T>[],
   headerShortcut?: string,
   appearance: MenuAppearance = "default",
+  typeToSearch = false,
 ): Promise<MenuEntry<T> | undefined> {
   if (typeof ctx.ui.custom !== "function")
     throw new Error("Benutzerdefiniertes TUI-Overlay wird nicht unterstützt.");
@@ -269,7 +270,20 @@ async function selectWithCustomUi<T>(
       const visibleEntries = (): MenuEntry<T>[] => {
         const query = filterText.trim().toLowerCase();
         if (!query) return [...level().entries];
-        return level().entries.filter((entry) => matchesFilter(entry, query));
+        const matches = level().entries.filter((entry) =>
+          matchesFilter(entry, query),
+        );
+        if (!typeToSearch) return matches;
+        // Search-first lists rank label prefix, then substring, then the
+        // looser subsequence match; equal ranks keep their list order.
+        const rank = (entry: MenuEntry<T>) => {
+          const label = entry.label.toLowerCase();
+          return label.startsWith(query) ? 0 : label.includes(query) ? 1 : 2;
+        };
+        return matches
+          .map((entry, index) => ({ entry, index, rank: rank(entry) }))
+          .sort((a, b) => a.rank - b.rank || a.index - b.index)
+          .map((item) => item.entry);
       };
       const pad = (value: string, width: number) =>
         truncateToWidth(value, Math.max(1, width), ELLIPSIS, true);
@@ -461,6 +475,7 @@ async function selectWithCustomUi<T>(
           const footerText = [
             "↑↓ Auswahl",
             selected?.children ? "Enter öffnen" : "Enter übernehmen",
+            typeToSearch ? "Tippen sucht" : "",
             stack.length > 1 ? "←/Rücktaste zurück" : "",
             "Esc schließen",
           ]
@@ -608,7 +623,13 @@ async function selectWithCustomUi<T>(
             data >= " " &&
             data !== "\x7f" &&
             !matchesKey(data, Key.escape);
-          if (!filterActive && printable && data !== "j" && data !== "k") {
+          // `j`/`k` double as navigation unless the menu is search-first.
+          const literalNavigation = !typeToSearch;
+          if (
+            !filterActive &&
+            printable &&
+            (!literalNavigation || (data !== "j" && data !== "k"))
+          ) {
             const matched = current.entries.find(
               (entry) =>
                 !entry.disabled &&
@@ -641,13 +662,19 @@ async function selectWithCustomUi<T>(
           // extended keyboard protocol is negotiated inconsistently. j/k are
           // deliberately checked before the shortcut path above could start
           // an accidental filter — but only while the filter is empty.
-          if (matchesKey(data, Key.up) || data === "k")
+          if (
+            matchesKey(data, Key.up) ||
+            (literalNavigation && data === "k")
+          )
             current.selected = moveMenuIndex(
               current.selected,
               -1,
               entriesInView,
             );
-          else if (matchesKey(data, Key.down) || data === "j")
+          else if (
+            matchesKey(data, Key.down) ||
+            (literalNavigation && data === "j")
+          )
             current.selected = moveMenuIndex(
               current.selected,
               1,
@@ -773,6 +800,11 @@ export interface RunMenuOptions {
   headerShortcut?: string;
   /** Visual variant; the default preserves the shared picker appearance. */
   appearance?: MenuAppearance;
+  /**
+   * Search-first picker for long lists: every printable key starts the filter,
+   * so `j`/`k` are not reserved for navigation (arrow keys still are).
+   */
+  typeToSearch?: boolean;
 }
 
 export async function runMenu<T>(
@@ -797,6 +829,7 @@ export async function runMenu<T>(
         entries,
         options.headerShortcut,
         options.appearance,
+        options.typeToSearch,
       ),
     (labels) => ctx.ui.select(options.fallbackPrompt ?? title, labels),
   );
