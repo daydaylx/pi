@@ -32,6 +32,7 @@ import {
 } from "../shared/workspace-scope.ts";
 import {
   getPiLaunchProfile,
+  hasFrontendConfirmChannel,
   resolveSystemWorkspaceRoot,
 } from "../shared/profile.ts";
 import {
@@ -541,9 +542,14 @@ export function createPermissionSession(
         latestState?.data?.selectedPermissionLevel ??
         latestState?.data?.permissionLevel;
       const normalizedPersistedLevel = normalizePermissionLevel(persistedRaw);
+      // A frontend host can answer confirmations, so a persisted "headless"
+      // (written before the host had a confirm channel) is not a choice.
+      const confirmChannel = hasFrontendConfirmChannel();
       const restoredLevel = isYoloLevel(normalizedPersistedLevel)
         ? "project-write"
-        : normalizedPersistedLevel;
+        : confirmChannel && normalizedPersistedLevel === "headless"
+          ? undefined
+          : normalizedPersistedLevel;
       // Phase 2.3: a fresh session (no prior persisted choice in this
       // project) outside the TUI has no confirm dialog available at all.
       // Defaulting it to "project-write" - as every session got before -
@@ -551,8 +557,14 @@ export function createPermissionSession(
       // clear signal why. A TUI session keeps today's default unchanged; any
       // project with a prior persisted choice (in any mode) keeps respecting
       // that choice, regardless of mode.
+      // Behind a frontend host the confirm channel exists: ask for everything
+      // that is not plainly inspecting ("confirm-all") instead of denying.
       const freshDefaultLevel: PermissionLevel =
-        ctx.mode === "tui" ? "project-write" : "headless";
+        ctx.mode === "tui"
+          ? "project-write"
+          : confirmChannel
+            ? "confirm-all"
+            : "headless";
       selectedPermissionLevel = restoredLevel ?? freshDefaultLevel;
       selectedPermissionState =
         selectedPermissionLevel === "project-write" ||

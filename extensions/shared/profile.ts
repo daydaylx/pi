@@ -12,6 +12,18 @@ export function getPiLaunchProfile(
 }
 
 /**
+ * True when Pi runs behind a frontend host (pi-system-host, GUI) that forwards
+ * extension UI requests to a person. Such a session has a real confirm channel
+ * even though `ctx.mode` is not "tui", so risky actions can ask instead of
+ * being denied outright as in the channel-less headless level.
+ */
+export function hasFrontendConfirmChannel(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.PI_FRONTEND_RPC === "1";
+}
+
+/**
  * Return the launcher's private System workspace only when the live working
  * directory, launcher marker and configured profile-state path resolve to the
  * same owned, private directory. The profile name on its own is not a grant.

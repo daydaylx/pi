@@ -3258,6 +3258,87 @@ await test("system profile name alone or a mismatched PI_SYSTEM_WORKSPACE grants
   }
 });
 
+await test("system profile behind a frontend host asks instead of denying: confirm-all default, shell and privileged tools", async () => {
+  if (!modePermissions) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  const previousRpc = process.env.PI_FRONTEND_RPC;
+  const confirms = (harness) =>
+    harness.lifecycleCalls.filter((call) => call.kind === "confirm").length;
+  try {
+    // Without a frontend host the non-TUI default stays channel-less headless.
+    delete process.env.PI_FRONTEND_RPC;
+    const bare = await startSystemFileScopeHarness(fixture, {
+      sessionId: "system-bare-rpc",
+      context: { mode: "rpc" },
+    });
+    const bareShell = await bare.harness.runHooks(
+      "tool_call",
+      { toolName: "bash", input: { command: "nmcli device wifi list" } },
+      bare.context,
+    );
+    assert(
+      bareShell.some((entry) => entry?.block),
+      "headless without a frontend host keeps the shell blocked",
+    );
+    await bare.harness.runHooks("session_shutdown", {}, bare.context);
+
+    // Behind a frontend host (PI_FRONTEND_RPC=1) the confirm channel exists.
+    process.env.PI_FRONTEND_RPC = "1";
+    const host = await startSystemFileScopeHarness(fixture, {
+      sessionId: "system-frontend-host",
+      context: { mode: "rpc", hasUI: true },
+    });
+    const call = (toolName, input) =>
+      host.harness.runHooks("tool_call", { toolName, input }, host.context);
+    const before = confirms(host.harness);
+    const shell = await call("bash", { command: "nmcli device wifi list" });
+    assert(
+      shell.every((entry) => !entry?.block),
+      `shell is available with a confirm channel: ${JSON.stringify(shell)}`,
+    );
+    assert(
+      confirms(host.harness) > before,
+      "a non-inspecting shell command asks the frontend instead of being denied",
+    );
+    const afterShell = confirms(host.harness);
+    const apply = await call("nixos_apply", {});
+    assert(
+      apply.every((entry) => !entry?.block),
+      `privileged system tool asks instead of being blocked: ${JSON.stringify(apply)}`,
+    );
+    assert(
+      confirms(host.harness) > afterShell,
+      "privileged system tool requires a frontend confirmation",
+    );
+    const beforeProtected = confirms(host.harness);
+    const protectedCommand = await call("bash", {
+      command: "nixos-agent-apply",
+    });
+    assert(
+      protectedCommand.every((entry) => !entry?.block),
+      `protected system command is confirmable, not blocked: ${JSON.stringify(protectedCommand)}`,
+    );
+    assert(
+      confirms(host.harness) > beforeProtected,
+      "protected system command requires a frontend confirmation",
+    );
+    // Root elevation via the shell stays a hard boundary; the privileged route
+    // is the confirmable nixos_apply tool.
+    const sudo = await call("bash", { command: "sudo nixos-rebuild switch" });
+    assert(
+      sudo.some((entry) => entry?.block),
+      "sudo through the shell stays a hard block",
+    );
+    await host.harness.runHooks("session_shutdown", {}, host.context);
+  } finally {
+    if (previousRpc === undefined) delete process.env.PI_FRONTEND_RPC;
+    else process.env.PI_FRONTEND_RPC = previousRpc;
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
+});
+
 await test("external System file scope is separate from project trust and allows native file tools", async () => {
   if (!modePermissions || !workspaceScope) return;
   const fixture = createSystemFileScopeFixture();

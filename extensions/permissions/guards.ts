@@ -41,6 +41,7 @@ import { assessWebToolInput } from "./web-tools.ts";
 import { toolPath } from "./tool-event.ts";
 import {
   getPiLaunchProfile,
+  hasFrontendConfirmChannel,
   resolveSystemWorkspaceRoot,
 } from "../shared/profile.ts";
 import { systemBashNeedsApproval } from "../system-control/policy.ts";
@@ -578,8 +579,22 @@ export function registerPermissionGuards(
         session.isAdditionalWorkspaceRoot(scopedProjectRoot));
     const systemFullAccessBypass =
       !systemProfile && session.level() === "yolo-full";
+    // The System profile's private workspace is never project-trusted, which
+    // used to block its shell outright. Behind a frontend host a person can
+    // confirm (not headless/readonly), so the shell stays available there: the
+    // permission level and the protected-command check below still ask for
+    // everything risky. The terminal profile (`pis`) keeps the hard boundary.
+    const systemShellWithConfirmChannel =
+      systemProfile &&
+      hasFrontendConfirmChannel() &&
+      Boolean(systemWorkspaceRoot) &&
+      (event.toolName === "bash" ||
+        event.toolName === INTERACTIVE_SHELL_TOOL_NAME) &&
+      session.level() !== "headless" &&
+      session.level() !== "readonly";
     if (
       !ctx.isProjectTrusted() &&
+      !systemShellWithConfirmChannel &&
       !(
         getPiLaunchProfile() === "system" &&
         SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)
