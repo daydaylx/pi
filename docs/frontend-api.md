@@ -28,11 +28,13 @@ per connection. Runtime schemas and fixtures are exported by
 
 ## Capabilities
 
-V1 defines `sessions`, `messages`, `streaming`, `tool-calls`, `workflow`,
+V1 defines `sessions`, `session-management`, `messages`, `streaming`, `tool-calls`, `workflow`,
 `tasks`, `subagents`, `permissions`, `verification`, `changes`, `lsp`, `models`,
 `thinking`, `notifications`, `configuration`, `extension-ui`, `host-epoch`,
 `approval-envelope` and `paged-messages`. A frontend must
-disable or hide a feature when its capability is absent.
+disable or hide a feature when its capability is absent; clients without the
+`session-management` capability show session management actions as disabled
+("nicht verfügbar").
 
 State entries of `subagents` carry `runId`, `agent` (agent id), `label`,
 `status` and the optional `objective` and `profile`. The former `role` field
@@ -49,7 +51,7 @@ may therefore be present even when a particular optional command returns
 | Area           | Methods                                                                                                  |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
 | System         | `system.ping`                                                                                            |
-| Sessions       | `session.list`, `session.create`, `session.open`, `session.current`, `session.messages`, `session.stats` |
+| Sessions       | `session.list`, `session.create`, `session.open`, `session.rename`, `session.archive`, `session.delete`, `session.current`, `session.messages`, `session.stats` |
 | Agent          | `agent.prompt`, `agent.steer`, `agent.followUp`, `agent.abort`                                           |
 | Models         | `model.list`, `model.set`, `model.cycle`                                                                 |
 | Thinking       | `thinking.list`, `thinking.set`, `thinking.cycle`                                                        |
@@ -67,6 +69,40 @@ before the cursor, oldest first, with `nextCursor` when older messages remain.
 Each page is limited to 100,000 serialized characters; a single oversized
 message has its text blocks shortened with `…[gekürzt]`. Calls without
 parameters therefore return the newest page, not the full history.
+
+Session management methods (`session.rename`, `session.archive`, `session.delete`)
+operate on inactive sessions and require a dedicated session directory
+(`PI_CODING_AGENT_SESSION_DIR`):
+
+- `session.rename`: Parameters `{ id, title }`. The title is trimmed and must be
+  1–120 characters without control characters (U+0000–U+001F, U+007F). An empty
+  title after trimming (`title: ""`) removes the title override. Returns `{}`.
+- `session.archive`: Parameters `{ id, archived: boolean }`. Sets or clears the
+  archive flag. Returns `{}`.
+- `session.delete`: Parameters `{ id, confirm: true }`. Requires literal
+  `confirm: true`. The session file is moved to
+  `<sessionDir>/.trash/<basename>.<Date.now()>` with mode 0700 and its index
+  entry is removed. Returns `{}`.
+
+Rules and error conditions for session management:
+- All three methods validate `id`: 1–128 characters matching `^[A-Za-z0-9_-]+$`.
+  Path characters, dots, slashes, or whitespace yield `INVALID_REQUEST`.
+- If `PI_CODING_AGENT_SESSION_DIR` is not set, all three methods fail with
+  `INVALID_REQUEST` ("Session management requires a dedicated session directory").
+- If an agent turn is active (`activity.kind !== "idle"`), mutations fail with
+  `SESSION_BUSY`.
+- The active session (`get_state` -> `normalizeCurrentSession(...).id`) cannot be
+  renamed, archived, or deleted (fails with `SESSION_BUSY`).
+- The session list is freshly reloaded (`listAll`) before each mutation. Unknown
+  IDs fail with `INVALID_REQUEST` ("Session not found"). A second delete of the
+  same ID fails with `INVALID_REQUEST`.
+- For `session.delete`, the target file must be a regular file (not a symlink)
+  residing directly within `PI_CODING_AGENT_SESSION_DIR`.
+- Overrides and flags are stored in `.frontend-index.json` in the session
+  directory (mode 0600, atomic writes). A corrupt or missing index file defaults
+  to an empty index without crashing.
+- `session.list` reflects the title override as `name` and includes optional
+  `archived: true` for archived sessions. Archived sessions remain in the list.
 
 ## Events
 

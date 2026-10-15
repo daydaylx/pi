@@ -33,6 +33,7 @@ const SessionSummary = Type.Object(
     updatedAt: Type.String(),
     messageCount: Type.Integer({ minimum: 0 }),
     firstMessage: Type.String(),
+    archived: Type.Optional(Type.Literal(true)),
   },
   Strict,
 );
@@ -130,6 +131,9 @@ export const REQUEST_RESULT_SCHEMAS = {
   "session.list": Type.Object({ sessions: Type.Array(SessionSummary) }, Strict),
   "session.create": CurrentSession,
   "session.open": CurrentSession,
+  "session.rename": Empty,
+  "session.archive": Empty,
+  "session.delete": Empty,
   "session.current": CurrentSession,
   "session.messages": Type.Object(
     {

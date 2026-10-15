@@ -575,3 +575,59 @@ test("host stamps epochs and resolves approval envelopes exactly once", async ()
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+test("host rejects session management mutations with SESSION_BUSY while turn is active", async () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-mutations-"));
+  const agentDir = path.join(temp, "agent");
+  mkdirSync(agentDir, { recursive: true, mode: 0o700 });
+  const host = new PiSystemHost({
+    env: {
+      ...process.env,
+      HOME: temp,
+      PI_CODING_AGENT_DIR: agentDir,
+    },
+    runtimeDir: temp,
+    runtimePath: fakePi,
+    startupTimeoutMs: 20_000,
+  });
+  let client;
+  try {
+    await host.start();
+    client = await waitForSocket(host.socketPath);
+    client.send({
+      kind: "hello",
+      client: { name: "mutations-test", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await client.next((frame) => frame.kind === "hello");
+    await client.next((frame) => frame.event === "state.snapshot");
+
+    host.handleBackendFrame({
+      kind: "event",
+      event: "state.patch",
+      data: { activity: { kind: "responding" } },
+    });
+    assert.equal(host.isBusy(), true);
+
+    for (const [id, method, params] of [
+      ["rename-busy", "session.rename", { id: "s1", title: "New Title" }],
+      ["archive-busy", "session.archive", { id: "s1", archived: true }],
+      ["delete-busy", "session.delete", { id: "s1", confirm: true }],
+    ]) {
+      client.send({
+        protocolVersion: 1,
+        kind: "request",
+        id,
+        method,
+        params,
+      });
+      const response = await client.next((frame) => frame.id === id);
+      assert.equal(response.ok, false);
+      assert.equal(response.error.code, "SESSION_BUSY");
+    }
+  } finally {
+    client?.socket.destroy();
+    await host.stop();
+    rmSync(temp, { recursive: true, force: true });
+  }
+});

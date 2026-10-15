@@ -311,3 +311,167 @@ test("validates permission.set rejects non-settable levels", () => {
     assert.equal(isValidRequestParams("permission.set", { level }), false);
   }
 });
+
+test("exposes session-management capability and validates request methods", () => {
+  assert.ok(CAPABILITIES.includes("session-management"));
+  assert.ok(isKnownRequestMethod("session.rename"));
+  assert.ok(isKnownRequestMethod("session.archive"));
+  assert.ok(isKnownRequestMethod("session.delete"));
+});
+
+test("validates session management parameters and results strictly", () => {
+  assert.equal(
+    isValidRequestParams("session.rename", { id: "session-1", title: "Title" }),
+    true,
+  );
+  assert.equal(
+    isValidRequestParams("session.rename", { id: "session_1-A", title: "" }),
+    true,
+  );
+  assert.equal(
+    isValidRequestParams("session.rename", { id: "../x", title: "Title" }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.rename", { id: "a/b", title: "Title" }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.rename", { id: "a.b", title: "Title" }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.rename", { id: "", title: "Title" }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.rename", {
+      id: "a".repeat(129),
+      title: "Title",
+    }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.rename", { id: "session-1" }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.rename", { id: "session-1", title: 123 }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.rename", {
+      id: "session-1",
+      title: "Title",
+      extra: true,
+    }),
+    false,
+  );
+
+  assert.equal(
+    isValidRequestParams("session.archive", {
+      id: "session-1",
+      archived: true,
+    }),
+    true,
+  );
+  assert.equal(
+    isValidRequestParams("session.archive", {
+      id: "session-1",
+      archived: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isValidRequestParams("session.archive", {
+      id: "session-1",
+      archived: "true",
+    }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.archive", { id: "session-1" }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.archive", {
+      id: "session/1",
+      archived: true,
+    }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.archive", {
+      id: "session-1",
+      archived: true,
+      extra: 1,
+    }),
+    false,
+  );
+
+  assert.equal(
+    isValidRequestParams("session.delete", { id: "session-1", confirm: true }),
+    true,
+  );
+  assert.equal(
+    isValidRequestParams("session.delete", { id: "session-1", confirm: false }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.delete", { id: "session-1" }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.delete", {
+      id: "session-1",
+      confirm: "true",
+    }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.delete", { id: "a/b", confirm: true }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("session.delete", {
+      id: "session-1",
+      confirm: true,
+      extra: true,
+    }),
+    false,
+  );
+
+  assert.equal(isValidRequestResult("session.rename", {}), true);
+  assert.equal(isValidRequestResult("session.rename", { extra: 1 }), false);
+  assert.equal(isValidRequestResult("session.archive", {}), true);
+  assert.equal(isValidRequestResult("session.archive", { extra: 1 }), false);
+  assert.equal(isValidRequestResult("session.delete", {}), true);
+  assert.equal(isValidRequestResult("session.delete", { extra: 1 }), false);
+
+  const baseSummary = {
+    id: "session-1",
+    cwd: "/workspace",
+    createdAt: "2026-10-15T12:00:00.000Z",
+    updatedAt: "2026-10-15T12:00:00.000Z",
+    messageCount: 1,
+    firstMessage: "Hello",
+  };
+  assert.equal(
+    isValidRequestResult("session.list", {
+      sessions: [baseSummary],
+    }),
+    true,
+  );
+  assert.equal(
+    isValidRequestResult("session.list", {
+      sessions: [{ ...baseSummary, name: "Custom Name", archived: true }],
+    }),
+    true,
+  );
+  assert.equal(
+    isValidRequestResult("session.list", {
+      sessions: [{ ...baseSummary, archived: false }],
+    }),
+    false,
+  );
+});

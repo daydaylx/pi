@@ -1,4 +1,14 @@
 import assert from "node:assert/strict";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { isValidRequestResult } from "../../npm/packages/frontend-protocol/dist/index.js";
 import {
@@ -291,6 +301,356 @@ test("agent_settled emits state.patch first then agent.settled event with aborte
     assert.equal(emitted[1].event, "agent.settled");
     assert.deepEqual(emitted[1].data, { aborted: expectedAborted });
     assert.equal(emitted[1].sequence, emitted[0].sequence + 1);
+  }
+});
+
+function createMiniSession(
+  dir,
+  id,
+  { cwd = "/workspace", name, content = "Hello" } = {},
+) {
+  const filePath = path.join(dir, `${id}.jsonl`);
+  const lines = [
+    JSON.stringify({
+      type: "session",
+      version: 3,
+      id,
+      timestamp: "2026-10-15T12:00:00.000Z",
+      cwd,
+    }),
+    JSON.stringify({
+      type: "message",
+      id: `msg-${id}`,
+      parentId: null,
+      timestamp: "2026-10-15T12:00:01.000Z",
+      message: { role: "user", content, timestamp: 1729000000000 },
+    }),
+  ];
+  if (name) {
+    lines.push(
+      JSON.stringify({
+        type: "session_info",
+        id: `info-${id}`,
+        parentId: `msg-${id}`,
+        timestamp: "2026-10-15T12:00:02.000Z",
+        name,
+      }),
+    );
+  }
+  writeFileSync(filePath, lines.join("\n") + "\n", "utf8");
+  return filePath;
+}
+
+test("session.rename sets title in list and leaves session file bytes unchanged", async () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "pi-session-rename-"));
+  try {
+    const sessionPath = createMiniSession(tempDir, "inactive-session", {
+      name: "Original Name",
+      content: "First user message",
+    });
+    const bytesBefore = readFileSync(sessionPath);
+
+    const server = new FrontendServer({
+      env: { PI_CODING_AGENT_SESSION_DIR: tempDir },
+    });
+    server.runtime = {
+      request: async ({ type }) => {
+        if (type === "get_state") return { sessionId: "active-session" };
+        return {};
+      },
+    };
+
+    const res = await server.dispatch("session.rename", {
+      id: "inactive-session",
+      title: "  Renamed Title  ",
+    });
+    assert.deepEqual(res, {});
+
+    const bytesAfter = readFileSync(sessionPath);
+    assert.deepEqual(bytesBefore, bytesAfter);
+
+    const listRes = await server.dispatch("session.list", {});
+    const entry = listRes.sessions.find((s) => s.id === "inactive-session");
+    assert.ok(entry);
+    assert.equal(entry.name, "Renamed Title");
+
+    await server.dispatch("session.rename", {
+      id: "inactive-session",
+      title: "   ",
+    });
+    const listResAfterClear = await server.dispatch("session.list", {});
+    const entryAfterClear = listResAfterClear.sessions.find(
+      (s) => s.id === "inactive-session",
+    );
+    assert.equal(entryAfterClear.name, "Original Name");
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("session.archive sets and clears archived flag in session.list", async () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "pi-session-archive-"));
+  try {
+    createMiniSession(tempDir, "archived-session");
+    const server = new FrontendServer({
+      env: { PI_CODING_AGENT_SESSION_DIR: tempDir },
+    });
+    server.runtime = {
+      request: async ({ type }) => {
+        if (type === "get_state") return { sessionId: "active-session" };
+        return {};
+      },
+    };
+
+    const archiveOn = await server.dispatch("session.archive", {
+      id: "archived-session",
+      archived: true,
+    });
+    assert.deepEqual(archiveOn, {});
+
+    let listRes = await server.dispatch("session.list", {});
+    let entry = listRes.sessions.find((s) => s.id === "archived-session");
+    assert.ok(entry);
+    assert.equal(entry.archived, true);
+
+    const archiveOff = await server.dispatch("session.archive", {
+      id: "archived-session",
+      archived: false,
+    });
+    assert.deepEqual(archiveOff, {});
+
+    listRes = await server.dispatch("session.list", {});
+    entry = listRes.sessions.find((s) => s.id === "archived-session");
+    assert.ok(entry);
+    assert.equal(entry.archived, undefined);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("session.delete moves file to .trash, removes from list, and second delete fails", async () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "pi-session-delete-"));
+  try {
+    const sessionPath = createMiniSession(tempDir, "delete-session");
+    const server = new FrontendServer({
+      env: { PI_CODING_AGENT_SESSION_DIR: tempDir },
+    });
+    server.runtime = {
+      request: async ({ type }) => {
+        if (type === "get_state") return { sessionId: "active-session" };
+        return {};
+      },
+    };
+
+    let listRes = await server.dispatch("session.list", {});
+    assert.ok(listRes.sessions.some((s) => s.id === "delete-session"));
+
+    const delRes = await server.dispatch("session.delete", {
+      id: "delete-session",
+      confirm: true,
+    });
+    assert.deepEqual(delRes, {});
+
+    assert.equal(existsSync(sessionPath), false);
+
+    const trashDir = path.join(tempDir, ".trash");
+    assert.ok(existsSync(trashDir));
+    const trashFiles = readdirSync(trashDir);
+    assert.ok(trashFiles.some((f) => f.startsWith("delete-session.jsonl.")));
+
+    listRes = await server.dispatch("session.list", {});
+    assert.equal(
+      listRes.sessions.some((s) => s.id === "delete-session"),
+      false,
+    );
+
+    await assert.rejects(
+      server.dispatch("session.delete", {
+        id: "delete-session",
+        confirm: true,
+      }),
+      (err) => err.code === "INVALID_REQUEST",
+    );
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("session management rejects negative cases", async () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "pi-session-negative-"));
+  try {
+    createMiniSession(tempDir, "active-session");
+    createMiniSession(tempDir, "inactive-session");
+
+    const server = new FrontendServer({
+      env: { PI_CODING_AGENT_SESSION_DIR: tempDir },
+    });
+    server.runtime = {
+      request: async ({ type }) => {
+        if (type === "get_state") return { sessionId: "active-session" };
+        return {};
+      },
+    };
+
+    // Active session (all three)
+    await assert.rejects(
+      server.dispatch("session.rename", {
+        id: "active-session",
+        title: "New Title",
+      }),
+      (err) => err.code === "SESSION_BUSY",
+    );
+    await assert.rejects(
+      server.dispatch("session.archive", {
+        id: "active-session",
+        archived: true,
+      }),
+      (err) => err.code === "SESSION_BUSY",
+    );
+    await assert.rejects(
+      server.dispatch("session.delete", {
+        id: "active-session",
+        confirm: true,
+      }),
+      (err) => err.code === "SESSION_BUSY",
+    );
+
+    // Unknown ID
+    await assert.rejects(
+      server.dispatch("session.rename", {
+        id: "unknown-id",
+        title: "New Title",
+      }),
+      (err) => err.code === "INVALID_REQUEST",
+    );
+    await assert.rejects(
+      server.dispatch("session.archive", {
+        id: "unknown-id",
+        archived: true,
+      }),
+      (err) => err.code === "INVALID_REQUEST",
+    );
+    await assert.rejects(
+      server.dispatch("session.delete", {
+        id: "unknown-id",
+        confirm: true,
+      }),
+      (err) => err.code === "INVALID_REQUEST",
+    );
+
+    // Invalid ID: path traversal, slashes, dots, empty
+    for (const badId of ["../x", "a/b", "a.b", ""]) {
+      await assert.rejects(
+        server.dispatch("session.rename", { id: badId, title: "Title" }),
+        (err) => err.code === "INVALID_REQUEST",
+      );
+    }
+
+    // Delete without confirm / confirm: false
+    await assert.rejects(
+      server.dispatch("session.delete", { id: "inactive-session" }),
+      (err) => err.code === "INVALID_REQUEST",
+    );
+    await assert.rejects(
+      server.dispatch("session.delete", {
+        id: "inactive-session",
+        confirm: false,
+      }),
+      (err) => err.code === "INVALID_REQUEST",
+    );
+
+    // Title with control characters
+    for (const badTitle of [
+      "bad\x00title",
+      "bad\x1ftitle",
+      "bad\x7ftitle",
+      "bad\ntitle",
+    ]) {
+      await assert.rejects(
+        server.dispatch("session.rename", {
+          id: "inactive-session",
+          title: badTitle,
+        }),
+        (err) => err.code === "INVALID_REQUEST",
+      );
+    }
+
+    // Title > 120 characters
+    await assert.rejects(
+      server.dispatch("session.rename", {
+        id: "inactive-session",
+        title: "x".repeat(121),
+      }),
+      (err) => err.code === "INVALID_REQUEST",
+    );
+
+    // Running turn -> SESSION_BUSY
+    server.state.activity = { kind: "responding" };
+    await assert.rejects(
+      server.dispatch("session.rename", {
+        id: "inactive-session",
+        title: "Title",
+      }),
+      (err) => err.code === "SESSION_BUSY",
+    );
+    await assert.rejects(
+      server.dispatch("session.archive", {
+        id: "inactive-session",
+        archived: true,
+      }),
+      (err) => err.code === "SESSION_BUSY",
+    );
+    await assert.rejects(
+      server.dispatch("session.delete", {
+        id: "inactive-session",
+        confirm: true,
+      }),
+      (err) => err.code === "SESSION_BUSY",
+    );
+    server.state.activity = { kind: "idle" };
+
+    // Missing PI_CODING_AGENT_SESSION_DIR
+    const noDirServer = new FrontendServer({ env: {} });
+    noDirServer.runtime = server.runtime;
+    for (const [method, params] of [
+      ["session.rename", { id: "inactive-session", title: "New" }],
+      ["session.archive", { id: "inactive-session", archived: true }],
+      ["session.delete", { id: "inactive-session", confirm: true }],
+    ]) {
+      await assert.rejects(
+        noDirServer.dispatch(method, params),
+        (err) =>
+          err.code === "INVALID_REQUEST" &&
+          err.message ===
+            "Session management requires a dedicated session directory",
+      );
+    }
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("corrupt index file does not crash session.list", async () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "pi-session-corrupt-"));
+  try {
+    createMiniSession(tempDir, "regular-session", { name: "Base Name" });
+    writeFileSync(
+      path.join(tempDir, ".frontend-index.json"),
+      "{ invalid json syntax",
+      "utf8",
+    );
+
+    const server = new FrontendServer({
+      env: { PI_CODING_AGENT_SESSION_DIR: tempDir },
+    });
+    server.runtime = { request: async () => ({}) };
+
+    const res = await server.dispatch("session.list", {});
+    assert.equal(res.sessions.length, 1);
+    assert.equal(res.sessions[0].id, "regular-session");
+    assert.equal(res.sessions[0].name, "Base Name");
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
   }
 });
 

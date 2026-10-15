@@ -2,7 +2,17 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { extname } from "node:path";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import path, { extname } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { SessionManager } from "../npm/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
 import {
@@ -682,15 +692,60 @@ export function mapRuntimeEvent(message, sequence) {
   };
 }
 
-function opaqueSession(session) {
+const FRONTEND_INDEX_FILE = ".frontend-index.json";
+
+async function loadFrontendIndex(sessionDir) {
+  if (!sessionDir) return { version: 1, sessions: {} };
+  const indexPath = path.join(sessionDir, FRONTEND_INDEX_FILE);
+  try {
+    const raw = await readFile(indexPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.version === 1 &&
+      parsed.sessions &&
+      typeof parsed.sessions === "object" &&
+      !Array.isArray(parsed.sessions)
+    ) {
+      return parsed;
+    }
+    return { version: 1, sessions: {} };
+  } catch {
+    return { version: 1, sessions: {} };
+  }
+}
+
+async function saveFrontendIndex(sessionDir, index) {
+  const indexPath = path.join(sessionDir, FRONTEND_INDEX_FILE);
+  const tempPath = path.join(
+    sessionDir,
+    `${FRONTEND_INDEX_FILE}.tmp.${randomUUID()}`,
+  );
+  const content = JSON.stringify(index, null, 2);
+  try {
+    await writeFile(tempPath, content, { encoding: "utf8", mode: 0o600 });
+    await chmod(tempPath, 0o600).catch(() => {});
+    await rename(tempPath, indexPath);
+  } catch (error) {
+    await unlink(tempPath).catch(() => {});
+    throw error;
+  }
+}
+
+function opaqueSession(session, index) {
+  const indexed = index?.sessions?.[session.id];
+  const name =
+    typeof indexed?.title === "string" ? indexed.title : session.name;
   return {
     id: session.id,
-    ...(session.name ? { name: session.name } : {}),
+    ...(name ? { name } : {}),
     cwd: session.cwd,
     createdAt: session.created.toISOString(),
     updatedAt: session.modified.toISOString(),
     messageCount: session.messageCount,
     firstMessage: session.firstMessage,
+    ...(indexed?.archived === true ? { archived: true } : {}),
   };
 }
 
@@ -849,6 +904,16 @@ class RuntimeRpc {
       child.kill("SIGTERM");
     });
   }
+}
+
+function hasControlCharacter(text) {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export class FrontendServer {
@@ -1160,7 +1225,12 @@ export class FrontendServer {
         this.sessionPaths = new Map(
           sessions.map((session) => [session.id, session.path]),
         );
-        return { sessions: sessions.map(opaqueSession) };
+        const index = await loadFrontendIndex(
+          this.env.PI_CODING_AGENT_SESSION_DIR,
+        );
+        return {
+          sessions: sessions.map((session) => opaqueSession(session, index)),
+        };
       }
       case "session.create":
         await runtime.request({ type: "new_session" });
@@ -1176,6 +1246,10 @@ export class FrontendServer {
           await runtime.request({ type: "get_state" }),
         );
       }
+      case "session.rename":
+      case "session.archive":
+      case "session.delete":
+        return this.mutateSession(method, params);
       case "session.current":
         return normalizeCurrentSession(
           await runtime.request({ type: "get_state" }),
@@ -1336,6 +1410,143 @@ export class FrontendServer {
     }
   }
 
+  async mutateSession(method, params) {
+    const sessionDir = this.env.PI_CODING_AGENT_SESSION_DIR;
+    if (!sessionDir) {
+      throw frontendError(
+        "INVALID_REQUEST",
+        "Session management requires a dedicated session directory",
+      );
+    }
+    if (this.state.activity?.kind !== "idle") {
+      throw frontendError("SESSION_BUSY", "Session has an active turn");
+    }
+    if (
+      typeof params?.id !== "string" ||
+      params.id.length < 1 ||
+      params.id.length > 128 ||
+      !/^[A-Za-z0-9_-]+$/.test(params.id)
+    ) {
+      throw frontendError("INVALID_REQUEST", "Invalid session id");
+    }
+
+    if (method === "session.rename") {
+      if (typeof params.title !== "string") {
+        throw frontendError("INVALID_REQUEST", "Title must be a string");
+      }
+      if (hasControlCharacter(params.title)) {
+        throw frontendError(
+          "INVALID_REQUEST",
+          "Title contains control characters",
+        );
+      }
+      const trimmedTitle = params.title.trim();
+      if (trimmedTitle.length > 120) {
+        throw frontendError(
+          "INVALID_REQUEST",
+          "Title must not exceed 120 characters",
+        );
+      }
+    } else if (method === "session.archive") {
+      if (typeof params.archived !== "boolean") {
+        throw frontendError("INVALID_REQUEST", "archived must be a boolean");
+      }
+    } else if (method === "session.delete") {
+      if (params.confirm !== true) {
+        throw frontendError(
+          "INVALID_REQUEST",
+          "Deletion requires confirm: true",
+        );
+      }
+    }
+
+    const currentState = await this.runtime.request({ type: "get_state" });
+    const currentSession = normalizeCurrentSession(currentState);
+    if (currentSession.id && currentSession.id === params.id) {
+      throw frontendError("SESSION_BUSY", "Cannot modify active session");
+    }
+
+    const sessions = await SessionManager.listAll(sessionDir);
+    this.sessionPaths = new Map(
+      sessions.map((session) => [session.id, session.path]),
+    );
+    const sessionPath = this.sessionPaths.get(params.id);
+    if (!sessionPath) {
+      throw frontendError("INVALID_REQUEST", "Session not found");
+    }
+
+    if (method === "session.rename") {
+      const trimmedTitle = params.title.trim();
+      const index = await loadFrontendIndex(sessionDir);
+      if (!index.sessions) index.sessions = {};
+      if (trimmedTitle.length === 0) {
+        if (index.sessions[params.id]) {
+          delete index.sessions[params.id].title;
+          if (Object.keys(index.sessions[params.id]).length === 0) {
+            delete index.sessions[params.id];
+          }
+        }
+      } else {
+        if (!index.sessions[params.id]) index.sessions[params.id] = {};
+        index.sessions[params.id].title = trimmedTitle;
+      }
+      await saveFrontendIndex(sessionDir, index);
+      return {};
+    }
+
+    if (method === "session.archive") {
+      const index = await loadFrontendIndex(sessionDir);
+      if (!index.sessions) index.sessions = {};
+      if (params.archived) {
+        if (!index.sessions[params.id]) index.sessions[params.id] = {};
+        index.sessions[params.id].archived = true;
+      } else {
+        if (index.sessions[params.id]) {
+          delete index.sessions[params.id].archived;
+          if (Object.keys(index.sessions[params.id]).length === 0) {
+            delete index.sessions[params.id];
+          }
+        }
+      }
+      await saveFrontendIndex(sessionDir, index);
+      return {};
+    }
+
+    if (method === "session.delete") {
+      const stats = await lstat(sessionPath);
+      if (stats.isSymbolicLink() || !stats.isFile()) {
+        throw frontendError(
+          "INVALID_REQUEST",
+          "Session path must be a regular file",
+        );
+      }
+      const realSessionPath = await realpath(sessionPath);
+      const realSessionDir = await realpath(sessionDir);
+      if (path.dirname(realSessionPath) !== realSessionDir) {
+        throw frontendError(
+          "INVALID_REQUEST",
+          "Session file must reside directly in session directory",
+        );
+      }
+      const trashDir = path.join(sessionDir, ".trash");
+      await mkdir(trashDir, { recursive: true, mode: 0o700 });
+      await chmod(trashDir, 0o700).catch(() => {});
+      const basename = path.basename(sessionPath);
+      const targetPath = path.join(trashDir, `${basename}.${Date.now()}`);
+      await rename(sessionPath, targetPath);
+
+      const index = await loadFrontendIndex(sessionDir);
+      if (index.sessions?.[params.id]) {
+        delete index.sessions[params.id];
+        await saveFrontendIndex(sessionDir, index);
+      }
+      this.sessionPaths.delete(params.id);
+      return {};
+    }
+
+    throw frontendError("UNKNOWN_METHOD", `Unknown method: ${method}`);
+  }
+
   sendProtocolError(id, code, message) {
     const error = protocolError(code, message, randomUUID(), {
       retryable: [
@@ -1366,6 +1577,7 @@ export class FrontendServer {
       SESSION_INVALID: "Session is invalid",
       TOOL_FAILED: "Tool execution failed",
       PERMISSION_DENIED: "Permission denied",
+      SESSION_BUSY: "Session is busy",
       PROVIDER_ERROR: "Provider request failed",
       INTERNAL_ERROR: "Pi frontend request failed",
       UNSUPPORTED_CAPABILITY: "This Pi capability is not available",

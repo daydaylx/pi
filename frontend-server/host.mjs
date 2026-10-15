@@ -32,6 +32,9 @@ const PROMPT_START_GRACE_MS = 5_000;
 const SESSION_BUSY_MUTATIONS = new Set([
   "session.create",
   "session.open",
+  "session.rename",
+  "session.archive",
+  "session.delete",
   "model.set",
   "model.cycle",
   "thinking.set",

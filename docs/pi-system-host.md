@@ -20,6 +20,12 @@ verfügbar. Nachrichten werden seitenweise mit höchstens 100 Einträgen und
 Sekunden. Jede Host-Instanz meldet eine zufällige `hostEpoch` für die Dauer
 ihres Prozesses. Sie ermöglicht Resync-Erkennung, speichert aber keine Events.
 
+Metadaten der Sessionverwaltung werden im Session-Verzeichnis
+(`profile-state/system/host-sessions`) in `.frontend-index.json` (Modus `0600`,
+atomare Writes) geführt. Gelöschte Sitzungen werden nicht vernichtet, sondern
+nach `.trash/<basename>.<timestamp>` (Modus `0700`) verschoben und aus dem Index
+entfernt.
+
 ## Quellcode prüfen
 
 ```bash

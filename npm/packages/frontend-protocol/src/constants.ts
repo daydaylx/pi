@@ -3,6 +3,7 @@ export const PROTOCOL_PACKAGE_VERSION = "1.2.0" as const;
 
 export const CAPABILITIES = [
   "sessions",
+  "session-management",
   "messages",
   "streaming",
   "tool-calls",
@@ -31,6 +32,9 @@ export const REQUEST_METHODS = [
   "session.list",
   "session.create",
   "session.open",
+  "session.rename",
+  "session.archive",
+  "session.delete",
   "session.current",
   "session.messages",
   "session.stats",

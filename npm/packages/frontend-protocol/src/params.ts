@@ -6,12 +6,29 @@ const Strict = { additionalProperties: false } as const;
 const Empty = Type.Object({}, Strict);
 const Id = Type.String({ minLength: 1 });
 const Message = Type.String({ minLength: 1, maxLength: 100_000 });
+const SessionManagementId = Type.String({
+  minLength: 1,
+  maxLength: 128,
+  pattern: "^[A-Za-z0-9_-]+$",
+});
 
 export const REQUEST_PARAM_SCHEMAS = {
   "system.ping": Empty,
   "session.list": Empty,
   "session.create": Empty,
   "session.open": Type.Object({ id: Id }, Strict),
+  "session.rename": Type.Object(
+    { id: SessionManagementId, title: Type.String() },
+    Strict,
+  ),
+  "session.archive": Type.Object(
+    { id: SessionManagementId, archived: Type.Boolean() },
+    Strict,
+  ),
+  "session.delete": Type.Object(
+    { id: SessionManagementId, confirm: Type.Literal(true) },
+    Strict,
+  ),
   "session.current": Empty,
   "session.messages": Type.Object(
     {
