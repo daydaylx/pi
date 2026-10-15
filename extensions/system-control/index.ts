@@ -7,6 +7,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { getPiLaunchProfile } from "../shared/profile.ts";
+import { strictCategoriesForRequest } from "../system-context/collector.mjs";
 import { audit, digest } from "./audit.ts";
 import {
   SYSTEM_CONTROL_TOOL,
@@ -333,7 +334,7 @@ export function registerSystemControl(
   pi: ExtensionAPI,
   options: { profile?: () => "project" | "system"; exec?: Exec } = {},
 ): void {
-  if ((options.profile ?? getPiLaunchProfile)() !== "system") return;
+  const profile = (options.profile ?? getPiLaunchProfile)();
   const run = options.exec ?? defaultExec;
   const defs = [
     {
@@ -572,6 +573,36 @@ export function registerSystemControl(
     },
   ];
   for (const definition of defs) makeTool(pi, run, definition);
+  if (profile !== "system") activateOnSystemRequest(pi);
+}
+
+/**
+ * Project profile (`pi`): the typed tools exist, but stay out of the active
+ * tool list (and so out of the model context) until the person's own prompt
+ * asks for system work. Only the prompt decides, never file or tool output, so
+ * repository content cannot switch them on. Authorization is unchanged: the
+ * permission policy classifies the tools by name and level in every profile.
+ * Once activated they stay active for the session to avoid flapping.
+ */
+function activateOnSystemRequest(pi: ExtensionAPI): void {
+  const names = [...SYSTEM_CONTROL_TOOL_NAME_SET];
+  let active = false;
+  const without = (list: string[]) =>
+    list.filter((name) => !SYSTEM_CONTROL_TOOL_NAME_SET.has(name));
+  pi.on("session_start", () => {
+    active = false;
+    pi.setActiveTools(without(pi.getActiveTools()));
+  });
+  pi.on("before_agent_start", (event) => {
+    if (active || event.messageType === "custom") return;
+    if (strictCategoriesForRequest(event.prompt).length === 0) return;
+    active = true;
+    const current = pi.getActiveTools();
+    pi.setActiveTools([
+      ...current,
+      ...names.filter((name) => !current.includes(name)),
+    ]);
+  });
 }
 
 export default function systemControlExtension(pi: ExtensionAPI): void {

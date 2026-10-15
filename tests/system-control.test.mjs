@@ -17,21 +17,82 @@ const audit = await importModule("extensions/system-control/audit.ts");
 const policy = await importModule("extensions/system-control/policy.ts");
 const toolPolicy = await importModule("extensions/permissions/tool-policy.ts");
 const bashPolicy = await importModule("extensions/shared/permission-policy.ts");
+const openPolicy = await importModule(
+  "extensions/permissions/system-open-policy.ts",
+);
 const { Value } = await import(
   pathToFileURL(npmModuleFile("typebox", "build/value/index.mjs")).href
 );
 
 function register(profile, exec = async () => ({ stdout: "ok", stderr: "" })) {
   const tools = new Map();
+  const handlers = new Map();
+  let active = ["read", "bash"];
   extension.registerSystemControl(
-    { registerTool: (tool) => tools.set(tool.name, tool) },
+    {
+      registerTool: (tool) => {
+        tools.set(tool.name, tool);
+        active.push(tool.name);
+      },
+      on: (event, handler) => handlers.set(event, handler),
+      getActiveTools: () => [...active],
+      setActiveTools: (names) => {
+        active = [...names];
+      },
+    },
     { profile: () => profile, exec },
   );
+  tools.handlers = handlers;
+  tools.active = () => [...active];
   return tools;
 }
 
-test("System-Control ist profilgebunden, strikt und registriert den festen Katalog", () => {
-  assert.equal(register("project").size, 0);
+test("Projektprofil: Systemwerkzeuge bleiben bis zu einer Systemanfrage inaktiv", () => {
+  const tools = register("project");
+  assert.equal(tools.size, 13);
+  // Registrierung allein verändert die aktive Liste nicht; session_start blendet sie aus.
+  tools.handlers.get("session_start")();
+  assert.deepEqual(tools.active(), ["read", "bash"]);
+  const before = tools.handlers.get("before_agent_start");
+  // Alltägliche Programmierwörter aktivieren nichts.
+  for (const prompt of [
+    "Untersuche mein Lager-Projekt auf Fehler",
+    "Schreibe einen log-Dialog und beachte die letzte Zeile",
+    "Prüfe die Integration zwischen Pi und QuickPanel",
+  ]) {
+    before({ prompt, messageType: "user" });
+    assert.deepEqual(tools.active(), ["read", "bash"], prompt);
+  }
+  // Erweiterungsnachrichten entscheiden nie.
+  before({ prompt: "zeige CPU und RAM", messageType: "custom" });
+  assert.deepEqual(tools.active(), ["read", "bash"]);
+  before({
+    prompt: "Zeige mir die aktuelle CPU- und RAM-Auslastung",
+    messageType: "user",
+  });
+  assert.equal(tools.active().length, 15);
+  assert.ok(tools.active().includes("nixos_apply"));
+  // Neue Sitzung: wieder inaktiv.
+  tools.handlers.get("session_start")();
+  assert.deepEqual(tools.active(), ["read", "bash"]);
+  for (const prompt of [
+    "Prüfe meine NixOS-Konfiguration und behebe die fehlerhafte Einstellung",
+    "Wie ist die Lautstärke gerade?",
+    "Warum ist mein WLAN langsam",
+  ]) {
+    tools.handlers.get("session_start")();
+    before({ prompt, messageType: "user" });
+    assert.equal(tools.active().length, 15, prompt);
+  }
+});
+
+test("Systemprofil: Werkzeuge sind sofort aktiv, es gibt keine Aktivierungslogik", () => {
+  const tools = register("system");
+  assert.equal(tools.handlers.size, 0);
+  assert.equal(tools.active().length, 15);
+});
+
+test("System-Control registriert im Systemprofil den festen Katalog strikt", () => {
   const tools = register("system");
   assert.deepEqual(
     [...tools.keys()],
@@ -186,9 +247,21 @@ test("System-Bash-Policy hebt nur allow für geschützte Befehle auf ask an", ()
   };
   const commands = Object.keys(baseline);
 
-  function expectedAction(profile, command, existingAction) {
-    if (profile === "project") return existingAction;
+  // The protected-command check is profile independent; only the project
+  // profile's explicit YOLO levels keep their "no questions" meaning.
+  function expectedAction(profile, command, existingAction, level) {
+    if (profile === "project" && level.startsWith("yolo"))
+      return existingAction;
     if (existingAction === "allow" && policy.systemBashNeedsApproval(command))
+      return "ask";
+    // The project profile additionally asks for the shared critical-risk
+    // heuristic (privilege escalation, git loss, disk and service operations).
+    if (
+      profile === "project" &&
+      existingAction === "allow" &&
+      (level === "project-write" || level === "headless") &&
+      openPolicy.systemOpenBashRisk(command)
+    )
       return "ask";
     return existingAction;
   }
@@ -208,7 +281,7 @@ test("System-Bash-Policy hebt nur allow für geschützte Befehle auf ask an", ()
           );
           assert.equal(
             decision.action,
-            expectedAction(profile, command, existingAction),
+            expectedAction(profile, command, existingAction, level),
             `${profile} ${level}: ${command}`,
           );
         }

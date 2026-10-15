@@ -102,12 +102,11 @@ function isSystemProjectPolicyConfig(root: string, target: string): boolean {
 }
 function guardedRecoveryEffect(event: ToolCallEvent, cwd: string) {
   if (
-    getPiLaunchProfile() === "system" &&
-    (SYSTEM_CONTROL_READ_TOOLS.has(event.toolName) ||
-      (event.toolName === "system_job" &&
-        ["status", "output"].includes(
-          String((event.input as Record<string, unknown>).action),
-        )))
+    SYSTEM_CONTROL_READ_TOOLS.has(event.toolName) ||
+    (event.toolName === "system_job" &&
+      ["status", "output"].includes(
+        String((event.input as Record<string, unknown>).action),
+      ))
   ) {
     return "read_only" as const;
   }
@@ -254,11 +253,7 @@ export function registerPermissionGuards(
       return { block: true, ...stopNonInteractive(ctx), reason: limitReason };
     }
     let outcome = await guardToolCall(event, ctx);
-    if (
-      outcome?.block &&
-      getPiLaunchProfile() === "system" &&
-      SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)
-    ) {
+    if (outcome?.block && SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)) {
       const auditError = await auditSystemDenial(event.toolName, event.input);
       if (auditError)
         outcome = {
@@ -430,7 +425,10 @@ export function registerPermissionGuards(
    * Systemprofil (`pis`): offen, nur Löschen und andere Risiken werden vorab
    * bestätigt. Trust-, Scope-, Pfad- und Recovery-Grenzen entfallen bewusst.
    */
-  const guardSystemOpen = async (event: ToolCallEvent, ctx: ExtensionContext) => {
+  const guardSystemOpen = async (
+    event: ToolCallEvent,
+    ctx: ExtensionContext,
+  ) => {
     if (event.toolName === ASK_USER_TOOL_NAME && !ctx.hasUI) {
       return {
         block: true,
@@ -446,11 +444,7 @@ export function registerPermissionGuards(
         reason: webAssessment.reason,
       };
     }
-    const contractOutcome = await guardDelegationContract(
-      event,
-      ctx,
-      ctx.cwd,
-    );
+    const contractOutcome = await guardDelegationContract(event, ctx, ctx.cwd);
     if (contractOutcome) return contractOutcome;
 
     let risk: SystemOpenRisk | undefined;
@@ -769,10 +763,7 @@ export function registerPermissionGuards(
     if (
       !ctx.isProjectTrusted() &&
       !systemShellWithConfirmChannel &&
-      !(
-        getPiLaunchProfile() === "system" &&
-        SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)
-      ) &&
+      !SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName) &&
       !systemFullAccessBypass &&
       event.toolName !== "workspace_add" &&
       !targetRootTrusted &&

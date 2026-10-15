@@ -22,6 +22,7 @@ import { WEB_TOOLS, decideWebTool } from "./web-tools.ts";
 import { LOCAL_LSP_TOOLS } from "./workflow-policy.ts";
 import { toolPath } from "./tool-event.ts";
 import { getPiLaunchProfile } from "../shared/profile.ts";
+import { systemOpenBashRisk } from "./system-open-policy.ts";
 import { systemBashNeedsApproval } from "../system-control/policy.ts";
 import {
   SYSTEM_CONTROL_JOB_TOOLS,
@@ -67,7 +68,10 @@ function decideToolBase(
     systemFileRoots?: readonly string[];
   } = {},
 ): PolicyDecision {
-  if (getPiLaunchProfile() === "system") {
+  // Tool classes are authorization by name and permission level, not by the
+  // launch profile: the same typed tools ask (or are blocked) identically in
+  // `pi` and `pis`. The profile label grants nothing.
+  {
     if (SYSTEM_CONTROL_JOB_TOOLS.has(event.toolName)) {
       const action = (event.input as Record<string, unknown>).action;
       if (action === "status" || action === "output")
@@ -274,7 +278,6 @@ export function decideTool(
   );
   if (
     decision.action !== "allow" ||
-    getPiLaunchProfile() !== "system" ||
     (event.toolName !== "bash" &&
       event.toolName !== INTERACTIVE_SHELL_TOOL_NAME)
   )
@@ -284,9 +287,29 @@ export function decideTool(
     event.toolName === INTERACTIVE_SHELL_TOOL_NAME
       ? interactiveShellCommand(event)
       : String((event.input as Record<string, unknown>).command ?? "");
-  if (!systemBashNeedsApproval(command)) return decision;
-  return {
-    action: "ask",
-    reason: "Geschütztes Systemkommando benötigt eine ausdrückliche Freigabe.",
-  };
+  // YOLO is the person's explicit "no questions" mode in the project profile
+  // (ADR 029); the System profile keeps asking for protected commands there.
+  const yoloProjectBypass =
+    getPiLaunchProfile() !== "system" &&
+    (permissionLevel === "yolo" ||
+      permissionLevel === "yolo-ask" ||
+      permissionLevel === "yolo-full");
+  if (!yoloProjectBypass && systemBashNeedsApproval(command)) {
+    return {
+      action: "ask",
+      reason:
+        "Geschütztes Systemkommando benötigt eine ausdrückliche Freigabe.",
+    };
+  }
+  // The project profile has no open policy, but it must not run critical
+  // system or git-loss operations unasked just because it was started in a
+  // repository: the same heuristic the System profile uses asks first.
+  if (
+    getPiLaunchProfile() !== "system" &&
+    (permissionLevel === "project-write" || permissionLevel === "headless")
+  ) {
+    const risk = systemOpenBashRisk(command);
+    if (risk) return { action: "ask", reason: risk.reason };
+  }
+  return decision;
 }
