@@ -45,6 +45,100 @@ const SESSION_BUSY_MUTATIONS = new Set([
   "verification.run",
 ]);
 
+const ALLOWED_ENV_EXACT = new Set([
+  "HOME",
+  "PATH",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LANGUAGE",
+  "TERM",
+  "COLORTERM",
+  "NO_COLOR",
+  "FORCE_COLOR",
+  "TZ",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "XDG_RUNTIME_DIR",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_STATE_HOME",
+  "XDG_SESSION_TYPE",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "WAYLAND_DISPLAY",
+  "HYPRLAND_INSTANCE_SIGNATURE",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+  "NIX_PATH",
+  "NIX_SSL_CERT_FILE",
+  "LOCALE_ARCHIVE",
+]);
+
+const FORBIDDEN_ENV_EXACT = new Set([
+  "NODE_OPTIONS",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "LD_AUDIT",
+  "NODE_PATH",
+  "BASH_ENV",
+  "ENV",
+  "PYTHONPATH",
+]);
+
+const PASSTHROUGH_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function isForbiddenEnv(key) {
+  return FORBIDDEN_ENV_EXACT.has(key) || key.startsWith("DYLD_");
+}
+
+export function filterBackendEnv(env = {}) {
+  const result = {};
+  if (!env || typeof env !== "object") return result;
+
+  const passthroughNames = new Set();
+  const rawPassthrough = env.PI_SYSTEM_HOST_ENV_PASSTHROUGH;
+  if (typeof rawPassthrough === "string" && rawPassthrough.length > 0) {
+    for (const item of rawPassthrough.split(",")) {
+      const name = item.trim();
+      if (
+        name &&
+        PASSTHROUGH_NAME_PATTERN.test(name) &&
+        !isForbiddenEnv(name) &&
+        passthroughNames.size < 64
+      ) {
+        passthroughNames.add(name);
+      }
+    }
+  }
+
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    if (isForbiddenEnv(key)) continue;
+    if (
+      ALLOWED_ENV_EXACT.has(key) ||
+      key.startsWith("LC_") ||
+      key.startsWith("PI_") ||
+      passthroughNames.has(key)
+    ) {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
 function line(stream, frame) {
   stream.write(`${JSON.stringify(frame)}\n`);
 }
@@ -216,6 +310,7 @@ export class PiSystemHost {
     runtimePath = DEFAULT_RUNTIME,
     promptStartGraceMs = PROMPT_START_GRACE_MS,
     startupTimeoutMs = 10_000,
+    requestTimeoutMs,
     approvalTtlMs,
     maxBackendFrameChars = MAX_BACKEND_FRAME_CHARS,
   } = {}) {
@@ -244,7 +339,7 @@ export class PiSystemHost {
     );
     this.profile = profile;
     this.env = {
-      ...env,
+      ...filterBackendEnv(env),
       PI_CODING_AGENT_DIR: profile.agentDir,
       PI_CODING_AGENT_SESSION_DIR: profile.sessions,
       PI_SYSTEM_WORKSPACE: profile.workspace,
@@ -256,6 +351,16 @@ export class PiSystemHost {
     this.promptStartGraceMs = promptStartGraceMs;
     this.startupTimeoutMs = startupTimeoutMs;
     this.maxBackendFrameChars = maxBackendFrameChars;
+    const configuredTimeout = Number(
+      requestTimeoutMs ?? env.PI_SYSTEM_HOST_REQUEST_TIMEOUT_MS ?? 60_000,
+    );
+    this.requestTimeoutMs = Math.min(
+      600_000,
+      Math.max(
+        1_000,
+        Number.isFinite(configuredTimeout) ? configuredTimeout : 60_000,
+      ),
+    );
     const configuredTtl = Number(
       approvalTtlMs ?? env.PI_SYSTEM_APPROVAL_TTL_MS ?? 120_000,
     );
@@ -366,8 +471,8 @@ export class PiSystemHost {
       "Pi frontend response exceeded the 8 MiB backend frame limit",
     );
     for (const request of this.pending.values()) {
+      if (request.timer) clearTimeout(request.timer);
       if (request.internalUi) {
-        this.emitUiResolved(request.uiId, request.outcome);
         continue;
       }
       request.client.inflight.delete(request.clientId);
@@ -402,9 +507,9 @@ export class PiSystemHost {
     if (frame?.kind === "response") {
       const request = this.pending.get(frame.id);
       if (!request) return;
+      if (request.timer) clearTimeout(request.timer);
       this.pending.delete(frame.id);
       if (request.internalUi) {
-        this.emitUiResolved(request.uiId, request.outcome);
         return;
       }
       request.client.inflight.delete(request.clientId);
@@ -526,6 +631,7 @@ export class PiSystemHost {
     if (!pending) return false;
     clearTimeout(pending.timer);
     this.pendingUi.delete(id);
+    this.emitUiResolved(id, outcome);
     if (notifyBackend && this.backend?.stdin?.writable) {
       const backendId = `host-${randomUUID()}`;
       this.pending.set(backendId, {
@@ -540,8 +646,6 @@ export class PiSystemHost {
         method: "ui.respond",
         params: { id, cancelled: true },
       });
-    } else {
-      this.emitUiResolved(id, outcome);
     }
     this.updateRunState();
     return true;
@@ -601,7 +705,7 @@ export class PiSystemHost {
   }
 
   acceptClient(socket) {
-    if (this.clients.size >= MAX_CLIENTS) {
+    if (this.stopping || this.clients.size >= MAX_CLIENTS) {
       socket.destroy();
       return;
     }
@@ -797,12 +901,17 @@ export class PiSystemHost {
       this.promptReserved = true;
     }
     const backendId = `host-${randomUUID()}`;
+    const timer = setTimeout(() => {
+      this.handleRequestTimeout(backendId);
+    }, this.requestTimeoutMs);
+    timer.unref?.();
     client.inflight.add(frame.id);
     this.pending.set(backendId, {
       client,
       clientId: frame.id,
       method: frame.method,
       uiId,
+      timer,
     });
     try {
       line(this.backend.stdin, {
@@ -813,6 +922,7 @@ export class PiSystemHost {
         params: frame.params,
       });
     } catch {
+      clearTimeout(timer);
       this.pending.delete(backendId);
       client.inflight.delete(frame.id);
       if (uiId) {
@@ -831,6 +941,37 @@ export class PiSystemHost {
         "RPC_DISCONNECTED",
         "Pi frontend is disconnected",
         true,
+      );
+    }
+  }
+
+  handleRequestTimeout(backendId) {
+    const request = this.pending.get(backendId);
+    if (!request) return;
+    this.pending.delete(backendId);
+    if (request.internalUi) {
+      this.emitUiResolved(request.uiId, request.outcome);
+      return;
+    }
+    request.client.inflight.delete(request.clientId);
+    if (request.uiId) {
+      const pendingUi = this.pendingUi.get(request.uiId);
+      if (pendingUi) pendingUi.responding = false;
+    }
+    const startsTurn =
+      request.method === "agent.prompt" ||
+      request.method === "agent.followUp";
+    if (startsTurn) {
+      this.activeRun = true;
+      this.uncertainRun = true;
+      this.clearPromptReservation();
+    }
+    if (!request.client.socket.destroyed) {
+      this.sendClientError(
+        request.client,
+        request.clientId,
+        "REQUEST_TIMEOUT",
+        "Pi backend request timed out",
       );
     }
   }
@@ -882,24 +1023,44 @@ export class PiSystemHost {
     if (this.stopping) return;
     this.stopping = true;
     this.clearPromptReservation();
-    for (const pending of this.pendingUi.values()) clearTimeout(pending.timer);
-    this.pendingUi.clear();
-    for (const client of this.clients.values()) client.socket.destroy();
-    this.clients.clear();
-    if (this.server) {
-      await new Promise((resolve) => this.server.close(resolve));
-      this.server = undefined;
+    this.cancelPendingUi();
+    for (const pending of this.pending.values()) {
+      if (pending.timer) clearTimeout(pending.timer);
     }
+    this.pending.clear();
     const backend = this.backend;
     if (backend && backend.exitCode === null) {
       await new Promise((resolve) => {
-        const timer = setTimeout(() => backend.kill("SIGKILL"), 3_000);
+        const timer = setTimeout(() => {
+          try {
+            backend.kill("SIGKILL");
+          } catch {
+            // Process may already be dead
+          }
+        }, 3_000);
         backend.once("close", () => {
           clearTimeout(timer);
           resolve();
         });
-        backend.kill("SIGTERM");
+        try {
+          backend.kill("SIGTERM");
+        } catch {
+          clearTimeout(timer);
+          resolve();
+        }
       });
+    }
+    for (const client of this.clients.values()) client.socket.destroy();
+    this.clients.clear();
+    if (this.server) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 3_000);
+        this.server.close(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      this.server = undefined;
     }
     try {
       const socketStats = lstatSync(this.socketPath);

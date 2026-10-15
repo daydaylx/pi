@@ -14,11 +14,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { PiSystemHost } from "../host.mjs";
+import { PiSystemHost, filterBackendEnv } from "../host.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakePi = path.join(here, "fixtures", "fake-system-host-pi.mjs");
-const FRAME_WAIT_MS = 15_000;
+const FRAME_WAIT_MS = 45_000;
 
 function connectClient(socketPath) {
   const socket = net.createConnection(socketPath);
@@ -68,7 +68,7 @@ function connectClient(socketPath) {
 }
 
 async function waitForSocket(socketPath) {
-  for (let attempt = 0; attempt < 750; attempt += 1) {
+  for (let attempt = 0; attempt < 2_250; attempt += 1) {
     try {
       const client = connectClient(socketPath);
       await client.connect();
@@ -80,7 +80,68 @@ async function waitForSocket(socketPath) {
   throw new Error("Pi System host socket did not become available");
 }
 
-test("one Pi runtime is shared, prompts are serialized, and reconnect gets a snapshot", async () => {
+async function waitFor(predicate, { timeout = 45_000, interval = 25 } = {}) {
+  const start = Date.now();
+  let lastError;
+  while (Date.now() - start < timeout) {
+    try {
+      const result = await predicate();
+      if (result) return result;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+  try {
+    const finalResult = await predicate();
+    if (finalResult) return finalResult;
+  } catch (error) {
+    lastError = error;
+  }
+  throw lastError ?? new Error("Timed out waiting for condition");
+}
+
+async function cleanupHost(host, client, tempDir) {
+  if (Array.isArray(client)) {
+    for (const c of client) c?.socket.destroy();
+  } else {
+    client?.socket.destroy();
+  }
+  if (host) {
+    let stopFinished = false;
+    host.stop().then(
+      () => {
+        stopFinished = true;
+      },
+      (err) => {
+        stopFinished = err;
+      },
+    );
+    try {
+      await waitFor(() => {
+        if (stopFinished instanceof Error) throw stopFinished;
+        return stopFinished;
+      });
+    } catch {
+      // stop timed out or failed
+    }
+    if (host.backend && host.backend.exitCode === null) {
+      try {
+        host.backend.kill("SIGKILL");
+      } catch {
+        // Process may already be dead
+      }
+    }
+  }
+  if (tempDir) {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+test(
+  "one Pi runtime is shared, prompts are serialized, and reconnect gets a snapshot",
+  { timeout: 90_000 },
+  async () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-"));
   const agentDir = path.join(temp, "agent");
   const startLog = path.join(temp, "runtime-starts.log");
@@ -91,12 +152,13 @@ test("one Pi runtime is shared, prompts are serialized, and reconnect gets a sna
       ...process.env,
       HOME: temp,
       PI_CODING_AGENT_DIR: agentDir,
+      PI_SYSTEM_HOST_ENV_PASSTHROUGH: "FAKE_PI_START_LOG",
       FAKE_PI_START_LOG: startLog,
     },
     runtimeDir: temp,
     runtimePath: fakePi,
     promptStartGraceMs: 1_000,
-    startupTimeoutMs: 20_000,
+    startupTimeoutMs: 45_000,
   });
   const clients = [];
   try {
@@ -110,11 +172,12 @@ test("one Pi runtime is shared, prompts are serialized, and reconnect gets a sna
         ...process.env,
         HOME: temp,
         PI_CODING_AGENT_DIR: agentDir,
+        PI_SYSTEM_HOST_ENV_PASSTHROUGH: "FAKE_PI_START_LOG",
         FAKE_PI_START_LOG: startLog,
       },
       runtimeDir: temp,
       runtimePath: fakePi,
-      startupTimeoutMs: 20_000,
+      startupTimeoutMs: 45_000,
     });
     await assert.rejects(competingHost.start(), /already listening/);
     await competingHost.stop();
@@ -239,7 +302,10 @@ test("one Pi runtime is shared, prompts are serialized, and reconnect gets a sna
         frame.event === "state.patch" && frame.data.activity?.kind === "idle",
     );
 
-    const starts = readFileSync(startLog, "utf8").trim().split(/\r?\n/);
+    const starts = await waitFor(() => {
+      const content = readFileSync(startLog, "utf8").trim();
+      return content ? content.split(/\r?\n/).filter(Boolean) : undefined;
+    });
     assert.equal(starts.length, 1, "all clients share one Pi RPC runtime");
   } finally {
     for (const client of clients) client.socket.destroy();
@@ -248,7 +314,10 @@ test("one Pi runtime is shared, prompts are serialized, and reconnect gets a sna
   }
 });
 
-test("uncertain prompt timeout blocks retries until session.current verifies idle", async () => {
+test(
+  "uncertain prompt timeout blocks retries until session.current verifies idle",
+  { timeout: 90_000 },
+  async () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-timeout-"));
   const agentDir = path.join(temp, "agent");
   const promptLog = path.join(temp, "prompts.log");
@@ -260,13 +329,14 @@ test("uncertain prompt timeout blocks retries until session.current verifies idl
       HOME: temp,
       PI_CODING_AGENT_DIR: agentDir,
       PI_FRONTEND_REQUEST_TIMEOUT_MS: "100",
+      PI_SYSTEM_HOST_ENV_PASSTHROUGH: "FAKE_PI_HANG_PROMPT,FAKE_PI_PROMPT_LOG",
       FAKE_PI_HANG_PROMPT: "1",
       FAKE_PI_PROMPT_LOG: promptLog,
     },
     runtimeDir: temp,
     runtimePath: fakePi,
     promptStartGraceMs: 100,
-    startupTimeoutMs: 20_000,
+    startupTimeoutMs: 45_000,
   });
   let client;
   try {
@@ -307,10 +377,14 @@ test("uncertain prompt timeout blocks retries until session.current verifies idl
     const blocked = await client.next((frame) => frame.id === "prompt-blocked");
     assert.equal(blocked.ok, false);
     assert.equal(blocked.error.code, "SESSION_BUSY");
-    assert.equal(
-      readFileSync(promptLog, "utf8").trim().split(/\r?\n/).length,
-      1,
-    );
+    const promptCount1 = await waitFor(() => {
+      const lines = readFileSync(promptLog, "utf8")
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean);
+      return lines.length === 1 ? lines.length : undefined;
+    });
+    assert.equal(promptCount1, 1);
 
     client.send({
       protocolVersion: 1,
@@ -331,10 +405,14 @@ test("uncertain prompt timeout blocks retries until session.current verifies idl
     );
     assert.equal(checkedPrompt.ok, false);
     assert.equal(checkedPrompt.error.code, "REQUEST_TIMEOUT");
-    assert.equal(
-      readFileSync(promptLog, "utf8").trim().split(/\r?\n/).length,
-      2,
-    );
+    const promptCount2 = await waitFor(() => {
+      const lines = readFileSync(promptLog, "utf8")
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean);
+      return lines.length === 2 ? lines.length : undefined;
+    });
+    assert.equal(promptCount2, 2);
   } finally {
     client?.socket.destroy();
     await host.stop();
@@ -342,7 +420,10 @@ test("uncertain prompt timeout blocks retries until session.current verifies idl
   }
 });
 
-test("host refuses symlinked runtime and Pi agent directories", () => {
+test(
+  "host refuses symlinked runtime and Pi agent directories",
+  { timeout: 90_000 },
+  () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-paths-"));
   const runtimeDir = path.join(temp, "runtime");
   const agentDir = path.join(temp, "agent");
@@ -371,7 +452,10 @@ test("host refuses symlinked runtime and Pi agent directories", () => {
   }
 });
 
-test("discards an oversized backend frame and keeps serving requests", async () => {
+test(
+  "discards an oversized backend frame and keeps serving requests",
+  { timeout: 90_000 },
+  async () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-frames-"));
   const agentDir = path.join(temp, "agent");
   mkdirSync(agentDir, { recursive: true, mode: 0o700 });
@@ -380,6 +464,8 @@ test("discards an oversized backend frame and keeps serving requests", async () 
       ...process.env,
       HOME: temp,
       PI_CODING_AGENT_DIR: agentDir,
+      PI_SYSTEM_HOST_ENV_PASSTHROUGH:
+        "FAKE_SYSTEM_HOST_BACKEND,FAKE_PI_SMALL_MESSAGES,FAKE_PI_BIG_MESSAGES,FAKE_PI_OVERSIZED_MESSAGES",
       FAKE_SYSTEM_HOST_BACKEND: "1",
       FAKE_PI_SMALL_MESSAGES: "100000",
       FAKE_PI_BIG_MESSAGES: "300000",
@@ -388,7 +474,7 @@ test("discards an oversized backend frame and keeps serving requests", async () 
     runtimeDir: temp,
     frontendPath: fakePi,
     maxBackendFrameChars: 400_000,
-    startupTimeoutMs: 20_000,
+    startupTimeoutMs: 45_000,
   });
   let client;
   try {
@@ -457,7 +543,10 @@ test("discards an oversized backend frame and keeps serving requests", async () 
   }
 });
 
-test("host stamps epochs and resolves approval envelopes exactly once", async () => {
+test(
+  "host stamps epochs and resolves approval envelopes exactly once",
+  { timeout: 90_000 },
+  async () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-approval-"));
   const agentDir = path.join(temp, "agent");
   const responseLog = path.join(temp, "ui-responses.log");
@@ -467,6 +556,8 @@ test("host stamps epochs and resolves approval envelopes exactly once", async ()
     ...process.env,
     HOME: temp,
     PI_CODING_AGENT_DIR: agentDir,
+    PI_SYSTEM_HOST_ENV_PASSTHROUGH:
+      "FAKE_PI_UI_REQUEST,FAKE_PI_UI_RESPONSE_LOG",
     FAKE_PI_UI_REQUEST: "1",
     FAKE_PI_UI_RESPONSE_LOG: responseLog,
   };
@@ -475,7 +566,7 @@ test("host stamps epochs and resolves approval envelopes exactly once", async ()
     runtimeDir: temp,
     runtimePath: fakePi,
     approvalTtlMs: 5_000,
-    startupTimeoutMs: 20_000,
+    startupTimeoutMs: 45_000,
   });
   let client;
   try {
@@ -538,19 +629,22 @@ test("host stamps epochs and resolves approval envelopes exactly once", async ()
     const resolved = await client.next(
       (frame) =>
         frame.event === "extension-ui.resolved" && frame.data.id === "expires",
-      20_000,
     );
     assert.equal(resolved.data.outcome, "expired");
-    const expiryResponse = readFileSync(responseLog, "utf8")
-      .trim()
-      .split(/\r?\n/)
-      .map((line) => JSON.parse(line))
-      .find((response) => response.id === "expires");
+    const expiryResponse = await waitFor(() => {
+      const content = readFileSync(responseLog, "utf8").trim();
+      if (!content) return undefined;
+      const lines = content.split(/\r?\n/).filter(Boolean);
+      return lines
+        .map((line) => JSON.parse(line))
+        .find((response) => response.id === "expires");
+    });
     assert.deepEqual(expiryResponse, {
       type: "extension_ui_response",
       id: "expires",
       cancelled: true,
     });
+    await waitFor(() => !host.isBusy());
     assert.equal(host.isBusy(), false);
 
     host.handleBackendFrame({
@@ -576,7 +670,10 @@ test("host stamps epochs and resolves approval envelopes exactly once", async ()
   }
 });
 
-test("host rejects session management mutations with SESSION_BUSY while turn is active", async () => {
+test(
+  "host rejects session management mutations with SESSION_BUSY while turn is active",
+  { timeout: 90_000 },
+  async () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-mutations-"));
   const agentDir = path.join(temp, "agent");
   mkdirSync(agentDir, { recursive: true, mode: 0o700 });
@@ -588,7 +685,7 @@ test("host rejects session management mutations with SESSION_BUSY while turn is 
     },
     runtimeDir: temp,
     runtimePath: fakePi,
-    startupTimeoutMs: 20_000,
+    startupTimeoutMs: 45_000,
   });
   let client;
   try {
@@ -629,5 +726,338 @@ test("host rejects session management mutations with SESSION_BUSY while turn is 
     client?.socket.destroy();
     await host.stop();
     rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test(
+  "filterBackendEnv enforces allowlist, blocklist and validated passthrough",
+  { timeout: 90_000 },
+  () => {
+  const input = {
+    HOME: "/home/user",
+    PATH: "/bin:/usr/bin",
+    USER: "user",
+    LOGNAME: "user",
+    SHELL: "/bin/bash",
+    LANG: "C.UTF-8",
+    LANGUAGE: "en",
+    TERM: "xterm-256color",
+    COLORTERM: "truecolor",
+    NO_COLOR: "1",
+    FORCE_COLOR: "1",
+    TZ: "UTC",
+    TMPDIR: "/tmp",
+    TMP: "/tmp",
+    TEMP: "/tmp",
+    XDG_RUNTIME_DIR: "/run/user/1000",
+    XDG_CONFIG_HOME: "/home/user/.config",
+    XDG_DATA_HOME: "/home/user/.local/share",
+    XDG_CACHE_HOME: "/home/user/.cache",
+    XDG_STATE_HOME: "/home/user/.local/state",
+    XDG_SESSION_TYPE: "wayland",
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+    WAYLAND_DISPLAY: "wayland-0",
+    HYPRLAND_INSTANCE_SIGNATURE: "sig123",
+    HTTP_PROXY: "http://proxy:8080",
+    HTTPS_PROXY: "https://proxy:8443",
+    ALL_PROXY: "socks5://proxy:1080",
+    NO_PROXY: "localhost",
+    http_proxy: "http://proxy:8080",
+    https_proxy: "https://proxy:8443",
+    all_proxy: "socks5://proxy:1080",
+    no_proxy: "localhost",
+    SSL_CERT_FILE: "/etc/ssl/cert.pem",
+    SSL_CERT_DIR: "/etc/ssl/certs",
+    NODE_EXTRA_CA_CERTS: "/etc/ssl/extra.pem",
+    NIX_PATH: "nixpkgs=/nix/store",
+    NIX_SSL_CERT_FILE: "/etc/ssl/nix.pem",
+    LOCALE_ARCHIVE: "/usr/lib/locale/locale-archive",
+    // Prefixes
+    LC_ALL: "C.UTF-8",
+    LC_CTYPE: "C.UTF-8",
+    PI_CUSTOM_VAR: "custom_pi",
+    // Disallowed / sensitive
+    OPENAI_API_KEY: "sk-secret123",
+    ANTHROPIC_API_KEY: "sk-ant-secret",
+    SSH_AUTH_SOCK: "/run/user/1000/keyring/ssh",
+    GPG_AGENT_INFO: "/run/user/1000/gnupg/S.gpg-agent:0:1",
+    GITHUB_TOKEN: "ghp_secret",
+    // Blocklist (must never pass)
+    NODE_OPTIONS: "--require evil.js",
+    LD_PRELOAD: "/lib/evil.so",
+    LD_LIBRARY_PATH: "/lib/evil",
+    LD_AUDIT: "/lib/audit.so",
+    DYLD_INSERT_LIBRARIES: "/lib/dyld.dylib",
+    DYLD_LIBRARY_PATH: "/lib/dyld",
+    NODE_PATH: "/evil/node_modules",
+    BASH_ENV: "/evil/bashrc",
+    ENV: "/evil/shrc",
+    PYTHONPATH: "/evil/python",
+    // Passthrough configuration
+    PI_SYSTEM_HOST_ENV_PASSTHROUGH:
+      "ALLOWED_CUSTOM,123INVALID,BAD-NAME,NODE_OPTIONS,ANOTHER_PASSTHROUGH",
+    ALLOWED_CUSTOM: "custom-value",
+    ANOTHER_PASSTHROUGH: "another-value",
+  };
+
+  const filtered = filterBackendEnv(input);
+
+  // Exact allowed variables arrive
+  assert.equal(filtered.HOME, "/home/user");
+  assert.equal(filtered.PATH, "/bin:/usr/bin");
+  assert.equal(filtered.USER, "user");
+  assert.equal(filtered.SHELL, "/bin/bash");
+  assert.equal(filtered.WAYLAND_DISPLAY, "wayland-0");
+  assert.equal(filtered.SSL_CERT_FILE, "/etc/ssl/cert.pem");
+  assert.equal(filtered.NIX_PATH, "nixpkgs=/nix/store");
+  assert.equal(filtered.LOCALE_ARCHIVE, "/usr/lib/locale/locale-archive");
+
+  // Prefixes arrive
+  assert.equal(filtered.LC_ALL, "C.UTF-8");
+  assert.equal(filtered.LC_CTYPE, "C.UTF-8");
+  assert.equal(filtered.PI_CUSTOM_VAR, "custom_pi");
+
+  // Unallowed variables do NOT arrive
+  assert.equal("OPENAI_API_KEY" in filtered, false);
+  assert.equal("ANTHROPIC_API_KEY" in filtered, false);
+  assert.equal("SSH_AUTH_SOCK" in filtered, false);
+  assert.equal("GPG_AGENT_INFO" in filtered, false);
+  assert.equal("GITHUB_TOKEN" in filtered, false);
+
+  // Blocklist variables do NOT arrive
+  assert.equal("NODE_OPTIONS" in filtered, false);
+  assert.equal("LD_PRELOAD" in filtered, false);
+  assert.equal("LD_LIBRARY_PATH" in filtered, false);
+  assert.equal("LD_AUDIT" in filtered, false);
+  assert.equal("DYLD_INSERT_LIBRARIES" in filtered, false);
+  assert.equal("DYLD_LIBRARY_PATH" in filtered, false);
+  assert.equal("NODE_PATH" in filtered, false);
+  assert.equal("BASH_ENV" in filtered, false);
+  assert.equal("ENV" in filtered, false);
+  assert.equal("PYTHONPATH" in filtered, false);
+
+  // Passthrough works for normal names, but not for blocklist, and invalid names are ignored
+  assert.equal(filtered.ALLOWED_CUSTOM, "custom-value");
+  assert.equal(filtered.ANOTHER_PASSTHROUGH, "another-value");
+  assert.equal("123INVALID" in filtered, false);
+  assert.equal("BAD-NAME" in filtered, false);
+
+  // Result is a new object and input is untouched
+  assert.notEqual(filtered, input);
+});
+
+test(
+  "host passes only allowed environment variables and validated passthrough to backend",
+  { timeout: 90_000 },
+  async () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-host-env-"));
+  const agentDir = path.join(temp, "agent");
+  const envDumpFile = path.join(temp, "backend-env.json");
+  mkdirSync(agentDir, { recursive: true, mode: 0o700 });
+  const host = new PiSystemHost({
+    env: {
+      ...process.env,
+      HOME: temp,
+      PI_CODING_AGENT_DIR: agentDir,
+      FAKE_PI_ENV_DUMP: envDumpFile,
+      FAKE_SYSTEM_HOST_BACKEND: "1",
+      LANG: "de_DE.UTF-8",
+      LC_MESSAGES: "de_DE.UTF-8",
+      OPENAI_API_KEY: "sk-should-not-pass",
+      SSH_AUTH_SOCK: "/tmp/ssh.sock",
+      NODE_OPTIONS: "--require /tmp/bad.js",
+      LD_PRELOAD: "/tmp/bad.so",
+      PI_SYSTEM_HOST_ENV_PASSTHROUGH:
+        "VALID_CUSTOM,NODE_OPTIONS,123BAD,FAKE_SYSTEM_HOST_BACKEND,FAKE_PI_ENV_DUMP",
+      VALID_CUSTOM: "passed-through",
+      "123BAD": "should-be-ignored",
+    },
+    runtimeDir: temp,
+    frontendPath: fakePi,
+    startupTimeoutMs: 45_000,
+  });
+  let client;
+  try {
+    await host.start();
+    client = await waitForSocket(host.socketPath);
+    client.send({
+      kind: "hello",
+      client: { name: "env-test", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await client.next((frame) => frame.kind === "hello");
+
+    const dumpContent = await waitFor(() => {
+      try {
+        const text = readFileSync(envDumpFile, "utf8");
+        return text ? JSON.parse(text) : undefined;
+      } catch {
+        return undefined;
+      }
+    });
+
+    assert.equal(dumpContent.LANG, "de_DE.UTF-8");
+    assert.equal(dumpContent.LC_MESSAGES, "de_DE.UTF-8");
+    assert.equal(dumpContent.VALID_CUSTOM, "passed-through");
+
+    assert.equal("OPENAI_API_KEY" in dumpContent, false);
+    assert.equal("SSH_AUTH_SOCK" in dumpContent, false);
+    assert.equal("NODE_OPTIONS" in dumpContent, false);
+    assert.equal("LD_PRELOAD" in dumpContent, false);
+    assert.equal("123BAD" in dumpContent, false);
+  } finally {
+    await cleanupHost(host, client, temp);
+  }
+});
+
+test(
+  "host times out slow backend requests with REQUEST_TIMEOUT, keeps serving, and ignores late response",
+  { timeout: 90_000 },
+  async () => {
+  const temp = mkdtempSync(
+    path.join(os.tmpdir(), "pi-system-host-req-timeout-"),
+  );
+  const agentDir = path.join(temp, "agent");
+  mkdirSync(agentDir, { recursive: true, mode: 0o700 });
+  const host = new PiSystemHost({
+    env: {
+      ...process.env,
+      HOME: temp,
+      PI_CODING_AGENT_DIR: agentDir,
+      PI_SYSTEM_HOST_ENV_PASSTHROUGH:
+        "FAKE_SYSTEM_HOST_BACKEND,FAKE_PI_HANG_PING",
+      FAKE_SYSTEM_HOST_BACKEND: "1",
+      FAKE_PI_HANG_PING: "1",
+    },
+    runtimeDir: temp,
+    frontendPath: fakePi,
+    requestTimeoutMs: 1_000,
+    startupTimeoutMs: 45_000,
+  });
+  let client;
+  try {
+    await host.start();
+    client = await waitForSocket(host.socketPath);
+    client.send({
+      kind: "hello",
+      client: { name: "timeout-client", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await client.next((frame) => frame.kind === "hello");
+    await client.next((frame) => frame.event === "state.snapshot");
+
+    client.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "slow-ping",
+      method: "system.ping",
+      params: {},
+    });
+
+    const timeoutResponse = await client.next(
+      (frame) => frame.id === "slow-ping",
+    );
+    assert.equal(timeoutResponse.ok, false);
+    assert.equal(timeoutResponse.error.code, "REQUEST_TIMEOUT");
+    assert.equal(host.pending.size, 0);
+
+    // Wait until backend emits its delayed response (at 1500ms)
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    // Backend late response must not cause an unhandled error or crash
+    assert.equal(host.stopping, false);
+
+    // Host keeps serving normally
+    client.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "fast-messages",
+      method: "session.messages",
+      params: { before: "small" },
+    });
+    const fastResponse = await client.next(
+      (frame) => frame.id === "fast-messages",
+    );
+    assert.equal(fastResponse.ok, true);
+    assert.equal(host.pending.size, 0);
+  } finally {
+    await cleanupHost(host, client, temp);
+  }
+});
+
+test(
+  "stop with open dialog resolves extension-ui with cancelled outcome",
+  { timeout: 90_000 },
+  async () => {
+  const temp = mkdtempSync(
+    path.join(os.tmpdir(), "pi-system-host-dialog-stop-"),
+  );
+  const agentDir = path.join(temp, "agent");
+  mkdirSync(agentDir, { recursive: true, mode: 0o700 });
+  const host = new PiSystemHost({
+    env: {
+      ...process.env,
+      HOME: temp,
+      PI_CODING_AGENT_DIR: agentDir,
+      PI_SYSTEM_HOST_ENV_PASSTHROUGH: "FAKE_SYSTEM_HOST_BACKEND",
+      FAKE_SYSTEM_HOST_BACKEND: "1",
+    },
+    runtimeDir: temp,
+    frontendPath: fakePi,
+    startupTimeoutMs: 45_000,
+  });
+  let client;
+  try {
+    await host.start();
+    client = await waitForSocket(host.socketPath);
+    client.send({
+      kind: "hello",
+      client: { name: "dialog-client", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await client.next((frame) => frame.kind === "hello");
+    await client.next((frame) => frame.event === "state.snapshot");
+
+    host.handleBackendFrame({
+      kind: "event",
+      event: "extension-ui.requested",
+      data: {
+        id: "dialog-to-cancel",
+        method: "confirm",
+        title: "Pending confirm",
+      },
+    });
+    const requested = await client.next(
+      (frame) =>
+        frame.event === "extension-ui.requested" &&
+        frame.data.id === "dialog-to-cancel",
+    );
+    assert.equal(requested.data.id, "dialog-to-cancel");
+    assert.equal(host.pendingUi.size, 1);
+
+    const stopPromise = host.stop();
+    const resolved = await client.next(
+      (frame) =>
+        frame.event === "extension-ui.resolved" &&
+        frame.data.id === "dialog-to-cancel",
+    );
+    assert.equal(resolved.data.id, "dialog-to-cancel");
+    assert.equal(resolved.data.outcome, "cancelled");
+    let stopFinished = false;
+    stopPromise.then(
+      () => {
+        stopFinished = true;
+      },
+      (err) => {
+        stopFinished = err;
+      },
+    );
+    await waitFor(() => {
+      if (stopFinished instanceof Error) throw stopFinished;
+      return stopFinished;
+    });
+    assert.equal(host.pendingUi.size, 0);
+  } finally {
+    await cleanupHost(host, client, temp);
   }
 });

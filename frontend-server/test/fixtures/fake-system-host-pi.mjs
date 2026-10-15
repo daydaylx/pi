@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import readline from "node:readline";
+
+if (process.env.FAKE_PI_ENV_DUMP) {
+  writeFileSync(process.env.FAKE_PI_ENV_DUMP, JSON.stringify(process.env));
+}
 
 if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
   const input = readline.createInterface({ input: process.stdin });
@@ -11,11 +15,37 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
         kind: "hello",
         accepted: true,
         protocolVersion: 1,
-        serverVersion: "1.2.0",
+        serverVersion: "1.3.0",
         piVersion: "1.0.4",
         capabilities: [],
       });
-      send({ kind: "event", event: "state.snapshot", data: {} });
+      send({
+        kind: "event",
+        event: "state.snapshot",
+        data: {
+          session: {
+            id: "fake-session",
+            name: "Fake Session",
+            cwd: "/tmp",
+            connected: true,
+          },
+          workflow: { mode: "work", label: "Work", available: ["work"] },
+          task: { title: "Fake", phaseLabel: "Ready", status: "active" },
+          activity: { kind: "idle" },
+          permissions: {
+            current: "confirm-all",
+            label: "Confirm All",
+            options: ["confirm-all"],
+          },
+          lsp: { state: "idle", detail: "" },
+          model: { current: "fake-model", available: ["fake-model"] },
+          thinking: { current: "off", available: ["off"] },
+          changes: null,
+          verification: null,
+          subagents: [],
+          configuration: {},
+        },
+      });
       return;
     }
     const size =
@@ -64,6 +94,11 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
           data: { id: "after-oversized" },
         })}\n`,
       );
+    } else if (
+      request.method === "system.ping" &&
+      process.env.FAKE_PI_HANG_PING === "1"
+    ) {
+      setTimeout(() => send(response), 1_500);
     } else send(response);
   });
 
