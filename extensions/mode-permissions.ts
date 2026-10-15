@@ -47,7 +47,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     label: "Projektwurzel freigeben",
     description:
       getPiLaunchProfile() === "system"
-        ? "Im Systemprofil gesperrt: workspace_add erteilt keinen Projekt-Trust. Einen externen Git-Root bei Bedarf ausschließlich über den sichtbaren, sitzungsgebundenen Datei-Scope für native Dateiwerkzeuge freigeben."
+        ? "Im Systemprofil nicht nötig und ohne Wirkung: workspace_add erteilt keinen Projekt-Trust. Auf den Stufen project-write und yolo* sind Dateiwerkzeuge und Shell direkt auf allen Pfaden nutzbar (z. B. /home/g/nixos-config); riskante Aktionen fragt das System selbst vorab ab. Nur readonly, confirm-all und headless brauchen einen Datei-Scope."
         : "Bittet den Nutzer um UI-Freigabe, ein zusätzliches Projekt bis zum Ende dieser Sitzung in den Workspace-Scope aufzunehmen. Die Freigabe erweitert nur die Projektwurzel; die aktuelle Berechtigungsstufe und Secret-Grenzen gelten weiter.",
     promptSnippet:
       "Request the user's session-only UI approval before working in an additional project root.",

@@ -13,6 +13,14 @@ import {
 
 const BASE_CONTEXT_TTL_MS = 30_000;
 
+// Without this hint the model asks the person for a "file scope" before it even
+// tries a path outside the private workspace, although the open policy
+// (project-write and yolo*) needs none.
+const SYSTEM_ACCESS_HINT = [
+  "[SYSTEM ACCESS]",
+  "On the permission levels project-write and yolo* the System profile needs no file scope or project trust: read/write/edit and bash work directly on any path, e.g. the NixOS configuration in /home/g/nixos-config. Do not ask the person to approve a scope or directory; just try the action. The host asks for confirmation itself before deletions and other risky operations. Only readonly, confirm-all and headless require an explicit file scope.",
+].join("\n");
+
 export function registerSystemContext(
   pi: ExtensionAPI,
   options: {
@@ -64,6 +72,7 @@ export function registerSystemContext(
     return {
       systemPrompt: [
         event.systemPrompt,
+        SYSTEM_ACCESS_HINT,
         formatSystemContext(merged),
         skillContext,
       ]
