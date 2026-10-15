@@ -89,8 +89,12 @@ Recovery-Gates und Prüfstände sind pro freigegebener Wurzel getrennt.
 
 ## Git-Veröffentlichung
 
-Commit, Push, Merge, Branch-Veröffentlichung und Deployment nur ausführen, wenn
-die Nutzerin oder der Nutzer es ausdrücklich beauftragt hat. Commit und Push
+Commits und Pushes brauchen keine Einzelfreigabe: nach jedem abgeschlossenen
+Teilschritt sofort in kleinen, thematisch getrennten Commits festhalten und
+direkt pushen. Nur eigene Dateien gezielt stagen (nie `git add -A`), Änderungen
+anderer Sitzungen nicht mitcommitten. Force-Push und das Umschreiben gepushter
+Commits sind ausgeschlossen; Merge, Branch-Veröffentlichung und Deployment nur
+auf ausdrücklichen Auftrag. Commit und Push
 sind getrennte Schritte. Vor einem Commit mit verifier-pflichtigem Diff muss
 der erforderliche Verifier-Nachweis für denselben Workspace-Fingerprint
 vorliegen. Nach einem Push-Fehler lokalen Commit- und Upstream-Status prüfen;
@@ -123,7 +127,7 @@ nicht einen automatisierten Modell-Eval.
 | Permission- oder Recovery-Änderung                 | Hard-Pfade und Verifier-Gate ausführlich global                     | globale Schutzregel plus `docs/subagents.md` und technische Policy    | kein Risiko durch Dokumentenverschiebung freigegeben  |
 | Öffentliche API-/IPC-Änderung                      | Need-Gate/Verifier-Trigger global erklärt                           | globaler Boundary-Hinweis plus `docs/subagents.md`                    | Hard-Pfad und Need-Gate bleiben maßgeblich            |
 | Plan während Planmodus umsetzen                    | UI-Wechsel und Planfreigabe ausführlich global                      | kurzer globaler Modusschutz, Detail in Workflow-Referenz und ADR 020  | keine Umgehung der Modussperre                        |
-| Commit und Push                                    | expliziter Auftrag und Verifier-Regeln global                       | expliziter Auftrag global, Ablauf in Workflow-Referenz                | kein Commit ohne Auftrag; Schritte getrennt           |
+| Commit und Push                                    | expliziter Auftrag und Verifier-Regeln global                       | Commit-/Push-Regel global, Ablauf in Workflow-Referenz                | kleine Commits, direkt gepusht; Schritte getrennt     |
 | Aktuelle externe Provider- oder API-Frage          | Bedingung, Such-/Fetch-Reihenfolge global                           | kurze globale Bedingung, Ablauf in Workflow-Referenz                  | lokale Fragen bleiben lokal; externe Quellen gezielt  |
 | Lange Sitzung oder Compaction                      | Checkpoint-Regel global, Skillbeschreibung nannte auch jede Analyse | seltene Auslöser im Skill; globaler Verweis                           | kein Routine-Checkpoint und kein automatisches Ledger |
 | Unbekannter Bug mit möglicher unabhängiger Analyse | Delegationskriterien und Limits global                              | globaler Nicht-Rollen-Hinweis plus `docs/subagents.md`                | temporäre Delegation nach Nutzen und Grenzen          |

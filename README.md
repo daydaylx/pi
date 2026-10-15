@@ -181,8 +181,9 @@ Arbeitsbaum, nicht über eine bestandene Prüfung — vorher hieß dieser Zustan
 Teil von `verify`/CI: es prüft die explizit gewählte oder lokal erkannte
 Pi-Runtime.
 
-Abhängigkeiten werden nicht automatisch installiert. Commits, Pushes und
-Veröffentlichungen erfolgen nur auf ausdrücklichen Auftrag.
+Abhängigkeiten werden nicht automatisch installiert. Commits und Pushes
+erfolgen in kleinen Schritten ohne Einzelfreigabe, Veröffentlichungen nur auf
+ausdrücklichen Auftrag.
 
 ## Lokale Laufzeitdaten
 
