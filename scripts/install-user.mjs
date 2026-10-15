@@ -355,6 +355,7 @@ function runInstall(argv) {
       "profile-state/system/workspace",
       "profile-state/system/sessions",
       "profile-state/system/host-sessions",
+      "profile-state/system/tmp",
     ]) {
       const directory = path.join(target, relative);
       assertNoSymlinkComponents(directory);

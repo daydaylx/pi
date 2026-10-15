@@ -57,7 +57,9 @@ um.
 Die Unit begrenzt Schreibzugriff auf
 `~/.pi/agent/profile-state/system`, nutzt `NoNewPrivileges`, `ProtectSystem`
 und private temporäre Dateien und setzt Prozess-, CPU- und Speicherlimits. Die
-Modellverbindung benötigt ausgehenden Netzwerkzugriff. Pi-Core, Provider-Auth
+Modellverbindung benötigt ausgehenden Netzwerkzugriff. `TMPDIR` zeigt auf
+`profile-state/system/tmp`, damit der jiti-Cache einen Neustart übersteht; mit
+kaltem Cache überschreitet der Start das 10-s-Fenster des Hosts. Pi-Core, Provider-Auth
 und Extensions bleiben die vorhandene Installation.
 
 ## Grenzen des aktuellen Hosts

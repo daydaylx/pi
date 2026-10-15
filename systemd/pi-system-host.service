@@ -12,6 +12,7 @@ RuntimeDirectory=pi-system-host
 RuntimeDirectoryMode=0700
 Environment=PI_CODING_AGENT_DIR=%h/.pi/agent
 Environment=PI_SYSTEM_HOST_RUNTIME_DIR=%t
+Environment=TMPDIR=%h/.pi/agent/profile-state/system/tmp
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
