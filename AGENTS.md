@@ -11,7 +11,8 @@ Diese Regeln gelten für Pi-Sitzungen und werden von anderen Coding-Agenten sinn
 - Vor Shell-Aktionen Schreibziel, Variablenquotierung und Credential-Grenzen prüfen. Eine Schutzblockade nicht mit einer Variantenstrategie umgehen: Ursache bestimmen und zulässige lokale Alternative nutzen. Wiederholt sich dieselbe Blockade, nicht weiterprobieren; Pi nutzt `ask_user` für die konkrete Blockade.
 - Eine einzelne blockierte Datei oder Ressource beendet nicht die ganze Aufgabe. Ohne sie weiterarbeiten, sofern keine echte Sackgasse besteht.
 - Den aktiven Permission- und Workflow-Modus respektieren. Planfreigabe und Moduswechsel sind UI-Aktionen; eine Sperre nie über alternative Schreibwege umgehen.
-- Keine Commits, Pushes, Merges, Veröffentlichungen oder Deployments ohne ausdrücklichen Auftrag.
+- Commits und Pushes brauchen keine Einzelfreigabe: nach jedem abgeschlossenen Teilschritt sofort in kleinen, thematisch getrennten Commits festhalten und direkt pushen. Nur eigene Dateien gezielt stagen (nie `git add -A`), fremde Änderungen nicht mitcommitten, Fehlschlagendes nicht committen. Kein Force-Push und kein Umschreiben gepushter Commits. Technische Gates (Verifier-Gate vor Commit) bleiben unberührt.
+- Merges, Veröffentlichungen und Deployments nur mit ausdrücklichem Auftrag.
 
 ## Arbeitsweise und Qualität
 
