@@ -13,7 +13,7 @@ ist selbst keine Berechtigung.
 | Installierter Launcher | `~/.local/bin/pi` → `~/.pi/agent/bin/pi`, Pi `1.2.0`                                                                            |
 | Terminal-Auflösung     | `pi system --help` aus `/tmp` und `~/nixos-config` erfolgreich; normale `pi --version` bleibt `1.2.0`                           |
 | Live-Dienste           | `pi-system-host`, `quickshell-quickpanel` und `agent-control` aktiv                                                             |
-| Systemd-Grenze         | Host-Unit setzt `ProtectSystem=strict`; `ReadWritePaths` enthält nur `~/.pi/agent/profile-state/system`, nicht `~/nixos-config` |
+| Systemd-Grenze         | Historische Baseline: `ProtectSystem=strict`; nur `~/.pi/agent/profile-state/system` schreibbar, `~/nixos-config` nicht        |
 | NixOS                  | Generation 61; letzter Build erfolgreich. Es wurde in dieser Arbeit keine Generation aktiviert.                                 |
 | Sessions               | TUI schreibt nach `profile-state/system/sessions`, Host nach `profile-state/system/host-sessions`; Attach/Handoff fehlt.        |
 
@@ -21,6 +21,19 @@ Der Launcher-/Help-Test belegt Profilauflösung, nicht den vollständigen Start
 einer interaktiven Sitzung. Der Host läuft tatsächlich, aber eine echte
 Freigabe und ein Schreibversuch über QuickPanel wurden noch nicht live
 abgenommen.
+
+## Live-Status nach P0-Bereitstellung
+
+- Die aktive Host-Unit setzt `ProtectHome=read-only` und `ProtectSystem=strict`.
+  Schreibbar sind `~/.pi/agent` (Pi-Konfiguration und Profilzustand) sowie
+  `~/nixos-config`; ein Live-Sandbox-Test ließ Schreibzugriffe auf `Downloads`
+  scheitern.
+- Der Host ist mit Pi `1.2.0` aktiv; `system.ping` lieferte `pong`. QuickPanel
+  hat eine bestehende Unix-Socket-Verbindung zum Host.
+- Eine sichtbare Freigabe eines externen Datei-Scopes und eine anschließende
+  Mutation über QuickPanel sind noch nicht live abgenommen.
+- NixOS Generation 61 blieb aktiv; ein NixOS-Build oder -Wechsel wurde nicht
+  ausgeführt.
 
 ## Zielvertrag: Scope und Grundregeln
 

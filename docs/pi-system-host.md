@@ -102,13 +102,15 @@ freigegeben wird, kann die Unit in den User-Unit-Pfad kopiert, mit
 Quellcode-Installer-Aufruf schaltet Hermes oder eine aktive Oberfläche nicht
 um.
 
-Die Unit begrenzt Schreibzugriff auf
-`~/.pi/agent/profile-state/system`, nutzt `NoNewPrivileges`, `ProtectSystem`
-und private temporäre Dateien und setzt Prozess-, CPU- und Speicherlimits. Die
-Modellverbindung benötigt ausgehenden Netzwerkzugriff. `TMPDIR` zeigt auf
-`profile-state/system/tmp`, damit der jiti-Cache einen Neustart übersteht; mit
-kaltem Cache überschreitet der Start das 10-s-Fenster des Hosts. Pi-Core, Provider-Auth
-und Extensions bleiben die vorhandene Installation.
+Die User-Unit setzt `ProtectHome=read-only` und `ProtectSystem=strict`. Schreibbar
+sind `~/.pi/agent` für Pi-Einstellungen und Profilzustand sowie das explizite
+Arbeits-Repository `~/nixos-config`; andere Home-Pfade bleiben read-only.
+`NoNewPrivileges`, private temporäre Dateien sowie Prozess-, CPU- und
+Speicherlimits bleiben aktiv. Die Modellverbindung benötigt ausgehenden
+Netzwerkzugriff. `TMPDIR` zeigt auf `profile-state/system/tmp`, damit der
+jiti-Cache einen Neustart übersteht; mit kaltem Cache überschreitet der Start
+das 10-s-Fenster des Hosts. Pi-Core, Provider-Auth und Extensions bleiben die
+vorhandene Installation.
 
 ## Grenzen des aktuellen Hosts
 
