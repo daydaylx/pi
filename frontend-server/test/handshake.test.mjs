@@ -81,7 +81,7 @@ test("rejects an incompatible installed Pi version", async () => {
   assert.equal(hello.error.code, "PI_START_FAILED");
   assert.equal(
     hello.error.message,
-    "Installed Pi 0.85.0 is not supported by frontend protocol v1 (supported: 0.84.x, 1.0.x)",
+    "Installed Pi 0.85.0 is not supported by frontend protocol v1 (supported: 0.84.x, 1.0.x, 1.2.x)",
   );
   assert.equal(hello.error.retryable, false);
   server.child.kill("SIGTERM");
@@ -98,6 +98,20 @@ test("accepts the verified Pi 1.0 runtime line", async () => {
   const hello = await server.next();
   assert.equal(hello.accepted, true);
   assert.equal(hello.piVersion, "1.0.4");
+  server.child.kill("SIGTERM");
+  await once(server.child, "exit");
+});
+
+test("accepts the verified Pi 1.2 runtime line", async () => {
+  const server = startServer({ FAKE_PI_VERSION: "1.2.0" });
+  server.send({
+    kind: "hello",
+    client: { name: "test", version: "1" },
+    supportedProtocolVersions: [1],
+  });
+  const hello = await server.next();
+  assert.equal(hello.accepted, true);
+  assert.equal(hello.piVersion, "1.2.0");
   server.child.kill("SIGTERM");
   await once(server.child, "exit");
 });

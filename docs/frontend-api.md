@@ -107,8 +107,8 @@ payloads.
 ## Compatibility
 
 - Wire major 1 is required for this contract generation.
-- The bundled server accepts an explicit allowlist of Pi runtime lines: 0.84.x
-  and 1.0.x. Another runtime is rejected during the handshake with
+- The bundled server accepts an explicit allowlist of Pi runtime lines: 0.84.x,
+  1.0.x and 1.2.x. Another runtime is rejected during the handshake with
   `PI_START_FAILED`, a message naming the detected version and the supported
   lines, and `retryable: false`, instead of being reported under a supported
   version. Adding a line requires a verified RPC contract and tests.
