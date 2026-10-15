@@ -129,3 +129,69 @@ test("session ids can be made opaque and stable", () => {
     stableSessionId("/tmp/b.jsonl"),
   );
 });
+
+test("derives streaming deltas from the 1.x assistantMessageEvent wire form", () => {
+  const wire = (assistantMessageEvent) => ({
+    type: "message_update",
+    usage: { input: 1, output: 1 },
+    assistantMessageEvent,
+  });
+  const text = mapRuntimeEvent(
+    wire({ type: "text_delta", contentIndex: 0, delta: "Hallo" }),
+    1,
+  );
+  assert.equal(text.event, "message.delta");
+  assert.deepEqual(text.data, { delta: "Hallo" });
+  assert.deepEqual(
+    mapRuntimeEvent(wire({ type: "text_delta", contentIndex: 0, delta: "" }), 2)
+      .data,
+    { delta: "" },
+  );
+  assert.equal(
+    mapRuntimeEvent(wire({ type: "thinking_start", contentIndex: 0 }), 3).event,
+    "thinking.started",
+  );
+  const thinking = mapRuntimeEvent(
+    wire({ type: "thinking_delta", contentIndex: 0, delta: "x" }),
+    4,
+  );
+  assert.equal(thinking.event, "thinking.delta");
+  assert.deepEqual(thinking.data, { delta: "x" });
+  assert.equal(
+    mapRuntimeEvent(
+      wire({ type: "thinking_end", contentIndex: 0, content: "x" }),
+      5,
+    ).event,
+    "thinking.completed",
+  );
+});
+
+test("drops update shapes without a public event instead of reinterpreting them", () => {
+  const wire = (assistantMessageEvent) => ({
+    type: "message_update",
+    assistantMessageEvent,
+  });
+  for (const update of [
+    { type: "text_start", contentIndex: 0 },
+    { type: "text_end", contentIndex: 0, content: "x" },
+    { type: "toolcall_start", contentIndex: 1, id: "t1", toolName: "read" },
+    { type: "toolcall_delta", contentIndex: 1, delta: "{" },
+    { type: "toolcall_end", contentIndex: 1, toolCall: {} },
+    { type: "text_delta", contentIndex: 0, delta: null },
+    { type: "something_new" },
+    undefined,
+  ]) {
+    assert.equal(mapRuntimeEvent(wire(update), 1), undefined);
+  }
+  assert.equal(mapRuntimeEvent({ type: "message_update" }, 2), undefined);
+});
+
+test("does not forward fire-and-forget extension UI methods as dialogs", () => {
+  for (const method of ["setStatus", "setWidget", "setTitle", "set_editor_text"]) {
+    assert.equal(
+      mapRuntimeEvent({ type: "extension_ui_request", id: "1", method }, 1),
+      undefined,
+      method,
+    );
+  }
+});

@@ -532,6 +532,8 @@ export function normalizeBridgeState(internal, current) {
   return patch;
 }
 
+const UI_DIALOG_METHODS = new Set(["confirm", "select", "input", "editor"]);
+
 function publicRuntimeEvent(message) {
   if (message?.type === "message_start") {
     return {
@@ -540,15 +542,38 @@ function publicRuntimeEvent(message) {
     };
   }
   if (message?.type === "message_update") {
-    return {
-      event: "message.delta",
-      data: {
-        ...(typeof message.delta === "string" ? { delta: message.delta } : {}),
-        ...(message.message
-          ? { message: normalizeMessage(message.message) }
-          : {}),
-      },
-    };
+    // Runtime >= 1.0 sends delta-only wire records: the text share lives in
+    // `assistantMessageEvent`; `delta`/`message` remain for older runtimes.
+    const update = message.assistantMessageEvent;
+    const textDelta =
+      update?.type === "text_delta" && typeof update.delta === "string"
+        ? update.delta
+        : undefined;
+    const delta = typeof message.delta === "string" ? message.delta : textDelta;
+    if (delta !== undefined || message.message) {
+      return {
+        event: "message.delta",
+        data: {
+          ...(delta !== undefined ? { delta } : {}),
+          ...(message.message
+            ? { message: normalizeMessage(message.message) }
+            : {}),
+        },
+      };
+    }
+    if (update?.type === "thinking_start") {
+      return { event: "thinking.started", data: {} };
+    }
+    if (update?.type === "thinking_delta" && typeof update.delta === "string") {
+      return { event: "thinking.delta", data: { delta: update.delta } };
+    }
+    if (update?.type === "thinking_end") {
+      return { event: "thinking.completed", data: {} };
+    }
+    // text_start/text_end, toolcall_*, start and unknown types have no public
+    // event: tool lifecycle comes from tool_execution_*, the final text from
+    // message_end. They are dropped, never reinterpreted.
+    return undefined;
   }
   if (message?.type === "message_end") {
     return {
@@ -594,6 +619,9 @@ function publicRuntimeEvent(message) {
         },
       };
     }
+    // Fire-and-forget UI methods (setStatus, setWidget, setTitle,
+    // set_editor_text) expect no response and are not part of the contract.
+    if (!UI_DIALOG_METHODS.has(message.method)) return undefined;
     const data = {
       id: String(message.id ?? ""),
       method: String(message.method ?? ""),

@@ -112,6 +112,13 @@ payloads.
   `PI_START_FAILED`, a message naming the detected version and the supported
   lines, and `retryable: false`, instead of being reported under a supported
   version. Adding a line requires a verified RPC contract and tests.
+- Streaming events are derived from the runtime's delta-only `message_update`
+  records (`assistantMessageEvent`): `text_delta` becomes `message.delta` with
+  `delta`; `thinking_start`/`thinking_delta`/`thinking_end` become
+  `thinking.started`/`thinking.delta`/`thinking.completed`. Tool lifecycle
+  comes from `tool_execution_*`, the authoritative text from `message.completed`.
+  Other update shapes produce no event. Fire-and-forget extension UI methods
+  (`setStatus`, `setWidget`, `setTitle`, `set_editor_text`) are not forwarded.
 - Protocol package version 1.2.0 adds optional capabilities, paged message
   parameters, approval metadata/events and `RESULT_TOO_LARGE`.
 - Minor package releases may add optional capabilities, methods or events.
