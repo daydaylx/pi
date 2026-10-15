@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isValidRequestResult } from "../../npm/packages/frontend-protocol/dist/index.js";
 import {
   assertCompatiblePiVersion,
   mapRuntimeEvent,
+  normalizeCurrentSession,
   normalizeBridgeState,
   stableSessionId,
 } from "../index.mjs";
@@ -194,4 +196,17 @@ test("does not forward fire-and-forget extension UI methods as dialogs", () => {
       method,
     );
   }
+});
+
+test("session.current liefert nur provider und id am Modell und erfüllt das Ergebnisschema", () => {
+  const result = normalizeCurrentSession({
+    sessionId: "s1",
+    model: { provider: "openai-codex", id: "gpt-6-luna", name: "GPT-6 Luna", contextWindow: 272000, reasoning: true },
+    thinkingLevel: "high",
+    isStreaming: false,
+    messageCount: 3,
+  });
+  assert.deepEqual(result.model, { provider: "openai-codex", id: "gpt-6-luna" });
+  assert.equal(isValidRequestResult("session.current", result), true);
+  assert.equal(isValidRequestResult("session.current", normalizeCurrentSession({ sessionId: "s2" })), true);
 });

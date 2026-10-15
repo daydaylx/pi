@@ -186,7 +186,13 @@ function normalizeModel(raw) {
   };
 }
 
-function normalizeCurrentSession(state) {
+// session.current erlaubt am Modell nur provider und id (strenges Ergebnisschema); model.list behält die Zusatzfelder.
+function normalizeCurrentModel(raw) {
+  const model = normalizeModel(raw);
+  return model ? { provider: model.provider, id: model.id } : null;
+}
+
+export function normalizeCurrentSession(state) {
   return {
     ...(typeof state?.sessionId === "string" ? { id: state.sessionId } : {}),
     ...(typeof state?.sessionName === "string"
@@ -194,7 +200,7 @@ function normalizeCurrentSession(state) {
       : {}),
     connected: true,
     ...(state?.model !== undefined
-      ? { model: normalizeModel(state.model) }
+      ? { model: normalizeCurrentModel(state.model) }
       : {}),
     ...(typeof state?.thinkingLevel === "string"
       ? { thinkingLevel: state.thinkingLevel }
