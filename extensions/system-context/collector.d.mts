@@ -29,6 +29,9 @@ export interface SystemContextOptions {
   [key: string]: unknown;
 }
 
+export function strictCategoriesForRequest(
+  request: string,
+): SystemContextCategory[];
 export function categoriesForRequest(request: string): SystemContextCategory[];
 export function commandEnvironment(
   overrides?: Record<string, string>,

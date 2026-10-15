@@ -13,6 +13,7 @@ import { importModule } from "./shared/jiti-loader.mjs";
 
 const collector = await importModule("extensions/system-context/collector.mjs");
 const extension = await importModule("extensions/system-context/index.ts");
+const repos = await importModule("extensions/system-context/repos.mjs");
 const results = [];
 
 function test(name, fn) {
@@ -297,18 +298,115 @@ async function main() {
   } catch (error) {
     results.push(`system context cache: FAIL — ${error.message}`);
   }
-  test("project profile receives no system context hook", () => {
+  const runPrompt = (profile, prompt, extra = {}) => {
     const harness = createHarness();
-    let collected = false;
+    const collected = [];
     extension.registerSystemContext(harness.api, {
-      profile: () => "project",
-      collect() {
-        collected = true;
-        return {};
+      profile: () => profile,
+      collect(categories) {
+        collected.push(categories);
+        return { system: { configuration: { revision: "r" } } };
       },
+      discoverConfig: () => ({ revision: "r" }),
+      repoContext: () => extra.repos,
     });
-    assert.equal(collected, false);
-    assert.equal(harness.hooks.has("before_agent_start"), false);
+    const hook = harness.hooks.get("before_agent_start")?.[0];
+    assert.ok(hook, "before_agent_start registered");
+    const result = hook(
+      { prompt, systemPrompt: "BASE", messageType: "user" },
+      { cwd: "/tmp" },
+    );
+    return { result, collected };
+  };
+  test("project profile adds no system context to ordinary coding prompts", () => {
+    for (const prompt of [
+      "Untersuche mein Lager-Projekt auf Fehler",
+      "Refactor the log dialog and fix the last failing test",
+      "Prüfe die Integration zwischen Pi und QuickPanel",
+    ]) {
+      const { result, collected } = runPrompt("project", prompt);
+      assert.equal(result, undefined, prompt);
+      assert.deepEqual(collected, [], prompt);
+    }
+  });
+  test("project profile loads system context only for clear system requests", () => {
+    const { result, collected } = runPrompt(
+      "project",
+      "Zeige mir die aktuelle CPU- und RAM-Auslastung",
+    );
+    assert.ok(result.systemPrompt.startsWith("BASE"));
+    assert.ok(result.systemPrompt.includes("[SYSTEM CONTEXT"));
+    assert.ok(!result.systemPrompt.includes("[SYSTEM ACCESS]"));
+    assert.deepEqual(collected.flat().sort(), ["health", "system"]);
+  });
+  test("a repository named in the prompt is added without system context", () => {
+    const { result, collected } = runPrompt("project", "Prüfe das Lager", {
+      repos: "[KNOWN REPOSITORIES — OBSERVATIONAL DATA]\n- lager: /x/lager",
+    });
+    assert.ok(result.systemPrompt.includes("- lager: /x/lager"));
+    assert.ok(!result.systemPrompt.includes("[SYSTEM CONTEXT"));
+    assert.deepEqual(collected, []);
+  });
+  test("strict categories need whole system words", () => {
+    const strict = collector.strictCategoriesForRequest;
+    assert.deepEqual(strict("Fehler im Dialog, log last"), []);
+    assert.deepEqual(strict("RAM und CPU?").sort(), ["health"]);
+    assert.deepEqual(strict("Hyprland Fenster").sort(), ["desktop"]);
+    assert.deepEqual(strict("Meine NixOS-Konfiguration").sort(), [
+      "flake",
+      "project",
+    ]);
+    assert.deepEqual(strict("programm"), []);
+  });
+  test("repo discovery is bounded, cached, finds names and sub-directories", () => {
+    const temp = mkdtempSync(path.join(os.tmpdir(), "pi-repos-"));
+    try {
+      const home = path.join(temp, "home");
+      for (const repo of [
+        "Projekte/lager",
+        "Projekte/pi",
+        "nixos-config",
+        "Downloads/ignored",
+      ]) {
+        mkdirSync(path.join(home, repo, ".git"), { recursive: true });
+      }
+      mkdirSync(path.join(home, "nixos-config", "quickpanel"));
+      mkdirSync(
+        path.join(home, "Projekte", "plain", "deep", "deeper", "x", ".git"),
+        {
+          recursive: true,
+        },
+      );
+      repos.resetRepoCache();
+      const found = repos.discoverRepos({ home, env: {} });
+      assert.deepEqual(
+        found.map((repo) => repo.name),
+        ["nixos-config", "lager", "pi"],
+      );
+      const options = { home, env: {}, cwd: path.join(home, "Projekte", "pi") };
+      const lager = repos.repoContextForRequest(
+        "Untersuche mein Lager-Projekt auf Fehler",
+        options,
+      );
+      assert.ok(
+        lager.includes(`lager: ${path.join(home, "Projekte", "lager")}`),
+      );
+      assert.ok(!lager.includes("nixos-config"));
+      const panel = repos.repoContextForRequest("Prüfe QuickPanel", options);
+      assert.ok(panel.includes("nixos-config"), "matched via top-level dir");
+      // The current project is never repeated and unrelated prompts match nothing.
+      assert.equal(
+        repos.repoContextForRequest("Optimiere pi", options),
+        undefined,
+      );
+      assert.equal(
+        repos.repoContextForRequest("Was ist 2+2?", options),
+        undefined,
+      );
+    } finally {
+      repos.resetRepoCache();
+      rmSync(temp, { recursive: true, force: true });
+    }
   });
   const failed = results.filter((result) => result.includes("FAIL"));
   for (const result of results) console.log(result);

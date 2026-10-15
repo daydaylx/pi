@@ -395,6 +395,41 @@ function projectContext(options, config) {
   };
 }
 
+/**
+ * Strict request classification for the project profile (`pi`).
+ *
+ * `categoriesForRequest` is deliberately broad because the System profile
+ * always runs system tasks. In a coding session words like "Fehler", "log" or
+ * "last" are everyday vocabulary, so the project profile only reacts to
+ * unambiguous system vocabulary (whole words) and otherwise carries no system
+ * tools or system context at all.
+ */
+const STRICT_PATTERNS = [
+  [
+    "health",
+    /(?:^|[^\p{L}\p{N}])(?:cpu|ram|arbeitsspeicher|auslastung|systemlast|systemzustand|systemstatus|speicherplatz|festplatte|datenträger|temperatur|gpu|uptime|journalctl|journal|systemd|wlan|wifi|wi-fi|netzwerkstatus|internetverbindung)(?![\p{L}\p{N}])/iu,
+  ],
+  [
+    "desktop",
+    /(?:^|[^\p{L}\p{N}])(?:hyprland|waybar|quickshell|lautstärke|pipewire|wpctl|arbeitsfläche|hyprctl)(?![\p{L}\p{N}])/iu,
+  ],
+  [
+    "flake",
+    /(?:^|[^\p{L}\p{N}])(?:nixos|flake|nixos-config|nixos-rebuild|systemkonfig\p{L}*|nixos-generation|home-manager)(?![\p{L}\p{N}])/iu,
+  ],
+];
+
+export function strictCategoriesForRequest(request) {
+  const text = String(request ?? "").slice(0, 4096);
+  const categories = new Set();
+  for (const [category, pattern] of STRICT_PATTERNS) {
+    if (!pattern.test(text)) continue;
+    categories.add(category);
+    if (category === "flake") categories.add("project");
+  }
+  return [...categories];
+}
+
 export function categoriesForRequest(request) {
   const text = String(request ?? "")
     .slice(0, 4096)
