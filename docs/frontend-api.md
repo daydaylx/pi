@@ -96,6 +96,9 @@ Rules and error conditions for session management:
 - The session list is freshly reloaded (`listAll`) before each mutation. Unknown
   IDs fail with `INVALID_REQUEST` ("Session not found"). A second delete of the
   same ID fails with `INVALID_REQUEST`.
+- Only persisted sessions are managed: Pi writes a session file with the first
+  message, so a session created by `session.create` that has no message yet is
+  neither listed nor addressable (`INVALID_REQUEST`, "Session not found").
 - For `session.delete`, the target file must be a regular file (not a symlink)
   residing directly within `PI_CODING_AGENT_SESSION_DIR`.
 - Overrides and flags are stored in `.frontend-index.json` in the session
