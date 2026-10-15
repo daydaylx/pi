@@ -938,6 +938,36 @@ await test("task-tier: Test und Doku neben einer Änderung sind kein zweites Sub
   });
 });
 
+await test("task-tier: Läufe aus Extension-Nachrichten klassifizieren nicht neu", async () => {
+  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
+    await harness.runHooks(
+      "before_agent_start",
+      {
+        messageType: "user",
+        prompt: "Setze editorPaddingX in settings.json",
+        systemPrompt: "SYS",
+      },
+      context,
+    );
+    const custom = await harness.runHooks(
+      "before_agent_start",
+      {
+        messageType: "custom",
+        message: { customType: "x", content: "y" },
+        systemPrompt: "SYS",
+      },
+      context,
+    );
+    eq(custom[0], undefined, "Custom-Lauf ändert den System-Prompt nicht");
+    const [sub] = await harness.runHooks(
+      "tool_call",
+      tc("subagent", { spec: { profile: "verify" } }),
+      context,
+    );
+    assert(sub?.block === true, "FAST-Klasse der Aufgabe bleibt bestehen");
+  });
+});
+
 const { passed, failed } = summary();
 if (failed > 0) {
   console.error(`\nFAIL: ${passed} passed, ${failed} failed`);

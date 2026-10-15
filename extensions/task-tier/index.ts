@@ -347,6 +347,9 @@ export default function taskTier(pi: ExtensionAPI): void {
   pi.on("session_compact", () => tracker.reset());
 
   pi.on("before_agent_start", async (event) => {
+    // The tier classifies the user's prompt. Runs started by an extension
+    // message keep the tier state of the current task.
+    if (event.messageType === "custom") return;
     const planning = isPlanningMode(
       requestWorkflowCapabilities(pi.events).mode ?? "work",
     );

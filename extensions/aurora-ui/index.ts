@@ -1331,6 +1331,9 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", (event) => {
+    // Runs started by an extension message carry no user prompt and are not a
+    // new task for the title projection.
+    if (event.messageType === "custom") return;
     currentUserPrompt = event.prompt;
     // A plan is only a valid task-title source for the turn it belongs to.
     // A brand-new prompt that starts outside planning mode is a new,

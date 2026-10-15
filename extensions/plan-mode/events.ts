@@ -43,6 +43,21 @@ export function registerPlanEvents(
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    // A run started by an extension message is neither a planning turn nor a
+    // candidate for an approval grant, which is bound to the user's prompt. It
+    // opens no turn, so readiness and approval stay untouched, but it must not
+    // run without the instructions of the active mode.
+    if (event.messageType === "custom") {
+      const active = session.effectiveMode();
+      const addition = isPlanningMode(active)
+        ? planningPrompt(active)
+        : session.planningSeen()
+          ? WORK_MODE_NOTICE
+          : undefined;
+      return addition
+        ? { systemPrompt: `${event.systemPrompt}\n\n${addition}` }
+        : undefined;
+    }
     const mode = session.beginTurn(ctx);
     if (isPlanningMode(mode)) {
       return {

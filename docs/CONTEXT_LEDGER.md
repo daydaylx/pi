@@ -129,7 +129,7 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 - Der Fork `daydaylx/pi-subagents` ist am Pin typecheck-grün, seine Unit-,
   Integrations- und E2E-Suiten bestehen; er ist nicht Teil einer
   Pflichtprüfung des Hauptrepos.
-- Pi 1.0.4 warnt beim Start, dass `typebox` in `pi-subagents` und
+- Pi 1.2.0 warnt beim Start, dass `typebox` in `pi-subagents` und
   `pi-web-access` unter `dependencies` statt `peerDependencies` steht. Beim
   Fork bewusst nicht geändert: Pi installiert Git-Pakete mit `--omit=peer`, und
   der asynchrone Runner läuft außerhalb des Extension-Loaders.
@@ -139,8 +139,7 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 - Der Live-Smoke ist ohne authentifizierte TTY nicht durchführbar; Aurora-
   Sichtbarkeit, Shift+Tab, Plan→Work-Handoff und Subagent-Aufruf bleiben
   unbelegt (`docs/manual-smoke-checklist.md`).
-- P2: belegt ist nur die Aufteilung von `tests/suites/runtime.mjs`
-  (Schnittkante: `SECTION_SUITES`-Registry).
+- P2: belegt ist nur die Aufteilung von `tests/suites/runtime.mjs`.
 
 ## Offene Risiken
 
@@ -161,6 +160,7 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 - Vor `npm run install:user -- --apply` ein Backup von `~/.pi/agent` anlegen;
   danach `npm install --ignore-scripts` in `~/.pi/agent/npm` (nie `npm ci`,
   `node-pty` bleibt gebaut) und `node scripts/apply-runtime-patches.mjs --apply`.
+  `pi update` greift hier nicht; Runtime-Updates: `docs/RUNTIME_PATCHES.md`.
 - Nach relevanten Änderungen läuft `npm --prefix npm run verify`. Nur ein
   `project_check`-Aufruf des Pflichtprofils `verify` aktualisiert den
   Footer/Ledger — ein reiner `bash`-Lauf desselben Befehls oder ein Lauf aus
@@ -173,7 +173,7 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 ## Aktuelle Prioritäten
 
 - Audit-Umsetzung vom 2026-10-13 ist abgeschlossen (Stand:
-  `docs/PROJECT_STATE.md`); Pi-Runtime-Pin und Dev-Abhängigkeit sind `1.0.4`.
+  `docs/PROJECT_STATE.md`); Pi-Runtime-Pin und Dev-Abhängigkeit sind `1.2.0`.
 - Real-Duel: Medium-Profile, Fingerprint-Provenienz und die 36-Lauf-Matrix
   sind vorbereitet. Vor dem Dual-Smoke zuerst den kanonischen Audit-/Medium-
   Stand prüfen und die explizite Commit-Freigabe einholen.

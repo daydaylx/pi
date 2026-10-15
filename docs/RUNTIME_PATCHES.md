@@ -78,6 +78,39 @@ entfernt das interne `npm-shrinkwrap` und pinnt `brace-expansion@5.0.12`
 direkt. Der Root-Override ist ebenfalls auf `5.0.12` gesetzt, damit der
 Audit-Fix nach einer sauberen `npm ci`-Installation greift.
 
+Am 2026-10-15 wurden Runtime und Dev-Abhängigkeit auf `1.2.0` angehoben. Der
+Weg führt über den Pin in `npm/package.json` und `npm install --ignore-scripts`
+in `~/.pi/agent/npm`: `pi update` verweigert den Self-Update, weil die
+Installation nicht als globales npm-Paket verwaltet wird. Alle elf Patch-Anker
+trafen unverändert. Außerhalb der Patches waren zwei Anpassungen nötig:
+
+- **`before_agent_start` feuert jetzt auch für Läufe aus
+  `pi.sendMessage(..., { triggerTurn: true })`** (seit `1.1.0`; real genutzt von
+  `pi-subagents`-Hintergrundmeldungen und `pi-web-access`).
+  `BeforeAgentStartEvent` ist eine Union auf `messageType`; `custom`-Events
+  tragen kein `prompt`. Ein `systemPrompt`-Rückgabewert gilt nur für den
+  jeweiligen Lauf; ohne Beitrag läuft ein solcher Lauf mit dem nackten
+  Basis-Prompt.
+  - `aurora-ui`, `context-capsule` und `task-tier` überspringen diese Läufe
+    (Titel, Zielbeschreibung und Klassifikation hängen am Nutzer-Prompt; das
+    Event kam für sie vorher gar nicht an).
+  - `plan-mode` hängt für sie den Planungs- bzw. Work-Hinweis des aktiven Modus
+    an, öffnet aber bewusst keinen Turn (`beginTurn`) und verbraucht keine
+    Freigabe: Ein Hintergrundlauf soll die „Plan fertig"-Bereitschaft nicht
+    löschen.
+  - `system-context` liefert für sie den Basiskontext ohne Zusatzkategorien.
+  - `resilience` ist prompt-unabhängig und legt für solche Läufe ebenfalls einen
+    Turn-Marker an; eine ausstehende Recovery-Anweisung wird ihnen zugestellt.
+- **Theme-Schema** liegt jetzt unter `schemas/theme.schema.json` im Paket
+  (`tests/suites/runtime/target-config.mjs` liest es von dort). Themes werden
+  beim Start nun ebenfalls validiert; alle vier Aurora-Themes bestehen den
+  Validator der Runtime.
+
+In `tests/p1-runtime.mjs` wurde das Regex-Fenster für `hideExtensionSelector()`
+von 260 auf 400 Zeichen erweitert, weil Upstream dort eine Zeile
+(`programStatus.setBlocked`) eingefügt hat; das Verhalten (Fokus zurück auf den
+Editor) ist unverändert.
+
 ## Wiederherstellen
 
 Die Patches liegen in `node_modules` und überleben kein `npm update` der

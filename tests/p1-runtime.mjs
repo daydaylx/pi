@@ -1,4 +1,4 @@
-// P1 regression test for the locally patched Pi 1.0.4 runtime.
+// P1 regression test for the locally patched Pi 1.2.0 runtime.
 // It intentionally targets the executable runtime, not npm/node_modules,
 // because that is the Pi instance users actually start.
 import assert from "node:assert/strict";
@@ -117,7 +117,7 @@ assert.match(
 );
 assert.match(
   interactiveSource,
-  /hideExtensionSelector\(\) \{[\s\S]{0,260}setFocus\(this\.editor\)/,
+  /hideExtensionSelector\(\) \{[\s\S]{0,400}setFocus\(this\.editor\)/,
   "closing a native extension selector restores editor focus",
 );
 

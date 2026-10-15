@@ -37,6 +37,9 @@ export function registerSystemContext(
   });
 
   pi.on("before_agent_start", (event, ctx: ExtensionContext) => {
+    // Context categories are derived from the user's prompt; a run started by
+    // an extension message has none and gets the base context only.
+    const request = event.messageType === "custom" ? "" : event.prompt;
     const instant = now();
     const configRevision = discoverConfig({ cwd: ctx.cwd })?.revision;
     const cachedRevision = baseContext?.system?.configuration?.revision;
@@ -48,7 +51,7 @@ export function registerSystemContext(
       baseContext = collect(["system"], { cwd: ctx.cwd });
       baseContextExpiresAt = instant + BASE_CONTEXT_TTL_MS;
     }
-    const extraCategories = categoriesForRequest(event.prompt).filter(
+    const extraCategories = categoriesForRequest(request).filter(
       (category) => category !== "system",
     );
     const extraContext = extraCategories.length

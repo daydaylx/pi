@@ -270,6 +270,20 @@ async function testExtensionLifecycle() {
       ["system"],
       ["system"],
     ]);
+    // Extension-triggered runs have no user prompt: base context only.
+    const collected = requests.length;
+    configRevision = "revision-3";
+    const custom = await harness.runHooks(
+      "before_agent_start",
+      { messageType: "custom", message: {}, systemPrompt: "base" },
+      ctx,
+    );
+    assert.ok(
+      custom
+        .at(-1)
+        .systemPrompt.includes("[SYSTEM CONTEXT — OBSERVATIONAL DATA]"),
+    );
+    assert.deepEqual(requests.slice(collected), [["system"]]);
     return "system context cache and on-demand collection: PASS";
   } finally {
     if (previousProfile === undefined) delete process.env.PI_LAUNCH_PROFILE;

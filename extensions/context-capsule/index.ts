@@ -3,7 +3,10 @@
  * The capsule is never written to a project file and carries no authority over
  * current workflow, permissions, recovery, or workspace state.
  */
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { relative, resolve, sep } from "node:path";
 import {
   CAPSULE_MAX_BYTES,
@@ -77,7 +80,11 @@ export default function contextCapsule(pi: ExtensionAPI): void {
   function discardPending(): void {
     const current = pending;
     pending = undefined;
-    if (current) pi.appendEntry("context-capsule.telemetry", telemetry("discarded", current));
+    if (current)
+      pi.appendEntry(
+        "context-capsule.telemetry",
+        telemetry("discarded", current),
+      );
   }
 
   pi.on("session_start", () => {
@@ -89,6 +96,9 @@ export default function contextCapsule(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", (event) => {
+    // Only a user prompt defines a new objective; extension-triggered runs
+    // continue the current turn state untouched.
+    if (event.messageType === "custom") return;
     discardPending();
     turnGeneration += 1;
     const objective = objectiveFromPrompt(event.prompt);
@@ -109,7 +119,8 @@ export default function contextCapsule(pi: ExtensionAPI): void {
       turn.sessionGeneration !== sessionGeneration ||
       turn.turnGeneration !== turnGeneration ||
       event.isError
-    ) return;
+    )
+      return;
 
     const input = event.input as Record<string, unknown> | undefined;
     if (event.toolName === "edit" || event.toolName === "write") {
@@ -118,7 +129,10 @@ export default function contextCapsule(pi: ExtensionAPI): void {
       return;
     }
     if (event.toolName === "project_check") {
-      const profile = typeof input?.profile === "string" ? input.profile : "requested profiles";
+      const profile =
+        typeof input?.profile === "string"
+          ? input.profile
+          : "requested profiles";
       turn.lastSuccessfulCheck = `project_check (${profile.slice(0, 180)}) completed`;
     }
   });
@@ -129,14 +143,18 @@ export default function contextCapsule(pi: ExtensionAPI): void {
       !turn ||
       turn.sessionGeneration !== sessionGeneration ||
       turn.turnGeneration !== turnGeneration
-    ) return;
+    )
+      return;
 
     const capsule = createContextCapsule({
       objective: turn.objective,
       changedFiles: [...turn.changedFiles],
       lastSuccessfulCheck: turn.lastSuccessfulCheck,
     });
-    const serializedBytes = Buffer.byteLength(serializeContextCapsule(capsule), "utf8");
+    const serializedBytes = Buffer.byteLength(
+      serializeContextCapsule(capsule),
+      "utf8",
+    );
     if (serializedBytes > CAPSULE_MAX_BYTES) return;
 
     const snapshot: PendingCapsule = {
@@ -147,7 +165,10 @@ export default function contextCapsule(pi: ExtensionAPI): void {
     };
     discardPending();
     pending = snapshot;
-    pi.appendEntry("context-capsule.telemetry", telemetry("captured", snapshot));
+    pi.appendEntry(
+      "context-capsule.telemetry",
+      telemetry("captured", snapshot),
+    );
   });
 
   pi.on("session_compact", () => {
@@ -158,7 +179,10 @@ export default function contextCapsule(pi: ExtensionAPI): void {
       snapshot.sessionGeneration !== sessionGeneration ||
       snapshot.turnGeneration !== turnGeneration
     ) {
-      pi.appendEntry("context-capsule.telemetry", telemetry("discarded", snapshot));
+      pi.appendEntry(
+        "context-capsule.telemetry",
+        telemetry("discarded", snapshot),
+      );
       return;
     }
     try {
@@ -170,9 +194,15 @@ export default function contextCapsule(pi: ExtensionAPI): void {
         },
         { deliverAs: "steer" },
       );
-      pi.appendEntry("context-capsule.telemetry", telemetry("restored", snapshot));
+      pi.appendEntry(
+        "context-capsule.telemetry",
+        telemetry("restored", snapshot),
+      );
     } catch {
-      pi.appendEntry("context-capsule.telemetry", telemetry("discarded", snapshot));
+      pi.appendEntry(
+        "context-capsule.telemetry",
+        telemetry("discarded", snapshot),
+      );
     }
   });
 
@@ -185,7 +215,10 @@ export default function contextCapsule(pi: ExtensionAPI): void {
   (
     pi.on as unknown as (
       event: "session_compact_failed",
-      handler: (event: SessionCompactFailedEvent, ctx: ExtensionContext) => void,
+      handler: (
+        event: SessionCompactFailedEvent,
+        ctx: ExtensionContext,
+      ) => void,
     ) => void
   )("session_compact_failed", () => discardPending());
 

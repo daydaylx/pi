@@ -241,7 +241,7 @@ export const setupCoreSections = {
         assert(
           harness.notifications
             .at(-1)
-            ?.message?.includes("Pi CLI/dev package: 0.80.7/1.0.4") &&
+            ?.message?.includes("Pi CLI/dev package: 0.80.7/1.2.0") &&
             harness.notifications
               .at(-1)
               ?.message?.includes("WARNING: Pi CLI, Manifest") &&

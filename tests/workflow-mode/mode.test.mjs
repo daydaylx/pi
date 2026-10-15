@@ -73,6 +73,43 @@ await test("workflow exposes no public slash commands or legacy shortcut", () =>
   assert(!harness.tools.has("plan_progress"), "plan_progress is removed");
 });
 
+await test("a run started by an extension message is not a planning turn", async () => {
+  if (!planMode) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-mode-"));
+  try {
+    const harness = createHarness({ select: () => "Architekturplan" });
+    const ctx = harness.makeContext({ cwd });
+    planMode.default(harness.api);
+    await hooks(harness, "session_start", ctx);
+    await harness.shortcuts.get("shift+tab")(ctx);
+    const custom = await harness.runHooks(
+      "before_agent_start",
+      { messageType: "custom", message: {}, systemPrompt: "SYS" },
+      ctx,
+    );
+    assert(
+      custom[0]?.systemPrompt?.startsWith("SYS\n\n"),
+      "an extension-triggered run keeps the planning instructions",
+    );
+    assert(
+      custom[0]?.message === undefined,
+      "an extension-triggered run consumes no approval and injects no plan",
+    );
+    const user = await harness.runHooks(
+      "before_agent_start",
+      { messageType: "user", prompt: "Plane das", systemPrompt: "SYS" },
+      ctx,
+    );
+    eq(
+      custom[0].systemPrompt,
+      user[0]?.systemPrompt,
+      "both kinds of run carry the same planning prompt",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 await test("choosing a plan mode preserves a plan until the next agent turn", async () => {
   if (!planMode) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-mode-"));

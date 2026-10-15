@@ -41,7 +41,7 @@ macht die Aussage über den Arbeitsbaum veraltet.
 | #   | Schritt                                          | Erwartet                                                                                                       | Beobachtet | ✓/✗ |
 | --- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ---------- | --- |
 | 1   | `npm run install:user -- --apply --target <tmp>` | Installation läuft durch; `APPEND_SYSTEM.md` und `prompts/` sind vorhanden, `docs/archive/session-logs/` fehlt |            |     |
-| 2   | `npm ci --prefix <tmp>/npm`                      | `@earendil-works/pi-coding-agent@1.0.4` installiert                                                           |            |     |
+| 2   | `npm ci --prefix <tmp>/npm`                      | `@earendil-works/pi-coding-agent@1.2.0` installiert                                                           |            |     |
 | 3   | Pi im Zielverzeichnis starten                    | Neue Session, Extensions laden, keine unerwarteten Startfehler                                                 |            |     |
 | 4   | Fork-Pin prüfen                                  | Installierter Pi-Subagents-Fork entspricht exakt `settings.json` → `packages`                                  |            |     |
 

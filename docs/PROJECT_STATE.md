@@ -11,8 +11,18 @@ Repo-Gesundheit, Kindprozess-Umgebung und Run-History im Fork. Die zwölf
 verwaisten Testdateien sind triagiert (Zwillinge bestehen, Duplikate gelöscht),
 `tests/permissions.test.mjs` ist gegatet. Der Installer behält lokale
 `+extensions/…`-Einträge der installierten `settings.json`. Die
-Installation `~/.pi/agent` läuft auf Pi `1.0.4` mit allen 11 Runtime-Patches;
-Rückfall-Backup unter `~/.pi/backups/agent-20261013-vor-runtime-update`.
+Installation `~/.pi/agent` läuft auf Pi `1.2.0` mit allen 11 Runtime-Patches;
+Rückfall-Backup unter `~/.pi/agent-backups/pre-pi-update-20261015`.
+
+Pi-Update 1.0.4 → 1.2.0 (2026-10-15, uncommittet): Pin in `npm/package.json`,
+Lock, Patch-Skript und Docs angehoben; `pi update` greift hier nicht. Alle 11
+Patch-Anker trafen unverändert. `before_agent_start` feuert seit 1.1.0 auch für
+`triggerTurn`-Läufe (`messageType: "custom"`, kein `prompt`): `aurora-ui`,
+`context-capsule` und `task-tier` überspringen sie, `plan-mode` und
+`system-context` liefern nur den Prompt-Beitrag ohne Turn-Zustand. Das
+Theme-Schema liegt unter `schemas/theme.schema.json`, die Aurora-Themes
+verweisen auf `https://pi.dev/schemas/theme.schema.json`. Details:
+`docs/RUNTIME_PATCHES.md`.
 
 Zusätzlicher Auftrag „Pi Harness Update Paket“: P1 Context Capsule, P2
 Instruction Audit und P3 Task-Tier-Nachschärfung sind umgesetzt. P3 lässt
@@ -77,7 +87,7 @@ stehen in `docs/experiments/p5-observer-baseline.md`.
 
 ## Phase-1-Bestand
 
-- Pi: Node `v22.23.2`, npm `10.9.8`, installierter Pi `1.0.4` (seit 2026-10-13).
+- Pi: Node `v22.23.2`, npm `10.9.8`, installierter Pi `1.2.0` (seit 2026-10-15).
 - Pi-`verify`-Profil: `.pi/verify.json`; setup-core liegt unter
   `extensions/setup-core/` mit `verify-profiles.ts`, `dependency-prepare.ts`
   und `index.ts`.
@@ -112,8 +122,11 @@ Umgebungswerte nicht lesen oder veröffentlichen.
   Exit 0, alle acht Stufen, 4856 Assertions ohne Fehler; Lint 0 Fehler.
 - Fork `pi-subagents` @ `0364aaa`: `typecheck` ok, Unit 1198/1198,
   Integration und E2E Exit 0 (außerhalb der Sandbox).
-- Installation: `pi --version` = 1.0.4, `tests/runtime-patches.mjs` 52/52,
-  `tests/p1-runtime.mjs` ok, Headless-Lauf und `subagent list` ok.
+- Pi-Update 1.2.0 (Arbeitsbaum, 2026-10-15): `npm --prefix npm run verify`
+  Exit 0 (Lint 0 Fehler, `tests/runtime-patches.mjs` 52/52).
+- Installation: `pi --version` = 1.2.0, alle 11 Patches angewendet,
+  `tests/p1-runtime.mjs` ok, Headless-Lauf `pi -p … --no-session` ok;
+  `subagent list` nicht erneut geprüft.
 - Nicht belegt: interaktiver TUI-Rundlauf (Plan→Work, Shift+Tab) und die
   Recovery-Rate nach den Fixes — es existieren noch keine neuen Sitzungen.
 
@@ -122,7 +135,9 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 1. Nach den ersten neuen Sitzungen `/session-health --days 7` ausführen und die
    Recovery-Rate gegen die Messung vor den Fixes vergleichen; erst dann
    Recovery weiter vereinfachen.
-2. Keine weiteren offenen Entscheidungen aus dem Audit: Fork-Strip-down ist
-   verworfen (Pin `0364aaa`), die `typebox`-Startwarnung bleibt bewusst.
-3. Optional: lokalen Branch `wip/strip-down-2026-10-13` im Dev-Klon
-   `/home/g/Projekte/pi-subagents` löschen, sobald er nicht mehr gebraucht wird.
+2. Pi-Update-Änderungen (Pin 1.2.0, `before_agent_start`-Anpassungen, Themes,
+   Tests, Docs) reviewen und auf ausdrücklichen Auftrag committen/pushen; die
+   Installation ist bereits aktuell.
+3. Interaktiven Rundlauf gegen 1.2.0 nachholen (Plan→Work, Shift+Tab,
+   Hintergrund-Subagent-Meldung während Planmodus); laufende Pi-Sitzungen
+   vorher neu starten.

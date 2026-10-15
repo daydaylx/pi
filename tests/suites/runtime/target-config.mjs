@@ -298,8 +298,8 @@ export const targetConfigSections = {
           readFileSync(
             path.join(
               ROOT,
-              "npm/node_modules/@earendil-works/pi-coding-agent/dist",
-              "modes/interactive/theme/theme-schema.json",
+              "npm/node_modules/@earendil-works/pi-coding-agent",
+              "schemas/theme.schema.json",
             ),
             "utf8",
           ),
