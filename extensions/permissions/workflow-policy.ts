@@ -197,6 +197,7 @@ export function assessWorkflowTool(
   cwd: string,
   permissionLevel?: PermissionLevel,
   additionalRoots: readonly string[] = [],
+  systemFileRoots: readonly string[] = [],
 ): WorkflowAssessment {
   if (event.toolName === INTERACTIVE_SHELL_TOOL_NAME)
     return assessInteractiveShell(
@@ -220,7 +221,10 @@ export function assessWorkflowTool(
     permissionLevel !== "yolo-ask" &&
     permissionLevel !== "yolo-full"
   ) {
-    const identity = resolvePathScope(path, cwd, additionalRoots);
+    const identity = resolvePathScope(path, cwd, [
+      ...additionalRoots,
+      ...systemFileRoots,
+    ]);
     const isReadFileTool = READ_ONLY_FILE_TOOLS.has(event.toolName);
 
     if (

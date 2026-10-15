@@ -30,8 +30,13 @@ import { isInside } from "../shared/path-utils.ts";
 import {
   WORKSPACE_SCOPE_EVENTS,
   canonicalWorkspaceRoot,
+  gitWorkspaceRootForPath,
   type WorkspaceScopeRequest,
 } from "../shared/workspace-scope.ts";
+import {
+  getPiLaunchProfile,
+  resolveSystemWorkspaceRoot,
+} from "../shared/profile.ts";
 import {
   FRONTEND_UI_CHANNELS,
   isFrontendUiStateRequest,
@@ -63,6 +68,7 @@ import type { ThinkingControl } from "./thinking-control.ts";
 
 export const PERSISTED_STATE_KEY = "mode-permissions";
 export const WORKSPACE_ROOT_APPROVED_KEY = "workspace-root-approved";
+export const SYSTEM_FILE_SCOPE_APPROVED_KEY = "system-file-scope-approved";
 
 /** The single session record shared by permission and thinking state. */
 interface PersistedPermissionState {
@@ -81,6 +87,11 @@ interface PersistedWorkspaceRootApproval {
   root?: unknown;
 }
 
+interface PersistedSystemFileScopeApproval {
+  sessionId?: unknown;
+  root?: unknown;
+}
+
 export interface ConfiguredToolPolicy {
   unknownTools: ConfiguredPolicyAction;
   bash: ConfiguredPolicyAction;
@@ -92,7 +103,14 @@ export interface PermissionSession {
   configured(): ConfiguredToolPolicy;
   additionalWorkspaceRoots(): string[];
   isAdditionalWorkspaceRoot(root: string): boolean;
+  systemFileRoots(): string[];
+  isSystemFileRoot(root: string): boolean;
   authorizeWorkspaceRoot(
+    path: string,
+    ctx: ExtensionContext,
+    epoch?: number,
+  ): Promise<{ approved: boolean; root?: string; reason?: string }>;
+  authorizeSystemFileRoot(
     path: string,
     ctx: ExtensionContext,
     epoch?: number,
@@ -139,6 +157,7 @@ export function createPermissionSession(
   let auroraEpoch: string | undefined;
   let unsubscribeAurora: (() => void) | undefined;
   let additionalRoots = new Set<string>();
+  let systemFileRoots = new Set<string>();
 
   function trustedWriteScopeRoot(
     ctx: ExtensionContext,
@@ -161,6 +180,57 @@ export function createPermissionSession(
       return undefined;
     }
     return root;
+  }
+
+  function validSystemFileRoot(
+    path: string,
+    ctx: ExtensionContext,
+  ): string | undefined {
+    const systemRoot = resolveSystemWorkspaceRoot(ctx.cwd);
+    if (!systemRoot || getPiLaunchProfile() !== "system") return undefined;
+    const root = canonicalWorkspaceRoot(resolve(ctx.cwd, path));
+    if (
+      !root ||
+      root === "/" ||
+      root === systemRoot ||
+      isInside(root, systemRoot) ||
+      isInside(systemRoot, root) ||
+      gitWorkspaceRootForPath(root) !== root
+    ) {
+      return undefined;
+    }
+    const hardSystemRoots = [
+      "/etc",
+      "/usr",
+      "/bin",
+      "/sbin",
+      "/boot",
+      "/var",
+      "/proc",
+      "/sys",
+      "/dev",
+    ];
+    if (
+      hardSystemRoots.some((systemRootPath) => isInside(systemRootPath, root))
+    ) {
+      return undefined;
+    }
+    return root;
+  }
+
+  function currentSystemFileRoots(): string[] {
+    if (
+      !activeContext ||
+      getPiLaunchProfile() !== "system" ||
+      !resolveSystemWorkspaceRoot(activeContext.cwd)
+    ) {
+      return [];
+    }
+    const roots: string[] = [];
+    for (const root of systemFileRoots) {
+      if (validSystemFileRoot(root, activeContext) === root) roots.push(root);
+    }
+    return roots;
   }
 
   function publishStatus(ctx: ExtensionContext): void {
@@ -237,6 +307,8 @@ export function createPermissionSession(
     configured: () => configuredPolicy,
     additionalWorkspaceRoots: () => [...additionalRoots],
     isAdditionalWorkspaceRoot: (root) => additionalRoots.has(root),
+    systemFileRoots: currentSystemFileRoots,
+    isSystemFileRoot: (root) => currentSystemFileRoots().includes(root),
     context: () => activeContext,
     epoch: () => sessionEpoch,
     isCurrentEpoch: (epoch) => epoch === sessionEpoch,
@@ -260,6 +332,13 @@ export function createPermissionSession(
     },
 
     async authorizeWorkspaceRoot(path, ctx, epoch = sessionEpoch) {
+      if (getPiLaunchProfile() === "system") {
+        return {
+          approved: false,
+          reason:
+            "workspace_add erteilt im Systemprofil keinen Projekt-Trust. Externe Datei-Scopes werden bei nativen Dateiwerkzeugen separat bestätigt.",
+        };
+      }
       if (epoch !== sessionEpoch || ctx !== activeContext) {
         return { approved: false, reason: "Die Sitzung hat sich geändert." };
       }
@@ -299,6 +378,75 @@ export function createPermissionSession(
       }
       additionalRoots.add(root);
       pi.appendEntry(WORKSPACE_ROOT_APPROVED_KEY, {
+        sessionId: activeSessionId,
+        root,
+        approvedAt: new Date().toISOString(),
+      });
+      return { approved: true, root };
+    },
+
+    async authorizeSystemFileRoot(path, ctx, epoch = sessionEpoch) {
+      if (getPiLaunchProfile() !== "system") {
+        return {
+          approved: false,
+          reason: "System-Datei-Scopes sind nur im Systemprofil verfügbar.",
+        };
+      }
+      if (
+        epoch !== sessionEpoch ||
+        ctx !== activeContext ||
+        typeof activeSessionId !== "string" ||
+        activeSessionId.length === 0
+      ) {
+        return { approved: false, reason: "Die Sitzung hat sich geändert." };
+      }
+      if (!ctx.hasUI) {
+        return {
+          approved: false,
+          reason:
+            "Externe Datei-Scopes benötigen eine sichtbare UI-Freigabe; dieser Modus hat keinen Bestätigungsdialog.",
+        };
+      }
+      const systemRoot = resolveSystemWorkspaceRoot(ctx.cwd);
+      const root = validSystemFileRoot(path, ctx);
+      if (!systemRoot || !root) {
+        return {
+          approved: false,
+          reason:
+            "Externer Datei-Scope abgelehnt: erwartet wird eine erreichbare, kanonische Git-Projektwurzel außerhalb des privaten System-Workspace.",
+        };
+      }
+      if (currentSystemFileRoots().includes(root)) {
+        return { approved: true, root };
+      }
+
+      let confirmed = false;
+      try {
+        confirmed = await ctx.ui.confirm(
+          "Datei-Scope für diese Sitzung freigeben?",
+          `Pi darf native read/grep/find/ls/write/edit-Aufrufe unter ${root} nach der aktuellen Berechtigungsstufe ausführen. Diese Freigabe gilt nur für diese Sitzung und ändert weder Projekt-Trust, Projekt-Setup oder Verifikationsprofile noch Bash-Rechte. Secret-, Symlink-, geschützte Datei-, Recovery- und Planmodus-Gates bleiben bestehen.`,
+        );
+      } catch {
+        confirmed = false;
+      }
+      if (
+        !confirmed ||
+        epoch !== sessionEpoch ||
+        ctx !== activeContext ||
+        activeSessionId !== ctx.sessionManager.getSessionId() ||
+        resolveSystemWorkspaceRoot(ctx.cwd) !== systemRoot ||
+        validSystemFileRoot(root, ctx) !== root
+      ) {
+        return {
+          approved: false,
+          root,
+          reason: confirmed
+            ? "Datei-Scope verworfen: Die Sitzung, der private Workspace oder die kanonische Projektwurzel hat sich während der Freigabe geändert."
+            : "Datei-Scope vom Benutzer abgelehnt.",
+        };
+      }
+      systemFileRoots.add(root);
+      pi.appendEntry(SYSTEM_FILE_SCOPE_APPROVED_KEY, {
         sessionId: activeSessionId,
         root,
         approvedAt: new Date().toISOString(),
@@ -370,6 +518,7 @@ export function createPermissionSession(
       activeSessionId = ctx.sessionManager.getSessionId();
       activeContext = ctx;
       additionalRoots = new Set();
+      systemFileRoots = new Set();
       const approvalEntries = ctx.sessionManager
         .getEntries()
         .filter(
@@ -388,6 +537,33 @@ export function createPermissionSession(
         const root = canonicalWorkspaceRoot(approval.root);
         if (root === approval.root && root !== "/") additionalRoots.add(root);
       }
+      if (
+        getPiLaunchProfile() === "system" &&
+        typeof activeSessionId === "string" &&
+        activeSessionId.length > 0 &&
+        resolveSystemWorkspaceRoot(ctx.cwd)
+      ) {
+        const systemFileApprovalEntries = ctx.sessionManager
+          .getEntries()
+          .filter(
+            (entry: { type: string; customType?: string; data?: unknown }) =>
+              entry.type === "custom" &&
+              entry.customType === SYSTEM_FILE_SCOPE_APPROVED_KEY,
+          ) as Array<{ data?: PersistedSystemFileScopeApproval }>;
+        for (const entry of systemFileApprovalEntries) {
+          const approval = entry.data;
+          if (
+            approval?.sessionId !== activeSessionId ||
+            typeof approval.root !== "string"
+          ) {
+            continue;
+          }
+          if (validSystemFileRoot(approval.root, ctx) === approval.root) {
+            systemFileRoots.add(approval.root);
+          }
+        }
+      }
+      if (getPiLaunchProfile() === "system") additionalRoots.clear();
       auroraEpoch = undefined;
       subscribeAuroraProvider();
       configuredPolicy = loadSetupConfig(ctx.cwd, ctx.isProjectTrusted()).config
@@ -438,6 +614,7 @@ export function createPermissionSession(
       activeSessionId = undefined;
       activeContext = undefined;
       additionalRoots.clear();
+      systemFileRoots.clear();
       setTuiStatus(ctx, UI_STATUS_KEYS.permissions, undefined);
     },
   };

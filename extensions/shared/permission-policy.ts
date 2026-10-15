@@ -710,6 +710,8 @@ export interface DecideFileAccessOptions {
   allowOutsideProjectRead?: boolean;
   /** Additional roots explicitly approved for the current session. */
   additionalRoots?: readonly string[];
+  /** System-profile roots explicitly authorized for native file tools. */
+  systemFileRoots?: readonly string[];
 }
 
 export function decideFileAccess(
@@ -720,7 +722,10 @@ export function decideFileAccess(
   options: DecideFileAccessOptions = {},
 ): PolicyDecision {
   const { protectedWritePath } = options;
-  const identity = resolvePathScope(rawPath, cwd, options.additionalRoots);
+  const identity = resolvePathScope(rawPath, cwd, [
+    ...(options.additionalRoots ?? []),
+    ...(options.systemFileRoots ?? []),
+  ]);
   const isReadRestricted = permissionLevel === "readonly";
 
   // YOLO 3 hebt die Pfadgrenzen vollständig auf (Secrets, außerhalb des

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -8,7 +8,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import { confirmAction } from "../shared/permission-dialog.ts";
-import { decideBash, resolvePathScope } from "../shared/permission-policy.ts";
+import {
+  decideBash,
+  isSensitivePathIdentity,
+  resolvePathScope,
+} from "../shared/permission-policy.ts";
 import {
   RECOVERY_CAPABILITY_EVENTS,
   recoveryEffect,
@@ -44,7 +48,10 @@ import {
 } from "./verifier-policy.ts";
 import { assessWebToolInput } from "./web-tools.ts";
 import { toolPath } from "./tool-event.ts";
-import { getPiLaunchProfile } from "../shared/profile.ts";
+import {
+  getPiLaunchProfile,
+  resolveSystemWorkspaceRoot,
+} from "../shared/profile.ts";
 import { systemBashNeedsApproval } from "../system-control/policy.ts";
 import { auditSystemDenial } from "../system-control/audit.ts";
 import {
@@ -65,6 +72,25 @@ const READ_ONLY_TOOLS = [
   "workspace_add",
   "recovery_check",
 ];
+const NATIVE_FILE_TOOLS = new Set([
+  "read",
+  "write",
+  "edit",
+  "grep",
+  "find",
+  "ls",
+]);
+const NATIVE_WRITE_TOOLS = new Set(["write", "edit"]);
+const SYSTEM_PROJECT_POLICY_CONFIGS = new Set([
+  ".pi/setup.json",
+  ".pi/verify.json",
+]);
+
+function isSystemProjectPolicyConfig(root: string, target: string): boolean {
+  return SYSTEM_PROJECT_POLICY_CONFIGS.has(
+    relative(root, target).split(sep).join("/"),
+  );
+}
 function guardedRecoveryEffect(event: ToolCallEvent, cwd: string) {
   if (
     getPiLaunchProfile() === "system" &&
@@ -117,7 +143,8 @@ export function systemControlPlanModeBlocks(
  * Turn mit möglicher Mutation genau die Werkzeuge, die den Workspace weiter
  * verändern könnten. `recovery_check` bleibt als Entsperre frei. YOLO 3
  * übergeht dieses Gate ausdrücklich; alle anderen Stufen müssen den Zustand
- * zuerst prüfen.
+ * zuerst prüfen. Nur das reguläre Projektprofil behält den YOLO-3-Bypass; das
+ * Systemprofil hält die Recovery-Grenze auch bei yolo-full ein.
  */
 function recoveryGateBlocks(
   armed: boolean,
@@ -188,20 +215,18 @@ function normalizeNativeFileTarget(
   event: ToolCallEvent,
   cwd: string,
   additionalRoots: readonly string[] = [],
+  systemFileRoots: readonly string[] = [],
 ): void {
-  if (
-    event.toolName !== "read" &&
-    event.toolName !== "write" &&
-    event.toolName !== "edit"
-  ) {
-    return;
-  }
+  if (!NATIVE_FILE_TOOLS.has(event.toolName)) return;
   const input = event.input as Record<string, unknown>;
   const field = typeof input.path === "string" ? "path" : "filePath";
   const rawPath = input[field];
   if (typeof rawPath !== "string") return;
 
-  const identity = resolvePathScope(rawPath, cwd, additionalRoots);
+  const identity = resolvePathScope(rawPath, cwd, [
+    ...additionalRoots,
+    ...systemFileRoots,
+  ]);
   if (
     identity.canonicalPath === undefined ||
     identity.canonicalPath === identity.lexicalPath
@@ -300,10 +325,28 @@ export function registerPermissionGuards(
     }
     if (!outcome?.block) {
       parentRunAgents.commit(launches);
+      const systemProfile = getPiLaunchProfile() === "system";
+      const systemWorkspaceRoot = systemProfile
+        ? resolveSystemWorkspaceRoot(ctx.cwd)
+        : undefined;
       const additionalRoots = session.additionalWorkspaceRoots();
+      const systemFileRoots = NATIVE_FILE_TOOLS.has(event.toolName)
+        ? session.systemFileRoots()
+        : [];
       const path = toolPath(event);
       const pathRoot = path
-        ? resolvePathScope(path, ctx.cwd, additionalRoots).workspaceRoot
+        ? resolvePathScope(path, ctx.cwd, [
+            ...additionalRoots,
+            ...systemFileRoots,
+          ]).workspaceRoot
+        : undefined;
+      const canonicalPathRoot = pathRoot
+        ? systemWorkspaceRoot &&
+          resolveSystemWorkspaceRoot(pathRoot) === systemWorkspaceRoot
+          ? systemWorkspaceRoot
+          : systemProfile && session.isSystemFileRoot(pathRoot)
+            ? pathRoot
+            : (canonicalWorkspaceRoot(pathRoot) ?? resolve(pathRoot))
         : undefined;
       const explicitRoot = (event.input as Record<string, unknown> | undefined)
         ?.workspaceRoot;
@@ -312,9 +355,7 @@ export function registerPermissionGuards(
         input: event.input,
         toolCallId: event.toolCallId,
         workspaceRoot:
-          (pathRoot
-            ? (canonicalWorkspaceRoot(pathRoot) ?? resolve(pathRoot))
-            : undefined) ??
+          canonicalPathRoot ??
           (typeof explicitRoot === "string" ? explicitRoot : undefined) ??
           canonicalWorkspaceRoot(ctx.cwd) ??
           resolve(ctx.cwd),
@@ -325,10 +366,179 @@ export function registerPermissionGuards(
 
   const guardToolCall = async (event: ToolCallEvent, ctx: ExtensionContext) => {
     let additionalRoots = session.additionalWorkspaceRoots();
+    const systemProfile = getPiLaunchProfile() === "system";
+    const systemWorkspaceRoot = systemProfile
+      ? resolveSystemWorkspaceRoot(ctx.cwd)
+      : undefined;
+    let systemFileRoots = systemProfile ? session.systemFileRoots() : [];
     let scopedProjectRoot = ctx.cwd;
     let targetIdentity = toolPath(event)
       ? resolvePathScope(toolPath(event)!, ctx.cwd, additionalRoots)
-      : undefined;
+      : NATIVE_FILE_TOOLS.has(event.toolName)
+        ? resolvePathScope(".", ctx.cwd, additionalRoots)
+        : undefined;
+
+    if (
+      systemProfile &&
+      NATIVE_FILE_TOOLS.has(event.toolName) &&
+      !systemWorkspaceRoot
+    ) {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason:
+          "System-Dateizugriff gesperrt: ctx.cwd, PI_SYSTEM_WORKSPACE und der private Launcher-Workspace stimmen nicht kanonisch überein oder der Workspace ist nicht privat.",
+      };
+    }
+    if (systemProfile && event.toolName === "workspace_add") {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason:
+          "workspace_add erteilt im Systemprofil keinen Projekt-Trust. Einen externen Git-Root nur über den sichtbaren, sitzungsgebundenen Datei-Scope für native Dateiwerkzeuge freigeben.",
+      };
+    }
+    if (
+      systemProfile &&
+      event.toolName === "project_check" &&
+      !ctx.isProjectTrusted()
+    ) {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason:
+          "project_check benötigt echten Projekt-Trust; ein System-Datei-Scope autorisiert weder Projekt-Setup noch Verifikationsprofile.",
+      };
+    }
+
+    if (systemProfile && NATIVE_FILE_TOOLS.has(event.toolName)) {
+      const path =
+        toolPath(event) ??
+        (event.toolName === "grep" ||
+        event.toolName === "find" ||
+        event.toolName === "ls"
+          ? "."
+          : undefined);
+      if (!path || !targetIdentity) {
+        return {
+          block: true,
+          ...stopNonInteractive(ctx),
+          reason:
+            "System-Datei-Scope benötigt ein eindeutig aufgelöstes natives Dateiziel.",
+        };
+      }
+      const targetPath =
+        targetIdentity.canonicalPath ?? targetIdentity.lexicalPath;
+      const initialRoot =
+        targetIdentity.workspaceRoot ??
+        (targetIdentity.scope === "external"
+          ? gitWorkspaceRootForPath(targetPath)
+          : undefined);
+      if (
+        NATIVE_WRITE_TOOLS.has(event.toolName) &&
+        initialRoot &&
+        isSystemProjectPolicyConfig(initialRoot, targetPath)
+      ) {
+        return {
+          block: true,
+          ...stopNonInteractive(ctx),
+          reason:
+            "System-Datei-Scopes dürfen keine Projekt-Setup- oder Verifikationskonfiguration ändern.",
+        };
+      }
+      if (targetIdentity.scope === "external") {
+        if (!ctx.hasUI) {
+          return {
+            block: true,
+            ...stopNonInteractive(ctx),
+            reason:
+              "Externer Datei-Scope benötigt eine sichtbare UI-Freigabe; dieser Modus hat keinen Bestätigungsdialog.",
+          };
+        }
+        if (
+          NATIVE_WRITE_TOOLS.has(event.toolName) &&
+          session.level() === "readonly"
+        ) {
+          return {
+            block: true,
+            ...stopNonInteractive(ctx),
+            reason: "Readonly erlaubt keinen externen Datei-Schreibscope.",
+          };
+        }
+        if (session.level() === "headless") {
+          return {
+            block: true,
+            ...stopNonInteractive(ctx),
+            reason:
+              "Headless erlaubt keine externe Datei-Scope-Erweiterung, auch wenn ein UI-Kanal verfügbar ist.",
+          };
+        }
+        if (
+          isSensitivePathIdentity(path, targetIdentity) ||
+          targetIdentity.symlinkEscape ||
+          targetIdentity.targetKind === "other" ||
+          (NATIVE_WRITE_TOOLS.has(event.toolName) &&
+            targetIdentity.targetKind === "directory") ||
+          targetIdentity.targetKind === "dangling-symlink"
+        ) {
+          return {
+            block: true,
+            ...stopNonInteractive(ctx),
+            reason:
+              "Externer Datei-Scope blockiert: Secret, Spezialdatei, Symlink-Escape oder nicht sicher aufgelöstes Ziel.",
+          };
+        }
+        const candidateRoot = gitWorkspaceRootForPath(targetPath);
+        if (!candidateRoot) {
+          return {
+            block: true,
+            ...stopNonInteractive(ctx),
+            reason:
+              "Externer Datei-Scope benötigt einen erreichbaren Git-Root; Fremdroots ohne eindeutige Git-Wurzel bleiben gesperrt.",
+          };
+        }
+        const approval = await session.authorizeSystemFileRoot(
+          candidateRoot,
+          ctx,
+        );
+        if (!approval.approved) {
+          return {
+            block: true,
+            ...stopNonInteractive(ctx),
+            reason:
+              approval.reason ?? "Externer Datei-Scope nicht freigegeben.",
+          };
+        }
+        systemFileRoots = session.systemFileRoots();
+        targetIdentity = resolvePathScope(path, ctx.cwd, [
+          ...additionalRoots,
+          ...systemFileRoots,
+        ]);
+        if (
+          targetIdentity.workspaceRoot !== approval.root ||
+          targetIdentity.scope !== "project" ||
+          targetIdentity.symlinkEscape
+        ) {
+          return {
+            block: true,
+            ...stopNonInteractive(ctx),
+            reason:
+              "Externer Datei-Scope verworfen: Das native Ziel gehört nach der kanonischen Prüfung nicht zur bestätigten Git-Wurzel.",
+          };
+        }
+      }
+    }
+
+    const systemFileScopeAllowed = Boolean(
+      systemProfile &&
+      systemWorkspaceRoot &&
+      NATIVE_FILE_TOOLS.has(event.toolName) &&
+      targetIdentity &&
+      !targetIdentity.symlinkEscape &&
+      targetIdentity.scope === "project" &&
+      (targetIdentity.workspaceRoot === resolve(ctx.cwd) ||
+        session.isSystemFileRoot(targetIdentity.workspaceRoot ?? "")),
+    );
 
     if (event.toolName === "project_check") {
       const input = event.input as Record<string, unknown>;
@@ -408,16 +618,19 @@ export function registerPermissionGuards(
       (scopedProjectRoot ===
         (canonicalWorkspaceRoot(ctx.cwd) ?? resolve(ctx.cwd)) ||
         session.isAdditionalWorkspaceRoot(scopedProjectRoot));
+    const systemFullAccessBypass =
+      !systemProfile && session.level() === "yolo-full";
     if (
       !ctx.isProjectTrusted() &&
       !(
         getPiLaunchProfile() === "system" &&
         SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)
       ) &&
-      session.level() !== "yolo-full" &&
+      !systemFullAccessBypass &&
       event.toolName !== "workspace_add" &&
       !targetRootTrusted &&
-      !projectCheckRootTrusted
+      !projectCheckRootTrusted &&
+      !systemFileScopeAllowed
     ) {
       if (!READ_ONLY_TOOLS.includes(event.toolName)) {
         return {
@@ -489,11 +702,18 @@ export function registerPermissionGuards(
           "Planmodus: Systemmutationen und geschützte System-Shell-Befehle sind gesperrt.",
       };
     }
+    const filePolicyLevel =
+      systemProfile &&
+      NATIVE_FILE_TOOLS.has(event.toolName) &&
+      session.level() === "yolo-full"
+        ? "project-write"
+        : session.level();
     const assessment = assessWorkflowTool(
       event,
       ctx.cwd,
-      session.level(),
+      filePolicyLevel,
       additionalRoots,
+      NATIVE_FILE_TOOLS.has(event.toolName) ? systemFileRoots : [],
     );
     if (assessment.blocked) {
       return {
@@ -584,12 +804,14 @@ export function registerPermissionGuards(
       };
     }
     // Recovery ist eine Workspace-Integritätsgrenze, keine Permission-Rückfrage.
-    // YOLO 3 übergeht sie ausdrücklich als Vollzugriffsstufe.
+    // Nur das reguläre Projektprofil übergeht sie bei YOLO 3 ausdrücklich.
     const effect = guardedRecoveryEffect(event, ctx.cwd);
     const recoveryEpoch = session.epoch();
+    const yoloFullRecoveryBypass =
+      !systemProfile && session.level() === "yolo-full";
     const recovery =
       effect === "potentially_mutating" &&
-      session.level() !== "yolo-full" &&
+      !yoloFullRecoveryBypass &&
       session.level() !== "readonly"
         ? await requestRecoveryStatus(
             pi.events,
@@ -604,7 +826,7 @@ export function registerPermissionGuards(
         : { armed: false as const };
     if (
       effect === "potentially_mutating" &&
-      session.level() !== "yolo-full" &&
+      !yoloFullRecoveryBypass &&
       session.level() !== "readonly" &&
       recoveryEpoch !== session.epoch()
     ) {
@@ -616,7 +838,7 @@ export function registerPermissionGuards(
       };
     }
     if (
-      session.level() !== "yolo-full" &&
+      !yoloFullRecoveryBypass &&
       session.level() !== "readonly" &&
       recoveryGateBlocks(recovery.armed, event, ctx.cwd)
     ) {
@@ -634,7 +856,7 @@ export function registerPermissionGuards(
 
     const planGuard = planModeMutationGuard(
       workflow,
-      session.level(),
+      filePolicyLevel,
       event,
       ctx.cwd,
     );
@@ -647,17 +869,25 @@ export function registerPermissionGuards(
     }
 
     const decision = decideTool(
-      session.level(),
+      filePolicyLevel,
       event,
       ctx.cwd,
       session.configured(),
       {
         allowOutsideProjectRead: assessment.allowOutsideProjectRead,
         additionalRoots,
+        systemFileRoots: NATIVE_FILE_TOOLS.has(event.toolName)
+          ? systemFileRoots
+          : [],
       },
     );
     if (decision.action === "allow") {
-      normalizeNativeFileTarget(event, ctx.cwd, additionalRoots);
+      normalizeNativeFileTarget(
+        event,
+        ctx.cwd,
+        additionalRoots,
+        systemFileRoots,
+      );
       return;
     }
     if (decision.action === "block") {
@@ -692,7 +922,7 @@ export function registerPermissionGuards(
     if (!confirmed) {
       return { block: true, reason: "Aktion vom Benutzer abgelehnt." };
     }
-    normalizeNativeFileTarget(event, ctx.cwd, additionalRoots);
+    normalizeNativeFileTarget(event, ctx.cwd, additionalRoots, systemFileRoots);
   };
 
   // user_bash fires only for a `!`/`!!`-prefixed command the human types
@@ -705,7 +935,10 @@ export function registerPermissionGuards(
   // during a planning turn, not to restrict what the operator types at
   // their own keyboard.
   pi.on("user_bash", async (event, ctx: ExtensionContext) => {
-    if (!ctx.isProjectTrusted() && session.level() !== "yolo-full") {
+    if (
+      !ctx.isProjectTrusted() &&
+      (getPiLaunchProfile() === "system" || session.level() !== "yolo-full")
+    ) {
       return {
         result: {
           output:

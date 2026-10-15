@@ -65,6 +65,7 @@ function decideToolBase(
   options: {
     allowOutsideProjectRead?: boolean;
     additionalRoots?: readonly string[];
+    systemFileRoots?: readonly string[];
   } = {},
 ): PolicyDecision {
   if (getPiLaunchProfile() === "system") {
@@ -156,6 +157,7 @@ function decideToolBase(
       {
         allowOutsideProjectRead: options.allowOutsideProjectRead,
         additionalRoots: options.additionalRoots,
+        systemFileRoots: options.systemFileRoots,
       },
     );
   }
@@ -220,6 +222,7 @@ function decideToolBase(
     const filePath = toolPath(event) ?? "";
     return decideFileAccess(permissionLevel, "write", filePath, cwd, {
       additionalRoots: options.additionalRoots,
+      systemFileRoots: options.systemFileRoots,
     });
   }
 
@@ -274,6 +277,7 @@ export function decideTool(
   options: {
     allowOutsideProjectRead?: boolean;
     additionalRoots?: readonly string[];
+    systemFileRoots?: readonly string[];
   } = {},
 ): PolicyDecision {
   const decision = decideToolBase(

@@ -33,6 +33,7 @@ import { registerPermissionGuards } from "./permissions/guards.ts";
 import { openPermissionMenu } from "./permissions/menus.ts";
 import { createPermissionSession } from "./permissions/session-state.ts";
 import { createThinkingControl } from "./permissions/thinking-control.ts";
+import { getPiLaunchProfile } from "./shared/profile.ts";
 
 export default function modePermissionsExtension(pi: ExtensionAPI): void {
   const thinking = createThinkingControl(pi);
@@ -45,7 +46,9 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     name: "workspace_add",
     label: "Projektwurzel freigeben",
     description:
-      "Bittet den Nutzer um UI-Freigabe, ein zusätzliches Projekt bis zum Ende dieser Sitzung in den Workspace-Scope aufzunehmen. Die Freigabe erweitert nur die Projektwurzel; die aktuelle Berechtigungsstufe, Secret-Grenzen und Planmodus-Regeln gelten weiter.",
+      getPiLaunchProfile() === "system"
+        ? "Im Systemprofil gesperrt: workspace_add erteilt keinen Projekt-Trust. Einen externen Git-Root bei Bedarf ausschließlich über den sichtbaren, sitzungsgebundenen Datei-Scope für native Dateiwerkzeuge freigeben."
+        : "Bittet den Nutzer um UI-Freigabe, ein zusätzliches Projekt bis zum Ende dieser Sitzung in den Workspace-Scope aufzunehmen. Die Freigabe erweitert nur die Projektwurzel; die aktuelle Berechtigungsstufe, Secret-Grenzen und Planmodus-Regeln gelten weiter.",
     promptSnippet:
       "Request the user's session-only UI approval before working in an additional project root.",
     parameters: Type.Object({ path: Type.String() }),

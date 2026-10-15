@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { delimiter, join } from "node:path";
 import { assert, eq, test } from "../shared/assertions.mjs";
 import { createHarness } from "../shared/harness.mjs";
@@ -41,6 +42,96 @@ const subagentGuard = await load(
 const modelFallback = await load(
   "npm/node_modules/pi-subagents/src/runs/shared/model-fallback.ts",
 );
+
+function createSystemFileScopeFixture() {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-system-file-scope-agent-"));
+  const profileState = join(agentDir, "profile-state");
+  const systemState = join(profileState, "system");
+  const workspace = join(systemState, "workspace");
+  mkdirSync(workspace, { recursive: true });
+  for (const directory of [profileState, systemState, workspace]) {
+    chmodSync(directory, 0o700);
+  }
+
+  const externalRoot = mkdtempSync(join(tmpdir(), "pi-system-file-scope-git-"));
+  const foreignRoot = mkdtempSync(
+    join(tmpdir(), "pi-system-file-scope-foreign-"),
+  );
+  const symlinkTarget = mkdtempSync(
+    join(tmpdir(), "pi-system-file-scope-link-"),
+  );
+  return { agentDir, workspace, externalRoot, foreignRoot, symlinkTarget };
+}
+
+function initializeSystemFileScopeGitRoot(fixture) {
+  execFileSync("git", ["init", "--quiet"], { cwd: fixture.externalRoot });
+}
+
+function setSystemFileScopeEnvironment(fixture) {
+  const keys = [
+    "PI_LAUNCH_PROFILE",
+    "PI_SYSTEM_WORKSPACE",
+    "PI_CODING_AGENT_DIR",
+  ];
+  const previous = new Map(keys.map((key) => [key, process.env[key]]));
+  process.env.PI_LAUNCH_PROFILE = "system";
+  process.env.PI_SYSTEM_WORKSPACE = fixture.workspace;
+  process.env.PI_CODING_AGENT_DIR = fixture.agentDir;
+  return () => {
+    for (const key of keys) {
+      const value = previous.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
+
+function removeSystemFileScopeFixture(fixture) {
+  for (const path of [
+    fixture.agentDir,
+    fixture.externalRoot,
+    fixture.foreignRoot,
+    fixture.symlinkTarget,
+  ]) {
+    rmSync(path, { recursive: true, force: true });
+  }
+}
+
+async function startSystemFileScopeHarness(fixture, options = {}) {
+  const recoveryState = options.recoveryState ?? { armed: false };
+  const workflowMode = options.workflowMode;
+  const harnessOptions = { ...options };
+  delete harnessOptions.recoveryState;
+  delete harnessOptions.workflowMode;
+  const harness = createHarness({
+    confirm: true,
+    sessionId: "system-file-scope-session",
+    ...harnessOptions,
+  });
+  harness.api.events.on("recovery-status:request", (request) =>
+    request.respond({ armed: recoveryState.armed }),
+  );
+  if (workflowMode) {
+    harness.api.events.on("workflow-capabilities:request", (request) =>
+      request.respond({ mode: workflowMode }),
+    );
+  }
+  planMode.default(harness.api);
+  modePermissions.default(harness.api);
+  const context = harness.makeContext({
+    cwd: fixture.workspace,
+    mode: "tui",
+    trusted: false,
+    ...options.context,
+  });
+  context.ui.custom = () => {
+    throw new Error(
+      "custom overlays are unavailable in the permission harness",
+    );
+  };
+  await harness.runHooks("session_start", {}, context);
+  return { harness, context, recoveryState };
+}
 
 await test("recovery capability effects fail closed outside known read-only tools", () => {
   if (!recoveryCapabilities) return;
@@ -3470,6 +3561,768 @@ await test("untrusted projects block external reads and symlink escapes at the t
     ),
     "three identical blocked actions terminate a repeated tool loop with an actionable reason",
   );
+});
+
+await test("system profile permits native file tools in its canonical private workspace while trusted is false", async () => {
+  if (!modePermissions || !planMode) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  try {
+    writeFileSync(join(fixture.workspace, "notes.txt"), "needle\n");
+    const { harness, context } = await startSystemFileScopeHarness(fixture);
+    assert(!context.isProjectTrusted(), "system workspace remains untrusted");
+
+    const calls = [
+      ["read", { path: join(fixture.workspace, "notes.txt") }],
+      ["write", { path: join(fixture.workspace, "new.txt"), content: "x" }],
+      [
+        "edit",
+        {
+          filePath: join(fixture.workspace, "notes.txt"),
+          oldText: "needle",
+          newText: "changed",
+        },
+      ],
+      ["grep", { path: fixture.workspace, pattern: "needle" }],
+      ["find", { path: fixture.workspace, pattern: "*.txt" }],
+      ["ls", {}],
+    ];
+    for (const [toolName, input] of calls) {
+      const result = await harness.runHooks(
+        "tool_call",
+        { toolName, input },
+        context,
+      );
+      assert(
+        result.every((entry) => !entry?.block),
+        `${toolName} is available inside the canonical private System workspace: ${JSON.stringify(result)}`,
+      );
+    }
+    await harness.runHooks("session_shutdown", {}, context);
+  } finally {
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
+});
+
+await test("system profile name alone or a mismatched PI_SYSTEM_WORKSPACE grants no file scope", async () => {
+  if (!modePermissions || !planMode) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  try {
+    for (const marker of [undefined, fixture.foreignRoot]) {
+      if (marker === undefined) delete process.env.PI_SYSTEM_WORKSPACE;
+      else process.env.PI_SYSTEM_WORKSPACE = marker;
+      const { harness, context } = await startSystemFileScopeHarness(fixture);
+      const result = await harness.runHooks(
+        "tool_call",
+        {
+          toolName: "read",
+          input: { path: join(fixture.workspace, "notes.txt") },
+        },
+        context,
+      );
+      assert(
+        result.some(
+          (entry) =>
+            entry?.block && entry.reason.includes("PI_SYSTEM_WORKSPACE"),
+        ),
+        "a profile label without matching canonical launcher path fails closed",
+      );
+      await harness.runHooks("session_shutdown", {}, context);
+    }
+  } finally {
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
+});
+
+await test("external System file scope is separate from project trust and allows native file tools", async () => {
+  if (!modePermissions || !planMode || !workspaceScope) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  try {
+    initializeSystemFileScopeGitRoot(fixture);
+    const existingFile = join(fixture.externalRoot, "existing.txt");
+    writeFileSync(existingFile, "before\n");
+    const { harness, context } = await startSystemFileScopeHarness(fixture);
+    const write = async (path) =>
+      harness.runHooks(
+        "tool_call",
+        { toolName: "write", input: { path, content: "after\n" } },
+        context,
+      );
+    const firstRead = await harness.runHooks(
+      "tool_call",
+      { toolName: "read", input: { path: existingFile } },
+      context,
+    );
+    assert(
+      firstRead.every((entry) => !entry?.block),
+      "the first external read obtains a visible file-scope approval",
+    );
+    const scopePrompt = harness.lifecycleCalls.find(
+      (call) => call.kind === "confirm" && call.title.includes("Datei-Scope"),
+    );
+    assert(
+      scopePrompt,
+      "the first native file access shows a visible scope dialog",
+    );
+    assert(
+      scopePrompt.message.includes("read/grep/find/ls/write/edit") &&
+        scopePrompt.message.includes("ändert weder Projekt-Trust"),
+      "dialog describes the limited file scope",
+    );
+    const first = await write(join(fixture.externalRoot, "new-a.txt"));
+    assert(
+      first.every((entry) => !entry?.block),
+      "the first external write is allowed after scope approval",
+    );
+    eq(
+      harness.lifecycleCalls.filter((call) => call.kind === "confirm").length,
+      1,
+      "project-write confirms the scope once, not every ordinary mutation",
+    );
+    assert(
+      !context.isProjectTrusted(),
+      "file scope does not change project trust",
+    );
+    eq(
+      workspaceScope.requestWorkspaceScope(
+        harness.api.events,
+        fixture.workspace,
+        "system-file-scope-session",
+      ).additionalRoots,
+      [],
+      "file scope stays out of additionalWorkspaceRoots",
+    );
+    for (const [toolName, input] of [
+      ["grep", { path: fixture.externalRoot, pattern: "before" }],
+      ["find", { path: fixture.externalRoot, pattern: "*.txt" }],
+      ["ls", { path: fixture.externalRoot }],
+    ]) {
+      const result = await harness.runHooks(
+        "tool_call",
+        { toolName, input },
+        context,
+      );
+      assert(
+        result.every((entry) => !entry?.block),
+        `${toolName} works within the approved native file scope`,
+      );
+    }
+
+    assert(
+      (await write(join(fixture.externalRoot, "new-b.txt"))).every(
+        (entry) => !entry?.block,
+      ),
+      "a second native write uses the same session file scope",
+    );
+    const edit = await harness.runHooks(
+      "tool_call",
+      {
+        toolName: "edit",
+        input: { filePath: existingFile, oldText: "before", newText: "after" },
+      },
+      context,
+    );
+    assert(
+      edit.every((entry) => !entry?.block),
+      "native edit uses the approved scope",
+    );
+    eq(
+      harness.lifecycleCalls.filter((call) => call.kind === "confirm").length,
+      1,
+      "repeated write/edit calls do not repeat the scope dialog",
+    );
+
+    await harness.commands.get("permission")("confirm-all", context);
+    const confirmAllFirst = await write(
+      join(fixture.externalRoot, "confirm-a.txt"),
+    );
+    const confirmAllSecond = await write(
+      join(fixture.externalRoot, "confirm-b.txt"),
+    );
+    assert(
+      confirmAllFirst.every((entry) => !entry?.block),
+      "confirm-all can approve a scoped mutation",
+    );
+    assert(
+      confirmAllSecond.every((entry) => !entry?.block),
+      "confirm-all keeps allowing scoped mutations after approval",
+    );
+    eq(
+      harness.lifecycleCalls.filter((call) => call.kind === "confirm").length,
+      3,
+      "confirm-all separately confirms each mutation after the one scope dialog",
+    );
+
+    for (const configPath of [".pi/setup.json", ".pi/verify.json"]) {
+      const result = await write(join(fixture.externalRoot, configPath));
+      assert(
+        result.some(
+          (entry) => entry?.block && entry.reason.includes("Projekt-Setup"),
+        ),
+        `${configPath} cannot be changed through the file scope`,
+      );
+    }
+    const projectCheck = await harness.runHooks(
+      "tool_call",
+      {
+        toolName: "project_check",
+        input: { profile: "verify", workspaceRoot: fixture.externalRoot },
+      },
+      context,
+    );
+    assert(
+      projectCheck.some(
+        (entry) =>
+          entry?.block && entry.reason.includes("echten Projekt-Trust"),
+      ),
+      "a file scope does not authorize project_check",
+    );
+    const workspaceAdd = await harness.runHooks(
+      "tool_call",
+      { toolName: "workspace_add", input: { path: fixture.externalRoot } },
+      context,
+    );
+    assert(
+      workspaceAdd.some((entry) => entry?.block),
+      "workspace_add cannot grant project trust in system profile",
+    );
+    let directWorkspaceAddError;
+    try {
+      await harness.tools
+        .get("workspace_add")
+        .execute(
+          "system-workspace-add",
+          { path: fixture.externalRoot },
+          undefined,
+          undefined,
+          context,
+        );
+    } catch (error) {
+      directWorkspaceAddError = String(error);
+    }
+    assert(
+      directWorkspaceAddError?.includes(
+        "erteilt im Systemprofil keinen Projekt-Trust",
+      ),
+      "the workspace_add executor also refuses to turn file scope into project trust",
+    );
+    const bash = await harness.runHooks(
+      "tool_call",
+      { toolName: "bash", input: { command: "git status --short" } },
+      context,
+    );
+    assert(
+      bash.some(
+        (entry) => entry?.block && entry.reason.includes("Harte Trust-Grenze"),
+      ),
+      "file scope does not authorize Bash",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+  } finally {
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
+});
+
+await test("System external scopes reject secrets, protected and special files, symlink escapes and roots without Git", async () => {
+  if (!modePermissions || !planMode) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  const socketServer = createServer();
+  try {
+    initializeSystemFileScopeGitRoot(fixture);
+    symlinkSync(fixture.symlinkTarget, join(fixture.externalRoot, "escape"));
+    const socketPath = join(fixture.externalRoot, "special.sock");
+    await new Promise((resolve, reject) => {
+      socketServer.once("error", reject);
+      socketServer.listen(socketPath, resolve);
+    });
+    const { harness, context } = await startSystemFileScopeHarness(fixture);
+    const blocked = async (path) =>
+      harness.runHooks(
+        "tool_call",
+        { toolName: "write", input: { path, content: "x" } },
+        context,
+      );
+    for (const path of [
+      join(fixture.externalRoot, ".env"),
+      join(fixture.externalRoot, ".git", "config"),
+      socketPath,
+      join(fixture.externalRoot, "escape", "new.txt"),
+      join(fixture.foreignRoot, "new.txt"),
+    ]) {
+      const result = await blocked(path);
+      assert(
+        result.some((entry) => entry?.block),
+        `${path} fails closed`,
+      );
+    }
+    eq(
+      harness.lifecycleCalls.filter((call) => call.kind === "confirm").length,
+      0,
+      "secret, protected file, special target, symlink escape and non-Git root are denied before scope approval",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+  } finally {
+    if (socketServer.listening) {
+      await new Promise((resolve, reject) =>
+        socketServer.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
+});
+
+await test("System external scopes fail closed on rejection, readonly, headless and session changes", async () => {
+  if (!modePermissions || !planMode) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  try {
+    initializeSystemFileScopeGitRoot(fixture);
+    const target = join(fixture.externalRoot, "new.txt");
+
+    const rejected = await startSystemFileScopeHarness(fixture, {
+      confirm: false,
+    });
+    const rejection = await rejected.harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: target, content: "x" } },
+      rejected.context,
+    );
+    assert(
+      rejection.some(
+        (entry) => entry?.block && entry.reason.includes("abgelehnt"),
+      ),
+      "a declined visible scope remains blocked",
+    );
+    await rejected.harness.runHooks("session_shutdown", {}, rejected.context);
+
+    const readonly = await startSystemFileScopeHarness(fixture, {
+      sessionId: "system-readonly",
+    });
+    await readonly.harness.commands.get("permission")(
+      "readonly",
+      readonly.context,
+    );
+    const readonlyResult = await readonly.harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: target, content: "x" } },
+      readonly.context,
+    );
+    assert(
+      readonlyResult.some(
+        (entry) => entry?.block && entry.reason.includes("Readonly"),
+      ),
+      "readonly blocks before scope approval",
+    );
+    eq(
+      readonly.harness.lifecycleCalls.filter((call) => call.kind === "confirm")
+        .length,
+      0,
+      "readonly does not prompt",
+    );
+    await readonly.harness.runHooks("session_shutdown", {}, readonly.context);
+
+    const headlessLevel = await startSystemFileScopeHarness(fixture, {
+      sessionId: "system-headless-level",
+    });
+    await headlessLevel.harness.commands.get("permission")(
+      "headless",
+      headlessLevel.context,
+    );
+    const headlessLevelResult = await headlessLevel.harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: target, content: "x" } },
+      headlessLevel.context,
+    );
+    assert(
+      headlessLevelResult.some(
+        (entry) => entry?.block && entry.reason.includes("Headless"),
+      ),
+      "the headless permission level cannot acquire an external scope",
+    );
+    eq(
+      headlessLevel.harness.lifecycleCalls.filter(
+        (call) => call.kind === "confirm",
+      ).length,
+      0,
+      "headless permission does not prompt",
+    );
+    await headlessLevel.harness.runHooks(
+      "session_shutdown",
+      {},
+      headlessLevel.context,
+    );
+
+    const headless = await startSystemFileScopeHarness(fixture, {
+      sessionId: "system-headless",
+      context: { mode: "rpc" },
+    });
+    const headlessResult = await headless.harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: target, content: "x" } },
+      headless.context,
+    );
+    assert(
+      headlessResult.some(
+        (entry) =>
+          entry?.block && entry.reason.includes("keinen Bestätigungsdialog"),
+      ),
+      "headless has a clear fail-closed reason",
+    );
+    eq(
+      headless.harness.lifecycleCalls.filter((call) => call.kind === "confirm")
+        .length,
+      0,
+      "headless never tries to prompt",
+    );
+    await headless.harness.runHooks("session_shutdown", {}, headless.context);
+
+    let switchingHarness;
+    let originalContext;
+    switchingHarness = createHarness({
+      sessionId: "system-switch-a",
+      confirm: async () => {
+        await switchingHarness.runHooks(
+          "session_shutdown",
+          {},
+          originalContext,
+        );
+        const nextContext = switchingHarness.makeContext({
+          cwd: fixture.workspace,
+          mode: "tui",
+          trusted: false,
+          sessionId: "system-switch-b",
+        });
+        await switchingHarness.runHooks("session_start", {}, nextContext);
+        return true;
+      },
+    });
+    switchingHarness.api.events.on("recovery-status:request", (request) =>
+      request.respond({ armed: false }),
+    );
+    planMode.default(switchingHarness.api);
+    modePermissions.default(switchingHarness.api);
+    originalContext = switchingHarness.makeContext({
+      cwd: fixture.workspace,
+      mode: "tui",
+      trusted: false,
+      sessionId: "system-switch-a",
+    });
+    await switchingHarness.runHooks("session_start", {}, originalContext);
+    const changedSessionResult = await switchingHarness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: target, content: "x" } },
+      originalContext,
+    );
+    assert(
+      changedSessionResult.some(
+        (entry) => entry?.block && entry.reason.includes("Sitzung"),
+      ),
+      "a session switch during the UI dialog invalidates the pending scope",
+    );
+  } finally {
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
+});
+
+await test("System file scopes restore only for the same session and stay outside project roots", async () => {
+  if (!modePermissions || !planMode || !workspaceScope) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  try {
+    initializeSystemFileScopeGitRoot(fixture);
+    const first = await startSystemFileScopeHarness(fixture, {
+      sessionId: "system-resume-a",
+    });
+    const firstWrite = await first.harness.runHooks(
+      "tool_call",
+      {
+        toolName: "write",
+        input: { path: join(fixture.externalRoot, "first.txt"), content: "x" },
+      },
+      first.context,
+    );
+    assert(
+      firstWrite.every((entry) => !entry?.block),
+      "initial session approves the Git root",
+    );
+    const approval = first.harness.appended.find(
+      (entry) => entry.customType === "system-file-scope-approved",
+    );
+    assert(approval, "the file scope is persisted as its own session entry");
+    await first.harness.runHooks("session_shutdown", {}, first.context);
+
+    const resumed = await startSystemFileScopeHarness(fixture, {
+      sessionId: "system-resume-a",
+      entries: [approval],
+    });
+    const resumedWrite = await resumed.harness.runHooks(
+      "tool_call",
+      {
+        toolName: "edit",
+        input: { filePath: join(fixture.externalRoot, "second.txt") },
+      },
+      resumed.context,
+    );
+    assert(
+      resumedWrite.every((entry) => !entry?.block),
+      "the same session restores its canonical file scope",
+    );
+    eq(
+      resumed.harness.lifecycleCalls.filter((call) => call.kind === "confirm")
+        .length,
+      0,
+      "same-session restore needs no second scope dialog",
+    );
+    eq(
+      workspaceScope.requestWorkspaceScope(
+        resumed.harness.api.events,
+        fixture.workspace,
+        "system-resume-a",
+      ).additionalRoots,
+      [],
+      "restored file scope is still not a project root",
+    );
+    await resumed.harness.runHooks("session_shutdown", {}, resumed.context);
+
+    const fresh = await startSystemFileScopeHarness(fixture, {
+      sessionId: "system-resume-b",
+      entries: [approval],
+    });
+    const freshWrite = await fresh.harness.runHooks(
+      "tool_call",
+      {
+        toolName: "write",
+        input: { path: join(fixture.externalRoot, "third.txt"), content: "x" },
+      },
+      fresh.context,
+    );
+    assert(
+      freshWrite.every((entry) => !entry?.block),
+      "a fresh session can request a new approval",
+    );
+    eq(
+      fresh.harness.lifecycleCalls.filter((call) => call.kind === "confirm")
+        .length,
+      1,
+      "a different session does not inherit the approval",
+    );
+    await fresh.harness.runHooks("session_shutdown", {}, fresh.context);
+  } finally {
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
+});
+
+await test("YOLO full keeps System trust and scope gates while normal pi keeps its existing bypass", async () => {
+  if (!modePermissions || !planMode) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  try {
+    initializeSystemFileScopeGitRoot(fixture);
+    writeFileSync(join(fixture.workspace, ".env"), "SECRET=fixture\n");
+    const system = await startSystemFileScopeHarness(fixture, {
+      confirm: false,
+    });
+    await system.harness.commands.get("permission")(
+      "yolo-full",
+      system.context,
+    );
+    const privateWrite = await system.harness.runHooks(
+      "tool_call",
+      {
+        toolName: "write",
+        input: { path: join(fixture.workspace, "yolo.txt"), content: "x" },
+      },
+      system.context,
+    );
+    assert(
+      privateWrite.every((entry) => !entry?.block),
+      "YOLO full follows the ordinary permission level inside the real System workspace",
+    );
+    const externalWrite = await system.harness.runHooks(
+      "tool_call",
+      {
+        toolName: "write",
+        input: { path: join(fixture.externalRoot, "yolo.txt"), content: "x" },
+      },
+      system.context,
+    );
+    assert(
+      externalWrite.some(
+        (entry) => entry?.block && entry.reason.includes("abgelehnt"),
+      ),
+      "YOLO full still needs a visible external scope approval",
+    );
+    const secretRead = await system.harness.runHooks(
+      "tool_call",
+      { toolName: "read", input: { path: join(fixture.workspace, ".env") } },
+      system.context,
+    );
+    assert(
+      secretRead.some((entry) => entry?.block),
+      "YOLO full cannot bypass the System Secret boundary",
+    );
+    const projectCheck = await system.harness.runHooks(
+      "tool_call",
+      {
+        toolName: "project_check",
+        input: { profile: "verify", workspaceRoot: fixture.externalRoot },
+      },
+      system.context,
+    );
+    assert(
+      projectCheck.some((entry) => entry?.block),
+      "YOLO full cannot turn file scope into project trust",
+    );
+    const bash = await system.harness.runHooks(
+      "tool_call",
+      { toolName: "bash", input: { command: "git status --short" } },
+      system.context,
+    );
+    assert(
+      bash.some((entry) => entry?.block),
+      "YOLO full does not grant Shell access in the untrusted System workspace",
+    );
+    await system.harness.runHooks("session_shutdown", {}, system.context);
+
+    const previousProfile = process.env.PI_LAUNCH_PROFILE;
+    const previousSystemWorkspace = process.env.PI_SYSTEM_WORKSPACE;
+    process.env.PI_LAUNCH_PROFILE = "project";
+    delete process.env.PI_SYSTEM_WORKSPACE;
+    const normalRoot = mkdtempSync(
+      join(tmpdir(), "pi-yolo-full-normal-project-"),
+    );
+    try {
+      const normal = createHarness({ sessionId: "normal-yolo-full" });
+      normal.api.events.on("recovery-status:request", (request) =>
+        request.respond({ armed: false }),
+      );
+      planMode.default(normal.api);
+      modePermissions.default(normal.api);
+      const context = normal.makeContext({
+        cwd: normalRoot,
+        mode: "tui",
+        trusted: false,
+      });
+      await normal.runHooks("session_start", {}, context);
+      await normal.commands.get("permission")("yolo-full", context);
+      const write = await normal.runHooks(
+        "tool_call",
+        {
+          toolName: "write",
+          input: { path: join(normalRoot, "yolo.txt"), content: "x" },
+        },
+        context,
+      );
+      assert(
+        write.every((entry) => !entry?.block),
+        "normal pi retains its existing untrusted-project YOLO full behavior",
+      );
+      const bashResult = await normal.runHooks(
+        "tool_call",
+        { toolName: "bash", input: { command: "git status --short" } },
+        context,
+      );
+      assert(
+        bashResult.every((entry) => !entry?.block),
+        "normal pi retains its existing YOLO full Shell behavior",
+      );
+      await normal.runHooks("session_shutdown", {}, context);
+    } finally {
+      if (previousProfile === undefined) delete process.env.PI_LAUNCH_PROFILE;
+      else process.env.PI_LAUNCH_PROFILE = previousProfile;
+      if (previousSystemWorkspace === undefined)
+        delete process.env.PI_SYSTEM_WORKSPACE;
+      else process.env.PI_SYSTEM_WORKSPACE = previousSystemWorkspace;
+      rmSync(normalRoot, { recursive: true, force: true });
+    }
+  } finally {
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
+});
+
+await test("System YOLO full keeps the recovery gate for scoped file writes", async () => {
+  if (!modePermissions || !planMode) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  try {
+    initializeSystemFileScopeGitRoot(fixture);
+    const target = join(fixture.externalRoot, "recovery-blocked.txt");
+    const { harness, context } = await startSystemFileScopeHarness(fixture, {
+      recoveryState: { armed: true },
+    });
+    await harness.commands.get("permission")("yolo-full", context);
+    const result = await harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: target, content: "x" } },
+      context,
+    );
+    assert(
+      result.some(
+        (entry) => entry?.block && /Recovery-Gate/.test(entry.reason),
+      ),
+      "System YOLO full cannot bypass the armed recovery gate after approving an external file scope",
+    );
+    eq(
+      harness.lifecycleCalls.filter(
+        (call) => call.kind === "confirm" && call.title.includes("Datei-Scope"),
+      ).length,
+      1,
+      "recovery blocks the mutation after a single explicit scope approval",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+  } finally {
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
+});
+
+await test("System plan mode blocks writes even after external file-scope approval", async () => {
+  if (!modePermissions || !planMode) return;
+  const fixture = createSystemFileScopeFixture();
+  const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
+  try {
+    initializeSystemFileScopeGitRoot(fixture);
+    const { harness, context } = await startSystemFileScopeHarness(fixture, {
+      workflowMode: "simple_plan",
+    });
+    await harness.commands.get("permission")("yolo-full", context);
+    const result = await harness.runHooks(
+      "tool_call",
+      {
+        toolName: "write",
+        input: {
+          path: join(fixture.externalRoot, "plan-blocked.txt"),
+          content: "x",
+        },
+      },
+      context,
+    );
+    assert(
+      result.some((entry) => entry?.block && /Planmodus/.test(entry.reason)),
+      "System yolo-full still applies the plan-mode mutation gate after external scope approval",
+    );
+    eq(
+      harness.lifecycleCalls.filter(
+        (call) => call.kind === "confirm" && call.title.includes("Datei-Scope"),
+      ).length,
+      1,
+      "the external root scope is explicitly confirmed before the plan gate blocks the write",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+  } finally {
+    restoreEnvironment();
+    removeSystemFileScopeFixture(fixture);
+  }
 });
 
 await test("workspace_add requires UI approval and keeps the root within one session", async () => {
