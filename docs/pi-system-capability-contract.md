@@ -35,7 +35,36 @@ abgenommen.
 - NixOS Generation 61 blieb aktiv; ein NixOS-Build oder -Wechsel wurde nicht
   ausgeführt.
 
-## Zielvertrag: Scope und Grundregeln
+## Offene Policy des Systemprofils (gültig ab 2026-10-15, ADR 036)
+
+`pis` arbeitet auf dem eigenen Rechner offen. Auf den Stufen `project-write`
+(Standard, auch hinter dem Frontend-Host) und `yolo`/`yolo-ask`/`yolo-full`
+gibt es **keine** Trust-, Projekt-, Scope-, Symlink- oder Recovery-Sperren:
+Shell, `read`/`grep`/`find`/`ls`/`write`/`edit`, Subagenten, LSP, Web und
+unbekannte Tools laufen ohne Rückfrage. Vorab bestätigt wird nur, was nicht
+rückgängig zu machen ist oder das System gefährdet (`extensions/permissions/
+system-open-policy.ts`):
+
+- Löschen (`rm`, `rmdir`, `shred`, `find -delete`, Papierkorb-Befehle),
+  Git-Verlust (`clean`, `reset --hard`, Force-/Lösch-Push, `branch -D`,
+  `stash drop`, Historienumschreibung);
+- Datenträger- und Partitionsoperationen (`dd`, `mkfs`, `parted`, `wipefs` …);
+- erhöhte Rechte (`sudo`, `su`, `doas`, `pkexec`), NixOS-Aktivierung,
+  `nix-collect-garbage`, Paketentfernung;
+- Dienst-/Stromsteuerung (`systemctl stop|disable|mask|kill|reboot …`,
+  `reboot`, `shutdown`, `killall`, `pkill`);
+- rekursive Rechteänderung, Schreibzugriff auf Systempfade (`/etc`, `/boot`,
+  `/usr`, Geräte) per Shell oder `write`/`edit`;
+- Zugriff auf Secrets/Zugangsdaten, Download-direkt-in-Shell;
+- typisierte System-Control-Werkzeuge mit Wirkung (wie bisher).
+
+Ohne Bestätigungskanal (kein UI) wird eine solche Aktion strukturiert
+blockiert. `readonly`, `confirm-all` und `headless` bleiben als ausdrücklich
+strengere Wahl mit den unten beschriebenen Grenzen bestehen. Die Prüfung ist
+eine Heuristik vor dem Executor, keine OS-Sandbox; die systemd-Sandbox des
+Hosts begrenzt weiterhin, was der Host-Prozess schreiben kann.
+
+## Strengere Stufen: Scope und Grundregeln (`readonly`, `confirm-all`, `headless`)
 
 1. Die private, vom Launcher festgelegte System-Workspace-Wurzel ist ein
    begrenzter Datei-Scope. Die normale Berechtigungsstufe und Recovery-Grenzen
@@ -59,9 +88,8 @@ abgenommen.
 6. Eine Root-Freigabe erlaubt keinen NixOS-Apply. `nixos_build` bleibt eine
    getrennte, sichtbare Aktion; `nixos_apply` braucht immer eine zusätzliche
    Bestätigung und einen geprüften Rückweg.
-7. Im Systemprofil gibt es keinen `yolo-full`-Pfad, der Scope-, Secret-,
-   Trust- oder Recovery-Grenzen umgeht. Reguläres `pi` behält seine
-   bestehende Policy.
+7. Auf diesen strengeren Stufen gelten die Punkte 1–6 unverändert; die offene
+   Policy oben gilt dort nicht. Reguläres `pi` behält seine bestehende Policy.
 
 ## Capability-Matrix
 

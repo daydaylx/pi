@@ -6,7 +6,7 @@ const GUARDED = new Set([
   "sudo",
 ]);
 
-function shellCommands(command: string): string[][] {
+export function shellCommands(command: string): string[][] {
   const commands: string[][] = [];
   let tokens: string[] = [];
   let token = "";
@@ -52,7 +52,7 @@ function shellCommands(command: string): string[][] {
   return commands;
 }
 
-function flattenTokens(commands: string[][], depth: number): string[] {
+export function flattenTokens(commands: string[][], depth: number): string[] {
   const flattened: string[] = [];
   for (const tokens of commands) {
     for (const token of tokens) {

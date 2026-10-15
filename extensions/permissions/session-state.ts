@@ -557,13 +557,18 @@ export function createPermissionSession(
       // clear signal why. A TUI session keeps today's default unchanged; any
       // project with a prior persisted choice (in any mode) keeps respecting
       // that choice, regardless of mode.
-      // Behind a frontend host the confirm channel exists: ask for everything
-      // that is not plainly inspecting ("confirm-all") instead of denying.
+      // Behind a frontend host the confirm channel exists. The System profile
+      // then works openly ("project-write" = open policy with up-front
+      // confirmation of deletions and other risks, see system-open-policy.ts);
+      // the project profile asks for everything that is not plainly
+      // inspecting ("confirm-all") instead of denying.
       const freshDefaultLevel: PermissionLevel =
         ctx.mode === "tui"
           ? "project-write"
           : confirmChannel
-            ? "confirm-all"
+            ? getPiLaunchProfile() === "system"
+              ? "project-write"
+              : "confirm-all"
             : "headless";
       selectedPermissionLevel = restoredLevel ?? freshDefaultLevel;
       selectedPermissionState =

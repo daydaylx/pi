@@ -38,6 +38,11 @@ import {
   normalizeVerifierDelegationInput,
 } from "./verifier-policy.ts";
 import { assessWebToolInput } from "./web-tools.ts";
+import {
+  systemOpenBashRisk,
+  systemOpenFileRisk,
+  type SystemOpenRisk,
+} from "./system-open-policy.ts";
 import { toolPath } from "./tool-event.ts";
 import {
   getPiLaunchProfile,
@@ -64,6 +69,18 @@ const READ_ONLY_TOOLS = [
   "workspace_add",
   "recovery_check",
 ];
+/**
+ * Stufen, auf denen das Systemprofil (`pis`) offen arbeitet: keine Trust-,
+ * Scope- oder Pfadgrenzen, nur Vorab-Bestätigung für Löschen und andere
+ * Risiken (system-open-policy.ts). readonly, confirm-all und headless bleiben
+ * als ausdrücklich strengere Wahl unverändert.
+ */
+const SYSTEM_OPEN_LEVELS = new Set([
+  "project-write",
+  "yolo",
+  "yolo-ask",
+  "yolo-full",
+]);
 const NATIVE_FILE_TOOLS = new Set([
   "read",
   "write",
@@ -323,7 +340,164 @@ export function registerPermissionGuards(
     return outcome;
   });
 
+  /**
+   * Vertragsprüfung von Delegationen (Verifier-Pflichtfelder, Spec-Grenzen).
+   * Sie schützt kein Zielsystem, sondern die Form der Delegation, und gilt
+   * deshalb unabhängig von Stufe und Profil.
+   */
+  const guardDelegationContract = async (
+    event: ToolCallEvent,
+    ctx: ExtensionContext,
+    verificationRoot: string,
+  ) => {
+    // Ein verify-Spec wird vor der Verifier-Prüfung in den geprüften
+    // Verifier-Aufruf übersetzt, damit Ticket, Dedup und Commit-Gate greifen.
+    const verifyRewrite = rewriteVerifySpecToVerifier(event);
+    if (verifyRewrite.kind === "blocked") {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: verifyRewrite.reason,
+      };
+    }
+    if (verifyRewrite.kind === "rewritten") {
+      const target = event.input as Record<string, unknown>;
+      delete target.spec;
+      Object.assign(target, verifyRewrite.input);
+    }
+    const verification = requestVerificationCapabilities(
+      pi.events,
+      verificationRoot,
+    );
+    const verifierAssessment = await assessVerifierDelegation(
+      event,
+      ctx.cwd,
+      verification,
+    );
+    if (verifierAssessment.blocked) {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: verifierAssessment.reason,
+      };
+    }
+    const normalizedVerifierInput = await normalizeVerifierDelegationInput(
+      event,
+      ctx.cwd,
+    );
+    if (normalizedVerifierInput) {
+      Object.assign(
+        event.input as Record<string, unknown>,
+        normalizedVerifierInput,
+      );
+    }
+    const temporarySpecAssessment = assessTemporaryAgentSpec(event);
+    if (temporarySpecAssessment.blocked) {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: temporarySpecAssessment.reason,
+      };
+    }
+    return undefined;
+  };
+
+  /** Fragt vorab nach; ohne Bestätigungskanal wird strukturiert blockiert. */
+  const confirmSystemRisk = async (
+    event: ToolCallEvent,
+    ctx: ExtensionContext,
+    risk: SystemOpenRisk,
+  ) => {
+    if (!ctx.hasUI) {
+      return {
+        block: true,
+        terminate: true,
+        reason: `Freigabe benötigt, aber im Modus "${ctx.mode}" nicht erfüllbar (kein Bestätigungsdialog verfügbar): ${risk.reason}`,
+      };
+    }
+    const confirmed = await confirmAction(
+      ctx,
+      { action: "ask", reason: risk.reason },
+      toolSubject(event),
+      event.toolName,
+    );
+    return confirmed
+      ? undefined
+      : { block: true, reason: "Aktion vom Benutzer abgelehnt." };
+  };
+
+  /**
+   * Systemprofil (`pis`): offen, nur Löschen und andere Risiken werden vorab
+   * bestätigt. Trust-, Scope-, Pfad- und Recovery-Grenzen entfallen bewusst.
+   */
+  const guardSystemOpen = async (event: ToolCallEvent, ctx: ExtensionContext) => {
+    if (event.toolName === ASK_USER_TOOL_NAME && !ctx.hasUI) {
+      return {
+        block: true,
+        terminate: true,
+        reason: `ask_user ist im Modus "${ctx.mode}" nicht verfügbar; es steht kein interaktiver UI-Kanal zur Verfügung. Keine Rückfrage starten oder wiederholen.`,
+      };
+    }
+    const webAssessment = assessWebToolInput(event);
+    if (webAssessment.blocked) {
+      return {
+        block: true,
+        ...stopNonInteractive(ctx),
+        reason: webAssessment.reason,
+      };
+    }
+    const contractOutcome = await guardDelegationContract(
+      event,
+      ctx,
+      ctx.cwd,
+    );
+    if (contractOutcome) return contractOutcome;
+
+    let risk: SystemOpenRisk | undefined;
+    if (
+      event.toolName === "bash" ||
+      event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+    ) {
+      risk = systemOpenBashRisk(
+        event.toolName === INTERACTIVE_SHELL_TOOL_NAME
+          ? interactiveShellCommand(event)
+          : String((event.input as Record<string, unknown>).command ?? ""),
+      );
+    } else if (NATIVE_FILE_TOOLS.has(event.toolName)) {
+      risk = systemOpenFileRisk(
+        NATIVE_WRITE_TOOLS.has(event.toolName) ? "write" : "read",
+        toolPath(event) ?? ".",
+        ctx.cwd,
+      );
+    } else if (SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)) {
+      const decision = decideTool(
+        session.level(),
+        event,
+        ctx.cwd,
+        session.configured(),
+      );
+      if (decision.action === "block") {
+        return {
+          block: true,
+          ...stopNonInteractive(ctx),
+          reason: decision.reason,
+        };
+      }
+      if (decision.action === "ask") risk = { reason: decision.reason };
+    }
+    return risk ? confirmSystemRisk(event, ctx, risk) : undefined;
+  };
+
   const guardToolCall = async (event: ToolCallEvent, ctx: ExtensionContext) => {
+    // Die Sitzungsepoche gilt ab Beginn des Aufrufs, nicht erst ab dem Punkt,
+    // an dem die Recovery-Abfrage nach mehreren awaits gestellt wird.
+    const callEpoch = session.epoch();
+    if (
+      getPiLaunchProfile() === "system" &&
+      SYSTEM_OPEN_LEVELS.has(session.level())
+    ) {
+      return guardSystemOpen(event, ctx);
+    }
     let additionalRoots = session.additionalWorkspaceRoots();
     const systemProfile = getPiLaunchProfile() === "system";
     const systemWorkspaceRoot = systemProfile
@@ -695,61 +869,16 @@ export function registerPermissionGuards(
         reason: webAssessment.reason,
       };
     }
-    // Die Vollständigkeits- und Dedup-Prüfung einer Verifier-Delegation
-    // selbst gilt unabhängig vom Zugriffslevel — auch YOLO befreit einen
-    // Prüfauftrag nicht von Ziel/Scope/Diff/Baseline. Vor die
-    // Delegationsprüfung gezogen, damit assessVerifierDelegation denselben
-    // Snapshot auch für den Dedup-Check gegen einen bereits abgeschlossenen
-    // Verifier-Lauf nutzen kann.
-    // Ein verify-Spec wird vor der Verifier-Prüfung in den geprüften
-    // Verifier-Aufruf übersetzt, damit Ticket, Dedup und Commit-Gate greifen.
-    const verifyRewrite = rewriteVerifySpecToVerifier(event);
-    if (verifyRewrite.kind === "blocked") {
-      return {
-        block: true,
-        ...stopNonInteractive(ctx),
-        reason: verifyRewrite.reason,
-      };
-    }
-    if (verifyRewrite.kind === "rewritten") {
-      const target = event.input as Record<string, unknown>;
-      delete target.spec;
-      Object.assign(target, verifyRewrite.input);
-    }
+    const contractOutcome = await guardDelegationContract(
+      event,
+      ctx,
+      event.toolName === "project_check" ? scopedProjectRoot : ctx.cwd,
+    );
+    if (contractOutcome) return contractOutcome;
     const verification = requestVerificationCapabilities(
       pi.events,
       event.toolName === "project_check" ? scopedProjectRoot : ctx.cwd,
     );
-    const verifierAssessment = await assessVerifierDelegation(
-      event,
-      ctx.cwd,
-      verification,
-    );
-    if (verifierAssessment.blocked) {
-      return {
-        block: true,
-        ...stopNonInteractive(ctx),
-        reason: verifierAssessment.reason,
-      };
-    }
-    const normalizedVerifierInput = await normalizeVerifierDelegationInput(
-      event,
-      ctx.cwd,
-    );
-    if (normalizedVerifierInput) {
-      Object.assign(
-        event.input as Record<string, unknown>,
-        normalizedVerifierInput,
-      );
-    }
-    const temporarySpecAssessment = assessTemporaryAgentSpec(event);
-    if (temporarySpecAssessment.blocked) {
-      return {
-        block: true,
-        ...stopNonInteractive(ctx),
-        reason: temporarySpecAssessment.reason,
-      };
-    }
     // YOLO hebt die technische Commit-Gate-Pflicht (ADR 021) auf — bewusste
     // Lockerung, analog zu Claude Codes bypassPermissions-Modus. Die
     // Vollständigkeits-/Dedup-Prüfung der Delegation selbst (oben) bleibt
@@ -770,7 +899,7 @@ export function registerPermissionGuards(
     // Recovery ist eine Workspace-Integritätsgrenze, keine Permission-Rückfrage.
     // Nur das reguläre Projektprofil übergeht sie bei YOLO 3 ausdrücklich.
     const effect = guardedRecoveryEffect(event, ctx.cwd);
-    const recoveryEpoch = session.epoch();
+    const recoveryEpoch = callEpoch;
     const yoloFullRecoveryBypass =
       !systemProfile && session.level() === "yolo-full";
     const recovery =
@@ -876,6 +1005,32 @@ export function registerPermissionGuards(
   // chosen permission level (decideBash) still apply, same as any other
   // mode.
   pi.on("user_bash", async (event, ctx: ExtensionContext) => {
+    if (
+      getPiLaunchProfile() === "system" &&
+      SYSTEM_OPEN_LEVELS.has(session.level())
+    ) {
+      const risk = systemOpenBashRisk(event.command);
+      if (!risk) return;
+      const declined = (output: string) => ({
+        result: {
+          output,
+          exitCode: 126,
+          cancelled: true,
+          truncated: false,
+        },
+      });
+      if (!ctx.hasUI)
+        return declined(
+          `Freigabe benötigt, aber nicht erfüllbar (kein Bestätigungsdialog): ${risk.reason}`,
+        );
+      const approved = await confirmAction(
+        ctx,
+        { action: "ask", reason: risk.reason },
+        event.command,
+        "bash",
+      );
+      return approved ? undefined : declined("Aktion vom Benutzer abgelehnt.");
+    }
     if (
       !ctx.isProjectTrusted() &&
       (getPiLaunchProfile() === "system" || session.level() !== "yolo-full")

@@ -56,8 +56,11 @@ Pi-Runtime mit einem festen Workspace und eigenem Sitzungsverzeichnis.
 `pi system` bleibt als kompatibler Aufruf verfügbar. Modell, Authentisierung und
 Extension-Code bleiben gemeinsam; Sessions, Pläne und Setup-Präferenzen sind
 profilgetrennt. Projektdateien und Projekt-Kontext werden im System-Profil
-nicht automatisch geladen. Die Profilkennung ist kein Berechtigungsnachweis;
-privilegierte Systemwerkzeuge gehören zu späteren Umbauphasen.
+nicht automatisch geladen. `pis` arbeitet offen: keine Trust-, Scope- oder
+Pfadsperren, nur Löschen und andere Risiken (Datenträger, erhöhte Rechte,
+Dienst-/Stromsteuerung, Git-Verlust, Paketentfernung, Secrets, Systempfade)
+werden vorab bestätigt (ADR 036). `readonly`, `confirm-all` und `headless`
+bleiben als strengere Wahl bestehen.
 
 Details und aktuelle Einschränkungen: [`docs/pi-system-profile.md`](docs/pi-system-profile.md).
 Der lokale RPC-Host und seine offenen Betriebsgrenzen sind in

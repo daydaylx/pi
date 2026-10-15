@@ -31,6 +31,7 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [033](033-task-tiers.md) — Task-Klassen FAST/NORMAL/DEEP: Routing, FAST-Subagenten-/Verifier-Sperre, Duplicate-Read-Guard, dynamisches Thinking
 - [034](034-system-control.md) — Typed System-Control-Werkzeuge ohne Root-Daemon
 - [035](035-remove-plan-mode.md) — Planmodus und Workflow-Zustand entfernt, Shift+Tab freigegeben
+- [036](036-pis-open-policy.md) — `pis` arbeitet offen, nur Löschen und Risiken werden vorab bestätigt
 
 ## Historische, ersetzte Entscheidungen
 

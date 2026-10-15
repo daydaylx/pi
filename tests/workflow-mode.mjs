@@ -3,6 +3,7 @@ import { counters as summary } from "./shared/assertions.mjs";
 await import("./workflow-mode/permissions.test.mjs");
 await import("./workflow-mode/executable-trust.test.mjs");
 await import("./workflow-mode/permission-levels.test.mjs");
+await import("./workflow-mode/system-open.test.mjs");
 await import("./workflow-mode/session-health.test.mjs");
 
 const { passed, failed } = summary();
