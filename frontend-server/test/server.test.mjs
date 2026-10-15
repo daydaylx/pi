@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isValidRequestResult } from "../../npm/packages/frontend-protocol/dist/index.js";
 import {
+  FrontendServer,
   assertCompatiblePiVersion,
   mapRuntimeEvent,
   normalizeCurrentSession,
@@ -210,3 +211,86 @@ test("session.current liefert nur provider und id am Modell und erfüllt das Erg
   assert.equal(isValidRequestResult("session.current", result), true);
   assert.equal(isValidRequestResult("session.current", normalizeCurrentSession({ sessionId: "s2" })), true);
 });
+
+test("permission.list provides 7 entries with exactly 4 settable, levels unchanged", async () => {
+  const server = new FrontendServer();
+  server.runtime = { request: async () => ({}) };
+  const result = await server.dispatch("permission.list", {});
+  assert.deepEqual(result.levels, [
+    "readonly",
+    "project-write",
+    "confirm-all",
+    "yolo",
+  ]);
+  assert.equal(result.entries.length, 7);
+  assert.deepEqual(
+    result.entries.map((entry) => entry.level),
+    [
+      "readonly",
+      "project-write",
+      "confirm-all",
+      "yolo",
+      "yolo-ask",
+      "yolo-full",
+      "headless",
+    ],
+  );
+  const settableEntries = result.entries.filter((entry) => entry.settable);
+  assert.equal(settableEntries.length, 4);
+  assert.deepEqual(
+    settableEntries.map((e) => e.level),
+    ["readonly", "project-write", "confirm-all", "yolo"],
+  );
+  assert.equal(isValidRequestResult("permission.list", result), true);
+});
+
+test("permission.set rejects non-settable levels with INVALID_REQUEST", async () => {
+  const server = new FrontendServer();
+  server.handshakeComplete = true;
+  for (const level of ["yolo-full", "yolo-ask", "headless"]) {
+    const outputs = [];
+    server.output = {
+      write(line) {
+        outputs.push(JSON.parse(line));
+      },
+    };
+    await server.handle({
+      protocolVersion: 1,
+      kind: "request",
+      id: `perm-${level}`,
+      method: "permission.set",
+      params: { level },
+    });
+    assert.equal(outputs.length, 1);
+    assert.equal(outputs[0].ok, false);
+    assert.equal(outputs[0].error.code, "INVALID_REQUEST");
+  }
+});
+
+test("agent_settled emits state.patch first then agent.settled event with aborted flag", () => {
+  for (const [input, expectedAborted] of [
+    [{ type: "agent_settled", aborted: true }, true],
+    [{ type: "agent_settled" }, false],
+    [{ type: "agent_settled", aborted: false }, false],
+  ]) {
+    const emitted = [];
+    const server = new FrontendServer();
+    server.sentStateSnapshot = true;
+    server.output = {
+      write(chunk) {
+        emitted.push(JSON.parse(chunk));
+      },
+    };
+
+    server.handleRuntimeEvent(input);
+
+    assert.equal(emitted.length, 2);
+    assert.equal(emitted[0].event, "state.patch");
+    assert.equal(emitted[0].data.activity.kind, "idle");
+
+    assert.equal(emitted[1].event, "agent.settled");
+    assert.deepEqual(emitted[1].data, { aborted: expectedAborted });
+    assert.equal(emitted[1].sequence, emitted[0].sequence + 1);
+  }
+});
+

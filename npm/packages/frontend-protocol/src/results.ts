@@ -110,6 +110,14 @@ const Model = Type.Object(
   Strict,
 );
 
+const PermissionEntry = Type.Object(
+  {
+    level: Type.String({ minLength: 1 }),
+    settable: Type.Boolean(),
+  },
+  Strict,
+);
+
 export const REQUEST_RESULT_SCHEMAS = {
   "system.ping": Type.Object(
     {
@@ -149,7 +157,13 @@ export const REQUEST_RESULT_SCHEMAS = {
   ),
   "workflow.list": Type.Object({ modes: Type.Array(Type.String()) }, Strict),
   "workflow.set": Empty,
-  "permission.list": Type.Object({ levels: Type.Array(Type.String()) }, Strict),
+  "permission.list": Type.Object(
+    {
+      levels: Type.Array(Type.String()),
+      entries: Type.Optional(Type.Array(PermissionEntry)),
+    },
+    Strict,
+  ),
   "permission.set": Empty,
   "command.list": Type.Object(
     {

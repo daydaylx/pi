@@ -72,6 +72,7 @@ export const EVENT_NAMES = [
   "tool.updated",
   "tool.completed",
   "tool.failed",
+  "agent.settled",
   "session.changed",
   "subagent.changed",
   "verification.changed",

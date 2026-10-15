@@ -49,6 +49,7 @@ export const EVENT_DATA_SCHEMAS = {
   "tool.updated": ToolData,
   "tool.completed": ToolEndData,
   "tool.failed": ToolEndData,
+  "agent.settled": Type.Object({ aborted: Type.Boolean() }, Strict),
   "session.changed": Type.Object({ id: Type.Optional(NonEmptyString) }, Strict),
   "subagent.changed": Type.Object(
     { runId: NonEmptyString, status: NonEmptyString },

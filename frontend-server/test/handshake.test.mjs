@@ -362,3 +362,92 @@ test("maps runtime request timeouts to REQUEST_TIMEOUT", async () => {
   server.child.kill("SIGTERM");
   await once(server.child, "exit");
 });
+
+test("agent.abort triggers agent_settled with aborted:true and emits agent.settled event", async () => {
+  const server = startServer();
+  try {
+    server.send({
+      kind: "hello",
+      client: { name: "abort-test", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await server.next();
+    await server.next();
+
+    server.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "abort-call",
+      method: "agent.abort",
+      params: {},
+    });
+
+    const frames = [
+      await server.next(),
+      await server.next(),
+      await server.next(),
+    ];
+    const patch = frames.find((f) => f.event === "state.patch");
+    const settled = frames.find((f) => f.event === "agent.settled");
+    const response = frames.find((f) => f.id === "abort-call");
+
+    assert.ok(patch, "state.patch was emitted");
+    assert.equal(patch.data.activity.kind, "idle");
+    assert.ok(settled, "agent.settled was emitted");
+    assert.deepEqual(settled.data, { aborted: true });
+    assert.ok(response, "abort response was emitted");
+    assert.equal(response.ok, true);
+  } finally {
+    server.child.kill("SIGTERM");
+    await once(server.child, "exit");
+  }
+});
+
+test("permission.list returns 7 entries and rejects non-settable levels on permission.set", async () => {
+  const server = startServer();
+  try {
+    server.send({
+      kind: "hello",
+      client: { name: "perm-test", version: "1" },
+      supportedProtocolVersions: [1],
+    });
+    await server.next();
+    await server.next();
+
+    server.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "perm-list",
+      method: "permission.list",
+      params: {},
+    });
+    const listResponse = await server.next();
+    assert.equal(listResponse.ok, true);
+    assert.deepEqual(listResponse.result.levels, [
+      "readonly",
+      "project-write",
+      "confirm-all",
+      "yolo",
+    ]);
+    assert.equal(listResponse.result.entries.length, 7);
+    const settable = listResponse.result.entries.filter((e) => e.settable);
+    assert.equal(settable.length, 4);
+
+    for (const level of ["yolo-full", "yolo-ask", "headless"]) {
+      server.send({
+        protocolVersion: 1,
+        kind: "request",
+        id: `perm-set-${level}`,
+        method: "permission.set",
+        params: { level },
+      });
+      const setResponse = await server.next();
+      assert.equal(setResponse.ok, false);
+      assert.equal(setResponse.error.code, "INVALID_REQUEST");
+    }
+  } finally {
+    server.child.kill("SIGTERM");
+    await once(server.child, "exit");
+  }
+});
+

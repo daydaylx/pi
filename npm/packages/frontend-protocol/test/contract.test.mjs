@@ -247,3 +247,67 @@ test("validates projected results and rejects internal session paths", () => {
     false,
   );
 });
+
+test("validates agent.settled payload and rejects extra fields", () => {
+  assert.equal(isKnownEventName("agent.settled"), true);
+  assert.equal(isValidEventData("agent.settled", { aborted: true }), true);
+  assert.equal(isValidEventData("agent.settled", { aborted: false }), true);
+  assert.equal(isValidEventData("agent.settled", {}), false);
+  assert.equal(isValidEventData("agent.settled", { aborted: "true" }), false);
+  assert.equal(
+    isValidEventData("agent.settled", { aborted: true, unexpected: true }),
+    false,
+  );
+});
+
+test("validates permission.list results with optional entries and backwards-compatible levels", () => {
+  const legacyResult = {
+    levels: ["readonly", "project-write", "confirm-all", "yolo"],
+  };
+  assert.equal(isValidRequestResult("permission.list", legacyResult), true);
+
+  const fullResult = {
+    levels: ["readonly", "project-write", "confirm-all", "yolo"],
+    entries: [
+      { level: "readonly", settable: true },
+      { level: "project-write", settable: true },
+      { level: "confirm-all", settable: true },
+      { level: "yolo", settable: true },
+      { level: "yolo-ask", settable: false },
+      { level: "yolo-full", settable: false },
+      { level: "headless", settable: false },
+    ],
+  };
+  assert.equal(isValidRequestResult("permission.list", fullResult), true);
+
+  assert.equal(
+    isValidRequestResult("permission.list", {
+      ...fullResult,
+      entries: [{ level: "", settable: true }],
+    }),
+    false,
+  );
+  assert.equal(
+    isValidRequestResult("permission.list", {
+      ...fullResult,
+      entries: [{ level: "readonly" }],
+    }),
+    false,
+  );
+  assert.equal(
+    isValidRequestResult("permission.list", {
+      ...fullResult,
+      entries: [{ level: "readonly", settable: true, extra: 1 }],
+    }),
+    false,
+  );
+});
+
+test("validates permission.set rejects non-settable levels", () => {
+  for (const level of ["readonly", "project-write", "confirm-all", "yolo"]) {
+    assert.equal(isValidRequestParams("permission.set", { level }), true);
+  }
+  for (const level of ["yolo-full", "yolo-ask", "headless", "unknown"]) {
+    assert.equal(isValidRequestParams("permission.set", { level }), false);
+  }
+});

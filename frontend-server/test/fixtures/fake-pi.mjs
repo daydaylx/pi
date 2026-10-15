@@ -89,8 +89,16 @@ lines.on("line", (line) => {
     }
     return;
   }
-  if (request.type === "abort" && process.env.FAKE_PI_HANG_ABORT === "1")
+  if (request.type === "abort") {
+    if (process.env.FAKE_PI_HANG_ABORT === "1") return;
+    process.stdout.write(
+      `${JSON.stringify({ type: "agent_settled", aborted: true })}\n`,
+    );
+    process.stdout.write(
+      `${JSON.stringify({ id: request.id, type: "response", command: request.type, success: true, data })}\n`,
+    );
     return;
+  }
   process.stdout.write(
     `${JSON.stringify({ id: request.id, type: "response", command: request.type, success: true, data })}\n`,
   );

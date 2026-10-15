@@ -30,6 +30,16 @@ const PINNED_PI_PATH = fileURLToPath(
 );
 const WORKFLOW_MODES = ["work", "simple_plan", "detailed_plan"];
 const PERMISSION_LEVELS = ["readonly", "project-write", "confirm-all", "yolo"];
+// Canonical order of all 7 permission levels from extensions/shared/workflow-status.ts:6-13
+const ALL_PERMISSION_LEVELS = [
+  "readonly",
+  "project-write",
+  "confirm-all",
+  "yolo",
+  "yolo-ask",
+  "yolo-full",
+  "headless",
+];
 
 function writeJsonLine(stream, value) {
   stream.write(`${JSON.stringify(value)}\n`);
@@ -1078,6 +1088,11 @@ export class FrontendServer {
         status: deriveTaskStatus(this.state),
       };
       this.emitState("state.patch", { ...patch, task: this.state.task });
+      if (message.type === "agent_settled") {
+        this.emit("agent.settled", {
+          aborted: message.aborted === true,
+        });
+      }
       return;
     }
     const event = publicRuntimeEvent(message);
@@ -1269,7 +1284,13 @@ export class FrontendServer {
         });
         return {};
       case "permission.list":
-        return { levels: [...PERMISSION_LEVELS] };
+        return {
+          levels: [...PERMISSION_LEVELS],
+          entries: ALL_PERMISSION_LEVELS.map((level) => ({
+            level,
+            settable: PERMISSION_LEVELS.includes(level),
+          })),
+        };
       case "permission.set":
         await runtime.request({
           type: "prompt",

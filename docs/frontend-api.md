@@ -71,9 +71,21 @@ parameters therefore return the newest page, not the full history.
 ## Events
 
 V1 events are `state.snapshot`, `state.patch`, the message/thinking lifecycle,
-the tool lifecycle, `session.changed`, `subagent.changed`,
-`verification.changed`, `permission.requested`, `extension-ui.requested`, `notification`,
-`core.disconnected`, `core.reconnected`, `extension-ui.resolved` and `error`.
+the tool lifecycle, `agent.settled`, `session.changed`, `subagent.changed`,
+`verification.changed`, `permission.requested`, `extension-ui.requested`,
+`notification`, `core.disconnected`, `core.reconnected`,
+`extension-ui.resolved` and `error`.
+
+`agent.settled` signals that Pi has finished processing the prompt turn and will
+not continue automatically through retries, compaction recovery, or follow-up
+work. The payload contains `{ aborted: boolean }`, allowing frontends to
+distinguish an aborted run (`aborted: true`) from normal completion
+(`aborted: false`). Note that `agent.abort` only aborts the current agent turn
+and does not abort background system jobs or external processes.
+
+The `permission.requested` event is reserved and deprecated; it is never
+emitted by the server. Interactive approvals flow through
+`extension-ui.requested` and are answered via `ui.respond`.
 
 `extension-ui.requested` includes an `approval` envelope with a SHA-256 digest
 of the displayed method/title/message/options, the current `sessionId` when
