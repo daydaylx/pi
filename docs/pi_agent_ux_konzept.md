@@ -4,7 +4,7 @@
 
 | Shortcut    | Funktion    |
 | ----------- | ----------- |
-| `Shift+Tab` | frei (später Skill-Auswahl) |
+| `Shift+Tab` | `/skill` (Skill für nächste Nachricht) |
 | `Super+M`   | `/model`    |
 | `Super+D`   | `/thinking` |
 | `Super+Y`   | `/yolo`     |
@@ -23,10 +23,10 @@ Arbeit (`A`), Modelle & Denken (`M`), Rechte & Vertrauen (`R`), Code
 Einträge zeigen den kanonischen `/command`; Aliase werden nur am Original
 erklärt.
 
-Shift+Tab ist frei. Es gibt keinen Workflow- oder Planmodus mehr; die Taste ist
-für eine spätere Skill-Auswahl reserviert (eigener Folgeauftrag). Pis
-Standardaktion der Taste (`app.thinking.cycle`) ist in `keybindings.json` auf
-`Super+T` umgelegt und darf dort nicht zurückkehren.
+Shift+Tab öffnet die Skill-Auswahl (`/skill`, ADR 037). Es gibt keinen
+Workflow- oder Planmodus mehr. Pis Standardaktion der Taste
+(`app.thinking.cycle`) ist in `keybindings.json` auf `Super+T` umgelegt und darf
+dort nicht zurückkehren.
 
 Die Shortcuts gelten im fokussierten Pi-Terminal und benötigen für `Super`
 das Kitty-/CSI-u-Protokoll. Sie werden nicht als systemweite Linux-Mint-Hotkeys

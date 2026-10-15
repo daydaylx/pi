@@ -51,7 +51,7 @@ WezTerm und Ghostty ausgeführt.
 | #   | Schritt                                                           | Erwartet                                                                                                                               | Beobachtet | ✓/✗ |
 | --- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------- | --- |
 | 5   | Sitzung öffnen                                                    | Aurora-Fußzeile sichtbar, eine Zeile                                                                                                   |            |     |
-| 6   | Shift+Tab drücken                                                 | **Nichts** passiert: kein Menü, kein Moduswechsel, die Thinking-Stufe bleibt unverändert                                               |            |     |
+| 6   | Shift+Tab drücken (Entwurf im Eingabefeld lassen)                 | Skill-Liste öffnet in Aurora-Optik, Tippen sucht; Enter zeigt `Skill: <name>` im Footer, Esc ändert nichts; Entwurf und Thinking-Stufe bleiben unverändert, kein Turn startet |            |     |
 | 9   | Während des Laufs zusehen                                         | `DENKT NACH` → `ARBEITET` → `ANTWORTET`, Laufzeit zählt hoch (bei Provider-Pausen ≥4s zwischenzeitlich `WARTET AUF MODELL` — kein Bug) |            |     |
 | 13  | Tool-Ausführung beobachten                                        | Sitzungsübersicht bleibt sichtbar; nur die Aktivitätszeile aktualisiert sich und verschwindet nach dem Tool wieder                     |            |     |
 

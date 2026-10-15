@@ -66,19 +66,39 @@ Details und aktuelle Einschränkungen: [`docs/pi-system-profile.md`](docs/pi-sys
 Der lokale RPC-Host und seine offenen Betriebsgrenzen sind in
 [`docs/pi-system-host.md`](docs/pi-system-host.md) dokumentiert.
 
-## Planung und Shift+Tab
+## Planung und Skill-Auswahl (Shift+Tab)
 
 Pi hat keinen technischen Planmodus und keinen Workflow-Umschalter. Planung
 läuft über normale Prompts; jeder Turn arbeitet unter der gewählten
 Zugriffsstufe (`/permission`). Pläne aus früheren Versionen unter
 `~/.pi/agent/plans/` bleiben unberührt, werden aber nicht mehr gelesen.
 
-Shift+Tab ist frei und für die spätere Skill-Auswahl reserviert (eigener
-Folgeauftrag, noch nicht implementiert). Weder eine Extension noch
-`keybindings.json` belegt die Taste. Die Runtime-Standardaktion von Shift+Tab
-(`app.thinking.cycle`) ist in `keybindings.json` auf Super+T umgelegt; diese
-Umbelegung muss erhalten bleiben, sonst löst die Taste wieder den Thinking-
-Wechsel aus (`tests/suites/runtime/shortcuts.mjs` prüft das).
+**Shift+Tab** (oder `/skill`) öffnet eine durchsuchbare Liste der Skills, die
+die Runtime in dieser Sitzung geladen hat, gruppiert nach Herkunft (Projekt,
+Projekt-Paket, Global, Paket). Tippen sucht sofort, ↑/↓ bewegt, Enter merkt den
+Skill für die **nächste Nachricht** vor, Esc schließt ohne Änderung. Die Auswahl
+startet keinen Turn und ruft kein Modell auf; ein vorhandener Entwurf bleibt
+unberührt. Der Footer zeigt `Skill: <name>`.
+
+- Beim Absenden der nächsten normalen Nachricht wird ihr `/skill:<name> `
+  vorangestellt; die native Skill-Expansion der Runtime lädt die `SKILL.md`.
+  Danach ist die Vormerkung verbraucht. Commands (`/…`), Prompt-Templates und
+  ausdrückliche `/skill:`-Aufrufe lassen sie unberührt stehen.
+- Es gibt immer höchstens einen vorgemerkten Skill, kein Pinning und keine
+  Mehrfachauswahl. Erneutes Wählen desselben Skills nimmt die Vormerkung zurück;
+  `/skill <name>` setzt sie direkt, `/skill --clear` entfernt sie.
+- Neue Sitzung, Wechsel, Fork und `/reload` beginnen ohne Vormerkung. Ein nach
+  `/reload` entfallener Skill wird nicht geladen und gemeldet.
+- Die Liste ist die Skill-Erkennung der Runtime, keine eigene: Projekt-Skills
+  erscheinen nur in vertrauten Projekten, `pi system` zeigt nur die dort
+  geladenen (globalen) Skills. Ein Skill vergibt keine Rechte; Zugriffsstufen,
+  Trust, Recovery und Verifier bleiben unverändert.
+- Bestehende `/skill:<name> …`-Aufrufe funktionieren wie zuvor.
+
+Die Runtime-Standardaktion von Shift+Tab (`app.thinking.cycle`) ist in
+`keybindings.json` auf Super+T umgelegt; diese Umbelegung muss erhalten bleiben,
+sonst kollidiert die Taste (`tests/suites/runtime/shortcuts.mjs` prüft das und
+dass genau eine Registrierung die Taste besitzt, ADR 037).
 
 ## Subagenten
 

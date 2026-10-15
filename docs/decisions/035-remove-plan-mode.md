@@ -13,7 +13,7 @@ noch `plan_write`, Planfreigabe, Plan-Qualitätsprüfung oder einen
 Workflow-Umschalter. Planung läuft über normale Prompts und später optional
 über einen Skill.
 
-Shift+Tab ist freigegeben und für eine spätere Skill-Auswahl reserviert. Ein
+Shift+Tab ist freigegeben (inzwischen von der Skill-Auswahl belegt, ADR 037). Ein
 Launcher ist **nicht** Teil dieser Entscheidung.
 
 ## Begründung
