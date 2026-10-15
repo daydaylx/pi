@@ -14,7 +14,7 @@ Verwende diese Struktur:
 - **Nicht-Ziele:** ausdrücklich ausgeschlossene Eingriffe.
 - **Kontext:** relevante Dateien, Architektur und Randbedingungen.
 - **Vorgehen:** konkrete, sinnvolle Arbeitsschritte.
-- **Änderungsregeln:** zulässiger Scope sowie Schutzregeln, insbesondere keine Commits, Pushes, Installationen oder destruktiven Aktionen ohne direkten Auftrag.
+- **Änderungsregeln:** zulässiger Scope sowie Schutzregeln, insbesondere keine Installationen, Merges, Deployments, Force-Pushes oder destruktiven Aktionen ohne direkten Auftrag; Commits und Pushes in kleinen, thematisch getrennten Schritten.
 - **Verifikation:** relevante Tests und statische Checks.
 - **Ausgabeformat:** erwartete Struktur der Antwort.
 - **Abschlusskriterien:** Bedingungen für „fertig“.
