@@ -28,14 +28,14 @@ await test("hard path among several changed files still requires", () => {
   const result = assess({
     changedFiles: [
       "README.md",
-      "extensions/plan-mode/plan-tool.ts",
+      "extensions/permissions/workflow-policy.ts",
       "src/x.ts",
     ],
   });
-  eq(result.need, "required", "plan-mode hit forces required");
+  eq(result.need, "required", "permission-logic hit forces required");
   eq(
     result.requiredPathHits.map((hit) => hit.path),
-    ["extensions/plan-mode/plan-tool.ts"],
+    ["extensions/permissions/workflow-policy.ts"],
     "only the actual hard-path file is reported as a hit",
   );
 });

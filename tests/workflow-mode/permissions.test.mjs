@@ -34,7 +34,6 @@ const permissionPolicy = await load("extensions/shared/permission-policy.ts");
 const workspaceScope = await load("extensions/shared/workspace-scope.ts");
 const toolPolicy = await load("extensions/permissions/tool-policy.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
-const planMode = await load("extensions/plan-mode/index.ts");
 const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
 const subagentGuard = await load(
   "extensions/setup-core/subagent-output-guard.ts",
@@ -99,10 +98,8 @@ function removeSystemFileScopeFixture(fixture) {
 
 async function startSystemFileScopeHarness(fixture, options = {}) {
   const recoveryState = options.recoveryState ?? { armed: false };
-  const workflowMode = options.workflowMode;
   const harnessOptions = { ...options };
   delete harnessOptions.recoveryState;
-  delete harnessOptions.workflowMode;
   const harness = createHarness({
     confirm: true,
     sessionId: "system-file-scope-session",
@@ -111,12 +108,6 @@ async function startSystemFileScopeHarness(fixture, options = {}) {
   harness.api.events.on("recovery-status:request", (request) =>
     request.respond({ armed: recoveryState.armed }),
   );
-  if (workflowMode) {
-    harness.api.events.on("workflow-capabilities:request", (request) =>
-      request.respond({ mode: workflowMode }),
-    );
-  }
-  planMode.default(harness.api);
   modePermissions.default(harness.api);
   const context = harness.makeContext({
     cwd: fixture.workspace,
@@ -148,7 +139,6 @@ await test("recovery capability effects fail closed outside known read-only tool
     "web_search",
     "fetch_content",
     "get_search_content",
-    "plan_write",
   ]) {
     eq(effect(toolName), "read_only", `${toolName} is explicitly read-only`);
   }
@@ -490,7 +480,7 @@ await test("writes to in-project execution paths need confirmation, YOLO refuses
 });
 
 await test("runtime path aliases stay outside the project permission scope", async () => {
-  if (!permissionPolicy || !modePermissions || !planMode) return;
+  if (!permissionPolicy || !modePermissions) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-runtime-path-alias-"));
   try {
     for (const path of ["@/tmp/x", "~/x", "@~/x", "./a/../../x"]) {
@@ -516,7 +506,6 @@ await test("runtime path aliases stay outside the project permission scope", asy
     harness.api.events.on("recovery-status:request", (request) =>
       request.respond({ armed: false }),
     );
-    planMode.default(harness.api);
     modePermissions.default(harness.api);
     const context = harness.makeContext({ cwd, mode: "tui" });
     await harness.runHooks("session_start", {}, context);
@@ -703,13 +692,12 @@ await test("credential path additions preserve ordinary config and env examples"
 });
 
 await test("RPC UI contexts receive guard blocks without terminating the run", async () => {
-  if (!modePermissions || !planMode) return;
+  if (!modePermissions) return;
   const invokeBlockedWrite = async (hasUI) => {
     const harness = createHarness({ confirm: false, customResult: false });
     harness.api.events.on("recovery-status:request", (request) =>
       request.respond({ armed: false }),
     );
-    planMode.default(harness.api);
     modePermissions.default(harness.api);
     const context = harness.makeContext({
       cwd: process.cwd(),
@@ -948,7 +936,7 @@ await test("canonical path identity protects sensitive symlink aliases through t
       "ordinary internal aliases remain usable",
     );
     assert(
-      !permissionPolicy.isPlanModeDiagnosticCommand("cat env-alias", cwd),
+      !permissionPolicy.diagnoseCommandSafety("cat env-alias", cwd).safe,
       "Plan diagnostics cannot read a sensitive file through an alias",
     );
     eq(
@@ -958,10 +946,10 @@ await test("canonical path identity protects sensitive symlink aliases through t
     );
     const externalAbsolute = join(cwd, "outside-alias", "outside.txt");
     assert(
-      permissionPolicy.isPlanModeDiagnosticCommand(
+      permissionPolicy.diagnoseCommandSafety(
         "cat " + externalAbsolute,
         cwd,
-      ),
+      ).safe,
       "Plan diagnostics accept an absolute path through an external symlink",
     );
     eq(
@@ -981,7 +969,6 @@ await test("canonical path identity protects sensitive symlink aliases through t
     harness.api.events.on("recovery-status:request", (request) =>
       request.respond({ armed: false }),
     );
-    planMode?.default(harness.api);
     modePermissions.default(harness.api);
     const context = harness.makeContext({ cwd });
     await harness.runHooks("session_start", {}, context);
@@ -1134,124 +1121,21 @@ await test("decideBash asks or blocks on unquoted shell variables at every non-r
   );
 });
 
-await test("planModeMutationGuard blocks non-plan writes at project-write/confirm-all during planning, allows the plan file", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification blocks mutating commands and allows read-only ones", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const write = (level, path) =>
-    workflowPolicy.planModeMutationGuard(
-      planning,
-      level,
-      { toolName: "write", input: { path } },
-      cwd,
-    );
-  assert(
-    write("project-write", "extensions/example.ts").blocked,
-    "a non-plan write is blocked at project-write while planning",
-  );
-  assert(
-    write("confirm-all", "extensions/example.ts").blocked,
-    "a non-plan write is blocked at confirm-all while planning",
-  );
-  // The plan no longer lives in the project, so the old write exception is
-  // gone with it: plan mode's project-write surface is empty in every level.
-  assert(
-    write("project-write", ".agent/plans/current-plan.md").blocked,
-    "the former plan path is an ordinary project file now and stays blocked",
-  );
+  const safe = (command) =>
+    permissionPolicy.diagnoseCommandSafety(command, cwd).safe;
+  assert(!safe("rm extensions/example.ts"), "a mutating command is unsafe");
+  assert(safe("git status"), "a read-only command is safe");
 });
 
-await test("an unknown workflow state defers to permissions instead of impersonating plan mode", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification allows explicit read-only shell tools", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const unknown = { mode: undefined };
-  const decide = (toolName, input) =>
-    workflowPolicy.planModeMutationGuard(
-      unknown,
-      "project-write",
-      { toolName, input },
-      cwd,
-    );
-  assert(
-    !decide("write", { path: "extensions/example.ts" }).blocked,
-    "unknown workflow does not preempt the active permission level",
-  );
-  assert(
-    !decide("custom_read_tool", {}).blocked,
-    "new capabilities are not denied just because the plan guard has no entry",
-  );
-  assert(
-    !workflowPolicy.planModeBashGuard(unknown, "project-write", "npm test", cwd)
-      .blocked,
-    "unknown workflow does not impose plan restrictions",
-  );
-});
-
-await test("planModeMutationGuard leaves readonly and work mode unaffected", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "simple_plan" };
-  const working = { mode: "work" };
-  const write = (workflow, level) =>
-    workflowPolicy.planModeMutationGuard(
-      workflow,
-      level,
-      { toolName: "write", input: { path: "extensions/example.ts" } },
-      cwd,
-    );
-  assert(
-    !write(planning, "readonly").blocked,
-    "readonly already denies this elsewhere; the plan guard does not duplicate it",
-  );
-  assert(
-    write(planning, "yolo").blocked,
-    "yolo does not unlock agent writes while planning",
-  );
-  assert(
-    !write(working, "project-write").blocked,
-    "work mode is never affected by the plan guard",
-  );
-  assert(
-    !write(working, "yolo").blocked,
-    "yolo keeps its ordinary meaning outside plan mode",
-  );
-});
-
-await test("planModeBashGuard blocks mutating commands and allows read-only ones during planning", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const working = { mode: "work" };
-  const bash = (workflow, level, command) =>
-    workflowPolicy.planModeBashGuard(workflow, level, command, cwd);
-  assert(
-    bash(planning, "project-write", "rm extensions/example.ts").blocked,
-    "a mutating command is blocked while planning",
-  );
-  assert(
-    !bash(planning, "project-write", "git status").blocked,
-    "a read-only command passes while planning",
-  );
-  assert(
-    bash(planning, "yolo", "rm extensions/example.ts").blocked,
-    "yolo does not bypass the plan-mode bash guard",
-  );
-  assert(
-    !bash(planning, "yolo", "git status").blocked,
-    "diagnostics stay available under yolo while planning",
-  );
-  assert(
-    !bash(working, "project-write", "rm extensions/example.ts").blocked,
-    "work mode is never affected by the plan guard",
-  );
-});
-
-await test("planModeBashGuard allows only explicit read-only shell tools during planning", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "git status",
     "git --no-pager diff --no-ext-diff --no-textconv",
@@ -1260,17 +1144,17 @@ await test("planModeBashGuard allows only explicit read-only shell tools during 
   ]) {
     assert(
       !bash(command).blocked,
-      `${command} is a legitimate diagnostic and must pass during planning`,
+      `${command} is a legitimate diagnostic and must be classified safe`,
     );
   }
 });
 
-await test("planModeBashGuard allows the widened read-only system tool set during planning", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification allows the widened read-only system tool set", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "pwd",
     "ls -la",
@@ -1289,17 +1173,17 @@ await test("planModeBashGuard allows the widened read-only system tool set durin
   ]) {
     assert(
       !bash(command).blocked,
-      `${command} is a harmless, non-script read tool and must pass during planning`,
+      `${command} is a harmless, non-script read tool and must be classified safe`,
     );
   }
 });
 
-await test("plan-mode effects block mutations but allow unknown read-only commands", () => {
-  if (!workflowPolicy) return;
+await test("command effects block mutations but allow unknown read-only commands", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "find . -delete",
     "sort -o out.txt package.json",
@@ -1340,12 +1224,12 @@ await test("plan-mode effects block mutations but allow unknown read-only comman
   }
 });
 
-await test("planModeBashGuard classifies script execution and shell effects during planning", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification covers script execution and shell effects", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "npm test",
     "npm run build",
@@ -1373,7 +1257,7 @@ await test("planModeBashGuard classifies script execution and shell effects duri
     );
   }
   // A path-qualified executable never inherits trust from its basename
-  // (extensions/plan-mode/README.md, "Executable-Vertrauen").
+  // (docs/executable-trust.md).
   for (const command of ["./git status", "./ls"]) {
     assert(
       bash(command).blocked,
@@ -1382,12 +1266,12 @@ await test("planModeBashGuard classifies script execution and shell effects duri
   }
 });
 
-await test("planModeBashGuard rejects npm run <arbitrary script> and non-diagnostic bare aliases", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification rejects npm run <arbitrary script> and non-diagnostic bare aliases", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "npm run generate",
     "npm run foo",
@@ -1403,8 +1287,8 @@ await test("planModeBashGuard rejects npm run <arbitrary script> and non-diagnos
   }
 });
 
-await test("Plan, readonly and executable resolution share the hardened diagnostic classification", () => {
-  if (!permissionPolicy || !workflowPolicy) return;
+await test("Recovery, readonly and executable resolution share the hardened diagnostic classification", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
   const hostHasRg = (process.env.PATH ?? "")
     .split(delimiter)
@@ -1416,7 +1300,7 @@ await test("Plan, readonly and executable resolution share the hardened diagnost
     "git --no-pager log -n 1",
     // The readonly path resolves rg against the host (captured at module
     // load); a host without rg cannot start it, so the case would only
-    // measure the machine. Plan Mode's rg handling runs on fixtures in
+    // measure the machine. The rg handling runs on fixtures in
     // executable-trust.test.mjs.
     ...(hostHasRg ? ["rg plan extensions"] : []),
   ];
@@ -1429,40 +1313,22 @@ await test("Plan, readonly and executable resolution share the hardened diagnost
   ];
   for (const command of allowed) {
     assert(
-      permissionPolicy.isPlanSafeCommand(command, cwd),
+      permissionPolicy.isReadOnlyCommand(command, cwd),
       `readonly accepts the safe diagnostic: ${command}`,
     );
     assert(
-      permissionPolicy.isPlanModeDiagnosticCommand(command, cwd),
-      `Plan Mode accepts the safe diagnostic: ${command}`,
-    );
-    assert(
-      !workflowPolicy.planModeBashGuard(
-        { mode: "detailed_plan" },
-        "project-write",
-        command,
-        cwd,
-      ).blocked,
-      `the Plan Mode guard accepts the safe diagnostic: ${command}`,
+      permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+      `the safety classification accepts the safe diagnostic: ${command}`,
     );
   }
   for (const command of blocked) {
     assert(
-      !permissionPolicy.isPlanSafeCommand(command, cwd),
+      !permissionPolicy.isReadOnlyCommand(command, cwd),
       `readonly rejects the unsafe diagnostic: ${command}`,
     );
     assert(
-      !permissionPolicy.isPlanModeDiagnosticCommand(command, cwd),
-      `Plan Mode rejects the unsafe diagnostic: ${command}`,
-    );
-    assert(
-      workflowPolicy.planModeBashGuard(
-        { mode: "detailed_plan" },
-        "project-write",
-        command,
-        cwd,
-      ).blocked,
-      `the Plan Mode guard rejects the unsafe diagnostic: ${command}`,
+      !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+      `the safety classification rejects the unsafe diagnostic: ${command}`,
     );
   }
 });
@@ -1508,12 +1374,12 @@ await test("the effect classifier does not require a fixed command-name allowlis
   }
 });
 
-await test("planModeBashGuard still blocks real mutations during planning, even ones that look like diagnostics", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification blocks real mutations, even ones that look like diagnostics", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "rm -rf node_modules",
     "touch new-file.txt",
@@ -1546,7 +1412,7 @@ await test("planModeBashGuard still blocks real mutations during planning, even 
   ]) {
     assert(
       bash(command).blocked,
-      `${command} is a mutation and must stay blocked during planning`,
+      `${command} is a mutation and must be classified unsafe`,
     );
   }
 });
@@ -1578,7 +1444,7 @@ await test("decideBash (yolo) does not mistake /dev/null redirects on internal p
   );
 });
 
-await test("isPlanSafeCommand (readonly permission level) stays strict: no `;`-chaining or /dev/null redirect widening", () => {
+await test("isReadOnlyCommand (readonly permission level) stays strict: no `;`-chaining or /dev/null redirect widening", () => {
   if (!permissionPolicy) return;
   const cwd = process.cwd();
   for (const command of [
@@ -1588,117 +1454,8 @@ await test("isPlanSafeCommand (readonly permission level) stays strict: no `;`-c
     "eslint . &>/dev/null",
   ]) {
     assert(
-      !permissionPolicy.isPlanSafeCommand(command, cwd),
-      `${command} must stay blocked for the readonly permission level — only Plan Mode's diagnostic classification widens`,
-    );
-  }
-});
-
-// The generic plan-mode guard remains fail-closed for tools it cannot prove
-// read-only. The temporary-spec exception runs before this guard in
-// registerPermissionGuards.
-await test("generic plan-mode guard admits only positively known read-only tools", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "simple_plan" };
-  const decide = (level, toolName, input) =>
-    workflowPolicy.planModeMutationGuard(
-      planning,
-      level,
-      { toolName, input },
-      cwd,
-    ).blocked;
-
-  for (const [toolName, input] of [
-    ["read", { path: "src/a.ts" }],
-    ["grep", { pattern: "x" }],
-    ["ls", { path: "." }],
-    ["ask_user", { question: "weiter?" }],
-    ["plan_write", { content: "# Plan" }],
-    ["verify", { check: "typecheck" }],
-  ]) {
-    assert(
-      !decide("project-write", toolName, input),
-      `${toolName} is a read-only capability (or the plan writer) and stays available while planning`,
-    );
-  }
-
-  for (const [toolName, input, why] of [
-    ["write", { path: "src/a.ts" }, "a write outside the plan file"],
-    ["edit", { path: "src/a.ts" }, "an edit outside the plan file"],
-    [
-      "project_check",
-      { profile: "verify" },
-      "a project check runs project scripts",
-    ],
-    [
-      "verify",
-      { check: "test" },
-      "a test run can write coverage or snapshot files",
-    ],
-    ["verify", {}, "a verify call without a check argument is not typecheck"],
-    [
-      "subagent",
-      { agent: "investigator", output: "/tmp/report.md" },
-      "an output path must not become a second write channel",
-    ],
-  ]) {
-    assert(
-      decide("project-write", toolName, input),
-      `${toolName} must stay blocked while planning: ${why}`,
-    );
-  }
-
-  // YOLO hebt die Planmodus-Grenzen für Agenten-Tool-Aufrufe nicht auf.
-  for (const [toolName, input] of [["write", { path: "src/a.ts" }]]) {
-    assert(
-      decide("yolo", toolName, input),
-      `${toolName} stays blocked while planning, even under yolo`,
-    );
-  }
-  assert(
-    !decide("project-write", "frobnicate", {}),
-    "an unrecognized capability is delegated to its permission-level decision instead of being blocked by name",
-  );
-  assert(
-    !decide("yolo", "frobnicate", {}),
-    "the plan guard does not invent a classification for unknown capabilities",
-  );
-  assert(
-    !decide("yolo", "verify", { check: "typecheck" }),
-    "verify(typecheck) stays non-mutating regardless of permission level",
-  );
-});
-
-await test("plan mode permits only verify(check: typecheck), never test or other tools", () => {
-  if (!workflowPolicy) return;
-  const allowed = (mode, toolName, input) =>
-    workflowPolicy.planModeVerifyTypecheckAllowed(
-      { mode },
-      { toolName, input },
-    );
-
-  for (const mode of ["simple_plan", "detailed_plan"]) {
-    assert(
-      allowed(mode, "verify", { check: "typecheck" }),
-      `${mode} permits verify(check: typecheck)`,
-    );
-  }
-  assert(
-    !allowed("work", "verify", { check: "typecheck" }),
-    "work mode does not take the plan-mode exception",
-  );
-
-  for (const [toolName, input, why] of [
-    ["verify", { check: "test" }, "test runs can write coverage/snapshots"],
-    ["verify", {}, "missing check argument"],
-    ["verify", { check: "typecheck", extra: true }, "extra argument present"],
-    ["project_check", { profile: "verify" }, "wrong tool entirely"],
-    ["verify", null, "non-object input"],
-  ]) {
-    assert(
-      !allowed("simple_plan", toolName, input),
-      `simple_plan blocks verify delegation: ${why}`,
+      !permissionPolicy.isReadOnlyCommand(command, cwd),
+      `${command} must stay blocked for the readonly permission level — only the diagnostic classification widens`,
     );
   }
 });
@@ -1884,8 +1641,8 @@ await test("yolo keeps interpreter hard boundaries beyond the project-write matr
   );
 });
 
-await test("plan mode: command lookups and subagent list/status stay available", () => {
-  if (!permissionPolicy || !workflowPolicy) return;
+await test("command lookups are classified as read-only diagnostics", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
   for (const command of [
     "command -v node",
@@ -1894,8 +1651,8 @@ await test("plan mode: command lookups and subagent list/status stay available",
     "command -v node; command -v python3",
   ]) {
     assert(
-      permissionPolicy.diagnosePlanModeCommand(command, cwd).safe,
-      `plan mode allows lookup: ${command}`,
+      permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+      `lookup is a read-only diagnostic: ${command}`,
     );
   }
   for (const command of [
@@ -1907,35 +1664,8 @@ await test("plan mode: command lookups and subagent list/status stay available",
     "command -v node > out.txt",
   ]) {
     assert(
-      !permissionPolicy.diagnosePlanModeCommand(command, cwd).safe,
-      `plan mode still blocks: ${command}`,
-    );
-  }
-  const planning = { mode: "simple_plan" };
-  const guard = (input) =>
-    workflowPolicy.planModeMutationGuard(
-      planning,
-      "project-write",
-      { toolName: "subagent", input },
-      cwd,
-    );
-  for (const action of ["list", "status"]) {
-    assert(
-      !guard({ action }).blocked,
-      `plan mode allows subagent action=${action}`,
-    );
-  }
-  for (const input of [
-    { action: "stop" },
-    { action: "interrupt" },
-    { agent: "verifier", task: "x" },
-    { action: "list", agent: "verifier", task: "x" },
-    { action: "list", spec: { profile: "verify" } },
-    {},
-  ]) {
-    assert(
-      guard(input).blocked,
-      `plan mode still gates subagent ${JSON.stringify(input)}`,
+      !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+      `unsafe command stays unsafe: ${command}`,
     );
   }
 });
@@ -1965,86 +1695,6 @@ await test("subagent delegations are allowed without confirmation outside readon
     decide("project-write", "frobnicate"),
     "ask",
     "other unknown tools still follow the configured unknownTools policy",
-  );
-});
-
-await test("plan mode write guard: YOLO 2 keeps it, YOLO 3 bypasses it (ADR 029)", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "simple_plan" };
-  const writeEvent = { toolName: "write", input: { path: "src/x.ts" } };
-  assert(
-    workflowPolicy.planModeMutationGuard(planning, "yolo-ask", writeEvent, cwd)
-      .blocked,
-    "a write outside the plan file stays blocked under YOLO 2",
-  );
-  assert(
-    !workflowPolicy.planModeMutationGuard(
-      planning,
-      "yolo-full",
-      writeEvent,
-      cwd,
-    ).blocked,
-    "YOLO 3 bypasses the plan mode write guard",
-  );
-});
-
-await test("plan mode guards hold even under an active YOLO level", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "simple_plan" };
-  const writeEvent = { toolName: "write", input: { path: "src/x.ts" } };
-  assert(
-    workflowPolicy.planModeMutationGuard(planning, "yolo", writeEvent, cwd)
-      .blocked,
-    "a write outside the plan file stays blocked under YOLO",
-  );
-  assert(
-    workflowPolicy.planModeMutationGuard(
-      planning,
-      "yolo",
-      { toolName: "bash", input: { command: "npm test" } },
-      cwd,
-    ).blocked,
-    "a mutating shell call stays blocked under YOLO",
-  );
-  assert(
-    !workflowPolicy.planModeMutationGuard(
-      planning,
-      "yolo",
-      { toolName: "bash", input: { command: "git status --short" } },
-      cwd,
-    ).blocked,
-    "diagnostic shell stays available under YOLO",
-  );
-  assert(
-    !workflowPolicy.planModeMutationGuard(planning, "readonly", writeEvent, cwd)
-      .blocked,
-    "readonly still hands the decision to the permission level",
-  );
-  assert(
-    !workflowPolicy.planModeMutationGuard(
-      { mode: "work" },
-      "yolo",
-      writeEvent,
-      cwd,
-    ).blocked,
-    "outside plan mode YOLO keeps its ordinary meaning",
-  );
-});
-
-await test("recovery_check is a read-only plan-mode capability", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  assert(
-    !workflowPolicy.planModeMutationGuard(
-      planning,
-      "project-write",
-      { toolName: "recovery_check", input: {} },
-      cwd,
-    ).blocked,
-    "recovery_check stays usable while planning",
   );
 });
 
@@ -2512,7 +2162,7 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "docs/verifier-policy.md",
     "extensions/permissions/menus.ts",
     "extensions/permissions/thinking-control.ts",
-    "extensions/plan-mode/presentation.ts",
+    "extensions/aurora-ui/footer.ts",
     "package.json",
     "npm/package.json",
   ]) {
@@ -2534,8 +2184,8 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "extensions/permissions/guards.ts",
     "extensions/permissions/workflow-policy.ts",
     "extensions/shared/verification-capabilities.ts",
-    "extensions/plan-mode/commands.ts",
-    "extensions/plan-mode/session.ts",
+    "extensions/shared/workflow-status.ts",
+    "extensions/shared/recovery-capabilities.ts",
     "extensions/resilience/recovery-state.ts",
     "extensions/setup-core/subagent-output-guard.ts",
     "extensions/permissions/verifier-policy.ts",
@@ -3111,10 +2761,10 @@ await test("device writes use the protected system-path decision at every level"
       }
     }
     const effect = permissionPolicy.classifyOperationEffect(command, cwd);
-    assert(effect !== "SAFE", `${command} is risky to plan inspection`);
+    assert(effect !== "SAFE", `${command} is risky to inspect`);
     assert(
-      !permissionPolicy.diagnosePlanModeCommand(command, cwd).safe,
-      `${command} is rejected by Plan Mode diagnosis`,
+      !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+      `${command} is rejected by the safety diagnosis`,
     );
   }
 
@@ -3273,29 +2923,10 @@ await test("YOLO stufen: file access outside the project is denied, asked or all
   );
 });
 
-await test("YOLO 2 keeps plan and credential gates; YOLO 3 bypasses permission gates", async () => {
+await test("YOLO 2 keeps the credential gate; YOLO 3 bypasses permission gates", async () => {
   if (!workflowPolicy || !toolPolicy || !verifierPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "simple_plan" };
   for (const level of ["yolo-ask"]) {
-    assert(
-      workflowPolicy.planModeMutationGuard(
-        planning,
-        level,
-        { toolName: "write", input: { path: "src/x.ts" } },
-        cwd,
-      ).blocked,
-      `${level} does not unlock writes while planning`,
-    );
-    assert(
-      workflowPolicy.planModeMutationGuard(
-        planning,
-        level,
-        { toolName: "bash", input: { command: "sudo id" } },
-        cwd,
-      ).blocked,
-      `${level} does not unlock a mutating shell while planning`,
-    );
     assert(
       workflowPolicy.assessWorkflowTool(
         {
@@ -3337,15 +2968,6 @@ await test("YOLO 2 keeps plan and credential gates; YOLO 3 bypasses permission g
       `${level} bypasses the commit-verifier gate like YOLO 1`,
     );
   }
-  assert(
-    !workflowPolicy.planModeMutationGuard(
-      planning,
-      "yolo-full",
-      { toolName: "write", input: { path: "/dev/test-partition" } },
-      cwd,
-    ).blocked,
-    "YOLO 3 allows writes during plan mode",
-  );
   assert(
     !workflowPolicy.assessWorkflowTool(
       {
@@ -3413,7 +3035,6 @@ await test("untrusted projects block external reads and symlink escapes at the t
     recoveryRequests += 1;
     request.respond({ armed: recoveryArmed });
   });
-  planMode.default(harness.api);
   modePermissions.default(harness.api);
 
   const trustedContext = harness.makeContext({
@@ -3564,7 +3185,7 @@ await test("untrusted projects block external reads and symlink escapes at the t
 });
 
 await test("system profile permits native file tools in its canonical private workspace while trusted is false", async () => {
-  if (!modePermissions || !planMode) return;
+  if (!modePermissions) return;
   const fixture = createSystemFileScopeFixture();
   const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
   try {
@@ -3606,7 +3227,7 @@ await test("system profile permits native file tools in its canonical private wo
 });
 
 await test("system profile name alone or a mismatched PI_SYSTEM_WORKSPACE grants no file scope", async () => {
-  if (!modePermissions || !planMode) return;
+  if (!modePermissions) return;
   const fixture = createSystemFileScopeFixture();
   const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
   try {
@@ -3638,7 +3259,7 @@ await test("system profile name alone or a mismatched PI_SYSTEM_WORKSPACE grants
 });
 
 await test("external System file scope is separate from project trust and allows native file tools", async () => {
-  if (!modePermissions || !planMode || !workspaceScope) return;
+  if (!modePermissions || !workspaceScope) return;
   const fixture = createSystemFileScopeFixture();
   const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
   try {
@@ -3829,7 +3450,7 @@ await test("external System file scope is separate from project trust and allows
 });
 
 await test("System external scopes reject secrets, protected and special files, symlink escapes and roots without Git", async () => {
-  if (!modePermissions || !planMode) return;
+  if (!modePermissions) return;
   const fixture = createSystemFileScopeFixture();
   const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
   const socketServer = createServer();
@@ -3879,7 +3500,7 @@ await test("System external scopes reject secrets, protected and special files, 
 });
 
 await test("System external scopes fail closed on rejection, readonly, headless and session changes", async () => {
-  if (!modePermissions || !planMode) return;
+  if (!modePermissions) return;
   const fixture = createSystemFileScopeFixture();
   const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
   try {
@@ -4006,7 +3627,6 @@ await test("System external scopes fail closed on rejection, readonly, headless 
     switchingHarness.api.events.on("recovery-status:request", (request) =>
       request.respond({ armed: false }),
     );
-    planMode.default(switchingHarness.api);
     modePermissions.default(switchingHarness.api);
     originalContext = switchingHarness.makeContext({
       cwd: fixture.workspace,
@@ -4033,7 +3653,7 @@ await test("System external scopes fail closed on rejection, readonly, headless 
 });
 
 await test("System file scopes restore only for the same session and stay outside project roots", async () => {
-  if (!modePermissions || !planMode || !workspaceScope) return;
+  if (!modePermissions || !workspaceScope) return;
   const fixture = createSystemFileScopeFixture();
   const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
   try {
@@ -4122,7 +3742,7 @@ await test("System file scopes restore only for the same session and stay outsid
 });
 
 await test("YOLO full keeps System trust and scope gates while normal pi keeps its existing bypass", async () => {
-  if (!modePermissions || !planMode) return;
+  if (!modePermissions) return;
   const fixture = createSystemFileScopeFixture();
   const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
   try {
@@ -4205,7 +3825,6 @@ await test("YOLO full keeps System trust and scope gates while normal pi keeps i
       normal.api.events.on("recovery-status:request", (request) =>
         request.respond({ armed: false }),
       );
-      planMode.default(normal.api);
       modePermissions.default(normal.api);
       const context = normal.makeContext({
         cwd: normalRoot,
@@ -4251,7 +3870,7 @@ await test("YOLO full keeps System trust and scope gates while normal pi keeps i
 });
 
 await test("System YOLO full keeps the recovery gate for scoped file writes", async () => {
-  if (!modePermissions || !planMode) return;
+  if (!modePermissions) return;
   const fixture = createSystemFileScopeFixture();
   const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
   try {
@@ -4286,37 +3905,35 @@ await test("System YOLO full keeps the recovery gate for scoped file writes", as
   }
 });
 
-await test("System plan mode blocks writes even after external file-scope approval", async () => {
-  if (!modePermissions || !planMode) return;
+await test("System yolo-full confirms the external file scope once and then writes without a plan gate", async () => {
+  if (!modePermissions) return;
   const fixture = createSystemFileScopeFixture();
   const restoreEnvironment = setSystemFileScopeEnvironment(fixture);
   try {
     initializeSystemFileScopeGitRoot(fixture);
-    const { harness, context } = await startSystemFileScopeHarness(fixture, {
-      workflowMode: "simple_plan",
-    });
+    const { harness, context } = await startSystemFileScopeHarness(fixture);
     await harness.commands.get("permission")("yolo-full", context);
     const result = await harness.runHooks(
       "tool_call",
       {
         toolName: "write",
         input: {
-          path: join(fixture.externalRoot, "plan-blocked.txt"),
+          path: join(fixture.externalRoot, "scoped-write.txt"),
           content: "x",
         },
       },
       context,
     );
     assert(
-      result.some((entry) => entry?.block && /Planmodus/.test(entry.reason)),
-      "System yolo-full still applies the plan-mode mutation gate after external scope approval",
+      !result.some((entry) => entry?.block),
+      "no planning gate exists any more: the scoped write is decided by the permission level",
     );
     eq(
       harness.lifecycleCalls.filter(
         (call) => call.kind === "confirm" && call.title.includes("Datei-Scope"),
       ).length,
       1,
-      "the external root scope is explicitly confirmed before the plan gate blocks the write",
+      "the external root scope is explicitly confirmed",
     );
     await harness.runHooks("session_shutdown", {}, context);
   } finally {
@@ -4443,7 +4060,7 @@ await test("workspace_add requires UI approval and keeps the root within one ses
 });
 
 await test("RPC contexts with dialog support can confirm guarded writes", async () => {
-  if (!modePermissions || !planMode) return;
+  if (!modePermissions) return;
   let confirmations = 0;
   const harness = createHarness({
     confirm: () => {
@@ -4454,7 +4071,6 @@ await test("RPC contexts with dialog support can confirm guarded writes", async 
   harness.api.events.on("recovery-status:request", (request) =>
     request.respond({ armed: false }),
   );
-  planMode.default(harness.api);
   modePermissions.default(harness.api);
   const context = harness.makeContext({
     cwd: process.cwd(),
@@ -4487,25 +4103,25 @@ await test("RPC contexts with dialog support can confirm guarded writes", async 
   );
 });
 
-await test("Plan Mode permits external inspection and pipelines but blocks secrets and mutations", () => {
-  if (!permissionPolicy || !workflowPolicy) return;
+await test("read-only classification permits external inspection and pipelines but blocks secrets and mutations", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
 
   // Pure observation on external paths is plan safe and readonly safe
   assert(
-    permissionPolicy.isPlanModeDiagnosticCommand("cat /etc/hostname", cwd),
-    "Plan mode permits cat on /etc/hostname",
+    permissionPolicy.diagnoseCommandSafety("cat /etc/hostname", cwd).safe,
+    "Read-only classification permits cat on /etc/hostname",
   );
   assert(
-    permissionPolicy.isPlanModeDiagnosticCommand(
+    permissionPolicy.diagnoseCommandSafety(
       "head -n 5 /etc/hostname",
       cwd,
-    ),
-    "Plan mode permits head on /etc/hostname",
+    ).safe,
+    "Read-only classification permits head on /etc/hostname",
   );
   assert(
-    permissionPolicy.isPlanModeDiagnosticCommand("ls /tmp", cwd),
-    "Plan mode permits ls on /tmp",
+    permissionPolicy.diagnoseCommandSafety("ls /tmp", cwd).safe,
+    "Read-only classification permits ls on /tmp",
   );
   eq(
     permissionPolicy.decideBash("readonly", "cat /etc/hostname", cwd).action,
@@ -4515,8 +4131,8 @@ await test("Plan Mode permits external inspection and pipelines but blocks secre
 
   // But external mutations remain blocked
   assert(
-    !permissionPolicy.isPlanModeDiagnosticCommand("touch /tmp/test-file", cwd),
-    "Plan mode blocks touch /tmp/test-file",
+    !permissionPolicy.diagnoseCommandSafety("touch /tmp/test-file", cwd).safe,
+    "Read-only classification blocks touch /tmp/test-file",
   );
   eq(
     permissionPolicy.decideBash("readonly", "touch /tmp/test-file", cwd).action,
@@ -4534,8 +4150,8 @@ await test("Plan Mode permits external inspection and pipelines but blocks secre
     "env | grep PASSWORD",
   ]) {
     assert(
-      !permissionPolicy.isPlanModeDiagnosticCommand(command, cwd),
-      `Plan mode blocks secret access: ${command}`,
+      !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+      `Read-only classification blocks secret access: ${command}`,
     );
     eq(
       permissionPolicy.classifyOperationEffect(command, cwd),
@@ -4550,13 +4166,13 @@ await test("Plan Mode permits external inspection and pipelines but blocks secre
     "find . -type f | grep ts | head",
   ]) {
     assert(
-      permissionPolicy.isPlanModeDiagnosticCommand(command, cwd),
+      permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
       `harmless inspection is allowed: ${command}`,
     );
   }
   assert(
-    !permissionPolicy.isPlanModeDiagnosticCommand("cat ~/.ssh/id_rsa", cwd),
-    "Plan mode blocks reading ~/.ssh/id_rsa",
+    !permissionPolicy.diagnoseCommandSafety("cat ~/.ssh/id_rsa", cwd).safe,
+    "Read-only classification blocks reading ~/.ssh/id_rsa",
   );
   eq(
     permissionPolicy.decideBash("readonly", "cat ~/.ssh/id_rsa", cwd).action,

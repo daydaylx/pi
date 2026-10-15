@@ -1,6 +1,4 @@
-import type { WorkflowMode } from "../shared/workflow-mode.ts";
-
-export type TaskPhase = "understand" | "plan" | "work" | "verify" | "done";
+export type TaskPhase = "understand" | "work" | "verify" | "done";
 
 export type ReceiptKind =
   | "investigation"
@@ -106,7 +104,6 @@ export interface TaskViewModel {
   goal?: string;
   phase: TaskPhase;
   phaseLabel: string;
-  workflowMode: WorkflowMode;
   currentWork?: CurrentWorkViewModel;
   findings: TaskFinding[];
   changesSummary?: TaskChangesSummary;

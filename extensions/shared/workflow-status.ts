@@ -1,8 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-export type { WorkflowMode } from "./workflow-mode.ts";
 
-// Die Zugriffsstufe ist orthogonal zum Workflow-Modus. Planvarianten steuern
-// Prompting und Workflow; ausschließlich diese Stufe steuert Tool-Zugriffe.
+// Ausschließlich diese Stufe steuert Tool-Zugriffe.
 export type PermissionLevel =
   | "readonly"
   | "project-write"
@@ -67,15 +65,15 @@ export const PERMISSION_LEVEL_LABEL: Record<PermissionLevel, string> = {
 
 export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
   readonly:
-    "Projekt lesen und sichere Inspect-Shell nutzen; nur der Plan ist in der Planung beschreibbar",
+    "Projekt lesen und sichere Inspect-Shell nutzen; keine Änderungen",
   "project-write":
     "Gewöhnliche Projektänderungen; riskante, destruktive und externe Aktionen bestätigen",
   "confirm-all": "Jede Mutation und jede externe Aktion einzeln bestätigen",
-  yolo: "Temporärer sichtbarer Bypass ohne Rückfragen im Projekt; harte Secret-, System-, Symlink- und Trust-Grenzen sowie der Plan-Mode-Schreibschutz bleiben aktiv",
+  yolo: "Temporärer sichtbarer Bypass ohne Rückfragen im Projekt; harte Secret-, System-, Symlink- und Trust-Grenzen bleiben aktiv",
   "yolo-ask":
     "Wie YOLO 1, aber mehr Zugriff mit Erlaubnis: sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach",
   "yolo-full":
-    "Temporärer Vollzugriff ohne Rückfragen, auch sudo, Partitionen, Systempfade, Secrets und Pfade außerhalb des Projekts; Trust-, Recovery- und Planmodus-Sperren werden aufgehoben",
+    "Temporärer Vollzugriff ohne Rückfragen, auch sudo, Partitionen, Systempfade, Secrets und Pfade außerhalb des Projekts; Trust- und Recovery-Sperren werden aufgehoben",
   headless:
     "Ohne Bestätigungsdialog (kein TUI-Kanal vorhanden): projektlokale Builds/Tests/Lint/Typecheck erlaubt, jede sonst bestätigungspflichtige Aktion bricht strukturiert ab statt zu fragen",
 };
@@ -102,7 +100,6 @@ export function normalizePermissionLevel(
 
 export const UI_STATUS_KEYS = {
   permissions: "permissions",
-  workflow: "workflow",
   recovery: "recovery",
 } as const;
 

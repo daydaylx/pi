@@ -2,7 +2,6 @@ import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 
 export type CommandCategoryId =
   | "work"
-  | "plan"
   | "subagents"
   | "models"
   | "access"
@@ -41,7 +40,6 @@ export interface AvailableCommand {
 
 export const COMMAND_CATEGORIES: readonly CommandCategory[] = [
   { id: "work", label: "Arbeit", shortcut: "A" },
-  { id: "plan", label: "Plan", shortcut: "P" },
   { id: "subagents", label: "Subagenten", shortcut: "U" },
   { id: "models", label: "Modelle & Denken", shortcut: "M" },
   { id: "access", label: "Rechte & Vertrauen", shortcut: "R" },
@@ -52,43 +50,6 @@ export const COMMAND_CATEGORIES: readonly CommandCategory[] = [
 ] as const;
 
 const definitions = [
-  [
-    "view-plan",
-    "Plan anzeigen",
-    "Vollständigen Markdown-Plan im Terminal anzeigen",
-    "plan",
-  ],
-  [
-    "edit-plan",
-    "Plan bearbeiten",
-    "Den Plan dieser Sitzung im aktiven Planmodus im externen Editor bearbeiten",
-    "plan",
-  ],
-  [
-    "plan-decide",
-    "Über den Plan entscheiden",
-    "Nach einem fertigen Plan: ausführen, weiter planen oder ohne Ausführung nach Work",
-    "plan",
-  ],
-  [
-    "plan-approve",
-    "Plan freigeben und ausführen",
-    "Ausdrückliche, an den Planhash gebundene Freigabe; startet genau einen Work-Turn",
-    "plan",
-  ],
-  [
-    "save-plan",
-    "Plan im Workspace speichern",
-    "Kopiert den Sitzungsplan bewusst nach .agent/plans/current-plan.md",
-    "plan",
-  ],
-  [
-    "workflow-set",
-    "Workflow direkt setzen",
-    "Workflow-Modus ohne Selector setzen: work | simple_plan | detailed_plan",
-    "plan",
-  ],
-
   [
     "verifier",
     "Verifier",

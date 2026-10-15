@@ -127,48 +127,6 @@ await test("capability requests are not grants: the guard leaves narrowing to th
   );
 });
 
-const planAllowed = (mode, level, input) =>
-  policy.planModeTemporarySpecAllowed({ mode }, level, call(input));
-
-await test("plan mode admits only read-only, artifact-free foreground specs", () => {
-  for (const mode of ["simple_plan", "detailed_plan"]) {
-    assert(planAllowed(mode, "project-write", { spec }), `${mode} analyse`);
-    assert(
-      planAllowed(mode, "yolo", {
-        spec: { ...spec, profile: "research", requestedCapabilities: ["read", "search"] },
-      }),
-      `${mode} research`,
-    );
-    assert(!planAllowed(mode, "readonly", { spec }), `${mode} readonly`);
-    assert(
-      !planAllowed(mode, "project-write", {
-        spec: { ...spec, requestedCapabilities: ["read", "readonly_shell"] },
-      }),
-      `${mode} shell request`,
-    );
-    assert(
-      !planAllowed(mode, "project-write", {
-        spec: { ...spec, requestedCapabilities: ["write"] },
-      }),
-      `${mode} write request`,
-    );
-    assert(!planAllowed(mode, "project-write", { spec, async: true }), `${mode} async`);
-    assert(
-      !planAllowed(mode, "project-write", { spec, artifacts: true }),
-      `${mode} artifacts`,
-    );
-    assert(
-      !planAllowed(mode, "project-write", { spec: { ...spec, profile: "implement" } }),
-      `${mode} implement`,
-    );
-    assert(
-      !planAllowed(mode, "project-write", { spec: verifySpec }),
-      `${mode} verify`,
-    );
-  }
-  eq(planAllowed("work", "project-write", { spec }), false, "work mode is not plan-restricted");
-});
-
 await test("TUI shows temporary agents by objective and write right, not by role", () => {
   const shown = renderers.temporaryAgentDisplay(spec);
   eq(shown.agent, "TEMP AGENT", "generic label");

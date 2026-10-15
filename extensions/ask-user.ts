@@ -4,8 +4,8 @@
  * Escape in editor returns to options, Escape in options cancels
  *
  * Registered under ASK_USER_TOOL_NAME (shared/ask-user-policy.ts), which the
- * permission-policy layers and extensions/plan-mode/prompts.ts also import —
- * see that constant's doc comment for why it's centralized.
+ * permission-policy layers also import — see that constant's doc comment for
+ * why it's centralized.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

@@ -20,10 +20,6 @@ import {
 } from "../shared/recovery-capabilities.ts";
 import { requestVerificationCapabilities } from "../shared/verification-capabilities.ts";
 import {
-  isPlanRestricted,
-  requestWorkflowCapabilities,
-} from "../shared/workflow-capabilities.ts";
-import {
   INTERACTIVE_SHELL_TOOL_NAME,
   interactiveShellCommand,
 } from "../shared/interactive-shell-policy.ts";
@@ -32,15 +28,10 @@ import {
   assessTemporaryAgentSpec,
   createParentRunAgentCounter,
   subagentLaunchCount,
-  planModeTemporarySpecAllowed,
   rewriteVerifySpecToVerifier,
 } from "./temporary-agent-policy.ts";
 import { decideTool } from "./tool-policy.ts";
-import {
-  assessBash,
-  assessWorkflowTool,
-  planModeMutationGuard,
-} from "./workflow-policy.ts";
+import { assessBash, assessWorkflowTool } from "./workflow-policy.ts";
 import {
   assessGitCommitVerifierGate,
   assessVerifierDelegation,
@@ -103,39 +94,6 @@ function guardedRecoveryEffect(event: ToolCallEvent, cwd: string) {
     return "read_only" as const;
   }
   return recoveryEffect(event, cwd);
-}
-
-export function systemControlPlanModeBlocks(
-  workflow: Parameters<typeof isPlanRestricted>[0],
-  event: ToolCallEvent,
-): boolean {
-  if (getPiLaunchProfile() !== "system" || !isPlanRestricted(workflow))
-    return false;
-  if (
-    event.toolName === "bash" ||
-    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
-  ) {
-    const command =
-      event.toolName === INTERACTIVE_SHELL_TOOL_NAME
-        ? interactiveShellCommand(event)
-        : String((event.input as Record<string, unknown>).command ?? "");
-    return systemBashNeedsApproval(command);
-  }
-  return (
-    [
-      "desktop_switch_workspace",
-      "desktop_focus_window",
-      "audio_set_volume",
-      "notify",
-      "user_service",
-      "nixos_build",
-      "nixos_apply",
-    ].includes(event.toolName) ||
-    (event.toolName === "system_job" &&
-      !["status", "output"].includes(
-        String((event.input as Record<string, unknown>).action),
-      ))
-  );
 }
 
 /**
@@ -693,15 +651,6 @@ export function registerPermissionGuards(
           'Kein Projekt-Prüfprofil definiert: .pi/verify.json fehlt. Es wird kein freies Prüfkommando geraten; zulässiger Prüfpfad: .pi/verify.json mit benanntem Profil anlegen und project_check erneut ausführen. Ohne Profil nicht erneut project_check aufrufen: mit gezielten Checks (direkt zugehöriger Test, Syntax-/Typecheck) weiterarbeiten und im Abschluss ausdrücklich "nicht über project_check verifiziert (kein Profil)" melden.',
       };
     }
-    const workflow = requestWorkflowCapabilities(pi.events);
-    if (systemControlPlanModeBlocks(workflow, event)) {
-      return {
-        block: true,
-        ...stopNonInteractive(ctx),
-        reason:
-          "Planmodus: Systemmutationen und geschützte System-Shell-Befehle sind gesperrt.",
-      };
-    }
     const filePolicyLevel =
       systemProfile &&
       NATIVE_FILE_TOOLS.has(event.toolName) &&
@@ -848,26 +797,6 @@ export function registerPermissionGuards(
         reason: recoveryBlockReason(recovery.reason, recovery.workspaceRoot),
       };
     }
-    if (planModeTemporarySpecAllowed(workflow, session.level(), event)) {
-      // The package would otherwise write debug artifacts below ctx.cwd.
-      (event.input as Record<string, unknown>).artifacts = false;
-      return;
-    }
-
-    const planGuard = planModeMutationGuard(
-      workflow,
-      filePolicyLevel,
-      event,
-      ctx.cwd,
-    );
-    if (planGuard.blocked) {
-      return {
-        block: true,
-        ...stopNonInteractive(ctx),
-        reason: planGuard.reason,
-      };
-    }
-
     const decision = decideTool(
       filePolicyLevel,
       event,
@@ -930,10 +859,7 @@ export function registerPermissionGuards(
   // comment) — never for the agent's own `bash` tool calls, which go
   // through tool_call above. The hard boundaries (assessBash) and the
   // chosen permission level (decideBash) still apply, same as any other
-  // mode; planModeMutationGuard/planModeBashGuard deliberately do not run
-  // here — Plan Mode exists to keep the agent from quietly implementing
-  // during a planning turn, not to restrict what the operator types at
-  // their own keyboard.
+  // mode.
   pi.on("user_bash", async (event, ctx: ExtensionContext) => {
     if (
       !ctx.isProjectTrusted() &&

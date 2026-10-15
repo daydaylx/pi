@@ -7,7 +7,7 @@ import { ROOT } from "../../shared/jiti-loader.mjs";
 /**
  * Web capability (pi-web-access): genau web_search + fetch_content als
  * extern read-only Klasse. Prüft die harten Eingabegrenzen, die Stufenlogik
- * im Work Mode, die Plan-Mode-Freigabe und die Trust-Trennung.
+ * und die Trust-Trennung.
  */
 export const webAccessSections = {
   "web tool capability and boundaries": async (context) => {
@@ -134,35 +134,6 @@ export const webAccessSections = {
         );
       }
 
-      // --- Plan Mode: extern read-only läuft durch ----------------------
-      const planGuard = (workflow, event) =>
-        workflowPolicy.planModeMutationGuard(workflow, "project-write", event, process.cwd());
-
-      for (const mode of ["simple_plan", "detailed_plan"]) {
-        const planning = { mode };
-        assert(
-          !planGuard(planning, {
-            toolName: "web_search",
-            input: { query: "x" },
-          }).blocked,
-          `web_search is permitted in trusted ${mode}`,
-        );
-        assert(
-          !planGuard(planning, {
-            toolName: "fetch_content",
-            input: { url: "https://example.test/" },
-          }).blocked,
-          `fetch_content is permitted in trusted ${mode}`,
-        );
-        assert(
-          planGuard(planning, {
-            toolName: "write",
-            input: { path: "extensions/example.ts" },
-          }).blocked,
-          `mutating tools stay blocked in ${mode}`,
-        );
-      }
-
       // --- Trust-Trennung: echter Permission-Hook -----------------------
       if (modePermissions) {
         const harness = createHarness();
@@ -213,17 +184,6 @@ export const webAccessSections = {
           webTools.WEB_TOOLS.has("web_search") &&
           webTools.WEB_TOOLS.has("fetch_content"),
         "the web capability class contains exactly the two pi-web-access tools",
-      );
-
-      // --- Plan-Mode-Liste enthält beide Tools, Work-Modes unverändert --
-      const planning = { mode: "detailed_plan" };
-      eq(
-        workflowPolicy.planModeMutationGuard(planning, "project-write", {
-          toolName: "bash",
-          input: { command: "touch unexpected-plan-mutation" },
-        }, process.cwd()).blocked,
-        true,
-        "plan mode blocks mutating bash commands",
       );
     });
   },

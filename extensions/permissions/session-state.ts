@@ -5,14 +5,11 @@
  *   selectedPermissionLevel/State — what the user chose (persisted)
  *   permissionLevel/State         — what is actually in force right now
  *
- * The workflow mode does not live here: it is orthogonal to the permission
- * level and is queried live from plan-mode via requestWorkflowCapabilities
- * exactly where it matters for a decision (permissions/guards.ts). YOLO
- * exists in the effective pair alone. It is a temporary bypass, never a
+ * YOLO exists in the effective pair alone. It is a temporary bypass, never a
  * preference: it is never persisted. It comes in three stufen (yolo,
  * yolo-ask, yolo-full; see workflow-status.ts). The trust boundary and the
- * Plan Mode write ban and Recovery workspace-integrity gate stay active on
- * YOLO 1 and 2; YOLO 3 explicitly bypasses the Recovery gate. YOLO 1
+ * Recovery workspace-integrity gate stay active on YOLO 1 and 2; YOLO 3
+ * explicitly bypasses the Recovery gate. YOLO 1
  * additionally keeps the hard secret/symlink boundaries;
  * the system-level shell boundaries and commit-verifier gate are the
  * deliberate bypass surface (see workflow-policy.ts, verifier-policy.ts,
@@ -59,10 +56,6 @@ import {
   loadSetupConfig,
   type PolicyAction as ConfiguredPolicyAction,
 } from "../setup-core/config.ts";
-import {
-  isWorkflowStateUnknown,
-  requestWorkflowCapabilities,
-} from "../shared/workflow-capabilities.ts";
 import { permissionWarning } from "./tool-policy.ts";
 import type { ThinkingControl } from "./thinking-control.ts";
 
@@ -274,33 +267,6 @@ export function createPermissionSession(
     });
   }
 
-  /**
-   * A workflow provider that never answers at all (no plan-mode extension
-   * loaded, or a bridge failure) is a different risk than an active Plan
-   * Mode: it means nobody can vouch for what mode is actually in force. YOLO
-   * stays blocked for that case — fail-closed robustness net, not a planning
-   * restriction — even though YOLO is otherwise allowed during Plan Mode.
-   */
-  function yoloDeniedOnUnknownWorkflowState(
-    ctx: ExtensionContext,
-    source: "command" | "shortcut" | "session",
-  ): boolean {
-    const workflow = requestWorkflowCapabilities(pi.events);
-    if (!isWorkflowStateUnknown(workflow)) return false;
-    pi.appendEntry("permission-transition-denied", {
-      timestamp: new Date().toISOString(),
-      source,
-      attemptedLevel: "yolo",
-      mode: "unknown",
-      reason: "YOLO ist gesperrt, solange kein Workflow-Zustand gemeldet wird.",
-    });
-    ctx.ui.notify(
-      "YOLO ist gesperrt: Keine Workflow-Extension meldet den aktuellen Modus.",
-      "warning",
-    );
-    return true;
-  }
-
   const session: PermissionSession = {
     pi,
     level: () => permissionLevel,
@@ -362,7 +328,7 @@ export function createPermissionSession(
       const currentRoot = canonicalWorkspaceRoot(ctx.cwd) ?? resolve(ctx.cwd);
       const confirmed = await ctx.ui.confirm(
         "Zusätzliche Projektwurzel für diese Sitzung freigeben?",
-        `Pi erhält Zugriff auf ${root} als zusätzliches Projekt. Die aktuelle Berechtigungsstufe und Planmodus-Regeln gelten dort weiter. Projektkonfiguration und Prüfprofile dieser Wurzel gelten nach der Freigabe als vertrauenswürdig. Die Freigabe endet mit dieser Sitzung.`,
+        `Pi erhält Zugriff auf ${root} als zusätzliches Projekt. Die aktuelle Berechtigungsstufe gilt dort weiter. Projektkonfiguration und Prüfprofile dieser Wurzel gelten nach der Freigabe als vertrauenswürdig. Die Freigabe endet mit dieser Sitzung.`,
       );
       if (
         !confirmed ||
@@ -456,15 +422,9 @@ export function createPermissionSession(
 
     async toggleYolo(ctx, source, epoch = sessionEpoch, level) {
       if (epoch !== sessionEpoch) return;
-      // YOLO ist jetzt auch im Plan Mode aktivierbar (bewusste Lockerung,
-      // analog zu Claude Codes bypassPermissions-Modus). Das hebt
-      // planModeMutationGuard nicht auf: Der Plan Mode bleibt unabhängig vom
-      // Zugriffslevel eine harte Schreibgrenze (workflow-policy.ts). Ein
-      // komplett unbekannter Workflow-Zustand bleibt weiterhin gesperrt.
       const active = permissionState === "YOLO_OVERRIDE";
       const turnOff =
         active && (level === undefined || level === permissionLevel);
-      if (!turnOff && yoloDeniedOnUnknownWorkflowState(ctx, source)) return;
       if (turnOff) {
         permissionState = selectedPermissionState;
         permissionLevel = selectedPermissionLevel;

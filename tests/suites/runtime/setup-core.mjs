@@ -125,33 +125,20 @@ export const setupCoreSections = {
 
         const state = {
           sessionEpoch: "epoch-1",
-          workflow: { phase: "work", label: "Work" },
           permissions: {},
           lsp: {},
           model: {},
           activity: { kind: "idle" },
         };
+        auroraState.mergeAuroraUiState(state, { lsp: { state: "ready" } });
+        // A retired workflow patch is ignored instead of being stored.
         auroraState.mergeAuroraUiState(state, {
-          workflow: {
-            phase: "simple_plan",
-            label: "Schnellplan",
-          },
-          lsp: { state: "ready" },
-        });
-        eq(state.workflow.phase, "simple_plan", "Aurora merges workflow modes");
-        // Unknown legacy phases are ignored.
-        auroraState.mergeAuroraUiState(state, {
-          workflow: { phase: "executing" },
+          workflow: { phase: "simple_plan", label: "Schnellplan" },
         });
         eq(
-          state.workflow.phase,
-          "simple_plan",
-          "Aurora rejects the retired legacy phase name",
-        );
-        eq(
-          state.workflow.label,
-          "Schnellplan",
-          "Aurora merges the workflow label",
+          "workflow" in state,
+          false,
+          "Aurora no longer carries a workflow field",
         );
         eq(state.lsp.state, "ready", "Aurora merges LSP patches");
         eq(

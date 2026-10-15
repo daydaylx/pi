@@ -60,7 +60,7 @@ async function withIsolatedAgentDir(fn) {
 
 export const auroraLifecycleSections = {
   "Aurora UI lifecycle regression coverage": async (context) => {
-    const { section, load, auroraUi, auroraState } = context;
+    const { section, auroraUi, auroraState } = context;
 
     await section("Aurora UI lifecycle regression coverage", async () => {
       if (!auroraUi || !auroraState) return;
@@ -72,7 +72,6 @@ export const auroraLifecycleSections = {
             title: "Budget-Test-Aufgabe",
             phase: "work",
             phaseLabel: "Arbeiten",
-            workflowMode: "work",
             findings: [],
             receipts: [],
             subagents: [],
@@ -359,7 +358,6 @@ export const auroraLifecycleSections = {
           await harness.runHooks("session_start", {}, ctx);
           const sessionEpoch = outgoingEpoch(harness, auroraState);
           emitPatch(harness, auroraState, sessionEpoch, {
-            workflow: { phase: "work", label: "Work" },
             permissions: { level: "yolo" },
           });
 
@@ -389,62 +387,6 @@ export const auroraLifecycleSections = {
           );
           await harness.runHooks("session_shutdown", {}, ctx);
         }
-
-        // --- T8: an old plan title must not survive an unrelated new
-        // prompt outside planning mode (Problem 14) ---
-        await withIsolatedAgentDir(async () => {
-          const planStore = await load("extensions/plan-mode/plan-store.ts");
-          if (planStore) {
-            const harness = createHarness();
-            auroraUi.default(harness.api);
-            const cwd = mkdtempSync(path.join(tmpdir(), "aurora-t8-cwd-"));
-            const ctx = harness.makeContext({ cwd, sessionId: "aurora-t8" });
-            try {
-              await harness.runHooks("session_start", {}, ctx);
-              const sessionEpoch = outgoingEpoch(harness, auroraState);
-              emitPatch(harness, auroraState, sessionEpoch, {
-                workflow: { phase: "detailed_plan", label: "Architekturplan" },
-              });
-
-              const location = planStore.planLocation(cwd, "aurora-t8");
-              planStore.writePlan(
-                location,
-                "# Plan A: Altes Vorhaben\n\nZiel: Migration abschliessen.",
-                undefined,
-              );
-              await harness.runHooks("agent_start", {}, ctx);
-              await harness.runHooks("agent_settled", {}, ctx);
-
-              // The user leaves planning and starts a brand-new, unrelated
-              // task without ever re-entering a planning turn.
-              emitPatch(harness, auroraState, sessionEpoch, {
-                workflow: { phase: "work", label: "Work" },
-              });
-              await harness.runHooks(
-                "before_agent_start",
-                { prompt: "Behebe den Login-Bug in auth.ts" },
-                ctx,
-              );
-              await harness.runHooks("agent_start", {}, ctx);
-              await harness.runHooks("agent_settled", {}, ctx);
-
-              const lines = renderWidget(harness, ctx, 120, 30);
-              assert(
-                !lines.some((line) =>
-                  line.includes("Behebe den Login-Bug in auth.ts"),
-                ),
-                "the activity dashboard omits the redundant task title",
-              );
-              assert(
-                !lines.some((line) => line.includes("Plan A: Altes Vorhaben")),
-                "the old plan title from a finished planning turn no longer leaks into an unrelated task",
-              );
-            } finally {
-              await harness.runHooks("session_shutdown", {}, ctx);
-              rmSync(cwd, { recursive: true, force: true });
-            }
-          }
-        });
 
         // --- T9: the inspector must use the real terminal width, not a
         // hardcoded 76 columns (Problem 15) ---

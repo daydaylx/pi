@@ -93,6 +93,21 @@ const LEGACY_MANAGED = [
   // older install would be an orphan the tree no longer imports.
   "extensions/aurora-ui/editor.ts",
   "skills/lsp-navigation/SKILL.md",
+  // The planning workflow (plan-mode extension, its shared contracts and
+  // tests) was removed. A left-over directory would keep the stale extension
+  // active through a settings.json entry that localExtensionEntries() carries
+  // over for files that still exist. Plan files and sessions live outside
+  // these paths (~/.pi/agent/plans, sessions/) and are never touched.
+  "extensions/plan-mode",
+  "extensions/shared/workflow-capabilities.ts",
+  "extensions/shared/workflow-mode.ts",
+  "extensions/shared/control-center-menu.ts",
+  "docs/plan-eval.md",
+  "tests/plan-eval",
+  "tests/workflow-mode/e2e.test.mjs",
+  "tests/workflow-mode/mode.test.mjs",
+  "tests/workflow-mode/plan-eval.test.mjs",
+  "tests/workflow-mode/plan-store.test.mjs",
 ];
 
 function parseArgs(argv) {

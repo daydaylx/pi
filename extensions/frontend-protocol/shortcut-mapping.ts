@@ -1,8 +1,7 @@
 /**
  * Shortcut-Mapping: bestehende TUI-Shortcuts werden auf semantische
- * Command-IDs abgebildet (Dokument 02: "Shift+Tab -> command:
- * workflow.open", nicht auf eine UI-Komponente). Die Tasten bleiben die
- * gewohnten; portable Einträge sind auch für externe Clients
+ * Command-IDs abgebildet, nicht auf eine UI-Komponente. Portable Einträge
+ * sind auch für externe Clients
  * reproduzierbar, nicht-portable brauchen eine Bridge-Operation oder sind
  * editornativ (dokumentiert statt still weggelassen).
  */
@@ -20,12 +19,6 @@ export interface ShortcutMapping {
 }
 
 export const SHORTCUT_COMMAND_MAP: readonly ShortcutMapping[] = [
-  {
-    keys: "shift+tab",
-    command: "workflow.open",
-    portable: true,
-    note: "Externe Clients verwenden einen Picker über WORKFLOW_MODES; Ausführung via /workflow-set.",
-  },
   { keys: "super+m", command: "model.open", portable: true },
   { keys: "super+d", command: "thinking.open", portable: true },
   { keys: "super+q", command: "app.commandCenter", portable: true },

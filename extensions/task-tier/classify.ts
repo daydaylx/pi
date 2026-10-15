@@ -8,11 +8,6 @@ import { matchingVerifierRequiredPaths } from "../permissions/verifier-required-
 
 export type TaskTier = "fast" | "normal" | "deep";
 
-export interface ClassifyOptions {
-  /** Plan Mode (simple/detailed) ist aktiv. */
-  planning: boolean;
-}
-
 /** Risikowörter allein verlangen konservativ NORMAL, aber keine DEEP-Prüfung. */
 const NORMAL_RISK_PATTERN = new RegExp(
   [
@@ -38,7 +33,6 @@ const NORMAL_RISK_PATTERN = new RegExp(
     "\\bipc\\b",
     "dependenc",
     "abhängigkeit",
-    "plan[- ]?mod(?:e|us)",
     "verifier",
     "subagent",
     "race condition",
@@ -68,16 +62,6 @@ const RELEASE_PATTERN =
 const CONTINUATION_PATTERN =
   /^\s*(weiter|mach weiter|fortsetzen|ja|ok(?:ay)?|go|los|jo|passt|bitte|dann|continue|proceed|yes)\b[\s\w,.!?äöüß-]{0,40}$/i;
 
-/**
- * Prompt, mit dem plan-mode die Umsetzung eines freigegebenen Plans startet
- * (extensions/plan-mode/commands.ts, PLAN_EXECUTION_PROMPT). Der Prompt ist
- * kurz, der eigentliche Auftrag steht im plan-handoff. Eine freigegebene
- * Umsetzung ist nie FAST: sonst sänke das Thinking auf low und das spätere
- * Hochstufen setzte es zurück, was den Prompt-Cache des gesamten Kontexts
- * entwertet.
- */
-const PLAN_EXECUTION_PATTERN = /^\s*Setze den freigegebenen Plan um\b/i;
-
 const PATH_PATTERN =
   /(?:[\w.-]+\/)+[\w.-]+\.\w+|\b[\w-]+\.(?:ts|tsx|js|mjs|cjs|json|md|css|py|sh|ya?ml)\b/g;
 
@@ -89,11 +73,7 @@ export function mentionedPaths(prompt: string): string[] {
   return [...new Set(prompt.match(PATH_PATTERN) ?? [])];
 }
 
-export function classifyPrompt(
-  prompt: string,
-  options: ClassifyOptions,
-): TaskTier {
-  if (options.planning) return "deep";
+export function classifyPrompt(prompt: string): TaskTier {
   const text = prompt.trim();
   if (!text) return "normal";
   const paths = mentionedPaths(text);
@@ -108,7 +88,6 @@ export function classifyPrompt(
   if (BROAD_PATTERN.test(text)) return "normal";
   const listItems = text.match(/^\s*(?:[-*]|\d+[.)])\s+/gm)?.length ?? 0;
   if (listItems > FAST_MAX_LIST_ITEMS) return "normal";
-  if (PLAN_EXECUTION_PATTERN.test(text)) return "normal";
   return "fast";
 }
 

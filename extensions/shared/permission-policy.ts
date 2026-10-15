@@ -191,7 +191,7 @@ function isWriteCapableCommand(command: string): boolean {
   return WRITE_CAPABLE_PATTERN.test(command);
 }
 
-const PLAN_SIMPLE_COMMANDS = new Set([
+const SIMPLE_DIAGNOSTIC_COMMANDS = new Set([
   "pwd",
   "ls",
   "tree",
@@ -224,12 +224,13 @@ const PLAN_SIMPLE_COMMANDS = new Set([
   "uptime",
 ]);
 
-// Recovery has a stricter job than Plan Mode: only commands whose executable
-// is known to be diagnostic may pass. classifyOperationEffect intentionally
-// treats unfamiliar programs as SAFE for Plan Mode; that default would let
-// deployment and infrastructure tools run through a recovery gate.
+// Recovery has a stricter job than the general command-effect check: only
+// commands whose executable is known to be diagnostic may pass.
+// classifyOperationEffect intentionally treats unfamiliar programs as SAFE;
+// that default would let deployment and infrastructure tools run through a
+// recovery gate.
 const RECOVERY_DIAGNOSTIC_COMMANDS = new Set([
-  ...PLAN_SIMPLE_COMMANDS,
+  ...SIMPLE_DIAGNOSTIC_COMMANDS,
   "find",
   "git",
 ]);
@@ -238,7 +239,7 @@ const SAFE_SHELL_BUILTINS = new Set(["echo", "printf", "pwd", "type"]);
 
 /**
  * Executable trust has three independent steps (see
- * extensions/plan-mode/README.md, "Executable-Vertrauen"):
+ * docs/executable-trust.md):
  *
  *   1. Discovery  - which file would the shell run? The first PATH hit wins;
  *      a later, trusted hit is never used as a fallback.
@@ -729,8 +730,8 @@ export function decideFileAccess(
   const isReadRestricted = permissionLevel === "readonly";
 
   // YOLO 3 hebt die Pfadgrenzen vollständig auf (Secrets, außerhalb des
-  // Projekts, Symlink-Escape, Ausführungspfade). Trust-Grenze und Plan-Mode
-  // entscheiden vorher in guards.ts/workflow-policy.ts.
+  // Projekts, Symlink-Escape, Ausführungspfade). Die Trust-Grenze entscheidet
+  // vorher in guards.ts/workflow-policy.ts.
   if (permissionLevel === "yolo-full") return YOLO_FULL_ALLOW;
 
   if (isSensitivePathIdentity(rawPath, identity)) {
@@ -812,7 +813,7 @@ interface ParsedShell {
 }
 
 /**
- * Conservative parser for Plan Mode and readonly permissions. It accepts one
+ * Conservative parser for readonly permissions and Recovery. It accepts one
  * plain command only and rejects shell constructs whose effects cannot be
  * proven read-only. In particular, pipelines are not a safe composition
  * primitive: every command in a pipeline would need an independent process
@@ -1345,7 +1346,7 @@ function isSafeSed(tokens: string[]): boolean {
  * merely by sharing a basename with a system tool.
  */
 function classifyToolSegment(executable: string, tokens: string[]): boolean {
-  if (PLAN_SIMPLE_COMMANDS.has(executable)) {
+  if (SIMPLE_DIAGNOSTIC_COMMANDS.has(executable)) {
     if (
       executable === "tree" &&
       hasAnyOption(tokens, [/^-o(?:.+)?$/, /^--output(?:=|$)/i])
@@ -1487,7 +1488,7 @@ function isSafePlanSegment(tokens: string[], cwd: string): boolean {
   return classifyToolSegment(executable, tokens);
 }
 
-export function isPlanSafeCommand(command: string, cwd: string): boolean {
+export function isReadOnlyCommand(command: string, cwd: string): boolean {
   if (containsUnquotedVariableExpansion(command)) return false;
   const parsed = parseReadOnlyShell(command);
   return (
@@ -1642,7 +1643,7 @@ function gitAction(args: string[]): { action?: string; position: number } {
 
 /**
  * Executable-level facts `classifyOperationEffect` reports to a caller that
- * wants to verify them (Plan Mode, see diagnosePlanModeCommand): every program
+ * wants to verify them (see diagnoseCommandSafety): every program
  * the shell would start, and every environment override that changes how
  * programs are found or loaded.
  */
@@ -1909,7 +1910,7 @@ export function classifyOperationEffect(
 const EXECUTION_ENV_OVERRIDE =
   /^(?:PATH|LD_[A-Z_]+|DYLD_[A-Z_]+|BASH_ENV|ENV)$/;
 
-export type PlanModeCommandDiagnosis =
+export type CommandSafetyDiagnosis =
   | { safe: true }
   /** Classified as mutating, risky or forbidden by `classifyOperationEffect`. */
   | { safe: false; cause: "command-not-allowed"; effect: OperationEffect }
@@ -1927,11 +1928,11 @@ export type PlanModeCommandDiagnosis =
     };
 
 /**
- * Plan Mode decision for one shell command:
- * effect classification -> executable discovery -> trust of source and target.
+ * Safety decision for one shell command (used by Recovery's read-only
+ * capability): effect classification -> executable discovery -> trust of
+ * source and target.
  *
- * Plan Mode must be able to read and explore, so the gate is deliberately
- * open: a program passes whatever its source (system profile, user profile,
+ * Read-only exploration must stay possible, so the gate is deliberately open: a program passes whatever its source (system profile, user profile,
  * dev-shell store path, user bin dir) as long as its effect is harmless. Only
  * what a project could plant is refused: the first PATH hit or an absolute
  * path inside the project (`bin/ls`, `node_modules/.bin`, a relative or empty
@@ -1939,14 +1940,14 @@ export type PlanModeCommandDiagnosis =
  * overrides in front of the command. Trust (resolveExecutableTrust) stays
  * available for callers that need to know whether a program is a system one.
  */
-export function diagnosePlanModeCommand(
+export function diagnoseCommandSafety(
   command: string,
   cwd: string,
   /** Injectable for tests that model a different system layout. */
   trust?: { policy?: ExecutableTrustPolicy; pathEnv?: string },
-): PlanModeCommandDiagnosis {
+): CommandSafetyDiagnosis {
   let untrusted:
-    | Extract<PlanModeCommandDiagnosis, { cause: "executable-untrusted" }>
+    | Extract<CommandSafetyDiagnosis, { cause: "executable-untrusted" }>
     | undefined;
   const effect = classifyOperationEffect(command, cwd, (check) => {
     if (untrusted) return;
@@ -1993,16 +1994,9 @@ export function diagnosePlanModeCommand(
   return untrusted ?? { safe: true };
 }
 
-export function isPlanModeDiagnosticCommand(
-  command: string,
-  cwd: string,
-): boolean {
-  return diagnosePlanModeCommand(command, cwd).safe;
-}
-
 /**
  * Recovery shell capability: a single parsed command, from a known
- * diagnostic executable, that also passes the Plan Mode safety checks.
+ * diagnostic executable, that also passes the command safety checks.
  * Unknown executables and wrappers fail closed even when the general effect
  * classifier cannot prove that they mutate state.
  */
@@ -2022,7 +2016,7 @@ export function isRecoveryReadOnlyCommand(
   ) {
     return false;
   }
-  return isPlanModeDiagnosticCommand(command, cwd);
+  return diagnoseCommandSafety(command, cwd).safe;
 }
 
 function referencesSystemPath(command: string): boolean {
@@ -2531,7 +2525,7 @@ export function decideBash(
   if (!trimmed) return deny("Leeres Bash-Kommando.");
 
   if (permissionLevel === "readonly") {
-    return isPlanSafeCommand(trimmed, cwd)
+    return isReadOnlyCommand(trimmed, cwd)
       ? ALLOW
       : deny(
           "Readonly: Das Kommando ist nicht nachweislich rein inspizierend.",
@@ -2575,7 +2569,7 @@ export function decideBash(
   }
 
   if (permissionLevel === "confirm-all") {
-    if (isPlanSafeCommand(trimmed, cwd)) return ALLOW;
+    if (isReadOnlyCommand(trimmed, cwd)) return ALLOW;
     return ask(
       isWriteCapableCommand(trimmed)
         ? "Shell-Mutation benötigt Bestätigung"

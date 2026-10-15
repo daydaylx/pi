@@ -8,9 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { LAYOUT_COLUMNS, layoutForSize } from "../shared/layout.ts";
-import { isPlanningMode } from "../shared/workflow-mode.ts";
 import { getPiLaunchProfile, type PiLaunchProfile } from "../shared/profile.ts";
-import { planLocation, readPlan } from "../plan-mode/plan-store.ts";
 import {
   loadSetupConfig,
   persistUiPreference,
@@ -296,7 +294,6 @@ function makeState(
 ): AuroraUiState {
   return {
     sessionEpoch: epoch,
-    workflow: { phase: "work", label: "Work" },
     permissions: {},
     lsp: {},
     model: {
@@ -464,7 +461,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   let sessionHome: string | undefined;
   let sessionProfile: PiLaunchProfile | undefined;
   let currentUserPrompt: string | undefined;
-  let currentPlanText: string | undefined;
   let lastVerificationStatus: string | null = null;
   let workspaceChangedSinceVerification = false;
   // One owner: ui.dashboard from the active profile's setup.json, switched via
@@ -571,7 +567,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       now,
       verificationStatus: state.verification?.status,
       workspaceChangedSinceVerification,
-      currentPlan: currentPlanText,
       userPrompt: currentUserPrompt,
       contextPercent: activeContext?.getContextUsage()?.percent ?? null,
     });
@@ -630,7 +625,7 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
   /**
    * The surface above the editor is a fresh-session welcome followed by the
    * fixed Session panel and adaptive tile workspace. It consumes cached runtime values only: rendering
-   * never changes workflow state or asks another system for information.
+   * never changes state or asks another system for information.
    */
   function renderActivityWidget(
     theme: Theme,
@@ -654,7 +649,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       return renderStartscreen(theme, {
         width,
         rows,
-        workflow: state.workflow.label,
         model: state.model.id,
         thinking: state.model.thinking,
         cwd: sessionCwd,
@@ -990,7 +984,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
       sessionEpoch: state.sessionEpoch,
       source: OWNER,
       state: {
-        workflow: { ...state.workflow },
         permissions: { ...state.permissions },
         lsp: { ...state.lsp },
         model: { ...state.model },
@@ -1102,7 +1095,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     lastRelevantActivityAt = 0;
     turnSettledWhileAsync = false;
     currentUserPrompt = undefined;
-    currentPlanText = undefined;
     lastVerificationStatus = null;
     workspaceChangedSinceVerification = false;
     // A session boundary must not leak the previous session's task/
@@ -1335,13 +1327,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     // new task for the title projection.
     if (event.messageType === "custom") return;
     currentUserPrompt = event.prompt;
-    // A plan is only a valid task-title source for the turn it belongs to.
-    // A brand-new prompt that starts outside planning mode is a new,
-    // independent task and must not keep showing a previous plan's title —
-    // the plan itself stays on disk, only its use as the current title ends.
-    if (!state || !isPlanningMode(state.workflow.phase)) {
-      currentPlanText = undefined;
-    }
     showStartscreen = false;
     projectCurrentTask(Date.now());
     ticker?.requestRender();
@@ -1497,14 +1482,6 @@ export default function auroraUiExtension(pi: ExtensionAPI): void {
     activeTools.clear();
     foregroundSubagents.clear();
     refreshSubagentDisplay();
-    if (sessionCwd && state && isPlanningMode(state.workflow.phase)) {
-      // Plans are session-scoped now, so the display needs the session id as
-      // well as the workspace — reading "the" plan of a directory would show a
-      // concurrent session's plan.
-      currentPlanText = readPlan(
-        planLocation(sessionCwd, ctx.sessionManager.getSessionId()),
-      )?.content;
-    }
     // See agent_start: project after the activity kind has settled to its
     // post-turn value (idle, or "tool" again if an async child retains it),
     // not before — otherwise the projection still reflects the turn's last

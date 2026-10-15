@@ -360,7 +360,6 @@ export const targetConfigSections = {
           activeExtensions,
           [
             "+extensions/setup-core/index.ts",
-            "+extensions/plan-mode/index.ts",
             "+extensions/mode-permissions.ts",
             "+extensions/interactive-pty/index.ts",
             "+extensions/lsp/index.ts",
@@ -381,7 +380,6 @@ export const targetConfigSections = {
         );
         for (const extension of [
           "+extensions/setup-core/index.ts",
-          "+extensions/plan-mode/index.ts",
           "+extensions/mode-permissions.ts",
           "+extensions/ask-user.ts",
           "+extensions/lsp/index.ts",

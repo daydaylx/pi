@@ -1,6 +1,6 @@
 /**
- * Executable trust for Plan Mode shell commands (extensions/shared/
- * permission-policy.ts: resolveExecutableTrust / diagnosePlanModeCommand).
+ * Executable trust for the shell command safety classification (extensions/shared/
+ * permission-policy.ts: resolveExecutableTrust / diagnoseCommandSafety).
  *
  * The NixOS layout is modelled in a temp dir, so the suite proves the same on
  * every host:
@@ -25,13 +25,11 @@ import { assert, eq, test } from "../shared/assertions.mjs";
 import { importModule as load } from "../shared/jiti-loader.mjs";
 
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
-const workflowPolicy = await load("extensions/permissions/workflow-policy.ts");
 const { createExecutableTrustPolicy, resolveExecutableTrust } =
   permissionPolicy;
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-exec-trust-")));
 const project = join(root, "project");
-const planning = { mode: "detailed_plan" };
 
 function executable(path) {
   mkdirSync(join(path, ".."), { recursive: true });
@@ -122,7 +120,7 @@ const policy = createExecutableTrustPolicy({
 const resolveWith = (name, pathEnv) =>
   resolveExecutableTrust(name, project, policy, pathEnv);
 const diagnose = (command, pathEnv) =>
-  permissionPolicy.diagnosePlanModeCommand(command, project, {
+  permissionPolicy.diagnoseCommandSafety(command, project, {
     policy,
     pathEnv,
   });
@@ -246,11 +244,11 @@ await test("E: a /nix/store path alone is never a trust proof", () => {
       `${join(store, "aaaa-coreutils-9.5", "bin", "coreutils")} -h`,
       SYSTEM_PATH,
     ).safe,
-    "Plan Mode stays open: a direct store call is not project-planted, so it may read",
+    "The classification stays open: a direct store call is not project-planted, so it may read",
   );
 });
 
-await test("open Plan Mode: user profiles, dev-shell store paths and user bin dirs may read", () => {
+await test("open classification: user profiles, dev-shell store paths and user bin dirs may read", () => {
   const userDir = join(root, "home", "user", ".local", "bin");
   executable(join(userDir, "python3"));
   for (const [command, pathEnv] of [
@@ -362,49 +360,31 @@ await test("G: a missing bare name is not an executable-trust failure, a missing
   );
 });
 
-await test("planModeBashGuard reports why a command was refused", () => {
+await test("diagnoseCommandSafety reports why a command was refused", () => {
   const original = process.env.PATH;
   try {
     process.env.PATH = [fakeBin, original ?? ""].join(delimiter);
-    const untrusted = workflowPolicy.planModeBashGuard(
-      planning,
-      "project-write",
-      "ls",
-      project,
-    );
-    assert(untrusted.blocked, "ls shadowed by a project binary is blocked");
+    const untrusted = permissionPolicy.diagnoseCommandSafety("ls", project);
+    assert(!untrusted.safe, "ls shadowed by a project binary is unsafe");
+    eq(untrusted.cause, "executable-untrusted", "cause: executable-untrusted");
     eq(
-      untrusted.planModeCause,
-      "executable-untrusted",
-      "cause: executable-untrusted",
+      untrusted.reason,
+      "project-controlled",
+      "the diagnosis names the project-controlled PATH hit",
     );
-    assert(
-      untrusted.reason.includes("im Projekt"),
-      "the message names the project-controlled PATH hit",
-    );
-    const mutating = workflowPolicy.planModeBashGuard(
-      planning,
-      "project-write",
+    const mutating = permissionPolicy.diagnoseCommandSafety(
       "find . -delete",
       project,
     );
-    assert(mutating.blocked, "find -delete is blocked");
-    eq(
-      mutating.planModeCause,
-      "command-not-allowed",
-      "cause: command-not-allowed",
-    );
-    assert(
-      !mutating.reason.includes("im Projekt"),
-      "the allow-policy message does not mention executable trust",
-    );
+    assert(!mutating.safe, "find -delete is unsafe");
+    eq(mutating.cause, "command-not-allowed", "cause: command-not-allowed");
   } finally {
     if (original === undefined) delete process.env.PATH;
     else process.env.PATH = original;
   }
 });
 
-await test("planModeBashGuard allows the original regression commands on this host", () => {
+await test("diagnoseCommandSafety accepts the original regression commands on this host", () => {
   // Uses the real PATH and the default trust policy: on classic distributions
   // the tools resolve through /usr/bin, on NixOS through
   // /run/current-system/sw/bin. A tool that is not installed passes the gate
@@ -414,16 +394,11 @@ await test("planModeBashGuard allows the original regression commands on this ho
     "find . -maxdepth 2 -type f",
     "git status --short",
   ]) {
-    const result = workflowPolicy.planModeBashGuard(
-      planning,
-      "project-write",
+    const result = permissionPolicy.diagnoseCommandSafety(
       command,
       process.cwd(),
     );
-    assert(
-      !result.blocked,
-      `${command} is allowed on this host (${result.reason})`,
-    );
+    assert(result.safe, `${command} is safe on this host`);
   }
 });
 

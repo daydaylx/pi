@@ -33,10 +33,6 @@ export const auroraUiSections = {
             sessionEpoch: value.sessionEpoch,
             source: "permissions-test-provider",
             state: {
-              workflow: {
-                phase: "detailed_plan",
-                label: "Architekturplan",
-              },
               permissions: {
                 level: "project-write",
                 label: "Projekt schreiben",
@@ -262,7 +258,6 @@ export const auroraUiSections = {
               getGitBranch: () => "feature/aurora",
               getExtensionStatuses: () =>
                 new Map([
-                  ["workflow", "ARBEIT 1/3"],
                   ["permissions", "Read + Write"],
                   ["lsp", "ready"],
                 ]),
@@ -290,14 +285,12 @@ export const auroraUiSections = {
           const wide = stripAnsi(footer.render(140)[0]);
           const narrow = stripAnsi(footer.render(60)[0]);
 
-          // The fixed Session panel and the footer intentionally share the
-          // workflow identity: the footer remains the permanent status anchor.
           assert(
             wide.includes("main-model") &&
               narrow.includes("main-model") &&
-              wide.includes("Architekturplan") &&
-              narrow.includes("Architekturplan"),
-            "the footer keeps status-bar metadata and the active session mode",
+              !wide.includes("Architekturplan") &&
+              !narrow.includes("Architekturplan"),
+            "the footer keeps status-bar metadata and shows no workflow label",
           );
 
           // The footer renders runtime state, never the wide risk banner the
@@ -407,7 +400,6 @@ export const auroraUiSections = {
             const rendered = startscreen.renderStartscreen(context.ui.theme, {
               width: columns,
               rows,
-              workflow: "Work",
               model: "aurora-test-model",
               thinking: "high",
               cwd: path.join(homedir(), "projects", "pi"),
@@ -424,7 +416,6 @@ export const auroraUiSections = {
           }
           const footerState = (overrides = {}) => ({
             sessionEpoch: "responsive-test",
-            workflow: { phase: "work", label: "Work" },
             permissions: { level: "project-write", label: "Projekt schreiben" },
             lsp: { state: "ready" },
             model: { id: "aurora-test-model", thinking: "high" },
@@ -492,21 +483,21 @@ export const auroraUiSections = {
           );
           const standard = line(70, quiet);
           assert(
-            standard.includes("Work") &&
+            !standard.includes("Work") &&
               standard.includes("aurora-test-model") &&
               standard.includes("~/…/pi") &&
               standard.includes("High") &&
               !standard.includes("Denken"),
-            "the standard footer keeps workflow, model, thinking and folder",
+            "the standard footer keeps model, thinking and folder",
           );
           const compact = line(45, quiet);
           assert(
-            compact.includes("Work") && compact.includes("pi"),
-            "the compact footer keeps the workflow and final folder name",
+            !compact.includes("Work") && compact.includes("pi"),
+            "the compact footer keeps the final folder name",
           );
           assert(
-            line(100, { dashboardVisible: true }).includes("Work"),
-            "the footer keeps workflow identity visible beside the Session panel",
+            line(100, { dashboardVisible: true }).includes("aurora-test-model"),
+            "the footer keeps the model visible beside the Session panel",
           );
 
           // Risk outranks the tier: these claim space at any width.
@@ -651,7 +642,6 @@ export const auroraUiSections = {
                 ]),
                 contextPercent: 95,
                 state: footerState({
-                  workflow: { phase: "work", label: "作業モード" },
                   model: { id: "模型-统一-推理-大", thinking: "high" },
                   permissions: { level: "yolo" },
                   lsp: { state: "eingeschränkt" },
@@ -785,7 +775,6 @@ export const auroraUiSections = {
             goal: "Keep the workflow state visible.",
             phase: "work",
             phaseLabel: "Arbeiten",
-            workflowMode: "work",
             currentWork: { summary: "Integrate the fixed session panel." },
             findings: [],
             receipts: [],
@@ -1669,8 +1658,7 @@ export const auroraUiSections = {
           },
           context,
         );
-        // The footer owns the persistent workflow identity; the widget
-        // remains the compact event stream even when the dashboard is
+        // The widget remains the compact event stream even when the dashboard is
         // expanded (decision 023: no separate fixed session panel).
         await context.ui.submitSlashCommand("/dashboard expanded");
         const railRendered =
@@ -1695,12 +1683,12 @@ export const auroraUiSections = {
           ? stripAnsi(footerComponent.render(140)[0] ?? "")
           : "";
         assert(
-          footerRendered.includes("Architekturplan") &&
+          footerRendered.includes("main-model") &&
             !railRendered.includes("Sitzung") &&
             railRendered.includes("ARBEITET") &&
             railRendered.includes("READ") &&
             railRendered.includes("TEST"),
-          "the footer keeps the workflow identity while the workspace keeps typed tool rows",
+          "the footer keeps the model while the workspace keeps typed tool rows",
         );
 
         const auroraEpoch = harness.emitted.find(
@@ -2912,17 +2900,6 @@ export const auroraUiSections = {
             // 2. Task Phase determination
             eq(
               determineTaskPhase({
-                mode: "simple_plan",
-                activityKind: "tool",
-                verificationStatus: null,
-                hasActiveVerificationTool: false,
-              }).phase,
-              "plan",
-              "plan mode maps to plan phase",
-            );
-            eq(
-              determineTaskPhase({
-                mode: "work",
                 activityKind: "thinking",
                 verificationStatus: null,
                 hasActiveVerificationTool: false,
@@ -2932,7 +2909,6 @@ export const auroraUiSections = {
             );
             eq(
               determineTaskPhase({
-                mode: "work",
                 activityKind: "tool",
                 verificationStatus: null,
                 hasActiveVerificationTool: false,
@@ -2942,7 +2918,6 @@ export const auroraUiSections = {
             );
             eq(
               determineTaskPhase({
-                mode: "work",
                 activityKind: "idle",
                 verificationStatus: "checks_failed",
                 hasActiveVerificationTool: false,
@@ -2952,7 +2927,6 @@ export const auroraUiSections = {
             );
             eq(
               determineTaskPhase({
-                mode: "work",
                 activityKind: "idle",
                 verificationStatus: "verified",
                 hasActiveVerificationTool: false,
@@ -2991,7 +2965,6 @@ export const auroraUiSections = {
             // Scenario 1: idle after current successful verification.
             eq(
               determineTaskPhase({
-                mode: "work",
                 activityKind: "idle",
                 verificationStatus: "verified",
                 hasActiveVerificationTool: false,
@@ -3005,7 +2978,6 @@ export const auroraUiSections = {
             // never a running check, and the verdict turns unverified.
             eq(
               determineTaskPhase({
-                mode: "work",
                 activityKind: "tool",
                 verificationStatus: "verified",
                 hasActiveVerificationTool: false,
@@ -3022,7 +2994,6 @@ export const auroraUiSections = {
             // but the check is now stale) — must not be done.
             eq(
               determineTaskPhase({
-                mode: "work",
                 activityKind: "idle",
                 verificationStatus: "verified",
                 hasActiveVerificationTool: false,
@@ -3039,7 +3010,6 @@ export const auroraUiSections = {
             // re-check, with the failure verdict, never a fabricated success.
             eq(
               determineTaskPhase({
-                mode: "work",
                 activityKind: "idle",
                 verificationStatus: "checks_failed",
                 hasActiveVerificationTool: false,
@@ -3058,7 +3028,6 @@ export const auroraUiSections = {
             // NOT_READY and degrades an unstructured stale one to UNVERIFIED.
             eq(
               determineTaskPhase({
-                mode: "work",
                 activityKind: "tool",
                 verificationStatus: "checks_failed",
                 hasActiveVerificationTool: false,
@@ -3077,7 +3046,6 @@ export const auroraUiSections = {
             // and its in-flight result is unverified.
             eq(
               determineTaskPhase({
-                mode: "work",
                 activityKind: "tool",
                 verificationStatus: null,
                 hasActiveVerificationTool: true,
@@ -3090,26 +3058,6 @@ export const auroraUiSections = {
               "UNVERIFIED",
             );
 
-            // Scenarios 7 & 8: planning keeps its semantics without fabricating
-            // a verification result.
-            eq(
-              determineTaskPhase({
-                mode: "simple_plan",
-                activityKind: "thinking",
-                verificationStatus: null,
-                hasActiveVerificationTool: false,
-              }).phase,
-              "understand",
-            );
-            eq(
-              determineTaskPhase({
-                mode: "detailed_plan",
-                activityKind: "tool",
-                verificationStatus: null,
-                hasActiveVerificationTool: false,
-              }).phase,
-              "plan",
-            );
             eq(projectVerificationState(null, noTools, null, false), undefined);
 
             // Invariant across every activity × status × staleness combination:
@@ -3124,7 +3072,6 @@ export const auroraUiSections = {
                 for (const current of [true, false]) {
                   for (const hasVerify of [true, false]) {
                     const { phase } = determineTaskPhase({
-                      mode: "work",
                       activityKind: kind,
                       verificationStatus: status,
                       hasActiveVerificationTool: hasVerify,
@@ -3142,7 +3089,6 @@ export const auroraUiSections = {
             const doneTvm = projectTaskViewModel({
               state: {
                 sessionEpoch: "test-epoch",
-                workflow: { phase: "work", label: "Work" },
                 permissions: {},
                 lsp: {},
                 model: { id: "test-model", thinking: "medium" },
@@ -3161,14 +3107,6 @@ export const auroraUiSections = {
             );
 
             // 3. Task Title extraction
-            eq(
-              extractTaskTitle(
-                undefined,
-                "# Fix Compaction\n\nZiel: threshold fix",
-              ).title,
-              "Fix Compaction",
-              "plan title extracted",
-            );
             eq(
               extractTaskTitle("/work Fix the broken test").title,
               "Fix the broken test",
@@ -3307,7 +3245,6 @@ export const auroraUiSections = {
             const tvm = projectTaskViewModel({
               state: {
                 sessionEpoch: "test-epoch",
-                workflow: { phase: "work", label: "Work" },
                 permissions: {},
                 lsp: {},
                 model: { id: "test-model", thinking: "medium" },
@@ -3536,7 +3473,6 @@ export const auroraUiSections = {
             const tvmWithChanges = projectTaskViewModel({
               state: {
                 sessionEpoch: "test-epoch",
-                workflow: { phase: "work", label: "Work" },
                 permissions: {},
                 lsp: {},
                 model: { id: "test-model", thinking: "medium" },
@@ -3845,7 +3781,6 @@ export const auroraUiSections = {
             const tvmWithGoal = projectTaskViewModel({
               state: tvm && {
                 sessionEpoch: "test-epoch",
-                workflow: { phase: "work", label: "Work" },
                 permissions: {},
                 lsp: {},
                 model: { id: "test-model", thinking: "medium" },

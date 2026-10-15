@@ -77,7 +77,6 @@ const thinkingMenu = await load("extensions/shared/thinking-menu.ts");
 const lspControlCenter = await load("extensions/lsp/control-center.ts");
 const lspTools = await load("extensions/lsp/tools.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
-const planMode = await load("extensions/plan-mode/index.ts");
 const controlPlane = await load("extensions/control-plane.ts");
 const compactTools = await load("extensions/compact-tools/index.ts");
 const askUser = await load("extensions/ask-user.ts");
@@ -116,7 +115,6 @@ const context = {
   lspControlCenter,
   lspTools,
   modePermissions,
-  planMode,
   controlPlane,
   compactTools,
   askUser,

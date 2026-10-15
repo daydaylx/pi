@@ -230,10 +230,6 @@ export const snapshotGateSections = {
         // Recovery unavailability is not a blanket read lock, but it must
         // fail closed for writes in the real permission pipeline.
         const unavailableHarness = createHarness();
-        unavailableHarness.api.events.on(
-          "workflow-capabilities:request",
-          (value) => value.respond({ mode: "work" }),
-        );
         modePermissions.default(unavailableHarness.api);
         const unavailableCtx = unavailableHarness.makeContext({
           cwd: workspace,
@@ -263,9 +259,6 @@ export const snapshotGateSections = {
         // A clear-looking response from an obsolete session cannot authorize
         // a write in the replacement session.
         const staleHarness = createHarness();
-        staleHarness.api.events.on("workflow-capabilities:request", (value) =>
-          value.respond({ mode: "work" }),
-        );
         let resolveStaleStatus;
         staleHarness.api.events.on("recovery-status:request", (request) =>
           request.respond(
@@ -304,9 +297,6 @@ export const snapshotGateSections = {
         const guardHarness = createHarness();
         guardHarness.api.events.on("recovery-status:request", (request) =>
           request.respond({ armed: false }),
-        );
-        guardHarness.api.events.on("workflow-capabilities:request", (value) =>
-          value.respond({ mode: "work" }),
         );
         modePermissions.default(guardHarness.api);
         const guardCtx = guardHarness.makeContext({ cwd: workspace });

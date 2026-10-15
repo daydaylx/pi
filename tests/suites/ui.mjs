@@ -1,89 +1,66 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assert, eq } from "../shared/assertions.mjs";
 import {
   assertNoGlobalChrome,
-  contrastRatio,
   createHarness,
-  latestStatus,
   stripAnsi,
 } from "../shared/harness.mjs";
 import { npmModuleFile, ROOT } from "../shared/jiti-loader.mjs";
 
 export const uiSections = {
   "Control Center menus": async (context) => {
-    const { section, thinkingMenu, modePermissions, planMode, controlPlane } =
-      context;
+    const { section, thinkingMenu, modePermissions, controlPlane } = context;
 
     await section("Control Center menus", async () => {
-      if (!thinkingMenu || !modePermissions || !planMode || !controlPlane)
-        return;
+      if (!thinkingMenu || !modePermissions || !controlPlane) return;
 
-      // Shift+Tab is the sole workflow control. Super+Q remains the independent
-      // Command Center and must not offer an alternative workflow route.
+      // Shift+Tab is unbound (reserved for a later skill launcher). Super+Q is
+      // the Command Center and offers no workflow route, since none exists.
       {
         const seen = [];
-        let customCalls = 0;
         const shared = createHarness({
           select: (labels) => {
             seen.push([...labels]);
             return undefined;
           },
         });
-        planMode.default(shared.api);
         controlPlane.default(shared.api);
         const sharedContext = shared.makeContext({
           cwd: mkdtempSync(path.join(tmpdir(), "pi-cc-entries-")),
         });
         sharedContext.ui.custom = async () => {
-          customCalls += 1;
           throw new Error("use deterministic select fallback");
         };
         await shared.runHooks("session_start", {}, sharedContext);
-        await shared.shortcuts.get("shift+tab")(sharedContext);
         eq(
-          customCalls,
-          0,
-          "Shift+Tab uses Pi's native selector instead of a focus-capturing overlay",
+          shared.shortcuts.has("shift+tab"),
+          false,
+          "no extension binds Shift+Tab",
         );
         await shared.shortcuts.get("super+q")(sharedContext);
-        // Super+Q routes through an event; the bus dispatches without awaiting the
-        // async listener, so let the microtask queue drain before asserting.
+        // Super+Q routes through a command; the bus dispatches without awaiting
+        // the async listener, so let the microtask queue drain before asserting.
         await new Promise((resolve) => setImmediate(resolve));
-        eq(seen.length, 2, "both entry points opened their menu");
-        const [workflowSwitch, controlCenter] = seen;
-        eq(
-          workflowSwitch,
-          ["Work", "Schnellplan", "Architekturplan"],
-          "Shift+Tab exposes only the three workflow modes",
-        );
+        eq(seen.length, 1, "Super+Q opened the Command Center");
+        const [controlCenter] = seen;
         assert(
-          controlCenter.length > workflowSwitch.length &&
-            !controlCenter.some((entry) =>
-              ["/plan", "/work", "/go", "/workflow"].some((command) =>
-                entry.includes(command),
-              ),
-            ) &&
+          !controlCenter.some((entry) =>
+            ["/plan", "/work", "/go", "/workflow", "-plan"].some((command) =>
+              entry.includes(command),
+            ),
+          ) &&
             controlCenter.includes("Berechtigungsmodus · /permission") &&
             controlCenter.includes("LSP-Steuerung · /lsp"),
-          "Super+Q has no alternative workflow command and keeps independent commands",
+          "Super+Q offers no workflow or plan command and keeps independent commands",
         );
       }
 
       // This uses Pi's real selector component and the harness' non-blocking
-      // shortcut dispatcher. Unlike the mapping checks above, the selector
-      // promise stays open while terminal input is routed to its focus owner.
+      // shortcut dispatcher. The selector promise stays open while terminal
+      // input is routed to its focus owner.
       {
         const selectorModule = await import(
           pathToFileURL(
@@ -124,9 +101,11 @@ export const uiSections = {
           editorText: "unverlorener Entwurf",
           select,
         });
-        planMode.default(liveHarness.api);
         controlPlane.default(liveHarness.api);
         const liveContext = liveHarness.makeContext();
+        liveContext.ui.custom = async () => {
+          throw new Error("use deterministic select fallback");
+        };
         await liveHarness.runHooks("session_start", {}, liveContext);
         let globalNavigationConsumes = 0;
         liveContext.ui.onTerminalInput((data) => {
@@ -137,31 +116,42 @@ export const uiSections = {
           return undefined;
         });
 
-        const dispatch = liveHarness.dispatchShortcut("shift+tab", liveContext);
+        const unboundDispatch = liveHarness.dispatchShortcut(
+          "shift+tab",
+          liveContext,
+        );
+        eq(
+          unboundDispatch.handled,
+          false,
+          "Shift+Tab is not recognized by Pi's dispatcher: no extension binds it",
+        );
+        eq(selectorCalls, 0, "an unbound Shift+Tab opens no selector");
+
+        const dispatch = liveHarness.dispatchShortcut("super+q", liveContext);
         let completed = false;
         void dispatch.completion.then(() => {
           completed = true;
         });
-        await Promise.resolve();
+        await new Promise((resolve) => setImmediate(resolve));
         eq(
           dispatch.handled,
           true,
-          "Shift+Tab is recognized by Pi's dispatcher",
+          "Super+Q is recognized by Pi's dispatcher",
         );
-        eq(selectorCalls, 1, "Shift+Tab opens exactly one native selector");
+        eq(selectorCalls, 1, "Super+Q opens exactly one native selector");
         eq(completed, false, "the native selector remains open for input");
         assert(
           Boolean(liveHarness.focusedComponent),
           "the open native selector owns keyboard focus",
         );
         liveHarness.sendTerminalInput("\u001b[57420u");
-        liveHarness.sendTerminalInput("\u001b[13u");
-        await dispatch.completion;
         eq(
-          latestStatus(liveHarness, "workflow"),
-          "Schnellplan",
-          "CSI-u navigation and selection apply the chosen workflow",
+          globalNavigationConsumes,
+          0,
+          "global extension input listeners cannot consume modal navigation",
         );
+        liveHarness.sendTerminalInput("\u001b");
+        await dispatch.completion;
         eq(
           liveHarness.editorText,
           "unverlorener Entwurf",
@@ -171,23 +161,6 @@ export const uiSections = {
           liveHarness.focusedComponent,
           undefined,
           "closing the selector returns focus from the modal test surface",
-        );
-
-        const cancelled = liveHarness.dispatchShortcut(
-          "shift+tab",
-          liveContext,
-        );
-        liveHarness.sendTerminalInput("\u001b");
-        await cancelled.completion;
-        eq(
-          latestStatus(liveHarness, "workflow"),
-          "Schnellplan",
-          "Escape closes the native selector without changing workflow",
-        );
-        eq(
-          globalNavigationConsumes,
-          0,
-          "global extension input listeners cannot consume modal navigation",
         );
         liveHarness.sendTerminalInput("\u001b[57420u");
         eq(
@@ -209,21 +182,19 @@ export const uiSections = {
             return selectorResult;
           },
         });
-        planMode.default(guarded.api);
         controlPlane.default(guarded.api);
         const guardedContext = guarded.makeContext();
+        guardedContext.ui.custom = async () => {
+          throw new Error("use deterministic select fallback");
+        };
         await guarded.runHooks("session_start", {}, guardedContext);
-        const first = guarded.dispatchShortcut("shift+tab", guardedContext);
-        const second = guarded.dispatchShortcut("shift+tab", guardedContext);
+        const first = guarded.dispatchShortcut("super+q", guardedContext);
+        const second = guarded.dispatchShortcut("super+q", guardedContext);
+        await new Promise((resolve) => setImmediate(resolve));
         eq(
           selectorCalls,
           1,
           "same-turn repeated shortcuts cannot queue a duplicate modal command",
-        );
-        eq(
-          guarded.submittedCommands,
-          [],
-          "Shift+Tab opens the workflow selector directly without a slash command",
         );
         releaseSelector(undefined);
         await Promise.all([first.completion, second.completion]);
@@ -236,22 +207,18 @@ export const uiSections = {
             throw new Error("simulierter Dispatcherfehler");
           },
         });
-        planMode.default(failing.api);
+        controlPlane.default(failing.api);
         const failingContext = failing.makeContext();
-        const dispatch = failing.dispatchShortcut("shift+tab", failingContext);
+        failingContext.ui.custom = async () => {
+          throw new Error("use deterministic select fallback");
+        };
+        await failing.runHooks("session_start", {}, failingContext);
+        const dispatch = failing.dispatchShortcut("super+q", failingContext);
         await dispatch.completion;
         eq(
           failing.editorText,
           "wichtiger Entwurf",
           "a failed preserve-draft shortcut restores the editor text",
-        );
-        assert(
-          failing.notifications.some(
-            (entry) =>
-              entry.level === "error" &&
-              entry.message.includes("simulierter Dispatcherfehler"),
-          ),
-          "shortcut dispatch failures remain visible",
         );
       }
 
@@ -347,7 +314,6 @@ export const uiSections = {
             },
           },
         });
-        planMode.default(harness.api);
         modePermissions.default(harness.api);
         controlPlane.default(harness.api);
         const context = harness.makeContext({
@@ -403,50 +369,12 @@ export const uiSections = {
           "xhigh",
           "manual Thinking selection applies its level",
         );
-        choice = "Schnellplan";
-        await harness.shortcuts.get("shift+tab")(context);
-        eq(
-          latestStatus(harness, "workflow"),
-          "Schnellplan",
-          "the native workflow selector maps Schnellplan",
-        );
-        eq(
-          harness.api.getThinkingLevel(),
-          "xhigh",
-          "manual Thinking survives a workflow transition",
-        );
         choice = "Mittel";
         await harness.shortcuts.get("super+d")(context);
         eq(
           harness.api.getThinkingLevel(),
           "medium",
           "manual Thinking selection applies medium level",
-        );
-        choice = "Architekturplan";
-        await harness.shortcuts.get("shift+tab")(context);
-        eq(
-          latestStatus(harness, "workflow"),
-          "Architekturplan",
-          "the native workflow selector maps Architekturplan",
-        );
-        eq(
-          harness.api.getThinkingLevel(),
-          "medium",
-          "manual Thinking stays at chosen level across workflow changes",
-        );
-        choice = "Work";
-        await harness.shortcuts.get("shift+tab")(context);
-        eq(
-          latestStatus(harness, "workflow"),
-          "Work",
-          "the native workflow selector maps Work",
-        );
-        choice = undefined;
-        await harness.shortcuts.get("shift+tab")(context);
-        eq(
-          latestStatus(harness, "workflow"),
-          "Work",
-          "cancelling the native workflow selector keeps the current mode",
         );
 
         // Sessions written before the auto mode was retired still carry
@@ -489,7 +417,6 @@ export const uiSections = {
           select: (labels) =>
             labels.find((label) => label.endsWith("openai-codex/gpt-5.4-mini")),
         });
-        planMode.default(busy.api);
         controlPlane.default(busy.api);
         const busyContext = busy.makeContext({ cwd });
         busyContext.ui.custom = async () => {
@@ -1204,7 +1131,6 @@ export const uiSections = {
         const welcome = startscreen.renderStartscreen(theme, {
           width: columns,
           rows,
-          workflow: "Work",
           model: "aurora-test-model",
           thinking: "high",
           cwd: path.join(homedir(), "projects", "pi"),
@@ -1216,19 +1142,19 @@ export const uiSections = {
         );
         assert(
           !welcome.some((row) => row.includes(pendingBg)) &&
-            stripAnsi(welcome.join("\n")).includes("WORKFLOW"),
+            stripAnsi(welcome.join("\n")).includes("MODELL"),
           `the welcome card stays frame-only and carries labelled fields at ${columns}×${rows}`,
         );
       }
 
       const narrowShortcuts = tile.renderShortcutRows(theme, 22, [
-        { key: "Shift+Tab", label: "Workflow" },
+        { key: "Super+Q", label: "Befehle" },
         { key: "Super+M", label: "Modell" },
         { key: "Super+D", label: "Denken" },
       ]);
       assert(
         narrowShortcuts.every((row) => visibleWidth(row) <= 22) &&
-          narrowShortcuts.join("\n").includes("Shift+Tab") &&
+          narrowShortcuts.join("\n").includes("Super+Q") &&
           narrowShortcuts.join("\n").includes("Super+M"),
         "shortcut key caps wrap as complete width-safe units instead of being clipped at a card edge",
       );
@@ -1256,10 +1182,10 @@ export const uiSections = {
         "overlong titles and goals are cropped inside intact frames",
       );
 
-      // 8. The footer upgrades workflow and risks to chips on wide tiers only.
+      // 8. The footer upgrades the launch profile and risks to chips on wide
+      // tiers only.
       const footerState = {
         sessionEpoch: "tile-test",
-        workflow: { phase: "work", label: "Work" },
         permissions: { level: "yolo" },
         lsp: {},
         model: { id: "aurora-test-model", thinking: "high" },
@@ -1269,10 +1195,11 @@ export const uiSections = {
         state: footerState,
         statuses: new Map(),
         contextPercent: null,
+        profile: "system",
       })[0];
       assert(
         wideFooter.includes(selectedBg) && wideFooter.includes(errorBg),
-        "the wide footer paints the workflow chip and the YOLO risk chip",
+        "the wide footer paints the profile chip and the YOLO risk chip",
       );
       const standardFooter = auroraFooter.renderFooterLines(theme, 70, {
         state: footerState,

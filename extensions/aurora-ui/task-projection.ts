@@ -1,5 +1,3 @@
-import type { WorkflowMode } from "../shared/workflow-mode.ts";
-import { isPlanningMode, workflowModeLabel } from "../shared/workflow-mode.ts";
 import type { AuroraUiState, AuroraVerificationSummary } from "./state.ts";
 import { normalizeVerificationLabel } from "./verification-normalize.ts";
 import {
@@ -26,7 +24,6 @@ export interface TaskProjectionContext {
   receiptAggregator?: ReceiptAggregator;
   verificationStatus?: string | null;
   workspaceChangedSinceVerification?: boolean;
-  currentPlan?: string;
   userPrompt?: string;
   contextPercent?: number | null;
   now?: number;
@@ -37,17 +34,15 @@ export interface TaskProjectionContext {
  * the workspace can be trusted (see 02-target-behavior.md phase rules).
  *
  * Precedence:
- * 1. Planning modes keep their explicit planning semantics.
- * 2. Only a real running verification tool claims "Prüfen".
- * 3. Active edit/bash/other work stays "Arbeiten" even after a failed check.
- * 4. Active thinking means "understand" unless planning mode applies.
- * 5. `done` requires idle plus a current successful verification — a stale one
+ * 1. Only a real running verification tool claims "Prüfen".
+ * 2. Active edit/bash/other work stays "Arbeiten" even after a failed check.
+ * 3. Active thinking means "understand".
+ * 4. `done` requires idle plus a current successful verification — a stale one
  *    (workspace mutated since the check) never yields `done`.
- * 6. A failed check alone never claims that verification is currently running;
+ * 5. A failed check alone never claims that verification is currently running;
  *    only idle + failed may show it as an invitation to re-check.
  */
 export interface TaskPhaseInput {
-  mode: WorkflowMode;
   activityKind: AuroraUiState["activity"]["kind"];
   verificationStatus: string | null | undefined;
   hasActiveVerificationTool: boolean;
@@ -55,19 +50,11 @@ export interface TaskPhaseInput {
 }
 
 export function determineTaskPhase({
-  mode,
   activityKind,
   verificationStatus,
   hasActiveVerificationTool,
   verificationIsCurrent = true,
 }: TaskPhaseInput): { phase: TaskPhase; label: string } {
-  if (isPlanningMode(mode)) {
-    if (activityKind === "thinking") {
-      return { phase: "understand", label: "Verstehen" };
-    }
-    return { phase: "plan", label: workflowModeLabel(mode) };
-  }
-
   if (hasActiveVerificationTool) {
     return { phase: "verify", label: "Prüfen" };
   }
@@ -98,32 +85,10 @@ export function determineTaskPhase({
   return { phase: "work", label: "Arbeiten" };
 }
 
-export function extractTaskTitle(
-  userPrompt?: string,
-  currentPlan?: string,
-  mode?: WorkflowMode,
-): { title: string; goal?: string } {
-  if (currentPlan) {
-    const lines = currentPlan.split("\n");
-    const heading = lines
-      .find((line) => line.startsWith("# "))
-      ?.replace(/^#\s*/, "")
-      .trim();
-    if (heading) {
-      const goalLine = lines.find(
-        (line) =>
-          line.toLowerCase().includes("ziel:") ||
-          line.toLowerCase().includes("goal:"),
-      );
-      return {
-        title: heading,
-        goal: goalLine
-          ? goalLine.replace(/^[#*\s-]*ziel:\s*/i, "").trim()
-          : undefined,
-      };
-    }
-  }
-
+export function extractTaskTitle(userPrompt?: string): {
+  title: string;
+  goal?: string;
+} {
   if (userPrompt) {
     const trimmed = userPrompt.trim().replace(/^[/#]\w+\s*/, "");
     const firstLine = trimmed.split("\n")[0]?.trim() ?? "";
@@ -138,9 +103,7 @@ export function extractTaskTitle(
     }
   }
 
-  return {
-    title: isPlanningMode(mode ?? "work") ? "Planung" : "Aktuelle Aufgabe",
-  };
+  return { title: "Aktuelle Aufgabe" };
 }
 
 function checksFromVerificationSummary(
@@ -360,7 +323,6 @@ export function projectTaskViewModel(
   context: TaskProjectionContext,
 ): TaskViewModel {
   const now = context.now ?? Date.now();
-  const mode = (context.state.workflow.phase as WorkflowMode) ?? "work";
   const hasActiveVerification = [...context.activeTools.values()].some(
     (t) => t.kind === "verification",
   );
@@ -372,18 +334,13 @@ export function projectTaskViewModel(
   );
 
   const { phase, label: phaseLabel } = determineTaskPhase({
-    mode,
     activityKind: context.state.activity.kind,
     verificationStatus: context.verificationStatus,
     hasActiveVerificationTool: hasActiveVerification,
     verificationIsCurrent: !stale,
   });
 
-  const { title, goal } = extractTaskTitle(
-    context.userPrompt,
-    context.currentPlan,
-    mode,
-  );
+  const { title, goal } = extractTaskTitle(context.userPrompt);
 
   const receipts = context.receiptAggregator
     ? context.receiptAggregator.getReceipts()
@@ -407,7 +364,6 @@ export function projectTaskViewModel(
     goal,
     phase,
     phaseLabel,
-    workflowMode: mode,
     currentWork,
     findings: [],
     changesSummary,

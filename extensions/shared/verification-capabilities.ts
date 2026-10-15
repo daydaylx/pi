@@ -1,7 +1,7 @@
 /**
  * Synchronous capability bridge for verifier coverage.
  *
- * Same pattern as workflow-capabilities.ts/recovery-capabilities.ts: the
+ * Same pattern as recovery-capabilities.ts: the
  * permission layer asks, setup-core (which already tracks verifier run
  * records via subagent-output-guard.ts and binds them to a workspace
  * fingerprint) answers during event dispatch. The permission layer holds no

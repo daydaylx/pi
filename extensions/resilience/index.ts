@@ -26,7 +26,6 @@ import {
   requestWorkspaceScope,
 } from "../shared/workspace-scope.ts";
 import { trackedExec } from "../shared/tracked-exec.ts";
-import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import {
   RECOVERY_CAPABILITY_EVENTS,
   recoveryEffect,
@@ -756,7 +755,6 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
         (await currentWorkspaceFingerprint(cwd)),
       workspaceRoot: root,
       workspaceFingerprintsByRoot,
-      workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       provider: ctx.model?.provider ?? "unknown",
       model: ctx.model?.id ?? "unknown",
       contextPercent: contextPercent(ctx),
@@ -856,7 +854,6 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       reason: event.reason,
       willRetry: event.willRetry,
       workspaceFingerprint: await currentWorkspaceFingerprint(ctx.cwd),
-      workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
     if (generation === sessionGeneration && turnId === turnGeneration)
@@ -892,7 +889,6 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       reason: event.reason,
       willRetry: event.willRetry,
       workspaceFingerprint: await currentWorkspaceFingerprint(ctx.cwd),
-      workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
       errorMessage: event.errorMessage,
     };
@@ -912,7 +908,6 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       reason: event.reason,
       willRetry: event.willRetry,
       workspaceFingerprint: await currentWorkspaceFingerprint(ctx.cwd),
-      workflowMode: requestWorkflowCapabilities(pi.events).mode ?? "unknown",
       contextPercent: contextPercent(ctx),
     };
     if (generation !== sessionGeneration || turnId !== turnGeneration) return;

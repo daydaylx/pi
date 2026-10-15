@@ -4,7 +4,7 @@
  *
  * Dieses Modul gehört zu keiner Präsentationsschicht: Aurora ist Konsument
  * wie jedes andere Frontend und keine Datenquelle. Die fachlichen Extensions
- * (plan-mode, setup-core, diff-viewer, permissions, lsp) und die Runtime
+ * (setup-core, diff-viewer, permissions, lsp) und die Runtime
  * bleiben die alleinigen Wahrheitsquellen.
  *
  * Transport: dieselben EventBus-Kanäle, die die fachlichen Extensions bereits
@@ -12,18 +12,13 @@
  * bestehende Provider unverändert weiterlaufen; die semantische Bedeutung ist
  * über PROTOCOL_VERSION versioniert.
  */
-import type { WorkflowMode } from "../shared/workflow-mode.ts";
-
-export const PROTOCOL_VERSION = "1.1.0";
+export const PROTOCOL_VERSION = "2.0.0";
 
 export const FRONTEND_STATE_CHANNELS = {
   request: "aurora-ui/state/request",
   patch: "aurora-ui/state/patch",
   snapshot: "aurora-ui/state/snapshot",
 } as const;
-
-/** Presentation mirror of the selected workflow mode. */
-export type FrontendWorkflowPhase = WorkflowMode;
 
 export type FrontendActivityKind = "idle" | "thinking" | "tool" | "responding";
 
@@ -58,29 +53,8 @@ export interface FrontendTask {
   phaseLabel: string;
 }
 
-/**
- * A plan that finished a planning turn and is now waiting for a decision.
- *
- * Every frontend needs this to offer the same three choices (execute, keep
- * planning, switch to work without executing). `hash` is what an approval is
- * bound to, so a frontend can tell that the plan it displayed is still the plan
- * it is approving.
- */
-export interface FrontendPlanReadiness {
-  hash: string;
-  mode: FrontendWorkflowPhase;
-  qualityOk: boolean;
-}
-
 export interface FrontendUiState {
   sessionEpoch: string;
-  workflow: {
-    phase: FrontendWorkflowPhase;
-    label: string;
-    /** Selected during a running turn; in force only after it settles. */
-    pending?: FrontendWorkflowPhase;
-    planReady?: FrontendPlanReadiness | null;
-  };
   permissions: {
     level?: string;
     label?: string;
@@ -103,7 +77,6 @@ export interface FrontendUiState {
 }
 
 export interface FrontendUiStatePatch {
-  workflow?: Partial<FrontendUiState["workflow"]>;
   permissions?: Partial<FrontendUiState["permissions"]>;
   lsp?: Partial<FrontendUiState["lsp"]>;
   model?: Partial<FrontendUiState["model"]>;
@@ -139,7 +112,6 @@ export interface FrontendUiSnapshotEvent {
 /** Erlaubte Besitzer. Kein Eintrag zeigt auf eine Präsentationsschicht. */
 export const STATE_FIELD_OWNERS = [
   "runtime",
-  "extension:plan-mode",
   "extension:setup-core",
   "extension:diff-viewer",
   "extension:lsp",
@@ -153,7 +125,7 @@ export type StateFieldOwner = (typeof STATE_FIELD_OWNERS)[number];
 export type StateTransport = "rpc" | "bus" | "bus-events";
 
 /**
- * Das Frontend-State-Schema: zwölf Kernfelder mit ihrem Core-Besitzer und
+ * Das Frontend-State-Schema: elf Kernfelder mit ihrem Core-Besitzer und
  * ihrem Transport. "task" und
  * "activity" sind Projektionen aus echten Core-Signalen (Tool-Ereignisse,
  * Verification-Urteile, letzte Nutzereingabe) — sie dürfen nie aus UI-Text
@@ -161,7 +133,6 @@ export type StateTransport = "rpc" | "bus" | "bus-events";
  */
 export const FRONTEND_STATE_FIELDS = {
   session: { owner: "runtime", transport: "rpc" },
-  workflow: { owner: "extension:plan-mode", transport: "bus" },
   task: { owner: "derived-from-core-signals", transport: "bus-events" },
   activity: { owner: "derived-from-core-signals", transport: "bus-events" },
   changes: { owner: "extension:diff-viewer", transport: "bus" },

@@ -25,7 +25,6 @@ else process.env.PI_RUNTIME_ROOT = originalRuntimeRoot;
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
 const toolPolicy = await load("extensions/permissions/tool-policy.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
-const planMode = await load("extensions/plan-mode/index.ts");
 const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
 const subagentGuard = await load(
   "extensions/setup-core/subagent-output-guard.ts",
@@ -423,7 +422,7 @@ await test("canonical path identity protects sensitive symlink aliases through t
       "ordinary internal aliases remain usable",
     );
     assert(
-      !permissionPolicy.isPlanModeDiagnosticCommand("cat env-alias", cwd),
+      !permissionPolicy.diagnoseCommandSafety("cat env-alias", cwd).safe,
       "Plan diagnostics cannot read a sensitive file through an alias",
     );
     eq(
@@ -433,10 +432,10 @@ await test("canonical path identity protects sensitive symlink aliases through t
     );
     const externalAbsolute = join(cwd, "outside-alias", "outside.txt");
     assert(
-      permissionPolicy.isPlanModeDiagnosticCommand(
+      permissionPolicy.diagnoseCommandSafety(
         "cat " + externalAbsolute,
         cwd,
-      ),
+      ).safe,
       "Plan diagnostics accept an absolute path through an external symlink",
     );
     eq(
@@ -456,7 +455,6 @@ await test("canonical path identity protects sensitive symlink aliases through t
     harness.api.events.on("recovery-status:request", (request) =>
       request.respond({ armed: false }),
     );
-    planMode?.default(harness.api);
     modePermissions.default(harness.api);
     const context = harness.makeContext({ cwd, mode: "tui" });
     await harness.runHooks("session_start", {}, context);
@@ -609,98 +607,21 @@ await test("decideBash asks or blocks on unquoted shell variables at every non-r
   );
 });
 
-await test("planModeMutationGuard blocks non-plan writes at project-write/confirm-all during planning, allows the plan file", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification blocks mutating commands and allows read-only ones", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const write = (level, path) =>
-    workflowPolicy.planModeMutationGuard(
-      planning,
-      level,
-      { toolName: "write", input: { path } },
-      cwd,
-    );
-  assert(
-    write("project-write", "extensions/example.ts").blocked,
-    "a non-plan write is blocked at project-write while planning",
-  );
-  assert(
-    write("confirm-all", "extensions/example.ts").blocked,
-    "a non-plan write is blocked at confirm-all while planning",
-  );
-  // The plan no longer lives in the project, so the old write exception is
-  // gone with it: plan mode's project-write surface is empty in every level.
-  assert(
-    write("project-write", ".agent/plans/current-plan.md").blocked,
-    "the former plan path is an ordinary project file now and stays blocked",
-  );
+  const safe = (command) =>
+    permissionPolicy.diagnoseCommandSafety(command, cwd).safe;
+  assert(!safe("rm extensions/example.ts"), "a mutating command is unsafe");
+  assert(safe("git status"), "a read-only command is safe");
 });
 
-await test("planModeMutationGuard leaves readonly and work mode unaffected", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification allows explicit read-only shell tools", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "simple_plan" };
-  const working = { mode: "work" };
-  const write = (workflow, level) =>
-    workflowPolicy.planModeMutationGuard(
-      workflow,
-      level,
-      { toolName: "write", input: { path: "extensions/example.ts" } },
-      cwd,
-    );
-  assert(
-    !write(planning, "readonly").blocked,
-    "readonly already denies this elsewhere; the plan guard does not duplicate it",
-  );
-  assert(
-    write(planning, "yolo").blocked,
-    "yolo does not unlock agent writes while planning",
-  );
-  assert(
-    !write(working, "project-write").blocked,
-    "work mode is never affected by the plan guard",
-  );
-  assert(
-    !write(working, "yolo").blocked,
-    "yolo keeps its ordinary meaning outside plan mode",
-  );
-});
-
-await test("planModeBashGuard blocks mutating commands and allows read-only ones during planning", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const working = { mode: "work" };
-  const bash = (workflow, level, command) =>
-    workflowPolicy.planModeBashGuard(workflow, level, command, cwd);
-  assert(
-    bash(planning, "project-write", "rm extensions/example.ts").blocked,
-    "a mutating command is blocked while planning",
-  );
-  assert(
-    !bash(planning, "project-write", "git status").blocked,
-    "a read-only command passes while planning",
-  );
-  assert(
-    bash(planning, "yolo", "rm extensions/example.ts").blocked,
-    "yolo does not bypass the plan-mode bash guard",
-  );
-  assert(
-    !bash(planning, "yolo", "git status").blocked,
-    "diagnostics stay available under yolo while planning",
-  );
-  assert(
-    !bash(working, "project-write", "rm extensions/example.ts").blocked,
-    "work mode is never affected by the plan guard",
-  );
-});
-
-await test("planModeBashGuard allows only explicit read-only shell tools during planning", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "git status",
     "git --no-pager diff --no-ext-diff --no-textconv",
@@ -709,17 +630,17 @@ await test("planModeBashGuard allows only explicit read-only shell tools during 
   ]) {
     assert(
       !bash(command).blocked,
-      `${command} is a legitimate diagnostic and must pass during planning`,
+      `${command} is a legitimate diagnostic and must be classified safe`,
     );
   }
 });
 
-await test("planModeBashGuard allows the widened read-only system tool set during planning", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification allows the widened read-only system tool set", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "pwd",
     "ls -la",
@@ -738,33 +659,28 @@ await test("planModeBashGuard allows the widened read-only system tool set durin
   ]) {
     assert(
       !bash(command).blocked,
-      `${command} is a harmless, non-script read tool and must pass during planning`,
+      `${command} is a harmless, non-script read tool and must be classified safe`,
     );
   }
 });
 
-await test("plan mode permits effect-free echo output", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification permits effect-free echo output", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
   // ADR 012 classifies shell effects instead of requiring a fixed executable
   // allowlist; echo without a redirect has no state-changing effect.
   assert(
-    !workflowPolicy.planModeBashGuard(
-      { mode: "detailed_plan" },
-      "project-write",
-      "echo hi",
-      cwd,
-    ).blocked,
-    "plain echo output is read-only during planning",
+    permissionPolicy.diagnoseCommandSafety("echo hi", cwd).safe,
+    "plain echo output is read-only",
   );
 });
 
-await test("planModeBashGuard rejects npm run <arbitrary script> and non-diagnostic bare aliases", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification rejects npm run <arbitrary script> and non-diagnostic bare aliases", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "npm run generate",
     "npm run foo",
@@ -780,12 +696,12 @@ await test("planModeBashGuard rejects npm run <arbitrary script> and non-diagnos
   }
 });
 
-await test("planModeBashGuard still blocks real mutations during planning, even ones that look like diagnostics", () => {
-  if (!workflowPolicy) return;
+await test("command safety classification blocks real mutations, even ones that look like diagnostics", () => {
+  if (!permissionPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  const bash = (command) =>
-    workflowPolicy.planModeBashGuard(planning, "project-write", command, cwd);
+  const bash = (command) => ({
+    blocked: !permissionPolicy.diagnoseCommandSafety(command, cwd).safe,
+  });
   for (const command of [
     "rm -rf node_modules",
     "touch new-file.txt",
@@ -818,7 +734,7 @@ await test("planModeBashGuard still blocks real mutations during planning, even 
   ]) {
     assert(
       bash(command).blocked,
-      `${command} is a mutation and must stay blocked during planning`,
+      `${command} is a mutation`,
     );
   }
 });
@@ -850,7 +766,7 @@ await test("decideBash (yolo) does not mistake /dev/null redirects on internal p
   );
 });
 
-await test("isPlanSafeCommand (readonly permission level) stays strict: no `;`-chaining or /dev/null redirect widening", () => {
+await test("isReadOnlyCommand (readonly permission level) stays strict: no `;`-chaining or /dev/null redirect widening", () => {
   if (!permissionPolicy) return;
   const cwd = process.cwd();
   for (const command of [
@@ -860,44 +776,8 @@ await test("isPlanSafeCommand (readonly permission level) stays strict: no `;`-c
     "eslint . &>/dev/null",
   ]) {
     assert(
-      !permissionPolicy.isPlanSafeCommand(command, cwd),
-      `${command} must stay blocked for the readonly permission level — only Plan Mode's diagnostic classification widens`,
-    );
-  }
-});
-
-// The generic plan-mode guard remains fail-closed for tools it cannot prove
-// read-only. The specialized Investigator-SINGLE exception is checked below
-// and runs before this guard in registerPermissionGuards.
-await test("plan mode permits only verify(check: typecheck), never test or other tools", () => {
-  if (!workflowPolicy) return;
-  const allowed = (mode, toolName, input) =>
-    workflowPolicy.planModeVerifyTypecheckAllowed(
-      { mode },
-      { toolName, input },
-    );
-
-  for (const mode of ["simple_plan", "detailed_plan"]) {
-    assert(
-      allowed(mode, "verify", { check: "typecheck" }),
-      `${mode} permits verify(check: typecheck)`,
-    );
-  }
-  assert(
-    !allowed("work", "verify", { check: "typecheck" }),
-    "work mode does not take the plan-mode exception",
-  );
-
-  for (const [toolName, input, why] of [
-    ["verify", { check: "test" }, "test runs can write coverage/snapshots"],
-    ["verify", {}, "missing check argument"],
-    ["verify", { check: "typecheck", extra: true }, "extra argument present"],
-    ["project_check", { profile: "verify" }, "wrong tool entirely"],
-    ["verify", null, "non-object input"],
-  ]) {
-    assert(
-      !allowed("simple_plan", toolName, input),
-      `simple_plan blocks verify delegation: ${why}`,
+      !permissionPolicy.isReadOnlyCommand(command, cwd),
+      `${command} must stay blocked for the readonly permission level — only the diagnostic classification widens`,
     );
   }
 });
@@ -985,65 +865,6 @@ await test("subagent delegations are allowed without confirmation outside readon
     decide("project-write", "frobnicate"),
     "ask",
     "other unknown tools still follow the configured unknownTools policy",
-  );
-});
-
-await test("plan mode guards hold even under an active YOLO level", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "simple_plan" };
-  const writeEvent = { toolName: "write", input: { path: "src/x.ts" } };
-  assert(
-    workflowPolicy.planModeMutationGuard(planning, "yolo", writeEvent, cwd)
-      .blocked,
-    "a write outside the plan file stays blocked under YOLO",
-  );
-  assert(
-    workflowPolicy.planModeMutationGuard(
-      planning,
-      "yolo",
-      { toolName: "bash", input: { command: "npm test" } },
-      cwd,
-    ).blocked,
-    "a mutating shell call stays blocked under YOLO",
-  );
-  assert(
-    !workflowPolicy.planModeMutationGuard(
-      planning,
-      "yolo",
-      { toolName: "bash", input: { command: "git status --short" } },
-      cwd,
-    ).blocked,
-    "diagnostic shell stays available under YOLO",
-  );
-  assert(
-    !workflowPolicy.planModeMutationGuard(planning, "readonly", writeEvent, cwd)
-      .blocked,
-    "readonly still hands the decision to the permission level",
-  );
-  assert(
-    !workflowPolicy.planModeMutationGuard(
-      { mode: "work" },
-      "yolo",
-      writeEvent,
-      cwd,
-    ).blocked,
-    "outside plan mode YOLO keeps its ordinary meaning",
-  );
-});
-
-await test("recovery_check is a read-only plan-mode capability", () => {
-  if (!workflowPolicy) return;
-  const cwd = process.cwd();
-  const planning = { mode: "detailed_plan" };
-  assert(
-    !workflowPolicy.planModeMutationGuard(
-      planning,
-      "project-write",
-      { toolName: "recovery_check", input: {} },
-      cwd,
-    ).blocked,
-    "recovery_check stays usable while planning",
   );
 });
 
@@ -1306,7 +1127,7 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "docs/verifier-policy.md",
     "extensions/permissions/menus.ts",
     "extensions/permissions/thinking-control.ts",
-    "extensions/plan-mode/presentation.ts",
+    "extensions/aurora-ui/footer.ts",
     "package.json",
     "npm/package.json",
   ]) {
@@ -1328,8 +1149,8 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "extensions/permissions/guards.ts",
     "extensions/permissions/workflow-policy.ts",
     "extensions/shared/verification-capabilities.ts",
-    "extensions/plan-mode/commands.ts",
-    "extensions/plan-mode/session.ts",
+    "extensions/shared/workflow-status.ts",
+    "extensions/shared/recovery-capabilities.ts",
     "extensions/resilience/recovery-state.ts",
     "extensions/setup-core/subagent-output-guard.ts",
     "extensions/permissions/verifier-policy.ts",
@@ -1830,34 +1651,13 @@ await test("YOLO stufen: file access outside the project is denied, asked or all
   );
 });
 
-await test("YOLO 2/3 keep plan mode, the interactive credential guard and the loosened gates", async () => {
+await test("YOLO 2/3 keep the interactive credential guard and the loosened gates", async () => {
   if (!workflowPolicy || !toolPolicy || !verifierPolicy) return;
   const cwd = process.cwd();
-  const planning = { mode: "simple_plan" };
-  // ADR 029 explicitly grants YOLO 3 the Plan Mode and credential-path
-  // bypasses; YOLO 2 retains the ADR 016 protections.
+  // ADR 029 grants YOLO 3 the credential-path bypass; YOLO 2 retains the
+  // ADR 016 protections.
   for (const level of ["yolo-ask", "yolo-full"]) {
     const expectedBlocked = level === "yolo-ask";
-    eq(
-      workflowPolicy.planModeMutationGuard(
-        planning,
-        level,
-        { toolName: "write", input: { path: "src/x.ts" } },
-        cwd,
-      ).blocked,
-      expectedBlocked,
-      `${level} does not unlock writes while planning`,
-    );
-    eq(
-      workflowPolicy.planModeMutationGuard(
-        planning,
-        level,
-        { toolName: "bash", input: { command: "sudo id" } },
-        cwd,
-      ).blocked,
-      expectedBlocked,
-      `${level} does not unlock a mutating shell while planning`,
-    );
     eq(
       workflowPolicy.assessWorkflowTool(
         {

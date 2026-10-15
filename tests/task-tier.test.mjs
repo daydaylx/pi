@@ -7,12 +7,9 @@ import { importModule as load } from "./shared/jiti-loader.mjs";
 const classify = await load("extensions/task-tier/classify.ts");
 const tracker = await load("extensions/task-tier/read-tracker.ts");
 const tier = await load("extensions/task-tier/index.ts");
-const capabilities = await load("extensions/shared/workflow-capabilities.ts");
 const hardPaths = await load(
   "extensions/permissions/verifier-required-paths.ts",
 );
-
-const opts = { planning: false };
 
 await test("verifier hard paths include gate dependencies", () => {
   for (const path of [
@@ -40,7 +37,6 @@ await test("task-tier: Klassifikation (Tests A–F)", async () => {
   eq(
     classify.classifyPrompt(
       "Setze in settings.json editorPaddingX auf 2",
-      opts,
     ),
     "fast",
     "A config",
@@ -48,7 +44,6 @@ await test("task-tier: Klassifikation (Tests A–F)", async () => {
   eq(
     classify.classifyPrompt(
       "Zeige im Footer den aktuellen Arbeitsordner an",
-      opts,
     ),
     "fast",
     "C ui",
@@ -56,62 +51,55 @@ await test("task-tier: Klassifikation (Tests A–F)", async () => {
   eq(
     classify.classifyPrompt(
       "Fix: parseArgs in extensions/foo/args.ts liefert bei leerem String undefined",
-      opts,
     ),
     "fast",
     "B bug",
   );
   // Risikowörter allein führen zu NORMAL; kritische Pfade bleiben DEEP.
   eq(
-    classify.classifyPrompt("Ändere die Permission-Prüfung für bash", opts),
+    classify.classifyPrompt("Ändere die Permission-Prüfung für bash"),
     "normal",
     "E permission",
   );
   eq(
-    classify.classifyPrompt("Sicherheitslücke im Login beheben", opts),
+    classify.classifyPrompt("Sicherheitslücke im Login beheben"),
     "normal",
     "E security",
   );
   eq(
-    classify.classifyPrompt("Passe extensions/permissions/guards.ts an", opts),
+    classify.classifyPrompt("Passe extensions/permissions/guards.ts an"),
     "deep",
     "E hard path",
   );
-  // Planmodus und explizite Tiefenprüfung bleiben DEEP.
-  eq(
-    classify.classifyPrompt("Kleine Sache", { planning: true }),
-    "deep",
-    "F plan mode",
-  );
+  // Explizite Tiefenprüfung bleibt DEEP.
   eq(
     classify.classifyPrompt(
       "Führe ein gründliches Audit des Recovery-Flows durch",
-      opts,
     ),
     "deep",
     "explizites Audit",
   );
   eq(
-    classify.classifyPrompt("Refactore das Subsystem", opts),
+    classify.classifyPrompt("Refactore das Subsystem"),
     "normal",
     "Refactor-Wort allein",
   );
   eq(
-    classify.classifyPrompt("Ein Tippfehler in der Verifier-Doku", opts),
+    classify.classifyPrompt("Ein Tippfehler in der Verifier-Doku"),
     "normal",
     "Verifier-Wort allein",
   );
   eq(
-    classify.classifyPrompt("Benenne die Funktion in allen Dateien um", opts),
+    classify.classifyPrompt("Benenne die Funktion in allen Dateien um"),
     "normal",
     "broad",
   );
   eq(
-    classify.classifyPrompt("a.ts b.ts c.ts d.ts ändern", opts),
+    classify.classifyPrompt("a.ts b.ts c.ts d.ts ändern"),
     "normal",
     "viele Pfade",
   );
-  eq(classify.classifyPrompt("", opts), "normal", "leer");
+  eq(classify.classifyPrompt(""), "normal", "leer");
 });
 
 await test("task-tier: 30-Aufgaben-Korpus gegen alte Heuristik", async () => {
@@ -147,7 +135,7 @@ await test("task-tier: 30-Aufgaben-Korpus gegen alte Heuristik", async () => {
       "normal",
       "Vergleiche die beiden Benchmark-Reports und fasse Unterschiede zusammen",
     ],
-    ["normal", "Korrigiere den Plan-Modus-Text in der Dokumentation"],
+    ["normal", "Korrigiere den Berechtigungs-Text in der Dokumentation"],
     [
       "normal",
       "Der Verifier-Leitfaden enthält einen Tippfehler; korrigiere ihn",
@@ -170,7 +158,7 @@ await test("task-tier: 30-Aufgaben-Korpus gegen alte Heuristik", async () => {
     ],
     [
       "deep",
-      "Ändere extensions/plan-mode/plan-store.ts für atomare Planpersistenz",
+      "Ändere extensions/resilience/recovery-state.ts für atomare Zustandspersistenz",
     ],
     [
       "deep",
@@ -183,7 +171,7 @@ await test("task-tier: 30-Aufgaben-Korpus gegen alte Heuristik", async () => {
     ],
     [
       "deep",
-      "Führe ein ausführliches Audit für Verifier-Ledger und Workflow-Capabilities durch",
+      "Führe ein ausführliches Audit für Verifier-Ledger und Recovery-Capabilities durch",
     ],
     [
       "deep",
@@ -191,11 +179,11 @@ await test("task-tier: 30-Aufgaben-Korpus gegen alte Heuristik", async () => {
     ],
     [
       "deep",
-      "Ersetze den Workflow-Vertrag in extensions/shared/workflow-capabilities.ts",
+      "Ersetze den Berechtigungsvertrag in extensions/shared/workflow-status.ts",
     ],
   ];
   const legacyDeep =
-    /security|sicherheit|permission|berechtigung|trust|secret|credential|auth(?:entication|orization|entifizierung)?\b|sandbox|architektur|architecture|migrat|refactor|umbau|neu\s*schreiben|rewrite|protokoll|protocol|frontend[- ]api|\bipc\b|dependenc|abhängigkeit|plan[- ]?mode|planmodus|\bplan\b|verifier|subagent|race condition|intermittier|nicht reproduzierbar|root cause|ursache.*unklar/i;
+    /security|sicherheit|permission|berechtigung|trust|secret|credential|auth(?:entication|orization|entifizierung)?\b|sandbox|architektur|architecture|migrat|refactor|umbau|neu\s*schreiben|rewrite|protokoll|protocol|frontend[- ]api|\bipc\b|dependenc|abhängigkeit|verifier|subagent|race condition|intermittier|nicht reproduzierbar|root cause|ursache.*unklar/i;
   const legacyTier = (prompt) => {
     if (legacyDeep.test(prompt)) return "deep";
     if (
@@ -228,7 +216,7 @@ await test("task-tier: 30-Aufgaben-Korpus gegen alte Heuristik", async () => {
   let newErrors = 0;
   for (const [expected, prompt] of corpus) {
     const old = legacyTier(prompt);
-    const current = classify.classifyPrompt(prompt, opts);
+    const current = classify.classifyPrompt(prompt);
     if (old === "deep" && expected !== "deep") oldFalseDeep += 1;
     if (old !== expected) oldErrors += 1;
     if (current !== expected) {
@@ -484,26 +472,6 @@ await test("task-tier: FAST blockt Subagenten, Duplicate-Reads, eskaliert", asyn
   });
 });
 
-await test("task-tier: Plan Mode → DEEP, Subagent erlaubt", async () => {
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    harness.api.events.on(
-      capabilities.WORKFLOW_CAPABILITY_EVENTS.request,
-      (request) => request.respond({ mode: "detailed_plan" }),
-    );
-    const [start] = await harness.runHooks(
-      "before_agent_start",
-      { prompt: "kurz", systemPrompt: "SYS" },
-      context,
-    );
-    assert(start.systemPrompt.includes("DEEP"), "DEEP im Planmodus");
-    const [sub] = await harness.runHooks(
-      "tool_call",
-      tc("subagent", { spec: { profile: "analyse" } }),
-      context,
-    );
-    eq(sub, undefined, "Subagent nicht geblockt");
-  });
-});
 
 await test("task-tier: NORMAL lässt Prompt und Thinking unverändert", async () => {
   await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
@@ -528,7 +496,7 @@ await test("task-tier: Commit/Push nie FAST, Fortsetzung erbt Klasse", async () 
     "mach den PR",
   ]) {
     assert(
-      classify.classifyPrompt(prompt, opts) !== "fast",
+      classify.classifyPrompt(prompt) !== "fast",
       `release nicht fast: ${prompt}`,
     );
   }
@@ -745,10 +713,6 @@ await test("task-tier: nur Test-/Build-Läufe zählen als Prüffehler", async ()
     "Recovery-Gate",
   );
   assert(
-    tier.isPolicyBlock(text("Planmodus: Dieses Shell-Kommando …")),
-    "Plan Mode",
-  );
-  assert(
     !tier.isPolicyBlock(text("1 failing\n\nCommand exited with code 1")),
     "echter Testfehler",
   );
@@ -797,43 +761,6 @@ await test("task-tier: nur Test-/Build-Läufe zählen als Prüffehler", async ()
     "AssertionError\n\nCommand exited with code 1",
   );
   eq(failing.finalTier, "normal", "echter Testfehler stuft hoch");
-});
-
-await test("task-tier: Plan-Umsetzung ist nie FAST", async () => {
-  const opts = { planning: false };
-  eq(
-    classify.classifyPrompt("Setze den freigegebenen Plan um.", opts),
-    "normal",
-    "Plan-Ausführungsprompt",
-  );
-  eq(
-    classify.classifyPrompt(
-      "Setze den freigegebenen Plan um. Beginne mit Phase 1.",
-      opts,
-    ),
-    "normal",
-    "Plan-Ausführungsprompt mit Zusatz",
-  );
-  eq(
-    classify.classifyPrompt("Setze editorPaddingX in settings.json", opts),
-    "fast",
-    "gewöhnliche kleine Aufgabe bleibt FAST",
-  );
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    const before = harness.api.getThinkingLevel();
-    await harness.runHooks(
-      "before_agent_start",
-      { prompt: "Setze den freigegebenen Plan um.", systemPrompt: "SYS" },
-      context,
-    );
-    eq(harness.api.getThinkingLevel(), before, "Thinking wird nicht verändert");
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(entry.data.initialTier, "normal", "Plan-Umsetzung startet als NORMAL");
-    eq(entry.data.escalations.length, 0, "keine Eskalation nötig");
-  });
 });
 
 await test("task-tier: Telemetrie zählt Requests, Tokens und Cache-Verluste", async () => {

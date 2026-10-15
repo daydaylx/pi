@@ -10,7 +10,6 @@ import { statusSeparator } from "../shared/ui-theme.ts";
 export interface StartscreenInput {
   width: number;
   rows: number;
-  workflow: string;
   model?: string;
   thinking?: string;
   cwd: string;
@@ -35,10 +34,7 @@ function metadata(
   width: number,
 ): string {
   const model = crop(input.model ?? "kein Modell", 28);
-  const values = [
-    theme.fg("accent", theme.bold(input.workflow.toUpperCase())),
-    theme.fg("text", model),
-  ];
+  const values = [theme.fg("text", model)];
   if (input.thinking) values.push(renderThinkingLabel(theme, input.thinking));
   return center(values.join(statusSeparator(theme)), width);
 }
@@ -49,7 +45,6 @@ function shortcutRows(theme: Theme, innerWidth: number): string[] {
     theme,
     innerWidth,
     [
-      ["Shift+Tab", "Workflow"],
       ["Super+M", "Modell"],
       ["Super+D", "Denken"],
       ["Super+Q", "Befehle"],
@@ -104,11 +99,6 @@ export function renderStartscreen(
       ...(input.profile === "system"
         ? [theme.fg("muted", "NixOS · Hyprland")]
         : []),
-      renderField(
-        theme,
-        "Workflow",
-        theme.fg("accent", theme.bold(input.workflow.toUpperCase())),
-      ),
       renderField(theme, "Modell", theme.fg("text", model)),
       ...(input.thinking
         ? [

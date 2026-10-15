@@ -652,7 +652,6 @@ export function renderSubagents(
 
 const PHASES: Array<{ id: TaskPhase; label: string }> = [
   { id: "understand", label: "Verstehen" },
-  { id: "plan", label: "Planen" },
   { id: "work", label: "Arbeiten" },
   { id: "verify", label: "Prüfen" },
   { id: "done", label: "Fertig" },

@@ -17,8 +17,6 @@ import {
   clearAutoThinking,
   expectAutoThinking,
 } from "../shared/auto-thinking.ts";
-import { isPlanningMode } from "../shared/workflow-mode.ts";
-import { requestWorkflowCapabilities } from "../shared/workflow-capabilities.ts";
 import {
   classifyPrompt,
   isContinuationPrompt,
@@ -192,7 +190,7 @@ export function isEnvironmentalFailure(content: unknown): boolean {
 }
 
 /**
- * Eine Sperre durch Policy, Plan Mode oder Recovery-Gate ist kein Test-/
+ * Eine Sperre durch Policy oder Recovery-Gate ist kein Test-/
  * Build-Fehler: der Befehl lief gar nicht. Sie darf FAST nicht hochstufen.
  */
 export function isPolicyBlock(content: unknown): boolean {
@@ -206,7 +204,7 @@ export function isPolicyBlock(content: unknown): boolean {
         : "",
     )
     .join("\n");
-  return /^(?:Harte [^\n]*[Gg]renze|Planmodus:|Recovery-Gate aktiv|FAST-Aufgabe:)/m.test(
+  return /^(?:Harte [^\n]*[Gg]renze|Recovery-Gate aktiv|FAST-Aufgabe:)/m.test(
     text,
   );
 }
@@ -350,17 +348,13 @@ export default function taskTier(pi: ExtensionAPI): void {
     // The tier classifies the user's prompt. Runs started by an extension
     // message keep the tier state of the current task.
     if (event.messageType === "custom") return;
-    const planning = isPlanningMode(
-      requestWorkflowCapabilities(pi.events).mode ?? "work",
-    );
-    let tier = classifyPrompt(event.prompt, { planning });
+    let tier = classifyPrompt(event.prompt);
     // "weiter"/"ja" setzt die vorige Aufgabe fort: Klasse (inkl. Eskalation) erben.
     if (previousTier && isContinuationPrompt(event.prompt)) {
       tier = maxTier(tier, previousTier);
     }
     restoreHiddenTools();
     turn = newTurn(tier, SOFT_RISK_PROMPT.test(event.prompt));
-    if (planning) turn.observedRiskSignals.add("planning_mode");
     if (
       /\b(deep(?:[- ]dive)?|gründlich|tiefen(?:audit|prüfung)|ausführlich.*(?:audit|analyse|prüfung))\b/i.test(
         event.prompt,

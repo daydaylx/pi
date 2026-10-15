@@ -287,6 +287,38 @@ export const installerSections = {
         writeFileSync(legacyEditor, "// legacy Aurora editor");
         const userFile = path.join(target, "agents", "custom-user-agent.md");
         writeFileSync(userFile, "# user-owned custom agent");
+        // The removed planning workflow: its extension, shared contracts and
+        // the settings.json entry that would keep it active. A stored plan
+        // is user data and has to survive.
+        mkdirSync(path.join(target, "extensions", "plan-mode"), {
+          recursive: true,
+        });
+        writeFileSync(
+          path.join(target, "extensions", "plan-mode", "index.ts"),
+          "// legacy plan mode",
+        );
+        mkdirSync(path.join(target, "extensions", "shared"), {
+          recursive: true,
+        });
+        for (const shared of ["workflow-capabilities.ts", "workflow-mode.ts"]) {
+          writeFileSync(
+            path.join(target, "extensions", "shared", shared),
+            "// legacy workflow contract",
+          );
+        }
+        writeFileSync(
+          path.join(target, "settings.json"),
+          JSON.stringify({
+            extensions: [
+              "!extensions/**",
+              "+extensions/plan-mode/index.ts",
+              "+extensions/mode-permissions.ts",
+            ],
+          }),
+        );
+        const storedPlan = path.join(target, "plans", "session-1", "plan.md");
+        mkdirSync(path.dirname(storedPlan), { recursive: true });
+        writeFileSync(storedPlan, "# stored plan");
 
         execFileSync(
           process.execPath,
@@ -315,6 +347,25 @@ export const installerSections = {
         assert(
           existsSync(userFile),
           "upgrade preserves user-owned file agents/custom-user-agent.md",
+        );
+        assert(
+          existsSync(storedPlan),
+          "upgrade preserves stored plan files as user data",
+        );
+        const upgradedSettings = JSON.parse(
+          readFileSync(path.join(target, "settings.json"), "utf8"),
+        );
+        assert(
+          !upgradedSettings.extensions.some((entry) =>
+            String(entry).includes("plan-mode"),
+          ),
+          "upgrade leaves no plan-mode entry in the installed settings.json",
+        );
+        assert(
+          upgradedSettings.extensions.includes(
+            "+extensions/mode-permissions.ts",
+          ),
+          "upgrade keeps the current extension list",
         );
 
         // Current agents are installed.

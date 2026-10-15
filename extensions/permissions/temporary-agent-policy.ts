@@ -10,12 +10,6 @@
  */
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import {
-  isPlanRestricted,
-  isWorkflowStateUnknown,
-  type WorkflowCapabilitySnapshot,
-} from "../shared/workflow-capabilities.ts";
-import type { PermissionLevel } from "../shared/workflow-status.ts";
-import {
   isVerifierOptionalTrigger,
   renderOptionalTriggerSection,
   VERIFIER_OPTIONAL_TRIGGERS,
@@ -25,8 +19,6 @@ import type { WorkflowAssessment } from "./workflow-policy.ts";
 const PERMITTED: WorkflowAssessment = { blocked: false, reason: "" };
 
 const KNOWN_PROFILES = ["analyse", "research", "verify", "implement"];
-const PLAN_MODE_PROFILES = ["analyse", "research"];
-const PLAN_MODE_CAPABILITIES = ["read", "search"];
 
 /**
  * Parameters a spec call must not carry: the spec is the whole contract.
@@ -149,43 +141,6 @@ export function createParentRunAgentCounter(
     },
     used: () => count,
   };
-}
-
-/**
- * Plan Mode admits a spec call only when it is provably read-only and
- * artifact-free: profile analyse/research, no capability beyond read/search,
- * foreground, no output. The guard normalizes `artifacts` to false.
- */
-export function planModeTemporarySpecAllowed(
-  workflow: WorkflowCapabilitySnapshot,
-  permissionLevel: PermissionLevel,
-  event: ToolCallEvent,
-): boolean {
-  if (
-    !isPlanRestricted(workflow) ||
-    isWorkflowStateUnknown(workflow) ||
-    permissionLevel === "readonly" ||
-    !isTemporarySpecCall(event) ||
-    assessTemporaryAgentSpec(event).blocked
-  ) {
-    return false;
-  }
-  const input = event.input as Record<string, unknown>;
-  const spec = input.spec as Record<string, unknown>;
-  if (!PLAN_MODE_PROFILES.includes(spec.profile as string)) return false;
-  const requested = spec.requestedCapabilities;
-  if (requested !== undefined) {
-    if (
-      !Array.isArray(requested) ||
-      requested.some((c) => !PLAN_MODE_CAPABILITIES.includes(c as string))
-    ) {
-      return false;
-    }
-  }
-  return (
-    (input.async === undefined || input.async === false) &&
-    (input.artifacts === undefined || input.artifacts === false)
-  );
 }
 
 /**

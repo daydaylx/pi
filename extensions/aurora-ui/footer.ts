@@ -35,8 +35,7 @@ export interface FooterInput {
   homeDirectory?: string;
   profile?: "system";
   /** True while a Session panel surface (auto/compact/expanded) is active. It
-   * owns routine verification reporting; workflow identity remains visible in
-   * the footer as the permanent status-bar anchor. */
+   * owns routine verification reporting. */
   dashboardVisible?: boolean;
 }
 
@@ -58,7 +57,7 @@ const FOLDER_MAX_COLUMNS: Record<Layout, number> = {
  * without type information.
  */
 const Slot = {
-  workflow: 0,
+  profile: 0,
   model: 1,
   thinking: 2,
   folder: 3,
@@ -72,12 +71,12 @@ type Slot = (typeof Slot)[keyof typeof Slot];
 
 /**
  * What gets dropped first when the line is too long — lowest survives longest.
- * The workflow is last man standing. Everything that reports an actual problem
+ * The launch profile is last man standing. Everything that reports an actual problem
  * outranks the model name: at the widths where this matters the user knows
  * which model they picked, and does not yet know their language server died.
  */
 const Priority = {
-  workflow: 0,
+  profile: 0,
   yolo: 1,
   recovery: 2,
   failedVerification: 3,
@@ -95,8 +94,8 @@ type Priority = (typeof Priority)[keyof typeof Priority];
 
 /**
  * Three classes, in survival order:
- * - `orientation` (workflow, folder): the permanent anchors. Never removed,
- *   only cropped — losing the current workflow or working directory is worse
+ * - `orientation` (profile, folder): the permanent anchors. Never removed,
+ *   only cropped — losing the launch profile or working directory is worse
  *   than losing any amount of metadata.
  * - `risk` (YOLO, recovery, failed verification, degraded LSP, exhausted
  *   context): ignores the width tier. Several at once aggregate into one
@@ -119,7 +118,7 @@ interface Segment {
 /** Which routine segments each width tier may show at all. */
 const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
   wide: new Set([
-    Slot.workflow,
+    Slot.profile,
     Slot.model,
     Slot.thinking,
     Slot.folder,
@@ -128,7 +127,7 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.verification,
   ]),
   comfortable: new Set([
-    Slot.workflow,
+    Slot.profile,
     Slot.model,
     Slot.thinking,
     Slot.folder,
@@ -136,8 +135,8 @@ const ROUTINE_TIERS: Record<Layout, ReadonlySet<Slot>> = {
     Slot.context,
     Slot.verification,
   ]),
-  standard: new Set([Slot.workflow, Slot.model, Slot.thinking, Slot.folder]),
-  compact: new Set([Slot.workflow, Slot.model, Slot.folder]),
+  standard: new Set([Slot.profile, Slot.model, Slot.thinking, Slot.folder]),
+  compact: new Set([Slot.profile, Slot.model, Slot.folder]),
 };
 
 function verificationState(input: FooterInput): string | null {
@@ -175,17 +174,16 @@ function lspNeedsAttention(state: string): boolean {
 function collectSegments(input: FooterInput, width: number): Segment[] {
   const tier = footerTier(width);
   const segments: Segment[] = [];
-  segments.push({
-    slot: Slot.workflow,
-    priority: Priority.workflow,
-    text:
-      input.profile === "system"
-        ? `${input.state.workflow.label} · SYSTEM`
-        : input.state.workflow.label,
-    tone: "accent",
-    bold: true,
-    class: "orientation",
-  });
+  if (input.profile === "system") {
+    segments.push({
+      slot: Slot.profile,
+      priority: Priority.profile,
+      text: "SYSTEM",
+      tone: "accent",
+      bold: true,
+      class: "orientation",
+    });
+  }
   segments.push({
     slot: Slot.model,
     priority: Priority.model,
@@ -236,7 +234,7 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
   if (input.contextPercent !== null) {
     // Colour and layout priority are separate judgements. A filling context is
     // worth a warning colour long before it is worth taking a narrow line's
-    // space away from the workflow — only a nearly exhausted one is urgent
+    // space away from the folder — only a nearly exhausted one is urgent
     // enough to outrank the tier it would normally be filtered out by.
     const exhausted = input.contextPercent >= CONTEXT_CRITICAL_PERCENT;
     segments.push({
@@ -349,13 +347,13 @@ function isPillTier(tier: Layout): boolean {
 }
 
 /**
- * Whether this segment renders as a pill when the tier allows it: workflow
- * identity and every critical risk; routine metadata never does. Shared by
+ * Whether this segment renders as a pill when the tier allows it: the launch
+ * profile and every critical risk; routine metadata never does. Shared by
  * the width budget (`segmentCells`) and the actual render decision below, so
  * the two can never silently drift apart.
  */
 function isPillSegment(segment: Segment): boolean {
-  return segment.class === "risk" || segment.slot === Slot.workflow;
+  return segment.class === "risk" || segment.slot === Slot.profile;
 }
 
 /** The extra cells a segment pays when it renders as a filled pill. */
@@ -434,7 +432,7 @@ export function renderFooterLines(
     collectSegments(input, available),
     available,
   );
-  // From comfortable width on, the workflow identity and every risk read as
+  // From comfortable width on, the launch profile and every risk read as
   // filled chips; routine metadata stays flat so the line never turns into a
   // wall of colour. Narrow tiers keep the flat look entirely.
   const pillTier = isPillTier(footerTier(available));

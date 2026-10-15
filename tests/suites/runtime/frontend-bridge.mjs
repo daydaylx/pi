@@ -29,8 +29,8 @@ export const frontendBridgeSections = {
       harness.api.events.emit(channels.patch, {
         type: "patch",
         sessionEpoch: "epoch-early",
-        source: "plan-mode",
-        patch: { workflow: { phase: "work", label: "Work" } },
+        source: "permissions",
+        patch: { permissions: { level: "readonly", label: "Nur Lesen" } },
       });
       await sleep(300);
       eq(
@@ -48,12 +48,6 @@ export const frontendBridgeSections = {
         requester: "aurora-ui",
       });
 
-      harness.api.events.emit(channels.patch, {
-        type: "patch",
-        sessionEpoch: "epoch-1",
-        source: "plan-mode",
-        patch: { workflow: { phase: "simple_plan", label: "Schnellplan" } },
-      });
       harness.api.events.emit(channels.patch, {
         type: "patch",
         sessionEpoch: "epoch-1",
@@ -139,7 +133,11 @@ export const frontendBridgeSections = {
         "Eintrag trägt die Core-Session-ID",
       );
       const state = last.data.state;
-      eq(state.workflow.phase, "simple_plan", "workflow kommt aus dem Bus");
+      eq(
+        "workflow" in state,
+        false,
+        "der entfernte workflow-Zustand wird nicht mehr persistiert",
+      );
       eq(
         state.permissions.level,
         "confirm-all",
@@ -169,8 +167,8 @@ export const frontendBridgeSections = {
       harness.api.events.emit(channels.patch, {
         type: "patch",
         sessionEpoch: "epoch-fremd",
-        source: "plan-mode",
-        patch: { workflow: { phase: "work", label: "Work" } },
+        source: "permissions",
+        patch: { permissions: { level: "yolo", label: "YOLO" } },
       });
       await sleep(300);
       const entriesAfter = harness.appended.filter(
@@ -182,8 +180,8 @@ export const frontendBridgeSections = {
         "fremde Epochen erzeugen keinen neuen Eintrag",
       );
       eq(
-        entriesAfter.at(-1).data.state.workflow.phase,
-        "simple_plan",
+        entriesAfter.at(-1).data.state.permissions.level,
+        "confirm-all",
         "fremde Epochen verändern den Zustand nicht",
       );
 

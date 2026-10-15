@@ -11,7 +11,6 @@ import {
   type FrontendUiStatePatch,
   type FrontendUiStateRequest,
   type FrontendVerificationSummary,
-  type FrontendWorkflowPhase,
 } from "../frontend-protocol/state-contract.ts";
 import {
   isFrontendUiPatchEvent,
@@ -27,8 +26,6 @@ import {
  * Helfer. Aurora ist Konsument des Core-Bus, nicht dessen Quelle.
  */
 export const AURORA_UI_CHANNELS = FRONTEND_STATE_CHANNELS;
-
-export type AuroraWorkflowPhase = FrontendWorkflowPhase;
 
 export type AuroraActivityKind = FrontendActivityKind;
 

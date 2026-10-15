@@ -1,18 +1,10 @@
 import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
-import { ASK_USER_TOOL_NAME } from "../shared/ask-user-policy.ts";
 import {
-  diagnosePlanModeCommand,
-  type PlanModeCommandDiagnosis,
   isSensitivePathIdentity,
   isSensitiveReference,
   resolvePathScope,
 } from "../shared/permission-policy.ts";
 import type { PermissionLevel } from "../shared/workflow-status.ts";
-import {
-  isPlanRestricted,
-  type WorkflowCapabilitySnapshot,
-} from "../shared/workflow-capabilities.ts";
-import { PLAN_WRITE_TOOL_NAME } from "../plan-mode/plan-tool.ts";
 import { toolPath } from "./tool-event.ts";
 import {
   forbiddenInteractiveCredentialPath,
@@ -40,66 +32,19 @@ import {
  *
  * YOLO 2 ("yolo-ask") and YOLO 3 ("yolo-full") pass every one of these
  * boundaries on to the decision layer, which asks (2) or allows (3). YOLO 3
- * also lifts the trust, recovery, Plan Mode and interactive credential-path
- * gates. Those remain in place for every other permission level.
+ * also lifts the trust, recovery and interactive credential-path gates.
+ * Those remain in place for every other permission level.
  */
 export interface WorkflowAssessment {
   blocked: boolean;
   reason: string;
   /** The hard layer explicitly approved a read outside the project. */
   allowOutsideProjectRead?: boolean;
-  /**
-   * Why Plan Mode refused a shell command, for tests and debugging: the
-   * command's effect is not allowed, or its program could not be verified as a
-   * trusted system program.
-   */
-  planModeCause?: "command-not-allowed" | "executable-untrusted";
 }
 
 export const LOCAL_LSP_TOOLS = new Set(["lsp_diagnostics"]);
 
-const WRITE_TOOLS = new Set(["write", "edit", "project_check", "subagent"]);
-
-/**
- * `subagent` with a management `action` never starts a run (see
- * subagentLaunchCount). Listing the available agents or a run's status reads
- * state only, so Plan Mode lets it through; `stop`/`interrupt` stay gated.
- */
-const SUBAGENT_LOOKUP_ACTIONS = new Set(["list", "status"]);
-
-function isSubagentLookup(event: ToolCallEvent): boolean {
-  if (event.toolName !== "subagent") return false;
-  const input = event.input as Record<string, unknown> | undefined;
-  if (typeof input?.action !== "string") return false;
-  if (!SUBAGENT_LOOKUP_ACTIONS.has(input.action)) return false;
-  // Defensive: a lookup carries no work description.
-  return !["agent", "task", "tasks", "chain", "spec"].some(
-    (field) => input[field] !== undefined,
-  );
-}
 const READ_ONLY_FILE_TOOLS = new Set(["read", "grep", "find", "ls"]);
-/**
- * Tools plan mode allows. `plan_write` is the plan's only writer and owns its
- * own destination inside the runtime's session storage, so it needs no
- * exception in the project-file write ban — unlike the old plan file, which
- * required exactly such a hole.
- */
-const PLAN_MODE_READ_ONLY_TOOLS = new Set([
-  PLAN_WRITE_TOOL_NAME,
-  "workspace_add",
-  "read",
-  "grep",
-  "find",
-  "ls",
-  "recovery_check",
-  ASK_USER_TOOL_NAME,
-  // Extern read-only (pi-web-access): nur trusted wirksam, weil das
-  // Trust-Gate in guards.ts vorgeschaltet ist und der Planmodus selbst im
-  // untrusted Projekt gesperrt ist.
-  "web_search",
-  "fetch_content",
-  ...LOCAL_LSP_TOOLS,
-]);
 
 /**
  * Appended to every hard-boundary block reason. A single denied read (a
@@ -261,113 +206,5 @@ export function assessWorkflowTool(
       };
     }
   }
-  return PERMITTED;
-}
-
-/**
- * `verify({ check: "typecheck" })` never writes: extensions/setup-core runs
- * it with the setup's fixed typecheck command (--noEmit semantics), and
- * Plan Mode is only reachable in a trusted project (see
- * `switchMode`/`isProjectTrusted` in plan-mode/commands.ts), so a
- * project-configured typecheck command carries no extra risk here that
- * trust hasn't already accepted. `check: "test"` stays blocked: a test run
- * can write coverage or snapshot files, which Plan Mode's read-only
- * contract must not permit.
- */
-export function planModeVerifyTypecheckAllowed(
-  workflow: WorkflowCapabilitySnapshot,
-  event: ToolCallEvent,
-): boolean {
-  if (!isPlanRestricted(workflow) || event.toolName !== "verify") {
-    return false;
-  }
-  const input = event.input;
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return false;
-  }
-  const params = input as Record<string, unknown>;
-  return params.check === "typecheck" && Object.keys(params).length === 1;
-}
-
-/**
- * Plan Mode blocks effects classified as mutating/risky/forbidden. Shell
- * commands are classified by their effects, not by a fixed executable
- * allowlist; unknown tool capabilities are delegated to the active permission
- * level rather than being blocked solely because they are new.
- */
-export function planModeBashGuard(
-  workflow: WorkflowCapabilitySnapshot,
-  permissionLevel: PermissionLevel,
-  command: string,
-  cwd: string,
-): WorkflowAssessment {
-  if (!isPlanRestricted(workflow)) return PERMITTED;
-  if (permissionLevel === "readonly") return PERMITTED;
-  const diagnosis = diagnosePlanModeCommand(command, cwd);
-  if (diagnosis.safe) return PERMITTED;
-  if (diagnosis.cause === "executable-untrusted") {
-    const where = diagnosis.path ? `: ${diagnosis.path}` : "";
-    return {
-      blocked: true,
-      planModeCause: diagnosis.cause,
-      reason: `Planmodus: Das Programm „${diagnosis.executable}“ wird im Planmodus nicht gestartet (${EXECUTABLE_UNTRUSTED_DETAIL[diagnosis.reason]}${where}). Projektlokale Programme gelten nicht als vertrauenswürdig; Systemprogramme und eigene Installationen sind erlaubt.`,
-    };
-  }
-  return {
-    blocked: true,
-    planModeCause: diagnosis.cause,
-    reason:
-      "Planmodus: Dieses Shell-Kommando kann mutieren oder ist als riskant klassifiziert; Shell-Schreibzugriffe und sensible Aktionen sind während der Planung gesperrt.",
-  };
-}
-
-const EXECUTABLE_UNTRUSTED_DETAIL: Record<
-  Extract<
-    PlanModeCommandDiagnosis,
-    { cause: "executable-untrusted" }
-  >["reason"],
-  string
-> = {
-  "project-controlled": "erster PATH-Treffer liegt im Projekt",
-  "relative-path": "relativer Programmpfad",
-  "env-override": "Umgebungsvariable verändert die Programmsuche",
-};
-
-export function planModeMutationGuard(
-  workflow: WorkflowCapabilitySnapshot,
-  permissionLevel: PermissionLevel,
-  event: ToolCallEvent,
-  cwd: string,
-): WorkflowAssessment {
-  if (!isPlanRestricted(workflow)) return PERMITTED;
-  if (permissionLevel === "yolo-full") return PERMITTED;
-  if (permissionLevel === "readonly") return PERMITTED;
-
-  if (
-    event.toolName === "bash" ||
-    event.toolName === INTERACTIVE_SHELL_TOOL_NAME
-  ) {
-    return planModeBashGuard(
-      workflow,
-      permissionLevel,
-      event.toolName === INTERACTIVE_SHELL_TOOL_NAME
-        ? interactiveShellCommand(event)
-        : String((event.input as Record<string, unknown>).command ?? ""),
-      cwd,
-    );
-  }
-  if (PLAN_MODE_READ_ONLY_TOOLS.has(event.toolName)) return PERMITTED;
-  if (isSubagentLookup(event)) return PERMITTED;
-  if (planModeVerifyTypecheckAllowed(workflow, event)) return PERMITTED;
-  if (WRITE_TOOLS.has(event.toolName) || event.toolName === "verify") {
-    return {
-      blocked: true,
-      reason:
-        "Planmodus: Dieses Tool kann Projektzustand verändern oder Code ausführen. Der Plan selbst wird ausschließlich über plan_write gespeichert.",
-    };
-  }
-  // Capability is not inferred from a tool's name. Let the configured
-  // permission level handle newly introduced tools instead of denying them
-  // merely because this module has not learned their contract yet.
   return PERMITTED;
 }

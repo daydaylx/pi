@@ -1,5 +1,5 @@
 /**
- * Frontend-Bridge: Bringt Pi-spezifische Core-Zustände (Workflow, Task,
+ * Frontend-Bridge: Bringt Pi-spezifische Core-Zustände (Task,
  * Verification, Changes, Subagenten, Permissions, LSP) über die RPC-Grenze,
  * ohne Geschäftslogik in externen Clients zu duplizieren (R1/R2/R11).
  *
@@ -10,7 +10,7 @@
  * externen Clients und überleben gleichzeitig Session-Neustarts.
  *
  * Phase-5-Scope:
- *   - Bus-Felder: workflow, permissions, lsp, changes, verification
+ *   - Bus-Felder: permissions, lsp, changes, verification
  *   - Bus-Events: subagent:async-started/complete/control-event
  *   - Core-Ereignisse: message_start (letzte Nutzereingabe) für task.title
  */
@@ -30,11 +30,6 @@ import {
   type FrontendUiStateRequest,
 } from "../frontend-protocol/state-contract.ts";
 import { protocolStateRequest } from "../frontend-protocol/compatibility.ts";
-import {
-  isPlanningMode,
-  workflowModeLabel,
-  type WorkflowMode,
-} from "../shared/workflow-mode.ts";
 
 const OWNER = "frontend-bridge";
 const STATE_ENTRY_TYPE = "frontend-bridge/state";
@@ -80,7 +75,6 @@ function stringList(value: unknown): string[] {
 function defaultState(): FrontendUiState {
   return {
     sessionEpoch: "",
-    workflow: { phase: "work", label: workflowModeLabel("work") },
     permissions: {},
     lsp: {},
     model: {},
@@ -92,29 +86,22 @@ function defaultState(): FrontendUiState {
   };
 }
 
-function computeTaskTitle(
-  workflowPhase: WorkflowMode,
-  lastUserPrompt: string | undefined,
-): string {
+function computeTaskTitle(lastUserPrompt: string | undefined): string {
   if (lastUserPrompt) {
     const trimmed = lastUserPrompt.trim().replace(/^[/#]\w+\s*/, "");
     const first = trimmed.split("\n")[0]?.trim() ?? "";
     if (first) return first.length > 60 ? `${first.slice(0, 57)}…` : first;
   }
-  if (isPlanningMode(workflowPhase)) return workflowModeLabel(workflowPhase);
   return "Aktuelle Aufgabe";
 }
 
 function computeTaskPhaseLabel(
-  workflowPhase: WorkflowMode,
   activityKind: FrontendUiState["activity"]["kind"],
 ): string {
-  if (activityKind === "thinking") {
-    return isPlanningMode(workflowPhase) ? "Verstehen" : "Analysieren";
-  }
+  if (activityKind === "thinking") return "Analysieren";
   if (activityKind === "tool" || activityKind === "responding")
     return "Arbeiten";
-  return workflowModeLabel(workflowPhase);
+  return "Bereit";
 }
 
 function updateTask(
@@ -122,11 +109,8 @@ function updateTask(
   lastUserPrompt: string | undefined,
 ): void {
   state.task = {
-    title: computeTaskTitle(state.workflow.phase, lastUserPrompt),
-    phaseLabel: computeTaskPhaseLabel(
-      state.workflow.phase,
-      state.activity.kind,
-    ),
+    title: computeTaskTitle(lastUserPrompt),
+    phaseLabel: computeTaskPhaseLabel(state.activity.kind),
   };
 }
 
@@ -199,7 +183,6 @@ export default function frontendBridgeExtension(pi: ExtensionAPI): void {
       if (!sessionEpoch) return;
       updateTask(state, lastUserPrompt);
       const snapshot: Partial<FrontendUiState> = {
-        workflow: state.workflow,
         permissions: state.permissions,
         lsp: state.lsp,
         changes: state.changes,

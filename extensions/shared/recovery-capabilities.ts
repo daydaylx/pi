@@ -1,7 +1,7 @@
 /**
  * Promise-aware capability bridge for the resilience recovery gate.
  *
- * Same pattern as workflow-capabilities.ts: the permission layer asks, the
+ * Same pattern as verification-capabilities.ts: the permission layer asks, the
  * resilience extension answers during event dispatch. Die Guard-Schicht hält
  * damit keinen eigenen Recovery-Zustand und keine zweite Persistenzquelle —
  * die Wahrheit bleibt bei den Session-Einträgen der Resilience-Extension.
@@ -27,7 +27,6 @@ const READ_ONLY_TOOLS = new Set([
   "web_search",
   "fetch_content",
   "get_search_content",
-  "plan_write",
   "lsp_diagnostics",
   // Checks may create artifacts; workspace fingerprinting detects changes.
   "project_check",

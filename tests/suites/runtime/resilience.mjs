@@ -12,7 +12,7 @@ import { ROOT } from "../../shared/jiti-loader.mjs";
 
 export const resilienceSections = {
   "resilience telemetry and recovery": async (context) => {
-    const { section, load, resilience, modePermissions, planMode } = context;
+    const { section, load, resilience, modePermissions } = context;
 
     await section("resilience telemetry and recovery", async () => {
       if (!resilience) return;
@@ -27,13 +27,10 @@ export const resilienceSections = {
       await harness.runHooks("before_agent_start", {}, ctx);
       const start = harness.appended.at(-1);
       eq(start?.customType, "resilience.turn-start", "turn start is persisted");
-      // No workflow provider is registered in this harness, and the capability
-      // bridge is fail-closed: it reports the state as unknown rather than
-      // inventing "work". The marker records exactly what was known.
       eq(
-        start?.data.workflowMode,
-        "unknown",
-        "turn start records an unknown workflow mode when no provider answers",
+        "workflowMode" in (start?.data ?? {}),
+        false,
+        "turn start no longer records a workflow mode",
       );
       eq(start?.data.provider, "main-provider", "turn start records provider");
       await harness.runHooks("agent_start", {}, ctx);
@@ -229,7 +226,6 @@ export const resilienceSections = {
               schemaVersion: 1,
               timestamp: "2026-08-10T20:00:00.000Z",
               workspaceFingerprint: "unavailable",
-              workflowMode: "work",
               provider: "provider",
               model: "model",
               contextPercent: 42,
@@ -264,7 +260,6 @@ export const resilienceSections = {
               schemaVersion: 1,
               timestamp: "2026-08-10T20:01:00.000Z",
               workspaceFingerprint: "unavailable",
-              workflowMode: "work",
               provider: "provider",
               model: "model",
               contextPercent: 42,
@@ -316,10 +311,6 @@ export const resilienceSections = {
 
       // --- Recovery-Gate: Schreibsperre bis zum recovery_check ---
       const gateHarness = createHarness();
-      // The permission layer is fail-closed without a workflow provider, so a
-      // recovery-gate test has to register one; otherwise every write is
-      // refused for a reason that has nothing to do with recovery.
-      planMode?.default(gateHarness.api);
       modePermissions.default(gateHarness.api);
       resilience.default(gateHarness.api);
       const gateCtx = gateHarness.makeContext({ cwd: ROOT });
@@ -573,7 +564,6 @@ export const resilienceSections = {
           },
         ],
       });
-      planMode?.default(deniedAttempt.api);
       modePermissions.default(deniedAttempt.api);
       resilience.default(deniedAttempt.api);
       const deniedAttemptCtx = deniedAttempt.makeContext({ cwd: ROOT });
@@ -657,7 +647,6 @@ export const resilienceSections = {
           },
         ],
       });
-      planMode?.default(rpcRecovery.api);
       modePermissions.default(rpcRecovery.api);
       resilience.default(rpcRecovery.api);
       const rpcCtx = rpcRecovery.makeContext({
@@ -839,7 +828,6 @@ export const resilienceSections = {
           entries: multiRootEntries,
           sessionId: multiRootSessionId,
         });
-        planMode?.default(multiRootHarness.api);
         modePermissions.default(multiRootHarness.api);
         resilience.default(multiRootHarness.api);
         const multiRootCtx = multiRootHarness.makeContext({
@@ -895,7 +883,6 @@ export const resilienceSections = {
       }
 
       const abortedHarness = createHarness();
-      planMode?.default(abortedHarness.api);
       modePermissions.default(abortedHarness.api);
       resilience.default(abortedHarness.api);
       const abortedCtx = abortedHarness.makeContext({ cwd: ROOT });
@@ -947,7 +934,6 @@ export const resilienceSections = {
         "an abort after a completed tool call does not arm recovery",
       );
       const abortDuringMutation = createHarness();
-      planMode?.default(abortDuringMutation.api);
       modePermissions.default(abortDuringMutation.api);
       resilience.default(abortDuringMutation.api);
       const abortDuringMutationCtx = abortDuringMutation.makeContext({
@@ -1023,7 +1009,6 @@ export const resilienceSections = {
             schemaVersion: 2,
             timestamp: "2026-08-19T00:00:00.000Z",
             workspaceFingerprint: "unavailable",
-            workflowMode: "work",
             provider: "provider",
             model: "model",
             contextPercent: 10,
@@ -1056,7 +1041,6 @@ export const resilienceSections = {
         },
       ];
       const restarted = createHarness({ entries: restartedEntries });
-      planMode?.default(restarted.api);
       modePermissions.default(restarted.api);
       resilience.default(restarted.api);
       const restartedCtx = restarted.makeContext({ cwd: ROOT });
@@ -1096,7 +1080,6 @@ export const resilienceSections = {
       const checkedRestart = createHarness({
         entries: [...restartedEntries, checkedEntry],
       });
-      planMode?.default(checkedRestart.api);
       modePermissions.default(checkedRestart.api);
       resilience.default(checkedRestart.api);
       const checkedRestartCtx = checkedRestart.makeContext({ cwd: ROOT });
@@ -1165,7 +1148,6 @@ export const resilienceSections = {
         const twoCheckHarness = createHarness({
           entries: [twoCheckRequired],
         });
-        planMode?.default(twoCheckHarness.api);
         modePermissions.default(twoCheckHarness.api);
         resilience.default(twoCheckHarness.api);
         const twoCheckCtx = twoCheckHarness.makeContext({ cwd: twoCheckWs });
@@ -1205,7 +1187,6 @@ export const resilienceSections = {
         const restartedTwoCheck = createHarness({
           entries: [twoCheckRequired, checkedA, checkedB],
         });
-        planMode?.default(restartedTwoCheck.api);
         modePermissions.default(restartedTwoCheck.api);
         resilience.default(restartedTwoCheck.api);
         const restartedTwoCheckCtx = restartedTwoCheck.makeContext({
@@ -1244,7 +1225,6 @@ export const resilienceSections = {
               schemaVersion: 2,
               timestamp: "2026-08-19T00:00:00.000Z",
               workspaceFingerprint: "unavailable",
-              workflowMode: "work",
               provider: "provider",
               model: "model",
               contextPercent: 10,
@@ -1277,7 +1257,6 @@ export const resilienceSections = {
           },
         ],
       });
-      planMode?.default(yoloArmed.api);
       modePermissions.default(yoloArmed.api);
       resilience.default(yoloArmed.api);
       const yoloArmedCtx = yoloArmed.makeContext({ cwd: ROOT });
@@ -1347,7 +1326,6 @@ export const resilienceSections = {
       section,
       load,
       modePermissions,
-      planMode,
       controlPlane,
       compactTools,
       interactivePty,
@@ -1372,7 +1350,6 @@ export const resilienceSections = {
     await section("combined production extension stack", async () => {
       if (
         !modePermissions ||
-        !planMode ||
         !setupCore ||
         !askUser ||
         !lspExtensionMod ||
@@ -1390,7 +1367,6 @@ export const resilienceSections = {
         return;
       const factoryByExtension = {
         "+extensions/setup-core/index.ts": setupCore.default,
-        "+extensions/plan-mode/index.ts": planMode.default,
         "+extensions/mode-permissions.ts": modePermissions.default,
         "+extensions/interactive-pty/index.ts": interactivePty.default,
         "+extensions/lsp/index.ts": lspExtensionMod.default,
@@ -1424,10 +1400,8 @@ export const resilienceSections = {
       );
       const harness = createHarness();
       for (const factory of factories) factory(harness.api);
-      // A dedicated cwd keeps this test isolated from any real .agent/plans/
-      // current-plan.md that may exist at ROOT (this repo's own working state),
-      // which would otherwise push plan-mode into "draft" and flip the expected
-      // "WORK" workflow status below.
+      // A dedicated cwd keeps this test isolated from the repository's own
+      // working state at ROOT.
       const cwd = mkdtempSync(path.join(tmpdir(), "pi-combined-stack-"));
       const context = harness.makeContext({ cwd });
       await harness.runHooks("session_start", {}, context);
@@ -1451,7 +1425,6 @@ export const resilienceSections = {
           "interactive_shell",
           "ls",
           "lsp_diagnostics",
-          "plan_write",
           "project_check",
           "read",
           "recovery_check",
@@ -1468,8 +1441,8 @@ export const resilienceSections = {
       );
       eq(
         latestStatus(harness, "workflow"),
-        "Work",
-        "combined stack publishes workflow",
+        undefined,
+        "combined stack publishes no workflow status",
       );
       eq(
         harness.workingVisibility.at(-1),
@@ -1537,16 +1510,12 @@ export const resilienceSections = {
             mode +
             " mode",
         );
-        await nonTui.commands.get("workflow-set")(
-          "detailed_plan",
-          contextForMode,
-        );
         const blockedBuilds = [];
         for (let attempt = 0; attempt < 2; attempt += 1) {
           blockedBuilds.push(
             ...(await nonTui.runHooks(
               "tool_call",
-              { toolName: "bash", input: { command: "npm run build" } },
+              { toolName: "bash", input: { command: "sudo id" } },
               contextForMode,
             )),
           );
@@ -1559,7 +1528,7 @@ export const resilienceSections = {
             blockedBuildDecisions.every(
               (result) => result?.block && result?.terminate === true,
             ),
-          "two blocked builds end their non-interactive batches in " +
+          "two hard-blocked commands end their non-interactive batches in " +
             mode +
             " mode",
         );
@@ -1605,7 +1574,7 @@ export const resilienceSections = {
   },
 
   "resilience recovery gate under a large diff (F-02)": async (context) => {
-    const { section, resilience, modePermissions, planMode } = context;
+    const { section, resilience, modePermissions } = context;
 
     await section(
       "resilience recovery gate under a large diff (F-02)",
@@ -1689,7 +1658,6 @@ export const resilienceSections = {
           );
 
           const largeDiffHarness = createHarness();
-          planMode?.default(largeDiffHarness.api);
           modePermissions.default(largeDiffHarness.api);
           resilience.default(largeDiffHarness.api);
           const largeDiffCtx = largeDiffHarness.makeContext({
@@ -1731,7 +1699,6 @@ export const resilienceSections = {
         try {
           writeFileSync(path.join(noGitWorkspace, "work.txt"), "content\n");
           const noGitHarness = createHarness();
-          planMode?.default(noGitHarness.api);
           modePermissions.default(noGitHarness.api);
           resilience.default(noGitHarness.api);
           const noGitCtx = noGitHarness.makeContext({ cwd: noGitWorkspace });

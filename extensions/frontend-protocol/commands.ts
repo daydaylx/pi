@@ -67,30 +67,6 @@ export interface ProtocolCommandDef {
 }
 
 export const COMMAND_REGISTRY = {
-  "workflow.open": {
-    title: "Workflow-Auswahl öffnen",
-    target: { type: "local" },
-    menuDataOps: ["get_commands"],
-    notes:
-      "Externe Clients rendern die Auswahl aus dem statischen Workflow-Modus-Set; Aurora behält den nativen Shift+Tab-Selector.",
-  },
-  "workflow.set": {
-    title: "Workflow setzen",
-    target: { type: "slash", name: "/workflow-set" },
-    notes: "Direktsetzer /workflow-set (plan-mode) seit Phase 5.",
-  },
-  "plan.decide": {
-    title: "Über den fertigen Plan entscheiden",
-    target: { type: "slash", name: "/plan-decide" },
-    notes:
-      "Öffnet die Entscheidung nach einem abgeschlossenen Planning-Turn: ausführen, weiter planen oder ohne Ausführung nach Work. Speist sich aus workflow.planReady.",
-  },
-  "plan.approve": {
-    title: "Freigegebenen Plan ausführen",
-    target: { type: "slash", name: "/plan-approve" },
-    notes:
-      "Ausdrückliche, an den Planhash gebundene Freigabe. Startet genau einen Work-Turn und hebt keine Berechtigungsstufe an.",
-  },
   "model.open": {
     title: "Modellwahl öffnen",
     target: { type: "local" },
@@ -166,7 +142,7 @@ export const COMMAND_REGISTRY = {
     title: "Inspector öffnen",
     target: { type: "local" },
     notes:
-      "Reine Präsentation über den State-Strom (workflow, verification, changes, subagents, context, lsp).",
+      "Reine Präsentation über den State-Strom (verification, changes, subagents, context, lsp).",
   },
   "changes.view": {
     title: "Änderungen anzeigen",
@@ -196,10 +172,6 @@ export type CommandId = keyof typeof COMMAND_REGISTRY;
 
 /** Pflicht-IDs laut Arbeitsauftrag Phase 2 (Dokument 07). */
 export const REQUIRED_COMMAND_IDS = [
-  "workflow.open",
-  "workflow.set",
-  "plan.decide",
-  "plan.approve",
   "model.open",
   "model.set",
   "thinking.open",

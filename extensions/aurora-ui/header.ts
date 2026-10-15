@@ -31,7 +31,7 @@ export interface SessionStatusInput {
   task?: SessionTask;
 }
 
-/** The status is a projection, never a second persisted workflow state. */
+/** The status is a projection, never a second persisted state. */
 export function sessionStatus(input: SessionStatusInput): SessionStatus {
   if (input.activity === "error") return "error";
   // A user abort is its own outcome — a stale failed verification from

@@ -17,7 +17,6 @@ const audit = await importModule("extensions/system-control/audit.ts");
 const policy = await importModule("extensions/system-control/policy.ts");
 const toolPolicy = await importModule("extensions/permissions/tool-policy.ts");
 const bashPolicy = await importModule("extensions/shared/permission-policy.ts");
-const guards = await importModule("extensions/permissions/guards.ts");
 const { Value } = await import(
   pathToFileURL(npmModuleFile("typebox", "build/value/index.mjs")).href
 );
@@ -690,22 +689,7 @@ test("Policy-Matrix erzwingt Systemklassen und Bash-Gegenprobe", async () => {
       "allow",
     );
     assert.equal(policy.systemBashNeedsApproval("nixos-rebuild build"), false);
-    const plan = { mode: "simple_plan" };
     process.env.PI_LAUNCH_PROFILE = "system";
-    assert.equal(
-      guards.systemControlPlanModeBlocks(plan, {
-        toolName: "nixos_apply",
-        input: {},
-      }),
-      true,
-    );
-    assert.equal(
-      guards.systemControlPlanModeBlocks(plan, {
-        toolName: "system_unit_status",
-        input: { unit: "demo.service" },
-      }),
-      false,
-    );
     for (const toolName of ["bash", "interactive_shell"]) {
       assert.equal(
         toolPolicy.decideTool(

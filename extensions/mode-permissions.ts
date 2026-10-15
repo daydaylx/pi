@@ -1,5 +1,5 @@
 /**
- * Central permission decision layer, independent from the workflow mode.
+ * Central permission decision layer.
  *
  * This is intentionally the only extension that intercepts tool_call and
  * user_bash. Workflow extensions do not make access decisions themselves.
@@ -48,7 +48,7 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     description:
       getPiLaunchProfile() === "system"
         ? "Im Systemprofil gesperrt: workspace_add erteilt keinen Projekt-Trust. Einen externen Git-Root bei Bedarf ausschließlich über den sichtbaren, sitzungsgebundenen Datei-Scope für native Dateiwerkzeuge freigeben."
-        : "Bittet den Nutzer um UI-Freigabe, ein zusätzliches Projekt bis zum Ende dieser Sitzung in den Workspace-Scope aufzunehmen. Die Freigabe erweitert nur die Projektwurzel; die aktuelle Berechtigungsstufe, Secret-Grenzen und Planmodus-Regeln gelten weiter.",
+        : "Bittet den Nutzer um UI-Freigabe, ein zusätzliches Projekt bis zum Ende dieser Sitzung in den Workspace-Scope aufzunehmen. Die Freigabe erweitert nur die Projektwurzel; die aktuelle Berechtigungsstufe und Secret-Grenzen gelten weiter.",
     promptSnippet:
       "Request the user's session-only UI approval before working in an additional project root.",
     parameters: Type.Object({ path: Type.String() }),

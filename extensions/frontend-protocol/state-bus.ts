@@ -11,7 +11,6 @@ import {
   type FrontendUiStatePatch as ContractFrontendUiStatePatch,
   type FrontendUiStateRequest as ContractFrontendUiStateRequest,
   type FrontendVerificationSummary as ContractFrontendVerificationSummary,
-  type FrontendWorkflowPhase as ContractFrontendWorkflowPhase,
 } from "./state-contract.ts";
 import {
   isFrontendUiPatchEvent,
@@ -25,7 +24,6 @@ import {
  * neither Aurora nor the Desktop renderer owns them.
  */
 export const FRONTEND_UI_CHANNELS = FRONTEND_STATE_CHANNELS;
-export type FrontendWorkflowPhase = ContractFrontendWorkflowPhase;
 export type FrontendActivityKind = ContractFrontendActivityKind;
 export type FrontendTaskChanges = ContractFrontendTaskChanges;
 export type FrontendVerificationSummary = ContractFrontendVerificationSummary;

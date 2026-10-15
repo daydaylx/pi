@@ -16,7 +16,6 @@ export interface TurnStartMarker {
   workspaceRoot?: string;
   /** Start fingerprint for every approved project root at turn start. */
   workspaceFingerprintsByRoot?: Record<string, string>;
-  workflowMode: string;
   provider: string;
   model: string;
   contextPercent: number | null;
@@ -64,7 +63,6 @@ export interface CompactionBoundaryMarker {
   reason: "manual" | "threshold" | "overflow";
   willRetry: boolean;
   workspaceFingerprint: string;
-  workflowMode: string;
   contextPercent: number | null;
   errorMessage?: string;
 }

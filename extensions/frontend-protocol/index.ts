@@ -19,7 +19,6 @@ export type {
   FrontendUiStatePatch,
   FrontendUiStateRequest,
   FrontendVerificationSummary,
-  FrontendWorkflowPhase,
   StateFieldOwner,
   StateTransport,
 } from "./state-contract.ts";

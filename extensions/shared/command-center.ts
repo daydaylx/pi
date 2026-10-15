@@ -10,19 +10,15 @@ import {
   type CommandCategoryId,
   type CommandDefinition,
   type CommandEffect,
-} from "../shared/command-catalog.ts";
+} from "./command-catalog.ts";
 import { resolveLspInteractiveCommand } from "../lsp/control-center.ts";
-import { submitCanonicalCommand } from "../shared/command-runtime.ts";
+import { submitCanonicalCommand } from "./command-runtime.ts";
 import {
   choose,
   cleanInput,
   runMenu,
   type MenuEntry,
-} from "../shared/menu-ui.ts";
-
-export interface CommandCenterState {
-  activeMode: "work" | "simple_plan" | "detailed_plan";
-}
+} from "./menu-ui.ts";
 
 export interface CommandMenuAction {
   name: string;
@@ -31,20 +27,9 @@ export interface CommandMenuAction {
   guide?: CommandDefinition["guide"];
 }
 
-function disabledReason(
-  name: string,
-  state: CommandCenterState,
-): string | undefined {
-  if (name === "edit-plan" && state.activeMode === "work")
-    return "Wechsle zuerst in einen Planmodus.";
-  return undefined;
-}
-
 function commandEntry(
   definition: CommandDefinition,
-  state: CommandCenterState,
 ): MenuEntry<CommandMenuAction> {
-  const reason = disabledReason(definition.name, state);
   const aliases = definition.aliases?.length
     ? `Aliase: ${definition.aliases.map((alias) => `/${alias}`).join(", ")}.`
     : undefined;
@@ -63,8 +48,6 @@ function commandEntry(
     label: `${definition.label} · ${commandLine}`,
     description: [definition.description, shortcut].filter(Boolean).join(" "),
     details: aliases,
-    disabled: Boolean(reason),
-    disabledReason: reason,
     dangerous: definition.dangerous,
     tone: definition.dangerous ? "danger" : undefined,
     value: {
@@ -100,7 +83,6 @@ function dynamicEntry(command: AvailableCommand): MenuEntry<CommandMenuAction> {
 
 export function buildCommandCenterEntries(
   available: readonly AvailableCommand[],
-  state: CommandCenterState,
 ): MenuEntry<CommandMenuAction>[] {
   const knownNames = new Set(
     COMMAND_DEFINITIONS.flatMap((definition) => [
@@ -116,25 +98,9 @@ export function buildCommandCenterEntries(
     knownByCategory.set(category.id, []);
 
   for (const definition of COMMAND_DEFINITIONS) {
-    // "commands" ist der Einstiegspunkt selbst. Die übrigen drei ändern den
-    // Workflow-Zustand: "workflow-set" ist ein programmatischer Direktsetzer
-    // für Frontends/RPC, "plan-decide" und "plan-approve" entscheiden über
-    // einen fertigen Plan und "plan-approve" startet dabei einen Work-Turn.
-    // Sie werden bewusst nicht als alternative Workflow-Route im Command
-    // Center angeboten — der Workflow-Wechsel und die Planentscheidung laufen
-    // über das Shift+Tab-Menü (bzw. für Frontends über die dokumentierten
-    // Slash-Commands). Reine Plan-Werkzeuge ohne Zustandswechsel
-    // (`view-plan`, `edit-plan`, `save-plan`) bleiben hier verfügbar.
-    if (
-      definition.name === "commands" ||
-      definition.name === "workflow-set" ||
-      definition.name === "plan-decide" ||
-      definition.name === "plan-approve"
-    )
-      continue;
-    knownByCategory
-      .get(definition.category)
-      ?.push(commandEntry(definition, state));
+    // "commands" ist der Einstiegspunkt selbst.
+    if (definition.name === "commands") continue;
+    knownByCategory.get(definition.category)?.push(commandEntry(definition));
   }
 
   const prompts = available
@@ -299,7 +265,6 @@ async function guideCommand(
 export async function openCommandCenter(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  state: CommandCenterState,
 ): Promise<void> {
   const available =
     typeof pi.getCommands === "function"
@@ -308,7 +273,7 @@ export async function openCommandCenter(
   const selected = await runMenu(
     ctx,
     "Command Center",
-    buildCommandCenterEntries(available, state),
+    buildCommandCenterEntries(available),
     {
       nonInteractiveHint: "Das Command Center benötigt den TUI-Modus.",
       headerShortcut: "Super+Q",

@@ -53,19 +53,6 @@
   "tests/suites/ui.mjs": {
     "no-control-regex": {
       "count": 4
-    },
-    "no-unused-vars": {
-      "count": 7
-    }
-  },
-  "tests/workflow-mode/e2e.test.mjs": {
-    "no-unused-vars": {
-      "count": 1
-    }
-  },
-  "tests/workflow-mode/plan-store.test.mjs": {
-    "no-control-regex": {
-      "count": 1
     }
   }
 }

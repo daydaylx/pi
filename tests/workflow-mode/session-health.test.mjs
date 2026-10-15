@@ -262,7 +262,7 @@ await test("session health separates interactive errors from raw history", () =>
     eq(
       report.permissions.deniedYoloAttempts,
       1,
-      "the denied YOLO attempt in plan mode is named",
+      "a denied YOLO attempt is named",
     );
     eq(report.verifier.completed, 1, "a finished verifier run is completed");
     eq(

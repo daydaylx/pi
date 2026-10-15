@@ -3,7 +3,6 @@
   "metric": "v8-function",
   "activeExtensions": [
     "extensions/setup-core/index.ts",
-    "extensions/plan-mode/index.ts",
     "extensions/mode-permissions.ts",
     "extensions/interactive-pty/index.ts",
     "extensions/lsp/index.ts",
@@ -22,7 +21,6 @@
   ],
   "minimumFunctionCoverage": {
     "extensions/setup-core/index.ts": 100,
-    "extensions/plan-mode/index.ts": 100,
     "extensions/mode-permissions.ts": 100,
     "extensions/interactive-pty/index.ts": 62,
     "extensions/lsp/index.ts": 100,

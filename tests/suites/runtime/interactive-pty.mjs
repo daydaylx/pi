@@ -91,10 +91,8 @@ export const interactivePtySections = {
       interactiveRunner,
       interactivePty,
       modePermissions,
-      planMode,
     } = context;
-    if (!interactiveRunner || !interactivePty || !modePermissions || !planMode)
-      return;
+    if (!interactiveRunner || !interactivePty || !modePermissions) return;
 
     await section("interactive PTY runner", async () => {
       const terminal = makeFakeTerminal();
@@ -293,7 +291,6 @@ export const interactivePtySections = {
       approvedHarness.api.events.on("recovery-status:request", (request) =>
         request.respond({ armed: false }),
       );
-      planMode.default(approvedHarness.api);
       modePermissions.default(approvedHarness.api);
       const approvedContext = approvedHarness.makeContext();
       approvedContext.ui.custom = async () => {

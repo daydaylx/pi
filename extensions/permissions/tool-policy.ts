@@ -20,7 +20,6 @@ import {
 import type { PolicyAction as ConfiguredPolicyAction } from "../setup-core/config.ts";
 import { WEB_TOOLS, decideWebTool } from "./web-tools.ts";
 import { LOCAL_LSP_TOOLS } from "./workflow-policy.ts";
-import { PLAN_WRITE_TOOL_NAME } from "../plan-mode/plan-tool.ts";
 import { toolPath } from "./tool-event.ts";
 import { getPiLaunchProfile } from "../shared/profile.ts";
 import { systemBashNeedsApproval } from "../system-control/policy.ts";
@@ -40,13 +39,13 @@ export function permissionWarning(level: PermissionLevel): string | undefined {
     return "CONFIRM ALL aktiv: Jede Mutation und externe Aktion benötigt eine Bestätigung.";
   }
   if (level === "yolo") {
-    return "YOLO temporär aktiv: Routine-Rückfragen und Commit-Verifier-Pflicht entfallen, harte System-Bash-Grenzen (sudo, Paketmanager, curl|sh, rm -rf /) sind gelockert; Recovery-Gate, Secret-, Symlink- und Trust-Grenzen sowie Plan-Mode-Schreibschutz bleiben aktiv.";
+    return "YOLO temporär aktiv: Routine-Rückfragen und Commit-Verifier-Pflicht entfallen, harte System-Bash-Grenzen (sudo, Paketmanager, curl|sh, rm -rf /) sind gelockert; Recovery-Gate, Secret-, Symlink- und Trust-Grenzen bleiben aktiv.";
   }
   if (level === "yolo-ask") {
-    return "YOLO 2 temporär aktiv: wie YOLO 1 ohne Routine-Rückfragen, aber sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach. Das Recovery-Gate bleibt aktiv; die Commit-Verifier-Pflicht entfällt. Trust-Grenze und Plan-Mode-Schreibschutz bleiben aktiv.";
+    return "YOLO 2 temporär aktiv: wie YOLO 1 ohne Routine-Rückfragen, aber sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach. Das Recovery-Gate bleibt aktiv; die Commit-Verifier-Pflicht entfällt. Die Trust-Grenze bleibt aktiv.";
   }
   if (level === "yolo-full") {
-    return "YOLO 3 temporär aktiv: VOLLZUGRIFF ohne Rückfragen, auch sudo, Partitionen, Systempfade, Secrets und Pfade außerhalb des Projekts. Trust-, Recovery- und Planmodus-Sperren sowie Root-Dateisystem-Löschung sind freigegeben. Tatsächliche Root-Rechte hängen von den OS-Rechten des Pi-Prozesses und sudo ab.";
+    return "YOLO 3 temporär aktiv: VOLLZUGRIFF ohne Rückfragen, auch sudo, Partitionen, Systempfade, Secrets und Pfade außerhalb des Projekts. Trust- und Recovery-Sperren sowie Root-Dateisystem-Löschung sind freigegeben. Tatsächliche Root-Rechte hängen von den OS-Rechten des Pi-Prozesses und sudo ab.";
   }
   if (level === "headless") {
     return "Headless aktiv: kein Bestätigungsdialog verfügbar. Projektlokale Builds/Tests/Lint/Typecheck sind erlaubt; jede sonst bestätigungspflichtige Aktion bricht strukturiert ab statt zu fragen.";
@@ -174,20 +173,6 @@ function decideToolBase(
   }
   if (event.toolName === ASK_USER_TOOL_NAME) {
     return { action: "allow", reason: "Controlled workflow capability" };
-  }
-  if (event.toolName === PLAN_WRITE_TOOL_NAME) {
-    // Der Planschreiber besitzt sein Ziel selbst: er schreibt ausschließlich in
-    // die sitzungseigene Planablage der Runtime, nie in das Projekt. Er ist
-    // damit keine Projektmutation und steht nie hinter einem Dialog — ein
-    // Bestätigungsdialog für "Plan schreiben" wäre im Planmodus auch genau die
-    // Aktion, die der Modus vorsieht. Der Planmodus-Guard entscheidet vorher,
-    // dass überhaupt geplant wird; `readonly` sperrt weiterhin alles.
-    return permissionLevel === "readonly"
-      ? {
-          action: "block",
-          reason: "Readonly: Es wird kein Plan geschrieben.",
-        }
-      : { action: "allow", reason: "Planschreiber der Sitzungsablage" };
   }
   if (event.toolName === "recovery_check") {
     // Der Recovery-Check ist die einzige Möglichkeit, das Recovery-Gate zu
