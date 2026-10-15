@@ -346,7 +346,7 @@ try {
     const loaded = setup.loadSetupConfig(projectDir, true);
     assert.equal(loaded.config.ui.theme, "aurora-system");
     assert.equal(loaded.config.ui.dashboard, "compact");
-    assert.equal(loaded.config.ui.motion, "contextual");
+    assert.equal(loaded.config.ui.motion, "expressive");
     assert.deepEqual(loaded.sources, [systemSetupPath]);
     await setup.persistUiPreference({ dashboard: "expanded" });
     assert.equal(

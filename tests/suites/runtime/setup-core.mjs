@@ -28,7 +28,7 @@ export const setupCoreSections = {
         );
         eq(
           defaults.ui,
-          { theme: "aurora-forge", motion: "contextual", dashboard: "auto" },
+          { theme: "aurora-forge", motion: "expressive", dashboard: "auto" },
           "Aurora is the central UI default",
         );
         eq(
@@ -102,10 +102,11 @@ export const setupCoreSections = {
           }),
         );
         const trustedInvalid = setupConfig.loadSetupConfig(project, true);
+        const untrustedBase = setupConfig.loadSetupConfig(project, false);
         eq(
           trustedInvalid.config.ui.motion,
-          defaults.ui.motion,
-          "invalid motion falls back to default",
+          untrustedBase.config.ui.motion,
+          "invalid motion falls back to the active profile's configured default",
         );
         assert(
           trustedInvalid.diagnostics.some((entry) =>

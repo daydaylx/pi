@@ -1847,9 +1847,8 @@ export const auroraUiSections = {
           }
         }
 
-        // Only thinking and running tools are moving work. Responding keeps a
-        // fixed glyph while the slow status ticker still repaints the line, so
-        // the glyph is sampled across a full four-frame cycle of the old pulse.
+        // Expressive motion animates Responding with a quiet stream glyph; sample
+        // across several ticker frames to prove it moves without changing state.
         {
           const headGlyph = () => {
             const rendered =
@@ -1862,7 +1861,7 @@ export const auroraUiSections = {
             const activityLine = rendered
               .split("\n")
               .find((line) => line.includes("ANTWORTET"));
-            return activityLine?.match(/[·•●▸]/)?.[0] ?? "";
+            return activityLine?.match(/([^\s│])\s+ANTWORTET/)?.[1] ?? "";
           };
           const samples = [headGlyph()];
           for (let tick = 0; tick < 3; tick += 1) {
@@ -1877,14 +1876,13 @@ export const auroraUiSections = {
             );
             samples.push(headGlyph());
           }
-          eq(
-            [...new Set(samples)],
-            [samples[0]],
-            "ANTWORTET keeps one static glyph while the status ticker runs",
+          assert(
+            new Set(samples).size > 1,
+            "expressive Responding motion advances its stream glyph",
           );
           assert(
-            samples[0] !== "·" && samples[0] !== "",
-            "the static responding glyph stays distinguishable from WARTET AUF MODELL",
+            samples.every((glyph) => glyph !== ""),
+            "responding stream glyphs stay distinguishable from WARTET AUF MODELL",
           );
         }
 

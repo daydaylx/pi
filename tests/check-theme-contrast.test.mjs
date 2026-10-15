@@ -59,9 +59,11 @@ await test("Aurora Forge contains every Pi color slot used by Aurora Night", () 
   }
   assert(
     auroraForge.name === "aurora-forge" &&
-      auroraForge.vars.bg === "#12100F" &&
-      auroraForge.vars.bgDark === "#0D0B0A",
-    "Forge exposes its deep warm surfaces",
+      auroraForge.vars.bg === "#07110B" &&
+      auroraForge.vars.bgDark === "#040A06" &&
+      auroraForge.vars.copper === "#39D353" &&
+      auroraForge.colors.accent === "terracotta",
+    "Forge exposes its deep green cyber surfaces and neon accent",
   );
 });
 
@@ -69,6 +71,14 @@ await test("Aurora Forge keeps runtime status tones distinct", () => {
   assert(
     checkStatusDistinctness(auroraForge).length === 0,
     "Forge runtime status slots do not collapse into indistinguishable tones",
+  );
+  assert(
+    checkHueProximity(auroraForge).length === 0,
+    "Forge brand accents remain visually distinct",
+  );
+  assert(
+    checkContrast(auroraForge).every((row) => !row.belowText),
+    "Forge foreground colors clear 4.5:1 contrast on all dashboard surfaces",
   );
 });
 

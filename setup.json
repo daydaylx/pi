@@ -2,7 +2,7 @@
   "$schema": "./schemas/setup.schema.json",
   "ui": {
     "theme": "aurora-forge",
-    "motion": "contextual"
+    "motion": "expressive"
   },
   "permissions": {
     "unknownTools": "ask",

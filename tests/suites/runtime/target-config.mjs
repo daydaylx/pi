@@ -220,7 +220,7 @@ export const targetConfigSections = {
         );
         eq(
           setup.ui,
-          { theme: "aurora-forge", motion: "contextual" },
+          { theme: "aurora-forge", motion: "expressive" },
           "central UI defaults",
         );
         eq(
@@ -245,13 +245,13 @@ export const targetConfigSections = {
         );
         eq(
           auroraTheme.vars.bg,
-          "#12100F",
-          "Aurora uses its warm neutral page background",
+          "#07110B",
+          "Aurora uses its deep green cyber page background",
         );
         eq(
           auroraTheme.vars.bgDark,
-          "#0D0B0A",
-          "Aurora uses its darker warm terminal background variant",
+          "#040A06",
+          "Aurora uses its darker green terminal background variant",
         );
         assert(
           contrastRatio(auroraTheme.vars.textMuted, auroraTheme.vars.bg) >=
