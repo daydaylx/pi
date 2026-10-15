@@ -15,7 +15,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { planUserCliLink, applyUserCliLink } from "../scripts/install-user.mjs";
+import {
+  applySystemCliLink,
+  applyUserCliLink,
+  planSystemCliLink,
+  planUserCliLink,
+} from "../scripts/install-user.mjs";
 import { resolveRuntimeRoot } from "../shared/runtime-resolution.mjs";
 import { importModule } from "./shared/jiti-loader.mjs";
 
@@ -76,10 +81,8 @@ try {
   const systemProject = path.join(tempRoot, "some-project");
   mkdirSync(systemProject, { recursive: true });
   const system = spawnSync(
-    "bash",
+    path.join(ROOT, "bin", "pis"),
     [
-      path.join(ROOT, "bin", "pi"),
-      "system",
       "--continue",
       "--model",
       "local/test",
@@ -129,8 +132,8 @@ try {
   }
 
   const rejectedApproval = spawnSync(
-    "bash",
-    [path.join(ROOT, "bin", "pi"), "system", "--approve"],
+    path.join(ROOT, "bin", "pi"),
+    ["system", "--approve"],
     {
       cwd: tempRoot,
       encoding: "utf8",
@@ -143,13 +146,13 @@ try {
     },
   );
   assert.equal(rejectedApproval.status, 64);
-  assert.match(rejectedApproval.stderr, /--approve ist in pi system gesperrt/);
+  assert.match(rejectedApproval.stderr, /--approve ist in pis gesperrt/);
 
   const outsideSession = path.join(tempRoot, "project-session.jsonl");
   writeFileSync(outsideSession, "unverändert\n");
   const rejectedSession = spawnSync(
-    "bash",
-    [path.join(ROOT, "bin", "pi"), "system", "--session", outsideSession],
+    path.join(ROOT, "bin", "pis"),
+    ["--session", outsideSession],
     {
       cwd: tempRoot,
       encoding: "utf8",
@@ -171,8 +174,8 @@ try {
   const inProfileSession = path.join(systemSessions, "resume.jsonl");
   writeFileSync(inProfileSession, "{}\n");
   const acceptedSession = spawnSync(
-    "bash",
-    [path.join(ROOT, "bin", "pi"), "system", "--session", inProfileSession],
+    path.join(ROOT, "bin", "pis"),
+    ["--session", inProfileSession],
     {
       cwd: tempRoot,
       encoding: "utf8",
@@ -386,6 +389,40 @@ try {
   assert.equal(readlinkSync(linkCommand), installedLauncher);
   assert.equal(planUserCliLink(linkAgent, linkHome).status, "keep");
 
+  const systemCommand = path.join(linkHome, ".local", "bin", "pis");
+  const installedSystemLauncher = path.join(linkAgent, "bin", "pis");
+  writeFileSync(installedSystemLauncher, "#!/bin/sh\n");
+  chmodSync(installedSystemLauncher, 0o755);
+  const systemLinkPlan = planSystemCliLink(linkAgent, linkHome);
+  assert.equal(systemLinkPlan.status, "create");
+  assert.equal(applySystemCliLink(systemLinkPlan).status, "linked");
+  assert.equal(
+    realpathSync(systemCommand),
+    realpathSync(installedSystemLauncher),
+  );
+  assert.equal(readlinkSync(systemCommand), installedSystemLauncher);
+  assert.equal(planSystemCliLink(linkAgent, linkHome).status, "keep");
+
+  const racingSystemHome = path.join(tempRoot, "racing-system-home");
+  const racingSystemCommand = path.join(
+    racingSystemHome,
+    ".local",
+    "bin",
+    "pis",
+  );
+  const racingSystemPlan = planSystemCliLink(linkAgent, racingSystemHome);
+  assert.equal(racingSystemPlan.status, "create");
+  mkdirSync(path.dirname(racingSystemCommand), { recursive: true });
+  writeFileSync(racingSystemCommand, "concurrent user command\n");
+  assert.throws(
+    () => applySystemCliLink(racingSystemPlan),
+    /keine verwaltete Symlink-Datei/,
+  );
+  assert.equal(
+    readFileSync(racingSystemCommand, "utf8"),
+    "concurrent user command\n",
+  );
+
   const protectedHome = path.join(tempRoot, "protected-home");
   const protectedCommand = path.join(protectedHome, ".local", "bin", "pi");
   mkdirSync(path.dirname(protectedCommand), { recursive: true });
@@ -396,8 +433,26 @@ try {
   );
   assert.equal(readFileSync(protectedCommand, "utf8"), "user command\n");
 
+  const protectedSystemHome = path.join(tempRoot, "protected-system-home");
+  const protectedSystemCommand = path.join(
+    protectedSystemHome,
+    ".local",
+    "bin",
+    "pis",
+  );
+  mkdirSync(path.dirname(protectedSystemCommand), { recursive: true });
+  writeFileSync(protectedSystemCommand, "user system command\n");
+  assert.throws(
+    () => planSystemCliLink(linkAgent, protectedSystemHome),
+    /keine verwaltete Symlink-Datei/,
+  );
+  assert.equal(
+    readFileSync(protectedSystemCommand, "utf8"),
+    "user system command\n",
+  );
+
   console.log(
-    "PASS: pi-system-profile launch, state, theme-config and link safety",
+    "PASS: pis launch, profile state, theme config and CLI link safety",
   );
 } finally {
   rmSync(tempRoot, { recursive: true, force: true });

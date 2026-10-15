@@ -11,7 +11,7 @@ ist selbst keine Berechtigung.
 | Pi-Repository          | `main`, Baseline `3645411b6db621c9229e915c34c7fe0745b1a3df`, sauber                                                             |
 | NixOS-Repository       | `main`, Baseline `6cce2f8f23de3cb0e2c084a8f4cd6ca2db27d873`, sauber                                                             |
 | Installierter Launcher | `~/.local/bin/pi` → `~/.pi/agent/bin/pi`, Pi `1.2.0`                                                                            |
-| Terminal-Auflösung     | `pi system --help` aus `/tmp` und `~/nixos-config` erfolgreich; normale `pi --version` bleibt `1.2.0`                           |
+| Terminal-Auflösung     | `pis --help` aus `/tmp` und `~/nixos-config` erfolgreich; normale `pi --version` bleibt `1.2.0`                                  |
 | Live-Dienste           | `pi-system-host`, `quickshell-quickpanel` und `agent-control` aktiv                                                             |
 | Systemd-Grenze         | Historische Baseline: `ProtectSystem=strict`; nur `~/.pi/agent/profile-state/system` schreibbar, `~/nixos-config` nicht        |
 | NixOS                  | Generation 61; letzter Build erfolgreich. Es wurde in dieser Arbeit keine Generation aktiviert.                                 |
@@ -87,7 +87,7 @@ wird.
 
 | Frontend                            | allow                                                    | ask                                                                                                             | deny                                                                               |
 | ----------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `pi system` TUI                     | Lesen und freigegebene Aktionen entsprechend Scope/Stufe | Scope- und Risiko-Dialog über TUI                                                                               | Fehlende UI, abgelehnter Dialog, harte Pfad-/Plan-/Secret-Grenze                   |
+| `pis` TUI                            | Lesen und freigegebene Aktionen entsprechend Scope/Stufe | Scope- und Risiko-Dialog über TUI                                                                               | Fehlende UI, abgelehnter Dialog, harte Pfad-/Plan-/Secret-Grenze                   |
 | Host + QuickPanel                   | Lesen und freigegebene Aktionen derselben Host-Sitzung   | Host-Dialog wird sichtbar in QuickPanel beantwortet; Berechtigungsstufe ändert sich nur nach expliziter Auswahl | Kein QuickPanel-Kanal, Timeout, abgelehnter Dialog, falsche Host-Epoch/Sitzung     |
 | Android-Bridge                      | Read-only Host-Funktionen im erlaubten Methoden-Katalog  | Keine positive Approval-Funktion                                                                                | `permission.set`, Sessionwechsel, `command.invoke` und positive Approval-Antworten |
 | RPC/Print/Headless ohne Approval-UI | Nur explizit sichere Reads und vorgesehene Prüfungen     | Keine nicht erfüllbare Rückfrage                                                                                | Scope-Erweiterung und jede Aktion, die UI-Zustimmung braucht                       |
@@ -116,7 +116,7 @@ Systemgeneration aktiviert.
 
 | Gate                                       | Status                         | Nachweis / Restarbeit                                                                                                                                                       |
 | ------------------------------------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Launcher aus beliebigem `cwd`              | Teilweise bestanden            | `pi system --help` aus `/tmp` und NixOS-Repo; vollständige interaktive TUI- und Resume-/Session-Escape-Probe offen.                                                         |
+| Launcher aus beliebigem `cwd`              | Teilweise bestanden            | `pis --help` aus `/tmp` und NixOS-Repo; vollständige interaktive TUI- und Resume-/Session-Escape-Probe offen.                                                                |
 | Untrusted System-Workspace lesen/schreiben | Core bestanden                 | Private Workspace- und untrusted-Guard-Regressions sind grün; echte Live-Sitzung bleibt offen.                                                                              |
 | Expliziter Root-Scope für `~/nixos-config` | Core bestanden, live offen     | Native Datei-Scope-Freigabe und Sitzungsbindung sind getestet. Aktive Host-Unit sperrt noch; Quell-Unit ist vorbereitet.                                                    |
 | Shell auf bestätigtem Root                 | Nicht bestanden                | Kein explizites `cwd` im Core-Bash-Schema; keine String-Heuristik als Ersatz.                                                                                               |

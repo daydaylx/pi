@@ -1,13 +1,13 @@
 # Pi System-Profil
 
-`pi system` startet dieselbe Pi-Runtime wie `pi`, mit festem Workspace,
+`pis` startet dieselbe Pi-Runtime wie `pi`, mit festem Workspace,
 separaten Sessions und eigenen Setup-Präferenzen. Das Profil hängt nicht vom
 aktuellen Verzeichnis oder einem Git-Repository ab.
 
 ## Installation
 
-Die Synchronisation kopiert `bin/pi` nach `~/.pi/agent/bin/pi`. Den Wechsel des
-PATH-Befehls prüft man zuerst:
+Die Synchronisation kopiert `bin/pi` und `bin/pis` nach `~/.pi/agent/bin/`.
+Den Wechsel der PATH-Befehle prüft man zuerst:
 
 ```bash
 npm run install:user -- --dry-run --link-cli
@@ -19,10 +19,11 @@ Der explizite Anwenden-Schritt lautet:
 npm run install:user -- --apply --link-cli
 ```
 
-Der Installer ändert `~/.local/bin/pi` nur, wenn es fehlt oder auf die Pi-
-Runtime im ausgewählten Agent-Verzeichnis zeigt. Eine reguläre Datei, ein
-defekter Symlink oder ein anderer Symlink wird nicht ersetzt. Der vorherige
-Symlink kann für den Rückweg wieder auf
+Der Installer legt `~/.local/bin/pi` und `~/.local/bin/pis` an. `pi` wird nur
+ersetzt, wenn es auf die Pi-Runtime im ausgewählten Agent-Verzeichnis zeigt;
+`pis` wird nur angelegt oder beibehalten, wenn es auf den zugehörigen Launcher
+zeigt. Reguläre Dateien und fremde oder defekte Symlinks werden nicht ersetzt.
+Der vorherige `pi`-Symlink kann für den Rückweg wieder auf
 `~/.pi/agent/npm/node_modules/.bin/pi` zeigen. Bei einem abweichenden
 Agent-Verzeichnis gilt dessen `npm/node_modules/.bin/pi`.
 
@@ -30,13 +31,13 @@ Agent-Verzeichnis gilt dessen `npm/node_modules/.bin/pi`.
 
 ```bash
 pi                         # unverändertes Projektprofil
-pi system                  # unabhängiges System-Profil
-pi system --continue       # letzte Pi-System-Sitzung fortsetzen
-pi system --resume         # Pi-System-Sitzung auswählen
+pis                        # unabhängiges System-Profil
+pis --continue             # letzte Pi-System-Sitzung fortsetzen
+pis --resume               # Pi-System-Sitzung auswählen
 ```
 
-`pi system` setzt den Arbeitsordner auf
-`$PI_CODING_AGENT_DIR/profile-state/system/workspace` und speichert die
+`pi system` bleibt als kompatibler Alias erhalten. `pis` setzt den Arbeitsordner
+auf `$PI_CODING_AGENT_DIR/profile-state/system/workspace` und speichert die
 interaktiven TUI-Sessions unter
 `$PI_CODING_AGENT_DIR/profile-state/system/sessions` (Standard:
 `~/.pi/agent`). Der RPC-Host verwendet getrennt

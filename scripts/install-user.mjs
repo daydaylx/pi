@@ -33,6 +33,7 @@ const ALLOWLIST = [
   "tsconfig.json",
   "keybindings.json",
   "subagent-tool-description.md",
+  "bin/pis",
   "bin/pi",
   "bin/pi-frontend",
   "bin/pi-system-host",
@@ -178,22 +179,19 @@ function lstatOrUndefined(candidate) {
 }
 
 /**
- * Plan the optional ~/.local/bin/pi switch without following or replacing an
- * unrelated user command. The only replaceable link is the current Pi runtime
- * installed under the selected agent directory.
+ * Plan an optional user command link without following or replacing an
+ * unrelated command. Only `pi` can replace the Pi runtime link; `pis` is
+ * created directly at its managed launcher.
  */
-export function planUserCliLink(target, home = homedir()) {
+function planCliLink(command, launcher, target, home, runtimeCommand) {
   target = path.resolve(target);
   home = path.resolve(home);
-  const commandPath = path.join(home, ".local", "bin", "pi");
-  const launcherPath = path.join(target, "bin", "pi");
-  const runtimeLinkPath = path.join(
-    target,
-    "npm",
-    "node_modules",
-    ".bin",
-    "pi",
-  );
+  const commandPath = path.join(home, ".local", "bin", command);
+  const launcherPath = path.join(target, "bin", launcher);
+  const runtimeLinkPath = runtimeCommand
+    ? path.join(target, "npm", "node_modules", ".bin", runtimeCommand)
+    : undefined;
+  const label = command === "pis" ? "Pi-System-Befehl" : "Pi-Befehl";
 
   assertNoSymlinkComponents(path.dirname(commandPath));
   const current = lstatOrUndefined(commandPath);
@@ -201,7 +199,7 @@ export function planUserCliLink(target, home = homedir()) {
     return { status: "create", commandPath, launcherPath, target, home };
   if (!current.isSymbolicLink()) {
     throw new Error(
-      `Pi-Befehl ist keine verwaltete Symlink-Datei: ${commandPath}`,
+      `${label} ist keine verwaltete Symlink-Datei: ${commandPath}`,
     );
   }
 
@@ -210,46 +208,53 @@ export function planUserCliLink(target, home = homedir()) {
     readlinkSync(commandPath),
   );
   const launcherTargets = new Set([launcherPath]);
-  const runtimeTargets = new Set([runtimeLinkPath]);
-  for (const [candidate, allowed] of [
-    [launcherPath, launcherTargets],
-    [runtimeLinkPath, runtimeTargets],
-  ]) {
+  const runtimeTargets = new Set(runtimeLinkPath ? [runtimeLinkPath] : []);
+  const targets = [[launcherPath, launcherTargets]];
+  if (runtimeLinkPath) targets.push([runtimeLinkPath, runtimeTargets]);
+  for (const [candidate, allowed] of targets) {
     if (existsSync(candidate)) allowed.add(realpathSync(candidate));
   }
 
   if (launcherTargets.has(currentTarget))
     return { status: "keep", commandPath, launcherPath, target, home };
-  if (runtimeTargets.has(currentTarget))
+  if (runtimeLinkPath && runtimeTargets.has(currentTarget))
     return { status: "replace", commandPath, launcherPath, target, home };
 
   try {
     const currentRealPath = realpathSync(commandPath);
     if (launcherTargets.has(currentRealPath))
       return { status: "keep", commandPath, launcherPath, target, home };
-    if (runtimeTargets.has(currentRealPath))
+    if (runtimeLinkPath && runtimeTargets.has(currentRealPath))
       return { status: "replace", commandPath, launcherPath, target, home };
   } catch {
     // A broken, user-selected symlink is not ours to repair.
   }
 
   throw new Error(
-    `Pi-Befehl zeigt auf ein nicht verwaltetes Ziel und bleibt unangetastet: ${commandPath}`,
+    `${label} zeigt auf ein nicht verwaltetes Ziel und bleibt unangetastet: ${commandPath}`,
   );
 }
 
-/** Replace only the link approved by planUserCliLink; never unlink a file. */
-export function applyUserCliLink(plan) {
+export function planUserCliLink(target, home = homedir()) {
+  return planCliLink("pi", "pi", target, home, "pi");
+}
+
+export function planSystemCliLink(target, home = homedir()) {
+  return planCliLink("pis", "pis", target, home);
+}
+
+/** Apply only a freshly revalidated link plan; never unlink a file. */
+function applyCliLink(plan, replan, command) {
   if (plan.status === "keep") return plan;
   assertNoSymlinkComponents(path.dirname(plan.commandPath));
   if (!existsSync(plan.launcherPath))
     throw new Error(
-      `Pi-Launcher fehlt im Installationsziel: ${plan.launcherPath}`,
+      `${command}-Launcher fehlt im Installationsziel: ${plan.launcherPath}`,
     );
 
-  // Recheck immediately before the atomic rename in case another installer or
-  // user changed ~/.local/bin/pi after the preview.
-  const currentPlan = planUserCliLink(plan.target, plan.home);
+  // Recheck immediately before publishing in case another installer or user
+  // changed the command after the preview.
+  const currentPlan = replan(plan.target, plan.home);
   if (
     currentPlan.status !== plan.status ||
     currentPlan.commandPath !== plan.commandPath ||
@@ -260,17 +265,27 @@ export function applyUserCliLink(plan) {
     );
   }
 
+  mkdirSync(path.dirname(plan.commandPath), { recursive: true, mode: 0o700 });
+  assertNoSymlinkComponents(path.dirname(plan.commandPath));
+  if (plan.status === "create") {
+    // symlink(2) fails with EEXIST instead of replacing a file or link that
+    // appeared after the final revalidation.
+    symlinkSync(plan.launcherPath, plan.commandPath);
+    return { ...plan, status: "linked" };
+  }
+
   const temporaryLink = path.join(
     path.dirname(plan.commandPath),
-    `.pi-launcher-${process.pid}`,
+    `.${path.basename(plan.commandPath)}-launcher-${process.pid}`,
   );
-  if (lstatOrUndefined(temporaryLink))
-    throw new Error(`Temporärer Pi-Link existiert bereits: ${temporaryLink}`);
+  if (lstatOrUndefined(temporaryLink)) {
+    throw new Error(
+      `Temporärer Launcher-Link existiert bereits: ${temporaryLink}`,
+    );
+  }
 
   let created = false;
   try {
-    mkdirSync(path.dirname(plan.commandPath), { recursive: true, mode: 0o700 });
-    assertNoSymlinkComponents(path.dirname(plan.commandPath));
     symlinkSync(plan.launcherPath, temporaryLink);
     created = true;
     renameSync(temporaryLink, plan.commandPath);
@@ -279,6 +294,14 @@ export function applyUserCliLink(plan) {
     throw error;
   }
   return { ...plan, status: "linked" };
+}
+
+export function applyUserCliLink(plan) {
+  return applyCliLink(plan, planUserCliLink, "Pi");
+}
+
+export function applySystemCliLink(plan) {
+  return applyCliLink(plan, planSystemCliLink, "Pi System");
 }
 
 /**
@@ -329,7 +352,20 @@ function runInstall(argv) {
   }
 
   assertNoSymlinkComponents(target);
-  const cliLinkPlan = linkCli ? planUserCliLink(target) : undefined;
+  const cliLinkPlans = linkCli
+    ? [
+        {
+          plan: planUserCliLink(target),
+          replan: planUserCliLink,
+          apply: applyUserCliLink,
+        },
+        {
+          plan: planSystemCliLink(target),
+          replan: planSystemCliLink,
+          apply: applySystemCliLink,
+        },
+      ]
+    : [];
 
   const files = ALLOWLIST.flatMap((entry) => {
     const absolute = path.join(SOURCE, entry);
@@ -351,6 +387,7 @@ function runInstall(argv) {
     mkdirSync(path.dirname(to), { recursive: true });
     copyFileSync(from, to);
     if (
+      relative === "bin/pis" ||
       relative === "bin/pi" ||
       relative === "bin/pi-frontend" ||
       relative === "bin/pi-system-host" ||
@@ -379,11 +416,11 @@ function runInstall(argv) {
     }
   }
 
-  if (cliLinkPlan) {
+  for (const { plan, replan, apply: applyLink } of cliLinkPlans) {
     console.log(
-      `${apply ? "LINK" : "DRY "} ${cliLinkPlan.commandPath} -> ${cliLinkPlan.launcherPath}`,
+      `${apply ? "LINK" : "DRY "} ${plan.commandPath} -> ${plan.launcherPath}`,
     );
-    if (apply) applyUserCliLink(planUserCliLink(target));
+    if (apply) applyLink(replan(target));
   }
 
   // Remove known legacy paths that were previously managed by this installer.

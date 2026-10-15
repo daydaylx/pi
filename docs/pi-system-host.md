@@ -3,7 +3,7 @@
 Der Host betreibt genau einen `bin/pi-frontend`-Prozess in einem eigenen
 Session-Verzeichnis (`profile-state/system/host-sessions`) und stellt dessen
 v1-JSONL-Vertrag über einen lokalen Unix-Socket bereit. Das interaktive
-`pi system`-TUI bleibt in `profile-state/system/sessions`; beide können nicht
+`pis`-TUI bleibt in `profile-state/system/sessions`; beide können nicht
 versehentlich dieselbe Sessiondatei beschreiben. Der Socket liegt unter
 `$XDG_RUNTIME_DIR/pi-system-host/frontend.sock`, gehört dem ausführenden Nutzer
 und hat Modus `0600`; ein Netzwerkport wird nicht geöffnet. Verbundene Clients
@@ -122,7 +122,7 @@ vorhandene Installation.
 - Pi-Sitzungen sind persistent; ein separates dauerhaftes Run-/Job-Manifest,
   Crash-Recovery und Statusabgleich gestarteter externer Jobs fehlen. Die
   Host-Epoch gilt nur für den jeweiligen Prozess und bietet keinen Replay-Puffer.
-- `pi system` als interaktive TUI und der RPC-Host nutzen getrennte
+- `pis` als interaktive TUI und der RPC-Host nutzen getrennte
   Session-Verzeichnisse. Eine Attach-/Handoff-Funktion existiert nicht; Verlauf
   und Sessionauswahl werden nicht automatisch zwischen den beiden Profilen
   zusammengeführt.

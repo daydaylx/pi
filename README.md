@@ -41,23 +41,23 @@ npm run install:user -- --dry-run --link-cli
 npm run install:user -- --apply --link-cli
 ```
 
-`--link-cli` ersetzt nur einen vorhandenen Symlink auf die Pi-Runtime im
-gewählten Agent-Verzeichnis oder legt den Befehl an. Eine normale Datei oder
-ein anderer Symlink unter `~/.local/bin/pi` bleibt unangetastet und führt zu
-einem Fehler.
+`--link-cli` legt `~/.local/bin/pi` und `~/.local/bin/pis` an. Es ersetzt
+`pi` nur, wenn der vorhandene Symlink auf die Pi-Runtime im gewählten
+Agent-Verzeichnis zeigt. Normale Dateien oder fremde Symlinks bleiben
+unangetastet und führen zu einem Fehler.
 
 Externe Frontends starten `bin/pi-frontend` und verwenden ausschließlich die in
 `docs/frontend-api.md` dokumentierte, versionierte JSONL-Schnittstelle.
 
 ## Pi System-Profil
 
-Nach dem optionalen Launcher-Link startet `pi system` aus jedem Verzeichnis
-dieselbe Pi-Runtime mit einem festen Workspace und eigenem Sitzungsverzeichnis.
-Modell, Authentisierung und Extension-Code bleiben gemeinsam; Sessions, Pläne
-und Setup-Präferenzen sind profilgetrennt. Projektdateien und Projekt-Kontext
-werden im System-Profil nicht automatisch geladen. Die Profilkennung ist kein
-Berechtigungsnachweis; privilegierte Systemwerkzeuge gehören zu späteren
-Umbauphasen.
+Nach dem optionalen Launcher-Link startet `pis` aus jedem Verzeichnis dieselbe
+Pi-Runtime mit einem festen Workspace und eigenem Sitzungsverzeichnis.
+`pi system` bleibt als kompatibler Aufruf verfügbar. Modell, Authentisierung und
+Extension-Code bleiben gemeinsam; Sessions, Pläne und Setup-Präferenzen sind
+profilgetrennt. Projektdateien und Projekt-Kontext werden im System-Profil
+nicht automatisch geladen. Die Profilkennung ist kein Berechtigungsnachweis;
+privilegierte Systemwerkzeuge gehören zu späteren Umbauphasen.
 
 Details und aktuelle Einschränkungen: [`docs/pi-system-profile.md`](docs/pi-system-profile.md).
 Der lokale RPC-Host und seine offenen Betriebsgrenzen sind in

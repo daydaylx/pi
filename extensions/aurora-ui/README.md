@@ -38,7 +38,7 @@ short reverse-video highlight and is disposed with the session.
 always reports model, thinking level, session folder, a compact changes
 summary, context share and verification risks. It drops whole segments
 from the least important end as the terminal narrows. From comfortable width
-on, the launch profile (`pi system` only) and every risk segment render as
+on, the system profile (started with `pis`; `pi system` remains an alias) and every risk segment render as
 filled status chips (pills); routine metadata stays flat so the line never turns into a wall
 of colour, and narrow tiers keep the flat look entirely. Whenever a visible
 panel owns verification reporting, the footer suppresses the routine successful

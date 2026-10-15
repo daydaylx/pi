@@ -60,7 +60,7 @@ assert_system_session_reference() {
     resolved="$(realpath -e -- "$reference")"
     case "$resolved" in
       "$sessions"/*) ;;
-      *) fail "Pi System darf keine Sitzung außerhalb seines Profils öffnen: $reference" ;;
+      *) fail "pis darf keine Sitzung außerhalb seines Profils öffnen: $reference" ;;
     esac
   fi
 }
@@ -73,10 +73,10 @@ while (($#)); do
       break
       ;;
     --approve|-a)
-      fail "--approve ist in pi system gesperrt; Projektdateien bleiben deaktiviert"
+      fail "--approve ist in pis gesperrt; Projektdateien bleiben deaktiviert"
       ;;
     --session-dir|--session-dir=*)
-      fail "pi system verwaltet sein eigenes Sitzungsverzeichnis"
+      fail "pis verwaltet sein eigenes Sitzungsverzeichnis"
       ;;
     --session|--fork)
       [[ $# -ge 2 ]] || fail "$1 benötigt einen Wert"

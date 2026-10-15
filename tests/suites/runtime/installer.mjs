@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   rmSync,
   statSync,
@@ -140,16 +141,23 @@ export const installerSections = {
 
       // Verify real deployment to a temporary target works.
       const target = mkdtempSync(path.join(tmpdir(), "pi-install-greenfield-"));
+      const home = path.join(target, "test-home");
       try {
+        mkdirSync(home, { recursive: true });
         execFileSync(
           process.execPath,
           [
             path.join(ROOT, "scripts", "install-user.mjs"),
             "--apply",
+            "--link-cli",
             "--target",
             target,
           ],
-          { stdio: "pipe", timeout: 30_000 },
+          {
+            stdio: "pipe",
+            timeout: 30_000,
+            env: { ...process.env, HOME: home },
+          },
         );
 
         // shared/ must exist and be importable.
@@ -178,12 +186,21 @@ export const installerSections = {
         );
         for (const launcher of [
           "bin/pi",
+          "bin/pis",
           "bin/pi-frontend",
           "bin/pi-system-host",
           "bin/pi-system-runtime",
         ]) {
           const mode = statSync(path.join(target, launcher)).mode & 0o777;
           eq(mode, 0o755, `deployed ${launcher} is executable`);
+        }
+        for (const command of ["pi", "pis"]) {
+          const commandPath = path.join(home, ".local", "bin", command);
+          eq(
+            readlinkSync(commandPath),
+            path.join(target, "bin", command),
+            `installer links ${command} to its launcher`,
+          );
         }
         for (const directory of [
           "profile-state",
