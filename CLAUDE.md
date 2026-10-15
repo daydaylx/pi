@@ -42,3 +42,5 @@ Core-Runtime + extensions/ ──> neutraler Frontend-State-Bus ──> Aurora T
 ## Dokumentation
 
 Architekturentscheidungen: `docs/decisions/` (ADRs); Überblick `docs/architecture.md`; dauerhaftes Projektgedächtnis `docs/CONTEXT_LEDGER.md` und flüchtiger Stand `docs/PROJECT_STATE.md` werden nur über den Skill `context-checkpoint` gepflegt.
+
+Audits und größere Umbauten mit externen Agenten (`agy`, Codex): Arbeitsweise, Isolation und Gegenprüfung in `docs/delegation-workflow.md`.
