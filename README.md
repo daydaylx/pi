@@ -1,7 +1,7 @@
 # Pi Core CLI/TUI — Aurora Setup
 
 Pi is the core CLI/TUI agent runtime setup. Dieses Repository enthält die lokale
-Pi-Konfiguration für Aurora, Berechtigungen, LSP, Verification und Plan Mode.
+Pi-Konfiguration für Aurora, Berechtigungen, LSP, Verification und Resilience.
 Externe Frontends können den Pi-Core über die versionierte Schnittstelle
 `bin/pi-frontend` verwenden.
 
@@ -63,27 +63,19 @@ Details und aktuelle Einschränkungen: [`docs/pi-system-profile.md`](docs/pi-sys
 Der lokale RPC-Host und seine offenen Betriebsgrenzen sind in
 [`docs/pi-system-host.md`](docs/pi-system-host.md) dokumentiert.
 
-## Planmodus
+## Planung und Shift+Tab
 
-Der Workflow kennt nur drei flüchtige Modi: `work`, `simple_plan` und
-`detailed_plan`. Shift+Tab ist die einzige normale Workflow-Steuerung: Die
-Auswahl Work, Schnellplan oder Architekturplan setzt nur den Modus und wartet
-auf die nächste echte Nutzereingabe. Sie startet keinen Agent-Turn und ändert
-keine Plan-Datei.
+Pi hat keinen technischen Planmodus und keinen Workflow-Umschalter. Planung
+läuft über normale Prompts; jeder Turn arbeitet unter der gewählten
+Zugriffsstufe (`/permission`). Pläne aus früheren Versionen unter
+`~/.pi/agent/plans/` bleiben unberührt, werden aber nicht mehr gelesen.
 
-Ein Planning-Turn schreibt ausschließlich über `plan_write` in die
-sitzungsbezogene Runtime-Ablage
-`~/.pi/agent/plans/<workspace-key>/<session-id>.md` (bzw. unter
-`PI_CODING_AGENT_DIR`), nie in den Arbeitsbaum. Nach einem fertigen Plan gibt
-es drei explizite Wege: ausführen, weiter planen oder ohne Ausführung nach Work
-wechseln. Nur „Plan ausführen“ bzw. `/plan-approve` startet einen Work-Turn
-mit dem unveränderten, hashgebundenen Plan; ein bloßer Wechsel nach Work führt
-nichts aus.
-
-Der Plan bleibt unverbindlicher Markdown-Kontext und ersetzt weder
-Berechtigungsstufen noch die harten Trust-, Recovery- oder Verifier-Grenzen.
-Details zu Ablage, Freigabe, Editieren und der Qualitätsprüfung stehen in
-[`extensions/plan-mode/README.md`](extensions/plan-mode/README.md).
+Shift+Tab ist frei und für die spätere Skill-Auswahl reserviert (eigener
+Folgeauftrag, noch nicht implementiert). Weder eine Extension noch
+`keybindings.json` belegt die Taste. Die Runtime-Standardaktion von Shift+Tab
+(`app.thinking.cycle`) ist in `keybindings.json` auf Super+T umgelegt; diese
+Umbelegung muss erhalten bleiben, sonst löst die Taste wieder den Thinking-
+Wechsel aus (`tests/suites/runtime/shortcuts.mjs` prüft das).
 
 ## Subagenten
 
@@ -110,31 +102,10 @@ verschachtelter Delegation sind Eigenschaften des Verifier-Profils und der tempo
 Berechtigungen sind eine reine Stufenwahl über `/permission`: `readonly`,
 `project-write`, `confirm-all` und temporäres `yolo` in drei Stufen
 (`yolo`, `yolo-ask`, `yolo-full`, kurz `/yolo 1|2|3`; Entscheidung 029). Gespeicherte
-Einzelfreigaben gibt es nicht; ein Workflowwechsel ändert die Stufe selbst
-nicht. Subagenten-Delegationen (`subagent`) sind auf `project-write`,
+Einzelfreigaben gibt es nicht. Subagenten-Delegationen (`subagent`) sind auf `project-write`,
 `confirm-all` und `yolo` ohne Bestätigung erlaubt (Entscheidung 018);
-`readonly` bleibt vollständig gesperrt. Planmodus-Guard,
-Verifier-Vertragsprüfung und die harten Grenzen gelten unverändert weiter.
-
-Während `simple_plan` oder `detailed_plan` verweigert der technische
-Mutationsschutz für Agenten auf `project-write`, `confirm-all` und `yolo`
-jeden Schreibzugriff in den Arbeitsbaum; nur `plan_write` darf den
-sitzungsbezogenen Plan speichern. Positiv bekannte Plan-Fähigkeiten sind
-`read`, `grep`, `find`, `ls`, `recovery_check`, `ask_user`, lokale LSP-Tools,
-vertrauensgebundene read-only-Webtools, `plan_write` sowie
-`verify({ check: "typecheck" })`. `project_check` und Tests bleiben blockiert.
-
-Für Bash sind nur `git status`/`diff`/`log`, `rg`, `find` ohne mutierende
-Optionen und die reinen Lesewerkzeuge `pwd`, `ls`, `cat`, `head`, `tail`, `wc`,
-`stat`, `du`, `df`, `tree`, `sort` und `uniq` zulässig. Projekt-Skripte,
-Redirections, Shell-Verkettungen und mutierende Git-Kommandos bleiben
-blockiert. Eine artefaktfreie read-only Spec-Delegation (`analyse`/`research`) ist nur bei
-unbekanntem Repository-Bereich, Kontrollfluss oder Änderungssurface erlaubt;
-`verify`, Management-Aktionen, Hintergrundläufe und Ausgabe-Dateien
-bleiben im Planmodus gesperrt. `readonly` selbst bleibt vollständig gesperrt;
-`yolo` hebt die Plan-Mode-Grenzen für Agenten-Tool-Aufrufe nicht auf. Ein vom
-Menschen selbst per `!`/`!!` eingegebener Bash-Befehl durchläuft diesen Guard
-nicht. Details: `docs/decisions/012-plan-mode-mutation-guard.md`.
+`readonly` bleibt vollständig gesperrt. Verifier-Vertragsprüfung und die
+harten Grenzen gelten unverändert weiter.
 
 Harte Trust-, Secret-, Symlink-, Projekt- und Systemgrenzen bleiben auf jeder
 Stufe blockiert, YOLO 1 eingeschlossen. Dazu zählen auch Ausführungspfade
@@ -143,7 +114,7 @@ innerhalb des Projekts: Schreibzugriffe auf `.git/`, `.pi/lsp.json` und
 ausgeführt wird. YOLO 2 (`yolo-ask`) fragt an diesen Grenzen mit Gefahr-Dialog
 nach (sudo, Systempfade, Secrets, Pfade außerhalb des Projekts, opake
 Interpreter); YOLO 3 (`yolo-full`) erlaubt sie, auch sudo. Auf jeder YOLO-Stufe
-bleiben Trust-Grenze, Plan-Mode-Schreibschutz und der Credential-Pfad des
+bleiben Trust-Grenze und der Credential-Pfad des
 interaktiven Shell-Tools aktiv.
 
 ## Verifikation

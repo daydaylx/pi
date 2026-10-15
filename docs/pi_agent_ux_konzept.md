@@ -4,7 +4,7 @@
 
 | Shortcut    | Funktion    |
 | ----------- | ----------- |
-| `Shift+Tab` | Workflow wählen |
+| `Shift+Tab` | frei (später Skill-Auswahl) |
 | `Super+M`   | `/model`    |
 | `Super+D`   | `/thinking` |
 | `Super+Y`   | `/yolo`     |
@@ -17,17 +17,16 @@ Fuzzy-Filter: Tippen grenzt die sichtbaren Einträge ein, Backspace bearbeitet
 den Filter, Escape löscht zunächst den Filter und schließt erst beim leeren
 Filter das Menü. Kategorie-Shortcuts gelten nur bei leerem Filter; Enter
 verankert die Auswahl nach einem Filterwechsel neu. Das Hauptmenü besteht aus
-Arbeit (`A`), Plan (`P`), Modelle & Denken (`M`), Rechte & Vertrauen (`R`), Code
+Arbeit (`A`), Modelle & Denken (`M`), Rechte & Vertrauen (`R`), Code
 & Diagnose (`C`), Subagenten (`S`), Sitzungen & Kontext (`Z`), Vorlagen & Skills
 (`V`) sowie System & Transfer (`T`). Ein Buchstabe öffnet den Bereich direkt.
 Einträge zeigen den kanonischen `/command`; Aliase werden nur am Original
 erklärt.
 
-Shift+Tab ist die einzige normale Workflow-Steuerung und bietet nur Work,
-Schnellplan und Architekturplan. Die Auswahl wartet auf die nächste echte
-Nutzereingabe und startet selbst keinen Turn. Ein vorhandener Plan bleibt bis
-zum Planning-Turn unverändert; ein gerade in derselben Sitzung erzeugter Plan
-kann beim nächsten Work-Turn einmalig hilfreicher Kontext sein.
+Shift+Tab ist frei. Es gibt keinen Workflow- oder Planmodus mehr; die Taste ist
+für eine spätere Skill-Auswahl reserviert (eigener Folgeauftrag). Pis
+Standardaktion der Taste (`app.thinking.cycle`) ist in `keybindings.json` auf
+`Super+T` umgelegt und darf dort nicht zurückkehren.
 
 Die Shortcuts gelten im fokussierten Pi-Terminal und benötigen für `Super`
 das Kitty-/CSI-u-Protokoll. Sie werden nicht als systemweite Linux-Mint-Hotkeys
@@ -43,24 +42,19 @@ Picker zeigt; freigegeben sind die Modelle aus `settings.enabledModels`.
 (`shared/menu-ui.ts`) — eine flache Liste der sechs Stufen von `Aus` bis
 `Sehr hoch`, ausschließlich manuell wählbar. Stufen, die das aktive Modell
 nicht kennt, stehen deaktiviert in der Liste statt zu verschwinden: die Skala
-bleibt dieselbe, und die Lücke sagt „dieses Modell kann das nicht". Eine automatische,
-workflowabhängige Vorauswahl gibt es zur Laufzeit nicht. Eine frühere
-`detailed_plan → high`-Zuordnung (`extensions/plan-mode/events.ts`) reagierte
-auf ein Event, für das weder dieses Repository noch das installierte
-`@earendil-works/pi-coding-agent`-Paket (geprüft im installierten
-`node_modules`) einen Sender besaßen — bestätigt toter Code ohne Consumer,
-inzwischen entfernt. Eine separate Status-Telemetrie-Ansicht gibt es nicht
-mehr — der Status steht in der Fußzeile.
+bleibt dieselbe, und die Lücke sagt „dieses Modell kann das nicht". Eine
+automatische Vorauswahl nach Workflow gibt es nicht. Eine separate Status-Telemetrie-Ansicht
+gibt es nicht mehr — der Status steht in der Fußzeile.
 
 ## Statusflächen
 
 Es gibt zwei Renderer-Slots, und nur die Fußzeile ist permanent.
 
-Die **Fußzeile** ist eine Zeile und trägt Arbeitsablauf, Modell, Denktiefe,
+Die **Fußzeile** ist eine Zeile und trägt Modell, Denktiefe,
 Kontextanteil und eskalierte Risiken. Wird es eng, fallen ganze Segmente vom
 unwichtigen Ende her weg statt am Rand abgeschnitten zu werden. YOLO,
 gescheiterte Verifikation und gestörter LSP ignorieren die Größenklasse und
-verdrängen Gewöhnliches. Ab komfortabler Breite erscheinen Arbeitsablauf und
+verdrängen Gewöhnliches. Ab komfortabler Breite erscheinen das Systemprofil und
 Risiken als gefüllte Status-Chips (Pills), Routine-Metadaten bleiben flach;
 schmale Klassen behalten den flachen Look. Git-Branch, Sitzungsname und
 Tokenzähler stehen nicht mehr dort; das Arbeitsverzeichnis erscheint weiterhin

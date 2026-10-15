@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Was das Repo ist
 
-Konfigurations- und Extension-Repo für den Pi-Coding-Agent (`@earendil-works/pi-coding-agent`, extern gepinnt): Aurora-Terminal-UI, Berechtigungen, Plan Mode, LSP, Verifikation, Resilience, Subagenten-Harness. Wird per `npm run install:user -- --apply` nach `~/.pi/agent` synchronisiert (ohne `--apply` nur Dry-Run). Nach Runtime-Updates Patches gemäß `docs/RUNTIME_PATCHES.md` (`npm run patch:runtime`) prüfen.
+Konfigurations- und Extension-Repo für den Pi-Coding-Agent (`@earendil-works/pi-coding-agent`, extern gepinnt): Aurora-Terminal-UI, Berechtigungen, LSP, Verifikation, Resilience, Subagenten-Harness. Wird per `npm run install:user -- --apply` nach `~/.pi/agent` synchronisiert (ohne `--apply` nur Dry-Run). Nach Runtime-Updates Patches gemäß `docs/RUNTIME_PATCHES.md` (`npm run patch:runtime`) prüfen.
 
 Node 22.23.2 / npm 10.9.8 sind fest gepinnt (`.nvmrc`, `engines`). Abhängigkeiten liegen in `npm/` (nicht im Root); die Root-Scripts delegieren dorthin.
 
@@ -29,9 +29,8 @@ Core-Runtime + extensions/ ──> neutraler Frontend-State-Bus ──> Aurora T
                           └──> extensions/frontend-bridge + frontend-server/ ──> JSONL Frontend API v1
 ```
 
-- `extensions/` – ein Verzeichnis/Datei je Fähigkeit (permissions, plan-mode, subagent, lsp, resilience, session-health, setup-core, verification …). Der Core-Zustand ist maßgeblich; Frontends halten nur flüchtigen Anzeigezustand und implementieren keine Permission-, Workflow-, Routing-, Verifikations- oder Session-Logik.
-- `extensions/permissions/` – Tool-/Workflow-Policy, Trust-Grenzen, Verifier-Gate (`verifier-required-paths.ts` = Katalog der automatisch erkannten Hard-Verifier-Pfade).
-- `extensions/plan-mode/` – Modi `work`/`simple_plan`/`detailed_plan`; Pläne nur über `plan_write` in die Runtime-Ablage (`~/.pi/agent/plans/…`), Ausführung nur per expliziter Freigabe (ADR 020).
+- `extensions/` – ein Verzeichnis/Datei je Fähigkeit (permissions, subagent, lsp, resilience, session-health, setup-core, verification …). Der Core-Zustand ist maßgeblich; Frontends halten nur flüchtigen Anzeigezustand und implementieren keine Permission-, Workflow-, Routing-, Verifikations- oder Session-Logik.
+- `extensions/permissions/` – Tool-Policy, Trust-Grenzen, Verifier-Gate (`verifier-required-paths.ts` = Katalog der automatisch erkannten Hard-Verifier-Pfade).
 - `npm/packages/frontend-protocol/` – öffentliches, separat packbares Protokoll-Paket (`@daydaylx/pi-frontend-protocol`); `frontend-server/` adaptiert den Upstream-RPC darauf. Änderungen hier berühren einen öffentlichen Vertrag (`docs/frontend-api.md`).
 - `agents/` – nur `verifier.md` als technisches Profil der Verifier-Kette; Delegation läuft über temporäre Task-Agenten (`subagent` mit `spec`, max. 3 pro Parent-Lauf, ADR 031, `docs/subagents.md`).
 - Projektlokale Prüfprofile: `.pi/verify.json` (nur in vertrauten Projekten, `docs/verify-profiles.md`).

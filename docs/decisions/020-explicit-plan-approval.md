@@ -1,5 +1,9 @@
 # 020 — Ausdrückliche Planfreigabe, sitzungsbezogene Ablage, turnfester Modus
 
+> **Ersetzt durch [035](035-remove-plan-mode.md):** Planfreigabe, Planablage
+> und der Workflow-Modus existieren nicht mehr. Dieses Dokument bleibt als
+> Historie.
+
 ## Kontext
 
 Der Planmodus funktionierte mechanisch, aber sechs Eigenschaften ließen sich

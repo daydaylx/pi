@@ -61,12 +61,6 @@ Aus `FrontendUiPatchEvent` (`extensions/frontend-protocol/state-contract.ts`):
   source: string,
   patch: {
     permissions?: { level?: string; label?: string },
-    workflow?: {
-      phase?: "work" | "simple_plan" | "detailed_plan",
-      label?: string,
-      pending?: "work" | "simple_plan" | "detailed_plan",
-      planReady?: { hash: string; mode: string; qualityOk: boolean } | null,
-    },
     // weitere Felder (lsp, model, activity, changes, verification, task,
     // subagents) sind Teil desselben Payloads, aber nicht Teil dieses
     // Contracts — pi-rabbitmode liest sie in Phase 1-2 nicht.
@@ -75,9 +69,11 @@ Aus `FrontendUiPatchEvent` (`extensions/frontend-protocol/state-contract.ts`):
 ```
 
 Owner laut `STATE_FIELD_OWNERS`/`FRONTEND_STATE_FIELDS`:
-`permissions` → `extension:mode-permissions`,
-`workflow` → `extension:plan-mode`. Kein Eintrag zeigt auf einen
-Rabbit-Owner — `pi-rabbitmode` schreibt hier nie, es liest nur.
+`permissions` → `extension:mode-permissions`. Das frühere Feld `workflow`
+(Owner `extension:plan-mode`) gibt es seit der Entfernung des Planmodus nicht
+mehr (interne Kontraktversion 2.0.0); es wird weder gesendet noch in
+Snapshots geführt, Konsumenten behandeln sein Fehlen als `work`. Kein Eintrag
+zeigt auf einen Rabbit-Owner — `pi-rabbitmode` schreibt hier nie, es liest nur.
 
 ## Stabilitätshinweis
 

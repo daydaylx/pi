@@ -10,15 +10,13 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [009](009-aurora-owns-the-footer.md) — Aurora besitzt auch die Fußzeile
 - [010](010-compaction-recent-context-budget.md) — Recent-Context-Budget nutzt den Upstream-Default von 20.000 Tokens
 - [011](011-investigator-debugger-verifier.md) — Investigator, Debugger, Verifier ersetzen Planner, Worker, Reviewer (Investigator/Debugger durch 031 abgelöst)
-- [012](012-plan-mode-mutation-guard.md) — Plan Mode bekommt einen technischen Mutationsschutz
 - [013](013-aurora-keeps-the-native-editor.md) — Aurora behält Pis nativen Editor (ersetzt den Editor-Teil von 009)
 - [014](014-reduced-subagent-tool-surface.md) — Die reduzierte Subagent-Tool-Surface ist ein eigener Schalter
 - [015](015-verifier-delegation-guard.md) — Verifier-Delegationen werden technisch erzwungen, nicht appelliert
-- [016](016-plan-mode-yolo-lock-and-recovery-gate.md) — YOLO-Sperre im Planmodus und Recovery-Gate vor Schreibzugriffen
+- [016](016-plan-mode-yolo-lock-and-recovery-gate.md) — YOLO-Sperre im Planmodus und Recovery-Gate vor Schreibzugriffen (Planmodus-Teil durch 035 ersetzt, Recovery-Gate gültig)
 - [017](017-verifier-acceptance-none.md) — Verifier-Akzeptanz ohne eigenes Urteil
 - [018](018-subagent-delegation-always-allowed.md) — Subagent-Delegationen immer erlaubt
 - [019](019-dashboard-modes-and-phase-precedence.md) — Dashboard-Modi mit einer Staleness-Wahrheit für Phase und Verifikation
-- [020](020-explicit-plan-approval.md) — Ausdrückliche Planfreigabe, sitzungsbezogene Ablage, turnfester Modus
 - [021](021-verifier-dedup-gate.md) — Verifier-Delegationen werden auf unverändertem Fingerprint dedupliziert
 - [022](022-project-write-interpreter-boundary.md) — Project-write fragt bei opakem Code gezielt nach
 - [023](023-single-dashboard-surface.md) — Eine Dashboard-Fläche statt fixem Panel plus Kachel-Grid (bekräftigt 019)
@@ -32,11 +30,16 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [032](032-verifier-need-gate.md) — Verifier Need-Gate: technisch erzwungene required/justified/not_needed-Entscheidung für optionale Verifier-Läufe
 - [033](033-task-tiers.md) — Task-Klassen FAST/NORMAL/DEEP: Routing, FAST-Subagenten-/Verifier-Sperre, Duplicate-Read-Guard, dynamisches Thinking
 - [034](034-system-control.md) — Typed System-Control-Werkzeuge ohne Root-Daemon
+- [035](035-remove-plan-mode.md) — Planmodus und Workflow-Zustand entfernt, Shift+Tab freigegeben
 
 ## Historische, ersetzte Entscheidungen
 
 - [005](005-three-agent-model.md) — Drei lokale Rollen: Planner, Worker,
   Reviewer (vollständig ersetzt durch 011)
+- [012](012-plan-mode-mutation-guard.md) — Plan Mode bekommt einen technischen
+  Mutationsschutz (ersetzt durch 035)
+- [020](020-explicit-plan-approval.md) — Ausdrückliche Planfreigabe,
+  sitzungsbezogene Ablage, turnfester Modus (ersetzt durch 035)
 
 ## Nummernlücke 001–004, 006
 

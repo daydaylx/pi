@@ -10,9 +10,6 @@ etwas ab, den Schritt notieren und `#137` offen lassen.
 
 ## Rollen nicht automatisierter Prüfungen
 
-- `node tests/plan-eval/run.mjs` ist eine manuelle, offline ausführbare
-  Auswertung der Referenzpläne; echte Modellpläne werden nur bewusst mit
-  `--plans <verzeichnis>` bewertet.
 - `npm --prefix npm run check:versioned-tree` ist eine optionale lokale
   Release-/HEAD-Prüfung und sinnvoll erst nach einem Commit.
 - Der relative-Import-Check läuft genau einmal als `relative-imports`-Suite
@@ -54,15 +51,8 @@ WezTerm und Ghostty ausgeführt.
 | #   | Schritt                                                           | Erwartet                                                                                                                               | Beobachtet | ✓/✗ |
 | --- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------- | --- |
 | 5   | Sitzung öffnen                                                    | Aurora-Fußzeile sichtbar, eine Zeile                                                                                                   |            |     |
-| 6   | Shift+Tab                                                         | Modusauswahl öffnet sich                                                                                                               |            |     |
-| 7   | „Schnellplan" wählen                                              | Modus aktiv, **kein** Turn startet, vorhandene Plandatei unverändert                                                                   |            |     |
-| 8   | Eigenen Planungsauftrag eingeben                                  | Plan wird über `plan_write` erstellt; im Projektverzeichnis entsteht **keine** Datei (`git status` bleibt sauber)                      |            |     |
+| 6   | Shift+Tab drücken                                                 | **Nichts** passiert: kein Menü, kein Moduswechsel, die Thinking-Stufe bleibt unverändert                                               |            |     |
 | 9   | Während des Laufs zusehen                                         | `DENKT NACH` → `ARBEITET` → `ANTWORTET`, Laufzeit zählt hoch (bei Provider-Pausen ≥4s zwischenzeitlich `WARTET AUF MODELL` — kein Bug) |            |     |
-| 10  | Shift+Tab → „Work"                                                | Modus wechselt, **kein** Turn startet, **keine** Freigabe entsteht                                                                     |            |     |
-| 11  | Umsetzungsauftrag eingeben                                        | Der Turn läuft **ohne** Plankontext — ein Wechsel nach Work führt nichts aus                                                           |            |     |
-| 11a | Shift+Tab → „Fertiger Plan · entscheiden" → „Plan ausführen"      | Ein Work-Turn startet; der Plan erscheint **genau einmal** als Datenblock, die Zugriffsstufe bleibt unverändert                        |            |     |
-| 11b | `/view-plan`, Plan per `/edit-plan` ändern, dann erneut ausführen | Die alte Freigabe verfällt sichtbar; der geänderte Plan muss neu freigegeben werden                                                    |            |     |
-| 12  | Zweiten Work-Turn starten                                         | Plan wird **nicht** erneut eingebunden                                                                                                 |            |     |
 | 13  | Tool-Ausführung beobachten                                        | Sitzungsübersicht bleibt sichtbar; nur die Aktivitätszeile aktualisiert sich und verschwindet nach dem Tool wieder                     |            |     |
 
 ### 14 · Der eigentliche Aurora-Fix
@@ -94,9 +84,6 @@ Agentenlauf die Anzeige zurück.
 | #   | Schritt                                          | Erwartet                      | Beobachtet | ✓/✗ |
 | --- | ------------------------------------------------ | ----------------------------- | ---------- | --- |
 | 20  | Read-only `analyse`-Spec starten                 | Läuft, liefert Befunde inline |            |     |
-| 21  | Im Planmodus `npm test` versuchen                | Blockiert                     |            |     |
-| 22  | Im Planmodus Datei außerhalb des Plans schreiben | Blockiert                     |            |     |
-| 23  | Im Planmodus Plandatei schreiben                 | Erlaubt                       |            |     |
 | 24  | Schreibzugriff auf `.git/config`                 | Bestätigung wird verlangt     |            |     |
 
 ## Abschluss

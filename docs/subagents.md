@@ -49,10 +49,7 @@ Ein `analyse`-Spec wird nur bei unbekanntem Bereich, unklarer
 Änderungssurface oder unbekannten, intermittierenden oder gescheiterten Bugs
 gestartet. Pro Parent-Lauf (ein Nutzer-Turn) sind höchstens 3 Subagenten
 zulässig; das ist eine Obergrenze, kein Zielwert, die Sitzungsgrenze bleibt
-bei 5. Im Simple oder Detailed Plan ist ausschließlich eine synchrone,
-artefaktfreie read-only Spec-Delegation (`analyse`/`research`, nur
-`read`/`search`) zulässig; `verify`, `implement`, Management-Aktionen und
-Legacy-Agentenaufrufe bleiben dort blockiert. Für
+bei 5. Für
 den `verifier` unterscheidet `AGENTS.md` zwischen
 `HARD_VERIFIER_REQUIRED` und `VERIFIER_OPTIONAL`: maßgeblich ist das reale
 Risiko, nicht die Zahl der berührten Dateien. Es gibt keine verschachtelte

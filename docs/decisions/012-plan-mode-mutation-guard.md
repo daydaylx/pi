@@ -1,5 +1,8 @@
 # 012 — Plan Mode hat einen kleinen technischen Mutationsschutz
 
+> **Ersetzt durch [035](035-remove-plan-mode.md):** Der Planmodus und sein
+> Mutationsschutz existieren nicht mehr. Dieses Dokument bleibt als Historie.
+
 ## Entscheidung
 
 Während `simple_plan` oder `detailed_plan` aktiv ist, verändert der Agent

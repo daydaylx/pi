@@ -34,10 +34,6 @@ Extensions und Policies bleiben maßgeblich.
   `.git`-Metadaten werden auf jeder Tiefe ausgelassen. Diese sicherheitsrelevante
   Option wird nur aus der globalen `setup.json` übernommen, nicht aus
   Projektkonfigurationen.
-- Im Planmodus nur die für diesen Modus freigegebenen Leseaktionen ausführen.
-  Bash-Aufrufe dort einzeln und einfach halten; keine Verkettungen,
-  Umleitungen oder Prozesssubstitutionen. Die durchsetzbare Policy ist
-  maßgeblich.
 
 ## Verifikation
 
@@ -70,22 +66,13 @@ Verzeichnis ohne Git die ausdrücklich angegebene Verzeichniswurzel.
 
 Die freigegebene Wurzel erweitert den Datei-Scope und kann für
 `project_check({ profile, workspaceRoot })` verwendet werden. Die vorhandene
-Berechtigungsstufe, Secret- und Symlink-Grenzen sowie der Planmodus gelten
-weiter. Die Shell behält ihre bestehende Bash-Klassifikation und ihr
+Berechtigungsstufe sowie Secret- und Symlink-Grenzen gelten weiter. Die Shell behält ihre bestehende Bash-Klassifikation und ihr
 Ausführungs-`cwd`; für dateibezogene Arbeit in zusätzlichen Wurzeln die
 Datei-Tools oder `project_check` mit `workspaceRoot` verwenden.
 
 Recovery-Gates und Prüfstände sind pro freigegebener Wurzel getrennt.
 `recovery_check()` prüft alle Wurzeln mit offenem Gate; mit
 `workspaceRoot` prüft es nur die angegebene freigegebene Wurzel.
-
-## Planmodus
-
-- Ein expliziter Umsetzungsauftrag im Planmodus hebt die Modussperre nicht auf.
-  Den Wechsel muss die Nutzerin oder der Nutzer in der UI vornehmen.
-- Planfreigabe und Wechsel nach Work sind getrennte Aktionen. Den Plan nur über
-  `plan_write` persistieren; keine alternative Schreibroute verwenden.
-- Details: ADR `docs/decisions/020-explicit-plan-approval.md`.
 
 ## Git-Veröffentlichung
 
@@ -126,7 +113,6 @@ nicht einen automatisierten Modell-Eval.
 | Lokaler Bugfix mit Regressionstest                 | kleine Schritte und Baseline-Regel in `AGENTS.md`                   | dieselben Regeln in `docs/agent-workflow.md`                          | zuerst engster Test; keine unbelegte Baseline         |
 | Permission- oder Recovery-Änderung                 | Hard-Pfade und Verifier-Gate ausführlich global                     | globale Schutzregel plus `docs/subagents.md` und technische Policy    | kein Risiko durch Dokumentenverschiebung freigegeben  |
 | Öffentliche API-/IPC-Änderung                      | Need-Gate/Verifier-Trigger global erklärt                           | globaler Boundary-Hinweis plus `docs/subagents.md`                    | Hard-Pfad und Need-Gate bleiben maßgeblich            |
-| Plan während Planmodus umsetzen                    | UI-Wechsel und Planfreigabe ausführlich global                      | kurzer globaler Modusschutz, Detail in Workflow-Referenz und ADR 020  | keine Umgehung der Modussperre                        |
 | Commit und Push                                    | expliziter Auftrag und Verifier-Regeln global                       | Commit-/Push-Regel global, Ablauf in Workflow-Referenz                | kleine Commits, direkt gepusht; Schritte getrennt     |
 | Aktuelle externe Provider- oder API-Frage          | Bedingung, Such-/Fetch-Reihenfolge global                           | kurze globale Bedingung, Ablauf in Workflow-Referenz                  | lokale Fragen bleiben lokal; externe Quellen gezielt  |
 | Lange Sitzung oder Compaction                      | Checkpoint-Regel global, Skillbeschreibung nannte auch jede Analyse | seltene Auslöser im Skill; globaler Verweis                           | kein Routine-Checkpoint und kein automatisches Ledger |

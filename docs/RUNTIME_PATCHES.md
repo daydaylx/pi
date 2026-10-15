@@ -94,10 +94,6 @@ trafen unverändert. Außerhalb der Patches waren zwei Anpassungen nötig:
   - `aurora-ui`, `context-capsule` und `task-tier` überspringen diese Läufe
     (Titel, Zielbeschreibung und Klassifikation hängen am Nutzer-Prompt; das
     Event kam für sie vorher gar nicht an).
-  - `plan-mode` hängt für sie den Planungs- bzw. Work-Hinweis des aktiven Modus
-    an, öffnet aber bewusst keinen Turn (`beginTurn`) und verbraucht keine
-    Freigabe: Ein Hintergrundlauf soll die „Plan fertig"-Bereitschaft nicht
-    löschen.
   - `system-context` liefert für sie den Basiskontext ohne Zusatzkategorien.
   - `resilience` ist prompt-unabhängig und legt für solche Läufe ebenfalls einen
     Turn-Marker an; eine ausstehende Recovery-Anweisung wird ihnen zugestellt.
