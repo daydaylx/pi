@@ -344,6 +344,7 @@ async function main() {
       repos: "[KNOWN REPOSITORIES — OBSERVATIONAL DATA]\n- lager: /x/lager",
     });
     assert.ok(result.systemPrompt.includes("- lager: /x/lager"));
+    assert.ok(result.systemPrompt.includes("workspace_add once"));
     assert.ok(!result.systemPrompt.includes("[SYSTEM CONTEXT"));
     assert.deepEqual(collected, []);
   });
