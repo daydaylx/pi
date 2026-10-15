@@ -15,7 +15,7 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
         kind: "hello",
         accepted: true,
         protocolVersion: 1,
-        serverVersion: "1.3.0",
+        serverVersion: "1.4.0",
         piVersion: "1.0.4",
         capabilities: [],
       });

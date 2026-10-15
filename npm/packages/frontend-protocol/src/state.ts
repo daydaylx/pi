@@ -1,3 +1,8 @@
+/**
+ * Deprecated since 1.4.0: Pi has no planning workflow any more, so servers
+ * only ever report `work`. The retired names stay valid here for older
+ * recorded data and are removed with the next wire major.
+ */
 export type WorkflowMode = "work" | "simple_plan" | "detailed_plan";
 export type TaskStatus = "active" | "needs_input" | "review" | "completed";
 export type ActivityKind =

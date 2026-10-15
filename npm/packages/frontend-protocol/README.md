@@ -9,6 +9,22 @@ Consumers must reject incompatible protocol majors and must not import Pi intern
 
 ## Changelog
 
+### 1.4.0
+
+- Deprecates the `workflow` state field and the `workflow.list`/`workflow.set`
+  methods: the planning workflow is gone and `work` is the only mode. Servers
+  always report `workflow: { mode: "work", available: ["work"] }`;
+  `workflow.list` returns `["work"]`; `workflow.set` with `"work"` is a no-op
+  and refuses `simple_plan`/`detailed_plan` with `UNSUPPORTED_CAPABILITY`.
+- The schemas still accept the retired mode names so that older recorded
+  data stays valid; no server emits them any more.
+- The slash commands `/workflow-set`, `/plan-decide`, `/plan-approve`,
+  `/view-plan`, `/edit-plan` and `/save-plan` no longer exist, and the Pi-side
+  command ids `workflow.open`, `plan.decide` and `plan.approve` are removed
+  from the command registry. Clients must stop offering them.
+- Wire major stays 1. The deprecated field and methods are removed with the
+  next wire major.
+
 ### 1.3.0
 
 - Adds session-management (`session.rename`, `session.archive`, `session.delete`).

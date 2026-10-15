@@ -97,7 +97,11 @@ test("maps bridge state without exposing a session file", () => {
     },
     current,
   );
-  assert.equal(patch.workflow.mode, "simple_plan");
+  assert.equal(
+    "workflow" in patch,
+    false,
+    "a retired workflow entry from an older session is ignored",
+  );
   assert.deepEqual(patch.changes.files, [{ path: "a.ts" }]);
   assert.equal(patch.task.status, "review");
   assert.equal(JSON.stringify(patch).includes("sessionFile"), false);
@@ -252,6 +256,32 @@ test("permission.list provides 7 entries with exactly 4 settable, levels unchang
     ["readonly", "project-write", "confirm-all", "yolo"],
   );
   assert.equal(isValidRequestResult("permission.list", result), true);
+});
+
+test("workflow is constant: list reports only work, set refuses the retired plan modes", async () => {
+  const server = new FrontendServer();
+  const requests = [];
+  server.runtime = {
+    request: async (request) => {
+      requests.push(request);
+      return {};
+    },
+  };
+  const listed = await server.dispatch("workflow.list", {});
+  assert.deepEqual(listed, { modes: ["work"] });
+  assert.equal(isValidRequestResult("workflow.list", listed), true);
+  assert.deepEqual(await server.dispatch("workflow.set", { mode: "work" }), {});
+  for (const mode of ["simple_plan", "detailed_plan"]) {
+    await assert.rejects(
+      () => server.dispatch("workflow.set", { mode }),
+      (error) => error.code === "UNSUPPORTED_CAPABILITY",
+    );
+  }
+  assert.deepEqual(
+    requests,
+    [],
+    "workflow.set never reaches the runtime: /workflow-set no longer exists",
+  );
 });
 
 test("permission.set rejects non-settable levels with INVALID_REQUEST", async () => {

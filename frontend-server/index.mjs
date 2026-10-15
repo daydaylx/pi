@@ -38,7 +38,8 @@ const STDERR_LIMIT = 2_000;
 const PINNED_PI_PATH = fileURLToPath(
   new URL("../npm/node_modules/.bin/pi", import.meta.url),
 );
-const WORKFLOW_MODES = ["work", "simple_plan", "detailed_plan"];
+// Deprecated since protocol package 1.4.0: `work` is the only workflow mode.
+const WORKFLOW_MODES = ["work"];
 const PERMISSION_LEVELS = ["readonly", "project-write", "confirm-all", "yolo"];
 // Canonical order of all 7 permission levels from extensions/shared/workflow-status.ts:6-13
 const ALL_PERMISSION_LEVELS = [
@@ -437,19 +438,6 @@ function deriveTaskStatus(state) {
 
 export function normalizeBridgeState(internal, current) {
   const patch = {};
-  if (internal?.workflow) {
-    const mode = WORKFLOW_MODES.includes(internal.workflow.phase)
-      ? internal.workflow.phase
-      : current.workflow.mode;
-    patch.workflow = {
-      mode,
-      label:
-        typeof internal.workflow.label === "string"
-          ? internal.workflow.label
-          : mode,
-      available: [...WORKFLOW_MODES],
-    };
-  }
   if (internal?.activity?.kind)
     patch.activity = { kind: internal.activity.kind };
   if (internal?.permissions) {
@@ -1352,10 +1340,15 @@ export class FrontendServer {
       case "workflow.list":
         return { modes: [...WORKFLOW_MODES] };
       case "workflow.set":
-        await runtime.request({
-          type: "prompt",
-          message: `/workflow-set ${params.mode}`,
-        });
+        // Deprecated since protocol package 1.4.0. The planning workflow no
+        // longer exists: "work" is always in force, so selecting it is a no-op
+        // and the retired plan modes are refused instead of silently ignored.
+        if (params.mode !== "work") {
+          throw frontendError(
+            "UNSUPPORTED_CAPABILITY",
+            `Workflow mode ${params.mode} is no longer supported; only "work" exists.`,
+          );
+        }
         return {};
       case "permission.list":
         return {

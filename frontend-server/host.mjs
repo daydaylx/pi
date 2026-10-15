@@ -39,7 +39,6 @@ const SESSION_BUSY_MUTATIONS = new Set([
   "model.cycle",
   "thinking.set",
   "thinking.cycle",
-  "workflow.set",
   "permission.set",
   "command.invoke",
   "verification.run",
