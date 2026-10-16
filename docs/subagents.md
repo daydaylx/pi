@@ -209,6 +209,11 @@ ID und keine Persistenz. Die Rollenprofile in `agents/*.md` beschreiben unter
   `verification.trigger`/`triggerEvidence`) wird als `not_needed` vor dem
   Start geblockt — unabhängig davon, ob er über `agent: "verifier"` oder
   `spec.profile: "verify"` läuft.
+- Der Workspace-Snapshot (Ticket-Start/-Ende) ignoriert `.pi-subagents/`: Der
+  Runner schreibt dort seine Lauf-Artefakte ins Projekt. Ohne den Ausschluss
+  endete jeder Verifier-Lauf in einem Repository ohne passenden
+  `.gitignore`-Eintrag als `stale` (`workspace-mutated`) und musste wiederholt
+  werden.
 - Ein abgebrochener, zeitüberschrittener oder providerfehlerhafter Lauf
   schreibt einen `verifier-run`-Session-Eintrag mit `status: "incomplete"`
   und einen sichtbaren INCOMPLETE-Vorsatz im Tool-Result. Ein solcher Lauf

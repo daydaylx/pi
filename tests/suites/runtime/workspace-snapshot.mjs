@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   rmSync,
   symlinkSync,
@@ -261,6 +262,100 @@ export const workspaceSnapshotSections = {
         }
       }
     });
+  },
+
+  "workspace snapshot ignores subagent run artifacts": async (context) => {
+    const { section } = context;
+    await section(
+      "workspace snapshot ignores subagent run artifacts",
+      async () => {
+        // Der Subagent-Runner schreibt `.pi-subagents/artifacts/…` während eines
+        // Laufs ins Projekt. Ohne Ausschluss ist jeder Verifier-Lauf "stale".
+        const ws = makeRepo("subagent-artifacts");
+        try {
+          writeFileSync(path.join(ws, "base.txt"), "base\n");
+          git(ws, ["add", "-A"]);
+          git(ws, ["commit", "-q", "-m", "base"]);
+          const before = await collectWorkspaceSnapshot(ws);
+          assert(before.ok, "snapshot of the clean fixture succeeds");
+          if (!before.ok) return;
+
+          mkdirSync(path.join(ws, ".pi-subagents", "artifacts"), {
+            recursive: true,
+          });
+          writeFileSync(
+            path.join(
+              ws,
+              ".pi-subagents",
+              "artifacts",
+              "abc_verifier_0_input.md",
+            ),
+            "input\n",
+          );
+          mkdirSync(path.join(ws, "sub", ".pi-subagents"), { recursive: true });
+          writeFileSync(
+            path.join(ws, "sub", ".pi-subagents", "meta.json"),
+            "{}",
+          );
+          const withArtifacts = await collectWorkspaceSnapshot(ws);
+          assert(withArtifacts.ok, "snapshot with run artifacts succeeds");
+          if (!withArtifacts.ok) return;
+          eq(
+            withArtifacts.snapshot.fingerprint,
+            before.snapshot.fingerprint,
+            "run artifacts do not change the fingerprint",
+          );
+          eq(
+            withArtifacts.snapshot.changedFiles,
+            [],
+            "run artifacts are not reported as changed files",
+          );
+
+          writeFileSync(path.join(ws, "work.txt"), "real change\n");
+          const real = await collectWorkspaceSnapshot(ws);
+          assert(real.ok, "snapshot with a real change succeeds");
+          if (!real.ok) return;
+          assert(
+            real.snapshot.fingerprint !== before.snapshot.fingerprint &&
+              real.snapshot.changedFiles.includes("work.txt"),
+            "a real change next to the artifacts is still detected",
+          );
+
+          writeFileSync(
+            path.join(ws, "pi-subagents-notes.txt"),
+            "not an artifact\n",
+          );
+          const similar = await collectWorkspaceSnapshot(ws);
+          assert(
+            similar.ok &&
+              similar.snapshot.changedFiles.includes("pi-subagents-notes.txt"),
+            "only the artifact directory itself is excluded, not similar names",
+          );
+        } finally {
+          rmSync(ws, { recursive: true, force: true });
+        }
+
+        // Ohne Git: das Dateisystem-Inventar überspringt das Verzeichnis ebenfalls.
+        const plain = mkdtempSync(path.join(tmpdir(), "pi-snapshot-plain-"));
+        try {
+          writeFileSync(path.join(plain, "a.txt"), "a\n");
+          const first = await collectWorkspaceSnapshot(plain);
+          mkdirSync(path.join(plain, ".pi-subagents"), { recursive: true });
+          writeFileSync(path.join(plain, ".pi-subagents", "x.md"), "x\n");
+          const second = await collectWorkspaceSnapshot(plain);
+          assert(first.ok && second.ok, "filesystem snapshots succeed");
+          if (first.ok && second.ok) {
+            eq(
+              second.snapshot.fingerprint,
+              first.snapshot.fingerprint,
+              "the filesystem inventory skips run artifacts too",
+            );
+          }
+        } finally {
+          rmSync(plain, { recursive: true, force: true });
+        }
+      },
+    );
   },
 
   "workspace snapshot error categories": async (context) => {
