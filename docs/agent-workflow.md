@@ -42,8 +42,9 @@ Extensions und Policies bleiben maßgeblich.
   aktualisiert Verifikations-Footer und -Ledger. Ein direkter Lauf von
   `npm run verify` dient dem Debugging und ersetzt ihn nicht. Das Pi-Setup-Tool
   `verify` prüft ausschließlich `~/.pi/agent`.
-- FAST: gezielter Test und passende Syntax-/Typprüfung; kein globales Verify
-  ohne Anlass. Bei NORMAL/DEEP die relevante Suite und betroffene
+- Kleine, lokale Änderung: gezielter Test und passende Syntax-/Typprüfung; kein
+  globales Verify ohne Anlass. Bei Verträgen, Sicherheits-/Permission-Grenzen
+  oder mehreren Subsystemen die relevante Suite und betroffene
   Subsystem-Prüfungen verwenden.
 - Einen vollständigen Testlauf nicht ohne Änderung am geprüften Stand
   wiederholen. Nach dem gezielten Test nur noch fehlende Pflichtnachweise
@@ -106,17 +107,17 @@ Die folgenden typischen Aufgaben wurden regelweise gegen die vorherige
 globale Fassung verglichen. „Ergebnis“ nennt die erwartete Verhaltensparität,
 nicht einen automatisierten Modell-Eval.
 
-| Typische Aufgabe                                   | Vorher                                                              | Jetzt                                                                 | Ergebnis                                              |
-| -------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
-| Tippfehler in einer Dokumentation                  | FAST-Grenzen und Stop-Regel direkt in `AGENTS.md`                   | Task-Tier bleibt global beschrieben; Kriterien in ADR 033             | FAST und gezielter Check bleiben erhalten             |
-| Kleine TUI-Textänderung                            | TUI/Bridge-Ausschluss direkt in `AGENTS.md`                         | Globaler Scope-Hinweis mit Verweis auf `docs/scope-cli-tui-vs-gui.md` | Bridge bleibt bei TUI-Auftrag außen vor               |
-| Lokaler Bugfix mit Regressionstest                 | kleine Schritte und Baseline-Regel in `AGENTS.md`                   | dieselben Regeln in `docs/agent-workflow.md`                          | zuerst engster Test; keine unbelegte Baseline         |
-| Permission- oder Recovery-Änderung                 | Hard-Pfade und Verifier-Gate ausführlich global                     | globale Schutzregel plus `docs/subagents.md` und technische Policy    | kein Risiko durch Dokumentenverschiebung freigegeben  |
-| Öffentliche API-/IPC-Änderung                      | Need-Gate/Verifier-Trigger global erklärt                           | globaler Boundary-Hinweis plus `docs/subagents.md`                    | Hard-Pfad und Need-Gate bleiben maßgeblich            |
-| Commit und Push                                    | expliziter Auftrag und Verifier-Regeln global                       | Commit-/Push-Regel global, Ablauf in Workflow-Referenz                | kleine Commits, direkt gepusht; Schritte getrennt     |
-| Aktuelle externe Provider- oder API-Frage          | Bedingung, Such-/Fetch-Reihenfolge global                           | kurze globale Bedingung, Ablauf in Workflow-Referenz                  | lokale Fragen bleiben lokal; externe Quellen gezielt  |
-| Lange Sitzung oder Compaction                      | Checkpoint-Regel global, Skillbeschreibung nannte auch jede Analyse | seltene Auslöser im Skill; globaler Verweis                           | kein Routine-Checkpoint und kein automatisches Ledger |
-| Unbekannter Bug mit möglicher unabhängiger Analyse | Delegationskriterien und Limits global                              | globaler Nicht-Rollen-Hinweis plus `docs/subagents.md`                | temporäre Delegation nach Nutzen und Grenzen          |
+| Typische Aufgabe                                   | Vorher                                                              | Jetzt                                                                                      | Ergebnis                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| Tippfehler in einer Dokumentation                  | FAST-Grenzen und Stop-Regel direkt in `AGENTS.md`                   | Regel „engster passender Check“ und Stop-Regel in `AGENTS.md`; Klassen entfallen (ADR 039) | gezielter Check bleibt erhalten                       |
+| Kleine TUI-Textänderung                            | TUI/Bridge-Ausschluss direkt in `AGENTS.md`                         | Globaler Scope-Hinweis mit Verweis auf `docs/scope-cli-tui-vs-gui.md`                      | Bridge bleibt bei TUI-Auftrag außen vor               |
+| Lokaler Bugfix mit Regressionstest                 | kleine Schritte und Baseline-Regel in `AGENTS.md`                   | dieselben Regeln in `docs/agent-workflow.md`                                               | zuerst engster Test; keine unbelegte Baseline         |
+| Permission- oder Recovery-Änderung                 | Hard-Pfade und Verifier-Gate ausführlich global                     | globale Schutzregel plus `docs/subagents.md` und technische Policy                         | kein Risiko durch Dokumentenverschiebung freigegeben  |
+| Öffentliche API-/IPC-Änderung                      | Need-Gate/Verifier-Trigger global erklärt                           | globaler Boundary-Hinweis plus `docs/subagents.md`                                         | Hard-Pfad und Need-Gate bleiben maßgeblich            |
+| Commit und Push                                    | expliziter Auftrag und Verifier-Regeln global                       | Commit-/Push-Regel global, Ablauf in Workflow-Referenz                                     | kleine Commits, direkt gepusht; Schritte getrennt     |
+| Aktuelle externe Provider- oder API-Frage          | Bedingung, Such-/Fetch-Reihenfolge global                           | kurze globale Bedingung, Ablauf in Workflow-Referenz                                       | lokale Fragen bleiben lokal; externe Quellen gezielt  |
+| Lange Sitzung oder Compaction                      | Checkpoint-Regel global, Skillbeschreibung nannte auch jede Analyse | seltene Auslöser im Skill; globaler Verweis                                                | kein Routine-Checkpoint und kein automatisches Ledger |
+| Unbekannter Bug mit möglicher unabhängiger Analyse | Delegationskriterien und Limits global                              | globaler Nicht-Rollen-Hinweis plus `docs/subagents.md`                                     | temporäre Delegation nach Nutzen und Grenzen          |
 
 Diese Matrix ist eine Verhaltensprüfung, kein zusätzlicher Workflow und keine
 Ausnahme von Nutzeranweisungen.

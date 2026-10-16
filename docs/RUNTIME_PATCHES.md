@@ -91,8 +91,8 @@ trafen unverändert. Außerhalb der Patches waren zwei Anpassungen nötig:
   tragen kein `prompt`. Ein `systemPrompt`-Rückgabewert gilt nur für den
   jeweiligen Lauf; ohne Beitrag läuft ein solcher Lauf mit dem nackten
   Basis-Prompt.
-  - `aurora-ui`, `context-capsule` und `task-tier` überspringen diese Läufe
-    (Titel, Zielbeschreibung und Klassifikation hängen am Nutzer-Prompt; das
+  - `aurora-ui` und `context-capsule` überspringen diese Läufe
+    (Titel und Zielbeschreibung hängen am Nutzer-Prompt; das
     Event kam für sie vorher gar nicht an).
   - `system-context` liefert für sie den Basiskontext ohne Zusatzkategorien.
   - `resilience` ist prompt-unabhängig und legt für solche Läufe ebenfalls einen
