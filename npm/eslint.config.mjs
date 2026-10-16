@@ -16,9 +16,6 @@ export default [
       "docs/archive/",
       ".agent/",
       "benchmarks/tasks/*/fixture/",
-      "pi-audit-remediation-improved-e8196d6/",
-      "pi_benchmark_befunde_arbeitsauftraege/",
-      "work/",
       "coverage/",
       // typescript-eslint verweigert den Start gegen die hier gepinnte
       // typescript@7.0.2 (siehe https://github.com/typescript-eslint/typescript-eslint/issues/10940).
