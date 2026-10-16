@@ -1759,6 +1759,146 @@ await test("compound commands keep literal project scripts allowed and harmless 
   );
 });
 
+await test("sed scripts, nested shells and wrappers cannot hide writes or interpreters", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  const decide = (level, command) =>
+    permissionPolicy.decideBash(level, command, cwd).action;
+  const levels = ["project-write", "yolo", "headless"];
+  // ADR 040, offene Befunde: Diese Formen galten als harmlos oder wurden als
+  // Filter durchgewunken, obwohl sie Dateien schreiben oder Code ausführen.
+  const refused = [
+    // sed: w/W schreiben beliebige Dateien, e und s///e führen Befehle aus.
+    "sed -n 'w /tmp/x' f",
+    "sed 'W /tmp/x' f",
+    "sed '1e id' f",
+    "sed 's/a/b/e' f",
+    "sed -n 's/a/b/w out' f",
+    "sed -f script.sed f",
+    "sed --file=script.sed f",
+    "sed -n -e 'p' -e 'w out' f",
+    // Subshell, Gruppe, Ersetzung und Prozess-Substitution
+    "(node -e 1)",
+    "{ node -e 1; }",
+    "echo $(node -e 1)",
+    "echo `node -e 1`",
+    "echo \"$(python3 -c 'print(1)')\"",
+    "cat <(node -e 1)",
+    "node <(echo hi)",
+    "f() { node -e 1; }; f",
+    "ls | (node -e 1)",
+    "(echo x > y.sh; bash y.sh)",
+    "(echo x > y.sh) && bash y.sh",
+    "cd /tmp && (node x.js)",
+    "(cd /tmp; node x.js)",
+    // Wrapper vor dem Interpreter
+    "timeout 5 node -e 1",
+    "nohup node -e 1",
+    "time node -e 1",
+    "command node -e 1",
+    "nice -n 5 node -e 1",
+    "xargs node -e 1",
+    "xargs -n1 node -e 1",
+    "echo x | timeout 3 python3",
+    "find . -exec node -e 1 {} \\;",
+    "find . -name x -execdir bash -c id {} +",
+    // eval, source und weitere Laufzeiten
+    'eval "node -e 1"',
+    "eval $(ssh-agent)",
+    "source ../x.sh",
+    "bun -e 1",
+    "tsx -e 1",
+  ];
+  for (const command of refused) {
+    for (const level of levels) {
+      assert(
+        decide(level, command) !== "allow",
+        `${level} does not allow: ${command}`,
+      );
+    }
+  }
+  // Alltagsbefehle bleiben erlaubt.
+  const allowed = [
+    "sed -n '1,5p' f",
+    "sed 's/a/b/g' f",
+    "sed -i 's/a/b/' f",
+    "sed -i.bak -e 's/a/b/' f",
+    "sed -E 's/(a)(b)/\\2\\1/' f",
+    "sed '/x/d' f",
+    "sed -n '/a/,/b/p' f",
+    "sed '1d;$d' f",
+    "sed -e 's/a/b/' -e 's/c/d/' f",
+    "sed '1i\\header' f",
+    "sed 's|/usr|/opt|g' f",
+    "sed 's/web/x/' f",
+    "sed 5q f",
+    "cat f | sed 's/a/b/'",
+    "VERSION=$(node scripts/x.js)",
+    "echo $(date)",
+    'echo "$(git rev-parse HEAD)"',
+    "(cd npm && node ../tests/run.mjs)",
+    "echo $(( 1 + 2 ))",
+    "ls $(pwd)",
+    "timeout 5 node scripts/x.js",
+    "time node tests/run.mjs",
+    "xargs -n1 echo",
+    "xargs grep -l node",
+    "find . -name '*.ts' -exec grep -l node {} +",
+    "command -v node",
+    "nice ls",
+    "node --test tests/*.test.mjs",
+    "node tests/run.mjs 2>&1 | tail -20",
+    "source .env.example",
+    "bun test",
+    "bun run build",
+  ];
+  for (const command of allowed) {
+    for (const level of levels) {
+      eq(decide(level, command), "allow", `${level} allows: ${command}`);
+    }
+  }
+  // Der Reason nennt den eigentlichen Grund, nicht nur "Interpreter".
+  assert(
+    /sed/.test(permissionPolicy.decideBash("yolo", "sed 'w x' f", cwd).reason),
+    "the block reason names sed",
+  );
+});
+
+await test("a cd through a symlink before a write is an external write", () => {
+  if (!permissionPolicy) return;
+  const root = mkdtempSync(join(tmpdir(), "pi-policy-cd-symlink-"));
+  const project = join(root, "project");
+  const outside = join(root, "outside");
+  try {
+    mkdirSync(project, { recursive: true });
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(project, "link"));
+    for (const command of [
+      "cd link && touch z",
+      "cd link; touch z",
+      "cd link;touch z",
+      "touch a; cd link; touch z",
+      "(cd link; touch z)",
+    ]) {
+      for (const level of ["project-write", "yolo", "headless"]) {
+        assert(
+          permissionPolicy.decideBash(level, command, project).action !==
+            "allow",
+          `${level} treats a write after cd through a symlink as external: ${command}`,
+        );
+      }
+    }
+    eq(
+      permissionPolicy.decideBash("project-write", "cd link; ls", project)
+        .action,
+      "allow",
+      "reading through the same symlink stays possible",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 await test("command lookups are classified as read-only diagnostics", () => {
   if (!permissionPolicy) return;
   const cwd = process.cwd();

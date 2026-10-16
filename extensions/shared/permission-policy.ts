@@ -2161,7 +2161,9 @@ function likelyExternalWrite(command: string, cwd: string): boolean {
     ? command
         .replace(DEV_NULL_REDIRECT_TOKEN, " ")
         .replace(BARE_REDIRECT_OPERATOR, " ")
-        .split(/\s+/)
+        // `cd link; touch z`: ohne Operator-Trennung bliebe `link;` ein Token,
+        // das innerhalb des Projekts aufgelöst wird statt über den Symlink.
+        .split(/[\s;&|()`]+/)
     : parsed.segments.flat();
   return isWriteCapableCommand(command) && containsExternalPath(tokens, cwd);
 }
@@ -2252,9 +2254,12 @@ function likelyProtectedPathWrite(command: string, cwd: string): boolean {
 }
 
 const OPAQUE_INTERPRETERS = new Set([
+  ".",
   "bash",
+  "bun",
   "dash",
   "deno",
+  "eval",
   "ksh",
   "lua",
   "node",
@@ -2264,6 +2269,9 @@ const OPAQUE_INTERPRETERS = new Set([
   "python3",
   "ruby",
   "sh",
+  "source",
+  "ts-node",
+  "tsx",
   "zsh",
 ]);
 
@@ -2303,21 +2311,309 @@ function executableToken(tokens: string[]): {
   };
 }
 
-function opaqueInterpreterInvocations(
-  command: string,
-): Array<{ executable: string; args: string[] }> {
-  const parsed = parseReadOnlyShell(command);
-  if (parsed.error) return [];
-  return parsed.segments.flatMap((tokens) => {
-    const { executable, args } = executableToken(tokens);
+/**
+ * Wrapper, die ihren ersten Operanden als Befehl ausführen
+ * (`timeout 5 node -e 1`, `xargs node x.js`). Die Interpreterprüfung sieht
+ * durch sie hindurch, damit ein Wrapper Inline-Code nicht verdeckt.
+ */
+const COMMAND_WRAPPERS = new Map<
+  string,
+  { valueOptions: ReadonlySet<string>; operands: number }
+>([
+  ["builtin", { valueOptions: new Set(), operands: 0 }],
+  ["command", { valueOptions: new Set(), operands: 0 }],
+  ["exec", { valueOptions: new Set(["-a"]), operands: 0 }],
+  [
+    "ionice",
+    { valueOptions: new Set(["-c", "-n", "-p", "-P", "-u"]), operands: 0 },
+  ],
+  ["nice", { valueOptions: new Set(["-n", "--adjustment"]), operands: 0 }],
+  ["nohup", { valueOptions: new Set(), operands: 0 }],
+  ["setsid", { valueOptions: new Set(), operands: 0 }],
+  ["stdbuf", { valueOptions: new Set(["-e", "-i", "-o"]), operands: 0 }],
+  [
+    "time",
+    {
+      valueOptions: new Set(["-f", "-o", "--format", "--output"]),
+      operands: 0,
+    },
+  ],
+  [
+    "timeout",
+    {
+      valueOptions: new Set(["-k", "-s", "--kill-after", "--signal"]),
+      operands: 1,
+    },
+  ],
+  [
+    "xargs",
+    {
+      valueOptions: new Set([
+        "-a",
+        "-d",
+        "-E",
+        "-I",
+        "-L",
+        "-n",
+        "-P",
+        "-s",
+        "--arg-file",
+        "--delimiter",
+        "--max-args",
+        "--max-chars",
+        "--max-lines",
+        "--max-procs",
+      ]),
+      operands: 0,
+    },
+  ],
+]);
+
+function unwrapCommandWord(
+  tokens: string[],
+): ReturnType<typeof executableToken> {
+  let current = executableToken(tokens);
+  for (let depth = 0; depth < 4; depth += 1) {
+    const wrapper = COMMAND_WRAPPERS.get(current.executable);
+    if (!wrapper) break;
+    const args = current.args;
+    // `command -v node` fragt nur ab und führt nichts aus.
     if (
-      !OPAQUE_INTERPRETERS.has(executable) ||
-      (args.length === 1 && ["-v", "-V", "--version"].includes(args[0]))
+      current.executable === "command" &&
+      args.some((arg) => /^-[a-z]*[vV]/.test(arg))
     ) {
-      return [];
+      break;
     }
-    return [{ executable, args }];
-  });
+    let index = 0;
+    while (
+      index < args.length &&
+      args[index].startsWith("-") &&
+      args[index] !== "--"
+    ) {
+      index += wrapper.valueOptions.has(args[index]) ? 2 : 1;
+    }
+    if (args[index] === "--") index += 1;
+    const inner = args.slice(index + wrapper.operands);
+    if (inner.length === 0) break;
+    current = executableToken(inner);
+  }
+  return current;
+}
+
+const FIND_EXEC_OPTIONS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+
+/**
+ * Alle Befehle, die ein Segment ausführt: das Kommandowort (Wrapper
+ * aufgelöst) und die Befehle hinter `find -exec …`.
+ */
+function segmentInvocations(
+  tokens: string[],
+): Array<ReturnType<typeof executableToken>> {
+  const main = unwrapCommandWord(tokens);
+  const invocations = [main];
+  if (main.executable === "find") {
+    for (let index = 0; index < main.args.length; index += 1) {
+      if (!FIND_EXEC_OPTIONS.has(main.args[index])) continue;
+      const rest = main.args.slice(index + 1);
+      const end = rest.findIndex((arg) => arg === ";" || arg === "+");
+      const inner = end < 0 ? rest : rest.slice(0, end);
+      if (inner.length > 0) invocations.push(unwrapCommandWord(inner));
+    }
+  }
+  return invocations;
+}
+
+/**
+ * Ein `sed`-Skript, das nur ersetzt, löscht, ausgibt und Text einfügt. `w`/`W`
+ * schreiben beliebige Dateien, `e` und `s///e` führen Shell-Befehle aus. Alles
+ * Unbekannte gilt als nicht filterartig.
+ */
+function isFilterOnlySedScript(script: string): boolean {
+  const length = script.length;
+  let index = 0;
+  // Liest bis zum nächsten unmaskierten Trennzeichen; false ohne Abschluss.
+  const skipDelimited = (delimiter: string): boolean => {
+    while (index < length) {
+      const char = script[index];
+      index += 1;
+      if (char === "\\") index += 1;
+      else if (char === delimiter) return true;
+    }
+    return false;
+  };
+  const skipLine = () => {
+    while (index < length) {
+      const char = script[index];
+      index += 1;
+      if (char === "\\") index += 1;
+      else if (char === "\n") return;
+    }
+  };
+  while (index < length) {
+    while (index < length && /[\s;]/.test(script[index])) index += 1;
+    if (index >= length) break;
+    // Adressen: Zahl, `$`, `first~step`, `addr,+N`, `/re/IM`, `\cREc`.
+    while (index < length) {
+      const char = script[index];
+      if (/[\d$,~+]/.test(char)) {
+        index += 1;
+      } else if (char === "/" || char === "\\") {
+        const delimiter = char === "/" ? "/" : script[index + 1];
+        if (!delimiter) return false;
+        index += char === "/" ? 1 : 2;
+        if (!skipDelimited(delimiter)) return false;
+        while (index < length && /[IM]/.test(script[index])) index += 1;
+      } else {
+        break;
+      }
+    }
+    while (index < length && /\s/.test(script[index])) index += 1;
+    if (script[index] === "!") index += 1;
+    while (index < length && /\s/.test(script[index])) index += 1;
+    const command = script[index];
+    index += 1;
+    switch (command) {
+      case "{":
+      case "}":
+      case "=":
+      case "d":
+      case "D":
+      case "g":
+      case "G":
+      case "h":
+      case "H":
+      case "n":
+      case "N":
+      case "p":
+      case "P":
+      case "x":
+      case "z":
+        break;
+      case "l":
+      case "q":
+      case "Q":
+        while (index < length && /\d/.test(script[index])) index += 1;
+        break;
+      case "a":
+      case "i":
+      case "c":
+      case "r":
+      case "R":
+        skipLine();
+        break;
+      case "b":
+      case "t":
+      case "T":
+      case ":":
+        while (index < length && !/[;\n]/.test(script[index])) index += 1;
+        break;
+      case "s":
+      case "y": {
+        const delimiter = script[index];
+        if (!delimiter || /[\s\\;]/.test(delimiter)) return false;
+        index += 1;
+        if (!skipDelimited(delimiter) || !skipDelimited(delimiter)) {
+          return false;
+        }
+        if (command === "s") {
+          while (index < length && /[gpiImMx\d]/.test(script[index])) {
+            index += 1;
+          }
+        }
+        // Alles andere als Abschluss (`w`, `e`, unbekannte Flags) ist nicht filterartig.
+        if (index < length && !/[\s;}]/.test(script[index])) return false;
+        break;
+      }
+      default:
+        return false;
+    }
+  }
+  return true;
+}
+
+function isFilterOnlySed(args: string[]): boolean {
+  const scripts: string[] = [];
+  const operands: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") {
+      operands.push(...args.slice(index + 1));
+      break;
+    }
+    if (arg === "--expression") {
+      index += 1;
+      if (args[index] === undefined) return false;
+      scripts.push(args[index]);
+    } else if (arg.startsWith("--expression=")) {
+      scripts.push(arg.slice("--expression=".length));
+    } else if (arg === "--file" || arg.startsWith("--file=")) {
+      return false;
+    } else if (arg === "--line-length") {
+      index += 1;
+    } else if (arg.startsWith("--") || arg === "-") {
+      // Übrige Langoptionen (--quiet, --regexp-extended, --in-place, …) ändern
+      // das Skript nicht.
+    } else if (arg.startsWith("-")) {
+      for (let letter = 1; letter < arg.length; letter += 1) {
+        const flag = arg[letter];
+        if ("nErsuzb".includes(flag)) continue;
+        if (flag === "i") break;
+        if (flag === "l") {
+          if (letter === arg.length - 1) index += 1;
+          break;
+        }
+        if (flag === "e") {
+          const attached = arg.slice(letter + 1);
+          if (attached) scripts.push(attached);
+          else {
+            index += 1;
+            if (args[index] === undefined) return false;
+            scripts.push(args[index]);
+          }
+          break;
+        }
+        return false;
+      }
+    } else {
+      operands.push(arg);
+    }
+  }
+  if (scripts.length === 0) {
+    const first = operands.shift();
+    if (first === undefined) return false;
+    scripts.push(first);
+  }
+  return scripts.every(isFilterOnlySedScript);
+}
+
+/**
+ * Name des Interpreters, falls diese Ausführung opaken Code enthält, sonst
+ * undefined. `isDynamicArg` erkennt Argumente, deren Wert die Shell erst
+ * auflöst; `isProjectInternalScript` entscheidet über Skriptpfade.
+ */
+function opaqueInvocationName(
+  invocation: { executable: string; args: string[] },
+  isProjectInternalScript: (value: string) => boolean,
+  isDynamicArg: (arg: string) => boolean,
+): string | undefined {
+  const { executable, args } = invocation;
+  if (executable === "sed") {
+    return isFilterOnlySed(args) ? undefined : "sed mit w-/e-/-f-Skript";
+  }
+  if (
+    !OPAQUE_INTERPRETERS.has(executable) ||
+    (args.length === 1 && ["-v", "-V", "--version"].includes(args[0]))
+  ) {
+    return undefined;
+  }
+  return args.some(isDynamicArg) ||
+    isInlineInterpreter(executable, args) ||
+    isStdinInterpreter(args) ||
+    interpreterPathArguments(args).some(
+      (value) => !isProjectInternalScript(value),
+    )
+    ? executable
+    : undefined;
 }
 
 /**
@@ -2367,6 +2663,7 @@ const PIPE_INTERPRETER =
   /(?:^|[|;&\n])\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)(?:env\s+)?(?:\S+\/)?(bash|dash|deno|ksh|lua|node|perl|php|python|python3|ruby|sh|zsh)\b(?=\s|$)/i;
 
 function isInlineInterpreter(executable: string, args: string[]): boolean {
+  if (executable === "eval") return true;
   if (executable === "deno" && args[0]?.toLowerCase() === "eval") return true;
   if (executable === "python" || executable === "python3") {
     const moduleIndex = args.indexOf("-m");
@@ -2620,20 +2917,21 @@ function splitCompoundShell(command: string): ShellSegment[] | undefined {
 function compoundInterpreter(
   command: string,
   projectRoot: string,
+  context: InterpreterContext,
 ): { analyzed: false } | { analyzed: true; interpreter?: string } {
-  if (isWriteCapableCommand(command)) return { analyzed: false };
+  if (context.writeCapable) return { analyzed: false };
   const segments = splitCompoundShell(command);
   if (!segments) return { analyzed: false };
   const trackDirectory = segments.every((segment) =>
     ["", "&&", ";"].includes(segment.separator),
   );
-  let current: string | undefined = resolve(projectRoot);
+  let current: string | undefined = context.directoryKnown
+    ? resolve(projectRoot)
+    : undefined;
   const internal = (value: string): boolean =>
+    current !== undefined &&
     !/^~|:\/\//.test(value) &&
-    isProjectInternalInterpreterPath(
-      resolve(current ?? projectRoot, value),
-      projectRoot,
-    );
+    isProjectInternalInterpreterPath(resolve(current, value), projectRoot);
   for (const { tokens: rawTokens } of segments) {
     // Reserved words and wrappers in front of the command word must not hide
     // an interpreter (`do node -e 1`, `time python3 -c ...`).
@@ -2644,7 +2942,8 @@ function compoundInterpreter(
     ) {
       skip += 1;
     }
-    const { executable, args } = executableToken(rawTokens.slice(skip));
+    const tokens = rawTokens.slice(skip);
+    const { executable, args } = executableToken(tokens);
     if (executable === "cd") {
       current =
         trackDirectory &&
@@ -2660,44 +2959,190 @@ function compoundInterpreter(
       current = undefined;
       continue;
     }
-    if (
-      !OPAQUE_INTERPRETERS.has(executable) ||
-      (args.length === 1 && ["-v", "-V", "--version"].includes(args[0]))
-    ) {
-      continue;
-    }
-    if (
-      current === undefined ||
-      args.some((arg) => /[$*?[]/.test(arg)) ||
-      isInlineInterpreter(executable, args) ||
-      isStdinInterpreter(args) ||
-      interpreterPathArguments(args).some((value) => !internal(value))
-    ) {
-      return { analyzed: true, interpreter: executable };
+    for (const invocation of segmentInvocations(tokens)) {
+      const interpreter = opaqueInvocationName(invocation, internal, (arg) =>
+        /[$*?[]/.test(arg),
+      );
+      if (interpreter) return { analyzed: true, interpreter };
     }
   }
   return { analyzed: true };
 }
 
+interface InterpreterContext {
+  /** Der gesamte Befehl kann schreiben (ein Skript könnte darin entstehen). */
+  writeCapable: boolean;
+  /** Das Arbeitsverzeichnis ist bekannt (kein `cd` vor einer Gruppe). */
+  directoryKnown: boolean;
+}
+
+/** Platzhalter für eine Ersetzung: enthält `$`, gilt also als dynamisch. */
+const SUBSTITUTION_PLACEHOLDER = "$__sub__";
+
+/**
+ * Löst Command Substitution (`$(…)`, Backticks), Prozess-Substitution
+ * (`<(…)`), Subshells `(…)` und Brace-Gruppen `{ …; }` in ihre Innenteile auf.
+ * Die Innenteile prüft der Aufrufer einzeln; der äußere Text behält Platzhalter.
+ * Ohne Rückgabe (unausgewogene Klammern) bleibt die konservative Regel.
+ */
+function extractNestedShell(
+  command: string,
+): { outer: string; inner: string[]; changesDirectory: boolean } | undefined {
+  const inner: string[] = [];
+  let outer = "";
+  let quote: "'" | '"' | undefined;
+  // Liest ab `start` bis zur passenden `)`; liefert Text und Endindex.
+  const readParen = (
+    start: number,
+  ): { text: string; end: number } | undefined => {
+    let depth = 1;
+    let innerQuote: "'" | '"' | undefined;
+    for (let cursor = start; cursor < command.length; cursor += 1) {
+      const char = command[cursor];
+      if (innerQuote === "'") {
+        if (char === "'") innerQuote = undefined;
+        continue;
+      }
+      if (char === "\\") {
+        cursor += 1;
+        continue;
+      }
+      if (innerQuote === '"') {
+        if (char === '"') innerQuote = undefined;
+        continue;
+      }
+      if (char === "'" || char === '"') innerQuote = char;
+      else if (char === "(") depth += 1;
+      else if (char === ")") {
+        depth -= 1;
+        if (depth === 0)
+          return { text: command.slice(start, cursor), end: cursor };
+      }
+    }
+    return undefined;
+  };
+  const readBacktick = (
+    start: number,
+  ): { text: string; end: number } | undefined => {
+    for (let cursor = start; cursor < command.length; cursor += 1) {
+      if (command[cursor] === "\\") cursor += 1;
+      else if (command[cursor] === "`") {
+        return { text: command.slice(start, cursor), end: cursor };
+      }
+    }
+    return undefined;
+  };
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    const next = command[index + 1];
+    if (quote === "'") {
+      outer += char;
+      if (char === "'") quote = undefined;
+      continue;
+    }
+    if (char === "\\") {
+      outer += char + (next ?? "");
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      quote = quote === '"' ? undefined : '"';
+      outer += char;
+      continue;
+    }
+    if (char === "'" && quote === undefined) {
+      quote = "'";
+      outer += char;
+      continue;
+    }
+    if (char === "`") {
+      const read = readBacktick(index + 1);
+      if (!read) return undefined;
+      inner.push(read.text);
+      outer += SUBSTITUTION_PLACEHOLDER;
+      index = read.end;
+      continue;
+    }
+    if (char === "$" && next === "(") {
+      const read = readParen(index + 2);
+      if (!read) return undefined;
+      inner.push(read.text);
+      outer += SUBSTITUTION_PLACEHOLDER;
+      index = read.end;
+      continue;
+    }
+    if (quote === undefined && (char === "<" || char === ">") && next === "(") {
+      const read = readParen(index + 2);
+      if (!read) return undefined;
+      inner.push(read.text);
+      // Ein Interpreter bekommt `/dev/fd/N`: außerhalb des Projekts, also opak.
+      outer += "/dev/fd/63";
+      index = read.end;
+      continue;
+    }
+    if (quote === undefined && char === "(") {
+      const read = readParen(index + 1);
+      if (!read) return undefined;
+      inner.push(read.text);
+      outer += " ; ";
+      index = read.end;
+      continue;
+    }
+    if (
+      quote === undefined &&
+      (char === "{" || char === "}") &&
+      /(?:^|[\s;])$/.test(outer) &&
+      (next === undefined || /[\s;]/.test(next))
+    ) {
+      outer += " ";
+      continue;
+    }
+    outer += char;
+  }
+  return {
+    outer,
+    inner,
+    changesDirectory: /(?:^|[\s;&|])(?:cd|pushd|popd)(?=\s|;|$)/.test(outer),
+  };
+}
+
 function projectWriteInterpreter(
   command: string,
   cwd: string,
+  context?: Partial<InterpreterContext>,
 ): string | undefined {
-  const invocations = opaqueInterpreterInvocations(command);
-  for (const { executable, args } of invocations) {
-    if (isInlineInterpreter(executable, args) || isStdinInterpreter(args)) {
-      return executable;
+  const writeCapable = context?.writeCapable ?? isWriteCapableCommand(command);
+  let directoryKnown = context?.directoryKnown ?? true;
+  const nested = extractNestedShell(command);
+  if (nested) {
+    const innerContext = {
+      writeCapable,
+      directoryKnown: directoryKnown && !nested.changesDirectory,
+    };
+    for (const inner of nested.inner) {
+      const found = projectWriteInterpreter(inner, cwd, innerContext);
+      if (found) return found;
     }
-    if (
-      interpreterPathArguments(args).some(
-        (value) => !isProjectInternalInterpreterPath(value, cwd),
-      )
-    ) {
-      return executable;
-    }
+    command = nested.outer;
   }
-  if (!parseReadOnlyShell(command).error) return undefined;
-  const compound = compoundInterpreter(command, cwd);
+  const internal = (value: string): boolean =>
+    directoryKnown && isProjectInternalInterpreterPath(value, cwd);
+  const parsed = parseReadOnlyShell(command);
+  if (!parsed.error) {
+    for (const tokens of parsed.segments) {
+      for (const invocation of segmentInvocations(tokens)) {
+        const interpreter = opaqueInvocationName(invocation, internal, (arg) =>
+          arg.includes(SUBSTITUTION_PLACEHOLDER),
+        );
+        if (interpreter) return interpreter;
+      }
+    }
+    return undefined;
+  }
+  const compound = compoundInterpreter(command, cwd, {
+    writeCapable,
+    directoryKnown,
+  });
   if (compound.analyzed) return compound.interpreter;
   // parseReadOnlyShell intentionally rejects redirections. Still identify the
   // common `python < script.py`/heredoc shape as stdin code instead of letting
