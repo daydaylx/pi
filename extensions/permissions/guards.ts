@@ -46,9 +46,7 @@ import {
 } from "../shared/profile.ts";
 import { systemBashNeedsApproval } from "../system-control/policy.ts";
 import { auditSystemDenial } from "../system-control/audit.ts";
-import {
-  SYSTEM_CONTROL_TOOL_NAME_SET,
-} from "../system-control/tool-names.ts";
+import { SYSTEM_CONTROL_TOOL_NAME_SET } from "../system-control/tool-names.ts";
 import {
   canonicalWorkspaceRoot,
   gitWorkspaceRootForPath,
@@ -264,18 +262,20 @@ export function registerPermissionGuards(
    * Sie schützt kein Zielsystem, sondern die Form der Delegation, und gilt
    * deshalb unabhängig von Stufe und Profil.
    */
+  // Formfehler einer Delegation sind korrigierbar: Der Lauf endet deshalb auch
+  // ohne UI nicht, das Modell kann den Aufruf berichtigen. Wiederholte identische
+  // Blockaden beendet der Wiederholungsschutz weiter unten.
   const guardDelegationContract = async (
     event: ToolCallEvent,
     ctx: ExtensionContext,
     verificationRoot: string,
-  ) => {
+  ): Promise<{ block: true; reason: string; terminate?: true } | undefined> => {
     // Ein verify-Spec wird vor der Verifier-Prüfung in den geprüften
     // Verifier-Aufruf übersetzt, damit Ticket, Dedup und Commit-Gate greifen.
     const verifyRewrite = rewriteVerifySpecToVerifier(event);
     if (verifyRewrite.kind === "blocked") {
       return {
         block: true,
-        ...stopNonInteractive(ctx),
         reason: verifyRewrite.reason,
       };
     }
@@ -296,7 +296,6 @@ export function registerPermissionGuards(
     if (verifierAssessment.blocked) {
       return {
         block: true,
-        ...stopNonInteractive(ctx),
         reason: verifierAssessment.reason,
       };
     }
@@ -314,7 +313,6 @@ export function registerPermissionGuards(
     if (temporarySpecAssessment.blocked) {
       return {
         block: true,
-        ...stopNonInteractive(ctx),
         reason: temporarySpecAssessment.reason,
       };
     }

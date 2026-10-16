@@ -75,6 +75,11 @@ await test("T18 — legacy verifier call with no hard path and no trigger is not
         result.reason.includes("no_trigger"),
       "reason names the Need-Gate decision",
     );
+    assert(
+      result.reason.includes("trigger: user_requested") &&
+        result.reason.includes("evidence:"),
+      "the rejection tells the agent how to register an explicit user request",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

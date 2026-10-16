@@ -673,6 +673,35 @@ await test("RPC UI contexts receive guard blocks without terminating the run", a
   );
 });
 
+await test("a rejected delegation does not end a headless run: the agent can fix the form", async () => {
+  if (!modePermissions) return;
+  const harness = createHarness({ confirm: false, customResult: false });
+  modePermissions.default(harness.api);
+  const context = harness.makeContext({
+    cwd: process.cwd(),
+    mode: "print",
+    hasUI: false,
+    trusted: true,
+  });
+  await harness.runHooks("session_start", {}, context);
+  const results = await harness.runHooks(
+    "tool_call",
+    {
+      toolName: "subagent",
+      input: { agent: "verifier", task: "zu kurz", acceptance: "x" },
+    },
+    context,
+  );
+  const block = results.find((result) => result?.block);
+  assert(block, "an incomplete verifier delegation is rejected");
+  eq(
+    block.terminate,
+    undefined,
+    "a form error of the delegation leaves the run alive so the agent can correct it",
+  );
+  await harness.runHooks("session_shutdown", {}, context);
+});
+
 await test("a headless block names its reason when the run ends", async () => {
   if (!modePermissions) return;
   const harness = createHarness({ confirm: false, customResult: false });
