@@ -187,8 +187,21 @@ function isHeadlessTrustedNpxInvocation(command: string): boolean {
 const WRITE_CAPABLE_PATTERN =
   /\b(?:rm|rmdir|unlink|trash|cp|mv|mkdir|touch|tee|truncate|dd|chmod|chown|chgrp|ln|rsync|install|wget)\b|\bgio\s+trash\b|\bsed\b[^;&|]*\s-i(?:\s|$)|(?:^|[^<])>(?!>)|>>|\bcurl\b[^;&|]*\s(?:-[a-zA-Z0-9]*[oO]|--output(?:=|\s|$))/i;
 
+/**
+ * Redirections that cannot write anywhere: output to /dev/null and file
+ * descriptor duplication (`2>&1`, `>&2`). They are removed before the
+ * write-capability checks so a plain `ls /opt 2>/dev/null` or `cmd 2>&1 | tail`
+ * is not mistaken for a write. Every other `>` (a file target) stays visible.
+ */
+const HARMLESS_REDIRECT =
+  /(?:\d*|&)>>?[ \t]*\/dev\/null(?=[\s;&|)]|$)|\d*>&(?:\d+|-)(?=[\s;&|)]|$)/g;
+
+function withoutHarmlessRedirects(command: string): string {
+  return command.replace(HARMLESS_REDIRECT, " ");
+}
+
 function isWriteCapableCommand(command: string): boolean {
-  return WRITE_CAPABLE_PATTERN.test(command);
+  return WRITE_CAPABLE_PATTERN.test(withoutHarmlessRedirects(command));
 }
 
 const SIMPLE_DIAGNOSTIC_COMMANDS = new Set([
@@ -2394,6 +2407,228 @@ function isProjectInternalInterpreterPath(value: string, cwd: string): boolean {
   return identity.scope === "project" && !identity.symlinkEscape;
 }
 
+const SHELL_PREFIX_WORDS = new Set([
+  "!",
+  "do",
+  "then",
+  "else",
+  "elif",
+  "if",
+  "while",
+  "until",
+  "time",
+  "exec",
+  "nohup",
+]);
+
+interface ShellSegment {
+  tokens: string[];
+  /** Operator in front of the segment; "" for the first one. */
+  separator: "" | "&&" | "||" | ";" | "|" | "&";
+}
+
+/**
+ * Splits a compound command (`a && b`, `a | b`, `a; b`, `a 2>&1 | tail`) into
+ * quote-aware segments for the interpreter check. Redirections are dropped
+ * (their targets are checked by the write rules). Anything the lexer cannot
+ * prove literal returns undefined, and the caller keeps the conservative rule:
+ * command substitution, stdin redirects and heredocs, subshells and groups,
+ * comments, and dangling operators.
+ */
+function splitCompoundShell(command: string): ShellSegment[] | undefined {
+  const segments: ShellSegment[] = [];
+  let tokens: string[] = [];
+  let word = "";
+  let wordStarted = false;
+  let quote: "'" | '"' | undefined;
+  let separator: ShellSegment["separator"] = "";
+  const endWord = () => {
+    if (wordStarted) tokens.push(word);
+    word = "";
+    wordStarted = false;
+  };
+  const endSegment = (next: ShellSegment["separator"]): boolean => {
+    endWord();
+    if (tokens.length === 0) return false;
+    segments.push({ tokens, separator });
+    tokens = [];
+    separator = next;
+    return true;
+  };
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    const next = command[index + 1];
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+        continue;
+      }
+      if (quote === '"') {
+        if (char === "`" || (char === "$" && next === "(")) return undefined;
+        if (char === "\\" && next !== undefined) {
+          word += next;
+          index += 1;
+          continue;
+        }
+      }
+      word += char;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      wordStarted = true;
+      continue;
+    }
+    if (char === "\\") {
+      if (next === undefined || next === "\n" || next === "\r")
+        return undefined;
+      word += next;
+      wordStarted = true;
+      index += 1;
+      continue;
+    }
+    if (char === "`" || (char === "$" && next === "(")) return undefined;
+    if ("<(){}".includes(char)) return undefined;
+    if (char === "#" && !wordStarted) return undefined;
+    if (char === "\n") {
+      if (!endSegment(";") && tokens.length > 0) return undefined;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      endWord();
+      continue;
+    }
+    if (char === ";") {
+      if (!endSegment(";")) return undefined;
+      continue;
+    }
+    if (char === "|") {
+      const doubled = next === "|";
+      if (!endSegment(doubled ? "||" : "|")) return undefined;
+      if (doubled || next === "&") index += 1;
+      continue;
+    }
+    if (char === "&" && next !== ">") {
+      const doubled = next === "&";
+      if (!endSegment(doubled ? "&&" : "&")) return undefined;
+      if (doubled) index += 1;
+      continue;
+    }
+    if (char === ">" || char === "&") {
+      // Redirection (`>`, `>>`, `>&`, `>|`, `&>`, `2>`): drop an fd prefix,
+      // the operator and the target word.
+      if (wordStarted && /^\d+$/.test(word)) {
+        word = "";
+        wordStarted = false;
+      } else {
+        endWord();
+      }
+      let cursor = index;
+      while (cursor < command.length && ">&|".includes(command[cursor]))
+        cursor += 1;
+      while (cursor < command.length && /[ \t]/.test(command[cursor]))
+        cursor += 1;
+      let target = "";
+      let targetQuote: "'" | '"' | undefined;
+      for (; cursor < command.length; cursor += 1) {
+        const c = command[cursor];
+        if (targetQuote) {
+          if (c === targetQuote) targetQuote = undefined;
+          else target += c;
+          continue;
+        }
+        if (c === "'" || c === '"') {
+          targetQuote = c;
+          continue;
+        }
+        if (/[\s;&|<>]/.test(c)) break;
+        if ("$`(){}".includes(c)) return undefined;
+        target += c;
+      }
+      if (targetQuote || target === "") return undefined;
+      index = cursor - 1;
+      continue;
+    }
+    word += char;
+    wordStarted = true;
+  }
+  if (quote) return undefined;
+  endWord();
+  if (tokens.length > 0) segments.push({ tokens, separator });
+  else if (separator !== "" && separator !== ";" && separator !== "&")
+    return undefined;
+  return segments.length > 0 ? segments : undefined;
+}
+
+/**
+ * Interpreter check for a compound command. A literal project-internal script
+ * stays ordinary project work inside `a && b`, `a | b` and `cd dir && a`. The
+ * answer is `{ analyzed: false }` whenever the conservative rule must apply:
+ * the lexer gave up, the command can write (it might create the script it
+ * runs), a path contains a shell variable, or the directory is unknown.
+ */
+function compoundInterpreter(
+  command: string,
+  projectRoot: string,
+): { analyzed: false } | { analyzed: true; interpreter?: string } {
+  if (isWriteCapableCommand(command)) return { analyzed: false };
+  const segments = splitCompoundShell(command);
+  if (!segments) return { analyzed: false };
+  const trackDirectory = segments.every((segment) =>
+    ["", "&&", ";"].includes(segment.separator),
+  );
+  let current: string | undefined = resolve(projectRoot);
+  const internal = (value: string): boolean =>
+    !/^~|:\/\//.test(value) &&
+    isProjectInternalInterpreterPath(
+      resolve(current ?? projectRoot, value),
+      projectRoot,
+    );
+  for (const { tokens: rawTokens } of segments) {
+    // Reserved words and wrappers in front of the command word must not hide
+    // an interpreter (`do node -e 1`, `time python3 -c ...`).
+    let skip = 0;
+    while (
+      skip < rawTokens.length - 1 &&
+      SHELL_PREFIX_WORDS.has(rawTokens[skip])
+    ) {
+      skip += 1;
+    }
+    const { executable, args } = executableToken(rawTokens.slice(skip));
+    if (executable === "cd") {
+      current =
+        trackDirectory &&
+        current !== undefined &&
+        args.length === 1 &&
+        !/^[-~]|[$*?[]/.test(args[0]) &&
+        internal(args[0])
+          ? resolve(current, args[0])
+          : undefined;
+      continue;
+    }
+    if (executable === "pushd" || executable === "popd") {
+      current = undefined;
+      continue;
+    }
+    if (
+      !OPAQUE_INTERPRETERS.has(executable) ||
+      (args.length === 1 && ["-v", "-V", "--version"].includes(args[0]))
+    ) {
+      continue;
+    }
+    if (
+      current === undefined ||
+      args.some((arg) => /[$*?[]/.test(arg)) ||
+      isInlineInterpreter(executable, args) ||
+      isStdinInterpreter(args) ||
+      interpreterPathArguments(args).some((value) => !internal(value))
+    ) {
+      return { analyzed: true, interpreter: executable };
+    }
+  }
+  return { analyzed: true };
+}
+
 function projectWriteInterpreter(
   command: string,
   cwd: string,
@@ -2412,6 +2647,8 @@ function projectWriteInterpreter(
     }
   }
   if (!parseReadOnlyShell(command).error) return undefined;
+  const compound = compoundInterpreter(command, cwd);
+  if (compound.analyzed) return compound.interpreter;
   // parseReadOnlyShell intentionally rejects redirections. Still identify the
   // common `python < script.py`/heredoc shape as stdin code instead of letting
   // it fall through to project-write's unconditional allow.
@@ -2441,8 +2678,8 @@ function extendedYoloBoundary(
     (/\b(?:rm|mv|cp|mkdir|touch|tee|truncate|dd|chmod|chown|chgrp|ln|sed)\b/i.test(
       command,
     ) ||
-      /(?:^|[^<])>(?!>)/.test(command) ||
-      />>/.test(command))
+      /(?:^|[^<])>(?!>)/.test(withoutHarmlessRedirects(command)) ||
+      />>/.test(withoutHarmlessRedirects(command)))
   ) {
     return "Änderung an einem Systempfad";
   }
@@ -2544,8 +2781,8 @@ export function decideBash(
     (/\b(?:rm|mv|cp|mkdir|touch|tee|truncate|dd|chmod|chown|chgrp|ln|sed)\b/i.test(
       trimmed,
     ) ||
-      /(?:^|[^<])>(?!>)/.test(trimmed) ||
-      />>/.test(trimmed))
+      /(?:^|[^<])>(?!>)/.test(withoutHarmlessRedirects(trimmed)) ||
+      />>/.test(withoutHarmlessRedirects(trimmed)))
   ) {
     return noConfirmChannel
       ? deny("Harte Systemgrenze: Änderung am Systempfad wurde blockiert.")

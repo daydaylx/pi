@@ -1637,6 +1637,90 @@ await test("yolo keeps interpreter hard boundaries beyond the project-write matr
   );
 });
 
+await test("compound commands keep literal project scripts allowed and harmless redirects are not writes", () => {
+  if (!permissionPolicy) return;
+  const cwd = process.cwd();
+  const decide = (level, command) =>
+    permissionPolicy.decideBash(level, command, cwd).action;
+  // Gemessene Fehlalarme: gewöhnliche Verkettung, Pipe und Umleitung machten
+  // aus einem literalen Projektskript einen "opaken Interpreteraufruf".
+  for (const command of [
+    "node tests/run.mjs 2>&1 | tail -20",
+    "node tests/run.mjs; echo done",
+    "node tests/a.mjs && node tests/b.mjs",
+    "PI_TEST_SUITE=ui node tests/run.mjs 2>&1 | tail -5",
+    "command -v node; node --version; npm --version",
+    "python3 -I scripts/check.py 2>/dev/null || true",
+    "cd . && node tests/run.mjs",
+  ]) {
+    for (const level of ["project-write", "yolo", "headless"]) {
+      eq(
+        decide(level, command),
+        "allow",
+        `${level} allows a literal project script in a compound command: ${command}`,
+      );
+    }
+  }
+  // Ein Lesezugriff auf externe Pfade bleibt ein Lesezugriff, auch mit
+  // 2>/dev/null oder 2>&1.
+  for (const command of [
+    "ls -l /opt 2>/dev/null || true",
+    "ls /usr/share 2>&1 | head -5",
+    "rg -n needle /opt/data 2>&1",
+  ]) {
+    eq(
+      decide("yolo", command),
+      "allow",
+      `a redirect to /dev/null or a file descriptor is not a write: ${command}`,
+    );
+  }
+  // Alles, was Code einschmuggeln, ein Skript erst erzeugen oder den
+  // Projektbereich verlassen kann, bleibt wie zuvor gesperrt.
+  for (const command of [
+    "echo x > y.sh && bash y.sh",
+    "printf x > s.js; node s.js",
+    "node tests/run.mjs | bash",
+    "node tests/run.mjs 2>&1 | node",
+    "node -e 1 && node tests/run.mjs",
+    "node tests/run.mjs; python3 -c 'print(1)'",
+    "node tests/run.mjs && node ../outside.mjs",
+    "node tests/run.mjs 2>&1 && node ~/x.mjs",
+    "cd /tmp && node tests/run.mjs",
+    "cd .. && node tests/run.mjs",
+    "cd $HOME && node tests/run.mjs",
+    "cd npm || cd /etc; node tests/run.mjs",
+    "cd npm | node ../tests/run.mjs",
+    "node tests/$(echo x).mjs; true",
+    "node tests/run.mjs; node <<EOF\nx\nEOF",
+    "node tests/run.mjs && python3 < s.py",
+    "node tests/run.mjs || bash -c 'rm -rf build'",
+    "node *.mjs && true",
+    "true; do node -e 1; done",
+    "true && time python3 -c 'print(1)'",
+    "ls /opt > out.txt && touch /opt/x",
+    "ls /opt 2>/dev/null; touch /opt/x",
+  ]) {
+    for (const level of ["yolo", "headless"]) {
+      eq(
+        decide(level, command) === "allow",
+        false,
+        `${level} still refuses: ${command}`,
+      );
+    }
+  }
+  // cd in ein Projektunterverzeichnis verschiebt die Auflösung relativer Pfade.
+  eq(
+    decide("yolo", "cd npm && node ../tests/run.mjs"),
+    "allow",
+    "cd into a project directory resolves relative script paths from there",
+  );
+  eq(
+    decide("yolo", "node ../tests/run.mjs"),
+    "block",
+    "without the cd the same relative path leaves the project",
+  );
+});
+
 await test("command lookups are classified as read-only diagnostics", () => {
   if (!permissionPolicy) return;
   const cwd = process.cwd();
