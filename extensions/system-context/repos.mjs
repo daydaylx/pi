@@ -88,10 +88,12 @@ export function repoSearchRoots(options = {}) {
 }
 
 function sanitize(value) {
-  // eslint-disable-next-line no-control-regex -- Steuerzeichen aus Dateinamen entfernen
-  return String(value)
-    .replace(/[\u0000-\u001F\u007F]/g, "")
-    .slice(0, 60);
+  return (
+    String(value)
+      // eslint-disable-next-line no-control-regex -- Steuerzeichen aus Dateinamen entfernen
+      .replace(/[\u0000-\u001F\u007F]/g, "")
+      .slice(0, 60)
+  );
 }
 
 export function discoverRepos(options = {}) {
