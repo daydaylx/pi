@@ -95,7 +95,16 @@ function isSystemProjectPolicyConfig(root: string, target: string): boolean {
 // leeres Subject und der Mensch würde blind bestätigen.
 const MAX_INPUT_PREVIEW = 300;
 
+/**
+ * Ohne UI endet der Lauf an einer Blockade, weil niemand bestätigen kann. Ein
+ * Subagent-Kind (`PI_SUBAGENT_CHILD=1`) beendet sich dagegen nicht: Eine
+ * einzelne verweigerte Aktion (etwa `node -e` im Verifier) soll nicht den
+ * ganzen, teuren Lauf mit Exit 1 abbrechen; das Modell erhält die Blockade und
+ * wählt einen anderen Weg. Wiederholte identische Blockaden beendet der
+ * Wiederholungsschutz weiterhin.
+ */
 function stopNonInteractive(ctx: ExtensionContext): { terminate?: true } {
+  if (process.env.PI_SUBAGENT_CHILD === "1") return {};
   return ctx.mode !== "tui" && !ctx.hasUI ? { terminate: true } : {};
 }
 

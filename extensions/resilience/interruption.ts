@@ -26,7 +26,8 @@ const READ_ONLY_TOOLS = new Set([
   "lsp_diagnostics",
   // Wartet nur auf laufende Subagenten, ändert den Workspace nicht.
   "wait",
-  // Checks may create artifacts; workspace fingerprinting detects changes.
+  // Prüfläufe schreiben höchstens Build-Artefakte, nie Quellen; ein
+  // unterbrochener Check ist deshalb keinen Hinweis wert.
   "project_check",
   "verify",
   "workspace_add",

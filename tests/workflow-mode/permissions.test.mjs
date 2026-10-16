@@ -702,6 +702,39 @@ await test("a rejected delegation does not end a headless run: the agent can fix
   await harness.runHooks("session_shutdown", {}, context);
 });
 
+await test("a subagent child keeps running after a block so the verifier is not lost to one refusal", async () => {
+  if (!modePermissions) return;
+  const previous = process.env.PI_SUBAGENT_CHILD;
+  process.env.PI_SUBAGENT_CHILD = "1";
+  try {
+    const harness = createHarness({ confirm: false, customResult: false });
+    modePermissions.default(harness.api);
+    const context = harness.makeContext({
+      cwd: process.cwd(),
+      mode: "print",
+      hasUI: false,
+      trusted: true,
+    });
+    await harness.runHooks("session_start", {}, context);
+    const results = await harness.runHooks(
+      "tool_call",
+      { toolName: "bash", input: { command: "node -e 'console.log(1)'" } },
+      context,
+    );
+    const block = results.find((result) => result?.block);
+    assert(block, "inline interpreter code is still blocked without a UI");
+    eq(
+      block.terminate,
+      undefined,
+      "the child receives the block and may continue with another approach",
+    );
+    await harness.runHooks("session_shutdown", {}, context);
+  } finally {
+    if (previous === undefined) delete process.env.PI_SUBAGENT_CHILD;
+    else process.env.PI_SUBAGENT_CHILD = previous;
+  }
+});
+
 await test("a headless block names its reason when the run ends", async () => {
   if (!modePermissions) return;
   const harness = createHarness({ confirm: false, customResult: false });
