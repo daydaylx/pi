@@ -255,6 +255,40 @@ function latestRecoveryState(entries: readonly unknown[]): {
   };
 }
 
+/**
+ * Gemeinsame Berichtszeilen für den Recovery-Check (Tool und automatische
+ * Prüfung beim Turn-Start), damit beide denselben Wortlaut liefern.
+ */
+function inspectionLines(
+  root: string,
+  snapshot: WorkspaceSnapshot,
+  gitStatus: string,
+  diffStat: string,
+  released: boolean,
+): string[] {
+  return [
+    `Projektwurzel: ${root}`,
+    released
+      ? "Recovery-Check abgeschlossen: Die Schreibsperre für diese Wurzel ist aufgehoben."
+      : "Kein offenes Recovery-Gate für diese Wurzel; der Workspace wurde geprüft.",
+    `Workspace-Fingerprint: ${snapshot.fingerprint}`,
+    `VCS: ${snapshot.vcs ?? "git"}`,
+    ...(snapshot.vcs === "none"
+      ? [`Filesystem-Einträge geprüft: ${snapshot.filesystemEntries}`]
+      : ["git status --short:", gitStatus.trim() || "(keine Änderungen)"]),
+    ...(diffStat.trim() ? ["git diff --stat:", diffStat.trim()] : []),
+    "",
+  ];
+}
+
+/** Anweisung, wenn der Workspace beim Turn-Start bereits automatisch geprüft wurde. */
+function autoCheckedInstruction(report: string, failedRoots: string[]): string {
+  const remaining = failedRoots.length
+    ? ` Für ${failedRoots.join(", ")} war die automatische Prüfung nicht möglich: rufe dort recovery_check auf, bevor du schreibst.`
+    : "";
+  return `Die vorherige Ausführung wurde unterbrochen oder endete mit einem Fehler. Der Workspace wurde beim Start dieses Laufs bereits geprüft, die Schreibsperre ist aufgehoben.${remaining} Bericht:\n${report}\nPrüfe diesen Bericht sowie die letzten validen Tool-Ergebnisse. Behandle vorhandene Änderungen als möglicherweise bereits ausgeführt. Wiederhole keine mutierende Aktion, bevor geklärt ist, ob sie bereits lief. Setze den Nutzerauftrag fort.`;
+}
+
 function recoveryInstruction(
   workspaceWasChanged: boolean,
   toolMayHaveMutatedWorkspace: boolean,
@@ -266,7 +300,20 @@ function recoveryInstruction(
     : "Die vorherige Ausführung wurde unterbrochen oder endete mit einem Fehler, ohne erkennbare Workspace-Mutation. Setze den Nutzerauftrag vom letzten validen Sessionpunkt aus fort; replaye keinen partiellen Tool-Call blind.";
 }
 
-export default function resilienceExtension(pi: ExtensionAPI): void {
+export interface ResilienceOptions {
+  /**
+   * Offene Recovery-Gates beim Turn-Start automatisch prüfen (Standard). Mit
+   * `false` bleibt das Gate bis zum manuellen `recovery_check` geschlossen; das
+   * ist der Rückfall und der Weg, die Gate-Sperre selbst zu testen.
+   */
+  autoInspect?: boolean;
+}
+
+export default function resilienceExtension(
+  pi: ExtensionAPI,
+  options: ResilienceOptions = {},
+): void {
+  const autoInspect = options.autoInspect !== false;
   let openTurn: OpenTurn | undefined;
   let sessionCwd = "";
   let activeContext: ExtensionContext | undefined;
@@ -636,6 +683,83 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
     };
   }
 
+  /**
+   * Prüft offene Recovery-Gates beim Turn-Start, statt das Modell erst gegen
+   * die Schreibsperre laufen zu lassen. Es ist derselbe lesende Check wie das
+   * Tool `recovery_check` (Snapshot, git status, git diff --stat) und schreibt
+   * dieselben Marker. Schlägt eine Wurzel fehl, bleibt ihr Gate offen und die
+   * Anweisung verweist auf das Tool.
+   */
+  async function inspectOpenGates(
+    ctx: ExtensionContext,
+    generation: number,
+    turnId: number,
+  ): Promise<{ report: string; failedRoots: string[] } | undefined> {
+    const openRoots = recoveryRootsForContext(ctx).filter((root) => {
+      const rootGate = gateForRoot(root);
+      return Boolean(
+        rootGate &&
+        gateRequiresInspection(rootGate.required) &&
+        !rootGate.checked,
+      );
+    });
+    if (openRoots.length === 0) return undefined;
+    const lines: string[] = [];
+    const failedRoots: string[] = [];
+    for (const root of openRoots) {
+      const checkedGate = gateForRoot(root);
+      const result = await collectWorkspaceSnapshot(root, {
+        signal: ctx.signal,
+      });
+      let gitStatus = "";
+      let diffStat = "";
+      let ok = result.ok;
+      if (result.ok && result.snapshot.vcs !== "none") {
+        try {
+          gitStatus = await gitText(root, ["status", "--short"], ctx.signal);
+          diffStat = await gitText(root, ["diff", "--stat"], ctx.signal).catch(
+            () => "(Diff-Zusammenfassung nicht verfügbar)",
+          );
+        } catch {
+          ok = false;
+        }
+      }
+      if (generation !== sessionGeneration || turnId !== turnGeneration)
+        return undefined;
+      const openRequired = checkedGate?.required;
+      if (
+        !ok ||
+        !result.ok ||
+        !openRequired ||
+        !sameGate(gateForRoot(root), checkedGate)
+      ) {
+        failedRoots.push(root);
+        continue;
+      }
+      const record: RecoveryCheckedMarker = {
+        schemaVersion: SCHEMA_VERSION,
+        timestamp: new Date().toISOString(),
+        turnStartedAt: openRequired.turnStartedAt,
+        workspaceFingerprint: result.snapshot.fingerprint,
+        workspaceRoot: root,
+      };
+      pi.appendEntry("resilience.recovery-checked", record);
+      rememberCheckedMarker(
+        root,
+        openRequired,
+        record,
+        ctx.sessionManager.getBranch(),
+      );
+      lines.push(
+        ...inspectionLines(root, result.snapshot, gitStatus, diffStat, true),
+      );
+    }
+    gate = gateForRoot(primaryWorkspaceRoot(ctx.cwd));
+    await updateRecoveryStatus();
+    if (lines.length === 0) return { report: "", failedRoots };
+    return { report: limitTextOutput(lines.join("\n")).text, failedRoots };
+  }
+
   function rememberRecovery(record: RecoveryRequiredMarker): void {
     pendingRecovery = {
       workspaceWasChanged: record.workspaceChangedSinceTurnStart,
@@ -774,15 +898,24 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
       activeMutatingToolCalls: new Set(),
     };
     pi.appendEntry("resilience.turn-start", marker);
-    if (!recovery) return;
+    const inspected = autoInspect
+      ? await inspectOpenGates(ctx, generation, turnId)
+      : undefined;
+    if (!recovery && !inspected?.report) return;
+    const instruction = inspected?.report
+      ? autoCheckedInstruction(inspected.report, inspected.failedRoots)
+      : recovery
+        ? recoveryInstruction(
+            recovery.workspaceWasChanged,
+            recovery.toolMayHaveMutatedWorkspace,
+            recovery.workspaceRoots,
+          )
+        : undefined;
+    if (!instruction) return;
     return {
       message: {
         customType: "pi-resilience-recovery",
-        content: recoveryInstruction(
-          recovery.workspaceWasChanged,
-          recovery.toolMayHaveMutatedWorkspace,
-          recovery.workspaceRoots,
-        ),
+        content: instruction,
         display: false,
       },
     };
@@ -1202,24 +1335,13 @@ export default function resilienceExtension(pi: ExtensionAPI): void {
 
       const lines = inspections.flatMap((inspection) => {
         const openRequired = inspection.gate?.required;
-        const statusText = inspection.gitStatus.trim() || "(keine Änderungen)";
-        return [
-          `Projektwurzel: ${inspection.root}`,
-          openRequired && gateRequiresInspection(openRequired)
-            ? "Recovery-Check abgeschlossen: Die Schreibsperre für diese Wurzel ist aufgehoben."
-            : "Kein offenes Recovery-Gate für diese Wurzel; der Workspace wurde geprüft.",
-          `Workspace-Fingerprint: ${inspection.snapshot.fingerprint}`,
-          `VCS: ${inspection.snapshot.vcs ?? "git"}`,
-          ...(inspection.snapshot.vcs === "none"
-            ? [
-                `Filesystem-Einträge geprüft: ${inspection.snapshot.filesystemEntries}`,
-              ]
-            : ["git status --short:", statusText]),
-          ...(inspection.diffStat.trim()
-            ? ["git diff --stat:", inspection.diffStat.trim()]
-            : []),
-          "",
-        ];
+        return inspectionLines(
+          inspection.root,
+          inspection.snapshot,
+          inspection.gitStatus,
+          inspection.diffStat,
+          Boolean(openRequired && gateRequiresInspection(openRequired)),
+        );
       });
       const limited = limitTextOutput(lines.join("\n"));
       for (const root of inspections.map((inspection) => inspection.root)) {

@@ -233,7 +233,7 @@ export const resilienceSections = {
           },
         ],
       });
-      resilience.default(resumed.api);
+      resilience.default(resumed.api, { autoInspect: false });
       const resumedCtx = resumed.makeContext({ cwd: ROOT });
       await resumed.runHooks("session_start", {}, resumedCtx);
       eq(
@@ -291,7 +291,7 @@ export const resilienceSections = {
           },
         ],
       });
-      resilience.default(resumedFinalFailure.api);
+      resilience.default(resumedFinalFailure.api, { autoInspect: false });
       const finalFailureCtx = resumedFinalFailure.makeContext({ cwd: ROOT });
       await resumedFinalFailure.runHooks("session_start", {}, finalFailureCtx);
       eq(
@@ -309,10 +309,109 @@ export const resilienceSections = {
         "resume after a persisted final failure still injects recovery guidance",
       );
 
+      // --- Automatische Prüfung beim Turn-Start ---
+      // Gemessen: 314 Schreib-/Shell-Blockaden durch das Gate, weil das Modell
+      // trotz Anweisung zuerst schrieb. Der Start prüft jetzt selbst.
+      const failedEntries = [
+        {
+          type: "custom",
+          customType: "resilience.turn-start",
+          data: {
+            schemaVersion: 2,
+            timestamp: "2026-10-08T08:00:00.000Z",
+            workspaceFingerprint: "unavailable",
+            provider: "provider",
+            model: "model",
+            contextPercent: 10,
+          },
+        },
+        {
+          type: "custom",
+          customType: "resilience.recovery-required",
+          data: {
+            schemaVersion: 2,
+            timestamp: "2026-10-08T08:00:02.000Z",
+            turnStartedAt: "2026-10-08T08:00:00.000Z",
+            reason: "final_failure",
+            workspaceChangedSinceTurnStart: true,
+            toolMayHaveMutatedWorkspace: true,
+          },
+        },
+      ];
+      const autoChecked = createHarness({ entries: failedEntries });
+      modePermissions.default(autoChecked.api);
+      resilience.default(autoChecked.api);
+      const autoCtx = autoChecked.makeContext({ cwd: ROOT });
+      await autoChecked.runHooks("session_start", {}, autoCtx);
+      const autoTurn = await autoChecked.runHooks(
+        "before_agent_start",
+        {},
+        autoCtx,
+      );
+      const autoMessage = autoTurn.at(-1)?.message;
+      assert(
+        autoMessage?.content.includes("bereits geprüft") &&
+          autoMessage.content.includes("git status --short"),
+        "an open recovery gate is inspected at turn start and the report is injected",
+      );
+      assert(
+        !autoMessage.content.includes("Rufe zuerst recovery_check auf"),
+        "the model is not asked to call recovery_check again",
+      );
+      eq(
+        autoChecked.appended.filter(
+          (entry) => entry.customType === "resilience.recovery-checked",
+        ).length,
+        1,
+        "the automatic inspection persists the same checked marker as the tool",
+      );
+      await autoChecked.runHooks("agent_start", {}, autoCtx);
+      const autoWrite = await autoChecked.runHooks(
+        "tool_call",
+        {
+          toolName: "write",
+          toolCallId: "auto-write",
+          input: { path: "after-auto-check.txt", content: "x" },
+        },
+        autoCtx,
+      );
+      assert(
+        !autoWrite.some(
+          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+        ),
+        "after the automatic inspection the recovery gate no longer blocks writes",
+      );
+
+      // Ist der Workspace nicht lesbar, bleibt das Gate zu und die Anweisung
+      // verweist wie bisher auf recovery_check.
+      const unreadable = createHarness({ entries: failedEntries });
+      modePermissions.default(unreadable.api);
+      resilience.default(unreadable.api);
+      const unreadableCtx = unreadable.makeContext({
+        cwd: "/nonexistent/pi-recovery-auto-check",
+      });
+      await unreadable.runHooks("session_start", {}, unreadableCtx);
+      const unreadableTurn = await unreadable.runHooks(
+        "before_agent_start",
+        {},
+        unreadableCtx,
+      );
+      assert(
+        unreadableTurn.at(-1)?.message?.content.includes("recovery_check"),
+        "a failed automatic inspection falls back to the recovery_check instruction",
+      );
+      eq(
+        unreadable.appended.filter(
+          (entry) => entry.customType === "resilience.recovery-checked",
+        ).length,
+        0,
+        "a failed automatic inspection writes no checked marker",
+      );
+
       // --- Recovery-Gate: Schreibsperre bis zum recovery_check ---
       const gateHarness = createHarness();
       modePermissions.default(gateHarness.api);
-      resilience.default(gateHarness.api);
+      resilience.default(gateHarness.api, { autoInspect: false });
       const gateCtx = gateHarness.makeContext({ cwd: ROOT });
       await gateHarness.runHooks("session_start", {}, gateCtx);
       await gateHarness.runHooks("before_agent_start", {}, gateCtx);
@@ -579,7 +678,7 @@ export const resilienceSections = {
         ],
       });
       modePermissions.default(deniedAttempt.api);
-      resilience.default(deniedAttempt.api);
+      resilience.default(deniedAttempt.api, { autoInspect: false });
       const deniedAttemptCtx = deniedAttempt.makeContext({ cwd: ROOT });
       await deniedAttempt.runHooks("session_start", {}, deniedAttemptCtx);
       await deniedAttempt.runHooks("before_agent_start", {}, deniedAttemptCtx);
