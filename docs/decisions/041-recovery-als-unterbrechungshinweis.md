@@ -145,3 +145,22 @@ Die Policy bleibt wie entschieden. Eigenständige Risiken, die weder Recovery no
   Schreibzielprüfung).
 - Weiterhin offen und bewusst nicht gelöst: Interpreter-Skripte lesen und schreiben beliebig, sobald
   sie als Projektskript gelten; die Policy prüft die Befehlsform, nicht den Inhalt (ADR 022).
+
+## Unabhängige Prüfung und Praxistests (2026-10-16)
+
+- Ein echter Pi-Verifier prüfte die Hard-Pfad-Änderungen in einer isolierten Kopie. Erster Lauf: FAIL
+  wegen der absichtlich entfernten Schreibsperre (der Auftrag nannte ADR 041 nicht) sowie zwei
+  Hinweisen: `project_check`/`verify` gelten als lesend (bleibt so: Prüfläufe schreiben höchstens
+  Build-Artefakte) und der `.pi-subagents`-Ausschluss gilt auf jeder Tiefe (bleibt so: bei einem
+  Start im Unterverzeichnis liegen die Artefakte dort). Zwei weitere Läufe scheiterten daran, dass
+  eine einzelne verweigerte Aktion (`node -e`, löschender Schritt) das Verifier-Kind ohne UI
+  beendete — behoben (Subagent-Kinder terminieren nicht mehr an einer Blockade). Danach
+  `PASS_WITH_WARNINGS` ohne Befund an den geänderten Hard-Pfaden; die Prüftiefe war begrenzt (der
+  Verifier lief andere Tests als beauftragt, die geforderten Suiten wurden danach selbst ausgeführt).
+- In `pi -p --approve` erbt das Verifier-Kind die einmalige Freigabe nicht; ohne Eintrag in
+  `trust.json` sind seine `bash`-Aufrufe durch die Trust-Grenze gesperrt. Es bleibt eine Einschränkung
+  dieses Weges.
+- Praxistests mit echtem Provider (isolierte Kopie): `pi -p`, `pis` (offene Policy: `echo > /tmp/…`
+  ohne Rückfrage, `rm` mit Rückfrage), TUI (Shift+Tab-Skillliste, `ask_user` ohne Pflichtfelder,
+  Rückfragedialog, Esc-Abbruch), unterbrochene Sitzung (der nächste Lauf prüft zuerst den Stand),
+  Verifier (`user_requested` nach der Ablehnung, kein `stale` mehr).
