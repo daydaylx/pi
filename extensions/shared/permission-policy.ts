@@ -1777,7 +1777,17 @@ export function classifyOperationEffect(
     if (
       executable === "find" &&
       args.some((arg) =>
-        ["-delete", "-exec", "-execdir", "-ok", "-okdir"].includes(arg),
+        [
+          "-delete",
+          "-exec",
+          "-execdir",
+          "-ok",
+          "-okdir",
+          "-fprint",
+          "-fprint0",
+          "-fprintf",
+          "-fls",
+        ].includes(arg),
       )
     )
       return "MUTATING";
@@ -2001,10 +2011,27 @@ export function isRecoveryReadOnlyCommand(
   command: string,
   cwd: string,
 ): boolean {
+  // `2>&1` and `>/dev/null` write nowhere; every other redirect stays visible
+  // to the single-command parser below and fails closed.
+  const stripped = withoutHarmlessRedirects(command).trim();
+  if (!parseReadOnlyShell(stripped).error) {
+    return isRecoveryDiagnosticCommand(stripped, cwd);
+  }
+  // A pipeline or chain is read-only only if every part is an independent
+  // diagnostic command: `git status 2>&1 | head`, `grep x f && wc -l f`.
+  const segments = splitCompoundShell(stripped);
+  return (
+    segments !== undefined &&
+    segments.every((segment) => isRecoveryDiagnosticCommand(segment.raw, cwd))
+  );
+}
+
+function isRecoveryDiagnosticCommand(command: string, cwd: string): boolean {
+  // `cmd || true` keeps a diagnostic's exit code out of the way.
+  if (command === "true" || command === "false") return true;
   const parsed = parseReadOnlyShell(command);
   if (parsed.error || parsed.segments.length !== 1) return false;
-  const tokens = parsed.segments[0];
-  const check = executableToken(tokens);
+  const check = executableToken(parsed.segments[0]);
   if (
     !check.raw ||
     check.viaEnv ||
@@ -2423,6 +2450,8 @@ const SHELL_PREFIX_WORDS = new Set([
 
 interface ShellSegment {
   tokens: string[];
+  /** Source text of the segment, redirections included. */
+  raw: string;
   /** Operator in front of the segment; "" for the first one. */
   separator: "" | "&&" | "||" | ";" | "|" | "&";
 }
@@ -2442,17 +2471,28 @@ function splitCompoundShell(command: string): ShellSegment[] | undefined {
   let wordStarted = false;
   let quote: "'" | '"' | undefined;
   let separator: ShellSegment["separator"] = "";
+  let segmentStart = 0;
   const endWord = () => {
     if (wordStarted) tokens.push(word);
     word = "";
     wordStarted = false;
   };
-  const endSegment = (next: ShellSegment["separator"]): boolean => {
+  // `at` is the operator's index, `resume` the first character after it.
+  const endSegment = (
+    next: ShellSegment["separator"],
+    at: number,
+    resume: number,
+  ): boolean => {
     endWord();
     if (tokens.length === 0) return false;
-    segments.push({ tokens, separator });
+    segments.push({
+      tokens,
+      raw: command.slice(segmentStart, at).trim(),
+      separator,
+    });
     tokens = [];
     separator = next;
+    segmentStart = resume;
     return true;
   };
   for (let index = 0; index < command.length; index += 1) {
@@ -2491,7 +2531,9 @@ function splitCompoundShell(command: string): ShellSegment[] | undefined {
     if ("<(){}".includes(char)) return undefined;
     if (char === "#" && !wordStarted) return undefined;
     if (char === "\n") {
-      if (!endSegment(";") && tokens.length > 0) return undefined;
+      if (!endSegment(";", index, index + 1) && tokens.length > 0)
+        return undefined;
+      segmentStart = index + 1;
       continue;
     }
     if (/\s/.test(char)) {
@@ -2499,18 +2541,21 @@ function splitCompoundShell(command: string): ShellSegment[] | undefined {
       continue;
     }
     if (char === ";") {
-      if (!endSegment(";")) return undefined;
+      if (!endSegment(";", index, index + 1)) return undefined;
       continue;
     }
     if (char === "|") {
       const doubled = next === "|";
-      if (!endSegment(doubled ? "||" : "|")) return undefined;
-      if (doubled || next === "&") index += 1;
+      const length = doubled || next === "&" ? 2 : 1;
+      if (!endSegment(doubled ? "||" : "|", index, index + length))
+        return undefined;
+      index += length - 1;
       continue;
     }
     if (char === "&" && next !== ">") {
       const doubled = next === "&";
-      if (!endSegment(doubled ? "&&" : "&")) return undefined;
+      if (!endSegment(doubled ? "&&" : "&", index, index + (doubled ? 2 : 1)))
+        return undefined;
       if (doubled) index += 1;
       continue;
     }
@@ -2554,7 +2599,12 @@ function splitCompoundShell(command: string): ShellSegment[] | undefined {
   }
   if (quote) return undefined;
   endWord();
-  if (tokens.length > 0) segments.push({ tokens, separator });
+  if (tokens.length > 0)
+    segments.push({
+      tokens,
+      raw: command.slice(segmentStart).trim(),
+      separator,
+    });
   else if (separator !== "" && separator !== ";" && separator !== "&")
     return undefined;
   return segments.length > 0 ? segments : undefined;

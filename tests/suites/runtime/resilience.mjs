@@ -496,6 +496,14 @@ export const resilienceSections = {
         "git --no-pager diff --no-ext-diff --no-textconv --stat",
         "git --no-pager log -n 1",
         "git -C . status",
+        // Gemessen: 63 von 166 Recovery-Blockaden trafen Pipes, Ketten oder
+        // 2>&1 aus rein diagnostischen Befehlen. Jeder Teil wird einzeln
+        // bewiesen; Umleitungen in Dateien und Ersetzungen bleiben gesperrt.
+        "git status --short 2>&1",
+        "git status | head -20",
+        "git log -1 --oneline 2>/dev/null || true",
+        "grep -n needle README.md | wc -l",
+        "git diff --stat && git diff --check",
       ];
       for (const command of allowedDiagnosticCommands) {
         const freeDiagnosticBash = await gateHarness.runHooks(
@@ -521,7 +529,13 @@ export const resilienceSections = {
         "git diff --output=plan-write.txt",
         "git --no-pager diff --ext-diff",
         "git --no-pager diff --textconv",
-        "git status | head -20",
+        "git status | tee out.txt",
+        "git status > out.txt",
+        "git status && rm -rf build",
+        "git status; touch a",
+        "git status | sh",
+        "find . -fprint out.txt",
+        "git log $(rm -rf build)",
         "sh -c 'git status'",
         "./git status",
         "./deploy.sh",
