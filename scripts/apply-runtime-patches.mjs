@@ -210,6 +210,25 @@ function applyConfiguredExtensionOrder(resolved, overrides, fallbackBaseDir) {
         return {
             extensions: mapToResolved(accumulator.extensions, extensionOverrides),`,
   },
+  {
+    id: "trust-manager-setup-resources",
+    file: "dist/core/trust-manager.js",
+    summary:
+      "Pi-Setup-Projektdateien (.pi/verify.json, setup.json, lsp.json) als vertrauenspflichtig melden",
+    detect: "// P1: Pi-Setup-Projektdateien lösen die Vertrauensabfrage aus",
+    anchor: `    "SYSTEM.md",
+    "APPEND_SYSTEM.md",
+];`,
+    replacement: `    "SYSTEM.md",
+    "APPEND_SYSTEM.md",
+    // P1: Pi-Setup-Projektdateien lösen die Vertrauensabfrage aus. Ohne sie
+    // gilt ein Projekt mit nur .pi/verify.json als vertraut, und project_check
+    // führt dessen Programme ohne Abfrage aus.
+    "verify.json",
+    "setup.json",
+    "lsp.json",
+];`,
+  },
   // P1-RETIRED (0.84.3): "agent-session-compaction-failure-manual" and
   // "agent-session-compaction-failure-auto" used to hand-emit a
   // `session_compact_failed` event from compact()'s catch block and from
@@ -304,6 +323,14 @@ export const BUNDLE_PATCHES = [
       "return resolved.filter(entry=>{let canonicalPath=canonicalizePath(entry.path);return seen.has(canonicalPath)?!1:(seen.add(canonicalPath),!0)})};" +
       "let globalSettings=this.settingsManager.getGlobalSettings(),extensionOverrides=[...(globalSettings.extensions??[])];" +
       "return{extensions:mapToResolved(accumulator.extensions,extensionOverrides),skills:mapToResolved(accumulator.skills),prompts:mapToResolved(accumulator.prompts),themes:mapToResolved(accumulator.themes)}}",
+  },
+  {
+    id: "bundle-trust-manager-setup-resources",
+    summary: "Pi-Setup-Projektdateien als vertrauenspflichtig melden (Bundle)",
+    detect: '"APPEND_SYSTEM.md","verify.json","setup.json","lsp.json"]',
+    anchor: '"SYSTEM.md","APPEND_SYSTEM.md"];function normalizeCwd',
+    replacement:
+      '"SYSTEM.md","APPEND_SYSTEM.md","verify.json","setup.json","lsp.json"];function normalizeCwd',
   },
 ];
 

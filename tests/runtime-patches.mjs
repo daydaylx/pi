@@ -186,6 +186,7 @@ check("patches stay within the allowlisted runtime files", () => {
     "dist/core/extensions/loader.js",
     "dist/core/extensions/runner.js",
     "dist/core/package-manager.js",
+    "dist/core/trust-manager.js",
     "dist/modes/interactive/interactive-mode.js",
   ]);
   for (const patch of PATCHES) {

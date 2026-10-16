@@ -136,6 +136,42 @@ for (const patch of BUNDLE_PATCHES) {
   );
 }
 
+// Pi-Setup-Projektdateien müssen die Vertrauensabfrage auslösen. Ohne den
+// Patch `trust-manager-setup-resources` gilt ein Projekt mit nur
+// `.pi/verify.json` als vertraut und `project_check` führt dessen Programme
+// ohne Abfrage aus (Agententest 2026-10-16).
+{
+  const { hasTrustRequiringProjectResources } = await import(
+    `${RUNTIME_ROOT}/dist/core/trust-manager.js`
+  );
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } =
+    await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const base = mkdtempSync(join(tmpdir(), "pi-trust-resources-"));
+  try {
+    const empty = join(base, "empty");
+    mkdirSync(empty);
+    assert.equal(
+      hasTrustRequiringProjectResources(empty),
+      false,
+      "a project without .pi resources needs no trust prompt",
+    );
+    for (const file of ["verify.json", "setup.json", "lsp.json"]) {
+      const project = join(base, file);
+      mkdirSync(join(project, ".pi"), { recursive: true });
+      writeFileSync(join(project, ".pi", file), "{}\n");
+      assert.equal(
+        hasTrustRequiringProjectResources(project),
+        true,
+        `.pi/${file} must require project trust`,
+      );
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+}
+
 const { createEventBus } = await import(
   `${RUNTIME_ROOT}/dist/core/event-bus.js`
 );

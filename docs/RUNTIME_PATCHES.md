@@ -258,6 +258,26 @@ verbliebenen acht Einträgen besteht `tests/p1-runtime.mjs`. Die bereits
 installierte Runtime trägt die alten Änderungen weiter, bis sie neu installiert
 wird; nichts hängt daran.
 
+## Trust-Gate für Pi-Setup-Dateien (2026-10-16)
+
+Ein echter Agentenlauf (`pi -p`) in einem Projekt mit nur `.pi/verify.json`
+führte `project_check` ohne Vertrauensabfrage aus: Upstream fragt nur, wenn
+`hasTrustRequiringProjectResources()` (`dist/core/trust-manager.js`) eine der
+eigenen Ressourcen (`settings.json`, `mcp.json`, `extensions`, `skills`,
+`prompts`, `themes`, `SYSTEM.md`, `APPEND_SYSTEM.md`) findet, und meldet sonst
+`trusted = true`, ohne das `project_trust`-Extension-Event auszulösen. Ein
+Extension-Hook kann die Lücke deshalb nicht schließen.
+
+Der Patch `trust-manager-setup-resources` (und im Bundle
+`bundle-trust-manager-setup-resources`) ergänzt die Liste um `verify.json`,
+`setup.json` und `lsp.json`. Damit greifen Abfrage, Trust-Store,
+`--approve`/`--no-approve` und `defaultProjectTrust` für diese Dateien wie für
+Upstream-Ressourcen; ohne UI gilt das Projekt als nicht vertraut. Ein
+Wurzel-`setup.json` (ohne `.pi/`) bleibt davon unberührt; die Projektschicht
+darf Berechtigungen nicht lockern und keine Kommandos setzen
+(`applyTrustedProjectLayer`). Sollte Upstream die Liste erweitern oder ein
+Hook für nicht erkannte Ressourcen anbieten, entfällt der Patch.
+
 ## Warum die verbliebenen Patches
 
 | Patch (Quelle + Bundle)                   | Wirkung                                                                                                                  | Native Alternative                                                                                                                                                                                                       |
