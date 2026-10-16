@@ -147,6 +147,17 @@ const HEALTHY_SESSION = [
   },
   {
     type: "custom",
+    customType: "verifier-run",
+    timestamp: "2026-08-18T10:04:30.000Z",
+    data: {
+      timestamp: "2026-08-18T10:04:30.000Z",
+      agent: "verifier",
+      status: "stale",
+      reason: "workspace-mutated",
+    },
+  },
+  {
+    type: "custom",
     customType: "resilience.compaction-boundary",
     timestamp: "2026-08-18T10:05:00.000Z",
     data: {
@@ -287,6 +298,11 @@ await test("session health separates interactive errors from raw history", () =>
       report.verifier.byVerdict.PASS_WITH_WARNINGS,
       1,
       "the verdict is reported",
+    );
+    eq(
+      report.verifier.stale,
+      1,
+      "a run whose workspace changed meanwhile is stale, not completed",
     );
     eq(report.verifier.incomplete, 1, "an aborted verifier run is incomplete");
     eq(

@@ -45,6 +45,8 @@ export interface SessionHealthPermissions {
 
 export interface SessionHealthVerifier {
   completed: number;
+  /** Läufe, deren Urteil nicht zählt, weil sich der Workspace währenddessen änderte. */
+  stale: number;
   incomplete: number;
   byVerdict: Record<string, number>;
   incompleteReasons: Record<string, number>;
@@ -109,6 +111,7 @@ export function emptySessionHealthReport(): SessionHealthReport {
     },
     verifier: {
       completed: 0,
+      stale: 0,
       incomplete: 0,
       byVerdict: {},
       incompleteReasons: {},
@@ -363,7 +366,9 @@ export function aggregateSessionEntries(
       reason?: unknown;
     }>(rawEntry, "verifier-run");
     if (verifierRun) {
-      if (verifierRun.status === "incomplete") {
+      if (verifierRun.status === "stale") {
+        report.verifier.stale += 1;
+      } else if (verifierRun.status === "incomplete") {
         report.verifier.incomplete += 1;
         bump(
           report.verifier.incompleteReasons,
@@ -435,7 +440,7 @@ export function formatSessionHealth(report: SessionHealthReport): string {
     `    nach Provider: ${formatCounts(report.failures.byProvider)}`,
     `    nach Phase: ${formatCounts(report.failures.byPhase)}`,
     `  Berechtigungen: ${report.permissions.transitions} Übergänge · ${report.permissions.yoloOverrides} YOLO-Overrides · ${report.permissions.denied} verweigert (${report.permissions.deniedYoloAttempts} YOLO-Versuche)`,
-    `  Verifier: ${report.verifier.completed} abgeschlossen (${formatCounts(report.verifier.byVerdict)}) · ${report.verifier.incomplete} unvollständig (${formatCounts(report.verifier.incompleteReasons)})`,
+    `  Verifier: ${report.verifier.completed} abgeschlossen (${formatCounts(report.verifier.byVerdict)}) · ${report.verifier.stale} veraltet (Workspace währenddessen geändert) · ${report.verifier.incomplete} unvollständig (${formatCounts(report.verifier.incompleteReasons)})`,
     ...formatUsage(report.usage),
     `  Kompaktierungen fehlgeschlagen: ${report.compactionFailures}`,
     "  Hinweis: run-history.jsonl ist eine rohe Test-/Legacy-Historie und fließt nicht in diese Auswertung ein. Sessions ohne verifier-run-Einträge (Altbestand) erscheinen in der Verifier-Zeile nicht.",
