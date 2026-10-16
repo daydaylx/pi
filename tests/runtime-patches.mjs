@@ -168,7 +168,6 @@ check("the patch set covers what p1-runtime.mjs verifies", () => {
   // P1-RETIRED comments in scripts/apply-runtime-patches.mjs.
   const runtimeMarkers = [
     "applyConfiguredExtensionOrder",
-    "const builtinCommands = BUILTIN_SLASH_COMMANDS.map",
     "submitSlashCommand: async (commandLine)",
     "P1: terminal input listeners are editor-scoped",
   ];

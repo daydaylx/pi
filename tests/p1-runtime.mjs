@@ -69,11 +69,9 @@ assert.match(
   /applyConfiguredExtensionOrder/,
   "package manager honors explicit extension order",
 );
-assert.match(
-  sessionSource,
-  /const builtinCommands = BUILTIN_SLASH_COMMANDS\.map/,
-  "command inventory includes Pi built-ins",
-);
+// Retired 2026-10-16: the built-in command inventory patch (see
+// scripts/apply-runtime-patches.mjs). The installed runtime may still carry it;
+// nothing requires it.
 // Retired in 0.84.3: "agent-session-compaction-failure-manual" and
 // "agent-session-compaction-failure-auto" used to hand-emit
 // session_compact_failed from compact()'s catch block and from

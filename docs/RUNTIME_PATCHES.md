@@ -162,7 +162,7 @@ den Bundle) — sie kommen fertig aus dem npm-Tarball, ohne dass `npm install`
 im Wurzel-Repo sie neu erzeugt. Patches an den unbebündelten Dateien haben
 deshalb keinerlei Wirkung auf den tatsächlich laufenden `pi`-Prozess.
 
-`BUNDLE_PATCHES` in `scripts/apply-runtime-patches.mjs` trägt dieselben sechs
+`BUNDLE_PATCHES` in `scripts/apply-runtime-patches.mjs` trägt dieselben
 Eingriffe wie `PATCHES`, von Hand an die minifizierte Form angepasst:
 
 - Keine Zeilenumbrüche/Leerzeichen zwischen Tokens — die Anker sind daher
@@ -172,10 +172,8 @@ Eingriffe wie `PATCHES`, von Hand an die minifizierte Form angepasst:
   `createSyntheticSourceInfo`, …) überleben esbuilds Standard-Minifizierung
   unverändert; nur lokale `let`/`const`-Bezeichner und Funktionsparameter
   können umbenannt sein (z. B. `path` → `path14` bei einer Namenskollision).
-- "agent-session-builtin-command-import" und "agent-session-complete-command-inventory"
-  sind zu einem Eintrag (`bundle-agent-session-command-inventory`)
-  zusammengelegt, weil beide denselben `getCommands`-Closure-Body treffen und
-  im minifizierten Ein-Zeiler nicht unabhängig voneinander anwendbar sind.
+- Das Command-Inventar (`bundle-agent-session-command-inventory`) wurde am
+  2026-10-16 ausgemustert, siehe **Retirement (2026-10-16)**.
 
 Jeder `BUNDLE_PATCHES`-Eintrag trägt bewusst **kein** `file`-Feld: Der
 Chunk-Dateiname (`chunk-E5KXRMZK.js` zum Zeitpunkt dieser Entdeckung) ist ein
@@ -186,9 +184,6 @@ patcht die eine Datei, die den Anker tatsächlich enthält — nach derselben
 
 ## Umfang
 
-- `dist/core/agent-session.js`: `pi.getCommands()` liefert zusätzlich die 22
-  Built-ins und nur dann Skill-Commands, wenn Skill-Commands in den Settings
-  aktiviert sind.
 - `dist/modes/interactive/interactive-mode.js`: Die Extension-UI erhält
   `submitSlashCommand()`. Es akzeptiert genau eine Slash-Zeile und reicht sie
   an denselben Dispatcher wie eine manuelle Eingabe weiter. Außerdem werden
@@ -242,20 +237,38 @@ Methode, nicht auf den ursprünglich gemeinten Ort). `tests/p1-runtime.mjs`
 prüft seit diesem Retirement direkt den nativen `_emitSessionCompactFailed()`-
 Mechanismus statt der alten Patch-Marker.
 
+## Retirement (2026-10-16)
+
+Die Patches `agent-session-builtin-command-import`,
+`agent-session-complete-command-inventory` (und im Bundle
+`bundle-agent-session-command-inventory`) ergänzten `pi.getCommands()` um Pi-Built-ins
+und koppelten Skill-Commands an `enableSkillCommands`. Geprüft gegen den Code:
+
+- Der einzige Verbraucher ist das Command-Center (`extensions/shared/command-center.ts`).
+  Es zeigt Built-ins aus dem eigenen Katalog (`command-catalog.ts`); der Abgleich
+  mit `BUILTIN_SLASH_COMMANDS` der Runtime 1.2.0 ergibt als einzige Differenz
+  `/bug` (Fehlerbericht an die Pi-Entwickler). Mit dem Patch erschien `/bug` als
+  Eintrag mit dem falschen Abzeichen „ERWEITERUNG"; ohne ihn fehlt er, was
+  gewollt ist.
+- `enableSkillCommands` steht auf dem Standardwert `true`; die Kopplung hatte
+  keine Wirkung.
+
+Der Patch war damit ohne nachweisbaren Nutzen. Ein frischer `1.2.0`-Bundle mit den
+verbliebenen acht Einträgen besteht `tests/p1-runtime.mjs`. Die bereits
+installierte Runtime trägt die alten Änderungen weiter, bis sie neu installiert
+wird; nichts hängt daran.
+
 ## Warum die verbliebenen Patches
 
-Ohne den Reihenfolge-Patch ist die Sortierung innerhalb einer Präzedenzstufe die
-Verzeichnis-Scan-Reihenfolge, nicht die in `settings.json` deklarierte.
+| Patch (Quelle + Bundle)                   | Wirkung                                                                                                                  | Native Alternative                                                                                                                                                                                                       |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `interactive-submit-slash-command`        | Shortcuts und Menü führen Built-ins (`/model`, `/thinking`, `/login` …) wie eine getippte Zeile aus.                     | Nur für Extension-Commands: `pi.sendUserMessage("/x", { expandPromptTemplates: true })`. Built-ins kennt allein `InteractiveMode.onSubmit`; es gibt keine API.                                                           |
+| `interactive-focus-scoped-terminal-input` | Globale Eingabe-Listener (Escape-Abbruch eines Slash-Subagent-Laufs) greifen nicht vor fokussierten Selectoren.          | Keine; der Fleet-Dock, der es ursprünglich auslöste, ist abgeschaltet (`ui.fleetView: false`). Der Patch ist ein Schutz für den Slash-Lauf und entfällt, sobald der Fork den Listener selbst begrenzt.                   |
+| `package-manager-order-helper/-use`       | `+extensions/…`-Einträge laden in der deklarierten Reihenfolge (Tool-Call-Handler: `setup-core` vor `mode-permissions`). | Keine; Upstream sortiert innerhalb einer Rangstufe nach Verzeichnisscan. Ein einzelner Sammel-Einstiegspunkt würde die Reihenfolge in Code legen, nähme aber das Ein-/Ausschalten je Extension über `settings.json` weg. |
 
-Ohne Inventar- und Dispatcher-Patch könnte `/commands` weder Pi-Built-ins
-vollständig anzeigen noch einen gewählten Eintrag direkt ausführen. Shortcuts,
-Menü und manuelle Slash-Eingabe würden dann unterschiedliche Ausführungswege
-verwenden.
-
-Ohne die Fokusgrenze laufen globale Extension-Terminal-Listener vor der
-fokussierten Komponente. Ein Fleet-Dock, das bei leerem Editor Pfeil runter zur
-Aktivierung verwendet, kann dadurch dieselbe Taste in einem sichtbaren Selector
-verschlucken und anschließend auch Escape konsumieren.
+Für alle drei gilt: ein Upstream-Vorschlag wäre der saubere Weg (API für
+Built-in-Dispatch aus Extensions, deklarierte Ladereihenfolge). Er wird hier nicht
+eingereicht, weil das eine Veröffentlichung in einem fremden Repository wäre.
 
 ## Upgrade-Gate
 

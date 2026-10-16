@@ -54,71 +54,12 @@ export const EXPECTED_RUNTIME_VERSION = "1.2.0";
  * exact untouched text it replaces. Both must be unambiguous.
  */
 export const PATCHES = [
-  {
-    id: "agent-session-builtin-command-import",
-    file: "dist/core/agent-session.js",
-    summary: "Built-in Slash-Commands für das Extension-Inventar importieren",
-    detect: 'import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.js";',
-    anchor: `import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath } from "./source-info.js";`,
-    replacement: `import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath } from "./source-info.js";
-import { BUILTIN_SLASH_COMMANDS } from "./slash-commands.js";`,
-  },
-  {
-    id: "agent-session-complete-command-inventory",
-    file: "dist/core/agent-session.js",
-    summary: "pi.getCommands() um Built-ins und aktive Skills ergänzen",
-    detect: "const builtinCommands = BUILTIN_SLASH_COMMANDS.map",
-    anchor: `        const getCommands = () => {
-            const extensionCommands = runner.getRegisteredCommands().map((command) => ({
-                name: command.invocationName,
-                description: command.description,
-                source: "extension",
-                sourceInfo: command.sourceInfo,
-            }));
-            const templates = this.promptTemplates.map((template) => ({
-                name: template.name,
-                description: template.description,
-                source: "prompt",
-                sourceInfo: template.sourceInfo,
-            }));
-            const skills = this._resourceLoader.getSkills().skills.map((skill) => ({
-                name: \`skill:\${skill.name}\`,
-                description: skill.description,
-                source: "skill",
-                sourceInfo: skill.sourceInfo,
-            }));
-            return [...extensionCommands, ...templates, ...skills];
-        };`,
-    replacement: `        const getCommands = () => {
-            const builtinCommands = BUILTIN_SLASH_COMMANDS.map((command) => ({
-                name: command.name,
-                description: command.description,
-                source: "builtin",
-                sourceInfo: createSyntheticSourceInfo(\`<builtin-command:\${command.name}>\`, { source: "builtin" }),
-            }));
-            const extensionCommands = runner.getRegisteredCommands().map((command) => ({
-                name: command.invocationName,
-                description: command.description,
-                source: "extension",
-                sourceInfo: command.sourceInfo,
-            }));
-            const templates = this.promptTemplates.map((template) => ({
-                name: template.name,
-                description: template.description,
-                source: "prompt",
-                sourceInfo: template.sourceInfo,
-            }));
-            const skills = this.settingsManager.getEnableSkillCommands()
-                ? this._resourceLoader.getSkills().skills.map((skill) => ({
-                    name: \`skill:\${skill.name}\`,
-                    description: skill.description,
-                    source: "skill",
-                    sourceInfo: skill.sourceInfo,
-                }))
-                : [];
-            return [...builtinCommands, ...extensionCommands, ...templates, ...skills];
-        };`,
-  },
+  // P1-RETIRED (2026-10-16): "agent-session-builtin-command-import" and
+  // "agent-session-complete-command-inventory" added Pi's built-in slash
+  // commands to pi.getCommands() and gated skills on enableSkillCommands. The
+  // command catalog already lists every built-in except /bug, so the only
+  // effect left was a mislabelled /bug entry in the command center. See
+  // docs/RUNTIME_PATCHES.md.
   {
     id: "interactive-submit-slash-command",
     file: "dist/modes/interactive/interactive-mode.js",
@@ -284,14 +225,11 @@ function applyConfiguredExtensionOrder(resolved, overrides, fallbackBaseDir) {
 export const BUNDLE_CHUNKS_DIR = "dist/bundle/chunks";
 
 /**
- * The same six edits as PATCHES, hand-adapted to the minified bundle form
+ * The same edits as PATCHES, hand-adapted to the minified bundle form
  * (no whitespace between tokens, local parameter names can differ from the
  * unbundled source — but `this.*` property access and top-level function
  * names survive esbuild's default minification unchanged, which is what
- * every anchor below relies on). "agent-session-builtin-command-import" and
- * "agent-session-complete-command-inventory" are folded into one entry
- * here because both touch the same `getCommands` closure and cannot be
- * applied independently once minified onto one line.
+ * every anchor below relies on).
  *
  * These have no `file` field: the bundle's chunk filename is a content
  * hash that a rebuild can change, so main() resolves each patch against
@@ -324,21 +262,6 @@ export const BUNDLE_PATCHES = [
       "onTerminalInput:handler=>this.addExtensionTerminalInputListener(handler)",
     replacement:
       "onTerminalInput:handler=>this.addExtensionTerminalInputListener(data=>this.ui.focusedComponent===this.editor?handler(data):void 0)",
-  },
-  {
-    id: "bundle-agent-session-command-inventory",
-    summary:
-      "pi.getCommands() um Built-ins und aktive Skills ergänzen (Bundle, kombiniert)",
-    detect: "let builtinCommands=BUILTIN_SLASH_COMMANDS.map(command=>",
-    anchor:
-      'let getCommands=()=>{let extensionCommands=runner.getRegisteredCommands().map(command=>({name:command.invocationName,description:command.description,source:"extension",sourceInfo:command.sourceInfo})),templates=this.promptTemplates.map(template=>({name:template.name,description:template.description,source:"prompt",sourceInfo:template.sourceInfo})),skills=this._resourceLoader.getSkills().skills.map(skill=>({name:`skill:${skill.name}`,description:skill.description,source:"skill",sourceInfo:skill.sourceInfo}));return[...extensionCommands,...templates,...skills]}',
-    replacement:
-      "let getCommands=()=>{" +
-      'let builtinCommands=BUILTIN_SLASH_COMMANDS.map(command=>({name:command.name,description:command.description,source:"builtin",sourceInfo:createSyntheticSourceInfo(`<builtin-command:${command.name}>`,{source:"builtin"})})),' +
-      'extensionCommands=runner.getRegisteredCommands().map(command=>({name:command.invocationName,description:command.description,source:"extension",sourceInfo:command.sourceInfo})),' +
-      'templates=this.promptTemplates.map(template=>({name:template.name,description:template.description,source:"prompt",sourceInfo:template.sourceInfo})),' +
-      'skills=this.settingsManager.getEnableSkillCommands()?this._resourceLoader.getSkills().skills.map(skill=>({name:`skill:${skill.name}`,description:skill.description,source:"skill",sourceInfo:skill.sourceInfo})):[];' +
-      "return[...builtinCommands,...extensionCommands,...templates,...skills]}",
   },
   {
     id: "bundle-package-manager-order-helper",
