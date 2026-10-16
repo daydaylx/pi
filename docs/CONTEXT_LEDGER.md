@@ -37,18 +37,13 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
   `frontend-server/` stellt externen Clients die öffentliche JSONL-API bereit
   (`docs/frontend-api.md`, Paket `@daydaylx/pi-frontend-protocol`);
   `verification.run` ist darüber nicht direkt aufrufbar.
-- **Planmodus** (ADR 012, 016, 020): nur `work`, `simple_plan`,
-  `detailed_plan`. Shift+Tab ist die einzige normale Steuerung; die Auswahl
-  wartet auf die nächste Nutzereingabe und startet keinen Turn. Pläne werden
-  ausschließlich über `plan_write` in die sitzungsbezogene Ablage
-  (`~/.pi/agent/plans/<workspace>/<session>.md`) geschrieben, sind
-  unverbindlicher Kontext und werden nur nach ausdrücklicher, hashgebundener
-  Freigabe umgesetzt. Arbeitsbaum-Mutationen sind unter YOLO 1 und 2 gesperrt,
-  nur YOLO 3 übergeht sie (ADR 029). Die feste Allowlist umfasst
-  Lese-/Diagnose-/Recovery-/Web-Fähigkeiten, `verify({check:"typecheck"})`,
-  begrenzte Diagnose-Bash und eine artefaktfreie temporäre Analyse-Spec;
-  Projekt-Skripte und `project_check` bleiben gesperrt.
-- **Bash-Klassifikation** (ADR 012, 022): Plan-, Readonly- und Recovery-Gate
+- **Planmodus entfernt** (ADR 035, ersetzt 012/020 und den Planteil von 016):
+  keine Workflow-Zustände, kein `plan_write`. Shift+Tab öffnet die
+  Skill-Auswahl (ADR 037); Planung läuft über normale Prompts.
+- **Task-Tier** (ADR 033, vereinfacht durch 039): nur Duplicate-Read-Guard und
+  Turn-Telemetrie `task-tier.turn`; keine FAST/DEEP-Klassen, keine
+  Thinking-Automatik, keine Subagent-/Verifier-Sperre.
+- **Bash-Klassifikation** (ADR 022): Readonly- und Recovery-Gate
   teilen ein normalisiertes Modell in `extensions/shared/permission-policy.ts`.
   Executables werden nur über `trustedExecutableName` aufgelöst,
   `git status/diff/log` nur mit konservativer Options-Allowlist,
@@ -137,7 +132,7 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
   `models.json`, `keybindings.json` und `web-search.json` im
   Agent-Verzeichnis.
 - Der Live-Smoke ist ohne authentifizierte TTY nicht durchführbar; Aurora-
-  Sichtbarkeit, Shift+Tab, Plan→Work-Handoff und Subagent-Aufruf bleiben
+  Sichtbarkeit, Shift+Tab-Skillauswahl und Subagent-Aufruf bleiben
   unbelegt (`docs/manual-smoke-checklist.md`).
 - P2: belegt ist nur die Aufteilung von `tests/suites/runtime.mjs`.
 
@@ -178,7 +173,7 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
   sind vorbereitet. Vor dem Dual-Smoke zuerst den kanonischen Audit-/Medium-
   Stand prüfen und die explizite Commit-Freigabe einholen.
 - Der Live-Smoke (#137) bleibt offen: Offline-Start/Shift+Tab ist geprüft,
-  Provider- und Plan/Work-Schritte sind noch nicht gelaufen.
+  Provider-Schritte und der TUI-Rundlauf (Shift+Tab-Skillauswahl, `pis`) sind noch nicht gelaufen.
 - Der Fork-Pin ist ein vollständiger, bei GitHub erreichbarer SHA, der den
   alten Pin enthält (aktuell `0364aaa`, Branch
   `feat/temporary-agent-spec`); `main` ist nicht automatisch der neueste

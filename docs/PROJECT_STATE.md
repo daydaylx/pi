@@ -2,6 +2,16 @@
 
 ## Aktuelle Arbeit
 
+Harness-Vereinfachung vom 2026-10-16 (Befund und Ergebnis:
+`~/Dokumente/Pi_Harness_Arbeitsordner_ClaudeCode_2026-10-16/reports/BEFUND_PHASE_A.md`),
+committet, gepusht und nach `~/.pi/agent` installiert: CI repariert (Verifier-
+Tests laufen gegen ein Fixture-Agent-Verzeichnis, `tests/shared/isolated-agent-dir.mjs`;
+Coverage-Baseline kennt `skill-select`), Task-Tier auf Duplicate-Read-Guard und
+Telemetrie reduziert (ADR 039), `wait` des Subagenten-Pakets erlaubt, Planmodus-
+und Task-Tier-Reste in `AGENTS.md`/Docs entfernt, Installer kopiert `types/` und
+räumt entfernte Dateien. `Verify` in GitHub Actions ist seit Lauf 291 grün
+(zuvor 40 Läufe rot).
+
 Audit-Umsetzung vom 2026-10-13 abgeschlossen, committet und gepusht (`main`
 bis `e9a2302`, Fork `feat/temporary-agent-spec` auf `0364aaa`). Entfernt:
 `second-opinion`, `diff-viewer`, `diff-learning`, LSP-Navigationstools,
@@ -25,11 +35,8 @@ verweisen auf `https://pi.dev/schemas/theme.schema.json`. Details:
 `docs/RUNTIME_PATCHES.md`.
 
 Zusätzlicher Auftrag „Pi Harness Update Paket“: P1 Context Capsule, P2
-Instruction Audit und P3 Task-Tier-Nachschärfung sind umgesetzt. P3 lässt
-Risikowörter allein höchstens NORMAL auslösen, sammelt Laufzeit-Risiken und
-ergänzt Anfangs-/Endklasse, Eskalationsgründe und False-Positive-Kandidaten in
-der Telemetrie. Der 30-Aufgaben-Vergleich in `tests/task-tier.test.mjs` ergibt
-9 Fehlklassifikationen mit der alten und 0 mit der neuen Heuristik. P4 ist als
+Instruction Audit und P3 Task-Tier-Nachschärfung waren umgesetzt (die
+Klassifikation aus P3 ist seit ADR 039 entfernt). P4 ist als
 isolierter, skill-only Agent-Plugin-PoC für `doc-diff` abgeschlossen:
 `experiments/agent-plugin-poc/`. Der Skill ist byte-identisch kopiert, das
 Manifest lokal geprüft; der Plugin-Host wurde nicht installiert oder gestartet.
@@ -118,6 +125,11 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 
 ## Letzte Verifikation
 
+- Harness-Vereinfachung (2026-10-16): `npm run verify` Exit 0 im Checkout und in
+  einem Klon mit leerem `HOME`; GitHub-Actions `Verify` Läufe 291–295 grün;
+  installiert, `pi`/`pis --version` 1.2.0, `npm --prefix ~/.pi/agent/npm run
+  typecheck` Exit 0. Unabhängige Durchsicht der Hard-Pfad-Diffs durch einen
+  lesenden Agenten (kein Pi-Verifier-Lauf).
 - `npm run verify` auf reinem HEAD (nur getrackte Dateien, frische Kopie):
   Exit 0, alle acht Stufen, 4856 Assertions ohne Fehler; Lint 0 Fehler.
 - Fork `pi-subagents` @ `0364aaa`: `typecheck` ok, Unit 1198/1198,
@@ -127,17 +139,19 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 - Installation: `pi --version` = 1.2.0, alle 11 Patches angewendet,
   `tests/p1-runtime.mjs` ok, Headless-Lauf `pi -p … --no-session` ok;
   `subagent list` nicht erneut geprüft.
-- Nicht belegt: interaktiver TUI-Rundlauf (Plan→Work, Shift+Tab) und die
+- Nicht belegt: interaktiver TUI-Rundlauf (Shift+Tab-Skillauswahl) und die
   Recovery-Rate nach den Fixes — es existieren noch keine neuen Sitzungen.
 
 ## Nächste Schritte
 
-1. Nach den ersten neuen Sitzungen `/session-health --days 7` ausführen und die
-   Recovery-Rate gegen die Messung vor den Fixes vergleichen; erst dann
-   Recovery weiter vereinfachen.
-2. Pi-Update-Änderungen (Pin 1.2.0, `before_agent_start`-Anpassungen, Themes,
-   Tests, Docs) reviewen und auf ausdrücklichen Auftrag committen/pushen; die
-   Installation ist bereits aktuell.
-3. Interaktiven Rundlauf gegen 1.2.0 nachholen (Plan→Work, Shift+Tab,
-   Hintergrund-Subagent-Meldung während Planmodus); laufende Pi-Sitzungen
-   vorher neu starten.
+1. TUI-Rundlauf nachholen: `pi` und `pis` starten, Shift+Tab-Skillauswahl wählen
+   und mit der nächsten Nachricht verbrauchen, `/reload` (Vormerkung muss
+   verschwinden); laufende Pi-Sitzungen vorher neu starten.
+2. Nach einigen Sitzungen `/session-health --days 7` und die neue Telemetrie
+   `task-tier.turn` (Schema 2) auswerten; nach etwa zwei Wochen ohne Guard-
+   Schaden Task-Tier ganz entfernen (Rückbau in ADR 039).
+3. Verifier-Fehlerquote klären (8 von 10 `error`-Läufen am 2026-10-07, `exit: 1`
+   ohne Text; das Subagenten-Paket müsste das Endurteil protokollieren) und
+   die Hard-Pfad-Änderungen dieser Runde (`tool-policy.ts`,
+   `recovery-capabilities.ts`, `session-state.ts`) in einer Pi-Sitzung durch
+   einen Verifier prüfen lassen.
