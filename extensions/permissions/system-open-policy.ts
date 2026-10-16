@@ -150,10 +150,15 @@ const COMMAND_PREFIXES = new Set([
   "setsid",
   "timeout",
 ]);
-const SYSTEM_PATH =
-  /^\/(?:etc|boot|usr|bin|sbin|lib|lib32|lib64|opt|root|sys|var\/lib|proc\/sys|dev\/(?:sd|nvme|vd|hd|mmcblk|dm-|loop|mapper|disk))(?:\/|$)/;
-const SYSTEM_WRITE_REDIRECT =
-  /(?:^|[^<>&0-9])>>?\s*["']?\/(?:etc|boot|usr|bin|sbin|lib|lib32|lib64|opt|root|sys|var\/lib|proc\/sys|dev\/(?:sd|nvme|vd|hd|mmcblk|dm-|loop|mapper|disk))(?:\/|\b)/;
+// Block-Geräte tragen Nummern und Suffixe (`/dev/sda1`, `/dev/nvme0n1p2`).
+const BLOCK_DEVICE =
+  "dev\\/(?:(?:sd|nvme|vd|hd|mmcblk|dm-|loop)[A-Za-z0-9_-]*|mapper|disk)";
+const SYSTEM_PATH = new RegExp(
+  `^\\/(?:etc|boot|usr|bin|sbin|lib|lib32|lib64|opt|root|sys|var\\/lib|proc\\/sys|${BLOCK_DEVICE})(?:\\/|$)`,
+);
+const SYSTEM_WRITE_REDIRECT = new RegExp(
+  `(?:^|[^<>&0-9])>>?\\s*["']?\\/(?:etc|boot|usr|bin|sbin|lib|lib32|lib64|opt|root|sys|var\\/lib|proc\\/sys|${BLOCK_DEVICE})(?:\\/|\\b|$)`,
+);
 const DOWNLOAD_TO_SHELL =
   /\b(?:curl|wget)\b[^|;&]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh)\b/i;
 
@@ -181,8 +186,9 @@ function gitRisk(tokens: readonly string[]): string | undefined {
         ? "git reset --hard verwirft Änderungen"
         : undefined;
     case "push":
+      // `:branch` löscht, `+refspec` erzwingt den Push.
       return flags.some((flag) => GIT_FORCE_FLAGS.has(flag)) ||
-        rest.some((token) => /^:[^\s]+$/.test(token))
+        rest.some((token) => /^[:+][^\s]+$/.test(token))
         ? "git push mit Force/Löschen überschreibt oder löscht Remote-Stände"
         : undefined;
     case "branch":
@@ -206,7 +212,9 @@ function gitRisk(tokens: readonly string[]): string | undefined {
 }
 
 /** Liefert den Grund, warum ein Shell-Kommando vorab bestätigt werden muss. */
-export function systemOpenBashRisk(command: string): SystemOpenRisk | undefined {
+export function systemOpenBashRisk(
+  command: string,
+): SystemOpenRisk | undefined {
   if (DOWNLOAD_TO_SHELL.test(command))
     return { reason: "Download wird direkt in eine Shell geleitet" };
   if (isSensitiveReference(command))
@@ -222,8 +230,7 @@ export function systemOpenBashRisk(command: string): SystemOpenRisk | undefined 
     if (!executable) continue;
     const names = new Set(segment.map((token) => basename(token)));
     for (const name of names) {
-      if (DELETE_EXECUTABLES.has(name))
-        return { reason: `Löschen (${name})` };
+      if (DELETE_EXECUTABLES.has(name)) return { reason: `Löschen (${name})` };
       if (DISK_EXECUTABLES.has(name) || name.startsWith("mkfs"))
         return { reason: `Datenträger-/Partitionsoperation (${name})` };
       if (PRIVILEGE_EXECUTABLES.has(name))
@@ -254,7 +261,9 @@ export function systemOpenBashRisk(command: string): SystemOpenRisk | undefined 
     )
       return { reason: "nix store gc/delete löscht Store-Pfade" };
     if (
-      (executable === "chmod" || executable === "chown" || executable === "chgrp") &&
+      (executable === "chmod" ||
+        executable === "chown" ||
+        executable === "chgrp") &&
       segment.some((token) => token === "-R" || token === "--recursive")
     )
       return { reason: `Rekursive Rechteänderung (${executable})` };

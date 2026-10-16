@@ -41,9 +41,9 @@ export function shellCommands(command: string): string[][] {
       quote = char;
       continue;
     }
-    if (/[\s;|&<>()[\]]/.test(char)) {
+    if (/[\s;|&<>()[\]`]/.test(char)) {
       flushToken();
-      if (/[;|&\n()]/.test(char)) flushCommand();
+      if (/[;|&\n()`]/.test(char)) flushCommand();
       continue;
     }
     token += char;
