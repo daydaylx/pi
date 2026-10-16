@@ -109,6 +109,9 @@ const LEGACY_MANAGED = [
   "tests/workflow-mode/mode.test.mjs",
   "tests/workflow-mode/plan-eval.test.mjs",
   "tests/workflow-mode/plan-store.test.mjs",
+  // Task-Tier klassifiziert nicht mehr (ADR 039).
+  "extensions/task-tier/classify.ts",
+  "extensions/shared/auto-thinking.ts",
 ];
 
 function parseArgs(argv) {
