@@ -8,7 +8,6 @@
 | npm                 | `10.9.8`                              | `npm --version`                                          |
 | Aurora UI           | lokales TypeScript                    | Typecheck, Lifecycle- und responsive Render-Tests        |
 | Aurora-Theme        | lokales `aurora-night`                | Truecolor- und 256-Farb-Theme-Laden                      |
-| Planmodus           | lokales TypeScript                    | Modus-, Prompt- und Permission-Grant-Tests               |
 | LSP                 | lokales TypeScript                    | Fake-Server-Transport-, Dokument- und Tool-Suiten        |
 | pi-subagents        | siehe `settings.json` (`packages`)    | exakter Laufzeitpaket-Pin                                |
 | Betriebssystem      | Linux                                 | CI und lokale Verifikation                               |

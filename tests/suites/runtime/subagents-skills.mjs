@@ -109,6 +109,7 @@ export const subagentsSkillsSections = {
         "context-checkpoint",
         "doc-diff",
         "git-check",
+        "implementation-plan",
         "prompt-compiler",
         "release-changelog",
         "repo-analyse",
@@ -123,7 +124,7 @@ export const subagentsSkillsSections = {
           .map((entry) => entry.name)
           .sort(),
         expectedSkills,
-        "the twelve project skills use Pi's standard skill directories",
+        "the project skills use Pi's standard skill directories",
       );
 
       for (const name of expectedSkills) {
