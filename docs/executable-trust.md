@@ -1,8 +1,8 @@
 # Executable-Vertrauen
 
 Gilt für die Befehlsklassifikation in `extensions/shared/permission-policy.ts`.
-Sie wird von der Recovery-Fähigkeit „read-only Shell“ (`isRecoveryReadOnlyCommand`)
-genutzt; die Zugriffsstufe `readonly` nutzt den strikteren Parser
+Sie wird vom Unterbrechungshinweis (`toolEffect` in `extensions/resilience/interruption.ts`,
+nutzt `isRecoveryReadOnlyCommand`) genutzt; die Zugriffsstufe `readonly` nutzt den strikteren Parser
 `parseReadOnlyShell` (`isReadOnlyCommand`). Die Klassifikation ist ein Guard vor
 dem Executor, keine OS-Sandbox.
 

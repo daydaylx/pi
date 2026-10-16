@@ -92,7 +92,7 @@ unberührt. Der Footer zeigt `Skill: <name>`.
 - Die Liste ist die Skill-Erkennung der Runtime, keine eigene: Projekt-Skills
   erscheinen nur in vertrauten Projekten, `pi system` zeigt nur die dort
   geladenen (globalen) Skills. Ein Skill vergibt keine Rechte; Zugriffsstufen,
-  Trust, Recovery und Verifier bleiben unverändert.
+  Trust und Verifier bleiben unverändert.
 - Bestehende `/skill:<name> …`-Aufrufe funktionieren wie zuvor.
 
 Die Runtime-Standardaktion von Shift+Tab (`app.thinking.cycle`) ist in

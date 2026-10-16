@@ -90,8 +90,8 @@ Session-Wechsel oder Shutdown wird ein ausstehender Snapshot verworfen.
 
 Die Extension speichert keine Projektdatei und führt keine Tools erneut aus.
 Die Telemetrie enthält weder Capsule-Text noch Tool-Ausgaben. Sie ergänzt
-`context-checkpoint` nicht als dauerhafte Fortsetzung; Workflow-, Permission-,
-Recovery- und Workspace-Zustand bleiben maßgeblich. Die Runtime-Tests messen
+`context-checkpoint` nicht als dauerhafte Fortsetzung; Workflow-, Permission-
+und Workspace-Zustand bleiben maßgeblich. Die Runtime-Tests messen
 Größe, Redaktion, Lifecycle und Restore-Overhead providerfrei; einen echten
 Long-Session-Nutzen muss eine separate Sitzung mit wiederholten
 Kompaktierungen belegen.

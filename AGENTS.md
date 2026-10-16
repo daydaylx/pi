@@ -1,6 +1,6 @@
 # Globale Agent-Regeln
 
-Diese Regeln gelten für Pi-Sitzungen und werden von anderen Coding-Agenten sinngemäß befolgt; Verweise auf Pi-eigene Tools (`ask_user`, `project_check`, `recovery_check`, `subagent`, `verify`) gelten für sie nicht. Seltene Arbeitsabläufe stehen in [docs/agent-workflow.md](docs/agent-workflow.md), Session-Checkpoints im Skill `context-checkpoint`, Subagenten- und Verifier-Verträge in [docs/subagents.md](docs/subagents.md), Prüfprofile in [docs/verify-profiles.md](docs/verify-profiles.md) und CLI/TUI-Scope in [docs/scope-cli-tui-vs-gui.md](docs/scope-cli-tui-vs-gui.md). Relative Pfade unter `extensions/` und `agents/` bezeichnen das Pi-Setup.
+Diese Regeln gelten für Pi-Sitzungen und werden von anderen Coding-Agenten sinngemäß befolgt; Verweise auf Pi-eigene Tools (`ask_user`, `project_check`, `subagent`, `verify`) gelten für sie nicht. Seltene Arbeitsabläufe stehen in [docs/agent-workflow.md](docs/agent-workflow.md), Session-Checkpoints im Skill `context-checkpoint`, Subagenten- und Verifier-Verträge in [docs/subagents.md](docs/subagents.md), Prüfprofile in [docs/verify-profiles.md](docs/verify-profiles.md) und CLI/TUI-Scope in [docs/scope-cli-tui-vs-gui.md](docs/scope-cli-tui-vs-gui.md). Relative Pfade unter `extensions/` und `agents/` bezeichnen das Pi-Setup.
 
 ## Schutz und Umfang
 

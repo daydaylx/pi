@@ -20,20 +20,15 @@ Extensions und Policies bleiben maßgeblich.
   wenn eine Ausgabe gekürzt ist.
 - Pi: `!!command` nur verwenden, wenn die Nutzerin oder der Nutzer die Ausgabe
   sehen soll, der Agent sie aber nicht weiter auswerten muss.
-- Nach einer Recovery-Sperre einmal den vorgesehenen Recovery-Check ausführen;
-  eine Sperre nicht mit einem anderen Schreibweg umgehen. Wird derselbe
+- Eine Sperre nicht mit einem anderen Schreibweg umgehen. Wird derselbe
   Tool-Aufruf dreimal hintereinander mit identischen Argumenten und demselben Blockgrund
   abgelehnt, beendet der Guard den wiederholten Tool-Lauf; behebe den
-  Blockgrund oder führe den genannten Recovery-Schritt aus.
-- Die globale Setup-Option `recovery.skipWithoutGit` kann Recovery-Snapshots
-  und deren Schreibsperre für jede freigegebene Wurzel ohne Git überspringen.
-  Andere freigegebene Git-Wurzeln behalten ihr Recovery-Gate. Der Standard
-  dieses Setups ist `false`; ohne Git nutzt Recovery eine vollständige
-  Filesystem-Inventur mit begrenztem temporärem Speicher. Die Inventur erfasst
-  auch Arbeitsdateien in verschachtelten Repositories und Worktrees; deren
-  `.git`-Metadaten werden auf jeder Tiefe ausgelassen. Diese sicherheitsrelevante
-  Option wird nur aus der globalen `setup.json` übernommen, nicht aus
-  Projektkonfigurationen.
+  Blockgrund oder nutze die genannte Alternative.
+- Endete der vorherige Lauf, bevor mutierende Aufrufe bestätigt waren (Fehler,
+  Abbruch, Aufruf ohne Ergebnis), bekommt der nächste Lauf einen versteckten
+  Hinweis mit diesen Aufrufen und `git status --short` (ADR 041). Aufrufe ohne
+  Ergebnis gelten als möglicherweise ausgeführt: Zustand prüfen, bevor sie
+  wiederholt werden. Es gibt keine Schreibsperre und kein Prüfwerkzeug dafür.
 
 ## Verifikation
 
@@ -71,9 +66,7 @@ Berechtigungsstufe sowie Secret- und Symlink-Grenzen gelten weiter. Die Shell be
 Ausführungs-`cwd`; für dateibezogene Arbeit in zusätzlichen Wurzeln die
 Datei-Tools oder `project_check` mit `workspaceRoot` verwenden.
 
-Recovery-Gates und Prüfstände sind pro freigegebener Wurzel getrennt.
-`recovery_check()` prüft alle Wurzeln mit offenem Gate; mit
-`workspaceRoot` prüft es nur die angegebene freigegebene Wurzel.
+Prüfstände (`project_check`) sind pro freigegebener Wurzel getrennt.
 
 ## Git-Veröffentlichung
 
@@ -112,7 +105,7 @@ nicht einen automatisierten Modell-Eval.
 | Tippfehler in einer Dokumentation                  | FAST-Grenzen und Stop-Regel direkt in `AGENTS.md`                   | Regel „engster passender Check“ und Stop-Regel in `AGENTS.md`; Klassen entfallen (ADR 039) | gezielter Check bleibt erhalten                       |
 | Kleine TUI-Textänderung                            | TUI/Bridge-Ausschluss direkt in `AGENTS.md`                         | Globaler Scope-Hinweis mit Verweis auf `docs/scope-cli-tui-vs-gui.md`                      | Bridge bleibt bei TUI-Auftrag außen vor               |
 | Lokaler Bugfix mit Regressionstest                 | kleine Schritte und Baseline-Regel in `AGENTS.md`                   | dieselben Regeln in `docs/agent-workflow.md`                                               | zuerst engster Test; keine unbelegte Baseline         |
-| Permission- oder Recovery-Änderung                 | Hard-Pfade und Verifier-Gate ausführlich global                     | globale Schutzregel plus `docs/subagents.md` und technische Policy                         | kein Risiko durch Dokumentenverschiebung freigegeben  |
+| Permission-Änderung                                | Hard-Pfade und Verifier-Gate ausführlich global                     | globale Schutzregel plus `docs/subagents.md` und technische Policy                         | kein Risiko durch Dokumentenverschiebung freigegeben  |
 | Öffentliche API-/IPC-Änderung                      | Need-Gate/Verifier-Trigger global erklärt                           | globaler Boundary-Hinweis plus `docs/subagents.md`                                         | Hard-Pfad und Need-Gate bleiben maßgeblich            |
 | Commit und Push                                    | expliziter Auftrag und Verifier-Regeln global                       | Commit-/Push-Regel global, Ablauf in Workflow-Referenz                                     | kleine Commits, direkt gepusht; Schritte getrennt     |
 | Aktuelle externe Provider- oder API-Frage          | Bedingung, Such-/Fetch-Reihenfolge global                           | kurze globale Bedingung, Ablauf in Workflow-Referenz                                       | lokale Fragen bleiben lokal; externe Quellen gezielt  |

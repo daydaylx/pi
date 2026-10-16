@@ -81,6 +81,9 @@ Extension neben dem Fork (Schalter in `settings.json`), Rückfall = Pin behalten
 
 ## Offene Befunde (nicht Teil dieser Entscheidung)
 
+> Stand nach [041](041-recovery-als-unterbrechungshinweis.md): `sed`, Subshells/Ersetzungen und das
+> Recovery-Gate (`autoInspect`) sind erledigt bzw. entfernt; die Punkte unten sind der historische Befund.
+
 - `diagnoseCommandSafety` stuft `sed -n 'w datei'` und `sed '1e befehl'` als sicher ein; `sed` ist deshalb
   nicht Teil der Recovery-Diagnosebefehle.
 - Die Interpretergrenze erkennt `(node -e 1)`, `{ node -e 1; }` und `$(node -e 1)` nicht (auch vor dieser
