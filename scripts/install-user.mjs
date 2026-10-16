@@ -57,6 +57,9 @@ const ALLOWLIST = [
   "skills",
   "tests",
   "themes",
+  // tsconfig.json includes types/**/*.d.ts; without it the installed setup's
+  // typecheck (and the verify tool) fails on AgentToolResult.
+  "types",
 ];
 const NEVER_COPY = new Set([
   "auth.json",
