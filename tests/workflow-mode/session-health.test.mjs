@@ -345,6 +345,32 @@ await test("session health arguments and file collection are bounded", () => {
 
 await test("the session-health command reports without mutating anything", async () => {
   if (!sessionHealth) return;
+  // Eigenes Agent-Verzeichnis mit zwei Subagenten in der Rohhistorie: Das Ergebnis
+  // darf nicht von der installierten Pi-Umgebung abhängen (CI-Runner ist leer).
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-session-health-cmd-"));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  writeFileSync(
+    join(agentDir, "run-history.jsonl"),
+    [
+      { ts: nowSeconds, agent: "verifier", status: "ok", duration: 90_000 },
+      { ts: nowSeconds, agent: "verifier", status: "error", duration: 30_000 },
+      { ts: nowSeconds, agent: "temp-1", status: "ok", duration: 10_000 },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n"),
+  );
+  try {
+    await runSessionHealthCommand();
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+async function runSessionHealthCommand() {
   const harness = createHarness();
   sessionHealth.default(harness.api);
   const ctx = harness.makeContext();
@@ -373,7 +399,14 @@ await test("the session-health command reports without mutating anything", async
       ?.message.startsWith("Session-Health (gesamte Historie)"),
     "the text report names its window",
   );
-});
+  await harness.commands.get("session-health")("--days 1", ctx);
+  assert(
+    harness.notifications
+      .at(-1)
+      ?.message.includes("Subagent verifier: 2 Läufe"),
+    "the raw history lists subagent runs, most frequent first",
+  );
+}
 
 await test("the time window keeps recent entries and drops older ones", () => {
   if (!analyze) return;
