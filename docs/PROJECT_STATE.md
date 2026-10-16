@@ -2,6 +2,19 @@
 
 ## Aktuelle Arbeit
 
+Harness-Vereinfachung auf Messbasis (2. Lauf, 2026-10-16; ADR 040, Befund
+`docs/audits/harness-bestandsaufnahme-2026-10-16.md`), auf `main` gepusht,
+**nicht installiert**: Ask-User-Felder optional; Shell-Policy ohne Fehlalarme für
+`2>&1`/`>/dev/null` und Ketten/Pipes mit literalem Projektskript; Recovery prüft offene
+Gates beim Turn-Start selbst (Rückfall `autoInspect: false`) und lässt diagnostische
+Pipes im Gate zu; System-Skills nativ (`nixos-system`, `hyprland-desktop`,
+`system-health`), neuer Skill `implementation-plan`; Runtime-Patches 11 → 8;
+`intercomBridge` für Subagent-Kinder aus; `/session-health` mit Nutzungsmetriken;
+Audit-Altlasten entfernt. `npm run verify` grün. Nicht gebaut: Subagent-V2, Sandbox.
+Offen: Installation (`install:user --apply`, braucht Freigabe), unabhängiger
+Pi-Verifier-Lauf für `permission-policy.ts`/`resilience/index.ts`, TUI-Rauchtest,
+Befunde aus ADR 040 (Subshell-Umgehung der Interpretergrenze, `sed w/e`).
+
 Harness-Vereinfachung vom 2026-10-16 (Befund und Ergebnis:
 `~/Dokumente/Pi_Harness_Arbeitsordner_ClaudeCode_2026-10-16/reports/BEFUND_PHASE_A.md`),
 committet, gepusht und nach `~/.pi/agent` installiert: CI repariert (Verifier-
@@ -128,7 +141,7 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 - Harness-Vereinfachung (2026-10-16): `npm run verify` Exit 0 im Checkout und in
   einem Klon mit leerem `HOME`; GitHub-Actions `Verify` Läufe 291–295 grün;
   installiert, `pi`/`pis --version` 1.2.0, `npm --prefix ~/.pi/agent/npm run
-  typecheck` Exit 0. Unabhängige Durchsicht der Hard-Pfad-Diffs durch einen
+typecheck` Exit 0. Unabhängige Durchsicht der Hard-Pfad-Diffs durch einen
   lesenden Agenten (kein Pi-Verifier-Lauf).
 - `npm run verify` auf reinem HEAD (nur getrackte Dateien, frische Kopie):
   Exit 0, alle acht Stufen, 4856 Assertions ohne Fehler; Lint 0 Fehler.

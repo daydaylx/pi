@@ -43,6 +43,10 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 - **Task-Tier** (ADR 033, vereinfacht durch 039): nur Duplicate-Read-Guard und
   Turn-Telemetrie `task-tier.turn`; keine FAST/DEEP-Klassen, keine
   Thinking-Automatik, keine Subagent-/Verifier-Sperre.
+- **Messbasierte Vereinfachung** (ADR 040): Ask-User-Felder optional,
+  Recovery-Gate wird beim Turn-Start automatisch geprüft, Systemskills sind
+  native `SKILL.md`, Runtime-Patches 8, keine Subagent-V2 und keine Sandbox
+  (Begründung und Wiedervorlage-Kriterien dort).
 - **Bash-Klassifikation** (ADR 022): Readonly- und Recovery-Gate
   teilen ein normalisiertes Modell in `extensions/shared/permission-policy.ts`.
   Executables werden nur über `trustedExecutableName` aufgelöst,
