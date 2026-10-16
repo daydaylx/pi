@@ -1,5 +1,6 @@
 /**
- * Ask-User Tool - Decision card with 2–4 options (effort/risk/recommendation)
+ * Ask-User Tool - Decision card with 2–4 options; effort/risk, pro/contra and
+ * a recommendation are optional and only shown when the model provides them.
  * Full custom UI: options list + inline editor for "Freitext eingeben..."
  * Escape in editor returns to options, Escape in options cancels
  *
@@ -37,9 +38,9 @@ import { calculateMenuViewport } from "./shared/menu-ui.ts";
 
 interface QuestionOption {
   label: string;
-  description: string;
-  effort: Level;
-  risk: Level;
+  description?: string;
+  effort?: Level;
+  risk?: Level;
   pro?: string;
   contra?: string;
 }
@@ -68,22 +69,28 @@ function levelMarker(level: Level): string {
   return "[NIEDRIG .]";
 }
 
-// Options with label, description, effort/risk, and optional pro/contra
+// Only the label is required; everything else is shown when it helps the decision.
 const OptionSchema = Type.Object({
   label: Type.String({
     minLength: 1,
     description: "Kurzer Optionstitel",
   }),
-  description: Type.String({
-    minLength: 1,
-    description: "Was die Option bedeutet und bewirkt",
-  }),
-  effort: StringEnum(LEVELS, {
-    description: "Aufwand",
-  }),
-  risk: StringEnum(LEVELS, {
-    description: "Risiko",
-  }),
+  description: Type.Optional(
+    Type.String({
+      minLength: 1,
+      description: "Was die Option bedeutet und bewirkt",
+    }),
+  ),
+  effort: Type.Optional(
+    StringEnum(LEVELS, {
+      description: "Aufwand, nur angeben wenn entscheidungsrelevant",
+    }),
+  ),
+  risk: Type.Optional(
+    StringEnum(LEVELS, {
+      description: "Risiko, nur angeben wenn entscheidungsrelevant",
+    }),
+  ),
   pro: Type.Optional(Type.String({ description: "Wichtigster Vorteil" })),
   contra: Type.Optional(Type.String({ description: "Wichtigster Nachteil" })),
 });
@@ -103,15 +110,19 @@ const QuestionParams = Type.Object({
     minItems: MIN_QUESTION_OPTIONS,
     maxItems: MAX_QUESTION_OPTIONS,
   }),
-  recommendedIndex: Type.Integer({
-    minimum: 1,
-    maximum: MAX_QUESTION_OPTIONS,
-    description: "1-basierter Index der empfohlenen Option.",
-  }),
-  recommendationReason: Type.String({
-    minLength: 1,
-    description: "Warum diese Option empfohlen wird.",
-  }),
+  recommendedIndex: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: MAX_QUESTION_OPTIONS,
+      description: "1-basierter Index der empfohlenen Option.",
+    }),
+  ),
+  recommendationReason: Type.Optional(
+    Type.String({
+      minLength: 1,
+      description: "Warum diese Option empfohlen wird.",
+    }),
+  ),
 });
 
 export default function askUser(pi: ExtensionAPI) {
@@ -119,7 +130,7 @@ export default function askUser(pi: ExtensionAPI) {
     name: ASK_USER_TOOL_NAME,
     label: "Nutzer fragen",
     description:
-      "Stellt eine Entscheidungsfrage mit 2–4 Optionen und einer begründeten Empfehlung. Nur nutzen, wenn eine Nutzerentscheidung nötig ist.",
+      "Stellt eine konkrete Entscheidungsfrage mit 2–4 kurzen Optionen und optionaler Empfehlung; Freitext ist immer möglich. Nur bei echten Zielkonflikten, riskanten Entscheidungen oder nicht auflösbarer Mehrdeutigkeit nutzen, nicht für technische Implementierungsdetails.",
     parameters: QuestionParams,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -156,10 +167,13 @@ export default function askUser(pi: ExtensionAPI) {
         };
       }
 
-      const recommendedIndex = clampRecommendedIndex(
-        params.recommendedIndex,
-        params.options.length,
-      );
+      const recommendedIndex =
+        params.recommendedIndex === undefined
+          ? undefined
+          : clampRecommendedIndex(
+              params.recommendedIndex,
+              params.options.length,
+            );
 
       const allOptions: DisplayOption[] = [
         ...params.options,
@@ -183,8 +197,9 @@ export default function askUser(pi: ExtensionAPI) {
             columns: tui.terminal.columns,
             rows: tui.terminal.rows,
           });
-          const recommendedDisplayIndex = recommendedIndex - 1;
-          let optionIndex = recommendedDisplayIndex;
+          const recommendedDisplayIndex =
+            recommendedIndex === undefined ? undefined : recommendedIndex - 1;
+          let optionIndex = recommendedDisplayIndex ?? 0;
           let editMode = false;
           let cachedLines: string[] | undefined;
           let cachedWidth: number | undefined;
@@ -386,17 +401,22 @@ export default function askUser(pi: ExtensionAPI) {
                 footerLines,
               );
             } else {
-              const recommended = params.options[recommendedIndex - 1];
-              addWrappedWithPrefix(
-                " ",
-                theme.fg("success", "Empfehlung: ") +
-                  theme.fg(
-                    "text",
-                    `${recommendedIndex}. ${recommended.label} — ${params.recommendationReason}`,
-                  ),
-                footerLines,
-              );
-              footerLines.push("");
+              if (recommendedIndex !== undefined) {
+                const recommended = params.options[recommendedIndex - 1];
+                const reason = params.recommendationReason
+                  ? ` — ${params.recommendationReason}`
+                  : "";
+                addWrappedWithPrefix(
+                  " ",
+                  theme.fg("success", "Empfehlung: ") +
+                    theme.fg(
+                      "text",
+                      `${recommendedIndex}. ${recommended.label}${reason}`,
+                    ),
+                  footerLines,
+                );
+                footerLines.push("");
+              }
               addWrappedWithPrefix(
                 " ",
                 theme.fg(
@@ -431,25 +451,39 @@ export default function askUser(pi: ExtensionAPI) {
                 theme.fg(color, `${i + 1}. ${opt.label}`) + tag,
                 block,
               );
-              addWrappedWithPrefix(
-                optionIndent,
-                theme.fg("muted", opt.description),
-                block,
-              );
-              addWrappedWithPrefix(
-                optionIndent,
-                theme.fg("muted", "Aufwand: ") +
-                  theme.fg(
-                    levelColor(opt.effort),
-                    `${levelMarker(opt.effort)} ${opt.effort}`,
-                  ) +
-                  theme.fg("muted", " · Risiko: ") +
-                  theme.fg(
-                    levelColor(opt.risk),
-                    `${levelMarker(opt.risk)} ${opt.risk}`,
-                  ),
-                block,
-              );
+              if (opt.description) {
+                addWrappedWithPrefix(
+                  optionIndent,
+                  theme.fg("muted", opt.description),
+                  block,
+                );
+              }
+              const levels: string[] = [];
+              if (opt.effort) {
+                levels.push(
+                  theme.fg("muted", "Aufwand: ") +
+                    theme.fg(
+                      levelColor(opt.effort),
+                      `${levelMarker(opt.effort)} ${opt.effort}`,
+                    ),
+                );
+              }
+              if (opt.risk) {
+                levels.push(
+                  theme.fg("muted", "Risiko: ") +
+                    theme.fg(
+                      levelColor(opt.risk),
+                      `${levelMarker(opt.risk)} ${opt.risk}`,
+                    ),
+                );
+              }
+              if (levels.length) {
+                addWrappedWithPrefix(
+                  optionIndent,
+                  levels.join(theme.fg("muted", " · ")),
+                  block,
+                );
+              }
               if (opt.pro) {
                 addWrappedWithPrefix(
                   optionIndent,
@@ -617,12 +651,11 @@ export default function askUser(pi: ExtensionAPI) {
         theme.fg("muted", args.question);
       const opts = Array.isArray(args.options) ? args.options : [];
       if (opts.length) {
-        const recommendedIndex = isValidRecommendedIndex(
-          args.recommendedIndex,
-          opts.length,
-        )
-          ? args.recommendedIndex
-          : undefined;
+        const recommendedIndex =
+          args.recommendedIndex !== undefined &&
+          isValidRecommendedIndex(args.recommendedIndex, opts.length)
+            ? args.recommendedIndex
+            : undefined;
         const labels = [
           ...opts.map((o: QuestionOption) => o.label),
           "Freitext eingeben.",

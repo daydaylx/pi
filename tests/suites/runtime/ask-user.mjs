@@ -135,6 +135,42 @@ export const askUserSections = {
       eq(result.details.selectedIndex, 2, "selected index remains one-based");
       assertNoGlobalChrome(harness, "ask_user uses no global editor or widget");
 
+      // Minimalform: nur Frage und zwei Labels, keine Empfehlung, kein
+      // Aufwand/Risiko. Der Dialog muss ohne diese Felder auskommen.
+      const minimal = createHarness({ columns: 60 });
+      askUser.default(minimal.api);
+      const minimalPending = minimal.tools.get("ask_user").execute(
+        "ask-user-minimal",
+        {
+          question: "Welche Variante?",
+          options: [{ label: "Alt" }, { label: "Neu" }],
+        },
+        undefined,
+        undefined,
+        minimal.makeContext(),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const minimalComponent = minimal.customComponents.at(-1);
+      assert(
+        Boolean(minimalComponent),
+        "ask_user opens with label-only options",
+      );
+      const minimalText = minimalComponent
+        .render(60)
+        .map((line) => stripAnsi(line))
+        .join("\n");
+      assert(
+        !/Empfehlung|EMPFOHLEN|Aufwand|Risiko/.test(minimalText),
+        "ask_user shows no recommendation or effort/risk without data",
+      );
+      minimalComponent.handleInput("\r");
+      const minimalResult = await minimalPending;
+      eq(
+        minimalResult.details.selectedIndex,
+        1,
+        "ask_user without recommendation starts on the first option",
+      );
+
       const nonTui = createHarness();
       askUser.default(nonTui.api);
       const nonTuiTool = nonTui.tools.get("ask_user");
