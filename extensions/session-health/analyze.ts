@@ -51,6 +51,24 @@ export interface SessionHealthVerifier {
   incompleteReasons: Record<string, number>;
 }
 
+/** Modell- und Tool-Nutzung aus den Nachrichteneinträgen der Sessions. */
+export interface SessionHealthUsage {
+  userMessages: number;
+  requests: number;
+  /** Requests, die mit `stopReason: "error"` endeten. */
+  requestErrors: number;
+  toolCalls: number;
+  toolErrors: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  toolCallsByName: Record<string, number>;
+  toolErrorsByName: Record<string, number>;
+  /** Roh-Stichprobe der Request-Dauer; `summarizeUsage` verdichtet sie. */
+  latencySamplesMs: number[];
+}
+
 export interface SessionHealthReport {
   files: number;
   entries: number;
@@ -60,6 +78,7 @@ export interface SessionHealthReport {
   failures: SessionHealthFailures;
   permissions: SessionHealthPermissions;
   verifier: SessionHealthVerifier;
+  usage: SessionHealthUsage;
   compactionFailures: number;
 }
 
@@ -89,6 +108,20 @@ export function emptySessionHealthReport(): SessionHealthReport {
       incomplete: 0,
       byVerdict: {},
       incompleteReasons: {},
+    },
+    usage: {
+      userMessages: 0,
+      requests: 0,
+      requestErrors: 0,
+      toolCalls: 0,
+      toolErrors: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      costUsd: 0,
+      toolCallsByName: {},
+      toolErrorsByName: {},
+      latencySamplesMs: [],
     },
     compactionFailures: 0,
   };
@@ -127,6 +160,75 @@ export function parseSessionLines(text: string): {
   return { entries, parseErrors };
 }
 
+function numberOr0(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** Faltet eine Nachricht (user/assistant/toolResult) in die Nutzungszahlen. */
+function aggregateMessage(
+  entry: Record<string, unknown>,
+  usage: SessionHealthUsage,
+): boolean {
+  if (entry.type !== "message" || !isRecord(entry.message)) return false;
+  const message = entry.message;
+  if (message.role === "user") {
+    usage.userMessages += 1;
+  } else if (message.role === "assistant") {
+    usage.requests += 1;
+    if (message.stopReason === "error") usage.requestErrors += 1;
+    if (isRecord(message.usage)) {
+      usage.inputTokens += numberOr0(message.usage.input);
+      usage.outputTokens += numberOr0(message.usage.output);
+      usage.cacheReadTokens += numberOr0(message.usage.cacheRead);
+      if (isRecord(message.usage.cost))
+        usage.costUsd += numberOr0(message.usage.cost.total);
+    }
+    const duration = numberOr0(message.durationMs);
+    if (duration > 0) usage.latencySamplesMs.push(duration);
+    if (Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (isRecord(block) && block.type === "toolCall") {
+          usage.toolCalls += 1;
+          bump(
+            usage.toolCallsByName,
+            typeof block.name === "string" ? block.name : undefined,
+          );
+        }
+      }
+    }
+  } else if (message.role === "toolResult" && message.isError === true) {
+    usage.toolErrors += 1;
+    bump(
+      usage.toolErrorsByName,
+      typeof message.toolName === "string" ? message.toolName : undefined,
+    );
+  }
+  return true;
+}
+
+function percentile(sorted: readonly number[], fraction: number): number {
+  if (sorted.length === 0) return 0;
+  return sorted[
+    Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))
+  ]!;
+}
+
+/** Abgeleitete Kennzahlen; ohne die Roh-Stichprobe, daher JSON-tauglich. */
+export function summarizeUsage(usage: SessionHealthUsage) {
+  const { latencySamplesMs, ...counts } = usage;
+  const sorted = [...latencySamplesMs].sort((a, b) => a - b);
+  const prompt = usage.inputTokens + usage.cacheReadTokens;
+  return {
+    ...counts,
+    cacheShare: prompt > 0 ? usage.cacheReadTokens / prompt : 0,
+    toolCallsPerUserMessage:
+      usage.userMessages > 0 ? usage.toolCalls / usage.userMessages : 0,
+    toolErrorRate: usage.toolCalls > 0 ? usage.toolErrors / usage.toolCalls : 0,
+    latencyMedianMs: percentile(sorted, 0.5),
+    latencyP90Ms: percentile(sorted, 0.9),
+  };
+}
+
 function entryTimestampMs(entry: unknown): number | undefined {
   if (!isRecord(entry) || typeof entry.timestamp !== "string") return undefined;
   const ms = Date.parse(entry.timestamp);
@@ -150,6 +252,9 @@ export function aggregateSessionEntries(
       if (ms !== undefined && ms < sinceMs) continue;
     }
     report.entries += 1;
+
+    if (isRecord(rawEntry) && aggregateMessage(rawEntry, report.usage))
+      continue;
 
     const start = customData<{ timestamp?: unknown }>(
       rawEntry,
@@ -248,7 +353,9 @@ export function aggregateSessionEntries(
         report.verifier.incomplete += 1;
         bump(
           report.verifier.incompleteReasons,
-          typeof verifierRun.reason === "string" ? verifierRun.reason : undefined,
+          typeof verifierRun.reason === "string"
+            ? verifierRun.reason
+            : undefined,
         );
       } else {
         report.verifier.completed += 1;
@@ -261,11 +368,7 @@ export function aggregateSessionEntries(
   report.turns.open += openTurns.size;
 
   const gate = latestRecoveryGate(entries);
-  if (
-    gate &&
-    gateRequiresInspection(gate.required) &&
-    !gate.checked
-  ) {
+  if (gate && gateRequiresInspection(gate.required) && !gate.checked) {
     report.recovery.uncheckedGates += 1;
   }
 }
@@ -291,6 +394,21 @@ export function aggregateSessionFile(
 
 const RECORD_ORDER = new Intl.Collator("de");
 
+function formatTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)} M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)} k`;
+  return String(value);
+}
+
+function topCounts(map: Record<string, number>, limit: number): string {
+  const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return "keine";
+  return entries
+    .slice(0, limit)
+    .map(([key, count]) => `${key}: ${count}`)
+    .join(", ");
+}
+
 export function formatCounts(map: Record<string, number>): string {
   const keys = Object.keys(map).sort(RECORD_ORDER.compare);
   if (keys.length === 0) return "keine";
@@ -309,8 +427,20 @@ export function formatSessionHealth(report: SessionHealthReport): string {
     `    nach Phase: ${formatCounts(report.failures.byPhase)}`,
     `  Berechtigungen: ${report.permissions.transitions} Übergänge · ${report.permissions.yoloOverrides} YOLO-Overrides · ${report.permissions.denied} verweigert (${report.permissions.deniedYoloAttempts} YOLO-Versuche)`,
     `  Verifier: ${report.verifier.completed} abgeschlossen (${formatCounts(report.verifier.byVerdict)}) · ${report.verifier.incomplete} unvollständig (${formatCounts(report.verifier.incompleteReasons)})`,
+    ...formatUsage(report.usage),
     `  Kompaktierungen fehlgeschlagen: ${report.compactionFailures}`,
     "  Hinweis: run-history.jsonl ist eine rohe Test-/Legacy-Historie und fließt nicht in diese Auswertung ein. Sessions ohne verifier-run-Einträge (Altbestand) erscheinen in der Verifier-Zeile nicht.",
   ];
   return lines.join("\n");
+}
+
+function formatUsage(usage: SessionHealthUsage): string[] {
+  const summary = summarizeUsage(usage);
+  return [
+    `  Nutzung: ${usage.userMessages} Nutzernachrichten · ${usage.requests} Requests (${usage.requestErrors} mit Fehler) · ${usage.toolCalls} Tool-Calls (${usage.toolErrors} fehlgeschlagen, ${(summary.toolErrorRate * 100).toFixed(1)} %) · Ø ${summary.toolCallsPerUserMessage.toFixed(1)} Tool-Calls je Nutzernachricht`,
+    `    Tokens: ${formatTokens(usage.inputTokens)} Input · ${formatTokens(usage.outputTokens)} Output · ${formatTokens(usage.cacheReadTokens)} Cache-Read (${(summary.cacheShare * 100).toFixed(1)} % des Prompts) · Kosten $${usage.costUsd.toFixed(2)}`,
+    `    Request-Dauer: Median ${(summary.latencyMedianMs / 1000).toFixed(1)} s · p90 ${(summary.latencyP90Ms / 1000).toFixed(1)} s`,
+    `    Tool-Calls: ${topCounts(usage.toolCallsByName, 8)}`,
+    `    Fehlgeschlagen: ${topCounts(usage.toolErrorsByName, 6)}`,
+  ];
 }

@@ -14,7 +14,12 @@ const sessionHealth = await load("extensions/session-health/index.ts");
  * Verifier-Lauf.
  */
 const HEALTHY_SESSION = [
-  { type: "session", version: 3, id: "s1", timestamp: "2026-08-18T10:00:00.000Z" },
+  {
+    type: "session",
+    version: 3,
+    id: "s1",
+    timestamp: "2026-08-18T10:00:00.000Z",
+  },
   {
     type: "custom",
     customType: "resilience.turn-start",
@@ -216,11 +221,14 @@ await test("session health separates interactive errors from raw history", () =>
       join(dir, "sessions", "project-a", "two.jsonl"),
       toJsonl(CHECKED_SESSION),
     );
-    writeFileSync(join(dir, "run-history.jsonl"), [
-      '{"agent":"tester","task":"x","ts":1784000000,"status":"ok","duration":1}',
-      '{"agent":"tester","task":"y","ts":1784000999,"status":"error","duration":1}',
-      "not json",
-    ].join("\n"));
+    writeFileSync(
+      join(dir, "run-history.jsonl"),
+      [
+        '{"agent":"tester","task":"x","ts":1784000000,"status":"ok","duration":1}',
+        '{"agent":"tester","task":"y","ts":1784000999,"status":"error","duration":1}',
+        "not json",
+      ].join("\n"),
+    );
 
     const report = analyze.emptySessionHealthReport();
     for (const file of [
@@ -246,11 +254,7 @@ await test("session health separates interactive errors from raw history", () =>
     );
     eq(report.failures.total, 1, "failures come from resilience entries");
     eq(report.failures.byClass.stream, 1, "the stream class is reported");
-    eq(
-      report.failures.byProvider.openrouter,
-      1,
-      "the provider is reported",
-    );
+    eq(report.failures.byProvider.openrouter, 1, "the provider is reported");
     eq(report.failures.byPhase.streaming_text, 1, "the phase is reported");
     eq(report.permissions.transitions, 1, "permission transitions are counted");
     eq(
@@ -389,4 +393,71 @@ await test("the time window keeps recent entries and drops older ones", () => {
   const all = analyze.emptySessionHealthReport();
   analyze.aggregateSessionEntries(HEALTHY_SESSION, all);
   eq(all.turns.total, 3, "without a window every turn start counts");
+});
+
+await test("usage metrics count requests, tool calls, tokens, cache and latency", () => {
+  if (!analyze) return;
+  const message = (role, extra) => ({
+    type: "message",
+    timestamp: "2026-08-18T10:00:00.000Z",
+    message: { role, ...extra },
+  });
+  const entries = [
+    message("user", { content: "Hallo" }),
+    message("assistant", {
+      stopReason: "toolUse",
+      durationMs: 2000,
+      usage: {
+        input: 100,
+        output: 10,
+        cacheRead: 300,
+        cost: { total: 0.5 },
+      },
+      content: [
+        { type: "text", text: "Ich lese." },
+        { type: "toolCall", id: "1", name: "read", arguments: {} },
+        { type: "toolCall", id: "2", name: "bash", arguments: {} },
+      ],
+    }),
+    message("toolResult", { toolName: "bash", isError: true, content: [] }),
+    message("toolResult", { toolName: "read", isError: false, content: [] }),
+    message("assistant", {
+      stopReason: "error",
+      durationMs: 6000,
+      usage: { input: 100, output: 0, cacheRead: 100, cost: { total: 0.25 } },
+      content: [],
+    }),
+  ];
+  const report = analyze.emptySessionHealthReport();
+  analyze.aggregateSessionEntries(entries, report);
+  const usage = report.usage;
+  eq(usage.userMessages, 1, "user messages are counted");
+  eq(usage.requests, 2, "assistant messages are model requests");
+  eq(usage.requestErrors, 1, "error stop reasons are counted");
+  eq(usage.toolCalls, 2, "tool calls come from assistant content");
+  eq(usage.toolErrors, 1, "failed tool results are counted");
+  eq(usage.toolCallsByName.read, 1, "tool calls are grouped by name");
+  eq(usage.toolErrorsByName.bash, 1, "tool errors are grouped by name");
+  eq(
+    usage.inputTokens + usage.cacheReadTokens,
+    600,
+    "prompt tokens are summed",
+  );
+  const summary = analyze.summarizeUsage(usage);
+  eq(
+    summary.cacheShare,
+    400 / 600,
+    "cache share is cache-read over prompt tokens",
+  );
+  eq(summary.latencyP90Ms, 6000, "p90 latency uses the slowest sample of two");
+  assert(
+    !("latencySamplesMs" in summary),
+    "the derived summary omits the raw latency samples",
+  );
+  assert(
+    analyze
+      .formatSessionHealth(report)
+      .includes("Nutzung: 1 Nutzernachrichten"),
+    "the text report lists the usage line",
+  );
 });
