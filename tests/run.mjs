@@ -20,6 +20,8 @@ import {
 process.env.GIT_CONFIG_GLOBAL =
   process.platform === "win32" ? "NUL" : "/dev/null";
 process.env.GIT_CONFIG_NOSYSTEM = "1";
+// ...and must not depend on the installed agent directory either.
+await import("./shared/isolated-agent-dir.mjs");
 
 const { runtimeSections } = await import("./suites/runtime.mjs");
 const { uiSections } = await import("./suites/ui.mjs");

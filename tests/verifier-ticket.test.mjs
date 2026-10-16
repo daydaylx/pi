@@ -1,9 +1,10 @@
 /**
  * Unit coverage for createVerifierTicket's Need-Gate provenance fields
- * (Phase 4). Uses the shared harness's default cwd (this repo's own root,
- * which genuinely has agents/verifier.md) so readVerifierAgent resolves a
- * real agent config instead of a fabricated fixture.
+ * (Phase 4). The verifier profile comes from the isolated agent directory
+ * built from the repository's own agents/verifier.md, so readVerifierAgent
+ * resolves a real agent config instead of the host's installed one.
  */
+import "./shared/isolated-agent-dir.mjs";
 import { assert, eq, test, counters as summary } from "./shared/assertions.mjs";
 import { importModule as load } from "./shared/jiti-loader.mjs";
 import { createHarness } from "./shared/harness.mjs";
