@@ -34,6 +34,7 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [036](036-pis-open-policy.md) — `pis` arbeitet offen, nur Löschen und Risiken werden vorab bestätigt
 - [037](037-skill-select-shift-tab.md) — Skill-Auswahl auf Shift+Tab: Vormerkung über die native `/skill:`-Expansion
 - [039](039-task-tier-vereinfacht.md) — Task-Tier nur noch Duplicate-Read-Guard und Telemetrie; keine Klassen, keine Thinking-Automatik
+- [040](040-harness-vereinfachung-2026-10-16.md) — Harness-Vereinfachung auf Messbasis: Ask-User, Shell-Fehlalarme, automatische Recovery-Prüfung, native Systemskills, Patches 11 auf 8, Subagent-V2 nicht gebaut
 
 ## Historische, ersetzte Entscheidungen
 

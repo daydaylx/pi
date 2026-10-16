@@ -13,25 +13,25 @@ historisch markiert. Es wurden keine Modell-Benchmarks gestartet.
 
 ## 1. Messwerte (Baseline)
 
-| Kennzahl                                           | Wert                                                                                                                                           | Status            |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| Modell-Requests (37 Sessions)                      | 2 007 (Ø 54 je Session)                                                                                                                        | [N]               |
-| Tool-Calls / Tool-Fehler                           | 3 325 / 361 (10,9 %)                                                                                                                           | [N]               |
-| Tool-Calls je Nutzernachricht                      | Ø 31,7                                                                                                                                         | [N]               |
-| Tokens Input / Output / Cache-Read                 | 9,1 M / 1,2 M / 243 M (Cache-Anteil 96,4 %)                                                                                                    | [N]               |
-| Latenz je Request                                  | Median 4,6 s, p90 9,8 s                                                                                                                        | [N]               |
-| Stop-Gründe                                        | 1 872 toolUse, 79 stop, 50 error (2,5 %), 6 aborted                                                                                            | [N]               |
-| Häufigste Tools                                    | read 1 462, bash 1 107, edit 422, subagent 88, recovery_check 85, project_check 55, ask_user 26                                                | [N]               |
-| Fehlerquellen (isError)                            | bash 160, read 83, edit 49, subagent 31, project_check 26                                                                                      | [N]               |
-| Provider-Fehler (`resilience.failure`, alle Zeit)  | 438; größte Klasse `fetch failed` (159), `Operation aborted` (50), HTTP 429 (25), 503 (23)                                                     | [N]               |
-| Recovery-Marker `required` / `checked` (alle Zeit) | 148 / 664 bei 678 Turns; 102 von 148 verlangten tatsächlich eine Prüfung (Workspace geändert oder Mutation möglich)                            | [N]               |
-| Schreibzugriffe durch Recovery-Gate blockiert      | 22 Tool-Calls (0,7 % aller Tool-Calls)                                                                                                         | [N]               |
-| Duplicate-Read-Guard (Task-Tier)                   | 42 von 1 145 Reads blockiert (3,7 %), kein Schaden belegt                                                                                      | [N]               |
-| Verifier-Läufe seit 2026-10-03 (`run-history`)     | 18 Läufe, 9 `error` (50 %); Median 151 s, p90 243 s, je Lauf ca. 40–140 k Input + 110–580 k Cache-Read                                         | [N]               |
-| Verifier-Session-Einträge                          | 69 `verifier-run`, 14 ohne Urteil, 9 verworfen                                                                                                 | [N]               |
-| Subagent-Tool-Fehler                               | 31 von 88 Calls; Ursachen überwiegend Policy-Ablehnungen (Planmodus 18, Verifier-Vorlage unvollständig 12, Spec-Feldverbote 11, FAST-Sperre 2) | [N]               |
-| Sperren durch Shell-Heuristik                      | 44 `bash`-Blockaden: 24 Planmodus (entfernt), 14 Interpreter in YOLO, 5 externe Shell-Änderung                                                 | [N]               |
-| Native Kompaktierungen / Context-Capsule-Einträge  | 87 / 0 (3 Kompaktierungen seit Einführung der Capsule am 2026-10-07)                                                                           | [N] / Nutzen [NV] |
+| Kennzahl                                           | Wert                                                                                                                                                                                                                                     | Status            |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| Modell-Requests (37 Sessions)                      | 2 007 (Ø 54 je Session)                                                                                                                                                                                                                  | [N]               |
+| Tool-Calls / Tool-Fehler                           | 3 325 / 361 (10,9 %)                                                                                                                                                                                                                     | [N]               |
+| Tool-Calls je Nutzernachricht                      | Ø 31,7                                                                                                                                                                                                                                   | [N]               |
+| Tokens Input / Output / Cache-Read                 | 9,1 M / 1,2 M / 243 M (Cache-Anteil 96,4 %)                                                                                                                                                                                              | [N]               |
+| Latenz je Request                                  | Median 4,6 s, p90 9,8 s                                                                                                                                                                                                                  | [N]               |
+| Stop-Gründe                                        | 1 872 toolUse, 79 stop, 50 error (2,5 %), 6 aborted                                                                                                                                                                                      | [N]               |
+| Häufigste Tools                                    | read 1 462, bash 1 107, edit 422, subagent 88, recovery_check 85, project_check 55, ask_user 26                                                                                                                                          | [N]               |
+| Fehlerquellen (isError)                            | bash 160, read 83, edit 49, subagent 31, project_check 26                                                                                                                                                                                | [N]               |
+| Provider-Fehler (`resilience.failure`, alle Zeit)  | 438; größte Klasse `fetch failed` (159), `Operation aborted` (50), HTTP 429 (25), 503 (23)                                                                                                                                               | [N]               |
+| Recovery-Marker `required` / `checked` (alle Zeit) | 148 / 664 bei 678 Turns; 102 von 148 verlangten tatsächlich eine Prüfung (Workspace geändert oder Mutation möglich)                                                                                                                      | [N]               |
+| Aufrufe durch das Recovery-Gate blockiert          | 22 in den 37 Kernsessions (0,7 %); über alle 324 Sessions 314 von 25 337 Tool-Ergebnissen (1,2 %): 174 `bash`, 122 `edit`, 10 `write`. Von 166 verschiedenen blockierten Shell-Befehlen waren 63 rein diagnostisch (Pipe, Kette, `2>&1`) | [N]               |
+| Duplicate-Read-Guard (Task-Tier)                   | 42 von 1 145 Reads blockiert (3,7 %), kein Schaden belegt                                                                                                                                                                                | [N]               |
+| Verifier-Läufe seit 2026-10-03 (`run-history`)     | 18 Läufe, 9 `error` (50 %); Median 151 s, p90 243 s, je Lauf ca. 40–140 k Input + 110–580 k Cache-Read                                                                                                                                   | [N]               |
+| Verifier-Session-Einträge                          | 69 `verifier-run`, 14 ohne Urteil, 9 verworfen                                                                                                                                                                                           | [N]               |
+| Subagent-Tool-Fehler                               | 31 von 88 Calls; Ursachen überwiegend Policy-Ablehnungen (Planmodus 18, Verifier-Vorlage unvollständig 12, Spec-Feldverbote 11, FAST-Sperre 2)                                                                                           | [N]               |
+| Sperren durch Shell-Heuristik                      | 44 `bash`-Blockaden: 24 Planmodus (entfernt), 14 Interpreter in YOLO, 5 externe Shell-Änderung                                                                                                                                           | [N]               |
+| Native Kompaktierungen / Context-Capsule-Einträge  | 87 / 0 (3 Kompaktierungen seit Einführung der Capsule am 2026-10-07)                                                                                                                                                                     | [N] / Nutzen [NV] |
 
 Kernbefunde der Messung:
 
@@ -40,8 +40,9 @@ Kernbefunde der Messung:
    Ablehnungen durch Planmodus/Task-Tier (inzwischen entfernt) und die
    Verifier-Vorlagenprüfung (noch aktiv).
 2. Recovery ist bereits zielgerichtet (sperrt nur bei möglicher Mutation) und verursacht
-   0,7 % blockierter Calls. Ursache der Recovery-Fälle sind überwiegend
-   Provider-/Netzfehler, nicht das Recovery-Design.
+   1,2 % blockierter Calls, überwiegend weil das Modell trotz Anweisung zuerst schrieb oder
+   las. Ursache der Recovery-Fälle sind überwiegend Provider-/Netzfehler, nicht das
+   Recovery-Design.
 3. Verifier-Läufe sind der teuerste und instabilste Teil: 50 % `error`, 2–4 Minuten.
    Die Fehlerursache der `error`-Läufe (Exit 1 ohne Text) ist weiter offen.
 
@@ -104,3 +105,12 @@ Alle elf Einträge treffen unverändert gegen 1.2.0. Es sind fünf logische Eing
 - Wirksamkeit der Context-Capsule [NV].
 - Nutzung von `openrouter-doctor` [NV].
 - TUI-Rauchtest (Shift+Tab, `pis`) in einem echten Terminal [NV].
+
+## 6. Nachtrag (nach der Umsetzung)
+
+- Messbasis des Nachtrags: alle 324 Nicht-Benchmark-Sessions (25 337 Tool-Ergebnisse, 2 856
+  Fehler = 11,3 %).
+- Shell-Policy: Von 244 verschiedenen, in YOLO hart geblockten Befehlen sind nach der Änderung
+  127 (vorher 43) erlaubt; die übrigen sind Variablen im Pfad (54), `sudo` im Text (14),
+  echte externe Schreib-/Interpreteraufrufe und Secret-Zugriffe.
+- Umsetzung und Entscheidungen: [ADR 040](../decisions/040-harness-vereinfachung-2026-10-16.md).
