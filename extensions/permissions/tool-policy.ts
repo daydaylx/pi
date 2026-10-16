@@ -40,13 +40,13 @@ export function permissionWarning(level: PermissionLevel): string | undefined {
     return "CONFIRM ALL aktiv: Jede Mutation und externe Aktion benötigt eine Bestätigung.";
   }
   if (level === "yolo") {
-    return "YOLO temporär aktiv: Routine-Rückfragen und Commit-Verifier-Pflicht entfallen, harte System-Bash-Grenzen (sudo, Paketmanager, curl|sh, rm -rf /) sind gelockert; Recovery-Gate, Secret-, Symlink- und Trust-Grenzen bleiben aktiv.";
+    return "YOLO temporär aktiv: Routine-Rückfragen und Commit-Verifier-Pflicht entfallen, harte System-Bash-Grenzen (sudo, Paketmanager, curl|sh, rm -rf /) sind gelockert; Secret-, Symlink- und Trust-Grenzen bleiben aktiv.";
   }
   if (level === "yolo-ask") {
-    return "YOLO 2 temporär aktiv: wie YOLO 1 ohne Routine-Rückfragen, aber sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach. Das Recovery-Gate bleibt aktiv; die Commit-Verifier-Pflicht entfällt. Die Trust-Grenze bleibt aktiv.";
+    return "YOLO 2 temporär aktiv: wie YOLO 1 ohne Routine-Rückfragen, aber sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach. Die Commit-Verifier-Pflicht entfällt. Die Trust-Grenze bleibt aktiv.";
   }
   if (level === "yolo-full") {
-    return "YOLO 3 temporär aktiv: VOLLZUGRIFF ohne Rückfragen, auch sudo, Partitionen, Systempfade, Secrets und Pfade außerhalb des Projekts. Trust- und Recovery-Sperren sowie Root-Dateisystem-Löschung sind freigegeben. Tatsächliche Root-Rechte hängen von den OS-Rechten des Pi-Prozesses und sudo ab.";
+    return "YOLO 3 temporär aktiv: VOLLZUGRIFF ohne Rückfragen, auch sudo, Partitionen, Systempfade, Secrets und Pfade außerhalb des Projekts. Trust-Sperren sowie Root-Dateisystem-Löschung sind freigegeben. Tatsächliche Root-Rechte hängen von den OS-Rechten des Pi-Prozesses und sudo ab.";
   }
   if (level === "headless") {
     return "Headless aktiv: kein Bestätigungsdialog verfügbar. Projektlokale Builds/Tests/Lint/Typecheck sind erlaubt; jede sonst bestätigungspflichtige Aktion bricht strukturiert ab statt zu fragen.";
@@ -177,11 +177,6 @@ function decideToolBase(
   }
   if (event.toolName === ASK_USER_TOOL_NAME) {
     return { action: "allow", reason: "Controlled workflow capability" };
-  }
-  if (event.toolName === "recovery_check") {
-    // Der Recovery-Check ist die einzige Möglichkeit, das Recovery-Gate zu
-    // öffnen; er ist read-only und darf niemals hinter einem Dialog stehen.
-    return { action: "allow", reason: "Read-only-Recovery-Check" };
   }
   if (event.toolName === "workspace_add") {
     return { action: "allow", reason: "Nutzerbestätigte Workspace-Freigabe" };

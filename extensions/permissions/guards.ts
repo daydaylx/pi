@@ -13,11 +13,6 @@ import {
   isSensitivePathIdentity,
   resolvePathScope,
 } from "../shared/permission-policy.ts";
-import {
-  RECOVERY_CAPABILITY_EVENTS,
-  recoveryEffect,
-  requestRecoveryStatus,
-} from "../shared/recovery-capabilities.ts";
 import { requestVerificationCapabilities } from "../shared/verification-capabilities.ts";
 import {
   INTERACTIVE_SHELL_TOOL_NAME,
@@ -52,7 +47,6 @@ import {
 import { systemBashNeedsApproval } from "../system-control/policy.ts";
 import { auditSystemDenial } from "../system-control/audit.ts";
 import {
-  SYSTEM_CONTROL_READ_TOOLS,
   SYSTEM_CONTROL_TOOL_NAME_SET,
 } from "../system-control/tool-names.ts";
 import {
@@ -67,7 +61,6 @@ const READ_ONLY_TOOLS = [
   "ls",
   ASK_USER_TOOL_NAME,
   "workspace_add",
-  "recovery_check",
 ];
 /**
  * Stufen, auf denen das Systemprofil (`pis`) offen arbeitet: keine Trust-,
@@ -100,68 +93,12 @@ function isSystemProjectPolicyConfig(root: string, target: string): boolean {
     relative(root, target).split(sep).join("/"),
   );
 }
-function guardedRecoveryEffect(event: ToolCallEvent, cwd: string) {
-  if (
-    SYSTEM_CONTROL_READ_TOOLS.has(event.toolName) ||
-    (event.toolName === "system_job" &&
-      ["status", "output"].includes(
-        String((event.input as Record<string, unknown>).action),
-      ))
-  ) {
-    return "read_only" as const;
-  }
-  return recoveryEffect(event, cwd);
-}
-
-/**
- * Das Recovery-Gate sperrt nach einem fehlgeschlagenen oder unterbrochenen
- * Turn mit möglicher Mutation genau die Werkzeuge, die den Workspace weiter
- * verändern könnten. `recovery_check` bleibt als Entsperre frei. YOLO 3
- * übergeht dieses Gate ausdrücklich; alle anderen Stufen müssen den Zustand
- * zuerst prüfen. Nur das reguläre Projektprofil behält den YOLO-3-Bypass; das
- * Systemprofil hält die Recovery-Grenze auch bei yolo-full ein.
- */
-function recoveryGateBlocks(
-  armed: boolean,
-  event: ToolCallEvent,
-  cwd: string,
-): boolean {
-  return armed && guardedRecoveryEffect(event, cwd) === "potentially_mutating";
-}
-
-function recoveryBlockReason(
-  reason: string | undefined,
-  workspaceRoot?: string,
-): string {
-  const cause =
-    reason === "workspace-changed"
-      ? "Der Workspace hat sich seit dem letzten Recovery-Check verändert."
-      : reason === "unavailable"
-        ? "Der Recovery-Status ist nicht verfügbar."
-        : "Der vorherige Turn wurde unterbrochen oder endete mit einem Fehler.";
-  const rootHint = workspaceRoot
-    ? ` Betroffene Projektwurzel: ${workspaceRoot}.`
-    : "";
-  return `Recovery-Gate aktiv: ${cause}${rootHint} Schreibzugriffe sind gesperrt, bis recovery_check die betroffene Wurzel geprüft hat. Rufe recovery_check auf, um fortzufahren. Lesen bleibt erlaubt.`;
-}
-
 // Custom-/MCP-Tools ohne path/filePath-Feld (z. B. subagent) hätten sonst ein
 // leeres Subject und der Mensch würde blind bestätigen.
 const MAX_INPUT_PREVIEW = 300;
 
 function stopNonInteractive(ctx: ExtensionContext): { terminate?: true } {
   return ctx.mode !== "tui" && !ctx.hasUI ? { terminate: true } : {};
-}
-
-function stopRecoveryNonInteractive(
-  ctx: ExtensionContext,
-  reason: string | undefined,
-): { terminate?: true } {
-  // In RPC/print a real gate can still be resolved by calling recovery_check.
-  // If the provider itself is missing, terminate to avoid an impossible loop.
-  return ctx.mode !== "tui" && reason === "unavailable"
-    ? { terminate: true }
-    : {};
 }
 
 function toolSubject(event: ToolCallEvent): string {
@@ -303,8 +240,7 @@ export function registerPermissionGuards(
             `${outcome.reason} ` +
             `Derselbe Aufruf wurde ${repeatedBlockedActionCount} Mal ` +
             `identisch blockiert; dieser Tool-Lauf wird beendet. Behebe ` +
-            `zuerst den Blockgrund oder führe den dafür genannten ` +
-            `Recovery-Schritt aus.`,
+            `zuerst den Blockgrund oder nutze die genannte Alternative.`,
         };
       }
     } else {
@@ -319,44 +255,7 @@ export function registerPermissionGuards(
     ) {
       headlessStop ??= `${event.toolName}: ${outcome.reason ?? "Aktion abgelehnt."}`;
     }
-    if (!outcome?.block) {
-      parentRunAgents.commit(launches);
-      const systemProfile = getPiLaunchProfile() === "system";
-      const systemWorkspaceRoot = systemProfile
-        ? resolveSystemWorkspaceRoot(ctx.cwd)
-        : undefined;
-      const additionalRoots = session.additionalWorkspaceRoots();
-      const systemFileRoots = NATIVE_FILE_TOOLS.has(event.toolName)
-        ? session.systemFileRoots()
-        : [];
-      const path = toolPath(event);
-      const pathRoot = path
-        ? resolvePathScope(path, ctx.cwd, [
-            ...additionalRoots,
-            ...systemFileRoots,
-          ]).workspaceRoot
-        : undefined;
-      const canonicalPathRoot = pathRoot
-        ? systemWorkspaceRoot &&
-          resolveSystemWorkspaceRoot(pathRoot) === systemWorkspaceRoot
-          ? systemWorkspaceRoot
-          : systemProfile && session.isSystemFileRoot(pathRoot)
-            ? pathRoot
-            : (canonicalWorkspaceRoot(pathRoot) ?? resolve(pathRoot))
-        : undefined;
-      const explicitRoot = (event.input as Record<string, unknown> | undefined)
-        ?.workspaceRoot;
-      pi.events.emit(RECOVERY_CAPABILITY_EVENTS.mutationApproved, {
-        toolName: event.toolName,
-        input: event.input,
-        toolCallId: event.toolCallId,
-        workspaceRoot:
-          canonicalPathRoot ??
-          (typeof explicitRoot === "string" ? explicitRoot : undefined) ??
-          canonicalWorkspaceRoot(ctx.cwd) ??
-          resolve(ctx.cwd),
-      });
-    }
+    if (!outcome?.block) parentRunAgents.commit(launches);
     return outcome;
   });
 
@@ -448,7 +347,7 @@ export function registerPermissionGuards(
 
   /**
    * Systemprofil (`pis`): offen, nur Löschen und andere Risiken werden vorab
-   * bestätigt. Trust-, Scope-, Pfad- und Recovery-Grenzen entfallen bewusst.
+   * bestätigt. Trust-, Scope- und Pfadgrenzen entfallen bewusst.
    */
   const guardSystemOpen = async (
     event: ToolCallEvent,
@@ -508,9 +407,6 @@ export function registerPermissionGuards(
   };
 
   const guardToolCall = async (event: ToolCallEvent, ctx: ExtensionContext) => {
-    // Die Sitzungsepoche gilt ab Beginn des Aufrufs, nicht erst ab dem Punkt,
-    // an dem die Recovery-Abfrage nach mehreren awaits gestellt wird.
-    const callEpoch = session.epoch();
     if (
       getPiLaunchProfile() === "system" &&
       SYSTEM_OPEN_LEVELS.has(session.level())
@@ -910,51 +806,6 @@ export function registerPermissionGuards(
         block: true,
         ...stopNonInteractive(ctx),
         reason: commitGate.reason,
-      };
-    }
-    // Recovery ist eine Workspace-Integritätsgrenze, keine Permission-Rückfrage.
-    // Nur das reguläre Projektprofil übergeht sie bei YOLO 3 ausdrücklich.
-    const effect = guardedRecoveryEffect(event, ctx.cwd);
-    const recoveryEpoch = callEpoch;
-    const yoloFullRecoveryBypass =
-      !systemProfile && session.level() === "yolo-full";
-    const recovery =
-      effect === "potentially_mutating" &&
-      !yoloFullRecoveryBypass &&
-      session.level() !== "readonly"
-        ? await requestRecoveryStatus(
-            pi.events,
-            targetIdentity?.workspaceRoot
-              ? (canonicalWorkspaceRoot(targetIdentity.workspaceRoot) ??
-                  resolve(targetIdentity.workspaceRoot))
-              : event.toolName === "project_check"
-                ? (canonicalWorkspaceRoot(scopedProjectRoot) ??
-                  resolve(scopedProjectRoot))
-                : undefined,
-          )
-        : { armed: false as const };
-    if (
-      effect === "potentially_mutating" &&
-      !yoloFullRecoveryBypass &&
-      session.level() !== "readonly" &&
-      recoveryEpoch !== session.epoch()
-    ) {
-      return {
-        block: true,
-        ...stopNonInteractive(ctx),
-        reason:
-          "Recovery-Gate: Die Sitzung hat während der Zustandsabfrage gewechselt. Der veraltete Status wurde verworfen; den Aufruf in der aktuellen Sitzung erneut starten.",
-      };
-    }
-    if (
-      !yoloFullRecoveryBypass &&
-      session.level() !== "readonly" &&
-      recoveryGateBlocks(recovery.armed, event, ctx.cwd)
-    ) {
-      return {
-        block: true,
-        ...stopRecoveryNonInteractive(ctx, recovery.reason),
-        reason: recoveryBlockReason(recovery.reason, recovery.workspaceRoot),
       };
     }
     const decision = decideTool(

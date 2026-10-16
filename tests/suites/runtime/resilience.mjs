@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { assert, eq } from "../../shared/assertions.mjs";
@@ -10,15 +16,44 @@ import {
 } from "../../shared/harness.mjs";
 import { ROOT } from "../../shared/jiti-loader.mjs";
 
+// Session entries as Pi writes them: messages with role, stopReason and tool calls.
+let entrySeq = 0;
+const message = (role, fields = {}) => ({
+  type: "message",
+  id: `e${(entrySeq += 1)}`,
+  message: { role, ...fields },
+});
+const user = (text = "weiter") =>
+  message("user", { content: [{ type: "text", text }] });
+const assistantCalls = (calls, stopReason = "toolUse") =>
+  message("assistant", {
+    stopReason,
+    content: calls.map(([id, name, args]) => ({
+      type: "toolCall",
+      id,
+      name,
+      arguments: args,
+    })),
+  });
+const toolResult = (id, isError = false) =>
+  message("toolResult", {
+    toolCallId: id,
+    isError,
+    content: [{ type: "text", text: "x" }],
+  });
+const finalAnswer = () =>
+  message("assistant", {
+    stopReason: "stop",
+    content: [{ type: "text", text: "fertig" }],
+  });
+
 export const resilienceSections = {
   "resilience telemetry and recovery": async (context) => {
-    const { section, load, resilience, modePermissions } = context;
+    const { section, resilience } = context;
 
     await section("resilience telemetry and recovery", async () => {
       if (!resilience) return;
-      const { recoveryEffect } = await load(
-        "extensions/shared/recovery-capabilities.ts",
-      );
+
       const harness = createHarness();
       resilience.default(harness.api);
       const ctx = harness.makeContext({ cwd: ROOT });
@@ -138,9 +173,9 @@ export const resilienceSections = {
         "settled turn preserves observed failures",
       );
       eq(
-        settled?.data.recoveryPending,
-        undefined,
-        "a turn that recovered through retry carries no pending recovery",
+        "recoveryPending" in (settled?.data ?? {}),
+        false,
+        "a settled turn carries no recovery gate state anymore",
       );
 
       // A manual /compact between turns (no open turn) that the runtime patch
@@ -182,6 +217,7 @@ export const resilienceSections = {
         "a compaction failure with no open turn does not fabricate a turn failure",
       );
 
+      // --- Kein Gate mehr: ein Fehlturn schreibt nur Telemetrie (ADR 041) ---
       await harness.runHooks("before_agent_start", {}, ctx);
       await harness.runHooks("agent_start", {}, ctx);
       await harness.runHooks(
@@ -198,1238 +234,546 @@ export const resilienceSections = {
         ctx,
       );
       await harness.runHooks("agent_settled", {}, ctx);
-      const recovery = harness.appended.at(-1);
       eq(
-        recovery?.customType,
-        "resilience.recovery-required",
-        "final failure requests safe recovery",
+        harness.appended.at(-1)?.customType,
+        "resilience.turn-settled",
+        "a final failure only settles the turn",
       );
-      eq(recovery?.data.reason, "final_failure", "final failure is classified");
-
-      const nextTurnResults = await harness.runHooks(
-        "before_agent_start",
-        {},
-        ctx,
-      );
+      eq(harness.appended.at(-1)?.data.outcome, "failed", "outcome is failed");
       eq(
-        nextTurnResults.at(-1)?.message?.customType,
-        "pi-resilience-recovery",
-        "next turn receives a recovery instruction instead of a replay",
-      );
-
-      const resumed = createHarness({
-        entries: [
-          {
-            type: "custom",
-            customType: "resilience.turn-start",
-            data: {
-              schemaVersion: 1,
-              timestamp: "2026-08-10T20:00:00.000Z",
-              workspaceFingerprint: "unavailable",
-              provider: "provider",
-              model: "model",
-              contextPercent: 42,
-            },
-          },
-        ],
-      });
-      resilience.default(resumed.api, { autoInspect: false });
-      const resumedCtx = resumed.makeContext({ cwd: ROOT });
-      await resumed.runHooks("session_start", {}, resumedCtx);
-      eq(
-        resumed.appended.at(-1)?.customType,
-        "resilience.recovery-required",
-        "resumed open turn is marked for inspection once",
-      );
-      const resumedTurn = await resumed.runHooks(
-        "before_agent_start",
-        {},
-        resumedCtx,
-      );
-      assert(
-        resumedTurn.at(-1)?.message?.content.includes("recovery_check"),
-        "changed or unavailable workspace requires inspection before mutation",
-      );
-
-      const resumedFinalFailure = createHarness({
-        entries: [
-          {
-            type: "custom",
-            customType: "resilience.turn-start",
-            data: {
-              schemaVersion: 1,
-              timestamp: "2026-08-10T20:01:00.000Z",
-              workspaceFingerprint: "unavailable",
-              provider: "provider",
-              model: "model",
-              contextPercent: 42,
-            },
-          },
-          {
-            type: "custom",
-            customType: "resilience.turn-settled",
-            data: {
-              schemaVersion: 1,
-              timestamp: "2026-08-10T20:01:01.000Z",
-              turnStartedAt: "2026-08-10T20:01:00.000Z",
-              workspaceFingerprint: "unavailable",
-              outcome: "failed",
-              observedFailureCount: 1,
-            },
-          },
-          {
-            type: "custom",
-            customType: "resilience.recovery-required",
-            data: {
-              schemaVersion: 1,
-              timestamp: "2026-08-10T20:01:02.000Z",
-              turnStartedAt: "2026-08-10T20:01:00.000Z",
-              reason: "final_failure",
-              workspaceChangedSinceTurnStart: true,
-              toolMayHaveMutatedWorkspace: true,
-            },
-          },
-        ],
-      });
-      resilience.default(resumedFinalFailure.api, { autoInspect: false });
-      const finalFailureCtx = resumedFinalFailure.makeContext({ cwd: ROOT });
-      await resumedFinalFailure.runHooks("session_start", {}, finalFailureCtx);
-      eq(
-        resumedFinalFailure.appended.length,
-        0,
-        "existing recovery marker is not duplicated on resume",
-      );
-      const finalFailureTurn = await resumedFinalFailure.runHooks(
-        "before_agent_start",
-        {},
-        finalFailureCtx,
-      );
-      assert(
-        finalFailureTurn.at(-1)?.message?.content.includes("recovery_check"),
-        "resume after a persisted final failure still injects recovery guidance",
-      );
-
-      // --- Automatische Prüfung beim Turn-Start ---
-      // Gemessen: 314 Schreib-/Shell-Blockaden durch das Gate, weil das Modell
-      // trotz Anweisung zuerst schrieb. Der Start prüft jetzt selbst.
-      const failedEntries = [
-        {
-          type: "custom",
-          customType: "resilience.turn-start",
-          data: {
-            schemaVersion: 2,
-            timestamp: "2026-10-08T08:00:00.000Z",
-            workspaceFingerprint: "unavailable",
-            provider: "provider",
-            model: "model",
-            contextPercent: 10,
-          },
-        },
-        {
-          type: "custom",
-          customType: "resilience.recovery-required",
-          data: {
-            schemaVersion: 2,
-            timestamp: "2026-10-08T08:00:02.000Z",
-            turnStartedAt: "2026-10-08T08:00:00.000Z",
-            reason: "final_failure",
-            workspaceChangedSinceTurnStart: true,
-            toolMayHaveMutatedWorkspace: true,
-          },
-        },
-      ];
-      const autoChecked = createHarness({ entries: failedEntries });
-      modePermissions.default(autoChecked.api);
-      resilience.default(autoChecked.api);
-      const autoCtx = autoChecked.makeContext({ cwd: ROOT });
-      await autoChecked.runHooks("session_start", {}, autoCtx);
-      const autoTurn = await autoChecked.runHooks(
-        "before_agent_start",
-        {},
-        autoCtx,
-      );
-      const autoMessage = autoTurn.at(-1)?.message;
-      assert(
-        autoMessage?.content.includes("bereits geprüft") &&
-          autoMessage.content.includes("git status --short"),
-        "an open recovery gate is inspected at turn start and the report is injected",
-      );
-      assert(
-        !autoMessage.content.includes("Rufe zuerst recovery_check auf"),
-        "the model is not asked to call recovery_check again",
-      );
-      eq(
-        autoChecked.appended.filter(
-          (entry) => entry.customType === "resilience.recovery-checked",
-        ).length,
-        1,
-        "the automatic inspection persists the same checked marker as the tool",
-      );
-      await autoChecked.runHooks("agent_start", {}, autoCtx);
-      const autoWrite = await autoChecked.runHooks(
-        "tool_call",
-        {
-          toolName: "write",
-          toolCallId: "auto-write",
-          input: { path: "after-auto-check.txt", content: "x" },
-        },
-        autoCtx,
-      );
-      assert(
-        !autoWrite.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ),
-        "after the automatic inspection the recovery gate no longer blocks writes",
-      );
-
-      // Ist der Workspace nicht lesbar, bleibt das Gate zu und die Anweisung
-      // verweist wie bisher auf recovery_check.
-      const unreadable = createHarness({ entries: failedEntries });
-      modePermissions.default(unreadable.api);
-      resilience.default(unreadable.api);
-      const unreadableCtx = unreadable.makeContext({
-        cwd: "/nonexistent/pi-recovery-auto-check",
-      });
-      await unreadable.runHooks("session_start", {}, unreadableCtx);
-      const unreadableTurn = await unreadable.runHooks(
-        "before_agent_start",
-        {},
-        unreadableCtx,
-      );
-      assert(
-        unreadableTurn.at(-1)?.message?.content.includes("recovery_check"),
-        "a failed automatic inspection falls back to the recovery_check instruction",
-      );
-      eq(
-        unreadable.appended.filter(
-          (entry) => entry.customType === "resilience.recovery-checked",
-        ).length,
-        0,
-        "a failed automatic inspection writes no checked marker",
-      );
-
-      // --- Recovery-Gate: Schreibsperre bis zum recovery_check ---
-      const gateHarness = createHarness();
-      modePermissions.default(gateHarness.api);
-      resilience.default(gateHarness.api, { autoInspect: false });
-      const gateCtx = gateHarness.makeContext({ cwd: ROOT });
-      await gateHarness.runHooks("session_start", {}, gateCtx);
-      await gateHarness.runHooks("before_agent_start", {}, gateCtx);
-      await gateHarness.runHooks("agent_start", {}, gateCtx);
-      await gateHarness.runHooks(
-        "message_update",
-        { assistantMessageEvent: { type: "text_start" } },
-        gateCtx,
-      );
-      await gateHarness.runHooks(
-        "message_update",
-        {
-          assistantMessageEvent: { type: "error", error: { errorMessage: "" } },
-        },
-        gateCtx,
-      );
-      const streamFailure = gateHarness.appended.at(-1);
-      eq(
-        streamFailure?.customType,
-        "resilience.failure",
-        "a streaming error without text is observed",
-      );
-      eq(
-        streamFailure?.data.errorClass,
-        "stream",
-        "a textless streaming failure is classified as stream, not unknown",
-      );
-      eq(
-        streamFailure?.data.errorCode,
-        "STREAM_PHASE",
-        "the streaming phase is preserved as error context",
-      );
-      await gateHarness.runHooks(
-        "tool_execution_start",
-        {
-          toolName: "bash",
-          toolCallId: "gate-bash-test",
-          args: { command: "npm test" },
-        },
-        gateCtx,
-      );
-      await gateHarness.dispatchEvent("recovery-mutation:approved", {
-        toolName: "bash",
-        input: { command: "npm test" },
-        toolCallId: "gate-bash-test",
-      });
-      await gateHarness.runHooks("agent_settled", {}, gateCtx);
-      const gateSettled = gateHarness.appended
-        .filter((entry) => entry.customType === "resilience.turn-settled")
-        .at(-1);
-      eq(gateSettled?.data.outcome, "failed", "the gate turn settles failed");
-      eq(
-        gateSettled?.data.recoveryPending,
-        true,
-        "a failed turn marks its recovery as pending",
-      );
-      const gateRequired = gateHarness.appended
-        .filter((entry) => entry.customType === "resilience.recovery-required")
-        .at(-1);
-      eq(
-        gateRequired?.data.toolMayHaveMutatedWorkspace,
-        true,
-        "the failed turn may have mutated the workspace",
-      );
-      eq(
-        latestStatus(gateHarness, "recovery"),
-        "⚠ Recovery-Check offen",
-        `an armed recovery gate stays visible in the TUI (${JSON.stringify({ latest: latestStatus(gateHarness, "recovery"), required: gateRequired?.data })})`,
-      );
-
-      const blockedWrite = await gateHarness.runHooks(
-        "tool_call",
-        { toolName: "write", input: { path: "example.txt", content: "x" } },
-        gateCtx,
-      );
-      assert(
-        blockedWrite.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ),
-        `writes are blocked while the recovery gate is armed (${JSON.stringify(blockedWrite)})`,
-      );
-      await gateHarness.commands.get("permission")("yolo", gateCtx);
-      const yoloWrite = await gateHarness.runHooks(
-        "tool_call",
-        { toolName: "write", input: { path: "yolo.txt", content: "x" } },
-        gateCtx,
-      );
-      assert(
-        yoloWrite.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ),
-        "armed recovery blocks write even under YOLO",
-      );
-      await gateHarness.commands.get("permission")("yolo-ask", gateCtx);
-      const yoloAskEdit = await gateHarness.runHooks(
-        "tool_call",
-        { toolName: "edit", input: { path: "yolo-ask.txt", edits: [] } },
-        gateCtx,
-      );
-      assert(
-        yoloAskEdit.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ),
-        "armed recovery blocks edit under yolo-ask",
-      );
-      await gateHarness.commands.get("permission")("yolo-full", gateCtx);
-      const yoloFullBash = await gateHarness.runHooks(
-        "tool_call",
-        { toolName: "bash", input: { command: "npm run build" } },
-        gateCtx,
-      );
-      assert(
-        !yoloFullBash.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ),
-        "YOLO 3 bypasses the recovery gate for process mutation (ADR 029)",
-      );
-      await gateHarness.commands.get("permission")("project-write", gateCtx);
-      const blockedBash = await gateHarness.runHooks(
-        "tool_call",
-        { toolName: "bash", input: { command: "npm test" } },
-        gateCtx,
-      );
-      assert(
-        blockedBash.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ),
-        "potentially mutating shell calls are blocked while armed",
-      );
-      for (const event of [
-        {
-          toolName: "subagent",
-          input: { agent: "investigator", task: "Diagnose the failed run" },
-        },
-        { toolName: "custom_mutator", input: { action: "change" } },
-      ]) {
-        const gated = await gateHarness.runHooks("tool_call", event, gateCtx);
-        assert(
-          gated.some(
-            (result) => result?.block && /Recovery-Gate/.test(result.reason),
-          ),
-          `armed recovery blocks ${event.toolName} as a process, delegation or unknown capability`,
-        );
-      }
-      const recoveryRequestsBeforeRead = gateHarness.emitted.filter(
-        (entry) => entry.name === "recovery-status:request",
-      ).length;
-      const freeRead = await gateHarness.runHooks(
-        "tool_call",
-        { toolName: "read", input: { path: "README.md" } },
-        gateCtx,
-      );
-      assert(
-        freeRead.every((result) => !result?.block),
-        "read-only tools stay available while armed",
-      );
-      for (const toolName of ["project_check", "verify"]) {
-        eq(
-          recoveryEffect({ toolName, input: {} }, gateCtx.cwd),
-          "read_only",
-          `${toolName} remains available as a read-only check while recovery is armed`,
-        );
-      }
-      eq(
-        recoveryEffect(
-          { toolName: "bash", input: { command: "npm test" } },
-          gateCtx.cwd,
-        ),
-        "potentially_mutating",
-        "bash npm test remains potentially mutating",
-      );
-      eq(
-        gateHarness.emitted.filter(
-          (entry) => entry.name === "recovery-status:request",
-        ).length,
-        recoveryRequestsBeforeRead,
-        "read-only tools do not trigger a redundant recovery snapshot",
-      );
-      const allowedDiagnosticCommands = [
-        "git status --short",
-        "git --no-pager diff --no-ext-diff --no-textconv --stat",
-        "git --no-pager log -n 1",
-        "git -C . status",
-        // Gemessen: 63 von 166 Recovery-Blockaden trafen Pipes, Ketten oder
-        // 2>&1 aus rein diagnostischen Befehlen. Jeder Teil wird einzeln
-        // bewiesen; Umleitungen in Dateien und Ersetzungen bleiben gesperrt.
-        "git status --short 2>&1",
-        "git status | head -20",
-        "git log -1 --oneline 2>/dev/null || true",
-        "grep -n needle README.md | wc -l",
-        "git diff --stat && git diff --check",
-      ];
-      for (const command of allowedDiagnosticCommands) {
-        const freeDiagnosticBash = await gateHarness.runHooks(
-          "tool_call",
-          { toolName: "bash", input: { command } },
-          gateCtx,
-        );
-        assert(
-          freeDiagnosticBash.every((result) => !result?.block),
-          `${command} stays available while the recovery gate is armed`,
-        );
-      }
-      const recoveryRequestsBeforeBlockedDiagnostics =
-        gateHarness.emitted.filter(
-          (entry) => entry.name === "recovery-status:request",
-        ).length;
-      eq(
-        recoveryRequestsBeforeBlockedDiagnostics,
-        recoveryRequestsBeforeRead,
-        "allowed diagnostic shell commands do not trigger a redundant recovery snapshot",
-      );
-      const blockedDiagnosticCommands = [
-        "git diff --output=plan-write.txt",
-        "git --no-pager diff --ext-diff",
-        "git --no-pager diff --textconv",
-        "git status | tee out.txt",
-        "git status > out.txt",
-        "git status && rm -rf build",
-        "git status; touch a",
-        "git status | sh",
-        "find . -fprint out.txt",
-        "git log $(rm -rf build)",
-        "sh -c 'git status'",
-        "./git status",
-        "./deploy.sh",
-      ];
-      for (const command of blockedDiagnosticCommands) {
-        const blockedDiagnosticBash = await gateHarness.runHooks(
-          "tool_call",
-          { toolName: "bash", input: { command } },
-          gateCtx,
-        );
-        assert(
-          blockedDiagnosticBash.some(
-            (result) => result?.block && /Recovery-Gate/.test(result.reason),
-          ),
-          `${command} remains blocked while the recovery gate is armed`,
-        );
-      }
-      eq(
-        gateHarness.emitted.filter(
-          (entry) => entry.name === "recovery-status:request",
-        ).length,
-        recoveryRequestsBeforeBlockedDiagnostics +
-          blockedDiagnosticCommands.length,
-        "risky shell commands request a fresh recovery status",
-      );
-
-      const deniedAttempt = createHarness({
-        entries: [
-          {
-            type: "custom",
-            customType: "resilience.recovery-required",
-            data: {
-              schemaVersion: 2,
-              timestamp: "2026-10-08T10:00:00.000Z",
-              turnStartedAt: "2026-10-08T09:59:00.000Z",
-              reason: "final_failure",
-              workspaceChangedSinceTurnStart: true,
-              toolMayHaveMutatedWorkspace: true,
-            },
-          },
-        ],
-      });
-      modePermissions.default(deniedAttempt.api);
-      resilience.default(deniedAttempt.api, { autoInspect: false });
-      const deniedAttemptCtx = deniedAttempt.makeContext({ cwd: ROOT });
-      await deniedAttempt.runHooks("session_start", {}, deniedAttemptCtx);
-      await deniedAttempt.runHooks("before_agent_start", {}, deniedAttemptCtx);
-      await deniedAttempt.runHooks("agent_start", {}, deniedAttemptCtx);
-      await deniedAttempt.runHooks(
-        "tool_execution_start",
-        {
-          toolName: "write",
-          toolCallId: "denied-write",
-          args: { path: "denied.txt", content: "not executed" },
-        },
-        deniedAttemptCtx,
-      );
-      const denied = await deniedAttempt.runHooks(
-        "tool_call",
-        {
-          toolName: "write",
-          toolCallId: "denied-write",
-          input: { path: "denied.txt", content: "not executed" },
-        },
-        deniedAttemptCtx,
-      );
-      assert(
-        denied.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ),
-        "the recovery guard denies a write before execution",
-      );
-      await deniedAttempt.runHooks(
-        "tool_execution_end",
-        {
-          toolName: "write",
-          toolCallId: "denied-write",
-        },
-        deniedAttemptCtx,
-      );
-      await deniedAttempt.runHooks(
-        "message_update",
-        {
-          assistantMessageEvent: {
-            type: "error",
-            error: { errorMessage: "HTTP 503" },
-          },
-        },
-        deniedAttemptCtx,
-      );
-      await deniedAttempt.runHooks("agent_settled", {}, deniedAttemptCtx);
-      const deniedRequired = deniedAttempt.appended
-        .filter((entry) => entry.customType === "resilience.recovery-required")
-        .at(-1);
-      eq(
-        deniedRequired?.data.toolMayHaveMutatedWorkspace,
-        false,
-        "a guard-blocked execution start does not count as a mutation",
-      );
-      const freeRecoveryCall = await gateHarness.runHooks(
-        "tool_call",
-        { toolName: "recovery_check", input: {} },
-        gateCtx,
-      );
-      assert(
-        freeRecoveryCall.every((result) => !result?.block),
-        "recovery_check itself is never blocked by its own gate",
-      );
-
-      const rpcRecovery = createHarness({
-        entries: [
-          {
-            type: "custom",
-            customType: "resilience.recovery-required",
-            data: {
-              schemaVersion: 2,
-              timestamp: "2026-10-08T11:00:00.000Z",
-              turnStartedAt: "2026-10-08T10:59:00.000Z",
-              reason: "final_failure",
-              workspaceChangedSinceTurnStart: true,
-              toolMayHaveMutatedWorkspace: true,
-            },
-          },
-        ],
-      });
-      modePermissions.default(rpcRecovery.api);
-      resilience.default(rpcRecovery.api);
-      const rpcCtx = rpcRecovery.makeContext({
-        cwd: ROOT,
-        mode: "rpc",
-        hasUI: false,
-      });
-      await rpcRecovery.runHooks("session_start", {}, rpcCtx);
-      const rpcBlockedWrite = await rpcRecovery.runHooks(
-        "tool_call",
-        {
-          toolName: "write",
-          input: { path: "rpc.txt", content: "x" },
-        },
-        rpcCtx,
-      );
-      assert(
-        rpcBlockedWrite.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ) && rpcBlockedWrite.every((result) => result?.terminate !== true),
-        "RPC reports the recovery block without terminating the batch",
-      );
-      const rpcRepeatedWrite = await rpcRecovery.runHooks(
-        "tool_call",
-        {
-          toolName: "write",
-          input: { path: "rpc.txt", content: "x" },
-        },
-        rpcCtx,
-      );
-      assert(
-        rpcRepeatedWrite.some((result) => result?.block) &&
-          rpcRepeatedWrite.every((result) => result?.terminate !== true),
-        "a repeated RPC block still leaves room for recovery_check",
-      );
-      const rpcBlockedLoop = await rpcRecovery.runHooks(
-        "tool_call",
-        {
-          toolName: "write",
-          input: { path: "rpc.txt", content: "x" },
-        },
-        rpcCtx,
-      );
-      assert(
-        rpcBlockedLoop.some(
-          (result) =>
-            result?.block &&
-            result?.terminate === true &&
-            result.reason.includes("3 Mal identisch blockiert"),
-        ),
-        "three identical blocked RPC writes terminate the repeated tool loop",
-      );
-      const rpcRecoveryTool = rpcRecovery.tools.get("recovery_check");
-      const rpcCheck = await rpcRecoveryTool.execute(
-        "rpc-recovery-check",
-        {},
-        undefined,
-        undefined,
-        rpcCtx,
-      );
-      assert(
-        rpcCheck.content[0]?.text.includes("Recovery-Check abgeschlossen"),
-        "RPC can call recovery_check after a blocked write",
-      );
-      const rpcReleasedWrite = await rpcRecovery.runHooks(
-        "tool_call",
-        {
-          toolName: "write",
-          input: { path: "rpc.txt", content: "x" },
-        },
-        rpcCtx,
-      );
-      assert(
-        rpcReleasedWrite.every((result) => !result?.block),
-        "RPC resumes the write flow after recovery_check",
-      );
-
-      const recoveryTool = gateHarness.tools.get("recovery_check");
-      assert(Boolean(recoveryTool), "recovery_check is registered as a tool");
-      const recoveryResult = await recoveryTool.execute(
-        "check-1",
-        {},
-        undefined,
-        undefined,
-        gateCtx,
-      );
-      assert(
-        recoveryResult.content[0]?.text.includes(
-          "Recovery-Check abgeschlossen",
-        ),
-        "recovery_check reports the released gate",
-      );
-      const checked = gateHarness.appended.filter(
-        (entry) => entry.customType === "resilience.recovery-checked",
-      );
-      eq(checked.length, 1, "the successful check is persisted exactly once");
-      eq(
-        checked[0]?.data.turnStartedAt,
-        gateRequired?.data.turnStartedAt,
-        "the check references the failed turn",
-      );
-      eq(
-        latestStatus(gateHarness, "recovery"),
-        undefined,
-        "a successful check clears the recovery status",
-      );
-      const unblockedWrite = await gateHarness.runHooks(
-        "tool_call",
-        { toolName: "write", input: { path: "example.txt", content: "x" } },
-        gateCtx,
-      );
-      assert(
-        unblockedWrite.every((result) => !result?.block),
-        "writes are released after a successful recovery check",
-      );
-
-      // Changes after the explicit check are expected work and do not re-arm
-      // this turn's gate.
-      const postCheckWorkspace = mkdtempSync(
-        path.join(ROOT, ".tmp-recovery-after-check-"),
-      );
-      try {
-        writeFileSync(
-          path.join(postCheckWorkspace, "changed.txt"),
-          "after check\n",
-        );
-        const stillReleasedWrite = await gateHarness.runHooks(
-          "tool_call",
-          { toolName: "write", input: { path: "example.txt", content: "x" } },
-          gateCtx,
-        );
-        assert(
-          stillReleasedWrite.every((result) => !result?.block),
-          "a successful check remains released after a workspace change",
-        );
-      } finally {
-        rmSync(postCheckWorkspace, { recursive: true, force: true });
-      }
-
-      const primaryRecoveryRoot = mkdtempSync(
-        path.join(tmpdir(), "pi-recovery-primary-root-"),
-      );
-      const additionalRecoveryRoot = mkdtempSync(
-        path.join(tmpdir(), "pi-recovery-additional-root-"),
-      );
-      const multiRootSessionId = "multi-root-recovery-session";
-      const multiRootEntries = [
-        {
-          type: "custom",
-          customType: "workspace-root-approved",
-          data: {
-            sessionId: multiRootSessionId,
-            root: additionalRecoveryRoot,
-            approvedAt: "2026-01-01T00:00:00.000Z",
-          },
-        },
-        {
-          type: "custom",
-          customType: "resilience.recovery-required",
-          data: {
-            schemaVersion: 2,
-            timestamp: "2026-01-01T00:00:01.000Z",
-            turnStartedAt: "2026-01-01T00:00:00.000Z",
-            reason: "final_failure",
-            workspaceChangedSinceTurnStart: false,
-            toolMayHaveMutatedWorkspace: true,
-            affectedRoots: [primaryRecoveryRoot, additionalRecoveryRoot].map(
-              (workspaceRoot) => ({
-                workspaceRoot,
-                workspaceChangedSinceTurnStart: false,
-                toolMayHaveMutatedWorkspace: true,
-              }),
-            ),
-          },
-        },
-      ];
-      try {
-        const multiRootHarness = createHarness({
-          entries: multiRootEntries,
-          sessionId: multiRootSessionId,
-        });
-        modePermissions.default(multiRootHarness.api);
-        resilience.default(multiRootHarness.api);
-        const multiRootCtx = multiRootHarness.makeContext({
-          cwd: primaryRecoveryRoot,
-          trusted: true,
-          sessionId: multiRootSessionId,
-        });
-        await multiRootHarness.runHooks("session_start", {}, multiRootCtx);
-        const multiRootRecoveryCheck =
-          multiRootHarness.tools.get("recovery_check");
-        await multiRootRecoveryCheck.execute(
-          "check-primary-root",
-          { workspaceRoot: primaryRecoveryRoot },
-          undefined,
-          undefined,
-          multiRootCtx,
-        );
-        const primaryWrite = await multiRootHarness.runHooks(
-          "tool_call",
-          {
-            toolName: "write",
-            input: {
-              path: path.join(primaryRecoveryRoot, "primary.txt"),
-              content: "x",
-            },
-          },
-          multiRootCtx,
-        );
-        const additionalWrite = await multiRootHarness.runHooks(
-          "tool_call",
-          {
-            toolName: "write",
-            input: {
-              path: path.join(additionalRecoveryRoot, "additional.txt"),
-              content: "x",
-            },
-          },
-          multiRootCtx,
-        );
-        assert(
-          primaryWrite.every((result) => !result?.block),
-          "checking one root releases writes in that root",
-        );
-        assert(
-          additionalWrite.some(
-            (result) => result?.block && /Recovery-Gate/.test(result.reason),
-          ),
-          "checking one root leaves another root's recovery gate armed",
-        );
-      } finally {
-        rmSync(primaryRecoveryRoot, { recursive: true, force: true });
-        rmSync(additionalRecoveryRoot, { recursive: true, force: true });
-      }
-
-      const abortedHarness = createHarness();
-      modePermissions.default(abortedHarness.api);
-      resilience.default(abortedHarness.api);
-      const abortedCtx = abortedHarness.makeContext({ cwd: ROOT });
-      await abortedHarness.runHooks("session_start", {}, abortedCtx);
-      await abortedHarness.runHooks("before_agent_start", {}, abortedCtx);
-      await abortedHarness.runHooks("agent_start", {}, abortedCtx);
-      await abortedHarness.runHooks(
-        "tool_execution_start",
-        {
-          toolName: "write",
-          toolCallId: "completed-write",
-          args: {},
-        },
-        abortedCtx,
-      );
-      await abortedHarness.dispatchEvent("recovery-mutation:approved", {
-        toolName: "write",
-        input: { path: "already-written.txt", content: "done" },
-        toolCallId: "completed-write",
-      });
-      await abortedHarness.runHooks(
-        "tool_execution_end",
-        {
-          toolName: "write",
-          toolCallId: "completed-write",
-        },
-        abortedCtx,
-      );
-      await abortedHarness.runHooks(
-        "agent_end",
-        {
-          messages: [{ role: "assistant", stopReason: "aborted" }],
-        },
-        abortedCtx,
-      );
-      await abortedHarness.runHooks("agent_settled", {}, abortedCtx);
-      const abortedSettled = abortedHarness.appended.find(
-        (entry) => entry.customType === "resilience.turn-settled",
-      );
-      eq(
-        abortedSettled?.data.outcome,
-        "aborted",
-        "Esc is recorded separately from a provider failure",
-      );
-      assert(
-        !abortedHarness.appended.some(
+        harness.appended.some(
           (entry) => entry.customType === "resilience.recovery-required",
         ),
-        "an abort after a completed tool call does not arm recovery",
+        false,
+        "no recovery gate marker is written",
       );
-      const abortDuringMutation = createHarness();
-      modePermissions.default(abortDuringMutation.api);
-      resilience.default(abortDuringMutation.api);
-      const abortDuringMutationCtx = abortDuringMutation.makeContext({
-        cwd: ROOT,
-      });
-      await abortDuringMutation.runHooks(
-        "session_start",
-        {},
-        abortDuringMutationCtx,
+      eq(
+        harness.tools.has("recovery_check"),
+        false,
+        "the recovery_check tool no longer exists",
       );
-      await abortDuringMutation.runHooks(
-        "before_agent_start",
-        {},
-        abortDuringMutationCtx,
-      );
-      await abortDuringMutation.runHooks(
-        "agent_start",
-        {},
-        abortDuringMutationCtx,
-      );
-      await abortDuringMutation.runHooks(
-        "tool_execution_start",
-        {
-          toolName: "write",
-          toolCallId: "in-flight-write",
-          args: {},
+      let answered = false;
+      await harness.dispatchEvent("recovery-status:request", {
+        respond() {
+          answered = true;
         },
-        abortDuringMutationCtx,
-      );
-      await abortDuringMutation.dispatchEvent("recovery-mutation:approved", {
-        toolName: "write",
-        input: { path: "partial.txt", content: "maybe partial" },
-        toolCallId: "in-flight-write",
       });
-      await abortDuringMutation.runHooks(
-        "agent_end",
-        {
-          messages: [{ role: "assistant", stopReason: "aborted" }],
-        },
-        abortDuringMutationCtx,
+      eq(answered, false, "no recovery status provider answers anymore");
+      const nextTurn = await harness.runHooks("before_agent_start", {}, ctx);
+      eq(
+        nextTurn.at(-1)?.message,
+        undefined,
+        "a failed turn without any mutating call needs no notice",
       );
-      await abortDuringMutation.runHooks(
-        "agent_settled",
-        {},
-        abortDuringMutationCtx,
+    });
+  },
+
+  "resilience interruption notice": async (context) => {
+    const { section, load, resilience, modePermissions } = context;
+
+    await section("resilience interruption notice", async () => {
+      if (!resilience) return;
+      const interruption = await load("extensions/resilience/interruption.ts");
+      const { findInterruptedRun, formatInterruptionNotice, toolEffect } =
+        interruption;
+      const cwd = ROOT;
+      const reasons = (entries) => findInterruptedRun(entries, cwd);
+
+      // --- Klassifikation: nur bekannte lesende Werkzeuge gelten als lesend ---
+      for (const [toolName, input, expected] of [
+        ["read", {}, "read_only"],
+        ["grep", {}, "read_only"],
+        ["project_check", {}, "read_only"],
+        ["wait", {}, "read_only"],
+        ["bash", { command: "git status --short 2>&1 | head" }, "read_only"],
+        ["bash", { command: "npm test" }, "potentially_mutating"],
+        ["bash", { command: "git status > out.txt" }, "potentially_mutating"],
+        ["bash", { command: "sed -n 'w out' f" }, "potentially_mutating"],
+        ["interactive_shell", { command: "ls" }, "read_only"],
+        ["interactive_shell", { command: "rm -rf x" }, "potentially_mutating"],
+        ["edit", {}, "potentially_mutating"],
+        ["write", {}, "potentially_mutating"],
+        ["unknown_tool", {}, "potentially_mutating"],
+        ["subagent", { spec: { profile: "research" } }, "read_only"],
+        ["subagent", { spec: { profile: "analyse" } }, "read_only"],
+        ["subagent", { spec: { profile: "verify" } }, "potentially_mutating"],
+        ["system_job", { action: "status" }, "read_only"],
+        ["system_job", { action: "start" }, "potentially_mutating"],
+        ["system_unit_status", {}, "read_only"],
+      ]) {
+        eq(
+          toolEffect({ toolName, input }, cwd),
+          expected,
+          `${toolName} ${JSON.stringify(input)} is ${expected}`,
+        );
+      }
+
+      // --- Erkennung aus den nativen Session-Einträgen ---
+      eq(reasons([]), undefined, "an empty session has no interruption");
+      eq(
+        reasons([
+          user(),
+          assistantCalls([["c1", "edit", { path: "a.ts" }]]),
+          toolResult("c1"),
+          finalAnswer(),
+        ]),
+        undefined,
+        "a regularly finished run is not an interruption",
       );
-      const abortRequired = abortDuringMutation.appended.find(
-        (entry) => entry.customType === "resilience.recovery-required",
+      const failedAfterEdit = reasons([
+        user(),
+        assistantCalls([["c1", "edit", { path: "a.ts" }]]),
+        toolResult("c1"),
+        message("assistant", {
+          stopReason: "error",
+          errorMessage: "ECONNRESET",
+          content: [],
+        }),
+      ]);
+      eq(
+        failedAfterEdit?.reason,
+        "error",
+        "an errored last message is an interruption",
       );
-      const abortSettled = abortDuringMutation.appended.find(
-        (entry) => entry.customType === "resilience.turn-settled",
+      eq(
+        failedAfterEdit?.errorMessage,
+        "ECONNRESET",
+        "the provider error is kept",
       );
+      eq(
+        failedAfterEdit?.calls,
+        [{ name: "edit", summary: "a.ts", outcome: "ok" }],
+        "the completed mutating call is listed with its outcome",
+      );
+      eq(
+        reasons([
+          user(),
+          assistantCalls([["c1", "grep", {}]]),
+          toolResult("c1"),
+          message("assistant", { stopReason: "error", content: [] }),
+        ]),
+        undefined,
+        "an interrupted read-only run needs no notice",
+      );
+      eq(
+        reasons([
+          user(),
+          message("assistant", {
+            stopReason: "error",
+            content: [
+              {
+                type: "toolCall",
+                id: "c9",
+                name: "write",
+                arguments: { path: "x" },
+              },
+            ],
+          }),
+        ]),
+        undefined,
+        "tool calls of an errored message never ran and are not reported",
+      );
+      const aborted = reasons([
+        user(),
+        assistantCalls([["c1", "bash", { command: "npm install" }]]),
+        toolResult("c1", true),
+        message("assistant", { stopReason: "aborted", content: [] }),
+      ]);
+      eq(aborted?.reason, "aborted", "Esc is its own reason");
+      eq(
+        aborted?.calls[0]?.outcome,
+        "error",
+        "a failed result is reported as error",
+      );
+      const crashed = reasons([
+        user(),
+        assistantCalls([
+          ["c1", "write", { path: "a.ts" }],
+          ["c2", "bash", { command: "git commit -am x" }],
+        ]),
+        toolResult("c1"),
+      ]);
+      eq(
+        crashed?.reason,
+        "no-result",
+        "a call without any result means the session ended mid-tool",
+      );
+      eq(
+        crashed?.calls.map((call) => call.outcome),
+        ["ok", "none"],
+        "only the call without a result has an unknown outcome",
+      );
+      const noFollowUp = reasons([
+        user(),
+        assistantCalls([["c1", "edit", { path: "a.ts" }]]),
+        toolResult("c1"),
+      ]);
+      eq(
+        noFollowUp?.reason,
+        "no-follow-up",
+        "tool results without an answer are an interruption",
+      );
+      eq(
+        reasons([
+          user(),
+          assistantCalls([["c1", "edit", { path: "a.ts" }]]),
+          toolResult("c1"),
+          message("assistant", { stopReason: "error", content: [] }),
+          user("noch einmal"),
+        ])?.reason,
+        "error",
+        "a trailing, not yet answered user prompt belongs to the new run",
+      );
+      eq(
+        reasons([
+          user("alt"),
+          assistantCalls([["c0", "edit", { path: "old.ts" }]]),
+          toolResult("c0"),
+          message("assistant", { stopReason: "error", content: [] }),
+          user("neu"),
+          assistantCalls([["c1", "grep", {}]]),
+          toolResult("c1"),
+          finalAnswer(),
+        ]),
+        undefined,
+        "a later regular run supersedes an older interruption",
+      );
+      const many = reasons([
+        user(),
+        assistantCalls(
+          Array.from({ length: 12 }, (_, index) => [
+            `m${index}`,
+            "bash",
+            { command: `touch file${index} ${"x".repeat(300)}` },
+          ]),
+        ),
+        ...Array.from({ length: 12 }, (_, index) => toolResult(`m${index}`)),
+      ]);
+      eq(many?.calls.length, 8, "the notice lists at most the last 8 calls");
       assert(
-        Boolean(abortRequired),
-        "an abort during an approved in-flight mutation still arms recovery",
+        many.calls.every((call) => call.summary.length <= 141),
+        "call summaries are truncated",
       );
-      eq(
-        abortRequired?.data.reason,
-        "interrupted",
-        "mutating abort records an interrupted gate",
-      );
-      eq(
-        abortSettled?.data.outcome,
-        "aborted",
-        "mutating abort stays distinct from provider failure",
-      );
-      // Persisted recovery survives a restart and unlocks through the check.
-      const restartedEntries = [
-        {
-          type: "custom",
-          customType: "resilience.turn-start",
-          data: {
-            schemaVersion: 2,
-            timestamp: "2026-08-19T00:00:00.000Z",
-            workspaceFingerprint: "unavailable",
-            provider: "provider",
-            model: "model",
-            contextPercent: 10,
-          },
-        },
-        {
-          type: "custom",
-          customType: "resilience.turn-settled",
-          data: {
-            schemaVersion: 2,
-            timestamp: "2026-08-19T00:00:01.000Z",
-            turnStartedAt: "2026-08-19T00:00:00.000Z",
-            workspaceFingerprint: "unavailable",
-            outcome: "failed",
-            observedFailureCount: 1,
-            recoveryPending: true,
-          },
-        },
-        {
-          type: "custom",
-          customType: "resilience.recovery-required",
-          data: {
-            schemaVersion: 2,
-            timestamp: "2026-08-19T00:00:02.000Z",
-            turnStartedAt: "2026-08-19T00:00:00.000Z",
-            reason: "final_failure",
-            workspaceChangedSinceTurnStart: false,
-            toolMayHaveMutatedWorkspace: true,
-          },
-        },
+      const withNotice = [
+        user(),
+        assistantCalls([["c1", "edit", { path: "a.ts" }]]),
+        toolResult("c1"),
+        message("assistant", { stopReason: "error", content: [] }),
       ];
-      const restarted = createHarness({ entries: restartedEntries });
-      modePermissions.default(restarted.api);
-      resilience.default(restarted.api);
-      const restartedCtx = restarted.makeContext({ cwd: ROOT });
-      await restarted.runHooks("session_start", {}, restartedCtx);
-      const restartedBlocked = await restarted.runHooks(
-        "tool_call",
-        { toolName: "write", input: { path: "example.txt", content: "x" } },
-        restartedCtx,
-      );
-      assert(
-        restartedBlocked.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ),
-        "a persisted recovery gate still blocks writes after a restart",
-      );
-      const restartedTool = restarted.tools.get("recovery_check");
-      await restartedTool.execute(
-        "check-2",
-        {},
-        undefined,
-        undefined,
-        restartedCtx,
-      );
-      const restartedUnblocked = await restarted.runHooks(
-        "tool_call",
-        { toolName: "write", input: { path: "example.txt", content: "x" } },
-        restartedCtx,
-      );
-      assert(
-        restartedUnblocked.every((result) => !result?.block),
-        "recovery_check unlocks a restored gate after restart",
-      );
-
-      const checkedEntry = restarted.appended.find(
-        (entry) => entry.customType === "resilience.recovery-checked",
-      );
-      const checkedRestart = createHarness({
-        entries: [...restartedEntries, checkedEntry],
-      });
-      modePermissions.default(checkedRestart.api);
-      resilience.default(checkedRestart.api);
-      const checkedRestartCtx = checkedRestart.makeContext({ cwd: ROOT });
-      await checkedRestart.runHooks("session_start", {}, checkedRestartCtx);
-      const checkedRestartStart = await checkedRestart.runHooks(
-        "before_agent_start",
-        {},
-        checkedRestartCtx,
-      );
-      assert(
-        checkedRestartStart.every(
-          (result) => result?.message?.customType !== "pi-resilience-recovery",
-        ),
-        "a checked gate stays closed without repeating the recovery instruction after restart",
-      );
-
-      // REC-002: two real recovery_check calls on the same required turn —
-      // over a real content change, not a synthetic fingerprint — must
-      // leave a restart trusting the second (newest) check, not the first.
-      const twoCheckWs = mkdtempSync(path.join(tmpdir(), "pi-rec002-"));
-      const recoveryGitEnv = {
-        ...process.env,
-        GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_AUTHOR_NAME: "Recovery Fixture",
-        GIT_AUTHOR_EMAIL: "recovery@example.test",
-        GIT_COMMITTER_NAME: "Recovery Fixture",
-        GIT_COMMITTER_EMAIL: "recovery@example.test",
-      };
-      try {
-        execFileSync("git", ["init", "--quiet"], {
-          cwd: twoCheckWs,
-          env: recoveryGitEnv,
-        });
-        writeFileSync(path.join(twoCheckWs, "base.txt"), "base\n");
-        execFileSync("git", ["add", "-A"], {
-          cwd: twoCheckWs,
-          env: recoveryGitEnv,
-        });
-        execFileSync(
-          "git",
-          [
-            "-c",
-            "user.name=Recovery Fixture",
-            "-c",
-            "user.email=recovery@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "base",
-          ],
-          { cwd: twoCheckWs, env: recoveryGitEnv },
-        );
-        const twoCheckRequired = {
-          type: "custom",
-          customType: "resilience.recovery-required",
-          data: {
-            schemaVersion: 2,
-            timestamp: "2026-01-01T00:00:00.000Z",
-            turnStartedAt: "2026-01-01T00:00:00.000Z",
-            reason: "final_failure",
-            workspaceChangedSinceTurnStart: false,
-            toolMayHaveMutatedWorkspace: true,
+      const lastId = withNotice.at(-1).id;
+      eq(
+        reasons([
+          ...withNotice,
+          {
+            type: "custom",
+            customType: "resilience.interruption-notice",
+            data: { entryId: lastId },
           },
+        ]),
+        undefined,
+        "an interruption that was already reported is not reported twice",
+      );
+      eq(
+        reasons([
+          { type: "message", message: { role: "user", content: [] } },
+          {
+            type: "message",
+            message: {
+              role: "assistant",
+              stopReason: "aborted",
+              content: [
+                {
+                  type: "toolCall",
+                  id: "x",
+                  name: "bash",
+                  arguments: { command: "make" },
+                },
+                { type: "text" },
+              ],
+            },
+          },
+          "not an entry",
+          { type: "message" },
+        ]),
+        undefined,
+        "malformed entries and ids are tolerated",
+      );
+      const noId = findInterruptedRun(
+        [
+          { type: "message", message: { role: "user" } },
+          {
+            type: "message",
+            message: {
+              role: "assistant",
+              stopReason: "toolUse",
+              content: [
+                {
+                  type: "toolCall",
+                  id: "x",
+                  name: "bash",
+                  arguments: { command: "make" },
+                },
+              ],
+            },
+          },
+        ],
+        cwd,
+      );
+      eq(noId?.reason, "no-result", "entries without ids are still analysed");
+      assert(
+        /^index-/.test(noId.entryId),
+        "entries without ids fall back to their index",
+      );
+
+      // --- Wortlaut des Hinweises ---
+      const text = formatInterruptionNotice(crashed, "Workspace x:\nM a.ts");
+      assert(
+        /endete während eines Tool-Aufrufs/.test(text) &&
+          /write: a\.ts — Ergebnis: ok/.test(text) &&
+          /bash: git commit -am x — kein Ergebnis — Ausgang unbekannt/.test(
+            text,
+          ) &&
+          /möglicherweise ausgeführt/.test(text),
+        "the notice names the reason, each call with its outcome and what to do",
+      );
+      assert(
+        !/recovery_check|gesperrt/.test(text),
+        "the notice neither blocks nor refers to a tool",
+      );
+
+      // --- Integration: der nächste Lauf bekommt genau einen Hinweis ---
+      function gitFixture(prefix) {
+        const dir = mkdtempSync(path.join(tmpdir(), prefix));
+        const env = {
+          ...process.env,
+          GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_AUTHOR_NAME: "Resilience Fixture",
+          GIT_AUTHOR_EMAIL: "resilience-fixture@example.test",
+          GIT_COMMITTER_NAME: "Resilience Fixture",
+          GIT_COMMITTER_EMAIL: "resilience-fixture@example.test",
         };
-        const twoCheckHarness = createHarness({
-          entries: [twoCheckRequired],
-        });
-        modePermissions.default(twoCheckHarness.api);
-        resilience.default(twoCheckHarness.api);
-        const twoCheckCtx = twoCheckHarness.makeContext({ cwd: twoCheckWs });
-        await twoCheckHarness.runHooks("session_start", {}, twoCheckCtx);
-        const twoCheckTool = twoCheckHarness.tools.get("recovery_check");
+        const git = (args) =>
+          execFileSync("git", args, { cwd: dir, encoding: "utf8", env });
+        git(["init", "--quiet"]);
+        return { dir, git };
+      }
+      const interrupted = () => [
+        user(),
+        assistantCalls([["c1", "edit", { path: "fixture.txt" }]]),
+        toolResult("c1"),
+        message("assistant", {
+          stopReason: "error",
+          errorMessage: "503",
+          content: [],
+        }),
+      ];
 
-        await twoCheckTool.execute(
-          "check-A",
-          {},
-          undefined,
-          undefined,
-          twoCheckCtx,
+      const { dir: repo, git } = gitFixture("pi-resilience-notice-");
+      try {
+        writeFileSync(path.join(repo, "fixture.txt"), "base\n");
+        git(["add", "-A"]);
+        git([
+          "-c",
+          "user.email=a@b.c",
+          "-c",
+          "user.name=x",
+          "commit",
+          "-q",
+          "-m",
+          "base",
+        ]);
+        writeFileSync(path.join(repo, "fixture.txt"), "changed\n");
+        const harness = createHarness({ entries: interrupted() });
+        resilience.default(harness.api);
+        const ctx = harness.makeContext({ cwd: repo });
+        await harness.runHooks("session_start", {}, ctx);
+        const results = await harness.runHooks("before_agent_start", {}, ctx);
+        const injected = results.at(-1)?.message;
+        eq(
+          injected?.customType,
+          "pi-resilience-recovery",
+          "the next run gets a hidden message",
         );
-        const checkedA = twoCheckHarness.appended
-          .filter((entry) => entry.customType === "resilience.recovery-checked")
-          .at(-1);
-
-        writeFileSync(path.join(twoCheckWs, "base.txt"), "changed\n");
-        await twoCheckTool.execute(
-          "check-B",
-          {},
-          undefined,
-          undefined,
-          twoCheckCtx,
-        );
-        const checkedB = twoCheckHarness.appended
-          .filter((entry) => entry.customType === "resilience.recovery-checked")
-          .at(-1);
-        assert(
-          checkedA &&
-            checkedB &&
-            checkedA.data.workspaceFingerprint !==
-              checkedB.data.workspaceFingerprint,
-          "two recovery_check calls after a real content change produce two different fingerprints",
-        );
-
-        const restartedTwoCheck = createHarness({
-          entries: [twoCheckRequired, checkedA, checkedB],
-        });
-        modePermissions.default(restartedTwoCheck.api);
-        resilience.default(restartedTwoCheck.api);
-        const restartedTwoCheckCtx = restartedTwoCheck.makeContext({
-          cwd: twoCheckWs,
-        });
-        await restartedTwoCheck.runHooks(
-          "session_start",
-          {},
-          restartedTwoCheckCtx,
-        );
-        // The workspace is still at B's fingerprint (unchanged since check
-        // B). A restart that trusts B unlocks writes immediately; a restart
-        // that (like the pre-fix bug) replayed A instead would see the
-        // workspace as changed since A and keep the gate armed.
-        const afterRestartWrite = await restartedTwoCheck.runHooks(
-          "tool_call",
-          { toolName: "write", input: { path: "example.txt", content: "x" } },
-          restartedTwoCheckCtx,
+        eq(
+          injected?.display,
+          false,
+          "the message is hidden from the transcript",
         );
         assert(
-          afterRestartWrite.every((result) => !result?.block),
-          "a restart trusts the newest recovery check (B), unlocking writes without a redundant recovery_check",
+          /edit: fixture\.txt — Ergebnis: ok/.test(injected.content),
+          "it lists the mutating call",
+        );
+        assert(
+          /M fixture\.txt/.test(injected.content),
+          "it carries git status --short",
+        );
+        assert(
+          !/diff --stat/.test(injected.content),
+          "it no longer depends on git diff --stat",
+        );
+        const notice = harness.appended.find(
+          (entry) => entry.customType === "resilience.interruption-notice",
+        );
+        eq(
+          notice?.data.reason,
+          "error",
+          "the notice is counted for /session-health",
+        );
+        eq(notice?.data.mutatingCalls, 1, "the marker counts mutating calls");
+        eq(
+          notice?.data.unconfirmedCalls,
+          0,
+          "the marker counts unconfirmed calls",
+        );
+        assert(
+          harness.appended.some(
+            (entry) => entry.customType === "resilience.turn-start",
+          ),
+          "the turn start marker is still written",
+        );
+        eq(
+          harness.appended.some(
+            (entry) => "workspaceFingerprint" in (entry.data ?? {}),
+          ),
+          false,
+          "no workspace snapshot is taken per turn anymore",
+        );
+
+        // Ein bereits gemeldeter Abbruch bleibt still.
+        const reported = interrupted();
+        const again = createHarness({
+          entries: [
+            ...reported,
+            {
+              type: "custom",
+              customType: "resilience.interruption-notice",
+              data: { entryId: reported.at(-1).id },
+            },
+          ],
+        });
+        resilience.default(again.api);
+        const againCtx = again.makeContext({ cwd: repo });
+        const quiet = await again.runHooks("before_agent_start", {}, againCtx);
+        eq(
+          quiet.at(-1)?.message,
+          undefined,
+          "an already reported interruption stays quiet",
         );
       } finally {
-        rmSync(twoCheckWs, { recursive: true, force: true });
+        rmSync(repo, { recursive: true, force: true });
       }
 
-      // Recovery is an integrity gate, not a permission confirmation: all
-      // YOLO levels must keep the same armed-state block.
-      const yoloArmed = createHarness({
-        entries: [
-          {
-            type: "custom",
-            customType: "resilience.turn-start",
-            data: {
-              schemaVersion: 2,
-              timestamp: "2026-08-19T00:00:00.000Z",
-              workspaceFingerprint: "unavailable",
-              provider: "provider",
-              model: "model",
-              contextPercent: 10,
-            },
-          },
-          {
-            type: "custom",
-            customType: "resilience.turn-settled",
-            data: {
-              schemaVersion: 2,
-              timestamp: "2026-08-19T00:00:01.000Z",
-              turnStartedAt: "2026-08-19T00:00:00.000Z",
-              workspaceFingerprint: "unavailable",
-              outcome: "failed",
-              observedFailureCount: 1,
-              recoveryPending: true,
-            },
-          },
-          {
-            type: "custom",
-            customType: "resilience.recovery-required",
-            data: {
-              schemaVersion: 2,
-              timestamp: "2026-08-19T00:00:02.000Z",
-              turnStartedAt: "2026-08-19T00:00:00.000Z",
-              reason: "final_failure",
-              workspaceChangedSinceTurnStart: false,
-              toolMayHaveMutatedWorkspace: true,
-            },
-          },
-        ],
-      });
-      modePermissions.default(yoloArmed.api);
-      resilience.default(yoloArmed.api);
-      const yoloArmedCtx = yoloArmed.makeContext({ cwd: ROOT });
-      await yoloArmed.runHooks("session_start", {}, yoloArmedCtx);
-      const stillBlocked = await yoloArmed.runHooks(
-        "tool_call",
-        { toolName: "write", input: { path: "example.txt", content: "x" } },
-        yoloArmedCtx,
-      );
-      assert(
-        stillBlocked.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
-        ),
-        "the gate still blocks before YOLO is activated",
-      );
-      for (const [level, event] of [
-        [
-          "yolo",
-          { toolName: "write", input: { path: "example.txt", content: "x" } },
-        ],
-        [
-          "yolo-ask",
-          { toolName: "edit", input: { path: "example.txt", edits: [] } },
-        ],
-      ]) {
-        await yoloArmed.commands.get("permission")(level, yoloArmedCtx);
-        const stillGated = await yoloArmed.runHooks(
-          "tool_call",
-          event,
-          yoloArmedCtx,
+      // Ohne Git: der Hinweis nennt es offen, statt zu sperren.
+      const plain = mkdtempSync(path.join(tmpdir(), "pi-resilience-nogit-"));
+      try {
+        const noGit = createHarness({ entries: interrupted() });
+        resilience.default(noGit.api);
+        const noGitCtx = noGit.makeContext({ cwd: plain });
+        const results = await noGit.runHooks(
+          "before_agent_start",
+          {},
+          noGitCtx,
+        );
+        const content = results.at(-1)?.message?.content ?? "";
+        assert(
+          /Zustand nicht prüfbar/.test(content),
+          "a missing Git repository is reported as not checkable",
         );
         assert(
-          stillGated.some(
-            (result) => result?.block && /Recovery-Gate/.test(result.reason),
-          ),
-          `armed recovery stays enforced under ${level}`,
+          /edit: fixture\.txt/.test(content),
+          "the call list still reaches the model",
         );
+      } finally {
+        rmSync(plain, { recursive: true, force: true });
       }
-      // YOLO 3 is the documented full-access level (ADR 029) and bypasses the
-      // recovery gate; YOLO 1 and 2 above must keep enforcing it.
-      await yoloArmed.commands.get("permission")("yolo-full", yoloArmedCtx);
-      const yoloFullGated = await yoloArmed.runHooks(
-        "tool_call",
-        { toolName: "bash", input: { command: "npm run build" } },
-        yoloArmedCtx,
+
+      // Viele geänderte Dateien bleiben begrenzt (frühere ENOBUFS-Klasse).
+      const { dir: bigRepo, git: bigGit } = gitFixture("pi-resilience-many-");
+      try {
+        mkdirSync(path.join(bigRepo, "d"), { recursive: true });
+        for (let index = 0; index < 4000; index += 1) {
+          writeFileSync(
+            path.join(bigRepo, "d", `file-${index}-${"n".repeat(40)}.txt`),
+            "x\n",
+          );
+        }
+        void bigGit;
+        const bigHarness = createHarness({ entries: interrupted() });
+        resilience.default(bigHarness.api);
+        const bigCtx = bigHarness.makeContext({ cwd: bigRepo });
+        const results = await bigHarness.runHooks(
+          "before_agent_start",
+          {},
+          bigCtx,
+        );
+        const content = results.at(-1)?.message?.content ?? "";
+        assert(
+          content.length < 120_000,
+          "a huge untracked tree does not blow up the notice",
+        );
+        assert(
+          /\?\? d\//.test(content),
+          "the notice still shows the beginning of the status",
+        );
+      } finally {
+        rmSync(bigRepo, { recursive: true, force: true });
+      }
+
+      // Alte Sitzungen mit einem offenen Gate des früheren Recovery-Modells
+      // sperren nichts mehr: weder Schreibwerkzeuge noch Shell.
+      if (modePermissions) {
+        const legacy = createHarness({
+          entries: [
+            ...interrupted(),
+            {
+              type: "custom",
+              customType: "resilience.recovery-required",
+              data: {
+                schemaVersion: 2,
+                timestamp: "2026-10-01T10:00:00.000Z",
+                turnStartedAt: "2026-10-01T09:59:00.000Z",
+                reason: "final_failure",
+                workspaceChangedSinceTurnStart: true,
+                toolMayHaveMutatedWorkspace: true,
+              },
+            },
+          ],
+        });
+        modePermissions.default(legacy.api);
+        resilience.default(legacy.api);
+        const legacyCtx = legacy.makeContext({ cwd: ROOT });
+        await legacy.runHooks("session_start", {}, legacyCtx);
+        for (const call of [
+          { toolName: "write", input: { path: "legacy-ok.txt", content: "x" } },
+          { toolName: "bash", input: { command: "touch legacy-ok.txt" } },
+        ]) {
+          const blocked = await legacy.runHooks("tool_call", call, legacyCtx);
+          assert(
+            blocked.every((result) => !result?.block),
+            `an unchecked legacy gate no longer blocks ${call.toolName}`,
+          );
+        }
+      }
+
+      // Eine Sitzung, die währenddessen wechselt, bekommt keinen Hinweis des alten Laufs.
+      const raceHarness = createHarness({ entries: interrupted() });
+      resilience.default(raceHarness.api);
+      const raceCtx = raceHarness.makeContext({ cwd: ROOT });
+      const racing = raceHarness.runHooks("before_agent_start", {}, raceCtx);
+      await raceHarness.runHooks("session_shutdown", {}, raceCtx);
+      const raced = await racing;
+      eq(
+        raced.at(-1)?.message,
+        undefined,
+        "a notice is dropped when the session ended meanwhile",
       );
-      assert(
-        !yoloFullGated.some(
-          (result) => result?.block && /Recovery-Gate/.test(result.reason),
+      eq(
+        raceHarness.appended.some(
+          (entry) => entry.customType === "resilience.interruption-notice",
         ),
-        "armed recovery is bypassed under yolo-full (ADR 029)",
-      );
-      const yoloFreeRead = await yoloArmed.runHooks(
-        "tool_call",
-        { toolName: "read", input: { path: "README.md" } },
-        yoloArmedCtx,
-      );
-      assert(
-        yoloFreeRead.every((result) => !result?.block),
-        "read-only diagnostics remain free under armed recovery",
+        false,
+        "no marker is written for a dropped notice",
       );
     });
   },
@@ -1551,7 +895,6 @@ export const resilienceSections = {
           "notify",
           "project_check",
           "read",
-          "recovery_check",
           "system_job",
           "system_journal",
           "system_unit_status",
@@ -1701,263 +1044,5 @@ export const resilienceSections = {
         );
       }
     });
-  },
-
-  "resilience recovery gate under a large diff (F-02)": async (context) => {
-    const { section, resilience, modePermissions } = context;
-
-    await section(
-      "resilience recovery gate under a large diff (F-02)",
-      async () => {
-        if (!resilience) return;
-
-        function gitFixture(prefix) {
-          const cwd = mkdtempSync(path.join(tmpdir(), prefix));
-          const env = {
-            ...process.env,
-            GIT_CONFIG_GLOBAL:
-              process.platform === "win32" ? "NUL" : "/dev/null",
-            GIT_CONFIG_NOSYSTEM: "1",
-            GIT_AUTHOR_NAME: "Resilience Fixture",
-            GIT_AUTHOR_EMAIL: "resilience-fixture@example.test",
-            GIT_COMMITTER_NAME: "Resilience Fixture",
-            GIT_COMMITTER_EMAIL: "resilience-fixture@example.test",
-          };
-          const git = (args) =>
-            execFileSync("git", args, { cwd, encoding: "utf8", env });
-          git(["init", "--quiet"]);
-          git(["config", "user.email", "resilience-fixture@example.test"]);
-          git(["config", "user.name", "Resilience Fixture"]);
-          return { cwd, git };
-        }
-
-        async function armGate(harness, ctx) {
-          await harness.runHooks("session_start", {}, ctx);
-          await harness.runHooks("before_agent_start", {}, ctx);
-          await harness.runHooks("agent_start", {}, ctx);
-          await harness.runHooks(
-            "message_update",
-            { assistantMessageEvent: { type: "text_start" } },
-            ctx,
-          );
-          await harness.runHooks(
-            "message_update",
-            {
-              assistantMessageEvent: {
-                type: "error",
-                error: { errorMessage: "" },
-              },
-            },
-            ctx,
-          );
-          await harness.runHooks(
-            "tool_execution_start",
-            { toolName: "edit", toolCallId: "gate-edit", args: {} },
-            ctx,
-          );
-          await harness.dispatchEvent("recovery-mutation:approved", {
-            toolName: "edit",
-            input: { path: "fixture.txt", edits: [] },
-            toolCallId: "gate-edit",
-          });
-          await harness.runHooks("agent_settled", {}, ctx);
-        }
-
-        // A large but valid diff must not leave the gate permanently
-        // unlockable (F-02's root cause): the streaming snapshot handles it,
-        // and recovery_check succeeds.
-        const { cwd: largeDiffRepo, git } = gitFixture(
-          "pi-resilience-largediff-",
-        );
-        try {
-          const lines = [];
-          for (let i = 0; i < 15000; i += 1)
-            lines.push(`line ${i} ${"x".repeat(30)}`);
-          writeFileSync(
-            path.join(largeDiffRepo, "big.txt"),
-            `${lines.join("\n")}\n`,
-          );
-          git(["add", "-A"]);
-          git(["commit", "-q", "-m", "base"]);
-          const changed = [];
-          for (let i = 0; i < 15000; i += 1)
-            changed.push(`line ${i} CHANGED ${"y".repeat(30)}`);
-          writeFileSync(
-            path.join(largeDiffRepo, "big.txt"),
-            `${changed.join("\n")}\n`,
-          );
-
-          const largeDiffHarness = createHarness();
-          modePermissions.default(largeDiffHarness.api);
-          resilience.default(largeDiffHarness.api);
-          const largeDiffCtx = largeDiffHarness.makeContext({
-            cwd: largeDiffRepo,
-          });
-          await armGate(largeDiffHarness, largeDiffCtx);
-          eq(
-            latestStatus(largeDiffHarness, "recovery"),
-            "⚠ Recovery-Check offen",
-            "the gate arms even with a large diff present",
-          );
-
-          const recoveryTool = largeDiffHarness.tools.get("recovery_check");
-          const result = await recoveryTool.execute(
-            "check-1",
-            {},
-            undefined,
-            undefined,
-            largeDiffCtx,
-          );
-          assert(
-            result.content[0]?.text.includes("Recovery-Check abgeschlossen"),
-            "a large valid diff no longer permanently locks the recovery gate (F-02)",
-          );
-          eq(
-            latestStatus(largeDiffHarness, "recovery"),
-            undefined,
-            "the gate releases after a successful check even with a large diff",
-          );
-        } finally {
-          rmSync(largeDiffRepo, { recursive: true, force: true });
-        }
-
-        // A plain directory without Git uses the filesystem fingerprint and
-        // can complete recovery without entering a Git-only error state.
-        const noGitWorkspace = mkdtempSync(
-          path.join(tmpdir(), "pi-resilience-no-git-"),
-        );
-        try {
-          writeFileSync(path.join(noGitWorkspace, "work.txt"), "content\n");
-          const noGitHarness = createHarness();
-          modePermissions.default(noGitHarness.api);
-          resilience.default(noGitHarness.api);
-          const noGitCtx = noGitHarness.makeContext({ cwd: noGitWorkspace });
-          await armGate(noGitHarness, noGitCtx);
-
-          const recoveryTool = noGitHarness.tools.get("recovery_check");
-          const result = await recoveryTool.execute(
-            "check-1",
-            {},
-            undefined,
-            undefined,
-            noGitCtx,
-          );
-          assert(
-            result.content[0]?.text.includes("VCS: none"),
-            "recovery reports that Git is unavailable without failing",
-          );
-          eq(
-            latestStatus(noGitHarness, "recovery"),
-            undefined,
-            "filesystem recovery releases the gate",
-          );
-        } finally {
-          rmSync(noGitWorkspace, { recursive: true, force: true });
-        }
-
-        // A persistently unreadable .git marker must keep recovery locked
-        // until the third failed snapshot, when an interactive user may
-        // explicitly disable recovery for this session.
-        const brokenGitWorkspace = mkdtempSync(
-          path.join(tmpdir(), "pi-resilience-broken-git-"),
-        );
-        try {
-          writeFileSync(path.join(brokenGitWorkspace, ".git"), "broken\n");
-          const brokenGitHarness = createHarness({
-            confirm: true,
-            entries: [
-              {
-                type: "custom",
-                customType: "resilience.recovery-required",
-                data: {
-                  schemaVersion: 2,
-                  timestamp: "2026-10-07T10:00:00.000Z",
-                  turnStartedAt: "2026-10-07T09:59:00.000Z",
-                  reason: "final_failure",
-                  workspaceChangedSinceTurnStart: true,
-                  toolMayHaveMutatedWorkspace: true,
-                },
-              },
-            ],
-          });
-          resilience.default(brokenGitHarness.api);
-          const brokenGitCtx = brokenGitHarness.makeContext({
-            cwd: brokenGitWorkspace,
-          });
-          await brokenGitHarness.runHooks("session_start", {}, brokenGitCtx);
-          const recoveryTool = brokenGitHarness.tools.get("recovery_check");
-          let failedAttempts = 0;
-          for (let attempt = 0; attempt < 2; attempt += 1) {
-            try {
-              await recoveryTool.execute(
-                `failed-check-${attempt + 1}`,
-                {},
-                undefined,
-                undefined,
-                brokenGitCtx,
-              );
-            } catch {
-              failedAttempts += 1;
-            }
-          }
-          eq(
-            failedAttempts,
-            2,
-            "the first two snapshot failures keep recovery_check fail-closed",
-          );
-          eq(
-            brokenGitHarness.lifecycleCalls.filter(
-              (call) => call.kind === "confirm",
-            ).length,
-            0,
-            "no disable confirmation appears before three snapshot failures",
-          );
-          const disabled = await recoveryTool.execute(
-            "failed-check-3",
-            {},
-            undefined,
-            undefined,
-            brokenGitCtx,
-          );
-          assert(
-            disabled.content[0]?.text.includes("für diese Sitzung deaktiviert"),
-            "confirmation disables the recovery snapshot for this session",
-          );
-          eq(
-            brokenGitHarness.lifecycleCalls.filter(
-              (call) => call.kind === "confirm",
-            ).length,
-            1,
-            "the user is asked once after the third snapshot failure",
-          );
-          const skipped = await recoveryTool.execute(
-            "after-disable",
-            {},
-            undefined,
-            undefined,
-            brokenGitCtx,
-          );
-          assert(
-            skipped.content[0]?.text.includes(
-              "ist für diese Sitzung deaktiviert",
-            ),
-            "later recovery_check calls skip snapshot collection for the session",
-          );
-          eq(
-            latestStatus(brokenGitHarness, "recovery"),
-            "⚠ Recovery für 1 Projektwurzel deaktiviert",
-            "session confirmation shows which root has its recovery bypass disabled",
-          );
-          await brokenGitHarness.runHooks("session_start", {}, brokenGitCtx);
-          eq(
-            latestStatus(brokenGitHarness, "recovery"),
-            "⚠ Recovery-Check offen",
-            "the next session restores the persisted recovery gate",
-          );
-        } finally {
-          rmSync(brokenGitWorkspace, { recursive: true, force: true });
-        }
-      },
-    );
   },
 };

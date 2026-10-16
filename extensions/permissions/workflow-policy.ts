@@ -32,7 +32,7 @@ import {
  *
  * YOLO 2 ("yolo-ask") and YOLO 3 ("yolo-full") pass every one of these
  * boundaries on to the decision layer, which asks (2) or allows (3). YOLO 3
- * also lifts the trust, recovery and interactive credential-path gates.
+ * also lifts the trust and interactive credential-path gates.
  * Those remain in place for every other permission level.
  */
 export interface WorkflowAssessment {

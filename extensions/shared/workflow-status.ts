@@ -73,7 +73,7 @@ export const PERMISSION_LEVEL_DESCRIPTION: Record<PermissionLevel, string> = {
   "yolo-ask":
     "Wie YOLO 1, aber mehr Zugriff mit Erlaubnis: sudo, Systempfade, Secrets, Pfade außerhalb des Projekts und opake Interpreter fragen einzeln nach",
   "yolo-full":
-    "Temporärer Vollzugriff ohne Rückfragen, auch sudo, Partitionen, Systempfade, Secrets und Pfade außerhalb des Projekts; Trust- und Recovery-Sperren werden aufgehoben",
+    "Temporärer Vollzugriff ohne Rückfragen, auch sudo, Partitionen, Systempfade, Secrets und Pfade außerhalb des Projekts; Trust-Sperren werden aufgehoben",
   headless:
     "Ohne Bestätigungsdialog (kein TUI-Kanal vorhanden): projektlokale Builds/Tests/Lint/Typecheck erlaubt, jede sonst bestätigungspflichtige Aktion bricht strukturiert ab statt zu fragen",
 };
@@ -100,7 +100,6 @@ export function normalizePermissionLevel(
 
 export const UI_STATUS_KEYS = {
   permissions: "permissions",
-  recovery: "recovery",
 } as const;
 
 export type PermissionRiskStatusValue =

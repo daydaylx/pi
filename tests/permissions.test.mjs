@@ -452,9 +452,6 @@ await test("canonical path identity protects sensitive symlink aliases through t
     );
 
     const harness = createHarness({ confirm: false, customResult: false });
-    harness.api.events.on("recovery-status:request", (request) =>
-      request.respond({ armed: false }),
-    );
     modePermissions.default(harness.api);
     const context = harness.makeContext({ cwd, mode: "tui" });
     await harness.runHooks("session_start", {}, context);
@@ -1158,8 +1155,6 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "extensions/permissions/workflow-policy.ts",
     "extensions/shared/verification-capabilities.ts",
     "extensions/shared/workflow-status.ts",
-    "extensions/shared/recovery-capabilities.ts",
-    "extensions/resilience/recovery-state.ts",
     "extensions/setup-core/subagent-output-guard.ts",
     "extensions/permissions/verifier-policy.ts",
     "extensions/frontend-protocol/state-contract.ts",
@@ -1180,8 +1175,12 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "the capability bridge this gate depends on is covered by its own gate",
   );
   assert(
-    assess(["extensions/shared/recovery-capabilities.ts"], "fp-1", {}).blocked,
-    "every *-capabilities.ts bridge under extensions/shared is covered, not just verification's",
+    assess(["shared/workspace-snapshot.mjs"], "fp-1", {}).blocked,
+    "the snapshot identity the verifier ticket binds to stays a hard path",
+  );
+  assert(
+    !assess(["extensions/resilience/index.ts"], "fp-1", {}).blocked,
+    "the interruption notice is advice for the model, not a boundary (ADR 041)",
   );
 
   const noRecord = assess(["extensions/permissions/guards.ts"], "fp-1", {});
@@ -1744,23 +1743,17 @@ await test("YOLO stufen have their own labels, status values and are never resto
   eq(parseYoloLevel("4"), undefined, "unknown argument");
 });
 
-await test("YOLO 1/2 warn about recovery while YOLO 3 lifts that gate", () => {
+await test("YOLO warnings no longer mention a recovery gate", () => {
   if (!toolPolicy) return;
-  for (const level of ["yolo", "yolo-ask"]) {
+  for (const level of ["yolo", "yolo-ask", "yolo-full"]) {
     assert(
-      toolPolicy.permissionWarning(level)?.includes("Recovery-Gate") &&
-        !toolPolicy
-          .permissionWarning(level)
-          ?.includes("Recovery-Gate entfallen"),
-      `${level} warning accurately says recovery remains enforced`,
+      !/Recovery/.test(toolPolicy.permissionWarning(level) ?? ""),
+      `${level} warning does not promise a gate that no longer exists`,
     );
   }
   assert(
-    // ADR 029 and permissionWarning use "Recovery" without the old hyphenated
-    // label while describing the YOLO 3 gate as released.
-    toolPolicy.permissionWarning("yolo-full")?.includes("Recovery") &&
-      toolPolicy.permissionWarning("yolo-full")?.includes("freigegeben"),
-    "YOLO 3 warning says recovery is bypassed",
+    toolPolicy.permissionWarning("yolo-full")?.includes("Trust-Sperren"),
+    "YOLO 3 warning still names the trust boundary it lifts",
   );
 });
 

@@ -98,7 +98,6 @@ const auroraUi = await load("extensions/aurora-ui/index.ts");
 const auroraFooter = await load("extensions/aurora-ui/footer.ts");
 const resilience = await load("extensions/resilience/index.ts");
 const contextCapsule = await load("extensions/context-capsule/index.ts");
-const recoveryState = await load("extensions/resilience/recovery-state.ts");
 const verifierPolicy = await load("extensions/permissions/verifier-policy.ts");
 const sessionHealthAnalyze = await load("extensions/session-health/analyze.ts");
 const sessionHealth = await load("extensions/session-health/index.ts");
@@ -134,7 +133,6 @@ const context = {
   auroraFooter,
   resilience,
   contextCapsule,
-  recoveryState,
   verifierPolicy,
   sessionHealthAnalyze,
   sessionHealth,

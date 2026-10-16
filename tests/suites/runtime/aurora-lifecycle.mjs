@@ -364,7 +364,6 @@ export const auroraLifecycleSections = {
           const footerData = {
             getExtensionStatuses: () =>
               new Map([
-                ["recovery", "⚠ Sperre aktiv"],
                 ["verification", "Verify: checks_failed"],
                 ["lsp", "eingeschränkt"],
               ]),

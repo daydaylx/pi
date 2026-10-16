@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { collectWorkspaceSnapshot } from "../../../shared/workspace-snapshot.mjs";
 import { assert, eq } from "../../shared/assertions.mjs";
-import { createHarness, latestStatus } from "../../shared/harness.mjs";
+import { createHarness } from "../../shared/harness.mjs";
 
 const verifierTicket = (
   canonicalRoot,
@@ -191,113 +191,27 @@ export const snapshotGateSections = {
           "an index race resolves to the actual final index/worktree pair",
         );
 
-        const bridge = await load("extensions/shared/recovery-capabilities.ts");
-        const query = (replies) =>
-          bridge.requestRecoveryStatus({
-            emit(_channel, request) {
-              for (const reply of replies) request.respond(reply);
-            },
-          });
-        eq(
-          await query([]),
-          { armed: true, reason: "unavailable" },
-          "an absent recovery extension is unavailable and cannot authorize writes",
-        );
-        eq(
-          await query([{}, Promise.resolve({ armed: true })]),
-          { armed: true },
-          "an invalid reply cannot shadow a valid recovery gate",
-        );
-        eq(
-          await query([
-            Promise.reject(new Error("provider failed")),
-            { armed: true },
-          ]),
-          { armed: true },
-          "a rejected reply cannot shadow the next provider",
-        );
-        eq(
-          await query([Promise.resolve({ armed: false }), { armed: true }]),
-          { armed: false },
-          "the first valid reply retains registration-order precedence",
-        );
-        eq(
-          await query([{}, Promise.reject(new Error("provider failed"))]),
-          { armed: true, reason: "unavailable" },
-          "broken providers explicitly leave the recovery boundary unavailable",
-        );
-
-        // Recovery unavailability is not a blanket read lock, but it must
-        // fail closed for writes in the real permission pipeline.
-        const unavailableHarness = createHarness();
-        modePermissions.default(unavailableHarness.api);
-        const unavailableCtx = unavailableHarness.makeContext({
-          cwd: workspace,
-        });
-        await unavailableHarness.runHooks("session_start", {}, unavailableCtx);
-        const unavailableRead = await unavailableHarness.runHooks(
-          "tool_call",
-          { toolName: "read", input: { path: "initial.txt" } },
-          unavailableCtx,
-        );
-        assert(
-          unavailableRead.every((result) => !result?.block),
-          "a missing recovery consumer leaves read-only diagnostics available",
-        );
-        const unavailableWrite = await unavailableHarness.runHooks(
+        // Es gibt kein Recovery-Gate mehr (ADR 041): Ohne jeden Provider
+        // läuft ein Schreibaufruf durch dieselbe Berechtigungsprüfung wie
+        // vorher, ohne an einem fehlenden Recovery-Status zu scheitern.
+        const noGateHarness = createHarness();
+        modePermissions.default(noGateHarness.api);
+        const noGateCtx = noGateHarness.makeContext({ cwd: workspace });
+        await noGateHarness.runHooks("session_start", {}, noGateCtx);
+        const noGateWrite = await noGateHarness.runHooks(
           "tool_call",
           { toolName: "write", input: { path: "next.txt", content: "x" } },
-          unavailableCtx,
+          noGateCtx,
         );
         assert(
-          unavailableWrite.some(
-            (result) => result?.block && /nicht verfügbar/.test(result.reason),
-          ),
-          "a missing recovery consumer blocks writes with an explicit unavailable reason",
-        );
-
-        // A clear-looking response from an obsolete session cannot authorize
-        // a write in the replacement session.
-        const staleHarness = createHarness();
-        let resolveStaleStatus;
-        staleHarness.api.events.on("recovery-status:request", (request) =>
-          request.respond(
-            new Promise((resolve) => {
-              resolveStaleStatus = resolve;
-            }),
-          ),
-        );
-        modePermissions.default(staleHarness.api);
-        const staleCtx = staleHarness.makeContext({ cwd: workspace });
-        await staleHarness.runHooks("session_start", {}, staleCtx);
-        const staleAttempt = staleHarness.runHooks(
-          "tool_call",
-          { toolName: "write", input: { path: "stale.txt", content: "x" } },
-          staleCtx,
-        );
-        await staleHarness.runHooks("session_shutdown", {}, staleCtx);
-        const replacementCtx = staleHarness.makeContext({
-          cwd: workspace,
-          sessionId: "replacement-recovery-session",
-        });
-        await staleHarness.runHooks("session_start", {}, replacementCtx);
-        resolveStaleStatus({ armed: false });
-        const staleResult = await staleAttempt;
-        assert(
-          staleResult.some(
-            (result) =>
-              result?.block && /Sitzung.*gewechselt/.test(result.reason),
-          ),
-          "a stale clear response is ignored after a session switch",
+          noGateWrite.every((result) => !result?.block),
+          "a write is not blocked by a missing recovery status provider",
         );
 
         // F-18: exercise the real tool_call pipeline, not just the pure
         // verifier policy. A permitted verifier reaches the executor with the
         // normalized input; a rejected one leaves its caller input untouched.
         const guardHarness = createHarness();
-        guardHarness.api.events.on("recovery-status:request", (request) =>
-          request.respond({ armed: false }),
-        );
         modePermissions.default(guardHarness.api);
         const guardCtx = guardHarness.makeContext({ cwd: workspace });
         await guardHarness.runHooks("session_start", {}, guardCtx);
@@ -379,100 +293,8 @@ export const snapshotGateSections = {
           "both streams are capped during collection and truncation is reported",
         );
 
-        // Each hook reaches a real snapshot await before the next lifecycle
-        // event runs. No sleeps or mocked snapshot results are needed.
-        for (const event of [
-          "before_agent_start",
-          "after_provider_response",
-          "agent_settled",
-          "session_before_compact",
-          "session_compact_failed",
-          "session_compact",
-        ]) {
-          const harness = createHarness();
-          resilience.default(harness.api);
-          const ctx = harness.makeContext({ cwd: workspace });
-          await harness.runHooks("session_start", {}, ctx);
-          if (event !== "before_agent_start")
-            await harness.runHooks("before_agent_start", {}, ctx);
-          if (event === "agent_settled") {
-            await harness.runHooks(
-              "tool_execution_start",
-              { toolName: "edit" },
-              ctx,
-            );
-            await harness.runHooks(
-              "after_provider_response",
-              { status: 503 },
-              ctx,
-            );
-          }
-          const count = harness.appended.length;
-          const pending = harness.runHooks(
-            event,
-            {
-              status: 503,
-              reason: "manual",
-              errorMessage: "failed",
-              willRetry: false,
-            },
-            ctx,
-          );
-          await harness.runHooks("session_shutdown", {}, ctx);
-          const next = harness.makeContext({
-            cwd: workspace,
-            sessionId: "next",
-          });
-          await harness.runHooks("session_start", {}, next);
-          await pending;
-          eq(
-            harness.appended.length,
-            count,
-            `${event}: stale snapshot work appends no entries to the next session`,
-          );
-          eq(
-            latestStatus(harness, "recovery"),
-            undefined,
-            `${event}: stale work cannot arm the next session's gate`,
-          );
-        }
-
-        const recoveryHarness = createHarness();
-        resilience.default(recoveryHarness.api);
-        const ctx = recoveryHarness.makeContext({ cwd: workspace });
-        await recoveryHarness.runHooks("session_start", {}, ctx);
-        await recoveryHarness.runHooks("before_agent_start", {}, ctx);
-        await recoveryHarness.runHooks(
-          "tool_execution_start",
-          { toolName: "edit" },
-          ctx,
-        );
-        await recoveryHarness.runHooks(
-          "after_provider_response",
-          { status: 503 },
-          ctx,
-        );
-        await recoveryHarness.runHooks("agent_settled", {}, ctx);
-        const recovery = recoveryHarness.tools.get("recovery_check");
-        const pendingCheck = recovery
-          .execute("old-check", {}, undefined, undefined, ctx)
-          .then(
-            () => "released",
-            (error) => error.message,
-          );
-        await recoveryHarness.runHooks("session_shutdown", {}, ctx);
-        await recoveryHarness.runHooks("session_start", {}, ctx);
-        assert(
-          (await pendingCheck).includes("abgebrochen"),
-          "an in-flight recovery check cannot release a gate after session replacement",
-        );
-        assert(
-          !recoveryHarness.appended.some(
-            (entry) => entry.customType === "resilience.recovery-checked",
-          ),
-          "no obsolete recovery proof is persisted",
-        );
-
+        // Jeder Turn behält sein eigenes Ergebnis: Das Abschließen wartet auf
+        // keinen Snapshot mehr, ein späterer Turn kann nicht überschrieben werden.
         const turns = createHarness();
         resilience.default(turns.api);
         const turnCtx = turns.makeContext({ cwd: workspace });
@@ -483,22 +305,16 @@ export const snapshotGateSections = {
           { status: 503 },
           turnCtx,
         );
-        const settling = turns.runHooks("agent_settled", {}, turnCtx);
+        await turns.runHooks("agent_settled", {}, turnCtx);
         await turns.runHooks("before_agent_start", {}, turnCtx);
-        await settling;
         await turns.runHooks("agent_settled", {}, turnCtx);
         const settled = turns.appended.filter(
           (entry) => entry.customType === "resilience.turn-settled",
         );
         eq(
-          settled.length,
-          1,
-          "an obsolete settlement cannot clear the following turn in the same session",
-        );
-        eq(
-          settled[0]?.data.outcome,
-          "completed",
-          "the following turn retains its own outcome",
+          settled.map((entry) => entry.data.outcome),
+          ["failed", "completed"],
+          "each turn keeps its own outcome",
         );
 
         const verifierHarness = createHarness();

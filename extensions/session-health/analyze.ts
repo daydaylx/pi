@@ -8,10 +8,6 @@
  * hier höchstens als Zeilen-/Zeitstempelsummen erwähnt.
  */
 import { readFileSync } from "node:fs";
-import {
-  gateRequiresInspection,
-  latestRecoveryGate,
-} from "../resilience/recovery-state.ts";
 
 export interface SessionHealthTurns {
   total: number;
@@ -24,10 +20,13 @@ export interface SessionHealthTurns {
 }
 
 export interface SessionHealthRecovery {
-  required: number;
-  checked: number;
-  /** Gates, die eine Prüfung verlangen und keine hatten (pro Session). */
-  uncheckedGates: number;
+  /** Hinweise an das Modell nach einem unterbrochenen Lauf mit mutierenden Aufrufen (ADR 041). */
+  notices: number;
+  /** Davon mutierende Aufrufe ohne Tool-Ergebnis. */
+  unconfirmedCalls: number;
+  /** Einträge des früheren Recovery-Gates (bis ADR 040), nur für den Vergleich. */
+  legacyRequired: number;
+  legacyChecked: number;
 }
 
 export interface SessionHealthFailures {
@@ -95,7 +94,12 @@ export function emptySessionHealthReport(): SessionHealthReport {
       aborted: 0,
       open: 0,
     },
-    recovery: { required: 0, checked: 0, uncheckedGates: 0 },
+    recovery: {
+      notices: 0,
+      unconfirmedCalls: 0,
+      legacyRequired: 0,
+      legacyChecked: 0,
+    },
     failures: { total: 0, byClass: {}, byProvider: {}, byPhase: {} },
     permissions: {
       transitions: 0,
@@ -283,7 +287,7 @@ export function aggregateSessionEntries(
       "resilience.recovery-required",
     );
     if (required) {
-      report.recovery.required += 1;
+      report.recovery.legacyRequired += 1;
       continue;
     }
     const checked = customData<Record<string, unknown>>(
@@ -291,7 +295,17 @@ export function aggregateSessionEntries(
       "resilience.recovery-checked",
     );
     if (checked) {
-      report.recovery.checked += 1;
+      report.recovery.legacyChecked += 1;
+      continue;
+    }
+    const notice = customData<{ unconfirmedCalls?: unknown }>(
+      rawEntry,
+      "resilience.interruption-notice",
+    );
+    if (notice) {
+      report.recovery.notices += 1;
+      if (typeof notice.unconfirmedCalls === "number")
+        report.recovery.unconfirmedCalls += notice.unconfirmedCalls;
       continue;
     }
     const failure = customData<{
@@ -366,11 +380,6 @@ export function aggregateSessionEntries(
     }
   }
   report.turns.open += openTurns.size;
-
-  const gate = latestRecoveryGate(entries);
-  if (gate && gateRequiresInspection(gate.required) && !gate.checked) {
-    report.recovery.uncheckedGates += 1;
-  }
 }
 
 /** Liest eine Session-Datei und faltet sie in den Bericht. */
@@ -420,7 +429,7 @@ export function formatSessionHealth(report: SessionHealthReport): string {
     "Session-Health",
     `  Dateien: ${report.files} · Einträge: ${report.entries} · Parsefehler: ${report.parseErrors}`,
     `  Turns: ${report.turns.total} gesamt · ${report.turns.completed} abgeschlossen · ${report.turns.completedAfterFailure} nach Fehler fortgesetzt · ${report.turns.failed} fehlgeschlagen · ${report.turns.aborted} abgebrochen · ${report.turns.open} offen/unbesiedelt`,
-    `  Recovery: ${report.recovery.required} erforderlich · ${report.recovery.checked} geprüft · ${report.recovery.uncheckedGates} offene Gates`,
+    `  Recovery: ${report.recovery.notices} Hinweise nach Unterbrechung (${report.recovery.unconfirmedCalls} Aufrufe ohne Ergebnis) · früheres Gate: ${report.recovery.legacyRequired} erforderlich, ${report.recovery.legacyChecked} geprüft`,
     `  Fehler: ${report.failures.total} gesamt`,
     `    nach Klasse: ${formatCounts(report.failures.byClass)}`,
     `    nach Provider: ${formatCounts(report.failures.byProvider)}`,

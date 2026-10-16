@@ -80,7 +80,6 @@ type Slot = (typeof Slot)[keyof typeof Slot];
 const Priority = {
   profile: 0,
   yolo: 1,
-  recovery: 2,
   failedVerification: 3,
   exhaustedContext: 4,
   lsp: 5,
@@ -100,7 +99,7 @@ type Priority = (typeof Priority)[keyof typeof Priority];
  * - `orientation` (profile, folder): the permanent anchors. Never removed,
  *   only cropped — losing the launch profile or working directory is worse
  *   than losing any amount of metadata.
- * - `risk` (YOLO, recovery, failed verification, degraded LSP, exhausted
+ * - `risk` (YOLO, failed verification, degraded LSP, exhausted
  *   context): ignores the width tier. Several at once aggregate into one
  *   visible count rather than being dropped one by one until only the
  *   luckiest-priority risk survives.
@@ -323,20 +322,6 @@ function collectSegments(input: FooterInput, width: number): Segment[] {
           : yoloLevel === "yolo-full"
             ? "⚠ YOLO 3"
             : "⚠ YOLO",
-      tone: "error",
-      bold: true,
-      class: "risk",
-    });
-  }
-
-  const recovery = input.statuses.get("recovery");
-  if (recovery) {
-    // Eine offene Recovery-Sperre ist eine aktive Schreibgrenze und bleibt
-    // deshalb unabhängig von der Breite sichtbar.
-    segments.push({
-      slot: Slot.risk,
-      priority: Priority.recovery,
-      text: recovery,
       tone: "error",
       bold: true,
       class: "risk",

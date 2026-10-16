@@ -202,6 +202,19 @@ const CHECKED_SESSION = [
       workspaceFingerprint: "abc",
     },
   },
+  {
+    type: "custom",
+    customType: "resilience.interruption-notice",
+    timestamp: "2026-08-18T11:05:00.000Z",
+    data: {
+      schemaVersion: 2,
+      timestamp: "2026-08-18T11:05:00.000Z",
+      reason: "no-result",
+      entryId: "e1",
+      mutatingCalls: 3,
+      unconfirmedCalls: 2,
+    },
+  },
 ];
 
 function toJsonl(entries) {
@@ -245,12 +258,13 @@ await test("session health separates interactive errors from raw history", () =>
     eq(report.turns.aborted, 1, "aborted turns have a separate counter");
     eq(report.turns.failed, 2, "failed turns include schemaVersion-1 legacy");
     eq(report.turns.open, 0, "no turn is left open in the fixtures");
-    eq(report.recovery.required, 2, "recovery requests are counted");
-    eq(report.recovery.checked, 1, "recovery checks are counted");
+    eq(report.recovery.legacyRequired, 2, "legacy gate requests are counted");
+    eq(report.recovery.legacyChecked, 1, "legacy gate checks are counted");
+    eq(report.recovery.notices, 1, "interruption notices are counted");
     eq(
-      report.recovery.uncheckedGates,
-      1,
-      "only the session without a check reports an open gate",
+      report.recovery.unconfirmedCalls,
+      2,
+      "calls without a tool result are summed up",
     );
     eq(report.failures.total, 1, "failures come from resilience entries");
     eq(report.failures.byClass.stream, 1, "the stream class is reported");

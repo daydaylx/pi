@@ -7,9 +7,8 @@
  *
  * YOLO exists in the effective pair alone. It is a temporary bypass, never a
  * preference: it is never persisted. It comes in three stufen (yolo,
- * yolo-ask, yolo-full; see workflow-status.ts). The trust boundary and the
- * Recovery workspace-integrity gate stay active on YOLO 1 and 2; YOLO 3
- * explicitly bypasses the Recovery gate. YOLO 1
+ * yolo-ask, yolo-full; see workflow-status.ts). The trust boundary stays
+ * active on YOLO 1 and 2. YOLO 1
  * additionally keeps the hard secret/symlink boundaries;
  * the system-level shell boundaries and commit-verifier gate are the
  * deliberate bypass surface (see workflow-policy.ts, verifier-policy.ts,

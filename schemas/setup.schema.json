@@ -70,17 +70,6 @@
         "typecheck": { "$ref": "#/$defs/check" },
         "test": { "$ref": "#/$defs/check" }
       }
-    },
-    "recovery": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "skipWithoutGit": {
-          "type": "boolean",
-          "default": false,
-          "description": "Bei einem Workspace ohne Git-Repository Recovery-Snapshots überspringen. Nur die globale Setup-Konfiguration darf diese sicherheitsrelevante Einstellung setzen."
-        }
-      }
     }
   },
   "$defs": {

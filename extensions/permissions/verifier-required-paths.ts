@@ -27,7 +27,7 @@ function oneOf(...paths: string[]): (path: string) => boolean {
 
 const RULES: RequiredPathRule[] = [
   {
-    category: "Permission- oder Recovery-Logik",
+    category: "Permission-Logik",
     test: oneOf(
       "extensions/mode-permissions.ts",
       "extensions/permissions/guards.ts",
@@ -37,17 +37,13 @@ const RULES: RequiredPathRule[] = [
       "extensions/permissions/web-tools.ts",
       "extensions/permissions/workflow-policy.ts",
       "extensions/shared/permission-policy.ts",
-      "extensions/shared/recovery-capabilities.ts",
       "extensions/shared/verification-capabilities.ts",
       "extensions/shared/workflow-status.ts",
     ),
   },
   {
-    category: "Kritischer Recovery-State",
+    category: "Workspace-Snapshot (Verifier-Identität)",
     test: oneOf(
-      "extensions/resilience/index.ts",
-      "extensions/resilience/recovery-state.ts",
-      "extensions/resilience/types.ts",
       "shared/workspace-snapshot.mjs",
       "shared/workspace-snapshot.d.mts",
     ),

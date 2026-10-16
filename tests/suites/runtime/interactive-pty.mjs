@@ -248,9 +248,6 @@ export const interactivePtySections = {
       );
 
       const policyHarness = createHarness({ confirm: false });
-      policyHarness.api.events.on("recovery-status:request", (request) =>
-        request.respond({ armed: false }),
-      );
       modePermissions.default(policyHarness.api);
       const policyContext = policyHarness.makeContext();
       policyContext.ui.custom = async () => {
@@ -288,9 +285,6 @@ export const interactivePtySections = {
       }
 
       const approvedHarness = createHarness({ confirm: true });
-      approvedHarness.api.events.on("recovery-status:request", (request) =>
-        request.respond({ armed: false }),
-      );
       modePermissions.default(approvedHarness.api);
       const approvedContext = approvedHarness.makeContext();
       approvedContext.ui.custom = async () => {

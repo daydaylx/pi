@@ -24,9 +24,7 @@ writeFileSync(
 writeFileSync(join(runtimeFixtureRoot, "README.md"), "runtime docs\n");
 process.env.PI_RUNTIME_ROOT = runtimeFixtureRoot;
 const workflowPolicy = await load("extensions/permissions/workflow-policy.ts");
-const recoveryCapabilities = await load(
-  "extensions/shared/recovery-capabilities.ts",
-);
+const interruption = await load("extensions/resilience/interruption.ts");
 if (originalRuntimeRoot === undefined) delete process.env.PI_RUNTIME_ROOT;
 else process.env.PI_RUNTIME_ROOT = originalRuntimeRoot;
 const permissionPolicy = await load("extensions/shared/permission-policy.ts");
@@ -92,17 +90,11 @@ function removeSystemFileScopeFixture(fixture) {
 }
 
 async function startSystemFileScopeHarness(fixture, options = {}) {
-  const recoveryState = options.recoveryState ?? { armed: false };
-  const harnessOptions = { ...options };
-  delete harnessOptions.recoveryState;
   const harness = createHarness({
     confirm: true,
     sessionId: "system-file-scope-session",
-    ...harnessOptions,
+    ...options,
   });
-  harness.api.events.on("recovery-status:request", (request) =>
-    request.respond({ armed: recoveryState.armed }),
-  );
   modePermissions.default(harness.api);
   const context = harness.makeContext({
     cwd: fixture.workspace,
@@ -116,13 +108,13 @@ async function startSystemFileScopeHarness(fixture, options = {}) {
     );
   };
   await harness.runHooks("session_start", {}, context);
-  return { harness, context, recoveryState };
+  return { harness, context };
 }
 
-await test("recovery capability effects fail closed outside known read-only tools", () => {
-  if (!recoveryCapabilities) return;
+await test("tool effects fail closed outside known read-only tools", () => {
+  if (!interruption) return;
   const effect = (toolName, input = {}) =>
-    recoveryCapabilities.recoveryEffect({ toolName, input }, process.cwd());
+    interruption.toolEffect({ toolName, input }, process.cwd());
   for (const toolName of [
     "read",
     "grep",
@@ -135,24 +127,15 @@ await test("recovery capability effects fail closed outside known read-only tool
     "fetch_content",
     "get_search_content",
     "wait",
+    "workspace_add",
   ]) {
     eq(effect(toolName), "read_only", `${toolName} is explicitly read-only`);
   }
-  eq(
-    effect("recovery_check"),
-    "recovery_control",
-    "recovery control stays free",
-  );
-  eq(
-    effect("workspace_add"),
-    "recovery_control",
-    "user-approved workspace-scope control stays available",
-  );
   for (const toolName of ["write", "edit", "custom_mutator", "subagent"]) {
     eq(
       effect(toolName),
       "potentially_mutating",
-      `${toolName} is gated as process/delegation/write/unknown capability`,
+      `${toolName} counts as a process/delegation/write/unknown capability`,
     );
   }
   for (const input of [
@@ -203,37 +186,6 @@ await test("recovery capability effects fail closed outside known read-only tool
       `unknown or operational command is not assumed safe: ${command}`,
     );
   }
-});
-
-await test("recovery status distinguishes unavailable, clear and broken providers", async () => {
-  if (!recoveryCapabilities) return;
-  const request = recoveryCapabilities.requestRecoveryStatus;
-  const unavailable = await request({ emit() {} });
-  eq(
-    unavailable.armed,
-    true,
-    "missing consumer does not imply a clear workspace",
-  );
-  eq(unavailable.reason, "unavailable", "missing consumer is explicit");
-  const clear = await request({
-    emit(_channel, payload) {
-      payload.respond({ armed: false });
-    },
-  });
-  eq(clear, { armed: false }, "an available, clear consumer remains clear");
-  const invalid = await request({
-    emit(_channel, payload) {
-      payload.respond({ armed: "false" });
-    },
-  });
-  eq(invalid.armed, true, "invalid provider data fails closed");
-  eq(invalid.reason, "unavailable", "invalid provider data is unavailable");
-  const rejected = await request({
-    emit(_channel, payload) {
-      payload.respond(Promise.reject(new Error("provider failed")));
-    },
-  });
-  eq(rejected.armed, true, "rejected provider data fails closed");
 });
 
 await test("hard shell boundaries hold outside YOLO", () => {
@@ -499,9 +451,6 @@ await test("runtime path aliases stay outside the project permission scope", asy
     );
 
     const harness = createHarness({ confirm: false, customResult: false });
-    harness.api.events.on("recovery-status:request", (request) =>
-      request.respond({ armed: false }),
-    );
     modePermissions.default(harness.api);
     const context = harness.makeContext({ cwd, mode: "tui" });
     await harness.runHooks("session_start", {}, context);
@@ -691,9 +640,6 @@ await test("RPC UI contexts receive guard blocks without terminating the run", a
   if (!modePermissions) return;
   const invokeBlockedWrite = async (hasUI) => {
     const harness = createHarness({ confirm: false, customResult: false });
-    harness.api.events.on("recovery-status:request", (request) =>
-      request.respond({ armed: false }),
-    );
     modePermissions.default(harness.api);
     const context = harness.makeContext({
       cwd: process.cwd(),
@@ -730,9 +676,6 @@ await test("RPC UI contexts receive guard blocks without terminating the run", a
 await test("a headless block names its reason when the run ends", async () => {
   if (!modePermissions) return;
   const harness = createHarness({ confirm: false, customResult: false });
-  harness.api.events.on("recovery-status:request", (request) =>
-    request.respond({ armed: false }),
-  );
   modePermissions.default(harness.api);
   const context = harness.makeContext({
     cwd: process.cwd(),
@@ -1000,9 +943,6 @@ await test("canonical path identity protects sensitive symlink aliases through t
     );
 
     const harness = createHarness({ confirm: false, customResult: false });
-    harness.api.events.on("recovery-status:request", (request) =>
-      request.respond({ armed: false }),
-    );
     modePermissions.default(harness.api);
     const context = harness.makeContext({ cwd });
     await harness.runHooks("session_start", {}, context);
@@ -2443,8 +2383,6 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "extensions/permissions/workflow-policy.ts",
     "extensions/shared/verification-capabilities.ts",
     "extensions/shared/workflow-status.ts",
-    "extensions/shared/recovery-capabilities.ts",
-    "extensions/resilience/recovery-state.ts",
     "extensions/setup-core/subagent-output-guard.ts",
     "extensions/permissions/verifier-policy.ts",
     "extensions/frontend-protocol/state-contract.ts",
@@ -2465,8 +2403,12 @@ await test("verifier coverage gate blocks mandatory paths without a matching PAS
     "the capability bridge this gate depends on is covered by its own gate",
   );
   assert(
-    assess(["extensions/shared/recovery-capabilities.ts"], "fp-1", {}).blocked,
-    "every *-capabilities.ts bridge under extensions/shared is covered, not just verification's",
+    assess(["shared/workspace-snapshot.mjs"], "fp-1", {}).blocked,
+    "the snapshot identity the verifier ticket binds to stays a hard path",
+  );
+  assert(
+    !assess(["extensions/resilience/index.ts"], "fp-1", {}).blocked,
+    "the interruption notice is advice for the model, not a boundary (ADR 041)",
   );
 
   const noRecord = assess(["extensions/permissions/guards.ts"], "fp-1", {});
@@ -3287,12 +3229,6 @@ await test("untrusted projects block external reads and symlink escapes at the t
   if (!modePermissions || !workflowPolicy) return;
   const cwd = process.cwd();
   const harness = createHarness({ confirm: false, customResult: false });
-  let recoveryArmed = false;
-  let recoveryRequests = 0;
-  harness.api.events.on("recovery-status:request", (request) => {
-    recoveryRequests += 1;
-    request.respond({ armed: recoveryArmed });
-  });
   modePermissions.default(harness.api);
 
   const trustedContext = harness.makeContext({
@@ -3360,7 +3296,6 @@ await test("untrusted projects block external reads and symlink escapes at the t
   );
 
   await harness.commands.get("yolo")("3", trustedContext);
-  recoveryArmed = true;
   const fullAccess = await check(
     "bash",
     { command: "sudo dd if=/dev/zero of=/dev/sdz" },
@@ -3369,11 +3304,6 @@ await test("untrusted projects block external reads and symlink escapes at the t
   assert(
     fullAccess.every((r) => !r?.block),
     `YOLO 3 allows sudo partition writes in an untrusted project: ${JSON.stringify(fullAccess)}`,
-  );
-  eq(
-    recoveryRequests,
-    0,
-    "YOLO 3 bypasses the armed recovery gate without querying it",
   );
 
   // The operator's own `!` shell follows the same trust boundary: blocked in
@@ -3392,7 +3322,7 @@ await test("untrusted projects block external reads and symlink escapes at the t
     "YOLO 3 lets user_bash run in an untrusted project",
   );
 
-  // YOLO 2 keeps the trust boundary and the recovery gate.
+  // YOLO 2 keeps the trust boundary.
   await harness.commands.get("yolo")("2", trustedContext);
   const askUserBash = await userBash(untrustedContext);
   assert(
@@ -3408,28 +3338,19 @@ await test("untrusted projects block external reads and symlink escapes at the t
     askWrite.some((r) => r?.block && r.reason.includes("Harte Trust-Grenze")),
     "YOLO 2 keeps the trust boundary for mutating tools",
   );
-  const askRecovery = await check(
+  const repeatedBlock = await check(
     "write",
     { path: "x.txt", content: "x" },
-    trustedContext,
+    untrustedContext,
   );
   assert(
-    askRecovery.some((r) => r?.block && /Recovery-Gate/.test(r.reason)),
-    "YOLO 2 keeps the armed recovery gate",
-  );
-  const repeatedRecoveryBlock = await check(
-    "write",
-    { path: "x.txt", content: "x" },
-    trustedContext,
-  );
-  assert(
-    repeatedRecoveryBlock.some((r) => r?.block && r?.terminate !== true),
-    "the first repeated block gives the agent a chance to use recovery_check",
+    repeatedBlock.some((r) => r?.block && r?.terminate !== true),
+    "the second identical block still gives the agent a chance to change course",
   );
   const blockedLoop = await check(
     "write",
     { path: "x.txt", content: "x" },
-    trustedContext,
+    untrustedContext,
   );
   assert(
     blockedLoop.some(
@@ -3493,9 +3414,6 @@ await test("workspace_add requires UI approval and keeps the root within one ses
       confirm: true,
       sessionId: "workspace-session-a",
     });
-    harness.api.events.on("recovery-status:request", (request) =>
-      request.respond({ armed: false }),
-    );
     modePermissions.default(harness.api);
     const context = harness.makeContext({
       cwd,
@@ -3610,9 +3528,6 @@ await test("RPC contexts with dialog support can confirm guarded writes", async 
       return true;
     },
   });
-  harness.api.events.on("recovery-status:request", (request) =>
-    request.respond({ armed: false }),
-  );
   modePermissions.default(harness.api);
   const context = harness.makeContext({
     cwd: process.cwd(),

@@ -11,12 +11,6 @@ async function hooks(harness, name, ctx, event = {}) {
   return harness.runHooks(name, event, ctx);
 }
 
-function answerRecoveryClear(harness) {
-  harness.api.events.on("recovery-status:request", (request) =>
-    request.respond({ armed: false }),
-  );
-}
-
 // The permission layer is self-sufficient: no workflow provider (there is no
 // planning workflow any more) is needed, and none may be asked for.
 await test("permissions decide without any workflow provider and never ask for one", async () => {
@@ -24,7 +18,6 @@ await test("permissions decide without any workflow provider and never ask for o
   const cwd = mkdtempSync(join(tmpdir(), "pi-no-workflow-"));
   try {
     const harness = createHarness();
-    answerRecoveryClear(harness);
     let asked = 0;
     harness.api.events.on("workflow-capabilities:request", () => {
       asked += 1;
@@ -114,7 +107,6 @@ await test("guard limits subagent launches to 3 per parent run and resets per tu
     const cwd = mkdtempSync(join(tmpdir(), "pi-parent-run-limit-"));
     try {
       const harness = createHarness();
-      answerRecoveryClear(harness);
       modePermissions.default(harness.api);
       const ctx = harness.makeContext({ cwd });
       await hooks(harness, "session_start", ctx);
@@ -161,7 +153,6 @@ await test("/yolo selects between three stufen, never persists them and YOLO 3 w
     const cwd = mkdtempSync(join(tmpdir(), "pi-yolo-stufen-e2e-"));
     try {
       const harness = createHarness();
-      answerRecoveryClear(harness);
       modePermissions.default(harness.api);
       const ctx = harness.makeContext({ cwd });
       await hooks(harness, "session_start", ctx);
@@ -237,7 +228,6 @@ await test("YOLO 2 shows the confirm dialog at a boundary and a rejection blocks
     try {
       const run = async (level, approve, toolName, input) => {
         const harness = createHarness({ confirm: approve });
-        answerRecoveryClear(harness);
         modePermissions.default(harness.api);
         const ctx = harness.makeContext({ cwd });
         // Deterministic confirm fallback instead of the custom overlay.

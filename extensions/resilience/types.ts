@@ -12,10 +12,6 @@ export type ErrorClass =
 export interface TurnStartMarker {
   schemaVersion: 1 | 2;
   timestamp: string;
-  workspaceFingerprint: string;
-  workspaceRoot?: string;
-  /** Start fingerprint for every approved project root at turn start. */
-  workspaceFingerprintsByRoot?: Record<string, string>;
   provider: string;
   model: string;
   contextPercent: number | null;
@@ -24,19 +20,14 @@ export interface TurnStartMarker {
 /**
  * `completed_after_failure` ist ein Turn, der nach mindestens einem
  * beobachteten Fehler durch Pis natives Retry doch noch erfolgreich
- * siedelte. `recoveryPending` markiert Turns, unmittelbar nach denen ein
- * `resilience.recovery-required`-Eintrag geschrieben wurde, auch wenn ein
- * Abbruch einen freigegebenen mutierenden Aufruf unterbrochen hat. Beide
- * Felder sind additiv; Leser müssen schemaVersion 1 (ohne sie) akzeptieren.
+ * siedelte.
  */
 export interface TurnSettledMarker {
   schemaVersion: 1 | 2;
   timestamp: string;
   turnStartedAt: string;
-  workspaceFingerprint: string;
   outcome: "completed" | "completed_after_failure" | "failed" | "aborted";
   observedFailureCount: number;
-  recoveryPending?: boolean;
 }
 
 export interface FailureDiagnostic {
@@ -50,8 +41,6 @@ export interface FailureDiagnostic {
   /** Konkreter Provider-/Stream-Fehlertext, auf ERROR_MESSAGE_MAX gekürzt. */
   errorMessage?: string;
   phase: TurnPhase;
-  workspaceChangedSinceTurnStart: boolean;
-  toolMayHaveMutatedWorkspace: boolean;
   activeSubagents: number;
   settled: false;
 }
@@ -62,41 +51,23 @@ export interface CompactionBoundaryMarker {
   boundary: "started" | "completed" | "failed";
   reason: "manual" | "threshold" | "overflow";
   willRetry: boolean;
-  workspaceFingerprint: string;
   contextPercent: number | null;
   errorMessage?: string;
 }
 
-export interface RecoveryRequiredMarker {
-  schemaVersion: 1 | 2;
-  timestamp: string;
-  turnStartedAt: string;
-  reason: "interrupted" | "final_failure";
-  workspaceChangedSinceTurnStart: boolean;
-  toolMayHaveMutatedWorkspace: boolean;
-  /** Canonical workspace affected by this marker; absent on legacy global markers. */
-  workspaceRoot?: string;
-  /** Root-specific evidence for one failed turn. */
-  affectedRoots?: Array<{
-    workspaceRoot: string;
-    workspaceChangedSinceTurnStart: boolean;
-    toolMayHaveMutatedWorkspace: boolean;
-  }>;
-}
-
 /**
- * Abschluss des Recovery-Gates: Der Workspace wurde nach einem
- * `recovery-required` geprüft. Ein erfolgreicher Marker schließt genau dieses
- * Gate dauerhaft; ein neuer Fehlturn oder eine neue Unterbrechung erzeugt ein
- * neues `recovery-required`-Gate.
+ * Der Lauf davor endete, bevor das Modell die Wirkung seiner mutierenden
+ * Aufrufe bestätigen konnte; der nächste Lauf bekam einen Hinweis darauf.
  */
-export interface RecoveryCheckedMarker {
+export interface InterruptionNoticeMarker {
   schemaVersion: 1 | 2;
   timestamp: string;
-  turnStartedAt: string;
-  workspaceFingerprint: string;
-  /** Root inspected by this check; absent on legacy global checks. */
-  workspaceRoot?: string;
+  reason: "error" | "aborted" | "no-result" | "no-follow-up";
+  /** Session-Eintrag, an dem der unterbrochene Lauf endete. */
+  entryId: string;
+  mutatingCalls: number;
+  /** Mutierende Aufrufe ohne Tool-Ergebnis (Ausgang unbekannt). */
+  unconfirmedCalls: number;
 }
 
 /** Maximale Länge des gespeicherten Fehlertexts in FailureDiagnostic. */
@@ -106,11 +77,7 @@ export interface OpenTurn {
   marker: TurnStartMarker;
   phase: TurnPhase;
   activeSubagents: number;
-  toolMayHaveMutatedWorkspace: boolean;
-  mutatingWorkspaceRoots: Set<string>;
   observedFailureCount: number;
   currentAttemptFailed: boolean;
   currentAttemptAborted: boolean;
-  currentAttemptAbortNeedsRecovery: boolean;
-  activeMutatingToolCalls: Set<string>;
 }

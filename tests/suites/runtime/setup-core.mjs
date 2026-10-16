@@ -22,9 +22,9 @@ export const setupCoreSections = {
         if (!setupConfig || !auroraState) return;
         const defaults = setupConfig.defaultSetupConfig();
         eq(
-          defaults.recovery.skipWithoutGit,
+          "recovery" in defaults,
           false,
-          "recovery uses a filesystem snapshot by default without Git",
+          "the recovery gate has no setup option anymore (ADR 041)",
         );
         eq(
           defaults.ui,

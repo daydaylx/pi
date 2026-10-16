@@ -10,4 +10,4 @@ description: NixOS-Konfiguration prüfen oder ändern (Flake, Generationen, nixo
 - Nutze für Flake-Abfragen ausschließlich Offline-Evaluation ohne Lockfile-Schreibzugriff.
 - Konfigurationsänderungen erfolgen nur über den vorhandenen `nixos-agent`-Build-/Apply-Pfad. Fehlt das passende Werkzeug oder ein vorbereiteter Rollback, erkläre die Grenze statt einen Ersatzweg zu erfinden.
 - Quellcodeänderungen und Tests autorisieren keinen System-Switch; Aktivierung nur nach ausdrücklicher Freigabe.
-- Dieser Skill ist keine Freigabe. Bestehende Rechte- und Recovery-Gates bleiben maßgeblich.
+- Dieser Skill ist keine Freigabe. Bestehende Rechte-Gates bleiben maßgeblich.

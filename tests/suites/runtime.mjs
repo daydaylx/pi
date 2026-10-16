@@ -10,7 +10,6 @@ import { auroraUiSections } from "./runtime/aurora-ui.mjs";
 import { auroraInspectorSections } from "./runtime/aurora-inspector.mjs";
 import { auroraLifecycleSections } from "./runtime/aurora-lifecycle.mjs";
 import { resilienceSections } from "./runtime/resilience.mjs";
-import { recoveryStateSections } from "./runtime/recovery-state.mjs";
 import { webAccessSections } from "./runtime/web-access.mjs";
 import { shortcutsSections } from "./runtime/shortcuts.mjs";
 import { skillSelectSections } from "./runtime/skill-select.mjs";
@@ -33,7 +32,6 @@ export const runtimeSections = {
   ...auroraInspectorSections,
   ...auroraLifecycleSections,
   ...resilienceSections,
-  ...recoveryStateSections,
   ...webAccessSections,
   ...shortcutsSections,
   ...skillSelectSections,
