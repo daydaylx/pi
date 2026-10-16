@@ -391,7 +391,7 @@ export function createPermissionSession(
       try {
         confirmed = await ctx.ui.confirm(
           "Datei-Scope für diese Sitzung freigeben?",
-          `Pi darf native read/grep/find/ls/write/edit-Aufrufe unter ${root} nach der aktuellen Berechtigungsstufe ausführen. Diese Freigabe gilt nur für diese Sitzung und ändert weder Projekt-Trust, Projekt-Setup oder Verifikationsprofile noch Bash-Rechte. Secret-, Symlink-, geschützte Datei-, Recovery- und Planmodus-Gates bleiben bestehen.`,
+          `Pi darf native read/grep/find/ls/write/edit-Aufrufe unter ${root} nach der aktuellen Berechtigungsstufe ausführen. Diese Freigabe gilt nur für diese Sitzung und ändert weder Projekt-Trust, Projekt-Setup oder Verifikationsprofile noch Bash-Rechte. Secret-, Symlink-, geschützte Datei- und Recovery-Gates bleiben bestehen.`,
         );
       } catch {
         confirmed = false;
