@@ -2,6 +2,9 @@
   "toolDescriptionMode": "custom",
   "toolSchemaMode": "harness",
   "maxSubagentSpawnsPerSession": 5,
+  "intercomBridge": {
+    "mode": "off"
+  },
   "ui": {
     "showAsyncWidget": false,
     "fleetView": false

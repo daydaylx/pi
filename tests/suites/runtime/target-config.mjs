@@ -448,6 +448,11 @@ export const targetConfigSections = {
           5,
           "active package config directly bounds spawns per session",
         );
+        eq(
+          subagentConfig.intercomBridge?.mode,
+          "off",
+          "children get no contact_supervisor: a headless child cannot confirm it",
+        );
         // The reduced parameter surface is registered by toolSchemaMode alone.
         // toolDescriptionMode only replaces the visible description text.
         eq(

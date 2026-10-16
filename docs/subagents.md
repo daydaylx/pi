@@ -103,8 +103,12 @@ registrierte zugleich das reduzierte Schema. Siehe
   Paket-Builtins; `packages` pinnt den Fork auf einen vollständigen,
   erreichbaren Commit-SHA.
 - `extensions/subagent/config.json`: `toolSchemaMode: "harness"`,
-  `toolDescriptionMode: "custom"`, `maxSubagentSpawnsPerSession: 5` sowie
-  `ui.showAsyncWidget: false` und `ui.fleetView: false`. Es gibt keine
+  `toolDescriptionMode: "custom"`, `maxSubagentSpawnsPerSession: 5`,
+  `intercomBridge.mode: "off"` sowie
+  `ui.showAsyncWidget: false` und `ui.fleetView: false`. Ohne die Intercom-Bridge
+  erhalten Kinder weder `contact_supervisor` noch die zugehörige Anweisung; im
+  Headless-Kind scheiterte der Aufruf an der Bestätigungspflicht für
+  unbekannte Tools und beendete den Verifier-Lauf mit Exit 1. Es gibt keine
   Parallelitäts- oder Concurrency-Konfiguration mehr — das aktive Harness
   führt keine parallelen Subagenten aus, und `/setup-doctor` meldet eine
   wieder auftauchende Parallelitätskonfiguration als Fehler.
