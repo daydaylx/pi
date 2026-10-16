@@ -115,6 +115,11 @@ const LEGACY_MANAGED = [
   // Task-Tier klassifiziert nicht mehr (ADR 039).
   "extensions/task-tier/classify.ts",
   "extensions/shared/auto-thinking.ts",
+  // Systemskills sind native SKILL.md-Verzeichnisse (resources_discover) statt
+  // keyword-injizierter Markdown-Dateien.
+  "extensions/system-context/skills/nixos-diagnostics.md",
+  "extensions/system-context/skills/desktop-control.md",
+  "extensions/system-context/skills/system-health.md",
 ];
 
 function parseArgs(argv) {

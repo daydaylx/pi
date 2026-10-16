@@ -2,12 +2,14 @@ import { strict as assert } from "node:assert";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHarness } from "./shared/harness.mjs";
 import { importModule } from "./shared/jiti-loader.mjs";
 
@@ -194,18 +196,28 @@ test("request classification only selects bounded read-only categories", () => {
   assert.deepEqual(collector.categoriesForRequest("Hallo"), []);
 });
 
-test("system skills load only on matching requests and grant no permissions", () => {
-  const empty = collector.systemSkillContext([]);
-  assert.equal(empty, "");
-  const health = collector.systemSkillContext(["health"]);
-  assert.match(health, /SYSTEM PROFILE GUIDANCE/);
-  assert.match(health, /nicht verfügbar/);
-  assert.match(health, /override tool permissions/);
-  assert.doesNotMatch(health, /nixos-agent-apply/);
-  const nixos = collector.systemSkillContext(["flake"]);
-  assert.match(nixos, /Offline-Evaluation/);
-  assert.match(nixos, /nixos-agent/);
-  assert.ok(health.length < 2500);
+test("system skills are native SKILL.md files with routing descriptions", () => {
+  const root = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "extensions",
+    "system-context",
+    "skills",
+  );
+  for (const name of ["nixos-system", "hyprland-desktop", "system-health"]) {
+    const text = readFileSync(path.join(root, name, "SKILL.md"), "utf8");
+    assert.match(
+      text,
+      new RegExp(`^---\\nname: ${name}\\ndescription: .{40,}`),
+    );
+    assert.ok(text.length < 2500, `${name} bleibt kurz`);
+    assert.doesNotMatch(text, /Plan-Gates?|Planmodus/);
+  }
+  assert.match(
+    readFileSync(path.join(root, "nixos-system", "SKILL.md"), "utf8"),
+    /Offline-Evaluation/,
+  );
+  assert.equal(collector.systemSkillContext, undefined);
 });
 
 async function testExtensionLifecycle() {
@@ -234,6 +246,19 @@ async function testExtensionLifecycle() {
     });
     const ctx = harness.makeContext();
     await harness.runHooks("session_start", {}, ctx);
+    const discovered = await harness.runHooks(
+      "resources_discover",
+      { cwd: ctx.cwd, reason: "startup" },
+      ctx,
+    );
+    assert.ok(
+      discovered
+        .at(-1)
+        .skillPaths.some((dir) =>
+          dir.endsWith(path.join("system-context", "skills")),
+        ),
+      "native skill discovery receives the system skill directory",
+    );
     const first = await harness.runHooks(
       "before_agent_start",
       { prompt: "Hallo", systemPrompt: "base" },

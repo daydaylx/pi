@@ -1,4 +1,9 @@
-## Desktop und Benutzer-Sitzung
+---
+name: hyprland-desktop
+description: Hyprland-Desktop und Audio der Benutzersitzung abfragen oder steuern (Fenster, Workspaces, Monitore, Lautstärke, Clipboard). Verwenden bei Aufgaben am laufenden Desktop.
+---
+
+# Hyprland-Desktop und Benutzer-Sitzung
 
 - Verwende für Hyprland und Audio nur die verfügbaren nativen, strukturierten Werkzeuge der aktiven Benutzersitzung. Root-Zugriff ist dafür nicht vorgesehen.
 - Lies den aktuellen Workspace oder Audiostatus vor einer gezielten Änderung und verifiziere danach das Ergebnis.

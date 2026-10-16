@@ -41,9 +41,6 @@ export function collectSystemContext(
   options?: SystemContextOptions,
 ): SystemContext;
 export function formatSystemContext(value: SystemContext): string;
-export function systemSkillContext(
-  categories?: SystemContextCategory[],
-): string;
 export function discoverConfigRoot(options?: {
   home?: string;
   etcNixos?: string;

@@ -2,6 +2,8 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { getPiLaunchProfile } from "../shared/profile.ts";
 import { repoContextForRequest } from "./repos.mjs";
 import {
@@ -10,10 +12,13 @@ import {
   collectSystemContext,
   discoverConfigRoot,
   formatSystemContext,
-  systemSkillContext,
 } from "./collector.mjs";
 
 const BASE_CONTEXT_TTL_MS = 30_000;
+const SKILLS_DIR = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "skills",
+);
 
 // Without this hint the model asks the person for a "file scope" before it even
 // tries a path outside the private workspace, although the open policy
@@ -51,6 +56,10 @@ export function registerSystemContext(
     baseContextExpiresAt = 0;
   });
 
+  // Die Fachanweisungen sind native Skills: Pi nennt Name und Beschreibung im
+  // Systemprompt und lädt die SKILL.md erst bei passender Aufgabe.
+  pi.on("resources_discover", () => ({ skillPaths: [SKILLS_DIR] }));
+
   pi.on("before_agent_start", (event, ctx: ExtensionContext) => {
     // Context categories are derived from the user's prompt; a run started by
     // an extension message has none and gets the base context only.
@@ -87,7 +96,6 @@ export function registerSystemContext(
         ? { ...baseContext, ...extraContext }
         : baseContext;
       sections.push(formatSystemContext(merged));
-      sections.push(systemSkillContext(extraCategories));
     }
     sections.push(repos);
     // Project profile only: edits outside the current project ask on every

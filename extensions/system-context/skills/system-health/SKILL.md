@@ -1,4 +1,9 @@
-## Systemzustand
+---
+name: system-health
+description: Systemzustand diagnostizieren (Dienste, Journal, Netzwerk, Speicher, Hardware, laufende Prozesse). Verwenden bei Fragen zu Gesundheit, Fehlern oder Auslastung des Rechners.
+---
+
+# Systemzustand
 
 - Lade nur die zur Frage passende Zustandskategorie. Ein fehlender oder nicht verfügbarer Wert bedeutet unbekannt, nicht fehlerfrei.
 - Werte mit Zeitstempel als Momentaufnahme. Behaupte nicht dauerhaft, dass Netzwerk, Dienste oder Hardware gesund sind.
