@@ -28,11 +28,12 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [030](030-rabbitmode-read-only-status-contract.md) — RabbitMode liest Permission/Workflow-State über einen dokumentierten Contract, kein Package-Export
 - [031](031-temporary-task-agents.md) — Temporäre Task-Agenten (stateless, Runtime-Limits, Evidenz) statt fester Subagenten-Rollen
 - [032](032-verifier-need-gate.md) — Verifier Need-Gate: technisch erzwungene required/justified/not_needed-Entscheidung für optionale Verifier-Läufe
-- [033](033-task-tiers.md) — Task-Klassen FAST/NORMAL/DEEP: Routing, FAST-Subagenten-/Verifier-Sperre, Duplicate-Read-Guard, dynamisches Thinking
+- [033](033-task-tiers.md) — Task-Klassen FAST/NORMAL/DEEP (Klassifikation durch 039 abgelöst; Duplicate-Read-Guard und Telemetrie gültig)
 - [034](034-system-control.md) — Typed System-Control-Werkzeuge ohne Root-Daemon
 - [035](035-remove-plan-mode.md) — Planmodus und Workflow-Zustand entfernt, Shift+Tab freigegeben
 - [036](036-pis-open-policy.md) — `pis` arbeitet offen, nur Löschen und Risiken werden vorab bestätigt
 - [037](037-skill-select-shift-tab.md) — Skill-Auswahl auf Shift+Tab: Vormerkung über die native `/skill:`-Expansion
+- [039](039-task-tier-vereinfacht.md) — Task-Tier nur noch Duplicate-Read-Guard und Telemetrie; keine Klassen, keine Thinking-Automatik
 
 ## Historische, ersetzte Entscheidungen
 

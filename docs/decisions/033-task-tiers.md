@@ -2,8 +2,10 @@
 
 ## Status
 
-Umgesetzt (Extension `extensions/task-tier/`, Abschnitt „Aufgabenklassen“ in
-`AGENTS.md`).
+Teilweise abgelöst durch [039](039-task-tier-vereinfacht.md) (2026-10-16): Klassifikation,
+Prompt-Zusatz, Thinking-Automatik, Tool-Ausblenden, FAST-Sperre und Eskalation
+sind entfallen; Duplicate-Read-Guard und Telemetrie gelten weiter. Der Text
+unten beschreibt den Stand davor. „Plan Mode“ gibt es seit [035](035-remove-plan-mode.md) nicht mehr.
 
 ## Kontext
 
