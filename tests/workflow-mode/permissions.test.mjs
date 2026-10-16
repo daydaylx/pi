@@ -727,6 +727,46 @@ await test("RPC UI contexts receive guard blocks without terminating the run", a
   );
 });
 
+await test("a headless block names its reason when the run ends", async () => {
+  if (!modePermissions) return;
+  const harness = createHarness({ confirm: false, customResult: false });
+  harness.api.events.on("recovery-status:request", (request) =>
+    request.respond({ armed: false }),
+  );
+  modePermissions.default(harness.api);
+  const context = harness.makeContext({
+    cwd: process.cwd(),
+    mode: "rpc",
+    hasUI: false,
+    trusted: false,
+  });
+  await harness.runHooks("session_start", {}, context);
+  await harness.runHooks("agent_start", {}, context);
+  await harness.runHooks(
+    "tool_call",
+    { toolName: "write", input: { path: "blocked.txt", content: "x" } },
+    context,
+  );
+  const stderrWrites = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    stderrWrites.push(String(chunk));
+    return true;
+  };
+  try {
+    await harness.runHooks("agent_end", {}, context);
+    await harness.runHooks("agent_end", {}, context);
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+  await harness.runHooks("session_shutdown", {}, context);
+  eq(stderrWrites.length, 1, "the stop notice is written exactly once");
+  assert(
+    /write: .+/.test(stderrWrites[0]) && stderrWrites[0].startsWith("[pi]"),
+    "the stop notice names the tool and the block reason",
+  );
+});
+
 await test("resolvePathScope flags a symlink only when its real target escapes the project", () => {
   if (!permissionPolicy) return;
   const cwd = mkdtempSync(join(tmpdir(), "pi-symlink-scope-"));
@@ -942,10 +982,8 @@ await test("canonical path identity protects sensitive symlink aliases through t
     );
     const externalAbsolute = join(cwd, "outside-alias", "outside.txt");
     assert(
-      permissionPolicy.diagnoseCommandSafety(
-        "cat " + externalAbsolute,
-        cwd,
-      ).safe,
+      permissionPolicy.diagnoseCommandSafety("cat " + externalAbsolute, cwd)
+        .safe,
       "Plan diagnostics accept an absolute path through an external symlink",
     );
     eq(
@@ -3477,10 +3515,7 @@ await test("read-only classification permits external inspection and pipelines b
     "Read-only classification permits cat on /etc/hostname",
   );
   assert(
-    permissionPolicy.diagnoseCommandSafety(
-      "head -n 5 /etc/hostname",
-      cwd,
-    ).safe,
+    permissionPolicy.diagnoseCommandSafety("head -n 5 /etc/hostname", cwd).safe,
     "Read-only classification permits head on /etc/hostname",
   );
   assert(

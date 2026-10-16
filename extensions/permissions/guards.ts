@@ -239,7 +239,22 @@ export function registerPermissionGuards(
   const parentRunAgents = createParentRunAgentCounter();
   let previousBlockedAction: string | undefined;
   let repeatedBlockedActionCount = 0;
-  pi.on("agent_start", () => parentRunAgents.reset());
+  // Ein Block ohne UI beendet den Lauf (kein Dialog möglich). Im Print-Modus
+  // bliebe sonst nur der Satz vor dem Tool-Aufruf als Ergebnis stehen.
+  let headlessStop: string | undefined;
+  pi.on("agent_start", () => {
+    parentRunAgents.reset();
+    headlessStop = undefined;
+  });
+  pi.on("agent_end", () => {
+    if (headlessStop === undefined) return;
+    const reason = headlessStop;
+    headlessStop = undefined;
+    process.stderr.write(
+      `[pi] Lauf ohne UI wegen einer blockierten Aktion beendet: ${reason}\n`,
+    );
+    pi.appendEntry("permissions.headless-stop", { reason });
+  });
   pi.on("session_start", () => {
     parentRunAgents.reset();
     previousBlockedAction = undefined;
@@ -250,7 +265,9 @@ export function registerPermissionGuards(
     const launches = subagentLaunchCount(event);
     const limitReason = parentRunAgents.check(launches);
     if (limitReason) {
-      return { block: true, ...stopNonInteractive(ctx), reason: limitReason };
+      const stop = stopNonInteractive(ctx);
+      if (stop.terminate) headlessStop ??= `${event.toolName}: ${limitReason}`;
+      return { block: true, ...stop, reason: limitReason };
     }
     let outcome = await guardToolCall(event, ctx);
     if (outcome?.block && SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)) {
@@ -293,6 +310,14 @@ export function registerPermissionGuards(
     } else {
       previousBlockedAction = undefined;
       repeatedBlockedActionCount = 0;
+    }
+    if (
+      outcome?.block &&
+      outcome.terminate &&
+      ctx.mode !== "tui" &&
+      !ctx.hasUI
+    ) {
+      headlessStop ??= `${event.toolName}: ${outcome.reason ?? "Aktion abgelehnt."}`;
     }
     if (!outcome?.block) {
       parentRunAgents.commit(launches);
