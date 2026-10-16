@@ -565,7 +565,11 @@ test(
     env,
     runtimeDir: temp,
     runtimePath: fakePi,
-    approvalTtlMs: 5_000,
+    // Die Fake-Freigabe entsteht schon beim Start des Hosts; bis der Client
+    // verbunden und per hello angemeldet ist, darf sie nicht ablaufen. Mit 5 s
+    // schlug der Test auf langsamen oder ausgelasteten Läufern gelegentlich fehl
+    // (der Client sah die Anfrage nie und wartete bis zum Frame-Timeout).
+    approvalTtlMs: 12_000,
     startupTimeoutMs: 45_000,
   });
   let client;
