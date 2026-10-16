@@ -16,9 +16,9 @@ Diese Regeln gelten für Pi-Sitzungen und werden von anderen Coding-Agenten sinn
 
 ## Arbeitsweise und Qualität
 
-- Zuerst relevante Projektanweisungen, Implementierung und Prüfungen gezielt lokalisieren. Änderungen klein halten und nach jedem Teilpaket den engsten passenden Check ausführen.
+- `AGENTS.md`/`CLAUDE.md` von Projekt und Elternverzeichnissen sind bereits im Kontext geladen; nicht per `find`/`rg` danach suchen. Zuerst Implementierung und Prüfungen gezielt lokalisieren. Änderungen klein halten und nach jedem Teilpaket den engsten passenden Check ausführen.
 - Fehler, nicht ausführbare Prüfungen und offene Unsicherheit ausdrücklich nennen. Eine Änderung erst als umgesetzt bezeichnen, wenn ihr relevanter Testlauf beendet ist.
-- Reibung vermeiden: Braucht die Aufgabe eine Toolchain (Build, Test, SDK), zuerst per `command -v`/`test -x` prüfen und Fehlendes sofort melden, statt vorher Statusdateien zu lesen. Status- und Handoff-Dateien (`TASKS.md`, `CURRENT_STATUS.md` u. ä.) nur für Implementierungsaufgaben lesen, nicht für reine Git-Aufgaben. Prüfkommandos nicht blind starten, wenn Abhängigkeiten fehlen (`node_modules`, SDK).
+- Reibung vermeiden: Soll die Aufgabe eine Toolchain ausführen (Build, Test, SDK), zuerst per `command -v`/`test -x` prüfen und Fehlendes sofort melden, statt vorher Statusdateien zu lesen. Status- und Handoff-Dateien (`TASKS.md`, `CURRENT_STATUS.md` u. ä.) nur für Implementierungsaufgaben lesen, nicht für reine Git-Aufgaben. Prüfkommandos nicht blind starten, wenn Abhängigkeiten fehlen (`node_modules`, SDK).
 - `ask_user` nur für echte Entscheidungen. Optionen vorher gegen die eigene Schreib- und Rechtegrenze prüfen und nichts anbieten, was der aktive Modus verbietet oder das nicht existiert.
 - Sind Akzeptanzkriterien erfüllt, der passende Check erfolgreich und keine Unsicherheit offen, endet die Aufgabe. Weitere Reads, Tests oder Refactorings brauchen einen Anlass; ausdrückliche Nutzerwünsche haben Vorrang.
 - Dauerhafte Projektregeln gehören hierher, ausführliche Referenzen in `docs/`. `docs/PROJECT_STATE.md` und `docs/CONTEXT_LEDGER.md` werden ausschließlich über den Skill `context-checkpoint` gepflegt.
@@ -31,6 +31,6 @@ Diese Regeln gelten für Pi-Sitzungen und werden von anderen Coding-Agenten sinn
 
 ## Delegation und Scope
 
-- Keine festen Agentenrollen oder permanenten Teams. Triviale Arbeit selbst erledigen; temporäre Delegation nur nach den Kriterien und Grenzen in [docs/subagents.md](docs/subagents.md).
+- Keine festen Agentenrollen oder permanenten Teams. Triviale Arbeit selbst erledigen; temporäre Delegation nur nach den Kriterien und Grenzen in [docs/subagents.md](docs/subagents.md). Verlangt der Nutzer ausdrücklich Subagenten oder parallele Arbeit, diese nutzen oder in einem Satz begründen, warum nicht.
 - Dieses Repository umfasst Pi-Core-Konfiguration und Aurora-TUI. Externe Frontends liegen außerhalb; bei einem reinen TUI-Auftrag bleibt die Bridge außen vor, sofern sie nicht ausdrücklich genannt ist. Zuordnung: [docs/scope-cli-tui-vs-gui.md](docs/scope-cli-tui-vs-gui.md).
 - Webrecherche nur bei echtem Aktualitätsbedarf oder wenn lokale Belege nicht reichen. Den sicheren Such- und Fetch-Ablauf beschreibt [docs/agent-workflow.md](docs/agent-workflow.md).
