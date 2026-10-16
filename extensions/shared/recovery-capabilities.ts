@@ -28,6 +28,8 @@ const READ_ONLY_TOOLS = new Set([
   "fetch_content",
   "get_search_content",
   "lsp_diagnostics",
+  // Wartet nur auf laufende Subagenten, ändert den Workspace nicht.
+  "wait",
   // Checks may create artifacts; workspace fingerprinting detects changes.
   "project_check",
   "verify",

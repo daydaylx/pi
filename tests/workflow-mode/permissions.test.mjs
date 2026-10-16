@@ -134,6 +134,7 @@ await test("recovery capability effects fail closed outside known read-only tool
     "web_search",
     "fetch_content",
     "get_search_content",
+    "wait",
   ]) {
     eq(effect(toolName), "read_only", `${toolName} is explicitly read-only`);
   }

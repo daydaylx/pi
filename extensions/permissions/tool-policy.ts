@@ -236,6 +236,15 @@ function decideToolBase(
       reason: "Subagenten-Delegation ist ohne Bestätigung erlaubt",
     };
   }
+  // `wait` gehört zum Subagenten-Paket und blockiert nur, bis laufende Kind-Läufe
+  // enden; es vergibt keine Fähigkeit. Ohne diesen Zweig fragte es als
+  // "unbekanntes Tool" bei jedem Aufruf nach.
+  if (event.toolName === "wait") {
+    return {
+      action: "allow",
+      reason: "Warten auf Subagenten-Läufe ist ohne Bestätigung erlaubt",
+    };
+  }
   switch (configured.unknownTools) {
     case "block":
       return {

@@ -861,6 +861,14 @@ await test("subagent delegations are allowed without confirmation outside readon
     "block",
     "readonly keeps its complete tool boundary: child runs are not provably read-only",
   );
+  for (const level of ["project-write", "confirm-all", "yolo"]) {
+    eq(decide(level, "wait"), "allow", `wait needs no confirmation at ${level}`);
+  }
+  eq(
+    decide("readonly", "wait"),
+    "block",
+    "readonly keeps wait blocked together with the delegation it waits for",
+  );
   eq(
     decide("project-write", "frobnicate"),
     "ask",
