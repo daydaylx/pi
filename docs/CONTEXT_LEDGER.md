@@ -76,11 +76,11 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
   Dedup-Gate, Ticket, Commit-Gate (Pfadkatalog:
   `extensions/permissions/verifier-required-paths.ts`); urteilslose
   Verifier-Läufe bleiben retrybar und decken keinen Commit.
-- **Recovery** (ADR 016): `latestRecoveryGate`
-  (`extensions/resilience/recovery-state.ts`) behält den chronologisch
-  neuesten `recovery-checked`-Marker; Live-Update im `recovery_check`-Tool
-  und History-Replay nutzen denselben Reducer (`foldCheckedMarker`,
-  `foldRequiredMarker`).
+- **Recovery** (ADR 041, ersetzt 016): kein Gate, kein `recovery_check`.
+  `extensions/resilience/interruption.ts` liest den nativen Session-Zweig; nach
+  einem Lauf mit unbestätigten mutierenden Aufrufen bekommt der nächste einen
+  versteckten Hinweis (Aufrufe, `git status --short`) und einen Marker
+  `resilience.interruption-notice`. Rückfall: `git revert 53a67d2`.
 - **Subagenten** (ADR 031, 014, 018): keine festen Rollen mehr;
   `agents/verifier.md` ist das einzige technische Profil. Delegation läuft
   über temporäre Task-Agenten (`subagent` mit `spec`, höchstens 3 pro
@@ -142,6 +142,8 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 
 ## Offene Risiken
 
+- `pis` bleibt eine Heuristik: `mv`/`cp`/`rsync --delete` und
+  `git checkout -- .`/`git restore .` laufen ohne Rückfrage (ADR 041).
 - Git-Sonderfälle wie Umbenennungen, gelöschte und indexierte Dateien müssen
   bei allen unterstützten Git-Versionen gleich behandelt werden.
 - Zusätzliche Metriken oder Statushinweise können Schemakompatibilität,
@@ -149,8 +151,10 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 
 ## Offene Fragen
 
-- Recovery-Rate nach den Fixes aus dem Audit vom 2026-10-13 ist nicht
-  gemessen (keine neuen Sitzungen).
+- Wirkung der Änderungen vom 2026-10-16 ungemessen: `/session-health --days 7`
+  auswerten (Verifier `veraltet`, Recovery-Hinweise).
+- `pi -p` hing in 3 von ~20 Starts ohne Ausgabe (Ursache offen; Verdacht
+  Provider-Stall, `retry.provider.timeoutMs` 1 h).
 
 ## Wichtige Projektregeln
 
@@ -171,13 +175,12 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 
 ## Aktuelle Prioritäten
 
-- Audit-Umsetzung vom 2026-10-13 ist abgeschlossen (Stand:
-  `docs/PROJECT_STATE.md`); Pi-Runtime-Pin und Dev-Abhängigkeit sind `1.2.0`.
+- Audit 2026-10-13 abgeschlossen (`docs/PROJECT_STATE.md`); Pi-Pin `1.2.0`.
 - Real-Duel: Medium-Profile, Fingerprint-Provenienz und die 36-Lauf-Matrix
   sind vorbereitet. Vor dem Dual-Smoke zuerst den kanonischen Audit-/Medium-
   Stand prüfen und die explizite Commit-Freigabe einholen.
-- Der Live-Smoke (#137) bleibt offen: Offline-Start/Shift+Tab ist geprüft,
-  Provider-Schritte und der TUI-Rundlauf (Shift+Tab-Skillauswahl, `pis`) sind noch nicht gelaufen.
+- Live-Smoke (#137): Start, Shift+Tab, `ask_user`, Permission-Dialog, `pis`,
+  Verifier liefen am 2026-10-16 in einer isolierten Kopie.
 - Der Fork-Pin ist ein vollständiger, bei GitHub erreichbarer SHA, der den
   alten Pin enthält (aktuell `0364aaa`, Branch
   `feat/temporary-agent-spec`); `main` ist nicht automatisch der neueste
@@ -186,13 +189,11 @@ Details und Begründungen stehen in `docs/decisions/`; hier nur der gültige Ker
 
 ## Verworfene Optionen
 
-- Ein großer allgemeiner Runtime-State, automatische `blocked`-Klassifikation
-  und standardmäßig aktive Recovery-Nudges sind verworfen, bis Messdaten
-  ihren Nutzen belegen.
-- Eine zweite vollständige Verify-Pipeline ist verworfen; stattdessen gibt es
-  den schlanken Versioned-Tree-Check plus den `git archive HEAD`-Weg.
+- Ein großer allgemeiner Runtime-State und automatische `blocked`-Klassifikation
+  sind verworfen, bis Messdaten ihren Nutzen belegen. Das Recovery-Gate ist
+  verworfen (ADR 041); der Hinweis nach Unterbrechung ersetzt es.
+- Zweite Verify-Pipeline verworfen; stattdessen Versioned-Tree-Check und `git archive HEAD`.
 - Fork-Strip-down (2026-10-13 verworfen): Async-Runner, Chains, Intercom und
   Worktrees zu entfernen (−38 000 Zeilen) brächte nur Wartbarkeit;
-  `toolSchemaMode: "harness"` sperrt diese Pfade schon auf Schema-Ebene. Der
-  Stand ist unfertig (82 Typfehler) und liegt nur lokal im Dev-Klon
-  (`wip/strip-down-2026-10-13`); `74b95d6` ist ebenfalls nicht übernommen.
+  `toolSchemaMode: "harness"` sperrt diese Pfade schon. Der unfertige Stand
+  liegt nur lokal (`wip/strip-down-2026-10-13`); `74b95d6` ist nicht übernommen.
