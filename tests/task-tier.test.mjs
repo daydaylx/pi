@@ -4,7 +4,6 @@ import { assert, eq, test, counters as summary } from "./shared/assertions.mjs";
 import { withHarness } from "./shared/harness.mjs";
 import { importModule as load } from "./shared/jiti-loader.mjs";
 
-const classify = await load("extensions/task-tier/classify.ts");
 const tracker = await load("extensions/task-tier/read-tracker.ts");
 const tier = await load("extensions/task-tier/index.ts");
 const hardPaths = await load(
@@ -30,214 +29,6 @@ await test("verifier hard paths include gate dependencies", () => {
     0,
     "unrelated UI module remains optional",
   );
-});
-
-await test("task-tier: Klassifikation (Tests A–F)", async () => {
-  // A trivialer Config-Fix, C lokale UI-Änderung, B kleiner Bug
-  eq(
-    classify.classifyPrompt(
-      "Setze in settings.json editorPaddingX auf 2",
-    ),
-    "fast",
-    "A config",
-  );
-  eq(
-    classify.classifyPrompt(
-      "Zeige im Footer den aktuellen Arbeitsordner an",
-    ),
-    "fast",
-    "C ui",
-  );
-  eq(
-    classify.classifyPrompt(
-      "Fix: parseArgs in extensions/foo/args.ts liefert bei leerem String undefined",
-    ),
-    "fast",
-    "B bug",
-  );
-  // Risikowörter allein führen zu NORMAL; kritische Pfade bleiben DEEP.
-  eq(
-    classify.classifyPrompt("Ändere die Permission-Prüfung für bash"),
-    "normal",
-    "E permission",
-  );
-  eq(
-    classify.classifyPrompt("Sicherheitslücke im Login beheben"),
-    "normal",
-    "E security",
-  );
-  eq(
-    classify.classifyPrompt("Passe extensions/permissions/guards.ts an"),
-    "deep",
-    "E hard path",
-  );
-  // Explizite Tiefenprüfung bleibt DEEP.
-  eq(
-    classify.classifyPrompt(
-      "Führe ein gründliches Audit des Recovery-Flows durch",
-    ),
-    "deep",
-    "explizites Audit",
-  );
-  eq(
-    classify.classifyPrompt("Refactore das Subsystem"),
-    "normal",
-    "Refactor-Wort allein",
-  );
-  eq(
-    classify.classifyPrompt("Ein Tippfehler in der Verifier-Doku"),
-    "normal",
-    "Verifier-Wort allein",
-  );
-  eq(
-    classify.classifyPrompt("Benenne die Funktion in allen Dateien um"),
-    "normal",
-    "broad",
-  );
-  eq(
-    classify.classifyPrompt("a.ts b.ts c.ts d.ts ändern"),
-    "normal",
-    "viele Pfade",
-  );
-  eq(classify.classifyPrompt(""), "normal", "leer");
-});
-
-await test("task-tier: 30-Aufgaben-Korpus gegen alte Heuristik", async () => {
-  // Repräsentative Aufgaben aus den lokalen Behebungsaufträgen und kleinen
-  // Repo-Arbeiten; die Labels sind die erwartete Klasse nach beobachtetem Umfang.
-  const corpus = [
-    ["fast", "Setze editorPaddingX in settings.json auf 2"],
-    ["fast", "Korrigiere den Tippfehler im Footer-Label"],
-    [
-      "fast",
-      "Fix: parseArgs in extensions/foo/args.ts gibt bei leerem String undefined zurück",
-    ],
-    ["fast", "Ergänze einen Test für den leeren String in tests/foo.test.mjs"],
-    ["fast", "Zeige im Footer den aktuellen Arbeitsordner an"],
-    ["fast", "Ändere den Standardwert von retryCount in config.ts auf 3"],
-    ["fast", "Entferne den ungenutzten Import aus extensions/foo/index.ts"],
-    ["fast", "Ergänze den fehlenden Markdown-Link in README.md"],
-    ["fast", "Benenne den lokalen Button-Text in Abbrechen um"],
-    ["fast", "Korrigiere den Grenzfall für offset 0 in read-tracker.ts"],
-    [
-      "normal",
-      "Prüfe den Timeout-Alias im Verifier und ergänze passende Tests",
-    ],
-    ["normal", "Untersuche den intermittierenden Fehler im LSP-Cache"],
-    ["normal", "Refactore den Parser in args.ts und aktualisiere die Tests"],
-    [
-      "normal",
-      "Prüfe die Sicherheitslücke im Login und beschreibe die Ursache",
-    ],
-    ["normal", "Ändere die Permission-Prüfung für bash"],
-    ["normal", "Aktualisiere alle drei CLI-Hilfetexte in docs/"],
-    [
-      "normal",
-      "Vergleiche die beiden Benchmark-Reports und fasse Unterschiede zusammen",
-    ],
-    ["normal", "Korrigiere den Berechtigungs-Text in der Dokumentation"],
-    [
-      "normal",
-      "Der Verifier-Leitfaden enthält einen Tippfehler; korrigiere ihn",
-    ],
-    [
-      "normal",
-      "Ergänze Tests für den Recovery-Neustart und prüfe den betroffenen Workflow",
-    ],
-    [
-      "deep",
-      "Ändere extensions/permissions/guards.ts und prüfe den Permission-Vertrag",
-    ],
-    [
-      "deep",
-      "Überarbeite extensions/shared/permission-policy.ts für Symlink-Ziele",
-    ],
-    [
-      "deep",
-      "Repariere extensions/frontend-protocol/events.ts und die öffentliche Event-Kompatibilität",
-    ],
-    [
-      "deep",
-      "Ändere extensions/resilience/recovery-state.ts für atomare Zustandspersistenz",
-    ],
-    [
-      "deep",
-      "Passe extensions/setup-core/dependency-prepare.ts an die Lockfile-Attestierung an",
-    ],
-    ["deep", "Führe ein gründliches Audit des Recovery-Flows durch"],
-    [
-      "deep",
-      "Untersuche Root Cause und behebe den nicht reproduzierbaren Fehler im Recovery-State",
-    ],
-    [
-      "deep",
-      "Führe ein ausführliches Audit für Verifier-Ledger und Recovery-Capabilities durch",
-    ],
-    [
-      "deep",
-      "Ändere extensions/permissions/tool-policy.ts und extensions/resilience/recovery-state.ts",
-    ],
-    [
-      "deep",
-      "Ersetze den Berechtigungsvertrag in extensions/shared/workflow-status.ts",
-    ],
-  ];
-  const legacyDeep =
-    /security|sicherheit|permission|berechtigung|trust|secret|credential|auth(?:entication|orization|entifizierung)?\b|sandbox|architektur|architecture|migrat|refactor|umbau|neu\s*schreiben|rewrite|protokoll|protocol|frontend[- ]api|\bipc\b|dependenc|abhängigkeit|verifier|subagent|race condition|intermittier|nicht reproduzierbar|root cause|ursache.*unklar/i;
-  const legacyTier = (prompt) => {
-    if (legacyDeep.test(prompt)) return "deep";
-    if (
-      hardPaths.matchingVerifierRequiredPaths(classify.mentionedPaths(prompt))
-        .length > 0
-    )
-      return "deep";
-    if (
-      /\b(commit\w*|push\w*|merge\w*|publish\w*|release\w*|deploy\w*|veröffentlich\w*|pull[- ]?request|pr)\b/i.test(
-        prompt,
-      )
-    )
-      return "normal";
-    if (
-      prompt.length > 500 ||
-      /\b(alle[nrms]?|überall|komplett\w*|gesamte\w*|repo-?weit|projektweit|across|everywhere|all files|whole|entire)\b/i.test(
-        prompt,
-      )
-    )
-      return "normal";
-    if (
-      classify.mentionedPaths(prompt).length > 3 ||
-      (prompt.match(/^\s*(?:[-*]|\d+[.)])\s+/gm)?.length ?? 0) > 2
-    )
-      return "normal";
-    return "fast";
-  };
-  let oldFalseDeep = 0;
-  let oldErrors = 0;
-  let newErrors = 0;
-  for (const [expected, prompt] of corpus) {
-    const old = legacyTier(prompt);
-    const current = classify.classifyPrompt(prompt);
-    if (old === "deep" && expected !== "deep") oldFalseDeep += 1;
-    if (old !== expected) oldErrors += 1;
-    if (current !== expected) {
-      newErrors += 1;
-    }
-  }
-  eq(corpus.length, 30, "10 Aufgaben je Klasse");
-  eq(
-    oldFalseDeep,
-    7,
-    "alte Heuristik stuft harmlose Risikowörter fälschlich deep ein",
-  );
-  eq(oldErrors, 9, "Gesamtfehler der alten Heuristik im Korpus");
-  eq(newErrors, 0, "neue Heuristik trifft alle Korpuslabels");
-});
-
-await test("task-tier: Thinking-Ziele", async () => {
-  eq(classify.thinkingForTier("fast", "kurz"), "low", "fast kurz");
-  eq(classify.thinkingForTier("fast", "x".repeat(200)), "medium", "fast lang");
-  eq(classify.thinkingForTier("normal", "x"), undefined, "normal unverändert");
-  eq(classify.thinkingForTier("deep", "x"), "high", "deep");
 });
 
 await test("task-tier: Read-Tracker", async () => {
@@ -273,29 +64,14 @@ const tr = (toolName, input, extra = {}) => ({
   isError: false,
   ...extra,
 });
+const turnEntry = (harness) =>
+  harness.appended.find((e) => e.customType === "task-tier.turn");
 
-await test("task-tier: FAST blockt Subagenten, Duplicate-Reads, eskaliert", async () => {
+await test("task-tier: Duplicate-Read wird blockiert, Edit und Änderung geben frei", async () => {
   await withHarness(
     { extensions: [tier], files: { "a.txt": "x\n" } },
     async ({ harness, context, cwd }) => {
-      const [start] = await harness.runHooks(
-        "before_agent_start",
-        {
-          prompt: "Setze editorPaddingX in settings.json",
-          systemPrompt: "SYS",
-        },
-        context,
-      );
-      assert(start.systemPrompt.includes("FAST"), "FAST-Prompt angehängt");
-      eq(harness.api.getThinkingLevel(), "low", "Thinking gesenkt");
-
-      const [sub] = await harness.runHooks(
-        "tool_call",
-        tc("subagent", { spec: { profile: "verify" } }),
-        context,
-      );
-      assert(sub?.block === true, "Subagent geblockt");
-
+      await harness.runHooks("agent_start", {}, context);
       const read = { path: "a.txt" };
       eq(
         (await harness.runHooks("tool_call", tc("read", read), context))[0],
@@ -315,459 +91,68 @@ await test("task-tier: FAST blockt Subagenten, Duplicate-Reads, eskaliert", asyn
         undefined,
         "nach Edit wieder frei",
       );
-      writeFileSync(join(cwd, "a.txt"), "y\n");
-
-      // Eskalation: zu viele Searches vor dem ersten Edit (Edit-Flag zurücksetzen über neuen Turn)
-      await harness.runHooks("agent_end", { messages: [] }, context);
-      eq(harness.api.getThinkingLevel(), "high", "Thinking wiederhergestellt");
-      const entry = harness.appended.find(
-        (e) => e.customType === "task-tier.turn",
+      await harness.runHooks("tool_result", tr("read", read), context);
+      writeFileSync(join(cwd, "a.txt"), "yy\n");
+      eq(
+        (await harness.runHooks("tool_call", tc("read", read), context))[0],
+        undefined,
+        "nach externer Änderung wieder frei",
       );
-      eq(entry.data.tier, "fast", "Telemetrie Klasse");
-      eq(entry.data.dupReadsBlocked, 1, "Telemetrie Duplicate-Reads");
+      await harness.runHooks("tool_result", tr("read", read), context);
+      await harness.runHooks("session_compact", {}, context);
+      eq(
+        (await harness.runHooks("tool_call", tc("read", read), context))[0],
+        undefined,
+        "nach Kompaktierung wieder frei",
+      );
+      await harness.runHooks("agent_end", { messages: [] }, context);
+      eq(turnEntry(harness).data.dupReadsBlocked, 1, "Telemetrie Duplicate-Reads");
     },
   );
+});
 
+await test("task-tier: ändert weder Prompt, Thinking noch Subagenten", async () => {
   await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      { prompt: "Zeige im Footer den Ordner an", systemPrompt: "SYS" },
-      context,
-    );
-    for (let i = 0; i < 3; i += 1)
-      await harness.runHooks(
-        "tool_result",
-        tr("grep", { pattern: "x" }),
-        context,
-      );
-    const [sub] = await harness.runHooks(
-      "tool_call",
-      tc("subagent", { spec: { profile: "analyse" } }),
-      context,
-    );
-    eq(sub, undefined, "nach Eskalation Subagent erlaubt");
-    assert(
-      harness.sent.some((s) => s.message.customType === "task-tier.escalation"),
-      "Steering-Hinweis",
-    );
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(entry.data.escalations.length, 1, "Eskalation protokolliert");
-    eq(entry.data.tier, "normal", "Klasse NORMAL");
-  });
-
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      { prompt: "Kleiner Fix in foo.ts", systemPrompt: "SYS" },
-      context,
-    );
-    await harness.runHooks(
-      "tool_result",
-      tr("edit", { path: "extensions/permissions/guards.ts" }),
-      context,
-    );
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(entry.data.tier, "deep", "Hard-Pfad → DEEP");
-    eq(entry.data.initialTier, "fast", "Anfangsklasse wird festgehalten");
-    eq(entry.data.finalTier, "deep", "Endklasse wird festgehalten");
-    assert(
-      entry.data.observedRiskSignals.includes("hard_verifier_path"),
-      "Hard-Pfad-Signal",
-    );
-    eq(
-      entry.data.escalationReason.length,
-      1,
-      "Eskalationsgrund wird protokolliert",
-    );
-  });
-
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      {
-        prompt:
-          "Der Verifier-Leitfaden enthält einen Tippfehler; korrigiere ihn",
-        systemPrompt: "SYS",
-      },
-      context,
-    );
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(entry.data.initialTier, "normal", "weiches Risikowort bleibt NORMAL");
-    eq(
-      entry.data.falsePositiveCandidate,
-      true,
-      "Kandidat für bisherige Überklassifikation",
-    );
-    eq(
-      entry.data.observedRiskSignals.length,
-      0,
-      "keine Laufzeit-Risiken beobachtet",
-    );
-  });
-
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      { prompt: "Kleiner Fix in foo.ts", systemPrompt: "SYS" },
-      context,
-    );
-    await harness.runHooks(
-      "tool_result",
-      tr("edit", { path: "extensions/example/fix.ts" }),
-      context,
-    );
-    await harness.runHooks(
-      "tool_result",
-      tr("edit", { path: "extensions/other/fix.ts" }),
-      context,
-    );
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(
-      entry.data.finalTier,
-      "deep",
-      "Subsystem-Änderungen heben auf DEEP hoch",
-    );
-    assert(
-      entry.data.observedRiskSignals.includes("multiple_subsystems"),
-      "Subsystem-Signal",
-    );
-  });
-
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
+    const thinking = harness.api.getThinkingLevel();
+    const start = await harness.runHooks(
       "before_agent_start",
       { prompt: "Setze editorPaddingX in settings.json", systemPrompt: "SYS" },
       context,
     );
+    eq(start[0], undefined, "kein Prompt-Zusatz, auch für kurze Aufträge");
+    await harness.runHooks("agent_start", {}, context);
+    for (const input of [
+      { spec: { profile: "verify" } },
+      { agent: "verifier", task: "x" },
+    ]) {
+      const [sub] = await harness.runHooks(
+        "tool_call",
+        tc("subagent", input),
+        context,
+      );
+      eq(sub, undefined, "Subagent und Verifier werden nicht blockiert");
+    }
+    eq(harness.api.getThinkingLevel(), thinking, "Thinking unverändert");
+    await harness.runHooks("agent_end", { messages: [] }, context);
+    eq(harness.api.getThinkingLevel(), thinking, "Thinking bleibt am Ende");
+    const entry = turnEntry(harness).data;
+    eq(entry.subagentCalls, 2, "Subagent-Starts gezählt");
+    eq(entry.verifierCalls, 2, "Verifier-Starts gezählt");
+  });
+});
+
+await test("task-tier: Telemetrie zählt Aufrufe, Requests, Tokens und Cache-Verluste", async () => {
+  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
+    await harness.runHooks("agent_start", {}, context);
+    await harness.runHooks("tool_result", tr("grep", { path: "." }), context);
     await harness.runHooks(
       "tool_result",
-      tr("bash", { command: "npm test" }, { isError: true }),
-      context,
-    );
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(
-      entry.data.finalTier,
-      "normal",
-      "fehlgeschlagener Check hebt FAST auf NORMAL",
-    );
-    assert(
-      entry.data.observedRiskSignals.includes("test_build_failure"),
-      "Check-Fehler-Signal",
-    );
-  });
-});
-
-
-await test("task-tier: NORMAL lässt Prompt und Thinking unverändert", async () => {
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    const [start] = await harness.runHooks(
-      "before_agent_start",
-      {
-        prompt: "Benenne alles komplett um in allen Modulen",
-        systemPrompt: "SYS",
-      },
-      context,
-    );
-    eq(start, undefined, "kein Prompt-Zusatz");
-    eq(harness.api.getThinkingLevel(), "high", "Thinking unverändert");
-  });
-});
-
-await test("task-tier: Commit/Push nie FAST, Fortsetzung erbt Klasse", async () => {
-  for (const prompt of [
-    "commit und push",
-    "Bitte pushen",
-    "merge den Branch",
-    "mach den PR",
-  ]) {
-    assert(
-      classify.classifyPrompt(prompt) !== "fast",
-      `release nicht fast: ${prompt}`,
-    );
-  }
-  assert(classify.isContinuationPrompt("weiter"), "weiter");
-  assert(classify.isContinuationPrompt("ja, mach das"), "ja");
-  assert(
-    !classify.isContinuationPrompt(
-      "Setze in settings.json editorPaddingX auf 2",
-    ),
-    "kein Fortsetzungs-Prompt",
-  );
-  eq(classify.maxTier("fast", "deep"), "deep", "maxTier");
-  eq(classify.maxTier("normal", "fast"), "normal", "maxTier2");
-});
-
-await test("task-tier: FAST blendet Subagent-Tools aus und stellt sie wieder her", async () => {
-  const all = ["read", "bash", "edit", "subagent", "wait", "web_search"];
-  const small = "Setze editorPaddingX in settings.json";
-
-  // Ausblenden bei FAST, Wiederherstellung am Turn-Ende; fremde Tools bleiben unberührt.
-  await withHarness(
-    { extensions: [tier], harness: { activeTools: all } },
-    async ({ harness, context }) => {
-      await harness.runHooks(
-        "before_agent_start",
-        { prompt: small, systemPrompt: "SYS" },
-        context,
-      );
-      eq(
-        harness.api.getActiveTools(),
-        ["read", "bash", "edit", "web_search"],
-        "FAST ohne Subagent-Tools",
-      );
-      await harness.runHooks("agent_end", { messages: [] }, context);
-      eq(
-        [...harness.api.getActiveTools()].sort(),
-        [...all].sort(),
-        "nach Turn-Ende wieder vollständig",
-      );
-    },
-  );
-
-  // Eskalation FAST -> NORMAL bringt die Tools sofort zurück.
-  await withHarness(
-    { extensions: [tier], harness: { activeTools: all } },
-    async ({ harness, context }) => {
-      await harness.runHooks(
-        "before_agent_start",
-        { prompt: small, systemPrompt: "SYS" },
-        context,
-      );
-      assert(
-        !harness.api.getActiveTools().includes("subagent"),
-        "subagent anfangs verborgen",
-      );
-      await harness.runHooks(
-        "tool_result",
-        tr("bash", { command: "npm test" }, { isError: true }),
-        context,
-      );
-      assert(
-        harness.api.getActiveTools().includes("subagent") &&
-          harness.api.getActiveTools().includes("wait"),
-        "Eskalation stellt Subagent-Tools wieder her",
-      );
-    },
-  );
-
-  // NORMAL und DEEP lassen die Tool-Liste unverändert.
-  for (const prompt of [
-    "Benenne alles komplett um in allen Modulen",
-    "Führe ein gründliches Audit des Recovery-Flows durch",
-  ]) {
-    await withHarness(
-      { extensions: [tier], harness: { activeTools: all } },
-      async ({ harness, context }) => {
-        await harness.runHooks(
-          "before_agent_start",
-          { prompt, systemPrompt: "SYS" },
-          context,
-        );
-        eq(harness.api.getActiveTools(), all, `Tools unverändert: ${prompt}`);
-      },
-    );
-  }
-
-  // Fehlen die Subagent-Tools, wird nichts verändert (kein setActiveTools-Aufruf nötig).
-  await withHarness(
-    { extensions: [tier], harness: { activeTools: ["read", "bash"] } },
-    async ({ harness, context }) => {
-      await harness.runHooks(
-        "before_agent_start",
-        { prompt: small, systemPrompt: "SYS" },
-        context,
-      );
-      eq(harness.api.getActiveTools(), ["read", "bash"], "keine Änderung");
-    },
-  );
-});
-
-await test("task-tier: Umgebungsfehler eskalieren nicht, echte Testfehler schon", async () => {
-  const text = (t) => [{ type: "text", text: t }];
-  assert(
-    tier.isEnvironmentalFailure(
-      text(
-        "sh: bundt: Kommando nicht gefunden\n\nCommand exited with code 127",
-      ),
-    ),
-    "Exit 127",
-  );
-  assert(
-    tier.isEnvironmentalFailure(text("Error: Cannot find module 'x'")),
-    "Modul fehlt",
-  );
-  assert(
-    !tier.isEnvironmentalFailure(
-      text("1 failing\n\nCommand exited with code 1"),
-    ),
-    "echter Testfehler",
-  );
-  assert(!tier.isEnvironmentalFailure(undefined), "kein Inhalt");
-
-  const small = "Setze editorPaddingX in settings.json";
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      { prompt: small, systemPrompt: "SYS" },
+      tr("edit", { path: "src/index.js" }),
       context,
     );
     await harness.runHooks(
       "tool_result",
-      tr(
-        "bash",
-        { command: "npm test" },
-        {
-          isError: true,
-          content: text(
-            "bundt: Kommando nicht gefunden\n\nCommand exited with code 127",
-          ),
-        },
-      ),
-      context,
-    );
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(entry.data.finalTier, "fast", "bleibt FAST bei Umgebungsfehler");
-    eq(entry.data.environmentFailures, 1, "Umgebungsfehler gezählt");
-  });
-
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      { prompt: small, systemPrompt: "SYS" },
-      context,
-    );
-    await harness.runHooks(
-      "tool_result",
-      tr(
-        "bash",
-        { command: "npm test" },
-        {
-          isError: true,
-          content: text("1 failing\n\nCommand exited with code 1"),
-        },
-      ),
-      context,
-    );
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(entry.data.finalTier, "normal", "echter Fehler stuft hoch");
-  });
-});
-
-await test("task-tier: nur Test-/Build-Läufe zählen als Prüffehler", async () => {
-  const text = (t) => [{ type: "text", text: t }];
-  assert(tier.isTestOrBuildCommand("npm test"), "npm test");
-  assert(
-    tier.isTestOrBuildCommand("node quickpanel/tests/hermes.test.js"),
-    "node *.test.js",
-  );
-  assert(
-    tier.isTestOrBuildCommand("python3 -I quickpanel/tests/shell_smoke.py"),
-    "Smoke-Skript",
-  );
-  assert(tier.isTestOrBuildCommand("nixos-agent-build"), "Nix-Build");
-  assert(
-    tier.isTestOrBuildCommand("cd app && FOO=1 npx vitest run"),
-    "Kette mit Env und npx",
-  );
-  assert(!tier.isTestOrBuildCommand("rg -n voice quickpanel"), "rg");
-  assert(
-    !tier.isTestOrBuildCommand("rg -n x quickpanel/tests/hermes.test.js"),
-    "rg auf Testdatei",
-  );
-  assert(!tier.isTestOrBuildCommand("git diff --check"), "git");
-  assert(!tier.isTestOrBuildCommand("test -f .pi/verify.json"), "test -f");
-  assert(!tier.isTestOrBuildCommand("command -v node"), "command -v");
-  assert(!tier.isTestOrBuildCommand(undefined), "kein Befehl");
-
-  assert(
-    tier.isPolicyBlock(
-      text(
-        "Harte System-/Secret-Grenze: opaker Interpreteraufruf (node) wurde blockiert.",
-      ),
-    ),
-    "YOLO-Interpreter-Sperre",
-  );
-  assert(
-    tier.isPolicyBlock(text("Recovery-Gate aktiv: Der Workspace …")),
-    "Recovery-Gate",
-  );
-  assert(
-    !tier.isPolicyBlock(text("1 failing\n\nCommand exited with code 1")),
-    "echter Testfehler",
-  );
-
-  const small = "Setze editorPaddingX in settings.json";
-  const run = async (command, content, toolName = "bash") => {
-    let result;
-    await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-      await harness.runHooks(
-        "before_agent_start",
-        { prompt: small, systemPrompt: "SYS" },
-        context,
-      );
-      await harness.runHooks(
-        "tool_result",
-        tr(toolName, { command }, { isError: true, content: text(content) }),
-        context,
-      );
-      await harness.runHooks("agent_end", { messages: [] }, context);
-      result = harness.appended.find(
-        (e) => e.customType === "task-tier.turn",
-      ).data;
-    });
-    return result;
-  };
-
-  const noMatch = await run(
-    "rg -n voice quickpanel",
-    "\n\nCommand exited with code 1",
-  );
-  eq(noMatch.finalTier, "fast", "rg ohne Treffer stuft nicht hoch");
-  assert(
-    !noMatch.observedRiskSignals.includes("test_build_failure"),
-    "kein Prüffehler-Signal bei rg",
-  );
-
-  const blocked = await run(
-    "node quickpanel/tests/hermes.test.js",
-    "Harte System-/Secret-Grenze: opaker Interpreteraufruf (node) wurde blockiert.",
-  );
-  eq(blocked.finalTier, "fast", "Policy-Sperre stuft nicht hoch");
-  eq(blocked.environmentFailures, 0, "Policy-Sperre ist kein Umgebungsfehler");
-
-  const failing = await run(
-    "node quickpanel/tests/hermes.test.js",
-    "AssertionError\n\nCommand exited with code 1",
-  );
-  eq(failing.finalTier, "normal", "echter Testfehler stuft hoch");
-});
-
-await test("task-tier: Telemetrie zählt Requests, Tokens und Cache-Verluste", async () => {
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      { prompt: "Setze editorPaddingX in settings.json", systemPrompt: "SYS" },
+      tr("bash", { command: "npm test" }),
       context,
     );
     const usage = (input, cacheRead, output) => ({
@@ -788,110 +173,19 @@ await test("task-tier: Telemetrie zählt Requests, Tokens und Cache-Verluste", a
     await end({ role: "assistant", usage: usage(300, 12000, 40) });
     await end({ role: "assistant", usage: usage(13000, 0, 60) });
     await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(entry.data.requests, 3, "Requests");
-    eq(entry.data.inputTokens, 14300, "frischer Input");
-    eq(entry.data.cacheReadTokens, 24000, "Cache-Lesung");
-    eq(entry.data.outputTokens, 150, "Output");
-    eq(entry.data.cacheMisses, 1, "ein Cache-Verlust");
-    assert(entry.data.slowestRequestMs >= 0, "langsamster Request erfasst");
-  });
-});
-
-await test("task-tier: Test und Doku neben einer Änderung sind kein zweites Subsystem", async () => {
-  for (const p of [
-    "test/index.js",
-    "tests/a/b.mjs",
-    "src/foo.test.ts",
-    "docs/x.html",
-    "README.md",
-  ])
-    assert(tier.isAccompanyingFile(p), `begleitend: ${p}`);
-  for (const p of ["src/index.js", "extensions/foo/a.ts", "lib/x.mjs"])
-    assert(!tier.isAccompanyingFile(p), `kein Begleiter: ${p}`);
-
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      { prompt: "Setze editorPaddingX in settings.json", systemPrompt: "SYS" },
-      context,
-    );
-    await harness.runHooks(
-      "tool_result",
-      tr("edit", { path: "src/index.js" }),
-      context,
-    );
-    await harness.runHooks(
-      "tool_result",
-      tr("edit", { path: "test/index.js" }),
-      context,
-    );
-    await harness.runHooks(
-      "tool_result",
-      tr("edit", { path: "README.md" }),
-      context,
-    );
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(entry.data.finalTier, "fast", "Fix plus Test plus Doku bleibt FAST");
-  });
-
-  // Zwei echte Code-Subsysteme eskalieren weiterhin auf DEEP.
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      { prompt: "Setze editorPaddingX in settings.json", systemPrompt: "SYS" },
-      context,
-    );
-    await harness.runHooks(
-      "tool_result",
-      tr("edit", { path: "src/a.js" }),
-      context,
-    );
-    await harness.runHooks(
-      "tool_result",
-      tr("edit", { path: "lib/b.js" }),
-      context,
-    );
-    await harness.runHooks("agent_end", { messages: [] }, context);
-    const entry = harness.appended.find(
-      (e) => e.customType === "task-tier.turn",
-    );
-    eq(entry.data.finalTier, "deep", "zwei Code-Subsysteme -> DEEP");
-  });
-});
-
-await test("task-tier: Läufe aus Extension-Nachrichten klassifizieren nicht neu", async () => {
-  await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
-    await harness.runHooks(
-      "before_agent_start",
-      {
-        messageType: "user",
-        prompt: "Setze editorPaddingX in settings.json",
-        systemPrompt: "SYS",
-      },
-      context,
-    );
-    const custom = await harness.runHooks(
-      "before_agent_start",
-      {
-        messageType: "custom",
-        message: { customType: "x", content: "y" },
-        systemPrompt: "SYS",
-      },
-      context,
-    );
-    eq(custom[0], undefined, "Custom-Lauf ändert den System-Prompt nicht");
-    const [sub] = await harness.runHooks(
-      "tool_call",
-      tc("subagent", { spec: { profile: "verify" } }),
-      context,
-    );
-    assert(sub?.block === true, "FAST-Klasse der Aufgabe bleibt bestehen");
+    const entry = turnEntry(harness).data;
+    eq(entry.schemaVersion, 2, "Schema");
+    eq(entry.searches, 1, "Suchen");
+    eq(entry.edits, 1, "Edits");
+    eq(entry.editedFiles, 1, "geänderte Dateien");
+    eq(entry.commands, 1, "Kommandos");
+    eq(entry.requests, 3, "Requests");
+    eq(entry.inputTokens, 14300, "frischer Input");
+    eq(entry.cacheReadTokens, 24000, "Cache-Lesung");
+    eq(entry.outputTokens, 150, "Output");
+    eq(entry.cacheMisses, 1, "ein Cache-Verlust");
+    assert(entry.slowestRequestMs >= 0, "langsamster Request erfasst");
+    assert(!("tier" in entry), "keine Klassenfelder mehr");
   });
 });
 

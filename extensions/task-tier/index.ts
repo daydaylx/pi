@@ -1,75 +1,43 @@
 /**
- * task-tier — FAST/NORMAL/DEEP-Routing für weniger Overhead bei einfachen
- * Aufgaben (docs/decisions/033-task-tiers.md).
+ * task-tier — Duplicate-Read-Guard und Turn-Telemetrie
+ * (docs/decisions/039-task-tier-vereinfacht.md).
  *
- * Rückbau: Eintrag `+extensions/task-tier/index.ts` aus settings.json
- * entfernen; alle anderen Mechanismen bleiben unverändert.
+ * Die frühere FAST/NORMAL/DEEP-Klassifikation (Prompt-Zusatz, automatische
+ * Thinking-Änderung, ausgeblendete Subagenten-Tools, Eskalation) ist entfallen:
+ * Thinking, Subagenten und Verifier regeln Nutzerwahl und Permission-Schicht.
+ * Übrig bleiben zwei beobachtbare Funktionen:
+ *
+ * - ein `read`, dessen Zeilenbereich bereits von einer früheren, nicht
+ *   gekürzten Ausgabe derselben unveränderten Datei (mtime/Größe) abgedeckt
+ *   ist, wird blockiert; `edit`/`write` invalidieren, Kompaktierung und
+ *   Sitzungsstart setzen zurück;
+ * - pro Lauf ein Session-Eintrag `task-tier.turn` mit Aufrufzählern, Tokens
+ *   und Cache-Verlusten.
+ *
+ * Rückbau: Eintrag `+extensions/task-tier/index.ts` aus settings.json und
+ * knip.json entfernen, Erwartungslisten in tests/suites/runtime/target-config.mjs,
+ * tests/suites/runtime/resilience.mjs und tests/coverage-baseline.json anpassen.
  */
 import { statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { resolve } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { matchingVerifierRequiredPaths } from "../permissions/verifier-required-paths.ts";
 import { subagentLaunchCount } from "../permissions/temporary-agent-policy.ts";
-import {
-  clearAutoThinking,
-  expectAutoThinking,
-} from "../shared/auto-thinking.ts";
-import {
-  classifyPrompt,
-  isContinuationPrompt,
-  isHigherThan,
-  isLowerThan,
-  maxTier,
-  thinkingForTier,
-  type TaskTier,
-} from "./classify.ts";
 import { createReadTracker } from "./read-tracker.ts";
 
 export const TASK_TIER_ENTRY = "task-tier.turn";
-
-/** Eskalationsschwellen vor dem ersten Edit bzw. insgesamt. */
-export const MAX_FAST_SEARCHES = 2;
-export const MAX_FAST_READS = 6;
-export const MAX_FAST_EDITED_FILES = 3;
 
 const SEARCH_TOOLS = new Set(["grep", "find", "ls"]);
 const EDIT_TOOLS = new Set(["edit", "write"]);
 const COMMAND_TOOLS = new Set(["bash", "project_check"]);
 
-/**
- * Tools, die FAST ohnehin technisch sperrt (Subagenten). Sie werden für FAST-Turns
- * aus der aktiven Tool-Liste genommen, damit ihr Schema nicht bei jedem Request
- * im Prompt steht; bei Eskalation und Turn-Ende kommen sie zurück.
- */
-export const FAST_HIDDEN_TOOLS: readonly string[] = ["subagent", "wait"];
-
-const STOP_RULE =
-  "Stop-Regel: Sind die Akzeptanzkriterien erfüllt, der gezielte Test erfolgreich und keine Unsicherheit offen, beende die Aufgabe. Danach keine erneuten Reads, Zusatz-Refactorings, weiteren Tests oder Doku-Änderungen ohne Anlass; ausdrückliche Nutzerwünsche haben Vorrang.";
-
-const FAST_PROMPT = [
-  "## Aufgabenklasse: FAST (automatisch erkannt)",
-  "Lokale, risikoarme Aufgabe. Ablauf: inspect → edit → gezielter Check → fertig.",
-  "- Vor dem ersten Edit höchstens ~2 Suchen und 3–5 Datei-Reads; keine allgemeine Architekturerkundung.",
-  "- Lies eine Datei einmal in einem ausreichend großen zusammenhängenden Bereich statt in vielen kleinen Ausschnitten; kein erneuter Read unveränderter Dateien.",
-  "- Keine Subagenten und kein Verifier. Prüfe die Änderung selbst mit dem direkt zugehörigen Test bzw. Syntax-/Typecheck; kein globales `verify` ohne Anlass.",
-  "- Zeigt sich echte Komplexität (mehrere Subsysteme, Security/Permissions, öffentlicher Vertrag), arbeite normal weiter; die Klasse wird dann automatisch hochgestuft.",
-  STOP_RULE,
-].join("\n");
-
-const DEEP_PROMPT = [
-  "## Aufgabenklasse: DEEP (automatisch erkannt)",
-  "Ausführliche Exploration, Subagenten, Verifier und umfassendere Tests sind erlaubt und bei Risiko erwünscht.",
-  STOP_RULE,
-].join("\n");
+/** Ein Cache-Verlust: der Cache-Anteil fällt auf unter die Hälfte des vorherigen Requests. */
+export const CACHE_MISS_RATIO = 0.5;
 
 interface TurnState {
-  tier: TaskTier;
   startedAt: number;
-  startedThinking: string | undefined;
-  autoThinking: string | undefined;
   searches: number;
   reads: number;
   dupReadsBlocked: number;
@@ -78,12 +46,6 @@ interface TurnState {
   commands: number;
   subagentCalls: number;
   verifierCalls: number;
-  escalations: string[];
-  initialTier: TaskTier;
-  observedRiskSignals: Set<string>;
-  changedSubsystems: Set<string>;
-  softRiskPrompt: boolean;
-  environmentFailures: number;
   requests: number;
   inputTokens: number;
   cacheReadTokens: number;
@@ -94,15 +56,9 @@ interface TurnState {
   lastCacheRead: number;
 }
 
-const SOFT_RISK_PROMPT =
-  /security|sicherheit|permission|berechtigung|trust|secret|credential|auth|sandbox|architektur|architecture|migrat|refactor|umbau|rewrite|protokoll|protocol|frontend[- ]api|\bipc\b|dependenc|abhängigkeit|verifier|subagent|race condition|intermittier|root cause|ursache.*unklar/i;
-
-function newTurn(tier: TaskTier, softRiskPrompt: boolean): TurnState {
+function newTurn(): TurnState {
   return {
-    tier,
     startedAt: Date.now(),
-    startedThinking: undefined,
-    autoThinking: undefined,
     searches: 0,
     reads: 0,
     dupReadsBlocked: 0,
@@ -111,12 +67,6 @@ function newTurn(tier: TaskTier, softRiskPrompt: boolean): TurnState {
     commands: 0,
     subagentCalls: 0,
     verifierCalls: 0,
-    escalations: [],
-    initialTier: tier,
-    observedRiskSignals: new Set(),
-    changedSubsystems: new Set(),
-    softRiskPrompt,
-    environmentFailures: 0,
     requests: 0,
     inputTokens: 0,
     cacheReadTokens: 0,
@@ -126,30 +76,6 @@ function newTurn(tier: TaskTier, softRiskPrompt: boolean): TurnState {
     lastMessageEndAt: Date.now(),
     lastCacheRead: 0,
   };
-}
-
-/** Ein Cache-Verlust: der Cache-Anteil fällt auf unter die Hälfte des vorherigen Requests. */
-export const CACHE_MISS_RATIO = 0.5;
-
-function subsystemOf(path: string): string {
-  const parts = path.split("/");
-  return parts.length > 1 ? parts.slice(0, 2).join("/") : "(root)";
-}
-
-/**
- * Tests und Doku begleiten eine Änderung, sie sind kein eigenes Subsystem:
- * "Fix in src/ plus Test in test/" bleibt eine kleine Aufgabe.
- */
-export function isAccompanyingFile(path: string): boolean {
-  return (
-    /(^|\/)(tests?|__tests__|spec|docs?)(\/|$)/i.test(path) ||
-    /\.(test|spec)\.[cm]?[jt]sx?$/i.test(path) ||
-    /\.(md|mdx|txt)$/i.test(path)
-  );
-}
-
-function isSensitivePath(path: string): boolean {
-  return /(^|\/)(permissions?|security|auth|cryptography)(\/|[-.])/i.test(path);
 }
 
 function inputPath(input: unknown): string | undefined {
@@ -168,109 +94,6 @@ function isVerifierCall(input: unknown): boolean {
   return record.agent === "verifier" || record.spec?.profile === "verify";
 }
 
-/**
- * Fehlgeschlagene Befehle, die nur die Umgebung betreffen (fehlendes Programm,
- * fehlende Abhängigkeit), sagen nichts über die Komplexität der Aufgabe und
- * stufen FAST deshalb nicht hoch.
- */
-export function isEnvironmentalFailure(content: unknown): boolean {
-  if (!Array.isArray(content)) return false;
-  const text = content
-    .map((part) =>
-      part &&
-      typeof part === "object" &&
-      typeof (part as { text?: unknown }).text === "string"
-        ? (part as { text: string }).text
-        : "",
-    )
-    .join("\n");
-  return /Command exited with code (126|127)\b|command not found|Kommando nicht gefunden|Cannot find module|ERR_MODULE_NOT_FOUND/i.test(
-    text,
-  );
-}
-
-/**
- * Eine Sperre durch Policy oder Recovery-Gate ist kein Test-/
- * Build-Fehler: der Befehl lief gar nicht. Sie darf FAST nicht hochstufen.
- */
-export function isPolicyBlock(content: unknown): boolean {
-  if (!Array.isArray(content)) return false;
-  const text = content
-    .map((part) =>
-      part &&
-      typeof part === "object" &&
-      typeof (part as { text?: unknown }).text === "string"
-        ? (part as { text: string }).text
-        : "",
-    )
-    .join("\n");
-  return /^(?:Harte [^\n]*[Gg]renze|Recovery-Gate aktiv|FAST-Aufgabe:)/m.test(
-    text,
-  );
-}
-
-/** Suchen, Lesen und Status-Abfragen: ein Exit 1 (z. B. kein Treffer) ist kein Testfehler. */
-const INSPECTION_EXECUTABLES = new Set([
-  "rg",
-  "grep",
-  "egrep",
-  "fgrep",
-  "find",
-  "fd",
-  "ls",
-  "cat",
-  "head",
-  "tail",
-  "sed",
-  "awk",
-  "wc",
-  "sort",
-  "uniq",
-  "diff",
-  "stat",
-  "file",
-  "readlink",
-  "realpath",
-  "git",
-  "test",
-  "[",
-  "command",
-  "type",
-  "which",
-  "printf",
-  "echo",
-  "jq",
-  "tree",
-  "du",
-  "df",
-  "ps",
-  "pgrep",
-  "systemctl",
-  "journalctl",
-  "hyprctl",
-]);
-
-const TEST_OR_BUILD_PATTERN =
-  /(?<![a-z])(?:tests?|spec|pytest|unittest|jest|vitest|mocha|playwright|tsc|typecheck|lint|eslint|prettier|ruff|mypy|pyright|build|make|cmake|gradle|mvn|clippy|check|verify|smoke|nixos-agent-build|nixos-agent-apply|nixos-rebuild)(?![a-z])/i;
-
-/**
- * Beschreibt der Shell-Befehl einen Test-, Build- oder Prüflauf? Nur dann
- * zählt ein Fehlerausgang als `test_build_failure`. Ketten (`&&`, `;`, `|`)
- * werden je Segment bewertet; Such- und Statusbefehle zählen nie.
- */
-export function isTestOrBuildCommand(command: unknown): boolean {
-  if (typeof command !== "string") return false;
-  return command.split(/&&|\|\||;|\|/).some((segment) => {
-    const tokens = segment.trim().split(/\s+/);
-    let index = 0;
-    while (index < tokens.length && /^[A-Za-z_]\w*=/.test(tokens[index]))
-      index += 1;
-    const executable = (tokens[index] ?? "").split("/").pop() ?? "";
-    if (!executable || INSPECTION_EXECUTABLES.has(executable)) return false;
-    return TEST_OR_BUILD_PATTERN.test(tokens.slice(index).join(" "));
-  });
-}
-
 function stampOf(absolute: string) {
   try {
     const stat = statSync(absolute);
@@ -283,241 +106,84 @@ function stampOf(absolute: string) {
 export default function taskTier(pi: ExtensionAPI): void {
   const tracker = createReadTracker();
   let turn: TurnState | undefined;
-  let editedFirst = false;
-  let previousTier: TaskTier | undefined;
-  /** Von task-tier selbst ausgeblendete Tools; nur diese werden wiederhergestellt. */
-  let hiddenTools: string[] = [];
-
-  const hideFastTools = () => {
-    const active = pi.getActiveTools();
-    const hide = active.filter((name) => FAST_HIDDEN_TOOLS.includes(name));
-    if (hide.length === 0) return;
-    pi.setActiveTools(active.filter((name) => !hide.includes(name)));
-    hiddenTools = hide;
-  };
-
-  const restoreHiddenTools = () => {
-    if (hiddenTools.length === 0) return;
-    const active = pi.getActiveTools();
-    const missing = hiddenTools.filter((name) => !active.includes(name));
-    hiddenTools = [];
-    if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
-  };
-
-  const setAutoThinking = (level: string) => {
-    if (!turn || pi.getThinkingLevel() === level) return;
-    expectAutoThinking(level);
-    pi.setThinkingLevel(level as ReturnType<typeof pi.getThinkingLevel>);
-    turn.autoThinking = pi.getThinkingLevel();
-  };
-
-  const escalate = (to: TaskTier, reason: string) => {
-    if (!turn || turn.tier === "deep" || turn.tier === to) return;
-    if (to === "fast") return;
-    turn.escalations.push(`${turn.tier}->${to}: ${reason}`);
-    turn.tier = to;
-    restoreHiddenTools();
-    previousTier = to;
-    const started = turn.startedThinking;
-    if (to === "deep") {
-      if (isHigherThan("high", pi.getThinkingLevel())) setAutoThinking("high");
-    } else if (started && turn.autoThinking !== undefined) {
-      setAutoThinking(started);
-    }
-    pi.sendMessage(
-      {
-        customType: "task-tier.escalation",
-        content: `Aufgabenklasse auf ${to.toUpperCase()} hochgestuft (${reason}). Subagenten und Verifier sind nach Bedarf wieder erlaubt; arbeite mit der bisherigen Sorgfalt weiter.`,
-        display: false,
-      },
-      { deliverAs: "steer" },
-    );
-  };
 
   pi.on("session_start", () => {
     tracker.reset();
     turn = undefined;
-    previousTier = undefined;
-    restoreHiddenTools();
-    editedFirst = false;
-    clearAutoThinking();
   });
   pi.on("session_compact", () => tracker.reset());
-
-  pi.on("before_agent_start", async (event) => {
-    // The tier classifies the user's prompt. Runs started by an extension
-    // message keep the tier state of the current task.
-    if (event.messageType === "custom") return;
-    let tier = classifyPrompt(event.prompt);
-    // "weiter"/"ja" setzt die vorige Aufgabe fort: Klasse (inkl. Eskalation) erben.
-    if (previousTier && isContinuationPrompt(event.prompt)) {
-      tier = maxTier(tier, previousTier);
-    }
-    restoreHiddenTools();
-    turn = newTurn(tier, SOFT_RISK_PROMPT.test(event.prompt));
-    if (
-      /\b(deep(?:[- ]dive)?|gründlich|tiefen(?:audit|prüfung)|ausführlich.*(?:audit|analyse|prüfung))\b/i.test(
-        event.prompt,
-      )
-    ) {
-      turn.observedRiskSignals.add("explicit_deep_audit");
-    }
-    previousTier = tier;
-    editedFirst = false;
-    clearAutoThinking();
-    turn.startedThinking = pi.getThinkingLevel();
-    const target = thinkingForTier(tier, event.prompt);
-    if (target) {
-      const current = pi.getThinkingLevel();
-      const apply =
-        tier === "fast"
-          ? isLowerThan(target, current)
-          : isHigherThan(target, current);
-      if (apply) setAutoThinking(target);
-    }
-    if (tier === "fast") hideFastTools();
-    if (tier === "normal") return;
-    return {
-      systemPrompt: `${event.systemPrompt}\n\n${tier === "fast" ? FAST_PROMPT : DEEP_PROMPT}`,
-    };
+  pi.on("agent_start", () => {
+    turn = newTurn();
   });
 
   pi.on("tool_call", (event, ctx: ExtensionContext) => {
-    if (!turn) return;
     const name = event.toolName;
 
     if (name === "subagent") {
+      if (!turn) return;
       const launches = subagentLaunchCount(event);
-      if (launches > 0 && turn.tier === "fast") {
-        return {
-          block: true,
-          reason:
-            "FAST-Aufgabe: keine Subagenten und kein Verifier. Erledige die Arbeit selbst. Wirkt sie größer als erwartet, arbeite mit Reads/Edits weiter; die Klasse wird dann automatisch hochgestuft.",
-        };
-      }
       turn.subagentCalls += launches;
       if (launches > 0 && isVerifierCall(event.input)) turn.verifierCalls += 1;
       return;
     }
 
-    if (name === "read" && turn.tier !== "deep") {
-      const path = inputPath(event.input);
-      if (!path) return;
-      const absolute = resolve(ctx.cwd, path);
-      const stamp = stampOf(absolute);
-      const input = event.input as { offset?: number; limit?: number };
-      if (
-        stamp &&
-        tracker.isRedundant(
-          absolute,
-          { offset: input.offset, limit: input.limit },
-          stamp,
-        )
-      ) {
-        turn.dupReadsBlocked += 1;
-        return {
-          block: true,
-          reason: `Datei unverändert und dieser Bereich wurde bereits gelesen (${path}); der Inhalt steht im Kontext. Nicht erneut lesen.`,
-        };
-      }
+    if (name !== "read") return;
+    const path = inputPath(event.input);
+    if (!path) return;
+    const absolute = resolve(ctx.cwd, path);
+    const stamp = stampOf(absolute);
+    const input = event.input as { offset?: number; limit?: number };
+    if (
+      stamp &&
+      tracker.isRedundant(
+        absolute,
+        { offset: input.offset, limit: input.limit },
+        stamp,
+      )
+    ) {
+      if (turn) turn.dupReadsBlocked += 1;
+      return {
+        block: true,
+        reason: `Datei unverändert und dieser Bereich wurde bereits gelesen (${path}); der Inhalt steht im Kontext. Nicht erneut lesen.`,
+      };
     }
   });
 
   pi.on("tool_result", (event, ctx: ExtensionContext) => {
-    if (!turn) return;
     const name = event.toolName;
-    if (SEARCH_TOOLS.has(name)) turn.searches += 1;
-    else if (COMMAND_TOOLS.has(name)) {
-      turn.commands += 1;
-      if (event.isError) {
-        const command = (event.input as { command?: unknown } | undefined)
-          ?.command;
-        if (isEnvironmentalFailure(event.content)) {
-          turn.environmentFailures += 1;
-        } else if (isPolicyBlock(event.content)) {
-          // Befehl wurde nicht ausgeführt: weder Umgebungs- noch Testfehler.
-        } else if (name === "project_check" || isTestOrBuildCommand(command)) {
-          turn.observedRiskSignals.add("test_build_failure");
-          if (turn.tier === "fast")
-            escalate("normal", "Test-/Build-Befehl fehlgeschlagen");
-        }
-      }
-    } else if (name === "read") {
-      turn.reads += 1;
-      const path = inputPath(event.input);
-      if (path && !event.isError) {
-        const absolute = resolve(ctx.cwd, path);
-        const rel = relative(ctx.cwd, absolute);
-        const inside = !rel.startsWith("..") && !isAbsolute(rel);
-        if (inside) {
-          const hardPath = matchingVerifierRequiredPaths([rel]).length > 0;
-          if (hardPath) {
-            turn.observedRiskSignals.add("hard_verifier_path");
-            escalate("deep", `Hard-Verifier-Pfad gelesen: ${rel}`);
-          }
-          if (isSensitivePath(rel)) {
-            turn.observedRiskSignals.add("permission_security_path");
-            escalate("deep", `Security-/Permission-Pfad gelesen: ${rel}`);
-          }
-        }
-        const stamp = stampOf(absolute);
-        const input = event.input as { offset?: number; limit?: number };
-        const details = (event as { details?: { truncation?: unknown } })
-          .details;
-        const truncated = Boolean(
-          (details?.truncation as { truncated?: boolean } | undefined)
-            ?.truncated,
-        );
-        if (stamp)
-          tracker.record(
-            absolute,
-            { offset: input.offset, limit: input.limit },
-            stamp,
-            truncated,
-          );
-      }
-    } else if (EDIT_TOOLS.has(name)) {
-      turn.edits += 1;
-      const path = inputPath(event.input);
-      if (path) {
-        const absolute = resolve(ctx.cwd, path);
-        tracker.invalidate(absolute);
-        const rel = relative(ctx.cwd, absolute);
-        const inside = !rel.startsWith("..") && !isAbsolute(rel);
-        turn.editedFiles.add(rel);
-        if (inside) {
-          const hardPath = matchingVerifierRequiredPaths([rel]).length > 0;
-          if (hardPath) turn.observedRiskSignals.add("hard_verifier_path");
-          if (isSensitivePath(rel))
-            turn.observedRiskSignals.add("permission_security_path");
-          if (!isAccompanyingFile(rel))
-            turn.changedSubsystems.add(subsystemOf(rel));
-          if (turn.changedSubsystems.size > 1) {
-            turn.observedRiskSignals.add("multiple_subsystems");
-            escalate("deep", "Änderungen in mehreren Subsystemen");
-          }
-          if (isSensitivePath(rel))
-            escalate("deep", `Security-/Permission-Pfad geändert: ${rel}`);
-          else if (hardPath)
-            escalate("deep", `Hard-Verifier-Pfad geändert: ${rel}`);
-        }
-        if (turn.editedFiles.size > MAX_FAST_EDITED_FILES) {
-          turn.observedRiskSignals.add("scope_growth");
-          escalate("normal", `mehr als ${MAX_FAST_EDITED_FILES} Dateien`);
-        }
-      }
-      editedFirst = true;
+    if (turn) {
+      if (SEARCH_TOOLS.has(name)) turn.searches += 1;
+      else if (COMMAND_TOOLS.has(name)) turn.commands += 1;
+      else if (name === "read") turn.reads += 1;
+      else if (EDIT_TOOLS.has(name)) turn.edits += 1;
     }
-    if (turn.tier === "fast" && !editedFirst) {
-      if (turn.searches > MAX_FAST_SEARCHES)
-        escalate("normal", "mehr Suchen als für FAST vorgesehen");
-      else if (turn.reads > MAX_FAST_READS)
-        escalate("normal", "mehr Reads als für FAST vorgesehen");
+
+    const path = inputPath(event.input);
+    if (!path) return;
+    const absolute = resolve(ctx.cwd, path);
+    if (EDIT_TOOLS.has(name)) {
+      tracker.invalidate(absolute);
+      turn?.editedFiles.add(path);
+      return;
+    }
+    if (name === "read" && !event.isError) {
+      const stamp = stampOf(absolute);
+      const input = event.input as { offset?: number; limit?: number };
+      const details = (event as { details?: { truncation?: unknown } }).details;
+      const truncated = Boolean(
+        (details?.truncation as { truncated?: boolean } | undefined)?.truncated,
+      );
+      if (stamp)
+        tracker.record(
+          absolute,
+          { offset: input.offset, limit: input.limit },
+          stamp,
+          truncated,
+        );
     }
   });
 
-  // Nur beobachten: Tokens, Cache-Verluste und langsamste Antwort je Turn, damit sich
-  // die Wirkung der Klassen später messen lässt (Telemetrie, kein Eingriff).
+  // Nur beobachten: Tokens, Cache-Verluste und langsamste Antwort je Lauf.
   pi.on("message_end", (event) => {
     if (!turn) return;
     const message = (
@@ -548,38 +214,20 @@ export default function taskTier(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_end", () => {
-    restoreHiddenTools();
     const state = turn;
     if (!state) return;
     turn = undefined;
-    const current = pi.getThinkingLevel();
-    // Manuelle Änderung während des Turns hat Vorrang: nur zurücksetzen,
-    // wenn das Level noch dem selbst gesetzten entspricht.
-    if (
-      state.autoThinking !== undefined &&
-      state.startedThinking &&
-      current === state.autoThinking &&
-      current !== state.startedThinking
-    ) {
-      expectAutoThinking(state.startedThinking);
-      pi.setThinkingLevel(
-        state.startedThinking as ReturnType<typeof pi.getThinkingLevel>,
-      );
-    }
-    clearAutoThinking();
     pi.appendEntry(TASK_TIER_ENTRY, {
-      schemaVersion: 1,
+      schemaVersion: 2,
       timestamp: new Date().toISOString(),
-      tier: state.tier,
-      escalations: state.escalations,
       searches: state.searches,
       reads: state.reads,
       dupReadsBlocked: state.dupReadsBlocked,
       edits: state.edits,
+      editedFiles: state.editedFiles.size,
       commands: state.commands,
       subagentCalls: state.subagentCalls,
       verifierCalls: state.verifierCalls,
-      thinking: state.autoThinking ?? state.startedThinking ?? null,
       durationMs: Date.now() - state.startedAt,
       requests: state.requests,
       inputTokens: state.inputTokens,
@@ -587,16 +235,6 @@ export default function taskTier(pi: ExtensionAPI): void {
       outputTokens: state.outputTokens,
       cacheMisses: state.cacheMisses,
       slowestRequestMs: state.slowestRequestMs,
-      environmentFailures: state.environmentFailures,
-      initialTier: state.initialTier,
-      finalTier: state.tier,
-      escalationReason: state.escalations,
-      observedRiskSignals: [...state.observedRiskSignals],
-      falsePositiveCandidate:
-        state.initialTier === "normal" &&
-        state.softRiskPrompt &&
-        state.escalations.length === 0 &&
-        state.observedRiskSignals.size === 0,
     });
   });
 }
