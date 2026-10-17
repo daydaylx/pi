@@ -117,6 +117,9 @@ Ausnahme von Nutzeranweisungen.
 
 ### Umfangsmessung
 
+Historische Messung, Stand 07.10.2026 (Commit `457609c`). `AGENTS.md` wurde
+seither geändert; die Werte werden bewusst nicht fortgeschrieben.
+
 | Text                                  |                                       Vorher |                                  Nachher |
 | ------------------------------------- | -------------------------------------------: | ---------------------------------------: |
 | `AGENTS.md`                           | 265 Zeilen, 16.103 UTF-8-Bytes, 1.826 Wörter | 34 Zeilen, 4.533 UTF-8-Bytes, 481 Wörter |
