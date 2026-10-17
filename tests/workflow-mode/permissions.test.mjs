@@ -668,8 +668,12 @@ await test("RPC UI contexts receive guard blocks without terminating the run", a
   assert(headlessBlock, "the same trust guard blocks in RPC without UI");
   eq(
     headlessBlock.terminate,
-    true,
-    "an RPC block without UI still terminates the impossible retry loop",
+    undefined,
+    "the first RPC block without UI is soft: the model can pick a local alternative",
+  );
+  assert(
+    /lokale Alternative/.test(headlessBlock.reason),
+    "the soft block names the local-alternative hint",
   );
 });
 
@@ -735,6 +739,46 @@ await test("a subagent child keeps running after a block so the verifier is not 
   }
 });
 
+await test("headless blocks are soft for two calls and end the run on the third", async () => {
+  if (!modePermissions) return;
+  const harness = createHarness({ confirm: false, customResult: false });
+  modePermissions.default(harness.api);
+  const context = harness.makeContext({
+    cwd: process.cwd(),
+    mode: "rpc",
+    hasUI: false,
+    trusted: false,
+  });
+  await harness.runHooks("session_start", {}, context);
+  await harness.runHooks("agent_start", {}, context);
+  const verdicts = [];
+  for (const name of ["a.txt", "b.txt", "c.txt"]) {
+    const results = await harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: name, content: "x" } },
+      context,
+    );
+    verdicts.push(results.find((result) => result?.block)?.terminate);
+  }
+  eq(
+    verdicts,
+    [undefined, undefined, true],
+    "two soft blocks, then the run ends",
+  );
+  await harness.runHooks("agent_start", {}, context);
+  const fresh = await harness.runHooks(
+    "tool_call",
+    { toolName: "write", input: { path: "d.txt", content: "x" } },
+    context,
+  );
+  eq(
+    fresh.find((result) => result?.block)?.terminate,
+    undefined,
+    "a new run starts with a fresh budget",
+  );
+  await harness.runHooks("session_shutdown", {}, context);
+});
+
 await test("a headless block names its reason when the run ends", async () => {
   if (!modePermissions) return;
   const harness = createHarness({ confirm: false, customResult: false });
@@ -747,11 +791,13 @@ await test("a headless block names its reason when the run ends", async () => {
   });
   await harness.runHooks("session_start", {}, context);
   await harness.runHooks("agent_start", {}, context);
-  await harness.runHooks(
-    "tool_call",
-    { toolName: "write", input: { path: "blocked.txt", content: "x" } },
-    context,
-  );
+  for (const name of ["blocked.txt", "blocked2.txt", "blocked3.txt"]) {
+    await harness.runHooks(
+      "tool_call",
+      { toolName: "write", input: { path: name, content: "x" } },
+      context,
+    );
+  }
   const stderrWrites = [];
   const originalWrite = process.stderr.write;
   process.stderr.write = (chunk) => {

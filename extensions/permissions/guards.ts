@@ -96,7 +96,24 @@ function isSystemProjectPolicyConfig(root: string, target: string): boolean {
 const MAX_INPUT_PREVIEW = 300;
 
 /**
- * Ohne UI endet der Lauf an einer Blockade, weil niemand bestätigen kann. Ein
+ * Ohne UI endet der Lauf erst nach dieser Zahl weicher Blockaden. Bis dahin
+ * erhält das Modell die Ablehnung samt Hinweis und kann eine zulässige lokale
+ * Alternative wählen (ADR 042); die Sperre selbst bleibt unverändert.
+ */
+export const HEADLESS_SOFT_BLOCK_LIMIT = 2;
+
+function headlessSoftBlockHint(remaining: number): string {
+  return (
+    "Ohne UI nicht freigebbar: Nutze eine zulässige lokale Alternative im " +
+    "aktuellen Verzeichnis und nenne die Blockade im Abschluss. " +
+    `Weitere weiche Blockaden bis zum Ende des Laufs: ${remaining}.`
+  );
+}
+
+/**
+ * Ohne UI endet der Lauf an einer Blockade, weil niemand bestätigen kann (die
+ * ersten `HEADLESS_SOFT_BLOCK_LIMIT` Blockaden eines Laufs mildert der
+ * tool_call-Handler ab, ADR 042). Ein
  * Subagent-Kind (`PI_SUBAGENT_CHILD=1`) beendet sich dagegen nicht: Eine
  * einzelne verweigerte Aktion (etwa `node -e` im Verifier) soll nicht den
  * ganzen, teuren Lauf mit Exit 1 abbrechen; das Modell erhält die Blockade und
@@ -186,9 +203,11 @@ export function registerPermissionGuards(
   // Ein Block ohne UI beendet den Lauf (kein Dialog möglich). Im Print-Modus
   // bliebe sonst nur der Satz vor dem Tool-Aufruf als Ergebnis stehen.
   let headlessStop: string | undefined;
+  let headlessSoftBlocks = 0;
   pi.on("agent_start", () => {
     parentRunAgents.reset();
     headlessStop = undefined;
+    headlessSoftBlocks = 0;
   });
   pi.on("agent_end", () => {
     if (headlessStop === undefined) return;
@@ -222,6 +241,26 @@ export function registerPermissionGuards(
           reason: `${outcome.reason ?? "Aktion abgelehnt."} ${auditError}`,
         };
     }
+    // Der Hinweis der weichen Blockade bleibt aus der Identität heraus, damit
+    // der Wiederholungsschutz denselben Aufruf erkennt.
+    const originalBlockReason = outcome?.reason;
+    if (
+      outcome?.block &&
+      outcome.terminate &&
+      ctx.mode !== "tui" &&
+      !ctx.hasUI
+    ) {
+      headlessSoftBlocks += 1;
+      if (headlessSoftBlocks <= HEADLESS_SOFT_BLOCK_LIMIT) {
+        const { terminate: _terminate, ...softened } = outcome;
+        outcome = {
+          ...softened,
+          reason: `${outcome.reason ?? "Aktion abgelehnt."} ${headlessSoftBlockHint(
+            HEADLESS_SOFT_BLOCK_LIMIT - headlessSoftBlocks,
+          )}`,
+        };
+      }
+    }
     if (outcome?.block) {
       let inputIdentity: string;
       try {
@@ -234,7 +273,7 @@ export function registerPermissionGuards(
         .update("\0")
         .update(inputIdentity)
         .update("\0")
-        .update(outcome.reason ?? "")
+        .update(originalBlockReason ?? "")
         .digest("hex");
       repeatedBlockedActionCount =
         identity === previousBlockedAction ? repeatedBlockedActionCount + 1 : 1;

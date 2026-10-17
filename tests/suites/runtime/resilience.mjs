@@ -976,8 +976,9 @@ export const resilienceSections = {
           blockedAsk.some(
             (result) =>
               result?.block &&
-              result?.terminate === true &&
-              /nicht verfügbar/.test(result.reason),
+              result?.terminate === undefined &&
+              /nicht verfügbar/.test(result.reason) &&
+              /lokale Alternative/.test(result.reason),
           ),
           "ask_user is capability-blocked before execution in " +
             mode +
@@ -998,10 +999,9 @@ export const resilienceSections = {
         );
         assert(
           blockedBuildDecisions.length === 2 &&
-            blockedBuildDecisions.every(
-              (result) => result?.block && result?.terminate === true,
-            ),
-          "two hard-blocked commands end their non-interactive batches in " +
+            blockedBuildDecisions[0].terminate === undefined &&
+            blockedBuildDecisions[1].terminate === true,
+          "the soft-block budget ends non-interactive batches on the third block in " +
             mode +
             " mode",
         );

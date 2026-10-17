@@ -190,8 +190,14 @@ export const askUserSections = {
         );
         eq(
           resultForMode.terminate,
-          true,
-          "ask_user terminates the non-interactive batch instead of inviting a retry",
+          mode === "rpc" ? true : undefined,
+          "ask_user keeps the first two non-interactive failures soft and ends the run on the third (" +
+            mode +
+            ")",
+        );
+        assert(
+          resultForMode.content[0].text.includes("sicherste Entscheidung"),
+          "ask_user tells the model to decide itself",
         );
       }
       eq(
