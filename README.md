@@ -61,7 +61,7 @@ werden im System-Profil nicht automatisch geladen. `pis` läuft dauerhaft mit
 Vollzugriff: Pi-eigene Permission-, Trust-, Pfad-, Risiko-, Verifier- und
 Wiederholungs-Guards blockieren keine Befehle oder Tools; Bestätigungsdialoge
 werden nicht gezeigt. `/permission` und `/yolo` können diesen Zustand nicht
-absenken (ADR 042).
+absenken (ADR 043).
 
 Details und aktuelle Einschränkungen: [`docs/pi-system-profile.md`](docs/pi-system-profile.md).
 Der lokale RPC-Host und seine offenen Betriebsgrenzen sind in

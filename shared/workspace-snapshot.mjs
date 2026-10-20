@@ -87,6 +87,15 @@ function nullSeparated(output) {
   return output.split("\0").filter(Boolean);
 }
 
+/**
+ * The subagent runner writes its run artifacts (`.pi-subagents/artifacts/…`)
+ * into the project directory while a delegated run is active. They are the
+ * tool's own output, never part of the user's work: counting them made every
+ * verifier run end `stale` ("workspace-mutated") in a repository that does not
+ * ignore the directory.
+ */
+const HARNESS_ARTIFACT_PATH = /(?:^|\/)\.pi-subagents(?:\/|$)/;
+
 function resolveRepositoryRoot(worktree, timeoutMs, maxAttempts) {
   let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -214,6 +223,10 @@ async function collectCheapState(worktree, timeoutMs, signal) {
     timeoutMs,
   );
   if (!untrackedRaw.ok) return untrackedRaw;
+  const untrackedValue = nullSeparated(untrackedRaw.value)
+    .filter((path) => !HARNESS_ARTIFACT_PATH.test(path))
+    .map((path) => `${path}\0`)
+    .join("");
   const indexPath = runGitSync(
     worktree,
     ["rev-parse", "--git-path", "index"],
@@ -249,7 +262,7 @@ async function collectCheapState(worktree, timeoutMs, signal) {
     );
   }
 
-  const untracked = nullSeparated(untrackedRaw.value).sort();
+  const untracked = nullSeparated(untrackedValue).sort();
   const changedPaths = [
     ...new Set([
       ...stagedStatus.changes.map((entry) => entry.path),
@@ -266,7 +279,7 @@ async function collectCheapState(worktree, timeoutMs, signal) {
       head: head.value.trim(),
       stagedRaw: stagedRaw.value,
       unstagedRaw: unstagedRaw.value,
-      untrackedRaw: untrackedRaw.value,
+      untrackedRaw: untrackedValue,
       contentStamp: contentStamp(worktree, changedPaths),
       indexHash,
       stagedStatus,
@@ -723,6 +736,7 @@ async function collectFilesystemSnapshot(worktree, options = {}) {
       for (const name of names) {
         if (name === ".git") continue;
         if (name === "node_modules") continue;
+        if (name === ".pi-subagents") continue;
         const path = directory ? `${directory}/${name}` : name;
         const fullPath = resolve(root, path);
         const stat = await lstatAsync(fullPath, { bigint: true });

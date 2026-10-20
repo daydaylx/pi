@@ -400,7 +400,11 @@ export async function assessVerifierDelegation(
       reason:
         `Verifier-Delegation abgelehnt (${needAssessment.reasonCode}): ${needAssessment.reason} ` +
         `Ein freiwilliger Verifier-Lauf ohne belegten Bedarf ist technisch gesperrt — ` +
-        `siehe extensions/permissions/verifier-risk.ts.`,
+        `siehe extensions/permissions/verifier-risk.ts. ` +
+        `Hat der Nutzer die Prüfung ausdrücklich verlangt oder liegt ein belegtes Restrisiko vor, ` +
+        `melde den Trigger mit Beleg an: Abschnitt "## Optional verifier trigger" mit ` +
+        `"trigger: user_requested" und "evidence: <Nutzerformulierung oder Beleg>" im Prüfauftrag ` +
+        `(bei spec.profile "verify": verification.trigger und verification.triggerEvidence).`,
     };
   }
   const dedup = await assessVerifierDedup(task, cwd, verification);

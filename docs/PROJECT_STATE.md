@@ -2,18 +2,23 @@
 
 ## Aktuelle Arbeit
 
-Harness-Vereinfachung auf Messbasis (2. Lauf, 2026-10-16; ADR 040, Befund
-`docs/audits/harness-bestandsaufnahme-2026-10-16.md`), auf `main` gepusht,
-**nicht installiert**: Ask-User-Felder optional; Shell-Policy ohne Fehlalarme für
-`2>&1`/`>/dev/null` und Ketten/Pipes mit literalem Projektskript; Recovery prüft offene
-Gates beim Turn-Start selbst (Rückfall `autoInspect: false`) und lässt diagnostische
-Pipes im Gate zu; System-Skills nativ (`nixos-system`, `hyprland-desktop`,
-`system-health`), neuer Skill `implementation-plan`; Runtime-Patches 11 → 8;
-`intercomBridge` für Subagent-Kinder aus; `/session-health` mit Nutzungsmetriken;
-Audit-Altlasten entfernt. `npm run verify` grün. Nicht gebaut: Subagent-V2, Sandbox.
-Offen: Installation (`install:user --apply`, braucht Freigabe), unabhängiger
-Pi-Verifier-Lauf für `permission-policy.ts`/`resilience/index.ts`, TUI-Rauchtest,
-Befunde aus ADR 040 (Subshell-Umgehung der Interpretergrenze, `sed w/e`).
+Harness abschließen und absichern (2026-10-16, Auftrag „Pi-Harness abschließen“;
+ADR 041), auf `main` gepusht und nach `~/.pi/agent` installiert (Backup
+`~/.pi/agent-backups/pre-harness-abschluss-20261016`): Recovery-Gate durch einen
+Unterbrechungshinweis aus dem nativen Session-Zweig ersetzt
+(`extensions/resilience/interruption.ts`, kein `recovery_check`, keine
+Snapshots pro Turn); Shell-Policy gegen `sed w/e`, Subshells, Ersetzungen,
+Wrapper, `eval`/`source` und `cd` über Symlinks gehärtet; Systemprofil fragt bei
+Blockgeräten, `+refspec`-Push und Backticks; Verifier: Snapshot ignoriert
+`.pi-subagents/` (Ursache für „stale“ in jedem Repo ohne `.gitignore`-Eintrag),
+Ablehnung nennt den `user_requested`-Weg, Formfehler beenden headless den Lauf
+nicht mehr; `/session-health` zählt `stale` getrennt; zwei CI-Flakes behoben;
+Installer räumt verwaiste Dateien. Praxistests in isolierter Kopie mit echtem
+Provider: `pi -p`, `pis`, TUI (Shift+Tab, `ask_user`, Permission-Dialog), Abbruch
+per Esc, unterbrochene Sitzung, Verifier (PASS_WITH_WARNINGS, nicht stale).
+Offen: unabhängiger Pi-Verifier über die Hard-Pfad-Änderungen (nur das Verhalten
+des Verifiers wurde getestet), Wirkung messen, Neustart laufender Sitzungen und
+des Frontend-Hosts (laden den alten Stand), `pi -p`-Hänger (3 von ~20 Starts).
 
 Harness-Vereinfachung vom 2026-10-16 (Befund und Ergebnis:
 `~/Dokumente/Pi_Harness_Arbeitsordner_ClaudeCode_2026-10-16/reports/BEFUND_PHASE_A.md`),
@@ -138,6 +143,11 @@ Umgebungswerte nicht lesen oder veröffentlichen.
 
 ## Letzte Verifikation
 
+- Harness abschließen (2026-10-16): `npm run verify` Exit 0 auf Stand `15fe04e`
+  (sauberer Arbeitsbaum); GitHub Actions `Verify` seit ADR 041 grün; Installation
+  gegen Repository verglichen (nur lokale Zusätze abweichend), `pi`/`pis --version`
+  1.2.0, `tests/p1-runtime.mjs` und `npm --prefix ~/.pi/agent/npm run typecheck`
+  Exit 0. Der Test „host stamps epochs“ ist unter Last flaky gewesen (TTL, behoben).
 - Harness-Vereinfachung (2026-10-16): `npm run verify` Exit 0 im Checkout und in
   einem Klon mit leerem `HOME`; GitHub-Actions `Verify` Läufe 291–295 grün;
   installiert, `pi`/`pis --version` 1.2.0, `npm --prefix ~/.pi/agent/npm run
@@ -157,14 +167,11 @@ typecheck` Exit 0. Unabhängige Durchsicht der Hard-Pfad-Diffs durch einen
 
 ## Nächste Schritte
 
-1. TUI-Rundlauf nachholen: `pi` und `pis` starten, Shift+Tab-Skillauswahl wählen
-   und mit der nächsten Nachricht verbrauchen, `/reload` (Vormerkung muss
-   verschwinden); laufende Pi-Sitzungen vorher neu starten.
-2. Nach einigen Sitzungen `/session-health --days 7` und die neue Telemetrie
-   `task-tier.turn` (Schema 2) auswerten; nach etwa zwei Wochen ohne Guard-
-   Schaden Task-Tier ganz entfernen (Rückbau in ADR 039).
-3. Verifier-Fehlerquote klären (8 von 10 `error`-Läufen am 2026-10-07, `exit: 1`
-   ohne Text; das Subagenten-Paket müsste das Endurteil protokollieren) und
-   die Hard-Pfad-Änderungen dieser Runde (`tool-policy.ts`,
-   `recovery-capabilities.ts`, `session-state.ts`) in einer Pi-Sitzung durch
-   einen Verifier prüfen lassen.
+1. Laufende Pi-Sitzungen und den Frontend-Host (`pi-system-host`) neu starten;
+   sie laden noch den Stand vor ADR 041.
+2. Nach einigen Sitzungen `/session-health --days 7` auswerten (Verifier
+   `veraltet`/`unvollständig`, Recovery-Hinweise, Tool-Fehlerrate) und die
+   Hard-Pfad-Änderungen (`permission-policy.ts`, `guards.ts`,
+   `workspace-snapshot.mjs`) in einer Pi-Sitzung durch einen Verifier prüfen lassen.
+3. `pi -p`-Hänger beobachten; bei Wiederholung `retry.provider.timeoutMs`
+   (aktuell 1 h) und `httpIdleTimeoutMs` prüfen.

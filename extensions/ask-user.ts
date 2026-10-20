@@ -126,6 +126,12 @@ const QuestionParams = Type.Object({
 });
 
 export default function askUser(pi: ExtensionAPI) {
+  // Ohne UI ist die Frage nicht beantwortbar. Die ersten Fehlversuche beenden
+  // den Lauf nicht, damit das Modell selbst entscheidet (ADR 042).
+  let unavailableAsks = 0;
+  pi.on("agent_start", () => {
+    unavailableAsks = 0;
+  });
   pi.registerTool({
     name: ASK_USER_TOOL_NAME,
     label: "Nutzer fragen",
@@ -135,11 +141,13 @@ export default function askUser(pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (ctx.mode !== "tui") {
+        unavailableAsks += 1;
+        const endRun = unavailableAsks > 2;
         return {
           content: [
             {
               type: "text",
-              text: `Fehler: ask_user benötigt den interaktiven TUI-Modus (aktueller Modus: "${ctx.mode}"). Diese Entscheidung kann hier nicht eingeholt werden.`,
+              text: `Fehler: ask_user benötigt den interaktiven TUI-Modus (aktueller Modus: "${ctx.mode}"). Diese Entscheidung kann hier nicht eingeholt werden. Triff die sicherste Entscheidung selbst und nenne sie im Abschluss.`,
             },
           ],
           details: {
@@ -147,7 +155,7 @@ export default function askUser(pi: ExtensionAPI) {
             options: params.options.map((o) => o.label),
             answer: null,
           } as QuestionDetails,
-          terminate: true,
+          ...(endRun ? { terminate: true as const } : {}),
         };
       }
 

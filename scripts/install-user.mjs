@@ -96,7 +96,7 @@ const LEGACY_MANAGED = [
   // Aurora no longer installs an editor component; a copy left behind by an
   // older install would be an orphan the tree no longer imports.
   "extensions/aurora-ui/editor.ts",
-  "skills/lsp-navigation/SKILL.md",
+  "skills/lsp-navigation",
   // The planning workflow (plan-mode extension, its shared contracts and
   // tests) was removed. A left-over directory would keep the stale extension
   // active through a settings.json entry that localExtensionEntries() carries
@@ -120,6 +120,30 @@ const LEGACY_MANAGED = [
   "extensions/system-context/skills/nixos-diagnostics.md",
   "extensions/system-context/skills/desktop-control.md",
   "extensions/system-context/skills/system-health.md",
+  // Das Recovery-Gate entfiel zugunsten eines Unterbrechungshinweises
+  // (ADR 041).
+  "extensions/resilience/recovery-state.ts",
+  "extensions/shared/recovery-capabilities.ts",
+  "tests/suites/runtime/recovery-state.mjs",
+  // Verwaiste Dateien entfernter Funktionen (GUI-Paketierung, Second Opinion,
+  // Planmodus, alte Testordner), die frühere Installationen hinterlassen haben.
+  "scripts/package-gui.mjs",
+  "scripts/setup-benchmark-tests.mjs",
+  "docs/gui-baseline",
+  "docs/gui-v2",
+  "docs/repository-split-audit.md",
+  "docs/skills",
+  "tests/benchmark-telemetry.test.mjs",
+  "tests/e2e.test.mjs",
+  "tests/integration",
+  "tests/mode.test.mjs",
+  "tests/plan-eval.test.mjs",
+  "tests/plan-store.test.mjs",
+  "tests/second-opinion-run-history.test.mjs",
+  "tests/session-health.test.mjs",
+  "tests/suites/diff.mjs",
+  "tests/suites/runtime/second-opinion.mjs",
+  "tests/unit",
 ];
 
 function parseArgs(argv) {

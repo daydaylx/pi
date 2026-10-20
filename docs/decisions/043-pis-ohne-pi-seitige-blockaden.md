@@ -1,4 +1,4 @@
-# 042 — `pis` blockiert keine Pi-eigenen Tool- und Permission-Aufrufe
+# 043 — `pis` blockiert keine Pi-eigenen Tool- und Permission-Aufrufe
 
 ## Status
 

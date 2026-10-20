@@ -47,3 +47,6 @@ extensions/tty7/
 
 # Pi-vs-Codex-Duelle: lokale Laufdaten (Rohlogs), siehe benchmarks/duel/README.md
 /duels/
+
+# Rohdaten lokaler Benchmark-Läufe (Pi vs Codex), nicht versioniert
+/benchmark-rohdaten/

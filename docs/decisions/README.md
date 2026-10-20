@@ -34,7 +34,8 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [037](037-skill-select-shift-tab.md) — Skill-Auswahl auf Shift+Tab: Vormerkung über die native `/skill:`-Expansion
 - [039](039-task-tier-vereinfacht.md) — Task-Tier nur noch Duplicate-Read-Guard und Telemetrie; keine Klassen, keine Thinking-Automatik
 - [041](041-recovery-als-unterbrechungshinweis.md) — Recovery-Gate entfällt; ein Unterbrechungshinweis aus dem nativen Session-Zweig bleibt; sed-/Subshell-/Wrapper-Befunde behoben; Risiken des offenen Systemprofils bewertet
-- [042](042-pis-ohne-pi-seitige-blockaden.md) — `pis` blockiert keine Pi-eigenen Permission- und Tool-Call-Aufrufe
+- [042](042-headless-blockaden-weich.md) — Blockaden ohne UI sind für zwei Aufrufe weich (Hinweis auf lokale Alternative), die dritte beendet den Lauf; `ask_user` ohne UI folgt demselben Budget
+- [043](043-pis-ohne-pi-seitige-blockaden.md) — `pis` blockiert keine Pi-eigenen Permission- und Tool-Call-Aufrufe
 - [040](040-harness-vereinfachung-2026-10-16.md) — Harness-Vereinfachung auf Messbasis: Ask-User, Shell-Fehlalarme, automatische Recovery-Prüfung, native Systemskills, Patches 11 auf 8, Subagent-V2 nicht gebaut
 
 ## Historische, ersetzte Entscheidungen

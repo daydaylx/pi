@@ -43,6 +43,7 @@ export const SECTION_SUITES = {
   "LSP security and registry single-flight (P0.2, P1.1)": "lsp",
   "LSP command, status and trust (#97)": "lsp",
   "workspace snapshot fingerprint stability": "runtime",
+  "workspace snapshot ignores subagent run artifacts": "runtime",
   "workspace snapshot error categories": "runtime",
   "workspace snapshot mutation during capture": "runtime",
   "workspace snapshot content identity (textconv/ext-diff independence)":
