@@ -3434,12 +3434,18 @@ await test("workspace_add requires UI approval and keeps the root within one ses
       preflight.every((result) => !result?.block),
       `the root request passes the tool guard and reaches its explicit UI step: ${JSON.stringify(preflight)}`,
     );
+    const invocationContext = harness.makeContext({
+      cwd,
+      mode: "tui",
+      trusted: true,
+      sessionId: "workspace-session-a",
+    });
     const result = await tool.execute(
       "workspace-add-a",
       { path: additional },
       undefined,
       undefined,
-      context,
+      invocationContext,
     );
     assert(
       result.content[0]?.text.includes(additional),
@@ -3459,6 +3465,47 @@ await test("workspace_add requires UI approval and keeps the root within one ses
       scope.additionalRoots,
       [additional],
       "the approved root is present in the active session scope",
+    );
+
+    async function assertWorkspaceAddRejected(id, rejectedContext, message) {
+      let error;
+      try {
+        await tool.execute(
+          id,
+          { path: additional },
+          undefined,
+          undefined,
+          rejectedContext,
+        );
+      } catch (caught) {
+        error = caught;
+      }
+      assert(
+        error instanceof Error &&
+          error.message.includes("Die Sitzung hat sich geändert."),
+        message,
+      );
+    }
+
+    await assertWorkspaceAddRejected(
+      "workspace-add-other-session",
+      harness.makeContext({
+        cwd,
+        mode: "tui",
+        trusted: true,
+        sessionId: "workspace-session-b",
+      }),
+      "a different session ID cannot authorize the workspace root",
+    );
+    await assertWorkspaceAddRejected(
+      "workspace-add-other-cwd",
+      harness.makeContext({
+        cwd: additional,
+        mode: "tui",
+        trusted: true,
+        sessionId: "workspace-session-a",
+      }),
+      "a different cwd cannot authorize the workspace root",
     );
 
     const write = await harness.runHooks(

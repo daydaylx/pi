@@ -305,7 +305,10 @@ export function createPermissionSession(
             "workspace_add erteilt im Systemprofil keinen Projekt-Trust. Externe Datei-Scopes werden bei nativen Dateiwerkzeugen separat bestätigt.",
         };
       }
-      if (epoch !== sessionEpoch || ctx !== activeContext) {
+      if (
+        epoch !== sessionEpoch ||
+        !session.ownsSession(ctx.sessionManager.getSessionId(), ctx.cwd)
+      ) {
         return { approved: false, reason: "Die Sitzung hat sich geändert." };
       }
       if (!ctx.hasUI) {
@@ -333,7 +336,7 @@ export function createPermissionSession(
       if (
         !confirmed ||
         epoch !== sessionEpoch ||
-        ctx !== activeContext ||
+        !session.ownsSession(ctx.sessionManager.getSessionId(), ctx.cwd) ||
         currentRoot !== (canonicalWorkspaceRoot(ctx.cwd) ?? resolve(ctx.cwd))
       ) {
         return {
