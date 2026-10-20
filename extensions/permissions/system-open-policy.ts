@@ -1,16 +1,11 @@
 /**
- * Offene Policy des Systemprofils (`pis`).
+ * Historische Risikoklassifikation des Systemprofils (`pis`).
  *
- * Das Systemprofil arbeitet auf dem eigenen Rechner der Nutzerin oder des
- * Nutzers: Es gibt keine Projekt-, Trust-, Scope- oder Pfadgrenzen. Vorab
- * bestätigt wird nur, was nicht rückgängig zu machen ist oder das System
- * gefährdet: Löschen, Datenträger- und Rechteoperationen, Dienst-/Strom-
- * steuerung, Paketentfernung, Git-Verlustoperationen, Secrets und
- * Schreibzugriffe auf Systempfade. Alles andere läuft ohne Rückfrage.
+ * Die aktuelle PIS-Laufzeit verwendet diese Klassifikation nicht als
+ * Freigabe- oder Sperrregel. Sie bleibt für Kompatibilität und Tests erhalten.
  *
- * Die Prüfung ist eine Heuristik vor dem Executor, keine Sandbox: Sie erkennt
- * die genannten Programme auch hinter Wrappern (sudo, env, sh -c), nicht aber
- * beliebig verschleierten Code.
+ * Die Klassifikation ist eine Heuristik und erkennt nicht beliebig
+ * verschleierten Code.
  */
 import { basename } from "node:path";
 import {

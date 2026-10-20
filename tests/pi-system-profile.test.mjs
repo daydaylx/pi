@@ -47,13 +47,19 @@ try {
   );
   writeFileSync(
     runtimeBin,
-    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({argv: process.argv.slice(2), cwd: process.cwd(), profile: process.env.PI_LAUNCH_PROFILE, systemWorkspace: process.env.PI_SYSTEM_WORKSPACE, systemSessions: process.env.PI_SYSTEM_SESSION_DIR, sessionDirEnv: process.env.PI_CODING_AGENT_SESSION_DIR}));\n`,
+    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({argv: process.argv.slice(2), cwd: process.cwd(), profile: process.env.PI_LAUNCH_PROFILE, systemWorkspace: process.env.PI_SYSTEM_WORKSPACE, systemSessions: process.env.PI_SYSTEM_SESSION_DIR, sessionDirEnv: process.env.PI_CODING_AGENT_SESSION_DIR, subagentSpawnLimit: process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION}));\n`,
   );
   chmodSync(runtimeBin, 0o755);
 
   const normal = spawnSync(
     "bash",
-    [path.join(ROOT, "bin", "pi"), "--version", "--", "--approve"],
+    [
+      path.join(ROOT, "bin", "pi"),
+      "--model",
+      "local/test",
+      "--",
+      "--approve",
+    ],
     {
       cwd: tempRoot,
       encoding: "utf8",
@@ -71,7 +77,7 @@ try {
   );
   assert.equal(normal.status, 0, normal.stderr);
   const normalRun = JSON.parse(normal.stdout);
-  assert.deepEqual(normalRun.argv, ["--version", "--", "--approve"]);
+  assert.deepEqual(normalRun.argv, ["--model", "local/test", "--", "--approve"]);
   assert.equal(normalRun.cwd, tempRoot);
   assert.equal(normalRun.profile, undefined);
   assert.equal(normalRun.systemWorkspace, undefined);
@@ -127,6 +133,7 @@ try {
   assert.equal(systemRun.systemWorkspace, systemWorkspace);
   assert.equal(systemRun.systemSessions, systemSessions);
   assert.equal(systemRun.sessionDirEnv, systemSessions);
+  assert.equal(systemRun.subagentSpawnLimit, "2147483647");
   for (const directory of [profileState, systemWorkspace, systemSessions]) {
     assert.equal(statSync(directory).mode & 0o777, 0o700);
   }
@@ -145,12 +152,14 @@ try {
       },
     },
   );
-  assert.equal(rejectedApproval.status, 64);
-  assert.match(rejectedApproval.stderr, /--approve ist in pis gesperrt/);
+  assert.equal(rejectedApproval.status, 0, rejectedApproval.stderr);
+  const approvalRun = JSON.parse(rejectedApproval.stdout);
+  assert.ok(approvalRun.argv.includes("--no-approve"));
+  assert.ok(!approvalRun.argv.includes("--approve"));
 
   const outsideSession = path.join(tempRoot, "project-session.jsonl");
   writeFileSync(outsideSession, "unverändert\n");
-  const rejectedSession = spawnSync(
+  const acceptedOutsideSession = spawnSync(
     path.join(ROOT, "bin", "pis"),
     ["--session", outsideSession],
     {
@@ -164,12 +173,30 @@ try {
       },
     },
   );
-  assert.equal(rejectedSession.status, 64);
-  assert.match(
-    rejectedSession.stderr,
-    /keine Sitzung außerhalb seines Profils/,
-  );
+  assert.equal(acceptedOutsideSession.status, 0, acceptedOutsideSession.stderr);
+  assert.ok(JSON.parse(acceptedOutsideSession.stdout).argv.includes(outsideSession));
   assert.equal(readFileSync(outsideSession, "utf8"), "unverändert\n");
+
+  const alternateSessionDir = path.join(tempRoot, "alternate-session-dir");
+  const alternateSession = spawnSync(
+    path.join(ROOT, "bin", "pis"),
+    ["--approve", "--session-dir", alternateSessionDir, "--session", outsideSession],
+    {
+      cwd: tempRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        PI_CODING_AGENT_DIR: agentDir,
+        PI_RUNTIME_ROOT: runtimeRoot,
+      },
+    },
+  );
+  assert.equal(alternateSession.status, 0, alternateSession.stderr);
+  const alternateRun = JSON.parse(alternateSession.stdout);
+  assert.ok(!alternateRun.argv.includes("--approve"));
+  assert.ok(alternateRun.argv.includes(alternateSessionDir));
+  assert.ok(alternateRun.argv.includes(outsideSession));
 
   const inProfileSession = path.join(systemSessions, "resume.jsonl");
   writeFileSync(inProfileSession, "{}\n");
@@ -265,8 +292,11 @@ try {
       },
     },
   );
-  assert.equal(escapedHostRuntime.status, 73);
-  assert.match(escapedHostRuntime.stderr, /verwalteten Pi-System-Profil/);
+  assert.equal(escapedHostRuntime.status, 0, escapedHostRuntime.stderr);
+  assert.equal(
+    JSON.parse(escapedHostRuntime.stdout).sessionDirEnv,
+    path.join(tempRoot, "outside-sessions"),
+  );
 
   const runtimeWrapperApproval = spawnSync(
     "bash",
@@ -282,11 +312,11 @@ try {
       },
     },
   );
-  assert.equal(runtimeWrapperApproval.status, 64);
-  assert.match(
-    runtimeWrapperApproval.stderr,
-    /Approval und Sitzungsverzeichnis/,
-  );
+  assert.equal(runtimeWrapperApproval.status, 0, runtimeWrapperApproval.stderr);
+  const runtimeApprovalRun = JSON.parse(runtimeWrapperApproval.stdout);
+  assert.ok(runtimeApprovalRun.argv.includes("--no-approve"));
+  assert.ok(!runtimeApprovalRun.argv.includes("--approve"));
+  assert.equal(runtimeApprovalRun.subagentSpawnLimit, "2147483647");
 
   const fallbackRuntimeRoot = path.join(tempRoot, "configured-agent");
   const fallbackPackage = path.join(

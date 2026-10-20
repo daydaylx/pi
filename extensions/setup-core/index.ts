@@ -38,6 +38,7 @@ import {
 } from "./dependency-prepare.ts";
 import { loadSetupConfig, type VerificationName } from "./config.ts";
 import { requestWorkspaceScope } from "../shared/workspace-scope.ts";
+import { getPiLaunchProfile } from "../shared/profile.ts";
 import {
   collectContextDiagnostics,
   formatContextDiagnostics,
@@ -119,7 +120,7 @@ const ProjectCheckParams = Type.Object({
     Type.String({
       minLength: 1,
       description:
-        "Zusätzliche freigegebene Projektwurzel. Die UI-Freigabe muss für diese Sitzung bereits vorliegen.",
+        "Zusätzliche Projektwurzel; im offenen Systemprofil explizit und erreichbar angeben, im normalen Projektmodus zuvor freigeben.",
     }),
   ),
 });
@@ -416,6 +417,7 @@ export default function setupCore(
   )("tool_call", async (event, ctx) => {
     activeCwd = ctx.cwd;
     activeWorkspaceRoot = canonicalWorkspaceRoot(ctx.cwd) ?? ctx.cwd;
+    if (getPiLaunchProfile() === "system") return;
     if (!isVerifierSingleCall(event)) return;
     const modeIssue = verifierSingleCallIssue(event);
     if (modeIssue) return { block: true, reason: modeIssue };
@@ -901,22 +903,27 @@ export default function setupCore(
         ctx.cwd,
         activeSession,
       ).additionalRoots;
-      const projectTrusted =
+      // This boolean authorizes profile loading only for this explicit root;
+      // it never changes ctx.isProjectTrusted() or any other resource trust.
+      const systemProfileCheck = getPiLaunchProfile() === "system";
+      const profilesAuthorized =
         (ctx.isProjectTrusted() && canonicalProjectRoot === primaryRoot) ||
-        authorizedRoots.includes(canonicalProjectRoot);
+        authorizedRoots.includes(canonicalProjectRoot) ||
+        systemProfileCheck;
       if (
         projectParams.workspaceRoot &&
         canonicalProjectRoot !== primaryRoot &&
-        !authorizedRoots.includes(canonicalProjectRoot)
+        !authorizedRoots.includes(canonicalProjectRoot) &&
+        !systemProfileCheck
       ) {
         toolError(
           `Projektprüfung für ${canonicalProjectRoot} abgelehnt: Diese Projektwurzel ist in der aktuellen Sitzung nicht freigegeben. Zuerst workspace_add aufrufen.`,
         );
       }
 
-      const loaded = loadVerifyProfiles(projectRoot, projectTrusted);
+      const loaded = loadVerifyProfiles(projectRoot, profilesAuthorized);
       const availableProfileIds = Object.keys(loaded.profiles).sort();
-      if (!projectTrusted) {
+      if (!profilesAuthorized) {
         toolError(
           ".pi/verify.json wird nur in vertrauten Projekten ausgeführt.",
           loaded.diagnostics,
@@ -1035,7 +1042,7 @@ export default function setupCore(
         });
       }
 
-      const required = declaredRequiredIds(loaded, projectTrusted);
+      const required = declaredRequiredIds(loaded, profilesAuthorized);
       const evaluation = evaluateCheckRun(reports, required);
       if (checkSnapshot) {
         verificationLedger = mergeCheckRun(

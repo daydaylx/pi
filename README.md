@@ -52,15 +52,16 @@ Externe Frontends starten `bin/pi-frontend` und verwenden ausschließlich die in
 ## Pi System-Profil
 
 Nach dem optionalen Launcher-Link startet `pis` aus jedem Verzeichnis dieselbe
-Pi-Runtime mit einem festen Workspace und eigenem Sitzungsverzeichnis.
+Pi-Runtime mit einem festen Workspace und einem eigenen Standard-Sitzungsverzeichnis.
 `pi system` bleibt als kompatibler Aufruf verfügbar. Modell, Authentisierung und
 Extension-Code bleiben gemeinsam; Sessions, Pläne und Setup-Präferenzen sind
-profilgetrennt. Projektdateien und Projekt-Kontext werden im System-Profil
-nicht automatisch geladen. `pis` arbeitet offen: keine Trust-, Scope- oder
-Pfadsperren, nur Löschen und andere Risiken (Datenträger, erhöhte Rechte,
-Dienst-/Stromsteuerung, Git-Verlust, Paketentfernung, Secrets, Systempfade)
-werden vorab bestätigt (ADR 036). `readonly`, `confirm-all` und `headless`
-bleiben als strengere Wahl bestehen.
+standardmäßig profilgetrennt. Explizite `--session`, `--fork` und
+`--session-dir` werden durchgereicht. Projektdateien und Projekt-Kontext
+werden im System-Profil nicht automatisch geladen. `pis` läuft dauerhaft mit
+Vollzugriff: Pi-eigene Permission-, Trust-, Pfad-, Risiko-, Verifier- und
+Wiederholungs-Guards blockieren keine Befehle oder Tools; Bestätigungsdialoge
+werden nicht gezeigt. `/permission` und `/yolo` können diesen Zustand nicht
+absenken (ADR 042).
 
 Details und aktuelle Einschränkungen: [`docs/pi-system-profile.md`](docs/pi-system-profile.md).
 Der lokale RPC-Host und seine offenen Betriebsgrenzen sind in
@@ -122,13 +123,14 @@ verschachtelter Delegation sind Eigenschaften des Verifier-Profils und der tempo
 
 ## Berechtigungen und Freigaben
 
-Berechtigungen sind eine reine Stufenwahl über `/permission`: `readonly`,
+Berechtigungen im Projektprofil sind eine reine Stufenwahl über `/permission`: `readonly`,
 `project-write`, `confirm-all` und temporäres `yolo` in drei Stufen
 (`yolo`, `yolo-ask`, `yolo-full`, kurz `/yolo 1|2|3`; Entscheidung 029). Gespeicherte
 Einzelfreigaben gibt es nicht. Subagenten-Delegationen (`subagent`) sind auf `project-write`,
 `confirm-all` und `yolo` ohne Bestätigung erlaubt (Entscheidung 018);
-`readonly` bleibt vollständig gesperrt. Verifier-Vertragsprüfung und die
-harten Grenzen gelten unverändert weiter.
+`readonly` bleibt im Projektprofil vollständig gesperrt. `pis` verwendet
+unabhängig von einer gespeicherten Stufe dauerhaft `yolo-full`; seine
+Permission-Guards blockieren keine Tool-Aufrufe.
 
 Harte Trust-, Secret-, Symlink-, Projekt- und Systemgrenzen bleiben auf jeder
 Stufe blockiert, YOLO 1 eingeschlossen. Dazu zählen auch Ausführungspfade

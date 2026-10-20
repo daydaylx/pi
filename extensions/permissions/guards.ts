@@ -39,6 +39,7 @@ import {
   type SystemOpenRisk,
 } from "./system-open-policy.ts";
 import { toolPath } from "./tool-event.ts";
+import { loadVerifyProfiles } from "../setup-core/verify-profiles.ts";
 import {
   getPiLaunchProfile,
   hasFrontendConfirmChannel,
@@ -46,9 +47,7 @@ import {
 } from "../shared/profile.ts";
 import { systemBashNeedsApproval } from "../system-control/policy.ts";
 import { auditSystemDenial } from "../system-control/audit.ts";
-import {
-  SYSTEM_CONTROL_TOOL_NAME_SET,
-} from "../system-control/tool-names.ts";
+import { SYSTEM_CONTROL_TOOL_NAME_SET } from "../system-control/tool-names.ts";
 import {
   canonicalWorkspaceRoot,
   gitWorkspaceRootForPath,
@@ -99,6 +98,10 @@ const MAX_INPUT_PREVIEW = 300;
 
 function stopNonInteractive(ctx: ExtensionContext): { terminate?: true } {
   return ctx.mode !== "tui" && !ctx.hasUI ? { terminate: true } : {};
+}
+
+function quoteShellWord(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function toolSubject(event: ToolCallEvent): string {
@@ -200,6 +203,10 @@ export function registerPermissionGuards(
 
   pi.on("tool_call", async (event: ToolCallEvent, ctx) => {
     const launches = subagentLaunchCount(event);
+    if (getPiLaunchProfile() === "system") {
+      parentRunAgents.commit(launches);
+      return;
+    }
     const limitReason = parentRunAgents.check(launches);
     if (limitReason) {
       const stop = stopNonInteractive(ctx);
@@ -387,6 +394,59 @@ export function registerPermissionGuards(
         toolPath(event) ?? ".",
         ctx.cwd,
       );
+    } else if (event.toolName === "project_check") {
+      const input = event.input as Record<string, unknown>;
+      if (typeof input.workspaceRoot === "string") {
+        const root = canonicalWorkspaceRoot(
+          resolve(ctx.cwd, input.workspaceRoot),
+        );
+        if (root) {
+          const profiles = loadVerifyProfiles(root, true).profiles;
+          const requestedIds =
+            typeof input.profile === "string"
+              ? [input.profile]
+              : Array.isArray(input.profiles)
+                ? input.profiles.filter(
+                    (profileId): profileId is string =>
+                      typeof profileId === "string",
+                  )
+                : [];
+          const profileAssessments = requestedIds.flatMap((profileId) => {
+            const profile = profiles[profileId];
+            if (!profile) return [];
+            const command = [profile.program, ...profile.args]
+              .map(quoteShellWord)
+              .join(" ");
+            return [
+              {
+                commandRisk: systemOpenBashRisk(command),
+                decision: decideBash("project-write", command, root),
+              },
+            ];
+          });
+          const blockedProfile = profileAssessments.find(
+            ({ decision }) => decision.action === "block",
+          );
+          if (blockedProfile) {
+            return {
+              block: true,
+              ...stopNonInteractive(ctx),
+              reason: `Projekt-Prüfprofil blockiert: ${blockedProfile.decision.reason}`,
+            };
+          }
+          const riskyProfiles = profileAssessments.flatMap(
+            ({ commandRisk, decision }) => [
+              ...(commandRisk ? [commandRisk.reason] : []),
+              ...(decision.action === "ask" ? [decision.reason] : []),
+            ],
+          );
+          if (riskyProfiles.length > 0) {
+            risk = {
+              reason: `Projekt-Prüfprofil erfordert Bestätigung: ${[...new Set(riskyProfiles)].join("; ")}`,
+            };
+          }
+        }
+      }
     } else if (SYSTEM_CONTROL_TOOL_NAME_SET.has(event.toolName)) {
       const decision = decideTool(
         session.level(),
@@ -872,6 +932,7 @@ export function registerPermissionGuards(
   // chosen permission level (decideBash) still apply, same as any other
   // mode.
   pi.on("user_bash", async (event, ctx: ExtensionContext) => {
+    if (getPiLaunchProfile() === "system") return;
     if (
       getPiLaunchProfile() === "system" &&
       SYSTEM_OPEN_LEVELS.has(session.level())

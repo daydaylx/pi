@@ -54,6 +54,16 @@ export default function modePermissionsExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({ path: Type.String() }),
     executionMode: "sequential",
     async execute(_id, params, _signal, _onUpdate, ctx) {
+      if (getPiLaunchProfile() === "system") {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "pis hat Vollzugriff; eine zusätzliche Projektfreigabe ist nicht nötig.",
+            },
+          ],
+        };
+      }
       const approved = await session.authorizeWorkspaceRoot(
         (params as { path: string }).path,
         ctx,

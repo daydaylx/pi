@@ -425,6 +425,12 @@ export function createPermissionSession(
 
     async toggleYolo(ctx, source, epoch = sessionEpoch, level) {
       if (epoch !== sessionEpoch) return;
+      if (getPiLaunchProfile() === "system") {
+        permissionLevel = "yolo-full";
+        publishStatus(ctx);
+        ctx.ui.notify("pis läuft dauerhaft mit Vollzugriff.", "info");
+        return;
+      }
       const active = permissionState === "YOLO_OVERRIDE";
       const turnOff =
         active && (level === undefined || level === permissionLevel);
@@ -447,6 +453,12 @@ export function createPermissionSession(
 
     async applyPermissionLevel(level, ctx, epoch = sessionEpoch) {
       if (epoch !== sessionEpoch) return;
+      if (getPiLaunchProfile() === "system") {
+        permissionLevel = "yolo-full";
+        publishStatus(ctx);
+        ctx.ui.notify("pis läuft dauerhaft mit Vollzugriff.", "info");
+        return;
+      }
       if (isYoloLevel(level)) {
         await session.toggleYolo(ctx, "command", epoch, level);
         return;
@@ -579,7 +591,10 @@ export function createPermissionSession(
           ? "DEFAULT"
           : "MANUAL";
       permissionState = selectedPermissionState;
-      permissionLevel = selectedPermissionLevel;
+      permissionLevel =
+        getPiLaunchProfile() === "system"
+          ? "yolo-full"
+          : selectedPermissionLevel;
       publishStatus(ctx);
       session.persist();
       auditTransition("session");

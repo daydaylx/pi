@@ -112,6 +112,9 @@ registrierte zugleich das reduzierte Schema. Siehe
   Parallelitäts- oder Concurrency-Konfiguration mehr — das aktive Harness
   führt keine parallelen Subagenten aus, und `/setup-doctor` meldet eine
   wieder auftauchende Parallelitätskonfiguration als Fehler.
+- Der `pis`-Launcher überschreibt den Sitzungszähler mit
+  `PI_SUBAGENT_MAX_SPAWNS_PER_SESSION=2147483647`; das Limit gilt dort praktisch
+  nicht. Das Projektprofil `pi` behält die konfigurierte Grenze.
 - Die Frontmatter des Verifier-Profils: `defaultContext: fresh`,
   `inheritProjectContext: true`, `inheritSkills: false` und seine
   Toolliste. Das Profil hat kein Delegations-Tool.

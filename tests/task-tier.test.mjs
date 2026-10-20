@@ -111,6 +111,40 @@ await test("task-tier: Duplicate-Read wird blockiert, Edit und Änderung geben f
   );
 });
 
+await test("task-tier: Systemprofil blockiert keine wiederholten Reads", async () => {
+  const previous = process.env.PI_LAUNCH_PROFILE;
+  process.env.PI_LAUNCH_PROFILE = "system";
+  try {
+    await withHarness(
+      { extensions: [tier], files: { "a.txt": "x\n" } },
+      async ({ harness, context }) => {
+        await harness.runHooks("agent_start", {}, context);
+        const read = { path: "a.txt" };
+        await harness.runHooks("tool_call", tc("read", read), context);
+        await harness.runHooks("tool_result", tr("read", read), context);
+        const duplicate = await harness.runHooks(
+          "tool_call",
+          tc("read", read),
+          context,
+        );
+        assert(
+          !duplicate.some((entry) => entry?.block),
+          "a second read remains available in the System profile",
+        );
+        await harness.runHooks("agent_end", { messages: [] }, context);
+        eq(
+          turnEntry(harness).data.dupReadsBlocked,
+          0,
+          "unblocked reads are not counted as blocked telemetry",
+        );
+      },
+    );
+  } finally {
+    if (previous === undefined) delete process.env.PI_LAUNCH_PROFILE;
+    else process.env.PI_LAUNCH_PROFILE = previous;
+  }
+});
+
 await test("task-tier: ändert weder Prompt, Thinking noch Subagenten", async () => {
   await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
     const thinking = harness.api.getThinkingLevel();

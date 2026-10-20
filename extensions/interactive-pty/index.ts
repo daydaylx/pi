@@ -11,6 +11,7 @@ import {
   type PtyProcess,
 } from "./runner.ts";
 import { forbiddenInteractiveCredentialPath } from "../shared/interactive-shell-policy.ts";
+import { getPiLaunchProfile } from "../shared/profile.ts";
 import { createProcessTerminal } from "./terminal.ts";
 
 const require = createRequire(import.meta.url);
@@ -117,7 +118,10 @@ function interactiveTool(): ToolDefinition<typeof interactiveShellSchema> {
       if (!params.command.trim()) {
         return unavailableResult("Interactive command must not be empty.");
       }
-      const forbidden = forbiddenInteractiveCredentialPath(params.command);
+      const forbidden =
+        getPiLaunchProfile() === "system"
+          ? undefined
+          : forbiddenInteractiveCredentialPath(params.command);
       if (forbidden) return unavailableResult(forbidden);
       if (
         params.timeout !== undefined &&

@@ -31,14 +31,15 @@ Entscheidungen verweisen auf ältere, wenn sie sie ersetzen oder ändern.
 - [033](033-task-tiers.md) — Task-Klassen FAST/NORMAL/DEEP (Klassifikation durch 039 abgelöst; Duplicate-Read-Guard und Telemetrie gültig)
 - [034](034-system-control.md) — Typed System-Control-Werkzeuge ohne Root-Daemon
 - [035](035-remove-plan-mode.md) — Planmodus und Workflow-Zustand entfernt, Shift+Tab freigegeben
-- [036](036-pis-open-policy.md) — `pis` arbeitet offen, nur Löschen und Risiken werden vorab bestätigt
 - [037](037-skill-select-shift-tab.md) — Skill-Auswahl auf Shift+Tab: Vormerkung über die native `/skill:`-Expansion
 - [039](039-task-tier-vereinfacht.md) — Task-Tier nur noch Duplicate-Read-Guard und Telemetrie; keine Klassen, keine Thinking-Automatik
 - [041](041-recovery-als-unterbrechungshinweis.md) — Recovery-Gate entfällt; ein Unterbrechungshinweis aus dem nativen Session-Zweig bleibt; sed-/Subshell-/Wrapper-Befunde behoben; Risiken des offenen Systemprofils bewertet
+- [042](042-pis-ohne-pi-seitige-blockaden.md) — `pis` blockiert keine Pi-eigenen Permission- und Tool-Call-Aufrufe
 - [040](040-harness-vereinfachung-2026-10-16.md) — Harness-Vereinfachung auf Messbasis: Ask-User, Shell-Fehlalarme, automatische Recovery-Prüfung, native Systemskills, Patches 11 auf 8, Subagent-V2 nicht gebaut
 
 ## Historische, ersetzte Entscheidungen
 
+- [036](036-pis-open-policy.md) — `pis` fragt vor riskanten Aktionen (abgelöst durch 042)
 - [005](005-three-agent-model.md) — Drei lokale Rollen: Planner, Worker,
   Reviewer (vollständig ersetzt durch 011)
 - [012](012-plan-mode-mutation-guard.md) — Plan Mode bekommt einen technischen

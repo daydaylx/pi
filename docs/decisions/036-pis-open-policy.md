@@ -2,9 +2,10 @@
 
 ## Status
 
-Angenommen. Ersetzt für die Stufen `project-write` und `yolo*` den
-Datei-Scope- und Trust-Teil der Systemprofil-Policy
-(`docs/pi-system-capability-contract.md`).
+Durch [ADR 042](042-pis-ohne-pi-seitige-blockaden.md) abgelöst. Die damalige
+Risikoklassifikation bleibt als historische Implementierung und für
+Kompatibilität erhalten; sie wird im aktiven `pis`-Profil nicht mehr zur
+Freigabe oder Sperre verwendet.
 
 ## Entscheidung
 

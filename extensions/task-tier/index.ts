@@ -7,10 +7,11 @@
  * Thinking, Subagenten und Verifier regeln Nutzerwahl und Permission-Schicht.
  * Übrig bleiben zwei beobachtbare Funktionen:
  *
- * - ein `read`, dessen Zeilenbereich bereits von einer früheren, nicht
- *   gekürzten Ausgabe derselben unveränderten Datei (mtime/Größe) abgedeckt
- *   ist, wird blockiert; `edit`/`write` invalidieren, Kompaktierung und
- *   Sitzungsstart setzen zurück;
+ * - im Projektprofil wird ein `read`, dessen Zeilenbereich bereits von einer
+ *   früheren, nicht gekürzten Ausgabe derselben unveränderten Datei
+ *   (mtime/Größe) abgedeckt ist, blockiert; in `pis` bleiben Wiederholungen
+ *   erlaubt; `edit`/`write` invalidieren, Kompaktierung und Sitzungsstart
+ *   setzen zurück;
  * - pro Lauf ein Session-Eintrag `task-tier.turn` mit Aufrufzählern, Tokens
  *   und Cache-Verlusten.
  *
@@ -25,6 +26,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { subagentLaunchCount } from "../permissions/temporary-agent-policy.ts";
+import { getPiLaunchProfile } from "../shared/profile.ts";
 import { createReadTracker } from "./read-tracker.ts";
 
 export const TASK_TIER_ENTRY = "task-tier.turn";
@@ -134,6 +136,7 @@ export default function taskTier(pi: ExtensionAPI): void {
     const stamp = stampOf(absolute);
     const input = event.input as { offset?: number; limit?: number };
     if (
+      getPiLaunchProfile() !== "system" &&
       stamp &&
       tracker.isRedundant(
         absolute,

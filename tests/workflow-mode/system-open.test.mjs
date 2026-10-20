@@ -1,4 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { rejects } from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, eq, test } from "../shared/assertions.mjs";
@@ -7,8 +9,9 @@ import { importModule as load } from "../shared/jiti-loader.mjs";
 
 const openPolicy = await load("extensions/permissions/system-open-policy.ts");
 const modePermissions = await load("extensions/mode-permissions.ts");
+const setupCore = await load("extensions/setup-core/index.ts");
 
-await test("pis open policy asks only for deletion and other risks", () => {
+await test("legacy pis risk classifier still identifies destructive commands", () => {
   const risky = [
     "rm -rf build",
     "rm file.txt",
@@ -42,7 +45,7 @@ await test("pis open policy asks only for deletion and other risks", () => {
     "nixos-rebuild switch",
   ];
   for (const command of risky) {
-    assert(openPolicy.systemOpenBashRisk(command), `asks first: ${command}`);
+    assert(openPolicy.systemOpenBashRisk(command), `classified as risky: ${command}`);
   }
   const open = [
     "ls -la /etc",
@@ -70,18 +73,43 @@ await test("pis open policy asks only for deletion and other risks", () => {
     "echo `date`",
   ];
   for (const command of open) {
-    eq(openPolicy.systemOpenBashRisk(command), undefined, `no prompt: ${command}`);
+    eq(
+      openPolicy.systemOpenBashRisk(command),
+      undefined,
+      `no prompt: ${command}`,
+    );
   }
 });
 
-await test("pis open policy covers file tools: secrets and system paths ask, the rest is open", () => {
+await test("legacy pis file risk classifier identifies secrets and system writes", () => {
   const cwd = process.cwd();
-  assert(openPolicy.systemOpenFileRisk("read", "/home/x/.ssh/id_rsa", cwd), "secret read asks");
-  assert(openPolicy.systemOpenFileRisk("write", ".env", cwd), "secret write asks");
-  assert(openPolicy.systemOpenFileRisk("write", "/etc/hosts", cwd), "system path write asks");
-  eq(openPolicy.systemOpenFileRisk("read", "/etc/hostname", cwd), undefined, "system path read is open");
-  eq(openPolicy.systemOpenFileRisk("write", "/tmp/anything.txt", cwd), undefined, "writes elsewhere are open");
-  eq(openPolicy.systemOpenFileRisk("write", "../outside.txt", cwd), undefined, "outside the workspace is open");
+  assert(
+    openPolicy.systemOpenFileRisk("read", "/home/x/.ssh/id_rsa", cwd),
+    "secret read is classified",
+  );
+  assert(
+    openPolicy.systemOpenFileRisk("write", ".env", cwd),
+    "secret write is classified",
+  );
+  assert(
+    openPolicy.systemOpenFileRisk("write", "/etc/hosts", cwd),
+    "system path write is classified",
+  );
+  eq(
+    openPolicy.systemOpenFileRisk("read", "/etc/hostname", cwd),
+    undefined,
+    "system path read is open",
+  );
+  eq(
+    openPolicy.systemOpenFileRisk("write", "/tmp/anything.txt", cwd),
+    undefined,
+    "writes elsewhere are open",
+  );
+  eq(
+    openPolicy.systemOpenFileRisk("write", "../outside.txt", cwd),
+    undefined,
+    "outside the workspace is open",
+  );
 });
 
 async function withSystemProfile(run) {
@@ -125,7 +153,7 @@ async function startSystem(cwd, options = {}) {
   return { harness, context, call, asked };
 }
 
-await test("pis works without trust, scope or path boundaries and asks only for risks", async () => {
+await test("pis does not block risky tools or ask for confirmation", async () => {
   if (!modePermissions) return;
   await withSystemProfile(async (cwd) => {
     const { call, asked } = await startSystem(cwd);
@@ -150,39 +178,399 @@ await test("pis works without trust, scope or path boundaries and asks only for 
 
     assert(
       !blocked(await call("bash", { command: "rm -rf /tmp/pis-open" })),
-      "an approved deletion runs",
+      "a deletion runs without a confirmation",
     );
-    eq(asked(), 1, "the deletion was confirmed first");
     assert(
-      !blocked(await call("write", { path: "/etc/pis-open-test", content: "x" })),
-      "an approved system-path write runs",
+      !blocked(
+        await call("write", { path: "/etc/pis-open-test", content: "x" }),
+      ),
+      "a system-path write runs without a confirmation",
     );
-    eq(asked(), 2, "the system-path write was confirmed first");
+    assert(
+      !blocked(await call("bash", { command: "cat ~/.ssh/id_ed25519" })),
+      "secret-path shell access is not blocked",
+    );
+    eq(asked(), 0, "no permission or risk dialog was shown");
   });
 });
 
-await test("pis refuses a risky action the person declines", async () => {
+await test("pis runs the declared QuickPanel checks in an explicit external workspace without trust promotion", async () => {
+  if (!modePermissions || !setupCore) return;
+  await withSystemProfile(async (cwd) => {
+    const project = mkdtempSync(join(tmpdir(), "pi-quickpanel-profiles-"));
+    mkdirSync(join(project, ".pi"), { recursive: true });
+    mkdirSync(join(project, "quickpanel", "tests"), { recursive: true });
+    writeFileSync(
+      join(project, "quickpanel", "tests", "pi.test.js"),
+      "process.stdout.write('quickpanel pi test ran');\n",
+    );
+    writeFileSync(
+      join(project, "quickpanel", "tests", "shell_smoke.py"),
+      "print('quickpanel shell smoke ran')\n",
+    );
+    writeFileSync(
+      join(project, ".pi", "verify.json"),
+      JSON.stringify({
+        profiles: {
+          "quickpanel-pi": {
+            program: "node",
+            args: ["quickpanel/tests/pi.test.js"],
+            cwd: ".",
+            timeoutMs: 60_000,
+            classification: "recommended",
+            trustRequired: true,
+          },
+          "quickpanel-shell-smoke": {
+            program: "python3",
+            args: ["-I", "quickpanel/tests/shell_smoke.py"],
+            cwd: ".",
+            timeoutMs: 180_000,
+            classification: "recommended",
+            env: { PYTHONDONTWRITEBYTECODE: "1" },
+            trustRequired: true,
+          },
+        },
+      }),
+    );
+    try {
+      const { harness, context, call } = await startSystem(cwd, {
+        exec: (command, args, options) => {
+          try {
+            return {
+              stdout: execFileSync(command, args, {
+                cwd: options.cwd,
+                env: options.env,
+                timeout: options.timeout,
+                encoding: "utf8",
+              }),
+              stderr: "",
+              code: 0,
+              killed: false,
+            };
+          } catch (error) {
+            return {
+              stdout: error.stdout?.toString() ?? "",
+              stderr: error.stderr?.toString() ?? error.message,
+              code: error.status ?? 1,
+              killed: false,
+            };
+          }
+        },
+      });
+      setupCore.default(harness.api, { exec: harness.api.exec });
+      await harness.runHooks("session_start", {}, context);
+      const tool = harness.tools.get("project_check");
+      assert(Boolean(tool), "project_check is registered in pis");
+      for (const [profile, command, args] of [
+        ["quickpanel-pi", "node", ["quickpanel/tests/pi.test.js"]],
+        [
+          "quickpanel-shell-smoke",
+          "python3",
+          ["-I", "quickpanel/tests/shell_smoke.py"],
+        ],
+      ]) {
+        const guard = await call("project_check", {
+          profile,
+          workspaceRoot: project,
+        });
+        assert(
+          !guard.some((entry) => entry?.block),
+          `${profile} passes pis guards without workspace_add`,
+        );
+        const result = await tool.execute(
+          `system-${profile}`,
+          { profile, workspaceRoot: project },
+          undefined,
+          undefined,
+          context,
+        );
+        assert(!result.isError, `${profile} reaches successful execution`);
+        assert(
+          result.details.profiles[0].output.includes(
+            profile === "quickpanel-pi"
+              ? "quickpanel pi test ran"
+              : "quickpanel shell smoke ran",
+          ),
+          `${profile} actually ran its fixture script as a child process`,
+        );
+        const execution = harness.execCalls.at(-1);
+        eq(
+          execution.command,
+          command,
+          `${profile} uses its declared executable`,
+        );
+        eq(
+          execution.args,
+          args,
+          `${profile} uses its declared argument vector`,
+        );
+        eq(
+          execution.options.cwd,
+          project,
+          `${profile} runs at the explicit workspace root`,
+        );
+      }
+      assert(
+        !context.isProjectTrusted(),
+        "loading/running profiles does not promote global project trust",
+      );
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("pis project_check rejects invalid roots and malformed profile commands", async () => {
+  if (!modePermissions || !setupCore) return;
+  await withSystemProfile(async (cwd) => {
+    const project = mkdtempSync(join(tmpdir(), "pi-invalid-check-"));
+    mkdirSync(join(project, ".pi"), { recursive: true });
+    writeFileSync(
+      join(project, ".pi", "verify.json"),
+      JSON.stringify({
+        profiles: {
+          poisoned: { program: "node", args: ["test.js"], shell: true },
+        },
+      }),
+    );
+    try {
+      const { harness, context, call } = await startSystem(cwd);
+      setupCore.default(harness.api, { exec: harness.api.exec });
+      await harness.runHooks("session_start", {}, context);
+      const tool = harness.tools.get("project_check");
+      const invalidGuard = await call("project_check", {
+        profile: "poisoned",
+        workspaceRoot: join(project, "missing"),
+      });
+      assert(
+        !invalidGuard.some((entry) => entry?.block),
+        "open guard leaves validation to project_check",
+      );
+      await rejects(
+        tool.execute(
+          "invalid-root",
+          { profile: "poisoned", workspaceRoot: join(project, "missing") },
+          undefined,
+          undefined,
+          context,
+        ),
+        /reachable Workspace|Workspace-Wurzel/,
+      );
+      await rejects(
+        tool.execute(
+          "invalid-profile",
+          { profile: "poisoned", workspaceRoot: project },
+          undefined,
+          undefined,
+          context,
+        ),
+        /unbekannter Schlüssel|Verfügbar/,
+      );
+      eq(
+        harness.execCalls.length,
+        0,
+        "invalid roots and manipulated profiles never execute",
+      );
+      assert(
+        !context.isProjectTrusted(),
+        "rejected profiles do not promote global trust",
+      );
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("pis does not block or confirm destructive project_check profiles", async () => {
+  if (!modePermissions || !setupCore) return;
+  await withSystemProfile(async (cwd) => {
+    const project = mkdtempSync(join(tmpdir(), "pi-dangerous-check-"));
+    mkdirSync(join(project, ".pi"), { recursive: true });
+    writeFileSync(
+      join(project, ".pi", "verify.json"),
+      JSON.stringify({
+        profiles: {
+          cleanup: { program: "rm", args: ["-rf", "/tmp/pi-profile-test"] },
+          encoded: {
+            program: "python3",
+            args: [
+              "-c",
+              `import base64; exec(base64.b64decode('${Buffer.from(
+                'import os; os.system("rm -rf /tmp/pi-profile-test")',
+              ).toString("base64")}'))`,
+            ],
+          },
+        },
+      }),
+    );
+    try {
+      const { harness, call, asked } = await startSystem(cwd);
+      setupCore.default(harness.api, { exec: harness.api.exec });
+      for (const profile of ["cleanup", "encoded"]) {
+        const result = await call("project_check", {
+          profile,
+          workspaceRoot: project,
+        });
+        assert(!result.some((entry) => entry?.block), `${profile} is not blocked`);
+      }
+      eq(
+        asked(),
+        0,
+        "no system-risk confirmation is shown",
+      );
+      eq(
+        harness.execCalls.length,
+        0,
+        "declined risky profiles are never executed",
+      );
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("pis ignores restrictive permission selections for tools and project_check", async () => {
+  if (!modePermissions || !setupCore) return;
+  await withSystemProfile(async (cwd) => {
+    const project = mkdtempSync(join(tmpdir(), "pi-restricted-check-"));
+    mkdirSync(join(project, ".pi"), { recursive: true });
+    writeFileSync(
+      join(project, ".pi", "verify.json"),
+      JSON.stringify({
+        profiles: { tests: { program: "node", args: ["test.js"] } },
+      }),
+    );
+    try {
+      const { harness, context, call, asked } = await startSystem(cwd);
+      setupCore.default(harness.api, { exec: harness.api.exec });
+      await harness.runHooks("session_start", {}, context);
+      await harness.commands.get("permission")("readonly", context);
+      const result = await call("project_check", {
+        profile: "tests",
+        workspaceRoot: project,
+      });
+      assert(
+        !result.some((entry) => entry?.block),
+        "project_check is not blocked by the readonly selection",
+      );
+      assert(
+        !(
+          await call("write", {
+            path: join(project, "outside.txt"),
+            content: "allowed",
+          })
+        ).some((entry) => entry?.block),
+        "writes remain available after selecting readonly",
+      );
+      assert(
+        !(
+          await call("bash", { command: "rm -rf /tmp/pis-open-test" })
+        ).some((entry) => entry?.block),
+        "destructive shell commands remain available after selecting readonly",
+      );
+      eq(asked(), 0, "restrictive selection causes no confirmation dialog");
+      eq(
+        harness.execCalls.length,
+        0,
+        "the tool-call guard does not execute project profiles itself",
+      );
+      assert(
+        !context.isProjectTrusted(),
+        "restrictive check leaves global trust false",
+      );
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+});
+
+await test("pis does not block a risky action when confirmations are disabled", async () => {
   if (!modePermissions) return;
   await withSystemProfile(async (cwd) => {
     const { call, asked } = await startSystem(cwd, { confirm: false });
     const results = await call("bash", { command: "git reset --hard HEAD~1" });
     assert(
-      results.some((entry) => entry?.block && /abgelehnt/.test(entry.reason)),
-      "a declined confirmation blocks the call",
+      !results.some((entry) => entry?.block),
+      "the call is not blocked",
     );
-    eq(asked(), 1, "exactly one confirmation was shown");
+    eq(asked(), 0, "no confirmation was shown");
   });
 });
 
-await test("pis keeps the stricter explicit levels strict", async () => {
+await test("pis stays on full access after /permission readonly", async () => {
   if (!modePermissions) return;
   await withSystemProfile(async (cwd) => {
     const { harness, context, call } = await startSystem(cwd);
     await harness.commands.get("permission")("readonly", context);
-    const results = await call("write", { path: join(cwd, "a.txt"), content: "x" });
+    eq(
+      harness.statusCalls.at(-1)?.value,
+      "⚠ YOLO 3 · VOLLZUGRIFF",
+      "the PIS status continues to show full access",
+    );
+    const results = await call("write", {
+      path: join(cwd, "a.txt"),
+      content: "x",
+    });
     assert(
-      results.some((entry) => entry?.block),
-      "readonly still refuses writes in the System profile",
+      !results.some((entry) => entry?.block),
+      "readonly cannot block writes in the System profile",
+    );
+    const blockedRisk = await call("bash", { command: "sudo ls /root" });
+    assert(
+      !blockedRisk.some((entry) => entry?.block),
+      "readonly cannot block system commands either",
+    );
+  });
+});
+
+await test("pis leaves user shell commands and workspace_add unblocked", async () => {
+  if (!modePermissions) return;
+  await withSystemProfile(async (cwd) => {
+    const { harness, context, asked } = await startSystem(cwd);
+    const bash = await harness.runHooks(
+      "user_bash",
+      { command: "rm -rf /tmp/pis-user-shell" },
+      context,
+    );
+    assert(
+      !bash.some((entry) => entry?.result?.cancelled || entry?.block),
+      "a risky user-entered shell command is not cancelled",
+    );
+    const scope = await harness.tools
+      .get("workspace_add")
+      .execute(
+        "workspace-add",
+        { path: "/tmp/any-project" },
+        undefined,
+        undefined,
+        context,
+      );
+    assert(
+      !scope.isError && scope.content[0].text.includes("Vollzugriff"),
+      "workspace_add reports success without creating a permission gate",
+    );
+    eq(asked(), 0, "these calls show no confirmation dialog");
+  });
+});
+
+await test("pis skips the setup-core verifier preflight blocks", async () => {
+  if (!setupCore) return;
+  await withSystemProfile(async (cwd) => {
+    const harness = createHarness();
+    setupCore.default(harness.api, { exec: harness.api.exec });
+    const context = harness.makeContext({ cwd, mode: "tui", trusted: false });
+    const results = await harness.runHooks(
+      "tool_call",
+      {
+        toolName: "subagent",
+        toolCallId: "pis-verifier-preflight",
+        input: { spec: { profile: "verify" } },
+      },
+      context,
+    );
+    assert(
+      !results.some((entry) => entry?.block),
+      "PIS verifier contract checks do not block tool calls",
     );
   });
 });

@@ -107,6 +107,11 @@ von 260 auf 400 Zeichen erweitert, weil Upstream dort eine Zeile
 (`programStatus.setBlocked`) eingefügt hat; das Verhalten (Fokus zurück auf den
 Editor) ist unverändert.
 
+Am 2026-10-17 wurden Runtime und Dev-Abhängigkeit auf `1.3.0` angehoben. Alle
+zehn aktiven Patch-Anker trafen unverändert; die Patches wurden auf der
+Entwicklungs- und aktiven Runtime angewendet. `tests/p1-runtime.mjs` bestand für
+beide Installationen.
+
 ## Wiederherstellen
 
 Die Patches liegen in `node_modules` und überleben kein `npm update` der

@@ -2,8 +2,8 @@
 
 | Komponente          | Gepinnte Version / Wert               | Verifikation                                             |
 | ------------------- | ------------------------------------- | -------------------------------------------------------- |
-| Pi-Runtime          | `1.2.0`                               | installiertes globales Paket und `pi --version`          |
-| Pi-Dev-Abhängigkeit | `1.2.0`                               | exaktes lokales Manifest/Lock; entspricht der Pi-Runtime |
+| Pi-Runtime          | `1.3.0`                               | installiertes globales Paket und `pi --version`          |
+| Pi-Dev-Abhängigkeit | `1.3.0`                               | exaktes lokales Manifest/Lock; entspricht der Pi-Runtime |
 | Node.js             | `22.23.2`                             | `node --version`                                         |
 | npm                 | `10.9.8`                              | `npm --version`                                          |
 | Aurora UI           | lokales TypeScript                    | Typecheck, Lifecycle- und responsive Render-Tests        |
@@ -16,7 +16,7 @@
 ## Release-Gate
 
 `npm run verify` muss ohne bekannte Fehlschläge bestehen. Die Pi-Runtime und die
-gepaarte Entwicklungsabhängigkeit sind beide auf `1.2.0` gepinnt. Typen und Tests
+gepaarte Entwicklungsabhängigkeit sind beide auf `1.3.0` gepinnt. Typen und Tests
 laufen damit gegen dieselbe API, die die produktive Runtime ausführt. Siehe
 `docs/RUNTIME_PATCHES.md` für Runtime-Patches und deren Verifikation.
 

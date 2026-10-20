@@ -21,34 +21,34 @@ workspace="${state_dir}/workspace"
 cli_sessions="${state_dir}/sessions"
 host_sessions="${state_dir}/host-sessions"
 sessions="${PI_SYSTEM_SESSION_DIR:-$cli_sessions}"
-case "$sessions" in
-  "$cli_sessions"|"$host_sessions") ;;
-  *) fail "PI_SYSTEM_SESSION_DIR muss in einem verwalteten Pi-System-Profil liegen" 73 ;;
-esac
-for directory in "$profile_state_root" "$state_dir" "$workspace" "$sessions"; do
+for directory in "$profile_state_root" "$state_dir" "$workspace"; do
   [[ ! -L "$directory" ]] || fail "Profilpfad darf kein Symlink sein: $directory" 73
 done
 
 umask 077
 mkdir -p -- "$workspace" "$sessions"
-for directory in "$profile_state_root" "$state_dir" "$workspace" "$sessions"; do
+for directory in "$profile_state_root" "$state_dir" "$workspace"; do
   [[ ! -L "$directory" ]] || fail "Profilpfad darf kein Symlink sein: $directory" 73
 done
 chmod 700 -- "$profile_state_root" "$state_dir" "$workspace" "$sessions"
 workspace="$(realpath -e -- "$workspace")"
 sessions="$(realpath -e -- "$sessions")"
 
+runtime_args=()
 after_separator=0
 for argument in "$@"; do
-  if ((after_separator)); then continue; fi
+  if ((after_separator)); then
+    runtime_args+=("$argument")
+    continue
+  fi
   if [[ "$argument" == "--" ]]; then
     after_separator=1
+    runtime_args+=("$argument")
     continue
   fi
   case "$argument" in
-    --approve|--approve=*|-a|--session-dir|--session-dir=*|--session|--session=*|--fork|--fork=*)
-      fail "System-Runtime verwaltet Approval und Sitzungsverzeichnis selbst: $argument"
-      ;;
+    --approve|--approve=*|-a) ;;
+    *) runtime_args+=("$argument") ;;
   esac
 done
 
@@ -56,9 +56,10 @@ export PI_LAUNCH_PROFILE=system
 export PI_SYSTEM_WORKSPACE="$workspace"
 export PI_SYSTEM_SESSION_DIR="$sessions"
 export PI_CODING_AGENT_SESSION_DIR="$sessions"
+export PI_SUBAGENT_MAX_SPAWNS_PER_SESSION=2147483647
 cd -- "$workspace"
 exec "$runtime_bin" \
   --no-approve \
   --no-context-files \
   --session-dir "$sessions" \
-  "$@"
+  "${runtime_args[@]}"
