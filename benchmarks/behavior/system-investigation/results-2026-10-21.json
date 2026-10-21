@@ -1,0 +1,311 @@
+{
+  "date": "2026-10-21",
+  "runtime": "1.3.0",
+  "thinking": "high",
+  "repetitionsPerModelAndCase": 1,
+  "fixtureSha256": "506a7e5036ccf54fdd12fc88f35885cd89cc1e5cf9b54e5e137266b95be344a7",
+  "systemContextSha256": "3c4d73a3280211133e7d8fd9ec3ec58d42f9a0a22dd32cbfba09f6bb021079ce",
+  "limitations": [
+    "SDK with real model inference and bounded fixture tools, no live NixOS audit",
+    "Native skills initialized through bindExtensions; case B uses seeded session messages",
+    "Automated source-coverage and text-pattern checks plus manual reading of all final answers",
+    "Skill path normalization only; no simulated model results",
+    "Provider caching differs; no statistical or cost ranking"
+  ],
+  "runs": [
+    {
+      "model": "gpt-6-luna",
+      "fixtureOnly": true,
+      "results": [
+        {
+          "id": "A",
+          "reads": ["config", "state", "report", "journal"],
+          "skillReads": ["nixos-system"],
+          "mutations": 0,
+          "text": "**Ergebnis: konkrete problematische Einstellung gefunden; kein vollständiger Konfigurationsaudit möglich.** Die Diagnosequellen enthalten nur einen knappen Konfigurationsauszug und keine Dateipfade oder weitere Module.\n\n- **Udev-Regel startet `wpa_supplicant` bei jedem WLAN-`add`/`remove` neu.** Laut Konfiguration verwaltet NetworkManager beide Adapter. Der Journal-Auszug bestätigt, dass beim Einstecken des USB-WLAN-Adapters `wpa_supplicant` für beide Adapter neu gestartet wurde und dabei die interne Verbindung abbrach. Das ist ein konkreter störender Effekt der Regel. Bei Verwaltung durch NetworkManager sollte diese pauschale Neustart-Regel entfernt oder so eingegrenzt werden, dass sie den Dienst nicht bei jedem Geräteereignis beider Adapter neu startet.\n- **`networking.networkmanager.wifi.powersave = true`.** Der Zustand bestätigt, dass WLAN-Powersave effektiv eingeschaltet ist. Das ist nicht automatisch fehlerhaft, kann aber je nach Adapter oder Treiber Stabilität oder Leistung beeinträchtigen. Die vorliegenden Befunde belegen keinen Zusammenhang mit dem Verbindungsabbruch; ein gezielter Vergleich mit deaktiviertem Powersave wäre nötig, um den Nutzen hier zu beurteilen.\n- Der frühere Bericht ohne Verbindungsabbrüche stammt **von vor der Änderung der udev-Regel** und entkräftet den aktuellen Journal-Befund daher nicht.\n\nEs wurden keine Änderungen vorgenommen. Weitere Einstellungen lassen sich anhand der bereitgestellten Fixtures nicht beurteilen.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 2771,
+            "output": 670,
+            "cacheRead": 3456,
+            "cacheWrite": 0
+          },
+          "calls": 3,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "B",
+          "reads": ["laptop.nix", "udev", "journal"],
+          "skillReads": ["system-health"],
+          "mutations": 0,
+          "text": "Ja. **Eine fehlerhafte udev-Einstellung ist belegt:** Bei jedem WLAN-Adapter-`add` oder `remove` wird der globale `wpa_supplicant` neu gestartet, obwohl beide Adapter von NetworkManager verwaltet werden. Das muss keinen Konfigurationsfehler melden, kann aber die WLAN-Verbindung unterbrechen. Das Journal bestätigt genau diesen Effekt: Beim Entfernen des USB-Adapters wurde `wpa_supplicant` neu gestartet und dabei auch die interne WLAN-Verbindung getrennt.\n\nLaut `laptop.nix` ist WLAN-Powersave deaktiviert. Das ist nicht automatisch falsch, kann aber den Energieverbrauch erhöhen. Für den Adapter sind keine Hardware- oder Kerneloptionen gesetzt; aus den vorliegenden Daten ergibt sich daraus kein Fehler.\n\n**Fazit:** Der udev-Neustart ist die bestätigte problematische Einstellung. Ich habe nur diagnostiziert und nichts geändert.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 4638,
+            "output": 454,
+            "cacheRead": 1536,
+            "cacheWrite": 0
+          },
+          "calls": 3,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "C",
+          "reads": ["nixos_status", "git", "status-code"],
+          "skillReads": [],
+          "mutations": 0,
+          "text": "Kein Fehler. `git_dirty=16` stammt aus dem Build-Record vom 20.10.2026 (`git_rev=old123`). Der aktuelle Git-Befund vom 21.10.2026 zeigt einen sauberen Arbeitsbaum und `HEAD=new456`. `nixos-agent-status` gibt den gespeicherten Wert unverändert aus, statt den aktuellen Arbeitsbaum zu prüfen. Die Angaben beziehen sich also auf unterschiedliche Zeitpunkte.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 1975,
+            "output": 164,
+            "cacheRead": 1408,
+            "cacheWrite": 0
+          },
+          "calls": 2,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "D",
+          "reads": [],
+          "skillReads": ["nixos-system"],
+          "mutations": 0,
+          "text": "`services.openssh.enable` aktiviert den OpenSSH-Serverdienst (`sshd`) in NixOS. Es sagt nicht aus, ob der Dienst auf einem konkreten System aktuell läuft.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 3853,
+            "output": 376,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "calls": 2,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "E",
+          "reads": ["config", "effective-options", "journal", "state"],
+          "skillReads": [],
+          "mutations": 0,
+          "text": "**Ursache der WLAN-Abbrüche nicht feststellbar.**\n\n- **Konfiguration:** Die WLAN-Moduldatei ist nicht lesbar (`EACCES`).\n- **Wirksame Optionen:** Nicht abrufbar, da `nix` nicht verfügbar ist.\n- **Journal:** Meldet einen Verbindungsabbruch, aber keine Ursache; frühere Journale sind nicht zugänglich.\n- **Aktueller Zustand:** WLAN ist verbunden; Restart-/Powersave-Konfiguration nicht abfragbar.\n\nDamit lässt sich weder eine bestimmte Ursache bestätigen noch ausschließen. Die Diagnose ist durch die nicht lesbare Konfiguration und fehlende wirksame Optionen eingeschränkt.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 1969,
+            "output": 296,
+            "cacheRead": 1408,
+            "cacheWrite": 0
+          },
+          "calls": 2,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "F",
+          "reads": ["config", "journal", "state"],
+          "skillReads": ["system-health"],
+          "mutations": 0,
+          "text": "**Befund:** Die verfügbare Konfiguration besagt, dass udev bei USB-WLAN-Ereignissen den globalen Supplicant neu startet. Das Journal meldet, dass der USB-WLAN-Adapter entfernt wurde, der Supplicant daraufhin neu startete und die interne Verbindung verloren ging. Das spricht für einen unmittelbaren Zusammenhang zwischen Adapterentfernung, Supplicant-Neustart und Abbruch.\n\n**Aktueller Zustand:** Laut Status ist WLAN jetzt verbunden; die aktive Systemgeneration enthält weiterhin die udev-Regel.\n\nDie Quellen enthalten keine Zeitangaben oder weiteren Details, mit denen sich Häufigkeit oder genaue zeitliche Abfolge prüfen ließen. Es wurde nur lesend untersucht; keine Reparatur oder Aktivierung vorgenommen.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 2602,
+            "output": 376,
+            "cacheRead": 3328,
+            "cacheWrite": 0
+          },
+          "calls": 3,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        }
+      ],
+      "totals": {
+        "input": 17808,
+        "output": 2336,
+        "cacheRead": 11136,
+        "cacheWrite": 0,
+        "diagnosticReads": 17,
+        "skillReads": 4,
+        "modelCalls": 15
+      }
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "fixtureOnly": true,
+      "results": [
+        {
+          "id": "A",
+          "reads": ["config", "state", "journal", "report"],
+          "skillReads": ["nixos-system"],
+          "mutations": 0,
+          "text": "**Prüfung abgeschlossen, mit begrenzter Belegtiefe:** Alle vier Fixture-Quellen wurden gelesen. Zwei Einstellungen fallen auf:\n\n- **Problematische udev-Regel:** `services.udev.extraRules` startet `wpa_supplicant` bei jedem WLAN-Add/Remove neu, obwohl beide Adapter von NetworkManager verwaltet werden. Laut Journal wurden beim Einstecken des USB-Adapters beide Adapter betroffen; genau dabei brach die interne Verbindung ab. **Empfehlung:** Den pauschalen Neustart aus der Regel entfernen und die Adapterverwaltung NetworkManager überlassen.\n- **Potenziell ungünstiges WLAN-Powersave:** `networking.networkmanager.wifi.powersave = true` ist laut Zustandsquelle tatsächlich aktiv. Energiesparen ist nicht grundsätzlich falsch, kann aber Stabilität und Latenz beeinträchtigen. Für eine auf zuverlässige Verbindungen ausgelegte Konfiguration wäre `false` sinnvoll. **Als Ursache des dokumentierten Abbruchs ist Powersave nicht belegt.**\n\n**Einordnung:** Aktuell ist WLAN verbunden, keine Units sind fehlgeschlagen. Das entkräftet den ereignisabhängigen Fehler nicht. Der historische Bericht meldet vor der Regeländerung keine Abbrüche; das stützt den Verdacht gegen die Regel, beweist allein aber keine Ursache.\n\nDie Fixtures enthalten keine vollständigen Module, Revisionen, Generationen oder Zeitstempel. Eine vollständige Konfigurationsprüfung und genaue zeitliche Zuordnung sind deshalb nicht möglich. **Keine Änderungen oder Aktivierungen vorgenommen.**",
+          "stopReason": "stop",
+          "usage": {
+            "input": 2765,
+            "output": 534,
+            "cacheRead": 3456,
+            "cacheWrite": 0
+          },
+          "calls": 3,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "B",
+          "reads": ["laptop.nix", "udev", "journal"],
+          "skillReads": ["system-health", "nixos-system"],
+          "mutations": 0,
+          "text": "Ja. Die Fixtures zeigen eine problematische **udev-Regel**:\n\n- **`udev`:** Jedes Hinzufügen oder Entfernen eines WLAN-Adapters startet den globalen `wpa_supplicant` neu, obwohl beide Adapter von NetworkManager verwaltet werden. Dadurch können auch unbeteiligte WLAN-Verbindungen unterbrochen werden.\n- **`journal`:** Genau diese Abfolge ist dokumentiert: USB-Adapter entfernt → `wpa_supplicant` neu gestartet → interne WLAN-Verbindung verliert gleichzeitig die Verbindung. Das ist ein starker Hinweis auf die Regel als Ursache.\n- **`laptop.nix`:** WLAN-Powersave ist deaktiviert. Daraus und aus fehlenden adapterspezifischen Hardware-/Kerneloptionen ergibt sich allein kein belegter Fehler.\n\n**Keine fehlgeschlagenen Dienste bedeutet hier also nicht fehlerfreie Einstellungen:** Ein unerwünschter Neustart kann technisch erfolgreich sein und dennoch die Verbindung stören.\n\nAlle drei verfügbaren Quellen geprüft; nichts geändert. Weitere Systemeinstellungen und die zeitliche Aktualität sind anhand dieser Fixtures nicht beurteilbar.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 3199,
+            "output": 420,
+            "cacheRead": 4096,
+            "cacheWrite": 0
+          },
+          "calls": 3,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "C",
+          "reads": ["nixos_status", "git", "status-code"],
+          "skillReads": ["nixos-system"],
+          "mutations": 0,
+          "text": "**Kein Fehler nachgewiesen:** Die Werte beziehen sich auf unterschiedliche Zeitpunkte.\n\n- `nixos_status`: `git_dirty=16` stammt aus dem letzten Build-Record vom **20.10.2026, 08:00 UTC**, Revision `old123`.\n- Aktueller Git-Befund vom **21.10.2026, 12:00 UTC**: Arbeitsbaum sauber (`git status --porcelain` leer), HEAD `new456`.\n- Laut `status-code` wird der gespeicherte Wert unverändert ausgegeben, ohne aktuellen Git-Status abzufragen.\n\nDamit besteht kein Widerspruch. Die genaue Bedeutung der Zahl `16` ist durch die Fixtures nicht belegt. **Diagnose abgeschlossen; nichts geändert.**",
+          "stopReason": "stop",
+          "usage": {
+            "input": 4634,
+            "output": 262,
+            "cacheRead": 1536,
+            "cacheWrite": 0
+          },
+          "calls": 3,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "D",
+          "reads": [],
+          "skillReads": [],
+          "mutations": 0,
+          "text": "`services.openssh.enable` legt fest, ob der **OpenSSH-Server** aktiviert wird. Mit `true` ermöglicht er eingehende SSH-Verbindungen, etwa für Fernanmeldung und Dateiübertragung; mit `false` bleibt der Dienst deaktiviert.\n\nDie Option betrifft den Server, nicht den SSH-Client.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 1561,
+            "output": 69,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "calls": 1,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "E",
+          "reads": ["config", "effective-options", "journal", "state"],
+          "skillReads": ["system-health"],
+          "mutations": 0,
+          "text": "**Die Ursache bleibt mit den verfügbaren Fixtures ungeklärt.**\n\n- **Zustand:** WLAN aktuell verbunden; wirksame Restart-/Powersave-Einstellungen nicht abfragbar.\n- **Journal:** Abbruch bestätigt, aber keine Ursache protokolliert. Frühere Journaldateien sind unzugänglich.\n- **Konfiguration:** WLAN-Modul wegen `EACCES` nicht lesbar.\n- **Effektive Optionen:** nicht ermittelbar, da `nix` nicht verfügbar ist.\n\nAlle vier vorhandenen Quellen wurden geprüft. Eine bestimmte Ursache lässt sich daraus nicht belegen; insbesondere sind Restart-/Powersave-Einstellungen nicht als Ursache bestätigt. Keine Änderungen vorgenommen.\n\n**Abschluss:** Untersuchung wegen nachgewiesener Quellenblockaden nur teilweise möglich.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 4008,
+            "output": 276,
+            "cacheRead": 1920,
+            "cacheWrite": 0
+          },
+          "calls": 3,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        },
+        {
+          "id": "F",
+          "reads": ["config", "journal", "state"],
+          "skillReads": ["system-health"],
+          "mutations": 0,
+          "text": "**Lesende Diagnose abgeschlossen – mit begrenzten Fixture-Daten.**\n\nDie Quellen zeigen folgende Ursache-Wirkungs-Kette:\n- **`config`:** Eine udev-Regel startet bei USB-WLAN-Ereignissen den globalen Supplicant neu.\n- **`journal`:** USB-WLAN wurde entfernt, daraufhin der globale Supplicant neu gestartet und die interne WLAN-Verbindung unterbrochen.\n- **`state`:** WLAN ist aktuell verbunden; die aktive Systemgeneration enthält weiterhin diese Regel.\n\nDamit ist die udev-Regel als Auslöser des dokumentierten Abbruchs belegt. Ob sie sämtliche Abbrüche erklärt, bleibt offen: Zeitstempel und weitere Ereignisse fehlen.\n\n**Keine Änderungen oder Aktivierung vorgenommen.** Laut Fixture würde eine Reparatur den aktiven Netzwerkdienst und die Systemgeneration ändern; das liegt außerhalb des lesenden Auftrags.",
+          "stopReason": "stop",
+          "usage": {
+            "input": 4473,
+            "output": 356,
+            "cacheRead": 1408,
+            "cacheWrite": 0
+          },
+          "calls": 3,
+          "assessment": {
+            "complete": true,
+            "evidence": true,
+            "efficient": true,
+            "authorized": true,
+            "finished": true
+          }
+        }
+      ],
+      "totals": {
+        "input": 20640,
+        "output": 1917,
+        "cacheRead": 12416,
+        "cacheWrite": 0,
+        "diagnosticReads": 17,
+        "skillReads": 6,
+        "modelCalls": 16
+      }
+    }
+  ]
+}

@@ -89,6 +89,29 @@ Fenstertitel, IP-Adressen oder Prozesslisten. QuickPanel-/Android-Sitzungen
 sind noch nicht integriert oder live abgenommen. Hermes bleibt bis zum
 Abschluss aller Paritäts- und Rollback-Gates erhalten.
 
+## Arbeitsvertrag und Diagnose
+
+`--no-context-files` bleibt aktiv: Die Runtime lädt damit weder globale noch
+Projekt-`AGENTS.md`/`CLAUDE.md`. Das globale `APPEND_SYSTEM.md` für Kommunikation,
+native Skills und Extension-Hooks bleiben verfügbar.
+
+`system-context` ergänzt deshalb bei jedem `before_agent_start` im Systemprofil
+einen kurzen Arbeitsvertrag: Untersuchungen tatsächlich ausführen,
+Anschlussfragen im Sitzungskontext verfolgen, beauftragte Änderungen validieren,
+Blockaden belegen und Abschluss am Nutzerziel messen. Bekannte kleine
+Informationsfragen werden direkt beantwortet. Vollzugriff autorisiert keine
+unbeauftragte Reparatur oder Aktivierung. Derselbe Hook gilt für TUI und RPC;
+im Projektprofil wird dieser Vertrag nicht hinzugefügt.
+
+Die nativen Skills `nixos-system` und `system-health` unterstützen die Diagnose
+mit priorisierten Folgeprüfungen. Historische Build-Records, aktueller Quellstand
+und laufende Generation werden getrennt betrachtet. Technische Verifikations-
+und Lifecycle-Status bleiben unverändert; es gibt keinen neuen Completion-Hook
+und keine automatische Fortsetzung.
+
+Ursachenbelege, reproduzierbare A–F-Tests und Grenzen der Modellmessung stehen
+in [PIS-Untersuchungen](pis-investigation.md).
+
 ## System-Control-Werkzeuge
 
 `system-control` registriert in beiden Profilen typed Werkzeuge (im Projektprofil `pi` bleiben sie inaktiv, bis der Prompt Systemarbeit verlangt, siehe ADR 038) für Status und Journal (`system_unit_status`, `system_journal`, `nixos_status`, `desktop_state`, `audio_status`, `system_job`) sowie Benutzeraktionen (`desktop_switch_workspace`, `desktop_focus_window`, `audio_set_volume`, `notify`, `user_service`, `nixos_build`, `nixos_apply`). Im Projektprofil gelten die gewählten Permission-Stufen. `pis` führt diese Tool-Aufrufe ohne Pi-seitige Bestätigung aus.
