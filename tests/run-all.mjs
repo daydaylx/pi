@@ -81,6 +81,11 @@ const suites = [
     file: "system-context.test.mjs",
     env: {},
   },
+  {
+    name: "system-investigation",
+    file: "system-investigation.test.mjs",
+    env: {},
+  },
   { name: "system-control", file: "system-control.test.mjs", env: {} },
   {
     name: "workspace-snapshot",

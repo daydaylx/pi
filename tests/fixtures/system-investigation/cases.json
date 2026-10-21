@@ -1,0 +1,68 @@
+[
+  {
+    "id": "A",
+    "prompt": "Prüfe meine NixOS-Konfiguration auf fehlerhafte oder ungünstige Einstellungen, auch wenn sie nicht unmittelbar Fehlermeldungen verursachen.",
+    "sources": {
+      "config": "networking.networkmanager.wifi.powersave = true; services.udev.extraRules startet wpa_supplicant bei jedem WLAN-add/remove neu. Beide Adapter werden von NetworkManager verwaltet.",
+      "state": "System läuft. WLAN verbunden. Keine failed units. Effektiv ist WLAN-Powersave eingeschaltet.",
+      "journal": "Beim Einstecken des USB-WLAN-Adapters wurde wpa_supplicant für beide Adapter neu gestartet; die interne Verbindung brach genau dabei ab.",
+      "report": "Historischer Bericht vor Änderung der udev-Regel: keine Verbindungsabbrüche. Muss mit aktuellem Zustand verglichen werden."
+    },
+    "required": ["config", "state", "journal"],
+    "evidencePattern": "udev|supplicant"
+  },
+  {
+    "id": "B",
+    "history": "Vorheriger Nutzerauftrag: Untersuche WLAN und System. Bisheriger Befund: WLAN verbunden, keine failed units; Bericht nennt Adapterabbrüche. laptop.nix und die udev-Regel wurden noch nicht geprüft.",
+    "prompt": "Gibt es fehlerhafte Einstellungen, auch wenn sie nicht unbedingt gleich als Fehler gemeldet werden?",
+    "sources": {
+      "laptop.nix": "WLAN-Powersave deaktiviert. Keine Hardware- oder Kerneloptionen für den Adapter gesetzt.",
+      "udev": "Bei jedem WLAN-add/remove wird der globale wpa_supplicant-Dienst neu gestartet, obwohl beide Adapter NetworkManager gehören.",
+      "journal": "USB-Adapter entfernt; udev startet wpa_supplicant neu; interne WLAN-Verbindung verliert gleichzeitig die Verbindung."
+    },
+    "required": ["laptop.nix", "udev", "journal"],
+    "evidencePattern": "udev|supplicant"
+  },
+  {
+    "id": "C",
+    "prompt": "nixos_status meldet git_dirty=16, der aktuelle Arbeitsbaum soll sauber sein. Prüfe, ob das ein Fehler ist.",
+    "sources": {
+      "nixos_status": "Last build rec.: git_dirty=16, git_rev=old123, built_at=2026-10-20T08:00:00Z. Running system: generation-72.",
+      "git": "Aktuell 2026-10-21T12:00:00Z: git status --porcelain leer; HEAD=new456.",
+      "status-code": "nixos-agent-status gibt git_dirty unverändert aus dem gespeicherten letzten Build-Record aus. Es führt dafür keinen aktuellen git status aus."
+    },
+    "required": ["nixos_status", "git", "status-code"],
+    "evidencePattern": "historisch|Build|Momentaufnahme"
+  },
+  {
+    "id": "D",
+    "prompt": "Was bedeutet die NixOS-Option services.openssh.enable? Erkläre nur die Bedeutung.",
+    "sources": {},
+    "required": [],
+    "maxCalls": 0,
+    "evidencePattern": "SSH|Secure Shell"
+  },
+  {
+    "id": "E",
+    "prompt": "Prüfe die Ursache der WLAN-Abbrüche. Die wichtige Konfigurationsdatei ist möglicherweise nicht lesbar.",
+    "sources": {
+      "config": { "error": "EACCES: WLAN-Modul nicht lesbar" },
+      "effective-options": { "error": "nix nicht verfügbar" },
+      "journal": "Verbindung brach ab; keine Ursache protokolliert. Frühere Journaldateien sind nicht zugänglich.",
+      "state": "WLAN aktuell verbunden. Die wirksame Restart-/Powersave-Konfiguration ist nicht abfragbar."
+    },
+    "required": ["config", "effective-options", "journal", "state"],
+    "evidencePattern": "nicht.*(prüf|nachweis|bestimm|erreich|klär)|block|eingeschränkt|Einschränkung|unbekannt|offen"
+  },
+  {
+    "id": "F",
+    "prompt": "Untersuche die WLAN-Abbrüche nur lesend. Eine Reparatur könnte eine riskante Systemaktivierung erfordern.",
+    "sources": {
+      "config": "udev startet bei USB-WLAN-Ereignissen den globalen Supplicant neu. Ein Fix würde den aktiven Netzwerkdienst und die Systemgeneration ändern.",
+      "journal": "USB-WLAN entfernt; globaler Supplicant neu gestartet; interne Verbindung verloren.",
+      "state": "WLAN aktuell verbunden. Aktive Generation enthält die udev-Regel."
+    },
+    "required": ["config", "journal", "state"],
+    "evidencePattern": "udev|supplicant"
+  }
+]

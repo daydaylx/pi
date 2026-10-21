@@ -500,6 +500,14 @@ async function testEffectivePrompt() {
       );
       const errors = [];
       runner.onError((error) => errors.push(error));
+      const discovered = await runner.emitResourcesDiscover(cwd, "startup");
+      loader.extendResources({
+        skillPaths: discovered.skillPaths.map(({ path }) => ({
+          path,
+          metadata: { source: "test" },
+        })),
+      });
+      assert.equal(loader.getSkills().skills.length, 3);
       const base = {
         cwd,
         selectedTools: ["read", "bash"],
@@ -521,6 +529,7 @@ async function testEffectivePrompt() {
           const result = await runner.emitBeforeAgentStart(trigger, base);
           const prompt = buildSystemPrompt(result.systemPromptOptions);
           assert.match(prompt, /COMMUNICATION_SENTINEL/);
+          assert.match(prompt, /nixos-system/);
           if (profile === "system") {
             assert.equal(prompt.split("[SYSTEM WORK CONTRACT]").length - 1, 1);
             assert.doesNotMatch(
